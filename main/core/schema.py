@@ -10,7 +10,7 @@ records 与 run_closure schema 常量与校验
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List
 from main.core import time_utils
 from main.core.contracts import ContractInterpretation
 from main.core.errors import (
@@ -24,6 +24,38 @@ RUN_CLOSURE_SCHEMA_VERSION = "v1.0"
 RECORD_SCHEMA_VERSION = "v1.0"
 RECORDS_MANIFEST_NAME = "records_manifest.json"
 RUN_CLOSURE_NAME = "run_closure.json"
+
+
+_OPTIONAL_STR_FIELDS = [
+    "content_evidence.mask_digest",
+    "content_evidence.plan_digest",
+    "content_evidence.basis_digest",
+    "content_evidence.lf_trace_digest",
+    "content_evidence.hf_trace_digest",
+    "content_evidence.content_failure_reason",
+    "geometry_evidence.anchor_digest",
+    "geometry_evidence.sync_digest",
+    "geometry_evidence.align_trace_digest",
+    "geometry_evidence.geo_failure_reason",
+    "decision.fusion_rule_version",
+    "decision.used_threshold_id",
+    "decision.routing_digest"
+]
+
+_OPTIONAL_NUMBER_FIELDS = [
+    "content_evidence.lf_score",
+    "content_evidence.hf_score",
+    "geometry_evidence.geo_score"
+]
+
+_OPTIONAL_MAPPING_FIELDS = [
+    "content_evidence.mask_stats",
+    "content_evidence.score_parts",
+    "geometry_evidence.anchor_metrics",
+    "geometry_evidence.sync_metrics",
+    "decision.routing_decisions",
+    "decision.conditional_fpr_notes"
+]
 
 
 def get_record_type(record: Dict[str, Any]) -> str:
@@ -647,7 +679,12 @@ def _validate_bound_fact_sources(payload: Dict[str, Any]) -> None:
         "policy_path_semantics_digest",
         "policy_path_semantics_file_sha256",
         "policy_path_semantics_canon_sha256",
-        "policy_path_semantics_bound_digest"
+        "policy_path_semantics_bound_digest",
+        "injection_scope_manifest_version",
+        "injection_scope_manifest_digest",
+        "injection_scope_manifest_file_sha256",
+        "injection_scope_manifest_canon_sha256",
+        "injection_scope_manifest_bound_digest"
     ]
     for field_name in required_fields:
         value = _require_str_field(bound_fact_sources, field_name)
@@ -971,6 +1008,10 @@ def validate_record(
             # model_provenance_canon_sha256 类型不符合预期，必须 fail-fast。
             raise TypeError("model_provenance_canon_sha256 must be non-empty str")
 
+    _validate_optional_str_fields(record, _OPTIONAL_STR_FIELDS)
+    _validate_optional_number_fields(record, _OPTIONAL_NUMBER_FIELDS)
+    _validate_optional_mapping_fields(record, _OPTIONAL_MAPPING_FIELDS)
+
 
 def _get_value_by_field_path(record: Dict[str, Any], field_path: str) -> tuple[bool, Any]:
     """
@@ -1046,6 +1087,112 @@ def _validate_json_like(value: Any, field_path: str) -> None:
         return
     # 非 JSON-like 类型，必须 fail-fast。
     raise TypeError(f"Type mismatch at {field_path}: non-JSON-like {type(value).__name__}")
+
+
+def _validate_optional_str_fields(record: Dict[str, Any], field_paths: List[str]) -> None:
+    """
+    功能：校验可选字符串字段集合。
+
+    Validate optional string fields by dotted field paths.
+
+    Args:
+        record: Record mapping.
+        field_paths: List of dotted field paths.
+
+    Returns:
+        None.
+
+    Raises:
+        TypeError: If inputs are invalid or field types mismatch.
+        ValueError: If field path is invalid.
+    """
+    if not isinstance(record, dict):
+        # record 类型不符合预期，必须 fail-fast。
+        raise TypeError("record must be dict")
+    if not isinstance(field_paths, list):
+        # field_paths 类型不符合预期，必须 fail-fast。
+        raise TypeError("field_paths must be list")
+    for field_path in field_paths:
+        if not isinstance(field_path, str) or not field_path:
+            # field_path 类型不符合预期，必须 fail-fast。
+            raise ValueError("field_path must be non-empty str")
+        found, value = _get_value_by_field_path(record, field_path)
+        if not found or value is None:
+            continue
+        if not isinstance(value, str) or not value:
+            # 字段类型不符合预期，必须 fail-fast。
+            raise TypeError(f"Type mismatch at {field_path}: expected non-empty str")
+
+
+def _validate_optional_number_fields(record: Dict[str, Any], field_paths: List[str]) -> None:
+    """
+    功能：校验可选数值字段集合。
+
+    Validate optional numeric fields by dotted field paths.
+
+    Args:
+        record: Record mapping.
+        field_paths: List of dotted field paths.
+
+    Returns:
+        None.
+
+    Raises:
+        TypeError: If inputs are invalid or field types mismatch.
+        ValueError: If field path is invalid.
+    """
+    if not isinstance(record, dict):
+        # record 类型不符合预期，必须 fail-fast。
+        raise TypeError("record must be dict")
+    if not isinstance(field_paths, list):
+        # field_paths 类型不符合预期，必须 fail-fast。
+        raise TypeError("field_paths must be list")
+    for field_path in field_paths:
+        if not isinstance(field_path, str) or not field_path:
+            # field_path 类型不符合预期，必须 fail-fast。
+            raise ValueError("field_path must be non-empty str")
+        found, value = _get_value_by_field_path(record, field_path)
+        if not found or value is None:
+            continue
+        if not isinstance(value, (int, float)):
+            # 字段类型不符合预期，必须 fail-fast。
+            raise TypeError(f"Type mismatch at {field_path}: expected number")
+
+
+def _validate_optional_mapping_fields(record: Dict[str, Any], field_paths: List[str]) -> None:
+    """
+    功能：校验可选映射字段集合。
+
+    Validate optional mapping fields by dotted field paths.
+
+    Args:
+        record: Record mapping.
+        field_paths: List of dotted field paths.
+
+    Returns:
+        None.
+
+    Raises:
+        TypeError: If inputs are invalid or field types mismatch.
+        ValueError: If field path is invalid.
+    """
+    if not isinstance(record, dict):
+        # record 类型不符合预期，必须 fail-fast。
+        raise TypeError("record must be dict")
+    if not isinstance(field_paths, list):
+        # field_paths 类型不符合预期，必须 fail-fast。
+        raise TypeError("field_paths must be list")
+    for field_path in field_paths:
+        if not isinstance(field_path, str) or not field_path:
+            # field_path 类型不符合预期，必须 fail-fast。
+            raise ValueError("field_path must be non-empty str")
+        found, value = _get_value_by_field_path(record, field_path)
+        if not found or value is None:
+            continue
+        if not isinstance(value, dict):
+            # 字段类型不符合预期，必须 fail-fast。
+            raise TypeError(f"Type mismatch at {field_path}: expected dict")
+        _validate_json_like(value, field_path)
 
 
 def _is_json_scalar(value: Any) -> bool:

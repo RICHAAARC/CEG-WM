@@ -12,6 +12,39 @@ import json
 from pathlib import Path
 
 
+def _prepare_fact_sources(tmp_run_root: Path):
+    """
+    功能：准备写盘事实源上下文。
+
+    Prepare fact sources for artifact write tests.
+
+    Args:
+        tmp_run_root: Temporary run root directory.
+
+    Returns:
+        Tuple of (contracts, whitelist, semantics, injection_scope_manifest, records_dir, artifacts_dir, logs_dir).
+
+    Raises:
+        TypeError: If tmp_run_root is invalid.
+    """
+    if not isinstance(tmp_run_root, Path):
+        # tmp_run_root 类型不符合预期，必须 fail-fast。
+        raise TypeError("tmp_run_root must be Path")
+
+    from main.core.contracts import load_frozen_contracts
+    from main.policy.runtime_whitelist import load_runtime_whitelist, load_policy_path_semantics
+    from main.core.injection_scope import load_injection_scope_manifest
+
+    contracts = load_frozen_contracts()
+    whitelist = load_runtime_whitelist()
+    semantics = load_policy_path_semantics()
+    injection_scope_manifest = load_injection_scope_manifest()
+    records_dir = tmp_run_root / "records"
+    artifacts_dir = tmp_run_root / "artifacts"
+    logs_dir = tmp_run_root / "logs"
+    return contracts, whitelist, semantics, injection_scope_manifest, records_dir, artifacts_dir, logs_dir
+
+
 def test_artifacts_reject_records_semantic_fields(tmp_run_root):
     """
     Test that writing artifacts with records-semantic fields is rejected.
@@ -33,13 +66,23 @@ def test_artifacts_reject_records_semantic_fields(tmp_run_root):
     
     output_path = tmp_run_root / "artifacts" / "illegal_artifact.json"
     
+    from main.core.errors import RecordsWritePolicyError
+
+    contracts, whitelist, semantics, injection_scope_manifest, records_dir, artifacts_dir, logs_dir = _prepare_fact_sources(tmp_run_root)
+
     # 期望：写入被拒绝
-    with pytest.raises((RuntimeError, ValueError)) as exc_info:
-        # 假设 records_io 提供 write_artifact 函数并包含语义检查
-        if hasattr(records_io, "write_artifact"):
-            records_io.write_artifact(output_path, artifact_with_semantic_fields)
-        else:
-            pytest.skip("records_io.write_artifact not implemented")
+    with records_io.bound_fact_sources(
+        contracts,
+        whitelist,
+        semantics,
+        tmp_run_root,
+        records_dir,
+        artifacts_dir,
+        logs_dir,
+        injection_scope_manifest=injection_scope_manifest
+    ):
+        with pytest.raises(RecordsWritePolicyError) as exc_info:
+            records_io.write_artifact_json(str(output_path), artifact_with_semantic_fields)
     
     error_msg = str(exc_info.value).lower()
     assert any(keyword in error_msg for keyword in ["semantic", "bypass", "artifact", "contract"])
@@ -65,25 +108,30 @@ def test_artifacts_allow_controlled_fields(tmp_run_root):
         },
     }
     
-    output_path = tmp_run_root / "artifacts" / "valid_artifact.json"
+    output_path = tmp_run_root / "artifacts" / "path_audits" / "valid_artifact.json"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     
+    contracts, whitelist, semantics, injection_scope_manifest, records_dir, artifacts_dir, logs_dir = _prepare_fact_sources(tmp_run_root)
+
     # 应该允许写入
-    try:
-        if hasattr(records_io, "write_artifact"):
-            records_io.write_artifact(output_path, valid_artifact)
-        else:
-            # 临时方案：直接写入
-            output_path.write_text(json.dumps(valid_artifact, indent=2), encoding="utf-8")
-        
-        # 验证文件存在
-        assert output_path.exists()
-        
-        # 验证内容
-        written_content = json.loads(output_path.read_text(encoding="utf-8"))
-        assert written_content["artifact_type"] == "visualization"
-        
-    except Exception as e:
-        pytest.xfail(f"Artifact write with guard not yet fully implemented: {e}")
+    with records_io.bound_fact_sources(
+        contracts,
+        whitelist,
+        semantics,
+        tmp_run_root,
+        records_dir,
+        artifacts_dir,
+        logs_dir,
+        injection_scope_manifest=injection_scope_manifest
+    ):
+        records_io.write_artifact_json(str(output_path), valid_artifact)
+
+    # 验证文件存在
+    assert output_path.exists()
+
+    # 验证内容
+    written_content = json.loads(output_path.read_text(encoding="utf-8"))
+    assert written_content["artifact_type"] == "visualization"
 
 
 def test_artifacts_reject_whitelist_digest_fields(tmp_run_root):
@@ -100,18 +148,29 @@ def test_artifacts_reject_whitelist_digest_fields(tmp_run_root):
     # 构造包含 whitelist digest 的 artifact
     artifact_with_whitelist_digest = {
         "artifact_type": "test",
-        "runtime_whitelist_digest": "sha256:xyz789",  # 锚点字段
+        "whitelist_bound_digest": "sha256:xyz789",  # 锚点字段
         "data": "test",
     }
     
     output_path = tmp_run_root / "artifacts" / "whitelist_artifact.json"
     
+    from main.core.errors import RecordsWritePolicyError
+
+    contracts, whitelist, semantics, injection_scope_manifest, records_dir, artifacts_dir, logs_dir = _prepare_fact_sources(tmp_run_root)
+
     # 应该被拒绝
-    with pytest.raises((RuntimeError, ValueError)):
-        if hasattr(records_io, "write_artifact"):
-            records_io.write_artifact(output_path, artifact_with_whitelist_digest)
-        else:
-            pytest.skip("write_artifact not implemented")
+    with records_io.bound_fact_sources(
+        contracts,
+        whitelist,
+        semantics,
+        tmp_run_root,
+        records_dir,
+        artifacts_dir,
+        logs_dir,
+        injection_scope_manifest=injection_scope_manifest
+    ):
+        with pytest.raises(RecordsWritePolicyError):
+            records_io.write_artifact_json(str(output_path), artifact_with_whitelist_digest)
 
 
 def test_critical_outputs_use_controlled_write_path(tmp_run_root):
@@ -131,20 +190,37 @@ def test_critical_outputs_use_controlled_write_path(tmp_run_root):
         "cfg_audit.json",
     ]
     
+    contracts, whitelist, semantics, injection_scope_manifest, records_dir, artifacts_dir, logs_dir = _prepare_fact_sources(tmp_run_root)
+
+    with records_io.bound_fact_sources(
+        contracts,
+        whitelist,
+        semantics,
+        tmp_run_root,
+        records_dir,
+        artifacts_dir,
+        logs_dir,
+        injection_scope_manifest=injection_scope_manifest
+    ):
+        for output_name in critical_outputs:
+            if output_name == "cfg_audit.json":
+                output_path = artifacts_dir / "cfg_audit" / "cfg_audit.json"
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                test_content = {
+                    "config_path": "configs/default.yaml",
+                    "cfg_digest": "a" * 64
+                }
+            else:
+                output_path = artifacts_dir / output_name
+                test_content = {
+                    "output_type": output_name,
+                    "test": True,
+                }
+            records_io.write_artifact_json(str(output_path), test_content)
+
     for output_name in critical_outputs:
-        output_path = tmp_run_root / output_name
-        
-        test_content = {
-            "output_type": output_name,
-            "test": True,
-        }
-        
-        # 尝试直接写入（应该被拦截或由受控函数处理）
-        # 注：实际项目中应该有专门的写入函数
-        # 这里只验证概念
-        if hasattr(records_io, f"write_{output_name.replace('.json', '')}"):
-            # 存在专用函数
-            pass
+        if output_name == "cfg_audit.json":
+            output_path = artifacts_dir / "cfg_audit" / "cfg_audit.json"
         else:
-            # 标记为需要实现
-            pytest.skip(f"Controlled write function for {output_name} not implemented")
+            output_path = artifacts_dir / output_name
+        assert output_path.exists()

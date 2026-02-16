@@ -1,8 +1,10 @@
 """
-嵌入流程运行期编排
+嵌入流程编排
 
 功能说明：
-- 嵌入流程的运行期编排，负责调用注入的实现来完成业务流程。
+- 定义了嵌入流程的编排器函数，用于协调不同组件的执行流程。
+- 每个编排器函数都接受配置和实现集作为输入，并返回包含业务字段的记录映射。
+- 实现了输入验证和错误处理，确保接口的健壮性。
 """
 
 from __future__ import annotations
@@ -47,9 +49,6 @@ def run_embed_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Dict[
         "watermarked_path": "placeholder_output.png",
         "seed": 42,
         "strength": 0.5,
-        "decision": {
-            "is_watermarked": False
-        },
         "content_result": content_result,
         "subspace_plan": subspace_result,
         "sync_result": sync_result

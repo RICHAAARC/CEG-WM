@@ -2056,7 +2056,8 @@ def bind_freeze_anchors_to_run_meta(
     run_meta: Dict[str, Any],
     contracts: Any,
     whitelist: Any,
-    semantics: Any
+    semantics: Any,
+    injection_scope_manifest: Any
 ) -> None:
     """
     功能：将冻结锚点字段一次性写入 run_meta。
@@ -2069,6 +2070,7 @@ def bind_freeze_anchors_to_run_meta(
         contracts: FrozenContracts instance.
         whitelist: RuntimeWhitelist instance.
         semantics: PolicyPathSemantics instance.
+        injection_scope_manifest: InjectionScopeManifest instance.
 
     Returns:
         None.
@@ -2081,7 +2083,12 @@ def bind_freeze_anchors_to_run_meta(
         raise TypeError("run_meta must be dict")
 
     # 构建快照以获取所有字段。
-    snapshot = records_io.build_fact_sources_snapshot(contracts, whitelist, semantics)
+    snapshot = records_io.build_fact_sources_snapshot(
+        contracts,
+        whitelist,
+        semantics,
+        injection_scope_manifest
+    )
 
     # 定义所有冻结锚点字段。
     freeze_anchor_fields = [
@@ -2099,7 +2106,12 @@ def bind_freeze_anchors_to_run_meta(
         "policy_path_semantics_digest",
         "policy_path_semantics_file_sha256",
         "policy_path_semantics_canon_sha256",
-        "policy_path_semantics_bound_digest"
+        "policy_path_semantics_bound_digest",
+        "injection_scope_manifest_version",
+        "injection_scope_manifest_digest",
+        "injection_scope_manifest_file_sha256",
+        "injection_scope_manifest_canon_sha256",
+        "injection_scope_manifest_bound_digest"
     ]
 
     # 一次性写入所有字段，缺失时写入 <absent>。

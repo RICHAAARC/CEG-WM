@@ -1,0 +1,148 @@
+# ==============================================================
+# Records schema extensions
+# - 仅追加字段，默认允许 absent。
+# - 本文件作为接口层字段事实源，用于审计与字段登记对齐。
+# ==============================================================
+version: "v1"
+append_only: true
+
+type_definitions:
+  digest_hex64: "64 字符小写十六进制 sha256 摘要。"
+  metrics_dict: "JSON-like 的指标映射。"
+  score_float: "非负数值（int 或 float）。"
+  routing_dict: "JSON-like 的路由决策映射。"
+  reason_string: "非空字符串，用于失败原因。"
+
+fields:
+  - path: "content_evidence.mask_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "语义掩码摘要（可复算锚点）。"
+  - path: "content_evidence.mask_stats"
+    layer: "diagnostic"
+    type: "metrics_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "掩码统计指标（面积占比、连通域数量等）。"
+  - path: "content_evidence.plan_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "内容链计划摘要（与 cfg_digest 区分）。"
+  - path: "content_evidence.basis_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "子空间基摘要。"
+  - path: "content_evidence.lf_trace_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "低频注入痕迹摘要。"
+  - path: "content_evidence.hf_trace_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "高频注入痕迹摘要。"
+  - path: "content_evidence.lf_score"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "低频分区得分。"
+  - path: "content_evidence.hf_score"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "高频分区得分。"
+  - path: "content_evidence.score_parts"
+    layer: "diagnostic"
+    type: "metrics_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "结构化分解得分（可包含 lf_score、hf_score 等）。"
+  - path: "content_evidence.content_failure_reason"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "内容链失败原因（字符串枚举）。"
+  - path: "geometry_evidence.anchor_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "注意力锚点摘要。"
+  - path: "geometry_evidence.anchor_metrics"
+    layer: "diagnostic"
+    type: "metrics_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "注意力锚点稳定性指标。"
+  - path: "geometry_evidence.sync_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "同步模板摘要。"
+  - path: "geometry_evidence.sync_metrics"
+    layer: "diagnostic"
+    type: "metrics_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "同步质量指标。"
+  - path: "geometry_evidence.align_trace_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "对齐痕迹摘要。"
+  - path: "geometry_evidence.geo_score"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "几何链得分。"
+  - path: "geometry_evidence.geo_failure_reason"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "几何链失败原因（字符串枚举）。"
+  - path: "decision.fusion_rule_version"
+    layer: "routing"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "融合规则版本。"
+  - path: "decision.used_threshold_id"
+    layer: "routing"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "使用的阈值标识。"
+  - path: "decision.routing_decisions"
+    layer: "routing"
+    type: "routing_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "路由决策明细（启停原因与链路选择）。"
+  - path: "decision.routing_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "路由决策摘要。"
+  - path: "decision.conditional_fpr_notes"
+    layer: "routing"
+    type: "routing_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "条件 FPR 口径说明与统计锚点。"

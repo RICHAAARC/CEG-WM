@@ -38,6 +38,7 @@ from main.core import status
 from main.policy import path_policy
 from main.registries import runtime_resolver
 from main.watermarking.detect.orchestrator import run_detect_orchestrator
+from main.watermarking.fusion import decision_writer
 from main.core.errors import RunFailureReason
 from main.diffusion.sd3 import pipeline_factory
 from main.diffusion.sd3 import infer_runtime
@@ -129,16 +130,24 @@ def run_detect(
         contracts = load_frozen_contracts(config_loader.FROZEN_CONTRACTS_PATH)
         whitelist = load_runtime_whitelist(config_loader.RUNTIME_WHITELIST_PATH)
         semantics = load_policy_path_semantics(config_loader.POLICY_PATH_SEMANTICS_PATH)
+        injection_scope_manifest = config_loader.load_injection_scope_manifest()
 
-        # 绑定冻结锚点到 run_meta（A1/A7 修复）。
+        # 绑定冻结锚点到 run_meta。
         print("[Detect] Binding freeze anchors to run_meta...")
-        status.bind_freeze_anchors_to_run_meta(run_meta, contracts, whitelist, semantics)
+        status.bind_freeze_anchors_to_run_meta(
+            run_meta,
+            contracts,
+            whitelist,
+            semantics,
+            injection_scope_manifest
+        )
 
         # 生成事实源快照用于后续一致性校验。
         snapshot = records_io.build_fact_sources_snapshot(
             contracts,
             whitelist,
-            semantics
+            semantics,
+            injection_scope_manifest
         )
         run_meta["bound_fact_sources"] = snapshot
 
@@ -243,7 +252,8 @@ def run_detect(
             run_root,
             records_dir,
             artifacts_dir,
-            logs_dir
+            logs_dir,
+            injection_scope_manifest=injection_scope_manifest
         ):
             bound_fact_sources = records_io.get_bound_fact_sources()
             run_meta["bound_fact_sources"] = bound_fact_sources
@@ -318,12 +328,33 @@ def run_detect(
             bind_whitelist_to_record(record, whitelist)
             bind_semantics_to_record(record, semantics)
 
+            # CLI 单点收口：融合判决唯一 decision 写入与序列化。
+            # 位置：ensure_required_fields 之后、validate_record 之前。
+            fusion_result = record.get("fusion_result")
+            if fusion_result is None:
+                # fusion_result 缺失是致命错误，必须 fail-fast。
+                raise ValueError("fusion_result is required in record but was None")
+            # 验证 fusion_result 是 FusionDecision 对象。
+            from main.watermarking.fusion.interfaces import FusionDecision
+            if not isinstance(fusion_result, FusionDecision):
+                raise ValueError(
+                    f"fusion_result must be FusionDecision instance, got {type(fusion_result)}"
+                )
+            # 调用 decision_writer 写入 decision 字段。
+            decision_writer.apply_fusion_decision_to_record(
+                record,
+                fusion_result,
+                interpretation
+            )
+            # 序列化 fusion_result 为可 JSON 化的 dict，覆盖原值。
+            record["fusion_result"] = fusion_result.to_dict()
+
             try:
                 schema.validate_record(record, interpretation=interpretation)
             except Exception as exc:
                 set_failure_status(run_meta, RunFailureReason.RUNTIME_ERROR, exc)
                 raise
-
+            
             # 写盘，触发 freeze_gate.assert_prewrite。
             record_path = records_dir / "detect_record.json"
             path_policy.validate_output_target(record_path, "record", run_root)

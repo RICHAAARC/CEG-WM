@@ -149,16 +149,24 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
         contracts = load_frozen_contracts(config_loader.FROZEN_CONTRACTS_PATH)
         whitelist = load_runtime_whitelist(config_loader.RUNTIME_WHITELIST_PATH)
         semantics = load_policy_path_semantics(config_loader.POLICY_PATH_SEMANTICS_PATH)
+        injection_scope_manifest = config_loader.load_injection_scope_manifest()
 
-        # 绑定冻结锚点到 run_meta（A1/A7 修复）。
+        # 绑定冻结锚点到 run_meta。
         print("[Embed] Binding freeze anchors to run_meta...")
-        status.bind_freeze_anchors_to_run_meta(run_meta, contracts, whitelist, semantics)
+        status.bind_freeze_anchors_to_run_meta(
+            run_meta,
+            contracts,
+            whitelist,
+            semantics,
+            injection_scope_manifest
+        )
 
         # 生成事实源快照用于后续一致性校验。
         snapshot = records_io.build_fact_sources_snapshot(
             contracts,
             whitelist,
-            semantics
+            semantics,
+            injection_scope_manifest
         )
         run_meta["bound_fact_sources"] = snapshot
 
@@ -173,7 +181,8 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
             run_root,
             records_dir,
             artifacts_dir,
-            logs_dir
+            logs_dir,
+            injection_scope_manifest=injection_scope_manifest
         ):
             bound_fact_sources = records_io.get_bound_fact_sources()
             run_meta["bound_fact_sources"] = bound_fact_sources

@@ -147,22 +147,24 @@ def test_failure_reason_locatable_to_gate():
         pytest.skip("main.core.errors module not found")
     
     # 检查错误类型是否包含 gate_name 和 field_path
-    if hasattr(errors, "GateFailureError"):
-        error_class = errors.GateFailureError
-        
+    if hasattr(errors, "GateEnforcementError"):
+        error_class = errors.GateEnforcementError
+
         # 构造错误实例
         try:
             raise error_class(
+                "gate failure",
                 gate_name="freeze_gate.assert_prewrite",
                 field_path="contract_version",
-                reason="required field missing",
+                expected="present",
+                actual="missing"
             )
         except error_class as e:
             # 验证异常包含定位信息
             assert hasattr(e, "gate_name") or "gate_name" in str(e)
             assert hasattr(e, "field_path") or "field_path" in str(e)
     else:
-        pytest.skip("GateFailureError not implemented")
+        pytest.skip("GateEnforcementError not implemented")
 
 
 def test_orchestrator_generates_closure_on_exception(tmp_run_root):
@@ -171,6 +173,25 @@ def test_orchestrator_generates_closure_on_exception(tmp_run_root):
     
     orchestrator 在异常时仍能生成 run_closure。
     """
-    # 这个测试需要实际运行 orchestrator 或模拟其行为
-    # 标记为集成测试的一部分
-    pytest.skip("Requires integration test with actual orchestrator")
+    try:
+        from main.cli import run_detect
+    except ImportError:
+        pytest.skip("main.cli.run_detect module not found")
+
+    invalid_config_path = tmp_run_root / "configs" / "missing.yaml"
+
+    with pytest.raises(Exception):
+        run_detect.run_detect(
+            output_dir=str(tmp_run_root),
+            config_path=str(invalid_config_path),
+            input_record_path=None,
+            overrides=None
+        )
+
+    run_closure_path = tmp_run_root / "artifacts" / "run_closure.json"
+    assert run_closure_path.exists(), "run_closure.json must exist on failure"
+
+    content = json.loads(run_closure_path.read_text(encoding="utf-8"))
+    status = content.get("status", {})
+    assert status.get("ok") is False
+    assert status.get("reason") == "config_invalid"

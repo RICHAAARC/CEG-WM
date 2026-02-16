@@ -65,11 +65,26 @@ def test_registry_seal_prevents_override():
     
     seal 后不允许覆盖已有 impl。
     """
-    registry = pytest.importorskip("main.registries.registry_base", reason="registry_base not available")
-    
-    # 这里假设 registry 提供 override 方法
-    # 实际测试需要根据具体实现调整
-    pytest.skip("Requires actual registry implementation with override support")
+    try:
+        from main.registries.registry_base import RegistryBase, RegistrySealedError
+        from main.registries.capabilities import ImplCapabilities
+    except ImportError:
+        pytest.skip("registry_base not available")
+
+    registry = RegistryBase("test_registry")
+    registry.register_factory(
+        "impl_1",
+        lambda cfg: cfg,
+        ImplCapabilities(supports_batching=False, requires_cuda=False)
+    )
+    registry.seal()
+
+    with pytest.raises(RegistrySealedError):
+        registry.register_factory(
+            "impl_2",
+            lambda cfg: cfg,
+            ImplCapabilities(supports_batching=False, requires_cuda=False)
+        )
 
 
 def test_real_registries_are_sealed_after_initialization():
@@ -83,20 +98,15 @@ def test_real_registries_are_sealed_after_initialization():
     except ImportError:
         pytest.skip("Registry modules not found")
     
-    # 检查每个注册表是否实现了 sealed 状态检查
-    for registry_name, registry_module in [
-        ("content_registry", content_registry),
-        ("fusion_registry", fusion_registry),
-        ("geometry_registry", geometry_registry),
-    ]:
-        # 检查模块是否提供 is_sealed 或 _sealed 属性
-        # 实际测试需要根据具体实现调整
-        if hasattr(registry_module, "_sealed"):
-            # 注册表应该在模块导入后就被 seal
-            # 注：这取决于初始化策略
-            pass
-        elif hasattr(registry_module, "is_sealed"):
-            # 检查 is_sealed() 方法
-            pass
-        else:
-            pytest.skip(f"{registry_name} does not expose seal state")
+    registry_specs = [
+        ("content_registry", content_registry, "_CONTENT_REGISTRY"),
+        ("fusion_registry", fusion_registry, "_FUSION_REGISTRY"),
+        ("geometry_registry", geometry_registry, "_GEOMETRY_REGISTRY"),
+    ]
+
+    for registry_name, registry_module, attr_name in registry_specs:
+        if not hasattr(registry_module, attr_name):
+            pytest.skip(f"{registry_name} does not expose {attr_name}")
+        registry_obj = getattr(registry_module, attr_name)
+        assert hasattr(registry_obj, "is_sealed")
+        assert registry_obj.is_sealed() is True

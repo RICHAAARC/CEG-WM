@@ -1,0 +1,17 @@
+injection_scope_manifest_version: "v1.0"
+allowed_impl_id_set: []
+digest_inputs:
+  cfg_digest_include: []
+  plan_digest_include: []
+version_bump_policy:
+  bump_on_digest_inputs_change: true
+  bump_on_impl_param_change: true
+frozen_no_touch_files:
+  - "configs/frozen_contracts.yaml"
+  - "configs/runtime_whitelist.yaml"
+  - "configs/policy_path_semantics.yaml"
+  - "main/policy/freeze_gate.py"
+  - "main/core/digests.py"
+  - "main/core/status.py"
+notes:
+  - "placeholder: update allowed_impl_id_set and digest_inputs before production"

@@ -22,6 +22,7 @@ AUDIT_SCRIPTS = [
     "audits/audit_freeze_surface_integrity.py",
     "audits/audit_registry_injection_surface.py",
     "audits/audit_policy_path_semantics_binding.py",
+    "audits/audit_injection_scope_manifest_binding.py",
     "audits/audit_dangerous_exec_and_pickle_scan.py",
     "audits/audit_network_access_scan.py",
 ]

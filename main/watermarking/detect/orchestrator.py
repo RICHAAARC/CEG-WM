@@ -1,10 +1,10 @@
 """
-全流程运行期编排
+检测、评估与校准编排
 
 功能说明：
-- 检测流程的运行期编排，负责调用注入的实现来完成业务流程。
-- 评估流程的运行期编排，负责调用注入的实现来完成业务流程。
-- 校准流程的运行期编排，负责调用注入的实现来完成业务流程。
+- 定义了检测、评估与校准的编排器函数，用于协调不同组件的执行流程。
+- 每个编排器函数都接受配置和实现集作为输入，并返回包含业务字段的记录映射。
+- 实现了输入验证和错误处理，确保接口的健壮性。
 """
 
 from __future__ import annotations
@@ -47,17 +47,14 @@ def run_detect_orchestrator(
 
     content_result = impl_set.content_extractor.extract(cfg)
     geometry_result = impl_set.geometry_extractor.extract(cfg)
-    fusion_result = impl_set.fusion_rule.fuse(content_result, geometry_result, cfg)
+    fusion_result = impl_set.fusion_rule.fuse(cfg, content_result, geometry_result)
     input_fields = len(input_record or {})
 
     record: Dict[str, Any] = {
         "operation": "detect",
         "detect_placeholder": True,
         "image_path": "placeholder_test.png",
-        "score": fusion_result.get("score", 0.0),
-        "decision": {
-            "is_watermarked": False
-        },
+        "score": getattr(fusion_result, "evidence_summary", {}).get("content_score"),
         "execution_report": {
             "content_chain_status": "ok",
             "geometry_chain_status": "ok",
@@ -69,9 +66,6 @@ def run_detect_orchestrator(
         "geometry_result": geometry_result,
         "fusion_result": fusion_result
     }
-    threshold_value = fusion_result.get("threshold")
-    if threshold_value is not None:
-        record["threshold"] = threshold_value
     return record
 
 
@@ -104,9 +98,6 @@ def run_calibrate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> D
         "operation": "calibrate",
         "calibration_placeholder": True,
         "protocol": "neyman_pearson",
-        "decision": {
-            "is_watermarked": False
-        },
         "execution_report": {
             "content_chain_status": "ok",
             "geometry_chain_status": "ok",
@@ -144,14 +135,11 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
 
     content_result = impl_set.content_extractor.extract(cfg)
     geometry_result = impl_set.geometry_extractor.extract(cfg)
-    fusion_result = impl_set.fusion_rule.fuse(content_result, geometry_result, cfg)
+    fusion_result = impl_set.fusion_rule.fuse(cfg, content_result, geometry_result)
 
     record: Dict[str, Any] = {
         "operation": "evaluate",
         "evaluation_placeholder": True,
-        "decision": {
-            "is_watermarked": False
-        },
         "metrics": {
             "tpr": 0.95,
             "fpr": 0.01,

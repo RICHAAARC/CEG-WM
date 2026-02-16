@@ -34,6 +34,7 @@ from typing import Dict, Any, Optional, List, Iterator
 
 from main.core import schema
 from main.core.contracts import FrozenContracts, ContractInterpretation, get_contract_interpretation
+from main.core.injection_scope import InjectionScopeManifest
 from main.core.errors import FactSourcesNotInitializedError, RecordsWritePolicyError
 from main.policy.freeze_gate import assert_prewrite
 from main.policy.runtime_whitelist import RuntimeWhitelist, PolicyPathSemantics
@@ -51,6 +52,7 @@ class FactSourcesContext:
         contracts: Loaded FrozenContracts.
         whitelist: Loaded RuntimeWhitelist.
         semantics: Loaded PolicyPathSemantics.
+        injection_scope_manifest: Loaded InjectionScopeManifest.
         run_root: Run root directory.
         records_dir: Records output directory.
         artifacts_dir: Artifacts output directory.
@@ -60,6 +62,7 @@ class FactSourcesContext:
     contracts: FrozenContracts
     whitelist: RuntimeWhitelist
     semantics: PolicyPathSemantics
+    injection_scope_manifest: InjectionScopeManifest
     run_root: Path
     records_dir: Path
     artifacts_dir: Path
@@ -96,7 +99,8 @@ _ARTIFACT_CFG_AUDIT_ALLOWED_FIELDS = {
 _ARTIFACT_FORBIDDEN_ANCHOR_FIELDS = {
     "contract_bound_digest",
     "whitelist_bound_digest",
-    "policy_path_semantics_bound_digest"
+    "policy_path_semantics_bound_digest",
+    "injection_scope_manifest_bound_digest"
 }
 
 
@@ -108,7 +112,9 @@ def bound_fact_sources(
     run_root: Path,
     records_dir: Path,
     artifacts_dir: Path,
-    logs_dir: Path
+    logs_dir: Path,
+    *,
+    injection_scope_manifest: InjectionScopeManifest
 ) -> Iterator[None]:
     """
     功能：绑定事实源写盘上下文。
@@ -119,6 +125,7 @@ def bound_fact_sources(
         contracts: Loaded FrozenContracts.
         whitelist: Loaded RuntimeWhitelist.
         semantics: Loaded PolicyPathSemantics.
+        injection_scope_manifest: Loaded InjectionScopeManifest.
         run_root: Run root directory.
         records_dir: Records output directory.
         artifacts_dir: Artifacts output directory.
@@ -140,6 +147,9 @@ def bound_fact_sources(
     if not isinstance(semantics, PolicyPathSemantics):
         # semantics 类型不符合预期，必须 fail-fast。
         raise TypeError("semantics must be PolicyPathSemantics")
+    if not isinstance(injection_scope_manifest, InjectionScopeManifest):
+        # injection_scope_manifest 类型不符合预期，必须 fail-fast。
+        raise TypeError("injection_scope_manifest must be InjectionScopeManifest")
     if not isinstance(run_root, Path):
         # run_root 类型不符合预期，必须 fail-fast。
         raise TypeError("run_root must be Path")
@@ -166,6 +176,7 @@ def bound_fact_sources(
         contracts=contracts,
         whitelist=whitelist,
         semantics=semantics,
+        injection_scope_manifest=injection_scope_manifest,
         run_root=run_root,
         records_dir=records_dir,
         artifacts_dir=artifacts_dir,
@@ -211,14 +222,20 @@ def get_bound_fact_sources() -> Dict[str, Any]:
         "policy_path_semantics_digest": ctx.semantics.policy_path_semantics_digest,
         "policy_path_semantics_file_sha256": ctx.semantics.policy_path_semantics_file_sha256,
         "policy_path_semantics_canon_sha256": ctx.semantics.policy_path_semantics_canon_sha256,
-        "policy_path_semantics_bound_digest": ctx.semantics.policy_path_semantics_bound_digest
+        "policy_path_semantics_bound_digest": ctx.semantics.policy_path_semantics_bound_digest,
+        "injection_scope_manifest_version": ctx.injection_scope_manifest.injection_scope_manifest_version,
+        "injection_scope_manifest_digest": ctx.injection_scope_manifest.injection_scope_manifest_digest,
+        "injection_scope_manifest_file_sha256": ctx.injection_scope_manifest.injection_scope_manifest_file_sha256,
+        "injection_scope_manifest_canon_sha256": ctx.injection_scope_manifest.injection_scope_manifest_canon_sha256,
+        "injection_scope_manifest_bound_digest": ctx.injection_scope_manifest.injection_scope_manifest_bound_digest
     }
 
 
 def build_fact_sources_snapshot(
     contracts: FrozenContracts,
     whitelist: RuntimeWhitelist,
-    semantics: PolicyPathSemantics
+    semantics: PolicyPathSemantics,
+    injection_scope_manifest: InjectionScopeManifest
 ) -> Dict[str, Any]:
     """
     功能：构建事实源快照。
@@ -229,6 +246,7 @@ def build_fact_sources_snapshot(
         contracts: Loaded FrozenContracts.
         whitelist: Loaded RuntimeWhitelist.
         semantics: Loaded PolicyPathSemantics.
+        injection_scope_manifest: Loaded InjectionScopeManifest.
 
     Returns:
         Dict with contract/whitelist/policy_path_semantics version and digests.
@@ -245,6 +263,9 @@ def build_fact_sources_snapshot(
     if not isinstance(semantics, PolicyPathSemantics):
         # semantics 类型不符合预期，必须 fail-fast。
         raise TypeError("semantics must be PolicyPathSemantics")
+    if not isinstance(injection_scope_manifest, InjectionScopeManifest):
+        # injection_scope_manifest 类型不符合预期，必须 fail-fast。
+        raise TypeError("injection_scope_manifest must be InjectionScopeManifest")
 
     return {
         "contract_version": contracts.contract_version,
@@ -261,7 +282,12 @@ def build_fact_sources_snapshot(
         "policy_path_semantics_digest": semantics.policy_path_semantics_digest,
         "policy_path_semantics_file_sha256": semantics.policy_path_semantics_file_sha256,
         "policy_path_semantics_canon_sha256": semantics.policy_path_semantics_canon_sha256,
-        "policy_path_semantics_bound_digest": semantics.policy_path_semantics_bound_digest
+        "policy_path_semantics_bound_digest": semantics.policy_path_semantics_bound_digest,
+        "injection_scope_manifest_version": injection_scope_manifest.injection_scope_manifest_version,
+        "injection_scope_manifest_digest": injection_scope_manifest.injection_scope_manifest_digest,
+        "injection_scope_manifest_file_sha256": injection_scope_manifest.injection_scope_manifest_file_sha256,
+        "injection_scope_manifest_canon_sha256": injection_scope_manifest.injection_scope_manifest_canon_sha256,
+        "injection_scope_manifest_bound_digest": injection_scope_manifest.injection_scope_manifest_bound_digest
     }
 
 

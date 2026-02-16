@@ -420,6 +420,29 @@ records_schema:
     - score_audit.fusion_rule_used
     - decision.abstain_reason
     - score_audit.abstain_triggered_by
+    # ---- 接口层字段追加（append-only） ----
+    - content_evidence.mask_digest
+    - content_evidence.mask_stats
+    - content_evidence.plan_digest
+    - content_evidence.basis_digest
+    - content_evidence.lf_trace_digest
+    - content_evidence.hf_trace_digest
+    - content_evidence.lf_score
+    - content_evidence.hf_score
+    - content_evidence.score_parts
+    - content_evidence.content_failure_reason
+    - geometry_evidence.anchor_digest
+    - geometry_evidence.anchor_metrics
+    - geometry_evidence.sync_digest
+    - geometry_evidence.sync_metrics
+    - geometry_evidence.align_trace_digest
+    - geometry_evidence.geo_score
+    - geometry_evidence.geo_failure_reason
+    - decision.fusion_rule_version
+    - decision.used_threshold_id
+    - decision.routing_decisions
+    - decision.routing_digest
+    - decision.conditional_fpr_notes
 
 # ------------------------------
 # 字段别名：用于历史兼容

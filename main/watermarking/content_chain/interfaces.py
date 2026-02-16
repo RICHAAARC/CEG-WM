@@ -30,6 +30,16 @@ class ContentEvidence:
                Higher score indicates stronger evidence of watermarking.
                Must be non-negative float or None.
         audit: Audit metadata dict. Must contain keys: impl_identity, impl_version, impl_digest, trace_digest.
+        mask_digest: Optional mask digest (sha256 hex string).
+        mask_stats: Optional mask statistics dict.
+        plan_digest: Optional content plan digest.
+        basis_digest: Optional subspace basis digest.
+        lf_trace_digest: Optional low-frequency trace digest.
+        hf_trace_digest: Optional high-frequency trace digest.
+        lf_score: Optional low-frequency score.
+        hf_score: Optional high-frequency score.
+        score_parts: Optional structured score components.
+        content_failure_reason: Optional content failure reason string.
                All values must be JSON-serializable strings or dicts.
     
     Raises:
@@ -40,6 +50,16 @@ class ContentEvidence:
     status: Literal["ok", "absent", "fail", "mismatch"]
     score: Optional[float]
     audit: Dict[str, Any]
+    mask_digest: Optional[str] = None
+    mask_stats: Optional[Dict[str, Any]] = None
+    plan_digest: Optional[str] = None
+    basis_digest: Optional[str] = None
+    lf_trace_digest: Optional[str] = None
+    hf_trace_digest: Optional[str] = None
+    lf_score: Optional[float] = None
+    hf_score: Optional[float] = None
+    score_parts: Optional[Dict[str, Any]] = None
+    content_failure_reason: Optional[str] = None
     
     def __post_init__(self) -> None:
         # 校验 status 值。
@@ -79,6 +99,50 @@ class ContentEvidence:
                 f"audit missing required fields: {missing_fields}"
             )
 
+        _validate_optional_str(self.mask_digest, "mask_digest")
+        _validate_optional_mapping(self.mask_stats, "mask_stats")
+        _validate_optional_str(self.plan_digest, "plan_digest")
+        _validate_optional_str(self.basis_digest, "basis_digest")
+        _validate_optional_str(self.lf_trace_digest, "lf_trace_digest")
+        _validate_optional_str(self.hf_trace_digest, "hf_trace_digest")
+        _validate_optional_number(self.lf_score, "lf_score")
+        _validate_optional_number(self.hf_score, "hf_score")
+        _validate_optional_mapping(self.score_parts, "score_parts")
+        _validate_optional_str(self.content_failure_reason, "content_failure_reason")
+
+    def as_dict(self) -> Dict[str, Any]:
+        """
+        功能：将 ContentEvidence 序列化为可 JSON 化的字典。
+
+        Serialize ContentEvidence to a JSON-serializable dict.
+
+        Args:
+            None.
+
+        Returns:
+            Dict containing frozen field values (all JSON-compatible types).
+
+        Raises:
+            ValueError: If any field is not JSON-serializable.
+        """
+        result = {
+            "status": self.status,
+            "score": self.score,
+            "audit": self.audit,
+            "mask_digest": self.mask_digest,
+            "mask_stats": self.mask_stats,
+            "plan_digest": self.plan_digest,
+            "basis_digest": self.basis_digest,
+            "lf_trace_digest": self.lf_trace_digest,
+            "hf_trace_digest": self.hf_trace_digest,
+            "lf_score": self.lf_score,
+            "hf_score": self.hf_score,
+            "score_parts": self.score_parts,
+            "content_failure_reason": self.content_failure_reason
+        }
+        _validate_json_like(result, "content_evidence")
+        return result
+
 
 class ContentExtractor(Protocol):
     """
@@ -108,3 +172,137 @@ class ContentExtractor(Protocol):
             RuntimeError: If extraction fails (status should be "fail" in ContentEvidence, not raised here).
         """
         ...
+
+
+def _validate_optional_str(value: Any, field_name: str) -> None:
+    """
+    功能：校验可选字符串字段。
+
+    Validate optional string field.
+
+    Args:
+        value: Field value.
+        field_name: Field name for error context.
+
+    Returns:
+        None.
+
+    Raises:
+        TypeError: If field_name is invalid.
+        ValueError: If value type is invalid.
+    """
+    if not isinstance(field_name, str) or not field_name:
+        # field_name 类型不合法，必须 fail-fast。
+        raise TypeError("field_name must be non-empty str")
+    if value is None:
+        return
+    if not isinstance(value, str) or not value:
+        # 字段类型不符合预期，必须 fail-fast。
+        raise ValueError(f"Type mismatch at {field_name}: expected non-empty str")
+
+
+def _validate_optional_number(value: Any, field_name: str) -> None:
+    """
+    功能：校验可选数值字段。
+
+    Validate optional numeric field.
+
+    Args:
+        value: Field value.
+        field_name: Field name for error context.
+
+    Returns:
+        None.
+
+    Raises:
+        TypeError: If field_name is invalid.
+        ValueError: If value type is invalid.
+    """
+    if not isinstance(field_name, str) or not field_name:
+        # field_name 类型不合法，必须 fail-fast。
+        raise TypeError("field_name must be non-empty str")
+    if value is None:
+        return
+    if not isinstance(value, (int, float)):
+        # 字段类型不符合预期，必须 fail-fast。
+        raise ValueError(f"Type mismatch at {field_name}: expected number")
+
+
+def _validate_optional_mapping(value: Any, field_name: str) -> None:
+    """
+    功能：校验可选映射字段。
+
+    Validate optional mapping field.
+
+    Args:
+        value: Field value.
+        field_name: Field name for error context.
+
+    Returns:
+        None.
+
+    Raises:
+        TypeError: If field_name is invalid.
+        ValueError: If value type is invalid.
+    """
+    if not isinstance(field_name, str) or not field_name:
+        # field_name 类型不合法，必须 fail-fast。
+        raise TypeError("field_name must be non-empty str")
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        # 字段类型不符合预期，必须 fail-fast。
+        raise ValueError(f"Type mismatch at {field_name}: expected dict")
+    _validate_json_like(value, field_name)
+
+
+def _validate_json_like(value: Any, field_path: str) -> None:
+    """
+    功能：校验 JSON-like 结构。
+
+    Validate that a value is JSON-like (dict/list/scalars).
+
+    Args:
+        value: Value to validate.
+        field_path: Field path for error messages.
+
+    Returns:
+        None.
+
+    Raises:
+        TypeError: If value contains non-JSON-like types.
+        ValueError: If field_path is invalid.
+    """
+    if not isinstance(field_path, str) or not field_path:
+        # field_path 输入不合法，必须 fail-fast。
+        raise ValueError("field_path must be non-empty str")
+    if _is_json_scalar(value):
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _validate_json_like(item, f"{field_path}[{index}]")
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                # JSON key 类型不合法，必须 fail-fast。
+                raise TypeError(f"Type mismatch at {field_path}: expected str keys")
+            _validate_json_like(item, f"{field_path}.{key}")
+        return
+    # 非 JSON-like 类型，必须 fail-fast。
+    raise TypeError(f"Type mismatch at {field_path}: non-JSON-like {type(value).__name__}")
+
+
+def _is_json_scalar(value: Any) -> bool:
+    """
+    功能：判断是否为 JSON 标量。
+
+    Check whether a value is a JSON scalar.
+
+    Args:
+        value: Value to check.
+
+    Returns:
+        True if value is JSON scalar; otherwise False.
+    """
+    return isinstance(value, (str, int, float, bool)) or value is None

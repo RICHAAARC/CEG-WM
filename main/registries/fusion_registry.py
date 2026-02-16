@@ -1,9 +1,10 @@
 """
-融合规则 registry
+融合规则注册表与占位实现
 
 功能说明：
-- 提供融合规则实现的运行时注册表。
-- 定义融合规则占位实现，供测试和示例使用。
+- 定义了一个融合规则注册表，用于管理不同的融合规则实现。
+- 提供了一个占位实现，用于在没有具体融合规则时返回确定性的决策结果。
+- 实现了输入验证和错误处理，确保接口的健壮性。
 """
 
 from __future__ import annotations
@@ -11,6 +12,8 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from main.core import digests
+from main.watermarking.fusion import neyman_pearson
+from main.watermarking.fusion.interfaces import FusionDecision
 
 from .registry_base import FactoryType, RegistryBase
 from .capabilities import ImplCapabilities
@@ -23,7 +26,7 @@ class FusionBaselineIdentity:
     """
     功能：融合规则占位实现。
 
-    Placeholder fusion rule that returns fixed decision values.
+    Placeholder fusion rule that returns deterministic decision values.
 
     Args:
         impl_id: Implementation identifier.
@@ -53,43 +56,143 @@ class FusionBaselineIdentity:
 
     def fuse(
         self,
-        content_result: Dict[str, Any],
-        geometry_result: Dict[str, Any],
-        cfg: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        cfg: Dict[str, Any],
+        content_evidence: Dict[str, Any],
+        geometry_evidence: Dict[str, Any]
+    ) -> FusionDecision:
         """
-        功能：输出占位融合结果。
+        功能：输出占位融合决策。
 
-        Return placeholder fusion result.
+        Return deterministic fusion decision for baseline registry rule.
 
         Args:
-            content_result: Content evidence mapping.
-            geometry_result: Geometry evidence mapping.
             cfg: Config mapping.
+            content_evidence: Content evidence mapping.
+            geometry_evidence: Geometry evidence mapping.
 
         Returns:
-            Placeholder fusion result mapping.
+            FusionDecision instance.
 
         Raises:
             TypeError: If inputs are not dict.
+            ValueError: If evidence fields are invalid.
         """
-        if not isinstance(content_result, dict):
-            # content_result 类型不合法，必须 fail-fast。
-            raise TypeError("content_result must be dict")
-        if not isinstance(geometry_result, dict):
-            # geometry_result 类型不合法，必须 fail-fast。
-            raise TypeError("geometry_result must be dict")
         if not isinstance(cfg, dict):
             # cfg 类型不合法，必须 fail-fast。
             raise TypeError("cfg must be dict")
-        return {
-            "decision": {
-                "is_watermarked": False
-            },
-            "score": 0.0,
-            "threshold": 0.5,
-            "fusion_rule": "identity"
+        if not isinstance(content_evidence, dict):
+            # content_evidence 类型不合法，必须 fail-fast。
+            raise TypeError("content_evidence must be dict")
+        if not isinstance(geometry_evidence, dict):
+            # geometry_evidence 类型不合法，必须 fail-fast。
+            raise TypeError("geometry_evidence must be dict")
+
+        thresholds_spec = neyman_pearson.build_thresholds_spec(cfg)
+        thresholds_digest = neyman_pearson.compute_thresholds_digest(thresholds_spec)
+
+        content_status = _extract_status_field(
+            content_evidence,
+            "content_evidence",
+            "absent"
+        )
+        geometry_status = _extract_status_field(
+            geometry_evidence,
+            "geometry_evidence",
+            "absent"
+        )
+        content_score = _extract_optional_score(content_evidence, "content_signal")
+        geometry_score = _extract_optional_score(geometry_evidence, "geometry_signal")
+
+        decision_status = "decided" if content_status != "absent" else "abstain"
+        is_watermarked = False if decision_status == "decided" else None
+
+        evidence_summary = {
+            "content_score": content_score,
+            "geometry_score": geometry_score,
+            "content_status": content_status,
+            "geometry_status": geometry_status,
+            "fusion_rule_id": self.impl_id
         }
+        audit = {
+            "impl_id": self.impl_id,
+            "impl_version": self.impl_version,
+            "impl_digest": self.impl_digest,
+            "decision_status": decision_status
+        }
+        return FusionDecision(
+            is_watermarked=is_watermarked,
+            decision_status=decision_status,
+            thresholds_digest=thresholds_digest,
+            evidence_summary=evidence_summary,
+            audit=audit
+        )
+
+
+def _extract_status_field(payload: Dict[str, Any], field_name: str, fallback: str) -> str:
+    """
+    功能：提取证据状态字段。
+
+    Extract evidence status field with fallback behavior.
+
+    Args:
+        payload: Evidence mapping.
+        field_name: Field name to read.
+        fallback: Fallback status string.
+
+    Returns:
+        Status string.
+
+    Raises:
+        TypeError: If payload is invalid.
+        ValueError: If status field is invalid.
+    """
+    if not isinstance(payload, dict):
+        # payload 类型不合法，必须 fail-fast。
+        raise TypeError("payload must be dict")
+    if not isinstance(field_name, str) or not field_name:
+        # field_name 类型不合法，必须 fail-fast。
+        raise TypeError("field_name must be non-empty str")
+    if not isinstance(fallback, str) or not fallback:
+        # fallback 类型不合法，必须 fail-fast。
+        raise TypeError("fallback must be non-empty str")
+
+    value = payload.get(field_name, fallback)
+    if not isinstance(value, str) or not value:
+        # 状态字段不合法，必须 fail-fast。
+        raise ValueError(f"{field_name} must be non-empty str")
+    return value
+
+
+def _extract_optional_score(payload: Dict[str, Any], field_name: str) -> float | None:
+    """
+    功能：提取可选数值分数。
+
+    Extract an optional numeric score from evidence mapping.
+
+    Args:
+        payload: Evidence mapping.
+        field_name: Field name to read.
+
+    Returns:
+        Optional numeric score.
+
+    Raises:
+        TypeError: If payload is invalid.
+        ValueError: If score type is invalid.
+    """
+    if not isinstance(payload, dict):
+        # payload 类型不合法，必须 fail-fast。
+        raise TypeError("payload must be dict")
+    if not isinstance(field_name, str) or not field_name:
+        # field_name 类型不合法，必须 fail-fast。
+        raise TypeError("field_name must be non-empty str")
+    value = payload.get(field_name)
+    if value is None:
+        return None
+    if not isinstance(value, (int, float)):
+        # score 类型不合法，必须 fail-fast。
+        raise ValueError(f"{field_name} must be number or None")
+    return float(value)
 
 
 _FUSION_REGISTRY = RegistryBase("fusion_rule")

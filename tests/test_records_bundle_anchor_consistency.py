@@ -20,23 +20,26 @@ def test_bundle_detects_anchor_inconsistency(tmp_run_root):
     """
     try:
         from main.core import records_bundle
+        from main.core.errors import RecordBundleError
     except ImportError:
         pytest.skip("main.core.records_bundle module not found")
     
     records_dir = tmp_run_root / "records"
     
-    # 创建两个 records 文件，故意制造 contract_version 冲突
+    # 创建两个 records 文件，故意制造 contract_bound_digest 冲突
     record_1 = {
         "run_id": "test_run_001",
-        "contract_version": "v1.0.0",  # 版本 1
-        "schema_version": "v1.0.0",
+        "contract_bound_digest": "a" * 64,
+        "whitelist_bound_digest": "b" * 64,
+        "policy_path_semantics_bound_digest": "c" * 64,
         "event": "record_1",
     }
     
     record_2 = {
         "run_id": "test_run_001",
-        "contract_version": "v2.0.0",  # 版本 2（冲突）
-        "schema_version": "v1.0.0",
+        "contract_bound_digest": "d" * 64,
+        "whitelist_bound_digest": "b" * 64,
+        "policy_path_semantics_bound_digest": "c" * 64,
         "event": "record_2",
     }
     
@@ -44,19 +47,14 @@ def test_bundle_detects_anchor_inconsistency(tmp_run_root):
     (records_dir / "record_2.json").write_text(json.dumps(record_2), encoding="utf-8")
     
     # 尝试构建 bundle
-    with pytest.raises((ValueError, RuntimeError)) as exc_info:
-        if hasattr(records_bundle, "build_bundle"):
-            records_bundle.build_bundle(records_dir)
-        elif hasattr(records_bundle, "validate_anchor_consistency"):
-            records_bundle.validate_anchor_consistency(records_dir)
-        else:
-            pytest.skip("records_bundle module does not provide bundle building function")
+    with pytest.raises(RecordBundleError) as exc_info:
+        records_bundle.close_records_bundle(records_dir)
     
     error_msg = str(exc_info.value)
     
     # 验证异常信息包含：
     # 1. 冲突字段名
-    assert "contract_version" in error_msg
+    assert "contract_bound_digest" in error_msg
     
     # 2. 两个来源文件
     assert "record_1.json" in error_msg or "record_2.json" in error_msg
@@ -78,34 +76,34 @@ def test_bundle_succeeds_with_consistent_anchors(tmp_run_root):
     # 创建两个 records 文件，anchors 一致
     record_1 = {
         "run_id": "test_run_002",
-        "contract_version": "v1.0.0",
-        "schema_version": "v1.0.0",
+        "contract_bound_digest": "a" * 64,
+        "whitelist_bound_digest": "b" * 64,
+        "policy_path_semantics_bound_digest": "c" * 64,
         "event": "consistent_record_1",
     }
     
     record_2 = {
         "run_id": "test_run_002",
-        "contract_version": "v1.0.0",  # 一致
-        "schema_version": "v1.0.0",  # 一致
+        "contract_bound_digest": "a" * 64,
+        "whitelist_bound_digest": "b" * 64,
+        "policy_path_semantics_bound_digest": "c" * 64,
         "event": "consistent_record_2",
     }
     
     (records_dir / "record_1.json").write_text(json.dumps(record_1), encoding="utf-8")
     (records_dir / "record_2.json").write_text(json.dumps(record_2), encoding="utf-8")
     
+    artifacts_dir = tmp_run_root / "artifacts"
+
     # 构建 bundle
-    try:
-        if hasattr(records_bundle, "build_bundle"):
-            result = records_bundle.build_bundle(records_dir)
-            
-            # 验证返回结果包含 manifest 或 digest
-            assert result is not None
-            if isinstance(result, dict):
-                assert "bundle_digest" in result or "manifest" in result
-        else:
-            pytest.skip("build_bundle not implemented")
-    except Exception as e:
-        pytest.xfail(f"Bundle building not yet fully implemented: {e}")
+    manifest_path = records_bundle.close_records_bundle(
+        records_dir,
+        manifest_dir=artifacts_dir
+    )
+
+    assert manifest_path.exists()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert "bundle_canon_sha256" in manifest
 
 
 def test_bundle_scan_range_is_stable(tmp_run_root):
@@ -136,15 +134,12 @@ def test_bundle_scan_range_is_stable(tmp_run_root):
     (records_dir / ".hidden.json").write_text(json.dumps(valid_record))
     
     # 扫描 records
-    if hasattr(records_bundle, "scan_records"):
-        scanned_files = records_bundle.scan_records(records_dir)
-        
-        # 验证仅包含 .json 和 .jsonl
-        for filepath in scanned_files:
-            assert filepath.suffix in {".json", ".jsonl"}
-            assert not filepath.name.startswith(".")
-    else:
-        pytest.skip("scan_records not implemented")
+    scanned_files = records_bundle._scan_record_files(records_dir, "records_manifest.json")
+
+    # 验证仅包含 .json 和 .jsonl
+    for filepath in scanned_files:
+        assert filepath.suffix in {".json", ".jsonl"}
+        assert filepath.name != "records_manifest.json"
 
 
 def test_bundle_failure_does_not_leave_partial_output(tmp_run_root):
@@ -155,22 +150,27 @@ def test_bundle_failure_does_not_leave_partial_output(tmp_run_root):
     """
     try:
         from main.core import records_bundle
+        from main.core.errors import RecordBundleError
     except ImportError:
         pytest.skip("main.core.records_bundle module not found")
     
     records_dir = tmp_run_root / "records"
-    manifest_path = tmp_run_root / "records_manifest.json"
+    manifest_path = tmp_run_root / "artifacts" / "records_manifest.json"
     
     # 创建冲突的 records
     record_1 = {
         "run_id": "test_run_004",
-        "contract_version": "v1.0.0",
+        "contract_bound_digest": "a" * 64,
+        "whitelist_bound_digest": "b" * 64,
+        "policy_path_semantics_bound_digest": "c" * 64,
         "event": "record_1",
     }
     
     record_2 = {
         "run_id": "test_run_004",
-        "contract_version": "v2.0.0",  # 冲突
+        "contract_bound_digest": "d" * 64,
+        "whitelist_bound_digest": "b" * 64,
+        "policy_path_semantics_bound_digest": "c" * 64,
         "event": "record_2",
     }
     
@@ -179,9 +179,11 @@ def test_bundle_failure_does_not_leave_partial_output(tmp_run_root):
     
     # 尝试构建 bundle（应该失败）
     try:
-        if hasattr(records_bundle, "build_bundle"):
-            records_bundle.build_bundle(records_dir, output_path=manifest_path)
-    except (ValueError, RuntimeError):
+        records_bundle.close_records_bundle(
+            records_dir,
+            manifest_dir=manifest_path.parent
+        )
+    except RecordBundleError:
         # 预期失败
         pass
     
@@ -209,20 +211,27 @@ def test_bundle_digest_is_reproducible(tmp_run_root):
     # 创建一致的 records
     record_1 = {
         "run_id": "test_run_005",
-        "contract_version": "v1.0.0",
-        "schema_version": "v1.0.0",
+        "contract_bound_digest": "a" * 64,
+        "whitelist_bound_digest": "b" * 64,
+        "policy_path_semantics_bound_digest": "c" * 64,
         "event": "digest_test",
     }
     
     (records_dir / "record_1.json").write_text(json.dumps(record_1, sort_keys=True), encoding="utf-8")
     
+    artifacts_dir = tmp_run_root / "artifacts"
+
     # 构建 bundle 两次
-    if hasattr(records_bundle, "build_bundle"):
-        result_1 = records_bundle.build_bundle(records_dir)
-        result_2 = records_bundle.build_bundle(records_dir)
-        
-        # 验证 digest 一致
-        if isinstance(result_1, dict) and "bundle_digest" in result_1:
-            assert result_1["bundle_digest"] == result_2["bundle_digest"]
-    else:
-        pytest.skip("build_bundle not implemented")
+    manifest_path_1 = records_bundle.close_records_bundle(
+        records_dir,
+        manifest_dir=artifacts_dir
+    )
+    manifest_1 = json.loads(manifest_path_1.read_text(encoding="utf-8"))
+
+    manifest_path_2 = records_bundle.close_records_bundle(
+        records_dir,
+        manifest_dir=artifacts_dir
+    )
+    manifest_2 = json.loads(manifest_path_2.read_text(encoding="utf-8"))
+
+    assert manifest_1.get("bundle_canon_sha256") == manifest_2.get("bundle_canon_sha256")

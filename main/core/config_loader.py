@@ -22,6 +22,7 @@ from .errors import YAMLLoadError
 FROZEN_CONTRACTS_PATH = "configs/frozen_contracts.yaml"
 RUNTIME_WHITELIST_PATH = "configs/runtime_whitelist.yaml"
 POLICY_PATH_SEMANTICS_PATH = "configs/policy_path_semantics.yaml"
+INJECTION_SCOPE_MANIFEST_PATH = "configs/injection_scope_manifest.yaml"
 
 
 def load_frozen_contracts_interpretation(
@@ -93,6 +94,29 @@ def load_policy_path_semantics(
 
     return _load_policy_path_semantics(
         POLICY_PATH_SEMANTICS_PATH,
+        allow_non_authoritative=allow_non_authoritative
+    )
+
+
+def load_injection_scope_manifest(
+    *,
+    allow_non_authoritative: bool = False
+):
+    """
+    功能：加载注入范围事实源配置。
+
+    Load injection_scope_manifest.yaml.
+
+    Returns:
+        InjectionScopeManifest instance.
+
+    Raises:
+        YAMLLoadError: If manifest cannot be loaded.
+    """
+    from main.core.injection_scope import load_injection_scope_manifest as _load_injection_scope_manifest
+
+    return _load_injection_scope_manifest(
+        INJECTION_SCOPE_MANIFEST_PATH,
         allow_non_authoritative=allow_non_authoritative
     )
 
