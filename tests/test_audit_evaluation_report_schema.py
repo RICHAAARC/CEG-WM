@@ -98,11 +98,11 @@ class TestAuditEvaluationReportSchema:
         assert result == 0  # Should pass
 
     def test_audit_rejects_absent_digest_values(self, tmp_path, capsys):
-        """测试：审计拒绝 <absent> 占位符作为有效值。"""
+        """测试：审计拒绝 <absent> 缺省标记作为有效值。"""
         # Arrange
         report = {
             "cfg_digest": "sha256_cfg",
-            "plan_digest": "<absent>",  # Invalid placeholder!
+            "plan_digest": "<absent>",  # Invalid absent marker!
             "thresholds_digest": "sha256_thresh",
             "threshold_metadata_digest": "sha256_metadata",
             "impl_digest": "sha256_impl",

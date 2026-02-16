@@ -1,5 +1,5 @@
 """
-功能：测试 path_audit 在未绑定事实源时不得落盘（B5/D2 覆盖）
+功能：测试 path_audit 在未绑定事实源时不得落盘（policy.path_semantics_binding_and_audit_evidence，legacy_code=B5/D2）
 
 Module type: Core innovation module
 

@@ -13,6 +13,11 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any, Set
 
+try:
+    from scripts.audits.gate_label_mapping import resolve_audit_label
+except Exception:
+    from gate_label_mapping import resolve_audit_label
+
 
 # 冻结面关键文件
 FROZEN_FILES = [
@@ -354,9 +359,12 @@ def run_audit(repo_root: Path) -> Dict[str, Any]:
         else "N.A."
     )
     
+    label = resolve_audit_label("A1_A7.freeze_surface_integrity", "gate.freeze_surface_integrity")
     return {
-        "audit_id": "A1_A7.freeze_surface_integrity",
-        "gate_name": "gate.freeze_surface_integrity",
+        "audit_id": label["audit_id"],
+        "gate_name": label["gate_name"],
+        "legacy_code": label["legacy_code"],
+        "formal_description": label["formal_description"],
         "category": "A",
         "severity": "BLOCK",
         "result": result,

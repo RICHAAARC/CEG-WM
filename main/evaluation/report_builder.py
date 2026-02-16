@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from main.core import digests
+from main.core import records_io
 
 
 def build_evaluation_report(
@@ -185,7 +186,78 @@ def build_evaluation_report(
     if isinstance(attack_protocol_spec, dict):
         report["attack_protocol"] = attack_protocol_spec
 
+    # append-only: 路由摘要字段（若可从指标中推断则保留）。
+    report["routing_decisions"] = {
+        "attack_protocol_version": safe_attack_protocol_version,
+        "policy_path": safe_policy_path,
+        "rescue_rate": metrics_overall.get("rescue_rate") if isinstance(metrics_overall, dict) else None,
+        "geo_available_rate": metrics_overall.get("geo_available_rate") if isinstance(metrics_overall, dict) else None,
+    }
+    report["routing_digest"] = digests.canonical_sha256(report["routing_decisions"])
+
+    # append-only: impl 锚点容器（兼容 impl_digest 单字段）。
+    report["impl_anchors"] = {
+        "content": {
+            "impl_digest": safe_impl_digest,
+        },
+        "geometry": {
+            "impl_digest": safe_impl_digest,
+        },
+        "fusion": {
+            "impl_digest": safe_impl_digest,
+            "fusion_rule_version": safe_fusion_rule_version,
+        },
+    }
+
     return report
+
+
+def build_eval_report(**kwargs: Any) -> Dict[str, Any]:
+    """
+    功能：构造 evaluate 报告（build_evaluation_report 的别名入口）。
+
+    Build evaluation report via canonical report builder.
+
+    Args:
+        **kwargs: Same keyword arguments accepted by build_evaluation_report.
+
+    Returns:
+        Evaluation report mapping.
+    """
+    return build_evaluation_report(**kwargs)
+
+
+def write_eval_report_via_records_io(
+    eval_report: Dict[str, Any],
+    output_path: str,
+) -> None:
+    """
+    功能：通过 records_io 写入评测报告工件。
+
+    Write evaluation report artifact through records_io controlled path.
+
+    Args:
+        eval_report: Evaluation report mapping.
+        output_path: Artifact path under artifacts directory.
+
+    Returns:
+        None.
+
+    Raises:
+        TypeError: If inputs are invalid.
+    """
+    if not isinstance(eval_report, dict):
+        raise TypeError("eval_report must be dict")
+    if not isinstance(output_path, str) or not output_path:
+        raise TypeError("output_path must be non-empty str")
+
+    # artifacts 语义旁路防护：将报告作为业务载荷嵌套，避免顶层 records anchor 冲突。
+    payload = {
+        "evaluation_report": eval_report,
+        "report_type": "eval_report_v1",
+        "report_digest": digests.canonical_sha256(eval_report),
+    }
+    records_io.write_artifact_json(output_path, payload)
 
 
 def build_conditional_metrics_container(

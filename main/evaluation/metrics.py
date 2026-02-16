@@ -218,6 +218,35 @@ def extract_hf_failure_decision(record: Dict[str, Any]) -> Optional[bool]:
     return None
 
 
+def _extract_chain_status(record: Dict[str, Any], chain_name: str) -> Optional[str]:
+    """
+    功能：提取链路状态（content/geometry）。
+
+    Extract chain status from record payloads.
+
+    Args:
+        record: Detection record dict.
+        chain_name: Chain name, one of "content" or "geometry".
+
+    Returns:
+        Status string if available, otherwise None.
+    """
+    if not isinstance(record, dict):
+        return None
+    if chain_name == "content":
+        payload = record.get("content_evidence_payload")
+    elif chain_name == "geometry":
+        payload = record.get("geometry_evidence_payload")
+    else:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    status_value = payload.get("status")
+    if isinstance(status_value, str) and status_value:
+        return status_value
+    return None
+
+
 def compute_overall_metrics(
     records: List[Dict[str, Any]],
     threshold_value: float,
@@ -259,6 +288,12 @@ def compute_overall_metrics(
         "status_not_ok": 0,
         "invalid_score": 0,
         "missing_ground_truth": 0,
+        "content_absent": 0,
+        "content_mismatch": 0,
+        "content_fail": 0,
+        "geometry_absent": 0,
+        "geometry_mismatch": 0,
+        "geometry_fail": 0,
     }
 
     # 逐记录处理。
@@ -279,6 +314,13 @@ def compute_overall_metrics(
         if content_payload.get("status") != "ok":
             n_reject += 1
             reject_count_by_reason["status_not_ok"] += 1
+            content_status = _extract_chain_status(item, "content")
+            if content_status == "absent":
+                reject_count_by_reason["content_absent"] += 1
+            elif content_status == "mismatch":
+                reject_count_by_reason["content_mismatch"] += 1
+            elif content_status == "fail":
+                reject_count_by_reason["content_fail"] += 1
             continue
 
         score_value = content_payload.get("score")
@@ -305,6 +347,14 @@ def compute_overall_metrics(
 
         if extract_geometry_score(item) is not None:
             geo_available_accepted += 1
+        else:
+            geometry_status = _extract_chain_status(item, "geometry")
+            if geometry_status == "absent":
+                reject_count_by_reason["geometry_absent"] += 1
+            elif geometry_status == "mismatch":
+                reject_count_by_reason["geometry_mismatch"] += 1
+            elif geometry_status == "fail":
+                reject_count_by_reason["geometry_fail"] += 1
 
         if extract_rescue_triggered(item):
             rescue_triggered_count += 1
@@ -410,6 +460,12 @@ def compute_attack_group_metrics(
                     "status_not_ok": 0,
                     "invalid_score": 0,
                     "missing_ground_truth": 0,
+                    "content_absent": 0,
+                    "content_mismatch": 0,
+                    "content_fail": 0,
+                    "geometry_absent": 0,
+                    "geometry_mismatch": 0,
+                    "geometry_fail": 0,
                 },
             }
 
@@ -427,6 +483,13 @@ def compute_attack_group_metrics(
 
         if content_payload.get("status") != "ok":
             group_stats["reject_count_by_reason"]["status_not_ok"] += 1
+            content_status = _extract_chain_status(item, "content")
+            if content_status == "absent":
+                group_stats["reject_count_by_reason"]["content_absent"] += 1
+            elif content_status == "mismatch":
+                group_stats["reject_count_by_reason"]["content_mismatch"] += 1
+            elif content_status == "fail":
+                group_stats["reject_count_by_reason"]["content_fail"] += 1
             continue
 
         score_value = content_payload.get("score")
@@ -446,6 +509,14 @@ def compute_attack_group_metrics(
 
         if extract_geometry_score(item) is not None:
             group_stats["geo_available_accepted"] += 1
+        else:
+            geometry_status = _extract_chain_status(item, "geometry")
+            if geometry_status == "absent":
+                group_stats["reject_count_by_reason"]["geometry_absent"] += 1
+            elif geometry_status == "mismatch":
+                group_stats["reject_count_by_reason"]["geometry_mismatch"] += 1
+            elif geometry_status == "fail":
+                group_stats["reject_count_by_reason"]["geometry_fail"] += 1
 
         if extract_rescue_triggered(item):
             group_stats["rescue_triggered"] += 1
@@ -513,3 +584,58 @@ def compute_attack_group_metrics(
         })
 
     return result
+
+
+def aggregate_metrics(
+    records_manifest: Any,
+    thresholds_artifact: Dict[str, Any],
+    attack_protocol: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    功能：聚合评测指标并返回结构化结果。
+
+    Aggregate evaluation metrics from records and threshold artifact.
+
+    Args:
+        records_manifest: Record list or manifest-like mapping containing records.
+        thresholds_artifact: Threshold artifact mapping with threshold_value.
+        attack_protocol: Attack protocol spec mapping.
+
+    Returns:
+        Dict containing overall metrics, breakdown and grouped metrics.
+
+    Raises:
+        TypeError: If input types are invalid.
+        ValueError: If threshold value is absent.
+    """
+    if isinstance(records_manifest, list):
+        records = records_manifest
+    elif isinstance(records_manifest, dict):
+        candidate_records = records_manifest.get("records")
+        if isinstance(candidate_records, list):
+            records = candidate_records
+        else:
+            records = records_manifest.get("items") if isinstance(records_manifest.get("items"), list) else []
+    else:
+        raise TypeError("records_manifest must be list or dict")
+
+    if not isinstance(thresholds_artifact, dict):
+        raise TypeError("thresholds_artifact must be dict")
+    if not isinstance(attack_protocol, dict):
+        raise TypeError("attack_protocol must be dict")
+
+    threshold_value = thresholds_artifact.get("threshold_value")
+    if not isinstance(threshold_value, (int, float)):
+        raise ValueError("thresholds_artifact.threshold_value must be number")
+
+    metrics_overall, breakdown = compute_overall_metrics(records, float(threshold_value))
+    metrics_by_attack_condition = compute_attack_group_metrics(
+        records,
+        float(threshold_value),
+        attack_protocol,
+    )
+    return {
+        "metrics_overall": metrics_overall,
+        "breakdown": breakdown,
+        "metrics_by_attack_condition": metrics_by_attack_condition,
+    }

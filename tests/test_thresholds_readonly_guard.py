@@ -15,7 +15,7 @@ from main.registries.runtime_resolver import BuiltImplSet
 from main.watermarking.detect import orchestrator as detect_orchestrator
 
 
-# ==================== B2: Readonly Guard Runtime Tests ====================
+# ==================== Readonly Threshold Guard Runtime Tests ====================
 
 
 def test_thresholds_readonly_guard_passes_when_unchanged(tmp_path):
@@ -166,7 +166,7 @@ def test_thresholds_readonly_guard_appended_to_report(tmp_path):
         "unchanged boolean flag missing from guard record"
 
 
-# ==================== B3: Attack Protocol Hardcoding Audit Tests ====================
+# ==================== Attack Protocol Fact-Source Audit Tests ====================
 
 
 def test_audit_attack_protocol_hardcoding_script_returns_zero_on_pass():
@@ -279,9 +279,9 @@ def test_no_hardcoded_attack_parameters_in_evaluation_module():
 
 def test_run_all_audits_includes_b2_b3_scripts():
     """
-    功能：验证 run_all_audits.py 正确包含 B2/B3 审计脚本。
+    功能：验证 run_all_audits.py 正确包含只读阈值与攻击协议事实源审计脚本。
 
-    Verify that run_all_audits.py includes B2/B3 audit scripts in AUDIT_SCRIPTS list.
+    Verify that run_all_audits.py includes readonly-threshold and attack-protocol audit scripts.
     """
     repo_root = Path(__file__).resolve().parent.parent
     run_all_audits = repo_root / "scripts" / "run_all_audits.py"
@@ -290,19 +290,19 @@ def test_run_all_audits_includes_b2_b3_scripts():
     
     content = run_all_audits.read_text(encoding="utf-8")
     
-    # 验证 B2 和 B3 审计脚本在列表中
+    # 验证只读阈值与攻击协议事实源审计脚本在列表中
     assert "audit_thresholds_readonly_enforcement.py" in content, \
-        "B2 audit script (audit_thresholds_readonly_enforcement.py) not found in AUDIT_SCRIPTS"
+        "readonly-threshold audit script (audit_thresholds_readonly_enforcement.py) not found in AUDIT_SCRIPTS"
     
     assert "audit_attack_protocol_hardcoding.py" in content, \
-        "B3 audit script (audit_attack_protocol_hardcoding.py) not found in AUDIT_SCRIPTS"
+        "attack-protocol fact-source audit script (audit_attack_protocol_hardcoding.py) not found in AUDIT_SCRIPTS"
 
 
 def test_run_freeze_signoff_includes_b2_b3_audits():
     """
-    功能：验证 run_freeze_signoff.py 的 MINIMUM_AUDIT_SCRIPTS 包含 B2/B3 脚本。
+    功能：验证 run_freeze_signoff.py 的 MINIMUM_AUDIT_SCRIPTS 包含只读阈值与攻击协议事实源脚本。
 
-    Verify that run_freeze_signoff.py includes B2/B3 in MINIMUM_AUDIT_SCRIPTS.
+    Verify that run_freeze_signoff.py includes readonly-threshold and attack-protocol scripts.
     """
     repo_root = Path(__file__).resolve().parent.parent
     run_freeze_signoff = repo_root / "scripts" / "run_freeze_signoff.py"
@@ -311,12 +311,12 @@ def test_run_freeze_signoff_includes_b2_b3_audits():
     
     content = run_freeze_signoff.read_text(encoding="utf-8")
     
-    # 验证 B2 和 B3 审计脚本在 MINIMUM_AUDIT_SCRIPTS 中
+    # 验证只读阈值与攻击协议事实源审计脚本在 MINIMUM_AUDIT_SCRIPTS 中
     assert "audit_thresholds_readonly_enforcement.py" in content, \
-        "B2 audit script not in run_freeze_signoff.py"
+        "readonly-threshold audit script not in run_freeze_signoff.py"
     
     assert "audit_attack_protocol_hardcoding.py" in content, \
-        "B3 audit script not in run_freeze_signoff.py"
+        "attack-protocol fact-source audit script not in run_freeze_signoff.py"
 
 
 if __name__ == "__main__":

@@ -17,6 +17,124 @@ from typing import Any, Callable, Dict, List, Optional
 from main.core import digests
 
 
+def apply_attack_transform(
+    image_or_latent: Any,
+    attack_spec: Dict[str, Any],
+    rng: Any,
+) -> Dict[str, Any]:
+    """
+    功能：应用攻击变换并返回可复算追踪信息。
+
+    Apply attack transform in deterministic audit mode.
+    Current implementation is protocol-bound no-op transform with full trace anchors.
+
+    Args:
+        image_or_latent: Input payload.
+        attack_spec: Attack specification mapping.
+        rng: Random generator handle used for seed binding.
+
+    Returns:
+        Dict containing transformed payload and attack trace anchors.
+
+    Raises:
+        TypeError: If attack_spec is invalid.
+    """
+    if not isinstance(attack_spec, dict):
+        # attack_spec 类型不合法，必须 fail-fast。
+        raise TypeError("attack_spec must be dict")
+
+    seed_value = attack_spec.get("seed")
+    if not isinstance(seed_value, int):
+        seed_value = attack_spec.get("rng_seed") if isinstance(attack_spec.get("rng_seed"), int) else 0
+
+    attack_digest = digests.canonical_sha256(attack_spec)
+    trace_payload = {
+        "attack_family": attack_spec.get("attack_family", "<absent>"),
+        "params_version": attack_spec.get("params_version", "<absent>"),
+        "seed": int(seed_value),
+        "attack_digest": attack_digest,
+        "rng_type": type(rng).__name__ if rng is not None else "<absent>",
+    }
+
+    return {
+        "payload": image_or_latent,
+        "attack_trace": trace_payload,
+        "attack_digest": attack_digest,
+        "seed": int(seed_value),
+    }
+
+
+def should_enable_geometry_chain(
+    attack_spec: Dict[str, Any],
+    cfg: Dict[str, Any],
+    plan: Dict[str, Any],
+    evidence: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    功能：判断是否启用几何链并输出路由摘要。
+
+    Decide geometry chain routing and return routing decisions plus routing digest.
+
+    Args:
+        attack_spec: Attack specification mapping.
+        cfg: Runtime config mapping.
+        plan: Plan mapping.
+        evidence: Evidence mapping.
+
+    Returns:
+        Dict with enable flag, routing_decisions and routing_digest.
+
+    Raises:
+        TypeError: If inputs are invalid.
+    """
+    if not isinstance(attack_spec, dict):
+        # attack_spec 类型不合法，必须 fail-fast。
+        raise TypeError("attack_spec must be dict")
+    if not isinstance(cfg, dict):
+        # cfg 类型不合法，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+    if not isinstance(plan, dict):
+        # plan 类型不合法，必须 fail-fast。
+        raise TypeError("plan must be dict")
+    if not isinstance(evidence, dict):
+        # evidence 类型不合法，必须 fail-fast。
+        raise TypeError("evidence must be dict")
+
+    family = attack_spec.get("attack_family")
+    if not isinstance(family, str) or not family:
+        family = attack_spec.get("family") if isinstance(attack_spec.get("family"), str) else "<absent>"
+
+    geometry_attack_families = {
+        "rotate",
+        "resize",
+        "crop",
+        "translate",
+        "composite",
+    }
+    enabled_by_family = family in geometry_attack_families
+    cfg_geometry_enabled = bool(
+        isinstance(cfg.get("detect"), dict)
+        and isinstance(cfg.get("detect", {}).get("geometry"), dict)
+        and cfg.get("detect", {}).get("geometry", {}).get("enabled", False)
+    )
+
+    routing_decisions = {
+        "attack_family": family,
+        "enabled_by_family": enabled_by_family,
+        "cfg_geometry_enabled": cfg_geometry_enabled,
+        "plan_digest": plan.get("plan_digest", "<absent>"),
+        "evidence_status": evidence.get("status", "<absent>"),
+        "geo_chain_enabled": bool(enabled_by_family and cfg_geometry_enabled),
+    }
+    routing_digest = digests.canonical_sha256(routing_decisions)
+
+    return {
+        "geo_chain_enabled": bool(routing_decisions["geo_chain_enabled"]),
+        "routing_decisions": routing_decisions,
+        "routing_digest": routing_digest,
+    }
+
+
 class AttackFailureReason(str, Enum):
     """
     功能：攻击执行失败原因枚举。
@@ -194,7 +312,7 @@ def run_attacks_for_condition(
     }
 
     try:
-        # 真实攻击执行由上游实现接入；当前仅做协议驱动执行占位与审计封装。
+        # 攻击执行遵循协议驱动封装；具体攻击算子由上游实现提供并版本化管理。
         attacked_payload = images_or_latents
         output_digest = _stable_payload_digest(attacked_payload)
 

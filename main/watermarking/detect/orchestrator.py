@@ -48,10 +48,12 @@ def run_detect_orchestrator(
     detect_plan_result_override: Any | None = None
 ) -> Dict[str, Any]:
     """
-    功能：执行检测占位流程，包括 plan_digest 一致性验证。
+    功能：执行检测编排流程，包括 plan_digest 一致性验证。
 
     Execute detect workflow using injected implementations.
     Validates plan_digest consistency with embed-time plan_digest when available.
+    Supports ablation flags: when ablation.normalized.enable_content=false,
+    content_extractor returns status="absent" with no failure reason.
 
     Args:
         cfg: Config mapping (may differ from embed-time cfg).
@@ -74,7 +76,7 @@ def run_detect_orchestrator(
         # cfg 类型不合法，必须 fail-fast。
         raise TypeError("cfg must be dict")
     if not isinstance(impl_set, BuiltImplSet):
-        # impl_set 类型不合法，必须 fail-fast。
+        # impl_set 类型不合法，必须 failfast。
         raise TypeError("impl_set must be BuiltImplSet")
     if input_record is not None and not isinstance(input_record, dict):
         # input_record 类型不合法，必须 fail-fast。
@@ -95,8 +97,22 @@ def run_detect_orchestrator(
         # detect_plan_result_override 类型不符合预期，必须 fail-fast。
         raise TypeError("detect_plan_result_override must be dict, SubspacePlan, or None")
 
-    content_result = content_result_override if content_result_override is not None else impl_set.content_extractor.extract(cfg)
-    geometry_result = _run_geometry_extractor_with_runtime_inputs(impl_set.geometry_extractor, cfg)
+    # 读取 ablation.normalized 开关（若缺失则默认全启用）。
+    ablation_normalized = _get_ablation_normalized(cfg)
+    enable_content = ablation_normalized.get("enable_content", True)
+    enable_geometry = ablation_normalized.get("enable_geometry", True)
+
+    # Ablation: 禁用 content 模块时返回 absent 语义。
+    if not enable_content:
+        content_result = _build_ablation_absent_content_evidence("content_chain_disabled_by_ablation")
+    else:
+        content_result = content_result_override if content_result_override is not None else impl_set.content_extractor.extract(cfg)
+    
+    # Ablation: 禁用 geometry 模块时返回 absent 语义。
+    if not enable_geometry:
+        geometry_result = _build_ablation_absent_geometry_evidence("geometry_chain_disabled_by_ablation")
+    else:
+        geometry_result = _run_geometry_extractor_with_runtime_inputs(impl_set.geometry_extractor, cfg)
 
     # (1) 统一转换 ContentEvidence / GeometryEvidence 数据类为 dict。
     # 优先使用 .as_dict() 方法；若不存在则直接使用数据类或字典。
@@ -1793,7 +1809,13 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
     
     # 计算 overall 和 grouped metrics。
     threshold_value = float(thresholds_obj.get("threshold_value", 0.5))
-    metrics_obj, breakdown = eval_metrics.compute_overall_metrics(detect_records, threshold_value)
+    aggregated_metrics = eval_metrics.aggregate_metrics(
+        detect_records,
+        thresholds_obj,
+        attack_protocol_spec,
+    )
+    metrics_obj = aggregated_metrics.get("metrics_overall", {})
+    breakdown = aggregated_metrics.get("breakdown", {})
     
     # 重新加载 thresholds 工件并对比 digest。
     thresholds_obj_after = load_thresholds_artifact_controlled(str(thresholds_path))
@@ -1808,11 +1830,7 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
             f"  - digest_after: {thresholds_digest_after}\n"
             f"  - 原因: evaluate 侧修改或污染了 thresholds 工件"
         )
-    attack_group_metrics = eval_metrics.compute_attack_group_metrics(
-        detect_records,
-        threshold_value,
-        attack_protocol_spec,
-    )
+    attack_group_metrics = aggregated_metrics.get("metrics_by_attack_condition", [])
     
     # 构造条件指标容器（向后兼容）。
     conditional_metrics = eval_report_builder.build_conditional_metrics_container(
@@ -1851,7 +1869,7 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
     fusion_rule_version = thresholds_obj.get("rule_version", "<absent>")
     policy_path = cfg.get("__policy_path__", "<absent>")
     
-    report_obj = eval_report_builder.build_evaluation_report(
+    report_obj = eval_report_builder.build_eval_report(
         cfg_digest=cfg.get("__evaluate_cfg_digest__", "<absent>"),
         plan_digest=plan_digest,
         thresholds_digest=thresholds_digest,
@@ -3014,3 +3032,133 @@ def _run_geometry_extractor_with_runtime_inputs(geometry_extractor: Any, cfg: Di
     except TypeError:
         # 兼容旧实现：仅接受 cfg 参数。
         return extract_method(cfg)
+
+
+def _extract_detect_planner_input_digest(detect_plan_result: Any) -> str | None:
+    """
+    功能：提取 detect 侧 planner input digest。
+
+    Extract detect-side planner input digest from plan result.
+
+    Args:
+        detect_plan_result: Plan result object or mapping.
+
+    Returns:
+        planner_input_digest string or None.
+    """
+    if hasattr(detect_plan_result, "planner_input_digest"):
+        value = detect_plan_result.planner_input_digest
+        if isinstance(value, str) and value:
+            return value
+    if isinstance(detect_plan_result, dict):
+        value = detect_plan_result.get("planner_input_digest")
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _get_ablation_normalized(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：读取 ablation.normalized 开关段。
+
+    Read ablation.normalized switch settings from cfg.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        ablation.normalized dict (empty if missing).
+
+    Raises:
+        TypeError: If cfg is invalid.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    ablation = cfg.get("ablation")
+    if not isinstance(ablation, dict):
+        return {}
+    normalized = ablation.get("normalized")
+    if not isinstance(normalized, dict):
+        return {}
+    return normalized
+
+
+def _build_ablation_absent_content_evidence(absent_reason: str) -> Dict[str, Any]:
+    """
+    功能：构造 ablation 禁用时的 content_evidence absent 语义。
+
+    Build content_evidence with status="absent" for ablation-disabled modules.
+
+    Args:
+        absent_reason: Absence reason string (e.g., "content_chain_disabled_by_ablation").
+
+    Returns:
+        ContentEvidence-compatible dict with status="absent", score=None.
+
+    Raises:
+        TypeError: If absent_reason is invalid.
+    """
+    if not isinstance(absent_reason, str) or not absent_reason:
+        raise TypeError("absent_reason must be non-empty str")
+    return {
+        "status": "absent",
+        "score": None,
+        "audit": {
+            "impl_identity": "ablation_switchboard",
+            "impl_version": "v1",
+            "impl_digest": digests.canonical_sha256({"impl_id": "ablation_switchboard", "impl_version": "v1"}),
+            "trace_digest": digests.canonical_sha256({"absent_reason": absent_reason})
+        },
+        "mask_digest": None,
+        "mask_stats": None,
+        "plan_digest": None,
+        "basis_digest": None,
+        "lf_trace_digest": None,
+        "hf_trace_digest": None,
+        "lf_score": None,
+        "hf_score": None,
+        "score_parts": {
+            "routing_digest": "<absent>",
+            "routing_absent_reason": absent_reason,
+        },
+        "content_failure_reason": None  # absent 状态下无失败原因
+    }
+
+
+def _build_ablation_absent_geometry_evidence(absent_reason: str) -> Dict[str, Any]:
+    """
+    功能：构造 ablation 禁用时的 geometry_evidence absent 语义。
+
+    Build geometry_evidence with status="absent" for ablation-disabled modules.
+
+    Args:
+        absent_reason: Absence reason string (e.g., "geometry_chain_disabled_by_ablation").
+
+    Returns:
+        GeometryEvidence-compatible dict with status="absent", score=None.
+
+    Raises:
+        TypeError: If absent_reason is invalid.
+    """
+    if not isinstance(absent_reason, str) or not absent_reason:
+        raise TypeError("absent_reason must be non-empty str")
+    return {
+        "status": "absent",
+        "geo_score": None,
+        "audit": {
+            "impl_identity": "ablation_switchboard",
+            "impl_version": "v1",
+            "impl_digest": digests.canonical_sha256({"impl_id": "ablation_switchboard", "impl_version": "v1"}),
+            "trace_digest": digests.canonical_sha256({"absent_reason": absent_reason})
+        },
+        "sync": {
+            "status": "absent",
+            "reason": absent_reason
+        },
+        "anchor_digest": None,
+        "anchor_metrics": None,
+        "sync_digest": None,
+        "sync_metrics": None,
+        "align_trace_digest": None,
+        "geo_failure_reason": None  # absent 状态下无失败原因
+    }

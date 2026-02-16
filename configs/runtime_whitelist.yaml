@@ -86,13 +86,71 @@ override:
       override_mode: "set"
       source: "cli"
       description: "测试模式基线检验：启用 identity 模式后 content/geometry 使用基线实现"
+    
+    # Ablation 实验开关 CLI overrides (append-only v1.0)
+    # 允许通过 CLI 覆写 ablation.enable_* 开关，用于消融实验控制
+    - arg_name: "ablation_enable_content"
+      field_path: "ablation.enable_content"
+      override_mode: "set"
+      source: "cli"
+      description: "Ablation：覆写 content 链开关"
+    - arg_name: "ablation_disable_content"
+      field_path: "ablation.enable_content"
+      override_mode: "set"
+      allowed_values: [false]
+      source: "cli"
+      description: "Ablation：禁用 content 链（传递 =false 强制禁用）"
+    - arg_name: "ablation_enable_geometry"
+      field_path: "ablation.enable_geometry"
+      override_mode: "set"
+      source: "cli"
+      description: "Ablation：覆写 geometry 链开关"
+    - arg_name: "ablation_disable_geometry"
+      field_path: "ablation.enable_geometry"
+      override_mode: "set"
+      allowed_values: [false]
+      source: "cli"
+      description: "Ablation：禁用 geometry 链（传递 =false 强制禁用）"
+    - arg_name: "ablation_enable_fusion"
+      field_path: "ablation.enable_fusion"
+      override_mode: "set"
+      source: "cli"
+      description: "Ablation：覆写 fusion 决策开关"
+    - arg_name: "ablation_disable_fusion"
+      field_path: "ablation.enable_fusion"
+      override_mode: "set"
+      allowed_values: [false]
+      source: "cli"
+      description: "Ablation：禁用 fusion 决策（传递 =false 强制禁用）"
+    - arg_name: "ablation_enable_lf"
+      field_path: "ablation.enable_lf"
+      override_mode: "set"
+      source: "cli"
+      description: "Ablation：覆写 LF 低频通道开关"
+    - arg_name: "ablation_disable_lf"
+      field_path: "ablation.enable_lf"
+      override_mode: "set"
+      allowed_values: [false]
+      source: "cli"
+      description: "Ablation：禁用 LF 低频通道（传递 =false 强制禁用）"
+    - arg_name: "ablation_enable_hf"
+      field_path: "ablation.enable_hf"
+      override_mode: "set"
+      source: "cli"
+      description: "Ablation：覆写 HF 高频通道开关"
+    - arg_name: "ablation_disable_hf"
+      field_path: "ablation.enable_hf"
+      override_mode: "set"
+      allowed_values: [false]
+      source: "cli"
+      description: "Ablation：禁用 HF 高频通道（传递 =false 强制禁用）"
 
   # 覆写 source 的枚举白名单（gate 必须校验）
   source_enum:
     allowed:
       - "cli"
     immutable: true
-    notes: "当前 Phase 仅支持 CLI 覆写，未来可扩展其他来源。"
+    notes: "当前行为仅允许 CLI 来源覆写；若扩展来源，必须通过 whitelist_version 版本化变更。"
 
   # 覆写 arg_name 的枚举白名单（gate 必须校验）
   arg_name_enum:
@@ -105,6 +163,17 @@ override:
       - "enable_paper_faithfulness"
       - "enable_trace_tap"
       - "test_mode_identity"
+      # Ablation 实验开关枚举（append-only v1.0）
+      - "ablation_enable_content"
+      - "ablation_disable_content"
+      - "ablation_enable_geometry"
+      - "ablation_disable_geometry"
+      - "ablation_enable_fusion"
+      - "ablation_disable_fusion"
+      - "ablation_enable_lf"
+      - "ablation_disable_lf"
+      - "ablation_enable_hf"
+      - "ablation_disable_hf"
     immutable: true
     notes: "必须与 allowed_overrides[*].arg_name 的值集完全一致。新增 override 必须同步更新此枚举。"
 
@@ -117,7 +186,7 @@ override:
 # ==============================================================
 # 运行期枚举允许集合
 #   - 将若干关键枚举的允许值显式化为 allowlist，供 schema/records 校验与门禁使用。
-#   - 这些枚举本质上是“运行期选择集合”，未来真实方法注入时常需要扩展。
+#   - 这些枚举是“运行期选择集合”；新增取值必须通过版本化追加，不得原位改义。
 #   - frozen_contracts 冻结“必须集中定义与必须验证”的机制。
 #   - runtime_whitelist 给出“当前允许集合”，便于 gate 与审计脚本在无代码依赖下校验。
 # ==============================================================
@@ -247,7 +316,7 @@ impl_id:
       - "unified_content_extractor_v1"
 
     geometry_extractor:
-      # 几何证据链占位实现：
+      # 几何证据链基线实现：
       # - 不生成几何指纹。
       # - 可返回 canonical 状态或空几何证据。
       # - 用于测试几何链路与 fallback / abstain 语义。
@@ -270,7 +339,7 @@ impl_id:
       - "geometry_align_invariance_sd3_v1"
 
     fusion_rule:
-      # 融合规则占位实现：
+      # 融合规则基线实现：
       # - 采用恒等映射或固定规则。
       # - 不引入统计权重或真实阈值比较。
       # - 用于验证 policy_path 与 decision 流程。
@@ -285,7 +354,7 @@ impl_id:
       - "fusion_neyman_pearson_v1"
 
     subspace_planner:
-      # 子空间规划占位实现：
+      # 子空间规划基线实现：
       # - 不进行真实子空间选择。
       # - 可返回 full-space / None / 预定义空 frame。
       # - 用于固化 subspace_frame 的审计语义。
@@ -302,7 +371,7 @@ impl_id:
       - "subspace_planner_v1"
 
     sync_module:
-      # 同步模块占位实现：
+      # 同步模块基线实现：
       # - 不执行真实同步。
       # - 可显式返回 success / unavailable 的固定状态。
       # - 用于测试 geometry gate 与 failure 语义。

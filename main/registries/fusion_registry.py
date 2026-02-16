@@ -229,7 +229,7 @@ def _derive_impl_digest(impl_id: str, impl_version: str) -> str:
 
 def _build_fusion_baseline_identity(cfg: Dict[str, Any]) -> FusionBaselineIdentity:
     """
-    功能：构造融合规则占位实现。
+    功能：构造融合规则基线实现。
 
     Build baseline fusion rule.
 

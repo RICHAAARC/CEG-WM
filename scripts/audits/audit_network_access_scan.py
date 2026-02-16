@@ -13,6 +13,11 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any
 
+try:
+    from scripts.audits.gate_label_mapping import resolve_audit_label
+except Exception:
+    from gate_label_mapping import resolve_audit_label
+
 
 class NetworkAccessVisitor(ast.NodeVisitor):
     """
@@ -296,9 +301,12 @@ def run_audit(repo_root: Path) -> Dict[str, Any]:
         else "N.A."
     )
     
+    label = resolve_audit_label("D10.network_access_scan", "gate.network_access")
     return {
-        "audit_id": "D10.network_access_scan",
-        "gate_name": "gate.network_access",
+        "audit_id": label["audit_id"],
+        "gate_name": label["gate_name"],
+        "legacy_code": label["legacy_code"],
+        "formal_description": label["formal_description"],
         "category": "D",
         "severity": "BLOCK",
         "result": result,

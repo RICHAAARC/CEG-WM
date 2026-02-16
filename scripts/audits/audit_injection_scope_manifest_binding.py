@@ -13,6 +13,11 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, List
 
+try:
+    from scripts.audits.gate_label_mapping import resolve_audit_label
+except Exception:
+    from gate_label_mapping import resolve_audit_label
+
 _scripts_dir = Path(__file__).resolve().parent
 _repo_root = _scripts_dir.parent.parent
 if str(_repo_root) not in sys.path:
@@ -383,9 +388,12 @@ def run_audit(repo_root: Path) -> Dict[str, Any]:
         if fail_reasons else "N.A."
     )
 
+    label = resolve_audit_label("S00.injection_scope_manifest_binding", "gate.injection_scope_manifest_binding")
     return {
-        "audit_id": "S00.injection_scope_manifest_binding",
-        "gate_name": "gate.injection_scope_manifest_binding",
+        "audit_id": label["audit_id"],
+        "gate_name": label["gate_name"],
+        "legacy_code": label["legacy_code"],
+        "formal_description": label["formal_description"],
         "category": "S",
         "severity": "BLOCK",
         "result": result,

@@ -1,5 +1,5 @@
 """
-功能：测试失败时 run_closure 必产出（F1/F2 覆盖）
+功能：测试失败时 run_closure 必产出（evidence.run_closure_emitted_on_failure，legacy_code=F1/F2）
 
 Module type: Core innovation module
 
@@ -164,7 +164,7 @@ def test_failure_reason_locatable_to_gate():
             assert hasattr(e, "gate_name") or "gate_name" in str(e)
             assert hasattr(e, "field_path") or "field_path" in str(e)
     else:
-        pytest.skip("GateEnforcementError not implemented")
+        pytest.skip("GateEnforcementError is unavailable in current profile")
 
 
 def test_orchestrator_generates_closure_on_exception(tmp_run_root):

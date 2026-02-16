@@ -9,6 +9,7 @@ from . import attack_runner
 from . import metrics
 from . import report_builder
 from . import table_export
+from . import experiment_matrix
 
 __all__ = [
     "protocol_loader",
@@ -17,4 +18,5 @@ __all__ = [
     "metrics",
     "report_builder",
     "table_export",
+    "experiment_matrix",
 ]

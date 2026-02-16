@@ -367,7 +367,9 @@ def compute_signoff_decision(
     if evidence_failed:
         reasons.append({
             "source": "run_root_evidence",
-            "audit_id": "F1_F3_D2.evidence_bundle",
+            "audit_id": "evidence.run_root_bundle_is_complete_and_anchor_consistent",
+            "legacy_code": "F1_F3_D2",
+            "formal_description": "run_root 证据包必须完整且锚点一致。",
             "rule": "run_root evidence package must be complete and anchor-consistent",
             "impact": "freeze sign-off evidence is incomplete or inconsistent",
             "fix": "regenerate run outputs and ensure run_closure/manifest/audits are complete",

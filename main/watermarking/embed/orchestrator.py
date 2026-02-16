@@ -48,9 +48,11 @@ def run_embed_orchestrator(
     subspace_result_override: Any | None = None
 ) -> Dict[str, Any]:
     """
-    功能：执行嵌入占位流程。
+    功能：执行嵌入编排流程。
 
     Execute embed workflow using injected implementations.
+    Supports ablation flags: when ablation.normalized.enable_content=false,
+    content_extractor returns status="absent" with no failure reason.
 
     Args:
         cfg: Config mapping.
@@ -92,12 +94,22 @@ def run_embed_orchestrator(
         # subspace_result_override 类型不符合预期，必须 fail-fast。
         raise TypeError("subspace_result_override must be dict, SubspacePlan, or None")
 
+    # 读取 ablation.normalized 开关（若缺失则默认全启用）。
+    ablation_normalized = _get_ablation_normalized(cfg)
+    enable_content = ablation_normalized.get("enable_content", True)
+    enable_subspace = ablation_normalized.get("enable_subspace", True)
+
     content_inputs = _build_content_inputs_for_embed(cfg)
-    content_result = content_result_override if content_result_override is not None else impl_set.content_extractor.extract(
-        cfg,
-        inputs=content_inputs,
-        cfg_digest=cfg_digest
-    )
+    
+    # Ablation: 禁用 content 模块时返回 absent 语义。
+    if not enable_content:
+        content_result = _build_ablation_absent_content_evidence("content_chain_disabled_by_ablation")
+    else:
+        content_result = content_result_override if content_result_override is not None else impl_set.content_extractor.extract(
+            cfg,
+            inputs=content_inputs,
+            cfg_digest=cfg_digest
+        )
 
     content_evidence_payload = None
     if hasattr(content_result, "as_dict") and callable(content_result.as_dict):
@@ -840,6 +852,74 @@ def _bind_mask_and_routing_evidence_to_record(record_fields: Dict[str, Any], con
     mask_binding = _extract_mask_binding(content_evidence_payload)
     if isinstance(mask_binding, dict):
         record_fields["mask_resolution_binding"] = mask_binding
+
+
+def _get_ablation_normalized(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：读取 ablation.normalized 开关段。
+
+    Read ablation.normalized switch settings from cfg.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        ablation.normalized dict (empty if missing).
+
+    Raises:
+        TypeError: If cfg is invalid.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    ablation = cfg.get("ablation")
+    if not isinstance(ablation, dict):
+        return {}
+    normalized = ablation.get("normalized")
+    if not isinstance(normalized, dict):
+        return {}
+    return normalized
+
+
+def _build_ablation_absent_content_evidence(absent_reason: str) -> Dict[str, Any]:
+    """
+    功能：构造 ablation 禁用时的 content_evidence absent 语义。
+
+    Build content_evidence with status="absent" for ablation-disabled modules.
+
+    Args:
+        absent_reason: Absence reason string (e.g., "content_chain_disabled_by_ablation").
+
+    Returns:
+        ContentEvidence-compatible dict with status="absent", score=None.
+
+    Raises:
+        TypeError: If absent_reason is invalid.
+    """
+    if not isinstance(absent_reason, str) or not absent_reason:
+        raise TypeError("absent_reason must be non-empty str")
+    return {
+        "status": "absent",
+        "score": None,
+        "audit": {
+            "impl_identity": "ablation_switchboard",
+            "impl_version": "v1",
+            "impl_digest": digests.canonical_sha256({"impl_id": "ablation_switchboard", "impl_version": "v1"}),
+            "trace_digest": digests.canonical_sha256({"absent_reason": absent_reason})
+        },
+        "mask_digest": None,
+        "mask_stats": None,
+        "plan_digest": None,
+        "basis_digest": None,
+        "lf_trace_digest": None,
+        "hf_trace_digest": None,
+        "lf_score": None,
+        "hf_score": None,
+        "score_parts": {
+            "routing_digest": "<absent>",
+            "routing_absent_reason": absent_reason,
+        },
+        "content_failure_reason": None  # absent 状态下无失败原因
+    }
 
     mask_source_impl_identity = mask_stats.get("mask_source_impl_identity")
     if isinstance(mask_source_impl_identity, dict):

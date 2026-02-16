@@ -78,9 +78,9 @@ class TestLFParameterDriftDetection:
         # 因此不匹配是正常预期。
         evidence2 = coder.extract(cfg_attacked, inputs=inputs, cfg_digest="cfg_dig_1")
         
-        # 注：当前 LowFreqCoder 未实现 plan_digest 验证逻辑（占位版本）
-        # 此测试记录了审计需求；完整版本应在 S-04 和 S-06 联合时实现
-        # 检测侧（S-06 ContentDetector）应该检查 plan_digest 一致性
+        # 注：当前 LowFreqCoder 未在该路径执行 plan_digest 一致性校验。
+        # 此测试用于记录审计需求；后续版本化演进可在检测侧补充一致性校验。
+        # 检测侧 ContentDetector 应检查 plan_digest 一致性。
         # 这里我们测试 ecc 参数改变后的分数是否不同（间接证明参数被使用）
         
         # 当参数改变时，生成的分数/trace 应该不同

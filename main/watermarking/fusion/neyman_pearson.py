@@ -345,7 +345,7 @@ def _extract_target_fpr(cfg: Dict[str, Any]) -> float:
 
 def _lookup_threshold_value(thresholds: Dict[str, Any], fpr_key: str) -> float:
     """
-    功能：从阈值表中提取阈值占位值。
+    功能：从阈值表中提取阈值基线值。
     
     Lookup threshold value from thresholds mapping with fallback logic.
     

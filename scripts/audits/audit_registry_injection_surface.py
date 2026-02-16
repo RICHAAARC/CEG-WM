@@ -14,6 +14,11 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any
 
+try:
+    from scripts.audits.gate_label_mapping import resolve_audit_label
+except Exception:
+    from gate_label_mapping import resolve_audit_label
+
 
 class RegistryInjectionVisitor(ast.NodeVisitor):
     """
@@ -195,9 +200,12 @@ def run_audit(repo_root: Path) -> Dict[str, Any]:
     # 扫描 main/registries/ 目录
     registries_dir = repo_root / "main" / "registries"
     if not registries_dir.exists():
+        label = resolve_audit_label("C1.registry_injection_surface", "gate.registry_immutability")
         return {
-            "audit_id": "C1.registry_injection_surface",
-            "gate_name": "gate.registry_immutability",
+            "audit_id": label["audit_id"],
+            "gate_name": label["gate_name"],
+            "legacy_code": label["legacy_code"],
+            "formal_description": label["formal_description"],
             "category": "C",
             "severity": "BLOCK",
             "result": "N.A.",
@@ -257,9 +265,12 @@ def run_audit(repo_root: Path) -> Dict[str, Any]:
         else "N.A."
     )
     
+    label = resolve_audit_label("C1.registry_injection_surface", "gate.registry_immutability")
     return {
-        "audit_id": "C1.registry_injection_surface",
-        "gate_name": "gate.registry_immutability",
+        "audit_id": label["audit_id"],
+        "gate_name": label["gate_name"],
+        "legacy_code": label["legacy_code"],
+        "formal_description": label["formal_description"],
         "category": "C",
         "severity": "BLOCK",
         "result": result,

@@ -29,6 +29,12 @@ families:
     params_versions:
       v1:
         crop_ratios: [0.9, 0.8, 0.7]
+  translate:
+    description: "translation attacks"
+    params_versions:
+      v1:
+        x_shift: [-24, -12, 12, 24]
+        y_shift: [-24, -12, 12, 24]
   jpeg:
     description: "jpeg compression attacks"
     params_versions:
@@ -69,6 +75,9 @@ params_versions:
   crop::v1:
     family: "crop"
     params: {crop_ratios: [0.9, 0.8, 0.7]}
+  translate::v1:
+    family: "translate"
+    params: {x_shift: [-24, -12, 12, 24], y_shift: [-24, -12, 12, 24]}
   jpeg::v1:
     family: "jpeg"
     params: {quality: [95, 85, 75], seed_policy: "inherit"}

@@ -3,9 +3,9 @@
 
 Module type: Core innovation module
 
-验证 B1（阈值绑定）和 B3（救援原因语义）的修复是否正确实现。
-- B1: 验证 threshold_source 审计字段正确追踪来源（artifact vs test-only fallback）
-- B3: 验证 rescue_reason 语义正确（"rescued_by_geo_gate" 而非倒转的值）
+验证阈值来源绑定与救援原因语义的修复是否正确实现。
+- 阈值来源绑定：验证 threshold_source 审计字段正确追踪来源（artifact vs test-only fallback）
+- 救援原因语义：验证 rescue_reason 语义正确（"rescued_by_geo_gate" 而非倒转的值）
 """
 
 import pytest
@@ -16,7 +16,7 @@ from main.registries.fusion_registry import resolve_fusion_rule
 
 class TestB1ThresholdSourceAudit:
     """
-    B1 验证：threshold_source 审计字段正确记录阈值来源
+    阈值来源绑定验证：threshold_source 审计字段正确记录阈值来源
     """
     
     @pytest.fixture
@@ -105,7 +105,7 @@ class TestB1ThresholdSourceAudit:
 
 class TestB3RescueReasonSemantic:
     """
-    B3 验证：rescue_reason 语义正确，与触发条件一致
+    救援原因语义验证：rescue_reason 语义正确，与触发条件一致
     """
     
     @pytest.fixture

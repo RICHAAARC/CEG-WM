@@ -61,7 +61,7 @@ def evaluate_alignment(
 
     alignment_checks = []
 
-    # 检查 1：pipeline_fingerprint 必须存在且非占位。
+    # 检查 1：pipeline_fingerprint 必须存在且非缺省标记值。
     check_1 = _check_pipeline_fingerprint_presence(
         pipeline_fingerprint,
         enable_paper_faithfulness=is_paper_faithfulness_enabled
@@ -112,7 +112,7 @@ def _check_pipeline_fingerprint_presence(
     enable_paper_faithfulness: bool = False
 ) -> Dict[str, Any]:
     """
-    功能：检查 pipeline_fingerprint 是否存在且非占位。
+    功能：检查 pipeline_fingerprint 是否存在且非缺省标记值。
 
     Check pipeline fingerprint presence and non-empty value.
 
@@ -124,7 +124,7 @@ def _check_pipeline_fingerprint_presence(
         Check result dict with result in [PASS, FAIL, NA].
     """
     check_name = "pipeline_fingerprint_presence"
-    check_rule = "SD3 pipeline fingerprint 必须存在且非占位"
+    check_rule = "SD3 pipeline fingerprint 必须存在且非缺省标记值"
 
     if pipeline_fingerprint is None:
         return {
@@ -174,7 +174,7 @@ def _check_pipeline_fingerprint_presence(
     for field in required_fields:
         value = pipeline_fingerprint.get(field)
         # 只有当字段完全缺失（None）时才视为缺失
-        # "<absent>" 是合法的占位值，表示该模块不存在或无法提取
+        # "<absent>" 是合法的缺省标记值，表示该模块不存在或无法提取
         if value is None:
             missing_fields.append(field)
 
@@ -257,7 +257,7 @@ def _check_trajectory_digest_reproducibility(
             "check_name": check_name,
             "check_rule": check_rule,
             "result": "FAIL",
-            "failure_message": "trajectory digest 为占位值（<absent>）"
+            "failure_message": "trajectory digest 为缺省标记值（<absent>）"
         }
 
     if not isinstance(trajectory_spec_digest, str) or len(trajectory_spec_digest) != 64:
@@ -328,7 +328,7 @@ def _check_injection_site_alignment(
             "check_name": check_name,
             "check_rule": check_rule,
             "result": "FAIL",
-            "failure_message": "hook_type 为占位值（<absent>）"
+            "failure_message": "hook_type 为缺省标记值（<absent>）"
         }
 
     # 检查是否符合 SD3 适配要求（从 paper_spec 读取）。

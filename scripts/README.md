@@ -8,22 +8,22 @@
 scripts/
 ├── run_all_audits.py          # 审计聚合器（主入口）
 └── audits/
-    ├── audit_write_bypass_scan.py                  # B1/B5: 写盘旁路扫描
-    ├── audit_yaml_loader_uniqueness.py             # A6: YAML 加载安全
-    ├── audit_freeze_surface_integrity.py           # A1-A7: 冻结面完整性
-    ├── audit_registry_injection_surface.py         # C1/C4: 注册表注入面
-    ├── audit_policy_path_semantics_binding.py      # B3/D1/D2: 路径策略绑定
-    ├── audit_dangerous_exec_and_pickle_scan.py     # D9: 危险执行扫描
-    └── audit_network_access_scan.py                # D10: 网络访问扫描
+  ├── audit_write_bypass_scan.py                  # records.write_path_is_unbypassable（legacy_code=B1/B5）
+  ├── audit_yaml_loader_uniqueness.py             # config.yaml_loader_is_safe_and_unique（legacy_code=A6）
+  ├── audit_freeze_surface_integrity.py           # freeze_surface.integrity_and_single_source_loading（legacy_code=A1-A7）
+  ├── audit_registry_injection_surface.py         # registry.seal_and_runtime_injection_resistance（legacy_code=C1/C4）
+  ├── audit_policy_path_semantics_binding.py      # policy.path_semantics_binding_and_audit_evidence（legacy_code=B3/D1/D2）
+  ├── audit_dangerous_exec_and_pickle_scan.py     # runtime.dangerous_execution_and_deserialization_blocked（legacy_code=D9）
+  └── audit_network_access_scan.py                # runtime.network_access_is_audited_or_blocked（legacy_code=D10）
 
 tests/
 ├── conftest.py                                     # pytest fixture 配置
-├── test_schema_requires_interpretation.py          # A2: schema 权威化
-├── test_records_write_must_enforce_freeze_gate.py  # B1/A1: 写盘门禁
-├── test_registry_seal_is_immutable.py              # C1: 注册表封闭
-├── test_artifacts_semantic_bypass_guard.py         # B6/B5: artifacts 语义旁路
-├── test_run_closure_must_exist_on_failure.py       # F1/F2: 失败闭包产出
-└── test_records_bundle_anchor_consistency.py       # F3: bundle 一致性
+├── test_schema_requires_interpretation.py          # schema.interpretation_is_required（legacy_code=A2）
+├── test_records_write_must_enforce_freeze_gate.py  # records.write_path_enforces_freeze_gate（legacy_code=B1/A1）
+├── test_registry_seal_is_immutable.py              # registry.seal_and_immutability（legacy_code=C1）
+├── test_artifacts_semantic_bypass_guard.py         # artifacts.semantic_bypass_is_blocked（legacy_code=B6/B5）
+├── test_run_closure_must_exist_on_failure.py       # evidence.run_closure_emitted_on_failure（legacy_code=F1/F2）
+└── test_records_bundle_anchor_consistency.py       # evidence.records_bundle_anchor_consistency（legacy_code=F3）
 ```
 
 ## 使用方法
@@ -76,8 +76,10 @@ pytest tests/test_schema_requires_interpretation.py -v
 
 ```json
 {
-  "audit_id": "B1.write_bypass_scan",
-  "gate_name": "gate.write_bypass",
+  "audit_id": "records.write_path_is_unbypassable",
+  "gate_name": "records.write_path_is_unbypassable",
+  "legacy_code": "B1",
+  "formal_description": "受控写盘路径必须不可旁路。",
   "category": "B",
   "severity": "BLOCK",
   "result": "PASS",
@@ -191,7 +193,7 @@ pip install pyyaml
 
 ## 后续扩展
 
-当前审计集合覆盖 A-G 类别的关键 BLOCK 项。后续可新增：
+当前审计集合覆盖 A-G 类别的关键 BLOCK 项。按版本化计划可追加：
 - E 类（统计与判决语义）的细化审计
 - G 类（recommended_enforce）的执行态三态化审计
 - 集成测试脚本用于 E2E 验证

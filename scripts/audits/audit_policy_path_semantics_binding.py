@@ -12,6 +12,11 @@ import sys
 from pathlib import Path
 from typing import Dict, Any
 
+try:
+    from scripts.audits.gate_label_mapping import resolve_audit_label
+except Exception:
+    from gate_label_mapping import resolve_audit_label
+
 
 def check_policy_files_existence(repo_root: Path) -> Dict[str, Any]:
     """
@@ -221,9 +226,12 @@ def run_audit(repo_root: Path) -> Dict[str, Any]:
         else "N.A."
     )
     
+    label = resolve_audit_label("B3_D1_D2.policy_path_semantics_binding", "gate.policy_path_semantics")
     return {
-        "audit_id": "B3_D1_D2.policy_path_semantics_binding",
-        "gate_name": "gate.policy_path_semantics",
+        "audit_id": label["audit_id"],
+        "gate_name": label["gate_name"],
+        "legacy_code": label["legacy_code"],
+        "formal_description": label["formal_description"],
         "category": "B",
         "severity": "BLOCK",
         "result": result,

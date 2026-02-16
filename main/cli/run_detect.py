@@ -4,7 +4,7 @@
 功能说明：
 - 规范化输出目录路径，确保输出布局，加载合同与白名单，验证配置，解析实现，构造记录，绑定字段，写盘，并产出闭包。
 - 包含详细的输入验证、错误处理与状态更新机制，确保健壮性与可维护性。
-- 当前为基线实现，后续会逐步完善业务逻辑与字段定义。
+- 当前为可审计基线实现，新能力仅通过版本化追加，不改变既有冻结语义与字段口径。
 """
 
 import sys
@@ -156,7 +156,7 @@ def run_detect(
             injection_scope_manifest
         )
 
-        # 生成事实源快照用于后续一致性校验。
+        # 生成事实源快照用于运行期一致性校验。
         snapshot = records_io.build_fact_sources_snapshot(
             contracts,
             whitelist,
@@ -475,6 +475,7 @@ def run_detect(
 
             # CLI 单点收口：融合判决唯一 decision 写入与序列化。
             # 位置：ensure_required_fields 之后、validate_record 之前。
+            decision_writer.assert_decision_write_bypass_blocked(record, interpretation)
             fusion_result = record.get("fusion_result")
             if fusion_result is None:
                 # fusion_result 缺失是致命错误，必须 fail-fast。

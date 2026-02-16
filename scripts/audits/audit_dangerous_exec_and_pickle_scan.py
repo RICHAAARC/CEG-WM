@@ -13,6 +13,11 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any
 
+try:
+    from scripts.audits.gate_label_mapping import resolve_audit_label
+except Exception:
+    from gate_label_mapping import resolve_audit_label
+
 
 class DangerousExecVisitor(ast.NodeVisitor):
     """
@@ -205,9 +210,12 @@ def run_audit(repo_root: Path) -> Dict[str, Any]:
         else "N.A."
     )
     
+    label = resolve_audit_label("D9.dangerous_exec_and_pickle_scan", "gate.dangerous_execution")
     return {
-        "audit_id": "D9.dangerous_exec_and_pickle_scan",
-        "gate_name": "gate.dangerous_execution",
+        "audit_id": label["audit_id"],
+        "gate_name": label["gate_name"],
+        "legacy_code": label["legacy_code"],
+        "formal_description": label["formal_description"],
         "category": "D",
         "severity": "BLOCK",
         "result": result,

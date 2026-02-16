@@ -36,6 +36,7 @@ from main.core import schema
 from main.core import status
 from main.policy import path_policy
 from main.registries import runtime_resolver
+from main.evaluation import report_builder as eval_report_builder
 from main.watermarking.detect.orchestrator import run_evaluate_orchestrator
 from main.watermarking.fusion import decision_writer
 from main.core.errors import RunFailureReason
@@ -266,6 +267,7 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
 
             # CLI 单点收口：融合判决唯一 decision 写入与序列化。
             # 位置：ensure_required_fields 之后、validate_record 之前。
+            decision_writer.assert_decision_write_bypass_blocked(record, interpretation)
             fusion_result = record.get("fusion_result")
             if fusion_result is None:
                 # fusion_result 缺失是致命错误，必须 fail-fast。
@@ -290,6 +292,16 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
             except Exception as exc:
                 set_failure_status(run_meta, RunFailureReason.RUNTIME_ERROR, exc)
                 raise
+
+            # 评测报告工件统一收口写盘（records_io artifact 路径）。
+            evaluation_report_payload = record.get("evaluation_report")
+            if isinstance(evaluation_report_payload, dict):
+                eval_report_path = artifacts_dir / "eval_report.json"
+                path_policy.validate_output_target(eval_report_path, "artifact", run_root)
+                eval_report_builder.write_eval_report_via_records_io(
+                    evaluation_report_payload,
+                    str(eval_report_path),
+                )
             
             # 写盘，触发 freeze_gate.assert_prewrite。
             record_path = records_dir / "evaluate_record.json"

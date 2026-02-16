@@ -12,6 +12,10 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+try:
+    from scripts.audits.gate_label_mapping import resolve_audit_label
+except Exception:
+    from gate_label_mapping import resolve_audit_label
 from main.core import config_loader
 
 
@@ -111,9 +115,15 @@ def run_audit(repo_root: Path) -> Dict[str, Any]:
     contracts_path = repo_root / "configs" / "frozen_contracts.yaml"
 
     if not extensions_path.exists():
+        label = resolve_audit_label(
+            "S01.records_schema_extensions_presence",
+            "gate.records_schema_extensions.presence"
+        )
         return {
-            "audit_id": "S01.records_schema_extensions_presence",
-            "gate_name": "gate.records_schema_extensions.presence",
+            "audit_id": label["audit_id"],
+            "gate_name": label["gate_name"],
+            "legacy_code": label["legacy_code"],
+            "formal_description": label["formal_description"],
             "category": "S",
             "severity": "BLOCK",
             "result": "FAIL",
@@ -165,9 +175,15 @@ def run_audit(repo_root: Path) -> Dict[str, Any]:
     impact = "; ".join(fail_reasons) if fail_reasons else "extensions are registered and well-formed"
     fix_suggestion = "Add missing fields to frozen_contracts.yaml field_paths_registry" if missing_in_registry else "N.A."
 
+    label = resolve_audit_label(
+        "S01.records_schema_extensions_append_only",
+        "gate.records_schema_extensions.append_only"
+    )
     return {
-        "audit_id": "S01.records_schema_extensions_append_only",
-        "gate_name": "gate.records_schema_extensions.append_only",
+        "audit_id": label["audit_id"],
+        "gate_name": label["gate_name"],
+        "legacy_code": label["legacy_code"],
+        "formal_description": label["formal_description"],
         "category": "S",
         "severity": "BLOCK",
         "result": result,

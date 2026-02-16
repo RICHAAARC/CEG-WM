@@ -207,6 +207,7 @@ class TestDetectOrchestratorWithContentDetector:
             "impl_digest": "digest"
         }
         mock_subspace_planner.plan.return_value = SimpleNamespace(
+            planner_input_digest=planner_input_digest,
             plan={
                 "planner_input_digest": planner_input_digest,
                 "planner_impl_identity": planner_impl_identity
@@ -225,7 +226,21 @@ class TestDetectOrchestratorWithContentDetector:
         
         cfg = {
             "watermark": {"detector": {"enabled": True}, "plan_digest": "test_plan"},
-            "evaluate": {"target_fpr": 1e-6}
+            "evaluate": {"target_fpr": 1e-6},
+            "ablation": {
+                "normalized": {
+                    "enable_content": True,
+                    "enable_geometry": True,
+                    "enable_fusion": True,
+                    "enable_mask": True,
+                    "enable_subspace": True,
+                    "enable_rescue": False,
+                    "enable_lf": True,
+                    "enable_hf": False,
+                    "lf_only": False,
+                    "hf_only": False,
+                }
+            }
         }
         
         # 调用 detect 编排器。
@@ -324,6 +339,7 @@ class TestDetectOrchestratorWithContentDetector:
             "impl_digest": "digest"
         }
         mock_subspace_planner.plan.return_value = SimpleNamespace(
+            planner_input_digest=planner_input_digest,
             plan={
                 "planner_input_digest": planner_input_digest,
                 "planner_impl_identity": planner_impl_identity
@@ -341,8 +357,22 @@ class TestDetectOrchestratorWithContentDetector:
         )
         
         cfg = {
-            "watermark": {"detector": {"enabled": True}},
-            "evaluate": {"target_fpr": 1e-6}
+            "watermark": {"detector": {"enabled": True}, "plan_digest": "test_plan"},
+            "evaluate": {"target_fpr": 1e-6},
+            "ablation": {
+                "normalized": {
+                    "enable_content": True,
+                    "enable_geometry": True,
+                    "enable_fusion": True,
+                    "enable_mask": True,
+                    "enable_subspace": True,
+                    "enable_rescue": False,
+                    "enable_lf": True,
+                    "enable_hf": False,
+                    "lf_only": False,
+                    "hf_only": False,
+                }
+            }
         }
         
         input_record = {

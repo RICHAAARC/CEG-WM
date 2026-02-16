@@ -14,6 +14,11 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+try:
+    from scripts.audits.gate_label_mapping import resolve_audit_label
+except Exception:
+    from gate_label_mapping import resolve_audit_label
+
 
 WRITE_FUNCTIONS = {
     "write_path_validation_audit",
@@ -371,9 +376,12 @@ def _scan_repo(repo_root: Path) -> Dict[str, Any]:
     records_io_path = repo_root / "main" / "core" / "records_io.py"
 
     if not path_policy_path.exists() or not records_io_path.exists():
+        label = resolve_audit_label("D1.path_policy_escape_rejection", "gate.path_policy_escape_rejection")
         return {
-            "audit_id": "D1.path_policy_escape_rejection",
-            "gate_name": "gate.path_policy_escape_rejection",
+            "audit_id": label["audit_id"],
+            "gate_name": label["gate_name"],
+            "legacy_code": label["legacy_code"],
+            "formal_description": label["formal_description"],
             "category": "D",
             "severity": "BLOCK",
             "result": "FAIL",
@@ -447,9 +455,12 @@ def _scan_repo(repo_root: Path) -> Dict[str, Any]:
         else "N.A."
     )
 
+    label = resolve_audit_label("D1.path_policy_escape_rejection", "gate.path_policy_escape_rejection")
     return {
-        "audit_id": "D1.path_policy_escape_rejection",
-        "gate_name": "gate.path_policy_escape_rejection",
+        "audit_id": label["audit_id"],
+        "gate_name": label["gate_name"],
+        "legacy_code": label["legacy_code"],
+        "formal_description": label["formal_description"],
         "category": "D",
         "severity": "BLOCK",
         "result": result,

@@ -127,7 +127,7 @@ def run_calibrate(output_dir: str, config_path: str, overrides: list[str] | None
             injection_scope_manifest
         )
 
-        # 生成事实源快照用于后续一致性校验。
+        # 生成事实源快照用于运行期一致性校验。
         snapshot = records_io.build_fact_sources_snapshot(
             contracts,
             whitelist,

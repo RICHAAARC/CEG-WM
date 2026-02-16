@@ -6,12 +6,12 @@
 
 | 测试文件 | 覆盖检查项 | 严重性 | 描述 |
 |---------|-----------|--------|------|
-| `test_schema_requires_interpretation.py` | A2 | BLOCK | schema 校验必须要求 interpretation |
-| `test_records_write_must_enforce_freeze_gate.py` | B1/A1 | BLOCK | records 写盘必须经过 freeze_gate |
-| `test_registry_seal_is_immutable.py` | C1 | BLOCK | 注册表 seal 后不可变 |
-| `test_artifacts_semantic_bypass_guard.py` | B6/B5 | BLOCK | artifacts 不得包含 records 语义字段 |
-| `test_run_closure_must_exist_on_failure.py` | F1/F2 | BLOCK | 失败时 run_closure 必产出 |
-| `test_records_bundle_anchor_consistency.py` | F3 | BLOCK | bundle 检测 anchors 一致性 |
+| `test_schema_requires_interpretation.py` | schema.interpretation_is_required（legacy_code=A2） | BLOCK | schema 校验必须要求 interpretation |
+| `test_records_write_must_enforce_freeze_gate.py` | records.write_path_enforces_freeze_gate（legacy_code=B1/A1） | BLOCK | records 写盘必须经过 freeze_gate |
+| `test_registry_seal_is_immutable.py` | registry.seal_and_immutability（legacy_code=C1） | BLOCK | 注册表 seal 后不可变 |
+| `test_artifacts_semantic_bypass_guard.py` | artifacts.semantic_bypass_is_blocked（legacy_code=B6/B5） | BLOCK | artifacts 不得包含 records 语义字段 |
+| `test_run_closure_must_exist_on_failure.py` | evidence.run_closure_emitted_on_failure（legacy_code=F1/F2） | BLOCK | 失败时 run_closure 必产出 |
+| `test_records_bundle_anchor_consistency.py` | evidence.records_bundle_anchor_consistency（legacy_code=F3） | BLOCK | bundle 检测 anchors 一致性 |
 
 ## 运行方式
 
@@ -137,11 +137,13 @@ def test_example(mock_registry_sealed):
 
 ## 预期测试状态
 
-### 当前阶段（框架构建中）
+### 当前行为（可审计）
 部分测试可能 `skip` 或 `xfail`，这是正常的。关键是：
 1. 测试逻辑正确表达了规范要求
 2. 实现完成后可直接取消跳过标记
 3. 失败路径的异常检查已到位
+
+升级条件：新增或调整规则时，必须通过版本化方式演进，不影响冻结红线语义。
 
 ### 冻结前最终状态
 所有 BLOCK 级测试必须 PASS，且：
@@ -151,7 +153,7 @@ def test_example(mock_registry_sealed):
 
 ## 扩展测试
 
-当前测试集为最小回归闭环。后续可新增：
+当前测试集为最小回归闭环。按版本化计划可追加：
 
 ### 集成测试
 - 端到端运行 `embed → detect → evaluate`

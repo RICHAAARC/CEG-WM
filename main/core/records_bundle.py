@@ -5,7 +5,7 @@ records bundle 闭包与 manifest 生成
 - 实现闭包逻辑，确保跨文件锚点一致性，并生成包含文件列表和锚点信息的 manifest。
 - 包含详细的输入验证和错误处理，确保健壮性和可维护性。
 - 依赖 core.records_io 进行原子写入，依赖 core.digests 进行规范化 digest 计算。
-- 未来可以扩展为支持更多类型的 records 文件、提供更丰富的 manifest 信息。
+- 扩展能力需通过版本化追加接入，且不得改变既有闭包语义与锚点约束。
 """
 
 from __future__ import annotations

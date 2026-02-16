@@ -71,7 +71,7 @@ class RecordsSchemaExtensions:
 @dataclass
 class EmptyRecordsSchemaExtensions:
     """
-    功能：空扩展占位符（向后兼容）。
+    功能：空扩展基线结构（向后兼容）。
 
     Empty extensions baseline for backward compatibility.
 
@@ -261,7 +261,7 @@ def load_records_schema_extensions(
     if not path_obj.exists():
         # 文件缺失处理：若允许则返回空扩展，否则 fail-fast。
         if allow_missing:
-            # 向后兼容：返回空扩展占位符。
+            # 向后兼容：返回空扩展基线结构。
             return EmptyRecordsSchemaExtensions(entries=[], entry_paths=[])
         else:
             raise MissingRequiredFieldError(

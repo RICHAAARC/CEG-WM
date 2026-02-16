@@ -1,5 +1,5 @@
 """
-功能：测试 schema 校验必须要求 interpretation（A2 覆盖）
+功能：测试 schema 校验必须要求 interpretation（schema.interpretation_is_required，legacy_code=A2）
 
 Module type: Core innovation module
 

@@ -211,7 +211,7 @@ sd3_adaptation:
     evidence_field_paths:
       - "content_evidence.injection_site_spec"
       - "content_evidence.injection_site_digest"
-    computation_rule: "必须从实际 hook 配置动态生成，禁止假值或占位值。"
+    computation_rule: "必须从实际 hook 配置动态生成，禁止假值或基线缺省值。"
 
 # ==============================================================
 # 对齐检查规则（Alignment Check Rules）
@@ -220,14 +220,14 @@ sd3_adaptation:
 # ==============================================================
 alignment_check_rules:
 
-  # 规则 1：pipeline_fingerprint 必须存在且非占位
+  # 规则 1：pipeline_fingerprint 必须存在且非基线缺省值
   pipeline_fingerprint_presence:
     check_type: "presence_and_non_baseline"
     target_field_paths:
       - "content_evidence.pipeline_fingerprint"
       - "content_evidence.pipeline_fingerprint_digest"
     failure_action: "FAIL"
-    failure_message: "SD3 pipeline fingerprint 缺失或为占位值"
+    failure_message: "SD3 pipeline fingerprint 缺失或为基线缺省值"
 
   # 规则 2：trajectory_digest 必须存在且可复算
   trajectory_digest_reproducibility:
@@ -295,7 +295,7 @@ audit_gate_requirements:
   # 审计 4：对齐证据完整性审计
   alignment_evidence_completeness:
     audit_script: "scripts/audits/audit_alignment_evidence_completeness.py"
-    check_rule: "所有 enabled 方法族的对齐证据字段必须齐全且非占位"
+    check_rule: "所有 enabled 方法族的对齐证据字段必须齐全且非基线缺省值"
     failure_level: "BLOCK"
 
 test_gate_requirements:

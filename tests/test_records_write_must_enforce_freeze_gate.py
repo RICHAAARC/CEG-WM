@@ -1,5 +1,5 @@
 """
-功能：测试 records 写盘必须经过 freeze_gate 门禁（B1/A1 覆盖）
+功能：测试 records 写盘必须经过 freeze_gate 门禁（records.write_path_enforces_freeze_gate，legacy_code=B1/A1）
 
 Module type: Core innovation module
 

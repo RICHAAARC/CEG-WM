@@ -9,6 +9,7 @@ import pytest
 from pathlib import Path
 
 from main.evaluation import report_builder
+from main.core import digests
 
 
 class TestEvaluationReportAnchors:
@@ -201,3 +202,61 @@ class TestEvaluationReportAnchors:
         assert report["plan_digest"] == "sha256_plan"
         assert report["impl_digest"] == "sha256_impl"
         assert report["attack_protocol_version"] == "attack_protocol_v1"
+
+    def test_report_contains_routing_and_impl_anchors_append_only(self):
+        """测试：报告包含 append-only 的 routing 与 impl_anchors 字段。"""
+        report = report_builder.build_evaluation_report(
+            cfg_digest="sha256_cfg",
+            plan_digest="sha256_plan",
+            thresholds_digest="sha256_thresh",
+            threshold_metadata_digest="sha256_metadata",
+            impl_digest="sha256_impl",
+            fusion_rule_version="fusion_v1",
+            attack_protocol_version="attack_protocol_v1",
+            attack_protocol_digest="sha256_proto",
+            policy_path="policy://test",
+            metrics_overall={
+                "rescue_rate": 0.1,
+                "geo_available_rate": 0.7,
+            },
+            metrics_by_attack_condition=[],
+            strict_anchor_validation=False,
+        )
+
+        assert isinstance(report.get("routing_decisions"), dict)
+        assert isinstance(report.get("routing_digest"), str)
+        assert report["routing_digest"] == digests.canonical_sha256(report["routing_decisions"])
+
+        impl_anchors = report.get("impl_anchors")
+        assert isinstance(impl_anchors, dict)
+        assert isinstance(impl_anchors.get("content"), dict)
+        assert isinstance(impl_anchors.get("geometry"), dict)
+        assert isinstance(impl_anchors.get("fusion"), dict)
+
+    def test_write_eval_report_via_records_io_wraps_payload(self, monkeypatch):
+        """测试：评测报告写盘通过 records_io 且 payload 封装稳定。"""
+        captured = {}
+
+        def _fake_write_artifact_json(path, payload, indent=2, ensure_ascii=False):
+            captured["path"] = path
+            captured["payload"] = payload
+            captured["indent"] = indent
+            captured["ensure_ascii"] = ensure_ascii
+
+        monkeypatch.setattr(report_builder.records_io, "write_artifact_json", _fake_write_artifact_json)
+
+        eval_report = {
+            "evaluation_version": "eval_v1",
+            "cfg_digest": "sha256_cfg",
+            "plan_digest": "sha256_plan",
+        }
+        output_path = "artifacts/eval_report.json"
+
+        report_builder.write_eval_report_via_records_io(eval_report, output_path)
+
+        assert captured["path"] == output_path
+        payload = captured.get("payload")
+        assert isinstance(payload, dict)
+        assert payload.get("report_type") == "eval_report_v1"
+        assert payload.get("evaluation_report") == eval_report
+        assert payload.get("report_digest") == digests.canonical_sha256(eval_report)

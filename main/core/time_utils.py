@@ -1,5 +1,5 @@
 """
-功能：随机性上下文与稳定种子占位实现；时间戳唯一入口。
+功能：随机性上下文与稳定种子实现；时间戳唯一入口。
 
 File purpose: Provide deterministic RNG scaffolding for auditability and unified time semantics.
 Module type: Core innovation module
@@ -22,7 +22,7 @@ _REQUIRED_SEED_KEYS = {"key_id", "sample_idx", "purpose"}
 @dataclass(frozen=True)
 class RNGScope:
     """
-    功能：RNG 作用域占位结构。
+    功能：RNG 作用域结构。
 
     Deterministic RNG scope with audit-friendly seed metadata.
 
@@ -101,7 +101,7 @@ def require_torch_generator(generator: Any) -> Any:
 @contextmanager
 def rng_context(seed_parts: Dict[str, Any], *, torch_device: Optional[str] = None) -> Iterator[RNGScope]:
     """
-    功能：RNG 上下文占位管理器。
+    功能：RNG 上下文管理器。
 
     Provide a deterministic RNG scope with audit-friendly metadata.
 

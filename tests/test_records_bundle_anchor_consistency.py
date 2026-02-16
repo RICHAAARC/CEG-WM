@@ -1,5 +1,5 @@
 """
-功能：测试 records_bundle 与 anchors 一致性（F3 覆盖）
+功能：测试 records_bundle 与 anchors 一致性（evidence.records_bundle_anchor_consistency，legacy_code=F3）
 
 Module type: Core innovation module
 

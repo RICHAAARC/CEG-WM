@@ -78,6 +78,10 @@ class _PlanResult:
     basis_digest: str
 
     @property
+    def planner_input_digest(self) -> str:
+        return "planner_input_ok"
+
+    @property
     def plan(self) -> Dict[str, Any]:
         return {
             "planner_input_digest": "planner_input_ok",
@@ -125,6 +129,20 @@ def _build_cfg() -> Dict[str, Any]:
                 "seed": 3,
                 "timestep_start": 0,
                 "timestep_end": 7,
+            }
+        },
+        "ablation": {
+            "normalized": {
+                "enable_content": True,
+                "enable_geometry": True,
+                "enable_fusion": True,
+                "enable_mask": True,
+                "enable_subspace": True,
+                "enable_rescue": False,
+                "enable_lf": True,
+                "enable_hf": False,
+                "lf_only": False,
+                "hf_only": False,
             }
         },
     }

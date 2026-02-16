@@ -12,6 +12,11 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any
 
+try:
+    from scripts.audits.gate_label_mapping import resolve_audit_label
+except Exception:
+    from gate_label_mapping import resolve_audit_label
+
 
 class YAMLLoaderVisitor(ast.NodeVisitor):
     """
@@ -166,9 +171,12 @@ def run_audit(repo_root: Path) -> Dict[str, Any]:
         else "N.A."
     )
     
+    label = resolve_audit_label("A6.yaml_loader_uniqueness", "gate.yaml_loader_safety")
     return {
-        "audit_id": "A6.yaml_loader_uniqueness",
-        "gate_name": "gate.yaml_loader_safety",
+        "audit_id": label["audit_id"],
+        "gate_name": label["gate_name"],
+        "legacy_code": label["legacy_code"],
+        "formal_description": label["formal_description"],
         "category": "A",
         "severity": "BLOCK",
         "result": result,

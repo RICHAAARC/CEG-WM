@@ -1,5 +1,5 @@
 """
-功能：测试 artifacts 语义旁路防护（B6/B5 覆盖）
+功能：测试 artifacts 语义旁路防护（artifacts.semantic_bypass_is_blocked，legacy_code=B6/B5）
 
 Module type: Core innovation module
 

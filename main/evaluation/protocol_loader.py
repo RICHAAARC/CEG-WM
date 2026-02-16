@@ -12,6 +12,92 @@ from main.core import config_loader
 from main.core import digests
 
 
+def parse_attack_protocol(protocol_obj: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：解析并规范化攻击协议对象。
+
+    Parse and normalize attack protocol object into canonical structure.
+
+    Args:
+        protocol_obj: Raw protocol mapping loaded from YAML.
+
+    Returns:
+        Canonical protocol spec containing version, family candidates,
+        params version candidates, families, params_versions and digest anchors.
+
+    Raises:
+        TypeError: If protocol_obj is not dict.
+    """
+    if not isinstance(protocol_obj, dict):
+        raise TypeError("protocol_obj must be dict")
+
+    normalized = {
+        "version": "<absent>",
+        "family_field_candidates": ["attack_family", "attack.family", "attack.type"],
+        "params_version_field_candidates": ["attack_params_version", "attack.params_version"],
+        "families": {},
+        "params_versions": {},
+        "attack_protocol_digest": "<absent>",
+        "attack_protocol_file_sha256": "<absent>",
+    }
+
+    for key in [
+        "version",
+        "family_field_candidates",
+        "params_version_field_candidates",
+        "families",
+        "params_versions",
+        "attack_protocol_digest",
+        "attack_protocol_file_sha256",
+    ]:
+        if key in protocol_obj:
+            normalized[key] = protocol_obj[key]
+
+    normalized["family_field_candidates"] = [
+        field_name
+        for field_name in normalized.get("family_field_candidates", [])
+        if isinstance(field_name, str) and field_name
+    ] or ["attack_family", "attack.family", "attack.type"]
+
+    normalized["params_version_field_candidates"] = [
+        field_name
+        for field_name in normalized.get("params_version_field_candidates", [])
+        if isinstance(field_name, str) and field_name
+    ] or ["attack_params_version", "attack.params_version"]
+
+    if not isinstance(normalized.get("version"), str) or not normalized.get("version"):
+        normalized["version"] = "<absent>"
+    if not isinstance(normalized.get("families"), dict):
+        normalized["families"] = {}
+    if not isinstance(normalized.get("params_versions"), dict):
+        normalized["params_versions"] = {}
+
+    if normalized.get("attack_protocol_digest") in (None, "<absent>", ""):
+        normalized["attack_protocol_digest"] = compute_attack_protocol_digest(normalized)
+
+    return normalized
+
+
+def compute_attack_digest(attack_spec: Dict[str, Any]) -> str:
+    """
+    功能：计算攻击规格摘要。
+
+    Compute canonical digest for an attack spec object.
+
+    Args:
+        attack_spec: Attack specification mapping.
+
+    Returns:
+        Canonical SHA256 hex digest.
+
+    Raises:
+        TypeError: If attack_spec is not dict.
+    """
+    if not isinstance(attack_spec, dict):
+        raise TypeError("attack_spec must be dict")
+    return digests.canonical_sha256(attack_spec)
+
+
 def load_attack_protocol_spec(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     功能：从 configs 事实源加载并标准化攻击协议。
@@ -92,7 +178,7 @@ def load_attack_protocol_spec(cfg: Optional[Dict[str, Any]] = None) -> Dict[str,
         if isinstance(cfg_params_candidates, list) and len(cfg_params_candidates) > 0:
             merged_spec["params_version_field_candidates"] = cfg_params_candidates
 
-    return merged_spec
+    return parse_attack_protocol(merged_spec)
 
 
 def compute_attack_protocol_digest(protocol_spec: Dict[str, Any]) -> str:

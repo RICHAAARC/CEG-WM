@@ -138,7 +138,7 @@ gate_enforcement_requirements:
         3) 计算 bound_digest = sha256(version + canon_sha256 + 关键段落摘要)，用于确保本次运行绑定了这三份 YAML 的具体内容
         4) 在同一运行中对内存对象再计算一次 digest，确保"文件内容"与"对象内容"一致
         5) 任何缺失、空字符串、长度不符（非 64 位小写十六进制）必须 fail-fast
-      目的：防止攻击者或错误实现写入假值/空值，导致事实源绑定沦为"字段占位"。
+      目的：防止攻击者或错误实现写入假值/空值，导致事实源绑定沦为"字段基线缺省标识"。
 
   # ---- cfg_digest 计算顺序冻结 ----
   cfg_digest_computation_order:
@@ -296,7 +296,7 @@ record_accessors:
     - "require_present"
   delegation_scope:
     scripts_mandatory: true                 # scripts/ 中的审计脚本必须使用 accessor。
-    main_chain_gradual: false               # 主链路是否强制：当前 Phase 可先不强制，但建议后续收紧为 true。
+    main_chain_gradual: false               # 主链路是否强制：当前版本实现可先不强制，但建议后续版本收紧为 true。
   notes: >
     require_present(value, field_path, record_hint) 只能对“已抽取值”做统一报错格式，
     不在内部解析 record。字段路径解析权必须保留在各 accessor 内部。
@@ -511,7 +511,7 @@ records_schema:
 
 # ------------------------------
 # 字段别名：用于历史兼容
-# - 为空表示当前阶段不启用别名机制。
+# - 为空表示当前版本实现不启用别名机制。
 # ------------------------------
 field_aliases: {}
 
@@ -519,7 +519,7 @@ field_aliases: {}
 # Impl Identity Binding
 #   - impl 身份冻结：绑定 whitelist 允许集合与 records 字段路径。
 #   - field_paths_by_domain 定义每个 domain 对应的 records 字段路径。
-#   - 未来方法注入只能改变 impl.*_id 值，gate 必须验证值属于 whitelist 对应 domain 的 allowed 集合。
+#   - 后续版本的方法注入只能改变 impl.*_id 值，gate 必须验证值属于 whitelist 对应 domain 的 allowed 集合。
 # ==============================================================
 impl_identity:
   required: true
@@ -865,6 +865,9 @@ config_loader:
     - "detect.feature"
     - "evaluate.decoder_type"
     - "evaluate.target_fpr"
+    # Ablation 实验开关（append-only v1.0）
+    # 必须包含 ablation.normalized 以便 ablation flags 变化影响 cfg_digest
+    - "ablation.normalized"
 
   cfg_digest_override_applied_included: false
 

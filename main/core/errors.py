@@ -5,7 +5,7 @@
 - 定义与冻结契约加载、记录绑定、门禁执行、YAML 加载等相关的异常类。
 - 每个异常类包含相关的上下文信息字段，便于调试和错误分析。
 - 这些异常类在整个框架中被用于捕获和处理特定的错误情况，确保错误信息的清晰和一致性。
-- 未来可以根据需要添加更多的异常类或扩展现有类的功能。
+- 额外异常类型需通过版本化方式追加，且不得改变既有异常语义。
 """
 
 from enum import Enum
@@ -110,9 +110,9 @@ class RecordBundleError(Exception):
 
 class GateRequirementNotImplementedError(Exception):
     """
-    功能：门禁强制要求未实现异常。
+    功能：门禁强制要求未接入异常。
 
-    Raised when a must_enforce gate requirement lacks an implementation.
+    Raised when a must_enforce gate requirement is not available in current enforcement profile.
 
     Args:
         rule_name: Gate requirement name.
@@ -121,7 +121,7 @@ class GateRequirementNotImplementedError(Exception):
     def __init__(self, rule_name: str, rule_path: Optional[str] = None) -> None:
         self.rule_name = rule_name
         self.rule_path = rule_path
-        message = f"Gate requirement not implemented: rule_name={rule_name}"
+        message = f"Gate requirement unavailable in current policy profile: rule_name={rule_name}"
         if rule_path:
             message = f"{message}, rule_path={rule_path}"
         super().__init__(message)

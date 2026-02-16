@@ -1,5 +1,5 @@
 """
-功能：测试注册表 seal 后不可变（C1 覆盖）
+功能：测试注册表 seal 后不可变（registry.seal_and_immutability，legacy_code=C1）
 
 Module type: Core innovation module
 

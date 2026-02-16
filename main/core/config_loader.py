@@ -3,10 +3,14 @@ YAML 加载唯一入口
 
 功能说明：
 - 统一所有 YAML 加载操作的入口，禁止其他模块直接调用 yaml.safe_load。
-- 加载时同时计算文件 SHA256 和对象的 canonical JSON SHA256，提供溯源信息。
+- 加载时同时计算文件 SHA256 和对象的 canonical JSON SHA256,提供溯源信息。
 - 提供加载并校验配置的函数，验证 policy_path 与白名单和语义表的一致性，并应用 CLI 覆盖规则。
+- 实现 ablation 统一开关归一化（normalize_ablation_flags）：
+  - 解析用户输入的 ablation.enable_* 开关，处理互斥约束（lf_only / hf_only）。
+  - 生成 normalized 字段记录最终生效的开关状态，纳入 cfg_digest 计算。
+  - 禁止手动设置 normalized 字段，由归一化函数自动生成。
 - 包含详细的输入验证和错误处理，确保健壮性和可维护性。
-- 未来可以扩展为支持更多格式或提供更丰富的校验功能。
+- 额外能力需通过版本化追加接入，且不得改变既有配置语义与校验口径。
 """
 
 import yaml
@@ -25,6 +29,117 @@ POLICY_PATH_SEMANTICS_PATH = "configs/policy_path_semantics.yaml"
 INJECTION_SCOPE_MANIFEST_PATH = "configs/injection_scope_manifest.yaml"
 RECORDS_SCHEMA_EXTENSIONS_PATH = "configs/records_schema_extensions.yaml"
 ATTACK_PROTOCOL_PATH = "configs/attack_protocol.yaml"
+
+
+def normalize_ablation_flags(cfg: Dict[str, Any]) -> None:
+    """
+    功能：归一化 ablation 实验开关，生成 normalized 字段并写入 cfg。
+
+    Normalize ablation flags and generate normalized field.
+
+    Processes ablation.enable_* flags, resolves mutual exclusion constraints
+    (lf_only/hf_only), and generates ablation.normalized field recording final
+    effective switch states. Mutates cfg in place.
+
+    Rules:
+        1. User-provided enable_* (null/bool) are resolved to bool (null → default).
+        2. lf_only / hf_only mutual exclusion enforced (both true → fail-fast).
+        3. lf_only=true → enable_lf=true, enable_hf=false.
+        4. hf_only=true → enable_hf=true, enable_lf=false.
+        5. ablation.normalized pre-existing in cfg → fail-fast (must auto-generate).
+        6. ablation.normalized is written to cfg for cfg_digest inclusion.
+
+    Args:
+        cfg: Configuration dict with optional ablation section.
+
+    Returns:
+        None (mutates cfg in place).
+
+    Raises:
+        TypeError: If cfg or ablation types are invalid.
+        ValueError: If mutual exclusion violated or normalized is manually set.
+    """
+    if not isinstance(cfg, dict):
+        # cfg 类型不合法，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+
+    ablation = cfg.get("ablation")
+    if ablation is None:
+        # ablation 段缺失，设置默认值（全部启用）。
+        ablation = {}
+        cfg["ablation"] = ablation
+
+    if not isinstance(ablation, dict):
+        # ablation 类型不合法，必须 fail-fast。
+        raise TypeError("ablation must be dict")
+
+    # 禁止用户手动设置 normalized 字段。
+    if "normalized" in ablation and ablation["normalized"] is not None:
+        raise ValueError("ablation.normalized must not be manually set (auto-generated)")
+
+    # 读取用户输入的开关值（null 或 bool）。
+    enable_content = ablation.get("enable_content")
+    enable_geometry = ablation.get("enable_geometry")
+    enable_fusion = ablation.get("enable_fusion")
+    enable_mask = ablation.get("enable_mask")
+    enable_subspace = ablation.get("enable_subspace")
+    enable_rescue = ablation.get("enable_rescue")
+    enable_lf = ablation.get("enable_lf")
+    enable_hf = ablation.get("enable_hf")
+    lf_only = ablation.get("lf_only", False)
+    hf_only = ablation.get("hf_only", False)
+
+    # 类型校验：lf_only / hf_only 必须为 bool。
+    if not isinstance(lf_only, bool):
+        raise TypeError("ablation.lf_only must be bool")
+    if not isinstance(hf_only, bool):
+        raise TypeError("ablation.hf_only must be bool")
+
+    # 互斥约束：lf_only 和 hf_only 不可同时为 true。
+    if lf_only and hf_only:
+        raise ValueError("ablation.lf_only and ablation.hf_only cannot both be true")
+
+    # 默认值解析（null → 默认启用）。
+    def _resolve_bool(value: Any, default: bool) -> bool:
+        if value is None:
+            return default
+        if not isinstance(value, bool):
+            raise TypeError(f"ablation enable flag must be bool or null, got {type(value).__name__}")
+        return value
+
+    enable_content_resolved = _resolve_bool(enable_content, True)
+    enable_geometry_resolved = _resolve_bool(enable_geometry, True)
+    enable_fusion_resolved = _resolve_bool(enable_fusion, True)
+    enable_mask_resolved = _resolve_bool(enable_mask, True)
+    enable_subspace_resolved = _resolve_bool(enable_subspace, True)
+    enable_rescue_resolved = _resolve_bool(enable_rescue, False)
+    enable_lf_resolved = _resolve_bool(enable_lf, True)
+    enable_hf_resolved = _resolve_bool(enable_hf, False)
+
+    # 应用互斥约束覆写。
+    if lf_only:
+        enable_lf_resolved = True
+        enable_hf_resolved = False
+    if hf_only:
+        enable_lf_resolved = False
+        enable_hf_resolved = True
+
+    # 生成 normalized 字段（记录最终生效的开关状态）。
+    normalized = {
+        "enable_content": enable_content_resolved,
+        "enable_geometry": enable_geometry_resolved,
+        "enable_fusion": enable_fusion_resolved,
+        "enable_mask": enable_mask_resolved,
+        "enable_subspace": enable_subspace_resolved,
+        "enable_rescue": enable_rescue_resolved,
+        "enable_lf": enable_lf_resolved,
+        "enable_hf": enable_hf_resolved,
+        "lf_only": lf_only,
+        "hf_only": hf_only,
+    }
+
+    # 写入 cfg，纳入 cfg_digest 计算。
+    ablation["normalized"] = normalized
 
 
 def load_frozen_contracts_interpretation(
@@ -394,7 +509,16 @@ def load_and_validate_config(
     功能：加载并校验配置，同时返回 cfg_digest 和 cfg_audit_metadata。
 
     Load YAML config via load_yaml_with_provenance, validate policy_path and overrides,
-    apply CLI overrides (if provided), then compute cfg_digest using include_paths.
+    apply CLI overrides (if provided), normalize ablation flags, then compute cfg_digest
+    using include_paths.
+
+    Workflow:
+        1. Load YAML config from file.
+        2. Validate overrides embedded in config (YAML-level overrides forbidden).
+        3. Apply CLI overrides (if provided).
+        4. Normalize ablation flags (generate ablation.normalized field).
+        5. Validate policy_path against whitelist and semantics.
+        6. Compute cfg_digest on effective config.
 
     Args:
         config_path: Path to config YAML.
@@ -460,6 +584,10 @@ def load_and_validate_config(
         cfg["override_applied"] = override_applied
 
     _require_run_root_reuse_override(cfg, override_applied)
+
+    # Ablation 归一化（在 override 应用之后、cfg_digest 计算之前）。
+    # 必须在 policy_path 验证之前完成，以便 ablation.normalized 纳入 cfg_digest。
+    normalize_ablation_flags(cfg)
 
     policy_path = cfg.get("policy_path")
     if not isinstance(policy_path, str) or not policy_path:

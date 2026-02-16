@@ -62,11 +62,11 @@ def define_on_step_end_callback(
     if plan is not None and not isinstance(plan, dict):
         raise TypeError("plan must be dict or None")
     
-    # 若 plan 为 None，使用空字典作为占位符。
+    # 若 plan 为 None，使用空字典作为基线值。
     if plan is None:
         plan = {}
     
-    # 若未提供 plan_digest，则生成占位符。
+    # 若未提供 plan_digest，则生成基线标识。
     if plan_digest is None:
         plan_digest = "baseline_plan_digest"
     

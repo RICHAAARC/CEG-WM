@@ -178,6 +178,14 @@ def test_evaluate_report_contains_required_anchor_fields(tmp_path: Path) -> None
         assert anchor_key in report, f"Missing anchor field: {anchor_key}"
         assert isinstance(report[anchor_key], str), f"Anchor {anchor_key} should be string"
 
+    # append-only: 新增路由摘要与实现锚点容器。
+    assert isinstance(report.get("routing_decisions"), dict)
+    assert isinstance(report.get("routing_digest"), str)
+    assert isinstance(report.get("impl_anchors"), dict)
+    assert isinstance(report["impl_anchors"].get("content"), dict)
+    assert isinstance(report["impl_anchors"].get("geometry"), dict)
+    assert isinstance(report["impl_anchors"].get("fusion"), dict)
+
 
 def test_metrics_by_attack_condition_present_and_grouped(tmp_path: Path) -> None:
     """

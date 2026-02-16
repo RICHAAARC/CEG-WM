@@ -492,7 +492,7 @@ def _enforce_records_schema_extensions_binding(
         interpretation: Contract interpretation with extensions spec.
 
     Raises:
-        None (current phase allows both patterns).
+        None (current behavior is audit-record-only for recommended fields).
     """
     if not isinstance(record, dict):
         # record 类型不符合预期，必须 fail-fast。
@@ -508,8 +508,9 @@ def _enforce_records_schema_extensions_binding(
         # NOTE: 可选地在 audit_obligations 中记录 "schema_extensions_not_enabled"
         return
 
-    # 扩展已启用：检查推荐的锚点字段
-    # (当前阶段仅记录，不强制失败；未来可升级为 must_enforce)
+    # 扩展已启用：检查推荐的锚点字段。
+    # Enforcement: 当前行为仅记录审计信息，不触发失败。
+    # Version-bound: 如需升级为强制失败，必须通过契约版本化变更。
     recommended_fields = [
         "records_schema_extensions_version",
         "records_schema_extensions_digest",
@@ -525,8 +526,7 @@ def _enforce_records_schema_extensions_binding(
             missing_recommended.append(field_path)
     
     if missing_recommended:
-        # 当前阶段不强制，仅记录为日志级别的审计信息
-        # 未来可调整为 GateEnforcementError("extensions_binding_recommended_fields_missing", ...)
+        # 推荐项缺失仅记录审计信息，不改变现行门禁判定。
         pass
 
 
@@ -641,10 +641,10 @@ def enforce_recommended_requirements(
                 reason = "args_digest_factor_separation checked"
                 
             else:
-                # 未实现的 recommended 项
+                # 未登记执行路径的 recommended 项
                 executed = False
                 passed = False
-                reason = f"recommended_enforce not implemented for {requirement_name}"
+                reason = f"recommended_enforce execution path not registered: {requirement_name}"
                 
         except Exception as exc:
             # 检查执行失败，记录异常但不中断流程

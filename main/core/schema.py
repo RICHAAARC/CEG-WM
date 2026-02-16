@@ -1305,7 +1305,7 @@ def _is_json_scalar(value: Any) -> bool:
 
 def build_thresholds_spec(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
-    功能：构造阈值占位 spec。
+    功能：构造阈值基线 spec。
 
     Build a baseline thresholds specification for digest derivation.
 
@@ -1379,7 +1379,7 @@ def _resolve_record_kind(record: Dict[str, Any]) -> str:
     if operation is None:
         raise MissingRequiredFieldError("Missing required field: operation")
     
-    # 统计类操作映射（阶段 1 占位实现）
+    # 统计类操作映射（当前版本实现）
     statistical_operations = {"calibrate", "detect", "evaluate"}
     
     if operation in statistical_operations:

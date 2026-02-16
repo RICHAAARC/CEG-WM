@@ -1,5 +1,5 @@
 """
-File purpose: Tests for B 目标：SubspacePlanner 最小可用实现（S-03）
+File purpose: SubspacePlanner regression tests for deterministic planning and digest binding semantics.
 Module type: General module
 
 功能说明：
