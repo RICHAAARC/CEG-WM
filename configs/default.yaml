@@ -1,0 +1,14 @@
+policy_path: "content_only"
+
+# 统计口径默认配置
+target_fpr: 0.01
+
+detect:
+  geometry:
+    enabled: false
+impl:
+  content_extractor_id: "content_baseline_noop_v1"
+  geometry_extractor_id: "geometry_baseline_noop_v1"
+  fusion_rule_id: "fusion_baseline_identity_v1"
+  subspace_planner_id: "subspace_baseline_full_v1"
+  sync_module_id: "geometry_sync_baseline_v1"

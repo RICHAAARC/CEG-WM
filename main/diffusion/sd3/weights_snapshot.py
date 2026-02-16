@@ -1,0 +1,285 @@
+"""
+模型权重快照摘要计算
+
+功能说明：
+- 计算模型权重快照的可复算摘要并返回结构化元信息。
+- 禁止抛异常，所有错误均以 error 字段返回。
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any, Dict, List, Tuple
+
+from main.core import digests
+
+
+def compute_weights_snapshot_sha256(
+    model_id: str,
+    model_source: str | None,
+    hf_revision: str | None,
+    local_files_only: bool | None,
+    cache_dir: str | None = None
+) -> Tuple[str, Dict[str, Any], str | None]:
+    """
+    功能：计算权重快照摘要。
+
+    Compute weights snapshot digest with structured metadata.
+
+    Args:
+        model_id: Model identifier or local path.
+        model_source: Model source indicator.
+        hf_revision: Revision string or None.
+        local_files_only: Whether to use local-only resolution.
+        cache_dir: Optional Hugging Face cache directory.
+
+    Returns:
+        Tuple of (weights_snapshot_sha256, snapshot_meta, error_or_none).
+
+    Raises:
+        None.
+    """
+    snapshot_meta = _init_snapshot_meta(model_id, model_source, hf_revision, local_files_only, cache_dir)
+
+    if not isinstance(model_id, str) or not model_id:
+        snapshot_meta["snapshot_status"] = "failed"
+        return "<absent>", snapshot_meta, "model_id must be non-empty str"
+    if not isinstance(model_source, str) or not model_source:
+        snapshot_meta["snapshot_status"] = "failed"
+        return "<absent>", snapshot_meta, "model_source must be non-empty str"
+
+    normalized_revision = _normalize_revision(hf_revision)
+
+    try:
+        if model_source == "local_path":
+            snapshot_dir, error = _resolve_local_snapshot_dir(model_id)
+            if error is not None:
+                snapshot_meta["snapshot_status"] = "failed"
+                return "<absent>", snapshot_meta, error
+            return _compute_snapshot_digest(snapshot_dir, snapshot_meta)
+
+        if model_source == "hf_hub":
+            snapshot_dir, resolved_revision, error = _resolve_hf_snapshot_dir(
+                model_id,
+                normalized_revision,
+                local_files_only,
+                cache_dir
+            )
+            if resolved_revision is not None:
+                snapshot_meta["resolved_revision"] = resolved_revision
+            if error is not None:
+                snapshot_meta["snapshot_status"] = "failed"
+                return "<absent>", snapshot_meta, error
+            return _compute_snapshot_digest(snapshot_dir, snapshot_meta)
+
+        snapshot_meta["snapshot_status"] = "failed"
+        return "<absent>", snapshot_meta, f"model_source not supported: {model_source}"
+    except Exception as exc:
+        snapshot_meta["snapshot_status"] = "failed"
+        return "<absent>", snapshot_meta, f"{type(exc).__name__}: {exc}"
+
+
+def _init_snapshot_meta(
+    model_id: Any,
+    model_source: Any,
+    hf_revision: Any,
+    local_files_only: Any,
+    cache_dir: Any
+) -> Dict[str, Any]:
+    """
+    功能：初始化快照元信息。
+
+    Initialize snapshot metadata with explicit <absent> fields.
+
+    Args:
+        model_id: Model identifier.
+        model_source: Model source indicator.
+        hf_revision: Revision string or None.
+        local_files_only: Local-only flag.
+        cache_dir: Cache directory.
+
+    Returns:
+        Snapshot metadata mapping.
+    """
+    return {
+        "model_id": model_id if isinstance(model_id, str) and model_id else "<absent>",
+        "model_source": model_source if isinstance(model_source, str) and model_source else "<absent>",
+        "hf_revision": hf_revision if isinstance(hf_revision, str) and hf_revision else "<absent>",
+        "resolved_revision": "<absent>",
+        "local_files_only": local_files_only if isinstance(local_files_only, bool) else "<absent>",
+        "cache_dir": cache_dir if isinstance(cache_dir, str) and cache_dir else "<absent>",
+        "snapshot_dir": "<absent>",
+        "file_count": 0,
+        "total_bytes": 0,
+        "snapshot_status": "unbuilt"
+    }
+
+
+def _normalize_revision(hf_revision: Any) -> str | None:
+    """
+    功能：规范化 revision 输入。
+
+    Normalize revision value to string or None.
+
+    Args:
+        hf_revision: Revision input.
+
+    Returns:
+        Normalized revision string or None.
+    """
+    if isinstance(hf_revision, str) and hf_revision and hf_revision != "<absent>":
+        return hf_revision
+    return None
+
+
+def _resolve_local_snapshot_dir(model_id: str) -> Tuple[Path | None, str | None]:
+    """
+    功能：解析本地路径快照根。
+
+    Resolve local snapshot root path.
+
+    Args:
+        model_id: Local path string.
+
+    Returns:
+        Tuple of (snapshot_path_or_none, error_or_none).
+    """
+    path = Path(model_id)
+    if not path.exists():
+        return None, f"local_path not found: {path}"
+    return path.resolve(), None
+
+
+def _resolve_hf_snapshot_dir(
+    model_id: str,
+    revision: str | None,
+    local_files_only: bool | None,
+    cache_dir: str | None
+) -> Tuple[Path | None, str | None, str | None]:
+    """
+    功能：解析 Hugging Face snapshot 目录。
+
+    Resolve Hugging Face snapshot directory via snapshot_download.
+    
+    Note: Offline-only enforcement is MANDATORY (system default). Network downloads
+    are completely disabled in this version.
+
+    Args:
+        model_id: HF repo id.
+        revision: Optional revision.
+        local_files_only: Local-only flag (must be True; ignored if False).
+        cache_dir: Optional cache directory.
+
+    Returns:
+        Tuple of (snapshot_path_or_none, resolved_revision_or_none, error_or_none).
+    """
+    # (P0-A) 离线模式强制：HF hub snapshot 禁止网络下载。
+    # Offline-only enforcement: HF hub snapshot_download is disabled.
+    # Return error when local_files_only is False or unset.
+    if isinstance(local_files_only, bool) and not local_files_only:
+        return None, None, "offline_only_enforcement: hf_hub downloads are disabled (local_files_only=True required)"
+    
+    try:
+        from huggingface_hub import snapshot_download
+    except Exception as exc:
+        return None, None, f"huggingface_hub import failed: {type(exc).__name__}: {exc}"
+
+    # 强制本地-only 模式；禁止网络下载。
+    # Force local_files_only=True regardless of input.
+    download_kwargs: Dict[str, Any] = {
+        "repo_id": model_id,
+        "local_files_only": True
+    }
+    if revision is not None:
+        download_kwargs["revision"] = revision
+    if isinstance(cache_dir, str) and cache_dir:
+        download_kwargs["cache_dir"] = cache_dir
+
+    try:
+        snapshot_path = snapshot_download(**download_kwargs)
+    except Exception as exc:
+        return None, None, f"snapshot_download failed: {type(exc).__name__}: {exc}"
+
+    return Path(snapshot_path).resolve(), None, None
+
+
+def _compute_snapshot_digest(snapshot_path: Path, snapshot_meta: Dict[str, Any]) -> Tuple[str, Dict[str, Any], str | None]:
+    """
+    功能：计算快照目录摘要。
+
+    Compute snapshot digest by hashing all files under snapshot_path.
+
+    Args:
+        snapshot_path: Snapshot root path.
+        snapshot_meta: Snapshot metadata mapping to mutate.
+
+    Returns:
+        Tuple of (weights_snapshot_sha256, snapshot_meta, error_or_none).
+    """
+    if not isinstance(snapshot_path, Path):
+        snapshot_meta["snapshot_status"] = "failed"
+        return "<absent>", snapshot_meta, "snapshot_path must be Path"
+
+    if snapshot_path.is_file():
+        files = [_build_file_entry(snapshot_path, snapshot_path.parent)]
+    else:
+        files = _collect_snapshot_files(snapshot_path)
+
+    file_count = len(files)
+    total_bytes = sum(item.get("size_bytes", 0) for item in files)
+    snapshot_meta["snapshot_dir"] = str(snapshot_path)
+    snapshot_meta["file_count"] = file_count
+    snapshot_meta["total_bytes"] = total_bytes
+
+    digest_value = digests.canonical_sha256({"files": files})
+    snapshot_meta["snapshot_status"] = "built"
+    return digest_value, snapshot_meta, None
+
+
+def _collect_snapshot_files(snapshot_path: Path) -> List[Dict[str, Any]]:
+    """
+    功能：收集快照文件条目。
+
+    Collect snapshot file entries from a directory.
+
+    Args:
+        snapshot_path: Snapshot root path.
+
+    Returns:
+        List of file entries.
+    """
+    entries: List[Dict[str, Any]] = []
+    for root, dirs, files in os.walk(snapshot_path):
+        dirs.sort()
+        files.sort()
+        for filename in files:
+            file_path = Path(root) / filename
+            if not file_path.is_file():
+                continue
+            entries.append(_build_file_entry(file_path, snapshot_path))
+    entries.sort(key=lambda item: item.get("path", ""))
+    return entries
+
+
+def _build_file_entry(file_path: Path, root_path: Path) -> Dict[str, Any]:
+    """
+    功能：构造单文件快照条目。
+
+    Build a file entry for snapshot digest.
+
+    Args:
+        file_path: File path.
+        root_path: Root path to compute relative path.
+
+    Returns:
+        File entry mapping.
+    """
+    relative_path = file_path.relative_to(root_path).as_posix()
+    file_sha256 = digests.file_sha256(file_path)
+    size_bytes = file_path.stat().st_size
+    return {
+        "path": relative_path,
+        "file_sha256": file_sha256,
+        "size_bytes": size_bytes
+    }

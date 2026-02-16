@@ -1,0 +1,25 @@
+# Stable Diffusion 3 模型配置
+# 用于模型权重与外部资产可追溯性 (Model / Asset Provenance)
+
+# 模型标识 (Model Identifier)
+model_id: "stabilityai/stable-diffusion-3.5-medium"
+
+# 模型来源 (Model Source)
+# 枚举值：hf (Hugging Face) / local / other
+source: "hf"
+
+# 版本/修订号 (Revision)
+# 对于 HuggingFace 模型，可以是commit hash或分支名
+# 若未指定则使用 <absent> 标记
+revision: "<absent>"
+
+# 权重文件 SHA256 校验和 (Weights SHA256 Checksum)
+# 用于验证模型文件完整性
+# 若未计算则使用 <absent> 标记
+weights_sha256: "<absent>"
+
+# 可选字段：模型元信息 (Optional: Model Metadata)
+# 以下字段可根据实际需要填充
+# model_variant: "fp16"
+# cache_dir: "<absent>"
+# load_config: {}
