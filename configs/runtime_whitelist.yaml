@@ -146,6 +146,7 @@ impl_id:
   # 运行期 gate 判定使用扁平化集合，语义分组仅用于审计展示。
   allowed_flat:
     - "content_baseline_noop_v1"
+    - "semantic_mask_provider_v1"
     - "geometry_baseline_noop_v1"
     - "fusion_baseline_identity_v1"
     - "subspace_baseline_full_v1"
@@ -159,6 +160,13 @@ impl_id:
       # - 可返回空证据或固定格式的基线统计量。
       # - 仅用于验证框架闭环与审计链路。
       - "content_baseline_noop_v1"
+      
+      # 语义掩码提供器：
+      # - 从输入图像或 latent 中提取语义掩码。
+      # - 支持 enable_mask 配置参数控制启用/禁用。
+      # - 生成可复算的掩码摘要与分辨率绑定。
+      # - 用于 content_evidence 中的 mask_digest、mask_stats 字段。
+      - "semantic_mask_provider_v1"
 
     geometry_extractor:
       # 几何证据链占位实现：

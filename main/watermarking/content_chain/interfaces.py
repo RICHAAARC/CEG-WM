@@ -76,21 +76,30 @@ class ContentEvidence:
             )
         
         # 校验 score 与 status 一致性：
-        # - status="ok" 时，score 必须是非 None 的非负浮点数；
+        # - status="ok" 时：
+        #   - 通常 score 必须是非 None 的非负浮点数（检测内容）；
+        #   - 特例：若 mask_digest 非 None，则为结构证据（掩码），score=None 允许。
         # - status!="ok" 时，score 必须为 None（失败/缺失/不一致态的分数无效）。
         if self.status == "ok":
-            if self.score is None:
+            # 掩码等结构证据：score=None 且 mask_digest 非空。
+            if self.score is None and self.mask_digest is not None:
+                # 结构证据（掩码已提取），score=None 允许。
+                pass
+            # 常规检测内容：score 非 None。
+            elif self.score is None and self.mask_digest is None:
                 raise ValueError(
-                    "score must be non-None float when status=ok"
+                    "score must be non-None float when status=ok (except for structural evidence with mask_digest)"
                 )
-            if not isinstance(self.score, (int, float)):
-                raise ValueError(
-                    f"score must be float or int, got {type(self.score).__name__}"
-                )
-            if self.score < 0:
-                raise ValueError(
-                    f"score must be non-negative, got {self.score}"
-                )
+            elif self.score is not None:
+                # score 存在时必须是有效数值。
+                if not isinstance(self.score, (int, float)):
+                    raise ValueError(
+                        f"score must be float or int, got {type(self.score).__name__}"
+                    )
+                if self.score < 0:
+                    raise ValueError(
+                        f"score must be non-negative, got {self.score}"
+                    )
         else:
             if self.score is not None:
                 raise ValueError(

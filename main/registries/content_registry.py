@@ -14,10 +14,16 @@ from main.core import digests
 
 from .registry_base import FactoryType, RegistryBase
 from .capabilities import ImplCapabilities
+from main.watermarking.content_chain.semantic_mask_provider import (
+    SemanticMaskProvider,
+    SEMANTIC_MASK_PROVIDER_ID,
+    SEMANTIC_MASK_PROVIDER_VERSION
+)
 
 
 CONTENT_BASELINE_NOOP_ID = "content_baseline_noop_v1"
 SUBSPACE_BASELINE_FULL_ID = "subspace_baseline_full_v1"
+CONTENT_SEMANTIC_MASK_PROVIDER_ID = SEMANTIC_MASK_PROVIDER_ID
 
 
 class ContentBaselineNoop:
@@ -212,6 +218,29 @@ def _build_subspace_baseline_full(cfg: Dict[str, Any]) -> SubspaceBaselineFull:
     return SubspaceBaselineFull(SUBSPACE_BASELINE_FULL_ID, impl_version, impl_digest)
 
 
+def _build_content_semantic_mask_provider(cfg: Dict[str, Any]) -> SemanticMaskProvider:
+    """
+    功能：构造语义掩码提供器实现。
+
+    Build semantic mask provider content extractor.
+
+    Args:
+        cfg: Config mapping.
+
+    Returns:
+        SemanticMaskProvider instance.
+
+    Raises:
+        TypeError: If cfg is not dict.
+    """
+    if not isinstance(cfg, dict):
+        # cfg 类型不合法，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+    impl_version = SEMANTIC_MASK_PROVIDER_VERSION
+    impl_digest = _derive_impl_digest(CONTENT_SEMANTIC_MASK_PROVIDER_ID, impl_version)
+    return SemanticMaskProvider(CONTENT_SEMANTIC_MASK_PROVIDER_ID, impl_version, impl_digest)
+
+
 _CONTENT_REGISTRY.register_factory(
     CONTENT_BASELINE_NOOP_ID,
     _build_content_baseline_noop,
@@ -220,6 +249,17 @@ _CONTENT_REGISTRY.register_factory(
         requires_cuda=False,
         supports_deterministic=True,
         max_resolution=None,
+        supported_models=None
+    )
+)
+_CONTENT_REGISTRY.register_factory(
+    CONTENT_SEMANTIC_MASK_PROVIDER_ID,
+    _build_content_semantic_mask_provider,
+    capabilities=ImplCapabilities(
+        supports_batching=False,
+        requires_cuda=False,
+        supports_deterministic=True,
+        max_resolution=(2048, 2048),
         supported_models=None
     )
 )
