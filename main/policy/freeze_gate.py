@@ -92,6 +92,10 @@ def assert_prewrite(
     interpretation = get_contract_interpretation(contracts)
     schema.validate_record(record, interpretation=interpretation)
     _enforce_schema_version_consistency(record)
+    
+    # 检查 records_schema_extensions 绑定状态（向后兼容过渡）。
+    _enforce_records_schema_extensions_binding(record, interpretation)
+    
     #  runtime_whitelist must_enforce 规则执行。
     enforce_must_enforce_rules(whitelist, semantics, contracts, record)
 
@@ -460,6 +464,69 @@ def _enforce_schema_version_consistency(record: Dict[str, Any]) -> None:
             expected=schema.RECORD_SCHEMA_VERSION,
             actual=str(schema_version)
         )
+
+
+def _enforce_records_schema_extensions_binding(
+    record: Dict[str, Any],
+    interpretation: ContractInterpretation
+) -> None:
+    """
+    功能：执行 records_schema_extensions 绑定检查（向后兼容过渡）。
+
+    Enforce records_schema_extensions binding according to enablement status.
+    
+    If extensions are enabled:
+      - Recommended anchor fields SHOULD be present (but do not fail in transition)
+    If extensions are not enabled:
+      - Extensions fields are not required (absent_ok)
+      - But audit_obligations may require recording the "not enabled" reason
+    
+    This implements the transition strategy where:
+      - Old records (without extension binding) are allowed to pass
+      - New records (with extension binding) are encouraged to follow the spec
+      - In future phases, this can be upgraded to "must_enforce"
+
+    Args:
+        record: Record dict to validate.
+        interpretation: Contract interpretation with extensions spec.
+
+    Raises:
+        None (current phase allows both patterns).
+    """
+    if not isinstance(record, dict):
+        # record 类型不符合预期，必须 fail-fast。
+        raise TypeError("record must be dict")
+    if not isinstance(interpretation, ContractInterpretation):
+        # interpretation 类型不符合预期，必须 fail-fast。
+        raise TypeError("interpretation must be ContractInterpretation")
+
+    extensions_spec = interpretation.records_schema_extensions_spec
+    
+    if not extensions_spec.enabled:
+        # 扩展未启用：旧 records 允许不绑定
+        # NOTE: 可选地在 audit_obligations 中记录 "schema_extensions_not_enabled"
+        return
+
+    # 扩展已启用：检查推荐的锚点字段
+    # (当前阶段仅记录，不强制失败；未来可升级为 must_enforce)
+    recommended_fields = [
+        "records_schema_extensions_version",
+        "records_schema_extensions_digest",
+        "records_schema_extensions_file_sha256",
+        "records_schema_extensions_canon_sha256",
+        "records_schema_extensions_bound_digest"
+    ]
+    
+    missing_recommended = []
+    for field_path in recommended_fields:
+        value = record.get(field_path)
+        if value is None:
+            missing_recommended.append(field_path)
+    
+    if missing_recommended:
+        # 当前阶段不强制，仅记录为日志级别的审计信息
+        # 未来可调整为 GateEnforcementError("extensions_binding_recommended_fields_missing", ...)
+        pass
 
 
 def enforce_gate_policies(

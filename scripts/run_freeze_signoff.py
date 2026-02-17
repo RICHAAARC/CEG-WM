@@ -25,6 +25,7 @@ if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
 from main.core import time_utils
+from main.core.records_io import write_artifact_json_unbound, write_artifact_bytes_unbound
 
 SIGNOFF_REPORT_SCHEMA_VERSION = "v1"
 
@@ -478,9 +479,17 @@ def snapshot_frozen_constraints(repo_root: Path, run_root: Path) -> Dict[str, An
             continue
         try:
             dst_path = snapshot_dir / fname
-            dst_path.write_bytes(src_path.read_bytes())
-            file_sha256 = hashlib.sha256(src_path.read_bytes()).hexdigest()
-            file_size = src_path.stat().st_size
+            # (P0-B) D1 gate: 使用受控写盘接口替代直接 write_bytes。
+            file_data = src_path.read_bytes()
+            artifacts_dir = run_root / "artifacts"
+            write_artifact_bytes_unbound(
+                run_root=run_root,
+                artifacts_dir=artifacts_dir,
+                path=str(dst_path),
+                data=file_data
+            )
+            file_sha256 = hashlib.sha256(file_data).hexdigest()
+            file_size = len(file_data)
             files_manifest.append({
                 "path": fname,
                 "sha256": file_sha256,
@@ -634,7 +643,16 @@ def main() -> None:
     signoff_dir = run_root / "artifacts" / "signoff"
     signoff_dir.mkdir(parents=True, exist_ok=True)
     report_path = signoff_dir / "signoff_report.json"
-    report_path.write_text(json.dumps(signoff_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    # (P0-B) D1 gate: 使用受控写盘接口替代直接 write_text。
+    artifacts_dir = run_root / "artifacts"
+    write_artifact_json_unbound(
+        run_root=run_root,
+        artifacts_dir=artifacts_dir,
+        path=str(report_path),
+        obj=signoff_payload,
+        indent=2,
+        ensure_ascii=False
+    )
 
     print(f"[Freeze Signoff] 报告路径: {report_path}")
     print(f"[Freeze Signoff] 决策: {decision.get('decision')}")

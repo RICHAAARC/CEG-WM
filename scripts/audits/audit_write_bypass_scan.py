@@ -23,6 +23,15 @@ CRITICAL_OUTPUTS = [
     "path_audit",
 ]
 
+# 受控写盘函数白名单（允许在关键脚本中调用）
+CONTROLLED_WRITE_FUNCTIONS = {
+    "write_artifact_json_unbound",
+    "write_artifact_bytes_unbound",
+    "write_artifact_json",
+    "write_artifact_canon_json_unbound",
+    "write_artifact_text_unbound",
+}
+
 # 写模式标识符
 WRITE_MODES = {"w", "wb", "a", "ab", "x", "xb", "r+", "rb+", "w+", "wb+", "a+", "ab+"}
 
@@ -175,6 +184,33 @@ def scan_file(filepath: Path) -> List[Dict[str, Any]]:
         return []
 
 
+def _is_controlled_write_call(filepath: Path, lineno: int) -> bool:
+    """
+    检查给定行是否调用了受控写盘函数。
+    
+    Check whether a line calls a controlled write function.
+    
+    Args:
+        filepath: Source file path.
+        lineno: Line number (1-indexed).
+    
+    Returns:
+        True if line calls a controlled write function.
+    """
+    try:
+        source = filepath.read_text(encoding="utf-8")
+        lines = source.split("\n")
+        if lineno <= 0 or lineno > len(lines):
+            return False
+        line = lines[lineno - 1]
+        for func_name in CONTROLLED_WRITE_FUNCTIONS:
+            if func_name in line:
+                return True
+        return False
+    except Exception:
+        return False
+
+
 def classify_match(match: Dict[str, Any], repo_root: Path) -> str:
     """
     Classify match as ALLOWLISTED, FAIL, or WARNING.
@@ -189,6 +225,7 @@ def classify_match(match: Dict[str, Any], repo_root: Path) -> str:
     filepath = Path(match["path"])
     rel_path = filepath.relative_to(repo_root).as_posix()
     access = match.get("access")
+    lineno = match.get("lineno_start", -1)
 
     if access == "read":
         return "ALLOWLISTED"
@@ -201,15 +238,29 @@ def classify_match(match: Dict[str, Any], repo_root: Path) -> str:
         # 这里简化为：records_io.py 中的所有 write 视为受控
         return "ALLOWLISTED"
     
-    # (2) tests/ 或 scripts/ 中 → WARNING（非阻断，但应注意）
-    if rel_path.startswith("tests/") or rel_path.startswith("scripts/"):
+    # (2) scripts/run_freeze_signoff.py 中调用受控写盘函数 → ALLOWLISTED
+    if "scripts/run_freeze_signoff.py" in rel_path:
+        if _is_controlled_write_call(filepath, lineno):
+            return "ALLOWLISTED"
+        # 否则对于 artifacts/ 写入 → FAIL
+        if "artifacts" in match.get("snippet", ""):
+            return "FAIL"
+        # 其他脚本内的写入 → WARNING
         return "WARNING"
     
-    # (3) main/ 中且可能写入关键产物 → FAIL
+    # (3) tests/ 中 → WARNING（非阻断，但应注意）
+    if rel_path.startswith("tests/"):
+        return "WARNING"
+    
+    # (4) scripts/ 中的其他脚本（如审计脚本）→ WARNING（审计脚本可能有合理理由写入临时结果）
+    if rel_path.startswith("scripts/"):
+        return "WARNING"
+    
+    # (5) main/ 中且可能写入关键产物 → FAIL
     if rel_path.startswith("main/"):
         return "FAIL"
     
-    # (4) 其他位置 → WARNING
+    # (6) 其他位置 → WARNING
     return "WARNING"
 
 
@@ -225,22 +276,17 @@ def run_audit(repo_root: Path) -> Dict[str, Any]:
     """
     # 扫描 main/ 目录下所有 Python 文件
     main_dir = repo_root / "main"
-    if not main_dir.exists():
-        return {
-            "audit_id": "B1.write_bypass_scan",
-            "gate_name": "gate.write_bypass",
-            "category": "B",
-            "severity": "BLOCK",
-            "result": "N.A.",
-            "rule": "禁止绕过受控写盘路径直接写入 records 或关键产物",
-            "evidence": {"matches": []},
-            "impact": "main/ directory not found",
-            "fix": "Ensure repository structure includes main/ directory",
-        }
-    
     all_matches = []
-    for pyfile in main_dir.rglob("*.py"):
-        matches = scan_file(pyfile)
+    
+    if main_dir.exists():
+        for pyfile in main_dir.rglob("*.py"):
+            matches = scan_file(pyfile)
+            all_matches.extend(matches)
+    
+    # 扫描关键脚本：scripts/run_freeze_signoff.py
+    signoff_script = repo_root / "scripts" / "run_freeze_signoff.py"
+    if signoff_script.exists():
+        matches = scan_file(signoff_script)
         all_matches.extend(matches)
     
     # 分类命中点
@@ -276,7 +322,8 @@ def run_audit(repo_root: Path) -> Dict[str, Any]:
     )
     
     fix_suggestion = (
-        "将所有 records 与关键产物的写入操作统一通过 main/core/records_io.py 的受控函数执行，"
+        "将所有 records 与关键产物的写入操作统一通过 main/core/records_io.py 的受控函数执行。"
+        "scripts/run_freeze_signoff.py 中的 artifacts/ 写入必须使用 write_artifact_json_unbound 或 write_artifact_bytes_unbound。"
         "禁止在业务逻辑中直接调用 open/json.dump/Path.write_* 等写盘 API"
         if len(fail_matches) > 0
         else "N.A."

@@ -359,6 +359,37 @@ class FailReasonEnumSpec:
 
 
 @dataclass(frozen=True)
+class RecordsSchemaExtensionsSpec:
+    """
+    功能：记录 schema 扩展解释段落。
+    
+    Records schema extensions specification.
+    
+    Attributes:
+        enabled: Whether schema extensions are enabled.
+        version: Extension version (if enabled).
+        digest: Extension digest (if enabled).
+        file_sha256: File SHA256 (if enabled).
+        canon_sha256: Canonical SHA256 (if enabled).
+        bound_digest: Bound digest (if enabled).
+        optional_str_fields: Optional string field paths.
+        optional_number_fields: Optional number field paths.
+        optional_mapping_fields: Optional mapping field paths.
+        all_optional_field_paths: All optional field paths combined (for fast lookup).
+    """
+    enabled: bool
+    version: str
+    digest: str
+    file_sha256: str
+    canon_sha256: str
+    bound_digest: str
+    optional_str_fields: List[str]
+    optional_number_fields: List[str]
+    optional_mapping_fields: List[str]
+    all_optional_field_paths: List[str]
+
+
+@dataclass(frozen=True)
 class MismatchReasonEnumSpec:
     """
     功能：mismatch_reason 枚举解释段落。
@@ -419,6 +450,7 @@ class ContractInterpretation:
     status_enum: StatusEnumSpec
     fail_reason_enum: FailReasonEnumSpec
     mismatch_reason_enum: MismatchReasonEnumSpec
+    records_schema_extensions_spec: RecordsSchemaExtensionsSpec
 
 
 _INTERPRETATION_CACHE: Dict[int, ContractInterpretation] = {}
@@ -583,6 +615,7 @@ def interpret_frozen_contracts(
     status_enum = _parse_status_enum(root)
     fail_reason_enum = _parse_fail_reason_enum(root)
     mismatch_reason_enum = _parse_mismatch_reason_enum(root)
+    records_schema_extensions_spec = _parse_records_schema_extensions()
     required_record_fields = _collect_required_record_fields(
         external_fact_sources,
         records_schema
@@ -605,7 +638,8 @@ def interpret_frozen_contracts(
         impl_identity=impl_identity,
         status_enum=status_enum,
         fail_reason_enum=fail_reason_enum,
-        mismatch_reason_enum=mismatch_reason_enum
+        mismatch_reason_enum=mismatch_reason_enum,
+        records_schema_extensions_spec=records_schema_extensions_spec
     )
 
 
@@ -1638,6 +1672,94 @@ def _parse_fail_reason_enum(root: Dict[str, Any]) -> FailReasonEnumSpec:
         usage=usage,
         immutable=immutable
     )
+
+
+def _parse_records_schema_extensions() -> RecordsSchemaExtensionsSpec:
+    """
+    功能：加载并解析 records_schema_extensions 配置。
+
+    Load and parse records_schema_extensions.yaml to extract optional field lists.
+    Supports backward compatibility: if file is missing, returns empty spec with enabled=False.
+
+    Args:
+        None.
+
+    Returns:
+        RecordsSchemaExtensionsSpec instance.
+
+    Raises:
+        TypeError: If parsed extensions have invalid schema.
+    """
+    try:
+        from main.core import config_loader
+        from main.core.schema_extensions import EmptyRecordsSchemaExtensions
+
+        extensions = config_loader.load_records_schema_extensions(allow_missing=True)
+
+        # 检查是否为空扩展（向后兼容）
+        if isinstance(extensions, EmptyRecordsSchemaExtensions):
+            # 向后兼容模式：扩展未启用，返回空规范
+            return RecordsSchemaExtensionsSpec(
+                enabled=False,
+                version="",
+                digest="",
+                file_sha256="",
+                canon_sha256="",
+                bound_digest="",
+                optional_str_fields=[],
+                optional_number_fields=[],
+                optional_mapping_fields=[],
+                all_optional_field_paths=[]
+            )
+
+        # 从扩展条目列表中提取字段并按类型分类
+        optional_str_fields: List[str] = []
+        optional_number_fields: List[str] = []
+        optional_mapping_fields: List[str] = []
+
+        for entry in extensions.entries:
+            # 根据 type 字段分类
+            if entry.type in ("digest_hex64", "reason_string"):
+                # 这些类型对应字符串字段
+                optional_str_fields.append(entry.path)
+            elif entry.type in ("score_float",):
+                # 这些类型对应数值字段
+                optional_number_fields.append(entry.path)
+            elif entry.type in ("metrics_dict", "routing_dict"):
+                # 这些类型对应映射字段
+                optional_mapping_fields.append(entry.path)
+
+        all_optional_field_paths = (
+            optional_str_fields + optional_number_fields + optional_mapping_fields
+        )
+
+        return RecordsSchemaExtensionsSpec(
+            enabled=True,
+            version=extensions.extensions_version,
+            digest=extensions.extensions_digest,
+            file_sha256=extensions.extensions_file_sha256,
+            canon_sha256=extensions.extensions_canon_sha256,
+            bound_digest=extensions.extensions_bound_digest,
+            optional_str_fields=optional_str_fields,
+            optional_number_fields=optional_number_fields,
+            optional_mapping_fields=optional_mapping_fields,
+            all_optional_field_paths=all_optional_field_paths
+        )
+    except Exception as e:
+        # 异常处理：若加载或解析失败（除了文件缺失），记录但允许继续（向后兼容）
+        # 返回空规范
+        return RecordsSchemaExtensionsSpec(
+            enabled=False,
+            version="",
+            digest="",
+            file_sha256="",
+            canon_sha256="",
+            bound_digest="",
+            optional_str_fields=[],
+            optional_number_fields=[],
+            optional_mapping_fields=[],
+            all_optional_field_paths=[]
+        )
 
 
 def _parse_mismatch_reason_enum(root: Dict[str, Any]) -> MismatchReasonEnumSpec:

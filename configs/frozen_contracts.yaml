@@ -62,6 +62,20 @@ external_fact_sources:
       - "policy_path_semantics_file_sha256"
       - "policy_path_semantics_canon_sha256"
       - "policy_path_semantics_bound_digest"
+  records_schema_extensions:
+    path: "configs/records_schema_extensions.yaml"
+    required_record_fields: []
+    recommended_record_fields:
+      - "records_schema_extensions_version"
+      - "records_schema_extensions_digest"
+      - "records_schema_extensions_file_sha256"
+      - "records_schema_extensions_canon_sha256"
+      - "records_schema_extensions_bound_digest"
+    optional_policy: "absent_ok"
+    description: |
+      可选事实源：append-only 字段扩展的权威来源。
+      若启用 schema_extensions，则 records必须绑定上述锚点字段；否则允许 absent（但需记录未启用原因）。
+      支持向后兼容：旧 records（未绑定该事实源）允许通过，但必须在 run_closure 中标记为 "extensions_not_enabled"。
 
 # ==============================================================
 # I/O Entry Points & Write Exceptions

@@ -25,8 +25,10 @@ RECORD_SCHEMA_VERSION = "v1.0"
 RECORDS_MANIFEST_NAME = "records_manifest.json"
 RUN_CLOSURE_NAME = "run_closure.json"
 
-
-_OPTIONAL_STR_FIELDS = [
+# 硬编码的可选字段列表（向后兼容，不再直接使用）
+# 这些列表现在由 records_schema_extensions.yaml 定义，通过 ContractInterpretation 传递
+# 仅在 interpretation 不可用时作为后备
+_FALLBACK_OPTIONAL_STR_FIELDS = [
     "content_evidence.mask_digest",
     "content_evidence.plan_digest",
     "content_evidence.basis_digest",
@@ -42,13 +44,13 @@ _OPTIONAL_STR_FIELDS = [
     "decision.routing_digest"
 ]
 
-_OPTIONAL_NUMBER_FIELDS = [
+_FALLBACK_OPTIONAL_NUMBER_FIELDS = [
     "content_evidence.lf_score",
     "content_evidence.hf_score",
     "geometry_evidence.geo_score"
 ]
 
-_OPTIONAL_MAPPING_FIELDS = [
+_FALLBACK_OPTIONAL_MAPPING_FIELDS = [
     "content_evidence.mask_stats",
     "content_evidence.score_parts",
     "geometry_evidence.anchor_metrics",
@@ -1008,9 +1010,21 @@ def validate_record(
             # model_provenance_canon_sha256 类型不符合预期，必须 fail-fast。
             raise TypeError("model_provenance_canon_sha256 must be non-empty str")
 
-    _validate_optional_str_fields(record, _OPTIONAL_STR_FIELDS)
-    _validate_optional_number_fields(record, _OPTIONAL_NUMBER_FIELDS)
-    _validate_optional_mapping_fields(record, _OPTIONAL_MAPPING_FIELDS)
+    # 从解释面获取可选字段列表（若启用扩展则使用动态列表，否则使用后备硬编码列表）
+    extensions_spec = interpretation.records_schema_extensions_spec
+    if extensions_spec.enabled:
+        optional_str_fields = extensions_spec.optional_str_fields
+        optional_number_fields = extensions_spec.optional_number_fields
+        optional_mapping_fields = extensions_spec.optional_mapping_fields
+    else:
+        # 向后兼容：若扩展未启用，使用硬编码后备列表
+        optional_str_fields = _FALLBACK_OPTIONAL_STR_FIELDS
+        optional_number_fields = _FALLBACK_OPTIONAL_NUMBER_FIELDS
+        optional_mapping_fields = _FALLBACK_OPTIONAL_MAPPING_FIELDS
+
+    _validate_optional_str_fields(record, optional_str_fields)
+    _validate_optional_number_fields(record, optional_number_fields)
+    _validate_optional_mapping_fields(record, optional_mapping_fields)
 
 
 def _get_value_by_field_path(record: Dict[str, Any], field_path: str) -> tuple[bool, Any]:
