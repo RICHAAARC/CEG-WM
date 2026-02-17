@@ -46,7 +46,10 @@ from main.diffusion.sd3 import infer_trace
 from main.cli.run_common import (
     bind_impl_identity_fields,
     set_failure_status,
-    format_fact_sources_mismatch
+    format_fact_sources_mismatch,
+    build_seed_audit,
+    build_determinism_controls,
+    normalize_nondeterminism_notes
 )
 
 
@@ -171,6 +174,21 @@ def run_detect(
         run_meta["cfg_digest"] = cfg_digest
         run_meta["policy_path"] = cfg["policy_path"]
 
+        seed_parts, seed_digest, seed_value, seed_rule_id = build_seed_audit(cfg, "detect")
+        cfg["seed"] = seed_value
+        run_meta["seed_parts"] = seed_parts
+        run_meta["seed_digest"] = seed_digest
+        run_meta["seed_rule_id"] = seed_rule_id
+        run_meta["seed_value"] = seed_value
+        run_meta["cfg"] = cfg
+
+        determinism_controls = build_determinism_controls(cfg)
+        if determinism_controls is not None:
+            run_meta["determinism_controls"] = determinism_controls
+        nondeterminism_notes = normalize_nondeterminism_notes(cfg.get("nondeterminism_notes"))
+        if nondeterminism_notes is not None:
+            run_meta["nondeterminism_notes"] = nondeterminism_notes
+
         pipeline_result = pipeline_factory.build_pipeline_shell(cfg)
         run_meta["pipeline_provenance_canon_sha256"] = pipeline_result.get("pipeline_provenance_canon_sha256")
         run_meta["pipeline_status"] = pipeline_result.get("pipeline_status")
@@ -185,7 +203,7 @@ def run_detect(
         # (7.7) Real Dataflow Smoke: 在 pipeline_result 之后调用 inference
         pipeline_obj = pipeline_result.get("pipeline_obj")
         device = cfg.get("device", "cpu")
-        seed = cfg.get("seed")
+        seed = seed_value
         
         inference_result = infer_runtime.run_sd3_inference(cfg, pipeline_obj, device, seed)
         inference_status = inference_result.get("inference_status")

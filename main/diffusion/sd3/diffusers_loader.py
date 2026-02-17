@@ -104,11 +104,11 @@ def build_sd3_pipeline_from_pretrained(
     except Exception as exc:
         return None, build_meta, f"{type(exc).__name__}: {exc}"
 
-    local_files_only = False
+    local_files_only = True
     if model_source == "local_path":
         local_files_only = True
     elif model_source == "hf_hub":
-        local_files_only = False
+        local_files_only = True
     elif model_source is not None:
         return None, build_meta, "model_source not allowed"
 
@@ -129,6 +129,8 @@ def build_sd3_pipeline_from_pretrained(
         build_meta["status"] = "failed"
         build_meta["local_files_only"] = local_files_only
         build_meta["build_kwargs"] = dict(build_kwargs)
+        if model_source == "hf_hub":
+            return None, build_meta, "hf_hub_local_cache_missing_or_unavailable"
         return None, build_meta, f"{type(exc).__name__}: {exc}"
 
 

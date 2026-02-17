@@ -732,6 +732,9 @@ def finalize_run(
         # 从 cfg 或环境获取 RNG 配置。
         cfg_from_meta = run_meta.get("cfg")
         seed_value = None
+        seed_parts = None
+        seed_digest = None
+        seed_rule_id = None
         rng_backend = None
         torch_deterministic = None
         cudnn_benchmark = None
@@ -744,13 +747,26 @@ def finalize_run(
         else:
             # cfg 不可用，显式标记缺失。
             seed_value = "<absent>"
+            seed_parts = "<absent>"
+            seed_digest = "<absent>"
+            seed_rule_id = "<absent>"
             rng_backend = "<absent>"
             torch_deterministic = "<absent>"
             cudnn_benchmark = "<absent>"
 
+        if seed_parts is None:
+            seed_parts = run_meta.get("seed_parts", "<absent>")
+        if seed_digest is None:
+            seed_digest = run_meta.get("seed_digest", "<absent>")
+        if seed_rule_id is None:
+            seed_rule_id = run_meta.get("seed_rule_id", "<absent>")
+
         # 构造 rng_audit 对象。
         rng_audit = {
             "seed_value": seed_value,
+            "seed_parts": seed_parts,
+            "seed_digest": seed_digest,
+            "seed_rule_id": seed_rule_id,
             "rng_backend": rng_backend,
             "torch_deterministic": torch_deterministic,
             "cudnn_benchmark": cudnn_benchmark

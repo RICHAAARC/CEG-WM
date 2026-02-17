@@ -13,6 +13,13 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, List
 
+_scripts_dir = Path(__file__).resolve().parent
+_repo_root = _scripts_dir.parent.parent
+if str(_repo_root) not in sys.path:
+    sys.path.insert(0, str(_repo_root))
+
+from main.core import config_loader
+
 
 _INJECTION_FIELDS = [
     "injection_scope_manifest_version",
@@ -198,6 +205,66 @@ def _check_cli_entries(repo_root: Path) -> Dict[str, Any]:
     }
 
 
+def _check_digest_inputs_non_empty(repo_root: Path) -> Dict[str, Any]:
+    """
+    功能：校验 injection_scope_manifest.digest_scope 不为空。
+
+    Validate digest_scope.cfg_digest_include_paths and plan_digest_include_paths are non-empty.
+
+    Args:
+        repo_root: Repository root directory.
+
+    Returns:
+        Check result mapping.
+    """
+    manifest_path = repo_root / "configs" / "injection_scope_manifest.yaml"
+    if not manifest_path.exists():
+        return {
+            "check": "digest_inputs_non_empty",
+            "pass": False,
+            "missing_fields": [
+                "digest_scope.cfg_digest_include_paths",
+                "digest_scope.plan_digest_include_paths"
+            ],
+            "reason": "manifest_missing",
+            "path": str(manifest_path)
+        }
+
+    try:
+        obj, _ = config_loader.load_yaml_with_provenance(manifest_path)
+    except Exception as exc:
+        return {
+            "check": "digest_inputs_non_empty",
+            "pass": False,
+            "missing_fields": [
+                "digest_scope.cfg_digest_include_paths",
+                "digest_scope.plan_digest_include_paths"
+            ],
+            "reason": f"load_failed: {type(exc).__name__}: {exc}",
+            "path": str(manifest_path)
+        }
+
+    digest_scope = obj.get("digest_scope") if isinstance(obj, dict) else None
+    cfg_include = None
+    plan_include = None
+    if isinstance(digest_scope, dict):
+        cfg_include = digest_scope.get("cfg_digest_include_paths")
+        plan_include = digest_scope.get("plan_digest_include_paths")
+
+    missing_fields: List[str] = []
+    if not isinstance(cfg_include, list) or len(cfg_include) == 0:
+        missing_fields.append("digest_scope.cfg_digest_include_paths")
+    if not isinstance(plan_include, list) or len(plan_include) == 0:
+        missing_fields.append("digest_scope.plan_digest_include_paths")
+
+    return {
+        "check": "digest_inputs_non_empty",
+        "pass": len(missing_fields) == 0,
+        "missing_fields": missing_fields,
+        "path": str(manifest_path)
+    }
+
+
 def run_audit(repo_root: Path) -> Dict[str, Any]:
     """
     功能：执行注入范围事实源绑定审计。
@@ -223,7 +290,8 @@ def run_audit(repo_root: Path) -> Dict[str, Any]:
         _check_injection_scope_module(repo_root),
         _check_bound_fact_sources(repo_root),
         _check_schema_required_fields(repo_root),
-        _check_cli_entries(repo_root)
+        _check_cli_entries(repo_root),
+        _check_digest_inputs_non_empty(repo_root)
     ]
 
     fail_reasons = [c["check"] for c in checks if not c.get("pass")]

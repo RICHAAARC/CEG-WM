@@ -42,7 +42,10 @@ from main.core.errors import RunFailureReason
 from main.cli.run_common import (
     bind_impl_identity_fields,
     set_failure_status,
-    format_fact_sources_mismatch
+    format_fact_sources_mismatch,
+    build_seed_audit,
+    build_determinism_controls,
+    normalize_nondeterminism_notes
 )
 
 
@@ -165,6 +168,21 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
                 raise
             run_meta["cfg_digest"] = cfg_digest
             run_meta["policy_path"] = cfg["policy_path"]
+
+            seed_parts, seed_digest, seed_value, seed_rule_id = build_seed_audit(cfg, "evaluate")
+            cfg["seed"] = seed_value
+            run_meta["seed_parts"] = seed_parts
+            run_meta["seed_digest"] = seed_digest
+            run_meta["seed_rule_id"] = seed_rule_id
+            run_meta["seed_value"] = seed_value
+            run_meta["cfg"] = cfg
+
+            determinism_controls = build_determinism_controls(cfg)
+            if determinism_controls is not None:
+                run_meta["determinism_controls"] = determinism_controls
+            nondeterminism_notes = normalize_nondeterminism_notes(cfg.get("nondeterminism_notes"))
+            if nondeterminism_notes is not None:
+                run_meta["nondeterminism_notes"] = nondeterminism_notes
             
             # 提取 run_root 复用参数。
             allow_nonempty_run_root = cfg.get("allow_nonempty_run_root", False)

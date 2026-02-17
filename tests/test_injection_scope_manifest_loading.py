@@ -54,19 +54,19 @@ def test_injection_scope_manifest_loads_with_digests(tmp_path: Path) -> None:
     _write_manifest(
         manifest_path,
         """injection_scope_manifest_version: \"v1\"
-allowed_impl_id_set:
+allowed_impl_ids:
   - \"impl_test\"
-digest_inputs:
-  cfg_digest_include:
+digest_scope:
+  cfg_digest_include_paths:
     - \"cfg.policy_path\"
-  plan_digest_include:
+  plan_digest_include_paths:
     - \"plan.impl_id\"
-version_bump_policy:
-  bump_on_digest_inputs_change: true
-  bump_on_impl_param_change: true
-frozen_no_touch_files:
+versioning_policy:
+  bump_manifest_version_on_digest_scope_change: true
+  bump_manifest_version_on_impl_scope_change: true
+frozen_surface_protected_files:
   - \"configs/frozen_contracts.yaml\"
-notes: \"test\"
+operational_notes: \"test\"
 """
     )
 
@@ -100,17 +100,17 @@ def test_injection_scope_manifest_missing_version_fails(tmp_path: Path) -> None:
     manifest_path = tmp_path / "injection_scope_manifest.yaml"
     _write_manifest(
         manifest_path,
-        """allowed_impl_id_set:
+        """allowed_impl_ids:
   - \"impl_test\"
-digest_inputs:
-  cfg_digest_include:
+digest_scope:
+  cfg_digest_include_paths:
     - \"cfg.policy_path\"
-  plan_digest_include:
+  plan_digest_include_paths:
     - \"plan.impl_id\"
-version_bump_policy:
-  bump_on_digest_inputs_change: true
-  bump_on_impl_param_change: true
-frozen_no_touch_files:
+versioning_policy:
+  bump_manifest_version_on_digest_scope_change: true
+  bump_manifest_version_on_impl_scope_change: true
+frozen_surface_protected_files:
   - \"configs/frozen_contracts.yaml\"
 """
     )
@@ -120,3 +120,24 @@ frozen_no_touch_files:
             str(manifest_path),
             allow_non_authoritative=True
         )
+
+
+def test_injection_scope_manifest_real_config_loads() -> None:
+    """
+    功能：真实配置文件必须可加载。
+
+    Load real configs/injection_scope_manifest.yaml and ensure parsing succeeds.
+
+    Args:
+      None.
+
+    Returns:
+      None.
+    """
+    from main.core.injection_scope import load_injection_scope_manifest
+
+    manifest = load_injection_scope_manifest()
+    assert isinstance(manifest.injection_scope_manifest_digest, str)
+    assert isinstance(manifest.injection_scope_manifest_file_sha256, str)
+    assert isinstance(manifest.injection_scope_manifest_canon_sha256, str)
+    assert isinstance(manifest.injection_scope_manifest_bound_digest, str)

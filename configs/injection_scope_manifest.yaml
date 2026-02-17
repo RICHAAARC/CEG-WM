@@ -1,17 +1,102 @@
 injection_scope_manifest_version: "v1.0"
-allowed_impl_id_set: []
-digest_inputs:
-  cfg_digest_include: []
-  plan_digest_include: []
-version_bump_policy:
-  bump_on_digest_inputs_change: true
-  bump_on_impl_param_change: true
-frozen_no_touch_files:
+
+allowed_impl_ids:
+
+  # content chain first.
+  - "mask_provider_v1"
+  - "subspace_planner_v1"
+  - "low_freq_coder_v1"
+  - "content_detector_v1"
+
+  # geometry and fusion later.
+  - "attention_anchor_v1"
+  - "latent_sync_v1"
+  - "geometry_aligner_v1"
+  - "fusion_rule_v1"
+
+  # Baseline implementations.
+  - "content_baseline_noop_v1"
+  - "subspace_baseline_full_v1"
+  - "geometry_baseline_noop_v1"
+  - "geometry_sync_baseline_v1"
+  - "fusion_baseline_identity_v1"
+
+digest_scope:
+
+  cfg_digest_include_paths:
+
+    - "watermark.key_id"
+    - "watermark.pattern_id"
+    - "watermark.strength"
+
+    - "watermark.subspace.enabled"
+    - "watermark.subspace.frame"
+    - "watermark.subspace.selector_id"
+    - "watermark.subspace.grid_rows"
+    - "watermark.subspace.grid_cols"
+    - "watermark.subspace.grid_h"
+    - "watermark.subspace.grid_w"
+    - "watermark.subspace.k"
+    - "watermark.subspace.topk"
+    - "watermark.subspace.score_type"
+    - "watermark.subspace.channel_agg"
+
+    - "model.model_id"
+    - "model.height"
+    - "model.width"
+    - "model.dtype"
+    - "enable_xformers"
+
+    - "generation.num_inference_steps"
+    - "generation.guidance_scale"
+
+    - "detect.content.enabled"
+    - "detect.geometry.enabled"
+    - "detect.method"
+    - "detect.feature"
+
+    - "evaluate.decoder_type"
+    - "evaluate.target_fpr"
+
+  plan_digest_include_paths:
+
+    - "watermark.mask.threshold"
+    - "watermark.mask.resolution_binding"
+    - "watermark.mask.postprocess.enabled"
+    - "watermark.mask.postprocess.kernel"
+
+    - "watermark.subspace.rank"
+    - "watermark.subspace.grid_rows"
+    - "watermark.subspace.grid_cols"
+    - "watermark.subspace.topk"
+    - "watermark.subspace.energy_ratio"
+    - "watermark.subspace.mask_digest_binding"
+
+    - "watermark.lf.codebook_id"
+    - "watermark.lf.ecc"
+    - "watermark.lf.strength"
+
+    - "watermark.hf.tail_truncation_ratio"
+    - "watermark.hf.tail_truncation_mode"
+    - "watermark.hf.codebook_id"
+    - "watermark.hf.ecc"
+
+versioning_policy:
+
+  bump_manifest_version_on_digest_scope_change: true
+  bump_manifest_version_on_impl_scope_change: true
+
+frozen_surface_protected_files:
+
   - "configs/frozen_contracts.yaml"
   - "configs/runtime_whitelist.yaml"
   - "configs/policy_path_semantics.yaml"
   - "main/policy/freeze_gate.py"
   - "main/core/digests.py"
   - "main/core/status.py"
-notes:
-  - "placeholder: update allowed_impl_id_set and digest_inputs before production"
+
+operational_notes:
+
+  - "Digest scope must remain append-only."
+  - "Any new impl parameters must appear in plan_digest_include_paths."
+  - "Removal of impl_id from allowed_impl_ids requires manifest version bump."
