@@ -12,8 +12,13 @@
 #     - scripts/tests 增加闭合一致性校验。
 # ==============================================================
 
+# 关键版本声明：融合策略路径语义映射版本
+# 此版本号必须与 runtime_whitelist_version 协同升级，保证策略语义一致性
+semantics_version: "v1.0"
+
 # ------------------------------
 # 语义映射版本：用于 records 写入与 freeze_gate 校验。
+# 与 frozen_contracts.yaml 中 policy_path_semantics_version 绑定
 # ------------------------------
 policy_path_semantics_version: "v1.0"
 

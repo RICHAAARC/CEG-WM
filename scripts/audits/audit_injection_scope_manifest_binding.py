@@ -265,6 +265,75 @@ def _check_digest_inputs_non_empty(repo_root: Path) -> Dict[str, Any]:
     }
 
 
+def _check_injection_scope_impl_id_closure(repo_root: Path) -> Dict[str, Any]:
+    """
+    功能：检查 injection_scope_manifest.allowed_impl_ids 与 runtime_whitelist.impl_id.allowed_flat 的命名闭合性。
+
+    Verify that injection_scope_manifest.allowed_impl_ids is a subset of 
+    runtime_whitelist.impl_id.allowed_flat (命名闭合性）.
+
+    Args:
+        repo_root: Repository root directory.
+
+    Returns:
+        Check result mapping with:
+        - "pass": True if allowed_impl_ids ⊆ allowed_flat.
+        - "manifest_impl_ids": Set of impl_ids from injection_scope_manifest.
+        - "whitelist_impl_ids": Set of impl_ids from runtime_whitelist.
+        - "unmapped_impl_ids": Impl_ids in manifest but not in whitelist (BLOCK).
+    """
+    import yaml
+    
+    manifest_path = repo_root / "configs" / "injection_scope_manifest.yaml"
+    whitelist_path = repo_root / "configs" / "runtime_whitelist.yaml"
+    
+    manifest_impl_ids = set()
+    whitelist_impl_ids = set()
+    unmapped = set()
+    
+    # 加载 injection_scope_manifest
+    try:
+        if manifest_path.exists():
+            with manifest_path.open('r', encoding='utf-8') as f:
+                manifest = yaml.safe_load(f) or {}
+            manifest_impl_ids = set(manifest.get("allowed_impl_ids", []))
+    except Exception as e:
+        return {
+            "check": "impl_id_closure",
+            "pass": False,
+            "reason": f"failed_to_load_manifest: {e}",
+            "path": str(manifest_path)
+        }
+    
+    # 加载 runtime_whitelist
+    try:
+        if whitelist_path.exists():
+            with whitelist_path.open('r', encoding='utf-8') as f:
+                whitelist = yaml.safe_load(f) or {}
+            impl_id_cfg = whitelist.get("impl_id", {})
+            whitelist_impl_ids = set(impl_id_cfg.get("allowed_flat", []))
+    except Exception as e:
+        return {
+            "check": "impl_id_closure",
+            "pass": False,
+            "reason": f"failed_to_load_whitelist: {e}",
+            "path": str(whitelist_path)
+        }
+    
+    # 检查闭合性
+    unmapped = manifest_impl_ids - whitelist_impl_ids
+    
+    return {
+        "check": "impl_id_closure",
+        "pass": len(unmapped) == 0,
+        "manifest_impl_ids": sorted(manifest_impl_ids),
+        "whitelist_impl_ids": sorted(whitelist_impl_ids),
+        "unmapped_impl_ids": sorted(unmapped) if unmapped else None,
+        "rule": "allowed_impl_ids ⊆ allowed_flat (命名闭合性)",
+        "severity": "BLOCK_FREEZE" if unmapped else "PASS"
+    }
+
+
 def run_audit(repo_root: Path) -> Dict[str, Any]:
     """
     功能：执行注入范围事实源绑定审计。
@@ -291,7 +360,8 @@ def run_audit(repo_root: Path) -> Dict[str, Any]:
         _check_bound_fact_sources(repo_root),
         _check_schema_required_fields(repo_root),
         _check_cli_entries(repo_root),
-        _check_digest_inputs_non_empty(repo_root)
+        _check_digest_inputs_non_empty(repo_root),
+        _check_injection_scope_impl_id_closure(repo_root)  # 新增：impl_id 命名闭合性检查
     ]
 
     fail_reasons = [c["check"] for c in checks if not c.get("pass")]
@@ -301,7 +371,8 @@ def run_audit(repo_root: Path) -> Dict[str, Any]:
     fix_suggestion = (
         "1. Add configs/injection_scope_manifest.yaml; "
         "2. Bind injection_scope_manifest in records_io and schema; "
-        "3. Ensure CLI entry points load and bind injection_scope_manifest"
+        "3. Ensure CLI entry points load and bind injection_scope_manifest; "
+        "4. Fix impl_id naming: allowed_impl_ids must match runtime_whitelist.allowed_flat exactly"
         if fail_reasons else "N.A."
     )
 
@@ -338,7 +409,9 @@ def main() -> None:
         repo_root = Path(sys.argv[1])
 
     result = run_audit(repo_root)
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    output = json.dumps(result, indent=2, ensure_ascii=False)
+    sys.stdout.write(output + '\n')
+    sys.stdout.flush()
 
 
 if __name__ == "__main__":

@@ -2,24 +2,19 @@ injection_scope_manifest_version: "v1.0"
 
 allowed_impl_ids:
 
-  # content chain first.
-  - "mask_provider_v1"
-  - "subspace_planner_v1"
-  - "low_freq_coder_v1"
-  - "content_detector_v1"
-
-  # geometry and fusion later.
-  - "attention_anchor_v1"
-  - "latent_sync_v1"
-  - "geometry_aligner_v1"
-  - "fusion_rule_v1"
-
-  # Baseline implementations.
+  # content chain 真实实现
+  - "semantic_mask_provider_v1"
+  
+  # 占位实现
   - "content_baseline_noop_v1"
   - "subspace_baseline_full_v1"
   - "geometry_baseline_noop_v1"
   - "geometry_sync_baseline_v1"
   - "fusion_baseline_identity_v1"
+  
+  # 注意：此列表必须是 runtime_whitelist.yaml:impl_id.allowed_flat 的子集或相等。
+  # 违反闭合性将触发 BLOCK_FREEZE。
+  # 生产部署前必须通过审计脚本 audit_injection_scope_manifest_binding.py 校验。
 
 digest_scope:
 
