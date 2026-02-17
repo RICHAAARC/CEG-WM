@@ -25,6 +25,15 @@ RECORD_SCHEMA_VERSION = "v1.0"
 RECORDS_MANIFEST_NAME = "records_manifest.json"
 RUN_CLOSURE_NAME = "run_closure.json"
 
+PATH_AUDIT_STATUS_ALLOWED = {"ok", "failed"}
+PATH_AUDIT_ERROR_CODE_ALLOWED = {
+    "fact_sources_unbound",
+    "missing_bound_fields",
+    "build_exception",
+    "write_blocked",
+    "write_failed"
+}
+
 # 硬编码的可选字段列表（向后兼容，不再直接使用）
 # 这些列表现在由 records_schema_extensions.yaml 定义，通过 ContractInterpretation 传递
 # 仅在 interpretation 不可用时作为后备
@@ -478,6 +487,33 @@ def validate_run_closure(payload: Dict[str, Any]) -> None:
             raise TypeError("impl_identity_digest must be non-empty str or None")
     if status_ok:
         _validate_run_closure_ok_fields(payload)
+
+    path_audit_status = payload.get("path_audit_status")
+    if path_audit_status is not None:
+        if not isinstance(path_audit_status, str) or not path_audit_status:
+            # path_audit_status 类型不符合预期，必须 fail-fast。
+            raise TypeError("path_audit_status must be non-empty str or None")
+        if path_audit_status not in PATH_AUDIT_STATUS_ALLOWED:
+            # path_audit_status 非受控枚举成员，必须 fail-fast。
+            raise ValueError("path_audit_status must be one of {'ok','failed'}")
+
+    path_audit_error_code = payload.get("path_audit_error_code")
+    if path_audit_error_code is not None:
+        if not isinstance(path_audit_error_code, str) or not path_audit_error_code:
+            # path_audit_error_code 类型不符合预期，必须 fail-fast。
+            raise TypeError("path_audit_error_code must be non-empty str or None")
+        if path_audit_error_code != "<absent>" and path_audit_error_code not in PATH_AUDIT_ERROR_CODE_ALLOWED:
+            # path_audit_error_code 非受控枚举成员，必须 fail-fast。
+            raise ValueError("path_audit_error_code must be in frozen allowlist")
+
+    if path_audit_status == "ok":
+        if path_audit_error_code not in {None, "<absent>"}:
+            # ok 状态不应携带错误码，必须 fail-fast。
+            raise ValueError("path_audit_error_code must be absent when path_audit_status is ok")
+    if path_audit_status == "failed":
+        if path_audit_error_code in {None, "<absent>"}:
+            # failed 状态必须携带错误码，必须 fail-fast。
+            raise ValueError("path_audit_error_code is required when path_audit_status is failed")
 
     # 验证 RNG 审计字段：rng_audit_canon_sha256 必须存在且为 str。
     rng_audit_canon_sha256 = payload.get("rng_audit_canon_sha256")

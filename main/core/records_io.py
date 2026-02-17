@@ -430,7 +430,6 @@ def write_path_validation_audit(
     audit_filename = f"path_audit_{target_hash}_{timestamp_str}.json"
     audit_path = audit_records_dir / audit_filename
     
-    # (P0-B) D1 explicit path validation gate: validate artifact output path.
     # 显式路径策略校验：禁止逃逸。
     path_policy.validate_output_target(audit_path, "artifact", ctx.run_root)
     
@@ -1146,7 +1145,6 @@ def write_artifact_text_unbound(
         # content 类型不合法，必须 fail-fast。
         raise TypeError("content must be str")
 
-    # (P0-B) D1 explicit path validation gate: validate artifact output path.
     # 显式路径策略校验：禁止逃逸。
     path_policy.validate_output_target(Path(path), "artifact", run_root)
 
@@ -1192,7 +1190,6 @@ def write_artifact_bytes_unbound(
         # data 类型不合法，必须 fail-fast。
         raise TypeError("data must be bytes")
 
-    # (P0-B) D1 explicit path validation gate: validate artifact output path.
     # 显式路径策略校验：禁止逃逸。
     path_policy.validate_output_target(Path(path), "artifact", run_root)
 

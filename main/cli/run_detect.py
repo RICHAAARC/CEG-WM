@@ -118,7 +118,7 @@ def run_detect(
         "path_policy": None,
         "run_root_reuse_allowed": False,
         "run_root_reuse_reason": None,
-        # (P1-D) E1 统计口径锚点初始化 / E1 statistics calibration anchors initialization.
+        # 统计口径锚点初始化。
         "target_fpr": "<absent>",
         "thresholds_digest": "<absent>",
         "threshold_metadata_digest": "<absent>"

@@ -230,7 +230,6 @@ def anchor_requirements(run_root: Path, repo_root: Optional[Path] = None) -> Non
     功能：将仓库根目录的 requirements.txt 复制到 run_root。
 
     Copy requirements.txt from repository root to run_root for reproducibility anchoring.
-    D3: Fail-fast if requirements.txt does not exist in repo root.
 
     Args:
         run_root: Run root directory.

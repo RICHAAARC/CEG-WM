@@ -174,7 +174,7 @@ def _resolve_hf_snapshot_dir(
     Returns:
         Tuple of (snapshot_path_or_none, resolved_revision_or_none, error_or_none).
     """
-    # (P0-A) 离线模式强制：HF hub snapshot 禁止网络下载。
+    # 离线模式强制：HF hub snapshot 禁止网络下载。
     # Offline-only enforcement: HF hub snapshot_download is disabled.
     # Return error when local_files_only is False or unset.
     if isinstance(local_files_only, bool) and not local_files_only:
