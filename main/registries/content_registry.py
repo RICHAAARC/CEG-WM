@@ -19,6 +19,16 @@ from main.watermarking.content_chain.semantic_mask_provider import (
     SEMANTIC_MASK_PROVIDER_ID,
     SEMANTIC_MASK_PROVIDER_VERSION
 )
+from main.watermarking.content_chain.low_freq_coder import (
+    LowFreqCoder,
+    LOW_FREQ_CODER_ID,
+    LOW_FREQ_CODER_VERSION
+)
+from main.watermarking.content_chain.content_detector import (
+    ContentDetector,
+    CONTENT_DETECTOR_ID,
+    CONTENT_DETECTOR_VERSION
+)
 from main.watermarking.content_chain.subspace.placeholder_planner import (
     SubspacePlannerImpl,
     SUBSPACE_PLANNER_ID,
@@ -29,6 +39,8 @@ from main.watermarking.content_chain.subspace.placeholder_planner import (
 CONTENT_BASELINE_NOOP_ID = "content_baseline_noop_v1"
 SUBSPACE_BASELINE_FULL_ID = "subspace_baseline_full_v1"
 CONTENT_SEMANTIC_MASK_PROVIDER_ID = SEMANTIC_MASK_PROVIDER_ID
+CONTENT_LOW_FREQ_CODER_ID = LOW_FREQ_CODER_ID
+CONTENT_DETECTOR_ID_CONST = CONTENT_DETECTOR_ID
 
 
 class ContentBaselineNoop:
@@ -257,6 +269,52 @@ def _build_content_semantic_mask_provider(cfg: Dict[str, Any]) -> SemanticMaskPr
     return SemanticMaskProvider(CONTENT_SEMANTIC_MASK_PROVIDER_ID, impl_version, impl_digest)
 
 
+def _build_content_low_freq_coder(cfg: Dict[str, Any]) -> LowFreqCoder:
+    """
+    功能：构造低频水印编码器实现。
+
+    Build low-frequency coder content extractor.
+
+    Args:
+        cfg: Config mapping.
+
+    Returns:
+        LowFreqCoder instance.
+
+    Raises:
+        TypeError: If cfg is not dict.
+    """
+    if not isinstance(cfg, dict):
+        # cfg 类型不合法，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+    impl_version = LOW_FREQ_CODER_VERSION
+    impl_digest = _derive_impl_digest(CONTENT_LOW_FREQ_CODER_ID, impl_version)
+    return LowFreqCoder(CONTENT_LOW_FREQ_CODER_ID, impl_version, impl_digest)
+
+
+def _build_content_detector(cfg: Dict[str, Any]) -> ContentDetector:
+    """
+    功能：构造内容检测器实现。
+
+    Build content detector content extractor.
+
+    Args:
+        cfg: Config mapping.
+
+    Returns:
+        ContentDetector instance.
+
+    Raises:
+        TypeError: If cfg is not dict.
+    """
+    if not isinstance(cfg, dict):
+        # cfg 类型不合法，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+    impl_version = CONTENT_DETECTOR_VERSION
+    impl_digest = _derive_impl_digest(CONTENT_DETECTOR_ID_CONST, impl_version)
+    return ContentDetector(CONTENT_DETECTOR_ID_CONST, impl_version, impl_digest)
+
+
 def _build_subspace_planner(cfg: Dict[str, Any]) -> SubspacePlannerImpl:
     """
     功能：构造子空间规划器实现。
@@ -299,6 +357,28 @@ _CONTENT_REGISTRY.register_factory(
         requires_cuda=False,
         supports_deterministic=True,
         max_resolution=(2048, 2048),
+        supported_models=None
+    )
+)
+_CONTENT_REGISTRY.register_factory(
+    CONTENT_LOW_FREQ_CODER_ID,
+    _build_content_low_freq_coder,
+    capabilities=ImplCapabilities(
+        supports_batching=False,
+        requires_cuda=False,
+        supports_deterministic=True,
+        max_resolution=None,
+        supported_models=None
+    )
+)
+_CONTENT_REGISTRY.register_factory(
+    CONTENT_DETECTOR_ID_CONST,
+    _build_content_detector,
+    capabilities=ImplCapabilities(
+        supports_batching=False,
+        requires_cuda=False,
+        supports_deterministic=True,
+        max_resolution=None,
         supported_models=None
     )
 )

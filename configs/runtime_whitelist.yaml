@@ -147,6 +147,8 @@ impl_id:
   allowed_flat:
     - "content_baseline_noop_v1"
     - "semantic_mask_provider_v1"
+    - "low_freq_coder_v1"
+    - "content_detector_v1"
     - "geometry_baseline_noop_v1"
     - "fusion_baseline_identity_v1"
     - "subspace_baseline_full_v1"
@@ -168,6 +170,21 @@ impl_id:
       # - 生成可复算的掩码摘要与分辨率绑定。
       # - 用于 content_evidence 中的 mask_digest、mask_stats 字段。
       - "semantic_mask_provider_v1"
+
+      # 低频水印编码器：
+      # - 在 LF（低频）子空间施加隐蔽编码，作为主通道。
+      # - 支持 enable_lf 配置参数控制启用/禁用。
+      # - 生成可复算的 lf_trace_digest，绑定计划与编码参数。
+      # - 输出 lf_score，方向性固定（高值表示强证据）。
+      # - 严格区分 absent/failed/mismatch 语义。
+      - "low_freq_coder_v1"
+
+      # 内容检测器：
+      # - 统一从 LF/HF 子空间检测水印，输出融合得分。
+      # - 严格校验 plan_digest 一致性，不一致时返回 mismatch。
+      # - 输出 content_score、score_parts（lf_score/hf_score）。
+      # - 失败时 score=None，content_failure_reason 单一主因上报。
+      - "content_detector_v1"
 
     geometry_extractor:
       # 几何证据链占位实现：
