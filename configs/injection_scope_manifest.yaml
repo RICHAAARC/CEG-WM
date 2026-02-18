@@ -4,6 +4,8 @@ allowed_impl_ids:
 
   # content chain 真实实现
   - "semantic_mask_provider_v1"
+  - "low_freq_coder_v1"  # LF 子空间水印编码器
+  - "content_detector_v1"  # 统一内容检测器（LF+HF 融合）
   
   # subspace 真实实现
   - "subspace_planner_v1"

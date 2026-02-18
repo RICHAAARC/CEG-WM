@@ -50,6 +50,11 @@ class WriteCallVisitor(ast.NodeVisitor):
     def __init__(self, filepath: Path):
         self.filepath = filepath
         self.matches: List[Dict[str, Any]] = []
+        self.source_lines: List[str] = []  # 用于上下文分析
+        
+    def set_source_lines(self, source: str) -> None:
+        """Set source lines for context analysis."""
+        self.source_lines = source.split("\n")
         
     def visit_Call(self, node: ast.Call) -> None:
         """Visit function call nodes."""
@@ -69,6 +74,22 @@ class WriteCallVisitor(ast.NodeVisitor):
                 "access": access,
                 "mode": mode
             })
+        
+        # (1b) os.open(...) flags 模式推断（新增：去不确定化）
+        if isinstance(node.func, ast.Attribute):
+            if node.func.attr == "open" and self._looks_like_os_module(node.func):
+                flags_value, flags_str = self._extract_os_open_flags(node)
+                access = self._classify_access_from_os_flags(flags_value, flags_str)
+                self.matches.append({
+                    "path": str(self.filepath),
+                    "lineno_start": lineno,
+                    "lineno_end": end_lineno,
+                    "symbol": "os.open",
+                    "snippet": f"os.open() access={access} flags={flags_str} at line {lineno}",
+                    "access": access,
+                    "mode": None,
+                    "os_flags": flags_str
+                })
         
         # (2) Path.write_text / Path.write_bytes / Path.open
         if isinstance(node.func, ast.Attribute):
@@ -134,6 +155,128 @@ class WriteCallVisitor(ast.NodeVisitor):
 
         return None, False
 
+    def _classify_access_from_mode(self, mode: Optional[str], provided: bool) -> str:
+        """Classify access based on open() mode semantics."""
+        if mode is None:
+            return "unknown" if provided else "read"
+        if any(m in mode for m in WRITE_MODES):
+            return "write"
+        return "read"
+    
+    def _extract_os_open_flags(self, node: ast.Call) -> tuple[Optional[int], str]:
+        """
+        提取 os.open() 的 flags 参数并推断访问模式。
+
+        Extract os.open() flags and infer access mode.
+        
+        Args:
+            node: AST Call node.
+        
+        Returns:
+            Tuple of (flags_value_or_none, flags_str_representation).
+        """
+        if len(node.args) >= 2:
+            flags_arg = node.args[1]
+            return self._parse_flags_expr(flags_arg)
+        
+        for kw in node.keywords:
+            if kw.arg == "flags":
+                return self._parse_flags_expr(kw.value)
+        
+        return None, "unknown"
+    
+    def _parse_flags_expr(self, expr: ast.AST) -> tuple[Optional[int], str]:
+        """
+        解析 flags 表达式（支持位或运算）。
+
+        Parse flags expression (supports bitwise OR).
+        
+        Args:
+            expr: AST expression node.
+        
+        Returns:
+            Tuple of (flags_value_or_none, flags_str_representation).
+        """
+        # 处理常量
+        if isinstance(expr, ast.Constant) and isinstance(expr.value, int):
+            return expr.value, str(expr.value)
+        
+        # 处理属性访问：os.O_WRONLY | os.O_CREAT | os.O_APPEND
+        if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.BitOr):
+            left_val, left_str = self._parse_flags_expr(expr.left)
+            right_val, right_str = self._parse_flags_expr(expr.right)
+            
+            if left_val is not None and right_val is not None:
+                combined_val = left_val | right_val
+            else:
+                combined_val = None
+            
+            combined_str = f"{left_str}|{right_str}"
+            return combined_val, combined_str
+        
+        # 处理 os.O_* 常量
+        if isinstance(expr, ast.Attribute):
+            attr_name = expr.attr
+            if attr_name.startswith("O_"):
+                # 尝试从 os 模块获取实际值
+                import os as os_module
+                if hasattr(os_module, attr_name):
+                    flag_value = getattr(os_module, attr_name)
+                    return flag_value, f"os.{attr_name}"
+            return None, f"os.{attr_name}"
+        
+        return None, "unknown"
+    
+    def _classify_access_from_os_flags(self, flags_value: Optional[int], flags_str: str) -> str:
+        """
+        根据 os.open() flags 推断访问模式。
+
+        Classify access mode based on os.open() flags.
+        
+        Args:
+            flags_value: Parsed flags value (or None if unparsable).
+            flags_str: String representation of flags.
+        
+        Returns:
+            Access classification: "read", "write", or "unknown".
+        """
+        import os as os_module
+        
+        # 如果能解析出数值，使用精确判断
+        if flags_value is not None:
+            # 检查是否包含写标志
+            write_flags = [
+                os_module.O_WRONLY,
+                os_module.O_RDWR,
+                os_module.O_CREAT,
+                os_module.O_APPEND,
+                os_module.O_TRUNC
+            ]
+            if any(flags_value & flag for flag in write_flags):
+                return "write"
+            # 如果只有 O_RDONLY（值为 0），则为读
+            if flags_value == os_module.O_RDONLY:
+                return "read"
+            return "read"  # 默认为读
+        
+        # 如果无法解析数值，使用字符串模式匹配
+        write_patterns = ["O_WRONLY", "O_RDWR", "O_CREAT", "O_APPEND", "O_TRUNC"]
+        if any(pattern in flags_str for pattern in write_patterns):
+            return "write"
+        
+        # 如果包含 O_RDONLY，推断为读
+        if "O_RDONLY" in flags_str:
+            return "read"
+        
+        # 无法确定
+        return "unknown"
+    
+    def _looks_like_os_module(self, attr_node: ast.Attribute) -> bool:
+        """Check if attribute is from os module."""
+        if isinstance(attr_node.value, ast.Name):
+            return attr_node.value.id == "os"
+        return False
+    
     def _classify_access_from_mode(self, mode: Optional[str], provided: bool) -> str:
         """Classify access based on open() mode semantics."""
         if mode is None:
@@ -211,6 +354,53 @@ def _is_controlled_write_call(filepath: Path, lineno: int) -> bool:
         return False
 
 
+def _is_within_controlled_function(filepath: Path, lineno: int) -> bool:
+    """
+    检查给定行是否在受控写盘函数内部（用于 records_io.py 精确化）。
+
+    Check whether a line is within a controlled write function.
+    This is used to allowlist os.open() calls with access=unknown in records_io.py.
+    
+    Args:
+        filepath: Source file path (should be records_io.py).
+        lineno: Line number (1-indexed).
+    
+    Returns:
+        True if line is within append_jsonl, write_json, write_text, etc.
+    """
+    # 受控写盘函数列表（records_io.py 中的规范入口函数）
+    controlled_functions = [
+        "append_jsonl",
+        "write_json",
+        "write_text",
+        "write_artifact_json",
+        "write_artifact_bytes",
+        "write_artifact_canon_json_unbound",
+        "write_artifact_json_unbound",
+        "write_artifact_bytes_unbound",
+        "write_artifact_text_unbound",
+        "copy_file_controlled",
+        "copy_file_controlled_unbound"
+    ]
+    
+    try:
+        source = filepath.read_text(encoding="utf-8")
+        lines = source.split("\n")
+        if lineno <= 0 or lineno > len(lines):
+            return False
+        
+        # 向上搜索函数定义（简化启发式：找到 "def function_name(" 行）
+        for i in range(lineno - 1, max(0, lineno - 100), -1):
+            line = lines[i].strip()
+            for func_name in controlled_functions:
+                if line.startswith(f"def {func_name}("):
+                    return True
+        
+        return False
+    except Exception:
+        return False
+
+
 def classify_match(match: Dict[str, Any], repo_root: Path) -> str:
     """
     Classify match as ALLOWLISTED, FAIL, or WARNING.
@@ -226,17 +416,24 @@ def classify_match(match: Dict[str, Any], repo_root: Path) -> str:
     rel_path = filepath.relative_to(repo_root).as_posix()
     access = match.get("access")
     lineno = match.get("lineno_start", -1)
+    symbol = match.get("symbol", "")
 
     if access == "read":
         return "ALLOWLISTED"
-    if access == "unknown":
-        return "WARNING"
     
     # (1) records_io.py 中的受控写盘函数内部 → ALLOWLISTED
+    # 特别处理：os.open() access=unknown 时，通过函数上下文判断
     if "main/core/records_io.py" in rel_path:
-        # 需要进一步检查符号名是否在白名单中
-        # 这里简化为：records_io.py 中的所有 write 视为受控
-        return "ALLOWLISTED"
+        # records_io.py 中的所有 write/unknown 都视为受控写盘（仅限受控函数内部）
+        # 受控函数包括：append_jsonl, write_json, write_text 等
+        if access in ("write", "unknown") and _is_within_controlled_function(filepath, lineno):
+            return "ALLOWLISTED"
+        # 如果不在受控函数内部，则降级为 WARNING
+        if access == "unknown":
+            return "WARNING"
+    
+    if access == "unknown":
+        return "WARNING"
     
     # (2) scripts/run_freeze_signoff.py 中调用受控写盘函数 → ALLOWLISTED
     if "scripts/run_freeze_signoff.py" in rel_path:

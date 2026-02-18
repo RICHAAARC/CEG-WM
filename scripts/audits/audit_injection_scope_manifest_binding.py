@@ -365,14 +365,21 @@ def run_audit(repo_root: Path) -> Dict[str, Any]:
     ]
 
     fail_reasons = [c["check"] for c in checks if not c.get("pass")]
+    
+    # 检查是否存在 BLOCK 级别的违规（impl_id 闭合性失败）
+    has_block_failure = any(
+        c.get("severity") == "BLOCK_FREEZE" for c in checks if not c.get("pass")
+    )
+    
     result = "FAIL" if fail_reasons else "PASS"
+    severity = "BLOCK" if has_block_failure else "BLOCK"  # 本审计全部为 BLOCK 级别
 
     impact = "missing binding checks: " + ", ".join(fail_reasons) if fail_reasons else "injection_scope_manifest binding is enforced"
     fix_suggestion = (
         "1. Add configs/injection_scope_manifest.yaml; "
         "2. Bind injection_scope_manifest in records_io and schema; "
         "3. Ensure CLI entry points load and bind injection_scope_manifest; "
-        "4. Fix impl_id naming: allowed_impl_ids must match runtime_whitelist.allowed_flat exactly"
+        "4. Fix impl_id naming: allowed_impl_ids must be subset of runtime_whitelist.allowed_flat"
         if fail_reasons else "N.A."
     )
 

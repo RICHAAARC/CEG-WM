@@ -169,6 +169,173 @@ class LowFreqCoder:
         self.impl_version = impl_version
         self.impl_digest = impl_digest
 
+    def embed_apply(
+        self,
+        cfg: Dict[str, Any],
+        latent_features: Any,
+        plan_digest: str,
+        cfg_digest: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        功能：PRC-lite embed 侧注入闭环，确定性嵌入水印到 LF 子空间。
+
+        Apply deterministic PRC-lite watermark embedding to low-frequency subspace.
+        Returns modified latent features and embedding trace for audit.
+
+        必须满足：
+        1. embed 侧必须是确定性的（种子派生绑定 plan_digest + LF 参数）
+        2. 不允许写入大矩阵到 records；只能写摘要（注入前后统计摘要、seed 派生信息摘要）
+        3. 输出包含可复算摘要（embedding_digest、n、Δ、strength、seed_digest）
+
+        Args:
+            cfg: Configuration dict with watermark.lf.* parameters.
+            latent_features: Input latent features (flattened or nested list/array).
+            plan_digest: Plan digest binding (must match cfg plan_digest).
+            cfg_digest: Optional cfg canonical digest.
+
+        Returns:
+            Dict with keys:
+            - "latent_features_embedded": Modified latent features with watermark.
+            - "embedding_trace": Audit trace with embedding_digest, seed_digest, statistics.
+            - "embedding_digest": Canonical SHA256 digest of embedding operation.
+
+        Raises:
+            ValueError: If inputs are invalid or plan_digest mismatch.
+        """
+        if not isinstance(cfg, dict):
+            raise TypeError("cfg must be dict")
+        if plan_digest is None or not isinstance(plan_digest, str):
+            raise ValueError("plan_digest must be non-empty str")
+
+        # 验证 plan_digest 一致性（S-04 约束：detect 侧若不一致必须返回 mismatch）。
+        cfg_plan_digest = cfg.get("watermark", {}).get("plan_digest")
+        if cfg_plan_digest != plan_digest:
+            raise ValueError(
+                f"plan_digest mismatch: cfg={cfg_plan_digest}, input={plan_digest}. "
+                "S-04 constraint: embed and detect must use same plan_digest."
+            )
+
+        lf_cfg = cfg.get("watermark", {}).get("lf", {})
+        enabled = lf_cfg.get("enabled", False)
+        if not enabled:
+            # LF 未启用，返回原始 latent_features（无嵌入）。
+            return {
+                "latent_features_embedded": latent_features,
+                "embedding_trace": None,
+                "embedding_digest": None
+            }
+
+        # 读取 LF 参数（与 plan_digest_include_paths 对齐）。
+        codebook_id = lf_cfg.get("codebook_id", "default")
+        ecc = lf_cfg.get("ecc", 3)
+        strength = lf_cfg.get("strength", 0.1)
+        delta = lf_cfg.get("delta", 1.0)
+        block_length = lf_cfg.get("block_length", 8)
+        variance = lf_cfg.get("variance", 1.5)
+
+        # 参数验证（与 extract() 保持一致）。
+        if not isinstance(ecc, int) or ecc < 2 or ecc > 8:
+            raise ValueError(f"ecc must be int in [2, 8], got {ecc}")
+        if not isinstance(strength, (int, float)) or strength <= 0 or strength > 1:
+            raise ValueError(f"strength must be float in (0, 1], got {strength}")
+        if not isinstance(delta, (int, float)) or delta <= 0:
+            raise ValueError(f"delta must be positive number, got {delta}")
+        if not isinstance(block_length, int) or block_length < 1 or block_length > 64:
+            raise ValueError(f"block_length must be int in [1, 64], got {block_length}")
+        if not isinstance(variance, (int, float)) or variance <= 0:
+            raise ValueError(f"variance must be positive number, got {variance}")
+
+        # 扁平化 latent_features。
+        def flatten(lst):
+            result = []
+            for item in lst:
+                if isinstance(item, (list, tuple)):
+                    result.extend(flatten(item))
+                else:
+                    result.append(item)
+            return result
+
+        if isinstance(latent_features, (list, tuple)):
+            lf_vector = flatten(latent_features)
+        else:
+            lf_vector = list(latent_features)
+
+        # 派生确定性种子（绑定 plan_digest + 所有 LF 参数）。
+        import hashlib
+        param_seed_input = f"{plan_digest}:{codebook_id}:{ecc}:{strength}:{delta}:{block_length}:{variance}"
+        param_seed = hashlib.sha256(param_seed_input.encode()).hexdigest()
+        seed_int = int(param_seed[:16], 16) % 100000
+        seed_digest = hashlib.sha256(str(seed_int).encode()).hexdigest()[:16]
+
+        # 生成 ±1 codeword（确定性，可复算）。
+        codeword = []
+        for i in range(block_length):
+            bit = ((seed_int * (i + 1) + 17) % 2) * 2 - 1
+            codeword.append(bit)
+
+        # 提取前 n 个 LF 系数。
+        n = min(block_length, len(lf_vector))
+        if n == 0:
+            raise ValueError(f"lf_vector length {len(lf_vector)} < block_length {block_length}")
+
+        lf_coeffs = [float(lf_vector[i]) for i in range(n)]
+
+        # PRC-lite 真实嵌入机制：伪高斯嵌入。
+        # 对每个系数 coeff_i：
+        #   z_i = codeword_i * |randn()| * strength * delta
+        #   coeff_embedded_i = coeff_i + z_i
+        embedded_coeffs = []
+        import random
+        random.seed(seed_int)
+        for i in range(n):
+            # 生成伪高斯随机数（Box-Muller 变换）。
+            u1 = random.random()
+            u2 = random.random()
+            z_gaussian = math.sqrt(-2.0 * math.log(u1)) * math.cos(2.0 * math.pi * u2)
+            # 伪高斯嵌入：codeword * |randn()| * strength * delta。
+            z_embed = codeword[i] * abs(z_gaussian) * strength * delta
+            coeff_embedded = lf_coeffs[i] + z_embed
+            embedded_coeffs.append(coeff_embedded)
+
+        # 计算嵌入前后统计摘要（不写大矩阵，只写摘要）。
+        mean_before = sum(lf_coeffs) / n if n > 0 else 0.0
+        mean_after = sum(embedded_coeffs) / n if n > 0 else 0.0
+        energy_before = sum(c * c for c in lf_coeffs) / n if n > 0 else 0.0
+        energy_after = sum(c * c for c in embedded_coeffs) / n if n > 0 else 0.0
+
+        # 构造嵌入 trace（只保存摘要）。
+        embedding_trace = {
+            "codebook_id": codebook_id,
+            "ecc": ecc,
+            "strength": strength,
+            "delta": delta,
+            "block_length": block_length,
+            "variance": variance,
+            "n_embedded": n,
+            "seed_digest": seed_digest,  # 种子摘要（可复算性依据）
+            "mean_before": float(mean_before),
+            "mean_after": float(mean_after),
+            "energy_before": float(energy_before),
+            "energy_after": float(energy_after),
+            "codeword_snapshot": codeword[:min(8, len(codeword))],  # 只保存前 8 位用于审计
+            "detection_method": "erf_posterior_recovery",
+            "plan_digest": plan_digest,
+            "cfg_digest": cfg_digest
+        }
+
+        # 计算 embedding_digest（可复算摘要）。
+        embedding_digest = digests.canonical_sha256(embedding_trace)
+
+        # 将嵌入后的系数写回 lf_vector。
+        for i in range(n):
+            lf_vector[i] = embedded_coeffs[i]
+
+        return {
+            "latent_features_embedded": lf_vector,
+            "embedding_trace": embedding_trace,
+            "embedding_digest": embedding_digest
+        }
+
     def extract(
         self,
         cfg: Dict[str, Any],
@@ -242,7 +409,8 @@ class LowFreqCoder:
                 impl_digest=self.impl_digest,
                 enabled=False,
                 plan_digest=None,
-                encoding_trace=None
+                encoding_trace=None,
+                cfg_digest=cfg_digest
             )
             trace_digest = digests.canonical_sha256(trace_payload)
 
@@ -274,7 +442,8 @@ class LowFreqCoder:
                 impl_digest=self.impl_digest,
                 enabled=True,
                 plan_digest=None,
-                encoding_trace=None
+                encoding_trace=None,
+                cfg_digest=cfg_digest
             )
             trace_digest = digests.canonical_sha256(trace_payload)
 
@@ -295,10 +464,46 @@ class LowFreqCoder:
                 content_failure_reason="lf_coder_no_plan"
             )
 
-        # (3) 验证输入有效性。
+        # (2b) S-04 约束：若 inputs 中提供了 expected_plan_digest，必须验证一致性。
+        # 若 plan_digest 不一致，必须返回 status="mismatch" 且 score=None（失败不得给分）。
         if inputs is None:
             inputs = {}
 
+        expected_plan_digest = inputs.get("expected_plan_digest")
+        if expected_plan_digest is not None and expected_plan_digest != plan_digest:
+            # plan_digest 不一致，编码参数与计划脱离。
+            trace_payload = _build_lf_trace_payload(
+                cfg=cfg,
+                impl_id=self.impl_id,
+                impl_version=self.impl_version,
+                impl_digest=self.impl_digest,
+                enabled=True,
+                plan_digest=plan_digest,
+                encoding_trace=None,
+                cfg_digest=cfg_digest
+            )
+            trace_digest = digests.canonical_sha256(trace_payload)
+
+            audit = {
+                "impl_identity": self.impl_id,
+                "impl_version": self.impl_version,
+                "impl_digest": self.impl_digest,
+                "trace_digest": trace_digest,
+                "plan_digest_expected": expected_plan_digest,
+                "plan_digest_actual": plan_digest
+            }
+
+            return ContentEvidence(
+                status="mismatch",
+                score=None,
+                audit=audit,
+                lf_trace_digest=trace_digest,
+                lf_score=None,
+                plan_digest=plan_digest,
+                content_failure_reason="lf_coder_plan_mismatch"
+            )
+
+        # (3) 验证输入有效性。
         latent_features = inputs.get("latent_features")
         latent_shape = inputs.get("latent_shape")
 
@@ -311,7 +516,8 @@ class LowFreqCoder:
                 impl_digest=self.impl_digest,
                 enabled=True,
                 plan_digest=plan_digest,
-                encoding_trace=None
+                encoding_trace=None,
+                cfg_digest=cfg_digest
             )
             trace_digest = digests.canonical_sha256(trace_payload)
 
@@ -497,7 +703,8 @@ class LowFreqCoder:
                 impl_digest=self.impl_digest,
                 enabled=True,
                 plan_digest=plan_digest,
-                encoding_trace=None
+                encoding_trace=None,
+                cfg_digest=cfg_digest
             )
             trace_digest = digests.canonical_sha256(trace_payload)
 
@@ -526,7 +733,8 @@ class LowFreqCoder:
             impl_digest=self.impl_digest,
             enabled=True,
             plan_digest=plan_digest,
-            encoding_trace=encoding_trace
+            encoding_trace=encoding_trace,
+            cfg_digest=cfg_digest
         )
         lf_trace_digest = digests.canonical_sha256(trace_payload)
 
@@ -556,7 +764,8 @@ def _build_lf_trace_payload(
     impl_digest: str,
     enabled: bool,
     plan_digest: Optional[str],
-    encoding_trace: Optional[Dict[str, Any]]
+    encoding_trace: Optional[Dict[str, Any]],
+    cfg_digest: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     功能：构造可复算的低频编码追踪有效负载。
@@ -565,6 +774,9 @@ def _build_lf_trace_payload(
     
     关键设计：trace_payload 中的键空间与 plan_digest_include_paths 对齐，
     确保配置参数变化（watermark.lf.* 中任何字段）均导致 lf_trace_digest 变化。
+    
+    必须修复 2：当 enabled=true 时主 payload 必须包含 codebook_id/ecc/strength/delta/
+    block_length/variance/cfg_digest/plan_digest；disabled 时这些字段为 None，但键必须存在。
 
     Args:
         cfg: Configuration mapping containing 'watermark.lf.*' parameters.
@@ -574,10 +786,11 @@ def _build_lf_trace_payload(
         enabled: Whether LF coding is enabled.
         plan_digest: Optional plan digest binding.
         encoding_trace: Optional encoding parameters and trace.
+        cfg_digest: Optional canonical SHA256 digest of cfg (新增参数）。
 
     Returns:
         JSON-like dict for canonical SHA256 computation.
-        Keys are named to match plan_digest_include_paths (codebook_id, ecc, strength).
+        Keys are named to match plan_digest_include_paths (codebook_id, ecc, strength, delta, block_length, variance).
 
     Raises:
         TypeError: If inputs are invalid.
@@ -597,10 +810,15 @@ def _build_lf_trace_payload(
     if encoding_trace is not None and not isinstance(encoding_trace, dict):
         # encoding_trace 类型不合法，必须 fail-fast。
         raise TypeError("encoding_trace must be dict or None")
+    if cfg_digest is not None and not isinstance(cfg_digest, str):
+        # cfg_digest 类型不合法，必须 fail-fast。
+        raise TypeError("cfg_digest must be str or None")
 
     # P0 修复：统一键空间为 watermark.lf（与 plan_digest_include_paths 对齐）。
     lf_cfg = cfg.get("watermark", {}).get("lf", {})
 
+    # 必须修复 2：当 enabled=true 时主 payload 必须包含全部 plan_digest_include_paths 字段。
+    # 当 enabled=false 时，这些字段为 None，但键必须存在（确保四种返回路径使用同一键空间）。
     payload = {
         "impl_id": impl_id,
         "impl_version": impl_version,
@@ -608,12 +826,14 @@ def _build_lf_trace_payload(
         "trace_version": LOW_FREQ_CODER_TRACE_VERSION,
         "enabled": enabled,
         "plan_digest": plan_digest,
-        # P0 修复：包含所有 plan_digest_include_paths 中的 watermark.lf.* 字段。
+        "cfg_digest": cfg_digest,  # 新增：cfg_digest 必须写入主 payload
+        # P0 修复 + 必须修复 2：包含所有 plan_digest_include_paths 中的 watermark.lf.* 字段。
         "codebook_id": lf_cfg.get("codebook_id", "default") if enabled else None,
         "ecc": lf_cfg.get("ecc", 3) if enabled else None,
         "strength": lf_cfg.get("strength", 0.1) if enabled else None,
         "delta": lf_cfg.get("delta", 1.0) if enabled else None,
         "block_length": lf_cfg.get("block_length", 8) if enabled else None,
+        "variance": lf_cfg.get("variance", 1.5) if enabled else None,  # 新增：variance 必须写入主 payload
     }
 
     if encoding_trace is not None:

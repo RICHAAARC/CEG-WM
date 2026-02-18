@@ -279,7 +279,7 @@ def _compute_plan_digest_input(
     impl_digest: str
 ) -> Dict[str, Any]:
     """
-    功能：构造 plan_digest 的完整输入域。
+    功能：构造 plan_digest 的完整输入域（冻结与可复算）。
     
     Build complete input for plan_digest computation.
     This input must bind:
@@ -289,6 +289,8 @@ def _compute_plan_digest_input(
       - impl_identity (impl_id, impl_version, impl_digest)
     
     plan_digest = canonical_sha256(plan_digest_input)
+    
+    CRITICAL: 此输入域冻结，禁止删除/重命名键。允许 append，不允许改语义。
 
     Args:
         k: Subspace dimension.
@@ -300,7 +302,7 @@ def _compute_plan_digest_input(
         impl_digest: Implementation digest.
 
     Returns:
-        JSON-like dict for canonical SHA256 computation.
+        JSON-like dict for canonical SHA256 computation (canonical_sha256 ready).
     """
     return {
         "plan_digest_version": "v1",
@@ -312,9 +314,9 @@ def _compute_plan_digest_input(
         "k": k,
         "topk": topk,
         # 权威摘要绑定（digest_bindings）：必须进入 digest
-        "mask_digest_binding": mask_digest,      # 来自 SemanticMaskProvider
-        "cfg_digest_binding": cfg_digest,        # 来自 config_loader
-        # 可空性标记：显式声明输入缺失时的消融语义
+        "mask_digest_binding": mask_digest,
+        "cfg_digest_binding": cfg_digest,
+        # 可空性标记：显式声明输入缺失时的消融语义。
         "mask_digest_provided": mask_digest is not None,
         "cfg_digest_provided": cfg_digest is not None
     }

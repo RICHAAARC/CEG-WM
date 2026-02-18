@@ -148,6 +148,7 @@ impl_id:
     - "content_baseline_noop_v1"
     - "semantic_mask_provider_v1"
     - "low_freq_coder_v1"
+    - "content_detector_v1"  # 统一内容检测器（LF+HF 融合）
     - "content_detector_v1"
     - "geometry_baseline_noop_v1"
     - "fusion_baseline_identity_v1"

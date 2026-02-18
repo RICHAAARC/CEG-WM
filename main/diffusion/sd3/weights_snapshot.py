@@ -68,10 +68,15 @@ def compute_weights_snapshot_sha256(
             )
             if resolved_revision is not None:
                 snapshot_meta["resolved_revision"] = resolved_revision
+                snapshot_meta["snapshot_provenance_anchors"]["revision_resolved"] = resolved_revision
             if error is not None:
                 snapshot_meta["snapshot_status"] = "failed"
                 return "<absent>", snapshot_meta, error
-            return _compute_snapshot_digest(snapshot_dir, snapshot_meta)
+            
+            digest, snapshot_meta, digest_error = _compute_snapshot_digest(snapshot_dir, snapshot_meta)
+            if digest_error is None:
+                snapshot_meta["snapshot_provenance_anchors"]["snapshot_digest"] = digest
+            return digest, snapshot_meta, digest_error
 
         snapshot_meta["snapshot_status"] = "failed"
         return "<absent>", snapshot_meta, f"model_source not supported: {model_source}"
@@ -91,6 +96,11 @@ def _init_snapshot_meta(
     功能：初始化快照元信息。
 
     Initialize snapshot metadata with explicit <absent> fields.
+    
+    增强可复现性锚定（建议项）：
+    - 添加 resolved_revision 字段用于记录实际使用的 commit hash
+    - 添加 snapshot_provenance_anchors 字段建议在 run_closure 中引用
+    - 这些字段降低供应链漂移风险，确保模型权重可追溯
 
     Args:
         model_id: Model identifier.
@@ -106,13 +116,21 @@ def _init_snapshot_meta(
         "model_id": model_id if isinstance(model_id, str) and model_id else "<absent>",
         "model_source": model_source if isinstance(model_source, str) and model_source else "<absent>",
         "hf_revision": hf_revision if isinstance(hf_revision, str) and hf_revision else "<absent>",
-        "resolved_revision": "<absent>",
+        "resolved_revision": "<absent>",  # 实际使用的 commit hash（可复现锚定）
         "local_files_only": local_files_only if isinstance(local_files_only, bool) else "<absent>",
         "cache_dir": cache_dir if isinstance(cache_dir, str) and cache_dir else "<absent>",
         "snapshot_dir": "<absent>",
         "file_count": 0,
         "total_bytes": 0,
-        "snapshot_status": "unbuilt"
+        "snapshot_status": "unbuilt",
+        # 可复现性锚定建议字段（供 run_closure.provenance 引用）
+        "snapshot_provenance_anchors": {
+            "repo_id": model_id if isinstance(model_id, str) and model_id else "<absent>",
+            "revision_requested": hf_revision if isinstance(hf_revision, str) and hf_revision else "<absent>",
+            "revision_resolved": "<absent>",  # 将由 _resolve_hf_snapshot_dir 填充
+            "snapshot_digest": "<absent>",  # 将由 _compute_snapshot_digest 填充
+            "local_files_only_enforced": True  # 当前版本强制离线模式
+        }
     }
 
 
@@ -201,7 +219,22 @@ def _resolve_hf_snapshot_dir(
     except Exception as exc:
         return None, None, f"snapshot_download failed: {type(exc).__name__}: {exc}"
 
-    return Path(snapshot_path).resolve(), None, None
+    # 尝试从 snapshot_path 提取 resolved_revision（可复现锚定核查）。
+    # Hugging Face 缓存结构通常为：cache_dir/models--{org}--{name}/snapshots/{commit_hash}
+    # 提取 commit_hash 作为 resolved_revision 以增强可复现性。
+    resolved_snapshot_path = Path(snapshot_path).resolve()
+    resolved_revision = None
+    
+    try:
+        # 提取路径中的 commit hash（最后一级目录名）
+        if "snapshots" in resolved_snapshot_path.parts:
+            snapshots_idx = resolved_snapshot_path.parts.index("snapshots")
+            if snapshots_idx + 1 < len(resolved_snapshot_path.parts):
+                resolved_revision = resolved_snapshot_path.parts[snapshots_idx + 1]
+    except (ValueError, IndexError):
+        pass
+
+    return resolved_snapshot_path, resolved_revision, None
 
 
 def _compute_snapshot_digest(snapshot_path: Path, snapshot_meta: Dict[str, Any]) -> Tuple[str, Dict[str, Any], str | None]:
