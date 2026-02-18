@@ -242,12 +242,87 @@ class ContentDetector:
                 hf_score=None
             )
 
-        # (4) 提取得分分量。
+        # (4) 提取得分分量与状态传播。
+        # P2 修复：支持向后兼容（既接收 lf_evidence 也接收 lf_score）。
         try:
-            lf_score = inputs.get("lf_score")
-            hf_score = inputs.get("hf_score")
+            # (4a) 读取 lf_evidence（ContentEvidence dataclass 或 dict）。
+            lf_evidence = inputs.get("lf_evidence")
+            hf_evidence = inputs.get("hf_evidence")
 
-            # 验证得分类型。
+            # (4b) 处理 lf_evidence：提取 status 和 score。
+            lf_status = None
+            lf_score = None
+            lf_failure_reason = None
+            
+            # 如果提供了 lf_evidence，从中提取信息。
+            if lf_evidence is not None:
+                if isinstance(lf_evidence, dict):
+                    lf_status = lf_evidence.get("status")
+                    lf_score = lf_evidence.get("lf_score") or lf_evidence.get("score")
+                    lf_failure_reason = lf_evidence.get("content_failure_reason")
+                else:
+                    # 假设是 ContentEvidence dataclass
+                    lf_status = getattr(lf_evidence, "status", None)
+                    lf_score = getattr(lf_evidence, "lf_score", None) or getattr(lf_evidence, "score", None)
+                    lf_failure_reason = getattr(lf_evidence, "content_failure_reason", None)
+            else:
+                # 向后兼容：如果没有 lf_evidence，尝试直接读取 lf_score。
+                lf_score = inputs.get("lf_score")
+                if lf_score is not None:
+                    lf_status = "ok"  # 假设直接提供的分数是有效的
+
+            # (4c) 处理 hf_evidence：当前阶段 HF 应为 absent。
+            hf_status = None
+            hf_score = None
+            if hf_evidence is not None:
+                if isinstance(hf_evidence, dict):
+                    hf_status = hf_evidence.get("status")
+                    hf_score = hf_evidence.get("hf_score") or hf_evidence.get("score")
+                else:
+                    hf_status = getattr(hf_evidence, "status", None)
+                    hf_score = getattr(hf_evidence, "hf_score", None) or getattr(hf_evidence, "score", None)
+            else:
+                # 向后兼容：直接读取 hf_score。
+                hf_score_direct = inputs.get("hf_score")
+                if hf_score_direct is not None:
+                    hf_score = hf_score_direct
+                    hf_status = "ok"
+
+            # (4d) 状态传播：若 lf_status != "ok"，传播失败。
+            # 设计逻辑：LF 是主通道，其失败状态必须传播到 content 层。
+            if lf_status is not None and lf_status != "ok":
+                # LF 失败/缺失/不匹配，传播到 content 层。
+                trace_payload = _build_detector_trace_payload(
+                    cfg=cfg,
+                    impl_id=self.impl_id,
+                    impl_version=self.impl_version,
+                    impl_digest=self.impl_digest,
+                    enabled=True,
+                    plan_digest=plan_digest,
+                    detection_result=None
+                )
+                trace_digest = digests.canonical_sha256(trace_payload)
+
+                audit = {
+                    "impl_identity": self.impl_id,
+                    "impl_version": self.impl_version,
+                    "impl_digest": self.impl_digest,
+                    "trace_digest": trace_digest
+                }
+
+                # 传播 lf_status 和 lf_failure_reason。
+                return ContentEvidence(
+                    status=lf_status,  # 传播 lf_status（absent/failed/mismatch）
+                    score=None,  # 失败状态下 score 必须为 None
+                    audit=audit,
+                    plan_digest=plan_digest,
+                    content_failure_reason=lf_failure_reason,  # 传播 LF 失败原因
+                    score_parts=None,  # 失败状态下分量无效
+                    lf_score=None,
+                    hf_score=None
+                )
+
+            # (4e) 验证得分类型（仅当可用时）。
             if lf_score is not None and not isinstance(lf_score, (int, float)):
                 # lf_score 类型不合法，必须 fail-fast。
                 raise TypeError(f"lf_score must be float or None, got {type(lf_score).__name__}")
@@ -263,7 +338,7 @@ class ContentDetector:
                 # hf_score 值域不合法，必须 fail-fast。
                 raise ValueError(f"hf_score must be non-negative, got {hf_score}")
 
-            # 若无任何证据分数，返回失败。
+            # (4f) 若无任何有效证据分数（LF 和 HF 都 absent），返回失败。
             if lf_score is None and hf_score is None:
                 trace_payload = _build_detector_trace_payload(
                     cfg=cfg,
@@ -294,17 +369,76 @@ class ContentDetector:
                     hf_score=None
                 )
 
-            # (5) 融合得分（简化：占位实现，加权平均）。
-            # 在真实实现中，此处应执行实际分数融合算法。
-            if lf_score is not None and hf_score is not None:
-                # 两路都可用：加权融合（占位：等权）。
-                content_score = (lf_score + hf_score) / 2.0
-            elif lf_score is not None:
-                # 仅 LF 可用。
+            # (5) 融合得分（LF 仅主通道，HF 必须 absent）。
+            # 融合规则：content_score = lf_score（HF 当前不可用）。
+            # 设计逻辑：
+            # - 若 lf_score 可用，content_score = lf_score（主通道）。
+            # - 若 lf_score 不可用但 hf_score 可用，返回 failed（HF 当前应不可用）。
+            # - 当来评估时，可由校准阈值或融合规则决定是否接纳 HF。
+            if lf_score is not None:
+                # LF 主通道可用：直接作为内容分数。
                 content_score = lf_score
+            elif hf_score is not None:
+                # LF 不可用但 HF 可用：当前不受支持。
+                # 返回 failed，提示缺失主通道。
+                trace_payload = _build_detector_trace_payload(
+                    cfg=cfg,
+                    impl_id=self.impl_id,
+                    impl_version=self.impl_version,
+                    impl_digest=self.impl_digest,
+                    enabled=True,
+                    plan_digest=plan_digest,
+                    detection_result=None
+                )
+                trace_digest = digests.canonical_sha256(trace_payload)
+
+                audit = {
+                    "impl_identity": self.impl_id,
+                    "impl_version": self.impl_version,
+                    "impl_digest": self.impl_digest,
+                    "trace_digest": trace_digest
+                }
+
+                return ContentEvidence(
+                    status="failed",
+                    score=None,
+                    audit=audit,
+                    plan_digest=plan_digest,
+                    content_failure_reason="detector_extraction_failed",
+                    score_parts=None,
+                    lf_score=None,
+                    hf_score=None
+                )
             else:
-                # 仅 HF 可用。
-                content_score = hf_score
+                # 不应到达（前面已检查 lf_score is None and hf_score is None）。
+                trace_payload = _build_detector_trace_payload(
+                    cfg=cfg,
+                    impl_id=self.impl_id,
+                    impl_version=self.impl_version,
+                    impl_digest=self.impl_digest,
+                    enabled=True,
+                    plan_digest=plan_digest,
+                    detection_result=None
+                )
+                trace_digest = digests.canonical_sha256(trace_payload)
+
+                audit = {
+                    "impl_identity": self.impl_id,
+                    "impl_version": self.impl_version,
+                    "impl_digest": self.impl_digest,
+                    "trace_digest": trace_digest
+                }
+
+                return ContentEvidence(
+                    status="failed",
+                    score=None,
+                    audit=audit,
+                    plan_digest=plan_digest,
+                    content_failure_reason="detector_extraction_failed",
+                    score_parts=None,
+                    lf_score=None,
+                    hf_score=None
+                )
 
         except (TypeError, ValueError, KeyError) as e:
             # 检测异常，单一主因上报。
@@ -367,11 +501,12 @@ class ContentDetector:
         }
 
         score_parts = {
-            "lf_score": lf_score,
-            "hf_score": hf_score
+            "lf_score": lf_score if lf_score is not None else "<absent>",
+            "hf_score": "<absent>"  # P2 修复：HF 当前阶段显式标记为 absent
         }
 
         # (7) 返回成功证据。
+        # P2 修复：content_score = lf_score，HF 显式标记为 absent。
         return ContentEvidence(
             status="ok",
             score=content_score,
@@ -380,7 +515,7 @@ class ContentDetector:
             content_failure_reason=None,
             score_parts=score_parts,
             lf_score=lf_score,
-            hf_score=hf_score
+            hf_score=None  # P2 修复：HF 当前为 None（未实现）
         )
 
 

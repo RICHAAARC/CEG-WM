@@ -1,4 +1,4 @@
-injection_scope_manifest_version: "v1.0"
+injection_scope_manifest_version: "v1.1"  # 版本提升：追加 LF 参数漂移检测审计需求
 
 allowed_impl_ids:
 
@@ -73,9 +73,9 @@ digest_scope:
     - "watermark.lf.codebook_id"
     - "watermark.lf.ecc"
     - "watermark.lf.strength"
-
-    - "watermark.hf.tail_truncation_ratio"
-    - "watermark.hf.tail_truncation_mode"
+    - "watermark.lf.delta"
+    - "watermark.lf.block_length"
+    - "watermark.lf.variance"  # PRC 伪高斯方差（pseudogaussian variance），默认 1.5
     - "watermark.hf.codebook_id"
     - "watermark.hf.ecc"
 
@@ -98,3 +98,12 @@ operational_notes:
   - "Digest scope must remain append-only."
   - "Any new impl parameters must appear in plan_digest_include_paths."
   - "Removal of impl_id from allowed_impl_ids requires manifest version bump."
+  
+  - "LF Parameter Drift Detection (v1.1+):"
+  - "  Watermark.lf.* parameters are critical for reproducibility and must:"
+  - "    (a) Be included in plan_digest_include_paths (currently: codebook_id, ecc, strength)"
+  - "    (b) Cause plan_digest to change when any parameter is modified"
+  - "    (c) Be verified for consistency during detect phase (S-06 ContentDetector)"
+  - "    (d) If parameters change but plan_digest does not, status='mismatch' must be returned"
+  - "  This audit requirement prevents parameter drift attacks and ensures"
+  - "  all watermark parameters remain traceable and auditable."
