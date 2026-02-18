@@ -6,7 +6,7 @@ Module type: General module
 from main.core import digests
 from main.watermarking.content_chain.subspace.placeholder_planner import (
     SubspacePlannerImpl,
-    SUBSPACE_PLANNER_REAL_ID,
+    SUBSPACE_PLANNER_ID,
     SUBSPACE_PLANNER_VERSION
 )
 
@@ -43,8 +43,8 @@ def _build_inputs() -> dict:
 
 
 def test_subspace_plan_digest_binds_mask_digest() -> None:
-    impl_digest = digests.canonical_sha256({"impl_id": SUBSPACE_PLANNER_REAL_ID, "impl_version": SUBSPACE_PLANNER_VERSION})
-    planner = SubspacePlannerImpl(SUBSPACE_PLANNER_REAL_ID, SUBSPACE_PLANNER_VERSION, impl_digest)
+    impl_digest = digests.canonical_sha256({"impl_id": SUBSPACE_PLANNER_ID, "impl_version": SUBSPACE_PLANNER_VERSION})
+    planner = SubspacePlannerImpl(SUBSPACE_PLANNER_ID, SUBSPACE_PLANNER_VERSION, impl_digest)
 
     cfg = _build_cfg()
     inputs = _build_inputs()

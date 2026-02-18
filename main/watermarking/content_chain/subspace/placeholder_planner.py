@@ -21,7 +21,6 @@ from main.watermarking.content_chain.subspace.planner_interface import SubspaceP
 
 
 SUBSPACE_PLANNER_ID = "subspace_planner_v1"
-SUBSPACE_PLANNER_REAL_ID = "subspace_planner_real_v1"
 SUBSPACE_PLANNER_VERSION = "v1"
 
 

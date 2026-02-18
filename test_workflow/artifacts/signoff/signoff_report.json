@@ -17,7 +17,7 @@
       "audit_id": "B1.write_bypass_scan",
       "category": "B",
       "evidence": {
-        "allowlisted_count": 11,
+        "allowlisted_count": 13,
         "fail_count": 0,
         "matches": [
           {
@@ -62,7 +62,18 @@
           },
           {
             "access": "unknown",
-            "classification": "WARNING",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 1272,
+            "lineno_start": 1272,
+            "mode": null,
+            "os_flags": "unknown",
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "snippet": "os.open() access=unknown flags=unknown at line 1272",
+            "symbol": "os.open"
+          },
+          {
+            "access": "unknown",
+            "classification": "ALLOWLISTED",
             "lineno_end": 1272,
             "lineno_start": 1272,
             "mode": null,
@@ -139,7 +150,7 @@
             "symbol": "open"
           }
         ],
-        "warning_count": 1
+        "warning_count": 0
       },
       "fix": "N.A.",
       "gate_name": "gate.write_bypass",
@@ -282,9 +293,11 @@
             "check": "impl_id_closure",
             "manifest_impl_ids": [
               "content_baseline_noop_v1",
+              "content_detector_v1",
               "fusion_baseline_identity_v1",
               "geometry_baseline_noop_v1",
               "geometry_sync_baseline_v1",
+              "low_freq_coder_v1",
               "semantic_mask_provider_v1",
               "subspace_baseline_full_v1",
               "subspace_planner_v1"
@@ -295,9 +308,11 @@
             "unmapped_impl_ids": null,
             "whitelist_impl_ids": [
               "content_baseline_noop_v1",
+              "content_detector_v1",
               "fusion_baseline_identity_v1",
               "geometry_baseline_noop_v1",
               "geometry_sync_baseline_v1",
+              "low_freq_coder_v1",
               "semantic_mask_provider_v1",
               "subspace_baseline_full_v1",
               "subspace_planner_v1"
@@ -541,11 +556,11 @@
         "matches": [
           {
             "classification": "CONTROLLED",
-            "lineno_end": 200,
-            "lineno_start": 200,
+            "lineno_end": 218,
+            "lineno_start": 218,
             "path": "D:\\Code\\CEG-WM\\main\\diffusion\\sd3\\weights_snapshot.py",
             "risk": "model_download",
-            "snippet": "snapshot_download() at line 200",
+            "snippet": "snapshot_download() at line 218",
             "symbol": "snapshot_download"
           }
         ],
@@ -572,8 +587,8 @@
       },
       {
         "path": "runtime_whitelist.yaml",
-        "sha256": "66361a3fd03b2128811918ecfcadf2e13857e11a57968af586aaf254b896b475",
-        "size_bytes": 12521
+        "sha256": "7719d44a394ff9ff04d95535c9cec6d2ff82c69020ab8f22ea70a3dd0554a9a2",
+        "size_bytes": 13430
       },
       {
         "path": "policy_path_semantics.yaml",
@@ -584,7 +599,7 @@
     "snapshot_dir": "D:\\Code\\CEG-WM\\test_workflow\\artifacts\\signoff\\frozen_constraints_snapshot",
     "status": "ok"
   },
-  "generated_at_utc": "2026-02-18T05:10:25.653Z",
+  "generated_at_utc": "2026-02-18T13:45:11.181Z",
   "minimum_audit_set": [
     "audits/audit_write_bypass_scan.py",
     "audits/audit_registry_injection_surface.py",
@@ -626,7 +641,7 @@
     "exit_code": 0,
     "status": "pass",
     "stderr_tail": "",
-    "stdout_tail": "........................................................................ [ 83%]\r\n..............                                                           [100%]\r\n86 passed in 4.00s\r\n",
+    "stdout_tail": "........................................................................ [ 54%]\r\n...........................................................              [100%]\r\n131 passed in 3.83s\r\n",
     "test_summary": "pytest executed"
   }
 }

@@ -11,7 +11,7 @@ from main.registries.runtime_resolver import BuiltImplSet
 from main.watermarking.content_chain.interfaces import ContentEvidence
 from main.watermarking.content_chain.subspace.placeholder_planner import (
     SubspacePlannerImpl,
-    SUBSPACE_PLANNER_REAL_ID,
+    SUBSPACE_PLANNER_ID,
     SUBSPACE_PLANNER_VERSION
 )
 from main.watermarking.detect.orchestrator import run_detect_orchestrator
@@ -65,8 +65,8 @@ class _SyncStub:
 
 
 def test_detect_plan_mismatch_is_mismatch() -> None:
-    impl_digest = digests.canonical_sha256({"impl_id": SUBSPACE_PLANNER_REAL_ID, "impl_version": SUBSPACE_PLANNER_VERSION})
-    subspace_planner = SubspacePlannerImpl(SUBSPACE_PLANNER_REAL_ID, SUBSPACE_PLANNER_VERSION, impl_digest)
+    impl_digest = digests.canonical_sha256({"impl_id": SUBSPACE_PLANNER_ID, "impl_version": SUBSPACE_PLANNER_VERSION})
+    subspace_planner = SubspacePlannerImpl(SUBSPACE_PLANNER_ID, SUBSPACE_PLANNER_VERSION, impl_digest)
     fusion_stub = _FusionRuleStub()
 
     impl_set = BuiltImplSet(
