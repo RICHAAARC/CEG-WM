@@ -25,6 +25,28 @@ from main.watermarking.content_chain.subspace.placeholder_planner import (
 from main.watermarking.content_chain.subspace.planner_interface import SubspacePlanEvidence
 
 
+def _build_planner_inputs() -> Dict[str, Any]:
+    """
+    功能：构造规划器输入。 
+
+    Build deterministic planner inputs for tests.
+
+    Args:
+        None.
+
+    Returns:
+        Planner inputs mapping.
+    """
+    return {
+        "trace_signature": {
+            "num_inference_steps": 20,
+            "guidance_scale": 7.0,
+            "height": 512,
+            "width": 512
+        }
+    }
+
+
 class TestPlanDigestBinding:
     """
     验证 plan_digest 完整绑定到所有关键因素。
@@ -58,18 +80,18 @@ class TestPlanDigestBinding:
         mask_digest = "mask_digest_64chars_111111111111111111111111111111111111111"
         
         # 第一次：使用 cfg_digest_1 计算
-        result1 = planner.plan(cfg, mask_digest=mask_digest, cfg_digest=cfg_digest_1)
+        result1 = planner.plan(cfg, mask_digest=mask_digest, cfg_digest=cfg_digest_1, inputs=_build_planner_inputs())
         assert result1.status == "ok"
         plan_digest_with_cfg1 = result1.plan_digest
         
         # 第二次：使用相同的 cfg_digest_1 再计算，plan_digest 应相同（可复算）
-        result1_repeat = planner.plan(cfg, mask_digest=mask_digest, cfg_digest=cfg_digest_1)
+        result1_repeat = planner.plan(cfg, mask_digest=mask_digest, cfg_digest=cfg_digest_1, inputs=_build_planner_inputs())
         assert result1_repeat.status == "ok"
         assert result1_repeat.plan_digest == plan_digest_with_cfg1, \
             "plan_digest 应可复算（同 cfg_digest 应产出相同 plan_digest）"
         
         # 第三次：改用 cfg_digest_2，plan_digest 必须变化
-        result2 = planner.plan(cfg, mask_digest=mask_digest, cfg_digest=cfg_digest_2)
+        result2 = planner.plan(cfg, mask_digest=mask_digest, cfg_digest=cfg_digest_2, inputs=_build_planner_inputs())
         assert result2.status == "ok"
         plan_digest_with_cfg2 = result2.plan_digest
         assert plan_digest_with_cfg2 != plan_digest_with_cfg1, \
@@ -102,12 +124,12 @@ class TestPlanDigestBinding:
         mask_digest_2 = "mask_digest_2_64chars_222222222222222222222222222222222222222"
         
         # 使用 mask_digest_1
-        result1 = planner.plan(cfg, mask_digest=mask_digest_1, cfg_digest=cfg_digest)
+        result1 = planner.plan(cfg, mask_digest=mask_digest_1, cfg_digest=cfg_digest, inputs=_build_planner_inputs())
         assert result1.status == "ok"
         plan_digest_with_mask1 = result1.plan_digest
         
         # 使用 mask_digest_2
-        result2 = planner.plan(cfg, mask_digest=mask_digest_2, cfg_digest=cfg_digest)
+        result2 = planner.plan(cfg, mask_digest=mask_digest_2, cfg_digest=cfg_digest, inputs=_build_planner_inputs())
         assert result2.status == "ok"
         plan_digest_with_mask2 = result2.plan_digest
         assert plan_digest_with_mask2 != plan_digest_with_mask1, \
@@ -146,10 +168,10 @@ class TestPlanDigestBinding:
         cfg_digest = "cfg_digest_64chars_abc123def456abc123def456abc123def456abc12"
         mask_digest = "mask_digest_64chars_111111111111111111111111111111111111111"
         
-        result1 = planner.plan(cfg_base, mask_digest=mask_digest, cfg_digest=cfg_digest)
+        result1 = planner.plan(cfg_base, mask_digest=mask_digest, cfg_digest=cfg_digest, inputs=_build_planner_inputs())
         assert result1.status == "ok"
         
-        result2 = planner.plan(cfg_with_k15_topk25, mask_digest=mask_digest, cfg_digest=cfg_digest)
+        result2 = planner.plan(cfg_with_k15_topk25, mask_digest=mask_digest, cfg_digest=cfg_digest, inputs=_build_planner_inputs())
         assert result2.status == "ok"
         
         assert result1.plan_digest != result2.plan_digest, \
@@ -200,11 +222,11 @@ class TestTraceDigestIsolation:
         cfg_digest = "cfg_digest_64chars_abc123def456abc123def456abc123def456abc12"
         mask_digest = "mask_digest_64chars_111111111111111111111111111111111111111"
         
-        result1 = planner.plan(cfg_base, mask_digest=mask_digest, cfg_digest=cfg_digest)
+        result1 = planner.plan(cfg_base, mask_digest=mask_digest, cfg_digest=cfg_digest, inputs=_build_planner_inputs())
         assert result1.status == "ok"
         trace_digest_1 = result1.audit.get("trace_digest")
         
-        result2 = planner.plan(cfg_modified_irrelevant, mask_digest=mask_digest, cfg_digest=cfg_digest)
+        result2 = planner.plan(cfg_modified_irrelevant, mask_digest=mask_digest, cfg_digest=cfg_digest, inputs=_build_planner_inputs())
         assert result2.status == "ok"
         trace_digest_2 = result2.audit.get("trace_digest")
         
@@ -314,18 +336,13 @@ class TestAblationSemantics:
         cfg_digest = "cfg_digest_64chars_abc123def456abc123def456abc123def456abc12"
         
         # mask_digest=None（缺失）
-        result = planner.plan(cfg, mask_digest=None, cfg_digest=cfg_digest)
-        
-        assert result.status == "ok", \
-            "即使 mask_digest 缺失，仍应返回 ok（表示能计算）"
-        assert result.plan_digest is not None, \
-            "mask_digest 缺失时，plan_digest 仍应可复算"
-        assert result.plan is not None
-        
-        # 验证 plan 中显式标注了 mask_digest_status=absent
-        plan = result.plan
-        assert plan.get("mask_digest_status") == "absent", \
-            "plan_payload 必须显式标注 mask_digest_status=absent 以记录消融情况"
+        result = planner.plan(cfg, mask_digest=None, cfg_digest=cfg_digest, inputs=_build_planner_inputs())
+
+        assert result.status == "absent", \
+            "mask_digest 缺失时应返回 absent 语义"
+        assert result.plan is None
+        assert result.plan_digest is None
+        assert result.plan_failure_reason == "mask_absent"
 
 
 class TestDetectSideMismatchValidation:
@@ -361,12 +378,12 @@ class TestDetectSideMismatchValidation:
         mask_digest = "mask_digest_64chars_111111111111111111111111111111111111111"
         
         # embed 时的计算
-        embed_result = planner.plan(cfg, mask_digest=mask_digest, cfg_digest=cfg_digest_embed)
+        embed_result = planner.plan(cfg, mask_digest=mask_digest, cfg_digest=cfg_digest_embed, inputs=_build_planner_inputs())
         assert embed_result.status == "ok"
         embed_plan_digest = embed_result.plan_digest
         
         # detect 时的计算（使用不同的 cfg_digest）
-        detect_result = planner.plan(cfg, mask_digest=mask_digest, cfg_digest=cfg_digest_detect)
+        detect_result = planner.plan(cfg, mask_digest=mask_digest, cfg_digest=cfg_digest_detect, inputs=_build_planner_inputs())
         assert detect_result.status == "ok"
         detect_plan_digest = detect_result.plan_digest
         

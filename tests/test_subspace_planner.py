@@ -38,13 +38,24 @@ class TestSubspacePlannerBasic:
             "watermark": {
                 "subspace": {
                     "enabled": True,
-                    "k": 10,
-                    "topk": 20
+                    "rank": 6,
+                    "sample_count": 12,
+                    "feature_dim": 32,
+                    "seed": 11
                 }
             }
         }
 
-        result = planner.plan(cfg)
+        inputs = {
+            "trace_signature": {
+                "num_inference_steps": 20,
+                "guidance_scale": 7.0,
+                "height": 512,
+                "width": 512
+            }
+        }
+
+        result = planner.plan(cfg, mask_digest="mask_digest_001", inputs=inputs)
 
         assert result.status == "ok"
         assert result.plan is not None
@@ -67,8 +78,9 @@ class TestSubspacePlannerBasic:
             "watermark": {
                 "subspace": {
                     "enabled": False,
-                    "k": 10,
-                    "topk": 20
+                    "rank": 6,
+                    "sample_count": 12,
+                    "feature_dim": 32
                 }
             }
         }
@@ -100,20 +112,31 @@ class TestPlanDigestBinding:
             "watermark": {
                 "subspace": {
                     "enabled": True,
-                    "k": 10,
-                    "topk": 20
+                    "rank": 6,
+                    "sample_count": 12,
+                    "feature_dim": 32,
+                    "seed": 11
                 }
             }
         }
 
+        inputs = {
+            "trace_signature": {
+                "num_inference_steps": 20,
+                "guidance_scale": 7.0,
+                "height": 512,
+                "width": 512
+            }
+        }
+
         mask_digest_1 = "mask_digest_value_1"
-        result1 = planner.plan(cfg, mask_digest=mask_digest_1)
+        result1 = planner.plan(cfg, mask_digest=mask_digest_1, inputs=inputs)
 
         assert result1.status == "ok"
         plan_digest_1 = result1.plan_digest
 
         mask_digest_2 = "mask_digest_value_2"
-        result2 = planner.plan(cfg, mask_digest=mask_digest_2)
+        result2 = planner.plan(cfg, mask_digest=mask_digest_2, inputs=inputs)
 
         assert result2.status == "ok"
         plan_digest_2 = result2.plan_digest
@@ -136,21 +159,32 @@ class TestPlanDigestBinding:
             "watermark": {
                 "subspace": {
                     "enabled": True,
-                    "k": 10,
-                    "topk": 20
+                    "rank": 6,
+                    "sample_count": 12,
+                    "feature_dim": 32,
+                    "seed": 11
                 }
+            }
+        }
+
+        inputs = {
+            "trace_signature": {
+                "num_inference_steps": 20,
+                "guidance_scale": 7.0,
+                "height": 512,
+                "width": 512
             }
         }
 
         mask_digest = "test_mask_digest"
         cfg_digest_1 = "cfg_digest_1"
-        result1 = planner.plan(cfg, mask_digest=mask_digest, cfg_digest=cfg_digest_1)
+        result1 = planner.plan(cfg, mask_digest=mask_digest, cfg_digest=cfg_digest_1, inputs=inputs)
 
         assert result1.status == "ok"
         plan_digest_1 = result1.plan_digest
 
         cfg_digest_2 = "cfg_digest_2"
-        result2 = planner.plan(cfg, mask_digest=mask_digest, cfg_digest=cfg_digest_2)
+        result2 = planner.plan(cfg, mask_digest=mask_digest, cfg_digest=cfg_digest_2, inputs=inputs)
 
         assert result2.status == "ok"
         plan_digest_2 = result2.plan_digest
@@ -173,17 +207,28 @@ class TestPlanDigestBinding:
             "watermark": {
                 "subspace": {
                     "enabled": True,
-                    "k": 10,
-                    "topk": 20
+                    "rank": 6,
+                    "sample_count": 12,
+                    "feature_dim": 32,
+                    "seed": 11
                 }
+            }
+        }
+
+        inputs = {
+            "trace_signature": {
+                "num_inference_steps": 20,
+                "guidance_scale": 7.0,
+                "height": 512,
+                "width": 512
             }
         }
 
         mask_digest = "test_mask_digest"
         cfg_digest = "test_cfg_digest"
 
-        result1 = planner.plan(cfg, mask_digest=mask_digest, cfg_digest=cfg_digest)
-        result2 = planner.plan(cfg, mask_digest=mask_digest, cfg_digest=cfg_digest)
+        result1 = planner.plan(cfg, mask_digest=mask_digest, cfg_digest=cfg_digest, inputs=inputs)
+        result2 = planner.plan(cfg, mask_digest=mask_digest, cfg_digest=cfg_digest, inputs=inputs)
 
         assert result1.status == "ok"
         assert result2.status == "ok"
@@ -209,8 +254,10 @@ class TestPlanDigestNotSensitiveToNonPlanDigestScopeFields:
             "watermark": {
                 "subspace": {
                     "enabled": True,
-                    "k": 10,
-                    "topk": 20
+                    "rank": 6,
+                    "sample_count": 12,
+                    "feature_dim": 32,
+                    "seed": 11
                 }
             },
             "plan_digest_scope_field": "important",
@@ -222,9 +269,17 @@ class TestPlanDigestNotSensitiveToNonPlanDigestScopeFields:
 
         mask_digest = "test_mask"
         cfg_digest = "test_cfg_digest"
+        inputs = {
+            "trace_signature": {
+                "num_inference_steps": 20,
+                "guidance_scale": 7.0,
+                "height": 512,
+                "width": 512
+            }
+        }
 
-        result1 = planner.plan(cfg_base, mask_digest=mask_digest, cfg_digest=cfg_digest)
-        result2 = planner.plan(cfg_modified, mask_digest=mask_digest, cfg_digest=cfg_digest)
+        result1 = planner.plan(cfg_base, mask_digest=mask_digest, cfg_digest=cfg_digest, inputs=inputs)
+        result2 = planner.plan(cfg_modified, mask_digest=mask_digest, cfg_digest=cfg_digest, inputs=inputs)
 
         assert result1.status == "ok"
         assert result2.status == "ok"
@@ -253,13 +308,24 @@ class TestPlanAuditFields:
             "watermark": {
                 "subspace": {
                     "enabled": True,
-                    "k": 10,
-                    "topk": 20
+                    "rank": 6,
+                    "sample_count": 12,
+                    "feature_dim": 32,
+                    "seed": 11
                 }
             }
         }
 
-        result = planner.plan(cfg)
+        inputs = {
+            "trace_signature": {
+                "num_inference_steps": 20,
+                "guidance_scale": 7.0,
+                "height": 512,
+                "width": 512
+            }
+        }
+
+        result = planner.plan(cfg, mask_digest="mask_digest_001", inputs=inputs)
 
         assert result.status == "ok"
         assert result.audit is not None
@@ -287,13 +353,23 @@ class TestPlanFailureReasons:
             "watermark": {
                 "subspace": {
                     "enabled": True,
-                    "k": -1,  # 无效的负数
-                    "topk": 20
+                    "rank": -1,
+                    "sample_count": 12,
+                    "feature_dim": 32
                 }
             }
         }
 
-        result = planner.plan(cfg)
+        inputs = {
+            "trace_signature": {
+                "num_inference_steps": 20,
+                "guidance_scale": 7.0,
+                "height": 512,
+                "width": 512
+            }
+        }
+
+        result = planner.plan(cfg, mask_digest="mask_digest_001", inputs=inputs)
 
         assert result.status == "failed"
         assert result.plan_failure_reason is not None

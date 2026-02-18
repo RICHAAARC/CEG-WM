@@ -70,10 +70,12 @@ def run_embed_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet, cfg_dige
         mask_digest = content_result.mask_digest
     
     # 调用规划器计算 plan_digest，绑定 cfg_digest + mask_digest + planner_params。
+    planner_inputs = _build_planner_inputs_for_runtime(cfg)
     subspace_result = impl_set.subspace_planner.plan(
         cfg,
         mask_digest=mask_digest,
-        cfg_digest=cfg_digest
+        cfg_digest=cfg_digest,
+        inputs=planner_inputs
     )
     
     sync_result = impl_set.sync_module.sync(cfg)
@@ -88,7 +90,7 @@ def run_embed_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet, cfg_dige
         "seed": 42,
         "strength": 0.5,
         "content_result": content_result,
-        "subspace_plan": subspace_result,
+        "subspace_plan": subspace_result.as_dict() if hasattr(subspace_result, "as_dict") else subspace_result,
         "sync_result": sync_result,
         # 添加 execution_report（冻结门禁要求）。
         # 注：embed 阶段未执行融合，fusion_status 置为 "absent"；
@@ -106,5 +108,38 @@ def run_embed_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet, cfg_dige
         record_fields["plan_digest"] = subspace_result.plan_digest
         record_fields["basis_digest"] = subspace_result.basis_digest
         record_fields["plan_stats"] = subspace_result.plan_stats
+        if isinstance(subspace_result.plan, dict):
+            record_fields["subspace_rank"] = subspace_result.plan.get("rank")
+            record_fields["subspace_energy_ratio"] = subspace_result.plan.get("energy_ratio")
+            record_fields["subspace_planner_impl_identity"] = subspace_result.plan.get("planner_impl_identity")
     
     return record_fields
+
+
+def _build_planner_inputs_for_runtime(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：构造规划器输入签名。
+
+    Build deterministic planner input signature from cfg runtime fields.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Planner input mapping containing trace_signature.
+
+    Raises:
+        TypeError: If cfg is invalid.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+
+    trace_signature = {
+        "num_inference_steps": cfg.get("inference_num_steps", cfg.get("generation", {}).get("num_inference_steps", 16) if isinstance(cfg.get("generation"), dict) else 16),
+        "guidance_scale": cfg.get("inference_guidance_scale", cfg.get("generation", {}).get("guidance_scale", 7.0) if isinstance(cfg.get("generation"), dict) else 7.0),
+        "height": cfg.get("inference_height", cfg.get("model", {}).get("height", 512) if isinstance(cfg.get("model"), dict) else 512),
+        "width": cfg.get("inference_width", cfg.get("model", {}).get("width", 512) if isinstance(cfg.get("model"), dict) else 512),
+    }
+    return {
+        "trace_signature": trace_signature
+    }

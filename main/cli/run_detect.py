@@ -301,7 +301,7 @@ def run_detect(
 
             # 构造 detect record，本阶段为 placeholder。
             print("[Detect] Generating detect record (placeholder)...")
-            record = run_detect_orchestrator(cfg, impl_set, input_record)
+            record = run_detect_orchestrator(cfg, impl_set, input_record, cfg_digest=cfg_digest)
             if record is None:
                 exc = RuntimeError("record_construction_failed: record is None")
                 set_failure_status(run_meta, RunFailureReason.RUNTIME_ERROR, exc)

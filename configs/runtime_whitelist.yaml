@@ -148,12 +148,12 @@ impl_id:
     - "content_baseline_noop_v1"
     - "semantic_mask_provider_v1"
     - "low_freq_coder_v1"
-    - "content_detector_v1"  # 统一内容检测器（LF+HF 融合）
-    - "content_detector_v1"
+    - "content_detector_v1"  # 统一内容检测器
     - "geometry_baseline_noop_v1"
     - "fusion_baseline_identity_v1"
     - "subspace_baseline_full_v1"
     - "subspace_planner_v1"
+    - "subspace_planner_real_v1"
     - "geometry_sync_baseline_v1"
 
   allowed_by_domain:
@@ -213,6 +213,11 @@ impl_id:
       # - 支持规划器消融（disabled 时返回 absent）。
       # - 输出序列化的规划摘要与统计（无巨大矩阵）。
       - "subspace_planner_v1"
+
+      # 子空间规划器真实实现：
+      # - 执行 SVD 低维子空间估计并输出摘要化 subspace_spec。
+      # - 绑定 plan_digest/basis_digest/impl_identity，detect 侧强一致性校验。
+      - "subspace_planner_real_v1"
 
     sync_module:
       # 同步模块占位实现：

@@ -32,6 +32,7 @@ from main.watermarking.content_chain.content_detector import (
 from main.watermarking.content_chain.subspace.placeholder_planner import (
     SubspacePlannerImpl,
     SUBSPACE_PLANNER_ID,
+    SUBSPACE_PLANNER_REAL_ID,
     SUBSPACE_PLANNER_VERSION
 )
 
@@ -338,6 +339,29 @@ def _build_subspace_planner(cfg: Dict[str, Any]) -> SubspacePlannerImpl:
     return SubspacePlannerImpl(SUBSPACE_PLANNER_ID, impl_version, impl_digest)
 
 
+def _build_subspace_planner_real(cfg: Dict[str, Any]) -> SubspacePlannerImpl:
+    """
+    功能：构造真实子空间规划器实现（独立 impl_id）。
+
+    Build real subspace planner implementation with dedicated impl_id.
+
+    Args:
+        cfg: Config mapping.
+
+    Returns:
+        SubspacePlannerImpl instance.
+
+    Raises:
+        TypeError: If cfg is not dict.
+    """
+    if not isinstance(cfg, dict):
+        # cfg 类型不合法，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+    impl_version = SUBSPACE_PLANNER_VERSION
+    impl_digest = _derive_impl_digest(SUBSPACE_PLANNER_REAL_ID, impl_version)
+    return SubspacePlannerImpl(SUBSPACE_PLANNER_REAL_ID, impl_version, impl_digest)
+
+
 _CONTENT_REGISTRY.register_factory(
     CONTENT_BASELINE_NOOP_ID,
     _build_content_baseline_noop,
@@ -396,6 +420,17 @@ _SUBSPACE_REGISTRY.register_factory(
 _SUBSPACE_REGISTRY.register_factory(
     SUBSPACE_PLANNER_ID,
     _build_subspace_planner,
+    capabilities=ImplCapabilities(
+        supports_batching=False,
+        requires_cuda=False,
+        supports_deterministic=True,
+        max_resolution=None,
+        supported_models=None
+    )
+)
+_SUBSPACE_REGISTRY.register_factory(
+    SUBSPACE_PLANNER_REAL_ID,
+    _build_subspace_planner_real,
     capabilities=ImplCapabilities(
         supports_batching=False,
         requires_cuda=False,
