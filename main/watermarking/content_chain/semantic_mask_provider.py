@@ -74,7 +74,8 @@ class SemanticMaskProvider:
     def extract(
         self,
         cfg: Dict[str, Any],
-        inputs: Optional[Dict[str, Any]] = None
+        inputs: Optional[Dict[str, Any]] = None,
+        cfg_digest: Optional[str] = None
     ) -> ContentEvidence:
         """
         功能：提取语义掩码证据，支持可选启用与禁用模式。
@@ -102,6 +103,10 @@ class SemanticMaskProvider:
                 - "image" or "latent" (array-like): Input for mask computation.
                 - "image_shape" (tuple, optional): Expected shape (H, W, C).
                 - Other input fields included in trace digest.
+            cfg_digest: Optional canonical SHA256 digest of cfg (computed from include_paths).
+                       When provided, mask_digest will bind to this authoritative digest
+                       instead of recomputing from full cfg. Prevents non-digest-scope fields
+                       from affecting mask_digest and ensures reproducibility.
 
         Returns:
             ContentEvidence instance with:
@@ -124,6 +129,9 @@ class SemanticMaskProvider:
         if inputs is not None and not isinstance(inputs, dict):
             # inputs 类型不合法，必须 fail-fast。
             raise TypeError("inputs must be dict or None")
+        if cfg_digest is not None and not isinstance(cfg_digest, str):
+            # cfg_digest 类型不合法，必须 fail-fast。
+            raise TypeError("cfg_digest must be str or None")
 
         # 1. 解析配置参数。
         enable_mask = cfg.get("enable_mask", False)
@@ -138,7 +146,8 @@ class SemanticMaskProvider:
             self.impl_id,
             self.impl_version,
             self.impl_digest,
-            enable_mask
+            enable_mask,
+            cfg_digest=cfg_digest
         )
         trace_digest = digests.canonical_sha256(trace_payload)
 
@@ -212,7 +221,7 @@ class SemanticMaskProvider:
 
         # （3）掩码计算（简化版：演示版本不实现真实 ML 模型、直接生成模型掩码）。
         try:
-            mask_payload = _compute_semantic_mask(image_data, image_shape, cfg)
+            mask_payload = _compute_semantic_mask(image_data, image_shape, cfg, cfg_digest=cfg_digest)
             mask_digest = digests.canonical_sha256(mask_payload)
             mask_stats = _extract_mask_statistics(mask_payload, image_shape)
             resolution_binding = _bind_resolution(image_shape, cfg)
@@ -277,7 +286,8 @@ def _build_mask_trace_payload(
     impl_id: str,
     impl_version: str,
     impl_digest: str,
-    enable_mask: bool
+    enable_mask: bool,
+    cfg_digest: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     功能：构造可复算的掩码追踪有效负载，用于 trace_digest 计算。
@@ -293,6 +303,7 @@ def _build_mask_trace_payload(
         impl_version: Implementation version.
         impl_digest: Implementation digest.
         enable_mask: Whether mask extraction is enabled.
+        cfg_digest: Optional canonical SHA256 digest of cfg (computed from include_paths).
 
     Returns:
         JSON-like dict for canonical SHA256 computation.
@@ -315,16 +326,22 @@ def _build_mask_trace_payload(
     if not isinstance(impl_digest, str) or not impl_digest:
         # impl_digest 类型不合法，必须 fail-fast。
         raise TypeError("impl_digest must be non-empty str")
+    if cfg_digest is not None and not isinstance(cfg_digest, str):
+        # cfg_digest 类型不合法，必须 fail-fast。
+        raise TypeError("cfg_digest must be str or None")
 
-    # 构造追踪有效负载：包含实现身份、配置与输入元数据。
+    # 构造追踪有效负载：包含实现身份、配置摘要与输入元数据。
+    # 关键修复：使用 cfg_digest 而非全量 cfg，防止 trace_digest 对非 digest_scope 字段敏感。
+    # trace_version v2：从包含全量 cfg 改为仅包含 cfg_digest（append-only 版本化）。
     payload = {
-        "trace_version": SEMANTIC_MASK_TRACE_VERSION,
+        "trace_version": "v2",  # 版本化：表示不再包含全量 cfg
         "impl_id": impl_id,
         "impl_version": impl_version,
         "impl_digest": impl_digest,
         "enable_mask": enable_mask,
-        "cfg": cfg,
-        "inputs_keys": sorted(inputs.keys()) if inputs else []
+        "inputs_keys": sorted(inputs.keys()) if inputs else [],
+        "cfg_digest_provided": cfg_digest is not None,
+        "cfg_digest_binding": cfg_digest  # 仅包含摘要，不包含全量 cfg
     }
     return payload
 
@@ -332,7 +349,8 @@ def _build_mask_trace_payload(
 def _compute_semantic_mask(
     image_data: Any,
     image_shape: Optional[Any],
-    cfg: Dict[str, Any]
+    cfg: Dict[str, Any],
+    cfg_digest: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     功能：计算语义掩码有效负载（演示版本）。
@@ -345,6 +363,8 @@ def _compute_semantic_mask(
         image_data: Image tensor or latent code.
         image_shape: Optional expected shape (H, W, C).
         cfg: Configuration dict.
+        cfg_digest: Optional canonical SHA256 digest of cfg (computed from include_paths).
+                   When provided, this authoritative digest is used for cfg_digest_binding.
 
     Returns:
         JSON-like mask payload dict.
@@ -387,9 +407,15 @@ def _compute_semantic_mask(
             "total_pixels": height * width,
             "masked_pixels_ratio": 0.5,  # 演示版本固定比例
             "mask_type": "semantic_segmentation"
-        },
-        "cfg_digest_binding": digests.canonical_sha256(cfg)  # 绑定至配置摘要
+        }
     }
+    
+    # 绑定配置摘要：若 cfg_digest 由调用者传入，使用它；否则为 absent。
+    if cfg_digest is not None:
+        mask_payload["cfg_digest_binding"] = cfg_digest
+    else:
+        # 后向兼容：未来 cfg_digest 必须由调用者提供；当前允许 absent（警告级别）。
+        mask_payload["cfg_digest_binding"] = "absent"
 
     return mask_payload
 

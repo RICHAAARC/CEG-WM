@@ -313,7 +313,7 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
 
             # 构造 embed record，本阶段为 placeholder。
             print("[Embed] Generating embed record (placeholder)...")
-            record = run_embed_orchestrator(cfg, impl_set)
+            record = run_embed_orchestrator(cfg, impl_set, cfg_digest)
             if not isinstance(record, dict):
                 # record 类型不符合预期，必须 fail-fast。
                 raise TypeError("orchestrator output must be dict")

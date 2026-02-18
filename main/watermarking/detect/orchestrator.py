@@ -17,17 +17,21 @@ from main.registries.runtime_resolver import BuiltImplSet
 def run_detect_orchestrator(
     cfg: Dict[str, Any],
     impl_set: BuiltImplSet,
-    input_record: Optional[Dict[str, Any]] = None
+    input_record: Optional[Dict[str, Any]] = None,
+    cfg_digest: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    功能：执行检测占位流程。
+    功能：执行检测占位流程，包括 plan_digest 一致性验证。
 
     Execute detect placeholder flow using injected implementations.
+    Validates plan_digest consistency with embed-time plan_digest when available.
 
     Args:
-        cfg: Config mapping.
+        cfg: Config mapping (may differ from embed-time cfg).
         impl_set: Built implementation set.
-        input_record: Optional input record mapping.
+        input_record: Optional input record mapping (contains embed-time plan_digest).
+        cfg_digest: Optional cfg digest for detect-time cfg.
+                   If None, plan_digest validation is skipped.
 
     Returns:
         Business fields mapping for record.
@@ -44,12 +48,53 @@ def run_detect_orchestrator(
     if input_record is not None and not isinstance(input_record, dict):
         # input_record 类型不合法，必须 fail-fast。
         raise TypeError("input_record must be dict or None")
+    if cfg_digest is not None and not isinstance(cfg_digest, str):
+        # cfg_digest 类型不合法，必须 fail-fast。
+        raise TypeError("cfg_digest must be str or None")
 
     content_result = impl_set.content_extractor.extract(cfg)
     geometry_result = impl_set.geometry_extractor.extract(cfg)
     fusion_result = impl_set.fusion_rule.fuse(cfg, content_result, geometry_result)
     input_fields = len(input_record or {})
 
+    # plan_digest 一致性验证（可选）。
+    plan_digest_status = "not_validated"
+    plan_digest_mismatch_reason = None
+    
+    # 仅当 input_record 包含 plan_digest 且 cfg_digest 可用时，才进行验证。
+    if input_record and cfg_digest:
+        embed_time_plan_digest = input_record.get("plan_digest")
+        if embed_time_plan_digest is not None:
+            # 在 detect 侧重新计算 plan_digest（使用相同的 subspace_planner）。
+            # 提取 mask_digest（detect 时重新计算的 mask）。
+            mask_digest = None
+            if isinstance(content_result, dict):
+                mask_digest = content_result.get("mask_digest")
+            elif hasattr(content_result, "mask_digest"):
+                mask_digest = content_result.mask_digest
+            
+            detect_time_plan_result = impl_set.subspace_planner.plan(
+                cfg,
+                mask_digest=mask_digest,
+                cfg_digest=cfg_digest
+            )
+            
+            # 对比两个 plan_digest。
+            detect_time_plan_digest = None
+            if hasattr(detect_time_plan_result, "plan_digest"):
+                detect_time_plan_digest = detect_time_plan_result.plan_digest
+            
+            if detect_time_plan_digest is not None:
+                if detect_time_plan_digest == embed_time_plan_digest:
+                    plan_digest_status = "ok"
+                else:
+                    # plan_digest 不一致：可能是 cfg_digest 变化或其他参数变化。
+                    plan_digest_status = "mismatch"
+                    plan_digest_mismatch_reason = "plan_digest_mismatch"
+            else:
+                # Detect 侧计算失败，无法进行对比。
+                plan_digest_status = "compute_failed"
+    
     record: Dict[str, Any] = {
         "operation": "detect",
         "detect_placeholder": True,
@@ -62,6 +107,8 @@ def run_detect_orchestrator(
             "audit_obligations_satisfied": True
         },
         "input_record_fields": input_fields,
+        "plan_digest_validation_status": plan_digest_status,
+        "plan_digest_mismatch_reason": plan_digest_mismatch_reason,
         "content_result": content_result,
         "geometry_result": geometry_result,
         "fusion_result": fusion_result

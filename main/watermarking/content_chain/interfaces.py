@@ -180,7 +180,7 @@ class ContentExtractor(Protocol):
     Note: This is a frozen interface. Implementations must not change the signature.
     """
     
-    def extract(self, cfg: Dict[str, Any], inputs: Dict[str, Any]) -> ContentEvidence:
+    def extract(self, cfg: Dict[str, Any], inputs: Optional[Dict[str, Any]] = None, cfg_digest: Optional[str] = None) -> ContentEvidence:
         """
         功能：从输入中提取内容链证据。
         
@@ -188,7 +188,11 @@ class ContentExtractor(Protocol):
         
         Args:
             cfg: Configuration dict containing model paths, thresholds, and parameters.
-            inputs: Input dict containing latent features, embeddings, or raw data.
+            inputs: Optional input dict containing latent features, embeddings, or raw data.
+            cfg_digest: Optional canonical SHA256 digest of cfg (computed from include_paths).
+                       When provided, mask_digest will bind to this authoritative digest
+                       instead of recomputing from full cfg. Enables reproducibility and
+                       prevents non-digest-scope fields from affecting mask_digest.
         
         Returns:
             ContentEvidence instance with frozen structure.

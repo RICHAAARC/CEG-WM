@@ -19,6 +19,11 @@ from main.watermarking.content_chain.semantic_mask_provider import (
     SEMANTIC_MASK_PROVIDER_ID,
     SEMANTIC_MASK_PROVIDER_VERSION
 )
+from main.watermarking.content_chain.subspace.placeholder_planner import (
+    SubspacePlannerImpl,
+    SUBSPACE_PLANNER_ID,
+    SUBSPACE_PLANNER_VERSION
+)
 
 
 CONTENT_BASELINE_NOOP_ID = "content_baseline_noop_v1"
@@ -58,7 +63,7 @@ class ContentBaselineNoop:
         self.impl_version = impl_version
         self.impl_digest = impl_digest
 
-    def extract(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    def extract(self, cfg: Dict[str, Any], inputs: Dict[str, Any] | None = None, cfg_digest: str | None = None) -> Dict[str, Any]:
         """
         功能：输出占位内容证据。
 
@@ -66,6 +71,8 @@ class ContentBaselineNoop:
 
         Args:
             cfg: Config mapping.
+            inputs: Optional input mapping (unused in placeholder).
+            cfg_digest: Optional cfg digest (unused in placeholder).
 
         Returns:
             Placeholder content evidence mapping.
@@ -115,7 +122,13 @@ class SubspaceBaselineFull:
         self.impl_version = impl_version
         self.impl_digest = impl_digest
 
-    def plan(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    def plan(
+        self,
+        cfg: Dict[str, Any],
+        mask_digest: str | None = None,
+        cfg_digest: str | None = None,
+        inputs: Dict[str, Any] | None = None
+    ) -> Dict[str, Any]:
         """
         功能：输出占位子空间规划。
 
@@ -123,6 +136,9 @@ class SubspaceBaselineFull:
 
         Args:
             cfg: Config mapping.
+            mask_digest: Optional mask digest (unused in placeholder).
+            cfg_digest: Optional cfg digest (unused in placeholder).
+            inputs: Optional input mapping (unused in placeholder).
 
         Returns:
             Placeholder subspace plan mapping.
@@ -241,6 +257,29 @@ def _build_content_semantic_mask_provider(cfg: Dict[str, Any]) -> SemanticMaskPr
     return SemanticMaskProvider(CONTENT_SEMANTIC_MASK_PROVIDER_ID, impl_version, impl_digest)
 
 
+def _build_subspace_planner(cfg: Dict[str, Any]) -> SubspacePlannerImpl:
+    """
+    功能：构造子空间规划器实现。
+
+    Build subspace planner implementation.
+
+    Args:
+        cfg: Config mapping.
+
+    Returns:
+        SubspacePlannerImpl instance.
+
+    Raises:
+        TypeError: If cfg is not dict.
+    """
+    if not isinstance(cfg, dict):
+        # cfg 类型不合法，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+    impl_version = SUBSPACE_PLANNER_VERSION
+    impl_digest = _derive_impl_digest(SUBSPACE_PLANNER_ID, impl_version)
+    return SubspacePlannerImpl(SUBSPACE_PLANNER_ID, impl_version, impl_digest)
+
+
 _CONTENT_REGISTRY.register_factory(
     CONTENT_BASELINE_NOOP_ID,
     _build_content_baseline_noop,
@@ -266,6 +305,17 @@ _CONTENT_REGISTRY.register_factory(
 _SUBSPACE_REGISTRY.register_factory(
     SUBSPACE_BASELINE_FULL_ID,
     _build_subspace_baseline_full,
+    capabilities=ImplCapabilities(
+        supports_batching=False,
+        requires_cuda=False,
+        supports_deterministic=True,
+        max_resolution=None,
+        supported_models=None
+    )
+)
+_SUBSPACE_REGISTRY.register_factory(
+    SUBSPACE_PLANNER_ID,
+    _build_subspace_planner,
     capabilities=ImplCapabilities(
         supports_batching=False,
         requires_cuda=False,

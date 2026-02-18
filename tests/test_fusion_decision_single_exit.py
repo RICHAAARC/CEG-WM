@@ -128,7 +128,10 @@ def test_orchestrator_does_not_write_decision() -> None:
     found, _ = _get_value_by_field_path(detect_record, "decision.is_watermarked")
     assert not found, "decision.is_watermarked should not be written by detect orchestrator"
 
-    embed_record = run_embed_orchestrator(cfg, impl_set)
+    # 计算 cfg_digest（最小化测试中的模拟 cfg_digest）。
+    from main.core import digests
+    cfg_digest = digests.canonical_sha256(cfg)
+    embed_record = run_embed_orchestrator(cfg, impl_set, cfg_digest=cfg_digest)
     assert "decision" not in embed_record, "embed_record should not include decision"
     found, _ = _get_value_by_field_path(embed_record, "decision.is_watermarked")
     assert not found, "decision.is_watermarked should not be written by embed orchestrator"

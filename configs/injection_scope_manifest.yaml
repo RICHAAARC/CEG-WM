@@ -5,6 +5,9 @@ allowed_impl_ids:
   # content chain 真实实现
   - "semantic_mask_provider_v1"
   
+  # subspace 真实实现
+  - "subspace_planner_v1"
+  
   # 占位实现
   - "content_baseline_noop_v1"
   - "subspace_baseline_full_v1"

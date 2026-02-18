@@ -150,6 +150,7 @@ impl_id:
     - "geometry_baseline_noop_v1"
     - "fusion_baseline_identity_v1"
     - "subspace_baseline_full_v1"
+    - "subspace_planner_v1"
     - "geometry_sync_baseline_v1"
 
   allowed_by_domain:
@@ -188,6 +189,12 @@ impl_id:
       # - 可返回 full-space / None / 预定义空 frame。
       # - 用于固化 subspace_frame 的审计语义。
       - "subspace_baseline_full_v1"
+      
+      # 子空间规划器最小可用实现：
+      # - 计算可复算的 plan_digest，绑定 mask_digest 与 cfg_digest。
+      # - 支持规划器消融（disabled 时返回 absent）。
+      # - 输出序列化的规划摘要与统计（无巨大矩阵）。
+      - "subspace_planner_v1"
 
     sync_module:
       # 同步模块占位实现：
