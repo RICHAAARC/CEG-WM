@@ -148,12 +148,18 @@ def run_detect_orchestrator(
         fusion_result = impl_set.fusion_rule.fuse(cfg, content_evidence_adapted, geometry_evidence_adapted)
     input_fields = len(input_record or {})
 
-    # plan_digest 一致性验证。
+    # plan_digest 一致性验证（优先级高于 compute_failed）。
+    # 优先级：已检测到的 plan_digest mismatch > compute_failed > not_validated
     plan_digest_status = "not_validated"
     plan_digest_mismatch_reason = None
     
-    # 仅当 input_record 包含 plan_digest 且 cfg_digest 可用时，才进行验证。
-    if input_record and cfg_digest:
+    # 如果已通过 mismatch_reasons 检测到 plan_digest 不一致，优先级最高
+    if forced_mismatch and "plan_digest_mismatch" in mismatch_reasons:
+        # mismatch 已经在 forced_mismatch 分支中处理过，直接设置状态
+        plan_digest_status = "mismatch"
+        plan_digest_mismatch_reason = "plan_digest_mismatch"
+    # 仅当未检测到 mismatch 时，才进行额外的一致性验证或 compute_failed 标记
+    elif input_record and cfg_digest:
         embed_time_plan_digest = input_record.get("plan_digest")
         if embed_time_plan_digest is not None:
             if detect_time_plan_digest is not None:
@@ -163,6 +169,8 @@ def run_detect_orchestrator(
                     plan_digest_status = "mismatch"
                     plan_digest_mismatch_reason = "plan_digest_mismatch"
             else:
+                # 只有在不需要重算即可判定 mismatch 的情况下，才将 computed_failed 作为后备选项
+                # embed_time 存在但 detect_time 计算失败，这才是 compute_failed
                 plan_digest_status = "compute_failed"
     
     record: Dict[str, Any] = {

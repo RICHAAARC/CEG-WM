@@ -570,6 +570,13 @@ class SubspacePlannerImpl:
                 "probe_count_digest": jvp_anchor.get("probe_count_digest", ""),
                 "jacobian_eps_digest": jvp_anchor.get("jacobian_eps_digest", "")
             },
+            # 规划参数规范化（统一的输入域）
+            "planner_params_canonical": {
+                "rank": planner_params.rank,
+                "sample_count": planner_params.sample_count,
+                "feature_dim": planner_params.feature_dim,
+                "spectrum_topk": planner_params.spectrum_topk
+            },
             # 模型可验证性锚点
             "model_provenance_anchor": {
                 "model_id": model_id,
@@ -704,9 +711,10 @@ class SubspacePlannerImpl:
 
     def _parse_planner_params(self, cfg: Dict[str, Any]) -> _PlannerParams:
         """
-        功能：解析并校验规划参数。
+        功能：解析并校验规划参数（建立统一的输入域解析层）。
 
         Parse and validate planner parameters from config.
+        Establishes single authority for k/topk/rank/spectrum_topk canonicalization.
 
         Args:
             cfg: Configuration mapping.
@@ -719,7 +727,12 @@ class SubspacePlannerImpl:
         """
         subspace_cfg = cfg.get("watermark", {}).get("subspace", {})
         
-        rank = subspace_cfg.get("rank", subspace_cfg.get("k", 8))
+        # 统一解析条例：优先级 rank > k，spectrum_topk > topk
+        # 这确保了输入域的可验证性与唯一性
+        rank = subspace_cfg.get("rank")
+        if rank is None:
+            rank = subspace_cfg.get("k", 8)
+        
         sample_count = subspace_cfg.get("sample_count", 16)
         feature_dim = subspace_cfg.get("feature_dim", 128)
         timestep_start = subspace_cfg.get("timestep_start", 0)
@@ -727,7 +740,10 @@ class SubspacePlannerImpl:
         seed = subspace_cfg.get("seed", cfg.get("seed", 0))
         float_round_digits = subspace_cfg.get("float_round_digits", 8)
         trajectory_step_stride = subspace_cfg.get("trajectory_step_stride", 1)
-        spectrum_topk = subspace_cfg.get("spectrum_topk", 8)
+        # 统一解析：spectrum_topk > topk（兼容性读取）
+        spectrum_topk = subspace_cfg.get("spectrum_topk")
+        if spectrum_topk is None:
+            spectrum_topk = subspace_cfg.get("topk", 8)
         jacobian_probe_count = subspace_cfg.get("jacobian_probe_count", 2)
         jacobian_eps = subspace_cfg.get("jacobian_eps", 1e-3)
         
@@ -953,7 +969,8 @@ class SubspacePlannerImpl:
         # 计算 JVP 能量摘要（不存储大矩阵）
         jvp_energy = np.sum(jvp_samples ** 2, axis=1)
         total_jvp_energy = float(np.sum(jvp_energy))
-        jvp_spectrum = np.abs(np.linalg.svdvals(jvp_samples))
+        _, jvp_singular_values, _ = np.linalg.svd(jvp_samples, full_matrices=False)
+        jvp_spectrum = np.abs(jvp_singular_values)
         
         jvp_anchor = {
             "jvp_anchor_version": "v1",
