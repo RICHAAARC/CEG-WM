@@ -122,10 +122,12 @@ class TestDetectOrchestratorWithContentDetector:
             impl_digest="test_digest_detector_v1"
         )
         
-        # 准备配置和输入。
+        # 准备配置和输入（对齐 injection_scope_manifest.yaml 的键空间）。
         cfg = {
+            "detect": {
+                "content": {"enabled": True}
+            },
             "watermark": {
-                "detector": {"enabled": True},
                 "plan_digest": "test_plan_digest_123"
             }
         }

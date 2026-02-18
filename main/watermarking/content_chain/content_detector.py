@@ -135,12 +135,11 @@ class ContentDetector:
             # inputs 类型不合法，必须 fail-fast。
             raise TypeError("inputs must be dict or None")
 
-        # (1) 解析启用状态。
-        detector_cfg = cfg.get("watermark", {}).get("detector", {})
-        enabled = detector_cfg.get("enabled", False)
+        # (1) 解析启用状态。对齐 injection_scope_manifest.yaml 中 cfg_digest_include_paths 的 detect.content.enabled。
+        enabled = cfg.get("detect", {}).get("content", {}).get("enabled", False)
         if not isinstance(enabled, bool):
             # enabled 类型不合法，必须 fail-fast。
-            raise TypeError("watermark.detector.enabled must be bool")
+            raise TypeError("detect.content.enabled must be bool")
 
         # 若禁用，返回 absent 语义（非错误）。
         if not enabled:
@@ -439,7 +438,8 @@ def _build_detector_trace_payload(
         "trace_version": CONTENT_DETECTOR_TRACE_VERSION,
         "enabled": enabled,
         "plan_digest": plan_digest,
-        "detector_threshold": detector_cfg.get("threshold", 0.5) if enabled else None,
+        # detector_threshold 已在 docstring 中标记为 unused，直接使用默认值。
+        "detector_threshold": 0.5 if enabled else None,
     }
 
     if detection_result is not None:

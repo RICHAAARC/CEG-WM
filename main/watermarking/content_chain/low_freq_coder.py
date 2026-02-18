@@ -134,12 +134,12 @@ class LowFreqCoder:
             # inputs 类型不合法，必须 fail-fast。
             raise TypeError("inputs must be dict or None")
 
-        # (1) 解析启用状态。
-        lf_cfg = cfg.get("watermark", {}).get("low_freq", {})
+        # (1) 解析启用状态。对齐 injection_scope_manifest.yaml 中 plan_digest_include_paths 的声明。
+        lf_cfg = cfg.get("watermark", {}).get("lf", {})
         enabled = lf_cfg.get("enabled", False)
         if not isinstance(enabled, bool):
             # enabled 类型不合法，必须 fail-fast。
-            raise TypeError("watermark.low_freq.enabled must be bool")
+            raise TypeError("watermark.lf.enabled must be bool")
 
         # 若禁用，返回 absent 语义（非错误）。
         if not enabled:
@@ -242,9 +242,10 @@ class LowFreqCoder:
 
         # (4) 执行编码与评分（简化：占位实现，返回固定分数）。
         try:
+            # 读取 LF 参数（这些参数已在 plan_digest_include_paths 中声明）。
             codebook_id = lf_cfg.get("codebook_id", "default")
-            redundancy = lf_cfg.get("redundancy", 3)
-            power = lf_cfg.get("power", 0.1)
+            redundancy = lf_cfg.get("ecc", 3)  # ecc 参数（纠错编码强度）匹配 manifest
+            power = lf_cfg.get("strength", 0.1)  # strength 参数（功率）匹配 manifest
 
             # 验证参数范围。
             if not isinstance(redundancy, int) or redundancy < 2 or redundancy > 8:

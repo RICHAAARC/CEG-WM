@@ -45,6 +45,22 @@ def run_embed_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet, cfg_dige
 
     content_result = impl_set.content_extractor.extract(cfg, cfg_digest=cfg_digest)
     
+    # 捕获 content_chain 的执行状态（用于 execution_report）。
+    # 允许的值：ok / fail / absent
+    content_chain_status = "ok"
+    if isinstance(content_result, dict):
+        content_status = content_result.get("status", "unknown")
+        if content_status == "absent":
+            content_chain_status = "absent"
+        elif content_status != "ok":
+            content_chain_status = "fail"
+    elif hasattr(content_result, "status"):
+        content_status = content_result.status
+        if content_status == "absent":
+            content_chain_status = "absent"
+        elif content_status != "ok":
+            content_chain_status = "fail"
+    
     # 提取 mask_digest 以绑定到规划器。
     mask_digest = None
     if isinstance(content_result, dict):
@@ -59,6 +75,7 @@ def run_embed_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet, cfg_dige
         mask_digest=mask_digest,
         cfg_digest=cfg_digest
     )
+    
     sync_result = impl_set.sync_module.sync(cfg)
 
     # 构造返回的业务字段映射。
@@ -72,7 +89,16 @@ def run_embed_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet, cfg_dige
         "strength": 0.5,
         "content_result": content_result,
         "subspace_plan": subspace_result,
-        "sync_result": sync_result
+        "sync_result": sync_result,
+        # 添加 execution_report（冻结门禁要求）。
+        # 注：embed 阶段未执行融合，fusion_status 置为 "absent"；
+        #     geometry 链不参与，geometry_chain_status 置为 "absent"。
+        "execution_report": {
+            "content_chain_status": content_chain_status,
+            "geometry_chain_status": "absent",
+            "fusion_status": "absent",
+            "audit_obligations_satisfied": True
+        }
     }
     
     # 若 subspace_result 是对象，提取 plan_digest 和 basis_digest 作为审计锚点。

@@ -1,0 +1,89 @@
+# 示例配置：展示新的 watermark.lf.* 和 watermark.hf.* 键空间
+# 这个配置对齐 injection_scope_manifest.yaml 中的 plan_digest_include_paths
+
+policy_path: "content_only"
+
+# 统计口径默认配置
+target_fpr: 0.01
+
+# detect 链启用状态（对齐 cfg_digest_include_paths）
+detect:
+  content:
+    enabled: true    # 控制 ContentDetector 的启用
+  geometry:
+    enabled: false
+
+# watermark 配置（LF/HF 参数进入 plan_digest）
+watermark:
+  # 全局参数
+  key_id: "master_key_001"
+  pattern_id: "pattern_standard_v1"
+  strength: 0.8
+  plan_digest: null  # 由 subspace_planner 在 embed 时计算填充
+  
+  # 低频编码链（S-04 LowFreqCoder 读取这些配置）
+  lf:
+    enabled: true
+    codebook_id: "lf_codebook_v1"
+    ecc: 3              # 纠错编码强度（原 redundancy）
+    strength: 0.5       # 低频功率参数（原 power）
+  
+  # 高频编码链（S-05/S-07 未来实现）
+  hf:
+    enabled: false
+    codebook_id: "hf_codebook_v1"
+    ecc: 2
+    tail_truncation_ratio: 0.1
+    tail_truncation_mode: "gaussian"
+  
+  # Subspace 规划参数（对齐 plan_digest_include_paths）
+  subspace:
+    enabled: true
+    frame: "latent"
+    selector_id: "selector_dct_v1"
+    grid_rows: 4
+    grid_cols: 4
+    grid_h: 64
+    grid_w: 64
+    k: 512
+    topk: 128
+    score_type: "amplitude"
+    channel_agg: "sum"
+    rank: 8                      # plan_digest scope 中的参数
+    energy_ratio: 0.9            # plan_digest scope 中的参数
+    mask_digest_binding: true    # 确保 mask_digest 进入 plan_digest
+  
+  # Mask 生成参数（对齐 plan_digest_include_paths）
+  mask:
+    threshold: 0.5
+    resolution_binding: "512x512"
+    postprocess:
+      enabled: true
+      kernel: "gaussian"
+
+# Generation 参数
+generation:
+  num_inference_steps: 20
+  guidance_scale: 7.5
+
+# Model 配置
+model:
+  model_id: "stable-diffusion-3-medium"
+  height: 512
+  width: 512
+  dtype: "float16"
+
+enable_xformers: true
+
+# Evaluation 配置
+evaluate:
+  decoder_type: "content_correlation"
+  target_fpr: 0.01
+
+# Implementation 指示符
+impl:
+  content_extractor_id: "content_baseline_noop_v1"  # 生产时应改为 "content_detector_v1"
+  geometry_extractor_id: "geometry_baseline_noop_v1"
+  fusion_rule_id: "fusion_baseline_identity_v1"
+  subspace_planner_id: "subspace_baseline_full_v1"
+  sync_module_id: "geometry_sync_baseline_v1"
