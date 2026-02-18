@@ -112,6 +112,9 @@ def run_detect_orchestrator(
         embed_time_planner_impl_identity=embed_time_planner_impl_identity,
         detect_time_planner_impl_identity=detect_time_planner_impl_identity
     )
+    primary_mismatch_reason, primary_mismatch_field_path = _resolve_primary_mismatch(
+        mismatch_reasons
+    )
 
     forced_mismatch = len(mismatch_reasons) > 0
     if forced_mismatch:
@@ -121,6 +124,8 @@ def run_detect_orchestrator(
             "plan_digest": detect_time_plan_digest,
             "basis_digest": detect_time_basis_digest,
             "content_failure_reason": "detector_plan_mismatch",
+            "content_mismatch_reason": primary_mismatch_reason,
+            "content_mismatch_field_path": primary_mismatch_field_path,
             "score_parts": None,
             "lf_score": None,
             "hf_score": None,
@@ -128,7 +133,11 @@ def run_detect_orchestrator(
                 "impl_identity": "detect_orchestrator",
                 "impl_version": "v1",
                 "impl_digest": digests.canonical_sha256({"impl_id": "detect_orchestrator", "impl_version": "v1"}),
-                "trace_digest": digests.canonical_sha256({"mismatch_reasons": mismatch_reasons})
+                "trace_digest": digests.canonical_sha256({
+                    "mismatch_reasons": mismatch_reasons,
+                    "primary_mismatch_reason": primary_mismatch_reason,
+                    "primary_mismatch_field_path": primary_mismatch_field_path
+                })
             }
         }
         content_result = content_evidence_payload
@@ -169,7 +178,7 @@ def run_detect_orchestrator(
         },
         "input_record_fields": input_fields,
         "plan_digest_validation_status": plan_digest_status,
-        "plan_digest_mismatch_reason": ",".join(mismatch_reasons) if forced_mismatch else plan_digest_mismatch_reason,
+        "plan_digest_mismatch_reason": primary_mismatch_reason if forced_mismatch else plan_digest_mismatch_reason,
         # (append-only) 保留完整的 payload，供后续升级 fusion 规则时直接消费冻结字段。
         "content_evidence_payload": content_evidence_payload,
         "geometry_evidence_payload": geometry_evidence_payload,
@@ -215,6 +224,33 @@ def _collect_plan_mismatch_reasons(
         if embed_time_planner_impl_identity != detect_time_planner_impl_identity:
             reasons.append("planner_impl_identity_mismatch")
     return reasons
+
+
+def _resolve_primary_mismatch(mismatch_reasons: list[str]) -> tuple[str, str]:
+    """
+    功能：选择单一主 mismatch 原因并返回对应字段路径。
+
+    Resolve a single primary mismatch reason and its field path.
+
+    Args:
+        mismatch_reasons: Collected mismatch reason tokens.
+
+    Returns:
+        Tuple of (primary_reason, field_path).
+    """
+    reason_to_field_path = {
+        "plan_digest_mismatch": "content_evidence.plan_digest",
+        "basis_digest_mismatch": "content_evidence.basis_digest",
+        "planner_impl_identity_mismatch": "content_evidence.planner_impl_identity"
+    }
+    for token in [
+        "plan_digest_mismatch",
+        "basis_digest_mismatch",
+        "planner_impl_identity_mismatch"
+    ]:
+        if token in mismatch_reasons:
+            return token, reason_to_field_path[token]
+    return "unknown_mismatch", "content_evidence"
 
 
 def _build_mismatch_fusion_decision(

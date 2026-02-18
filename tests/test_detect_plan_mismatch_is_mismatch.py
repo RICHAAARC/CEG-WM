@@ -119,7 +119,8 @@ def test_detect_plan_mismatch_is_mismatch() -> None:
     assert record["plan_digest_validation_status"] == "mismatch"
     assert record["content_result"]["status"] == "mismatch"
     assert record["content_result"]["score"] is None
-    assert "plan_digest_mismatch" in record["plan_digest_mismatch_reason"]
+    assert record["plan_digest_mismatch_reason"] == "plan_digest_mismatch"
+    assert record["content_result"].get("content_mismatch_field_path") == "content_evidence.plan_digest"
 
     fusion_result = record["fusion_result"]
     assert isinstance(fusion_result, FusionDecision)

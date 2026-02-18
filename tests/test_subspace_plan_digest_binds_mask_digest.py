@@ -55,3 +55,41 @@ def test_subspace_plan_digest_binds_mask_digest() -> None:
     assert result_1.status == "ok"
     assert result_2.status == "ok"
     assert result_1.plan_digest != result_2.plan_digest
+
+
+def test_subspace_plan_digest_binds_critical_planner_param() -> None:
+    impl_digest = digests.canonical_sha256({"impl_id": SUBSPACE_PLANNER_ID, "impl_version": SUBSPACE_PLANNER_VERSION})
+    planner = SubspacePlannerImpl(SUBSPACE_PLANNER_ID, SUBSPACE_PLANNER_VERSION, impl_digest)
+
+    cfg_a = _build_cfg()
+    cfg_b = _build_cfg()
+    cfg_a["watermark"]["subspace"]["trajectory_step_stride"] = 1
+    cfg_b["watermark"]["subspace"]["trajectory_step_stride"] = 2
+
+    inputs = _build_inputs()
+
+    result_1 = planner.plan(cfg_a, mask_digest="mask_digest_same", cfg_digest="cfg_digest_same", inputs=inputs)
+    result_2 = planner.plan(cfg_b, mask_digest="mask_digest_same", cfg_digest="cfg_digest_same", inputs=inputs)
+
+    assert result_1.status == "ok"
+    assert result_2.status == "ok"
+    assert result_1.plan_digest != result_2.plan_digest
+
+
+def test_subspace_plan_digest_binds_jacobian_eps() -> None:
+    impl_digest = digests.canonical_sha256({"impl_id": SUBSPACE_PLANNER_ID, "impl_version": SUBSPACE_PLANNER_VERSION})
+    planner = SubspacePlannerImpl(SUBSPACE_PLANNER_ID, SUBSPACE_PLANNER_VERSION, impl_digest)
+
+    cfg_a = _build_cfg()
+    cfg_b = _build_cfg()
+    cfg_a["watermark"]["subspace"]["jacobian_eps"] = 1e-3
+    cfg_b["watermark"]["subspace"]["jacobian_eps"] = 2e-3
+
+    inputs = _build_inputs()
+
+    result_1 = planner.plan(cfg_a, mask_digest="mask_digest_same", cfg_digest="cfg_digest_same", inputs=inputs)
+    result_2 = planner.plan(cfg_b, mask_digest="mask_digest_same", cfg_digest="cfg_digest_same", inputs=inputs)
+
+    assert result_1.status == "ok"
+    assert result_2.status == "ok"
+    assert result_1.plan_digest != result_2.plan_digest

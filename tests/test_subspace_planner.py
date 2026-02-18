@@ -374,3 +374,342 @@ class TestPlanFailureReasons:
         assert result.status == "failed"
         assert result.plan_failure_reason is not None
         assert result.plan_digest is None
+
+class TestShallowDiffuseParameterBinding:
+    """
+    Shallow Diffuse 风格参数绑定测试。
+    验证 edit_timestep、mask_shape、w_channel、injection_domain、enable_channel_refill 等参数的绑定。
+    """
+
+    def test_plan_digest_binds_edit_timestep(self):
+        """plan_digest 应依赖于 edit_timestep。"""
+        planner = SubspacePlannerImpl(
+            impl_id=SUBSPACE_PLANNER_ID,
+            impl_version=SUBSPACE_PLANNER_VERSION,
+            impl_digest=digests.canonical_sha256({
+                "impl_id": SUBSPACE_PLANNER_ID,
+                "impl_version": SUBSPACE_PLANNER_VERSION
+            })
+        )
+
+        cfg_base = {
+            "watermark": {
+                "subspace": {
+                    "enabled": True,
+                    "rank": 6,
+                    "sample_count": 12,
+                    "feature_dim": 32,
+                    "seed": 11,
+                    "num_inference_steps": 50,
+                    "edit_timestep": 10
+                }
+            }
+        }
+
+        cfg_modified = dict(cfg_base)
+        cfg_modified["watermark"] = dict(cfg_base["watermark"])
+        cfg_modified["watermark"]["subspace"] = dict(cfg_base["watermark"]["subspace"])
+        cfg_modified["watermark"]["subspace"]["edit_timestep"] = 30
+
+        inputs = {
+            "trace_signature": {
+                "num_inference_steps": 50,
+                "guidance_scale": 7.0,
+                "height": 512,
+                "width": 512
+            }
+        }
+
+        result1 = planner.plan(cfg_base, mask_digest="mask_001", inputs=inputs)
+        result2 = planner.plan(cfg_modified, mask_digest="mask_001", inputs=inputs)
+
+        assert result1.status == "ok"
+        assert result2.status == "ok"
+        assert result1.plan_digest != result2.plan_digest, \
+            "edit_timestep 改变应导致 plan_digest 改变"
+
+    def test_plan_digest_binds_mask_shape(self):
+        """plan_digest 应依赖于 mask_shape。"""
+        planner = SubspacePlannerImpl(
+            impl_id=SUBSPACE_PLANNER_ID,
+            impl_version=SUBSPACE_PLANNER_VERSION,
+            impl_digest=digests.canonical_sha256({
+                "impl_id": SUBSPACE_PLANNER_ID,
+                "impl_version": SUBSPACE_PLANNER_VERSION
+            })
+        )
+
+        cfg_base = {
+            "watermark": {
+                "subspace": {
+                    "enabled": True,
+                    "rank": 6,
+                    "sample_count": 12,
+                    "feature_dim": 32,
+                    "seed": 11,
+                    "mask_shape": "circle",
+                    "mask_radius": 10
+                }
+            }
+        }
+
+        cfg_modified = dict(cfg_base)
+        cfg_modified["watermark"] = dict(cfg_base["watermark"])
+        cfg_modified["watermark"]["subspace"] = dict(cfg_base["watermark"]["subspace"])
+        cfg_modified["watermark"]["subspace"]["mask_shape"] = "square"
+
+        inputs = {
+            "trace_signature": {
+                "num_inference_steps": 50,
+                "guidance_scale": 7.0,
+                "height": 512,
+                "width": 512
+            }
+        }
+
+        result1 = planner.plan(cfg_base, mask_digest="mask_001", inputs=inputs)
+        result2 = planner.plan(cfg_modified, mask_digest="mask_001", inputs=inputs)
+
+        assert result1.status == "ok"
+        assert result2.status == "ok"
+        assert result1.plan_digest != result2.plan_digest, \
+            "mask_shape 改变应导致 plan_digest 改变"
+
+    def test_plan_digest_binds_w_channel(self):
+        """plan_digest 应依赖于 w_channel。"""
+        planner = SubspacePlannerImpl(
+            impl_id=SUBSPACE_PLANNER_ID,
+            impl_version=SUBSPACE_PLANNER_VERSION,
+            impl_digest=digests.canonical_sha256({
+                "impl_id": SUBSPACE_PLANNER_ID,
+                "impl_version": SUBSPACE_PLANNER_VERSION
+            })
+        )
+
+        cfg_base = {
+            "watermark": {
+                "subspace": {
+                    "enabled": True,
+                    "rank": 6,
+                    "sample_count": 12,
+                    "feature_dim": 32,
+                    "seed": 11,
+                    "w_channel": -1
+                }
+            }
+        }
+
+        cfg_modified = dict(cfg_base)
+        cfg_modified["watermark"] = dict(cfg_base["watermark"])
+        cfg_modified["watermark"]["subspace"] = dict(cfg_base["watermark"]["subspace"])
+        cfg_modified["watermark"]["subspace"]["w_channel"] = 0
+
+        inputs = {
+            "trace_signature": {
+                "num_inference_steps": 50,
+                "guidance_scale": 7.0,
+                "height": 512,
+                "width": 512
+            }
+        }
+
+        result1 = planner.plan(cfg_base, mask_digest="mask_001", inputs=inputs)
+        result2 = planner.plan(cfg_modified, mask_digest="mask_001", inputs=inputs)
+
+        assert result1.status == "ok"
+        assert result2.status == "ok"
+        assert result1.plan_digest != result2.plan_digest, \
+            "w_channel 改变应导致 plan_digest 改变"
+
+    def test_plan_digest_binds_injection_domain(self):
+        """plan_digest 应依赖于 injection_domain。"""
+        planner = SubspacePlannerImpl(
+            impl_id=SUBSPACE_PLANNER_ID,
+            impl_version=SUBSPACE_PLANNER_VERSION,
+            impl_digest=digests.canonical_sha256({
+                "impl_id": SUBSPACE_PLANNER_ID,
+                "impl_version": SUBSPACE_PLANNER_VERSION
+            })
+        )
+
+        cfg_base = {
+            "watermark": {
+                "subspace": {
+                    "enabled": True,
+                    "rank": 6,
+                    "sample_count": 12,
+                    "feature_dim": 32,
+                    "seed": 11,
+                    "injection_domain": "spatial"
+                }
+            }
+        }
+
+        cfg_modified = dict(cfg_base)
+        cfg_modified["watermark"] = dict(cfg_base["watermark"])
+        cfg_modified["watermark"]["subspace"] = dict(cfg_base["watermark"]["subspace"])
+        cfg_modified["watermark"]["subspace"]["injection_domain"] = "freq"
+
+        inputs = {
+            "trace_signature": {
+                "num_inference_steps": 50,
+                "guidance_scale": 7.0,
+                "height": 512,
+                "width": 512
+            }
+        }
+
+        result1 = planner.plan(cfg_base, mask_digest="mask_001", inputs=inputs)
+        result2 = planner.plan(cfg_modified, mask_digest="mask_001", inputs=inputs)
+
+        assert result1.status == "ok"
+        assert result2.status == "ok"
+        assert result1.plan_digest != result2.plan_digest, \
+            "injection_domain 改变应导致 plan_digest 改变"
+
+    def test_plan_digest_binds_enable_channel_refill(self):
+        """plan_digest 应依赖于 enable_channel_refill。"""
+        planner = SubspacePlannerImpl(
+            impl_id=SUBSPACE_PLANNER_ID,
+            impl_version=SUBSPACE_PLANNER_VERSION,
+            impl_digest=digests.canonical_sha256({
+                "impl_id": SUBSPACE_PLANNER_ID,
+                "impl_version": SUBSPACE_PLANNER_VERSION
+            })
+        )
+
+        cfg_base = {
+            "watermark": {
+                "subspace": {
+                    "enabled": True,
+                    "rank": 6,
+                    "sample_count": 12,
+                    "feature_dim": 32,
+                    "seed": 11,
+                    "enable_channel_refill": False
+                }
+            }
+        }
+
+        cfg_modified = dict(cfg_base)
+        cfg_modified["watermark"] = dict(cfg_base["watermark"])
+        cfg_modified["watermark"]["subspace"] = dict(cfg_base["watermark"]["subspace"])
+        cfg_modified["watermark"]["subspace"]["enable_channel_refill"] = True
+
+        inputs = {
+            "trace_signature": {
+                "num_inference_steps": 50,
+                "guidance_scale": 7.0,
+                "height": 512,
+                "width": 512
+            }
+        }
+
+        result1 = planner.plan(cfg_base, mask_digest="mask_001", inputs=inputs)
+        result2 = planner.plan(cfg_modified, mask_digest="mask_001", inputs=inputs)
+
+        assert result1.status == "ok"
+        assert result2.status == "ok"
+        assert result1.plan_digest != result2.plan_digest, \
+            "enable_channel_refill 改变应导致 plan_digest 改变"
+
+    def test_plan_contains_detection_domain_spec(self):
+        """plan 应包含 detection_domain_spec，用于定义 detect 端的 z_t 构造。"""
+        planner = SubspacePlannerImpl(
+            impl_id=SUBSPACE_PLANNER_ID,
+            impl_version=SUBSPACE_PLANNER_VERSION,
+            impl_digest=digests.canonical_sha256({
+                "impl_id": SUBSPACE_PLANNER_ID,
+                "impl_version": SUBSPACE_PLANNER_VERSION
+            })
+        )
+
+        cfg = {
+            "watermark": {
+                "subspace": {
+                    "enabled": True,
+                    "rank": 6,
+                    "sample_count": 12,
+                    "feature_dim": 32,
+                    "seed": 11,
+                    "num_inference_steps": 50,
+                    "edit_timestep": 20
+                }
+            }
+        }
+
+        inputs = {
+            "trace_signature": {
+                "num_inference_steps": 50,
+                "guidance_scale": 7.0,
+                "height": 512,
+                "width": 512
+            }
+        }
+
+        result = planner.plan(cfg, mask_digest="mask_001", inputs=inputs)
+
+        assert result.status == "ok"
+        assert result.plan is not None
+        assert "detection_domain_spec" in result.plan
+        
+        detection_spec = result.plan["detection_domain_spec"]
+        assert "edit_timestep" in detection_spec
+        assert "num_inference_steps" in detection_spec
+        assert "forward_diffusion_start_timestep" in detection_spec or "forward_diffusion_start" in detection_spec
+        assert "forward_diffusion_end_timestep" in detection_spec or "forward_diffusion_end" in detection_spec
+        assert detection_spec.get("edit_timestep") == 20
+
+    def test_injection_config_in_plan(self):
+        """plan 的 injection_config 应包含 edit_timestep、mask_shape、w_channel、injection_domain 等。"""
+        planner = SubspacePlannerImpl(
+            impl_id=SUBSPACE_PLANNER_ID,
+            impl_version=SUBSPACE_PLANNER_VERSION,
+            impl_digest=digests.canonical_sha256({
+                "impl_id": SUBSPACE_PLANNER_ID,
+                "impl_version": SUBSPACE_PLANNER_VERSION
+            })
+        )
+
+        cfg = {
+            "watermark": {
+                "subspace": {
+                    "enabled": True,
+                    "rank": 6,
+                    "sample_count": 12,
+                    "feature_dim": 32,
+                    "seed": 11,
+                    "edit_timestep": 15,
+                    "mask_shape": "ring",
+                    "mask_radius": 20,
+                    "mask_radius2": 5,
+                    "w_channel": 1,
+                    "injection_domain": "freq",
+                    "enable_channel_refill": True,
+                    "num_inference_steps": 50
+                }
+            }
+        }
+
+        inputs = {
+            "trace_signature": {
+                "num_inference_steps": 50,
+                "guidance_scale": 7.0,
+                "height": 512,
+                "width": 512
+            }
+        }
+
+        result = planner.plan(cfg, mask_digest="mask_001", inputs=inputs)
+
+        assert result.status == "ok"
+        assert result.plan is not None
+        assert "injection_config" in result.plan
+        
+        inj_cfg = result.plan["injection_config"]
+        assert inj_cfg["edit_timestep"] == 15
+        assert inj_cfg["mask_shape"] == "ring"
+        assert inj_cfg["mask_radius"] == 20
+        assert inj_cfg["w_channel"] == 1
+        assert inj_cfg["injection_domain"] == "freq"
+        assert inj_cfg["channel_mix_policy"] == "channel_refill"
