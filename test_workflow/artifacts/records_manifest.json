@@ -1,0 +1,29 @@
+{
+  "_artifact_audit": {
+    "schema_version": "v1.0",
+    "writer": "records_io"
+  },
+  "anchors": {
+    "contract_bound_digest": "6ae1f486f923866845b1b949f383528228e6e0af2b7304d059256b1e4f4b0a06",
+    "contract_version": "v1.0",
+    "policy_path": "content_only",
+    "policy_path_semantics_bound_digest": "c02387b99afa68c99b630ab711b522130f0338d4df07e136413ab474ed39d22f",
+    "policy_path_semantics_version": "v1.0",
+    "whitelist_bound_digest": "05f47ba95eb3802d4c6afab27810fbd00ab63ca810e2ca21c203b4592c820830",
+    "whitelist_version": "v1.0"
+  },
+  "bundle_canon_sha256": "c2e45f125490c9a07c420d376b7ee5841cc4debfbfdc5b55bfd78e616d9a771f",
+  "file_count": 1,
+  "files": [
+    {
+      "canon_sha256": "cdba8f278d9f744e652feb2e0d9642c1e41246ca67cbf4ccba28d045108a6300",
+      "file_sha256": "a8bef9d5541d6493e26333fba68ea77dae62e0a0fe0a4d96af584b6bc5b6503d",
+      "file_type": "json",
+      "path": "detect_record.json",
+      "record_count": 1
+    }
+  ],
+  "manifest_name": "records_manifest.json",
+  "records_dir": "D:/Code/CEG-WM/test_workflow/records",
+  "schema_version": "v1.0"
+}

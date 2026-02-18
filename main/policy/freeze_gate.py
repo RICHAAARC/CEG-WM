@@ -767,24 +767,42 @@ def _get_value_by_path(mapping: Dict[str, Any], field_path: str) -> tuple[bool, 
     return True, current
 
 
-def _handle_policy_failure(policy: str, message: str) -> None:
+def _handle_policy_failure(
+    policy: str,
+    message: str,
+    gate_name: str | None = None,
+    field_path: str | None = None,
+    expected: str | None = None,
+    actual: str | None = None
+) -> None:
     """
     功能：按策略处理门禁失败。
 
     Handle gate failure with fail or warn behavior.
+    Passes structured gate info for better error localization and auditing.
 
     Args:
-        policy: Policy string.
-        message: Failure message.
+        policy: Policy string ("fail" or "warn").
+        message: Failure message summary.
+        gate_name: Optional gate identifier (e.g. "gate.facts_extra_keys_policy").
+        field_path: Optional field path causing failure (e.g. "policy_path_semantics.semantics_version").
+        expected: Optional description of expected value.
+        actual: Optional description of actual value observed.
 
     Returns:
         None.
 
     Raises:
-        GateEnforcementError: If policy is fail.
+        GateEnforcementError: If policy is "fail".
     """
     if policy == "fail":
-        raise GateEnforcementError(message)
+        raise GateEnforcementError(
+            message,
+            gate_name=gate_name,
+            field_path=field_path,
+            expected=expected,
+            actual=actual
+        )
     _emit_gate_warning(message)
 
 
@@ -812,20 +830,32 @@ def _enforce_facts_extra_keys_policy(
     whitelist_keys = set(whitelist.data.keys())
     whitelist_extra = sorted(whitelist_keys - whitelist_allowed)
     if whitelist_extra:
+        # 指定具体的字段路径以便定位
+        field_path = f"runtime_whitelist.{whitelist_extra[0]}" if whitelist_extra else "runtime_whitelist"
         _handle_policy_failure(
             policy,
             "facts_extra_keys_policy violation: source=runtime_whitelist, "
-            f"extra_keys={whitelist_extra}, allowed_keys={sorted(whitelist_allowed)}"
+            f"extra_keys={whitelist_extra}, allowed_keys={sorted(whitelist_allowed)}",
+            gate_name="gate.facts_extra_keys_policy",
+            field_path=field_path,
+            expected=f"keys from {sorted(whitelist_allowed)}",
+            actual=f"extra_keys={whitelist_extra}"
         )
 
     semantics_allowed = set(policy_spec.allowed_top_level_keys.get("policy_path_semantics", []))
     semantics_keys = set(semantics.data.keys())
     semantics_extra = sorted(semantics_keys - semantics_allowed)
     if semantics_extra:
+        # 指定具体的字段路径以便定位
+        field_path = f"policy_path_semantics.{semantics_extra[0]}" if semantics_extra else "policy_path_semantics"
         _handle_policy_failure(
             policy,
             "facts_extra_keys_policy violation: source=policy_path_semantics, "
-            f"extra_keys={semantics_extra}, allowed_keys={sorted(semantics_allowed)}"
+            f"extra_keys={semantics_extra}, allowed_keys={sorted(semantics_allowed)}",
+            gate_name="gate.facts_extra_keys_policy",
+            field_path=field_path,
+            expected=f"keys from {sorted(semantics_allowed)}",
+            actual=f"extra_keys={semantics_extra}"
         )
 
     policy_paths = semantics.data.get("policy_paths", {})
@@ -836,11 +866,16 @@ def _enforce_facts_extra_keys_policy(
                 continue
             extra = sorted(set(policy_value.keys()) - allowed_policy_path_keys)
             if extra:
+                field_path = f"policy_path_semantics.policy_paths.{policy_name}.{extra[0]}"
                 _handle_policy_failure(
                     policy,
                     "facts_extra_keys_policy violation: source=policy_path_semantics, "
                     f"policy_path={policy_name}, extra_keys={extra}, "
-                    f"allowed_keys={sorted(allowed_policy_path_keys)}"
+                    f"allowed_keys={sorted(allowed_policy_path_keys)}",
+                    gate_name="gate.facts_extra_keys_policy",
+                    field_path=field_path,
+                    expected=f"keys from {sorted(allowed_policy_path_keys)}",
+                    actual=f"extra_keys={extra}"
                 )
 
 

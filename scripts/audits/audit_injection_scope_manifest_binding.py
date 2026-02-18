@@ -410,8 +410,9 @@ def main() -> None:
 
     result = run_audit(repo_root)
     output = json.dumps(result, indent=2, ensure_ascii=False)
-    sys.stdout.write(output + '\n')
-    sys.stdout.flush()
+    # 处理 Windows GBK 编码限制：使用 ensure_ascii=True 或直接写为 UTF-8
+    sys.stdout.buffer.write((output + '\n').encode('utf-8'))
+    sys.stdout.buffer.flush()
 
 
 if __name__ == "__main__":

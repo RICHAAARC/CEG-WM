@@ -1,0 +1,137 @@
+{
+  "cfg_digest": "b55f3594c049e68408923b5c2306e3272d54c2dd7b496e9b28064aa406c642b8",
+  "content_result": {
+    "content_evidence": "absent",
+    "content_placeholder": true,
+    "content_signal": null
+  },
+  "contract_bound_digest": "6ae1f486f923866845b1b949f383528228e6e0af2b7304d059256b1e4f4b0a06",
+  "contract_canon_sha256": "661fa82faf8956c2f6c97f62465a464bd1e7839e3f0863b5f1fbb9512f0af891",
+  "contract_digest": "661fa82faf8956c2f6c97f62465a464bd1e7839e3f0863b5f1fbb9512f0af891",
+  "contract_file_sha256": "ee076d668d731338f92a989203f2f34e91b9ca6aa3b9c8a11decaa39ef1f363f",
+  "contract_version": "v1.0",
+  "decision": {
+    "is_watermarked": null
+  },
+  "detect_placeholder": true,
+  "diffusers_version": "<absent>",
+  "env_fingerprint_canon_sha256": "77941ccde00b0494dbe13e1c452c7922ec66f743731c4742f129b7ed0731d467",
+  "execution_report": {
+    "audit_obligations_satisfied": true,
+    "content_chain_status": "ok",
+    "fusion_status": "ok",
+    "geometry_chain_status": "ok"
+  },
+  "fusion_result": {
+    "audit": {
+      "decision_status": "abstain",
+      "impl_digest": "ed463f63bcbca661303250e9b7f2994d0acb25d3279035015b1001ae066aedac",
+      "impl_id": "fusion_baseline_identity_v1",
+      "impl_version": "v1"
+    },
+    "conditional_fpr_notes": null,
+    "decision_status": "abstain",
+    "evidence_summary": {
+      "content_score": null,
+      "content_status": "absent",
+      "fusion_rule_id": "fusion_baseline_identity_v1",
+      "geometry_score": null,
+      "geometry_status": "absent"
+    },
+    "fusion_rule_version": null,
+    "is_watermarked": null,
+    "routing_decisions": null,
+    "routing_digest": null,
+    "thresholds_digest": "bb4db91ef8a8cb1091a85312d23b81d8c693e6a17ea7ba53ade44a354a6f075b",
+    "used_threshold_id": null
+  },
+  "geometry_result": {
+    "geometry_evidence": "absent",
+    "geometry_placeholder": true,
+    "geometry_signal": null
+  },
+  "image_path": "placeholder_test.png",
+  "impl": {
+    "content_extractor_id": "content_baseline_noop_v1",
+    "digests": {
+      "content_extractor": "9ac1996e6747320d67a8ed7e0c61900dbe9f05b68d4a8c0f6d0cf10c688aa5f9",
+      "fusion_rule": "ed463f63bcbca661303250e9b7f2994d0acb25d3279035015b1001ae066aedac",
+      "geometry_extractor": "d3ac9f0e77a6ee33f4c0f80716e6888cfafa1c25932acd03542fba5336d59e3d",
+      "subspace_planner": "217a6541410307d09dabe119059dbadef000e466793dfe400b072ac75222c304",
+      "sync_module": "f25b8c2eee7955829b18e57fb26f4d425aebeecd9bf7d10acb3d39e2ee32c658"
+    },
+    "fusion_rule_id": "fusion_baseline_identity_v1",
+    "geometry_extractor_id": "geometry_baseline_noop_v1",
+    "subspace_planner_id": "subspace_baseline_full_v1",
+    "sync_module_id": "geometry_sync_baseline_v1",
+    "versions": {
+      "content_extractor": "v1",
+      "fusion_rule": "v1",
+      "geometry_extractor": "v1",
+      "subspace_planner": "v1",
+      "sync_module": "v1"
+    }
+  },
+  "impl_set_capabilities_digest": "14de3b58f399c480d4031fc165be4ab6f96e9038b042af75317ad9e51fff9848",
+  "infer_trace": {
+    "device": "<absent>",
+    "inference_enabled": false,
+    "inference_error": null,
+    "inference_guidance_scale": "<absent>",
+    "inference_height": "<absent>",
+    "inference_num_steps": "<absent>",
+    "inference_prompt": "<absent>",
+    "inference_status": "disabled",
+    "inference_width": "<absent>",
+    "output_image_count": 0,
+    "seed": 4388340890186534267
+  },
+  "infer_trace_canon_sha256": "72cf47f7e303ff46b6e09466d15e77cf9807075739dd09e0254519c38a11469f",
+  "inference_error": null,
+  "inference_runtime_meta": null,
+  "inference_status": "disabled",
+  "input_record_fields": 1,
+  "model_provenance_canon_sha256": "5f67920a4605fc28ab9ab8efc3437c078044bd9023ecbdef8ba120a7fc86f8d1",
+  "operation": "detect",
+  "pipeline_impl_id": "sd3_diffusers_shell_v1",
+  "pipeline_provenance": {
+    "hf_revision": "<absent>",
+    "local_files_only": "<absent>",
+    "model_id": "<absent>",
+    "model_revision": "<absent>",
+    "model_source": "<absent>",
+    "model_weights_sha256": "<absent>",
+    "pipeline_factory_entry": "main.diffusion.sd3.pipeline_factory",
+    "pipeline_impl_digest": "0e724df6fb5e651411e0048d648d2f5023b79a3cdcaabc1410eeadb16cccd0e6",
+    "pipeline_impl_id": "sd3_diffusers_shell_v1",
+    "pipeline_impl_version": "v1",
+    "resolved_revision": "<absent>",
+    "weights_snapshot_sha256": "<absent>"
+  },
+  "pipeline_provenance_canon_sha256": "f1e8e56ad065aa96fa2c82c277a98fa5ed2d941922cc3869754332eb0522ddb7",
+  "pipeline_runtime_meta": {},
+  "plan_digest_mismatch_reason": null,
+  "plan_digest_validation_status": "not_validated",
+  "policy_path": "content_only",
+  "policy_path_semantics_bound_digest": "c02387b99afa68c99b630ab711b522130f0338d4df07e136413ab474ed39d22f",
+  "policy_path_semantics_canon_sha256": "e62ebc208775e15b7279d2b00c87715533e2f14585235d2076135b2ec67cb74a",
+  "policy_path_semantics_digest": "e62ebc208775e15b7279d2b00c87715533e2f14585235d2076135b2ec67cb74a",
+  "policy_path_semantics_file_sha256": "86742209e927fdc54c348246c6a33b5a5130e0616e21de7ee9a85e71cc272f82",
+  "policy_path_semantics_version": "v1.0",
+  "safetensors_version": "<absent>",
+  "schema_version": "v1.0",
+  "score": null,
+  "stats_applicability": "applicable",
+  "target_fpr": 0.01,
+  "threshold_metadata_digest": "4b1a1fd21eae1652b67c38fae831b5ddbb41d8a5a34ef5579ea7a92b2123d96b",
+  "threshold_source": "np_canonical",
+  "thresholds_digest": "bb4db91ef8a8cb1091a85312d23b81d8c693e6a17ea7ba53ade44a354a6f075b",
+  "thresholds_rule_id": "fusion_neyman_pearson_placeholder",
+  "thresholds_rule_version": "v1",
+  "transformers_version": "<absent>",
+  "whitelist_bound_digest": "05f47ba95eb3802d4c6afab27810fbd00ab63ca810e2ca21c203b4592c820830",
+  "whitelist_canon_sha256": "50aed9ee66bd872e50004fe46ec5756fa7af9e10f08a3507f0732329f216c3ab",
+  "whitelist_digest": "50aed9ee66bd872e50004fe46ec5756fa7af9e10f08a3507f0732329f216c3ab",
+  "whitelist_file_sha256": "66361a3fd03b2128811918ecfcadf2e13857e11a57968af586aaf254b896b475",
+  "whitelist_version": "v1.0"
+}

@@ -1,0 +1,22 @@
+{
+  "_artifact_audit": {
+    "schema_version": "v1.0",
+    "writer": "records_io"
+  },
+  "failure_reason": null,
+  "original_input": "test_workflow",
+  "output_dir_input": "test_workflow",
+  "output_paths_relative": {
+    "artifacts_dir": "artifacts",
+    "logs_dir": "logs",
+    "records_dir": "records"
+  },
+  "policy_path": "content_only",
+  "policy_path_semantics_version": "v1.0",
+  "record_type": "path_validation_audit",
+  "run_root_resolved": "D:/Code/CEG-WM/test_workflow",
+  "runtime_whitelist_version": "v1.0",
+  "schema_version": "v1.0",
+  "timestamp": "2026-02-18T05:10:16.001Z",
+  "validation_status": "ok"
+}
