@@ -42,7 +42,13 @@ from main.registries import runtime_resolver
 from main.diffusion.sd3 import pipeline_factory
 from main.diffusion.sd3 import infer_runtime
 from main.diffusion.sd3 import infer_trace
+from main.watermarking.embed import orchestrator as embed_orchestrator
 from main.watermarking.embed.orchestrator import run_embed_orchestrator
+from main.watermarking.content_chain.latent_modifier import (
+    LatentModifier,
+    LATENT_MODIFIER_ID,
+    LATENT_MODIFIER_VERSION
+)
 from main.cli.run_common import (
     set_value_by_field_path,
     set_failure_status,
@@ -50,7 +56,8 @@ from main.cli.run_common import (
     bind_impl_identity_fields as _bind_impl_identity_fields,
     build_seed_audit,
     build_determinism_controls,
-    normalize_nondeterminism_notes
+    normalize_nondeterminism_notes,
+    build_injection_context_from_plan
 )
 
 
@@ -233,17 +240,63 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
             run_meta["transformers_version"] = pipeline_result.get("transformers_version")
             run_meta["safetensors_version"] = pipeline_result.get("safetensors_version")
             run_meta["model_provenance_canon_sha256"] = pipeline_result.get("model_provenance_canon_sha256")
+
+            try:
+                impl_identity, impl_set, impl_set_capabilities_digest = runtime_resolver.build_runtime_impl_set_from_cfg(cfg)
+            except Exception as exc:
+                set_failure_status(run_meta, RunFailureReason.IMPL_RESOLVE_FAILED, exc)
+                raise
+            run_meta["impl_id"] = impl_identity.content_extractor_id
+            run_meta["impl_version"] = impl_set.content_extractor.impl_version
+            run_meta["impl_identity"] = impl_identity.as_dict()
+            run_meta["impl_identity_digest"] = runtime_resolver.compute_impl_identity_digest(impl_identity)
+            run_meta["impl_set_capabilities_digest"] = impl_set_capabilities_digest
+
+            # 预先计算 content 与 subspace 计划，用于注入上下文。
+            content_result_pre = impl_set.content_extractor.extract(cfg, cfg_digest=cfg_digest)
+            mask_digest = None
+            if isinstance(content_result_pre, dict):
+                mask_digest = content_result_pre.get("mask_digest")
+            elif hasattr(content_result_pre, "mask_digest"):
+                mask_digest = content_result_pre.mask_digest
+
+            planner_inputs = embed_orchestrator._build_planner_inputs_for_runtime(cfg, None)
+            subspace_result_pre = impl_set.subspace_planner.plan(
+                cfg,
+                mask_digest=mask_digest,
+                cfg_digest=cfg_digest,
+                inputs=planner_inputs
+            )
+
+            plan_payload = subspace_result_pre.as_dict() if hasattr(subspace_result_pre, "as_dict") else subspace_result_pre
+            plan_digest = getattr(subspace_result_pre, "plan_digest", None)
+            if isinstance(plan_payload, dict) and not isinstance(plan_digest, str):
+                plan_digest = plan_payload.get("plan_digest")
+
+            injection_context = None
+            injection_modifier = None
+            if isinstance(plan_payload, dict) and isinstance(plan_digest, str) and plan_digest:
+                injection_context = build_injection_context_from_plan(cfg, plan_payload, plan_digest)
+                injection_modifier = LatentModifier(LATENT_MODIFIER_ID, LATENT_MODIFIER_VERSION)
             
             # (7.7) Real Dataflow Smoke: 在 pipeline_result 之后调用 inference
             pipeline_obj = pipeline_result.get("pipeline_obj")
             device = cfg.get("device", "cpu")
             seed = seed_value
             
-            inference_result = infer_runtime.run_sd3_inference(cfg, pipeline_obj, device, seed)
+            inference_result = infer_runtime.run_sd3_inference(
+                cfg,
+                pipeline_obj,
+                device,
+                seed,
+                injection_context=injection_context,
+                injection_modifier=injection_modifier
+            )
             inference_status = inference_result.get("inference_status")
             inference_error = inference_result.get("inference_error")
             inference_runtime_meta = inference_result.get("inference_runtime_meta")
             trajectory_evidence = inference_result.get("trajectory_evidence")
+            injection_evidence = inference_result.get("injection_evidence")
             
             # 构造 infer_trace 并计算 digest
             infer_trace_obj = infer_trace.build_infer_trace(
@@ -303,20 +356,17 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
             run_meta["run_root_reuse_allowed"] = bool(allow_nonempty_run_root)
             run_meta["run_root_reuse_reason"] = allow_nonempty_run_root_reason
 
-            try:
-                impl_identity, impl_set, impl_set_capabilities_digest = runtime_resolver.build_runtime_impl_set_from_cfg(cfg)
-            except Exception as exc:
-                set_failure_status(run_meta, RunFailureReason.IMPL_RESOLVE_FAILED, exc)
-                raise
-            run_meta["impl_id"] = impl_identity.content_extractor_id
-            run_meta["impl_version"] = impl_set.content_extractor.impl_version
-            run_meta["impl_identity"] = impl_identity.as_dict()
-            run_meta["impl_identity_digest"] = runtime_resolver.compute_impl_identity_digest(impl_identity)
-            run_meta["impl_set_capabilities_digest"] = impl_set_capabilities_digest
-
             # 构造 embed record，本阶段为 placeholder。
             print("[Embed] Generating embed record (placeholder)...")
-            record = run_embed_orchestrator(cfg, impl_set, cfg_digest, trajectory_evidence=trajectory_evidence)
+            record = run_embed_orchestrator(
+                cfg,
+                impl_set,
+                cfg_digest,
+                trajectory_evidence=trajectory_evidence,
+                injection_evidence=injection_evidence,
+                content_result_override=content_result_pre,
+                subspace_result_override=subspace_result_pre
+            )
             if not isinstance(record, dict):
                 # record 类型不符合预期，必须 fail-fast。
                 raise TypeError("orchestrator output must be dict")

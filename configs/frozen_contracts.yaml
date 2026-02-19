@@ -441,8 +441,14 @@ records_schema:
     - content_evidence.basis_digest
     - content_evidence.lf_trace_digest
     - content_evidence.hf_trace_digest
+    - content_evidence.injection_trace_digest
+    - content_evidence.injection_params_digest
     - content_evidence.lf_score
     - content_evidence.hf_score
+    - content_evidence.injection_status
+    - content_evidence.injection_absent_reason
+    - content_evidence.injection_failure_reason
+    - content_evidence.injection_metrics
     - content_evidence.hf_evidence_summary
     - content_evidence.score_parts
     - content_evidence.content_failure_reason

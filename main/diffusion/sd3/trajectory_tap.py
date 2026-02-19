@@ -24,6 +24,7 @@ import math
 import numpy as np
 
 from main.core import digests
+from main.diffusion.sd3.callback_composer import compose_step_end_callbacks
 
 
 TRAJECTORY_TAP_VERSION = "v1"
@@ -267,7 +268,13 @@ def tap_from_pipeline(
     )
 
     if not supports_callback:
-        output = pipeline_obj(**infer_kwargs)
+        # pipeline 不支持 callback 接口时，必须移除回调参数以避免报错。
+        safe_infer_kwargs = dict(infer_kwargs)
+        if "callback_on_step_end" in safe_infer_kwargs:
+            safe_infer_kwargs.pop("callback_on_step_end", None)
+        if "callback_on_step_end_tensor_inputs" in safe_infer_kwargs:
+            safe_infer_kwargs.pop("callback_on_step_end_tensor_inputs", None)
+        output = pipeline_obj(**safe_infer_kwargs)
         absent = build_trajectory_evidence(
             cfg,
             "ok",
@@ -307,8 +314,34 @@ def tap_from_pipeline(
         return callback_kwargs
 
     callback_kwargs = dict(infer_kwargs)
-    callback_kwargs["callback_on_step_end"] = _step_callback
-    callback_kwargs["callback_on_step_end_tensor_inputs"] = ["latents"]
+    existing_callback = callback_kwargs.get("callback_on_step_end")
+    existing_tensor_inputs = callback_kwargs.get("callback_on_step_end_tensor_inputs")
+
+    if existing_callback is not None:
+        if not callable(existing_callback):
+            # callback_on_step_end 类型不符合预期，必须 fail-fast。
+            raise TypeError("callback_on_step_end must be callable or None")
+        # 先执行现有回调，再执行采样回调（观察修改后的张量）。
+        callback_kwargs["callback_on_step_end"] = compose_step_end_callbacks(
+            existing_callback,
+            _step_callback
+        )
+    else:
+        callback_kwargs["callback_on_step_end"] = _step_callback
+
+    if existing_tensor_inputs is None:
+        tensor_inputs = []
+    elif isinstance(existing_tensor_inputs, list):
+        tensor_inputs = list(existing_tensor_inputs)
+    elif isinstance(existing_tensor_inputs, tuple):
+        tensor_inputs = list(existing_tensor_inputs)
+    else:
+        # callback_on_step_end_tensor_inputs 类型不符合预期，必须 fail-fast。
+        raise TypeError("callback_on_step_end_tensor_inputs must be list, tuple, or None")
+
+    if "latents" not in tensor_inputs:
+        tensor_inputs.append("latents")
+    callback_kwargs["callback_on_step_end_tensor_inputs"] = tensor_inputs
 
     output = pipeline_obj(**callback_kwargs)
     ordered_steps = _materialize_tap_steps(spec.scheduler_steps, captured)

@@ -25,7 +25,10 @@ def run_embed_orchestrator(
     impl_set: BuiltImplSet,
     cfg_digest: str,
     *,
-    trajectory_evidence: Dict[str, Any] | None = None
+    trajectory_evidence: Dict[str, Any] | None = None,
+    injection_evidence: Dict[str, Any] | None = None,
+    content_result_override: Any | None = None,
+    subspace_result_override: Any | None = None
 ) -> Dict[str, Any]:
     """
     功能：执行嵌入占位流程。
@@ -38,6 +41,9 @@ def run_embed_orchestrator(
         cfg_digest: Canonical SHA256 digest of cfg (computed from include_paths).
                    Passed to content_extractor to bind mask_digest to authoritative digest.
         trajectory_evidence: Optional trajectory tap evidence mapping.
+        injection_evidence: Optional injection evidence mapping.
+        content_result_override: Optional precomputed content result.
+        subspace_result_override: Optional precomputed subspace plan result.
 
     Returns:
         Business fields mapping for record.
@@ -58,8 +64,18 @@ def run_embed_orchestrator(
     if trajectory_evidence is not None and not isinstance(trajectory_evidence, dict):
         # trajectory_evidence 类型不符合预期，必须 fail-fast。
         raise TypeError("trajectory_evidence must be dict or None")
+    if injection_evidence is not None and not isinstance(injection_evidence, dict):
+        # injection_evidence 类型不符合预期，必须 fail-fast。
+        raise TypeError("injection_evidence must be dict or None")
 
-    content_result = impl_set.content_extractor.extract(cfg, cfg_digest=cfg_digest)
+    if content_result_override is not None and not isinstance(content_result_override, dict) and not hasattr(content_result_override, "as_dict"):
+        # content_result_override 类型不符合预期，必须 fail-fast。
+        raise TypeError("content_result_override must be dict, ContentEvidence, or None")
+    if subspace_result_override is not None and not isinstance(subspace_result_override, dict) and not hasattr(subspace_result_override, "as_dict"):
+        # subspace_result_override 类型不符合预期，必须 fail-fast。
+        raise TypeError("subspace_result_override must be dict, SubspacePlan, or None")
+
+    content_result = content_result_override if content_result_override is not None else impl_set.content_extractor.extract(cfg, cfg_digest=cfg_digest)
 
     content_evidence_payload = None
     if hasattr(content_result, "as_dict") and callable(content_result.as_dict):
@@ -72,6 +88,10 @@ def run_embed_orchestrator(
             content_evidence_payload = {}
         content_evidence_payload["trajectory_evidence"] = trajectory_evidence
         _inject_trajectory_audit_fields(content_evidence_payload, trajectory_evidence)
+    if injection_evidence is not None:
+        if content_evidence_payload is None:
+            content_evidence_payload = {}
+        _merge_injection_evidence(content_evidence_payload, injection_evidence)
     
     # 捕获 content_chain 的执行状态（用于 execution_report）。
     # 允许的值：ok / fail / absent
@@ -99,7 +119,7 @@ def run_embed_orchestrator(
     
     # 调用规划器计算 plan_digest，绑定 cfg_digest + mask_digest + planner_params。
     planner_inputs = _build_planner_inputs_for_runtime(cfg, trajectory_evidence)
-    subspace_result = impl_set.subspace_planner.plan(
+    subspace_result = subspace_result_override if subspace_result_override is not None else impl_set.subspace_planner.plan(
         cfg,
         mask_digest=mask_digest,
         cfg_digest=cfg_digest,
@@ -249,6 +269,32 @@ def _merge_hf_evidence(content_evidence_payload: Dict[str, Any], hf_evidence: Di
             score_parts["hf_failure_reason"] = summary.get("hf_failure_reason")
         score_parts["hf_metrics"] = summary
     score_parts["content_score_rule_version"] = hf_evidence.get("content_score_rule_version")
+
+
+def _merge_injection_evidence(content_evidence_payload: Dict[str, Any], injection_evidence: Dict[str, Any]) -> None:
+    """
+    功能：将注入证据写入 content_evidence 兼容字段。
+    
+    Merge injection evidence into content evidence payload using append-only fields.
+
+    Args:
+        content_evidence_payload: Mutable content evidence mapping.
+        injection_evidence: Injection evidence mapping.
+
+    Returns:
+        None.
+    """
+    if not isinstance(content_evidence_payload, dict):
+        return
+    if not isinstance(injection_evidence, dict):
+        return
+
+    content_evidence_payload["injection_status"] = injection_evidence.get("status")
+    content_evidence_payload["injection_absent_reason"] = injection_evidence.get("injection_absent_reason")
+    content_evidence_payload["injection_failure_reason"] = injection_evidence.get("injection_failure_reason")
+    content_evidence_payload["injection_trace_digest"] = injection_evidence.get("injection_trace_digest")
+    content_evidence_payload["injection_params_digest"] = injection_evidence.get("injection_params_digest")
+    content_evidence_payload["injection_metrics"] = injection_evidence.get("injection_metrics")
 
 
 def _inject_trajectory_audit_fields(

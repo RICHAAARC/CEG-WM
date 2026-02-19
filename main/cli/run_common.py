@@ -10,11 +10,87 @@ from main.core.contracts import FrozenContracts, get_contract_interpretation
 from main.core.errors import MissingRequiredFieldError, RunFailureReason
 from main.registries import runtime_resolver
 from main.core import digests
+from main.diffusion.sd3.callback_composer import InjectionContext
+from main.watermarking.content_chain import channel_lf, channel_hf
 from main.core import time_utils
 
 
 _SEED_RULE_ID = "stable_seed_from_parts_v1"
 _REQUIRED_SEED_PART_KEYS = {"key_id", "sample_idx", "purpose"}
+
+
+def build_injection_context_from_plan(
+    cfg: Dict[str, Any],
+    plan_payload: Dict[str, Any],
+    plan_digest: str
+) -> InjectionContext:
+    """
+    功能：基于 plan 构造 InjectionContext（不修改 cfg）。
+    
+    Build InjectionContext from plan payload and cfg without mutating cfg.
+
+    Args:
+        cfg: Configuration mapping.
+        plan_payload: Planner output mapping (plan payload).
+        plan_digest: Plan digest string.
+
+    Returns:
+        InjectionContext instance.
+
+    Raises:
+        TypeError: If inputs are invalid.
+        ValueError: If required fields are missing.
+    """
+    if not isinstance(cfg, dict):
+        # cfg 类型不符合预期，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+    if not isinstance(plan_payload, dict):
+        # plan_payload 类型不符合预期，必须 fail-fast。
+        raise TypeError("plan_payload must be dict")
+    if not isinstance(plan_digest, str) or not plan_digest:
+        # plan_digest 类型不符合预期，必须 fail-fast。
+        raise TypeError("plan_digest must be non-empty str")
+
+    watermark_cfg = cfg.get("watermark", {}) if isinstance(cfg.get("watermark", {}), dict) else {}
+    lf_cfg = watermark_cfg.get("lf", {}) if isinstance(watermark_cfg.get("lf", {}), dict) else {}
+    hf_cfg = watermark_cfg.get("hf", {}) if isinstance(watermark_cfg.get("hf", {}), dict) else {}
+
+    enable_lf = bool(lf_cfg.get("enabled", False))
+    enable_hf = bool(hf_cfg.get("enabled", False))
+
+    lf_strength = lf_cfg.get("strength", cfg.get("lf_strength", 1.5))
+    hf_threshold_percentile = hf_cfg.get("threshold_percentile", cfg.get("hf_threshold_percentile", 75.0))
+
+    lf_params = {
+        "impl_id": channel_lf.LF_CHANNEL_IMPL_ID,
+        "impl_version": channel_lf.LF_CHANNEL_VERSION,
+        "lf_strength": lf_strength,
+        "lf_enabled": enable_lf
+    }
+    hf_params = {
+        "impl_id": channel_hf.HF_CHANNEL_IMPL_ID,
+        "impl_version": channel_hf.HF_CHANNEL_VERSION,
+        "hf_threshold_percentile": hf_threshold_percentile,
+        "hf_enabled": enable_hf
+    }
+    lf_params_digest = digests.canonical_sha256(lf_params) if enable_lf else ""
+    hf_params_digest = digests.canonical_sha256(hf_params) if enable_hf else ""
+
+    device = cfg.get("device", "cpu")
+    dtype = cfg.get("dtype", "float32")
+    if isinstance(cfg.get("model"), dict) and "dtype" in cfg.get("model"):
+        dtype = cfg.get("model").get("dtype", dtype)
+
+    return InjectionContext(
+        plan_digest=plan_digest,
+        plan_ref=plan_payload,
+        lf_params_digest=lf_params_digest,
+        hf_params_digest=hf_params_digest,
+        enable_lf=enable_lf,
+        enable_hf=enable_hf,
+        device=device if isinstance(device, str) and device else "cpu",
+        dtype=dtype if isinstance(dtype, str) and dtype else "float32"
+    )
 
 
 def set_value_by_field_path(record: Dict[str, Any], field_path: str, value: str) -> None:

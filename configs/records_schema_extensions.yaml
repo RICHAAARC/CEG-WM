@@ -51,6 +51,18 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "高频注入痕迹摘要。"
+  - path: "content_evidence.injection_trace_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "注入痕迹摘要。"
+  - path: "content_evidence.injection_params_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "注入参数摘要。"
   - path: "content_evidence.lf_score"
     layer: "diagnostic"
     type: "score_float"
@@ -63,6 +75,30 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "高频分区得分。"
+  - path: "content_evidence.injection_status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "注入状态（ok/absent/failed/mismatch）。"
+  - path: "content_evidence.injection_absent_reason"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "注入缺失原因。"
+  - path: "content_evidence.injection_failure_reason"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "注入失败原因。"
+  - path: "content_evidence.injection_metrics"
+    layer: "diagnostic"
+    type: "metrics_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "注入统计指标摘要。"
   - path: "content_evidence.hf_evidence_summary"
     layer: "diagnostic"
     type: "json_dict"

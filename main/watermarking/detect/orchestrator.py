@@ -1,27 +1,22 @@
 """
-检测、评估与校准编排
-
-功能说明：
-- 定义了检测、评估与校准的编排器函数，用于协调不同组件的执行流程。
-- 每个编排器函数都接受配置和实现集作为输入，并返回包含业务字段的记录映射。
-- 实现了输入验证和错误处理，确保接口的健壮性。
-- 内容证据与几何证据数据类转换为适配字典，确保向下兼容性。
+File purpose: 检测、评估与校准编排（detect, evaluate, calibrate orchestration）。
+Module type: General module
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from main.registries.runtime_resolver import BuiltImplSet
 from main.core import digests
-from main.watermarking.fusion.interfaces import FusionDecision
-from main.watermarking.fusion import neyman_pearson
+from main.registries.runtime_resolver import BuiltImplSet
 from main.watermarking.content_chain.content_detector import CONTENT_DETECTOR_ID
 from main.watermarking.content_chain.high_freq_embedder import (
     HighFreqEmbedder,
     HIGH_FREQ_EMBEDDER_ID,
     HIGH_FREQ_EMBEDDER_VERSION,
 )
+from main.watermarking.fusion import neyman_pearson
+from main.watermarking.fusion.interfaces import FusionDecision
 
 
 def run_detect_orchestrator(
@@ -29,7 +24,10 @@ def run_detect_orchestrator(
     impl_set: BuiltImplSet,
     input_record: Optional[Dict[str, Any]] = None,
     cfg_digest: Optional[str] = None,
-    trajectory_evidence: Optional[Dict[str, Any]] = None
+    trajectory_evidence: Optional[Dict[str, Any]] = None,
+    injection_evidence: Optional[Dict[str, Any]] = None,
+    content_result_override: Any | None = None,
+    detect_plan_result_override: Any | None = None
 ) -> Dict[str, Any]:
     """
     功能：执行检测占位流程，包括 plan_digest 一致性验证。
@@ -44,6 +42,9 @@ def run_detect_orchestrator(
         cfg_digest: Optional cfg digest for detect-time cfg.
                    If None, plan_digest validation is skipped.
         trajectory_evidence: Optional trajectory tap evidence mapping.
+        injection_evidence: Optional injection evidence mapping.
+        content_result_override: Optional precomputed content result.
+        detect_plan_result_override: Optional precomputed detect plan result.
 
     Returns:
         Business fields mapping for record.
@@ -66,10 +67,19 @@ def run_detect_orchestrator(
     if trajectory_evidence is not None and not isinstance(trajectory_evidence, dict):
         # trajectory_evidence 类型不合法，必须 fail-fast。
         raise TypeError("trajectory_evidence must be dict or None")
+    if injection_evidence is not None and not isinstance(injection_evidence, dict):
+        # injection_evidence 类型不符合预期，必须 fail-fast。
+        raise TypeError("injection_evidence must be dict or None")
+    if content_result_override is not None and not isinstance(content_result_override, dict) and not hasattr(content_result_override, "as_dict"):
+        # content_result_override 类型不符合预期，必须 fail-fast。
+        raise TypeError("content_result_override must be dict, ContentEvidence, or None")
+    if detect_plan_result_override is not None and not isinstance(detect_plan_result_override, dict) and not hasattr(detect_plan_result_override, "as_dict"):
+        # detect_plan_result_override 类型不符合预期，必须 fail-fast。
+        raise TypeError("detect_plan_result_override must be dict, SubspacePlan, or None")
 
-    content_result = impl_set.content_extractor.extract(cfg)
+    content_result = content_result_override if content_result_override is not None else impl_set.content_extractor.extract(cfg)
     geometry_result = impl_set.geometry_extractor.extract(cfg)
-    
+
     # (1) 统一转换 ContentEvidence / GeometryEvidence 数据类为 dict。
     # 优先使用 .as_dict() 方法；若不存在则直接使用数据类或字典。
     content_evidence_payload = None
@@ -83,24 +93,28 @@ def run_detect_orchestrator(
             content_evidence_payload = {}
         content_evidence_payload["trajectory_evidence"] = trajectory_evidence
         _inject_trajectory_audit_fields(content_evidence_payload, trajectory_evidence)
-    
+    if injection_evidence is not None:
+        if content_evidence_payload is None:
+            content_evidence_payload = {}
+        _merge_injection_evidence(content_evidence_payload, injection_evidence)
+
     geometry_evidence_payload = None
     if hasattr(geometry_result, "as_dict") and callable(geometry_result.as_dict):
         geometry_evidence_payload = geometry_result.as_dict()
     elif isinstance(geometry_result, dict):
         geometry_evidence_payload = geometry_result
-    
+
     # (2) 构造融合输入适配 dict，兼容 FusionBaselineIdentity 的旧字段读取逻辑。
     # 优先从 .as_dict() 结果中读取，但为向后兼容也检查数据类属性。
     content_evidence_adapted = _adapt_content_evidence_for_fusion(content_result)
     geometry_evidence_adapted = _adapt_geometry_evidence_for_fusion(geometry_result)
-    
+
     planner_inputs = _build_planner_inputs_for_runtime(cfg, trajectory_evidence)
     mask_digest = None
     if isinstance(content_evidence_payload, dict):
         mask_digest = content_evidence_payload.get("mask_digest")
 
-    detect_plan_result = impl_set.subspace_planner.plan(
+    detect_plan_result = detect_plan_result_override if detect_plan_result_override is not None else impl_set.subspace_planner.plan(
         cfg,
         mask_digest=mask_digest,
         cfg_digest=cfg_digest,
@@ -159,12 +173,20 @@ def run_detect_orchestrator(
     )
     if trajectory_mismatch_reason:
         mismatch_reasons.append(trajectory_mismatch_reason)
+
+    injection_status, injection_mismatch_reason = _evaluate_injection_consistency(
+        input_record=input_record,
+        injection_evidence=injection_evidence
+    )
+    if injection_mismatch_reason:
+        mismatch_reasons.append(injection_mismatch_reason)
+
     primary_mismatch_reason, primary_mismatch_field_path = _resolve_primary_mismatch(
         mismatch_reasons
     )
 
     forced_mismatch = len(mismatch_reasons) > 0
-    forced_absent = trajectory_status == "absent" and not forced_mismatch
+    forced_absent = (trajectory_status == "absent" or injection_status == "absent") and not forced_mismatch
     if forced_mismatch:
         content_evidence_payload = {
             "status": "mismatch",
@@ -191,6 +213,8 @@ def run_detect_orchestrator(
         if trajectory_evidence is not None:
             content_evidence_payload["trajectory_evidence"] = trajectory_evidence
             _inject_trajectory_audit_fields(content_evidence_payload, trajectory_evidence)
+        if injection_evidence is not None:
+            _merge_injection_evidence(content_evidence_payload, injection_evidence)
         _merge_hf_evidence(content_evidence_payload, hf_evidence)
         content_result = content_evidence_payload
         content_evidence_adapted = content_evidence_payload
@@ -219,6 +243,8 @@ def run_detect_orchestrator(
         if trajectory_evidence is not None:
             content_evidence_payload["trajectory_evidence"] = trajectory_evidence
             _inject_trajectory_audit_fields(content_evidence_payload, trajectory_evidence)
+        if injection_evidence is not None:
+            _merge_injection_evidence(content_evidence_payload, injection_evidence)
         _merge_hf_evidence(content_evidence_payload, hf_evidence)
         content_result = content_evidence_payload
         content_evidence_adapted = content_evidence_payload
@@ -241,6 +267,11 @@ def run_detect_orchestrator(
             content_evidence_payload = _adapt_content_evidence_for_fusion(content_result)
         if content_evidence_payload is None:
             content_evidence_payload = {}
+        if trajectory_evidence is not None:
+            content_evidence_payload["trajectory_evidence"] = trajectory_evidence
+            _inject_trajectory_audit_fields(content_evidence_payload, trajectory_evidence)
+        if injection_evidence is not None:
+            _merge_injection_evidence(content_evidence_payload, injection_evidence)
         _merge_hf_evidence(content_evidence_payload, hf_evidence)
         content_evidence_adapted = _adapt_content_evidence_for_fusion(content_evidence_payload)
         fusion_result = impl_set.fusion_rule.fuse(cfg, content_evidence_adapted, geometry_evidence_adapted)
@@ -250,7 +281,7 @@ def run_detect_orchestrator(
     # 优先级：已检测到的 plan_digest mismatch > compute_failed > not_validated
     plan_digest_status = "not_validated"
     plan_digest_mismatch_reason = None
-    
+
     # 如果已通过 mismatch_reasons 检测到 plan_digest 不一致，优先级最高
     if forced_mismatch and "plan_digest_mismatch" in mismatch_reasons:
         # mismatch 已经在 forced_mismatch 分支中处理过，直接设置状态
@@ -270,7 +301,7 @@ def run_detect_orchestrator(
                 # 只有在不需要重算即可判定 mismatch 的情况下，才将 computed_failed 作为后备选项
                 # embed_time 存在但 detect_time 计算失败，这才是 compute_failed
                 plan_digest_status = "compute_failed"
-    
+
     record: Dict[str, Any] = {
         "operation": "detect",
         "detect_placeholder": True,
@@ -395,6 +426,93 @@ def _merge_hf_evidence(content_evidence_payload: Dict[str, Any], hf_evidence: Di
             score_parts["hf_absent_reason"] = summary.get("hf_absent_reason")
         if "hf_failure_reason" in summary:
             score_parts["hf_failure_reason"] = summary.get("hf_failure_reason")
+
+
+def _merge_injection_evidence(content_evidence_payload: Dict[str, Any], injection_evidence: Dict[str, Any]) -> None:
+    """
+    功能：合并注入证据到 content_evidence。
+    
+    Merge injection evidence into content evidence payload using registered fields.
+
+    Args:
+        content_evidence_payload: Mutable content evidence mapping.
+        injection_evidence: Injection evidence mapping.
+
+    Returns:
+        None.
+    """
+    if not isinstance(content_evidence_payload, dict):
+        return
+    if not isinstance(injection_evidence, dict):
+        return
+
+    content_evidence_payload["injection_status"] = injection_evidence.get("status")
+    content_evidence_payload["injection_absent_reason"] = injection_evidence.get("injection_absent_reason")
+    content_evidence_payload["injection_failure_reason"] = injection_evidence.get("injection_failure_reason")
+    content_evidence_payload["injection_trace_digest"] = injection_evidence.get("injection_trace_digest")
+    content_evidence_payload["injection_params_digest"] = injection_evidence.get("injection_params_digest")
+    content_evidence_payload["injection_metrics"] = injection_evidence.get("injection_metrics")
+
+
+def _evaluate_injection_consistency(
+    input_record: Optional[Dict[str, Any]],
+    injection_evidence: Optional[Dict[str, Any]]
+) -> tuple[str, Optional[str]]:
+    """
+    功能：校验 embed/detect 两端注入证据一致性。
+    
+    Evaluate injection evidence consistency between embed-time record and detect-time runtime.
+
+    Args:
+        input_record: Embed-time input record mapping or None.
+        injection_evidence: Detect-time injection evidence mapping or None.
+
+    Returns:
+        Tuple of (status, mismatch_reason_or_none).
+        status is one of: "ok", "absent", "mismatch".
+    """
+    if input_record is not None and not isinstance(input_record, dict):
+        # input_record 类型不合法，必须 fail-fast。
+        raise TypeError("input_record must be dict or None")
+    if injection_evidence is not None and not isinstance(injection_evidence, dict):
+        # injection_evidence 类型不合法，必须 fail-fast。
+        raise TypeError("injection_evidence must be dict or None")
+
+    embed_injection = None
+    if isinstance(input_record, dict):
+        for key in ["content_evidence_payload", "content_evidence", "content_result"]:
+            candidate = input_record.get(key)
+            if isinstance(candidate, dict) and "injection_status" in candidate:
+                embed_injection = candidate
+                break
+
+    if embed_injection is None:
+        # 向后兼容：embed 未提供注入证据时不触发缺失分支。
+        return "ok", None
+    if injection_evidence is None:
+        return "absent", "injection_evidence_missing"
+
+    embed_status = embed_injection.get("injection_status")
+    detect_status = injection_evidence.get("status")
+    if embed_status == "mismatch" or detect_status == "mismatch":
+        return "mismatch", "injection_status_mismatch"
+    if embed_status != "ok" or detect_status != "ok":
+        return "absent", "injection_status_not_ok"
+
+    embed_trace_digest = embed_injection.get("injection_trace_digest")
+    detect_trace_digest = injection_evidence.get("injection_trace_digest")
+    embed_params_digest = embed_injection.get("injection_params_digest")
+    detect_params_digest = injection_evidence.get("injection_params_digest")
+
+    if not isinstance(embed_trace_digest, str) or not isinstance(detect_trace_digest, str):
+        return "mismatch", "injection_trace_digest_invalid"
+    if not isinstance(embed_params_digest, str) or not isinstance(detect_params_digest, str):
+        return "mismatch", "injection_params_digest_invalid"
+    if embed_trace_digest != detect_trace_digest:
+        return "mismatch", "injection_trace_digest_mismatch"
+    if embed_params_digest != detect_params_digest:
+        return "mismatch", "injection_params_digest_mismatch"
+    return "ok", None
 
 
 def _extract_lf_evidence_from_input_record(input_record: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -733,6 +851,11 @@ def _resolve_mismatch_failure_reason(primary_mismatch_reason: str) -> str:
         "trajectory_spec_digest_mismatch": "detector_plan_mismatch",
         "trajectory_digest_mismatch": "detector_plan_mismatch",
         "trajectory_evidence_invalid": "detector_plan_mismatch",
+        "injection_trace_digest_mismatch": "detector_plan_mismatch",
+        "injection_params_digest_mismatch": "detector_plan_mismatch",
+        "injection_trace_digest_invalid": "detector_plan_mismatch",
+        "injection_params_digest_invalid": "detector_plan_mismatch",
+        "injection_status_mismatch": "detector_plan_mismatch",
     }
     return reason_map.get(primary_mismatch_reason, "detector_plan_mismatch")
 
@@ -809,7 +932,12 @@ def _resolve_primary_mismatch(mismatch_reasons: list[str]) -> tuple[str, str]:
         "planner_impl_identity_mismatch": "content_evidence.planner_impl_identity",
         "trajectory_spec_digest_mismatch": "content_evidence.trajectory_evidence.trajectory_spec_digest",
         "trajectory_digest_mismatch": "content_evidence.trajectory_evidence.trajectory_digest",
-        "trajectory_evidence_invalid": "content_evidence.trajectory_evidence"
+        "trajectory_evidence_invalid": "content_evidence.trajectory_evidence",
+        "injection_trace_digest_mismatch": "content_evidence.injection_trace_digest",
+        "injection_params_digest_mismatch": "content_evidence.injection_params_digest",
+        "injection_trace_digest_invalid": "content_evidence.injection_trace_digest",
+        "injection_params_digest_invalid": "content_evidence.injection_params_digest",
+        "injection_status_mismatch": "content_evidence.injection_status"
     }
     for token in [
         "plan_digest_mismatch",
@@ -817,7 +945,12 @@ def _resolve_primary_mismatch(mismatch_reasons: list[str]) -> tuple[str, str]:
         "planner_impl_identity_mismatch",
         "trajectory_spec_digest_mismatch",
         "trajectory_digest_mismatch",
-        "trajectory_evidence_invalid"
+        "trajectory_evidence_invalid",
+        "injection_trace_digest_mismatch",
+        "injection_params_digest_mismatch",
+        "injection_trace_digest_invalid",
+        "injection_params_digest_invalid",
+        "injection_status_mismatch"
     ]:
         if token in mismatch_reasons:
             return token, reason_to_field_path[token]

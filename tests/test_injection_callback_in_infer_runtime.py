@@ -1,0 +1,170 @@
+"""
+File purpose: 注入回调在 infer_runtime 中生效与降级测试。
+Module type: General module
+
+功能说明：
+- 验证 infer_runtime 中注入回调能产生注入证据摘要。
+- 验证不支持 callback 的 pipeline 会稳定降级为 absent。
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict
+
+import numpy as np
+
+from main.core import digests
+from main.diffusion.sd3.infer_runtime import run_sd3_inference
+from main.cli.run_common import build_injection_context_from_plan
+from main.watermarking.content_chain.latent_modifier import (
+    LatentModifier,
+    LATENT_MODIFIER_ID,
+    LATENT_MODIFIER_VERSION
+)
+
+
+class _CallbackPipelineStub:
+    """
+    功能：支持 callback_on_step_end 的推理桩。
+
+    Callback-capable pipeline stub for injection evidence.
+    """
+
+    def __init__(self, base_seed: int) -> None:
+        self._base_seed = base_seed
+
+    def __call__(
+        self,
+        *,
+        prompt: str,
+        num_inference_steps: int,
+        guidance_scale: float,
+        height: int,
+        width: int,
+        callback_on_step_end: Any = None,
+        callback_on_step_end_tensor_inputs: Any = None
+    ) -> Any:
+        if callback_on_step_end is not None:
+            for step_index in range(num_inference_steps):
+                rng = np.random.default_rng(self._base_seed + step_index)
+                latents = rng.normal(0.0, 1.0, size=(1, 4, 8, 8)).astype(np.float32)
+                callback_on_step_end(
+                    self,
+                    step_index,
+                    step_index,
+                    {"latents": latents}
+                )
+        class _Output:
+            images = [object()]
+        return _Output()
+
+
+class _NoCallbackPipelineStub:
+    """
+    功能：不支持 callback 的推理桩。
+
+    Pipeline stub without callback support.
+    """
+
+    def __call__(self, **kwargs: Any) -> Any:
+        class _Output:
+            images = [object()]
+        return _Output()
+
+
+def _build_cfg() -> Dict[str, Any]:
+    return {
+        "inference_enabled": True,
+        "inference_prompt": "prompt",
+        "inference_num_steps": 3,
+        "inference_guidance_scale": 7.0,
+        "inference_height": 512,
+        "inference_width": 512,
+        "trajectory_tap": {"enabled": True},
+        "watermark": {
+            "lf": {"enabled": True, "strength": 0.5},
+            "hf": {"enabled": True, "threshold_percentile": 75.0},
+            "subspace": {
+                "sample_count": 3,
+                "feature_dim": 16,
+                "timestep_start": 0,
+                "timestep_end": 2
+            }
+        }
+    }
+
+
+def _build_plan_with_basis(latent_dim: int, rank: int, seed: int) -> Dict[str, Any]:
+    rng = np.random.default_rng(seed)
+    lf_matrix = rng.normal(0.0, 1.0, size=(latent_dim, rank)).astype(np.float32)
+    lf_matrix, _ = np.linalg.qr(lf_matrix)
+    hf_matrix = rng.normal(0.0, 1.0, size=(latent_dim, rank)).astype(np.float32)
+    hf_matrix, _ = np.linalg.qr(hf_matrix)
+    return {
+        "lf_basis": {"projection_matrix": lf_matrix.tolist()},
+        "hf_basis": {"hf_projection_matrix": hf_matrix.tolist()},
+        "planner_params": {"rank": rank}
+    }
+
+
+def test_injection_callback_smoke() -> None:
+    """
+    功能：注入回调必须产生可复算证据摘要。
+    """
+    cfg = _build_cfg()
+    latent_dim = 1 * 4 * 8 * 8
+    plan_payload = _build_plan_with_basis(latent_dim, 8, 2026)
+    plan_digest = digests.canonical_sha256(plan_payload)
+
+    injection_context = build_injection_context_from_plan(cfg, plan_payload, plan_digest)
+    modifier = LatentModifier(LATENT_MODIFIER_ID, LATENT_MODIFIER_VERSION)
+
+    result = run_sd3_inference(
+        cfg,
+        _CallbackPipelineStub(base_seed=123),
+        "cpu",
+        None,
+        injection_context=injection_context,
+        injection_modifier=modifier
+    )
+
+    injection_evidence = result.get("injection_evidence")
+    assert isinstance(injection_evidence, dict)
+    assert injection_evidence.get("status") == "ok"
+    assert isinstance(injection_evidence.get("injection_trace_digest"), str)
+    assert len(injection_evidence.get("injection_trace_digest")) == 64
+    assert isinstance(injection_evidence.get("injection_params_digest"), str)
+    assert len(injection_evidence.get("injection_params_digest")) == 64
+
+    metrics = injection_evidence.get("injection_metrics")
+    assert isinstance(metrics, dict)
+    assert metrics.get("step_count") == 3
+    assert isinstance(metrics.get("delta_norm_mean"), float)
+    assert metrics.get("delta_norm_mean") > 0.0
+
+
+def test_injection_unsupported_callback_absent() -> None:
+    """
+    功能：不支持 callback 的 pipeline 必须稳定降级为 absent。
+    """
+    cfg = _build_cfg()
+    latent_dim = 1 * 4 * 8 * 8
+    plan_payload = _build_plan_with_basis(latent_dim, 8, 2026)
+    plan_digest = digests.canonical_sha256(plan_payload)
+
+    injection_context = build_injection_context_from_plan(cfg, plan_payload, plan_digest)
+    modifier = LatentModifier(LATENT_MODIFIER_ID, LATENT_MODIFIER_VERSION)
+
+    result = run_sd3_inference(
+        cfg,
+        _NoCallbackPipelineStub(),
+        "cpu",
+        None,
+        injection_context=injection_context,
+        injection_modifier=modifier
+    )
+
+    injection_evidence = result.get("injection_evidence")
+    assert isinstance(injection_evidence, dict)
+    assert injection_evidence.get("status") == "absent"
+    assert injection_evidence.get("injection_absent_reason") == "unsupported_pipeline"

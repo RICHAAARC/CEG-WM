@@ -9,9 +9,13 @@ SD3 推理流
 
 from __future__ import annotations
 
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional, List
 
 from main.diffusion.sd3 import trajectory_tap
+from main.diffusion.sd3.callback_composer import InjectionContext
+from main.watermarking.content_chain.latent_modifier import LatentModifier
+from main.watermarking.content_chain import channel_lf, channel_hf
+from main.core import digests
 
 
 INFERENCE_STATUS_OK = "ok"
@@ -23,7 +27,10 @@ def run_sd3_inference(
     cfg: Dict[str, Any],
     pipeline_obj: Any,
     device: str | None,
-    seed: int | None
+    seed: int | None,
+    *,
+    injection_context: Optional[InjectionContext] = None,
+    injection_modifier: Optional[LatentModifier] = None
 ) -> Dict[str, Any]:
     """
     功能：执行 SD3 推理并返回 inference_runtime_meta。
@@ -45,6 +52,12 @@ def run_sd3_inference(
     if not isinstance(cfg, dict):
         # cfg 类型不合法，必须 fail-fast。
         raise TypeError("cfg must be dict")
+    if injection_context is not None and not isinstance(injection_context, InjectionContext):
+        # injection_context 类型不合法，必须 fail-fast。
+        raise TypeError("injection_context must be InjectionContext or None")
+    if injection_modifier is not None and not isinstance(injection_modifier, LatentModifier):
+        # injection_modifier 类型不合法，必须 fail-fast。
+        raise TypeError("injection_modifier must be LatentModifier or None")
 
     inference_enabled = cfg.get("inference_enabled", False)
     if not inference_enabled:
@@ -58,6 +71,10 @@ def run_sd3_inference(
                 None,
                 seed=seed,
                 device=device
+            ),
+            "injection_evidence": _build_injection_absent_evidence(
+                injection_context,
+                absent_reason="inference_disabled"
             )
         }
 
@@ -65,6 +82,7 @@ def run_sd3_inference(
     inference_error = None
     inference_runtime_meta: Dict[str, Any] = {}
     trajectory_evidence: Dict[str, Any] | None = None
+    injection_evidence: Dict[str, Any] | None = None
 
     # (1) 检查 pipeline_obj 是否可用
     if pipeline_obj is None:
@@ -180,6 +198,16 @@ def run_sd3_inference(
             generator.manual_seed(seed)
             infer_kwargs["generator"] = generator
 
+        # 构造注入回调（闭包捕获 InjectionContext）。
+        injection_callback, injection_evidence = _prepare_injection_callback(
+            cfg,
+            injection_context,
+            injection_modifier
+        )
+        if injection_callback is not None:
+            infer_kwargs["callback_on_step_end"] = injection_callback
+            infer_kwargs["callback_on_step_end_tensor_inputs"] = ["latents"]
+
         # 执行推理并在支持时采样真实 trajectory 摘要。
         tap_call_result = trajectory_tap.tap_from_pipeline(
             cfg,
@@ -191,6 +219,15 @@ def run_sd3_inference(
         )
         output = tap_call_result.get("output")
         trajectory_evidence = tap_call_result.get("trajectory_evidence")
+        tap_status = tap_call_result.get("tap_status")
+
+        # 更新注入证据状态（处理不支持 callback 的降级路径）。
+        if injection_context is not None:
+            injection_evidence = _finalize_injection_evidence(
+                injection_context,
+                injection_evidence,
+                tap_status
+            )
 
         # 提取输出摘要
         if hasattr(output, "images") and output.images is not None and len(output.images) > 0:
@@ -232,5 +269,391 @@ def run_sd3_inference(
             inference_runtime_meta,
             seed=seed,
             device=device
+        ),
+        "injection_evidence": injection_evidence if isinstance(injection_evidence, dict) else _build_injection_absent_evidence(
+            injection_context,
+            absent_reason="injection_not_available"
         )
+    }
+
+
+def _prepare_injection_callback(
+    cfg: Dict[str, Any],
+    injection_context: Optional[InjectionContext],
+    injection_modifier: Optional[LatentModifier]
+) -> tuple[Optional[Any], Optional[Dict[str, Any]]]:
+    """
+    功能：构造注入回调与初始注入证据。
+    
+    Prepare injection callback capturing InjectionContext and initialize evidence.
+
+    Args:
+        cfg: Configuration mapping.
+        injection_context: InjectionContext instance or None.
+        injection_modifier: LatentModifier instance or None.
+
+    Returns:
+        Tuple of (callback or None, initial injection evidence dict or None).
+
+    Raises:
+        TypeError: If inputs are invalid.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if injection_context is None:
+        return None, _build_injection_absent_evidence(None, "injection_not_enabled")
+    if injection_modifier is None:
+        return None, _build_injection_absent_evidence(injection_context, "modifier_missing")
+
+    # 校验 params_digest 与运行期参数的一致性。
+    params_status, params_reason, params_payload = _validate_injection_params(cfg, injection_context)
+    if params_status != "ok":
+        return None, _build_injection_mismatch_evidence(
+            injection_context,
+            params_reason,
+            params_payload
+        )
+
+    injection_cfg = _build_injection_cfg(cfg, injection_context)
+    step_evidence_list: List[Dict[str, Any]] = []
+    plan_cache: Dict[str, Any] | None = None
+
+    def _injection_callback(
+        _pipe: Any,
+        step_index: int,
+        timestep: Any,
+        callback_kwargs: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        功能：在每步中执行注入并收集证据。
+        
+        Apply latent injection and collect step evidence during inference.
+        """
+        if not isinstance(callback_kwargs, dict):
+            return callback_kwargs
+        latents = callback_kwargs.get("latents")
+        if latents is None:
+            return callback_kwargs
+
+        nonlocal plan_cache
+        if plan_cache is None:
+            plan_cache = _build_plan_for_injection(
+                injection_context.plan_ref,
+                injection_context.plan_digest,
+                latents,
+                injection_cfg
+            )
+
+        latents_modified, step_evidence = injection_modifier.apply_latent_update(
+            latents=latents,
+            plan=plan_cache,
+            cfg=injection_cfg,
+            step_index=step_index,
+            key=None
+        )
+        callback_kwargs["latents"] = latents_modified
+        step_evidence_list.append(step_evidence)
+        return callback_kwargs
+
+    initial_evidence = _build_injection_ok_evidence(
+        injection_context,
+        params_payload,
+        step_evidence_list
+    )
+    return _injection_callback, initial_evidence
+
+
+def _build_injection_cfg(cfg: Dict[str, Any], context: InjectionContext) -> Dict[str, Any]:
+    """
+    功能：构造注入配置（不修改原 cfg）。
+
+    Build injection config without mutating cfg.
+
+    Args:
+        cfg: Configuration mapping.
+        context: InjectionContext instance.
+
+    Returns:
+        Injection config mapping for LatentModifier.
+    """
+    watermark_cfg = cfg.get("watermark", {}) if isinstance(cfg.get("watermark", {}), dict) else {}
+    lf_cfg = watermark_cfg.get("lf", {}) if isinstance(watermark_cfg.get("lf", {}), dict) else {}
+    hf_cfg = watermark_cfg.get("hf", {}) if isinstance(watermark_cfg.get("hf", {}), dict) else {}
+
+    lf_strength = lf_cfg.get("strength", cfg.get("lf_strength", 1.5))
+    hf_threshold_percentile = hf_cfg.get("threshold_percentile", cfg.get("hf_threshold_percentile", 75.0))
+    watermark_seed = cfg.get("watermark_seed", cfg.get("seed", 42))
+
+    return {
+        "lf_enabled": context.enable_lf,
+        "hf_enabled": context.enable_hf,
+        "lf_strength": lf_strength,
+        "hf_threshold_percentile": hf_threshold_percentile,
+        "watermark_seed": watermark_seed
+    }
+
+
+def _validate_injection_params(
+    cfg: Dict[str, Any],
+    context: InjectionContext
+) -> tuple[str, str, Dict[str, Any]]:
+    """
+    功能：校验注入参数摘要一致性。
+    
+    Validate injection parameter digests against runtime config.
+
+    Args:
+        cfg: Configuration mapping.
+        context: InjectionContext instance.
+
+    Returns:
+        Tuple of (status, reason, params_payload).
+    """
+    injection_cfg = _build_injection_cfg(cfg, context)
+    lf_params = {
+        "impl_id": channel_lf.LF_CHANNEL_IMPL_ID,
+        "impl_version": channel_lf.LF_CHANNEL_VERSION,
+        "lf_strength": injection_cfg.get("lf_strength"),
+        "lf_enabled": bool(context.enable_lf)
+    }
+    hf_params = {
+        "impl_id": channel_hf.HF_CHANNEL_IMPL_ID,
+        "impl_version": channel_hf.HF_CHANNEL_VERSION,
+        "hf_threshold_percentile": injection_cfg.get("hf_threshold_percentile"),
+        "hf_enabled": bool(context.enable_hf)
+    }
+    lf_params_digest = digests.canonical_sha256(lf_params)
+    hf_params_digest = digests.canonical_sha256(hf_params)
+
+    params_payload = {
+        "plan_digest": context.plan_digest,
+        "lf_params_digest": lf_params_digest,
+        "hf_params_digest": hf_params_digest,
+        "lf_enabled": bool(context.enable_lf),
+        "hf_enabled": bool(context.enable_hf)
+    }
+
+    if context.enable_lf and lf_params_digest != context.lf_params_digest:
+        return "mismatch", "lf_params_digest_mismatch", params_payload
+    if context.enable_hf and hf_params_digest != context.hf_params_digest:
+        return "mismatch", "hf_params_digest_mismatch", params_payload
+    return "ok", "ok", params_payload
+
+
+def _build_plan_for_injection(
+    plan_ref: Dict[str, Any],
+    plan_digest: str,
+    latents: Any,
+    injection_cfg: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    功能：为注入构造包含 basis 的 plan。
+    
+    Build a plan payload with deterministic basis when missing.
+
+    Args:
+        plan_ref: Plan reference mapping from planner.
+        plan_digest: Plan digest string.
+        latents: Latent tensor or array (used to infer shape).
+        injection_cfg: Injection config mapping.
+
+    Returns:
+        Plan mapping containing lf_basis/hf_basis if missing.
+    """
+    plan_payload = dict(plan_ref) if isinstance(plan_ref, dict) else {}
+    if "lf_basis" in plan_payload and "hf_basis" in plan_payload:
+        return plan_payload
+
+    # 根据 latents 维度构造确定性基。
+    latents_np = _to_numpy(latents)
+    if latents_np is None:
+        return plan_payload
+
+    latent_dim = int(latents_np.size)
+    rank = int(plan_payload.get("planner_params", {}).get("rank", 8))
+    rank = max(1, min(rank, latent_dim))
+    seed = _derive_seed_from_digest(plan_digest)
+
+    if "lf_basis" not in plan_payload:
+        plan_payload["lf_basis"] = {
+            "projection_matrix": _build_random_orthonormal(latent_dim, rank, seed)
+        }
+    if "hf_basis" not in plan_payload:
+        plan_payload["hf_basis"] = {
+            "hf_projection_matrix": _build_random_orthonormal(latent_dim, rank, seed + 1)
+        }
+    return plan_payload
+
+
+def _to_numpy(latents: Any) -> Optional[Any]:
+    """
+    功能：将 latents 转换为 numpy 数组（仅用于形状推断）。
+    
+    Convert latents to numpy array for shape inference.
+    """
+    try:
+        if hasattr(latents, "cpu"):
+            return latents.cpu().numpy()
+        import numpy as np
+        return np.asarray(latents)
+    except Exception:
+        return None
+
+
+def _derive_seed_from_digest(digest_hex: str) -> int:
+    """
+    功能：从摘要派生稳定 seed。
+    
+    Derive stable integer seed from hex digest.
+    """
+    if not isinstance(digest_hex, str) or not digest_hex:
+        return 0
+    return int(digest_hex[:8], 16)
+
+
+def _build_random_orthonormal(latent_dim: int, rank: int, seed: int) -> Any:
+    """
+    功能：构造确定性正交基。
+    Build deterministic orthonormal basis for injection.
+    """
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    matrix = rng.normal(0.0, 1.0, size=(latent_dim, rank)).astype(np.float32)
+    q, _ = np.linalg.qr(matrix)
+    return q
+
+
+def _build_injection_ok_evidence(
+    context: InjectionContext,
+    params_payload: Dict[str, Any],
+    step_evidence_list: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    功能：构造注入证据容器（待完成填充）。
+
+    Build injection evidence container (filled after inference).
+    """
+    return {
+        "status": "ok",
+        "injection_absent_reason": None,
+        "injection_failure_reason": None,
+        "injection_trace_digest": None,
+        "injection_params_digest": digests.canonical_sha256(params_payload),
+        "injection_metrics": None,
+        "plan_digest": context.plan_digest,
+        "lf_params_digest": context.lf_params_digest if context.enable_lf else None,
+        "hf_params_digest": context.hf_params_digest if context.enable_hf else None,
+        "_step_evidence_list": step_evidence_list
+    }
+
+
+def _build_injection_absent_evidence(
+    context: Optional[InjectionContext],
+    absent_reason: str
+) -> Dict[str, Any]:
+    """
+    功能：构造注入 absent 证据。
+
+    Build injection absent evidence mapping.
+    """
+    return {
+        "status": "absent",
+        "injection_absent_reason": absent_reason,
+        "injection_failure_reason": None,
+        "injection_trace_digest": None,
+        "injection_params_digest": None,
+        "injection_metrics": None,
+        "plan_digest": context.plan_digest if isinstance(context, InjectionContext) else None,
+        "lf_params_digest": context.lf_params_digest if isinstance(context, InjectionContext) else None,
+        "hf_params_digest": context.hf_params_digest if isinstance(context, InjectionContext) else None
+    }
+
+
+def _build_injection_mismatch_evidence(
+    context: InjectionContext,
+    mismatch_reason: str,
+    params_payload: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    功能：构造注入 mismatch 证据。
+
+    Build injection mismatch evidence mapping.
+    """
+    return {
+        "status": "mismatch",
+        "injection_absent_reason": None,
+        "injection_failure_reason": mismatch_reason,
+        "injection_trace_digest": None,
+        "injection_params_digest": digests.canonical_sha256(params_payload),
+        "injection_metrics": None,
+        "plan_digest": context.plan_digest,
+        "lf_params_digest": context.lf_params_digest if context.enable_lf else None,
+        "hf_params_digest": context.hf_params_digest if context.enable_hf else None
+    }
+
+
+def _finalize_injection_evidence(
+    context: InjectionContext,
+    injection_evidence: Optional[Dict[str, Any]],
+    tap_status: Optional[str]
+) -> Dict[str, Any]:
+    """
+    功能：根据推理结果收口注入证据。
+
+    Finalize injection evidence with aggregated metrics and digests.
+    """
+    if injection_evidence is None:
+        return _build_injection_absent_evidence(context, "injection_not_available")
+    if injection_evidence.get("status") in {"absent", "mismatch"}:
+        return injection_evidence
+    if tap_status == "unsupported":
+        return _build_injection_absent_evidence(context, "unsupported_pipeline")
+
+    step_evidence_list = injection_evidence.pop("_step_evidence_list", [])
+    if not isinstance(step_evidence_list, list) or len(step_evidence_list) == 0:
+        return _build_injection_absent_evidence(context, "latents_missing")
+
+    metrics = _summarize_injection_metrics(step_evidence_list)
+    trace_payload = {
+        "plan_digest": injection_evidence.get("plan_digest"),
+        "injection_params_digest": injection_evidence.get("injection_params_digest"),
+        "metrics": metrics
+    }
+    trace_digest = digests.canonical_sha256(trace_payload)
+
+    injection_evidence["injection_metrics"] = metrics
+    injection_evidence["injection_trace_digest"] = trace_digest
+    return injection_evidence
+
+
+def _summarize_injection_metrics(step_evidence_list: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    功能：汇总注入 step 级指标。
+    
+    Summarize step evidence metrics without exposing raw tensors.
+    """
+    if not isinstance(step_evidence_list, list):
+        return {
+            "step_count": 0,
+            "combined_status_counts": {},
+            "delta_norm_mean": 0.0
+        }
+
+    delta_values = []
+    status_counts: Dict[str, int] = {}
+    for step_evidence in step_evidence_list:
+        if not isinstance(step_evidence, dict):
+            continue
+        combined_status = step_evidence.get("combined_status", "unknown")
+        if isinstance(combined_status, str):
+            status_counts[combined_status] = status_counts.get(combined_status, 0) + 1
+        delta_norm = step_evidence.get("modification_delta_norm")
+        if isinstance(delta_norm, (int, float)):
+            delta_values.append(float(delta_norm))
+
+    delta_mean = float(sum(delta_values) / len(delta_values)) if delta_values else 0.0
+    return {
+        "step_count": len(step_evidence_list),
+        "combined_status_counts": status_counts,
+        "delta_norm_mean": delta_mean
     }
