@@ -445,14 +445,20 @@ records_schema:
     - content_evidence.hf_score
     - content_evidence.score_parts
     - content_evidence.content_failure_reason
+    - content_evidence.audit.trajectory_tap_status
+    - content_evidence.audit.trajectory_absent_reason
     - content_evidence.trajectory_evidence
     - content_evidence.trajectory_evidence.status
     - content_evidence.trajectory_evidence.trajectory_spec
     - content_evidence.trajectory_evidence.trajectory_spec_digest
     - content_evidence.trajectory_evidence.trajectory_digest
+    - content_evidence.trajectory_evidence.trajectory_metrics
     - content_evidence.trajectory_evidence.trajectory_stats
     - content_evidence.trajectory_evidence.trajectory_absent_reason
     - content_evidence.trajectory_evidence.trajectory_tap_version
+    - content_evidence.trajectory_evidence.audit
+    - content_evidence.trajectory_evidence.audit.trajectory_tap_status
+    - content_evidence.trajectory_evidence.audit.trajectory_absent_reason
     - content_evidence.trajectory_evidence.device
     - geometry_evidence.anchor_digest
     - geometry_evidence.anchor_metrics

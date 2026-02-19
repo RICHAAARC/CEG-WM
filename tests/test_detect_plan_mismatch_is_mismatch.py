@@ -64,6 +64,56 @@ class _SyncStub:
         return {"status": "ok"}
 
 
+def _build_trace_signature(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：构造与 detect orchestrator 一致的 trace_signature。
+
+    Build trace signature aligned with detect orchestrator.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Trace signature mapping.
+    """
+    generation = cfg.get("generation") if isinstance(cfg.get("generation"), dict) else {}
+    model = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
+    return {
+        "num_inference_steps": cfg.get("inference_num_steps", generation.get("num_inference_steps", 16)),
+        "guidance_scale": cfg.get("inference_guidance_scale", generation.get("guidance_scale", 7.0)),
+        "height": cfg.get("inference_height", model.get("height", 512)),
+        "width": cfg.get("inference_width", model.get("width", 512)),
+    }
+
+
+def _compute_planner_input_digest(
+    planner: SubspacePlannerImpl,
+    cfg: Dict[str, Any],
+    trajectory_evidence: Dict[str, Any] | None,
+    cfg_digest: str
+) -> str:
+    """
+    功能：计算与运行期一致的 planner_input_digest。
+
+    Compute planner_input_digest using planner runtime path.
+
+    Args:
+        planner: Planner implementation.
+        cfg: Configuration mapping.
+        trajectory_evidence: Optional trajectory evidence mapping.
+        cfg_digest: Config digest string.
+
+    Returns:
+        Planner input digest string.
+    """
+    inputs: Dict[str, Any] = {"trace_signature": _build_trace_signature(cfg)}
+    if trajectory_evidence is not None:
+        inputs["trajectory_evidence"] = trajectory_evidence
+
+    _ = cfg_digest
+    return planner._build_planner_input_digest(inputs)
+
+
 def test_detect_plan_mismatch_is_mismatch() -> None:
     impl_digest = digests.canonical_sha256({"impl_id": SUBSPACE_PLANNER_ID, "impl_version": SUBSPACE_PLANNER_VERSION})
     subspace_planner = SubspacePlannerImpl(SUBSPACE_PLANNER_ID, SUBSPACE_PLANNER_VERSION, impl_digest)
@@ -180,12 +230,28 @@ def test_detect_trajectory_digest_mismatch_is_mismatch() -> None:
         }
     }
 
+    detect_planner_input_digest = _compute_planner_input_digest(
+        subspace_planner,
+        cfg,
+        {
+            "status": "ok",
+            "trajectory_spec_digest": "spec_digest_embed",
+            "trajectory_digest": "traj_digest_detect"
+        },
+        "cfg_digest_test"
+    )
+
     input_record = {
         "content_evidence_payload": {
             "trajectory_evidence": {
                 "status": "ok",
                 "trajectory_spec_digest": "spec_digest_embed",
                 "trajectory_digest": "traj_digest_embed"
+            }
+        },
+        "subspace_plan": {
+            "verifiable_input_domain_spec": {
+                "planner_input_digest": detect_planner_input_digest
             }
         }
     }
@@ -266,12 +332,28 @@ def test_detect_trajectory_absent_forces_absent() -> None:
         }
     }
 
+    detect_planner_input_digest = _compute_planner_input_digest(
+        subspace_planner,
+        cfg,
+        {
+            "status": "ok",
+            "trajectory_spec_digest": "spec_digest_detect",
+            "trajectory_digest": "traj_digest_detect"
+        },
+        "cfg_digest_test"
+    )
+
     input_record = {
         "content_evidence_payload": {
             "trajectory_evidence": {
                 "status": "absent",
                 "trajectory_spec_digest": None,
                 "trajectory_digest": None
+            }
+        },
+        "subspace_plan": {
+            "verifiable_input_domain_spec": {
+                "planner_input_digest": detect_planner_input_digest
             }
         }
     }

@@ -76,6 +76,7 @@ def run_detect_orchestrator(
         if content_evidence_payload is None:
             content_evidence_payload = {}
         content_evidence_payload["trajectory_evidence"] = trajectory_evidence
+        _inject_trajectory_audit_fields(content_evidence_payload, trajectory_evidence)
     
     geometry_evidence_payload = None
     if hasattr(geometry_result, "as_dict") and callable(geometry_result.as_dict):
@@ -110,6 +111,13 @@ def run_detect_orchestrator(
 
     detect_time_plan_digest = getattr(detect_plan_result, "plan_digest", None)
     detect_time_basis_digest = getattr(detect_plan_result, "basis_digest", None)
+    detect_planner_input_digest = _extract_detect_planner_input_digest(detect_plan_result)
+    if detect_planner_input_digest is None:
+        build_planner_input_digest = getattr(impl_set.subspace_planner, "_build_planner_input_digest", None)
+        if callable(build_planner_input_digest):
+            computed_digest = build_planner_input_digest(planner_inputs)
+            if isinstance(computed_digest, str) and computed_digest:
+                detect_planner_input_digest = computed_digest
     detect_time_planner_impl_identity = None
     if hasattr(detect_plan_result, "plan") and isinstance(detect_plan_result.plan, dict):
         detect_time_planner_impl_identity = detect_plan_result.plan.get("planner_impl_identity")
@@ -125,7 +133,8 @@ def run_detect_orchestrator(
 
     trajectory_status, trajectory_mismatch_reason = _evaluate_trajectory_consistency(
         input_record=input_record,
-        trajectory_evidence=trajectory_evidence
+        trajectory_evidence=trajectory_evidence,
+        detect_planner_input_digest=detect_planner_input_digest
     )
     if trajectory_mismatch_reason:
         mismatch_reasons.append(trajectory_mismatch_reason)
@@ -160,6 +169,7 @@ def run_detect_orchestrator(
         }
         if trajectory_evidence is not None:
             content_evidence_payload["trajectory_evidence"] = trajectory_evidence
+            _inject_trajectory_audit_fields(content_evidence_payload, trajectory_evidence)
         content_result = content_evidence_payload
         content_evidence_adapted = content_evidence_payload
         geometry_evidence_adapted = _adapt_geometry_evidence_for_fusion(geometry_result)
@@ -186,6 +196,7 @@ def run_detect_orchestrator(
         }
         if trajectory_evidence is not None:
             content_evidence_payload["trajectory_evidence"] = trajectory_evidence
+            _inject_trajectory_audit_fields(content_evidence_payload, trajectory_evidence)
         content_result = content_evidence_payload
         content_evidence_adapted = content_evidence_payload
         geometry_evidence_adapted = _adapt_geometry_evidence_for_fusion(geometry_result)
@@ -282,7 +293,8 @@ def _collect_plan_mismatch_reasons(
 
 def _evaluate_trajectory_consistency(
     input_record: Optional[Dict[str, Any]],
-    trajectory_evidence: Optional[Dict[str, Any]]
+    trajectory_evidence: Optional[Dict[str, Any]],
+    detect_planner_input_digest: Optional[str]
 ) -> tuple[str, Optional[str]]:
     """
     功能：校验 embed/detect 两端 trajectory 证据一致性。
@@ -292,6 +304,7 @@ def _evaluate_trajectory_consistency(
     Args:
         input_record: Embed-time input record mapping or None.
         trajectory_evidence: Detect-time trajectory evidence mapping or None.
+        detect_planner_input_digest: Detect-time planner input digest.
 
     Returns:
         Tuple of (status, mismatch_reason_or_none).
@@ -306,6 +319,9 @@ def _evaluate_trajectory_consistency(
     if trajectory_evidence is not None and not isinstance(trajectory_evidence, dict):
         # trajectory_evidence 类型不合法，必须 fail-fast。
         raise TypeError("trajectory_evidence must be dict or None")
+    if detect_planner_input_digest is not None and not isinstance(detect_planner_input_digest, str):
+        # detect_planner_input_digest 类型不合法，必须 fail-fast。
+        raise TypeError("detect_planner_input_digest must be str or None")
 
     embed_trajectory_evidence = None
     if isinstance(input_record, dict):
@@ -322,14 +338,21 @@ def _evaluate_trajectory_consistency(
             raise TypeError("embed trajectory_evidence must be dict or None")
         embed_trajectory_evidence = candidate
 
+    embed_planner_input_digest = _extract_embed_planner_input_digest(input_record)
+
     if embed_trajectory_evidence is None and trajectory_evidence is None:
         return "absent", None
     if embed_trajectory_evidence is None or trajectory_evidence is None:
         return "absent", None
 
-    embed_status = embed_trajectory_evidence.get("status")
-    detect_status = trajectory_evidence.get("status")
+    embed_status = _resolve_trajectory_tap_status(embed_trajectory_evidence)
+    detect_status = _resolve_trajectory_tap_status(trajectory_evidence)
     if embed_status != "ok" or detect_status != "ok":
+        return "absent", None
+
+    if not isinstance(embed_planner_input_digest, str) or not embed_planner_input_digest:
+        return "absent", None
+    if not isinstance(detect_planner_input_digest, str) or not detect_planner_input_digest:
         return "absent", None
 
     embed_spec_digest = embed_trajectory_evidence.get("trajectory_spec_digest")
@@ -346,7 +369,176 @@ def _evaluate_trajectory_consistency(
         return "mismatch", "trajectory_spec_digest_mismatch"
     if embed_trajectory_digest != detect_trajectory_digest:
         return "mismatch", "trajectory_digest_mismatch"
+    if embed_planner_input_digest != detect_planner_input_digest:
+        return "mismatch", "plan_digest_mismatch"
     return "ok", None
+
+
+def _extract_embed_planner_input_digest(input_record: Optional[Dict[str, Any]]) -> Optional[str]:
+    """
+    功能：从 embed 记录提取 planner_input_digest。
+
+    Extract embed-time planner_input_digest from record payload.
+
+    Args:
+        input_record: Embed-time record mapping.
+
+    Returns:
+        Planner input digest string or None.
+    """
+    if not isinstance(input_record, dict):
+        return None
+
+    subspace_plan = input_record.get("subspace_plan")
+    if isinstance(subspace_plan, dict):
+        direct_digest = subspace_plan.get("planner_input_digest")
+        if isinstance(direct_digest, str) and direct_digest:
+            return direct_digest
+        verifiable_spec = subspace_plan.get("verifiable_input_domain_spec")
+        if isinstance(verifiable_spec, dict):
+            digest_value = verifiable_spec.get("planner_input_digest")
+            if isinstance(digest_value, str) and digest_value:
+                return digest_value
+
+    content_payload = input_record.get("content_evidence_payload")
+    if isinstance(content_payload, dict):
+        nested = content_payload.get("subspace_plan")
+        if isinstance(nested, dict):
+            direct_digest = nested.get("planner_input_digest")
+            if isinstance(direct_digest, str) and direct_digest:
+                return direct_digest
+            verifiable_spec = nested.get("verifiable_input_domain_spec")
+            if isinstance(verifiable_spec, dict):
+                digest_value = verifiable_spec.get("planner_input_digest")
+                if isinstance(digest_value, str) and digest_value:
+                    return digest_value
+    return None
+
+
+def _inject_trajectory_audit_fields(
+    content_evidence_payload: Dict[str, Any],
+    trajectory_evidence: Dict[str, Any]
+) -> None:
+    """
+    功能：将轨迹 tap 子状态写入 content_evidence.audit（兼容新旧字段）。
+
+    Inject trajectory tap status fields into content_evidence.audit.
+
+    Args:
+        content_evidence_payload: Content evidence payload mapping.
+        trajectory_evidence: Trajectory evidence mapping.
+
+    Returns:
+        None.
+    """
+    if not isinstance(content_evidence_payload, dict):
+        return
+    if not isinstance(trajectory_evidence, dict):
+        return
+
+    audit = content_evidence_payload.get("audit")
+    if not isinstance(audit, dict):
+        audit = {}
+        content_evidence_payload["audit"] = audit
+
+    tap_status = _resolve_trajectory_tap_status(trajectory_evidence)
+    tap_absent_reason = _resolve_trajectory_absent_reason(trajectory_evidence)
+
+    if isinstance(tap_status, str) and tap_status:
+        audit["trajectory_tap_status"] = tap_status
+    if isinstance(tap_absent_reason, str) and tap_absent_reason:
+        audit["trajectory_absent_reason"] = tap_absent_reason
+
+
+def _resolve_trajectory_tap_status(trajectory_evidence: Dict[str, Any]) -> Optional[str]:
+    """
+    功能：优先读取 trajectory audit 子状态，兼容旧 status 字段。
+
+    Resolve trajectory tap status with new-field-first compatibility.
+
+    Args:
+        trajectory_evidence: Trajectory evidence mapping.
+
+    Returns:
+        trajectory tap status string or None.
+    """
+    if not isinstance(trajectory_evidence, dict):
+        return None
+
+    audit = trajectory_evidence.get("audit")
+    if isinstance(audit, dict):
+        value = audit.get("trajectory_tap_status")
+        if isinstance(value, str) and value:
+            return value
+
+    legacy = trajectory_evidence.get("status")
+    if isinstance(legacy, str) and legacy:
+        return legacy
+    return None
+
+
+def _resolve_trajectory_absent_reason(trajectory_evidence: Dict[str, Any]) -> Optional[str]:
+    """
+    功能：优先读取 trajectory audit 缺失原因，兼容旧字段。
+
+    Resolve trajectory absent reason with new-field-first compatibility.
+
+    Args:
+        trajectory_evidence: Trajectory evidence mapping.
+
+    Returns:
+        Trajectory absent reason string or None.
+    """
+    if not isinstance(trajectory_evidence, dict):
+        return None
+
+    audit = trajectory_evidence.get("audit")
+    if isinstance(audit, dict):
+        value = audit.get("trajectory_absent_reason")
+        if isinstance(value, str) and value:
+            return value
+
+    legacy = trajectory_evidence.get("trajectory_absent_reason")
+    if isinstance(legacy, str) and legacy:
+        return legacy
+    return None
+
+
+def _extract_detect_planner_input_digest(detect_plan_result: Any) -> Optional[str]:
+    """
+    功能：从 detect 侧规划结果提取 planner_input_digest。
+
+    Extract detect-time planner_input_digest from planner output.
+
+    Args:
+        detect_plan_result: Planner result object.
+
+    Returns:
+        Planner input digest string or None.
+    """
+    if detect_plan_result is None:
+        return None
+
+    if hasattr(detect_plan_result, "plan") and isinstance(detect_plan_result.plan, dict):
+        direct_digest = detect_plan_result.plan.get("planner_input_digest")
+        if isinstance(direct_digest, str) and direct_digest:
+            return direct_digest
+        verifiable_spec = detect_plan_result.plan.get("verifiable_input_domain_spec")
+        if isinstance(verifiable_spec, dict):
+            digest_value = verifiable_spec.get("planner_input_digest")
+            if isinstance(digest_value, str) and digest_value:
+                return digest_value
+
+    if isinstance(detect_plan_result, dict):
+        direct_digest = detect_plan_result.get("planner_input_digest")
+        if isinstance(direct_digest, str) and direct_digest:
+            return direct_digest
+        verifiable_spec = detect_plan_result.get("verifiable_input_domain_spec")
+        if isinstance(verifiable_spec, dict):
+            digest_value = verifiable_spec.get("planner_input_digest")
+            if isinstance(digest_value, str) and digest_value:
+                return digest_value
+    return None
 
 
 def _resolve_mismatch_failure_reason(primary_mismatch_reason: str) -> str:

@@ -64,6 +64,7 @@ def run_sd3_inference(
     inference_status = INFERENCE_STATUS_OK
     inference_error = None
     inference_runtime_meta: Dict[str, Any] = {}
+    trajectory_evidence: Dict[str, Any] | None = None
 
     # (1) 检查 pipeline_obj 是否可用
     if pipeline_obj is None:
@@ -179,8 +180,17 @@ def run_sd3_inference(
             generator.manual_seed(seed)
             infer_kwargs["generator"] = generator
 
-        # 执行推理
-        output = pipeline_obj(**infer_kwargs)
+        # 执行推理并在支持时采样真实 trajectory 摘要。
+        tap_call_result = trajectory_tap.tap_from_pipeline(
+            cfg,
+            pipeline_obj,
+            infer_kwargs,
+            inference_runtime_meta,
+            seed=seed,
+            device=device
+        )
+        output = tap_call_result.get("output")
+        trajectory_evidence = tap_call_result.get("trajectory_evidence")
 
         # 提取输出摘要
         if hasattr(output, "images") and output.images is not None and len(output.images) > 0:
@@ -216,7 +226,7 @@ def run_sd3_inference(
         "inference_status": inference_status,
         "inference_error": inference_error,
         "inference_runtime_meta": inference_runtime_meta,
-        "trajectory_evidence": trajectory_tap.build_trajectory_evidence(
+        "trajectory_evidence": trajectory_evidence if isinstance(trajectory_evidence, dict) else trajectory_tap.build_trajectory_evidence(
             cfg,
             inference_status,
             inference_runtime_meta,

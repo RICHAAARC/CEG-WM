@@ -65,6 +65,7 @@ def run_embed_orchestrator(
         if content_evidence_payload is None:
             content_evidence_payload = {}
         content_evidence_payload["trajectory_evidence"] = trajectory_evidence
+        _inject_trajectory_audit_fields(content_evidence_payload, trajectory_evidence)
     
     # 捕获 content_chain 的执行状态（用于 execution_report）。
     # 允许的值：ok / fail / absent
@@ -136,6 +137,55 @@ def run_embed_orchestrator(
             record_fields["subspace_planner_impl_identity"] = subspace_result.plan.get("planner_impl_identity")
     
     return record_fields
+
+
+def _inject_trajectory_audit_fields(
+    content_evidence_payload: Dict[str, Any],
+    trajectory_evidence: Dict[str, Any]
+) -> None:
+    """
+    功能：将轨迹 tap 子状态写入 content_evidence.audit（兼容新旧字段）。
+
+    Inject trajectory tap status fields into content_evidence.audit.
+
+    Args:
+        content_evidence_payload: Content evidence payload mapping.
+        trajectory_evidence: Trajectory evidence mapping.
+
+    Returns:
+        None.
+    """
+    if not isinstance(content_evidence_payload, dict):
+        return
+    if not isinstance(trajectory_evidence, dict):
+        return
+
+    audit = content_evidence_payload.get("audit")
+    if not isinstance(audit, dict):
+        audit = {}
+        content_evidence_payload["audit"] = audit
+
+    tap_audit = trajectory_evidence.get("audit")
+    tap_status = None
+    tap_absent_reason = None
+    if isinstance(tap_audit, dict):
+        tap_status = tap_audit.get("trajectory_tap_status")
+        tap_absent_reason = tap_audit.get("trajectory_absent_reason")
+
+    if not isinstance(tap_status, str) or not tap_status:
+        status_value = trajectory_evidence.get("status")
+        if isinstance(status_value, str) and status_value:
+            tap_status = status_value
+
+    if not isinstance(tap_absent_reason, str) or not tap_absent_reason:
+        reason_value = trajectory_evidence.get("trajectory_absent_reason")
+        if isinstance(reason_value, str) and reason_value:
+            tap_absent_reason = reason_value
+
+    if isinstance(tap_status, str) and tap_status:
+        audit["trajectory_tap_status"] = tap_status
+    if isinstance(tap_absent_reason, str) and tap_absent_reason:
+        audit["trajectory_absent_reason"] = tap_absent_reason
 
 
 def _build_planner_inputs_for_runtime(

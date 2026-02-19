@@ -18,6 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 import hashlib
+import inspect
 import math
 
 import numpy as np
@@ -132,7 +133,10 @@ def build_trajectory_evidence(
     inference_runtime_meta: Optional[Dict[str, Any]],
     *,
     seed: Optional[int],
-    device: Optional[str]
+    device: Optional[str],
+    tap_steps: Optional[List[Dict[str, Any]]] = None,
+    trajectory_spec: Optional[TrajectorySpec] = None,
+    absent_reason_override: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     功能：构造 trajectory tap 证据（不写入原始张量）。
@@ -148,7 +152,8 @@ def build_trajectory_evidence(
 
     Returns:
         Evidence dict with keys: status, trajectory_spec, trajectory_spec_digest,
-        trajectory_digest, trajectory_stats, trajectory_absent_reason, trajectory_tap_version.
+        trajectory_digest, trajectory_metrics, trajectory_stats, trajectory_absent_reason,
+        trajectory_tap_version, and audit trajectory tap status fields.
 
     Raises:
         TypeError: If inputs are invalid.
@@ -175,43 +180,154 @@ def build_trajectory_evidence(
         return _build_absent_evidence("inference_failed")
 
     try:
-        spec = _build_trajectory_spec(cfg, inference_runtime_meta)
+        if absent_reason_override is not None:
+            return _build_absent_evidence(absent_reason_override)
+
+        spec = trajectory_spec if isinstance(trajectory_spec, TrajectorySpec) else _build_trajectory_spec(cfg, inference_runtime_meta)
         spec_digest = digests.canonical_sha256(spec.as_dict())
 
-        steps = _build_step_stats_list(
-            scheduler_steps=spec.scheduler_steps,
-            spec_digest=spec_digest,
-            feature_dim=spec.feature_dim,
-            stats_precision_digits=spec.stats_precision_digits,
-            seed=seed
-        )
+        steps = _normalize_tap_steps(tap_steps, spec)
+        if not steps:
+            return _build_absent_evidence("unsupported_pipeline")
 
-        trajectory_stats = {
+        trajectory_metrics = {
             "stats_precision_digits": spec.stats_precision_digits,
-            "shape": [spec.sample_count, spec.feature_dim],
+            "shape": [len(steps), spec.feature_dim],
             "dtype": "float32",
             "steps": steps,
         }
 
-        digest_payload = {
-            "trajectory_spec_digest": spec_digest,
-            "tap_version": spec.tap_version,
-            "steps": steps
-        }
-        trajectory_digest = digests.canonical_sha256(digest_payload)
+        digest_payload = _build_digest_payload(
+            spec_digest,
+            spec.tap_version,
+            steps
+        )
+        trajectory_digest = compute_trajectory_digest(digest_payload)
 
         return {
             "status": "ok",
             "trajectory_spec": spec.as_dict(),
             "trajectory_spec_digest": spec_digest,
             "trajectory_digest": trajectory_digest,
-            "trajectory_stats": trajectory_stats,
+            "trajectory_metrics": trajectory_metrics,
+            "trajectory_stats": trajectory_metrics,
             "trajectory_absent_reason": None,
             "trajectory_tap_version": spec.tap_version,
+            "audit": {
+                "trajectory_tap_status": "ok",
+                "trajectory_absent_reason": None,
+            },
             "device": device if device is not None else "<absent>",
         }
     except Exception:
         return _build_absent_evidence("tap_exception")
+
+
+def tap_from_pipeline(
+    cfg: Dict[str, Any],
+    pipeline_obj: Any,
+    infer_kwargs: Dict[str, Any],
+    inference_runtime_meta: Dict[str, Any],
+    *,
+    seed: Optional[int],
+    device: Optional[str]
+) -> Dict[str, Any]:
+    """
+    功能：在 SD3 推理循环中原位采样 trajectory 摘要。
+
+    Tap real inference tensors from pipeline callback and build digest-only evidence.
+
+    Args:
+        cfg: Runtime configuration mapping.
+        pipeline_obj: Diffusion pipeline object.
+        infer_kwargs: Inference kwargs for pipeline call.
+        inference_runtime_meta: Parsed runtime meta before pipeline execution.
+        seed: Deterministic seed for reproducibility.
+        device: Runtime device label.
+
+    Returns:
+        Mapping with output, trajectory_evidence, and tap_status.
+
+    Raises:
+        TypeError: If inputs are invalid.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(infer_kwargs, dict):
+        raise TypeError("infer_kwargs must be dict")
+    if not isinstance(inference_runtime_meta, dict):
+        raise TypeError("inference_runtime_meta must be dict")
+
+    spec = _build_trajectory_spec(cfg, inference_runtime_meta)
+
+    signature = inspect.signature(pipeline_obj.__call__)
+    supports_callback = (
+        "callback_on_step_end" in signature.parameters and
+        "callback_on_step_end_tensor_inputs" in signature.parameters
+    )
+
+    if not supports_callback:
+        output = pipeline_obj(**infer_kwargs)
+        absent = build_trajectory_evidence(
+            cfg,
+            "ok",
+            inference_runtime_meta,
+            seed=seed,
+            device=device,
+            tap_steps=None,
+            trajectory_spec=spec,
+            absent_reason_override="unsupported_pipeline"
+        )
+        return {
+            "output": output,
+            "trajectory_evidence": absent,
+            "tap_status": "unsupported"
+        }
+
+    captured: Dict[int, Dict[str, Any]] = {}
+
+    def _step_callback(_pipe: Any, step_index: int, timestep: Any, callback_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(callback_kwargs, dict):
+            return callback_kwargs
+
+        latents = callback_kwargs.get("latents")
+        if latents is None:
+            return callback_kwargs
+
+        if not isinstance(step_index, int) or step_index < 0:
+            return callback_kwargs
+
+        if step_index not in captured:
+            captured[step_index] = {
+                "step_index": step_index,
+                "scheduler_step": _normalize_scheduler_step(step_index),
+                "scheduler_timestep": _normalize_scheduler_step(timestep),
+                "stats": _summarize_tensor(latents, spec.stats_precision_digits)
+            }
+        return callback_kwargs
+
+    callback_kwargs = dict(infer_kwargs)
+    callback_kwargs["callback_on_step_end"] = _step_callback
+    callback_kwargs["callback_on_step_end_tensor_inputs"] = ["latents"]
+
+    output = pipeline_obj(**callback_kwargs)
+    ordered_steps = _materialize_tap_steps(spec.scheduler_steps, captured)
+
+    evidence = build_trajectory_evidence(
+        cfg,
+        "ok",
+        inference_runtime_meta,
+        seed=seed,
+        device=device,
+        tap_steps=ordered_steps,
+        trajectory_spec=spec
+    )
+
+    return {
+        "output": output,
+        "trajectory_evidence": evidence,
+        "tap_status": "ok" if evidence.get("status") == "ok" else "absent"
+    }
 
 
 def _resolve_tap_enabled(cfg: Dict[str, Any]) -> bool:
@@ -283,8 +399,15 @@ def _build_trajectory_spec(
         # subspace_cfg 类型不符合预期，必须 fail-fast。
         raise TypeError("watermark.subspace must be dict or None")
 
+    runtime_num_steps = _read_int(
+        inference_runtime_meta.get("num_inference_steps") if isinstance(inference_runtime_meta, dict) else None,
+        50
+    )
     timestep_start = _read_int(subspace_cfg.get("timestep_start"), 0)
-    timestep_end = _read_int(subspace_cfg.get("timestep_end"), max(0, _read_int(subspace_cfg.get("num_inference_steps"), 50) - 1))
+    timestep_end = _read_int(
+        subspace_cfg.get("timestep_end"),
+        max(0, _read_int(subspace_cfg.get("num_inference_steps"), runtime_num_steps) - 1)
+    )
     trajectory_step_stride = _read_int(subspace_cfg.get("trajectory_step_stride"), 1)
     sample_count = _read_int(subspace_cfg.get("sample_count"), 16)
     feature_dim = _read_int(subspace_cfg.get("feature_dim"), 128)
@@ -449,6 +572,253 @@ def _build_step_stats_list(
     return steps
 
 
+def _normalize_tap_steps(
+    tap_steps: Optional[List[Dict[str, Any]]],
+    spec: TrajectorySpec
+) -> List[Dict[str, Any]]:
+    """
+    功能：规范化 tap 步摘要列表。
+
+    Normalize externally captured tap steps to canonical structure.
+
+    Args:
+        tap_steps: Captured raw tap steps.
+        spec: Trajectory specification.
+
+    Returns:
+        Canonical step list.
+    """
+    if tap_steps is None:
+        return []
+    if not isinstance(tap_steps, list):
+        return []
+
+    normalized: List[Dict[str, Any]] = []
+    for index, item in enumerate(tap_steps):
+        if not isinstance(item, dict):
+            continue
+        stats = item.get("stats")
+        if not isinstance(stats, dict):
+            continue
+        normalized.append({
+            "step_index": _normalize_scheduler_step(item.get("step_index", index)),
+            "scheduler_step": _normalize_scheduler_step(item.get("scheduler_step", spec.scheduler_steps[min(index, len(spec.scheduler_steps) - 1)])),
+            "stats": _normalize_stats_mapping(stats, spec.stats_precision_digits)
+        })
+    return normalized
+
+
+def _normalize_stats_mapping(stats: Dict[str, Any], digits: int) -> Dict[str, float]:
+    """
+    功能：规范化统计字段为固定精度浮点。
+
+    Normalize statistic mapping into fixed-precision float fields.
+
+    Args:
+        stats: Raw statistics mapping.
+        digits: Quantization digits.
+
+    Returns:
+        Canonical statistics mapping.
+    """
+    return {
+        "mean": _quantize_float(float(stats.get("mean", 0.0)), digits),
+        "std": _quantize_float(float(stats.get("std", 0.0)), digits),
+        "l2_norm": _quantize_float(float(stats.get("l2_norm", 0.0)), digits),
+        "min": _quantize_float(float(stats.get("min", 0.0)), digits),
+        "max": _quantize_float(float(stats.get("max", 0.0)), digits),
+    }
+
+
+def _materialize_tap_steps(
+    scheduler_steps: List[int],
+    captured: Dict[int, Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """
+    功能：按 spec 顺序构建 steps 列表（顺序敏感）。
+
+    Build ordered step list according to spec scheduler steps.
+
+    Args:
+        scheduler_steps: Ordered scheduler step indices from spec.
+        captured: Captured step summaries by step index.
+
+    Returns:
+        Ordered canonical step list.
+    """
+    if not scheduler_steps or not captured:
+        return []
+
+    materialized: List[Dict[str, Any]] = []
+    last_stats: Optional[Dict[str, Any]] = None
+    for output_index, scheduler_step in enumerate(scheduler_steps):
+        captured_item = captured.get(scheduler_step)
+        if captured_item is not None:
+            last_stats = captured_item.get("stats")
+            materialized.append({
+                "step_index": output_index,
+                "scheduler_step": scheduler_step,
+                "stats": captured_item.get("stats")
+            })
+        elif last_stats is not None:
+            materialized.append({
+                "step_index": output_index,
+                "scheduler_step": scheduler_step,
+                "stats": last_stats
+            })
+    return materialized
+
+
+def _normalize_scheduler_step(value: Any) -> int:
+    """
+    功能：归一化 scheduler step 为整数。
+
+    Normalize scheduler step value to integer.
+
+    Args:
+        value: Step-like value.
+
+    Returns:
+        Non-negative integer step.
+    """
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, (int, np.integer)):
+        return max(0, int(value))
+    try:
+        return max(0, int(value))
+    except Exception:
+        return 0
+
+
+def _summarize_tensor(tensor_value: Any, stats_precision_digits: int) -> Dict[str, float]:
+    """
+    功能：计算张量摘要统计并做固定精度量化。
+
+    Summarize tensor into deterministic scalar statistics with fixed precision.
+
+    Args:
+        tensor_value: Tensor-like object (torch.Tensor or numpy-compatible).
+        stats_precision_digits: Decimal digits for quantization.
+
+    Returns:
+        Summary statistics mapping.
+
+    Raises:
+        ValueError: If input tensor cannot be summarized.
+    """
+    if isinstance(tensor_value, np.ndarray):
+        array = tensor_value
+    else:
+        if hasattr(tensor_value, "detach") and callable(tensor_value.detach):
+            tensor_value = tensor_value.detach()
+        if hasattr(tensor_value, "float") and callable(tensor_value.float):
+            tensor_value = tensor_value.float()
+        if hasattr(tensor_value, "cpu") and callable(tensor_value.cpu):
+            tensor_value = tensor_value.cpu()
+        if hasattr(tensor_value, "numpy") and callable(tensor_value.numpy):
+            array = tensor_value.numpy()
+        else:
+            array = np.asarray(tensor_value)
+
+    if not isinstance(array, np.ndarray):
+        array = np.asarray(array)
+    if array.size == 0:
+        raise ValueError("tensor_value must be non-empty")
+
+    flat = np.asarray(array, dtype=np.float64).reshape(-1)
+    if not np.isfinite(flat).all():
+        raise ValueError("tensor_value contains non-finite values")
+
+    mean_val = float(np.mean(flat))
+    std_val = float(np.std(flat))
+    l2_norm = float(np.linalg.norm(flat, ord=2))
+    min_val = float(np.min(flat))
+    max_val = float(np.max(flat))
+
+    return {
+        "mean": _quantize_float(mean_val, stats_precision_digits),
+        "std": _quantize_float(std_val, stats_precision_digits),
+        "l2_norm": _quantize_float(l2_norm, stats_precision_digits),
+        "min": _quantize_float(min_val, stats_precision_digits),
+        "max": _quantize_float(max_val, stats_precision_digits),
+    }
+
+
+def _build_digest_payload(
+    trajectory_spec_digest: str,
+    tap_version: str,
+    steps: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    功能：构造顺序敏感 trajectory digest 载体。
+
+    Build order-sensitive digest payload from canonical step sequence.
+
+    Args:
+        trajectory_spec_digest: Digest of trajectory specification.
+        tap_version: Tap implementation version.
+        steps: Ordered step list.
+
+    Returns:
+        Digest payload mapping.
+
+    Raises:
+        TypeError: If inputs are invalid.
+    """
+    if not isinstance(trajectory_spec_digest, str) or not trajectory_spec_digest:
+        raise TypeError("trajectory_spec_digest must be non-empty str")
+    if not isinstance(tap_version, str) or not tap_version:
+        raise TypeError("tap_version must be non-empty str")
+    if not isinstance(steps, list):
+        raise TypeError("steps must be list")
+
+    normalized_steps: List[Dict[str, Any]] = []
+    for item in steps:
+        if not isinstance(item, dict):
+            continue
+        stats = item.get("stats", {})
+        if not isinstance(stats, dict):
+            continue
+        normalized_steps.append({
+            "step_index": _normalize_scheduler_step(item.get("step_index", 0)),
+            "scheduler_step": _normalize_scheduler_step(item.get("scheduler_step", 0)),
+            "stats": {
+                "mean": stats.get("mean"),
+                "std": stats.get("std"),
+                "l2_norm": stats.get("l2_norm"),
+                "min": stats.get("min"),
+                "max": stats.get("max")
+            }
+        })
+
+    return {
+        "trajectory_spec_digest": trajectory_spec_digest,
+        "tap_version": tap_version,
+        "steps": normalized_steps
+    }
+
+
+def compute_trajectory_digest(payload: Dict[str, Any]) -> str:
+    """
+    功能：计算 trajectory payload 的 canonical sha256。
+
+    Compute trajectory digest using repository canonical JSON + SHA256.
+
+    Args:
+        payload: Canonical trajectory payload mapping.
+
+    Returns:
+        SHA256 hex digest string.
+
+    Raises:
+        TypeError: If payload is invalid.
+    """
+    if not isinstance(payload, dict):
+        raise TypeError("payload must be dict")
+    return digests.canonical_sha256(payload)
+
+
 def _compute_step_stats(
     *,
     spec_digest: str,
@@ -568,9 +938,14 @@ def _build_absent_evidence(reason: str) -> Dict[str, Any]:
         "trajectory_spec": None,
         "trajectory_spec_digest": None,
         "trajectory_digest": None,
+        "trajectory_metrics": None,
         "trajectory_stats": None,
         "trajectory_absent_reason": reason,
         "trajectory_tap_version": TRAJECTORY_TAP_VERSION,
+        "audit": {
+            "trajectory_tap_status": "absent",
+            "trajectory_absent_reason": reason,
+        },
         "device": "<absent>",
     }
 

@@ -122,11 +122,11 @@
           {
             "access": "read",
             "classification": "ALLOWLISTED",
-            "lineno_end": 1206,
-            "lineno_start": 1206,
+            "lineno_end": 1215,
+            "lineno_start": 1215,
             "mode": "r",
             "path": "D:\\Code\\CEG-WM\\main\\core\\status.py",
-            "snippet": "open() access=read at line 1206",
+            "snippet": "open() access=read at line 1215",
             "symbol": "open"
           },
           {
@@ -154,9 +154,9 @@
       },
       "fix": "N.A.",
       "gate_name": "gate.write_bypass",
-      "impact": "δ������ϼ�д����·",
+      "impact": "未发现阻断级写盘旁路",
       "result": "PASS",
-      "rule": "��ֹ�ƹ��ܿ�д��·��ֱ��д�� records ��ؼ�����",
+      "rule": "禁止绕过受控写盘路径直接写入 records 或关键产物",
       "severity": "BLOCK"
     },
     {
@@ -176,9 +176,9 @@
       },
       "fix": "N.A.",
       "gate_name": "gate.registry_immutability",
-      "impact": "ע������������Ҫ��",
+      "impact": "注册表封闭性满足要求",
       "result": "PASS",
-      "rule": "ע������� seal �󲻿ɱ䣬�Ҳ��ɱ�������ע��",
+      "rule": "注册表必须 seal 后不可变，且不可被运行期注入",
       "severity": "BLOCK"
     },
     {
@@ -221,9 +221,9 @@
       },
       "fix": "N.A.",
       "gate_name": "gate.policy_path_semantics",
-      "impact": "policy_path ���������Ҫ��",
+      "impact": "policy_path 语义绑定满足要求",
       "result": "PASS",
-      "rule": "policy_path �������� runtime whitelist������汾�󶨣�·������ִ���������֤��",
+      "rule": "policy_path 必须来自 runtime whitelist，语义版本绑定，路径策略执行留存审计证据",
       "severity": "BLOCK"
     },
     {
@@ -477,9 +477,9 @@
       },
       "fix": "N.A.",
       "gate_name": "gate.path_policy_escape_rejection",
-      "impact": "δ����·�������Ž�ȱʧ",
+      "impact": "未发现路径策略门禁缺失",
       "result": "PASS",
-      "rule": "д�̱���ͨ��·�������Ž����ܾ�·������",
+      "rule": "写盘必须通过路径策略门禁并拒绝路径逃逸",
       "severity": "BLOCK"
     },
     {
@@ -523,9 +523,9 @@
       },
       "fix": "N.A.",
       "gate_name": "gate.freeze_surface_integrity",
-      "impact": "����������������Ҫ��",
+      "impact": "冻结面完整性满足要求",
       "result": "PASS",
-      "rule": "������Լ�ļ�������ڡ����������Ψһ��schema Ȩ������records ���� schema_version",
+      "rule": "冻结契约文件必须存在、解释面入口唯一、schema 权威化、records 包含 schema_version",
       "severity": "BLOCK"
     },
     {
@@ -541,9 +541,9 @@
       },
       "fix": "N.A.",
       "gate_name": "gate.dangerous_execution",
-      "impact": "δ����Σ�յĶ�ִ̬�л򲻰�ȫ���л�",
+      "impact": "未发现危险的动态执行或不安全序列化",
       "result": "PASS",
-      "rule": "��ֹ eval/exec/compile/pickle.load ��Σ��ִ���벻��ȫ���л�",
+      "rule": "禁止 eval/exec/compile/pickle.load 等危险执行与不安全序列化",
       "severity": "BLOCK"
     },
     {
@@ -570,9 +570,9 @@
       },
       "fix": "N.A.",
       "gate_name": "gate.network_access",
-      "impact": "���� 1 ���ܿ����ص��ã����� freeze_gate + whitelist ���ǣ�",
+      "impact": "发现 1 处受控下载调用（已由 freeze_gate + whitelist 覆盖）",
       "result": "PASS",
-      "rule": "��ֹ����ʱ��ʽ������ʻ����أ������������������Ʋ�ê����Դ",
+      "rule": "禁止运行时隐式网络访问或下载，所有网络操作必须审计并锚定来源",
       "severity": "BLOCK"
     }
   ],
@@ -582,13 +582,13 @@
     "files": [
       {
         "path": "frozen_contracts.yaml",
-        "sha256": "ee076d668d731338f92a989203f2f34e91b9ca6aa3b9c8a11decaa39ef1f363f",
-        "size_bytes": 37174
+        "sha256": "d74531507cedaf8d7fc974f8b9f2ef9e67e45f623eb40efa936b22883b0a99cc",
+        "size_bytes": 38299
       },
       {
         "path": "runtime_whitelist.yaml",
-        "sha256": "7719d44a394ff9ff04d95535c9cec6d2ff82c69020ab8f22ea70a3dd0554a9a2",
-        "size_bytes": 13430
+        "sha256": "a4e0dbfbee2b6021c8b0fa83744c7e73bdd51a9f99b3f18c379b1e65b439596f",
+        "size_bytes": 13791
       },
       {
         "path": "policy_path_semantics.yaml",
@@ -599,7 +599,7 @@
     "snapshot_dir": "D:\\Code\\CEG-WM\\test_workflow\\artifacts\\signoff\\frozen_constraints_snapshot",
     "status": "ok"
   },
-  "generated_at_utc": "2026-02-18T13:45:11.181Z",
+  "generated_at_utc": "2026-02-19T05:28:09.448Z",
   "minimum_audit_set": [
     "audits/audit_write_bypass_scan.py",
     "audits/audit_registry_injection_surface.py",
@@ -641,7 +641,7 @@
     "exit_code": 0,
     "status": "pass",
     "stderr_tail": "",
-    "stdout_tail": "........................................................................ [ 54%]\r\n...........................................................              [100%]\r\n131 passed in 3.83s\r\n",
+    "stdout_tail": "........................................................................ [ 40%]\r\n........................................................................ [ 80%]\r\n..................................                                       [100%]\r\n178 passed in 4.86s\r\n",
     "test_summary": "pytest executed"
   }
 }

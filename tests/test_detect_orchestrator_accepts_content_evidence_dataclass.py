@@ -10,6 +10,7 @@ Module type: General module
 
 from typing import Any, Dict
 from unittest.mock import Mock, MagicMock
+from types import SimpleNamespace
 
 import pytest
 
@@ -199,6 +200,10 @@ class TestDetectOrchestratorWithContentDetector:
         mock_impl_set.geometry_extractor = mock_geometry_extractor
         mock_impl_set.fusion_rule = mock_fusion_rule
         mock_impl_set.subspace_planner = mock_subspace_planner
+        planner_input_digest = "planner_input_digest_ok"
+        mock_subspace_planner.plan.return_value = SimpleNamespace(
+            plan={"planner_input_digest": planner_input_digest}
+        )
         
         cfg = {
             "watermark": {"detector": {"enabled": True}, "plan_digest": "test_plan"},
@@ -213,6 +218,9 @@ class TestDetectOrchestratorWithContentDetector:
                     "trajectory_spec_digest": "spec_digest_ok",
                     "trajectory_digest": "traj_digest_ok"
                 }
+            },
+            "subspace_plan": {
+                "planner_input_digest": planner_input_digest
             }
         }
         trajectory_evidence = {
@@ -288,6 +296,10 @@ class TestDetectOrchestratorWithContentDetector:
         mock_impl_set.geometry_extractor = mock_geometry_extractor
         mock_impl_set.fusion_rule = mock_fusion_rule
         mock_impl_set.subspace_planner = mock_subspace_planner
+        planner_input_digest = "planner_input_digest_ok"
+        mock_subspace_planner.plan.return_value = SimpleNamespace(
+            plan={"planner_input_digest": planner_input_digest}
+        )
         
         cfg = {
             "watermark": {"detector": {"enabled": True}},
@@ -301,6 +313,9 @@ class TestDetectOrchestratorWithContentDetector:
                     "trajectory_spec_digest": "spec_digest_ok",
                     "trajectory_digest": "traj_digest_ok"
                 }
+            },
+            "subspace_plan": {
+                "planner_input_digest": planner_input_digest
             }
         }
         trajectory_evidence = {

@@ -105,6 +105,12 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "轨迹采样摘要（顺序敏感）。"
+  - path: "content_evidence.trajectory_evidence.trajectory_metrics"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "轨迹采样统计摘要（命名收敛字段，优先读取）。"
   - path: "content_evidence.trajectory_evidence.trajectory_stats"
     layer: "diagnostic"
     type: "json_dict"
@@ -123,6 +129,36 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "轨迹采样版本标识。"
+  - path: "content_evidence.trajectory_evidence.audit"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "轨迹采样审计子容器。"
+  - path: "content_evidence.trajectory_evidence.audit.trajectory_tap_status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "轨迹采样子状态（命名收敛字段，优先读取）。"
+  - path: "content_evidence.trajectory_evidence.audit.trajectory_absent_reason"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "轨迹采样缺失原因（审计容器字段）。"
+  - path: "content_evidence.audit.trajectory_tap_status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "内容证据审计中的轨迹采样子状态。"
+  - path: "content_evidence.audit.trajectory_absent_reason"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "内容证据审计中的轨迹采样缺失原因。"
   - path: "content_evidence.trajectory_evidence.device"
     layer: "diagnostic"
     type: "reason_string"

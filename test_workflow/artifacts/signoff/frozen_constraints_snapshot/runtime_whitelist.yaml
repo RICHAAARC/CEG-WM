@@ -211,6 +211,10 @@ impl_id:
       # - 执行低维子空间估计并输出摘要化 subspace_spec。
       # - 计算可复算的 plan_digest/basis_digest，绑定 mask_digest、cfg_digest 与 impl_identity。
       # - 规划器禁用或输入缺失时返回 absent，估计失败时返回 failed。
+      # - 支持浅层注入分段（edit_timestep）与掩码子空间定义（mask_shape/w_channel）。
+      # - 支持频域（complex FFT）与时域（spatial）注入方案。
+      # - 支持可选的通道解耦回填策略（enable_channel_refill）。
+      # - 输出完整的 injection_config 与 detection_domain_spec，供检测侧复现。
       - "subspace_planner_v1"
 
     sync_module:
