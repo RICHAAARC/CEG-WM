@@ -12,6 +12,12 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from main.registries.runtime_resolver import BuiltImplSet
+from main.core import digests
+from main.watermarking.content_chain.high_freq_embedder import (
+    HighFreqEmbedder,
+    HIGH_FREQ_EMBEDDER_ID,
+    HIGH_FREQ_EMBEDDER_VERSION,
+)
 
 
 def run_embed_orchestrator(
@@ -102,6 +108,16 @@ def run_embed_orchestrator(
     
     sync_result = impl_set.sync_module.sync(cfg)
 
+    hf_evidence = _build_hf_embed_evidence(
+        cfg=cfg,
+        cfg_digest=cfg_digest,
+        subspace_result=subspace_result,
+        trajectory_evidence=trajectory_evidence,
+    )
+    if content_evidence_payload is None:
+        content_evidence_payload = {}
+    _merge_hf_evidence(content_evidence_payload, hf_evidence)
+
     # 构造返回的业务字段映射。
     # 关键：plan_digest 作为锚点字段必须同时返回，以供后续 detect 侧验证。
     record_fields = {
@@ -137,6 +153,102 @@ def run_embed_orchestrator(
             record_fields["subspace_planner_impl_identity"] = subspace_result.plan.get("planner_impl_identity")
     
     return record_fields
+
+
+def _build_hf_embed_evidence(
+    cfg: Dict[str, Any],
+    cfg_digest: str,
+    subspace_result: Any,
+    trajectory_evidence: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    """
+    功能：构造 embed 侧 HF 证据。
+
+    Build embed-side HF evidence bound to planner-defined subspace.
+
+    Args:
+        cfg: Configuration mapping.
+        cfg_digest: Config digest.
+        subspace_result: Planner result object or mapping.
+        trajectory_evidence: Optional trajectory evidence mapping.
+
+    Returns:
+        HF evidence mapping.
+
+    Raises:
+        TypeError: If cfg/cfg_digest types are invalid.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(cfg_digest, str) or not cfg_digest:
+        raise TypeError("cfg_digest must be non-empty str")
+
+    plan_payload = None
+    plan_digest = None
+    if hasattr(subspace_result, "as_dict") and callable(subspace_result.as_dict):
+        plan_payload = subspace_result.as_dict()
+    elif isinstance(subspace_result, dict):
+        plan_payload = dict(subspace_result)
+
+    if hasattr(subspace_result, "plan_digest"):
+        plan_digest = subspace_result.plan_digest
+    elif isinstance(plan_payload, dict):
+        plan_digest = plan_payload.get("plan_digest")
+
+    embedder = HighFreqEmbedder(
+        impl_id=HIGH_FREQ_EMBEDDER_ID,
+        impl_version=HIGH_FREQ_EMBEDDER_VERSION,
+        impl_digest=digests.canonical_sha256(
+            {
+                "impl_id": HIGH_FREQ_EMBEDDER_ID,
+                "impl_version": HIGH_FREQ_EMBEDDER_VERSION,
+            }
+        ),
+    )
+    return embedder.embed(
+        latents=trajectory_evidence,
+        plan=plan_payload,
+        cfg=cfg,
+        cfg_digest=cfg_digest,
+        expected_plan_digest=plan_digest,
+    )
+
+
+def _merge_hf_evidence(content_evidence_payload: Dict[str, Any], hf_evidence: Dict[str, Any]) -> None:
+    """
+    功能：将 HF 证据写入 content_evidence 兼容字段。
+
+    Merge HF evidence into content evidence payload using append-only compatible fields.
+
+    Args:
+        content_evidence_payload: Mutable content evidence mapping.
+        hf_evidence: HF evidence mapping.
+
+    Returns:
+        None.
+    """
+    if not isinstance(content_evidence_payload, dict):
+        return
+    if not isinstance(hf_evidence, dict):
+        return
+
+    content_evidence_payload["hf_trace_digest"] = hf_evidence.get("hf_trace_digest")
+    content_evidence_payload["hf_score"] = hf_evidence.get("hf_score")
+
+    score_parts = content_evidence_payload.get("score_parts")
+    if not isinstance(score_parts, dict):
+        score_parts = {}
+        content_evidence_payload["score_parts"] = score_parts
+
+    score_parts["hf_status"] = hf_evidence.get("status")
+    summary = hf_evidence.get("hf_evidence_summary")
+    if isinstance(summary, dict):
+        if "hf_absent_reason" in summary:
+            score_parts["hf_absent_reason"] = summary.get("hf_absent_reason")
+        if "hf_failure_reason" in summary:
+            score_parts["hf_failure_reason"] = summary.get("hf_failure_reason")
+        score_parts["hf_metrics"] = summary
+    score_parts["content_score_rule_version"] = hf_evidence.get("content_score_rule_version")
 
 
 def _inject_trajectory_audit_fields(

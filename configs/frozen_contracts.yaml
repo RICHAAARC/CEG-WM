@@ -443,8 +443,11 @@ records_schema:
     - content_evidence.hf_trace_digest
     - content_evidence.lf_score
     - content_evidence.hf_score
+    - content_evidence.hf_evidence_summary
     - content_evidence.score_parts
     - content_evidence.content_failure_reason
+    - content_evidence.content_mismatch_reason
+    - content_evidence.content_mismatch_field_path
     - content_evidence.audit.trajectory_tap_status
     - content_evidence.audit.trajectory_absent_reason
     - content_evidence.trajectory_evidence

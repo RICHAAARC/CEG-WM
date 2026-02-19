@@ -3,72 +3,69 @@ File purpose: Content detector implementation for S-06.
 Module type: Core innovation module
 
 功能说明：
-- 统一从 LF 和 HF 子空间检测水印信号，输出融合得分。
-- 严格区分 absent（无计划）、mismatch（参数不一致）、failed（异常）语义。
-- 输出 content_score、score_parts（hf_score/lf_score）、content_evidence、failure_reason（枚举）。
-- plan_digest 不一致时必须返回 mismatch 状态，score=None。
-- 失败路径单一主因上报，不得写入"看似有效的分数"。
+- 统一从 LF 和 HF 子空间读取证据并输出内容链得分。
+- 保持 LF/HF 正交：HF disabled 不影响 LF 主链得分。
+- 严格处理 mismatch/failed：任何阻断态下 score=None。
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional, Tuple, cast
 
 from main.core import digests
 
+from .high_freq_embedder import CONTENT_SCORE_RULE_VERSION
 from .interfaces import ContentEvidence
 
 
 CONTENT_DETECTOR_ID = "content_detector_v1"
 CONTENT_DETECTOR_VERSION = "v1"
-CONTENT_DETECTOR_TRACE_VERSION = "v1"
+CONTENT_DETECTOR_TRACE_VERSION = "v2"
 
-# 允许的失败原因枚举。
 ALLOWED_DETECTOR_FAILURE_REASONS = {
-    "detector_no_plan",                   # 缺失 plan_digest，无法校验一致性
-    "detector_plan_mismatch",             # plan_digest 不一致，检测参数与计划脱离
-    "detector_no_evidence",               # 内容证据缺失，无法提取分数
-    "detector_invalid_input",             # 输入缺失或形状不符
-    "detector_extraction_failed",         # 分数提取异常
-    "detector_score_validation_failed",   # 分数有效性校验失败
+    "detector_no_plan",
+    "detector_plan_mismatch",
+    "detector_no_evidence",
+    "detector_invalid_input",
+    "detector_extraction_failed",
+    "detector_score_validation_failed",
+    "hf_plan_mismatch",
+    "hf_detection_failed",
+    "hf_subspace_missing",
 }
+
+HF_ABSENT_ALLOWLIST = {
+    "hf_disabled_by_config",
+}
+
+DETECTOR_STATUS = Literal["ok", "absent", "failed", "mismatch"]
 
 
 class ContentDetector:
     """
-    功能：内容链检测器，统一输出融合得分与失败语义。
+    功能：内容链检测器。
 
-    Content detector implementing unified watermark score extraction from
-    content evidence with strict failure semantics and plan digest binding.
-
-    Implements the ContentExtractor protocol frozen in interfaces.py.
-    Emits ContentEvidence with content_score, score_parts (lf_score/hf_score),
-    and strict failure semantics (absent, failed, mismatch) matching frozen enumeration.
-
-    Detector validates plan_digest consistency and rejects mismatches with
-    status="mismatch" and score=None to prevent false detection.
+    Unified content detector that combines LF and HF evidence under frozen
+    failure semantics and deterministic score rule.
 
     Args:
-        impl_id: Implementation identifier string (frozen to content_detector_v1).
-        impl_version: Implementation version string (frozen to v1).
-        impl_digest: Implementation digest computed from source code.
+        impl_id: Implementation identifier string.
+        impl_version: Implementation version string.
+        impl_digest: Implementation digest string.
 
     Returns:
         None.
 
     Raises:
-        ValueError: If any input is invalid.
+        ValueError: If any constructor argument is invalid.
     """
 
     def __init__(self, impl_id: str, impl_version: str, impl_digest: str) -> None:
-        if not isinstance(impl_id, str) or not impl_id:
-            # impl_id 输入不合法，必须 fail-fast。
+        if not impl_id:
             raise ValueError("impl_id must be non-empty str")
-        if not isinstance(impl_version, str) or not impl_version:
-            # impl_version 输入不合法，必须 fail-fast。
+        if not impl_version:
             raise ValueError("impl_version must be non-empty str")
-        if not isinstance(impl_digest, str) or not impl_digest:
-            # impl_digest 输入不合法，必须 fail-fast。
+        if not impl_digest:
             raise ValueError("impl_digest must be non-empty str")
 
         self.impl_id = impl_id
@@ -82,406 +79,262 @@ class ContentDetector:
         cfg_digest: Optional[str] = None
     ) -> ContentEvidence:
         """
-        功能：检测内容链水印信号并输出融合得分。
+        功能：检测内容链水印并输出 content_score。
 
-        Detect watermark signal and extract unified content score.
-
-        Detector verifies plan_digest consistency; mismatch returns status="mismatch".
-        Extracts lf_score and hf_score from content evidence components and
-        fuses into single content_score.
-
-        Three semantic modes:
-        1. enable_detector=false: Returns absent status (abstinence).
-        2. enable_detector=true, plan available: Extracts score from evidence.
-        3. enable_detector=true, plan missing or mismatch: Returns status="mismatch" or "failed".
-
-        When status="ok": score is non-negative float in [0.0, infinity).
-        When status!="ok": score must be None, content_failure_reason populated.
+        Extract content evidence and compute deterministic content score.
 
         Args:
-            cfg: Configuration dict with optional keys:
-                - "enable_detector" (bool, default False): Whether to enable detection.
-                - "detector_threshold" (float, default 0.5): Unused; for documentation.
-                - "watermark" (dict, optional): Sub-configuration containing plan_digest.
-                  - "plan_digest" (str, optional): Expected plan digest binding.
-
-            inputs: Optional input dict with keys:
-                - "lf_score" (float, optional): Low-frequency channel score.
-                - "hf_score" (float, optional): High-frequency channel score.
-                - "raw_evidence" (dict, optional): Raw detection output.
-
-            cfg_digest: Optional canonical SHA256 digest of cfg.
+            cfg: Configuration mapping.
+            inputs: Optional detector inputs including lf_evidence/hf_evidence/plan_digest.
+            cfg_digest: Optional canonical config digest.
 
         Returns:
-            ContentEvidence instance with frozen structure.
-                - status: "ok" (valid score), "absent" (disabled), "failed" (error),
-                  "mismatch" (plan inconsistency).
-                - score: Non-None float when status="ok"; None otherwise.
-                - score_parts: Dict with "lf_score", "hf_score" when ok.
-                - lf_score: Low-frequency score component (when ok).
-                - hf_score: High-frequency score component (when ok).
-                - plan_digest: Echoed from inputs for consistency audit.
-                - audit: Dict with impl_identity, impl_version, impl_digest, trace_digest.
-                - content_failure_reason: Enumeration string when status!="ok".
+            ContentEvidence instance.
 
         Raises:
-            TypeError: If cfg or inputs types are invalid.
-            ValueError: If critical fields are malformed.
+            TypeError: If input types are invalid.
         """
-        if not isinstance(cfg, dict):
-            # cfg 类型不合法，必须 fail-fast。
-            raise TypeError("cfg must be dict")
-        if inputs is not None and not isinstance(inputs, dict):
-            # inputs 类型不合法，必须 fail-fast。
-            raise TypeError("inputs must be dict or None")
-
-        # (1) 解析启用状态。对齐 injection_scope_manifest.yaml 中 cfg_digest_include_paths 的 detect.content.enabled。
         enabled = cfg.get("detect", {}).get("content", {}).get("enabled", False)
         if not isinstance(enabled, bool):
-            # enabled 类型不合法，必须 fail-fast。
             raise TypeError("detect.content.enabled must be bool")
 
-        # 若禁用，返回 absent 语义（非错误）。
         if not enabled:
-            trace_payload = _build_detector_trace_payload(
+            return self._build_result(
                 cfg=cfg,
-                impl_id=self.impl_id,
-                impl_version=self.impl_version,
-                impl_digest=self.impl_digest,
-                enabled=False,
-                plan_digest=None,
-                detection_result=None
-            )
-            trace_digest = digests.canonical_sha256(trace_payload)
-
-            audit = {
-                "impl_identity": self.impl_id,
-                "impl_version": self.impl_version,
-                "impl_digest": self.impl_digest,
-                "trace_digest": trace_digest
-            }
-
-            return ContentEvidence(
                 status="absent",
                 score=None,
-                audit=audit,
                 plan_digest=None,
                 content_failure_reason=None,
-                score_parts=None,
+                score_parts={
+                    "content_score_rule_version": CONTENT_SCORE_RULE_VERSION,
+                    "hf_status": "absent",
+                    "hf_absent_reason": "hf_disabled_by_config",
+                    "hf_score": "<absent>",
+                    "lf_score": "<absent>",
+                },
                 lf_score=None,
-                hf_score=None
+                hf_score=None,
+                cfg_digest=cfg_digest,
+                detection_result=None,
             )
 
-        # (2) 初始化输入。
-        if inputs is None:
-            inputs = {}
-
-        # (3) 解析计划摘要与校验一致性。
+        normalized_inputs: Dict[str, Any] = inputs or {}
         plan_digest = cfg.get("watermark", {}).get("plan_digest")
-        if plan_digest is None:
-            # 无计划，无法确定检测子空间。
-            trace_payload = _build_detector_trace_payload(
+        if not isinstance(plan_digest, str) or not plan_digest:
+            return self._build_result(
                 cfg=cfg,
-                impl_id=self.impl_id,
-                impl_version=self.impl_version,
-                impl_digest=self.impl_digest,
-                enabled=True,
-                plan_digest=None,
-                detection_result=None
-            )
-            trace_digest = digests.canonical_sha256(trace_payload)
-
-            audit = {
-                "impl_identity": self.impl_id,
-                "impl_version": self.impl_version,
-                "impl_digest": self.impl_digest,
-                "trace_digest": trace_digest
-            }
-
-            return ContentEvidence(
                 status="mismatch",
                 score=None,
-                audit=audit,
                 plan_digest=None,
                 content_failure_reason="detector_no_plan",
                 score_parts=None,
                 lf_score=None,
-                hf_score=None
+                hf_score=None,
+                cfg_digest=cfg_digest,
+                detection_result=None,
             )
 
-        # 验证输入的 plan_digest 是否与配置一致。
-        input_plan_digest = inputs.get("plan_digest")
+        input_plan_digest = normalized_inputs.get("plan_digest")
         if input_plan_digest is not None and input_plan_digest != plan_digest:
-            # 计划摘要不一致，产生 mismatch。
-            trace_payload = _build_detector_trace_payload(
+            return self._build_result(
                 cfg=cfg,
-                impl_id=self.impl_id,
-                impl_version=self.impl_version,
-                impl_digest=self.impl_digest,
-                enabled=True,
-                plan_digest=plan_digest,
-                detection_result=None
-            )
-            trace_digest = digests.canonical_sha256(trace_payload)
-
-            audit = {
-                "impl_identity": self.impl_id,
-                "impl_version": self.impl_version,
-                "impl_digest": self.impl_digest,
-                "trace_digest": trace_digest
-            }
-
-            return ContentEvidence(
                 status="mismatch",
                 score=None,
-                audit=audit,
                 plan_digest=plan_digest,
                 content_failure_reason="detector_plan_mismatch",
                 score_parts=None,
                 lf_score=None,
-                hf_score=None
+                hf_score=None,
+                cfg_digest=cfg_digest,
+                detection_result=None,
             )
 
-        # (4) 提取得分分量与状态传播。
-        # P2 修复：支持向后兼容（既接收 lf_evidence 也接收 lf_score）。
+        lf_status, lf_score, lf_failure_reason = _extract_channel(
+            evidence=normalized_inputs.get("lf_evidence"),
+            score_key="lf_score",
+            default_score=normalized_inputs.get("lf_score"),
+            channel_name="lf"
+        )
+        hf_enabled = bool(cfg.get("watermark", {}).get("hf", {}).get("enabled", False))
+        if hf_enabled:
+            hf_status, hf_score, hf_failure_reason = _extract_channel(
+                evidence=normalized_inputs.get("hf_evidence"),
+                score_key="hf_score",
+                default_score=normalized_inputs.get("hf_score"),
+                channel_name="hf"
+            )
+        else:
+            hf_status, hf_score, hf_failure_reason = "absent", None, "hf_disabled_by_config"
+
         try:
-            # (4a) 读取 lf_evidence（ContentEvidence dataclass 或 dict）。
-            lf_evidence = inputs.get("lf_evidence")
-            hf_evidence = inputs.get("hf_evidence")
-
-            # (4b) 处理 lf_evidence：提取 status 和 score。
-            lf_status = None
-            lf_score = None
-            lf_failure_reason = None
-            
-            # 如果提供了 lf_evidence，从中提取信息。
-            if lf_evidence is not None:
-                if isinstance(lf_evidence, dict):
-                    lf_status = lf_evidence.get("status")
-                    lf_score = lf_evidence.get("lf_score") or lf_evidence.get("score")
-                    lf_failure_reason = lf_evidence.get("content_failure_reason")
-                else:
-                    # 假设是 ContentEvidence dataclass
-                    lf_status = getattr(lf_evidence, "status", None)
-                    lf_score = getattr(lf_evidence, "lf_score", None) or getattr(lf_evidence, "score", None)
-                    lf_failure_reason = getattr(lf_evidence, "content_failure_reason", None)
-            else:
-                # 向后兼容：如果没有 lf_evidence，尝试直接读取 lf_score。
-                lf_score = inputs.get("lf_score")
-                if lf_score is not None:
-                    lf_status = "ok"  # 假设直接提供的分数是有效的
-
-            # (4c) 处理 hf_evidence：当前阶段 HF 应为 absent。
-            hf_status = None
-            hf_score = None
-            if hf_evidence is not None:
-                if isinstance(hf_evidence, dict):
-                    hf_status = hf_evidence.get("status")
-                    hf_score = hf_evidence.get("hf_score") or hf_evidence.get("score")
-                else:
-                    hf_status = getattr(hf_evidence, "status", None)
-                    hf_score = getattr(hf_evidence, "hf_score", None) or getattr(hf_evidence, "score", None)
-            else:
-                # 向后兼容：直接读取 hf_score。
-                hf_score_direct = inputs.get("hf_score")
-                if hf_score_direct is not None:
-                    hf_score = hf_score_direct
-                    hf_status = "ok"
-
-            # (4d) 状态传播：若 lf_status != "ok"，传播失败。
-            # 设计逻辑：LF 是主通道，其失败状态必须传播到 content 层。
-            if lf_status is not None and lf_status != "ok":
-                # LF 失败/缺失/不匹配，传播到 content 层。
-                trace_payload = _build_detector_trace_payload(
-                    cfg=cfg,
-                    impl_id=self.impl_id,
-                    impl_version=self.impl_version,
-                    impl_digest=self.impl_digest,
-                    enabled=True,
-                    plan_digest=plan_digest,
-                    detection_result=None
-                )
-                trace_digest = digests.canonical_sha256(trace_payload)
-
-                audit = {
-                    "impl_identity": self.impl_id,
-                    "impl_version": self.impl_version,
-                    "impl_digest": self.impl_digest,
-                    "trace_digest": trace_digest
-                }
-
-                # 传播 lf_status 和 lf_failure_reason。
-                return ContentEvidence(
-                    status=lf_status,  # 传播 lf_status（absent/failed/mismatch）
-                    score=None,  # 失败状态下 score 必须为 None
-                    audit=audit,
-                    plan_digest=plan_digest,
-                    content_failure_reason=lf_failure_reason,  # 传播 LF 失败原因
-                    score_parts=None,  # 失败状态下分量无效
-                    lf_score=None,
-                    hf_score=None
-                )
-
-            # (4e) 验证得分类型（仅当可用时）。
-            if lf_score is not None and not isinstance(lf_score, (int, float)):
-                # lf_score 类型不合法，必须 fail-fast。
-                raise TypeError(f"lf_score must be float or None, got {type(lf_score).__name__}")
-            if hf_score is not None and not isinstance(hf_score, (int, float)):
-                # hf_score 类型不合法，必须 fail-fast。
-                raise TypeError(f"hf_score must be float or None, got {type(hf_score).__name__}")
-
-            # 验证得分范围（非负）。
-            if lf_score is not None and lf_score < 0:
-                # lf_score 值域不合法，必须 fail-fast。
-                raise ValueError(f"lf_score must be non-negative, got {lf_score}")
-            if hf_score is not None and hf_score < 0:
-                # hf_score 值域不合法，必须 fail-fast。
-                raise ValueError(f"hf_score must be non-negative, got {hf_score}")
-
-            # (4f) 若无任何有效证据分数（LF 和 HF 都 absent），返回失败。
-            if lf_score is None and hf_score is None:
-                trace_payload = _build_detector_trace_payload(
-                    cfg=cfg,
-                    impl_id=self.impl_id,
-                    impl_version=self.impl_version,
-                    impl_digest=self.impl_digest,
-                    enabled=True,
-                    plan_digest=plan_digest,
-                    detection_result=None
-                )
-                trace_digest = digests.canonical_sha256(trace_payload)
-
-                audit = {
-                    "impl_identity": self.impl_id,
-                    "impl_version": self.impl_version,
-                    "impl_digest": self.impl_digest,
-                    "trace_digest": trace_digest
-                }
-
-                return ContentEvidence(
-                    status="failed",
-                    score=None,
-                    audit=audit,
-                    plan_digest=plan_digest,
-                    content_failure_reason="detector_no_evidence",
-                    score_parts=None,
-                    lf_score=None,
-                    hf_score=None
-                )
-
-            # (5) 融合得分（LF 仅主通道，HF 必须 absent）。
-            # 融合规则：content_score = lf_score（HF 当前不可用）。
-            # 设计逻辑：
-            # - 若 lf_score 可用，content_score = lf_score（主通道）。
-            # - 若 lf_score 不可用但 hf_score 可用，返回 failed（HF 当前应不可用）。
-            # - 当来评估时，可由校准阈值或融合规则决定是否接纳 HF。
-            if lf_score is not None:
-                # LF 主通道可用：直接作为内容分数。
-                content_score = lf_score
-            elif hf_score is not None:
-                # LF 不可用但 HF 可用：当前不受支持。
-                # 返回 failed，提示缺失主通道。
-                trace_payload = _build_detector_trace_payload(
-                    cfg=cfg,
-                    impl_id=self.impl_id,
-                    impl_version=self.impl_version,
-                    impl_digest=self.impl_digest,
-                    enabled=True,
-                    plan_digest=plan_digest,
-                    detection_result=None
-                )
-                trace_digest = digests.canonical_sha256(trace_payload)
-
-                audit = {
-                    "impl_identity": self.impl_id,
-                    "impl_version": self.impl_version,
-                    "impl_digest": self.impl_digest,
-                    "trace_digest": trace_digest
-                }
-
-                return ContentEvidence(
-                    status="failed",
-                    score=None,
-                    audit=audit,
-                    plan_digest=plan_digest,
-                    content_failure_reason="detector_extraction_failed",
-                    score_parts=None,
-                    lf_score=None,
-                    hf_score=None
-                )
-            else:
-                # 不应到达（前面已检查 lf_score is None and hf_score is None）。
-                trace_payload = _build_detector_trace_payload(
-                    cfg=cfg,
-                    impl_id=self.impl_id,
-                    impl_version=self.impl_version,
-                    impl_digest=self.impl_digest,
-                    enabled=True,
-                    plan_digest=plan_digest,
-                    detection_result=None
-                )
-                trace_digest = digests.canonical_sha256(trace_payload)
-
-                audit = {
-                    "impl_identity": self.impl_id,
-                    "impl_version": self.impl_version,
-                    "impl_digest": self.impl_digest,
-                    "trace_digest": trace_digest
-                }
-
-                return ContentEvidence(
-                    status="failed",
-                    score=None,
-                    audit=audit,
-                    plan_digest=plan_digest,
-                    content_failure_reason="detector_extraction_failed",
-                    score_parts=None,
-                    lf_score=None,
-                    hf_score=None
-                )
-
-        except (TypeError, ValueError, KeyError) as e:
-            # 检测异常，单一主因上报。
-            failure_reason = "detector_extraction_failed"
-
-            trace_payload = _build_detector_trace_payload(
+            _validate_non_negative_score(lf_score, "lf_score")
+            _validate_non_negative_score(hf_score, "hf_score")
+        except Exception:
+            return self._build_result(
                 cfg=cfg,
-                impl_id=self.impl_id,
-                impl_version=self.impl_version,
-                impl_digest=self.impl_digest,
-                enabled=True,
-                plan_digest=plan_digest,
-                detection_result=None
-            )
-            trace_digest = digests.canonical_sha256(trace_payload)
-
-            audit = {
-                "impl_identity": self.impl_id,
-                "impl_version": self.impl_version,
-                "impl_digest": self.impl_digest,
-                "trace_digest": trace_digest
-            }
-
-            return ContentEvidence(
                 status="failed",
                 score=None,
-                audit=audit,
                 plan_digest=plan_digest,
-                content_failure_reason=failure_reason,
+                content_failure_reason="detector_score_validation_failed",
                 score_parts=None,
                 lf_score=None,
-                hf_score=None
+                hf_score=None,
+                cfg_digest=cfg_digest,
+                detection_result=None,
             )
 
-        # (6) 构造成功路径审计字段与得分分量。
-        detection_result = {
+        if lf_status in {"mismatch", "failed", "absent"}:
+            propagated_reason = lf_failure_reason
+            if lf_status == "mismatch" and not isinstance(propagated_reason, str):
+                propagated_reason = "detector_plan_mismatch"
+            if lf_status == "failed" and not isinstance(propagated_reason, str):
+                propagated_reason = "detector_extraction_failed"
+            return self._build_result(
+                cfg=cfg,
+                status=lf_status,
+                score=None,
+                plan_digest=plan_digest,
+                content_failure_reason=propagated_reason,
+                score_parts=None,
+                lf_score=None,
+                hf_score=None,
+                cfg_digest=cfg_digest,
+                detection_result=None,
+            )
+
+        if hf_status == "mismatch":
+            return self._build_result(
+                cfg=cfg,
+                status="mismatch",
+                score=None,
+                plan_digest=plan_digest,
+                content_failure_reason=hf_failure_reason or "hf_plan_mismatch",
+                score_parts=None,
+                lf_score=None,
+                hf_score=None,
+                cfg_digest=cfg_digest,
+                detection_result=None,
+            )
+
+        if hf_status == "failed":
+            return self._build_result(
+                cfg=cfg,
+                status="failed",
+                score=None,
+                plan_digest=plan_digest,
+                content_failure_reason=hf_failure_reason or "hf_detection_failed",
+                score_parts=None,
+                lf_score=None,
+                hf_score=None,
+                cfg_digest=cfg_digest,
+                detection_result=None,
+            )
+
+        if lf_score is None and hf_score is None:
+            return self._build_result(
+                cfg=cfg,
+                status="failed",
+                score=None,
+                plan_digest=plan_digest,
+                content_failure_reason="detector_no_evidence",
+                score_parts=None,
+                lf_score=None,
+                hf_score=None,
+                cfg_digest=cfg_digest,
+                detection_result=None,
+            )
+
+        content_score, score_parts = self._compose_content_score(
+            lf_score=lf_score,
+            hf_score=hf_score,
+            hf_status=hf_status,
+            hf_failure_reason=hf_failure_reason,
+        )
+
+        detection_result_typed: Dict[str, Any] = {
+            "plan_digest": plan_digest,
             "lf_score": lf_score,
             "hf_score": hf_score,
             "content_score": content_score,
-            "plan_digest": plan_digest,
-            "cfg_digest": cfg_digest
+            "content_score_rule_version": CONTENT_SCORE_RULE_VERSION,
+            "cfg_digest": cfg_digest,
         }
 
+        return self._build_result(
+            cfg=cfg,
+            status="ok",
+            score=content_score,
+            plan_digest=plan_digest,
+            content_failure_reason=None,
+            score_parts=score_parts,
+            lf_score=lf_score,
+            hf_score=hf_score,
+            cfg_digest=cfg_digest,
+            detection_result=detection_result_typed,
+        )
+
+    def _compose_content_score(
+        self,
+        lf_score: Optional[float],
+        hf_score: Optional[float],
+        hf_status: Optional[str],
+        hf_failure_reason: Optional[str],
+    ) -> Tuple[float, Dict[str, Any]]:
+        if lf_score is None:
+            raise ValueError("lf_score must be non-None when composing content score")
+
+        if hf_status == "absent":
+            hf_reason = hf_failure_reason if isinstance(hf_failure_reason, str) else "hf_disabled_by_config"
+            score_parts: Dict[str, Any] = {
+                "content_score_rule_version": CONTENT_SCORE_RULE_VERSION,
+                "rule_id": "lf_only_when_hf_absent_v1",
+                "lf_score": lf_score,
+                "hf_score": "<absent>",
+                "hf_status": "absent",
+                "hf_absent_reason": hf_reason,
+            }
+            return float(lf_score), score_parts
+
+        if hf_score is None:
+            score_parts: Dict[str, Any] = {
+                "content_score_rule_version": CONTENT_SCORE_RULE_VERSION,
+                "rule_id": "lf_only_default_v1",
+                "lf_score": lf_score,
+                "hf_score": "<absent>",
+                "hf_status": "absent",
+                "hf_absent_reason": "hf_disabled_by_config",
+            }
+            return float(lf_score), score_parts
+
+        weight_lf = 0.7
+        weight_hf = 0.3
+        content_score = float(round(lf_score * weight_lf + hf_score * weight_hf, 8))
+        score_parts: Dict[str, Any] = {
+            "content_score_rule_version": CONTENT_SCORE_RULE_VERSION,
+            "rule_id": "lf_hf_weighted_sum_v1",
+            "lf_score": lf_score,
+            "hf_score": hf_score,
+            "weights": {
+                "lf": weight_lf,
+                "hf": weight_hf,
+            },
+            "hf_status": "ok",
+        }
+        return content_score, score_parts
+
+    def _build_result(
+        self,
+        cfg: Dict[str, Any],
+        status: DETECTOR_STATUS,
+        score: Optional[float],
+        plan_digest: Optional[str],
+        content_failure_reason: Optional[str],
+        score_parts: Optional[Dict[str, Any]],
+        lf_score: Optional[float],
+        hf_score: Optional[float],
+        cfg_digest: Optional[str],
+        detection_result: Optional[Dict[str, Any]],
+    ) -> ContentEvidence:
         trace_payload = _build_detector_trace_payload(
             cfg=cfg,
             impl_id=self.impl_id,
@@ -489,7 +342,7 @@ class ContentDetector:
             impl_digest=self.impl_digest,
             enabled=True,
             plan_digest=plan_digest,
-            detection_result=detection_result
+            detection_result=detection_result,
         )
         trace_digest = digests.canonical_sha256(trace_payload)
 
@@ -497,26 +350,105 @@ class ContentDetector:
             "impl_identity": self.impl_id,
             "impl_version": self.impl_version,
             "impl_digest": self.impl_digest,
-            "trace_digest": trace_digest
+            "trace_digest": trace_digest,
         }
 
-        score_parts = {
-            "lf_score": lf_score if lf_score is not None else "<absent>",
-            "hf_score": "<absent>"  # P2 修复：HF 当前阶段显式标记为 absent
-        }
+        if status != "ok":
+            return ContentEvidence(
+                status=status,
+                score=None,
+                audit=audit,
+                plan_digest=plan_digest,
+                score_parts=score_parts,
+                lf_score=None,
+                hf_score=None,
+                content_failure_reason=content_failure_reason,
+            )
 
-        # (7) 返回成功证据。
-        # P2 修复：content_score = lf_score，HF 显式标记为 absent。
         return ContentEvidence(
             status="ok",
-            score=content_score,
+            score=score,
             audit=audit,
             plan_digest=plan_digest,
-            content_failure_reason=None,
             score_parts=score_parts,
             lf_score=lf_score,
-            hf_score=None  # P2 修复：HF 当前为 None（未实现）
+            hf_score=hf_score,
+            content_failure_reason=None,
         )
+
+
+def _extract_channel(
+    evidence: Any,
+    score_key: str,
+    default_score: Any,
+    channel_name: str,
+) -> Tuple[Optional[DETECTOR_STATUS], Optional[float], Optional[str]]:
+    if not score_key:
+        raise TypeError("score_key must be non-empty str")
+    if channel_name not in {"lf", "hf"}:
+        raise ValueError("channel_name must be lf or hf")
+
+    if evidence is None:
+        if default_score is None:
+            if channel_name == "hf":
+                return "absent", None, "hf_disabled_by_config"
+            return None, None, None
+        return "ok", float(default_score), None
+
+    if isinstance(evidence, dict):
+        evidence_dict = cast(Dict[str, Any], evidence)
+        status = evidence_dict.get("status")
+        score = evidence_dict.get(score_key)
+        if score is None:
+            score = evidence_dict.get("score")
+        failure_reason = evidence_dict.get("content_failure_reason")
+        if channel_name == "hf":
+            summary = evidence_dict.get("hf_evidence_summary")
+            if isinstance(summary, dict):
+                summary_dict = cast(Dict[str, Any], summary)
+                if status == "absent":
+                    reason = summary_dict.get("hf_absent_reason")
+                    if isinstance(reason, str) and reason:
+                        failure_reason = reason
+                if status in {"failed", "mismatch"}:
+                    reason = summary_dict.get("hf_failure_reason")
+                    if isinstance(reason, str) and reason:
+                        failure_reason = reason
+        status_literal: Optional[DETECTOR_STATUS] = None
+        if isinstance(status, str) and status in {"ok", "absent", "failed", "mismatch"}:
+            status_literal = cast(DETECTOR_STATUS, status)
+        failure_reason_text: Optional[str] = failure_reason if isinstance(failure_reason, str) else None
+        return status_literal, _safe_float(score), failure_reason_text
+
+    status = getattr(evidence, "status", None)
+    score = getattr(evidence, score_key, None)
+    if score is None:
+        score = getattr(evidence, "score", None)
+    failure_reason = getattr(evidence, "content_failure_reason", None)
+    status_literal: Optional[DETECTOR_STATUS] = None
+    if isinstance(status, str) and status in {"ok", "absent", "failed", "mismatch"}:
+        status_literal = cast(DETECTOR_STATUS, status)
+    failure_reason_text = failure_reason if isinstance(failure_reason, str) else None
+    return status_literal, _safe_float(score), failure_reason_text
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise TypeError("boolean is not valid score")
+    if not isinstance(value, (int, float)):
+        raise TypeError("score must be float-like")
+    return float(value)
+
+
+def _validate_non_negative_score(score: Optional[float], score_name: str) -> None:
+    if not score_name:
+        raise TypeError("score_name must be non-empty str")
+    if score is None:
+        return
+    if score < 0:
+        raise ValueError(f"{score_name} must be non-negative")
 
 
 def _build_detector_trace_payload(
@@ -526,7 +458,7 @@ def _build_detector_trace_payload(
     impl_digest: str,
     enabled: bool,
     plan_digest: Optional[str],
-    detection_result: Optional[Dict[str, Any]]
+    detection_result: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """
     功能：构造可复算的内容检测追踪有效负载。
@@ -548,33 +480,17 @@ def _build_detector_trace_payload(
     Raises:
         TypeError: If inputs are invalid.
     """
-    if not isinstance(cfg, dict):
-        # cfg 类型不合法，必须 fail-fast。
-        raise TypeError("cfg must be dict")
-    if not isinstance(impl_id, str) or not impl_id:
-        # impl_id 类型不合法，必须 fail-fast。
+    if not impl_id:
         raise TypeError("impl_id must be non-empty str")
-    if not isinstance(enabled, bool):
-        # enabled 类型不合法，必须 fail-fast。
-        raise TypeError("enabled must be bool")
-    if plan_digest is not None and not isinstance(plan_digest, str):
-        # plan_digest 类型不合法，必须 fail-fast。
-        raise TypeError("plan_digest must be str or None")
-    if detection_result is not None and not isinstance(detection_result, dict):
-        # detection_result 类型不合法，必须 fail-fast。
-        raise TypeError("detection_result must be dict or None")
 
-    detector_cfg = cfg.get("watermark", {}).get("detector", {})
-
-    payload = {
+    payload: Dict[str, Any] = {
         "impl_id": impl_id,
         "impl_version": impl_version,
         "impl_digest": impl_digest,
         "trace_version": CONTENT_DETECTOR_TRACE_VERSION,
         "enabled": enabled,
         "plan_digest": plan_digest,
-        # detector_threshold 已在 docstring 中标记为 unused，直接使用默认值。
-        "detector_threshold": 0.5 if enabled else None,
+        "content_score_rule_version": CONTENT_SCORE_RULE_VERSION,
     }
 
     if detection_result is not None:

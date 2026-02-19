@@ -233,6 +233,10 @@ class SubspacePlannerImpl:
                 cfg=cfg
             )
 
+            high_freq_subspace_spec = self._build_high_freq_subspace_spec(
+                basis_summary=basis_summary
+            )
+
             plan = {
                 "plan_version": "v3",
                 "subspace_method": "trajectory_jacobian_nullspace_svd",
@@ -264,7 +268,8 @@ class SubspacePlannerImpl:
                     "injection_domain": planner_params.injection_domain,
                     "channel_mix_policy": "channel_refill" if planner_params.enable_channel_refill else "none"
                 },
-                "detection_domain_spec": detection_domain_spec
+                "detection_domain_spec": detection_domain_spec,
+                "high_freq_subspace_spec": high_freq_subspace_spec
             }
 
             plan_stats = {
@@ -633,7 +638,8 @@ class SubspacePlannerImpl:
                 "trajectory_step_stride": planner_params.trajectory_step_stride,
                 "spectrum_topk": planner_params.spectrum_topk,
                 "jacobian_probe_count": planner_params.jacobian_probe_count,
-                "jacobian_eps": self._normalize_float(planner_params.jacobian_eps, planner_params.float_round_digits)
+                "jacobian_eps": self._normalize_float(planner_params.jacobian_eps, planner_params.float_round_digits),
+                "high_freq": _build_high_freq_cfg_binding(cfg)
             },
             "injection_config": injection_config_payload,
             "detection_domain_spec": detection_domain_spec,
@@ -682,6 +688,44 @@ class SubspacePlannerImpl:
             Digest string.
         """
         return digests.canonical_sha256(payload)
+
+    def _build_high_freq_subspace_spec(self, basis_summary: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        功能：从规划摘要中派生 HF 子空间摘要。
+
+        Derive high-frequency subspace summary strictly from planner basis summary.
+
+        Args:
+            basis_summary: Basis summary mapping containing subspace_spec.
+
+        Returns:
+            High-frequency subspace summary mapping.
+
+        Raises:
+            TypeError: If basis_summary type is invalid.
+        """
+        if not isinstance(basis_summary, dict):
+            raise TypeError("basis_summary must be dict")
+        subspace_spec = basis_summary.get("subspace_spec")
+        if not isinstance(subspace_spec, dict):
+            return {
+                "selector": "planner_top_feature_tail_half",
+                "selected_indices": [],
+                "selected_count": 0,
+                "source_field": "subspace_spec.top_feature_indices"
+            }
+        top_feature_indices = subspace_spec.get("top_feature_indices")
+        if not isinstance(top_feature_indices, list):
+            top_feature_indices = []
+        normalized = [int(index) for index in top_feature_indices if isinstance(index, int) and index >= 0]
+        split = max(1, len(normalized) // 2) if len(normalized) > 0 else 0
+        selected_indices = normalized[-split:] if split > 0 else []
+        return {
+            "selector": "planner_top_feature_tail_half",
+            "selected_indices": selected_indices,
+            "selected_count": len(selected_indices),
+            "source_field": "subspace_spec.top_feature_indices"
+        }
 
     def _extract_feature_matrix(
         self,
@@ -2209,3 +2253,37 @@ def create_run_closure_trajectory_anchors(
         "jvp_source": jvp_source,
         "trajectory_anchors_version": "v1"
     }
+
+
+def _build_high_freq_cfg_binding(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：构造 HF 参数绑定摘要输入域。
+
+    Build canonical high-frequency config binding payload for plan_digest domain.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        High-frequency config binding mapping.
+
+    Raises:
+        TypeError: If cfg is invalid.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    hf_cfg = cfg.get("watermark", {}).get("hf", {})
+    if not isinstance(hf_cfg, dict):
+        hf_cfg = {}
+    payload = {
+        "enabled": bool(hf_cfg.get("enabled", False)),
+        "codebook_id": hf_cfg.get("codebook_id"),
+        "ecc": hf_cfg.get("ecc"),
+        "tail_truncation_ratio": hf_cfg.get("tail_truncation_ratio", 0.1),
+        "tail_truncation_mode": hf_cfg.get("tail_truncation_mode", "gaussian"),
+        "sampling_stride": hf_cfg.get("sampling_stride", 1),
+        "energy_floor": hf_cfg.get("energy_floor", 0.0),
+        "energy_cap": hf_cfg.get("energy_cap", 1.0),
+    }
+    payload["hf_cfg_digest"] = digests.canonical_sha256(payload)
+    return payload

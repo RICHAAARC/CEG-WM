@@ -16,6 +16,12 @@ from main.registries.runtime_resolver import BuiltImplSet
 from main.core import digests
 from main.watermarking.fusion.interfaces import FusionDecision
 from main.watermarking.fusion import neyman_pearson
+from main.watermarking.content_chain.content_detector import CONTENT_DETECTOR_ID
+from main.watermarking.content_chain.high_freq_embedder import (
+    HighFreqEmbedder,
+    HIGH_FREQ_EMBEDDER_ID,
+    HIGH_FREQ_EMBEDDER_VERSION,
+)
 
 
 def run_detect_orchestrator(
@@ -122,6 +128,21 @@ def run_detect_orchestrator(
     if hasattr(detect_plan_result, "plan") and isinstance(detect_plan_result.plan, dict):
         detect_time_planner_impl_identity = detect_plan_result.plan.get("planner_impl_identity")
 
+    plan_payload = None
+    if hasattr(detect_plan_result, "as_dict") and callable(detect_plan_result.as_dict):
+        plan_payload = detect_plan_result.as_dict()
+    elif isinstance(detect_plan_result, dict):
+        plan_payload = dict(detect_plan_result)
+
+    hf_evidence = _build_hf_detect_evidence(
+        cfg=cfg,
+        cfg_digest=cfg_digest,
+        plan_payload=plan_payload,
+        plan_digest=detect_time_plan_digest,
+        embed_time_plan_digest=embed_time_plan_digest,
+        trajectory_evidence=trajectory_evidence,
+    )
+
     mismatch_reasons = _collect_plan_mismatch_reasons(
         embed_time_plan_digest=embed_time_plan_digest,
         detect_time_plan_digest=detect_time_plan_digest,
@@ -170,6 +191,7 @@ def run_detect_orchestrator(
         if trajectory_evidence is not None:
             content_evidence_payload["trajectory_evidence"] = trajectory_evidence
             _inject_trajectory_audit_fields(content_evidence_payload, trajectory_evidence)
+        _merge_hf_evidence(content_evidence_payload, hf_evidence)
         content_result = content_evidence_payload
         content_evidence_adapted = content_evidence_payload
         geometry_evidence_adapted = _adapt_geometry_evidence_for_fusion(geometry_result)
@@ -197,11 +219,30 @@ def run_detect_orchestrator(
         if trajectory_evidence is not None:
             content_evidence_payload["trajectory_evidence"] = trajectory_evidence
             _inject_trajectory_audit_fields(content_evidence_payload, trajectory_evidence)
+        _merge_hf_evidence(content_evidence_payload, hf_evidence)
         content_result = content_evidence_payload
         content_evidence_adapted = content_evidence_payload
         geometry_evidence_adapted = _adapt_geometry_evidence_for_fusion(geometry_result)
         fusion_result = _build_absent_fusion_decision(cfg, content_evidence_adapted, geometry_evidence_adapted)
     else:
+        extractor_impl_id = getattr(impl_set.content_extractor, "impl_id", None)
+        if extractor_impl_id == CONTENT_DETECTOR_ID:
+            lf_evidence = _extract_lf_evidence_from_input_record(input_record)
+            detector_inputs: Dict[str, Any] = {
+                "plan_digest": detect_time_plan_digest,
+                "lf_evidence": lf_evidence,
+                "hf_evidence": hf_evidence,
+            }
+            content_result = impl_set.content_extractor.extract(
+                cfg,
+                inputs=detector_inputs,
+                cfg_digest=cfg_digest,
+            )
+            content_evidence_payload = _adapt_content_evidence_for_fusion(content_result)
+        if content_evidence_payload is None:
+            content_evidence_payload = {}
+        _merge_hf_evidence(content_evidence_payload, hf_evidence)
+        content_evidence_adapted = _adapt_content_evidence_for_fusion(content_evidence_payload)
         fusion_result = impl_set.fusion_rule.fuse(cfg, content_evidence_adapted, geometry_evidence_adapted)
     input_fields = len(input_record or {})
 
@@ -252,6 +293,131 @@ def run_detect_orchestrator(
         "fusion_result": fusion_result
     }
     return record
+
+
+def _build_hf_detect_evidence(
+    cfg: Dict[str, Any],
+    cfg_digest: Optional[str],
+    plan_payload: Optional[Dict[str, Any]],
+    plan_digest: Optional[str],
+    embed_time_plan_digest: Optional[str],
+    trajectory_evidence: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    功能：构造 detect 侧 HF 证据。
+
+    Build detect-side HF evidence under planner-defined plan.
+
+    Args:
+        cfg: Configuration mapping.
+        cfg_digest: Optional cfg digest.
+        plan_payload: Planner evidence mapping.
+        plan_digest: Detect-time plan digest.
+        embed_time_plan_digest: Embed-time plan digest.
+        trajectory_evidence: Optional trajectory evidence mapping.
+
+    Returns:
+        HF evidence mapping.
+
+    Raises:
+        TypeError: If cfg is invalid.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+
+    embedder = HighFreqEmbedder(
+        impl_id=HIGH_FREQ_EMBEDDER_ID,
+        impl_version=HIGH_FREQ_EMBEDDER_VERSION,
+        impl_digest=digests.canonical_sha256(
+            {
+                "impl_id": HIGH_FREQ_EMBEDDER_ID,
+                "impl_version": HIGH_FREQ_EMBEDDER_VERSION,
+            }
+        ),
+    )
+
+    expected_plan_digest = embed_time_plan_digest if isinstance(embed_time_plan_digest, str) and embed_time_plan_digest else plan_digest
+    hf_score, evidence = embedder.detect(
+        latents_or_features=trajectory_evidence,
+        plan=plan_payload,
+        cfg=cfg,
+        cfg_digest=cfg_digest,
+        expected_plan_digest=expected_plan_digest,
+    )
+    if not isinstance(evidence, dict):
+        evidence = {
+            "status": "failed",
+            "hf_score": None,
+            "hf_trace_digest": None,
+            "hf_evidence_summary": {
+                "hf_status": "failed",
+                "hf_failure_reason": "hf_detection_failed",
+            },
+            "content_failure_reason": "hf_detection_failed",
+        }
+    if "hf_score" not in evidence:
+        evidence["hf_score"] = hf_score
+    return evidence
+
+
+def _merge_hf_evidence(content_evidence_payload: Dict[str, Any], hf_evidence: Dict[str, Any]) -> None:
+    """
+    功能：合并 HF 证据到 content_evidence。
+
+    Merge HF evidence into content evidence payload using existing registered fields.
+
+    Args:
+        content_evidence_payload: Mutable content evidence mapping.
+        hf_evidence: HF evidence mapping.
+
+    Returns:
+        None.
+    """
+    if not isinstance(content_evidence_payload, dict):
+        return
+    if not isinstance(hf_evidence, dict):
+        return
+
+    content_evidence_payload["hf_trace_digest"] = hf_evidence.get("hf_trace_digest")
+    content_evidence_payload["hf_score"] = hf_evidence.get("hf_score")
+
+    score_parts = content_evidence_payload.get("score_parts")
+    if not isinstance(score_parts, dict):
+        score_parts = {}
+        content_evidence_payload["score_parts"] = score_parts
+
+    score_parts["content_score_rule_version"] = hf_evidence.get("content_score_rule_version")
+    score_parts["hf_status"] = hf_evidence.get("status")
+    summary = hf_evidence.get("hf_evidence_summary")
+    if isinstance(summary, dict):
+        score_parts["hf_metrics"] = summary
+        if "hf_absent_reason" in summary:
+            score_parts["hf_absent_reason"] = summary.get("hf_absent_reason")
+        if "hf_failure_reason" in summary:
+            score_parts["hf_failure_reason"] = summary.get("hf_failure_reason")
+
+
+def _extract_lf_evidence_from_input_record(input_record: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    功能：从 embed record 中提取 LF 证据。
+
+    Extract LF evidence payload from embed-time input record.
+
+    Args:
+        input_record: Optional input record mapping.
+
+    Returns:
+        LF evidence mapping or None.
+    """
+    if not isinstance(input_record, dict):
+        return None
+    for key in ["content_evidence_payload", "content_evidence", "content_result"]:
+        candidate = input_record.get(key)
+        if not isinstance(candidate, dict):
+            continue
+        if "lf_score" in candidate or "lf_trace_digest" in candidate or candidate.get("status") in {"ok", "failed", "mismatch", "absent"}:
+            return candidate
+    return None
 
 
 def _collect_plan_mismatch_reasons(

@@ -80,6 +80,12 @@ digest_scope:
     - "watermark.lf.variance"  # PRC 伪高斯方差（pseudogaussian variance），默认 1.5
     - "watermark.hf.codebook_id"
     - "watermark.hf.ecc"
+    - "watermark.hf.enabled"
+    - "watermark.hf.tail_truncation_ratio"
+    - "watermark.hf.tail_truncation_mode"
+    - "watermark.hf.sampling_stride"
+    - "watermark.hf.energy_floor"
+    - "watermark.hf.energy_cap"
 
 versioning_policy:
 

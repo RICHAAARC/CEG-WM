@@ -63,6 +63,12 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "高频分区得分。"
+  - path: "content_evidence.hf_evidence_summary"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "高频证据摘要（状态、原因与可复算统计）。"
   - path: "content_evidence.score_parts"
     layer: "diagnostic"
     type: "metrics_dict"
@@ -75,6 +81,18 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "内容链失败原因（字符串枚举）。"
+  - path: "content_evidence.content_mismatch_reason"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "内容链主 mismatch 原因（单一主因）。"
+  - path: "content_evidence.content_mismatch_field_path"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "内容链主 mismatch 对应字段路径。"
   - path: "content_evidence.trajectory_evidence"
     layer: "diagnostic"
     type: "json_dict"
