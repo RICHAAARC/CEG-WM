@@ -46,7 +46,16 @@ ALLOWED_FAIL_REASONS = [
     "decoder_error",
     "unknown"
 ]
-ALLOWED_MISMATCH_REASONS = ["subspace_frame_mismatch", "cfg_digest_mismatch"]
+ALLOWED_MISMATCH_REASONS = [
+    "subspace_frame_mismatch",
+    "cfg_digest_mismatch",
+    "plan_digest_mismatch",
+    "basis_digest_mismatch",
+    "planner_impl_identity_mismatch",
+    "trajectory_spec_digest_mismatch",
+    "trajectory_digest_mismatch",
+    "trajectory_evidence_invalid"
+]
 
 # pip 子进程超时秒数。
 PIP_SUBPROCESS_TIMEOUT_SECONDS = 10

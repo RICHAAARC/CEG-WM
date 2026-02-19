@@ -200,10 +200,34 @@ class TestDetectOrchestratorWithContentDetector:
         mock_impl_set.fusion_rule = mock_fusion_rule
         mock_impl_set.subspace_planner = mock_subspace_planner
         
-        cfg = {"watermark": {"detector": {"enabled": True}, "plan_digest": "test_plan"}}
+        cfg = {
+            "watermark": {"detector": {"enabled": True}, "plan_digest": "test_plan"},
+            "evaluate": {"target_fpr": 1e-6}
+        }
         
         # 调用 detect 编排器。
-        record = run_detect_orchestrator(cfg, mock_impl_set, input_record=None, cfg_digest=None)
+        input_record = {
+            "content_evidence_payload": {
+                "trajectory_evidence": {
+                    "status": "ok",
+                    "trajectory_spec_digest": "spec_digest_ok",
+                    "trajectory_digest": "traj_digest_ok"
+                }
+            }
+        }
+        trajectory_evidence = {
+            "status": "ok",
+            "trajectory_spec_digest": "spec_digest_ok",
+            "trajectory_digest": "traj_digest_ok"
+        }
+
+        record = run_detect_orchestrator(
+            cfg,
+            mock_impl_set,
+            input_record=input_record,
+            cfg_digest=None,
+            trajectory_evidence=trajectory_evidence
+        )
         
         # 验证 record 包含 content_evidence_payload（append-only）。
         assert "content_evidence_payload" in record
@@ -265,9 +289,33 @@ class TestDetectOrchestratorWithContentDetector:
         mock_impl_set.fusion_rule = mock_fusion_rule
         mock_impl_set.subspace_planner = mock_subspace_planner
         
-        cfg = {"watermark": {"detector": {"enabled": True}}}
+        cfg = {
+            "watermark": {"detector": {"enabled": True}},
+            "evaluate": {"target_fpr": 1e-6}
+        }
         
-        record = run_detect_orchestrator(cfg, mock_impl_set)
+        input_record = {
+            "content_evidence_payload": {
+                "trajectory_evidence": {
+                    "status": "ok",
+                    "trajectory_spec_digest": "spec_digest_ok",
+                    "trajectory_digest": "traj_digest_ok"
+                }
+            }
+        }
+        trajectory_evidence = {
+            "status": "ok",
+            "trajectory_spec_digest": "spec_digest_ok",
+            "trajectory_digest": "traj_digest_ok"
+        }
+
+        record = run_detect_orchestrator(
+            cfg,
+            mock_impl_set,
+            input_record=input_record,
+            cfg_digest=None,
+            trajectory_evidence=trajectory_evidence
+        )
         
         # 验证融合收到的字段。
         call_args = mock_fusion_rule.fuse.call_args

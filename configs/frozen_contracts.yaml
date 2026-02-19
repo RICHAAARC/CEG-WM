@@ -445,6 +445,15 @@ records_schema:
     - content_evidence.hf_score
     - content_evidence.score_parts
     - content_evidence.content_failure_reason
+    - content_evidence.trajectory_evidence
+    - content_evidence.trajectory_evidence.status
+    - content_evidence.trajectory_evidence.trajectory_spec
+    - content_evidence.trajectory_evidence.trajectory_spec_digest
+    - content_evidence.trajectory_evidence.trajectory_digest
+    - content_evidence.trajectory_evidence.trajectory_stats
+    - content_evidence.trajectory_evidence.trajectory_absent_reason
+    - content_evidence.trajectory_evidence.trajectory_tap_version
+    - content_evidence.trajectory_evidence.device
     - geometry_evidence.anchor_digest
     - geometry_evidence.anchor_metrics
     - geometry_evidence.sync_digest
@@ -537,7 +546,15 @@ fail_reason_enum:
   immutable: true
 
 mismatch_reason_enum:
-  allowed_values: ["subspace_frame_mismatch", "cfg_digest_mismatch"]
+  allowed_values:
+    - "subspace_frame_mismatch"
+    - "cfg_digest_mismatch"
+    - "plan_digest_mismatch"
+    - "basis_digest_mismatch"
+    - "planner_impl_identity_mismatch"
+    - "trajectory_spec_digest_mismatch"
+    - "trajectory_digest_mismatch"
+    - "trajectory_evidence_invalid"
   usage: "仅在 status == 'mismatch' 时填充"
   immutable: true
 

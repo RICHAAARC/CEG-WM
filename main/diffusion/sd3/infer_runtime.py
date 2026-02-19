@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Dict, Any, Tuple
 
+from main.diffusion.sd3 import trajectory_tap
+
 
 INFERENCE_STATUS_OK = "ok"
 INFERENCE_STATUS_FAILED = "failed"
@@ -49,7 +51,14 @@ def run_sd3_inference(
         return {
             "inference_status": INFERENCE_STATUS_DISABLED,
             "inference_error": None,
-            "inference_runtime_meta": None
+            "inference_runtime_meta": None,
+            "trajectory_evidence": trajectory_tap.build_trajectory_evidence(
+                cfg,
+                INFERENCE_STATUS_DISABLED,
+                None,
+                seed=seed,
+                device=device
+            )
         }
 
     inference_status = INFERENCE_STATUS_OK
@@ -63,7 +72,14 @@ def run_sd3_inference(
         return {
             "inference_status": inference_status,
             "inference_error": inference_error,
-            "inference_runtime_meta": None
+            "inference_runtime_meta": None,
+            "trajectory_evidence": trajectory_tap.build_trajectory_evidence(
+                cfg,
+                inference_status,
+                None,
+                seed=seed,
+                device=device
+            )
         }
 
     # (2) 解析推理参数
@@ -80,7 +96,14 @@ def run_sd3_inference(
             return {
                 "inference_status": inference_status,
                 "inference_error": inference_error,
-                "inference_runtime_meta": None
+                "inference_runtime_meta": None,
+                "trajectory_evidence": trajectory_tap.build_trajectory_evidence(
+                    cfg,
+                    inference_status,
+                    None,
+                    seed=seed,
+                    device=device
+                )
             }
 
         if not isinstance(num_inference_steps, int) or num_inference_steps <= 0:
@@ -89,7 +112,14 @@ def run_sd3_inference(
             return {
                 "inference_status": inference_status,
                 "inference_error": inference_error,
-                "inference_runtime_meta": None
+                "inference_runtime_meta": None,
+                "trajectory_evidence": trajectory_tap.build_trajectory_evidence(
+                    cfg,
+                    inference_status,
+                    None,
+                    seed=seed,
+                    device=device
+                )
             }
 
         inference_runtime_meta["prompt"] = prompt
@@ -106,7 +136,14 @@ def run_sd3_inference(
         return {
             "inference_status": inference_status,
             "inference_error": inference_error,
-            "inference_runtime_meta": inference_runtime_meta
+            "inference_runtime_meta": inference_runtime_meta,
+            "trajectory_evidence": trajectory_tap.build_trajectory_evidence(
+                cfg,
+                inference_status,
+                inference_runtime_meta,
+                seed=seed,
+                device=device
+            )
         }
 
     # (3) 尝试执行推理
@@ -118,7 +155,14 @@ def run_sd3_inference(
             return {
                 "inference_status": inference_status,
                 "inference_error": inference_error,
-                "inference_runtime_meta": inference_runtime_meta
+                "inference_runtime_meta": inference_runtime_meta,
+                "trajectory_evidence": trajectory_tap.build_trajectory_evidence(
+                    cfg,
+                    inference_status,
+                    inference_runtime_meta,
+                    seed=seed,
+                    device=device
+                )
             }
 
         # 构造推理参数
@@ -171,5 +215,12 @@ def run_sd3_inference(
     return {
         "inference_status": inference_status,
         "inference_error": inference_error,
-        "inference_runtime_meta": inference_runtime_meta
+        "inference_runtime_meta": inference_runtime_meta,
+        "trajectory_evidence": trajectory_tap.build_trajectory_evidence(
+            cfg,
+            inference_status,
+            inference_runtime_meta,
+            seed=seed,
+            device=device
+        )
     }

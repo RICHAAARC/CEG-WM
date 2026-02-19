@@ -318,6 +318,28 @@ class TestDetectSideMismatchVerification:
         assert not is_consistent
         assert "timesteps_digest mismatch" in reason
 
+    def test_verify_verifiable_input_domain_detects_trajectory_digest_mismatch(self):
+        """校验函数应检测轨迹摘要不匹配。"""
+        plan_payload = {
+            "verifiable_input_domain_spec": {
+                "planner_input_digest": "planner_input_digest_A",
+                "trajectory_evidence_anchor": {
+                    "trajectory_spec_digest": "spec_digest_A",
+                    "trajectory_digest": "traj_digest_A"
+                }
+            }
+        }
+
+        closure_anchors = {
+            "planner_input_digest": "planner_input_digest_A",
+            "trajectory_spec_digest": "spec_digest_A",
+            "trajectory_digest": "traj_digest_B"
+        }
+
+        is_consistent, reason = verify_verifiable_input_domain(plan_payload, closure_anchors, strict_mode=True)
+        assert not is_consistent
+        assert "trajectory_digest mismatch" in reason
+
     def test_create_run_closure_trajectory_anchors(self):
         """创建 run_closure 锚点的函数应正确生成摘要。"""
         samples = np.random.randn(8, 16).astype(np.float64)

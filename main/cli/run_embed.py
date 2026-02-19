@@ -243,13 +243,15 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
             inference_status = inference_result.get("inference_status")
             inference_error = inference_result.get("inference_error")
             inference_runtime_meta = inference_result.get("inference_runtime_meta")
+            trajectory_evidence = inference_result.get("trajectory_evidence")
             
             # 构造 infer_trace 并计算 digest
             infer_trace_obj = infer_trace.build_infer_trace(
                 cfg,
                 inference_status,
                 inference_error,
-                inference_runtime_meta
+                inference_runtime_meta,
+                trajectory_evidence
             )
             infer_trace_canon_sha256 = infer_trace.compute_infer_trace_canon_sha256(infer_trace_obj)
             
@@ -259,6 +261,7 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
             run_meta["inference_status"] = inference_status
             run_meta["inference_error"] = inference_error
             run_meta["inference_runtime_meta"] = inference_runtime_meta
+            run_meta["trajectory_evidence"] = trajectory_evidence
             
             # 提取 run_root 复用参数。
             allow_nonempty_run_root = cfg.get("allow_nonempty_run_root", False)
@@ -313,7 +316,7 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
 
             # 构造 embed record，本阶段为 placeholder。
             print("[Embed] Generating embed record (placeholder)...")
-            record = run_embed_orchestrator(cfg, impl_set, cfg_digest)
+            record = run_embed_orchestrator(cfg, impl_set, cfg_digest, trajectory_evidence=trajectory_evidence)
             if not isinstance(record, dict):
                 # record 类型不符合预期，必须 fail-fast。
                 raise TypeError("orchestrator output must be dict")

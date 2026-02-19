@@ -22,7 +22,8 @@ def run_detect_orchestrator(
     cfg: Dict[str, Any],
     impl_set: BuiltImplSet,
     input_record: Optional[Dict[str, Any]] = None,
-    cfg_digest: Optional[str] = None
+    cfg_digest: Optional[str] = None,
+    trajectory_evidence: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     功能：执行检测占位流程，包括 plan_digest 一致性验证。
@@ -36,6 +37,7 @@ def run_detect_orchestrator(
         input_record: Optional input record mapping (contains embed-time plan_digest).
         cfg_digest: Optional cfg digest for detect-time cfg.
                    If None, plan_digest validation is skipped.
+        trajectory_evidence: Optional trajectory tap evidence mapping.
 
     Returns:
         Business fields mapping for record.
@@ -55,6 +57,9 @@ def run_detect_orchestrator(
     if cfg_digest is not None and not isinstance(cfg_digest, str):
         # cfg_digest 类型不合法，必须 fail-fast。
         raise TypeError("cfg_digest must be str or None")
+    if trajectory_evidence is not None and not isinstance(trajectory_evidence, dict):
+        # trajectory_evidence 类型不合法，必须 fail-fast。
+        raise TypeError("trajectory_evidence must be dict or None")
 
     content_result = impl_set.content_extractor.extract(cfg)
     geometry_result = impl_set.geometry_extractor.extract(cfg)
@@ -66,6 +71,11 @@ def run_detect_orchestrator(
         content_evidence_payload = content_result.as_dict()
     elif isinstance(content_result, dict):
         content_evidence_payload = content_result
+
+    if trajectory_evidence is not None:
+        if content_evidence_payload is None:
+            content_evidence_payload = {}
+        content_evidence_payload["trajectory_evidence"] = trajectory_evidence
     
     geometry_evidence_payload = None
     if hasattr(geometry_result, "as_dict") and callable(geometry_result.as_dict):
@@ -78,7 +88,7 @@ def run_detect_orchestrator(
     content_evidence_adapted = _adapt_content_evidence_for_fusion(content_result)
     geometry_evidence_adapted = _adapt_geometry_evidence_for_fusion(geometry_result)
     
-    planner_inputs = _build_planner_inputs_for_runtime(cfg)
+    planner_inputs = _build_planner_inputs_for_runtime(cfg, trajectory_evidence)
     mask_digest = None
     if isinstance(content_evidence_payload, dict):
         mask_digest = content_evidence_payload.get("mask_digest")
@@ -112,18 +122,26 @@ def run_detect_orchestrator(
         embed_time_planner_impl_identity=embed_time_planner_impl_identity,
         detect_time_planner_impl_identity=detect_time_planner_impl_identity
     )
+
+    trajectory_status, trajectory_mismatch_reason = _evaluate_trajectory_consistency(
+        input_record=input_record,
+        trajectory_evidence=trajectory_evidence
+    )
+    if trajectory_mismatch_reason:
+        mismatch_reasons.append(trajectory_mismatch_reason)
     primary_mismatch_reason, primary_mismatch_field_path = _resolve_primary_mismatch(
         mismatch_reasons
     )
 
     forced_mismatch = len(mismatch_reasons) > 0
+    forced_absent = trajectory_status == "absent" and not forced_mismatch
     if forced_mismatch:
         content_evidence_payload = {
             "status": "mismatch",
             "score": None,
             "plan_digest": detect_time_plan_digest,
             "basis_digest": detect_time_basis_digest,
-            "content_failure_reason": "detector_plan_mismatch",
+            "content_failure_reason": _resolve_mismatch_failure_reason(primary_mismatch_reason),
             "content_mismatch_reason": primary_mismatch_reason,
             "content_mismatch_field_path": primary_mismatch_field_path,
             "score_parts": None,
@@ -140,10 +158,38 @@ def run_detect_orchestrator(
                 })
             }
         }
+        if trajectory_evidence is not None:
+            content_evidence_payload["trajectory_evidence"] = trajectory_evidence
         content_result = content_evidence_payload
         content_evidence_adapted = content_evidence_payload
         geometry_evidence_adapted = _adapt_geometry_evidence_for_fusion(geometry_result)
         fusion_result = _build_mismatch_fusion_decision(cfg, content_evidence_adapted, geometry_evidence_adapted)
+    elif forced_absent:
+        content_evidence_payload = {
+            "status": "absent",
+            "score": None,
+            "plan_digest": detect_time_plan_digest,
+            "basis_digest": detect_time_basis_digest,
+            "content_failure_reason": None,
+            "score_parts": None,
+            "lf_score": None,
+            "hf_score": None,
+            "audit": {
+                "impl_identity": "detect_orchestrator",
+                "impl_version": "v1",
+                "impl_digest": digests.canonical_sha256({"impl_id": "detect_orchestrator", "impl_version": "v1"}),
+                "trace_digest": digests.canonical_sha256({
+                    "trajectory_status": trajectory_status,
+                    "trajectory_mismatch_reason": trajectory_mismatch_reason
+                })
+            }
+        }
+        if trajectory_evidence is not None:
+            content_evidence_payload["trajectory_evidence"] = trajectory_evidence
+        content_result = content_evidence_payload
+        content_evidence_adapted = content_evidence_payload
+        geometry_evidence_adapted = _adapt_geometry_evidence_for_fusion(geometry_result)
+        fusion_result = _build_absent_fusion_decision(cfg, content_evidence_adapted, geometry_evidence_adapted)
     else:
         fusion_result = impl_set.fusion_rule.fuse(cfg, content_evidence_adapted, geometry_evidence_adapted)
     input_fields = len(input_record or {})
@@ -234,6 +280,159 @@ def _collect_plan_mismatch_reasons(
     return reasons
 
 
+def _evaluate_trajectory_consistency(
+    input_record: Optional[Dict[str, Any]],
+    trajectory_evidence: Optional[Dict[str, Any]]
+) -> tuple[str, Optional[str]]:
+    """
+    功能：校验 embed/detect 两端 trajectory 证据一致性。
+
+    Evaluate trajectory evidence consistency between embed-time record and detect-time runtime.
+
+    Args:
+        input_record: Embed-time input record mapping or None.
+        trajectory_evidence: Detect-time trajectory evidence mapping or None.
+
+    Returns:
+        Tuple of (status, mismatch_reason_or_none).
+        status is one of: "ok", "absent", "mismatch".
+
+    Raises:
+        TypeError: If inputs are invalid.
+    """
+    if input_record is not None and not isinstance(input_record, dict):
+        # input_record 类型不合法，必须 fail-fast。
+        raise TypeError("input_record must be dict or None")
+    if trajectory_evidence is not None and not isinstance(trajectory_evidence, dict):
+        # trajectory_evidence 类型不合法，必须 fail-fast。
+        raise TypeError("trajectory_evidence must be dict or None")
+
+    embed_trajectory_evidence = None
+    if isinstance(input_record, dict):
+        candidate = None
+        for key in ["content_evidence_payload", "content_evidence", "content_result"]:
+            payload = input_record.get(key)
+            if isinstance(payload, dict) and "trajectory_evidence" in payload:
+                candidate = payload.get("trajectory_evidence")
+                break
+        if candidate is None and "trajectory_evidence" in input_record:
+            candidate = input_record.get("trajectory_evidence")
+        if candidate is not None and not isinstance(candidate, dict):
+            # embed 记录中的 trajectory_evidence 类型不合法，必须 fail-fast。
+            raise TypeError("embed trajectory_evidence must be dict or None")
+        embed_trajectory_evidence = candidate
+
+    if embed_trajectory_evidence is None and trajectory_evidence is None:
+        return "absent", None
+    if embed_trajectory_evidence is None or trajectory_evidence is None:
+        return "absent", None
+
+    embed_status = embed_trajectory_evidence.get("status")
+    detect_status = trajectory_evidence.get("status")
+    if embed_status != "ok" or detect_status != "ok":
+        return "absent", None
+
+    embed_spec_digest = embed_trajectory_evidence.get("trajectory_spec_digest")
+    detect_spec_digest = trajectory_evidence.get("trajectory_spec_digest")
+    embed_trajectory_digest = embed_trajectory_evidence.get("trajectory_digest")
+    detect_trajectory_digest = trajectory_evidence.get("trajectory_digest")
+
+    if not isinstance(embed_spec_digest, str) or not isinstance(detect_spec_digest, str):
+        return "mismatch", "trajectory_evidence_invalid"
+    if not isinstance(embed_trajectory_digest, str) or not isinstance(detect_trajectory_digest, str):
+        return "mismatch", "trajectory_evidence_invalid"
+
+    if embed_spec_digest != detect_spec_digest:
+        return "mismatch", "trajectory_spec_digest_mismatch"
+    if embed_trajectory_digest != detect_trajectory_digest:
+        return "mismatch", "trajectory_digest_mismatch"
+    return "ok", None
+
+
+def _resolve_mismatch_failure_reason(primary_mismatch_reason: str) -> str:
+    """
+    功能：将 mismatch 原因映射为 content_failure_reason。
+
+    Map mismatch reason token to content_failure_reason enum.
+
+    Args:
+        primary_mismatch_reason: Primary mismatch reason token.
+
+    Returns:
+        content_failure_reason enum string.
+
+    Raises:
+        TypeError: If inputs are invalid.
+    """
+    if not isinstance(primary_mismatch_reason, str) or not primary_mismatch_reason:
+        # primary_mismatch_reason 类型不合法，必须 fail-fast。
+        raise TypeError("primary_mismatch_reason must be non-empty str")
+
+    reason_map = {
+        "plan_digest_mismatch": "detector_plan_mismatch",
+        "basis_digest_mismatch": "detector_plan_mismatch",
+        "planner_impl_identity_mismatch": "detector_plan_mismatch",
+        "trajectory_spec_digest_mismatch": "detector_plan_mismatch",
+        "trajectory_digest_mismatch": "detector_plan_mismatch",
+        "trajectory_evidence_invalid": "detector_plan_mismatch",
+    }
+    return reason_map.get(primary_mismatch_reason, "detector_plan_mismatch")
+
+
+def _build_absent_fusion_decision(
+    cfg: Dict[str, Any],
+    content_evidence_adapted: Dict[str, Any],
+    geometry_evidence_adapted: Dict[str, Any]
+) -> FusionDecision:
+    """
+    功能：构造 absent 的融合判决。
+
+    Build a FusionDecision for absent trajectory evidence.
+
+    Args:
+        cfg: Configuration mapping.
+        content_evidence_adapted: Adapted content evidence mapping.
+        geometry_evidence_adapted: Adapted geometry evidence mapping.
+
+    Returns:
+        FusionDecision with decision_status="abstain" and score-free evidence summary.
+
+    Raises:
+        TypeError: If inputs are invalid.
+    """
+    if not isinstance(cfg, dict):
+        # cfg 类型不合法，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+    if not isinstance(content_evidence_adapted, dict):
+        # content_evidence_adapted 类型不合法，必须 fail-fast。
+        raise TypeError("content_evidence_adapted must be dict")
+    if not isinstance(geometry_evidence_adapted, dict):
+        # geometry_evidence_adapted 类型不合法，必须 fail-fast。
+        raise TypeError("geometry_evidence_adapted must be dict")
+
+    thresholds_spec = neyman_pearson.build_thresholds_spec(cfg)
+    thresholds_digest = neyman_pearson.compute_thresholds_digest(thresholds_spec)
+
+    evidence_summary = {
+        "content_score": None,
+        "geometry_score": geometry_evidence_adapted.get("geo_score"),
+        "content_status": "absent",
+        "geometry_status": geometry_evidence_adapted.get("status", "absent"),
+        "fusion_rule_id": "detect_absent_guard_v1"
+    }
+    audit = {
+        "guard": "trajectory_absent_guard",
+        "reason": content_evidence_adapted.get("content_failure_reason", "detector_no_evidence")
+    }
+    return FusionDecision(
+        is_watermarked=None,
+        decision_status="abstain",
+        thresholds_digest=thresholds_digest,
+        evidence_summary=evidence_summary,
+        audit=audit
+    )
+
+
 def _resolve_primary_mismatch(mismatch_reasons: list[str]) -> tuple[str, str]:
     """
     功能：选择单一主 mismatch 原因并返回对应字段路径。
@@ -249,12 +448,18 @@ def _resolve_primary_mismatch(mismatch_reasons: list[str]) -> tuple[str, str]:
     reason_to_field_path = {
         "plan_digest_mismatch": "content_evidence.plan_digest",
         "basis_digest_mismatch": "content_evidence.basis_digest",
-        "planner_impl_identity_mismatch": "content_evidence.planner_impl_identity"
+        "planner_impl_identity_mismatch": "content_evidence.planner_impl_identity",
+        "trajectory_spec_digest_mismatch": "content_evidence.trajectory_evidence.trajectory_spec_digest",
+        "trajectory_digest_mismatch": "content_evidence.trajectory_evidence.trajectory_digest",
+        "trajectory_evidence_invalid": "content_evidence.trajectory_evidence"
     }
     for token in [
         "plan_digest_mismatch",
         "basis_digest_mismatch",
-        "planner_impl_identity_mismatch"
+        "planner_impl_identity_mismatch",
+        "trajectory_spec_digest_mismatch",
+        "trajectory_digest_mismatch",
+        "trajectory_evidence_invalid"
     ]:
         if token in mismatch_reasons:
             return token, reason_to_field_path[token]
@@ -302,7 +507,10 @@ def _build_mismatch_fusion_decision(
     )
 
 
-def _build_planner_inputs_for_runtime(cfg: Dict[str, Any]) -> Dict[str, Any]:
+def _build_planner_inputs_for_runtime(
+    cfg: Dict[str, Any],
+    trajectory_evidence: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     """
     功能：构造规划器输入签名。
 
@@ -310,19 +518,28 @@ def _build_planner_inputs_for_runtime(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
     Args:
         cfg: Configuration mapping.
+        trajectory_evidence: Optional trajectory tap evidence.
 
     Returns:
         Planner input mapping.
     """
+    if not isinstance(cfg, dict):
+        # cfg 类型不合法，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+    if trajectory_evidence is not None and not isinstance(trajectory_evidence, dict):
+        # trajectory_evidence 类型不合法，必须 fail-fast。
+        raise TypeError("trajectory_evidence must be dict or None")
+
     trace_signature = {
         "num_inference_steps": cfg.get("inference_num_steps", cfg.get("generation", {}).get("num_inference_steps", 16) if isinstance(cfg.get("generation"), dict) else 16),
         "guidance_scale": cfg.get("inference_guidance_scale", cfg.get("generation", {}).get("guidance_scale", 7.0) if isinstance(cfg.get("generation"), dict) else 7.0),
         "height": cfg.get("inference_height", cfg.get("model", {}).get("height", 512) if isinstance(cfg.get("model"), dict) else 512),
         "width": cfg.get("inference_width", cfg.get("model", {}).get("width", 512) if isinstance(cfg.get("model"), dict) else 512),
     }
-    return {
-        "trace_signature": trace_signature
-    }
+    inputs = {"trace_signature": trace_signature}
+    if trajectory_evidence is not None:
+        inputs["trajectory_evidence"] = trajectory_evidence
+    return inputs
 
 
 def run_calibrate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Dict[str, Any]:
@@ -470,7 +687,8 @@ def _adapt_content_evidence_for_fusion(content_evidence: Any) -> Dict[str, Any]:
     # 提取关键字段（来自 ContentEvidence 冻结结构）。
     for field_name in ["status", "score", "audit", "mask_digest", "mask_stats",
                        "plan_digest", "basis_digest", "lf_trace_digest", "hf_trace_digest",
-                       "lf_score", "hf_score", "score_parts", "content_failure_reason"]:
+                       "lf_score", "hf_score", "score_parts", "trajectory_evidence",
+                       "content_failure_reason"]:
         if hasattr(content_evidence, field_name):
             adapted[field_name] = getattr(content_evidence, field_name)
     

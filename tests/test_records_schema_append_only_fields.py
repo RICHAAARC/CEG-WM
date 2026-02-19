@@ -130,6 +130,7 @@ def test_records_schema_new_fields_type_mismatch_fails(mock_interpretation):
 
     record = _build_minimal_valid_record(schema, mock_interpretation)
     _set_value_by_field_path(record, "content_evidence.mask_digest", 123)
+    _set_value_by_field_path(record, "content_evidence.trajectory_evidence", ["not", "a", "dict"])
 
     with pytest.raises(TypeError) as exc_info:
         schema.validate_record(record, interpretation=mock_interpretation)
@@ -159,6 +160,15 @@ def test_records_schema_new_fields_valid_types_pass(mock_interpretation):
     _set_value_by_field_path(record, "content_evidence.mask_digest", "a" * 64)
     _set_value_by_field_path(record, "content_evidence.mask_stats", {"area_ratio": 0.1})
     _set_value_by_field_path(record, "content_evidence.lf_score", 0.12)
+    _set_value_by_field_path(record, "content_evidence.trajectory_evidence", {"status": "ok"})
+    _set_value_by_field_path(record, "content_evidence.trajectory_evidence.status", "ok")
+    _set_value_by_field_path(record, "content_evidence.trajectory_evidence.trajectory_spec", {"sample_count": 4})
+    _set_value_by_field_path(record, "content_evidence.trajectory_evidence.trajectory_spec_digest", "c" * 64)
+    _set_value_by_field_path(record, "content_evidence.trajectory_evidence.trajectory_digest", "d" * 64)
+    _set_value_by_field_path(record, "content_evidence.trajectory_evidence.trajectory_stats", {"shape": [1, 2]})
+    _set_value_by_field_path(record, "content_evidence.trajectory_evidence.trajectory_absent_reason", "tap_disabled")
+    _set_value_by_field_path(record, "content_evidence.trajectory_evidence.trajectory_tap_version", "v1")
+    _set_value_by_field_path(record, "content_evidence.trajectory_evidence.device", "cpu")
     _set_value_by_field_path(record, "geometry_evidence.anchor_metrics", {"stability": 0.9})
     _set_value_by_field_path(record, "decision.routing_decisions", {"content": "enabled"})
     _set_value_by_field_path(record, "decision.routing_digest", "b" * 64)

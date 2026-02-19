@@ -209,13 +209,15 @@ def run_detect(
         inference_status = inference_result.get("inference_status")
         inference_error = inference_result.get("inference_error")
         inference_runtime_meta = inference_result.get("inference_runtime_meta")
+        trajectory_evidence = inference_result.get("trajectory_evidence")
         
         # 构造 infer_trace 并计算 digest
         infer_trace_obj = infer_trace.build_infer_trace(
             cfg,
             inference_status,
             inference_error,
-            inference_runtime_meta
+            inference_runtime_meta,
+            trajectory_evidence
         )
         infer_trace_canon_sha256 = infer_trace.compute_infer_trace_canon_sha256(infer_trace_obj)
         
@@ -225,6 +227,7 @@ def run_detect(
         run_meta["inference_status"] = inference_status
         run_meta["inference_error"] = inference_error
         run_meta["inference_runtime_meta"] = inference_runtime_meta
+        run_meta["trajectory_evidence"] = trajectory_evidence
 
         allow_nonempty_run_root = cfg.get("allow_nonempty_run_root", False)
         allow_nonempty_run_root_reason = cfg.get("allow_nonempty_run_root_reason")
@@ -301,7 +304,13 @@ def run_detect(
 
             # 构造 detect record，本阶段为 placeholder。
             print("[Detect] Generating detect record (placeholder)...")
-            record = run_detect_orchestrator(cfg, impl_set, input_record, cfg_digest=cfg_digest)
+            record = run_detect_orchestrator(
+                cfg,
+                impl_set,
+                input_record,
+                cfg_digest=cfg_digest,
+                trajectory_evidence=trajectory_evidence
+            )
             if record is None:
                 exc = RuntimeError("record_construction_failed: record is None")
                 set_failure_status(run_meta, RunFailureReason.RUNTIME_ERROR, exc)

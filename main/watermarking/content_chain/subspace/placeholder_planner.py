@@ -222,7 +222,8 @@ class SubspacePlannerImpl:
                 basis_summary=basis_summary,
                 basis_digest=basis_digest,
                 feature_source_tag=feature_source_tag,
-                normalization_tag=normalization_tag
+                normalization_tag=normalization_tag,
+                inputs=inputs
             )
             plan_digest = self._derive_plan_digest(plan_payload)
             
@@ -491,7 +492,8 @@ class SubspacePlannerImpl:
         basis_summary: Dict[str, Any],
         basis_digest: str,
         feature_source_tag: Optional[str] = None,
-        normalization_tag: Optional[str] = None
+        normalization_tag: Optional[str] = None,
+        inputs: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         功能：构造 plan_digest 输入域（扩展可验证框架）。
@@ -508,6 +510,7 @@ class SubspacePlannerImpl:
             basis_digest: Basis digest string.
             feature_source_tag: Feature source identifier (trajectory/trace_signature/etc).
             normalization_tag: Normalization strategy tag (centering/variance_scaling/etc).
+            inputs: Optional planner inputs for input digest binding.
 
         Returns:
             Canonical payload mapping for digest that binds feature domain with verifiable anchors.
@@ -528,6 +531,9 @@ class SubspacePlannerImpl:
         )
         mask_spec_digest = digests.canonical_sha256(mask_spec)
         
+        planner_input_digest = self._build_planner_input_digest(inputs)
+        trajectory_evidence_anchor = self._extract_trajectory_evidence_anchor(inputs)
+
         # 构造注入参数承载
         injection_config_payload = self._build_injection_config_payload(
             edit_timestep=planner_params.edit_timestep,
@@ -561,6 +567,8 @@ class SubspacePlannerImpl:
                 "sample_count": planner_params.sample_count,
                 "timesteps_digest": samples_anchor.get("timesteps_digest", "")
             },
+            "planner_input_digest": planner_input_digest,
+            "trajectory_evidence_anchor": trajectory_evidence_anchor,
             # Jacobian 探针规格
             "probe_spec": {
                 "probe_seed": planner_params.seed,
@@ -601,6 +609,7 @@ class SubspacePlannerImpl:
             "mask_digest": mask_digest,
             "mask_spec_digest": mask_spec_digest,
             "cfg_digest": cfg_digest,
+            "planner_input_digest": planner_input_digest,
             "planner_method": "trajectory_jacobian_nullspace_svd",
             "planner_impl_identity": {
                 "impl_id": self.impl_id,
@@ -1286,6 +1295,80 @@ class SubspacePlannerImpl:
             "cfg_digest": cfg_digest,
             "input_keys": input_keys,
             "policy_path": cfg.get("policy_path", "<absent>")
+        }
+
+    def _build_planner_input_digest(self, inputs: Optional[Dict[str, Any]]) -> str:
+        """
+        功能：构造 planner 输入摘要。
+
+        Build canonical planner input digest from trace_signature and trajectory evidence.
+
+        Args:
+            inputs: Optional planner inputs mapping.
+
+        Returns:
+            Canonical SHA256 digest string.
+
+        Raises:
+            TypeError: If inputs are invalid.
+        """
+        if inputs is not None and not isinstance(inputs, dict):
+            # inputs 类型不符合预期，必须 fail-fast。
+            raise TypeError("inputs must be dict or None")
+
+        trace_signature = None
+        if isinstance(inputs, dict):
+            trace_signature = inputs.get("trace_signature")
+
+        trajectory_anchor = self._extract_trajectory_evidence_anchor(inputs)
+
+        payload = {
+            "planner_input_version": "v1",
+            "trace_signature": trace_signature if isinstance(trace_signature, dict) else None,
+            "trajectory_evidence_anchor": trajectory_anchor
+        }
+        return digests.canonical_sha256(payload)
+
+    def _extract_trajectory_evidence_anchor(self, inputs: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        功能：提取 trajectory_evidence 的摘要锚点。
+
+        Extract compact anchor from trajectory evidence for digest binding.
+
+        Args:
+            inputs: Optional planner inputs mapping.
+
+        Returns:
+            Anchor mapping with status and digest fields.
+
+        Raises:
+            TypeError: If inputs are invalid.
+        """
+        if inputs is not None and not isinstance(inputs, dict):
+            # inputs 类型不符合预期，必须 fail-fast。
+            raise TypeError("inputs must be dict or None")
+
+        trajectory_evidence = None
+        if isinstance(inputs, dict):
+            trajectory_evidence = inputs.get("trajectory_evidence")
+
+        if trajectory_evidence is None:
+            return {
+                "status": "absent",
+                "trajectory_spec_digest": "<absent>",
+                "trajectory_digest": "<absent>",
+                "trajectory_tap_version": "<absent>"
+            }
+
+        if not isinstance(trajectory_evidence, dict):
+            # trajectory_evidence 类型不符合预期，必须 fail-fast。
+            raise TypeError("trajectory_evidence must be dict or None")
+
+        return {
+            "status": trajectory_evidence.get("status", "<absent>"),
+            "trajectory_spec_digest": trajectory_evidence.get("trajectory_spec_digest", "<absent>"),
+            "trajectory_digest": trajectory_evidence.get("trajectory_digest", "<absent>"),
+            "trajectory_tap_version": trajectory_evidence.get("trajectory_tap_version", "<absent>")
         }
 
     def _to_numpy_2d(self, value: Any) -> np.ndarray:
@@ -2022,6 +2105,33 @@ def verify_verifiable_input_domain(
         if closure_jvp_source != planner_jvp_source:
             mismatch_reasons.append(
                 f"jvp_source mismatch: closure={closure_jvp_source} vs planner={planner_jvp_source}"
+            )
+
+    # 6. 校验 planner_input_digest
+    closure_planner_input_digest = run_closure_anchors.get("planner_input_digest")
+    planner_input_digest = verifiable_spec.get("planner_input_digest")
+    if closure_planner_input_digest and planner_input_digest:
+        if closure_planner_input_digest != planner_input_digest:
+            mismatch_reasons.append(
+                "planner_input_digest mismatch: closure vs planner"
+            )
+
+    # 7. 校验 trajectory evidence 摘要
+    closure_trajectory_spec_digest = run_closure_anchors.get("trajectory_spec_digest")
+    closure_trajectory_digest = run_closure_anchors.get("trajectory_digest")
+    trajectory_anchor = verifiable_spec.get("trajectory_evidence_anchor", {})
+    planner_trajectory_spec_digest = trajectory_anchor.get("trajectory_spec_digest")
+    planner_trajectory_digest = trajectory_anchor.get("trajectory_digest")
+
+    if closure_trajectory_spec_digest and planner_trajectory_spec_digest:
+        if closure_trajectory_spec_digest != planner_trajectory_spec_digest:
+            mismatch_reasons.append(
+                "trajectory_spec_digest mismatch: closure vs planner"
+            )
+    if closure_trajectory_digest and planner_trajectory_digest:
+        if closure_trajectory_digest != planner_trajectory_digest:
+            mismatch_reasons.append(
+                "trajectory_digest mismatch: closure vs planner"
             )
 
     # 返回结果
