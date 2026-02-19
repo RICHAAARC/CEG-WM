@@ -66,6 +66,8 @@ class ContentEvidence:
     hf_score: Optional[float] = None
     score_parts: Optional[Dict[str, Any]] = None
     trajectory_evidence: Optional[Dict[str, Any]] = None
+    lf_statistics_digest: Optional[str] = None
+    hf_statistics_digest: Optional[str] = None
     content_failure_reason: Optional[str] = None
     
     def __post_init__(self) -> None:
@@ -137,6 +139,8 @@ class ContentEvidence:
         _validate_optional_number(self.hf_score, "hf_score")
         _validate_optional_mapping(self.score_parts, "score_parts")
         _validate_optional_mapping(self.trajectory_evidence, "trajectory_evidence")
+        _validate_optional_str(self.lf_statistics_digest, "lf_statistics_digest")
+        _validate_optional_str(self.hf_statistics_digest, "hf_statistics_digest")
         _validate_optional_str(self.content_failure_reason, "content_failure_reason")
 
     def as_dict(self) -> Dict[str, Any]:
@@ -168,6 +172,8 @@ class ContentEvidence:
             "hf_score": self.hf_score,
             "score_parts": self.score_parts,
             "trajectory_evidence": self.trajectory_evidence,
+            "lf_statistics_digest": self.lf_statistics_digest,
+            "hf_statistics_digest": self.hf_statistics_digest,
             "content_failure_reason": self.content_failure_reason
         }
         _validate_json_like(result, "content_evidence")

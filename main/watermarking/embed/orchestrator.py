@@ -295,6 +295,7 @@ def _merge_injection_evidence(content_evidence_payload: Dict[str, Any], injectio
     content_evidence_payload["injection_trace_digest"] = injection_evidence.get("injection_trace_digest")
     content_evidence_payload["injection_params_digest"] = injection_evidence.get("injection_params_digest")
     content_evidence_payload["injection_metrics"] = injection_evidence.get("injection_metrics")
+    content_evidence_payload["subspace_binding_digest"] = injection_evidence.get("subspace_binding_digest")
 
 
 def _inject_trajectory_audit_fields(

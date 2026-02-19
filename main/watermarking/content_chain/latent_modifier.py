@@ -86,17 +86,25 @@ class LatentModifier:
         if plan is not None and not isinstance(plan, dict):
             raise TypeError("plan must be dict or None")
         
-        # 支持 torch.Tensor 转换为 np 数组。
-        is_torch_input = hasattr(latents, "cpu")
+        is_torch_input = False
+        try:
+            import torch
+            is_torch_input = torch.is_tensor(latents)
+        except Exception:
+            is_torch_input = False
+
         if is_torch_input:
-            latents_np = latents.cpu().numpy().copy()
-        else:
-            latents_np = np.asarray(latents, dtype=np.float32).copy()
-        
+            return self._apply_latent_update_torch(
+                latents=latents,
+                plan=plan,
+                cfg=cfg,
+                step_index=step_index,
+                key=key
+            )
+
+        latents_np = np.asarray(latents, dtype=np.float32).copy()
         original_shape = latents_np.shape
         latents_working = latents_np.copy()
-        
-        # 记录初始状态。
         latents_before_modifications = latents_working.copy()
         
         # 提取基础参数。
@@ -228,6 +236,15 @@ class LatentModifier:
                 }
             
             step_evidence["hf_evidence"] = hf_evidence
+
+            if (
+                isinstance(lf_evidence, dict)
+                and isinstance(hf_evidence, dict)
+                and lf_evidence.get("status") == "absent"
+                and hf_evidence.get("status") == "absent"
+                and step_evidence.get("combined_status") == "ok"
+            ):
+                step_evidence["combined_status"] = "absent"
             
             # 记录修改后的状态。
             step_evidence["latents_before_norm"] = float(np.linalg.norm(latents_before_modifications))
@@ -240,11 +257,207 @@ class LatentModifier:
             step_evidence["combined_status"] = "failed"
             step_evidence["overall_error"] = str(e)
         
-        # 恢复为原始类型（torch 或 numpy）。
-        if is_torch_input:
-            import torch
-            latents_modified = torch.from_numpy(latents_working.astype(np.float32))
-        else:
-            latents_modified = latents_working.astype(np.float32)
-        
+        latents_modified = latents_working.astype(np.float32)
+        return latents_modified, step_evidence
+
+    def _apply_latent_update_torch(
+        self,
+        latents: Any,
+        plan: Optional[Dict[str, Any]],
+        cfg: Dict[str, Any],
+        step_index: Optional[int],
+        key: Optional[int]
+    ) -> Tuple[Any, Dict[str, Any]]:
+        """
+        功能：在 torch 张量上执行真实注入更新。
+
+        Apply LF/HF updates directly on torch latents while preserving
+        device and dtype.
+
+        Args:
+            latents: Torch tensor latents.
+            plan: Subspace plan with LF/HF basis.
+            cfg: Injection config mapping.
+            step_index: Current diffusion step index.
+            key: Optional encoding seed.
+
+        Returns:
+            Tuple of (latents_modified, step_evidence).
+
+        Raises:
+            TypeError: If torch is unavailable or inputs are invalid.
+        """
+        import torch
+
+        if not torch.is_tensor(latents):
+            raise TypeError("latents must be torch.Tensor")
+
+        original_shape = tuple(latents.shape)
+        original_device = latents.device
+        original_dtype = latents.dtype
+        latents_working = latents
+        latents_before_modifications = latents.detach().clone()
+
+        lf_enabled = cfg.get("lf_enabled", True)
+        hf_enabled = cfg.get("hf_enabled", True)
+
+        if key is None:
+            seed_base = cfg.get("watermark_seed", 42)
+            key = seed_base + int(step_index) if isinstance(step_index, int) else seed_base
+
+        runtime_binding = None
+        if isinstance(plan, dict):
+            runtime_binding = plan.get("runtime_subspace_binding")
+        runtime_binding_digest = None
+        if isinstance(runtime_binding, dict):
+            digest_value = runtime_binding.get("binding_digest")
+            if isinstance(digest_value, str) and digest_value:
+                runtime_binding_digest = digest_value
+
+        step_evidence = {
+            "step_index": step_index if step_index is not None else -1,
+            "latents_shape": list(original_shape),
+            "lf_evidence": None,
+            "hf_evidence": None,
+            "combined_status": "ok",
+            "runtime_subspace_binding_digest": runtime_binding_digest,
+            "latents_device": str(original_device),
+            "latents_dtype": str(original_dtype),
+        }
+
+        try:
+            lf_delta_norm = 0.0
+            hf_delta_norm = 0.0
+
+            if lf_enabled and isinstance(plan, dict):
+                try:
+                    basis_lf = plan.get("lf_basis")
+                    if basis_lf is None:
+                        lf_evidence = {
+                            "status": "absent",
+                            "absent_reason": "lf_basis_missing_in_plan",
+                            "encoded_coeffs": None
+                        }
+                    else:
+                        lf_coeffs = channel_lf.compute_lf_basis_projection_torch(latents_working, basis_lf)
+                        lf_coeffs_encoded, encoding_evidence = channel_lf.apply_low_freq_encoding_torch(
+                            lf_coeffs,
+                            int(key),
+                            cfg
+                        )
+                        latents_lf_modified = channel_lf.reconstruct_from_lf_coeffs_torch(
+                            lf_coeffs_encoded,
+                            basis_lf,
+                            original_shape,
+                            dtype=original_dtype
+                        )
+                        latents_lf_original = channel_lf.reconstruct_from_lf_coeffs_torch(
+                            lf_coeffs,
+                            basis_lf,
+                            original_shape,
+                            dtype=original_dtype
+                        )
+                        latents_lf_delta = latents_lf_modified - latents_lf_original
+                        latents_working = latents_working + latents_lf_delta
+                        lf_delta_norm = float(torch.linalg.vector_norm(latents_lf_delta.to(dtype=torch.float32)).item())
+
+                        lf_evidence = {
+                            "status": "ok",
+                            "coeffs_norm": float(torch.linalg.vector_norm(lf_coeffs).item()),
+                            "encoded_coeffs_norm": float(torch.linalg.vector_norm(lf_coeffs_encoded).item()),
+                            "lf_delta_norm": lf_delta_norm,
+                            "encoding_evidence": encoding_evidence
+                        }
+                except Exception as e:
+                    lf_evidence = {
+                        "status": "failed",
+                        "failure_reason": f"lf_encoding_error: {type(e).__name__}",
+                        "error_detail": str(e)
+                    }
+                    step_evidence["combined_status"] = "failed"
+            else:
+                lf_evidence = {
+                    "status": "absent",
+                    "absent_reason": "lf_disabled_by_config" if not lf_enabled else "lf_plan_missing"
+                }
+            step_evidence["lf_evidence"] = lf_evidence
+
+            if hf_enabled and isinstance(plan, dict):
+                try:
+                    basis_hf = plan.get("hf_basis")
+                    if basis_hf is None:
+                        hf_evidence = {
+                            "status": "absent",
+                            "absent_reason": "hf_basis_missing_in_plan"
+                        }
+                    else:
+                        hf_coeffs = channel_hf.compute_hf_basis_projection_torch(latents_working, basis_hf)
+                        hf_coeffs_constrained, constraint_evidence = channel_hf.apply_hf_truncation_constraint_torch(
+                            hf_coeffs,
+                            cfg
+                        )
+                        latents_hf_modified = channel_hf.reconstruct_from_hf_coeffs_torch(
+                            hf_coeffs_constrained,
+                            basis_hf,
+                            original_shape,
+                            dtype=original_dtype
+                        )
+                        latents_hf_original = channel_hf.reconstruct_from_hf_coeffs_torch(
+                            hf_coeffs,
+                            basis_hf,
+                            original_shape,
+                            dtype=original_dtype
+                        )
+                        latents_hf_delta = latents_hf_modified - latents_hf_original
+                        latents_working = latents_working + latents_hf_delta
+                        hf_delta_norm = float(torch.linalg.vector_norm(latents_hf_delta.to(dtype=torch.float32)).item())
+
+                        hf_evidence = {
+                            "status": "ok",
+                            "coeffs_norm": float(torch.linalg.vector_norm(hf_coeffs).item()),
+                            "constrained_coeffs_norm": float(torch.linalg.vector_norm(hf_coeffs_constrained).item()),
+                            "hf_delta_norm": hf_delta_norm,
+                            "constraint_evidence": constraint_evidence
+                        }
+                except Exception as e:
+                    hf_evidence = {
+                        "status": "failed",
+                        "failure_reason": f"hf_constraint_error: {type(e).__name__}",
+                        "error_detail": str(e)
+                    }
+                    if step_evidence["combined_status"] == "ok":
+                        step_evidence["combined_status"] = "failed"
+            else:
+                hf_evidence = {
+                    "status": "absent",
+                    "absent_reason": "hf_disabled_by_config" if not hf_enabled else "hf_plan_missing"
+                }
+            step_evidence["hf_evidence"] = hf_evidence
+
+            if (
+                isinstance(lf_evidence, dict)
+                and isinstance(hf_evidence, dict)
+                and lf_evidence.get("status") == "absent"
+                and hf_evidence.get("status") == "absent"
+                and step_evidence.get("combined_status") == "ok"
+            ):
+                step_evidence["combined_status"] = "absent"
+
+            latents_before_norm = float(
+                torch.linalg.vector_norm(latents_before_modifications.to(dtype=torch.float32)).item()
+            )
+            latents_after_norm = float(torch.linalg.vector_norm(latents_working.to(dtype=torch.float32)).item())
+            modification_delta_norm = float(
+                torch.linalg.vector_norm((latents_working - latents_before_modifications).to(dtype=torch.float32)).item()
+            )
+            step_evidence["latents_before_norm"] = latents_before_norm
+            step_evidence["latents_after_norm"] = latents_after_norm
+            step_evidence["modification_delta_norm"] = modification_delta_norm
+            step_evidence["lf_delta_norm"] = lf_delta_norm
+            step_evidence["hf_delta_norm"] = hf_delta_norm
+        except Exception as e:
+            step_evidence["combined_status"] = "failed"
+            step_evidence["overall_error"] = str(e)
+
+        latents_modified = latents_working.to(device=original_device, dtype=original_dtype)
         return latents_modified, step_evidence

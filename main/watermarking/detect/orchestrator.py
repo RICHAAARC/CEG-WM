@@ -258,6 +258,9 @@ def run_detect_orchestrator(
                 "plan_digest": detect_time_plan_digest,
                 "lf_evidence": lf_evidence,
                 "hf_evidence": hf_evidence,
+                "trajectory_evidence": trajectory_evidence,
+                "injection_evidence": injection_evidence,
+                "plan_payload": plan_payload,
             }
             content_result = impl_set.content_extractor.extract(
                 cfg,
@@ -452,6 +455,7 @@ def _merge_injection_evidence(content_evidence_payload: Dict[str, Any], injectio
     content_evidence_payload["injection_trace_digest"] = injection_evidence.get("injection_trace_digest")
     content_evidence_payload["injection_params_digest"] = injection_evidence.get("injection_params_digest")
     content_evidence_payload["injection_metrics"] = injection_evidence.get("injection_metrics")
+    content_evidence_payload["subspace_binding_digest"] = injection_evidence.get("subspace_binding_digest")
 
 
 def _evaluate_injection_consistency(
@@ -503,6 +507,8 @@ def _evaluate_injection_consistency(
     detect_trace_digest = injection_evidence.get("injection_trace_digest")
     embed_params_digest = embed_injection.get("injection_params_digest")
     detect_params_digest = injection_evidence.get("injection_params_digest")
+    embed_binding_digest = embed_injection.get("subspace_binding_digest")
+    detect_binding_digest = injection_evidence.get("subspace_binding_digest")
 
     if not isinstance(embed_trace_digest, str) or not isinstance(detect_trace_digest, str):
         return "mismatch", "injection_trace_digest_invalid"
@@ -512,6 +518,9 @@ def _evaluate_injection_consistency(
         return "mismatch", "injection_trace_digest_mismatch"
     if embed_params_digest != detect_params_digest:
         return "mismatch", "injection_params_digest_mismatch"
+    if isinstance(embed_binding_digest, str) and embed_binding_digest:
+        if not isinstance(detect_binding_digest, str) or detect_binding_digest != embed_binding_digest:
+            return "mismatch", "injection_subspace_binding_digest_mismatch"
     return "ok", None
 
 
@@ -856,6 +865,7 @@ def _resolve_mismatch_failure_reason(primary_mismatch_reason: str) -> str:
         "injection_trace_digest_invalid": "detector_plan_mismatch",
         "injection_params_digest_invalid": "detector_plan_mismatch",
         "injection_status_mismatch": "detector_plan_mismatch",
+        "injection_subspace_binding_digest_mismatch": "detector_plan_mismatch",
     }
     return reason_map.get(primary_mismatch_reason, "detector_plan_mismatch")
 
@@ -937,7 +947,8 @@ def _resolve_primary_mismatch(mismatch_reasons: list[str]) -> tuple[str, str]:
         "injection_params_digest_mismatch": "content_evidence.injection_params_digest",
         "injection_trace_digest_invalid": "content_evidence.injection_trace_digest",
         "injection_params_digest_invalid": "content_evidence.injection_params_digest",
-        "injection_status_mismatch": "content_evidence.injection_status"
+        "injection_status_mismatch": "content_evidence.injection_status",
+        "injection_subspace_binding_digest_mismatch": "content_evidence.subspace_binding_digest"
     }
     for token in [
         "plan_digest_mismatch",
@@ -950,7 +961,8 @@ def _resolve_primary_mismatch(mismatch_reasons: list[str]) -> tuple[str, str]:
         "injection_params_digest_mismatch",
         "injection_trace_digest_invalid",
         "injection_params_digest_invalid",
-        "injection_status_mismatch"
+        "injection_status_mismatch",
+        "injection_subspace_binding_digest_mismatch"
     ]:
         if token in mismatch_reasons:
             return token, reason_to_field_path[token]

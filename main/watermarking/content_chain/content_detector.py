@@ -107,6 +107,7 @@ class ContentDetector:
                 content_failure_reason=None,
                 score_parts={
                     "content_score_rule_version": CONTENT_SCORE_RULE_VERSION,
+                    "content_score_rule_id": "lf_only_when_hf_absent_v1",
                     "hf_status": "absent",
                     "hf_absent_reason": "hf_disabled_by_config",
                     "hf_score": "<absent>",
@@ -155,6 +156,17 @@ class ContentDetector:
             default_score=normalized_inputs.get("lf_score"),
             channel_name="lf"
         )
+        lf_statistics = extract_low_freq_statistics(normalized_inputs)
+        lf_statistics_digest = lf_statistics.get("statistics_digest") if isinstance(lf_statistics, dict) else None
+        if lf_score is None and isinstance(lf_statistics, dict) and lf_statistics.get("status") == "ok":
+            lf_score = compute_lf_score(
+                lf_statistics=lf_statistics,
+                injection_evidence=normalized_inputs.get("injection_evidence"),
+                lf_evidence=normalized_inputs.get("lf_evidence")
+            )
+            lf_status = "ok"
+            lf_failure_reason = None
+
         hf_enabled = bool(cfg.get("watermark", {}).get("hf", {}).get("enabled", False))
         if hf_enabled:
             hf_status, hf_score, hf_failure_reason = _extract_channel(
@@ -163,8 +175,19 @@ class ContentDetector:
                 default_score=normalized_inputs.get("hf_score"),
                 channel_name="hf"
             )
+            hf_statistics = extract_high_freq_statistics(normalized_inputs)
+            hf_statistics_digest = hf_statistics.get("statistics_digest") if isinstance(hf_statistics, dict) else None
+            if hf_score is None and isinstance(hf_statistics, dict) and hf_statistics.get("status") == "ok":
+                hf_score = compute_hf_score(
+                    hf_statistics=hf_statistics,
+                    injection_evidence=normalized_inputs.get("injection_evidence"),
+                    hf_evidence=normalized_inputs.get("hf_evidence")
+                )
+                hf_status = "ok"
+                hf_failure_reason = None
         else:
             hf_status, hf_score, hf_failure_reason = "absent", None, "hf_disabled_by_config"
+            hf_statistics_digest = None
 
         try:
             _validate_non_negative_score(lf_score, "lf_score")
@@ -271,6 +294,8 @@ class ContentDetector:
             hf_score=hf_score,
             cfg_digest=cfg_digest,
             detection_result=detection_result_typed,
+            lf_statistics_digest=lf_statistics_digest,
+            hf_statistics_digest=hf_statistics_digest,
         )
 
     def _compose_content_score(
@@ -288,6 +313,7 @@ class ContentDetector:
             score_parts: Dict[str, Any] = {
                 "content_score_rule_version": CONTENT_SCORE_RULE_VERSION,
                 "rule_id": "lf_only_when_hf_absent_v1",
+                "content_score_rule_id": "lf_only_when_hf_absent_v1",
                 "lf_score": lf_score,
                 "hf_score": "<absent>",
                 "hf_status": "absent",
@@ -299,6 +325,7 @@ class ContentDetector:
             score_parts: Dict[str, Any] = {
                 "content_score_rule_version": CONTENT_SCORE_RULE_VERSION,
                 "rule_id": "lf_only_default_v1",
+                "content_score_rule_id": "lf_only_default_v1",
                 "lf_score": lf_score,
                 "hf_score": "<absent>",
                 "hf_status": "absent",
@@ -312,6 +339,7 @@ class ContentDetector:
         score_parts: Dict[str, Any] = {
             "content_score_rule_version": CONTENT_SCORE_RULE_VERSION,
             "rule_id": "lf_hf_weighted_sum_v1",
+            "content_score_rule_id": "lf_hf_weighted_sum_v1",
             "lf_score": lf_score,
             "hf_score": hf_score,
             "weights": {
@@ -334,6 +362,8 @@ class ContentDetector:
         hf_score: Optional[float],
         cfg_digest: Optional[str],
         detection_result: Optional[Dict[str, Any]],
+        lf_statistics_digest: Optional[str] = None,
+        hf_statistics_digest: Optional[str] = None,
     ) -> ContentEvidence:
         trace_payload = _build_detector_trace_payload(
             cfg=cfg,
@@ -363,6 +393,8 @@ class ContentDetector:
                 lf_score=None,
                 hf_score=None,
                 content_failure_reason=content_failure_reason,
+                lf_statistics_digest=lf_statistics_digest,
+                hf_statistics_digest=hf_statistics_digest,
             )
 
         return ContentEvidence(
@@ -374,6 +406,8 @@ class ContentDetector:
             lf_score=lf_score,
             hf_score=hf_score,
             content_failure_reason=None,
+            lf_statistics_digest=lf_statistics_digest,
+            hf_statistics_digest=hf_statistics_digest,
         )
 
 
@@ -430,6 +464,183 @@ def _extract_channel(
         status_literal = cast(DETECTOR_STATUS, status)
     failure_reason_text = failure_reason if isinstance(failure_reason, str) else None
     return status_literal, _safe_float(score), failure_reason_text
+
+
+def extract_low_freq_statistics(inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：提取 LF 同构统计摘要。
+
+    Extract deterministic LF statistics from trajectory evidence.
+
+    Args:
+        inputs: Detector inputs mapping.
+
+    Returns:
+        LF statistics mapping with status and digest.
+    """
+    return _extract_statistics_from_trajectory(inputs, channel="lf")
+
+
+def extract_high_freq_statistics(inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：提取 HF 同构统计摘要。
+
+    Extract deterministic HF statistics from trajectory evidence.
+
+    Args:
+        inputs: Detector inputs mapping.
+
+    Returns:
+        HF statistics mapping with status and digest.
+    """
+    return _extract_statistics_from_trajectory(inputs, channel="hf")
+
+
+def compute_lf_score(
+    lf_statistics: Dict[str, Any],
+    injection_evidence: Any,
+    lf_evidence: Any
+) -> float:
+    """
+    功能：根据 LF 统计计算分数（越大表示证据更强）。
+
+    Compute LF score from deterministic statistics.
+
+    Args:
+        lf_statistics: LF statistics mapping.
+        injection_evidence: Injection evidence mapping.
+        lf_evidence: Embed LF evidence mapping.
+
+    Returns:
+        Non-negative LF score.
+    """
+    if not isinstance(lf_statistics, dict):
+        raise TypeError("lf_statistics must be dict")
+
+    mean_std = _safe_float(lf_statistics.get("mean_std")) or 0.0
+    mean_abs = _safe_float(lf_statistics.get("mean_abs")) or 0.0
+    expected_delta = _extract_expected_delta(injection_evidence, "lf_delta_norm_mean")
+    embed_hint = _extract_embed_hint(lf_evidence, "lf_score")
+
+    observed = mean_std + mean_abs
+    alignment = 1.0 / (1.0 + abs(observed - expected_delta))
+    boost = 1.0 + max(0.0, embed_hint)
+    return float(round(max(0.0, observed * alignment * boost), 8))
+
+
+def compute_hf_score(
+    hf_statistics: Dict[str, Any],
+    injection_evidence: Any,
+    hf_evidence: Any
+) -> float:
+    """
+    功能：根据 HF 统计计算分数（越大表示证据更强）。
+
+    Compute HF score from deterministic statistics.
+
+    Args:
+        hf_statistics: HF statistics mapping.
+        injection_evidence: Injection evidence mapping.
+        hf_evidence: Embed HF evidence mapping.
+
+    Returns:
+        Non-negative HF score.
+    """
+    if not isinstance(hf_statistics, dict):
+        raise TypeError("hf_statistics must be dict")
+
+    mean_l2 = _safe_float(hf_statistics.get("mean_l2")) or 0.0
+    std_l2 = _safe_float(hf_statistics.get("std_l2")) or 0.0
+    expected_delta = _extract_expected_delta(injection_evidence, "hf_delta_norm_mean")
+    embed_hint = _extract_embed_hint(hf_evidence, "hf_score")
+
+    observed = mean_l2 + std_l2
+    alignment = 1.0 / (1.0 + abs(observed - expected_delta))
+    boost = 1.0 + max(0.0, embed_hint)
+    return float(round(max(0.0, observed * alignment * boost), 8))
+
+
+def _extract_statistics_from_trajectory(inputs: Dict[str, Any], channel: str) -> Dict[str, Any]:
+    if not isinstance(inputs, dict):
+        return {"status": "absent", "reason": "invalid_inputs", "statistics_digest": None}
+    if channel not in {"lf", "hf"}:
+        raise ValueError("channel must be 'lf' or 'hf'")
+
+    trajectory = inputs.get("trajectory_evidence")
+    if not isinstance(trajectory, dict):
+        return {"status": "absent", "reason": "trajectory_missing", "statistics_digest": None}
+    if trajectory.get("status") != "ok":
+        return {"status": "absent", "reason": "trajectory_not_ok", "statistics_digest": None}
+
+    trajectory_metrics = trajectory.get("trajectory_metrics")
+    if not isinstance(trajectory_metrics, dict):
+        trajectory_metrics = trajectory.get("trajectory_stats")
+    if not isinstance(trajectory_metrics, dict):
+        return {"status": "absent", "reason": "trajectory_metrics_missing", "statistics_digest": None}
+
+    steps = trajectory_metrics.get("steps")
+    if not isinstance(steps, list) or len(steps) == 0:
+        return {"status": "absent", "reason": "trajectory_steps_missing", "statistics_digest": None}
+
+    mean_values = []
+    std_values = []
+    l2_values = []
+    for item in steps:
+        if not isinstance(item, dict):
+            continue
+        stats = item.get("stats")
+        if not isinstance(stats, dict):
+            continue
+        mean_val = _safe_float(stats.get("mean"))
+        std_val = _safe_float(stats.get("std"))
+        l2_val = _safe_float(stats.get("l2_norm"))
+        if mean_val is not None:
+            mean_values.append(abs(mean_val))
+        if std_val is not None:
+            std_values.append(std_val)
+        if l2_val is not None:
+            l2_values.append(l2_val)
+
+    if len(std_values) == 0 or len(l2_values) == 0:
+        return {"status": "absent", "reason": "trajectory_stats_invalid", "statistics_digest": None}
+
+    mean_abs = float(sum(mean_values) / len(mean_values)) if mean_values else 0.0
+    mean_std = float(sum(std_values) / len(std_values))
+    mean_l2 = float(sum(l2_values) / len(l2_values))
+    std_l2 = 0.0
+    if len(l2_values) > 1:
+        center = mean_l2
+        std_l2 = float((sum((value - center) * (value - center) for value in l2_values) / len(l2_values)) ** 0.5)
+
+    payload = {
+        "channel": channel,
+        "step_count": len(l2_values),
+        "mean_abs": round(mean_abs, 8),
+        "mean_std": round(mean_std, 8),
+        "mean_l2": round(mean_l2, 8),
+        "std_l2": round(std_l2, 8),
+    }
+    payload["statistics_digest"] = digests.canonical_sha256(payload)
+    payload["status"] = "ok"
+    payload["reason"] = None
+    return payload
+
+
+def _extract_expected_delta(injection_evidence: Any, key_name: str) -> float:
+    if not isinstance(injection_evidence, dict):
+        return 0.0
+    metrics = injection_evidence.get("injection_metrics")
+    if not isinstance(metrics, dict):
+        return 0.0
+    value = _safe_float(metrics.get(key_name))
+    return value if value is not None else 0.0
+
+
+def _extract_embed_hint(evidence: Any, key_name: str) -> float:
+    if not isinstance(evidence, dict):
+        return 0.0
+    value = _safe_float(evidence.get(key_name))
+    return value if value is not None else 0.0
 
 
 def _safe_float(value: Any) -> Optional[float]:

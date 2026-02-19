@@ -25,6 +25,161 @@ LF_CHANNEL_VERSION = "v1"
 LF_TRACE_VERSION = "v1"
 
 
+def compute_lf_basis_projection_torch(latents: Any, basis: Dict[str, Any]) -> Any:
+    """
+    功能：使用 torch 在 LF 基向量上计算投影系数。
+
+    Compute LF projection coefficients using torch tensor operations.
+
+    Args:
+        latents: Torch tensor latents.
+        basis: Basis mapping with projection_matrix.
+
+    Returns:
+        Torch tensor coefficients in LF subspace.
+
+    Raises:
+        TypeError: If inputs are invalid.
+        ValueError: If basis shape mismatches latent dimension.
+    """
+    import torch
+
+    if not torch.is_tensor(latents):
+        raise TypeError("latents must be torch.Tensor")
+    if not isinstance(basis, dict):
+        raise TypeError("basis must be dict mapping")
+
+    basis_matrix = basis.get("projection_matrix")
+    if basis_matrix is None:
+        raise ValueError("basis must contain projection_matrix")
+
+    latents_flat = latents.reshape(-1).to(dtype=torch.float32)
+    basis_matrix_t = torch.as_tensor(
+        basis_matrix,
+        dtype=torch.float32,
+        device=latents_flat.device
+    )
+    if basis_matrix_t.ndim != 2:
+        raise ValueError("projection_matrix must be rank-2")
+    if latents_flat.shape[0] != basis_matrix_t.shape[0]:
+        raise ValueError(
+            f"latents dimension {latents_flat.shape[0]} != basis dimension {basis_matrix_t.shape[0]}"
+        )
+    return torch.matmul(latents_flat, basis_matrix_t)
+
+
+def apply_low_freq_encoding_torch(coeffs: Any, key: int, cfg: Dict[str, Any]) -> Tuple[Any, Dict[str, Any]]:
+    """
+    功能：使用 torch 在 LF 系数上施加确定性编码。
+
+    Apply deterministic LF encoding on torch coefficients.
+
+    Args:
+        coeffs: Torch coefficients tensor.
+        key: Encoding seed.
+        cfg: Config mapping.
+
+    Returns:
+        Tuple of (encoded_coeffs, encoding_evidence).
+
+    Raises:
+        TypeError: If inputs are invalid.
+        ValueError: If cfg values are invalid.
+    """
+    import torch
+
+    if not torch.is_tensor(coeffs):
+        raise TypeError("coeffs must be torch.Tensor")
+    if coeffs.ndim != 1:
+        raise TypeError("coeffs must be 1-D torch.Tensor")
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+
+    strength = cfg.get("lf_strength", 1.5)
+    if not isinstance(strength, (int, float)) or strength < 0:
+        raise ValueError(f"lf_strength must be non-negative, got {strength}")
+
+    generator = torch.Generator(device=coeffs.device)
+    generator.manual_seed(int(key))
+    pseudogaussian_factors = torch.randn(
+        coeffs.shape[0],
+        generator=generator,
+        device=coeffs.device,
+        dtype=torch.float32
+    )
+    code_bits = torch.randint(
+        low=0,
+        high=2,
+        size=(coeffs.shape[0],),
+        generator=generator,
+        device=coeffs.device
+    )
+    codeword = code_bits.to(dtype=torch.float32) * 2.0 - 1.0
+    watermark_pattern = codeword * torch.abs(pseudogaussian_factors)
+
+    coeffs_fp32 = coeffs.to(dtype=torch.float32)
+    encoded_coeffs = coeffs_fp32 + float(strength) * watermark_pattern
+
+    encoding_evidence = {
+        "strength_applied": float(strength),
+        "pattern_seed": int(key),
+        "coeffs_before_norm": float(torch.linalg.vector_norm(coeffs_fp32).item()),
+        "coeffs_after_norm": float(torch.linalg.vector_norm(encoded_coeffs).item()),
+        "pattern_norm": float(torch.linalg.vector_norm(watermark_pattern).item()),
+        "coeffs_count": int(coeffs.shape[0])
+    }
+    return encoded_coeffs, encoding_evidence
+
+
+def reconstruct_from_lf_coeffs_torch(
+    coeffs: Any,
+    basis: Dict[str, Any],
+    latents_shape: Tuple[int, ...],
+    dtype: Any
+) -> Any:
+    """
+    功能：使用 torch 从 LF 系数重建张量。
+
+    Reconstruct latent tensor from LF coefficients using torch.
+
+    Args:
+        coeffs: Torch coefficients tensor.
+        basis: Basis mapping with projection_matrix.
+        latents_shape: Target shape.
+        dtype: Target dtype.
+
+    Returns:
+        Torch tensor with requested shape and dtype.
+
+    Raises:
+        TypeError: If inputs are invalid.
+        ValueError: If basis is invalid.
+    """
+    import torch
+
+    if not torch.is_tensor(coeffs):
+        raise TypeError("coeffs must be torch.Tensor")
+    if not isinstance(basis, dict):
+        raise TypeError("basis must be dict")
+    if not isinstance(latents_shape, tuple) or len(latents_shape) == 0:
+        raise TypeError("latents_shape must be non-empty tuple")
+
+    basis_matrix = basis.get("projection_matrix")
+    if basis_matrix is None:
+        raise ValueError("basis must contain projection_matrix")
+    basis_matrix_t = torch.as_tensor(
+        basis_matrix,
+        dtype=torch.float32,
+        device=coeffs.device
+    )
+    if basis_matrix_t.ndim != 2:
+        raise ValueError("projection_matrix must be rank-2")
+
+    latents_flat = torch.matmul(basis_matrix_t, coeffs.to(dtype=torch.float32))
+    reconstructed = latents_flat.reshape(latents_shape)
+    return reconstructed.to(dtype=dtype)
+
+
 def compute_lf_basis_projection(latents: np.ndarray | Any, basis: Dict[str, Any]) -> np.ndarray:
     """
     功能：计算 latent 在 LF 基向量上的投影系数。

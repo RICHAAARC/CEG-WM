@@ -449,7 +449,7 @@ def _build_plan_for_injection(
     """
     功能：为注入构造包含 basis 的 plan。
     
-    Build a plan payload with deterministic basis when missing.
+    Build a runtime plan payload with deterministic tensor-driven basis when missing.
 
     Args:
         plan_ref: Plan reference mapping from planner.
@@ -458,30 +458,36 @@ def _build_plan_for_injection(
         injection_cfg: Injection config mapping.
 
     Returns:
-        Plan mapping containing lf_basis/hf_basis if missing.
+        Plan mapping containing lf_basis/hf_basis or runtime absent binding.
     """
     plan_payload = dict(plan_ref) if isinstance(plan_ref, dict) else {}
     if "lf_basis" in plan_payload and "hf_basis" in plan_payload:
         return plan_payload
 
-    # 根据 latents 维度构造确定性基。
-    latents_np = _to_numpy(latents)
-    if latents_np is None:
+    runtime_binding = _build_runtime_subspace_binding(
+        plan_payload=plan_payload,
+        plan_digest=plan_digest,
+        latents=latents,
+        injection_cfg=injection_cfg
+    )
+    plan_payload["runtime_subspace_binding"] = runtime_binding
+    if runtime_binding.get("status") != "ok":
         return plan_payload
-
-    latent_dim = int(latents_np.size)
-    rank = int(plan_payload.get("planner_params", {}).get("rank", 8))
-    rank = max(1, min(rank, latent_dim))
-    seed = _derive_seed_from_digest(plan_digest)
 
     if "lf_basis" not in plan_payload:
         plan_payload["lf_basis"] = {
-            "projection_matrix": _build_random_orthonormal(latent_dim, rank, seed)
+            "projection_matrix": runtime_binding.get("lf_projection_matrix"),
+            "basis_source": "trajectory_tensor_stats"
         }
     if "hf_basis" not in plan_payload:
         plan_payload["hf_basis"] = {
-            "hf_projection_matrix": _build_random_orthonormal(latent_dim, rank, seed + 1)
+            "hf_projection_matrix": runtime_binding.get("hf_projection_matrix"),
+            "basis_source": "trajectory_tensor_stats"
         }
+
+    # 避免写入大对象到 evidence 之外的字段。
+    runtime_binding.pop("lf_projection_matrix", None)
+    runtime_binding.pop("hf_projection_matrix", None)
     return plan_payload
 
 
@@ -500,27 +506,117 @@ def _to_numpy(latents: Any) -> Optional[Any]:
         return None
 
 
-def _derive_seed_from_digest(digest_hex: str) -> int:
+def _build_runtime_subspace_binding(
+    plan_payload: Dict[str, Any],
+    plan_digest: str,
+    latents: Any,
+    injection_cfg: Dict[str, Any]
+) -> Dict[str, Any]:
     """
-    功能：从摘要派生稳定 seed。
-    
-    Derive stable integer seed from hex digest.
-    """
-    if not isinstance(digest_hex, str) or not digest_hex:
-        return 0
-    return int(digest_hex[:8], 16)
+    功能：基于真实推理张量构造确定性子空间绑定摘要。
 
+    Build deterministic runtime subspace binding from real inference tensor summary.
 
-def _build_random_orthonormal(latent_dim: int, rank: int, seed: int) -> Any:
+    Args:
+        plan_payload: Plan payload mapping.
+        plan_digest: Plan digest string.
+        latents: Runtime latents tensor.
+        injection_cfg: Injection config mapping.
+
+    Returns:
+        Runtime subspace binding mapping.
     """
-    功能：构造确定性正交基。
-    Build deterministic orthonormal basis for injection.
-    """
-    import numpy as np
-    rng = np.random.default_rng(seed)
-    matrix = rng.normal(0.0, 1.0, size=(latent_dim, rank)).astype(np.float32)
-    q, _ = np.linalg.qr(matrix)
-    return q
+    try:
+        import torch
+    except Exception:
+        return {
+            "status": "absent",
+            "absent_reason": "torch_unavailable"
+        }
+
+    if not torch.is_tensor(latents):
+        return {
+            "status": "absent",
+            "absent_reason": "latents_not_torch_tensor"
+        }
+
+    latents_fp32 = latents.reshape(-1).to(dtype=torch.float32)
+    latent_dim = int(latents_fp32.shape[0])
+    if latent_dim <= 0:
+        return {
+            "status": "absent",
+            "absent_reason": "invalid_latent_dimension"
+        }
+
+    planner_params = plan_payload.get("planner_params", {}) if isinstance(plan_payload.get("planner_params"), dict) else {}
+    rank_value = planner_params.get("rank", plan_payload.get("rank", 8))
+    if not isinstance(rank_value, int):
+        try:
+            rank_value = int(rank_value)
+        except Exception:
+            rank_value = 0
+    rank = max(1, min(rank_value, latent_dim)) if rank_value > 0 else 0
+    if rank <= 0:
+        return {
+            "status": "absent",
+            "absent_reason": "rank_unavailable"
+        }
+
+    abs_values = torch.abs(latents_fp32)
+    if int(abs_values.shape[0]) < rank:
+        return {
+            "status": "absent",
+            "absent_reason": "rank_exceeds_latent_dimension"
+        }
+
+    hf_indices = torch.topk(abs_values, k=rank, largest=True, sorted=True).indices
+    lf_indices = torch.topk(abs_values, k=rank, largest=False, sorted=True).indices
+
+    lf_projection_matrix = torch.zeros((latent_dim, rank), dtype=torch.float32, device=latents.device)
+    hf_projection_matrix = torch.zeros((latent_dim, rank), dtype=torch.float32, device=latents.device)
+    lf_projection_matrix[lf_indices, torch.arange(rank, device=latents.device)] = 1.0
+    hf_projection_matrix[hf_indices, torch.arange(rank, device=latents.device)] = 1.0
+
+    l2_total = float(torch.sum(latents_fp32 * latents_fp32).item())
+    hf_energy = float(torch.sum((abs_values[hf_indices] ** 2)).item())
+    energy_ratio = 0.0 if l2_total <= 0 else hf_energy / l2_total
+
+    trajectory_anchor = {
+        "mean": float(torch.mean(latents_fp32).item()),
+        "std": float(torch.std(latents_fp32, unbiased=False).item()),
+        "l2_norm": float(torch.linalg.vector_norm(latents_fp32).item()),
+        "latent_dim": latent_dim,
+        "rank": rank,
+        "lf_enabled": bool(injection_cfg.get("lf_enabled", True)),
+        "hf_enabled": bool(injection_cfg.get("hf_enabled", True)),
+        "plan_digest": plan_digest,
+    }
+    trajectory_anchor_digest = digests.canonical_sha256(trajectory_anchor)
+
+    binding_payload = {
+        "binding_version": "trajectory_tensor_binding_v1",
+        "plan_digest": plan_digest,
+        "trajectory_anchor_digest": trajectory_anchor_digest,
+        "rank": rank,
+        "energy_ratio": round(float(energy_ratio), 8),
+        "lf_indices": [int(v) for v in lf_indices.tolist()],
+        "hf_indices": [int(v) for v in hf_indices.tolist()],
+    }
+    binding_digest = digests.canonical_sha256(binding_payload)
+
+    return {
+        "status": "ok",
+        "absent_reason": None,
+        "binding_version": "trajectory_tensor_binding_v1",
+        "trajectory_anchor_digest": trajectory_anchor_digest,
+        "binding_digest": binding_digest,
+        "rank": rank,
+        "energy_ratio": round(float(energy_ratio), 8),
+        "lf_indices_digest": digests.canonical_sha256([int(v) for v in lf_indices.tolist()]),
+        "hf_indices_digest": digests.canonical_sha256([int(v) for v in hf_indices.tolist()]),
+        "lf_projection_matrix": lf_projection_matrix,
+        "hf_projection_matrix": hf_projection_matrix,
+    }
 
 
 def _build_injection_ok_evidence(
@@ -540,6 +636,7 @@ def _build_injection_ok_evidence(
         "injection_trace_digest": None,
         "injection_params_digest": digests.canonical_sha256(params_payload),
         "injection_metrics": None,
+        "subspace_binding_digest": None,
         "plan_digest": context.plan_digest,
         "lf_params_digest": context.lf_params_digest if context.enable_lf else None,
         "hf_params_digest": context.hf_params_digest if context.enable_hf else None,
@@ -563,6 +660,7 @@ def _build_injection_absent_evidence(
         "injection_trace_digest": None,
         "injection_params_digest": None,
         "injection_metrics": None,
+        "subspace_binding_digest": None,
         "plan_digest": context.plan_digest if isinstance(context, InjectionContext) else None,
         "lf_params_digest": context.lf_params_digest if isinstance(context, InjectionContext) else None,
         "hf_params_digest": context.hf_params_digest if isinstance(context, InjectionContext) else None
@@ -586,6 +684,7 @@ def _build_injection_mismatch_evidence(
         "injection_trace_digest": None,
         "injection_params_digest": digests.canonical_sha256(params_payload),
         "injection_metrics": None,
+        "subspace_binding_digest": None,
         "plan_digest": context.plan_digest,
         "lf_params_digest": context.lf_params_digest if context.enable_lf else None,
         "hf_params_digest": context.hf_params_digest if context.enable_hf else None
@@ -614,6 +713,15 @@ def _finalize_injection_evidence(
         return _build_injection_absent_evidence(context, "latents_missing")
 
     metrics = _summarize_injection_metrics(step_evidence_list)
+    combined_status_counts = metrics.get("combined_status_counts", {}) if isinstance(metrics, dict) else {}
+    if isinstance(combined_status_counts, dict):
+        non_absent_count = 0
+        for status_key, status_count in combined_status_counts.items():
+            if status_key != "absent" and isinstance(status_count, int):
+                non_absent_count += status_count
+        if non_absent_count == 0:
+            return _build_injection_absent_evidence(context, "runtime_subspace_unavailable")
+
     trace_payload = {
         "plan_digest": injection_evidence.get("plan_digest"),
         "injection_params_digest": injection_evidence.get("injection_params_digest"),
@@ -623,6 +731,10 @@ def _finalize_injection_evidence(
 
     injection_evidence["injection_metrics"] = metrics
     injection_evidence["injection_trace_digest"] = trace_digest
+    if isinstance(metrics, dict):
+        subspace_binding_digest = metrics.get("subspace_binding_digest")
+        if isinstance(subspace_binding_digest, str) and subspace_binding_digest:
+            injection_evidence["subspace_binding_digest"] = subspace_binding_digest
     return injection_evidence
 
 
@@ -640,6 +752,9 @@ def _summarize_injection_metrics(step_evidence_list: List[Dict[str, Any]]) -> Di
         }
 
     delta_values = []
+    lf_delta_values = []
+    hf_delta_values = []
+    subspace_binding_digests: List[str] = []
     status_counts: Dict[str, int] = {}
     for step_evidence in step_evidence_list:
         if not isinstance(step_evidence, dict):
@@ -650,10 +765,26 @@ def _summarize_injection_metrics(step_evidence_list: List[Dict[str, Any]]) -> Di
         delta_norm = step_evidence.get("modification_delta_norm")
         if isinstance(delta_norm, (int, float)):
             delta_values.append(float(delta_norm))
+        lf_delta_norm = step_evidence.get("lf_delta_norm")
+        if isinstance(lf_delta_norm, (int, float)):
+            lf_delta_values.append(float(lf_delta_norm))
+        hf_delta_norm = step_evidence.get("hf_delta_norm")
+        if isinstance(hf_delta_norm, (int, float)):
+            hf_delta_values.append(float(hf_delta_norm))
+        binding_digest = step_evidence.get("runtime_subspace_binding_digest")
+        if isinstance(binding_digest, str) and binding_digest:
+            subspace_binding_digests.append(binding_digest)
 
     delta_mean = float(sum(delta_values) / len(delta_values)) if delta_values else 0.0
+    lf_delta_mean = float(sum(lf_delta_values) / len(lf_delta_values)) if lf_delta_values else 0.0
+    hf_delta_mean = float(sum(hf_delta_values) / len(hf_delta_values)) if hf_delta_values else 0.0
+    unique_binding = sorted(list(set(subspace_binding_digests)))
+    subspace_binding_digest = unique_binding[0] if len(unique_binding) == 1 else None
     return {
         "step_count": len(step_evidence_list),
         "combined_status_counts": status_counts,
-        "delta_norm_mean": delta_mean
+        "delta_norm_mean": delta_mean,
+        "lf_delta_norm_mean": lf_delta_mean,
+        "hf_delta_norm_mean": hf_delta_mean,
+        "subspace_binding_digest": subspace_binding_digest
     }

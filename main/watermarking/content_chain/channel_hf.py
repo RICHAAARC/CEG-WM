@@ -37,6 +37,152 @@ HF_FAILURE_REASONS = {
 }
 
 
+def compute_hf_basis_projection_torch(latents: Any, basis: Dict[str, Any]) -> Any:
+    """
+    功能：使用 torch 在 HF 基向量上计算投影系数。
+
+    Compute HF projection coefficients using torch tensor operations.
+
+    Args:
+        latents: Torch tensor latents.
+        basis: Basis mapping with hf_projection_matrix.
+
+    Returns:
+        Torch tensor coefficients.
+
+    Raises:
+        TypeError: If inputs are invalid.
+        ValueError: If shape mismatches.
+    """
+    import torch
+
+    if not torch.is_tensor(latents):
+        raise TypeError("latents must be torch.Tensor")
+    if not isinstance(basis, dict):
+        raise TypeError("basis must be dict mapping")
+
+    basis_matrix = basis.get("hf_projection_matrix")
+    if basis_matrix is None:
+        raise ValueError("basis must contain hf_projection_matrix for HF channel")
+
+    latents_flat = latents.reshape(-1).to(dtype=torch.float32)
+    basis_matrix_t = torch.as_tensor(
+        basis_matrix,
+        dtype=torch.float32,
+        device=latents_flat.device
+    )
+    if basis_matrix_t.ndim != 2:
+        raise ValueError("hf_projection_matrix must be rank-2")
+    if latents_flat.shape[0] != basis_matrix_t.shape[0]:
+        raise ValueError(
+            f"latents dimension {latents_flat.shape[0]} != basis dimension {basis_matrix_t.shape[0]}"
+        )
+    return torch.matmul(latents_flat, basis_matrix_t)
+
+
+def apply_hf_truncation_constraint_torch(coeffs: Any, cfg: Dict[str, Any]) -> Tuple[Any, Dict[str, Any]]:
+    """
+    功能：使用 torch 对 HF 系数执行尾部截断约束。
+
+    Apply deterministic tail truncation on torch HF coefficients.
+
+    Args:
+        coeffs: Torch coefficients tensor.
+        cfg: Config mapping.
+
+    Returns:
+        Tuple of (constrained_coeffs, constraint_evidence).
+
+    Raises:
+        TypeError: If inputs are invalid.
+        ValueError: If cfg values are invalid.
+    """
+    import torch
+
+    if not torch.is_tensor(coeffs):
+        raise TypeError("coeffs must be torch.Tensor")
+    if coeffs.ndim != 1:
+        raise TypeError("coeffs must be 1-D torch.Tensor")
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+
+    hf_threshold_percentile = cfg.get("hf_threshold_percentile", 75.0)
+    if not isinstance(hf_threshold_percentile, (int, float)) or not (0 <= hf_threshold_percentile <= 100):
+        raise ValueError(f"hf_threshold_percentile must be in [0, 100], got {hf_threshold_percentile}")
+
+    coeffs_fp32 = coeffs.to(dtype=torch.float32)
+    abs_coeffs = torch.abs(coeffs_fp32)
+    quantile = float(hf_threshold_percentile) / 100.0
+    threshold_value = torch.quantile(abs_coeffs, quantile)
+
+    mask = abs_coeffs >= threshold_value
+    constrained_coeffs = torch.where(mask, coeffs_fp32, torch.zeros_like(coeffs_fp32))
+
+    retained_count = int(mask.sum().item())
+    total_count = int(coeffs.shape[0])
+    retention_ratio = float(retained_count / total_count) if total_count > 0 else 0.0
+
+    constraint_evidence = {
+        "threshold_percentile_applied": float(hf_threshold_percentile),
+        "threshold_value": float(threshold_value.item()),
+        "coeffs_before_norm": float(torch.linalg.vector_norm(coeffs_fp32).item()),
+        "coeffs_after_norm": float(torch.linalg.vector_norm(constrained_coeffs).item()),
+        "coeffs_retained_count": retained_count,
+        "coeffs_total_count": total_count,
+        "retention_ratio": retention_ratio
+    }
+    return constrained_coeffs, constraint_evidence
+
+
+def reconstruct_from_hf_coeffs_torch(
+    coeffs: Any,
+    basis: Dict[str, Any],
+    latents_shape: Tuple[int, ...],
+    dtype: Any
+) -> Any:
+    """
+    功能：使用 torch 从 HF 系数重建张量。
+
+    Reconstruct latent tensor from HF coefficients using torch.
+
+    Args:
+        coeffs: Torch coefficients tensor.
+        basis: Basis mapping with hf_projection_matrix.
+        latents_shape: Target shape.
+        dtype: Target dtype.
+
+    Returns:
+        Torch tensor with requested shape and dtype.
+
+    Raises:
+        TypeError: If inputs are invalid.
+        ValueError: If basis is invalid.
+    """
+    import torch
+
+    if not torch.is_tensor(coeffs):
+        raise TypeError("coeffs must be torch.Tensor")
+    if not isinstance(basis, dict):
+        raise TypeError("basis must be dict")
+    if not isinstance(latents_shape, tuple) or len(latents_shape) == 0:
+        raise TypeError("latents_shape must be non-empty tuple")
+
+    basis_matrix = basis.get("hf_projection_matrix")
+    if basis_matrix is None:
+        raise ValueError("basis must contain hf_projection_matrix for HF channel")
+    basis_matrix_t = torch.as_tensor(
+        basis_matrix,
+        dtype=torch.float32,
+        device=coeffs.device
+    )
+    if basis_matrix_t.ndim != 2:
+        raise ValueError("hf_projection_matrix must be rank-2")
+
+    latents_flat = torch.matmul(basis_matrix_t, coeffs.to(dtype=torch.float32))
+    reconstructed = latents_flat.reshape(latents_shape)
+    return reconstructed.to(dtype=dtype)
+
+
 def compute_hf_basis_projection(latents: np.ndarray | Any, basis: Dict[str, Any]) -> np.ndarray:
     """
     功能：计算 latent 在 HF 基向量上的投影系数。

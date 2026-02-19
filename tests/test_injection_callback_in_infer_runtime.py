@@ -14,6 +14,7 @@ from typing import Any, Dict
 import numpy as np
 
 from main.core import digests
+from main.diffusion.sd3.callback_composer import InjectionContext
 from main.diffusion.sd3.infer_runtime import run_sd3_inference
 from main.cli.run_common import build_injection_context_from_plan
 from main.watermarking.content_chain.latent_modifier import (
@@ -141,6 +142,8 @@ def test_injection_callback_smoke() -> None:
     assert metrics.get("step_count") == 3
     assert isinstance(metrics.get("delta_norm_mean"), float)
     assert metrics.get("delta_norm_mean") > 0.0
+    assert isinstance(metrics.get("lf_delta_norm_mean"), float)
+    assert isinstance(metrics.get("hf_delta_norm_mean"), float)
 
 
 def test_injection_unsupported_callback_absent() -> None:
@@ -168,3 +171,40 @@ def test_injection_unsupported_callback_absent() -> None:
     assert isinstance(injection_evidence, dict)
     assert injection_evidence.get("status") == "absent"
     assert injection_evidence.get("injection_absent_reason") == "unsupported_pipeline"
+
+
+def test_injection_params_not_in_digest_domain_must_mismatch() -> None:
+    """
+    功能：注入参数摘要不一致必须触发 mismatch。
+    """
+    cfg = _build_cfg()
+    latent_dim = 1 * 4 * 8 * 8
+    plan_payload = _build_plan_with_basis(latent_dim, 8, 2026)
+    plan_digest = digests.canonical_sha256(plan_payload)
+
+    valid_context = build_injection_context_from_plan(cfg, plan_payload, plan_digest)
+    invalid_context = InjectionContext(
+        plan_digest=valid_context.plan_digest,
+        plan_ref=valid_context.plan_ref,
+        lf_params_digest="0" * 64,
+        hf_params_digest=valid_context.hf_params_digest,
+        enable_lf=valid_context.enable_lf,
+        enable_hf=valid_context.enable_hf,
+        device=valid_context.device,
+        dtype=valid_context.dtype,
+    )
+
+    modifier = LatentModifier(LATENT_MODIFIER_ID, LATENT_MODIFIER_VERSION)
+    result = run_sd3_inference(
+        cfg,
+        _CallbackPipelineStub(base_seed=123),
+        "cpu",
+        None,
+        injection_context=invalid_context,
+        injection_modifier=modifier,
+    )
+
+    injection_evidence = result.get("injection_evidence")
+    assert isinstance(injection_evidence, dict)
+    assert injection_evidence.get("status") == "mismatch"
+    assert injection_evidence.get("injection_failure_reason") == "lf_params_digest_mismatch"

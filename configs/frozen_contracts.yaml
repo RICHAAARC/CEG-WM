@@ -449,6 +449,9 @@ records_schema:
     - content_evidence.injection_absent_reason
     - content_evidence.injection_failure_reason
     - content_evidence.injection_metrics
+    - content_evidence.subspace_binding_digest
+    - content_evidence.lf_statistics_digest
+    - content_evidence.hf_statistics_digest
     - content_evidence.hf_evidence_summary
     - content_evidence.score_parts
     - content_evidence.content_failure_reason
