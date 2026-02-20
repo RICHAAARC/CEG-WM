@@ -55,9 +55,16 @@ def inspect_sd3_pipeline(
         transformer_config = getattr(transformer, "config", None)
         if transformer_config is not None:
             # 提取 DiT/Transformer 关键参数。
-            fingerprint["transformer_num_blocks"] = _safe_get_attr(
-                transformer_config, "num_layers", default="<absent>"
+            # SD3 使用 num_blocks（不是 num_layers）。
+            transformer_num_blocks = _safe_get_attr(
+                transformer_config, "num_blocks", default=None
             )
+            if transformer_num_blocks is None:
+                # Fallback：某些 Transformer 配置可能使用 num_layers。
+                transformer_num_blocks = _safe_get_attr(
+                    transformer_config, "num_layers", default="<absent>"
+                )
+            fingerprint["transformer_num_blocks"] = transformer_num_blocks
             fingerprint["transformer_attention_head_dim"] = _safe_get_attr(
                 transformer_config, "attention_head_dim", default="<absent>"
             )

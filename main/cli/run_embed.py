@@ -281,28 +281,45 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
             injection_modifier = None
             injection_site_spec = None
             injection_site_digest = None
-            if isinstance(plan_payload, dict) and isinstance(plan_digest, str) and plan_digest:
-                injection_context = build_injection_context_from_plan(cfg, plan_payload, plan_digest)
-                injection_modifier = LatentModifier(LATENT_MODIFIER_ID, LATENT_MODIFIER_VERSION)
-                
-                # (S-B-2) Paper Faithfulness: 生成 injection_site_spec（必达证据）
-                try:
+            
+            # (S-B-2) Paper Faithfulness: 生成 injection_site_spec（必达证据）
+            # 无论 plan 是否存在都必须生成 injection_site_spec
+            try:
+                if isinstance(plan_payload, dict) and isinstance(plan_digest, str) and plan_digest:
+                    # 计划存在：包含详细的plan digest和注入模式
+                    injection_context = build_injection_context_from_plan(cfg, plan_payload, plan_digest)
+                    injection_modifier = LatentModifier(LATENT_MODIFIER_ID, LATENT_MODIFIER_VERSION)
+                    
                     injection_site_spec, injection_site_digest = injection_site_binder.build_injection_site_spec(
                         hook_type="callback_on_step_end",
-                        target_module_name="sd3_transformer",
+                        target_module_name="StableDiffusion3Pipeline",
                         target_tensor_name="latents",
-                        hook_timing="post",
+                        hook_timing="after_scheduler_step",
                         injection_rule_summary={
                             "plan_digest": plan_digest,
                             "injection_mode": "subspace_projection"
                         },
                         cfg=cfg
                     )
-                    print(f"[Paper-Faithful] Injection site spec generated: {injection_site_digest[:16]}...")
-                except Exception as inj_site_exc:
-                    print(f"[Paper-Faithful] [WARN] Injection site binding failed: {inj_site_exc}")
-                    injection_site_spec = {"status": "failed", "error": str(inj_site_exc)}
-                    injection_site_digest = "<failed>"
+                    print(f"[Paper-Faithful] Injection site spec generated (with plan): {injection_site_digest[:16]}...")
+                else:
+                    # 计划缺失：仍然生成最小化的 injection_site_spec（必须）
+                    injection_site_spec, injection_site_digest = injection_site_binder.build_injection_site_spec(
+                        hook_type="callback_on_step_end",
+                        target_module_name="StableDiffusion3Pipeline",
+                        target_tensor_name="latents",
+                        hook_timing="after_scheduler_step",
+                        injection_rule_summary={
+                            "plan_digest": "<absent>",
+                            "injection_mode": "latent_direct"
+                        },
+                        cfg=cfg
+                    )
+                    print(f"[Paper-Faithful] Injection site spec generated (minimal): {injection_site_digest[:16]}...")
+            except Exception as inj_site_exc:
+                print(f"[Paper-Faithful] [WARN] Injection site binding failed: {inj_site_exc}")
+                injection_site_spec = {"status": "failed", "error": str(inj_site_exc)}
+                injection_site_digest = "<failed>"
             
             # (7.7) Real Dataflow Smoke: 在 pipeline_result 之后调用 inference
             pipeline_obj = pipeline_result.get("pipeline_obj")
