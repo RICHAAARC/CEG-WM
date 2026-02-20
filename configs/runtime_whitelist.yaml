@@ -353,4 +353,13 @@ pipeline_realization:
     - "hf_hub"   # 允许从 HuggingFace Hub 加载（别名）
     - "local"    # 允许从本地路径加载
   hf_revision_required: true  # 要求指定 HF revision
+  weights_snapshot_required: false  # 暂不强制要求 weights snapshot（便于开发调试）
+  allowed_devices:
+    - "cpu"
+    - "cuda"
+    - "mps"
+  allowed_precisions:
+    - "float32"
+    - "float16"
+    - "bfloat16"
   notes: "启用此策略后，才能使用 sd3_diffusers_real_v1 实现"

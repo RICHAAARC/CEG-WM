@@ -539,7 +539,26 @@ def assert_pipeline_weights_snapshot_required(
         # field_path 输入不合法，必须 fail-fast。
         raise TypeError("field_path must be non-empty str")
 
-    _raise_pipeline_realization_policy_disabled(field_path)
+    # 检查 whitelist 中的 pipeline_realization 策略
+    pipeline_realization = whitelist.data.get("pipeline_realization")
+    if not isinstance(pipeline_realization, dict):
+        _raise_pipeline_realization_policy_disabled(field_path)
+    
+    enabled = pipeline_realization.get("enabled", False)
+    if not enabled:
+        _raise_pipeline_realization_policy_disabled(field_path)
+    
+    # 如果策略启用，验证 weights_snapshot_sha256 必须存在
+    weights_snapshot_required = pipeline_realization.get("weights_snapshot_required", True)
+    if weights_snapshot_required:
+        if not isinstance(weights_snapshot_sha256, str) or not weights_snapshot_sha256:
+            raise GateEnforcementError(
+                "weights_snapshot_sha256 required",
+                gate_name="pipeline_realization.weights_snapshot.required",
+                field_path=field_path,
+                expected="non-empty sha256",
+                actual=str(weights_snapshot_sha256)
+            )
 
 
 def assert_pipeline_hf_hub_download_allowed(
@@ -574,7 +593,17 @@ def assert_pipeline_hf_hub_download_allowed(
         # field_path 输入不合法，必须 fail-fast。
         raise TypeError("field_path must be non-empty str")
 
-    _raise_pipeline_realization_policy_disabled(field_path)
+    # 检查 whitelist 中的 pipeline_realization 策略
+    pipeline_realization = whitelist.data.get("pipeline_realization")
+    if not isinstance(pipeline_realization, dict):
+        _raise_pipeline_realization_policy_disabled(field_path)
+    
+    enabled = pipeline_realization.get("enabled", False)
+    if not enabled:
+        _raise_pipeline_realization_policy_disabled(field_path)
+    
+    # 如果策略启用，允许 HF Hub 下载（download_allowed 参数由调用方传入）
+    # 此处不额外限制，交由调用方决定是否允许下载
 
 
 def assert_inference_device_allowed(
@@ -605,7 +634,25 @@ def assert_inference_device_allowed(
         # field_path 输入不合法，必须 fail-fast。
         raise TypeError("field_path must be non-empty str")
 
-    _raise_pipeline_realization_policy_disabled(field_path)
+    # 检查 whitelist 中的 pipeline_realization 策略
+    pipeline_realization = whitelist.data.get("pipeline_realization")
+    if not isinstance(pipeline_realization, dict):
+        _raise_pipeline_realization_policy_disabled(field_path)
+    
+    enabled = pipeline_realization.get("enabled", False)
+    if not enabled:
+        _raise_pipeline_realization_policy_disabled(field_path)
+    
+    # 如果策略启用，检查 device 是否在允许列表中
+    allowed_devices = pipeline_realization.get("allowed_devices", ["cpu", "cuda", "mps"])
+    if device is not None and device not in allowed_devices:
+        raise GateEnforcementError(
+            f"device not allowed: {device}",
+            gate_name="pipeline_realization.device.not_allowed",
+            field_path=field_path,
+            expected=f"one of {allowed_devices}",
+            actual=device
+        )
 
 
 def assert_inference_precision_allowed(
@@ -636,7 +683,25 @@ def assert_inference_precision_allowed(
         # field_path 输入不合法，必须 fail-fast。
         raise TypeError("field_path must be non-empty str")
 
-    _raise_pipeline_realization_policy_disabled(field_path)
+    # 检查 whitelist 中的 pipeline_realization 策略
+    pipeline_realization = whitelist.data.get("pipeline_realization")
+    if not isinstance(pipeline_realization, dict):
+        _raise_pipeline_realization_policy_disabled(field_path)
+    
+    enabled = pipeline_realization.get("enabled", False)
+    if not enabled:
+        _raise_pipeline_realization_policy_disabled(field_path)
+    
+    # 如果策略启用，检查 precision 是否在允许列表中
+    allowed_precisions = pipeline_realization.get("allowed_precisions", ["float32", "float16", "bfloat16"])
+    if precision is not None and precision not in allowed_precisions:
+        raise GateEnforcementError(
+            f"precision not allowed: {precision}",
+            gate_name="pipeline_realization.precision.not_allowed",
+            field_path=field_path,
+            expected=f"one of {allowed_precisions}",
+            actual=precision
+        )
 
 
 def assert_env_fingerprint_required(
