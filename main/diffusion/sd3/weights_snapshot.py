@@ -59,7 +59,8 @@ def compute_weights_snapshot_sha256(
                 return "<absent>", snapshot_meta, error
             return _compute_snapshot_digest(snapshot_dir, snapshot_meta)
 
-        if model_source == "hf_hub":
+        # 支持 "hf" 和 "hf_hub" 两种标识（向后兼容）
+        if model_source in ("hf", "hf_hub"):
             snapshot_dir, resolved_revision, error = _resolve_hf_snapshot_dir(
                 model_id,
                 normalized_revision,

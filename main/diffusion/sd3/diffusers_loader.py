@@ -198,7 +198,8 @@ def build_sd3_pipeline_from_pretrained(
                 serializable_kwargs[key] = value
         build_meta["build_kwargs"] = serializable_kwargs
         
-        if model_source == "hf_hub":
+        # 支持 "hf" 和 "hf_hub" 两种标识
+        if model_source in ("hf", "hf_hub"):
             return None, build_meta, "hf_hub_local_cache_missing_or_unavailable"
         return None, build_meta, f"{type(exc).__name__}: {exc}"
 

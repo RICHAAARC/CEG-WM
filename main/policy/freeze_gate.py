@@ -245,7 +245,8 @@ def _enforce_pipeline_realization_requirements(
     hf_revision = pipeline_provenance.get("hf_revision")
     assert_pipeline_hf_revision_required(whitelist, hf_revision, "pipeline_provenance.hf_revision")
 
-    if model_source == "hf_hub":
+    # 支持 "hf" 和 "hf_hub" 两种标识（向后兼容）
+    if model_source in ("hf", "hf_hub"):
         local_files_only = pipeline_provenance.get("local_files_only")
         if not isinstance(local_files_only, bool):
             raise GateEnforcementError(
