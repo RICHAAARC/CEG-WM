@@ -202,6 +202,8 @@
   "model_provenance_canon_sha256": "5f67920a4605fc28ab9ab8efc3437c078044bd9023ecbdef8ba120a7fc86f8d1",
   "operation": "detect",
   "paper_faithfulness": {
+    "absent_reasons": [],
+    "fail_reasons": [],
     "mismatch_reasons": [],
     "status": "ok"
   },

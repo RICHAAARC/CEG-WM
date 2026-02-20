@@ -12,12 +12,12 @@
     "whitelist_bound_digest": "50e0e4f016844bf858a58e9b975ab8781ef660785a4166dec6bf9169f375c13f",
     "whitelist_version": "v1.0"
   },
-  "bundle_canon_sha256": "3e64ad40b5212ee7c5ba3073d3e617577ee243099cae430b1e71c09f340f511d",
+  "bundle_canon_sha256": "e2683616b349e14994810285af13750dc5eedb776433d89412d81a910b5fc6f2",
   "file_count": 1,
   "files": [
     {
-      "canon_sha256": "f64573bf6d585e0da7d1ff4ef973cad757fb0e19cd461739bdc2acd4bba8c689",
-      "file_sha256": "f7f792adb9fe75b6def902aa2a4ef070532ccc478777fedb2b9497bbbefbe78b",
+      "canon_sha256": "8173badbe3f59b45466b843968414861b0397ec02da3b66c7db6c3c8dbc6ae39",
+      "file_sha256": "9fa5f0be2b5647111e2a4cc9c05624de8da21983baf47c80b1c721938dbeef07",
       "file_type": "json",
       "path": "detect_record.json",
       "record_count": 1

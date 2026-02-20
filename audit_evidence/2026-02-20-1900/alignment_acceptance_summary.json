@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-20T10:02:31.549349Z",
+  "generated_at": "2026-02-20T11:00:01.110152Z",
   "notebook_version": "v1.0",
   "run_root": "/content/run_root",
   "model_id": "stabilityai/stable-diffusion-3.5-medium",
@@ -22,7 +22,7 @@
     "record_path": "/content/run_root_detect/records/detect_record.json"
   },
   "pytest_status": {
-    "passed": 206,
+    "passed": 220,
     "failed": 0,
     "all_passed": true
   },

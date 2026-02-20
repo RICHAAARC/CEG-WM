@@ -1,0 +1,128 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.13.5, pytest-8.3.4, pluggy-1.5.0 -- D:\Programs\Anaconda\python.exe
+cachedir: .pytest_cache
+rootdir: D:\Code\CEG-WM
+configfile: pyproject.toml
+testpaths: tests
+plugins: anyio-4.7.0
+collecting ... collected 220 items / 1 skipped
+
+tests/test_artifacts_semantic_bypass_guard.py::test_artifacts_reject_records_semantic_fields PASSED [  0%]
+tests/test_artifacts_semantic_bypass_guard.py::test_artifacts_allow_controlled_fields PASSED [  0%]
+tests/test_artifacts_semantic_bypass_guard.py::test_artifacts_reject_whitelist_digest_fields PASSED [  1%]
+tests/test_artifacts_semantic_bypass_guard.py::test_critical_outputs_use_controlled_write_path PASSED [  1%]
+tests/test_content_detector_lf_status_propagation.py::test_content_detector_propagates_lf_absent_status PASSED [  2%]
+tests/test_content_detector_lf_status_propagation.py::test_content_detector_propagates_lf_mismatch_status PASSED [  2%]
+tests/test_content_detector_lf_status_propagation.py::test_content_detector_propagates_lf_failed_status PASSED [  3%]
+tests/test_content_detector_lf_status_propagation.py::test_content_detector_success_with_lf_score PASSED [  3%]
+tests/test_content_placeholder_extractor.py::test_content_placeholder_extractor_absent_and_audit PASSED [  4%]
+tests/test_detect_failure_reasons_must_be_non_empty.py::test_paper_faithfulness_consistency_absent_reasons_non_empty PASSED [  4%]
+tests/test_detect_failure_reasons_must_be_non_empty.py::test_paper_faithfulness_consistency_mismatch_digest_absent_reasons_non_empty PASSED [  5%]
+tests/test_detect_failure_reasons_must_be_non_empty.py::test_paper_faithfulness_consistency_fail_digest_fail_reasons_non_empty PASSED [  5%]
+tests/test_detect_failure_reasons_must_be_non_empty.py::test_paper_faithfulness_consistency_ok_all_reasons_empty PASSED [  5%]
+tests/test_detect_failure_reasons_must_be_non_empty.py::test_paper_faithfulness_consistency_missing_content_evidence_absent_reasons_non_empty PASSED [  6%]
+tests/test_detect_orchestrator_accepts_content_evidence_dataclass.py::TestContentEvidenceDataclassAdaptation::test_adapt_content_evidence_calls_as_dict_method PASSED [  6%]
+tests/test_detect_orchestrator_accepts_content_evidence_dataclass.py::TestContentEvidenceDataclassAdaptation::test_adapt_content_evidence_from_dict PASSED [  7%]
+tests/test_detect_orchestrator_accepts_content_evidence_dataclass.py::TestContentEvidenceDataclassAdaptation::test_adapt_content_evidence_absent_status PASSED [  7%]
+tests/test_detect_orchestrator_accepts_content_evidence_dataclass.py::TestContentEvidenceDataclassAdaptation::test_adapt_content_evidence_mismatch_status PASSED [  8%]
+tests/test_detect_orchestrator_accepts_content_evidence_dataclass.py::TestGeometryEvidenceDataclassAdaptation::test_adapt_geometry_evidence_from_dict PASSED [  8%]
+tests/test_detect_orchestrator_accepts_content_evidence_dataclass.py::TestDetectOrchestratorWithContentDetector::test_detect_orchestrator_accepts_content_evidence_dataclass PASSED [  9%]
+tests/test_detect_orchestrator_accepts_content_evidence_dataclass.py::TestDetectOrchestratorWithContentDetector::test_detect_orchestrator_payload_preservation PASSED [  9%]
+tests/test_detect_orchestrator_accepts_content_evidence_dataclass.py::TestDetectOrchestratorWithContentDetector::test_detect_orchestrator_fusion_receives_adapted_dict PASSED [ 10%]
+tests/test_detect_orchestrator_accepts_content_evidence_dataclass.py::TestDetectOrchestratorWithContentDetector::test_content_evidence_payload_roundtrip PASSED [ 10%]
+tests/test_detect_paper_faithfulness_consistency_ok_on_same_run_root.py::test_detect_paper_faithfulness_consistency_ok_on_same_run_root PASSED [ 10%]
+tests/test_detect_paper_faithfulness_consistency_ok_on_same_run_root.py::test_detect_paper_faithfulness_consistency_ok_with_trajectory_digest PASSED [ 11%]
+python : Fatal Python error: Aborted
+所在位置 行:1 字符: 1
++ python -m pytest -v 2>&1 | Out-File -FilePath pytest_output.txt -Enco ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Fatal Python error: Aborted:Strin 
+   g) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+Current thread 0x0000998c (most recent call first):
+  File "D:\Programs\Anaconda\Lib\site-packages\numpy\linalg\_linalg.py", line 1
+839 in svd
+  File "D:\Code\CEG-WM\main\watermarking\content_chain\subspace\placeholder_pla
+nner.py", line 1025 in _estimate_jvp_matrix
+  File "D:\Code\CEG-WM\main\watermarking\content_chain\subspace\placeholder_pla
+nner.py", line 361 in _estimate_low_dim_subspace
+  File "D:\Code\CEG-WM\main\watermarking\content_chain\subspace\placeholder_pla
+nner.py", line 205 in plan
+  File "D:\Code\CEG-WM\main\watermarking\detect\orchestrator.py", line 118 in r
+un_detect_orchestrator
+  File "D:\Code\CEG-WM\tests\test_detect_plan_mismatch_is_mismatch.py", line 16
+7 in test_detect_plan_mismatch_is_mismatch
+  File "D:\Programs\Anaconda\Lib\site-packages\_pytest\python.py", line 159 in 
+pytest_pyfunc_call
+  File "D:\Programs\Anaconda\Lib\site-packages\pluggy\_callers.py", line 103 in
+ _multicall
+  File "D:\Programs\Anaconda\Lib\site-packages\pluggy\_manager.py", line 120 in
+ _hookexec
+  File "D:\Programs\Anaconda\Lib\site-packages\pluggy\_hooks.py", line 513 in _
+_call__
+  File "D:\Programs\Anaconda\Lib\site-packages\_pytest\python.py", line 1627 in
+ runtest
+  File "D:\Programs\Anaconda\Lib\site-packages\_pytest\runner.py", line 174 in 
+pytest_runtest_call
+  File "D:\Programs\Anaconda\Lib\site-packages\pluggy\_callers.py", line 103 in
+ _multicall
+  File "D:\Programs\Anaconda\Lib\site-packages\pluggy\_manager.py", line 120 in
+ _hookexec
+  File "D:\Programs\Anaconda\Lib\site-packages\pluggy\_hooks.py", line 513 in _
+_call__
+  File "D:\Programs\Anaconda\Lib\site-packages\_pytest\runner.py", line 242 in 
+<lambda>
+  File "D:\Programs\Anaconda\Lib\site-packages\_pytest\runner.py", line 341 in 
+from_call
+  File "D:\Programs\Anaconda\Lib\site-packages\_pytest\runner.py", line 241 in 
+call_and_report
+  File "D:\Programs\Anaconda\Lib\site-packages\_pytest\runner.py", line 132 in 
+runtestprotocol
+  File "D:\Programs\Anaconda\Lib\site-packages\_pytest\runner.py", line 113 in 
+pytest_runtest_protocol
+  File "D:\Programs\Anaconda\Lib\site-packages\pluggy\_callers.py", line 103 in
+ _multicall
+  File "D:\Programs\Anaconda\Lib\site-packages\pluggy\_manager.py", line 120 in
+ _hookexec
+  File "D:\Programs\Anaconda\Lib\site-packages\pluggy\_hooks.py", line 513 in _
+_call__
+  File "D:\Programs\Anaconda\Lib\site-packages\_pytest\main.py", line 362 in py
+test_runtestloop
+  File "D:\Programs\Anaconda\Lib\site-packages\pluggy\_callers.py", line 103 in
+ _multicall
+  File "D:\Programs\Anaconda\Lib\site-packages\pluggy\_manager.py", line 120 in
+ _hookexec
+  File "D:\Programs\Anaconda\Lib\site-packages\pluggy\_hooks.py", line 513 in _
+_call__
+  File "D:\Programs\Anaconda\Lib\site-packages\_pytest\main.py", line 337 in _m
+ain
+  File "D:\Programs\Anaconda\Lib\site-packages\_pytest\main.py", line 283 in wr
+ap_session
+  File "D:\Programs\Anaconda\Lib\site-packages\_pytest\main.py", line 330 in py
+test_cmdline_main
+  File "D:\Programs\Anaconda\Lib\site-packages\pluggy\_callers.py", line 103 in
+ _multicall
+  File "D:\Programs\Anaconda\Lib\site-packages\pluggy\_manager.py", line 120 in
+ _hookexec
+  File "D:\Programs\Anaconda\Lib\site-packages\pluggy\_hooks.py", line 513 in _
+_call__
+  File "D:\Programs\Anaconda\Lib\site-packages\_pytest\config\__init__.py", lin
+e 175 in main
+  File "D:\Programs\Anaconda\Lib\site-packages\_pytest\config\__init__.py", lin
+e 201 in console_main
+  File "D:\Programs\Anaconda\Lib\site-packages\pytest\__main__.py", line 9 in <
+module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+
+Extension modules: yaml._yaml, mkl._mklinit, mkl._py_mkl_service, numpy._core._
+multiarray_umath, numpy.linalg._umath_linalg, torch._C, torch._C._dynamo.autogr
+ad_compiler, torch._C._dynamo.eval_frame, torch._C._dynamo.guards, torch._C._dy
+namo.utils, torch._C._fft, torch._C._linalg, torch._C._nested, torch._C._nn, to
+rch._C._sparse, torch._C._special, numpy.random._common, numpy.random.bit_gener
+ator, numpy.random._bounded_integers, numpy.random._mt19937, numpy.random.mtran
+d, numpy.random._philox, numpy.random._pcg64, numpy.random._sfc64, numpy.random
+._generator (total: 25)
+tests/test_detect_plan_mismatch_is_mismatch.py::test_detect_plan_mismatch_is_mismatch 
