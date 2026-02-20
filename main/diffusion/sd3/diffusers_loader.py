@@ -116,18 +116,64 @@ def build_sd3_pipeline_from_pretrained(
         # 不支持的 model_source 值
         return None, build_meta, f"model_source not allowed: {model_source}"
 
+    # 从 extra_kwargs 中提取设备和精度配置
+    device = None
+    torch_dtype = None
+    if extra_kwargs:
+        device = extra_kwargs.get("device")
+        dtype_str = extra_kwargs.get("dtype")
+        if dtype_str:
+            # 转换 dtype 字符串为 torch.dtype
+            try:
+                import torch
+                dtype_map = {
+                    "float32": torch.float32,
+                    "float16": torch.float16,
+                    "bfloat16": torch.bfloat16,
+                    "fp32": torch.float32,
+                    "fp16": torch.float16,
+                    "bf16": torch.bfloat16,
+                }
+                torch_dtype = dtype_map.get(dtype_str.lower())
+            except Exception:
+                pass
+
     build_kwargs: Dict[str, Any] = {
         "revision": revision,
         "local_files_only": local_files_only
     }
+    
+    # 添加 torch_dtype 参数（如果指定）
+    if torch_dtype is not None:
+        build_kwargs["torch_dtype"] = torch_dtype
+    
+    # 保留其他 extra_kwargs（排除已处理的 device 和 dtype）
     if extra_kwargs:
-        build_kwargs.update(extra_kwargs)
+        for key, value in extra_kwargs.items():
+            if key not in ("device", "dtype"):
+                build_kwargs[key] = value
 
     try:
         pipeline = diffusers.DiffusionPipeline.from_pretrained(model_id, **build_kwargs)
+        
+        # 如果指定了设备，将 pipeline 移动到该设备
+        if device is not None and hasattr(pipeline, "to"):
+            try:
+                import torch
+                # 验证设备是否可用
+                if device == "cuda" and not torch.cuda.is_available():
+                    device = "cpu"
+                    build_meta["device_fallback"] = "cuda_unavailable"
+                pipeline = pipeline.to(device)
+                build_meta["device"] = device
+            except Exception as device_error:
+                build_meta["device_error"] = str(device_error)
+        
         build_meta["status"] = "built"
         build_meta["local_files_only"] = local_files_only
         build_meta["build_kwargs"] = dict(build_kwargs)
+        if torch_dtype is not None:
+            build_meta["torch_dtype"] = str(torch_dtype)
         return pipeline, build_meta, None
     except Exception as exc:
         build_meta["status"] = "failed"

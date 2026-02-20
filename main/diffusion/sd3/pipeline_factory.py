@@ -80,6 +80,17 @@ def build_pipeline_shell(cfg: Dict[str, Any]) -> Dict[str, Any]:
                 model_id = cfg.get("model_id")
                 model_source = cfg.get("model_source")
                 hf_revision = cfg.get("hf_revision")
+                
+                # 获取设备和精度配置
+                device = cfg.get("device", "cpu")
+                model_cfg = cfg.get("model", {})
+                dtype_str = model_cfg.get("dtype", "float32") if isinstance(model_cfg, dict) else "float32"
+                
+                # 构造 extra_kwargs 传递设备和精度信息
+                extra_kwargs = {
+                    "device": device,
+                    "dtype": dtype_str
+                }
 
                 if not isinstance(model_id, str) or not model_id:
                     pipeline_status = PIPELINE_STATUS_FAILED
@@ -95,7 +106,7 @@ def build_pipeline_shell(cfg: Dict[str, Any]) -> Dict[str, Any]:
                         model_id=model_id,
                         revision=hf_revision,
                         model_source=model_source,
-                        extra_kwargs=None
+                        extra_kwargs=extra_kwargs
                     )
                     pipeline_runtime_meta = build_meta if isinstance(build_meta, dict) else {}
                     _attach_resolved_revision(pipeline_obj, pipeline_runtime_meta)
