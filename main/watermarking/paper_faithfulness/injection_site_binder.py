@@ -65,6 +65,8 @@ def build_injection_site_spec(
 
     if isinstance(injection_rule_summary, dict):
         injection_site_spec["injection_rule_summary"] = injection_rule_summary
+        # 计算 injection_rule_digest（必达，供 alignment check 使用）
+        injection_site_spec["injection_rule_digest"] = digests.canonical_sha256(injection_rule_summary)
 
     # 从 cfg 中提取相关配置（若有）。
     if isinstance(cfg, dict):

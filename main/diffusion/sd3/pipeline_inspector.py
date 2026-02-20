@@ -64,6 +64,11 @@ def inspect_sd3_pipeline(
                 transformer_num_blocks = _safe_get_attr(
                     transformer_config, "num_layers", default="<absent>"
                 )
+            if transformer_num_blocks == "<absent>":
+                # 继续尝试其他可能的属性名
+                transformer_num_blocks = _safe_get_attr(
+                    transformer_config, "depth", default="<absent>"
+                )
             fingerprint["transformer_num_blocks"] = transformer_num_blocks
             fingerprint["transformer_attention_head_dim"] = _safe_get_attr(
                 transformer_config, "attention_head_dim", default="<absent>"
@@ -91,9 +96,16 @@ def inspect_sd3_pipeline(
     # 2) Scheduler 名称与关键超参。
     scheduler = getattr(pipeline_obj, "scheduler", None)
     if scheduler is not None:
+        # 首先尝试从 scheduler 对象获取类名
+        scheduler_class_name = scheduler.__class__.__name__
+        if not scheduler_class_name or scheduler_class_name == "<absent>":
+            scheduler_class_name = "<absent>"
+        
+        fingerprint["scheduler_class_name"] = scheduler_class_name
+        
+        # 然后尝试获取 config
         scheduler_config = getattr(scheduler, "config", None)
         if scheduler_config is not None:
-            fingerprint["scheduler_class_name"] = scheduler.__class__.__name__
             fingerprint["scheduler_num_train_timesteps"] = _safe_get_attr(
                 scheduler_config, "num_train_timesteps", default="<absent>"
             )
@@ -105,17 +117,23 @@ def inspect_sd3_pipeline(
             )
         else:
             fingerprint["scheduler_config_status"] = "config_missing"
-    else:
-        fingerprint["scheduler_status"] = "scheduler_missing"
 
-    # 3) VAE latent channels。
+    # 3) VAE latent channels（必达字段）。
     vae = getattr(pipeline_obj, "vae", None)
     if vae is not None:
         vae_config = getattr(vae, "config", None)
         if vae_config is not None:
-            fingerprint["vae_latent_channels"] = _safe_get_attr(
-                vae_config, "latent_channels", default="<absent>"
+            # 首先尝试标准字段名
+            vae_latent_channels = _safe_get_attr(
+                vae_config, "latent_channels", default=None
             )
+            if vae_latent_channels is None:
+                # Fallback：某些 VAE 配置可能使用 out_channels（压缩维度）
+                vae_latent_channels = _safe_get_attr(
+                    vae_config, "out_channels", default="<absent>"
+                )
+            fingerprint["vae_latent_channels"] = vae_latent_channels
+            
             fingerprint["vae_in_channels"] = _safe_get_attr(
                 vae_config, "in_channels", default="<absent>"
             )
