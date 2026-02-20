@@ -191,6 +191,27 @@ def run_sd3_inference(
                 )
             }
 
+        # 确保 pipeline 在正确的设备上
+        try:
+            import torch
+            if pipeline_obj is not None and hasattr(pipeline_obj, "to"):
+                # 验证设备参数
+                actual_device = device if device else "cpu"
+                if actual_device == "cuda" and not torch.cuda.is_available():
+                    actual_device = "cpu"
+                    inference_runtime_meta["device_fallback"] = "cuda_unavailable"
+                # 转移 pipeline 到指定设备
+                pipeline_obj = pipeline_obj.to(actual_device)
+                inference_runtime_meta["device_confirmed"] = actual_device
+        except Exception as device_setup_exc:
+            inference_status = INFERENCE_STATUS_FAILED
+            inference_error = f"device_setup_error: {device_setup_exc}"
+            return {
+                "inference_status": inference_status,
+                "inference_error": inference_error,
+                "inference_runtime_meta": inference_runtime_meta
+            }
+
         # 构造推理参数
         infer_kwargs = {
             "prompt": prompt,
@@ -201,7 +222,11 @@ def run_sd3_inference(
         }
         if seed is not None:
             import torch
-            generator = torch.Generator(device=device if device else "cpu")
+            # 确保 generator 在与 pipeline 一致的设备上
+            generator_device = device if device else "cpu"
+            if generator_device == "cuda" and not torch.cuda.is_available():
+                generator_device = "cpu"
+            generator = torch.Generator(device=generator_device)
             generator.manual_seed(seed)
             infer_kwargs["generator"] = generator
 
@@ -250,6 +275,33 @@ def run_sd3_inference(
         if callback_to_use is not None:
             infer_kwargs["callback_on_step_end"] = callback_to_use
             infer_kwargs["callback_on_step_end_tensor_inputs"] = ["latents"]
+
+        # 【关键】确保所有 text_encoder 的输出也在与 pipeline 相同的设备上
+        # 避免 "index is on cuda:0, different from other tensors on cpu" 的 CUDA 不匹配错误
+        try:
+            if hasattr(pipeline_obj, 'device') and pipeline_obj.device is not None:
+                confirmed_device = str(pipeline_obj.device)
+                inference_runtime_meta["pipeline_confirmed_device"] = confirmed_device
+                
+                # 检查 decoder（VAE）是否与 pipeline 在同一设备
+                if hasattr(pipeline_obj, 'vae') and pipeline_obj.vae is not None:
+                    vae_device = next(pipeline_obj.vae.parameters()).device
+                    if str(vae_device) != confirmed_device:
+                        inference_runtime_meta["device_mismatch_detected"] = f"vae on {vae_device}, pipeline expects {confirmed_device}"
+                        # 尝试修复
+                        pipeline_obj.vae = pipeline_obj.vae.to(confirmed_device)
+
+                # 检查所有 text_encoders
+                if hasattr(pipeline_obj, 'text_encoders') and pipeline_obj.text_encoders:
+                    for i, encoder in enumerate(pipeline_obj.text_encoders):
+                        if encoder is not None:
+                            enc_device = next(encoder.parameters()).device
+                            if str(enc_device) != confirmed_device:
+                                inference_runtime_meta[f"encoder_{i}_misaligned"] = str(enc_device)
+                                encoder = encoder.to(confirmed_device)
+        except Exception as device_align_exc:
+            # 设备对齐警告但不中断
+            inference_runtime_meta["device_alignment_warning"] = str(device_align_exc)
 
         # 执行推理并在支持时采样真实 trajectory 摘要。
         tap_call_result = trajectory_tap.tap_from_pipeline(
@@ -583,7 +635,7 @@ def _build_runtime_subspace_binding(
             "absent_reason": "latents_not_torch_tensor"
         }
 
-    latents_fp32 = latents.reshape(-1).to(dtype=torch.float32)
+    latents_fp32 = latents.reshape(-1).to(dtype=torch.float32, device=latents.device)
     latent_dim = int(latents_fp32.shape[0])
     if latent_dim <= 0:
         return {
