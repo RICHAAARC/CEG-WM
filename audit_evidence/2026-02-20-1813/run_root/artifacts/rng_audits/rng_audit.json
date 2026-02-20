@@ -1,0 +1,17 @@
+{
+  "_artifact_audit": {
+    "schema_version": "v1.0",
+    "writer": "records_io"
+  },
+  "cudnn_benchmark": "<absent>",
+  "rng_backend": "<absent>",
+  "seed_digest": "3df9cd31ad262c6c036a3d98547fc6d65864c3b218668f65789bff913495eb05",
+  "seed_parts": {
+    "key_id": "master_key_001",
+    "purpose": "embed",
+    "sample_idx": 0
+  },
+  "seed_rule_id": "stable_seed_from_parts_v1",
+  "seed_value": 4465826118756609132,
+  "torch_deterministic": "<absent>"
+}

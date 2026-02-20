@@ -1,0 +1,233 @@
+{
+  "cfg_digest": "955d788718891c72d1047b30aecf17d29083e884ed5d012fab0aec05509b051e",
+  "content_evidence": {
+    "alignment_digest": "c9c8ed7298880878156f0d2c73e6d16a74022b73d8880e150b1f63e62e7c31a9",
+    "alignment_report": {
+      "checks": [
+        {
+          "check_name": "pipeline_fingerprint_presence",
+          "check_rule": "SD3 pipeline fingerprint 必须存在且非占位",
+          "na_reason": "无法检查：pipeline_fingerprint 状态为 absent",
+          "result": "NA"
+        },
+        {
+          "check_name": "trajectory_digest_reproducibility",
+          "check_rule": "trajectory_digest 必须存在且可复算",
+          "na_reason": "trajectory tracing 未启用",
+          "result": "NA"
+        },
+        {
+          "check_name": "injection_site_alignment",
+          "check_rule": "injection_site_spec 必须与 paper_spec 对齐",
+          "evidence_fields": [
+            "hook_type",
+            "target_module_name",
+            "target_tensor_name",
+            "hook_timing",
+            "injection_rule_digest"
+          ],
+          "result": "PASS"
+        },
+        {
+          "check_name": "method_specific_parameter_binding",
+          "check_rule": "方法特定参数必须正确绑定",
+          "result": "PASS"
+        }
+      ],
+      "evaluator_version": "v1",
+      "fail_count": 0,
+      "na_count": 2,
+      "overall_status": "PASS",
+      "pass_count": 2,
+      "total_checks": 4
+    },
+    "audit": {
+      "trajectory_absent_reason": "tap_disabled",
+      "trajectory_tap_status": "absent"
+    },
+    "content_evidence": "absent",
+    "content_placeholder": true,
+    "content_signal": null,
+    "hf_score": null,
+    "hf_trace_digest": "9777e726b532977acf282598f350eeb72360e02fd854f0dbf659ef5e79b79413",
+    "injection_absent_reason": "inference_disabled",
+    "injection_failure_reason": null,
+    "injection_metrics": null,
+    "injection_params_digest": null,
+    "injection_site_digest": "fb9ef533805575b07745e77f443c849c6c1808dfbed4ea002fedd570089b8aef",
+    "injection_site_spec": {
+      "hf_channel_enabled": true,
+      "hook_timing": "after_scheduler_step",
+      "hook_type": "callback_on_step_end",
+      "injection_rule_digest": "58386ad28d3369db88515ba9f1c7cac6606440d6201b0c3f5fb3628bd8beb42f",
+      "injection_rule_summary": {
+        "injection_mode": "latent_direct",
+        "plan_digest": "<absent>"
+      },
+      "lf_channel_enabled": true,
+      "subspace_frame": "latent",
+      "target_module_name": "StableDiffusion3Pipeline",
+      "target_tensor_name": "latents"
+    },
+    "injection_status": "absent",
+    "injection_trace_digest": null,
+    "pipeline_fingerprint": {
+      "reason": "pipeline_obj_is_none",
+      "scheduler_class_name": "<absent>",
+      "status": "absent",
+      "transformer_num_blocks": "<absent>",
+      "vae_latent_channels": "<absent>"
+    },
+    "pipeline_fingerprint_digest": "d4e0639657e7dcdf0143ecc83711f032f7b3be6606033738bfceab0370d92b52",
+    "score_parts": {
+      "content_score_rule_version": "content_score_rule_v1",
+      "hf_failure_reason": "hf_subspace_missing",
+      "hf_metrics": {
+        "hf_failure_reason": "hf_subspace_missing",
+        "hf_status": "mismatch",
+        "metrics_digest": "afde903d5940f44277714cc5dd7961bf4866f0aabbaa46e6494ba7a6bb342662"
+      },
+      "hf_status": "mismatch"
+    },
+    "subspace_binding_digest": null,
+    "trajectory_evidence": {
+      "audit": {
+        "trajectory_absent_reason": "tap_disabled",
+        "trajectory_tap_status": "absent"
+      },
+      "device": "<absent>",
+      "status": "absent",
+      "trajectory_absent_reason": "tap_disabled",
+      "trajectory_digest": null,
+      "trajectory_metrics": null,
+      "trajectory_spec": null,
+      "trajectory_spec_digest": null,
+      "trajectory_stats": null,
+      "trajectory_tap_version": "v1"
+    }
+  },
+  "content_result": {
+    "content_evidence": "absent",
+    "content_placeholder": true,
+    "content_signal": null
+  },
+  "contract_bound_digest": "b7c6f44a4aaf09e63cf5b073923b8de04caebdbb8ec1d616236aacf817f05932",
+  "contract_canon_sha256": "d14dd799fdc34d2dc0c72e01c2a7bebc06eebcb3447c5facbe7819fa6e917d47",
+  "contract_digest": "d14dd799fdc34d2dc0c72e01c2a7bebc06eebcb3447c5facbe7819fa6e917d47",
+  "contract_file_sha256": "41a92d5878d3835481d5e8916c2c546928b6bedb33183f420cdb1804257527c2",
+  "contract_version": "v1.0",
+  "decision": {
+    "is_watermarked": null
+  },
+  "diffusers_version": "<absent>",
+  "embed_placeholder": true,
+  "env_fingerprint_canon_sha256": "914ddc03e19a53b17201ce7dd5b047900d86020f46587a0a573fa7fcef989d53",
+  "execution_report": {
+    "audit_obligations_satisfied": true,
+    "content_chain_status": "fail",
+    "fusion_status": "absent",
+    "geometry_chain_status": "absent"
+  },
+  "image_path": "placeholder_input.png",
+  "impl": {
+    "content_extractor_id": "content_baseline_noop_v1",
+    "digests": {
+      "content_extractor": "9ac1996e6747320d67a8ed7e0c61900dbe9f05b68d4a8c0f6d0cf10c688aa5f9",
+      "fusion_rule": "ed463f63bcbca661303250e9b7f2994d0acb25d3279035015b1001ae066aedac",
+      "geometry_extractor": "d3ac9f0e77a6ee33f4c0f80716e6888cfafa1c25932acd03542fba5336d59e3d",
+      "subspace_planner": "217a6541410307d09dabe119059dbadef000e466793dfe400b072ac75222c304",
+      "sync_module": "f25b8c2eee7955829b18e57fb26f4d425aebeecd9bf7d10acb3d39e2ee32c658"
+    },
+    "fusion_rule_id": "fusion_baseline_identity_v1",
+    "geometry_extractor_id": "geometry_baseline_noop_v1",
+    "subspace_planner_id": "subspace_baseline_full_v1",
+    "sync_module_id": "geometry_sync_baseline_v1",
+    "versions": {
+      "content_extractor": "v1",
+      "fusion_rule": "v1",
+      "geometry_extractor": "v1",
+      "subspace_planner": "v1",
+      "sync_module": "v1"
+    }
+  },
+  "impl_set_capabilities_digest": "d34ed01eb32ba680acd61ec49b28cc18b7c5aa7dea4d8b98a758f5e1d12ba387",
+  "infer_trace": {
+    "device": "<absent>",
+    "inference_enabled": false,
+    "inference_error": null,
+    "inference_guidance_scale": "<absent>",
+    "inference_height": "<absent>",
+    "inference_num_steps": "<absent>",
+    "inference_prompt": "<absent>",
+    "inference_status": "disabled",
+    "inference_width": "<absent>",
+    "output_image_count": 0,
+    "scheduler_config_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "seed": 4465826118756609132,
+    "trajectory_absent_reason": "tap_disabled",
+    "trajectory_digest": null,
+    "trajectory_spec_digest": null,
+    "trajectory_tap_status": "absent",
+    "trajectory_tap_version": "v1"
+  },
+  "infer_trace_canon_sha256": "73990566599bbeb1665a4dd2d0b8a97e272c4dc55990dd267aa3e0f62169d004",
+  "inference_error": null,
+  "inference_runtime_meta": null,
+  "inference_status": "disabled",
+  "model_provenance_canon_sha256": "e9e6bfa1cc46311ee70452c56520b7aa7531187b3ab2246edb1bcbbd1078d064",
+  "operation": "embed",
+  "paper_faithfulness": {
+    "spec_digest": "dd6c6da0c778ec0a0c04850d0ba168b40cbb1327357ab8f7e335309d8ca16917",
+    "spec_version": "v1.0"
+  },
+  "pipeline_impl_id": "sd3_diffusers_shell_v1",
+  "pipeline_provenance": {
+    "hf_revision": "main",
+    "local_files_only": "<absent>",
+    "model_id": "stabilityai/stable-diffusion-3.5-medium",
+    "model_revision": "<absent>",
+    "model_source": "hf",
+    "model_weights_sha256": "<absent>",
+    "pipeline_factory_entry": "main.diffusion.sd3.pipeline_factory",
+    "pipeline_impl_digest": "0e724df6fb5e651411e0048d648d2f5023b79a3cdcaabc1410eeadb16cccd0e6",
+    "pipeline_impl_id": "sd3_diffusers_shell_v1",
+    "pipeline_impl_version": "v1",
+    "resolved_revision": "<absent>",
+    "weights_snapshot_sha256": "<absent>"
+  },
+  "pipeline_provenance_canon_sha256": "b5e3cf10fe973bca91711c8ca5db17888afa479748dc7262cb1806159be73ad1",
+  "pipeline_runtime_meta": {},
+  "policy_path": "content_only",
+  "policy_path_semantics_bound_digest": "324f6229abedf87d04de92a2bbc2aaee94dc520ea78b2b7cf5757d2663e2fd6f",
+  "policy_path_semantics_canon_sha256": "ec820f0debdf243142cd868b3866988c0a3b77b9602356d8f0f409ee26208a1c",
+  "policy_path_semantics_digest": "ec820f0debdf243142cd868b3866988c0a3b77b9602356d8f0f409ee26208a1c",
+  "policy_path_semantics_file_sha256": "2e1891684d70ebb1e4cb03fe55338d228277d0d53179dd528b247845e9647bd1",
+  "policy_path_semantics_version": "v1.0",
+  "safetensors_version": "<absent>",
+  "schema_version": "v1.0",
+  "seed": 42,
+  "stats_applicability": "<absent>",
+  "strength": 0.5,
+  "subspace_plan": {
+    "subspace_frame": "full",
+    "subspace_method": "absent",
+    "subspace_source": "absent"
+  },
+  "sync_result": {
+    "sync_status": "unavailable",
+    "sync_success": false
+  },
+  "target_fpr": "<absent>",
+  "threshold_metadata_digest": "4b1a1fd21eae1652b67c38fae831b5ddbb41d8a5a34ef5579ea7a92b2123d96b",
+  "threshold_source": "<absent>",
+  "thresholds_digest": "bb4db91ef8a8cb1091a85312d23b81d8c693e6a17ea7ba53ade44a354a6f075b",
+  "thresholds_rule_id": "fusion_neyman_pearson_placeholder",
+  "thresholds_rule_version": "v1",
+  "transformers_version": "<absent>",
+  "watermarked_path": "placeholder_output.png",
+  "whitelist_bound_digest": "50e0e4f016844bf858a58e9b975ab8781ef660785a4166dec6bf9169f375c13f",
+  "whitelist_canon_sha256": "4b0886df6e974750443fe961b34f6bc92847037f1ece416b43aebe8ede111393",
+  "whitelist_digest": "4b0886df6e974750443fe961b34f6bc92847037f1ece416b43aebe8ede111393",
+  "whitelist_file_sha256": "009ae71b8a922ab125fa591e244176844d1adfee657e0b9915c598ddf4aa03f8",
+  "whitelist_version": "v1.0"
+}

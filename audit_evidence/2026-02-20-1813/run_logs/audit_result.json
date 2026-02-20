@@ -18,11 +18,21 @@
       "category": "B",
       "severity": "BLOCK",
       "result": "PASS",
-      "rule": "��ֹ�ƹ��ܿ�д��·��ֱ��д�� records ��ؼ�����",
+      "rule": "禁止绕过受控写盘路径直接写入 records 或关键产物",
       "evidence": {
         "matches": [
           {
-            "path": "D:\\Code\\CEG-WM\\main\\core\\config_loader.py",
+            "path": "/content/CEG-WM/main/core/status.py",
+            "lineno_start": 1215,
+            "lineno_end": 1215,
+            "symbol": "open",
+            "snippet": "open() access=read at line 1215",
+            "access": "read",
+            "mode": "r",
+            "classification": "ALLOWLISTED"
+          },
+          {
+            "path": "/content/CEG-WM/main/core/config_loader.py",
             "lineno_start": 194,
             "lineno_end": 194,
             "symbol": "Path.open",
@@ -32,7 +42,7 @@
             "classification": "ALLOWLISTED"
           },
           {
-            "path": "D:\\Code\\CEG-WM\\main\\core\\digests.py",
+            "path": "/content/CEG-WM/main/core/digests.py",
             "lineno_start": 135,
             "lineno_end": 135,
             "symbol": "Path.open",
@@ -42,7 +52,7 @@
             "classification": "ALLOWLISTED"
           },
           {
-            "path": "D:\\Code\\CEG-WM\\main\\core\\records_bundle.py",
+            "path": "/content/CEG-WM/main/core/records_bundle.py",
             "lineno_start": 319,
             "lineno_end": 319,
             "symbol": "Path.open",
@@ -52,7 +62,7 @@
             "classification": "ALLOWLISTED"
           },
           {
-            "path": "D:\\Code\\CEG-WM\\main\\core\\records_bundle.py",
+            "path": "/content/CEG-WM/main/core/records_bundle.py",
             "lineno_start": 347,
             "lineno_end": 347,
             "symbol": "Path.open",
@@ -62,17 +72,28 @@
             "classification": "ALLOWLISTED"
           },
           {
-            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "path": "/content/CEG-WM/main/core/records_io.py",
+            "lineno_start": 1272,
+            "lineno_end": 1272,
+            "symbol": "os.open",
+            "snippet": "os.open() access=unknown flags=unknown at line 1272",
+            "access": "unknown",
+            "mode": null,
+            "os_flags": "unknown",
+            "classification": "ALLOWLISTED"
+          },
+          {
+            "path": "/content/CEG-WM/main/core/records_io.py",
             "lineno_start": 1272,
             "lineno_end": 1272,
             "symbol": "Path.open",
             "snippet": "Path.open() access=unknown at line 1272",
             "access": "unknown",
             "mode": null,
-            "classification": "WARNING"
+            "classification": "ALLOWLISTED"
           },
           {
-            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "path": "/content/CEG-WM/main/core/records_io.py",
             "lineno_start": 1402,
             "lineno_end": 1402,
             "symbol": "Path.open",
@@ -82,7 +103,7 @@
             "classification": "ALLOWLISTED"
           },
           {
-            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "path": "/content/CEG-WM/main/core/records_io.py",
             "lineno_start": 1425,
             "lineno_end": 1425,
             "symbol": "Path.open",
@@ -92,7 +113,7 @@
             "classification": "ALLOWLISTED"
           },
           {
-            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "path": "/content/CEG-WM/main/core/records_io.py",
             "lineno_start": 1484,
             "lineno_end": 1484,
             "symbol": "shutil.copy2",
@@ -101,7 +122,7 @@
             "classification": "ALLOWLISTED"
           },
           {
-            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "path": "/content/CEG-WM/main/core/records_io.py",
             "lineno_start": 1556,
             "lineno_end": 1556,
             "symbol": "shutil.copy2",
@@ -110,17 +131,7 @@
             "classification": "ALLOWLISTED"
           },
           {
-            "path": "D:\\Code\\CEG-WM\\main\\core\\status.py",
-            "lineno_start": 1206,
-            "lineno_end": 1206,
-            "symbol": "open",
-            "snippet": "open() access=read at line 1206",
-            "access": "read",
-            "mode": "r",
-            "classification": "ALLOWLISTED"
-          },
-          {
-            "path": "D:\\Code\\CEG-WM\\main\\watermarking\\fusion\\neyman_pearson.py",
+            "path": "/content/CEG-WM/main/watermarking/fusion/neyman_pearson.py",
             "lineno_start": 306,
             "lineno_end": 306,
             "symbol": "Path.open",
@@ -130,7 +141,7 @@
             "classification": "ALLOWLISTED"
           },
           {
-            "path": "D:\\Code\\CEG-WM\\scripts\\run_freeze_signoff.py",
+            "path": "/content/CEG-WM/scripts/run_freeze_signoff.py",
             "lineno_start": 530,
             "lineno_end": 530,
             "symbol": "open",
@@ -141,10 +152,10 @@
           }
         ],
         "fail_count": 0,
-        "allowlisted_count": 11,
-        "warning_count": 1
+        "allowlisted_count": 13,
+        "warning_count": 0
       },
-      "impact": "δ������ϼ�д����·",
+      "impact": "未发现阻断级写盘旁路",
       "fix": "N.A."
     },
     {
@@ -153,11 +164,11 @@
       "category": "A",
       "severity": "BLOCK",
       "result": "PASS",
-      "rule": "��ֹ����ȫ�� YAML ���أ��� YAML ������ڱ���Ψһ",
+      "rule": "禁止不安全的 YAML 加载，且 YAML 解析入口必须唯一",
       "evidence": {
         "matches": [
           {
-            "path": "D:\\Code\\CEG-WM\\tests\\test_lf_parameter_drift_detection.py",
+            "path": "/content/CEG-WM/tests/test_lf_parameter_drift_detection.py",
             "lineno_start": 257,
             "lineno_end": 257,
             "symbol": "yaml.safe_load",
@@ -165,7 +176,15 @@
             "severity": "SAFE_LOAD_ENTRY"
           },
           {
-            "path": "D:\\Code\\CEG-WM\\scripts\\audits\\audit_injection_scope_manifest_binding.py",
+            "path": "/content/CEG-WM/main/core/config_loader.py",
+            "lineno_start": 195,
+            "lineno_end": 195,
+            "symbol": "yaml.safe_load",
+            "snippet": "yaml.safe_load() at line 195",
+            "severity": "SAFE_LOAD_ENTRY"
+          },
+          {
+            "path": "/content/CEG-WM/scripts/audits/audit_injection_scope_manifest_binding.py",
             "lineno_start": 298,
             "lineno_end": 298,
             "symbol": "yaml.safe_load",
@@ -173,7 +192,7 @@
             "severity": "SAFE_LOAD_ENTRY"
           },
           {
-            "path": "D:\\Code\\CEG-WM\\scripts\\audits\\audit_injection_scope_manifest_binding.py",
+            "path": "/content/CEG-WM/scripts/audits/audit_injection_scope_manifest_binding.py",
             "lineno_start": 312,
             "lineno_end": 312,
             "symbol": "yaml.safe_load",
@@ -181,19 +200,27 @@
             "severity": "SAFE_LOAD_ENTRY"
           },
           {
-            "path": "D:\\Code\\CEG-WM\\main\\core\\config_loader.py",
-            "lineno_start": 195,
-            "lineno_end": 195,
+            "path": "/content/CEG-WM/scripts/audits/audit_paper_faithfulness.py",
+            "lineno_start": 90,
+            "lineno_end": 90,
             "symbol": "yaml.safe_load",
-            "snippet": "yaml.safe_load() at line 195",
+            "snippet": "yaml.safe_load() at line 90",
+            "severity": "SAFE_LOAD_ENTRY"
+          },
+          {
+            "path": "/content/CEG-WM/scripts/audits/audit_paper_faithfulness.py",
+            "lineno_start": 149,
+            "lineno_end": 149,
+            "symbol": "yaml.safe_load",
+            "snippet": "yaml.safe_load() at line 149",
             "severity": "SAFE_LOAD_ENTRY"
           }
         ],
         "unsafe_count": 0,
-        "safe_load_entry_count": 4,
+        "safe_load_entry_count": 6,
         "main_non_canonical_safe_load_count": 0
       },
-      "impact": "���� YAML ���ؾ�ʹ�ð�ȫ���",
+      "impact": "所有 YAML 加载均使用安全入口",
       "fix": "N.A."
     },
     {
@@ -202,12 +229,12 @@
       "category": "A",
       "severity": "BLOCK",
       "result": "PASS",
-      "rule": "������Լ�ļ�������ڡ����������Ψһ��schema Ȩ������records ���� schema_version",
+      "rule": "冻结契约文件必须存在、解释面入口唯一、schema 权威化、records 包含 schema_version",
       "evidence": {
         "anchors": {
-          "canonical_config_loader": "D:\\Code\\CEG-WM\\main\\core\\config_loader.py",
-          "schema_module": "D:\\Code\\CEG-WM\\main\\core\\schema.py",
-          "records_io_module": "D:\\Code\\CEG-WM\\main\\core\\records_io.py"
+          "canonical_config_loader": "/content/CEG-WM/main/core/config_loader.py",
+          "schema_module": "/content/CEG-WM/main/core/schema.py",
+          "records_io_module": "/content/CEG-WM/main/core/records_io.py"
         },
         "checks": {
           "existence": {
@@ -219,9 +246,9 @@
             "check": "interpretation_entry_uniqueness",
             "pass": true,
             "canonical_entry": [
-              "D:\\Code\\CEG-WM\\main\\core\\config_loader.py",
-              "D:\\Code\\CEG-WM\\main\\core\\contracts.py",
-              "D:\\Code\\CEG-WM\\main\\policy\\runtime_whitelist.py"
+              "/content/CEG-WM/main/core/config_loader.py",
+              "/content/CEG-WM/main/core/contracts.py",
+              "/content/CEG-WM/main/policy/runtime_whitelist.py"
             ],
             "non_canonical_references": []
           },
@@ -239,7 +266,7 @@
         },
         "frozen_file_references": []
       },
-      "impact": "����������������Ҫ��",
+      "impact": "冻结面完整性满足要求",
       "fix": "N.A."
     },
     {
@@ -248,7 +275,7 @@
       "category": "C",
       "severity": "BLOCK",
       "result": "PASS",
-      "rule": "ע������� seal �󲻿ɱ䣬�Ҳ��ɱ�������ע��",
+      "rule": "注册表必须 seal 后不可变，且不可被运行期注入",
       "evidence": {
         "matches": [],
         "env_injection_count": 0,
@@ -261,7 +288,7 @@
           "has_lock_indicator": true
         }
       },
-      "impact": "ע������������Ҫ��",
+      "impact": "注册表封闭性满足要求",
       "fix": "N.A."
     },
     {
@@ -270,14 +297,14 @@
       "category": "B",
       "severity": "BLOCK",
       "result": "PASS",
-      "rule": "policy_path �������� runtime whitelist������汾�󶨣�·������ִ���������֤��",
+      "rule": "policy_path 必须来自 runtime whitelist，语义版本绑定，路径策略执行留存审计证据",
       "evidence": {
         "anchors": {
-          "path_policy_module": "D:\\Code\\CEG-WM\\main\\policy\\path_policy.py",
-          "runtime_whitelist_module": "D:\\Code\\CEG-WM\\main\\policy\\runtime_whitelist.py",
+          "path_policy_module": "/content/CEG-WM/main/policy/path_policy.py",
+          "runtime_whitelist_module": "/content/CEG-WM/main/policy/runtime_whitelist.py",
           "policy_config_files": [
-            "D:\\Code\\CEG-WM\\configs\\runtime_whitelist.yaml",
-            "D:\\Code\\CEG-WM\\configs\\policy_path_semantics.yaml"
+            "/content/CEG-WM/configs/runtime_whitelist.yaml",
+            "/content/CEG-WM/configs/policy_path_semantics.yaml"
           ]
         },
         "checks": {
@@ -306,7 +333,7 @@
           }
         }
       },
-      "impact": "policy_path ���������Ҫ��",
+      "impact": "policy_path 语义绑定满足要求",
       "fix": "N.A."
     },
     {
@@ -321,30 +348,30 @@
           {
             "check": "manifest_exists",
             "pass": true,
-            "path": "D:\\Code\\CEG-WM\\configs\\injection_scope_manifest.yaml"
+            "path": "/content/CEG-WM/configs/injection_scope_manifest.yaml"
           },
           {
             "check": "config_loader_entry",
             "pass": true,
-            "path": "D:\\Code\\CEG-WM\\main\\core\\config_loader.py",
+            "path": "/content/CEG-WM/main/core/config_loader.py",
             "has_const": true,
             "has_loader": true
           },
           {
             "check": "injection_scope_module",
             "pass": true,
-            "path": "D:\\Code\\CEG-WM\\main\\core\\injection_scope.py"
+            "path": "/content/CEG-WM/main/core/injection_scope.py"
           },
           {
             "check": "bound_fact_sources_fields",
             "pass": true,
-            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "path": "/content/CEG-WM/main/core/records_io.py",
             "missing_fields": []
           },
           {
             "check": "schema_required_fields",
             "pass": true,
-            "path": "D:\\Code\\CEG-WM\\main\\core\\schema.py",
+            "path": "/content/CEG-WM/main/core/schema.py",
             "missing_fields": []
           },
           {
@@ -352,19 +379,19 @@
             "pass": true,
             "missing_entries": [],
             "details": {
-              "D:\\Code\\CEG-WM\\main\\cli\\run_embed.py": {
+              "/content/CEG-WM/main/cli/run_embed.py": {
                 "has_loader": true,
                 "has_binding": true
               },
-              "D:\\Code\\CEG-WM\\main\\cli\\run_detect.py": {
+              "/content/CEG-WM/main/cli/run_detect.py": {
                 "has_loader": true,
                 "has_binding": true
               },
-              "D:\\Code\\CEG-WM\\main\\cli\\run_calibrate.py": {
+              "/content/CEG-WM/main/cli/run_calibrate.py": {
                 "has_loader": true,
                 "has_binding": true
               },
-              "D:\\Code\\CEG-WM\\main\\cli\\run_evaluate.py": {
+              "/content/CEG-WM/main/cli/run_evaluate.py": {
                 "has_loader": true,
                 "has_binding": true
               }
@@ -374,16 +401,18 @@
             "check": "digest_inputs_non_empty",
             "pass": true,
             "missing_fields": [],
-            "path": "D:\\Code\\CEG-WM\\configs\\injection_scope_manifest.yaml"
+            "path": "/content/CEG-WM/configs/injection_scope_manifest.yaml"
           },
           {
             "check": "impl_id_closure",
             "pass": true,
             "manifest_impl_ids": [
               "content_baseline_noop_v1",
+              "content_detector_v1",
               "fusion_baseline_identity_v1",
               "geometry_baseline_noop_v1",
               "geometry_sync_baseline_v1",
+              "low_freq_coder_v1",
               "semantic_mask_provider_v1",
               "subspace_baseline_full_v1",
               "subspace_planner_v1"
@@ -394,10 +423,16 @@
               "fusion_baseline_identity_v1",
               "geometry_baseline_noop_v1",
               "geometry_sync_baseline_v1",
+              "high_freq_coder_v1",
+              "injection_site_binder_v1",
               "low_freq_coder_v1",
+              "paper_alignment_evaluator_v1",
+              "sd3_diffusion_tracer_v1",
+              "sd3_pipeline_inspector_v1",
               "semantic_mask_provider_v1",
               "subspace_baseline_full_v1",
-              "subspace_planner_v1"
+              "subspace_planner_v1",
+              "unified_latent_modifier_v1"
             ],
             "unmapped_impl_ids": null,
             "rule": "allowed_impl_ids ⊆ allowed_flat (命名闭合性)",
@@ -414,7 +449,7 @@
       "category": "D",
       "severity": "BLOCK",
       "result": "PASS",
-      "rule": "��ֹ eval/exec/compile/pickle.load ��Σ��ִ���벻��ȫ���л�",
+      "rule": "禁止 eval/exec/compile/pickle.load 等危险执行与不安全序列化",
       "evidence": {
         "matches": [],
         "fail_count": 0,
@@ -423,7 +458,7 @@
         "unsafe_deserialization_count": 0,
         "dynamic_import_count": 0
       },
-      "impact": "δ����Σ�յĶ�ִ̬�л򲻰�ȫ���л�",
+      "impact": "未发现危险的动态执行或不安全序列化",
       "fix": "N.A."
     },
     {
@@ -432,15 +467,15 @@
       "category": "D",
       "severity": "BLOCK",
       "result": "PASS",
-      "rule": "��ֹ����ʱ��ʽ������ʻ����أ������������������Ʋ�ê����Դ",
+      "rule": "禁止运行时隐式网络访问或下载，所有网络操作必须审计并锚定来源",
       "evidence": {
         "matches": [
           {
-            "path": "D:\\Code\\CEG-WM\\main\\diffusion\\sd3\\weights_snapshot.py",
-            "lineno_start": 200,
-            "lineno_end": 200,
+            "path": "/content/CEG-WM/main/diffusion/sd3/weights_snapshot.py",
+            "lineno_start": 218,
+            "lineno_end": 218,
             "symbol": "snapshot_download",
-            "snippet": "snapshot_download() at line 200",
+            "snippet": "snapshot_download() at line 218",
             "risk": "model_download",
             "classification": "CONTROLLED"
           }
@@ -452,12 +487,12 @@
         "model_download_count": 0,
         "subprocess_download_count": 0
       },
-      "impact": "���� 1 ���ܿ����ص��ã����� freeze_gate + whitelist ���ǣ�",
+      "impact": "发现 1 处受控下载调用（已由 freeze_gate + whitelist 覆盖）",
       "fix": "N.A."
     }
   ],
   "metadata": {
-    "repo_root": "D:\\Code\\CEG-WM",
+    "repo_root": "/content/CEG-WM",
     "audit_count": 8,
     "audit_scripts": [
       "audits/audit_write_bypass_scan.py",
@@ -467,7 +502,9 @@
       "audits/audit_policy_path_semantics_binding.py",
       "audits/audit_injection_scope_manifest_binding.py",
       "audits/audit_dangerous_exec_and_pickle_scan.py",
-      "audits/audit_network_access_scan.py"
+      "audits/audit_network_access_scan.py",
+      "audits/audit_paper_faithfulness.py",
+      "audits/audit_paper_faithfulness_runtime_must_have.py"
     ]
   }
 }

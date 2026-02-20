@@ -1,0 +1,29 @@
+{
+  "_artifact_audit": {
+    "schema_version": "v1.0",
+    "writer": "records_io"
+  },
+  "anchors": {
+    "contract_bound_digest": "b7c6f44a4aaf09e63cf5b073923b8de04caebdbb8ec1d616236aacf817f05932",
+    "contract_version": "v1.0",
+    "policy_path": "content_only",
+    "policy_path_semantics_bound_digest": "324f6229abedf87d04de92a2bbc2aaee94dc520ea78b2b7cf5757d2663e2fd6f",
+    "policy_path_semantics_version": "v1.0",
+    "whitelist_bound_digest": "50e0e4f016844bf858a58e9b975ab8781ef660785a4166dec6bf9169f375c13f",
+    "whitelist_version": "v1.0"
+  },
+  "bundle_canon_sha256": "3e64ad40b5212ee7c5ba3073d3e617577ee243099cae430b1e71c09f340f511d",
+  "file_count": 1,
+  "files": [
+    {
+      "canon_sha256": "f64573bf6d585e0da7d1ff4ef973cad757fb0e19cd461739bdc2acd4bba8c689",
+      "file_sha256": "f7f792adb9fe75b6def902aa2a4ef070532ccc478777fedb2b9497bbbefbe78b",
+      "file_type": "json",
+      "path": "detect_record.json",
+      "record_count": 1
+    }
+  ],
+  "manifest_name": "records_manifest.json",
+  "records_dir": "/content/run_root_detect/records",
+  "schema_version": "v1.0"
+}

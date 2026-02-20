@@ -1,0 +1,11 @@
+{
+  "_artifact_audit": {
+    "schema_version": "v1.0",
+    "writer": "records_io"
+  },
+  "cfg_audit_canon_sha256": "7d600f597f308d526358e3728f61cd00f59bd4118e4e6052a7f0290d097712b2",
+  "cfg_digest": "955d788718891c72d1047b30aecf17d29083e884ed5d012fab0aec05509b051e",
+  "cfg_pruned_for_digest_canon_sha256": "955d788718891c72d1047b30aecf17d29083e884ed5d012fab0aec05509b051e",
+  "config_path": "/content/temp_runtime.yaml",
+  "overrides_applied_summary": null
+}
