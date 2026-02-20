@@ -185,15 +185,15 @@ def run_detect_orchestrator(
     # (S-D) Paper Faithfulness: 验证 paper faithfulness 证据一致性（必达）
     # 注意：只在 input_record 存在且包含 paper_faithfulness 信息时才添加到全局 mismatch_reasons
     # 这样可以避免单元测试中使用不完整 input_record 时产生副作用
-    paper_faithfulness_status, paper_faithfulness_mismatch_reasons = _evaluate_paper_faithfulness_consistency(
+    paper_faithfulness_status, paper_absent_reasons, paper_mismatch_reasons, paper_fail_reasons = _evaluate_paper_faithfulness_consistency(
         input_record=input_record
     )
     
     # 仅当 input_record 存在且包含 paper_faithfulness 字段时，才将缺失视为 mismatch
     if input_record is not None and isinstance(input_record.get("paper_faithfulness"), dict):
         # input_record 包含 paper_faithfulness，所以缺失或不一致是真实的 mismatch
-        if paper_faithfulness_mismatch_reasons:
-            mismatch_reasons.extend(paper_faithfulness_mismatch_reasons)
+        if paper_mismatch_reasons:
+            mismatch_reasons.extend(paper_mismatch_reasons)
 
     primary_mismatch_reason, primary_mismatch_field_path = _resolve_primary_mismatch(
         mismatch_reasons
@@ -447,10 +447,12 @@ def run_detect_orchestrator(
         "content_result": content_result,
         "geometry_result": geometry_result,
         "fusion_result": fusion_result,
-        # (S-D) Paper Faithfulness: 添加一致性验证结果
+        # (S-D) Paper Faithfulness: 添加一致性验证结果（结构化 failure semantics）
         "paper_faithfulness": {
             "status": paper_faithfulness_status,
-            "mismatch_reasons": paper_faithfulness_mismatch_reasons if paper_faithfulness_mismatch_reasons else []
+            "absent_reasons": paper_absent_reasons,
+            "mismatch_reasons": paper_mismatch_reasons,
+            "fail_reasons": paper_fail_reasons
         }
     }
     return record
@@ -653,20 +655,23 @@ def _evaluate_injection_consistency(
 
 def _evaluate_paper_faithfulness_consistency(
     input_record: Optional[Dict[str, Any]]
-) -> tuple[str, list[str]]:
+) -> tuple[str, list[str], list[str], list[str]]:
     """
     功能：校验 paper faithfulness 证据一致性（S-D 必达）。
 
     Evaluate paper faithfulness evidence consistency between embed-time record.
     Validates: pipeline_fingerprint_digest, injection_site_digest, paper_spec_digest.
+    Returns structured failure semantics: absent_reasons / mismatch_reasons / fail_reasons.
 
     Args:
         input_record: Embed-time input record mapping or None.
 
     Returns:
-        Tuple of (status, mismatch_reasons_list).
-        status is one of: "ok", "absent", "mismatch".
-        mismatch_reasons_list contains tokens like "pipeline_fingerprint_digest_absent".
+        Tuple of (status, absent_reasons, mismatch_reasons, fail_reasons).
+        status is one of: "ok", "absent", "mismatch", "fail".
+        absent_reasons: list of tokens for missing required evidence (non-empty if status="absent").
+        mismatch_reasons: list of tokens for inconsistent evidence (non-empty if status="mismatch").
+        fail_reasons: list of tokens for failed validation (non-empty if status="fail").
 
     Raises:
         TypeError: If input_record type is invalid.
@@ -674,10 +679,13 @@ def _evaluate_paper_faithfulness_consistency(
     if input_record is not None and not isinstance(input_record, dict):
         raise TypeError("input_record must be dict or None")
 
+    absent_reasons: list[str] = []
     mismatch_reasons: list[str] = []
+    fail_reasons: list[str] = []
 
     if input_record is None:
-        return "absent", mismatch_reasons
+        absent_reasons.append("input_record_is_none")
+        return "absent", absent_reasons, mismatch_reasons, fail_reasons
 
     # 提取 embed-time paper faithfulness 证据。
     embed_content_evidence = None
@@ -689,36 +697,59 @@ def _evaluate_paper_faithfulness_consistency(
 
     embed_paper_faithfulness = input_record.get("paper_faithfulness")
 
-    # 验证 paper_spec_digest 存在性。
+    # (1) 验证 paper_spec_digest 存在性（absent vs mismatch）。
     if isinstance(embed_paper_faithfulness, dict):
         spec_digest = embed_paper_faithfulness.get("spec_digest")
-        if not isinstance(spec_digest, str) or not spec_digest or spec_digest in ("<absent>", "<failed>"):
-            mismatch_reasons.append("paper_spec_digest_absent_or_invalid")
+        if spec_digest == "<absent>":
+            absent_reasons.append("paper_spec_digest_marked_absent")
+        elif spec_digest == "<failed>":
+            fail_reasons.append("paper_spec_digest_marked_failed")
+        elif not isinstance(spec_digest, str) or not spec_digest:
+            absent_reasons.append("paper_spec_digest_missing")
     else:
-        mismatch_reasons.append("paper_faithfulness_section_absent")
+        absent_reasons.append("paper_faithfulness_section_absent")
 
-    # 验证 pipeline_fingerprint_digest 存在性。
-    if isinstance(embed_content_evidence, dict):
-        pipeline_fingerprint_digest = embed_content_evidence.get("pipeline_fingerprint_digest")
-        if not isinstance(pipeline_fingerprint_digest, str) or not pipeline_fingerprint_digest or pipeline_fingerprint_digest in ("<absent>", "<failed>"):
-            mismatch_reasons.append("pipeline_fingerprint_digest_absent_or_invalid")
+    # (2) 验证 content_evidence 存在性。
+    if not isinstance(embed_content_evidence, dict):
+        absent_reasons.append("content_evidence_absent")
+        return "absent", absent_reasons, mismatch_reasons, fail_reasons
 
-        # 验证 injection_site_digest 存在性。
-        injection_site_digest = embed_content_evidence.get("injection_site_digest")
-        if not isinstance(injection_site_digest, str) or not injection_site_digest or injection_site_digest in ("<absent>", "<failed>"):
-            mismatch_reasons.append("injection_site_digest_absent_or_invalid")
+    # (3) 验证 pipeline_fingerprint_digest 存在性（absent vs fail）。
+    pipeline_fingerprint_digest = embed_content_evidence.get("pipeline_fingerprint_digest")
+    if pipeline_fingerprint_digest == "<absent>":
+        absent_reasons.append("pipeline_fingerprint_digest_marked_absent")
+    elif pipeline_fingerprint_digest == "<failed>":
+        fail_reasons.append("pipeline_fingerprint_digest_marked_failed")
+    elif not isinstance(pipeline_fingerprint_digest, str) or not pipeline_fingerprint_digest:
+        absent_reasons.append("pipeline_fingerprint_digest_missing")
 
-        # 验证 alignment_digest 存在性。
-        alignment_digest = embed_content_evidence.get("alignment_digest")
-        if not isinstance(alignment_digest, str) or not alignment_digest or alignment_digest in ("<absent>", "<failed>"):
-            mismatch_reasons.append("alignment_digest_absent_or_invalid")
-    else:
-        mismatch_reasons.append("content_evidence_absent")
+    # (4) 验证 injection_site_digest 存在性（absent vs fail）。
+    injection_site_digest = embed_content_evidence.get("injection_site_digest")
+    if injection_site_digest == "<absent>":
+        absent_reasons.append("injection_site_digest_marked_absent")
+    elif injection_site_digest == "<failed>":
+        fail_reasons.append("injection_site_digest_marked_failed")
+    elif not isinstance(injection_site_digest, str) or not injection_site_digest:
+        absent_reasons.append("injection_site_digest_missing")
 
+    # (5) 验证 alignment_digest 存在性（absent vs fail）。
+    alignment_digest = embed_content_evidence.get("alignment_digest")
+    if alignment_digest == "<absent>":
+        absent_reasons.append("alignment_digest_marked_absent")
+    elif alignment_digest == "<failed>":
+        fail_reasons.append("alignment_digest_marked_failed")
+    elif not isinstance(alignment_digest, str) or not alignment_digest:
+        absent_reasons.append("alignment_digest_missing")
+
+    # (6) 决定最终 status（优先级：fail > mismatch > absent > ok）。
+    if len(fail_reasons) > 0:
+        return "fail", absent_reasons, mismatch_reasons, fail_reasons
     if len(mismatch_reasons) > 0:
-        return "mismatch", mismatch_reasons
+        return "mismatch", absent_reasons, mismatch_reasons, fail_reasons
+    if len(absent_reasons) > 0:
+        return "absent", absent_reasons, mismatch_reasons, fail_reasons
 
-    return "ok", mismatch_reasons
+    return "ok", absent_reasons, mismatch_reasons, fail_reasons
 
 
 def _extract_lf_evidence_from_input_record(input_record: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:

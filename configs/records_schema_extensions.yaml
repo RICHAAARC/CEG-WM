@@ -468,3 +468,38 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "HF 重复因子（T2SMark 等方法的 repetition code 参数）。"
+  # ==============================================================
+  # Paper Faithfulness detect 侧一致性验证扩展（append-only v1.0）
+  # - 结构化 failure semantics：absent_reasons / mismatch_reasons / fail_reasons
+  # - status 为 "ok" 时，所有 reasons 数组为空列表
+  # - status 为 "absent" 时 absent_reasons 必须非空
+  # - status 为 "mismatch" 时 mismatch_reasons 必须非空
+  # - status 为 "fail" 时 fail_reasons 必须非空
+  # ==============================================================
+  - path: "paper_faithfulness.status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "paper faithfulness 一致性验证状态（ok/absent/mismatch/fail）。"
+  
+  - path: "paper_faithfulness.absent_reasons"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "paper faithfulness 证据缺失原因列表（必须非空当 status='absent'）。"
+  
+  - path: "paper_faithfulness.mismatch_reasons"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "paper faithfulness 证据不一致原因列表（必须非空当 status='mismatch'）。"
+  
+  - path: "paper_faithfulness.fail_reasons"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "paper faithfulness 验证失败原因列表（必须非空当 status='fail'）。"
