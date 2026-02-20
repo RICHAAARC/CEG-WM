@@ -210,6 +210,7 @@ def _resolve_pipeline_build_enabled(cfg: Dict[str, Any]) -> Tuple[bool, str | No
     功能：解析 pipeline_build_enabled 运行期开关。
 
     Resolve optional pipeline_build_enabled flag from cfg.
+    When paper_faithfulness is enabled, pipeline building is always mandatory.
 
     Args:
         cfg: Configuration mapping.
@@ -224,6 +225,16 @@ def _resolve_pipeline_build_enabled(cfg: Dict[str, Any]) -> Tuple[bool, str | No
         # cfg 类型不合法，必须 fail-fast。
         raise TypeError("cfg must be dict")
 
+    # 检查 paper_faithfulness 是否启用
+    # 当启用 paper_faithfulness 时，pipeline 构造必须强制开启
+    paper_faithfulness_cfg = cfg.get("paper_faithfulness", {})
+    if isinstance(paper_faithfulness_cfg, dict):
+        pf_enabled = paper_faithfulness_cfg.get("enabled", False)
+        if pf_enabled:
+            # paper_faithfulness 启用 → 必须构造 pipeline
+            return True, None
+
+    # 否则，读取 pipeline_build_enabled 配置（默认为 True）
     build_enabled = cfg.get("pipeline_build_enabled", True)
     if not isinstance(build_enabled, bool):
         return False, "pipeline_build_enabled must be bool"

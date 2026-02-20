@@ -37,7 +37,7 @@ def evaluate_alignment(
         pipeline_fingerprint: SD3 pipeline fingerprint dict.
         trajectory_evidence: Diffusion trajectory evidence dict.
         injection_site_spec: Injection site spec dict.
-        cfg: Configuration mapping.
+        cfg: Configuration mapping (包含 enable_paper_faithfulness 等开关).
 
     Returns:
         Tuple of (alignment_report dict, alignment_digest str).
@@ -53,14 +53,26 @@ def evaluate_alignment(
     if not isinstance(cfg, dict):
         raise TypeError("cfg must be dict")
 
+    # 确定是否启用 paper_faithfulness（用于决定 absent 状态是否升级为 FAIL）
+    paper_faithfulness_cfg = cfg.get("paper_faithfulness", {})
+    is_paper_faithfulness_enabled = False
+    if isinstance(paper_faithfulness_cfg, dict):
+        is_paper_faithfulness_enabled = paper_faithfulness_cfg.get("enabled", False)
+
     alignment_checks = []
 
     # 检查 1：pipeline_fingerprint 必须存在且非占位。
-    check_1 = _check_pipeline_fingerprint_presence(pipeline_fingerprint)
+    check_1 = _check_pipeline_fingerprint_presence(
+        pipeline_fingerprint,
+        enable_paper_faithfulness=is_paper_faithfulness_enabled
+    )
     alignment_checks.append(check_1)
 
     # 检查 2：trajectory_digest 必须存在且可复算。
-    check_2 = _check_trajectory_digest_reproducibility(trajectory_evidence)
+    check_2 = _check_trajectory_digest_reproducibility(
+        trajectory_evidence,
+        enable_paper_faithfulness=is_paper_faithfulness_enabled
+    )
     alignment_checks.append(check_2)
 
     # 检查 3：injection_site_spec 必须与 paper_spec 对齐。
@@ -96,7 +108,8 @@ def evaluate_alignment(
 
 
 def _check_pipeline_fingerprint_presence(
-    pipeline_fingerprint: Optional[Dict[str, Any]]
+    pipeline_fingerprint: Optional[Dict[str, Any]],
+    enable_paper_faithfulness: bool = False
 ) -> Dict[str, Any]:
     """
     功能：检查 pipeline_fingerprint 是否存在且非占位。
@@ -105,6 +118,7 @@ def _check_pipeline_fingerprint_presence(
 
     Args:
         pipeline_fingerprint: Pipeline fingerprint dict.
+        enable_paper_faithfulness: Whether paper faithfulness is enabled (影响 absent 是否升级为 FAIL).
 
     Returns:
         Check result dict with result in [PASS, FAIL, NA].
@@ -129,15 +143,25 @@ def _check_pipeline_fingerprint_presence(
         }
 
     # 检查 pipeline 是否处于不可评估的状态（absent 或 failed）
-    # 当 pipeline_obj 为 None 或构建失败时，无法获得真实的结构信息，应返回 NA
     pipeline_status = pipeline_fingerprint.get("status")
     if pipeline_status in ["absent", "failed"]:
-        return {
-            "check_name": check_name,
-            "check_rule": check_rule,
-            "result": "NA",
-            "na_reason": f"无法检查：pipeline_fingerprint 状态为 {pipeline_status}"
-        }
+        # 当启用 paper_faithfulness 时，absent/failed 状态必须升级为 FAIL（不允许 NA）
+        # 因为 paper_faithfulness 模式下 fingerprint 是必达的
+        if enable_paper_faithfulness:
+            reason = pipeline_fingerprint.get("reason", "unknown")
+            return {
+                "check_name": check_name,
+                "check_rule": check_rule,
+                "result": "FAIL",
+                "failure_message": f"paper_faithfulness enabled 但 pipeline_fingerprint 为 {pipeline_status}（reason: {reason}）"
+            }
+        else:
+            return {
+                "check_name": check_name,
+                "check_rule": check_rule,
+                "result": "NA",
+                "na_reason": f"无法检查：pipeline_fingerprint 状态为 {pipeline_status}"
+            }
 
     # 检查关键字段是否存在。
     required_fields = [
@@ -171,7 +195,8 @@ def _check_pipeline_fingerprint_presence(
 
 
 def _check_trajectory_digest_reproducibility(
-    trajectory_evidence: Optional[Dict[str, Any]]
+    trajectory_evidence: Optional[Dict[str, Any]],
+    enable_paper_faithfulness: bool = False
 ) -> Dict[str, Any]:
     """
     功能：检查 trajectory_digest 是否可复算。
@@ -180,6 +205,7 @@ def _check_trajectory_digest_reproducibility(
 
     Args:
         trajectory_evidence: Trajectory evidence dict.
+        enable_paper_faithfulness: Whether paper faithfulness is enabled (影响 absent 是否升级为 FAIL).
 
     Returns:
         Check result dict.
@@ -188,21 +214,40 @@ def _check_trajectory_digest_reproducibility(
     check_rule = "trajectory_digest 必须存在且可复算"
 
     if trajectory_evidence is None:
-        return {
-            "check_name": check_name,
-            "check_rule": check_rule,
-            "result": "NA",
-            "na_reason": "trajectory_evidence 未启用"
-        }
+        # 当启用 paper_faithfulness 时，缺失 trajectory_evidence 必须升级为 FAIL
+        if enable_paper_faithfulness:
+            return {
+                "check_name": check_name,
+                "check_rule": check_rule,
+                "result": "FAIL",
+                "failure_message": "paper_faithfulness enabled 但 trajectory_evidence 为 None"
+            }
+        else:
+            return {
+                "check_name": check_name,
+                "check_rule": check_rule,
+                "result": "NA",
+                "na_reason": "trajectory_evidence 未启用"
+            }
 
     status = trajectory_evidence.get("status")
     if status == "absent":
-        return {
-            "check_name": check_name,
-            "check_rule": check_rule,
-            "result": "NA",
-            "na_reason": "trajectory tracing 未启用"
-        }
+        # 当启用 paper_faithfulness 时，absent 状态必须升级为 FAIL
+        absent_reason = trajectory_evidence.get("trajectory_absent_reason", "unknown")
+        if enable_paper_faithfulness:
+            return {
+                "check_name": check_name,
+                "check_rule": check_rule,
+                "result": "FAIL",
+                "failure_message": f"paper_faithfulness enabled 但 trajectory tracing 为 absent（reason: {absent_reason}）"
+            }
+        else:
+            return {
+                "check_name": check_name,
+                "check_rule": check_rule,
+                "result": "NA",
+                "na_reason": f"trajectory tracing 未启用（reason: {absent_reason}）"
+            }
 
     trajectory_spec_digest = trajectory_evidence.get("trajectory_spec_digest")
     trajectory_digest = trajectory_evidence.get("trajectory_digest")

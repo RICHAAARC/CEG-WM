@@ -367,7 +367,7 @@ def _resolve_tap_enabled(cfg: Dict[str, Any]) -> bool:
     """
     功能：解析 trajectory tap 启用标志。
 
-    Resolve tap enable flag from cfg with deterministic fallback.
+    Resolve tap enable flag from cfg with paper_faithfulness mode default.
 
     Args:
         cfg: Configuration mapping.
@@ -387,6 +387,7 @@ def _resolve_tap_enabled(cfg: Dict[str, Any]) -> bool:
         # tap_cfg 类型不符合预期，必须 fail-fast。
         raise TypeError("trajectory_tap must be dict or None")
 
+    # (1) 如果 trajectory_tap.enabled 显式设置，则使用该值
     if isinstance(tap_cfg, dict) and "enabled" in tap_cfg:
         enabled = tap_cfg.get("enabled")
         if not isinstance(enabled, bool):
@@ -394,6 +395,16 @@ def _resolve_tap_enabled(cfg: Dict[str, Any]) -> bool:
             raise TypeError("trajectory_tap.enabled must be bool")
         return enabled
 
+    # (2) 否则，检查 paper_faithfulness 是否启用
+    # 当 paper_faithfulness 启用时，trajectory tap 默认也应启用（paper mode 下必须采样轨迹）
+    paper_faithfulness_cfg = cfg.get("paper_faithfulness", {})
+    if isinstance(paper_faithfulness_cfg, dict):
+        pf_enabled = paper_faithfulness_cfg.get("enabled", False)
+        if pf_enabled:
+            # paper_faithfulness 启用 → tap 默认启用（除非显式禁用）
+            return True
+
+    # (3) 都没有设置时，回退到 inference_enabled（传统逻辑）
     inference_enabled = cfg.get("inference_enabled", False)
     if not isinstance(inference_enabled, bool):
         # inference_enabled 类型不符合预期，必须 fail-fast。
