@@ -40,9 +40,10 @@ def test_paper_faithfulness_consistency_absent_reasons_non_empty():
 
 def test_paper_faithfulness_consistency_mismatch_digest_absent_reasons_non_empty():
     """
-    功能：测试 paper_spec_digest 标记为 <absent> 时 absent_reasons 必须非空。
+    功能：测试 paper_spec_digest 标记为 <absent> 时 mismatch_reasons 必须非空。
 
-    Test that absent_reasons is non-empty when paper_spec_digest is marked as <absent>.
+    Test that mismatch_reasons is non-empty when paper_spec_digest is marked as <absent>
+    (when content_evidence exists, this is a mismatch not an absence).
 
     Args:
         None.
@@ -61,14 +62,14 @@ def test_paper_faithfulness_consistency_mismatch_digest_absent_reasons_non_empty
         input_record=input_record
     )
     
-    # 断言：status 必须为 absent
-    assert status == "absent", f"Expected status='absent', got '{status}'"
+    # 断言：status 必须为 mismatch（因为 content_evidence 存在）
+    assert status == "mismatch", f"Expected status='mismatch', got '{status}'"
     
-    # 断言：absent_reasons 必须非空（必须包含 paper_spec_digest_marked_absent）
-    assert isinstance(absent_reasons, list), "absent_reasons must be list"
-    assert len(absent_reasons) > 0, "absent_reasons must be non-empty when status='absent'"
-    assert "paper_spec_digest_marked_absent" in absent_reasons, \
-        f"Expected 'paper_spec_digest_marked_absent' in absent_reasons, got {absent_reasons}"
+    # 断言：mismatch_reasons 必须非空（必须包含 paper_spec_digest_absent_or_invalid）
+    assert isinstance(mismatch_reasons, list), "mismatch_reasons must be list"
+    assert len(mismatch_reasons) > 0, "mismatch_reasons must be non-empty when status='mismatch'"
+    assert "paper_spec_digest_absent_or_invalid" in mismatch_reasons, \
+        f"Expected 'paper_spec_digest_absent_or_invalid' in mismatch_reasons, got {mismatch_reasons}"
 
 
 def test_paper_faithfulness_consistency_fail_digest_fail_reasons_non_empty():

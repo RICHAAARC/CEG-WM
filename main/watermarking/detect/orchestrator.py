@@ -695,51 +695,52 @@ def _evaluate_paper_faithfulness_consistency(
             embed_content_evidence = candidate
             break
 
-    embed_paper_faithfulness = input_record.get("paper_faithfulness")
-
-    # (1) 验证 paper_spec_digest 存在性（absent vs mismatch）。
-    if isinstance(embed_paper_faithfulness, dict):
-        spec_digest = embed_paper_faithfulness.get("spec_digest")
-        if spec_digest == "<absent>":
-            absent_reasons.append("paper_spec_digest_marked_absent")
-        elif spec_digest == "<failed>":
-            fail_reasons.append("paper_spec_digest_marked_failed")
-        elif not isinstance(spec_digest, str) or not spec_digest:
-            absent_reasons.append("paper_spec_digest_missing")
-    else:
-        absent_reasons.append("paper_faithfulness_section_absent")
-
-    # (2) 验证 content_evidence 存在性。
+    # (1) 验证 content_evidence 存在性（整体 absent 前置检查）。
     if not isinstance(embed_content_evidence, dict):
         absent_reasons.append("content_evidence_absent")
         return "absent", absent_reasons, mismatch_reasons, fail_reasons
 
-    # (3) 验证 pipeline_fingerprint_digest 存在性（absent vs fail）。
+    # content_evidence 存在说明 embed 侧运行了，后续缺失归类为 mismatch。
+    embed_paper_faithfulness = input_record.get("paper_faithfulness")
+
+    # (2) 验证 paper_spec_digest 存在性（mismatch vs fail）。
+    if isinstance(embed_paper_faithfulness, dict):
+        spec_digest = embed_paper_faithfulness.get("spec_digest")
+        if spec_digest == "<absent>":
+            mismatch_reasons.append("paper_spec_digest_absent_or_invalid")
+        elif spec_digest == "<failed>":
+            fail_reasons.append("paper_spec_digest_marked_failed")
+        elif not isinstance(spec_digest, str) or not spec_digest:
+            mismatch_reasons.append("paper_spec_digest_missing")
+    else:
+        mismatch_reasons.append("paper_faithfulness_section_absent")
+
+    # (3) 验证 pipeline_fingerprint_digest 存在性（mismatch vs fail）。
     pipeline_fingerprint_digest = embed_content_evidence.get("pipeline_fingerprint_digest")
     if pipeline_fingerprint_digest == "<absent>":
-        absent_reasons.append("pipeline_fingerprint_digest_marked_absent")
+        mismatch_reasons.append("pipeline_fingerprint_digest_marked_absent")
     elif pipeline_fingerprint_digest == "<failed>":
         fail_reasons.append("pipeline_fingerprint_digest_marked_failed")
     elif not isinstance(pipeline_fingerprint_digest, str) or not pipeline_fingerprint_digest:
-        absent_reasons.append("pipeline_fingerprint_digest_missing")
+        mismatch_reasons.append("pipeline_fingerprint_digest_missing")
 
-    # (4) 验证 injection_site_digest 存在性（absent vs fail）。
+    # (4) 验证 injection_site_digest 存在性（mismatch vs fail）。
     injection_site_digest = embed_content_evidence.get("injection_site_digest")
     if injection_site_digest == "<absent>":
-        absent_reasons.append("injection_site_digest_marked_absent")
+        mismatch_reasons.append("injection_site_digest_marked_absent")
     elif injection_site_digest == "<failed>":
         fail_reasons.append("injection_site_digest_marked_failed")
     elif not isinstance(injection_site_digest, str) or not injection_site_digest:
-        absent_reasons.append("injection_site_digest_missing")
+        mismatch_reasons.append("injection_site_digest_missing")
 
-    # (5) 验证 alignment_digest 存在性（absent vs fail）。
+    # (5) 验证 alignment_digest 存在性（mismatch vs fail）。
     alignment_digest = embed_content_evidence.get("alignment_digest")
     if alignment_digest == "<absent>":
-        absent_reasons.append("alignment_digest_marked_absent")
+        mismatch_reasons.append("alignment_digest_marked_absent")
     elif alignment_digest == "<failed>":
         fail_reasons.append("alignment_digest_marked_failed")
     elif not isinstance(alignment_digest, str) or not alignment_digest:
-        absent_reasons.append("alignment_digest_missing")
+        mismatch_reasons.append("alignment_digest_missing")
 
     # (6) 决定最终 status（优先级：fail > mismatch > absent > ok）。
     if len(fail_reasons) > 0:

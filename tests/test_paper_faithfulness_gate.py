@@ -252,7 +252,7 @@ def test_paper_spec_digest_mismatch_must_fail() -> None:
         }
     }
 
-    status_missing, mismatch_reasons_missing = orchestrator._evaluate_paper_faithfulness_consistency(
+    status_missing, absent_reasons_missing, mismatch_reasons_missing, fail_reasons_missing = orchestrator._evaluate_paper_faithfulness_consistency(
         input_record=input_record_missing
     )
 
@@ -269,7 +269,7 @@ def test_paper_spec_digest_mismatch_must_fail() -> None:
         }
     }
 
-    status_invalid, mismatch_reasons_invalid = orchestrator._evaluate_paper_faithfulness_consistency(
+    status_invalid, absent_reasons_invalid, mismatch_reasons_invalid, fail_reasons_invalid = orchestrator._evaluate_paper_faithfulness_consistency(
         input_record=input_record_invalid
     )
 
