@@ -280,25 +280,30 @@ def run_sd3_inference(
         # 避免 "index is on cuda:0, different from other tensors on cpu" 的 CUDA 不匹配错误
         try:
             if hasattr(pipeline_obj, 'device') and pipeline_obj.device is not None:
-                confirmed_device = str(pipeline_obj.device)
-                inference_runtime_meta["pipeline_confirmed_device"] = confirmed_device
+                confirmed_device = pipeline_obj.device
+                inference_runtime_meta["pipeline_confirmed_device"] = str(confirmed_device)
                 
                 # 检查 decoder（VAE）是否与 pipeline 在同一设备
                 if hasattr(pipeline_obj, 'vae') and pipeline_obj.vae is not None:
-                    vae_device = next(pipeline_obj.vae.parameters()).device
-                    if str(vae_device) != confirmed_device:
-                        inference_runtime_meta["device_mismatch_detected"] = f"vae on {vae_device}, pipeline expects {confirmed_device}"
-                        # 尝试修复
-                        pipeline_obj.vae = pipeline_obj.vae.to(confirmed_device)
+                    try:
+                        vae_device = next(pipeline_obj.vae.parameters()).device
+                        if vae_device != confirmed_device:
+                            inference_runtime_meta["device_mismatch_detected"] = f"vae on {vae_device}, pipeline on {confirmed_device}"
+                            pipeline_obj.vae = pipeline_obj.vae.to(confirmed_device)
+                    except (StopIteration, RuntimeError):
+                        pass
 
                 # 检查所有 text_encoders
                 if hasattr(pipeline_obj, 'text_encoders') and pipeline_obj.text_encoders:
                     for i, encoder in enumerate(pipeline_obj.text_encoders):
                         if encoder is not None:
-                            enc_device = next(encoder.parameters()).device
-                            if str(enc_device) != confirmed_device:
-                                inference_runtime_meta[f"encoder_{i}_misaligned"] = str(enc_device)
-                                encoder = encoder.to(confirmed_device)
+                            try:
+                                enc_device = next(encoder.parameters()).device
+                                if enc_device != confirmed_device:
+                                    inference_runtime_meta[f"encoder_{i}_misaligned"] = str(enc_device)
+                                    pipeline_obj.text_encoders[i] = encoder.to(confirmed_device)
+                            except (StopIteration, RuntimeError):
+                                pass
         except Exception as device_align_exc:
             # 设备对齐警告但不中断
             inference_runtime_meta["device_alignment_warning"] = str(device_align_exc)
