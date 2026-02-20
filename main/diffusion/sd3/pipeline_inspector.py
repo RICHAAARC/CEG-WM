@@ -89,8 +89,15 @@ def inspect_sd3_pipeline(
                 transformer_config, "patch_size", default="<absent>"
             )
         else:
+            # config 为 None：尝试从 transformer 对象直接提取，否则设为 <absent>
+            transformer_num_blocks = _safe_get_attr(transformer, "num_blocks", default=None)
+            if transformer_num_blocks is None:
+                transformer_num_blocks = _safe_get_attr(transformer, "num_layers", default="<absent>")
+            fingerprint["transformer_num_blocks"] = transformer_num_blocks
             fingerprint["transformer_config_status"] = "config_missing"
     else:
+        # transformer 本身为 None：一定要设置关键字段为 <absent>
+        fingerprint["transformer_num_blocks"] = "<absent>"
         fingerprint["transformer_status"] = "transformer_missing"
 
     # 2) Scheduler 名称与关键超参。
@@ -117,6 +124,10 @@ def inspect_sd3_pipeline(
             )
         else:
             fingerprint["scheduler_config_status"] = "config_missing"
+    else:
+        # scheduler 本身为 None：必须设置关键字段为 <absent>
+        fingerprint["scheduler_class_name"] = "<absent>"
+        fingerprint["scheduler_status"] = "scheduler_missing"
 
     # 3) VAE latent channels（必达字段）。
     vae = getattr(pipeline_obj, "vae", None)
@@ -141,8 +152,15 @@ def inspect_sd3_pipeline(
                 vae_config, "out_channels", default="<absent>"
             )
         else:
+            # config 为 None：尝试从 VAE 对象直接提取，否则设为 <absent>
+            vae_latent_channels = _safe_get_attr(vae, "latent_channels", default=None)
+            if vae_latent_channels is None:
+                vae_latent_channels = _safe_get_attr(vae, "out_channels", default="<absent>")
+            fingerprint["vae_latent_channels"] = vae_latent_channels
             fingerprint["vae_config_status"] = "config_missing"
     else:
+        # vae 本身为 None：一定要设置关键字段为 <absent>
+        fingerprint["vae_latent_channels"] = "<absent>"
         fingerprint["vae_status"] = "vae_missing"
 
     # 4) Text encoders/CLIP/T5（若使用）版本摘要。
