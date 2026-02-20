@@ -107,7 +107,7 @@ def _check_pipeline_fingerprint_presence(
         pipeline_fingerprint: Pipeline fingerprint dict.
 
     Returns:
-        Check result dict.
+        Check result dict with result in [PASS, FAIL, NA].
     """
     check_name = "pipeline_fingerprint_presence"
     check_rule = "SD3 pipeline fingerprint 必须存在且非占位"
@@ -128,6 +128,17 @@ def _check_pipeline_fingerprint_presence(
             "failure_message": "pipeline_fingerprint 类型错误（非 dict）"
         }
 
+    # 检查 pipeline 是否处于不可评估的状态（absent 或 failed）
+    # 当 pipeline_obj 为 None 或构建失败时，无法获得真实的结构信息，应返回 NA
+    pipeline_status = pipeline_fingerprint.get("status")
+    if pipeline_status in ["absent", "failed"]:
+        return {
+            "check_name": check_name,
+            "check_rule": check_rule,
+            "result": "NA",
+            "na_reason": f"无法检查：pipeline_fingerprint 状态为 {pipeline_status}"
+        }
+
     # 检查关键字段是否存在。
     required_fields = [
         "transformer_num_blocks",
@@ -138,7 +149,9 @@ def _check_pipeline_fingerprint_presence(
     missing_fields = []
     for field in required_fields:
         value = pipeline_fingerprint.get(field)
-        if value is None or value == "<absent>":
+        # 只有当字段完全缺失（None）时才视为缺失
+        # "<absent>" 是合法的占位值，表示该模块不存在或无法提取
+        if value is None:
             missing_fields.append(field)
 
     if missing_fields:

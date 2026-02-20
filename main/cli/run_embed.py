@@ -337,11 +337,25 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
                     print(f"[Paper-Faithful] Pipeline fingerprint extracted: {pipeline_fingerprint_digest[:16]}...")
                 except Exception as pipeline_insp_exc:
                     print(f"[Paper-Faithful] [WARN] Pipeline inspection failed: {pipeline_insp_exc}")
-                    pipeline_fingerprint = {"status": "failed", "error": str(pipeline_insp_exc)}
+                    pipeline_fingerprint = {
+                        "status": "failed",
+                        "error": str(pipeline_insp_exc),
+                        "transformer_num_blocks": "<absent>",
+                        "scheduler_class_name": "<absent>",
+                        "vae_latent_channels": "<absent>"
+                    }
                     pipeline_fingerprint_digest = "<failed>"
             else:
-                pipeline_fingerprint = {"status": "absent", "reason": "pipeline_obj_is_none"}
-                pipeline_fingerprint_digest = "<absent>"
+                # Pipeline object 为 None：生成 absent 状态指纹，但仍包含必需的三个字段
+                pipeline_fingerprint = {
+                    "status": "absent",
+                    "reason": "pipeline_obj_is_none",
+                    "transformer_num_blocks": "<absent>",
+                    "scheduler_class_name": "<absent>",
+                    "vae_latent_channels": "<absent>"
+                }
+                from main.core import digests
+                pipeline_fingerprint_digest = digests.canonical_sha256(pipeline_fingerprint)
             
             inference_result = infer_runtime.run_sd3_inference(
                 cfg,
