@@ -104,13 +104,17 @@ def build_sd3_pipeline_from_pretrained(
     except Exception as exc:
         return None, build_meta, f"{type(exc).__name__}: {exc}"
 
-    local_files_only = True
-    if model_source == "local_path":
-        local_files_only = True
-    elif model_source == "hf_hub":
+    # 根据 model_source 决定是否允许从 HF Hub 下载
+    local_files_only = True  # 默认只使用本地缓存
+    if model_source in ("hf", "hf_hub"):
+        # 允许从 HuggingFace Hub 下载模型
+        local_files_only = False
+    elif model_source in ("local", "local_path"):
+        # 仅使用本地文件，不联网下载
         local_files_only = True
     elif model_source is not None:
-        return None, build_meta, "model_source not allowed"
+        # 不支持的 model_source 值
+        return None, build_meta, f"model_source not allowed: {model_source}"
 
     build_kwargs: Dict[str, Any] = {
         "revision": revision,
