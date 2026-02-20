@@ -4,8 +4,8 @@
     "writer": "records_io"
   },
   "failure_reason": null,
-  "original_input": "/content/run_root",
-  "output_dir_input": "/content/run_root",
+  "original_input": "/content/run_root_detect",
+  "output_dir_input": "/content/run_root_detect",
   "output_paths_relative": {
     "artifacts_dir": "artifacts",
     "logs_dir": "logs",
@@ -14,9 +14,9 @@
   "policy_path": "content_only",
   "policy_path_semantics_version": "v1.0",
   "record_type": "path_validation_audit",
-  "run_root_resolved": "/content/run_root",
+  "run_root_resolved": "/content/run_root_detect",
   "runtime_whitelist_version": "v1.0",
   "schema_version": "v1.0",
-  "timestamp": "2026-02-20T10:59:29.649Z",
+  "timestamp": "2026-02-20T11:59:34.278Z",
   "validation_status": "ok"
 }

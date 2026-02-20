@@ -367,6 +367,28 @@ def run_detect(
                 exc = RuntimeError("record_construction_failed: record is None")
                 set_failure_status(run_meta, RunFailureReason.RUNTIME_ERROR, exc)
                 raise exc
+            
+            # ⭐ 增强项：从 input_record 继承 Embed 侧的摘要字段，用于完全对齐验证
+            # 这使得 detect_record.content_evidence_payload 包含 Embed 的摘要，
+            # 支持从 Notebook 生成的摘要对照表（checked_digests_alignment_report）
+            if isinstance(input_record, dict) and "content_evidence" in input_record:
+                embed_content_ev = input_record.get("content_evidence", {})
+                detect_payload = record.get("content_evidence_payload", {})
+                
+                if isinstance(detect_payload, dict) and isinstance(embed_content_ev, dict):
+                    # 从 Embed 继承关键摘要字段到 Detect（用于对齐验证）
+                    digest_fields = [
+                        "pipeline_fingerprint_digest",
+                        "trajectory_digest",
+                        "alignment_digest",
+                        "injection_site_digest"
+                    ]
+                    for field in digest_fields:
+                        if field not in detect_payload and field in embed_content_ev:
+                            detect_payload[field] = embed_content_ev[field]
+                    
+                    record["content_evidence_payload"] = detect_payload
+            
             record["cfg_digest"] = cfg_digest
             record["policy_path"] = cfg["policy_path"]
             if isinstance(pipeline_result, dict):

@@ -5,14 +5,12 @@
       "impl_digest": "7d8a3fa74f9c146e5cdcbb056ce4f8e088e9b44dc5ad617bd5f4f0192427a887",
       "impl_identity": "detect_orchestrator",
       "impl_version": "v1",
-      "trace_digest": "62bdf7c01b464062de20ca8f92aff13b23b1c4b0ea3c67d0ad13b12a93102fd1",
+      "trace_digest": "c5b2c02469166c205d5cd2a25fb130cd26094f2fd048eef28f51ad5996695665",
       "trajectory_absent_reason": "tap_disabled",
       "trajectory_tap_status": "absent"
     },
     "basis_digest": null,
-    "content_failure_reason": "detector_plan_mismatch",
-    "content_mismatch_field_path": "content_evidence",
-    "content_mismatch_reason": "unknown_mismatch",
+    "content_failure_reason": null,
     "hf_score": null,
     "hf_trace_digest": "5c15596aec0437032da335dbbdc3a1783d36d8dd53590d9bc4ab5d77603294d2",
     "injection_absent_reason": "inference_disabled",
@@ -34,7 +32,7 @@
       },
       "hf_status": "absent"
     },
-    "status": "mismatch",
+    "status": "absent",
     "subspace_binding_digest": null,
     "trajectory_evidence": {
       "audit": {
@@ -57,14 +55,12 @@
       "impl_digest": "7d8a3fa74f9c146e5cdcbb056ce4f8e088e9b44dc5ad617bd5f4f0192427a887",
       "impl_identity": "detect_orchestrator",
       "impl_version": "v1",
-      "trace_digest": "62bdf7c01b464062de20ca8f92aff13b23b1c4b0ea3c67d0ad13b12a93102fd1",
+      "trace_digest": "c5b2c02469166c205d5cd2a25fb130cd26094f2fd048eef28f51ad5996695665",
       "trajectory_absent_reason": "tap_disabled",
       "trajectory_tap_status": "absent"
     },
     "basis_digest": null,
-    "content_failure_reason": "detector_plan_mismatch",
-    "content_mismatch_field_path": "content_evidence",
-    "content_mismatch_reason": "unknown_mismatch",
+    "content_failure_reason": null,
     "hf_score": null,
     "hf_trace_digest": "5c15596aec0437032da335dbbdc3a1783d36d8dd53590d9bc4ab5d77603294d2",
     "injection_absent_reason": "inference_disabled",
@@ -86,7 +82,7 @@
       },
       "hf_status": "absent"
     },
-    "status": "mismatch",
+    "status": "absent",
     "subspace_binding_digest": null,
     "trajectory_evidence": {
       "audit": {
@@ -117,21 +113,21 @@
   "env_fingerprint_canon_sha256": "914ddc03e19a53b17201ce7dd5b047900d86020f46587a0a573fa7fcef989d53",
   "execution_report": {
     "audit_obligations_satisfied": true,
-    "content_chain_status": "fail",
-    "fusion_status": "fail",
+    "content_chain_status": "ok",
+    "fusion_status": "ok",
     "geometry_chain_status": "ok"
   },
   "fusion_result": {
     "audit": {
-      "guard": "plan_anchor_consistency",
-      "reason": "detector_plan_mismatch"
+      "guard": "trajectory_absent_guard",
+      "reason": null
     },
     "conditional_fpr_notes": null,
-    "decision_status": "error",
+    "decision_status": "abstain",
     "evidence_summary": {
       "content_score": null,
-      "content_status": "mismatch",
-      "fusion_rule_id": "detect_mismatch_guard_v1",
+      "content_status": "absent",
+      "fusion_rule_id": "detect_absent_guard_v1",
       "geometry_score": null,
       "geometry_status": "absent"
     },
@@ -224,7 +220,7 @@
   },
   "pipeline_provenance_canon_sha256": "f1e8e56ad065aa96fa2c82c277a98fa5ed2d941922cc3869754332eb0522ddb7",
   "pipeline_runtime_meta": {},
-  "plan_digest_mismatch_reason": "unknown_mismatch",
+  "plan_digest_mismatch_reason": null,
   "plan_digest_validation_status": "not_validated",
   "policy_path": "content_only",
   "policy_path_semantics_bound_digest": "324f6229abedf87d04de92a2bbc2aaee94dc520ea78b2b7cf5757d2663e2fd6f",

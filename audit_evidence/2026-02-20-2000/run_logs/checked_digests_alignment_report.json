@@ -1,0 +1,37 @@
+{
+  "generated_at": "2026-02-20T11:59:34.887807",
+  "embed_record_path": "/content/run_root/records/embed_record.json",
+  "detect_record_path": "/content/run_root_detect/records/detect_record.json",
+  "checks": [
+    {
+      "摘要类型": "Pipeline Fingerprint",
+      "Embed": "d4e0639657e7dcdf...",
+      "Detect": "<absent>",
+      "对齐": "❌"
+    },
+    {
+      "摘要类型": "Trajectory Digest",
+      "Embed": "<absent>",
+      "Detect": "<absent>",
+      "对齐": "❌"
+    },
+    {
+      "摘要类型": "Alignment Report",
+      "Embed": "c9c8ed7298880878...",
+      "Detect": "<absent>",
+      "对齐": "❌"
+    },
+    {
+      "摘要类型": "Injection Site Spec",
+      "Embed": "fb9ef533805575b0...",
+      "Detect": "<absent>",
+      "对齐": "❌"
+    }
+  ],
+  "alignment_summary": {
+    "total": 4,
+    "passed": 0,
+    "failed": 4,
+    "complete_alignment": false
+  }
+}

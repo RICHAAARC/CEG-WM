@@ -42,7 +42,7 @@
       "total_checks": 4
     },
     "audit": {
-      "trajectory_absent_reason": "tap_disabled",
+      "trajectory_absent_reason": "inference_failed",
       "trajectory_tap_status": "absent"
     },
     "content_evidence": "absent",
@@ -50,10 +50,6 @@
     "content_signal": null,
     "hf_score": null,
     "hf_trace_digest": "9777e726b532977acf282598f350eeb72360e02fd854f0dbf659ef5e79b79413",
-    "injection_absent_reason": "inference_disabled",
-    "injection_failure_reason": null,
-    "injection_metrics": null,
-    "injection_params_digest": null,
     "injection_site_digest": "fb9ef533805575b07745e77f443c849c6c1808dfbed4ea002fedd570089b8aef",
     "injection_site_spec": {
       "hf_channel_enabled": true,
@@ -69,8 +65,6 @@
       "target_module_name": "StableDiffusion3Pipeline",
       "target_tensor_name": "latents"
     },
-    "injection_status": "absent",
-    "injection_trace_digest": null,
     "pipeline_fingerprint": {
       "reason": "pipeline_obj_is_none",
       "scheduler_class_name": "<absent>",
@@ -89,15 +83,14 @@
       },
       "hf_status": "mismatch"
     },
-    "subspace_binding_digest": null,
     "trajectory_evidence": {
       "audit": {
-        "trajectory_absent_reason": "tap_disabled",
+        "trajectory_absent_reason": "inference_failed",
         "trajectory_tap_status": "absent"
       },
       "device": "<absent>",
       "status": "absent",
-      "trajectory_absent_reason": "tap_disabled",
+      "trajectory_absent_reason": "inference_failed",
       "trajectory_digest": null,
       "trajectory_metrics": null,
       "trajectory_spec": null,
@@ -153,27 +146,27 @@
   "impl_set_capabilities_digest": "d34ed01eb32ba680acd61ec49b28cc18b7c5aa7dea4d8b98a758f5e1d12ba387",
   "infer_trace": {
     "device": "<absent>",
-    "inference_enabled": false,
-    "inference_error": null,
+    "inference_enabled": true,
+    "inference_error": "pipeline_obj is None",
     "inference_guidance_scale": "<absent>",
     "inference_height": "<absent>",
     "inference_num_steps": "<absent>",
     "inference_prompt": "<absent>",
-    "inference_status": "disabled",
+    "inference_status": "failed",
     "inference_width": "<absent>",
     "output_image_count": 0,
     "scheduler_config_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
     "seed": 4465826118756609132,
-    "trajectory_absent_reason": "tap_disabled",
+    "trajectory_absent_reason": "inference_failed",
     "trajectory_digest": null,
     "trajectory_spec_digest": null,
     "trajectory_tap_status": "absent",
     "trajectory_tap_version": "v1"
   },
-  "infer_trace_canon_sha256": "73990566599bbeb1665a4dd2d0b8a97e272c4dc55990dd267aa3e0f62169d004",
-  "inference_error": null,
+  "infer_trace_canon_sha256": "ddaaad39ca0290a0671cbff41e5dcc82edaec4dbb82557b01ca7ac161a0f5706",
+  "inference_error": "pipeline_obj is None",
   "inference_runtime_meta": null,
-  "inference_status": "disabled",
+  "inference_status": "failed",
   "model_provenance_canon_sha256": "e9e6bfa1cc46311ee70452c56520b7aa7531187b3ab2246edb1bcbbd1078d064",
   "operation": "embed",
   "paper_faithfulness": {

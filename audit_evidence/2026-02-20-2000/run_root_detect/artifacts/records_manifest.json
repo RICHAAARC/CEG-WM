@@ -12,18 +12,18 @@
     "whitelist_bound_digest": "50e0e4f016844bf858a58e9b975ab8781ef660785a4166dec6bf9169f375c13f",
     "whitelist_version": "v1.0"
   },
-  "bundle_canon_sha256": "1fbe76a0e03670a4289d08b0a7e25cefe48abeef9dc04744699908f1bd8f3c19",
+  "bundle_canon_sha256": "d7fef1d3843e4494959816d76a740b72c6fe24d49c5a8141456548bfb209b35c",
   "file_count": 1,
   "files": [
     {
-      "canon_sha256": "3a49dc1bd30abb63b167cd593a81136f28a08c0fa62e1e0c99a49c5df39ad234",
-      "file_sha256": "bb83b5d76c776b69f028b6204312502c76e666047679805f453ca4d7334364a8",
+      "canon_sha256": "de29a7e8eaab5ce6725ee4c92b65ab855e8cc353786449d0b947d7b5eb5da1be",
+      "file_sha256": "d45953a8d16fee84248614e1d21ac12d433eb58383ad355b45fca6266c11ac90",
       "file_type": "json",
-      "path": "embed_record.json",
+      "path": "detect_record.json",
       "record_count": 1
     }
   ],
   "manifest_name": "records_manifest.json",
-  "records_dir": "/content/run_root/records",
+  "records_dir": "/content/run_root_detect/records",
   "schema_version": "v1.0"
 }
