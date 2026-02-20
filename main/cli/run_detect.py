@@ -245,7 +245,7 @@ def run_detect(
             injection_context = build_injection_context_from_plan(cfg, plan_payload, plan_digest)
             injection_modifier = LatentModifier(LATENT_MODIFIER_ID, LATENT_MODIFIER_VERSION)
 
-        # (7.7) Real Dataflow Smoke: 在 pipeline_result 之后调用 inference
+        # (7.7) Real Dataflow Smoke：在 pipeline_result 之后调用 inference，并捕获最后的 latents 用于 detect 侧评分
         pipeline_obj = pipeline_result.get("pipeline_obj")
         device = cfg.get("device", "cpu")
         seed = seed_value
@@ -256,13 +256,20 @@ def run_detect(
             device,
             seed,
             injection_context=injection_context,
-            injection_modifier=injection_modifier
+            injection_modifier=injection_modifier,
+            capture_final_latents=True  # 捕获最后的 latents 用于 detect 侧评分
         )
         inference_status = inference_result.get("inference_status")
         inference_error = inference_result.get("inference_error")
         inference_runtime_meta = inference_result.get("inference_runtime_meta")
         trajectory_evidence = inference_result.get("trajectory_evidence")
         injection_evidence = inference_result.get("injection_evidence")
+        final_latents = inference_result.get("final_latents")
+        
+        # 将最后的 latents 存储到 cfg 的临时字段，供 detect orchestrator 使用。
+        # 这些 latents 不会被写入 records，只在内存中处理。
+        if final_latents is not None:
+            cfg["__detect_final_latents__"] = final_latents
         
         # 构造 infer_trace 并计算 digest
         infer_trace_obj = infer_trace.build_infer_trace(

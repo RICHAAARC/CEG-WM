@@ -172,6 +172,45 @@ def test_fusion_baseline_returns_fusion_decision() -> None:
     assert abstain.is_watermarked is None, "abstain/error must have None is_watermarked"
 
 
+def test_geometry_failure_does_not_change_content_score_or_thresholds() -> None:
+    """
+    功能：验证几何失败不会污染内容分数或阈值口径。
+
+    Test that geometry failure does not alter content_score or thresholds_digest.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    cfg = _build_minimal_cfg()
+    fusion_rule = fusion_registry.resolve_fusion_rule(
+        fusion_registry.FUSION_BASELINE_IDENTITY_ID
+    )(cfg)
+
+    content_evidence = {
+        "content_evidence": "ok",
+        "content_signal": 0.42,
+    }
+
+    geometry_ok = {
+        "geometry_evidence": "ok",
+        "geometry_signal": 0.12,
+    }
+    geometry_failed = {
+        "geometry_evidence": "failed",
+        "geometry_signal": 0.12,
+    }
+
+    decided_ok = fusion_rule.fuse(cfg, content_evidence, geometry_ok)
+    decided_failed = fusion_rule.fuse(cfg, content_evidence, geometry_failed)
+
+    assert decided_ok.thresholds_digest == decided_failed.thresholds_digest
+    assert decided_ok.evidence_summary.get("content_score") == 0.42
+    assert decided_failed.evidence_summary.get("content_score") == 0.42
+
+
 def test_fusion_decision_allow_null_for_abstain() -> None:
     """
     功能：验证 FusionDecision 允许 abstain 为空值。

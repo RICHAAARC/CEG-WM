@@ -1,0 +1,319 @@
+# ==============================================================
+# 算法对齐规范（Paper Faithfulness Specification）
+# - 本文件是"真实算法完全对齐（paper-faithful）"的唯一权威事实源。
+# - append-only，版本化，必须通过审计与测试门禁。
+# - 定义目标论文/方法族的对齐维度与可接受偏差。
+# - 明确 SD3 Transformer/DiT 适配点。
+# ==============================================================
+
+# ------------------------------
+# 规范版本与冻结元信息
+# ------------------------------
+paper_faithfulness_spec_version: "v1.0"
+frozen_date: "2026-02-20"
+phase: "phase-1-alignment-spec-freeze"
+
+# ------------------------------
+# 权威性声明
+# ------------------------------
+authority:
+  location: "configs/paper_faithfulness_spec.yaml"
+  uniqueness: "唯一权威。本文件定义所有 paper-faithful 对齐约束。"
+  modification_policy: "需代码审查 + 影响评估，禁止无审查直接修改。"
+
+# ==============================================================
+# 目标方法族（Target Method Families）
+#   - 声明所支持的论文方法类别及其核心对齐维度。
+#   - 每个方法族定义"必须对齐项"与"可接受偏差项"。
+# ==============================================================
+target_method_families:
+
+  # ------------------------------
+  # Shallow Diffuse 对齐规范
+  # ------------------------------
+  shallow_diffuse:
+    paper_citation: "Shallow Diffuse: Robust and Invisible Watermarking through Low-Dimensional Subspaces in Diffusion Models (arXiv:2410...)"
+    enabled: true
+    alignment_dimensions:
+
+      # 1) 子空间来源（Subspace Source）
+      subspace_source:
+        required_alignment: "planner_computed"
+        alignment_rule: "子空间基必须由 SubspacePlanner 实时计算，不可使用预设固定基。"
+        deviation_policy: "禁止偏差"
+        evidence_field_paths:
+          - "content_evidence.basis_digest"
+          - "content_evidence.plan_digest"
+          - "content_evidence.subspace_binding_digest"
+
+      # 2) 子空间嵌入位置（Embedding Position）
+      embedding_position:
+        required_alignment: "latent_space_per_step"
+        alignment_rule: "水印必须嵌入到每个扩散步的 latent 张量中，通过 callback hook 实现。"
+        deviation_policy: "禁止偏差"
+        evidence_field_paths:
+          - "content_evidence.injection_trace_digest"
+          - "content_evidence.trajectory_evidence.trajectory_spec_digest"
+        sd3_binding:
+          hook_type: "callback_on_step_end"
+          target_tensor: "latents"
+          hook_module_path: "main.diffusion.sd3.hooks"
+
+      # 3) 轨迹与噪声调度绑定（Trajectory Binding）
+      trajectory_binding:
+        required_alignment: "scheduler_aware"
+        alignment_rule: "轨迹采样必须与 scheduler 的 timesteps/sigmas 绑定，确保可复现性。"
+        deviation_policy: "允许采样间隔调整，但必须记录并纳入 trajectory_spec_digest"
+        evidence_field_paths:
+          - "content_evidence.trajectory_evidence.trajectory_spec_digest"
+          - "content_evidence.trajectory_evidence.trajectory_digest"
+        sd3_binding:
+          scheduler_field_path: "model.scheduler"
+          required_spec_fields:
+            - "num_inference_steps"
+            - "scheduler_class_name"
+            - "sample_stride"
+
+  # ------------------------------
+  # T2SMark 对齐规范
+  # ------------------------------
+  t2s_mark:
+    paper_citation: "T2SMark: Tail-Truncation Sampling for Robust Diffusion Watermarking (arXiv:...)"
+    enabled: true
+    alignment_dimensions:
+
+      # 1) Tail Truncation 采样规则（Tail-Truncation Sampling）
+      tail_truncation:
+        required_alignment: "top_k_magnitude_based"
+        alignment_rule: "必须使用 top-k 截断规则，基于 magnitude 排序，而非随机采样。"
+        deviation_policy: "禁止偏差"
+        evidence_field_paths:
+          - "content_evidence.hf_trace_digest"
+          - "content_evidence.hf_evidence_summary"
+        parameter_binding:
+          k_field_path: "watermark.hf.tail_truncation_ratio"
+          mode_field_path: "watermark.hf.tail_truncation_mode"
+          required_values:
+            tail_truncation_mode: "top_k_per_latent"
+
+      # 2) 重复码编码（Repetition Code）
+      repetition_code:
+        required_alignment: "rademacher_bipolar"
+        alignment_rule: "codeword 必须使用 Rademacher 双极性重复码（±1），重复因子 r 由 FPR 决定。"
+        deviation_policy: "禁止偏差"
+        evidence_field_paths:
+          - "content_evidence.hf_evidence_summary.repetition_factor"
+          - "content_evidence.injection_params_digest"
+        parameter_binding:
+          repetition_factor_derivation: "2 * Φ(-τ) * n / m"
+          tau_field_path: "watermark.hf.tau"
+
+      # 3) 检测阈值校准（Detection Threshold Calibration）
+      threshold_calibration:
+        required_alignment: "sum_of_products"
+        alignment_rule: "检测得分必须使用 sum-of-products 公式：p = watermarked_vec * v_value 的分组和。"
+        deviation_policy: "禁止偏差"
+        evidence_field_paths:
+          - "content_evidence.hf_score"
+          - "thresholds_digest"
+
+  # ------------------------------
+  # PRC (Pseudorandom Code) 对齐规范
+  # ------------------------------
+  prc:
+    paper_citation: "PRC: Provably Robust and Stealthy Watermarking for Diffusion Models (arXiv:2309...)"
+    enabled: true
+    alignment_dimensions:
+
+      # 1) 编码域（Encoding Domain）
+      encoding_domain:
+        required_alignment: "latent_space_sign_flipping"
+        alignment_rule: "水印必须编码在 latent 符号翻转上（±1），通过 one-time pad 与伪高斯噪声实现隐蔽性。"
+        deviation_policy: "禁止偏差"
+        evidence_field_paths:
+          - "content_evidence.lf_trace_digest"
+          - "content_evidence.injection_params_digest"
+        parameter_binding:
+          variance_field_path: "watermark.lf.variance"
+          required_values:
+            variance: 1.5  # PRC 伪高斯方差（pseudogaussian variance）
+
+      # 2) 纠错码参数（ECC Parameters）
+      ecc_parameters:
+        required_alignment: "sparse_parity_check"
+        alignment_rule: "必须使用稀疏奇偶校验矩阵（t=3 或可配置），支持 BP 解码。"
+        deviation_policy: "允许调整 sparsity t 与 message_length，但必须记录并纳入 plan_digest"
+        evidence_field_paths:
+          - "content_evidence.plan_digest"
+          - "content_evidence.lf.ecc_spec_digest"
+        parameter_binding:
+          ecc_field_path: "watermark.lf.ecc"
+          sparsity_field_path: "watermark.lf.ecc_sparsity"
+          message_length_field_path: "watermark.lf.message_length"
+
+      # 3) BP 解码器（BP Decoder）
+      bp_decoder:
+        required_alignment: "belief_propagation"
+        alignment_rule: "检测必须使用 BP 解码器与 test bits 验证机制。"
+        deviation_policy: "禁止偏差"
+        evidence_field_paths:
+          - "content_evidence.lf_score"
+          - "content_evidence.lf_statistics_digest"
+
+# ==============================================================
+# SD3 Transformer/DiT 适配点（Mandatory for SD3）
+#   - 明确 SD3 特有的 attention blocks、cross-attention、latent 维度等可观测信号。
+#   - 任何 SD3 pipeline 必须提供这些可观测证据。
+# ==============================================================
+sd3_adaptation:
+
+  # SD3 pipeline 结构指纹（Pipeline Structure Fingerprint）
+  pipeline_fingerprint:
+    required: true
+    required_fields:
+      - "transformer_num_blocks"
+      - "transformer_attention_head_dim"
+      - "transformer_num_attention_heads"
+      - "transformer_in_channels"
+      - "transformer_out_channels"
+      - "scheduler_class_name"
+      - "scheduler_num_train_timesteps"
+      - "vae_latent_channels"
+      - "text_encoder_names"
+    evidence_field_paths:
+      - "content_evidence.pipeline_fingerprint"
+      - "content_evidence.pipeline_fingerprint_digest"
+    computation_rule: "必须从 diffusers pipeline 对象动态提取，不可硬编码。"
+
+  # SD3 扩散轨迹采样（Diffusion Trace Sampling）
+  diffusion_trace:
+    required: true
+    required_fields:
+      - "trajectory_spec.sample_stride"
+      - "trajectory_spec.num_inference_steps"
+      - "trajectory_metrics.timestep_samples"
+      - "trajectory_metrics.sigma_samples"
+      - "trajectory_metrics.latent_norm_samples"
+    evidence_field_paths:
+      - "content_evidence.trajectory_evidence.trajectory_spec_digest"
+      - "content_evidence.trajectory_evidence.trajectory_digest"
+    computation_rule: "每 K 步采样一次（K 由 sample_stride 决定），记录 timestep/sigma/latent_norm。"
+
+  # SD3 注入点绑定（Injection Site Binding）
+  injection_site_binding:
+    required: true
+    required_fields:
+      - "hook_type"
+      - "target_module_name"
+      - "target_tensor_name"
+      - "hook_timing"
+      - "injection_rule_digest"
+    evidence_field_paths:
+      - "content_evidence.injection_site_spec"
+      - "content_evidence.injection_site_digest"
+    computation_rule: "必须从实际 hook 配置动态生成，禁止假值或占位值。"
+
+# ==============================================================
+# 对齐检查规则（Alignment Check Rules）
+#   - 定义如何从 records 证据中判定"是否对齐"。
+#   - 任何不对齐必须触发 audit FAIL。
+# ==============================================================
+alignment_check_rules:
+
+  # 规则 1：pipeline_fingerprint 必须存在且非占位
+  pipeline_fingerprint_presence:
+    check_type: "presence_and_non_placeholder"
+    target_field_paths:
+      - "content_evidence.pipeline_fingerprint"
+      - "content_evidence.pipeline_fingerprint_digest"
+    failure_action: "FAIL"
+    failure_message: "SD3 pipeline fingerprint 缺失或为占位值"
+
+  # 规则 2：trajectory_digest 必须存在且可复算
+  trajectory_digest_reproducibility:
+    check_type: "digest_reproducibility"
+    target_field_paths:
+      - "content_evidence.trajectory_evidence.trajectory_spec_digest"
+      - "content_evidence.trajectory_evidence.trajectory_digest"
+    failure_action: "FAIL"
+    failure_message: "轨迹摘要缺失或不可复算"
+
+  # 规则 3：injection_site_spec 必须与 paper_spec 对齐
+  injection_site_alignment:
+    check_type: "spec_conformance"
+    target_field_paths:
+      - "content_evidence.injection_site_spec"
+    required_keys_by_method:
+      shallow_diffuse: ["hook_type", "target_tensor"]
+      t2s_mark: ["hook_type", "truncation_site"]
+      prc: ["hook_type", "encoding_site"]
+    failure_action: "FAIL"
+    failure_message: "注入点规范与 paper_spec 不一致"
+
+  # 规则 4：方法特定参数必须绑定
+  method_specific_parameter_binding:
+    check_type: "parameter_binding"
+    bindings:
+      t2s_mark:
+        - field_path: "watermark.hf.tail_truncation_mode"
+          required_value: "top_k_per_latent"
+        - field_path: "watermark.hf.enabled"
+          required_value: true
+      prc:
+        - field_path: "watermark.lf.variance"
+          required_value: 1.5
+        - field_path: "watermark.lf.ecc"
+          required_value: "sparse_ldpc"
+    failure_action: "FAIL"
+    failure_message: "方法特定参数未正确绑定"
+
+# ==============================================================
+# 审计与测试门禁要求（Audit & Test Gate Requirements）
+#   - 明确哪些审计与测试必须覆盖。
+#   - 任何缺失或失败必须阻断签署流程。
+# ==============================================================
+audit_gate_requirements:
+
+  # 审计 1：paper_spec_digest 绑定审计
+  paper_spec_digest_binding:
+    audit_script: "scripts/audits/audit_paper_spec_binding.py"
+    check_rule: "所有 records 必须绑定 paper_spec_digest 且可复算"
+    failure_level: "BLOCK"
+
+  # 审计 2：pipeline_fingerprint 一致性审计
+  pipeline_fingerprint_consistency:
+    audit_script: "scripts/audits/audit_pipeline_fingerprint_consistency.py"
+    check_rule: "同一 cfg_digest 下的 records 必须具有一致的 pipeline_fingerprint_digest"
+    failure_level: "BLOCK"
+
+  # 审计 3：injection_site 变化审计
+  injection_site_drift:
+    audit_script: "scripts/audits/audit_injection_site_drift.py"
+    check_rule: "注入点变化必须体现在 injection_site_digest 中，任何未记录的变化必须 FAIL"
+    failure_level: "BLOCK"
+
+  # 审计 4：对齐证据完整性审计
+  alignment_evidence_completeness:
+    audit_script: "scripts/audits/audit_alignment_evidence_completeness.py"
+    check_rule: "所有 enabled 方法族的对齐证据字段必须齐全且非占位"
+    failure_level: "BLOCK"
+
+test_gate_requirements:
+
+  # 测试 1：未绑定 paper_spec 必须 FAIL
+  test_paper_spec_binding_required:
+    test_file: "tests/test_paper_faithfulness_gate.py"
+    test_function: "test_paper_spec_digest_required"
+    check_rule: "未绑定 paper_spec_digest 的 records 必须触发 FAIL"
+
+  # 测试 2：pipeline 结构变化未体现在 fingerprint 中必须 FAIL
+  test_pipeline_fingerprint_drift:
+    test_file: "tests/test_paper_faithfulness_gate.py"
+    test_function: "test_pipeline_structure_change_must_update_fingerprint"
+    check_rule: "更换 SD3 pipeline 版本但未更新 pipeline_fingerprint 必须 FAIL"
+
+  # 测试 3：注入点变化未记录必须 FAIL
+  test_injection_site_drift:
+    test_file: "tests/test_paper_faithfulness_gate.py"
+    test_function: "test_injection_site_change_must_update_digest"
+    check_rule: "hook 位置变化但未更新 injection_site_digest 必须 FAIL"

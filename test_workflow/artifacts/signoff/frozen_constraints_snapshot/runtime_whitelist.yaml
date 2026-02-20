@@ -148,6 +148,8 @@ impl_id:
     - "content_baseline_noop_v1"
     - "semantic_mask_provider_v1"
     - "low_freq_coder_v1"
+    - "high_freq_coder_v1"
+    - "unified_latent_modifier_v1"
     - "content_detector_v1"  # 统一内容检测器
     - "geometry_baseline_noop_v1"
     - "fusion_baseline_identity_v1"
@@ -178,6 +180,21 @@ impl_id:
       # - 输出 lf_score，方向性固定（高值表示强证据）。
       # - 严格区分 absent/failed/mismatch 语义。
       - "low_freq_coder_v1"
+
+      # 高频水印鲁棒化器：
+      # - 在 HF（高频）子空间施加鲁棒约束与尾部截断。
+      # - 支持 enable_hf 配置参数控制启用/禁用。
+      # - 与 LF 通道正交，HF 失败不影响 LF 分数。
+      # - 生成可复算的 hf_trace_digest，绑定计划与约束参数。
+      # - 输出 hf_score，方向性固定（高值表示强证据）。
+      - "high_freq_coder_v1"
+
+      # 统一 latent 修改器：
+      # - 在 SD3 推理循环中协调 LF/HF 子空间修改。
+      # - 通过 callback_on_step_end hook 与 diffusers 集成。
+      # - 生成 step 级证据用于最终摘要计算。
+      # - 仅改 latent 张量，不写原始张量到 records。
+      - "unified_latent_modifier_v1"
 
       # 内容检测器：
       # - 统一从 LF/HF 子空间检测水印，输出融合得分。

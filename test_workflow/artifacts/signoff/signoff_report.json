@@ -154,9 +154,9 @@
       },
       "fix": "N.A.",
       "gate_name": "gate.write_bypass",
-      "impact": "未发现阻断级写盘旁路",
+      "impact": "δ������ϼ�д����·",
       "result": "PASS",
-      "rule": "禁止绕过受控写盘路径直接写入 records 或关键产物",
+      "rule": "��ֹ�ƹ��ܿ�д��·��ֱ��д�� records ��ؼ�����",
       "severity": "BLOCK"
     },
     {
@@ -176,9 +176,9 @@
       },
       "fix": "N.A.",
       "gate_name": "gate.registry_immutability",
-      "impact": "注册表封闭性满足要求",
+      "impact": "ע������������Ҫ��",
       "result": "PASS",
-      "rule": "注册表必须 seal 后不可变，且不可被运行期注入",
+      "rule": "ע������� seal �󲻿ɱ䣬�Ҳ��ɱ�������ע��",
       "severity": "BLOCK"
     },
     {
@@ -221,9 +221,9 @@
       },
       "fix": "N.A.",
       "gate_name": "gate.policy_path_semantics",
-      "impact": "policy_path 语义绑定满足要求",
+      "impact": "policy_path ���������Ҫ��",
       "result": "PASS",
-      "rule": "policy_path 必须来自 runtime whitelist，语义版本绑定，路径策略执行留存审计证据",
+      "rule": "policy_path �������� runtime whitelist������汾�󶨣�·������ִ���������֤��",
       "severity": "BLOCK"
     },
     {
@@ -312,10 +312,12 @@
               "fusion_baseline_identity_v1",
               "geometry_baseline_noop_v1",
               "geometry_sync_baseline_v1",
+              "high_freq_coder_v1",
               "low_freq_coder_v1",
               "semantic_mask_provider_v1",
               "subspace_baseline_full_v1",
-              "subspace_planner_v1"
+              "subspace_planner_v1",
+              "unified_latent_modifier_v1"
             ]
           }
         ]
@@ -477,9 +479,9 @@
       },
       "fix": "N.A.",
       "gate_name": "gate.path_policy_escape_rejection",
-      "impact": "未发现路径策略门禁缺失",
+      "impact": "δ����·�������Ž�ȱʧ",
       "result": "PASS",
-      "rule": "写盘必须通过路径策略门禁并拒绝路径逃逸",
+      "rule": "д�̱���ͨ��·�������Ž����ܾ�·������",
       "severity": "BLOCK"
     },
     {
@@ -523,9 +525,9 @@
       },
       "fix": "N.A.",
       "gate_name": "gate.freeze_surface_integrity",
-      "impact": "冻结面完整性满足要求",
+      "impact": "����������������Ҫ��",
       "result": "PASS",
-      "rule": "冻结契约文件必须存在、解释面入口唯一、schema 权威化、records 包含 schema_version",
+      "rule": "������Լ�ļ�������ڡ����������Ψһ��schema Ȩ������records ���� schema_version",
       "severity": "BLOCK"
     },
     {
@@ -541,9 +543,9 @@
       },
       "fix": "N.A.",
       "gate_name": "gate.dangerous_execution",
-      "impact": "未发现危险的动态执行或不安全序列化",
+      "impact": "δ����Σ�յĶ�ִ̬�л򲻰�ȫ���л�",
       "result": "PASS",
-      "rule": "禁止 eval/exec/compile/pickle.load 等危险执行与不安全序列化",
+      "rule": "��ֹ eval/exec/compile/pickle.load ��Σ��ִ���벻��ȫ���л�",
       "severity": "BLOCK"
     },
     {
@@ -570,9 +572,9 @@
       },
       "fix": "N.A.",
       "gate_name": "gate.network_access",
-      "impact": "发现 1 处受控下载调用（已由 freeze_gate + whitelist 覆盖）",
+      "impact": "���� 1 ���ܿ����ص��ã����� freeze_gate + whitelist ���ǣ�",
       "result": "PASS",
-      "rule": "禁止运行时隐式网络访问或下载，所有网络操作必须审计并锚定来源",
+      "rule": "��ֹ����ʱ��ʽ������ʻ����أ������������������Ʋ�ê����Դ",
       "severity": "BLOCK"
     }
   ],
@@ -582,24 +584,24 @@
     "files": [
       {
         "path": "frozen_contracts.yaml",
-        "sha256": "d74531507cedaf8d7fc974f8b9f2ef9e67e45f623eb40efa936b22883b0a99cc",
-        "size_bytes": 38299
+        "sha256": "bd5f550429e091cfe385d3c5ba7b011fe3cc24ae0c893e324608a97003d99d12",
+        "size_bytes": 39261
       },
       {
         "path": "runtime_whitelist.yaml",
-        "sha256": "a4e0dbfbee2b6021c8b0fa83744c7e73bdd51a9f99b3f18c379b1e65b439596f",
-        "size_bytes": 13791
+        "sha256": "7ecbd699397628bc9c2f1d8a6659d65532309b0a5c3228806d8b5905337ace6f",
+        "size_bytes": 14618
       },
       {
         "path": "policy_path_semantics.yaml",
-        "sha256": "86742209e927fdc54c348246c6a33b5a5130e0616e21de7ee9a85e71cc272f82",
-        "size_bytes": 17820
+        "sha256": "8ed57cf1db9b727f8f90214cebf99a8e53970b42aed737e12fffb66f449d4dbd",
+        "size_bytes": 17970
       }
     ],
     "snapshot_dir": "D:\\Code\\CEG-WM\\test_workflow\\artifacts\\signoff\\frozen_constraints_snapshot",
     "status": "ok"
   },
-  "generated_at_utc": "2026-02-19T05:28:09.448Z",
+  "generated_at_utc": "2026-02-20T06:38:14.128Z",
   "minimum_audit_set": [
     "audits/audit_write_bypass_scan.py",
     "audits/audit_registry_injection_surface.py",
@@ -641,7 +643,7 @@
     "exit_code": 0,
     "status": "pass",
     "stderr_tail": "",
-    "stdout_tail": "........................................................................ [ 40%]\r\n........................................................................ [ 80%]\r\n..................................                                       [100%]\r\n178 passed in 4.86s\r\n",
+    "stdout_tail": "........................................................................ [ 37%]\r\n........................................................................ [ 74%]\r\n..................................................                       [100%]\r\n194 passed, 1 skipped in 4.49s\r\n",
     "test_summary": "pytest executed"
   }
 }

@@ -156,6 +156,11 @@ impl_id:
     - "subspace_baseline_full_v1"
     - "subspace_planner_v1"
     - "geometry_sync_baseline_v1"
+    # Paper Faithfulness 模块 impl_id（append-only v1.0）
+    - "sd3_pipeline_inspector_v1"
+    - "sd3_diffusion_tracer_v1"
+    - "injection_site_binder_v1"
+    - "paper_alignment_evaluator_v1"
 
   allowed_by_domain:
 

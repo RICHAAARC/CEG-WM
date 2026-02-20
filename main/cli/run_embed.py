@@ -19,6 +19,7 @@ from main.cli import assert_module_execution
 assert_module_execution("run_embed")
 
 from main.core import time_utils
+from main.core import digests
 from main.core.contracts import (
     load_frozen_contracts,
     bind_contract_to_record,
@@ -42,7 +43,10 @@ from main.registries import runtime_resolver
 from main.diffusion.sd3 import pipeline_factory
 from main.diffusion.sd3 import infer_runtime
 from main.diffusion.sd3 import infer_trace
+from main.diffusion.sd3 import pipeline_inspector
 from main.watermarking.embed import orchestrator as embed_orchestrator
+from main.watermarking.paper_faithfulness import injection_site_binder
+from main.watermarking.paper_faithfulness import alignment_evaluator
 from main.watermarking.embed.orchestrator import run_embed_orchestrator
 from main.watermarking.content_chain.latent_modifier import (
     LatentModifier,
@@ -275,14 +279,52 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
 
             injection_context = None
             injection_modifier = None
+            injection_site_spec = None
+            injection_site_digest = None
             if isinstance(plan_payload, dict) and isinstance(plan_digest, str) and plan_digest:
                 injection_context = build_injection_context_from_plan(cfg, plan_payload, plan_digest)
                 injection_modifier = LatentModifier(LATENT_MODIFIER_ID, LATENT_MODIFIER_VERSION)
+                
+                # (S-B-2) Paper Faithfulness: 生成 injection_site_spec（必达证据）
+                try:
+                    injection_site_spec, injection_site_digest = injection_site_binder.build_injection_site_spec(
+                        hook_type="callback_on_step_end",
+                        target_module_name="sd3_transformer",
+                        target_tensor_name="latents",
+                        hook_timing="post",
+                        injection_rule_summary={
+                            "plan_digest": plan_digest,
+                            "injection_mode": "subspace_projection"
+                        },
+                        cfg=cfg
+                    )
+                    print(f"[Paper-Faithful] Injection site spec generated: {injection_site_digest[:16]}...")
+                except Exception as inj_site_exc:
+                    print(f"[Paper-Faithful] [WARN] Injection site binding failed: {inj_site_exc}")
+                    injection_site_spec = {"status": "failed", "error": str(inj_site_exc)}
+                    injection_site_digest = "<failed>"
             
             # (7.7) Real Dataflow Smoke: 在 pipeline_result 之后调用 inference
             pipeline_obj = pipeline_result.get("pipeline_obj")
             device = cfg.get("device", "cpu")
             seed = seed_value
+            
+            # (S-B-1) Paper Faithfulness: 提取 SD3 pipeline fingerprint（必达证据）
+            pipeline_fingerprint = None
+            pipeline_fingerprint_digest = None
+            if pipeline_obj is not None:
+                try:
+                    pipeline_fingerprint, pipeline_fingerprint_digest = pipeline_inspector.inspect_sd3_pipeline(
+                        pipeline_obj, cfg
+                    )
+                    print(f"[Paper-Faithful] Pipeline fingerprint extracted: {pipeline_fingerprint_digest[:16]}...")
+                except Exception as pipeline_insp_exc:
+                    print(f"[Paper-Faithful] [WARN] Pipeline inspection failed: {pipeline_insp_exc}")
+                    pipeline_fingerprint = {"status": "failed", "error": str(pipeline_insp_exc)}
+                    pipeline_fingerprint_digest = "<failed>"
+            else:
+                pipeline_fingerprint = {"status": "absent", "reason": "pipeline_obj_is_none"}
+                pipeline_fingerprint_digest = "<absent>"
             
             inference_result = infer_runtime.run_sd3_inference(
                 cfg,
@@ -389,6 +431,78 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
             record["inference_status"] = run_meta.get("inference_status")
             record["inference_error"] = run_meta.get("inference_error")
             record["inference_runtime_meta"] = run_meta.get("inference_runtime_meta")
+            
+            # (S-B-3) Paper Faithfulness: Merge 必达证据到 content_evidence
+            content_evidence = record.get("content_evidence")
+            if not isinstance(content_evidence, dict):
+                content_evidence = {}
+                record["content_evidence"] = content_evidence
+            
+            # 写入 pipeline_fingerprint 和 pipeline_fingerprint_digest
+            if pipeline_fingerprint is not None:
+                content_evidence["pipeline_fingerprint"] = pipeline_fingerprint
+            if pipeline_fingerprint_digest is not None:
+                content_evidence["pipeline_fingerprint_digest"] = pipeline_fingerprint_digest
+            
+            # 写入 injection_site_spec 和 injection_site_digest
+            if injection_site_spec is not None:
+                content_evidence["injection_site_spec"] = injection_site_spec
+            if injection_site_digest is not None:
+                content_evidence["injection_site_digest"] = injection_site_digest
+            
+            # (S-C) Paper Faithfulness: 调用 alignment_evaluator（必达）
+            paper_spec = None
+            paper_spec_digest = None
+            try:
+                # 加载 paper_faithfulness_spec.yaml（通过唯一入口）
+                from pathlib import Path as PathLib
+                spec_path = PathLib(__file__).parent.parent.parent / "configs" / "paper_faithfulness_spec.yaml"
+                if spec_path.exists():
+                    # 使用 config_loader 唯一入口加载 YAML
+                    paper_spec, spec_provenance = config_loader.load_yaml_with_provenance(spec_path)
+                    paper_spec_digest = spec_provenance.canon_sha256
+                    print(f"[Paper-Faithful] Paper spec loaded: {spec_path.name}, digest: {paper_spec_digest[:16]}...")
+                else:
+                    print(f"[Paper-Faithful] [WARN] Paper spec not found: {spec_path}")
+                    paper_spec = {"status": "absent", "reason": "spec_file_not_found"}
+                    paper_spec_digest = "<absent>"
+            except Exception as spec_load_exc:
+                print(f"[Paper-Faithful] [WARN] Failed to load paper spec: {spec_load_exc}")
+                paper_spec = {"status": "failed", "error": str(spec_load_exc)}
+                paper_spec_digest = "<failed>"
+            
+            # 调用 alignment_evaluator
+            alignment_report = None
+            alignment_digest = None
+            if isinstance(paper_spec, dict) and paper_spec.get("status") not in ("absent", "failed"):
+                try:
+                    alignment_report, alignment_digest = alignment_evaluator.evaluate_alignment(
+                        paper_spec=paper_spec,
+                        pipeline_fingerprint=pipeline_fingerprint,
+                        trajectory_evidence=trajectory_evidence,
+                        injection_site_spec=injection_site_spec,
+                        cfg=cfg
+                    )
+                    print(f"[Paper-Faithful] Alignment evaluated: {alignment_report['overall_status']}, digest: {alignment_digest[:16]}...")
+                except Exception as align_exc:
+                    print(f"[Paper-Faithful] [WARN] Alignment evaluation failed: {align_exc}")
+                    alignment_report = {"status": "failed", "error": str(align_exc)}
+                    alignment_digest = "<failed>"
+            else:
+                alignment_report = {"status": "absent", "reason": "paper_spec_not_available"}
+                alignment_digest = "<absent>"
+            
+            # 写入 alignment_report 和 alignment_digest
+            if alignment_report is not None:
+                content_evidence["alignment_report"] = alignment_report
+            if alignment_digest is not None:
+                content_evidence["alignment_digest"] = alignment_digest
+            
+            # 写入 paper_spec 绑定字段到顶层 record
+            if not isinstance(record.get("paper_faithfulness"), dict):
+                record["paper_faithfulness"] = {}
+            record["paper_faithfulness"]["spec_version"] = paper_spec.get("paper_faithfulness_spec_version", "<absent>")
+            record["paper_faithfulness"]["spec_digest"] = paper_spec_digest
             
             override_applied = cfg.get("override_applied")
             if override_applied is not None:

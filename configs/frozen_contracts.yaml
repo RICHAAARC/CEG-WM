@@ -484,6 +484,29 @@ records_schema:
     - decision.routing_decisions
     - decision.routing_digest
     - decision.conditional_fpr_notes
+    - content_evidence.detect_lf_score
+    - content_evidence.detect_hf_score
+    - content_evidence.lf_score_drift_status
+    - content_evidence.hf_score_drift_status
+    - content_evidence.trajectory_digest_match
+    - content_evidence.basis_digest_match
+    - content_evidence.detect_lf_statistics
+    - content_evidence.detect_hf_statistics
+    - content_evidence.subspace_consistency_status
+    # ---- Paper Faithfulness 对齐证据字段（append-only v1.0） ----
+    - paper_faithfulness.spec_version
+    - paper_faithfulness.spec_digest
+    - paper_faithfulness.spec_file_sha256
+    - paper_faithfulness.spec_canon_sha256
+    - paper_faithfulness.spec_bound_digest
+    - content_evidence.pipeline_fingerprint
+    - content_evidence.pipeline_fingerprint_digest
+    - content_evidence.injection_site_spec
+    - content_evidence.injection_site_digest
+    - content_evidence.alignment_report
+    - content_evidence.alignment_digest
+    - content_evidence.lf.ecc_spec_digest
+    - content_evidence.hf_evidence_summary.repetition_factor
 
 # ------------------------------
 # 字段别名：用于历史兼容

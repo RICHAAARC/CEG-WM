@@ -30,7 +30,8 @@ def run_sd3_inference(
     seed: int | None,
     *,
     injection_context: Optional[InjectionContext] = None,
-    injection_modifier: Optional[LatentModifier] = None
+    injection_modifier: Optional[LatentModifier] = None,
+    capture_final_latents: bool = False
 ) -> Dict[str, Any]:
     """
     功能：执行 SD3 推理并返回 inference_runtime_meta。
@@ -42,9 +43,10 @@ def run_sd3_inference(
         pipeline_obj: Pipeline object (may be None if unbuilt).
         device: Device string ("cpu", "cuda", etc.) or None.
         seed: Random seed integer or None.
+        capture_final_latents: Optional bool to capture final latents from inference (for detect-side scoring).
 
     Returns:
-        Dict with inference_status, inference_error, inference_runtime_meta.
+        Dict with inference_status, inference_error, inference_runtime_meta, and optional final_latents.
 
     Raises:
         TypeError: If cfg is invalid.
@@ -58,8 +60,13 @@ def run_sd3_inference(
     if injection_modifier is not None and not isinstance(injection_modifier, LatentModifier):
         # injection_modifier 类型不合法，必须 fail-fast。
         raise TypeError("injection_modifier must be LatentModifier or None")
+    if not isinstance(capture_final_latents, bool):
+        # capture_final_latents 类型不合法，必须 fail-fast。
+        raise TypeError("capture_final_latents must be bool")
 
     inference_enabled = cfg.get("inference_enabled", False)
+    detect_latents_storage = {"final_latents": None} if capture_final_latents else None
+
     if not inference_enabled:
         return {
             "inference_status": INFERENCE_STATUS_DISABLED,
@@ -198,14 +205,50 @@ def run_sd3_inference(
             generator.manual_seed(seed)
             infer_kwargs["generator"] = generator
 
+        def _capture_latents_callback(
+            _pipe: Any,
+            step_index: int,
+            timestep: Any,
+            callback_kwargs: Dict[str, Any]
+        ) -> Dict[str, Any]:
+            """
+            功能：捕获推理过程中的最后一次 latents。
+
+            Capture the latest latents during inference for detect-side scoring.
+            """
+            if not isinstance(callback_kwargs, dict):
+                return callback_kwargs
+            latents = callback_kwargs.get("latents")
+            if latents is None:
+                return callback_kwargs
+            if detect_latents_storage is not None:
+                detect_latents_storage["final_latents"] = latents
+            return callback_kwargs
+
         # 构造注入回调（闭包捕获 InjectionContext）。
         injection_callback, injection_evidence = _prepare_injection_callback(
             cfg,
             injection_context,
             injection_modifier
         )
-        if injection_callback is not None:
-            infer_kwargs["callback_on_step_end"] = injection_callback
+
+        capture_callback = _capture_latents_callback if capture_final_latents else None
+        callback_to_use = injection_callback
+        if injection_callback is not None and capture_callback is not None:
+            def _combined_callback(
+                _pipe: Any,
+                step_index: int,
+                timestep: Any,
+                callback_kwargs: Dict[str, Any]
+            ) -> Dict[str, Any]:
+                callback_kwargs = injection_callback(_pipe, step_index, timestep, callback_kwargs)
+                return capture_callback(_pipe, step_index, timestep, callback_kwargs)
+            callback_to_use = _combined_callback
+        elif injection_callback is None:
+            callback_to_use = capture_callback
+
+        if callback_to_use is not None:
+            infer_kwargs["callback_on_step_end"] = callback_to_use
             infer_kwargs["callback_on_step_end_tensor_inputs"] = ["latents"]
 
         # 执行推理并在支持时采样真实 trajectory 摘要。
@@ -273,7 +316,8 @@ def run_sd3_inference(
         "injection_evidence": injection_evidence if isinstance(injection_evidence, dict) else _build_injection_absent_evidence(
             injection_context,
             absent_reason="injection_not_available"
-        )
+        ),
+        "final_latents": detect_latents_storage.get("final_latents") if detect_latents_storage is not None else None
     }
 
 
@@ -291,7 +335,6 @@ def _prepare_injection_callback(
         cfg: Configuration mapping.
         injection_context: InjectionContext instance or None.
         injection_modifier: LatentModifier instance or None.
-
     Returns:
         Tuple of (callback or None, initial injection evidence dict or None).
 

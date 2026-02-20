@@ -309,3 +309,162 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "条件 FPR 口径说明与统计锚点。"
+
+  # ==============================================================
+  # detect 侧同构统计信号（论文级检测闭环）
+  # ==============================================================
+  - path: "content_evidence.detect_lf_score"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "detect 侧 LF 子空间同构得分（范围 [0, 1]）。"
+  
+  - path: "content_evidence.detect_hf_score"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "detect 侧 HF 子空间同构得分（范围 [0, 1]）。"
+  
+  - path: "content_evidence.lf_score_drift_status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "embed vs detect LF score 漂移状态（ok/drift_detected）。"
+  
+  - path: "content_evidence.hf_score_drift_status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "embed vs detect HF score 漂移状态（ok/drift_detected）。"
+  
+  - path: "content_evidence.trajectory_digest_match"
+    layer: "anchor"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "轨迹摘要一致性状态（consistent/mismatch/absent）。"
+  
+  - path: "content_evidence.basis_digest_match"
+    layer: "anchor"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "子空间基摘要一致性状态（consistent/mismatch/absent）。"
+  
+  - path: "content_evidence.detect_lf_statistics"
+    layer: "diagnostic"
+    type: "metrics_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "detect 侧 LF 统计向量（系数范数、均值、标差等）。"
+  
+  - path: "content_evidence.detect_hf_statistics"
+    layer: "diagnostic"
+    type: "metrics_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "detect 侧 HF 统计向量（系数范数、均值、标差等）。"
+  
+  - path: "content_evidence.subspace_consistency_status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "子空间一致性校验总体状态（ok/inconsistent/absent）。"
+  # ==============================================================
+  # Paper Faithfulness 对齐证据字段（append-only v1.0）
+  # ==============================================================
+  - path: "paper_faithfulness.spec_version"
+    layer: "anchor"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "paper_faithfulness_spec.yaml 版本号。"
+  
+  - path: "paper_faithfulness.spec_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "paper_faithfulness_spec.yaml 配置摘要。"
+  
+  - path: "paper_faithfulness.spec_file_sha256"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "paper_faithfulness_spec.yaml 文件原文哈希。"
+  
+  - path: "paper_faithfulness.spec_canon_sha256"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "paper_faithfulness_spec.yaml 规范化哈希。"
+  
+  - path: "paper_faithfulness.spec_bound_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "paper_faithfulness_spec.yaml 绑定摘要。"
+  
+  - path: "content_evidence.pipeline_fingerprint"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "SD3 pipeline 结构指纹（transformer blocks、attention heads 等）。"
+  
+  - path: "content_evidence.pipeline_fingerprint_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "SD3 pipeline 结构指纹摘要。"
+  
+  - path: "content_evidence.injection_site_spec"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "水印注入点规范（hook 类型、模块路径、张量名等）。"
+  
+  - path: "content_evidence.injection_site_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "水印注入点规范摘要。"
+  
+  - path: "content_evidence.alignment_report"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "对齐检查报告（逐项 PASS/FAIL/NA + 证据路径）。"
+  
+  - path: "content_evidence.alignment_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "对齐检查报告摘要。"
+  
+  - path: "content_evidence.lf.ecc_spec_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "LF 纠错码规范摘要（PRC 等方法的 ECC 参数）。"
+  
+  - path: "content_evidence.hf_evidence_summary.repetition_factor"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "HF 重复因子（T2SMark 等方法的 repetition code 参数）。"

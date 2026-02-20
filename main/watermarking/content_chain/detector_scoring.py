@@ -282,3 +282,201 @@ def compute_content_score(
     
     else:
         return None, f"unknown_rule_version: {rule_version}"
+
+
+def extract_lf_score_from_detect_latents(
+    detect_latents: Optional[Any],
+    lf_basis: Optional[Dict[str, Any]],
+    embed_lf_score: Optional[float],
+    cfg: Dict[str, Any]
+) -> Tuple[Optional[float], str]:
+    """
+    功能：从 detect-side 真实推理张量提取 LF 分数（同构方式）。
+    
+    Extract LF score from detect-side latent tensor using same method as embed side.
+    Enables reproducible cross-validation between embed and detect traces.
+    
+    Args:
+        detect_latents: Detect-side latent tensor (torch.Tensor or np.ndarray).
+        lf_basis: LF basis dict with projection_matrix.
+        embed_lf_score: Embed-side LF score for consistency check.
+        cfg: Configuration mapping.
+    
+    Returns:
+        Tuple of (detect_lf_score, status).
+        detect_lf_score=None if absent/failed; else float in [0, 1].
+        status: "ok" / "absent" / "failed" / "mismatch".
+    
+    Raises:
+        TypeError: If inputs types invalid.
+    """
+    if not isinstance(cfg, dict):
+        return None, "cfg_invalid_type"
+    
+    if detect_latents is None:
+        return None, "detect_latents_missing"
+    
+    if lf_basis is None:
+        return None, "lf_basis_missing"
+    
+    try:
+        # 尝试 torch 路径。
+        is_torch = False
+        try:
+            import torch
+            is_torch = torch.is_tensor(detect_latents)
+        except Exception:
+            is_torch = False
+        
+        if is_torch:
+            import torch
+            projection_matrix = lf_basis.get("projection_matrix")
+            if projection_matrix is None:
+                return None, "projection_matrix_missing"
+            
+            # 投影到 LF 子空间并计算系数范数。
+            latents_flat = detect_latents.reshape(-1).to(dtype=torch.float32)
+            proj_matrix_t = torch.as_tensor(
+                projection_matrix,
+                dtype=torch.float32,
+                device=latents_flat.device
+            )
+            lf_coeffs = torch.matmul(latents_flat, proj_matrix_t)
+            coeffs_norm = float(torch.linalg.vector_norm(lf_coeffs).item())
+        else:
+            # numpy 路径。
+            projection_matrix = lf_basis.get("projection_matrix")
+            if projection_matrix is None:
+                return None, "projection_matrix_missing"
+            
+            latents_np = np.asarray(detect_latents, dtype=np.float32).copy()
+            latents_flat = latents_np.reshape(-1)
+            proj_matrix_np = np.asarray(projection_matrix, dtype=np.float32)
+            lf_coeffs = np.dot(latents_flat, proj_matrix_np)
+            coeffs_norm = float(np.linalg.norm(lf_coeffs))
+        
+        # 计算分数（与 embed 侧同样的阈值）。
+        lf_score_threshold = cfg.get("lf_score_threshold", 10.0)
+        detect_lf_score = min(1.0, max(0.0, coeffs_norm / float(lf_score_threshold)))
+        
+        # 可选：检查与 embed-side 分数的一致性。
+        if embed_lf_score is not None:
+            score_delta = abs(detect_lf_score - embed_lf_score)
+            # 允许小的偏差（数值差异）。
+            if score_delta > 0.15:  # 15% 差异视为 mismatch。
+                return detect_lf_score, "lf_score_drift_detected"
+        
+        return detect_lf_score, "ok"
+    
+    except Exception as e:
+        return None, f"lf_extraction_failed: {type(e).__name__}"
+
+
+def extract_hf_score_from_detect_latents(
+    detect_latents: Optional[Any],
+    hf_basis: Optional[Dict[str, Any]],
+    embed_hf_score: Optional[float],
+    cfg: Dict[str, Any]
+) -> Tuple[Optional[float], str]:
+    """
+    功能：从 detect-side 真实推理张量提取 HF 分数（同构方式）。
+    
+    Extract HF score from detect-side latent tensor using same method as embed side.
+    
+    Args:
+        detect_latents: Detect-side latent tensor.
+        hf_basis: HF basis dict with hf_projection_matrix.
+        embed_hf_score: Embed-side HF score for consistency check.
+        cfg: Configuration mapping.
+    
+    Returns:
+        Tuple of (detect_hf_score, status).
+    
+    Raises:
+        TypeError: If inputs types invalid.
+    """
+    if not isinstance(cfg, dict):
+        return None, "cfg_invalid_type"
+    
+    if detect_latents is None:
+        return None, "detect_latents_missing"
+    
+    if hf_basis is None:
+        return None, "hf_basis_missing"
+    
+    try:
+        is_torch = False
+        try:
+            import torch
+            is_torch = torch.is_tensor(detect_latents)
+        except Exception:
+            is_torch = False
+        
+        if is_torch:
+            import torch
+            projection_matrix = hf_basis.get("hf_projection_matrix")
+            if projection_matrix is None:
+                return None, "hf_projection_matrix_missing"
+            
+            latents_flat = detect_latents.reshape(-1).to(dtype=torch.float32)
+            proj_matrix_t = torch.as_tensor(
+                projection_matrix,
+                dtype=torch.float32,
+                device=latents_flat.device
+            )
+            hf_coeffs = torch.matmul(latents_flat, proj_matrix_t)
+            coeffs_norm = float(torch.linalg.vector_norm(hf_coeffs).item())
+        else:
+            projection_matrix = hf_basis.get("hf_projection_matrix")
+            if projection_matrix is None:
+                return None, "hf_projection_matrix_missing"
+            
+            latents_np = np.asarray(detect_latents, dtype=np.float32).copy()
+            latents_flat = latents_np.reshape(-1)
+            proj_matrix_np = np.asarray(projection_matrix, dtype=np.float32)
+            hf_coeffs = np.dot(latents_flat, proj_matrix_np)
+            coeffs_norm = float(np.linalg.norm(hf_coeffs))
+        
+        hf_score_threshold = cfg.get("hf_score_threshold", 5.0)
+        detect_hf_score = min(1.0, max(0.0, coeffs_norm / float(hf_score_threshold)))
+        
+        if embed_hf_score is not None:
+            score_delta = abs(detect_hf_score - embed_hf_score)
+            if score_delta > 0.15:
+                return detect_hf_score, "hf_score_drift_detected"
+        
+        return detect_hf_score, "ok"
+    
+    except Exception as e:
+        return None, f"hf_extraction_failed: {type(e).__name__}"
+
+
+def validate_basis_digest_consistency(
+    embed_basis_digest: Optional[str],
+    detect_basis_digest: Optional[str]
+) -> Tuple[bool, str]:
+    """
+    功能：校验 basis_digest 一致性。
+    
+    Validate subspace basis digest consistency.
+    
+    Args:
+        embed_basis_digest: Basis digest from embed-side.
+        detect_basis_digest: Basis digest recomputed at detect-side.
+    
+    Returns:
+        Tuple of (is_consistent, reason).
+    """
+    if embed_basis_digest is None and detect_basis_digest is None:
+        return False, "basis_digest_both_absent"
+    
+    if embed_basis_digest is None:
+        return False, "basis_digest_embed_absent"
+    
+    if detect_basis_digest is None:
+        return False, "basis_digest_detect_absent"
+    
+    if embed_basis_digest == detect_basis_digest:
+        return True, "basis_digest_consistent"
+    else:
+        return False, "basis_digest_mismatch"

@@ -441,10 +441,22 @@ records_schema:
     - content_evidence.basis_digest
     - content_evidence.lf_trace_digest
     - content_evidence.hf_trace_digest
+    - content_evidence.injection_trace_digest
+    - content_evidence.injection_params_digest
     - content_evidence.lf_score
     - content_evidence.hf_score
+    - content_evidence.injection_status
+    - content_evidence.injection_absent_reason
+    - content_evidence.injection_failure_reason
+    - content_evidence.injection_metrics
+    - content_evidence.subspace_binding_digest
+    - content_evidence.lf_statistics_digest
+    - content_evidence.hf_statistics_digest
+    - content_evidence.hf_evidence_summary
     - content_evidence.score_parts
     - content_evidence.content_failure_reason
+    - content_evidence.content_mismatch_reason
+    - content_evidence.content_mismatch_field_path
     - content_evidence.audit.trajectory_tap_status
     - content_evidence.audit.trajectory_absent_reason
     - content_evidence.trajectory_evidence
@@ -472,6 +484,15 @@ records_schema:
     - decision.routing_decisions
     - decision.routing_digest
     - decision.conditional_fpr_notes
+    - content_evidence.detect_lf_score
+    - content_evidence.detect_hf_score
+    - content_evidence.lf_score_drift_status
+    - content_evidence.hf_score_drift_status
+    - content_evidence.trajectory_digest_match
+    - content_evidence.basis_digest_match
+    - content_evidence.detect_lf_statistics
+    - content_evidence.detect_hf_statistics
+    - content_evidence.subspace_consistency_status
 
 # ------------------------------
 # 字段别名：用于历史兼容

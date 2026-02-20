@@ -16,7 +16,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from main.core import digests
 
 
-HIGH_FREQ_EMBEDDER_ID = "high_freq_embedder_v1"
+HIGH_FREQ_EMBEDDER_ID = "high_freq_coder_v1"
 HIGH_FREQ_EMBEDDER_VERSION = "v1"
 HIGH_FREQ_EMBEDDER_TRACE_VERSION = "v1"
 CONTENT_SCORE_RULE_VERSION = "content_score_rule_v1"

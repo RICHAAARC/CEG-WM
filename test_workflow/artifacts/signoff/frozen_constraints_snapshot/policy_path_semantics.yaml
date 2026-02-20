@@ -170,6 +170,9 @@ field_catalog:
       - "score_audit.fusion_rule_used"
       - "decision.abstain_reason"
       - "score_audit.abstain_triggered_by"
+      - "content_evidence.subspace_binding_digest"
+      - "content_evidence.lf_statistics_digest"
+      - "content_evidence.hf_statistics_digest"
 
 # ------------------------------
 # catalogs 使用约束

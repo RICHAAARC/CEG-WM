@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional
 from main.core import digests
 from main.registries.runtime_resolver import BuiltImplSet
 from main.watermarking.content_chain.content_detector import CONTENT_DETECTOR_ID
+from main.watermarking.content_chain import detector_scoring
 from main.watermarking.content_chain.high_freq_embedder import (
     HighFreqEmbedder,
     HIGH_FREQ_EMBEDDER_ID,
@@ -181,6 +182,13 @@ def run_detect_orchestrator(
     if injection_mismatch_reason:
         mismatch_reasons.append(injection_mismatch_reason)
 
+    # (S-D) Paper Faithfulness: 验证 paper faithfulness 证据一致性（必达）
+    paper_faithfulness_status, paper_faithfulness_mismatch_reasons = _evaluate_paper_faithfulness_consistency(
+        input_record=input_record
+    )
+    if paper_faithfulness_mismatch_reasons:
+        mismatch_reasons.extend(paper_faithfulness_mismatch_reasons)
+
     primary_mismatch_reason, primary_mismatch_field_path = _resolve_primary_mismatch(
         mismatch_reasons
     )
@@ -280,6 +288,114 @@ def run_detect_orchestrator(
         fusion_result = impl_set.fusion_rule.fuse(cfg, content_evidence_adapted, geometry_evidence_adapted)
     input_fields = len(input_record or {})
 
+    # (D-2) 实现 detect 侧同构分数与一致性校验
+    detect_placeholder_flag = True  # 默认为占位符模式
+    final_latents = cfg.get("__detect_final_latents__")  # 从 CLI 层捕获的最后 latents
+
+    if not forced_mismatch and final_latents is not None and isinstance(plan_payload, dict):
+        # 从 plan_payload 提取 LF/HF basis
+        lf_basis = plan_payload.get("lf_basis")
+        hf_basis = plan_payload.get("hf_basis")
+
+        # 从 input_record 提取 embed 侧分数（兼容 content_evidence 承载）。
+        embed_lf_score = None
+        embed_hf_score = None
+        if isinstance(input_record, dict):
+            embed_lf_score = input_record.get("lf_score")
+            embed_hf_score = input_record.get("hf_score")
+            embed_content_evidence = input_record.get("content_evidence")
+            if isinstance(embed_content_evidence, dict):
+                if embed_lf_score is None:
+                    embed_lf_score = embed_content_evidence.get("lf_score")
+                if embed_hf_score is None:
+                    embed_hf_score = embed_content_evidence.get("hf_score")
+
+        # 计算 detect 侧 LF 分数（同构方式）
+        detect_lf_score, detect_lf_status = detector_scoring.extract_lf_score_from_detect_latents(
+            final_latents,
+            lf_basis,
+            embed_lf_score,
+            cfg
+        )
+
+        # 计算 detect 侧 HF 分数（同构方式）
+        detect_hf_score, detect_hf_status = detector_scoring.extract_hf_score_from_detect_latents(
+            final_latents,
+            hf_basis,
+            embed_hf_score,
+            cfg
+        )
+
+        # 校验 plan_digest 与 basis_digest 一致性
+        embed_plan_digest = input_record.get("plan_digest") if input_record else None
+        embed_basis_digest = input_record.get("basis_digest") if input_record else None
+
+        plan_digest_consistent, plan_digest_reason = detector_scoring.validate_plan_digest_consistency(
+            embed_plan_digest,
+            detect_time_plan_digest
+        )
+        basis_digest_consistent, basis_digest_reason = detector_scoring.validate_basis_digest_consistency(
+            embed_basis_digest,
+            getattr(detect_plan_result, "basis_digest", None) if detect_plan_result else None
+        )
+
+        if content_evidence_payload is None:
+            content_evidence_payload = {}
+
+        # 追加 detect 侧分数与一致性状态到 content_evidence
+        content_evidence_payload["detect_lf_score"] = detect_lf_score
+        content_evidence_payload["detect_hf_score"] = detect_hf_score
+
+        lf_score_drift_status = None
+        if detect_lf_status == "ok":
+            lf_score_drift_status = "ok"
+        elif detect_lf_status == "lf_score_drift_detected":
+            lf_score_drift_status = "drift_detected"
+
+        hf_score_drift_status = None
+        if detect_hf_status == "ok":
+            hf_score_drift_status = "ok"
+        elif detect_hf_status == "hf_score_drift_detected":
+            hf_score_drift_status = "drift_detected"
+
+        if lf_score_drift_status is not None:
+            content_evidence_payload["lf_score_drift_status"] = lf_score_drift_status
+        if hf_score_drift_status is not None:
+            content_evidence_payload["hf_score_drift_status"] = hf_score_drift_status
+
+        if basis_digest_consistent:
+            basis_digest_match = "consistent"
+        elif "absent" in basis_digest_reason:
+            basis_digest_match = "absent"
+        else:
+            basis_digest_match = "mismatch"
+
+        if trajectory_status == "ok":
+            trajectory_digest_match = "consistent"
+        elif trajectory_status == "mismatch":
+            trajectory_digest_match = "mismatch"
+        else:
+            trajectory_digest_match = "absent"
+
+        content_evidence_payload["basis_digest_match"] = basis_digest_match
+        content_evidence_payload["trajectory_digest_match"] = trajectory_digest_match
+
+        if (not plan_digest_consistent and "absent" not in plan_digest_reason) or basis_digest_match == "mismatch" or trajectory_status == "mismatch":
+            subspace_consistency_status = "inconsistent"
+        elif "absent" in plan_digest_reason or basis_digest_match == "absent" or trajectory_status == "absent":
+            subspace_consistency_status = "absent"
+        else:
+            subspace_consistency_status = "ok"
+
+        content_evidence_payload["subspace_consistency_status"] = subspace_consistency_status
+
+        # 如果 detect 侧分数有效且一致性通过，则标记为实际运行而非占位符
+        if detect_lf_status == "ok" and subspace_consistency_status == "ok":
+            detect_placeholder_flag = False
+
+    # 删除临时的 latents 字段，确保不写入 records
+    cfg.pop("__detect_final_latents__", None)
+
     # plan_digest 一致性验证（优先级高于 compute_failed）。
     # 优先级：已检测到的 plan_digest mismatch > compute_failed > not_validated
     plan_digest_status = "not_validated"
@@ -307,7 +423,7 @@ def run_detect_orchestrator(
 
     record: Dict[str, Any] = {
         "operation": "detect",
-        "detect_placeholder": True,
+        "detect_placeholder": detect_placeholder_flag,
         "image_path": "placeholder_test.png",
         "score": getattr(fusion_result, "evidence_summary", {}).get("content_score"),
         "execution_report": {
@@ -522,6 +638,76 @@ def _evaluate_injection_consistency(
         if not isinstance(detect_binding_digest, str) or detect_binding_digest != embed_binding_digest:
             return "mismatch", "injection_subspace_binding_digest_mismatch"
     return "ok", None
+
+
+def _evaluate_paper_faithfulness_consistency(
+    input_record: Optional[Dict[str, Any]]
+) -> tuple[str, list[str]]:
+    """
+    功能：校验 paper faithfulness 证据一致性（S-D 必达）。
+
+    Evaluate paper faithfulness evidence consistency between embed-time record.
+    Validates: pipeline_fingerprint_digest, injection_site_digest, paper_spec_digest.
+
+    Args:
+        input_record: Embed-time input record mapping or None.
+
+    Returns:
+        Tuple of (status, mismatch_reasons_list).
+        status is one of: "ok", "absent", "mismatch".
+        mismatch_reasons_list contains tokens like "pipeline_fingerprint_digest_absent".
+
+    Raises:
+        TypeError: If input_record type is invalid.
+    """
+    if input_record is not None and not isinstance(input_record, dict):
+        raise TypeError("input_record must be dict or None")
+
+    mismatch_reasons: list[str] = []
+
+    if input_record is None:
+        return "absent", mismatch_reasons
+
+    # 提取 embed-time paper faithfulness 证据。
+    embed_content_evidence = None
+    for key in ["content_evidence_payload", "content_evidence", "content_result"]:
+        candidate = input_record.get(key)
+        if isinstance(candidate, dict):
+            embed_content_evidence = candidate
+            break
+
+    embed_paper_faithfulness = input_record.get("paper_faithfulness")
+
+    # 验证 paper_spec_digest 存在性。
+    if isinstance(embed_paper_faithfulness, dict):
+        spec_digest = embed_paper_faithfulness.get("spec_digest")
+        if not isinstance(spec_digest, str) or not spec_digest or spec_digest in ("<absent>", "<failed>"):
+            mismatch_reasons.append("paper_spec_digest_absent_or_invalid")
+    else:
+        mismatch_reasons.append("paper_faithfulness_section_absent")
+
+    # 验证 pipeline_fingerprint_digest 存在性。
+    if isinstance(embed_content_evidence, dict):
+        pipeline_fingerprint_digest = embed_content_evidence.get("pipeline_fingerprint_digest")
+        if not isinstance(pipeline_fingerprint_digest, str) or not pipeline_fingerprint_digest or pipeline_fingerprint_digest in ("<absent>", "<failed>"):
+            mismatch_reasons.append("pipeline_fingerprint_digest_absent_or_invalid")
+
+        # 验证 injection_site_digest 存在性。
+        injection_site_digest = embed_content_evidence.get("injection_site_digest")
+        if not isinstance(injection_site_digest, str) or not injection_site_digest or injection_site_digest in ("<absent>", "<failed>"):
+            mismatch_reasons.append("injection_site_digest_absent_or_invalid")
+
+        # 验证 alignment_digest 存在性。
+        alignment_digest = embed_content_evidence.get("alignment_digest")
+        if not isinstance(alignment_digest, str) or not alignment_digest or alignment_digest in ("<absent>", "<failed>"):
+            mismatch_reasons.append("alignment_digest_absent_or_invalid")
+    else:
+        mismatch_reasons.append("content_evidence_absent")
+
+    if len(mismatch_reasons) > 0:
+        return "mismatch", mismatch_reasons
+
+    return "ok", mismatch_reasons
 
 
 def _extract_lf_evidence_from_input_record(input_record: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -866,6 +1052,13 @@ def _resolve_mismatch_failure_reason(primary_mismatch_reason: str) -> str:
         "injection_params_digest_invalid": "detector_plan_mismatch",
         "injection_status_mismatch": "detector_plan_mismatch",
         "injection_subspace_binding_digest_mismatch": "detector_plan_mismatch",
+        # (S-D) Paper Faithfulness mismatch reasons
+        "paper_spec_digest_absent_or_invalid": "detector_plan_mismatch",
+        "pipeline_fingerprint_digest_absent_or_invalid": "detector_plan_mismatch",
+        "injection_site_digest_absent_or_invalid": "detector_plan_mismatch",
+        "alignment_digest_absent_or_invalid": "detector_plan_mismatch",
+        "paper_faithfulness_section_absent": "detector_plan_mismatch",
+        "content_evidence_absent": "detector_plan_mismatch",
     }
     return reason_map.get(primary_mismatch_reason, "detector_plan_mismatch")
 
@@ -948,7 +1141,14 @@ def _resolve_primary_mismatch(mismatch_reasons: list[str]) -> tuple[str, str]:
         "injection_trace_digest_invalid": "content_evidence.injection_trace_digest",
         "injection_params_digest_invalid": "content_evidence.injection_params_digest",
         "injection_status_mismatch": "content_evidence.injection_status",
-        "injection_subspace_binding_digest_mismatch": "content_evidence.subspace_binding_digest"
+        "injection_subspace_binding_digest_mismatch": "content_evidence.subspace_binding_digest",
+        # (S-D) Paper Faithfulness mismatch field paths
+        "paper_spec_digest_absent_or_invalid": "paper_faithfulness.spec_digest",
+        "pipeline_fingerprint_digest_absent_or_invalid": "content_evidence.pipeline_fingerprint_digest",
+        "injection_site_digest_absent_or_invalid": "content_evidence.injection_site_digest",
+        "alignment_digest_absent_or_invalid": "content_evidence.alignment_digest",
+        "paper_faithfulness_section_absent": "paper_faithfulness",
+        "content_evidence_absent": "content_evidence",
     }
     for token in [
         "plan_digest_mismatch",
@@ -962,7 +1162,14 @@ def _resolve_primary_mismatch(mismatch_reasons: list[str]) -> tuple[str, str]:
         "injection_trace_digest_invalid",
         "injection_params_digest_invalid",
         "injection_status_mismatch",
-        "injection_subspace_binding_digest_mismatch"
+        "injection_subspace_binding_digest_mismatch",
+        # (S-D) Paper Faithfulness mismatch priority
+        "paper_spec_digest_absent_or_invalid",
+        "pipeline_fingerprint_digest_absent_or_invalid",
+        "injection_site_digest_absent_or_invalid",
+        "alignment_digest_absent_or_invalid",
+        "paper_faithfulness_section_absent",
+        "content_evidence_absent",
     ]:
         if token in mismatch_reasons:
             return token, reason_to_field_path[token]
