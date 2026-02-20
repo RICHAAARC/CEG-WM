@@ -156,7 +156,7 @@ _PIPELINE_REGISTRY.register_factory(
         requires_cuda=False,
         supports_deterministic=True,
         max_resolution=None,
-        supported_models=None
+        supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
     )
 )
 
@@ -168,7 +168,7 @@ _PIPELINE_REGISTRY.register_factory(
         requires_cuda=False,
         supports_deterministic=True,
         max_resolution=None,
-        supported_models=None
+        supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
     )
 )
 

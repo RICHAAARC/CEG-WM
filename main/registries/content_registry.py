@@ -346,7 +346,7 @@ _CONTENT_REGISTRY.register_factory(
         requires_cuda=False,
         supports_deterministic=True,
         max_resolution=None,
-        supported_models=None
+        supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
     )
 )
 _CONTENT_REGISTRY.register_factory(
@@ -357,7 +357,7 @@ _CONTENT_REGISTRY.register_factory(
         requires_cuda=False,
         supports_deterministic=True,
         max_resolution=(2048, 2048),
-        supported_models=None
+        supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
     )
 )
 _CONTENT_REGISTRY.register_factory(
@@ -368,7 +368,7 @@ _CONTENT_REGISTRY.register_factory(
         requires_cuda=False,
         supports_deterministic=True,
         max_resolution=None,
-        supported_models=None
+        supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
     )
 )
 _CONTENT_REGISTRY.register_factory(
@@ -379,7 +379,7 @@ _CONTENT_REGISTRY.register_factory(
         requires_cuda=False,
         supports_deterministic=True,
         max_resolution=None,
-        supported_models=None
+        supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
     )
 )
 _SUBSPACE_REGISTRY.register_factory(
@@ -390,7 +390,7 @@ _SUBSPACE_REGISTRY.register_factory(
         requires_cuda=False,
         supports_deterministic=True,
         max_resolution=None,
-        supported_models=None
+        supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
     )
 )
 _SUBSPACE_REGISTRY.register_factory(
@@ -401,7 +401,7 @@ _SUBSPACE_REGISTRY.register_factory(
         requires_cuda=False,
         supports_deterministic=True,
         max_resolution=None,
-        supported_models=None
+        supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
     )
 )
 
