@@ -438,7 +438,25 @@ def assert_pipeline_model_source_allowed(
         # field_path 输入不合法，必须 fail-fast。
         raise TypeError("field_path must be non-empty str")
 
-    _raise_pipeline_realization_policy_disabled(field_path)
+    # 检查 whitelist 中的 pipeline_realization 策略
+    pipeline_realization = whitelist.data.get("pipeline_realization")
+    if not isinstance(pipeline_realization, dict):
+        _raise_pipeline_realization_policy_disabled(field_path)
+    
+    enabled = pipeline_realization.get("enabled", False)
+    if not enabled:
+        _raise_pipeline_realization_policy_disabled(field_path)
+    
+    # 检查 model_source 是否在允许列表中
+    allowed_sources = pipeline_realization.get("allowed_model_sources", [])
+    if model_source not in allowed_sources:
+        raise GateEnforcementError(
+            f"model_source not allowed: {model_source}",
+            gate_name="pipeline_realization.model_source.not_allowed",
+            field_path=field_path,
+            expected=f"one of {allowed_sources}",
+            actual=model_source
+        )
 
 
 def assert_pipeline_hf_revision_required(
@@ -470,7 +488,26 @@ def assert_pipeline_hf_revision_required(
         # field_path 输入不合法，必须 fail-fast。
         raise TypeError("field_path must be non-empty str")
 
-    _raise_pipeline_realization_policy_disabled(field_path)
+    # 检查 whitelist 中的 pipeline_realization 策略
+    pipeline_realization = whitelist.data.get("pipeline_realization")
+    if not isinstance(pipeline_realization, dict):
+        _raise_pipeline_realization_policy_disabled(field_path)
+    
+    enabled = pipeline_realization.get("enabled", False)
+    if not enabled:
+        _raise_pipeline_realization_policy_disabled(field_path)
+    
+    # 检查是否要求 hf_revision
+    hf_revision_required = pipeline_realization.get("hf_revision_required", True)
+    if hf_revision_required:
+        if not isinstance(hf_revision, str) or not hf_revision or hf_revision == "<absent>":
+            raise GateEnforcementError(
+                "hf_revision required",
+                gate_name="pipeline_realization.hf_revision.required",
+                field_path=field_path,
+                expected="non-empty",
+                actual=str(hf_revision)
+            )
 
 
 def assert_pipeline_weights_snapshot_required(
