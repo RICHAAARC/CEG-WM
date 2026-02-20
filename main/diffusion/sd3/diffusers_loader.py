@@ -171,14 +171,33 @@ def build_sd3_pipeline_from_pretrained(
         
         build_meta["status"] = "built"
         build_meta["local_files_only"] = local_files_only
-        build_meta["build_kwargs"] = dict(build_kwargs)
+        
+        # 构造可序列化的 build_kwargs 副本（排除 torch.dtype 对象）
+        serializable_kwargs = {}
+        for key, value in build_kwargs.items():
+            if key == "torch_dtype":
+                # 将 torch.dtype 转换为字符串
+                serializable_kwargs[key] = str(value) if value is not None else None
+            else:
+                serializable_kwargs[key] = value
+        build_meta["build_kwargs"] = serializable_kwargs
+        
         if torch_dtype is not None:
             build_meta["torch_dtype"] = str(torch_dtype)
         return pipeline, build_meta, None
     except Exception as exc:
         build_meta["status"] = "failed"
         build_meta["local_files_only"] = local_files_only
-        build_meta["build_kwargs"] = dict(build_kwargs)
+        
+        # 构造可序列化的 build_kwargs 副本
+        serializable_kwargs = {}
+        for key, value in build_kwargs.items():
+            if key == "torch_dtype":
+                serializable_kwargs[key] = str(value) if value is not None else None
+            else:
+                serializable_kwargs[key] = value
+        build_meta["build_kwargs"] = serializable_kwargs
+        
         if model_source == "hf_hub":
             return None, build_meta, "hf_hub_local_cache_missing_or_unavailable"
         return None, build_meta, f"{type(exc).__name__}: {exc}"
