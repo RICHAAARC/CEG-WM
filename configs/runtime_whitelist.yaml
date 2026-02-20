@@ -63,6 +63,24 @@ override:
       field_path: "allow_nonempty_run_root_reason"
       override_mode: "set"
       source: "cli"
+    - arg_name: "force_cpu"
+      field_path: "device"
+      override_mode: "set"
+      set_value: "cpu"
+      source: "cli"
+      description: "CPU 优先闭环验证：强制设备为 CPU，用于审计与可复现性验证"
+    - arg_name: "enable_paper_faithfulness"
+      field_path: "paper_faithfulness.enabled"
+      override_mode: "set"
+      set_value: true
+      source: "cli"
+      description: "启用纸质对齐验证：启用 paper_faithfulness 模式、pipeline fingerprint 与 trajectory tap 必达"
+    - arg_name: "enable_trace_tap"
+      field_path: "trajectory_tap.enabled"
+      override_mode: "set"
+      set_value: true
+      source: "cli"
+      description: "启用轨迹采样：启用 trajectory tap 以产出可复算的轨迹摘要"
 
   # 覆写 source 的枚举白名单（gate 必须校验）
   source_enum:
@@ -78,6 +96,9 @@ override:
       - "disable_geometry"
       - "run_root_reuse_allowed"
       - "run_root_reuse_reason"
+      - "force_cpu"
+      - "enable_paper_faithfulness"
+      - "enable_trace_tap"
     immutable: true
     notes: "必须与 allowed_overrides[*].arg_name 的值集完全一致。新增 override 必须同步更新此枚举。"
 

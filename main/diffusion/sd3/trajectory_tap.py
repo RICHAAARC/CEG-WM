@@ -267,8 +267,15 @@ def tap_from_pipeline(
         "callback_on_step_end_tensor_inputs" in signature.parameters
     )
 
+    print(f"[Trajectory-TAP] Pipeline callback support check:")
+    print(f"  - Pipeline type: {type(pipeline_obj).__name__}")
+    print(f"  - Supports callback_on_step_end: {'callback_on_step_end' in signature.parameters}")
+    print(f"  - Supports callback_on_step_end_tensor_inputs: {'callback_on_step_end_tensor_inputs' in signature.parameters}")
+    print(f"  - Final supports_callback: {supports_callback}")
+
     if not supports_callback:
         # pipeline 不支持 callback 接口时，必须移除回调参数以避免报错。
+        print(f"[Trajectory-TAP] [WARN] Pipeline does not support callback interface, using absent evidence")
         safe_infer_kwargs = dict(infer_kwargs)
         if "callback_on_step_end" in safe_infer_kwargs:
             safe_infer_kwargs.pop("callback_on_step_end", None)
@@ -346,6 +353,13 @@ def tap_from_pipeline(
     output = pipeline_obj(**callback_kwargs)
     ordered_steps = _materialize_tap_steps(spec.scheduler_steps, captured)
 
+    print(f"[Trajectory-TAP] Tap collection results:")
+    print(f"  - Captured steps count: {len(captured)}")
+    print(f"  - Ordered steps count: {len(ordered_steps) if ordered_steps else 0}")
+    print(f"  - Expected scheduler steps: {len(spec.scheduler_steps) if spec.scheduler_steps else 0}")
+    if not ordered_steps:
+        print(f"  - [WARN] No steps collected! Will return absent evidence")
+
     evidence = build_trajectory_evidence(
         cfg,
         "ok",
@@ -355,6 +369,8 @@ def tap_from_pipeline(
         tap_steps=ordered_steps,
         trajectory_spec=spec
     )
+
+    print(f"[Trajectory-TAP] Evidence build result: status={evidence.get('status')}, digest={evidence.get('trajectory_digest', '<absent>')[:16] if evidence.get('trajectory_digest') else '<None>'}")
 
     return {
         "output": output,
