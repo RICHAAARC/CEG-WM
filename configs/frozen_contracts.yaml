@@ -209,6 +209,7 @@ gate_enforcement_requirements:
           - "enums"
           - "impl_id"
           - "consistency_rules"
+          - "pipeline_realization"  # 真实 pipeline 构建策略
         policy_path_semantics:
           - "policy_path_semantics_version"
           - "hard_requirements"
