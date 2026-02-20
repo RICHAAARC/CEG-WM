@@ -440,7 +440,12 @@ def run_detect_orchestrator(
         "geometry_evidence_payload": geometry_evidence_payload,
         "content_result": content_result,
         "geometry_result": geometry_result,
-        "fusion_result": fusion_result
+        "fusion_result": fusion_result,
+        # (S-D) Paper Faithfulness: 添加一致性验证结果
+        "paper_faithfulness": {
+            "status": paper_faithfulness_status,
+            "mismatch_reasons": paper_faithfulness_mismatch_reasons if paper_faithfulness_mismatch_reasons else []
+        }
     }
     return record
 
