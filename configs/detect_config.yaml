@@ -70,11 +70,11 @@ watermark:
     tau: 2.0
 
 # ==============================================================
-# 检测几何配置
+# 检测几何配置（Detect 模式启用）
 # ==============================================================
 detect:
   content:
-    enabled: false  # Embed 模式（检测在 detect 侧启用）
+    enabled: true  # Detect 模式（启用内容检测）
   geometry:
     enabled: false
 

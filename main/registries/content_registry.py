@@ -34,9 +34,15 @@ from main.watermarking.content_chain.subspace.placeholder_planner import (
     SUBSPACE_PLANNER_ID,
     SUBSPACE_PLANNER_VERSION
 )
+from main.watermarking.content_chain.unified_content_extractor import (
+    UnifiedContentExtractor,
+    UNIFIED_CONTENT_EXTRACTOR_ID,
+    UNIFIED_CONTENT_EXTRACTOR_VERSION
+)
 
 
 CONTENT_BASELINE_NOOP_ID = "content_baseline_noop_v1"
+UNIFIED_CONTENT_EXTRACTOR_ID_CONST = UNIFIED_CONTENT_EXTRACTOR_ID
 SUBSPACE_BASELINE_FULL_ID = "subspace_baseline_full_v1"
 CONTENT_SEMANTIC_MASK_PROVIDER_ID = SEMANTIC_MASK_PROVIDER_ID
 CONTENT_LOW_FREQ_CODER_ID = LOW_FREQ_CODER_ID
@@ -338,6 +344,29 @@ def _build_subspace_planner(cfg: Dict[str, Any]) -> SubspacePlannerImpl:
     return SubspacePlannerImpl(SUBSPACE_PLANNER_ID, impl_version, impl_digest)
 
 
+def _build_unified_content_extractor(cfg: Dict[str, Any]) -> UnifiedContentExtractor:
+    """
+    功能：构造统一内容链提取器实现。
+
+    Build unified content extractor (embed + detect dual mode).
+
+    Args:
+        cfg: Config mapping.
+
+    Returns:
+        UnifiedContentExtractor instance.
+
+    Raises:
+        TypeError: If cfg is not dict.
+    """
+    if not isinstance(cfg, dict):
+        # cfg 类型不合法，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+    impl_version = UNIFIED_CONTENT_EXTRACTOR_VERSION
+    impl_digest = _derive_impl_digest(UNIFIED_CONTENT_EXTRACTOR_ID_CONST, impl_version)
+    return UnifiedContentExtractor(UNIFIED_CONTENT_EXTRACTOR_ID_CONST, impl_version, impl_digest)
+
+
 _CONTENT_REGISTRY.register_factory(
     CONTENT_BASELINE_NOOP_ID,
     _build_content_baseline_noop,
@@ -356,7 +385,7 @@ _CONTENT_REGISTRY.register_factory(
         supports_batching=False,
         requires_cuda=False,
         supports_deterministic=True,
-        max_resolution=(2048, 2048),
+        max_resolution="2048x2048",
         supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
     )
 )
@@ -379,6 +408,17 @@ _CONTENT_REGISTRY.register_factory(
         requires_cuda=False,
         supports_deterministic=True,
         max_resolution=None,
+        supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
+    )
+)
+_CONTENT_REGISTRY.register_factory(
+    UNIFIED_CONTENT_EXTRACTOR_ID_CONST,
+    _build_unified_content_extractor,
+    capabilities=ImplCapabilities(
+        supports_batching=False,
+        requires_cuda=False,
+        supports_deterministic=True,
+        max_resolution="2048x2048",
         supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
     )
 )

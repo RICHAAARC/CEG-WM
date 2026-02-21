@@ -82,6 +82,9 @@ def run_embed_orchestrator(
         content_evidence_payload = content_result.as_dict()
     elif isinstance(content_result, dict):
         content_evidence_payload = dict(content_result)
+    else:
+        # content_result 类型不符合预期，必须 fail-fast。
+        raise TypeError(f"content_result must be dict or have as_dict method, got {type(content_result).__name__}")
 
     if trajectory_evidence is not None:
         if content_evidence_payload is None:
@@ -147,7 +150,7 @@ def run_embed_orchestrator(
         "watermarked_path": "placeholder_output.png",
         "seed": 42,
         "strength": 0.5,
-        "content_result": content_result,
+        "content_result": content_evidence_payload,
         "content_evidence": content_evidence_payload,
         "subspace_plan": subspace_result.as_dict() if hasattr(subspace_result, "as_dict") else subspace_result,
         "sync_result": sync_result,
