@@ -178,7 +178,7 @@ impl_id:
     - "high_freq_coder_v1"
     - "unified_latent_modifier_v1"
     - "content_detector_v1"  # 统一内容检测器
-    - "unified_content_extractor_v1"  # L3 真实实现（Embed + Detect 双模式）
+    - "unified_content_extractor_v1"  # Embed + Detect 双模式
     - "geometry_baseline_identity_v1"
     - "fusion_baseline_identity_v1"
     - "subspace_baseline_full_v1"
@@ -236,7 +236,7 @@ impl_id:
       # - 失败时 score=None，content_failure_reason 单一主因上报。
       - "content_detector_v1"
 
-      # 统一内容提取器（L3 真实实现）：
+      # 统一内容提取器：
       # - 根据 detect.content.enabled 自动切换 Embed/Detect 模式。
       # - Embed 模式：调用 SemanticMaskProvider 提取 mask_digest。
       # - Detect 模式：调用 ContentDetector 执行 LF/HF 检测。

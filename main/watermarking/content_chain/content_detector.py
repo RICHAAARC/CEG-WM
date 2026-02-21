@@ -1,6 +1,5 @@
 """
-File purpose: Content detector implementation for S-06.
-Module type: Core innovation module
+内容链检测器实现
 
 功能说明：
 - 统一从 LF 和 HF 子空间读取证据并输出内容链得分。

@@ -371,7 +371,6 @@ def _build_mask_trace_payload(
         raise TypeError("cfg_digest must be str or None")
 
     # 构造追踪有效负载：包含实现身份、配置摘要与输入元数据。
-    # 关键修复：使用 cfg_digest 而非全量 cfg，防止 trace_digest 对非 digest_scope 字段敏感。
     # trace_version v2：从包含全量 cfg 改为仅包含 cfg_digest（append-only 版本化）。
     payload = {
         "trace_version": "v2",  # 版本化：表示不再包含全量 cfg

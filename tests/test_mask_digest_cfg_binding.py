@@ -1,5 +1,5 @@
 """
-File purpose: Tests for A 修复：SemanticMaskProvider cfg_digest_binding 改进
+File purpose: Tests for A ：SemanticMaskProvider cfg_digest_binding 改进
 Module type: General module
 
 功能说明：

@@ -394,7 +394,6 @@ def load_and_validate_config(
 
     Load YAML config via load_yaml_with_provenance, validate policy_path and overrides,
     apply CLI overrides (if provided), then compute cfg_digest using include_paths.
-    D5: Also generates cfg_audit metadata for artifacts output.
 
     Args:
         config_path: Path to config YAML.

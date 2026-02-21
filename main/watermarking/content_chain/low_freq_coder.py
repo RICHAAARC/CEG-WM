@@ -209,12 +209,12 @@ class LowFreqCoder:
         if plan_digest is None or not isinstance(plan_digest, str):
             raise ValueError("plan_digest must be non-empty str")
 
-        # 验证 plan_digest 一致性（S-04 约束：detect 侧若不一致必须返回 mismatch）。
+        # 验证 plan_digest 一致性。
         cfg_plan_digest = cfg.get("watermark", {}).get("plan_digest")
         if cfg_plan_digest != plan_digest:
             raise ValueError(
                 f"plan_digest mismatch: cfg={cfg_plan_digest}, input={plan_digest}. "
-                "S-04 constraint: embed and detect must use same plan_digest."
+                "Embed and detect must use same plan_digest."
             )
 
         lf_cfg = cfg.get("watermark", {}).get("lf", {})
@@ -466,7 +466,7 @@ class LowFreqCoder:
                 content_failure_reason="lf_coder_no_plan"
             )
 
-        # (2b) S-04 约束：若 inputs 中提供了 expected_plan_digest，必须验证一致性。
+        # 若 inputs 中提供了 expected_plan_digest，必须验证一致性。
         # 若 plan_digest 不一致，必须返回 status="mismatch" 且 score=None（失败不得给分）。
         if inputs is None:
             inputs = {}
@@ -773,12 +773,6 @@ def _build_lf_trace_payload(
     功能：构造可复算的低频编码追踪有效负载。
 
     Build deterministic trace payload for LF coder digest computation.
-    
-    关键设计：trace_payload 中的键空间与 plan_digest_include_paths 对齐，
-    确保配置参数变化（watermark.lf.* 中任何字段）均导致 lf_trace_digest 变化。
-    
-    必须修复 2：当 enabled=true 时主 payload 必须包含 codebook_id/ecc/strength/delta/
-    block_length/variance/cfg_digest/plan_digest；disabled 时这些字段为 None，但键必须存在。
 
     Args:
         cfg: Configuration mapping containing 'watermark.lf.*' parameters.
@@ -788,7 +782,7 @@ def _build_lf_trace_payload(
         enabled: Whether LF coding is enabled.
         plan_digest: Optional plan digest binding.
         encoding_trace: Optional encoding parameters and trace.
-        cfg_digest: Optional canonical SHA256 digest of cfg (新增参数）。
+        cfg_digest: Optional canonical SHA256 digest of cfg.
 
     Returns:
         JSON-like dict for canonical SHA256 computation.
@@ -816,11 +810,11 @@ def _build_lf_trace_payload(
         # cfg_digest 类型不合法，必须 fail-fast。
         raise TypeError("cfg_digest must be str or None")
 
-    # P0 修复：统一键空间为 watermark.lf（与 plan_digest_include_paths 对齐）。
+    # 统一键空间为 watermark.lf，与 plan_digest_include_paths 对齐。
     lf_cfg = cfg.get("watermark", {}).get("lf", {})
 
-    # 必须修复 2：当 enabled=true 时主 payload 必须包含全部 plan_digest_include_paths 字段。
-    # 当 enabled=false 时，这些字段为 None，但键必须存在（确保四种返回路径使用同一键空间）。
+    # 当 enabled=true 时主 payload 必须包含全部 plan_digest_include_paths 字段。
+    # 当 enabled=false 时，这些字段为 None，但键必须存在，确保四种返回路径使用同一键空间。
     payload = {
         "impl_id": impl_id,
         "impl_version": impl_version,
@@ -829,7 +823,7 @@ def _build_lf_trace_payload(
         "enabled": enabled,
         "plan_digest": plan_digest,
         "cfg_digest": cfg_digest,  # 新增：cfg_digest 必须写入主 payload
-        # P0 修复 + 必须修复 2：包含所有 plan_digest_include_paths 中的 watermark.lf.* 字段。
+        # 包含所有 plan_digest_include_paths 中的 watermark.lf.* 字段。
         "codebook_id": lf_cfg.get("codebook_id", "default") if enabled else None,
         "ecc": lf_cfg.get("ecc", 3) if enabled else None,
         "strength": lf_cfg.get("strength", 0.1) if enabled else None,

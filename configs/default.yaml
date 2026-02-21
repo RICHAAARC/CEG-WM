@@ -40,10 +40,10 @@ paper_faithfulness:
   enabled: true  # 启用论文对齐验证
   alignment_check: true
   
-  # P1 检查：Pipeline fingerprint（离散结构指纹）
+  # 检查：Pipeline fingerprint（离散结构指纹）
   check_pipeline_fingerprint: true
   
-  # P2 检查：Trajectory digest reproducibility（可复算轨迹摘要）
+  # 检查：Trajectory digest reproducibility（可复算轨迹摘要）
   check_trajectory_digest: true
 
 # ==============================================================
@@ -81,7 +81,7 @@ detect:
 # ==============================================================
 # 内容链配置
 # ==============================================================
-enable_mask: true  # 启用语义掩码提取（L3 真实水印必需）
+enable_mask: true  # 
 
 # ==============================================================
 # 嵌入配置
@@ -93,7 +93,7 @@ embed:
 # 实现标识
 # ==============================================================
 impl:
-  content_extractor_id: "unified_content_extractor_v1"  # 真实 L3 实现（Embed + Detect 双模式）
+  content_extractor_id: "unified_content_extractor_v1"  # Embed + Detect 双模式
   geometry_extractor_id: "geometry_baseline_identity_v1"
   fusion_rule_id: "fusion_baseline_identity_v1"
   subspace_planner_id: "subspace_planner_v1"

@@ -323,7 +323,7 @@ def run_detect_orchestrator(
         fusion_result = impl_set.fusion_rule.fuse(cfg, content_evidence_adapted, geometry_evidence_adapted)
     input_fields = len(input_record or {})
 
-    # (D-2) 实现 detect 侧同构分数与一致性校验
+    # 实现 detect 侧同构分数与一致性校验
     detect_runtime_mode = "fallback_identity_v0"  # 默认：未获得可用 detect 同构分数
     final_latents = cfg.get("__detect_final_latents__")  # 从 CLI 层捕获的最后 latents
 

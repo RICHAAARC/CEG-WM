@@ -304,7 +304,6 @@ def run_embed(
             injection_site_spec = None
             injection_site_digest = None
             
-            # (S-B-2) Paper Faithfulness: 生成 injection_site_spec（必达证据）
             # 无论 plan 是否存在都必须生成 injection_site_spec
             try:
                 if isinstance(plan_payload, dict) and isinstance(plan_digest, str) and plan_digest:
@@ -348,7 +347,6 @@ def run_embed(
             device = cfg.get("device", "cpu")
             seed = seed_value
             
-            # (S-B-1) Paper Faithfulness: 提取 SD3 pipeline fingerprint（必达证据）
             pipeline_fingerprint = None
             pipeline_fingerprint_digest = None
             if pipeline_obj is not None:
@@ -495,7 +493,6 @@ def run_embed(
             record["inference_error"] = run_meta.get("inference_error")
             record["inference_runtime_meta"] = run_meta.get("inference_runtime_meta")
             
-            # (S-B-3) Paper Faithfulness: Merge 必达证据到 content_evidence
             content_evidence = record.get("content_evidence")
             if not isinstance(content_evidence, dict):
                 content_evidence = {}

@@ -296,7 +296,7 @@ class TestLFParameterAuditRequirement:
         assert True, "Audit requirement: LF parameters must be in plan_digest calculation"
     def test_lf_trace_digest_changes_when_ecc_changes(self) -> None:
         """
-        P0 修复验证：修改 watermark.lf.ecc 时，lf_trace_digest 必须变化。
+        修改 watermark.lf.ecc 时，lf_trace_digest 必须变化。
         
         这验证了 _build_lf_trace_payload() 确实从 cfg["watermark"]["lf"] 读取
         ecc 参数，而非旧的 cfg["watermark"]["low_freq"]["redundancy"]。
@@ -349,14 +349,14 @@ class TestLFParameterAuditRequirement:
         digest_ecc5 = result_ecc5.lf_trace_digest
         assert digest_ecc5 is not None, "lf_trace_digest must not be None when enabled"
         
-        # P0 修复核心验证：两个 digest 必须不同
+        # 验证：两个 digest 必须不同
         assert digest_ecc3 != digest_ecc5, \
             "lf_trace_digest must change when watermark.lf.ecc changes " \
             "(P0 fix: _build_lf_trace_payload must read from watermark.lf, not watermark.low_freq)"
 
     def test_lf_trace_digest_changes_when_strength_changes(self) -> None:
         """
-        P0 修复验证：修改 watermark.lf.strength 时，lf_trace_digest 必须变化。
+        修改 watermark.lf.strength 时，lf_trace_digest 必须变化。
         
         这进一步验证了 strength 参数（旧的 power 字段）也被正确纳入 trace_digest。
         
@@ -408,7 +408,7 @@ class TestLFParameterAuditRequirement:
         digest_str07 = result_str07.lf_trace_digest
         assert digest_str07 is not None, "lf_trace_digest must not be None when enabled"
         
-        # P0 修复核心验证：两个 digest 必须不同
+        # 验证：两个 digest 必须不同
         assert digest_str03 != digest_str07, \
             "lf_trace_digest must change when watermark.lf.strength changes " \
             "(P0 fix: _build_lf_trace_payload must read from watermark.lf, not watermark.low_freq)"

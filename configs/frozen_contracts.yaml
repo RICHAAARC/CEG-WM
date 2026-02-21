@@ -494,7 +494,7 @@ records_schema:
     - content_evidence.detect_lf_statistics
     - content_evidence.detect_hf_statistics
     - content_evidence.subspace_consistency_status
-    # ---- Paper Faithfulness 对齐证据字段（append-only v1.0） ----
+    # ---- Paper Faithfulness 对齐证据字段 ----
     - paper_faithfulness.spec_version
     - paper_faithfulness.spec_digest
     - paper_faithfulness.spec_file_sha256
