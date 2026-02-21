@@ -1,9 +1,9 @@
 """
-融合规则注册表与占位实现
+融合规则注册表与基线实现
 
 功能说明：
 - 定义了一个融合规则注册表，用于管理不同的融合规则实现。
-- 提供了一个占位实现，用于在没有具体融合规则时返回确定性的决策结果。
+- 提供了一个基线实现，用于在没有具体融合规则时返回确定性的决策结果。
 - 实现了输入验证和错误处理，确保接口的健壮性。
 """
 
@@ -24,9 +24,9 @@ FUSION_BASELINE_IDENTITY_ID = "fusion_baseline_identity_v1"
 
 class FusionBaselineIdentity:
     """
-    功能：融合规则占位实现。
+    功能：融合规则基线实现。
 
-    Placeholder fusion rule that returns deterministic decision values.
+    Baseline fusion rule that returns deterministic decision values.
 
     Args:
         impl_id: Implementation identifier.
@@ -61,7 +61,7 @@ class FusionBaselineIdentity:
         geometry_evidence: Dict[str, Any]
     ) -> FusionDecision:
         """
-        功能：输出占位融合决策。
+        功能：输出基线融合决策。
 
         Return deterministic fusion decision for baseline registry rule.
 
@@ -230,7 +230,7 @@ def _build_fusion_baseline_identity(cfg: Dict[str, Any]) -> FusionBaselineIdenti
     """
     功能：构造融合规则占位实现。
 
-    Build placeholder fusion rule.
+    Build baseline fusion rule.
 
     Args:
         cfg: Config mapping.

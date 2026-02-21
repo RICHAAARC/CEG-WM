@@ -4,7 +4,7 @@
 功能说明：
 - 规范化输出目录路径，确保输出布局，加载合同与白名单，验证配置，解析实现，构造记录，绑定字段，写盘，并产出闭包。
 - 包含详细的输入验证、错误处理与状态更新机制，确保健壮性与可维护性。
-- 目前实现为 placeholder，未来会逐步完善业务逻辑与字段定义。
+- 当前为基线实现，后续会逐步完善业务逻辑与字段定义。
 """
 
 import sys
@@ -99,15 +99,15 @@ def run_embed(
     input_image_path: str | None = None
 ) -> None:
     """
-    功能：执行嵌入流程，本阶段为 placeholder。
+    功能：执行嵌入流程，本阶段为基线实现。
 
-    Execute embed workflow (placeholder implementation).
+    Execute embed workflow (baseline implementation).
 
     Args:
         output_dir: Run root directory for records/artifacts.
         config_path: YAML config path.
         overrides: Optional CLI override args list.
-        input_image_path: Optional input image path for noop embed artifact flow.
+        input_image_path: Optional input image path for identity embed artifact flow.
     """
     if not isinstance(output_dir, str) or not output_dir:
         # output_dir 输入不合法，必须 fail-fast。
@@ -461,8 +461,8 @@ def run_embed(
             run_meta["run_root_reuse_allowed"] = bool(allow_nonempty_run_root)
             run_meta["run_root_reuse_reason"] = allow_nonempty_run_root_reason
 
-            # 构造 embed record，本阶段为 placeholder。
-            print("[Embed] Generating embed record (placeholder)...")
+            # 构造 embed record，本阶段为基线实现。
+            print("[Embed] Generating embed record (baseline)...")
             record = run_embed_orchestrator(
                 cfg,
                 impl_set,
@@ -640,7 +640,7 @@ def run_embed(
 def main():
     """主流程。"""
     parser = argparse.ArgumentParser(
-        description="Embed watermark (placeholder implementation)"
+        description="Embed watermark (baseline implementation)"
     )
     parser.add_argument(
         "--out",
@@ -662,7 +662,7 @@ def main():
     parser.add_argument(
         "--input-image",
         default=None,
-        help="Input image path for noop embed artifact generation"
+        help="Input image path for identity embed artifact generation"
     )
     
     args = parser.parse_args()

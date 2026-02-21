@@ -11,10 +11,10 @@ allowed_impl_ids:
   # subspace 真实实现
   - "subspace_planner_v1"
   
-  # 占位实现
-  - "content_baseline_noop_v1"
+  # 基线实现
+  - "content_baseline_identity_v1"
   - "subspace_baseline_full_v1"
-  - "geometry_baseline_noop_v1"
+  - "geometry_baseline_identity_v1"
   - "geometry_sync_baseline_v1"
   - "fusion_baseline_identity_v1"
   

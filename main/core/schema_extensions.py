@@ -73,7 +73,7 @@ class EmptyRecordsSchemaExtensions:
     """
     功能：空扩展占位符（向后兼容）。
 
-    Empty extensions placeholder for backward compatibility.
+    Empty extensions baseline for backward compatibility.
 
     Attributes:
         entries: Empty list.

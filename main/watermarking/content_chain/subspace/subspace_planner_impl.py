@@ -209,7 +209,7 @@ class SubspacePlannerImpl:
                 mask_digest=mask_digest
             )
             basis_digest = self._derive_basis_digest(basis_summary["basis_digest_payload"])
-            plan_origin = "test_synthetic" if basis_summary.get("samples_anchor", {}).get("source") == "test_synthetic" else "planner_v1_band_spec"
+            plan_origin = "test_mode_synthetic" if basis_summary.get("samples_anchor", {}).get("source") == "test_mode_synthetic" else "planner_v1_band_spec"
             routing_digest_ref = self._extract_routing_digest_ref(inputs)
             band_spec, band_spec_digest, band_metrics = self.build_subspace_plan_v1(
                 cfg=cfg,
@@ -1815,7 +1815,7 @@ class SubspacePlannerImpl:
                 cfg=cfg,
             )
         elif self._is_test_synthetic_enabled(cfg, inputs):
-            # 路径 C：仅测试模式可启用的 synthetic 轨迹。
+            # 路径 C：仅测试模式可启用的合成轨迹。
             samples, samples_anchor = self._sample_deterministic_trajectory(
                 planner_params=planner_params,
                 cfg=cfg,
@@ -1918,9 +1918,9 @@ class SubspacePlannerImpl:
         base_seed: int
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
         """
-        功能：生成确定性合成轨迹样本（总是可用的后备）。
+        功能：生成确定性合成轨迹样本（仅测试模式启用）。
 
-        Generate deterministic synthetic trajectory samples (fallback).
+        Generate deterministic test-mode trajectory samples (fallback).
 
         Args:
             planner_params: Planner parameters.
@@ -1967,7 +1967,7 @@ class SubspacePlannerImpl:
             "moments_digest": moments_digest,
             "guidance_scale": self._normalize_float(guidance_scale, planner_params.float_round_digits),
             "num_inference_steps": num_steps,
-            "source": "test_synthetic"
+            "source": "test_mode_synthetic"
         }
         
         return samples, samples_anchor
@@ -2023,16 +2023,16 @@ class SubspacePlannerImpl:
 
     def _is_test_synthetic_enabled(self, cfg: Dict[str, Any], inputs: Dict[str, Any]) -> bool:
         """
-        功能：判定是否允许 test synthetic 轨迹路径。 
+        功能：判定是否允许测试模式合成轨迹路径。 
 
-        Decide whether test synthetic trajectory path is enabled.
+        Decide whether test-mode synthetic trajectory path is enabled.
 
         Args:
             cfg: Configuration mapping.
             inputs: Planner input mapping.
 
         Returns:
-            True when synthetic path is explicitly enabled.
+            True when test-mode synthetic path is explicitly enabled.
         """
         if not isinstance(cfg, dict):
             return False

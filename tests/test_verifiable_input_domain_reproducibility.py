@@ -12,7 +12,7 @@ Module type: General module
 import pytest
 from typing import Dict, Any
 
-from main.watermarking.content_chain.subspace.placeholder_planner import (
+from main.watermarking.content_chain.subspace.subspace_planner_impl import (
     SubspacePlannerImpl,
     SUBSPACE_PLANNER_ID,
     SUBSPACE_PLANNER_VERSION

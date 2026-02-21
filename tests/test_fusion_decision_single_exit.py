@@ -86,7 +86,7 @@ def _build_minimal_cfg() -> Dict[str, Any]:
     """
     功能：构造最小 cfg。
 
-    Build a minimal configuration mapping for placeholder implementations.
+    Build a minimal configuration mapping for baseline implementations.
 
     Args:
         None.
@@ -96,8 +96,8 @@ def _build_minimal_cfg() -> Dict[str, Any]:
     """
     return {
         "impl": {
-            "content_extractor_id": content_registry.CONTENT_BASELINE_NOOP_ID,
-            "geometry_extractor_id": geometry_registry.GEOMETRY_BASELINE_NOOP_ID,
+            "content_extractor_id": content_registry.CONTENT_BASELINE_IDENTITY_ID,
+            "geometry_extractor_id": geometry_registry.GEOMETRY_BASELINE_IDENTITY_ID,
             "fusion_rule_id": fusion_registry.FUSION_BASELINE_IDENTITY_ID,
             "subspace_planner_id": content_registry.SUBSPACE_BASELINE_FULL_ID,
             "sync_module_id": geometry_registry.SYNC_BASELINE_ID

@@ -13,7 +13,7 @@ import pytest
 import numpy as np
 from typing import Dict, Any
 
-from main.watermarking.content_chain.subspace.placeholder_planner import (
+from main.watermarking.content_chain.subspace.subspace_planner_impl import (
     SubspacePlannerImpl,
     verify_verifiable_input_domain,
     create_run_closure_trajectory_anchors,

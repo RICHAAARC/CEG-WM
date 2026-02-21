@@ -81,6 +81,11 @@ override:
       set_value: true
       source: "cli"
       description: "启用轨迹采样：启用 trajectory tap 以产出可复算的轨迹摘要"
+    - arg_name: "test_mode_identity"
+      field_path: "embed.test_mode_identity"
+      override_mode: "set"
+      source: "cli"
+      description: "测试模式基线检验：启用 identity 模式后 content/geometry 使用基线实现"
 
   # 覆写 source 的枚举白名单（gate 必须校验）
   source_enum:
@@ -99,6 +104,7 @@ override:
       - "force_cpu"
       - "enable_paper_faithfulness"
       - "enable_trace_tap"
+      - "test_mode_identity"
     immutable: true
     notes: "必须与 allowed_overrides[*].arg_name 的值集完全一致。新增 override 必须同步更新此枚举。"
 
@@ -166,14 +172,14 @@ impl_id:
 
   # 运行期 gate 判定使用扁平化集合，语义分组仅用于审计展示。
   allowed_flat:
-    - "content_baseline_noop_v1"
+    - "content_baseline_identity_v1"
     - "semantic_mask_provider_v1"
     - "low_freq_coder_v1"
     - "high_freq_coder_v1"
     - "unified_latent_modifier_v1"
     - "content_detector_v1"  # 统一内容检测器
     - "unified_content_extractor_v1"  # L3 真实实现（Embed + Detect 双模式）
-    - "geometry_baseline_noop_v1"
+    - "geometry_baseline_identity_v1"
     - "fusion_baseline_identity_v1"
     - "subspace_baseline_full_v1"
     - "subspace_planner_v1"
@@ -187,11 +193,11 @@ impl_id:
   allowed_by_domain:
 
     content_extractor:
-      # 内容证据链占位实现：
+      # 内容证据链基线实现：
       # - 不注入任何真实水印信号。
       # - 可返回空证据或固定格式的基线统计量。
       # - 仅用于验证框架闭环与审计链路。
-      - "content_baseline_noop_v1"
+      - "content_baseline_identity_v1"
       
       # 语义掩码提供器：
       # - 从输入图像或 latent 中提取语义掩码。
@@ -242,7 +248,7 @@ impl_id:
       # - 不生成几何指纹。
       # - 可返回 canonical 状态或空几何证据。
       # - 用于测试几何链路与 fallback / abstain 语义。
-      - "geometry_baseline_noop_v1"
+      - "geometry_baseline_identity_v1"
 
     fusion_rule:
       # 融合规则占位实现：

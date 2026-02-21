@@ -3,7 +3,7 @@
 
 功能说明：
 - 内容链（content extractor）与子空间规划器（subspace planner）的运行时注册表。
-- 提供占位实现（baseline implementations）以支持系统的基本功能和测试。
+- 提供基线实现（baseline implementations）以支持系统的基本功能和测试。
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from main.watermarking.content_chain.content_detector import (
     CONTENT_DETECTOR_ID,
     CONTENT_DETECTOR_VERSION
 )
-from main.watermarking.content_chain.subspace.placeholder_planner import (
+from main.watermarking.content_chain.subspace.subspace_planner_impl import (
     SubspacePlannerImpl,
     SUBSPACE_PLANNER_ID,
     SUBSPACE_PLANNER_VERSION
@@ -41,7 +41,7 @@ from main.watermarking.content_chain.unified_content_extractor import (
 )
 
 
-CONTENT_BASELINE_NOOP_ID = "content_baseline_noop_v1"
+CONTENT_BASELINE_IDENTITY_ID = "content_baseline_identity_v1"
 UNIFIED_CONTENT_EXTRACTOR_ID_CONST = UNIFIED_CONTENT_EXTRACTOR_ID
 SUBSPACE_BASELINE_FULL_ID = "subspace_baseline_full_v1"
 CONTENT_SEMANTIC_MASK_PROVIDER_ID = SEMANTIC_MASK_PROVIDER_ID
@@ -49,11 +49,11 @@ CONTENT_LOW_FREQ_CODER_ID = LOW_FREQ_CODER_ID
 CONTENT_DETECTOR_ID_CONST = CONTENT_DETECTOR_ID
 
 
-class ContentBaselineNoop:
+class ContentBaselineIdentity:
     """
-    功能：内容链占位实现。
+    功能：内容链基线实现。
 
-    Placeholder content extractor that emits fixed evidence.
+    Baseline content extractor that emits fixed evidence.
 
     Args:
         impl_id: Implementation identifier.
@@ -83,17 +83,17 @@ class ContentBaselineNoop:
 
     def extract(self, cfg: Dict[str, Any], inputs: Dict[str, Any] | None = None, cfg_digest: str | None = None) -> Dict[str, Any]:
         """
-        功能：输出占位内容证据。
+        功能：输出基线内容证据。
 
-        Return placeholder content evidence.
+        Return baseline content evidence.
 
         Args:
             cfg: Config mapping.
-            inputs: Optional input mapping (unused in placeholder).
-            cfg_digest: Optional cfg digest (unused in placeholder).
+            inputs: Optional input mapping (unused in baseline).
+            cfg_digest: Optional cfg digest (unused in baseline).
 
         Returns:
-            Placeholder content evidence mapping.
+            Baseline content evidence mapping.
 
         Raises:
             TypeError: If cfg is not dict.
@@ -102,7 +102,7 @@ class ContentBaselineNoop:
             # cfg 类型不合法，必须 fail-fast。
             raise TypeError("cfg must be dict")
         return {
-            "content_placeholder": True,
+            "content_baseline": True,
             "content_evidence": "absent",
             "content_signal": None
         }
@@ -110,9 +110,9 @@ class ContentBaselineNoop:
 
 class SubspaceBaselineFull:
     """
-    功能：子空间规划占位实现。
+    功能：子空间规划基线实现。
 
-    Placeholder subspace planner that returns fixed metadata.
+    Baseline subspace planner that returns fixed metadata.
 
     Args:
         impl_id: Implementation identifier.
@@ -148,18 +148,18 @@ class SubspaceBaselineFull:
         inputs: Dict[str, Any] | None = None
     ) -> Dict[str, Any]:
         """
-        功能：输出占位子空间规划。
+        功能：输出基线子空间规划。
 
-        Return placeholder subspace plan.
+        Return baseline subspace plan.
 
         Args:
             cfg: Config mapping.
-            mask_digest: Optional mask digest (unused in placeholder).
-            cfg_digest: Optional cfg digest (unused in placeholder).
-            inputs: Optional input mapping (unused in placeholder).
+            mask_digest: Optional mask digest (unused in baseline).
+            cfg_digest: Optional cfg digest (unused in baseline).
+            inputs: Optional input mapping (unused in baseline).
 
         Returns:
-            Placeholder subspace plan mapping.
+            Baseline subspace plan mapping.
 
         Raises:
             TypeError: If cfg is not dict.
@@ -206,17 +206,17 @@ def _derive_impl_digest(impl_id: str, impl_version: str) -> str:
     })
 
 
-def _build_content_baseline_noop(cfg: Dict[str, Any]) -> ContentBaselineNoop:
+def _build_content_baseline_identity(cfg: Dict[str, Any]) -> ContentBaselineIdentity:
     """
-    功能：构造内容链占位实现。
+    功能：构造内容链基线实现。
 
-    Build placeholder content extractor.
+    Build baseline content extractor.
 
     Args:
         cfg: Config mapping.
 
     Returns:
-        ContentBaselineNoop instance.
+        ContentBaselineIdentity instance.
 
     Raises:
         TypeError: If cfg is not dict.
@@ -225,15 +225,15 @@ def _build_content_baseline_noop(cfg: Dict[str, Any]) -> ContentBaselineNoop:
         # cfg 类型不合法，必须 fail-fast。
         raise TypeError("cfg must be dict")
     impl_version = "v1"
-    impl_digest = _derive_impl_digest(CONTENT_BASELINE_NOOP_ID, impl_version)
-    return ContentBaselineNoop(CONTENT_BASELINE_NOOP_ID, impl_version, impl_digest)
+    impl_digest = _derive_impl_digest(CONTENT_BASELINE_IDENTITY_ID, impl_version)
+    return ContentBaselineIdentity(CONTENT_BASELINE_IDENTITY_ID, impl_version, impl_digest)
 
 
 def _build_subspace_baseline_full(cfg: Dict[str, Any]) -> SubspaceBaselineFull:
     """
-    功能：构造子空间占位实现。
+    功能：构造子空间基线实现。
 
-    Build placeholder subspace planner.
+    Build baseline subspace planner.
 
     Args:
         cfg: Config mapping.
@@ -368,8 +368,8 @@ def _build_unified_content_extractor(cfg: Dict[str, Any]) -> UnifiedContentExtra
 
 
 _CONTENT_REGISTRY.register_factory(
-    CONTENT_BASELINE_NOOP_ID,
-    _build_content_baseline_noop,
+    CONTENT_BASELINE_IDENTITY_ID,
+    _build_content_baseline_identity,
     capabilities=ImplCapabilities(
         supports_batching=False,
         requires_cuda=False,

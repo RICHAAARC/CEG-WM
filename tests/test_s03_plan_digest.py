@@ -17,7 +17,7 @@ from typing import Any, Dict
 import pytest
 
 from main.core import digests
-from main.watermarking.content_chain.subspace.placeholder_planner import (
+from main.watermarking.content_chain.subspace.subspace_planner_impl import (
     SubspacePlannerImpl,
     SUBSPACE_PLANNER_ID,
     SUBSPACE_PLANNER_VERSION
@@ -237,7 +237,7 @@ class TestTraceDigestIsolation:
         """
         直接验证 trace_payload 结构不包含 'cfg' 全量字段（v2）。
         """
-        from main.watermarking.content_chain.subspace.placeholder_planner import (
+        from main.watermarking.content_chain.subspace.subspace_planner_impl import (
             _build_planner_trace_payload
         )
         

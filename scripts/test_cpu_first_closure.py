@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 CPU 优先端到端闭环快速验证
 

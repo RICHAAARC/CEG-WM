@@ -17,7 +17,7 @@ from scripts.audits.audit_records_fields_append_only import run_audit
 from main.core import digests
 from main.watermarking.content_chain.content_detector import ContentDetector
 from main.watermarking.content_chain.interfaces import ContentEvidence
-from main.watermarking.content_chain.subspace.placeholder_planner import (
+from main.watermarking.content_chain.subspace.subspace_planner_impl import (
     SUBSPACE_PLANNER_ID,
     SUBSPACE_PLANNER_VERSION,
     SubspacePlannerImpl,

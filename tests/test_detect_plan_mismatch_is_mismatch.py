@@ -9,7 +9,7 @@ from typing import Any, Dict
 from main.core import digests
 from main.registries.runtime_resolver import BuiltImplSet
 from main.watermarking.content_chain.interfaces import ContentEvidence
-from main.watermarking.content_chain.subspace.placeholder_planner import (
+from main.watermarking.content_chain.subspace.subspace_planner_impl import (
     SubspacePlannerImpl,
     SUBSPACE_PLANNER_ID,
     SUBSPACE_PLANNER_VERSION

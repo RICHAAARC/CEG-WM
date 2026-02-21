@@ -13,6 +13,7 @@ from main.watermarking.detect.orchestrator import (
     evaluate_records_against_threshold,
     load_scores_for_calibration,
     load_thresholds_artifact_controlled,
+    run_calibrate_orchestrator,
     run_evaluate_orchestrator,
 )
 from main.watermarking.fusion.neyman_pearson import compute_np_threshold_from_scores
@@ -122,9 +123,9 @@ def test_run_evaluate_orchestrator_readonly_without_extractors(tmp_path: Path) -
     detect_record_payload = {
         "content_evidence_payload": {"status": "ok", "score": 0.8},
         "label": True,
-        "cfg_digest": "cfg_demo",
-        "plan_digest": "plan_demo",
-        "impl": {"digests": {"content_extractor": "impl_demo"}},
+        "cfg_digest": "cfg_sample",
+        "plan_digest": "plan_sample",
+        "impl": {"digests": {"content_extractor": "impl_sample"}},
     }
     detect_record_path.write_text(json.dumps(detect_record_payload), encoding="utf-8")
 
@@ -147,8 +148,45 @@ def test_run_evaluate_orchestrator_readonly_without_extractors(tmp_path: Path) -
     result = run_evaluate_orchestrator(cfg, impl_set)
 
     assert result["operation"] == "evaluate"
-    assert result["evaluation_placeholder"] is False
+    assert result["evaluation_is_fallback"] is False
+    assert result["evaluation_mode"] == "real"
     assert result["metrics"]["n_total"] == 1
     assert result["threshold_key_used"] == "fpr_0_01"
     assert result["fusion_result"].decision_status == "abstain"
     assert result["fusion_result"].used_threshold_id == "content_score_np_fpr_0_01"
+
+
+def test_run_calibrate_orchestrator_sets_calibration_mode(tmp_path: Path) -> None:
+    """
+    功能：验证 calibrate 输出包含规范化运行模式字段。
+
+    Validate calibrate record includes normalized mode field.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    detect_record_path = tmp_path / "detect_record.json"
+    detect_record_payload = {
+        "content_evidence_payload": {"status": "ok", "score": 0.8},
+    }
+    detect_record_path.write_text(json.dumps(detect_record_payload), encoding="utf-8")
+
+    cfg = {
+        "evaluate": {"target_fpr": 0.01},
+        "calibration": {"detect_records_glob": str(detect_record_path)},
+    }
+    impl_set = BuiltImplSet(
+        content_extractor=object(),
+        geometry_extractor=object(),
+        fusion_rule=object(),
+        subspace_planner=object(),
+        sync_module=object(),
+    )
+
+    record = run_calibrate_orchestrator(cfg, impl_set)
+
+    assert record["calibration_is_fallback"] is False
+    assert record["calibration_mode"] == "real"

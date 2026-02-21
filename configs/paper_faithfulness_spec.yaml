@@ -222,7 +222,7 @@ alignment_check_rules:
 
   # 规则 1：pipeline_fingerprint 必须存在且非占位
   pipeline_fingerprint_presence:
-    check_type: "presence_and_non_placeholder"
+    check_type: "presence_and_non_baseline"
     target_field_paths:
       - "content_evidence.pipeline_fingerprint"
       - "content_evidence.pipeline_fingerprint_digest"

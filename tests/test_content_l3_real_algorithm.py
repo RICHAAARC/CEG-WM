@@ -3,7 +3,7 @@ L3 Content Chain 真实算法必达字段回归测试
 
 功能说明：
 - 验证 Content 链 L3 必达字段：mask_digest, plan_digest, lf_trace_digest 等。
-- 确保 embed 侧不再输出 placeholder，而是真实水印证据。
+- 确保 embed 侧不再输出 baseline，而是真实水印证据。
 - 确保 detect 侧能够检测并返回 content_score。
 - 严格验证失败语义（absent/failed/mismatch）。
 """
@@ -236,11 +236,11 @@ def test_unified_extractor_detect_mode_plan_mismatch_returns_mismatch():
         f"Failure reason should mention plan mismatch, got: {result.content_failure_reason}"
 
 
-def test_l3_content_chain_not_placeholder_when_enabled():
+def test_l3_content_chain_not_baseline_when_enabled():
     """
-    功能：验证 Content 链 L3 不再是 placeholder（启用时）。
+    功能：验证 Content 链 L3 不再是 baseline（启用时）。
 
-    Regression test: Content chain L3 must not emit placeholder when enabled.
+    Regression test: Content chain L3 must not emit baseline when enabled.
     Validates that embed_record contains mask_digest/plan_digest/lf_trace_digest.
 
     Args:

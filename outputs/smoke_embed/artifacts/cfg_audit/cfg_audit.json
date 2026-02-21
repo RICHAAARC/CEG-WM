@@ -1,0 +1,21 @@
+{
+  "_artifact_audit": {
+    "schema_version": "v1.0",
+    "writer": "records_io"
+  },
+  "cfg_audit_canon_sha256": "c17a3bdcb7f10f3a93ab765dc2797bb0ccbbd633c819ac7736901375e0852498",
+  "cfg_digest": "799c280605f4c181afd88cff85e28f2a74b07e5e9ad28189a2606a5eea7186d8",
+  "cfg_pruned_for_digest_canon_sha256": "799c280605f4c181afd88cff85e28f2a74b07e5e9ad28189a2606a5eea7186d8",
+  "config_path": "configs/default.yaml",
+  "overrides_applied_summary": {
+    "count": 6,
+    "keys": [
+      "allowed_fields_version",
+      "applied_fields",
+      "rejected_fields",
+      "requested_kv",
+      "requested_overrides",
+      "source"
+    ]
+  }
+}

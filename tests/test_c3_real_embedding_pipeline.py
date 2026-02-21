@@ -18,7 +18,7 @@ from main.policy.runtime_whitelist import load_policy_path_semantics, load_runti
 from main.core.contracts import load_frozen_contracts
 from main.registries.runtime_resolver import BuiltImplSet
 from main.watermarking.content_chain.subspace.planner_interface import SubspacePlanEvidence
-from main.watermarking.content_chain.subspace.placeholder_planner import (
+from main.watermarking.content_chain.subspace.subspace_planner_impl import (
     _build_high_freq_cfg_binding,
     _build_low_freq_cfg_binding,
 )

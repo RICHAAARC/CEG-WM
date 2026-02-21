@@ -13,6 +13,7 @@ type_definitions:
   routing_dict: "JSON-like 的路由决策映射。"
   reason_string: "非空字符串，用于失败原因。"
   json_dict: "JSON-like 的映射。"
+  boolean_flag: "布尔标记字段（true/false）。"
 
 fields:
   - path: "content_evidence.mask_digest"
@@ -591,7 +592,21 @@ fields:
     type: "json_dict"
     required: false
     missing_semantics: "absent_ok"
-    description: "embed noop_v0 占位字段标记（防止误当真实嵌入参数）。"
+    description: "embed 基线身份标记字段（防止误当真实嵌入参数）。"
+
+  - path: "embed_trace.identity_mode"
+    layer: "diagnostic"
+    type: "boolean_flag"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "embed 基线身份模式标记。"
+
+  - path: "embed_trace.identity_reason"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "embed 基线身份模式原因枚举。"
 
   - path: "plan_digest_expected"
     layer: "anchor"
@@ -614,12 +629,40 @@ fields:
     missing_semantics: "absent_ok"
     description: "detect 侧 plan 摘要一致性状态（ok/mismatch/absent）。"
 
+  - path: "calibration_mode"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "calibration 侧运行模式（real）。"
+
+  - path: "calibration_is_fallback"
+    layer: "diagnostic"
+    type: "boolean_flag"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "calibration 侧回退标记（由 calibration_mode 派生）。"
+
+  - path: "evaluation_mode"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "evaluation 侧运行模式（real）。"
+
+  - path: "evaluation_is_fallback"
+    layer: "diagnostic"
+    type: "boolean_flag"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "evaluation 侧回退标记（由 evaluation_mode 派生）。"
+
   - path: "detect_runtime_mode"
     layer: "diagnostic"
     type: "reason_string"
     required: false
     missing_semantics: "absent_ok"
-    description: "detect 侧运行模式（real/placeholder）。"
+    description: "detect 侧运行模式（real/fallback_identity_v0）。"
 
   - path: "detect_runtime_status"
     layer: "diagnostic"
@@ -628,8 +671,8 @@ fields:
     missing_semantics: "absent_ok"
     description: "detect 侧运行状态（active/fallback）。"
 
-  - path: "detect_placeholder"
+  - path: "detect_runtime_is_fallback"
     layer: "diagnostic"
     required: false
     missing_semantics: "absent_ok"
-    description: "detect 侧兼容字段：是否处于 placeholder 模式（由 detect_runtime_mode 派生）。"
+    description: "detect 侧兼容字段：是否处于回退模式（由 detect_runtime_mode 派生）。"

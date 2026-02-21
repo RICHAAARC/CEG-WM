@@ -8,7 +8,7 @@
 - `main/watermarking/embed/`: 嵌入层（pattern、injector、plan、router、subspace）
 - `main/watermarking/detect/`: 检测层（decoder、evidence、inversion、trace）
 - `main/watermarking/fusion/`: 融合层（decision、policy、calibrate、audit）
-- `main/watermarking/content_chain/`: 内容证据链路（interfaces、placeholder_impl、statistics）
+- `main/watermarking/content_chain/`: 内容证据链路（interfaces、content_baseline_extractor、statistics）
 - `main/watermarking/geometry_chain/`: 几何证据链路
 
 ### 扩散模型集成
@@ -158,35 +158,35 @@ CEG-WM/
 #### main/watermarking/content_chain
 - [main/watermarking/content_chain/__init__.py](main/watermarking/content_chain/__init__.py): 包初始化占位。
 - [main/watermarking/content_chain/interfaces.py](main/watermarking/content_chain/interfaces.py): 内容证据结构与提取器协议定义。
-- [main/watermarking/content_chain/placeholder_impl.py](main/watermarking/content_chain/placeholder_impl.py): 空文件，占位内容链实现。
+- [main/watermarking/content_chain/content_baseline_extractor.py](main/watermarking/content_chain/content_baseline_extractor.py): 空文件，占位内容链实现。
 - [main/watermarking/content_chain/statistics.py](main/watermarking/content_chain/statistics.py): 空文件，占位统计模块。
 - [main/watermarking/content_chain/subspace/planner_interface.py](main/watermarking/content_chain/subspace/planner_interface.py): 空文件，占位子空间规划接口。
-- [main/watermarking/content_chain/subspace/placeholder_planner.py](main/watermarking/content_chain/subspace/placeholder_planner.py): 空文件，占位子空间规划实现。
+- [main/watermarking/content_chain/subspace/subspace_planner_impl.py](main/watermarking/content_chain/subspace/subspace_planner_impl.py): 空文件，占位子空间规划实现。
 
 #### main/watermarking/detect
 - [main/watermarking/detect/__init__.py](main/watermarking/detect/__init__.py): 包初始化占位。
 - [main/watermarking/detect/orchestrator.py](main/watermarking/detect/orchestrator.py): detect/evaluate/calibrate 占位编排与记录字段构造。
-- [main/watermarking/detect/placeholders.py](main/watermarking/detect/placeholders.py): 空文件，占位检测侧实现。
+- [main/watermarking/detect/baseline_stub.py](main/watermarking/detect/baseline_stub.py): 空文件，占位检测侧实现。
 
 #### main/watermarking/embed
 - [main/watermarking/embed/__init__.py](main/watermarking/embed/__init__.py): 包初始化占位。
 - [main/watermarking/embed/orchestrator.py](main/watermarking/embed/orchestrator.py): 嵌入占位编排与记录字段构造。
-- [main/watermarking/embed/placeholders.py](main/watermarking/embed/placeholders.py): 空文件，占位嵌入侧实现。
+- [main/watermarking/embed/baseline_stub.py](main/watermarking/embed/baseline_stub.py): 空文件，占位嵌入侧实现。
 
 #### main/watermarking/fusion
 - [main/watermarking/fusion/__init__.py](main/watermarking/fusion/__init__.py): 包初始化占位。
 - [main/watermarking/fusion/decision.py](main/watermarking/fusion/decision.py): 空文件，占位融合决策逻辑。
 - [main/watermarking/fusion/interfaces.py](main/watermarking/fusion/interfaces.py): 融合决策结构与规则协议定义。
 - [main/watermarking/fusion/neyman_pearson.py](main/watermarking/fusion/neyman_pearson.py): NP 阈值占位实现与 digest 口径。
-- [main/watermarking/fusion/placeholder_fusion.py](main/watermarking/fusion/placeholder_fusion.py): 空文件，占位融合实现。
+- [main/watermarking/fusion/baseline_fusion_stub.py](main/watermarking/fusion/baseline_fusion_stub.py): 空文件，占位融合实现。
 
 #### main/watermarking/geometry_chain
 - [main/watermarking/geometry_chain/__init__.py](main/watermarking/geometry_chain/__init__.py): 包初始化占位。
 - [main/watermarking/geometry_chain/canonicalize.py](main/watermarking/geometry_chain/canonicalize.py): 空文件，占位几何规范化。
 - [main/watermarking/geometry_chain/interfaces.py](main/watermarking/geometry_chain/interfaces.py): 几何证据结构与提取器协议定义。
-- [main/watermarking/geometry_chain/placeholder_impl.py](main/watermarking/geometry_chain/placeholder_impl.py): 空文件，占位几何链实现。
+- [main/watermarking/geometry_chain/baseline_impl.py](main/watermarking/geometry_chain/baseline_impl.py): 空文件，占位几何链实现。
 - [main/watermarking/geometry_chain/sync/__init__.py](main/watermarking/geometry_chain/sync/__init__.py): 包初始化占位。
-- [main/watermarking/geometry_chain/sync/placeholder_sync.py](main/watermarking/geometry_chain/sync/placeholder_sync.py): 空文件，占位同步模块实现。
+- [main/watermarking/geometry_chain/sync/baseline_sync.py](main/watermarking/geometry_chain/sync/baseline_sync.py): 空文件，占位同步模块实现。
 - [main/watermarking/geometry_chain/sync/sync_interface.py](main/watermarking/geometry_chain/sync/sync_interface.py): 空文件，占位同步协议定义。
 
 ## 关键特性
@@ -203,7 +203,7 @@ CEG-WM/
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
 | `model_id` | Stable Diffusion 模型 | `stabilityai/stable-diffusion-3.5-medium` |
-| `embed_mode` | 嵌入模式 | `post_vae_encode_placeholder` |
+| `embed_mode` | 嵌入模式 | `post_vae_encode_baseline` |
 | `pattern_id` | 水印模式 | `gaussian_iid` |
 | `strength` | 水印强度 | `0.1` |
 | `height` / `width` | 生成分辨率 | `1024` |

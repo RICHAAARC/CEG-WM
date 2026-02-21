@@ -41,7 +41,7 @@ def run_detect_orchestrator(
     """
     功能：执行检测占位流程，包括 plan_digest 一致性验证。
 
-    Execute detect placeholder flow using injected implementations.
+    Execute detect workflow using injected implementations.
     Validates plan_digest consistency with embed-time plan_digest when available.
 
     Args:
@@ -324,7 +324,7 @@ def run_detect_orchestrator(
     input_fields = len(input_record or {})
 
     # (D-2) 实现 detect 侧同构分数与一致性校验
-    detect_runtime_mode = "placeholder"  # 默认：未获得可用 detect 同构分数
+    detect_runtime_mode = "fallback_identity_v0"  # 默认：未获得可用 detect 同构分数
     final_latents = cfg.get("__detect_final_latents__")  # 从 CLI 层捕获的最后 latents
 
     if not forced_mismatch and final_latents is not None and isinstance(plan_payload, dict):
@@ -437,8 +437,8 @@ def run_detect_orchestrator(
         "operation": "detect",
         "detect_runtime_mode": detect_runtime_mode,
         "detect_runtime_status": "active" if detect_runtime_mode == "real" else "fallback",
-        "detect_placeholder": (detect_runtime_mode != "real"),
-        "image_path": "placeholder_test.png",
+        "detect_runtime_is_fallback": (detect_runtime_mode != "real"),
+        "image_path": "<absent>",
         "score": getattr(fusion_result, "evidence_summary", {}).get("content_score"),
         "execution_report": {
             "content_chain_status": "fail" if forced_mismatch else "ok",
@@ -1573,7 +1573,8 @@ def run_calibrate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> D
 
     record: Dict[str, Any] = {
         "operation": "calibrate",
-        "calibration_placeholder": False,
+        "calibration_is_fallback": False,
+        "calibration_mode": "real",
         "protocol": "neyman_pearson",
         "threshold_key_used": threshold_key_used,
         "threshold_id": threshold_id,
@@ -1659,7 +1660,8 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
 
     record: Dict[str, Any] = {
         "operation": "evaluate",
-        "evaluation_placeholder": False,
+        "evaluation_is_fallback": False,
+        "evaluation_mode": "real",
         "metrics": metrics_obj,
         "evaluation_breakdown": breakdown,
         "evaluation_report": report_obj,

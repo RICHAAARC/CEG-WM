@@ -737,7 +737,7 @@ def _validate_run_closure_ok_fields(payload: Dict[str, Any]) -> None:
     """
     功能：校验 ok 闭包关键字段不得为空或为哨兵值。
 
-    Validate critical fields for ok closures to avoid sentinel placeholders.
+    Validate critical fields for ok closures to avoid sentinel baselines.
 
     Args:
         payload: Run closure payload mapping.
@@ -1264,7 +1264,7 @@ def build_thresholds_spec(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
     功能：构造阈值占位 spec。
 
-    Build a placeholder thresholds specification for digest derivation.
+    Build a baseline thresholds specification for digest derivation.
 
     Args:
         cfg: Config mapping.

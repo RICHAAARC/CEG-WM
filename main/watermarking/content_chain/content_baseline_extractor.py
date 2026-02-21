@@ -1,9 +1,9 @@
 """
-File purpose: Content chain placeholder extractor implementation.
+File purpose: Content chain baseline extractor implementation.
 Module type: General module
 
 功能说明：
-- 提供内容链占位 extractor，实现接口级可复算与可审计输出。
+- 提供内容链基线 extractor，实现接口级可复算与可审计输出。
 - 默认输出 absent 语义，确保不引入统计口径污染。
 """
 
@@ -17,14 +17,14 @@ from .interfaces import ContentEvidence
 
 
 TRACE_VERSION = "v1"
-DEFAULT_FAILURE_REASON = "placeholder_absent"
+DEFAULT_FAILURE_REASON = "evidence_absent"
 
 
-class ContentEvidencePlaceholderExtractor:
+class ContentEvidenceBaselineExtractor:
     """
-    功能：内容链占位 extractor。
+    功能：内容链基线 extractor。
 
-    Placeholder extractor emitting deterministic absent evidence.
+    Baseline extractor emitting deterministic absent evidence.
 
     Args:
         impl_identity: Implementation identity string.
@@ -58,9 +58,9 @@ class ContentEvidencePlaceholderExtractor:
         inputs: Optional[Dict[str, Any]] = None
     ) -> ContentEvidence:
         """
-        功能：输出占位内容链证据。
+        功能：输出基线内容链证据。
 
-        Emit placeholder content evidence with deterministic audit fields.
+        Emit baseline content evidence with deterministic audit fields.
 
         Args:
             cfg: Config mapping.

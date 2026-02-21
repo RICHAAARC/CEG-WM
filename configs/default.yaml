@@ -84,11 +84,17 @@ detect:
 enable_mask: true  # 启用语义掩码提取（L3 真实水印必需）
 
 # ==============================================================
+# 嵌入配置
+# ==============================================================
+embed:
+  test_mode_identity: false  # 测试模式基线检验：启用后 content/geometry 使用基线实现
+
+# ==============================================================
 # 实现标识
 # ==============================================================
 impl:
   content_extractor_id: "unified_content_extractor_v1"  # 真实 L3 实现（Embed + Detect 双模式）
-  geometry_extractor_id: "geometry_baseline_noop_v1"
+  geometry_extractor_id: "geometry_baseline_identity_v1"
   fusion_rule_id: "fusion_baseline_identity_v1"
   subspace_planner_id: "subspace_planner_v1"
   sync_module_id: "geometry_sync_baseline_v1"

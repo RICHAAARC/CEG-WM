@@ -50,7 +50,7 @@ def run_embed_orchestrator(
     """
     功能：执行嵌入占位流程。
 
-    Execute embed placeholder flow using injected implementations.
+    Execute embed workflow using injected implementations.
 
     Args:
         cfg: Config mapping.
@@ -166,10 +166,12 @@ def run_embed_orchestrator(
     io_anchors = _prepare_embed_real_io_anchors(cfg)
     embed_trace = {
         "embed_mode": io_anchors["embed_mode"],
+        "identity_mode": io_anchors.get("identity_mode"),
+        "identity_reason": io_anchors.get("identity_reason"),
         "note": "content_embedding_real_v1",
     }
 
-    if io_anchors["embed_mode"] != "noop_v0_test_only" and io_anchors["image_path"] != "<absent>":
+    if not io_anchors.get("identity_mode", False) and io_anchors["image_path"] != "<absent>":
         input_image = Image.open(io_anchors["image_path"]).convert("RGB")
         watermarked_image, pipeline_trace = _apply_content_embedding_pipeline(
             image=input_image,
@@ -485,6 +487,8 @@ def _prepare_embed_real_io_anchors(cfg: Dict[str, Any]) -> Dict[str, str]:
         "run_root": "<absent>",
         "artifacts_dir": "<absent>",
         "output_rel": "watermarked/watermarked.png",
+        "identity_mode": False,
+        "identity_reason": None,
     }
 
     input_image_path = _resolve_embed_input_image_path(cfg)
@@ -517,10 +521,12 @@ def _prepare_embed_real_io_anchors(cfg: Dict[str, Any]) -> Dict[str, str]:
     output_path = (artifacts_dir / output_rel).resolve()
     path_policy.validate_output_target(output_path, "artifact", run_root)
 
-    test_mode_noop = bool(embed_cfg.get("test_mode_noop", False))
-    if test_mode_noop:
+    test_mode_identity = bool(embed_cfg.get("test_mode_identity", False))
+    if test_mode_identity:
         records_io.copy_file_controlled(input_path, output_path, kind="artifact")
-        result["embed_mode"] = "noop_v0_test_only"
+        result["embed_mode"] = "baseline_identity_v0"
+        result["identity_mode"] = True
+        result["identity_reason"] = "identity_pipeline"
         result["watermarked_path"] = str(output_path)
         result["artifact_sha256"] = digests.file_sha256(output_path)
         try:

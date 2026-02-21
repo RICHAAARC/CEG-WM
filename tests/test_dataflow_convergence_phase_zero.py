@@ -170,7 +170,7 @@ def _build_base_cfg() -> Dict[str, Any]:
             "target_fpr": 1e-6
         },
         "embed": {
-            "output_artifact_rel_path": "watermarked/watermarked_noop_v0.png"
+            "output_artifact_rel_path": "watermarked/watermarked_identity_v0.png"
         },
         "detect": {
             "content": {"enabled": True},
@@ -246,8 +246,8 @@ def test_detect_must_not_read_plan_digest_from_cfg() -> None:
     assert record["plan_digest_status"] == "ok"
     assert record["plan_digest_expected"] == plan_digest
     assert record["plan_digest_observed"] == plan_digest
-    assert record["detect_runtime_mode"] in {"real", "placeholder"}
-    assert record["detect_placeholder"] == (record["detect_runtime_mode"] != "real")
+    assert record["detect_runtime_mode"] in {"real", "fallback_identity_v0"}
+    assert record["detect_runtime_is_fallback"] == (record["detect_runtime_mode"] != "real")
 
 
 def test_embed_produces_real_artifact_and_records_anchor(tmp_path: Path) -> None:
@@ -383,7 +383,7 @@ def test_append_only_fields_validate_with_interpretation() -> None:
     schema.validate_record(old_record, interpretation=interpretation)
 
 
-def test_embed_noop_trace_marks_placeholder_fields(tmp_path: Path) -> None:
+def test_embed_identity_trace_marks_baseline_fields(tmp_path: Path) -> None:
     run_root = tmp_path / "embed_trace"
     records_dir = run_root / "records"
     artifacts_dir = run_root / "artifacts"

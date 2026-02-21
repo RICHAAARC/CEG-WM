@@ -42,7 +42,7 @@ FORBIDDEN_UNSAFE_DESERIALIZATION_PATTERNS = [
 
 
 def test_no_write_bypass_introduced_by_planner() -> None:
-    planner_path = Path("main/watermarking/content_chain/subspace/placeholder_planner.py")
+    planner_path = Path("main/watermarking/content_chain/subspace/subspace_planner_impl.py")
     source = planner_path.read_text(encoding="utf-8")
 
     hits = [pattern for pattern in FORBIDDEN_WRITE_PATTERNS if pattern in source]
@@ -50,7 +50,7 @@ def test_no_write_bypass_introduced_by_planner() -> None:
 
 
 def test_no_network_access_introduced_by_planner() -> None:
-    planner_path = Path("main/watermarking/content_chain/subspace/placeholder_planner.py")
+    planner_path = Path("main/watermarking/content_chain/subspace/subspace_planner_impl.py")
     source = planner_path.read_text(encoding="utf-8")
 
     hits = [pattern for pattern in FORBIDDEN_NETWORK_PATTERNS if pattern in source]
@@ -58,7 +58,7 @@ def test_no_network_access_introduced_by_planner() -> None:
 
 
 def test_no_dynamic_execution_introduced_by_planner() -> None:
-    planner_path = Path("main/watermarking/content_chain/subspace/placeholder_planner.py")
+    planner_path = Path("main/watermarking/content_chain/subspace/subspace_planner_impl.py")
     source = planner_path.read_text(encoding="utf-8")
 
     hits = [pattern for pattern in FORBIDDEN_DYNAMIC_EXECUTION_PATTERNS if pattern in source]
@@ -66,7 +66,7 @@ def test_no_dynamic_execution_introduced_by_planner() -> None:
 
 
 def test_no_unsafe_deserialization_introduced_by_planner() -> None:
-    planner_path = Path("main/watermarking/content_chain/subspace/placeholder_planner.py")
+    planner_path = Path("main/watermarking/content_chain/subspace/subspace_planner_impl.py")
     source = planner_path.read_text(encoding="utf-8")
 
     hits = [pattern for pattern in FORBIDDEN_UNSAFE_DESERIALIZATION_PATTERNS if pattern in source]

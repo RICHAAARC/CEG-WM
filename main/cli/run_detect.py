@@ -4,7 +4,7 @@
 功能说明：
 - 规范化输出目录路径，确保输出布局，加载合同与白名单，验证配置，解析实现，构造记录，绑定字段，写盘，并产出闭包。
 - 包含详细的输入验证、错误处理与状态更新机制，确保健壮性与可维护性。
-- 目前实现为 placeholder，未来会逐步完善业务逻辑与字段定义。
+- 当前为基线实现，后续会逐步完善业务逻辑与字段定义。
 """
 
 import sys
@@ -67,14 +67,14 @@ def run_detect(
     overrides: list[str] | None = None
 ) -> None:
     """
-    功能：执行检测流程，本阶段为 placeholder。
+    功能：执行检测流程，本阶段为基线实现。
 
-    Execute detect workflow (placeholder implementation).
+    Execute detect workflow (baseline implementation).
 
     Args:
         output_dir: Run root directory for records/artifacts.
         config_path: YAML config path.
-        input_record_path: Optional input record path (placeholder if not provided).
+        input_record_path: Optional input record path (baseline if not provided).
         overrides: Optional CLI override args list.
     
     Returns:
@@ -348,11 +348,11 @@ def run_detect(
                 input_record = records_io.read_json(input_record_path)
                 print(f"[Detect]   Loaded input record with {len(input_record)} fields")
             else:
-                print("[Detect] No input record provided, using placeholder")
-                input_record = {"placeholder_input": True}
+                print("[Detect] No input record provided, using baseline")
+                input_record = {"baseline_input": True}
 
-            # 构造 detect record，本阶段为 placeholder。
-            print("[Detect] Generating detect record (placeholder)...")
+            # 构造 detect record，本阶段为基线实现。
+            print("[Detect] Generating detect record (baseline)...")
             record = run_detect_orchestrator(
                 cfg,
                 impl_set,
@@ -503,7 +503,7 @@ def run_detect(
 def main():
     """主流程。"""
     parser = argparse.ArgumentParser(
-        description="Detect watermark (placeholder implementation)"
+        description="Detect watermark (baseline implementation)"
     )
     parser.add_argument(
         "--out",

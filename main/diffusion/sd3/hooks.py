@@ -68,7 +68,7 @@ def define_on_step_end_callback(
     
     # 若未提供 plan_digest，则生成占位符。
     if plan_digest is None:
-        plan_digest = "placeholder_plan_digest"
+        plan_digest = "baseline_plan_digest"
     
     # 构建 InjectionContext（显式上下文，避免修改 cfg）。
     try:

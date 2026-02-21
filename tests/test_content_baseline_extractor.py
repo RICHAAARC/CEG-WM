@@ -1,9 +1,9 @@
 """
-File purpose: Content chain placeholder extractor tests.
+File purpose: Content chain baseline extractor tests.
 Module type: General module
 
 功能说明：
-- 验证内容链占位 extractor 的 absent 语义与审计字段。
+- 验证内容链基线 extractor 的 absent 语义与审计字段。
 - 验证 extract(cfg) 兼容入口与可复算 trace_digest。
 """
 
@@ -12,8 +12,8 @@ from typing import Any, Dict
 
 import pytest
 
-from main.watermarking.content_chain.placeholder_impl import (
-    ContentEvidencePlaceholderExtractor
+from main.watermarking.content_chain.content_baseline_extractor import (
+    ContentEvidenceBaselineExtractor
 )
 
 
@@ -42,13 +42,13 @@ def _block_write(*args, **kwargs):
     raise RuntimeError("write blocked")
 
 
-def test_content_placeholder_extractor_absent_and_audit(
+def test_content_baseline_extractor_absent_and_audit(
     monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """
-    功能：验证占位 extractor 的 absent 语义与审计字段。
+    功能：验证基线 extractor 的 absent 语义与审计字段。
 
-    Verify placeholder extractor absent semantics and audit fields.
+    Verify baseline extractor absent semantics and audit fields.
 
     Args:
         monkeypatch: pytest monkeypatch fixture.
@@ -81,10 +81,10 @@ def test_content_placeholder_extractor_absent_and_audit(
 
     monkeypatch.setattr(Path, "open", _blocked_path_open)
 
-    extractor = ContentEvidencePlaceholderExtractor(
-        impl_identity="content_placeholder_v1",
+    extractor = ContentEvidenceBaselineExtractor(
+        impl_identity="content_baseline_v1",
         impl_version="v1",
-        impl_digest="digest_placeholder"
+        impl_digest="digest_baseline"
     )
     cfg: Dict[str, Any] = {"policy_path": "test_policy"}
 
@@ -93,7 +93,7 @@ def test_content_placeholder_extractor_absent_and_audit(
 
     assert evidence_dict["status"] == "absent"
     assert evidence_dict["score"] is None
-    assert evidence_dict["content_failure_reason"] == "placeholder_absent"
+    assert evidence_dict["content_failure_reason"] == "evidence_absent"
 
     audit = evidence_dict["audit"]
     assert set(audit.keys()) == {
@@ -102,9 +102,9 @@ def test_content_placeholder_extractor_absent_and_audit(
         "impl_digest",
         "trace_digest"
     }
-    assert audit["impl_identity"] == "content_placeholder_v1"
+    assert audit["impl_identity"] == "content_baseline_v1"
     assert audit["impl_version"] == "v1"
-    assert audit["impl_digest"] == "digest_placeholder"
+    assert audit["impl_digest"] == "digest_baseline"
     assert isinstance(audit["trace_digest"], str)
 
     evidence_repeat = extractor.extract(cfg)

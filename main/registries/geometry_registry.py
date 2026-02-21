@@ -3,7 +3,7 @@
 
 功能说明：
 - 提供几何链提取器和同步模块实现的运行时注册表。
-- 定义几何链和同步模块占位实现，供测试和示例使用。
+- 定义几何链和同步模块基线实现，供测试和示例使用。
 """
 
 from __future__ import annotations
@@ -16,15 +16,15 @@ from .registry_base import FactoryType, RegistryBase
 from .capabilities import ImplCapabilities
 
 
-GEOMETRY_BASELINE_NOOP_ID = "geometry_baseline_noop_v1"
+GEOMETRY_BASELINE_IDENTITY_ID = "geometry_baseline_identity_v1"
 SYNC_BASELINE_ID = "geometry_sync_baseline_v1"
 
 
-class GeometryBaselineNoop:
+class GeometryBaselineIdentity:
     """
-    功能：几何链占位实现。
+    功能：几何链基线实现。
 
-    Placeholder geometry extractor that emits fixed evidence.
+    Baseline geometry extractor that emits fixed evidence.
 
     Args:
         impl_id: Implementation identifier.
@@ -54,15 +54,15 @@ class GeometryBaselineNoop:
 
     def extract(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
         """
-        功能：输出占位几何证据。
+        功能：输出基线几何证据。
 
-        Return placeholder geometry evidence.
+        Return baseline geometry evidence.
 
         Args:
             cfg: Config mapping.
 
         Returns:
-            Placeholder geometry evidence mapping.
+            Baseline geometry evidence mapping.
 
         Raises:
             TypeError: If cfg is not dict.
@@ -71,7 +71,7 @@ class GeometryBaselineNoop:
             # cfg 类型不合法，必须 fail-fast。
             raise TypeError("cfg must be dict")
         return {
-            "geometry_placeholder": True,
+            "geometry_baseline": True,
             "geometry_evidence": "absent",
             "geometry_signal": None
         }
@@ -79,9 +79,9 @@ class GeometryBaselineNoop:
 
 class SyncBaseline:
     """
-    功能：同步模块占位实现。
+    功能：同步模块基线实现。
 
-    Placeholder sync module that returns fixed status.
+    Baseline sync module that returns fixed status.
 
     Args:
         impl_id: Implementation identifier.
@@ -111,15 +111,15 @@ class SyncBaseline:
 
     def sync(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
         """
-        功能：输出占位同步状态。
+        功能：输出基线同步状态。
 
-        Return placeholder sync status.
+        Return baseline sync status.
 
         Args:
             cfg: Config mapping.
 
         Returns:
-            Placeholder sync status mapping.
+            Baseline sync status mapping.
 
         Raises:
             TypeError: If cfg is not dict.
@@ -165,17 +165,17 @@ def _derive_impl_digest(impl_id: str, impl_version: str) -> str:
     })
 
 
-def _build_geometry_baseline_noop(cfg: Dict[str, Any]) -> GeometryBaselineNoop:
+def _build_geometry_baseline_identity(cfg: Dict[str, Any]) -> GeometryBaselineIdentity:
     """
-    功能：构造几何链占位实现。
+    功能：构造几何链基线实现。
 
-    Build placeholder geometry extractor.
+    Build baseline geometry extractor.
 
     Args:
         cfg: Config mapping.
 
     Returns:
-        GeometryBaselineNoop instance.
+        GeometryBaselineIdentity instance.
 
     Raises:
         TypeError: If cfg is not dict.
@@ -184,15 +184,15 @@ def _build_geometry_baseline_noop(cfg: Dict[str, Any]) -> GeometryBaselineNoop:
         # cfg 类型不合法，必须 fail-fast。
         raise TypeError("cfg must be dict")
     impl_version = "v1"
-    impl_digest = _derive_impl_digest(GEOMETRY_BASELINE_NOOP_ID, impl_version)
-    return GeometryBaselineNoop(GEOMETRY_BASELINE_NOOP_ID, impl_version, impl_digest)
+    impl_digest = _derive_impl_digest(GEOMETRY_BASELINE_IDENTITY_ID, impl_version)
+    return GeometryBaselineIdentity(GEOMETRY_BASELINE_IDENTITY_ID, impl_version, impl_digest)
 
 
 def _build_sync_baseline(cfg: Dict[str, Any]) -> SyncBaseline:
     """
-    功能：构造同步占位实现。
+    功能：构造同步基线实现。
 
-    Build placeholder sync module.
+    Build baseline sync module.
 
     Args:
         cfg: Config mapping.
@@ -212,8 +212,8 @@ def _build_sync_baseline(cfg: Dict[str, Any]) -> SyncBaseline:
 
 
 _GEOMETRY_REGISTRY.register_factory(
-    GEOMETRY_BASELINE_NOOP_ID,
-    _build_geometry_baseline_noop,
+    GEOMETRY_BASELINE_IDENTITY_ID,
+    _build_geometry_baseline_identity,
     capabilities=ImplCapabilities(
         supports_batching=False,
         requires_cuda=False,

@@ -114,7 +114,7 @@ def _check_pipeline_fingerprint_presence(
     """
     功能：检查 pipeline_fingerprint 是否存在且非占位。
 
-    Check pipeline fingerprint presence and non-placeholder.
+    Check pipeline fingerprint presence and non-empty value.
 
     Args:
         pipeline_fingerprint: Pipeline fingerprint dict.

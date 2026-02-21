@@ -12,7 +12,7 @@ Module type: General module
 import pytest
 from typing import Dict, Any
 
-from main.watermarking.content_chain.subspace.placeholder_planner import (
+from main.watermarking.content_chain.subspace.subspace_planner_impl import (
     SubspacePlannerImpl,
     SUBSPACE_PLANNER_ID,
     SUBSPACE_PLANNER_VERSION
@@ -93,8 +93,8 @@ class TestSubspacePlannerBasic:
         # S-03 改进：absent 时记录 plan_failure_reason="planner_disabled_by_policy" 作为审计标记
         assert result.plan_failure_reason == "planner_disabled_by_policy"
 
-    def test_subspace_planner_default_path_not_test_synthetic(self):
-        """默认路径应走 planner_v1_band_spec，而非 test_synthetic。"""
+    def test_subspace_planner_default_path_not_test_mode_synthetic(self):
+        """默认路径应走 planner_v1_band_spec，而非 test_mode_synthetic。"""
         planner = SubspacePlannerImpl(
             impl_id=SUBSPACE_PLANNER_ID,
             impl_version=SUBSPACE_PLANNER_VERSION,
@@ -138,7 +138,7 @@ class TestSubspacePlannerBasic:
         assert result.plan.get("attention_anchor_ref_digest") == "<absent>"
 
     def test_subspace_planner_synthetic_requires_test_mode_or_allow_flag(self):
-        """synthetic 仅允许在 test_mode/allow_synthetic_trajectory 下启用。"""
+        """test_mode_synthetic 仅允许在 test_mode/allow_synthetic_trajectory 下启用。"""
         planner = SubspacePlannerImpl(
             impl_id=SUBSPACE_PLANNER_ID,
             impl_version=SUBSPACE_PLANNER_VERSION,
@@ -175,7 +175,7 @@ class TestSubspacePlannerBasic:
         )
         assert result_with_test_mode.status == "ok"
         assert isinstance(result_with_test_mode.plan, dict)
-        assert result_with_test_mode.plan.get("plan_origin") == "test_synthetic"
+        assert result_with_test_mode.plan.get("plan_origin") == "test_mode_synthetic"
 
 
 class TestPlanDigestBinding:

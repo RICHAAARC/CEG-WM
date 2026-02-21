@@ -13,8 +13,8 @@ def test_registry_whitelist_required_for_planner_impl() -> None:
     whitelist = load_runtime_whitelist()
 
     impl_identity = {
-        "content_extractor_id": "content_baseline_noop_v1",
-        "geometry_extractor_id": "geometry_baseline_noop_v1",
+        "content_extractor_id": "content_baseline_identity_v1",
+        "geometry_extractor_id": "geometry_baseline_identity_v1",
         "fusion_rule_id": "fusion_baseline_identity_v1",
         "subspace_planner_id": "subspace_planner_not_whitelisted_v1",
         "sync_module_id": "geometry_sync_baseline_v1"
