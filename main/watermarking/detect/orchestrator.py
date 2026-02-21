@@ -131,6 +131,13 @@ def run_detect_orchestrator(
     )
 
     expected_plan_digest = _resolve_expected_plan_digest(input_record)
+    detect_test_mode = _resolve_detect_test_mode(cfg)
+    allow_cfg_plan_digest_fallback_used = False
+    if expected_plan_digest is None and detect_test_mode:
+        cfg_plan_digest = _resolve_cfg_plan_digest(cfg)
+        if isinstance(cfg_plan_digest, str) and cfg_plan_digest:
+            expected_plan_digest = cfg_plan_digest
+            allow_cfg_plan_digest_fallback_used = True
     embed_time_plan_digest = expected_plan_digest
     embed_time_basis_digest = None
     embed_time_planner_impl_identity = None
@@ -157,36 +164,25 @@ def run_detect_orchestrator(
     elif isinstance(detect_plan_result, dict):
         plan_payload = dict(detect_plan_result)
 
-    hf_evidence = _build_hf_detect_evidence(
-        cfg=cfg,
-        cfg_digest=cfg_digest,
-        plan_payload=plan_payload,
-        plan_digest=detect_time_plan_digest,
-        embed_time_plan_digest=embed_time_plan_digest,
-        trajectory_evidence=trajectory_evidence,
-    )
-    lf_raw_score, hf_raw_score, raw_score_traces = _extract_content_raw_scores_from_image(
-        cfg=cfg,
-        input_record=input_record,
-        plan_payload=plan_payload,
-        plan_digest=detect_time_plan_digest,
-        cfg_digest=cfg_digest,
-    )
-
-    mismatch_reasons = _collect_plan_mismatch_reasons(
-        embed_time_plan_digest=expected_plan_digest,
-        detect_time_plan_digest=detect_time_plan_digest,
-        embed_time_basis_digest=embed_time_basis_digest,
-        detect_time_basis_digest=detect_time_basis_digest,
-        embed_time_planner_impl_identity=embed_time_planner_impl_identity,
-        detect_time_planner_impl_identity=detect_time_planner_impl_identity
-    )
-    plan_digest_status, plan_digest_reason = verify_plan_digest(
-        expected_plan_digest if isinstance(expected_plan_digest, str) else None,
-        detect_time_plan_digest if isinstance(detect_time_plan_digest, str) else None,
-    )
-    if plan_digest_reason == "plan_digest_mismatch" and "plan_digest_mismatch" not in mismatch_reasons:
-        mismatch_reasons.append("plan_digest_mismatch")
+    mismatch_reasons: list[str] = []
+    if isinstance(expected_plan_digest, str) and expected_plan_digest:
+        mismatch_reasons = _collect_plan_mismatch_reasons(
+            embed_time_plan_digest=expected_plan_digest,
+            detect_time_plan_digest=detect_time_plan_digest,
+            embed_time_basis_digest=embed_time_basis_digest,
+            detect_time_basis_digest=detect_time_basis_digest,
+            embed_time_planner_impl_identity=embed_time_planner_impl_identity,
+            detect_time_planner_impl_identity=detect_time_planner_impl_identity
+        )
+        plan_digest_status, plan_digest_reason = verify_plan_digest(
+            expected_plan_digest,
+            detect_time_plan_digest if isinstance(detect_time_plan_digest, str) else None,
+        )
+        if plan_digest_reason == "plan_digest_mismatch" and "plan_digest_mismatch" not in mismatch_reasons:
+            mismatch_reasons.append("plan_digest_mismatch")
+    else:
+        plan_digest_status = "absent"
+        plan_digest_reason = "plan_digest_absent"
 
     trajectory_status, trajectory_mismatch_reason = _evaluate_trajectory_consistency(
         input_record=input_record,
@@ -221,7 +217,11 @@ def run_detect_orchestrator(
     )
 
     forced_mismatch = len(mismatch_reasons) > 0
-    forced_absent = (trajectory_status == "absent" or injection_status == "absent") and not forced_mismatch
+    forced_absent = (
+        not isinstance(expected_plan_digest, str) or
+        not expected_plan_digest or
+        ((trajectory_status == "absent" or injection_status == "absent") and not forced_mismatch)
+    )
     if forced_mismatch:
         content_evidence_payload = {
             "status": "mismatch",
@@ -250,8 +250,7 @@ def run_detect_orchestrator(
             _inject_trajectory_audit_fields(content_evidence_payload, trajectory_evidence)
         if injection_evidence is not None:
             _merge_injection_evidence(content_evidence_payload, injection_evidence)
-        _merge_hf_evidence(content_evidence_payload, hf_evidence)
-        _bind_raw_scores_to_content_payload(content_evidence_payload, lf_raw_score, hf_raw_score, raw_score_traces)
+        _bind_scores_if_ok(content_evidence_payload)
         content_result = content_evidence_payload
         content_evidence_adapted = content_evidence_payload
         geometry_evidence_adapted = _adapt_geometry_evidence_for_fusion(geometry_result)
@@ -262,7 +261,7 @@ def run_detect_orchestrator(
             "score": None,
             "plan_digest": detect_time_plan_digest,
             "basis_digest": detect_time_basis_digest,
-            "content_failure_reason": None,
+            "content_failure_reason": "detector_no_plan_expected" if not isinstance(expected_plan_digest, str) or not expected_plan_digest else None,
             "score_parts": None,
             "lf_score": None,
             "hf_score": None,
@@ -272,7 +271,8 @@ def run_detect_orchestrator(
                 "impl_digest": digests.canonical_sha256({"impl_id": "detect_orchestrator", "impl_version": "v1"}),
                 "trace_digest": digests.canonical_sha256({
                     "trajectory_status": trajectory_status,
-                    "trajectory_mismatch_reason": trajectory_mismatch_reason
+                    "trajectory_mismatch_reason": trajectory_mismatch_reason,
+                    "plan_digest_status": plan_digest_status
                 })
             }
         }
@@ -281,19 +281,34 @@ def run_detect_orchestrator(
             _inject_trajectory_audit_fields(content_evidence_payload, trajectory_evidence)
         if injection_evidence is not None:
             _merge_injection_evidence(content_evidence_payload, injection_evidence)
-        _merge_hf_evidence(content_evidence_payload, hf_evidence)
-        _bind_raw_scores_to_content_payload(content_evidence_payload, lf_raw_score, hf_raw_score, raw_score_traces)
+        _bind_scores_if_ok(content_evidence_payload)
         content_result = content_evidence_payload
         content_evidence_adapted = content_evidence_payload
         geometry_evidence_adapted = _adapt_geometry_evidence_for_fusion(geometry_result)
         fusion_result = _build_absent_fusion_decision(cfg, content_evidence_adapted, geometry_evidence_adapted)
     else:
+        hf_evidence = _build_hf_detect_evidence(
+            cfg=cfg,
+            cfg_digest=cfg_digest,
+            plan_payload=plan_payload,
+            plan_digest=detect_time_plan_digest,
+            embed_time_plan_digest=embed_time_plan_digest,
+            trajectory_evidence=trajectory_evidence,
+        )
+        lf_raw_score, hf_raw_score, raw_score_traces = _extract_content_raw_scores_from_image(
+            cfg=cfg,
+            input_record=input_record,
+            plan_payload=plan_payload,
+            plan_digest=detect_time_plan_digest,
+            cfg_digest=cfg_digest,
+        )
         lf_evidence = _extract_lf_evidence_from_input_record(input_record)
         detector_inputs: Dict[str, Any] = {
             "expected_plan_digest": expected_plan_digest,
             "observed_plan_digest": detect_time_plan_digest,
-            "disable_cfg_plan_digest_fallback": True,
+            "disable_cfg_plan_digest_fallback": (not detect_test_mode),
             "plan_digest": detect_time_plan_digest,
+            "test_mode": detect_test_mode,
             "lf_evidence": lf_evidence,
             "hf_evidence": hf_evidence,
             "lf_score": lf_raw_score,
@@ -319,6 +334,7 @@ def run_detect_orchestrator(
             _merge_injection_evidence(content_evidence_payload, injection_evidence)
         _merge_hf_evidence(content_evidence_payload, hf_evidence)
         _bind_raw_scores_to_content_payload(content_evidence_payload, lf_raw_score, hf_raw_score, raw_score_traces)
+        _bind_scores_if_ok(content_evidence_payload)
         content_evidence_adapted = _adapt_content_evidence_for_fusion(content_evidence_payload)
         fusion_result = impl_set.fusion_rule.fuse(cfg, content_evidence_adapted, geometry_evidence_adapted)
     input_fields = len(input_record or {})
@@ -428,6 +444,8 @@ def run_detect_orchestrator(
         if detect_lf_status == "ok" and subspace_consistency_status == "ok":
             detect_runtime_mode = "real"
 
+    _bind_scores_if_ok(content_evidence_payload)
+
     # 删除临时的 latents 字段，确保不写入 records
     cfg.pop("__detect_final_latents__", None)
 
@@ -452,6 +470,7 @@ def run_detect_orchestrator(
         "plan_digest_status": plan_digest_status,
         "plan_digest_validation_status": plan_digest_status,
         "plan_digest_mismatch_reason": primary_mismatch_reason if forced_mismatch else plan_digest_mismatch_reason,
+        "allow_cfg_plan_digest_fallback_used": allow_cfg_plan_digest_fallback_used,
         # (append-only) 保留完整的 payload，供后续升级 fusion 规则时直接消费冻结字段。
         "content_evidence_payload": content_evidence_payload,
         "geometry_evidence_payload": geometry_evidence_payload,
@@ -467,6 +486,110 @@ def run_detect_orchestrator(
         }
     }
     return record
+
+
+def _resolve_cfg_plan_digest(cfg: Dict[str, Any]) -> Optional[str]:
+    """
+    功能：从 cfg 读取 plan_digest（仅用于 test_mode）。
+
+    Resolve cfg-side plan_digest for test-mode-only fallback.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        plan_digest string or None.
+    """
+    if not isinstance(cfg, dict):
+        return None
+    watermark_cfg = cfg.get("watermark")
+    if not isinstance(watermark_cfg, dict):
+        return None
+    candidate = watermark_cfg.get("plan_digest")
+    if isinstance(candidate, str) and candidate:
+        return candidate
+    return None
+
+
+def _resolve_detect_test_mode(cfg: Dict[str, Any]) -> bool:
+    """
+    功能：解析 detect 的 test_mode 开关。
+
+    Resolve detect test_mode switch from cfg.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        True if detect test_mode is enabled.
+    """
+    if not isinstance(cfg, dict):
+        return False
+    direct = cfg.get("test_mode")
+    if isinstance(direct, bool):
+        return direct
+    detect_cfg = cfg.get("detect")
+    if isinstance(detect_cfg, dict):
+        runtime_cfg = detect_cfg.get("runtime")
+        if isinstance(runtime_cfg, dict):
+            runtime_test_mode = runtime_cfg.get("test_mode")
+            if isinstance(runtime_test_mode, bool):
+                return runtime_test_mode
+        detect_test_mode = detect_cfg.get("test_mode")
+        if isinstance(detect_test_mode, bool):
+            return detect_test_mode
+    return False
+
+
+def _bind_scores_if_ok(content_evidence_payload: Dict[str, Any]) -> None:
+    """
+    功能：分数写入纪律收口，仅 status=ok 允许数值分数。
+
+    Enforce score write discipline: numeric score fields are allowed only when status="ok".
+
+    Args:
+        content_evidence_payload: Mutable content evidence mapping.
+
+    Returns:
+        None.
+    """
+    if not isinstance(content_evidence_payload, dict):
+        return
+
+    status_value = content_evidence_payload.get("status")
+    if not isinstance(status_value, str):
+        status_value = "failed"
+        content_evidence_payload["status"] = status_value
+
+    score_parts = content_evidence_payload.get("score_parts")
+    if status_value != "ok":
+        content_evidence_payload["score"] = None
+        content_evidence_payload["lf_score"] = None
+        content_evidence_payload["hf_score"] = None
+        if isinstance(score_parts, dict):
+            for numeric_key in [
+                "lf_score",
+                "hf_score",
+                "content_score",
+                "detect_lf_score",
+                "detect_hf_score",
+            ]:
+                if isinstance(score_parts.get(numeric_key), (int, float)):
+                    score_parts[numeric_key] = None
+        return
+
+    for field_name in ["score", "lf_score", "hf_score"]:
+        score_value = content_evidence_payload.get(field_name)
+        if score_value is None:
+            continue
+        if not isinstance(score_value, (int, float)) or not np.isfinite(float(score_value)):
+            content_evidence_payload["status"] = "failed"
+            content_evidence_payload["content_failure_reason"] = "detector_score_validation_failed"
+            content_evidence_payload["score"] = None
+            content_evidence_payload["lf_score"] = None
+            content_evidence_payload["hf_score"] = None
+            content_evidence_payload["score_parts"] = None
+            return
 
 
 def _build_hf_detect_evidence(

@@ -174,6 +174,7 @@ def run_sd3_inference(
 
     # (3) 尝试执行推理
     try:
+        synthetic_pipeline = bool(getattr(pipeline_obj, "is_synthetic_pipeline", False))
         # 检查 pipeline_obj 是否有 __call__ 方法
         if not callable(pipeline_obj):
             inference_status = INFERENCE_STATUS_FAILED
@@ -204,13 +205,16 @@ def run_sd3_inference(
                 pipeline_obj = pipeline_obj.to(actual_device)
                 inference_runtime_meta["device_confirmed"] = actual_device
         except Exception as device_setup_exc:
-            inference_status = INFERENCE_STATUS_FAILED
-            inference_error = f"device_setup_error: {device_setup_exc}"
-            return {
-                "inference_status": inference_status,
-                "inference_error": inference_error,
-                "inference_runtime_meta": inference_runtime_meta
-            }
+            if synthetic_pipeline:
+                inference_runtime_meta["device_setup_warning"] = str(device_setup_exc)
+            else:
+                inference_status = INFERENCE_STATUS_FAILED
+                inference_error = f"device_setup_error: {device_setup_exc}"
+                return {
+                    "inference_status": inference_status,
+                    "inference_error": inference_error,
+                    "inference_runtime_meta": inference_runtime_meta
+                }
 
         # 构造推理参数
         infer_kwargs = {
@@ -221,14 +225,21 @@ def run_sd3_inference(
             "width": width
         }
         if seed is not None:
-            import torch
-            # 确保 generator 在与 pipeline 一致的设备上
-            generator_device = device if device else "cpu"
-            if generator_device == "cuda" and not torch.cuda.is_available():
-                generator_device = "cpu"
-            generator = torch.Generator(device=generator_device)
-            generator.manual_seed(seed)
-            infer_kwargs["generator"] = generator
+            try:
+                import torch
+                # 确保 generator 在与 pipeline 一致的设备上
+                generator_device = device if device else "cpu"
+                if generator_device == "cuda" and not torch.cuda.is_available():
+                    generator_device = "cpu"
+                generator = torch.Generator(device=generator_device)
+                generator.manual_seed(seed)
+                infer_kwargs["generator"] = generator
+            except Exception as seed_setup_exc:
+                if synthetic_pipeline:
+                    infer_kwargs["seed"] = seed
+                    inference_runtime_meta["seed_setup_warning"] = str(seed_setup_exc)
+                else:
+                    raise
 
         def _capture_latents_callback(
             _pipe: Any,

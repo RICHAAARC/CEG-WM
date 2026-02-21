@@ -201,8 +201,26 @@ class TestDetectOrchestratorWithContentDetector:
         mock_impl_set.fusion_rule = mock_fusion_rule
         mock_impl_set.subspace_planner = mock_subspace_planner
         planner_input_digest = "planner_input_digest_ok"
+        planner_impl_identity = {
+            "impl_id": "subspace_planner_v1",
+            "impl_version": "v1",
+            "impl_digest": "digest"
+        }
         mock_subspace_planner.plan.return_value = SimpleNamespace(
-            plan={"planner_input_digest": planner_input_digest}
+            plan={
+                "planner_input_digest": planner_input_digest,
+                "planner_impl_identity": planner_impl_identity
+            },
+            plan_digest="test_plan_digest",
+            basis_digest="test_basis_digest",
+            as_dict=lambda: {
+                "plan": {
+                    "planner_input_digest": planner_input_digest,
+                    "planner_impl_identity": planner_impl_identity
+                },
+                "plan_digest": "test_plan_digest",
+                "basis_digest": "test_basis_digest"
+            }
         )
         
         cfg = {
@@ -212,6 +230,9 @@ class TestDetectOrchestratorWithContentDetector:
         
         # 调用 detect 编排器。
         input_record = {
+            "plan_digest": "test_plan_digest",
+            "basis_digest": "test_basis_digest",
+            "subspace_planner_impl_identity": planner_impl_identity,
             "content_evidence_payload": {
                 "trajectory_evidence": {
                     "status": "ok",
@@ -297,8 +318,26 @@ class TestDetectOrchestratorWithContentDetector:
         mock_impl_set.fusion_rule = mock_fusion_rule
         mock_impl_set.subspace_planner = mock_subspace_planner
         planner_input_digest = "planner_input_digest_ok"
+        planner_impl_identity = {
+            "impl_id": "subspace_planner_v1",
+            "impl_version": "v1",
+            "impl_digest": "digest"
+        }
         mock_subspace_planner.plan.return_value = SimpleNamespace(
-            plan={"planner_input_digest": planner_input_digest}
+            plan={
+                "planner_input_digest": planner_input_digest,
+                "planner_impl_identity": planner_impl_identity
+            },
+            plan_digest="test_plan_digest",
+            basis_digest="test_basis_digest",
+            as_dict=lambda: {
+                "plan": {
+                    "planner_input_digest": planner_input_digest,
+                    "planner_impl_identity": planner_impl_identity
+                },
+                "plan_digest": "test_plan_digest",
+                "basis_digest": "test_basis_digest"
+            }
         )
         
         cfg = {
@@ -307,6 +346,9 @@ class TestDetectOrchestratorWithContentDetector:
         }
         
         input_record = {
+            "plan_digest": "test_plan_digest",
+            "basis_digest": "test_basis_digest",
+            "subspace_planner_impl_identity": planner_impl_identity,
             "content_evidence_payload": {
                 "trajectory_evidence": {
                     "status": "ok",

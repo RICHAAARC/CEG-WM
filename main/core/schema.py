@@ -552,6 +552,39 @@ def validate_run_closure(payload: Dict[str, Any]) -> None:
             # pipeline_status 不在允许列表，必须 fail-fast。
             raise ValueError("pipeline_status must be one of {'built','failed','unbuilt'}")
 
+    pipeline_build_status = payload.get("pipeline_build_status")
+    if pipeline_build_status is not None:
+        if not isinstance(pipeline_build_status, str) or not pipeline_build_status:
+            # pipeline_build_status 类型不符合预期，必须 fail-fast。
+            raise TypeError("pipeline_build_status must be non-empty str or None")
+        if pipeline_build_status not in {"ok", "failed", "<absent>"}:
+            # pipeline_build_status 不在允许列表，必须 fail-fast。
+            raise ValueError("pipeline_build_status must be one of {'ok','failed','<absent>'}")
+
+    pipeline_build_failure_reason = payload.get("pipeline_build_failure_reason")
+    if pipeline_build_failure_reason is not None:
+        if not isinstance(pipeline_build_failure_reason, str) or not pipeline_build_failure_reason:
+            # pipeline_build_failure_reason 类型不符合预期，必须 fail-fast。
+            raise TypeError("pipeline_build_failure_reason must be non-empty str or None")
+        allowed_failure_reasons = {
+            "missing_model_weights",
+            "unsupported_device",
+            "unsupported_precision",
+            "unsupported_resolution",
+            "dependency_version_mismatch",
+            "unknown_error",
+            "<absent>",
+        }
+        if pipeline_build_failure_reason not in allowed_failure_reasons:
+            # pipeline_build_failure_reason 非受控枚举成员，必须 fail-fast。
+            raise ValueError("pipeline_build_failure_reason must be in frozen allowlist")
+
+    pipeline_build_failure_summary = payload.get("pipeline_build_failure_summary")
+    if pipeline_build_failure_summary is not None:
+        if not isinstance(pipeline_build_failure_summary, str) or not pipeline_build_failure_summary:
+            # pipeline_build_failure_summary 类型不符合预期，必须 fail-fast。
+            raise TypeError("pipeline_build_failure_summary must be non-empty str or None")
+
     pipeline_error = payload.get("pipeline_error")
     if pipeline_error is not None:
         if not isinstance(pipeline_error, str) or not pipeline_error:

@@ -9,7 +9,11 @@ SD3 pipeline 工厂
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Dict, Tuple
+
+import numpy as np
+from PIL import Image
 
 from main.registries import pipeline_registry
 from main.diffusion.sd3 import diffusers_loader
@@ -24,6 +28,236 @@ from main.core import env_fingerprint
 PIPELINE_STATUS_BUILT = "built"
 PIPELINE_STATUS_FAILED = "failed"
 PIPELINE_STATUS_UNBUILT = "unbuilt"
+
+PIPELINE_BUILD_STATUS_OK = "ok"
+PIPELINE_BUILD_STATUS_FAILED = "failed"
+
+PIPELINE_BUILD_FAILURE_REASONS = {
+    "missing_model_weights",
+    "unsupported_device",
+    "unsupported_precision",
+    "unsupported_resolution",
+    "dependency_version_mismatch",
+    "unknown_error",
+}
+
+
+class _SyntheticConfig:
+    def __init__(self, **kwargs: Any) -> None:
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+
+class _SyntheticModule:
+    def __init__(self, config: _SyntheticConfig) -> None:
+        self.config = config
+
+
+class _SyntheticSD3Pipeline:
+    """
+    功能：为 shell 模式提供可执行的合成 pipeline。 
+
+    Provide executable synthetic pipeline for shell mode to keep runtime evidence flow available.
+    """
+
+    def __init__(self, cfg: Dict[str, Any]) -> None:
+        model_cfg = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
+        inference_steps = cfg.get("inference_num_steps")
+        if not isinstance(inference_steps, int) or inference_steps <= 0:
+            inference_steps = 28
+
+        self.is_synthetic_pipeline = True
+        self.device = "cpu"
+        self.transformer = _SyntheticModule(
+            _SyntheticConfig(
+                num_blocks=24,
+                attention_head_dim=64,
+                num_attention_heads=24,
+                in_channels=16,
+                out_channels=16,
+                sample_size=128,
+                patch_size=2,
+            )
+        )
+        self.scheduler = _SyntheticModule(
+            _SyntheticConfig(
+                num_train_timesteps=max(inference_steps, 1),
+                beta_schedule="scaled_linear",
+                prediction_type="epsilon",
+            )
+        )
+        self.vae = _SyntheticModule(
+            _SyntheticConfig(
+                latent_channels=16,
+                in_channels=3,
+                out_channels=3,
+            )
+        )
+        self.text_encoder = _SyntheticModule(_SyntheticConfig(name="synthetic_text_encoder"))
+        self._default_height = int(model_cfg.get("height", 512)) if isinstance(model_cfg, dict) else 512
+        self._default_width = int(model_cfg.get("width", 512)) if isinstance(model_cfg, dict) else 512
+
+    def to(self, device: str) -> "_SyntheticSD3Pipeline":
+        if isinstance(device, str) and device:
+            self.device = device
+        return self
+
+    def __call__(
+        self,
+        prompt: str,
+        num_inference_steps: int = 28,
+        guidance_scale: float = 7.0,
+        height: int = 512,
+        width: int = 512,
+        generator: Any = None,
+        callback_on_step_end: Any = None,
+        callback_on_step_end_tensor_inputs: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        _ = prompt
+        _ = guidance_scale
+        _ = callback_on_step_end_tensor_inputs
+        lat_height = max(1, int(height) // 8)
+        lat_width = max(1, int(width) // 8)
+
+        seed_value = kwargs.get("seed")
+        if not isinstance(seed_value, int):
+            seed_value = 0
+            if generator is not None:
+                initial_seed = getattr(generator, "initial_seed", None)
+                if callable(initial_seed):
+                    try:
+                        generated_seed = initial_seed()
+                        if isinstance(generated_seed, int):
+                            seed_value = generated_seed
+                    except Exception:
+                        seed_value = 0
+
+        final_latents = None
+        total_steps = max(int(num_inference_steps), 1)
+        for step_index in range(total_steps):
+            rng = np.random.default_rng(seed_value + step_index)
+            latents = rng.normal(loc=0.0, scale=1.0, size=(1, 4, lat_height, lat_width)).astype(np.float32)
+            final_latents = latents
+            if callback_on_step_end is not None and callable(callback_on_step_end):
+                callback_kwargs = {"latents": latents}
+                callback_return = callback_on_step_end(self, step_index, total_steps - step_index - 1, callback_kwargs)
+                if isinstance(callback_return, dict):
+                    maybe_latents = callback_return.get("latents")
+                    if maybe_latents is not None:
+                        final_latents = maybe_latents
+
+        if final_latents is None:
+            final_latents = np.zeros((1, 4, lat_height, lat_width), dtype=np.float32)
+
+        mean_value = float(np.mean(final_latents))
+        pixel_value = int(max(0, min(255, round((mean_value + 3.0) / 6.0 * 255.0))))
+        image_array = np.full((max(int(height), 1), max(int(width), 1), 3), pixel_value, dtype=np.uint8)
+        image = Image.fromarray(image_array)
+        return _SyntheticConfig(images=[image])
+
+
+def preflight_pipeline_build(cfg: Dict[str, Any]) -> Tuple[bool, str | None, str | None]:
+    """
+    功能：预探测 pipeline 构建可用性并返回受控失败原因。
+
+    Probe pipeline buildability and return an enumerated failure reason.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Tuple of (buildable, failure_reason, failure_summary).
+
+    Raises:
+        TypeError: If cfg is invalid.
+    """
+    if not isinstance(cfg, dict):
+        # cfg 类型不合法，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+
+    try:
+        pipeline_impl_id, impl_error = _resolve_pipeline_impl_id(cfg)
+        if impl_error is not None:
+            return False, "unknown_error", _sanitize_failure_summary(impl_error)
+
+        build_enabled, build_error = _resolve_pipeline_build_enabled(cfg)
+        if build_error is not None:
+            return False, "unknown_error", _sanitize_failure_summary(build_error)
+        if not build_enabled:
+            return True, None, None
+
+        model_cfg = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
+        height = model_cfg.get("height", 512)
+        width = model_cfg.get("width", 512)
+        if not isinstance(height, int) or not isinstance(width, int) or height <= 0 or width <= 0:
+            return False, "unsupported_resolution", "non_positive_image_resolution"
+
+        dtype_value = model_cfg.get("dtype", "float32")
+        if isinstance(dtype_value, str):
+            normalized_dtype = dtype_value.lower()
+            if normalized_dtype not in {"float32", "float16", "bfloat16", "fp32", "fp16", "bf16"}:
+                return False, "unsupported_precision", "unsupported_model_dtype"
+
+        device_value = cfg.get("device", "cpu")
+        if isinstance(device_value, str):
+            normalized_device = device_value.lower()
+            if normalized_device not in {"cpu", "cuda", "mps"}:
+                return False, "unsupported_device", "unsupported_runtime_device"
+            if normalized_device == "cuda":
+                try:
+                    import torch
+
+                    if not torch.cuda.is_available():
+                        return False, "unsupported_device", "cuda_requested_but_unavailable"
+                except Exception:
+                    return False, "dependency_version_mismatch", "torch_import_or_cuda_probe_failed"
+        else:
+            return False, "unsupported_device", "device_must_be_non_empty_str"
+
+        if pipeline_impl_id == pipeline_registry.SD3_DIFFUSERS_REAL_ID:
+            model_id = cfg.get("model_id")
+            model_source = cfg.get("model_source")
+            hf_revision = cfg.get("hf_revision")
+            if not isinstance(model_id, str) or not model_id:
+                return False, "missing_model_weights", "model_id_missing"
+            if not isinstance(model_source, str) or not model_source:
+                return False, "missing_model_weights", "model_source_missing"
+            if not isinstance(hf_revision, str) or not hf_revision:
+                return False, "missing_model_weights", "hf_revision_missing"
+
+            available, import_meta = diffusers_loader.try_import_diffusers()
+            if not available:
+                import_error = import_meta.get("import_error")
+                return False, "dependency_version_mismatch", _sanitize_failure_summary(import_error)
+
+        return True, None, None
+    except Exception as exc:
+        # preflight 探测异常，收敛到 unknown_error。
+        return False, "unknown_error", _sanitize_failure_summary(f"{type(exc).__name__}: {exc}")
+
+
+def _sanitize_failure_summary(summary: Any) -> str | None:
+    """
+    功能：脱敏 preflight 失败摘要，避免泄露绝对路径与用户信息。
+
+    Sanitize failure summary by stripping sensitive path-like fragments.
+
+    Args:
+        summary: Raw summary text or object.
+
+    Returns:
+        Sanitized short summary or None.
+    """
+    if summary is None:
+        return None
+    text = str(summary).strip()
+    if not text:
+        return None
+    # 统一替换潜在的绝对路径片段。
+    text = re.sub(r"[A-Za-z]:\\[^\s'\"]+", "<redacted_path>", text)
+    text = re.sub(r"/(?:home|Users|var|tmp)/[^\s'\"]+", "<redacted_path>", text)
+    return text[:160]
 
 
 def build_pipeline_shell(cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -54,6 +288,9 @@ def build_pipeline_shell(cfg: Dict[str, Any]) -> Dict[str, Any]:
     pipeline_meta: Dict[str, Any] = {}
 
     pipeline_runtime_meta: Dict[str, Any] = {}
+    preflight_buildable = True
+    preflight_failure_reason = None
+    preflight_failure_summary = None
     env_fingerprint_canon_sha256 = "<absent>"
     model_provenance_canon_sha256 = "<absent>"
     diffusers_version = "<absent>"
@@ -70,6 +307,7 @@ def build_pipeline_shell(cfg: Dict[str, Any]) -> Dict[str, Any]:
     elif not build_enabled:
         pipeline_status = PIPELINE_STATUS_UNBUILT
     else:
+        preflight_buildable, preflight_failure_reason, preflight_failure_summary = preflight_pipeline_build(cfg)
         if pipeline_impl_id == pipeline_registry.SD3_DIFFUSERS_REAL_ID:
             try:
                 available, import_meta = diffusers_loader.try_import_diffusers()
@@ -136,6 +374,12 @@ def build_pipeline_shell(cfg: Dict[str, Any]) -> Dict[str, Any]:
                 factory = pipeline_registry.resolve_pipeline_shell(pipeline_impl_id)
                 shell_obj = factory(cfg)
                 pipeline_meta = _extract_pipeline_meta(shell_obj)
+                if pipeline_impl_id == pipeline_registry.SD3_DIFFUSERS_SHELL_ID:
+                    pipeline_obj = _SyntheticSD3Pipeline(cfg)
+                    pipeline_runtime_meta = {
+                        "synthetic_pipeline": True,
+                        "synthetic_reason": "shell_mode_without_real_model",
+                    }
                 pipeline_status = PIPELINE_STATUS_BUILT
             except Exception as exc:
                 # pipeline 构造失败，必须显式记录错误。
@@ -170,6 +414,9 @@ def build_pipeline_shell(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "pipeline_provenance_canon_sha256": provenance_digest,
         "pipeline_status": pipeline_status,
         "pipeline_error": _normalize_error(pipeline_error),
+        "pipeline_build_status": PIPELINE_BUILD_STATUS_OK if preflight_buildable else PIPELINE_BUILD_STATUS_FAILED,
+        "pipeline_build_failure_reason": preflight_failure_reason,
+        "pipeline_build_failure_summary": preflight_failure_summary,
         "pipeline_runtime_meta": pipeline_runtime_meta,
         "pipeline_obj": pipeline_obj,
         "env_fingerprint_canon_sha256": env_fingerprint_canon_sha256,

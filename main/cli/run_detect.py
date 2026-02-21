@@ -49,6 +49,7 @@ from main.core.errors import RunFailureReason
 from main.diffusion.sd3 import pipeline_factory
 from main.diffusion.sd3 import infer_runtime
 from main.diffusion.sd3 import infer_trace
+from main.diffusion.sd3 import trajectory_tap
 from main.cli.run_common import (
     bind_impl_identity_fields,
     set_failure_status,
@@ -112,6 +113,9 @@ def run_detect(
         "pipeline_provenance_canon_sha256": "<absent>",
         "pipeline_status": "unbuilt",
         "pipeline_error": "<absent>",
+        "pipeline_build_status": "<absent>",
+        "pipeline_build_failure_reason": "<absent>",
+        "pipeline_build_failure_summary": "<absent>",
         "pipeline_runtime_meta": None,
         "env_fingerprint_canon_sha256": "<absent>",
         "diffusers_version": "<absent>",
@@ -200,6 +204,9 @@ def run_detect(
         run_meta["pipeline_provenance_canon_sha256"] = pipeline_result.get("pipeline_provenance_canon_sha256")
         run_meta["pipeline_status"] = pipeline_result.get("pipeline_status")
         run_meta["pipeline_error"] = pipeline_result.get("pipeline_error")
+        run_meta["pipeline_build_status"] = pipeline_result.get("pipeline_build_status", "<absent>")
+        run_meta["pipeline_build_failure_reason"] = pipeline_result.get("pipeline_build_failure_reason", "<absent>")
+        run_meta["pipeline_build_failure_summary"] = pipeline_result.get("pipeline_build_failure_summary", "<absent>")
         run_meta["pipeline_runtime_meta"] = pipeline_result.get("pipeline_runtime_meta")
         run_meta["env_fingerprint_canon_sha256"] = pipeline_result.get("env_fingerprint_canon_sha256")
         run_meta["diffusers_version"] = pipeline_result.get("diffusers_version")
@@ -249,22 +256,58 @@ def run_detect(
         pipeline_obj = pipeline_result.get("pipeline_obj")
         device = cfg.get("device", "cpu")
         seed = seed_value
-        
-        inference_result = infer_runtime.run_sd3_inference(
+
+        dependency_guard = assert_detect_runtime_dependencies(
             cfg,
-            pipeline_obj,
-            device,
-            seed,
-            injection_context=injection_context,
-            injection_modifier=injection_modifier,
-            capture_final_latents=True  # 捕获最后的 latents 用于 detect 侧评分
+            {
+                "test_mode": _resolve_detect_test_mode(cfg)
+            },
+            pipeline_obj
         )
-        inference_status = inference_result.get("inference_status")
-        inference_error = inference_result.get("inference_error")
-        inference_runtime_meta = inference_result.get("inference_runtime_meta")
-        trajectory_evidence = inference_result.get("trajectory_evidence")
-        injection_evidence = inference_result.get("injection_evidence")
-        final_latents = inference_result.get("final_latents")
+
+        if pipeline_obj is None:
+            inference_status = infer_runtime.INFERENCE_STATUS_FAILED
+            inference_error = "detect_missing_pipeline_dependency"
+            inference_runtime_meta = {
+                "dependency_guard": {
+                    "allow_missing_pipeline_for_detect": True,
+                    "test_mode": bool(dependency_guard.get("test_mode", False)),
+                    "allow_flag": bool(dependency_guard.get("allow_flag", False))
+                }
+            }
+            trajectory_evidence = trajectory_tap.build_trajectory_evidence(
+                cfg,
+                inference_status,
+                inference_runtime_meta,
+                seed=seed,
+                device=device,
+            )
+            injection_evidence = {
+                "status": "absent",
+                "injection_absent_reason": "inference_failed",
+                "injection_failure_reason": None,
+                "injection_trace_digest": None,
+                "injection_params_digest": None,
+                "injection_metrics": None,
+                "subspace_binding_digest": None,
+            }
+            final_latents = None
+        else:
+            inference_result = infer_runtime.run_sd3_inference(
+                cfg,
+                pipeline_obj,
+                device,
+                seed,
+                injection_context=injection_context,
+                injection_modifier=injection_modifier,
+                capture_final_latents=True  # 捕获最后的 latents 用于 detect 侧评分
+            )
+            inference_status = inference_result.get("inference_status")
+            inference_error = inference_result.get("inference_error")
+            inference_runtime_meta = inference_result.get("inference_runtime_meta")
+            trajectory_evidence = inference_result.get("trajectory_evidence")
+            injection_evidence = inference_result.get("injection_evidence")
+            final_latents = inference_result.get("final_latents")
         
         # 将最后的 latents 存储到 cfg 的临时字段，供 detect orchestrator 使用。
         # 这些 latents 不会被写入 records，只在内存中处理。
@@ -538,6 +581,107 @@ def main():
         import traceback
         traceback.print_exc()
         sys.exit(1)
+
+
+def _resolve_detect_test_mode(cfg: Dict[str, Any]) -> bool:
+    """
+    功能：解析 detect test_mode 开关。
+
+    Resolve detect test mode switch from config.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        True when detect test mode is enabled.
+    """
+    if not isinstance(cfg, dict):
+        return False
+    direct = cfg.get("test_mode")
+    if isinstance(direct, bool):
+        return direct
+    detect_cfg = cfg.get("detect")
+    if isinstance(detect_cfg, dict):
+        runtime_cfg = detect_cfg.get("runtime")
+        if isinstance(runtime_cfg, dict):
+            runtime_test_mode = runtime_cfg.get("test_mode")
+            if isinstance(runtime_test_mode, bool):
+                return runtime_test_mode
+        detect_test_mode = detect_cfg.get("test_mode")
+        if isinstance(detect_test_mode, bool):
+            return detect_test_mode
+    return False
+
+
+def _resolve_allow_missing_pipeline_for_detect(cfg: Dict[str, Any]) -> bool:
+    """
+    功能：解析 detect 缺失 pipeline 显式放行开关。
+
+    Resolve explicit allow flag for missing detect pipeline dependency.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        True when explicit allow flag is enabled.
+    """
+    if not isinstance(cfg, dict):
+        return False
+    runtime_cfg = cfg.get("runtime")
+    if isinstance(runtime_cfg, dict):
+        allow_flag = runtime_cfg.get("allow_missing_pipeline_for_detect")
+        if isinstance(allow_flag, bool):
+            return allow_flag
+    detect_cfg = cfg.get("detect")
+    if isinstance(detect_cfg, dict):
+        runtime_detect_cfg = detect_cfg.get("runtime")
+        if isinstance(runtime_detect_cfg, dict):
+            allow_flag = runtime_detect_cfg.get("allow_missing_pipeline_for_detect")
+            if isinstance(allow_flag, bool):
+                return allow_flag
+    return False
+
+
+def assert_detect_runtime_dependencies(
+    cfg: Dict[str, Any],
+    inputs: Dict[str, Any],
+    pipeline_obj: Any
+) -> Dict[str, Any]:
+    """
+    功能：detect 运行依赖前置校验。
+
+    Enforce strict detect runtime dependency policy.
+    Missing pipeline is allowed only in test_mode or explicit allow flag.
+
+    Args:
+        cfg: Configuration mapping.
+        inputs: Runtime inputs mapping.
+        pipeline_obj: Built pipeline object.
+
+    Returns:
+        Guard decision mapping.
+
+    Raises:
+        RuntimeError: If pipeline dependency is missing in production mode.
+        TypeError: If inputs are invalid.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(inputs, dict):
+        raise TypeError("inputs must be dict")
+
+    test_mode = bool(inputs.get("test_mode", False)) or _resolve_detect_test_mode(cfg)
+    allow_flag = _resolve_allow_missing_pipeline_for_detect(cfg)
+
+    if pipeline_obj is None and not test_mode and not allow_flag:
+        # production 默认 fail-fast，防止 fallback 污染统计口径。
+        raise RuntimeError("detect_missing_pipeline_dependency")
+
+    return {
+        "test_mode": bool(test_mode),
+        "allow_flag": bool(allow_flag),
+        "allow_missing_pipeline_for_detect": bool(test_mode or allow_flag),
+    }
 
 
 if __name__ == "__main__":
