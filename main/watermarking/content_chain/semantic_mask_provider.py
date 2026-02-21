@@ -11,21 +11,24 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Literal
+from pathlib import Path
+from typing import Any, Dict, Optional
 
+import numpy as np
 from main.core import digests
-from main.core.errors import RecordsWritePolicyError
 
 from .interfaces import ContentEvidence
 
 
 SEMANTIC_MASK_PROVIDER_ID = "semantic_mask_provider_v1"
 SEMANTIC_MASK_PROVIDER_VERSION = "v1"
-SEMANTIC_MASK_TRACE_VERSION = "v1"
+SEMANTIC_MASK_TRACE_VERSION = "v2"
+
+MASK_ABSENT_REASON_DISABLED = "mask_disabled_by_config"
+ROUTING_ABSENT_REASON_MASK_DISABLED = "routing_mask_disabled"
 
 # 允许的失败原因枚举。
 ALLOWED_MASK_FAILURE_REASONS = {
-    "mask_extraction_disabled",           # enable_mask 配置为 false，掩码提取未启用
     "mask_extraction_no_input",           # 输入缺失，无法执行掩码提取
     "mask_extraction_invalid_shape",      # 输入形状不符，掩码提取失败
     "mask_resolution_binding_mismatch",   # 分辨率绑定不一致，掩码损坏或配置错误
@@ -159,12 +162,18 @@ class SemanticMaskProvider:
             "trace_digest": trace_digest
         }
 
+        mask_params = _resolve_mask_params(cfg)
+
         # 4. 禁用路径：返回 absent 语义，无失败原因。
         if not enable_mask:
             return ContentEvidence(
                 status="absent",
                 score=None,
-                audit=audit,
+                audit={
+                    **audit,
+                    "mask_absent_reason": MASK_ABSENT_REASON_DISABLED,
+                    "routing_absent_reason": ROUTING_ABSENT_REASON_MASK_DISABLED,
+                },
                 mask_digest=None,
                 mask_stats=None,
                 plan_digest=None,
@@ -173,7 +182,10 @@ class SemanticMaskProvider:
                 hf_trace_digest=None,
                 lf_score=None,
                 hf_score=None,
-                score_parts=None,
+                score_parts={
+                    "routing_digest": "<absent>",
+                    "routing_absent_reason": ROUTING_ABSENT_REASON_MASK_DISABLED,
+                },
                 content_failure_reason=None  # absent 状态下无失败原因
             )
 
@@ -198,7 +210,11 @@ class SemanticMaskProvider:
             )
 
         # （2）提取输入语义（可选）。
-        image_data = inputs.get("image") or inputs.get("latent")
+        image_data = inputs.get("image")
+        if image_data is None:
+            image_data = inputs.get("latent")
+        if image_data is None:
+            image_data = inputs.get("image_path")
         image_shape = inputs.get("image_shape")
 
         if image_data is None:
@@ -219,16 +235,29 @@ class SemanticMaskProvider:
                 content_failure_reason="mask_extraction_no_input"
             )
 
-        # （3）掩码计算（简化版：演示版本不实现真实 ML 模型、直接生成模型掩码）。
+        # （3）掩码计算（确定性轻量算法：梯度幅值 + 开闭操作）。
         try:
-            mask_payload = _compute_semantic_mask(image_data, image_shape, cfg, cfg_digest=cfg_digest)
-            mask_digest = digests.canonical_sha256(mask_payload)
-            mask_stats = _extract_mask_statistics(mask_payload, image_shape)
-            resolution_binding = _bind_resolution(image_shape, cfg)
+            mask_array, mask_stats, mask_binding = build_texture_mask_v1(
+                image=image_data,
+                image_shape=image_shape,
+                cfg=cfg,
+                params=mask_params
+            )
+            mask_summary = summarize_mask_for_digest(
+                mask_array=mask_array,
+                mask_stats=mask_stats,
+                binding=mask_binding,
+                cfg_digest=cfg_digest,
+                mask_params=mask_params,
+            )
+            mask_digest = compute_mask_digest(mask_summary)
+            routing_summary = build_routing_summary(mask_stats, mask_params)
+            routing_digest = compute_routing_digest(routing_summary)
+            mask_params_digest = digests.canonical_sha256(mask_params)
         except (ValueError, TypeError, KeyError) as e:
             # 掩码计算异常，单一主因上报：根据异常类型推导主因。
             if "shape" in str(e).lower():
-                failure_reason = "mask_invalid_shape"
+                failure_reason = "mask_extraction_invalid_shape"
             elif "digest" in str(e).lower():
                 failure_reason = "mask_digest_computation_failed"
             else:
@@ -256,8 +285,16 @@ class SemanticMaskProvider:
 
         # （4）如启用掩码且计算成功，绑定至掩码统计。
         mask_stats_with_binding = dict(mask_stats or {})
-        if resolution_binding:
-            mask_stats_with_binding["resolution_binding"] = resolution_binding
+        mask_stats_with_binding["mask_resolution_binding"] = mask_binding
+        mask_stats_with_binding["resolution_binding"] = mask_binding
+        mask_stats_with_binding["mask_source_impl_identity"] = {
+            "impl_id": self.impl_id,
+            "impl_version": self.impl_version,
+            "impl_digest": self.impl_digest,
+        }
+        mask_stats_with_binding["mask_params_digest"] = mask_params_digest
+        mask_stats_with_binding["routing_summary"] = routing_summary
+        mask_stats_with_binding["routing_digest"] = routing_digest
 
         # 5. 成功路径：返回 ok 状态（掩码成功提取的结构证据）。
         # 注意：掩码是结构证据，不产生检测分数 (score=None)。
@@ -275,7 +312,10 @@ class SemanticMaskProvider:
             hf_trace_digest=None,
             lf_score=None,
             hf_score=None,
-            score_parts=None,
+            score_parts={
+                "routing_digest": routing_digest,
+                "routing_summary": routing_summary,
+            },
             content_failure_reason=None  # ok 状态下无失败原因
         )
 
@@ -353,18 +393,20 @@ def _compute_semantic_mask(
     cfg_digest: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    功能：计算语义掩码有效负载（演示版本）。
+    功能：计算语义掩码有效负载（确定性 texture-based v1）。
 
-    Compute semantic mask payload (demonstration version without ML model).
-    In production, this would invoke segmentation model; for S-02 demo,
-    generates deterministic mask based on shape and configuration.
+    Compute semantic mask payload with deterministic texture-based v1 algorithm.
+    The payload is reproducible and digest-friendly by construction:
+    mask summary fields are canonicalized before hashing, and mask parameters
+    are bound through mask_params_digest.
 
     Args:
         image_data: Image tensor or latent code.
         image_shape: Optional expected shape (H, W, C).
         cfg: Configuration dict.
         cfg_digest: Optional canonical SHA256 digest of cfg (computed from include_paths).
-                   When provided, this authoritative digest is used for cfg_digest_binding.
+               When provided, this authoritative digest is used for cfg_digest_binding
+               to avoid non-scope cfg fields affecting reproducibility.
 
     Returns:
         JSON-like mask payload dict.
@@ -373,51 +415,20 @@ def _compute_semantic_mask(
         ValueError: If shape validation fails.
         TypeError: If image_data type is unsupported.
     """
-    # 演示版本：直接生成模拟掩码负载。
-    # 生成结构：{mask_pixels, mask_bounds, mask_encoding_version}
-    
-    # 获取或推断形状。
-    if image_shape is None:
-        # 默认形状：512x512（标准 Stable Diffusion 3 分辨率）。
-        inferred_shape = (512, 512, 3)
-    elif isinstance(image_shape, (list, tuple)) and len(image_shape) == 3:
-        inferred_shape = tuple(image_shape)
-    else:
-        raise ValueError(
-            f"image_shape must be 3-tuple (H, W, C), got {image_shape}"
-        )
-
-    height, width, channels = inferred_shape
-
-    if height <= 0 or width <= 0:
-        # 分辨率不合法，必须 fail 上报。
-        raise ValueError(
-            f"image_shape must have positive dimensions, got ({height}, {width}, {channels})"
-        )
-
-    # 掩码负载：包含分辨率、编码版本、掩码数据段落。
-    mask_payload = {
-        "mask_encoding_version": "v1",
-        "mask_resolution": {
-            "height": height,
-            "width": width,
-            "channels": channels
-        },
-        "mask_data": {
-            "total_pixels": height * width,
-            "masked_pixels_ratio": 0.5,  # 演示版本固定比例
-            "mask_type": "semantic_segmentation"
-        }
-    }
-    
-    # 绑定配置摘要：若 cfg_digest 由调用者传入，使用它；否则为 absent。
-    if cfg_digest is not None:
-        mask_payload["cfg_digest_binding"] = cfg_digest
-    else:
-        # 后向兼容：未来 cfg_digest 必须由调用者提供；当前允许 absent（警告级别）。
-        mask_payload["cfg_digest_binding"] = "absent"
-
-    return mask_payload
+    mask_params = _resolve_mask_params(cfg)
+    mask_array, mask_stats, mask_binding = build_texture_mask_v1(
+        image=image_data,
+        image_shape=image_shape,
+        cfg=cfg,
+        params=mask_params,
+    )
+    return summarize_mask_for_digest(
+        mask_array=mask_array,
+        mask_stats=mask_stats,
+        binding=mask_binding,
+        cfg_digest=cfg_digest,
+        mask_params=mask_params,
+    )
 
 
 def _extract_mask_statistics(
@@ -444,21 +455,14 @@ def _extract_mask_statistics(
     if not isinstance(mask_payload, dict):
         raise ValueError(f"mask_payload must be dict, got {type(mask_payload).__name__}")
 
-    # 从负载提取统计。
     mask_data = mask_payload.get("mask_data", {})
-    mask_resolution = mask_payload.get("mask_resolution", {})
-
-    stats = {
-        "mask_area_ratio": mask_data.get("masked_pixels_ratio", 0.0),
-        "connected_components": 1,  # 演示版本：单连通域
-        "boundary_complexity": 0.5,  # 演示版本：中等复杂度
-        "resolution": {
-            "height": mask_resolution.get("height"),
-            "width": mask_resolution.get("width")
-        }
+    if not isinstance(mask_data, dict):
+        raise ValueError("mask_payload.mask_data must be dict")
+    return {
+        "area_ratio": mask_data.get("area_ratio", 0.0),
+        "connected_components": mask_data.get("connected_components", 0),
+        "mean_energy": mask_data.get("mean_energy", 0.0),
     }
-
-    return stats
 
 
 def _bind_resolution(
@@ -513,3 +517,390 @@ def _bind_resolution(
         "aspect_ratio": round(aspect_ratio, 4),
         "binding_version": "v1"
     }
+
+
+def _resolve_mask_params(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：解析掩码算法参数并生成稳定参数集。 
+
+    Resolve mask generation parameters from configuration.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Canonical mask parameter mapping.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+
+    mask_cfg = cfg.get("mask") if isinstance(cfg.get("mask"), dict) else {}
+    threshold_quantile = mask_cfg.get("threshold_quantile", 0.8)
+    if not isinstance(threshold_quantile, (int, float)):
+        threshold_quantile = 0.8
+    threshold_quantile = max(0.5, min(float(threshold_quantile), 0.98))
+
+    open_iters = mask_cfg.get("open_iters", 1)
+    close_iters = mask_cfg.get("close_iters", 1)
+    if not isinstance(open_iters, int):
+        open_iters = 1
+    if not isinstance(close_iters, int):
+        close_iters = 1
+    open_iters = max(0, min(open_iters, 3))
+    close_iters = max(0, min(close_iters, 3))
+
+    return {
+        "mask_algo_version": "texture_gradient_v1",
+        "threshold_quantile": threshold_quantile,
+        "open_iters": open_iters,
+        "close_iters": close_iters,
+    }
+
+
+def build_texture_mask_v1(
+    image: Any,
+    image_shape: Optional[Any],
+    cfg: Dict[str, Any],
+    params: Dict[str, Any]
+) -> tuple[np.ndarray, Dict[str, Any], Dict[str, Any]]:
+    """
+    功能：基于梯度纹理生成确定性掩码。 
+
+    Build deterministic texture mask via gradient magnitude thresholding.
+
+    Args:
+        image: Input image payload or path.
+        image_shape: Optional shape hint.
+        cfg: Configuration mapping.
+        params: Mask parameter mapping.
+
+    Returns:
+        Tuple of (mask_array, mask_stats, mask_binding).
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(params, dict):
+        raise TypeError("params must be dict")
+
+    image_array = _materialize_image_array(image, image_shape)
+    gray = _to_gray(image_array)
+    gradient_energy = _compute_gradient_energy(gray)
+    threshold = float(np.quantile(gradient_energy, float(params["threshold_quantile"])))
+    mask = gradient_energy >= threshold
+
+    for _ in range(int(params["open_iters"])):
+        mask = _binary_dilate(_binary_erode(mask))
+    for _ in range(int(params["close_iters"])):
+        mask = _binary_erode(_binary_dilate(mask))
+
+    mask = mask.astype(bool)
+    area_ratio = float(np.mean(mask)) if mask.size > 0 else 0.0
+    component_count = _count_connected_components(mask)
+    mean_energy = float(np.mean(gradient_energy[mask])) if np.any(mask) else 0.0
+
+    mask_stats = {
+        "area_ratio": round(area_ratio, 8),
+        "connected_components": int(component_count),
+        "mean_energy": round(mean_energy, 8),
+    }
+    binding = {
+        "space": "image_space",
+        "height": int(image_array.shape[0]),
+        "width": int(image_array.shape[1]),
+        "aspect_ratio": round(float(image_array.shape[1]) / float(image_array.shape[0]), 4) if int(image_array.shape[0]) > 0 else 1.0,
+        "channels": int(image_array.shape[2]),
+        "resize_rule": "identity",
+        "binding_version": "v1",
+    }
+    return mask, mask_stats, binding
+
+
+def summarize_mask_for_digest(
+    mask_array: np.ndarray,
+    mask_stats: Dict[str, Any],
+    binding: Dict[str, Any],
+    cfg_digest: Optional[str],
+    mask_params: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    功能：构造掩码摘要化表示用于 digest。 
+
+    Build canonical summary dictionary for mask digest computation.
+
+    Args:
+        mask_array: Boolean mask array.
+        mask_stats: Mask statistics mapping.
+        binding: Mask resolution binding mapping.
+        cfg_digest: Optional cfg digest binding.
+        mask_params: Mask algorithm parameter mapping.
+
+    Returns:
+        Canonical summary mapping.
+    """
+    if not isinstance(mask_array, np.ndarray):
+        raise TypeError("mask_array must be ndarray")
+    if not isinstance(mask_stats, dict):
+        raise TypeError("mask_stats must be dict")
+    if not isinstance(binding, dict):
+        raise TypeError("binding must be dict")
+    if not isinstance(mask_params, dict):
+        raise TypeError("mask_params must be dict")
+
+    row_sum = mask_array.sum(axis=1).astype(int).tolist() if mask_array.ndim == 2 else []
+    col_sum = mask_array.sum(axis=0).astype(int).tolist() if mask_array.ndim == 2 else []
+    row_digest = digests.canonical_sha256({"row_sum": row_sum})
+    col_digest = digests.canonical_sha256({"col_sum": col_sum})
+    return {
+        "mask_summary_version": "v2",
+        "mask_shape": [int(v) for v in mask_array.shape],
+        "mask_population": int(mask_array.sum()),
+        "row_projection_digest": row_digest,
+        "col_projection_digest": col_digest,
+        "mask_stats": mask_stats,
+        "mask_resolution_binding": binding,
+        "mask_params_digest": digests.canonical_sha256(mask_params),
+        "cfg_digest_binding": cfg_digest if isinstance(cfg_digest, str) and cfg_digest else "<absent>",
+    }
+
+
+def compute_mask_digest(mask_summary_dict: Dict[str, Any]) -> str:
+    """
+    功能：计算掩码摘要 digest。 
+
+    Compute mask digest via canonical sha256.
+
+    Args:
+        mask_summary_dict: Canonical mask summary mapping.
+
+    Returns:
+        SHA256 hex digest.
+    """
+    if not isinstance(mask_summary_dict, dict):
+        raise TypeError("mask_summary_dict must be dict")
+    return digests.canonical_sha256(mask_summary_dict)
+
+
+def build_routing_summary(mask_stats: Dict[str, Any], planner_params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：构造路由摘要。 
+
+    Build minimal audit routing summary from mask statistics.
+
+    Args:
+        mask_stats: Mask statistics mapping.
+        planner_params: Planner/mask params mapping.
+
+    Returns:
+        Routing summary mapping.
+    """
+    if not isinstance(mask_stats, dict):
+        raise TypeError("mask_stats must be dict")
+    if not isinstance(planner_params, dict):
+        raise TypeError("planner_params must be dict")
+
+    hf_ratio = float(mask_stats.get("area_ratio", 0.0))
+    hf_ratio = max(0.0, min(hf_ratio, 1.0))
+    lf_ratio = 1.0 - hf_ratio
+    return {
+        "routing_version": "v1",
+        "hf_region_ratio": round(hf_ratio, 8),
+        "lf_region_ratio": round(lf_ratio, 8),
+        "band_thresholds": {
+            "gradient_quantile": planner_params.get("threshold_quantile")
+        },
+        "mask_to_band_mapping": {
+            "mask_true": "hf",
+            "mask_false": "lf"
+        }
+    }
+
+
+def compute_routing_digest(routing_summary: Dict[str, Any]) -> str:
+    """
+    功能：计算 routing 摘要 digest。 
+
+    Compute routing digest via canonical sha256.
+
+    Args:
+        routing_summary: Routing summary mapping.
+
+    Returns:
+        SHA256 hex digest.
+    """
+    if not isinstance(routing_summary, dict):
+        raise TypeError("routing_summary must be dict")
+    return digests.canonical_sha256(routing_summary)
+
+
+def _materialize_image_array(image: Any, image_shape: Optional[Any]) -> np.ndarray:
+    """
+    功能：将输入转换为 HWC 图像数组。 
+
+    Materialize image payload into deterministic HWC float array.
+
+    Args:
+        image: Image payload or path.
+        image_shape: Optional shape hint.
+
+    Returns:
+        Numpy float array in HWC layout.
+    """
+    if isinstance(image, str) and image:
+        path = Path(image)
+        if path.exists() and path.is_file():
+            try:
+                from PIL import Image
+            except Exception as exc:
+                raise TypeError("PIL is required to read image path input") from exc
+            with Image.open(path) as img:
+                rgb = img.convert("RGB")
+                return np.asarray(rgb, dtype=np.float32)
+
+    if isinstance(image, np.ndarray):
+        arr = image.astype(np.float32)
+    else:
+        arr = np.asarray(image, dtype=np.float32)
+
+    if arr.ndim == 3 and arr.shape[2] in {1, 3, 4}:
+        if arr.shape[2] == 1:
+            return np.repeat(arr, 3, axis=2)
+        if arr.shape[2] == 4:
+            return arr[:, :, :3]
+        return arr
+
+    if isinstance(image_shape, (list, tuple)) and len(image_shape) == 3:
+        h, w, c = int(image_shape[0]), int(image_shape[1]), int(image_shape[2])
+        if h <= 0 or w <= 0 or c <= 0:
+            raise ValueError("image_shape must be positive")
+        target_size = h * w * c
+        flat = arr.flatten()
+        if flat.size == 0:
+            raise ValueError("image payload is empty")
+        repeat_count = (target_size + flat.size - 1) // flat.size
+        expanded = np.tile(flat, repeat_count)[:target_size]
+        reshaped = expanded.reshape((h, w, c)).astype(np.float32)
+        if c == 1:
+            reshaped = np.repeat(reshaped, 3, axis=2)
+        elif c > 3:
+            reshaped = reshaped[:, :, :3]
+        return reshaped
+
+    raise ValueError("unsupported image payload shape for mask extraction")
+
+
+def _to_gray(image_array: np.ndarray) -> np.ndarray:
+    """
+    功能：将 HWC 图像转为灰度。 
+
+    Convert HWC image array to grayscale.
+
+    Args:
+        image_array: Image array in HWC format.
+
+    Returns:
+        Grayscale array in range [0, 1].
+    """
+    if not isinstance(image_array, np.ndarray) or image_array.ndim != 3:
+        raise ValueError("image_array must be HWC ndarray")
+    rgb = image_array[:, :, :3]
+    gray = 0.2989 * rgb[:, :, 0] + 0.5870 * rgb[:, :, 1] + 0.1140 * rgb[:, :, 2]
+    max_value = float(np.max(gray)) if gray.size > 0 else 1.0
+    if max_value <= 0:
+        return np.zeros_like(gray, dtype=np.float32)
+    return (gray / max_value).astype(np.float32)
+
+
+def _compute_gradient_energy(gray: np.ndarray) -> np.ndarray:
+    """
+    功能：计算灰度图梯度能量。 
+
+    Compute gradient magnitude energy map.
+
+    Args:
+        gray: Grayscale image array.
+
+    Returns:
+        Gradient energy array.
+    """
+    gx = np.zeros_like(gray, dtype=np.float32)
+    gy = np.zeros_like(gray, dtype=np.float32)
+    gx[:, 1:] = np.abs(gray[:, 1:] - gray[:, :-1])
+    gy[1:, :] = np.abs(gray[1:, :] - gray[:-1, :])
+    return np.sqrt(gx * gx + gy * gy)
+
+
+def _binary_dilate(mask: np.ndarray) -> np.ndarray:
+    """
+    功能：执行 3x3 膨胀。 
+
+    Perform 3x3 binary dilation.
+
+    Args:
+        mask: Boolean mask.
+
+    Returns:
+        Dilated mask.
+    """
+    padded = np.pad(mask.astype(np.uint8), 1, mode="edge")
+    acc = np.zeros_like(mask, dtype=np.uint8)
+    for di in range(3):
+        for dj in range(3):
+            acc = np.maximum(acc, padded[di:di + mask.shape[0], dj:dj + mask.shape[1]])
+    return acc > 0
+
+
+def _binary_erode(mask: np.ndarray) -> np.ndarray:
+    """
+    功能：执行 3x3 腐蚀。 
+
+    Perform 3x3 binary erosion.
+
+    Args:
+        mask: Boolean mask.
+
+    Returns:
+        Eroded mask.
+    """
+    padded = np.pad(mask.astype(np.uint8), 1, mode="edge")
+    acc = np.ones_like(mask, dtype=np.uint8)
+    for di in range(3):
+        for dj in range(3):
+            acc = np.minimum(acc, padded[di:di + mask.shape[0], dj:dj + mask.shape[1]])
+    return acc > 0
+
+
+def _count_connected_components(mask: np.ndarray) -> int:
+    """
+    功能：计算布尔掩码连通域数量。 
+
+    Count connected components in boolean mask.
+
+    Args:
+        mask: Boolean mask array.
+
+    Returns:
+        Connected component count.
+    """
+    if mask.size == 0:
+        return 0
+    visited = np.zeros(mask.shape, dtype=bool)
+    component_count = 0
+    h, w = mask.shape
+
+    for i in range(h):
+        for j in range(w):
+            if not mask[i, j] or visited[i, j]:
+                continue
+            component_count += 1
+            stack = [(i, j)]
+            visited[i, j] = True
+            while stack:
+                x, y = stack.pop()
+                for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+                    if nx < 0 or nx >= h or ny < 0 or ny >= w:
+                        continue
+                    if visited[nx, ny] or not mask[nx, ny]:
+                        continue
+                    visited[nx, ny] = True
+                    stack.append((nx, ny))
+    return component_count

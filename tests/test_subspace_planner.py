@@ -93,6 +93,90 @@ class TestSubspacePlannerBasic:
         # S-03 改进：absent 时记录 plan_failure_reason="planner_disabled_by_policy" 作为审计标记
         assert result.plan_failure_reason == "planner_disabled_by_policy"
 
+    def test_subspace_planner_default_path_not_test_synthetic(self):
+        """默认路径应走 planner_v1_band_spec，而非 test_synthetic。"""
+        planner = SubspacePlannerImpl(
+            impl_id=SUBSPACE_PLANNER_ID,
+            impl_version=SUBSPACE_PLANNER_VERSION,
+            impl_digest=digests.canonical_sha256({
+                "impl_id": SUBSPACE_PLANNER_ID,
+                "impl_version": SUBSPACE_PLANNER_VERSION
+            })
+        )
+
+        cfg = {
+            "watermark": {
+                "subspace": {
+                    "enabled": True,
+                    "rank": 6,
+                    "sample_count": 12,
+                    "feature_dim": 32,
+                    "seed": 11
+                }
+            }
+        }
+        inputs = {
+            "trace_signature": {
+                "num_inference_steps": 20,
+                "guidance_scale": 7.0,
+                "height": 512,
+                "width": 512
+            },
+            "routing_digest": "a" * 64,
+            "mask_summary": {
+                "area_ratio": 0.3
+            }
+        }
+
+        result = planner.plan(cfg, mask_digest="mask_digest_001", inputs=inputs)
+        assert result.status == "ok"
+        assert isinstance(result.plan, dict)
+        assert result.plan.get("plan_origin") == "planner_v1_band_spec"
+        assert result.plan.get("routing_digest_ref") == "a" * 64
+        assert result.plan.get("pipeline_feature_digest") == "<absent>"
+        assert result.plan.get("denoise_trace_digest") == "<absent>"
+        assert result.plan.get("attention_anchor_ref_digest") == "<absent>"
+
+    def test_subspace_planner_synthetic_requires_test_mode_or_allow_flag(self):
+        """synthetic 仅允许在 test_mode/allow_synthetic_trajectory 下启用。"""
+        planner = SubspacePlannerImpl(
+            impl_id=SUBSPACE_PLANNER_ID,
+            impl_version=SUBSPACE_PLANNER_VERSION,
+            impl_digest=digests.canonical_sha256({
+                "impl_id": SUBSPACE_PLANNER_ID,
+                "impl_version": SUBSPACE_PLANNER_VERSION
+            })
+        )
+
+        cfg = {
+            "watermark": {
+                "subspace": {
+                    "enabled": True,
+                    "rank": 6,
+                    "sample_count": 12,
+                    "feature_dim": 32,
+                    "seed": 11
+                }
+            }
+        }
+
+        result_without_flag = planner.plan(
+            cfg,
+            mask_digest="mask_digest_001",
+            inputs={"unexpected": "only"}
+        )
+        assert result_without_flag.status == "absent"
+        assert result_without_flag.plan_failure_reason == "planner_input_absent"
+
+        result_with_test_mode = planner.plan(
+            cfg,
+            mask_digest="mask_digest_001",
+            inputs={"test_mode": True}
+        )
+        assert result_with_test_mode.status == "ok"
+        assert isinstance(result_with_test_mode.plan, dict)
+        assert result_with_test_mode.plan.get("plan_origin") == "test_synthetic"
+
 
 class TestPlanDigestBinding:
     """测试 plan_digest 与 mask_digest/cfg_digest 的绑定。"""

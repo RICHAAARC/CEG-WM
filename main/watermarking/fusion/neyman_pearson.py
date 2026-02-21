@@ -10,6 +10,7 @@ Neyman-Pearson 阈值占位实现与审计口径
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -366,3 +367,69 @@ def _lookup_threshold_value(thresholds: Dict[str, Any], fpr_key: str) -> float:
     if not isinstance(value, (int, float)):
         raise ValueError("threshold_value_used must be number")
     return float(value)
+
+
+def compute_np_threshold_from_scores(
+    scores: List[float],
+    target_fpr: float,
+    quantile_rule: str = "higher"
+) -> tuple[float, Dict[str, Any]]:
+    """
+    功能：按 order-statistics 计算 NP 阈值。 
+
+    Compute Neyman-Pearson threshold from null scores using order statistics.
+
+    Args:
+        scores: Null distribution score list.
+        target_fpr: Target false positive rate in (0, 1).
+        quantile_rule: Quantile selection rule, currently supports "higher".
+
+    Returns:
+        Tuple of (threshold_value, order_stat_info).
+
+    Raises:
+        TypeError: If input types are invalid.
+        ValueError: If inputs are out of valid range.
+    """
+    if not isinstance(scores, list) or len(scores) == 0:
+        raise ValueError("scores must be non-empty list")
+    if not isinstance(target_fpr, (int, float)):
+        raise TypeError("target_fpr must be number")
+    if not isinstance(quantile_rule, str) or not quantile_rule:
+        raise TypeError("quantile_rule must be non-empty str")
+    if quantile_rule != "higher":
+        raise ValueError("quantile_rule must be 'higher'")
+
+    target_fpr_value = float(target_fpr)
+    if target_fpr_value <= 0.0 or target_fpr_value >= 1.0:
+        raise ValueError("target_fpr must be in (0, 1)")
+
+    normalized_scores: List[float] = []
+    for idx, score in enumerate(scores):
+        if isinstance(score, bool) or not isinstance(score, (int, float)):
+            raise TypeError(f"scores[{idx}] must be number")
+        value = float(score)
+        if not math.isfinite(value):
+            raise ValueError(f"scores[{idx}] must be finite")
+        normalized_scores.append(value)
+
+    sorted_scores = sorted(normalized_scores)
+    n_samples = len(sorted_scores)
+
+    # higher quantile: index = ceil(q*n) - 1, q = 1-target_fpr
+    quantile = 1.0 - target_fpr_value
+    raw_rank = int(math.ceil(quantile * n_samples))
+    rank_1based = min(max(1, raw_rank), n_samples)
+    index_0based = rank_1based - 1
+    threshold_value = float(sorted_scores[index_0based])
+
+    order_stat_info = {
+        "n_samples": n_samples,
+        "target_fpr": target_fpr_value,
+        "quantile": quantile,
+        "quantile_rule": "higher",
+        "order_stat_rank_1based": rank_1based,
+        "order_stat_index_0based": index_0based,
+        "ties_policy": "higher",
+    }
+    return threshold_value, order_stat_info

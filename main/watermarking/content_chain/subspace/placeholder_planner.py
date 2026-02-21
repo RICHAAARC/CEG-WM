@@ -209,6 +209,15 @@ class SubspacePlannerImpl:
                 mask_digest=mask_digest
             )
             basis_digest = self._derive_basis_digest(basis_summary["basis_digest_payload"])
+            plan_origin = "test_synthetic" if basis_summary.get("samples_anchor", {}).get("source") == "test_synthetic" else "planner_v1_band_spec"
+            routing_digest_ref = self._extract_routing_digest_ref(inputs)
+            band_spec, band_spec_digest, band_metrics = self.build_subspace_plan_v1(
+                cfg=cfg,
+                inputs=inputs,
+                planner_params=planner_params,
+                basis_summary=basis_summary,
+                routing_digest_ref=routing_digest_ref,
+            )
             
             # 推断特征域标签
             feature_source_tag = self._infer_feature_source(inputs)
@@ -241,10 +250,17 @@ class SubspacePlannerImpl:
                 "plan_version": "v3",
                 "subspace_method": "trajectory_jacobian_nullspace_svd",
                 "subspace_source": "planner_computed",
+                "plan_origin": plan_origin,
                 "rank": basis_summary["rank"],
                 "energy_ratio": basis_summary["energy_ratio"],
                 "null_space_dim": basis_summary["null_space_dim"],
                 "subspace_spec": basis_summary["subspace_spec"],
+                "band_spec": band_spec,
+                "band_spec_digest": band_spec_digest,
+                "routing_digest_ref": routing_digest_ref,
+                "pipeline_feature_digest": "<absent>",
+                "denoise_trace_digest": "<absent>",
+                "attention_anchor_ref_digest": "<absent>",
                 "basis_digest": basis_digest,
                 "planner_impl_identity": {
                     "impl_id": self.impl_id,
@@ -280,7 +296,10 @@ class SubspacePlannerImpl:
                 "null_space_dim": basis_summary["null_space_dim"],
                 "null_space_energy_ratio": basis_summary["null_space_energy_ratio"],
                 "spectrum_summary": basis_summary["spectrum_summary"],
-                "feature_source_tag": feature_source_tag
+                "feature_source_tag": feature_source_tag,
+                "band_spec_digest": band_spec_digest,
+                "hf_region_ratio": band_metrics.get("hf_region_ratio"),
+                "lf_region_ratio": band_metrics.get("lf_region_ratio"),
             }
 
             return SubspacePlanEvidence(
@@ -293,6 +312,17 @@ class SubspacePlannerImpl:
                 plan_failure_reason=None
             )
         except ValueError as exc:
+            message = str(exc).lower()
+            if "planner inputs missing" in message or "trajectory source" in message:
+                return SubspacePlanEvidence(
+                    status="absent",
+                    plan=None,
+                    basis_digest=None,
+                    plan_digest=None,
+                    audit=audit,
+                    plan_stats=None,
+                    plan_failure_reason="planner_input_absent"
+                )
             reason = "invalid_subspace_params"
             if "rank" in str(exc).lower():
                 reason = "rank_computation_failed"
@@ -639,6 +669,7 @@ class SubspacePlannerImpl:
                 "spectrum_topk": planner_params.spectrum_topk,
                 "jacobian_probe_count": planner_params.jacobian_probe_count,
                 "jacobian_eps": self._normalize_float(planner_params.jacobian_eps, planner_params.float_round_digits),
+                "low_freq": _build_low_freq_cfg_binding(cfg),
                 "high_freq": _build_high_freq_cfg_binding(cfg)
             },
             "injection_config": injection_config_payload,
@@ -1480,7 +1511,141 @@ class SubspacePlannerImpl:
             return "latent_features"
         if "feature_samples" in inputs:
             return "feature_samples"
-        return "trace_signature"
+        return "trace_signature_projection"
+
+    def _extract_routing_digest_ref(self, inputs: Dict[str, Any]) -> str:
+        """
+        功能：提取 routing_digest 引用位。 
+
+        Extract routing digest reference from planner inputs.
+
+        Args:
+            inputs: Planner input mapping.
+
+        Returns:
+            Routing digest reference string or "<absent>".
+        """
+        if not isinstance(inputs, dict):
+            return "<absent>"
+        candidate = inputs.get("routing_digest")
+        if isinstance(candidate, str) and candidate:
+            return candidate
+        return "<absent>"
+
+    def build_subspace_plan_v1(
+        self,
+        cfg: Dict[str, Any],
+        inputs: Dict[str, Any],
+        planner_params: _PlannerParams,
+        basis_summary: Dict[str, Any],
+        routing_digest_ref: str,
+    ) -> Tuple[Dict[str, Any], str, Dict[str, Any]]:
+        """
+        功能：构造 Planner v1 的 band 规范与摘要。 
+
+        Build planner v1 band specification and digest anchors.
+
+        Args:
+            cfg: Configuration mapping.
+            inputs: Planner input mapping.
+            planner_params: Parsed planner parameters.
+            basis_summary: Basis summary mapping.
+            routing_digest_ref: Routing digest reference.
+
+        Returns:
+            Tuple of (band_spec, band_spec_digest, band_metrics).
+        """
+        if not isinstance(cfg, dict):
+            raise TypeError("cfg must be dict")
+        if not isinstance(inputs, dict):
+            raise TypeError("inputs must be dict")
+        if not isinstance(basis_summary, dict):
+            raise TypeError("basis_summary must be dict")
+
+        mask_summary = inputs.get("mask_summary") if isinstance(inputs.get("mask_summary"), dict) else {}
+        band_spec = self.build_band_spec_from_mask(mask_summary, planner_params, routing_digest_ref)
+        band_spec_digest = self.compute_band_spec_digest(band_spec)
+
+        hf_selector_summary = band_spec.get("hf_selector_summary") if isinstance(band_spec.get("hf_selector_summary"), dict) else {}
+        lf_selector_summary = band_spec.get("lf_selector_summary") if isinstance(band_spec.get("lf_selector_summary"), dict) else {}
+        band_metrics = {
+            "hf_region_ratio": hf_selector_summary.get("region_ratio", 0.5),
+            "lf_region_ratio": lf_selector_summary.get("region_ratio", 0.5),
+            "rank": basis_summary.get("rank"),
+            "energy_ratio": basis_summary.get("energy_ratio"),
+        }
+        return band_spec, band_spec_digest, band_metrics
+
+    def build_band_spec_from_mask(
+        self,
+        mask_summary: Dict[str, Any],
+        planner_params: _PlannerParams,
+        routing_digest_ref: str,
+    ) -> Dict[str, Any]:
+        """
+        功能：从 mask 摘要构建 LF/HF 频带规范。 
+
+        Build LF/HF band specification from mask summary and planner params.
+
+        Args:
+            mask_summary: Optional mask summary mapping.
+            planner_params: Parsed planner parameter bundle.
+            routing_digest_ref: Routing digest reference.
+
+        Returns:
+            Band specification mapping.
+        """
+        if not isinstance(mask_summary, dict):
+            mask_summary = {}
+
+        block_size = 8
+        dct_low_cutoff = max(1, min(planner_params.rank, block_size - 1))
+        mask_area_ratio = mask_summary.get("area_ratio")
+        if not isinstance(mask_area_ratio, (int, float)):
+            mask_area_ratio = 0.5
+        mask_area_ratio = max(0.0, min(float(mask_area_ratio), 1.0))
+
+        hf_ratio = self._normalize_float(mask_area_ratio, planner_params.float_round_digits)
+        lf_ratio = self._normalize_float(1.0 - mask_area_ratio, planner_params.float_round_digits)
+
+        return {
+            "band_spec_version": "v1",
+            "basis_selector": "dct_block",
+            "dct_block_size": block_size,
+            "lf_band_rule": {
+                "type": "u_v_le_k",
+                "k": dct_low_cutoff,
+            },
+            "hf_band_rule": {
+                "type": "complement_of_lf",
+            },
+            "hf_selector_summary": {
+                "selector": "mask_true_or_high_texture",
+                "region_ratio": hf_ratio,
+                "routing_digest_ref": routing_digest_ref,
+            },
+            "lf_selector_summary": {
+                "selector": "mask_false_or_smooth",
+                "region_ratio": lf_ratio,
+                "routing_digest_ref": routing_digest_ref,
+            },
+        }
+
+    def compute_band_spec_digest(self, band_spec: Dict[str, Any]) -> str:
+        """
+        功能：计算 band 规范摘要。 
+
+        Compute canonical band specification digest.
+
+        Args:
+            band_spec: Band specification mapping.
+
+        Returns:
+            SHA256 digest string.
+        """
+        if not isinstance(band_spec, dict):
+            raise TypeError("band_spec must be dict")
+        return digests.canonical_sha256(band_spec)
 
     def _build_injection_config_payload(
         self,
@@ -1642,13 +1807,22 @@ class SubspacePlannerImpl:
                 planner_params=planner_params,
                 cfg=cfg
             )
-        else:
-            # 路径 B：确定性合成轨迹（总是可用）
+        elif isinstance(inputs.get("trace_signature"), dict):
+            # 路径 B：trace signature 投影路径（Planner v1 默认弱耦合主路径）。
+            samples, samples_anchor = self._sample_from_trace_signature_projection(
+                inputs=inputs,
+                planner_params=planner_params,
+                cfg=cfg,
+            )
+        elif self._is_test_synthetic_enabled(cfg, inputs):
+            # 路径 C：仅测试模式可启用的 synthetic 轨迹。
             samples, samples_anchor = self._sample_deterministic_trajectory(
                 planner_params=planner_params,
                 cfg=cfg,
                 base_seed=planner_params.seed
             )
+        else:
+            raise ValueError("planner inputs missing required trajectory source for planner_v1")
         
         # 验证样本矩阵
         if samples.shape[0] != planner_params.sample_count or samples.shape[1] != planner_params.feature_dim:
@@ -1793,10 +1967,86 @@ class SubspacePlannerImpl:
             "moments_digest": moments_digest,
             "guidance_scale": self._normalize_float(guidance_scale, planner_params.float_round_digits),
             "num_inference_steps": num_steps,
-            "source": "deterministic_trajectory"
+            "source": "test_synthetic"
         }
         
         return samples, samples_anchor
+
+    def _sample_from_trace_signature_projection(
+        self,
+        inputs: Dict[str, Any],
+        planner_params: _PlannerParams,
+        cfg: Dict[str, Any],
+    ) -> Tuple[np.ndarray, Dict[str, Any]]:
+        """
+        功能：基于 trace_signature 生成弱耦合可复算轨迹。 
+
+        Build weak-coupled deterministic trajectory from trace signature.
+
+        Args:
+            inputs: Planner input mapping.
+            planner_params: Planner parameter bundle.
+            cfg: Configuration mapping.
+
+        Returns:
+            Tuple of (samples, anchor).
+
+        Raises:
+            ValueError: If trace_signature is missing.
+        """
+        trace_signature = inputs.get("trace_signature")
+        if not isinstance(trace_signature, dict):
+            raise ValueError("trace_signature is required for planner_v1 weak-coupled path")
+
+        samples = _generate_deterministic_trajectory_from_signature(trace_signature, planner_params, cfg)
+        timesteps_list = self._build_timestep_sequence(planner_params)
+        timesteps_digest = digests.canonical_sha256({"timesteps": timesteps_list})
+        mean_vec = np.mean(samples, axis=0)
+        std_vec = np.std(samples, axis=0)
+        moments_digest = digests.canonical_sha256({
+            "mean": mean_vec.tolist()[:8],
+            "std": std_vec.tolist()[:8]
+        })
+
+        num_steps = _read_int(trace_signature.get("num_inference_steps"), planner_params.sample_count)
+        guidance_scale = _read_float(trace_signature.get("guidance_scale"), 7.0)
+        anchor = {
+            "timesteps_digest": timesteps_digest,
+            "probe_seed_digest": digests.canonical_sha256({"probe_seed": planner_params.seed + 7919}),
+            "shape_spec": list(samples.shape),
+            "moments_digest": moments_digest,
+            "guidance_scale": self._normalize_float(guidance_scale, planner_params.float_round_digits),
+            "num_inference_steps": num_steps,
+            "source": "trace_signature_projection",
+        }
+        return samples, anchor
+
+    def _is_test_synthetic_enabled(self, cfg: Dict[str, Any], inputs: Dict[str, Any]) -> bool:
+        """
+        功能：判定是否允许 test synthetic 轨迹路径。 
+
+        Decide whether test synthetic trajectory path is enabled.
+
+        Args:
+            cfg: Configuration mapping.
+            inputs: Planner input mapping.
+
+        Returns:
+            True when synthetic path is explicitly enabled.
+        """
+        if not isinstance(cfg, dict):
+            return False
+        if not isinstance(inputs, dict):
+            return False
+
+        if bool(inputs.get("test_mode", False)):
+            return True
+
+        subspace_cfg = cfg.get("watermark", {}).get("subspace", {})
+        if isinstance(subspace_cfg, dict) and bool(subspace_cfg.get("allow_synthetic_trajectory", False)):
+            return True
+
+        return bool(cfg.get("allow_synthetic_trajectory", False))
 
     def _build_timestep_sequence(self, planner_params: _PlannerParams) -> List[int]:
         """
@@ -2279,6 +2529,7 @@ def _build_high_freq_cfg_binding(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "enabled": bool(hf_cfg.get("enabled", False)),
         "codebook_id": hf_cfg.get("codebook_id"),
         "ecc": hf_cfg.get("ecc"),
+        "tau": hf_cfg.get("tau", 2.0),
         "tail_truncation_ratio": hf_cfg.get("tail_truncation_ratio", 0.1),
         "tail_truncation_mode": hf_cfg.get("tail_truncation_mode", "gaussian"),
         "sampling_stride": hf_cfg.get("sampling_stride", 1),
@@ -2286,4 +2537,39 @@ def _build_high_freq_cfg_binding(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "energy_cap": hf_cfg.get("energy_cap", 1.0),
     }
     payload["hf_cfg_digest"] = digests.canonical_sha256(payload)
+    return payload
+
+
+def _build_low_freq_cfg_binding(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：构造 LF 参数绑定摘要输入域。
+
+    Build canonical low-frequency config binding payload for plan_digest domain.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Low-frequency config binding mapping.
+
+    Raises:
+        TypeError: If cfg is invalid.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    lf_cfg = cfg.get("watermark", {}).get("lf", {})
+    if not isinstance(lf_cfg, dict):
+        lf_cfg = {}
+    payload = {
+        "enabled": bool(lf_cfg.get("enabled", False)),
+        "codebook_id": lf_cfg.get("codebook_id"),
+        "ecc": lf_cfg.get("ecc"),
+        "strength": lf_cfg.get("strength"),
+        "delta": lf_cfg.get("delta"),
+        "dct_block_size": lf_cfg.get("dct_block_size", 8),
+        "lf_coeff_indices": lf_cfg.get("lf_coeff_indices", [[1, 1], [1, 2], [2, 1]]),
+        "block_length": lf_cfg.get("block_length"),
+        "variance": lf_cfg.get("variance", 1.5),
+    }
+    payload["lf_cfg_digest"] = digests.canonical_sha256(payload)
     return payload

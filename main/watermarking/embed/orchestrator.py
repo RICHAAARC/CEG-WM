@@ -9,14 +9,31 @@
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from typing import Any, Dict
+
+import numpy as np
+from PIL import Image
 
 from main.registries.runtime_resolver import BuiltImplSet
 from main.core import digests
+from main.core import records_io
+from main.policy import path_policy
+from main.watermarking.common.plan_digest_flow import (
+    build_content_plan_and_digest,
+    bind_plan_to_record,
+)
 from main.watermarking.content_chain.high_freq_embedder import (
     HighFreqEmbedder,
     HIGH_FREQ_EMBEDDER_ID,
     HIGH_FREQ_EMBEDDER_VERSION,
+    embed_high_freq_pattern,
+    compute_hf_trace_digest,
+)
+from main.watermarking.content_chain.low_freq_coder import (
+    encode_low_freq_dct,
+    compute_lf_trace_digest,
 )
 
 
@@ -75,7 +92,12 @@ def run_embed_orchestrator(
         # subspace_result_override 类型不符合预期，必须 fail-fast。
         raise TypeError("subspace_result_override must be dict, SubspacePlan, or None")
 
-    content_result = content_result_override if content_result_override is not None else impl_set.content_extractor.extract(cfg, cfg_digest=cfg_digest)
+    content_inputs = _build_content_inputs_for_embed(cfg)
+    content_result = content_result_override if content_result_override is not None else impl_set.content_extractor.extract(
+        cfg,
+        inputs=content_inputs,
+        cfg_digest=cfg_digest
+    )
 
     content_evidence_payload = None
     if hasattr(content_result, "as_dict") and callable(content_result.as_dict):
@@ -121,7 +143,7 @@ def run_embed_orchestrator(
         mask_digest = content_result.mask_digest
     
     # 调用规划器计算 plan_digest，绑定 cfg_digest + mask_digest + planner_params。
-    planner_inputs = _build_planner_inputs_for_runtime(cfg, trajectory_evidence)
+    planner_inputs = _build_planner_inputs_for_runtime(cfg, trajectory_evidence, content_evidence_payload)
     subspace_result = subspace_result_override if subspace_result_override is not None else impl_set.subspace_planner.plan(
         cfg,
         mask_digest=mask_digest,
@@ -131,28 +153,59 @@ def run_embed_orchestrator(
     
     sync_result = impl_set.sync_module.sync(cfg)
 
-    hf_evidence = _build_hf_embed_evidence(
-        cfg=cfg,
-        cfg_digest=cfg_digest,
-        subspace_result=subspace_result,
-        trajectory_evidence=trajectory_evidence,
-    )
     if content_evidence_payload is None:
         content_evidence_payload = {}
-    _merge_hf_evidence(content_evidence_payload, hf_evidence)
+
+    plan_obj, plan_digest, plan_input_digest, plan_meta = build_content_plan_and_digest(
+        cfg,
+        subspace_result,
+        mask_digest if isinstance(mask_digest, str) else None,
+        mask_binding=_extract_mask_binding(content_evidence_payload),
+        mask_params_digest=_extract_mask_params_digest(content_evidence_payload),
+    )
+    io_anchors = _prepare_embed_real_io_anchors(cfg)
+    embed_trace = {
+        "embed_mode": io_anchors["embed_mode"],
+        "note": "content_embedding_real_v1",
+    }
+
+    if io_anchors["embed_mode"] != "noop_v0_test_only" and io_anchors["image_path"] != "<absent>":
+        input_image = Image.open(io_anchors["image_path"]).convert("RGB")
+        watermarked_image, pipeline_trace = _apply_content_embedding_pipeline(
+            image=input_image,
+            plan=plan_obj,
+            cfg=cfg,
+            cfg_digest=cfg_digest,
+            plan_digest=plan_digest,
+            content_evidence_payload=content_evidence_payload,
+        )
+        artifact_rel_path, artifact_sha256, watermarked_path = _write_watermarked_artifact_controlled(
+            watermarked_image=watermarked_image,
+            run_root=Path(io_anchors["run_root"]),
+            artifacts_dir=Path(io_anchors["artifacts_dir"]),
+            output_rel=io_anchors["output_rel"],
+        )
+        io_anchors["watermarked_path"] = watermarked_path
+        io_anchors["artifact_rel_path"] = artifact_rel_path
+        io_anchors["artifact_sha256"] = artifact_sha256
+        embed_trace.update(pipeline_trace)
 
     # 构造返回的业务字段映射。
-    # 关键：plan_digest 作为锚点字段必须同时返回，以供后续 detect 侧验证。
     record_fields = {
         "operation": "embed",
-        "embed_placeholder": True,
-        "image_path": "placeholder_input.png",
-        "watermarked_path": "placeholder_output.png",
+        "embed_mode": io_anchors["embed_mode"],
+        "image_path": io_anchors["image_path"],
+        "watermarked_path": io_anchors["watermarked_path"],
+        "input_sha256": io_anchors["input_sha256"],
+        "artifact_sha256": io_anchors["artifact_sha256"],
+        "artifact_rel_path": io_anchors["artifact_rel_path"],
+        "watermarked_artifact_sha256": io_anchors["artifact_sha256"],
+        "watermarked_artifact_rel_path": io_anchors["artifact_rel_path"],
         "seed": 42,
         "strength": 0.5,
+        "embed_trace": embed_trace,
         "content_result": content_evidence_payload,
         "content_evidence": content_evidence_payload,
-        "subspace_plan": subspace_result.as_dict() if hasattr(subspace_result, "as_dict") else subspace_result,
         "sync_result": sync_result,
         # 添加 execution_report（冻结门禁要求）。
         # 注：embed 阶段未执行融合，fusion_status 置为 "absent"；
@@ -164,10 +217,17 @@ def run_embed_orchestrator(
             "audit_obligations_satisfied": True
         }
     }
+    bind_plan_to_record(
+        record_fields,
+        plan_obj=plan_obj,
+        plan_digest=plan_digest,
+        plan_input_digest=plan_input_digest,
+        plan_meta=plan_meta,
+    )
+    _bind_mask_and_routing_evidence_to_record(record_fields, content_evidence_payload)
     
-    # 若 subspace_result 是对象，提取 plan_digest 和 basis_digest 作为审计锚点。
+    # 若 subspace_result 是对象，提取基础锚点作为审计字段。
     if hasattr(subspace_result, "plan_digest"):
-        record_fields["plan_digest"] = subspace_result.plan_digest
         record_fields["basis_digest"] = subspace_result.basis_digest
         record_fields["plan_stats"] = subspace_result.plan_stats
         if isinstance(subspace_result.plan, dict):
@@ -352,7 +412,8 @@ def _inject_trajectory_audit_fields(
 
 def _build_planner_inputs_for_runtime(
     cfg: Dict[str, Any],
-    trajectory_evidence: Dict[str, Any] | None
+    trajectory_evidence: Dict[str, Any] | None,
+    content_evidence_payload: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """
     功能：构造规划器输入签名。
@@ -373,6 +434,8 @@ def _build_planner_inputs_for_runtime(
         raise TypeError("cfg must be dict")
     if trajectory_evidence is not None and not isinstance(trajectory_evidence, dict):
         raise TypeError("trajectory_evidence must be dict or None")
+    if content_evidence_payload is not None and not isinstance(content_evidence_payload, dict):
+        raise TypeError("content_evidence_payload must be dict or None")
 
     trace_signature = {
         "num_inference_steps": cfg.get("inference_num_steps", cfg.get("generation", {}).get("num_inference_steps", 16) if isinstance(cfg.get("generation"), dict) else 16),
@@ -383,4 +446,403 @@ def _build_planner_inputs_for_runtime(
     inputs = {"trace_signature": trace_signature}
     if trajectory_evidence is not None:
         inputs["trajectory_evidence"] = trajectory_evidence
+    if isinstance(content_evidence_payload, dict):
+        mask_stats = content_evidence_payload.get("mask_stats")
+        if isinstance(mask_stats, dict):
+            inputs["mask_summary"] = dict(mask_stats)
+            routing_digest = mask_stats.get("routing_digest")
+            if isinstance(routing_digest, str) and routing_digest:
+                inputs["routing_digest"] = routing_digest
     return inputs
+
+
+def _prepare_embed_real_io_anchors(cfg: Dict[str, Any]) -> Dict[str, str]:
+    """
+    功能：执行 embed 阶段真实输入输出锚定。 
+
+    Resolve real input image path and derive controlled output targets.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Mapping with image path and digest anchors.
+
+    Raises:
+        TypeError: If cfg is invalid.
+        ValueError: If runtime IO configuration is invalid.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+
+    result = {
+        "embed_mode": "content_real_v1",
+        "image_path": "<absent>",
+        "watermarked_path": "<absent>",
+        "input_sha256": "<absent>",
+        "artifact_sha256": "<absent>",
+        "artifact_rel_path": "<absent>",
+        "run_root": "<absent>",
+        "artifacts_dir": "<absent>",
+        "output_rel": "watermarked/watermarked.png",
+    }
+
+    input_image_path = _resolve_embed_input_image_path(cfg)
+    if input_image_path is None:
+        return result
+
+    run_root_raw = cfg.get("__run_root_dir__")
+    artifacts_dir_raw = cfg.get("__artifacts_dir__")
+    if not isinstance(run_root_raw, str) or not run_root_raw:
+        # 缺失 run_root 信息时无法派生受控输出路径，必须 fail-fast。
+        raise ValueError("__run_root_dir__ must be non-empty str when input image is configured")
+    if not isinstance(artifacts_dir_raw, str) or not artifacts_dir_raw:
+        # 缺失 artifacts_dir 信息时无法派生受控输出路径，必须 fail-fast。
+        raise ValueError("__artifacts_dir__ must be non-empty str when input image is configured")
+
+    input_path = Path(input_image_path).resolve()
+    if not input_path.exists() or not input_path.is_file():
+        # 输入图片不存在时必须 fail-fast。
+        raise ValueError(f"input image path not found: {input_path}")
+
+    run_root = Path(run_root_raw).resolve()
+    artifacts_dir = Path(artifacts_dir_raw).resolve()
+
+    embed_cfg = cfg.get("embed") if isinstance(cfg.get("embed"), dict) else {}
+    output_rel = embed_cfg.get("output_artifact_rel_path", "watermarked/watermarked.png")
+    if not isinstance(output_rel, str) or not output_rel:
+        # 输出相对路径不合法，必须 fail-fast。
+        raise ValueError("embed.output_artifact_rel_path must be non-empty str when provided")
+
+    output_path = (artifacts_dir / output_rel).resolve()
+    path_policy.validate_output_target(output_path, "artifact", run_root)
+
+    test_mode_noop = bool(embed_cfg.get("test_mode_noop", False))
+    if test_mode_noop:
+        records_io.copy_file_controlled(input_path, output_path, kind="artifact")
+        result["embed_mode"] = "noop_v0_test_only"
+        result["watermarked_path"] = str(output_path)
+        result["artifact_sha256"] = digests.file_sha256(output_path)
+        try:
+            result["artifact_rel_path"] = str(output_path.relative_to(run_root))
+        except ValueError:
+            result["artifact_rel_path"] = str(output_path)
+
+    result["image_path"] = str(input_path)
+    result["input_sha256"] = digests.file_sha256(input_path)
+    result["run_root"] = str(run_root)
+    result["artifacts_dir"] = str(artifacts_dir)
+    result["output_rel"] = output_rel
+    return result
+
+
+def _apply_content_embedding_pipeline(
+    image: Image.Image,
+    plan: Dict[str, Any],
+    cfg: Dict[str, Any],
+    cfg_digest: str,
+    plan_digest: str | None,
+    content_evidence_payload: Dict[str, Any],
+) -> tuple[Image.Image, Dict[str, Any]]:
+    """
+    功能：执行 LF/HF 真实嵌入流水线并回填证据。
+
+    Apply real LF/HF embedding pipeline and bind trace evidence.
+
+    Args:
+        image: Input PIL image.
+        plan: Planner plan mapping.
+        cfg: Configuration mapping.
+        cfg_digest: Config digest.
+        plan_digest: Optional plan digest.
+        content_evidence_payload: Mutable content evidence mapping.
+
+    Returns:
+        Tuple of (watermarked_image, embed_trace).
+    """
+    if not isinstance(plan, dict):
+        raise TypeError("plan must be dict")
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(cfg_digest, str) or not cfg_digest:
+        raise TypeError("cfg_digest must be non-empty str")
+    if not isinstance(content_evidence_payload, dict):
+        raise TypeError("content_evidence_payload must be dict")
+
+    image_array = np.asarray(image, dtype=np.uint8)
+    plan_band_spec = plan.get("band_spec") if isinstance(plan.get("band_spec"), dict) else {}
+    routing_summary = plan_band_spec.get("hf_selector_summary") if isinstance(plan_band_spec.get("hf_selector_summary"), dict) else {}
+
+    key_material = digests.canonical_sha256(
+        {
+            "plan_digest": plan_digest,
+            "cfg_digest": cfg_digest,
+            "key_id": cfg.get("watermark", {}).get("key_id"),
+            "pattern_id": cfg.get("watermark", {}).get("pattern_id"),
+        }
+    )
+
+    lf_params = _build_lf_image_embed_params(cfg)
+    lf_watermarked, lf_trace_summary = encode_low_freq_dct(image_array, plan_band_spec, key_material, lf_params)
+    lf_trace_digest = compute_lf_trace_digest(
+        {
+            "summary": lf_trace_summary,
+            "params": lf_params,
+            "plan_digest": plan_digest,
+            "cfg_digest": cfg_digest,
+        }
+    )
+    content_evidence_payload["lf_trace_digest"] = lf_trace_digest
+    content_evidence_payload["lf_score"] = None
+    score_parts = content_evidence_payload.get("score_parts")
+    if not isinstance(score_parts, dict):
+        score_parts = {}
+        content_evidence_payload["score_parts"] = score_parts
+    score_parts["lf_status"] = lf_trace_summary.get("lf_status", "ok")
+    score_parts["lf_metrics"] = lf_trace_summary
+
+    hf_enabled = bool(cfg.get("watermark", {}).get("hf", {}).get("enabled", False))
+    embed_trace: Dict[str, Any] = {
+        "embed_mode": "content_real_v1",
+        "lf_trace_digest": lf_trace_digest,
+        "lf_trace_summary": lf_trace_summary,
+    }
+
+    if hf_enabled:
+        hf_params = _build_hf_image_embed_params(cfg)
+        hf_watermarked, hf_trace_summary = embed_high_freq_pattern(lf_watermarked, routing_summary, key_material, hf_params)
+        hf_trace_digest = compute_hf_trace_digest(
+            {
+                "summary": hf_trace_summary,
+                "params": hf_params,
+                "plan_digest": plan_digest,
+                "cfg_digest": cfg_digest,
+            }
+        )
+        content_evidence_payload["hf_trace_digest"] = hf_trace_digest
+        content_evidence_payload["hf_score"] = None
+        score_parts["hf_status"] = hf_trace_summary.get("hf_status", "ok")
+        score_parts["hf_metrics"] = hf_trace_summary
+        embed_trace["hf_trace_digest"] = hf_trace_digest
+        embed_trace["hf_trace_summary"] = hf_trace_summary
+        watermarked_array = hf_watermarked
+    else:
+        content_evidence_payload.pop("hf_trace_digest", None)
+        content_evidence_payload.pop("hf_score", None)
+        score_parts.pop("hf_status", None)
+        score_parts.pop("hf_metrics", None)
+        score_parts.pop("hf_absent_reason", None)
+        score_parts.pop("hf_failure_reason", None)
+        watermarked_array = lf_watermarked
+
+    return Image.fromarray(watermarked_array), embed_trace
+
+
+def _write_watermarked_artifact_controlled(
+    watermarked_image: Image.Image,
+    run_root: Path,
+    artifacts_dir: Path,
+    output_rel: str,
+) -> tuple[str, str, str]:
+    """
+    功能：受控写入 watermarked artifact 并返回锚点。
+
+    Write watermarked image through controlled records_io path and return anchors.
+
+    Args:
+        watermarked_image: Watermarked PIL image.
+        run_root: Run root directory.
+        artifacts_dir: Artifacts directory.
+        output_rel: Relative output path under artifacts.
+
+    Returns:
+        Tuple of (artifact_rel_path, artifact_sha256, watermarked_path).
+    """
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(artifacts_dir, Path):
+        raise TypeError("artifacts_dir must be Path")
+    if not isinstance(output_rel, str) or not output_rel:
+        raise TypeError("output_rel must be non-empty str")
+
+    output_path = (artifacts_dir / output_rel).resolve()
+    path_policy.validate_output_target(output_path, "artifact", run_root.resolve())
+
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_file:
+        tmp_path = Path(tmp_file.name)
+    try:
+        watermarked_image.save(tmp_path, format="PNG")
+        records_io.copy_file_controlled(tmp_path, output_path, kind="artifact")
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+
+    artifact_sha256 = digests.file_sha256(output_path)
+    artifact_rel_path = str(output_path.relative_to(run_root.resolve()))
+    return artifact_rel_path, artifact_sha256, str(output_path)
+
+
+def _build_lf_image_embed_params(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    lf_cfg = cfg.get("watermark", {}).get("lf", {})
+    if not isinstance(lf_cfg, dict):
+        lf_cfg = {}
+    return {
+        "dct_block_size": int(lf_cfg.get("dct_block_size", 8)),
+        "lf_coeff_indices": lf_cfg.get("lf_coeff_indices", [[1, 1], [1, 2], [2, 1]]),
+        "alpha": float(lf_cfg.get("strength", 1.5)),
+        "redundancy": int(lf_cfg.get("ecc", 1)),
+        "variance": float(lf_cfg.get("variance", 1.5)),
+    }
+
+
+def _build_hf_image_embed_params(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    hf_cfg = cfg.get("watermark", {}).get("hf", {})
+    if not isinstance(hf_cfg, dict):
+        hf_cfg = {}
+    return {
+        "beta": float(hf_cfg.get("tau", 2.0)),
+        "tail_truncation_ratio": float(hf_cfg.get("tail_truncation_ratio", 0.1)),
+        "tail_truncation_mode": hf_cfg.get("tail_truncation_mode", "top_k_per_latent"),
+        "sampling_stride": int(hf_cfg.get("sampling_stride", 1)),
+    }
+
+
+def _resolve_embed_input_image_path(cfg: Dict[str, Any]) -> str | None:
+    """
+    功能：解析 embed 输入图像路径。 
+
+    Resolve embed input image path from runtime/CLI/config fields.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Input image path string or None.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+
+    candidates = [
+        cfg.get("__embed_input_image_path__"),
+        cfg.get("input_image_path"),
+    ]
+    embed_cfg = cfg.get("embed")
+    if isinstance(embed_cfg, dict):
+        candidates.append(embed_cfg.get("input_image_path"))
+
+    for value in candidates:
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def _build_content_inputs_for_embed(cfg: Dict[str, Any]) -> Dict[str, Any] | None:
+    """
+    功能：构造 embed 阶段 content extractor 输入。 
+
+    Build content extractor inputs from embed real image path.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Inputs mapping or None when image path is absent.
+    """
+    image_path = _resolve_embed_input_image_path(cfg)
+    if image_path is None:
+        return None
+    return {
+        "image_path": image_path,
+    }
+
+
+def _extract_mask_binding(content_evidence_payload: Any) -> Dict[str, Any] | None:
+    """
+    功能：提取 mask 分辨率绑定字段。 
+
+    Extract mask resolution binding from content evidence payload.
+
+    Args:
+        content_evidence_payload: Content evidence payload.
+
+    Returns:
+        Mask binding mapping or None.
+    """
+    if not isinstance(content_evidence_payload, dict):
+        return None
+    mask_stats = content_evidence_payload.get("mask_stats")
+    if not isinstance(mask_stats, dict):
+        return None
+    binding = mask_stats.get("mask_resolution_binding")
+    if isinstance(binding, dict):
+        return binding
+    legacy = mask_stats.get("resolution_binding")
+    if isinstance(legacy, dict):
+        return legacy
+    return None
+
+
+def _extract_mask_params_digest(content_evidence_payload: Any) -> str | None:
+    """
+    功能：提取 mask 参数摘要字段。 
+
+    Extract mask params digest from content evidence payload.
+
+    Args:
+        content_evidence_payload: Content evidence payload.
+
+    Returns:
+        Mask params digest string or None.
+    """
+    if not isinstance(content_evidence_payload, dict):
+        return None
+    mask_stats = content_evidence_payload.get("mask_stats")
+    if not isinstance(mask_stats, dict):
+        return None
+    value = mask_stats.get("mask_params_digest")
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+def _bind_mask_and_routing_evidence_to_record(record_fields: Dict[str, Any], content_evidence_payload: Any) -> None:
+    """
+    功能：将 mask/routing 证据绑定到 record 顶层字段。 
+
+    Bind mask and routing evidence fields to record for audit closure.
+
+    Args:
+        record_fields: Mutable record mapping.
+        content_evidence_payload: Content evidence payload mapping.
+
+    Returns:
+        None.
+    """
+    if not isinstance(record_fields, dict):
+        return
+    if not isinstance(content_evidence_payload, dict):
+        return
+
+    mask_stats = content_evidence_payload.get("mask_stats")
+    if not isinstance(mask_stats, dict):
+        return
+
+    mask_binding = _extract_mask_binding(content_evidence_payload)
+    if isinstance(mask_binding, dict):
+        record_fields["mask_resolution_binding"] = mask_binding
+
+    mask_source_impl_identity = mask_stats.get("mask_source_impl_identity")
+    if isinstance(mask_source_impl_identity, dict):
+        record_fields["mask_source_impl_identity"] = mask_source_impl_identity
+
+    routing_digest = mask_stats.get("routing_digest")
+    if isinstance(routing_digest, str) and routing_digest:
+        record_fields["routing_digest"] = routing_digest
+
+    routing_summary = mask_stats.get("routing_summary")
+    if isinstance(routing_summary, dict):
+        record_fields["routing_summary"] = routing_summary

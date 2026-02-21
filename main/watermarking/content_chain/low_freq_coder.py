@@ -16,6 +16,8 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, Optional
 
+import numpy as np
+
 from main.core import digests
 
 from .interfaces import ContentEvidence
@@ -840,3 +842,256 @@ def _build_lf_trace_payload(
         payload["encoding_trace"] = encoding_trace
 
     return payload
+
+
+def encode_low_freq_dct(
+    image_array: np.ndarray,
+    band_spec: Dict[str, Any],
+    key_material: str,
+    params: Dict[str, Any]
+) -> tuple[np.ndarray, Dict[str, Any]]:
+    """
+    功能：在 LF 子域执行块 DCT 的最小可行嵌入。
+
+    Apply minimal viable LF embedding using block DCT coefficient modulation.
+
+    Args:
+        image_array: Input uint8 image array in HWC format.
+        band_spec: Planner band specification mapping.
+        key_material: Deterministic key material string.
+        params: LF embedding parameters.
+
+    Returns:
+        Tuple of (watermarked_image_array, lf_trace_summary).
+
+    Raises:
+        TypeError: If input types are invalid.
+        ValueError: If parameter values are invalid.
+    """
+    if not isinstance(image_array, np.ndarray):
+        raise TypeError("image_array must be np.ndarray")
+    if image_array.ndim != 3:
+        raise ValueError("image_array must be HWC array")
+    if not isinstance(band_spec, dict):
+        raise TypeError("band_spec must be dict")
+    if not isinstance(key_material, str) or not key_material:
+        raise TypeError("key_material must be non-empty str")
+    if not isinstance(params, dict):
+        raise TypeError("params must be dict")
+
+    block_size = int(params.get("dct_block_size", 8))
+    alpha = float(params.get("alpha", 1.5))
+    redundancy = int(params.get("redundancy", 1))
+    coeff_indices_raw = params.get("lf_coeff_indices", [(1, 1), (1, 2), (2, 1)])
+    if block_size <= 1:
+        raise ValueError("dct_block_size must be > 1")
+    if alpha <= 0:
+        raise ValueError("alpha must be positive")
+    if redundancy <= 0:
+        raise ValueError("redundancy must be positive")
+    if not isinstance(coeff_indices_raw, list) or len(coeff_indices_raw) == 0:
+        raise ValueError("lf_coeff_indices must be non-empty list")
+
+    coeff_indices = []
+    for item in coeff_indices_raw:
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            raise ValueError("each lf_coeff_indices item must be 2-length sequence")
+        ci = int(item[0])
+        cj = int(item[1])
+        if ci < 0 or cj < 0 or ci >= block_size or cj >= block_size:
+            raise ValueError("lf_coeff_indices values out of block range")
+        coeff_indices.append((ci, cj))
+
+    height, width, channels = image_array.shape
+    blocks_h = height // block_size
+    blocks_w = width // block_size
+    total_blocks = blocks_h * blocks_w
+    if total_blocks <= 0:
+        return image_array.copy(), {
+            "lf_status": "absent",
+            "lf_absent_reason": "image_too_small_for_lf_blocks",
+        }
+
+    lf_selector = band_spec.get("lf_selector_summary") if isinstance(band_spec.get("lf_selector_summary"), dict) else {}
+    region_ratio = float(lf_selector.get("region_ratio", 1.0))
+    region_ratio = max(0.0, min(1.0, region_ratio))
+
+    import random
+    rng_seed = int(digests.canonical_sha256({"key_material": key_material, "tag": "lf_dct"})[:16], 16)
+    rng = random.Random(rng_seed)
+
+    all_block_ids = list(range(total_blocks))
+    rng.shuffle(all_block_ids)
+    selected_count = max(1, int(round(total_blocks * region_ratio)))
+    selected_count = min(total_blocks, selected_count * redundancy)
+    selected_blocks = all_block_ids[:selected_count]
+
+    work = image_array.astype(np.float32).copy()
+    dct_matrix = _build_dct_matrix(block_size)
+    idct_matrix = dct_matrix.T
+
+    coeff_ops = 0
+    bit_values = []
+    for block_id in selected_blocks:
+        block_row = block_id // blocks_w
+        block_col = block_id % blocks_w
+        r0 = block_row * block_size
+        c0 = block_col * block_size
+        bit = -1.0 if rng.random() < 0.5 else 1.0
+        bit_values.append(bit)
+        for channel_idx in range(channels):
+            block = work[r0:r0 + block_size, c0:c0 + block_size, channel_idx]
+            coeff = _dct2(block, dct_matrix)
+            for ci, cj in coeff_indices:
+                coeff[ci, cj] = coeff[ci, cj] + bit * alpha
+                coeff_ops += 1
+            restored = _idct2(coeff, idct_matrix)
+            work[r0:r0 + block_size, c0:c0 + block_size, channel_idx] = restored
+
+    watermarked = np.clip(np.rint(work), 0, 255).astype(np.uint8)
+    lf_trace_summary = {
+        "lf_status": "ok",
+        "method": "block_dct_lf_modulation",
+        "block_size": block_size,
+        "coeff_indices": [[ci, cj] for ci, cj in coeff_indices],
+        "alpha": alpha,
+        "redundancy": redundancy,
+        "lf_region_ratio": region_ratio,
+        "selected_block_count": selected_count,
+        "total_block_count": total_blocks,
+        "coeff_operation_count": coeff_ops,
+        "bit_mean": float(sum(bit_values) / len(bit_values)) if bit_values else 0.0,
+        "band_spec_digest": digests.canonical_sha256(band_spec),
+    }
+    return watermarked, lf_trace_summary
+
+
+def detect_low_freq_score(
+    image_array: np.ndarray,
+    band_spec: Dict[str, Any],
+    key_material: str,
+    params: Dict[str, Any]
+) -> tuple[Optional[float], Dict[str, Any]]:
+    """
+    功能：提取 LF 通道原始分数，用于后续 NP 校准。
+
+    Extract LF raw score from block DCT coefficients for calibration readiness.
+
+    Args:
+        image_array: Input uint8 image array in HWC format.
+        band_spec: Planner band specification mapping.
+        key_material: Deterministic key material string.
+        params: LF detection parameters.
+
+    Returns:
+        Tuple of (lf_score, lf_detect_trace).
+
+    Raises:
+        TypeError: If input types are invalid.
+    """
+    if not isinstance(image_array, np.ndarray):
+        raise TypeError("image_array must be np.ndarray")
+    if image_array.ndim != 3:
+        return None, {"lf_status": "fail", "lf_failure_reason": "lf_invalid_input"}
+    if not isinstance(band_spec, dict):
+        raise TypeError("band_spec must be dict")
+    if not isinstance(key_material, str) or not key_material:
+        raise TypeError("key_material must be non-empty str")
+    if not isinstance(params, dict):
+        raise TypeError("params must be dict")
+
+    block_size = int(params.get("dct_block_size", 8))
+    coeff_indices_raw = params.get("lf_coeff_indices", [(1, 1), (1, 2), (2, 1)])
+    coeff_indices = [(int(v[0]), int(v[1])) for v in coeff_indices_raw if isinstance(v, (list, tuple)) and len(v) == 2]
+    if block_size <= 1 or len(coeff_indices) == 0:
+        return None, {"lf_status": "fail", "lf_failure_reason": "lf_invalid_params"}
+
+    height, width, channels = image_array.shape
+    blocks_h = height // block_size
+    blocks_w = width // block_size
+    total_blocks = blocks_h * blocks_w
+    if total_blocks <= 0:
+        return None, {"lf_status": "absent", "lf_absent_reason": "image_too_small_for_lf_blocks"}
+
+    lf_selector = band_spec.get("lf_selector_summary") if isinstance(band_spec.get("lf_selector_summary"), dict) else {}
+    region_ratio = float(lf_selector.get("region_ratio", 1.0))
+    region_ratio = max(0.0, min(1.0, region_ratio))
+
+    import random
+    rng_seed = int(digests.canonical_sha256({"key_material": key_material, "tag": "lf_dct"})[:16], 16)
+    rng = random.Random(rng_seed)
+    all_block_ids = list(range(total_blocks))
+    rng.shuffle(all_block_ids)
+    selected_count = max(1, int(round(total_blocks * region_ratio)))
+    selected_blocks = all_block_ids[:selected_count]
+    bit_signs = {block_id: (-1.0 if rng.random() < 0.5 else 1.0) for block_id in selected_blocks}
+
+    dct_matrix = _build_dct_matrix(block_size)
+    score_acc = 0.0
+    score_count = 0
+    work = image_array.astype(np.float32)
+    for block_id in selected_blocks:
+        block_row = block_id // blocks_w
+        block_col = block_id % blocks_w
+        r0 = block_row * block_size
+        c0 = block_col * block_size
+        expected_sign = bit_signs[block_id]
+        for channel_idx in range(channels):
+            block = work[r0:r0 + block_size, c0:c0 + block_size, channel_idx]
+            coeff = _dct2(block, dct_matrix)
+            for ci, cj in coeff_indices:
+                score_acc += expected_sign * float(coeff[ci, cj])
+                score_count += 1
+
+    if score_count <= 0:
+        return None, {"lf_status": "absent", "lf_absent_reason": "no_lf_coefficients"}
+
+    raw = score_acc / float(score_count)
+    lf_score = float(0.5 + 0.5 * math.tanh(raw / 10.0))
+    trace = {
+        "lf_status": "ok",
+        "lf_score_raw": float(raw),
+        "lf_score_count": score_count,
+        "selected_block_count": selected_count,
+        "total_block_count": total_blocks,
+        "band_spec_digest": digests.canonical_sha256(band_spec),
+    }
+    return lf_score, trace
+
+
+def compute_lf_trace_digest(lf_trace_summary: Dict[str, Any]) -> str:
+    """
+    功能：计算 LF 追踪摘要 digest。
+
+    Compute canonical LF trace digest from summary mapping.
+
+    Args:
+        lf_trace_summary: LF trace summary mapping.
+
+    Returns:
+        SHA256 digest string.
+    """
+    if not isinstance(lf_trace_summary, dict):
+        raise TypeError("lf_trace_summary must be dict")
+    return digests.canonical_sha256(lf_trace_summary)
+
+
+def _build_dct_matrix(block_size: int) -> np.ndarray:
+    if block_size <= 0:
+        raise ValueError("block_size must be positive")
+    matrix = np.zeros((block_size, block_size), dtype=np.float32)
+    scale0 = math.sqrt(1.0 / block_size)
+    scale = math.sqrt(2.0 / block_size)
+    for i in range(block_size):
+        alpha = scale0 if i == 0 else scale
+        for j in range(block_size):
+            matrix[i, j] = alpha * math.cos(math.pi * (2 * j + 1) * i / (2.0 * block_size))
+    return matrix
+
+
+def _dct2(block: np.ndarray, dct_matrix: np.ndarray) -> np.ndarray:
+    return dct_matrix @ block @ dct_matrix.T
+
+
+def _idct2(coeff: np.ndarray, idct_matrix: np.ndarray) -> np.ndarray:
+    return idct_matrix @ coeff @ idct_matrix.T

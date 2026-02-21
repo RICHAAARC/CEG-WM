@@ -17,6 +17,8 @@ from main.watermarking.content_chain.semantic_mask_provider import (
     SemanticMaskProvider,
     SEMANTIC_MASK_PROVIDER_ID,
     SEMANTIC_MASK_PROVIDER_VERSION,
+    MASK_ABSENT_REASON_DISABLED,
+    ROUTING_ABSENT_REASON_MASK_DISABLED,
 )
 from main.watermarking.content_chain.interfaces import ContentEvidence
 from main.core import digests
@@ -78,6 +80,11 @@ class TestSemanticMaskProviderReproducibility:
             "mask_stats must be None when disabled"
         assert result.content_failure_reason is None, \
             "absent 状态下不应有失败原因"
+        assert result.audit.get("mask_absent_reason") == MASK_ABSENT_REASON_DISABLED
+        assert result.audit.get("routing_absent_reason") == ROUTING_ABSENT_REASON_MASK_DISABLED
+        assert isinstance(result.score_parts, dict)
+        assert result.score_parts.get("routing_digest") == "<absent>"
+        assert result.score_parts.get("routing_absent_reason") == ROUTING_ABSENT_REASON_MASK_DISABLED
 
 
 class TestSemanticMaskProviderFailureReasons:
@@ -206,6 +213,23 @@ class TestSemanticMaskProviderResolutionBinding:
         assert binding["height"] == 768
         assert binding["aspect_ratio"] == pytest.approx(1024 / 768, rel=1e-3)
         assert binding["binding_version"] == "v1"
+
+        assert "mask_resolution_binding" in result.mask_stats
+        assert result.mask_stats["mask_resolution_binding"] == binding
+        assert "mask_source_impl_identity" in result.mask_stats
+        source_identity = result.mask_stats["mask_source_impl_identity"]
+        assert source_identity["impl_id"] == SEMANTIC_MASK_PROVIDER_ID
+        assert source_identity["impl_version"] == SEMANTIC_MASK_PROVIDER_VERSION
+        assert "mask_params_digest" in result.mask_stats
+        assert isinstance(result.mask_stats["mask_params_digest"], str)
+        assert len(result.mask_stats["mask_params_digest"]) == 64
+        assert "routing_summary" in result.mask_stats
+        assert isinstance(result.mask_stats["routing_summary"], dict)
+        assert "routing_digest" in result.mask_stats
+        assert isinstance(result.mask_stats["routing_digest"], str)
+        assert len(result.mask_stats["routing_digest"]) == 64
+        assert isinstance(result.score_parts, dict)
+        assert result.score_parts.get("routing_digest") == result.mask_stats["routing_digest"]
 
     def test_resolution_binding_absent_when_disabled(self):
         """禁用時分辨率绑定应不存在。"""

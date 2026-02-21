@@ -5,17 +5,25 @@ Module type: General module
 
 from __future__ import annotations
 
+import glob
+from pathlib import Path
 from typing import Any, Dict, Optional
 
+import numpy as np
+from PIL import Image
+
 from main.core import digests
+from main.core import records_io
 from main.registries.runtime_resolver import BuiltImplSet
-from main.watermarking.content_chain.content_detector import CONTENT_DETECTOR_ID
 from main.watermarking.content_chain import detector_scoring
+from main.watermarking.common.plan_digest_flow import verify_plan_digest
 from main.watermarking.content_chain.high_freq_embedder import (
     HighFreqEmbedder,
     HIGH_FREQ_EMBEDDER_ID,
     HIGH_FREQ_EMBEDDER_VERSION,
+    detect_high_freq_score,
 )
+from main.watermarking.content_chain.low_freq_coder import detect_low_freq_score
 from main.watermarking.fusion import neyman_pearson
 from main.watermarking.fusion.interfaces import FusionDecision
 
@@ -110,7 +118,7 @@ def run_detect_orchestrator(
     content_evidence_adapted = _adapt_content_evidence_for_fusion(content_result)
     geometry_evidence_adapted = _adapt_geometry_evidence_for_fusion(geometry_result)
 
-    planner_inputs = _build_planner_inputs_for_runtime(cfg, trajectory_evidence)
+    planner_inputs = _build_planner_inputs_for_runtime(cfg, trajectory_evidence, content_evidence_payload)
     mask_digest = None
     if isinstance(content_evidence_payload, dict):
         mask_digest = content_evidence_payload.get("mask_digest")
@@ -122,11 +130,11 @@ def run_detect_orchestrator(
         inputs=planner_inputs
     )
 
-    embed_time_plan_digest = None
+    expected_plan_digest = _resolve_expected_plan_digest(input_record)
+    embed_time_plan_digest = expected_plan_digest
     embed_time_basis_digest = None
     embed_time_planner_impl_identity = None
     if isinstance(input_record, dict):
-        embed_time_plan_digest = input_record.get("plan_digest")
         embed_time_basis_digest = input_record.get("basis_digest")
         embed_time_planner_impl_identity = input_record.get("subspace_planner_impl_identity")
 
@@ -157,15 +165,28 @@ def run_detect_orchestrator(
         embed_time_plan_digest=embed_time_plan_digest,
         trajectory_evidence=trajectory_evidence,
     )
+    lf_raw_score, hf_raw_score, raw_score_traces = _extract_content_raw_scores_from_image(
+        cfg=cfg,
+        input_record=input_record,
+        plan_payload=plan_payload,
+        plan_digest=detect_time_plan_digest,
+        cfg_digest=cfg_digest,
+    )
 
     mismatch_reasons = _collect_plan_mismatch_reasons(
-        embed_time_plan_digest=embed_time_plan_digest,
+        embed_time_plan_digest=expected_plan_digest,
         detect_time_plan_digest=detect_time_plan_digest,
         embed_time_basis_digest=embed_time_basis_digest,
         detect_time_basis_digest=detect_time_basis_digest,
         embed_time_planner_impl_identity=embed_time_planner_impl_identity,
         detect_time_planner_impl_identity=detect_time_planner_impl_identity
     )
+    plan_digest_status, plan_digest_reason = verify_plan_digest(
+        expected_plan_digest if isinstance(expected_plan_digest, str) else None,
+        detect_time_plan_digest if isinstance(detect_time_plan_digest, str) else None,
+    )
+    if plan_digest_reason == "plan_digest_mismatch" and "plan_digest_mismatch" not in mismatch_reasons:
+        mismatch_reasons.append("plan_digest_mismatch")
 
     trajectory_status, trajectory_mismatch_reason = _evaluate_trajectory_consistency(
         input_record=input_record,
@@ -230,6 +251,7 @@ def run_detect_orchestrator(
         if injection_evidence is not None:
             _merge_injection_evidence(content_evidence_payload, injection_evidence)
         _merge_hf_evidence(content_evidence_payload, hf_evidence)
+        _bind_raw_scores_to_content_payload(content_evidence_payload, lf_raw_score, hf_raw_score, raw_score_traces)
         content_result = content_evidence_payload
         content_evidence_adapted = content_evidence_payload
         geometry_evidence_adapted = _adapt_geometry_evidence_for_fusion(geometry_result)
@@ -260,28 +282,34 @@ def run_detect_orchestrator(
         if injection_evidence is not None:
             _merge_injection_evidence(content_evidence_payload, injection_evidence)
         _merge_hf_evidence(content_evidence_payload, hf_evidence)
+        _bind_raw_scores_to_content_payload(content_evidence_payload, lf_raw_score, hf_raw_score, raw_score_traces)
         content_result = content_evidence_payload
         content_evidence_adapted = content_evidence_payload
         geometry_evidence_adapted = _adapt_geometry_evidence_for_fusion(geometry_result)
         fusion_result = _build_absent_fusion_decision(cfg, content_evidence_adapted, geometry_evidence_adapted)
     else:
-        extractor_impl_id = getattr(impl_set.content_extractor, "impl_id", None)
-        if extractor_impl_id == CONTENT_DETECTOR_ID:
-            lf_evidence = _extract_lf_evidence_from_input_record(input_record)
-            detector_inputs: Dict[str, Any] = {
-                "plan_digest": detect_time_plan_digest,
-                "lf_evidence": lf_evidence,
-                "hf_evidence": hf_evidence,
-                "trajectory_evidence": trajectory_evidence,
-                "injection_evidence": injection_evidence,
-                "plan_payload": plan_payload,
-            }
-            content_result = impl_set.content_extractor.extract(
-                cfg,
-                inputs=detector_inputs,
-                cfg_digest=cfg_digest,
-            )
-            content_evidence_payload = _adapt_content_evidence_for_fusion(content_result)
+        lf_evidence = _extract_lf_evidence_from_input_record(input_record)
+        detector_inputs: Dict[str, Any] = {
+            "expected_plan_digest": expected_plan_digest,
+            "observed_plan_digest": detect_time_plan_digest,
+            "disable_cfg_plan_digest_fallback": True,
+            "plan_digest": detect_time_plan_digest,
+            "lf_evidence": lf_evidence,
+            "hf_evidence": hf_evidence,
+            "lf_score": lf_raw_score,
+            "hf_score": hf_raw_score,
+            "lf_detect_trace": raw_score_traces.get("lf") if isinstance(raw_score_traces, dict) else None,
+            "hf_detect_trace": raw_score_traces.get("hf") if isinstance(raw_score_traces, dict) else None,
+            "trajectory_evidence": trajectory_evidence,
+            "injection_evidence": injection_evidence,
+            "plan_payload": plan_payload,
+        }
+        content_result = impl_set.content_extractor.extract(
+            cfg,
+            inputs=detector_inputs,
+            cfg_digest=cfg_digest,
+        )
+        content_evidence_payload = _adapt_content_evidence_for_fusion(content_result)
         if content_evidence_payload is None:
             content_evidence_payload = {}
         if trajectory_evidence is not None:
@@ -290,12 +318,13 @@ def run_detect_orchestrator(
         if injection_evidence is not None:
             _merge_injection_evidence(content_evidence_payload, injection_evidence)
         _merge_hf_evidence(content_evidence_payload, hf_evidence)
+        _bind_raw_scores_to_content_payload(content_evidence_payload, lf_raw_score, hf_raw_score, raw_score_traces)
         content_evidence_adapted = _adapt_content_evidence_for_fusion(content_evidence_payload)
         fusion_result = impl_set.fusion_rule.fuse(cfg, content_evidence_adapted, geometry_evidence_adapted)
     input_fields = len(input_record or {})
 
     # (D-2) 实现 detect 侧同构分数与一致性校验
-    detect_placeholder_flag = True  # 默认为占位符模式
+    detect_runtime_mode = "placeholder"  # 默认：未获得可用 detect 同构分数
     final_latents = cfg.get("__detect_final_latents__")  # 从 CLI 层捕获的最后 latents
 
     if not forced_mismatch and final_latents is not None and isinstance(plan_payload, dict):
@@ -395,41 +424,20 @@ def run_detect_orchestrator(
 
         content_evidence_payload["subspace_consistency_status"] = subspace_consistency_status
 
-        # 如果 detect 侧分数有效且一致性通过，则标记为实际运行而非占位符
+        # 如果 detect 侧分数有效且一致性通过，则标记为真实运行模式
         if detect_lf_status == "ok" and subspace_consistency_status == "ok":
-            detect_placeholder_flag = False
+            detect_runtime_mode = "real"
 
     # 删除临时的 latents 字段，确保不写入 records
     cfg.pop("__detect_final_latents__", None)
 
-    # plan_digest 一致性验证（优先级高于 compute_failed）。
-    # 优先级：已检测到的 plan_digest mismatch > compute_failed > not_validated
-    plan_digest_status = "not_validated"
-    plan_digest_mismatch_reason = None
-
-    # 如果已通过 mismatch_reasons 检测到 plan_digest 不一致，优先级最高
-    if forced_mismatch and "plan_digest_mismatch" in mismatch_reasons:
-        # mismatch 已经在 forced_mismatch 分支中处理过，直接设置状态
-        plan_digest_status = "mismatch"
-        plan_digest_mismatch_reason = "plan_digest_mismatch"
-    # 仅当未检测到 mismatch 时，才进行额外的一致性验证或 compute_failed 标记
-    elif input_record and cfg_digest:
-        embed_time_plan_digest = input_record.get("plan_digest")
-        if embed_time_plan_digest is not None:
-            if detect_time_plan_digest is not None:
-                if detect_time_plan_digest == embed_time_plan_digest:
-                    plan_digest_status = "ok"
-                else:
-                    plan_digest_status = "mismatch"
-                    plan_digest_mismatch_reason = "plan_digest_mismatch"
-            else:
-                # 只有在不需要重算即可判定 mismatch 的情况下，才将 computed_failed 作为后备选项
-                # embed_time 存在但 detect_time 计算失败，这才是 compute_failed
-                plan_digest_status = "compute_failed"
+    plan_digest_mismatch_reason = plan_digest_reason if plan_digest_reason == "plan_digest_mismatch" else None
 
     record: Dict[str, Any] = {
         "operation": "detect",
-        "detect_placeholder": detect_placeholder_flag,
+        "detect_runtime_mode": detect_runtime_mode,
+        "detect_runtime_status": "active" if detect_runtime_mode == "real" else "fallback",
+        "detect_placeholder": (detect_runtime_mode != "real"),
         "image_path": "placeholder_test.png",
         "score": getattr(fusion_result, "evidence_summary", {}).get("content_score"),
         "execution_report": {
@@ -439,6 +447,9 @@ def run_detect_orchestrator(
             "audit_obligations_satisfied": True
         },
         "input_record_fields": input_fields,
+        "plan_digest_expected": expected_plan_digest,
+        "plan_digest_observed": detect_time_plan_digest,
+        "plan_digest_status": plan_digest_status,
         "plan_digest_validation_status": plan_digest_status,
         "plan_digest_mismatch_reason": primary_mismatch_reason if forced_mismatch else plan_digest_mismatch_reason,
         # (append-only) 保留完整的 payload，供后续升级 fusion 规则时直接消费冻结字段。
@@ -521,6 +532,172 @@ def _build_hf_detect_evidence(
     if "hf_score" not in evidence:
         evidence["hf_score"] = hf_score
     return evidence
+
+
+def _extract_content_raw_scores_from_image(
+    cfg: Dict[str, Any],
+    input_record: Optional[Dict[str, Any]],
+    plan_payload: Optional[Dict[str, Any]],
+    plan_digest: Optional[str],
+    cfg_digest: Optional[str],
+) -> tuple[Optional[float], Optional[float], Dict[str, Any]]:
+    """
+    功能：从图像提取 LF/HF 原始分数。 
+
+    Extract LF/HF raw scores from image artifact for calibration-ready evidence.
+
+    Args:
+        cfg: Configuration mapping.
+        input_record: Embed-side record mapping.
+        plan_payload: Planner payload mapping.
+        plan_digest: Detect-side plan digest.
+        cfg_digest: Detect-side config digest.
+
+    Returns:
+        Tuple of (lf_score, hf_score, traces).
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+
+    image_path = _resolve_detect_image_path(cfg, input_record)
+    if image_path is None:
+        return None, None, {
+            "lf": {"lf_status": "absent", "lf_absent_reason": "detect_image_absent"},
+            "hf": {"hf_status": "absent", "hf_absent_reason": "detect_image_absent"},
+        }
+
+    try:
+        image_array = np.asarray(Image.open(image_path).convert("RGB"), dtype=np.uint8)
+    except Exception:
+        return None, None, {
+            "lf": {"lf_status": "fail", "lf_failure_reason": "detect_image_load_failed"},
+            "hf": {"hf_status": "fail", "hf_failure_reason": "detect_image_load_failed"},
+        }
+
+    plan_dict = _resolve_plan_dict(plan_payload)
+    band_spec = plan_dict.get("band_spec") if isinstance(plan_dict.get("band_spec"), dict) else {}
+    routing_summary = band_spec.get("hf_selector_summary") if isinstance(band_spec.get("hf_selector_summary"), dict) else {}
+
+    key_material = digests.canonical_sha256(
+        {
+            "plan_digest": plan_digest,
+            "cfg_digest": cfg_digest,
+            "key_id": cfg.get("watermark", {}).get("key_id"),
+            "pattern_id": cfg.get("watermark", {}).get("pattern_id"),
+        }
+    )
+
+    lf_params = _build_lf_image_embed_params_for_detect(cfg)
+    lf_score, lf_trace = detect_low_freq_score(image_array, band_spec, key_material, lf_params)
+
+    hf_enabled = bool(cfg.get("watermark", {}).get("hf", {}).get("enabled", False))
+    if hf_enabled:
+        hf_params = _build_hf_image_embed_params_for_detect(cfg)
+        hf_score, hf_trace = detect_high_freq_score(image_array, routing_summary, key_material, hf_params)
+    else:
+        hf_score = None
+        hf_trace = {"hf_status": "absent", "hf_absent_reason": "hf_disabled_by_config"}
+
+    return lf_score, hf_score, {"lf": lf_trace, "hf": hf_trace}
+
+
+def _bind_raw_scores_to_content_payload(
+    content_evidence_payload: Dict[str, Any],
+    lf_score: Optional[float],
+    hf_score: Optional[float],
+    traces: Dict[str, Any],
+) -> None:
+    """
+    功能：将 LF/HF 原始分数和 trace 写入 content evidence。 
+
+    Bind LF/HF raw scores and traces into content evidence score_parts.
+    """
+    if not isinstance(content_evidence_payload, dict):
+        return
+    if not isinstance(traces, dict):
+        return
+
+    score_parts = content_evidence_payload.get("score_parts")
+    if not isinstance(score_parts, dict):
+        score_parts = {}
+        content_evidence_payload["score_parts"] = score_parts
+
+    lf_trace = traces.get("lf") if isinstance(traces.get("lf"), dict) else {}
+    hf_trace = traces.get("hf") if isinstance(traces.get("hf"), dict) else {}
+
+    content_evidence_payload["lf_score"] = lf_score
+    score_parts["lf_detect_trace"] = lf_trace
+    score_parts["lf_status"] = lf_trace.get("lf_status", "failed")
+
+    hf_status = hf_trace.get("hf_status")
+    if hf_status == "absent" and hf_trace.get("hf_absent_reason") == "hf_disabled_by_config":
+        content_evidence_payload.pop("hf_score", None)
+        content_evidence_payload.pop("hf_trace_digest", None)
+        score_parts.pop("hf_status", None)
+        score_parts.pop("hf_metrics", None)
+        score_parts.pop("hf_absent_reason", None)
+        score_parts.pop("hf_failure_reason", None)
+        score_parts.pop("hf_detect_trace", None)
+    else:
+        content_evidence_payload["hf_score"] = hf_score
+        score_parts["hf_detect_trace"] = hf_trace
+        score_parts["hf_status"] = hf_status if isinstance(hf_status, str) else "failed"
+        if "hf_absent_reason" in hf_trace:
+            score_parts["hf_absent_reason"] = hf_trace.get("hf_absent_reason")
+        if "hf_failure_reason" in hf_trace:
+            score_parts["hf_failure_reason"] = hf_trace.get("hf_failure_reason")
+
+
+def _resolve_detect_image_path(cfg: Dict[str, Any], input_record: Optional[Dict[str, Any]]) -> Optional[Path]:
+    if not isinstance(cfg, dict):
+        return None
+    candidates = [
+        cfg.get("__detect_input_image_path__"),
+        cfg.get("input_image_path"),
+    ]
+    if isinstance(input_record, dict):
+        candidates.append(input_record.get("watermarked_path"))
+        candidates.append(input_record.get("image_path"))
+    for value in candidates:
+        if isinstance(value, str) and value:
+            path = Path(value).resolve()
+            if path.exists() and path.is_file():
+                return path
+    return None
+
+
+def _resolve_plan_dict(plan_payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if isinstance(plan_payload, dict):
+        plan_node = plan_payload.get("plan")
+        if isinstance(plan_node, dict):
+            return plan_node
+        return plan_payload
+    return {}
+
+
+def _build_lf_image_embed_params_for_detect(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    lf_cfg = cfg.get("watermark", {}).get("lf", {}) if isinstance(cfg.get("watermark", {}), dict) else {}
+    if not isinstance(lf_cfg, dict):
+        lf_cfg = {}
+    return {
+        "dct_block_size": int(lf_cfg.get("dct_block_size", 8)),
+        "lf_coeff_indices": lf_cfg.get("lf_coeff_indices", [[1, 1], [1, 2], [2, 1]]),
+        "alpha": float(lf_cfg.get("strength", 1.5)),
+        "redundancy": int(lf_cfg.get("ecc", 1)),
+        "variance": float(lf_cfg.get("variance", 1.5)),
+    }
+
+
+def _build_hf_image_embed_params_for_detect(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    hf_cfg = cfg.get("watermark", {}).get("hf", {}) if isinstance(cfg.get("watermark", {}), dict) else {}
+    if not isinstance(hf_cfg, dict):
+        hf_cfg = {}
+    return {
+        "beta": float(hf_cfg.get("tau", 2.0)),
+        "tail_truncation_ratio": float(hf_cfg.get("tail_truncation_ratio", 0.1)),
+        "tail_truncation_mode": hf_cfg.get("tail_truncation_mode", "top_k_per_latent"),
+        "sampling_stride": int(hf_cfg.get("sampling_stride", 1)),
+    }
 
 
 def _merge_hf_evidence(content_evidence_payload: Dict[str, Any], hf_evidence: Dict[str, Any]) -> None:
@@ -772,6 +949,35 @@ def _extract_lf_evidence_from_input_record(input_record: Optional[Dict[str, Any]
         if not isinstance(candidate, dict):
             continue
         if "lf_score" in candidate or "lf_trace_digest" in candidate or candidate.get("status") in {"ok", "failed", "mismatch", "absent"}:
+            return candidate
+    return None
+
+
+def _resolve_expected_plan_digest(input_record: Optional[Dict[str, Any]]) -> Optional[str]:
+    """
+    功能：从输入记录解析 expected plan_digest。 
+
+    Resolve expected plan digest strictly from bound input record payload.
+
+    Args:
+        input_record: Embed-side bound input record.
+
+    Returns:
+        Expected plan digest string or None.
+    """
+    if not isinstance(input_record, dict):
+        return None
+
+    direct = input_record.get("plan_digest")
+    if isinstance(direct, str) and direct:
+        return direct
+
+    for key in ["content_evidence_payload", "content_evidence", "content_result"]:
+        payload = input_record.get(key)
+        if not isinstance(payload, dict):
+            continue
+        candidate = payload.get("plan_digest")
+        if isinstance(candidate, str) and candidate:
             return candidate
     return None
 
@@ -1262,7 +1468,8 @@ def _build_mismatch_fusion_decision(
 
 def _build_planner_inputs_for_runtime(
     cfg: Dict[str, Any],
-    trajectory_evidence: Optional[Dict[str, Any]] = None
+    trajectory_evidence: Optional[Dict[str, Any]] = None,
+    content_evidence_payload: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     功能：构造规划器输入签名。
@@ -1282,6 +1489,9 @@ def _build_planner_inputs_for_runtime(
     if trajectory_evidence is not None and not isinstance(trajectory_evidence, dict):
         # trajectory_evidence 类型不合法，必须 fail-fast。
         raise TypeError("trajectory_evidence must be dict or None")
+    if content_evidence_payload is not None and not isinstance(content_evidence_payload, dict):
+        # content_evidence_payload 类型不合法，必须 fail-fast。
+        raise TypeError("content_evidence_payload must be dict or None")
 
     trace_signature = {
         "num_inference_steps": cfg.get("inference_num_steps", cfg.get("generation", {}).get("num_inference_steps", 16) if isinstance(cfg.get("generation"), dict) else 16),
@@ -1292,14 +1502,21 @@ def _build_planner_inputs_for_runtime(
     inputs = {"trace_signature": trace_signature}
     if trajectory_evidence is not None:
         inputs["trajectory_evidence"] = trajectory_evidence
+    if isinstance(content_evidence_payload, dict):
+        mask_stats = content_evidence_payload.get("mask_stats")
+        if isinstance(mask_stats, dict):
+            inputs["mask_summary"] = dict(mask_stats)
+            routing_digest = mask_stats.get("routing_digest")
+            if isinstance(routing_digest, str) and routing_digest:
+                inputs["routing_digest"] = routing_digest
     return inputs
 
 
 def run_calibrate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Dict[str, Any]:
     """
-    功能：执行校准占位流程。
+    功能：执行校准流程并产出 NP 阈值工件。
 
-    Execute calibration placeholder flow using injected implementations.
+    Execute calibration workflow and build NP thresholds artifacts.
 
     Args:
         cfg: Config mapping.
@@ -1318,29 +1535,73 @@ def run_calibrate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> D
         # impl_set 类型不合法，必须 fail-fast。
         raise TypeError("impl_set must be BuiltImplSet")
 
-    subspace_result = impl_set.subspace_planner.plan(cfg)
+    thresholds_spec = neyman_pearson.build_thresholds_spec(cfg)
+    target_fpr = thresholds_spec.get("target_fpr")
+    if not isinstance(target_fpr, (int, float)):
+        raise TypeError("thresholds_spec.target_fpr must be number")
+
+    detect_records = _load_records_for_calibration(cfg)
+    scores, strata_info = load_scores_for_calibration(detect_records)
+    threshold_value, order_stat_info = compute_np_threshold(scores, float(target_fpr))
+
+    threshold_key_used = neyman_pearson.format_fpr_key_canonical(float(target_fpr))
+    threshold_id = f"content_score_np_{threshold_key_used}"
+    thresholds_artifact = {
+        "calibration_version": "np_v1",
+        "rule_id": neyman_pearson.RULE_ID,
+        "rule_version": neyman_pearson.RULE_VERSION,
+        "threshold_id": threshold_id,
+        "score_name": "content_score",
+        "target_fpr": float(target_fpr),
+        "threshold_value": float(threshold_value),
+        "threshold_key_used": threshold_key_used,
+        "quantile_rule": "higher",
+        "ties_policy": "higher",
+    }
+    threshold_metadata_artifact = {
+        "calibration_version": "np_v1",
+        "rule_id": neyman_pearson.RULE_ID,
+        "rule_version": neyman_pearson.RULE_VERSION,
+        "score_name": "content_score",
+        "target_fpr": float(target_fpr),
+        "null_source": "wrong_key",
+        "n_samples": len(scores),
+        "order_statistics": order_stat_info,
+        "stratification": strata_info,
+        "sample_digest": digests.canonical_sha256({"scores": [round(float(v), 12) for v in scores]}),
+    }
 
     record: Dict[str, Any] = {
         "operation": "calibrate",
-        "calibration_placeholder": True,
+        "calibration_placeholder": False,
         "protocol": "neyman_pearson",
+        "threshold_key_used": threshold_key_used,
+        "threshold_id": threshold_id,
+        "calibration_samples": len(scores),
+        "calibration_summary": {
+            "score_name": "content_score",
+            "target_fpr": float(target_fpr),
+            "threshold_value": float(threshold_value),
+            "order_statistics": order_stat_info,
+            "stratification": strata_info,
+        },
+        "thresholds_artifact": thresholds_artifact,
+        "threshold_metadata_artifact": threshold_metadata_artifact,
         "execution_report": {
             "content_chain_status": "ok",
             "geometry_chain_status": "ok",
             "fusion_status": "ok",
             "audit_obligations_satisfied": True
         },
-        "calibration_samples": 1000,
-        "subspace_plan": subspace_result
     }
     return record
 
 
 def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Dict[str, Any]:
     """
-    功能：执行评估占位流程。
+    功能：执行只读阈值评估流程。
 
-    Execute evaluation placeholder flow using injected implementations.
+    Execute evaluation workflow in readonly-threshold mode.
 
     Args:
         cfg: Config mapping.
@@ -1359,51 +1620,378 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
         # impl_set 类型不合法，必须 fail-fast。
         raise TypeError("impl_set must be BuiltImplSet")
 
-    content_result = impl_set.content_extractor.extract(cfg)
-    geometry_result = impl_set.geometry_extractor.extract(cfg)
-    
-    # (1) 统一转换 ContentEvidence / GeometryEvidence 数据类为 dict。
-    content_evidence_payload = None
-    if hasattr(content_result, "as_dict") and callable(content_result.as_dict):
-        content_evidence_payload = content_result.as_dict()
-    elif isinstance(content_result, dict):
-        content_evidence_payload = content_result
-    
-    geometry_evidence_payload = None
-    if hasattr(geometry_result, "as_dict") and callable(geometry_result.as_dict):
-        geometry_evidence_payload = geometry_result.as_dict()
-    elif isinstance(geometry_result, dict):
-        geometry_evidence_payload = geometry_result
-    
-    # (2) 构造融合输入适配 dict。
-    content_evidence_adapted = _adapt_content_evidence_for_fusion(content_result)
-    geometry_evidence_adapted = _adapt_geometry_evidence_for_fusion(geometry_result)
-    
-    fusion_result = impl_set.fusion_rule.fuse(cfg, content_evidence_adapted, geometry_evidence_adapted)
+    thresholds_path = _resolve_thresholds_path_for_evaluate(cfg)
+    thresholds_obj = load_thresholds_artifact_controlled(str(thresholds_path))
+    detect_records = _load_records_for_evaluate(cfg)
+    metrics_obj, breakdown = evaluate_records_against_threshold(detect_records, thresholds_obj)
+
+    _ = impl_set
+
+    fusion_result = FusionDecision(
+        is_watermarked=None,
+        decision_status="abstain",
+        thresholds_digest=digests.canonical_sha256(thresholds_obj),
+        evidence_summary={
+            "content_score": None,
+            "geometry_score": None,
+            "content_status": "aggregate",
+            "geometry_status": "aggregate",
+            "fusion_rule_id": "evaluate_readonly_thresholds_v1",
+        },
+        audit={
+            "impl_identity": "evaluate_orchestrator",
+            "mode": "readonly_thresholds",
+            "threshold_key_used": thresholds_obj.get("threshold_key_used"),
+            "n_total": metrics_obj.get("n_total"),
+        },
+        fusion_rule_version="v1",
+        used_threshold_id=thresholds_obj.get("threshold_id") if isinstance(thresholds_obj.get("threshold_id"), str) else None,
+    )
+
+    report_obj = {
+        "evaluation_version": "eval_v1",
+        "attack_protocol_version": _read_attack_protocol_version(cfg),
+        "thresholds_artifact_path": str(thresholds_path),
+        "thresholds_digest": digests.canonical_sha256(thresholds_obj),
+        "cfg_digest": cfg.get("__evaluate_cfg_digest__", "<absent>"),
+        "anchors": _collect_evaluation_anchors(detect_records),
+    }
 
     record: Dict[str, Any] = {
         "operation": "evaluate",
-        "evaluation_placeholder": True,
-        "metrics": {
-            "tpr": 0.95,
-            "fpr": 0.01,
-            "accuracy": 0.97
-        },
+        "evaluation_placeholder": False,
+        "metrics": metrics_obj,
+        "evaluation_breakdown": breakdown,
+        "evaluation_report": report_obj,
+        "thresholds_artifact": thresholds_obj,
+        "threshold_key_used": thresholds_obj.get("threshold_key_used"),
         "execution_report": {
             "content_chain_status": "ok",
             "geometry_chain_status": "ok",
             "fusion_status": "ok",
             "audit_obligations_satisfied": True
         },
-        "test_samples": 500,
-        # (append-only) 保留完整的 payload。
-        "content_evidence_payload": content_evidence_payload,
-        "geometry_evidence_payload": geometry_evidence_payload,
-        "content_result": content_result,
-        "geometry_result": geometry_result,
+        "test_samples": int(metrics_obj.get("n_total", 0)),
         "fusion_result": fusion_result
     }
     return record
+
+
+def load_scores_for_calibration(records: list[Dict[str, Any]]) -> tuple[list[float], Dict[str, Any]]:
+    """
+    功能：从 detect records 加载校准分数。 
+
+    Load calibration scores from detect records using strict status filtering.
+
+    Args:
+        records: Detect records list.
+
+    Returns:
+        Tuple of (scores, strata_info).
+    """
+    if not isinstance(records, list):
+        raise TypeError("records must be list")
+
+    scores: list[float] = []
+    total = len(records)
+    valid = 0
+    rejected = 0
+    for item in records:
+        if not isinstance(item, dict):
+            rejected += 1
+            continue
+        content_payload = item.get("content_evidence_payload")
+        status_value = None
+        score_value = None
+        if isinstance(content_payload, dict):
+            status_value = content_payload.get("status")
+            score_value = content_payload.get("score")
+        if status_value != "ok":
+            rejected += 1
+            continue
+        if not isinstance(score_value, (int, float)):
+            rejected += 1
+            continue
+        score_float = float(score_value)
+        if not np.isfinite(score_float):
+            rejected += 1
+            continue
+        scores.append(score_float)
+        valid += 1
+
+    if len(scores) == 0:
+        raise ValueError("calibration requires at least one valid content_score sample")
+
+    strata_info = {
+        "global": {
+            "n_total": total,
+            "n_valid": valid,
+            "n_rejected": rejected,
+        }
+    }
+    return scores, strata_info
+
+
+def compute_np_threshold(scores: list[float], target_fpr: float) -> tuple[float, Dict[str, Any]]:
+    """
+    功能：按 order-statistics 计算 NP 阈值。 
+
+    Compute Neyman-Pearson threshold using higher quantile order statistics.
+
+    Args:
+        scores: Null distribution scores.
+        target_fpr: Target false positive rate.
+
+    Returns:
+        Tuple of (threshold_value, order_stat_info).
+    """
+    if not isinstance(scores, list) or len(scores) == 0:
+        raise ValueError("scores must be non-empty list")
+    if not isinstance(target_fpr, (int, float)):
+        raise TypeError("target_fpr must be number")
+
+    threshold_value, order_stat_info = neyman_pearson.compute_np_threshold_from_scores(
+        scores,
+        float(target_fpr),
+        quantile_rule="higher",
+    )
+    return float(threshold_value), order_stat_info
+
+
+def load_thresholds_artifact_controlled(path: str) -> Dict[str, Any]:
+    """
+    功能：只读加载阈值工件。 
+
+    Load thresholds artifact in read-only mode with schema checks.
+
+    Args:
+        path: Thresholds artifact path.
+
+    Returns:
+        Thresholds artifact mapping.
+    """
+    if not isinstance(path, str) or not path:
+        raise TypeError("path must be non-empty str")
+    path_obj = Path(path)
+    if not path_obj.exists() or not path_obj.is_file():
+        raise ValueError(f"thresholds artifact not found: {path}")
+    payload = records_io.read_json(path)
+    if not isinstance(payload, dict):
+        raise TypeError("thresholds artifact must be dict")
+    required = ["threshold_id", "score_name", "target_fpr", "threshold_value", "threshold_key_used"]
+    for field_name in required:
+        if field_name not in payload:
+            raise ValueError(f"thresholds artifact missing field: {field_name}")
+    if not isinstance(payload.get("threshold_value"), (int, float)):
+        raise TypeError("threshold_value must be number")
+    return payload
+
+
+def evaluate_records_against_threshold(
+    records: list[Dict[str, Any]],
+    thresholds_obj: Dict[str, Any]
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """
+    功能：使用只读阈值评测 detect 记录。 
+
+    Evaluate detect records using precomputed thresholds artifact only.
+
+    Args:
+        records: Detect records list.
+        thresholds_obj: Thresholds artifact mapping.
+
+    Returns:
+        Tuple of (metrics, breakdown).
+    """
+    if not isinstance(records, list):
+        raise TypeError("records must be list")
+    if not isinstance(thresholds_obj, dict):
+        raise TypeError("thresholds_obj must be dict")
+
+    threshold_value = thresholds_obj.get("threshold_value")
+    if not isinstance(threshold_value, (int, float)):
+        raise TypeError("threshold_value must be number")
+    threshold_float = float(threshold_value)
+
+    n_total = 0
+    n_reject = 0
+    n_pos = 0
+    n_neg = 0
+    tp = 0
+    fp = 0
+    accepted = 0
+
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+        n_total += 1
+        content_payload = item.get("content_evidence_payload")
+        if not isinstance(content_payload, dict):
+            n_reject += 1
+            continue
+        if content_payload.get("status") != "ok":
+            n_reject += 1
+            continue
+        score_value = content_payload.get("score")
+        if not isinstance(score_value, (int, float)):
+            n_reject += 1
+            continue
+        score_float = float(score_value)
+        if not np.isfinite(score_float):
+            n_reject += 1
+            continue
+
+        gt_value = _extract_ground_truth_label(item)
+        if gt_value is None:
+            n_reject += 1
+            continue
+
+        accepted += 1
+        pred_positive = score_float >= threshold_float
+        if gt_value:
+            n_pos += 1
+            if pred_positive:
+                tp += 1
+        else:
+            n_neg += 1
+            if pred_positive:
+                fp += 1
+
+    reject_rate = float(n_reject / n_total) if n_total > 0 else 1.0
+    tpr_value = float(tp / n_pos) if n_pos > 0 else None
+    fpr_empirical = float(fp / n_neg) if n_neg > 0 else None
+
+    metrics = {
+        "metric_version": "tpr_at_fpr_v1",
+        "score_name": thresholds_obj.get("score_name", "content_score"),
+        "target_fpr": thresholds_obj.get("target_fpr"),
+        "threshold_value": threshold_float,
+        "threshold_key_used": thresholds_obj.get("threshold_key_used"),
+        "tpr_at_fpr": tpr_value,
+        "fpr_empirical": fpr_empirical,
+        "reject_rate": reject_rate,
+        "n_total": n_total,
+        "n_accepted": accepted,
+        "n_rejected": n_reject,
+        "n_pos": n_pos,
+        "n_neg": n_neg,
+    }
+    breakdown = {
+        "confusion": {
+            "tp": tp,
+            "fp": fp,
+            "fn": max(0, n_pos - tp),
+            "tn": max(0, n_neg - fp),
+        }
+    }
+    return metrics, breakdown
+
+
+def _load_records_for_calibration(cfg: Dict[str, Any]) -> list[Dict[str, Any]]:
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    records_glob = cfg.get("__calibration_detect_records_glob__")
+    if not isinstance(records_glob, str) or not records_glob:
+        calibration_cfg = cfg.get("calibration") if isinstance(cfg.get("calibration"), dict) else {}
+        records_glob = calibration_cfg.get("detect_records_glob") if isinstance(calibration_cfg.get("detect_records_glob"), str) else None
+    if not isinstance(records_glob, str) or not records_glob:
+        raise ValueError("calibration.detect_records_glob is required")
+    return _load_records_by_glob(records_glob)
+
+
+def _load_records_for_evaluate(cfg: Dict[str, Any]) -> list[Dict[str, Any]]:
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    records_glob = cfg.get("__evaluate_detect_records_glob__")
+    if not isinstance(records_glob, str) or not records_glob:
+        evaluate_cfg = cfg.get("evaluate") if isinstance(cfg.get("evaluate"), dict) else {}
+        records_glob = evaluate_cfg.get("detect_records_glob") if isinstance(evaluate_cfg.get("detect_records_glob"), str) else None
+    if not isinstance(records_glob, str) or not records_glob:
+        raise ValueError("evaluate.detect_records_glob is required")
+    return _load_records_by_glob(records_glob)
+
+
+def _resolve_thresholds_path_for_evaluate(cfg: Dict[str, Any]) -> Path:
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    thresholds_path = cfg.get("__evaluate_thresholds_path__")
+    if not isinstance(thresholds_path, str) or not thresholds_path:
+        evaluate_cfg = cfg.get("evaluate") if isinstance(cfg.get("evaluate"), dict) else {}
+        thresholds_path = evaluate_cfg.get("thresholds_path") if isinstance(evaluate_cfg.get("thresholds_path"), str) else None
+    if not isinstance(thresholds_path, str) or not thresholds_path:
+        raise ValueError("evaluate.thresholds_path is required")
+    path_obj = Path(thresholds_path).resolve()
+    if not path_obj.exists() or not path_obj.is_file():
+        raise ValueError(f"evaluate thresholds_path not found: {path_obj}")
+    return path_obj
+
+
+def _load_records_by_glob(records_glob: str) -> list[Dict[str, Any]]:
+    if not isinstance(records_glob, str) or not records_glob:
+        raise TypeError("records_glob must be non-empty str")
+    matched_paths = sorted(glob.glob(records_glob, recursive=True))
+    if len(matched_paths) == 0:
+        raise ValueError(f"no detect records matched: {records_glob}")
+    records: list[Dict[str, Any]] = []
+    for path_str in matched_paths:
+        path_obj = Path(path_str)
+        if not path_obj.is_file():
+            continue
+        payload = records_io.read_json(str(path_obj))
+        if isinstance(payload, dict):
+            records.append(payload)
+    if len(records) == 0:
+        raise ValueError(f"no valid detect records loaded from: {records_glob}")
+    return records
+
+
+def _extract_ground_truth_label(record: Dict[str, Any]) -> Optional[bool]:
+    if not isinstance(record, dict):
+        return None
+    for key_name in ["ground_truth_is_watermarked", "is_watermarked_gt", "label"]:
+        value = record.get(key_name)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)) and value in (0, 1):
+            return bool(value)
+    return None
+
+
+def _collect_evaluation_anchors(records: list[Dict[str, Any]]) -> Dict[str, Any]:
+    if not isinstance(records, list):
+        return {}
+    cfg_digests = []
+    plan_digests = []
+    impl_digests = []
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+        cfg_digest = item.get("cfg_digest")
+        if isinstance(cfg_digest, str) and cfg_digest:
+            cfg_digests.append(cfg_digest)
+        plan_digest = item.get("plan_digest")
+        if isinstance(plan_digest, str) and plan_digest:
+            plan_digests.append(plan_digest)
+        impl_digest = item.get("impl", {}).get("digests", {}).get("content_extractor") if isinstance(item.get("impl"), dict) else None
+        if isinstance(impl_digest, str) and impl_digest:
+            impl_digests.append(impl_digest)
+    return {
+        "cfg_digest_set": sorted(set(cfg_digests)),
+        "plan_digest_set": sorted(set(plan_digests)),
+        "impl_digest_set": sorted(set(impl_digests)),
+    }
+
+
+def _read_attack_protocol_version(cfg: Dict[str, Any]) -> str:
+    if not isinstance(cfg, dict):
+        return "<absent>"
+    evaluate_cfg = cfg.get("evaluate")
+    if not isinstance(evaluate_cfg, dict):
+        return "<absent>"
+    value = evaluate_cfg.get("attack_protocol_version")
+    if isinstance(value, str) and value:
+        return value
+    return "<absent>"
 
 
 def _adapt_content_evidence_for_fusion(content_evidence: Any) -> Dict[str, Any]:

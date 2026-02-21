@@ -24,6 +24,7 @@ CONTENT_DETECTOR_TRACE_VERSION = "v2"
 
 ALLOWED_DETECTOR_FAILURE_REASONS = {
     "detector_no_plan",
+    "detector_no_plan_expected",
     "detector_plan_mismatch",
     "detector_no_evidence",
     "detector_invalid_input",
@@ -120,14 +121,34 @@ class ContentDetector:
             )
 
         normalized_inputs: Dict[str, Any] = inputs or {}
-        plan_digest = cfg.get("watermark", {}).get("plan_digest")
-        if not isinstance(plan_digest, str) or not plan_digest:
+        test_mode = bool(normalized_inputs.get("test_mode", False))
+        disable_cfg_plan_digest_fallback = bool(normalized_inputs.get("disable_cfg_plan_digest_fallback", False))
+        expected_plan_digest = normalized_inputs.get("expected_plan_digest")
+        observed_plan_digest = normalized_inputs.get("observed_plan_digest")
+        if expected_plan_digest is None:
+            legacy_expected = normalized_inputs.get("plan_digest_expected")
+            if isinstance(legacy_expected, str) and legacy_expected:
+                expected_plan_digest = legacy_expected
+
+        if expected_plan_digest is None and test_mode and not disable_cfg_plan_digest_fallback:
+            cfg_plan_digest = cfg.get("watermark", {}).get("plan_digest")
+            if isinstance(cfg_plan_digest, str) and cfg_plan_digest:
+                expected_plan_digest = cfg_plan_digest
+
+        if expected_plan_digest is None:
+            legacy_plan_digest = normalized_inputs.get("plan_digest")
+            if isinstance(legacy_plan_digest, str) and legacy_plan_digest:
+                expected_plan_digest = legacy_plan_digest
+                if observed_plan_digest is None:
+                    observed_plan_digest = legacy_plan_digest
+
+        if not isinstance(expected_plan_digest, str) or not expected_plan_digest:
             return self._build_result(
                 cfg=cfg,
-                status="mismatch",
+                status="absent",
                 score=None,
                 plan_digest=None,
-                content_failure_reason="detector_no_plan",
+                content_failure_reason="detector_no_plan_expected",
                 score_parts=None,
                 lf_score=None,
                 hf_score=None,
@@ -135,13 +156,17 @@ class ContentDetector:
                 detection_result=None,
             )
 
-        input_plan_digest = normalized_inputs.get("plan_digest")
-        if input_plan_digest is not None and input_plan_digest != plan_digest:
+        if observed_plan_digest is None:
+            legacy_observed = normalized_inputs.get("plan_digest")
+            if isinstance(legacy_observed, str) and legacy_observed:
+                observed_plan_digest = legacy_observed
+
+        if observed_plan_digest is not None and observed_plan_digest != expected_plan_digest:
             return self._build_result(
                 cfg=cfg,
                 status="mismatch",
                 score=None,
-                plan_digest=plan_digest,
+                plan_digest=expected_plan_digest,
                 content_failure_reason="detector_plan_mismatch",
                 score_parts=None,
                 lf_score=None,
@@ -197,7 +222,7 @@ class ContentDetector:
                 cfg=cfg,
                 status="failed",
                 score=None,
-                plan_digest=plan_digest,
+                plan_digest=expected_plan_digest,
                 content_failure_reason="detector_score_validation_failed",
                 score_parts=None,
                 lf_score=None,
@@ -216,7 +241,7 @@ class ContentDetector:
                 cfg=cfg,
                 status=lf_status,
                 score=None,
-                plan_digest=plan_digest,
+                plan_digest=expected_plan_digest,
                 content_failure_reason=propagated_reason,
                 score_parts=None,
                 lf_score=None,
@@ -230,7 +255,7 @@ class ContentDetector:
                 cfg=cfg,
                 status="mismatch",
                 score=None,
-                plan_digest=plan_digest,
+                plan_digest=expected_plan_digest,
                 content_failure_reason=hf_failure_reason or "hf_plan_mismatch",
                 score_parts=None,
                 lf_score=None,
@@ -244,7 +269,7 @@ class ContentDetector:
                 cfg=cfg,
                 status="failed",
                 score=None,
-                plan_digest=plan_digest,
+                plan_digest=expected_plan_digest,
                 content_failure_reason=hf_failure_reason or "hf_detection_failed",
                 score_parts=None,
                 lf_score=None,
@@ -258,7 +283,7 @@ class ContentDetector:
                 cfg=cfg,
                 status="failed",
                 score=None,
-                plan_digest=plan_digest,
+                plan_digest=expected_plan_digest,
                 content_failure_reason="detector_no_evidence",
                 score_parts=None,
                 lf_score=None,
@@ -275,7 +300,7 @@ class ContentDetector:
         )
 
         detection_result_typed: Dict[str, Any] = {
-            "plan_digest": plan_digest,
+            "plan_digest": expected_plan_digest,
             "lf_score": lf_score,
             "hf_score": hf_score,
             "content_score": content_score,
@@ -287,7 +312,7 @@ class ContentDetector:
             cfg=cfg,
             status="ok",
             score=content_score,
-            plan_digest=plan_digest,
+            plan_digest=expected_plan_digest,
             content_failure_reason=None,
             score_parts=score_parts,
             lf_score=lf_score,

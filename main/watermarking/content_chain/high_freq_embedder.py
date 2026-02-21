@@ -11,7 +11,10 @@ Module type: Core innovation module
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+import numpy as np
 
 from main.core import digests
 
@@ -486,6 +489,180 @@ class HighFreqEmbedder:
             },
             "content_failure_reason": reason,
         }
+
+
+def embed_high_freq_pattern(
+    image_array: np.ndarray,
+    routing_summary: Dict[str, Any],
+    key_material: str,
+    params: Dict[str, Any]
+) -> tuple[np.ndarray, Dict[str, Any]]:
+    """
+    功能：在纹理高频区域执行最小可行嵌入。
+
+    Embed deterministic weak pattern in texture-driven high-frequency region.
+
+    Args:
+        image_array: Input uint8 image array in HWC format.
+        routing_summary: Routing summary mapping from planner/mask.
+        key_material: Deterministic key material string.
+        params: HF embedding parameters.
+
+    Returns:
+        Tuple of (watermarked_image_array, hf_trace_summary).
+
+    Raises:
+        TypeError: If input types are invalid.
+    """
+    if not isinstance(image_array, np.ndarray):
+        raise TypeError("image_array must be np.ndarray")
+    if image_array.ndim != 3:
+        raise ValueError("image_array must be HWC array")
+    if not isinstance(routing_summary, dict):
+        raise TypeError("routing_summary must be dict")
+    if not isinstance(key_material, str) or not key_material:
+        raise TypeError("key_material must be non-empty str")
+    if not isinstance(params, dict):
+        raise TypeError("params must be dict")
+
+    beta = float(params.get("beta", 2.0))
+    tail_ratio = float(params.get("tail_truncation_ratio", 0.1))
+    texture_ratio = float(routing_summary.get("region_ratio", params.get("texture_ratio", 0.2)))
+    texture_ratio = max(0.0, min(1.0, texture_ratio))
+    tail_ratio = max(0.0, min(0.95, tail_ratio))
+    if beta <= 0:
+        raise ValueError("beta must be positive")
+
+    work = image_array.astype(np.float32).copy()
+    gray = np.mean(work, axis=2)
+    grad_x = np.zeros_like(gray)
+    grad_y = np.zeros_like(gray)
+    grad_x[:, 1:] = np.abs(gray[:, 1:] - gray[:, :-1])
+    grad_y[1:, :] = np.abs(gray[1:, :] - gray[:-1, :])
+    texture = grad_x + grad_y
+
+    flat_texture = texture.reshape(-1)
+    total = flat_texture.shape[0]
+    if total <= 0:
+        return image_array.copy(), {
+            "hf_status": "absent",
+            "hf_absent_reason": "empty_image",
+        }
+
+    selected_count = max(1, int(round(total * texture_ratio)))
+    sorted_idx = np.argsort(flat_texture)
+    texture_idx = sorted_idx[-selected_count:]
+
+    rng = np.random.default_rng(int(digests.canonical_sha256({"key_material": key_material, "tag": "hf_texture"})[:16], 16))
+    pattern = rng.choice([-1.0, 1.0], size=selected_count).astype(np.float32)
+
+    threshold = float(np.quantile(flat_texture, max(0.0, 1.0 - texture_ratio)))
+    perturbation = np.zeros(total, dtype=np.float32)
+    perturbation[texture_idx] = pattern * beta
+
+    # tail truncation-like control: clamp perturbation magnitude by tail ratio-driven scale
+    clamp_scale = max(1.0, beta * (1.0 + tail_ratio * 2.0))
+    perturbation = np.clip(perturbation, -clamp_scale, clamp_scale)
+
+    for channel_idx in range(work.shape[2]):
+        channel = work[:, :, channel_idx].reshape(-1)
+        channel = channel + perturbation
+        work[:, :, channel_idx] = channel.reshape(work.shape[:2])
+
+    watermarked = np.clip(np.rint(work), 0, 255).astype(np.uint8)
+    hf_trace_summary = {
+        "hf_status": "ok",
+        "method": "texture_region_weak_pattern",
+        "tail_truncation_ratio": tail_ratio,
+        "texture_ratio": texture_ratio,
+        "texture_threshold": threshold,
+        "selected_pixel_count": int(selected_count),
+        "total_pixel_count": int(total),
+        "beta": beta,
+        "routing_digest": digests.canonical_sha256(routing_summary),
+    }
+    return watermarked, hf_trace_summary
+
+
+def detect_high_freq_score(
+    image_array: np.ndarray,
+    routing_summary: Dict[str, Any],
+    key_material: str,
+    params: Dict[str, Any]
+) -> tuple[Optional[float], Dict[str, Any]]:
+    """
+    功能：提取 HF 通道原始分数。
+
+    Detect raw HF score from texture region statistics.
+
+    Args:
+        image_array: Input uint8 image array in HWC format.
+        routing_summary: Routing summary mapping from planner/mask.
+        key_material: Deterministic key material string.
+        params: HF detection parameters.
+
+    Returns:
+        Tuple of (hf_score, hf_detect_trace).
+    """
+    if not isinstance(image_array, np.ndarray):
+        raise TypeError("image_array must be np.ndarray")
+    if image_array.ndim != 3:
+        return None, {"hf_status": "fail", "hf_failure_reason": "hf_invalid_input"}
+    if not isinstance(routing_summary, dict):
+        raise TypeError("routing_summary must be dict")
+    if not isinstance(key_material, str) or not key_material:
+        raise TypeError("key_material must be non-empty str")
+    if not isinstance(params, dict):
+        raise TypeError("params must be dict")
+
+    texture_ratio = float(routing_summary.get("region_ratio", params.get("texture_ratio", 0.2)))
+    texture_ratio = max(0.0, min(1.0, texture_ratio))
+    gray = np.mean(image_array.astype(np.float32), axis=2)
+    grad_x = np.zeros_like(gray)
+    grad_y = np.zeros_like(gray)
+    grad_x[:, 1:] = np.abs(gray[:, 1:] - gray[:, :-1])
+    grad_y[1:, :] = np.abs(gray[1:, :] - gray[:-1, :])
+    texture = grad_x + grad_y
+    flat_texture = texture.reshape(-1)
+    total = flat_texture.shape[0]
+    if total <= 0:
+        return None, {"hf_status": "absent", "hf_absent_reason": "empty_image"}
+
+    selected_count = max(1, int(round(total * texture_ratio)))
+    sorted_idx = np.argsort(flat_texture)
+    texture_idx = sorted_idx[-selected_count:]
+
+    rng = np.random.default_rng(int(digests.canonical_sha256({"key_material": key_material, "tag": "hf_texture"})[:16], 16))
+    pattern = rng.choice([-1.0, 1.0], size=selected_count).astype(np.float32)
+
+    selected_values = flat_texture[texture_idx]
+    raw = float(np.dot(selected_values, pattern) / max(1.0, np.linalg.norm(selected_values) * np.linalg.norm(pattern)))
+    hf_score = float(0.5 + 0.5 * math.tanh(raw))
+    trace = {
+        "hf_status": "ok",
+        "hf_score_raw": raw,
+        "selected_pixel_count": int(selected_count),
+        "total_pixel_count": int(total),
+        "routing_digest": digests.canonical_sha256(routing_summary),
+    }
+    return hf_score, trace
+
+
+def compute_hf_trace_digest(hf_trace_summary: Dict[str, Any]) -> str:
+    """
+    功能：计算 HF 追踪摘要 digest。
+
+    Compute canonical HF trace digest from summary mapping.
+
+    Args:
+        hf_trace_summary: HF trace summary mapping.
+
+    Returns:
+        SHA256 digest string.
+    """
+    if not isinstance(hf_trace_summary, dict):
+        raise TypeError("hf_trace_summary must be dict")
+    return digests.canonical_sha256(hf_trace_summary)
 
 
 def _extract_plan_digest(plan: Dict[str, Any]) -> Optional[str]:

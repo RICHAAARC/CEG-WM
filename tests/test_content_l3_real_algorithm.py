@@ -200,7 +200,6 @@ def test_unified_extractor_detect_mode_plan_mismatch_returns_mismatch():
             }
         },
         "watermark": {
-            "plan_digest": "expected_plan_digest_abc123",  # 期望的 plan_digest
             "lf": {
                 "enabled": True
             }
@@ -208,6 +207,7 @@ def test_unified_extractor_detect_mode_plan_mismatch_returns_mismatch():
     }
     
     inputs = {
+        "expected_plan_digest": "expected_plan_digest_abc123",  # 期望的 plan_digest
         "plan_digest": "actual_plan_digest_xyz789",  # 实际的 plan_digest（不一致）
         "lf_evidence": {
             "status": "ok",

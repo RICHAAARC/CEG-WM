@@ -4,7 +4,7 @@
 功能说明：
 - 规范化输出目录路径，确保输出布局，加载合同与白名单，验证配置，解析实现，构造记录，绑定字段，写盘，并产出闭包。
 - 包含详细的输入验证、错误处理与状态更新机制，确保健壮性与可维护性。
-- 目前实现为 placeholder，未来会逐步完善业务逻辑与字段定义。
+- 当前实现执行只读阈值评测流程（evaluate 不重估阈值）。
 """
 
 import sys
@@ -51,9 +51,9 @@ from main.cli.run_common import (
 
 def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None = None) -> None:
     """
-    功能：执行评估流程，本阶段为 placeholder。
+    功能：执行评估流程（只读阈值模式）。
 
-    Execute evaluation workflow (placeholder implementation).
+    Execute evaluation workflow in readonly-threshold mode.
 
     Args:
         output_dir: Run root directory for records/artifacts.
@@ -235,8 +235,8 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
             run_meta["impl_identity_digest"] = runtime_resolver.compute_impl_identity_digest(impl_identity)
             run_meta["impl_set_capabilities_digest"] = impl_set_capabilities_digest
 
-            # 构造 evaluation record，本阶段为 placeholder。
-            print("[Evaluate] Generating evaluation record (placeholder)...")
+            # 构造 evaluation record。
+            print("[Evaluate] Generating evaluation record...")
             record = run_evaluate_orchestrator(cfg, impl_set)
             if not isinstance(record, dict):
                 # record 类型不符合预期，必须 fail-fast。
@@ -337,7 +337,7 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
 def main():
     """主流程。"""
     parser = argparse.ArgumentParser(
-        description="Evaluate performance (placeholder implementation)"
+        description="Evaluate performance (readonly-threshold implementation)"
     )
     parser.add_argument(
         "--out",

@@ -92,7 +92,12 @@ def bind_impl_identity_fields(
     return _bind_impl_identity_fields(record, identity, impl_set, contracts)
 
 
-def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = None) -> None:
+def run_embed(
+    output_dir: str,
+    config_path: str,
+    overrides: list[str] | None = None,
+    input_image_path: str | None = None
+) -> None:
     """
     功能：执行嵌入流程，本阶段为 placeholder。
 
@@ -102,6 +107,7 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
         output_dir: Run root directory for records/artifacts.
         config_path: YAML config path.
         overrides: Optional CLI override args list.
+        input_image_path: Optional input image path for noop embed artifact flow.
     """
     if not isinstance(output_dir, str) or not output_dir:
         # output_dir 输入不合法，必须 fail-fast。
@@ -112,6 +118,9 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
     if overrides is not None and not isinstance(overrides, list):
         # overrides 输入不合法，必须 fail-fast。
         raise ValueError("overrides must be list or None")
+    if input_image_path is not None and not isinstance(input_image_path, str):
+        # input_image_path 输入不合法，必须 fail-fast。
+        raise ValueError("input_image_path must be str or None")
 
     # 创建 layout 和最小 run_meta。
     run_root = path_policy.derive_run_root(Path(output_dir))
@@ -256,8 +265,21 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
             run_meta["impl_identity_digest"] = runtime_resolver.compute_impl_identity_digest(impl_identity)
             run_meta["impl_set_capabilities_digest"] = impl_set_capabilities_digest
 
+            if isinstance(input_image_path, str) and input_image_path.strip():
+                cfg["__embed_input_image_path__"] = input_image_path.strip()
+            else:
+                embed_cfg = cfg.get("embed") if isinstance(cfg.get("embed"), dict) else {}
+                default_input = embed_cfg.get("input_image_path") if isinstance(embed_cfg, dict) else None
+                if isinstance(default_input, str) and default_input.strip():
+                    cfg["__embed_input_image_path__"] = default_input.strip()
+
             # 预先计算 content 与 subspace 计划，用于注入上下文。
-            content_result_pre = impl_set.content_extractor.extract(cfg, cfg_digest=cfg_digest)
+            content_inputs_pre = embed_orchestrator._build_content_inputs_for_embed(cfg)
+            content_result_pre = impl_set.content_extractor.extract(
+                cfg,
+                inputs=content_inputs_pre,
+                cfg_digest=cfg_digest
+            )
             mask_digest = None
             if isinstance(content_result_pre, dict):
                 mask_digest = content_result_pre.get("mask_digest")
@@ -407,6 +429,16 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
             records_dir = layout["records_dir"]
             artifacts_dir = layout["artifacts_dir"]
             logs_dir = layout["logs_dir"]
+
+            cfg["__run_root_dir__"] = str(run_root.resolve())
+            cfg["__artifacts_dir__"] = str(artifacts_dir.resolve())
+            if isinstance(input_image_path, str) and input_image_path.strip():
+                cfg["__embed_input_image_path__"] = input_image_path.strip()
+            else:
+                embed_cfg = cfg.get("embed") if isinstance(cfg.get("embed"), dict) else {}
+                default_input = embed_cfg.get("input_image_path") if isinstance(embed_cfg, dict) else None
+                if isinstance(default_input, str) and default_input.strip():
+                    cfg["__embed_input_image_path__"] = default_input.strip()
             
             # 写入 cfg_audit 工件到 artifacts/cfg_audit/cfg_audit.json。
             cfg_audit_dir = artifacts_dir / "cfg_audit"
@@ -627,11 +659,16 @@ def main():
         default=None,
         help="Override config key=value (JSON value). Can be repeated."
     )
+    parser.add_argument(
+        "--input-image",
+        default=None,
+        help="Input image path for noop embed artifact generation"
+    )
     
     args = parser.parse_args()
     
     try:
-        run_embed(args.out, args.config, args.override)
+        run_embed(args.out, args.config, args.override, args.input_image)
         sys.exit(0)
     except Exception as e:
         print(f"[Embed] [ERROR] Error: {e}", file=sys.stderr)

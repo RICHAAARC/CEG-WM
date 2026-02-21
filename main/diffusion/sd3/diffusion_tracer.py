@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-import torch
 import numpy as np
 
 from main.core import digests
@@ -69,7 +68,7 @@ def record_trajectory_sample(
     tracer_state: Dict[str, Any],
     step: int,
     timestep: Optional[float],
-    latents: Optional[torch.Tensor],
+    latents: Optional[Any],
     scheduler: Optional[Any] = None
 ) -> None:
     """
@@ -102,7 +101,7 @@ def record_trajectory_sample(
     }
 
     if timestep is not None:
-        if isinstance(timestep, torch.Tensor):
+        if _is_torch_tensor(timestep):
             sample["timestep"] = float(timestep.item())
         else:
             sample["timestep"] = float(timestep)
@@ -110,20 +109,19 @@ def record_trajectory_sample(
     # 提取 sigma（若 scheduler 支持）。
     if scheduler is not None and hasattr(scheduler, "sigmas"):
         sigmas = scheduler.sigmas
-        if isinstance(sigmas, torch.Tensor) and step < len(sigmas):
+        if _is_torch_tensor(sigmas) and step < len(sigmas):
             sample["sigma"] = float(sigmas[step].item())
 
     # 提取 latent norm。
-    if latents is not None and isinstance(latents, torch.Tensor):
-        with torch.no_grad():
-            latent_norm = torch.norm(latents.flatten(), p=2).item()
-            sample["latent_norm"] = latent_norm
+    if latents is not None and _is_torch_tensor(latents):
+        latent_norm = latents.flatten().norm(p=2).item()
+        sample["latent_norm"] = latent_norm
 
-            # 额外统计：均值、标准差（可选）。
-            latent_mean = latents.mean().item()
-            latent_std = latents.std().item()
-            sample["latent_mean"] = latent_mean
-            sample["latent_std"] = latent_std
+        # 额外统计：均值、标准差（可选）。
+        latent_mean = latents.mean().item()
+        latent_std = latents.std().item()
+        sample["latent_mean"] = latent_mean
+        sample["latent_std"] = latent_std
 
     tracer_state["trajectory_samples"].append(sample)
 
@@ -280,3 +278,24 @@ def get_tracer_impl_identity() -> Dict[str, str]:
         "impl_version": IMPL_VERSION,
         "impl_digest": impl_digest
     }
+
+
+def _is_torch_tensor(value: Any) -> bool:
+    """
+    功能：判定对象是否为 torch.Tensor。 
+
+    Check whether an object behaves like torch.Tensor without importing torch.
+
+    Args:
+        value: Value to check.
+
+    Returns:
+        True if value is likely a torch tensor.
+    """
+    if value is None:
+        return False
+    module_name = getattr(getattr(value, "__class__", None), "__module__", "")
+    if isinstance(module_name, str) and module_name.startswith("torch"):
+        return True
+    required_attrs = ["item", "flatten", "mean", "std"]
+    return all(hasattr(value, attr) for attr in required_attrs)
