@@ -1,5 +1,5 @@
 """
-测试评测报告锚点字段完整性（S-12 强化）。
+测试评测报告锚点字段完整性。
 
 Test that evaluation report contains all required anchor fields for paper reproducibility.
 """

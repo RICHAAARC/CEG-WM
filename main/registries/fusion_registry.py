@@ -265,7 +265,7 @@ _FUSION_REGISTRY.register_factory(
 
 def _build_fusion_neyman_pearson(cfg: Dict[str, Any]) -> NeumanPearsonFusionRule:
     """
-    功能：构造融合规则 S-10 真实实现。
+    功能：构造融合规则真实实现。
 
     Build Neyman-Pearson fusion rule with NP primary + geometry auxiliary.
 

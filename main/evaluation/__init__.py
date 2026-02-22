@@ -5,6 +5,7 @@ Module type: General module
 
 from . import protocol_loader
 from . import attack_plan
+from . import attack_runner
 from . import metrics
 from . import report_builder
 from . import table_export
@@ -12,6 +13,7 @@ from . import table_export
 __all__ = [
     "protocol_loader",
     "attack_plan",
+    "attack_runner",
     "metrics",
     "report_builder",
     "table_export",

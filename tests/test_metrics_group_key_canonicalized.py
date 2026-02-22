@@ -1,5 +1,5 @@
 """
-测试分组指标的规范化键（S-12 强化）。
+测试分组指标的规范化键。
 
 Test that attack group keys are canonicalized and deterministic regardless of source.
 """
@@ -156,3 +156,54 @@ class TestCanonicalConditionKey:
             assert "::" in group_key
             parts = group_key.split("::")
             assert len(parts) == 2
+
+
+def test_metrics_group_keys_are_canonical_and_complete() -> None:
+    """
+    功能：验证分组键 canonical 且每组字段完整。
+
+    Verify group keys are canonical and each group contains required report fields.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    records = [
+        {
+            "attack_family": "rotate",
+            "attack_params_version": "v1",
+            "content_evidence_payload": {"status": "ok", "score": 0.9},
+            "label": True,
+            "geometry_evidence_payload": {"status": "ok", "geo_score": 0.3},
+            "decision": {"routing_decisions": {"rescue_triggered": True}},
+        },
+        {
+            "attack_family": "rotate",
+            "attack_params_version": "v1",
+            "content_evidence_payload": {"status": "ok", "score": 0.1},
+            "label": False,
+            "geometry_evidence_payload": {"status": "ok", "geo_score": 0.2},
+            "decision": {"routing_decisions": {"rescue_triggered": False}},
+        },
+    ]
+    protocol_spec = {
+        "family_field_candidates": ["attack_family"],
+        "params_version_field_candidates": ["attack_params_version"],
+    }
+
+    grouped = metrics.compute_attack_group_metrics(records, 0.5, protocol_spec)
+    assert len(grouped) >= 1
+
+    required_fields = {
+        "group_key",
+        "tpr_at_fpr_primary",
+        "geo_available_rate",
+        "rescue_rate",
+        "reject_rate_by_reason",
+    }
+    for item in grouped:
+        assert "::" in item.get("group_key", "")
+        assert required_fields.issubset(set(item.keys()))
+

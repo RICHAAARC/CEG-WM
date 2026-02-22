@@ -17,7 +17,7 @@ from main.watermarking.fusion import neyman_pearson
 from main.watermarking.fusion.interfaces import FusionDecision
 
 
-# S-10 融合规则实现的 impl_id 定义
+# 融合规则实现的 impl_id 定义
 FUSION_RULE_ID = "fusion_neyman_pearson_v1"
 FUSION_RULE_VERSION = "v1"
 
@@ -236,7 +236,7 @@ class NeumanPearsonFusionRule:
         geo_gate_applied = False
 
         # (7) 几何辅助（rescue band）：单侧救回策略
-        # 口径修正（S-10 patch）：仅允许救回 False → True，禁止翻转 True → False
+        # 口径修正：仅允许救回 False → True，禁止翻转 True → False
         rescue_band_spec = _build_rescue_band_spec(cfg)
         if (geometry_status == "ok" and 
             isinstance(geometry_score, (int, float)) and 
@@ -412,8 +412,6 @@ def _is_rescue_candidate(
 ) -> bool:
     """
     功能：检查 content_score 是否在 rescue band 下界范围内（候选救回区间）。
-    
-    口径修正（S-10 patch）：仅检查 [threshold-delta, threshold) 范围。
 
     Determine if content_score is in rescue candidate zone (below threshold but within delta range).
 

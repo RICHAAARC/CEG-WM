@@ -29,6 +29,35 @@ families:
     params_versions:
       v1:
         crop_ratios: [0.9, 0.8, 0.7]
+  jpeg:
+    description: "jpeg compression attacks"
+    params_versions:
+      v1:
+        quality: [95, 85, 75]
+        seed_policy: "inherit"
+  gaussian_noise:
+    description: "additive gaussian noise attacks"
+    params_versions:
+      v1:
+        sigma: [0.005, 0.01, 0.02]
+        seed_policy: "inherit"
+  gaussian_blur:
+    description: "gaussian blur attacks"
+    params_versions:
+      v1:
+        kernel_size: [3, 5]
+        sigma: [0.8, 1.2]
+        seed_policy: "inherit"
+  composite:
+    description: "ordered composite attack sequences"
+    params_versions:
+      rotate_resize_v1:
+        steps:
+          - family: "rotate"
+            params: {degrees: 10}
+          - family: "resize"
+            params: {scale_factor: 0.9}
+        seed_policy: "shared"
 
 params_versions:
   rotate::v1:
@@ -40,3 +69,21 @@ params_versions:
   crop::v1:
     family: "crop"
     params: {crop_ratios: [0.9, 0.8, 0.7]}
+  jpeg::v1:
+    family: "jpeg"
+    params: {quality: [95, 85, 75], seed_policy: "inherit"}
+  gaussian_noise::v1:
+    family: "gaussian_noise"
+    params: {sigma: [0.005, 0.01, 0.02], seed_policy: "inherit"}
+  gaussian_blur::v1:
+    family: "gaussian_blur"
+    params: {kernel_size: [3, 5], sigma: [0.8, 1.2], seed_policy: "inherit"}
+  composite::rotate_resize_v1:
+    family: "composite"
+    params:
+      steps:
+        - family: "rotate"
+          params: {degrees: 10}
+        - family: "resize"
+          params: {scale_factor: 0.9}
+      seed_policy: "shared"

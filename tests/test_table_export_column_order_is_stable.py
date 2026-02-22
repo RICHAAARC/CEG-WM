@@ -1,5 +1,5 @@
 """
-测试表格导出的列顺序稳定性（S-12 强化）。
+测试表格导出的列顺序稳定性。
 
 Test that CSV export column order is deterministic and does not depend on dict insertion order.
 """

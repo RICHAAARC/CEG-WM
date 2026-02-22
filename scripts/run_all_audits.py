@@ -27,11 +27,11 @@ AUDIT_SCRIPTS = [
     "audits/audit_network_access_scan.py",
     "audits/audit_paper_faithfulness.py",
     "audits/audit_paper_faithfulness_runtime_must_have.py",  # 运行期必达证据审计
-    "audits/audit_no_empty_py_modules.py",  # 发布收口：禁止非初始化空文件
-    "audits/audit_evaluation_report_schema.py",  # S-13 B1: 证报告锚点字段完整性
-    "audits/audit_thresholds_readonly_enforcement.py",  # S-13 B2: thresholds 只读保护
-    "audits/audit_attack_protocol_hardcoding.py",  # S-13 B3: attack protocol 事实源强制
-]
+    "audits/audit_no_empty_py_modules.py",                   # 发布收口：禁止非初始化空文件
+    "audits/audit_evaluation_report_schema.py",              # 证报告锚点字段完整性
+    "audits/audit_thresholds_readonly_enforcement.py",       # thresholds 只读保护
+    "audits/audit_attack_protocol_hardcoding.py",            # attack protocol 事实源强制
+    "audits/audit_repro_bundle_integrity.py",               # repro bundle 完整性校验
 ]
 
 

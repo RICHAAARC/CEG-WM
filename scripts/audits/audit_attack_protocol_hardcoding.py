@@ -1,5 +1,5 @@
 """
-文件目的：静态审计 attack protocol 必须来自 configs（S-13 B3 阻断项）。
+静态审计 attack protocol
 Module type: Core innovation module
 
 审计职责：

@@ -38,10 +38,10 @@ MINIMUM_AUDIT_SCRIPTS = [
     "audits/audit_freeze_surface_integrity.py",
     "audits/audit_dangerous_exec_and_pickle_scan.py",
     "audits/audit_network_access_scan.py",
-    "audits/audit_no_empty_py_modules.py",  # 发布收口：禁止非初始化空文件（signoff BLOCK）
-    "audits/audit_evaluation_report_schema.py",  # S-13 B1: 报告锚点字段完整性（signoff BLOCK）
-    "audits/audit_thresholds_readonly_enforcement.py",  # S-13 B2: thresholds 只读保护（signoff BLOCK）
-    "audits/audit_attack_protocol_hardcoding.py",  # S-13 B3: attack protocol 事实源强制（signoff BLOCK）
+    "audits/audit_no_empty_py_modules.py",              # 发布收口：禁止非初始化空文件（signoff BLOCK）
+    "audits/audit_evaluation_report_schema.py",         # 报告锚点字段完整性（signoff BLOCK）
+    "audits/audit_thresholds_readonly_enforcement.py",  # thresholds 只读保护（signoff BLOCK）
+    "audits/audit_attack_protocol_hardcoding.py",       # attack protocol 事实源强制（signoff BLOCK）
 ]
 
 

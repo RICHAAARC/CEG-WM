@@ -1,5 +1,5 @@
 """
-文件目的：静态审计 thresholds 工件只读强制（S-13 B2 阻断项）。
+静态审计 thresholds 工件只读强制。
 Module type: Core innovation module
 
 审计职责：
@@ -184,7 +184,7 @@ def main(repo_root_str: Optional[str] = None) -> int:
         }
     
     print(json.dumps(result, indent=2))
-    return 0
+    return 0 if (not all_issues and is_compliant) else 1
 
 
 if __name__ == "__main__":

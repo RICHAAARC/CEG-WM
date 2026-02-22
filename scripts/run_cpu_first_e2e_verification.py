@@ -137,7 +137,7 @@ def run_cpu_first_verification(output_root="tmp/cpu_first_e2e", config_path="con
     
     print(f"\n[Embed] Record loaded, checking alignment...")
     
-    # 检查 P1：pipeline_fingerprint_presence
+    # 检查：pipeline_fingerprint_presence
     content_evidence = embed_record.get("content_evidence", {})
     alignment_report = content_evidence.get("alignment_report", {})
     pipeline_fp_check = None
@@ -153,18 +153,18 @@ def run_cpu_first_verification(output_root="tmp/cpu_first_e2e", config_path="con
         print(f"[WARN] pipeline_fingerprint_presence check not found in alignment_report")
     else:
         p1_status = pipeline_fp_check.get("result", "NA")
-        print(f"[P1] pipeline_fingerprint_presence: {p1_status}")
+        print(f"pipeline_fingerprint_presence: {p1_status}")
         if p1_status != "PASS":
-            print(f"[WARN] P1 not PASS: {pipeline_fp_check.get('failure_message', 'unknown')}")
+            print(f"[WARN] pipeline_fingerprint_presence not PASS: {pipeline_fp_check.get('failure_message', 'unknown')}")
     
-    # 检查 P2：trajectory_digest_reproducibility
+    # 检查：trajectory_digest_reproducibility
     if trajectory_check is None:
         print(f"[WARN] trajectory_digest_reproducibility check not found in alignment_report")
     else:
         p2_status = trajectory_check.get("result", "NA")
-        print(f"[P2] trajectory_digest_reproducibility: {p2_status}")
+        print(f"trajectory_digest_reproducibility: {p2_status}")
         if p2_status != "PASS":
-            print(f"[WARN] P2 not PASS: {trajectory_check.get('failure_message', 'unknown')}")
+            print(f"[WARN] trajectory_digest_reproducibility not PASS: {trajectory_check.get('failure_message', 'unknown')}")
     
     # ========== PHASE 2: Detect ==========/
     print("\n" + "="*70)

@@ -1,5 +1,5 @@
 """
-功能：S-10 审计修复验证测试
+功能：审计修复验证测试
 
 Module type: Core innovation module
 

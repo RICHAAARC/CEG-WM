@@ -1,5 +1,5 @@
 """
-File purpose: evaluation 协议工程化（S-12）回归测试。
+File purpose: evaluation 协议工程化回归测试。
 Module type: General module
 """
 

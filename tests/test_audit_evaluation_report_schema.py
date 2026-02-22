@@ -1,5 +1,5 @@
 """
-测试阻断项 B1：评测报告锚点字段完整性审计（S-13）。
+测试阻断项：评测报告锚点字段完整性审计。
 
 Test that audit_evaluation_report_schema correctly validates report anchor fields.
 """

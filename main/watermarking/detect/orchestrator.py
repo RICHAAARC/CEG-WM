@@ -346,7 +346,7 @@ def run_detect_orchestrator(
         _bind_scores_if_ok(content_evidence_payload)
         content_evidence_adapted = _adapt_content_evidence_for_fusion(content_evidence_payload)
         
-        # (S-10 修正) 从 input_record 中提取 calibrate 生成的 thresholds_artifact，
+        # 从 input_record 中提取 calibrate 生成的 thresholds_artifact，
         # 并注入到 cfg 中供 fusion_rule.fuse() 使用（必须修正：threshold binding error）。
         if isinstance(input_record, dict) and "thresholds_artifact" in input_record:
             thresholds_artifact = input_record["thresholds_artifact"]
@@ -1785,12 +1785,29 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
     thresholds_obj = load_thresholds_artifact_controlled(str(thresholds_path))
     detect_records = _load_records_for_evaluate(cfg)
     
-    # (S-12 新增) 使用 evaluation 模块代替内联逻辑。
+    # 记录 evaluate 开始前的 thresholds digest。
+    thresholds_digest_before = digests.canonical_sha256(thresholds_obj)
+    
+    # 使用 evaluation 模块代替内联逻辑。
     attack_protocol_spec = eval_protocol_loader.load_attack_protocol_spec(cfg)
     
     # 计算 overall 和 grouped metrics。
     threshold_value = float(thresholds_obj.get("threshold_value", 0.5))
     metrics_obj, breakdown = eval_metrics.compute_overall_metrics(detect_records, threshold_value)
+    
+    # 重新加载 thresholds 工件并对比 digest。
+    thresholds_obj_after = load_thresholds_artifact_controlled(str(thresholds_path))
+    thresholds_digest_after = digests.canonical_sha256(thresholds_obj_after)
+    
+    if thresholds_digest_before != thresholds_digest_after:
+        # thresholds 工件在 evaluate 过程中被修改，违反 NP 规则。
+        raise RuntimeError(
+            f"thresholds 工件只读性验证失败\n"
+            f"  - 路径: {thresholds_path}\n"
+            f"  - digest_before: {thresholds_digest_before}\n"
+            f"  - digest_after: {thresholds_digest_after}\n"
+            f"  - 原因: evaluate 侧修改或污染了 thresholds 工件"
+        )
     attack_group_metrics = eval_metrics.compute_attack_group_metrics(
         detect_records,
         threshold_value,
@@ -1826,7 +1843,7 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
         used_threshold_id=thresholds_obj.get("threshold_id") if isinstance(thresholds_obj.get("threshold_id"), str) else None,
     )
 
-    # (S-12 新增) 使用 report_builder 组装完整报告。
+    # 使用 report_builder 组装完整报告。
     thresholds_digest = digests.canonical_sha256(thresholds_obj)
     threshold_metadata_digest = cfg.get("__evaluate_threshold_metadata_digest__", "<absent>")
     plan_digest = cfg.get("__evaluate_plan_digest__", "<absent>")
@@ -1849,6 +1866,14 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
         thresholds_artifact=thresholds_obj,
         attack_protocol_spec=attack_protocol_spec,  # (向后兼容)
     )
+    
+    # append-only 加入 readonly guard 记录
+    report_obj["thresholds_readonly_guard"] = {
+        "digest_before": thresholds_digest_before,
+        "digest_after": thresholds_digest_after,
+        "unchanged": (thresholds_digest_before == thresholds_digest_after),
+        "guard_version": "v1",
+    }
 
     record: Dict[str, Any] = {
         "operation": "evaluate",
@@ -2011,7 +2036,7 @@ def evaluate_records_against_threshold(
         raise TypeError("threshold_value must be number")
     threshold_float = float(threshold_value)
 
-    # (S-12 改进) 使用 evaluation 模块计算指标。
+    # 使用 evaluation 模块计算指标。
     if attack_protocol_spec is None:
         attack_protocol_spec = {
             "version": "<absent>",

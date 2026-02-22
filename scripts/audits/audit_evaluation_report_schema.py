@@ -1,5 +1,5 @@
 """
-文件目的：静态审计评测报告锚点字段完整性（S-13 B1 阻断项）。
+静态审计评测报告锚点字段完整性。
 Module type: Core innovation module
 
 审计职责：
