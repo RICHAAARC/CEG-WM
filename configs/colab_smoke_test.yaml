@@ -20,14 +20,14 @@ model_id: "stabilityai/stable-diffusion-3-medium"
 hf_revision: "main"
 
 # ==============================================================
-# 推理配置（Smoke Test 优化：小规模快速验证）
+# 推理配置（Smoke Test 优化：工程稳定性测试，非论文级）
 # ==============================================================
 inference_enabled: true
 inference_prompt: "a serene landscape with mountains and a lake"
-inference_num_steps: 20  # 降低推理步数以加速（default: 28）
+inference_num_steps: 15  # 极简推理步数，仅验证工程闭环（default: 28）
 inference_guidance_scale: 7.0
-inference_height: 256    # 降低分辨率以减少内存占用（default: 512）
-inference_width: 256
+inference_height: 128    # 最小分辨率，T4 GPU 安全运行（default: 512）
+inference_width: 128
 
 # ==============================================================
 # 轨迹采样配置
@@ -48,21 +48,21 @@ paper_faithfulness:
   check_trajectory_digest: true
 
 # ==============================================================
-# 水印子空间配置（Smoke Test 小规模）
+# 水印子空间配置（Smoke Test 极简：工程稳定性验证）
 # ==============================================================
 watermark:
   subspace:
     timestep_start: 0
-    timestep_end: 19  # 匹配 num_inference_steps - 1 = 20 - 1
+    timestep_end: 14  # 匹配 num_inference_steps - 1 = 15 - 1
     trajectory_step_stride: 1
-    sample_count: 20  # 匹配 num_inference_steps
-    feature_dim: 64   # 降低维度以加速（default: 128）
+    sample_count: 15  # 匹配 num_inference_steps
+    feature_dim: 32   # 极简维度，仅验证流程（default: 128）
 
   lf:
     enabled: true
     variance: 1.5
-    ecc_sparsity: 3
-    message_length: 32  # 降低消息长度以加速（default: 64）
+    ecc_sparsity: 2   # 降低稀疏度以加速
+    message_length: 16  # 极简消息长度（default: 64）
 
   hf:
     enabled: false  # Smoke test 默认禁用 HF 通道
@@ -101,19 +101,20 @@ impl:
   sync_module_id: "geometry_sync_baseline_v1"
 
 # ==============================================================
-# Calibrate 配置（Smoke Test 小规模）
+# Calibrate 配置（Smoke Test 极简：工程验证级）
 # ==============================================================
 calibrate:
-  num_wrong_key_samples: 64  # 降低样本数以加速（default: 128）
-  batch_size: 8              # 适配 Colab GPU 内存
+  num_wrong_key_samples: 32  # 极简样本数，仅验证流程（default: 128）
+  batch_size: 4              # T4 GPU 保守配置
 
 # ==============================================================
-# Colab 环境优化
+# Colab 环境优化（T4 GPU 保守配置）
 # ==============================================================
 colab_optimizations:
   # 内存优化
   enable_xformers: true      # 如果可用，启用 xformers 以减少内存
   enable_attention_slicing: true
+  enable_vae_slicing: true   # 启用 VAE slicing 进一步降低内存
   enable_cpu_offload: false  # Colab 有 GPU，不需要 CPU offload
   
   # 缓存优化
@@ -123,3 +124,6 @@ colab_optimizations:
   # 输出优化
   save_intermediate_steps: false  # 不保存中间步骤以节省空间
   compress_artifacts: false       # 不压缩以加速
+  
+  # 测试模式标识
+  engineering_smoke_test: true    # 标识为工程稳定性测试，非论文级研究
