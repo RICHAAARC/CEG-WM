@@ -291,7 +291,6 @@ def build_runtime_impl_set_from_cfg(cfg: Dict[str, Any]) -> tuple[ImplIdentity, 
     功能：从 cfg 构建运行期 impl_set。
 
     Build runtime impl identity and implementation set from config.
-    R11: Aggregates impl capabilities and validates compatibility before returning.
 
     Args:
         cfg: Config mapping.

@@ -1,0 +1,12 @@
+{
+  "_artifact_audit": {
+    "schema_version": "v1.0",
+    "writer": "records_io"
+  },
+  "config_canon_sha256": "<absent>",
+  "config_file_sha256": "<absent>",
+  "model_id": "<absent>",
+  "revision": "<absent>",
+  "source": "<absent>",
+  "weights_sha256": "<absent>"
+}

@@ -46,7 +46,16 @@ ALLOWED_FAIL_REASONS = [
     "decoder_error",
     "unknown"
 ]
-ALLOWED_MISMATCH_REASONS = ["subspace_frame_mismatch", "cfg_digest_mismatch"]
+ALLOWED_MISMATCH_REASONS = [
+    "subspace_frame_mismatch",
+    "cfg_digest_mismatch",
+    "plan_digest_mismatch",
+    "basis_digest_mismatch",
+    "planner_impl_identity_mismatch",
+    "trajectory_spec_digest_mismatch",
+    "trajectory_digest_mismatch",
+    "trajectory_evidence_invalid"
+]
 
 # pip 子进程超时秒数。
 PIP_SUBPROCESS_TIMEOUT_SECONDS = 10
@@ -404,12 +413,103 @@ def _write_env_audit_record(
     audit_filename = f"env_audit_{canon_sha256[:8]}.json"
     audit_path = env_audits_dir / audit_filename
 
-    try:
-        records_io.write_artifact_json(str(audit_path), audit_record)
-    except FactSourcesNotInitializedError:
-        records_io.write_artifact_json_unbound(run_root, artifacts_dir, str(audit_path), audit_record)
+    logs_dir = run_root / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    _write_artifact_json_bound(
+        run_root,
+        records_dir=run_root / "records",
+        artifacts_dir=artifacts_dir,
+        logs_dir=logs_dir,
+        dst_path=audit_path,
+        obj=audit_record
+    )
 
     return audit_path
+
+
+def _write_artifact_json_bound(
+    run_root: Path,
+    records_dir: Path,
+    artifacts_dir: Path,
+    logs_dir: Path,
+    dst_path: Path,
+    obj: Dict[str, Any]
+) -> None:
+    """
+    功能：在受控事实源上下文中写入 artifacts JSON。
+
+    Write artifact JSON under a bound fact sources context only.
+
+    Args:
+        run_root: Run root directory.
+        records_dir: Records output directory.
+        artifacts_dir: Artifacts output directory.
+        logs_dir: Logs output directory.
+        dst_path: Destination path for artifact.
+        obj: Artifact payload mapping.
+
+    Returns:
+        None.
+
+    Raises:
+        TypeError: If inputs are invalid types.
+        RecordsWritePolicyError: If binding or write fails.
+    """
+    if not isinstance(run_root, Path):
+        # run_root 类型不符合预期，必须 fail-fast。
+        raise TypeError("run_root must be Path")
+    if not isinstance(records_dir, Path):
+        # records_dir 类型不符合预期，必须 fail-fast。
+        raise TypeError("records_dir must be Path")
+    if not isinstance(artifacts_dir, Path):
+        # artifacts_dir 类型不符合预期，必须 fail-fast。
+        raise TypeError("artifacts_dir must be Path")
+    if not isinstance(logs_dir, Path):
+        # logs_dir 类型不符合预期，必须 fail-fast。
+        raise TypeError("logs_dir must be Path")
+    if not isinstance(dst_path, Path):
+        # dst_path 类型不符合预期，必须 fail-fast。
+        raise TypeError("dst_path must be Path")
+    if not isinstance(obj, dict):
+        # obj 类型不符合预期，必须 fail-fast。
+        raise TypeError("artifact obj must be dict")
+
+    try:
+        records_io.get_bound_fact_sources()
+        records_io.write_artifact_json(str(dst_path), obj)
+        return
+    except FactSourcesNotInitializedError:
+        pass
+    except RecordsWritePolicyError:
+        raise
+
+    try:
+        from main.core.contracts import load_frozen_contracts
+        from main.policy.runtime_whitelist import load_runtime_whitelist, load_policy_path_semantics
+        from main.core.injection_scope import load_injection_scope_manifest
+
+        contracts = load_frozen_contracts()
+        whitelist = load_runtime_whitelist()
+        semantics = load_policy_path_semantics()
+        injection_scope_manifest = load_injection_scope_manifest()
+
+        with records_io.bound_fact_sources(
+            contracts,
+            whitelist,
+            semantics,
+            run_root,
+            records_dir,
+            artifacts_dir,
+            logs_dir,
+            injection_scope_manifest=injection_scope_manifest
+        ):
+            records_io.write_artifact_json(str(dst_path), obj)
+    except Exception as exc:
+        # 事实源绑定或写盘失败，必须 fail-fast。
+        raise RecordsWritePolicyError(
+            "artifact write requires bound fact sources: "
+            f"path={dst_path}, error={type(exc).__name__}: {exc}"
+        ) from exc
 
 
 def finalize_run(
@@ -450,7 +550,13 @@ def finalize_run(
         # run_meta 类型不符合预期，必须 fail-fast。
         raise TypeError("run_meta must be dict")
 
+    logs_dir = run_root / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+
     run_meta = dict(run_meta)
+    run_meta.setdefault("path_audit_status", "failed")
+    run_meta.setdefault("path_audit_error_code", "fact_sources_unbound")
+    run_meta.setdefault("path_audit_error", "FactSourcesNotInitializedError: bound_fact_sources missing")
     bound_fact_sources, bound_fact_sources_status = _resolve_bound_fact_sources(run_meta)
     if bound_fact_sources is not None:
         run_meta["bound_fact_sources"] = bound_fact_sources
@@ -529,8 +635,8 @@ def finalize_run(
             "reason": "fact_sources_not_initialized"
         }
         _append_audit_warning(
-            "FACT_SOURCES_UNBOUND_ARTIFACTS_ONLY",
-            "fact sources not initialized; artifacts written in unbound mode",
+            "FACT_SOURCES_UNBOUND_ARTIFACTS_BLOCKED",
+            "fact sources not initialized; artifact writes must be bound",
             None
         )
     elif fact_sources_status == "bound":
@@ -663,9 +769,22 @@ def finalize_run(
             model_prov_dir.mkdir(parents=True, exist_ok=True)
             model_prov_path = model_prov_dir / "model_provenance.json"
             try:
-                records_io.write_artifact_json(str(model_prov_path), model_provenance)
-            except records_io.FactSourcesNotInitializedError:
-                records_io.write_artifact_json_unbound(run_root, artifacts_dir, str(model_prov_path), model_provenance)
+                _write_artifact_json_bound(
+                    run_root,
+                    records_dir,
+                    artifacts_dir,
+                    logs_dir,
+                    model_prov_path,
+                    model_provenance
+                )
+            except RecordsWritePolicyError as exc:
+                model_provenance_error = f"{type(exc).__name__}: {exc}"
+                run_meta["model_provenance_error"] = model_provenance_error
+                _append_audit_warning(
+                    "MODEL_PROVENANCE_WRITE_BLOCKED",
+                    "model provenance write blocked by bound requirement",
+                    type(exc).__name__
+                )
         else:
             # 模型配置文件缺失，生成 <absent> 版 model_provenance。
             model_provenance = {
@@ -685,7 +804,23 @@ def finalize_run(
             model_prov_dir = artifacts_dir / "model_provenance"
             model_prov_dir.mkdir(parents=True, exist_ok=True)
             model_prov_path = model_prov_dir / "model_provenance.json"
-            records_io.write_artifact_json_unbound(run_root, artifacts_dir, str(model_prov_path), model_provenance)
+            try:
+                _write_artifact_json_bound(
+                    run_root,
+                    records_dir,
+                    artifacts_dir,
+                    logs_dir,
+                    model_prov_path,
+                    model_provenance
+                )
+            except RecordsWritePolicyError as exc:
+                model_provenance_error = f"{type(exc).__name__}: {exc}"
+                run_meta["model_provenance_error"] = model_provenance_error
+                _append_audit_warning(
+                    "MODEL_PROVENANCE_WRITE_BLOCKED",
+                    "model provenance write blocked by bound requirement",
+                    type(exc).__name__
+                )
 
             _append_audit_warning(
                 "MODEL_PROVENANCE_MISSING",
@@ -712,7 +847,14 @@ def finalize_run(
             model_prov_dir = artifacts_dir / "model_provenance"
             model_prov_dir.mkdir(parents=True, exist_ok=True)
             model_prov_path = model_prov_dir / "model_provenance.json"
-            records_io.write_artifact_json_unbound(run_root, artifacts_dir, str(model_prov_path), model_provenance)
+            _write_artifact_json_bound(
+                run_root,
+                records_dir,
+                artifacts_dir,
+                logs_dir,
+                model_prov_path,
+                model_provenance
+            )
         except Exception:
             # 写盘失败不阻断 finalize_run。
             pass
@@ -732,6 +874,9 @@ def finalize_run(
         # 从 cfg 或环境获取 RNG 配置。
         cfg_from_meta = run_meta.get("cfg")
         seed_value = None
+        seed_parts = None
+        seed_digest = None
+        seed_rule_id = None
         rng_backend = None
         torch_deterministic = None
         cudnn_benchmark = None
@@ -744,13 +889,26 @@ def finalize_run(
         else:
             # cfg 不可用，显式标记缺失。
             seed_value = "<absent>"
+            seed_parts = "<absent>"
+            seed_digest = "<absent>"
+            seed_rule_id = "<absent>"
             rng_backend = "<absent>"
             torch_deterministic = "<absent>"
             cudnn_benchmark = "<absent>"
 
+        if seed_parts is None:
+            seed_parts = run_meta.get("seed_parts", "<absent>")
+        if seed_digest is None:
+            seed_digest = run_meta.get("seed_digest", "<absent>")
+        if seed_rule_id is None:
+            seed_rule_id = run_meta.get("seed_rule_id", "<absent>")
+
         # 构造 rng_audit 对象。
         rng_audit = {
             "seed_value": seed_value,
+            "seed_parts": seed_parts,
+            "seed_digest": seed_digest,
+            "seed_rule_id": seed_rule_id,
             "rng_backend": rng_backend,
             "torch_deterministic": torch_deterministic,
             "cudnn_benchmark": cudnn_benchmark
@@ -764,9 +922,22 @@ def finalize_run(
         rng_audit_dir.mkdir(parents=True, exist_ok=True)
         rng_audit_path = rng_audit_dir / "rng_audit.json"
         try:
-            records_io.write_artifact_json(str(rng_audit_path), rng_audit)
-        except records_io.FactSourcesNotInitializedError:
-            records_io.write_artifact_json_unbound(run_root, artifacts_dir, str(rng_audit_path), rng_audit)
+            _write_artifact_json_bound(
+                run_root,
+                records_dir,
+                artifacts_dir,
+                logs_dir,
+                rng_audit_path,
+                rng_audit
+            )
+        except RecordsWritePolicyError as exc:
+            rng_audit_error = f"{type(exc).__name__}: {exc}"
+            run_meta["rng_audit_error"] = rng_audit_error
+            _append_audit_warning(
+                "RNG_AUDIT_WRITE_BLOCKED",
+                "rng audit write blocked by bound requirement",
+                type(exc).__name__
+            )
             
     except Exception as exc:
         # RNG 审计失败。
@@ -803,9 +974,22 @@ def finalize_run(
         input_prov_dir.mkdir(parents=True, exist_ok=True)
         input_prov_path = input_prov_dir / f"input_provenance_{input_provenance_digest[:8]}.json"
         try:
-            records_io.write_artifact_json(str(input_prov_path), input_provenance)
-        except records_io.FactSourcesNotInitializedError:
-            records_io.write_artifact_json_unbound(run_root, artifacts_dir, str(input_prov_path), input_provenance)
+            _write_artifact_json_bound(
+                run_root,
+                records_dir,
+                artifacts_dir,
+                logs_dir,
+                input_prov_path,
+                input_provenance
+            )
+        except RecordsWritePolicyError as exc:
+            input_provenance_error = f"{type(exc).__name__}: {exc}"
+            run_meta["input_provenance_error"] = input_provenance_error
+            _append_audit_warning(
+                "INPUT_PROVENANCE_WRITE_BLOCKED",
+                "input provenance write blocked by bound requirement",
+                type(exc).__name__
+            )
             
     except Exception as exc:
         # 输入来源审计失败。
@@ -822,6 +1006,17 @@ def finalize_run(
 
     path_audit_record = None
     path_audit_canon_sha256 = None
+    run_meta["path_audit_error_code"] = "<absent>"
+
+    if bound_fact_sources is None:
+        run_meta["path_audit_status"] = "failed"
+        run_meta["path_audit_error_code"] = "fact_sources_unbound"
+        run_meta["path_audit_error"] = "FactSourcesNotInitializedError: bound_fact_sources missing"
+        _append_audit_warning(
+            "PATH_AUDIT_UNBOUND",
+            "path audit requires bound fact sources",
+            "FactSourcesNotInitializedError"
+        )
 
     try:
         if bound_fact_sources is not None:
@@ -856,8 +1051,11 @@ def finalize_run(
                 path_audit_canon_sha256 = path_policy_module.compute_path_audit_canon_sha256(path_audit_record)
                 run_meta["path_audit_canon_sha256"] = path_audit_canon_sha256
                 run_meta["path_audit_status"] = "ok"
+                run_meta["path_audit_error_code"] = "<absent>"
+                run_meta["path_audit_error"] = "<absent>"
             else:
                 run_meta["path_audit_status"] = "failed"
+                run_meta["path_audit_error_code"] = "missing_bound_fields"
                 run_meta["path_audit_error"] = "ValueError: policy_path or bound versions missing"
                 _append_audit_warning(
                     "PATH_AUDIT_BUILD_FAILED",
@@ -867,6 +1065,7 @@ def finalize_run(
     except Exception as exc:
         error_summary = f"{type(exc).__name__}: {exc}"
         run_meta["path_audit_status"] = "failed"
+        run_meta["path_audit_error_code"] = "build_exception"
         run_meta["path_audit_error"] = error_summary
         _append_audit_warning(
             "PATH_AUDIT_BUILD_FAILED",
@@ -890,28 +1089,29 @@ def finalize_run(
 
             audit_path = path_audits_dir / audit_filename
 
-            # 优先使用受控写盘；仅在事实源未初始化或锚点重叠检查失败时回退到 unbound 写法。
-            try:
-                records_io.write_artifact_json(
-                    str(audit_path),
-                    path_audit_record
-                )
-            except (FactSourcesNotInitializedError, RecordsWritePolicyError):
-                # 事实源未初始化或锚点重叠检查失败时回退到 unbound 写法。
-                records_io.write_artifact_json_unbound(
-                    run_root,
-                    artifacts_dir,
-                    str(audit_path),
-                    path_audit_record
-                )
-                _append_audit_warning(
-                    "PATH_AUDIT_WRITE_UNBOUND",
-                    "path audit written without fact sources binding or semantic guard rejection",
-                    "FactSourcesNotInitializedError or RecordsWritePolicyError"
-                )
+            # 使用受控写盘，禁止 unbound 回退。
+            _write_artifact_json_bound(
+                run_root,
+                records_dir,
+                artifacts_dir,
+                logs_dir,
+                audit_path,
+                path_audit_record
+            )
+        except RecordsWritePolicyError as exc:
+            error_summary = f"{type(exc).__name__}: {exc}"
+            run_meta["path_audit_status"] = "failed"
+            run_meta["path_audit_error_code"] = "write_blocked"
+            run_meta["path_audit_error"] = error_summary
+            _append_audit_warning(
+                "PATH_AUDIT_WRITE_BLOCKED",
+                "path audit write blocked by bound requirement",
+                type(exc).__name__
+            )
         except Exception as exc:
             error_summary = f"{type(exc).__name__}: {exc}"
             run_meta["path_audit_status"] = "failed"
+            run_meta["path_audit_error_code"] = "write_failed"
             run_meta["path_audit_error"] = error_summary
             _append_audit_warning(
                 "PATH_AUDIT_WRITE_FAILED",
@@ -1031,12 +1231,15 @@ def finalize_run(
     path_policy.validate_output_target(run_closure_path, "artifact", run_root)
     validate_run_closure(payload)
     
-    # 尝试使用标准 write_artifact_json。
-    try:
-        records_io.write_artifact_json(str(run_closure_path), payload)
-    except records_io.FactSourcesNotInitializedError:
-        # 如果事实源未初始化，降级使用无上下文兜底写盘。
-        records_io.write_artifact_json_unbound(run_root, artifacts_dir, str(run_closure_path), payload)
+    # 受控写盘：禁止 unbound 回退。
+    _write_artifact_json_bound(
+        run_root,
+        records_dir,
+        artifacts_dir,
+        logs_dir,
+        run_closure_path,
+        payload
+    )
     # 其他异常继续向上抛，不隐藏真实 bug。
     
     
@@ -1250,6 +1453,9 @@ def build_run_closure_payload(
         "pipeline_provenance_canon_sha256": run_meta.get("pipeline_provenance_canon_sha256", "<absent>"),
         "pipeline_status": run_meta.get("pipeline_status", "unbuilt"),
         "pipeline_error": run_meta.get("pipeline_error", "<absent>"),
+        "pipeline_build_status": run_meta.get("pipeline_build_status", "<absent>"),
+        "pipeline_build_failure_reason": run_meta.get("pipeline_build_failure_reason", "<absent>"),
+        "pipeline_build_failure_summary": run_meta.get("pipeline_build_failure_summary", "<absent>"),
         "pipeline_runtime_meta": run_meta.get("pipeline_runtime_meta"),
         "inference_status": run_meta.get("inference_status", "<absent>"),
         "inference_error": run_meta.get("inference_error", "<absent>"),
@@ -1265,6 +1471,7 @@ def build_run_closure_payload(
         "records_bundle": records_bundle_payload,
         "path_audit_canon_sha256": path_audit_canon_sha256,
         "path_audit_status": run_meta.get("path_audit_status", "<absent>"),
+        "path_audit_error_code": run_meta.get("path_audit_error_code", "<absent>"),
         "path_audit_error": run_meta.get("path_audit_error", "<absent>"),
         "path_policy": path_policy_audit,
         "run_root_reuse_allowed": run_meta.get("run_root_reuse_allowed", False),

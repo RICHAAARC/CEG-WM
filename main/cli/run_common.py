@@ -5,10 +5,92 @@ CLI 入口层公共辅助逻辑
 - 提供 CLI 入口层共享的冻结面相关辅助函数，避免入口分叉导致的语义漂移。
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Tuple
 from main.core.contracts import FrozenContracts, get_contract_interpretation
 from main.core.errors import MissingRequiredFieldError, RunFailureReason
 from main.registries import runtime_resolver
+from main.core import digests
+from main.diffusion.sd3.callback_composer import InjectionContext
+from main.watermarking.content_chain import channel_lf, channel_hf
+from main.core import time_utils
+
+
+_SEED_RULE_ID = "stable_seed_from_parts_v1"
+_REQUIRED_SEED_PART_KEYS = {"key_id", "sample_idx", "purpose"}
+
+
+def build_injection_context_from_plan(
+    cfg: Dict[str, Any],
+    plan_payload: Dict[str, Any],
+    plan_digest: str
+) -> InjectionContext:
+    """
+    功能：基于 plan 构造 InjectionContext（不修改 cfg）。
+    
+    Build InjectionContext from plan payload and cfg without mutating cfg.
+
+    Args:
+        cfg: Configuration mapping.
+        plan_payload: Planner output mapping (plan payload).
+        plan_digest: Plan digest string.
+
+    Returns:
+        InjectionContext instance.
+
+    Raises:
+        TypeError: If inputs are invalid.
+        ValueError: If required fields are missing.
+    """
+    if not isinstance(cfg, dict):
+        # cfg 类型不符合预期，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+    if not isinstance(plan_payload, dict):
+        # plan_payload 类型不符合预期，必须 fail-fast。
+        raise TypeError("plan_payload must be dict")
+    if not isinstance(plan_digest, str) or not plan_digest:
+        # plan_digest 类型不符合预期，必须 fail-fast。
+        raise TypeError("plan_digest must be non-empty str")
+
+    watermark_cfg = cfg.get("watermark", {}) if isinstance(cfg.get("watermark", {}), dict) else {}
+    lf_cfg = watermark_cfg.get("lf", {}) if isinstance(watermark_cfg.get("lf", {}), dict) else {}
+    hf_cfg = watermark_cfg.get("hf", {}) if isinstance(watermark_cfg.get("hf", {}), dict) else {}
+
+    enable_lf = bool(lf_cfg.get("enabled", False))
+    enable_hf = bool(hf_cfg.get("enabled", False))
+
+    lf_strength = lf_cfg.get("strength", cfg.get("lf_strength", 1.5))
+    hf_threshold_percentile = hf_cfg.get("threshold_percentile", cfg.get("hf_threshold_percentile", 75.0))
+
+    lf_params = {
+        "impl_id": channel_lf.LF_CHANNEL_IMPL_ID,
+        "impl_version": channel_lf.LF_CHANNEL_VERSION,
+        "lf_strength": lf_strength,
+        "lf_enabled": enable_lf
+    }
+    hf_params = {
+        "impl_id": channel_hf.HF_CHANNEL_IMPL_ID,
+        "impl_version": channel_hf.HF_CHANNEL_VERSION,
+        "hf_threshold_percentile": hf_threshold_percentile,
+        "hf_enabled": enable_hf
+    }
+    lf_params_digest = digests.canonical_sha256(lf_params) if enable_lf else ""
+    hf_params_digest = digests.canonical_sha256(hf_params) if enable_hf else ""
+
+    device = cfg.get("device", "cpu")
+    dtype = cfg.get("dtype", "float32")
+    if isinstance(cfg.get("model"), dict) and "dtype" in cfg.get("model"):
+        dtype = cfg.get("model").get("dtype", dtype)
+
+    return InjectionContext(
+        plan_digest=plan_digest,
+        plan_ref=plan_payload,
+        lf_params_digest=lf_params_digest,
+        hf_params_digest=hf_params_digest,
+        enable_lf=enable_lf,
+        enable_hf=enable_hf,
+        device=device if isinstance(device, str) and device else "cpu",
+        dtype=dtype if isinstance(dtype, str) and dtype else "float32"
+    )
 
 
 def set_value_by_field_path(record: Dict[str, Any], field_path: str, value: str) -> None:
@@ -191,6 +273,137 @@ def set_failure_status(run_meta: Dict[str, Any], reason: RunFailureReason, exc: 
             "message": message,
             "stack_fingerprint": stack_fingerprint
         }
+
+
+def build_seed_audit(cfg: Dict[str, Any], command: str) -> Tuple[Dict[str, Any], str, int, str]:
+    """
+    功能：构造 seed 审计字段与派生 seed_value。
+
+    Build seed audit fields and derived seed value from seed_parts.
+
+    Args:
+        cfg: Configuration mapping.
+        command: Command name for seed purpose.
+
+    Returns:
+        Tuple of (seed_parts, seed_digest, seed_value, seed_rule_id).
+
+    Raises:
+        TypeError: If inputs are invalid.
+        ValueError: If seed_parts are invalid.
+    """
+    if not isinstance(cfg, dict):
+        # cfg 类型不符合预期，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+    if not isinstance(command, str) or not command:
+        # command 类型不符合预期，必须 fail-fast。
+        raise TypeError("command must be non-empty str")
+
+    seed_parts_cfg = cfg.get("seed_parts")
+    if seed_parts_cfg is not None:
+        if not isinstance(seed_parts_cfg, dict):
+            # seed_parts 类型不符合预期，必须 fail-fast。
+            raise TypeError("seed_parts must be dict")
+        if set(seed_parts_cfg.keys()) != _REQUIRED_SEED_PART_KEYS:
+            raise ValueError(
+                "seed_parts keys mismatch: "
+                f"expected={sorted(_REQUIRED_SEED_PART_KEYS)}, actual={sorted(seed_parts_cfg.keys())}"
+            )
+        seed_parts = dict(seed_parts_cfg)
+    else:
+        key_id = "<absent>"
+        watermark = cfg.get("watermark")
+        if isinstance(watermark, dict):
+            key_id_value = watermark.get("key_id")
+            if isinstance(key_id_value, str) and key_id_value:
+                key_id = key_id_value
+
+        sample_idx = 0
+        seed_value = cfg.get("seed")
+        if isinstance(seed_value, int):
+            sample_idx = seed_value
+        elif isinstance(seed_value, str) and seed_value.isdigit():
+            sample_idx = int(seed_value)
+
+        seed_parts = {
+            "key_id": key_id,
+            "sample_idx": sample_idx,
+            "purpose": command
+        }
+
+    digests.normalize_for_digest(seed_parts)
+    seed_digest = digests.canonical_sha256(seed_parts)
+    seed_value = time_utils.stable_seed_from_parts(seed_parts)
+    return seed_parts, seed_digest, seed_value, _SEED_RULE_ID
+
+
+def build_determinism_controls(cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    功能：构造 determinism_controls 审计字段。
+
+    Build determinism_controls audit mapping from config.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Determinism controls mapping or None if empty.
+
+    Raises:
+        TypeError: If cfg is invalid.
+    """
+    if not isinstance(cfg, dict):
+        # cfg 类型不符合预期，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+
+    controls = {}
+    if isinstance(cfg.get("determinism_controls"), dict):
+        controls.update(cfg.get("determinism_controls"))
+
+    for key in [
+        "torch_deterministic",
+        "cudnn_benchmark",
+        "deterministic_algorithms",
+        "rng_backend"
+    ]:
+        if key in cfg and key not in controls:
+            controls[key] = cfg.get(key)
+
+    if not controls:
+        return None
+    return controls
+
+
+def normalize_nondeterminism_notes(value: Any) -> Optional[Any]:
+    """
+    功能：规范化 nondeterminism_notes 字段。
+
+    Normalize nondeterminism_notes into str or list[str].
+
+    Args:
+        value: Raw notes value.
+
+    Returns:
+        Normalized notes or None.
+
+    Raises:
+        TypeError: If value type is invalid.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        if not value:
+            # notes 为空，必须 fail-fast。
+            raise TypeError("nondeterminism_notes must be non-empty str")
+        return value
+    if isinstance(value, list):
+        if not value:
+            raise TypeError("nondeterminism_notes must be non-empty list")
+        for item in value:
+            if not isinstance(item, str) or not item:
+                raise TypeError("nondeterminism_notes items must be non-empty str")
+        return list(value)
+    raise TypeError("nondeterminism_notes must be str, list[str], or None")
 
 
 

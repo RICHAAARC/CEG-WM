@@ -4,7 +4,7 @@
 功能说明：
 - 规范化输出目录路径，确保输出布局，加载合同与白名单，验证配置，解析实现，构造记录，绑定字段，写盘，并产出闭包。
 - 包含详细的输入验证、错误处理与状态更新机制，确保健壮性与可维护性。
-- 目前实现为 placeholder，未来会逐步完善业务逻辑与字段定义。
+- 当前为基线实现，后续会逐步完善业务逻辑与字段定义。
 """
 
 import sys
@@ -37,16 +37,27 @@ from main.core import schema
 from main.core import status
 from main.policy import path_policy
 from main.registries import runtime_resolver
+from main.watermarking.detect import orchestrator as detect_orchestrator
 from main.watermarking.detect.orchestrator import run_detect_orchestrator
+from main.watermarking.content_chain.latent_modifier import (
+    LatentModifier,
+    LATENT_MODIFIER_ID,
+    LATENT_MODIFIER_VERSION
+)
 from main.watermarking.fusion import decision_writer
 from main.core.errors import RunFailureReason
 from main.diffusion.sd3 import pipeline_factory
 from main.diffusion.sd3 import infer_runtime
 from main.diffusion.sd3 import infer_trace
+from main.diffusion.sd3 import trajectory_tap
 from main.cli.run_common import (
     bind_impl_identity_fields,
     set_failure_status,
-    format_fact_sources_mismatch
+    format_fact_sources_mismatch,
+    build_seed_audit,
+    build_determinism_controls,
+    normalize_nondeterminism_notes,
+    build_injection_context_from_plan
 )
 
 
@@ -57,14 +68,14 @@ def run_detect(
     overrides: list[str] | None = None
 ) -> None:
     """
-    功能：执行检测流程，本阶段为 placeholder。
+    功能：执行检测流程，本阶段为基线实现。
 
-    Execute detect workflow (placeholder implementation).
+    Execute detect workflow (baseline implementation).
 
     Args:
         output_dir: Run root directory for records/artifacts.
         config_path: YAML config path.
-        input_record_path: Optional input record path (placeholder if not provided).
+        input_record_path: Optional input record path (baseline if not provided).
         overrides: Optional CLI override args list.
     
     Returns:
@@ -102,6 +113,9 @@ def run_detect(
         "pipeline_provenance_canon_sha256": "<absent>",
         "pipeline_status": "unbuilt",
         "pipeline_error": "<absent>",
+        "pipeline_build_status": "<absent>",
+        "pipeline_build_failure_reason": "<absent>",
+        "pipeline_build_failure_summary": "<absent>",
         "pipeline_runtime_meta": None,
         "env_fingerprint_canon_sha256": "<absent>",
         "diffusers_version": "<absent>",
@@ -115,7 +129,7 @@ def run_detect(
         "path_policy": None,
         "run_root_reuse_allowed": False,
         "run_root_reuse_reason": None,
-        # (P1-D) E1 统计口径锚点初始化 / E1 statistics calibration anchors initialization.
+        # 统计口径锚点初始化。
         "target_fpr": "<absent>",
         "thresholds_digest": "<absent>",
         "threshold_metadata_digest": "<absent>"
@@ -171,10 +185,28 @@ def run_detect(
         run_meta["cfg_digest"] = cfg_digest
         run_meta["policy_path"] = cfg["policy_path"]
 
+        seed_parts, seed_digest, seed_value, seed_rule_id = build_seed_audit(cfg, "detect")
+        cfg["seed"] = seed_value
+        run_meta["seed_parts"] = seed_parts
+        run_meta["seed_digest"] = seed_digest
+        run_meta["seed_rule_id"] = seed_rule_id
+        run_meta["seed_value"] = seed_value
+        run_meta["cfg"] = cfg
+
+        determinism_controls = build_determinism_controls(cfg)
+        if determinism_controls is not None:
+            run_meta["determinism_controls"] = determinism_controls
+        nondeterminism_notes = normalize_nondeterminism_notes(cfg.get("nondeterminism_notes"))
+        if nondeterminism_notes is not None:
+            run_meta["nondeterminism_notes"] = nondeterminism_notes
+
         pipeline_result = pipeline_factory.build_pipeline_shell(cfg)
         run_meta["pipeline_provenance_canon_sha256"] = pipeline_result.get("pipeline_provenance_canon_sha256")
         run_meta["pipeline_status"] = pipeline_result.get("pipeline_status")
         run_meta["pipeline_error"] = pipeline_result.get("pipeline_error")
+        run_meta["pipeline_build_status"] = pipeline_result.get("pipeline_build_status", "<absent>")
+        run_meta["pipeline_build_failure_reason"] = pipeline_result.get("pipeline_build_failure_reason", "<absent>")
+        run_meta["pipeline_build_failure_summary"] = pipeline_result.get("pipeline_build_failure_summary", "<absent>")
         run_meta["pipeline_runtime_meta"] = pipeline_result.get("pipeline_runtime_meta")
         run_meta["env_fingerprint_canon_sha256"] = pipeline_result.get("env_fingerprint_canon_sha256")
         run_meta["diffusers_version"] = pipeline_result.get("diffusers_version")
@@ -182,22 +214,113 @@ def run_detect(
         run_meta["safetensors_version"] = pipeline_result.get("safetensors_version")
         run_meta["model_provenance_canon_sha256"] = pipeline_result.get("model_provenance_canon_sha256")
 
-        # (7.7) Real Dataflow Smoke: 在 pipeline_result 之后调用 inference
+        try:
+            impl_identity, impl_set, impl_set_capabilities_digest = runtime_resolver.build_runtime_impl_set_from_cfg(cfg)
+        except Exception as exc:
+            set_failure_status(run_meta, RunFailureReason.IMPL_RESOLVE_FAILED, exc)
+            raise
+        run_meta["impl_id"] = impl_identity.content_extractor_id
+        run_meta["impl_version"] = impl_set.content_extractor.impl_version
+        run_meta["impl_identity"] = impl_identity.as_dict()
+        run_meta["impl_identity_digest"] = runtime_resolver.compute_impl_identity_digest(impl_identity)
+        run_meta["impl_set_capabilities_digest"] = impl_set_capabilities_digest
+
+        # 预先计算 content 与 subspace 计划，用于注入上下文。
+        content_result_pre = impl_set.content_extractor.extract(cfg)
+        mask_digest = None
+        if isinstance(content_result_pre, dict):
+            mask_digest = content_result_pre.get("mask_digest")
+        elif hasattr(content_result_pre, "mask_digest"):
+            mask_digest = content_result_pre.mask_digest
+
+        planner_inputs = detect_orchestrator._build_planner_inputs_for_runtime(cfg, None)
+        subspace_result_pre = impl_set.subspace_planner.plan(
+            cfg,
+            mask_digest=mask_digest,
+            cfg_digest=cfg_digest,
+            inputs=planner_inputs
+        )
+
+        plan_payload = subspace_result_pre.as_dict() if hasattr(subspace_result_pre, "as_dict") else subspace_result_pre
+        plan_digest = getattr(subspace_result_pre, "plan_digest", None)
+        if isinstance(plan_payload, dict) and not isinstance(plan_digest, str):
+            plan_digest = plan_payload.get("plan_digest")
+
+        injection_context = None
+        injection_modifier = None
+        if isinstance(plan_payload, dict) and isinstance(plan_digest, str) and plan_digest:
+            injection_context = build_injection_context_from_plan(cfg, plan_payload, plan_digest)
+            injection_modifier = LatentModifier(LATENT_MODIFIER_ID, LATENT_MODIFIER_VERSION)
+
+        # (7.7) Real Dataflow Smoke：在 pipeline_result 之后调用 inference，并捕获最后的 latents 用于 detect 侧评分
         pipeline_obj = pipeline_result.get("pipeline_obj")
         device = cfg.get("device", "cpu")
-        seed = cfg.get("seed")
+        seed = seed_value
+
+        dependency_guard = assert_detect_runtime_dependencies(
+            cfg,
+            {
+                "test_mode": _resolve_detect_test_mode(cfg)
+            },
+            pipeline_obj
+        )
+
+        if pipeline_obj is None:
+            inference_status = infer_runtime.INFERENCE_STATUS_FAILED
+            inference_error = "detect_missing_pipeline_dependency"
+            inference_runtime_meta = {
+                "dependency_guard": {
+                    "allow_missing_pipeline_for_detect": True,
+                    "test_mode": bool(dependency_guard.get("test_mode", False)),
+                    "allow_flag": bool(dependency_guard.get("allow_flag", False))
+                }
+            }
+            trajectory_evidence = trajectory_tap.build_trajectory_evidence(
+                cfg,
+                inference_status,
+                inference_runtime_meta,
+                seed=seed,
+                device=device,
+            )
+            injection_evidence = {
+                "status": "absent",
+                "injection_absent_reason": "inference_failed",
+                "injection_failure_reason": None,
+                "injection_trace_digest": None,
+                "injection_params_digest": None,
+                "injection_metrics": None,
+                "subspace_binding_digest": None,
+            }
+            final_latents = None
+        else:
+            inference_result = infer_runtime.run_sd3_inference(
+                cfg,
+                pipeline_obj,
+                device,
+                seed,
+                injection_context=injection_context,
+                injection_modifier=injection_modifier,
+                capture_final_latents=True  # 捕获最后的 latents 用于 detect 侧评分
+            )
+            inference_status = inference_result.get("inference_status")
+            inference_error = inference_result.get("inference_error")
+            inference_runtime_meta = inference_result.get("inference_runtime_meta")
+            trajectory_evidence = inference_result.get("trajectory_evidence")
+            injection_evidence = inference_result.get("injection_evidence")
+            final_latents = inference_result.get("final_latents")
         
-        inference_result = infer_runtime.run_sd3_inference(cfg, pipeline_obj, device, seed)
-        inference_status = inference_result.get("inference_status")
-        inference_error = inference_result.get("inference_error")
-        inference_runtime_meta = inference_result.get("inference_runtime_meta")
+        # 将最后的 latents 存储到 cfg 的临时字段，供 detect orchestrator 使用。
+        # 这些 latents 不会被写入 records，只在内存中处理。
+        if final_latents is not None:
+            cfg["__detect_final_latents__"] = final_latents
         
         # 构造 infer_trace 并计算 digest
         infer_trace_obj = infer_trace.build_infer_trace(
             cfg,
             inference_status,
             inference_error,
-            inference_runtime_meta
+            inference_runtime_meta,
+            trajectory_evidence
         )
         infer_trace_canon_sha256 = infer_trace.compute_infer_trace_canon_sha256(infer_trace_obj)
         
@@ -207,6 +330,7 @@ def run_detect(
         run_meta["inference_status"] = inference_status
         run_meta["inference_error"] = inference_error
         run_meta["inference_runtime_meta"] = inference_runtime_meta
+        run_meta["trajectory_evidence"] = trajectory_evidence
 
         allow_nonempty_run_root = cfg.get("allow_nonempty_run_root", False)
         allow_nonempty_run_root_reason = cfg.get("allow_nonempty_run_root_reason")
@@ -267,27 +391,47 @@ def run_detect(
                 input_record = records_io.read_json(input_record_path)
                 print(f"[Detect]   Loaded input record with {len(input_record)} fields")
             else:
-                print("[Detect] No input record provided, using placeholder")
-                input_record = {"placeholder_input": True}
+                print("[Detect] No input record provided, using baseline")
+                input_record = {"baseline_input": True}
 
-            try:
-                impl_identity, impl_set, impl_set_capabilities_digest = runtime_resolver.build_runtime_impl_set_from_cfg(cfg)
-            except Exception as exc:
-                set_failure_status(run_meta, RunFailureReason.IMPL_RESOLVE_FAILED, exc)
-                raise
-            run_meta["impl_id"] = impl_identity.content_extractor_id
-            run_meta["impl_version"] = impl_set.content_extractor.impl_version
-            run_meta["impl_identity"] = impl_identity.as_dict()
-            run_meta["impl_identity_digest"] = runtime_resolver.compute_impl_identity_digest(impl_identity)
-            run_meta["impl_set_capabilities_digest"] = impl_set_capabilities_digest
-
-            # 构造 detect record，本阶段为 placeholder。
-            print("[Detect] Generating detect record (placeholder)...")
-            record = run_detect_orchestrator(cfg, impl_set, input_record)
+            # 构造 detect record，本阶段为基线实现。
+            print("[Detect] Generating detect record (baseline)...")
+            record = run_detect_orchestrator(
+                cfg,
+                impl_set,
+                input_record,
+                cfg_digest=cfg_digest,
+                trajectory_evidence=trajectory_evidence,
+                injection_evidence=injection_evidence,
+                content_result_override=content_result_pre,
+                detect_plan_result_override=subspace_result_pre
+            )
             if record is None:
                 exc = RuntimeError("record_construction_failed: record is None")
                 set_failure_status(run_meta, RunFailureReason.RUNTIME_ERROR, exc)
                 raise exc
+            
+            # ⭐ 增强项：从 input_record 继承 Embed 侧的摘要字段，用于完全对齐验证
+            # 这使得 detect_record.content_evidence_payload 包含 Embed 的摘要，
+            # 支持从 Notebook 生成的摘要对照表（checked_digests_alignment_report）
+            if isinstance(input_record, dict) and "content_evidence" in input_record:
+                embed_content_ev = input_record.get("content_evidence", {})
+                detect_payload = record.get("content_evidence_payload", {})
+                
+                if isinstance(detect_payload, dict) and isinstance(embed_content_ev, dict):
+                    # 从 Embed 继承关键摘要字段到 Detect（用于对齐验证）
+                    digest_fields = [
+                        "pipeline_fingerprint_digest",
+                        "trajectory_digest",
+                        "alignment_digest",
+                        "injection_site_digest"
+                    ]
+                    for field in digest_fields:
+                        if field not in detect_payload and field in embed_content_ev:
+                            detect_payload[field] = embed_content_ev[field]
+                    
+                    record["content_evidence_payload"] = detect_payload
+            
             record["cfg_digest"] = cfg_digest
             record["policy_path"] = cfg["policy_path"]
             if isinstance(pipeline_result, dict):
@@ -402,7 +546,7 @@ def run_detect(
 def main():
     """主流程。"""
     parser = argparse.ArgumentParser(
-        description="Detect watermark (placeholder implementation)"
+        description="Detect watermark (baseline implementation)"
     )
     parser.add_argument(
         "--out",
@@ -437,6 +581,107 @@ def main():
         import traceback
         traceback.print_exc()
         sys.exit(1)
+
+
+def _resolve_detect_test_mode(cfg: Dict[str, Any]) -> bool:
+    """
+    功能：解析 detect test_mode 开关。
+
+    Resolve detect test mode switch from config.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        True when detect test mode is enabled.
+    """
+    if not isinstance(cfg, dict):
+        return False
+    direct = cfg.get("test_mode")
+    if isinstance(direct, bool):
+        return direct
+    detect_cfg = cfg.get("detect")
+    if isinstance(detect_cfg, dict):
+        runtime_cfg = detect_cfg.get("runtime")
+        if isinstance(runtime_cfg, dict):
+            runtime_test_mode = runtime_cfg.get("test_mode")
+            if isinstance(runtime_test_mode, bool):
+                return runtime_test_mode
+        detect_test_mode = detect_cfg.get("test_mode")
+        if isinstance(detect_test_mode, bool):
+            return detect_test_mode
+    return False
+
+
+def _resolve_allow_missing_pipeline_for_detect(cfg: Dict[str, Any]) -> bool:
+    """
+    功能：解析 detect 缺失 pipeline 显式放行开关。
+
+    Resolve explicit allow flag for missing detect pipeline dependency.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        True when explicit allow flag is enabled.
+    """
+    if not isinstance(cfg, dict):
+        return False
+    runtime_cfg = cfg.get("runtime")
+    if isinstance(runtime_cfg, dict):
+        allow_flag = runtime_cfg.get("allow_missing_pipeline_for_detect")
+        if isinstance(allow_flag, bool):
+            return allow_flag
+    detect_cfg = cfg.get("detect")
+    if isinstance(detect_cfg, dict):
+        runtime_detect_cfg = detect_cfg.get("runtime")
+        if isinstance(runtime_detect_cfg, dict):
+            allow_flag = runtime_detect_cfg.get("allow_missing_pipeline_for_detect")
+            if isinstance(allow_flag, bool):
+                return allow_flag
+    return False
+
+
+def assert_detect_runtime_dependencies(
+    cfg: Dict[str, Any],
+    inputs: Dict[str, Any],
+    pipeline_obj: Any
+) -> Dict[str, Any]:
+    """
+    功能：detect 运行依赖前置校验。
+
+    Enforce strict detect runtime dependency policy.
+    Missing pipeline is allowed only in test_mode or explicit allow flag.
+
+    Args:
+        cfg: Configuration mapping.
+        inputs: Runtime inputs mapping.
+        pipeline_obj: Built pipeline object.
+
+    Returns:
+        Guard decision mapping.
+
+    Raises:
+        RuntimeError: If pipeline dependency is missing in production mode.
+        TypeError: If inputs are invalid.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(inputs, dict):
+        raise TypeError("inputs must be dict")
+
+    test_mode = bool(inputs.get("test_mode", False)) or _resolve_detect_test_mode(cfg)
+    allow_flag = _resolve_allow_missing_pipeline_for_detect(cfg)
+
+    if pipeline_obj is None and not test_mode and not allow_flag:
+        # production 默认 fail-fast，防止 fallback 污染统计口径。
+        raise RuntimeError("detect_missing_pipeline_dependency")
+
+    return {
+        "test_mode": bool(test_mode),
+        "allow_flag": bool(allow_flag),
+        "allow_missing_pipeline_for_detect": bool(test_mode or allow_flag),
+    }
 
 
 if __name__ == "__main__":

@@ -12,9 +12,10 @@
 #     - scripts/tests 增加闭合一致性校验。
 # ==============================================================
 
-# ------------------------------
 # 语义映射版本：用于 records 写入与 freeze_gate 校验。
-# ------------------------------
+# 与 frozen_contracts.yaml 中 policy_path_semantics_version 绑定
+# 注：顶层仅保留 policy_path_semantics_version；不再使用 semantics_version（已移至 _artifact_audit）
+# ==============================================================
 policy_path_semantics_version: "v1.0"
 
 # ==============================================================
@@ -169,6 +170,9 @@ field_catalog:
       - "score_audit.fusion_rule_used"
       - "decision.abstain_reason"
       - "score_audit.abstain_triggered_by"
+      - "content_evidence.subspace_binding_digest"
+      - "content_evidence.lf_statistics_digest"
+      - "content_evidence.hf_statistics_digest"
 
 # ------------------------------
 # catalogs 使用约束

@@ -104,31 +104,103 @@ def build_sd3_pipeline_from_pretrained(
     except Exception as exc:
         return None, build_meta, f"{type(exc).__name__}: {exc}"
 
-    local_files_only = False
-    if model_source == "local_path":
-        local_files_only = True
-    elif model_source == "hf_hub":
+    # 根据 model_source 决定是否允许从 HF Hub 下载
+    local_files_only = True  # 默认只使用本地缓存
+    if model_source in ("hf", "hf_hub"):
+        # 允许从 HuggingFace Hub 下载模型
         local_files_only = False
+    elif model_source in ("local", "local_path"):
+        # 仅使用本地文件，不联网下载
+        local_files_only = True
     elif model_source is not None:
-        return None, build_meta, "model_source not allowed"
+        # 不支持的 model_source 值
+        return None, build_meta, f"model_source not allowed: {model_source}"
+
+    # 从 extra_kwargs 中提取设备和精度配置
+    device = None
+    torch_dtype = None
+    if extra_kwargs:
+        device = extra_kwargs.get("device")
+        dtype_str = extra_kwargs.get("dtype")
+        if dtype_str:
+            # 转换 dtype 字符串为 torch.dtype
+            try:
+                import torch
+                dtype_map = {
+                    "float32": torch.float32,
+                    "float16": torch.float16,
+                    "bfloat16": torch.bfloat16,
+                    "fp32": torch.float32,
+                    "fp16": torch.float16,
+                    "bf16": torch.bfloat16,
+                }
+                torch_dtype = dtype_map.get(dtype_str.lower())
+            except Exception:
+                pass
 
     build_kwargs: Dict[str, Any] = {
         "revision": revision,
         "local_files_only": local_files_only
     }
+    
+    # 添加 torch_dtype 参数（如果指定）
+    if torch_dtype is not None:
+        build_kwargs["torch_dtype"] = torch_dtype
+    
+    # 保留其他 extra_kwargs（排除已处理的 device 和 dtype）
     if extra_kwargs:
-        build_kwargs.update(extra_kwargs)
+        for key, value in extra_kwargs.items():
+            if key not in ("device", "dtype"):
+                build_kwargs[key] = value
 
     try:
         pipeline = diffusers.DiffusionPipeline.from_pretrained(model_id, **build_kwargs)
+        
+        # 如果指定了设备，将 pipeline 移动到该设备
+        if device is not None and hasattr(pipeline, "to"):
+            try:
+                import torch
+                # 验证设备是否可用
+                if device == "cuda" and not torch.cuda.is_available():
+                    device = "cpu"
+                    build_meta["device_fallback"] = "cuda_unavailable"
+                pipeline = pipeline.to(device)
+                build_meta["device"] = device
+            except Exception as device_error:
+                build_meta["device_error"] = str(device_error)
+        
         build_meta["status"] = "built"
         build_meta["local_files_only"] = local_files_only
-        build_meta["build_kwargs"] = dict(build_kwargs)
+        
+        # 构造可序列化的 build_kwargs 副本（排除 torch.dtype 对象）
+        serializable_kwargs = {}
+        for key, value in build_kwargs.items():
+            if key == "torch_dtype":
+                # 将 torch.dtype 转换为字符串
+                serializable_kwargs[key] = str(value) if value is not None else None
+            else:
+                serializable_kwargs[key] = value
+        build_meta["build_kwargs"] = serializable_kwargs
+        
+        if torch_dtype is not None:
+            build_meta["torch_dtype"] = str(torch_dtype)
         return pipeline, build_meta, None
     except Exception as exc:
         build_meta["status"] = "failed"
         build_meta["local_files_only"] = local_files_only
-        build_meta["build_kwargs"] = dict(build_kwargs)
+        
+        # 构造可序列化的 build_kwargs 副本
+        serializable_kwargs = {}
+        for key, value in build_kwargs.items():
+            if key == "torch_dtype":
+                serializable_kwargs[key] = str(value) if value is not None else None
+            else:
+                serializable_kwargs[key] = value
+        build_meta["build_kwargs"] = serializable_kwargs
+        
+        # 支持 "hf" 和 "hf_hub" 两种标识
+        if model_source in ("hf", "hf_hub"):
+            return None, build_meta, "hf_hub_local_cache_missing_or_unavailable"
         return None, build_meta, f"{type(exc).__name__}: {exc}"
 
 

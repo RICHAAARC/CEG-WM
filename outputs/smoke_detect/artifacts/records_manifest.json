@@ -1,0 +1,29 @@
+{
+  "_artifact_audit": {
+    "schema_version": "v1.0",
+    "writer": "records_io"
+  },
+  "anchors": {
+    "contract_bound_digest": "d4001705d1416570c89a29a86c74fae6a092a3b74cfa38267d7b96df016dad60",
+    "contract_version": "v1.0",
+    "policy_path": "content_only",
+    "policy_path_semantics_bound_digest": "8380459aab14c3061b232ec15c7061c12e673add36dc6aa455a5703b2d687a32",
+    "policy_path_semantics_version": "v1.0",
+    "whitelist_bound_digest": "6c9c7ec9e7866de5b0b77eb44b7658d403ba5744f410aee9cf25b2c1c9134fe3",
+    "whitelist_version": "v1.0"
+  },
+  "bundle_canon_sha256": "ee5b41f5590227f27666466fd82e301531b3257c19921364bc310ac26c671b1b",
+  "file_count": 1,
+  "files": [
+    {
+      "canon_sha256": "c7c621b5a235c87bb47e0ea961d162041720018edb9a09ee34f2de7bce61d479",
+      "file_sha256": "99f61d97d2128345e3db029bc6aa0373472fff2d097a252fd9f37270814361de",
+      "file_type": "json",
+      "path": "detect_record.json",
+      "record_count": 1
+    }
+  ],
+  "manifest_name": "records_manifest.json",
+  "records_dir": "D:/Code/CEG-WM/outputs/smoke_detect/records",
+  "schema_version": "v1.0"
+}

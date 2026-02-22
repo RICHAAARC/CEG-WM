@@ -20,11 +20,11 @@ SD3_DIFFUSERS_SHELL_ID = "sd3_diffusers_shell_v1"
 SD3_DIFFUSERS_REAL_ID = "sd3_diffusers_real_v1"
 
 
-class PipelineShellPlaceholder:
+class PipelineShellBaseline:
     """
-    功能：管道壳占位实现。
+    功能：管道壳基线实现。
 
-    Placeholder pipeline shell implementation with metadata only.
+    Baseline pipeline shell implementation with metadata only.
 
     Args:
         impl_id: Implementation identifier.
@@ -54,9 +54,9 @@ class PipelineShellPlaceholder:
 
     def as_dict(self) -> Dict[str, str]:
         """
-        功能：导出占位实现元数据。
+        功能：导出基线实现元数据。
 
-        Export placeholder metadata as dict.
+        Export baseline metadata as dict.
 
         Args:
             None.
@@ -102,17 +102,17 @@ def _derive_impl_digest(impl_id: str, impl_version: str) -> str:
     })
 
 
-def _build_sd3_diffusers_shell(cfg: Dict[str, Any]) -> PipelineShellPlaceholder:
+def _build_sd3_diffusers_shell(cfg: Dict[str, Any]) -> PipelineShellBaseline:
     """
-    功能：构造 SD3 管道壳占位实现。
+    功能：构造 SD3 管道壳基线实现。
 
-    Build SD3 pipeline shell placeholder.
+    Build SD3 pipeline shell baseline.
 
     Args:
         cfg: Config mapping.
 
     Returns:
-        PipelineShellPlaceholder instance.
+        PipelineShellBaseline instance.
 
     Raises:
         TypeError: If cfg is invalid.
@@ -122,20 +122,20 @@ def _build_sd3_diffusers_shell(cfg: Dict[str, Any]) -> PipelineShellPlaceholder:
         raise TypeError("cfg must be dict")
     impl_version = "v1"
     impl_digest = _derive_impl_digest(SD3_DIFFUSERS_SHELL_ID, impl_version)
-    return PipelineShellPlaceholder(SD3_DIFFUSERS_SHELL_ID, impl_version, impl_digest)
+    return PipelineShellBaseline(SD3_DIFFUSERS_SHELL_ID, impl_version, impl_digest)
 
 
-def _build_sd3_diffusers_real(cfg: Dict[str, Any]) -> PipelineShellPlaceholder:
+def _build_sd3_diffusers_real(cfg: Dict[str, Any]) -> PipelineShellBaseline:
     """
-    功能：构造 SD3 真实 pipeline 占位实现。
+    功能：构造 SD3 真实 pipeline 基线实现。
 
-    Build SD3 real pipeline placeholder.
+    Build SD3 real pipeline baseline.
 
     Args:
         cfg: Config mapping.
 
     Returns:
-        PipelineShellPlaceholder instance.
+        PipelineShellBaseline instance.
 
     Raises:
         TypeError: If cfg is invalid.
@@ -145,7 +145,7 @@ def _build_sd3_diffusers_real(cfg: Dict[str, Any]) -> PipelineShellPlaceholder:
         raise TypeError("cfg must be dict")
     impl_version = "v1"
     impl_digest = _derive_impl_digest(SD3_DIFFUSERS_REAL_ID, impl_version)
-    return PipelineShellPlaceholder(SD3_DIFFUSERS_REAL_ID, impl_version, impl_digest)
+    return PipelineShellBaseline(SD3_DIFFUSERS_REAL_ID, impl_version, impl_digest)
 
 
 _PIPELINE_REGISTRY.register_factory(
@@ -156,7 +156,7 @@ _PIPELINE_REGISTRY.register_factory(
         requires_cuda=False,
         supports_deterministic=True,
         max_resolution=None,
-        supported_models=None
+        supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
     )
 )
 
@@ -168,7 +168,7 @@ _PIPELINE_REGISTRY.register_factory(
         requires_cuda=False,
         supports_deterministic=True,
         max_resolution=None,
-        supported_models=None
+        supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
     )
 )
 

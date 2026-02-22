@@ -62,6 +62,20 @@ external_fact_sources:
       - "policy_path_semantics_file_sha256"
       - "policy_path_semantics_canon_sha256"
       - "policy_path_semantics_bound_digest"
+  records_schema_extensions:
+    path: "configs/records_schema_extensions.yaml"
+    required_record_fields: []
+    recommended_record_fields:
+      - "records_schema_extensions_version"
+      - "records_schema_extensions_digest"
+      - "records_schema_extensions_file_sha256"
+      - "records_schema_extensions_canon_sha256"
+      - "records_schema_extensions_bound_digest"
+    optional_policy: "absent_ok"
+    description: |
+      可选事实源：append-only 字段扩展的权威来源。
+      若启用 schema_extensions，则 records必须绑定上述锚点字段；否则允许 absent（但需记录未启用原因）。
+      支持向后兼容：旧 records（未绑定该事实源）允许通过，但必须在 run_closure 中标记为 "extensions_not_enabled"。
 
 # ==============================================================
 # I/O Entry Points & Write Exceptions
@@ -195,6 +209,7 @@ gate_enforcement_requirements:
           - "enums"
           - "impl_id"
           - "consistency_rules"
+          - "pipeline_realization"  # 真实 pipeline 构建策略
         policy_path_semantics:
           - "policy_path_semantics_version"
           - "hard_requirements"
@@ -427,10 +442,37 @@ records_schema:
     - content_evidence.basis_digest
     - content_evidence.lf_trace_digest
     - content_evidence.hf_trace_digest
+    - content_evidence.injection_trace_digest
+    - content_evidence.injection_params_digest
     - content_evidence.lf_score
     - content_evidence.hf_score
+    - content_evidence.injection_status
+    - content_evidence.injection_absent_reason
+    - content_evidence.injection_failure_reason
+    - content_evidence.injection_metrics
+    - content_evidence.subspace_binding_digest
+    - content_evidence.lf_statistics_digest
+    - content_evidence.hf_statistics_digest
+    - content_evidence.hf_evidence_summary
     - content_evidence.score_parts
     - content_evidence.content_failure_reason
+    - content_evidence.content_mismatch_reason
+    - content_evidence.content_mismatch_field_path
+    - content_evidence.audit.trajectory_tap_status
+    - content_evidence.audit.trajectory_absent_reason
+    - content_evidence.trajectory_evidence
+    - content_evidence.trajectory_evidence.status
+    - content_evidence.trajectory_evidence.trajectory_spec
+    - content_evidence.trajectory_evidence.trajectory_spec_digest
+    - content_evidence.trajectory_evidence.trajectory_digest
+    - content_evidence.trajectory_evidence.trajectory_metrics
+    - content_evidence.trajectory_evidence.trajectory_stats
+    - content_evidence.trajectory_evidence.trajectory_absent_reason
+    - content_evidence.trajectory_evidence.trajectory_tap_version
+    - content_evidence.trajectory_evidence.audit
+    - content_evidence.trajectory_evidence.audit.trajectory_tap_status
+    - content_evidence.trajectory_evidence.audit.trajectory_absent_reason
+    - content_evidence.trajectory_evidence.device
     - geometry_evidence.anchor_digest
     - geometry_evidence.anchor_metrics
     - geometry_evidence.sync_digest
@@ -443,6 +485,29 @@ records_schema:
     - decision.routing_decisions
     - decision.routing_digest
     - decision.conditional_fpr_notes
+    - content_evidence.detect_lf_score
+    - content_evidence.detect_hf_score
+    - content_evidence.lf_score_drift_status
+    - content_evidence.hf_score_drift_status
+    - content_evidence.trajectory_digest_match
+    - content_evidence.basis_digest_match
+    - content_evidence.detect_lf_statistics
+    - content_evidence.detect_hf_statistics
+    - content_evidence.subspace_consistency_status
+    # ---- Paper Faithfulness 对齐证据字段 ----
+    - paper_faithfulness.spec_version
+    - paper_faithfulness.spec_digest
+    - paper_faithfulness.spec_file_sha256
+    - paper_faithfulness.spec_canon_sha256
+    - paper_faithfulness.spec_bound_digest
+    - content_evidence.pipeline_fingerprint
+    - content_evidence.pipeline_fingerprint_digest
+    - content_evidence.injection_site_spec
+    - content_evidence.injection_site_digest
+    - content_evidence.alignment_report
+    - content_evidence.alignment_digest
+    - content_evidence.lf.ecc_spec_digest
+    - content_evidence.hf_evidence_summary.repetition_factor
 
 # ------------------------------
 # 字段别名：用于历史兼容
@@ -523,7 +588,15 @@ fail_reason_enum:
   immutable: true
 
 mismatch_reason_enum:
-  allowed_values: ["subspace_frame_mismatch", "cfg_digest_mismatch"]
+  allowed_values:
+    - "subspace_frame_mismatch"
+    - "cfg_digest_mismatch"
+    - "plan_digest_mismatch"
+    - "basis_digest_mismatch"
+    - "planner_impl_identity_mismatch"
+    - "trajectory_spec_digest_mismatch"
+    - "trajectory_digest_mismatch"
+    - "trajectory_evidence_invalid"
   usage: "仅在 status == 'mismatch' 时填充"
   immutable: true
 

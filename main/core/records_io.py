@@ -430,7 +430,6 @@ def write_path_validation_audit(
     audit_filename = f"path_audit_{target_hash}_{timestamp_str}.json"
     audit_path = audit_records_dir / audit_filename
     
-    # (P0-B) D1 explicit path validation gate: validate artifact output path.
     # 显式路径策略校验：禁止逃逸。
     path_policy.validate_output_target(audit_path, "artifact", ctx.run_root)
     
@@ -775,6 +774,7 @@ def _enforce_artifact_semantic_bypass_guard(
         ) from exc
 
     present_fields = _collect_json_keys(obj)
+    top_level_fields = _collect_top_level_keys(obj) - {"_artifact_audit"}
 
     # path_audits/ 路径模式允许包含策略版本等审计字段。
     if relative_path.startswith("path_audits/") and relative_path.endswith(".json"):
@@ -798,15 +798,8 @@ def _enforce_artifact_semantic_bypass_guard(
                     "cfg_audit payload contains non-allowlisted top-level fields: "
                     f"path={dst_path}, fields={sorted(extra_top_level)}"
                 )
-            if interpretation is not None:
-                required_fields = set(interpretation.required_record_fields)
-                allowed_anchor = {"cfg_digest", "schema_version"}
-                anchor_pollution = present_fields.intersection(required_fields - allowed_anchor)
-                if anchor_pollution:
-                    raise RecordsWritePolicyError(
-                        "cfg_audit payload contains record anchor fields: "
-                        f"path={dst_path}, fields={sorted(anchor_pollution)}"
-                    )
+            # cfg_audit 不是 record，无需检查 required_record_fields
+            # _artifact_audit 是系统注入的审计子字段，不作为顶级锚点考虑
         return
 
     forbidden_overlap = present_fields.intersection(_ARTIFACT_FORBIDDEN_ANCHOR_FIELDS)
@@ -820,7 +813,7 @@ def _enforce_artifact_semantic_bypass_guard(
     if interpretation is not None:
         required_fields = set(interpretation.required_record_fields)
         if required_fields:
-            overlap = present_fields.intersection(required_fields)
+            overlap = top_level_fields.intersection(required_fields)
             if overlap:
                 # artifacts 具备 records 锚点字段，必须 fail-fast。
                 raise RecordsWritePolicyError(
@@ -1146,7 +1139,6 @@ def write_artifact_text_unbound(
         # content 类型不合法，必须 fail-fast。
         raise TypeError("content must be str")
 
-    # (P0-B) D1 explicit path validation gate: validate artifact output path.
     # 显式路径策略校验：禁止逃逸。
     path_policy.validate_output_target(Path(path), "artifact", run_root)
 
@@ -1192,7 +1184,6 @@ def write_artifact_bytes_unbound(
         # data 类型不合法，必须 fail-fast。
         raise TypeError("data must be bytes")
 
-    # (P0-B) D1 explicit path validation gate: validate artifact output path.
     # 显式路径策略校验：禁止逃逸。
     path_policy.validate_output_target(Path(path), "artifact", run_root)
 

@@ -3,8 +3,8 @@
 
 功能说明：
 - 本模块提供一个 CLI 入口，用于执行阈值校准流程。
-- 当前实现为 placeholder，主要演示如何加载事实源、验证一致性、构造记录并写盘。
-- 未来将替换为实际的校准逻辑，当前重点在于展示整体流程和接口设计。
+- 当前实现执行真实 NP 校准流程，支持阈值工件与元数据工件写盘。
+- 流程包含事实源绑定、配置校验、实现解析、校准执行与记录闭包。
 """
 
 import sys
@@ -32,6 +32,7 @@ from main.policy.runtime_whitelist import (
     bind_semantics_to_record
 )
 from main.core import records_io
+from main.core import digests
 from main.core import config_loader
 from main.core import schema
 from main.core import status
@@ -42,7 +43,10 @@ from main.core.errors import RunFailureReason
 from main.cli.run_common import (
     bind_impl_identity_fields,
     set_failure_status,
-    format_fact_sources_mismatch
+    format_fact_sources_mismatch,
+    build_seed_audit,
+    build_determinism_controls,
+    normalize_nondeterminism_notes
 )
 
 
@@ -152,6 +156,21 @@ def run_calibrate(output_dir: str, config_path: str, overrides: list[str] | None
         run_meta["cfg_digest"] = cfg_digest
         run_meta["policy_path"] = cfg["policy_path"]
 
+        seed_parts, seed_digest, seed_value, seed_rule_id = build_seed_audit(cfg, "calibrate")
+        cfg["seed"] = seed_value
+        run_meta["seed_parts"] = seed_parts
+        run_meta["seed_digest"] = seed_digest
+        run_meta["seed_rule_id"] = seed_rule_id
+        run_meta["seed_value"] = seed_value
+        run_meta["cfg"] = cfg
+
+        determinism_controls = build_determinism_controls(cfg)
+        if determinism_controls is not None:
+            run_meta["determinism_controls"] = determinism_controls
+        nondeterminism_notes = normalize_nondeterminism_notes(cfg.get("nondeterminism_notes"))
+        if nondeterminism_notes is not None:
+            run_meta["nondeterminism_notes"] = nondeterminism_notes
+
         allow_nonempty_run_root = cfg.get("allow_nonempty_run_root", False)
         allow_nonempty_run_root_reason = cfg.get("allow_nonempty_run_root_reason")
         override_applied_for_layout = cfg.get("override_applied")
@@ -216,8 +235,8 @@ def run_calibrate(output_dir: str, config_path: str, overrides: list[str] | None
             run_meta["impl_identity_digest"] = runtime_resolver.compute_impl_identity_digest(impl_identity)
             run_meta["impl_set_capabilities_digest"] = impl_set_capabilities_digest
 
-            # 构造 calibration record，本阶段为 placeholder。
-            print("[Calibrate] Generating calibration record (placeholder)...")
+            # 构造 calibration record。
+            print("[Calibrate] Generating calibration record...")
             record = run_calibrate_orchestrator(cfg, impl_set)
             record["cfg_digest"] = cfg_digest
             record["policy_path"] = cfg["policy_path"]
@@ -226,6 +245,30 @@ def run_calibrate(output_dir: str, config_path: str, overrides: list[str] | None
                 record["override_applied"] = override_applied
             # 写入 impl_set_capabilities_digest。
             record["impl_set_capabilities_digest"] = impl_set_capabilities_digest
+
+            thresholds_artifact = record.get("thresholds_artifact")
+            threshold_metadata_artifact = record.get("threshold_metadata_artifact")
+            if not isinstance(thresholds_artifact, dict):
+                # thresholds_artifact 缺失或类型不合法，必须 fail-fast。
+                raise TypeError("thresholds_artifact must be dict")
+            if not isinstance(threshold_metadata_artifact, dict):
+                # threshold_metadata_artifact 缺失或类型不合法，必须 fail-fast。
+                raise TypeError("threshold_metadata_artifact must be dict")
+
+            thresholds_dir = artifacts_dir / "thresholds"
+            thresholds_dir.mkdir(parents=True, exist_ok=True)
+            thresholds_path = thresholds_dir / "thresholds_artifact.json"
+            threshold_metadata_path = thresholds_dir / "threshold_metadata_artifact.json"
+
+            path_policy.validate_output_target(thresholds_path, "artifact", run_root)
+            path_policy.validate_output_target(threshold_metadata_path, "artifact", run_root)
+            records_io.write_artifact_json(str(thresholds_path), thresholds_artifact)
+            records_io.write_artifact_json(str(threshold_metadata_path), threshold_metadata_artifact)
+
+            record["thresholds_artifact_path"] = str(thresholds_path)
+            record["threshold_metadata_artifact_path"] = str(threshold_metadata_path)
+            record["thresholds_artifact_digest"] = digests.canonical_sha256(thresholds_artifact)
+            record["threshold_metadata_artifact_digest"] = digests.canonical_sha256(threshold_metadata_artifact)
 
             schema.ensure_required_fields(record, cfg, interpretation)
 
@@ -296,7 +339,7 @@ def run_calibrate(output_dir: str, config_path: str, overrides: list[str] | None
 def main():
     """主流程。"""
     parser = argparse.ArgumentParser(
-        description="Calibrate thresholds (placeholder implementation)"
+        description="Calibrate thresholds (real NP implementation)"
     )
     parser.add_argument(
         "--out",

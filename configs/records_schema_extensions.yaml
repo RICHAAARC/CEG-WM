@@ -12,6 +12,8 @@ type_definitions:
   score_float: "非负数值（int 或 float）。"
   routing_dict: "JSON-like 的路由决策映射。"
   reason_string: "非空字符串，用于失败原因。"
+  json_dict: "JSON-like 的映射。"
+  boolean_flag: "布尔标记字段（true/false）。"
 
 fields:
   - path: "content_evidence.mask_digest"
@@ -26,6 +28,36 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "掩码统计指标（面积占比、连通域数量等）。"
+  - path: "content_evidence.mask_stats.mask_resolution_binding"
+    layer: "anchor"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "掩码分辨率绑定信息（height/width/channels）。"
+  - path: "content_evidence.mask_stats.mask_source_impl_identity"
+    layer: "anchor"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "掩码来源实现身份（impl_id/impl_version/impl_digest）。"
+  - path: "content_evidence.mask_stats.mask_params_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "掩码参数摘要（mask_params 的 canonical sha256）。"
+  - path: "content_evidence.mask_stats.routing_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "由掩码统计派生的最小路由摘要。"
+  - path: "content_evidence.mask_stats.routing_summary"
+    layer: "routing"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "由掩码统计派生的最小路由统计摘要。"
   - path: "content_evidence.plan_digest"
     layer: "anchor"
     type: "digest_hex64"
@@ -50,6 +82,18 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "高频注入痕迹摘要。"
+  - path: "content_evidence.injection_trace_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "注入痕迹摘要。"
+  - path: "content_evidence.injection_params_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "注入参数摘要。"
   - path: "content_evidence.lf_score"
     layer: "diagnostic"
     type: "score_float"
@@ -62,6 +106,54 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "高频分区得分。"
+  - path: "content_evidence.injection_status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "注入状态（ok/absent/failed/mismatch）。"
+  - path: "content_evidence.injection_absent_reason"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "注入缺失原因。"
+  - path: "content_evidence.injection_failure_reason"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "注入失败原因。"
+  - path: "content_evidence.injection_metrics"
+    layer: "diagnostic"
+    type: "metrics_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "注入统计指标摘要。"
+  - path: "content_evidence.subspace_binding_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "注入期运行子空间绑定摘要。"
+  - path: "content_evidence.lf_statistics_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "检测侧 LF 同构统计摘要。"
+  - path: "content_evidence.hf_statistics_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "检测侧 HF 同构统计摘要。"
+  - path: "content_evidence.hf_evidence_summary"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "高频证据摘要（状态、原因与可复算统计）。"
   - path: "content_evidence.score_parts"
     layer: "diagnostic"
     type: "metrics_dict"
@@ -74,6 +166,108 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "内容链失败原因（字符串枚举）。"
+  - path: "content_evidence.content_mismatch_reason"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "内容链主 mismatch 原因（单一主因）。"
+  - path: "content_evidence.content_mismatch_field_path"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "内容链主 mismatch 对应字段路径。"
+  - path: "content_evidence.trajectory_evidence"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "轨迹采样证据（包含摘要与统计）。"
+  - path: "content_evidence.trajectory_evidence.status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "轨迹采样状态（ok/absent）。"
+  - path: "content_evidence.trajectory_evidence.trajectory_spec"
+    layer: "anchor"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "轨迹采样规范（可复算）。"
+  - path: "content_evidence.trajectory_evidence.trajectory_spec_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "轨迹采样规范摘要。"
+  - path: "content_evidence.trajectory_evidence.trajectory_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "轨迹采样摘要（顺序敏感）。"
+  - path: "content_evidence.trajectory_evidence.trajectory_metrics"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "轨迹采样统计摘要（命名收敛字段，优先读取）。"
+  - path: "content_evidence.trajectory_evidence.trajectory_stats"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "轨迹采样统计摘要。"
+  - path: "content_evidence.trajectory_evidence.trajectory_absent_reason"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "轨迹采样缺失原因。"
+  - path: "content_evidence.trajectory_evidence.trajectory_tap_version"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "轨迹采样版本标识。"
+  - path: "content_evidence.trajectory_evidence.audit"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "轨迹采样审计子容器。"
+  - path: "content_evidence.trajectory_evidence.audit.trajectory_tap_status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "轨迹采样子状态（命名收敛字段，优先读取）。"
+  - path: "content_evidence.trajectory_evidence.audit.trajectory_absent_reason"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "轨迹采样缺失原因（审计容器字段）。"
+  - path: "content_evidence.audit.trajectory_tap_status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "内容证据审计中的轨迹采样子状态。"
+  - path: "content_evidence.audit.trajectory_absent_reason"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "内容证据审计中的轨迹采样缺失原因。"
+  - path: "content_evidence.trajectory_evidence.device"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "轨迹采样设备标签。"
   - path: "geometry_evidence.anchor_digest"
     layer: "anchor"
     type: "digest_hex64"
@@ -140,9 +334,345 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "路由决策摘要。"
+  - path: "routing_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "content 链派生路由摘要（embed 顶层锚点）。"
+  - path: "routing_summary"
+    layer: "routing"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "content 链派生最小路由统计（embed 顶层字段）。"
+  - path: "mask_resolution_binding"
+    layer: "anchor"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "掩码分辨率绑定（embed 顶层字段）。"
+  - path: "mask_source_impl_identity"
+    layer: "anchor"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "掩码来源实现身份（embed 顶层字段）。"
   - path: "decision.conditional_fpr_notes"
     layer: "routing"
     type: "routing_dict"
     required: false
     missing_semantics: "absent_ok"
     description: "条件 FPR 口径说明与统计锚点。"
+
+  # ==============================================================
+  # detect 侧同构统计信号（论文级检测闭环）
+  # ==============================================================
+  - path: "content_evidence.detect_lf_score"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "detect 侧 LF 子空间同构得分（范围 [0, 1]）。"
+  
+  - path: "content_evidence.detect_hf_score"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "detect 侧 HF 子空间同构得分（范围 [0, 1]）。"
+  
+  - path: "content_evidence.lf_score_drift_status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "embed vs detect LF score 漂移状态（ok/drift_detected）。"
+  
+  - path: "content_evidence.hf_score_drift_status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "embed vs detect HF score 漂移状态（ok/drift_detected）。"
+  
+  - path: "content_evidence.trajectory_digest_match"
+    layer: "anchor"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "轨迹摘要一致性状态（consistent/mismatch/absent）。"
+  
+  - path: "content_evidence.basis_digest_match"
+    layer: "anchor"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "子空间基摘要一致性状态（consistent/mismatch/absent）。"
+  
+  - path: "content_evidence.detect_lf_statistics"
+    layer: "diagnostic"
+    type: "metrics_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "detect 侧 LF 统计向量（系数范数、均值、标差等）。"
+  
+  - path: "content_evidence.detect_hf_statistics"
+    layer: "diagnostic"
+    type: "metrics_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "detect 侧 HF 统计向量（系数范数、均值、标差等）。"
+  
+  - path: "content_evidence.subspace_consistency_status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "子空间一致性校验总体状态（ok/inconsistent/absent）。"
+  # ==============================================================
+  # Paper Faithfulness 对齐证据字段（append-only v1.0）
+  # ==============================================================
+  - path: "paper_faithfulness.spec_version"
+    layer: "anchor"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "paper_faithfulness_spec.yaml 版本号。"
+  
+  - path: "paper_faithfulness.spec_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "paper_faithfulness_spec.yaml 配置摘要。"
+  
+  - path: "paper_faithfulness.spec_file_sha256"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "paper_faithfulness_spec.yaml 文件原文哈希。"
+  
+  - path: "paper_faithfulness.spec_canon_sha256"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "paper_faithfulness_spec.yaml 规范化哈希。"
+  
+  - path: "paper_faithfulness.spec_bound_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "paper_faithfulness_spec.yaml 绑定摘要。"
+  
+  - path: "content_evidence.pipeline_fingerprint"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "SD3 pipeline 结构指纹（transformer blocks、attention heads 等）。"
+  
+  - path: "content_evidence.pipeline_fingerprint_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "SD3 pipeline 结构指纹摘要。"
+  
+  - path: "content_evidence.injection_site_spec"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "水印注入点规范（hook 类型、模块路径、张量名等）。"
+  
+  - path: "content_evidence.injection_site_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "水印注入点规范摘要。"
+  
+  - path: "content_evidence.alignment_report"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "对齐检查报告（逐项 PASS/FAIL/NA + 证据路径）。"
+  
+  - path: "content_evidence.alignment_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "对齐检查报告摘要。"
+  
+  - path: "content_evidence.lf.ecc_spec_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "LF 纠错码规范摘要（PRC 等方法的 ECC 参数）。"
+  
+  - path: "content_evidence.hf_evidence_summary.repetition_factor"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "HF 重复因子（T2SMark 等方法的 repetition code 参数）。"
+  # ==============================================================
+  # Paper Faithfulness detect 侧一致性验证扩展（append-only v1.0）
+  # - 结构化 failure semantics：absent_reasons / mismatch_reasons / fail_reasons
+  # - status 为 "ok" 时，所有 reasons 数组为空列表
+  # - status 为 "absent" 时 absent_reasons 必须非空
+  # - status 为 "mismatch" 时 mismatch_reasons 必须非空
+  # - status 为 "fail" 时 fail_reasons 必须非空
+  # ==============================================================
+  - path: "paper_faithfulness.status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "paper faithfulness 一致性验证状态（ok/absent/mismatch/fail）。"
+  
+  - path: "paper_faithfulness.absent_reasons"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "paper faithfulness 证据缺失原因列表（必须非空当 status='absent'）。"
+  
+  - path: "paper_faithfulness.mismatch_reasons"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "paper faithfulness 证据不一致原因列表（必须非空当 status='mismatch'）。"
+  
+  - path: "paper_faithfulness.fail_reasons"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "paper faithfulness 验证失败原因列表（必须非空当 status='fail'）。"
+
+  - path: "plan_input_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "embed 侧 plan 输入锚点摘要。"
+
+  - path: "plan_input_schema_version"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "plan 输入锚点口径版本。"
+
+  - path: "input_sha256"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "embed 输入图像文件摘要。"
+
+  - path: "artifact_sha256"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "embed 输出工件文件摘要。"
+
+  - path: "embed_trace"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "embed 基线身份标记字段（防止误当真实嵌入参数）。"
+
+  - path: "embed_trace.identity_mode"
+    layer: "diagnostic"
+    type: "boolean_flag"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "embed 基线身份模式标记。"
+
+  - path: "embed_trace.identity_reason"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "embed 基线身份模式原因枚举。"
+
+  - path: "plan_digest_expected"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "detect 侧输入绑定记录中的期望 plan 摘要。"
+
+  - path: "plan_digest_observed"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "detect 侧观测到的 plan 摘要。"
+
+  - path: "plan_digest_status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "detect 侧 plan 摘要一致性状态（ok/mismatch/absent）。"
+
+  - path: "calibration_mode"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "calibration 侧运行模式（real）。"
+
+  - path: "calibration_is_fallback"
+    layer: "diagnostic"
+    type: "boolean_flag"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "calibration 侧回退标记（由 calibration_mode 派生）。"
+
+  - path: "evaluation_mode"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "evaluation 侧运行模式（real）。"
+
+  - path: "evaluation_is_fallback"
+    layer: "diagnostic"
+    type: "boolean_flag"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "evaluation 侧回退标记（由 evaluation_mode 派生）。"
+
+  - path: "detect_runtime_mode"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "detect 侧运行模式（real/fallback_identity_v0）。"
+
+  - path: "detect_runtime_status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "detect 侧运行状态（active/fallback）。"
+
+  - path: "detect_runtime_is_fallback"
+    layer: "diagnostic"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "detect 侧兼容字段：是否处于回退模式（由 detect_runtime_mode 派生）。"

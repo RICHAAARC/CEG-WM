@@ -4,7 +4,7 @@
 功能说明：
 - 规范化输出目录路径，确保输出布局，加载合同与白名单，验证配置，解析实现，构造记录，绑定字段，写盘，并产出闭包。
 - 包含详细的输入验证、错误处理与状态更新机制，确保健壮性与可维护性。
-- 目前实现为 placeholder，未来会逐步完善业务逻辑与字段定义。
+- 当前为基线实现，后续会逐步完善业务逻辑与字段定义。
 """
 
 import sys
@@ -19,6 +19,7 @@ from main.cli import assert_module_execution
 assert_module_execution("run_embed")
 
 from main.core import time_utils
+from main.core import digests
 from main.core.contracts import (
     load_frozen_contracts,
     bind_contract_to_record,
@@ -42,12 +43,25 @@ from main.registries import runtime_resolver
 from main.diffusion.sd3 import pipeline_factory
 from main.diffusion.sd3 import infer_runtime
 from main.diffusion.sd3 import infer_trace
+from main.diffusion.sd3 import pipeline_inspector
+from main.watermarking.embed import orchestrator as embed_orchestrator
+from main.watermarking.paper_faithfulness import injection_site_binder
+from main.watermarking.paper_faithfulness import alignment_evaluator
 from main.watermarking.embed.orchestrator import run_embed_orchestrator
+from main.watermarking.content_chain.latent_modifier import (
+    LatentModifier,
+    LATENT_MODIFIER_ID,
+    LATENT_MODIFIER_VERSION
+)
 from main.cli.run_common import (
     set_value_by_field_path,
     set_failure_status,
     format_fact_sources_mismatch,
-    bind_impl_identity_fields as _bind_impl_identity_fields
+    bind_impl_identity_fields as _bind_impl_identity_fields,
+    build_seed_audit,
+    build_determinism_controls,
+    normalize_nondeterminism_notes,
+    build_injection_context_from_plan
 )
 
 
@@ -78,16 +92,22 @@ def bind_impl_identity_fields(
     return _bind_impl_identity_fields(record, identity, impl_set, contracts)
 
 
-def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = None) -> None:
+def run_embed(
+    output_dir: str,
+    config_path: str,
+    overrides: list[str] | None = None,
+    input_image_path: str | None = None
+) -> None:
     """
-    功能：执行嵌入流程，本阶段为 placeholder。
+    功能：执行嵌入流程，本阶段为基线实现。
 
-    Execute embed workflow (placeholder implementation).
+    Execute embed workflow (baseline implementation).
 
     Args:
         output_dir: Run root directory for records/artifacts.
         config_path: YAML config path.
         overrides: Optional CLI override args list.
+        input_image_path: Optional input image path for identity embed artifact flow.
     """
     if not isinstance(output_dir, str) or not output_dir:
         # output_dir 输入不合法，必须 fail-fast。
@@ -98,6 +118,9 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
     if overrides is not None and not isinstance(overrides, list):
         # overrides 输入不合法，必须 fail-fast。
         raise ValueError("overrides must be list or None")
+    if input_image_path is not None and not isinstance(input_image_path, str):
+        # input_image_path 输入不合法，必须 fail-fast。
+        raise ValueError("input_image_path must be str or None")
 
     # 创建 layout 和最小 run_meta。
     run_root = path_policy.derive_run_root(Path(output_dir))
@@ -205,6 +228,21 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
             run_meta["cfg_digest"] = cfg_digest
             run_meta["policy_path"] = cfg["policy_path"]
 
+            seed_parts, seed_digest, seed_value, seed_rule_id = build_seed_audit(cfg, "embed")
+            cfg["seed"] = seed_value
+            run_meta["seed_parts"] = seed_parts
+            run_meta["seed_digest"] = seed_digest
+            run_meta["seed_rule_id"] = seed_rule_id
+            run_meta["seed_value"] = seed_value
+            run_meta["cfg"] = cfg
+
+            determinism_controls = build_determinism_controls(cfg)
+            if determinism_controls is not None:
+                run_meta["determinism_controls"] = determinism_controls
+            nondeterminism_notes = normalize_nondeterminism_notes(cfg.get("nondeterminism_notes"))
+            if nondeterminism_notes is not None:
+                run_meta["nondeterminism_notes"] = nondeterminism_notes
+
             pipeline_result = pipeline_factory.build_pipeline_shell(cfg)
             run_meta["pipeline_provenance_canon_sha256"] = pipeline_result.get("pipeline_provenance_canon_sha256")
             run_meta["pipeline_status"] = pipeline_result.get("pipeline_status")
@@ -215,23 +253,151 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
             run_meta["transformers_version"] = pipeline_result.get("transformers_version")
             run_meta["safetensors_version"] = pipeline_result.get("safetensors_version")
             run_meta["model_provenance_canon_sha256"] = pipeline_result.get("model_provenance_canon_sha256")
+
+            try:
+                impl_identity, impl_set, impl_set_capabilities_digest = runtime_resolver.build_runtime_impl_set_from_cfg(cfg)
+            except Exception as exc:
+                set_failure_status(run_meta, RunFailureReason.IMPL_RESOLVE_FAILED, exc)
+                raise
+            run_meta["impl_id"] = impl_identity.content_extractor_id
+            run_meta["impl_version"] = impl_set.content_extractor.impl_version
+            run_meta["impl_identity"] = impl_identity.as_dict()
+            run_meta["impl_identity_digest"] = runtime_resolver.compute_impl_identity_digest(impl_identity)
+            run_meta["impl_set_capabilities_digest"] = impl_set_capabilities_digest
+
+            if isinstance(input_image_path, str) and input_image_path.strip():
+                cfg["__embed_input_image_path__"] = input_image_path.strip()
+            else:
+                embed_cfg = cfg.get("embed") if isinstance(cfg.get("embed"), dict) else {}
+                default_input = embed_cfg.get("input_image_path") if isinstance(embed_cfg, dict) else None
+                if isinstance(default_input, str) and default_input.strip():
+                    cfg["__embed_input_image_path__"] = default_input.strip()
+
+            # 预先计算 content 与 subspace 计划，用于注入上下文。
+            content_inputs_pre = embed_orchestrator._build_content_inputs_for_embed(cfg)
+            content_result_pre = impl_set.content_extractor.extract(
+                cfg,
+                inputs=content_inputs_pre,
+                cfg_digest=cfg_digest
+            )
+            mask_digest = None
+            if isinstance(content_result_pre, dict):
+                mask_digest = content_result_pre.get("mask_digest")
+            elif hasattr(content_result_pre, "mask_digest"):
+                mask_digest = content_result_pre.mask_digest
+
+            planner_inputs = embed_orchestrator._build_planner_inputs_for_runtime(cfg, None)
+            subspace_result_pre = impl_set.subspace_planner.plan(
+                cfg,
+                mask_digest=mask_digest,
+                cfg_digest=cfg_digest,
+                inputs=planner_inputs
+            )
+
+            plan_payload = subspace_result_pre.as_dict() if hasattr(subspace_result_pre, "as_dict") else subspace_result_pre
+            plan_digest = getattr(subspace_result_pre, "plan_digest", None)
+            if isinstance(plan_payload, dict) and not isinstance(plan_digest, str):
+                plan_digest = plan_payload.get("plan_digest")
+
+            injection_context = None
+            injection_modifier = None
+            injection_site_spec = None
+            injection_site_digest = None
+            
+            # 无论 plan 是否存在都必须生成 injection_site_spec
+            try:
+                if isinstance(plan_payload, dict) and isinstance(plan_digest, str) and plan_digest:
+                    # 计划存在：包含详细的plan digest和注入模式
+                    injection_context = build_injection_context_from_plan(cfg, plan_payload, plan_digest)
+                    injection_modifier = LatentModifier(LATENT_MODIFIER_ID, LATENT_MODIFIER_VERSION)
+                    
+                    injection_site_spec, injection_site_digest = injection_site_binder.build_injection_site_spec(
+                        hook_type="callback_on_step_end",
+                        target_module_name="StableDiffusion3Pipeline",
+                        target_tensor_name="latents",
+                        hook_timing="after_scheduler_step",
+                        injection_rule_summary={
+                            "plan_digest": plan_digest,
+                            "injection_mode": "subspace_projection"
+                        },
+                        cfg=cfg
+                    )
+                    print(f"[Paper-Faithful] Injection site spec generated (with plan): {injection_site_digest[:16]}...")
+                else:
+                    # 计划缺失：仍然生成最小化的 injection_site_spec（必须）
+                    injection_site_spec, injection_site_digest = injection_site_binder.build_injection_site_spec(
+                        hook_type="callback_on_step_end",
+                        target_module_name="StableDiffusion3Pipeline",
+                        target_tensor_name="latents",
+                        hook_timing="after_scheduler_step",
+                        injection_rule_summary={
+                            "plan_digest": "<absent>",
+                            "injection_mode": "latent_direct"
+                        },
+                        cfg=cfg
+                    )
+                    print(f"[Paper-Faithful] Injection site spec generated (minimal): {injection_site_digest[:16]}...")
+            except Exception as inj_site_exc:
+                print(f"[Paper-Faithful] [WARN] Injection site binding failed: {inj_site_exc}")
+                injection_site_spec = {"status": "failed", "error": str(inj_site_exc)}
+                injection_site_digest = "<failed>"
             
             # (7.7) Real Dataflow Smoke: 在 pipeline_result 之后调用 inference
             pipeline_obj = pipeline_result.get("pipeline_obj")
             device = cfg.get("device", "cpu")
-            seed = cfg.get("seed")
+            seed = seed_value
             
-            inference_result = infer_runtime.run_sd3_inference(cfg, pipeline_obj, device, seed)
+            pipeline_fingerprint = None
+            pipeline_fingerprint_digest = None
+            if pipeline_obj is not None:
+                try:
+                    pipeline_fingerprint, pipeline_fingerprint_digest = pipeline_inspector.inspect_sd3_pipeline(
+                        pipeline_obj, cfg
+                    )
+                    print(f"[Paper-Faithful] Pipeline fingerprint extracted: {pipeline_fingerprint_digest[:16]}...")
+                except Exception as pipeline_insp_exc:
+                    print(f"[Paper-Faithful] [WARN] Pipeline inspection failed: {pipeline_insp_exc}")
+                    pipeline_fingerprint = {
+                        "status": "failed",
+                        "error": str(pipeline_insp_exc),
+                        "transformer_num_blocks": "<absent>",
+                        "scheduler_class_name": "<absent>",
+                        "vae_latent_channels": "<absent>"
+                    }
+                    pipeline_fingerprint_digest = "<failed>"
+            else:
+                # Pipeline object 为 None：生成 absent 状态指纹，但仍包含必需的三个字段
+                pipeline_fingerprint = {
+                    "status": "absent",
+                    "reason": "pipeline_obj_is_none",
+                    "transformer_num_blocks": "<absent>",
+                    "scheduler_class_name": "<absent>",
+                    "vae_latent_channels": "<absent>"
+                }
+                from main.core import digests
+                pipeline_fingerprint_digest = digests.canonical_sha256(pipeline_fingerprint)
+            
+            inference_result = infer_runtime.run_sd3_inference(
+                cfg,
+                pipeline_obj,
+                device,
+                seed,
+                injection_context=injection_context,
+                injection_modifier=injection_modifier
+            )
             inference_status = inference_result.get("inference_status")
             inference_error = inference_result.get("inference_error")
             inference_runtime_meta = inference_result.get("inference_runtime_meta")
+            trajectory_evidence = inference_result.get("trajectory_evidence")
+            injection_evidence = inference_result.get("injection_evidence")
             
             # 构造 infer_trace 并计算 digest
             infer_trace_obj = infer_trace.build_infer_trace(
                 cfg,
                 inference_status,
                 inference_error,
-                inference_runtime_meta
+                inference_runtime_meta,
+                trajectory_evidence
             )
             infer_trace_canon_sha256 = infer_trace.compute_infer_trace_canon_sha256(infer_trace_obj)
             
@@ -241,6 +407,7 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
             run_meta["inference_status"] = inference_status
             run_meta["inference_error"] = inference_error
             run_meta["inference_runtime_meta"] = inference_runtime_meta
+            run_meta["trajectory_evidence"] = trajectory_evidence
             
             # 提取 run_root 复用参数。
             allow_nonempty_run_root = cfg.get("allow_nonempty_run_root", False)
@@ -260,6 +427,16 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
             records_dir = layout["records_dir"]
             artifacts_dir = layout["artifacts_dir"]
             logs_dir = layout["logs_dir"]
+
+            cfg["__run_root_dir__"] = str(run_root.resolve())
+            cfg["__artifacts_dir__"] = str(artifacts_dir.resolve())
+            if isinstance(input_image_path, str) and input_image_path.strip():
+                cfg["__embed_input_image_path__"] = input_image_path.strip()
+            else:
+                embed_cfg = cfg.get("embed") if isinstance(cfg.get("embed"), dict) else {}
+                default_input = embed_cfg.get("input_image_path") if isinstance(embed_cfg, dict) else None
+                if isinstance(default_input, str) and default_input.strip():
+                    cfg["__embed_input_image_path__"] = default_input.strip()
             
             # 写入 cfg_audit 工件到 artifacts/cfg_audit/cfg_audit.json。
             cfg_audit_dir = artifacts_dir / "cfg_audit"
@@ -282,20 +459,17 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
             run_meta["run_root_reuse_allowed"] = bool(allow_nonempty_run_root)
             run_meta["run_root_reuse_reason"] = allow_nonempty_run_root_reason
 
-            try:
-                impl_identity, impl_set, impl_set_capabilities_digest = runtime_resolver.build_runtime_impl_set_from_cfg(cfg)
-            except Exception as exc:
-                set_failure_status(run_meta, RunFailureReason.IMPL_RESOLVE_FAILED, exc)
-                raise
-            run_meta["impl_id"] = impl_identity.content_extractor_id
-            run_meta["impl_version"] = impl_set.content_extractor.impl_version
-            run_meta["impl_identity"] = impl_identity.as_dict()
-            run_meta["impl_identity_digest"] = runtime_resolver.compute_impl_identity_digest(impl_identity)
-            run_meta["impl_set_capabilities_digest"] = impl_set_capabilities_digest
-
-            # 构造 embed record，本阶段为 placeholder。
-            print("[Embed] Generating embed record (placeholder)...")
-            record = run_embed_orchestrator(cfg, impl_set)
+            # 构造 embed record，本阶段为基线实现。
+            print("[Embed] Generating embed record (baseline)...")
+            record = run_embed_orchestrator(
+                cfg,
+                impl_set,
+                cfg_digest,
+                trajectory_evidence=trajectory_evidence,
+                injection_evidence=injection_evidence,
+                content_result_override=content_result_pre,
+                subspace_result_override=subspace_result_pre
+            )
             if not isinstance(record, dict):
                 # record 类型不符合预期，必须 fail-fast。
                 raise TypeError("orchestrator output must be dict")
@@ -318,6 +492,77 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
             record["inference_status"] = run_meta.get("inference_status")
             record["inference_error"] = run_meta.get("inference_error")
             record["inference_runtime_meta"] = run_meta.get("inference_runtime_meta")
+            
+            content_evidence = record.get("content_evidence")
+            if not isinstance(content_evidence, dict):
+                content_evidence = {}
+                record["content_evidence"] = content_evidence
+            
+            # 写入 pipeline_fingerprint 和 pipeline_fingerprint_digest
+            if pipeline_fingerprint is not None:
+                content_evidence["pipeline_fingerprint"] = pipeline_fingerprint
+            if pipeline_fingerprint_digest is not None:
+                content_evidence["pipeline_fingerprint_digest"] = pipeline_fingerprint_digest
+            
+            # 写入 injection_site_spec 和 injection_site_digest
+            if injection_site_spec is not None:
+                content_evidence["injection_site_spec"] = injection_site_spec
+            if injection_site_digest is not None:
+                content_evidence["injection_site_digest"] = injection_site_digest
+            
+            # (S-C) Paper Faithfulness: 调用 alignment_evaluator（必达）
+            paper_spec = None
+            paper_spec_digest = None
+            try:
+                # 加载 paper_faithfulness_spec.yaml（通过唯一入口）
+                from pathlib import Path as PathLib
+                spec_path = PathLib(__file__).parent.parent.parent / "configs" / "paper_faithfulness_spec.yaml"
+                if spec_path.exists():
+                    # 使用 config_loader 唯一入口加载 YAML
+                    paper_spec, spec_provenance = config_loader.load_yaml_with_provenance(spec_path)
+                    paper_spec_digest = spec_provenance.canon_sha256
+                    print(f"[Paper-Faithful] Paper spec loaded: {spec_path.name}, digest: {paper_spec_digest[:16]}...")
+                else:
+                    print(f"[Paper-Faithful] [WARN] Paper spec not found: {spec_path}")
+                    paper_spec = {"status": "absent", "reason": "spec_file_not_found"}
+                    paper_spec_digest = "<absent>"
+            except Exception as spec_load_exc:
+                print(f"[Paper-Faithful] [WARN] Failed to load paper spec: {spec_load_exc}")
+                paper_spec = {"status": "failed", "error": str(spec_load_exc)}
+                paper_spec_digest = "<failed>"
+            
+            # 调用 alignment_evaluator
+            alignment_report = None
+            alignment_digest = None
+            if isinstance(paper_spec, dict) and paper_spec.get("status") not in ("absent", "failed"):
+                try:
+                    alignment_report, alignment_digest = alignment_evaluator.evaluate_alignment(
+                        paper_spec=paper_spec,
+                        pipeline_fingerprint=pipeline_fingerprint,
+                        trajectory_evidence=trajectory_evidence,
+                        injection_site_spec=injection_site_spec,
+                        cfg=cfg
+                    )
+                    print(f"[Paper-Faithful] Alignment evaluated: {alignment_report['overall_status']}, digest: {alignment_digest[:16]}...")
+                except Exception as align_exc:
+                    print(f"[Paper-Faithful] [WARN] Alignment evaluation failed: {align_exc}")
+                    alignment_report = {"status": "failed", "error": str(align_exc)}
+                    alignment_digest = "<failed>"
+            else:
+                alignment_report = {"status": "absent", "reason": "paper_spec_not_available"}
+                alignment_digest = "<absent>"
+            
+            # 写入 alignment_report 和 alignment_digest
+            if alignment_report is not None:
+                content_evidence["alignment_report"] = alignment_report
+            if alignment_digest is not None:
+                content_evidence["alignment_digest"] = alignment_digest
+            
+            # 写入 paper_spec 绑定字段到顶层 record
+            if not isinstance(record.get("paper_faithfulness"), dict):
+                record["paper_faithfulness"] = {}
+            record["paper_faithfulness"]["spec_version"] = paper_spec.get("paper_faithfulness_spec_version", "<absent>")
+            record["paper_faithfulness"]["spec_digest"] = paper_spec_digest
             
             override_applied = cfg.get("override_applied")
             if override_applied is not None:
@@ -392,7 +637,7 @@ def run_embed(output_dir: str, config_path: str, overrides: list[str] | None = N
 def main():
     """主流程。"""
     parser = argparse.ArgumentParser(
-        description="Embed watermark (placeholder implementation)"
+        description="Embed watermark (baseline implementation)"
     )
     parser.add_argument(
         "--out",
@@ -411,11 +656,16 @@ def main():
         default=None,
         help="Override config key=value (JSON value). Can be repeated."
     )
+    parser.add_argument(
+        "--input-image",
+        default=None,
+        help="Input image path for identity embed artifact generation"
+    )
     
     args = parser.parse_args()
     
     try:
-        run_embed(args.out, args.config, args.override)
+        run_embed(args.out, args.config, args.override, args.input_image)
         sys.exit(0)
     except Exception as e:
         print(f"[Embed] [ERROR] Error: {e}", file=sys.stderr)

@@ -25,6 +25,8 @@ AUDIT_SCRIPTS = [
     "audits/audit_injection_scope_manifest_binding.py",
     "audits/audit_dangerous_exec_and_pickle_scan.py",
     "audits/audit_network_access_scan.py",
+    "audits/audit_paper_faithfulness.py",
+    "audits/audit_paper_faithfulness_runtime_must_have.py",  # 运行期必达证据审计
 ]
 
 
@@ -307,15 +309,41 @@ def main():
         if audit_result is None:
             continue
         
-        # 校验审计结果格式
-        validation_errors = validate_audit_result(audit_result)
-        if validation_errors:
-            if args.strict:
-                # 严格模式：格式错误视为 FAIL
-                audit_result["result"] = "FAIL"
-                audit_result["impact"] += f" (Validation errors: {'; '.join(validation_errors)})"
-        
-        all_results.append(audit_result)
+        # 处理审计结果：可能是单个 dict 或 list of dicts
+        if isinstance(audit_result, list):
+            # 审计脚本返回的是 list（例如 audit_paper_faithfulness.py）
+            for result in audit_result:
+                # 校验审计结果格式
+                validation_errors = validate_audit_result(result)
+                if validation_errors:
+                    if args.strict:
+                        # 严格模式：格式错误视为 FAIL
+                        result["result"] = "FAIL"
+                        result["impact"] += f" (Validation errors: {'; '.join(validation_errors)})"
+                all_results.append(result)
+        elif isinstance(audit_result, dict):
+            # 审计脚本返回的是单个 dict
+            # 校验审计结果格式
+            validation_errors = validate_audit_result(audit_result)
+            if validation_errors:
+                if args.strict:
+                    # 严格模式：格式错误视为 FAIL
+                    audit_result["result"] = "FAIL"
+                    audit_result["impact"] += f" (Validation errors: {'; '.join(validation_errors)})"
+            all_results.append(audit_result)
+        else:
+            # 未知格式
+            all_results.append({
+                "audit_id": f"ERROR.{script_path.stem}",
+                "gate_name": f"gate.{script_path.stem}",
+                "category": "G",
+                "severity": "BLOCK",
+                "result": "FAIL",
+                "rule": f"审计脚本 {script_path.name} 返回格式错误",
+                "evidence": {"error": f"Expected dict or list, got {type(audit_result).__name__}"},
+                "impact": "审计脚本返回格式错误",
+                "fix": f"修复审计脚本 {script_path.name}，确保返回 dict 或 list of dicts",
+            })
     
     # 计算汇总
     summary = compute_summary(all_results)

@@ -61,7 +61,6 @@ class RegistryBase:
         功能：注册 impl_id 到 factory。
 
         Register factory for impl_id. Only allowed before seal().
-        R11: capabilities are mandatory to enable compatibility validation.
 
         Args:
             impl_id: Implementation identifier.

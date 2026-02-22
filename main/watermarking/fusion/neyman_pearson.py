@@ -1,8 +1,8 @@
 """
-Neyman-Pearson 阈值占位实现与审计口径
+Neyman-Pearson 阈值基线实现与审计口径
 
 功能说明：
-- 提供 Neyman-Pearson 阈值占位的接口实现，包含阈值规范构建、元信息构建、摘要计算和阈值选择逻辑。
+- 提供 Neyman-Pearson 阈值基线实现，包含阈值规范构建、元信息构建、摘要计算和阈值选择逻辑。
 - 定义稳定的阈值元信息 schema 和校验逻辑，确保元信息的一致性和完整性。
 - 按冻结口径加载阈值的函数，包含严格的输入校验和错误处理，确保加载过程的健壮性。
 """
@@ -10,13 +10,14 @@ Neyman-Pearson 阈值占位实现与审计口径
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any, Dict, List
 
 from main.core import digests
 
 
-RULE_ID = "fusion_neyman_pearson_placeholder"
+RULE_ID = "fusion_neyman_pearson_v1"
 RULE_VERSION = "v1"
 
 REQUIRED_METADATA_KEYS = [
@@ -31,7 +32,7 @@ REQUIRED_METADATA_KEYS = [
 
 def build_thresholds_spec(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
-    功能：构造阈值占位 spec。
+    功能：构造阈值基线 spec。
 
     Build a deterministic thresholds spec from config.
 
@@ -55,7 +56,7 @@ def build_thresholds_spec(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "rule_version": RULE_VERSION,
         "target_fpr": float(target_fpr),
         "fpr_key": format_fpr_key_canonical(target_fpr),
-        "method": "neyman_pearson_placeholder"
+        "method": "neyman_pearson_v1"
     }
     digests.normalize_for_digest(thresholds_spec)
     return thresholds_spec
@@ -63,7 +64,7 @@ def build_thresholds_spec(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
 def build_threshold_metadata(thresholds_spec: Dict[str, Any]) -> Dict[str, Any]:
     """
-    功能：构造阈值元信息占位结构。
+    功能：构造阈值元信息基线结构。
 
     Build deterministic threshold metadata with a fixed schema.
 
@@ -86,8 +87,8 @@ def build_threshold_metadata(thresholds_spec: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("thresholds_spec.target_fpr must be number")
 
     metadata = {
-        "method": "neyman_pearson_placeholder",
-        "null_source": "placeholder",
+        "method": "neyman_pearson_v1",
+        "null_source": "calibration_null",
         "n_null": 0,
         "calibration_date": "1970-01-01",
         "quantile_method": "nearest",
@@ -152,9 +153,9 @@ def compute_threshold_metadata_digest(metadata: Dict[str, Any]) -> str:
 
 def select_thresholds_np(thresholds: Dict[str, Any], target_fpr: float) -> Dict[str, Any]:
     """
-    功能：按 NP 占位逻辑选择阈值。
+    功能：按 NP 基线逻辑选择阈值。
 
-    Select thresholds with a deterministic placeholder policy.
+    Select thresholds with a deterministic baseline policy.
 
     Args:
         thresholds: Thresholds mapping loaded from file.
@@ -179,7 +180,7 @@ def select_thresholds_np(thresholds: Dict[str, Any], target_fpr: float) -> Dict[
         "rule_version": RULE_VERSION,
         "target_fpr": float(target_fpr),
         "fpr_key": format_fpr_key_canonical(float(target_fpr)),
-        "method": "neyman_pearson_placeholder"
+        "method": "neyman_pearson_v1"
     }
     thresholds_digest = compute_thresholds_digest(thresholds_spec)
     metadata = build_threshold_metadata(thresholds_spec)
@@ -366,3 +367,69 @@ def _lookup_threshold_value(thresholds: Dict[str, Any], fpr_key: str) -> float:
     if not isinstance(value, (int, float)):
         raise ValueError("threshold_value_used must be number")
     return float(value)
+
+
+def compute_np_threshold_from_scores(
+    scores: List[float],
+    target_fpr: float,
+    quantile_rule: str = "higher"
+) -> tuple[float, Dict[str, Any]]:
+    """
+    功能：按 order-statistics 计算 NP 阈值。 
+
+    Compute Neyman-Pearson threshold from null scores using order statistics.
+
+    Args:
+        scores: Null distribution score list.
+        target_fpr: Target false positive rate in (0, 1).
+        quantile_rule: Quantile selection rule, currently supports "higher".
+
+    Returns:
+        Tuple of (threshold_value, order_stat_info).
+
+    Raises:
+        TypeError: If input types are invalid.
+        ValueError: If inputs are out of valid range.
+    """
+    if not isinstance(scores, list) or len(scores) == 0:
+        raise ValueError("scores must be non-empty list")
+    if not isinstance(target_fpr, (int, float)):
+        raise TypeError("target_fpr must be number")
+    if not isinstance(quantile_rule, str) or not quantile_rule:
+        raise TypeError("quantile_rule must be non-empty str")
+    if quantile_rule != "higher":
+        raise ValueError("quantile_rule must be 'higher'")
+
+    target_fpr_value = float(target_fpr)
+    if target_fpr_value <= 0.0 or target_fpr_value >= 1.0:
+        raise ValueError("target_fpr must be in (0, 1)")
+
+    normalized_scores: List[float] = []
+    for idx, score in enumerate(scores):
+        if isinstance(score, bool) or not isinstance(score, (int, float)):
+            raise TypeError(f"scores[{idx}] must be number")
+        value = float(score)
+        if not math.isfinite(value):
+            raise ValueError(f"scores[{idx}] must be finite")
+        normalized_scores.append(value)
+
+    sorted_scores = sorted(normalized_scores)
+    n_samples = len(sorted_scores)
+
+    # higher quantile: index = ceil(q*n) - 1, q = 1-target_fpr
+    quantile = 1.0 - target_fpr_value
+    raw_rank = int(math.ceil(quantile * n_samples))
+    rank_1based = min(max(1, raw_rank), n_samples)
+    index_0based = rank_1based - 1
+    threshold_value = float(sorted_scores[index_0based])
+
+    order_stat_info = {
+        "n_samples": n_samples,
+        "target_fpr": target_fpr_value,
+        "quantile": quantile,
+        "quantile_rule": "higher",
+        "order_stat_rank_1based": rank_1based,
+        "order_stat_index_0based": index_0based,
+        "ties_policy": "higher",
+    }
+    return threshold_value, order_stat_info

@@ -25,8 +25,19 @@ RECORD_SCHEMA_VERSION = "v1.0"
 RECORDS_MANIFEST_NAME = "records_manifest.json"
 RUN_CLOSURE_NAME = "run_closure.json"
 
+PATH_AUDIT_STATUS_ALLOWED = {"ok", "failed"}
+PATH_AUDIT_ERROR_CODE_ALLOWED = {
+    "fact_sources_unbound",
+    "missing_bound_fields",
+    "build_exception",
+    "write_blocked",
+    "write_failed"
+}
 
-_OPTIONAL_STR_FIELDS = [
+# 硬编码的可选字段列表（向后兼容，不再直接使用）
+# 这些列表现在由 records_schema_extensions.yaml 定义，通过 ContractInterpretation 传递
+# 仅在 interpretation 不可用时作为后备
+_FALLBACK_OPTIONAL_STR_FIELDS = [
     "content_evidence.mask_digest",
     "content_evidence.plan_digest",
     "content_evidence.basis_digest",
@@ -42,13 +53,13 @@ _OPTIONAL_STR_FIELDS = [
     "decision.routing_digest"
 ]
 
-_OPTIONAL_NUMBER_FIELDS = [
+_FALLBACK_OPTIONAL_NUMBER_FIELDS = [
     "content_evidence.lf_score",
     "content_evidence.hf_score",
     "geometry_evidence.geo_score"
 ]
 
-_OPTIONAL_MAPPING_FIELDS = [
+_FALLBACK_OPTIONAL_MAPPING_FIELDS = [
     "content_evidence.mask_stats",
     "content_evidence.score_parts",
     "geometry_evidence.anchor_metrics",
@@ -477,6 +488,33 @@ def validate_run_closure(payload: Dict[str, Any]) -> None:
     if status_ok:
         _validate_run_closure_ok_fields(payload)
 
+    path_audit_status = payload.get("path_audit_status")
+    if path_audit_status is not None:
+        if not isinstance(path_audit_status, str) or not path_audit_status:
+            # path_audit_status 类型不符合预期，必须 fail-fast。
+            raise TypeError("path_audit_status must be non-empty str or None")
+        if path_audit_status not in PATH_AUDIT_STATUS_ALLOWED:
+            # path_audit_status 非受控枚举成员，必须 fail-fast。
+            raise ValueError("path_audit_status must be one of {'ok','failed'}")
+
+    path_audit_error_code = payload.get("path_audit_error_code")
+    if path_audit_error_code is not None:
+        if not isinstance(path_audit_error_code, str) or not path_audit_error_code:
+            # path_audit_error_code 类型不符合预期，必须 fail-fast。
+            raise TypeError("path_audit_error_code must be non-empty str or None")
+        if path_audit_error_code != "<absent>" and path_audit_error_code not in PATH_AUDIT_ERROR_CODE_ALLOWED:
+            # path_audit_error_code 非受控枚举成员，必须 fail-fast。
+            raise ValueError("path_audit_error_code must be in frozen allowlist")
+
+    if path_audit_status == "ok":
+        if path_audit_error_code not in {None, "<absent>"}:
+            # ok 状态不应携带错误码，必须 fail-fast。
+            raise ValueError("path_audit_error_code must be absent when path_audit_status is ok")
+    if path_audit_status == "failed":
+        if path_audit_error_code in {None, "<absent>"}:
+            # failed 状态必须携带错误码，必须 fail-fast。
+            raise ValueError("path_audit_error_code is required when path_audit_status is failed")
+
     # 验证 RNG 审计字段：rng_audit_canon_sha256 必须存在且为 str。
     rng_audit_canon_sha256 = payload.get("rng_audit_canon_sha256")
     if rng_audit_canon_sha256 is not None:
@@ -513,6 +551,39 @@ def validate_run_closure(payload: Dict[str, Any]) -> None:
         if pipeline_status not in allowed_pipeline_status:
             # pipeline_status 不在允许列表，必须 fail-fast。
             raise ValueError("pipeline_status must be one of {'built','failed','unbuilt'}")
+
+    pipeline_build_status = payload.get("pipeline_build_status")
+    if pipeline_build_status is not None:
+        if not isinstance(pipeline_build_status, str) or not pipeline_build_status:
+            # pipeline_build_status 类型不符合预期，必须 fail-fast。
+            raise TypeError("pipeline_build_status must be non-empty str or None")
+        if pipeline_build_status not in {"ok", "failed", "<absent>"}:
+            # pipeline_build_status 不在允许列表，必须 fail-fast。
+            raise ValueError("pipeline_build_status must be one of {'ok','failed','<absent>'}")
+
+    pipeline_build_failure_reason = payload.get("pipeline_build_failure_reason")
+    if pipeline_build_failure_reason is not None:
+        if not isinstance(pipeline_build_failure_reason, str) or not pipeline_build_failure_reason:
+            # pipeline_build_failure_reason 类型不符合预期，必须 fail-fast。
+            raise TypeError("pipeline_build_failure_reason must be non-empty str or None")
+        allowed_failure_reasons = {
+            "missing_model_weights",
+            "unsupported_device",
+            "unsupported_precision",
+            "unsupported_resolution",
+            "dependency_version_mismatch",
+            "unknown_error",
+            "<absent>",
+        }
+        if pipeline_build_failure_reason not in allowed_failure_reasons:
+            # pipeline_build_failure_reason 非受控枚举成员，必须 fail-fast。
+            raise ValueError("pipeline_build_failure_reason must be in frozen allowlist")
+
+    pipeline_build_failure_summary = payload.get("pipeline_build_failure_summary")
+    if pipeline_build_failure_summary is not None:
+        if not isinstance(pipeline_build_failure_summary, str) or not pipeline_build_failure_summary:
+            # pipeline_build_failure_summary 类型不符合预期，必须 fail-fast。
+            raise TypeError("pipeline_build_failure_summary must be non-empty str or None")
 
     pipeline_error = payload.get("pipeline_error")
     if pipeline_error is not None:
@@ -699,7 +770,7 @@ def _validate_run_closure_ok_fields(payload: Dict[str, Any]) -> None:
     """
     功能：校验 ok 闭包关键字段不得为空或为哨兵值。
 
-    Validate critical fields for ok closures to avoid sentinel placeholders.
+    Validate critical fields for ok closures to avoid sentinel baselines.
 
     Args:
         payload: Run closure payload mapping.
@@ -1008,9 +1079,21 @@ def validate_record(
             # model_provenance_canon_sha256 类型不符合预期，必须 fail-fast。
             raise TypeError("model_provenance_canon_sha256 must be non-empty str")
 
-    _validate_optional_str_fields(record, _OPTIONAL_STR_FIELDS)
-    _validate_optional_number_fields(record, _OPTIONAL_NUMBER_FIELDS)
-    _validate_optional_mapping_fields(record, _OPTIONAL_MAPPING_FIELDS)
+    # 从解释面获取可选字段列表（若启用扩展则使用动态列表，否则使用后备硬编码列表）
+    extensions_spec = interpretation.records_schema_extensions_spec
+    if extensions_spec.enabled:
+        optional_str_fields = extensions_spec.optional_str_fields
+        optional_number_fields = extensions_spec.optional_number_fields
+        optional_mapping_fields = extensions_spec.optional_mapping_fields
+    else:
+        # 向后兼容：若扩展未启用，使用硬编码后备列表
+        optional_str_fields = _FALLBACK_OPTIONAL_STR_FIELDS
+        optional_number_fields = _FALLBACK_OPTIONAL_NUMBER_FIELDS
+        optional_mapping_fields = _FALLBACK_OPTIONAL_MAPPING_FIELDS
+
+    _validate_optional_str_fields(record, optional_str_fields)
+    _validate_optional_number_fields(record, optional_number_fields)
+    _validate_optional_mapping_fields(record, optional_mapping_fields)
 
 
 def _get_value_by_field_path(record: Dict[str, Any], field_path: str) -> tuple[bool, Any]:
@@ -1214,7 +1297,7 @@ def build_thresholds_spec(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
     功能：构造阈值占位 spec。
 
-    Build a placeholder thresholds specification for digest derivation.
+    Build a baseline thresholds specification for digest derivation.
 
     Args:
         cfg: Config mapping.

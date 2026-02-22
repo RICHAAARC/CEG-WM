@@ -23,6 +23,7 @@ FROZEN_CONTRACTS_PATH = "configs/frozen_contracts.yaml"
 RUNTIME_WHITELIST_PATH = "configs/runtime_whitelist.yaml"
 POLICY_PATH_SEMANTICS_PATH = "configs/policy_path_semantics.yaml"
 INJECTION_SCOPE_MANIFEST_PATH = "configs/injection_scope_manifest.yaml"
+RECORDS_SCHEMA_EXTENSIONS_PATH = "configs/records_schema_extensions.yaml"
 
 
 def load_frozen_contracts_interpretation(
@@ -118,6 +119,37 @@ def load_injection_scope_manifest(
     return _load_injection_scope_manifest(
         INJECTION_SCOPE_MANIFEST_PATH,
         allow_non_authoritative=allow_non_authoritative
+    )
+
+
+def load_records_schema_extensions(
+    *,
+    allow_non_authoritative: bool = False,
+    allow_missing: bool = False
+):
+    """
+    功能：加载记录 schema 扩展配置。
+
+    Load records_schema_extensions.yaml.
+    Supports backward compatibility: if file is missing and allow_missing=True,
+    returns empty extensions structure.
+
+    Args:
+        allow_non_authoritative: Whether to allow non-authoritative paths for tests.
+        allow_missing: Whether to allow missing file (for backward compatibility).
+
+    Returns:
+        RecordsSchemaExtensions or EmptyRecordsSchemaExtensions instance.
+
+    Raises:
+        YAMLLoadError: If extensions cannot be loaded (unless allow_missing=True).
+    """
+    from main.core.schema_extensions import load_records_schema_extensions as _load_records_schema_extensions
+
+    return _load_records_schema_extensions(
+        RECORDS_SCHEMA_EXTENSIONS_PATH,
+        allow_non_authoritative=allow_non_authoritative,
+        allow_missing=allow_missing
     )
 
 
@@ -362,7 +394,6 @@ def load_and_validate_config(
 
     Load YAML config via load_yaml_with_provenance, validate policy_path and overrides,
     apply CLI overrides (if provided), then compute cfg_digest using include_paths.
-    D5: Also generates cfg_audit metadata for artifacts output.
 
     Args:
         config_path: Path to config YAML.

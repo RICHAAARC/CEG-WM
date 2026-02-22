@@ -8,9 +8,35 @@ minimal configuration paths, network mocking, GPU mocking.
 """
 
 import pytest
+import warnings
 from pathlib import Path
 from typing import Dict, Any
 from unittest.mock import MagicMock
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """
+    Configure test-scoped warning filters.
+
+    Args:
+        config: Pytest config object.
+
+    Returns:
+        None.
+    """
+    _ = config
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*(/proc/vmstat|vmstat).*",
+        category=RuntimeWarning,
+        module=r"psutil\._pslinux",
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*buffers/cached memory stats couldn't be determined.*",
+        category=RuntimeWarning,
+        module=r"psutil\._pslinux",
+    )
 
 
 @pytest.fixture

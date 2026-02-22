@@ -86,7 +86,7 @@ def _build_minimal_cfg() -> Dict[str, Any]:
     """
     功能：构造最小 cfg。
 
-    Build a minimal configuration mapping for placeholder implementations.
+    Build a minimal configuration mapping for baseline implementations.
 
     Args:
         None.
@@ -96,8 +96,8 @@ def _build_minimal_cfg() -> Dict[str, Any]:
     """
     return {
         "impl": {
-            "content_extractor_id": content_registry.CONTENT_BASELINE_NOOP_ID,
-            "geometry_extractor_id": geometry_registry.GEOMETRY_BASELINE_NOOP_ID,
+            "content_extractor_id": content_registry.CONTENT_BASELINE_IDENTITY_ID,
+            "geometry_extractor_id": geometry_registry.GEOMETRY_BASELINE_IDENTITY_ID,
             "fusion_rule_id": fusion_registry.FUSION_BASELINE_IDENTITY_ID,
             "subspace_planner_id": content_registry.SUBSPACE_BASELINE_FULL_ID,
             "sync_module_id": geometry_registry.SYNC_BASELINE_ID
@@ -128,7 +128,10 @@ def test_orchestrator_does_not_write_decision() -> None:
     found, _ = _get_value_by_field_path(detect_record, "decision.is_watermarked")
     assert not found, "decision.is_watermarked should not be written by detect orchestrator"
 
-    embed_record = run_embed_orchestrator(cfg, impl_set)
+    # 计算 cfg_digest（最小化测试中的模拟 cfg_digest）。
+    from main.core import digests
+    cfg_digest = digests.canonical_sha256(cfg)
+    embed_record = run_embed_orchestrator(cfg, impl_set, cfg_digest=cfg_digest)
     assert "decision" not in embed_record, "embed_record should not include decision"
     found, _ = _get_value_by_field_path(embed_record, "decision.is_watermarked")
     assert not found, "decision.is_watermarked should not be written by embed orchestrator"
@@ -167,6 +170,45 @@ def test_fusion_baseline_returns_fusion_decision() -> None:
     )
     assert abstain.decision_status in {"abstain", "error"}, "expected abstain or error"
     assert abstain.is_watermarked is None, "abstain/error must have None is_watermarked"
+
+
+def test_geometry_failure_does_not_change_content_score_or_thresholds() -> None:
+    """
+    功能：验证几何失败不会污染内容分数或阈值口径。
+
+    Test that geometry failure does not alter content_score or thresholds_digest.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    cfg = _build_minimal_cfg()
+    fusion_rule = fusion_registry.resolve_fusion_rule(
+        fusion_registry.FUSION_BASELINE_IDENTITY_ID
+    )(cfg)
+
+    content_evidence = {
+        "content_evidence": "ok",
+        "content_signal": 0.42,
+    }
+
+    geometry_ok = {
+        "geometry_evidence": "ok",
+        "geometry_signal": 0.12,
+    }
+    geometry_failed = {
+        "geometry_evidence": "failed",
+        "geometry_signal": 0.12,
+    }
+
+    decided_ok = fusion_rule.fuse(cfg, content_evidence, geometry_ok)
+    decided_failed = fusion_rule.fuse(cfg, content_evidence, geometry_failed)
+
+    assert decided_ok.thresholds_digest == decided_failed.thresholds_digest
+    assert decided_ok.evidence_summary.get("content_score") == 0.42
+    assert decided_failed.evidence_summary.get("content_score") == 0.42
 
 
 def test_fusion_decision_allow_null_for_abstain() -> None:

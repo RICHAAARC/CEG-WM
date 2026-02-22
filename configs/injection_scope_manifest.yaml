@@ -1,17 +1,118 @@
-injection_scope_manifest_version: "v1.0"
-allowed_impl_id_set: []
-digest_inputs:
-  cfg_digest_include: []
-  plan_digest_include: []
-version_bump_policy:
-  bump_on_digest_inputs_change: true
-  bump_on_impl_param_change: true
-frozen_no_touch_files:
+injection_scope_manifest_version: "v1.1"  # 版本提升：追加 LF 参数漂移检测审计需求
+
+allowed_impl_ids:
+
+  # content chain 真实实现
+  - "semantic_mask_provider_v1"
+  - "low_freq_coder_v1"  # LF 子空间水印编码器
+  - "content_detector_v1"  # 统一内容检测器（LF+HF 融合）
+  - "unified_content_extractor_v1"  # Embed + Detect 双模式
+  
+  # subspace 真实实现
+  - "subspace_planner_v1"
+  
+  # 基线实现
+  - "content_baseline_identity_v1"
+  - "subspace_baseline_full_v1"
+  - "geometry_baseline_identity_v1"
+  - "geometry_sync_baseline_v1"
+  - "fusion_baseline_identity_v1"
+  
+  # 注意：此列表必须是 runtime_whitelist.yaml:impl_id.allowed_flat 的子集或相等。
+  # 违反闭合性将触发 BLOCK_FREEZE。
+  # 生产部署前必须通过审计脚本 audit_injection_scope_manifest_binding.py 校验。
+
+digest_scope:
+
+  cfg_digest_include_paths:
+
+    - "watermark.key_id"
+    - "watermark.pattern_id"
+    - "watermark.strength"
+
+    - "watermark.subspace.enabled"
+    - "watermark.subspace.frame"
+    - "watermark.subspace.selector_id"
+    - "watermark.subspace.grid_rows"
+    - "watermark.subspace.grid_cols"
+    - "watermark.subspace.grid_h"
+    - "watermark.subspace.grid_w"
+    - "watermark.subspace.k"
+    - "watermark.subspace.topk"
+    - "watermark.subspace.score_type"
+    - "watermark.subspace.channel_agg"
+
+    - "model.model_id"
+    - "model.height"
+    - "model.width"
+    - "model.dtype"
+    - "enable_xformers"
+
+    - "generation.num_inference_steps"
+    - "generation.guidance_scale"
+
+    - "detect.content.enabled"
+    - "detect.geometry.enabled"
+    - "detect.method"
+    - "detect.feature"
+
+    - "evaluate.decoder_type"
+    - "evaluate.target_fpr"
+
+  plan_digest_include_paths:
+
+    - "watermark.mask.threshold"
+    - "watermark.mask.resolution_binding"
+    - "watermark.mask.postprocess.enabled"
+    - "watermark.mask.postprocess.kernel"
+
+    - "watermark.subspace.rank"
+    - "watermark.subspace.grid_rows"
+    - "watermark.subspace.grid_cols"
+    - "watermark.subspace.topk"
+    - "watermark.subspace.energy_ratio"
+    - "watermark.subspace.mask_digest_binding"
+
+    - "watermark.lf.codebook_id"
+    - "watermark.lf.ecc"
+    - "watermark.lf.strength"
+    - "watermark.lf.delta"
+    - "watermark.lf.block_length"
+    - "watermark.lf.variance"  # PRC 伪高斯方差（pseudogaussian variance），默认 1.5
+    - "watermark.hf.codebook_id"
+    - "watermark.hf.ecc"
+    - "watermark.hf.enabled"
+    - "watermark.hf.tail_truncation_ratio"
+    - "watermark.hf.tail_truncation_mode"
+    - "watermark.hf.sampling_stride"
+    - "watermark.hf.energy_floor"
+    - "watermark.hf.energy_cap"
+
+versioning_policy:
+
+  bump_manifest_version_on_digest_scope_change: true
+  bump_manifest_version_on_impl_scope_change: true
+
+frozen_surface_protected_files:
+
   - "configs/frozen_contracts.yaml"
   - "configs/runtime_whitelist.yaml"
   - "configs/policy_path_semantics.yaml"
   - "main/policy/freeze_gate.py"
   - "main/core/digests.py"
   - "main/core/status.py"
-notes:
-  - "placeholder: update allowed_impl_id_set and digest_inputs before production"
+
+operational_notes:
+
+  - "Digest scope must remain append-only."
+  - "Any new impl parameters must appear in plan_digest_include_paths."
+  - "Removal of impl_id from allowed_impl_ids requires manifest version bump."
+  
+  - "LF Parameter Drift Detection (v1.1+):"
+  - "  Watermark.lf.* parameters are critical for reproducibility and must:"
+  - "    (a) Be included in plan_digest_include_paths (currently: codebook_id, ecc, strength)"
+  - "    (b) Cause plan_digest to change when any parameter is modified"
+  - "    (c) Be verified for consistency during detect phase (S-06 ContentDetector)"
+  - "    (d) If parameters change but plan_digest does not, status='mismatch' must be returned"
+  - "  This audit requirement prevents parameter drift attacks and ensures"
+  - "  all watermark parameters remain traceable and auditable."

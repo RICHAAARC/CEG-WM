@@ -63,6 +63,29 @@ override:
       field_path: "allow_nonempty_run_root_reason"
       override_mode: "set"
       source: "cli"
+    - arg_name: "force_cpu"
+      field_path: "device"
+      override_mode: "set"
+      set_value: "cpu"
+      source: "cli"
+      description: "CPU 优先闭环验证：强制设备为 CPU，用于审计与可复现性验证"
+    - arg_name: "enable_paper_faithfulness"
+      field_path: "paper_faithfulness.enabled"
+      override_mode: "set"
+      set_value: true
+      source: "cli"
+      description: "启用纸质对齐验证：启用 paper_faithfulness 模式、pipeline fingerprint 与 trajectory tap 必达"
+    - arg_name: "enable_trace_tap"
+      field_path: "trajectory_tap.enabled"
+      override_mode: "set"
+      set_value: true
+      source: "cli"
+      description: "启用轨迹采样：启用 trajectory tap 以产出可复算的轨迹摘要"
+    - arg_name: "test_mode_identity"
+      field_path: "embed.test_mode_identity"
+      override_mode: "set"
+      source: "cli"
+      description: "测试模式基线检验：启用 identity 模式后 content/geometry 使用基线实现"
 
   # 覆写 source 的枚举白名单（gate 必须校验）
   source_enum:
@@ -78,6 +101,10 @@ override:
       - "disable_geometry"
       - "run_root_reuse_allowed"
       - "run_root_reuse_reason"
+      - "force_cpu"
+      - "enable_paper_faithfulness"
+      - "enable_trace_tap"
+      - "test_mode_identity"
     immutable: true
     notes: "必须与 allowed_overrides[*].arg_name 的值集完全一致。新增 override 必须同步更新此枚举。"
 
@@ -145,27 +172,83 @@ impl_id:
 
   # 运行期 gate 判定使用扁平化集合，语义分组仅用于审计展示。
   allowed_flat:
-    - "content_baseline_noop_v1"
-    - "geometry_baseline_noop_v1"
+    - "content_baseline_identity_v1"
+    - "semantic_mask_provider_v1"
+    - "low_freq_coder_v1"
+    - "high_freq_coder_v1"
+    - "unified_latent_modifier_v1"
+    - "content_detector_v1"  # 统一内容检测器
+    - "unified_content_extractor_v1"  # Embed + Detect 双模式
+    - "geometry_baseline_identity_v1"
     - "fusion_baseline_identity_v1"
     - "subspace_baseline_full_v1"
+    - "subspace_planner_v1"
     - "geometry_sync_baseline_v1"
+    # Paper Faithfulness 模块 impl_id（append-only v1.0）
+    - "sd3_pipeline_inspector_v1"
+    - "sd3_diffusion_tracer_v1"
+    - "injection_site_binder_v1"
+    - "paper_alignment_evaluator_v1"
 
   allowed_by_domain:
 
     content_extractor:
-      # 内容证据链占位实现：
+      # 内容证据链基线实现：
       # - 不注入任何真实水印信号。
       # - 可返回空证据或固定格式的基线统计量。
       # - 仅用于验证框架闭环与审计链路。
-      - "content_baseline_noop_v1"
+      - "content_baseline_identity_v1"
+      
+      # 语义掩码提供器：
+      # - 从输入图像或 latent 中提取语义掩码。
+      # - 支持 enable_mask 配置参数控制启用/禁用。
+      # - 生成可复算的掩码摘要与分辨率绑定。
+      # - 用于 content_evidence 中的 mask_digest、mask_stats 字段。
+      - "semantic_mask_provider_v1"
+
+      # 低频水印编码器：
+      # - 在 LF（低频）子空间施加隐蔽编码，作为主通道。
+      # - 支持 enable_lf 配置参数控制启用/禁用。
+      # - 生成可复算的 lf_trace_digest，绑定计划与编码参数。
+      # - 输出 lf_score，方向性固定（高值表示强证据）。
+      # - 严格区分 absent/failed/mismatch 语义。
+      - "low_freq_coder_v1"
+
+      # 高频水印鲁棒化器：
+      # - 在 HF（高频）子空间施加鲁棒约束与尾部截断。
+      # - 支持 enable_hf 配置参数控制启用/禁用。
+      # - 与 LF 通道正交，HF 失败不影响 LF 分数。
+      # - 生成可复算的 hf_trace_digest，绑定计划与约束参数。
+      # - 输出 hf_score，方向性固定（高值表示强证据）。
+      - "high_freq_coder_v1"
+
+      # 统一 latent 修改器：
+      # - 在 SD3 推理循环中协调 LF/HF 子空间修改。
+      # - 通过 callback_on_step_end hook 与 diffusers 集成。
+      # - 生成 step 级证据用于最终摘要计算。
+      # - 仅改 latent 张量，不写原始张量到 records。
+      - "unified_latent_modifier_v1"
+
+      # 内容检测器：
+      # - 统一从 LF/HF 子空间检测水印，输出融合得分。
+      # - 严格校验 plan_digest 一致性，不一致时返回 mismatch。
+      # - 输出 content_score、score_parts（lf_score/hf_score）。
+      # - 失败时 score=None，content_failure_reason 单一主因上报。
+      - "content_detector_v1"
+
+      # 统一内容提取器：
+      # - 根据 detect.content.enabled 自动切换 Embed/Detect 模式。
+      # - Embed 模式：调用 SemanticMaskProvider 提取 mask_digest。
+      # - Detect 模式：调用 ContentDetector 执行 LF/HF 检测。
+      # - 保持 embed/detect 使用同一 impl_id 的简洁性。
+      - "unified_content_extractor_v1"
 
     geometry_extractor:
       # 几何证据链占位实现：
       # - 不生成几何指纹。
       # - 可返回 canonical 状态或空几何证据。
       # - 用于测试几何链路与 fallback / abstain 语义。
-      - "geometry_baseline_noop_v1"
+      - "geometry_baseline_identity_v1"
 
     fusion_rule:
       # 融合规则占位实现：
@@ -180,6 +263,16 @@ impl_id:
       # - 可返回 full-space / None / 预定义空 frame。
       # - 用于固化 subspace_frame 的审计语义。
       - "subspace_baseline_full_v1"
+      
+      # 子空间规划器真实实现：
+      # - 执行低维子空间估计并输出摘要化 subspace_spec。
+      # - 计算可复算的 plan_digest/basis_digest，绑定 mask_digest、cfg_digest 与 impl_identity。
+      # - 规划器禁用或输入缺失时返回 absent，估计失败时返回 failed。
+      # - 支持浅层注入分段（edit_timestep）与掩码子空间定义（mask_shape/w_channel）。
+      # - 支持频域（complex FFT）与时域（spatial）注入方案。
+      # - 支持可选的通道解耦回填策略（enable_channel_refill）。
+      # - 输出完整的 injection_config 与 detection_domain_spec，供检测侧复现。
+      - "subspace_planner_v1"
 
     sync_module:
       # 同步模块占位实现：
@@ -282,3 +375,26 @@ consistency_rules:
     audit_required_fields:
       - "whitelist_version"
       - "whitelist_bound_digest"
+
+# ==============================================================
+# Pipeline Realization Policy
+#   - 控制真实 pipeline 构建的策略
+#   - 定义允许的 model_source 和相关约束
+# ==============================================================
+pipeline_realization:
+  enabled: true  # 启用真实 pipeline 支持
+  allowed_model_sources:
+    - "hf"       # 允许从 HuggingFace Hub 加载
+    - "hf_hub"   # 允许从 HuggingFace Hub 加载（别名）
+    - "local"    # 允许从本地路径加载
+  hf_revision_required: true  # 要求指定 HF revision
+  weights_snapshot_required: false  # 暂不强制要求 weights snapshot（便于开发调试）
+  allowed_devices:
+    - "cpu"
+    - "cuda"
+    - "mps"
+  allowed_precisions:
+    - "float32"
+    - "float16"
+    - "bfloat16"
+  notes: "启用此策略后，才能使用 sd3_diffusers_real_v1 实现"

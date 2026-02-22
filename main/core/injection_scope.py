@@ -1,6 +1,5 @@
 """
-File purpose: Injection scope manifest loading and digest anchoring.
-Module type: General module
+injection_scope_manifest.yaml 并进行类型校验与规范化
 
 功能说明：
 - 加载 injection_scope_manifest.yaml 并进行类型校验与规范化。
@@ -116,60 +115,68 @@ def _validate_manifest_schema(obj: Dict[str, Any]) -> None:
     if not isinstance(manifest_version, str) or not manifest_version:
         raise MissingRequiredFieldError("injection_scope_manifest_version missing or invalid")
 
-    allowed_impl_id_set = _require_non_empty_str_list(
-        obj.get("allowed_impl_id_set"),
-        "allowed_impl_id_set"
+    allowed_impl_ids = _require_non_empty_str_list(
+        obj.get("allowed_impl_ids"),
+        "allowed_impl_ids"
     )
-    _ = allowed_impl_id_set
+    _ = allowed_impl_ids
 
-    digest_inputs = obj.get("digest_inputs")
-    if not isinstance(digest_inputs, dict):
-        # digest_inputs 类型不符合预期，必须 fail-fast。
-        raise TypeError("digest_inputs must be dict")
+    digest_scope = obj.get("digest_scope")
+    if not isinstance(digest_scope, dict):
+        # digest_scope 类型不符合预期，必须 fail-fast。
+        raise TypeError("digest_scope must be dict")
 
     _require_non_empty_str_list(
-        digest_inputs.get("cfg_digest_include"),
-        "digest_inputs.cfg_digest_include"
+        digest_scope.get("cfg_digest_include_paths"),
+        "digest_scope.cfg_digest_include_paths"
     )
     _require_non_empty_str_list(
-        digest_inputs.get("plan_digest_include"),
-        "digest_inputs.plan_digest_include"
+        digest_scope.get("plan_digest_include_paths"),
+        "digest_scope.plan_digest_include_paths"
     )
 
-    version_bump_policy = obj.get("version_bump_policy")
-    if not isinstance(version_bump_policy, dict):
-        # version_bump_policy 类型不符合预期，必须 fail-fast。
-        raise TypeError("version_bump_policy must be dict")
+    versioning_policy = obj.get("versioning_policy")
+    if not isinstance(versioning_policy, dict):
+        # versioning_policy 类型不符合预期，必须 fail-fast。
+        raise TypeError("versioning_policy must be dict")
 
-    bump_on_digest_inputs_change = version_bump_policy.get("bump_on_digest_inputs_change")
-    if not isinstance(bump_on_digest_inputs_change, bool):
-        # bump_on_digest_inputs_change 类型不符合预期，必须 fail-fast。
-        raise TypeError("version_bump_policy.bump_on_digest_inputs_change must be bool")
+    bump_on_digest_scope_change = versioning_policy.get(
+        "bump_manifest_version_on_digest_scope_change"
+    )
+    if not isinstance(bump_on_digest_scope_change, bool):
+        # bump_manifest_version_on_digest_scope_change 类型不符合预期，必须 fail-fast。
+        raise TypeError(
+            "versioning_policy.bump_manifest_version_on_digest_scope_change must be bool"
+        )
 
-    bump_on_impl_param_change = version_bump_policy.get("bump_on_impl_param_change")
-    if not isinstance(bump_on_impl_param_change, bool):
-        # bump_on_impl_param_change 类型不符合预期，必须 fail-fast。
-        raise TypeError("version_bump_policy.bump_on_impl_param_change must be bool")
+    bump_on_impl_scope_change = versioning_policy.get(
+        "bump_manifest_version_on_impl_scope_change"
+    )
+    if not isinstance(bump_on_impl_scope_change, bool):
+        # bump_manifest_version_on_impl_scope_change 类型不符合预期，必须 fail-fast。
+        raise TypeError(
+            "versioning_policy.bump_manifest_version_on_impl_scope_change must be bool"
+        )
 
     _require_non_empty_str_list(
-        obj.get("frozen_no_touch_files"),
-        "frozen_no_touch_files"
+        obj.get("frozen_surface_protected_files"),
+        "frozen_surface_protected_files"
     )
 
-    notes = obj.get("notes")
-    if notes is None:
+    operational_notes = obj.get("operational_notes")
+    if operational_notes is None:
         return
-    if isinstance(notes, str):
-        if not notes:
-            # notes 值为空，必须 fail-fast。
-            raise TypeError("notes must be non-empty str when provided")
+    if isinstance(operational_notes, str):
+        if not operational_notes:
+            # operational_notes 值为空，必须 fail-fast。
+            raise TypeError("operational_notes must be non-empty str when provided")
         return
-    if isinstance(notes, list):
-        _require_non_empty_str_list(notes, "notes")
+    if isinstance(operational_notes, list):
+        _require_non_empty_str_list(operational_notes, "operational_notes")
         return
 
-    # notes 类型不符合预期，必须 fail-fast。
-    raise TypeError("notes must be str or list[str] when provided")
+    # operational_notes 类型不符合预期，必须 fail-fast。
+    raise TypeError("operational_notes must be str or list[str] when provided")
 
 
 def load_injection_scope_manifest(
