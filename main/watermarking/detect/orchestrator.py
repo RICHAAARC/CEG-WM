@@ -87,7 +87,7 @@ def run_detect_orchestrator(
         raise TypeError("detect_plan_result_override must be dict, SubspacePlan, or None")
 
     content_result = content_result_override if content_result_override is not None else impl_set.content_extractor.extract(cfg)
-    geometry_result = impl_set.geometry_extractor.extract(cfg)
+    geometry_result = _run_geometry_extractor_with_runtime_inputs(impl_set.geometry_extractor, cfg)
 
     # (1) 统一转换 ContentEvidence / GeometryEvidence 数据类为 dict。
     # 优先使用 .as_dict() 方法；若不存在则直接使用数据类或字典。
@@ -336,6 +336,14 @@ def run_detect_orchestrator(
         _bind_raw_scores_to_content_payload(content_evidence_payload, lf_raw_score, hf_raw_score, raw_score_traces)
         _bind_scores_if_ok(content_evidence_payload)
         content_evidence_adapted = _adapt_content_evidence_for_fusion(content_evidence_payload)
+        
+        # (S-10 修正) 从 input_record 中提取 calibrate 生成的 thresholds_artifact，
+        # 并注入到 cfg 中供 fusion_rule.fuse() 使用（必须修正：threshold binding error）。
+        if isinstance(input_record, dict) and "thresholds_artifact" in input_record:
+            thresholds_artifact = input_record["thresholds_artifact"]
+            if isinstance(thresholds_artifact, dict):
+                cfg["__thresholds_artifact__"] = thresholds_artifact
+        
         fusion_result = impl_set.fusion_rule.fuse(cfg, content_evidence_adapted, geometry_evidence_adapted)
     input_fields = len(input_record or {})
 
@@ -448,6 +456,7 @@ def run_detect_orchestrator(
 
     # 删除临时的 latents 字段，确保不写入 records
     cfg.pop("__detect_final_latents__", None)
+    cfg.pop("__detect_pipeline_obj__", None)
 
     plan_digest_mismatch_reason = plan_digest_reason if plan_digest_reason == "plan_digest_mismatch" else None
 
@@ -1685,14 +1694,28 @@ def run_calibrate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> D
         "calibration_version": "np_v1",
         "rule_id": neyman_pearson.RULE_ID,
         "rule_version": neyman_pearson.RULE_VERSION,
+        "method": "neyman_pearson_v1",
         "score_name": "content_score",
         "target_fpr": float(target_fpr),
         "null_source": "wrong_key",
+        "n_null": len(scores),
         "n_samples": len(scores),
+        "calibration_date": "1970-01-01",
+        "quantile_method": "higher",
+        "target_fprs": [float(target_fpr)],
         "order_statistics": order_stat_info,
         "stratification": strata_info,
         "sample_digest": digests.canonical_sha256({"scores": [round(float(v), 12) for v in scores]}),
     }
+    threshold_metadata_artifact["null_strata"] = _compute_null_strata_for_calibration(detect_records, float(threshold_value))
+    threshold_metadata_artifact["conditional_fpr"] = _compute_conditional_fpr_for_calibration(
+        detect_records,
+        float(threshold_value),
+    )
+    threshold_metadata_artifact["conditional_fpr_records"] = _compute_conditional_fpr_records_for_calibration(
+        detect_records,
+        float(threshold_value),
+    )
 
     record: Dict[str, Any] = {
         "operation": "calibrate",
@@ -1745,9 +1768,14 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
         raise TypeError("impl_set must be BuiltImplSet")
 
     thresholds_path = _resolve_thresholds_path_for_evaluate(cfg)
+    attack_protocol_spec = _read_attack_protocol_spec(cfg)
     thresholds_obj = load_thresholds_artifact_controlled(str(thresholds_path))
     detect_records = _load_records_for_evaluate(cfg)
-    metrics_obj, breakdown = evaluate_records_against_threshold(detect_records, thresholds_obj)
+    metrics_obj, breakdown, conditional_metrics = evaluate_records_against_threshold(
+        detect_records,
+        thresholds_obj,
+        attack_protocol_spec=attack_protocol_spec,
+    )
 
     _ = impl_set
 
@@ -1775,9 +1803,13 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
     report_obj = {
         "evaluation_version": "eval_v1",
         "attack_protocol_version": _read_attack_protocol_version(cfg),
+        "attack_protocol": attack_protocol_spec,
         "thresholds_artifact_path": str(thresholds_path),
         "thresholds_digest": digests.canonical_sha256(thresholds_obj),
+        "thresholds_rule_id": thresholds_obj.get("rule_id", "<absent>"),
+        "thresholds_rule_version": thresholds_obj.get("rule_version", "<absent>"),
         "cfg_digest": cfg.get("__evaluate_cfg_digest__", "<absent>"),
+        "attack_group_metrics_digest": digests.canonical_sha256(conditional_metrics.get("attack_group_metrics", [])),
         "anchors": _collect_evaluation_anchors(detect_records),
     }
 
@@ -1787,6 +1819,7 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
         "evaluation_mode": "real",
         "metrics": metrics_obj,
         "evaluation_breakdown": breakdown,
+        "conditional_metrics": conditional_metrics,
         "evaluation_report": report_obj,
         "thresholds_artifact": thresholds_obj,
         "threshold_key_used": thresholds_obj.get("threshold_key_used"),
@@ -1914,8 +1947,9 @@ def load_thresholds_artifact_controlled(path: str) -> Dict[str, Any]:
 
 def evaluate_records_against_threshold(
     records: list[Dict[str, Any]],
-    thresholds_obj: Dict[str, Any]
-) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    thresholds_obj: Dict[str, Any],
+    attack_protocol_spec: Optional[Dict[str, Any]] = None,
+) -> tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     """
     功能：使用只读阈值评测 detect 记录。 
 
@@ -1926,7 +1960,7 @@ def evaluate_records_against_threshold(
         thresholds_obj: Thresholds artifact mapping.
 
     Returns:
-        Tuple of (metrics, breakdown).
+        Tuple of (metrics, breakdown, conditional_metrics).
     """
     if not isinstance(records, list):
         raise TypeError("records must be list")
@@ -1945,46 +1979,99 @@ def evaluate_records_against_threshold(
     tp = 0
     fp = 0
     accepted = 0
+    geo_available_accepted = 0
+    rescue_triggered_count = 0
+    rescue_positive_count = 0
+    reject_count_by_reason: Dict[str, int] = {
+        "invalid_record": 0,
+        "missing_content_payload": 0,
+        "status_not_ok": 0,
+        "invalid_score": 0,
+        "missing_ground_truth": 0,
+    }
+    attack_groups: Dict[str, Dict[str, Any]] = {}
+
+    protocol_spec = attack_protocol_spec if isinstance(attack_protocol_spec, dict) else {
+        "version": "<absent>",
+        "family_field_candidates": ["attack_family", "attack.family", "attack.type"],
+        "params_version_field_candidates": ["attack_params_version", "attack.params_version"],
+    }
 
     for item in records:
         if not isinstance(item, dict):
+            reject_count_by_reason["invalid_record"] += 1
             continue
         n_total += 1
         content_payload = item.get("content_evidence_payload")
         if not isinstance(content_payload, dict):
             n_reject += 1
+            reject_count_by_reason["missing_content_payload"] += 1
             continue
         if content_payload.get("status") != "ok":
             n_reject += 1
+            reject_count_by_reason["status_not_ok"] += 1
             continue
         score_value = content_payload.get("score")
         if not isinstance(score_value, (int, float)):
             n_reject += 1
+            reject_count_by_reason["invalid_score"] += 1
             continue
         score_float = float(score_value)
         if not np.isfinite(score_float):
             n_reject += 1
+            reject_count_by_reason["invalid_score"] += 1
             continue
 
         gt_value = _extract_ground_truth_label(item)
         if gt_value is None:
             n_reject += 1
+            reject_count_by_reason["missing_ground_truth"] += 1
             continue
 
         accepted += 1
         pred_positive = score_float >= threshold_float
+        if _extract_geometry_score(item) is not None:
+            geo_available_accepted += 1
+        rescue_triggered = _extract_rescue_triggered(item)
+        if rescue_triggered:
+            rescue_triggered_count += 1
+            if pred_positive:
+                rescue_positive_count += 1
+
+        attack_group_key = _build_attack_group_key(item, protocol_spec)
+        if attack_group_key not in attack_groups:
+            attack_groups[attack_group_key] = {
+                "n_accepted": 0,
+                "n_pos": 0,
+                "n_neg": 0,
+                "tp": 0,
+                "fp": 0,
+            }
+        group_stats = attack_groups[attack_group_key]
+        group_stats["n_accepted"] += 1
         if gt_value:
             n_pos += 1
+            group_stats["n_pos"] += 1
             if pred_positive:
                 tp += 1
+                group_stats["tp"] += 1
         else:
             n_neg += 1
+            group_stats["n_neg"] += 1
             if pred_positive:
                 fp += 1
+                group_stats["fp"] += 1
 
     reject_rate = float(n_reject / n_total) if n_total > 0 else 1.0
     tpr_value = float(tp / n_pos) if n_pos > 0 else None
     fpr_empirical = float(fp / n_neg) if n_neg > 0 else None
+    geo_available_rate = float(geo_available_accepted / accepted) if accepted > 0 else None
+    rescue_rate = float(rescue_triggered_count / accepted) if accepted > 0 else None
+    rescue_gain_rate = float(rescue_positive_count / accepted) if accepted > 0 else None
+    reject_rate_by_reason = {
+        key_name: (float(count_value / n_total) if n_total > 0 else 0.0)
+        for key_name, count_value in reject_count_by_reason.items()
+    }
 
     metrics = {
         "metric_version": "tpr_at_fpr_v1",
@@ -1993,8 +2080,13 @@ def evaluate_records_against_threshold(
         "threshold_value": threshold_float,
         "threshold_key_used": thresholds_obj.get("threshold_key_used"),
         "tpr_at_fpr": tpr_value,
+        "tpr_at_fpr_primary": tpr_value,
         "fpr_empirical": fpr_empirical,
         "reject_rate": reject_rate,
+        "geo_available_rate": geo_available_rate,
+        "rescue_rate": rescue_rate,
+        "rescue_gain_rate": rescue_gain_rate,
+        "reject_rate_by_reason": reject_rate_by_reason,
         "n_total": n_total,
         "n_accepted": accepted,
         "n_rejected": n_reject,
@@ -2009,7 +2101,10 @@ def evaluate_records_against_threshold(
             "tn": max(0, n_neg - fp),
         }
     }
-    return metrics, breakdown
+    conditional_metrics = _compute_conditional_metrics_for_evaluate(records, threshold_float)
+    conditional_metrics["attack_protocol_version"] = protocol_spec.get("version", "<absent>")
+    conditional_metrics["attack_group_metrics"] = _build_attack_group_metrics(attack_groups)
+    return metrics, breakdown, conditional_metrics
 
 
 def _load_records_for_calibration(cfg: Dict[str, Any]) -> list[Dict[str, Any]]:
@@ -2082,6 +2177,292 @@ def _extract_ground_truth_label(record: Dict[str, Any]) -> Optional[bool]:
     return None
 
 
+def _extract_geometry_score(record: Dict[str, Any]) -> Optional[float]:
+    if not isinstance(record, dict):
+        return None
+    geometry_payload = record.get("geometry_evidence_payload")
+    if not isinstance(geometry_payload, dict):
+        return None
+    status_value = geometry_payload.get("status")
+    if status_value != "ok":
+        return None
+    for key_name in ["score", "geo_score"]:
+        value = geometry_payload.get(key_name)
+        if isinstance(value, (int, float)):
+            value_float = float(value)
+            if np.isfinite(value_float):
+                return value_float
+    return None
+
+
+def _extract_content_score_for_stats(record: Dict[str, Any]) -> Optional[float]:
+    if not isinstance(record, dict):
+        return None
+    content_payload = record.get("content_evidence_payload")
+    if not isinstance(content_payload, dict):
+        return None
+    if content_payload.get("status") != "ok":
+        return None
+    score_value = content_payload.get("score")
+    if not isinstance(score_value, (int, float)):
+        return None
+    score_float = float(score_value)
+    if not np.isfinite(score_float):
+        return None
+    return score_float
+
+
+def _compute_null_strata_for_calibration(records: list[Dict[str, Any]], threshold_value: float) -> Dict[str, Any]:
+    if not isinstance(records, list):
+        raise TypeError("records must be list")
+    if not isinstance(threshold_value, (int, float)):
+        raise TypeError("threshold_value must be number")
+
+    valid_content = 0
+    geometry_available = 0
+    geometry_unavailable = 0
+    rescue_candidate = 0
+
+    lower_bound = float(threshold_value) - 0.05
+    for item in records:
+        score_float = _extract_content_score_for_stats(item)
+        if score_float is None:
+            continue
+        valid_content += 1
+
+        geo_score = _extract_geometry_score(item)
+        if geo_score is None:
+            geometry_unavailable += 1
+        else:
+            geometry_available += 1
+
+        if lower_bound <= score_float < float(threshold_value):
+            rescue_candidate += 1
+
+    return {
+        "global_valid": {
+            "n": int(valid_content),
+        },
+        "geometry_available": {
+            "n": int(geometry_available),
+        },
+        "geometry_unavailable": {
+            "n": int(geometry_unavailable),
+        },
+        "rescue_candidate": {
+            "n": int(rescue_candidate),
+            "window": "[threshold-0.05, threshold)",
+        },
+    }
+
+
+def _compute_conditional_fpr_records_for_calibration(
+    records: list[Dict[str, Any]],
+    threshold_value: float,
+) -> list[Dict[str, Any]]:
+    if not isinstance(records, list):
+        raise TypeError("records must be list")
+    if not isinstance(threshold_value, (int, float)):
+        raise TypeError("threshold_value must be number")
+
+    threshold_float = float(threshold_value)
+
+    def _make_record(condition_id: str, definition: str, selected_scores: list[float], positive_count: int) -> Dict[str, Any]:
+        sample_count = len(selected_scores)
+        empirical_fpr = float(positive_count / sample_count) if sample_count > 0 else None
+        inputs_digest = digests.canonical_sha256(
+            {
+                "condition_id": condition_id,
+                "definition": definition,
+                "threshold_value": round(threshold_float, 12),
+                "sample_count": sample_count,
+                "positive_count": int(positive_count),
+                "scores": [round(float(value), 12) for value in selected_scores],
+            }
+        )
+        return {
+            "condition_id": condition_id,
+            "definition": definition,
+            "sample_count": int(sample_count),
+            "empirical_fpr": empirical_fpr,
+            "inputs_digest": inputs_digest,
+        }
+
+    condition_buffers: Dict[str, Dict[str, Any]] = {
+        "global": {"definition": "all valid null samples", "scores": [], "positive": 0},
+        "geometry_available": {"definition": "geometry score available", "scores": [], "positive": 0},
+        "geometry_unavailable": {"definition": "geometry score unavailable", "scores": [], "positive": 0},
+        "rescue_band_candidate": {"definition": "content score in rescue band [threshold-0.05, threshold)", "scores": [], "positive": 0},
+        "geo_gate_applied": {"definition": "geo gate applied in fusion audit", "scores": [], "positive": 0},
+        "align_quality_available": {"definition": "alignment quality metric is available", "scores": [], "positive": 0},
+    }
+
+    rescue_lower = threshold_float - 0.05
+    for item in records:
+        score_float = _extract_content_score_for_stats(item)
+        if score_float is None:
+            continue
+        pred_positive = bool(score_float >= threshold_float)
+
+        _update_condition_buffer(condition_buffers, "global", score_float, pred_positive)
+
+        geo_score = _extract_geometry_score(item)
+        if geo_score is None:
+            _update_condition_buffer(condition_buffers, "geometry_unavailable", score_float, pred_positive)
+        else:
+            _update_condition_buffer(condition_buffers, "geometry_available", score_float, pred_positive)
+
+        if rescue_lower <= score_float < threshold_float:
+            _update_condition_buffer(condition_buffers, "rescue_band_candidate", score_float, pred_positive)
+
+        if _extract_geo_gate_applied(item) is True:
+            _update_condition_buffer(condition_buffers, "geo_gate_applied", score_float, pred_positive)
+
+        if _extract_align_quality_available(item):
+            _update_condition_buffer(condition_buffers, "align_quality_available", score_float, pred_positive)
+
+    ordered_conditions = [
+        "global",
+        "geometry_available",
+        "geometry_unavailable",
+        "rescue_band_candidate",
+        "geo_gate_applied",
+        "align_quality_available",
+    ]
+    return [
+        _make_record(
+            condition_id=condition_id,
+            definition=condition_buffers[condition_id]["definition"],
+            selected_scores=condition_buffers[condition_id]["scores"],
+            positive_count=int(condition_buffers[condition_id]["positive"]),
+        )
+        for condition_id in ordered_conditions
+    ]
+
+
+def _compute_conditional_fpr_for_calibration(records: list[Dict[str, Any]], threshold_value: float) -> Dict[str, Any]:
+    if not isinstance(records, list):
+        raise TypeError("records must be list")
+    if not isinstance(threshold_value, (int, float)):
+        raise TypeError("threshold_value must be number")
+
+    global_total = 0
+    global_fp = 0
+    geo_available_total = 0
+    geo_available_fp = 0
+    geo_unavailable_total = 0
+    geo_unavailable_fp = 0
+
+    for item in records:
+        score_float = _extract_content_score_for_stats(item)
+        if score_float is None:
+            continue
+        pred_positive = bool(score_float >= float(threshold_value))
+
+        global_total += 1
+        if pred_positive:
+            global_fp += 1
+
+        geo_score = _extract_geometry_score(item)
+        if geo_score is None:
+            geo_unavailable_total += 1
+            if pred_positive:
+                geo_unavailable_fp += 1
+        else:
+            geo_available_total += 1
+            if pred_positive:
+                geo_available_fp += 1
+
+    def _pack(condition_id: str, total_count: int, fp_count: int) -> Dict[str, Any]:
+        fpr_value = float(fp_count / total_count) if total_count > 0 else None
+        return {
+            "condition_id": condition_id,
+            "n": int(total_count),
+            "fp": int(fp_count),
+            "fpr_empirical": fpr_value,
+        }
+
+    return {
+        "definition": "null-only empirical FPR conditioned on geometry availability",
+        "items": [
+            _pack("global", global_total, global_fp),
+            _pack("geometry_available", geo_available_total, geo_available_fp),
+            _pack("geometry_unavailable", geo_unavailable_total, geo_unavailable_fp),
+        ],
+    }
+
+
+def _update_condition_buffer(
+    condition_buffers: Dict[str, Dict[str, Any]],
+    condition_id: str,
+    score_value: float,
+    pred_positive: bool,
+) -> None:
+    if condition_id not in condition_buffers:
+        # 条件不存在属于调用方逻辑错误，必须 fail-fast。
+        raise ValueError(f"unknown condition_id: {condition_id}")
+    payload = condition_buffers[condition_id]
+    payload["scores"].append(float(score_value))
+    if pred_positive:
+        payload["positive"] += 1
+
+
+def _compute_conditional_metrics_for_evaluate(records: list[Dict[str, Any]], threshold_value: float) -> Dict[str, Any]:
+    if not isinstance(records, list):
+        raise TypeError("records must be list")
+    if not isinstance(threshold_value, (int, float)):
+        raise TypeError("threshold_value must be number")
+
+    groups = {
+        "global": {"tp": 0, "fp": 0, "pos": 0, "neg": 0, "accepted": 0},
+        "geometry_available": {"tp": 0, "fp": 0, "pos": 0, "neg": 0, "accepted": 0},
+        "geometry_unavailable": {"tp": 0, "fp": 0, "pos": 0, "neg": 0, "accepted": 0},
+    }
+
+    for item in records:
+        score_float = _extract_content_score_for_stats(item)
+        if score_float is None:
+            continue
+        gt_value = _extract_ground_truth_label(item)
+        if gt_value is None:
+            continue
+
+        pred_positive = bool(score_float >= float(threshold_value))
+        group_name = "geometry_available" if _extract_geometry_score(item) is not None else "geometry_unavailable"
+
+        for key_name in ["global", group_name]:
+            group = groups[key_name]
+            group["accepted"] += 1
+            if gt_value:
+                group["pos"] += 1
+                if pred_positive:
+                    group["tp"] += 1
+            else:
+                group["neg"] += 1
+                if pred_positive:
+                    group["fp"] += 1
+
+    items = []
+    for condition_id, group in groups.items():
+        tpr_value = float(group["tp"] / group["pos"]) if group["pos"] > 0 else None
+        fpr_value = float(group["fp"] / group["neg"]) if group["neg"] > 0 else None
+        items.append(
+            {
+                "condition_id": condition_id,
+                "n_accepted": int(group["accepted"]),
+                "n_pos": int(group["pos"]),
+                "n_neg": int(group["neg"]),
+                "tpr_at_fpr": tpr_value,
+                "fpr_empirical": fpr_value,
+            }
+        )
+
+    return {
+        "version": "conditional_eval_v1",
+        "items": items,
+    }
+
+
 def _collect_evaluation_anchors(records: list[Dict[str, Any]]) -> Dict[str, Any]:
     if not isinstance(records, list):
         return {}
@@ -2117,6 +2498,159 @@ def _read_attack_protocol_version(cfg: Dict[str, Any]) -> str:
     if isinstance(value, str) and value:
         return value
     return "<absent>"
+
+
+def _read_attack_protocol_spec(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(cfg, dict):
+        return {
+            "version": "<absent>",
+            "family_field_candidates": ["attack_family", "attack.family", "attack.type"],
+            "params_version_field_candidates": ["attack_params_version", "attack.params_version"],
+        }
+    evaluate_cfg = cfg.get("evaluate") if isinstance(cfg.get("evaluate"), dict) else {}
+
+    version = evaluate_cfg.get("attack_protocol_version")
+    if not isinstance(version, str) or not version:
+        version = "<absent>"
+
+    family_field_candidates = evaluate_cfg.get("attack_family_field_candidates")
+    if not isinstance(family_field_candidates, list) or len(family_field_candidates) == 0:
+        family_field_candidates = ["attack_family", "attack.family", "attack.type"]
+
+    params_field_candidates = evaluate_cfg.get("attack_params_version_field_candidates")
+    if not isinstance(params_field_candidates, list) or len(params_field_candidates) == 0:
+        params_field_candidates = ["attack_params_version", "attack.params_version"]
+
+    normalized_family_fields = [field_name for field_name in family_field_candidates if isinstance(field_name, str) and field_name]
+    normalized_params_fields = [field_name for field_name in params_field_candidates if isinstance(field_name, str) and field_name]
+    if len(normalized_family_fields) == 0:
+        normalized_family_fields = ["attack_family", "attack.family", "attack.type"]
+    if len(normalized_params_fields) == 0:
+        normalized_params_fields = ["attack_params_version", "attack.params_version"]
+
+    return {
+        "version": version,
+        "family_field_candidates": normalized_family_fields,
+        "params_version_field_candidates": normalized_params_fields,
+    }
+
+
+def _build_attack_group_key(record: Dict[str, Any], protocol_spec: Dict[str, Any]) -> str:
+    family_fields = protocol_spec.get("family_field_candidates") if isinstance(protocol_spec, dict) else None
+    params_fields = protocol_spec.get("params_version_field_candidates") if isinstance(protocol_spec, dict) else None
+
+    family_value = _extract_first_string_value(record, family_fields, "unknown_attack")
+    params_value = _extract_first_string_value(record, params_fields, "unknown_params")
+    return f"{family_value}::{params_value}"
+
+
+def _extract_first_string_value(record: Dict[str, Any], candidate_paths: Any, default_value: str) -> str:
+    if not isinstance(record, dict):
+        return default_value
+    if not isinstance(candidate_paths, list):
+        return default_value
+    for candidate in candidate_paths:
+        if not isinstance(candidate, str) or not candidate:
+            continue
+        value = _extract_nested_value(record, candidate)
+        if isinstance(value, str) and value:
+            return value
+    return default_value
+
+
+def _extract_nested_value(payload: Dict[str, Any], dotted_path: str) -> Any:
+    if not isinstance(payload, dict):
+        return None
+    if not isinstance(dotted_path, str) or not dotted_path:
+        return None
+    cursor: Any = payload
+    for part in dotted_path.split("."):
+        if not isinstance(cursor, dict) or part not in cursor:
+            return None
+        cursor = cursor[part]
+    return cursor
+
+
+def _build_attack_group_metrics(attack_groups: Dict[str, Dict[str, Any]]) -> list[Dict[str, Any]]:
+    if not isinstance(attack_groups, dict):
+        return []
+    metrics_list: list[Dict[str, Any]] = []
+    for group_key in sorted(attack_groups.keys()):
+        group = attack_groups[group_key]
+        if not isinstance(group, dict):
+            continue
+        group_n_pos = int(group.get("n_pos", 0))
+        group_n_neg = int(group.get("n_neg", 0))
+        group_tp = int(group.get("tp", 0))
+        group_fp = int(group.get("fp", 0))
+        metrics_list.append(
+            {
+                "group_key": group_key,
+                "n_accepted": int(group.get("n_accepted", 0)),
+                "n_pos": group_n_pos,
+                "n_neg": group_n_neg,
+                "tpr_at_fpr": (float(group_tp / group_n_pos) if group_n_pos > 0 else None),
+                "fpr_empirical": (float(group_fp / group_n_neg) if group_n_neg > 0 else None),
+            }
+        )
+    return metrics_list
+
+
+def _extract_rescue_triggered(record: Dict[str, Any]) -> bool:
+    if not isinstance(record, dict):
+        return False
+    decision_payload = record.get("decision")
+    if not isinstance(decision_payload, dict):
+        return False
+    routing_decisions = decision_payload.get("routing_decisions")
+    if isinstance(routing_decisions, dict):
+        value = routing_decisions.get("rescue_triggered")
+        if isinstance(value, bool):
+            return value
+    audit_payload = decision_payload.get("audit")
+    if isinstance(audit_payload, dict):
+        value = audit_payload.get("rescue_triggered")
+        if isinstance(value, bool):
+            return value
+    return False
+
+
+def _extract_geo_gate_applied(record: Dict[str, Any]) -> Optional[bool]:
+    if not isinstance(record, dict):
+        return None
+    decision_payload = record.get("decision")
+    if not isinstance(decision_payload, dict):
+        return None
+    routing_decisions = decision_payload.get("routing_decisions")
+    if isinstance(routing_decisions, dict):
+        value = routing_decisions.get("geo_gate_applied")
+        if isinstance(value, bool):
+            return value
+    audit_payload = decision_payload.get("audit")
+    if isinstance(audit_payload, dict):
+        value = audit_payload.get("geo_gate_applied")
+        if isinstance(value, bool):
+            return value
+    return None
+
+
+def _extract_align_quality_available(record: Dict[str, Any]) -> bool:
+    if not isinstance(record, dict):
+        return False
+    geometry_payload = record.get("geometry_evidence_payload")
+    if not isinstance(geometry_payload, dict):
+        return False
+    candidate_values = []
+    for dotted_path in [
+        "sync_metrics.align_quality",
+        "sync_metrics.alignment_quality",
+        "stability_metrics.align_quality",
+        "stability_metrics.alignment_quality",
+    ]:
+        value = _extract_nested_value(geometry_payload, dotted_path)
+        if isinstance(value, (int, float)) and np.isfinite(float(value)):
+            candidate_values.append(float(value))
+    return len(candidate_values) > 0
 
 
 def _adapt_content_evidence_for_fusion(content_evidence: Any) -> Dict[str, Any]:
@@ -2193,9 +2727,60 @@ def _adapt_geometry_evidence_for_fusion(geometry_evidence: Any) -> Dict[str, Any
     adapted = {}
     
     # 提取关键字段（来自 GeometryEvidence 冻结结构）。
-    for field_name in ["status", "geo_score", "audit", "anchor_digest", "align_trace_digest",
-                       "align_residuals", "stability_metrics", "geometry_failure_reason"]:
+    for field_name in [
+        "status",
+        "geo_score",
+        "audit",
+        "anchor_digest",
+        "anchor_config_digest",
+        "align_trace_digest",
+        "align_residuals",
+        "anchor_metrics",
+        "stability_metrics",
+        "sync_digest",
+        "sync_metrics",
+        "sync_config_digest",
+        "sync_quality_metrics",
+        "resolution_binding",
+        "align_metrics",
+        "align_config_digest",
+        "geo_score_direction",
+        "geo_failure_reason",
+        "geometry_failure_reason",
+    ]:
         if hasattr(geometry_evidence, field_name):
             adapted[field_name] = getattr(geometry_evidence, field_name)
     
     return adapted if adapted else {"status": "unknown"}
+
+
+def _run_geometry_extractor_with_runtime_inputs(geometry_extractor: Any, cfg: Dict[str, Any]) -> Any:
+    """
+    功能：以兼容方式调用 geometry extractor。 
+
+    Invoke geometry extractor with runtime inputs when supported.
+
+    Args:
+        geometry_extractor: Geometry extractor instance.
+        cfg: Configuration mapping.
+
+    Returns:
+        Geometry extraction output.
+    """
+    if not isinstance(cfg, dict):
+        # cfg 类型不合法，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+    runtime_inputs = {
+        "pipeline": cfg.get("__detect_pipeline_obj__"),
+        "latents": cfg.get("__detect_final_latents__"),
+        "rng": cfg.get("rng"),
+    }
+    extract_method = getattr(geometry_extractor, "extract", None)
+    if not callable(extract_method):
+        # geometry_extractor 协议不合法，必须 fail-fast。
+        raise TypeError("geometry_extractor.extract must be callable")
+    try:
+        return extract_method(cfg, inputs=runtime_inputs)
+    except TypeError:
+        # 兼容旧实现：仅接受 cfg 参数。
+        return extract_method(cfg)

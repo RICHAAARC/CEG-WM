@@ -82,15 +82,20 @@ def test_evaluate_records_against_threshold_uses_readonly_threshold() -> None:
         "threshold_key_used": "fpr_0_01",
     }
 
-    metrics, breakdown = evaluate_records_against_threshold(records, thresholds_obj)
+    metrics, breakdown, conditional_metrics = evaluate_records_against_threshold(records, thresholds_obj)
 
     assert metrics["n_total"] == 5
     assert metrics["n_accepted"] == 4
     assert metrics["n_rejected"] == 1
     assert metrics["tpr_at_fpr"] == pytest.approx(0.5)
+    assert metrics["tpr_at_fpr_primary"] == pytest.approx(0.5)
     assert metrics["fpr_empirical"] == pytest.approx(0.5)
     assert metrics["reject_rate"] == pytest.approx(0.2)
+    assert isinstance(metrics["reject_rate_by_reason"], dict)
     assert breakdown["confusion"] == {"tp": 1, "fp": 1, "fn": 1, "tn": 1}
+    assert conditional_metrics["version"] == "conditional_eval_v1"
+    assert isinstance(conditional_metrics["items"], list) and len(conditional_metrics["items"]) == 3
+    assert isinstance(conditional_metrics["attack_group_metrics"], list)
 
 
 class _ExtractorRaiser:
@@ -123,6 +128,13 @@ def test_run_evaluate_orchestrator_readonly_without_extractors(tmp_path: Path) -
     detect_record_payload = {
         "content_evidence_payload": {"status": "ok", "score": 0.8},
         "label": True,
+        "attack": {"family": "jpeg", "params_version": "p1"},
+        "decision": {
+            "routing_decisions": {
+                "rescue_triggered": True,
+                "geo_gate_applied": True,
+            }
+        },
         "cfg_digest": "cfg_sample",
         "plan_digest": "plan_sample",
         "impl": {"digests": {"content_extractor": "impl_sample"}},
@@ -134,6 +146,8 @@ def test_run_evaluate_orchestrator_readonly_without_extractors(tmp_path: Path) -
             "thresholds_path": str(thresholds_path),
             "detect_records_glob": str(detect_record_path),
             "attack_protocol_version": "attack_v1",
+            "attack_family_field_candidates": ["attack.family"],
+            "attack_params_version_field_candidates": ["attack.params_version"],
         },
         "__evaluate_cfg_digest__": "cfg_eval_digest",
     }
@@ -151,9 +165,18 @@ def test_run_evaluate_orchestrator_readonly_without_extractors(tmp_path: Path) -
     assert result["evaluation_is_fallback"] is False
     assert result["evaluation_mode"] == "real"
     assert result["metrics"]["n_total"] == 1
+    assert result["metrics"]["geo_available_rate"] == pytest.approx(0.0)
+    assert result["metrics"]["rescue_rate"] == pytest.approx(1.0)
+    assert result["metrics"]["rescue_gain_rate"] == pytest.approx(1.0)
     assert result["threshold_key_used"] == "fpr_0_01"
+    assert result["conditional_metrics"]["version"] == "conditional_eval_v1"
+    assert result["conditional_metrics"]["attack_protocol_version"] == "attack_v1"
+    attack_groups = result["conditional_metrics"]["attack_group_metrics"]
+    assert len(attack_groups) == 1
+    assert attack_groups[0]["group_key"] == "jpeg::p1"
     assert result["fusion_result"].decision_status == "abstain"
     assert result["fusion_result"].used_threshold_id == "content_score_np_fpr_0_01"
+    assert result["evaluation_report"]["attack_protocol"]["version"] == "attack_v1"
 
 
 def test_run_calibrate_orchestrator_sets_calibration_mode(tmp_path: Path) -> None:
@@ -190,3 +213,47 @@ def test_run_calibrate_orchestrator_sets_calibration_mode(tmp_path: Path) -> Non
 
     assert record["calibration_is_fallback"] is False
     assert record["calibration_mode"] == "real"
+    metadata_artifact = record["threshold_metadata_artifact"]
+    assert "null_strata" in metadata_artifact
+    assert "conditional_fpr" in metadata_artifact
+    assert metadata_artifact["conditional_fpr"]["definition"]
+    assert "conditional_fpr_records" in metadata_artifact
+    assert isinstance(metadata_artifact["conditional_fpr_records"], list)
+    assert len(metadata_artifact["conditional_fpr_records"]) >= 3
+    first_item = metadata_artifact["conditional_fpr_records"][0]
+    assert "condition_id" in first_item
+    assert "definition" in first_item
+    assert "sample_count" in first_item
+    assert "empirical_fpr" in first_item
+    assert "inputs_digest" in first_item
+
+
+def test_run_calibrate_orchestrator_conditional_fpr_records_are_deterministic(tmp_path: Path) -> None:
+    """Validate conditional_fpr_records is deterministic for the same calibration inputs."""
+    detect_record_path = tmp_path / "detect_record.json"
+    detect_record_payload = {
+        "content_evidence_payload": {"status": "ok", "score": 0.8},
+        "geometry_evidence_payload": {
+            "status": "ok",
+            "score": 0.2,
+            "sync_metrics": {"align_quality": 0.91},
+        },
+    }
+    detect_record_path.write_text(json.dumps(detect_record_payload), encoding="utf-8")
+
+    cfg = {
+        "evaluate": {"target_fpr": 0.01},
+        "calibration": {"detect_records_glob": str(detect_record_path)},
+    }
+    impl_set = BuiltImplSet(
+        content_extractor=object(),
+        geometry_extractor=object(),
+        fusion_rule=object(),
+        subspace_planner=object(),
+        sync_module=object(),
+    )
+
+    record_a = run_calibrate_orchestrator(cfg, impl_set)
+    record_b = run_calibrate_orchestrator(cfg, impl_set)
+
+    assert record_a["threshold_metadata_artifact"]["conditional_fpr_records"] == record_b["threshold_metadata_artifact"]["conditional_fpr_records"]

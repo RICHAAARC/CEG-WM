@@ -48,11 +48,19 @@ class GeometryEvidence:
     score: Optional[float]
     audit: Dict[str, Any]
     anchor_digest: Optional[str] = None
+    anchor_config_digest: Optional[str] = None
     anchor_metrics: Optional[Dict[str, Any]] = None
+    stability_metrics: Optional[Dict[str, Any]] = None
+    resolution_binding: Optional[Dict[str, Any]] = None
     sync_digest: Optional[str] = None
     sync_metrics: Optional[Dict[str, Any]] = None
+    sync_config_digest: Optional[str] = None
+    sync_quality_metrics: Optional[Dict[str, Any]] = None
     align_trace_digest: Optional[str] = None
+    align_metrics: Optional[Dict[str, Any]] = None
+    align_config_digest: Optional[str] = None
     geo_score: Optional[float] = None
+    geo_score_direction: Optional[str] = None
     geo_failure_reason: Optional[str] = None
     
     def __post_init__(self) -> None:
@@ -94,11 +102,19 @@ class GeometryEvidence:
             )
 
         _validate_optional_str(self.anchor_digest, "anchor_digest")
+        _validate_optional_str(self.anchor_config_digest, "anchor_config_digest")
         _validate_optional_mapping(self.anchor_metrics, "anchor_metrics")
+        _validate_optional_mapping(self.stability_metrics, "stability_metrics")
+        _validate_optional_mapping(self.resolution_binding, "resolution_binding")
         _validate_optional_str(self.sync_digest, "sync_digest")
         _validate_optional_mapping(self.sync_metrics, "sync_metrics")
+        _validate_optional_str(self.sync_config_digest, "sync_config_digest")
+        _validate_optional_mapping(self.sync_quality_metrics, "sync_quality_metrics")
         _validate_optional_str(self.align_trace_digest, "align_trace_digest")
+        _validate_optional_mapping(self.align_metrics, "align_metrics")
+        _validate_optional_str(self.align_config_digest, "align_config_digest")
         _validate_optional_number(self.geo_score, "geo_score")
+        _validate_optional_str(self.geo_score_direction, "geo_score_direction")
         _validate_optional_str(self.geo_failure_reason, "geo_failure_reason")
 
     def as_dict(self) -> Dict[str, Any]:
@@ -121,11 +137,19 @@ class GeometryEvidence:
             "score": self.score,
             "audit": self.audit,
             "anchor_digest": self.anchor_digest,
+            "anchor_config_digest": self.anchor_config_digest,
             "anchor_metrics": self.anchor_metrics,
+            "stability_metrics": self.stability_metrics,
+            "resolution_binding": self.resolution_binding,
             "sync_digest": self.sync_digest,
             "sync_metrics": self.sync_metrics,
+            "sync_config_digest": self.sync_config_digest,
+            "sync_quality_metrics": self.sync_quality_metrics,
             "align_trace_digest": self.align_trace_digest,
+            "align_metrics": self.align_metrics,
+            "align_config_digest": self.align_config_digest,
             "geo_score": self.geo_score,
+            "geo_score_direction": self.geo_score_direction,
             "geo_failure_reason": self.geo_failure_reason
         }
         _validate_json_like(result, "geometry_evidence")

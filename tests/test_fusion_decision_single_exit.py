@@ -104,7 +104,8 @@ def _build_minimal_cfg() -> Dict[str, Any]:
         },
         "evaluate": {
             "target_fpr": 1e-6
-        }
+        },
+        "allow_threshold_fallback_for_tests": True,
     }
 
 

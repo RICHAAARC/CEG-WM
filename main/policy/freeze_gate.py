@@ -1703,7 +1703,11 @@ def _validate_statistical_fields(
     if "threshold_metadata_digest" in required_fields or "threshold_metadata_digest" in record:
         from main.watermarking.fusion import neyman_pearson
 
-        threshold_metadata = neyman_pearson.build_threshold_metadata(thresholds_spec)
+        threshold_metadata_artifact = record.get("threshold_metadata_artifact")
+        if isinstance(threshold_metadata_artifact, dict):
+            threshold_metadata = threshold_metadata_artifact
+        else:
+            threshold_metadata = neyman_pearson.build_threshold_metadata(thresholds_spec)
         threshold_metadata_digest = neyman_pearson.compute_threshold_metadata_digest(threshold_metadata)
         record_metadata_digest = record.get("threshold_metadata_digest")
         if not isinstance(record_metadata_digest, str) or not record_metadata_digest:

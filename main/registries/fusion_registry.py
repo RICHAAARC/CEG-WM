@@ -13,6 +13,7 @@ from typing import Any, Dict
 
 from main.core import digests
 from main.watermarking.fusion import neyman_pearson
+from main.watermarking.fusion.decision import NeumanPearsonFusionRule
 from main.watermarking.fusion.interfaces import FusionDecision
 
 from .registry_base import FactoryType, RegistryBase
@@ -252,6 +253,43 @@ def _build_fusion_baseline_identity(cfg: Dict[str, Any]) -> FusionBaselineIdenti
 _FUSION_REGISTRY.register_factory(
     FUSION_BASELINE_IDENTITY_ID,
     _build_fusion_baseline_identity,
+    capabilities=ImplCapabilities(
+        supports_batching=False,
+        requires_cuda=False,
+        supports_deterministic=True,
+        max_resolution=None,
+        supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
+    )
+)
+
+
+def _build_fusion_neyman_pearson(cfg: Dict[str, Any]) -> NeumanPearsonFusionRule:
+    """
+    功能：构造融合规则 S-10 真实实现。
+
+    Build Neyman-Pearson fusion rule with NP primary + geometry auxiliary.
+
+    Args:
+        cfg: Config mapping.
+
+    Returns:
+        NeumanPearsonFusionRule instance.
+
+    Raises:
+        TypeError: If cfg is not dict.
+    """
+    if not isinstance(cfg, dict):
+        # cfg 类型不合法，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+    impl_version = "v1"
+    impl_id = "fusion_neyman_pearson_v1"
+    impl_digest = _derive_impl_digest(impl_id, impl_version)
+    return NeumanPearsonFusionRule(impl_id, impl_version, impl_digest)
+
+
+_FUSION_REGISTRY.register_factory(
+    "fusion_neyman_pearson_v1",
+    _build_fusion_neyman_pearson,
     capabilities=ImplCapabilities(
         supports_batching=False,
         requires_cuda=False,

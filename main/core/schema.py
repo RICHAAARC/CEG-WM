@@ -45,12 +45,18 @@ _FALLBACK_OPTIONAL_STR_FIELDS = [
     "content_evidence.hf_trace_digest",
     "content_evidence.content_failure_reason",
     "geometry_evidence.anchor_digest",
+    "geometry_evidence.anchor_config_digest",
     "geometry_evidence.sync_digest",
+    "geometry_evidence.sync_config_digest",
     "geometry_evidence.align_trace_digest",
+    "geometry_evidence.align_config_digest",
+    "geometry_evidence.geo_score_direction",
     "geometry_evidence.geo_failure_reason",
     "decision.fusion_rule_version",
     "decision.used_threshold_id",
-    "decision.routing_digest"
+    "decision.routing_digest",
+    "decision.fusion_rule_digest",
+    "decision.rescue_band_version"
 ]
 
 _FALLBACK_OPTIONAL_NUMBER_FIELDS = [
@@ -63,7 +69,11 @@ _FALLBACK_OPTIONAL_MAPPING_FIELDS = [
     "content_evidence.mask_stats",
     "content_evidence.score_parts",
     "geometry_evidence.anchor_metrics",
+    "geometry_evidence.stability_metrics",
+    "geometry_evidence.resolution_binding",
     "geometry_evidence.sync_metrics",
+    "geometry_evidence.sync_quality_metrics",
+    "geometry_evidence.align_metrics",
     "decision.routing_decisions",
     "decision.conditional_fpr_notes"
 ]
@@ -1520,7 +1530,11 @@ def ensure_required_fields(
             thresholds_spec = build_thresholds_spec(cfg)
         from main.watermarking.fusion import neyman_pearson
 
-        threshold_metadata = neyman_pearson.build_threshold_metadata(thresholds_spec)
+        threshold_metadata_artifact = record.get("threshold_metadata_artifact")
+        if isinstance(threshold_metadata_artifact, dict):
+            threshold_metadata = threshold_metadata_artifact
+        else:
+            threshold_metadata = neyman_pearson.build_threshold_metadata(thresholds_spec)
         threshold_metadata_digest = neyman_pearson.compute_threshold_metadata_digest(threshold_metadata)
         if "threshold_metadata_digest" in record:
             existing_digest = record.get("threshold_metadata_digest")

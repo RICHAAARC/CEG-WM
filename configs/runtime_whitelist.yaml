@@ -180,6 +180,9 @@ impl_id:
     - "content_detector_v1"  # 统一内容检测器
     - "unified_content_extractor_v1"  # Embed + Detect 双模式
     - "geometry_baseline_identity_v1"
+    - "geometry_attention_anchor_sd3_v1"
+    - "geometry_latent_sync_sd3_v1"
+    - "geometry_align_invariance_sd3_v1"
     - "fusion_baseline_identity_v1"
     - "subspace_baseline_full_v1"
     - "subspace_planner_v1"
@@ -250,12 +253,36 @@ impl_id:
       # - 用于测试几何链路与 fallback / abstain 语义。
       - "geometry_baseline_identity_v1"
 
+      # 几何注意力锚点实现（S-7）：
+      # - 仅支持 SD3 transformer token 关系摘要。
+      # - 输出 anchor_digest、stability_metrics、resolution_binding。
+      # - 不写原始 attention / token 高维数据到 records。
+      - "geometry_attention_anchor_sd3_v1"
+
+      # 几何 latent 同步模板实现（S-8）：
+      # - 基于 latent 频域摘要生成 sync_digest 与同步质量指标。
+      # - 输出量化同步初值，不写原始 latent 或可逆高维信息。
+      - "geometry_latent_sync_sd3_v1"
+
+      # 几何对齐与不变性评分实现（S-9）：
+      # - 聚合 anchor + sync 证据，输出 align_trace_digest 与 geo_score。
+      # - 不写原始坐标、不写完整匹配点列表、不写可逆高维参数。
+      - "geometry_align_invariance_sd3_v1"
+
     fusion_rule:
       # 融合规则占位实现：
       # - 采用恒等映射或固定规则。
       # - 不引入统计权重或真实阈值比较。
       # - 用于验证 policy_path 与 decision 流程。
       - "fusion_baseline_identity_v1"
+
+      # 融合规则 S-10 真实实现（Neyman-Pearson 主控 + 几何辅助）：
+      # - NP 阈值主链控制，从 thresholds_digest 只读选择阈值（禁止重估）。
+      # - 几何证据作为辅助：仅在 content 分数边界附近（rescue band）通过几何门控提供增益。
+      # - 唯一决策出口，返回 FusionDecision with is_watermarked ∈ {bool, None}。
+      # - 计算 fusion_rule_digest，记录 rescue_band_version、geo_gate_applied 等审计信息。
+      # - 失败语义：无融合输入或失败时返回 decision_status ∈ {"abstain", "error"}。
+      - "fusion_neyman_pearson_v1"
 
     subspace_planner:
       # 子空间规划占位实现：

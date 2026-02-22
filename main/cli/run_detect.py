@@ -313,6 +313,7 @@ def run_detect(
         # 这些 latents 不会被写入 records，只在内存中处理。
         if final_latents is not None:
             cfg["__detect_final_latents__"] = final_latents
+        cfg["__detect_pipeline_obj__"] = pipeline_obj
         
         # 构造 infer_trace 并计算 digest
         infer_trace_obj = infer_trace.build_infer_trace(

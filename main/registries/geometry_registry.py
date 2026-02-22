@@ -11,12 +11,18 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from main.core import digests
+from main.watermarking.geometry_chain.align_invariance_extractor import GeometryAlignInvarianceExtractor
+from main.watermarking.geometry_chain.attention_anchor_extractor import AttentionAnchorExtractor
+from main.watermarking.geometry_chain.sync.latent_sync_template import LatentSyncGeometryExtractor
 
 from .registry_base import FactoryType, RegistryBase
 from .capabilities import ImplCapabilities
 
 
 GEOMETRY_BASELINE_IDENTITY_ID = "geometry_baseline_identity_v1"
+GEOMETRY_ATTENTION_ANCHOR_SD3_ID = "geometry_attention_anchor_sd3_v1"
+GEOMETRY_LATENT_SYNC_SD3_ID = "geometry_latent_sync_sd3_v1"
+GEOMETRY_ALIGN_INVARIANCE_SD3_ID = "geometry_align_invariance_sd3_v1"
 SYNC_BASELINE_ID = "geometry_sync_baseline_v1"
 
 
@@ -188,6 +194,75 @@ def _build_geometry_baseline_identity(cfg: Dict[str, Any]) -> GeometryBaselineId
     return GeometryBaselineIdentity(GEOMETRY_BASELINE_IDENTITY_ID, impl_version, impl_digest)
 
 
+def _build_geometry_attention_anchor_sd3(cfg: Dict[str, Any]) -> AttentionAnchorExtractor:
+    """
+    功能：构造 SD3 attention 锚点提取实现。
+
+    Build SD3 transformer attention anchor extractor.
+
+    Args:
+        cfg: Config mapping.
+
+    Returns:
+        AttentionAnchorExtractor instance.
+
+    Raises:
+        TypeError: If cfg is not dict.
+    """
+    if not isinstance(cfg, dict):
+        # cfg 类型不合法，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+    impl_version = "v1"
+    impl_digest = _derive_impl_digest(GEOMETRY_ATTENTION_ANCHOR_SD3_ID, impl_version)
+    return AttentionAnchorExtractor(GEOMETRY_ATTENTION_ANCHOR_SD3_ID, impl_version, impl_digest)
+
+
+def _build_geometry_latent_sync_sd3(cfg: Dict[str, Any]) -> LatentSyncGeometryExtractor:
+    """
+    功能：构造 SD3 latent 同步模板几何实现。
+
+    Build SD3 latent sync geometry extractor.
+
+    Args:
+        cfg: Config mapping.
+
+    Returns:
+        LatentSyncGeometryExtractor instance.
+
+    Raises:
+        TypeError: If cfg is not dict.
+    """
+    if not isinstance(cfg, dict):
+        # cfg 类型不合法，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+    impl_version = "v1"
+    impl_digest = _derive_impl_digest(GEOMETRY_LATENT_SYNC_SD3_ID, impl_version)
+    return LatentSyncGeometryExtractor(GEOMETRY_LATENT_SYNC_SD3_ID, impl_version, impl_digest)
+
+
+def _build_geometry_align_invariance_sd3(cfg: Dict[str, Any]) -> GeometryAlignInvarianceExtractor:
+    """
+    功能：构造 SD3 几何对齐与不变性评分实现。
+
+    Build SD3 geometry align-and-invariance extractor.
+
+    Args:
+        cfg: Config mapping.
+
+    Returns:
+        GeometryAlignInvarianceExtractor instance.
+
+    Raises:
+        TypeError: If cfg is not dict.
+    """
+    if not isinstance(cfg, dict):
+        # cfg 类型不合法，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+    impl_version = "v2"
+    impl_digest = _derive_impl_digest(GEOMETRY_ALIGN_INVARIANCE_SD3_ID, impl_version)
+    return GeometryAlignInvarianceExtractor(GEOMETRY_ALIGN_INVARIANCE_SD3_ID, impl_version, impl_digest)
+
+
 def _build_sync_baseline(cfg: Dict[str, Any]) -> SyncBaseline:
     """
     功能：构造同步基线实现。
@@ -214,6 +289,39 @@ def _build_sync_baseline(cfg: Dict[str, Any]) -> SyncBaseline:
 _GEOMETRY_REGISTRY.register_factory(
     GEOMETRY_BASELINE_IDENTITY_ID,
     _build_geometry_baseline_identity,
+    capabilities=ImplCapabilities(
+        supports_batching=False,
+        requires_cuda=False,
+        supports_deterministic=True,
+        max_resolution=None,
+        supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
+    )
+)
+_GEOMETRY_REGISTRY.register_factory(
+    GEOMETRY_ATTENTION_ANCHOR_SD3_ID,
+    _build_geometry_attention_anchor_sd3,
+    capabilities=ImplCapabilities(
+        supports_batching=False,
+        requires_cuda=False,
+        supports_deterministic=True,
+        max_resolution=None,
+        supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
+    )
+)
+_GEOMETRY_REGISTRY.register_factory(
+    GEOMETRY_LATENT_SYNC_SD3_ID,
+    _build_geometry_latent_sync_sd3,
+    capabilities=ImplCapabilities(
+        supports_batching=False,
+        requires_cuda=False,
+        supports_deterministic=True,
+        max_resolution=None,
+        supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
+    )
+)
+_GEOMETRY_REGISTRY.register_factory(
+    GEOMETRY_ALIGN_INVARIANCE_SD3_ID,
+    _build_geometry_align_invariance_sd3,
     capabilities=ImplCapabilities(
         supports_batching=False,
         requires_cuda=False,
