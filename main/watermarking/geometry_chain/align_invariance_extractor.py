@@ -6,13 +6,23 @@ Module type: General module
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
 from main.core import digests
 from main.watermarking.geometry_chain.attention_anchor_extractor import AttentionAnchorExtractor
 from main.watermarking.geometry_chain.sync.latent_sync_template import LatentSyncGeometryExtractor
+
+
+GEO_AVAILABILITY_RULE_VERSION = "geo_availability_rule_v1"
+
+GEO_UNAVAILABILITY_REASONS = {
+    "geo_fit_not_converged",
+    "geo_param_uncertainty_high",
+    "geo_inlier_ratio_low",
+    "geo_residual_stats_anomaly",
+}
 
 
 @dataclass(frozen=True)
@@ -1071,6 +1081,13 @@ class GeometryAlignInvarianceExtractor:
             attention_consistency = self._compute_attention_consistency(anchor_evidence, sync_evidence, align_metrics)
             align_metrics["attention_consistency"] = round(_clamp01(attention_consistency), 6)
 
+        # (新增) 判定几何可用性：基于参数不确定性与拟合质量
+        geo_available, geo_unavailability_reason = self._decide_geo_available(
+            transform_result=transform_result,
+            align_metrics=align_metrics,
+            cfg=cfg
+        )
+
         trace_payload = {
             "align_trace_version": "geometry_align_trace_v1",
             "align_config_digest": align_config_digest,
@@ -1108,6 +1125,9 @@ class GeometryAlignInvarianceExtractor:
             geo_score_direction=str(score_result.get("geo_score_direction", "higher_is_stronger")),
             align_config_digest=align_config_digest,
             score_digest=score_digest,
+            geo_available=geo_available,
+            geo_availability_rule_version=GEO_AVAILABILITY_RULE_VERSION,
+            geo_unavailability_reason=geo_unavailability_reason,
         )
 
     def _build_absent_evidence(
@@ -1142,6 +1162,9 @@ class GeometryAlignInvarianceExtractor:
         geo_score_direction: str | None,
         align_config_digest: str | None,
         score_digest: str | None,
+        geo_available: bool | None = None,
+        geo_availability_rule_version: str | None = None,
+        geo_unavailability_reason: str | None = None,
     ) -> Dict[str, Any]:
         anchor_data = anchor_evidence if isinstance(anchor_evidence, dict) else {}
         sync_data = sync_evidence if isinstance(sync_evidence, dict) else {}
@@ -1154,7 +1177,7 @@ class GeometryAlignInvarianceExtractor:
             "score_digest": score_digest,
         }
         trace_digest = digests.canonical_sha256(trace_payload)
-        return {
+        evidence = {
             "status": status,
             "geo_score": geo_score,
             "geo_score_direction": geo_score_direction,
@@ -1186,6 +1209,14 @@ class GeometryAlignInvarianceExtractor:
                 "score_digest": score_digest,
             },
         }
+        # (新增) 几何可用性字段（仅在 status="ok" 时添加）
+        if geo_available is not None:
+            evidence["geo_available"] = geo_available
+        if geo_availability_rule_version is not None:
+            evidence["geo_availability_rule_version"] = geo_availability_rule_version
+        if geo_unavailability_reason is not None:
+            evidence["geo_unavailability_reason"] = geo_unavailability_reason
+        return evidence
 
     def _resolve_precheck_status(self, anchor_data: Dict[str, Any], sync_data: Dict[str, Any]) -> tuple[str, str | None]:
         anchor_status = str(anchor_data.get("status", "absent"))
@@ -1219,6 +1250,65 @@ class GeometryAlignInvarianceExtractor:
             if anchor_binding.get(key) != sync_binding.get(key):
                 return True
         return False
+
+    def _decide_geo_available(
+        self,
+        transform_result: Dict[str, Any],
+        align_metrics: Dict[str, Any],
+        cfg: Dict[str, Any]
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        功能：根据参数不确定性与拟合质量判定几何是否可用。
+
+        Decide whether geometry evidence is available based on parameter uncertainty and fit stability.
+
+        Args:
+            transform_result: Transform fitting result with fit_stability and fit_diagnostics.
+            align_metrics: Alignment metrics computed from fit result.
+            cfg: Configuration mapping.
+
+        Returns:
+            Tuple of (geo_available: bool, unavailability_reason: Optional[str]).
+            If geo_available=True, unavailability_reason=None.
+            If geo_available=False, unavailability_reason is one of GEO_UNAVAILABILITY_REASONS.
+
+        Raises:
+            TypeError: If argument types are invalid.
+        """
+        if not isinstance(transform_result, dict):
+            raise TypeError("transform_result must be dict")
+        if not isinstance(align_metrics, dict):
+            raise TypeError("align_metrics must be dict")
+        if not isinstance(cfg, dict):
+            raise TypeError("cfg must be dict")
+
+        geo_cfg = cfg.get("detect", {}).get("geometry", {})
+
+        # (1) 检查拟合收敛：若未收敛，则几何不可用
+        fit_diagnostics = transform_result.get("fit_diagnostics", {})
+        if not bool(transform_result.get("align_success", False)):
+            return False, "geo_fit_not_converged"
+
+        # (2) 检查参数不确定性：若 param_variance_norm 过高，则参数不稳定
+        max_param_variance = float(geo_cfg.get("max_param_variance_for_geo_available", 0.15))
+        param_variance_norm = float(align_metrics.get("param_variance_norm", 1.0))
+        if param_variance_norm > max_param_variance:
+            return False, "geo_param_uncertainty_high"
+
+        # (3) 检查内点比例：若过低，则对应点噪声过高
+        min_inlier_ratio = float(geo_cfg.get("min_inlier_ratio_for_geo_available", 0.5))
+        inlier_ratio = float(align_metrics.get("inlier_ratio", 0.0))
+        if inlier_ratio < min_inlier_ratio:
+            return False, "geo_inlier_ratio_low"
+
+        # (4) 检查残差统计：若 MAD（中位绝对偏差）过高，则数据离散异常
+        max_residual_mad = float(geo_cfg.get("max_residual_mad_for_geo_available", 0.08))
+        residual_mad = float(align_metrics.get("residual_mad", 1.0))
+        if residual_mad > max_residual_mad:
+            return False, "geo_residual_stats_anomaly"
+
+        # 所有检查都通过，几何可用
+        return True, None
 
     def _resolve_enable_align_invariance(self, cfg: Dict[str, Any]) -> bool:
         detect_cfg = cfg.get("detect")

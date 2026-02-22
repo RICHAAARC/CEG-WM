@@ -1,0 +1,42 @@
+# ==============================================================
+# Attack protocol fact source
+# - append-only versioned evaluation attack configuration.
+# ==============================================================
+version: "attack_protocol_v1"
+
+family_field_candidates:
+  - "attack.family"
+  - "attack_family"
+  - "attack.type"
+
+params_version_field_candidates:
+  - "attack.params_version"
+  - "attack_params_version"
+
+families:
+  rotate:
+    description: "rotation attacks"
+    params_versions:
+      v1:
+        degrees: [5, 10, 15]
+  resize:
+    description: "resize attacks"
+    params_versions:
+      v1:
+        scale_factors: [0.75, 0.9, 1.1]
+  crop:
+    description: "crop attacks"
+    params_versions:
+      v1:
+        crop_ratios: [0.9, 0.8, 0.7]
+
+params_versions:
+  rotate::v1:
+    family: "rotate"
+    params: {degrees: [5, 10, 15]}
+  resize::v1:
+    family: "resize"
+    params: {scale_factors: [0.75, 0.9, 1.1]}
+  crop::v1:
+    family: "crop"
+    params: {crop_ratios: [0.9, 0.8, 0.7]}

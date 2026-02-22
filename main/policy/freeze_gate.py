@@ -584,8 +584,7 @@ def enforce_recommended_requirements(
     功能：执行 recommended_enforce 项检查。
 
     Execute recommendations from gate_enforcement_requirements with enforcement="recommended_enforce".
-    This phase checks recommendations but does NOT fail; it documents findings for audit.
-
+    
     Args:
         record: Record dict to check.
         interpretation: Parsed contract interpretation.

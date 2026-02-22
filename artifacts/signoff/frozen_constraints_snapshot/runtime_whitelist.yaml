@@ -1,0 +1,427 @@
+# ==============================================================
+# 运行期白名单
+#   本文件定义“运行期允许集合”，用于门禁收口。
+#   - 限制 policy_path 只能取允许集合中的值。
+#   - 限制 registry/impl_id/decoder_type/method/feature 等枚举，只能取允许集合中的值。
+#   - 限制 CLI override 只能覆写允许字段，且可选地限制取值域。
+#   - 为 freeze_gate 提供 whitelist_version 与 whitelist_digest 的可审计锚点。
+#   - 本文件不冻结 records 语义、失败语义、digest 口径。
+#   - 本文件不定义 policy_path 的语义映射。
+# ==============================================================
+
+# ------------------------------
+# 白名单版本：用于 records 记录与审计。
+# ------------------------------
+whitelist_version: "v1.0"    # 运行期白名单版本号：任意一次运行必须记录到 records 中，且不可由 CLI 任意指定。
+
+# ==============================================================
+# policy_path 允许集合
+#   - 限制“融合策略路径”的取值域，避免出现未定义/未审计的策略组合。
+#   - 与 policy_path_semantics.yaml 形成闭合关系。
+#      - runtime_whitelist.yaml 中 allowed 的每个 policy_path。
+#      - 必须在 policy_path_semantics.yaml 中存在同名语义定义。
+# ==============================================================
+policy_path:
+  allowed:
+    # 基础单链策略。
+    - "content_only"         # 仅内容链。
+
+    # 显式组合策略。
+    # 几何作为 gate 或可选证据。
+    - "content_with_geometry_gate"          # 内容为主，几何门控。
+    - "content_fallback_no_geometry"        # 几何失败或未启用时的回退。
+
+    # 强拒绝/弃权策略：内容链失败即 abstain，用于严格审计、压低 FPR。
+    - "content_failed_abstain"
+
+# ==============================================================
+# CLI/运行期覆写允许集合
+#   - 明确哪些字段允许被 CLI 覆写，或者由运行期参数覆盖 cfg。
+#   - frozen_contracts 冻结“覆写机制与范围”。
+#   - runtime_whitelist 明确“允许覆写的字段路径集合”与可选取值域。
+#   - 覆写动作必须写入 records.override_applied 审计段，由 override_rules.py 统一生成。
+# ==============================================================
+override:
+  # CLI 参数到字段路径的映射规则。
+  # 语义约束（override_mode）冻结在 frozen_contracts.yaml，运行期允许集合在此。
+  allowed_overrides:
+    - arg_name: "enable_geometry"
+      field_path: "detect.geometry.enabled"
+      override_mode: "set"
+      set_value: true
+      source: "cli"
+    - arg_name: "disable_geometry"
+      field_path: "detect.geometry.enabled"
+      override_mode: "set"
+      set_value: false
+      source: "cli"
+    - arg_name: "run_root_reuse_allowed"
+      field_path: "allow_nonempty_run_root"
+      override_mode: "set"
+      source: "cli"
+    - arg_name: "run_root_reuse_reason"
+      field_path: "allow_nonempty_run_root_reason"
+      override_mode: "set"
+      source: "cli"
+    - arg_name: "force_cpu"
+      field_path: "device"
+      override_mode: "set"
+      set_value: "cpu"
+      source: "cli"
+      description: "CPU 优先闭环验证：强制设备为 CPU，用于审计与可复现性验证"
+    - arg_name: "enable_paper_faithfulness"
+      field_path: "paper_faithfulness.enabled"
+      override_mode: "set"
+      set_value: true
+      source: "cli"
+      description: "启用纸质对齐验证：启用 paper_faithfulness 模式、pipeline fingerprint 与 trajectory tap 必达"
+    - arg_name: "enable_trace_tap"
+      field_path: "trajectory_tap.enabled"
+      override_mode: "set"
+      set_value: true
+      source: "cli"
+      description: "启用轨迹采样：启用 trajectory tap 以产出可复算的轨迹摘要"
+    - arg_name: "test_mode_identity"
+      field_path: "embed.test_mode_identity"
+      override_mode: "set"
+      source: "cli"
+      description: "测试模式基线检验：启用 identity 模式后 content/geometry 使用基线实现"
+
+  # 覆写 source 的枚举白名单（gate 必须校验）
+  source_enum:
+    allowed:
+      - "cli"
+    immutable: true
+    notes: "当前 Phase 仅支持 CLI 覆写，未来可扩展其他来源。"
+
+  # 覆写 arg_name 的枚举白名单（gate 必须校验）
+  arg_name_enum:
+    allowed:
+      - "enable_geometry"
+      - "disable_geometry"
+      - "run_root_reuse_allowed"
+      - "run_root_reuse_reason"
+      - "force_cpu"
+      - "enable_paper_faithfulness"
+      - "enable_trace_tap"
+      - "test_mode_identity"
+    immutable: true
+    notes: "必须与 allowed_overrides[*].arg_name 的值集完全一致。新增 override 必须同步更新此枚举。"
+
+  # 一致性校验要求（gate 必须实现）
+  consistency_check:
+    arg_name_no_duplicates: true
+    field_path_authorized: true
+    override_applied_audit_required: true
+
+# ==============================================================
+# 运行期枚举允许集合
+#   - 将若干关键枚举的允许值显式化为 allowlist，供 schema/records 校验与门禁使用。
+#   - 这些枚举本质上是“运行期选择集合”，未来真实方法注入时常需要扩展。
+#   - frozen_contracts 冻结“必须集中定义与必须验证”的机制。
+#   - runtime_whitelist 给出“当前允许集合”，便于 gate 与审计脚本在无代码依赖下校验。
+# ==============================================================
+enums:
+
+  # decoder_type：检测/融合端选择的解码器类型。
+  decoder_type:
+    allowed:
+      - "content_correlation"
+      - "geometry_correlation"
+      - "fusion_neyman_pearson"
+
+  # detect_method：检测方法类别。
+  detect_method:
+    allowed:
+      - "content_correlation"
+      - "geometry_correlation"
+
+  # detect_feature：检测所用特征域。
+  detect_feature:
+    allowed:
+      - "vae_latent_z"
+      - "pixel_space"
+      - "init_latent_diff"
+
+  # pattern_type：pattern 生成类型。
+  pattern_type:
+    allowed:
+      - "gaussian_iid"
+      - "gaussian_iid_v1"
+      - "rademacher"
+
+  # subspace_method：子空间规划相关枚举，表示“如何选子空间”。
+  subspace_method:
+    allowed:
+      - "absent"
+      - "grid_blocks"
+      - "random_blocks"
+  # subspace_source：子空间规划相关枚举，表示“子空间来自哪里”。
+  subspace_source:
+    allowed:
+      - "absent"
+      - "planner_computed"
+      - "cfg_preset"
+
+# ==============================================================
+# impl_id allowlist
+#   - 真实方法注入将通过 impl_id 扩展。
+#   - 注入真实方法时，仅扩展此处 allowed_by_domain，不修改 frozen_contracts.yaml。
+# ==============================================================
+impl_id:
+
+  # 运行期 gate 判定使用扁平化集合，语义分组仅用于审计展示。
+  allowed_flat:
+    - "content_baseline_identity_v1"
+    - "semantic_mask_provider_v1"
+    - "low_freq_coder_v1"
+    - "high_freq_coder_v1"
+    - "unified_latent_modifier_v1"
+    - "content_detector_v1"  # 统一内容检测器
+    - "unified_content_extractor_v1"  # Embed + Detect 双模式
+    - "geometry_baseline_identity_v1"
+    - "geometry_attention_anchor_sd3_v1"
+    - "geometry_latent_sync_sd3_v1"
+    - "geometry_align_invariance_sd3_v1"
+    - "fusion_baseline_identity_v1"
+    - "subspace_baseline_full_v1"
+    - "subspace_planner_v1"
+    - "geometry_sync_baseline_v1"
+    # Paper Faithfulness 模块 impl_id（append-only v1.0）
+    - "sd3_pipeline_inspector_v1"
+    - "sd3_diffusion_tracer_v1"
+    - "injection_site_binder_v1"
+    - "paper_alignment_evaluator_v1"
+
+  allowed_by_domain:
+
+    content_extractor:
+      # 内容证据链基线实现：
+      # - 不注入任何真实水印信号。
+      # - 可返回空证据或固定格式的基线统计量。
+      # - 仅用于验证框架闭环与审计链路。
+      - "content_baseline_identity_v1"
+      
+      # 语义掩码提供器：
+      # - 从输入图像或 latent 中提取语义掩码。
+      # - 支持 enable_mask 配置参数控制启用/禁用。
+      # - 生成可复算的掩码摘要与分辨率绑定。
+      # - 用于 content_evidence 中的 mask_digest、mask_stats 字段。
+      - "semantic_mask_provider_v1"
+
+      # 低频水印编码器：
+      # - 在 LF（低频）子空间施加隐蔽编码，作为主通道。
+      # - 支持 enable_lf 配置参数控制启用/禁用。
+      # - 生成可复算的 lf_trace_digest，绑定计划与编码参数。
+      # - 输出 lf_score，方向性固定（高值表示强证据）。
+      # - 严格区分 absent/failed/mismatch 语义。
+      - "low_freq_coder_v1"
+
+      # 高频水印鲁棒化器：
+      # - 在 HF（高频）子空间施加鲁棒约束与尾部截断。
+      # - 支持 enable_hf 配置参数控制启用/禁用。
+      # - 与 LF 通道正交，HF 失败不影响 LF 分数。
+      # - 生成可复算的 hf_trace_digest，绑定计划与约束参数。
+      # - 输出 hf_score，方向性固定（高值表示强证据）。
+      - "high_freq_coder_v1"
+
+      # 统一 latent 修改器：
+      # - 在 SD3 推理循环中协调 LF/HF 子空间修改。
+      # - 通过 callback_on_step_end hook 与 diffusers 集成。
+      # - 生成 step 级证据用于最终摘要计算。
+      # - 仅改 latent 张量，不写原始张量到 records。
+      - "unified_latent_modifier_v1"
+
+      # 内容检测器：
+      # - 统一从 LF/HF 子空间检测水印，输出融合得分。
+      # - 严格校验 plan_digest 一致性，不一致时返回 mismatch。
+      # - 输出 content_score、score_parts（lf_score/hf_score）。
+      # - 失败时 score=None，content_failure_reason 单一主因上报。
+      - "content_detector_v1"
+
+      # 统一内容提取器：
+      # - 根据 detect.content.enabled 自动切换 Embed/Detect 模式。
+      # - Embed 模式：调用 SemanticMaskProvider 提取 mask_digest。
+      # - Detect 模式：调用 ContentDetector 执行 LF/HF 检测。
+      # - 保持 embed/detect 使用同一 impl_id 的简洁性。
+      - "unified_content_extractor_v1"
+
+    geometry_extractor:
+      # 几何证据链占位实现：
+      # - 不生成几何指纹。
+      # - 可返回 canonical 状态或空几何证据。
+      # - 用于测试几何链路与 fallback / abstain 语义。
+      - "geometry_baseline_identity_v1"
+
+      # 几何注意力锚点实现（S-7）：
+      # - 仅支持 SD3 transformer token 关系摘要。
+      # - 输出 anchor_digest、stability_metrics、resolution_binding。
+      # - 不写原始 attention / token 高维数据到 records。
+      - "geometry_attention_anchor_sd3_v1"
+
+      # 几何 latent 同步模板实现（S-8）：
+      # - 基于 latent 频域摘要生成 sync_digest 与同步质量指标。
+      # - 输出量化同步初值，不写原始 latent 或可逆高维信息。
+      - "geometry_latent_sync_sd3_v1"
+
+      # 几何对齐与不变性评分实现（S-9）：
+      # - 聚合 anchor + sync 证据，输出 align_trace_digest 与 geo_score。
+      # - 不写原始坐标、不写完整匹配点列表、不写可逆高维参数。
+      - "geometry_align_invariance_sd3_v1"
+
+    fusion_rule:
+      # 融合规则占位实现：
+      # - 采用恒等映射或固定规则。
+      # - 不引入统计权重或真实阈值比较。
+      # - 用于验证 policy_path 与 decision 流程。
+      - "fusion_baseline_identity_v1"
+
+      # 融合规则 S-10 真实实现（Neyman-Pearson 主控 + 几何辅助）：
+      # - NP 阈值主链控制，从 thresholds_digest 只读选择阈值（禁止重估）。
+      # - 几何证据作为辅助：仅在 content 分数边界附近（rescue band）通过几何门控提供增益。
+      # - 唯一决策出口，返回 FusionDecision with is_watermarked ∈ {bool, None}。
+      # - 计算 fusion_rule_digest，记录 rescue_band_version、geo_gate_applied 等审计信息。
+      # - 失败语义：无融合输入或失败时返回 decision_status ∈ {"abstain", "error"}。
+      - "fusion_neyman_pearson_v1"
+
+    subspace_planner:
+      # 子空间规划占位实现：
+      # - 不进行真实子空间选择。
+      # - 可返回 full-space / None / 预定义空 frame。
+      # - 用于固化 subspace_frame 的审计语义。
+      - "subspace_baseline_full_v1"
+      
+      # 子空间规划器真实实现：
+      # - 执行低维子空间估计并输出摘要化 subspace_spec。
+      # - 计算可复算的 plan_digest/basis_digest，绑定 mask_digest、cfg_digest 与 impl_identity。
+      # - 规划器禁用或输入缺失时返回 absent，估计失败时返回 failed。
+      # - 支持浅层注入分段（edit_timestep）与掩码子空间定义（mask_shape/w_channel）。
+      # - 支持频域（complex FFT）与时域（spatial）注入方案。
+      # - 支持可选的通道解耦回填策略（enable_channel_refill）。
+      # - 输出完整的 injection_config 与 detection_domain_spec，供检测侧复现。
+      - "subspace_planner_v1"
+
+    sync_module:
+      # 同步模块占位实现：
+      # - 不执行真实同步。
+      # - 可显式返回 success / unavailable 的固定状态。
+      # - 用于测试 geometry gate 与 failure 语义。
+      - "geometry_sync_baseline_v1"
+
+  # 是否允许出现未在 allowed_by_domain 中声明的 domain。
+  # v1 阶段为 false。
+  allow_unknown_domain: false
+
+# ==============================================================
+# 一致性与闭合校验规则
+#   - 强制 runtime_whitelist 与 policy_path_semantics 的键空间闭合。
+#   - 强制 records 必须记录 whitelist_version/whitelist_digest。
+# ==============================================================
+consistency_rules:
+  policy_path_must_exist_in_semantics: true
+  policy_path_semantics_must_be_subset_of_whitelist: false
+  require_semantics_exact_cover: false
+  override_field_paths_source: "override.allowed_overrides[*].field_path"
+  
+  # ---- Whitelist 层必须记录的字段集 ----
+  records_must_include:
+    - "whitelist_version"
+    - "whitelist_digest"
+    - "whitelist_file_sha256"
+    - "whitelist_canon_sha256"
+    - "whitelist_bound_digest"
+
+  # ---- Policy Path Semantics 层必须记录的字段集（新增） ----
+  policy_path_semantics_must_include:
+    - "policy_path_semantics_version"
+    - "policy_path_semantics_digest"
+    - "policy_path_semantics_path"
+    - "policy_path"
+  policy_path_semantics_version_source: "configs/policy_path_semantics.yaml:policy_path_semantics_version"
+  policy_path_semantics_digest_source: "configs/policy_path_semantics.yaml (canonical SHA256)"
+  notes: "这四个字段必须由 freeze_gate 在写盘前一并校验，缺失任何字段均为 fail-fast。"
+
+  # ---- Override 层的枚举校验（新增） ----
+  override_source_validation:
+    rule: "override.allowed_overrides[*].source 必须属于 override.source_enum.allowed"
+    enforcement: "must_enforce"
+    error_code: "whitelist_override_source_not_allowed"
+
+  override_arg_name_validation:
+    rule: "override.allowed_overrides[*].arg_name 必须属于 override.arg_name_enum.allowed"
+    enforcement: "must_enforce"
+    error_code: "whitelist_override_arg_name_not_allowed"
+
+  override_arg_name_no_duplicates:
+    rule: "override.allowed_overrides[*].arg_name 不允许重复，避免歧义"
+    enforcement: "must_enforce"
+    error_code: "whitelist_override_arg_name_duplicated"
+
+  override_applied_audit_required:
+    rule: "任何 override 被触发并应用时，必须在 records 中写入 override_applied 审计段"
+    enforcement: "must_enforce"
+    override_applied_minimum_fields:
+      - "arg_name"
+      - "field_path"
+      - "source"
+      - "override_mode"
+      - "old_value"
+      - "new_value"
+    notes: "这些字段的取值必须与 whitelist 条目一致，且必须能从 records 单独审计出覆写事件。"
+
+  # ---- Policy Path 三方一致性校验（新增） ----
+  policy_path_closed_under_semantics:
+    rule: "policy_path 必须同时满足：(1) 属于 policy_path.allowed；(2) 在 policy_path_semantics.yaml 中存在对应键"
+    enforcement: "must_enforce"
+    error_code: "policy_path_not_closed_under_semantics"
+
+  policy_path_semantics_digest_consistency:
+    rule: "records 中的 policy_path_semantics_digest 必须等于对 policy_path_semantics.yaml 的规范化 digest"
+    enforcement: "must_enforce"
+    error_code: "semantics_digest_mismatch"
+    notes: "使用 frozen_contracts.yaml 定义的 canonical_digest 口径计算。"
+
+  # ---- 强制闭合：policy_path_semantics 中的 record_fail_reason ----
+  policy_path_semantics_record_fail_reason_in_frozen_fail_reason_enum:
+    source_path_pattern: "policy_paths.*.on_chain_failure.*.record_fail_reason"
+    target_values_from: "frozen_contracts.fail_reason_enum.allowed_values"
+    enforcement: "must_enforce"
+    description: "policy_path_semantics.yaml 中所有 record_fail_reason 的取值必须属于 frozen_contracts.yaml 的 fail_reason_enum.allowed_values，确保三份事实源闭合。"
+
+  # 更新 versioning_policy 段（简化结构）
+  versioning_policy:
+    bump_required_if:
+      - "allowed_enum_change"
+      - "policy_path_mapping_change"
+    rollback_policy:
+      allow: "false"
+      reason: "No rollback allowed in v1"
+    forbidden_changes_in_place:
+      - "enums.remove"
+      - "policy_path.remove"
+    audit_required_fields:
+      - "whitelist_version"
+      - "whitelist_bound_digest"
+
+# ==============================================================
+# Pipeline Realization Policy
+#   - 控制真实 pipeline 构建的策略
+#   - 定义允许的 model_source 和相关约束
+# ==============================================================
+pipeline_realization:
+  enabled: true  # 启用真实 pipeline 支持
+  allowed_model_sources:
+    - "hf"       # 允许从 HuggingFace Hub 加载
+    - "hf_hub"   # 允许从 HuggingFace Hub 加载（别名）
+    - "local"    # 允许从本地路径加载
+  hf_revision_required: true  # 要求指定 HF revision
+  weights_snapshot_required: false  # 暂不强制要求 weights snapshot（便于开发调试）
+  allowed_devices:
+    - "cpu"
+    - "cuda"
+    - "mps"
+  allowed_precisions:
+    - "float32"
+    - "float16"
+    - "bfloat16"
+  notes: "启用此策略后，才能使用 sd3_diffusers_real_v1 实现"

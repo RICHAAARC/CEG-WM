@@ -23,6 +23,7 @@ HIGH_FREQ_EMBEDDER_ID = "high_freq_coder_v1"
 HIGH_FREQ_EMBEDDER_VERSION = "v1"
 HIGH_FREQ_EMBEDDER_TRACE_VERSION = "v1"
 CONTENT_SCORE_RULE_VERSION = "content_score_rule_v1"
+HF_FAILURE_RULE_VERSION = "hf_failure_rule_v1"
 
 HF_ABSENT_REASONS = {
     "hf_disabled_by_config",
@@ -34,6 +35,13 @@ HF_FAILURE_REASONS = {
     "hf_plan_mismatch",
     "hf_subspace_missing",
     "hf_detection_failed",
+}
+
+HF_FAILURE_DECISION_REASONS = {
+    "hf_monotonic_degradation",
+    "hf_tail_ratio_anomaly",
+    "hf_truncation_excessive",
+    "hf_energy_drop_insufficient",
 }
 
 
@@ -224,6 +232,17 @@ class HighFreqEmbedder:
                 truncation_ratio=truncation_ratio,
                 truncation_mode=truncation_mode
             )
+            hf_features = self._compute_hf_monotonic_features(
+                sampled_values=sampled_values,
+                truncated_values=truncated_values,
+                threshold_value=threshold_value,
+                evidence_summary=evidence_summary
+            )
+            hf_failure_decision, hf_failure_reason = self._decide_hf_failure(
+                hf_score=hf_score,
+                hf_features=hf_features,
+                cfg=cfg
+            )
             trace_digest = self._derive_hf_trace_digest(
                 plan_digest=plan_digest,
                 cfg_digest=cfg_digest,
@@ -243,6 +262,10 @@ class HighFreqEmbedder:
                 "hf_score": hf_score,
                 "hf_trace_digest": trace_digest,
                 "hf_evidence_summary": evidence_summary,
+                "hf_features": hf_features,
+                "hf_failure_rule_version": HF_FAILURE_RULE_VERSION,
+                "hf_failure_decision": hf_failure_decision,
+                "hf_failure_reason": hf_failure_reason,
                 "plan_digest": plan_digest,
                 "content_score_rule_version": CONTENT_SCORE_RULE_VERSION,
                 "audit": audit,
@@ -404,6 +427,129 @@ class HighFreqEmbedder:
             "summary": summary,
         }
         return digests.canonical_sha256(payload)
+
+    def _compute_hf_monotonic_features(
+        self,
+        sampled_values: List[float],
+        truncated_values: List[float],
+        threshold_value: float,
+        evidence_summary: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        功能：计算 HF 单调性特征（攻击增强时分数单调性）。
+
+        Compute HF monotonic sensitivity features for attack strength estimation.
+
+        Args:
+            sampled_values: Raw sampled HF values before truncation.
+            truncated_values: Values after tail truncation.
+            threshold_value: Truncation threshold (quantile-based).
+            evidence_summary: Pre-computed evidence summary mapping.
+
+        Returns:
+            HF features mapping with attack_strength_index, tail_ratio, truncation_level, hf_energy_drop.
+
+        Raises:
+            TypeError: If argument types are invalid.
+        """
+        if not isinstance(sampled_values, list):
+            raise TypeError("sampled_values must be list")
+        if not isinstance(truncated_values, list):
+            raise TypeError("truncated_values must be list")
+        if not isinstance(evidence_summary, dict):
+            raise TypeError("evidence_summary must be dict")
+
+        # (1) attack_strength_index：基于裁剪后的绝对值能量，反映攻击强度
+        abs_truncated = [abs(v) for v in truncated_values]
+        attack_strength_index = _mean_square(abs_truncated)
+
+        # (2) tail_ratio：尾部被截断的比例（被裁剪为阈值的样本占比）
+        if len(sampled_values) > 0:
+            clipped_count = sum(1 for v in sampled_values if abs(v) > threshold_value)
+            tail_ratio = float(clipped_count) / float(len(sampled_values))
+        else:
+            tail_ratio = 0.0
+
+        # (3) truncation_level：截断阈值相对于原始能量的比例
+        raw_energy = evidence_summary.get("raw_energy", 1.0)
+        if raw_energy <= 0.0:
+            truncation_level = 0.0
+        else:
+            truncation_level = float(threshold_value) / float(raw_energy)
+
+        # (4) hf_energy_drop：截断前后能量下降
+        raw_energy_val = float(evidence_summary.get("raw_energy", 0.0))
+        truncated_energy_val = float(evidence_summary.get("truncated_energy", 0.0))
+        hf_energy_drop = max(0.0, raw_energy_val - truncated_energy_val)
+
+        features = {
+            "attack_strength_index": _round_float(attack_strength_index),
+            "tail_ratio": _round_float(tail_ratio),
+            "truncation_level": _round_float(truncation_level),
+            "hf_energy_drop": _round_float(hf_energy_drop),
+        }
+        features["features_digest"] = digests.canonical_sha256(features)
+        return features
+
+    def _decide_hf_failure(
+        self,
+        hf_score: float,
+        hf_features: Dict[str, Any],
+        cfg: Dict[str, Any]
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        功能：根据 HF 特征与配置判定 HF 失败状态。
+
+        Decide whether HF detection has failed based on monotonic sensitivity and feature thresholds.
+
+        Args:
+            hf_score: Computed HF score.
+            hf_features: HF monotonic features mapping.
+            cfg: Configuration mapping.
+
+        Returns:
+            Tuple of (has_failed: bool, failure_reason: Optional[str]).
+            If has_failed=False, failure_reason=None.
+            If has_failed=True, failure_reason is one of HF_FAILURE_DECISION_REASONS.
+
+        Raises:
+            TypeError: If argument types are invalid.
+        """
+        if not isinstance(hf_score, (int, float)):
+            raise TypeError("hf_score must be numeric")
+        if not isinstance(hf_features, dict):
+            raise TypeError("hf_features must be dict")
+        if not isinstance(cfg, dict):
+            raise TypeError("cfg must be dict")
+
+        hf_cfg = cfg.get("watermark", {}).get("hf", {})
+
+        # (1) 检查单调性降级：若 energy_drop 过小 (< 0.001)，则可能是攻击破坏了 HF
+        min_energy_drop = float(hf_cfg.get("min_energy_drop_for_valid", 0.001))
+        hf_energy_drop = float(hf_features.get("hf_energy_drop", 0.0))
+        if hf_energy_drop < min_energy_drop:
+            return True, "hf_monotonic_degradation"
+
+        # (2) 检查尾部比例异常：若尾部比例过高 (> 0.6)，表示攻击导致极端值增加
+        max_tail_ratio = float(hf_cfg.get("max_tail_ratio_for_valid", 0.6))
+        tail_ratio = float(hf_features.get("tail_ratio", 0.0))
+        if tail_ratio > max_tail_ratio:
+            return True, "hf_tail_ratio_anomaly"
+
+        # (3) 检查截断过度：若 truncation_level 过高 (> 0.8)，表示原始值分布异常
+        max_truncation_level = float(hf_cfg.get("max_truncation_level_for_valid", 0.8))
+        truncation_level = float(hf_features.get("truncation_level", 0.0))
+        if truncation_level > max_truncation_level:
+            return True, "hf_truncation_excessive"
+
+        # (4) 检查能量绝对值不足：若 attack_strength_index < threshold，HF 信号弱
+        min_strength_index = float(hf_cfg.get("min_attack_strength_index", 0.001))
+        attack_strength_index = float(hf_features.get("attack_strength_index", 0.0))
+        if attack_strength_index < min_strength_index:
+            return True, "hf_energy_drop_insufficient"
+
+        # 所有检查都通过，未失败
+        return False, None
 
     def _build_absent_evidence(
         self,

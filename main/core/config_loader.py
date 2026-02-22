@@ -24,6 +24,7 @@ RUNTIME_WHITELIST_PATH = "configs/runtime_whitelist.yaml"
 POLICY_PATH_SEMANTICS_PATH = "configs/policy_path_semantics.yaml"
 INJECTION_SCOPE_MANIFEST_PATH = "configs/injection_scope_manifest.yaml"
 RECORDS_SCHEMA_EXTENSIONS_PATH = "configs/records_schema_extensions.yaml"
+ATTACK_PROTOCOL_PATH = "configs/attack_protocol.yaml"
 
 
 def load_frozen_contracts_interpretation(
