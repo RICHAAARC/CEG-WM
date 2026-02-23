@@ -1,6 +1,5 @@
 """
-File purpose: 验证 align impl 未在 whitelist 时必须拒绝。
-Module type: General module
+验证 align impl 未在 whitelist 时必须拒绝
 """
 
 from __future__ import annotations

@@ -1,6 +1,5 @@
 """
-File purpose: 攻击变换真实生效回归测试。
-Module type: General module
+攻击变换真实生效回归测试
 """
 
 from __future__ import annotations

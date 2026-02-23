@@ -1,11 +1,5 @@
 """
-File purpose: S-04 compliance tests for PRC embed-detect closure and manifest-whitelist binding.
-Module type: Core innovation module
 
-Test coverage:
-- T1: variance/cfg_digest change must change lf_trace_digest
-- T2: allowed_impl_ids not subset of whitelist must FAIL(BLOCK) in audit
-- T3: detect with mismatched plan_digest must return status=mismatch and score=None
 """
 
 import pytest

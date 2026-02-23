@@ -1,6 +1,5 @@
 """
-文件目的：attack protocol append-only 扩展加载回归测试。
-Module type: Core innovation module
+attack protocol append-only 扩展加载回归测试
 """
 
 from __future__ import annotations

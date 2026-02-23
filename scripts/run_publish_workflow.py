@@ -73,9 +73,22 @@ def main() -> None:
         help="仓库根目录",
     )
     parser.add_argument(
+        "--config",
+        type=Path,
+        default=Path("configs/default.yaml"),
+        help="experiment matrix 与 repro 流程共享的配置文件路径",
+    )
+    parser.add_argument(
         "--skip-repro",
         action="store_true",
         help="跳过 run_repro_pipeline（若工作流已完成），仅运行 signoff",
+    )
+    parser.add_argument(
+        "--signoff-profile",
+        type=str,
+        default="paper",
+        choices=["baseline", "paper", "publish"],
+        help="Signoff 审计集合 profile（baseline: 最小集合; paper/publish: 论文复现级，默认: paper）",
     )
     
     args = parser.parse_args()
@@ -83,6 +96,8 @@ def main() -> None:
     run_root = args.run_root.resolve()
     repo_root = args.repo_root.resolve()
     scripts_dir = repo_root / "scripts"
+    signoff_profile = args.signoff_profile
+    config_path = args.config.resolve()
     
     if not repo_root.is_dir():
         print(f"错误：repo_root 不存在: {repo_root}", file=sys.stderr)
@@ -93,6 +108,8 @@ def main() -> None:
     print(f"{'='*70}")
     print(f"Run Root: {run_root}")
     print(f"Repo Root: {repo_root}")
+    print(f"Config: {config_path}")
+    print(f"Signoff Profile: {signoff_profile}")
     
     # 第一阶段：embed → detect → calibrate → evaluate（可选跳过）
     if not args.skip_repro:
@@ -107,13 +124,33 @@ def main() -> None:
             sys.exit(1)
     else:
         print(f"\n[Publish Workflow] 跳过 repro 流程（--skip-repro 指定）")
+
+    # 第二阶段：experiment matrix（发布级门禁工件，必须在同一 run_root 下产出）
+    matrix_batch_root = run_root / "outputs" / "experiment_matrix"
+    print(f"\n[Publish Workflow] 执行 experiment matrix（batch_root={matrix_batch_root}）...")
+    result = run_command(
+        [
+            sys.executable,
+            str(scripts_dir / "run_experiment_matrix.py"),
+            "--config",
+            str(config_path),
+            "--batch-root",
+            str(matrix_batch_root),
+        ],
+        "Run Experiment Matrix (publish gate artifacts)"
+    )
+    if result != 0:
+        print(f"\n[FATAL] Experiment matrix failed. Cannot proceed to signoff.")
+        sys.exit(1)
     
-    # 第二阶段：冻结签署（强制要求 evaluation_report.json）
+    # 第三阶段：冻结签署（强制要求 evaluation_report.json 与 matrix 工件）
     print(f"\n[Publish Workflow] 执行冻结签署...")
     result = run_command(
         [sys.executable, str(scripts_dir / "run_freeze_signoff.py"),
-         "--run-root", str(run_root), "--repo-root", str(repo_root)],
-        "Freeze Signoff (基于完整工作流输出)"
+         "--run-root", str(run_root), "--repo-root", str(repo_root),
+         "--signoff-profile", signoff_profile,
+         "--require-experiment-matrix"],
+        f"Freeze Signoff (profile={signoff_profile}, 基于完整工作流输出)"
     )
     
     if result == 0:

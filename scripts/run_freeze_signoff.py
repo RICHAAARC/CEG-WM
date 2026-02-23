@@ -39,7 +39,9 @@ from main.core import time_utils
 from main.core.records_io import write_artifact_json_unbound, write_artifact_bytes_unbound
 
 SIGNOFF_REPORT_SCHEMA_VERSION = "v1"
+MATRIX_SCHEMA_AUDIT_SCRIPT = "audits/audit_experiment_matrix_outputs_schema.py"
 
+# Baseline 最小审计集合（历史兼容，12 个审计）
 MINIMUM_AUDIT_SCRIPTS = [
     "audits/audit_write_bypass_scan.py",
     "audits/audit_registry_injection_surface.py",
@@ -55,8 +57,93 @@ MINIMUM_AUDIT_SCRIPTS = [
     "audits/audit_attack_protocol_hardcoding.py",       # attack protocol 事实源强制（signoff BLOCK）
 ]
 
+# Paper/Publish 追加审计清单（论文复现级门禁）
+PAPER_PROFILE_ADDITIONAL_AUDITS = [
+    "audits/audit_attack_protocol_implementable.py",       # 协议—实现一致性门禁（paper/publish BLOCK）
+    "audits/audit_attack_protocol_report_coverage.py",     # 协议—报告覆盖率对齐（paper/publish BLOCK）
+    "audits/audit_repro_bundle_integrity.py",              # repro bundle 完整性校验（paper/publish BLOCK）
+    MATRIX_SCHEMA_AUDIT_SCRIPT,                             # experiment matrix 汇总工件 schema 门禁（paper/publish BLOCK）
+]
 
-def execute_audit_script(script_path: Path, repo_root: Path) -> Dict[str, Any]:
+
+def resolve_signoff_profile(profile: str) -> list[str]:
+    """
+    功能：根据 signoff profile 返回审计脚本清单。
+
+    Resolve signoff profile to audit scripts list.
+    Implements append-only extension of baseline minimum set.
+
+    Args:
+        profile: Signoff profile name ("baseline" | "paper" | "publish").
+
+    Returns:
+        List of audit script relative paths (POSIX style).
+
+    Raises:
+        ValueError: If profile is unknown.
+    """
+    if not isinstance(profile, str) or not profile:
+        raise TypeError("profile must be non-empty str")
+
+    profile_normalized = profile.lower().strip()
+
+    if profile_normalized == "baseline":
+        return list(MINIMUM_AUDIT_SCRIPTS)
+    elif profile_normalized in ("paper", "publish"):
+        # append-only: baseline + 论文级追加审计
+        return list(MINIMUM_AUDIT_SCRIPTS) + list(PAPER_PROFILE_ADDITIONAL_AUDITS)
+    else:
+        raise ValueError(
+            f"Unknown signoff profile: '{profile}'. "
+            f"Supported profiles: baseline, paper, publish."
+        )
+
+
+def resolve_require_experiment_matrix(
+    profile: str,
+    require_experiment_matrix: Optional[bool],
+) -> bool:
+    """
+    功能：解析 experiment matrix 是否为签署强制项。
+
+    Resolve whether experiment matrix artifacts are mandatory for signoff.
+
+    Args:
+        profile: Signoff profile name.
+        require_experiment_matrix: Optional explicit CLI override.
+
+    Returns:
+        Boolean indicating whether missing matrix artifacts must fail.
+
+    Raises:
+        ValueError: If profile is unknown.
+    """
+    if not isinstance(profile, str) or not profile:
+        raise TypeError("profile must be non-empty str")
+    if require_experiment_matrix is not None and not isinstance(require_experiment_matrix, bool):
+        raise TypeError("require_experiment_matrix must be bool or None")
+
+    profile_normalized = profile.lower().strip()
+    if profile_normalized == "baseline":
+        default_value = False
+    elif profile_normalized in ("paper", "publish"):
+        default_value = True
+    else:
+        raise ValueError(
+            f"Unknown signoff profile: '{profile}'. "
+            f"Supported profiles: baseline, paper, publish."
+        )
+
+    if require_experiment_matrix is None:
+        return default_value
+    return require_experiment_matrix
+
+
+def execute_audit_script(
+    script_path: Path,
+    repo_root: Path,
+    extra_args: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     """
     功能：执行单个静态审计脚本并返回结构化结果。
 
@@ -70,8 +157,17 @@ def execute_audit_script(script_path: Path, repo_root: Path) -> Dict[str, Any]:
         Structured audit result dictionary.
     """
     try:
+        command = [sys.executable, str(script_path), str(repo_root)]
+        if extra_args is not None:
+            if not isinstance(extra_args, list):
+                raise TypeError("extra_args must be list[str] or None")
+            for arg in extra_args:
+                if not isinstance(arg, str) or not arg:
+                    raise TypeError("extra_args items must be non-empty str")
+            command.extend(extra_args)
+
         result = subprocess.run(
-            [sys.executable, str(script_path), str(repo_root)],
+            command,
             capture_output=True,
             text=False,
             timeout=60,
@@ -596,6 +692,26 @@ def main() -> None:
         default=Path(__file__).resolve().parent.parent,
         help="仓库根目录（用于执行静态审计）",
     )
+    parser.add_argument(
+        "--signoff-profile",
+        type=str,
+        default="baseline",
+        choices=["baseline", "paper", "publish"],
+        help="Signoff 审计集合 profile（baseline: 最小集合; paper/publish: 论文复现级，默认: baseline）",
+    )
+    parser.add_argument(
+        "--require-experiment-matrix",
+        dest="require_experiment_matrix",
+        action="store_true",
+        default=None,
+        help="显式要求 experiment matrix 汇总工件存在；缺失时将触发 BLOCK_FREEZE",
+    )
+    parser.add_argument(
+        "--no-require-experiment-matrix",
+        dest="require_experiment_matrix",
+        action="store_false",
+        help="显式声明 experiment matrix 非必需；缺失时记为 N.A.",
+    )
     args = parser.parse_args()
 
     run_root = args.run_root.resolve()
@@ -615,6 +731,21 @@ def main() -> None:
 
     print(f"[Freeze Signoff] run_root: {run_root}")
     print(f"[Freeze Signoff] repo_root: {repo_root}")
+    print(f"[Freeze Signoff] signoff_profile: {args.signoff_profile}")
+
+    # 解析 signoff profile 并获取审计脚本清单
+    try:
+        audit_scripts = resolve_signoff_profile(args.signoff_profile)
+        require_experiment_matrix = resolve_require_experiment_matrix(
+            args.signoff_profile,
+            args.require_experiment_matrix,
+        )
+    except ValueError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        sys.exit(2)
+
+    print(f"[Freeze Signoff] 审计脚本数量: {len(audit_scripts)}")
+    print(f"[Freeze Signoff] require_experiment_matrix: {require_experiment_matrix}")
 
     # 执行 pytest（NON_BLOCK，仅记录）
     print(f"[Freeze Signoff] 执行 pytest -q...")
@@ -622,7 +753,7 @@ def main() -> None:
 
     # 执行静态审计
     static_results: List[Dict[str, Any]] = []
-    for relative_script in MINIMUM_AUDIT_SCRIPTS:
+    for relative_script in audit_scripts:
         script_path = scripts_dir / relative_script
         if not script_path.exists():
             static_results.append({
@@ -635,7 +766,18 @@ def main() -> None:
                 "evidence": {"path": str(script_path)},
             })
             continue
-        result = execute_audit_script(script_path, repo_root)
+        extra_args: Optional[List[str]] = None
+        if relative_script == MATRIX_SCHEMA_AUDIT_SCRIPT:
+            extra_args = [
+                "--run-root",
+                str(run_root),
+            ]
+            if require_experiment_matrix:
+                extra_args.append("--require-experiment-matrix")
+            else:
+                extra_args.append("--no-require-experiment-matrix")
+
+        result = execute_audit_script(script_path, repo_root, extra_args=extra_args)
         static_results.append(result)
 
     # 校验 run_root 证据包
@@ -651,20 +793,24 @@ def main() -> None:
     # 抽取冻结锚点
     anchors = extract_anchors_from_run_closure(run_root)
 
-    # 生成新 schema 的 signoff_report
+    # 生成新 schema 的 signoff_report（append-only 扩展 profile 字段）
     signoff_payload: Dict[str, Any] = {
         "schema_version": SIGNOFF_REPORT_SCHEMA_VERSION,
         "freeze_signoff_decision": decision.get("decision"),
         "generated_at_utc": time_utils.now_utc_iso_z(),
         "run_root": str(run_root),
         "repo_root": str(repo_root),
+        "signoff_profile": args.signoff_profile,  # append-only: 记录使用的 profile
+        "require_experiment_matrix": require_experiment_matrix,  # append-only: 记录 matrix 缺失语义开关
+        "resolved_minimum_audits": audit_scripts,  # append-only: 记录当前 profile 解析后的最小门禁集合
+        "audit_scripts": audit_scripts,  # append-only: 记录实际运行的审计清单
         "tests": pytest_result,  # NON_BLOCK 段，不影响决策
         "audits": static_results,
         "blocking_reasons": decision.get("blocking_reasons", []),
         "run_root_evidence": evidence_report,
         "frozen_constraints_snapshot": snapshot_result,  # 增强证据（失败不阻断）
         "anchors": anchors,
-        "minimum_audit_set": MINIMUM_AUDIT_SCRIPTS,
+        "minimum_audit_set": MINIMUM_AUDIT_SCRIPTS,  # 保留历史兼容字段
         "summary": {
             "decision": decision.get("decision"),
             "static_audit_counts": decision.get("static_audit_counts"),

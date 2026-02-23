@@ -1,5 +1,5 @@
 """
-File purpose: 真实嵌入与最小检测闭环回归测试。
+File purpose: C3 真实嵌入与最小检测闭环回归测试。
 Module type: General module
 """
 

@@ -1,6 +1,5 @@
 """
-File purpose: 验证 align 配置变化会影响 align_trace_digest。
-Module type: General module
+验证 align 配置变化会影响 align_trace_digest
 """
 
 from __future__ import annotations

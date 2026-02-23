@@ -1,6 +1,5 @@
 """
-File purpose: 验证几何对齐失败时 geo_score 不得产出。
-Module type: General module
+验证 几何对齐失败时 geo_score 不得产出
 """
 
 from __future__ import annotations

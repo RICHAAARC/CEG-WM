@@ -1,7 +1,6 @@
 """
-测试阻断项：attack protocol 必须来自 configs。
+测试 阻断项：attack protocol 必须来自 configs
 
-Test that attack protocol parameters are loaded from configs and not hardcoded.
 """
 
 import pytest

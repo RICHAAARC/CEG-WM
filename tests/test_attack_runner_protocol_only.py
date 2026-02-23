@@ -1,6 +1,5 @@
 """
-文件目的：attack runner 协议驱动与无硬编码回归测试。
-Module type: Core innovation module
+attack runner 协议驱动与无硬编码回归测试
 """
 
 from __future__ import annotations

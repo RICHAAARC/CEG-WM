@@ -1,12 +1,5 @@
 """
-Test: Non-whitelisted ablation override is blocked.
-
-功能说明：
-- 验证不在 runtime_whitelist.yaml 中的 ablation override 参数被阻断。
-- 确保 override_rules.py 严格校验 arg_name 白名单。
-- 验证 ablation override 通过白名单校验后可成功应用。
-
-Module type: General module
+验证 禁止非白名单内的消融覆盖操作
 """
 
 import tempfile

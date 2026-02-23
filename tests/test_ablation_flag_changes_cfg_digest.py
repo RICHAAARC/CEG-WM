@@ -1,12 +1,5 @@
 """
-Test: Ablation flag changes must alter cfg_digest.
-
-功能说明：
-- 验证 ablation.normalized 字段变化导致 cfg_digest 变化。
-- 确保 ablation flags 被正确纳入 cfg_digest 计算域。
-- 禁止消融实验参数变化而 cfg_digest 保持不变（单因素可比性破坏）。
-
-Module type: General module
+验证 消融实验标志的更改必须改变 cfg_digest
 """
 
 from pathlib import Path

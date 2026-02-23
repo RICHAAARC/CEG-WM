@@ -238,6 +238,9 @@ def run_experiment_grid(grid: list[dict], strict: bool = True) -> dict:
     aggregate_report = build_aggregate_report(results, grid_manifest=grid_manifest)
     summary_paths = _write_grid_artifacts(grid, aggregate_report, results, strict)
 
+    # 从 aggregate_report 或 results[0] 提取锚点字段（append-only，不重新计算）
+    anchors_obj = _extract_anchors_from_results(aggregate_report, results)
+
     grid_summary = {
         "strict": strict,
         "total": len(grid),
@@ -247,6 +250,7 @@ def run_experiment_grid(grid: list[dict], strict: bool = True) -> dict:
         "aggregate_report": aggregate_report,
         "grid_manifest": grid_manifest,
         "results": results,
+        **anchors_obj,  # append-only: 补齐锚点字段全集
         **summary_paths,
     }
 
@@ -630,6 +634,9 @@ def _write_grid_artifacts(
 
     grid_manifest = _build_grid_manifest(grid)
 
+    # 提取锚点字段（append-only，只读已有工件）
+    anchors_obj = _extract_anchors_from_results(aggregate_report, results)
+
     records_io.write_artifact_json_unbound(
         run_root=batch_root,
         artifacts_dir=artifacts_dir,
@@ -644,6 +651,7 @@ def _write_grid_artifacts(
             "strict": strict,
             "executed": len(results),
             "results": results,
+            **anchors_obj,  # append-only: 补齐锚点字段全集
         },
     )
     records_io.write_artifact_json_unbound(
@@ -790,3 +798,64 @@ def _safe_str(value: Any) -> str:
     if isinstance(value, str) and value:
         return value
     return "<absent>"
+
+
+def _extract_anchors_from_results(
+    aggregate_report: Dict[str, Any],
+    results: List[Dict[str, Any]],
+) -> Dict[str, str]:
+    """
+    功能：从 aggregate_report 或 results[0] 提取锚点字段全集（只读，不重新计算）。
+
+    Extract anchor fields from aggregate report or first successful run result.
+    This is append-only extension for grid_summary schema completeness.
+
+    Args:
+        aggregate_report: Aggregate report mapping.
+        results: Experiment results list.
+
+    Returns:
+        Mapping with anchor fields (cfg_digest, thresholds_digest, etc.).
+    """
+    anchors: Dict[str, str] = {
+        "cfg_digest": "<absent>",
+        "thresholds_digest": "<absent>",
+        "threshold_metadata_digest": "<absent>",
+        "attack_protocol_version": "<absent>",
+        "attack_protocol_digest": "<absent>",
+        "attack_coverage_digest": "<absent>",
+        "impl_digest": "<absent>",
+        "fusion_rule_version": "<absent>",
+        "policy_path": "<absent>",
+    }
+
+    # 优先级 1: 从 aggregate_report 提取（若包含 attack_coverage_digest）
+    if isinstance(aggregate_report, dict):
+        if aggregate_report.get("attack_coverage_digest"):
+            anchors["attack_coverage_digest"] = _safe_str(aggregate_report.get("attack_coverage_digest"))
+
+    # 优先级 2: 从第一个成功的 result 提取（若存在）
+    first_ok_result: Optional[Dict[str, Any]] = None
+    for item in results:
+        if isinstance(item, dict) and item.get("status") == "ok":
+            first_ok_result = item
+            break
+
+    if first_ok_result is not None:
+        for key in [
+            "cfg_digest",
+            "thresholds_digest",
+            "threshold_metadata_digest",
+            "attack_protocol_version",
+            "attack_protocol_digest",
+            "impl_digest",
+            "fusion_rule_version",
+        ]:
+            value = first_ok_result.get(key)
+            if isinstance(value, str) and value:
+                anchors[key] = value
+
+    # 优先级 3: 从 grid[0] 提取 attack_protocol_digest（若未从 result 获取）
+    # （已在 result 中包含，无需额外提取）
+
+    return anchors

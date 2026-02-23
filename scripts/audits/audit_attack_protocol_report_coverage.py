@@ -1,0 +1,364 @@
+"""
+File purpose: 运行期协议→报告覆盖率审计（declare vs execute 一致性验证）。
+Module type: Core innovation module
+
+设计边界：
+1. 校验 attack_protocol.yaml 声明的所有条件（family::params_version）是否全部出现在 evaluation_report.json 中。
+2. 禁止改动协议加载、报告生成、条件键抽取的任何逻辑——仅做审计观察。
+3. 失败必须包含证据（缺失条件键清单、预期vs实际对比）。
+4. 报告结构假设 metrics_by_attack_condition 字段为有序列表。
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+
+def load_attack_protocol_spec(repo_root: Path) -> Dict[str, Any]:
+    """
+    Load attack protocol specification from configs/attack_protocol.yaml.
+
+    Args:
+        repo_root: Repository root directory.
+
+    Returns:
+        Protocol specification dict with version, families, and params_versions keys.
+
+    Raises:
+        FileNotFoundError: If attack_protocol.yaml not found.
+        ValueError: If protocol spec is invalid.
+    """
+    if not isinstance(repo_root, Path):
+        repo_root = Path(repo_root)
+
+    protocol_path = repo_root / "configs" / "attack_protocol.yaml"
+    if not protocol_path.exists():
+        raise FileNotFoundError(f"attack_protocol.yaml not found at {protocol_path}")
+
+    try:
+        import yaml
+        with open(protocol_path, "r", encoding="utf-8") as f:
+            protocol_spec = yaml.safe_load(f)
+    except ImportError:
+        raise RuntimeError("PyYAML not available; cannot load protocol spec")
+    except Exception as e:
+        raise ValueError(f"Failed to parse attack_protocol.yaml: {e}")
+
+    if not isinstance(protocol_spec, dict):
+        raise ValueError("protocol_spec must be dict")
+
+    return protocol_spec
+
+
+def extract_declared_conditions(protocol_spec: Dict[str, Any]) -> List[str]:
+    """
+    Extract all unique conditions declared in attack protocol (family::params_version format).
+
+    Args:
+        protocol_spec: Attack protocol specification dict.
+
+    Returns:
+        Sorted list of condition keys in format "family::params_version".
+
+    Raises:
+        TypeError: If protocol_spec is invalid.
+        ValueError: If any condition lacks proper structure.
+    """
+    if not isinstance(protocol_spec, dict):
+        raise TypeError("protocol_spec must be dict")
+
+    conditions: List[str] = []
+
+    # 方法 1: 从 params_versions flat 字典读取（协议规范中显式条件键）
+    params_versions = protocol_spec.get("params_versions", {})
+    if isinstance(params_versions, dict):
+        for condition_key in params_versions.keys():
+            if isinstance(condition_key, str) and "::" in condition_key:
+                # 条件键已为 family::params_version 格式
+                if condition_key not in conditions:
+                    conditions.append(condition_key)
+
+    # 方法 2: 从 families 嵌套结构推导（备选，此时条件键需组合）
+    families = protocol_spec.get("families", {})
+    if isinstance(families, dict):
+        for family_name, family_spec in families.items():
+            if not isinstance(family_name, str):
+                continue
+            if not isinstance(family_spec, dict):
+                continue
+
+            params_versions_in_family = family_spec.get("params_versions", {})
+            if isinstance(params_versions_in_family, dict):
+                for param_version_name in params_versions_in_family.keys():
+                    if isinstance(param_version_name, str):
+                        condition_key = f"{family_name}::{param_version_name}"
+                        if condition_key not in conditions:
+                            conditions.append(condition_key)
+
+    return sorted(conditions)
+
+
+def load_evaluation_report(eval_report_path: Path) -> Dict[str, Any]:
+    """
+    Load evaluation report from file.
+
+    Args:
+        eval_report_path: Path to evaluation_report.json.
+
+    Returns:
+        Evaluation report dict.
+
+    Raises:
+        FileNotFoundError: If report not found.
+        ValueError: If report is invalid JSON or missing required structure.
+    """
+    if not isinstance(eval_report_path, Path):
+        eval_report_path = Path(eval_report_path)
+
+    if not eval_report_path.exists():
+        raise FileNotFoundError(f"evaluation_report.json not found at {eval_report_path}")
+
+    try:
+        with open(eval_report_path, "r", encoding="utf-8") as f:
+            report = json.load(f)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"evaluation_report.json is not valid JSON: {e}")
+
+    if not isinstance(report, dict):
+        raise ValueError("evaluation_report must be dict")
+
+    return report
+
+
+def extract_reported_conditions(report: Dict[str, Any]) -> List[str]:
+    """
+    Extract all condition keys reported in evaluation_report.json metrics_by_attack_condition.
+
+    Args:
+        report: Evaluation report dict.
+
+    Returns:
+        Sorted list of condition keys (group_key values) appearing in metrics_by_attack_condition.
+
+    Raises:
+        TypeError: If report structure is invalid.
+    """
+    if not isinstance(report, dict):
+        raise TypeError("report must be dict")
+
+    conditions: List[str] = []
+
+    metrics_by_condition = report.get("metrics_by_attack_condition")
+    if not isinstance(metrics_by_condition, list):
+        # 报告中缺失 metrics_by_attack_condition 字段——这是严重问题
+        return []
+
+    for item in metrics_by_condition:
+        if not isinstance(item, dict):
+            continue
+
+        group_key = item.get("group_key")
+        if isinstance(group_key, str) and group_key not in conditions:
+            conditions.append(group_key)
+
+    return sorted(conditions)
+
+
+def audit_attack_protocol_report_coverage(repo_root: Path) -> Dict[str, Any]:
+    """
+    Audit that all attack conditions declared in protocol are executed and reported.
+
+    Verifies:
+    1. All condition keys in attack_protocol.yaml params_versions appear in evaluation_report.json
+    2. No extra conditions in report that are not declared (future-proofing)
+    3. Condition key format and structure consistency
+
+    Args:
+        repo_root: Repository root directory.
+
+    Returns:
+        Audit result dict with structure:
+        {
+            "audit_id": "audit.attack_protocol_report_coverage",
+            "gate_name": "gate.attack_protocol_report_coverage",
+            "category": "G",
+            "severity": "BLOCK",
+            "result": "PASS" | "FAIL",
+            "rule": "all declared attack conditions must be executed and reported",
+            "evidence": {
+                "protocol_version": str,
+                "protocol_conditions_count": int,
+                "reported_conditions_count": int,
+                "missed_conditions": list[str],
+                "extra_reported_conditions": list[str],
+                "eval_report_path": str,
+                "protocol_spec_path": str,
+            }
+        }
+
+    Raises:
+        No exceptions; always returns valid audit result dict.
+    """
+    if not isinstance(repo_root, Path):
+        repo_root = Path(repo_root)
+
+    audit_id = "audit.attack_protocol_report_coverage"
+    gate_name = "gate.attack_protocol_report_coverage"
+
+    evidence: Dict[str, Any] = {
+        "protocol_spec_path": "configs/attack_protocol.yaml",
+        "eval_report_path": "outputs/smoke_detect/evaluation_report.json",
+        "declared_conditions": [],
+        "reported_conditions": [],
+        "missed_conditions": [],
+        "extra_reported_conditions": [],
+    }
+
+    try:
+        # (1) 加载协议规范
+        protocol_spec = load_attack_protocol_spec(repo_root)
+        evidence["protocol_version"] = protocol_spec.get("version", "<absent>")
+
+        declared_conditions = extract_declared_conditions(protocol_spec)
+        evidence["protocol_conditions_count"] = len(declared_conditions)
+        evidence["declared_conditions"] = declared_conditions
+
+        # (2) 尝试加载评测报告（支持多个位置）
+        eval_report_paths = [
+            repo_root / "outputs" / "smoke_detect" / "evaluation_report.json",
+            repo_root / "outputs" / "smoke_embed" / "evaluation_report.json",
+            repo_root / "evaluation_report.json",
+        ]
+
+        eval_report: Optional[Dict[str, Any]] = None
+        found_path: Optional[Path] = None
+
+        for path in eval_report_paths:
+            if path.exists():
+                try:
+                    eval_report = load_evaluation_report(path)
+                    found_path = path
+                    break
+                except (ValueError, json.JSONDecodeError):
+                    continue
+
+        if eval_report is None:
+            # 如果评测报告不存在，审计仅返回 SKIP（非阻止级别，因为可能运行未完成）
+            return {
+                "audit_id": audit_id,
+                "gate_name": gate_name,
+                "category": "G",
+                "severity": "WARN",
+                "result": "SKIP",
+                "rule": "all declared attack conditions must be executed and reported",
+                "evidence": {
+                    **evidence,
+                    "status": "evaluation_report.json not found in expected locations; skipping coverage audit",
+                    "checked_paths": [str(p) for p in eval_report_paths],
+                },
+            }
+
+        evidence["eval_report_path"] = str(found_path.relative_to(repo_root) if found_path.is_relative_to(repo_root) else found_path)
+
+        # (3) 从报告提取已上报的条件
+        reported_conditions = extract_reported_conditions(eval_report)
+        evidence["reported_conditions_count"] = len(reported_conditions)
+        evidence["reported_conditions"] = reported_conditions
+
+        # (4) 对比：缺失条件 vs 多报条件
+        declared_set = set(declared_conditions)
+        reported_set = set(reported_conditions)
+
+        missed_conditions = sorted(declared_set - reported_set)
+        extra_conditions = sorted(reported_set - declared_set)
+
+        evidence["missed_conditions"] = missed_conditions
+        evidence["extra_reported_conditions"] = extra_conditions
+
+        # (5) 审计决策
+        if missed_conditions:
+            # 声明但未执行的条件——严重失败
+            result = "FAIL"
+        elif extra_conditions:
+            # 报告了未声明的条件——警告但不阻止（可能是协议版本更新滞后）
+            result = "FAIL"
+        else:
+            result = "PASS"
+
+        return {
+            "audit_id": audit_id,
+            "gate_name": gate_name,
+            "category": "G",
+            "severity": "BLOCK" if result == "FAIL" else "INFO",
+            "result": result,
+            "rule": "all declared attack conditions must be executed and reported; no undeclared conditions in report",
+            "evidence": evidence,
+        }
+
+    except Exception as e:
+        # 审计脚本内部异常——返回错误状态
+        return {
+            "audit_id": audit_id,
+            "gate_name": gate_name,
+            "category": "G",
+            "severity": "BLOCK",
+            "result": "FAIL",
+            "rule": "all declared attack conditions must be executed and reported",
+            "evidence": {
+                **evidence,
+                "error": str(e),
+                "error_type": type(e).__name__,
+            },
+        }
+
+
+def main(repo_root: Optional[str] = None) -> int:
+    """
+    Main entry point for audit script.
+
+    Args:
+        repo_root: Repository root directory (from command line).
+
+    Returns:
+        Exit code (0 for PASS, 1 for FAIL, 2 for SKIP).
+    """
+    if repo_root is None:
+        repo_root = "."
+
+    repo_root_path = Path(repo_root).resolve()
+
+    try:
+        result = audit_attack_protocol_report_coverage(repo_root_path)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+
+        # Exit code: 0 for PASS, 1 for FAIL, 2 for SKIP
+        if result["result"] == "PASS":
+            return 0
+        elif result["result"] == "SKIP":
+            return 0  # SKIP 不阻止冻结（与 baseline 审计逻辑一致）
+        else:  # FAIL
+            return 1
+    except Exception as e:
+        # 捕获运行异常并输出错误格式的审计结果
+        error_result = {
+            "audit_id": "audit.attack_protocol_report_coverage",
+            "gate_name": "gate.attack_protocol_report_coverage",
+            "category": "G",
+            "severity": "BLOCK",
+            "result": "FAIL",
+            "rule": "all declared attack conditions must be executed and reported",
+            "evidence": {
+                "error": str(e),
+                "error_type": type(e).__name__,
+            },
+        }
+        print(json.dumps(error_result, indent=2, ensure_ascii=False))
+        return 1
+
+
+if __name__ == "__main__":
+    repo_root = sys.argv[1] if len(sys.argv) > 1 else "."
+    sys.exit(main(repo_root))

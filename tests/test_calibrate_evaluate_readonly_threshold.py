@@ -1,5 +1,5 @@
 """
-File purpose: 校准与评测只读阈值闭环回归测试。
+File purpose: C4 阶段校准与评测只读阈值闭环回归测试。
 Module type: General module
 """
 

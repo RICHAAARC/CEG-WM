@@ -1,6 +1,5 @@
 """
-File purpose: 攻击 trace digest 稳定性回归测试。
-Module type: General module
+攻击 trace digest 稳定性回归测试
 """
 
 from __future__ import annotations

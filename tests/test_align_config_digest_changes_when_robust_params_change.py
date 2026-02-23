@@ -1,6 +1,5 @@
 """
-File purpose: 验证稳健拟合参数变化会影响 align 配置 digest。
-Module type: General module
+验证 稳健拟合参数变化会影响 align 配置 digest
 """
 
 from __future__ import annotations

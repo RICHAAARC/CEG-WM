@@ -1,6 +1,5 @@
 """
-File purpose: 验证注意力锚点摘要输入域与配置变更绑定纪律。
-Module type: General module
+验证 注意力锚点摘要输入域与配置变更绑定纪律
 """
 
 from __future__ import annotations

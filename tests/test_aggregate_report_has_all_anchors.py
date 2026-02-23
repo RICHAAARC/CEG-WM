@@ -1,6 +1,5 @@
 """
-文件目的：验证 aggregate_report 锚点字段完备性。
-Module type: General module
+验证 aggregate_report 锚点字段完备性
 """
 
 from __future__ import annotations

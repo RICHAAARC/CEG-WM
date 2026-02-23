@@ -1,10 +1,5 @@
 """
-功能：测试 artifacts 语义旁路防护（artifacts.semantic_bypass_is_blocked，legacy_code=B6/B5）
-
-Module type: Core innovation module
-
-Test that artifacts cannot contain semantic fields that should be
-constrained by schema and freeze_gate (semantic bypass guard).
+artifacts 语义旁路防护测试
 """
 
 import pytest

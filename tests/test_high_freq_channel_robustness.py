@@ -1,5 +1,5 @@
 """
-File purpose: S-05 HF robust channel regression tests.
+File purpose: HF robust channel regression tests.
 Module type: General module
 
 功能说明：

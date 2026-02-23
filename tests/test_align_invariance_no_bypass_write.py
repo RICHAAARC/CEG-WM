@@ -1,6 +1,5 @@
 """
-File purpose: 验证 GeometryAlignInvarianceExtractor 不会绕过 records_io 写盘。
-Module type: General module
+验证 GeometryAlignInvarianceExtractor 不会绕过 records_io 写盘
 """
 
 from __future__ import annotations

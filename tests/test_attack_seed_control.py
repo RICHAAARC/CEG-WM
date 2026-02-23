@@ -1,6 +1,5 @@
 """
-File purpose: 攻击随机种子控制回归测试。
-Module type: General module
+攻击随机种子控制回归测试
 """
 
 from __future__ import annotations

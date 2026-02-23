@@ -31,7 +31,10 @@ AUDIT_SCRIPTS = [
     "audits/audit_evaluation_report_schema.py",              # 证报告锚点字段完整性
     "audits/audit_thresholds_readonly_enforcement.py",       # thresholds 只读保护
     "audits/audit_attack_protocol_hardcoding.py",            # attack protocol 事实源强制
+    "audits/audit_attack_protocol_implementable.py",         # attack protocol 协议—实现一致性门禁
+    "audits/audit_attack_protocol_report_coverage.py",      # attack protocol 协议—报告覆盖率对齐（平台保障）
     "audits/audit_repro_bundle_integrity.py",               # repro bundle 完整性校验
+    "audits/audit_experiment_matrix_outputs_schema.py",      # experiment matrix 汇总工件 schema 完整性
 ]
 
 

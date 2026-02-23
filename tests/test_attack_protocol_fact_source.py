@@ -1,6 +1,5 @@
 """
-File purpose: 攻击协议事实源与分组评测输出回归测试。
-Module type: General module
+测试 攻击协议事实源与分组评测输出回归
 """
 
 from __future__ import annotations

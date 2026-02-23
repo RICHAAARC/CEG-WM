@@ -6,27 +6,77 @@
 
 ```
 scripts/
-├── run_all_audits.py          # 审计聚合器（主入口）
+├── run_all_audits.py                                    # 审计聚合器（主入口）
+├── run_freeze_signoff.py                                # 冻结签署工具（baseline/paper/publish profile）
+├── run_experiment_matrix.py                             # 试验矩阵聚合器
 └── audits/
-  ├── audit_write_bypass_scan.py                  # records.write_path_is_unbypassable（legacy_code=B1/B5）
-  ├── audit_yaml_loader_uniqueness.py             # config.yaml_loader_is_safe_and_unique（legacy_code=A6）
-  ├── audit_freeze_surface_integrity.py           # freeze_surface.integrity_and_single_source_loading（legacy_code=A1-A7）
-  ├── audit_registry_injection_surface.py         # registry.seal_and_runtime_injection_resistance（legacy_code=C1/C4）
-  ├── audit_policy_path_semantics_binding.py      # policy.path_semantics_binding_and_audit_evidence（legacy_code=B3/D1/D2）
-  ├── audit_dangerous_exec_and_pickle_scan.py     # runtime.dangerous_execution_and_deserialization_blocked（legacy_code=D9）
-  └── audit_network_access_scan.py                # runtime.network_access_is_audited_or_blocked（legacy_code=D10）
+  ├── audit_write_bypass_scan.py                         # records.write_path_is_unbypassable（legacy_code=B1/B5）
+  ├── audit_yaml_loader_uniqueness.py                    # config.yaml_loader_is_safe_and_unique（legacy_code=A6）
+  ├── audit_freeze_surface_integrity.py                  # freeze_surface.integrity_and_single_source_loading（legacy_code=A1-A7）
+  ├── audit_registry_injection_surface.py                # registry.seal_and_runtime_injection_resistance（legacy_code=C1/C4）
+  ├── audit_policy_path_semantics_binding.py             # policy.path_semantics_binding_and_audit_evidence（legacy_code=B3/D1/D2）
+  ├── audit_dangerous_exec_and_pickle_scan.py            # runtime.dangerous_execution_and_deserialization_blocked（legacy_code=D9）
+  ├── audit_network_access_scan.py                       # runtime.network_access_is_audited_or_blocked（legacy_code=D10）
+  ├── audit_evaluation_report_schema.py                  # evaluation_report 锚点字段完整性（signoff BLOCK）
+  ├── audit_attack_protocol_implementable.py             # attack protocol 协议—实现一致性（paper/publish BLOCK）
+  ├── audit_attack_protocol_report_coverage.py           # attack protocol 声明与报告覆盖率对齐（paper/publish BLOCK）
+  ├── audit_experiment_matrix_outputs_schema.py          # experiment matrix 工件 schema（paper/publish BLOCK）
+  └── audit_repro_bundle_integrity.py                    # reproduction bundle 完整性（paper/publish BLOCK）
 
 tests/
-├── conftest.py                                     # pytest fixture 配置
-├── test_schema_requires_interpretation.py          # schema.interpretation_is_required（legacy_code=A2）
-├── test_records_write_must_enforce_freeze_gate.py  # records.write_path_enforces_freeze_gate（legacy_code=B1/A1）
-├── test_registry_seal_is_immutable.py              # registry.seal_and_immutability（legacy_code=C1）
-├── test_artifacts_semantic_bypass_guard.py         # artifacts.semantic_bypass_is_blocked（legacy_code=B6/B5）
-├── test_run_closure_must_exist_on_failure.py       # evidence.run_closure_emitted_on_failure（legacy_code=F1/F2）
-└── test_records_bundle_anchor_consistency.py       # evidence.records_bundle_anchor_consistency（legacy_code=F3）
+├── conftest.py
+├── test_*.py                                            # 回归测试集（477+ test cases）
+└── ...
 ```
 
 ## 使用方法
+
+### 0. 一键评测复现与审计流程（稳定锚点）
+
+**完整工作流：从评测执行 → 报告生成 → 审计验证**
+
+```powershell
+# 步骤 1: 在仓库根目录执行（需配置好 conda 环境）
+cd d:\Code\CEG-WM
+
+# 步骤 2: 运行评测流程（produce evaluation_report.json）
+# 假设已完成 embed/detect/calibrate，此步仅执行 evaluate
+python -m main.cli.evaluate_cli --config configs/default.yaml --output outputs/smoke_detect
+
+# 步骤 3: 运行审计聚合器（验证所有冻结约束）
+python scripts/run_all_audits.py --repo-root . --output audit_report.json
+
+# 步骤 4: 检查 FreezeSignoffDecision
+# 如果值为 "ALLOW_FREEZE"，说明当前代码满足冻结条件
+python -c "import json; r=json.load(open('audit_report.json')); print(f\"Decision: {r['summary']['FreezeSignoffDecision']}\")"
+
+# 步骤 5: 运行完整回归测试（确保未引入破坏性变更）
+pytest tests/ -q
+```
+
+**关键字段对应支付锚点：**
+
+| 锚点 | 对应文件 | 关键字段 | 语义 |
+|------|------|------|------|
+| evaluation_report.json | outputs/smoke_detect/ | `cfg_digest`, `attack_protocol_digest` | 评测前后配置一致性 |
+| metrics_by_attack_condition[*] | evaluation_report.json | `group_key` = "family::params_version" | 声明的攻击条件被执行且上报 |
+| audit_report.json | . | `summary.FreezeSignoffDecision` | 冻结审计集合决议 |
+| protocol_conditions_count | audit report (coverage) | 与 reported_conditions_count 对比 | 协议完整性：声明=执行 |
+
+**预期输出示例（PASS 状态）：**
+```json
+{
+  "summary": {
+    "FreezeSignoffDecision": "ALLOW_FREEZE",
+    "BlockingReasons": [],
+    "RiskSummary": "LOW"
+  },
+  "metadata": {
+    "profile": "paper",
+    "audit_count": 16
+  }
+}
+```
 
 ### 1. 运行所有审计脚本
 
@@ -98,11 +148,54 @@ pytest tests/test_schema_requires_interpretation.py -v
 - `gate_name`：门禁名称
 - `category`：类别（A-G）
 - `severity`：严重性（BLOCK / NON_BLOCK）
-- `result`：结果（PASS / FAIL / N.A.）
+- `result`：结果（PASS / FAIL / SKIP / N.A.）
 - `rule`：规则描述
-- `evidence`：证据（对抗式扫描包含 matches 命中列表）
-- `impact`：影响说明
-- `fix`：修复建议
+- `evidence`：证据（对抗式扫描包含 matches，协议对齐包含 condition 对比）
+- `impact`：影响说明（可选）
+- `fix`：修复建议（可选）
+
+### 新增审计：audit_attack_protocol_report_coverage
+
+**用途**：验证 attack_protocol.yaml 中声明的所有攻击条件（family::params_version）是否都被执行并上报到 evaluation_report.json。
+
+**规则**：
+- ✅ PASS：protocol_conditions_count == reported_conditions_count 且集合相等
+- ❌ FAIL：存在在协议中声明但未出现在报告中的条件（missed_conditions 非空）
+- ⚠️ FAIL：报告中包含未声明的条件（extra_reported_conditions 非空）
+- ⊘ SKIP：evaluation_report.json 尚未生成或路径不可达
+
+**证据字段**：
+```json
+{
+  "audit_id": "audit.attack_protocol_report_coverage",
+  "gate_name": "gate.attack_protocol_report_coverage",
+  "category": "G",
+  "severity": "BLOCK",
+  "result": "PASS|FAIL|SKIP",
+  "rule": "all declared attack conditions must be executed and reported; no undeclared conditions in report",
+  "evidence": {
+    "protocol_version": "attack_protocol_v1",
+    "protocol_spec_path": "configs/attack_protocol.yaml",
+    "eval_report_path": "outputs/smoke_detect/evaluation_report.json",
+    "protocol_conditions_count": 8,
+    "reported_conditions_count": 8,
+    "declared_conditions": ["composite::rotate_resize_v1", "crop::v1", "gaussian_blur::v1", ...],
+    "reported_conditions": [...],
+    "missed_conditions": [],
+    "extra_reported_conditions": []
+  }
+}
+```
+
+**集成位置**：
+- run_all_audits.py AUDIT_SCRIPTS（15 个脚本，排序：协议实现后）
+- paper profile：自动包含（PAPER_PROFILE_ADDITIONAL_AUDITS）
+- publish profile：自动包含（继承 paper）
+
+**失败排查**：
+1. 若 evaluation_report.json 缺失：检查是否已运行 evaluate 步骤
+2. 若 missed_conditions 非空：检查 attack_runner 是否真实执行了声明的攻击族
+3. 若 extra_reported_conditions 非空：协议版本可能滞后，检查是否需要更新 attack_protocol.yaml
 
 ## 聚合报告格式
 
@@ -115,22 +208,82 @@ pytest tests/test_schema_requires_interpretation.py -v
     "BlockingReasons": [],
     "RiskSummary": "LOW",
     "counts": {
-      "PASS": 7,
+      "PASS": 15,
+      "SKIP": 0,
       "FAIL": 0,
-      "N.A.": 0,
-      "BLOCK_fails": 0,
-      "NON_BLOCK_fails": 0
+      "BLOCK_fails": 0
     }
   },
   "results": [
-    // 所有审计结果明细
+    // 所有审计结果明细（15 个审计的逐个输出）
   ],
   "metadata": {
-    "repo_root": "D:\\Code\\WM-Framework",
-    "audit_count": 7
+    "repo_root": ".",
+    "audit_count": 15,
+    "profile": "paper"
   }
 }
 ```
+
+### evaluation_report.json 字段映射表
+
+评测报告（由 main/evaluation/report_builder.py::build_evaluation_report 生成）包含以下必要字段及其用途：
+
+| 字段 | 必需 | 类型 | 用途 | 绑定审计 |
+|------|------|------|------|------|
+| `report_type` | ✅ | str | 报告类型标识（固定 "evaluation_report"） | schema 完整性 |
+| `evaluation_version` | ✅ | str | 报告版本（如 "v1"） | schema 完整性 |
+| `cfg_digest` | ✅ | str | 配置摘要（SHA256）| 配置不变性 |
+| `plan_digest` | ✅ | str | 攻击计划摘要 | 计划不变性 |
+| `thresholds_digest` | ✅ | str | 阈值工件摘要 | thresholds 只读 |
+| `threshold_metadata_digest` | ✅ | str | 阈值元数据摘要 | thresholds 只读 |
+| `impl_digest` | ✅ | str | 实现摘要 | 实现不变性 |
+| `ablation_digest` | ✅ | str | Ablation 摘要（可选 offset） | ablation 完整性 |
+| `attack_trace_digest` | ✅ | str | 攻击执行跟踪摘要 | 执行追溯 |
+| `attack_protocol_version` | ✅ | str | 协议版本（来自 attack_protocol.yaml） | 协议版本追踪 |
+| `attack_protocol_digest` | ✅ | str | 协议规范摘要 | 协议不变性 |
+| `fusion_rule_version` | ✅ | str | 融合规则版本 | 融合规则追踪 |
+| `policy_path` | ✅ | str | 策略路径标识 | 策略绑定 |
+| `metrics` | ✅ | dict | 整体统计（n_total, n_rejected, n_rejected_by_reason） | 统计完整性 |
+| `metrics_by_attack_condition` | ✅ | list | 按条件分组的指标列表（每项含 group_key） | **协议覆盖率验证** |
+| `anchors` | ✅ | dict | 分组计数锚点（n_total, n_rejected_*） | 锚点完整性 |
+
+**关键字段：metrics_by_attack_condition**
+
+```json
+"metrics_by_attack_condition": [
+  {
+    "group_key": "crop::v1",
+    "n_total": 120,
+    "n_passed": 85,
+    "n_rejected": 35,
+    "precision": 0.71,
+    "recall": 0.68,
+    "f1": 0.69
+  },
+  {
+    "group_key": "gaussian_blur::v1",
+    "n_total": 100,
+    "n_passed": 72,
+    "n_rejected": 28,
+    "precision": 0.72,
+    "recall": 0.71,
+    "f1": 0.715
+  }
+  // ... 更多条件
+]
+```
+
+**group_key 格式强制约束**：
+- 格式：`"{family_name}::{params_version_name}"`（例：`"rotate::v1"`）
+- 排序：按 group_key 字母序排列（report_builder.py 第 190 行保证）
+- 必须项：来自 attack_protocol.yaml::families 与 params_versions 的所有条件
+- 长期稳定性：条件键一旦声明不可改变（append-only 原则）
+
+---
+
+## 聚合报告格式
+
 
 ## 判定规则
 

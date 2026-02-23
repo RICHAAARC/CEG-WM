@@ -1,6 +1,5 @@
 """
-File purpose: aggregate_report 消融分组计数回归测试。
-Module type: General module
+验证 aggregate_report 消融分组计数回归测试
 """
 
 from __future__ import annotations

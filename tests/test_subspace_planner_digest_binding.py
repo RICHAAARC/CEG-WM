@@ -1,5 +1,5 @@
 """
-子空间规划器全量收口测试
+S-03 子空间规划器全量收口测试
 
 功能说明：
 - 验证 plan_digest 完整绑定 cfg_digest、mask_digest、planner_params、impl_identity。
