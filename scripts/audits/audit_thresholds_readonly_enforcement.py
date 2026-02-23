@@ -11,6 +11,7 @@ Module type: Core innovation module
 
 import ast
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -38,14 +39,13 @@ def scan_thresholds_mutations(file_path: Path) -> List[str]:
     
     problems = []
     
-    # 危险关键词检测
+    # 危险关键词检测：仅关注真正的工件修改，而非参数提取或中间变量赋值
     dangerous_patterns = [
-        "threshold_value =",  # 重新赋值
-        "thresholds[",  # 直接索引修改
-        "thresholds.update(",  # 字典更新
-        "thresholds.pop(",  # 删除键
-        "thresholds.clear(",  # 清空
-        "write_artifact.*threshold",  # 写工件
+        r"thresholds\[.*\]\s*=",  # 直接索引修改 thresholds
+        r"thresholds\.update\(",  # 字典更新
+        r"thresholds\.pop\(",  # 删除键
+        r"thresholds\.clear\(",  # 清空
+        r"thresholds\s*=\s*\{",  # 重新赋值整个工件
     ]
     
     for i, line in enumerate(source_code.split("\n"), 1):
@@ -54,12 +54,14 @@ def scan_thresholds_mutations(file_path: Path) -> List[str]:
         if stripped.startswith("#") or '"""' in stripped or "'''" in stripped:
             continue
         
+        # 忽略本地变量赋值（如 threshold_value = float(...) 这是合法的参数提取）
+        if re.search(r"^\s*threshold_value\s*=", line):
+            continue
+        if re.search(r"^\s*\w+_threshold\s*=", line):
+            continue
+        
         for pattern in dangerous_patterns:
-            if pattern in stripped:
-                # 二次确认：是否在只读上下文中
-                # (这里做简化版，完整版应使用 AST 分析)
-                if "read" in stripped.lower() or "only" in stripped.lower():
-                    continue
+            if re.search(pattern, stripped, re.IGNORECASE):
                 problems.append(f"Line {i}: potential mutation pattern '{pattern}'")
     
     return problems

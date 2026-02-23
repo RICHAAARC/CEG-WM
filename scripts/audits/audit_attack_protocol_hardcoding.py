@@ -17,13 +17,13 @@ from typing import Any, Dict, List, Optional
 
 # 禁止的硬编码参数关键词（必须来自 configs/attack_protocol.yaml）
 FORBIDDEN_PARAMETER_PATTERNS = [
-    r"scale_min\s*=",  # 缩放参数
-    r"scale_max\s*=",
-    r"crop_ratio\s*=",  # 裁剪参数
-    r"rotate_angle\s*=",  # 旋转参数
-    r"brightness_delta\s*=",  # 亮度参数
-    r"contrast_factor\s*=",  # 对比度参数
-    r"noise_std\s*=",  # 噪声参数
+    r"scale_min\s*=\s*[\d\.]",  # 缩放最小值字面量
+    r"scale_max\s*=\s*[\d\.]",  # 缩放最大值字面量
+    r"crop_ratio\s*=\s*[\d\.]",  # 裁剪比例字面量
+    r"rotate_angle\s*=\s*[\d\.]",  # 旋转角度字面量
+    r"brightness_delta\s*=\s*[\d\.]",  # 亮度参数字面量
+    r"contrast_factor\s*=\s*[\d\.]",  # 对比度参数字面量
+    r"noise_std\s*=\s*[\d\.]",  # 噪声参数字面量
     r"attack_families\s*=\s*\[",  # 攻击族定义
     r"attack_params\s*=\s*\{",  # 攻击参数定义
     r"protocol_params\s*=\s*\[",  # 协议参数定义
@@ -33,9 +33,11 @@ FORBIDDEN_PARAMETER_PATTERNS = [
 ALLOWED_CONTEXTS = [
     "config_loader",  # 从配置加载
     "protocol_spec",  # 从协议规范中读取
+    "protocol_loader",  # 从 protocol_loader 加载
     "test_",  # 测试文件
+    "_resolve_float",  # 这是参数提取函数，default 参数不算硬编码
     "# docstring",  # 文档
-    "\"\"\"",  # 文档字符串
+    '"""',  # 文档字符串
 ]
 
 

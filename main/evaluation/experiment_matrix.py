@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from main.core import config_loader, digests
 from main.core import records_io
 from main.evaluation import protocol_loader
+from main.evaluation import attack_coverage
 from main.policy import path_policy
 
 
@@ -47,7 +48,7 @@ def build_experiment_grid(base_cfg: dict) -> list[dict]:
     matrix_cfg = _extract_matrix_cfg(base_cfg)
     model_list = _resolve_model_axis(base_cfg, matrix_cfg)
     seed_list = _resolve_seed_axis(base_cfg, matrix_cfg)
-    attack_families, attack_protocol_version = _resolve_attack_family_axis(base_cfg, matrix_cfg)
+    attack_families, attack_protocol_version, attack_protocol_digest = _resolve_attack_family_axis(base_cfg, matrix_cfg)
     ablation_variants = _resolve_ablation_axis(matrix_cfg)
 
     batch_root = matrix_cfg.get("batch_root", "outputs/experiment_matrix")
@@ -90,9 +91,14 @@ def build_experiment_grid(base_cfg: dict) -> list[dict]:
                         "grid_index": grid_index,
                         "cfg_snapshot": cfg_snapshot,
                         "ablation_flags": copy.deepcopy(ablation_flags),
+                        "ablation_digest": _compute_ablation_digest(ablation_flags),
                         "attack_protocol_family": attack_family,
                         "attack_protocol_version": attack_protocol_version,
+                        "attack_protocol_digest": attack_protocol_digest,
                         "grid_item_digest": grid_item_digest,
+                        "cfg_digest": digests.canonical_sha256(cfg_snapshot),
+                        "model_id": model_id,
+                        "seed": seed_value,
                         "batch_root": batch_root,
                         "config_path": config_path,
                         "attack_protocol_path": attack_protocol_path,
@@ -129,14 +135,17 @@ def run_single_experiment(grid_item_cfg: dict) -> dict:
         "grid_index": grid_item_cfg.get("grid_index", -1),
         "grid_item_digest": grid_item_cfg.get("grid_item_digest", "<absent>"),
         "run_root": str(run_root),
+        "model_id": _safe_str(grid_item_cfg.get("model_id")),
+        "seed": grid_item_cfg.get("seed") if isinstance(grid_item_cfg.get("seed"), int) else None,
+        "attack_family": _safe_str(grid_item_cfg.get("attack_protocol_family")),
         "status": "fail",
         "failure_reason": "<absent>",
-        "cfg_digest": "<absent>",
+        "cfg_digest": _safe_str(grid_item_cfg.get("cfg_digest")),
         "plan_digest": "<absent>",
         "thresholds_digest": "<absent>",
         "threshold_metadata_digest": "<absent>",
-        "ablation_digest": _compute_ablation_digest(grid_item_cfg.get("ablation_flags")),
-        "attack_protocol_digest": "<absent>",
+        "ablation_digest": _safe_str(grid_item_cfg.get("ablation_digest")),
+        "attack_protocol_digest": _safe_str(grid_item_cfg.get("attack_protocol_digest")),
         "attack_protocol_version": grid_item_cfg.get("attack_protocol_version", "<absent>"),
         "impl_digest": "<absent>",
         "fusion_rule_version": "<absent>",
@@ -157,8 +166,10 @@ def run_single_experiment(grid_item_cfg: dict) -> dict:
                 "plan_digest": _safe_str(eval_report.get("plan_digest")),
                 "thresholds_digest": _safe_str(eval_report.get("thresholds_digest")),
                 "threshold_metadata_digest": _safe_str(eval_report.get("threshold_metadata_digest")),
+                "ablation_digest": _safe_str(eval_report.get("ablation_digest")),
                 "attack_protocol_digest": _safe_str(eval_report.get("attack_protocol_digest")),
                 "attack_protocol_version": _safe_str(eval_report.get("attack_protocol_version")),
+                "attack_coverage_digest": _safe_str(eval_report.get("attack_coverage_digest")),
                 "impl_digest": _safe_str(eval_report.get("impl_digest")),
                 "fusion_rule_version": _safe_str(eval_report.get("fusion_rule_version")),
                 "metrics": {
@@ -167,6 +178,13 @@ def run_single_experiment(grid_item_cfg: dict) -> dict:
                     "rescue_rate": metrics_obj.get("rescue_rate"),
                     "reject_rate": metrics_obj.get("reject_rate"),
                     "reject_rate_breakdown": metrics_obj.get("reject_rate_by_reason", {}),
+                    "n_total": metrics_obj.get("n_total"),
+                    "n_accepted": metrics_obj.get("n_accepted"),
+                    "n_rejected": metrics_obj.get("n_rejected"),
+                    "n_rescue_triggered": metrics_obj.get("n_rescue_triggered"),
+                    "n_rescue_success": metrics_obj.get("n_rescue_success"),
+                    "conditional_fpr_estimate": metrics_obj.get("conditional_fpr_estimate"),
+                    "conditional_fpr_n": metrics_obj.get("conditional_fpr_n"),
                 },
             }
         )
@@ -216,7 +234,8 @@ def run_experiment_grid(grid: list[dict], strict: bool = True) -> dict:
             if strict:
                 break
 
-    aggregate_report = build_aggregate_report(results)
+    grid_manifest = _build_grid_manifest(grid)
+    aggregate_report = build_aggregate_report(results, grid_manifest=grid_manifest)
     summary_paths = _write_grid_artifacts(grid, aggregate_report, results, strict)
 
     grid_summary = {
@@ -226,6 +245,7 @@ def run_experiment_grid(grid: list[dict], strict: bool = True) -> dict:
         "succeeded": sum(1 for item in results if item.get("status") == "ok"),
         "failed": sum(1 for item in results if item.get("status") != "ok"),
         "aggregate_report": aggregate_report,
+        "grid_manifest": grid_manifest,
         "results": results,
         **summary_paths,
     }
@@ -240,7 +260,10 @@ def run_experiment_grid(grid: list[dict], strict: bool = True) -> dict:
     return grid_summary
 
 
-def build_aggregate_report(experiment_results: list[dict]) -> dict:
+def build_aggregate_report(
+    experiment_results: list[dict],
+    grid_manifest: Optional[Dict[str, Any]] = None,
+) -> dict:
     """
     功能：构建批量实验聚合报告。
 
@@ -316,14 +339,21 @@ def build_aggregate_report(experiment_results: list[dict]) -> dict:
                 }
             )
 
+    grouped_rows = _build_grouped_rows(experiment_results)
+    coverage_manifest = attack_coverage.compute_attack_coverage_manifest()
+
     report = {
         "aggregate_report_version": "aggregate_v1",
         "experiment_matrix_digest": digests.canonical_sha256(canonical_items),
         "experiment_count": len(experiment_results),
         "success_count": sum(1 for item in experiment_results if item.get("status") == "ok"),
         "failure_count": sum(1 for item in experiment_results if item.get("status") != "ok"),
+        "grid_manifest_digest": _safe_str(grid_manifest.get("grid_manifest_digest")) if isinstance(grid_manifest, dict) else "<absent>",
+        "attack_coverage_digest": _safe_str(coverage_manifest.get("attack_coverage_digest")),
+        "attack_coverage_manifest": coverage_manifest,
         "anchors": anchor_rows,
         "metrics_matrix": metrics_matrix,
+        "grouped_metrics": grouped_rows,
         "failures": failures,
     }
     return report
@@ -378,17 +408,18 @@ def _resolve_seed_axis(base_cfg: Dict[str, Any], matrix_cfg: Dict[str, Any]) -> 
 def _resolve_attack_family_axis(
     base_cfg: Dict[str, Any],
     matrix_cfg: Dict[str, Any],
-) -> Tuple[List[str], str]:
+) -> Tuple[List[str], str, str]:
     """Resolve attack family axis and protocol version."""
     protocol_spec = protocol_loader.load_attack_protocol_spec(base_cfg)
     protocol_version = protocol_loader.get_protocol_version(protocol_spec)
+    protocol_digest = _safe_str(protocol_spec.get("attack_protocol_digest"))
 
     families = matrix_cfg.get("attack_protocol_families")
     if families is None:
         protocol_families = protocol_spec.get("families", {})
         if isinstance(protocol_families, dict) and protocol_families:
-            return sorted(str(name) for name in protocol_families.keys()), protocol_version
-        return ["<absent>"], protocol_version
+            return sorted(str(name) for name in protocol_families.keys()), protocol_version, protocol_digest
+        return ["<absent>"], protocol_version, protocol_digest
 
     if not isinstance(families, list) or not families:
         raise ValueError("experiment_matrix.attack_protocol_families must be non-empty list")
@@ -398,7 +429,7 @@ def _resolve_attack_family_axis(
         if not isinstance(item, str) or not item:
             raise ValueError("experiment_matrix.attack_protocol_families entries must be non-empty str")
         resolved.append(item)
-    return resolved, protocol_version
+    return resolved, protocol_version, protocol_digest
 
 
 def _resolve_ablation_axis(matrix_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -594,6 +625,10 @@ def _write_grid_artifacts(
 
     aggregate_report_path = artifacts_dir / "aggregate_report.json"
     grid_summary_path = artifacts_dir / "grid_summary.json"
+    grid_manifest_path = artifacts_dir / "grid_manifest.json"
+    attack_coverage_manifest_path = artifacts_dir / "attack_coverage_manifest.json"
+
+    grid_manifest = _build_grid_manifest(grid)
 
     records_io.write_artifact_json_unbound(
         run_root=batch_root,
@@ -611,11 +646,35 @@ def _write_grid_artifacts(
             "results": results,
         },
     )
+    records_io.write_artifact_json_unbound(
+        run_root=batch_root,
+        artifacts_dir=artifacts_dir,
+        path=str(grid_manifest_path),
+        obj=grid_manifest,
+    )
+
+    coverage_manifest_obj = aggregate_report.get("attack_coverage_manifest")
+    if isinstance(coverage_manifest_obj, dict):
+        records_io.write_artifact_json_unbound(
+            run_root=batch_root,
+            artifacts_dir=artifacts_dir,
+            path=str(attack_coverage_manifest_path),
+            obj=coverage_manifest_obj,
+        )
+    else:
+        records_io.write_artifact_json_unbound(
+            run_root=batch_root,
+            artifacts_dir=artifacts_dir,
+            path=str(attack_coverage_manifest_path),
+            obj=attack_coverage.compute_attack_coverage_manifest(),
+        )
 
     return {
         "batch_root": str(batch_root),
         "aggregate_report_path": str(aggregate_report_path),
         "grid_summary_path": str(grid_summary_path),
+        "grid_manifest_path": str(grid_manifest_path),
+        "attack_coverage_manifest_path": str(attack_coverage_manifest_path),
     }
 
 
@@ -624,6 +683,106 @@ def _compute_ablation_digest(ablation_flags: Any) -> str:
     if not isinstance(ablation_flags, dict):
         return digests.canonical_sha256({})
     return digests.canonical_sha256(ablation_flags)
+
+
+def _build_grid_manifest(grid: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Build deterministic grid manifest payload for artifact publication."""
+    rows: List[Dict[str, Any]] = []
+    for item in grid:
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            {
+                "grid_index": item.get("grid_index"),
+                "grid_item_digest": _safe_str(item.get("grid_item_digest")),
+                "cfg_digest": _safe_str(item.get("cfg_digest")),
+                "attack_protocol_digest": _safe_str(item.get("attack_protocol_digest")),
+                "ablation_digest": _safe_str(item.get("ablation_digest")),
+                "attack_family": _safe_str(item.get("attack_protocol_family")),
+                "model_id": _safe_str(item.get("model_id")),
+                "seed": item.get("seed") if isinstance(item.get("seed"), int) else None,
+            }
+        )
+    manifest = {
+        "grid_manifest_version": "grid_manifest_v1",
+        "items": rows,
+    }
+    manifest["grid_manifest_digest"] = digests.canonical_sha256(manifest)
+    return manifest
+
+
+def _build_grouped_rows(experiment_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Build grouped aggregate rows for paper-friendly reporting."""
+    grouped: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
+    for item in experiment_results:
+        if not isinstance(item, dict):
+            continue
+        key = (
+            _safe_str(item.get("attack_family")),
+            _safe_str(item.get("ablation_digest")),
+            _safe_str(item.get("model_id")),
+            str(item.get("seed")) if isinstance(item.get("seed"), int) else "<absent>",
+        )
+        if key not in grouped:
+            grouped[key] = {
+                "attack_family": key[0],
+                "ablation_digest": key[1],
+                "ablation_id": f"abl::{key[1][:12]}",
+                "model_id": key[2],
+                "seed": None if key[3] == "<absent>" else int(key[3]),
+                "n_total": 0,
+                "n_attack_applied": 0,
+                "n_valid_scored": 0,
+                "n_rejected_absent": 0,
+                "n_rejected_mismatch": 0,
+                "n_rejected_fail": 0,
+                "n_rescue_triggered": 0,
+                "n_rescue_success": 0,
+                "conditional_fpr_estimate": None,
+                "conditional_fpr_sample_count": 0,
+                "tpr_at_fpr": None,
+                "geo_available_rate": None,
+                "rescue_rate": None,
+            }
+
+        group = grouped[key]
+        metrics_obj = item.get("metrics") if isinstance(item.get("metrics"), dict) else {}
+        reject_breakdown = metrics_obj.get("reject_rate_breakdown") if isinstance(metrics_obj.get("reject_rate_breakdown"), dict) else {}
+
+        n_total = metrics_obj.get("n_total")
+        n_accepted = metrics_obj.get("n_accepted")
+        n_rejected = metrics_obj.get("n_rejected")
+        if isinstance(n_total, int):
+            group["n_total"] += n_total
+            group["n_attack_applied"] += n_total
+        if isinstance(n_accepted, int):
+            group["n_valid_scored"] += n_accepted
+        if isinstance(n_rejected, int):
+            group["n_rejected_fail"] += max(n_rejected, 0)
+
+        group["n_rejected_absent"] += int(reject_breakdown.get("absent", 0) or 0)
+        group["n_rejected_mismatch"] += int(reject_breakdown.get("mismatch", 0) or 0)
+
+        rescue_triggered = metrics_obj.get("n_rescue_triggered")
+        rescue_success = metrics_obj.get("n_rescue_success")
+        if isinstance(rescue_triggered, int):
+            group["n_rescue_triggered"] += rescue_triggered
+        if isinstance(rescue_success, int):
+            group["n_rescue_success"] += rescue_success
+
+        conditional_fpr = metrics_obj.get("conditional_fpr_estimate")
+        conditional_fpr_n = metrics_obj.get("conditional_fpr_n")
+        if isinstance(conditional_fpr, (int, float)):
+            group["conditional_fpr_estimate"] = float(conditional_fpr)
+        if isinstance(conditional_fpr_n, int):
+            group["conditional_fpr_sample_count"] += conditional_fpr_n
+
+        for metric_name in ["tpr_at_fpr", "geo_available_rate", "rescue_rate"]:
+            metric_value = metrics_obj.get(metric_name)
+            if isinstance(metric_value, (int, float)):
+                group[metric_name] = float(metric_value)
+
+    return list(grouped.values())
 
 
 def _safe_str(value: Any) -> str:

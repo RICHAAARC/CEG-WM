@@ -11,6 +11,43 @@ from main.core import digests
 from main.core import records_io
 
 
+def _build_group_count_anchors(metrics_overall: Dict[str, Any]) -> Dict[str, int]:
+    """
+    功能：提取分组计数锚点（n_total 与 n_rejected_*）。
+
+    Build append-only count anchors from overall metrics.
+
+    Args:
+        metrics_overall: Overall metrics mapping.
+
+    Returns:
+        Count anchor mapping containing n_total and n_rejected_* keys when available.
+    """
+    if not isinstance(metrics_overall, dict):
+        raise TypeError("metrics_overall must be dict")
+
+    count_anchors: Dict[str, int] = {}
+    total_count = metrics_overall.get("n_total")
+    if isinstance(total_count, int):
+        count_anchors["n_total"] = total_count
+
+    rejected_total = metrics_overall.get("n_rejected")
+    if isinstance(rejected_total, int):
+        count_anchors["n_rejected"] = rejected_total
+
+    rejected_by_reason = metrics_overall.get("n_rejected_by_reason")
+    if isinstance(rejected_by_reason, dict):
+        for reason_key, reason_count in rejected_by_reason.items():
+            if not isinstance(reason_key, str) or not reason_key:
+                continue
+            if not isinstance(reason_count, int):
+                continue
+            normalized_key = reason_key.strip().lower().replace("-", "_").replace(" ", "_")
+            count_anchors[f"n_rejected_{normalized_key}"] = reason_count
+
+    return count_anchors
+
+
 def build_evaluation_report(
     cfg_digest: Optional[str],
     plan_digest: Optional[str],
@@ -26,6 +63,9 @@ def build_evaluation_report(
     thresholds_artifact: Optional[Dict[str, Any]] = None,
     attack_protocol_spec: Optional[Dict[str, Any]] = None,
     strict_anchor_validation: bool = True,
+    ablation_digest: Optional[str] = None,
+    attack_trace_digest: Optional[str] = None,
+    attack_coverage_digest: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     功能：组装完整的评测报告对象（包含所有锚点字段）。强制校验锚点字段完整性。
@@ -99,6 +139,8 @@ def build_evaluation_report(
             missing_anchors.append(("attack_protocol_digest", "attack protocol canonical digest"))
         if not isinstance(policy_path, str) or not policy_path.strip():
             missing_anchors.append(("policy_path", "policy path identifier"))
+        if not isinstance(ablation_digest, str) or not ablation_digest.strip():
+            missing_anchors.append(("ablation_digest", "normalized ablation digest from cfg"))
         
         if missing_anchors:
             error_msg_parts = ["Evaluation report anchor field validation FAILED:"]
@@ -130,6 +172,17 @@ def build_evaluation_report(
     safe_policy_path = (
         policy_path if isinstance(policy_path, str) and policy_path.strip() else "<absent>"
     )
+    safe_ablation_digest = (
+        ablation_digest if isinstance(ablation_digest, str) and ablation_digest.strip() else "<absent>"
+    )
+    safe_attack_trace_digest = (
+        attack_trace_digest if isinstance(attack_trace_digest, str) and attack_trace_digest.strip() else "<absent>"
+    )
+    safe_attack_coverage_digest = (
+        attack_coverage_digest
+        if isinstance(attack_coverage_digest, str) and attack_coverage_digest.strip()
+        else "<absent>"
+    )
 
     # 计算 metrics 和条件指标的 digest（用于审计）。
     metrics_digest = digests.canonical_sha256(metrics_overall)
@@ -140,6 +193,7 @@ def build_evaluation_report(
     # 组装报告（append-only 扩展原则）。
     report = {
         "evaluation_version": "eval_v1",
+        "report_type": "evaluation_report",
         # 锚点字段（必须存在）。
         "cfg_digest": safe_cfg_digest,
         "plan_digest": safe_plan_digest,
@@ -150,6 +204,9 @@ def build_evaluation_report(
         "attack_protocol_version": safe_attack_protocol_version,
         "attack_protocol_digest": safe_attack_protocol_digest,
         "policy_path": safe_policy_path,
+        "ablation_digest": safe_ablation_digest,
+        "attack_trace_digest": safe_attack_trace_digest,
+        "attack_coverage_digest": safe_attack_coverage_digest,
         # 指标数据。
         "metrics": metrics_overall,
         "metrics_by_attack_condition": metrics_by_attack_condition,
@@ -159,6 +216,8 @@ def build_evaluation_report(
     }
 
     # 构造锚点物业摘要（用于 run_closure）。
+    count_anchors = _build_group_count_anchors(metrics_overall)
+
     anchors = {
         "cfg_digest": safe_cfg_digest,
         "plan_digest": safe_plan_digest,
@@ -169,8 +228,13 @@ def build_evaluation_report(
         "policy_path": safe_policy_path,
         "impl_digest": safe_impl_digest,
         "fusion_rule_version": safe_fusion_rule_version,
+        "ablation_digest": safe_ablation_digest,
+        "attack_trace_digest": safe_attack_trace_digest,
+        "attack_coverage_digest": safe_attack_coverage_digest,
     }
+    anchors.update(count_anchors)
     report["anchors"] = anchors
+    report["group_count_anchors"] = count_anchors
 
     # 如果提供了 thresholds_artifact，将关键字段持久化（用于后续复核）。
     if isinstance(thresholds_artifact, dict):

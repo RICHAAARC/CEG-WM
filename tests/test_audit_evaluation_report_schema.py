@@ -5,10 +5,6 @@ Test that audit_evaluation_report_schema correctly validates report anchor field
 """
 
 import json
-import tempfile
-from pathlib import Path
-
-import pytest
 from scripts.audits import audit_evaluation_report_schema
 
 
@@ -137,6 +133,38 @@ class TestAuditEvaluationReportSchema:
         captured = capsys.readouterr()
         output = json.loads(captured.out)
         assert output["result"] == "N.A."
+
+    def test_audit_evaluation_report_schema_does_not_select_signoff_report(self, tmp_path, capsys):
+        """测试：仅存在 signoff_report.json 时必须返回 N.A.，不得误判为 evaluation_report。"""
+        signoff_report_path = tmp_path / "outputs" / "smoke_detect" / "artifacts" / "signoff" / "signoff_report.json"
+        signoff_report_path.parent.mkdir(parents=True, exist_ok=True)
+        signoff_report_path.write_text(
+            json.dumps({"freeze_signoff_decision": "BLOCK_FREEZE"}),
+            encoding="utf-8",
+        )
+
+        result = audit_evaluation_report_schema.main(str(tmp_path))
+
+        assert result == 0
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["result"] == "N.A."
+        assert output["severity"] == "NON_BLOCK"
+
+    def test_audit_evaluation_report_schema_returns_na_when_evaluation_report_missing(self, tmp_path, capsys):
+        """测试：缺失 evaluation_report 时必须返回 N.A.，不得返回 ERROR/FAIL。"""
+        run_closure_path = tmp_path / "outputs" / "smoke_detect" / "artifacts" / "run_closure.json"
+        run_closure_path.parent.mkdir(parents=True, exist_ok=True)
+        run_closure_path.write_text(json.dumps({"command": "detect"}), encoding="utf-8")
+
+        result = audit_evaluation_report_schema.main(str(tmp_path))
+
+        assert result == 0
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["result"] == "N.A."
+        assert output["severity"] == "NON_BLOCK"
+        assert "workflow_mode" in output["evidence"]
 
     def test_audit_output_format_is_valid_json(self, tmp_path, capsys):
         """测试：审计输出符合 JSON 格式。"""

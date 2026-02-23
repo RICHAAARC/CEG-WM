@@ -35,6 +35,7 @@ from main.watermarking.geometry_chain.align_invariance_extractor import (
 from main.evaluation import protocol_loader as eval_protocol_loader
 from main.evaluation import metrics as eval_metrics
 from main.evaluation import report_builder as eval_report_builder
+from main.evaluation import attack_coverage as eval_attack_coverage
 
 
 def run_detect_orchestrator(
@@ -1831,6 +1832,10 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
             f"  - 原因: evaluate 侧修改或污染了 thresholds 工件"
         )
     attack_group_metrics = aggregated_metrics.get("metrics_by_attack_condition", [])
+    ablation_digest = _compute_ablation_digest_for_report(cfg)
+    attack_trace_digest = _collect_attack_trace_digest(detect_records)
+    coverage_manifest = eval_attack_coverage.compute_attack_coverage_manifest()
+    attack_coverage_digest = coverage_manifest.get("attack_coverage_digest", "<absent>")
     
     # 构造条件指标容器（向后兼容）。
     conditional_metrics = eval_report_builder.build_conditional_metrics_container(
@@ -1883,6 +1888,9 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
         metrics_by_attack_condition=attack_group_metrics,
         thresholds_artifact=thresholds_obj,
         attack_protocol_spec=attack_protocol_spec,  # (向后兼容)
+        ablation_digest=ablation_digest,
+        attack_trace_digest=attack_trace_digest,
+        attack_coverage_digest=attack_coverage_digest,
     )
     
     # append-only 加入 readonly guard 记录
@@ -3081,6 +3089,62 @@ def _get_ablation_normalized(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(normalized, dict):
         return {}
     return normalized
+
+
+def _compute_ablation_digest_for_report(cfg: Dict[str, Any]) -> str:
+    """
+    功能：计算评测报告使用的 ablation_digest。 
+
+    Compute canonical ablation digest from normalized ablation config.
+
+    Args:
+        cfg: Runtime config mapping.
+
+    Returns:
+        Canonical digest string.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    ablation_normalized = _get_ablation_normalized(cfg)
+    if not isinstance(ablation_normalized, dict):
+        return digests.canonical_sha256({})
+    return digests.canonical_sha256(ablation_normalized)
+
+
+def _collect_attack_trace_digest(records: list[Dict[str, Any]]) -> str:
+    """
+    功能：聚合 detect records 中攻击追踪摘要。 
+
+    Collect deterministic aggregate digest from per-record attack traces.
+
+    Args:
+        records: Detect records list.
+
+    Returns:
+        Aggregate digest string or "<absent>".
+    """
+    if not isinstance(records, list):
+        raise TypeError("records must be list")
+
+    trace_digests: list[str] = []
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+
+        direct_digest = item.get("attack_trace_digest")
+        if isinstance(direct_digest, str) and direct_digest:
+            trace_digests.append(direct_digest)
+            continue
+
+        attack_trace = item.get("attack_trace")
+        if isinstance(attack_trace, dict):
+            nested_digest = attack_trace.get("attack_trace_digest")
+            if isinstance(nested_digest, str) and nested_digest:
+                trace_digests.append(nested_digest)
+
+    if len(trace_digests) == 0:
+        return "<absent>"
+    return digests.canonical_sha256(sorted(trace_digests))
 
 
 def _build_ablation_absent_content_evidence(absent_reason: str) -> Dict[str, Any]:

@@ -27,6 +27,7 @@ class TestEvaluationReportAnchors:
         attack_protocol_version = "attack_protocol_v1"
         attack_protocol_digest = "sha256_proto_ghi"
         policy_path = "policy://test_policy"
+        ablation_digest = "sha256_ablation_xyz"
 
         metrics_overall = {
             "tpr_at_fpr_primary": 0.95,
@@ -49,6 +50,7 @@ class TestEvaluationReportAnchors:
             attack_protocol_version=attack_protocol_version,
             attack_protocol_digest=attack_protocol_digest,
             policy_path=policy_path,
+            ablation_digest=ablation_digest,
             metrics_overall=metrics_overall,
             metrics_by_attack_condition=metrics_by_condition,
             strict_anchor_validation=False,  # Disable strict validation for this test
@@ -64,6 +66,7 @@ class TestEvaluationReportAnchors:
         assert report["attack_protocol_version"] == attack_protocol_version
         assert report["attack_protocol_digest"] == attack_protocol_digest
         assert report["policy_path"] == policy_path
+        assert report["ablation_digest"] == ablation_digest
 
         # Assert - anchors 子结构也包含这些字段
         anchors = report.get("anchors", {})
@@ -89,6 +92,7 @@ class TestEvaluationReportAnchors:
                 attack_protocol_version="attack_protocol_v1",
                 attack_protocol_digest="sha256_proto",
                 policy_path="policy://test",
+                ablation_digest="sha256_ablation",
                 metrics_overall=metrics_overall,
                 metrics_by_attack_condition=metrics_by_condition,
                 strict_anchor_validation=True,  # Enable strict validation
@@ -112,6 +116,7 @@ class TestEvaluationReportAnchors:
                 attack_protocol_version="attack_protocol_v1",
                 attack_protocol_digest="sha256_proto",
                 policy_path="policy://test",
+                ablation_digest="sha256_ablation",
                 metrics_overall=metrics_overall,
                 metrics_by_attack_condition=metrics_by_condition,
                 strict_anchor_validation=True,
@@ -135,6 +140,7 @@ class TestEvaluationReportAnchors:
                 attack_protocol_version=None,  # Missing!
                 attack_protocol_digest="sha256_proto",
                 policy_path="policy://test",
+                ablation_digest="sha256_ablation",
                 metrics_overall=metrics_overall,
                 metrics_by_attack_condition=metrics_by_condition,
                 strict_anchor_validation=True,
@@ -159,6 +165,7 @@ class TestEvaluationReportAnchors:
             attack_protocol_version="attack_protocol_v1",
             attack_protocol_digest="sha256_proto",
             policy_path="policy://test",
+            ablation_digest="sha256_ablation",
             metrics_overall=metrics_overall,
             metrics_by_attack_condition=metrics_by_condition,
             strict_anchor_validation=False,
@@ -186,6 +193,7 @@ class TestEvaluationReportAnchors:
             attack_protocol_version="attack_protocol_v1",
             attack_protocol_digest=None,
             policy_path="policy://test",
+            ablation_digest=None,
             metrics_overall=metrics_overall,
             metrics_by_attack_condition=metrics_by_condition,
             strict_anchor_validation=False,  # Disable strict validation
@@ -215,6 +223,7 @@ class TestEvaluationReportAnchors:
             attack_protocol_version="attack_protocol_v1",
             attack_protocol_digest="sha256_proto",
             policy_path="policy://test",
+            ablation_digest="sha256_ablation",
             metrics_overall={
                 "rescue_rate": 0.1,
                 "geo_available_rate": 0.7,
@@ -232,6 +241,43 @@ class TestEvaluationReportAnchors:
         assert isinstance(impl_anchors.get("content"), dict)
         assert isinstance(impl_anchors.get("geometry"), dict)
         assert isinstance(impl_anchors.get("fusion"), dict)
+
+    def test_report_contains_group_count_anchors_and_report_type(self):
+        """测试：报告追加 report_type 与分组计数锚点（append-only）。"""
+        report = report_builder.build_evaluation_report(
+            cfg_digest="sha256_cfg",
+            plan_digest="sha256_plan",
+            thresholds_digest="sha256_thresh",
+            threshold_metadata_digest="sha256_metadata",
+            impl_digest="sha256_impl",
+            fusion_rule_version="fusion_v1",
+            attack_protocol_version="attack_protocol_v1",
+            attack_protocol_digest="sha256_proto",
+            policy_path="policy://test",
+            ablation_digest="sha256_ablation",
+            metrics_overall={
+                "n_total": 100,
+                "n_rejected": 23,
+                "n_rejected_by_reason": {
+                    "geo_absent": 5,
+                    "plan_mismatch": 18,
+                },
+            },
+            metrics_by_attack_condition=[],
+            strict_anchor_validation=False,
+        )
+
+        assert report.get("report_type") == "evaluation_report"
+        anchors = report.get("anchors")
+        assert isinstance(anchors, dict)
+        assert anchors.get("n_total") == 100
+        assert anchors.get("n_rejected") == 23
+        assert anchors.get("n_rejected_geo_absent") == 5
+        assert anchors.get("n_rejected_plan_mismatch") == 18
+
+        group_count_anchors = report.get("group_count_anchors")
+        assert isinstance(group_count_anchors, dict)
+        assert group_count_anchors.get("n_total") == 100
 
     def test_write_eval_report_via_records_io_wraps_payload(self, monkeypatch):
         """测试：评测报告写盘通过 records_io 且 payload 封装稳定。"""

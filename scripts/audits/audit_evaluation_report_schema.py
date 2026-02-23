@@ -12,7 +12,7 @@ Module type: Core innovation module
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # 必备锚点字段（论文级一致性要求）
 REQUIRED_ANCHOR_FIELDS = [
@@ -35,8 +35,51 @@ ANCHOR_SEARCH_PATHS = [
     (["anchors"], REQUIRED_ANCHOR_FIELDS),
 ]
 
+EXCLUDED_REPORT_FILE_NAMES = {
+    "signoff_report.json",
+    "audit_report.json",
+    "run_closure.json",
+    "records_manifest.json",
+}
 
-def find_evaluation_report(repo_root: Path) -> Optional[Path]:
+
+def _infer_workflow_mode(repo_root: Path) -> Optional[str]:
+    """
+    功能：尝试从已有 run_closure 推断工作流模式。
+
+    Infer workflow mode from the latest run_closure when available.
+
+    Args:
+        repo_root: Repository root directory.
+
+    Returns:
+        Inferred workflow mode string or None when unavailable.
+    """
+    closure_candidates = list((repo_root / "outputs").rglob("artifacts/run_closure.json"))
+    if not closure_candidates:
+        return None
+
+    latest_closure = sorted(closure_candidates, key=lambda p: p.stat().st_mtime, reverse=True)[0]
+    run_root_name = latest_closure.parent.parent.name
+    if run_root_name:
+        return run_root_name
+
+    try:
+        closure_obj_any = json.loads(latest_closure.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    if not isinstance(closure_obj_any, dict):
+        return None
+
+    closure_obj = closure_obj_any
+    command_name = closure_obj.get("command")
+    if isinstance(command_name, str) and command_name:
+        return command_name
+    return None
+
+
+def find_evaluation_report_path(repo_root: Path) -> Optional[Path]:
     """
     功能：定位最新的评测报告文件。
 
@@ -48,7 +91,7 @@ def find_evaluation_report(repo_root: Path) -> Optional[Path]:
     Returns:
         Path to report file or None if not found.
     """
-    # 优先搜索 outputs，再搜索 artifacts
+    # 仅匹配 evaluation_report 系列，禁止宽匹配 *report*.json
     search_dirs = [
         repo_root / "outputs",
         repo_root / "artifacts",
@@ -58,9 +101,10 @@ def find_evaluation_report(repo_root: Path) -> Optional[Path]:
         if not search_dir.exists():
             continue
         
-        # 查找所有 evaluation_report*.json 和 report*.json
-        report_files = list(search_dir.rglob("evaluation_report*.json"))
-        report_files.extend(search_dir.rglob("*report*.json"))
+        report_files = [
+            path for path in search_dir.rglob("evaluation_report*.json")
+            if path.name not in EXCLUDED_REPORT_FILE_NAMES
+        ]
         
         if report_files:
             # 按修改时间排序，返回最新的
@@ -69,7 +113,36 @@ def find_evaluation_report(repo_root: Path) -> Optional[Path]:
     return None
 
 
-def validate_anchor_fields(report_obj: Dict[str, Any]) -> tuple[bool, List[str]]:
+def _is_evaluation_report_semantic(report_obj: Dict[str, Any]) -> bool:
+    """
+    功能：对报告对象进行评测报告语义判别。
+
+    Determine whether a report object is semantically an evaluation report.
+
+    Args:
+        report_obj: Parsed report JSON object.
+
+    Returns:
+        True if object is considered an evaluation report, otherwise False.
+    """
+    report_type = report_obj.get("report_type")
+    if isinstance(report_type, str):
+        return report_type == "evaluation_report"
+
+    # 兼容旧格式：无 report_type 时，只要含有至少一个评测锚点即可进入 schema 校验
+    for field_name in REQUIRED_ANCHOR_FIELDS:
+        if field_name in report_obj:
+            return True
+
+    anchors_obj = report_obj.get("anchors")
+    if isinstance(anchors_obj, dict):
+        for field_name in REQUIRED_ANCHOR_FIELDS:
+            if field_name in anchors_obj:
+                return True
+    return False
+
+
+def validate_anchor_fields(report_obj: Dict[str, Any]) -> Tuple[bool, List[str]]:
     """
     功能：验证报告中的锚点字段完整性。
 
@@ -139,7 +212,7 @@ def main(repo_root_str: Optional[str] = None) -> int:
     repo_root = Path(repo_root_str) if repo_root_str else Path.cwd()
     
     # 定位报告文件
-    report_path = find_evaluation_report(repo_root)
+    report_path = find_evaluation_report_path(repo_root)
     
     if report_path is None:
         # 未找到报告（可能尚未生成，非 FAIL）
@@ -153,6 +226,7 @@ def main(repo_root_str: Optional[str] = None) -> int:
             "evidence": {
                 "search_locations": ["outputs/", "artifacts/"],
                 "status": "report_not_yet_generated",
+                "workflow_mode": _infer_workflow_mode(repo_root) or "evaluation step not executed",
             },
             "impact": "evaluation report is not available for audit",
             "fix": "generate evaluation report via evaluate workflow",
@@ -181,6 +255,43 @@ def main(repo_root_str: Optional[str] = None) -> int:
         }
         print(json.dumps(result, indent=2))
         return 1
+
+    if not isinstance(report_obj, dict):
+        result = {
+            "audit_id": "audit_evaluation_report_schema",
+            "gate_name": "gate_evaluation_report_schema",
+            "category": "S",
+            "severity": "NON_BLOCK",
+            "result": "N.A.",
+            "rule": "matched file is not a valid evaluation report object",
+            "evidence": {
+                "report_path": str(report_path),
+                "status": "non_evaluation_report_object",
+            },
+            "impact": "evaluation report is not available for schema audit",
+            "fix": "generate evaluation report via evaluate workflow",
+        }
+        print(json.dumps(result, indent=2))
+        return 0
+
+    if not _is_evaluation_report_semantic(report_obj):
+        result = {
+            "audit_id": "audit_evaluation_report_schema",
+            "gate_name": "gate_evaluation_report_schema",
+            "category": "S",
+            "severity": "NON_BLOCK",
+            "result": "N.A.",
+            "rule": "matched file is not semantically an evaluation report",
+            "evidence": {
+                "report_path": str(report_path),
+                "status": "non_evaluation_report_semantic",
+                "workflow_mode": _infer_workflow_mode(repo_root) or "evaluation step not executed",
+            },
+            "impact": "evaluation report is not available for schema audit",
+            "fix": "generate evaluation report via evaluate workflow",
+        }
+        print(json.dumps(result, indent=2))
+        return 0
     
     # 验证锚点字段
     is_valid, missing_fields = validate_anchor_fields(report_obj)

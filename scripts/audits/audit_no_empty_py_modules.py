@@ -131,9 +131,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     # (4) 输出审计结果（JSON 格式）
     audit_result = result.get("result", "UNKNOWN")
     
+    # 统一输出为 dict（signoff 脚本要求 audit 输出 root 必须为 dict）
+    output_dict = {}
+    
     if audit_result == "FAIL":
-        # 违规情况：输出错误信息数组
-        error_info = {
+        # 违规情况：输出错误信息 dict
+        output_dict = {
             "audit_id": result.get("audit_id"),
             "severity": result.get("severity"),
             "result": result.get("result"),
@@ -142,19 +145,30 @@ def main(argv: Optional[List[str]] = None) -> int:
             "fix": result.get("fix"),
             "evidence": result.get("evidence"),
         }
-        print(json.dumps([error_info], indent=2, ensure_ascii=False))
+        print(json.dumps(output_dict, indent=2, ensure_ascii=False))
         return 1
     elif audit_result == "PASS":
-        # 通过：输出空数组
-        print(json.dumps([], indent=2, ensure_ascii=False))
+        # 通过：输出 PASS dict
+        output_dict = {
+            "audit_id": result.get("audit_id"),
+            "severity": result.get("severity"),
+            "result": result.get("result"),
+            "rule": result.get("rule"),
+            "impact": result.get("impact"),
+            "fix": result.get("fix"),
+            "evidence": result.get("evidence"),
+        }
+        print(json.dumps(output_dict, indent=2, ensure_ascii=False))
         return 0
     elif audit_result == "SKIP":
-        # 跳过：输出空数组
-        print(json.dumps([], indent=2, ensure_ascii=False))
+        # 跳过：输出 SKIP dict
+        output_dict = result
+        print(json.dumps(output_dict, indent=2, ensure_ascii=False))
         return 0
     else:
         # 未知状态：作为通过处理
-        print(json.dumps([], indent=2, ensure_ascii=False))
+        output_dict = result
+        print(json.dumps(output_dict, indent=2, ensure_ascii=False))
         return 0
 
 

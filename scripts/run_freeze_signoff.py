@@ -1,10 +1,21 @@
 """
-冻结签署入口点
+冻结签署入点（发布级工作流最后阶段）
 
 功能说明：
+- 冻结签署要求输入 run_root 必须来自完整工作流（embed → detect → calibrate → evaluate）。
+- 仅接受包含 evaluation_report.json 的产物证据包，确保签署决策基于完整证据链。
 - 以 run_root 产物证据包为输入执行 freeze sign-off。
 - 执行最小静态审计集合作为补充证据。
 - 校验 run_closure / manifest / cfg_audit / env_audit / path_audit 一致性。
+
+发布级工作流：
+  1. embed: 生成水印嵌入计划
+  2. detect: 生成并运行检测方案
+  3. calibrate: 校准阈值与融合规则
+  4. evaluate: 以只读阈值进行完整性能评测，输出 evaluation_report.json
+  5. signoff: 审计与冻结决策（本模块）
+
+smoke_detect（冒烟测试） 不包含 evaluate，不适用于 signoff 输入。
 
 Module type: Core innovation module
 """
@@ -204,9 +215,11 @@ def _load_json_file(path: Path) -> Tuple[Optional[Dict[str, Any]], Optional[str]
 
 def validate_run_root_evidence(run_root: Path) -> Dict[str, Any]:
     """
-    功能：校验 run_root 产物证据包完整性与一致性。
+    功能：校验 run_root 产物证据包完整性与一致性。冻结签署要求输入必须来自完整工作流（embed → detect → calibrate → evaluate）。
 
     Validate required signoff evidence from run_root artifacts.
+    Freeze signoff enforces that run_root MUST contain complete evaluation report artifact
+    from full publish-grade workflow (embed → detect → calibrate → evaluate).
 
     Args:
         run_root: Target run root directory.
@@ -252,6 +265,19 @@ def validate_run_root_evidence(run_root: Path) -> Dict[str, Any]:
         status_ok = status_obj_typed.get("ok")
         if not isinstance(status_ok, bool):
             errors.append("run_closure.status.ok must be bool")
+
+    # 强制约束：evaluation_report.json 必须存在
+    # Mandatory: evaluation_report must exist (from complete publish-grade workflow)
+    evaluation_report_path = artifacts_dir / "evaluation_report.json"
+    eval_report, eval_report_error = _load_json_file(evaluation_report_path)
+    if eval_report_error is not None:
+        errors.append(
+            f"evaluation_report_missing: freeze signoff requires complete workflow output (embed → detect → calibrate → evaluate). "
+            f"See run_repro_pipeline.py to generate publish-grade run bundle. "
+            f"Expected path: {evaluation_report_path}"
+        )
+    elif eval_report is None:
+        errors.append("evaluation_report_unexpected_none")
 
     # cfg_audit 必须存在
     cfg_audit_path = artifacts_dir / "cfg_audit" / "cfg_audit.json"

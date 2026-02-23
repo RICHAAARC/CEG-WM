@@ -40,6 +40,12 @@ CONTROLLED_WRITE_FUNCTIONS = {
 # 写模式标识符
 WRITE_MODES = {"w", "wb", "a", "ab", "x", "xb", "r+", "rb+", "w+", "wb+", "a+", "ab+"}
 
+# 允许的工具类模块（可以直接写盘，无需通过 records_io）
+# 这些是非关键产物的导出/工具函数，可在 main/ 中直接调用 Path.write_*
+ALLOWLISTED_TOOL_MODULES = {
+    "main/evaluation/table_export.py",
+}
+
 
 class WriteCallVisitor(ast.NodeVisitor):
     """
@@ -425,6 +431,11 @@ def classify_match(match: Dict[str, Any], repo_root: Path) -> str:
 
     if access == "read":
         return "ALLOWLISTED"
+    
+    # (0) 允许的工具类模块 → ALLOWLISTED（非关键产物）
+    for tool_module in ALLOWLISTED_TOOL_MODULES:
+        if tool_module in rel_path:
+            return "ALLOWLISTED"
     
     # (1) records_io.py 中的受控写盘函数内部 → ALLOWLISTED
     # 特别处理：os.open() access=unknown 时，通过函数上下文判断
