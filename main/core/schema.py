@@ -56,13 +56,15 @@ _FALLBACK_OPTIONAL_STR_FIELDS = [
     "decision.used_threshold_id",
     "decision.routing_digest",
     "decision.fusion_rule_digest",
-    "decision.rescue_band_version"
+    "decision.rescue_band_version",
+    "attack_trace_digest"
 ]
 
 _FALLBACK_OPTIONAL_NUMBER_FIELDS = [
     "content_evidence.lf_score",
     "content_evidence.hf_score",
-    "geometry_evidence.geo_score"
+    "geometry_evidence.geo_score",
+    "attack_random_seed"
 ]
 
 _FALLBACK_OPTIONAL_MAPPING_FIELDS = [
@@ -75,7 +77,8 @@ _FALLBACK_OPTIONAL_MAPPING_FIELDS = [
     "geometry_evidence.sync_quality_metrics",
     "geometry_evidence.align_metrics",
     "decision.routing_decisions",
-    "decision.conditional_fpr_notes"
+    "decision.conditional_fpr_notes",
+    "attack_trace"
 ]
 
 

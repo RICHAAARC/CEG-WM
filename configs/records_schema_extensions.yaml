@@ -743,6 +743,28 @@ fields:
 
   - path: "detect_runtime_is_fallback"
     layer: "diagnostic"
+    type: "boolean_flag"
     required: false
     missing_semantics: "absent_ok"
     description: "detect 侧兼容字段：是否处于回退模式（由 detect_runtime_mode 派生）。"
+
+  - path: "attack_trace"
+    layer: "diagnostic"
+    type: "metrics_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "攻击执行追踪信息（攻击族、参数、插值、顺序、随机种子、库版本）。"
+
+  - path: "attack_trace_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "攻击执行追踪摘要（canonical sha256）。"
+
+  - path: "attack_random_seed"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "攻击执行随机种子（用于可复算绑定）。"
