@@ -465,8 +465,14 @@ def classify_match(match: Dict[str, Any], repo_root: Path) -> str:
     if rel_path.startswith("tests/"):
         return "WARNING"
     
-    # (4) scripts/ 中的其他脚本（如审计脚本）→ WARNING（审计脚本可能有合理理由写入临时结果）
+    # (4) scripts/ 中：区分业务脚本 vs 审计工具脚本
     if rel_path.startswith("scripts/"):
+        # 审计脚本本身可以输出临时结果 → WARNING
+        if "audits/" in rel_path or rel_path.endswith("run_all_audits.py"):
+            return "WARNING"
+        # 业务脚本（run_*.py）不应直接调用写 API，必须使用受控路径 → FAIL
+        if rel_path.endswith(".py"):
+            return "FAIL"
         return "WARNING"
     
     # (5) main/ 中且可能写入关键产物 → FAIL
@@ -496,11 +502,12 @@ def run_audit(repo_root: Path) -> Dict[str, Any]:
             matches = scan_file(pyfile)
             all_matches.extend(matches)
     
-    # 扫描关键脚本：scripts/run_freeze_signoff.py
-    signoff_script = repo_root / "scripts" / "run_freeze_signoff.py"
-    if signoff_script.exists():
-        matches = scan_file(signoff_script)
-        all_matches.extend(matches)
+    # 扫描 scripts/ 目录下所有 Python 文件（包括业务脚本和审计脚本）
+    scripts_dir = repo_root / "scripts"
+    if scripts_dir.exists():
+        for pyfile in scripts_dir.rglob("*.py"):
+            matches = scan_file(pyfile)
+            all_matches.extend(matches)
     
     # 分类命中点
     fail_matches = []

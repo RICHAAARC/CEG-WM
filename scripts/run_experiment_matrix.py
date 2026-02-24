@@ -9,7 +9,6 @@ Module type: General module
 """
 
 import argparse
-import json
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -21,10 +20,73 @@ if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
 from main.core import config_loader
+from main.core.records_io import write_artifact_json_unbound
 from main.evaluation import experiment_matrix
 from main.evaluation import protocol_loader
 from main.evaluation import attack_coverage
 from main.evaluation import attack_protocol_guard
+from main.policy import path_policy
+
+
+def _resolve_controlled_summary_output_path(
+    output_summary: str,
+    batch_root: str,
+) -> Dict[str, Path]:
+    """
+    功能：解析并校验受控 summary 输出路径。
+
+    Resolve and validate controlled summary output path under batch_root/artifacts/experiment_matrix.
+
+    Args:
+        output_summary: CLI-provided summary filename.
+        batch_root: Batch root path from grid summary.
+
+    Returns:
+        Mapping containing validated run_root, artifacts_dir, and target_path.
+
+    Raises:
+        TypeError: If input types are invalid.
+        ValueError: If output_summary is absolute path, contains traversal, or batch_root is invalid.
+        RuntimeError: If output layout cannot be ensured.
+    """
+    if not isinstance(output_summary, str) or not output_summary.strip():
+        # output_summary 输入不合法，必须 fail-fast。
+        raise TypeError("output_summary must be non-empty str")
+    if not isinstance(batch_root, str) or not batch_root.strip():
+        # batch_root 输入不合法，必须 fail-fast。
+        raise TypeError("batch_root must be non-empty str")
+
+    output_name = Path(output_summary.strip())
+    if output_name.is_absolute():
+        # 禁止绝对路径写盘，防止绕过受控目录。
+        raise ValueError("--output-summary must be filename only; absolute path is not allowed")
+    if output_name.name != output_name.as_posix() or output_name.name in {"", ".", ".."}:
+        # 禁止目录分量和逃逸分量，强制仅允许文件名。
+        raise ValueError("--output-summary must be filename only; directory components are not allowed")
+
+    try:
+        validated_run_root = path_policy.derive_run_root(Path(batch_root))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"batch_root validation failed: {type(exc).__name__}: {exc}") from exc
+
+    try:
+        layout = path_policy.ensure_output_layout(
+            validated_run_root,
+            allow_nonempty_run_root=True,
+            allow_nonempty_run_root_reason="experiment_matrix_summary_write",
+            override_applied={"allow_nonempty_run_root": True},
+        )
+    except Exception as exc:
+        raise RuntimeError(f"failed to ensure output layout: {type(exc).__name__}: {exc}") from exc
+
+    artifacts_dir = layout["artifacts_dir"]
+    target_path = artifacts_dir / "experiment_matrix" / output_name.name
+
+    return {
+        "run_root": validated_run_root,
+        "artifacts_dir": artifacts_dir,
+        "target_path": target_path,
+    }
 
 
 def run_experiment_matrix_batch(
@@ -148,11 +210,19 @@ def main() -> None:
 
         # 可选：写入摘要到指定路径
         if args.output_summary:
-            output_path = Path(args.output_summary)
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            with output_path.open("w", encoding="utf-8") as f:
-                json.dump(grid_summary, f, indent=2, ensure_ascii=False)
-            print(f"  - Summary written to: {output_path}", file=sys.stderr)
+            output_plan = _resolve_controlled_summary_output_path(
+                output_summary=str(args.output_summary),
+                batch_root=str(grid_summary.get("batch_root", "")),
+            )
+            write_artifact_json_unbound(
+                run_root=output_plan["run_root"],
+                artifacts_dir=output_plan["artifacts_dir"],
+                path=str(output_plan["target_path"]),
+                obj=grid_summary,
+                indent=2,
+                ensure_ascii=False,
+            )
+            print(f"  - Summary written to: {output_plan['target_path']}", file=sys.stderr)
 
         # 退出码：根据失败数决定
         if grid_summary.get("failed", 0) > 0 and args.strict:

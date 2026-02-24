@@ -11,6 +11,7 @@ import json
 import subprocess
 import sys
 import locale
+import os
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -35,6 +36,7 @@ AUDIT_SCRIPTS = [
     "audits/audit_attack_protocol_report_coverage.py",      # attack protocol 协议—报告覆盖率对齐（平台保障）
     "audits/audit_repro_bundle_integrity.py",               # repro bundle 完整性校验
     "audits/audit_experiment_matrix_outputs_schema.py",      # experiment matrix 汇总工件 schema 完整性
+    "audits/audit_protocol_compare_outputs_schema.py",      # protocol compare 汇总工件 schema 与一致性（research-only）
 ]
 
 
@@ -42,7 +44,7 @@ def _decode_bytes(data: Optional[bytes]) -> str:
     """
     功能：解码子进程字节输出。
 
-    Decode subprocess bytes with stable fallback.
+    Decode subprocess bytes with multi-codec fallback for robustness.
 
     Args:
         data: Bytes or None.
@@ -58,11 +60,16 @@ def _decode_bytes(data: Optional[bytes]) -> str:
     if not isinstance(data, (bytes, bytearray)):
         # data 类型不符合预期，必须 fail-fast。
         raise TypeError("data must be bytes or None")
-    try:
-        return bytes(data).decode("utf-8", errors="replace")
-    except Exception:
-        encoding = locale.getpreferredencoding(False)
-        return bytes(data).decode(encoding, errors="replace")
+    
+    # 尝试编码清单：UTF-8 -> GBK/CP936 -> Latin-1
+    for encoding in ["utf-8", "gbk", "cp936", "latin-1"]:
+        try:
+            return bytes(data).decode(encoding, errors="strict")
+        except (UnicodeDecodeError, LookupError):
+            continue
+    
+    # 所有编码均失败，使用 replacement 模式
+    return bytes(data).decode("utf-8", errors="replace")
 
 
 def execute_audit_script(script_path: Path, repo_root: Path) -> Optional[Dict[str, Any]]:
@@ -77,10 +84,15 @@ def execute_audit_script(script_path: Path, repo_root: Path) -> Optional[Dict[st
         Audit result dictionary or None if execution failed
     """
     try:
+        # 强制子进程使用 UTF-8 编码（Windows 环境）
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        
         result = subprocess.run(
             [sys.executable, str(script_path), str(repo_root)],
             capture_output=True,
             text=False,
+            env=env,
             timeout=60,
         )
 

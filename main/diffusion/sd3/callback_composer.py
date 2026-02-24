@@ -47,6 +47,7 @@ class InjectionContext:
     enable_hf: bool
     device: str = "cpu"
     dtype: str = "float32"
+    require_basis_region_spec: bool = False
 
     def __post_init__(self) -> None:
         # 验证必填字段。
@@ -75,6 +76,8 @@ class InjectionContext:
         
         if not isinstance(self.dtype, str) or not self.dtype:
             raise ValueError("dtype must be non-empty str")
+        if not isinstance(self.require_basis_region_spec, bool):
+            raise TypeError("require_basis_region_spec must be bool")
 
 
 class LatentInjectionHook:
@@ -154,7 +157,11 @@ class LatentInjectionHook:
                     "watermark": {
                         "lf": {"enabled": self.context.enable_lf},
                         "hf": {"enabled": self.context.enable_hf},
-                    }
+                    },
+                    "paper_faithfulness": {
+                        "enabled": self.context.require_basis_region_spec
+                    },
+                    "require_basis_region_spec": self.context.require_basis_region_spec,
                 },
                 step_index=step_index,
                 key=None  # 内部衍生
@@ -327,5 +334,6 @@ def extract_injection_context_from_cfg(
         enable_lf=enable_lf,
         enable_hf=enable_hf,
         device=device,
-        dtype=dtype
+        dtype=dtype,
+        require_basis_region_spec=bool(cfg.get("paper_faithfulness", {}).get("enabled", False))
     )

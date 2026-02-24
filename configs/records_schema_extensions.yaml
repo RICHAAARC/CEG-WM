@@ -40,6 +40,18 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "掩码来源实现身份（impl_id/impl_version/impl_digest）。"
+  - path: "content_evidence.mask_stats.mask_impl_id"
+    layer: "anchor"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "掩码实现标识（semantic_saliency_v1 或 texture_gradient_v1）。"
+  - path: "content_evidence.mask_stats.mask_fallback_reason"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "语义掩码 fallback 原因（禁止静默 fallback）。"
   - path: "content_evidence.mask_stats.mask_params_digest"
     layer: "anchor"
     type: "digest_hex64"
@@ -64,6 +76,36 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "内容链计划摘要（与 cfg_digest 区分）。"
+  - path: "content_evidence.subspace_plan.hf_region_index_spec"
+    layer: "anchor"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "HF 区域索引规格（可执行局部作用域）。"
+  - path: "content_evidence.subspace_plan.lf_region_index_spec"
+    layer: "anchor"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "LF 区域索引规格（可执行局部作用域）。"
+  - path: "content_evidence.subspace_plan.region_index_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "区域索引规格摘要。"
+  - path: "content_evidence.subspace_plan.lf_basis"
+    layer: "anchor"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "LF 可执行 basis 载荷（序列化表示）。"
+  - path: "content_evidence.subspace_plan.hf_basis"
+    layer: "anchor"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "HF 可执行 basis 载荷（序列化表示）。"
   - path: "content_evidence.basis_digest"
     layer: "anchor"
     type: "digest_hex64"

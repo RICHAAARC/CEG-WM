@@ -12,7 +12,7 @@ Module type: Core innovation module
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, List
 
 import numpy as np
 
@@ -85,6 +85,12 @@ class LatentModifier:
         
         if plan is not None and not isinstance(plan, dict):
             raise TypeError("plan must be dict or None")
+
+        lf_enabled = self._resolve_channel_enabled(cfg, "lf")
+        hf_enabled = self._resolve_channel_enabled(cfg, "hf")
+        require_basis_region_spec = self._resolve_require_basis_region_spec(cfg)
+        if require_basis_region_spec:
+            self._validate_required_plan_fields(plan, lf_enabled=lf_enabled, hf_enabled=hf_enabled)
         
         is_torch_input = False
         try:
@@ -108,8 +114,6 @@ class LatentModifier:
         latents_before_modifications = latents_working.copy()
         
         # 提取基础参数。
-        lf_enabled = cfg.get("lf_enabled", True)
-        hf_enabled = cfg.get("hf_enabled", True)
         
         if key is None:
             # 衍生 key：基于 step_index 与固定种子。
@@ -132,6 +136,7 @@ class LatentModifier:
             if lf_enabled and plan is not None:
                 try:
                     basis_lf = plan.get("lf_basis")
+                    lf_region_spec = plan.get("lf_region_index_spec")
                     if basis_lf is None:
                         lf_evidence = {
                             "status": "absent",
@@ -160,6 +165,7 @@ class LatentModifier:
                         latents_lf_delta = latents_lf_modified - channel_lf.reconstruct_from_lf_coeffs(
                             lf_coeffs, basis_lf, original_shape, is_torch=False
                         )
+                        latents_lf_delta = self._apply_region_spec_delta_np(latents_lf_delta, lf_region_spec)
                         latents_working = latents_working + latents_lf_delta
                         
                         # 构造 step 证据（含摘要但不含原始张量）。
@@ -188,6 +194,7 @@ class LatentModifier:
             if hf_enabled and plan is not None:
                 try:
                     basis_hf = plan.get("hf_basis")
+                    hf_region_spec = plan.get("hf_region_index_spec")
                     if basis_hf is None:
                         hf_evidence = {
                             "status": "absent",
@@ -213,6 +220,7 @@ class LatentModifier:
                         latents_hf_delta = latents_hf_modified - channel_hf.reconstruct_from_hf_coeffs(
                             hf_coeffs, basis_hf, original_shape, is_torch=False
                         )
+                        latents_hf_delta = self._apply_region_spec_delta_np(latents_hf_delta, hf_region_spec)
                         latents_working = latents_working + latents_hf_delta
                         
                         hf_evidence = {
@@ -298,8 +306,11 @@ class LatentModifier:
         latents_working = latents
         latents_before_modifications = latents.detach().clone()
 
-        lf_enabled = cfg.get("lf_enabled", True)
-        hf_enabled = cfg.get("hf_enabled", True)
+        lf_enabled = self._resolve_channel_enabled(cfg, "lf")
+        hf_enabled = self._resolve_channel_enabled(cfg, "hf")
+        require_basis_region_spec = self._resolve_require_basis_region_spec(cfg)
+        if require_basis_region_spec:
+            self._validate_required_plan_fields(plan, lf_enabled=lf_enabled, hf_enabled=hf_enabled)
 
         if key is None:
             seed_base = cfg.get("watermark_seed", 42)
@@ -332,6 +343,7 @@ class LatentModifier:
             if lf_enabled and isinstance(plan, dict):
                 try:
                     basis_lf = plan.get("lf_basis")
+                    lf_region_spec = plan.get("lf_region_index_spec")
                     if basis_lf is None:
                         lf_evidence = {
                             "status": "absent",
@@ -358,6 +370,7 @@ class LatentModifier:
                             dtype=original_dtype
                         )
                         latents_lf_delta = latents_lf_modified - latents_lf_original
+                        latents_lf_delta = self._apply_region_spec_delta_torch(latents_lf_delta, lf_region_spec)
                         latents_working = latents_working + latents_lf_delta
                         lf_delta_norm = float(torch.linalg.vector_norm(latents_lf_delta.to(dtype=torch.float32)).item())
 
@@ -385,6 +398,7 @@ class LatentModifier:
             if hf_enabled and isinstance(plan, dict):
                 try:
                     basis_hf = plan.get("hf_basis")
+                    hf_region_spec = plan.get("hf_region_index_spec")
                     if basis_hf is None:
                         hf_evidence = {
                             "status": "absent",
@@ -409,6 +423,7 @@ class LatentModifier:
                             dtype=original_dtype
                         )
                         latents_hf_delta = latents_hf_modified - latents_hf_original
+                        latents_hf_delta = self._apply_region_spec_delta_torch(latents_hf_delta, hf_region_spec)
                         latents_working = latents_working + latents_hf_delta
                         hf_delta_norm = float(torch.linalg.vector_norm(latents_hf_delta.to(dtype=torch.float32)).item())
 
@@ -461,3 +476,146 @@ class LatentModifier:
 
         latents_modified = latents_working.to(device=original_device, dtype=original_dtype)
         return latents_modified, step_evidence
+
+    def _resolve_channel_enabled(self, cfg: Dict[str, Any], channel: str) -> bool:
+        """
+        功能：统一解析 LF/HF 开关。
+
+        Resolve channel enable flag from both root and watermark config.
+
+        Args:
+            cfg: Configuration mapping.
+            channel: Channel tag ("lf" or "hf").
+
+        Returns:
+            Channel enabled boolean.
+        """
+        if channel not in {"lf", "hf"}:
+            raise ValueError("channel must be lf or hf")
+        direct_key = f"{channel}_enabled"
+        direct_value = cfg.get(direct_key)
+        if isinstance(direct_value, bool):
+            return direct_value
+        watermark_cfg = cfg.get("watermark") if isinstance(cfg.get("watermark"), dict) else {}
+        channel_cfg = watermark_cfg.get(channel) if isinstance(watermark_cfg.get(channel), dict) else {}
+        nested_value = channel_cfg.get("enabled")
+        if isinstance(nested_value, bool):
+            return nested_value
+        return True
+
+    def _resolve_require_basis_region_spec(self, cfg: Dict[str, Any]) -> bool:
+        """
+        功能：解析是否强制 basis/region_spec 校验。
+
+        Resolve strict requirement flag for basis and region specs.
+
+        Args:
+            cfg: Configuration mapping.
+
+        Returns:
+            True when strict validation is required.
+        """
+        strict_flag = cfg.get("require_basis_region_spec")
+        if isinstance(strict_flag, bool):
+            return strict_flag
+        paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
+        paper_enabled = paper_cfg.get("enabled")
+        return bool(paper_enabled)
+
+    def _validate_required_plan_fields(
+        self,
+        plan: Optional[Dict[str, Any]],
+        *,
+        lf_enabled: bool,
+        hf_enabled: bool,
+    ) -> None:
+        """
+        功能：强制校验注入计划字段完整性。
+
+        Validate basis and region spec presence for strict latent injection path.
+
+        Args:
+            plan: Plan mapping.
+            lf_enabled: LF enabled flag.
+            hf_enabled: HF enabled flag.
+
+        Returns:
+            None.
+
+        Raises:
+            ValueError: If required fields are missing.
+        """
+        if not isinstance(plan, dict):
+            raise ValueError("plan must be dict when strict latent injection is enabled")
+        if lf_enabled:
+            if not isinstance(plan.get("lf_basis"), dict):
+                raise ValueError("lf_basis is required in strict latent injection mode")
+            if not isinstance(plan.get("lf_region_index_spec"), dict):
+                raise ValueError("lf_region_index_spec is required in strict latent injection mode")
+        if hf_enabled:
+            if not isinstance(plan.get("hf_basis"), dict):
+                raise ValueError("hf_basis is required in strict latent injection mode")
+            if not isinstance(plan.get("hf_region_index_spec"), dict):
+                raise ValueError("hf_region_index_spec is required in strict latent injection mode")
+
+    def _apply_region_spec_delta_np(self, delta: np.ndarray, region_spec: Any) -> np.ndarray:
+        """
+        功能：在 numpy 路径按区域规格裁剪增量作用域。
+
+        Apply region-index masking to numpy delta.
+
+        Args:
+            delta: Delta tensor array.
+            region_spec: Region index specification mapping.
+
+        Returns:
+            Region-masked delta array.
+        """
+        if not isinstance(delta, np.ndarray):
+            raise TypeError("delta must be np.ndarray")
+        if not isinstance(region_spec, dict):
+            return delta
+        selected = region_spec.get("selected_indices")
+        if not isinstance(selected, list):
+            return delta
+        flat = delta.reshape(-1)
+        selected_set = {int(v) for v in selected if isinstance(v, int) and 0 <= int(v) < flat.shape[0]}
+        if not selected_set:
+            return np.zeros_like(delta)
+        mask = np.zeros(flat.shape[0], dtype=np.float32)
+        for index in sorted(selected_set):
+            mask[index] = 1.0
+        masked = flat * mask
+        return masked.reshape(delta.shape)
+
+    def _apply_region_spec_delta_torch(self, delta: Any, region_spec: Any) -> Any:
+        """
+        功能：在 torch 路径按区域规格裁剪增量作用域。
+
+        Apply region-index masking to torch delta tensor.
+
+        Args:
+            delta: Torch delta tensor.
+            region_spec: Region index specification mapping.
+
+        Returns:
+            Region-masked delta tensor.
+        """
+        import torch
+
+        if not torch.is_tensor(delta):
+            raise TypeError("delta must be torch.Tensor")
+        if not isinstance(region_spec, dict):
+            return delta
+        selected = region_spec.get("selected_indices")
+        if not isinstance(selected, list):
+            return delta
+        flat = delta.reshape(-1)
+        selected_indices: List[int] = [
+            int(v) for v in selected if isinstance(v, int) and 0 <= int(v) < int(flat.shape[0])
+        ]
+        if not selected_indices:
+            return torch.zeros_like(delta)
+        mask = torch.zeros(flat.shape[0], device=flat.device, dtype=flat.dtype)
+        mask[torch.tensor(selected_indices, device=flat.device, dtype=torch.long)] = 1.0
+        return (flat * mask).reshape(delta.shape)

@@ -23,6 +23,8 @@ from .interfaces import ContentEvidence
 SEMANTIC_MASK_PROVIDER_ID = "semantic_mask_provider_v1"
 SEMANTIC_MASK_PROVIDER_VERSION = "v1"
 SEMANTIC_MASK_TRACE_VERSION = "v2"
+SEMANTIC_SALIENCY_IMPL_ID = "semantic_saliency_v1"
+TEXTURE_FALLBACK_IMPL_ID = "texture_gradient_v1"
 
 MASK_ABSENT_REASON_DISABLED = "mask_disabled_by_config"
 ROUTING_ABSENT_REASON_MASK_DISABLED = "routing_mask_disabled"
@@ -237,12 +239,34 @@ class SemanticMaskProvider:
 
         # （3）掩码计算（确定性轻量算法：梯度幅值 + 开闭操作）。
         try:
-            mask_array, mask_stats, mask_binding = build_texture_mask_v1(
-                image=image_data,
-                image_shape=image_shape,
-                cfg=cfg,
-                params=mask_params
-            )
+            mask_impl_id = str(mask_params.get("mask_algo_version", SEMANTIC_SALIENCY_IMPL_ID))
+            fallback_reason = None
+            if mask_impl_id == SEMANTIC_SALIENCY_IMPL_ID:
+                try:
+                    mask_array, saliency_map, mask_stats, mask_binding = build_semantic_saliency_mask_v1(
+                        image=image_data,
+                        image_shape=image_shape,
+                        cfg=cfg,
+                        params=mask_params,
+                    )
+                except Exception as saliency_exc:
+                    fallback_reason = f"semantic_model_unavailable: {type(saliency_exc).__name__}"
+                    mask_impl_id = TEXTURE_FALLBACK_IMPL_ID
+                    mask_array, mask_stats, mask_binding = build_texture_mask_v1(
+                        image=image_data,
+                        image_shape=image_shape,
+                        cfg=cfg,
+                        params=mask_params,
+                    )
+                    saliency_map = mask_array.astype(np.float32)
+            else:
+                mask_array, mask_stats, mask_binding = build_texture_mask_v1(
+                    image=image_data,
+                    image_shape=image_shape,
+                    cfg=cfg,
+                    params=mask_params,
+                )
+                saliency_map = mask_array.astype(np.float32)
             mask_summary = summarize_mask_for_digest(
                 mask_array=mask_array,
                 mask_stats=mask_stats,
@@ -292,9 +316,15 @@ class SemanticMaskProvider:
             "impl_version": self.impl_version,
             "impl_digest": self.impl_digest,
         }
+        mask_stats_with_binding["mask_impl_id"] = mask_impl_id
+        mask_stats_with_binding["mask_fallback_reason"] = fallback_reason if isinstance(fallback_reason, str) else "<absent>"
+        mask_stats_with_binding["saliency_mean"] = round(float(np.mean(saliency_map)), 8)
+        mask_stats_with_binding["saliency_std"] = round(float(np.std(saliency_map)), 8)
         mask_stats_with_binding["mask_params_digest"] = mask_params_digest
         mask_stats_with_binding["routing_summary"] = routing_summary
         mask_stats_with_binding["routing_digest"] = routing_digest
+        audit["mask_impl_id"] = mask_impl_id
+        audit["mask_fallback_reason"] = fallback_reason if isinstance(fallback_reason, str) else "<absent>"
 
         # 5. 成功路径：返回 ok 状态（掩码成功提取的结构证据）。
         # 注意：掩码是结构证据，不产生检测分数 (score=None)。
@@ -548,12 +578,112 @@ def _resolve_mask_params(cfg: Dict[str, Any]) -> Dict[str, Any]:
     open_iters = max(0, min(open_iters, 3))
     close_iters = max(0, min(close_iters, 3))
 
+    mask_impl_id = mask_cfg.get("impl_id", SEMANTIC_SALIENCY_IMPL_ID)
+    if not isinstance(mask_impl_id, str) or not mask_impl_id:
+        mask_impl_id = SEMANTIC_SALIENCY_IMPL_ID
+
+    semantic_model_source = mask_cfg.get("semantic_model_source", "offline_heuristic")
+    semantic_model_version = mask_cfg.get("semantic_model_version", "v1")
+    semantic_weights_id = mask_cfg.get("semantic_weights_id", "builtin")
+    saliency_threshold_quantile = mask_cfg.get("saliency_threshold_quantile", threshold_quantile)
+    if not isinstance(saliency_threshold_quantile, (int, float)):
+        saliency_threshold_quantile = threshold_quantile
+    saliency_threshold_quantile = max(0.5, min(float(saliency_threshold_quantile), 0.98))
+
     return {
-        "mask_algo_version": "texture_gradient_v1",
+        "mask_algo_version": mask_impl_id,
         "threshold_quantile": threshold_quantile,
+        "saliency_threshold_quantile": saliency_threshold_quantile,
+        "semantic_model_source": semantic_model_source,
+        "semantic_model_version": semantic_model_version,
+        "semantic_weights_id": semantic_weights_id,
         "open_iters": open_iters,
         "close_iters": close_iters,
     }
+
+
+def build_semantic_saliency_mask_v1(
+    image: Any,
+    image_shape: Optional[Any],
+    cfg: Dict[str, Any],
+    params: Dict[str, Any],
+) -> tuple[np.ndarray, np.ndarray, Dict[str, Any], Dict[str, Any]]:
+    """
+    功能：基于可复算显著性代理生成语义掩码。
+
+    Build deterministic semantic saliency mask and map.
+
+    Args:
+        image: Input image payload.
+        image_shape: Optional shape hint.
+        cfg: Configuration mapping.
+        params: Mask parameter mapping.
+
+    Returns:
+        Tuple of (mask, saliency_map, mask_stats, binding).
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(params, dict):
+        raise TypeError("params must be dict")
+
+    image_array = _materialize_image_array(image, image_shape)
+    gray = _to_gray(image_array)
+    gradient_energy = _compute_gradient_energy(gray)
+
+    h, w = gray.shape
+    yy = np.linspace(-1.0, 1.0, h, dtype=np.float32)
+    xx = np.linspace(-1.0, 1.0, w, dtype=np.float32)
+    grid_y, grid_x = np.meshgrid(yy, xx, indexing="ij")
+    center_prior = 1.0 - np.clip(np.sqrt(grid_x * grid_x + grid_y * grid_y), 0.0, 1.0)
+    center_prior = center_prior.astype(np.float32)
+
+    energy_norm = gradient_energy / (float(np.max(gradient_energy)) + 1e-8)
+    gray_norm = gray / (float(np.max(gray)) + 1e-8)
+    saliency_map = 0.45 * energy_norm + 0.35 * center_prior + 0.20 * gray_norm
+    saliency_map = np.clip(saliency_map, 0.0, 1.0).astype(np.float32)
+
+    threshold = float(np.quantile(saliency_map, float(params.get("saliency_threshold_quantile", 0.8))))
+    mask = saliency_map >= threshold
+
+    open_iters = int(params.get("open_iters", 1))
+    close_iters = int(params.get("close_iters", 1))
+    for _ in range(open_iters):
+        mask = _binary_dilate(_binary_erode(mask))
+    for _ in range(close_iters):
+        mask = _binary_erode(_binary_dilate(mask))
+
+    area_ratio = float(np.mean(mask)) if mask.size > 0 else 0.0
+    component_count = _count_connected_components(mask)
+    largest_component_ratio = _largest_component_ratio(mask)
+    boundary_length = _mask_boundary_length(mask)
+    perimeter_to_area = float(boundary_length / max(1.0, float(mask.sum())))
+    downsample_grid = _build_downsample_binary_grid(mask, rows=8, cols=8)
+    downsample_grid_digest = digests.canonical_sha256({"grid": downsample_grid.tolist()})
+    true_indices = np.flatnonzero(downsample_grid.reshape(-1)).astype(int).tolist()
+
+    mask_stats = {
+        "area_ratio": round(area_ratio, 8),
+        "connected_components": int(component_count),
+        "largest_component_ratio": round(float(largest_component_ratio), 8),
+        "boundary_length": int(boundary_length),
+        "perimeter_to_area_ratio": round(float(perimeter_to_area), 8),
+        "foreground_coverage_ratio": round(float(area_ratio), 8),
+        "downsample_grid_shape": [8, 8],
+        "downsample_grid_true_indices": true_indices,
+        "downsample_grid_digest": downsample_grid_digest,
+        "mean_energy": round(float(np.mean(gradient_energy[mask])) if np.any(mask) else 0.0, 8),
+    }
+    binding = {
+        "space": "image_space",
+        "height": int(image_array.shape[0]),
+        "width": int(image_array.shape[1]),
+        "aspect_ratio": round(float(image_array.shape[1]) / float(image_array.shape[0]), 4) if int(image_array.shape[0]) > 0 else 1.0,
+        "channels": int(image_array.shape[2]),
+        "resize_rule": "identity",
+        "binding_version": "v1",
+    }
+    return mask.astype(bool), saliency_map, mask_stats, binding
 
 
 def build_texture_mask_v1(
@@ -701,9 +831,16 @@ def build_routing_summary(mask_stats: Dict[str, Any], planner_params: Dict[str, 
     hf_ratio = max(0.0, min(hf_ratio, 1.0))
     lf_ratio = 1.0 - hf_ratio
     return {
-        "routing_version": "v1",
+        "routing_version": "v2",
         "hf_region_ratio": round(hf_ratio, 8),
         "lf_region_ratio": round(lf_ratio, 8),
+        "connected_components": int(mask_stats.get("connected_components", 0)),
+        "largest_component_ratio": float(mask_stats.get("largest_component_ratio", 0.0)),
+        "perimeter_to_area_ratio": float(mask_stats.get("perimeter_to_area_ratio", 0.0)),
+        "foreground_coverage_ratio": float(mask_stats.get("foreground_coverage_ratio", hf_ratio)),
+        "downsample_grid_shape": mask_stats.get("downsample_grid_shape", [8, 8]),
+        "downsample_grid_true_indices": mask_stats.get("downsample_grid_true_indices", []),
+        "downsample_grid_digest": mask_stats.get("downsample_grid_digest", "<absent>"),
         "band_thresholds": {
             "gradient_quantile": planner_params.get("threshold_quantile")
         },
@@ -903,3 +1040,103 @@ def _count_connected_components(mask: np.ndarray) -> int:
                     visited[nx, ny] = True
                     stack.append((nx, ny))
     return component_count
+
+
+def _largest_component_ratio(mask: np.ndarray) -> float:
+    """
+    功能：计算最大连通域占前景比例。
+
+    Compute largest connected component ratio among foreground pixels.
+
+    Args:
+        mask: Boolean mask array.
+
+    Returns:
+        Ratio in [0, 1].
+    """
+    if mask.size == 0:
+        return 0.0
+    total = int(mask.sum())
+    if total <= 0:
+        return 0.0
+    visited = np.zeros(mask.shape, dtype=bool)
+    h, w = mask.shape
+    max_count = 0
+    for i in range(h):
+        for j in range(w):
+            if not mask[i, j] or visited[i, j]:
+                continue
+            count = 0
+            stack = [(i, j)]
+            visited[i, j] = True
+            while stack:
+                x, y = stack.pop()
+                count += 1
+                for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+                    if nx < 0 or nx >= h or ny < 0 or ny >= w:
+                        continue
+                    if visited[nx, ny] or not mask[nx, ny]:
+                        continue
+                    visited[nx, ny] = True
+                    stack.append((nx, ny))
+            if count > max_count:
+                max_count = count
+    return float(max_count / total)
+
+
+def _mask_boundary_length(mask: np.ndarray) -> int:
+    """
+    功能：估计掩码边界长度。
+
+    Estimate boundary length by counting foreground-background edges.
+
+    Args:
+        mask: Boolean mask array.
+
+    Returns:
+        Boundary edge count.
+    """
+    if mask.size == 0:
+        return 0
+    boundary = 0
+    h, w = mask.shape
+    for i in range(h):
+        for j in range(w):
+            if not mask[i, j]:
+                continue
+            for nx, ny in ((i - 1, j), (i + 1, j), (i, j - 1), (i, j + 1)):
+                if nx < 0 or nx >= h or ny < 0 or ny >= w or not mask[nx, ny]:
+                    boundary += 1
+    return int(boundary)
+
+
+def _build_downsample_binary_grid(mask: np.ndarray, rows: int, cols: int) -> np.ndarray:
+    """
+    功能：构建掩码低分辨率二值网格表示。
+
+    Build downsampled binary grid for spatial structure anchoring.
+
+    Args:
+        mask: Boolean mask array.
+        rows: Grid rows.
+        cols: Grid cols.
+
+    Returns:
+        Boolean grid with shape (rows, cols).
+    """
+    if not isinstance(mask, np.ndarray) or mask.ndim != 2:
+        raise TypeError("mask must be 2-D ndarray")
+    if rows <= 0 or cols <= 0:
+        raise ValueError("rows and cols must be positive")
+    h, w = mask.shape
+    row_edges = np.linspace(0, h, rows + 1, dtype=np.int64)
+    col_edges = np.linspace(0, w, cols + 1, dtype=np.int64)
+    grid = np.zeros((rows, cols), dtype=bool)
+    for i in range(rows):
+        for j in range(cols):
+            block = mask[row_edges[i]:row_edges[i + 1], col_edges[j]:col_edges[j + 1]]
+            if block.size == 0:
+                grid[i, j] = False
+            else:
+                grid[i, j] = bool(np.mean(block.astype(np.float32)) >= 0.5)
+    return grid

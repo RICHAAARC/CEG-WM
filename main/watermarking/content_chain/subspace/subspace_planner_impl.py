@@ -218,6 +218,34 @@ class SubspacePlannerImpl:
                 basis_summary=basis_summary,
                 routing_digest_ref=routing_digest_ref,
             )
+            hf_region_index_spec = self.build_region_index_spec_from_mask(
+                inputs=inputs,
+                planner_params=planner_params,
+                channel="hf",
+            )
+            lf_region_index_spec = self.build_region_index_spec_from_mask(
+                inputs=inputs,
+                planner_params=planner_params,
+                channel="lf",
+            )
+            region_index_digest = digests.canonical_sha256(
+                {
+                    "hf_region_index_spec": hf_region_index_spec,
+                    "lf_region_index_spec": lf_region_index_spec,
+                }
+            )
+            lf_basis = self._build_executable_basis_payload(
+                basis_matrix=basis_summary.get("lf_projection_matrix"),
+                planner_params=planner_params,
+                basis_digest=basis_digest,
+                channel="lf",
+            )
+            hf_basis = self._build_executable_basis_payload(
+                basis_matrix=basis_summary.get("hf_projection_matrix"),
+                planner_params=planner_params,
+                basis_digest=basis_digest,
+                channel="hf",
+            )
             
             # 推断特征域标签
             feature_source_tag = self._infer_feature_source(inputs)
@@ -230,6 +258,11 @@ class SubspacePlannerImpl:
                 planner_params=planner_params,
                 basis_summary=basis_summary,
                 basis_digest=basis_digest,
+                hf_region_index_spec=hf_region_index_spec,
+                lf_region_index_spec=lf_region_index_spec,
+                region_index_digest=region_index_digest,
+                lf_basis=lf_basis,
+                hf_basis=hf_basis,
                 feature_source_tag=feature_source_tag,
                 normalization_tag=normalization_tag,
                 inputs=inputs
@@ -257,11 +290,16 @@ class SubspacePlannerImpl:
                 "subspace_spec": basis_summary["subspace_spec"],
                 "band_spec": band_spec,
                 "band_spec_digest": band_spec_digest,
+                "hf_region_index_spec": hf_region_index_spec,
+                "lf_region_index_spec": lf_region_index_spec,
+                "region_index_digest": region_index_digest,
                 "routing_digest_ref": routing_digest_ref,
                 "pipeline_feature_digest": "<absent>",
                 "denoise_trace_digest": "<absent>",
                 "attention_anchor_ref_digest": "<absent>",
                 "basis_digest": basis_digest,
+                "lf_basis": lf_basis,
+                "hf_basis": hf_basis,
                 "planner_impl_identity": {
                     "impl_id": self.impl_id,
                     "impl_version": self.impl_version,
@@ -300,6 +338,9 @@ class SubspacePlannerImpl:
                 "band_spec_digest": band_spec_digest,
                 "hf_region_ratio": band_metrics.get("hf_region_ratio"),
                 "lf_region_ratio": band_metrics.get("lf_region_ratio"),
+                "region_index_digest": region_index_digest,
+                "lf_basis_shape": lf_basis.get("basis_shape"),
+                "hf_basis_shape": hf_basis.get("basis_shape"),
             }
 
             return SubspacePlanEvidence(
@@ -430,6 +471,11 @@ class SubspacePlannerImpl:
         )
 
         basis = vh[:effective_rank, :]
+        lf_projection_matrix = basis.T
+        hf_basis_candidates = vh[effective_rank:effective_rank + effective_rank, :]
+        if hf_basis_candidates.shape[0] == 0:
+            hf_basis_candidates = basis
+        hf_projection_matrix = hf_basis_candidates.T
         basis_importance = np.mean(np.abs(basis), axis=0)
         top_index_count = min(32, basis_importance.shape[0])
         top_indices = np.argsort(-basis_importance)[:top_index_count].tolist()
@@ -513,6 +559,8 @@ class SubspacePlannerImpl:
             "spectrum_summary": spectrum_summary,
             "subspace_spec": subspace_spec,
             "basis_digest_payload": basis_digest_payload,
+            "lf_projection_matrix": lf_projection_matrix,
+            "hf_projection_matrix": hf_projection_matrix,
             # 新增：可验证锚点供 plan_digest 使用
             "samples_anchor": samples_anchor,
             "jvp_anchor": jvp_anchor
@@ -526,6 +574,11 @@ class SubspacePlannerImpl:
         planner_params: _PlannerParams,
         basis_summary: Dict[str, Any],
         basis_digest: str,
+        hf_region_index_spec: Dict[str, Any],
+        lf_region_index_spec: Dict[str, Any],
+        region_index_digest: str,
+        lf_basis: Dict[str, Any],
+        hf_basis: Dict[str, Any],
         feature_source_tag: Optional[str] = None,
         normalization_tag: Optional[str] = None,
         inputs: Optional[Dict[str, Any]] = None
@@ -682,6 +735,11 @@ class SubspacePlannerImpl:
             # 新增：可验证输入域规格（论文级要求）
             "verifiable_input_domain_spec": verifiable_input_domain_spec,
             "basis_digest": basis_digest,
+            "region_index_digest": region_index_digest,
+            "hf_region_index_spec": hf_region_index_spec,
+            "lf_region_index_spec": lf_region_index_spec,
+            "lf_basis": lf_basis,
+            "hf_basis": hf_basis,
             "basis_summary": {
                 "rank": basis_summary["rank"],
                 "energy_ratio": basis_summary["energy_ratio"],
@@ -1646,6 +1704,122 @@ class SubspacePlannerImpl:
         if not isinstance(band_spec, dict):
             raise TypeError("band_spec must be dict")
         return digests.canonical_sha256(band_spec)
+
+    def build_region_index_spec_from_mask(
+        self,
+        inputs: Dict[str, Any],
+        planner_params: _PlannerParams,
+        channel: str,
+    ) -> Dict[str, Any]:
+        """
+        功能：由掩码摘要构造可执行区域索引规格。
+
+        Build executable region index spec from mask summary.
+
+        Args:
+            inputs: Planner inputs mapping.
+            planner_params: Parsed planner params.
+            channel: Channel tag ("hf" or "lf").
+
+        Returns:
+            Region index spec mapping.
+        """
+        if not isinstance(inputs, dict):
+            raise TypeError("inputs must be dict")
+        if channel not in {"hf", "lf"}:
+            raise ValueError("channel must be hf or lf")
+
+        mask_summary = inputs.get("mask_summary") if isinstance(inputs.get("mask_summary"), dict) else {}
+        grid_shape = mask_summary.get("downsample_grid_shape", [8, 8])
+        if not (isinstance(grid_shape, list) and len(grid_shape) == 2):
+            grid_shape = [8, 8]
+        rows = int(grid_shape[0]) if int(grid_shape[0]) > 0 else 8
+        cols = int(grid_shape[1]) if int(grid_shape[1]) > 0 else 8
+        total = rows * cols
+
+        hf_indices = mask_summary.get("downsample_grid_true_indices")
+        if not isinstance(hf_indices, list):
+            hf_ratio = mask_summary.get("area_ratio", 0.5)
+            if not isinstance(hf_ratio, (int, float)):
+                hf_ratio = 0.5
+            hf_count = max(1, int(round(float(hf_ratio) * total)))
+            hf_indices = list(range(min(total, hf_count)))
+        hf_indices = sorted({int(v) for v in hf_indices if isinstance(v, int) and 0 <= int(v) < total})
+        lf_indices = [idx for idx in range(total) if idx not in set(hf_indices)]
+
+        selected_indices = hf_indices if channel == "hf" else lf_indices
+        selector = "mask_true_grid" if channel == "hf" else "mask_false_grid"
+        payload = {
+            "region_index_spec_version": "v1",
+            "channel": channel,
+            "selector": selector,
+            "grid_shape": [rows, cols],
+            "selected_indices": selected_indices,
+            "selected_count": len(selected_indices),
+            "selection_space": "latent_grid_tokens",
+            "feature_dim_anchor": planner_params.feature_dim,
+            "mask_grid_digest": mask_summary.get("downsample_grid_digest", "<absent>"),
+        }
+        payload["region_index_digest"] = digests.canonical_sha256(
+            {
+                "channel": channel,
+                "grid_shape": payload["grid_shape"],
+                "selected_indices": selected_indices,
+                "mask_grid_digest": payload["mask_grid_digest"],
+            }
+        )
+        return payload
+
+    def _build_executable_basis_payload(
+        self,
+        basis_matrix: Any,
+        planner_params: _PlannerParams,
+        basis_digest: str,
+        channel: str,
+    ) -> Dict[str, Any]:
+        """
+        功能：构造可执行 basis 载荷（可序列化、可复算）。
+
+        Build executable basis payload for runtime latent modifier.
+
+        Args:
+            basis_matrix: Basis projection matrix-like value.
+            planner_params: Planner params bundle.
+            basis_digest: Basis digest string.
+            channel: Channel tag ("lf" or "hf").
+
+        Returns:
+            Serializable basis payload mapping.
+        """
+        if channel not in {"lf", "hf"}:
+            raise ValueError("channel must be lf or hf")
+        matrix_np = np.asarray(basis_matrix, dtype=np.float32)
+        if matrix_np.ndim != 2:
+            raise ValueError("basis_matrix must be rank-2")
+        max_cols = min(16, matrix_np.shape[1])
+        matrix_np = matrix_np[:, :max_cols]
+        quantized = np.round(matrix_np, 6).astype(np.float32)
+        payload = {
+            "basis_payload_version": "v1",
+            "channel": channel,
+            "basis_kind": "planner_projection_payload",
+            "basis_shape": [int(quantized.shape[0]), int(quantized.shape[1])],
+            "basis_rank": int(quantized.shape[1]),
+            "basis_quantization": "round_1e-6",
+            "basis_seed_digest": digests.canonical_sha256(
+                {
+                    "basis_digest": basis_digest,
+                    "channel": channel,
+                    "seed": planner_params.seed,
+                }
+            ),
+        }
+        if channel == "lf":
+            payload["projection_matrix"] = quantized.tolist()
+        else:
+            payload["hf_projection_matrix"] = quantized.tolist()
+        payload["basis_payload_digest"] = digests.canonical_sha256(payload)
+        return payload
 
     def _build_injection_config_payload(
         self,

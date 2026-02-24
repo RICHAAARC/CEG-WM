@@ -176,14 +176,22 @@ def run_embed_orchestrator(
         mask_params_digest=_extract_mask_params_digest(content_evidence_payload),
     )
     io_anchors = _prepare_embed_real_io_anchors(cfg)
-    embed_trace = {
-        "embed_mode": io_anchors["embed_mode"],
-        "identity_mode": io_anchors.get("identity_mode"),
-        "identity_reason": io_anchors.get("identity_reason"),
-        "note": "content_embedding_real_v1",
-    }
+    use_latent_per_step = _should_use_latent_per_step_path(cfg)
+    if use_latent_per_step:
+        embed_trace = _build_latent_step_embed_trace(cfg, injection_evidence)
+    else:
+        embed_trace = {
+            "embed_mode": io_anchors["embed_mode"],
+            "identity_mode": io_anchors.get("identity_mode"),
+            "identity_reason": io_anchors.get("identity_reason"),
+            "note": "content_embedding_real_v1",
+        }
 
-    if not io_anchors.get("identity_mode", False) and io_anchors["image_path"] != "<absent>":
+    if (
+        not use_latent_per_step
+        and not io_anchors.get("identity_mode", False)
+        and io_anchors["image_path"] != "<absent>"
+    ):
         input_image = Image.open(io_anchors["image_path"]).convert("RGB")
         watermarked_image, pipeline_trace = _apply_content_embedding_pipeline(
             image=input_image,
@@ -207,7 +215,7 @@ def run_embed_orchestrator(
     # 构造返回的业务字段映射。
     record_fields = {
         "operation": "embed",
-        "embed_mode": io_anchors["embed_mode"],
+        "embed_mode": embed_trace.get("embed_mode", io_anchors["embed_mode"]),
         "image_path": io_anchors["image_path"],
         "watermarked_path": io_anchors["watermarked_path"],
         "input_sha256": io_anchors["input_sha256"],
@@ -852,6 +860,78 @@ def _bind_mask_and_routing_evidence_to_record(record_fields: Dict[str, Any], con
     mask_binding = _extract_mask_binding(content_evidence_payload)
     if isinstance(mask_binding, dict):
         record_fields["mask_resolution_binding"] = mask_binding
+
+
+def _should_use_latent_per_step_path(cfg: Dict[str, Any]) -> bool:
+    """
+    功能：判定 embed 是否走 latent per-step 注入主路径。
+
+    Determine whether latent per-step path should be selected.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        True if latent per-step mode is selected.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
+    if bool(paper_cfg.get("enabled", False)):
+        return True
+    embed_cfg = cfg.get("embed") if isinstance(cfg.get("embed"), dict) else {}
+    return bool(embed_cfg.get("use_latent_per_step", False))
+
+
+def _build_latent_step_embed_trace(
+    cfg: Dict[str, Any],
+    injection_evidence: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    """
+    功能：构造 latent per-step 模式 embed trace。
+
+    Build embed trace payload for latent per-step injection path.
+
+    Args:
+        cfg: Configuration mapping.
+        injection_evidence: Injection evidence mapping.
+
+    Returns:
+        Embed trace mapping.
+
+    Raises:
+        ValueError: If paper-faithfulness mode requires missing/invalid injection evidence.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
+    paper_enabled = bool(paper_cfg.get("enabled", False))
+    if paper_enabled:
+        if not isinstance(injection_evidence, dict):
+            raise ValueError("paper_faithfulness mode requires injection_evidence dict")
+        if injection_evidence.get("status") != "ok":
+            raise ValueError("paper_faithfulness mode requires injection_evidence.status=ok")
+
+    trace = {
+        "embed_mode": "latent_step_injection_stub_v1",
+        "identity_mode": False,
+        "identity_reason": None,
+        "note": "latent_per_step_injection_primary",
+        "injection_status": "<absent>",
+        "injection_trace_digest": "<absent>",
+        "injection_params_digest": "<absent>",
+    }
+    if isinstance(injection_evidence, dict):
+        status_value = injection_evidence.get("status")
+        trace_digest = injection_evidence.get("injection_trace_digest")
+        params_digest = injection_evidence.get("injection_params_digest")
+        if isinstance(status_value, str) and status_value:
+            trace["injection_status"] = status_value
+        if isinstance(trace_digest, str) and trace_digest:
+            trace["injection_trace_digest"] = trace_digest
+        if isinstance(params_digest, str) and params_digest:
+            trace["injection_params_digest"] = params_digest
+    return trace
 
 
 def _get_ablation_normalized(cfg: Dict[str, Any]) -> Dict[str, Any]:
