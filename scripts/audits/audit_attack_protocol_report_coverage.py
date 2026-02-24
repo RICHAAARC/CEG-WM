@@ -246,17 +246,17 @@ def audit_attack_protocol_report_coverage(repo_root: Path) -> Dict[str, Any]:
                     continue
 
         if eval_report is None:
-            # 如果评测报告不存在，审计仅返回 SKIP（非阻止级别，因为可能运行未完成）
+            # 如果评测报告不存在，审计返回 N.A.（不适用，因为未运行attack protocol流程）
             return {
                 "audit_id": audit_id,
                 "gate_name": gate_name,
                 "category": "G",
-                "severity": "WARN",
-                "result": "SKIP",
+                "severity": "NON_BLOCK",
+                "result": "N.A.",
                 "rule": "all declared attack conditions must be executed and reported",
                 "evidence": {
                     **evidence,
-                    "status": "evaluation_report.json not found in expected locations; skipping coverage audit",
+                    "status": "evaluation_report.json not found in expected locations; audit not applicable",
                     "checked_paths": [str(p) for p in eval_report_paths],
                 },
             }
@@ -334,11 +334,13 @@ def main(repo_root: Optional[str] = None) -> int:
         result = audit_attack_protocol_report_coverage(repo_root_path)
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
-        # Exit code: 0 for PASS, 1 for FAIL, 2 for SKIP
+        # Exit code: 0 for PASS/N.A., 1 for FAIL, 2 for SKIP (legacy)
         if result["result"] == "PASS":
             return 0
+        elif result["result"] == "N.A.":
+            return 0  # N.A. 不阻止冻结（审计不适用）
         elif result["result"] == "SKIP":
-            return 0  # SKIP 不阻止冻结（与 baseline 审计逻辑一致）
+            return 0  # SKIP(legacy) 不阻止冻结
         else:  # FAIL
             return 1
     except Exception as e:

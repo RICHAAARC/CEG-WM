@@ -158,16 +158,11 @@ def _build_stage_command(
         str(run_root),
         "--config",
         str(config_path),
-        "--override",
-        "allow_nonempty_run_root=true",
-        "--override",
-        'allow_nonempty_run_root_reason="repro_pipeline"',
     ]
 
     if seeds is not None:
         command.extend(["--override", f"seed={json.dumps(seeds)}"])
-    if max_samples is not None:
-        command.extend(["--override", f"max_samples={max_samples}"])
+    # Note: max_samples is not a valid override parameter and is handled by the caller
     if stage_name == "evaluate":
         command.extend(
             [

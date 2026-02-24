@@ -35,6 +35,7 @@ from main.watermarking.content_chain.low_freq_coder import (
     encode_low_freq_dct,
     compute_lf_trace_digest,
 )
+from main.watermarking.geometry_chain.sync import SyncRuntimeContext
 
 
 def run_embed_orchestrator(
@@ -44,6 +45,7 @@ def run_embed_orchestrator(
     *,
     trajectory_evidence: Dict[str, Any] | None = None,
     injection_evidence: Dict[str, Any] | None = None,
+    sync_runtime_context: SyncRuntimeContext | None = None,
     content_result_override: Any | None = None,
     subspace_result_override: Any | None = None
 ) -> Dict[str, Any]:
@@ -86,6 +88,9 @@ def run_embed_orchestrator(
     if injection_evidence is not None and not isinstance(injection_evidence, dict):
         # injection_evidence 类型不符合预期，必须 fail-fast。
         raise TypeError("injection_evidence must be dict or None")
+    if sync_runtime_context is not None and not isinstance(sync_runtime_context, SyncRuntimeContext):
+        # sync_runtime_context 类型不符合预期，必须 fail-fast。
+        raise TypeError("sync_runtime_context must be SyncRuntimeContext or None")
 
     if content_result_override is not None and not isinstance(content_result_override, dict) and not hasattr(content_result_override, "as_dict"):
         # content_result_override 类型不符合预期，必须 fail-fast。
@@ -129,6 +134,7 @@ def run_embed_orchestrator(
         if content_evidence_payload is None:
             content_evidence_payload = {}
         _merge_injection_evidence(content_evidence_payload, injection_evidence)
+    _normalize_content_evidence_optional_mappings(content_evidence_payload)
     
     # 捕获 content_chain 的执行状态（用于 execution_report）。
     # 允许的值：ok / fail / absent
@@ -163,7 +169,7 @@ def run_embed_orchestrator(
         inputs=planner_inputs
     )
     
-    sync_result = impl_set.sync_module.sync(cfg)
+    sync_result = _run_sync_module(cfg, impl_set, sync_runtime_context)
 
     if content_evidence_payload is None:
         content_evidence_payload = {}
@@ -258,6 +264,53 @@ def run_embed_orchestrator(
             record_fields["subspace_planner_impl_identity"] = subspace_result.plan.get("planner_impl_identity")
     
     return record_fields
+
+
+def _run_sync_module(
+    cfg: Dict[str, Any],
+    impl_set: BuiltImplSet,
+    sync_runtime_context: SyncRuntimeContext | None,
+) -> Dict[str, Any]:
+    """
+    功能：执行同步模块并优先使用运行期上下文。
+
+    Execute sync module and prefer runtime context when available.
+
+    Args:
+        cfg: Configuration mapping.
+        impl_set: Built implementation set.
+        sync_runtime_context: Optional sync runtime context.
+
+    Returns:
+        Sync result mapping.
+
+    Raises:
+        TypeError: If inputs are invalid.
+    """
+    if not isinstance(cfg, dict):
+        # cfg 类型不合法，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+    if not isinstance(impl_set, BuiltImplSet):
+        # impl_set 类型不合法，必须 fail-fast。
+        raise TypeError("impl_set must be BuiltImplSet")
+    if sync_runtime_context is not None and not isinstance(sync_runtime_context, SyncRuntimeContext):
+        # sync_runtime_context 类型不合法，必须 fail-fast。
+        raise TypeError("sync_runtime_context must be SyncRuntimeContext or None")
+
+    sync_module = impl_set.sync_module
+    if sync_runtime_context is not None:
+        sync_with_context = getattr(sync_module, "sync_with_context", None)
+        if sync_with_context is not None:
+            if not callable(sync_with_context):
+                # sync_with_context 类型不符合预期，必须 fail-fast。
+                raise TypeError("sync_with_context must be callable")
+            if sync_runtime_context.pipeline is not None and sync_runtime_context.latents is not None:
+                return sync_with_context(cfg, sync_runtime_context)
+
+    if not hasattr(sync_module, "sync") or not callable(sync_module.sync):
+        # sync 方法缺失，必须 fail-fast。
+        raise TypeError("sync_module must provide sync")
+    return sync_module.sync(cfg)
 
 
 def _build_hf_embed_evidence(
@@ -430,6 +483,31 @@ def _inject_trajectory_audit_fields(
         audit["trajectory_tap_status"] = tap_status
     if isinstance(tap_absent_reason, str) and tap_absent_reason:
         audit["trajectory_absent_reason"] = tap_absent_reason
+
+
+def _normalize_content_evidence_optional_mappings(content_evidence_payload: Dict[str, Any] | None) -> None:
+    """
+    功能：将 content_evidence 中可选 mapping 字段的 None 规范化为空映射。
+
+    Normalize optional mapping fields in content_evidence payload from None to {}.
+
+    Args:
+        content_evidence_payload: Mutable content evidence mapping.
+
+    Returns:
+        None.
+    """
+    if not isinstance(content_evidence_payload, dict):
+        return
+
+    optional_mapping_keys = [
+        "mask_stats",
+        "score_parts",
+    ]
+    for key in optional_mapping_keys:
+        current_value = content_evidence_payload.get(key)
+        if current_value is None:
+            content_evidence_payload[key] = {}
 
 
 def _build_planner_inputs_for_runtime(
@@ -876,6 +954,10 @@ def _should_use_latent_per_step_path(cfg: Dict[str, Any]) -> bool:
     """
     if not isinstance(cfg, dict):
         raise TypeError("cfg must be dict")
+    paper_spec_cfg = cfg.get("paper_faithfulness_spec") if isinstance(cfg.get("paper_faithfulness_spec"), dict) else {}
+    latent_space_per_step = paper_spec_cfg.get("latent_space_per_step")
+    if isinstance(latent_space_per_step, bool):
+        return latent_space_per_step
     paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
     if bool(paper_cfg.get("enabled", False)):
         return True

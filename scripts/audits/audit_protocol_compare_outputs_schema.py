@@ -42,17 +42,17 @@ def audit_protocol_compare_outputs_schema(repo_root: Path) -> Dict[str, Any]:
     category = "G"
     severity = "BLOCK"
 
-    # 默认 PASS（如果根本不存在 compare 工件，则 SKIP）
+    # 默认 N.A.（如果根本不存在 compare 工件，则不适用）
     default_result = {
         "audit_id": audit_id,
         "gate_name": gate_name,
         "category": category,
-        "severity": severity,
-        "result": "SKIP",
+        "severity": "NON_BLOCK",
+        "result": "N.A.",
         "rule": "No protocol_compare outputs found (research-only feature, not mandatory)",
         "evidence": {},
-        "impact": "Protocol compare audit skipped (feature not activated)",
-        "fix": "This is expected if multi-protocol evaluation was not run",
+        "impact": "Protocol compare audit not applicable: multi-protocol evaluation feature not invoked in this run",
+        "fix": "N/A (not applicable when feature is not used)",
     }
 
     # 扫描所有可能的 protocol compare 工件位置（outputs/multi_protocol_evaluation/）

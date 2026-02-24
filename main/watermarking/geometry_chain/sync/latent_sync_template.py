@@ -40,6 +40,77 @@ class SyncResult:
     failure_reason: Optional[str]
 
 
+@dataclass(frozen=True)
+class SyncRuntimeContext:
+    """
+    功能：运行期同步上下文载体。
+
+    Runtime context container for sync module execution.
+
+    Args:
+        pipeline: Runtime pipeline object.
+        latents: Runtime latents.
+        rng: Optional random generator handle.
+        trajectory_evidence: Optional trajectory tap evidence mapping.
+
+    Returns:
+        None.
+    """
+
+    pipeline: Any
+    latents: Any
+    rng: Any
+    trajectory_evidence: Optional[Dict[str, Any]] = None
+
+    def __post_init__(self) -> None:
+        if self.trajectory_evidence is not None and not isinstance(self.trajectory_evidence, dict):
+            # trajectory_evidence 类型不符合预期，必须 fail-fast。
+            raise TypeError("trajectory_evidence must be dict or None")
+
+
+def resolve_enable_latent_sync(cfg: Dict[str, Any]) -> bool:
+    """
+    功能：解析同步模板开关（embed/detect 双向兼容）。
+
+    Resolve latent sync enable switch from config.
+    Prioritizes embed.geometry.enable_latent_sync over detect.geometry.enable_latent_sync.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        True when latent sync template is enabled.
+
+    Raises:
+        TypeError: If cfg is not dict.
+    """
+    if not isinstance(cfg, dict):
+        # cfg 类型不合法，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+    
+    # (1) 优先读取 embed.geometry.enable_latent_sync（append-only v1.0）
+    embed_cfg = cfg.get("embed")
+    if isinstance(embed_cfg, dict):
+        embed_geometry_cfg = embed_cfg.get("geometry")
+        if isinstance(embed_geometry_cfg, dict):
+            embed_explicit = embed_geometry_cfg.get("enable_latent_sync")
+            if isinstance(embed_explicit, bool):
+                return embed_explicit
+    
+    # (2) 回退到 detect.geometry.enable_latent_sync（既有逻辑）
+    detect_cfg = cfg.get("detect")
+    if not isinstance(detect_cfg, dict):
+        return False
+    geometry_cfg = detect_cfg.get("geometry")
+    if not isinstance(geometry_cfg, dict):
+        return False
+    explicit = geometry_cfg.get("enable_latent_sync")
+    if isinstance(explicit, bool):
+        return explicit
+    enabled = geometry_cfg.get("enabled")
+    return bool(enabled) if isinstance(enabled, bool) else False
+
+
 class LatentSyncTemplate:
     """
     功能：提取几何同步模板摘要与质量指标。
@@ -376,17 +447,7 @@ class LatentSyncTemplate:
         Returns:
             True when latent sync template is enabled.
         """
-        detect_cfg = cfg.get("detect")
-        if not isinstance(detect_cfg, dict):
-            return False
-        geometry_cfg = detect_cfg.get("geometry")
-        if not isinstance(geometry_cfg, dict):
-            return False
-        explicit = geometry_cfg.get("enable_latent_sync")
-        if isinstance(explicit, bool):
-            return explicit
-        enabled = geometry_cfg.get("enabled")
-        return bool(enabled) if isinstance(enabled, bool) else False
+        return resolve_enable_latent_sync(cfg)
 
     def _resolve_fft_bins(self, cfg: Dict[str, Any]) -> int:
         detect_cfg = cfg.get("detect") if isinstance(cfg.get("detect"), dict) else {}

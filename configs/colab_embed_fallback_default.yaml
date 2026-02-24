@@ -1,0 +1,137 @@
+policy_path: "content_only"
+
+# 统计口径默认配置
+target_fpr: 0.01
+
+# ============================================================== 
+# run_root 复用控制（默认禁用，仅允许通过 CLI override 启用）
+# ============================================================== 
+allow_nonempty_run_root: false
+allow_nonempty_run_root_reason: null
+
+# ============================================================== 
+# 设备配置（CPU 优先闭环验证）
+# ============================================================== 
+device: "cpu"  # 禁忌/强制 CPU（可通过 CLI override --override force_cpu 覆盖）
+
+# ============================================================== 
+# SD3 模型配置
+# ============================================================== 
+model_id: "stabilityai/stable-diffusion-3.5-medium"
+hf_revision: "main"
+
+# ============================================================== 
+# 推理配置（真实闭合验证）
+# ============================================================== 
+inference_enabled: true
+inference_prompt: "a serene landscape with mountains and a lake"
+inference_num_steps: 28
+inference_guidance_scale: 7.0
+inference_height: 512
+inference_width: 512
+
+# ============================================================== 
+# 轨迹采样配置（Trajectory Tap - 可复算证据）
+# ============================================================== 
+trajectory_tap:
+  enabled: true  # 启用轨迹采样（被 paper_faithfulness 强制启用）
+  tensor_types: ["latent"]
+  module_paths: ["transformer"]  # SD3 使用 Transformer/DiT
+  stats_precision_digits: 6
+
+# ============================================================== 
+# Paper Faithfulness 配置（必达对齐验证）
+# ============================================================== 
+paper_faithfulness:
+  enabled: false  # 回退配置禁用论文对齐验证
+  alignment_check: true
+  
+  # 检查：Pipeline fingerprint（离散结构指纹）
+  check_pipeline_fingerprint: true
+  
+  # 检查：Trajectory digest reproducibility（可复算轨迹摘要）
+  check_trajectory_digest: true
+
+# ============================================================== 
+# 水印子空间配置
+# ============================================================== 
+watermark:
+  subspace:
+    timestep_start: 0
+    timestep_end: 27  # num_inference_steps - 1
+    trajectory_step_stride: 1
+    sample_count: 28
+    feature_dim: 128
+
+  lf:
+    enabled: true  # 启用 LF 主通道（真实水印注入）
+    variance: 1.5
+    ecc_sparsity: 3
+    message_length: 64
+
+  hf:
+    enabled: false  # HF 通道可选（初期禁用）
+    tail_truncation_ratio: 0.1
+    tail_truncation_mode: "top_k_per_latent"
+    tau: 2.0
+
+# ============================================================== 
+# 检测几何配置
+# ============================================================== 
+detect:
+  content:
+    enabled: false  # Embed 模式（检测在 detect 侧启用）
+  geometry:
+    enabled: false
+
+# ============================================================== 
+# 内容链配置
+# ============================================================== 
+enable_mask: true  # 
+
+# ============================================================== 
+# 嵌入配置
+# ============================================================== 
+embed:
+  test_mode_identity: false  # 测试模式基线检验：启用后 content/geometry 使用基线实现
+  use_latent_per_step: false
+
+# ============================================================== 
+# Ablation 实验开关面板（Ablation Switchboard）
+# - 为 ablation 实验提供统一开关配置段。
+# - normalized 字段由 config_loader.normalize_ablation_flags() 自动生成，用户不应手动设置。
+# - 所有 enable_* 开关必须为 bool，默认 null（表示未显式设置，由归一化逻辑处理）。
+# ============================================================== 
+ablation:
+  # 模块级开关：控制各模块是否参与 pipeline
+  enable_content: null     # 内容链开关（null 表示未设置，归一化后解析为 true）
+  enable_geometry: null    # 几何链开关
+  enable_fusion: null      # 融合决策开关
+  enable_mask: null        # 语义掩码开关
+  enable_subspace: null    # 子空间规划开关
+  enable_rescue: null      # 救援机制开关（保留）
+
+  # 频域开关：控制 LF/HF 通道
+  enable_lf: null          # LF 低频通道开关（默认 true）
+  enable_hf: null          # HF 高频通道开关（默认 false）
+
+  # 互斥约束（归一化时校验）
+  # - lf_only/hf_only 不可同时为 true
+  # - 违反互斥约束时必须 fail-fast
+  lf_only: false           # 仅 LF 模式（启用时强制 enable_lf=true, enable_hf=false）
+  hf_only: false           # 仅 HF 模式（启用时强制 enable_lf=true, enable_hf=false）
+
+  # 归一化输出（自动生成，用户禁止手动设置）
+  # - normalized 字段由 normalize_ablation_flags() 写入，记录最终生效的开关状态
+  # - normalized 必须纳入 cfg_digest 计算，确保 ablation 参数变化可追溯
+  normalized: null
+
+# ============================================================== 
+# 实现标识
+# ============================================================== 
+impl:
+  content_extractor_id: "unified_content_extractor_v1"  # Embed + Detect 双模式
+  geometry_extractor_id: "geometry_baseline_identity_v1"
+  fusion_rule_id: "fusion_baseline_identity_v1"
+  subspace_planner_id: "subspace_planner_v1"
+  sync_module_id: "geometry_sync_baseline_v1"

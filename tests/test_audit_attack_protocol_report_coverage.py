@@ -350,8 +350,8 @@ class TestAuditEquality:
 
             result = audit_module.audit_attack_protocol_report_coverage(tmpdir_path)
 
-            assert result["result"] == "SKIP"
-            assert result["severity"] == "WARN"
+            assert result["result"] == "N.A."
+            assert result["severity"] == "NON_BLOCK"
             assert "not found" in result["evidence"]["status"].lower()
 
 

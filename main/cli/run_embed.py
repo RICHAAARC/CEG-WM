@@ -48,6 +48,7 @@ from main.watermarking.embed import orchestrator as embed_orchestrator
 from main.watermarking.paper_faithfulness import injection_site_binder
 from main.watermarking.paper_faithfulness import alignment_evaluator
 from main.watermarking.embed.orchestrator import run_embed_orchestrator
+from main.watermarking.geometry_chain.sync import SyncRuntimeContext, resolve_enable_latent_sync
 from main.watermarking.content_chain.latent_modifier import (
     LatentModifier,
     LATENT_MODIFIER_ID,
@@ -377,19 +378,22 @@ def run_embed(
                 from main.core import digests
                 pipeline_fingerprint_digest = digests.canonical_sha256(pipeline_fingerprint)
             
+            enable_latent_sync = resolve_enable_latent_sync(cfg)
             inference_result = infer_runtime.run_sd3_inference(
                 cfg,
                 pipeline_obj,
                 device,
                 seed,
                 injection_context=injection_context,
-                injection_modifier=injection_modifier
+                injection_modifier=injection_modifier,
+                capture_final_latents=enable_latent_sync
             )
             inference_status = inference_result.get("inference_status")
             inference_error = inference_result.get("inference_error")
             inference_runtime_meta = inference_result.get("inference_runtime_meta")
             trajectory_evidence = inference_result.get("trajectory_evidence")
             injection_evidence = inference_result.get("injection_evidence")
+            final_latents = inference_result.get("final_latents") if enable_latent_sync else None
             
             # 构造 infer_trace 并计算 digest
             infer_trace_obj = infer_trace.build_infer_trace(
@@ -461,12 +465,19 @@ def run_embed(
 
             # 构造 embed record，本阶段为基线实现。
             print("[Embed] Generating embed record (baseline)...")
+            sync_runtime_context = SyncRuntimeContext(
+                pipeline=pipeline_obj,
+                latents=final_latents,
+                rng=None,
+                trajectory_evidence=trajectory_evidence
+            )
             record = run_embed_orchestrator(
                 cfg,
                 impl_set,
                 cfg_digest,
                 trajectory_evidence=trajectory_evidence,
                 injection_evidence=injection_evidence,
+                sync_runtime_context=sync_runtime_context,
                 content_result_override=content_result_pre,
                 subspace_result_override=subspace_result_pre
             )

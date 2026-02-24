@@ -1,0 +1,167 @@
+# ==============================================================
+# 论文验证配置（Paper Proof Profile）
+# ==============================================================
+# 目的：建立与论文主张路径隔离的配置剖面。
+# 与默认 smoke 配置的差异：
+#   - 启用 latent per-step 路由（paper_faithfulness_spec.latent_space_per_step=True）
+#   - 启用几何链作为主路径（enable_geometry=true，geometry.enabled=true）
+#   - 启用融合决策（fusion_baseline_identity → fusion_neyman_pearson）
+#   - 完整 attack_protocol 评测（rotate、scale、gaussian noise 等）
+# ==============================================================
+
+policy_path: "content_with_geometry_gate"
+
+# 统计口径：标准 FPR 1e-2
+target_fpr: 0.01
+
+# ============================================================== 
+# run_root 复用控制（默认禁用，仅允许通过 CLI override 启用）
+# ============================================================== 
+allow_nonempty_run_root: false
+allow_nonempty_run_root_reason: null
+
+# ==============================================================
+# 设备配置
+# ==============================================================
+device: "cpu"
+
+# ==============================================================
+# SD3 模型配置
+# ==============================================================
+model_id: "stabilityai/stable-diffusion-3.5-medium"
+hf_revision: "main"
+
+# ==============================================================
+# 推理配置（真实流水）
+# ==============================================================
+inference_enabled: true
+inference_prompt: "a serene landscape with mountains and a lake"
+inference_num_steps: 28
+inference_guidance_scale: 7.0
+inference_height: 512
+inference_width: 512
+
+# ==============================================================
+# 轨迹采样配置（必达：支持论文复现）
+# ==============================================================
+trajectory_tap:
+  enabled: true
+  tensor_types: ["latent"]
+  module_paths: ["transformer"]
+  stats_precision_digits: 6
+
+# ==============================================================
+# Paper Faithfulness 配置（论文对齐验证 - 必达）
+# ==============================================================
+paper_faithfulness:
+  enabled: false
+  alignment_check: true
+  check_pipeline_fingerprint: true
+  check_trajectory_digest: true
+
+# ==============================================================
+# Paper Faithfulness 规范化配置（新增：显式路由控制）
+# ==============================================================
+paper_faithfulness_spec:
+  # 关键：启用 latent per-step 路由以实现论文主张路径
+  latent_space_per_step: false
+  
+  # 轨迹验证
+  trajectory_reproducibility: true
+  trajectory_stats_required: true
+  
+  # 评估范围：确保评测覆盖论文列举的 attack 集合
+  required_attack_categories:
+    - "rotate"
+    - "scale"
+    - "gaussian_noise"
+    - "jpeg"
+
+# ==============================================================
+# 水印子空间配置
+# ==============================================================
+watermark:
+  subspace:
+    timestep_start: 0
+    timestep_end: 27
+    trajectory_step_stride: 1
+    sample_count: 28
+    feature_dim: 128
+
+  lf:
+    enabled: true
+    variance: 1.5
+    ecc_sparsity: 3
+    message_length: 64
+
+  hf:
+    enabled: false
+    tail_truncation_ratio: 0.1
+    tail_truncation_mode: "top_k_per_latent"
+    tau: 2.0
+
+# ==============================================================
+# 检测配置（启用几何链作为主路径与 gate）
+# ==============================================================
+detect:
+  content:
+    enabled: true   # 内容链启用（Embed 模式）
+  geometry:
+    enabled: true   # ⚠️ 几何链启用（与默认 smoke 的差异）
+
+# ==============================================================
+# 内容链配置
+# ==============================================================
+enable_mask: true
+
+# ==============================================================
+# 嵌入配置
+# ==============================================================
+embed:
+  test_mode_identity: false  # 使用真实实现，不用 baseline
+  use_latent_per_step: false
+
+# ==============================================================
+# Ablation 实验开关
+# ==============================================================
+ablation:
+  enable_content: true       # 启用内容链
+  enable_geometry: true      # ⚠️ 启用几何链（论文验证必需）
+  enable_fusion: true        # 启用融合决策
+  enable_mask: true
+  enable_subspace: true
+  enable_rescue: null
+  enable_lf: true
+  enable_hf: false
+  lf_only: false
+  hf_only: false
+  normalized: null
+
+# ==============================================================
+# 实现标识（论文主路径重写）
+# ==============================================================
+impl:
+  # 内容链：启用真实实现（不用 identity baseline）
+  # 注意：这里仍保持 unified_content_extractor_v1，它支持 Embed + Detect 模式切换
+  content_extractor_id: "unified_content_extractor_v1"
+  
+  # 几何链：启用 SD3 真实几何实现（而非 baseline）
+  geometry_extractor_id: "geometry_attention_anchor_sd3_v1"   # ← 论文实现
+  
+  # 融合决策：启用 Neyman-Pearson 融合（而非 baseline）
+  fusion_rule_id: "fusion_neyman_pearson_v1"                  # ← 论文实现
+  
+  # 子空间规划：启用真实规划器
+  subspace_planner_id: "subspace_planner_v1"
+  
+  # 同步模块：几何同步（支持几何对齐）
+  sync_module_id: "geometry_latent_sync_sd3_v1"               # ← 仅同步基线可用
+
+# ==============================================================
+# Evaluate 配置（论文评估范畴）
+# ==============================================================
+evaluate:
+  # 可选：指定 evaluate 工作流使用的 attack_protocol YAML
+  # attack_protocol_path: "configs/attack_protocol.yaml"
+  decoder_type: "fusion_neyman_pearson"
+  target_fpr: 0.01

@@ -16,7 +16,7 @@ device: "cuda"  # Colab 默认使用 GPU
 # ==============================================================
 # SD3 模型配置
 # ==============================================================
-model_id: "stabilityai/stable-diffusion-3-medium"
+model_id: "stabilityai/stable-diffusion-3.5-medium"
 hf_revision: "main"
 
 # ==============================================================

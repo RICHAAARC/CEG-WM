@@ -20,6 +20,8 @@ from datetime import datetime, timezone
 import tempfile
 import hashlib
 
+from main.core.records_io import write_artifact_json_unbound
+
 
 def run_command(cmd, description, check=True):
     """
@@ -322,8 +324,14 @@ def run_cpu_first_verification(output_root="tmp/cpu_first_e2e", config_path="con
     }
     
     summary_path = evidence_root / "alignment_acceptance_summary.json"
-    with open(summary_path, "w") as f:
-        json.dump(acceptance_summary, f, indent=2, ensure_ascii=False)
+    write_artifact_json_unbound(
+        run_root=evidence_root,
+        artifacts_dir=evidence_root,
+        path=str(summary_path),
+        obj=acceptance_summary,
+        indent=2,
+        ensure_ascii=False,
+    )
     
     print(f"\n[Evidence] Acceptance summary written: {summary_path}")
     
@@ -357,8 +365,14 @@ def run_cpu_first_verification(output_root="tmp/cpu_first_e2e", config_path="con
     }
     
     manifest_path = evidence_root / "MANIFEST.json"
-    with open(manifest_path, "w") as f:
-        json.dump(manifest, f, indent=2, ensure_ascii=False)
+    write_artifact_json_unbound(
+        run_root=evidence_root,
+        artifacts_dir=evidence_root,
+        path=str(manifest_path),
+        obj=manifest,
+        indent=2,
+        ensure_ascii=False,
+    )
     
     print(f"\n[Evidence] Manifest written: {manifest_path}")
     

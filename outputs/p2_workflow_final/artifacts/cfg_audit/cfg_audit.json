@@ -1,0 +1,21 @@
+{
+  "_artifact_audit": {
+    "schema_version": "v1.0",
+    "writer": "records_io"
+  },
+  "cfg_audit_canon_sha256": "18cacfb1a0ec686f9bb095bd05549ca3ac2e13a50f3ecbcfe13523bdbfe22ffe",
+  "cfg_digest": "6b5512999dbcdcb839047b9fa7ae250d3b2a2b6efe6a1b4dbeefa0edcc2f1084",
+  "cfg_pruned_for_digest_canon_sha256": "6b5512999dbcdcb839047b9fa7ae250d3b2a2b6efe6a1b4dbeefa0edcc2f1084",
+  "config_path": "configs/p2_workflow_fallback.yaml",
+  "overrides_applied_summary": {
+    "count": 6,
+    "keys": [
+      "allowed_fields_version",
+      "applied_fields",
+      "rejected_fields",
+      "requested_kv",
+      "requested_overrides",
+      "source"
+    ]
+  }
+}

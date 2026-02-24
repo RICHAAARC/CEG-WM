@@ -213,6 +213,78 @@ def validate_audit_result(result: Dict[str, Any]) -> List[str]:
     return errors
 
 
+def _fill_missing_optional_fields(result: Dict[str, Any]) -> None:
+    """
+    功能：补全聚合阶段缺失的兼容字段。
+
+    Fill missing optional compatibility fields for strict-mode stability.
+
+    Args:
+        result: Audit result dictionary to normalize in-place.
+
+    Returns:
+        None.
+
+    Raises:
+        TypeError: If result is not dict.
+    """
+    if not isinstance(result, dict):
+        # result 类型不符合预期，必须 fail-fast。
+        raise TypeError("result must be dict")
+
+    if "impact" not in result or not isinstance(result.get("impact"), str) or not result.get("impact"):
+        result["impact"] = "unspecified"
+    if "fix" not in result or not isinstance(result.get("fix"), str) or not result.get("fix"):
+        result["fix"] = "unspecified"
+
+
+def _sanitize_control_chars(text: str) -> str:
+    """
+    功能：清洗字符串中的不可见控制字符（保留 \n/\r/\t）。
+
+    Sanitize control characters in string payload while preserving newline/tab.
+
+    Args:
+        text: Input string.
+
+    Returns:
+        Sanitized string.
+    """
+    if not isinstance(text, str):
+        # text 类型不符合预期，必须 fail-fast。
+        raise TypeError("text must be str")
+
+    sanitized_chars: list[str] = []
+    for ch in text:
+        code = ord(ch)
+        if code < 32 and ch not in ("\n", "\r", "\t"):
+            sanitized_chars.append(f"\\u{code:04x}")
+        else:
+            sanitized_chars.append(ch)
+    return "".join(sanitized_chars)
+
+
+def _sanitize_json_like(value: Any) -> Any:
+    """
+    功能：递归清洗 JSON 结构中的字符串字段控制字符。
+
+    Recursively sanitize control characters in JSON-like payload.
+
+    Args:
+        value: Arbitrary JSON-like value.
+
+    Returns:
+        Sanitized value preserving original structure.
+    """
+    if isinstance(value, dict):
+        return {k: _sanitize_json_like(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_json_like(v) for v in value]
+    if isinstance(value, str):
+        return _sanitize_control_chars(value)
+    return value
+
+
 def compute_summary(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Compute audit summary and freeze sign-off decision.
@@ -333,6 +405,7 @@ def main():
         if isinstance(audit_result, list):
             # 审计脚本返回的是 list（例如 audit_paper_faithfulness.py）
             for result in audit_result:
+                _fill_missing_optional_fields(result)
                 # 校验审计结果格式
                 validation_errors = validate_audit_result(result)
                 if validation_errors:
@@ -343,6 +416,7 @@ def main():
                 all_results.append(result)
         elif isinstance(audit_result, dict):
             # 审计脚本返回的是单个 dict
+            _fill_missing_optional_fields(audit_result)
             # 校验审计结果格式
             validation_errors = validate_audit_result(audit_result)
             if validation_errors:
@@ -380,10 +454,13 @@ def main():
     }
     
     # 输出报告
-    report_json = json.dumps(report, indent=2, ensure_ascii=False)
+    sanitized_report = _sanitize_json_like(report)
+    report_json = json.dumps(sanitized_report, indent=2, ensure_ascii=False)
     
     if args.output:
-        args.output.write_text(report_json, encoding="utf-8")
+        with open(args.output, "w", encoding="utf-8", newline="\n") as report_file:
+            report_file.write(report_json)
+            report_file.write("\n")
         print(f"审计报告已写入: {args.output}")
     else:
         # 输出到 stdout，使用 UTF-8 编码确保兼容性

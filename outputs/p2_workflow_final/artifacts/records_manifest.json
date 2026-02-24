@@ -1,0 +1,36 @@
+{
+  "_artifact_audit": {
+    "schema_version": "v1.0",
+    "writer": "records_io"
+  },
+  "anchors": {
+    "contract_bound_digest": "d08cb413a78c891a70a4dff72095094c95afcd99b6171f2e92ea235c81e26acc",
+    "contract_version": "v1.0",
+    "policy_path": "content_only",
+    "policy_path_semantics_bound_digest": "a67d9289eac20d91ee0893a62df0ef99e49c503200860da82019522dd9c217b2",
+    "policy_path_semantics_version": "v1.0",
+    "whitelist_bound_digest": "45659bcd79d8053522e104e54a08b8514f844a9ea69afd916921400b455875a9",
+    "whitelist_version": "v1.0"
+  },
+  "bundle_canon_sha256": "92eb6000fc0954a339fd4d469ed997dfa26b757c5e96e1292cd91be8eca25fec",
+  "file_count": 2,
+  "files": [
+    {
+      "canon_sha256": "4c75a5b7db8424753c22f92c6e3bf0e23d75142dc646118f31aa085fec8a93d1",
+      "file_sha256": "c7ca9b6c2a2a8cdd5c6244968f56a418c73d0e49b4ae47119e1970b5654b7c9b",
+      "file_type": "json",
+      "path": "detect_record.json",
+      "record_count": 1
+    },
+    {
+      "canon_sha256": "f9a4b15e86b170b80ea5b8ad1a829ed5c478687ddf3d04ee70a180e80c051c30",
+      "file_sha256": "e641abe3b67014d34e5a1e2bf4c879d6f1290cf1fd8c4d0b80dfb671ec148561",
+      "file_type": "json",
+      "path": "embed_record.json",
+      "record_count": 1
+    }
+  ],
+  "manifest_name": "records_manifest.json",
+  "records_dir": "D:/Code/CEG-WM/outputs/p2_workflow_final/records",
+  "schema_version": "v1.0"
+}

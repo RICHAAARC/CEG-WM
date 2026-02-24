@@ -1,0 +1,129 @@
+policy_path: "content_only"
+
+# 统计口径默认配置
+target_fpr: 0.01
+
+# ============================================================== 
+# run_root 复用控制（默认禁用，仅允许通过 CLI override 启用）
+# ============================================================== 
+allow_nonempty_run_root: false
+allow_nonempty_run_root_reason: "p2_workflow"
+
+# ============================================================== 
+# 设备配置（CPU 优先闭环验证）
+# ============================================================== 
+device: "cpu"
+
+# ============================================================== 
+# SD3 模型配置
+# ============================================================== 
+model_id: "stabilityai/stable-diffusion-3.5-medium"
+hf_revision: "main"
+
+# ============================================================== 
+# 推理配置（真实闭合验证）
+# ============================================================== 
+inference_enabled: true
+inference_prompt: "a serene landscape with mountains and a lake"
+inference_num_steps: 28
+inference_guidance_scale: 7.0
+inference_height: 512
+inference_width: 512
+
+# ============================================================== 
+# 轨迹采样配置（Trajectory Tap - 可复算证据）
+# ============================================================== 
+trajectory_tap:
+  enabled: true
+  tensor_types: ["latent"]
+  module_paths: ["transformer"]
+  stats_precision_digits: 6
+
+# ============================================================== 
+# Paper Faithfulness 配置（回退剖面禁用）
+# ============================================================== 
+paper_faithfulness:
+  enabled: false
+  alignment_check: true
+  check_pipeline_fingerprint: true
+  check_trajectory_digest: true
+
+# ============================================================== 
+# 水印子空间配置
+# ============================================================== 
+watermark:
+  subspace:
+    timestep_start: 0
+    timestep_end: 27
+    trajectory_step_stride: 1
+    sample_count: 28
+    feature_dim: 128
+
+  lf:
+    enabled: true
+    variance: 1.5
+    ecc_sparsity: 3
+    message_length: 64
+
+  hf:
+    enabled: false
+    tail_truncation_ratio: 0.1
+    tail_truncation_mode: "top_k_per_latent"
+    tau: 2.0
+
+# ============================================================== 
+# 检测几何配置
+# ============================================================== 
+detect:
+  content:
+    enabled: true
+  geometry:
+    enabled: false
+
+# ============================================================== 
+# 内容链配置
+# ============================================================== 
+enable_mask: true
+
+# ============================================================== 
+# 嵌入配置
+# ============================================================== 
+embed:
+  test_mode_identity: false
+  use_latent_per_step: false
+
+# ============================================================== 
+# Ablation 实验开关面板
+# ============================================================== 
+ablation:
+  enable_content: null
+  enable_geometry: null
+  enable_fusion: null
+  enable_mask: null
+  enable_subspace: null
+  enable_rescue: null
+  enable_lf: null
+  enable_hf: null
+  lf_only: false
+  hf_only: false
+  normalized: null
+
+# ============================================================== 
+# 实现标识
+# ============================================================== 
+impl:
+  content_extractor_id: "unified_content_extractor_v1"
+  geometry_extractor_id: "geometry_baseline_identity_v1"
+  fusion_rule_id: "fusion_baseline_identity_v1"
+  subspace_planner_id: "subspace_planner_v1"
+  sync_module_id: "geometry_sync_baseline_v1"
+
+# ============================================================== 
+# Calibration / Evaluate 输入绑定（P2 workflow）
+# ============================================================== 
+calibration:
+  detect_records_glob: "outputs/p2_workflow_final/records/detect_record.json"
+
+evaluate:
+  detect_records_glob: "outputs/p2_workflow_final/records/detect_record.json"
+  thresholds_path: "outputs/p2_workflow_final/artifacts/thresholds/thresholds_artifact.json"

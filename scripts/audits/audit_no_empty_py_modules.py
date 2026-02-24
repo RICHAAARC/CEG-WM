@@ -35,15 +35,21 @@ def audit_no_empty_py_modules(repo_root: Path) -> Dict[str, Any]:
     if not repo_root.is_dir():
         raise ValueError(f"repo_root {repo_root} is not a directory")
 
+    audit_id = "empty_py_modules"
+    gate_name = "gate.empty_py_modules"
+    category = "G"
+
     main_dir = repo_root / "main"
     if not main_dir.is_dir():
         return {
-            "audit_id": "empty_py_modules",
-            "severity": "WARN",
-            "result": "SKIP",
-            "rule": "main/ directory not found; audit skipped",
-            "impact": "cannot verify; main/ structure missing",
-            "fix": "ensure main/ directory exists",
+            "audit_id": audit_id,
+            "gate_name": gate_name,
+            "category": category,
+            "severity": "NON_BLOCK",
+            "result": "N.A.",
+            "rule": "main/ directory not found; audit not applicable",
+            "impact": "Empty Python modules check not applicable; main/ structure not present",
+            "fix": "N.A.",
             "evidence": {
                 "checked_path": str(main_dir),
                 "directory_exists": False,
@@ -65,7 +71,9 @@ def audit_no_empty_py_modules(repo_root: Path) -> Dict[str, Any]:
         # 违规：存在非初始化空文件
         empty_modules_sorted = sorted(empty_modules)
         return {
-            "audit_id": "empty_py_modules",
+            "audit_id": audit_id,
+            "gate_name": gate_name,
+            "category": category,
             "severity": "BLOCK",
             "result": "FAIL",
             "rule": f"found {len(empty_modules_sorted)} zero-byte .py files (non-__init__.py) in main/",
@@ -80,12 +88,14 @@ def audit_no_empty_py_modules(repo_root: Path) -> Dict[str, Any]:
     else:
         # 通过：无违规文件
         return {
-            "audit_id": "empty_py_modules",
-            "severity": "PASS",
+            "audit_id": audit_id,
+            "gate_name": gate_name,
+            "category": category,
+            "severity": "NON_BLOCK",
             "result": "PASS",
             "rule": "no zero-byte .py files (non-__init__.py) found in main/",
             "impact": "release quality assurance: empty modules successfully eliminated",
-            "fix": None,
+            "fix": "N.A.",
             "evidence": {
                 "scanned_path": str(main_dir),
                 "empty_modules": [],
@@ -118,58 +128,28 @@ def main(argv: Optional[List[str]] = None) -> int:
         result = audit_no_empty_py_modules(Path(repo_root_str))
     except Exception as exc:
         error_info = {
-            "audit_id": "empty_py_modules",
-            "severity": "ERROR",
-            "result": "ERROR",
+            "audit_id": "ERROR.audit_no_empty_py_modules",
+            "gate_name": "gate.audit_no_empty_py_modules",
+            "category": "G",
+            "severity": "BLOCK",
+            "result": "FAIL",
             "rule": "audit execution failed",
             "impact": f"unexpected error: {str(exc)}",
-            "error": str(exc),
+            "fix": "fix runtime exception in audit_no_empty_py_modules.py",
+            "evidence": {
+                "error": str(exc)
+            },
         }
-        print(json.dumps([error_info], indent=2, ensure_ascii=False))
+        print(json.dumps(error_info, indent=2, ensure_ascii=False))
         return 1
 
     # (4) 输出审计结果（JSON 格式）
     audit_result = result.get("result", "UNKNOWN")
     
-    # 统一输出为 dict（signoff 脚本要求 audit 输出 root 必须为 dict）
-    output_dict = {}
-    
+    print(json.dumps(result, indent=2, ensure_ascii=False))
     if audit_result == "FAIL":
-        # 违规情况：输出错误信息 dict
-        output_dict = {
-            "audit_id": result.get("audit_id"),
-            "severity": result.get("severity"),
-            "result": result.get("result"),
-            "rule": result.get("rule"),
-            "impact": result.get("impact"),
-            "fix": result.get("fix"),
-            "evidence": result.get("evidence"),
-        }
-        print(json.dumps(output_dict, indent=2, ensure_ascii=False))
         return 1
-    elif audit_result == "PASS":
-        # 通过：输出 PASS dict
-        output_dict = {
-            "audit_id": result.get("audit_id"),
-            "severity": result.get("severity"),
-            "result": result.get("result"),
-            "rule": result.get("rule"),
-            "impact": result.get("impact"),
-            "fix": result.get("fix"),
-            "evidence": result.get("evidence"),
-        }
-        print(json.dumps(output_dict, indent=2, ensure_ascii=False))
-        return 0
-    elif audit_result == "SKIP":
-        # 跳过：输出 SKIP dict
-        output_dict = result
-        print(json.dumps(output_dict, indent=2, ensure_ascii=False))
-        return 0
-    else:
-        # 未知状态：作为通过处理
-        output_dict = result
-        print(json.dumps(output_dict, indent=2, ensure_ascii=False))
-        return 0
+    return 0
 
 
 if __name__ == "__main__":
