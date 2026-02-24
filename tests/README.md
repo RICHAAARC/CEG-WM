@@ -1,6 +1,6 @@
-# 测试套件说明
+# 测试与回归套件说明
 
-本目录包含冻结面完整性与门禁执行的最小回归测试闭环。
+本目录包含冻结面完整性与门禁执行的回归测试闭环。
 
 ## 测试覆盖矩阵
 
@@ -33,11 +33,6 @@ pytest tests/test_schema_requires_interpretation.py::test_schema_requires_interp
 ### 显示详细输出
 ```powershell
 pytest tests/ -v -s
-```
-
-### 仅运行未标记 skip 的测试
-```powershell
-pytest tests/ -v --ignore-skip
 ```
 
 ## Fixture 说明（conftest.py）
@@ -112,7 +107,7 @@ def test_example(mock_registry_sealed):
 ## 测试策略
 
 ### 1. 失败路径优先
-测试首先覆盖"应该失败"的场景：
+测试首先覆盖“应该失败”的场景：
 - 缺少 interpretation → fail-fast
 - 绕过 freeze_gate → 写盘拒绝
 - seal 后 register → 抛异常
@@ -153,7 +148,7 @@ def test_example(mock_registry_sealed):
 
 ## 扩展测试
 
-当前测试集为最小回归闭环。按版本化计划可追加：
+当前测试集为回归测试闭环。按版本化计划可追加：
 
 ### 集成测试
 - 端到端运行 `embed → detect → evaluate`
@@ -173,7 +168,7 @@ def test_example(mock_registry_sealed):
 ### ImportError: No module named 'main'
 确保仓库根目录在 PYTHONPATH 中：
 ```powershell
-$env:PYTHONPATH = "D:\Code\WM-Framework"
+$env:PYTHONPATH = "D:\Code\CEG-WM"
 pytest tests/ -v
 ```
 

@@ -1,14 +1,19 @@
-# 审计和测试脚本使用说明
+# 审计与工作流脚本使用说明
 
-本目录包含冻结前对抗式审计的所有审计脚本和回归测试。
+本目录包含工作流编排、冻结前对抗式审计和复现实验相关脚本。
 
 ## 目录结构
 
 ```
 scripts/
+├── run_onefile_workflow.py                             # 一键全链路（embed/detect/calibrate/evaluate/audits/signoff）
+├── run_cpu_first_e2e_verification.py                   # CPU-first 端到端闭环验证
 ├── run_all_audits.py                                    # 审计聚合器（主入口）
 ├── run_freeze_signoff.py                                # 冻结签署工具（baseline/paper/publish profile）
+├── run_multi_protocol_evaluation.py                     # 多协议评测编排
 ├── run_experiment_matrix.py                             # 试验矩阵聚合器
+├── run_publish_workflow.py                              # publish 工作流编排
+├── run_repro_pipeline.py                                # 复现实验流水线
 └── audits/
   ├── audit_write_bypass_scan.py                         # records.write_path_is_unbypassable（legacy_code=B1/B5）
   ├── audit_yaml_loader_uniqueness.py                    # config.yaml_loader_is_safe_and_unique（legacy_code=A6）
@@ -25,7 +30,7 @@ scripts/
 
 tests/
 ├── conftest.py
-├── test_*.py                                            # 回归测试集（477+ test cases）
+├── test_*.py                                            # 回归测试集（以仓库当前 tests 目录为准）
 └── ...
 ```
 
@@ -54,7 +59,7 @@ python -c "import json; r=json.load(open('audit_report.json')); print(f\"Decisio
 pytest tests/ -q
 ```
 
-**关键字段对应支付锚点：**
+**关键字段对应支撑锚点：**
 
 | 锚点 | 对应文件 | 关键字段 | 语义 |
 |------|------|------|------|
@@ -279,11 +284,6 @@ pytest tests/test_schema_requires_interpretation.py -v
 - 排序：按 group_key 字母序排列（report_builder.py 第 190 行保证）
 - 必须项：来自 attack_protocol.yaml::families 与 params_versions 的所有条件
 - 长期稳定性：条件键一旦声明不可改变（append-only 原则）
-
----
-
-## 聚合报告格式
-
 
 ## 判定规则
 

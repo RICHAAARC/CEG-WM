@@ -171,13 +171,16 @@ def apply_cli_overrides(
         new_value = _resolve_override_value(item, whitelist)
         _set_value_by_field_path(cfg, item.field_path, new_value)
 
+        audit_old_value = old_value if old_value is not None else "<absent>"
+        audit_new_value = new_value if new_value is not None else "<absent>"
+
         applied_fields.append({
             "arg_name": item.arg_name,
             "field_path": item.field_path,
             "override_mode": item.override_mode,
             "source": item.source,
-            "old_value": old_value,
-            "new_value": new_value
+            "old_value": audit_old_value,
+            "new_value": audit_new_value
         })
         requested_overrides.append({
             "arg_name": item.arg_name,

@@ -11,6 +11,7 @@ CPU 优先端到端闭环验证脚本
 Module type: Core innovation module
 """
 
+import argparse
 import sys
 import subprocess
 import json
@@ -19,6 +20,10 @@ from pathlib import Path
 from datetime import datetime, timezone
 import tempfile
 import hashlib
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from main.core.records_io import write_artifact_json_unbound
 
@@ -410,9 +415,39 @@ def run_cpu_first_verification(output_root="tmp/cpu_first_e2e", config_path="con
         return False
 
 
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """
+    功能：构建 CPU-first 验证脚本参数解析器。
+
+    Build argument parser for CPU-first verification script.
+
+    Args:
+        None.
+
+    Returns:
+        Configured ArgumentParser instance.
+    """
+    parser = argparse.ArgumentParser(
+        description="CPU-first end-to-end verification runner"
+    )
+    parser.add_argument(
+        "--output-root",
+        default="tmp/cpu_first_e2e",
+        help="Output directory root",
+    )
+    parser.add_argument(
+        "--config",
+        default="configs/default.yaml",
+        help="Config YAML path",
+    )
+    return parser
+
+
 if __name__ == "__main__":
+    parser = _build_arg_parser()
+    args = parser.parse_args()
     try:
-        success = run_cpu_first_verification()
+        success = run_cpu_first_verification(output_root=args.output_root, config_path=args.config)
         sys.exit(0 if success else 1)
     except Exception as e:
         print(f"\n[CRITICAL] Exception: {e}")
