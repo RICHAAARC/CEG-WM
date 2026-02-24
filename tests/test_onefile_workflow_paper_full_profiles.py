@@ -1,0 +1,162 @@
+"""
+文件目的：onefile profile 隔离与 paper 机制断言回归测试。
+Module type: General module
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import sys
+from pathlib import Path
+
+
+def _load_onefile_module(repo_root: Path):
+    """
+    功能：动态加载 onefile workflow 脚本模块。
+
+    Dynamically load scripts/run_onefile_workflow.py as module.
+
+    Args:
+        repo_root: Repository root path.
+
+    Returns:
+        Imported module object.
+    """
+    module_path = repo_root / "scripts" / "run_onefile_workflow.py"
+    spec = importlib.util.spec_from_file_location("run_onefile_workflow_profile_test", module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"failed to load module spec: {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_assert_script_module(repo_root: Path):
+    """
+    功能：动态加载 paper 机制断言脚本模块。
+
+    Dynamically load scripts/assert_paper_mechanisms.py as module.
+
+    Args:
+        repo_root: Repository root path.
+
+    Returns:
+        Imported module object.
+    """
+    module_path = repo_root / "scripts" / "assert_paper_mechanisms.py"
+    spec = importlib.util.spec_from_file_location("assert_paper_mechanisms_test", module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"failed to load module spec: {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_onefile_workflow_profiles_smoke_vs_paper_full_are_disjoint(tmp_path: Path) -> None:
+    """
+    功能：验证 smoke 与 paper_full profile 编排步骤严格隔离。
+
+    Verify cpu_smoke and paper_full_cuda profiles are strictly disjoint in workflow steps.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    cfg_path = repo_root / "configs" / "default.yaml"
+
+    smoke_steps = module.build_workflow_steps(
+        run_root=run_root,
+        cfg_path=cfg_path,
+        repo_root=repo_root,
+        profile="cpu_smoke",
+        signoff_profile="baseline",
+    )
+    paper_steps = module.build_workflow_steps(
+        run_root=run_root,
+        cfg_path=cfg_path,
+        repo_root=repo_root,
+        profile="paper_full_cuda",
+        signoff_profile="paper",
+    )
+
+    smoke_names = [step.name for step in smoke_steps]
+    paper_names = [step.name for step in paper_steps]
+
+    assert "assert_paper_mechanisms" not in smoke_names
+    assert "multi_protocol_evaluation" not in smoke_names
+    assert "assert_paper_mechanisms" in paper_names
+    assert "multi_protocol_evaluation" in paper_names
+
+
+def test_paper_full_mechanism_assertions_fail_fast_on_proxy_paths(tmp_path: Path) -> None:
+    """
+    功能：验证 paper 机制断言在 proxy 路径下 fail-fast。
+
+    Verify mechanism assertion fails fast when proxy HF/LF configuration is used.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    assert_module = _load_assert_script_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    (run_root / "records").mkdir(parents=True, exist_ok=True)
+    (run_root / "artifacts" / "multi_protocol_evaluation" / "artifacts" / "protocol_compare").mkdir(parents=True, exist_ok=True)
+
+    cfg = {
+        "paper_faithfulness": {"enabled": True},
+        "impl": {
+            "sync_module_id": "geometry_sync_baseline_v1",
+            "geometry_extractor_id": "geometry_baseline_identity_v1",
+        },
+        "watermark": {
+            "hf": {
+                "enabled": True,
+                "tail_truncation_mode": "gaussian",
+                "selection": "winsor",
+            },
+            "lf": {
+                "enabled": True,
+                "coding_mode": "dct_proxy",
+                "decoder": "majority_vote",
+            },
+        },
+    }
+    embed_record = {
+        "content_evidence": {
+            "trajectory_evidence": {"trajectory_spec_digest": "a" * 64},
+            "injection_site_spec": {"status": "ok", "hook_type": "callback_on_step_end"},
+            "lf_trace_digest": "b" * 64,
+        }
+    }
+    detect_record = {"content_evidence_payload": {}}
+    evaluate_report = {
+        "attack_protocol_version": "attack_protocol_v1",
+        "attack_protocol_digest": "c" * 64,
+        "attack_coverage_digest": "d" * 64,
+        "metrics_by_attack_condition": [{"group_key": "g0"}],
+    }
+
+    failures = assert_module._assert_paper_mechanisms(
+        run_root=run_root,
+        cfg=cfg,
+        embed_record=embed_record,
+        detect_record=detect_record,
+        evaluate_report=evaluate_report,
+    )
+
+    assert any("tail_truncation_mode" in item for item in failures)
+    assert any("coding_mode" in item for item in failures)
+    assert any("decoder" in item for item in failures)

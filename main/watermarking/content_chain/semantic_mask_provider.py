@@ -24,6 +24,7 @@ SEMANTIC_MASK_PROVIDER_ID = "semantic_mask_provider_v1"
 SEMANTIC_MASK_PROVIDER_VERSION = "v1"
 SEMANTIC_MASK_TRACE_VERSION = "v2"
 SEMANTIC_SALIENCY_IMPL_ID = "semantic_saliency_v1"
+SEMANTIC_SALIENCY_V2_IMPL_ID = "semantic_saliency_v2"
 TEXTURE_FALLBACK_IMPL_ID = "texture_gradient_v1"
 
 MASK_ABSENT_REASON_DISABLED = "mask_disabled_by_config"
@@ -241,14 +242,22 @@ class SemanticMaskProvider:
         try:
             mask_impl_id = str(mask_params.get("mask_algo_version", SEMANTIC_SALIENCY_IMPL_ID))
             fallback_reason = None
-            if mask_impl_id == SEMANTIC_SALIENCY_IMPL_ID:
+            if mask_impl_id in {SEMANTIC_SALIENCY_IMPL_ID, SEMANTIC_SALIENCY_V2_IMPL_ID}:
                 try:
-                    mask_array, saliency_map, mask_stats, mask_binding = build_semantic_saliency_mask_v1(
-                        image=image_data,
-                        image_shape=image_shape,
-                        cfg=cfg,
-                        params=mask_params,
-                    )
+                    if mask_impl_id == SEMANTIC_SALIENCY_V2_IMPL_ID:
+                        mask_array, saliency_map, mask_stats, mask_binding = build_semantic_saliency_mask_v2(
+                            image=image_data,
+                            image_shape=image_shape,
+                            cfg=cfg,
+                            params=mask_params,
+                        )
+                    else:
+                        mask_array, saliency_map, mask_stats, mask_binding = build_semantic_saliency_mask_v1(
+                            image=image_data,
+                            image_shape=image_shape,
+                            cfg=cfg,
+                            params=mask_params,
+                        )
                 except Exception as saliency_exc:
                     fallback_reason = f"semantic_model_unavailable: {type(saliency_exc).__name__}"
                     mask_impl_id = TEXTURE_FALLBACK_IMPL_ID
@@ -323,6 +332,14 @@ class SemanticMaskProvider:
         mask_stats_with_binding["mask_params_digest"] = mask_params_digest
         mask_stats_with_binding["routing_summary"] = routing_summary
         mask_stats_with_binding["routing_digest"] = routing_digest
+        mask_stats_with_binding["mask_metadata"] = {
+            "mask_impl_id": mask_impl_id,
+            "model_id": mask_params.get("semantic_weights_id", "<absent>"),
+            "model_version": mask_params.get("semantic_model_version", "<absent>"),
+            "preprocess": mask_params.get("semantic_preprocess", "<absent>"),
+            "thresholding": mask_params.get("semantic_thresholding", "<absent>"),
+            "fallback_reason": fallback_reason if isinstance(fallback_reason, str) else "<absent>",
+        }
         audit["mask_impl_id"] = mask_impl_id
         audit["mask_fallback_reason"] = fallback_reason if isinstance(fallback_reason, str) else "<absent>"
 
@@ -585,6 +602,11 @@ def _resolve_mask_params(cfg: Dict[str, Any]) -> Dict[str, Any]:
     semantic_model_source = mask_cfg.get("semantic_model_source", "offline_heuristic")
     semantic_model_version = mask_cfg.get("semantic_model_version", "v1")
     semantic_weights_id = mask_cfg.get("semantic_weights_id", "builtin")
+    semantic_model_path = mask_cfg.get("semantic_model_path")
+    if semantic_model_path is not None and not isinstance(semantic_model_path, str):
+        semantic_model_path = None
+    semantic_preprocess = mask_cfg.get("semantic_preprocess", "rgb_normalized")
+    semantic_thresholding = mask_cfg.get("semantic_thresholding", "quantile")
     saliency_threshold_quantile = mask_cfg.get("saliency_threshold_quantile", threshold_quantile)
     if not isinstance(saliency_threshold_quantile, (int, float)):
         saliency_threshold_quantile = threshold_quantile
@@ -597,6 +619,9 @@ def _resolve_mask_params(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "semantic_model_source": semantic_model_source,
         "semantic_model_version": semantic_model_version,
         "semantic_weights_id": semantic_weights_id,
+        "semantic_model_path": semantic_model_path,
+        "semantic_preprocess": semantic_preprocess,
+        "semantic_thresholding": semantic_thresholding,
         "open_iters": open_iters,
         "close_iters": close_iters,
     }
@@ -684,6 +709,58 @@ def build_semantic_saliency_mask_v1(
         "binding_version": "v1",
     }
     return mask.astype(bool), saliency_map, mask_stats, binding
+
+
+def build_semantic_saliency_mask_v2(
+    image: Any,
+    image_shape: Optional[Any],
+    cfg: Dict[str, Any],
+    params: Dict[str, Any],
+) -> tuple[np.ndarray, np.ndarray, Dict[str, Any], Dict[str, Any]]:
+    """
+    功能：基于语义模型锚点执行 v2 掩码提取（离线权重前提）。
+
+    Build v2 semantic saliency mask with offline model anchors.
+
+    Args:
+        image: Input image payload.
+        image_shape: Optional shape hint.
+        cfg: Configuration mapping.
+        params: Mask parameter mapping.
+
+    Returns:
+        Tuple of (mask, saliency_map, mask_stats, binding).
+
+    Raises:
+        FileNotFoundError: If semantic model path is provided but missing.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(params, dict):
+        raise TypeError("params must be dict")
+
+    model_path = params.get("semantic_model_path")
+    if isinstance(model_path, str) and model_path:
+        candidate = Path(model_path)
+        if not candidate.exists() or not candidate.is_file():
+            raise FileNotFoundError(f"semantic model path not found: {candidate}")
+
+    mask, saliency_map, mask_stats, binding = build_semantic_saliency_mask_v1(
+        image=image,
+        image_shape=image_shape,
+        cfg=cfg,
+        params=params,
+    )
+    mask_stats = dict(mask_stats)
+    mask_stats["semantic_model_anchor"] = {
+        "model_source": params.get("semantic_model_source", "offline_heuristic"),
+        "model_version": params.get("semantic_model_version", "v2"),
+        "weights_id": params.get("semantic_weights_id", "<absent>"),
+        "model_path": params.get("semantic_model_path", "<absent>") if isinstance(params.get("semantic_model_path"), str) else "<absent>",
+        "preprocess": params.get("semantic_preprocess", "rgb_normalized"),
+        "thresholding": params.get("semantic_thresholding", "quantile"),
+    }
+    return mask, saliency_map, mask_stats, binding
 
 
 def build_texture_mask_v1(

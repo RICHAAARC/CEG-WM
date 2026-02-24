@@ -1,0 +1,16 @@
+{
+  "_artifact_audit": {
+    "schema_version": "v1.0",
+    "writer": "records_io"
+  },
+  "calibration_version": "np_v1",
+  "quantile_rule": "higher",
+  "rule_id": "fusion_neyman_pearson_v1",
+  "rule_version": "v1",
+  "score_name": "content_score",
+  "target_fpr": 0.01,
+  "threshold_id": "content_score_np_1e-02",
+  "threshold_key_used": "1e-02",
+  "threshold_value": 0.0,
+  "ties_policy": "higher"
+}

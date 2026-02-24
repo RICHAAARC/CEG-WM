@@ -76,7 +76,7 @@ def test_onefile_workflow_builds_commands_and_fail_fast(monkeypatch: pytest.Monk
         repo_root=repo_root,
         cfg_path=cfg_path,
         run_root=run_root,
-        profile="cpu_min",
+        profile="cpu_smoke",
         signoff_profile="baseline",
         dry_run=False,
     )
@@ -130,7 +130,7 @@ def test_onefile_workflow_builds_commands_and_fail_fast(monkeypatch: pytest.Monk
         repo_root=repo_root,
         cfg_path=cfg_path,
         run_root=run_root,
-        profile="cpu_min",
+        profile="cpu_smoke",
         signoff_profile="baseline",
         dry_run=False,
     )
@@ -165,19 +165,19 @@ def test_onefile_workflow_requires_run_root_or_generates_one(tmp_path: Path) -> 
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
 
-    generated = module._build_run_root(repo_root, None, "cpu_min")
+    generated = module._build_run_root(repo_root, None, "cpu_smoke")
     generated.resolve().relative_to((repo_root / "outputs").resolve())
-    assert generated.name.startswith("onefile_cpu_min_")
+    assert generated.name.startswith("onefile_cpu_smoke_")
 
-    provided_relative = module._build_run_root(repo_root, "outputs/custom_run", "cpu_min")
+    provided_relative = module._build_run_root(repo_root, "outputs/custom_run", "cpu_smoke")
     assert provided_relative == (repo_root / "outputs" / "custom_run").resolve()
 
 
-def test_onefile_workflow_cuda_real_profile_generates_real_sd3_config(tmp_path: Path) -> None:
+def test_onefile_workflow_paper_full_profile_generates_real_sd3_config(tmp_path: Path) -> None:
     """
-    功能：验证 cuda_real profile 的真实 SD3 配置与命令覆盖。 
+    功能：验证 paper_full_cuda profile 的真实 SD3 配置与命令覆盖。 
 
-    Validate cuda_real profile writes real SD3 config and command overrides.
+    Validate paper_full_cuda profile writes real SD3 config and command overrides.
 
     Args:
         tmp_path: Temporary path fixture.
@@ -188,10 +188,10 @@ def test_onefile_workflow_cuda_real_profile_generates_real_sd3_config(tmp_path: 
     repo_root = Path(__file__).resolve().parent.parent
     module = _load_onefile_module(repo_root)
 
-    run_root = tmp_path / "cuda_real_run"
+    run_root = tmp_path / "paper_full_run"
     cfg_path = repo_root / "configs" / "default.yaml"
 
-    profile_cfg_path = module._prepare_profile_cfg_path("cuda_real", run_root, cfg_path)
+    profile_cfg_path = module._prepare_profile_cfg_path("paper_full_cuda", run_root, cfg_path)
     profile_cfg_text = profile_cfg_path.read_text(encoding="utf-8")
 
     assert "pipeline_impl_id: sd3_diffusers_real_v1" in profile_cfg_text
@@ -199,15 +199,20 @@ def test_onefile_workflow_cuda_real_profile_generates_real_sd3_config(tmp_path: 
     assert "device: cuda" in profile_cfg_text
     assert "enabled: true" in profile_cfg_text
     assert "alignment_check: true" in profile_cfg_text
+    assert "tail_truncation_mode: top_k_per_latent" in profile_cfg_text
+    assert "coding_mode: latent_space_sign_flipping" in profile_cfg_text
 
     steps = module.build_workflow_steps(
         run_root=run_root,
         cfg_path=profile_cfg_path,
         repo_root=repo_root,
-        profile="cuda_real",
+        profile="paper_full_cuda",
         signoff_profile="baseline",
     )
     embed_command_text = " ".join(steps[0].command)
     assert "enable_paper_faithfulness=true" in embed_command_text
     assert "enable_trace_tap=true" in embed_command_text
     assert "force_cpu=\"cpu\"" not in embed_command_text
+    step_names = [item.name for item in steps]
+    assert "multi_protocol_evaluation" in step_names
+    assert "assert_paper_mechanisms" in step_names

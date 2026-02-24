@@ -1,0 +1,21 @@
+{
+  "_artifact_audit": {
+    "schema_version": "v1.0",
+    "writer": "records_io"
+  },
+  "cfg_audit_canon_sha256": "c898fdf805a4203e47ae13b235f0783320beec2e6230460f7023c56e2fc499da",
+  "cfg_digest": "401eef52d1558169847d54d96d2457a60213a55b270435a2a6b6f01c58fc5f77",
+  "cfg_pruned_for_digest_canon_sha256": "401eef52d1558169847d54d96d2457a60213a55b270435a2a6b6f01c58fc5f77",
+  "config_path": "D:\\Code\\CEG-WM\\outputs\\onefile_cpu_smoke_verify\\artifacts\\workflow_cfg\\evaluate_config.yaml",
+  "overrides_applied_summary": {
+    "count": 6,
+    "keys": [
+      "allowed_fields_version",
+      "applied_fields",
+      "rejected_fields",
+      "requested_kv",
+      "requested_overrides",
+      "source"
+    ]
+  }
+}

@@ -105,6 +105,10 @@ def run_sd3_inference(
                 None,
                 seed=seed,
                 device=device
+            ),
+            "injection_evidence": _build_injection_absent_evidence(
+                injection_context,
+                absent_reason="pipeline_unavailable"
             )
         }
 
@@ -129,6 +133,10 @@ def run_sd3_inference(
                     None,
                     seed=seed,
                     device=device
+                ),
+                "injection_evidence": _build_injection_absent_evidence(
+                    injection_context,
+                    absent_reason="invalid_inference_prompt"
                 )
             }
 
@@ -145,6 +153,10 @@ def run_sd3_inference(
                     None,
                     seed=seed,
                     device=device
+                ),
+                "injection_evidence": _build_injection_absent_evidence(
+                    injection_context,
+                    absent_reason="invalid_inference_num_steps"
                 )
             }
 

@@ -982,17 +982,12 @@ def _build_latent_step_embed_trace(
         Embed trace mapping.
 
     Raises:
-        ValueError: If paper-faithfulness mode requires missing/invalid injection evidence.
+        None.
     """
     if not isinstance(cfg, dict):
         raise TypeError("cfg must be dict")
     paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
     paper_enabled = bool(paper_cfg.get("enabled", False))
-    if paper_enabled:
-        if not isinstance(injection_evidence, dict):
-            raise ValueError("paper_faithfulness mode requires injection_evidence dict")
-        if injection_evidence.get("status") != "ok":
-            raise ValueError("paper_faithfulness mode requires injection_evidence.status=ok")
 
     trace = {
         "embed_mode": "latent_step_injection_stub_v1",
@@ -1003,16 +998,27 @@ def _build_latent_step_embed_trace(
         "injection_trace_digest": "<absent>",
         "injection_params_digest": "<absent>",
     }
+    if paper_enabled:
+        trace["paper_faithfulness_required"] = True
     if isinstance(injection_evidence, dict):
         status_value = injection_evidence.get("status")
         trace_digest = injection_evidence.get("injection_trace_digest")
         params_digest = injection_evidence.get("injection_params_digest")
+        absent_reason = injection_evidence.get("injection_absent_reason")
+        failure_reason = injection_evidence.get("injection_failure_reason")
         if isinstance(status_value, str) and status_value:
             trace["injection_status"] = status_value
         if isinstance(trace_digest, str) and trace_digest:
             trace["injection_trace_digest"] = trace_digest
         if isinstance(params_digest, str) and params_digest:
             trace["injection_params_digest"] = params_digest
+        if isinstance(absent_reason, str) and absent_reason:
+            trace["injection_absent_reason"] = absent_reason
+        if isinstance(failure_reason, str) and failure_reason:
+            trace["injection_failure_reason"] = failure_reason
+    elif paper_enabled:
+        trace["injection_status"] = "absent"
+        trace["injection_absent_reason"] = "paper_mode_requires_injection_evidence"
     return trace
 
 

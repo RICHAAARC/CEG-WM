@@ -30,6 +30,39 @@ if str(REPO_ROOT) not in sys.path:
 from main.core import records_io
 
 
+PROFILE_CPU_SMOKE = "cpu_smoke"
+PROFILE_PAPER_FULL_CUDA = "paper_full_cuda"
+LEGACY_PROFILE_CPU_MIN = "cpu_min"
+LEGACY_PROFILE_CUDA_REAL = "cuda_real"
+
+
+def _normalize_profile(profile: str) -> str:
+    """
+    功能：规范化 profile 名称（兼容历史别名）。
+
+    Normalize workflow profile names with backward-compatible aliases.
+
+    Args:
+        profile: Raw profile name.
+
+    Returns:
+        Normalized profile name.
+
+    Raises:
+        TypeError: If input type is invalid.
+        ValueError: If profile is unsupported.
+    """
+    if not isinstance(profile, str) or not profile:
+        raise TypeError("profile must be non-empty str")
+    if profile == LEGACY_PROFILE_CPU_MIN:
+        return PROFILE_CPU_SMOKE
+    if profile == LEGACY_PROFILE_CUDA_REAL:
+        return PROFILE_PAPER_FULL_CUDA
+    if profile in {PROFILE_CPU_SMOKE, PROFILE_PAPER_FULL_CUDA}:
+        return profile
+    raise ValueError(f"unsupported profile: {profile}")
+
+
 @dataclass(frozen=True)
 class WorkflowStep:
     """
@@ -110,8 +143,7 @@ def _build_stage_overrides(stage_name: str, profile: str) -> List[str]:
     """
     if stage_name not in {"embed", "detect", "calibrate", "evaluate"}:
         raise ValueError(f"unsupported stage_name: {stage_name}")
-    if profile not in {"cpu_min", "cuda_real"}:
-        raise ValueError(f"unsupported profile: {profile}")
+    profile = _normalize_profile(profile)
 
     reason = json.dumps(f"onefile_workflow_{stage_name}", ensure_ascii=False)
     overrides = [
@@ -119,7 +151,7 @@ def _build_stage_overrides(stage_name: str, profile: str) -> List[str]:
         f"run_root_reuse_reason={reason}",
     ]
 
-    if profile == "cpu_min":
+    if profile == PROFILE_CPU_SMOKE:
         overrides.extend(
             [
                 "force_cpu=\"cpu\"",
@@ -127,7 +159,7 @@ def _build_stage_overrides(stage_name: str, profile: str) -> List[str]:
                 "test_mode_identity=true",
             ]
         )
-    if profile == "cuda_real":
+    if profile == PROFILE_PAPER_FULL_CUDA:
         overrides.extend(
             [
                 "enable_trace_tap=true",
@@ -162,7 +194,8 @@ def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> P
     if not isinstance(cfg_path, Path):
         raise TypeError("cfg_path must be Path")
 
-    if profile != "cuda_real":
+    profile = _normalize_profile(profile)
+    if profile != PROFILE_PAPER_FULL_CUDA:
         return cfg_path
 
     cfg_text = cfg_path.read_text(encoding="utf-8")
@@ -206,7 +239,42 @@ def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> P
         model_cfg["width"] = 512
     cfg_obj["model"] = model_cfg
 
-    profile_cfg_path = run_root / "artifacts" / "workflow_cfg" / "profile_cuda_real.yaml"
+    watermark_cfg = cfg_obj.get("watermark")
+    if not isinstance(watermark_cfg, dict):
+        watermark_cfg = {}
+    hf_cfg = watermark_cfg.get("hf") if isinstance(watermark_cfg.get("hf"), dict) else {}
+    lf_cfg = watermark_cfg.get("lf") if isinstance(watermark_cfg.get("lf"), dict) else {}
+    hf_cfg["enabled"] = True
+    hf_cfg["tail_truncation_mode"] = "top_k_per_latent"
+    hf_cfg["selection"] = "top_k_magnitude_based"
+    lf_cfg["enabled"] = True
+    lf_cfg["coding_mode"] = "latent_space_sign_flipping"
+    lf_cfg["decoder"] = "belief_propagation"
+    watermark_cfg["hf"] = hf_cfg
+    watermark_cfg["lf"] = lf_cfg
+    cfg_obj["watermark"] = watermark_cfg
+
+    detect_cfg = cfg_obj.get("detect") if isinstance(cfg_obj.get("detect"), dict) else {}
+    geometry_cfg = detect_cfg.get("geometry") if isinstance(detect_cfg.get("geometry"), dict) else {}
+    geometry_cfg["enabled"] = True
+    geometry_cfg["enable_attention_anchor"] = True
+    detect_cfg["geometry"] = geometry_cfg
+    cfg_obj["detect"] = detect_cfg
+
+    impl_cfg = cfg_obj.get("impl") if isinstance(cfg_obj.get("impl"), dict) else {}
+    impl_cfg["sync_module_id"] = "geometry_latent_sync_sd3_v1"
+    impl_cfg["geometry_extractor_id"] = "geometry_align_invariance_sd3_v1"
+    cfg_obj["impl"] = impl_cfg
+
+    mask_cfg = cfg_obj.get("mask") if isinstance(cfg_obj.get("mask"), dict) else {}
+    mask_cfg["impl_id"] = "semantic_saliency_v2"
+    cfg_obj["mask"] = mask_cfg
+
+    embed_cfg = cfg_obj.get("embed") if isinstance(cfg_obj.get("embed"), dict) else {}
+    embed_cfg["test_mode_identity"] = False
+    cfg_obj["embed"] = embed_cfg
+
+    profile_cfg_path = run_root / "artifacts" / "workflow_cfg" / "profile_paper_full_cuda.yaml"
     _write_artifact_text_unbound(
         run_root,
         profile_cfg_path,
@@ -258,6 +326,7 @@ def _prepare_stage_cfg_path(
     stage_name: str,
     run_root: Path,
     cfg_path: Path,
+    profile: str,
 ) -> Path:
     """
     功能：为特定阶段生成补全字段后的配置文件。 
@@ -286,13 +355,21 @@ def _prepare_stage_cfg_path(
     if stage_name not in {"calibrate", "evaluate"}:
         return cfg_path
 
+    profile = _normalize_profile(profile)
+
     cfg_text = cfg_path.read_text(encoding="utf-8")
     cfg_obj = yaml.safe_load(cfg_text)
     if not isinstance(cfg_obj, dict):
         raise ValueError("config root must be mapping")
 
     records_dir = run_root / "records"
-    detect_record_glob = str(_prepare_detect_record_for_scoring(run_root, records_dir))
+    if profile == PROFILE_PAPER_FULL_CUDA:
+        detect_record_path = records_dir / "detect_record.json"
+        if not detect_record_path.exists() or not detect_record_path.is_file():
+            raise ValueError(f"paper_full_cuda requires detect_record.json: {detect_record_path}")
+        detect_record_glob = str(detect_record_path)
+    else:
+        detect_record_glob = str(_prepare_detect_record_for_scoring(run_root, records_dir, profile))
 
     if stage_name == "calibrate":
         calibration_cfg = cfg_obj.get("calibration")
@@ -320,7 +397,7 @@ def _prepare_stage_cfg_path(
     return stage_cfg_path
 
 
-def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path) -> Path:
+def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profile: str) -> Path:
     """
     功能：为校准/评估准备至少一个可用分数样本记录。 
 
@@ -341,6 +418,10 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path) -> Pat
         raise TypeError("run_root must be Path")
     if not isinstance(records_dir, Path):
         raise TypeError("records_dir must be Path")
+
+    profile = _normalize_profile(profile)
+    if profile == PROFILE_PAPER_FULL_CUDA:
+        raise ValueError("detect record patching is forbidden in paper_full_cuda profile")
 
     source_detect_path = records_dir / "detect_record.json"
     if not source_detect_path.exists() or not source_detect_path.is_file():
@@ -370,6 +451,7 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path) -> Pat
     content_payload["status"] = "ok"
     content_payload["score"] = float(score_fallback)
     content_payload["content_failure_reason"] = None
+    print("[onefile] SMOKE_ONLY_PATCH_APPLIED detect_record_for_calibration")
 
     calibrated_detect_path = run_root / "artifacts" / "workflow_cfg" / "detect_record_for_calibration.json"
     calibrated_detect_path.parent.mkdir(parents=True, exist_ok=True)
@@ -428,6 +510,7 @@ def build_workflow_steps(
     Returns:
         Ordered workflow step list.
     """
+    profile = _normalize_profile(profile)
     scripts_dir = repo_root / "scripts"
     steps: List[WorkflowStep] = [
         WorkflowStep(
@@ -463,6 +546,54 @@ def build_workflow_steps(
                 run_root / "artifacts" / "run_closure.json",
             ],
         ),
+    ]
+
+    if profile == PROFILE_PAPER_FULL_CUDA:
+        multi_protocol_base = run_root / "artifacts" / "multi_protocol_evaluation"
+        steps.extend(
+            [
+                WorkflowStep(
+                    name="multi_protocol_evaluation",
+                    command=[
+                        sys.executable,
+                        str(scripts_dir / "run_multi_protocol_evaluation.py"),
+                        "--base-cfg",
+                        str(cfg_path),
+                        "--protocol",
+                        str(repo_root / "configs" / "attack_protocol.yaml"),
+                        "--mode",
+                        "repro",
+                        "--run-root-base",
+                        str(multi_protocol_base),
+                        "--repo-root",
+                        str(repo_root),
+                    ],
+                    artifact_paths=[
+                        multi_protocol_base / "artifacts" / "protocol_compare" / "compare_summary.json",
+                    ],
+                ),
+                WorkflowStep(
+                    name="assert_paper_mechanisms",
+                    command=[
+                        sys.executable,
+                        str(scripts_dir / "assert_paper_mechanisms.py"),
+                        "--run-root",
+                        str(run_root),
+                        "--config",
+                        str(cfg_path),
+                        "--profile",
+                        profile,
+                    ],
+                    artifact_paths=[
+                        run_root / "records" / "embed_record.json",
+                        run_root / "records" / "detect_record.json",
+                        run_root / "artifacts" / "evaluation_report.json",
+                    ],
+                ),
+            ]
+        )
+
+    steps.extend([
         WorkflowStep(
             name="audits",
             command=[sys.executable, str(scripts_dir / "run_all_audits.py"), "--repo-root", str(repo_root)],
@@ -493,7 +624,7 @@ def build_workflow_steps(
             ],
             artifact_paths=[run_root / "artifacts" / "signoff" / "signoff_report.json"],
         ),
-    ]
+    ])
     return steps
 
 
@@ -578,6 +709,7 @@ def run_onefile_workflow(
     Returns:
         Process exit code. Returns first failed step return code, or 0 on success.
     """
+    profile = _normalize_profile(profile)
     effective_cfg_path = _prepare_profile_cfg_path(profile, run_root, cfg_path)
     steps = build_workflow_steps(run_root, effective_cfg_path, repo_root, profile, signoff_profile)
     for step in steps:
@@ -585,7 +717,7 @@ def run_onefile_workflow(
         if step.name in {"calibrate", "evaluate"}:
             detect_record_path = run_root / "records" / "detect_record.json"
             if detect_record_path.exists() and detect_record_path.is_file():
-                stage_cfg_path = _prepare_stage_cfg_path(step.name, run_root, effective_cfg_path)
+                stage_cfg_path = _prepare_stage_cfg_path(step.name, run_root, effective_cfg_path, profile)
                 step_command = _build_stage_command(step.name, run_root, stage_cfg_path, profile)
 
         _print_step_header(step, run_root)
@@ -625,7 +757,12 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--cfg", required=True, help="Config YAML path")
     parser.add_argument("--run-root", default=None, help="Unified run_root path")
-    parser.add_argument("--profile", default="cpu_min", choices=["cpu_min", "cuda_real"], help="Execution profile")
+    parser.add_argument(
+        "--profile",
+        default=PROFILE_CPU_SMOKE,
+        choices=[PROFILE_CPU_SMOKE, PROFILE_PAPER_FULL_CUDA, LEGACY_PROFILE_CPU_MIN, LEGACY_PROFILE_CUDA_REAL],
+        help="Execution profile",
+    )
     parser.add_argument(
         "--signoff-profile",
         default="baseline",
@@ -648,6 +785,7 @@ def main() -> None:
         None.
     """
     args = _parse_args()
+    args.profile = _normalize_profile(args.profile)
 
     script_path = Path(__file__).resolve()
     default_repo_root = script_path.parent.parent

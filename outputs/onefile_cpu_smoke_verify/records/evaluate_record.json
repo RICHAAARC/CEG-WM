@@ -1,0 +1,638 @@
+{
+  "cfg_digest": "401eef52d1558169847d54d96d2457a60213a55b270435a2a6b6f01c58fc5f77",
+  "conditional_metrics": {
+    "attack_group_metrics": [
+      {
+        "fp": 0,
+        "fpr_empirical": null,
+        "geo_available_rate": null,
+        "group_key": "unknown_attack::unknown_params",
+        "n_accepted": 0,
+        "n_neg": 0,
+        "n_pos": 0,
+        "n_total": 1,
+        "reject_rate_by_reason": {
+          "content_absent": 0.0,
+          "content_fail": 0.0,
+          "content_mismatch": 0.0,
+          "geometry_absent": 0.0,
+          "geometry_fail": 0.0,
+          "geometry_mismatch": 0.0,
+          "invalid_record": 0.0,
+          "invalid_score": 0.0,
+          "missing_content_payload": 0.0,
+          "missing_ground_truth": 1.0,
+          "status_not_ok": 0.0
+        },
+        "rescue_gain_rate": null,
+        "rescue_rate": null,
+        "tp": 0,
+        "tpr_at_fpr_primary": null
+      }
+    ],
+    "attack_protocol_version": "attack_protocol_v1",
+    "items": [],
+    "version": "conditional_eval_v1"
+  },
+  "contract_bound_digest": "d08cb413a78c891a70a4dff72095094c95afcd99b6171f2e92ea235c81e26acc",
+  "contract_canon_sha256": "1cf3f57ab886002bc162317a1701c40bc86ada3d2232ca50d15156438e4556a3",
+  "contract_digest": "1cf3f57ab886002bc162317a1701c40bc86ada3d2232ca50d15156438e4556a3",
+  "contract_file_sha256": "6d3fe4d2273dd8b3fecde7e4c29165ea888a1a0382bd9356b30c5a6258bf5508",
+  "contract_version": "v1.0",
+  "decision": {
+    "is_watermarked": null
+  },
+  "evaluation_breakdown": {
+    "confusion": {
+      "fn": 0,
+      "fp": 0,
+      "tn": 0,
+      "tp": 0
+    }
+  },
+  "evaluation_is_fallback": false,
+  "evaluation_mode": "real",
+  "evaluation_report": {
+    "ablation_digest": "bede5454ad676a886f4ef95b1a3fb4bff074f31a7be221aaa05a34545b6562b5",
+    "anchors": {
+      "ablation_digest": "bede5454ad676a886f4ef95b1a3fb4bff074f31a7be221aaa05a34545b6562b5",
+      "attack_coverage_digest": "76cebcca07c28a6e9503c22c5da62d879bc23c41d57c6ad4331da850c4f6891a",
+      "attack_protocol_digest": "9ab9b9ed12321ca4d1c591adfa14f7b0b6245b75cb14bb506ae16320ce81599a",
+      "attack_protocol_version": "attack_protocol_v1",
+      "attack_trace_digest": "<absent>",
+      "cfg_digest": "<absent>",
+      "fusion_rule_version": "v1",
+      "impl_digest": "<absent>",
+      "n_rejected": 1,
+      "n_total": 1,
+      "plan_digest": "<absent>",
+      "policy_path": "<absent>",
+      "threshold_metadata_digest": "<absent>",
+      "thresholds_digest": "deb324e6161d854e42c922d0dd1a7760b607f23ca43c7b0cd29410ef3f905492"
+    },
+    "attack_coverage_digest": "76cebcca07c28a6e9503c22c5da62d879bc23c41d57c6ad4331da850c4f6891a",
+    "attack_protocol": {
+      "attack_protocol_digest": "9ab9b9ed12321ca4d1c591adfa14f7b0b6245b75cb14bb506ae16320ce81599a",
+      "attack_protocol_file_sha256": "8f62e1f733f6941e7f6926026e1da6008345e9d258de5b2133eee08836583951",
+      "families": {
+        "composite": {
+          "description": "ordered composite attack sequences",
+          "params_versions": {
+            "rotate_resize_v1": {
+              "seed_policy": "shared",
+              "steps": [
+                {
+                  "family": "rotate",
+                  "params": {
+                    "degrees": 10
+                  }
+                },
+                {
+                  "family": "resize",
+                  "params": {
+                    "scale_factor": 0.9
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "crop": {
+          "description": "crop attacks",
+          "params_versions": {
+            "v1": {
+              "crop_ratios": [
+                0.9,
+                0.8,
+                0.7
+              ]
+            }
+          }
+        },
+        "gaussian_blur": {
+          "description": "gaussian blur attacks",
+          "params_versions": {
+            "v1": {
+              "kernel_size": [
+                3,
+                5
+              ],
+              "seed_policy": "inherit",
+              "sigma": [
+                0.8,
+                1.2
+              ]
+            }
+          }
+        },
+        "gaussian_noise": {
+          "description": "additive gaussian noise attacks",
+          "params_versions": {
+            "v1": {
+              "seed_policy": "inherit",
+              "sigma": [
+                0.005,
+                0.01,
+                0.02
+              ]
+            }
+          }
+        },
+        "jpeg": {
+          "description": "jpeg compression attacks",
+          "params_versions": {
+            "v1": {
+              "quality": [
+                95,
+                85,
+                75
+              ],
+              "seed_policy": "inherit"
+            }
+          }
+        },
+        "resize": {
+          "description": "resize attacks",
+          "params_versions": {
+            "v1": {
+              "scale_factors": [
+                0.75,
+                0.9,
+                1.1
+              ]
+            }
+          }
+        },
+        "rotate": {
+          "description": "rotation attacks",
+          "params_versions": {
+            "v1": {
+              "degrees": [
+                5,
+                10,
+                15
+              ]
+            }
+          }
+        },
+        "translate": {
+          "description": "translation attacks",
+          "params_versions": {
+            "v1": {
+              "x_shift": [
+                -24,
+                -12,
+                12,
+                24
+              ],
+              "y_shift": [
+                -24,
+                -12,
+                12,
+                24
+              ]
+            }
+          }
+        }
+      },
+      "family_field_candidates": [
+        "attack.family",
+        "attack_family",
+        "attack.type"
+      ],
+      "params_version_field_candidates": [
+        "attack.params_version",
+        "attack_params_version"
+      ],
+      "params_versions": {
+        "composite::rotate_resize_v1": {
+          "family": "composite",
+          "params": {
+            "seed_policy": "shared",
+            "steps": [
+              {
+                "family": "rotate",
+                "params": {
+                  "degrees": 10
+                }
+              },
+              {
+                "family": "resize",
+                "params": {
+                  "scale_factor": 0.9
+                }
+              }
+            ]
+          }
+        },
+        "crop::v1": {
+          "family": "crop",
+          "params": {
+            "crop_ratios": [
+              0.9,
+              0.8,
+              0.7
+            ]
+          }
+        },
+        "gaussian_blur::v1": {
+          "family": "gaussian_blur",
+          "params": {
+            "kernel_size": [
+              3,
+              5
+            ],
+            "seed_policy": "inherit",
+            "sigma": [
+              0.8,
+              1.2
+            ]
+          }
+        },
+        "gaussian_noise::v1": {
+          "family": "gaussian_noise",
+          "params": {
+            "seed_policy": "inherit",
+            "sigma": [
+              0.005,
+              0.01,
+              0.02
+            ]
+          }
+        },
+        "jpeg::v1": {
+          "family": "jpeg",
+          "params": {
+            "quality": [
+              95,
+              85,
+              75
+            ],
+            "seed_policy": "inherit"
+          }
+        },
+        "resize::v1": {
+          "family": "resize",
+          "params": {
+            "scale_factors": [
+              0.75,
+              0.9,
+              1.1
+            ]
+          }
+        },
+        "rotate::v1": {
+          "family": "rotate",
+          "params": {
+            "degrees": [
+              5,
+              10,
+              15
+            ]
+          }
+        },
+        "translate::v1": {
+          "family": "translate",
+          "params": {
+            "x_shift": [
+              -24,
+              -12,
+              12,
+              24
+            ],
+            "y_shift": [
+              -24,
+              -12,
+              12,
+              24
+            ]
+          }
+        }
+      },
+      "version": "attack_protocol_v1"
+    },
+    "attack_protocol_digest": "9ab9b9ed12321ca4d1c591adfa14f7b0b6245b75cb14bb506ae16320ce81599a",
+    "attack_protocol_version": "attack_protocol_v1",
+    "attack_trace_digest": "<absent>",
+    "cfg_digest": "<absent>",
+    "evaluation_version": "eval_v1",
+    "fusion_rule_version": "v1",
+    "group_count_anchors": {
+      "n_rejected": 1,
+      "n_total": 1
+    },
+    "impl_anchors": {
+      "content": {
+        "impl_digest": "<absent>"
+      },
+      "fusion": {
+        "fusion_rule_version": "v1",
+        "impl_digest": "<absent>"
+      },
+      "geometry": {
+        "impl_digest": "<absent>"
+      }
+    },
+    "impl_digest": "<absent>",
+    "metrics": {
+      "fpr_empirical": null,
+      "geo_available_rate": null,
+      "n_accepted": 0,
+      "n_neg": 0,
+      "n_pos": 0,
+      "n_rejected": 1,
+      "n_total": 1,
+      "reject_rate": 1.0,
+      "reject_rate_by_reason": {
+        "content_absent": 0.0,
+        "content_fail": 0.0,
+        "content_mismatch": 0.0,
+        "geometry_absent": 0.0,
+        "geometry_fail": 0.0,
+        "geometry_mismatch": 0.0,
+        "invalid_record": 0.0,
+        "invalid_score": 0.0,
+        "missing_content_payload": 0.0,
+        "missing_ground_truth": 1.0,
+        "status_not_ok": 0.0
+      },
+      "rescue_gain_rate": null,
+      "rescue_rate": null,
+      "tpr_at_fpr": null,
+      "tpr_at_fpr_primary": null
+    },
+    "metrics_by_attack_condition": [
+      {
+        "fp": 0,
+        "fpr_empirical": null,
+        "geo_available_rate": null,
+        "group_key": "unknown_attack::unknown_params",
+        "n_accepted": 0,
+        "n_neg": 0,
+        "n_pos": 0,
+        "n_total": 1,
+        "reject_rate_by_reason": {
+          "content_absent": 0.0,
+          "content_fail": 0.0,
+          "content_mismatch": 0.0,
+          "geometry_absent": 0.0,
+          "geometry_fail": 0.0,
+          "geometry_mismatch": 0.0,
+          "invalid_record": 0.0,
+          "invalid_score": 0.0,
+          "missing_content_payload": 0.0,
+          "missing_ground_truth": 1.0,
+          "status_not_ok": 0.0
+        },
+        "rescue_gain_rate": null,
+        "rescue_rate": null,
+        "tp": 0,
+        "tpr_at_fpr_primary": null
+      }
+    ],
+    "metrics_by_condition_digest": "986b7303b190846686534f8e4f4e0ccc7df5f0a09f684cdccd85cc30e797f137",
+    "metrics_digest": "683ef5bf3089e58ef78a0bd170bb4cbe5e8530a27d3f4a60a2ff8e5eb0a7c137",
+    "plan_digest": "<absent>",
+    "policy_path": "<absent>",
+    "report_type": "evaluation_report",
+    "routing_decisions": {
+      "attack_protocol_version": "attack_protocol_v1",
+      "geo_available_rate": null,
+      "policy_path": "<absent>",
+      "rescue_rate": null
+    },
+    "routing_digest": "9539cf6a17e338227b581d4f8a51e0701e292092702a38c815383958e417e52b",
+    "threshold_metadata_digest": "<absent>",
+    "thresholds_artifact_metadata": {
+      "score_name": "content_score",
+      "target_fpr": 0.01,
+      "threshold_id": "content_score_np_1e-02",
+      "threshold_key_used": "1e-02",
+      "threshold_value": 0.0
+    },
+    "thresholds_digest": "deb324e6161d854e42c922d0dd1a7760b607f23ca43c7b0cd29410ef3f905492",
+    "thresholds_readonly_guard": {
+      "digest_after": "deb324e6161d854e42c922d0dd1a7760b607f23ca43c7b0cd29410ef3f905492",
+      "digest_before": "deb324e6161d854e42c922d0dd1a7760b607f23ca43c7b0cd29410ef3f905492",
+      "guard_version": "v1",
+      "unchanged": true
+    }
+  },
+  "execution_report": {
+    "audit_obligations_satisfied": true,
+    "content_chain_status": "ok",
+    "fusion_status": "ok",
+    "geometry_chain_status": "ok"
+  },
+  "fusion_result": {
+    "audit": {
+      "impl_identity": "evaluate_orchestrator",
+      "mode": "readonly_thresholds",
+      "n_total": 1,
+      "threshold_key_used": "1e-02"
+    },
+    "conditional_fpr_notes": null,
+    "decision_status": "abstain",
+    "evidence_summary": {
+      "content_score": null,
+      "content_status": "aggregate",
+      "fusion_rule_id": "evaluate_readonly_thresholds_v1",
+      "geometry_score": null,
+      "geometry_status": "aggregate"
+    },
+    "fusion_rule_version": "v1",
+    "is_watermarked": null,
+    "routing_decisions": null,
+    "routing_digest": null,
+    "thresholds_digest": "deb324e6161d854e42c922d0dd1a7760b607f23ca43c7b0cd29410ef3f905492",
+    "used_threshold_id": "content_score_np_1e-02"
+  },
+  "impl": {
+    "content_extractor_id": "unified_content_extractor_v1",
+    "digests": {
+      "content_extractor": "79c6635800836b3ed7d00593b6de3c78ace0a6b2652b4bd0c46f7ec2756af383",
+      "fusion_rule": "ed463f63bcbca661303250e9b7f2994d0acb25d3279035015b1001ae066aedac",
+      "geometry_extractor": "cad38f6a9873e79c7ab52a8db98e1694c60ca7ea0bd7dbac10c5aea3e9f7de3d",
+      "subspace_planner": "fb89633d86af594027287285d4eafbf6fd047a973df651ee70f2392bf6aca943",
+      "sync_module": "f25b8c2eee7955829b18e57fb26f4d425aebeecd9bf7d10acb3d39e2ee32c658"
+    },
+    "fusion_rule_id": "fusion_baseline_identity_v1",
+    "geometry_extractor_id": "geometry_baseline_identity_v1",
+    "subspace_planner_id": "subspace_planner_v1",
+    "sync_module_id": "geometry_sync_baseline_v1",
+    "versions": {
+      "content_extractor": "v1",
+      "fusion_rule": "v1",
+      "geometry_extractor": "v1",
+      "subspace_planner": "v1",
+      "sync_module": "v1"
+    }
+  },
+  "impl_set_capabilities_digest": "c194a234d19a31de2c62f9b467b4c342a0af62bf3a0202b9e8bde0f9c892f1af",
+  "metrics": {
+    "fpr_empirical": null,
+    "geo_available_rate": null,
+    "n_accepted": 0,
+    "n_neg": 0,
+    "n_pos": 0,
+    "n_rejected": 1,
+    "n_total": 1,
+    "reject_rate": 1.0,
+    "reject_rate_by_reason": {
+      "content_absent": 0.0,
+      "content_fail": 0.0,
+      "content_mismatch": 0.0,
+      "geometry_absent": 0.0,
+      "geometry_fail": 0.0,
+      "geometry_mismatch": 0.0,
+      "invalid_record": 0.0,
+      "invalid_score": 0.0,
+      "missing_content_payload": 0.0,
+      "missing_ground_truth": 1.0,
+      "status_not_ok": 0.0
+    },
+    "rescue_gain_rate": null,
+    "rescue_rate": null,
+    "tpr_at_fpr": null,
+    "tpr_at_fpr_primary": null
+  },
+  "operation": "evaluate",
+  "override_applied": {
+    "allowed_fields_version": "v1.0",
+    "applied_fields": [
+      {
+        "arg_name": "run_root_reuse_allowed",
+        "field_path": "allow_nonempty_run_root",
+        "new_value": true,
+        "old_value": false,
+        "override_mode": "set",
+        "source": "cli"
+      },
+      {
+        "arg_name": "run_root_reuse_reason",
+        "field_path": "allow_nonempty_run_root_reason",
+        "new_value": "onefile_workflow_evaluate",
+        "old_value": "<absent>",
+        "override_mode": "set",
+        "source": "cli"
+      },
+      {
+        "arg_name": "force_cpu",
+        "field_path": "device",
+        "new_value": "cpu",
+        "old_value": "cpu",
+        "override_mode": "set",
+        "source": "cli"
+      },
+      {
+        "arg_name": "enable_trace_tap",
+        "field_path": "trajectory_tap.enabled",
+        "new_value": true,
+        "old_value": true,
+        "override_mode": "set",
+        "source": "cli"
+      },
+      {
+        "arg_name": "test_mode_identity",
+        "field_path": "embed.test_mode_identity",
+        "new_value": true,
+        "old_value": false,
+        "override_mode": "set",
+        "source": "cli"
+      }
+    ],
+    "rejected_fields": [],
+    "requested_kv": {
+      "enable_trace_tap": true,
+      "force_cpu": "cpu",
+      "run_root_reuse_allowed": true,
+      "run_root_reuse_reason": "onefile_workflow_evaluate",
+      "test_mode_identity": true
+    },
+    "requested_overrides": [
+      {
+        "arg_name": "run_root_reuse_allowed",
+        "field_path": "allow_nonempty_run_root",
+        "override_mode": "set",
+        "raw_key": "run_root_reuse_allowed",
+        "raw_value": "true",
+        "source": "cli",
+        "value": true
+      },
+      {
+        "arg_name": "run_root_reuse_reason",
+        "field_path": "allow_nonempty_run_root_reason",
+        "override_mode": "set",
+        "raw_key": "run_root_reuse_reason",
+        "raw_value": "\"onefile_workflow_evaluate\"",
+        "source": "cli",
+        "value": "onefile_workflow_evaluate"
+      },
+      {
+        "arg_name": "force_cpu",
+        "field_path": "device",
+        "override_mode": "set",
+        "raw_key": "force_cpu",
+        "raw_value": "\"cpu\"",
+        "source": "cli",
+        "value": "cpu"
+      },
+      {
+        "arg_name": "enable_trace_tap",
+        "field_path": "trajectory_tap.enabled",
+        "override_mode": "set",
+        "raw_key": "enable_trace_tap",
+        "raw_value": "true",
+        "source": "cli",
+        "value": true
+      },
+      {
+        "arg_name": "test_mode_identity",
+        "field_path": "embed.test_mode_identity",
+        "override_mode": "set",
+        "raw_key": "test_mode_identity",
+        "raw_value": "true",
+        "source": "cli",
+        "value": true
+      }
+    ],
+    "source": "cli"
+  },
+  "policy_path": "content_only",
+  "policy_path_semantics_bound_digest": "a67d9289eac20d91ee0893a62df0ef99e49c503200860da82019522dd9c217b2",
+  "policy_path_semantics_canon_sha256": "ec820f0debdf243142cd868b3866988c0a3b77b9602356d8f0f409ee26208a1c",
+  "policy_path_semantics_digest": "ec820f0debdf243142cd868b3866988c0a3b77b9602356d8f0f409ee26208a1c",
+  "policy_path_semantics_file_sha256": "889549934b982a23b206a6b4edbdb703390dc05dd1e164b15daf9d55128b8086",
+  "policy_path_semantics_version": "v1.0",
+  "schema_version": "v1.0",
+  "stats_applicability": "applicable",
+  "target_fpr": 0.01,
+  "test_samples": 1,
+  "threshold_key_used": "1e-02",
+  "threshold_metadata_digest": "323f83a9b3882d864cf80406ce4d054a4e82c0d69d9541de2fb5e47c22f4a828",
+  "threshold_source": "np_canonical",
+  "thresholds_artifact": {
+    "_artifact_audit": {
+      "schema_version": "v1.0",
+      "writer": "records_io"
+    },
+    "calibration_version": "np_v1",
+    "quantile_rule": "higher",
+    "rule_id": "fusion_neyman_pearson_v1",
+    "rule_version": "v1",
+    "score_name": "content_score",
+    "target_fpr": 0.01,
+    "threshold_id": "content_score_np_1e-02",
+    "threshold_key_used": "1e-02",
+    "threshold_value": 0.0,
+    "ties_policy": "higher"
+  },
+  "thresholds_digest": "fb6b2a0b45e1afc176c33104ec80820da01fba4395bcaaff6f6ec58e2a75de61",
+  "thresholds_rule_id": "fusion_neyman_pearson_v1",
+  "thresholds_rule_version": "v1",
+  "whitelist_bound_digest": "45659bcd79d8053522e104e54a08b8514f844a9ea69afd916921400b455875a9",
+  "whitelist_canon_sha256": "f5e2959c0043982ac98685bebef729c901ccd8879c3cf70ea2fafa605602f2fe",
+  "whitelist_digest": "f5e2959c0043982ac98685bebef729c901ccd8879c3cf70ea2fafa605602f2fe",
+  "whitelist_file_sha256": "aa163a48160f563cfcda6c6a9f61b3c78d3e21b571b3cc5ed57603fec4f87171",
+  "whitelist_version": "v1.0"
+}
