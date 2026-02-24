@@ -144,15 +144,60 @@ def run_detect_orchestrator(
     content_evidence_adapted = _adapt_content_evidence_for_fusion(content_result)
     geometry_evidence_adapted = _adapt_geometry_evidence_for_fusion(geometry_result)
 
-    planner_inputs = _build_planner_inputs_for_runtime(cfg, trajectory_evidence, content_evidence_payload)
+    planner_content_payload = content_evidence_payload
+    planner_inputs = _build_planner_inputs_for_runtime(cfg, None, planner_content_payload)
     mask_digest = None
-    if isinstance(content_evidence_payload, dict):
-        mask_digest = content_evidence_payload.get("mask_digest")
+    if isinstance(planner_content_payload, dict):
+        mask_digest = planner_content_payload.get("mask_digest")
+    if not isinstance(mask_digest, str) or not mask_digest:
+        if isinstance(input_record, dict):
+            embed_content_evidence = input_record.get("content_evidence")
+            if isinstance(embed_content_evidence, dict):
+                planner_content_payload = embed_content_evidence
+                mask_digest = embed_content_evidence.get("mask_digest")
+                planner_inputs = _build_planner_inputs_for_runtime(cfg, None, planner_content_payload)
+    if not isinstance(mask_digest, str) or not mask_digest:
+        # detect-mode 前置阶段可能无法提供 mask_digest；为 planner 回退到 embed-mode 提取。
+        cfg_for_planner = dict(cfg)
+        detect_cfg_for_planner = cfg_for_planner.get("detect")
+        if isinstance(detect_cfg_for_planner, dict):
+            detect_cfg_for_planner = dict(detect_cfg_for_planner)
+        else:
+            detect_cfg_for_planner = {}
+        detect_content_cfg_for_planner = detect_cfg_for_planner.get("content")
+        if isinstance(detect_content_cfg_for_planner, dict):
+            detect_content_cfg_for_planner = dict(detect_content_cfg_for_planner)
+        else:
+            detect_content_cfg_for_planner = {}
+        detect_content_cfg_for_planner["enabled"] = False
+        detect_cfg_for_planner["content"] = detect_content_cfg_for_planner
+        cfg_for_planner["detect"] = detect_cfg_for_planner
+        planner_content_result = impl_set.content_extractor.extract(cfg_for_planner)
+        if hasattr(planner_content_result, "as_dict") and callable(planner_content_result.as_dict):
+            planner_content_payload = planner_content_result.as_dict()
+        elif isinstance(planner_content_result, dict):
+            planner_content_payload = planner_content_result
+        else:
+            planner_content_payload = None
+        if isinstance(planner_content_payload, dict):
+            mask_digest = planner_content_payload.get("mask_digest")
+        planner_inputs = _build_planner_inputs_for_runtime(cfg, None, planner_content_payload)
+
+    planner_cfg_digest = cfg_digest
+    planner_cfg = cfg
+    if isinstance(input_record, dict):
+        embed_cfg_digest = input_record.get("cfg_digest")
+        if isinstance(embed_cfg_digest, str) and embed_cfg_digest:
+            planner_cfg_digest = embed_cfg_digest
+        embed_seed = input_record.get("seed")
+        if isinstance(embed_seed, int):
+            planner_cfg = dict(cfg)
+            planner_cfg["seed"] = embed_seed
 
     detect_plan_result = detect_plan_result_override if detect_plan_result_override is not None else impl_set.subspace_planner.plan(
-        cfg,
+        planner_cfg,
         mask_digest=mask_digest,
-        cfg_digest=cfg_digest,
+        cfg_digest=planner_cfg_digest,
         inputs=planner_inputs
     )
 
@@ -190,6 +235,20 @@ def run_detect_orchestrator(
     elif isinstance(detect_plan_result, dict):
         plan_payload = dict(detect_plan_result)
 
+    if isinstance(plan_payload, dict):
+        if not isinstance(detect_time_plan_digest, str):
+            payload_plan_digest = plan_payload.get("plan_digest")
+            if isinstance(payload_plan_digest, str) and payload_plan_digest:
+                detect_time_plan_digest = payload_plan_digest
+        if not isinstance(detect_time_basis_digest, str):
+            payload_basis_digest = plan_payload.get("basis_digest")
+            if isinstance(payload_basis_digest, str) and payload_basis_digest:
+                detect_time_basis_digest = payload_basis_digest
+        if detect_time_planner_impl_identity is None:
+            plan_node = plan_payload.get("plan")
+            if isinstance(plan_node, dict):
+                detect_time_planner_impl_identity = plan_node.get("planner_impl_identity")
+
     mismatch_reasons: list[str] = []
     if isinstance(expected_plan_digest, str) and expected_plan_digest:
         mismatch_reasons = _collect_plan_mismatch_reasons(
@@ -215,14 +274,14 @@ def run_detect_orchestrator(
         trajectory_evidence=trajectory_evidence,
         detect_planner_input_digest=detect_planner_input_digest
     )
-    if trajectory_mismatch_reason:
+    if trajectory_status == "mismatch" and trajectory_mismatch_reason:
         mismatch_reasons.append(trajectory_mismatch_reason)
 
     injection_status, injection_mismatch_reason = _evaluate_injection_consistency(
         input_record=input_record,
         injection_evidence=injection_evidence
     )
-    if injection_mismatch_reason:
+    if injection_status == "mismatch" and injection_mismatch_reason:
         mismatch_reasons.append(injection_mismatch_reason)
 
     # (S-D) Paper Faithfulness: 验证 paper faithfulness 证据一致性（必达）
@@ -232,9 +291,11 @@ def run_detect_orchestrator(
         input_record=input_record
     )
     
-    # 仅当 input_record 存在且包含 paper_faithfulness 字段时，才将缺失视为 mismatch
-    if input_record is not None and isinstance(input_record.get("paper_faithfulness"), dict):
-        # input_record 包含 paper_faithfulness，所以缺失或不一致是真实的 mismatch
+    # 仅当 paper_faithfulness 显式启用且 input_record 包含对应字段时，才将缺失视为 mismatch。
+    paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
+    paper_enabled = bool(paper_cfg.get("enabled", False)) if isinstance(paper_cfg, dict) else False
+    if paper_enabled and input_record is not None and isinstance(input_record.get("paper_faithfulness"), dict):
+        # 启用模式下，paper_faithfulness 缺失或不一致必须进入 mismatch 门禁。
         if paper_mismatch_reasons:
             mismatch_reasons.extend(paper_mismatch_reasons)
 
@@ -246,7 +307,16 @@ def run_detect_orchestrator(
     forced_absent = (
         not isinstance(expected_plan_digest, str) or
         not expected_plan_digest or
-        ((trajectory_status == "absent" or injection_status == "absent") and not forced_mismatch)
+        (
+            isinstance(injection_evidence, dict)
+            and injection_evidence.get("injection_absent_reason") == "inference_failed"
+            and not forced_mismatch
+        ) or
+        (
+            isinstance(trajectory_evidence, dict)
+            and trajectory_evidence.get("trajectory_absent_reason") == "inference_failed"
+            and not forced_mismatch
+        )
     )
     if forced_mismatch:
         content_evidence_payload = {
@@ -353,6 +423,7 @@ def run_detect_orchestrator(
         content_evidence_payload = _adapt_content_evidence_for_fusion(content_result)
         if content_evidence_payload is None:
             content_evidence_payload = {}
+        content_result = content_evidence_payload
         if trajectory_evidence is not None:
             content_evidence_payload["trajectory_evidence"] = trajectory_evidence
             _inject_trajectory_audit_fields(content_evidence_payload, trajectory_evidence)

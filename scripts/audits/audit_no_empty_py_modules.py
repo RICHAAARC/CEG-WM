@@ -28,16 +28,16 @@ def audit_no_empty_py_modules(repo_root: Path) -> Dict[str, Any]:
     Raises:
         TypeError: If repo_root is not a Path or string.
     """
+    audit_id = "empty_py_modules"
+    gate_name = "gate.empty_py_modules"
+    category = "G"
+
     if isinstance(repo_root, str):
         repo_root = Path(repo_root)
     if not isinstance(repo_root, Path):
         raise TypeError("repo_root must be Path or str")
     if not repo_root.is_dir():
         raise ValueError(f"repo_root {repo_root} is not a directory")
-
-    audit_id = "empty_py_modules"
-    gate_name = "gate.empty_py_modules"
-    category = "G"
 
     main_dir = repo_root / "main"
     if not main_dir.is_dir():
@@ -128,17 +128,17 @@ def main(argv: Optional[List[str]] = None) -> int:
         result = audit_no_empty_py_modules(Path(repo_root_str))
     except Exception as exc:
         error_info = {
-            "audit_id": "ERROR.audit_no_empty_py_modules",
-            "gate_name": "gate.audit_no_empty_py_modules",
+            "audit_id": "empty_py_modules",
+            "gate_name": "gate.empty_py_modules",
             "category": "G",
             "severity": "BLOCK",
             "result": "FAIL",
             "rule": "audit execution failed",
-            "impact": f"unexpected error: {str(exc)}",
-            "fix": "fix runtime exception in audit_no_empty_py_modules.py",
             "evidence": {
-                "error": str(exc)
+                "error": str(exc),
             },
+            "impact": f"unexpected error: {str(exc)}",
+            "fix": "fix audit runtime exception",
         }
         print(json.dumps(error_info, indent=2, ensure_ascii=False))
         return 1
@@ -146,10 +146,61 @@ def main(argv: Optional[List[str]] = None) -> int:
     # (4) 输出审计结果（JSON 格式）
     audit_result = result.get("result", "UNKNOWN")
     
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    # 统一输出为 dict（signoff 脚本要求 audit 输出 root 必须为 dict）
+    output_dict = {}
+    
     if audit_result == "FAIL":
+        # 违规情况：输出错误信息 dict
+        output_dict = {
+            "audit_id": result.get("audit_id"),
+            "gate_name": result.get("gate_name"),
+            "category": result.get("category"),
+            "severity": result.get("severity"),
+            "result": result.get("result"),
+            "rule": result.get("rule"),
+            "impact": result.get("impact"),
+            "fix": result.get("fix"),
+            "evidence": result.get("evidence"),
+        }
+        print(json.dumps(output_dict, indent=2, ensure_ascii=False))
         return 1
-    return 0
+    elif audit_result == "PASS":
+        # 通过：输出 PASS dict
+        output_dict = {
+            "audit_id": result.get("audit_id"),
+            "gate_name": result.get("gate_name"),
+            "category": result.get("category"),
+            "severity": result.get("severity"),
+            "result": result.get("result"),
+            "rule": result.get("rule"),
+            "impact": result.get("impact"),
+            "fix": result.get("fix"),
+            "evidence": result.get("evidence"),
+        }
+        print(json.dumps(output_dict, indent=2, ensure_ascii=False))
+        return 0
+    elif audit_result == "N.A.":
+        # 不适用：输出 N.A. dict
+        output_dict = result
+        print(json.dumps(output_dict, indent=2, ensure_ascii=False))
+        return 0
+    else:
+        # 未知状态：统一降级为 FAIL，避免输出非法枚举。
+        output_dict = {
+            "audit_id": result.get("audit_id", "empty_py_modules"),
+            "gate_name": result.get("gate_name", "gate.empty_py_modules"),
+            "category": result.get("category", "G"),
+            "severity": "BLOCK",
+            "result": "FAIL",
+            "rule": "unexpected audit_result enum",
+            "impact": f"invalid result value: {audit_result}",
+            "fix": "ensure result is one of PASS/FAIL/N.A.",
+            "evidence": {
+                "raw_result": audit_result,
+            },
+        }
+        print(json.dumps(output_dict, indent=2, ensure_ascii=False))
+        return 1
 
 
 if __name__ == "__main__":

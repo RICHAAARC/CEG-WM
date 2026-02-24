@@ -240,48 +240,50 @@ def _fill_missing_optional_fields(result: Dict[str, Any]) -> None:
 
 def _sanitize_control_chars(text: str) -> str:
     """
-    功能：清洗字符串中的不可见控制字符（保留 \n/\r/\t）。
+    功能：清洗 JSON 字符串中的未转义控制字符。 
 
-    Sanitize control characters in string payload while preserving newline/tab.
+    Replace control characters (0x00-0x1F except \t/\n/\r) to keep JSON payload parse-safe.
 
     Args:
-        text: Input string.
+        text: Source string.
 
     Returns:
         Sanitized string.
     """
     if not isinstance(text, str):
-        # text 类型不符合预期，必须 fail-fast。
         raise TypeError("text must be str")
 
-    sanitized_chars: list[str] = []
-    for ch in text:
-        code = ord(ch)
-        if code < 32 and ch not in ("\n", "\r", "\t"):
+    sanitized_chars = []
+    for char in text:
+        code = ord(char)
+        if code < 32 and char not in ("\t", "\n", "\r"):
             sanitized_chars.append(f"\\u{code:04x}")
         else:
-            sanitized_chars.append(ch)
+            sanitized_chars.append(char)
     return "".join(sanitized_chars)
 
 
-def _sanitize_json_like(value: Any) -> Any:
+def _sanitize_json_payload(value: Any) -> Any:
     """
-    功能：递归清洗 JSON 结构中的字符串字段控制字符。
+    功能：递归清洗报告载荷中的字符串控制字符。 
 
-    Recursively sanitize control characters in JSON-like payload.
+    Recursively sanitize all strings in JSON payload while preserving decision semantics.
 
     Args:
         value: Arbitrary JSON-like value.
 
     Returns:
-        Sanitized value preserving original structure.
+        Sanitized JSON-like value.
     """
-    if isinstance(value, dict):
-        return {k: _sanitize_json_like(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_sanitize_json_like(v) for v in value]
     if isinstance(value, str):
         return _sanitize_control_chars(value)
+    if isinstance(value, list):
+        return [_sanitize_json_payload(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            _sanitize_json_payload(key) if isinstance(key, str) else key: _sanitize_json_payload(item)
+            for key, item in value.items()
+        }
     return value
 
 
@@ -452,15 +454,16 @@ def main():
             "audit_scripts": AUDIT_SCRIPTS,
         },
     }
+
+    report = _sanitize_json_payload(report)
     
     # 输出报告
-    sanitized_report = _sanitize_json_like(report)
-    report_json = json.dumps(sanitized_report, indent=2, ensure_ascii=False)
+    report_json = json.dumps(report, indent=2, ensure_ascii=False)
     
     if args.output:
-        with open(args.output, "w", encoding="utf-8", newline="\n") as report_file:
-            report_file.write(report_json)
-            report_file.write("\n")
+        with args.output.open("w", encoding="utf-8", newline="\n") as output_file:
+            output_file.write(report_json)
+            output_file.write("\n")
         print(f"审计报告已写入: {args.output}")
     else:
         # 输出到 stdout，使用 UTF-8 编码确保兼容性

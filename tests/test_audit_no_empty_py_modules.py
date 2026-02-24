@@ -42,7 +42,7 @@ def test_audit_no_empty_py_modules_passes_on_repo():
     # 断言：审计通过（当前仓库已删除空文件）
     assert result["audit_id"] == "empty_py_modules"
     assert result["result"] == "PASS"
-    assert result["severity"] == "PASS"
+    assert result["severity"] == "NON_BLOCK"
     
     # 断言：证据显示没有空模块
     evidence = result.get("evidence", {})

@@ -296,11 +296,19 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
             # 评测报告工件统一收口写盘（records_io artifact 路径）。
             evaluation_report_payload = record.get("evaluation_report")
             if isinstance(evaluation_report_payload, dict):
-                eval_report_path = artifacts_dir / "eval_report.json"
-                path_policy.validate_output_target(eval_report_path, "artifact", run_root)
+                evaluation_report_path = artifacts_dir / "evaluation_report.json"
+                path_policy.validate_output_target(evaluation_report_path, "artifact", run_root)
                 eval_report_builder.write_eval_report_via_records_io(
                     evaluation_report_payload,
-                    str(eval_report_path),
+                    str(evaluation_report_path),
+                )
+
+                # 兼容历史读取路径：保留 artifacts/eval_report.json（append-only）。
+                eval_report_legacy_path = artifacts_dir / "eval_report.json"
+                path_policy.validate_output_target(eval_report_legacy_path, "artifact", run_root)
+                eval_report_builder.write_eval_report_via_records_io(
+                    evaluation_report_payload,
+                    str(eval_report_legacy_path),
                 )
             
             # 写盘，触发 freeze_gate.assert_prewrite。

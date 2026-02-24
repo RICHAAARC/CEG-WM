@@ -49,11 +49,11 @@ File → Open notebook → Upload
 修改数据准备步骤中的配置选择：
 
 ```python
-CONFIG_CHOICE = "paper_proof"  # 或 "default"
+CONFIG_CHOICE = "default"
 ```
 
 - `default.yaml`：基础配置，快速测试
-- `paper_proof.yaml`：论文验证配置，启用完整功能
+- `paper_faithfulness_spec.yaml`：论文一致性规范配置，用于一致性检查与摘要绑定
 
 ### 5. 下载结果
 

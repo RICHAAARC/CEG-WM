@@ -27,13 +27,16 @@ def test_publish_workflow_help_accessible():
         [sys.executable, str(script_path), "--help"],
         cwd=str(_repo_root),
         capture_output=True,
-        text=True,
+        text=False,
         timeout=10,
     )
+
+    stdout_text = result.stdout.decode("utf-8", errors="replace") if isinstance(result.stdout, (bytes, bytearray)) else str(result.stdout)
+    stderr_text = result.stderr.decode("utf-8", errors="replace") if isinstance(result.stderr, (bytes, bytearray)) else str(result.stderr)
     
     # Should succeed (exit code 0 or 2 for --help)
     assert result.returncode in (0, 2), f"Expected exit code 0 or 2, got {result.returncode}"
-    assert "publish" in result.stdout.lower() or "publish" in result.stderr.lower(), \
+    assert "publish" in stdout_text.lower() or "publish" in stderr_text.lower(), \
         "Help output should mention publishing"
 
 

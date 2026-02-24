@@ -478,8 +478,7 @@ def run_embed(
                 trajectory_evidence=trajectory_evidence,
                 injection_evidence=injection_evidence,
                 sync_runtime_context=sync_runtime_context,
-                content_result_override=content_result_pre,
-                subspace_result_override=subspace_result_pre
+                content_result_override=content_result_pre
             )
             if not isinstance(record, dict):
                 # record 类型不符合预期，必须 fail-fast。

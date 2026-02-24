@@ -13,10 +13,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+import copy
+
+import yaml
 
 
 # 添加 repo 到 sys.path 以支持 main 包导入。
@@ -160,17 +164,26 @@ def _build_stage_command(
         str(config_path),
     ]
 
+    # 统一声明 run_root 复用来源为 CLI override（门禁要求）。
+    command.extend(
+        [
+            "--override",
+            "run_root_reuse_allowed=true",
+            "--override",
+            f"run_root_reuse_reason={json.dumps('repro_pipeline_stage_chain')}",
+        ]
+    )
+
     if seeds is not None:
         command.extend(["--override", f"seed={json.dumps(seeds)}"])
     # Note: max_samples is not a valid override parameter and is handled by the caller
-    if stage_name == "evaluate":
+    if stage_name == "detect":
         command.extend(
             [
-                "--override",
-                f"evaluate.attack_protocol_path={json.dumps(str(attack_protocol_path))}",
+                "--input",
+                str(run_root / "records" / "embed_record.json"),
             ]
         )
-
     return command
 
 
@@ -216,6 +229,13 @@ def _run_stage_command(
         cwd=str(repo_root),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
+        env={
+            **os.environ,
+            "KMP_DUPLICATE_LIB_OK": os.environ.get("KMP_DUPLICATE_LIB_OK", "TRUE"),
+            "PYTHONIOENCODING": os.environ.get("PYTHONIOENCODING", "utf-8"),
+        },
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -227,6 +247,90 @@ def _run_stage_command(
             f"  - stderr_tail: {result.stderr[-1000:]}"
         )
     return " ".join(command)
+
+
+def _set_nested(cfg: Dict[str, Any], path: List[str], value: Any) -> None:
+    """
+    功能：设置嵌套配置字段。 
+
+    Set nested config field by path, creating intermediate dict nodes when absent.
+
+    Args:
+        cfg: Mutable config mapping.
+        path: Field path segments.
+        value: Value to set.
+
+    Returns:
+        None.
+    """
+    current = cfg
+    for key in path[:-1]:
+        node = current.get(key)
+        if not isinstance(node, dict):
+            node = {}
+            current[key] = node
+        current = node
+    current[path[-1]] = value
+
+
+def _build_stage_configs(
+    run_root: Path,
+    artifacts_dir: Path,
+    base_cfg_obj: Dict[str, Any],
+) -> Dict[str, Path]:
+    """
+    功能：生成 stage 专用配置快照。 
+
+    Build stage-specific config snapshots to preserve workflow semantics:
+    embed uses embed-mode extractor, detect/calibrate/evaluate use detect-mode inputs.
+
+    Args:
+        run_root: Run root directory.
+        artifacts_dir: Artifacts directory under run_root.
+        base_cfg_obj: Base config mapping.
+
+    Returns:
+        Mapping from stage name to generated config path.
+    """
+    if not isinstance(base_cfg_obj, dict):
+        raise TypeError("base_cfg_obj must be dict")
+
+    stage_cfg_dir = run_root / "artifacts" / "repro" / "stage_configs"
+    stage_paths: Dict[str, Path] = {}
+
+    stage_definitions = {
+        "embed": {
+            "detect.content.enabled": False,
+        },
+        "detect": {
+            "detect.content.enabled": True,
+        },
+        "calibrate": {
+            "detect.content.enabled": True,
+            "calibration.detect_records_glob": str(run_root / "records" / "detect_record.json"),
+        },
+        "evaluate": {
+            "detect.content.enabled": True,
+            "evaluate.detect_records_glob": str(run_root / "records" / "detect_record.json"),
+            "evaluate.thresholds_path": str(run_root / "artifacts" / "thresholds" / "thresholds_artifact.json"),
+        },
+    }
+
+    for stage_name, overrides in stage_definitions.items():
+        stage_cfg = copy.deepcopy(base_cfg_obj)
+        for dotted_key, override_value in overrides.items():
+            _set_nested(stage_cfg, dotted_key.split("."), override_value)
+        stage_path = stage_cfg_dir / f"{stage_name}.yaml"
+        stage_yaml = yaml.safe_dump(stage_cfg, sort_keys=False, allow_unicode=True)
+        write_artifact_text_unbound(
+            run_root=run_root,
+            artifacts_dir=artifacts_dir,
+            path=str(stage_path),
+            content=stage_yaml,
+        )
+        stage_paths[stage_name] = stage_path
+
+    return stage_paths
 
 
 def _run_signoff(run_root: Path, repo_root: Path) -> str:
@@ -258,6 +362,13 @@ def _run_signoff(run_root: Path, repo_root: Path) -> str:
         cwd=str(repo_root),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
+        env={
+            **os.environ,
+            "KMP_DUPLICATE_LIB_OK": os.environ.get("KMP_DUPLICATE_LIB_OK", "TRUE"),
+            "PYTHONIOENCODING": os.environ.get("PYTHONIOENCODING", "utf-8"),
+        },
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -580,12 +691,21 @@ def run_repro_pipeline(
     runner = stage_runner if stage_runner is not None else _run_stage_command
     signoff_exec = signoff_runner if signoff_runner is not None else _run_signoff
 
+    if not isinstance(cfg_obj, dict):
+        raise TypeError("config root must be dict")
+    stage_config_paths = _build_stage_configs(
+        run_root=run_root,
+        artifacts_dir=artifacts_dir,
+        base_cfg_obj=cfg_obj,
+    )
+
     stage_commands: List[str] = []
     for stage_name in ["embed", "detect", "calibrate", "evaluate"]:
+        stage_config_path = stage_config_paths[stage_name]
         command_str = runner(
             stage_name,
             run_root,
-            config_path,
+            stage_config_path,
             attack_protocol_path,
             seeds,
             max_samples,
@@ -602,6 +722,37 @@ def run_repro_pipeline(
             "evaluation_report missing in evaluate_record\n"
             f"  - path: {evaluate_record_path}"
         )
+
+    detect_record_path = run_root / "records" / "detect_record.json"
+    detect_record = _load_json_dict(detect_record_path)
+
+    def _is_missing_anchor(value: Any) -> bool:
+        if value is None:
+            return True
+        if isinstance(value, str):
+            return value.strip() in {"", "<absent>"}
+        return False
+
+    evaluate_impl = evaluate_record.get("impl") if isinstance(evaluate_record.get("impl"), dict) else {}
+    evaluate_impl_digests = evaluate_impl.get("digests") if isinstance(evaluate_impl.get("digests"), dict) else {}
+    evaluate_impl_versions = evaluate_impl.get("versions") if isinstance(evaluate_impl.get("versions"), dict) else {}
+    fusion_result = evaluate_record.get("fusion_result") if isinstance(evaluate_record.get("fusion_result"), dict) else {}
+
+    fallback_anchors: Dict[str, Any] = {
+        "cfg_digest": evaluate_record.get("cfg_digest"),
+        "plan_digest": detect_record.get("plan_digest_observed") if isinstance(detect_record.get("plan_digest_observed"), str) else detect_record.get("plan_digest_expected"),
+        "thresholds_digest": evaluate_record.get("thresholds_digest"),
+        "threshold_metadata_digest": evaluate_record.get("threshold_metadata_digest"),
+        "impl_digest": evaluate_impl_digests.get("fusion_rule"),
+        "fusion_rule_version": fusion_result.get("fusion_rule_version") if isinstance(fusion_result.get("fusion_rule_version"), str) else evaluate_impl_versions.get("fusion_rule"),
+        "attack_protocol_version": evaluate_record.get("attack_protocol_version"),
+        "attack_protocol_digest": evaluate_record.get("attack_protocol_digest"),
+        "policy_path": evaluate_record.get("policy_path"),
+    }
+    for anchor_key, fallback_value in fallback_anchors.items():
+        current_value = report_obj.get(anchor_key)
+        if _is_missing_anchor(current_value) and not _is_missing_anchor(fallback_value):
+            report_obj[anchor_key] = fallback_value
 
     csv_content = table_export.export_metrics_to_csv(report_obj)
 

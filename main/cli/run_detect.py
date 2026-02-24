@@ -226,7 +226,22 @@ def run_detect(
         run_meta["impl_set_capabilities_digest"] = impl_set_capabilities_digest
 
         # 预先计算 content 与 subspace 计划，用于注入上下文。
-        content_result_pre = impl_set.content_extractor.extract(cfg)
+        # 这里必须使用 embed-mode 提取 mask_digest，避免 detect-mode 在无 detector_inputs 时返回 absent。
+        cfg_for_preplan = dict(cfg)
+        detect_cfg_for_preplan = cfg_for_preplan.get("detect")
+        if isinstance(detect_cfg_for_preplan, dict):
+            detect_cfg_for_preplan = dict(detect_cfg_for_preplan)
+        else:
+            detect_cfg_for_preplan = {}
+        detect_content_cfg_for_preplan = detect_cfg_for_preplan.get("content")
+        if isinstance(detect_content_cfg_for_preplan, dict):
+            detect_content_cfg_for_preplan = dict(detect_content_cfg_for_preplan)
+        else:
+            detect_content_cfg_for_preplan = {}
+        detect_content_cfg_for_preplan["enabled"] = False
+        detect_cfg_for_preplan["content"] = detect_content_cfg_for_preplan
+        cfg_for_preplan["detect"] = detect_cfg_for_preplan
+        content_result_pre = impl_set.content_extractor.extract(cfg_for_preplan)
         mask_digest = None
         if isinstance(content_result_pre, dict):
             mask_digest = content_result_pre.get("mask_digest")
@@ -397,6 +412,31 @@ def run_detect(
 
             # 构造 detect record，本阶段为基线实现。
             print("[Detect] Generating detect record (baseline)...")
+            if input_record_path:
+                content_override_for_orchestrator = None
+                for content_key in ["content_evidence", "content_evidence_payload", "content_result"]:
+                    content_candidate = input_record.get(content_key)
+                    if isinstance(content_candidate, dict):
+                        content_override_for_orchestrator = content_candidate
+                        break
+
+                plan_override_for_orchestrator = None
+                input_subspace_plan = input_record.get("subspace_plan")
+                input_plan_digest = input_record.get("plan_digest")
+                input_basis_digest = input_record.get("basis_digest")
+                input_plan_stats = input_record.get("plan_stats")
+                if isinstance(input_subspace_plan, dict):
+                    plan_override_for_orchestrator = {
+                        "status": "ok",
+                        "plan": input_subspace_plan,
+                        "plan_digest": input_plan_digest if isinstance(input_plan_digest, str) and input_plan_digest else None,
+                        "basis_digest": input_basis_digest if isinstance(input_basis_digest, str) and input_basis_digest else None,
+                        "plan_stats": input_plan_stats if isinstance(input_plan_stats, dict) else None,
+                        "plan_failure_reason": None,
+                    }
+            else:
+                content_override_for_orchestrator = content_result_pre
+                plan_override_for_orchestrator = subspace_result_pre
             record = run_detect_orchestrator(
                 cfg,
                 impl_set,
@@ -404,8 +444,8 @@ def run_detect(
                 cfg_digest=cfg_digest,
                 trajectory_evidence=trajectory_evidence,
                 injection_evidence=injection_evidence,
-                content_result_override=content_result_pre,
-                detect_plan_result_override=subspace_result_pre
+                content_result_override=content_override_for_orchestrator,
+                detect_plan_result_override=plan_override_for_orchestrator
             )
             if record is None:
                 exc = RuntimeError("record_construction_failed: record is None")

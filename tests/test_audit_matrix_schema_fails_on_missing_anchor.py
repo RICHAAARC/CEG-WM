@@ -61,17 +61,20 @@ def test_audit_experiment_matrix_outputs_schema_fails_on_missing_anchor():
         result = subprocess.run(
             [sys.executable, str(audit_script), str(tmp_root)],
             capture_output=True,
-            text=True,
+            text=False,
             timeout=30,
         )
 
         # 验证退出码（必须为非零）
+        stdout_text = result.stdout.decode("utf-8", errors="replace") if isinstance(result.stdout, (bytes, bytearray)) else str(result.stdout)
+        stderr_text = result.stderr.decode("utf-8", errors="replace") if isinstance(result.stderr, (bytes, bytearray)) else str(result.stderr)
+
         assert result.returncode != 0, \
-            f"审计脚本在缺失字段时必须返回非零退出码，实际为 {result.returncode}。\nstderr: {result.stderr}\nstdout: {result.stdout}"
+            f"审计脚本在缺失字段时必须返回非零退出码，实际为 {result.returncode}。\nstderr: {stderr_text}\nstdout: {stdout_text}"
 
         # 解析输出
-        output = result.stdout.strip()
-        assert output, f"审计脚本必须有输出，实际为空。stderr: {result.stderr}"
+        output = stdout_text.strip()
+        assert output, f"审计脚本必须有输出，实际为空。stderr: {stderr_text}"
 
         try:
             audit_result = json.loads(output)
