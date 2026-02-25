@@ -264,6 +264,9 @@ def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> P
     impl_cfg = cfg_obj.get("impl") if isinstance(cfg_obj.get("impl"), dict) else {}
     impl_cfg["sync_module_id"] = "geometry_latent_sync_sd3_v1"
     impl_cfg["geometry_extractor_id"] = "geometry_align_invariance_sd3_v1"
+    subspace_planner_id = impl_cfg.get("subspace_planner_id")
+    if subspace_planner_id not in {"subspace_planner_v1", "subspace_baseline_full_v1"}:
+        impl_cfg["subspace_planner_id"] = "subspace_planner_v1"
     cfg_obj["impl"] = impl_cfg
 
     mask_cfg = cfg_obj.get("mask") if isinstance(cfg_obj.get("mask"), dict) else {}

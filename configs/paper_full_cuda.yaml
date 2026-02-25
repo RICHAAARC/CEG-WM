@@ -68,7 +68,7 @@ impl:
   content_extractor_id: "unified_content_extractor_v1"
   geometry_extractor_id: "attention_anchor_map_relation_v1"
   fusion_rule_id: "fusion_baseline_identity_v1"
-  subspace_planner_id: "subspace_planner_v2"
+  subspace_planner_id: "subspace_planner_v1"
   sync_module_id: "geometry_latent_sync_sd3_v2"
   hf_embedder_id: "hf_embedder_t2smark_v1"
   lf_coder_id: "lf_coder_prc_v1"
