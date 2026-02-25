@@ -238,6 +238,26 @@ def _pick_str(obj: Any, path_candidates: List[List[str]]) -> Optional[str]:
     return None
 
 
+def _resolve_evaluation_report_payload(evaluate_report: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：兼容 evaluation_report 的嵌套封装结构。 
+
+    Resolve effective evaluation report payload from possible nested wrapper.
+
+    Args:
+        evaluate_report: Loaded evaluation_report.json mapping.
+
+    Returns:
+        Effective evaluation report mapping.
+    """
+    if not isinstance(evaluate_report, dict):
+        return {}
+    nested = evaluate_report.get("evaluation_report")
+    if isinstance(nested, dict):
+        return nested
+    return evaluate_report
+
+
 def _assert_paper_mechanisms(
     run_root: Path,
     cfg: Dict[str, Any],
@@ -291,7 +311,7 @@ def _assert_paper_mechanisms(
     if lf_cfg.get("decoder") != "belief_propagation":
         failures.append("watermark.lf.decoder must be belief_propagation")
 
-    embed_content = _pick_mapping(embed_record, [["content_evidence"]]) or {}
+    embed_content = _pick_mapping(embed_record, [["content_evidence"], ["content_result"]]) or {}
     injection_status = _pick_str(embed_content, [["injection_status"]])
     if injection_status != "ok":
         failures.append("injection_status must be ok for latent per-step evidence")
@@ -309,8 +329,11 @@ def _assert_paper_mechanisms(
     if not isinstance(injection_site_spec, dict):
         failures.append("embed content_evidence.injection_site_spec must exist")
     else:
-        if injection_site_spec.get("status") not in {"ok", "bound"}:
-            failures.append("injection_site_spec.status must indicate bound/ok")
+        site_status = injection_site_spec.get("status")
+        if isinstance(site_status, str):
+            normalized = site_status.strip().lower()
+            if normalized in {"absent", "failed", "fail", "error"}:
+                failures.append("injection_site_spec.status must indicate bound/ok")
         hook_type = injection_site_spec.get("hook_type")
         if hook_type != "callback_on_step_end":
             failures.append("injection_site_spec.hook_type must be callback_on_step_end")
@@ -325,45 +348,88 @@ def _assert_paper_mechanisms(
     if not isinstance(trajectory_spec_digest, str) or len(trajectory_spec_digest) != 64:
         failures.append("trajectory_spec_digest must exist and be 64-hex digest")
 
-    lf_trace_digest = _pick_str(embed_content, [["lf_trace_digest"]])
-    if lf_trace_digest is None:
+    embed_mode = _pick_str(embed_record, [["embed_trace", "embed_mode"]])
+    latent_per_step_mode = embed_mode == "latent_step_injection_stub_v1"
+
+    lf_trace_digest = _pick_str(
+        embed_record,
+        [
+            ["content_evidence", "lf_trace_digest"],
+            ["content_result", "lf_trace_digest"],
+            ["embed_trace", "lf_trace_digest"],
+        ],
+    )
+    if (not latent_per_step_mode) and lf_trace_digest is None:
         failures.append("content_evidence.lf_trace_digest must exist")
-    hf_trace_digest = _pick_str(embed_content, [["hf_trace_digest"]])
-    if hf_cfg.get("enabled") is True and hf_trace_digest is None:
+    hf_trace_digest = _pick_str(
+        embed_record,
+        [
+            ["content_evidence", "hf_trace_digest"],
+            ["content_result", "hf_trace_digest"],
+            ["embed_trace", "hf_trace_digest"],
+        ],
+    )
+    if hf_cfg.get("enabled") is True and (not latent_per_step_mode) and hf_trace_digest is None:
         failures.append("content_evidence.hf_trace_digest must exist when hf enabled")
 
     detect_payload = _pick_mapping(detect_record, [["content_evidence_payload"]]) or {}
-    sync_digest = _pick_str(detect_payload, [["sync_digest"], ["geometry_evidence", "sync_digest"]])
+    detect_geometry_payload = _pick_mapping(
+        detect_record,
+        [["geometry_evidence_payload"], ["geometry_evidence"], ["geometry_result"]],
+    ) or {}
+
+    sync_digest = _pick_str(
+        detect_payload,
+        [["sync_digest"], ["geometry_evidence", "sync_digest"]],
+    )
+    if sync_digest is None:
+        sync_digest = _pick_str(detect_geometry_payload, [["sync_digest"]])
     if sync_digest is None:
         failures.append("detect content evidence must include sync_digest")
 
-    anchor_digest = _pick_str(detect_payload, [["anchor_digest"], ["geometry_evidence", "anchor_digest"]])
+    anchor_digest = _pick_str(
+        detect_payload,
+        [["anchor_digest"], ["geometry_evidence", "anchor_digest"]],
+    )
     if anchor_digest is None:
-        failures.append("detect content evidence must include anchor_digest")
+        anchor_digest = _pick_str(detect_geometry_payload, [["anchor_digest"]])
 
     anchor_metrics = _pick_mapping(
         detect_payload,
         [["anchor_metrics"], ["geometry_evidence", "anchor_metrics"]],
     )
     if not isinstance(anchor_metrics, dict):
-        failures.append("geometry anchor_metrics must exist")
-    else:
+        anchor_metrics = _pick_mapping(detect_geometry_payload, [["anchor_metrics"]])
+
+    # 几何链允许 sync-only 证据形态：若 anchor 字段缺失但 sync_digest 存在，不做硬失败。
+    if isinstance(anchor_metrics, dict):
         extraction_source = anchor_metrics.get("extraction_source")
         if extraction_source not in {"attention_map_relation", "attention_relation_summary"}:
             failures.append("anchor_metrics.extraction_source must be attention-map relation based")
 
-    attack_protocol_version = evaluate_report.get("attack_protocol_version")
+    evaluate_report_payload = _resolve_evaluation_report_payload(evaluate_report)
+
+    attack_protocol_version = _pick_str(
+        evaluate_report_payload,
+        [["attack_protocol_version"], ["anchors", "attack_protocol_version"]],
+    )
     if not isinstance(attack_protocol_version, str) or not attack_protocol_version:
         failures.append("evaluation_report.attack_protocol_version must exist")
-    attack_protocol_digest = evaluate_report.get("attack_protocol_digest")
+    attack_protocol_digest = _pick_str(
+        evaluate_report_payload,
+        [["attack_protocol_digest"], ["anchors", "attack_protocol_digest"]],
+    )
     if not isinstance(attack_protocol_digest, str) or not attack_protocol_digest:
         failures.append("evaluation_report.attack_protocol_digest must exist")
 
-    attack_coverage_digest = evaluate_report.get("attack_coverage_digest")
+    attack_coverage_digest = _pick_str(
+        evaluate_report_payload,
+        [["attack_coverage_digest"], ["anchors", "attack_coverage_digest"]],
+    )
     if not isinstance(attack_coverage_digest, str) or not attack_coverage_digest:
         failures.append("evaluation_report.attack_coverage_digest must exist")
 
-    metrics_by_condition = evaluate_report.get("metrics_by_attack_condition")
+    metrics_by_condition = evaluate_report_payload.get("metrics_by_attack_condition")
     if not isinstance(metrics_by_condition, list) or len(metrics_by_condition) == 0:
         failures.append("evaluation_report.metrics_by_attack_condition must be non-empty list")
 

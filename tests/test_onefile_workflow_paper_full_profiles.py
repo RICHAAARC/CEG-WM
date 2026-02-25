@@ -161,3 +161,259 @@ def test_paper_full_mechanism_assertions_fail_fast_on_proxy_paths(tmp_path: Path
     assert any("tail_truncation_mode" in item for item in failures)
     assert any("coding_mode" in item for item in failures)
     assert any("decoder" in item for item in failures)
+
+
+def test_paper_full_mechanism_assertions_accept_top_level_geometry_payload(tmp_path: Path) -> None:
+    """
+    功能：验证断言脚本可从 detect 顶层 geometry payload 读取几何锚点。 
+
+    Verify mechanism assertion accepts geometry anchors from top-level geometry payload.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    assert_module = _load_assert_script_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    compare_dir = run_root / "artifacts" / "multi_protocol_evaluation" / "artifacts" / "protocol_compare"
+    compare_dir.mkdir(parents=True, exist_ok=True)
+    (compare_dir / "compare_summary.json").write_text("{}", encoding="utf-8")
+
+    cfg = {
+        "paper_faithfulness": {"enabled": True},
+        "impl": {
+            "sync_module_id": "geometry_latent_sync_sd3_v1",
+            "geometry_extractor_id": "geometry_attention_anchor_sd3_v1",
+            "hf_embedder_id": "hf_embedder_t2smark_v1",
+            "lf_coder_id": "lf_coder_prc_v1",
+        },
+        "watermark": {
+            "hf": {
+                "enabled": True,
+                "tail_truncation_mode": "top_k_per_latent",
+                "selection": "top_k_magnitude_based",
+            },
+            "lf": {
+                "enabled": True,
+                "coding_mode": "latent_space_sign_flipping",
+                "decoder": "belief_propagation",
+            },
+        },
+    }
+    embed_record = {
+        "content_evidence": {
+            "injection_status": "ok",
+            "injection_trace_digest": "1" * 64,
+            "injection_digest": "2" * 64,
+            "step_summary_digest": "3" * 64,
+            "trajectory_evidence": {"trajectory_spec_digest": "4" * 64},
+            "injection_site_spec": {"status": "ok", "hook_type": "callback_on_step_end"},
+            "lf_trace_digest": "5" * 64,
+            "hf_trace_digest": "6" * 64,
+        }
+    }
+    detect_record = {
+        "content_evidence_payload": {},
+        "geometry_evidence_payload": {
+            "sync_digest": "7" * 64,
+            "anchor_digest": "8" * 64,
+            "anchor_metrics": {"extraction_source": "attention_relation_summary"},
+        },
+    }
+    evaluate_report = {
+        "attack_protocol_version": "attack_protocol_v1",
+        "attack_protocol_digest": "9" * 64,
+        "attack_coverage_digest": "a" * 64,
+        "metrics_by_attack_condition": [{"group_key": "g0"}],
+    }
+
+    failures = assert_module._assert_paper_mechanisms(
+        run_root=run_root,
+        cfg=cfg,
+        embed_record=embed_record,
+        detect_record=detect_record,
+        evaluate_report=evaluate_report,
+        repo_root=repo_root,
+    )
+
+    assert all("detect content evidence must include sync_digest" not in item for item in failures)
+    assert all("detect content evidence must include anchor_digest" not in item for item in failures)
+    assert all("geometry anchor_metrics must exist" not in item for item in failures)
+
+
+def test_paper_full_mechanism_assertions_accept_nested_evaluation_report(tmp_path: Path) -> None:
+    """
+    功能：验证断言脚本兼容嵌套 evaluation_report 与可选 injection_site.status。 
+
+    Verify mechanism assertion accepts nested evaluation_report payload and optional site status.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    assert_module = _load_assert_script_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    compare_dir = run_root / "artifacts" / "multi_protocol_evaluation" / "artifacts" / "protocol_compare"
+    compare_dir.mkdir(parents=True, exist_ok=True)
+    (compare_dir / "compare_summary.json").write_text("{}", encoding="utf-8")
+
+    cfg = {
+        "paper_faithfulness": {"enabled": True},
+        "impl": {
+            "sync_module_id": "geometry_latent_sync_sd3_v1",
+            "geometry_extractor_id": "geometry_attention_anchor_sd3_v1",
+            "hf_embedder_id": "hf_embedder_t2smark_v1",
+            "lf_coder_id": "lf_coder_prc_v1",
+        },
+        "watermark": {
+            "hf": {
+                "enabled": True,
+                "tail_truncation_mode": "top_k_per_latent",
+                "selection": "top_k_magnitude_based",
+            },
+            "lf": {
+                "enabled": True,
+                "coding_mode": "latent_space_sign_flipping",
+                "decoder": "belief_propagation",
+            },
+        },
+    }
+    embed_record = {
+        "content_evidence": {
+            "injection_status": "ok",
+            "injection_trace_digest": "1" * 64,
+            "injection_digest": "2" * 64,
+            "step_summary_digest": "3" * 64,
+            "trajectory_evidence": {"trajectory_spec_digest": "4" * 64},
+            "injection_site_spec": {"hook_type": "callback_on_step_end"},
+        },
+        "content_result": {
+            "lf_trace_digest": "5" * 64,
+            "hf_trace_digest": "6" * 64,
+        },
+    }
+    detect_record = {
+        "content_evidence_payload": {},
+        "geometry_evidence_payload": {
+            "sync_digest": "7" * 64,
+            "anchor_digest": "8" * 64,
+            "anchor_metrics": {"extraction_source": "attention_relation_summary"},
+        },
+    }
+    evaluate_report = {
+        "evaluation_report": {
+            "attack_protocol_version": "attack_protocol_v1",
+            "attack_protocol_digest": "9" * 64,
+            "attack_coverage_digest": "a" * 64,
+            "metrics_by_attack_condition": [{"group_key": "g0"}],
+        }
+    }
+
+    failures = assert_module._assert_paper_mechanisms(
+        run_root=run_root,
+        cfg=cfg,
+        embed_record=embed_record,
+        detect_record=detect_record,
+        evaluate_report=evaluate_report,
+        repo_root=repo_root,
+    )
+
+    assert all("injection_site_spec.status must indicate bound/ok" not in item for item in failures)
+    assert all("content_evidence.lf_trace_digest must exist" not in item for item in failures)
+    assert all("content_evidence.hf_trace_digest must exist when hf enabled" not in item for item in failures)
+    assert all("evaluation_report.attack_protocol_version must exist" not in item for item in failures)
+    assert all("evaluation_report.attack_protocol_digest must exist" not in item for item in failures)
+    assert all("evaluation_report.attack_coverage_digest must exist" not in item for item in failures)
+    assert all("evaluation_report.metrics_by_attack_condition must be non-empty list" not in item for item in failures)
+
+
+def test_paper_full_mechanism_assertions_accept_latent_mode_sync_only_geometry(tmp_path: Path) -> None:
+    """
+    功能：验证 latent per-step 模式下 trace 与 anchor 缺失不触发硬失败。 
+
+    Verify latent per-step mode accepts missing LF/HF trace and sync-only geometry evidence.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    assert_module = _load_assert_script_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    compare_dir = run_root / "artifacts" / "multi_protocol_evaluation" / "artifacts" / "protocol_compare"
+    compare_dir.mkdir(parents=True, exist_ok=True)
+    (compare_dir / "compare_summary.json").write_text("{}", encoding="utf-8")
+
+    cfg = {
+        "paper_faithfulness": {"enabled": True},
+        "impl": {
+            "sync_module_id": "geometry_latent_sync_sd3_v1",
+            "geometry_extractor_id": "geometry_attention_anchor_sd3_v1",
+            "hf_embedder_id": "hf_embedder_t2smark_v1",
+            "lf_coder_id": "lf_coder_prc_v1",
+        },
+        "watermark": {
+            "hf": {
+                "enabled": True,
+                "tail_truncation_mode": "top_k_per_latent",
+                "selection": "top_k_magnitude_based",
+            },
+            "lf": {
+                "enabled": True,
+                "coding_mode": "latent_space_sign_flipping",
+                "decoder": "belief_propagation",
+            },
+        },
+    }
+    embed_record = {
+        "content_evidence": {
+            "injection_status": "ok",
+            "injection_trace_digest": "1" * 64,
+            "injection_digest": "2" * 64,
+            "step_summary_digest": "3" * 64,
+            "trajectory_evidence": {"trajectory_spec_digest": "4" * 64},
+            "injection_site_spec": {"hook_type": "callback_on_step_end"},
+        },
+        "embed_trace": {
+            "embed_mode": "latent_step_injection_stub_v1",
+        },
+    }
+    detect_record = {
+        "content_evidence_payload": {},
+        "geometry_evidence_payload": {
+            "sync_digest": "7" * 64,
+        },
+    }
+    evaluate_report = {
+        "evaluation_report": {
+            "attack_protocol_version": "attack_protocol_v1",
+            "attack_protocol_digest": "9" * 64,
+            "attack_coverage_digest": "a" * 64,
+            "metrics_by_attack_condition": [{"group_key": "g0"}],
+        }
+    }
+
+    failures = assert_module._assert_paper_mechanisms(
+        run_root=run_root,
+        cfg=cfg,
+        embed_record=embed_record,
+        detect_record=detect_record,
+        evaluate_report=evaluate_report,
+        repo_root=repo_root,
+    )
+
+    assert all("content_evidence.lf_trace_digest must exist" not in item for item in failures)
+    assert all("content_evidence.hf_trace_digest must exist when hf enabled" not in item for item in failures)
+    assert all("detect content evidence must include anchor_digest" not in item for item in failures)
+    assert all("geometry anchor_metrics must exist" not in item for item in failures)

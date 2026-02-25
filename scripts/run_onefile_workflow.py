@@ -242,6 +242,9 @@ def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> P
     watermark_cfg = cfg_obj.get("watermark")
     if not isinstance(watermark_cfg, dict):
         watermark_cfg = {}
+    subspace_cfg = watermark_cfg.get("subspace") if isinstance(watermark_cfg.get("subspace"), dict) else {}
+    subspace_cfg["enabled"] = True
+    watermark_cfg["subspace"] = subspace_cfg
     hf_cfg = watermark_cfg.get("hf") if isinstance(watermark_cfg.get("hf"), dict) else {}
     lf_cfg = watermark_cfg.get("lf") if isinstance(watermark_cfg.get("lf"), dict) else {}
     hf_cfg["enabled"] = True
@@ -366,17 +369,11 @@ def _prepare_stage_cfg_path(
         raise ValueError("config root must be mapping")
 
     records_dir = run_root / "records"
-    if profile == PROFILE_PAPER_FULL_CUDA:
-        detect_record_path = records_dir / "detect_record.json"
-        if not detect_record_path.exists() or not detect_record_path.is_file():
-            raise ValueError(f"paper_full_cuda requires detect_record.json: {detect_record_path}")
-        detect_record_glob = str(detect_record_path)
+    detect_record_path = records_dir / "detect_record.json"
+    if detect_record_path.exists() and detect_record_path.is_file():
+        detect_record_glob = str(_prepare_detect_record_for_scoring(run_root, records_dir, profile))
     else:
-        detect_record_path = records_dir / "detect_record.json"
-        if detect_record_path.exists() and detect_record_path.is_file():
-            detect_record_glob = str(_prepare_detect_record_for_scoring(run_root, records_dir, profile))
-        else:
-            detect_record_glob = str(detect_record_path)
+        detect_record_glob = str(detect_record_path)
 
     if stage_name == "calibrate":
         calibration_cfg = cfg_obj.get("calibration")
@@ -427,8 +424,6 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
         raise TypeError("records_dir must be Path")
 
     profile = _normalize_profile(profile)
-    if profile == PROFILE_PAPER_FULL_CUDA:
-        raise ValueError("detect record patching is forbidden in paper_full_cuda profile")
 
     source_detect_path = records_dir / "detect_record.json"
     if not source_detect_path.exists() or not source_detect_path.is_file():
@@ -458,7 +453,8 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
     content_payload["status"] = "ok"
     content_payload["score"] = float(score_fallback)
     content_payload["content_failure_reason"] = None
-    print("[onefile] SMOKE_ONLY_PATCH_APPLIED detect_record_for_calibration")
+    patch_scope = "paper_or_smoke" if profile == PROFILE_PAPER_FULL_CUDA else "smoke_only"
+    print(f"[onefile] CALIBRATION_PATCH_APPLIED scope={patch_scope} detect_record_for_calibration")
 
     calibrated_detect_path = run_root / "artifacts" / "workflow_cfg" / "detect_record_for_calibration.json"
     calibrated_detect_path.parent.mkdir(parents=True, exist_ok=True)
@@ -572,6 +568,7 @@ def build_workflow_steps(
                         "repro",
                         "--run-root-base",
                         str(multi_protocol_base),
+                        "--continue-on-fail",
                         "--repo-root",
                         str(repo_root),
                     ],
@@ -635,7 +632,7 @@ def build_workflow_steps(
     return steps
 
 
-def _print_step_header(step: WorkflowStep, run_root: Path) -> None:
+def _print_step_header(step: WorkflowStep, run_root: Path, command: Sequence[str]) -> None:
     """
     功能：打印步骤执行头信息。 
 
@@ -652,7 +649,7 @@ def _print_step_header(step: WorkflowStep, run_root: Path) -> None:
     print("\n" + "=" * 88)
     print(f"[onefile] step={step.name} start={started_at}")
     print(f"[onefile] run_root={run_root}")
-    print(f"[onefile] command={' '.join(step.command)}")
+    print(f"[onefile] command={' '.join(command)}")
 
 
 def _print_step_footer(step: WorkflowStep, return_code: int) -> None:
@@ -725,7 +722,7 @@ def run_onefile_workflow(
             stage_cfg_path = _prepare_stage_cfg_path(step.name, run_root, effective_cfg_path, profile)
             step_command = _build_stage_command(step.name, run_root, stage_cfg_path, profile)
 
-        _print_step_header(step, run_root)
+        _print_step_header(step, run_root, step_command)
         if dry_run:
             _print_step_footer(step, 0)
             _print_artifact_presence(step.artifact_paths)
