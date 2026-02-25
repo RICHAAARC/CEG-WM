@@ -13,7 +13,7 @@ import pytest
 from main.cli.run_detect import assert_detect_runtime_dependencies
 from main.core import digests
 from main.registries.runtime_resolver import BuiltImplSet
-from main.watermarking.detect.orchestrator import run_detect_orchestrator, _bind_scores_if_ok
+from main.watermarking.detect.orchestrator import run_detect_orchestrator, _bind_scores_if_ok, _resolve_expected_plan_digest
 from main.watermarking.fusion.interfaces import FusionDecision
 
 
@@ -205,6 +205,21 @@ def test_missing_expected_plan_digest_is_absent_and_no_scores() -> None:
     cfg_test_mode = _build_cfg(detect={"content": {"enabled": True}, "runtime": {"test_mode": True}})
     record_test_mode = run_detect_orchestrator(cfg_test_mode, _build_impl_set(), input_record={}, cfg_digest="cfg_digest")
     assert record_test_mode["allow_cfg_plan_digest_fallback_used"] is True
+
+
+def test_resolve_expected_plan_digest_from_embed_trace_injection_evidence() -> None:
+    expected_plan_digest = "plan_digest_from_embed_trace_injection"
+    input_record = {
+        "embed_trace": {
+            "injection_evidence": {
+                "status": "ok",
+                "plan_digest": expected_plan_digest,
+            }
+        }
+    }
+
+    resolved = _resolve_expected_plan_digest(input_record)
+    assert resolved == expected_plan_digest
 
 
 def test_plan_digest_mismatch_short_circuits_scoring() -> None:

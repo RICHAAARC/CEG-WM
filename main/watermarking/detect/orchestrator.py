@@ -1208,6 +1208,28 @@ def _resolve_expected_plan_digest(input_record: Optional[Dict[str, Any]]) -> Opt
         candidate = payload.get("plan_digest")
         if isinstance(candidate, str) and candidate:
             return candidate
+
+    embed_trace = input_record.get("embed_trace")
+    if isinstance(embed_trace, dict):
+        trace_plan_digest = embed_trace.get("plan_digest")
+        if isinstance(trace_plan_digest, str) and trace_plan_digest:
+            return trace_plan_digest
+
+        trace_injection = embed_trace.get("injection_evidence")
+        if isinstance(trace_injection, dict):
+            trace_injection_plan_digest = trace_injection.get("plan_digest")
+            if isinstance(trace_injection_plan_digest, str) and trace_injection_plan_digest:
+                return trace_injection_plan_digest
+
+    top_level_injection = input_record.get("injection_evidence")
+    if isinstance(top_level_injection, dict):
+        injection_plan_digest = top_level_injection.get("plan_digest")
+        if isinstance(injection_plan_digest, str) and injection_plan_digest:
+            return injection_plan_digest
+
+    subspace_plan = input_record.get("subspace_plan")
+    if isinstance(subspace_plan, dict) and len(subspace_plan) > 0:
+        return digests.canonical_sha256(subspace_plan)
     return None
 
 
