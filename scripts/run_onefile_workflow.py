@@ -553,6 +553,7 @@ def build_workflow_steps(
 
     if profile == PROFILE_PAPER_FULL_CUDA:
         multi_protocol_base = run_root / "artifacts" / "multi_protocol_evaluation"
+        experiment_matrix_batch_root = run_root / "outputs" / "experiment_matrix"
         steps.extend(
             [
                 WorkflowStep(
@@ -592,6 +593,20 @@ def build_workflow_steps(
                         run_root / "records" / "embed_record.json",
                         run_root / "records" / "detect_record.json",
                         run_root / "artifacts" / "evaluation_report.json",
+                    ],
+                ),
+                WorkflowStep(
+                    name="experiment_matrix",
+                    command=[
+                        sys.executable,
+                        str(scripts_dir / "run_experiment_matrix.py"),
+                        "--config",
+                        str(cfg_path),
+                        "--batch-root",
+                        str(experiment_matrix_batch_root),
+                    ],
+                    artifact_paths=[
+                        experiment_matrix_batch_root / "artifacts" / "grid_summary.json",
                     ],
                 ),
             ]
