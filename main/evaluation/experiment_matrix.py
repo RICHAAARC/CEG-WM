@@ -461,6 +461,8 @@ def _apply_ablation_flags(cfg_snapshot: Dict[str, Any], ablation_flags: Dict[str
     """Apply ablation flags into cfg snapshot and normalize."""
     if "ablation" not in cfg_snapshot or not isinstance(cfg_snapshot.get("ablation"), dict):
         cfg_snapshot["ablation"] = {}
+    else:
+        cfg_snapshot["ablation"]["normalized"] = None
     for field_name, field_value in ablation_flags.items():
         cfg_snapshot["ablation"][field_name] = field_value
     config_loader.normalize_ablation_flags(cfg_snapshot)
