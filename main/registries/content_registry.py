@@ -22,7 +22,15 @@ from main.watermarking.content_chain.semantic_mask_provider import (
 from main.watermarking.content_chain.low_freq_coder import (
     LowFreqCoder,
     LOW_FREQ_CODER_ID,
-    LOW_FREQ_CODER_VERSION
+    LOW_FREQ_CODER_VERSION,
+    LFCoderPRC,
+    LF_CODER_PRC_ID,
+    LF_CODER_PRC_VERSION
+)
+from main.watermarking.content_chain.high_freq_embedder import (
+    HFEmbedderT2SMark,
+    HF_EMBEDDER_T2SMARK_ID,
+    HF_EMBEDDER_T2SMARK_VERSION
 )
 from main.watermarking.content_chain.content_detector import (
     ContentDetector,
@@ -348,7 +356,7 @@ def _build_unified_content_extractor(cfg: Dict[str, Any]) -> UnifiedContentExtra
     """
     功能：构造统一内容链提取器实现。
 
-    Build unified content extractor (embed + detect dual mode).
+    Build unified content extractor implementation.
 
     Args:
         cfg: Config mapping.
@@ -365,6 +373,50 @@ def _build_unified_content_extractor(cfg: Dict[str, Any]) -> UnifiedContentExtra
     impl_version = UNIFIED_CONTENT_EXTRACTOR_VERSION
     impl_digest = _derive_impl_digest(UNIFIED_CONTENT_EXTRACTOR_ID_CONST, impl_version)
     return UnifiedContentExtractor(UNIFIED_CONTENT_EXTRACTOR_ID_CONST, impl_version, impl_digest)
+
+
+def _build_hf_embedder_t2smark(cfg: Dict[str, Any]) -> HFEmbedderT2SMark:
+    """
+    功能：构造 T2SMark HF embedder 实现。
+
+    Build T2SMark paper-faithful HF embedder.
+
+    Args:
+        cfg: Config mapping.
+
+    Returns:
+        HFEmbedderT2SMark instance.
+
+    Raises:
+        TypeError: If cfg is not dict.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    impl_version = HF_EMBEDDER_T2SMARK_VERSION
+    impl_digest = _derive_impl_digest(HF_EMBEDDER_T2SMARK_ID, impl_version)
+    return HFEmbedderT2SMark(HF_EMBEDDER_T2SMARK_ID, impl_version, impl_digest)
+
+
+def _build_lf_coder_prc(cfg: Dict[str, Any]) -> LFCoderPRC:
+    """
+    功能：构造 PRC LF coder 实现。
+
+    Build PRC paper-faithful LF coder.
+
+    Args:
+        cfg: Config mapping.
+
+    Returns:
+        LFCoderPRC instance.
+
+    Raises:
+        TypeError: If cfg is not dict.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    impl_version = LF_CODER_PRC_VERSION
+    impl_digest = _derive_impl_digest(LF_CODER_PRC_ID, impl_version)
+    return LFCoderPRC(LF_CODER_PRC_ID, impl_version, impl_digest)
 
 
 _CONTENT_REGISTRY.register_factory(
@@ -419,6 +471,28 @@ _CONTENT_REGISTRY.register_factory(
         requires_cuda=False,
         supports_deterministic=True,
         max_resolution="2048x2048",
+        supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
+    )
+)
+_CONTENT_REGISTRY.register_factory(
+    HF_EMBEDDER_T2SMARK_ID,
+    _build_hf_embedder_t2smark,
+    capabilities=ImplCapabilities(
+        supports_batching=False,
+        requires_cuda=False,
+        supports_deterministic=True,
+        max_resolution=None,
+        supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
+    )
+)
+_CONTENT_REGISTRY.register_factory(
+    LF_CODER_PRC_ID,
+    _build_lf_coder_prc,
+    capabilities=ImplCapabilities(
+        supports_batching=False,
+        requires_cuda=False,
+        supports_deterministic=True,
+        max_resolution=None,
         supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
     )
 )

@@ -260,14 +260,33 @@ class SemanticMaskProvider:
                         )
                 except Exception as saliency_exc:
                     fallback_reason = f"semantic_model_unavailable: {type(saliency_exc).__name__}"
-                    mask_impl_id = TEXTURE_FALLBACK_IMPL_ID
-                    mask_array, mask_stats, mask_binding = build_texture_mask_v1(
-                        image=image_data,
-                        image_shape=image_shape,
-                        cfg=cfg,
-                        params=mask_params,
-                    )
-                    saliency_map = mask_array.astype(np.float32)
+                    if mask_impl_id == SEMANTIC_SALIENCY_V2_IMPL_ID:
+                        try:
+                            mask_array, saliency_map, mask_stats, mask_binding = build_semantic_saliency_mask_v1(
+                                image=image_data,
+                                image_shape=image_shape,
+                                cfg=cfg,
+                                params=mask_params,
+                            )
+                            mask_impl_id = SEMANTIC_SALIENCY_IMPL_ID
+                        except Exception:
+                            mask_impl_id = TEXTURE_FALLBACK_IMPL_ID
+                            mask_array, mask_stats, mask_binding = build_texture_mask_v1(
+                                image=image_data,
+                                image_shape=image_shape,
+                                cfg=cfg,
+                                params=mask_params,
+                            )
+                            saliency_map = mask_array.astype(np.float32)
+                    else:
+                        mask_impl_id = TEXTURE_FALLBACK_IMPL_ID
+                        mask_array, mask_stats, mask_binding = build_texture_mask_v1(
+                            image=image_data,
+                            image_shape=image_shape,
+                            cfg=cfg,
+                            params=mask_params,
+                        )
+                        saliency_map = mask_array.astype(np.float32)
             else:
                 mask_array, mask_stats, mask_binding = build_texture_mask_v1(
                     image=image_data,
@@ -338,6 +357,7 @@ class SemanticMaskProvider:
             "model_version": mask_params.get("semantic_model_version", "<absent>"),
             "preprocess": mask_params.get("semantic_preprocess", "<absent>"),
             "thresholding": mask_params.get("semantic_thresholding", "<absent>"),
+            "threshold": mask_stats.get("saliency_threshold", "<absent>"),
             "fallback_reason": fallback_reason if isinstance(fallback_reason, str) else "<absent>",
         }
         audit["mask_impl_id"] = mask_impl_id
@@ -595,7 +615,7 @@ def _resolve_mask_params(cfg: Dict[str, Any]) -> Dict[str, Any]:
     open_iters = max(0, min(open_iters, 3))
     close_iters = max(0, min(close_iters, 3))
 
-    mask_impl_id = mask_cfg.get("impl_id", SEMANTIC_SALIENCY_IMPL_ID)
+    mask_impl_id = mask_cfg.get("impl_id", SEMANTIC_SALIENCY_V2_IMPL_ID)
     if not isinstance(mask_impl_id, str) or not mask_impl_id:
         mask_impl_id = SEMANTIC_SALIENCY_IMPL_ID
 
@@ -697,6 +717,7 @@ def build_semantic_saliency_mask_v1(
         "downsample_grid_shape": [8, 8],
         "downsample_grid_true_indices": true_indices,
         "downsample_grid_digest": downsample_grid_digest,
+        "saliency_threshold": round(float(threshold), 8),
         "mean_energy": round(float(np.mean(gradient_energy[mask])) if np.any(mask) else 0.0, 8),
     }
     binding = {
@@ -738,6 +759,11 @@ def build_semantic_saliency_mask_v2(
         raise TypeError("cfg must be dict")
     if not isinstance(params, dict):
         raise TypeError("params must be dict")
+
+    model_source = params.get("semantic_model_source")
+    if isinstance(model_source, str) and model_source in {"hf", "hf_hub", "online", "remote"}:
+        # 禁止运行期联网下载语义模型权重。
+        raise ValueError("semantic_model_source must be offline; provide semantic_model_path")
 
     model_path = params.get("semantic_model_path")
     if isinstance(model_path, str) and model_path:

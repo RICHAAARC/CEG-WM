@@ -856,6 +856,18 @@ def _finalize_injection_evidence(
     injection_evidence["injection_metrics"] = metrics
     injection_evidence["injection_trace_digest"] = trace_digest
     if isinstance(metrics, dict):
+        step_summary_digest = metrics.get("step_summary_digest")
+        if isinstance(step_summary_digest, str) and step_summary_digest:
+            injection_evidence["step_summary_digest"] = step_summary_digest
+    injection_evidence["injection_digest"] = digests.canonical_sha256(
+        {
+            "plan_digest": injection_evidence.get("plan_digest"),
+            "injection_params_digest": injection_evidence.get("injection_params_digest"),
+            "injection_trace_digest": trace_digest,
+            "step_summary_digest": injection_evidence.get("step_summary_digest", "<absent>"),
+        }
+    )
+    if isinstance(metrics, dict):
         subspace_binding_digest = metrics.get("subspace_binding_digest")
         if isinstance(subspace_binding_digest, str) and subspace_binding_digest:
             injection_evidence["subspace_binding_digest"] = subspace_binding_digest
@@ -904,11 +916,21 @@ def _summarize_injection_metrics(step_evidence_list: List[Dict[str, Any]]) -> Di
     hf_delta_mean = float(sum(hf_delta_values) / len(hf_delta_values)) if hf_delta_values else 0.0
     unique_binding = sorted(list(set(subspace_binding_digests)))
     subspace_binding_digest = unique_binding[0] if len(unique_binding) == 1 else None
+    summary_payload = {
+        "step_count": len(step_evidence_list),
+        "combined_status_counts": status_counts,
+        "delta_norm_mean": delta_mean,
+        "lf_delta_norm_mean": lf_delta_mean,
+        "hf_delta_norm_mean": hf_delta_mean,
+        "subspace_binding_digest": subspace_binding_digest,
+    }
+    step_summary_digest = digests.canonical_sha256(summary_payload)
     return {
         "step_count": len(step_evidence_list),
         "combined_status_counts": status_counts,
         "delta_norm_mean": delta_mean,
         "lf_delta_norm_mean": lf_delta_mean,
         "hf_delta_norm_mean": hf_delta_mean,
-        "subspace_binding_digest": subspace_binding_digest
+        "subspace_binding_digest": subspace_binding_digest,
+        "step_summary_digest": step_summary_digest
     }

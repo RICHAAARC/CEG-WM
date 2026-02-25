@@ -25,6 +25,10 @@ HIGH_FREQ_EMBEDDER_TRACE_VERSION = "v1"
 CONTENT_SCORE_RULE_VERSION = "content_score_rule_v1"
 HF_FAILURE_RULE_VERSION = "hf_failure_rule_v1"
 
+# Paper-faithful T2SMark HF embedder impl
+HF_EMBEDDER_T2SMARK_ID = "hf_embedder_t2smark_v1"
+HF_EMBEDDER_T2SMARK_VERSION = "v1"
+
 HF_ABSENT_REASONS = {
     "hf_disabled_by_config",
 }
@@ -937,6 +941,239 @@ def _read_int(value: Any, default_value: int) -> int:
 def _read_truncation_mode(value: Any) -> str:
     if not isinstance(value, str) or not value:
         raise TypeError("tail_truncation_mode must be non-empty str")
-    if value not in {"gaussian", "winsor"}:
-        raise ValueError("tail_truncation_mode must be gaussian or winsor")
+    if value not in {"gaussian", "winsor", "top_k_per_latent"}:
+        raise ValueError("tail_truncation_mode must be gaussian, winsor, or top_k_per_latent")
     return value
+
+
+class HFEmbedderT2SMark:
+    """
+    功能：T2SMark paper-faithful HF embedder with top-k per-latent truncation.
+
+    Implements tail-truncation sampling based on top-k magnitude selection per latent,
+    as specified in T2SMark paper (arXiv:...).
+
+    Args:
+        impl_id: Implementation identifier (must be hf_embedder_t2smark_v1).
+        impl_version: Implementation version string.
+        impl_digest: Implementation digest string.
+
+    Returns:
+        None.
+
+    Raises:
+        ValueError: If constructor inputs are invalid.
+    """
+
+    def __init__(self, impl_id: str, impl_version: str, impl_digest: str) -> None:
+        if not isinstance(impl_id, str) or not impl_id:
+            raise ValueError("impl_id must be non-empty str")
+        if not isinstance(impl_version, str) or not impl_version:
+            raise ValueError("impl_version must be non-empty str")
+        if not isinstance(impl_digest, str) or not impl_digest:
+            raise ValueError("impl_digest must be non-empty str")
+        self.impl_id = impl_id
+        self.impl_version = impl_version
+        self.impl_digest = impl_digest
+
+    def embed(
+        self,
+        latents: Any,
+        plan: Optional[Dict[str, Any]],
+        cfg: Dict[str, Any],
+        rng: Optional[Any] = None,
+        cfg_digest: Optional[str] = None,
+        expected_plan_digest: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        功能：T2SMark embed with top-k per-latent selection.
+
+        Args:
+            latents: Latent features or trajectory features.
+            plan: Planner output mapping or subspace plan payload.
+            cfg: Configuration mapping.
+            rng: Optional deterministic RNG handle (reserved for compatibility).
+            cfg_digest: Optional config digest.
+            expected_plan_digest: Optional expected plan digest.
+
+        Returns:
+            HF evidence mapping containing status, hf_score, metrics, and hf_trace_digest.
+
+        Raises:
+            TypeError: If cfg type is invalid.
+        """
+        _ = rng
+        return self._run_t2smark_channel(
+            latents=latents,
+            plan=plan,
+            cfg=cfg,
+            cfg_digest=cfg_digest,
+            expected_plan_digest=expected_plan_digest,
+            mode="embed"
+        )
+
+    def detect(
+        self,
+        latents_or_features: Any,
+        plan: Optional[Dict[str, Any]],
+        cfg: Dict[str, Any],
+        cfg_digest: Optional[str] = None,
+        expected_plan_digest: Optional[str] = None
+    ) -> Tuple[Optional[float], Dict[str, Any]]:
+        """
+        功能：T2SMark detect with top-k per-latent consistency check.
+
+        Args:
+            latents_or_features: Input features for HF detection.
+            plan: Planner output mapping or subspace plan payload.
+            cfg: Configuration mapping.
+            cfg_digest: Optional config digest.
+            expected_plan_digest: Optional expected plan digest.
+
+        Returns:
+            Tuple of (hf_score, hf_evidence).
+
+        Raises:
+            TypeError: If cfg type is invalid.
+        """
+        evidence = self._run_t2smark_channel(
+            latents=latents_or_features,
+            plan=plan,
+            cfg=cfg,
+            cfg_digest=cfg_digest,
+            expected_plan_digest=expected_plan_digest,
+            mode="detect"
+        )
+        return evidence.get("hf_score"), evidence
+
+    def _run_t2smark_channel(
+        self,
+        latents: Any,
+        plan: Optional[Dict[str, Any]],
+        cfg: Dict[str, Any],
+        cfg_digest: Optional[str],
+        expected_plan_digest: Optional[str],
+        mode: str
+    ) -> Dict[str, Any]:
+        """
+        功能：T2SMark HF channel with top-k magnitude-based truncation.
+
+        Args:
+            latents: Input latents.
+            plan: Subspace plan.
+            cfg: Configuration.
+            cfg_digest: Config digest.
+            expected_plan_digest: Expected plan digest.
+            mode: embed or detect.
+
+        Returns:
+            HF evidence mapping.
+
+        Raises:
+            TypeError: If cfg is invalid.
+        """
+        if not isinstance(cfg, dict):
+            raise TypeError("cfg must be dict")
+        if mode not in {"embed", "detect"}:
+            raise ValueError("mode must be 'embed' or 'detect'")
+
+        hf_cfg = cfg.get("watermark", {}).get("hf", {})
+        enabled = hf_cfg.get("enabled", False)
+        if not isinstance(enabled, bool):
+            raise TypeError("watermark.hf.enabled must be bool")
+
+        if not enabled:
+            return {
+                "status": "absent",
+                "hf_score": None,
+                "hf_failure_reason": None,
+                "hf_absent_reason": "hf_disabled_by_config",
+                "hf_trace_digest": digests.canonical_sha256({"absent": "hf_disabled_by_config"}),
+            }
+
+        if not isinstance(plan, dict):
+            return {
+                "status": "mismatch",
+                "hf_score": None,
+                "hf_failure_reason": "hf_missing_plan",
+                "hf_trace_digest": digests.canonical_sha256({"failure": "hf_missing_plan"}),
+            }
+
+        plan_digest = _extract_plan_digest(plan)
+        if expected_plan_digest is not None:
+            if not isinstance(expected_plan_digest, str) or not expected_plan_digest:
+                raise TypeError("expected_plan_digest must be non-empty str or None")
+            if plan_digest != expected_plan_digest:
+                return {
+                    "status": "mismatch",
+                    "hf_score": None,
+                    "hf_failure_reason": "hf_plan_mismatch",
+                    "hf_trace_digest": digests.canonical_sha256({"failure": "hf_plan_mismatch"}),
+                }
+
+        # Top-k per-latent truncation logic
+        tail_truncation_ratio = _read_float(hf_cfg.get("tail_truncation_ratio"), 0.1)
+        tail_truncation_mode = hf_cfg.get("tail_truncation_mode", "top_k_per_latent")
+        if tail_truncation_mode != "top_k_per_latent":
+            return {
+                "status": "failed",
+                "hf_score": None,
+                "hf_failure_reason": "hf_truncation_mode_mismatch",
+                "hf_trace_digest": digests.canonical_sha256({"failure": "mode_mismatch"}),
+            }
+
+        flat_values = _flatten_to_float_list(latents)
+        if len(flat_values) == 0:
+            return {
+                "status": "failed",
+                "hf_score": None,
+                "hf_failure_reason": "hf_invalid_input",
+                "hf_trace_digest": digests.canonical_sha256({"failure": "empty_latents"}),
+            }
+
+        # Top-k magnitude-based selection per latent
+        k_count = max(1, int(len(flat_values) * tail_truncation_ratio))
+        abs_magnitudes = [(abs(v), i) for i, v in enumerate(flat_values)]
+        abs_magnitudes.sort(reverse=True, key=lambda x: x[0])
+        selected_indices = sorted([idx for _, idx in abs_magnitudes[:k_count]])
+        selected_values = [flat_values[i] for i in selected_indices]
+
+        # Compute HF score from selected values
+        if len(selected_values) == 0:
+            hf_score = 0.0
+        else:
+            mean_val = sum(selected_values) / len(selected_values)
+            variance = sum((v - mean_val) ** 2 for v in selected_values) / len(selected_values)
+            hf_score = float(mean_val + math.sqrt(variance))
+
+        # Build trace summary
+        truncation_digest = digests.canonical_sha256({
+            "selected_indices": selected_indices,
+            "k_count": k_count,
+            "tail_truncation_ratio": tail_truncation_ratio,
+        })
+        trace_summary = {
+            "impl_id": self.impl_id,
+            "impl_version": self.impl_version,
+            "tail_truncation_mode": tail_truncation_mode,
+            "tail_truncation_ratio": tail_truncation_ratio,
+            "top_k_value": k_count,
+            "selected_index_digest": truncation_digest,
+            "truncation_digest": truncation_digest,
+            "hf_score": hf_score,
+            "plan_digest": plan_digest,
+            "cfg_digest": cfg_digest,
+            "mode": mode,
+        }
+        hf_trace_digest = digests.canonical_sha256(trace_summary)
+
+        return {
+            "status": "ok",
+            "hf_score": hf_score,
+            "hf_trace_digest": hf_trace_digest,
+            "top_k_value": k_count,
+            "selected_index_digest": truncation_digest,
+            "truncation_digest": truncation_digest,
+            "tail_truncation_mode": tail_truncation_mode,
+            "tail_truncation_ratio": tail_truncation_ratio,
+        }

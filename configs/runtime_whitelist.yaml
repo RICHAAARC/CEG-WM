@@ -219,6 +219,13 @@ enums:
       - "gaussian_iid_v1"
       - "rademacher"
 
+  # mask_impl_id：语义掩码实现枚举（append-only）。
+  mask_impl_id:
+    allowed:
+      - "semantic_saliency_v1"
+      - "semantic_saliency_v2"
+      - "texture_gradient_v1"
+
   # subspace_method：子空间规划相关枚举，表示“如何选子空间”。
   subspace_method:
     allowed:
@@ -261,6 +268,10 @@ impl_id:
     - "sd3_diffusion_tracer_v1"
     - "injection_site_binder_v1"
     - "paper_alignment_evaluator_v1"
+    - "hf_embedder_t2smark_v1"
+    - "lf_coder_prc_v1"
+    - "attention_anchor_map_relation_v1"
+    - "geometry_latent_sync_sd3_v2"
 
   allowed_by_domain:
 

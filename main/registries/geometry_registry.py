@@ -12,10 +12,18 @@ from typing import Any, Dict
 
 from main.core import digests
 from main.watermarking.geometry_chain.align_invariance_extractor import GeometryAlignInvarianceExtractor
-from main.watermarking.geometry_chain.attention_anchor_extractor import AttentionAnchorExtractor
+from main.watermarking.geometry_chain.attention_anchor_extractor import (
+    AttentionAnchorExtractor,
+    AttentionAnchorMapRelation,
+    ATTENTION_ANCHOR_MAP_RELATION_ID,
+    ATTENTION_ANCHOR_MAP_RELATION_VERSION
+)
 from main.watermarking.geometry_chain.sync.latent_sync_template import (
     LatentSyncGeometryExtractor,
     LatentSyncTemplate,
+    GeometryLatentSyncSD3V2,
+    GEOMETRY_LATENT_SYNC_SD3_V2_ID,
+    GEOMETRY_LATENT_SYNC_SD3_V2_VERSION,
     SyncResult,
     SyncRuntimeContext,
 )
@@ -462,6 +470,50 @@ def _build_sync_geometry_latent_sync_sd3(cfg: Dict[str, Any]) -> SyncLatentSyncS
     return SyncLatentSyncSd3(GEOMETRY_LATENT_SYNC_SD3_ID, impl_version, impl_digest)
 
 
+def _build_attention_anchor_map_relation(cfg: Dict[str, Any]) -> AttentionAnchorMapRelation:
+    """
+    功能：构造 attention anchor map relation 实现。
+
+    Build attention anchor map relation geometry extractor.
+
+    Args:
+        cfg: Config mapping.
+
+    Returns:
+        AttentionAnchorMapRelation instance.
+
+    Raises:
+        TypeError: If cfg is not dict.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    impl_version = ATTENTION_ANCHOR_MAP_RELATION_VERSION
+    impl_digest = _derive_impl_digest(ATTENTION_ANCHOR_MAP_RELATION_ID, impl_version)
+    return AttentionAnchorMapRelation(ATTENTION_ANCHOR_MAP_RELATION_ID, impl_version, impl_digest)
+
+
+def _build_geometry_latent_sync_sd3_v2(cfg: Dict[str, Any]) -> GeometryLatentSyncSD3V2:
+    """
+    功能：构造 geometry latent sync SD3 v2 实现。
+
+    Build geometry latent sync SD3 v2 with relation digest binding.
+
+    Args:
+        cfg: Config mapping.
+
+    Returns:
+        GeometryLatentSyncSD3V2 instance.
+
+    Raises:
+        TypeError: If cfg is not dict.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    impl_version = GEOMETRY_LATENT_SYNC_SD3_V2_VERSION
+    impl_digest = _derive_impl_digest(GEOMETRY_LATENT_SYNC_SD3_V2_ID, impl_version)
+    return GeometryLatentSyncSD3V2(GEOMETRY_LATENT_SYNC_SD3_V2_ID, impl_version, impl_digest)
+
+
 _GEOMETRY_REGISTRY.register_factory(
     GEOMETRY_BASELINE_IDENTITY_ID,
     _build_geometry_baseline_identity,
@@ -506,6 +558,17 @@ _GEOMETRY_REGISTRY.register_factory(
         supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
     )
 )
+_GEOMETRY_REGISTRY.register_factory(
+    ATTENTION_ANCHOR_MAP_RELATION_ID,
+    _build_attention_anchor_map_relation,
+    capabilities=ImplCapabilities(
+        supports_batching=False,
+        requires_cuda=False,
+        supports_deterministic=True,
+        max_resolution=None,
+        supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
+    )
+)
 _SYNC_REGISTRY.register_factory(
     SYNC_BASELINE_ID,
     _build_sync_baseline,
@@ -520,6 +583,17 @@ _SYNC_REGISTRY.register_factory(
 _SYNC_REGISTRY.register_factory(
     GEOMETRY_LATENT_SYNC_SD3_ID,
     _build_sync_geometry_latent_sync_sd3,
+    capabilities=ImplCapabilities(
+        supports_batching=False,
+        requires_cuda=False,
+        supports_deterministic=True,
+        max_resolution=None,
+        supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
+    )
+)
+_SYNC_REGISTRY.register_factory(
+    GEOMETRY_LATENT_SYNC_SD3_V2_ID,
+    _build_geometry_latent_sync_sd3_v2,
     capabilities=ImplCapabilities(
         supports_batching=False,
         requires_cuda=False,

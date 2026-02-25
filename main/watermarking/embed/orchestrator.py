@@ -183,6 +183,29 @@ def run_embed_orchestrator(
     )
     io_anchors = _prepare_embed_real_io_anchors(cfg)
     use_latent_per_step = _should_use_latent_per_step_path(cfg)
+    paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
+    paper_enabled = bool(paper_cfg.get("enabled", False))
+    if paper_enabled and not use_latent_per_step:
+        # paper 模式下必须走 latent per-step 主路径。
+        raise ValueError("paper_faithfulness requires latent per-step embed path")
+    if paper_enabled and io_anchors.get("identity_mode", False):
+        # paper 模式下禁止 identity baseline。
+        raise ValueError("paper_faithfulness forbids identity baseline embed")
+    
+    # Paper-faithful mode强制检查HF/LF实现（阶段4）
+    if paper_enabled:
+        impl_cfg = cfg.get("impl", {})
+        hf_impl_id = impl_cfg.get("hf_embedder_id")
+        lf_impl_id = impl_cfg.get("lf_coder_id")
+        
+        # 检查HF embedder必须是T2SMark
+        if hf_impl_id and hf_impl_id != "hf_embedder_t2smark_v1":
+            raise ValueError(f"paper_faithfulness requires hf_embedder_t2smark_v1, got {hf_impl_id}")
+        
+        # 检查LF coder必须是PRC
+        if lf_impl_id and lf_impl_id != "lf_coder_prc_v1":
+            raise ValueError(f"paper_faithfulness requires lf_coder_prc_v1, got {lf_impl_id}")
+    
     if use_latent_per_step:
         embed_trace = _build_latent_step_embed_trace(cfg, injection_evidence)
     else:
@@ -432,6 +455,8 @@ def _merge_injection_evidence(content_evidence_payload: Dict[str, Any], injectio
     content_evidence_payload["injection_failure_reason"] = injection_evidence.get("injection_failure_reason")
     content_evidence_payload["injection_trace_digest"] = injection_evidence.get("injection_trace_digest")
     content_evidence_payload["injection_params_digest"] = injection_evidence.get("injection_params_digest")
+    content_evidence_payload["step_summary_digest"] = injection_evidence.get("step_summary_digest")
+    content_evidence_payload["injection_digest"] = injection_evidence.get("injection_digest")
     content_evidence_payload["injection_metrics"] = injection_evidence.get("injection_metrics")
     content_evidence_payload["subspace_binding_digest"] = injection_evidence.get("subspace_binding_digest")
 
@@ -988,6 +1013,10 @@ def _build_latent_step_embed_trace(
         raise TypeError("cfg must be dict")
     paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
     paper_enabled = bool(paper_cfg.get("enabled", False))
+    injection_status = injection_evidence.get("status") if isinstance(injection_evidence, dict) else None
+    if paper_enabled and injection_status != "ok":
+        # paper 模式下 latent 注入证据非 ok 必须立即失败。
+        raise ValueError("latent injection evidence not ok under paper mode")
 
     trace = {
         "embed_mode": "latent_step_injection_stub_v1",

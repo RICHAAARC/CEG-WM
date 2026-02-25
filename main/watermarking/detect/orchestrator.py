@@ -303,6 +303,7 @@ def run_detect_orchestrator(
         mismatch_reasons
     )
 
+    trajectory_absent_forced = _is_embed_trajectory_explicit_absent(input_record)
     forced_mismatch = len(mismatch_reasons) > 0
     forced_absent = (
         not isinstance(expected_plan_digest, str) or
@@ -318,7 +319,38 @@ def run_detect_orchestrator(
             and not forced_mismatch
         )
     )
-    if forced_mismatch:
+    if trajectory_absent_forced:
+        content_evidence_payload = {
+            "status": "absent",
+            "score": None,
+            "plan_digest": detect_time_plan_digest,
+            "basis_digest": detect_time_basis_digest,
+            "content_failure_reason": "detector_no_plan_expected" if not isinstance(expected_plan_digest, str) or not expected_plan_digest else None,
+            "score_parts": None,
+            "lf_score": None,
+            "hf_score": None,
+            "audit": {
+                "impl_identity": "detect_orchestrator",
+                "impl_version": "v1",
+                "impl_digest": digests.canonical_sha256({"impl_id": "detect_orchestrator", "impl_version": "v1"}),
+                "trace_digest": digests.canonical_sha256({
+                    "trajectory_status": trajectory_status,
+                    "trajectory_mismatch_reason": trajectory_mismatch_reason,
+                    "plan_digest_status": plan_digest_status
+                })
+            }
+        }
+        if trajectory_evidence is not None:
+            content_evidence_payload["trajectory_evidence"] = trajectory_evidence
+            _inject_trajectory_audit_fields(content_evidence_payload, trajectory_evidence)
+        if injection_evidence is not None:
+            _merge_injection_evidence(content_evidence_payload, injection_evidence)
+        _bind_scores_if_ok(content_evidence_payload)
+        content_result = content_evidence_payload
+        content_evidence_adapted = content_evidence_payload
+        geometry_evidence_adapted = _adapt_geometry_evidence_for_fusion(geometry_result)
+        fusion_result = _build_absent_fusion_decision(cfg, content_evidence_adapted, geometry_evidence_adapted)
+    elif forced_mismatch:
         content_evidence_payload = {
             "status": "mismatch",
             "score": None,
@@ -1394,6 +1426,36 @@ def _extract_embed_planner_input_digest(input_record: Optional[Dict[str, Any]]) 
     return None
 
 
+def _is_embed_trajectory_explicit_absent(input_record: Optional[Dict[str, Any]]) -> bool:
+    """
+    功能：判断 embed 侧 trajectory 证据是否显式为 absent。
+
+    Determine whether embed-side trajectory evidence is explicitly absent.
+
+    Args:
+        input_record: Embed-time input record mapping.
+
+    Returns:
+        True if embed trajectory evidence exists and status is absent.
+    """
+    if not isinstance(input_record, dict):
+        return False
+
+    embed_trajectory_evidence = None
+    for key in ["content_evidence_payload", "content_evidence", "content_result"]:
+        payload = input_record.get(key)
+        if isinstance(payload, dict) and "trajectory_evidence" in payload:
+            embed_trajectory_evidence = payload.get("trajectory_evidence")
+            break
+    if embed_trajectory_evidence is None and "trajectory_evidence" in input_record:
+        embed_trajectory_evidence = input_record.get("trajectory_evidence")
+    if not isinstance(embed_trajectory_evidence, dict):
+        return False
+
+    embed_status = _resolve_trajectory_tap_status(embed_trajectory_evidence)
+    return embed_status == "absent"
+
+
 def _inject_trajectory_audit_fields(
     content_evidence_payload: Dict[str, Any],
     trajectory_evidence: Dict[str, Any]
@@ -1651,11 +1713,11 @@ def _resolve_primary_mismatch(mismatch_reasons: list[str]) -> tuple[str, str]:
         "content_evidence_absent": "content_evidence",
     }
     for token in [
+        "trajectory_digest_mismatch",
         "plan_digest_mismatch",
         "basis_digest_mismatch",
         "planner_impl_identity_mismatch",
         "trajectory_spec_digest_mismatch",
-        "trajectory_digest_mismatch",
         "trajectory_evidence_invalid",
         "injection_trace_digest_mismatch",
         "injection_params_digest_mismatch",

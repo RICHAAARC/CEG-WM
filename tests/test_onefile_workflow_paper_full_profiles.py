@@ -155,6 +155,7 @@ def test_paper_full_mechanism_assertions_fail_fast_on_proxy_paths(tmp_path: Path
         embed_record=embed_record,
         detect_record=detect_record,
         evaluate_report=evaluate_report,
+        repo_root=repo_root,
     )
 
     assert any("tail_truncation_mode" in item for item in failures)

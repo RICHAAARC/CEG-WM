@@ -369,7 +369,11 @@ def _prepare_stage_cfg_path(
             raise ValueError(f"paper_full_cuda requires detect_record.json: {detect_record_path}")
         detect_record_glob = str(detect_record_path)
     else:
-        detect_record_glob = str(_prepare_detect_record_for_scoring(run_root, records_dir, profile))
+        detect_record_path = records_dir / "detect_record.json"
+        if detect_record_path.exists() and detect_record_path.is_file():
+            detect_record_glob = str(_prepare_detect_record_for_scoring(run_root, records_dir, profile))
+        else:
+            detect_record_glob = str(detect_record_path)
 
     if stage_name == "calibrate":
         calibration_cfg = cfg_obj.get("calibration")
@@ -715,10 +719,8 @@ def run_onefile_workflow(
     for step in steps:
         step_command = list(step.command)
         if step.name in {"calibrate", "evaluate"}:
-            detect_record_path = run_root / "records" / "detect_record.json"
-            if detect_record_path.exists() and detect_record_path.is_file():
-                stage_cfg_path = _prepare_stage_cfg_path(step.name, run_root, effective_cfg_path, profile)
-                step_command = _build_stage_command(step.name, run_root, stage_cfg_path, profile)
+            stage_cfg_path = _prepare_stage_cfg_path(step.name, run_root, effective_cfg_path, profile)
+            step_command = _build_stage_command(step.name, run_root, stage_cfg_path, profile)
 
         _print_step_header(step, run_root)
         if dry_run:

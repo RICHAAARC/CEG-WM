@@ -724,7 +724,10 @@ def run_repro_pipeline(
         )
 
     detect_record_path = run_root / "records" / "detect_record.json"
-    detect_record = _load_json_dict(detect_record_path)
+    if detect_record_path.exists() and detect_record_path.is_file():
+        detect_record = _load_json_dict(detect_record_path)
+    else:
+        detect_record = {}
 
     def _is_missing_anchor(value: Any) -> bool:
         if value is None:
@@ -738,9 +741,21 @@ def run_repro_pipeline(
     evaluate_impl_versions = evaluate_impl.get("versions") if isinstance(evaluate_impl.get("versions"), dict) else {}
     fusion_result = evaluate_record.get("fusion_result") if isinstance(evaluate_record.get("fusion_result"), dict) else {}
 
+    detect_plan_digest = detect_record.get("plan_digest_observed") if isinstance(detect_record.get("plan_digest_observed"), str) else detect_record.get("plan_digest_expected")
+    if _is_missing_anchor(detect_plan_digest):
+        detect_plan_digest = evaluate_record.get("plan_digest")
+    if _is_missing_anchor(detect_plan_digest):
+        detect_plan_digest = report_obj.get("plan_digest")
+    if _is_missing_anchor(detect_plan_digest):
+        raise RuntimeError(
+            "reason: plan_digest anchor missing and detect_record unavailable\n"
+            f"path: {detect_record_path}\n"
+            "fix: provide records/detect_record.json or set evaluation_report.plan_digest"
+        )
+
     fallback_anchors: Dict[str, Any] = {
         "cfg_digest": evaluate_record.get("cfg_digest"),
-        "plan_digest": detect_record.get("plan_digest_observed") if isinstance(detect_record.get("plan_digest_observed"), str) else detect_record.get("plan_digest_expected"),
+        "plan_digest": detect_plan_digest,
         "thresholds_digest": evaluate_record.get("thresholds_digest"),
         "threshold_metadata_digest": evaluate_record.get("threshold_metadata_digest"),
         "impl_digest": evaluate_impl_digests.get("fusion_rule"),

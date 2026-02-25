@@ -35,6 +35,138 @@ ALLOWED_PLANNER_FAILURE_REASONS = {
 }
 
 
+def build_region_index_spec_from_mask_v1(mask: Any) -> Tuple[Dict[str, Any], Dict[str, Any], str]:
+    """
+    功能：将掩码空间结构转换为区域索引规格。 
+
+    Build region index specs from mask spatial structure.
+
+    Args:
+        mask: Mask array or summary dict with downsample grid fields.
+
+    Returns:
+        Tuple of (hf_region_index_spec, lf_region_index_spec, region_index_digest).
+
+    Raises:
+        TypeError: If mask type is invalid.
+    """
+    grid_rows = 8
+    grid_cols = 8
+    grid_mask = None
+    area_ratio = None
+
+    if isinstance(mask, dict):
+        grid_shape = mask.get("downsample_grid_shape", [8, 8])
+        if isinstance(grid_shape, list) and len(grid_shape) == 2:
+            grid_rows = int(grid_shape[0]) if int(grid_shape[0]) > 0 else 8
+            grid_cols = int(grid_shape[1]) if int(grid_shape[1]) > 0 else 8
+        true_indices = mask.get("downsample_grid_true_indices")
+        if isinstance(true_indices, list):
+            grid_mask = np.zeros((grid_rows, grid_cols), dtype=bool)
+            for idx in true_indices:
+                if not isinstance(idx, int):
+                    continue
+                if idx < 0 or idx >= grid_rows * grid_cols:
+                    continue
+                row = idx // grid_cols
+                col = idx % grid_cols
+                grid_mask[row, col] = True
+        area_ratio_value = mask.get("area_ratio")
+        if isinstance(area_ratio_value, (int, float)):
+            area_ratio = float(area_ratio_value)
+    elif isinstance(mask, np.ndarray):
+        if mask.ndim != 2:
+            raise TypeError("mask must be 2D array when provided as ndarray")
+        grid_mask = _downsample_mask_to_grid(mask.astype(bool), grid_rows, grid_cols)
+        area_ratio = float(np.mean(mask)) if mask.size > 0 else 0.5
+    elif mask is None:
+        grid_mask = None
+    else:
+        raise TypeError("mask must be dict, ndarray, or None")
+
+    if grid_mask is None:
+        area_ratio = 0.5 if area_ratio is None else max(0.0, min(area_ratio, 1.0))
+        total = grid_rows * grid_cols
+        hf_count = max(1, int(round(area_ratio * total)))
+        hf_indices = list(range(min(total, hf_count)))
+    else:
+        hf_indices = np.flatnonzero(grid_mask.reshape(-1)).astype(int).tolist()
+
+    total = grid_rows * grid_cols
+    hf_indices = sorted({int(v) for v in hf_indices if isinstance(v, int) and 0 <= int(v) < total})
+    hf_index_set = set(hf_indices)
+    lf_indices = [idx for idx in range(total) if idx not in hf_index_set]
+
+    mask_grid_digest = digests.canonical_sha256(
+        {
+            "grid_shape": [grid_rows, grid_cols],
+            "hf_indices": hf_indices,
+        }
+    )
+
+    hf_region_index_spec = {
+        "region_index_spec_version": "v1",
+        "channel": "hf",
+        "selector": "mask_true_grid",
+        "grid_shape": [grid_rows, grid_cols],
+        "selected_indices": hf_indices,
+        "selected_count": len(hf_indices),
+        "selection_space": "latent_grid_tokens",
+        "mask_grid_digest": mask_grid_digest,
+    }
+    lf_region_index_spec = {
+        "region_index_spec_version": "v1",
+        "channel": "lf",
+        "selector": "mask_false_grid",
+        "grid_shape": [grid_rows, grid_cols],
+        "selected_indices": lf_indices,
+        "selected_count": len(lf_indices),
+        "selection_space": "latent_grid_tokens",
+        "mask_grid_digest": mask_grid_digest,
+    }
+
+    region_index_digest = digests.canonical_sha256(
+        {
+            "hf_region_index_spec": hf_region_index_spec,
+            "lf_region_index_spec": lf_region_index_spec,
+        }
+    )
+    return hf_region_index_spec, lf_region_index_spec, region_index_digest
+
+
+def _downsample_mask_to_grid(mask_array: np.ndarray, rows: int, cols: int) -> np.ndarray:
+    """
+    功能：将掩码下采样为固定网格布尔阵列。 
+
+    Downsample mask into a fixed grid boolean map.
+
+    Args:
+        mask_array: 2D boolean mask array.
+        rows: Target grid rows.
+        cols: Target grid cols.
+
+    Returns:
+        Boolean grid mask.
+    """
+    if not isinstance(mask_array, np.ndarray) or mask_array.ndim != 2:
+        raise TypeError("mask_array must be 2D ndarray")
+    rows = max(1, int(rows))
+    cols = max(1, int(cols))
+    height, width = mask_array.shape
+    row_edges = np.linspace(0, height, rows + 1).astype(int)
+    col_edges = np.linspace(0, width, cols + 1).astype(int)
+    grid = np.zeros((rows, cols), dtype=bool)
+    for r in range(rows):
+        r0, r1 = row_edges[r], row_edges[r + 1]
+        for c in range(cols):
+            c0, c1 = col_edges[c], col_edges[c + 1]
+            cell = mask_array[r0:r1, c0:c1]
+            if cell.size == 0:
+                continue
+            grid[r, c] = bool(np.mean(cell) >= 0.5)
+    return grid
+
+
 @dataclass(frozen=True)
 class _PlannerParams:
     """
@@ -218,16 +350,17 @@ class SubspacePlannerImpl:
                 basis_summary=basis_summary,
                 routing_digest_ref=routing_digest_ref,
             )
-            hf_region_index_spec = self.build_region_index_spec_from_mask(
-                inputs=inputs,
-                planner_params=planner_params,
-                channel="hf",
+            mask_summary = inputs.get("mask_summary") if isinstance(inputs.get("mask_summary"), dict) else None
+            paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
+            if bool(paper_cfg.get("enabled", False)) and not isinstance(mask_summary, dict):
+                # paper 模式下必须提供 mask_summary 用于空间级 region 规格。
+                raise ValueError("mask_summary required for paper_faithfulness region index spec")
+
+            hf_region_index_spec, lf_region_index_spec, region_index_digest = build_region_index_spec_from_mask_v1(
+                mask_summary
             )
-            lf_region_index_spec = self.build_region_index_spec_from_mask(
-                inputs=inputs,
-                planner_params=planner_params,
-                channel="lf",
-            )
+            hf_region_index_spec["feature_dim_anchor"] = planner_params.feature_dim
+            lf_region_index_spec["feature_dim_anchor"] = planner_params.feature_dim
             region_index_digest = digests.canonical_sha256(
                 {
                     "hf_region_index_spec": hf_region_index_spec,
