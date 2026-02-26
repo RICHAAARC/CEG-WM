@@ -27,7 +27,7 @@ def test_embed_latent_per_step_path_is_selected_under_paper_spec() -> None:
             "injection_params_digest": "b" * 64,
         },
     )
-    assert trace["embed_mode"] == "latent_step_injection_stub_v1"
+    assert trace["embed_mode"] == "latent_step_injection_v1"
     assert trace["injection_status"] == "ok"
 
 

@@ -573,8 +573,8 @@ def run_detect(
                         "plan_failure_reason": None,
                     }
             else:
-                content_override_for_orchestrator = content_result_pre
-                plan_override_for_orchestrator = subspace_result_pre
+                content_override_for_orchestrator = None
+                plan_override_for_orchestrator = None
             record = run_detect_orchestrator(
                 cfg,
                 impl_set,

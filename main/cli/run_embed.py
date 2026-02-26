@@ -405,6 +405,10 @@ def run_embed(
             trajectory_evidence = inference_result.get("trajectory_evidence")
             injection_evidence = inference_result.get("injection_evidence")
             final_latents = inference_result.get("final_latents") if enable_latent_sync else None
+            if pipeline_obj is not None:
+                cfg["__embed_pipeline_obj__"] = pipeline_obj
+            if final_latents is not None:
+                cfg["__embed_final_latents__"] = final_latents
             
             # 构造 infer_trace 并计算 digest
             infer_trace_obj = infer_trace.build_infer_trace(
@@ -488,10 +492,10 @@ def run_embed(
                 cfg_digest,
                 trajectory_evidence=trajectory_evidence,
                 injection_evidence=injection_evidence,
-                sync_runtime_context=sync_runtime_context,
-                content_result_override=content_result_pre,
-                subspace_result_override=subspace_result_pre
+                sync_runtime_context=sync_runtime_context
             )
+            cfg.pop("__embed_pipeline_obj__", None)
+            cfg.pop("__embed_final_latents__", None)
             if not isinstance(record, dict):
                 # record 类型不符合预期，必须 fail-fast。
                 raise TypeError("orchestrator output must be dict")

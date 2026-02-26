@@ -29,7 +29,7 @@ def test_signoff_profile_baseline_unchanged():
     Verify that baseline profile returns exactly the historical
     MINIMUM_AUDIT_SCRIPTS list, ensuring backward compatibility.
 
-    GIVEN: MINIMUM_AUDIT_SCRIPTS constant (12 audits)
+    GIVEN: MINIMUM_AUDIT_SCRIPTS constant (13 audits)
     WHEN: resolve_signoff_profile("baseline") is called
     THEN: Returned list equals MINIMUM_AUDIT_SCRIPTS.
     """
@@ -51,9 +51,9 @@ def test_signoff_profile_baseline_unchanged():
         assert audit in baseline_audits, \
             f"baseline profile 必须包含核心审计 '{audit}'，实际缺失"
 
-    # 验证数量（历史为 12 个）
-    assert len(baseline_audits) == 12, \
-        f"baseline profile 必须包含 12 个审计，实际为 {len(baseline_audits)}"
+    # 验证数量（历史为 13 个）
+    assert len(baseline_audits) == 13, \
+        f"baseline profile 必须包含 13 个审计，实际为 {len(baseline_audits)}"
 
 
 def test_signoff_profile_baseline_audits_unchanged():

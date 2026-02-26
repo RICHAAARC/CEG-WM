@@ -235,6 +235,8 @@ class SubspaceConditioning:
         fallback_used: Whether fallback branch is used.
         fallback_reason: Fallback reason string.
         selected_feature_indices: Selected feature index list.
+        region_strengths: Per-feature modulation strengths in [0, 1].
+        modulation_mode: Semantic modulation mode label.
     """
 
     conditioning_mode: str
@@ -246,6 +248,8 @@ class SubspaceConditioning:
     fallback_used: bool
     fallback_reason: str
     selected_feature_indices: List[int]
+    region_strengths: List[float]
+    modulation_mode: str
 
     def as_dict(self) -> Dict[str, Any]:
         """
@@ -269,6 +273,8 @@ class SubspaceConditioning:
             "fallback_used": self.fallback_used,
             "fallback_reason": self.fallback_reason,
             "selected_feature_indices": self.selected_feature_indices,
+            "region_strengths": self.region_strengths,
+            "modulation_mode": self.modulation_mode,
         }
 
     def digest_payload(self) -> Dict[str, Any]:
@@ -848,6 +854,15 @@ class SubspacePlannerImpl:
             conditioning_mode = "full_feature_fallback"
             selected_feature_indices = list(range(feature_dim))
 
+        region_strengths: List[float] = []
+        selected_index_set = set(selected_feature_indices)
+        for feature_index in range(feature_dim):
+            if feature_index in selected_index_set:
+                strength = 0.55 + 0.45 * mask_area_ratio
+            else:
+                strength = 0.35 * (1.0 - mask_area_ratio)
+            region_strengths.append(self._normalize_float(max(0.0, min(1.0, strength)), planner_params.float_round_digits))
+
         masked_dim_count = len(selected_feature_indices)
         unmasked_dim_count = max(0, feature_dim - masked_dim_count)
         region_spec_digest = digests.canonical_sha256(
@@ -855,6 +870,8 @@ class SubspacePlannerImpl:
                 "feature_dim": feature_dim,
                 "selected_feature_indices": selected_feature_indices,
                 "conditioning_mode": conditioning_mode,
+                "region_strengths": region_strengths,
+                "modulation_mode": "semantic_strength_modulation_v1",
             }
         )
         return SubspaceConditioning(
@@ -867,6 +884,8 @@ class SubspacePlannerImpl:
             fallback_used=fallback_used,
             fallback_reason=fallback_reason,
             selected_feature_indices=selected_feature_indices,
+            region_strengths=region_strengths,
+            modulation_mode="semantic_strength_modulation_v1",
         )
 
     def _apply_mask_conditioning_to_feature_matrix(
@@ -888,14 +907,22 @@ class SubspacePlannerImpl:
         """
         if not isinstance(feature_matrix, np.ndarray) or feature_matrix.ndim != 2:
             raise ValueError("feature_matrix must be 2D ndarray")
-        selected = conditioning.selected_feature_indices
-        if not isinstance(selected, list) or len(selected) == 0:
-            return feature_matrix
         column_count = int(feature_matrix.shape[1])
-        valid_indices = [idx for idx in selected if isinstance(idx, int) and 0 <= idx < column_count]
-        if len(valid_indices) == 0:
-            return feature_matrix
-        return feature_matrix[:, valid_indices]
+        strengths = conditioning.region_strengths
+        if not isinstance(strengths, list) or len(strengths) == 0:
+            strengths = [1.0 for _ in range(column_count)]
+        if len(strengths) < column_count:
+            strengths = strengths + [1.0] * (column_count - len(strengths))
+        if len(strengths) > column_count:
+            strengths = strengths[:column_count]
+        weight_vector = np.asarray(
+            [
+                float(max(0.0, min(1.0, value))) if isinstance(value, (int, float)) else 1.0
+                for value in strengths
+            ],
+            dtype=np.float64,
+        )
+        return feature_matrix * weight_vector[np.newaxis, :]
 
     def _build_plan_payload_for_digest(
         self,

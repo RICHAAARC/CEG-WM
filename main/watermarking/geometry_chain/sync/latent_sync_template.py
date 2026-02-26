@@ -781,21 +781,45 @@ class GeometryLatentSyncSD3V2:
         Returns:
             Sync quality metrics mapping.
         """
-        # Simplified quality computation
-        # In real impl, would use relation_digest to guide alignment
-        
-        # Compute basic statistics
-        mean_val = float(np.mean(latents_np))
-        std_val = float(np.std(latents_np))
-        
-        # Derive uncertainty from relation_digest (simplified)
-        # In real impl, would check embedding/detection consistency  
-        relation_hash_int = int(relation_digest[:8], 16) if len(relation_digest) >= 8 else 0
-        uncertainty = float((relation_hash_int % 100) / 200.0)  # [0, 0.5]
+        if not isinstance(latents_np, np.ndarray) or latents_np.ndim != 4:
+            raise ValueError("latents_np must be rank-4 numpy array")
+        if not isinstance(relation_digest, str) or not relation_digest:
+            raise ValueError("relation_digest must be non-empty str")
+
+        latent_first = latents_np[0]
+        spatial_energy = np.mean(np.abs(latent_first), axis=0)
+        spatial_std = float(np.std(spatial_energy))
+        spatial_mean = float(np.mean(spatial_energy) + 1e-12)
+        contrast_ratio = float(spatial_std / spatial_mean)
+
+        flat_energy = spatial_energy.reshape(-1)
+        peak_value = float(np.max(flat_energy))
+        median_value = float(np.median(flat_energy) + 1e-12)
+        peak_sharpness = float(peak_value / median_value)
+
+        spectrum = np.fft.fftshift(np.abs(np.fft.fft2(spatial_energy)))
+        center_y = spectrum.shape[0] // 2
+        center_x = spectrum.shape[1] // 2
+        spectrum[center_y, center_x] = 0.0
+        sorted_spectrum = np.sort(spectrum.reshape(-1))
+        top1 = float(sorted_spectrum[-1]) if sorted_spectrum.size > 0 else 0.0
+        top2 = float(sorted_spectrum[-2]) if sorted_spectrum.size > 1 else 0.0
+        spectral_peak_ratio = float(top1 / (top2 + 1e-12)) if top1 > 0.0 else 0.0
+
+        relation_norm = float(sum(bytearray(relation_digest.encode("utf-8"))) % 1024) / 1024.0
+        relation_alignment = float(1.0 - abs(relation_norm - min(1.0, contrast_ratio / 4.0)))
+        relation_alignment = float(max(0.0, min(1.0, relation_alignment)))
+
+        quality_score = 0.35 * min(1.0, contrast_ratio / 2.0) + 0.35 * min(1.0, spectral_peak_ratio / 3.0) + 0.30 * relation_alignment
+        quality_score = float(max(0.0, min(1.0, quality_score)))
+        uncertainty = float(max(0.0, min(1.0, 1.0 - quality_score)))
 
         return {
-            "mean": mean_val,
-            "std": std_val,
-            "uncertainty": uncertainty,
+            "contrast_ratio": float(round(contrast_ratio, 6)),
+            "peak_sharpness": float(round(peak_sharpness, 6)),
+            "spectral_peak_ratio": float(round(spectral_peak_ratio, 6)),
+            "relation_alignment": float(round(relation_alignment, 6)),
+            "quality_score": float(round(quality_score, 6)),
+            "uncertainty": float(round(uncertainty, 6)),
             "relation_digest_bound": relation_digest,
         }

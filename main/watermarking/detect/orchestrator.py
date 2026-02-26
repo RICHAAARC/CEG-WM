@@ -32,6 +32,7 @@ from main.watermarking.fusion.interfaces import FusionDecision
 from main.watermarking.geometry_chain.align_invariance_extractor import (
     GEO_AVAILABILITY_RULE_VERSION,
 )
+from main.watermarking.geometry_chain.sync.latent_sync_template import SyncRuntimeContext
 from main.evaluation import protocol_loader as eval_protocol_loader
 from main.evaluation import metrics as eval_metrics
 from main.evaluation import report_builder as eval_report_builder
@@ -113,7 +114,7 @@ def run_detect_orchestrator(
     if not enable_geometry:
         geometry_result = _build_ablation_absent_geometry_evidence("geometry_chain_disabled_by_ablation")
     else:
-        geometry_result = _run_geometry_extractor_with_runtime_inputs(impl_set.geometry_extractor, cfg)
+        geometry_result = _run_geometry_chain_with_sync(impl_set, cfg)
 
     # (1) 统一转换 ContentEvidence / GeometryEvidence 数据类为 dict。
     # 优先使用 .as_dict() 方法；若不存在则直接使用数据类或字典。
@@ -416,6 +417,7 @@ def run_detect_orchestrator(
         fusion_result = _build_absent_fusion_decision(cfg, content_evidence_adapted, geometry_evidence_adapted)
     else:
         hf_evidence = _build_hf_detect_evidence(
+            impl_set=impl_set,
             cfg=cfg,
             cfg_digest=cfg_digest,
             plan_payload=plan_payload,
@@ -423,13 +425,21 @@ def run_detect_orchestrator(
             embed_time_plan_digest=embed_time_plan_digest,
             trajectory_evidence=trajectory_evidence,
         )
-        lf_raw_score, hf_raw_score, raw_score_traces = _extract_content_raw_scores_from_image(
-            cfg=cfg,
-            input_record=input_record,
-            plan_payload=plan_payload,
-            plan_digest=detect_time_plan_digest,
-            cfg_digest=cfg_digest,
-        )
+        if _is_image_domain_sidecar_enabled(cfg):
+            lf_raw_score, hf_raw_score, raw_score_traces = _extract_content_raw_scores_from_image(
+                cfg=cfg,
+                input_record=input_record,
+                plan_payload=plan_payload,
+                plan_digest=detect_time_plan_digest,
+                cfg_digest=cfg_digest,
+            )
+        else:
+            lf_raw_score = None
+            hf_raw_score = None
+            raw_score_traces = {
+                "lf": {"lf_status": "absent", "lf_absent_reason": "image_domain_sidecar_disabled"},
+                "hf": {"hf_status": "absent", "hf_absent_reason": "image_domain_sidecar_disabled"},
+            }
         lf_evidence = _extract_lf_evidence_from_input_record(input_record)
         detector_inputs: Dict[str, Any] = {
             "expected_plan_digest": expected_plan_digest,
@@ -731,6 +741,7 @@ def _bind_scores_if_ok(content_evidence_payload: Dict[str, Any]) -> None:
 
 
 def _build_hf_detect_evidence(
+    impl_set: BuiltImplSet,
     cfg: Dict[str, Any],
     cfg_digest: Optional[str],
     plan_payload: Optional[Dict[str, Any]],
@@ -759,26 +770,44 @@ def _build_hf_detect_evidence(
     """
     if not isinstance(cfg, dict):
         raise TypeError("cfg must be dict")
+    if not isinstance(impl_set, BuiltImplSet):
+        raise TypeError("impl_set must be BuiltImplSet")
 
-    embedder = HighFreqEmbedder(
-        impl_id=HIGH_FREQ_EMBEDDER_ID,
-        impl_version=HIGH_FREQ_EMBEDDER_VERSION,
-        impl_digest=digests.canonical_sha256(
-            {
-                "impl_id": HIGH_FREQ_EMBEDDER_ID,
-                "impl_version": HIGH_FREQ_EMBEDDER_VERSION,
-            }
-        ),
-    )
+    embedder = impl_set.hf_embedder
+    if embedder is None or not hasattr(embedder, "detect"):
+        embedder = HighFreqEmbedder(
+            impl_id=HIGH_FREQ_EMBEDDER_ID,
+            impl_version=HIGH_FREQ_EMBEDDER_VERSION,
+            impl_digest=digests.canonical_sha256(
+                {
+                    "impl_id": HIGH_FREQ_EMBEDDER_ID,
+                    "impl_version": HIGH_FREQ_EMBEDDER_VERSION,
+                }
+            ),
+        )
 
     expected_plan_digest = embed_time_plan_digest if isinstance(embed_time_plan_digest, str) and embed_time_plan_digest else plan_digest
-    hf_score, evidence = embedder.detect(
+    detect_result = embedder.detect(
         latents_or_features=trajectory_evidence,
         plan=plan_payload,
         cfg=cfg,
         cfg_digest=cfg_digest,
         expected_plan_digest=expected_plan_digest,
     )
+    if isinstance(detect_result, tuple) and len(detect_result) == 2:
+        hf_score, evidence = detect_result
+    else:
+        hf_score = None
+        evidence = {
+            "status": "failed",
+            "hf_score": None,
+            "hf_trace_digest": None,
+            "hf_evidence_summary": {
+                "hf_status": "failed",
+                "hf_failure_reason": "hf_detection_invalid_output",
+            },
+            "content_failure_reason": "hf_detection_invalid_output",
+        }
     if not isinstance(evidence, dict):
         evidence = {
             "status": "failed",
@@ -1821,6 +1850,12 @@ def _build_planner_inputs_for_runtime(
         "width": cfg.get("inference_width", cfg.get("model", {}).get("width", 512) if isinstance(cfg.get("model"), dict) else 512),
     }
     inputs = {"trace_signature": trace_signature}
+    runtime_pipeline = cfg.get("__detect_pipeline_obj__")
+    runtime_latents = cfg.get("__detect_final_latents__")
+    if runtime_pipeline is not None:
+        inputs["pipeline"] = runtime_pipeline
+    if runtime_latents is not None:
+        inputs["latents"] = runtime_latents
     if trajectory_evidence is not None:
         inputs["trajectory_evidence"] = trajectory_evidence
     if isinstance(content_evidence_payload, dict):
@@ -3431,7 +3466,203 @@ def _adapt_geometry_evidence_for_fusion(geometry_evidence: Any) -> Dict[str, Any
     return adapted if adapted else {"status": "unknown"}
 
 
-def _run_geometry_extractor_with_runtime_inputs(geometry_extractor: Any, cfg: Dict[str, Any]) -> Any:
+def _is_image_domain_sidecar_enabled(cfg: Dict[str, Any]) -> bool:
+    """
+    功能：解析图像域 sidecar 开关。
+
+    Resolve whether image-domain detector sidecar is enabled.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        True if sidecar is enabled.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    detect_runtime_cfg = cfg.get("detect_runtime") if isinstance(cfg.get("detect_runtime"), dict) else {}
+    explicit = detect_runtime_cfg.get("image_domain_sidecar_enabled")
+    if isinstance(explicit, bool):
+        return explicit
+    paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
+    if bool(paper_cfg.get("enabled", False)):
+        return False
+    return True
+
+
+def _build_attention_maps_from_latents(latents: Any) -> Any:
+    """
+    功能：从 latent 构造可复算 attention maps 代理。
+
+    Build deterministic attention-map proxy from latents.
+
+    Args:
+        latents: Tensor-like or numpy latent array.
+
+    Returns:
+        Attention proxy array or None.
+    """
+    if latents is None:
+        return None
+    if isinstance(latents, np.ndarray):
+        latents_np = latents
+    elif hasattr(latents, "detach") and callable(latents.detach):
+        detached = latents.detach()
+        if hasattr(detached, "cpu") and callable(detached.cpu):
+            detached = detached.cpu()
+        if hasattr(detached, "numpy") and callable(detached.numpy):
+            latents_np = detached.numpy()
+        else:
+            return None
+    else:
+        return None
+    if latents_np.ndim != 4:
+        return None
+    latent_first = latents_np[0]
+    if latent_first.ndim != 3:
+        return None
+    channels = latent_first.reshape(latent_first.shape[0], -1)
+    if channels.shape[0] < 2:
+        return None
+    correlation = np.corrcoef(channels)
+    if not np.isfinite(correlation).all():
+        correlation = np.nan_to_num(correlation, nan=0.0, posinf=0.0, neginf=0.0)
+    return correlation.astype(np.float64)
+
+
+def _build_geometry_runtime_inputs(cfg: Dict[str, Any], sync_result: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """
+    功能：构造几何链运行时输入域。
+
+    Build geometry runtime input payload for sync and extractor.
+
+    Args:
+        cfg: Configuration mapping.
+        sync_result: Optional sync result mapping.
+
+    Returns:
+        Runtime inputs mapping.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    runtime_inputs = {
+        "pipeline": cfg.get("__detect_pipeline_obj__"),
+        "latents": cfg.get("__detect_final_latents__"),
+        "rng": cfg.get("rng"),
+    }
+    attention_maps = _build_attention_maps_from_latents(runtime_inputs.get("latents"))
+    if attention_maps is not None:
+        runtime_inputs["attention_maps"] = attention_maps
+        runtime_inputs["attention_maps_digest"] = digests.canonical_sha256({
+            "shape": list(attention_maps.shape),
+            "mean": float(np.mean(attention_maps)),
+            "std": float(np.std(attention_maps)),
+            "max": float(np.max(attention_maps)),
+            "min": float(np.min(attention_maps)),
+        })
+    if isinstance(sync_result, dict):
+        relation_digest = sync_result.get("relation_digest_bound")
+        if isinstance(relation_digest, str) and relation_digest:
+            runtime_inputs["relation_digest"] = relation_digest
+        sync_digest = sync_result.get("sync_digest")
+        if isinstance(sync_digest, str) and sync_digest:
+            runtime_inputs["sync_digest"] = sync_digest
+        runtime_inputs["sync_result"] = sync_result
+    return runtime_inputs
+
+
+def _run_sync_module_for_detect(sync_module: Any, cfg: Dict[str, Any], runtime_inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：在 detect 侧执行同步模块。
+
+    Execute sync module for detect runtime.
+
+    Args:
+        sync_module: Runtime sync module instance.
+        cfg: Configuration mapping.
+        runtime_inputs: Runtime input mapping.
+
+    Returns:
+        Sync result mapping.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(runtime_inputs, dict):
+        raise TypeError("runtime_inputs must be dict")
+    if sync_module is None:
+        return {"status": "absent", "geometry_absent_reason": "sync_module_absent"}
+    pipeline_obj = runtime_inputs.get("pipeline")
+    latents = runtime_inputs.get("latents")
+    sync_with_context = getattr(sync_module, "sync_with_context", None)
+    has_sync = hasattr(sync_module, "sync") and callable(getattr(sync_module, "sync", None))
+    if callable(sync_with_context):
+        try:
+            sync_ctx = SyncRuntimeContext(
+                pipeline=pipeline_obj,
+                latents=latents,
+                rng=runtime_inputs.get("rng"),
+                trajectory_evidence=None
+            )
+            sync_result = sync_with_context(cfg, sync_ctx)
+            if isinstance(sync_result, dict):
+                return sync_result
+        except Exception as exc:
+            return {
+                "status": "failed",
+                "geometry_failure_reason": f"sync_with_context_failed: {type(exc).__name__}",
+            }
+    if not has_sync:
+        return {"status": "absent", "geometry_absent_reason": "sync_module_missing_sync_method"}
+    try:
+        sync_result = sync_module.sync(cfg)
+        if isinstance(sync_result, dict):
+            return sync_result
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "geometry_failure_reason": f"sync_failed: {type(exc).__name__}",
+        }
+    return {"status": "absent", "geometry_absent_reason": "sync_module_returned_non_mapping"}
+
+
+def _run_geometry_chain_with_sync(impl_set: BuiltImplSet, cfg: Dict[str, Any]) -> Any:
+    """
+    功能：detect 几何链先执行 sync，再执行 geometry extractor。
+
+    Run detect geometry chain with explicit sync-first orchestration.
+
+    Args:
+        impl_set: Built runtime implementation set.
+        cfg: Configuration mapping.
+
+    Returns:
+        Geometry evidence mapping.
+    """
+    if not isinstance(impl_set, BuiltImplSet):
+        raise TypeError("impl_set must be BuiltImplSet")
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    base_inputs = _build_geometry_runtime_inputs(cfg)
+    sync_module = getattr(impl_set, "sync_module", None)
+    sync_result = _run_sync_module_for_detect(sync_module, cfg, base_inputs)
+    runtime_inputs = _build_geometry_runtime_inputs(cfg, sync_result=sync_result)
+    geometry_result = _run_geometry_extractor_with_runtime_inputs(impl_set.geometry_extractor, cfg, runtime_inputs)
+    if isinstance(geometry_result, dict):
+        geometry_result.setdefault("sync_result", sync_result)
+        if isinstance(sync_result, dict):
+            sync_status = sync_result.get("sync_status") or sync_result.get("status")
+            if isinstance(sync_status, str) and sync_status and "sync_status" not in geometry_result:
+                geometry_result["sync_status"] = sync_status
+            if "sync_metrics" not in geometry_result:
+                geometry_result["sync_metrics"] = sync_result.get("sync_quality_metrics")
+    return geometry_result
+
+
+def _run_geometry_extractor_with_runtime_inputs(
+    geometry_extractor: Any,
+    cfg: Dict[str, Any],
+    runtime_inputs: Dict[str, Any] | None = None
+) -> Any:
     """
     功能：以兼容方式调用 geometry extractor。 
 
@@ -3447,11 +3678,10 @@ def _run_geometry_extractor_with_runtime_inputs(geometry_extractor: Any, cfg: Di
     if not isinstance(cfg, dict):
         # cfg 类型不合法，必须 fail-fast。
         raise TypeError("cfg must be dict")
-    runtime_inputs = {
-        "pipeline": cfg.get("__detect_pipeline_obj__"),
-        "latents": cfg.get("__detect_final_latents__"),
-        "rng": cfg.get("rng"),
-    }
+    if runtime_inputs is None:
+        runtime_inputs = _build_geometry_runtime_inputs(cfg)
+    if not isinstance(runtime_inputs, dict):
+        raise TypeError("runtime_inputs must be dict or None")
     extract_method = getattr(geometry_extractor, "extract", None)
     if not callable(extract_method):
         # geometry_extractor 协议不合法，必须 fail-fast。

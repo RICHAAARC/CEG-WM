@@ -569,6 +569,12 @@ def _build_planner_inputs_for_runtime(
         "width": cfg.get("inference_width", cfg.get("model", {}).get("width", 512) if isinstance(cfg.get("model"), dict) else 512),
     }
     inputs = {"trace_signature": trace_signature}
+    runtime_pipeline = cfg.get("__embed_pipeline_obj__")
+    runtime_latents = cfg.get("__embed_final_latents__")
+    if runtime_pipeline is not None:
+        inputs["pipeline"] = runtime_pipeline
+    if runtime_latents is not None:
+        inputs["latents"] = runtime_latents
     if trajectory_evidence is not None:
         inputs["trajectory_evidence"] = trajectory_evidence
     if isinstance(content_evidence_payload, dict):
@@ -1019,7 +1025,7 @@ def _build_latent_step_embed_trace(
         raise ValueError("latent injection evidence not ok under paper mode")
 
     trace = {
-        "embed_mode": "latent_step_injection_stub_v1",
+        "embed_mode": "latent_step_injection_v1",
         "identity_mode": False,
         "identity_reason": None,
         "note": "latent_per_step_injection_primary",

@@ -349,7 +349,7 @@ def _assert_paper_mechanisms(
         failures.append("trajectory_spec_digest must exist and be 64-hex digest")
 
     embed_mode = _pick_str(embed_record, [["embed_trace", "embed_mode"]])
-    latent_per_step_mode = embed_mode == "latent_step_injection_stub_v1"
+    latent_per_step_mode = embed_mode in {"latent_step_injection_stub_v1", "latent_step_injection_v1"}
 
     lf_trace_digest = _pick_str(
         embed_record,

@@ -44,6 +44,8 @@ class ImplIdentity:
     fusion_rule_id: str
     subspace_planner_id: str
     sync_module_id: str
+    hf_embedder_id: Optional[str] = None
+    lf_coder_id: Optional[str] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.content_extractor_id, str) or not self.content_extractor_id:
@@ -61,8 +63,12 @@ class ImplIdentity:
         if not isinstance(self.sync_module_id, str) or not self.sync_module_id:
             # sync_module_id 输入不合法，必须 fail-fast。
             raise ValueError("sync_module_id must be non-empty str")
+        if self.hf_embedder_id is not None and (not isinstance(self.hf_embedder_id, str) or not self.hf_embedder_id):
+            raise ValueError("hf_embedder_id must be non-empty str or None")
+        if self.lf_coder_id is not None and (not isinstance(self.lf_coder_id, str) or not self.lf_coder_id):
+            raise ValueError("lf_coder_id must be non-empty str or None")
 
-    def as_dict(self) -> Dict[str, str]:
+    def as_dict(self) -> Dict[str, Any]:
         """
         功能：导出 impl_identity 映射。
 
@@ -74,13 +80,18 @@ class ImplIdentity:
         Returns:
             Mapping of impl identity fields.
         """
-        return {
+        result: Dict[str, Any] = {
             "content_extractor_id": self.content_extractor_id,
             "geometry_extractor_id": self.geometry_extractor_id,
             "fusion_rule_id": self.fusion_rule_id,
             "subspace_planner_id": self.subspace_planner_id,
-            "sync_module_id": self.sync_module_id
+            "sync_module_id": self.sync_module_id,
         }
+        if isinstance(self.hf_embedder_id, str) and self.hf_embedder_id:
+            result["hf_embedder_id"] = self.hf_embedder_id
+        if isinstance(self.lf_coder_id, str) and self.lf_coder_id:
+            result["lf_coder_id"] = self.lf_coder_id
+        return result
 
 
 @dataclass(frozen=True)
@@ -127,6 +138,8 @@ class ResolvedImplFactories:
     fusion_rule: ImplFactorySpec
     subspace_planner: ImplFactorySpec
     sync_module: ImplFactorySpec
+    hf_embedder: Optional[ImplFactorySpec] = None
+    lf_coder: Optional[ImplFactorySpec] = None
 
 
 @dataclass(frozen=True)
@@ -152,6 +165,8 @@ class BuiltImplSet:
     fusion_rule: Any
     subspace_planner: Any
     sync_module: Any
+    hf_embedder: Any = None
+    lf_coder: Any = None
 
 
 def parse_impl_identity_from_cfg(cfg: Dict[str, Any]) -> ImplIdentity:
@@ -184,7 +199,9 @@ def parse_impl_identity_from_cfg(cfg: Dict[str, Any]) -> ImplIdentity:
         geometry_extractor_id=_require_str_field(impl_cfg, "geometry_extractor_id", "impl.geometry_extractor_id"),
         fusion_rule_id=_require_str_field(impl_cfg, "fusion_rule_id", "impl.fusion_rule_id"),
         subspace_planner_id=_require_str_field(impl_cfg, "subspace_planner_id", "impl.subspace_planner_id"),
-        sync_module_id=_require_str_field(impl_cfg, "sync_module_id", "impl.sync_module_id")
+        sync_module_id=_require_str_field(impl_cfg, "sync_module_id", "impl.sync_module_id"),
+        hf_embedder_id=impl_cfg.get("hf_embedder_id") if isinstance(impl_cfg.get("hf_embedder_id"), str) and impl_cfg.get("hf_embedder_id") else None,
+        lf_coder_id=impl_cfg.get("lf_coder_id") if isinstance(impl_cfg.get("lf_coder_id"), str) and impl_cfg.get("lf_coder_id") else None
     )
 
 
@@ -238,12 +255,30 @@ def resolve_impl_factories(
         identity.sync_module_id
     )
 
+    hf_factory = None
+    if isinstance(identity.hf_embedder_id, str) and identity.hf_embedder_id:
+        hf_factory = _resolve_factory(
+            content_registry.resolve_content_extractor,
+            "hf_embedder",
+            identity.hf_embedder_id
+        )
+
+    lf_factory = None
+    if isinstance(identity.lf_coder_id, str) and identity.lf_coder_id:
+        lf_factory = _resolve_factory(
+            content_registry.resolve_content_extractor,
+            "lf_coder",
+            identity.lf_coder_id
+        )
+
     return ResolvedImplFactories(
         content_extractor=ImplFactorySpec("content_extractor", identity.content_extractor_id, content_factory),
         geometry_extractor=ImplFactorySpec("geometry_extractor", identity.geometry_extractor_id, geometry_factory),
         fusion_rule=ImplFactorySpec("fusion_rule", identity.fusion_rule_id, fusion_factory),
         subspace_planner=ImplFactorySpec("subspace_planner", identity.subspace_planner_id, subspace_factory),
-        sync_module=ImplFactorySpec("sync_module", identity.sync_module_id, sync_factory)
+        sync_module=ImplFactorySpec("sync_module", identity.sync_module_id, sync_factory),
+        hf_embedder=ImplFactorySpec("hf_embedder", identity.hf_embedder_id, hf_factory) if hf_factory is not None and identity.hf_embedder_id is not None else None,
+        lf_coder=ImplFactorySpec("lf_coder", identity.lf_coder_id, lf_factory) if lf_factory is not None and identity.lf_coder_id is not None else None
     )
 
 
@@ -276,13 +311,17 @@ def build_impl_set(resolved: ResolvedImplFactories, cfg: Dict[str, Any]) -> Buil
     fusion_rule = _build_impl(resolved.fusion_rule, cfg)
     subspace_planner = _build_impl(resolved.subspace_planner, cfg)
     sync_module = _build_impl(resolved.sync_module, cfg)
+    hf_embedder = _build_impl(resolved.hf_embedder, cfg) if isinstance(resolved.hf_embedder, ImplFactorySpec) else None
+    lf_coder = _build_impl(resolved.lf_coder, cfg) if isinstance(resolved.lf_coder, ImplFactorySpec) else None
 
     return BuiltImplSet(
         content_extractor=content_extractor,
         geometry_extractor=geometry_extractor,
         fusion_rule=fusion_rule,
         subspace_planner=subspace_planner,
-        sync_module=sync_module
+        sync_module=sync_module,
+        hf_embedder=hf_embedder,
+        lf_coder=lf_coder
     )
 
 
@@ -327,23 +366,37 @@ def build_runtime_impl_set_from_cfg(cfg: Dict[str, Any]) -> tuple[ImplIdentity, 
     impl_caps_list.append(
         geometry_registry._SYNC_REGISTRY.get_capabilities(identity.sync_module_id)
     )
+    if isinstance(identity.hf_embedder_id, str) and identity.hf_embedder_id:
+        impl_caps_list.append(
+            content_registry._CONTENT_REGISTRY.get_capabilities(identity.hf_embedder_id)
+        )
+    if isinstance(identity.lf_coder_id, str) and identity.lf_coder_id:
+        impl_caps_list.append(
+            content_registry._CONTENT_REGISTRY.get_capabilities(identity.lf_coder_id)
+        )
 
     # 调用 assert_impl_set_compatible 执行门禁检查。
+    impl_ids_for_gate = [
+        identity.content_extractor_id,
+        identity.geometry_extractor_id,
+        identity.fusion_rule_id,
+        identity.subspace_planner_id,
+        identity.sync_module_id,
+    ]
+    if isinstance(identity.hf_embedder_id, str) and identity.hf_embedder_id:
+        impl_ids_for_gate.append(identity.hf_embedder_id)
+    if isinstance(identity.lf_coder_id, str) and identity.lf_coder_id:
+        impl_ids_for_gate.append(identity.lf_coder_id)
+
     impl_caps_gate = _aggregate_impl_capabilities_for_gate(
         impl_caps_list,
         cfg,
-        [
-            identity.content_extractor_id,
-            identity.geometry_extractor_id,
-            identity.fusion_rule_id,
-            identity.subspace_planner_id,
-            identity.sync_module_id
-        ]
+        impl_ids_for_gate
     )
     assert_impl_set_compatible(impl_caps_gate, cfg)
 
-    # 计算 impl_set_capabilities_digest（仅保留可审计字段：bool/enum/str-list）。
-    impl_set_capabilities_digest = compute_impl_set_capabilities_digest(impl_caps_list)
+    # 计算 impl_set_capabilities_digest（历史冻结口径仅绑定五个核心域）。
+    impl_set_capabilities_digest = compute_impl_set_capabilities_digest(impl_caps_list[:5])
 
     return identity, impl_set, impl_set_capabilities_digest
 

@@ -386,7 +386,7 @@ def test_paper_full_mechanism_assertions_accept_latent_mode_sync_only_geometry(t
             "injection_site_spec": {"hook_type": "callback_on_step_end"},
         },
         "embed_trace": {
-            "embed_mode": "latent_step_injection_stub_v1",
+            "embed_mode": "latent_step_injection_v1",
         },
     }
     detect_record = {

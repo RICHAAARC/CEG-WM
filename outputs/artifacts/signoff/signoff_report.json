@@ -1,0 +1,1202 @@
+{
+  "_artifact_audit": {
+    "schema_version": "v1.0",
+    "writer": "records_io"
+  },
+  "anchors": {
+    "status": "<absent>"
+  },
+  "audit_scripts": [
+    "audits/audit_write_bypass_scan.py",
+    "audits/audit_registry_injection_surface.py",
+    "audits/audit_policy_path_semantics_binding.py",
+    "audits/audit_injection_scope_manifest_binding.py",
+    "audits/audit_path_policy_escape_rejection.py",
+    "audits/audit_freeze_surface_integrity.py",
+    "audits/audit_dangerous_exec_and_pickle_scan.py",
+    "audits/audit_network_access_scan.py",
+    "audits/audit_no_empty_py_modules.py",
+    "audits/audit_evaluation_report_schema.py",
+    "audits/audit_thresholds_readonly_enforcement.py",
+    "audits/audit_attack_protocol_hardcoding.py",
+    "audits/audit_runtime_impl_smoke_new_saliency_and_subspace.py"
+  ],
+  "audits": [
+    {
+      "audit_id": "records.write_path_is_unbypassable",
+      "category": "B",
+      "evidence": {
+        "allowlisted_count": 38,
+        "fail_count": 0,
+        "matches": [
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 310,
+            "lineno_start": 310,
+            "mode": null,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\config_loader.py",
+            "snippet": "Path.open() access=read at line 310",
+            "symbol": "Path.open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 135,
+            "lineno_start": 135,
+            "mode": null,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\digests.py",
+            "snippet": "Path.open() access=read at line 135",
+            "symbol": "Path.open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 319,
+            "lineno_start": 319,
+            "mode": null,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_bundle.py",
+            "snippet": "Path.open() access=read at line 319",
+            "symbol": "Path.open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 347,
+            "lineno_start": 347,
+            "mode": null,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_bundle.py",
+            "snippet": "Path.open() access=read at line 347",
+            "symbol": "Path.open"
+          },
+          {
+            "access": "unknown",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 1272,
+            "lineno_start": 1272,
+            "mode": null,
+            "os_flags": "unknown",
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "snippet": "os.open() access=unknown flags=unknown at line 1272",
+            "symbol": "os.open"
+          },
+          {
+            "access": "unknown",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 1272,
+            "lineno_start": 1272,
+            "mode": null,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "snippet": "Path.open() access=unknown at line 1272",
+            "symbol": "Path.open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 1402,
+            "lineno_start": 1402,
+            "mode": null,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "snippet": "Path.open() access=read at line 1402",
+            "symbol": "Path.open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 1425,
+            "lineno_start": 1425,
+            "mode": null,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "snippet": "Path.open() access=read at line 1425",
+            "symbol": "Path.open"
+          },
+          {
+            "access": "write",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 1484,
+            "lineno_start": 1484,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "snippet": "shutil.copy2() at line 1484",
+            "symbol": "shutil.copy2"
+          },
+          {
+            "access": "write",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 1556,
+            "lineno_start": 1556,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "snippet": "shutil.copy2() at line 1556",
+            "symbol": "shutil.copy2"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 1215,
+            "lineno_start": 1215,
+            "mode": "r",
+            "path": "D:\\Code\\CEG-WM\\main\\core\\status.py",
+            "snippet": "open() access=read at line 1215",
+            "symbol": "open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 669,
+            "lineno_start": 669,
+            "mode": null,
+            "path": "D:\\Code\\CEG-WM\\main\\evaluation\\attack_runner.py",
+            "snippet": "Path.open() access=read at line 669",
+            "symbol": "Path.open"
+          },
+          {
+            "access": "write",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 128,
+            "lineno_start": 128,
+            "mode": null,
+            "path": "D:\\Code\\CEG-WM\\main\\evaluation\\table_export.py",
+            "snippet": "Path.write_text() access=write at line 128",
+            "symbol": "Path.write_text"
+          },
+          {
+            "access": "write",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 192,
+            "lineno_start": 192,
+            "mode": null,
+            "path": "D:\\Code\\CEG-WM\\main\\evaluation\\table_export.py",
+            "snippet": "Path.write_text() access=write at line 192",
+            "symbol": "Path.write_text"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 1217,
+            "lineno_start": 1217,
+            "mode": null,
+            "path": "D:\\Code\\CEG-WM\\main\\watermarking\\content_chain\\semantic_mask_provider.py",
+            "snippet": "Path.open() access=read at line 1217",
+            "symbol": "Path.open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 860,
+            "lineno_start": 860,
+            "mode": null,
+            "path": "D:\\Code\\CEG-WM\\main\\watermarking\\detect\\orchestrator.py",
+            "snippet": "Path.open() access=read at line 860",
+            "symbol": "Path.open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 224,
+            "lineno_start": 224,
+            "mode": null,
+            "path": "D:\\Code\\CEG-WM\\main\\watermarking\\embed\\orchestrator.py",
+            "snippet": "Path.open() access=read at line 224",
+            "symbol": "Path.open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 307,
+            "lineno_start": 307,
+            "mode": null,
+            "path": "D:\\Code\\CEG-WM\\main\\watermarking\\fusion\\neyman_pearson.py",
+            "snippet": "Path.open() access=read at line 307",
+            "symbol": "Path.open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 533,
+            "lineno_start": 533,
+            "mode": null,
+            "path": "D:\\Code\\CEG-WM\\scripts\\run_all_audits.py",
+            "snippet": "Path.open() access=read at line 533",
+            "symbol": "Path.open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 142,
+            "lineno_start": 142,
+            "mode": "r",
+            "path": "D:\\Code\\CEG-WM\\scripts\\run_cpu_first_e2e_verification.py",
+            "snippet": "open() access=read at line 142",
+            "symbol": "open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 200,
+            "lineno_start": 200,
+            "mode": "r",
+            "path": "D:\\Code\\CEG-WM\\scripts\\run_cpu_first_e2e_verification.py",
+            "snippet": "open() access=read at line 200",
+            "symbol": "open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 659,
+            "lineno_start": 659,
+            "mode": "r",
+            "path": "D:\\Code\\CEG-WM\\scripts\\run_freeze_signoff.py",
+            "snippet": "open() access=read at line 659",
+            "symbol": "open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 73,
+            "lineno_start": 73,
+            "mode": null,
+            "path": "D:\\Code\\CEG-WM\\scripts\\run_repro_pipeline.py",
+            "snippet": "Path.open() access=read at line 73",
+            "symbol": "Path.open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 18,
+            "lineno_start": 18,
+            "mode": "r",
+            "path": "D:\\Code\\CEG-WM\\scripts\\verify_whitelist_config.py",
+            "snippet": "open() access=read at line 18",
+            "symbol": "open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 24,
+            "lineno_start": 24,
+            "mode": "r",
+            "path": "D:\\Code\\CEG-WM\\scripts\\verify_whitelist_config.py",
+            "snippet": "open() access=read at line 24",
+            "symbol": "open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 124,
+            "lineno_start": 124,
+            "mode": "r",
+            "path": "D:\\Code\\CEG-WM\\scripts\\audits\\audit_attack_protocol_report_coverage.py",
+            "snippet": "open() access=read at line 124",
+            "symbol": "open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 206,
+            "lineno_start": 206,
+            "mode": "r",
+            "path": "D:\\Code\\CEG-WM\\scripts\\audits\\audit_attack_protocol_report_coverage.py",
+            "snippet": "open() access=read at line 206",
+            "symbol": "open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 137,
+            "lineno_start": 137,
+            "mode": null,
+            "path": "D:\\Code\\CEG-WM\\scripts\\audits\\audit_experiment_matrix_outputs_schema.py",
+            "snippet": "Path.open() access=read at line 137",
+            "symbol": "Path.open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 302,
+            "lineno_start": 302,
+            "mode": null,
+            "path": "D:\\Code\\CEG-WM\\scripts\\audits\\audit_injection_scope_manifest_binding.py",
+            "snippet": "Path.open() access=read at line 302",
+            "symbol": "Path.open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 316,
+            "lineno_start": 316,
+            "mode": null,
+            "path": "D:\\Code\\CEG-WM\\scripts\\audits\\audit_injection_scope_manifest_binding.py",
+            "snippet": "Path.open() access=read at line 316",
+            "symbol": "Path.open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 36,
+            "lineno_start": 36,
+            "mode": "rb",
+            "path": "D:\\Code\\CEG-WM\\scripts\\audits\\audit_paper_faithfulness.py",
+            "snippet": "open() access=read at line 36",
+            "symbol": "open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 89,
+            "lineno_start": 89,
+            "mode": "r",
+            "path": "D:\\Code\\CEG-WM\\scripts\\audits\\audit_paper_faithfulness.py",
+            "snippet": "open() access=read at line 89",
+            "symbol": "open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 148,
+            "lineno_start": 148,
+            "mode": "r",
+            "path": "D:\\Code\\CEG-WM\\scripts\\audits\\audit_paper_faithfulness.py",
+            "snippet": "open() access=read at line 148",
+            "symbol": "open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 52,
+            "lineno_start": 52,
+            "mode": "r",
+            "path": "D:\\Code\\CEG-WM\\scripts\\audits\\audit_paper_faithfulness_runtime_must_have.py",
+            "snippet": "open() access=read at line 52",
+            "symbol": "open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 114,
+            "lineno_start": 114,
+            "mode": "r",
+            "path": "D:\\Code\\CEG-WM\\scripts\\audits\\audit_paper_faithfulness_runtime_must_have.py",
+            "snippet": "open() access=read at line 114",
+            "symbol": "open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 175,
+            "lineno_start": 175,
+            "mode": "r",
+            "path": "D:\\Code\\CEG-WM\\scripts\\audits\\audit_paper_faithfulness_runtime_must_have.py",
+            "snippet": "open() access=read at line 175",
+            "symbol": "open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 236,
+            "lineno_start": 236,
+            "mode": "r",
+            "path": "D:\\Code\\CEG-WM\\scripts\\audits\\audit_paper_faithfulness_runtime_must_have.py",
+            "snippet": "open() access=read at line 236",
+            "symbol": "open"
+          },
+          {
+            "access": "read",
+            "classification": "ALLOWLISTED",
+            "lineno_end": 46,
+            "lineno_start": 46,
+            "mode": null,
+            "path": "D:\\Code\\CEG-WM\\scripts\\audits\\audit_repro_bundle_integrity.py",
+            "snippet": "Path.open() access=read at line 46",
+            "symbol": "Path.open"
+          }
+        ],
+        "warning_count": 0
+      },
+      "fix": "N.A.",
+      "formal_description": "受控写盘路径必须不可旁路。",
+      "gate_name": "records.write_path_is_unbypassable",
+      "impact": "未发现阻断级写盘旁路",
+      "legacy_code": "B1",
+      "result": "PASS",
+      "rule": "禁止绕过受控写盘路径直接写入 records 或关键产物",
+      "severity": "BLOCK"
+    },
+    {
+      "audit_id": "registry.seal_and_runtime_injection_resistance",
+      "category": "C",
+      "evidence": {
+        "dynamic_import_count": 0,
+        "env_injection_count": 0,
+        "matches": [],
+        "runtime_registration_count": 0,
+        "seal_check": {
+          "check": "registry_seal_mechanism",
+          "has_lock_indicator": true,
+          "has_seal_method": true,
+          "pass": true
+        }
+      },
+      "fix": "N.A.",
+      "formal_description": "注册表必须 seal 且不可运行期注入。",
+      "gate_name": "registry.seal_and_runtime_injection_resistance",
+      "impact": "注册表封闭性满足要求",
+      "legacy_code": "C1",
+      "result": "PASS",
+      "rule": "注册表必须 seal 后不可变，且不可被运行期注入",
+      "severity": "BLOCK"
+    },
+    {
+      "audit_id": "policy.path_semantics_binding_and_audit_evidence",
+      "category": "B",
+      "evidence": {
+        "anchors": {
+          "path_policy_module": "D:\\Code\\CEG-WM\\main\\policy\\path_policy.py",
+          "policy_config_files": [
+            "D:\\Code\\CEG-WM\\configs\\runtime_whitelist.yaml",
+            "D:\\Code\\CEG-WM\\configs\\policy_path_semantics.yaml"
+          ],
+          "runtime_whitelist_module": "D:\\Code\\CEG-WM\\main\\policy\\runtime_whitelist.py"
+        },
+        "checks": {
+          "audit_evidence": {
+            "check": "path_audit_evidence",
+            "pass": true,
+            "reason": "path_audit evidence found"
+          },
+          "files_existence": {
+            "check": "policy_files_existence",
+            "missing_files": [],
+            "pass": true
+          },
+          "path_policy_module": {
+            "check": "path_policy_module",
+            "has_policy_path_handling": true,
+            "has_semantics_binding": true,
+            "has_validate_function": true,
+            "pass": true
+          },
+          "runtime_whitelist_module": {
+            "check": "runtime_whitelist_module",
+            "has_policy_path_constraint": true,
+            "has_whitelist_enforcement": true,
+            "pass": true
+          }
+        }
+      },
+      "fix": "N.A.",
+      "formal_description": "policy_path 必须白名单绑定且保留路径审计证据。",
+      "gate_name": "policy.path_semantics_binding_and_audit_evidence",
+      "impact": "policy_path 语义绑定满足要求",
+      "legacy_code": "B3_D1_D2",
+      "result": "PASS",
+      "rule": "policy_path 必须来自 runtime whitelist，语义版本绑定，路径策略执行留存审计证据",
+      "severity": "BLOCK"
+    },
+    {
+      "audit_id": "injection_scope.manifest_binding_is_enforced",
+      "category": "S",
+      "evidence": {
+        "checks": [
+          {
+            "check": "manifest_exists",
+            "pass": true,
+            "path": "D:\\Code\\CEG-WM\\configs\\injection_scope_manifest.yaml"
+          },
+          {
+            "check": "config_loader_entry",
+            "has_const": true,
+            "has_loader": true,
+            "pass": true,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\config_loader.py"
+          },
+          {
+            "check": "injection_scope_module",
+            "pass": true,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\injection_scope.py"
+          },
+          {
+            "check": "bound_fact_sources_fields",
+            "missing_fields": [],
+            "pass": true,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py"
+          },
+          {
+            "check": "schema_required_fields",
+            "missing_fields": [],
+            "pass": true,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\schema.py"
+          },
+          {
+            "check": "cli_entries",
+            "details": {
+              "D:\\Code\\CEG-WM\\main\\cli\\run_calibrate.py": {
+                "has_binding": true,
+                "has_loader": true
+              },
+              "D:\\Code\\CEG-WM\\main\\cli\\run_detect.py": {
+                "has_binding": true,
+                "has_loader": true
+              },
+              "D:\\Code\\CEG-WM\\main\\cli\\run_embed.py": {
+                "has_binding": true,
+                "has_loader": true
+              },
+              "D:\\Code\\CEG-WM\\main\\cli\\run_evaluate.py": {
+                "has_binding": true,
+                "has_loader": true
+              }
+            },
+            "missing_entries": [],
+            "pass": true
+          },
+          {
+            "check": "digest_inputs_non_empty",
+            "missing_fields": [],
+            "pass": true,
+            "path": "D:\\Code\\CEG-WM\\configs\\injection_scope_manifest.yaml"
+          },
+          {
+            "check": "impl_id_closure",
+            "manifest_impl_ids": [
+              "content_baseline_identity_v1",
+              "content_detector_v1",
+              "fusion_baseline_identity_v1",
+              "geometry_baseline_identity_v1",
+              "geometry_sync_baseline_v1",
+              "low_freq_coder_v1",
+              "semantic_mask_provider_v1",
+              "subspace_baseline_full_v1",
+              "subspace_planner_v1",
+              "unified_content_extractor_v1"
+            ],
+            "pass": true,
+            "rule": "allowed_impl_ids ⊆ allowed_flat (命名闭合性)",
+            "severity": "PASS",
+            "unmapped_impl_ids": null,
+            "whitelist_impl_ids": [
+              "attention_anchor_map_relation_v1",
+              "content_baseline_identity_v1",
+              "content_detector_v1",
+              "fusion_baseline_identity_v1",
+              "geometry_align_invariance_sd3_v1",
+              "geometry_attention_anchor_sd3_v1",
+              "geometry_baseline_identity_v1",
+              "geometry_latent_sync_sd3_v1",
+              "geometry_latent_sync_sd3_v2",
+              "geometry_sync_baseline_v1",
+              "hf_embedder_t2smark_v1",
+              "high_freq_coder_v1",
+              "injection_site_binder_v1",
+              "lf_coder_prc_v1",
+              "low_freq_coder_v1",
+              "paper_alignment_evaluator_v1",
+              "sd3_diffusion_tracer_v1",
+              "sd3_pipeline_inspector_v1",
+              "semantic_mask_provider_saliency_source_policy_v1",
+              "semantic_mask_provider_v1",
+              "subspace_baseline_full_v1",
+              "subspace_planner_mask_conditioned_v1",
+              "subspace_planner_v1",
+              "unified_content_extractor_v1",
+              "unified_latent_modifier_v1"
+            ]
+          }
+        ]
+      },
+      "fix": "N.A.",
+      "formal_description": "injection_scope_manifest 必须进入绑定事实源并受 schema 约束。",
+      "gate_name": "injection_scope.manifest_binding_is_enforced",
+      "impact": "injection_scope_manifest binding is enforced",
+      "legacy_code": "S00",
+      "result": "PASS",
+      "rule": "injection_scope_manifest 必须进入 bound_fact_sources 并受 schema 约束",
+      "severity": "BLOCK"
+    },
+    {
+      "audit_id": "path.output_target_escape_rejection",
+      "category": "D",
+      "evidence": {
+        "missing_guard_count": 0,
+        "missing_guard_sites": [],
+        "unguarded_function_count": 0,
+        "unguarded_records_io_functions": [],
+        "validate_call_sites": [
+          {
+            "lineno": 171,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "scope": "bound_fact_sources",
+            "symbol": "validate_output_target"
+          },
+          {
+            "lineno": 172,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "scope": "bound_fact_sources",
+            "symbol": "validate_output_target"
+          },
+          {
+            "lineno": 173,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "scope": "bound_fact_sources",
+            "symbol": "validate_output_target"
+          },
+          {
+            "lineno": 434,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "scope": "write_path_validation_audit",
+            "symbol": "validate_output_target"
+          },
+          {
+            "lineno": 853,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "scope": "write_json",
+            "symbol": "validate_output_target"
+          },
+          {
+            "lineno": 906,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "scope": "write_artifact_json",
+            "symbol": "validate_output_target"
+          },
+          {
+            "lineno": 998,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "scope": "write_artifact_json_unbound",
+            "symbol": "validate_output_target"
+          },
+          {
+            "lineno": 1088,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "scope": "write_artifact_canon_json_unbound",
+            "symbol": "validate_output_target"
+          },
+          {
+            "lineno": 1143,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "scope": "write_artifact_text_unbound",
+            "symbol": "validate_output_target"
+          },
+          {
+            "lineno": 1188,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "scope": "write_artifact_bytes_unbound",
+            "symbol": "validate_output_target"
+          },
+          {
+            "lineno": 1219,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "scope": "write_artifact_bytes_unbound",
+            "symbol": "validate_output_target"
+          },
+          {
+            "lineno": 1252,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "scope": "append_jsonl",
+            "symbol": "validate_output_target"
+          },
+          {
+            "lineno": 1324,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "scope": "write_text",
+            "symbol": "validate_output_target"
+          },
+          {
+            "lineno": 1478,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "scope": "copy_file_controlled",
+            "symbol": "validate_output_target"
+          },
+          {
+            "lineno": 1551,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "scope": "copy_file_controlled_unbound",
+            "symbol": "validate_output_target"
+          }
+        ],
+        "write_call_count": 14,
+        "write_call_sites": [
+          {
+            "call_type": "records_io_local",
+            "function": "write_artifact_json_unbound",
+            "guarded": true,
+            "guarded_by_internal_validate": true,
+            "guarded_by_local_validate": true,
+            "lineno": 437,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "root": "write_artifact_json_unbound",
+            "scope": "write_path_validation_audit"
+          },
+          {
+            "call_type": "records_io_local",
+            "function": "write_artifact_bytes_unbound",
+            "guarded": true,
+            "guarded_by_internal_validate": true,
+            "guarded_by_local_validate": true,
+            "lineno": 1146,
+            "path": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+            "root": "write_artifact_bytes_unbound",
+            "scope": "write_artifact_text_unbound"
+          },
+          {
+            "call_type": "records_io_import",
+            "function": "write_artifact_json_unbound",
+            "guarded": true,
+            "guarded_by_internal_validate": true,
+            "guarded_by_local_validate": false,
+            "lineno": 332,
+            "path": "D:\\Code\\CEG-WM\\scripts\\run_cpu_first_e2e_verification.py",
+            "root": "write_artifact_json_unbound",
+            "scope": "run_cpu_first_verification"
+          },
+          {
+            "call_type": "records_io_import",
+            "function": "write_artifact_json_unbound",
+            "guarded": true,
+            "guarded_by_internal_validate": true,
+            "guarded_by_local_validate": false,
+            "lineno": 373,
+            "path": "D:\\Code\\CEG-WM\\scripts\\run_cpu_first_e2e_verification.py",
+            "root": "write_artifact_json_unbound",
+            "scope": "run_cpu_first_verification"
+          },
+          {
+            "call_type": "records_io_import",
+            "function": "write_artifact_json_unbound",
+            "guarded": true,
+            "guarded_by_internal_validate": true,
+            "guarded_by_local_validate": false,
+            "lineno": 217,
+            "path": "D:\\Code\\CEG-WM\\scripts\\run_experiment_matrix.py",
+            "root": "write_artifact_json_unbound",
+            "scope": "main"
+          },
+          {
+            "call_type": "records_io_import",
+            "function": "write_artifact_bytes_unbound",
+            "guarded": true,
+            "guarded_by_internal_validate": true,
+            "guarded_by_local_validate": false,
+            "lineno": 614,
+            "path": "D:\\Code\\CEG-WM\\scripts\\run_freeze_signoff.py",
+            "root": "write_artifact_bytes_unbound",
+            "scope": "snapshot_frozen_constraints"
+          },
+          {
+            "call_type": "records_io_import",
+            "function": "write_artifact_json_unbound",
+            "guarded": true,
+            "guarded_by_internal_validate": true,
+            "guarded_by_local_validate": false,
+            "lineno": 827,
+            "path": "D:\\Code\\CEG-WM\\scripts\\run_freeze_signoff.py",
+            "root": "write_artifact_json_unbound",
+            "scope": "main"
+          },
+          {
+            "call_type": "records_io_import",
+            "function": "write_artifact_json_unbound",
+            "guarded": true,
+            "guarded_by_internal_validate": true,
+            "guarded_by_local_validate": false,
+            "lineno": 386,
+            "path": "D:\\Code\\CEG-WM\\scripts\\run_multi_protocol_evaluation.py",
+            "root": "write_artifact_json_unbound",
+            "scope": "_write_compare_summary"
+          },
+          {
+            "call_type": "records_io_import",
+            "function": "write_artifact_text_unbound",
+            "guarded": true,
+            "guarded_by_internal_validate": true,
+            "guarded_by_local_validate": false,
+            "lineno": 325,
+            "path": "D:\\Code\\CEG-WM\\scripts\\run_repro_pipeline.py",
+            "root": "write_artifact_text_unbound",
+            "scope": "_build_stage_configs"
+          },
+          {
+            "call_type": "records_io_import",
+            "function": "write_artifact_json_unbound",
+            "guarded": true,
+            "guarded_by_internal_validate": true,
+            "guarded_by_local_validate": false,
+            "lineno": 582,
+            "path": "D:\\Code\\CEG-WM\\scripts\\run_repro_pipeline.py",
+            "root": "write_artifact_json_unbound",
+            "scope": "_build_repro_bundle"
+          },
+          {
+            "call_type": "records_io_import",
+            "function": "write_artifact_json_unbound",
+            "guarded": true,
+            "guarded_by_internal_validate": true,
+            "guarded_by_local_validate": false,
+            "lineno": 623,
+            "path": "D:\\Code\\CEG-WM\\scripts\\run_repro_pipeline.py",
+            "root": "write_artifact_json_unbound",
+            "scope": "_build_repro_bundle"
+          },
+          {
+            "call_type": "records_io_import",
+            "function": "write_artifact_json_unbound",
+            "guarded": true,
+            "guarded_by_internal_validate": true,
+            "guarded_by_local_validate": false,
+            "lineno": 778,
+            "path": "D:\\Code\\CEG-WM\\scripts\\run_repro_pipeline.py",
+            "root": "write_artifact_json_unbound",
+            "scope": "run_repro_pipeline"
+          },
+          {
+            "call_type": "records_io_import",
+            "function": "write_artifact_text_unbound",
+            "guarded": true,
+            "guarded_by_internal_validate": true,
+            "guarded_by_local_validate": false,
+            "lineno": 786,
+            "path": "D:\\Code\\CEG-WM\\scripts\\run_repro_pipeline.py",
+            "root": "write_artifact_text_unbound",
+            "scope": "run_repro_pipeline"
+          },
+          {
+            "call_type": "records_io_import",
+            "function": "write_artifact_json_unbound",
+            "guarded": true,
+            "guarded_by_internal_validate": true,
+            "guarded_by_local_validate": false,
+            "lineno": 852,
+            "path": "D:\\Code\\CEG-WM\\scripts\\run_repro_pipeline.py",
+            "root": "write_artifact_json_unbound",
+            "scope": "run_repro_pipeline"
+          }
+        ]
+      },
+      "fix": "N.A.",
+      "formal_description": "输出路径必须拒绝逃逸并通过门禁校验。",
+      "gate_name": "path.output_target_escape_rejection",
+      "impact": "未发现路径策略门禁缺失",
+      "legacy_code": "D1",
+      "result": "PASS",
+      "rule": "写盘必须通过路径策略门禁并拒绝路径逃逸",
+      "severity": "BLOCK"
+    },
+    {
+      "audit_id": "freeze_surface.integrity_and_single_source_loading",
+      "category": "A",
+      "evidence": {
+        "anchors": {
+          "canonical_config_loader": "D:\\Code\\CEG-WM\\main\\core\\config_loader.py",
+          "records_io_module": "D:\\Code\\CEG-WM\\main\\core\\records_io.py",
+          "schema_module": "D:\\Code\\CEG-WM\\main\\core\\schema.py"
+        },
+        "checks": {
+          "existence": {
+            "check": "frozen_files_existence",
+            "missing_files": [],
+            "pass": true
+          },
+          "schema_authority": {
+            "check": "schema_authority",
+            "interpretation_required": true,
+            "pass": true,
+            "validate_record_found": true
+          },
+          "uniqueness": {
+            "canonical_entry": [
+              "D:\\Code\\CEG-WM\\main\\core\\config_loader.py",
+              "D:\\Code\\CEG-WM\\main\\core\\contracts.py",
+              "D:\\Code\\CEG-WM\\main\\policy\\runtime_whitelist.py"
+            ],
+            "check": "interpretation_entry_uniqueness",
+            "non_canonical_references": [],
+            "pass": true
+          },
+          "version_injection": {
+            "check": "records_schema_version_injection",
+            "pass": true,
+            "reason": "schema_version field found in records_io.py"
+          }
+        },
+        "frozen_file_references": []
+      },
+      "fix": "N.A.",
+      "formal_description": "冻结面完整性、唯一加载入口与锚定一致性。",
+      "gate_name": "freeze_surface.integrity_and_single_source_loading",
+      "impact": "冻结面完整性满足要求",
+      "legacy_code": "A1_A7",
+      "result": "PASS",
+      "rule": "冻结契约文件必须存在、解释面入口唯一、schema 权威化、records 包含 schema_version",
+      "severity": "BLOCK"
+    },
+    {
+      "audit_id": "runtime.dangerous_execution_and_deserialization_blocked",
+      "category": "D",
+      "evidence": {
+        "dynamic_execution_count": 0,
+        "dynamic_import_count": 0,
+        "fail_count": 0,
+        "matches": [
+          {
+            "classification": "WARNING",
+            "lineno_end": 22,
+            "lineno_start": 22,
+            "path": "D:\\Code\\CEG-WM\\tests\\test_multi_protocol_runner_and_compare.py",
+            "risk": "dynamic_import",
+            "snippet": "__import__() at line 22",
+            "symbol": "__import__"
+          },
+          {
+            "classification": "WARNING",
+            "lineno_end": 23,
+            "lineno_start": 23,
+            "path": "D:\\Code\\CEG-WM\\tests\\test_multi_protocol_runner_and_compare.py",
+            "risk": "dynamic_import",
+            "snippet": "__import__() at line 23",
+            "symbol": "__import__"
+          },
+          {
+            "classification": "WARNING",
+            "lineno_end": 21,
+            "lineno_start": 21,
+            "path": "D:\\Code\\CEG-WM\\tests\\test_multi_protocol_write_path_safety.py",
+            "risk": "dynamic_import",
+            "snippet": "__import__() at line 21",
+            "symbol": "__import__"
+          },
+          {
+            "classification": "WARNING",
+            "lineno_end": 22,
+            "lineno_start": 22,
+            "path": "D:\\Code\\CEG-WM\\tests\\test_multi_protocol_write_path_safety.py",
+            "risk": "dynamic_import",
+            "snippet": "__import__() at line 22",
+            "symbol": "__import__"
+          }
+        ],
+        "unsafe_deserialization_count": 0,
+        "warning_count": 4
+      },
+      "fix": "N.A.",
+      "formal_description": "禁止危险动态执行与不安全反序列化。",
+      "gate_name": "runtime.dangerous_execution_and_deserialization_blocked",
+      "impact": "未发现危险的动态执行或不安全序列化",
+      "legacy_code": "D9",
+      "result": "PASS",
+      "rule": "禁止 eval/exec/compile/pickle.load 等危险执行与不安全序列化",
+      "severity": "BLOCK"
+    },
+    {
+      "audit_id": "runtime.network_access_is_audited_or_blocked",
+      "category": "D",
+      "evidence": {
+        "controlled_count": 1,
+        "fail_count": 0,
+        "http_request_count": 0,
+        "matches": [
+          {
+            "classification": "CONTROLLED",
+            "lineno_end": 219,
+            "lineno_start": 219,
+            "path": "D:\\Code\\CEG-WM\\main\\diffusion\\sd3\\weights_snapshot.py",
+            "risk": "model_download",
+            "snippet": "snapshot_download() at line 219",
+            "symbol": "snapshot_download"
+          }
+        ],
+        "model_download_count": 0,
+        "subprocess_download_count": 0,
+        "warning_count": 0
+      },
+      "fix": "N.A.",
+      "formal_description": "运行期网络访问必须受审计约束或阻断。",
+      "gate_name": "runtime.network_access_is_audited_or_blocked",
+      "impact": "发现 1 处受控下载调用（已由 freeze_gate + whitelist 覆盖）",
+      "legacy_code": "D10",
+      "result": "PASS",
+      "rule": "禁止运行时隐式网络访问或下载，所有网络操作必须审计并锚定来源",
+      "severity": "BLOCK"
+    },
+    {
+      "audit_id": "empty_py_modules",
+      "category": "G",
+      "evidence": {
+        "count": 0,
+        "empty_modules": [],
+        "scanned_path": "D:\\Code\\CEG-WM\\main"
+      },
+      "fix": "N.A.",
+      "gate_name": "gate.empty_py_modules",
+      "impact": "release quality assurance: empty modules successfully eliminated",
+      "result": "PASS",
+      "rule": "no zero-byte .py files (non-__init__.py) found in main/",
+      "severity": "NON_BLOCK"
+    },
+    {
+      "audit_id": "audit_evaluation_report_schema",
+      "category": "S",
+      "evidence": {
+        "search_locations": [
+          "outputs/",
+          "artifacts/"
+        ],
+        "status": "report_not_yet_generated",
+        "workflow_mode": "evaluation step not executed"
+      },
+      "fix": "generate evaluation report via evaluate workflow",
+      "gate_name": "gate_evaluation_report_schema",
+      "impact": "evaluation report is not available for audit",
+      "result": "N.A.",
+      "rule": "evaluation report not found in outputs or artifacts",
+      "severity": "NON_BLOCK"
+    },
+    {
+      "audit_id": "audit_thresholds_readonly",
+      "category": "S",
+      "evidence": {
+        "file_scanned": "D:\\Code\\CEG-WM\\main\\watermarking\\detect\\orchestrator.py",
+        "mutation_patterns_found": 0,
+        "protocol": "Neyman–Pearson rule: evaluate must only read thresholds, never re-estimate",
+        "status": "thresholds_read_only_verified"
+      },
+      "fix": "N.A.",
+      "gate_name": "gate_thresholds_readonly",
+      "impact": "evaluation cannot corrupt threshold artifacts",
+      "result": "PASS",
+      "rule": "thresholds artifact remains read-only in evaluate workflow",
+      "severity": "NON_BLOCK"
+    },
+    {
+      "audit_id": "audit_attack_protocol_hardcoding",
+      "category": "S",
+      "evidence": {
+        "hardcoded_patterns_found": 0,
+        "module_scanned": "D:\\Code\\CEG-WM\\main\\evaluation",
+        "protocol_loader_exists": true,
+        "status": "attack_protocol_fact_source_enforced"
+      },
+      "fix": "N.A.",
+      "gate_name": "gate_attack_protocol_hardcoding",
+      "impact": "attack parameters are not hardcoded, ensuring consistency with configs/attack_protocol.yaml",
+      "result": "PASS",
+      "rule": "attack protocol parameters come exclusively from configs fact source",
+      "severity": "NON_BLOCK"
+    },
+    {
+      "audit_id": "audit_runtime_impl_smoke_new_saliency_and_subspace",
+      "category": "G",
+      "evidence": {
+        "command": "pytest -q tests/test_runtime_impl_smoke_new_saliency_and_subspace.py",
+        "exit_code": 0,
+        "status": "pass",
+        "stderr_tail": "",
+        "stdout_tail": "..                                                                       [100%]\r\n2 passed in 0.53s\r\n",
+        "test_path": "tests/test_runtime_impl_smoke_new_saliency_and_subspace.py"
+      },
+      "fix": "N.A.",
+      "gate_name": "gate.runtime_impl_smoke_new_saliency_and_subspace",
+      "impact": "runtime resolver + whitelist + evidence anchors for new impl ids remain verifiable",
+      "result": "PASS",
+      "rule": "new impl runtime smoke tests are executable in audit entry",
+      "severity": "NON_BLOCK"
+    }
+  ],
+  "blocking_reasons": [
+    {
+      "audit_id": "evidence.run_root_bundle_is_complete_and_anchor_consistent",
+      "errors": [
+        "missing_file: D:\\Code\\CEG-WM\\outputs\\artifacts\\run_closure.json"
+      ],
+      "fix": "regenerate run outputs and ensure run_closure/manifest/audits are complete",
+      "formal_description": "run_root 证据包必须完整且锚点一致。",
+      "impact": "freeze sign-off evidence is incomplete or inconsistent",
+      "legacy_code": "F1_F3_D2",
+      "rule": "run_root evidence package must be complete and anchor-consistent",
+      "source": "run_root_evidence"
+    }
+  ],
+  "freeze_signoff_decision": "BLOCK_FREEZE",
+  "frozen_constraints_snapshot": {
+    "files": [
+      {
+        "path": "frozen_contracts.yaml",
+        "sha256": "36c5ad7187ca2f8139ce5ad6038c46e4aaf2a6117398d00286a4db13b250d1e3",
+        "size_bytes": 40563
+      },
+      {
+        "path": "runtime_whitelist.yaml",
+        "sha256": "57261786ccaca9dae4ef0b1a47c1aba59af289c02f02a55284efae64dab2a25c",
+        "size_bytes": 25140
+      },
+      {
+        "path": "policy_path_semantics.yaml",
+        "sha256": "889549934b982a23b206a6b4edbdb703390dc05dd1e164b15daf9d55128b8086",
+        "size_bytes": 17976
+      }
+    ],
+    "snapshot_dir": "D:\\Code\\CEG-WM\\outputs\\artifacts\\signoff\\frozen_constraints_snapshot",
+    "status": "ok"
+  },
+  "generated_at_utc": "2026-02-26T17:12:43.863Z",
+  "minimum_audit_set": [
+    "audits/audit_write_bypass_scan.py",
+    "audits/audit_registry_injection_surface.py",
+    "audits/audit_policy_path_semantics_binding.py",
+    "audits/audit_injection_scope_manifest_binding.py",
+    "audits/audit_path_policy_escape_rejection.py",
+    "audits/audit_freeze_surface_integrity.py",
+    "audits/audit_dangerous_exec_and_pickle_scan.py",
+    "audits/audit_network_access_scan.py",
+    "audits/audit_no_empty_py_modules.py",
+    "audits/audit_evaluation_report_schema.py",
+    "audits/audit_thresholds_readonly_enforcement.py",
+    "audits/audit_attack_protocol_hardcoding.py",
+    "audits/audit_runtime_impl_smoke_new_saliency_and_subspace.py"
+  ],
+  "repo_root": "D:\\Code\\CEG-WM",
+  "require_experiment_matrix": false,
+  "resolved_minimum_audits": [
+    "audits/audit_write_bypass_scan.py",
+    "audits/audit_registry_injection_surface.py",
+    "audits/audit_policy_path_semantics_binding.py",
+    "audits/audit_injection_scope_manifest_binding.py",
+    "audits/audit_path_policy_escape_rejection.py",
+    "audits/audit_freeze_surface_integrity.py",
+    "audits/audit_dangerous_exec_and_pickle_scan.py",
+    "audits/audit_network_access_scan.py",
+    "audits/audit_no_empty_py_modules.py",
+    "audits/audit_evaluation_report_schema.py",
+    "audits/audit_thresholds_readonly_enforcement.py",
+    "audits/audit_attack_protocol_hardcoding.py",
+    "audits/audit_runtime_impl_smoke_new_saliency_and_subspace.py"
+  ],
+  "run_root": "D:\\Code\\CEG-WM\\outputs",
+  "run_root_evidence": {
+    "errors": [
+      "missing_file: D:\\Code\\CEG-WM\\outputs\\artifacts\\run_closure.json"
+    ],
+    "paths": {
+      "run_closure": "D:\\Code\\CEG-WM\\outputs\\artifacts\\run_closure.json"
+    },
+    "status": "failed",
+    "warnings": []
+  },
+  "schema_version": "v1",
+  "signoff_profile": "baseline",
+  "summary": {
+    "decision": "BLOCK_FREEZE",
+    "evidence_status": "failed",
+    "static_audit_counts": {
+      "block_fail": 0,
+      "fail": 0,
+      "na": 1,
+      "pass": 12,
+      "total": 13
+    }
+  },
+  "tests": {
+    "command": "pytest -q",
+    "exit_code": 1,
+    "status": "fail",
+    "stderr_tail": "",
+    "stdout_tail": "udit_registry_injection_surface.py', 'audits/audit_policy_path_semantic..._manifest_binding.py', 'audits/audit_path_policy_escape_rejection.py', 'audits/audit_freeze_surface_integrity.py', ...])\r\n\r\ntests\\test_signoff_profile_baseline_unchanged.py:55: AssertionError\r\n=========================== short test summary info ===========================\r\nFAILED tests/test_signoff_profile_baseline_unchanged.py::test_signoff_profile_baseline_unchanged\r\n1 failed, 562 passed, 2 skipped in 102.52s (0:01:42)\r\n",
+    "test_summary": "pytest failed (see NON_BLOCK audit evidence)"
+  }
+}
