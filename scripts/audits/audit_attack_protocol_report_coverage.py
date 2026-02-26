@@ -248,6 +248,128 @@ def extract_reported_conditions(report: Dict[str, Any]) -> List[str]:
     return sorted(conditions)
 
 
+def collect_reported_conditions_candidates(
+    repo_root: Path,
+    eval_report_paths: List[Path],
+    declared_conditions: List[str],
+) -> Dict[str, Any]:
+    """
+    Collect condition coverage candidates from one or multiple evaluation reports.
+
+    Args:
+        repo_root: Repository root directory.
+        eval_report_paths: Candidate evaluation report paths.
+        declared_conditions: Declared condition keys from protocol spec.
+
+    Returns:
+        Dict containing best/aggregated reported conditions and evidence paths.
+    """
+    if not isinstance(repo_root, Path):
+        repo_root = Path(repo_root)
+    if not isinstance(eval_report_paths, list):
+        raise TypeError("eval_report_paths must be list")
+    if not isinstance(declared_conditions, list):
+        raise TypeError("declared_conditions must be list")
+
+    declared_set = {
+        item
+        for item in declared_conditions
+        if isinstance(item, str) and item
+    }
+
+    parsed_reports: List[Dict[str, Any]] = []
+    for path in eval_report_paths:
+        if not isinstance(path, Path) or not path.exists() or not path.is_file():
+            continue
+        try:
+            report_obj = load_evaluation_report(path)
+            reported_list = extract_reported_conditions(report_obj)
+        except Exception:
+            continue
+
+        reported_set = {
+            item
+            for item in reported_list
+            if isinstance(item, str) and item
+        }
+        covered_count = len(reported_set & declared_set)
+        extra_count = len(reported_set - declared_set)
+
+        parsed_reports.append(
+            {
+                "path": path,
+                "reported_list": sorted(reported_set),
+                "reported_set": reported_set,
+                "covered_count": covered_count,
+                "extra_count": extra_count,
+                "reported_count": len(reported_set),
+                "mtime": path.stat().st_mtime,
+            }
+        )
+
+    if not parsed_reports:
+        return {
+            "reported_conditions": [],
+            "eval_report_path": "<absent>",
+            "eval_report_paths": [],
+            "source_mode": "none",
+        }
+
+    # 候选 1：单报告最优（覆盖更多、额外更少、条目更多、更新更晚）
+    best_single = sorted(
+        parsed_reports,
+        key=lambda item: (
+            item["covered_count"],
+            -item["extra_count"],
+            item["reported_count"],
+            item["mtime"],
+        ),
+        reverse=True,
+    )[0]
+
+    # 候选 2：多报告聚合（union），用于 experiment_matrix 分条件拆分场景
+    union_set = set()
+    union_paths: List[Path] = []
+    for item in parsed_reports:
+        union_set.update(item["reported_set"])
+        union_paths.append(item["path"])
+
+    best_single_score = (
+        int(best_single["covered_count"]),
+        int(-best_single["extra_count"]),
+        int(best_single["reported_count"]),
+    )
+    union_score = (
+        int(len(union_set & declared_set)),
+        int(-len(union_set - declared_set)),
+        int(len(union_set)),
+    )
+
+    if union_score >= best_single_score:
+        chosen_set = union_set
+        chosen_paths = sorted(set(union_paths), key=lambda p: p.stat().st_mtime, reverse=True)
+        source_mode = "aggregated_union"
+    else:
+        chosen_set = set(best_single["reported_set"])
+        chosen_paths = [best_single["path"]]
+        source_mode = "best_single"
+
+    rel_paths: List[str] = []
+    for path in chosen_paths:
+        if path.is_relative_to(repo_root):
+            rel_paths.append(str(path.relative_to(repo_root)))
+        else:
+            rel_paths.append(str(path))
+
+    primary_path = rel_paths[0] if rel_paths else "<absent>"
+    return {
+        "reported_conditions": sorted(chosen_set),
+        "eval_report_path": primary_path,
+        "eval_report_paths": rel_paths,
+        "source_mode": source_mode,
+    }
+
+
 def audit_attack_protocol_report_coverage(repo_root: Path) -> Dict[str, Any]:
     """
     Audit that all attack conditions declared in protocol are executed and reported.
@@ -310,19 +432,14 @@ def audit_attack_protocol_report_coverage(repo_root: Path) -> Dict[str, Any]:
         # (2) 尝试加载评测报告（支持多个位置）
         eval_report_paths = find_candidate_evaluation_report_paths(repo_root)
 
-        eval_report: Optional[Dict[str, Any]] = None
-        found_path: Optional[Path] = None
+        reported_candidates = collect_reported_conditions_candidates(
+            repo_root,
+            eval_report_paths,
+            declared_conditions,
+        )
 
-        for path in eval_report_paths:
-            if path.exists():
-                try:
-                    eval_report = load_evaluation_report(path)
-                    found_path = path
-                    break
-                except (ValueError, json.JSONDecodeError):
-                    continue
-
-        if eval_report is None:
+        reported_conditions = reported_candidates.get("reported_conditions", [])
+        if not isinstance(reported_conditions, list) or len(reported_conditions) == 0:
             # 如果评测报告不存在，审计返回 N.A.（不适用，因为未运行attack protocol流程）
             return {
                 "audit_id": audit_id,
@@ -338,10 +455,11 @@ def audit_attack_protocol_report_coverage(repo_root: Path) -> Dict[str, Any]:
                 },
             }
 
-        evidence["eval_report_path"] = str(found_path.relative_to(repo_root) if found_path.is_relative_to(repo_root) else found_path)
+        evidence["eval_report_path"] = reported_candidates.get("eval_report_path", "<absent>")
+        evidence["eval_report_paths"] = reported_candidates.get("eval_report_paths", [])
+        evidence["reported_source_mode"] = reported_candidates.get("source_mode", "<absent>")
 
-        # (3) 从报告提取已上报的条件
-        reported_conditions = extract_reported_conditions(eval_report)
+        # (3) 从报告（单个或聚合）提取已上报的条件
         evidence["reported_conditions_count"] = len(reported_conditions)
         evidence["reported_conditions"] = reported_conditions
 
