@@ -37,6 +37,7 @@ from main.core import schema
 from main.core import status
 from main.policy import path_policy
 from main.registries import runtime_resolver
+from main.evaluation import protocol_loader
 from main.watermarking.detect import orchestrator as detect_orchestrator
 from main.watermarking.detect.orchestrator import run_detect_orchestrator
 from main.watermarking.content_chain.latent_modifier import (
@@ -96,6 +97,111 @@ def resolve_content_override_from_input_record(input_record: Dict[str, Any]) -> 
         return content_candidate
 
     return None
+
+
+def _resolve_single_attack_condition_from_protocol(cfg: Dict[str, Any]) -> tuple[str, str] | None:
+    """
+    功能：从攻击协议中解析唯一的 attack 条件键（family::params_version）。
+
+    Resolve the single declared attack condition from protocol spec.
+
+    Args:
+        cfg: Runtime configuration mapping.
+
+    Returns:
+        Tuple of (family, params_version) when protocol declares exactly one
+        unique condition; otherwise None.
+
+    Raises:
+        TypeError: If cfg is not dict.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+
+    protocol_spec = protocol_loader.load_attack_protocol_spec(cfg)
+    if not isinstance(protocol_spec, dict):
+        return None
+
+    condition_keys: list[str] = []
+
+    params_versions = protocol_spec.get("params_versions")
+    if isinstance(params_versions, dict):
+        for condition_key in params_versions.keys():
+            if isinstance(condition_key, str) and "::" in condition_key:
+                if condition_key not in condition_keys:
+                    condition_keys.append(condition_key)
+
+    families = protocol_spec.get("families")
+    if isinstance(families, dict):
+        for family_name, family_spec in families.items():
+            if not isinstance(family_name, str) or not family_name:
+                continue
+            if not isinstance(family_spec, dict):
+                continue
+            family_versions = family_spec.get("params_versions")
+            if not isinstance(family_versions, dict):
+                continue
+            for params_version in family_versions.keys():
+                if not isinstance(params_version, str) or not params_version:
+                    continue
+                condition_key = f"{family_name}::{params_version}"
+                if condition_key not in condition_keys:
+                    condition_keys.append(condition_key)
+
+    if len(condition_keys) != 1:
+        return None
+
+    family, params_version = condition_keys[0].split("::", 1)
+    if not family or not params_version:
+        return None
+    return family, params_version
+
+
+def _is_missing_attack_value(value: Any) -> bool:
+    """Return True when attack metadata value is absent or unknown placeholder."""
+    return value in (None, "", "<absent>", "unknown_attack", "unknown_params")
+
+
+def _inject_attack_condition_fields(record: Dict[str, Any], cfg: Dict[str, Any]) -> None:
+    """
+    功能：在 detect record 中补充 attack family 与 params_version 字段。 
+
+    Inject attack condition fields into detect record when protocol condition is unambiguous.
+
+    Args:
+        record: Detect record mapping to mutate in-place.
+        cfg: Runtime configuration mapping.
+
+    Returns:
+        None.
+
+    Raises:
+        TypeError: If inputs are invalid.
+    """
+    if not isinstance(record, dict):
+        raise TypeError("record must be dict")
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+
+    resolved_condition = _resolve_single_attack_condition_from_protocol(cfg)
+    if resolved_condition is None:
+        return
+
+    family, params_version = resolved_condition
+
+    if _is_missing_attack_value(record.get("attack_family")):
+        record["attack_family"] = family
+    if _is_missing_attack_value(record.get("attack_params_version")):
+        record["attack_params_version"] = params_version
+
+    attack_obj = record.get("attack")
+    if not isinstance(attack_obj, dict):
+        attack_obj = {}
+    if _is_missing_attack_value(attack_obj.get("family")):
+        attack_obj["family"] = family
+    if _is_missing_attack_value(attack_obj.get("params_version")):
+        attack_obj["params_version"] = params_version
+    record["attack"] = attack_obj
 
 
 def run_detect(
@@ -483,6 +589,8 @@ def run_detect(
                 exc = RuntimeError("record_construction_failed: record is None")
                 set_failure_status(run_meta, RunFailureReason.RUNTIME_ERROR, exc)
                 raise exc
+
+            _inject_attack_condition_fields(record, cfg)
             
             # ⭐ 增强项：从 input_record 继承 Embed 侧的摘要字段，用于完全对齐验证
             # 这使得 detect_record.content_evidence_payload 包含 Embed 的摘要，

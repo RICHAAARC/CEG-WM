@@ -113,7 +113,17 @@ def test_prepare_detect_record_for_attack_grouping_writes_attack_fields(tmp_path
     records_dir = run_root / "records"
     records_dir.mkdir(parents=True, exist_ok=True)
     source_path = records_dir / "detect_record.json"
-    source_path.write_text(json.dumps({"operation": "detect"}), encoding="utf-8")
+    source_path.write_text(
+        json.dumps(
+            {
+                "operation": "detect",
+                "contract_bound_digest": "x",
+                "whitelist_bound_digest": "y",
+                "policy_path_semantics_bound_digest": "z",
+            }
+        ),
+        encoding="utf-8",
+    )
 
     grid_item_cfg = {
         "attack_protocol_family": "rotate",
@@ -131,3 +141,6 @@ def test_prepare_detect_record_for_attack_grouping_writes_attack_fields(tmp_path
     assert isinstance(enriched_obj.get("attack"), dict)
     assert enriched_obj["attack"]["family"] == "rotate"
     assert enriched_obj["attack"]["params_version"] == "v1"
+    assert "contract_bound_digest" not in enriched_obj
+    assert "whitelist_bound_digest" not in enriched_obj
+    assert "policy_path_semantics_bound_digest" not in enriched_obj

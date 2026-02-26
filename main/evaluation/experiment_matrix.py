@@ -24,6 +24,14 @@ from main.evaluation import attack_coverage
 from main.policy import path_policy
 
 
+_FORBIDDEN_ARTIFACT_ANCHOR_FIELDS = {
+    "contract_bound_digest",
+    "whitelist_bound_digest",
+    "policy_path_semantics_bound_digest",
+    "injection_scope_manifest_bound_digest",
+}
+
+
 def build_experiment_grid(base_cfg: dict) -> list[dict]:
     """
     功能：根据基础配置展开实验矩阵。
@@ -673,6 +681,9 @@ def _prepare_detect_record_for_attack_grouping(run_root: Path, grid_item_cfg: Di
     detect_record = _read_optional_json(source_detect_record_path)
     if not isinstance(detect_record, dict) or not detect_record:
         return source_detect_record_path
+
+    for forbidden_field in _FORBIDDEN_ARTIFACT_ANCHOR_FIELDS:
+        detect_record.pop(forbidden_field, None)
 
     params_version = _resolve_attack_params_version_for_family(grid_item_cfg)
 
