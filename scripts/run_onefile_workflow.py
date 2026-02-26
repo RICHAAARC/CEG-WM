@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import uuid
@@ -704,6 +705,104 @@ def _print_artifact_presence(artifact_paths: Sequence[Path]) -> None:
         print(f"[onefile] artifact={item} status={status}")
 
 
+def _load_experiment_matrix_summary(summary_path: Path) -> dict:
+    """
+    功能：加载并校验 experiment matrix 汇总摘要。 
+
+    Load grid_summary.json and return normalized counters for recovery decisions.
+
+    Args:
+        summary_path: Path to grid_summary.json.
+
+    Returns:
+        Summary mapping with total/executed/succeeded/failed.
+
+    Raises:
+        TypeError: If summary_path type is invalid.
+        ValueError: If summary payload is invalid.
+    """
+    if not isinstance(summary_path, Path):
+        raise TypeError("summary_path must be Path")
+    if not summary_path.exists() or not summary_path.is_file():
+        raise ValueError(f"experiment_matrix summary not found: {summary_path}")
+
+    summary_obj = json.loads(summary_path.read_text(encoding="utf-8"))
+    if not isinstance(summary_obj, dict):
+        raise ValueError("experiment_matrix summary root must be dict")
+
+    normalized = {
+        "total": int(summary_obj.get("total", 0) or 0),
+        "executed": int(summary_obj.get("executed", 0) or 0),
+        "succeeded": int(summary_obj.get("succeeded", 0) or 0),
+        "failed": int(summary_obj.get("failed", 0) or 0),
+    }
+    return normalized
+
+
+def _cleanup_experiment_matrix_batch_root(batch_root: Path, run_root: Path) -> None:
+    """
+    功能：清理 experiment matrix batch_root 以便重试。 
+
+    Remove stale matrix batch outputs under current run_root before one-shot retry.
+
+    Args:
+        batch_root: Matrix batch root path.
+        run_root: Current workflow run_root.
+
+    Returns:
+        None.
+
+    Raises:
+        TypeError: If input types are invalid.
+        ValueError: If batch_root escapes run_root boundary.
+    """
+    if not isinstance(batch_root, Path):
+        raise TypeError("batch_root must be Path")
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+
+    batch_root_resolved = batch_root.resolve()
+    run_root_resolved = run_root.resolve()
+    batch_root_resolved.relative_to(run_root_resolved)
+
+    if batch_root_resolved.exists() and batch_root_resolved.is_dir():
+        shutil.rmtree(batch_root_resolved)
+
+
+def _run_subprocess_for_step(step_command: List[str], repo_root: Path) -> int:
+    """
+    功能：执行单步子进程命令并返回退出码。 
+
+    Execute one workflow step command with deterministic environment.
+
+    Args:
+        step_command: Command argument list.
+        repo_root: Repository root used as cwd.
+
+    Returns:
+        Subprocess return code.
+
+    Raises:
+        TypeError: If inputs are invalid.
+    """
+    if not isinstance(step_command, list) or not step_command:
+        raise TypeError("step_command must be non-empty list")
+    if not isinstance(repo_root, Path):
+        raise TypeError("repo_root must be Path")
+
+    result = subprocess.run(
+        step_command,
+        cwd=str(repo_root),
+        check=False,
+        env={
+            **os.environ,
+            "KMP_DUPLICATE_LIB_OK": os.environ.get("KMP_DUPLICATE_LIB_OK", "TRUE"),
+            "PYTHONIOENCODING": os.environ.get("PYTHONIOENCODING", "utf-8"),
+        },
+    )
+    return int(result.returncode)
+
+
 def run_onefile_workflow(
     repo_root: Path,
     cfg_path: Path,
@@ -731,6 +830,7 @@ def run_onefile_workflow(
     profile = _normalize_profile(profile)
     effective_cfg_path = _prepare_profile_cfg_path(profile, run_root, cfg_path)
     steps = build_workflow_steps(run_root, effective_cfg_path, repo_root, profile, signoff_profile)
+    experiment_matrix_retry_used = False
     for step in steps:
         step_command = list(step.command)
         if step.name in {"calibrate", "evaluate"}:
@@ -743,20 +843,60 @@ def run_onefile_workflow(
             _print_artifact_presence(step.artifact_paths)
             continue
 
-        result = subprocess.run(
-            step_command,
-            cwd=str(repo_root),
-            check=False,
-            env={
-                **os.environ,
-                "KMP_DUPLICATE_LIB_OK": os.environ.get("KMP_DUPLICATE_LIB_OK", "TRUE"),
-                "PYTHONIOENCODING": os.environ.get("PYTHONIOENCODING", "utf-8"),
-            },
-        )
-        _print_step_footer(step, int(result.returncode))
+        return_code = _run_subprocess_for_step(step_command, repo_root)
+        _print_step_footer(step, return_code)
         _print_artifact_presence(step.artifact_paths)
-        if result.returncode != 0:
-            return int(result.returncode)
+        if return_code != 0:
+            return return_code
+
+        if step.name == "experiment_matrix" and profile == PROFILE_PAPER_FULL_CUDA and step.artifact_paths:
+            summary_path = step.artifact_paths[0]
+            try:
+                matrix_summary = _load_experiment_matrix_summary(summary_path)
+            except Exception as exc:
+                # 汇总不可解析会导致后续审计失败，必须前置阻断。
+                print(f"[onefile] experiment_matrix summary parse failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+                return 1
+
+            total_count = matrix_summary.get("total", 0)
+            failed_count = matrix_summary.get("failed", 0)
+            succeeded_count = matrix_summary.get("succeeded", 0)
+
+            if total_count > 0 and failed_count == total_count and not experiment_matrix_retry_used:
+                print(
+                    "[onefile] EXPERIMENT_MATRIX_RECOVERY all grid items failed; "
+                    "cleaning batch_root and retrying once"
+                )
+                try:
+                    _cleanup_experiment_matrix_batch_root(run_root / "outputs" / "experiment_matrix", run_root)
+                except Exception as exc:
+                    # 清理失败无法保证复现实验独立性，必须 fail-fast。
+                    print(f"[onefile] experiment_matrix cleanup failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+                    return 1
+
+                experiment_matrix_retry_used = True
+                _print_step_header(step, run_root, step_command)
+                return_code = _run_subprocess_for_step(step_command, repo_root)
+                _print_step_footer(step, return_code)
+                _print_artifact_presence(step.artifact_paths)
+                if return_code != 0:
+                    return return_code
+
+                try:
+                    matrix_summary = _load_experiment_matrix_summary(summary_path)
+                except Exception as exc:
+                    print(f"[onefile] experiment_matrix summary parse failed after retry: {type(exc).__name__}: {exc}", file=sys.stderr)
+                    return 1
+                failed_count = matrix_summary.get("failed", 0)
+                succeeded_count = matrix_summary.get("succeeded", 0)
+
+            if failed_count > 0 and succeeded_count == 0:
+                print(
+                    "[onefile] experiment_matrix produced zero successful items; "
+                    "abort before audits to expose root cause",
+                    file=sys.stderr,
+                )
+                return 1
     return 0
 
 
