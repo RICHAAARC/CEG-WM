@@ -555,7 +555,13 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> None:
         )
 
 
-def _run_stage_command(stage_name: str, run_root: Path, config_path: Path, stage_overrides: List[str]) -> None:
+def _run_stage_command(
+    stage_name: str,
+    run_root: Path,
+    config_path: Path,
+    stage_overrides: List[str],
+    input_record_path: Optional[Path] = None,
+) -> None:
     """Execute one CLI stage command with fail-fast diagnostics."""
     if stage_name not in {"embed", "detect", "calibrate", "evaluate"}:
         raise ValueError(f"unsupported stage_name: {stage_name}")
@@ -565,6 +571,8 @@ def _run_stage_command(stage_name: str, run_root: Path, config_path: Path, stage
         raise TypeError("config_path must be Path")
     if not isinstance(stage_overrides, list):
         raise TypeError("stage_overrides must be list")
+    if input_record_path is not None and not isinstance(input_record_path, Path):
+        raise TypeError("input_record_path must be Path or None")
 
     command = [
         sys.executable,
@@ -575,6 +583,9 @@ def _run_stage_command(stage_name: str, run_root: Path, config_path: Path, stage
         "--config",
         str(config_path),
     ]
+    if stage_name == "detect":
+        detect_input_path = input_record_path or (run_root / "records" / "embed_record.json")
+        command.extend(["--input", str(detect_input_path)])
     for item in stage_overrides:
         if not isinstance(item, str) or not item:
             raise ValueError("stage_overrides entries must be non-empty str")
