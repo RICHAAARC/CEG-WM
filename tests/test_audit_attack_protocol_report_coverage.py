@@ -192,6 +192,27 @@ class TestExtractReportedConditions:
         assert len(conditions) == 2
         assert conditions == sorted(set(conditions))
 
+    def test_extract_from_wrapped_evaluation_report_payload(self):
+        """
+        Scenario: metrics are wrapped under report['evaluation_report'].
+
+        Expected: Extracted group_key values from inner evaluation_report object.
+        """
+        report = {
+            "report_type": "eval_report_v1",
+            "evaluation_report": {
+                "report_type": "evaluation_report",
+                "metrics_by_attack_condition": [
+                    {"group_key": "rotate::v1", "n_total": 100},
+                    {"group_key": "crop::v1", "n_total": 80},
+                ],
+            },
+        }
+
+        conditions = audit_module.extract_reported_conditions(report)
+
+        assert conditions == ["crop::v1", "rotate::v1"]
+
 
 class TestAuditEquality:
     """
@@ -467,3 +488,46 @@ class TestAuditScriptMainEntry:
             exit_code = audit_module.main(str(tmpdir_path))
 
             assert exit_code == 1
+
+
+def test_audit_finds_report_in_outputs_artifacts_run_root() -> None:
+    """
+    Scenario: Report exists under outputs/<run_root>/artifacts/evaluation_report.json only.
+
+    Expected: Coverage audit discovers the report path and evaluates protocol coverage.
+    """
+    protocol_spec = {
+        "version": "attack_protocol_v1",
+        "params_versions": {
+            "rotate::v1": {},
+        },
+    }
+    report = {
+        "report_type": "evaluation_report",
+        "metrics_by_attack_condition": [{"group_key": "rotate::v1"}],
+    }
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        (tmpdir_path / "configs").mkdir(parents=True, exist_ok=True)
+
+        protocol_path = tmpdir_path / "configs" / "attack_protocol.yaml"
+        import yaml
+
+        with open(protocol_path, "w", encoding="utf-8") as file_obj:
+            yaml.dump(protocol_spec, file_obj)
+
+        report_path = (
+            tmpdir_path
+            / "outputs"
+            / "onefile_paper_full_cuda_verify"
+            / "artifacts"
+            / "evaluation_report.json"
+        )
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+
+        result = audit_module.audit_attack_protocol_report_coverage(tmpdir_path)
+
+        assert result["result"] == "PASS"
+        assert "onefile_paper_full_cuda_verify" in result["evidence"]["eval_report_path"]

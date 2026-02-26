@@ -236,6 +236,11 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
             run_meta["impl_identity_digest"] = runtime_resolver.compute_impl_identity_digest(impl_identity)
             run_meta["impl_set_capabilities_digest"] = impl_set_capabilities_digest
 
+            # 绑定 evaluate 报告锚点（优先使用 CLI 已解析事实源）。
+            cfg["__evaluate_cfg_digest__"] = cfg_digest
+            cfg["__policy_path__"] = cfg["policy_path"]
+            cfg["__impl_digest__"] = impl_set_capabilities_digest
+
             # 构造 evaluation record。
             print("[Evaluate] Generating evaluation record...")
             record = run_evaluate_orchestrator(cfg, impl_set)

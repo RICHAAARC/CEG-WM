@@ -6,6 +6,7 @@ Module type: General module
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -94,3 +95,39 @@ def test_experiment_matrix_detect_stage_sets_content_enabled_override(monkeypatc
 
     detect_overrides = captured_overrides.get("detect", [])
     assert "enable_content_detect=true" in detect_overrides
+
+
+def test_prepare_detect_record_for_attack_grouping_writes_attack_fields(tmp_path: Path) -> None:
+    """
+    功能：为 calibrate/evaluate 生成带 attack 条件字段的 detect 副本。
+
+    Verify helper writes an artifact copy containing both top-level and nested attack fields.
+
+    Args:
+        tmp_path: pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    run_root = tmp_path / "run"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    source_path = records_dir / "detect_record.json"
+    source_path.write_text(json.dumps({"operation": "detect"}), encoding="utf-8")
+
+    grid_item_cfg = {
+        "attack_protocol_family": "rotate",
+        "attack_protocol_path": "configs/attack_protocol.yaml",
+    }
+
+    enriched_path = experiment_matrix._prepare_detect_record_for_attack_grouping(run_root, grid_item_cfg)
+
+    assert enriched_path.exists()
+    assert enriched_path != source_path
+
+    enriched_obj = json.loads(enriched_path.read_text(encoding="utf-8"))
+    assert enriched_obj["attack_family"] == "rotate"
+    assert enriched_obj["attack_params_version"] == "v1"
+    assert isinstance(enriched_obj.get("attack"), dict)
+    assert enriched_obj["attack"]["family"] == "rotate"
+    assert enriched_obj["attack"]["params_version"] == "v1"

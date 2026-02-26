@@ -1938,6 +1938,259 @@ def run_calibrate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> D
     return record
 
 
+def _pick_first_non_empty_string(values: list[Any]) -> Optional[str]:
+    """
+    功能：从候选值列表中提取首个非空字符串。
+
+    Select the first non-empty string from candidate values.
+
+    Args:
+        values: Candidate values.
+
+    Returns:
+        The first non-empty string, or None when not found.
+    """
+    if not isinstance(values, list):
+        raise TypeError("values must be list")
+    for value in values:
+        if isinstance(value, str) and value and value != "<absent>":
+            return value
+    return None
+
+
+def _resolve_cfg_digest_for_evaluate(cfg: Dict[str, Any], detect_records: list[Dict[str, Any]]) -> str:
+    """
+    功能：解析 evaluate 报告的 cfg_digest 锚点。
+
+    Resolve cfg_digest anchor for evaluation report.
+
+    Args:
+        cfg: Configuration mapping.
+        detect_records: Loaded detect records.
+
+    Returns:
+        Resolved cfg_digest anchor string.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(detect_records, list):
+        raise TypeError("detect_records must be list")
+
+    from_cfg = _pick_first_non_empty_string([
+        cfg.get("__evaluate_cfg_digest__"),
+        cfg.get("cfg_digest"),
+    ])
+    if isinstance(from_cfg, str):
+        return from_cfg
+
+    for record in detect_records:
+        if not isinstance(record, dict):
+            continue
+        from_record = _pick_first_non_empty_string([
+            record.get("cfg_digest"),
+        ])
+        if isinstance(from_record, str):
+            return from_record
+    return "<absent>"
+
+
+def _resolve_plan_digest_for_evaluate(cfg: Dict[str, Any], detect_records: list[Dict[str, Any]]) -> str:
+    """
+    功能：解析 evaluate 报告的 plan_digest 锚点。
+
+    Resolve plan_digest anchor for evaluation report.
+
+    Args:
+        cfg: Configuration mapping.
+        detect_records: Loaded detect records.
+
+    Returns:
+        Resolved plan_digest anchor string.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(detect_records, list):
+        raise TypeError("detect_records must be list")
+
+    from_cfg = _pick_first_non_empty_string([
+        cfg.get("__evaluate_plan_digest__"),
+        _resolve_cfg_plan_digest(cfg),
+    ])
+    if isinstance(from_cfg, str):
+        return from_cfg
+
+    plan_digests: list[str] = []
+    for record in detect_records:
+        if not isinstance(record, dict):
+            continue
+        resolved = _pick_first_non_empty_string([
+            record.get("plan_digest"),
+            record.get("expected_plan_digest"),
+        ])
+        if isinstance(resolved, str):
+            plan_digests.append(resolved)
+
+    unique_plan_digests = sorted(set(plan_digests))
+    if len(unique_plan_digests) == 1:
+        return unique_plan_digests[0]
+    if len(unique_plan_digests) > 1:
+        return digests.canonical_sha256({"evaluate_plan_digest_candidates": unique_plan_digests})
+
+    fallback_signatures: list[Dict[str, str]] = []
+    for record in detect_records:
+        if not isinstance(record, dict):
+            continue
+        attack = record.get("attack") if isinstance(record.get("attack"), dict) else {}
+        fallback_signatures.append({
+            "family": str(attack.get("family", "unknown")),
+            "params_version": str(attack.get("params_version", "unknown")),
+        })
+    if fallback_signatures:
+        return digests.canonical_sha256({
+            "rule": "evaluate_plan_digest_fallback_v1",
+            "attack_signatures": fallback_signatures,
+        })
+    return "<absent>"
+
+
+def _resolve_threshold_metadata_digest_for_evaluate(
+    cfg: Dict[str, Any],
+    thresholds_path: Path,
+    detect_records: list[Dict[str, Any]],
+) -> str:
+    """
+    功能：解析 evaluate 报告的 threshold_metadata_digest 锚点。
+
+    Resolve threshold metadata digest anchor for evaluation report.
+
+    Args:
+        cfg: Configuration mapping.
+        thresholds_path: Threshold artifact path.
+        detect_records: Loaded detect records.
+
+    Returns:
+        Resolved threshold metadata digest anchor string.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(thresholds_path, Path):
+        raise TypeError("thresholds_path must be Path")
+    if not isinstance(detect_records, list):
+        raise TypeError("detect_records must be list")
+
+    from_cfg = _pick_first_non_empty_string([
+        cfg.get("__evaluate_threshold_metadata_digest__"),
+    ])
+    if isinstance(from_cfg, str):
+        return from_cfg
+
+    evaluate_cfg = cfg.get("evaluate") if isinstance(cfg.get("evaluate"), dict) else {}
+    candidate_paths = [
+        cfg.get("__evaluate_threshold_metadata_artifact_path__"),
+        evaluate_cfg.get("threshold_metadata_artifact_path"),
+        str(thresholds_path.parent / "threshold_metadata_artifact.json"),
+        str(thresholds_path.parent / "threshold_metadata.json"),
+    ]
+    for path_str in candidate_paths:
+        if not isinstance(path_str, str) or not path_str:
+            continue
+        path_obj = Path(path_str).resolve()
+        if not path_obj.exists() or not path_obj.is_file():
+            continue
+        try:
+            payload = records_io.read_json(str(path_obj))
+        except Exception:
+            # metadata 工件不可读时跳过当前候选，继续尝试其他来源。
+            continue
+        if isinstance(payload, dict):
+            return digests.canonical_sha256(payload)
+
+    for record in detect_records:
+        if not isinstance(record, dict):
+            continue
+        resolved = _pick_first_non_empty_string([
+            record.get("threshold_metadata_digest"),
+        ])
+        if isinstance(resolved, str):
+            return resolved
+    return "<absent>"
+
+
+def _resolve_impl_digest_for_evaluate(cfg: Dict[str, Any], detect_records: list[Dict[str, Any]]) -> str:
+    """
+    功能：解析 evaluate 报告的 impl_digest 锚点。
+
+    Resolve implementation digest anchor for evaluation report.
+
+    Args:
+        cfg: Configuration mapping.
+        detect_records: Loaded detect records.
+
+    Returns:
+        Resolved impl_digest anchor string.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(detect_records, list):
+        raise TypeError("detect_records must be list")
+
+    from_cfg = _pick_first_non_empty_string([
+        cfg.get("__impl_digest__"),
+        cfg.get("impl_set_capabilities_digest"),
+        cfg.get("impl_identity_digest"),
+    ])
+    if isinstance(from_cfg, str):
+        return from_cfg
+
+    for record in detect_records:
+        if not isinstance(record, dict):
+            continue
+        resolved = _pick_first_non_empty_string([
+            record.get("impl_set_capabilities_digest"),
+            record.get("impl_identity_digest"),
+            record.get("impl_digest"),
+        ])
+        if isinstance(resolved, str):
+            return resolved
+    return "<absent>"
+
+
+def _resolve_policy_path_for_evaluate(cfg: Dict[str, Any], detect_records: list[Dict[str, Any]]) -> str:
+    """
+    功能：解析 evaluate 报告的 policy_path 锚点。
+
+    Resolve policy_path anchor for evaluation report.
+
+    Args:
+        cfg: Configuration mapping.
+        detect_records: Loaded detect records.
+
+    Returns:
+        Resolved policy_path anchor string.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(detect_records, list):
+        raise TypeError("detect_records must be list")
+
+    from_cfg = _pick_first_non_empty_string([
+        cfg.get("__policy_path__"),
+        cfg.get("policy_path"),
+    ])
+    if isinstance(from_cfg, str):
+        return from_cfg
+
+    for record in detect_records:
+        if not isinstance(record, dict):
+            continue
+        resolved = _pick_first_non_empty_string([
+            record.get("policy_path"),
+        ])
+        if isinstance(resolved, str):
+            return resolved
+    return "<absent>"
+
+
 def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Dict[str, Any]:
     """
     功能：执行只读阈值评估流程。
@@ -2031,14 +2284,19 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
 
     # 使用 report_builder 组装完整报告。
     thresholds_digest = digests.canonical_sha256(thresholds_obj)
-    threshold_metadata_digest = cfg.get("__evaluate_threshold_metadata_digest__", "<absent>")
-    plan_digest = cfg.get("__evaluate_plan_digest__", "<absent>")
-    impl_digest = cfg.get("__impl_digest__", "<absent>")
+    threshold_metadata_digest = _resolve_threshold_metadata_digest_for_evaluate(
+        cfg,
+        thresholds_path,
+        detect_records,
+    )
+    plan_digest = _resolve_plan_digest_for_evaluate(cfg, detect_records)
+    impl_digest = _resolve_impl_digest_for_evaluate(cfg, detect_records)
     fusion_rule_version = thresholds_obj.get("rule_version", "<absent>")
-    policy_path = cfg.get("__policy_path__", "<absent>")
+    policy_path = _resolve_policy_path_for_evaluate(cfg, detect_records)
+    cfg_digest = _resolve_cfg_digest_for_evaluate(cfg, detect_records)
     
     report_obj = eval_report_builder.build_eval_report(
-        cfg_digest=cfg.get("__evaluate_cfg_digest__", "<absent>"),
+        cfg_digest=cfg_digest,
         plan_digest=plan_digest,
         thresholds_digest=thresholds_digest,
         threshold_metadata_digest=threshold_metadata_digest,

@@ -72,7 +72,62 @@ def _decode_bytes(data: Optional[bytes]) -> str:
     return bytes(data).decode("utf-8", errors="replace")
 
 
-def execute_audit_script(script_path: Path, repo_root: Path) -> Optional[Dict[str, Any]]:
+def _infer_latest_run_root(repo_root: Path) -> Optional[Path]:
+    """
+    功能：推断最新 run_root。 
+
+    Infer latest run_root by scanning outputs/**/artifacts/run_closure.json.
+
+    Args:
+        repo_root: Repository root directory.
+
+    Returns:
+        Inferred run_root path or None when unavailable.
+    """
+    if not isinstance(repo_root, Path):
+        raise TypeError("repo_root must be Path")
+
+    outputs_root = repo_root / "outputs"
+    if not outputs_root.exists() or not outputs_root.is_dir():
+        return None
+
+    closure_candidates = [
+        item
+        for item in outputs_root.glob("**/artifacts/run_closure.json")
+        if item.is_file()
+    ]
+    if not closure_candidates:
+        return None
+
+    scored_candidates = []
+    for closure_path in closure_candidates:
+        run_root = closure_path.parent.parent
+        run_root_posix = run_root.as_posix()
+
+        in_experiment_matrix = "/outputs/experiment_matrix/experiments/" in run_root_posix
+        in_multi_protocol = "/artifacts/multi_protocol_evaluation/" in run_root_posix
+
+        scored_candidates.append(
+            (
+                (run_root / "artifacts" / "repro_bundle" / "manifest.json").is_file(),
+                (run_root / "artifacts" / "evaluation_report.json").is_file(),
+                (run_root / "records" / "evaluate_record.json").is_file(),
+                not in_experiment_matrix,
+                not in_multi_protocol,
+                closure_path.stat().st_mtime,
+                run_root,
+            )
+        )
+
+    scored_candidates.sort(reverse=True)
+    return scored_candidates[0][-1]
+
+
+def execute_audit_script(
+    script_path: Path,
+    repo_root: Path,
+    inferred_run_root: Optional[Path] = None,
+) -> Optional[Dict[str, Any]]:
     """
     Execute a single audit script.
     
@@ -89,7 +144,16 @@ def execute_audit_script(script_path: Path, repo_root: Path) -> Optional[Dict[st
         env["PYTHONIOENCODING"] = "utf-8"
         
         result = subprocess.run(
-            [sys.executable, str(script_path), str(repo_root)],
+            [
+                sys.executable,
+                str(script_path),
+                str(repo_root),
+                *(
+                    [str(inferred_run_root)]
+                    if script_path.name == "audit_repro_bundle_integrity.py" and isinstance(inferred_run_root, Path)
+                    else []
+                ),
+            ],
             capture_output=True,
             text=False,
             env=env,
@@ -98,25 +162,6 @@ def execute_audit_script(script_path: Path, repo_root: Path) -> Optional[Dict[st
 
         stdout_text = _decode_bytes(result.stdout)
         stderr_text = _decode_bytes(result.stderr)
-        
-        if result.returncode != 0:
-            # 审计脚本异常退出
-            return {
-                "audit_id": f"ERROR.{script_path.stem}",
-                "gate_name": f"gate.{script_path.stem}",
-                "category": "G",
-                "severity": "BLOCK",
-                "result": "FAIL",
-                "rule": f"审计脚本 {script_path.name} 执行失败",
-                "evidence": {
-                    "error": stderr_text[:500] if stderr_text else "Unknown error",
-                    "exit_code": result.returncode,
-                    "stdout_text": stdout_text[:1000],
-                    "stderr_text": stderr_text[:1000],
-                },
-                "impact": f"审计脚本异常退出，无法完成对应检查项",
-                "fix": f"修复审计脚本 {script_path.name} 的执行错误",
-            }
         
         # 解析输出
         output = stdout_text
@@ -138,8 +183,30 @@ def execute_audit_script(script_path: Path, repo_root: Path) -> Optional[Dict[st
                 "impact": "审计脚本未产生结果，无法完成对应检查项",
                 "fix": f"修复审计脚本 {script_path.name}，确保输出符合规范",
             }
-        
-        audit_result = json.loads(output)
+
+        try:
+            audit_result = json.loads(output)
+        except json.JSONDecodeError:
+            # 非 JSON 输出且非零退出视为脚本执行失败。
+            if result.returncode != 0:
+                return {
+                    "audit_id": f"ERROR.{script_path.stem}",
+                    "gate_name": f"gate.{script_path.stem}",
+                    "category": "G",
+                    "severity": "BLOCK",
+                    "result": "FAIL",
+                    "rule": f"审计脚本 {script_path.name} 执行失败",
+                    "evidence": {
+                        "error": stderr_text[:500] if stderr_text else "Unknown error",
+                        "exit_code": result.returncode,
+                        "stdout_text": stdout_text[:1000],
+                        "stderr_text": stderr_text[:1000],
+                    },
+                    "impact": f"审计脚本异常退出，无法完成对应检查项",
+                    "fix": f"修复审计脚本 {script_path.name} 的执行错误",
+                }
+            raise
+
         return audit_result
         
     except subprocess.TimeoutExpired:
@@ -378,6 +445,7 @@ def main():
     
     repo_root = args.repo_root.resolve()
     scripts_dir = Path(__file__).parent
+    inferred_run_root = _infer_latest_run_root(repo_root)
     
     # 执行所有审计脚本
     all_results = []
@@ -399,7 +467,7 @@ def main():
             })
             continue
         
-        audit_result = execute_audit_script(script_path, repo_root)
+        audit_result = execute_audit_script(script_path, repo_root, inferred_run_root)
         if audit_result is None:
             continue
         

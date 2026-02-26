@@ -193,3 +193,33 @@ class TestAuditEvaluationReportSchema:
         output = json.loads(captured.out)  # Should not raise JSONDecodeError
         assert "audit_id" in output
         assert "result" in output
+
+    def test_audit_accepts_wrapped_eval_report_payload(self, tmp_path, capsys):
+        """测试：支持 records_io 包装格式（evaluation_report 子键）。"""
+        report = {
+            "evaluation_report": {
+                "report_type": "evaluation_report",
+                "cfg_digest": "sha256_cfg",
+                "plan_digest": "sha256_plan",
+                "thresholds_digest": "sha256_thresh",
+                "threshold_metadata_digest": "sha256_metadata",
+                "impl_digest": "sha256_impl",
+                "fusion_rule_version": "fusion_v1",
+                "attack_protocol_version": "attack_protocol_v1",
+                "attack_protocol_digest": "sha256_proto",
+                "policy_path": "policy://test",
+            },
+            "report_type": "eval_report_v1",
+            "report_digest": "sha256_outer",
+        }
+
+        report_path = tmp_path / "outputs" / "onefile" / "artifacts" / "evaluation_report.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+
+        result = audit_evaluation_report_schema.main(str(tmp_path))
+
+        assert result == 0
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["result"] == "PASS"

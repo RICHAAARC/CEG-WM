@@ -97,19 +97,39 @@ def find_evaluation_report_path(repo_root: Path) -> Optional[Path]:
         repo_root / "artifacts",
     ]
     
+    candidate_files: List[Path] = []
     for search_dir in search_dirs:
         if not search_dir.exists():
             continue
-        
+
         report_files = [
             path for path in search_dir.rglob("evaluation_report*.json")
             if path.name not in EXCLUDED_REPORT_FILE_NAMES
         ]
-        
-        if report_files:
-            # 按修改时间排序，返回最新的
-            return sorted(report_files, key=lambda p: p.stat().st_mtime, reverse=True)[0]
-    
+
+        candidate_files.extend(report_files)
+
+    if candidate_files:
+        def _score(path: Path) -> Tuple[bool, bool, bool, bool, float]:
+            path_posix = path.as_posix()
+            in_experiment_matrix = "/outputs/experiment_matrix/experiments/" in path_posix
+            in_multi_protocol = "/artifacts/multi_protocol_evaluation/" in path_posix
+
+            has_eval_record = False
+            if "/artifacts/" in path_posix:
+                run_root = path.parent.parent
+                has_eval_record = (run_root / "records" / "evaluate_record.json").is_file()
+
+            return (
+                has_eval_record,
+                not in_experiment_matrix,
+                not in_multi_protocol,
+                path.name == "evaluation_report.json",
+                path.stat().st_mtime,
+            )
+
+        return sorted(candidate_files, key=_score, reverse=True)[0]
+
     return None
 
 
@@ -127,7 +147,8 @@ def _is_evaluation_report_semantic(report_obj: Dict[str, Any]) -> bool:
     """
     report_type = report_obj.get("report_type")
     if isinstance(report_type, str):
-        return report_type == "evaluation_report"
+        if report_type == "evaluation_report":
+            return True
 
     # 兼容旧格式：无 report_type 时，只要含有至少一个评测锚点即可进入 schema 校验
     for field_name in REQUIRED_ANCHOR_FIELDS:
@@ -139,6 +160,21 @@ def _is_evaluation_report_semantic(report_obj: Dict[str, Any]) -> bool:
         for field_name in REQUIRED_ANCHOR_FIELDS:
             if field_name in anchors_obj:
                 return True
+
+    # 兼容包装格式：records_io artifact 可能将业务报告置于 evaluation_report 子键。
+    nested_report = report_obj.get("evaluation_report")
+    if isinstance(nested_report, dict):
+        nested_report_type = nested_report.get("report_type")
+        if isinstance(nested_report_type, str) and nested_report_type == "evaluation_report":
+            return True
+        for field_name in REQUIRED_ANCHOR_FIELDS:
+            if field_name in nested_report:
+                return True
+        nested_anchors = nested_report.get("anchors")
+        if isinstance(nested_anchors, dict):
+            for field_name in REQUIRED_ANCHOR_FIELDS:
+                if field_name in nested_anchors:
+                    return True
     return False
 
 
@@ -156,11 +192,18 @@ def validate_anchor_fields(report_obj: Dict[str, Any]) -> Tuple[bool, List[str]]
     """
     if not isinstance(report_obj, dict):
         return False, ["report_object_must_be_dict"]
+
+    # 兼容包装格式：优先用内层 evaluation_report 做 schema 校验。
+    candidate_obj = report_obj
+    nested_report = report_obj.get("evaluation_report")
+    if isinstance(nested_report, dict):
+        candidate_obj = nested_report
     
     # 尝试多个搜索路径
+    best_missing: Optional[List[str]] = None
     for path_parts, required_fields in ANCHOR_SEARCH_PATHS:
         # 导航到目标路径
-        current = report_obj
+        current = candidate_obj
         for part in path_parts:
             if isinstance(current, dict) and part in current:
                 current = current[part]
@@ -185,12 +228,17 @@ def validate_anchor_fields(report_obj: Dict[str, Any]) -> Tuple[bool, List[str]]
         if not missing:
             # 找到了完整的字段集
             return True, []
+        if best_missing is None or len(missing) < len(best_missing):
+            best_missing = missing
+
+    if best_missing is not None:
+        return False, best_missing
     
     # 未找到完整的字段集，报告所有缺失字段
     all_missing = []
     for field_name in REQUIRED_ANCHOR_FIELDS:
-        if field_name not in report_obj and (
-            "anchors" not in report_obj or field_name not in report_obj.get("anchors", {})
+        if field_name not in candidate_obj and (
+            "anchors" not in candidate_obj or field_name not in candidate_obj.get("anchors", {})
         ):
             all_missing.append(field_name)
     

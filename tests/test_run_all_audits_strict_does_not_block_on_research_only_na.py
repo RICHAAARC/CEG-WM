@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import Dict, Any, List
 import pytest
+import importlib.util
+from pathlib import Path
 
 
 def validate_audit_result_strict_safe(result: Dict[str, Any]) -> List[str]:
@@ -197,3 +199,48 @@ def test_audit_result_validation_accepts_na() -> None:
     
     errors = validate_audit_result_strict_safe(na_result)
     assert not errors, f"N.A. should be valid, but got errors: {errors}"
+
+
+def test_infer_latest_run_root_prefers_latest_closure(tmp_path: Path) -> None:
+    """
+    功能：验证 run_all_audits 的 run_root 推断逻辑选择最新 run_closure。 
+
+    Verify _infer_latest_run_root returns the run root owning the newest run_closure.
+
+    Args:
+        tmp_path: Temporary repo root.
+
+    Returns:
+        None.
+    """
+    repo_root = tmp_path
+    outputs_root = repo_root / "outputs"
+    older = outputs_root / "older_run" / "artifacts"
+    newer = outputs_root / "newer_run" / "artifacts"
+    older.mkdir(parents=True, exist_ok=True)
+    newer.mkdir(parents=True, exist_ok=True)
+
+    older_closure = older / "run_closure.json"
+    newer_closure = newer / "run_closure.json"
+    older_closure.write_text("{}", encoding="utf-8")
+    newer_closure.write_text("{}", encoding="utf-8")
+
+    import time
+    now = time.time()
+    # older 的时间戳更早。
+    older_ts = now - 120
+    newer_ts = now - 10
+    older_closure.touch()
+    newer_closure.touch()
+    import os
+    os.utime(older_closure, (older_ts, older_ts))
+    os.utime(newer_closure, (newer_ts, newer_ts))
+
+    repo_script = Path(__file__).resolve().parent.parent / "scripts" / "run_all_audits.py"
+    spec = importlib.util.spec_from_file_location("run_all_audits_module", repo_script)
+    assert spec is not None and spec.loader is not None
+    run_all_audits_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(run_all_audits_module)
+
+    inferred = run_all_audits_module._infer_latest_run_root(repo_root)
+    assert inferred == newer.parent

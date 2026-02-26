@@ -17,6 +17,82 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
+def find_candidate_evaluation_report_paths(repo_root: Path) -> List[Path]:
+    """
+    Find candidate evaluation report paths with deterministic priority.
+
+    Args:
+        repo_root: Repository root directory.
+
+    Returns:
+        Ordered candidate path list (existing and non-existing allowed).
+    """
+    if not isinstance(repo_root, Path):
+        repo_root = Path(repo_root)
+
+    static_candidates = [
+        repo_root / "outputs" / "smoke_detect" / "evaluation_report.json",
+        repo_root / "outputs" / "smoke_embed" / "evaluation_report.json",
+        repo_root / "evaluation_report.json",
+        repo_root / "artifacts" / "evaluation_report.json",
+    ]
+
+    closure_candidates = [
+        item
+        for item in (repo_root / "outputs").glob("**/artifacts/run_closure.json")
+        if item.is_file()
+    ] if (repo_root / "outputs").is_dir() else []
+
+    preferred_run_root_report: Optional[Path] = None
+    if closure_candidates:
+        scored_run_roots = []
+        for closure_path in closure_candidates:
+            run_root = closure_path.parent.parent
+            run_root_posix = run_root.as_posix()
+            in_experiment_matrix = "/outputs/experiment_matrix/experiments/" in run_root_posix
+            in_multi_protocol = "/artifacts/multi_protocol_evaluation/" in run_root_posix
+            scored_run_roots.append(
+                (
+                    (run_root / "artifacts" / "repro_bundle" / "manifest.json").is_file(),
+                    (run_root / "artifacts" / "evaluation_report.json").is_file(),
+                    (run_root / "records" / "evaluate_record.json").is_file(),
+                    not in_experiment_matrix,
+                    not in_multi_protocol,
+                    closure_path.stat().st_mtime,
+                    run_root,
+                )
+            )
+
+        scored_run_roots.sort(reverse=True)
+        preferred_run_root = scored_run_roots[0][-1]
+        preferred_run_root_report = preferred_run_root / "artifacts" / "evaluation_report.json"
+
+    dynamic_candidates: List[Path] = []
+    outputs_root = repo_root / "outputs"
+    if outputs_root.exists() and outputs_root.is_dir():
+        for pattern in [
+            "**/artifacts/evaluation_report.json",
+            "**/evaluation_report.json",
+        ]:
+            for item in outputs_root.glob(pattern):
+                if item.is_file() and item not in dynamic_candidates:
+                    dynamic_candidates.append(item)
+
+        dynamic_candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+
+    merged_candidates: List[Path] = []
+    ordered_candidates: List[Path] = []
+    if isinstance(preferred_run_root_report, Path):
+        ordered_candidates.append(preferred_run_root_report)
+    ordered_candidates.extend(static_candidates)
+    ordered_candidates.extend(dynamic_candidates)
+
+    for item in ordered_candidates:
+        if item not in merged_candidates:
+            merged_candidates.append(item)
+    return merged_candidates
+
+
 def load_attack_protocol_spec(repo_root: Path) -> Dict[str, Any]:
     """
     Load attack protocol specification from configs/attack_protocol.yaml.
@@ -151,7 +227,12 @@ def extract_reported_conditions(report: Dict[str, Any]) -> List[str]:
 
     conditions: List[str] = []
 
-    metrics_by_condition = report.get("metrics_by_attack_condition")
+    report_obj = report
+    nested_report = report.get("evaluation_report")
+    if isinstance(nested_report, dict):
+        report_obj = nested_report
+
+    metrics_by_condition = report_obj.get("metrics_by_attack_condition")
     if not isinstance(metrics_by_condition, list):
         # 报告中缺失 metrics_by_attack_condition 字段——这是严重问题
         return []
@@ -227,11 +308,7 @@ def audit_attack_protocol_report_coverage(repo_root: Path) -> Dict[str, Any]:
         evidence["declared_conditions"] = declared_conditions
 
         # (2) 尝试加载评测报告（支持多个位置）
-        eval_report_paths = [
-            repo_root / "outputs" / "smoke_detect" / "evaluation_report.json",
-            repo_root / "outputs" / "smoke_embed" / "evaluation_report.json",
-            repo_root / "evaluation_report.json",
-        ]
+        eval_report_paths = find_candidate_evaluation_report_paths(repo_root)
 
         eval_report: Optional[Dict[str, Any]] = None
         found_path: Optional[Path] = None

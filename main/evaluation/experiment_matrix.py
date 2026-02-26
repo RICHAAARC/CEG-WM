@@ -582,7 +582,7 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> None:
         
         # calibrate 和 evaluate 需要 detect_records_glob 参数
         if stage_name in ["calibrate", "evaluate"]:
-            detect_record_path = run_root / "records" / "detect_record.json"
+            detect_record_path = _prepare_detect_record_for_attack_grouping(run_root, grid_item_cfg)
             arg_name = f"{stage_name}_detect_records_glob"
             stage_overrides.append(f"{arg_name}={json.dumps(str(detect_record_path))}")
         
@@ -601,6 +601,105 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> None:
             config_path=Path(config_path),
             stage_overrides=stage_overrides,
         )
+
+
+def _resolve_attack_params_version_for_family(grid_item_cfg: Dict[str, Any]) -> str:
+    """Resolve deterministic params_version for one attack family from protocol spec."""
+    if not isinstance(grid_item_cfg, dict):
+        raise TypeError("grid_item_cfg must be dict")
+
+    attack_family = grid_item_cfg.get("attack_protocol_family")
+    if not isinstance(attack_family, str) or not attack_family:
+        return "<absent>"
+
+    attack_protocol_path = grid_item_cfg.get("attack_protocol_path", config_loader.ATTACK_PROTOCOL_PATH)
+    if not isinstance(attack_protocol_path, str) or not attack_protocol_path:
+        attack_protocol_path = config_loader.ATTACK_PROTOCOL_PATH
+
+    protocol_cfg = {
+        "evaluate": {
+            "attack_protocol_path": attack_protocol_path,
+        }
+    }
+    protocol_spec = protocol_loader.load_attack_protocol_spec(protocol_cfg)
+
+    families_obj = protocol_spec.get("families") if isinstance(protocol_spec, dict) else {}
+    if isinstance(families_obj, dict):
+        family_spec = families_obj.get(attack_family)
+        if isinstance(family_spec, dict):
+            family_versions = family_spec.get("params_versions")
+            if isinstance(family_versions, dict) and family_versions:
+                resolved = sorted(
+                    version_name
+                    for version_name in family_versions.keys()
+                    if isinstance(version_name, str) and version_name
+                )
+                if resolved:
+                    return resolved[0]
+
+    params_versions_obj = protocol_spec.get("params_versions") if isinstance(protocol_spec, dict) else {}
+    if isinstance(params_versions_obj, dict):
+        prefix = f"{attack_family}::"
+        resolved = []
+        for condition_key in params_versions_obj.keys():
+            if not isinstance(condition_key, str):
+                continue
+            if not condition_key.startswith(prefix):
+                continue
+            version_name = condition_key.split("::", 1)[1]
+            if version_name:
+                resolved.append(version_name)
+        if resolved:
+            return sorted(set(resolved))[0]
+
+    return "<absent>"
+
+
+def _prepare_detect_record_for_attack_grouping(run_root: Path, grid_item_cfg: Dict[str, Any]) -> Path:
+    """Create enriched detect record artifact with attack family/params_version for grouping."""
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(grid_item_cfg, dict):
+        raise TypeError("grid_item_cfg must be dict")
+
+    source_detect_record_path = run_root / "records" / "detect_record.json"
+    if not source_detect_record_path.exists() or not source_detect_record_path.is_file():
+        return source_detect_record_path
+
+    attack_family = grid_item_cfg.get("attack_protocol_family")
+    if not isinstance(attack_family, str) or not attack_family:
+        return source_detect_record_path
+
+    detect_record = _read_optional_json(source_detect_record_path)
+    if not isinstance(detect_record, dict) or not detect_record:
+        return source_detect_record_path
+
+    params_version = _resolve_attack_params_version_for_family(grid_item_cfg)
+
+    enriched_record = copy.deepcopy(detect_record)
+    enriched_record["attack_family"] = attack_family
+    if isinstance(params_version, str) and params_version and params_version != "<absent>":
+        enriched_record["attack_params_version"] = params_version
+
+    attack_obj = enriched_record.get("attack")
+    if not isinstance(attack_obj, dict):
+        attack_obj = {}
+    attack_obj["family"] = attack_family
+    if isinstance(params_version, str) and params_version and params_version != "<absent>":
+        attack_obj["params_version"] = params_version
+    enriched_record["attack"] = attack_obj
+
+    artifacts_dir = run_root / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    enriched_path = artifacts_dir / "evaluate_inputs" / "detect_record_with_attack.json"
+
+    records_io.write_artifact_json_unbound(
+        run_root=run_root,
+        artifacts_dir=artifacts_dir,
+        path=str(enriched_path),
+        obj=enriched_record,
+    )
+    return enriched_path
 
 
 def _run_stage_command(

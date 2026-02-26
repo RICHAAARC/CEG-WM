@@ -136,6 +136,14 @@ def test_evaluate_report_contains_required_anchor_fields(tmp_path: Path) -> None
         }),
         encoding="utf-8",
     )
+    (tmp_path / "threshold_metadata_artifact.json").write_text(
+        json.dumps({
+            "rule_id": "np_v1",
+            "target_fpr": 0.01,
+            "n_null": 1,
+        }),
+        encoding="utf-8",
+    )
 
     detect_path = tmp_path / "detect.json"
     detect_path.write_text(
@@ -143,6 +151,8 @@ def test_evaluate_report_contains_required_anchor_fields(tmp_path: Path) -> None
             "content_evidence_payload": {"status": "ok", "score": 0.8},
             "label": True,
             "attack": {"family": "rotate", "params_version": "v1"},
+            "plan_digest": "test_plan_digest_from_detect",
+            "impl_set_capabilities_digest": "test_impl_set_digest_from_detect",
         }),
         encoding="utf-8",
     )
@@ -177,6 +187,17 @@ def test_evaluate_report_contains_required_anchor_fields(tmp_path: Path) -> None
     for anchor_key in required_anchors:
         assert anchor_key in report, f"Missing anchor field: {anchor_key}"
         assert isinstance(report[anchor_key], str), f"Anchor {anchor_key} should be string"
+
+    non_absent_anchors = [
+        "cfg_digest",
+        "plan_digest",
+        "thresholds_digest",
+        "threshold_metadata_digest",
+        "policy_path",
+        "impl_digest",
+    ]
+    for anchor_key in non_absent_anchors:
+        assert report[anchor_key] != "<absent>", f"Anchor {anchor_key} should not be <absent>"
 
     # append-only: 新增路由摘要与实现锚点容器。
     assert isinstance(report.get("routing_decisions"), dict)
