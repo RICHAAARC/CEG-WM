@@ -83,3 +83,6 @@ impl:
   hf_embedder_id: "hf_embedder_t2smark_v1"
   lf_coder_id: "lf_coder_prc_v1"
   use_latent_per_step: true
+
+experiment_matrix:
+  config_path: "configs/paper_full_cuda.yaml"
