@@ -1241,6 +1241,14 @@ def _resolve_expected_plan_digest(input_record: Optional[Dict[str, Any]]) -> Opt
         if isinstance(candidate, str) and candidate:
             return candidate
 
+        injection_site_spec = payload.get("injection_site_spec")
+        if isinstance(injection_site_spec, dict):
+            injection_rule_summary = injection_site_spec.get("injection_rule_summary")
+            if isinstance(injection_rule_summary, dict):
+                summary_plan_digest = injection_rule_summary.get("plan_digest")
+                if isinstance(summary_plan_digest, str) and summary_plan_digest:
+                    return summary_plan_digest
+
     embed_trace = input_record.get("embed_trace")
     if isinstance(embed_trace, dict):
         trace_plan_digest = embed_trace.get("plan_digest")
