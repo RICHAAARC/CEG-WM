@@ -55,7 +55,7 @@ def build_experiment_grid(base_cfg: dict) -> list[dict]:
     if not isinstance(batch_root, str) or not batch_root:
         raise ValueError("experiment_matrix.batch_root must be non-empty str")
 
-    config_path = matrix_cfg.get("config_path", "configs/default.yaml")
+    config_path = matrix_cfg.get("config_path", "configs/paper_full_cuda.yaml")
     if not isinstance(config_path, str) or not config_path:
         raise ValueError("experiment_matrix.config_path must be non-empty str")
 
@@ -496,7 +496,7 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> None:
     )
     _ = layout
 
-    config_path = grid_item_cfg.get("config_path", "configs/default.yaml")
+    config_path = grid_item_cfg.get("config_path", "configs/paper_full_cuda.yaml")
     attack_protocol_path = grid_item_cfg.get("attack_protocol_path", config_loader.ATTACK_PROTOCOL_PATH)
     seed_value = grid_item_cfg.get("cfg_snapshot", {}).get("seed")
     model_id = grid_item_cfg.get("cfg_snapshot", {}).get("model_id")
