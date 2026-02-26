@@ -42,6 +42,7 @@ watermark:
   lf:
     enabled: true
     variance: 1.5
+    ecc: "sparse_ldpc"
     ecc_sparsity: 3
     message_length: 64
     coding_mode: "latent_space_sign_flipping"

@@ -71,6 +71,7 @@ watermark:
   lf:
     enabled: true  # 启用 LF 主通道（真实水印注入）
     variance: 1.5
+    ecc: "sparse_ldpc"
     ecc_sparsity: 3
     message_length: 64
 
