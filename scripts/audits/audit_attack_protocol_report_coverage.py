@@ -17,6 +17,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
+_UNKNOWN_CONDITION_SENTINELS = {
+    "unknown_attack::unknown_params",
+}
+
+
 def find_candidate_evaluation_report_paths(repo_root: Path) -> List[Path]:
     """
     Find candidate evaluation report paths with deterministic priority.
@@ -248,6 +253,21 @@ def extract_reported_conditions(report: Dict[str, Any]) -> List[str]:
     return sorted(conditions)
 
 
+def is_unknown_condition_sentinel(condition_key: str) -> bool:
+    """
+    Check whether condition key is the known unknown sentinel.
+
+    Args:
+        condition_key: Condition key string.
+
+    Returns:
+        True if key is unknown sentinel, otherwise False.
+    """
+    if not isinstance(condition_key, str) or not condition_key:
+        return False
+    return condition_key in _UNKNOWN_CONDITION_SENTINELS
+
+
 def collect_reported_conditions_candidates(
     repo_root: Path,
     eval_report_paths: List[Path],
@@ -362,11 +382,22 @@ def collect_reported_conditions_candidates(
             rel_paths.append(str(path))
 
     primary_path = rel_paths[0] if rel_paths else "<absent>"
+    ignored_unknown_conditions = sorted(
+        item
+        for item in chosen_set
+        if is_unknown_condition_sentinel(item)
+    )
+    filtered_reported = sorted(
+        item
+        for item in chosen_set
+        if not is_unknown_condition_sentinel(item)
+    )
     return {
-        "reported_conditions": sorted(chosen_set),
+        "reported_conditions": filtered_reported,
         "eval_report_path": primary_path,
         "eval_report_paths": rel_paths,
         "source_mode": source_mode,
+        "ignored_unknown_conditions": ignored_unknown_conditions,
     }
 
 
@@ -458,6 +489,7 @@ def audit_attack_protocol_report_coverage(repo_root: Path) -> Dict[str, Any]:
         evidence["eval_report_path"] = reported_candidates.get("eval_report_path", "<absent>")
         evidence["eval_report_paths"] = reported_candidates.get("eval_report_paths", [])
         evidence["reported_source_mode"] = reported_candidates.get("source_mode", "<absent>")
+        evidence["ignored_unknown_conditions"] = reported_candidates.get("ignored_unknown_conditions", [])
 
         # (3) 从报告（单个或聚合）提取已上报的条件
         evidence["reported_conditions_count"] = len(reported_conditions)
