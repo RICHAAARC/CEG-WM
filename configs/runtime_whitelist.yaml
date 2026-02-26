@@ -185,9 +185,11 @@ override:
       - "ablation_enable_lf"
       - "ablation_disable_lf"
       - "ablation_enable_hf"
-      - "ablation_disable_hf"      # Experiment Matrix 实验网格枚举
+      - "ablation_disable_hf"
+      # Experiment Matrix 实验网格枚举
       - "seed"
-      - "model_id"    immutable: true
+      - "model_id"
+    immutable: true
     notes: "必须与 allowed_overrides[*].arg_name 的值集完全一致。新增 override 必须同步更新此枚举。"
 
   # 一致性校验要求（gate 必须实现）
