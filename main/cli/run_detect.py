@@ -61,6 +61,43 @@ from main.cli.run_common import (
 )
 
 
+def resolve_content_override_from_input_record(input_record: Dict[str, Any]) -> Dict[str, Any] | None:
+    """
+    功能：从输入记录中解析 detect 可复用的 content 结果覆盖项。
+
+    Resolve reusable detect content override from input record.
+
+    Args:
+        input_record: Input record mapping loaded from --input.
+
+    Returns:
+        Detect-compatible content payload dict, or None if input only contains
+        embed-mode content evidence.
+
+    Raises:
+        TypeError: If input_record is invalid.
+    """
+    if not isinstance(input_record, dict):
+        # input_record 类型不合法，必须 fail-fast。
+        raise TypeError("input_record must be dict")
+
+    for content_key in ["content_evidence_payload", "content_result", "content_evidence"]:
+        content_candidate = input_record.get(content_key)
+        if not isinstance(content_candidate, dict):
+            continue
+
+        status_value = content_candidate.get("status")
+        score_value = content_candidate.get("score")
+        if content_key == "content_evidence":
+            if status_value != "ok" or not isinstance(score_value, (int, float)):
+                # embed 侧 content_evidence 常为 absent；不能覆盖 detect 计算。
+                continue
+
+        return content_candidate
+
+    return None
+
+
 def run_detect(
     output_dir: str,
     config_path: str,
@@ -413,12 +450,7 @@ def run_detect(
             # 构造 detect record，本阶段为基线实现。
             print("[Detect] Generating detect record (baseline)...")
             if input_record_path:
-                content_override_for_orchestrator = None
-                for content_key in ["content_evidence", "content_evidence_payload", "content_result"]:
-                    content_candidate = input_record.get(content_key)
-                    if isinstance(content_candidate, dict):
-                        content_override_for_orchestrator = content_candidate
-                        break
+                content_override_for_orchestrator = resolve_content_override_from_input_record(input_record)
 
                 plan_override_for_orchestrator = None
                 input_subspace_plan = input_record.get("subspace_plan")

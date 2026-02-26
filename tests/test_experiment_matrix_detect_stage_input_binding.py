@@ -93,4 +93,4 @@ def test_experiment_matrix_detect_stage_sets_content_enabled_override(monkeypatc
     experiment_matrix._run_stage_sequence(grid_item_cfg, Path("outputs/experiment_matrix/experiments/item_0000"))
 
     detect_overrides = captured_overrides.get("detect", [])
-    assert "detect.content.enabled=true" in detect_overrides
+    assert "enable_content_detect=true" in detect_overrides
