@@ -40,7 +40,7 @@ def run_experiment_matrix(config_path: str, strict: bool = True) -> Dict[str, An
 def main() -> None:
     """CLI entry for experiment matrix execution."""
     parser = argparse.ArgumentParser(description="Run experiment matrix and publish aggregate artifacts")
-    parser.add_argument("--config", default="configs/default.yaml", help="Config YAML path")
+    parser.add_argument("--config", default="configs/paper_full_cuda.yaml", help="Config YAML path")
     parser.add_argument(
         "--strict",
         action="store_true",
