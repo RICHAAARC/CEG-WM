@@ -156,6 +156,21 @@ override:
       override_mode: "set"
       source: "cli"
       description: "实验矩阵：允许覆写模型 ID 用于多模型对比实验"
+    - arg_name: "calibrate_detect_records_glob"
+      field_path: "calibrate.detect_records_glob"
+      override_mode: "set"
+      source: "cli"
+      description: "实验矩阵：允许设置 calibrate 阶段的 detect 记录 glob 路径"
+    - arg_name: "evaluate_detect_records_glob"
+      field_path: "evaluate.detect_records_glob"
+      override_mode: "set"
+      source: "cli"
+      description: "实验矩阵：允许设置 evaluate 阶段的 detect 记录 glob 路径"
+    - arg_name: "evaluate_thresholds_path"
+      field_path: "evaluate.thresholds_path"
+      override_mode: "set"
+      source: "cli"
+      description: "实验矩阵：允许设置 evaluate 阶段的阈值工件路径"
 
   # 覆写 source 的枚举白名单（gate 必须校验）
   source_enum:
@@ -189,6 +204,9 @@ override:
       # Experiment Matrix 实验网格枚举
       - "seed"
       - "model_id"
+      - "calibrate_detect_records_glob"
+      - "evaluate_detect_records_glob"
+      - "evaluate_thresholds_path"
     immutable: true
     notes: "必须与 allowed_overrides[*].arg_name 的值集完全一致。新增 override 必须同步更新此枚举。"
 

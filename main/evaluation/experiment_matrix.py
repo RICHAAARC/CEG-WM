@@ -531,16 +531,17 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> None:
         # calibrate 和 evaluate 需要 detect_records_glob 参数
         if stage_name in ["calibrate", "evaluate"]:
             detect_record_path = run_root / "records" / "detect_record.json"
-            stage_overrides.append(f"{stage_name}.detect_records_glob={json.dumps(str(detect_record_path))}")
+            arg_name = f"{stage_name}_detect_records_glob"
+            stage_overrides.append(f"{arg_name}={json.dumps(str(detect_record_path))}")
         
         # evaluate 需要额外的参数
         if stage_name == "evaluate":
-            stage_overrides.append(f"evaluate.attack_protocol_path={json.dumps(attack_protocol_path)}")
             thresholds_path = run_root / "artifacts" / "thresholds" / "thresholds_artifact.json"
-            stage_overrides.append(f"evaluate.thresholds_path={json.dumps(str(thresholds_path))}")
+            stage_overrides.append(f"evaluate_thresholds_path={json.dumps(str(thresholds_path))}")
         
         for key, value in sorted(ablation_flags.items()):
             stage_overrides.append(f"ablation.{key}={str(value).lower()}")
+
 
         _run_stage_command(
             stage_name=stage_name,

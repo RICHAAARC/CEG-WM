@@ -67,6 +67,13 @@ mask:
 embed:
   test_mode_identity: false
 
+calibrate:
+  detect_records_glob: null  # detect 记录 glob 路径（由 experiment_matrix 注入）
+
+evaluate:
+  detect_records_glob: null  # detect 记录 glob 路径（由 experiment_matrix 注入）
+  thresholds_path: null      # 阈值工件路径（由 experiment_matrix 注入）
+
 impl:
   content_extractor_id: "unified_content_extractor_v1"
   geometry_extractor_id: "attention_anchor_map_relation_v1"
