@@ -396,6 +396,16 @@ impl_id:
       # - 不写原始坐标、不写完整匹配点列表、不写可逆高维参数。
       - "geometry_align_invariance_sd3_v1"
 
+      # 注意力锚点映射关系实现：
+      # - 提取 attention map 关系摘要。
+      # - 输出锚点关系 digest 与稳定性指标。
+      - "attention_anchor_map_relation_v1"
+
+      # 几何 latent 同步模板 v2 实现：
+      # - 基于 latent 频域摘要生成 sync_digest 与同步质量指标。
+      # - 增强版同步质量评估与 trajectory 绑定。
+      - "geometry_latent_sync_sd3_v2"
+
     fusion_rule:
       # 融合规则基线实现：
       # - 采用恒等映射或固定规则。
@@ -438,6 +448,11 @@ impl_id:
       # - 返回结构化同步状态与失败原因。
       # - 不执行真实同步或写盘操作。
       - "geometry_latent_sync_sd3_v1"
+
+      # 同步模块 SD3 latent 同步 v2 实现：
+      # - 增强版同步质量评估与 trajectory 绑定。
+      # - 返回结构化同步状态与失败原因。
+      - "geometry_latent_sync_sd3_v2"
 
   # 是否允许出现未在 allowed_by_domain 中声明的 domain。
   # v1 阶段为 false。
