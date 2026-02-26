@@ -300,6 +300,106 @@ class SyncLatentSyncSd3:
         return payload
 
 
+class SyncGeometryLatentSyncSD3V2:
+    """
+    功能：SD3 latent sync v2 同步模块包装器。
+
+    Sync module wrapper for GeometryLatentSyncSD3V2 extractor that provides
+    sync() and sync_with_context() interfaces.
+
+    Args:
+        impl_id: Implementation identifier.
+        impl_version: Implementation version string.
+        impl_digest: Implementation digest string.
+
+    Returns:
+        None.
+
+    Raises:
+        ValueError: If any input is invalid.
+    """
+
+    def __init__(self, impl_id: str, impl_version: str, impl_digest: str) -> None:
+        if not isinstance(impl_id, str) or not impl_id:
+            raise ValueError("impl_id must be non-empty str")
+        if not isinstance(impl_version, str) or not impl_version:
+            raise ValueError("impl_version must be non-empty str")
+        if not isinstance(impl_digest, str) or not impl_digest:
+            raise ValueError("impl_digest must be non-empty str")
+        self.impl_id = impl_id
+        self.impl_version = impl_version
+        self.impl_digest = impl_digest
+        self._extractor = GeometryLatentSyncSD3V2(impl_id, impl_version, impl_digest)
+
+    def sync(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        功能：返回结构化同步状态（无上下文）。
+
+        Return sync status without runtime context.
+
+        Args:
+            cfg: Config mapping.
+
+        Returns:
+            Sync status mapping.
+
+        Raises:
+            TypeError: If cfg is not dict.
+        """
+        if not isinstance(cfg, dict):
+            raise TypeError("cfg must be dict")
+        result = self._extractor.extract(cfg, inputs=None, sync_ctx=None)
+        return {
+            "sync_status": result.get("status", "absent"),
+            "sync_success": result.get("status") == "ok",
+            "sync_digest": result.get("sync_digest"),
+            "geo_score": result.get("geo_score"),
+            "geometry_absent_reason": result.get("geometry_absent_reason"),
+            "geometry_failure_reason": result.get("geometry_failure_reason"),
+            "impl_identity": self.impl_id,
+            "impl_version": self.impl_version,
+            "impl_digest": self.impl_digest,
+        }
+
+    def sync_with_context(self, cfg: Dict[str, Any], context: SyncRuntimeContext) -> Dict[str, Any]:
+        """
+        功能：使用运行期上下文提取同步状态。
+
+        Extract sync status using runtime context.
+
+        Args:
+            cfg: Config mapping.
+            context: Sync runtime context.
+
+        Returns:
+            Sync status mapping with trajectory bindings.
+
+        Raises:
+            TypeError: If inputs are invalid.
+        """
+        if not isinstance(cfg, dict):
+            raise TypeError("cfg must be dict")
+        if not isinstance(context, SyncRuntimeContext):
+            raise TypeError("context must be SyncRuntimeContext")
+        result = self._extractor.extract(cfg, inputs=None, sync_ctx=context)
+        payload = {
+            "sync_status": result.get("status", "absent"),
+            "sync_success": result.get("status") == "ok",
+            "sync_digest": result.get("sync_digest"),
+            "geo_score": result.get("geo_score"),
+            "geometry_absent_reason": result.get("geometry_absent_reason"),
+            "geometry_failure_reason": result.get("geometry_failure_reason"),
+            "impl_identity": self.impl_id,
+            "impl_version": self.impl_version,
+            "impl_digest": self.impl_digest,
+        }
+        if isinstance(context.trajectory_evidence, dict):
+            payload["trajectory_spec_digest"] = context.trajectory_evidence.get("trajectory_spec_digest")
+            payload["trajectory_digest"] = context.trajectory_evidence.get("trajectory_digest")
+            payload["trajectory_tap_version"] = context.trajectory_evidence.get("trajectory_tap_version")
+        return payload
+
+
 _GEOMETRY_REGISTRY = RegistryBase("geometry_extractor")
 _SYNC_REGISTRY = RegistryBase("sync_module")
 
@@ -492,17 +592,17 @@ def _build_attention_anchor_map_relation(cfg: Dict[str, Any]) -> AttentionAnchor
     return AttentionAnchorMapRelation(ATTENTION_ANCHOR_MAP_RELATION_ID, impl_version, impl_digest)
 
 
-def _build_geometry_latent_sync_sd3_v2(cfg: Dict[str, Any]) -> GeometryLatentSyncSD3V2:
+def _build_geometry_latent_sync_sd3_v2(cfg: Dict[str, Any]) -> SyncGeometryLatentSyncSD3V2:
     """
-    功能：构造 geometry latent sync SD3 v2 实现。
+    功能：构造 geometry latent sync SD3 v2 同步模块。
 
-    Build geometry latent sync SD3 v2 with relation digest binding.
+    Build geometry latent sync SD3 v2 sync module wrapper.
 
     Args:
         cfg: Config mapping.
 
     Returns:
-        GeometryLatentSyncSD3V2 instance.
+        SyncGeometryLatentSyncSD3V2 instance.
 
     Raises:
         TypeError: If cfg is not dict.
@@ -511,7 +611,7 @@ def _build_geometry_latent_sync_sd3_v2(cfg: Dict[str, Any]) -> GeometryLatentSyn
         raise TypeError("cfg must be dict")
     impl_version = GEOMETRY_LATENT_SYNC_SD3_V2_VERSION
     impl_digest = _derive_impl_digest(GEOMETRY_LATENT_SYNC_SD3_V2_ID, impl_version)
-    return GeometryLatentSyncSD3V2(GEOMETRY_LATENT_SYNC_SD3_V2_ID, impl_version, impl_digest)
+    return SyncGeometryLatentSyncSD3V2(GEOMETRY_LATENT_SYNC_SD3_V2_ID, impl_version, impl_digest)
 
 
 _GEOMETRY_REGISTRY.register_factory(
