@@ -157,7 +157,7 @@ override:
       source: "cli"
       description: "实验矩阵：允许覆写模型 ID 用于多模型对比实验"
     - arg_name: "calibrate_detect_records_glob"
-      field_path: "calibrate.detect_records_glob"
+      field_path: "calibration.detect_records_glob"
       override_mode: "set"
       source: "cli"
       description: "实验矩阵：允许设置 calibrate 阶段的 detect 记录 glob 路径"

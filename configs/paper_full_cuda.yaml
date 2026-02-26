@@ -67,7 +67,7 @@ mask:
 embed:
   test_mode_identity: false
 
-calibrate:
+calibration:
   detect_records_glob: null  # detect 记录 glob 路径（由 experiment_matrix 注入）
 
 evaluate:

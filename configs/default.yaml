@@ -131,9 +131,9 @@ ablation:
   normalized: null
 
 # ==============================================================
-# 校准 (Calibrate) 配置
+# 校准 (Calibration) 配置
 # ==============================================================
-calibrate:
+calibration:
   detect_records_glob: null  # detect 记录 glob 路径（由 experiment_matrix 注入）
 
 # ==============================================================
