@@ -17,6 +17,8 @@ inference_guidance_scale: 7.0
 inference_height: 512
 inference_width: 512
 
+seed: null  # 随机种子（null 表示自动生成，可通过 CLI override 覆盖）
+
 trajectory_tap:
   enabled: true
   tensor_types: ["latent"]
