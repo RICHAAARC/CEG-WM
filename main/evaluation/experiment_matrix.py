@@ -110,7 +110,7 @@ def build_experiment_grid(base_cfg: dict) -> list[dict]:
     return grid_items
 
 
-def run_single_experiment(grid_item_cfg: dict) -> dict:
+def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
     功能：执行单个网格实验并提取摘要锚点。
 
@@ -156,22 +156,50 @@ def run_single_experiment(grid_item_cfg: dict) -> dict:
         _run_stage_sequence(grid_item_cfg, run_root)
         eval_report = _read_evaluation_report_for_run(run_root)
         _assert_required_run_artifacts(run_root)
+        evaluate_record = _read_optional_json(run_root / "records" / "evaluate_record.json")
+        run_closure = _read_optional_json(run_root / "artifacts" / "run_closure.json")
 
         metrics_obj = eval_report.get("metrics") if isinstance(eval_report.get("metrics"), dict) else {}
+        cfg_digest_value = _first_present_str(
+            eval_report.get("cfg_digest"),
+            evaluate_record.get("cfg_digest") if isinstance(evaluate_record, dict) else None,
+            grid_item_cfg.get("cfg_digest"),
+        )
+        thresholds_digest_value = _first_present_str(
+            eval_report.get("thresholds_digest"),
+            evaluate_record.get("thresholds_digest") if isinstance(evaluate_record, dict) else None,
+            run_closure.get("thresholds_digest") if isinstance(run_closure, dict) else None,
+        )
+        thresholds_metadata_digest_value = _first_present_str(
+            eval_report.get("threshold_metadata_digest"),
+            evaluate_record.get("threshold_metadata_digest") if isinstance(evaluate_record, dict) else None,
+            run_closure.get("threshold_metadata_digest") if isinstance(run_closure, dict) else None,
+        )
+        impl_digest_value = _first_present_str(
+            eval_report.get("impl_digest"),
+            evaluate_record.get("impl_digest") if isinstance(evaluate_record, dict) else None,
+            run_closure.get("impl_digest") if isinstance(run_closure, dict) else None,
+            run_closure.get("impl_identity_digest") if isinstance(run_closure, dict) else None,
+        )
+        fusion_rule_version_value = _first_present_str(
+            eval_report.get("fusion_rule_version"),
+            evaluate_record.get("fusion_rule_version") if isinstance(evaluate_record, dict) else None,
+            run_closure.get("fusion_rule_version") if isinstance(run_closure, dict) else None,
+        )
         summary.update(
             {
                 "status": "ok",
                 "failure_reason": "ok",
-                "cfg_digest": _safe_str(eval_report.get("cfg_digest")),
+                "cfg_digest": _safe_str(cfg_digest_value),
                 "plan_digest": _safe_str(eval_report.get("plan_digest")),
-                "thresholds_digest": _safe_str(eval_report.get("thresholds_digest")),
-                "threshold_metadata_digest": _safe_str(eval_report.get("threshold_metadata_digest")),
+                "thresholds_digest": _safe_str(thresholds_digest_value),
+                "threshold_metadata_digest": _safe_str(thresholds_metadata_digest_value),
                 "ablation_digest": _safe_str(eval_report.get("ablation_digest")),
                 "attack_protocol_digest": _safe_str(eval_report.get("attack_protocol_digest")),
                 "attack_protocol_version": _safe_str(eval_report.get("attack_protocol_version")),
                 "attack_coverage_digest": _safe_str(eval_report.get("attack_coverage_digest")),
-                "impl_digest": _safe_str(eval_report.get("impl_digest")),
-                "fusion_rule_version": _safe_str(eval_report.get("fusion_rule_version")),
+                "impl_digest": _safe_str(impl_digest_value),
+                "fusion_rule_version": _safe_str(fusion_rule_version_value),
                 "metrics": {
                     "tpr_at_fpr": metrics_obj.get("tpr_at_fpr_primary", metrics_obj.get("tpr_at_fpr")),
                     "geo_available_rate": metrics_obj.get("geo_available_rate"),
@@ -194,6 +222,26 @@ def run_single_experiment(grid_item_cfg: dict) -> dict:
         summary["failure_reason"] = f"{type(exc).__name__}: {exc}"
 
     return summary
+
+
+def _read_optional_json(path: Path) -> Dict[str, Any]:
+    """Read optional JSON file and return dict, else empty dict."""
+    if not isinstance(path, Path):
+        raise TypeError("path must be Path")
+    if not path.exists() or not path.is_file():
+        return {}
+    parsed_obj = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(parsed_obj, dict):
+        return {}
+    return parsed_obj
+
+
+def _first_present_str(*values: Any) -> str:
+    """Return first non-empty non-absent string candidate."""
+    for value in values:
+        if isinstance(value, str) and value and value != "<absent>":
+            return value
+    return "<absent>"
 
 
 def run_experiment_grid(grid: list[dict], strict: bool = True) -> dict:
