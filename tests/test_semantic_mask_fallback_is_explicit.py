@@ -48,3 +48,66 @@ def test_semantic_mask_fallback_is_explicit(monkeypatch) -> None:
     assert isinstance(result.mask_stats.get("mask_fallback_reason"), str)
     assert result.mask_stats.get("mask_fallback_reason") != "<absent>"
     assert result.audit.get("mask_impl_id") == "texture_gradient_v1"
+
+
+def test_saliency_source_auto_fallback_is_auditable() -> None:
+    provider = SemanticMaskProvider(
+        impl_id=SEMANTIC_MASK_PROVIDER_ID,
+        impl_version=SEMANTIC_MASK_PROVIDER_VERSION,
+        impl_digest=digests.canonical_sha256({
+            "impl_id": SEMANTIC_MASK_PROVIDER_ID,
+            "impl_version": SEMANTIC_MASK_PROVIDER_VERSION,
+        }),
+    )
+
+    cfg = {
+        "enable_mask": True,
+        "mask": {
+            "saliency_source": "auto_fallback",
+            "semantic_model_path": "Z:/path/not_exists/model.safetensors",
+        },
+    }
+    inputs = {
+        "image": [1, 2, 3],
+        "image_shape": (64, 64, 3),
+    }
+
+    result = provider.extract(cfg, inputs=inputs, cfg_digest="cfg_digest_anchor")
+
+    assert result.status == "ok"
+    assert isinstance(result.mask_stats, dict)
+    assert result.mask_stats.get("saliency_source_selected") == "proxy_v1"
+    assert result.mask_stats.get("fallback_used") is True
+    assert isinstance(result.mask_stats.get("fallback_reason"), str)
+    saliency_provenance = result.mask_stats.get("saliency_provenance")
+    assert isinstance(saliency_provenance, dict)
+    assert saliency_provenance.get("fallback_used") is True
+
+
+def test_saliency_source_model_unavailable_returns_explicit_fail() -> None:
+    provider = SemanticMaskProvider(
+        impl_id=SEMANTIC_MASK_PROVIDER_ID,
+        impl_version=SEMANTIC_MASK_PROVIDER_VERSION,
+        impl_digest=digests.canonical_sha256({
+            "impl_id": SEMANTIC_MASK_PROVIDER_ID,
+            "impl_version": SEMANTIC_MASK_PROVIDER_VERSION,
+        }),
+    )
+
+    cfg = {
+        "enable_mask": True,
+        "mask": {
+            "saliency_source": "model_v2",
+            "semantic_model_path": "Z:/path/not_exists/model.safetensors",
+        },
+    }
+    inputs = {
+        "image": [1, 2, 3],
+        "image_shape": (64, 64, 3),
+    }
+
+    result = provider.extract(cfg, inputs=inputs, cfg_digest="cfg_digest_anchor")
+
+    assert result.status == "failed"
+    assert result.content_failure_reason == "saliency_source_model_unavailable"
+    assert isinstance(result.audit.get("fallback_reason"), str)

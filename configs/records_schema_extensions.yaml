@@ -70,6 +70,42 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "由掩码统计派生的最小路由统计摘要。"
+  - path: "content_evidence.mask_stats.saliency_source_selected"
+    layer: "anchor"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "显著性来源策略最终选择。"
+  - path: "content_evidence.mask_stats.saliency_source_attempted"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "显著性来源策略尝试序列（append-only）。"
+  - path: "content_evidence.mask_stats.fallback_used"
+    layer: "diagnostic"
+    type: "boolean_flag"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "显著性来源是否触发 fallback。"
+  - path: "content_evidence.mask_stats.fallback_reason"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "显著性来源 fallback 原因（禁止静默降级）。"
+  - path: "content_evidence.mask_stats.model_artifact_anchor"
+    layer: "anchor"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "显著性模型工件锚点（路径策略安全摘要）。"
+  - path: "content_evidence.mask_stats.saliency_provenance"
+    layer: "anchor"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "显著性来源决策与降级可审计载荷。"
   - path: "content_evidence.plan_digest"
     layer: "anchor"
     type: "digest_hex64"
@@ -94,6 +130,12 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "区域索引规格摘要。"
+  - path: "content_evidence.subspace_plan.subspace_conditioning"
+    layer: "anchor"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "子空间语义条件化摘要（mask-conditioned manifold adaptive）。"
   - path: "content_evidence.subspace_plan.lf_basis"
     layer: "anchor"
     type: "json_dict"

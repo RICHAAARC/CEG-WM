@@ -438,6 +438,12 @@ records_schema:
     # ---- 接口层字段追加（append-only） ----
     - content_evidence.mask_digest
     - content_evidence.mask_stats
+    - content_evidence.mask_stats.saliency_source_selected
+    - content_evidence.mask_stats.saliency_source_attempted
+    - content_evidence.mask_stats.fallback_used
+    - content_evidence.mask_stats.fallback_reason
+    - content_evidence.mask_stats.model_artifact_anchor
+    - content_evidence.mask_stats.saliency_provenance
     - content_evidence.plan_digest
     - content_evidence.basis_digest
     - content_evidence.lf_trace_digest
@@ -454,6 +460,7 @@ records_schema:
     - content_evidence.lf_statistics_digest
     - content_evidence.hf_statistics_digest
     - content_evidence.hf_evidence_summary
+    - content_evidence.subspace_plan.subspace_conditioning
     - content_evidence.score_parts
     - content_evidence.content_failure_reason
     - content_evidence.content_mismatch_reason

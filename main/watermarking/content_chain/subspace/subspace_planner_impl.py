@@ -22,6 +22,8 @@ from main.watermarking.content_chain.subspace.planner_interface import SubspaceP
 
 SUBSPACE_PLANNER_ID = "subspace_planner_v1"
 SUBSPACE_PLANNER_VERSION = "v1"
+SUBSPACE_PLANNER_MASK_CONDITIONED_ID = "subspace_planner_mask_conditioned_v1"
+SUBSPACE_PLANNER_MASK_CONDITIONED_VERSION = "v1"
 
 
 ALLOWED_PLANNER_FAILURE_REASONS = {
@@ -216,6 +218,77 @@ class _PlannerParams:
     num_inference_steps: int = 50
 
 
+@dataclass(frozen=True)
+class SubspaceConditioning:
+    """
+    功能：子空间语义条件化摘要。 
+
+    Serializable conditioning summary for mask-conditioned subspace estimation.
+
+    Args:
+        conditioning_mode: Conditioning mode label.
+        mask_digest: Bound mask digest anchor.
+        region_spec_digest: Digest of selected feature index spec.
+        masked_dim_count: Number of selected feature dimensions.
+        unmasked_dim_count: Number of non-selected feature dimensions.
+        mask_area_ratio: Mask area ratio in [0, 1].
+        fallback_used: Whether fallback branch is used.
+        fallback_reason: Fallback reason string.
+        selected_feature_indices: Selected feature index list.
+    """
+
+    conditioning_mode: str
+    mask_digest: str
+    region_spec_digest: str
+    masked_dim_count: int
+    unmasked_dim_count: int
+    mask_area_ratio: float
+    fallback_used: bool
+    fallback_reason: str
+    selected_feature_indices: List[int]
+
+    def as_dict(self) -> Dict[str, Any]:
+        """
+        功能：序列化子空间条件化摘要。 
+
+        Serialize subspace conditioning summary.
+
+        Args:
+            None.
+
+        Returns:
+            JSON-like conditioning mapping.
+        """
+        return {
+            "conditioning_mode": self.conditioning_mode,
+            "mask_digest": self.mask_digest,
+            "region_spec_digest": self.region_spec_digest,
+            "masked_dim_count": self.masked_dim_count,
+            "unmasked_dim_count": self.unmasked_dim_count,
+            "mask_area_ratio": self.mask_area_ratio,
+            "fallback_used": self.fallback_used,
+            "fallback_reason": self.fallback_reason,
+            "selected_feature_indices": self.selected_feature_indices,
+        }
+
+    def digest_payload(self) -> Dict[str, Any]:
+        """
+        功能：构造 digest 输入域。 
+
+        Build canonical digest payload for conditioning anchors.
+
+        Args:
+            None.
+
+        Returns:
+            Canonical digest payload mapping.
+        """
+        return {
+            "subspace_conditioning_version": "v1",
+            **self.as_dict(),
+        }
+
+
 class SubspacePlannerImpl:
     """
     功能：真实子空间规划器实现。
@@ -396,6 +469,7 @@ class SubspacePlannerImpl:
                 region_index_digest=region_index_digest,
                 lf_basis=lf_basis,
                 hf_basis=hf_basis,
+                subspace_conditioning=basis_summary.get("subspace_conditioning"),
                 feature_source_tag=feature_source_tag,
                 normalization_tag=normalization_tag,
                 inputs=inputs
@@ -443,6 +517,7 @@ class SubspacePlannerImpl:
                     "normalization_tag": normalization_tag,
                     "timestep_window": [planner_params.timestep_start, planner_params.timestep_end]
                 },
+                "subspace_conditioning": basis_summary.get("subspace_conditioning"),
                 "injection_config": {
                     "edit_timestep": planner_params.edit_timestep,
                     "edit_timestep_ratio": self._normalize_float(
@@ -474,6 +549,7 @@ class SubspacePlannerImpl:
                 "region_index_digest": region_index_digest,
                 "lf_basis_shape": lf_basis.get("basis_shape"),
                 "hf_basis_shape": hf_basis.get("basis_shape"),
+                "subspace_conditioning": basis_summary.get("subspace_conditioning"),
             }
 
             return SubspacePlanEvidence(
@@ -554,6 +630,16 @@ class SubspacePlannerImpl:
             sample_kind="pipeline_trajectory"
         )
         feature_matrix = self._align_feature_matrix(trajectory_samples, planner_params)
+        mask_summary = inputs.get("mask_summary") if isinstance(inputs.get("mask_summary"), dict) else {}
+        subspace_conditioning = self.build_subspace_conditioning(
+            mask_summary=mask_summary,
+            planner_params=planner_params,
+            mask_digest=mask_digest,
+        )
+        feature_matrix = self._apply_mask_conditioning_to_feature_matrix(
+            feature_matrix=feature_matrix,
+            conditioning=subspace_conditioning,
+        )
         
         if feature_matrix.shape[0] < 2 or feature_matrix.shape[1] < 2:
             raise ValueError("feature matrix must be at least 2x2")
@@ -673,6 +759,7 @@ class SubspacePlannerImpl:
             "spectrum_summary": spectrum_summary,
             "mask_digest_binding_enabled": mask_binding_enabled,
             "subspace_spec": subspace_spec,
+            "subspace_conditioning": subspace_conditioning.digest_payload(),
             # 新增：可验证输入域锚点
             "verifiable_input_domain": {
                 "samples_anchor": samples_anchor,
@@ -691,6 +778,7 @@ class SubspacePlannerImpl:
             "null_space_energy_ratio": null_space_energy_ratio,
             "spectrum_summary": spectrum_summary,
             "subspace_spec": subspace_spec,
+            "subspace_conditioning": subspace_conditioning.as_dict(),
             "basis_digest_payload": basis_digest_payload,
             "lf_projection_matrix": lf_projection_matrix,
             "hf_projection_matrix": hf_projection_matrix,
@@ -698,6 +786,116 @@ class SubspacePlannerImpl:
             "samples_anchor": samples_anchor,
             "jvp_anchor": jvp_anchor
         }
+
+    def build_subspace_conditioning(
+        self,
+        mask_summary: Dict[str, Any],
+        planner_params: _PlannerParams,
+        mask_digest: str,
+    ) -> SubspaceConditioning:
+        """
+        功能：构建子空间语义条件化信息。 
+
+        Build mask-conditioned subspace selection summary.
+
+        Args:
+            mask_summary: Mask summary mapping.
+            planner_params: Planner parameter bundle.
+            mask_digest: Mask digest anchor.
+
+        Returns:
+            SubspaceConditioning instance.
+        """
+        if not isinstance(mask_summary, dict):
+            mask_summary = {}
+
+        feature_dim = int(planner_params.feature_dim)
+        if feature_dim <= 0:
+            raise ValueError("planner_params.feature_dim must be positive")
+
+        mask_area_ratio = mask_summary.get("area_ratio", 0.5)
+        if not isinstance(mask_area_ratio, (int, float)):
+            mask_area_ratio = 0.5
+        mask_area_ratio = self._normalize_float(max(0.0, min(float(mask_area_ratio), 1.0)), planner_params.float_round_digits)
+
+        raw_indices = mask_summary.get("downsample_grid_true_indices")
+        selected_feature_indices: List[int] = []
+        conditioning_mode = "full_feature_fallback"
+        fallback_used = False
+        fallback_reason = "<absent>"
+
+        if isinstance(raw_indices, list) and len(raw_indices) > 0:
+            normalized = []
+            for value in raw_indices:
+                if not isinstance(value, int):
+                    continue
+                normalized.append(int(value) % feature_dim)
+            selected_feature_indices = sorted(set(normalized))
+            if len(selected_feature_indices) > 0:
+                conditioning_mode = "mask_indices_v1"
+
+        if len(selected_feature_indices) == 0:
+            fallback_used = True
+            fallback_reason = "mask_indices_absent_or_invalid"
+            conditioning_mode = "mask_ratio_v1"
+            masked_dim_count = max(2, int(round(mask_area_ratio * feature_dim)))
+            masked_dim_count = min(feature_dim, masked_dim_count)
+            selected_feature_indices = list(range(masked_dim_count))
+
+        if len(selected_feature_indices) >= feature_dim:
+            fallback_used = True
+            fallback_reason = "mask_selected_full_feature_domain"
+            conditioning_mode = "full_feature_fallback"
+            selected_feature_indices = list(range(feature_dim))
+
+        masked_dim_count = len(selected_feature_indices)
+        unmasked_dim_count = max(0, feature_dim - masked_dim_count)
+        region_spec_digest = digests.canonical_sha256(
+            {
+                "feature_dim": feature_dim,
+                "selected_feature_indices": selected_feature_indices,
+                "conditioning_mode": conditioning_mode,
+            }
+        )
+        return SubspaceConditioning(
+            conditioning_mode=conditioning_mode,
+            mask_digest=mask_digest,
+            region_spec_digest=region_spec_digest,
+            masked_dim_count=masked_dim_count,
+            unmasked_dim_count=unmasked_dim_count,
+            mask_area_ratio=mask_area_ratio,
+            fallback_used=fallback_used,
+            fallback_reason=fallback_reason,
+            selected_feature_indices=selected_feature_indices,
+        )
+
+    def _apply_mask_conditioning_to_feature_matrix(
+        self,
+        feature_matrix: np.ndarray,
+        conditioning: SubspaceConditioning,
+    ) -> np.ndarray:
+        """
+        功能：按语义条件化筛选特征矩阵列。 
+
+        Apply mask-conditioned feature selection to planner feature matrix.
+
+        Args:
+            feature_matrix: Planner feature matrix.
+            conditioning: Subspace conditioning summary.
+
+        Returns:
+            Mask-conditioned feature matrix.
+        """
+        if not isinstance(feature_matrix, np.ndarray) or feature_matrix.ndim != 2:
+            raise ValueError("feature_matrix must be 2D ndarray")
+        selected = conditioning.selected_feature_indices
+        if not isinstance(selected, list) or len(selected) == 0:
+            return feature_matrix
+        column_count = int(feature_matrix.shape[1])
+        valid_indices = [idx for idx in selected if isinstance(idx, int) and 0 <= idx < column_count]
+        if len(valid_indices) == 0:
+            return feature_matrix
+        return feature_matrix[:, valid_indices]
 
     def _build_plan_payload_for_digest(
         self,
@@ -712,6 +910,7 @@ class SubspacePlannerImpl:
         region_index_digest: str,
         lf_basis: Dict[str, Any],
         hf_basis: Dict[str, Any],
+        subspace_conditioning: Optional[Dict[str, Any]] = None,
         feature_source_tag: Optional[str] = None,
         normalization_tag: Optional[str] = None,
         inputs: Optional[Dict[str, Any]] = None
@@ -873,6 +1072,7 @@ class SubspacePlannerImpl:
             "lf_region_index_spec": lf_region_index_spec,
             "lf_basis": lf_basis,
             "hf_basis": hf_basis,
+            "subspace_conditioning": subspace_conditioning if isinstance(subspace_conditioning, dict) else {},
             "basis_summary": {
                 "rank": basis_summary["rank"],
                 "energy_ratio": basis_summary["energy_ratio"],

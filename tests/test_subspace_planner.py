@@ -320,6 +320,71 @@ class TestPlanDigestBinding:
             "相同输入必须产生相同 plan_digest"
 
 
+class TestSubspaceMaskConditioning:
+    """测试 mask-conditioned 子空间估计可审计性。"""
+
+    def test_subspace_conditioning_changes_with_mask_summary(self):
+        """同配置下不同 mask_summary 应触发不同 conditioning 与 plan_digest。"""
+        planner = SubspacePlannerImpl(
+            impl_id=SUBSPACE_PLANNER_ID,
+            impl_version=SUBSPACE_PLANNER_VERSION,
+            impl_digest=digests.canonical_sha256({
+                "impl_id": SUBSPACE_PLANNER_ID,
+                "impl_version": SUBSPACE_PLANNER_VERSION
+            })
+        )
+
+        cfg = {
+            "watermark": {
+                "subspace": {
+                    "enabled": True,
+                    "rank": 4,
+                    "sample_count": 10,
+                    "feature_dim": 16,
+                    "seed": 123,
+                }
+            }
+        }
+        base_inputs = {
+            "trace_signature": {
+                "num_inference_steps": 20,
+                "guidance_scale": 7.0,
+                "height": 512,
+                "width": 512,
+            }
+        }
+        inputs_a = {
+            **base_inputs,
+            "mask_summary": {
+                "area_ratio": 0.2,
+                "downsample_grid_true_indices": [0, 1, 2, 3],
+                "downsample_grid_shape": [8, 8],
+            },
+        }
+        inputs_b = {
+            **base_inputs,
+            "mask_summary": {
+                "area_ratio": 0.75,
+                "downsample_grid_true_indices": [40, 41, 42, 43, 44, 45],
+                "downsample_grid_shape": [8, 8],
+            },
+        }
+
+        result_a = planner.plan(cfg, mask_digest="mask_digest_same", cfg_digest="cfg_digest_same", inputs=inputs_a)
+        result_b = planner.plan(cfg, mask_digest="mask_digest_same", cfg_digest="cfg_digest_same", inputs=inputs_b)
+
+        assert result_a.status == "ok"
+        assert result_b.status == "ok"
+        assert isinstance(result_a.plan, dict)
+        assert isinstance(result_b.plan, dict)
+        conditioning_a = result_a.plan.get("subspace_conditioning")
+        conditioning_b = result_b.plan.get("subspace_conditioning")
+        assert isinstance(conditioning_a, dict)
+        assert isinstance(conditioning_b, dict)
+        assert conditioning_a.get("region_spec_digest") != conditioning_b.get("region_spec_digest")
+        assert result_a.plan_digest != result_b.plan_digest
+
+
 class TestPlanDigestNotSensitiveToNonPlanDigestScopeFields:
     """测试 plan_digest 不受非 plan_digest_scope 字段影响。"""
 

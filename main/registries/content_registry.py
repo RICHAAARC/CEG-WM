@@ -17,7 +17,9 @@ from .capabilities import ImplCapabilities
 from main.watermarking.content_chain.semantic_mask_provider import (
     SemanticMaskProvider,
     SEMANTIC_MASK_PROVIDER_ID,
-    SEMANTIC_MASK_PROVIDER_VERSION
+    SEMANTIC_MASK_PROVIDER_VERSION,
+    SEMANTIC_MASK_PROVIDER_SALIENCY_POLICY_ID,
+    SEMANTIC_MASK_PROVIDER_SALIENCY_POLICY_VERSION,
 )
 from main.watermarking.content_chain.low_freq_coder import (
     LowFreqCoder,
@@ -40,7 +42,9 @@ from main.watermarking.content_chain.content_detector import (
 from main.watermarking.content_chain.subspace.subspace_planner_impl import (
     SubspacePlannerImpl,
     SUBSPACE_PLANNER_ID,
-    SUBSPACE_PLANNER_VERSION
+    SUBSPACE_PLANNER_VERSION,
+    SUBSPACE_PLANNER_MASK_CONDITIONED_ID,
+    SUBSPACE_PLANNER_MASK_CONDITIONED_VERSION,
 )
 from main.watermarking.content_chain.unified_content_extractor import (
     UnifiedContentExtractor,
@@ -283,6 +287,25 @@ def _build_content_semantic_mask_provider(cfg: Dict[str, Any]) -> SemanticMaskPr
     return SemanticMaskProvider(CONTENT_SEMANTIC_MASK_PROVIDER_ID, impl_version, impl_digest)
 
 
+def _build_content_semantic_mask_provider_saliency_policy(cfg: Dict[str, Any]) -> SemanticMaskProvider:
+    """
+    功能：构造 saliency_source 策略版语义掩码提供器实现。
+
+    Build saliency-source-policy semantic mask provider implementation.
+
+    Args:
+        cfg: Config mapping.
+
+    Returns:
+        SemanticMaskProvider instance.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    impl_version = SEMANTIC_MASK_PROVIDER_SALIENCY_POLICY_VERSION
+    impl_digest = _derive_impl_digest(SEMANTIC_MASK_PROVIDER_SALIENCY_POLICY_ID, impl_version)
+    return SemanticMaskProvider(SEMANTIC_MASK_PROVIDER_SALIENCY_POLICY_ID, impl_version, impl_digest)
+
+
 def _build_content_low_freq_coder(cfg: Dict[str, Any]) -> LowFreqCoder:
     """
     功能：构造低频水印编码器实现。
@@ -350,6 +373,25 @@ def _build_subspace_planner(cfg: Dict[str, Any]) -> SubspacePlannerImpl:
     impl_version = SUBSPACE_PLANNER_VERSION
     impl_digest = _derive_impl_digest(SUBSPACE_PLANNER_ID, impl_version)
     return SubspacePlannerImpl(SUBSPACE_PLANNER_ID, impl_version, impl_digest)
+
+
+def _build_subspace_planner_mask_conditioned(cfg: Dict[str, Any]) -> SubspacePlannerImpl:
+    """
+    功能：构造 mask-conditioned 子空间规划器实现。
+
+    Build mask-conditioned subspace planner implementation.
+
+    Args:
+        cfg: Config mapping.
+
+    Returns:
+        SubspacePlannerImpl instance.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    impl_version = SUBSPACE_PLANNER_MASK_CONDITIONED_VERSION
+    impl_digest = _derive_impl_digest(SUBSPACE_PLANNER_MASK_CONDITIONED_ID, impl_version)
+    return SubspacePlannerImpl(SUBSPACE_PLANNER_MASK_CONDITIONED_ID, impl_version, impl_digest)
 
 
 def _build_unified_content_extractor(cfg: Dict[str, Any]) -> UnifiedContentExtractor:
@@ -442,6 +484,17 @@ _CONTENT_REGISTRY.register_factory(
     )
 )
 _CONTENT_REGISTRY.register_factory(
+    SEMANTIC_MASK_PROVIDER_SALIENCY_POLICY_ID,
+    _build_content_semantic_mask_provider_saliency_policy,
+    capabilities=ImplCapabilities(
+        supports_batching=False,
+        requires_cuda=False,
+        supports_deterministic=True,
+        max_resolution="2048x2048",
+        supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
+    )
+)
+_CONTENT_REGISTRY.register_factory(
     CONTENT_LOW_FREQ_CODER_ID,
     _build_content_low_freq_coder,
     capabilities=ImplCapabilities(
@@ -510,6 +563,17 @@ _SUBSPACE_REGISTRY.register_factory(
 _SUBSPACE_REGISTRY.register_factory(
     SUBSPACE_PLANNER_ID,
     _build_subspace_planner,
+    capabilities=ImplCapabilities(
+        supports_batching=False,
+        requires_cuda=False,
+        supports_deterministic=True,
+        max_resolution=None,
+        supported_models=["stabilityai/stable-diffusion-3.5-medium", "stabilityai/stable-diffusion-3-medium", "stabilityai/stable-diffusion-3-large"]
+    )
+)
+_SUBSPACE_REGISTRY.register_factory(
+    SUBSPACE_PLANNER_MASK_CONDITIONED_ID,
+    _build_subspace_planner_mask_conditioned,
     capabilities=ImplCapabilities(
         supports_batching=False,
         requires_cuda=False,

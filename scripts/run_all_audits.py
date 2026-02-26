@@ -34,6 +34,7 @@ AUDIT_SCRIPTS = [
     "audits/audit_attack_protocol_hardcoding.py",            # attack protocol 事实源强制
     "audits/audit_attack_protocol_implementable.py",         # attack protocol 协议—实现一致性门禁
     "audits/audit_attack_protocol_report_coverage.py",      # attack protocol 协议—报告覆盖率对齐（平台保障）
+    "audits/audit_runtime_impl_smoke_new_saliency_and_subspace.py",  # 新 impl runtime smoke 收口
     "audits/audit_repro_bundle_integrity.py",               # repro bundle 完整性校验
     "audits/audit_experiment_matrix_outputs_schema.py",      # experiment matrix 汇总工件 schema 完整性
     "audits/audit_protocol_compare_outputs_schema.py",      # protocol compare 汇总工件 schema 与一致性（research-only）

@@ -41,7 +41,7 @@ from main.core.records_io import write_artifact_json_unbound, write_artifact_byt
 SIGNOFF_REPORT_SCHEMA_VERSION = "v1"
 MATRIX_SCHEMA_AUDIT_SCRIPT = "audits/audit_experiment_matrix_outputs_schema.py"
 
-# Baseline 最小审计集合（历史兼容，12 个审计）
+# Baseline 最小审计集合（历史兼容，13 个审计）
 MINIMUM_AUDIT_SCRIPTS = [
     "audits/audit_write_bypass_scan.py",
     "audits/audit_registry_injection_surface.py",
@@ -55,6 +55,7 @@ MINIMUM_AUDIT_SCRIPTS = [
     "audits/audit_evaluation_report_schema.py",         # 报告锚点字段完整性（signoff BLOCK）
     "audits/audit_thresholds_readonly_enforcement.py",  # thresholds 只读保护（signoff BLOCK）
     "audits/audit_attack_protocol_hardcoding.py",       # attack protocol 事实源强制（signoff BLOCK）
+    "audits/audit_runtime_impl_smoke_new_saliency_and_subspace.py",  # 新 impl runtime smoke（signoff NON_BLOCK）
 ]
 
 # Paper/Publish 追加审计清单（论文复现级门禁）
