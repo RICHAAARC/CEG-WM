@@ -144,6 +144,18 @@ override:
       allowed_values: [false]
       source: "cli"
       description: "Ablation：禁用 HF 高频通道（传递 =false 强制禁用）"
+    
+    # Experiment Matrix 实验网格必需参数覆写
+    - arg_name: "seed"
+      field_path: "seed"
+      override_mode: "set"
+      source: "cli"
+      description: "实验矩阵：允许覆写随机种子用于可重复性实验网格"
+    - arg_name: "model_id"
+      field_path: "model_id"
+      override_mode: "set"
+      source: "cli"
+      description: "实验矩阵：允许覆写模型 ID 用于多模型对比实验"
 
   # 覆写 source 的枚举白名单（gate 必须校验）
   source_enum:
@@ -173,8 +185,9 @@ override:
       - "ablation_enable_lf"
       - "ablation_disable_lf"
       - "ablation_enable_hf"
-      - "ablation_disable_hf"
-    immutable: true
+      - "ablation_disable_hf"      # Experiment Matrix 实验网格枚举
+      - "seed"
+      - "model_id"    immutable: true
     notes: "必须与 allowed_overrides[*].arg_name 的值集完全一致。新增 override 必须同步更新此枚举。"
 
   # 一致性校验要求（gate 必须实现）
