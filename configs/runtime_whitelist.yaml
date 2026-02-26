@@ -55,6 +55,18 @@ override:
       override_mode: "set"
       set_value: false
       source: "cli"
+    - arg_name: "enable_content_detect"
+      field_path: "detect.content.enabled"
+      override_mode: "set"
+      set_value: true
+      source: "cli"
+      description: "实验矩阵：启用 content 检测（experiment_matrix 必需）"
+    - arg_name: "disable_content_detect"
+      field_path: "detect.content.enabled"
+      override_mode: "set"
+      set_value: false
+      source: "cli"
+      description: "实验矩阵：禁用 content 检测"
     - arg_name: "run_root_reuse_allowed"
       field_path: "allow_nonempty_run_root"
       override_mode: "set"
@@ -184,6 +196,8 @@ override:
     allowed:
       - "enable_geometry"
       - "disable_geometry"
+      - "enable_content_detect"
+      - "disable_content_detect"
       - "run_root_reuse_allowed"
       - "run_root_reuse_reason"
       - "force_cpu"

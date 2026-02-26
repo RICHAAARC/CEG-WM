@@ -528,6 +528,10 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> None:
         if isinstance(max_samples, int):
             stage_overrides.append(f"max_samples={max_samples}")
         
+        # detect 阶段必须启用 content 检测（experiment_matrix 需要生成检测分数）
+        if stage_name == "detect":
+            stage_overrides.append("enable_content_detect=true")
+        
         # calibrate 和 evaluate 需要 detect_records_glob 参数
         if stage_name in ["calibrate", "evaluate"]:
             detect_record_path = run_root / "records" / "detect_record.json"
