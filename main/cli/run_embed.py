@@ -265,6 +265,9 @@ def run_embed(
             run_meta["impl_identity"] = impl_identity.as_dict()
             run_meta["impl_identity_digest"] = runtime_resolver.compute_impl_identity_digest(impl_identity)
             run_meta["impl_set_capabilities_digest"] = impl_set_capabilities_digest
+            impl_set_capabilities_v2_digest = cfg.get("impl_set_capabilities_v2_digest")
+            if isinstance(impl_set_capabilities_v2_digest, str) and impl_set_capabilities_v2_digest:
+                run_meta["impl_set_capabilities_v2_digest"] = impl_set_capabilities_v2_digest
 
             if isinstance(input_image_path, str) and input_image_path.strip():
                 cfg["__embed_input_image_path__"] = input_image_path.strip()
@@ -595,6 +598,8 @@ def run_embed(
                 record["override_applied"] = override_applied
             # 写入 impl_set_capabilities_digest。
             record["impl_set_capabilities_digest"] = impl_set_capabilities_digest
+            if isinstance(impl_set_capabilities_v2_digest, str) and impl_set_capabilities_v2_digest:
+                record["impl_set_capabilities_v2_digest"] = impl_set_capabilities_v2_digest
 
             schema.ensure_required_fields(record, cfg, interpretation)
 

@@ -17,6 +17,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
+
 from main.core import config_loader, digests
 from main.core import records_io
 from main.evaluation import protocol_loader
@@ -608,6 +610,42 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> None:
             run_root=run_root,
             config_path=Path(config_path),
             stage_overrides=stage_overrides,
+        )
+
+        if stage_name == "detect":
+            _assert_min_valid_content_scores_after_detect(run_root, minimum_required=1)
+
+
+def _assert_min_valid_content_scores_after_detect(run_root: Path, minimum_required: int = 1) -> None:
+    """Fail-fast gate: require at least minimum valid content_score samples after detect."""
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(minimum_required, int) or minimum_required <= 0:
+        raise ValueError("minimum_required must be positive int")
+
+    detect_record_path = run_root / "records" / "detect_record.json"
+    detect_record_obj = _read_optional_json(detect_record_path)
+    if not isinstance(detect_record_obj, dict) or not detect_record_obj:
+        raise RuntimeError(
+            "detect stage gate failed: detect_record missing or invalid; "
+            f"path={detect_record_path}"
+        )
+
+    content_payload = detect_record_obj.get("content_evidence_payload")
+    valid_count = 0
+    status_value = None
+    score_value = None
+    if isinstance(content_payload, dict):
+        status_value = content_payload.get("status")
+        score_value = content_payload.get("score")
+        if status_value == "ok" and isinstance(score_value, (int, float)) and np.isfinite(float(score_value)):
+            valid_count = 1
+
+    if valid_count < minimum_required:
+        raise RuntimeError(
+            "detect stage gate failed: insufficient valid content_score samples before calibrate; "
+            f"required={minimum_required}, valid={valid_count}, status={status_value}, score={score_value}, "
+            f"path={detect_record_path}"
         )
 
 

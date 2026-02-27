@@ -295,6 +295,14 @@ def run_detect_orchestrator(
     if injection_status == "mismatch" and injection_mismatch_reason:
         mismatch_reasons.append(injection_mismatch_reason)
 
+    paper_impl_binding_status, paper_impl_binding_reason = _evaluate_paper_impl_binding_consistency(
+        cfg=cfg,
+        injection_evidence=injection_evidence,
+        input_record=input_record,
+    )
+    if paper_impl_binding_status == "mismatch" and isinstance(paper_impl_binding_reason, str):
+        mismatch_reasons.append(paper_impl_binding_reason)
+
     # (S-D) Paper Faithfulness: 验证 paper faithfulness 证据一致性（必达）
     # 注意：只在 input_record 存在且包含 paper_faithfulness 信息时才添加到全局 mismatch_reasons
     # 这样可以避免单元测试中使用不完整 input_record 时产生副作用
@@ -370,6 +378,7 @@ def run_detect_orchestrator(
             "content_failure_reason": _resolve_mismatch_failure_reason(primary_mismatch_reason),
             "content_mismatch_reason": primary_mismatch_reason,
             "content_mismatch_field_path": primary_mismatch_field_path,
+            "mismatch_reasons": list(mismatch_reasons),
             "score_parts": None,
             "lf_score": None,
             "hf_score": None,
@@ -1076,6 +1085,8 @@ def _merge_injection_evidence(content_evidence_payload: Dict[str, Any], injectio
     content_evidence_payload["injection_params_digest"] = injection_evidence.get("injection_params_digest")
     content_evidence_payload["injection_metrics"] = injection_evidence.get("injection_metrics")
     content_evidence_payload["subspace_binding_digest"] = injection_evidence.get("subspace_binding_digest")
+    content_evidence_payload["lf_impl_binding"] = injection_evidence.get("lf_impl_binding")
+    content_evidence_payload["hf_impl_binding"] = injection_evidence.get("hf_impl_binding")
 
 
 def _evaluate_injection_consistency(
@@ -1142,6 +1153,83 @@ def _evaluate_injection_consistency(
         if not isinstance(detect_binding_digest, str) or detect_binding_digest != embed_binding_digest:
             return "mismatch", "injection_subspace_binding_digest_mismatch"
     return "ok", None
+
+
+def _evaluate_paper_impl_binding_consistency(
+    cfg: Dict[str, Any],
+    injection_evidence: Optional[Dict[str, Any]],
+    input_record: Optional[Dict[str, Any]] = None,
+) -> tuple[str, Optional[str]]:
+    """
+    功能：在 paper 模式下校验 HF/LF impl 绑定一致性。
+
+    Validate impl binding consistency for paper mode and reject fallback-only claims.
+
+    Args:
+        cfg: Runtime configuration mapping.
+        injection_evidence: Injection evidence mapping.
+
+    Returns:
+        Tuple of (status, reason) where status in {ok, absent, mismatch}.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if injection_evidence is not None and not isinstance(injection_evidence, dict):
+        raise TypeError("injection_evidence must be dict or None")
+    if input_record is not None and not isinstance(input_record, dict):
+        raise TypeError("input_record must be dict or None")
+
+    paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
+    if not bool(paper_cfg.get("enabled", False)):
+        return "ok", None
+
+    if isinstance(injection_evidence, dict):
+        detect_status = injection_evidence.get("status")
+        if isinstance(detect_status, str) and detect_status != "ok":
+            return "absent", "paper_impl_binding_injection_status_not_ok"
+
+    resolved_binding_source = injection_evidence
+    if not isinstance(resolved_binding_source, dict):
+        resolved_binding_source = _extract_embed_impl_binding_source(input_record)
+        if not isinstance(resolved_binding_source, dict):
+            return "absent", "paper_impl_binding_evidence_absent"
+
+    for channel_name in ["lf_impl_binding", "hf_impl_binding"]:
+        binding_payload = resolved_binding_source.get(channel_name)
+        if not isinstance(binding_payload, dict):
+            return "mismatch", f"{channel_name}_missing_under_paper_mode"
+        impl_selected = binding_payload.get("impl_selected")
+        if not isinstance(impl_selected, str) or not impl_selected:
+            return "mismatch", f"{channel_name}_impl_selected_absent"
+        fallback_used = binding_payload.get("fallback_used")
+        if bool(fallback_used):
+            return "mismatch", f"{channel_name}_fallback_used_under_paper_mode"
+    return "ok", None
+
+
+def _extract_embed_impl_binding_source(input_record: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    功能：从 embed 输入记录提取 impl 绑定证据来源。
+
+    Extract LF/HF impl binding source from embed-time record fields.
+
+    Args:
+        input_record: Optional embed-time input record mapping.
+
+    Returns:
+        Mapping containing lf_impl_binding/hf_impl_binding if available.
+    """
+    if not isinstance(input_record, dict):
+        return None
+
+    for field_name in ["content_evidence_payload", "content_evidence", "content_result"]:
+        candidate = input_record.get(field_name)
+        if isinstance(candidate, dict):
+            has_lf = isinstance(candidate.get("lf_impl_binding"), dict)
+            has_hf = isinstance(candidate.get("hf_impl_binding"), dict)
+            if has_lf or has_hf:
+                return candidate
+    return None
 
 
 def _evaluate_paper_faithfulness_consistency(
@@ -1765,6 +1853,12 @@ def _resolve_primary_mismatch(mismatch_reasons: list[str]) -> tuple[str, str]:
         "injection_params_digest_invalid": "content_evidence.injection_params_digest",
         "injection_status_mismatch": "content_evidence.injection_status",
         "injection_subspace_binding_digest_mismatch": "content_evidence.subspace_binding_digest",
+        "lf_impl_binding_missing_under_paper_mode": "content_evidence.lf_impl_binding",
+        "hf_impl_binding_missing_under_paper_mode": "content_evidence.hf_impl_binding",
+        "lf_impl_binding_impl_selected_absent": "content_evidence.lf_impl_binding.impl_selected",
+        "hf_impl_binding_impl_selected_absent": "content_evidence.hf_impl_binding.impl_selected",
+        "lf_impl_binding_fallback_used_under_paper_mode": "content_evidence.lf_impl_binding.fallback_used",
+        "hf_impl_binding_fallback_used_under_paper_mode": "content_evidence.hf_impl_binding.fallback_used",
         # (S-D) Paper Faithfulness mismatch field paths
         "paper_spec_digest_absent_or_invalid": "paper_faithfulness.spec_digest",
         "pipeline_fingerprint_digest_absent_or_invalid": "content_evidence.pipeline_fingerprint_digest",
@@ -1786,6 +1880,12 @@ def _resolve_primary_mismatch(mismatch_reasons: list[str]) -> tuple[str, str]:
         "injection_params_digest_invalid",
         "injection_status_mismatch",
         "injection_subspace_binding_digest_mismatch",
+        "lf_impl_binding_missing_under_paper_mode",
+        "hf_impl_binding_missing_under_paper_mode",
+        "lf_impl_binding_impl_selected_absent",
+        "hf_impl_binding_impl_selected_absent",
+        "lf_impl_binding_fallback_used_under_paper_mode",
+        "hf_impl_binding_fallback_used_under_paper_mode",
         # (S-D) Paper Faithfulness mismatch priority
         "paper_spec_digest_absent_or_invalid",
         "pipeline_fingerprint_digest_absent_or_invalid",
@@ -2195,6 +2295,7 @@ def _resolve_impl_digest_for_evaluate(cfg: Dict[str, Any], detect_records: list[
 
     from_cfg = _pick_first_non_empty_string([
         cfg.get("__impl_digest__"),
+        cfg.get("impl_set_capabilities_v2_digest"),
         cfg.get("impl_set_capabilities_digest"),
         cfg.get("impl_identity_digest"),
     ])
@@ -2205,6 +2306,7 @@ def _resolve_impl_digest_for_evaluate(cfg: Dict[str, Any], detect_records: list[
         if not isinstance(record, dict):
             continue
         resolved = _pick_first_non_empty_string([
+            record.get("impl_set_capabilities_v2_digest"),
             record.get("impl_set_capabilities_digest"),
             record.get("impl_identity_digest"),
             record.get("impl_digest"),
@@ -3658,7 +3760,18 @@ def _run_sync_module_for_detect(sync_module: Any, cfg: Dict[str, Any], runtime_i
             except TypeError:
                 sync_result = sync_with_context(cfg, sync_ctx)
             if isinstance(sync_result, dict):
-                return sync_result
+                normalized = dict(sync_result)
+                raw_status = normalized.get("sync_status")
+                if not isinstance(raw_status, str) or not raw_status:
+                    raw_status = normalized.get("status")
+                if isinstance(raw_status, str) and raw_status:
+                    lowered = raw_status.lower()
+                    if lowered == "fail":
+                        lowered = "failed"
+                    if lowered in {"ok", "absent", "mismatch", "failed"}:
+                        normalized["sync_status"] = lowered
+                        normalized["status"] = lowered
+                return normalized
         except Exception as exc:
             return {
                 "status": "failed",
@@ -3755,6 +3868,9 @@ def _run_geometry_chain_with_sync(
                 geometry_result["sync_status"] = sync_status
             if "sync_metrics" not in geometry_result:
                 geometry_result["sync_metrics"] = sync_result.get("sync_quality_metrics")
+            sync_quality_semantics = sync_result.get("sync_quality_semantics")
+            if isinstance(sync_quality_semantics, dict):
+                geometry_result["sync_quality_semantics"] = sync_quality_semantics
             relation_digest_bound = sync_result.get("relation_digest_bound")
             if isinstance(relation_digest_bound, str) and relation_digest_bound:
                 geometry_result["relation_digest_bound"] = relation_digest_bound

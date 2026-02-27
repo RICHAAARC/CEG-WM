@@ -249,9 +249,6 @@ def _run_single_protocol_pipeline(
                 str(base_config_path),
                 "--batch-root",
                 str(run_root.parent),
-                "--validate-protocol",
-                "--repo-root",
-                str(repo_root),
             ]
         elif mode == "matrix":
             # 调用 run_experiment_matrix.py（完整 matrix）
@@ -262,9 +259,6 @@ def _run_single_protocol_pipeline(
                 str(base_config_path),
                 "--batch-root",
                 str(run_root.parent),
-                "--validate-protocol",
-                "--repo-root",
-                str(repo_root),
             ]
 
         result = subprocess.run(

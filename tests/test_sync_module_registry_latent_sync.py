@@ -6,10 +6,12 @@ Module type: General module
 from __future__ import annotations
 
 from typing import Dict, Any
+import numpy as np
 
 from main.policy.runtime_whitelist import load_runtime_whitelist
 from main.registries.geometry_registry import resolve_sync_module
 from main.watermarking.geometry_chain.sync import SyncRuntimeContext, resolve_enable_latent_sync
+from main.watermarking.detect import orchestrator as detect_orchestrator
 
 
 def _build_minimal_cfg(enable_latent_sync: bool = True) -> Dict[str, Any]:
@@ -149,3 +151,99 @@ def test_resolve_enable_latent_sync_flag() -> None:
     cfg_disabled = _build_minimal_cfg(enable_latent_sync=False)
     assert resolve_enable_latent_sync(cfg_enabled) is True
     assert resolve_enable_latent_sync(cfg_disabled) is False
+
+
+def test_sync_module_v2_sync_with_context_ok_path() -> None:
+    """
+    功能：v2 sync_with_context 在完整 runtime_inputs 下应稳定返回非异常状态。
+
+    v2 sync_with_context should return structured status without NameError
+    when runtime_inputs includes relation_digest.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    factory = resolve_sync_module("geometry_latent_sync_sd3_v2")
+    instance = factory({})
+    cfg = _build_minimal_cfg(enable_latent_sync=True)
+    latents = np.random.default_rng(20260227).normal(size=(1, 4, 8, 8)).astype(np.float32)
+    context = SyncRuntimeContext(
+        pipeline=object(),
+        latents=latents,
+        rng=None,
+        trajectory_evidence=None,
+    )
+    result = instance.sync_with_context(
+        cfg,
+        context,
+        runtime_inputs={"relation_digest": "r" * 64},
+    )
+    assert isinstance(result, dict)
+    assert result.get("sync_status") in {"ok", "absent", "mismatch", "failed"}
+    assert isinstance(result.get("sync_success"), bool)
+    failure_reason = result.get("geometry_failure_reason")
+    if isinstance(failure_reason, str):
+        assert "NameError" not in failure_reason
+
+
+def test_sync_module_v2_relation_digest_missing_returns_mismatch() -> None:
+    """
+    功能：v2 在缺失 relation_digest 时必须返回 mismatch 语义。
+
+    v2 must return mismatch semantics when relation_digest is absent.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    factory = resolve_sync_module("geometry_latent_sync_sd3_v2")
+    instance = factory({})
+    cfg = _build_minimal_cfg(enable_latent_sync=True)
+    latents = np.random.default_rng(20260228).normal(size=(1, 4, 8, 8)).astype(np.float32)
+    context = SyncRuntimeContext(
+        pipeline=object(),
+        latents=latents,
+        rng=None,
+        trajectory_evidence=None,
+    )
+    result = instance.sync_with_context(cfg, context)
+    assert isinstance(result, dict)
+    assert result.get("sync_status") == "mismatch"
+    assert result.get("sync_success") is False
+    assert result.get("geometry_failure_reason") == "relation_digest_missing_for_v2"
+
+
+def test_detect_run_sync_module_for_v2_no_nameerror() -> None:
+    """
+    功能：detect 侧调用 v2 sync 模块不应出现 sync_with_context_failed: NameError。
+
+    detect orchestrator should not emit sync_with_context_failed: NameError
+    for v2 sync module.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    factory = resolve_sync_module("geometry_latent_sync_sd3_v2")
+    instance = factory({})
+    cfg = _build_minimal_cfg(enable_latent_sync=True)
+    latents = np.random.default_rng(20260301).normal(size=(1, 4, 8, 8)).astype(np.float32)
+    runtime_inputs = {
+        "pipeline": object(),
+        "latents": latents,
+        "rng": None,
+        "relation_digest": "r" * 64,
+    }
+    run_sync = getattr(detect_orchestrator, "_run_sync_module_for_detect")
+    result = run_sync(instance, cfg, runtime_inputs)
+    assert isinstance(result, dict)
+    failure_reason = result.get("geometry_failure_reason")
+    if isinstance(failure_reason, str):
+        assert "sync_with_context_failed: NameError" not in failure_reason

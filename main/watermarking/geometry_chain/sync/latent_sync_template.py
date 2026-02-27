@@ -696,6 +696,7 @@ class GeometryLatentSyncSD3V2:
                     "score_type": "heuristic",
                     "score_version": "latent_sync_quality_heuristic_v1",
                     "trusted_as_primary_geometry_evidence": False,
+                    "evidence_level": "supporting",
                 },
             }
 
@@ -709,6 +710,7 @@ class GeometryLatentSyncSD3V2:
                     "score_type": "heuristic",
                     "score_version": "latent_sync_quality_heuristic_v1",
                     "trusted_as_primary_geometry_evidence": False,
+                    "evidence_level": "supporting",
                 },
             }
 
@@ -723,6 +725,7 @@ class GeometryLatentSyncSD3V2:
                     "score_type": "heuristic",
                     "score_version": "latent_sync_quality_heuristic_v1",
                     "trusted_as_primary_geometry_evidence": False,
+                    "evidence_level": "supporting",
                 },
             }
 
@@ -755,6 +758,12 @@ class GeometryLatentSyncSD3V2:
                 "geo_score": None,
                 "sync_digest": None,
                 "sync_quality_metrics": sync_quality_metrics,
+                "sync_quality_semantics": {
+                    "score_type": "heuristic",
+                    "score_version": "latent_sync_quality_heuristic_v1",
+                    "trusted_as_primary_geometry_evidence": False,
+                    "evidence_level": "supporting",
+                },
                 "geometry_failure_reason": "sync_uncertainty_too_high",
             }
 
@@ -779,6 +788,7 @@ class GeometryLatentSyncSD3V2:
                 "score_type": "heuristic",
                 "score_version": "latent_sync_quality_heuristic_v1",
                 "trusted_as_primary_geometry_evidence": False,
+                "evidence_level": "supporting",
             },
             "relation_digest_bound": relation_digest,
             "geometry_failure_reason": None,
@@ -843,4 +853,21 @@ class GeometryLatentSyncSD3V2:
             "uncertainty": float(round(uncertainty, 6)),
             "relation_digest_bound": relation_digest,
             "quality_method": "heuristic_latent_spectrum_relation_alignment_v1",
+            "quality_components_v2": {
+                "version": "latent_sync_quality_components_v2",
+                "contrast_component": float(round(min(1.0, contrast_ratio / 2.0), 6)),
+                "spectral_component": float(round(min(1.0, spectral_peak_ratio / 3.0), 6)),
+                "relation_component": float(round(relation_alignment, 6)),
+                "weights": {
+                    "contrast_component": 0.35,
+                    "spectral_component": 0.35,
+                    "relation_component": 0.30,
+                },
+                "constraints": {
+                    "quality_score_in_unit_interval": bool(0.0 <= quality_score <= 1.0),
+                    "uncertainty_is_one_minus_quality_score": float(round(abs((1.0 - quality_score) - uncertainty), 6)),
+                },
+                "primary_evidence": False,
+                "evidence_level": "supporting",
+            },
         }

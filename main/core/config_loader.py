@@ -86,6 +86,10 @@ def normalize_ablation_flags(cfg: Dict[str, Any]) -> None:
     enable_rescue = ablation.get("enable_rescue")
     enable_lf = ablation.get("enable_lf")
     enable_hf = ablation.get("enable_hf")
+    enable_sync = ablation.get("enable_sync")
+    enable_anchor = ablation.get("enable_anchor")
+    enable_attention_proxy = ablation.get("enable_attention_proxy")
+    enable_image_sidecar = ablation.get("enable_image_sidecar")
     lf_only = ablation.get("lf_only", False)
     hf_only = ablation.get("hf_only", False)
 
@@ -115,6 +119,10 @@ def normalize_ablation_flags(cfg: Dict[str, Any]) -> None:
     enable_rescue_resolved = _resolve_bool(enable_rescue, False)
     enable_lf_resolved = _resolve_bool(enable_lf, True)
     enable_hf_resolved = _resolve_bool(enable_hf, False)
+    enable_sync_resolved = _resolve_bool(enable_sync, True)
+    enable_anchor_resolved = _resolve_bool(enable_anchor, True)
+    enable_attention_proxy_resolved = _resolve_bool(enable_attention_proxy, True)
+    enable_image_sidecar_resolved = _resolve_bool(enable_image_sidecar, True)
 
     # 应用互斥约束覆写。
     if lf_only:
@@ -134,6 +142,10 @@ def normalize_ablation_flags(cfg: Dict[str, Any]) -> None:
         "enable_rescue": enable_rescue_resolved,
         "enable_lf": enable_lf_resolved,
         "enable_hf": enable_hf_resolved,
+        "enable_sync": enable_sync_resolved,
+        "enable_anchor": enable_anchor_resolved,
+        "enable_attention_proxy": enable_attention_proxy_resolved,
+        "enable_image_sidecar": enable_image_sidecar_resolved,
         "lf_only": lf_only,
         "hf_only": hf_only,
     }

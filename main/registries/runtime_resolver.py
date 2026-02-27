@@ -397,6 +397,8 @@ def build_runtime_impl_set_from_cfg(cfg: Dict[str, Any]) -> tuple[ImplIdentity, 
 
     # 计算 impl_set_capabilities_digest（历史冻结口径仅绑定五个核心域）。
     impl_set_capabilities_digest = compute_impl_set_capabilities_digest(impl_caps_list[:5])
+    # 并行计算扩展口径（v2）：覆盖 HF/LF 域，保持 v1 返回契约不变。
+    cfg["impl_set_capabilities_v2_digest"] = compute_impl_set_capabilities_digest_v2(impl_caps_list)
 
     return identity, impl_set, impl_set_capabilities_digest
 
@@ -629,6 +631,68 @@ def compute_impl_set_capabilities_digest(impl_caps_list: List[ImplCapabilities])
         
         canonical_caps[domain] = domain_caps
     
+    return digests.canonical_sha256(canonical_caps)
+
+
+def compute_impl_set_capabilities_digest_v2(impl_caps_list: List[ImplCapabilities]) -> str:
+    """
+    功能：计算 impl_set capabilities v2 摘要（包含 HF/LF 扩展域）。
+
+    Compute impl_set_capabilities_v2_digest from aggregated capabilities.
+    Preserves v1 fields and extends domain coverage to optional HF/LF domains.
+
+    Args:
+        impl_caps_list: List of ImplCapabilities instances in resolver order.
+
+    Returns:
+        Canonical digest string.
+
+    Raises:
+        TypeError: If input is invalid.
+        ValueError: If domain count is outside supported range.
+    """
+    if not isinstance(impl_caps_list, list):
+        raise TypeError("impl_caps_list must be list")
+
+    expected_min = 5
+    expected_max = 7
+    if len(impl_caps_list) < expected_min or len(impl_caps_list) > expected_max:
+        raise ValueError(
+            "impl_caps_list length mismatch for v2: "
+            f"expected {expected_min}..{expected_max}, got {len(impl_caps_list)}"
+        )
+
+    domains = [
+        "content_extractor",
+        "geometry_extractor",
+        "fusion_rule",
+        "subspace_planner",
+        "sync_module",
+        "hf_embedder",
+        "lf_coder",
+    ]
+    selected_domains = domains[:len(impl_caps_list)]
+
+    canonical_caps: Dict[str, Any] = {
+        "capabilities_version": "v2",
+        "domain_order": selected_domains,
+    }
+    for idx, domain in enumerate(selected_domains):
+        caps = impl_caps_list[idx]
+        if not isinstance(caps, ImplCapabilities):
+            raise TypeError(f"impl_caps_list[{idx}] must be ImplCapabilities")
+
+        domain_caps: Dict[str, Any] = {
+            "supports_batching": caps.supports_batching,
+            "requires_cuda": caps.requires_cuda,
+            "supports_deterministic": caps.supports_deterministic,
+        }
+        if caps.max_resolution is not None and isinstance(caps.max_resolution, str):
+            domain_caps["max_resolution"] = caps.max_resolution
+        if caps.supported_models is not None and isinstance(caps.supported_models, list):
+            domain_caps["supported_models"] = sorted(caps.supported_models)
+        canonical_caps[domain] = domain_caps
+
     return digests.canonical_sha256(canonical_caps)
 
 

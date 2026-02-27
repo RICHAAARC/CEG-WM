@@ -506,6 +506,7 @@ class SubspacePlannerImpl:
                 "subspace_method": "trajectory_jacobian_nullspace_svd",
                 "subspace_source": "planner_computed",
                 "plan_origin": plan_origin,
+                "subspace_evidence_semantics": basis_summary.get("subspace_evidence_semantics"),
                 "rank": basis_summary["rank"],
                 "energy_ratio": basis_summary["energy_ratio"],
                 "null_space_dim": basis_summary["null_space_dim"],
@@ -564,6 +565,7 @@ class SubspacePlannerImpl:
                 "region_index_digest": region_index_digest,
                 "lf_basis_shape": lf_basis.get("basis_shape"),
                 "hf_basis_shape": hf_basis.get("basis_shape"),
+                "subspace_evidence_semantics": basis_summary.get("subspace_evidence_semantics"),
                 "subspace_conditioning": basis_summary.get("subspace_conditioning"),
             }
 
@@ -760,6 +762,8 @@ class SubspacePlannerImpl:
         }
 
         # 步骤 5：构造basis_digest_payload，包含可验证框架信息
+        subspace_evidence_semantics = self._build_subspace_evidence_semantics(samples_anchor, jvp_anchor)
+
         basis_digest_payload = {
             "basis_digest_version": "v2",  # 版本升级以反映新的可验证机制
             "estimation_method": method_id,
@@ -775,6 +779,7 @@ class SubspacePlannerImpl:
             "mask_digest_binding_enabled": mask_binding_enabled,
             "subspace_spec": subspace_spec,
             "subspace_conditioning": subspace_conditioning.digest_payload(),
+            "subspace_evidence_semantics": subspace_evidence_semantics,
             # 新增：可验证输入域锚点
             "verifiable_input_domain": {
                 "samples_anchor": samples_anchor,
@@ -794,12 +799,61 @@ class SubspacePlannerImpl:
             "spectrum_summary": spectrum_summary,
             "subspace_spec": subspace_spec,
             "subspace_conditioning": subspace_conditioning.as_dict(),
+            "subspace_evidence_semantics": subspace_evidence_semantics,
             "basis_digest_payload": basis_digest_payload,
             "lf_projection_matrix": lf_projection_matrix,
             "hf_projection_matrix": hf_projection_matrix,
             # 新增：可验证锚点供 plan_digest 使用
             "samples_anchor": samples_anchor,
             "jvp_anchor": jvp_anchor
+        }
+
+    def _build_subspace_evidence_semantics(
+        self,
+        samples_anchor: Dict[str, Any],
+        jvp_anchor: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        功能：构造子空间主证据语义摘要。
+
+        Build explicit semantics summary for subspace primary/surrogate evidence.
+
+        Args:
+            samples_anchor: Trajectory sampling anchor mapping.
+            jvp_anchor: JVP anchor mapping.
+
+        Returns:
+            Semantics mapping with source/evidence_level/reason/version.
+        """
+        if not isinstance(samples_anchor, dict):
+            samples_anchor = {}
+        if not isinstance(jvp_anchor, dict):
+            jvp_anchor = {}
+
+        sample_source = samples_anchor.get("source") if isinstance(samples_anchor.get("source"), str) else "<absent>"
+        sample_semantics = samples_anchor.get("sample_semantics") if isinstance(samples_anchor.get("sample_semantics"), str) else "<absent>"
+        surrogate_reason = samples_anchor.get("surrogate_reason") if isinstance(samples_anchor.get("surrogate_reason"), str) else "<absent>"
+        jvp_source = jvp_anchor.get("jvp_source") if isinstance(jvp_anchor.get("jvp_source"), str) else "surrogate_transition"
+
+        if jvp_source == "real_unet":
+            evidence_level = "hybrid"
+            primary_path = "real_unet_jvp_with_surrogate_trajectory_samples"
+            evidence_reason = "real_jvp_available_but_trajectory_sampling_not_full_unet_rollout"
+        else:
+            evidence_level = "surrogate"
+            primary_path = "surrogate_transition_jvp_and_surrogate_trajectory_samples"
+            evidence_reason = surrogate_reason if surrogate_reason != "<absent>" else "real_unet_jvp_unavailable"
+
+        return {
+            "version": "subspace_evidence_semantics_v1",
+            "source": {
+                "sample_source": sample_source,
+                "sample_semantics": sample_semantics,
+                "jvp_source": jvp_source,
+            },
+            "evidence_level": evidence_level,
+            "primary_path": primary_path,
+            "reason": evidence_reason,
         }
 
     def build_subspace_conditioning(

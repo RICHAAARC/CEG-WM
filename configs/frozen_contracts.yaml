@@ -482,6 +482,9 @@ records_schema:
     - content_evidence.trajectory_evidence.device
     - geometry_evidence.anchor_digest
     - geometry_evidence.anchor_metrics
+    - geometry_evidence.anchor_source_semantics
+    - geometry_evidence.anchor_evidence_level
+    - geometry_evidence.anchor_blocking_reason
     - geometry_evidence.sync_digest
     - geometry_evidence.sync_metrics
     - geometry_evidence.align_trace_digest
@@ -501,6 +504,9 @@ records_schema:
     - content_evidence.detect_lf_statistics
     - content_evidence.detect_hf_statistics
     - content_evidence.subspace_consistency_status
+    - content_evidence.lf_impl_binding
+    - content_evidence.hf_impl_binding
+    - impl_set_capabilities_v2_digest
     # ---- Paper Faithfulness 对齐证据字段 ----
     - paper_faithfulness.spec_version
     - paper_faithfulness.spec_digest
@@ -515,6 +521,61 @@ records_schema:
     - content_evidence.alignment_digest
     - content_evidence.lf.ecc_spec_digest
     - content_evidence.hf_evidence_summary.repetition_factor
+    # ---- 历史欠账字段补登记（append-only） ----
+    - artifact_sha256
+    - attack_random_seed
+    - attack_trace
+    - attack_trace_digest
+    - calibration_is_fallback
+    - calibration_mode
+    - content_evidence.mask_stats.mask_fallback_reason
+    - content_evidence.mask_stats.mask_impl_id
+    - content_evidence.mask_stats.mask_params_digest
+    - content_evidence.mask_stats.mask_resolution_binding
+    - content_evidence.mask_stats.mask_source_impl_identity
+    - content_evidence.mask_stats.routing_digest
+    - content_evidence.mask_stats.routing_summary
+    - content_evidence.subspace_plan.hf_basis
+    - content_evidence.subspace_plan.hf_region_index_spec
+    - content_evidence.subspace_plan.lf_basis
+    - content_evidence.subspace_plan.lf_region_index_spec
+    - content_evidence.subspace_plan.region_index_digest
+    - content_evidence.subspace_plan.subspace_evidence_semantics
+    - decision.fusion_rule_digest
+    - decision.geo_gate_applied
+    - decision.rescue_band_version
+    - detect_runtime_is_fallback
+    - detect_runtime_mode
+    - detect_runtime_status
+    - embed_trace
+    - embed_trace.identity_mode
+    - embed_trace.identity_reason
+    - evaluation_is_fallback
+    - evaluation_mode
+    - geometry_evidence.align_config_digest
+    - geometry_evidence.align_metrics
+    - geometry_evidence.anchor_config_digest
+    - geometry_evidence.geo_score_direction
+    - geometry_evidence.resolution_binding
+    - geometry_evidence.stability_metrics
+    - geometry_evidence.sync_config_digest
+    - geometry_evidence.sync_quality_metrics
+    - geometry_evidence.sync_quality_metrics.quality_components_v2
+    - geometry_evidence.sync_quality_semantics
+    - input_sha256
+    - mask_resolution_binding
+    - mask_source_impl_identity
+    - paper_faithfulness.absent_reasons
+    - paper_faithfulness.fail_reasons
+    - paper_faithfulness.mismatch_reasons
+    - paper_faithfulness.status
+    - plan_digest_expected
+    - plan_digest_observed
+    - plan_digest_status
+    - plan_input_digest
+    - plan_input_schema_version
+    - routing_digest
+    - routing_summary
 
 # ------------------------------
 # 字段别名：用于历史兼容

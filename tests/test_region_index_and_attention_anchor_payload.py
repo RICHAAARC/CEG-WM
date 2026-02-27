@@ -80,6 +80,12 @@ def test_region_index_spec_is_produced_and_digest_anchored() -> None:
     assert result.status == "ok"
     assert isinstance(result.plan, dict)
     plan = result.plan
+    semantics = plan.get("subspace_evidence_semantics")
+    assert isinstance(semantics, dict)
+    assert isinstance(semantics.get("source"), dict)
+    assert isinstance(semantics.get("evidence_level"), str)
+    assert isinstance(semantics.get("reason"), str)
+    assert semantics.get("version") == "subspace_evidence_semantics_v1"
 
     hf_spec = plan.get("hf_region_index_spec")
     lf_spec = plan.get("lf_region_index_spec")
@@ -133,6 +139,9 @@ def test_attention_anchor_map_relation_has_digest_and_small_payload() -> None:
     assert evidence.get("status") == "ok"
     assert isinstance(evidence.get("anchor_digest"), str)
     assert len(evidence.get("anchor_digest")) == 64
+    assert evidence.get("anchor_source_semantics") == "attention_like_proxy_from_latent_correlation"
+    assert evidence.get("anchor_evidence_level") == "proxy"
+    assert evidence.get("anchor_blocking_reason") == "real_self_attention_map_not_wired_in_runtime"
 
     anchor_metrics = evidence.get("anchor_metrics")
     assert isinstance(anchor_metrics, dict)

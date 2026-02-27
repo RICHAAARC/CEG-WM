@@ -467,6 +467,8 @@ def _merge_injection_evidence(content_evidence_payload: Dict[str, Any], injectio
     content_evidence_payload["injection_digest"] = injection_evidence.get("injection_digest")
     content_evidence_payload["injection_metrics"] = injection_evidence.get("injection_metrics")
     content_evidence_payload["subspace_binding_digest"] = injection_evidence.get("subspace_binding_digest")
+    content_evidence_payload["lf_impl_binding"] = injection_evidence.get("lf_impl_binding")
+    content_evidence_payload["hf_impl_binding"] = injection_evidence.get("hf_impl_binding")
 
 
 def _inject_trajectory_audit_fields(
@@ -739,6 +741,7 @@ def _apply_content_embedding_pipeline(
         "impl_selected": getattr(getattr(impl_set, "lf_coder", None), "impl_id", None),
         "adapter_path": "image_dct_fallback",
         "fallback_used": True,
+        "evidence_level": "adapter_fallback",
         "fallback_reason": "lf_impl_embed_interface_absent",
     }
     lf_watermarked: np.ndarray | None = None
@@ -783,6 +786,7 @@ def _apply_content_embedding_pipeline(
                 "impl_selected": getattr(lf_coder, "impl_id", None),
                 "adapter_path": "lf_coder.embed_apply_image_proxy_v1",
                 "fallback_used": False,
+                "evidence_level": "primary",
                 "fallback_reason": None,
             }
         except Exception as exc:
@@ -790,6 +794,7 @@ def _apply_content_embedding_pipeline(
                 "impl_selected": getattr(lf_coder, "impl_id", None),
                 "adapter_path": "image_dct_fallback",
                 "fallback_used": True,
+                "evidence_level": "adapter_fallback",
                 "fallback_reason": f"lf_impl_embed_apply_failed:{type(exc).__name__}",
             }
             lf_watermarked = None
@@ -804,6 +809,7 @@ def _apply_content_embedding_pipeline(
             "impl_selected": getattr(lf_coder, "impl_id", None) if lf_coder is not None else None,
             "adapter_path": "ablation_switchboard",
             "fallback_used": False,
+            "evidence_level": "ablation_disabled",
             "fallback_reason": None,
         }
     elif lf_watermarked is None:
@@ -841,6 +847,7 @@ def _apply_content_embedding_pipeline(
             "impl_selected": getattr(hf_embedder, "impl_id", None),
             "adapter_path": "image_hf_fallback",
             "fallback_used": True,
+            "evidence_level": "adapter_fallback",
             "fallback_reason": "hf_impl_image_adapter_absent",
         }
         hf_watermarked, hf_trace_summary = embed_high_freq_pattern(lf_watermarked, routing_summary, key_material, hf_params)
@@ -868,6 +875,7 @@ def _apply_content_embedding_pipeline(
             "impl_selected": getattr(getattr(impl_set, "hf_embedder", None), "impl_id", None),
             "adapter_path": "ablation_switchboard" if not enable_hf else "image_hf_fallback",
             "fallback_used": False if not enable_hf else True,
+            "evidence_level": "ablation_disabled" if not enable_hf else "adapter_fallback",
             "fallback_reason": None if not enable_hf else "hf_impl_image_adapter_absent",
         }
         score_parts.pop("hf_status", None)
@@ -1148,6 +1156,8 @@ def _build_latent_step_embed_trace(
         params_digest = injection_evidence.get("injection_params_digest")
         absent_reason = injection_evidence.get("injection_absent_reason")
         failure_reason = injection_evidence.get("injection_failure_reason")
+        lf_impl_binding = injection_evidence.get("lf_impl_binding")
+        hf_impl_binding = injection_evidence.get("hf_impl_binding")
         if isinstance(status_value, str) and status_value:
             trace["injection_status"] = status_value
         if isinstance(trace_digest, str) and trace_digest:
@@ -1158,6 +1168,10 @@ def _build_latent_step_embed_trace(
             trace["injection_absent_reason"] = absent_reason
         if isinstance(failure_reason, str) and failure_reason:
             trace["injection_failure_reason"] = failure_reason
+        if isinstance(lf_impl_binding, dict):
+            trace["lf_impl_binding"] = lf_impl_binding
+        if isinstance(hf_impl_binding, dict):
+            trace["hf_impl_binding"] = hf_impl_binding
     elif paper_enabled:
         trace["injection_status"] = "absent"
         trace["injection_absent_reason"] = "paper_mode_requires_injection_evidence"

@@ -130,6 +130,12 @@ class LatentModifier:
             "hf_evidence": None,
             "combined_status": "ok"
         }
+        lf_impl_binding = cfg.get("lf_impl_binding") if isinstance(cfg.get("lf_impl_binding"), dict) else None
+        hf_impl_binding = cfg.get("hf_impl_binding") if isinstance(cfg.get("hf_impl_binding"), dict) else None
+        if isinstance(lf_impl_binding, dict):
+            step_evidence["lf_impl_binding"] = lf_impl_binding
+        if isinstance(hf_impl_binding, dict):
+            step_evidence["hf_impl_binding"] = hf_impl_binding
         
         try:
             # ============ LF 通道处理 ============
@@ -335,6 +341,12 @@ class LatentModifier:
             "latents_device": str(original_device),
             "latents_dtype": str(original_dtype),
         }
+        lf_impl_binding = cfg.get("lf_impl_binding") if isinstance(cfg.get("lf_impl_binding"), dict) else None
+        hf_impl_binding = cfg.get("hf_impl_binding") if isinstance(cfg.get("hf_impl_binding"), dict) else None
+        if isinstance(lf_impl_binding, dict):
+            step_evidence["lf_impl_binding"] = lf_impl_binding
+        if isinstance(hf_impl_binding, dict):
+            step_evidence["hf_impl_binding"] = hf_impl_binding
 
         try:
             lf_delta_norm = 0.0

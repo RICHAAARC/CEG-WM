@@ -506,13 +506,58 @@ def _build_injection_cfg(cfg: Dict[str, Any], context: InjectionContext) -> Dict
     lf_strength = lf_cfg.get("strength", cfg.get("lf_strength", 1.5))
     hf_threshold_percentile = hf_cfg.get("threshold_percentile", cfg.get("hf_threshold_percentile", 75.0))
     watermark_seed = cfg.get("watermark_seed", cfg.get("seed", 42))
+    impl_cfg = cfg.get("impl") if isinstance(cfg.get("impl"), dict) else {}
+
+    lf_impl_selected = impl_cfg.get("lf_coder_id") if isinstance(impl_cfg.get("lf_coder_id"), str) else None
+    hf_impl_selected = impl_cfg.get("hf_embedder_id") if isinstance(impl_cfg.get("hf_embedder_id"), str) else None
+
+    lf_impl_binding = {
+        "impl_selected": lf_impl_selected,
+        "adapter_path": "latent_modifier_channel_lf_v1" if context.enable_lf else "ablation_switchboard",
+        "fallback_used": bool(context.enable_lf and lf_impl_selected != channel_lf.LF_CHANNEL_IMPL_ID),
+        "evidence_level": "primary" if context.enable_lf and lf_impl_selected == channel_lf.LF_CHANNEL_IMPL_ID else "adapter_fallback",
+        "fallback_reason": (
+            "lf_channel_disabled_by_ablation"
+            if not context.enable_lf
+            else (
+                "lf_impl_missing"
+                if lf_impl_selected is None
+                else (
+                    "lf_impl_embed_interface_absent_for_latent_modifier"
+                    if lf_impl_selected != channel_lf.LF_CHANNEL_IMPL_ID
+                    else None
+                )
+            )
+        ),
+    }
+    hf_impl_binding = {
+        "impl_selected": hf_impl_selected,
+        "adapter_path": "latent_modifier_channel_hf_v1" if context.enable_hf else "ablation_switchboard",
+        "fallback_used": bool(context.enable_hf and hf_impl_selected != channel_hf.HF_CHANNEL_IMPL_ID),
+        "evidence_level": "primary" if context.enable_hf and hf_impl_selected == channel_hf.HF_CHANNEL_IMPL_ID else "adapter_fallback",
+        "fallback_reason": (
+            "hf_channel_disabled_by_ablation"
+            if not context.enable_hf
+            else (
+                "hf_impl_missing"
+                if hf_impl_selected is None
+                else (
+                    "hf_impl_embed_interface_absent_for_latent_modifier"
+                    if hf_impl_selected != channel_hf.HF_CHANNEL_IMPL_ID
+                    else None
+                )
+            )
+        ),
+    }
 
     return {
         "lf_enabled": context.enable_lf,
         "hf_enabled": context.enable_hf,
         "lf_strength": lf_strength,
         "hf_threshold_percentile": hf_threshold_percentile,
-        "watermark_seed": watermark_seed
+        "watermark_seed": watermark_seed,
+        "lf_impl_binding": lf_impl_binding,
+        "hf_impl_binding": hf_impl_binding,
     }
 
 
@@ -553,7 +598,9 @@ def _validate_injection_params(
         "lf_params_digest": lf_params_digest,
         "hf_params_digest": hf_params_digest,
         "lf_enabled": bool(context.enable_lf),
-        "hf_enabled": bool(context.enable_hf)
+        "hf_enabled": bool(context.enable_hf),
+        "lf_impl_binding": injection_cfg.get("lf_impl_binding"),
+        "hf_impl_binding": injection_cfg.get("hf_impl_binding"),
     }
 
     if context.enable_lf and lf_params_digest != context.lf_params_digest:
@@ -763,6 +810,8 @@ def _build_injection_ok_evidence(
         "plan_digest": context.plan_digest,
         "lf_params_digest": context.lf_params_digest if context.enable_lf else None,
         "hf_params_digest": context.hf_params_digest if context.enable_hf else None,
+        "lf_impl_binding": params_payload.get("lf_impl_binding"),
+        "hf_impl_binding": params_payload.get("hf_impl_binding"),
         "_step_evidence_list": step_evidence_list
     }
 
@@ -810,7 +859,9 @@ def _build_injection_mismatch_evidence(
         "subspace_binding_digest": None,
         "plan_digest": context.plan_digest,
         "lf_params_digest": context.lf_params_digest if context.enable_lf else None,
-        "hf_params_digest": context.hf_params_digest if context.enable_hf else None
+        "hf_params_digest": context.hf_params_digest if context.enable_hf else None,
+        "lf_impl_binding": params_payload.get("lf_impl_binding"),
+        "hf_impl_binding": params_payload.get("hf_impl_binding"),
     }
 
 

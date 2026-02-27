@@ -355,19 +355,26 @@ class SyncGeometryLatentSyncSD3V2:
         if not isinstance(cfg, dict):
             raise TypeError("cfg must be dict")
         result = self._extractor.extract(cfg, inputs=None, sync_ctx=None)
+        status = self._normalize_status_token(result.get("status"))
         return {
-            "sync_status": result.get("status", "absent"),
-            "sync_success": result.get("status") == "ok",
+            "sync_status": status,
+            "sync_success": status == "ok",
             "sync_digest": result.get("sync_digest"),
             "geo_score": result.get("geo_score"),
             "geometry_absent_reason": result.get("geometry_absent_reason"),
             "geometry_failure_reason": result.get("geometry_failure_reason"),
+            "sync_quality_semantics": result.get("sync_quality_semantics"),
             "impl_identity": self.impl_id,
             "impl_version": self.impl_version,
             "impl_digest": self.impl_digest,
         }
 
-    def sync_with_context(self, cfg: Dict[str, Any], context: SyncRuntimeContext) -> Dict[str, Any]:
+    def sync_with_context(
+        self,
+        cfg: Dict[str, Any],
+        context: SyncRuntimeContext,
+        runtime_inputs: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
         """
         功能：使用运行期上下文提取同步状态。
 
@@ -390,9 +397,10 @@ class SyncGeometryLatentSyncSD3V2:
         if runtime_inputs is not None and not isinstance(runtime_inputs, dict):
             raise TypeError("runtime_inputs must be dict or None")
         result = self._extractor.extract(cfg, inputs=runtime_inputs, sync_ctx=context)
+        status = self._normalize_status_token(result.get("status"))
         payload = {
-            "sync_status": result.get("status", "absent"),
-            "sync_success": result.get("status") == "ok",
+            "sync_status": status,
+            "sync_success": status == "ok",
             "sync_digest": result.get("sync_digest"),
             "geo_score": result.get("geo_score"),
             "geometry_absent_reason": result.get("geometry_absent_reason"),
@@ -410,6 +418,27 @@ class SyncGeometryLatentSyncSD3V2:
             payload["trajectory_digest"] = context.trajectory_evidence.get("trajectory_digest")
             payload["trajectory_tap_version"] = context.trajectory_evidence.get("trajectory_tap_version")
         return payload
+
+    def _normalize_status_token(self, raw_status: Any) -> str:
+        """
+        功能：归一化同步状态到冻结枚举口径。
+
+        Normalize raw sync status token to frozen status enum domain.
+
+        Args:
+            raw_status: Raw status token from extractor.
+
+        Returns:
+            Normalized status token in {ok, absent, mismatch, failed}.
+        """
+        if not isinstance(raw_status, str) or not raw_status:
+            return "absent"
+        lowered = raw_status.lower()
+        if lowered == "fail":
+            return "failed"
+        if lowered in {"ok", "absent", "mismatch", "failed"}:
+            return lowered
+        return "failed"
 
 
 _GEOMETRY_REGISTRY = RegistryBase("geometry_extractor")

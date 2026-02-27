@@ -148,6 +148,12 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "HF 可执行 basis 载荷（序列化表示）。"
+  - path: "content_evidence.subspace_plan.subspace_evidence_semantics"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "子空间证据语义摘要（source/evidence_level/reason/version，区分 primary 与 surrogate）。"
   - path: "content_evidence.basis_digest"
     layer: "anchor"
     type: "digest_hex64"
@@ -364,6 +370,24 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "注意力锚点稳定性指标。"
+  - path: "geometry_evidence.anchor_source_semantics"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "锚点语义来源声明（proxy attention-like / real attention）。"
+  - path: "geometry_evidence.anchor_evidence_level"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "锚点证据级别声明（proxy/real/blocking）。"
+  - path: "geometry_evidence.anchor_blocking_reason"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "未接入真实 attention 分支时的阻塞原因。"
   - path: "geometry_evidence.anchor_config_digest"
     layer: "anchor"
     type: "digest_hex64"
@@ -406,6 +430,18 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "同步质量指标（命名收敛字段）。"
+  - path: "geometry_evidence.sync_quality_metrics.quality_components_v2"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "同步质量可解释子项（v2，含 components/weights/constraints，非主证据）。"
+  - path: "geometry_evidence.sync_quality_semantics"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "同步质量语义声明（heuristic/supporting，禁止主证据误标）。"
   - path: "geometry_evidence.align_trace_digest"
     layer: "anchor"
     type: "digest_hex64"
@@ -584,6 +620,24 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "子空间一致性校验总体状态（ok/inconsistent/absent）。"
+  - path: "content_evidence.lf_impl_binding"
+    layer: "anchor"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "LF 实现绑定语义（impl_selected/adapter_path/fallback_used/fallback_reason）。"
+  - path: "content_evidence.hf_impl_binding"
+    layer: "anchor"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "HF 实现绑定语义（impl_selected/adapter_path/fallback_used/fallback_reason）。"
+  - path: "impl_set_capabilities_v2_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "扩展实现能力摘要（v2，覆盖 HF/LF 域，保留 v1 并行口径）。"
   # ==============================================================
   # Paper Faithfulness 对齐证据字段（append-only v1.0）
   # ==============================================================

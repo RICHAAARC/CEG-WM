@@ -10,6 +10,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from main.evaluation import experiment_matrix
 
 
@@ -76,6 +78,13 @@ def test_experiment_matrix_detect_stage_sets_content_enabled_override(monkeypatc
 
     def _fake_run_stage_command(stage_name, run_root, config_path, stage_overrides, input_record_path=None):
         captured_overrides[stage_name] = list(stage_overrides)
+        if stage_name == "detect":
+            detect_record_path = run_root / "records" / "detect_record.json"
+            detect_record_path.parent.mkdir(parents=True, exist_ok=True)
+            detect_record_path.write_text(
+                json.dumps({"content_evidence_payload": {"status": "ok", "score": 0.1}}),
+                encoding="utf-8",
+            )
 
     monkeypatch.setattr(experiment_matrix.path_policy, "ensure_output_layout", _fake_layout)
     monkeypatch.setattr(experiment_matrix, "_run_stage_command", _fake_run_stage_command)
@@ -144,3 +153,97 @@ def test_prepare_detect_record_for_attack_grouping_writes_attack_fields(tmp_path
     assert "contract_bound_digest" not in enriched_obj
     assert "whitelist_bound_digest" not in enriched_obj
     assert "policy_path_semantics_bound_digest" not in enriched_obj
+
+
+def test_detect_gate_blocks_calibrate_when_no_valid_content_score(tmp_path: Path, monkeypatch) -> None:
+    """detect 后若没有有效 content_score，必须 fail-fast 且不进入 calibrate。"""
+    called_stages = []
+
+    def _fake_layout(*args, **kwargs):
+        run_root = args[0]
+        (run_root / "records").mkdir(parents=True, exist_ok=True)
+        (run_root / "artifacts").mkdir(parents=True, exist_ok=True)
+        return {
+            "run_root": run_root,
+            "artifacts_dir": run_root / "artifacts",
+            "records_dir": run_root / "records",
+        }
+
+    def _fake_prepare_detect_record(run_root: Path, _grid_item_cfg: dict) -> Path:
+        path = run_root / "artifacts" / "evaluate_inputs" / "detect_record_with_attack.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}", encoding="utf-8")
+        return path
+
+    def _fake_run_stage(stage_name, run_root, config_path, stage_overrides, input_record_path=None):
+        called_stages.append(stage_name)
+        if stage_name == "detect":
+            detect_record_path = run_root / "records" / "detect_record.json"
+            detect_record_path.parent.mkdir(parents=True, exist_ok=True)
+            detect_record_path.write_text(
+                json.dumps({"content_evidence_payload": {"status": "mismatch", "score": None}}),
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr(experiment_matrix.path_policy, "ensure_output_layout", _fake_layout)
+    monkeypatch.setattr(experiment_matrix, "_prepare_detect_record_for_attack_grouping", _fake_prepare_detect_record)
+    monkeypatch.setattr(experiment_matrix, "_run_stage_command", _fake_run_stage)
+
+    grid_item_cfg = {
+        "config_path": "configs/paper_full_cuda.yaml",
+        "attack_protocol_path": "configs/attack_protocol.yaml",
+        "cfg_snapshot": {"seed": 0, "model_id": "stabilityai/stable-diffusion-3.5-medium"},
+        "ablation_flags": {},
+        "max_samples": None,
+    }
+
+    with pytest.raises(RuntimeError, match="insufficient valid content_score samples"):
+        experiment_matrix._run_stage_sequence(grid_item_cfg, tmp_path / "run")
+
+    assert called_stages == ["embed", "detect"]
+
+
+def test_detect_gate_allows_progress_when_content_score_valid(tmp_path: Path, monkeypatch) -> None:
+    """detect 后若有至少 1 条有效 content_score，允许进入 calibrate/evaluate。"""
+    called_stages = []
+
+    def _fake_layout(*args, **kwargs):
+        run_root = args[0]
+        (run_root / "records").mkdir(parents=True, exist_ok=True)
+        (run_root / "artifacts").mkdir(parents=True, exist_ok=True)
+        return {
+            "run_root": run_root,
+            "artifacts_dir": run_root / "artifacts",
+            "records_dir": run_root / "records",
+        }
+
+    def _fake_prepare_detect_record(run_root: Path, _grid_item_cfg: dict) -> Path:
+        path = run_root / "artifacts" / "evaluate_inputs" / "detect_record_with_attack.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}", encoding="utf-8")
+        return path
+
+    def _fake_run_stage(stage_name, run_root, config_path, stage_overrides, input_record_path=None):
+        called_stages.append(stage_name)
+        if stage_name == "detect":
+            detect_record_path = run_root / "records" / "detect_record.json"
+            detect_record_path.parent.mkdir(parents=True, exist_ok=True)
+            detect_record_path.write_text(
+                json.dumps({"content_evidence_payload": {"status": "ok", "score": 0.123}}),
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr(experiment_matrix.path_policy, "ensure_output_layout", _fake_layout)
+    monkeypatch.setattr(experiment_matrix, "_prepare_detect_record_for_attack_grouping", _fake_prepare_detect_record)
+    monkeypatch.setattr(experiment_matrix, "_run_stage_command", _fake_run_stage)
+
+    grid_item_cfg = {
+        "config_path": "configs/paper_full_cuda.yaml",
+        "attack_protocol_path": "configs/attack_protocol.yaml",
+        "cfg_snapshot": {"seed": 0, "model_id": "stabilityai/stable-diffusion-3.5-medium"},
+        "ablation_flags": {},
+        "max_samples": None,
+    }
+
+    experiment_matrix._run_stage_sequence(grid_item_cfg, tmp_path / "run")
+    assert called_stages == ["embed", "detect", "calibrate", "evaluate"]

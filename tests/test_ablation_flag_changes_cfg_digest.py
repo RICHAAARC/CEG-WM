@@ -126,6 +126,14 @@ def test_ablation_flag_changes_cfg_digest():
         assert "normalized" in cfg["ablation"], "normalized field must be generated"
         normalized = cfg["ablation"]["normalized"]
         assert isinstance(normalized, dict), "normalized must be dict"
+        for detect_switch in [
+            "enable_sync",
+            "enable_anchor",
+            "enable_attention_proxy",
+            "enable_image_sidecar",
+        ]:
+            assert detect_switch in normalized, f"{detect_switch} must be included in ablation.normalized"
+            assert isinstance(normalized[detect_switch], bool), f"{detect_switch} must be bool"
         # 确保可稳定序列化（digests.normalize_for_digest 不抛异常）。
         digests.normalize_for_digest(normalized)
 
