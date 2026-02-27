@@ -104,6 +104,7 @@ def test_experiment_matrix_detect_stage_sets_content_enabled_override(monkeypatc
 
     detect_overrides = captured_overrides.get("detect", [])
     assert "enable_content_detect=true" in detect_overrides
+    assert "allow_threshold_fallback_for_tests=true" in detect_overrides
 
 
 def test_prepare_detect_record_for_attack_grouping_writes_attack_fields(tmp_path: Path) -> None:

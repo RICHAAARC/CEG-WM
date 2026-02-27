@@ -227,6 +227,12 @@ override:
       override_mode: "set"
       source: "cli"
       description: "实验矩阵：允许设置 evaluate 阶段的阈值工件路径"
+    - arg_name: "allow_threshold_fallback_for_tests"
+      field_path: "allow_threshold_fallback_for_tests"
+      override_mode: "set"
+      allowed_values: [true]
+      source: "cli"
+      description: "实验矩阵：detect 阶段允许阈值工件缺失时启用受控 fallback，仅用于生成后续 calibrate/evaluate 输入"
 
   # 覆写 source 的枚举白名单（gate 必须校验）
   source_enum:
@@ -273,6 +279,7 @@ override:
       - "calibrate_detect_records_glob"
       - "evaluate_detect_records_glob"
       - "evaluate_thresholds_path"
+      - "allow_threshold_fallback_for_tests"
     immutable: true
     notes: "必须与 allowed_overrides[*].arg_name 的值集完全一致。新增 override 必须同步更新此枚举。"
 

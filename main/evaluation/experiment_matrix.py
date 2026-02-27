@@ -679,6 +679,7 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> None:
         # detect 阶段必须启用 content 检测（experiment_matrix 需要生成检测分数）
         if stage_name == "detect":
             stage_overrides.append("enable_content_detect=true")
+            stage_overrides.append("allow_threshold_fallback_for_tests=true")
         
         # calibrate 和 evaluate 需要 detect_records_glob 参数
         if stage_name in ["calibrate", "evaluate"]:
