@@ -226,8 +226,8 @@ def test_paper_full_mechanism_assertions_accept_top_level_geometry_payload(tmp_p
     cfg = {
         "paper_faithfulness": {"enabled": True},
         "impl": {
-            "sync_module_id": "geometry_latent_sync_sd3_v1",
-            "geometry_extractor_id": "geometry_attention_anchor_sd3_v1",
+            "sync_module_id": "geometry_latent_sync_sd3_v2",
+            "geometry_extractor_id": "attention_anchor_map_relation_v1",
             "hf_embedder_id": "hf_embedder_t2smark_v1",
             "lf_coder_id": "lf_coder_prc_v1",
         },
@@ -308,8 +308,8 @@ def test_paper_full_mechanism_assertions_accept_nested_evaluation_report(tmp_pat
     cfg = {
         "paper_faithfulness": {"enabled": True},
         "impl": {
-            "sync_module_id": "geometry_latent_sync_sd3_v1",
-            "geometry_extractor_id": "geometry_attention_anchor_sd3_v1",
+            "sync_module_id": "geometry_latent_sync_sd3_v2",
+            "geometry_extractor_id": "attention_anchor_map_relation_v1",
             "hf_embedder_id": "hf_embedder_t2smark_v1",
             "lf_coder_id": "lf_coder_prc_v1",
         },
@@ -398,8 +398,8 @@ def test_paper_full_mechanism_assertions_reject_latent_mode_sync_only_geometry(t
     cfg = {
         "paper_faithfulness": {"enabled": True},
         "impl": {
-            "sync_module_id": "geometry_latent_sync_sd3_v1",
-            "geometry_extractor_id": "geometry_attention_anchor_sd3_v1",
+            "sync_module_id": "geometry_latent_sync_sd3_v2",
+            "geometry_extractor_id": "attention_anchor_map_relation_v1",
             "hf_embedder_id": "hf_embedder_t2smark_v1",
             "lf_coder_id": "lf_coder_prc_v1",
         },

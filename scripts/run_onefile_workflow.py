@@ -35,6 +35,80 @@ PROFILE_CPU_SMOKE = "cpu_smoke"
 PROFILE_PAPER_FULL_CUDA = "paper_full_cuda"
 LEGACY_PROFILE_CPU_MIN = "cpu_min"
 LEGACY_PROFILE_CUDA_REAL = "cuda_real"
+PAPER_FROZEN_CONFIG_PATH = REPO_ROOT / "configs" / "paper_full_cuda.yaml"
+PAPER_FROZEN_IMPL_REQUIRED_FIELDS = ("sync_module_id", "geometry_extractor_id")
+
+
+def _load_paper_frozen_impl_constraints() -> dict:
+    """
+    功能：读取 paper_full_cuda 的冻结 impl 约束。 
+
+    Load frozen impl constraints from paper_full_cuda config.
+
+    Args:
+        None.
+
+    Returns:
+        Mapping for required impl constraints.
+
+    Raises:
+        FileNotFoundError: If frozen config is missing.
+        ValueError: If frozen config or impl section is invalid.
+    """
+    if not PAPER_FROZEN_CONFIG_PATH.exists() or not PAPER_FROZEN_CONFIG_PATH.is_file():
+        raise FileNotFoundError(f"paper frozen config not found: {PAPER_FROZEN_CONFIG_PATH}")
+
+    frozen_obj = yaml.safe_load(PAPER_FROZEN_CONFIG_PATH.read_text(encoding="utf-8"))
+    if not isinstance(frozen_obj, dict):
+        raise ValueError("paper frozen config root must be mapping")
+
+    frozen_impl = frozen_obj.get("impl")
+    if not isinstance(frozen_impl, dict):
+        raise ValueError("paper frozen config impl must be mapping")
+
+    constraints = {}
+    for field_name in PAPER_FROZEN_IMPL_REQUIRED_FIELDS:
+        field_value = frozen_impl.get(field_name)
+        if not isinstance(field_value, str) or not field_value.strip():
+            raise ValueError(f"paper frozen impl.{field_name} must be non-empty str")
+        constraints[field_name] = field_value.strip()
+    return constraints
+
+
+def _validate_paper_profile_impl_constraints(cfg_obj: dict, frozen_impl_constraints: dict) -> None:
+    """
+    功能：校验 paper profile 的关键 impl 绑定不偏离冻结约束。 
+
+    Validate required paper-profile impl bindings against frozen constraints.
+
+    Args:
+        cfg_obj: Effective config mapping.
+        frozen_impl_constraints: Required impl constraints loaded from frozen config.
+
+    Returns:
+        None.
+
+    Raises:
+        ValueError: If impl section or required fields are missing/mismatched.
+    """
+    if not isinstance(cfg_obj, dict):
+        raise TypeError("cfg_obj must be dict")
+    if not isinstance(frozen_impl_constraints, dict) or not frozen_impl_constraints:
+        raise TypeError("frozen_impl_constraints must be non-empty dict")
+
+    impl_cfg = cfg_obj.get("impl")
+    if not isinstance(impl_cfg, dict):
+        raise ValueError("paper_full_cuda requires config.impl to be mapping")
+
+    for field_name, expected_value in frozen_impl_constraints.items():
+        actual_value = impl_cfg.get(field_name)
+        if not isinstance(actual_value, str) or not actual_value.strip():
+            raise ValueError(f"paper_full_cuda requires impl.{field_name} to be non-empty str")
+        normalized_actual_value = actual_value.strip()
+        if normalized_actual_value != expected_value:
+            raise ValueError(
+                f"paper_full_cuda requires impl.{field_name}={expected_value}, got {normalized_actual_value}"
+            )
 
 
 def _normalize_profile(profile: str) -> str:
@@ -203,6 +277,7 @@ def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> P
     cfg_obj = yaml.safe_load(cfg_text)
     if not isinstance(cfg_obj, dict):
         raise ValueError("config root must be mapping")
+    frozen_impl_constraints = _load_paper_frozen_impl_constraints()
 
     cfg_obj["device"] = "cuda"
 
@@ -263,13 +338,7 @@ def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> P
     detect_cfg["geometry"] = geometry_cfg
     cfg_obj["detect"] = detect_cfg
 
-    impl_cfg = cfg_obj.get("impl") if isinstance(cfg_obj.get("impl"), dict) else {}
-    impl_cfg["sync_module_id"] = "geometry_latent_sync_sd3_v1"
-    impl_cfg["geometry_extractor_id"] = "geometry_align_invariance_sd3_v1"
-    subspace_planner_id = impl_cfg.get("subspace_planner_id")
-    if subspace_planner_id not in {"subspace_planner_v1", "subspace_baseline_full_v1"}:
-        impl_cfg["subspace_planner_id"] = "subspace_planner_v1"
-    cfg_obj["impl"] = impl_cfg
+    _validate_paper_profile_impl_constraints(cfg_obj, frozen_impl_constraints)
 
     mask_cfg = cfg_obj.get("mask") if isinstance(cfg_obj.get("mask"), dict) else {}
     mask_cfg["impl_id"] = "semantic_saliency_v2"

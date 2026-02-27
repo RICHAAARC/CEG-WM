@@ -19,6 +19,9 @@ from typing import Any, Dict, List, Optional, Set
 import yaml
 
 
+PAPER_FROZEN_IMPL_REQUIRED_FIELDS = ("sync_module_id", "geometry_extractor_id")
+
+
 def _load_json(path: Path) -> Dict[str, Any]:
     """
     功能：读取 JSON 文件并要求根对象为字典。
@@ -171,6 +174,39 @@ def _collect_impl_ids_from_cfg(cfg: Dict[str, Any]) -> List[str]:
     return impl_ids
 
 
+def _load_paper_frozen_impl_constraints(repo_root: Path) -> Dict[str, str]:
+    """
+    功能：读取 paper_full_cuda 冻结 impl 约束。 
+
+    Load frozen impl constraints from configs/paper_full_cuda.yaml.
+
+    Args:
+        repo_root: Repository root path.
+
+    Returns:
+        Required impl constraints mapping.
+
+    Raises:
+        ValueError: If frozen config content is invalid.
+    """
+    if not isinstance(repo_root, Path):
+        raise TypeError("repo_root must be Path")
+
+    frozen_cfg_path = repo_root / "configs" / "paper_full_cuda.yaml"
+    frozen_cfg = _load_yaml(frozen_cfg_path)
+    frozen_impl = frozen_cfg.get("impl")
+    if not isinstance(frozen_impl, dict):
+        raise ValueError("paper_full_cuda.impl must be mapping")
+
+    constraints: Dict[str, str] = {}
+    for field_name in PAPER_FROZEN_IMPL_REQUIRED_FIELDS:
+        field_value = frozen_impl.get(field_name)
+        if not isinstance(field_value, str) or not field_value.strip():
+            raise ValueError(f"paper_full_cuda.impl.{field_name} must be non-empty str")
+        constraints[field_name] = field_value.strip()
+    return constraints
+
+
 def assert_paper_mechanisms(run_root: Path) -> None:
     """
     功能：在 run_root 上执行 paper_full 机制断言。 
@@ -307,16 +343,21 @@ def _assert_paper_mechanisms(
         List of failure messages. Empty list indicates success.
     """
     failures: List[str] = []
+    frozen_impl_constraints = _load_paper_frozen_impl_constraints(repo_root)
 
     paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
     if paper_cfg.get("enabled") is not True:
         failures.append("paper_faithfulness.enabled must be true")
 
     impl_cfg = cfg.get("impl") if isinstance(cfg.get("impl"), dict) else {}
-    if impl_cfg.get("sync_module_id") != "geometry_latent_sync_sd3_v1":
-        failures.append("impl.sync_module_id must be geometry_latent_sync_sd3_v1")
-    if impl_cfg.get("geometry_extractor_id") in {"geometry_baseline_identity_v1"}:
-        failures.append("impl.geometry_extractor_id must not use baseline identity")
+    for field_name, expected_value in frozen_impl_constraints.items():
+        actual_value = impl_cfg.get(field_name)
+        if not isinstance(actual_value, str) or not actual_value.strip():
+            failures.append(f"impl.{field_name} must be non-empty str")
+            continue
+        normalized_actual_value = actual_value.strip()
+        if normalized_actual_value != expected_value:
+            failures.append(f"impl.{field_name} must be {expected_value}, got {normalized_actual_value}")
 
     watermark_cfg = cfg.get("watermark") if isinstance(cfg.get("watermark"), dict) else {}
     hf_cfg = watermark_cfg.get("hf") if isinstance(watermark_cfg.get("hf"), dict) else {}

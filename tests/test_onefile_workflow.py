@@ -190,20 +190,14 @@ def test_onefile_workflow_paper_full_profile_generates_real_sd3_config(tmp_path:
     module = _load_onefile_module(repo_root)
 
     run_root = tmp_path / "paper_full_run"
-    cfg_obj = {
-        "pipeline_impl_id": "custom_impl_should_not_be_overridden",
-        "pipeline_build_enabled": False,
-        "paper_faithfulness": {"enabled": False},
-    }
-    cfg_path = tmp_path / "base_config.yaml"
-    cfg_path.write_text(yaml.safe_dump(cfg_obj, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    cfg_path = repo_root / "configs" / "paper_full_cuda.yaml"
 
     profile_cfg_path = module._prepare_profile_cfg_path("paper_full_cuda", run_root, cfg_path)
     profile_cfg_text = profile_cfg_path.read_text(encoding="utf-8")
     profile_cfg_obj = yaml.safe_load(profile_cfg_text)
 
-    assert profile_cfg_obj["pipeline_impl_id"] == "custom_impl_should_not_be_overridden"
-    assert profile_cfg_obj["pipeline_build_enabled"] is False
+    assert profile_cfg_obj["impl"]["sync_module_id"] == "geometry_latent_sync_sd3_v2"
+    assert profile_cfg_obj["impl"]["geometry_extractor_id"] == "attention_anchor_map_relation_v1"
     assert "device: cuda" in profile_cfg_text
     assert "enabled: true" in profile_cfg_text
     assert "alignment_check: true" in profile_cfg_text
@@ -224,3 +218,32 @@ def test_onefile_workflow_paper_full_profile_generates_real_sd3_config(tmp_path:
     step_names = [item.name for item in steps]
     assert "multi_protocol_evaluation" in step_names
     assert "assert_paper_mechanisms" in step_names
+
+
+def test_onefile_workflow_paper_full_profile_fails_fast_on_mismatched_impl(tmp_path: Path) -> None:
+    """
+    功能：验证 paper_full_cuda 对关键 impl 错配执行 fail-fast。 
+
+    Verify paper_full_cuda rejects mismatched frozen impl bindings.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "paper_full_bad_impl"
+    cfg_obj = {
+        "impl": {
+            "sync_module_id": "geometry_latent_sync_sd3_v1",
+            "geometry_extractor_id": "geometry_align_invariance_sd3_v1",
+        }
+    }
+    cfg_path = tmp_path / "bad_impl_config.yaml"
+    cfg_path.write_text(yaml.safe_dump(cfg_obj, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="paper_full_cuda requires impl.sync_module_id"):
+        module._prepare_profile_cfg_path("paper_full_cuda", run_root, cfg_path)

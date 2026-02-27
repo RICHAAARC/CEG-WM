@@ -70,3 +70,4 @@ Thumbs.db
 outputs/
 tmp/
 audit_tmp/
+artifacts/
