@@ -100,3 +100,43 @@ def test_run_single_experiment_anchor_fallback_from_records(
     comparison_payload = summary.get("t2smark_comparison")
     assert isinstance(comparison_payload, dict)
     assert comparison_payload.get("comparison_source") == "real_t2smark_baseline_required"
+
+
+def test_extract_t2smark_comparison_reads_baseline_trace(tmp_path: Path) -> None:
+    """
+    功能：验证 t2smark 比较提取会读取 baseline 分数与 trace。 
+
+    Verify t2smark comparison extraction consumes baseline score and trace metadata.
+
+    Args:
+        tmp_path: pytest temp path fixture.
+
+    Returns:
+        None.
+    """
+    run_root = tmp_path / "item_0000"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    detect_record = {
+        "content_evidence_payload": {
+            "score": 0.91,
+        },
+        "t2smark_baseline": {
+            "status": "ok",
+            "score": 0.84,
+            "trace": {
+                "pipeline_impl_id": "sd3_diffusers_real_v1",
+                "infer_trace_canon_sha256": "a" * 64,
+                "cfg_digest": "b" * 64,
+            },
+        },
+    }
+    (records_dir / "detect_record.json").write_text(json.dumps(detect_record), encoding="utf-8")
+
+    payload = experiment_matrix._extract_t2smark_real_comparison_from_detect_record(run_root)
+    assert payload.get("comparison_ready") is True
+    assert payload.get("comparison_source") == "real_t2smark_baseline_record"
+    assert payload.get("baseline_status") == "ok"
+    baseline_trace = payload.get("baseline_trace")
+    assert isinstance(baseline_trace, dict)
+    assert baseline_trace.get("pipeline_impl_id") == "sd3_diffusers_real_v1"

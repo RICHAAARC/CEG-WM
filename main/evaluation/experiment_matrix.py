@@ -269,6 +269,7 @@ def _extract_t2smark_real_comparison_from_detect_record(run_root: Path) -> Dict[
         "comparison_ready": False,
         "comparison_source": "real_t2smark_baseline_required",
         "baseline_status": "absent",
+        "baseline_trace": None,
     }
 
     detect_record = _read_optional_json(run_root / "records" / "detect_record.json")
@@ -285,6 +286,12 @@ def _extract_t2smark_real_comparison_from_detect_record(run_root: Path) -> Dict[
 
     baseline_payload = detect_record.get("t2smark_baseline")
     if isinstance(baseline_payload, dict):
+        baseline_trace = baseline_payload.get("trace")
+        if isinstance(baseline_trace, dict):
+            result["baseline_trace"] = baseline_trace
+        baseline_status = baseline_payload.get("status")
+        if isinstance(baseline_status, str) and baseline_status:
+            result["baseline_status"] = baseline_status
         baseline_score = baseline_payload.get("score")
         if isinstance(baseline_score, (int, float)) and np.isfinite(float(baseline_score)):
             result["t2smark_score"] = float(baseline_score)

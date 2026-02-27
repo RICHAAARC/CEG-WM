@@ -204,8 +204,6 @@ def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> P
     if not isinstance(cfg_obj, dict):
         raise ValueError("config root must be mapping")
 
-    cfg_obj["pipeline_impl_id"] = "sd3_diffusers_real_v1"
-    cfg_obj["pipeline_build_enabled"] = True
     cfg_obj["device"] = "cuda"
 
     model_source = cfg_obj.get("model_source")
@@ -447,6 +445,11 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
     if status_ok and score_valid:
         return source_detect_path
 
+    if profile == PROFILE_PAPER_FULL_CUDA:
+        raise ValueError(
+            "paper_full_cuda requires detect_record.content_evidence_payload.status=ok and numeric score"
+        )
+
     score_fallback = content_payload.get("detect_lf_score")
     if not isinstance(score_fallback, (int, float)):
         score_fallback = 0.0
@@ -454,8 +457,7 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
     content_payload["status"] = "ok"
     content_payload["score"] = float(score_fallback)
     content_payload["content_failure_reason"] = None
-    patch_scope = "paper_or_smoke" if profile == PROFILE_PAPER_FULL_CUDA else "smoke_only"
-    print(f"[onefile] CALIBRATION_PATCH_APPLIED scope={patch_scope} detect_record_for_calibration")
+    print("[onefile] CALIBRATION_PATCH_APPLIED scope=smoke_only detect_record_for_calibration")
 
     calibrated_detect_path = run_root / "artifacts" / "workflow_cfg" / "detect_record_for_calibration.json"
     calibrated_detect_path.parent.mkdir(parents=True, exist_ok=True)

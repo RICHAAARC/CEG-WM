@@ -11,6 +11,7 @@ from typing import Any, List
 import sys
 
 import pytest
+import yaml
 
 
 def _load_onefile_module(repo_root: Path):
@@ -189,13 +190,20 @@ def test_onefile_workflow_paper_full_profile_generates_real_sd3_config(tmp_path:
     module = _load_onefile_module(repo_root)
 
     run_root = tmp_path / "paper_full_run"
-    cfg_path = repo_root / "configs" / "default.yaml"
+    cfg_obj = {
+        "pipeline_impl_id": "custom_impl_should_not_be_overridden",
+        "pipeline_build_enabled": False,
+        "paper_faithfulness": {"enabled": False},
+    }
+    cfg_path = tmp_path / "base_config.yaml"
+    cfg_path.write_text(yaml.safe_dump(cfg_obj, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
     profile_cfg_path = module._prepare_profile_cfg_path("paper_full_cuda", run_root, cfg_path)
     profile_cfg_text = profile_cfg_path.read_text(encoding="utf-8")
+    profile_cfg_obj = yaml.safe_load(profile_cfg_text)
 
-    assert "pipeline_impl_id: sd3_diffusers_real_v1" in profile_cfg_text
-    assert "pipeline_build_enabled: true" in profile_cfg_text
+    assert profile_cfg_obj["pipeline_impl_id"] == "custom_impl_should_not_be_overridden"
+    assert profile_cfg_obj["pipeline_build_enabled"] is False
     assert "device: cuda" in profile_cfg_text
     assert "enabled: true" in profile_cfg_text
     assert "alignment_check: true" in profile_cfg_text

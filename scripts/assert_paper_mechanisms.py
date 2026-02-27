@@ -426,8 +426,12 @@ def _assert_paper_mechanisms(
     if not isinstance(anchor_metrics, dict):
         anchor_metrics = _pick_mapping(detect_geometry_payload, [["anchor_metrics"]])
 
-    # 几何链允许 sync-only 证据形态：若 anchor 字段缺失但 sync_digest 存在，不做硬失败。
-    if isinstance(anchor_metrics, dict):
+    if not isinstance(anchor_digest, str) or len(anchor_digest) != 64:
+        failures.append("detect content evidence must include 64-hex anchor_digest")
+
+    if not isinstance(anchor_metrics, dict):
+        failures.append("detect content evidence must include anchor_metrics")
+    else:
         extraction_source = anchor_metrics.get("extraction_source")
         if extraction_source not in {"attention_map_relation", "attention_relation_summary"}:
             failures.append("anchor_metrics.extraction_source must be attention-map relation based")

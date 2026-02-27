@@ -107,6 +107,10 @@ def run_detect_orchestrator(
     enable_anchor = ablation_normalized.get("enable_anchor", True)
     enable_attention_proxy = ablation_normalized.get("enable_attention_proxy", True)
     enable_image_sidecar = ablation_normalized.get("enable_image_sidecar", True)
+    paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
+    paper_enabled = bool(paper_cfg.get("enabled", False)) if isinstance(paper_cfg, dict) else False
+    if paper_enabled:
+        enable_attention_proxy = False
 
     # Ablation: 禁用 content 模块时返回 absent 语义。
     if not enable_content:
@@ -649,6 +653,9 @@ def run_detect_orchestrator(
     cfg.pop("__detect_final_latents__", None)
     cfg.pop("__detect_pipeline_obj__", None)
     cfg.pop("__pipeline_runtime_meta__", None)
+    cfg.pop("__detect_attention_maps__", None)
+    cfg.pop("__detect_self_attention_maps__", None)
+    cfg.pop("__runtime_self_attention_maps__", None)
 
     plan_digest_mismatch_reason = plan_digest_reason if plan_digest_reason == "plan_digest_mismatch" else None
 
@@ -3765,12 +3772,20 @@ def _build_geometry_runtime_inputs(
         "latents": cfg.get("__detect_final_latents__"),
         "rng": cfg.get("rng"),
     }
+    paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
+    paper_enabled = bool(paper_cfg.get("enabled", False)) if isinstance(paper_cfg, dict) else False
     prebuilt_attention_maps = _resolve_runtime_self_attention_maps(cfg)
     if prebuilt_attention_maps is not None:
         runtime_inputs["attention_maps"] = prebuilt_attention_maps
         runtime_inputs["attention_maps_source"] = "runtime_self_attention"
+        runtime_inputs["attention_maps_evidence_level"] = "primary"
     if enable_attention_proxy:
         if "attention_maps" not in runtime_inputs:
+            if paper_enabled:
+                runtime_inputs["attention_proxy_status"] = "absent"
+                runtime_inputs["attention_proxy_absent_reason"] = "paper_mode_requires_runtime_self_attention"
+                runtime_inputs["attention_maps_missing_reason"] = "runtime_self_attention_missing_under_paper_mode"
+                return runtime_inputs
             attention_maps = _build_attention_maps_from_latents(runtime_inputs.get("latents"))
             if attention_maps is not None:
                 runtime_inputs["attention_maps"] = attention_maps

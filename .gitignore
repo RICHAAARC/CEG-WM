@@ -68,3 +68,5 @@ Thumbs.db
 
 # Output folders
 outputs/
+tmp/
+audit_tmp/

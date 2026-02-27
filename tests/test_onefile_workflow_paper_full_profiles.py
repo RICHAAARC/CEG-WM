@@ -6,8 +6,11 @@ Module type: General module
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
+
+import pytest
 
 
 def _load_onefile_module(repo_root: Path):
@@ -94,6 +97,43 @@ def test_onefile_workflow_profiles_smoke_vs_paper_full_are_disjoint(tmp_path: Pa
     assert "multi_protocol_evaluation" not in smoke_names
     assert "assert_paper_mechanisms" in paper_names
     assert "multi_protocol_evaluation" in paper_names
+
+
+def test_onefile_detect_record_scoring_fails_fast_under_paper_profile(tmp_path: Path) -> None:
+    """
+    功能：验证 paper_full profile 下 detect 记录缺分数时必须 fail-fast。 
+
+    Verify paper_full profile rejects detect records without valid score/status for calibration.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    detect_record_path = records_dir / "detect_record.json"
+    detect_record_path.write_text(
+        json.dumps(
+            {
+                "content_evidence_payload": {
+                    "status": "absent",
+                    "score": None,
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="paper_full_cuda requires detect_record"):
+        module._prepare_detect_record_for_scoring(run_root, records_dir, "paper_full_cuda")
 
 
 def test_paper_full_mechanism_assertions_fail_fast_on_proxy_paths(tmp_path: Path) -> None:
@@ -335,11 +375,11 @@ def test_paper_full_mechanism_assertions_accept_nested_evaluation_report(tmp_pat
     assert all("evaluation_report.metrics_by_attack_condition must be non-empty list" not in item for item in failures)
 
 
-def test_paper_full_mechanism_assertions_accept_latent_mode_sync_only_geometry(tmp_path: Path) -> None:
+def test_paper_full_mechanism_assertions_reject_latent_mode_sync_only_geometry(tmp_path: Path) -> None:
     """
-    功能：验证 latent per-step 模式下 trace 与 anchor 缺失不触发硬失败。 
+    功能：验证 latent per-step 模式下缺失 anchor 证据会触发硬失败。 
 
-    Verify latent per-step mode accepts missing LF/HF trace and sync-only geometry evidence.
+    Verify latent per-step mode rejects sync-only geometry evidence when anchor evidence is absent.
 
     Args:
         tmp_path: Temporary path fixture.
@@ -415,5 +455,5 @@ def test_paper_full_mechanism_assertions_accept_latent_mode_sync_only_geometry(t
 
     assert all("content_evidence.lf_trace_digest must exist" not in item for item in failures)
     assert all("content_evidence.hf_trace_digest must exist when hf enabled" not in item for item in failures)
-    assert all("detect content evidence must include anchor_digest" not in item for item in failures)
-    assert all("geometry anchor_metrics must exist" not in item for item in failures)
+    assert any("detect content evidence must include 64-hex anchor_digest" in item for item in failures)
+    assert any("detect content evidence must include anchor_metrics" in item for item in failures)

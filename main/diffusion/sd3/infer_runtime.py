@@ -92,6 +92,7 @@ def run_sd3_inference(
     inference_runtime_meta: Dict[str, Any] = {}
     trajectory_evidence: Dict[str, Any] | None = None
     injection_evidence: Dict[str, Any] | None = None
+    runtime_self_attention_maps: Any = None
 
     # (1) 检查 pipeline_obj 是否可用
     if pipeline_obj is None:
@@ -345,6 +346,16 @@ def run_sd3_inference(
         output = tap_call_result.get("output")
         trajectory_evidence = tap_call_result.get("trajectory_evidence")
         tap_status = tap_call_result.get("tap_status")
+        runtime_self_attention_maps, runtime_attention_source = _extract_runtime_self_attention_maps(
+            pipeline_obj,
+            output,
+        )
+        if runtime_self_attention_maps is None:
+            inference_runtime_meta["runtime_self_attention_status"] = "absent"
+            inference_runtime_meta["runtime_self_attention_source"] = "<absent>"
+        else:
+            inference_runtime_meta["runtime_self_attention_status"] = "ok"
+            inference_runtime_meta["runtime_self_attention_source"] = runtime_attention_source
 
         # 更新注入证据状态（处理不支持 callback 的降级路径）。
         if injection_context is not None:
@@ -399,8 +410,52 @@ def run_sd3_inference(
             injection_context,
             absent_reason="injection_not_available"
         ),
-        "final_latents": detect_latents_storage.get("final_latents") if detect_latents_storage is not None else None
+        "final_latents": detect_latents_storage.get("final_latents") if detect_latents_storage is not None else None,
+        "runtime_self_attention_maps": runtime_self_attention_maps,
     }
+
+
+def _extract_runtime_self_attention_maps(pipeline_obj: Any, output: Any) -> tuple[Any, str]:
+    """
+    功能：从推理输出与 pipeline 运行时抓取真实 self-attention maps。 
+
+    Extract runtime self-attention maps from inference output/pipeline object.
+
+    Args:
+        pipeline_obj: Runtime pipeline object.
+        output: Pipeline inference output.
+
+    Returns:
+        Tuple of (attention_maps_or_none, source_label).
+    """
+    output_field_candidates = [
+        "self_attention_maps",
+        "attention_maps",
+        "runtime_self_attention_maps",
+    ]
+    for field_name in output_field_candidates:
+        if hasattr(output, field_name):
+            candidate = getattr(output, field_name)
+            if candidate is not None:
+                return candidate, f"output.{field_name}"
+        if isinstance(output, dict):
+            candidate = output.get(field_name)
+            if candidate is not None:
+                return candidate, f"output.{field_name}"
+
+    pipeline_field_candidates = [
+        "runtime_self_attention_maps",
+        "_runtime_self_attention_maps",
+        "last_self_attention_maps",
+        "_last_self_attention_maps",
+    ]
+    for field_name in pipeline_field_candidates:
+        if hasattr(pipeline_obj, field_name):
+            candidate = getattr(pipeline_obj, field_name)
+            if candidate is not None:
+                return candidate, f"pipeline.{field_name}"
+
+    return None, "<absent>"
 
 
 def _prepare_injection_callback(

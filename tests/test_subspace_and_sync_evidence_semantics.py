@@ -11,6 +11,7 @@ import numpy as np
 
 from main.core import digests
 from main.registries.geometry_registry import resolve_sync_module
+from main.watermarking.detect import orchestrator as detect_orchestrator
 from main.watermarking.content_chain.subspace.subspace_planner_impl import (
     SUBSPACE_PLANNER_ID,
     SUBSPACE_PLANNER_VERSION,
@@ -106,3 +107,27 @@ def test_sync_quality_semantics_contains_quantitative_secondary_evidence_level()
         assert isinstance(components, dict)
         components = cast(Dict[str, Any], components)
         assert components.get("version") == "latent_sync_quality_components_v2"
+
+
+def test_geometry_runtime_inputs_disable_latent_proxy_under_paper_mode() -> None:
+    """
+    功能：验证 paper 模式下几何链运行时输入禁止 latent attention proxy。 
+
+    Verify geometry runtime inputs do not use latent attention proxy in paper mode.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    cfg: Dict[str, Any] = {
+        "paper_faithfulness": {"enabled": True},
+        "__detect_final_latents__": np.random.default_rng(20260301).normal(size=(1, 4, 8, 8)).astype(np.float32),
+    }
+    build_inputs = getattr(detect_orchestrator, "_build_geometry_runtime_inputs")
+    runtime_inputs = build_inputs(cfg, enable_attention_proxy=True)
+    assert isinstance(runtime_inputs, dict)
+    assert runtime_inputs.get("attention_maps") is None
+    assert runtime_inputs.get("attention_proxy_status") == "absent"
+    assert runtime_inputs.get("attention_proxy_absent_reason") == "paper_mode_requires_runtime_self_attention"

@@ -204,6 +204,84 @@ def _inject_attack_condition_fields(record: Dict[str, Any], cfg: Dict[str, Any])
     record["attack"] = attack_obj
 
 
+def _build_t2smark_baseline_payload(record: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：构造 T2SMark baseline 对比载荷。 
+
+    Build real T2SMark baseline payload from detect-time evidence for
+    same-sample comparison in experiment matrix.
+
+    Args:
+        record: Detect record mapping.
+        cfg: Runtime configuration mapping.
+
+    Returns:
+        T2SMark baseline payload mapping.
+
+    Raises:
+        TypeError: If inputs are invalid.
+    """
+    if not isinstance(record, dict):
+        raise TypeError("record must be dict")
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+
+    result: Dict[str, Any] = {
+        "status": "absent",
+        "score": None,
+        "score_source": "detect_record.content_evidence_payload.detect_hf_score",
+        "baseline_impl_id": "hf_embedder_t2smark_v1",
+        "baseline_version": "v1",
+        "baseline_absent_reason": "t2smark_score_unavailable",
+        "comparison_scope": "same_sample_real_pipeline",
+        "trace": {
+            "pipeline_impl_id": record.get("pipeline_impl_id", "<absent>"),
+            "infer_trace_canon_sha256": record.get("infer_trace_canon_sha256", "<absent>"),
+            "cfg_digest": record.get("cfg_digest", "<absent>"),
+        },
+    }
+
+    content_payload = record.get("content_evidence_payload")
+    if not isinstance(content_payload, dict):
+        result["baseline_absent_reason"] = "content_evidence_payload_absent"
+        return result
+
+    paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
+    paper_enabled = bool(paper_cfg.get("enabled", False)) if isinstance(paper_cfg, dict) else False
+    detect_runtime_mode = record.get("detect_runtime_mode")
+    pipeline_runtime_meta = record.get("pipeline_runtime_meta") if isinstance(record.get("pipeline_runtime_meta"), dict) else {}
+
+    if paper_enabled and bool(pipeline_runtime_meta.get("synthetic_pipeline", False)):
+        result["baseline_absent_reason"] = "synthetic_pipeline_runtime"
+        return result
+    if paper_enabled and detect_runtime_mode != "real":
+        result["baseline_absent_reason"] = f"detect_runtime_mode_not_real:{detect_runtime_mode}"
+        return result
+
+    watermark_cfg = cfg.get("watermark") if isinstance(cfg.get("watermark"), dict) else {}
+    hf_cfg = watermark_cfg.get("hf") if isinstance(watermark_cfg.get("hf"), dict) else {}
+    if not bool(hf_cfg.get("enabled", False)):
+        result["baseline_absent_reason"] = "hf_channel_disabled"
+        return result
+
+    score_candidate = content_payload.get("detect_hf_score")
+    if not isinstance(score_candidate, (int, float)):
+        score_candidate = content_payload.get("hf_score")
+    if not isinstance(score_candidate, (int, float)):
+        result["baseline_absent_reason"] = "hf_score_absent"
+        return result
+
+    score_value = float(score_candidate)
+    if score_value != score_value or score_value in (float("inf"), float("-inf")):
+        result["baseline_absent_reason"] = "hf_score_non_finite"
+        return result
+
+    result["status"] = "ok"
+    result["score"] = score_value
+    result["baseline_absent_reason"] = None
+    return result
+
+
 def run_detect(
     output_dir: str,
     config_path: str,
@@ -417,6 +495,7 @@ def run_detect(
         pipeline_obj = pipeline_result.get("pipeline_obj")
         device = cfg.get("device", "cpu")
         seed = seed_value
+        runtime_self_attention_maps = None
 
         dependency_guard = assert_detect_runtime_dependencies(
             cfg,
@@ -469,11 +548,14 @@ def run_detect(
             trajectory_evidence = inference_result.get("trajectory_evidence")
             injection_evidence = inference_result.get("injection_evidence")
             final_latents = inference_result.get("final_latents")
+            runtime_self_attention_maps = inference_result.get("runtime_self_attention_maps")
         
         # 将最后的 latents 存储到 cfg 的临时字段，供 detect orchestrator 使用。
         # 这些 latents 不会被写入 records，只在内存中处理。
         if final_latents is not None:
             cfg["__detect_final_latents__"] = final_latents
+        if runtime_self_attention_maps is not None:
+            cfg["__runtime_self_attention_maps__"] = runtime_self_attention_maps
         cfg["__detect_pipeline_obj__"] = pipeline_obj
         cfg["__pipeline_runtime_meta__"] = pipeline_result.get("pipeline_runtime_meta")
         
@@ -643,6 +725,7 @@ def run_detect(
             record["inference_status"] = run_meta.get("inference_status")
             record["inference_error"] = run_meta.get("inference_error")
             record["inference_runtime_meta"] = run_meta.get("inference_runtime_meta")
+            record["t2smark_baseline"] = _build_t2smark_baseline_payload(record, cfg)
 
             schema.ensure_required_fields(record, cfg, interpretation)
 
