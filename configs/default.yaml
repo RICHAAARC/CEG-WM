@@ -34,6 +34,7 @@ inference_width: 512
 # 随机种子配置（Seed Configuration - 可重复性验证）
 # ==============================================================
 seed: null  # 随机种子（null 表示自动生成，可通过 CLI override 覆盖）
+allow_threshold_fallback_for_tests: false
 
 # ==============================================================
 # 轨迹采样配置（Trajectory Tap - 可复算证据）

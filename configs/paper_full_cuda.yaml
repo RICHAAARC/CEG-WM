@@ -18,6 +18,7 @@ inference_height: 512
 inference_width: 512
 
 seed: null  # 随机种子（null 表示自动生成，可通过 CLI override 覆盖）
+allow_threshold_fallback_for_tests: false
 
 trajectory_tap:
   enabled: true
