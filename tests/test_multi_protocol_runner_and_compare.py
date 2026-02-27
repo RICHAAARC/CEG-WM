@@ -10,9 +10,7 @@ Module type: General module
 """
 
 import json
-import tempfile
 from pathlib import Path
-from typing import Dict, Any, List
 
 import pytest
 
@@ -130,7 +128,9 @@ class TestCompareSummarySchemaMustContainRequiredAnchors:
             "protocols": [protocol_record],
         }
 
-        summary_path = tmp_path / "compare_summary.json"
+        protocol_compare_dir = tmp_path / "outputs" / "multi_protocol_evaluation" / "artifacts" / "protocol_compare"
+        protocol_compare_dir.mkdir(parents=True)
+        summary_path = protocol_compare_dir / "compare_summary.json"
         summary_path.write_text(json.dumps(compare_summary, indent=2))
 
         # Act: 运行审计
@@ -272,6 +272,59 @@ class TestAuditProtocolCompareOutputsSchemaFailsOnDuplicateProtocolId:
         # Assert: 审计应该 FAIL
         assert result["result"] == "FAIL", f"Expected FAIL for duplicate protocol_id but got {result['result']}"
         assert "Duplicate protocol_id" in str(result["evidence"]), "Evidence should mention duplicate protocol_id"
+
+
+class TestAuditProtocolCompareOutputsSchemaIgnoresPytestArtifacts:
+    """测试：审计脚本应忽略 pytest 临时目录污染。"""
+
+    def test_audit_prefers_official_compare_summary_over_pytest_tmp(self, tmp_path):
+        """
+        Test that audit ignores pytest-like temporary compare_summary files.
+        """
+        official_dir = tmp_path / "outputs" / "multi_protocol_evaluation" / "artifacts" / "protocol_compare"
+        official_dir.mkdir(parents=True)
+        official_summary = {
+            "schema_version": "protocol_compare_v1",
+            "created_at_utc": "2024-01-01T01:01:01Z",
+            "run_root_base": str(tmp_path),
+            "protocol_count": 1,
+            "protocols": [
+                {
+                    "protocol_source_path": "/path/to/protocol_v1.yaml",
+                    "protocol_source_basename": "protocol_v1.yaml",
+                    "run_root": str(tmp_path / "run1"),
+                    "run_root_relative": "protocol_v1_abc/run_1",
+                    "status": "ok",
+                    "failure_reason": "ok",
+                    "protocol_id": "digest_official",
+                    "attack_protocol_version": "attack_protocol_v1",
+                    "attack_protocol_digest": "digest_official",
+                    "all_audits_passed": True,
+                    "anchors": {
+                        "cfg_digest": "cfg_ok",
+                        "plan_digest": "plan_ok",
+                        "thresholds_digest": "thresholds_ok",
+                        "threshold_metadata_digest": "threshold_metadata_ok",
+                        "impl_digest": "impl_ok",
+                        "fusion_rule_version": "fusion_v1",
+                        "attack_coverage_digest": "coverage_ok",
+                        "policy_path": "/policy/path",
+                    },
+                }
+            ],
+        }
+        official_path = official_dir / "compare_summary.json"
+        official_path.write_text(json.dumps(official_summary, indent=2), encoding="utf-8")
+
+        polluted_dir = tmp_path / "outputs" / "pytesttmp_123" / "artifacts"
+        polluted_dir.mkdir(parents=True)
+        polluted_path = polluted_dir / "compare_summary.json"
+        polluted_path.write_text("{ invalid json", encoding="utf-8")
+
+        result = audit_protocol_compare_outputs_schema(tmp_path)
+
+        assert result["result"] == "PASS", f"Expected PASS but got {result['result']}: {result.get('evidence')}"
+        assert result["evidence"]["path"] == str(official_path)
 
 
 class TestMakeProtocolSafeKey:

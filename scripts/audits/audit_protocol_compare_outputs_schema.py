@@ -16,7 +16,78 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
+
+
+def _is_ignored_compare_summary_path(path_obj: Path, repo_root: Path) -> bool:
+    """
+    功能：判断 compare_summary 路径是否属于测试临时目录或缓存目录。
+
+    Determine whether a compare_summary path should be ignored as test/tmp artifact.
+
+    Args:
+        path_obj: Candidate compare_summary path.
+        repo_root: Repository root directory.
+
+    Returns:
+        True when path belongs to ignored transient locations.
+    """
+    ignored_exact_names: Set[str] = {
+        ".pytest_cache",
+        "pytesttmp",
+        "__pycache__",
+    }
+    try:
+        relative_parts = path_obj.resolve().relative_to(repo_root.resolve()).parts
+    except Exception:
+        relative_parts = path_obj.parts
+
+    for raw_part in relative_parts:
+        part = raw_part.lower()
+        if part in ignored_exact_names:
+            return True
+        if part.startswith("pytest-") or part.startswith("pytest-of-") or part.startswith("pytesttmp"):
+            return True
+    return False
+
+
+def _find_compare_summary_path(repo_root: Path) -> Optional[Path]:
+    """
+    功能：在受控边界内定位 compare_summary.json，避免测试临时产物污染。
+
+    Resolve compare_summary.json from controlled locations only.
+
+    Args:
+        repo_root: Repository root directory.
+
+    Returns:
+        Resolved compare_summary path when found, otherwise None.
+    """
+    explicit_candidates = [
+        repo_root / "outputs" / "multi_protocol_evaluation" / "artifacts" / "protocol_compare" / "compare_summary.json",
+        repo_root / "compare_summary.json",
+    ]
+    for candidate_path in explicit_candidates:
+        if candidate_path.exists() and candidate_path.is_file() and not _is_ignored_compare_summary_path(candidate_path, repo_root):
+            return candidate_path
+
+    outputs_dir = repo_root / "outputs"
+    if not outputs_dir.exists():
+        return None
+
+    valid_matches: List[Path] = []
+    for candidate_path in outputs_dir.rglob("compare_summary.json"):
+        if not candidate_path.is_file():
+            continue
+        if _is_ignored_compare_summary_path(candidate_path, repo_root):
+            continue
+        valid_matches.append(candidate_path)
+
+    if not valid_matches:
+        return None
+
+    valid_matches.sort(key=lambda item: (len(item.parts), str(item).lower()))
+    return valid_matches[0]
 
 
 def audit_protocol_compare_outputs_schema(repo_root: Path) -> Dict[str, Any]:
@@ -55,35 +126,7 @@ def audit_protocol_compare_outputs_schema(repo_root: Path) -> Dict[str, Any]:
         "fix": "N/A (not applicable when feature is not used)",
     }
 
-    # 扫描所有可能的 protocol compare 工件位置（outputs/multi_protocol_evaluation/）
-    possible_compare_dirs = [
-        repo_root / "outputs" / "multi_protocol_evaluation" / "artifacts" / "protocol_compare",
-    ]
-
-    compare_summary_path: Optional[Path] = None
-    for candidate_dir in possible_compare_dirs:
-        candidate_path = candidate_dir / "compare_summary.json"
-        if candidate_path.exists() and candidate_path.is_file():
-            compare_summary_path = candidate_path
-            break
-
-    if compare_summary_path is None:
-        # 检查任何输出目录中是否有 compare_summary.json（递归扫描）
-        outputs_dir = repo_root / "outputs"
-        if outputs_dir.exists():
-            for p in outputs_dir.rglob("compare_summary.json"):
-                compare_summary_path = p
-                break
-
-    # 如果还是没找到，检查临时目录中的 compare_summary.json（用于测试）
-    if compare_summary_path is None:
-        for p in repo_root.rglob("compare_summary.json"):
-            if "pytest" not in str(p) and "tmp" not in str(p).lower():
-                # 忽略测试临时文件
-                continue
-            if p.exists() and p.is_file():
-                compare_summary_path = p
-                break
+    compare_summary_path = _find_compare_summary_path(repo_root)
 
     if compare_summary_path is None:
         # 未找到 compare 工件，SKIP

@@ -159,6 +159,9 @@ field_catalog:
     # 几何 gate 启用时的最小字段。
     geometry_gate_minimal:
       - "geometry_evidence.sync.status"
+      - "geometry_evidence.anchor_digest"
+      - "geometry_evidence.anchor_metrics"
+      - "geometry_evidence.anchor_evidence_level"
 
     # 推荐审计字段（可选）。
     recommended:

@@ -264,6 +264,99 @@ def check_injection_site_consistency(repo_root: Path) -> Dict[str, Any]:
     }
 
 
+def check_geometry_anchor_completeness(repo_root: Path) -> Dict[str, Any]:
+    """
+    功能：检查几何锚点字段在 paper 路径下的完整性。
+
+    Check geometry anchor fields are present and valid when geometry gate is enabled.
+    Required anchor fields: anchor_digest, anchor_metrics, anchor_evidence_level
+
+    Args:
+        repo_root: Repository root directory.
+
+    Returns:
+        Check result dict.
+    """
+    # 首先查找 detect records
+    records_dir = repo_root / "tmp" / "cli_smoke" / "detect_run" / "records"
+    if not records_dir.exists():
+        # 如果没有 detect records，则检查无法进行，认为 N.A.
+        return {
+            "check": "geometry_anchor_completeness",
+            "pass": True,
+            "note": "No detect records found for verification (N.A.)"
+        }
+
+    record_files = list(records_dir.glob("detect_record.json"))
+    if not record_files:
+        return {
+            "check": "geometry_anchor_completeness",
+            "pass": True,
+            "note": "No detect_record.json found (N.A.)"
+        }
+
+    record_file = record_files[0]
+    try:
+        with open(record_file, "r", encoding="utf-8") as f:
+            record = json.load(f)
+    except Exception as e:
+        return {
+            "check": "geometry_anchor_completeness",
+            "pass": False,
+            "error": f"Failed to load record: {e}",
+            "record_file": str(record_file)
+        }
+
+    # 检查 policy_path：关键指标是是否启用了几何链
+    policy_path = record.get("policy_path", "")
+    geometry_enabled = record.get("detect", {}).get("geometry", {}).get("enabled", False)
+
+    # 仅当 policy_path 启用几何链或明确启用了 geometry 检测时才检查锚点
+    if not (geometry_enabled or "geometry" in policy_path):
+        return {
+            "check": "geometry_anchor_completeness",
+            "pass": True,
+            "note": "Geometry chain not enabled, anchor check N.A."
+        }
+
+    # 检查几何证据链和锚点字段
+    geometry_evidence = record.get("geometry_evidence", {})
+    geometry_sync = geometry_evidence.get("sync", {})
+    sync_status = geometry_sync.get("status")
+
+    # 仅当 geometry sync 成功时才强制要求锚点字段
+    if sync_status not in ("ok", "success"):
+        # sync 失败或缺失时，锚点字段可以缺失；这是合法的失败语义
+        return {
+            "check": "geometry_anchor_completeness",
+            "pass": True,
+            "note": f"Geometry sync status={sync_status}, anchor check N.A. (failure is legal)"
+        }
+
+    # sync 成功时：锚点字段必须存在且非缺失值
+    missing_fields = []
+
+    anchor_digest = geometry_evidence.get("anchor_digest")
+    if anchor_digest is None or anchor_digest in ("<absent>", "<failed>", ""):
+        missing_fields.append("geometry_evidence.anchor_digest")
+
+    anchor_metrics = geometry_evidence.get("anchor_metrics")
+    if anchor_metrics is None or anchor_metrics in ("<absent>", "<failed>", ""):
+        missing_fields.append("geometry_evidence.anchor_metrics")
+
+    anchor_evidence_level = geometry_evidence.get("anchor_evidence_level")
+    if anchor_evidence_level is None or anchor_evidence_level in ("<absent>", "<failed>", ""):
+        missing_fields.append("geometry_evidence.anchor_evidence_level")
+
+    return {
+        "check": "geometry_anchor_completeness",
+        "pass": len(missing_fields) == 0,
+        "missing_fields": missing_fields if missing_fields else [],
+        "sync_status": sync_status,
+        "record_file": str(record_file)
+    }
+
+
 def aggregate_checks(repo_root: Path) -> List[Dict[str, Any]]:
     """
     功能：聚合所有运行期必达检查项。
@@ -282,6 +375,7 @@ def aggregate_checks(repo_root: Path) -> List[Dict[str, Any]]:
     checks.append(check_paper_spec_digest_binding(repo_root))
     checks.append(check_pipeline_fingerprint_consistency(repo_root))
     checks.append(check_injection_site_consistency(repo_root))
+    checks.append(check_geometry_anchor_completeness(repo_root))
 
     return checks
 

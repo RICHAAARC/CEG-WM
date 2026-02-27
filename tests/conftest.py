@@ -7,11 +7,140 @@ Provides common fixtures for testing: temporary directories,
 minimal configuration paths, network mocking, GPU mocking.
 """
 
+import os
+import sys
+import tempfile
 import pytest
 import warnings
 from pathlib import Path
 from typing import Dict, Any
 from unittest.mock import MagicMock
+
+
+def _pytest_workspace_root() -> Path:
+    """
+    获取测试工作区根目录。
+    """
+    return Path(__file__).resolve().parent.parent
+
+
+def _ensure_pytest_dirs_under_workspace(config: pytest.Config) -> None:
+    """
+    统一 pytest 的 cache/tmp 目录到工作区 .pytest 目录下。
+
+    Args:
+        config: Pytest config object.
+
+    Returns:
+        None.
+    """
+    workspace_root = _pytest_workspace_root()
+    pytest_root = workspace_root / ".pytest"
+    debug_temproot = pytest_root / "tmproot"
+    debug_temproot.mkdir(parents=True, exist_ok=True)
+
+    if "PYTEST_DEBUG_TEMPROOT" not in os.environ:
+        os.environ["PYTEST_DEBUG_TEMPROOT"] = str(debug_temproot)
+
+    current_basetemp = getattr(config.option, "basetemp", None)
+    if not current_basetemp:
+        config.option.basetemp = str(pytest_root / "tmp")
+
+
+def _requires_windows_py313_tmp_acl_workaround() -> bool:
+    """
+    判断是否需要应用 Windows + Python 3.13 下的 pytest 临时目录 ACL 兼容补丁。
+    """
+    return os.name == "nt" and sys.version_info >= (3, 13)
+
+
+def _apply_windows_py313_tmp_acl_workaround() -> None:
+    """
+    修复 pytest 在 Windows + Python 3.13 下以 0o700 创建临时目录导致的 ACL 不可访问问题。
+
+    该补丁仅作用于测试过程，不影响生产代码路径。
+    """
+    if not _requires_windows_py313_tmp_acl_workaround():
+        return
+
+    try:
+        import _pytest.pathlib as pytest_pathlib
+        import _pytest.tmpdir as pytest_tmpdir
+    except Exception:
+        return
+
+    if getattr(pytest_tmpdir.TempPathFactory, "_acl_safe_mode_patched", False):
+        return
+
+    def _mkdir_acl_safe(path_obj: Path, exist_ok: bool = False) -> None:
+        path_obj.mkdir(mode=0o755, exist_ok=exist_ok)
+
+    def _getbasetemp_acl_safe(self):
+        if self._basetemp is not None:
+            return self._basetemp
+
+        if self._given_basetemp is not None:
+            basetemp = self._given_basetemp
+            if basetemp.exists():
+                pytest_pathlib.rm_rf(basetemp)
+            _mkdir_acl_safe(basetemp)
+            basetemp = basetemp.resolve()
+        else:
+            from_env = os.environ.get("PYTEST_DEBUG_TEMPROOT")
+            temproot = Path(from_env or tempfile.gettempdir()).resolve()
+            user = pytest_pathlib.get_user() or "unknown"
+            rootdir = temproot.joinpath(f"pytest-of-{user}")
+            try:
+                _mkdir_acl_safe(rootdir, exist_ok=True)
+            except OSError:
+                rootdir = temproot.joinpath("pytest-of-unknown")
+                _mkdir_acl_safe(rootdir, exist_ok=True)
+
+            uid = pytest_pathlib.get_user_id()
+            if uid is not None:
+                rootdir_stat = rootdir.stat()
+                if rootdir_stat.st_uid != uid:
+                    raise OSError(
+                        f"The temporary directory {rootdir} is not owned by the current user. "
+                        "Fix this and try again."
+                    )
+                if (rootdir_stat.st_mode & 0o077) != 0:
+                    os.chmod(rootdir, rootdir_stat.st_mode & ~0o077)
+
+            keep = self._retention_count
+            if self._retention_policy == "none":
+                keep = 0
+
+            basetemp = pytest_pathlib.make_numbered_dir_with_cleanup(
+                prefix="pytest-",
+                root=rootdir,
+                keep=keep,
+                lock_timeout=pytest_tmpdir.LOCK_TIMEOUT,
+                mode=0o755,
+            )
+
+        assert basetemp is not None, basetemp
+        self._basetemp = basetemp
+        self._trace("new basetemp", basetemp)
+        return basetemp
+
+    def _mktemp_acl_safe(self, basename: str, numbered: bool = True):
+        basename = self._ensure_relative_to_basetemp(basename)
+        if not numbered:
+            temp_path = self.getbasetemp().joinpath(basename)
+            temp_path.mkdir(mode=0o755)
+        else:
+            temp_path = pytest_pathlib.make_numbered_dir(
+                root=self.getbasetemp(),
+                prefix=basename,
+                mode=0o755,
+            )
+            self._trace("mktemp", temp_path)
+        return temp_path
+
+    pytest_tmpdir.TempPathFactory.getbasetemp = _getbasetemp_acl_safe
+    pytest_tmpdir.TempPathFactory.mktemp = _mktemp_acl_safe
+    setattr(pytest_tmpdir.TempPathFactory, "_acl_safe_mode_patched", True)
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -24,7 +153,8 @@ def pytest_configure(config: pytest.Config) -> None:
     Returns:
         None.
     """
-    _ = config
+    _ensure_pytest_dirs_under_workspace(config)
+    _apply_windows_py313_tmp_acl_workaround()
     warnings.filterwarnings(
         "ignore",
         message=r".*(/proc/vmstat|vmstat).*",

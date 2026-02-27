@@ -71,3 +71,4 @@ outputs/
 tmp/
 audit_tmp/
 artifacts/
+.pytest/

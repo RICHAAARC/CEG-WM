@@ -2,3 +2,4 @@
 testpaths = ["tests"]
 norecursedirs = ["scripts/Freezen_Door"]
 pythonpath = ["."]
+addopts = "--basetemp=.pytest/tmp"

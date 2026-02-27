@@ -148,6 +148,7 @@ class TestCompareSummaryWrittenViaControlledWriter:
         assert summary_path.exists(), f"compare_summary.json should exist at {summary_path}"
         assert "protocol_compare" in str(summary_path), "path should contain 'protocol_compare'"
         assert str(summary_path).endswith("compare_summary.json"), "filename should be compare_summary.json"
+        assert not list((run_root_base / "artifacts").rglob("*.writing")), "artifacts 目录不应残留 .writing 临时文件"
         
         # Verify it's readable JSON
         with open(summary_path) as f:
@@ -173,6 +174,7 @@ class TestCompareSummaryWrittenViaControlledWriter:
         # Assert: 路径应该在 artifacts/ 下
         assert "artifacts" in str(summary_path)
         assert str(summary_path) == str(run_root_base / "artifacts" / "protocol_compare" / "compare_summary.json")
+        assert not list((run_root_base / "artifacts").rglob("*.writing")), "artifacts 目录不应残留 .writing 临时文件"
 
 
 class TestStaticAuditBlocksScriptsWriteBypass:

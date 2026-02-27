@@ -36,7 +36,90 @@ PROFILE_PAPER_FULL_CUDA = "paper_full_cuda"
 LEGACY_PROFILE_CPU_MIN = "cpu_min"
 LEGACY_PROFILE_CUDA_REAL = "cuda_real"
 PAPER_FROZEN_CONFIG_PATH = REPO_ROOT / "configs" / "paper_full_cuda.yaml"
+PAPER_SPEC_CONFIG_PATH = REPO_ROOT / "configs" / "paper_faithfulness_spec.yaml"
 PAPER_FROZEN_IMPL_REQUIRED_FIELDS = ("sync_module_id", "geometry_extractor_id")
+
+# cfg 角色枚举
+CFG_ROLE_SPEC = "spec"
+CFG_ROLE_RUNTIME = "runtime"
+
+
+def _detect_cfg_role(cfg_obj: dict) -> str:
+    """
+    功能：检测配置的角色类型（规范 vs 运行期）。
+
+    Detect whether config is a spec (specification) or runtime config.
+    Spec configs have 'authority' and 'audit_gate_requirements' top-level fields.
+
+    Args:
+        cfg_obj: Configuration mapping.
+
+    Returns:
+        Role string: "spec" or "runtime".
+
+    Raises:
+        TypeError: If cfg_obj is not a dict.
+    """
+    if not isinstance(cfg_obj, dict):
+        raise TypeError("cfg_obj must be dict")
+
+    # 特征检测：spec 有权威声明字段和审计门禁声明
+    authority = cfg_obj.get("authority")
+    audit_gate_requirements = cfg_obj.get("audit_gate_requirements")
+
+    # 两个特征字段都存在 -> spec
+    if isinstance(authority, dict) and isinstance(audit_gate_requirements, dict):
+        return CFG_ROLE_SPEC
+
+    # 否则 -> runtime
+    return CFG_ROLE_RUNTIME
+
+
+def _validate_cfg_role_for_profile(cfg_obj: dict, cfg_path: Path, profile: str) -> None:
+    """
+    功能：验证配置角色是否与 profile 兼容。
+
+    Validate that config role matches profile requirements.
+    paper_full_cuda profile only accepts runtime configs, never spec configs.
+
+    Args:
+        cfg_obj: Configuration mapping.
+        cfg_path: Configuration file path (for error messages).
+        profile: Workflow profile.
+
+    Returns:
+        None.
+
+    Raises:
+        TypeError: If cfg_obj or profile is invalid.
+        ValueError: If cfg role is inappropriate for profile.
+    """
+    if not isinstance(cfg_obj, dict):
+        raise TypeError("cfg_obj must be dict")
+    if not isinstance(cfg_path, Path):
+        raise TypeError("cfg_path must be Path")
+    if not isinstance(profile, str) or not profile:
+        raise TypeError("profile must be non-empty str")
+
+    detected_role = _detect_cfg_role(cfg_obj)
+    profile = _normalize_profile(profile)
+
+    # paper_full_cuda profile 对应论文方法，必须只能使用 runtime cfg
+    if profile == PROFILE_PAPER_FULL_CUDA:
+        if detected_role == CFG_ROLE_SPEC:
+            raise ValueError(
+                f"profile=paper_full_cuda requires runtime config, got spec config: {cfg_path}\n"
+                f"Use configs/paper_full_cuda.yaml as runtime config instead.\n"
+                f"configs/paper_faithfulness_spec.yaml is a specification document, not executable at runtime."
+            )
+
+    # cpu_smoke profile 也只接 runtime cfg
+    if profile == PROFILE_CPU_SMOKE:
+        if detected_role == CFG_ROLE_SPEC:
+            raise ValueError(
+                f"profile=cpu_smoke requires runtime config, got spec config: {cfg_path}\n"
+                f"Spec configs cannot be executed directly. Use a runtime config instead."
+            )
 
 
 def _load_paper_frozen_impl_constraints() -> dict:
@@ -1041,6 +1124,21 @@ def main() -> None:
         sys.exit(2)
     if not cfg_path.exists() or not cfg_path.is_file():
         print(f"[onefile] error: cfg not found: {cfg_path}", file=sys.stderr)
+        sys.exit(2)
+
+    # 检测 cfg 角色并验证其与 profile 的兼容性
+    try:
+        cfg_text = cfg_path.read_text(encoding="utf-8")
+        cfg_obj = yaml.safe_load(cfg_text)
+        if not isinstance(cfg_obj, dict):
+            print(f"[onefile] error: config root must be mapping", file=sys.stderr)
+            sys.exit(2)
+        _validate_cfg_role_for_profile(cfg_obj, cfg_path, args.profile)
+    except ValueError as e:
+        print(f"[onefile] error: {e}", file=sys.stderr)
+        sys.exit(2)
+    except Exception as e:
+        print(f"[onefile] error: failed to validate config: {type(e).__name__}: {e}", file=sys.stderr)
         sys.exit(2)
 
     return_code = run_onefile_workflow(

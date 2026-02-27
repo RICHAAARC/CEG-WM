@@ -14,6 +14,7 @@ import locale
 import os
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+import yaml
 
 
 # 审计脚本清单（固定顺序）
@@ -39,6 +40,167 @@ AUDIT_SCRIPTS = [
     "audits/audit_experiment_matrix_outputs_schema.py",      # experiment matrix 汇总工件 schema 完整性
     "audits/audit_protocol_compare_outputs_schema.py",      # protocol compare 汇总工件 schema 与一致性（research-only）
 ]
+
+
+def _load_spec_audit_requirements(repo_root: Path) -> Dict[str, str]:
+    """
+    功能：从 paper_faithfulness_spec 加载审计门禁要求。
+
+    Load audit gate requirements from paper_faithfulness_spec.yaml.
+    Returns a mapping of audit requirement key -> audit script path.
+
+    Args:
+        repo_root: Repository root directory.
+
+    Returns:
+        Dictionary mapping audit requirement names to script paths declared in spec.
+
+    Raises:
+        FileNotFoundError: If spec file not found.
+        ValueError: If spec format is invalid.
+    """
+    spec_path = repo_root / "configs" / "paper_faithfulness_spec.yaml"
+    if not spec_path.exists() or not spec_path.is_file():
+        # spec 文件不存在，不作为 BLOCK，因为 spec 是可选的
+        return {}
+
+    try:
+        spec_text = spec_path.read_text(encoding="utf-8")
+        spec_obj = yaml.safe_load(spec_text)
+    except Exception as e:
+        raise ValueError(f"Failed to load spec: {e}")
+
+    if not isinstance(spec_obj, dict):
+        raise ValueError("spec root must be mapping")
+
+    # 读取 audit_gate_requirements
+    audit_gate_requirements = spec_obj.get("audit_gate_requirements")
+    if not isinstance(audit_gate_requirements, dict):
+        # 没有 audit_gate_requirements 字段，认为没有声明需求
+        return {}
+
+    # 提取所有 audit_script 路径
+    result = {}
+    for req_key, req_value in audit_gate_requirements.items():
+        if not isinstance(req_value, dict):
+            continue
+        auditscript_path = req_value.get("audit_script")
+        if isinstance(auditscript_path, str) and auditscript_path.strip():
+            result[req_key] = auditscript_path.strip()
+
+    return result
+
+
+def _validate_spec_audit_closure(
+    spec_audit_requirements: Dict[str, str],
+    configured_scripts: List[str],
+    repo_root: Path,
+    strict: bool = False,
+) -> List[Dict[str, Any]]:
+    """
+    功能：验证 spec 声明的审计脚本在实现中完整性。
+
+    Validate that all audit scripts declared in spec exist and are registered.
+    Returns audit results for closure check.
+
+    Args:
+        spec_audit_requirements: Audit requirements loaded from spec.
+        configured_scripts: List of audit scripts in AUDIT_SCRIPTS.
+        repo_root: Repository root for path resolution.
+        strict: If True, missing or unregistered scripts cause BLOCK.
+
+    Returns:
+        List of audit result dictionaries for closure validation.
+
+    Raises:
+        TypeError: If arguments have invalid types.
+    """
+    if not isinstance(spec_audit_requirements, dict):
+        raise TypeError("spec_audit_requirements must be dict")
+    if not isinstance(configured_scripts, list):
+        raise TypeError("configured_scripts must be list")
+    if not isinstance(repo_root, Path):
+        raise TypeError("repo_root must be Path")
+    if not isinstance(strict, bool):
+        raise TypeError("strict must be bool")
+
+    results = []
+
+    # 如果 spec 没有声明任何审计需求，认为通过（没有额外约束）
+    if not spec_audit_requirements:
+        return results
+
+    # 逐个检查 spec 声明的审计脚本
+    missing_scripts = []
+    unregistered_scripts = []
+
+    # 规范化配置脚本列表：统一为脚本文件名或 audits/* 相对路径
+    normalized_configured = set()
+    for script_item in configured_scripts:
+        # 将反斜杠转换为正斜杠
+        normalized = script_item.replace("\\", "/")
+        # 保存完整的相对路径（audits/* 形式）
+        normalized_configured.add(normalized)
+
+    for req_key, spec_script_path in spec_audit_requirements.items():
+        # spec_script_path 是从 repo_root 开始的相对路径
+        script_file = repo_root / spec_script_path
+        is_exists = script_file.exists() and script_file.is_file()
+
+        # 规范化 spec 路径
+        normalized_spec = spec_script_path.replace("\\", "/")
+        
+        # 提取最后一个 audits/ 之后的部分作为规范化形式
+        # 比如 "scripts/audits/audit_test.py" -> "audits/audit_test.py"
+        if "/audits/" in normalized_spec:
+            # 找到 audits 的位置
+            audits_idx = normalized_spec.rfind("/audits/")
+            if audits_idx >= 0:
+                audits_part = normalized_spec[audits_idx + 1:]  # +1 跳过斜杠
+            else:
+                audits_part = normalized_spec
+        else:
+            audits_part = normalized_spec
+
+        # 检查是否在已注册的脚本中
+        # 对比规范化形式
+        is_registered = audits_part in normalized_configured
+
+        if not is_exists:
+            missing_scripts.append((req_key, spec_script_path))
+        if not is_registered:
+            unregistered_scripts.append((req_key, spec_script_path))
+
+    # 如果有缺失或未注册的脚本
+    if missing_scripts or unregistered_scripts:
+        issues = []
+        if missing_scripts:
+            issues.append(
+                f"Missing scripts: {', '.join(f'{k}={p}' for k, p in missing_scripts)}"
+            )
+        if unregistered_scripts:
+            issues.append(
+                f"Unregistered in AUDIT_SCRIPTS: {', '.join(f'{k}={p}' for k, p in unregistered_scripts)}"
+            )
+
+        result = {
+            "audit_id": "spec_audit_closure",
+            "gate_name": "gate.spec_audit_closure",
+            "category": "S",
+            "severity": "BLOCK" if strict else "NON_BLOCK",
+            "result": "FAIL" if (missing_scripts or unregistered_scripts) else "PASS",
+            "rule": "paper_faithfulness_spec 声明的所有审计脚本必须存在并在 run_all_audits.AUDIT_SCRIPTS 中注册",
+            "evidence": {
+                "missing_scripts": missing_scripts,
+                "unregistered_scripts": unregistered_scripts,
+                "spec_declared_count": len(spec_audit_requirements),
+            },
+            "impact": "spec 与实现审计清单不闭合，无法完成规范定义的审计门禁",
+            "fix": "创建缺失的审计脚本或将现有脚本注册到 AUDIT_SCRIPTS",
+        }
+        results.append(result)
+
+    return results
 
 
 def _decode_bytes(data: Optional[bytes]) -> str:
@@ -450,6 +612,16 @@ def main():
     
     # 执行所有审计脚本
     all_results = []
+
+    # 首先检查 spec 和 audit 闭合
+    spec_audit_requirements = _load_spec_audit_requirements(repo_root)
+    closure_results = _validate_spec_audit_closure(
+        spec_audit_requirements,
+        AUDIT_SCRIPTS,
+        repo_root,
+        strict=args.strict,
+    )
+    all_results.extend(closure_results)
     
     for script_name in AUDIT_SCRIPTS:
         script_path = scripts_dir / script_name

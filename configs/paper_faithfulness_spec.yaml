@@ -276,25 +276,25 @@ audit_gate_requirements:
 
   # 审计 1：paper_spec_digest 绑定审计
   paper_spec_digest_binding:
-    audit_script: "scripts/audits/audit_paper_spec_binding.py"
+    audit_script: "scripts/audits/audit_paper_faithfulness_runtime_must_have.py"
     check_rule: "所有 records 必须绑定 paper_spec_digest 且可复算"
     failure_level: "BLOCK"
 
   # 审计 2：pipeline_fingerprint 一致性审计
   pipeline_fingerprint_consistency:
-    audit_script: "scripts/audits/audit_pipeline_fingerprint_consistency.py"
+    audit_script: "scripts/audits/audit_paper_faithfulness_runtime_must_have.py"
     check_rule: "同一 cfg_digest 下的 records 必须具有一致的 pipeline_fingerprint_digest"
     failure_level: "BLOCK"
 
   # 审计 3：injection_site 变化审计
   injection_site_drift:
-    audit_script: "scripts/audits/audit_injection_site_drift.py"
+    audit_script: "scripts/audits/audit_paper_faithfulness_runtime_must_have.py"
     check_rule: "注入点变化必须体现在 injection_site_digest 中，任何未记录的变化必须 FAIL"
     failure_level: "BLOCK"
 
   # 审计 4：对齐证据完整性审计
   alignment_evidence_completeness:
-    audit_script: "scripts/audits/audit_alignment_evidence_completeness.py"
+    audit_script: "scripts/audits/audit_paper_faithfulness.py"
     check_rule: "所有 enabled 方法族的对齐证据字段必须齐全且非基线缺省值"
     failure_level: "BLOCK"
 

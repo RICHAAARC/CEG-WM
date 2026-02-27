@@ -351,6 +351,25 @@ def _ensure_parent_dir(dst: Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
 
 
+def _is_windows_winerror_5(exc: BaseException) -> bool:
+    """
+    功能：判断是否为 Windows 下 replace 触发的 WinError 5。 
+
+    Detect whether an exception is Windows access-denied (WinError 5).
+
+    Args:
+        exc: Exception instance raised during replace.
+
+    Returns:
+        True only when running on Windows and the exception is PermissionError with winerror=5.
+    """
+    if os.name != "nt":
+        return False
+    if not isinstance(exc, PermissionError):
+        return False
+    return getattr(exc, "winerror", None) == 5
+
+
 def _json_dumps_stable(
     obj: Any,
     indent: Optional[int],
@@ -482,9 +501,40 @@ def _atomic_replace_write_bytes(dst: Path, data: bytes) -> None:
         fd = None
         
         # 原子替换目标文件
-        tmp_path.replace(dst)
+        try:
+            tmp_path.replace(dst)
+        except PermissionError as replace_exc:
+            if not _is_windows_winerror_5(replace_exc):
+                raise
+
+            # Windows 权限环境下 WinError 5 的受限回退：
+            # 不再依赖 rename/replace，直接覆盖写入目标文件。
+            fallback_fd = None
+            try:
+                if dst.exists():
+                    try:
+                        os.chmod(dst, 0o666)
+                    except OSError:
+                        pass
+
+                fallback_flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+                if hasattr(os, "O_BINARY"):
+                    fallback_flags |= os.O_BINARY
+
+                fallback_fd = os.open(str(dst), fallback_flags, 0o666)
+                os.write(fallback_fd, data)
+                os.fsync(fallback_fd)
+            finally:
+                if fallback_fd is not None:
+                    os.close(fallback_fd)
+                # replace 失败后，临时文件仍在，必须清理。
+                if tmp_path.exists():
+                    try:
+                        tmp_path.unlink()
+                    except Exception:
+                        pass
         
-    except Exception as e:
+    except Exception:
         # 出错时清理临时文件
         if fd is not None:
             try:
@@ -497,7 +547,7 @@ def _atomic_replace_write_bytes(dst: Path, data: bytes) -> None:
             except Exception:
                 pass
         # 重新抛出原异常
-        raise e
+        raise
 
 
 def _require_fact_sources_initialized() -> FactSourcesContext:

@@ -140,6 +140,7 @@ def test_experiment_matrix_summary_written_via_controlled_writer(
     with summary_path.open("r", encoding="utf-8") as f:
         payload = json.load(f)
     assert payload.get("batch_root") == str(batch_root)
+    assert not list(artifacts_dir.rglob("*.writing")), "artifacts 目录不应残留 .writing 临时文件"
 
 
 def test_write_bypass_scan_blocks_scripts_open_write(tmp_path: Path) -> None:
