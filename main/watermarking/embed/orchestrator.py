@@ -103,6 +103,8 @@ def run_embed_orchestrator(
     ablation_normalized = _get_ablation_normalized(cfg)
     enable_content = ablation_normalized.get("enable_content", True)
     enable_subspace = ablation_normalized.get("enable_subspace", True)
+    enable_lf = ablation_normalized.get("enable_lf", True)
+    enable_hf = ablation_normalized.get("enable_hf", bool(cfg.get("watermark", {}).get("hf", {}).get("enabled", False)))
 
     content_inputs = _build_content_inputs_for_embed(cfg)
     
@@ -162,12 +164,15 @@ def run_embed_orchestrator(
     
     # 调用规划器计算 plan_digest，绑定 cfg_digest + mask_digest + planner_params。
     planner_inputs = _build_planner_inputs_for_runtime(cfg, trajectory_evidence, content_evidence_payload)
-    subspace_result = subspace_result_override if subspace_result_override is not None else impl_set.subspace_planner.plan(
-        cfg,
-        mask_digest=mask_digest,
-        cfg_digest=cfg_digest,
-        inputs=planner_inputs
-    )
+    if not enable_subspace:
+        subspace_result = _build_ablation_absent_subspace_result("subspace_disabled_by_ablation")
+    else:
+        subspace_result = subspace_result_override if subspace_result_override is not None else impl_set.subspace_planner.plan(
+            cfg,
+            mask_digest=mask_digest,
+            cfg_digest=cfg_digest,
+            inputs=planner_inputs
+        )
     
     sync_result = _run_sync_module(cfg, impl_set, sync_runtime_context)
 
@@ -223,12 +228,15 @@ def run_embed_orchestrator(
     ):
         input_image = Image.open(io_anchors["image_path"]).convert("RGB")
         watermarked_image, pipeline_trace = _apply_content_embedding_pipeline(
+            impl_set=impl_set,
             image=input_image,
             plan=plan_obj,
             cfg=cfg,
             cfg_digest=cfg_digest,
             plan_digest=plan_digest,
             content_evidence_payload=content_evidence_payload,
+            enable_lf=bool(enable_lf),
+            enable_hf=bool(enable_hf),
         )
         artifact_rel_path, artifact_sha256, watermarked_path = _write_watermarked_artifact_controlled(
             watermarked_image=watermarked_image,
@@ -672,12 +680,15 @@ def _prepare_embed_real_io_anchors(cfg: Dict[str, Any]) -> Dict[str, str]:
 
 
 def _apply_content_embedding_pipeline(
+    impl_set: BuiltImplSet,
     image: Image.Image,
     plan: Dict[str, Any],
     cfg: Dict[str, Any],
     cfg_digest: str,
     plan_digest: str | None,
     content_evidence_payload: Dict[str, Any],
+    enable_lf: bool = True,
+    enable_hf: bool = True,
 ) -> tuple[Image.Image, Dict[str, Any]]:
     """
     功能：执行 LF/HF 真实嵌入流水线并回填证据。
@@ -695,6 +706,8 @@ def _apply_content_embedding_pipeline(
     Returns:
         Tuple of (watermarked_image, embed_trace).
     """
+    if not isinstance(impl_set, BuiltImplSet):
+        raise TypeError("impl_set must be BuiltImplSet")
     if not isinstance(plan, dict):
         raise TypeError("plan must be dict")
     if not isinstance(cfg, dict):
@@ -703,6 +716,10 @@ def _apply_content_embedding_pipeline(
         raise TypeError("cfg_digest must be non-empty str")
     if not isinstance(content_evidence_payload, dict):
         raise TypeError("content_evidence_payload must be dict")
+    if not isinstance(enable_lf, bool):
+        raise TypeError("enable_lf must be bool")
+    if not isinstance(enable_hf, bool):
+        raise TypeError("enable_hf must be bool")
 
     image_array = np.asarray(image, dtype=np.uint8)
     plan_band_spec = plan.get("band_spec") if isinstance(plan.get("band_spec"), dict) else {}
@@ -718,7 +735,79 @@ def _apply_content_embedding_pipeline(
     )
 
     lf_params = _build_lf_image_embed_params(cfg)
-    lf_watermarked, lf_trace_summary = encode_low_freq_dct(image_array, plan_band_spec, key_material, lf_params)
+    lf_impl_binding: Dict[str, Any] = {
+        "impl_selected": getattr(getattr(impl_set, "lf_coder", None), "impl_id", None),
+        "adapter_path": "image_dct_fallback",
+        "fallback_used": True,
+        "fallback_reason": "lf_impl_embed_interface_absent",
+    }
+    lf_watermarked: np.ndarray | None = None
+    lf_trace_summary: Dict[str, Any]
+
+    lf_coder = getattr(impl_set, "lf_coder", None)
+    can_use_lf_impl = (
+        enable_lf
+        and
+        lf_coder is not None
+        and hasattr(lf_coder, "embed_apply")
+        and callable(getattr(lf_coder, "embed_apply", None))
+        and isinstance(plan_digest, str)
+        and bool(plan_digest)
+    )
+    if can_use_lf_impl:
+        try:
+            cfg_for_lf = dict(cfg)
+            watermark_cfg = cfg_for_lf.get("watermark") if isinstance(cfg_for_lf.get("watermark"), dict) else {}
+            watermark_cfg = dict(watermark_cfg)
+            watermark_cfg["plan_digest"] = plan_digest
+            cfg_for_lf["watermark"] = watermark_cfg
+            lf_impl_result = lf_coder.embed_apply(
+                cfg=cfg_for_lf,
+                latent_features=image_array.reshape(-1).astype(np.float64).tolist(),
+                plan_digest=plan_digest,
+                cfg_digest=cfg_digest,
+            )
+            if not isinstance(lf_impl_result, dict):
+                raise TypeError("lf_coder.embed_apply must return dict")
+            embedded_features = lf_impl_result.get("latent_features_embedded")
+            embedded_np = np.asarray(embedded_features)
+            if embedded_np.size != image_array.size:
+                raise ValueError("lf_coder embedded feature size mismatch for image adapter")
+            lf_watermarked = np.clip(np.round(embedded_np.reshape(image_array.shape)), 0, 255).astype(np.uint8)
+            lf_trace_summary = {
+                "lf_status": "ok",
+                "lf_mode": "impl_set_lf_coder_adapter_v1",
+                "lf_embedding_digest": lf_impl_result.get("embedding_digest"),
+            }
+            lf_impl_binding = {
+                "impl_selected": getattr(lf_coder, "impl_id", None),
+                "adapter_path": "lf_coder.embed_apply_image_proxy_v1",
+                "fallback_used": False,
+                "fallback_reason": None,
+            }
+        except Exception as exc:
+            lf_impl_binding = {
+                "impl_selected": getattr(lf_coder, "impl_id", None),
+                "adapter_path": "image_dct_fallback",
+                "fallback_used": True,
+                "fallback_reason": f"lf_impl_embed_apply_failed:{type(exc).__name__}",
+            }
+            lf_watermarked = None
+
+    if not enable_lf:
+        lf_watermarked = image_array
+        lf_trace_summary = {
+            "lf_status": "absent",
+            "lf_absent_reason": "lf_channel_disabled_by_ablation",
+        }
+        lf_impl_binding = {
+            "impl_selected": getattr(lf_coder, "impl_id", None) if lf_coder is not None else None,
+            "adapter_path": "ablation_switchboard",
+            "fallback_used": False,
+            "fallback_reason": None,
+        }
+    elif lf_watermarked is None:
+        lf_watermarked, lf_trace_summary = encode_low_freq_dct(image_array, plan_band_spec, key_material, lf_params)
     lf_trace_digest = compute_lf_trace_digest(
         {
             "summary": lf_trace_summary,
@@ -728,6 +817,7 @@ def _apply_content_embedding_pipeline(
         }
     )
     content_evidence_payload["lf_trace_digest"] = lf_trace_digest
+    content_evidence_payload["lf_impl_binding"] = lf_impl_binding
     content_evidence_payload["lf_score"] = None
     score_parts = content_evidence_payload.get("score_parts")
     if not isinstance(score_parts, dict):
@@ -736,15 +826,23 @@ def _apply_content_embedding_pipeline(
     score_parts["lf_status"] = lf_trace_summary.get("lf_status", "ok")
     score_parts["lf_metrics"] = lf_trace_summary
 
-    hf_enabled = bool(cfg.get("watermark", {}).get("hf", {}).get("enabled", False))
+    hf_enabled = bool(cfg.get("watermark", {}).get("hf", {}).get("enabled", False)) and enable_hf
     embed_trace: Dict[str, Any] = {
         "embed_mode": "content_real_v1",
         "lf_trace_digest": lf_trace_digest,
         "lf_trace_summary": lf_trace_summary,
+        "lf_impl_binding": lf_impl_binding,
     }
 
     if hf_enabled:
         hf_params = _build_hf_image_embed_params(cfg)
+        hf_embedder = getattr(impl_set, "hf_embedder", None)
+        hf_impl_binding: Dict[str, Any] = {
+            "impl_selected": getattr(hf_embedder, "impl_id", None),
+            "adapter_path": "image_hf_fallback",
+            "fallback_used": True,
+            "fallback_reason": "hf_impl_image_adapter_absent",
+        }
         hf_watermarked, hf_trace_summary = embed_high_freq_pattern(lf_watermarked, routing_summary, key_material, hf_params)
         hf_trace_digest = compute_hf_trace_digest(
             {
@@ -755,19 +853,28 @@ def _apply_content_embedding_pipeline(
             }
         )
         content_evidence_payload["hf_trace_digest"] = hf_trace_digest
+        content_evidence_payload["hf_impl_binding"] = hf_impl_binding
         content_evidence_payload["hf_score"] = None
         score_parts["hf_status"] = hf_trace_summary.get("hf_status", "ok")
         score_parts["hf_metrics"] = hf_trace_summary
         embed_trace["hf_trace_digest"] = hf_trace_digest
         embed_trace["hf_trace_summary"] = hf_trace_summary
+        embed_trace["hf_impl_binding"] = hf_impl_binding
         watermarked_array = hf_watermarked
     else:
         content_evidence_payload.pop("hf_trace_digest", None)
         content_evidence_payload.pop("hf_score", None)
+        content_evidence_payload["hf_impl_binding"] = {
+            "impl_selected": getattr(getattr(impl_set, "hf_embedder", None), "impl_id", None),
+            "adapter_path": "ablation_switchboard" if not enable_hf else "image_hf_fallback",
+            "fallback_used": False if not enable_hf else True,
+            "fallback_reason": None if not enable_hf else "hf_impl_image_adapter_absent",
+        }
         score_parts.pop("hf_status", None)
         score_parts.pop("hf_metrics", None)
-        score_parts.pop("hf_absent_reason", None)
+        score_parts["hf_absent_reason"] = "hf_channel_disabled_by_ablation" if not enable_hf else "hf_disabled_by_config"
         score_parts.pop("hf_failure_reason", None)
+        embed_trace["hf_impl_binding"] = content_evidence_payload.get("hf_impl_binding")
         watermarked_array = lf_watermarked
 
     return Image.fromarray(watermarked_array), embed_trace
@@ -1081,6 +1188,33 @@ def _get_ablation_normalized(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(normalized, dict):
         return {}
     return normalized
+
+
+def _build_ablation_absent_subspace_result(absent_reason: str) -> Dict[str, Any]:
+    """
+    功能：构造 subspace 关闭时的 absent 规划结果。 
+
+    Build subspace plan payload with explicit absent semantics.
+
+    Args:
+        absent_reason: Non-empty absent reason token.
+
+    Returns:
+        Mapping compatible with plan digest binding flow.
+    """
+    if not isinstance(absent_reason, str) or not absent_reason:
+        raise TypeError("absent_reason must be non-empty str")
+    return {
+        "status": "absent",
+        "subspace_absent_reason": absent_reason,
+        "plan": {},
+        "plan_digest": None,
+        "basis_digest": None,
+        "plan_stats": {
+            "planner_status": "absent",
+            "planner_absent_reason": absent_reason,
+        },
+    }
 
 
 def _build_ablation_absent_content_evidence(absent_reason: str) -> Dict[str, Any]:

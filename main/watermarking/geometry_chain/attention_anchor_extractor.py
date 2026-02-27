@@ -633,6 +633,12 @@ class AttentionAnchorMapRelation:
             "anchor_config_digest": anchor_config_digest,
             "relation_graph_topk": relation_graph_topk,
             "relation_spectral_hash": relation_spectral_hash,
+            "anchor_semantics": {
+                "attention_source": "latent_correlation_proxy",
+                "attention_like": True,
+                "self_attention_authentic": False,
+                "proxy_version": "attention_proxy_v1",
+            },
             "geometry_failure_reason": None,
         }
 

@@ -237,6 +237,9 @@ class SubspaceConditioning:
         selected_feature_indices: Selected feature index list.
         region_strengths: Per-feature modulation strengths in [0, 1].
         modulation_mode: Semantic modulation mode label.
+        mapping_mode: Mask-to-feature mapping mode.
+        mapping_digest: Canonical mapping digest.
+        mapping_stats: Mapping statistics payload.
     """
 
     conditioning_mode: str
@@ -250,6 +253,9 @@ class SubspaceConditioning:
     selected_feature_indices: List[int]
     region_strengths: List[float]
     modulation_mode: str
+    mapping_mode: str
+    mapping_digest: str
+    mapping_stats: Dict[str, Any]
 
     def as_dict(self) -> Dict[str, Any]:
         """
@@ -275,6 +281,9 @@ class SubspaceConditioning:
             "selected_feature_indices": self.selected_feature_indices,
             "region_strengths": self.region_strengths,
             "modulation_mode": self.modulation_mode,
+            "mapping_mode": self.mapping_mode,
+            "mapping_digest": self.mapping_digest,
+            "mapping_stats": self.mapping_stats,
         }
 
     def digest_payload(self) -> Dict[str, Any]:
@@ -830,12 +839,27 @@ class SubspacePlannerImpl:
         fallback_used = False
         fallback_reason = "<absent>"
 
+        mapping_mode = "mask_index_hash_projection_v1"
+        mapping_inputs = {
+            "mask_digest": mask_digest,
+            "feature_dim": feature_dim,
+        }
+        mapping_records: List[Dict[str, int]] = []
         if isinstance(raw_indices, list) and len(raw_indices) > 0:
             normalized = []
             for value in raw_indices:
                 if not isinstance(value, int):
                     continue
-                normalized.append(int(value) % feature_dim)
+                mapped_index = self._map_mask_index_to_feature_index(
+                    raw_index=int(value),
+                    feature_dim=feature_dim,
+                    mapping_inputs=mapping_inputs,
+                )
+                normalized.append(mapped_index)
+                mapping_records.append({
+                    "raw_index": int(value),
+                    "mapped_index": mapped_index,
+                })
             selected_feature_indices = sorted(set(normalized))
             if len(selected_feature_indices) > 0:
                 conditioning_mode = "mask_indices_v1"
@@ -865,6 +889,20 @@ class SubspacePlannerImpl:
 
         masked_dim_count = len(selected_feature_indices)
         unmasked_dim_count = max(0, feature_dim - masked_dim_count)
+        mapping_collisions = max(0, len(mapping_records) - len(selected_feature_indices))
+        mapping_stats = {
+            "raw_index_count": len(mapping_records),
+            "unique_mapped_count": len(selected_feature_indices),
+            "mapping_collisions": mapping_collisions,
+        }
+        mapping_digest = digests.canonical_sha256(
+            {
+                "mapping_mode": mapping_mode,
+                "mapping_inputs": mapping_inputs,
+                "mapping_stats": mapping_stats,
+                "selected_feature_indices": selected_feature_indices,
+            }
+        )
         region_spec_digest = digests.canonical_sha256(
             {
                 "feature_dim": feature_dim,
@@ -872,6 +910,8 @@ class SubspacePlannerImpl:
                 "conditioning_mode": conditioning_mode,
                 "region_strengths": region_strengths,
                 "modulation_mode": "semantic_strength_modulation_v1",
+                "mapping_mode": mapping_mode,
+                "mapping_digest": mapping_digest,
             }
         )
         return SubspaceConditioning(
@@ -886,7 +926,44 @@ class SubspacePlannerImpl:
             selected_feature_indices=selected_feature_indices,
             region_strengths=region_strengths,
             modulation_mode="semantic_strength_modulation_v1",
+            mapping_mode=mapping_mode,
+            mapping_digest=mapping_digest,
+            mapping_stats=mapping_stats,
         )
+
+    def _map_mask_index_to_feature_index(
+        self,
+        raw_index: int,
+        feature_dim: int,
+        mapping_inputs: Dict[str, Any],
+    ) -> int:
+        """
+        功能：将 mask 网格索引稳定映射到特征维。 
+
+        Deterministically map mask grid index to feature index.
+
+        Args:
+            raw_index: Raw mask index.
+            feature_dim: Feature dimension.
+            mapping_inputs: Mapping anchor payload.
+
+        Returns:
+            Deterministic mapped feature index.
+        """
+        if not isinstance(raw_index, int):
+            raise TypeError("raw_index must be int")
+        if not isinstance(feature_dim, int) or feature_dim <= 0:
+            raise ValueError("feature_dim must be positive int")
+        if not isinstance(mapping_inputs, dict):
+            raise TypeError("mapping_inputs must be dict")
+
+        mapping_seed = digests.canonical_sha256(
+            {
+                "raw_index": raw_index,
+                "mapping_inputs": mapping_inputs,
+            }
+        )
+        return int(mapping_seed[:16], 16) % feature_dim
 
     def _apply_mask_conditioning_to_feature_matrix(
         self,
@@ -2396,6 +2473,7 @@ class SubspacePlannerImpl:
         unet = inputs.get("unet")
         scheduler = inputs.get("scheduler")
         pipeline = inputs.get("pipeline")
+        runtime_latents = inputs.get("latents")
         
         # 如果没有真实 UNet，降级到确定性轨迹
         if unet is None and pipeline is None:
@@ -2405,23 +2483,55 @@ class SubspacePlannerImpl:
         timesteps_list = self._build_timestep_sequence(planner_params)
         timesteps_digest = digests.canonical_sha256({"timesteps": timesteps_list})
         
-        # 采样噪声和状态
-        rng = np.random.default_rng(planner_params.seed + 13531)
+        # 采样状态（优先 runtime latents 驱动；无法获取时才退回代理状态）。
         samples_list: List[np.ndarray] = []
         
         trace_signature = inputs.get("trace_signature", {}) if isinstance(inputs, dict) else {}
         guidance_scale = _read_float(trace_signature.get("guidance_scale"), 1.0)
         num_inference_steps = _read_int(trace_signature.get("num_inference_steps"), planner_params.sample_count)
         
-        # 对于每个采样时间步
-        for t_idx in timesteps_list:
-            # 生成伪状态样本（因为真实 UNet 可能需要条件，这里采用代理）
-            state = rng.normal(loc=0.0, scale=1.0, size=(planner_params.feature_dim,))
-            
-            # 施加时间索引的调制
-            timescale = max(0.1, 1.0 - t_idx / max(1, num_inference_steps))
-            state = state * (0.8 + 0.2 * timescale)
-            samples_list.append(state)
+        sample_semantics = "runtime_driven_surrogate"
+        sample_source = "runtime_latents_projection_surrogate"
+        surrogate_reason = "runtime_latents_projected_without_unet_jacobian"
+        latents_digest = "<absent>"
+
+        latents_array = None
+        if runtime_latents is not None:
+            try:
+                latents_array = np.asarray(runtime_latents, dtype=np.float64)
+            except Exception:
+                latents_array = None
+
+        if isinstance(latents_array, np.ndarray) and latents_array.ndim >= 2 and np.isfinite(latents_array).all():
+            base_vector = latents_array.reshape(-1)
+            latents_digest = digests.canonical_sha256(
+                {
+                    "shape": list(latents_array.shape),
+                    "mean": float(np.mean(base_vector)),
+                    "std": float(np.std(base_vector)),
+                    "l2": float(np.linalg.norm(base_vector)),
+                }
+            )
+            for sample_idx, t_idx in enumerate(timesteps_list):
+                projection_seed = planner_params.seed + 7919 + int(t_idx) * 131 + sample_idx
+                projection_rng = np.random.default_rng(projection_seed)
+                projection_indices = projection_rng.integers(0, max(1, base_vector.size), size=planner_params.feature_dim)
+                state = base_vector[projection_indices]
+                state = state - float(np.mean(state))
+                state_norm = float(np.linalg.norm(state) + 1e-12)
+                state = state / state_norm
+                timescale = max(0.1, 1.0 - t_idx / max(1, num_inference_steps))
+                state = state * (0.85 + 0.15 * timescale)
+                samples_list.append(state)
+        else:
+            sample_source = "pipeline_presence_proxy"
+            surrogate_reason = "runtime_latents_absent_using_seeded_proxy"
+            rng = np.random.default_rng(planner_params.seed + 13531)
+            for t_idx in timesteps_list:
+                state = rng.normal(loc=0.0, scale=1.0, size=(planner_params.feature_dim,))
+                timescale = max(0.1, 1.0 - t_idx / max(1, num_inference_steps))
+                state = state * (0.8 + 0.2 * timescale)
+                samples_list.append(state)
         
         samples = np.asarray(samples_list, dtype=np.float64)
         
@@ -2440,7 +2550,10 @@ class SubspacePlannerImpl:
             "moments_digest": moments_digest,
             "guidance_scale": self._normalize_float(guidance_scale, planner_params.float_round_digits),
             "num_inference_steps": num_inference_steps,
-            "source": "diffusion_pipeline"
+            "source": sample_source,
+            "sample_semantics": sample_semantics,
+            "surrogate_reason": surrogate_reason,
+            "latents_digest": latents_digest,
         }
         
         return samples, samples_anchor

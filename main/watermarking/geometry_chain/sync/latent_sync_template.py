@@ -692,6 +692,11 @@ class GeometryLatentSyncSD3V2:
                 "geo_score": None,
                 "sync_digest": None,
                 "geometry_failure_reason": "relation_digest_missing_for_v2",
+                "sync_quality_semantics": {
+                    "score_type": "heuristic",
+                    "score_version": "latent_sync_quality_heuristic_v1",
+                    "trusted_as_primary_geometry_evidence": False,
+                },
             }
 
         if not isinstance(relation_digest, str) or not relation_digest:
@@ -700,6 +705,11 @@ class GeometryLatentSyncSD3V2:
                 "geo_score": None,
                 "sync_digest": None,
                 "geometry_failure_reason": "relation_digest_invalid",
+                "sync_quality_semantics": {
+                    "score_type": "heuristic",
+                    "score_version": "latent_sync_quality_heuristic_v1",
+                    "trusted_as_primary_geometry_evidence": False,
+                },
             }
 
         # Extract latents from sync_ctx if available
@@ -709,6 +719,11 @@ class GeometryLatentSyncSD3V2:
                 "geo_score": None,
                 "sync_digest": None,
                 "geometry_absent_reason": "latents_missing",
+                "sync_quality_semantics": {
+                    "score_type": "heuristic",
+                    "score_version": "latent_sync_quality_heuristic_v1",
+                    "trusted_as_primary_geometry_evidence": False,
+                },
             }
 
         try:
@@ -760,6 +775,11 @@ class GeometryLatentSyncSD3V2:
             "sync_digest": sync_digest,
             "sync_config_digest": sync_config_digest,
             "sync_quality_metrics": sync_quality_metrics,
+            "sync_quality_semantics": {
+                "score_type": "heuristic",
+                "score_version": "latent_sync_quality_heuristic_v1",
+                "trusted_as_primary_geometry_evidence": False,
+            },
             "relation_digest_bound": relation_digest,
             "geometry_failure_reason": None,
         }
@@ -822,4 +842,5 @@ class GeometryLatentSyncSD3V2:
             "quality_score": float(round(quality_score, 6)),
             "uncertainty": float(round(uncertainty, 6)),
             "relation_digest_bound": relation_digest,
+            "quality_method": "heuristic_latent_spectrum_relation_alignment_v1",
         }

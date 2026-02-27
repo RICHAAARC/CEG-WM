@@ -62,6 +62,8 @@ class _GeometryStub:
         return {
             "status": "ok",
             "geo_score": 0.8,
+            "relation_digest": "r" * 64,
+            "anchor_digest": "a" * 64,
         }
 
 
@@ -90,6 +92,64 @@ def test_detect_geometry_chain_runs_sync_then_extract() -> None:
     geometry_payload = cast(Dict[str, Any], geometry_result)
     assert geometry_payload.get("status") == "ok"
     assert geometry_payload.get("sync_status") == "ok"
+
+
+class _SyncRelationConsumerStub:
+    def sync_with_context(self, cfg: Dict[str, Any], context: Any, runtime_inputs: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        _ = cfg
+        _ = context
+        if not isinstance(runtime_inputs, dict):
+            return {
+                "status": "mismatch",
+                "sync_status": "mismatch",
+                "geometry_failure_reason": "runtime_inputs_missing",
+            }
+        relation_digest = runtime_inputs.get("relation_digest")
+        if not isinstance(relation_digest, str) or not relation_digest:
+            return {
+                "status": "mismatch",
+                "sync_status": "mismatch",
+                "geometry_failure_reason": "relation_digest_missing_for_v2",
+            }
+        return {
+            "status": "ok",
+            "sync_status": "ok",
+            "sync_digest": "s" * 64,
+            "sync_quality_metrics": {"quality_score": 0.92, "uncertainty": 0.08},
+            "relation_digest_bound": relation_digest,
+        }
+
+
+def test_detect_geometry_chain_anchor_then_sync_relation_digest_bound() -> None:
+    latents = np.random.default_rng(20260228).normal(size=(1, 4, 16, 16)).astype(np.float32)
+    cfg: Dict[str, Any] = {
+        "__detect_pipeline_obj__": object(),
+        "__detect_final_latents__": latents,
+        "detect": {
+            "geometry": {
+                "enabled": True,
+                "enable_attention_anchor": True,
+            }
+        }
+    }
+    impl_set = BuiltImplSet(
+        content_extractor=object(),
+        geometry_extractor=_GeometryStub(),
+        fusion_rule=object(),
+        subspace_planner=object(),
+        sync_module=_SyncRelationConsumerStub(),
+    )
+    run_geometry_chain = getattr(detect_orchestrator, "_run_geometry_chain_with_sync")
+    geometry_result = run_geometry_chain(impl_set, cfg)
+    assert isinstance(geometry_result, dict)
+    geometry_payload = cast(Dict[str, Any], geometry_result)
+    assert geometry_payload.get("anchor_status") == "ok"
+    assert geometry_payload.get("sync_status") == "ok"
+    assert geometry_payload.get("relation_digest") == "r" * 64
+    assert geometry_payload.get("relation_digest_bound") == "r" * 64
+    relation_binding = geometry_payload.get("relation_digest_binding")
+    assert isinstance(relation_binding, dict)
+    assert relation_binding.get("binding_status") == "matched"
 
 
 def test_image_domain_sidecar_disabled_in_paper_mode() -> None:

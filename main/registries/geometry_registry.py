@@ -151,7 +151,12 @@ class SyncBaseline:
             "sync_success": False
         }
 
-    def sync_with_context(self, cfg: Dict[str, Any], context: SyncRuntimeContext) -> Dict[str, Any]:
+    def sync_with_context(
+        self,
+        cfg: Dict[str, Any],
+        context: SyncRuntimeContext,
+        runtime_inputs: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
         """
         功能：返回基线同步状态（忽略上下文）。
 
@@ -160,6 +165,7 @@ class SyncBaseline:
         Args:
             cfg: Config mapping.
             context: Sync runtime context.
+            runtime_inputs: Optional runtime input mapping.
 
         Returns:
             Baseline sync status mapping.
@@ -381,7 +387,9 @@ class SyncGeometryLatentSyncSD3V2:
             raise TypeError("cfg must be dict")
         if not isinstance(context, SyncRuntimeContext):
             raise TypeError("context must be SyncRuntimeContext")
-        result = self._extractor.extract(cfg, inputs=None, sync_ctx=context)
+        if runtime_inputs is not None and not isinstance(runtime_inputs, dict):
+            raise TypeError("runtime_inputs must be dict or None")
+        result = self._extractor.extract(cfg, inputs=runtime_inputs, sync_ctx=context)
         payload = {
             "sync_status": result.get("status", "absent"),
             "sync_success": result.get("status") == "ok",
@@ -389,10 +397,14 @@ class SyncGeometryLatentSyncSD3V2:
             "geo_score": result.get("geo_score"),
             "geometry_absent_reason": result.get("geometry_absent_reason"),
             "geometry_failure_reason": result.get("geometry_failure_reason"),
+            "sync_quality_semantics": result.get("sync_quality_semantics"),
             "impl_identity": self.impl_id,
             "impl_version": self.impl_version,
             "impl_digest": self.impl_digest,
         }
+        relation_digest_bound = result.get("relation_digest_bound")
+        if isinstance(relation_digest_bound, str) and relation_digest_bound:
+            payload["relation_digest_bound"] = relation_digest_bound
         if isinstance(context.trajectory_evidence, dict):
             payload["trajectory_spec_digest"] = context.trajectory_evidence.get("trajectory_spec_digest")
             payload["trajectory_digest"] = context.trajectory_evidence.get("trajectory_digest")

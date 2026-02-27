@@ -103,6 +103,10 @@ def run_detect_orchestrator(
     ablation_normalized = _get_ablation_normalized(cfg)
     enable_content = ablation_normalized.get("enable_content", True)
     enable_geometry = ablation_normalized.get("enable_geometry", True)
+    enable_sync = ablation_normalized.get("enable_sync", True)
+    enable_anchor = ablation_normalized.get("enable_anchor", True)
+    enable_attention_proxy = ablation_normalized.get("enable_attention_proxy", True)
+    enable_image_sidecar = ablation_normalized.get("enable_image_sidecar", True)
 
     # Ablation: 禁用 content 模块时返回 absent 语义。
     if not enable_content:
@@ -114,7 +118,13 @@ def run_detect_orchestrator(
     if not enable_geometry:
         geometry_result = _build_ablation_absent_geometry_evidence("geometry_chain_disabled_by_ablation")
     else:
-        geometry_result = _run_geometry_chain_with_sync(impl_set, cfg)
+        geometry_result = _run_geometry_chain_with_sync(
+            impl_set,
+            cfg,
+            enable_anchor=bool(enable_anchor),
+            enable_sync=bool(enable_sync),
+            enable_attention_proxy=bool(enable_attention_proxy),
+        )
 
     # (1) 统一转换 ContentEvidence / GeometryEvidence 数据类为 dict。
     # 优先使用 .as_dict() 方法；若不存在则直接使用数据类或字典。
@@ -425,7 +435,7 @@ def run_detect_orchestrator(
             embed_time_plan_digest=embed_time_plan_digest,
             trajectory_evidence=trajectory_evidence,
         )
-        if _is_image_domain_sidecar_enabled(cfg):
+        if _is_image_domain_sidecar_enabled(cfg, ablation_override=bool(enable_image_sidecar)):
             lf_raw_score, hf_raw_score, raw_score_traces = _extract_content_raw_scores_from_image(
                 cfg=cfg,
                 input_record=input_record,
@@ -437,8 +447,22 @@ def run_detect_orchestrator(
             lf_raw_score = None
             hf_raw_score = None
             raw_score_traces = {
-                "lf": {"lf_status": "absent", "lf_absent_reason": "image_domain_sidecar_disabled"},
-                "hf": {"hf_status": "absent", "hf_absent_reason": "image_domain_sidecar_disabled"},
+                "lf": {
+                    "lf_status": "absent",
+                    "lf_absent_reason": (
+                        "image_domain_sidecar_disabled_by_ablation"
+                        if not bool(enable_image_sidecar)
+                        else "image_domain_sidecar_disabled"
+                    ),
+                },
+                "hf": {
+                    "hf_status": "absent",
+                    "hf_absent_reason": (
+                        "image_domain_sidecar_disabled_by_ablation"
+                        if not bool(enable_image_sidecar)
+                        else "image_domain_sidecar_disabled"
+                    ),
+                },
             }
         lf_evidence = _extract_lf_evidence_from_input_record(input_record)
         detector_inputs: Dict[str, Any] = {
@@ -2284,6 +2308,7 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
         )
     attack_group_metrics = aggregated_metrics.get("metrics_by_attack_condition", [])
     ablation_digest = _compute_ablation_digest_for_report(cfg)
+    ablation_digest_v2 = _compute_ablation_digest_v2_for_report(cfg)
     attack_trace_digest = _collect_attack_trace_digest(detect_records)
     coverage_manifest = eval_attack_coverage.compute_attack_coverage_manifest()
     attack_coverage_digest = coverage_manifest.get("attack_coverage_digest", "<absent>")
@@ -2348,6 +2373,10 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
         attack_trace_digest=attack_trace_digest,
         attack_coverage_digest=attack_coverage_digest,
     )
+    report_obj["ablation_digest_v2"] = ablation_digest_v2
+    anchors = report_obj.get("anchors") if isinstance(report_obj.get("anchors"), dict) else None
+    if isinstance(anchors, dict):
+        anchors["ablation_digest_v2"] = ablation_digest_v2
     
     # append-only 加入 readonly guard 记录
     report_obj["thresholds_readonly_guard"] = {
@@ -3466,7 +3495,7 @@ def _adapt_geometry_evidence_for_fusion(geometry_evidence: Any) -> Dict[str, Any
     return adapted if adapted else {"status": "unknown"}
 
 
-def _is_image_domain_sidecar_enabled(cfg: Dict[str, Any]) -> bool:
+def _is_image_domain_sidecar_enabled(cfg: Dict[str, Any], ablation_override: bool | None = None) -> bool:
     """
     功能：解析图像域 sidecar 开关。
 
@@ -3480,6 +3509,10 @@ def _is_image_domain_sidecar_enabled(cfg: Dict[str, Any]) -> bool:
     """
     if not isinstance(cfg, dict):
         raise TypeError("cfg must be dict")
+    if ablation_override is not None and not isinstance(ablation_override, bool):
+        raise TypeError("ablation_override must be bool or None")
+    if isinstance(ablation_override, bool) and not ablation_override:
+        return False
     detect_runtime_cfg = cfg.get("detect_runtime") if isinstance(cfg.get("detect_runtime"), dict) else {}
     explicit = detect_runtime_cfg.get("image_domain_sidecar_enabled")
     if isinstance(explicit, bool):
@@ -3530,7 +3563,12 @@ def _build_attention_maps_from_latents(latents: Any) -> Any:
     return correlation.astype(np.float64)
 
 
-def _build_geometry_runtime_inputs(cfg: Dict[str, Any], sync_result: Dict[str, Any] | None = None) -> Dict[str, Any]:
+def _build_geometry_runtime_inputs(
+    cfg: Dict[str, Any],
+    sync_result: Dict[str, Any] | None = None,
+    anchor_result: Dict[str, Any] | None = None,
+    enable_attention_proxy: bool = True,
+) -> Dict[str, Any]:
     """
     功能：构造几何链运行时输入域。
 
@@ -3550,16 +3588,28 @@ def _build_geometry_runtime_inputs(cfg: Dict[str, Any], sync_result: Dict[str, A
         "latents": cfg.get("__detect_final_latents__"),
         "rng": cfg.get("rng"),
     }
-    attention_maps = _build_attention_maps_from_latents(runtime_inputs.get("latents"))
-    if attention_maps is not None:
-        runtime_inputs["attention_maps"] = attention_maps
-        runtime_inputs["attention_maps_digest"] = digests.canonical_sha256({
-            "shape": list(attention_maps.shape),
-            "mean": float(np.mean(attention_maps)),
-            "std": float(np.std(attention_maps)),
-            "max": float(np.max(attention_maps)),
-            "min": float(np.min(attention_maps)),
-        })
+    if enable_attention_proxy:
+        attention_maps = _build_attention_maps_from_latents(runtime_inputs.get("latents"))
+        if attention_maps is not None:
+            runtime_inputs["attention_maps"] = attention_maps
+            runtime_inputs["attention_maps_digest"] = digests.canonical_sha256({
+                "shape": list(attention_maps.shape),
+                "mean": float(np.mean(attention_maps)),
+                "std": float(np.std(attention_maps)),
+                "max": float(np.max(attention_maps)),
+                "min": float(np.min(attention_maps)),
+            })
+    else:
+        runtime_inputs["attention_proxy_status"] = "absent"
+        runtime_inputs["attention_proxy_absent_reason"] = "attention_proxy_disabled_by_ablation"
+    if isinstance(anchor_result, dict):
+        relation_digest = anchor_result.get("relation_digest")
+        if isinstance(relation_digest, str) and relation_digest:
+            runtime_inputs["relation_digest"] = relation_digest
+        anchor_digest = anchor_result.get("anchor_digest")
+        if isinstance(anchor_digest, str) and anchor_digest:
+            runtime_inputs["anchor_digest"] = anchor_digest
+        runtime_inputs["anchor_result"] = anchor_result
     if isinstance(sync_result, dict):
         relation_digest = sync_result.get("relation_digest_bound")
         if isinstance(relation_digest, str) and relation_digest:
@@ -3603,7 +3653,10 @@ def _run_sync_module_for_detect(sync_module: Any, cfg: Dict[str, Any], runtime_i
                 rng=runtime_inputs.get("rng"),
                 trajectory_evidence=None
             )
-            sync_result = sync_with_context(cfg, sync_ctx)
+            try:
+                sync_result = sync_with_context(cfg, sync_ctx, runtime_inputs=runtime_inputs)
+            except TypeError:
+                sync_result = sync_with_context(cfg, sync_ctx)
             if isinstance(sync_result, dict):
                 return sync_result
         except Exception as exc:
@@ -3625,7 +3678,14 @@ def _run_sync_module_for_detect(sync_module: Any, cfg: Dict[str, Any], runtime_i
     return {"status": "absent", "geometry_absent_reason": "sync_module_returned_non_mapping"}
 
 
-def _run_geometry_chain_with_sync(impl_set: BuiltImplSet, cfg: Dict[str, Any]) -> Any:
+def _run_geometry_chain_with_sync(
+    impl_set: BuiltImplSet,
+    cfg: Dict[str, Any],
+    *,
+    enable_anchor: bool = True,
+    enable_sync: bool = True,
+    enable_attention_proxy: bool = True,
+) -> Any:
     """
     功能：detect 几何链先执行 sync，再执行 geometry extractor。
 
@@ -3642,19 +3702,67 @@ def _run_geometry_chain_with_sync(impl_set: BuiltImplSet, cfg: Dict[str, Any]) -
         raise TypeError("impl_set must be BuiltImplSet")
     if not isinstance(cfg, dict):
         raise TypeError("cfg must be dict")
-    base_inputs = _build_geometry_runtime_inputs(cfg)
-    sync_module = getattr(impl_set, "sync_module", None)
-    sync_result = _run_sync_module_for_detect(sync_module, cfg, base_inputs)
-    runtime_inputs = _build_geometry_runtime_inputs(cfg, sync_result=sync_result)
-    geometry_result = _run_geometry_extractor_with_runtime_inputs(impl_set.geometry_extractor, cfg, runtime_inputs)
+    base_inputs = _build_geometry_runtime_inputs(cfg, enable_attention_proxy=enable_attention_proxy)
+    base_inputs["sync_result"] = {
+        "status": "absent",
+        "sync_status": "pending_anchor_first",
+        "geometry_absent_reason": "sync_not_executed_yet",
+    }
+
+    if enable_anchor:
+        anchor_result = _run_geometry_extractor_with_runtime_inputs(impl_set.geometry_extractor, cfg, base_inputs)
+        if not isinstance(anchor_result, dict):
+            anchor_result = {
+                "status": "failed",
+                "geo_score": None,
+                "geometry_failure_reason": "geometry_anchor_result_non_mapping",
+            }
+    else:
+        anchor_result = {
+            "status": "absent",
+            "geo_score": None,
+            "geometry_absent_reason": "anchor_disabled_by_ablation",
+            "relation_digest": None,
+            "anchor_digest": None,
+        }
+
+    if enable_sync:
+        sync_inputs = _build_geometry_runtime_inputs(
+            cfg,
+            anchor_result=anchor_result,
+            enable_attention_proxy=enable_attention_proxy,
+        )
+        sync_module = getattr(impl_set, "sync_module", None)
+        sync_result = _run_sync_module_for_detect(sync_module, cfg, sync_inputs)
+    else:
+        sync_result = {
+            "status": "absent",
+            "sync_status": "absent",
+            "geometry_absent_reason": "sync_disabled_by_ablation",
+        }
+
+    geometry_result = dict(anchor_result)
     if isinstance(geometry_result, dict):
         geometry_result.setdefault("sync_result", sync_result)
+        geometry_result.setdefault("anchor_result", anchor_result)
+        geometry_result.setdefault("anchor_status", anchor_result.get("status"))
+        anchor_relation_digest = anchor_result.get("relation_digest")
+        if isinstance(anchor_relation_digest, str) and anchor_relation_digest:
+            geometry_result.setdefault("relation_digest", anchor_relation_digest)
         if isinstance(sync_result, dict):
             sync_status = sync_result.get("sync_status") or sync_result.get("status")
             if isinstance(sync_status, str) and sync_status and "sync_status" not in geometry_result:
                 geometry_result["sync_status"] = sync_status
             if "sync_metrics" not in geometry_result:
                 geometry_result["sync_metrics"] = sync_result.get("sync_quality_metrics")
+            relation_digest_bound = sync_result.get("relation_digest_bound")
+            if isinstance(relation_digest_bound, str) and relation_digest_bound:
+                geometry_result["relation_digest_bound"] = relation_digest_bound
+            geometry_result["relation_digest_binding"] = {
+                "anchor_relation_digest": anchor_relation_digest if isinstance(anchor_relation_digest, str) else None,
+                "sync_relation_digest_bound": relation_digest_bound if isinstance(relation_digest_bound, str) else None,
+                "binding_status": "matched" if isinstance(anchor_relation_digest, str) and isinstance(relation_digest_bound, str) and anchor_relation_digest == relation_digest_bound else "mismatch_or_absent",
+            }
     return geometry_result
 
 
@@ -3760,6 +3868,33 @@ def _compute_ablation_digest_for_report(cfg: Dict[str, Any]) -> str:
     if not isinstance(ablation_normalized, dict):
         return digests.canonical_sha256({})
     return digests.canonical_sha256(ablation_normalized)
+
+
+def _compute_ablation_digest_v2_for_report(cfg: Dict[str, Any]) -> str:
+    """
+    功能：计算扩展口径 ablation_digest_v2。 
+
+    Compute expanded ablation digest that binds high-impact runtime switches.
+
+    Args:
+        cfg: Runtime config mapping.
+
+    Returns:
+        Canonical digest string.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    ablation_normalized = _get_ablation_normalized(cfg)
+    payload = {
+        "ablation_normalized": ablation_normalized if isinstance(ablation_normalized, dict) else {},
+        "detect_runtime_image_domain_sidecar_enabled": _is_image_domain_sidecar_enabled(cfg),
+        "detect_runtime_explicit": (
+            cfg.get("detect_runtime", {}).get("image_domain_sidecar_enabled")
+            if isinstance(cfg.get("detect_runtime"), dict)
+            else None
+        ),
+    }
+    return digests.canonical_sha256(payload)
 
 
 def _collect_attack_trace_digest(records: list[Dict[str, Any]]) -> str:
