@@ -397,6 +397,7 @@ def build_runtime_impl_set_from_cfg(cfg: Dict[str, Any]) -> tuple[ImplIdentity, 
 
     # 计算 impl_set_capabilities_digest（历史冻结口径仅绑定五个核心域）。
     impl_set_capabilities_digest = compute_impl_set_capabilities_digest(impl_caps_list[:5])
+    cfg["impl_set_capabilities_digest"] = impl_set_capabilities_digest
     # 并行计算扩展口径（v2）：覆盖 HF/LF 域，保持 v1 返回契约不变。
     cfg["impl_set_capabilities_v2_digest"] = compute_impl_set_capabilities_digest_v2(impl_caps_list)
 

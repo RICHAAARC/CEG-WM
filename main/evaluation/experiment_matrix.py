@@ -163,10 +163,10 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
         "fusion_rule_version": "<absent>",
         "t2smark_comparison": {
             "content_score": None,
-            "hf_score": None,
-            "score_delta_content_minus_hf": None,
+            "t2smark_score": None,
+            "score_delta_content_minus_t2smark": None,
             "comparison_ready": False,
-            "comparison_source": "detect_record_score_parts_hf_proxy",
+            "comparison_source": "real_t2smark_baseline_required",
         },
         "metrics": {},
     }
@@ -233,9 +233,10 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
                     "conditional_fpr_estimate": metrics_obj.get("conditional_fpr_estimate"),
                     "conditional_fpr_n": metrics_obj.get("conditional_fpr_n"),
                 },
-                "t2smark_comparison": _extract_t2smark_proxy_comparison_from_detect_record(run_root),
+                "t2smark_comparison": _extract_t2smark_real_comparison_from_detect_record(run_root),
             }
         )
+        _enforce_paper_acceptance_gate(summary=summary, grid_item_cfg=grid_item_cfg, run_root=run_root)
     except Exception as exc:
         # 单实验执行失败，必须记录失败原因并返回。
         summary["status"] = "fail"
@@ -256,17 +257,18 @@ def _read_optional_json(path: Path) -> Dict[str, Any]:
     return parsed_obj
 
 
-def _extract_t2smark_proxy_comparison_from_detect_record(run_root: Path) -> Dict[str, Any]:
-    """Extract same-sample proxy comparison values using content_score and HF score parts."""
+def _extract_t2smark_real_comparison_from_detect_record(run_root: Path) -> Dict[str, Any]:
+    """Extract same-sample comparison values from real T2SMark baseline record."""
     if not isinstance(run_root, Path):
         raise TypeError("run_root must be Path")
 
     result: Dict[str, Any] = {
         "content_score": None,
-        "hf_score": None,
-        "score_delta_content_minus_hf": None,
+        "t2smark_score": None,
+        "score_delta_content_minus_t2smark": None,
         "comparison_ready": False,
-        "comparison_source": "detect_record_score_parts_hf_proxy",
+        "comparison_source": "real_t2smark_baseline_required",
+        "baseline_status": "absent",
     }
 
     detect_record = _read_optional_json(run_root / "records" / "detect_record.json")
@@ -281,17 +283,57 @@ def _extract_t2smark_proxy_comparison_from_detect_record(run_root: Path) -> Dict
     if isinstance(content_score, (int, float)) and np.isfinite(float(content_score)):
         result["content_score"] = float(content_score)
 
-    score_parts = content_payload.get("score_parts")
-    if isinstance(score_parts, dict):
-        hf_score = score_parts.get("hf_score")
-        if isinstance(hf_score, (int, float)) and np.isfinite(float(hf_score)):
-            result["hf_score"] = float(hf_score)
+    baseline_payload = detect_record.get("t2smark_baseline")
+    if isinstance(baseline_payload, dict):
+        baseline_score = baseline_payload.get("score")
+        if isinstance(baseline_score, (int, float)) and np.isfinite(float(baseline_score)):
+            result["t2smark_score"] = float(baseline_score)
+            result["baseline_status"] = "ok"
+            result["comparison_source"] = "real_t2smark_baseline_record"
 
-    if isinstance(result.get("content_score"), float) and isinstance(result.get("hf_score"), float):
-        result["score_delta_content_minus_hf"] = float(result["content_score"] - result["hf_score"])
+    if isinstance(result.get("content_score"), float) and isinstance(result.get("t2smark_score"), float):
+        result["score_delta_content_minus_t2smark"] = float(result["content_score"] - result["t2smark_score"])
         result["comparison_ready"] = True
 
     return result
+
+
+def _enforce_paper_acceptance_gate(summary: Dict[str, Any], grid_item_cfg: Dict[str, Any], run_root: Path) -> None:
+    """Enforce hard acceptance constraints for paper-faithful matrix runs."""
+    if not isinstance(summary, dict):
+        raise TypeError("summary must be dict")
+    if not isinstance(grid_item_cfg, dict):
+        raise TypeError("grid_item_cfg must be dict")
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+
+    paper_cfg = grid_item_cfg.get("paper_faithfulness") if isinstance(grid_item_cfg.get("paper_faithfulness"), dict) else {}
+    enforce = bool(paper_cfg.get("enabled", False)) if isinstance(paper_cfg, dict) else False
+    if not enforce:
+        return
+
+    detect_record = _read_optional_json(run_root / "records" / "detect_record.json")
+    pipeline_runtime_meta = detect_record.get("pipeline_runtime_meta") if isinstance(detect_record.get("pipeline_runtime_meta"), dict) else {}
+    detect_runtime_mode = detect_record.get("detect_runtime_mode") if isinstance(detect_record.get("detect_runtime_mode"), str) else "<absent>"
+    metrics = summary.get("metrics") if isinstance(summary.get("metrics"), dict) else {}
+    geo_available_rate = metrics.get("geo_available_rate")
+    t2smark_comparison = summary.get("t2smark_comparison") if isinstance(summary.get("t2smark_comparison"), dict) else {}
+
+    if bool(pipeline_runtime_meta.get("synthetic_pipeline", False)):
+        summary["status"] = "fail"
+        summary["failure_reason"] = "paper_acceptance_failed: synthetic_pipeline_true"
+        return
+    if detect_runtime_mode != "real":
+        summary["status"] = "fail"
+        summary["failure_reason"] = f"paper_acceptance_failed: detect_runtime_mode={detect_runtime_mode}"
+        return
+    if isinstance(geo_available_rate, (int, float)) and float(geo_available_rate) == 0.0:
+        summary["status"] = "fail"
+        summary["failure_reason"] = "paper_acceptance_failed: geo_available_rate_zero"
+        return
+    if not bool(t2smark_comparison.get("comparison_ready", False)):
+        summary["status"] = "fail"
+        summary["failure_reason"] = "paper_acceptance_failed: real_t2smark_baseline_missing"
 
 
 def _first_present_str(*values: Any) -> str:
@@ -995,13 +1037,13 @@ def _write_grid_artifacts(
 
 
 def _build_t2smark_comparison_table(experiment_results: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Build a deterministic same-sample comparison table against T2SMark proxy HF scores."""
+    """Build a deterministic same-sample comparison table against real T2SMark baseline."""
     if not isinstance(experiment_results, list):
         raise TypeError("experiment_results must be list")
 
     rows: List[Dict[str, Any]] = []
     content_scores: List[float] = []
-    hf_scores: List[float] = []
+    t2smark_scores: List[float] = []
     score_deltas: List[float] = []
 
     for item in experiment_results:
@@ -1016,19 +1058,19 @@ def _build_t2smark_comparison_table(experiment_results: List[Dict[str, Any]]) ->
             "model_id": _safe_str(item.get("model_id")),
             "seed": item.get("seed") if isinstance(item.get("seed"), int) else None,
             "content_score": comparison_obj.get("content_score"),
-            "t2smark_proxy_hf_score": comparison_obj.get("hf_score"),
-            "score_delta_content_minus_t2smark_proxy": comparison_obj.get("score_delta_content_minus_hf"),
+            "t2smark_score": comparison_obj.get("t2smark_score"),
+            "score_delta_content_minus_t2smark": comparison_obj.get("score_delta_content_minus_t2smark"),
             "comparison_ready": bool(comparison_obj.get("comparison_ready", False)),
         }
         rows.append(row)
 
         content_value = row.get("content_score")
-        hf_value = row.get("t2smark_proxy_hf_score")
-        delta_value = row.get("score_delta_content_minus_t2smark_proxy")
+        t2smark_value = row.get("t2smark_score")
+        delta_value = row.get("score_delta_content_minus_t2smark")
         if isinstance(content_value, (int, float)) and np.isfinite(float(content_value)):
             content_scores.append(float(content_value))
-        if isinstance(hf_value, (int, float)) and np.isfinite(float(hf_value)):
-            hf_scores.append(float(hf_value))
+        if isinstance(t2smark_value, (int, float)) and np.isfinite(float(t2smark_value)):
+            t2smark_scores.append(float(t2smark_value))
         if isinstance(delta_value, (int, float)) and np.isfinite(float(delta_value)):
             score_deltas.append(float(delta_value))
 
@@ -1036,17 +1078,17 @@ def _build_t2smark_comparison_table(experiment_results: List[Dict[str, Any]]) ->
         "rows_total": len(rows),
         "rows_comparison_ready": sum(1 for row in rows if bool(row.get("comparison_ready", False))),
         "mean_content_score": (float(np.mean(content_scores)) if len(content_scores) > 0 else None),
-        "mean_t2smark_proxy_hf_score": (float(np.mean(hf_scores)) if len(hf_scores) > 0 else None),
-        "mean_delta_content_minus_t2smark_proxy": (float(np.mean(score_deltas)) if len(score_deltas) > 0 else None),
+        "mean_t2smark_score": (float(np.mean(t2smark_scores)) if len(t2smark_scores) > 0 else None),
+        "mean_delta_content_minus_t2smark": (float(np.mean(score_deltas)) if len(score_deltas) > 0 else None),
     }
 
     return {
         "schema_version": "t2smark_comparison_table_v1",
         "comparison_definition": {
-            "reference_name": "hf_score_as_t2smark_proxy",
-            "reference_source": "content_evidence_payload.score_parts.hf_score",
+            "reference_name": "real_t2smark_baseline",
+            "reference_source": "detect_record.t2smark_baseline.score",
             "target_source": "content_evidence_payload.score",
-            "directionality": "positive_delta_means_target_score_higher_than_t2smark_proxy",
+            "directionality": "positive_delta_means_target_score_higher_than_t2smark",
         },
         "rows": rows,
         "summary": summary,
@@ -1066,8 +1108,8 @@ def _build_t2smark_comparison_csv(table_obj: Dict[str, Any]) -> str:
         "model_id",
         "seed",
         "content_score",
-        "t2smark_proxy_hf_score",
-        "score_delta_content_minus_t2smark_proxy",
+        "t2smark_score",
+        "score_delta_content_minus_t2smark",
         "comparison_ready",
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames)

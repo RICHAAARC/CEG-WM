@@ -99,4 +99,4 @@ def test_run_single_experiment_anchor_fallback_from_records(
     assert summary.get("impl_digest") == "impl_identity_digest_from_run_closure"
     comparison_payload = summary.get("t2smark_comparison")
     assert isinstance(comparison_payload, dict)
-    assert comparison_payload.get("comparison_source") == "detect_record_score_parts_hf_proxy"
+    assert comparison_payload.get("comparison_source") == "real_t2smark_baseline_required"

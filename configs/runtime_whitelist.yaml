@@ -549,6 +549,7 @@ consistency_rules:
   policy_path_semantics_version_source: "configs/policy_path_semantics.yaml:policy_path_semantics_version"
   policy_path_semantics_digest_source: "configs/policy_path_semantics.yaml (canonical SHA256)"
   notes: "这四个字段必须由 freeze_gate 在写盘前一并校验，缺失任何字段均为 fail-fast。"
+  paper_acceptance_require_real_t2smark_baseline: true
 
   # ---- Override 层的枚举校验（新增） ----
   override_source_validation:

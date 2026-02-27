@@ -292,6 +292,7 @@ class LatentSyncTemplate:
             "scale_bin": int(summary.get("scale_bin", 0)),
             "match_confidence": round(match_confidence, 6),
             "availability_score": 1.0,
+            "sync_evidence_level": "primary",
         }
 
     def build_resolution_binding(self, transformer: Any, latents_np: np.ndarray, cfg: Dict[str, Any]) -> Dict[str, Any]:

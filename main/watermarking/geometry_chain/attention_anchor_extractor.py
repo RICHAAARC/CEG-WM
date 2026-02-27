@@ -6,7 +6,7 @@ Module type: General module
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple, List
 
 import numpy as np
 
@@ -520,6 +520,34 @@ ATTENTION_ANCHOR_MAP_RELATION_ID = "attention_anchor_map_relation_v1"
 ATTENTION_ANCHOR_MAP_RELATION_VERSION = "v1"
 
 
+def _to_json_safe_value(value: Any) -> Any:
+    """
+    功能：将 numpy/tuple 等对象规范化为 JSON-safe 值。
+
+    Normalize nested payload to JSON-safe python primitives.
+
+    Args:
+        value: Arbitrary nested value.
+
+    Returns:
+        JSON-safe value composed of dict/list/str/int/float/bool/None.
+    """
+    if isinstance(value, dict):
+        normalized: Dict[str, Any] = {}
+        for key, item in value.items():
+            normalized[str(key)] = _to_json_safe_value(item)
+        return normalized
+    if isinstance(value, tuple):
+        return [_to_json_safe_value(item) for item in value]
+    if isinstance(value, list):
+        return [_to_json_safe_value(item) for item in value]
+    if isinstance(value, np.ndarray):
+        return _to_json_safe_value(value.tolist())
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
 class AttentionAnchorMapRelation:
     """
     功能：基于 attention map 关系图构建几何锚点。
@@ -707,12 +735,25 @@ class AttentionAnchorMapRelation:
         k = 10
         flat_corr = correlation_matrix.flatten()
         top_k_indices = np.argsort(-np.abs(flat_corr))[:k]
-        top_k_edges = [(int(idx // num_nodes), int(idx % num_nodes), float(flat_corr[idx])) 
-                       for idx in top_k_indices]
+        top_k_edges: List[Dict[str, Any]] = []
+        for idx in top_k_indices:
+            src = int(idx // num_nodes)
+            dst = int(idx % num_nodes)
+            weight = float(flat_corr[idx])
+            top_k_edges.append(
+                {
+                    "src": src,
+                    "dst": dst,
+                    "weight": weight,
+                }
+            )
+
+        top_k_edges = _to_json_safe_value(top_k_edges)
 
         relation_graph_topk = {
             "num_nodes": num_nodes,
             "top_k": k,
+            "edges": top_k_edges,
             "edges_digest": digests.canonical_sha256({"edges": top_k_edges}),
         }
 

@@ -25,6 +25,22 @@ LATENT_MODIFIER_ID = "unified_latent_modifier_v1"
 LATENT_MODIFIER_VERSION = "v1"
 
 
+def _normalize_impl_binding(binding: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Normalize impl binding payload for audit stability."""
+    if not isinstance(binding, dict):
+        return None
+    normalized = dict(binding)
+    evidence_level = normalized.get("evidence_level")
+    binding_class = normalized.get("binding_class")
+    if not isinstance(binding_class, str) or not binding_class:
+        if isinstance(evidence_level, str) and evidence_level:
+            normalized["binding_class"] = evidence_level
+        else:
+            fallback_used = bool(normalized.get("fallback_used", False))
+            normalized["binding_class"] = "adapter_fallback" if fallback_used else "primary"
+    return normalized
+
+
 class LatentModifier:
     """
     功能：统一 latent 修改器。
@@ -130,8 +146,8 @@ class LatentModifier:
             "hf_evidence": None,
             "combined_status": "ok"
         }
-        lf_impl_binding = cfg.get("lf_impl_binding") if isinstance(cfg.get("lf_impl_binding"), dict) else None
-        hf_impl_binding = cfg.get("hf_impl_binding") if isinstance(cfg.get("hf_impl_binding"), dict) else None
+        lf_impl_binding = _normalize_impl_binding(cfg.get("lf_impl_binding") if isinstance(cfg.get("lf_impl_binding"), dict) else None)
+        hf_impl_binding = _normalize_impl_binding(cfg.get("hf_impl_binding") if isinstance(cfg.get("hf_impl_binding"), dict) else None)
         if isinstance(lf_impl_binding, dict):
             step_evidence["lf_impl_binding"] = lf_impl_binding
         if isinstance(hf_impl_binding, dict):
@@ -341,8 +357,8 @@ class LatentModifier:
             "latents_device": str(original_device),
             "latents_dtype": str(original_dtype),
         }
-        lf_impl_binding = cfg.get("lf_impl_binding") if isinstance(cfg.get("lf_impl_binding"), dict) else None
-        hf_impl_binding = cfg.get("hf_impl_binding") if isinstance(cfg.get("hf_impl_binding"), dict) else None
+        lf_impl_binding = _normalize_impl_binding(cfg.get("lf_impl_binding") if isinstance(cfg.get("lf_impl_binding"), dict) else None)
+        hf_impl_binding = _normalize_impl_binding(cfg.get("hf_impl_binding") if isinstance(cfg.get("hf_impl_binding"), dict) else None)
         if isinstance(lf_impl_binding, dict):
             step_evidence["lf_impl_binding"] = lf_impl_binding
         if isinstance(hf_impl_binding, dict):

@@ -2640,7 +2640,7 @@ class SubspacePlannerImpl:
                 state = state * (0.85 + 0.15 * timescale)
                 samples_list.append(state)
         else:
-            sample_semantics = "runtime_driven_surrogate"
+            sample_semantics = "runtime_driven_surrogate_fallback"
             sample_source = "pipeline_presence_proxy"
             surrogate_reason = "runtime_latents_absent_using_seeded_proxy"
             rng = np.random.default_rng(planner_params.seed + 13531)
@@ -2670,6 +2670,7 @@ class SubspacePlannerImpl:
             "source": sample_source,
             "sample_semantics": sample_semantics,
             "surrogate_reason": surrogate_reason if isinstance(surrogate_reason, str) and surrogate_reason else "<absent>",
+            "surrogate_class": "fallback" if isinstance(surrogate_reason, str) and surrogate_reason else "none",
             "latents_digest": latents_digest,
             "runtime_jvp_binding": has_runtime_jvp_binding,
         }

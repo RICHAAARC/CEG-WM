@@ -475,6 +475,7 @@ def run_detect(
         if final_latents is not None:
             cfg["__detect_final_latents__"] = final_latents
         cfg["__detect_pipeline_obj__"] = pipeline_obj
+        cfg["__pipeline_runtime_meta__"] = pipeline_result.get("pipeline_runtime_meta")
         
         # 构造 infer_trace 并计算 digest
         infer_trace_obj = infer_trace.build_infer_trace(

@@ -347,6 +347,7 @@ def build_pipeline_shell(cfg: Dict[str, Any]) -> Dict[str, Any]:
                         extra_kwargs=extra_kwargs
                     )
                     pipeline_runtime_meta = build_meta if isinstance(build_meta, dict) else {}
+                    pipeline_runtime_meta.setdefault("synthetic_pipeline", False)
                     _attach_resolved_revision(pipeline_obj, pipeline_runtime_meta)
                     pipeline_error = error or "<absent>"
                     pipeline_status = PIPELINE_STATUS_FAILED if error else PIPELINE_STATUS_BUILT

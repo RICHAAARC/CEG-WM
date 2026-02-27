@@ -620,8 +620,25 @@ def run_detect_orchestrator(
 
         content_evidence_payload["subspace_consistency_status"] = subspace_consistency_status
 
-        # 如果 detect 侧分数有效且一致性通过，则标记为真实运行模式
-        if detect_lf_status == "ok" and subspace_consistency_status == "ok":
+        subspace_semantics = _extract_subspace_evidence_semantics(plan_payload)
+        evidence_level = subspace_semantics.get("evidence_level") if isinstance(subspace_semantics.get("evidence_level"), str) else "<absent>"
+        subspace_primary_path = bool(evidence_level in {"primary", "hybrid"})
+        pipeline_runtime_meta = cfg.get("__pipeline_runtime_meta__") if isinstance(cfg.get("__pipeline_runtime_meta__"), dict) else {}
+        synthetic_pipeline_runtime = bool(pipeline_runtime_meta.get("synthetic_pipeline", False)) if isinstance(pipeline_runtime_meta, dict) else False
+
+        if isinstance(content_evidence_payload, dict):
+            content_evidence_payload["subspace_evidence_semantics"] = subspace_semantics
+            content_evidence_payload["subspace_evidence_level"] = evidence_level
+            content_evidence_payload["subspace_primary_path"] = subspace_primary_path
+            content_evidence_payload["synthetic_pipeline_runtime"] = synthetic_pipeline_runtime
+
+        # 如果 detect 侧分数有效、一致性通过且满足真实证据路径，则标记为真实运行模式。
+        if (
+            detect_lf_status == "ok"
+            and subspace_consistency_status == "ok"
+            and subspace_primary_path
+            and (not synthetic_pipeline_runtime)
+        ):
             detect_runtime_mode = "real"
 
     _bind_scores_if_ok(content_evidence_payload)
@@ -629,6 +646,7 @@ def run_detect_orchestrator(
     # 删除临时的 latents 字段，确保不写入 records
     cfg.pop("__detect_final_latents__", None)
     cfg.pop("__detect_pipeline_obj__", None)
+    cfg.pop("__pipeline_runtime_meta__", None)
 
     plan_digest_mismatch_reason = plan_digest_reason if plan_digest_reason == "plan_digest_mismatch" else None
 
@@ -3665,6 +3683,61 @@ def _build_attention_maps_from_latents(latents: Any) -> Any:
     return correlation.astype(np.float64)
 
 
+def _resolve_runtime_self_attention_maps(cfg: Dict[str, Any]) -> Any:
+    """
+    功能：解析 detect 侧真实 self-attention maps 载荷。
+
+    Resolve runtime self-attention maps from detect transient fields.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Attention maps payload or None.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    for key_name in [
+        "__detect_attention_maps__",
+        "__detect_self_attention_maps__",
+        "__runtime_self_attention_maps__",
+    ]:
+        candidate = cfg.get(key_name)
+        if candidate is not None:
+            return candidate
+    return None
+
+
+def _extract_subspace_evidence_semantics(plan_payload: Any) -> Dict[str, Any]:
+    """
+    功能：从计划载荷中提取子空间证据语义。
+
+    Extract subspace evidence semantics from planner payload.
+
+    Args:
+        plan_payload: Plan payload mapping.
+
+    Returns:
+        Semantics mapping or empty dict.
+    """
+    if not isinstance(plan_payload, dict):
+        return {}
+    direct_value = plan_payload.get("subspace_evidence_semantics")
+    if isinstance(direct_value, dict):
+        return direct_value
+    plan_node = plan_payload.get("plan")
+    if isinstance(plan_node, dict):
+        nested_value = plan_node.get("subspace_evidence_semantics")
+        if isinstance(nested_value, dict):
+            return nested_value
+    plan_stats = plan_payload.get("plan_stats")
+    if isinstance(plan_stats, dict):
+        stats_value = plan_stats.get("subspace_evidence_semantics")
+        if isinstance(stats_value, dict):
+            return stats_value
+    return {}
+
+
 def _build_geometry_runtime_inputs(
     cfg: Dict[str, Any],
     sync_result: Dict[str, Any] | None = None,
@@ -3690,7 +3763,7 @@ def _build_geometry_runtime_inputs(
         "latents": cfg.get("__detect_final_latents__"),
         "rng": cfg.get("rng"),
     }
-    prebuilt_attention_maps = cfg.get("__detect_attention_maps__")
+    prebuilt_attention_maps = _resolve_runtime_self_attention_maps(cfg)
     if prebuilt_attention_maps is not None:
         runtime_inputs["attention_maps"] = prebuilt_attention_maps
         runtime_inputs["attention_maps_source"] = "runtime_self_attention"
@@ -3700,6 +3773,8 @@ def _build_geometry_runtime_inputs(
             if attention_maps is not None:
                 runtime_inputs["attention_maps"] = attention_maps
                 runtime_inputs["attention_maps_source"] = "latent_proxy"
+                runtime_inputs["attention_maps_evidence_level"] = "fallback"
+                runtime_inputs["attention_maps_fallback_reason"] = "runtime_self_attention_missing"
                 runtime_inputs["attention_maps_digest"] = digests.canonical_sha256({
                     "shape": list(attention_maps.shape),
                     "mean": float(np.mean(attention_maps)),

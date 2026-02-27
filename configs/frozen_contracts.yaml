@@ -506,6 +506,10 @@ records_schema:
     - content_evidence.subspace_consistency_status
     - content_evidence.lf_impl_binding
     - content_evidence.hf_impl_binding
+    - content_evidence.subspace_evidence_semantics
+    - content_evidence.subspace_evidence_level
+    - content_evidence.subspace_primary_path
+    - content_evidence.synthetic_pipeline_runtime
     - impl_set_capabilities_v2_digest
     # ---- Paper Faithfulness 对齐证据字段 ----
     - paper_faithfulness.spec_version

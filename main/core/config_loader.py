@@ -151,6 +151,18 @@ def normalize_ablation_flags(cfg: Dict[str, Any]) -> None:
     }
 
     # 写入 cfg，纳入 cfg_digest 计算。
+    ablation["enable_content"] = enable_content_resolved
+    ablation["enable_geometry"] = enable_geometry_resolved
+    ablation["enable_fusion"] = enable_fusion_resolved
+    ablation["enable_mask"] = enable_mask_resolved
+    ablation["enable_subspace"] = enable_subspace_resolved
+    ablation["enable_rescue"] = enable_rescue_resolved
+    ablation["enable_lf"] = enable_lf_resolved
+    ablation["enable_hf"] = enable_hf_resolved
+    ablation["enable_sync"] = enable_sync_resolved
+    ablation["enable_anchor"] = enable_anchor_resolved
+    ablation["enable_attention_proxy"] = enable_attention_proxy_resolved
+    ablation["enable_image_sidecar"] = enable_image_sidecar_resolved
     ablation["normalized"] = normalized
 
 
