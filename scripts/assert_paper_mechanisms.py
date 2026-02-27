@@ -119,7 +119,14 @@ def _load_runtime_whitelist_impl_ids(repo_root: Path) -> Set[str]:
     allowed_flat = impl_id_cfg.get("allowed_flat")
     if not isinstance(allowed_flat, list):
         raise ValueError("runtime_whitelist.impl_id.allowed_flat must be list")
-    return {str(item) for item in allowed_flat if isinstance(item, str) and item}
+    normalized_ids: Set[str] = set()
+    for item in allowed_flat:
+        if not isinstance(item, str):
+            continue
+        normalized_item = item.strip()
+        if normalized_item:
+            normalized_ids.add(normalized_item)
+    return normalized_ids
 
 
 def _collect_impl_ids_from_cfg(cfg: Dict[str, Any]) -> List[str]:
@@ -141,8 +148,10 @@ def _collect_impl_ids_from_cfg(cfg: Dict[str, Any]) -> List[str]:
             continue
         if not key.endswith("_id"):
             continue
-        if isinstance(value, str) and value:
-            impl_ids.append(value)
+        if isinstance(value, str):
+            normalized_value = value.strip()
+            if normalized_value:
+                impl_ids.append(normalized_value)
     return impl_ids
 
 

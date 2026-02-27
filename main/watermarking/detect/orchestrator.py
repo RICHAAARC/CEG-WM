@@ -632,11 +632,13 @@ def run_detect_orchestrator(
             content_evidence_payload["subspace_primary_path"] = subspace_primary_path
             content_evidence_payload["synthetic_pipeline_runtime"] = synthetic_pipeline_runtime
 
-        # 如果 detect 侧分数有效、一致性通过且满足真实证据路径，则标记为真实运行模式。
+        runtime_built = bool(pipeline_runtime_meta.get("status") == "built") if isinstance(pipeline_runtime_meta, dict) else False
+
+        # 如果 detect 侧分数有效、未命中不一致且运行期为真实非 synthetic pipeline，则标记为真实运行模式。
         if (
             detect_lf_status == "ok"
-            and subspace_consistency_status == "ok"
-            and subspace_primary_path
+            and subspace_consistency_status != "inconsistent"
+            and runtime_built
             and (not synthetic_pipeline_runtime)
         ):
             detect_runtime_mode = "real"
