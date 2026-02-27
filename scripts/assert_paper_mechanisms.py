@@ -119,6 +119,11 @@ def _load_runtime_whitelist_impl_ids(repo_root: Path) -> Set[str]:
     allowed_flat = impl_id_cfg.get("allowed_flat")
     if not isinstance(allowed_flat, list):
         raise ValueError("runtime_whitelist.impl_id.allowed_flat must be list")
+    allowed_by_domain = impl_id_cfg.get("allowed_by_domain")
+    if allowed_by_domain is None:
+        allowed_by_domain = {}
+    if not isinstance(allowed_by_domain, dict):
+        raise ValueError("runtime_whitelist.impl_id.allowed_by_domain must be dict when present")
     normalized_ids: Set[str] = set()
     for item in allowed_flat:
         if not isinstance(item, str):
@@ -126,6 +131,17 @@ def _load_runtime_whitelist_impl_ids(repo_root: Path) -> Set[str]:
         normalized_item = item.strip()
         if normalized_item:
             normalized_ids.add(normalized_item)
+
+    for domain_values in allowed_by_domain.values():
+        if not isinstance(domain_values, list):
+            continue
+        for item in domain_values:
+            if not isinstance(item, str):
+                continue
+            normalized_item = item.strip()
+            if normalized_item:
+                normalized_ids.add(normalized_item)
+
     return normalized_ids
 
 
