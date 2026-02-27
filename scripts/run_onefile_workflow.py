@@ -241,6 +241,9 @@ def _build_stage_overrides(stage_name: str, profile: str) -> List[str]:
                 "enable_paper_faithfulness=true",
             ]
         )
+
+    if stage_name == "detect":
+        overrides.append("allow_threshold_fallback_for_tests=true")
     return overrides
 
 

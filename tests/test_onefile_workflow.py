@@ -113,6 +113,9 @@ def test_onefile_workflow_builds_commands_and_fail_fast(monkeypatch: pytest.Monk
 
     assert observed_order == expected_order
     assert any("--strict" in command for command in calls), "strict 审计步骤必须存在"
+    detect_commands = [command for command in calls if "-m" in command and "main.cli.run_detect" in command]
+    assert detect_commands, "detect command must be present"
+    assert "allow_threshold_fallback_for_tests=true" in detect_commands[0]
 
     calls_fail_fast: List[List[str]] = []
 
