@@ -97,3 +97,6 @@ def test_run_single_experiment_anchor_fallback_from_records(
     assert summary.get("thresholds_digest") == "thresholds_from_evaluate_record"
     assert summary.get("threshold_metadata_digest") == "threshold_meta_from_evaluate_record"
     assert summary.get("impl_digest") == "impl_identity_digest_from_run_closure"
+    comparison_payload = summary.get("t2smark_comparison")
+    assert isinstance(comparison_payload, dict)
+    assert comparison_payload.get("comparison_source") == "detect_record_score_parts_hf_proxy"

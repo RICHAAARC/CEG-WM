@@ -55,6 +55,8 @@ def test_experiment_matrix_runner_writes_summary_under_run_root(tmp_path: Path):
     assert "grid_summary_path" in grid_summary, "grid_summary 必须包含 grid_summary_path"
     assert "grid_manifest_path" in grid_summary, "grid_summary 必须包含 grid_manifest_path"
     assert "attack_coverage_manifest_path" in grid_summary, "grid_summary 必须包含 attack_coverage_manifest_path"
+    assert "t2smark_comparison_table_path" in grid_summary, "grid_summary 必须包含 t2smark_comparison_table_path"
+    assert "t2smark_comparison_table_csv_path" in grid_summary, "grid_summary 必须包含 t2smark_comparison_table_csv_path"
     
     # (5) 验证路径结构：所有工件路径必须在 batch_root/artifacts 下
     batch_root = Path(grid_summary["batch_root"])
@@ -64,6 +66,8 @@ def test_experiment_matrix_runner_writes_summary_under_run_root(tmp_path: Path):
     grid_summary_path = Path(grid_summary["grid_summary_path"])
     grid_manifest_path = Path(grid_summary["grid_manifest_path"])
     attack_coverage_path = Path(grid_summary["attack_coverage_manifest_path"])
+    comparison_table_path = Path(grid_summary["t2smark_comparison_table_path"])
+    comparison_csv_path = Path(grid_summary["t2smark_comparison_table_csv_path"])
     
     # 所有路径都应该在 artifacts_dir 下
     assert aggregate_report_path.parent == artifacts_dir, \
@@ -74,6 +78,10 @@ def test_experiment_matrix_runner_writes_summary_under_run_root(tmp_path: Path):
         f"grid_manifest 必须在 {artifacts_dir} 下，实际为: {grid_manifest_path.parent}"
     assert attack_coverage_path.parent == artifacts_dir, \
         f"attack_coverage_manifest 必须在 {artifacts_dir} 下，实际为: {attack_coverage_path.parent}"
+    assert comparison_table_path.parent == artifacts_dir, \
+        f"t2smark_comparison_table 必须在 {artifacts_dir} 下，实际为: {comparison_table_path.parent}"
+    assert comparison_csv_path.parent == artifacts_dir, \
+        f"t2smark_comparison_table_csv 必须在 {artifacts_dir} 下，实际为: {comparison_csv_path.parent}"
     
     # (6) 验证工件文件实际存在（即使内容可能为空或错误，文件必须被写入）
     # 注意：此测试不关心内容正确性，仅关心路径策略和写入行为
@@ -81,6 +89,8 @@ def test_experiment_matrix_runner_writes_summary_under_run_root(tmp_path: Path):
     assert grid_summary_path.exists(), f"grid_summary 文件必须存在: {grid_summary_path}"
     assert grid_manifest_path.exists(), f"grid_manifest 文件必须存在: {grid_manifest_path}"
     assert attack_coverage_path.exists(), f"attack_coverage_manifest 文件必须存在: {attack_coverage_path}"
+    assert comparison_table_path.exists(), f"t2smark_comparison_table 文件必须存在: {comparison_table_path}"
+    assert comparison_csv_path.exists(), f"t2smark_comparison_table_csv 文件必须存在: {comparison_csv_path}"
     
     # (7) 验证 JSON 格式可解析（基本健康性检查）
     with aggregate_report_path.open("r", encoding="utf-8") as f:
@@ -91,6 +101,11 @@ def test_experiment_matrix_runner_writes_summary_under_run_root(tmp_path: Path):
         manifest_data = json.load(f)
     with attack_coverage_path.open("r", encoding="utf-8") as f:
         coverage_data = json.load(f)
+    with comparison_table_path.open("r", encoding="utf-8") as f:
+        comparison_data = json.load(f)
+
+    comparison_csv_content = comparison_csv_path.read_text(encoding="utf-8")
+    assert "grid_item_digest" in comparison_csv_content
     
     # 清理
     if batch_root.exists():

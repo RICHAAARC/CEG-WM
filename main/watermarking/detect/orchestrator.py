@@ -3690,17 +3690,23 @@ def _build_geometry_runtime_inputs(
         "latents": cfg.get("__detect_final_latents__"),
         "rng": cfg.get("rng"),
     }
+    prebuilt_attention_maps = cfg.get("__detect_attention_maps__")
+    if prebuilt_attention_maps is not None:
+        runtime_inputs["attention_maps"] = prebuilt_attention_maps
+        runtime_inputs["attention_maps_source"] = "runtime_self_attention"
     if enable_attention_proxy:
-        attention_maps = _build_attention_maps_from_latents(runtime_inputs.get("latents"))
-        if attention_maps is not None:
-            runtime_inputs["attention_maps"] = attention_maps
-            runtime_inputs["attention_maps_digest"] = digests.canonical_sha256({
-                "shape": list(attention_maps.shape),
-                "mean": float(np.mean(attention_maps)),
-                "std": float(np.std(attention_maps)),
-                "max": float(np.max(attention_maps)),
-                "min": float(np.min(attention_maps)),
-            })
+        if "attention_maps" not in runtime_inputs:
+            attention_maps = _build_attention_maps_from_latents(runtime_inputs.get("latents"))
+            if attention_maps is not None:
+                runtime_inputs["attention_maps"] = attention_maps
+                runtime_inputs["attention_maps_source"] = "latent_proxy"
+                runtime_inputs["attention_maps_digest"] = digests.canonical_sha256({
+                    "shape": list(attention_maps.shape),
+                    "mean": float(np.mean(attention_maps)),
+                    "std": float(np.std(attention_maps)),
+                    "max": float(np.max(attention_maps)),
+                    "min": float(np.min(attention_maps)),
+                })
     else:
         runtime_inputs["attention_proxy_status"] = "absent"
         runtime_inputs["attention_proxy_absent_reason"] = "attention_proxy_disabled_by_ablation"

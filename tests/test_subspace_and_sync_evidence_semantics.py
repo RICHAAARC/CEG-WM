@@ -78,7 +78,7 @@ def test_subspace_plan_contains_evidence_semantics_payload() -> None:
     assert isinstance(semantics.get("reason"), str)
 
 
-def test_sync_quality_semantics_contains_supporting_evidence_level() -> None:
+def test_sync_quality_semantics_contains_quantitative_secondary_evidence_level() -> None:
     factory = resolve_sync_module("geometry_latent_sync_sd3_v2")
     sync_module = factory({})
     cfg: Dict[str, Any] = {
@@ -94,9 +94,10 @@ def test_sync_quality_semantics_contains_supporting_evidence_level() -> None:
     semantics = output.get("sync_quality_semantics")
     assert isinstance(semantics, dict)
     semantics = cast(Dict[str, Any], semantics)
-    assert semantics.get("score_type") == "heuristic"
+    assert semantics.get("score_type") == "interpretable_geometry_consistency"
     assert semantics.get("trusted_as_primary_geometry_evidence") is False
-    assert semantics.get("evidence_level") == "supporting"
+    assert semantics.get("score_version") == "latent_sync_geometry_consistency_v2"
+    assert semantics.get("evidence_level") == "quantitative_secondary"
 
     metrics = output.get("sync_quality_metrics")
     if isinstance(metrics, dict):

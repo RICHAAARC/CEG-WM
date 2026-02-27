@@ -147,6 +147,9 @@ def test_prepare_detect_record_for_attack_grouping_writes_attack_fields(tmp_path
     enriched_obj = json.loads(enriched_path.read_text(encoding="utf-8"))
     assert enriched_obj["attack_family"] == "rotate"
     assert enriched_obj["attack_params_version"] == "v1"
+    assert enriched_obj["label"] is True
+    assert enriched_obj["ground_truth"] is True
+    assert enriched_obj["is_watermarked"] is True
     assert isinstance(enriched_obj.get("attack"), dict)
     assert enriched_obj["attack"]["family"] == "rotate"
     assert enriched_obj["attack"]["params_version"] == "v1"

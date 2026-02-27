@@ -583,6 +583,11 @@ def _build_planner_inputs_for_runtime(
     runtime_latents = cfg.get("__embed_final_latents__")
     if runtime_pipeline is not None:
         inputs["pipeline"] = runtime_pipeline
+        runtime_unet = getattr(runtime_pipeline, "unet", None)
+        if runtime_unet is None:
+            runtime_unet = getattr(runtime_pipeline, "transformer", None)
+        if runtime_unet is not None:
+            inputs["unet"] = runtime_unet
     if runtime_latents is not None:
         inputs["latents"] = runtime_latents
     if trajectory_evidence is not None:

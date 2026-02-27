@@ -693,10 +693,10 @@ class GeometryLatentSyncSD3V2:
                 "sync_digest": None,
                 "geometry_failure_reason": "relation_digest_missing_for_v2",
                 "sync_quality_semantics": {
-                    "score_type": "heuristic",
-                    "score_version": "latent_sync_quality_heuristic_v1",
+                    "score_type": "interpretable_geometry_consistency",
+                    "score_version": "latent_sync_geometry_consistency_v2",
                     "trusted_as_primary_geometry_evidence": False,
-                    "evidence_level": "supporting",
+                    "evidence_level": "quantitative_secondary",
                 },
             }
 
@@ -707,10 +707,10 @@ class GeometryLatentSyncSD3V2:
                 "sync_digest": None,
                 "geometry_failure_reason": "relation_digest_invalid",
                 "sync_quality_semantics": {
-                    "score_type": "heuristic",
-                    "score_version": "latent_sync_quality_heuristic_v1",
+                    "score_type": "interpretable_geometry_consistency",
+                    "score_version": "latent_sync_geometry_consistency_v2",
                     "trusted_as_primary_geometry_evidence": False,
-                    "evidence_level": "supporting",
+                    "evidence_level": "quantitative_secondary",
                 },
             }
 
@@ -722,10 +722,10 @@ class GeometryLatentSyncSD3V2:
                 "sync_digest": None,
                 "geometry_absent_reason": "latents_missing",
                 "sync_quality_semantics": {
-                    "score_type": "heuristic",
-                    "score_version": "latent_sync_quality_heuristic_v1",
+                    "score_type": "interpretable_geometry_consistency",
+                    "score_version": "latent_sync_geometry_consistency_v2",
                     "trusted_as_primary_geometry_evidence": False,
-                    "evidence_level": "supporting",
+                    "evidence_level": "quantitative_secondary",
                 },
             }
 
@@ -759,10 +759,10 @@ class GeometryLatentSyncSD3V2:
                 "sync_digest": None,
                 "sync_quality_metrics": sync_quality_metrics,
                 "sync_quality_semantics": {
-                    "score_type": "heuristic",
-                    "score_version": "latent_sync_quality_heuristic_v1",
+                    "score_type": "interpretable_geometry_consistency",
+                    "score_version": "latent_sync_geometry_consistency_v2",
                     "trusted_as_primary_geometry_evidence": False,
-                    "evidence_level": "supporting",
+                    "evidence_level": "quantitative_secondary",
                 },
                 "geometry_failure_reason": "sync_uncertainty_too_high",
             }
@@ -785,10 +785,10 @@ class GeometryLatentSyncSD3V2:
             "sync_config_digest": sync_config_digest,
             "sync_quality_metrics": sync_quality_metrics,
             "sync_quality_semantics": {
-                "score_type": "heuristic",
-                "score_version": "latent_sync_quality_heuristic_v1",
+                "score_type": "interpretable_geometry_consistency",
+                "score_version": "latent_sync_geometry_consistency_v2",
                 "trusted_as_primary_geometry_evidence": False,
-                "evidence_level": "supporting",
+                "evidence_level": "quantitative_secondary",
             },
             "relation_digest_bound": relation_digest,
             "geometry_failure_reason": None,
@@ -852,7 +852,7 @@ class GeometryLatentSyncSD3V2:
             "quality_score": float(round(quality_score, 6)),
             "uncertainty": float(round(uncertainty, 6)),
             "relation_digest_bound": relation_digest,
-            "quality_method": "heuristic_latent_spectrum_relation_alignment_v1",
+            "quality_method": "interpretable_latent_spectrum_relation_consistency_v2",
             "quality_components_v2": {
                 "version": "latent_sync_quality_components_v2",
                 "contrast_component": float(round(min(1.0, contrast_ratio / 2.0), 6)),

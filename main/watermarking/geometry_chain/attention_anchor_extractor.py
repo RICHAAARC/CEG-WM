@@ -587,6 +587,8 @@ class AttentionAnchorMapRelation:
 
         runtime_inputs = inputs or {}
         attention_maps = runtime_inputs.get("attention_maps")
+        attention_maps_source = runtime_inputs.get("attention_maps_source")
+        is_authentic_attention = isinstance(attention_maps_source, str) and attention_maps_source == "runtime_self_attention"
 
         if attention_maps is None:
             return {
@@ -636,14 +638,22 @@ class AttentionAnchorMapRelation:
             "anchor_config_digest": anchor_config_digest,
             "relation_graph_topk": relation_graph_topk,
             "relation_spectral_hash": relation_spectral_hash,
-            "anchor_source_semantics": "attention_like_proxy_from_latent_correlation",
-            "anchor_evidence_level": "proxy",
-            "anchor_blocking_reason": "real_self_attention_map_not_wired_in_runtime",
+            "anchor_source_semantics": (
+                "authentic_self_attention_from_runtime_pipeline"
+                if is_authentic_attention
+                else "attention_like_proxy_from_latent_correlation"
+            ),
+            "anchor_evidence_level": "authentic" if is_authentic_attention else "proxy",
+            "anchor_blocking_reason": None if is_authentic_attention else "real_self_attention_map_not_wired_in_runtime",
             "anchor_semantics": {
-                "attention_source": "latent_correlation_proxy",
-                "attention_like": True,
-                "self_attention_authentic": False,
-                "proxy_version": "attention_proxy_v1",
+                "attention_source": (
+                    "runtime_self_attention"
+                    if is_authentic_attention
+                    else "latent_correlation_proxy"
+                ),
+                "attention_like": not is_authentic_attention,
+                "self_attention_authentic": is_authentic_attention,
+                "proxy_version": None if is_authentic_attention else "attention_proxy_v1",
             },
             "geometry_failure_reason": None,
         }

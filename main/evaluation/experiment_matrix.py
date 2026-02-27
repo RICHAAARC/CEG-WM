@@ -11,9 +11,11 @@ Module type: Core innovation module
 from __future__ import annotations
 
 import copy
+import csv
 import json
 import subprocess
 import sys
+from io import StringIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -159,6 +161,13 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
         "attack_protocol_version": grid_item_cfg.get("attack_protocol_version", "<absent>"),
         "impl_digest": "<absent>",
         "fusion_rule_version": "<absent>",
+        "t2smark_comparison": {
+            "content_score": None,
+            "hf_score": None,
+            "score_delta_content_minus_hf": None,
+            "comparison_ready": False,
+            "comparison_source": "detect_record_score_parts_hf_proxy",
+        },
         "metrics": {},
     }
 
@@ -224,6 +233,7 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
                     "conditional_fpr_estimate": metrics_obj.get("conditional_fpr_estimate"),
                     "conditional_fpr_n": metrics_obj.get("conditional_fpr_n"),
                 },
+                "t2smark_comparison": _extract_t2smark_proxy_comparison_from_detect_record(run_root),
             }
         )
     except Exception as exc:
@@ -244,6 +254,44 @@ def _read_optional_json(path: Path) -> Dict[str, Any]:
     if not isinstance(parsed_obj, dict):
         return {}
     return parsed_obj
+
+
+def _extract_t2smark_proxy_comparison_from_detect_record(run_root: Path) -> Dict[str, Any]:
+    """Extract same-sample proxy comparison values using content_score and HF score parts."""
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+
+    result: Dict[str, Any] = {
+        "content_score": None,
+        "hf_score": None,
+        "score_delta_content_minus_hf": None,
+        "comparison_ready": False,
+        "comparison_source": "detect_record_score_parts_hf_proxy",
+    }
+
+    detect_record = _read_optional_json(run_root / "records" / "detect_record.json")
+    if not isinstance(detect_record, dict) or not detect_record:
+        return result
+
+    content_payload = detect_record.get("content_evidence_payload")
+    if not isinstance(content_payload, dict):
+        return result
+
+    content_score = content_payload.get("score")
+    if isinstance(content_score, (int, float)) and np.isfinite(float(content_score)):
+        result["content_score"] = float(content_score)
+
+    score_parts = content_payload.get("score_parts")
+    if isinstance(score_parts, dict):
+        hf_score = score_parts.get("hf_score")
+        if isinstance(hf_score, (int, float)) and np.isfinite(float(hf_score)):
+            result["hf_score"] = float(hf_score)
+
+    if isinstance(result.get("content_score"), float) and isinstance(result.get("hf_score"), float):
+        result["score_delta_content_minus_hf"] = float(result["content_score"] - result["hf_score"])
+        result["comparison_ready"] = True
+
+    return result
 
 
 def _first_present_str(*values: Any) -> str:
@@ -726,6 +774,11 @@ def _prepare_detect_record_for_attack_grouping(run_root: Path, grid_item_cfg: Di
     params_version = _resolve_attack_params_version_for_family(grid_item_cfg)
 
     enriched_record = copy.deepcopy(detect_record)
+    label_value = _resolve_ground_truth_label_for_record(enriched_record)
+    if isinstance(label_value, bool):
+        enriched_record["label"] = label_value
+        enriched_record["ground_truth"] = label_value
+        enriched_record["is_watermarked"] = label_value
     enriched_record["attack_family"] = attack_family
     if isinstance(params_version, str) and params_version and params_version != "<absent>":
         enriched_record["attack_params_version"] = params_version
@@ -749,6 +802,19 @@ def _prepare_detect_record_for_attack_grouping(run_root: Path, grid_item_cfg: Di
         obj=enriched_record,
     )
     return enriched_path
+
+
+def _resolve_ground_truth_label_for_record(record: Dict[str, Any]) -> Optional[bool]:
+    """Resolve bool ground-truth label from record, defaulting to positive sample for matrix flow."""
+    if not isinstance(record, dict):
+        raise TypeError("record must be dict")
+
+    for key_name in ["label", "ground_truth", "is_watermarked"]:
+        value = record.get(key_name)
+        if isinstance(value, bool):
+            return value
+
+    return True
 
 
 def _run_stage_command(
@@ -855,6 +921,8 @@ def _write_grid_artifacts(
     grid_summary_path = artifacts_dir / "grid_summary.json"
     grid_manifest_path = artifacts_dir / "grid_manifest.json"
     attack_coverage_manifest_path = artifacts_dir / "attack_coverage_manifest.json"
+    t2smark_comparison_table_path = artifacts_dir / "t2smark_comparison_table.json"
+    t2smark_comparison_table_csv_path = artifacts_dir / "t2smark_comparison_table.csv"
 
     grid_manifest = _build_grid_manifest(grid)
 
@@ -901,13 +969,114 @@ def _write_grid_artifacts(
             obj=attack_coverage.compute_attack_coverage_manifest(),
         )
 
+    t2smark_comparison_table = _build_t2smark_comparison_table(results)
+    records_io.write_artifact_json_unbound(
+        run_root=batch_root,
+        artifacts_dir=artifacts_dir,
+        path=str(t2smark_comparison_table_path),
+        obj=t2smark_comparison_table,
+    )
+    records_io.write_artifact_text_unbound(
+        run_root=batch_root,
+        artifacts_dir=artifacts_dir,
+        path=str(t2smark_comparison_table_csv_path),
+        content=_build_t2smark_comparison_csv(t2smark_comparison_table),
+    )
+
     return {
         "batch_root": str(batch_root),
         "aggregate_report_path": str(aggregate_report_path),
         "grid_summary_path": str(grid_summary_path),
         "grid_manifest_path": str(grid_manifest_path),
         "attack_coverage_manifest_path": str(attack_coverage_manifest_path),
+        "t2smark_comparison_table_path": str(t2smark_comparison_table_path),
+        "t2smark_comparison_table_csv_path": str(t2smark_comparison_table_csv_path),
     }
+
+
+def _build_t2smark_comparison_table(experiment_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Build a deterministic same-sample comparison table against T2SMark proxy HF scores."""
+    if not isinstance(experiment_results, list):
+        raise TypeError("experiment_results must be list")
+
+    rows: List[Dict[str, Any]] = []
+    content_scores: List[float] = []
+    hf_scores: List[float] = []
+    score_deltas: List[float] = []
+
+    for item in experiment_results:
+        if not isinstance(item, dict):
+            continue
+        if item.get("status") != "ok":
+            continue
+        comparison_obj = item.get("t2smark_comparison") if isinstance(item.get("t2smark_comparison"), dict) else {}
+        row = {
+            "grid_item_digest": _safe_str(item.get("grid_item_digest")),
+            "attack_family": _safe_str(item.get("attack_family")),
+            "model_id": _safe_str(item.get("model_id")),
+            "seed": item.get("seed") if isinstance(item.get("seed"), int) else None,
+            "content_score": comparison_obj.get("content_score"),
+            "t2smark_proxy_hf_score": comparison_obj.get("hf_score"),
+            "score_delta_content_minus_t2smark_proxy": comparison_obj.get("score_delta_content_minus_hf"),
+            "comparison_ready": bool(comparison_obj.get("comparison_ready", False)),
+        }
+        rows.append(row)
+
+        content_value = row.get("content_score")
+        hf_value = row.get("t2smark_proxy_hf_score")
+        delta_value = row.get("score_delta_content_minus_t2smark_proxy")
+        if isinstance(content_value, (int, float)) and np.isfinite(float(content_value)):
+            content_scores.append(float(content_value))
+        if isinstance(hf_value, (int, float)) and np.isfinite(float(hf_value)):
+            hf_scores.append(float(hf_value))
+        if isinstance(delta_value, (int, float)) and np.isfinite(float(delta_value)):
+            score_deltas.append(float(delta_value))
+
+    summary = {
+        "rows_total": len(rows),
+        "rows_comparison_ready": sum(1 for row in rows if bool(row.get("comparison_ready", False))),
+        "mean_content_score": (float(np.mean(content_scores)) if len(content_scores) > 0 else None),
+        "mean_t2smark_proxy_hf_score": (float(np.mean(hf_scores)) if len(hf_scores) > 0 else None),
+        "mean_delta_content_minus_t2smark_proxy": (float(np.mean(score_deltas)) if len(score_deltas) > 0 else None),
+    }
+
+    return {
+        "schema_version": "t2smark_comparison_table_v1",
+        "comparison_definition": {
+            "reference_name": "hf_score_as_t2smark_proxy",
+            "reference_source": "content_evidence_payload.score_parts.hf_score",
+            "target_source": "content_evidence_payload.score",
+            "directionality": "positive_delta_means_target_score_higher_than_t2smark_proxy",
+        },
+        "rows": rows,
+        "summary": summary,
+    }
+
+
+def _build_t2smark_comparison_csv(table_obj: Dict[str, Any]) -> str:
+    """Render comparison table rows to CSV for quick inspection."""
+    if not isinstance(table_obj, dict):
+        raise TypeError("table_obj must be dict")
+
+    rows = table_obj.get("rows") if isinstance(table_obj.get("rows"), list) else []
+    output = StringIO()
+    fieldnames = [
+        "grid_item_digest",
+        "attack_family",
+        "model_id",
+        "seed",
+        "content_score",
+        "t2smark_proxy_hf_score",
+        "score_delta_content_minus_t2smark_proxy",
+        "comparison_ready",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    for row in rows:
+        if isinstance(row, dict):
+            writer.writerow({name: row.get(name) for name in fieldnames})
+
+    return output.getvalue()
 
 
 def _compute_ablation_digest(ablation_flags: Any) -> str:

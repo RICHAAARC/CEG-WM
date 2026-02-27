@@ -835,10 +835,17 @@ class SubspacePlannerImpl:
         surrogate_reason = samples_anchor.get("surrogate_reason") if isinstance(samples_anchor.get("surrogate_reason"), str) else "<absent>"
         jvp_source = jvp_anchor.get("jvp_source") if isinstance(jvp_anchor.get("jvp_source"), str) else "surrogate_transition"
 
-        if jvp_source == "real_unet":
+        if jvp_source in {"real_unet", "runtime_operator"} and sample_semantics in {
+            "runtime_pipeline_bound",
+            "runtime_pipeline_bound_with_unet",
+        }:
+            evidence_level = "primary"
+            primary_path = "runtime_pipeline_bound_jvp_primary_path"
+            evidence_reason = "runtime_pipeline_and_jvp_bound"
+        elif jvp_source in {"real_unet", "runtime_operator"}:
             evidence_level = "hybrid"
-            primary_path = "real_unet_jvp_with_surrogate_trajectory_samples"
-            evidence_reason = "real_jvp_available_but_trajectory_sampling_not_full_unet_rollout"
+            primary_path = "real_jvp_with_partial_runtime_trajectory"
+            evidence_reason = "real_jvp_available_but_trajectory_not_fully_pipeline_bound"
         else:
             evidence_level = "surrogate"
             primary_path = "surrogate_transition_jvp_and_surrogate_trajectory_samples"
@@ -1579,10 +1586,18 @@ class SubspacePlannerImpl:
             "probes": np.round(probes, 8).tolist()[:min(4, len(probes))]
         })
         
-        # 检查是否有真实 UNet
+        # 检查是否有真实 JVP operator / UNet。
+        jvp_operator = inputs.get("jvp_operator") if isinstance(inputs, dict) else None
         unet = inputs.get("unet") if isinstance(inputs, dict) else None
-        
-        if unet is not None:
+
+        if callable(jvp_operator):
+            jvp_samples, jvp_source = self._estimate_jvp_from_operator(
+                jvp_operator=jvp_operator,
+                centered_matrix=centered_matrix,
+                probes=probes,
+                planner_params=planner_params,
+            )
+        elif unet is not None:
             # 路径 A：真实 UNet JVP（要求 UNet 在 inputs 中）
             jvp_samples, jvp_source = self._estimate_jvp_from_unet(
                 unet=unet,
@@ -1630,6 +1645,47 @@ class SubspacePlannerImpl:
         }
         
         return jvp_samples, jvp_anchor
+
+    def _estimate_jvp_from_operator(
+        self,
+        jvp_operator: Any,
+        centered_matrix: np.ndarray,
+        probes: np.ndarray,
+        planner_params: _PlannerParams,
+    ) -> Tuple[np.ndarray, str]:
+        """
+        功能：通过运行时显式 JVP 算子估计 Jacobian-Vector Products。
+
+        Estimate JVP samples with an explicit runtime operator.
+
+        Args:
+            jvp_operator: Callable(state_vector, probe_vector, eps) -> vector-like.
+            centered_matrix: Centered trajectory matrix.
+            probes: Deterministic probe vectors.
+            planner_params: Planner parameters.
+
+        Returns:
+            Tuple of (jvp_samples, "runtime_operator").
+        """
+        jvp_rows: List[np.ndarray] = []
+        row_count = min(centered_matrix.shape[0], 4)
+        for row_index in range(row_count):
+            state = centered_matrix[row_index, :]
+            for probe in probes:
+                jvp_value = jvp_operator(state, probe, planner_params.jacobian_eps)
+                jvp_np = np.asarray(jvp_value, dtype=np.float64).reshape(-1)
+                if jvp_np.shape[0] != centered_matrix.shape[1]:
+                    continue
+                if not np.isfinite(jvp_np).all():
+                    continue
+                jvp_rows.append(jvp_np)
+
+        if len(jvp_rows) == 0:
+            return self._estimate_jvp_from_transition(centered_matrix, probes, planner_params)
+
+        jvp_samples = np.asarray(jvp_rows, dtype=np.float64)
+        jvp_samples = jvp_samples - np.mean(jvp_samples, axis=0, keepdims=True)
+        return jvp_samples, "runtime_operator"
 
     def _estimate_jvp_from_unet(
         self,
@@ -2544,9 +2600,15 @@ class SubspacePlannerImpl:
         guidance_scale = _read_float(trace_signature.get("guidance_scale"), 1.0)
         num_inference_steps = _read_int(trace_signature.get("num_inference_steps"), planner_params.sample_count)
         
-        sample_semantics = "runtime_driven_surrogate"
-        sample_source = "runtime_latents_projection_surrogate"
-        surrogate_reason = "runtime_latents_projected_without_unet_jacobian"
+        has_runtime_jvp_binding = bool(
+            callable(inputs.get("jvp_operator"))
+            or unet is not None
+            or getattr(pipeline, "unet", None) is not None
+            or getattr(pipeline, "transformer", None) is not None
+        )
+        sample_semantics = "runtime_pipeline_bound_with_unet" if has_runtime_jvp_binding else "runtime_pipeline_bound"
+        sample_source = "runtime_latents_projection_pipeline_bound"
+        surrogate_reason = None
         latents_digest = "<absent>"
 
         latents_array = None
@@ -2578,6 +2640,7 @@ class SubspacePlannerImpl:
                 state = state * (0.85 + 0.15 * timescale)
                 samples_list.append(state)
         else:
+            sample_semantics = "runtime_driven_surrogate"
             sample_source = "pipeline_presence_proxy"
             surrogate_reason = "runtime_latents_absent_using_seeded_proxy"
             rng = np.random.default_rng(planner_params.seed + 13531)
@@ -2606,8 +2669,9 @@ class SubspacePlannerImpl:
             "num_inference_steps": num_inference_steps,
             "source": sample_source,
             "sample_semantics": sample_semantics,
-            "surrogate_reason": surrogate_reason,
+            "surrogate_reason": surrogate_reason if isinstance(surrogate_reason, str) and surrogate_reason else "<absent>",
             "latents_digest": latents_digest,
+            "runtime_jvp_binding": has_runtime_jvp_binding,
         }
         
         return samples, samples_anchor

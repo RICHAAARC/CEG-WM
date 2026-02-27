@@ -22,7 +22,7 @@ def _build_context() -> InjectionContext:
     )
 
 
-def test_injection_cfg_marks_adapter_fallback_when_impl_not_channel_impl() -> None:
+def test_injection_cfg_marks_equivalent_binding_for_prc_t2s_impls() -> None:
     cfg = {
         "impl": {
             "lf_coder_id": "lf_coder_prc_v1",
@@ -43,12 +43,14 @@ def test_injection_cfg_marks_adapter_fallback_when_impl_not_channel_impl() -> No
     assert isinstance(hf_binding, dict)
     assert lf_binding.get("impl_selected") == "lf_coder_prc_v1"
     assert hf_binding.get("impl_selected") == "hf_embedder_t2smark_v1"
-    assert lf_binding.get("fallback_used") is True
-    assert hf_binding.get("fallback_used") is True
-    assert lf_binding.get("evidence_level") == "adapter_fallback"
-    assert hf_binding.get("evidence_level") == "adapter_fallback"
-    assert isinstance(lf_binding.get("fallback_reason"), str)
-    assert isinstance(hf_binding.get("fallback_reason"), str)
+    assert lf_binding.get("fallback_used") is False
+    assert hf_binding.get("fallback_used") is False
+    assert lf_binding.get("evidence_level") == "primary_equivalent"
+    assert hf_binding.get("evidence_level") == "primary_equivalent"
+    assert lf_binding.get("equivalence_mode") == "prc_to_channel_lf_parameter_mapping_v1"
+    assert hf_binding.get("equivalence_mode") == "t2smark_to_channel_hf_parameter_mapping_v1"
+    assert lf_binding.get("fallback_reason") is None
+    assert hf_binding.get("fallback_reason") is None
 
 
 def test_injection_cfg_marks_no_fallback_for_channel_native_impl() -> None:
