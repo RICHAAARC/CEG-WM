@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, cast
 
 import numpy as np
 from PIL import Image
@@ -25,17 +25,36 @@ from main.watermarking.common.plan_digest_flow import (
     bind_plan_to_record,
 )
 from main.watermarking.content_chain.high_freq_embedder import (
-    HighFreqEmbedder,
-    HIGH_FREQ_EMBEDDER_ID,
-    HIGH_FREQ_EMBEDDER_VERSION,
-    embed_high_freq_pattern,
     compute_hf_trace_digest,
 )
 from main.watermarking.content_chain.low_freq_coder import (
-    encode_low_freq_dct,
     compute_lf_trace_digest,
 )
+from main.watermarking.content_chain import high_freq_embedder as high_freq_embedder_module
+from main.watermarking.content_chain import low_freq_coder as low_freq_coder_module
 from main.watermarking.geometry_chain.sync import SyncRuntimeContext
+
+
+def _as_dict_payload(value: Any) -> Dict[str, Any] | None:
+    """
+    功能：将对象规范化为 dict 负载。
+
+    Convert a payload-like object to a dictionary.
+
+    Args:
+        value: Candidate payload object.
+
+    Returns:
+        Dictionary payload when available; otherwise None.
+    """
+    if isinstance(value, dict):
+        return cast(Dict[str, Any], value)
+    as_dict_method = getattr(value, "as_dict", None)
+    if callable(as_dict_method):
+        converted = as_dict_method()
+        if isinstance(converted, dict):
+            return cast(Dict[str, Any], converted)
+    return None
 
 
 def run_embed_orchestrator(
@@ -73,25 +92,6 @@ def run_embed_orchestrator(
         TypeError: If inputs are invalid.
         ValueError: If impl_set is invalid.
     """
-    if not isinstance(cfg, dict):
-        # cfg 类型不合法，必须 fail-fast。
-        raise TypeError("cfg must be dict")
-    if not isinstance(impl_set, BuiltImplSet):
-        # impl_set 类型不合法，必须 fail-fast。
-        raise TypeError("impl_set must be BuiltImplSet")
-    if not isinstance(cfg_digest, str) or not cfg_digest:
-        # cfg_digest 类型不符合预期，必须 fail-fast。
-        raise TypeError("cfg_digest must be non-empty str")
-    if trajectory_evidence is not None and not isinstance(trajectory_evidence, dict):
-        # trajectory_evidence 类型不符合预期，必须 fail-fast。
-        raise TypeError("trajectory_evidence must be dict or None")
-    if injection_evidence is not None and not isinstance(injection_evidence, dict):
-        # injection_evidence 类型不符合预期，必须 fail-fast。
-        raise TypeError("injection_evidence must be dict or None")
-    if sync_runtime_context is not None and not isinstance(sync_runtime_context, SyncRuntimeContext):
-        # sync_runtime_context 类型不符合预期，必须 fail-fast。
-        raise TypeError("sync_runtime_context must be SyncRuntimeContext or None")
-
     if content_result_override is not None and not isinstance(content_result_override, dict) and not hasattr(content_result_override, "as_dict"):
         # content_result_override 类型不符合预期，必须 fail-fast。
         raise TypeError("content_result_override must be dict, ContentEvidence, or None")
@@ -109,65 +109,57 @@ def run_embed_orchestrator(
     content_inputs = _build_content_inputs_for_embed(cfg)
     
     # Ablation: 禁用 content 模块时返回 absent 语义。
+    content_result: Any
     if not enable_content:
         content_result = _build_ablation_absent_content_evidence("content_chain_disabled_by_ablation")
+    elif content_result_override is not None:
+        content_result = cast(Any, content_result_override)
     else:
-        content_result = content_result_override if content_result_override is not None else impl_set.content_extractor.extract(
+        content_result = impl_set.content_extractor.extract(
             cfg,
             inputs=content_inputs,
             cfg_digest=cfg_digest
         )
 
-    content_evidence_payload = None
-    if hasattr(content_result, "as_dict") and callable(content_result.as_dict):
-        content_evidence_payload = content_result.as_dict()
-    elif isinstance(content_result, dict):
-        content_evidence_payload = dict(content_result)
-    else:
+    content_evidence_payload = _as_dict_payload(content_result)
+    if content_evidence_payload is None:
         # content_result 类型不符合预期，必须 fail-fast。
-        raise TypeError(f"content_result must be dict or have as_dict method, got {type(content_result).__name__}")
+        raise TypeError("content_result must be dict or have as_dict method")
 
     if trajectory_evidence is not None:
-        if content_evidence_payload is None:
-            content_evidence_payload = {}
         content_evidence_payload["trajectory_evidence"] = trajectory_evidence
         _inject_trajectory_audit_fields(content_evidence_payload, trajectory_evidence)
     if injection_evidence is not None:
-        if content_evidence_payload is None:
-            content_evidence_payload = {}
         _merge_injection_evidence(content_evidence_payload, injection_evidence)
     _normalize_content_evidence_optional_mappings(content_evidence_payload)
     
     # 捕获 content_chain 的执行状态（用于 execution_report）。
     # 允许的值：ok / fail / absent
     content_chain_status = "ok"
-    if isinstance(content_result, dict):
-        content_status = content_result.get("status", "unknown")
+    content_status = content_evidence_payload.get("status", "unknown")
+    if isinstance(content_status, str):
         if content_status == "absent":
             content_chain_status = "absent"
         elif content_status != "ok":
             content_chain_status = "fail"
-    elif hasattr(content_result, "status"):
-        content_status = content_result.status
-        if content_status == "absent":
-            content_chain_status = "absent"
-        elif content_status != "ok":
-            content_chain_status = "fail"
+    elif content_status != "ok":
+        content_chain_status = "fail"
     
     # 提取 mask_digest 以绑定到规划器。
-    mask_digest = None
-    if isinstance(content_result, dict):
-        mask_digest = content_result.get("mask_digest")
+    mask_digest = content_evidence_payload.get("mask_digest")
     # 若 content_result 是对象（如 ContentEvidence），提取 mask_digest。
-    elif hasattr(content_result, "mask_digest"):
-        mask_digest = content_result.mask_digest
+    if not isinstance(mask_digest, str):
+        mask_digest = None
     
     # 调用规划器计算 plan_digest，绑定 cfg_digest + mask_digest + planner_params。
     planner_inputs = _build_planner_inputs_for_runtime(cfg, trajectory_evidence, content_evidence_payload)
+    subspace_result: Any
     if not enable_subspace:
         subspace_result = _build_ablation_absent_subspace_result("subspace_disabled_by_ablation")
+    elif subspace_result_override is not None:
+        subspace_result = cast(Any, subspace_result_override)
     else:
-        subspace_result = subspace_result_override if subspace_result_override is not None else impl_set.subspace_planner.plan(
+        subspace_result = impl_set.subspace_planner.plan(
             cfg,
             mask_digest=mask_digest,
             cfg_digest=cfg_digest,
@@ -175,9 +167,6 @@ def run_embed_orchestrator(
         )
     
     sync_result = _run_sync_module(cfg, impl_set, sync_runtime_context)
-
-    if content_evidence_payload is None:
-        content_evidence_payload = {}
 
     plan_obj, plan_digest, plan_input_digest, plan_meta = build_content_plan_and_digest(
         cfg,
@@ -188,7 +177,8 @@ def run_embed_orchestrator(
     )
     io_anchors = _prepare_embed_real_io_anchors(cfg)
     use_latent_per_step = _should_use_latent_per_step_path(cfg)
-    paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
+    paper_cfg_raw = cfg.get("paper_faithfulness")
+    paper_cfg = cast(Dict[str, Any], paper_cfg_raw) if isinstance(paper_cfg_raw, dict) else {}
     paper_enabled = bool(paper_cfg.get("enabled", False))
     if paper_enabled and not use_latent_per_step:
         # paper 模式下必须走 latent per-step 主路径。
@@ -199,7 +189,8 @@ def run_embed_orchestrator(
     
     # Paper-faithful mode强制检查HF/LF实现（阶段4）
     if paper_enabled:
-        impl_cfg = cfg.get("impl", {})
+        impl_cfg_raw = cfg.get("impl")
+        impl_cfg = cast(Dict[str, Any], impl_cfg_raw) if isinstance(impl_cfg_raw, dict) else {}
         hf_impl_id = impl_cfg.get("hf_embedder_id")
         lf_impl_id = impl_cfg.get("lf_coder_id")
         
@@ -212,7 +203,7 @@ def run_embed_orchestrator(
             raise ValueError(f"paper_faithfulness requires lf_coder_prc_v1, got {lf_impl_id}")
     
     if use_latent_per_step:
-        embed_trace = _build_latent_step_embed_trace(cfg, injection_evidence)
+        embed_trace: Dict[str, Any] = _build_latent_step_embed_trace(cfg, injection_evidence)
     else:
         embed_trace = {
             "embed_mode": io_anchors["embed_mode"],
@@ -250,7 +241,7 @@ def run_embed_orchestrator(
         embed_trace.update(pipeline_trace)
 
     # 构造返回的业务字段映射。
-    record_fields = {
+    record_fields: Dict[str, Any] = {
         "operation": "embed",
         "embed_mode": embed_trace.get("embed_mode", io_anchors["embed_mode"]),
         "image_path": io_anchors["image_path"],
@@ -271,7 +262,7 @@ def run_embed_orchestrator(
         #     geometry 链不参与，geometry_chain_status 置为 "absent"。
         "execution_report": {
             "content_chain_status": content_chain_status,
-            "geometry_chain_status": "absent",
+            "geometry_chain_status": sync_result.get("status", "absent"),
             "fusion_status": "absent",
             "audit_obligations_satisfied": True
         }
@@ -285,14 +276,20 @@ def run_embed_orchestrator(
     )
     _bind_mask_and_routing_evidence_to_record(record_fields, content_evidence_payload)
     
-    # 若 subspace_result 是对象，提取基础锚点作为审计字段。
-    if hasattr(subspace_result, "plan_digest"):
-        record_fields["basis_digest"] = subspace_result.basis_digest
-        record_fields["plan_stats"] = subspace_result.plan_stats
-        if isinstance(subspace_result.plan, dict):
-            record_fields["subspace_rank"] = subspace_result.plan.get("rank")
-            record_fields["subspace_energy_ratio"] = subspace_result.plan.get("energy_ratio")
-            record_fields["subspace_planner_impl_identity"] = subspace_result.plan.get("planner_impl_identity")
+    subspace_payload = _as_dict_payload(subspace_result)
+    if isinstance(subspace_payload, dict):
+        basis_digest = subspace_payload.get("basis_digest")
+        if isinstance(basis_digest, str) and basis_digest:
+            record_fields["basis_digest"] = basis_digest
+        plan_stats = subspace_payload.get("plan_stats")
+        if isinstance(plan_stats, dict):
+            record_fields["plan_stats"] = plan_stats
+        plan_node = subspace_payload.get("plan")
+        if isinstance(plan_node, dict):
+            plan_node_payload = cast(Dict[str, Any], plan_node)
+            record_fields["subspace_rank"] = plan_node_payload.get("rank")
+            record_fields["subspace_energy_ratio"] = plan_node_payload.get("energy_ratio")
+            record_fields["subspace_planner_impl_identity"] = plan_node_payload.get("planner_impl_identity")
     
     return record_fields
 
@@ -318,17 +315,38 @@ def _run_sync_module(
     Raises:
         TypeError: If inputs are invalid.
     """
-    if not isinstance(cfg, dict):
-        # cfg 类型不合法，必须 fail-fast。
-        raise TypeError("cfg must be dict")
-    if not isinstance(impl_set, BuiltImplSet):
-        # impl_set 类型不合法，必须 fail-fast。
-        raise TypeError("impl_set must be BuiltImplSet")
-    if sync_runtime_context is not None and not isinstance(sync_runtime_context, SyncRuntimeContext):
-        # sync_runtime_context 类型不合法，必须 fail-fast。
-        raise TypeError("sync_runtime_context must be SyncRuntimeContext or None")
-
     sync_module = impl_set.sync_module
+    sync_inject_trace: Dict[str, Any] | None = None
+
+    if sync_runtime_context is not None and sync_runtime_context.latents is not None:
+        embed_inject_callable = getattr(sync_module, "embed_inject", None)
+        if not callable(embed_inject_callable):
+            sync_template_obj = getattr(sync_module, "_sync_template", None)
+            embed_inject_callable = getattr(sync_template_obj, "embed_inject", None) if sync_template_obj is not None else None
+
+        if callable(embed_inject_callable):
+            seed_value = cfg.get("seed", 42)
+            if not isinstance(seed_value, int):
+                seed_value = 42
+            inject_result = embed_inject_callable(sync_runtime_context.latents, cfg, int(seed_value))
+            if isinstance(inject_result, tuple):
+                inject_tuple = cast(tuple[Any, ...], inject_result)
+                if len(inject_tuple) == 2:
+                    injected_latents = inject_tuple[0]
+                    sync_inject_trace = _as_dict_payload(inject_tuple[1])
+                else:
+                    injected_latents = sync_runtime_context.latents
+                    sync_inject_trace = None
+            else:
+                injected_latents = sync_runtime_context.latents
+                sync_inject_trace = None
+            sync_runtime_context = SyncRuntimeContext(
+                pipeline=sync_runtime_context.pipeline,
+                latents=injected_latents,
+                rng=sync_runtime_context.rng,
+                trajectory_evidence=sync_runtime_context.trajectory_evidence,
+            )
+
     if sync_runtime_context is not None:
         sync_with_context = getattr(sync_module, "sync_with_context", None)
         if sync_with_context is not None:
@@ -336,108 +354,28 @@ def _run_sync_module(
                 # sync_with_context 类型不符合预期，必须 fail-fast。
                 raise TypeError("sync_with_context must be callable")
             if sync_runtime_context.pipeline is not None and sync_runtime_context.latents is not None:
-                return sync_with_context(cfg, sync_runtime_context)
+                result_obj = sync_with_context(cfg, sync_runtime_context)
+                result = _as_dict_payload(result_obj)
+                if not isinstance(result, dict):
+                    raise TypeError("sync_with_context must return dict-like payload")
+                if isinstance(sync_inject_trace, dict):
+                    result["sync_inject_status"] = sync_inject_trace.get("sync_inject_status", sync_inject_trace.get("status"))
+                    result["sync_inject_strength"] = sync_inject_trace.get("sync_inject_strength")
+                    result["template_digest"] = sync_inject_trace.get("template_digest")
+                return result
 
     if not hasattr(sync_module, "sync") or not callable(sync_module.sync):
         # sync 方法缺失，必须 fail-fast。
         raise TypeError("sync_module must provide sync")
-    return sync_module.sync(cfg)
-
-
-def _build_hf_embed_evidence(
-    cfg: Dict[str, Any],
-    cfg_digest: str,
-    subspace_result: Any,
-    trajectory_evidence: Dict[str, Any] | None,
-) -> Dict[str, Any]:
-    """
-    功能：构造 embed 侧 HF 证据。
-
-    Build embed-side HF evidence bound to planner-defined subspace.
-
-    Args:
-        cfg: Configuration mapping.
-        cfg_digest: Config digest.
-        subspace_result: Planner result object or mapping.
-        trajectory_evidence: Optional trajectory evidence mapping.
-
-    Returns:
-        HF evidence mapping.
-
-    Raises:
-        TypeError: If cfg/cfg_digest types are invalid.
-    """
-    if not isinstance(cfg, dict):
-        raise TypeError("cfg must be dict")
-    if not isinstance(cfg_digest, str) or not cfg_digest:
-        raise TypeError("cfg_digest must be non-empty str")
-
-    plan_payload = None
-    plan_digest = None
-    if hasattr(subspace_result, "as_dict") and callable(subspace_result.as_dict):
-        plan_payload = subspace_result.as_dict()
-    elif isinstance(subspace_result, dict):
-        plan_payload = dict(subspace_result)
-
-    if hasattr(subspace_result, "plan_digest"):
-        plan_digest = subspace_result.plan_digest
-    elif isinstance(plan_payload, dict):
-        plan_digest = plan_payload.get("plan_digest")
-
-    embedder = HighFreqEmbedder(
-        impl_id=HIGH_FREQ_EMBEDDER_ID,
-        impl_version=HIGH_FREQ_EMBEDDER_VERSION,
-        impl_digest=digests.canonical_sha256(
-            {
-                "impl_id": HIGH_FREQ_EMBEDDER_ID,
-                "impl_version": HIGH_FREQ_EMBEDDER_VERSION,
-            }
-        ),
-    )
-    return embedder.embed(
-        latents=trajectory_evidence,
-        plan=plan_payload,
-        cfg=cfg,
-        cfg_digest=cfg_digest,
-        expected_plan_digest=plan_digest,
-    )
-
-
-def _merge_hf_evidence(content_evidence_payload: Dict[str, Any], hf_evidence: Dict[str, Any]) -> None:
-    """
-    功能：将 HF 证据写入 content_evidence 兼容字段。
-
-    Merge HF evidence into content evidence payload using append-only compatible fields.
-
-    Args:
-        content_evidence_payload: Mutable content evidence mapping.
-        hf_evidence: HF evidence mapping.
-
-    Returns:
-        None.
-    """
-    if not isinstance(content_evidence_payload, dict):
-        return
-    if not isinstance(hf_evidence, dict):
-        return
-
-    content_evidence_payload["hf_trace_digest"] = hf_evidence.get("hf_trace_digest")
-    content_evidence_payload["hf_score"] = hf_evidence.get("hf_score")
-
-    score_parts = content_evidence_payload.get("score_parts")
-    if not isinstance(score_parts, dict):
-        score_parts = {}
-        content_evidence_payload["score_parts"] = score_parts
-
-    score_parts["hf_status"] = hf_evidence.get("status")
-    summary = hf_evidence.get("hf_evidence_summary")
-    if isinstance(summary, dict):
-        if "hf_absent_reason" in summary:
-            score_parts["hf_absent_reason"] = summary.get("hf_absent_reason")
-        if "hf_failure_reason" in summary:
-            score_parts["hf_failure_reason"] = summary.get("hf_failure_reason")
-        score_parts["hf_metrics"] = summary
-    score_parts["content_score_rule_version"] = hf_evidence.get("content_score_rule_version")
+    result_obj = sync_module.sync(cfg)
+    result = _as_dict_payload(result_obj)
+    if not isinstance(result, dict):
+        raise TypeError("sync_module.sync must return dict-like payload")
+    if isinstance(sync_inject_trace, dict):
+        result["sync_inject_status"] = sync_inject_trace.get("sync_inject_status", sync_inject_trace.get("status"))
+        result["sync_inject_strength"] = sync_inject_trace.get("sync_inject_strength")
+        result["template_digest"] = sync_inject_trace.get("template_digest")
+    return result
 
 
 def _merge_injection_evidence(content_evidence_payload: Dict[str, Any], injection_evidence: Dict[str, Any]) -> None:
@@ -453,11 +391,6 @@ def _merge_injection_evidence(content_evidence_payload: Dict[str, Any], injectio
     Returns:
         None.
     """
-    if not isinstance(content_evidence_payload, dict):
-        return
-    if not isinstance(injection_evidence, dict):
-        return
-
     content_evidence_payload["injection_status"] = injection_evidence.get("status")
     content_evidence_payload["injection_absent_reason"] = injection_evidence.get("injection_absent_reason")
     content_evidence_payload["injection_failure_reason"] = injection_evidence.get("injection_failure_reason")
@@ -487,11 +420,6 @@ def _inject_trajectory_audit_fields(
     Returns:
         None.
     """
-    if not isinstance(content_evidence_payload, dict):
-        return
-    if not isinstance(trajectory_evidence, dict):
-        return
-
     audit = content_evidence_payload.get("audit")
     if not isinstance(audit, dict):
         audit = {}
@@ -501,8 +429,9 @@ def _inject_trajectory_audit_fields(
     tap_status = None
     tap_absent_reason = None
     if isinstance(tap_audit, dict):
-        tap_status = tap_audit.get("trajectory_tap_status")
-        tap_absent_reason = tap_audit.get("trajectory_absent_reason")
+        tap_audit_payload = cast(Dict[str, Any], tap_audit)
+        tap_status = tap_audit_payload.get("trajectory_tap_status")
+        tap_absent_reason = tap_audit_payload.get("trajectory_absent_reason")
 
     if not isinstance(tap_status, str) or not tap_status:
         status_value = trajectory_evidence.get("status")
@@ -565,20 +494,13 @@ def _build_planner_inputs_for_runtime(
     Raises:
         TypeError: If cfg is invalid.
     """
-    if not isinstance(cfg, dict):
-        raise TypeError("cfg must be dict")
-    if trajectory_evidence is not None and not isinstance(trajectory_evidence, dict):
-        raise TypeError("trajectory_evidence must be dict or None")
-    if content_evidence_payload is not None and not isinstance(content_evidence_payload, dict):
-        raise TypeError("content_evidence_payload must be dict or None")
-
     trace_signature = {
         "num_inference_steps": cfg.get("inference_num_steps", cfg.get("generation", {}).get("num_inference_steps", 16) if isinstance(cfg.get("generation"), dict) else 16),
         "guidance_scale": cfg.get("inference_guidance_scale", cfg.get("generation", {}).get("guidance_scale", 7.0) if isinstance(cfg.get("generation"), dict) else 7.0),
         "height": cfg.get("inference_height", cfg.get("model", {}).get("height", 512) if isinstance(cfg.get("model"), dict) else 512),
         "width": cfg.get("inference_width", cfg.get("model", {}).get("width", 512) if isinstance(cfg.get("model"), dict) else 512),
     }
-    inputs = {"trace_signature": trace_signature}
+    inputs: Dict[str, Any] = {"trace_signature": trace_signature}
     runtime_pipeline = cfg.get("__embed_pipeline_obj__")
     runtime_latents = cfg.get("__embed_final_latents__")
     if runtime_pipeline is not None:
@@ -595,14 +517,15 @@ def _build_planner_inputs_for_runtime(
     if isinstance(content_evidence_payload, dict):
         mask_stats = content_evidence_payload.get("mask_stats")
         if isinstance(mask_stats, dict):
-            inputs["mask_summary"] = dict(mask_stats)
-            routing_digest = mask_stats.get("routing_digest")
+            mask_stats_payload = cast(Dict[str, Any], mask_stats)
+            inputs["mask_summary"] = mask_stats_payload
+            routing_digest = mask_stats_payload.get("routing_digest")
             if isinstance(routing_digest, str) and routing_digest:
                 inputs["routing_digest"] = routing_digest
     return inputs
 
 
-def _prepare_embed_real_io_anchors(cfg: Dict[str, Any]) -> Dict[str, str]:
+def _prepare_embed_real_io_anchors(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
     功能：执行 embed 阶段真实输入输出锚定。 
 
@@ -618,10 +541,7 @@ def _prepare_embed_real_io_anchors(cfg: Dict[str, Any]) -> Dict[str, str]:
         TypeError: If cfg is invalid.
         ValueError: If runtime IO configuration is invalid.
     """
-    if not isinstance(cfg, dict):
-        raise TypeError("cfg must be dict")
-
-    result = {
+    result: Dict[str, Any] = {
         "embed_mode": "content_real_v1",
         "image_path": "<absent>",
         "watermarked_path": "<absent>",
@@ -656,7 +576,8 @@ def _prepare_embed_real_io_anchors(cfg: Dict[str, Any]) -> Dict[str, str]:
     run_root = Path(run_root_raw).resolve()
     artifacts_dir = Path(artifacts_dir_raw).resolve()
 
-    embed_cfg = cfg.get("embed") if isinstance(cfg.get("embed"), dict) else {}
+    embed_cfg_node = cfg.get("embed")
+    embed_cfg = cast(Dict[str, Any], embed_cfg_node) if isinstance(embed_cfg_node, dict) else {}
     output_rel = embed_cfg.get("output_artifact_rel_path", "watermarked/watermarked.png")
     if not isinstance(output_rel, str) or not output_rel:
         # 输出相对路径不合法，必须 fail-fast。
@@ -713,24 +634,11 @@ def _apply_content_embedding_pipeline(
     Returns:
         Tuple of (watermarked_image, embed_trace).
     """
-    if not isinstance(impl_set, BuiltImplSet):
-        raise TypeError("impl_set must be BuiltImplSet")
-    if not isinstance(plan, dict):
-        raise TypeError("plan must be dict")
-    if not isinstance(cfg, dict):
-        raise TypeError("cfg must be dict")
-    if not isinstance(cfg_digest, str) or not cfg_digest:
-        raise TypeError("cfg_digest must be non-empty str")
-    if not isinstance(content_evidence_payload, dict):
-        raise TypeError("content_evidence_payload must be dict")
-    if not isinstance(enable_lf, bool):
-        raise TypeError("enable_lf must be bool")
-    if not isinstance(enable_hf, bool):
-        raise TypeError("enable_hf must be bool")
-
     image_array = np.asarray(image, dtype=np.uint8)
-    plan_band_spec = plan.get("band_spec") if isinstance(plan.get("band_spec"), dict) else {}
-    routing_summary = plan_band_spec.get("hf_selector_summary") if isinstance(plan_band_spec.get("hf_selector_summary"), dict) else {}
+    plan_band_spec_node = plan.get("band_spec")
+    plan_band_spec = cast(Dict[str, Any], plan_band_spec_node) if isinstance(plan_band_spec_node, dict) else {}
+    routing_summary_node = plan_band_spec.get("hf_selector_summary")
+    routing_summary = cast(Dict[str, Any], routing_summary_node) if isinstance(routing_summary_node, dict) else {}
 
     key_material = digests.canonical_sha256(
         {
@@ -749,8 +657,11 @@ def _apply_content_embedding_pipeline(
         "evidence_level": "adapter_fallback",
         "fallback_reason": "lf_impl_embed_interface_absent",
     }
-    lf_watermarked: np.ndarray | None = None
-    lf_trace_summary: Dict[str, Any]
+    lf_watermarked: Any = None
+    lf_trace_summary: Dict[str, Any] = {
+        "lf_status": "failed",
+        "lf_failure_reason": "lf_trace_not_initialized",
+    }
 
     lf_coder = getattr(impl_set, "lf_coder", None)
     can_use_lf_impl = (
@@ -762,23 +673,27 @@ def _apply_content_embedding_pipeline(
         and isinstance(plan_digest, str)
         and bool(plan_digest)
     )
-    if can_use_lf_impl:
+    if can_use_lf_impl and lf_coder is not None:
         try:
             cfg_for_lf = dict(cfg)
-            watermark_cfg = cfg_for_lf.get("watermark") if isinstance(cfg_for_lf.get("watermark"), dict) else {}
-            watermark_cfg = dict(watermark_cfg)
+            watermark_node = cfg_for_lf.get("watermark")
+            watermark_payload = cast(Dict[str, Any], watermark_node) if isinstance(watermark_node, dict) else {}
+            watermark_cfg = dict(watermark_payload)
             watermark_cfg["plan_digest"] = plan_digest
             cfg_for_lf["watermark"] = watermark_cfg
-            lf_impl_result = lf_coder.embed_apply(
+            lf_impl_result_obj = lf_coder.embed_apply(
                 cfg=cfg_for_lf,
                 latent_features=image_array.reshape(-1).astype(np.float64).tolist(),
                 plan_digest=plan_digest,
                 cfg_digest=cfg_digest,
             )
-            if not isinstance(lf_impl_result, dict):
+            if not isinstance(lf_impl_result_obj, dict):
                 raise TypeError("lf_coder.embed_apply must return dict")
+            lf_impl_result = cast(Dict[str, Any], lf_impl_result_obj)
             embedded_features = lf_impl_result.get("latent_features_embedded")
-            embedded_np = np.asarray(embedded_features)
+            if embedded_features is None:
+                raise ValueError("lf_coder embedded features are absent")
+            embedded_np = np.asarray(embedded_features, dtype=np.float64)
             if embedded_np.size != image_array.size:
                 raise ValueError("lf_coder embedded feature size mismatch for image adapter")
             lf_watermarked = np.clip(np.round(embedded_np.reshape(image_array.shape)), 0, 255).astype(np.uint8)
@@ -818,7 +733,8 @@ def _apply_content_embedding_pipeline(
             "fallback_reason": None,
         }
     elif lf_watermarked is None:
-        lf_watermarked, lf_trace_summary = encode_low_freq_dct(image_array, plan_band_spec, key_material, lf_params)
+        encode_low_freq_dct_fn = getattr(low_freq_coder_module, "encode_low_freq_dct")
+        lf_watermarked, lf_trace_summary = encode_low_freq_dct_fn(image_array, plan_band_spec, key_material, lf_params)
     lf_trace_digest = compute_lf_trace_digest(
         {
             "summary": lf_trace_summary,
@@ -834,6 +750,7 @@ def _apply_content_embedding_pipeline(
     if not isinstance(score_parts, dict):
         score_parts = {}
         content_evidence_payload["score_parts"] = score_parts
+    score_parts = cast(Dict[str, Any], score_parts)
     score_parts["lf_status"] = lf_trace_summary.get("lf_status", "ok")
     score_parts["lf_metrics"] = lf_trace_summary
 
@@ -855,7 +772,8 @@ def _apply_content_embedding_pipeline(
             "evidence_level": "adapter_fallback",
             "fallback_reason": "hf_impl_image_adapter_absent",
         }
-        hf_watermarked, hf_trace_summary = embed_high_freq_pattern(lf_watermarked, routing_summary, key_material, hf_params)
+        embed_high_freq_pattern_fn = getattr(high_freq_embedder_module, "embed_high_freq_pattern")
+        hf_watermarked, hf_trace_summary = embed_high_freq_pattern_fn(lf_watermarked, routing_summary, key_material, hf_params)
         hf_trace_digest = compute_hf_trace_digest(
             {
                 "summary": hf_trace_summary,
@@ -890,7 +808,7 @@ def _apply_content_embedding_pipeline(
         embed_trace["hf_impl_binding"] = content_evidence_payload.get("hf_impl_binding")
         watermarked_array = lf_watermarked
 
-    return Image.fromarray(watermarked_array), embed_trace
+    return Image.fromarray(np.asarray(watermarked_array)), embed_trace
 
 
 def _write_watermarked_artifact_controlled(
@@ -913,11 +831,7 @@ def _write_watermarked_artifact_controlled(
     Returns:
         Tuple of (artifact_rel_path, artifact_sha256, watermarked_path).
     """
-    if not isinstance(run_root, Path):
-        raise TypeError("run_root must be Path")
-    if not isinstance(artifacts_dir, Path):
-        raise TypeError("artifacts_dir must be Path")
-    if not isinstance(output_rel, str) or not output_rel:
+    if not output_rel:
         raise TypeError("output_rel must be non-empty str")
 
     output_path = (artifacts_dir / output_rel).resolve()
@@ -938,11 +852,10 @@ def _write_watermarked_artifact_controlled(
 
 
 def _build_lf_image_embed_params(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    if not isinstance(cfg, dict):
-        raise TypeError("cfg must be dict")
-    lf_cfg = cfg.get("watermark", {}).get("lf", {})
-    if not isinstance(lf_cfg, dict):
-        lf_cfg = {}
+    watermark_node = cfg.get("watermark")
+    watermark_cfg = cast(Dict[str, Any], watermark_node) if isinstance(watermark_node, dict) else {}
+    lf_node = watermark_cfg.get("lf")
+    lf_cfg = cast(Dict[str, Any], lf_node) if isinstance(lf_node, dict) else {}
     return {
         "dct_block_size": int(lf_cfg.get("dct_block_size", 8)),
         "lf_coeff_indices": lf_cfg.get("lf_coeff_indices", [[1, 1], [1, 2], [2, 1]]),
@@ -953,11 +866,10 @@ def _build_lf_image_embed_params(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _build_hf_image_embed_params(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    if not isinstance(cfg, dict):
-        raise TypeError("cfg must be dict")
-    hf_cfg = cfg.get("watermark", {}).get("hf", {})
-    if not isinstance(hf_cfg, dict):
-        hf_cfg = {}
+    watermark_node = cfg.get("watermark")
+    watermark_cfg = cast(Dict[str, Any], watermark_node) if isinstance(watermark_node, dict) else {}
+    hf_node = watermark_cfg.get("hf")
+    hf_cfg = cast(Dict[str, Any], hf_node) if isinstance(hf_node, dict) else {}
     return {
         "beta": float(hf_cfg.get("tau", 2.0)),
         "tail_truncation_ratio": float(hf_cfg.get("tail_truncation_ratio", 0.1)),
@@ -978,15 +890,13 @@ def _resolve_embed_input_image_path(cfg: Dict[str, Any]) -> str | None:
     Returns:
         Input image path string or None.
     """
-    if not isinstance(cfg, dict):
-        raise TypeError("cfg must be dict")
-
     candidates = [
         cfg.get("__embed_input_image_path__"),
         cfg.get("input_image_path"),
     ]
-    embed_cfg = cfg.get("embed")
-    if isinstance(embed_cfg, dict):
+    embed_cfg_node = cfg.get("embed")
+    embed_cfg = cast(Dict[str, Any], embed_cfg_node) if isinstance(embed_cfg_node, dict) else {}
+    if embed_cfg:
         candidates.append(embed_cfg.get("input_image_path"))
 
     for value in candidates:
@@ -1029,15 +939,17 @@ def _extract_mask_binding(content_evidence_payload: Any) -> Dict[str, Any] | Non
     """
     if not isinstance(content_evidence_payload, dict):
         return None
-    mask_stats = content_evidence_payload.get("mask_stats")
-    if not isinstance(mask_stats, dict):
+    content_evidence_mapping = cast(Dict[str, Any], content_evidence_payload)
+    mask_stats_node = content_evidence_mapping.get("mask_stats")
+    if not isinstance(mask_stats_node, dict):
         return None
+    mask_stats = cast(Dict[str, Any], mask_stats_node)
     binding = mask_stats.get("mask_resolution_binding")
     if isinstance(binding, dict):
-        return binding
+        return cast(Dict[str, Any], binding)
     legacy = mask_stats.get("resolution_binding")
     if isinstance(legacy, dict):
-        return legacy
+        return cast(Dict[str, Any], legacy)
     return None
 
 
@@ -1055,9 +967,11 @@ def _extract_mask_params_digest(content_evidence_payload: Any) -> str | None:
     """
     if not isinstance(content_evidence_payload, dict):
         return None
-    mask_stats = content_evidence_payload.get("mask_stats")
-    if not isinstance(mask_stats, dict):
+    content_evidence_mapping = cast(Dict[str, Any], content_evidence_payload)
+    mask_stats_node = content_evidence_mapping.get("mask_stats")
+    if not isinstance(mask_stats_node, dict):
         return None
+    mask_stats = cast(Dict[str, Any], mask_stats_node)
     value = mask_stats.get("mask_params_digest")
     if isinstance(value, str) and value:
         return value
@@ -1077,18 +991,29 @@ def _bind_mask_and_routing_evidence_to_record(record_fields: Dict[str, Any], con
     Returns:
         None.
     """
-    if not isinstance(record_fields, dict):
-        return
     if not isinstance(content_evidence_payload, dict):
         return
-
-    mask_stats = content_evidence_payload.get("mask_stats")
-    if not isinstance(mask_stats, dict):
+    content_evidence_mapping = cast(Dict[str, Any], content_evidence_payload)
+    mask_stats_node = content_evidence_mapping.get("mask_stats")
+    if not isinstance(mask_stats_node, dict):
         return
+    mask_stats = cast(Dict[str, Any], mask_stats_node)
 
     mask_binding = _extract_mask_binding(content_evidence_payload)
     if isinstance(mask_binding, dict):
         record_fields["mask_resolution_binding"] = mask_binding
+
+    mask_source_impl_identity = mask_stats.get("mask_source_impl_identity")
+    if isinstance(mask_source_impl_identity, dict):
+        record_fields["mask_source_impl_identity"] = mask_source_impl_identity
+
+    routing_digest = mask_stats.get("routing_digest")
+    if isinstance(routing_digest, str) and routing_digest:
+        record_fields["routing_digest"] = routing_digest
+
+    routing_summary = mask_stats.get("routing_summary")
+    if isinstance(routing_summary, dict):
+        record_fields["routing_summary"] = routing_summary
 
 
 def _should_use_latent_per_step_path(cfg: Dict[str, Any]) -> bool:
@@ -1103,16 +1028,17 @@ def _should_use_latent_per_step_path(cfg: Dict[str, Any]) -> bool:
     Returns:
         True if latent per-step mode is selected.
     """
-    if not isinstance(cfg, dict):
-        raise TypeError("cfg must be dict")
-    paper_spec_cfg = cfg.get("paper_faithfulness_spec") if isinstance(cfg.get("paper_faithfulness_spec"), dict) else {}
+    paper_spec_node = cfg.get("paper_faithfulness_spec")
+    paper_spec_cfg = cast(Dict[str, Any], paper_spec_node) if isinstance(paper_spec_node, dict) else {}
     latent_space_per_step = paper_spec_cfg.get("latent_space_per_step")
     if isinstance(latent_space_per_step, bool):
         return latent_space_per_step
-    paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
+    paper_node = cfg.get("paper_faithfulness")
+    paper_cfg = cast(Dict[str, Any], paper_node) if isinstance(paper_node, dict) else {}
     if bool(paper_cfg.get("enabled", False)):
         return True
-    embed_cfg = cfg.get("embed") if isinstance(cfg.get("embed"), dict) else {}
+    embed_node = cfg.get("embed")
+    embed_cfg = cast(Dict[str, Any], embed_node) if isinstance(embed_node, dict) else {}
     return bool(embed_cfg.get("use_latent_per_step", False))
 
 
@@ -1135,16 +1061,15 @@ def _build_latent_step_embed_trace(
     Raises:
         None.
     """
-    if not isinstance(cfg, dict):
-        raise TypeError("cfg must be dict")
-    paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
+    paper_node = cfg.get("paper_faithfulness")
+    paper_cfg = cast(Dict[str, Any], paper_node) if isinstance(paper_node, dict) else {}
     paper_enabled = bool(paper_cfg.get("enabled", False))
     injection_status = injection_evidence.get("status") if isinstance(injection_evidence, dict) else None
     if paper_enabled and injection_status != "ok":
         # paper 模式下 latent 注入证据非 ok 必须立即失败。
         raise ValueError("latent injection evidence not ok under paper mode")
 
-    trace = {
+    trace: Dict[str, Any] = {
         "embed_mode": "latent_step_injection_v1",
         "identity_mode": False,
         "identity_reason": None,
@@ -1198,15 +1123,14 @@ def _get_ablation_normalized(cfg: Dict[str, Any]) -> Dict[str, Any]:
     Raises:
         TypeError: If cfg is invalid.
     """
-    if not isinstance(cfg, dict):
-        raise TypeError("cfg must be dict")
-    ablation = cfg.get("ablation")
-    if not isinstance(ablation, dict):
+    ablation_node = cfg.get("ablation")
+    if not isinstance(ablation_node, dict):
         return {}
+    ablation = cast(Dict[str, Any], ablation_node)
     normalized = ablation.get("normalized")
     if not isinstance(normalized, dict):
         return {}
-    return normalized
+    return cast(Dict[str, Any], normalized)
 
 
 def _build_ablation_absent_subspace_result(absent_reason: str) -> Dict[str, Any]:
@@ -1221,7 +1145,7 @@ def _build_ablation_absent_subspace_result(absent_reason: str) -> Dict[str, Any]
     Returns:
         Mapping compatible with plan digest binding flow.
     """
-    if not isinstance(absent_reason, str) or not absent_reason:
+    if not absent_reason:
         raise TypeError("absent_reason must be non-empty str")
     return {
         "status": "absent",
@@ -1251,7 +1175,7 @@ def _build_ablation_absent_content_evidence(absent_reason: str) -> Dict[str, Any
     Raises:
         TypeError: If absent_reason is invalid.
     """
-    if not isinstance(absent_reason, str) or not absent_reason:
+    if not absent_reason:
         raise TypeError("absent_reason must be non-empty str")
     return {
         "status": "absent",
@@ -1276,15 +1200,3 @@ def _build_ablation_absent_content_evidence(absent_reason: str) -> Dict[str, Any
         },
         "content_failure_reason": None  # absent 状态下无失败原因
     }
-
-    mask_source_impl_identity = mask_stats.get("mask_source_impl_identity")
-    if isinstance(mask_source_impl_identity, dict):
-        record_fields["mask_source_impl_identity"] = mask_source_impl_identity
-
-    routing_digest = mask_stats.get("routing_digest")
-    if isinstance(routing_digest, str) and routing_digest:
-        record_fields["routing_digest"] = routing_digest
-
-    routing_summary = mask_stats.get("routing_summary")
-    if isinstance(routing_summary, dict):
-        record_fields["routing_summary"] = routing_summary

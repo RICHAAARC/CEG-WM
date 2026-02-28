@@ -12,6 +12,7 @@ from typing import Any, Dict
 
 from main.core import config_loader
 from main.evaluation import experiment_matrix
+from main.cli.run_common import build_cli_config_migration_hint
 
 
 def run_experiment_matrix(config_path: str, strict: bool = True) -> Dict[str, Any]:
@@ -33,6 +34,7 @@ def run_experiment_matrix(config_path: str, strict: bool = True) -> Dict[str, An
     cfg_obj, _ = config_loader.load_yaml_with_provenance(Path(config_path))
     cfg_dict: Dict[str, Any] = dict(cfg_obj)
     config_loader.normalize_ablation_flags(cfg_dict)
+    config_loader._validate_paper_lf_ecc_gate(cfg_dict)  # pyright: ignore[reportPrivateUsage]
     grid = experiment_matrix.build_experiment_grid(cfg_dict)
     return experiment_matrix.run_experiment_grid(grid, strict=strict)
 
@@ -60,6 +62,9 @@ def main() -> None:
         sys.exit(0)
     except Exception as exc:
         print(f"[ExperimentMatrix] [ERROR] {type(exc).__name__}: {exc}", file=sys.stderr)
+        hint = build_cli_config_migration_hint(exc)
+        if isinstance(hint, str) and hint:
+            print(f"[ExperimentMatrix] [HINT] {hint}", file=sys.stderr)
         raise
 
 

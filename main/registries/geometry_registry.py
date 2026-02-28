@@ -236,12 +236,18 @@ class SyncLatentSyncSd3:
         status = sync_result.status
         sync_success = status == "ok"
         return {
+            "status": status,
             "sync_status": status,
             "sync_success": sync_success,
             "failure_reason": sync_result.failure_reason,
             "sync_digest": sync_result.sync_digest,
             "sync_config_digest": sync_result.sync_config_digest,
             "sync_quality_metrics": sync_result.sync_quality_metrics,
+            "template_digest": (
+                sync_result.sync_quality_metrics.get("template_digest")
+                if isinstance(sync_result.sync_quality_metrics, dict)
+                else None
+            ),
             "resolution_binding": sync_result.resolution_binding,
             "impl_identity": self.impl_id,
             "impl_version": self.impl_version,
@@ -399,13 +405,20 @@ class SyncGeometryLatentSyncSD3V2:
         result = self._extractor.extract(cfg, inputs=runtime_inputs, sync_ctx=context)
         status = self._normalize_status_token(result.get("status"))
         payload = {
+            "status": status,
             "sync_status": status,
             "sync_success": status == "ok",
             "sync_digest": result.get("sync_digest"),
             "geo_score": result.get("geo_score"),
             "geometry_absent_reason": result.get("geometry_absent_reason"),
             "geometry_failure_reason": result.get("geometry_failure_reason"),
+            "sync_quality_metrics": result.get("sync_quality_metrics"),
             "sync_quality_semantics": result.get("sync_quality_semantics"),
+            "template_digest": (
+                result.get("sync_quality_metrics", {}).get("template_digest")
+                if isinstance(result.get("sync_quality_metrics"), dict)
+                else None
+            ),
             "impl_identity": self.impl_id,
             "impl_version": self.impl_version,
             "impl_digest": self.impl_digest,

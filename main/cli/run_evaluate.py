@@ -46,7 +46,8 @@ from main.cli.run_common import (
     format_fact_sources_mismatch,
     build_seed_audit,
     build_determinism_controls,
-    normalize_nondeterminism_notes
+    normalize_nondeterminism_notes,
+    build_cli_config_migration_hint
 )
 
 
@@ -235,14 +236,14 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
             run_meta["impl_identity"] = impl_identity.as_dict()
             run_meta["impl_identity_digest"] = runtime_resolver.compute_impl_identity_digest(impl_identity)
             run_meta["impl_set_capabilities_digest"] = impl_set_capabilities_digest
-            impl_set_capabilities_v2_digest = cfg.get("impl_set_capabilities_v2_digest")
-            if isinstance(impl_set_capabilities_v2_digest, str) and impl_set_capabilities_v2_digest:
-                run_meta["impl_set_capabilities_v2_digest"] = impl_set_capabilities_v2_digest
+            impl_set_capabilities_extended_digest = cfg.get("impl_set_capabilities_extended_digest")
+            if isinstance(impl_set_capabilities_extended_digest, str) and impl_set_capabilities_extended_digest:
+                run_meta["impl_set_capabilities_extended_digest"] = impl_set_capabilities_extended_digest
 
             # 绑定 evaluate 报告锚点（优先使用 CLI 已解析事实源）。
             cfg["__evaluate_cfg_digest__"] = cfg_digest
             cfg["__policy_path__"] = cfg["policy_path"]
-            cfg["__impl_digest__"] = impl_set_capabilities_v2_digest if isinstance(impl_set_capabilities_v2_digest, str) and impl_set_capabilities_v2_digest else impl_set_capabilities_digest
+            cfg["__impl_digest__"] = impl_set_capabilities_extended_digest if isinstance(impl_set_capabilities_extended_digest, str) and impl_set_capabilities_extended_digest else impl_set_capabilities_digest
 
             # 构造 evaluation record。
             print("[Evaluate] Generating evaluation record...")
@@ -257,8 +258,8 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
                 record["override_applied"] = override_applied
             # 写入 impl_set_capabilities_digest。
             record["impl_set_capabilities_digest"] = impl_set_capabilities_digest
-            if isinstance(impl_set_capabilities_v2_digest, str) and impl_set_capabilities_v2_digest:
-                record["impl_set_capabilities_v2_digest"] = impl_set_capabilities_v2_digest
+            if isinstance(impl_set_capabilities_extended_digest, str) and impl_set_capabilities_extended_digest:
+                record["impl_set_capabilities_extended_digest"] = impl_set_capabilities_extended_digest
 
             schema.ensure_required_fields(record, cfg, interpretation)
 
@@ -394,6 +395,9 @@ def main():
         sys.exit(0)
     except Exception as e:
         print(f"[Evaluate] [ERROR] Error: {e}", file=sys.stderr)
+        hint = build_cli_config_migration_hint(e)
+        if isinstance(hint, str) and hint:
+            print(f"[Evaluate] [HINT] {hint}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         sys.exit(1)

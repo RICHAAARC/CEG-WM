@@ -409,12 +409,12 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
     - whitelist_bound_digest                # 运行白名单绑定摘要。
 
     # Policy path 语义映射与配置锚点
+    - cfg_digest                            # 生效配置摘要。
     - policy_path_semantics_version         # 语义映射版本。
     - policy_path_semantics_digest          # 语义映射摘要。
     - policy_path_semantics_file_sha256     # 语义映射文件 SHA256。
     - policy_path_semantics_canon_sha256    # 语义映射 canonical SHA256。
     - policy_path_semantics_bound_digest    # 语义映射绑定摘要。
-    - cfg_digest                            # 生效配置摘要。
 
     # 链路启用与实现身份锚点
     - policy_path                           # policy 路径枚举值。
@@ -447,8 +447,8 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
     - thresholds_rule_version               # 阈值规则版本。
 
     # 核心判决与状态字段
-    - decision.is_watermarked               # 最终水印判决布尔值。
     - status                                # 检测过程状态。
+    - decision.is_watermarked               # 最终水印判决布尔值。
 
     # Content 证据（基础状态/分数/门控）
     - content_evidence.status                    # 内容证据状态。
@@ -464,10 +464,11 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
     - content_evidence.mask_stats                               # 掩码统计整体对象。
     - content_evidence.mask_stats.saliency_source_selected      # 实际选用显著性来源。
     - content_evidence.mask_stats.saliency_source_attempted     # 尝试过的显著性来源。
+    - content_evidence.mask_stats.saliency_provenance           # 显著性来源溯源信息。
     - content_evidence.mask_stats.fallback_used                 # 掩码是否使用回退。
     - content_evidence.mask_stats.fallback_reason               # 掩码回退原因。
     - content_evidence.mask_stats.model_artifact_anchor         # 掩码模型工件锚点。
-    - content_evidence.mask_stats.saliency_provenance           # 显著性来源溯源信息。
+    - content_evidence.mask_stats.model_artifact_anchor.weights_sha256    # 显著性模型权重摘要锚点。
 
     # Content 子空间/注入与轨迹锚点
     - content_evidence.plan_digest               # 子空间计划摘要。
@@ -511,12 +512,16 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
     - geometry_evidence.anchor_digest            # 几何锚点摘要。
     - geometry_evidence.anchor_metrics           # 几何锚点度量。
     - geometry_evidence.anchor_source_semantics  # 几何锚点来源语义。
+    - geometry_evidence.attention_capture_source # attention maps 采集来源。
     - geometry_evidence.anchor_evidence_level    # 几何锚点证据级别。
     - geometry_evidence.anchor_blocking_reason   # 几何锚点阻断原因。
     - geometry_evidence.sync_digest              # 几何同步摘要。
     - geometry_evidence.sync_metrics             # 几何同步度量。
     - geometry_evidence.sync.status              # 几何同步状态。
     - geometry_evidence.sync.reason              # 几何同步原因说明。
+    - geometry_evidence.sync_inject_status       # embed 侧同步注入状态。
+    - geometry_evidence.sync_inject_strength     # embed 侧同步注入强度。
+    - geometry_evidence.template_digest          # embed 侧同步模板摘要。
     - geometry_evidence.align_trace_digest       # 几何对齐轨迹摘要。
     - geometry_evidence.geo_score                # 几何得分。
     - geometry_evidence.geo_failure_reason       # 几何链失败原因。
@@ -528,6 +533,10 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
     - decision.routing_decisions                 # 决策路由明细。
     - decision.routing_digest                    # 决策路由摘要。
     - decision.abstain_reason                    # 决策弃权原因。
+    - decision.rescue_blocked_reason             # rescue 候选拦截原因。
+    - decision.rescue_anchor_evidence_level      # rescue 门控读取锚点证据等级。
+    - decision.rescue_sync_status                # rescue 门控读取原始同步状态。
+    - decision.rescue_sync_status_normalized     # rescue 门控读取归一化同步状态。
     - score_audit.abstain_triggered_by           # 触发弃权的条件来源。
     - decision.conditional_fpr_notes             # 条件 FPR 注释信息。
 
@@ -547,7 +556,9 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
     - content_evidence.subspace_evidence_level   # 子空间证据级别。
     - content_evidence.subspace_primary_path     # 子空间主路径。
     - content_evidence.synthetic_pipeline_runtime     # 合成 pipeline 运行信息。
-    - impl_set_capabilities_v2_digest            # impl 能力集摘要（v2）。
+    - content_evidence.bp_converged              # LDPC BP 收敛标志。
+    - content_evidence.bp_iteration_count        # LDPC BP 迭代次数。
+    - impl_set_capabilities_extended_digest      # impl 能力集摘要（扩展口径，推荐字段）。
 
     # ---- Paper Faithfulness 对齐证据字段 ----
     # 论文忠实性（Paper Faithfulness）绑定锚点
@@ -614,8 +625,10 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
     - geometry_evidence.stability_metrics        # 几何稳定性指标。
     - geometry_evidence.sync_config_digest       # 几何同步配置摘要。
     - geometry_evidence.sync_quality_metrics     # 几何同步质量指标。
-    - geometry_evidence.sync_quality_metrics.quality_components_v2   # 同步质量分量（v2）。
-    - geometry_evidence.sync_quality_semantics   # 同步质量语义说明。
+    - geometry_evidence.sync_quality_metrics.quality_components      # 几何同步质量分量。
+    - geometry_evidence.sync_quality_semantics   # 几何同步质量语义说明。
+    - quality_metrics.mean_psnr                  # 图像质量 PSNR。
+    - quality_metrics.mean_ssim                  # 图像质量 SSIM。
     
     # 顶层输入与路由锚点（仅 scripts/tests/离线审计主消费）
     - input_sha256                          # 输入文件 SHA256。

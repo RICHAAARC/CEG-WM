@@ -236,6 +236,10 @@ class NeumanPearsonFusionRule:
         content_decision = content_score >= np_threshold
         rescue_band_applied = False
         geo_gate_applied = False
+        rescue_blocked_reason = None
+        rescue_anchor_evidence_level = geometry_evidence.get("anchor_evidence_level", "proxy")
+        rescue_sync_status = geometry_evidence.get("sync_status", geometry_status)
+        rescue_sync_status_normalized = "ok" if rescue_sync_status in {"ok", "synced"} else rescue_sync_status
 
         # (7) 几何辅助（rescue band）：单侧救回策略
         # 口径修正：仅允许救回 False → True，禁止翻转 True → False
@@ -243,15 +247,20 @@ class NeumanPearsonFusionRule:
         if (geometry_status == "ok" and 
             isinstance(geometry_score, (int, float)) and 
             not content_decision):  # NP 决策为 False，才考虑救回
-            
-            # 检查是否在 rescue band 范围内（下界）
-            if _is_rescue_candidate(content_score, np_threshold, rescue_band_spec):
-                # 检查几何门控条件
-                geo_gate_applied = _check_geo_gate(content_score, geometry_score, rescue_band_spec)
-                if geo_gate_applied:
-                    # 几何门控通过：救回为 True（单侧）
-                    rescue_band_applied = True
-                    content_decision = True
+
+            # 新增：几何可信度门控（proxy 几何默认不可信，除非 sync_status 已为 ok）。
+            geo_trusted = (rescue_anchor_evidence_level != "proxy") or (rescue_sync_status_normalized == "ok")
+            if not geo_trusted:
+                rescue_blocked_reason = "proxy_geometry_not_trusted"
+            else:
+                # 检查是否在 rescue band 范围内（下界）
+                if _is_rescue_candidate(content_score, np_threshold, rescue_band_spec):
+                    # 检查几何门控条件
+                    geo_gate_applied = _check_geo_gate(content_score, geometry_score, rescue_band_spec)
+                    if geo_gate_applied:
+                        # 几何门控通过：救回为 True（单侧）
+                        rescue_band_applied = True
+                        content_decision = True
 
         # (8) 计算融合规则摘要
         # 提取 target_fpr（用于摘要计算）
@@ -272,6 +281,10 @@ class NeumanPearsonFusionRule:
             "rescue_band_version": RESCUE_BAND_VERSION if rescue_band_applied else None,
             "geo_gate_applied": geo_gate_applied,
             "allow_threshold_fallback_for_tests": fallback_enabled_for_tests,
+            "rescue_blocked_reason": rescue_blocked_reason,
+            "rescue_anchor_evidence_level": rescue_anchor_evidence_level,
+            "rescue_sync_status": rescue_sync_status,
+            "rescue_sync_status_normalized": rescue_sync_status_normalized,
         }
         fusion_rule_digest = compute_fusion_rule_digest(fusion_rule_payload)
 
@@ -300,6 +313,10 @@ class NeumanPearsonFusionRule:
             "rescue_reason": "rescued_by_geo_gate" if rescue_band_applied else None,
             "rescue_band_version": RESCUE_BAND_VERSION if rescue_band_applied else None,
             "geo_gate_applied": geo_gate_applied,
+            "rescue_blocked_reason": rescue_blocked_reason,
+            "rescue_anchor_evidence_level": rescue_anchor_evidence_level,
+            "rescue_sync_status": rescue_sync_status,
+            "rescue_sync_status_normalized": rescue_sync_status_normalized,
             "fusion_rule_digest": fusion_rule_digest
         }
 

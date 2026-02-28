@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Dict, Any, Tuple, Optional, List
 
 from main.diffusion.sd3 import trajectory_tap
+from main.diffusion.sd3.hooks import register_attention_hooks, remove_attention_hooks
 from main.diffusion.sd3.callback_composer import InjectionContext
 from main.watermarking.content_chain.latent_modifier import LatentModifier
 from main.watermarking.content_chain import channel_lf, channel_hf
@@ -33,7 +34,8 @@ def run_sd3_inference(
     *,
     injection_context: Optional[InjectionContext] = None,
     injection_modifier: Optional[LatentModifier] = None,
-    capture_final_latents: bool = False
+    capture_final_latents: bool = False,
+    capture_attention: bool = False,
 ) -> Dict[str, Any]:
     """
     功能：执行 SD3 推理并返回 inference_runtime_meta。
@@ -65,6 +67,9 @@ def run_sd3_inference(
     if not isinstance(capture_final_latents, bool):
         # capture_final_latents 类型不合法，必须 fail-fast。
         raise TypeError("capture_final_latents must be bool")
+    if not isinstance(capture_attention, bool):
+        # capture_attention 类型不合法，必须 fail-fast。
+        raise TypeError("capture_attention must be bool")
 
     inference_enabled = cfg.get("inference_enabled", False)
     detect_latents_storage = {"final_latents": None} if capture_final_latents else None
@@ -93,6 +98,8 @@ def run_sd3_inference(
     trajectory_evidence: Dict[str, Any] | None = None
     injection_evidence: Dict[str, Any] | None = None
     runtime_self_attention_maps: Any = None
+    runtime_attention_source = "<absent>"
+    attention_capture_hook = None
 
     # (1) 检查 pipeline_obj 是否可用
     if pipeline_obj is None:
@@ -283,6 +290,14 @@ def run_sd3_inference(
             injection_modifier
         )
 
+        if capture_attention:
+            try:
+                attention_capture_hook = register_attention_hooks(pipeline_obj, cfg)
+                inference_runtime_meta["attention_capture_enabled"] = True
+            except Exception as attention_register_exc:
+                inference_runtime_meta["attention_capture_enabled"] = False
+                inference_runtime_meta["attention_capture_warning"] = f"register_failed: {attention_register_exc}"
+
         capture_callback = _capture_latents_callback if capture_final_latents else None
         callback_to_use = injection_callback
         if injection_callback is not None and capture_callback is not None:
@@ -293,10 +308,26 @@ def run_sd3_inference(
                 callback_kwargs: Dict[str, Any]
             ) -> Dict[str, Any]:
                 callback_kwargs = injection_callback(_pipe, step_index, timestep, callback_kwargs)
-                return capture_callback(_pipe, step_index, timestep, callback_kwargs)
+                callback_kwargs = capture_callback(_pipe, step_index, timestep, callback_kwargs)
+                return callback_kwargs
             callback_to_use = _combined_callback
         elif injection_callback is None:
             callback_to_use = capture_callback
+
+        if callback_to_use is not None and attention_capture_hook is not None:
+            original_callback = callback_to_use
+
+            def _callback_with_attention_step(
+                _pipe: Any,
+                step_index: int,
+                timestep: Any,
+                callback_kwargs: Dict[str, Any]
+            ) -> Dict[str, Any]:
+                updated = original_callback(_pipe, step_index, timestep, callback_kwargs)
+                attention_capture_hook.advance_step()
+                return updated
+
+            callback_to_use = _callback_with_attention_step
 
         if callback_to_use is not None:
             infer_kwargs["callback_on_step_end"] = callback_to_use
@@ -350,6 +381,11 @@ def run_sd3_inference(
             pipeline_obj,
             output,
         )
+        if runtime_self_attention_maps is None and attention_capture_hook is not None:
+            captured_maps = attention_capture_hook.collect()
+            if captured_maps is not None:
+                runtime_self_attention_maps = captured_maps
+                runtime_attention_source = "hook_capture"
         if runtime_self_attention_maps is None:
             inference_runtime_meta["runtime_self_attention_status"] = "absent"
             inference_runtime_meta["runtime_self_attention_source"] = "<absent>"
@@ -394,6 +430,9 @@ def run_sd3_inference(
         # 其他推理错误
         inference_status = INFERENCE_STATUS_FAILED
         inference_error = f"{type(exc).__name__}: {exc}"
+
+    if attention_capture_hook is not None:
+        remove_attention_hooks(attention_capture_hook)
 
     return {
         "inference_status": inference_status,

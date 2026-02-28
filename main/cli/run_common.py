@@ -19,6 +19,35 @@ _SEED_RULE_ID = "stable_seed_from_parts_v1"
 _REQUIRED_SEED_PART_KEYS = {"key_id", "sample_idx", "purpose"}
 
 
+def build_cli_config_migration_hint(exc: Exception) -> Optional[str]:
+    """
+    功能：为配置校验错误生成 CLI 迁移提示。
+
+    Build migration hint text for known config-validation errors.
+
+    Args:
+        exc: Raised exception from config loading or validation.
+
+    Returns:
+        Human-readable migration hint when matched; otherwise None.
+
+    Raises:
+        TypeError: If exc is invalid.
+    """
+    if not isinstance(exc, Exception):
+        # exc 类型不合法，必须 fail-fast。
+        raise TypeError("exc must be Exception")
+
+    message = str(exc)
+    if "paper_faithfulness requires watermark.lf.ecc='sparse_ldpc'" in message:
+        return (
+            "检测到 paper_faithfulness 模式下使用了 legacy int ecc。"
+            "请将 watermark.lf.ecc 设置为 \"sparse_ldpc\"；"
+            "如需继续使用 int 兼容分支，请先将 paper_faithfulness.enabled 设为 false。"
+        )
+    return None
+
+
 def build_injection_context_from_plan(
     cfg: Dict[str, Any],
     plan_payload: Dict[str, Any],

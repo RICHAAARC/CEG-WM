@@ -8,6 +8,8 @@ from __future__ import annotations
 import numpy as np
 from typing import Any, Dict, List, Optional, Tuple
 
+from main.evaluation.image_quality import compute_quality_metrics_batch
+
 
 def canonical_condition_key(family: str, params_version: str) -> str:
     """
@@ -586,6 +588,105 @@ def compute_attack_group_metrics(
     return result
 
 
+def compute_roc_curve(records: List[Dict[str, Any]]) -> Tuple[List[float], List[float], List[float]]:
+    """
+    功能：计算 ROC 曲线（多阈值扫描）。
+
+    Compute ROC curve by sweeping thresholds over all available scores.
+
+    Args:
+        records: Detection record list.
+
+    Returns:
+        Tuple of (fpr_list, tpr_list, thresholds).
+
+    Raises:
+        TypeError: If records type is invalid.
+    """
+    if not isinstance(records, list):
+        raise TypeError("records must be list")
+
+    score_label_pairs: List[Tuple[float, bool]] = []
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+        content_payload = item.get("content_evidence_payload")
+        if not isinstance(content_payload, dict):
+            continue
+        score_value = content_payload.get("score")
+        if not isinstance(score_value, (int, float)):
+            continue
+        score_float = float(score_value)
+        if not np.isfinite(score_float):
+            continue
+        label_value = extract_ground_truth_label(item)
+        if label_value is None:
+            continue
+        score_label_pairs.append((score_float, bool(label_value)))
+
+    if not score_label_pairs:
+        return [], [], []
+
+    unique_thresholds = sorted({pair[0] for pair in score_label_pairs}, reverse=True)
+    unique_thresholds.append(float("-inf"))
+
+    fpr_list: List[float] = []
+    tpr_list: List[float] = []
+    thresholds: List[float] = []
+
+    pos_total = sum(1 for _, label in score_label_pairs if label)
+    neg_total = sum(1 for _, label in score_label_pairs if not label)
+
+    for threshold in unique_thresholds:
+        true_positive = 0
+        false_positive = 0
+        for score_float, label_value in score_label_pairs:
+            pred_positive = score_float >= threshold
+            if pred_positive and label_value:
+                true_positive += 1
+            elif pred_positive and not label_value:
+                false_positive += 1
+
+        tpr_value = float(true_positive / pos_total) if pos_total > 0 else 0.0
+        fpr_value = float(false_positive / neg_total) if neg_total > 0 else 0.0
+        tpr_list.append(tpr_value)
+        fpr_list.append(fpr_value)
+        thresholds.append(float(threshold) if np.isfinite(threshold) else -1e12)
+
+    pairs = sorted(zip(fpr_list, tpr_list, thresholds), key=lambda item: item[0])
+    return [item[0] for item in pairs], [item[1] for item in pairs], [item[2] for item in pairs]
+
+
+def compute_auc(fpr_list: List[float], tpr_list: List[float]) -> float:
+    """
+    功能：使用梯形法计算 AUC。
+
+    Compute AUC value from ROC points using trapezoidal integration.
+
+    Args:
+        fpr_list: False positive rates.
+        tpr_list: True positive rates.
+
+    Returns:
+        AUC value in [0, 1].
+
+    Raises:
+        ValueError: If inputs are invalid.
+    """
+    if not isinstance(fpr_list, list) or not isinstance(tpr_list, list):
+        raise ValueError("fpr_list and tpr_list must be lists")
+    if len(fpr_list) != len(tpr_list):
+        raise ValueError("fpr_list and tpr_list must have same length")
+    if len(fpr_list) == 0:
+        raise ValueError("fpr_list and tpr_list must be non-empty")
+
+    auc_value = 0.0
+    for index in range(len(fpr_list) - 1):
+        delta_x = float(fpr_list[index + 1] - fpr_list[index])
+        auc_value += delta_x * float(tpr_list[index + 1] + tpr_list[index]) * 0.5
+    return float(max(0.0, min(1.0, auc_value)))
+
+
 def aggregate_metrics(
     records_manifest: Any,
     thresholds_artifact: Dict[str, Any],
@@ -634,8 +735,29 @@ def aggregate_metrics(
         float(threshold_value),
         attack_protocol,
     )
-    return {
+    result = {
         "metrics_overall": metrics_overall,
         "breakdown": breakdown,
         "metrics_by_attack_condition": metrics_by_attack_condition,
     }
+
+    roc_fpr, roc_tpr, roc_thresholds = compute_roc_curve(records)
+    auc_value = None
+    if roc_fpr and roc_tpr:
+        try:
+            auc_value = compute_auc(roc_fpr, roc_tpr)
+        except ValueError:
+            auc_value = None
+    result["roc_auc"] = {
+        "auc": auc_value,
+        "roc_curve_points": len(roc_fpr),
+        "fpr": roc_fpr,
+        "tpr": roc_tpr,
+        "thresholds": roc_thresholds,
+    }
+
+    image_pairs = records_manifest.get("image_pairs") if isinstance(records_manifest, dict) else None
+    if isinstance(image_pairs, (list, tuple)):
+        result["quality_metrics"] = compute_quality_metrics_batch(image_pairs)
+
+    return result

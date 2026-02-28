@@ -454,12 +454,12 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "同步质量指标（命名收敛字段）。"
-  - path: "geometry_evidence.sync_quality_metrics.quality_components_v2"
+  - path: "geometry_evidence.sync_quality_metrics.quality_components"
     layer: "diagnostic"
     type: "json_dict"
     required: false
     missing_semantics: "absent_ok"
-    description: "同步质量可解释子项（v2，含 components/weights/constraints，非主证据）。"
+    description: "同步质量可解释子项（含 components/weights/constraints，非主证据）。"
   - path: "geometry_evidence.sync_quality_semantics"
     layer: "diagnostic"
     type: "json_dict"
@@ -656,12 +656,12 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "HF 实现绑定语义（impl_selected/adapter_path/fallback_used/fallback_reason）。"
-  - path: "impl_set_capabilities_v2_digest"
+  - path: "impl_set_capabilities_extended_digest"
     layer: "anchor"
     type: "digest_hex64"
     required: false
     missing_semantics: "absent_ok"
-    description: "扩展实现能力摘要（v2，覆盖 HF/LF 域，保留 v1 并行口径）。"
+    description: "扩展实现能力摘要（推荐字段，覆盖 HF/LF 域）。"
   # ==============================================================
   # Paper Faithfulness 对齐证据字段（append-only v1.0）
   # ==============================================================
@@ -930,3 +930,94 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "攻击执行随机种子（用于可复算绑定）。"
+
+  - path: "content_evidence.mask_stats.model_artifact_anchor.weights_sha256"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "显著性模型权重摘要（路径脱敏锚点）。"
+
+  - path: "geometry_evidence.attention_capture_source"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "attention maps 的采集来源（hook_capture/output_probe 等）。"
+
+  - path: "content_evidence.bp_converged"
+    layer: "diagnostic"
+    type: "boolean_flag"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "LDPC BP 解码是否收敛。"
+
+  - path: "content_evidence.bp_iteration_count"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "LDPC BP 解码迭代次数。"
+
+  - path: "decision.rescue_blocked_reason"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "rescue 候选被拦截时的主原因。"
+
+  - path: "decision.rescue_anchor_evidence_level"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "rescue 门控读取的锚点证据等级。"
+
+  - path: "decision.rescue_sync_status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "rescue 门控读取的原始 sync 状态。"
+
+  - path: "decision.rescue_sync_status_normalized"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "rescue 门控读取的归一化 sync 状态。"
+
+  - path: "geometry_evidence.sync_inject_status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "embed 侧同步模板注入状态。"
+
+  - path: "geometry_evidence.sync_inject_strength"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "embed 侧同步模板注入强度。"
+
+  - path: "geometry_evidence.template_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "embed 侧同步模板摘要。"
+
+  - path: "quality_metrics.mean_psnr"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "图像质量均值指标：PSNR。"
+
+  - path: "quality_metrics.mean_ssim"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "图像质量均值指标：SSIM。"

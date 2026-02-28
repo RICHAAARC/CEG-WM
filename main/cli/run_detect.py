@@ -58,7 +58,8 @@ from main.cli.run_common import (
     build_seed_audit,
     build_determinism_controls,
     normalize_nondeterminism_notes,
-    build_injection_context_from_plan
+    build_injection_context_from_plan,
+    build_cli_config_migration_hint
 )
 
 
@@ -445,9 +446,9 @@ def run_detect(
         run_meta["impl_identity"] = impl_identity.as_dict()
         run_meta["impl_identity_digest"] = runtime_resolver.compute_impl_identity_digest(impl_identity)
         run_meta["impl_set_capabilities_digest"] = impl_set_capabilities_digest
-        impl_set_capabilities_v2_digest = cfg.get("impl_set_capabilities_v2_digest")
-        if isinstance(impl_set_capabilities_v2_digest, str) and impl_set_capabilities_v2_digest:
-            run_meta["impl_set_capabilities_v2_digest"] = impl_set_capabilities_v2_digest
+        impl_set_capabilities_extended_digest = cfg.get("impl_set_capabilities_extended_digest")
+        if isinstance(impl_set_capabilities_extended_digest, str) and impl_set_capabilities_extended_digest:
+            run_meta["impl_set_capabilities_extended_digest"] = impl_set_capabilities_extended_digest
 
         # 预先计算 content 与 subspace 计划，用于注入上下文。
         # 这里必须使用 embed-mode 提取 mask_digest，避免 detect-mode 在无 detector_inputs 时返回 absent。
@@ -716,8 +717,8 @@ def run_detect(
                 record["override_applied"] = override_applied
             # 写入 impl_set_capabilities_digest。
             record["impl_set_capabilities_digest"] = impl_set_capabilities_digest
-            if isinstance(impl_set_capabilities_v2_digest, str) and impl_set_capabilities_v2_digest:
-                record["impl_set_capabilities_v2_digest"] = impl_set_capabilities_v2_digest
+            if isinstance(impl_set_capabilities_extended_digest, str) and impl_set_capabilities_extended_digest:
+                record["impl_set_capabilities_extended_digest"] = impl_set_capabilities_extended_digest
 
             # 将 inference 相关字段写入 record（append-only）
             record["infer_trace"] = run_meta.get("infer_trace")
@@ -849,6 +850,9 @@ def main():
         sys.exit(0)
     except Exception as e:
         print(f"[Detect] [ERROR] Error: {e}", file=sys.stderr)
+        hint = build_cli_config_migration_hint(e)
+        if isinstance(hint, str) and hint:
+            print(f"[Detect] [HINT] {hint}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         sys.exit(1)

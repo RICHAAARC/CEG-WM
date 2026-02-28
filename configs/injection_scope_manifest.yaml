@@ -65,6 +65,7 @@ digest_scope:
     - "watermark.mask.resolution_binding"
     - "watermark.mask.postprocess.enabled"
     - "watermark.mask.postprocess.kernel"
+    - "watermark.mask.semantic_model_path"
 
     - "watermark.subspace.rank"
     - "watermark.subspace.grid_rows"
@@ -75,6 +76,7 @@ digest_scope:
 
     - "watermark.lf.codebook_id"
     - "watermark.lf.ecc"
+    - "watermark.lf.ecc_sparsity"
     - "watermark.lf.strength"
     - "watermark.lf.delta"
     - "watermark.lf.block_length"
@@ -87,6 +89,7 @@ digest_scope:
     - "watermark.hf.sampling_stride"
     - "watermark.hf.energy_floor"
     - "watermark.hf.energy_cap"
+    - "embed.geometry.sync_strength"
 
 versioning_policy:
 

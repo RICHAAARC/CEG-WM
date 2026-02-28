@@ -46,7 +46,8 @@ from main.cli.run_common import (
     format_fact_sources_mismatch,
     build_seed_audit,
     build_determinism_controls,
-    normalize_nondeterminism_notes
+    normalize_nondeterminism_notes,
+    build_cli_config_migration_hint
 )
 
 
@@ -234,9 +235,9 @@ def run_calibrate(output_dir: str, config_path: str, overrides: list[str] | None
             run_meta["impl_identity"] = impl_identity.as_dict()
             run_meta["impl_identity_digest"] = runtime_resolver.compute_impl_identity_digest(impl_identity)
             run_meta["impl_set_capabilities_digest"] = impl_set_capabilities_digest
-            impl_set_capabilities_v2_digest = cfg.get("impl_set_capabilities_v2_digest")
-            if isinstance(impl_set_capabilities_v2_digest, str) and impl_set_capabilities_v2_digest:
-                run_meta["impl_set_capabilities_v2_digest"] = impl_set_capabilities_v2_digest
+            impl_set_capabilities_extended_digest = cfg.get("impl_set_capabilities_extended_digest")
+            if isinstance(impl_set_capabilities_extended_digest, str) and impl_set_capabilities_extended_digest:
+                run_meta["impl_set_capabilities_extended_digest"] = impl_set_capabilities_extended_digest
 
             # 构造 calibration record。
             print("[Calibrate] Generating calibration record...")
@@ -248,8 +249,8 @@ def run_calibrate(output_dir: str, config_path: str, overrides: list[str] | None
                 record["override_applied"] = override_applied
             # 写入 impl_set_capabilities_digest。
             record["impl_set_capabilities_digest"] = impl_set_capabilities_digest
-            if isinstance(impl_set_capabilities_v2_digest, str) and impl_set_capabilities_v2_digest:
-                record["impl_set_capabilities_v2_digest"] = impl_set_capabilities_v2_digest
+            if isinstance(impl_set_capabilities_extended_digest, str) and impl_set_capabilities_extended_digest:
+                record["impl_set_capabilities_extended_digest"] = impl_set_capabilities_extended_digest
 
             thresholds_artifact = record.get("thresholds_artifact")
             threshold_metadata_artifact = record.get("threshold_metadata_artifact")
@@ -371,6 +372,9 @@ def main():
         sys.exit(0)
     except Exception as e:
         print(f"[Calibrate] [ERROR] Error: {e}", file=sys.stderr)
+        hint = build_cli_config_migration_hint(e)
+        if isinstance(hint, str) and hint:
+            print(f"[Calibrate] [HINT] {hint}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         sys.exit(1)

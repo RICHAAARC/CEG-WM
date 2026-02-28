@@ -172,6 +172,103 @@ class LatentSyncTemplate:
 
         return {"valid": True, "status": "ok", "failure_reason": None}
 
+    def embed_inject(self, latents: Any, cfg: Dict[str, Any], seed: int) -> tuple[Any, Dict[str, Any]]:
+        """
+        功能：在 embed 侧注入 FFT 同步模板。
+
+        Inject deterministic sync template in latent frequency domain.
+
+        Args:
+            latents: Input latent payload (numpy or tensor-like).
+            cfg: Configuration mapping.
+            seed: Deterministic seed.
+
+        Returns:
+            Tuple of (modified_latents, inject_trace).
+
+        Raises:
+            TypeError: If inputs are invalid.
+        """
+        if not isinstance(cfg, dict):
+            raise TypeError("cfg must be dict")
+        if not isinstance(seed, int):
+            raise TypeError("seed must be int")
+
+        if not resolve_enable_latent_sync(cfg):
+            return latents, {
+                "status": "absent",
+                "sync_inject_status": "absent",
+                "sync_inject_reason": "embed_sync_disabled",
+            }
+
+        latents_np = _to_numpy_latents(latents)
+        sync_strength = self._resolve_sync_strength(cfg)
+        template = self._build_sync_template(latents_np.shape, cfg, seed)
+
+        modified = latents_np.copy().astype(np.float32)
+        for batch_index in range(modified.shape[0]):
+            for channel_index in range(modified.shape[1]):
+                fft_map = np.fft.fft2(modified[batch_index, channel_index])
+                fft_map = fft_map + template * sync_strength
+                modified[batch_index, channel_index] = np.real(np.fft.ifft2(fft_map)).astype(np.float32)
+
+        template_digest = digests.canonical_sha256({
+            "shape": list(template.shape),
+            "seed": int(seed),
+            "fft_bins": self._resolve_fft_bins(cfg),
+        })
+
+        inject_trace = {
+            "status": "ok",
+            "sync_inject_status": "ok",
+            "sync_inject_strength": float(sync_strength),
+            "template_digest": template_digest,
+            "sync_config_digest": digests.canonical_sha256(self._build_sync_config_domain(cfg)),
+        }
+
+        if isinstance(latents, np.ndarray):
+            return modified, inject_trace
+        if hasattr(latents, "detach") and hasattr(latents, "device"):
+            try:
+                import torch
+
+                out_tensor = torch.from_numpy(modified).to(device=latents.device)
+                return out_tensor.type_as(latents), inject_trace
+            except Exception:
+                return modified, inject_trace
+        return modified, inject_trace
+
+    def _build_sync_template(self, shape: tuple[int, ...], cfg: Dict[str, Any], seed: int) -> np.ndarray:
+        """
+        功能：构建确定性 FFT 同步模板。
+
+        Build deterministic conjugate-symmetric FFT template.
+
+        Args:
+            shape: Latent shape.
+            cfg: Configuration mapping.
+            seed: Deterministic seed.
+
+        Returns:
+            Complex FFT template.
+        """
+        if len(shape) < 4:
+            raise ValueError("shape must be rank-4")
+
+        height = int(shape[-2])
+        width = int(shape[-1])
+        rng = np.random.RandomState(seed)
+        fft_bins = self._resolve_fft_bins(cfg)
+        template = np.zeros((height, width), dtype=np.complex64)
+        for _ in range(fft_bins):
+            row = int(rng.randint(1, max(2, height // 2)))
+            col = int(rng.randint(1, max(2, width // 2)))
+            phase = float(rng.uniform(0.0, 2.0 * np.pi))
+            value = np.exp(1j * phase)
+            template[row, col] = value
+            template[-row % height, -col % width] = np.conj(value)
+        return template
+
     def extract_sync(self, pipeline: Any, latents: Any, *, cfg: Dict[str, Any], rng: Any) -> SyncResult:
         """
         功能：提取同步摘要与质量指标。
@@ -190,7 +287,7 @@ class LatentSyncTemplate:
         if not isinstance(cfg, dict):
             # cfg 类型不合法，必须 fail-fast。
             raise TypeError("cfg must be dict")
-        _ = rng
+        seed_value = self._resolve_sync_seed(cfg, rng)
 
         validation = self.validate_sync_inputs(pipeline, latents, cfg)
         if not bool(validation.get("valid", False)):
@@ -219,6 +316,16 @@ class LatentSyncTemplate:
             resolution_binding = self.build_resolution_binding(transformer, latents_np, cfg)
             sync_summary = self._build_sync_summary(latents_np, cfg)
             sync_quality_metrics = self.compute_sync_quality_metrics(sync_summary)
+            template_match_metrics = self._compute_template_match_metrics(latents_np, cfg, seed_value)
+            sync_quality_metrics["template_match_score"] = template_match_metrics["template_match_score"]
+            sync_quality_metrics["template_match_p95"] = template_match_metrics["template_match_p95"]
+            sync_quality_metrics["template_match_detected"] = template_match_metrics["template_match_detected"]
+            sync_quality_metrics["template_match_threshold"] = template_match_metrics["template_match_threshold"]
+            sync_quality_metrics["template_seed"] = template_match_metrics["template_seed"]
+            sync_quality_metrics["template_digest"] = template_match_metrics["template_digest"]
+            existing_confidence = float(sync_quality_metrics.get("match_confidence", 0.0))
+            template_confidence = float(min(1.0, template_match_metrics["template_match_score"] * 6.0))
+            sync_quality_metrics["match_confidence"] = round(max(existing_confidence, template_confidence), 6)
             sync_config_digest = digests.canonical_sha256(self._build_sync_config_domain(cfg))
 
             sync_payload = {
@@ -227,6 +334,8 @@ class LatentSyncTemplate:
                 "sync_config_digest": sync_config_digest,
                 "resolution_binding": resolution_binding,
                 "impl_identity": self._impl_identity(),
+                "template_digest": template_match_metrics["template_digest"],
+                "template_match_score": template_match_metrics["template_match_score"],
             }
             sync_digest = self.compute_sync_digest(sync_payload)
             return SyncResult(
@@ -247,6 +356,112 @@ class LatentSyncTemplate:
                 resolution_binding=None,
                 failure_reason="latent_sync_extraction_failed",
             )
+
+    def _resolve_sync_seed(self, cfg: Dict[str, Any], rng: Any) -> int:
+        """
+        功能：解析同步模板重建种子。
+
+        Resolve deterministic seed used for sync template reconstruction.
+
+        Args:
+            cfg: Configuration mapping.
+            rng: Optional runtime rng handle.
+
+        Returns:
+            Deterministic integer seed.
+        """
+        if not isinstance(cfg, dict):
+            raise TypeError("cfg must be dict")
+
+        seed_value = cfg.get("seed")
+        if isinstance(seed_value, int):
+            return int(seed_value)
+
+        if isinstance(rng, int):
+            return int(rng)
+        if hasattr(rng, "randint") and callable(getattr(rng, "randint")):
+            try:
+                sampled = rng.randint(0, 2 ** 31 - 1)
+                if isinstance(sampled, int):
+                    return int(sampled)
+            except Exception:
+                pass
+        return 42
+
+    def _compute_template_match_metrics(self, latents_np: np.ndarray, cfg: Dict[str, Any], seed: int) -> Dict[str, Any]:
+        """
+        功能：计算注入模板与运行期频谱的相关性匹配指标。
+
+        Compute correlation-based match metrics between reconstructed template and runtime FFT maps.
+
+        Args:
+            latents_np: Runtime latent array in shape [B, C, H, W].
+            cfg: Configuration mapping.
+            seed: Deterministic seed used for template reconstruction.
+
+        Returns:
+            Mapping with template match metrics and digest.
+        """
+        if not isinstance(latents_np, np.ndarray) or latents_np.ndim != 4:
+            raise ValueError("latents_np must be rank-4 numpy array")
+        if not isinstance(cfg, dict):
+            raise TypeError("cfg must be dict")
+        if not isinstance(seed, int):
+            raise TypeError("seed must be int")
+
+        template = self._build_sync_template(latents_np.shape, cfg, seed)
+        template_norm = float(np.linalg.norm(template))
+        if template_norm <= 1e-12:
+            template_digest = digests.canonical_sha256(
+                {
+                    "shape": list(template.shape),
+                    "seed": int(seed),
+                    "fft_bins": self._resolve_fft_bins(cfg),
+                }
+            )
+            return {
+                "template_match_score": 0.0,
+                "template_match_p95": 0.0,
+                "template_match_detected": False,
+                "template_match_threshold": 0.0,
+                "template_seed": int(seed),
+                "template_digest": template_digest,
+            }
+
+        match_scores = []
+        for batch_index in range(latents_np.shape[0]):
+            for channel_index in range(latents_np.shape[1]):
+                fft_map = np.fft.fft2(latents_np[batch_index, channel_index].astype(np.float32))
+                fft_norm = float(np.linalg.norm(fft_map))
+                if fft_norm <= 1e-12:
+                    continue
+                score = float(np.abs(np.vdot(template, fft_map)) / (template_norm * fft_norm + 1e-12))
+                match_scores.append(score)
+
+        if match_scores:
+            match_score = float(np.mean(match_scores))
+            match_p95 = float(np.percentile(np.asarray(match_scores, dtype=np.float64), 95.0))
+        else:
+            match_score = 0.0
+            match_p95 = 0.0
+
+        threshold = float(max(0.002, min(0.08, self._resolve_sync_strength(cfg) * 0.5 + 0.002)))
+        template_digest = digests.canonical_sha256(
+            {
+                "shape": list(template.shape),
+                "seed": int(seed),
+                "fft_bins": self._resolve_fft_bins(cfg),
+            }
+        )
+
+        return {
+            "template_match_score": round(match_score, 8),
+            "template_match_p95": round(match_p95, 8),
+            "template_match_detected": bool(match_score >= threshold),
+            "template_match_threshold": round(threshold, 8),
+            "template_seed": int(seed),
+            "template_digest": template_digest,
+        }
 
     def compute_sync_digest(self, payload: Dict[str, Any]) -> str:
         """
@@ -474,6 +689,14 @@ class LatentSyncTemplate:
             return 16
         return max(4, min(32, value))
 
+    def _resolve_sync_strength(self, cfg: Dict[str, Any]) -> float:
+        embed_cfg = cfg.get("embed") if isinstance(cfg.get("embed"), dict) else {}
+        geometry_cfg = embed_cfg.get("geometry") if isinstance(embed_cfg.get("geometry"), dict) else {}
+        value = geometry_cfg.get("sync_strength", 0.01)
+        if not isinstance(value, (int, float)):
+            return 0.01
+        return float(max(0.0, min(0.2, value)))
+
     def _is_sd3_transformer_pipeline(self, pipeline: Any, cfg: Dict[str, Any]) -> bool:
         """
         功能：判断 pipeline 是否符合 SD3 transformer 要求。
@@ -695,7 +918,7 @@ class GeometryLatentSyncSD3V2:
                 "geometry_failure_reason": "relation_digest_missing_for_v2",
                 "sync_quality_semantics": {
                     "score_type": "interpretable_geometry_consistency",
-                    "score_version": "latent_sync_geometry_consistency_v2",
+                    "score_version": "latent_sync_geometry_consistency",
                     "trusted_as_primary_geometry_evidence": False,
                     "evidence_level": "quantitative_secondary",
                 },
@@ -709,7 +932,7 @@ class GeometryLatentSyncSD3V2:
                 "geometry_failure_reason": "relation_digest_invalid",
                 "sync_quality_semantics": {
                     "score_type": "interpretable_geometry_consistency",
-                    "score_version": "latent_sync_geometry_consistency_v2",
+                    "score_version": "latent_sync_geometry_consistency",
                     "trusted_as_primary_geometry_evidence": False,
                     "evidence_level": "quantitative_secondary",
                 },
@@ -724,7 +947,7 @@ class GeometryLatentSyncSD3V2:
                 "geometry_absent_reason": "latents_missing",
                 "sync_quality_semantics": {
                     "score_type": "interpretable_geometry_consistency",
-                    "score_version": "latent_sync_geometry_consistency_v2",
+                    "score_version": "latent_sync_geometry_consistency",
                     "trusted_as_primary_geometry_evidence": False,
                     "evidence_level": "quantitative_secondary",
                 },
@@ -761,7 +984,7 @@ class GeometryLatentSyncSD3V2:
                 "sync_quality_metrics": sync_quality_metrics,
                 "sync_quality_semantics": {
                     "score_type": "interpretable_geometry_consistency",
-                    "score_version": "latent_sync_geometry_consistency_v2",
+                    "score_version": "latent_sync_geometry_consistency",
                     "trusted_as_primary_geometry_evidence": False,
                     "evidence_level": "quantitative_secondary",
                 },
@@ -787,7 +1010,7 @@ class GeometryLatentSyncSD3V2:
             "sync_quality_metrics": sync_quality_metrics,
             "sync_quality_semantics": {
                 "score_type": "interpretable_geometry_consistency",
-                "score_version": "latent_sync_geometry_consistency_v2",
+                "score_version": "latent_sync_geometry_consistency",
                 "trusted_as_primary_geometry_evidence": False,
                 "evidence_level": "quantitative_secondary",
             },
@@ -853,9 +1076,9 @@ class GeometryLatentSyncSD3V2:
             "quality_score": float(round(quality_score, 6)),
             "uncertainty": float(round(uncertainty, 6)),
             "relation_digest_bound": relation_digest,
-            "quality_method": "interpretable_latent_spectrum_relation_consistency_v2",
-            "quality_components_v2": {
-                "version": "latent_sync_quality_components_v2",
+            "quality_method": "interpretable_latent_spectrum_relation_consistency",
+            "quality_components": {
+                "version": "latent_sync_quality_components",
                 "contrast_component": float(round(min(1.0, contrast_ratio / 2.0), 6)),
                 "spectral_component": float(round(min(1.0, spectral_peak_ratio / 3.0), 6)),
                 "relation_component": float(round(relation_alignment, 6)),

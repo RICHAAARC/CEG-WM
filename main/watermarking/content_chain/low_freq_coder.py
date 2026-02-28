@@ -14,13 +14,14 @@ Module type: Core innovation module
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
 from main.core import digests
 
 from .interfaces import ContentEvidence
+from .ldpc_codec import build_ldpc_spec, decode_soft_llr, encode_message_bits
 
 
 def erf(x: float) -> float:
@@ -133,6 +134,30 @@ ALLOWED_LF_CODER_FAILURE_REASONS = {
 }
 
 
+def _normalize_lf_ecc_mode(ecc_value: Any) -> Tuple[str, Optional[int]]:
+    """
+    功能：归一化 LF ECC 双语义输入。
+
+    Normalize LF ECC dual semantics for compatibility period.
+
+    Args:
+        ecc_value: ECC value from config, supports int or "sparse_ldpc".
+
+    Returns:
+        Tuple of (ecc_mode, legacy_redundancy).
+
+    Raises:
+        ValueError: If ecc_value is invalid.
+    """
+    if isinstance(ecc_value, str):
+        if ecc_value == "sparse_ldpc":
+            return "sparse_ldpc", None
+        raise ValueError(f"ecc string must be 'sparse_ldpc', got {ecc_value}")
+    if isinstance(ecc_value, int) and 2 <= ecc_value <= 8:
+        return "legacy_int", int(ecc_value)
+    raise ValueError(f"ecc must be int in [2, 8] or 'sparse_ldpc', got {ecc_value}")
+
+
 class LowFreqCoder:
     """
     功能：低频水印编码器，在 LF 子空间施加隐蔽编码。
@@ -240,8 +265,7 @@ class LowFreqCoder:
         variance = lf_cfg.get("variance", 1.5)
 
         # 参数验证（与 extract() 保持一致）。
-        if not isinstance(ecc, int) or ecc < 2 or ecc > 8:
-            raise ValueError(f"ecc must be int in [2, 8], got {ecc}")
+        ecc_mode, _legacy_redundancy = _normalize_lf_ecc_mode(ecc)
         if not isinstance(strength, (int, float)) or strength <= 0 or strength > 1:
             raise ValueError(f"strength must be float in (0, 1], got {strength}")
         if not isinstance(delta, (int, float)) or delta <= 0:
@@ -268,7 +292,7 @@ class LowFreqCoder:
 
         # 派生确定性种子（绑定 plan_digest + 所有 LF 参数）。
         import hashlib
-        param_seed_input = f"{plan_digest}:{codebook_id}:{ecc}:{strength}:{delta}:{block_length}:{variance}"
+        param_seed_input = f"{plan_digest}:{codebook_id}:{ecc_mode}:{ecc}:{strength}:{delta}:{block_length}:{variance}"
         param_seed = hashlib.sha256(param_seed_input.encode()).hexdigest()
         seed_int = int(param_seed[:16], 16) % 100000
         seed_digest = hashlib.sha256(str(seed_int).encode()).hexdigest()[:16]
@@ -313,6 +337,7 @@ class LowFreqCoder:
         embedding_trace = {
             "codebook_id": codebook_id,
             "ecc": ecc,
+            "ecc_mode": ecc_mode,
             "strength": strength,
             "delta": delta,
             "block_length": block_length,
@@ -555,9 +580,7 @@ class LowFreqCoder:
             variance = lf_cfg.get("variance", 1.5)  # 伪高斯方差（pseudogaussian variance）
 
             # 验证参数范围。
-            if not isinstance(ecc, int) or ecc < 2 or ecc > 8:
-                # ecc 参数不合法，必须 fail-fast。
-                raise ValueError(f"ecc must be int in [2, 8], got {ecc}")
+            ecc_mode, _legacy_redundancy = _normalize_lf_ecc_mode(ecc)
             if not isinstance(strength, (int, float)) or strength <= 0 or strength > 1:
                 # strength 参数不合法，必须 fail-fast。
                 raise ValueError(f"strength must be float in (0, 1], got {strength}")
@@ -602,7 +625,7 @@ class LowFreqCoder:
                 # (2a) 派生种子：绑定所有影响编码的参数。
                 # 设计：plan_digest 已包含 delta/block_length/strength/ecc（来自 plan_digest_include_paths），
                 #       此处再绑定 codebook_id 确保码字唯一性。
-                param_seed_input = f"{plan_digest}:{codebook_id}:{ecc}:{strength}:{delta}:{block_length}"
+                param_seed_input = f"{plan_digest}:{codebook_id}:{ecc_mode}:{ecc}:{strength}:{delta}:{block_length}"
                 param_seed = hashlib.sha256(param_seed_input.encode()).hexdigest()
                 seed_int = int(param_seed[:16], 16) % 100000
                 
@@ -1182,10 +1205,17 @@ class LFCoderPRC:
         import random
         rng = random.Random(seed)
         message_bits = [1 if rng.random() < 0.5 else -1 for _ in range(message_length)]
+        ldpc_spec = build_ldpc_spec(
+            message_length=message_length,
+            ecc_sparsity=ecc_sparsity,
+            seed_key=f"{plan_digest}:{message_length}:{ecc_sparsity}:embed",
+        )
+        code_bits = encode_message_bits(message_bits, ldpc_spec)
+        block_length = int(ldpc_spec.get("n", len(code_bits)))
 
         # Latent sign flipping encoding
         flat_latents = _flatten_to_list(latent_features)
-        if len(flat_latents) < message_length:
+        if len(flat_latents) < block_length:
             return {
                 "status": "failed",
                 "latent_features_embedded": latent_features,
@@ -1195,21 +1225,17 @@ class LFCoderPRC:
 
         # Apply sign flipping to latents
         embedded_latents = list(flat_latents)
-        for i in range(message_length):
-            if i < len(embedded_latents):
-                # Sign flip: latent *= message_bit * variance_scaling
-                scale = variance * message_bits[i]
-                embedded_latents[i] = embedded_latents[i] * scale if embedded_latents[i] != 0 else scale
+        for i in range(block_length):
+            # Sign flip: latent *= code_bit * variance_scaling
+            scale = variance * code_bits[i]
+            embedded_latents[i] = embedded_latents[i] * scale if embedded_latents[i] != 0 else scale
 
         # Build trace summary
-        parity_check_digest = digests.canonical_sha256({
-            "message_length": message_length,
-            "ecc_sparsity": ecc_sparsity,
-            "coding_mode": coding_mode,
-        })
+        parity_check_digest = ldpc_spec["parity_check_digest"]
         llr_summary_digest = digests.canonical_sha256({
             "variance": variance,
             "message_bits_digest": digests.canonical_sha256({"message_bits": message_bits}),
+            "code_bits_digest": digests.canonical_sha256({"code_bits": code_bits}),
         })
         trace_summary = {
             "impl_id": self.impl_id,
@@ -1217,9 +1243,11 @@ class LFCoderPRC:
             "coding_mode": coding_mode,
             "variance": variance,
             "message_length": message_length,
+            "block_length": block_length,
             "ecc_sparsity": ecc_sparsity,
             "parity_check_digest": parity_check_digest,
             "llr_summary_digest": llr_summary_digest,
+            "ldpc_seed_digest": ldpc_spec["seed_digest"],
             "plan_digest": plan_digest,
             "cfg_digest": cfg_digest,
             "mode": "embed",
@@ -1283,11 +1311,19 @@ class LFCoderPRC:
 
         variance = float(lf_cfg.get("variance", 1.5))
         message_length = int(lf_cfg.get("message_length", 64))
+        ecc_sparsity = int(lf_cfg.get("ecc_sparsity", 3))
         bp_iterations = int(lf_cfg.get("bp_iterations", 10))
 
         # Extract flattened latents
         flat_latents = _flatten_to_list(latent_features)
-        if len(flat_latents) < message_length:
+        ldpc_spec = build_ldpc_spec(
+            message_length=message_length,
+            ecc_sparsity=ecc_sparsity,
+            seed_key=f"{plan_digest}:{message_length}:{ecc_sparsity}:embed",
+        )
+        block_length = int(ldpc_spec.get("n", message_length))
+
+        if len(flat_latents) < block_length:
             return None, {
                 "status": "failed",
                 "lf_failure_reason": "lf_insufficient_latent_dimension",
@@ -1295,43 +1331,43 @@ class LFCoderPRC:
             }
 
         # Recover posteriors using erf-based recovery
-        posteriors = recover_posteriors_erf(flat_latents[:message_length], variance)
+        posteriors = recover_posteriors_erf(flat_latents[:block_length], variance)
+        llr_values = [float((2.0 * p) / max(variance, 1e-8)) for p in posteriors]
 
-        # Simple belief propagation (iterative refinement)
-        beliefs = list(posteriors)
-        for iteration in range(bp_iterations):
-            # Update beliefs based on parity constraints
-            new_beliefs = []
-            for i in range(len(beliefs)):
-                # Simple BP update: average neighboring beliefs
-                neighbors = []
-                if i > 0:
-                    neighbors.append(beliefs[i - 1])
-                if i < len(beliefs) - 1:
-                    neighbors.append(beliefs[i + 1])
-                if neighbors:
-                    neighbor_mean = sum(neighbors) / len(neighbors)
-                    new_beliefs.append(0.7 * beliefs[i] + 0.3 * neighbor_mean)
-                else:
-                    new_beliefs.append(beliefs[i])
-            beliefs = new_beliefs
+        decode_result = decode_soft_llr(llr_values, ldpc_spec, bp_iterations)
+        decoded_bits = decode_result["decoded_bits"]
+        bp_converged = bool(decode_result["bp_converged"])
+        bp_iteration_count = int(decode_result["bp_iteration_count"])
 
-        # Compute LF score from final beliefs
-        lf_score = float(sum(beliefs) / len(beliefs)) if beliefs else 0.0
-        # Normalize to [0, 1]
-        lf_score = (lf_score + 1.0) / 2.0
+        seed = int(digests.canonical_sha256({"plan_digest": plan_digest, "tag": "lf_message"})[:16], 16)
+        import random
+        rng = random.Random(seed)
+        expected_bits = [1 if rng.random() < 0.5 else -1 for _ in range(message_length)]
+
+        agreement = 0
+        for exp_bit, dec_bit in zip(expected_bits, decoded_bits[:message_length]):
+            if exp_bit == dec_bit:
+                agreement += 1
+
+        # Score is defined as expected/decoded bit agreement ratio in [0, 1].
+        lf_score = float(agreement) / float(message_length) if message_length > 0 else 0.0
 
         # Build trace
         llr_summary_digest = digests.canonical_sha256({
             "variance": variance,
             "posteriors_digest": digests.canonical_sha256({"posteriors": posteriors[:10]}),
+            "decoded_bits_digest": digests.canonical_sha256({"decoded_bits": decoded_bits[:16]}),
         })
         trace = {
             "status": "ok",
             "lf_score": lf_score,
             "bp_iterations": bp_iterations,
+            "bp_converged": bp_converged,
+            "bp_iteration_count": bp_iteration_count,
+            "block_length": block_length,
+            "syndrome_weight": int(decode_result["syndrome_weight"]),
             "llr_summary_digest": llr_summary_digest,
-            "parity_check_digest": digests.canonical_sha256({"message_length": message_length}),
+            "parity_check_digest": ldpc_spec["parity_check_digest"],
             "impl_id": self.impl_id,
             "impl_version": self.impl_version,
             "plan_digest": plan_digest,

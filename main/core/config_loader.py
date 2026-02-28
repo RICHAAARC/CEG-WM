@@ -166,6 +166,43 @@ def normalize_ablation_flags(cfg: Dict[str, Any]) -> None:
     ablation["normalized"] = normalized
 
 
+def _validate_paper_lf_ecc_gate(cfg: Dict[str, Any]) -> None:
+    """
+    功能：在配置加载阶段执行 paper 模式 LF ECC 门禁。 
+
+    Enforce LF ECC gate at config loading stage for paper faithfulness mode.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        None.
+
+    Raises:
+        TypeError: If cfg structure is invalid.
+        ValueError: If paper mode is enabled while LF ECC uses legacy int branch.
+    """
+    if not isinstance(cfg, dict):
+        # cfg 类型不合法，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+
+    paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
+    paper_enabled = bool(paper_cfg.get("enabled", False)) if isinstance(paper_cfg, dict) else False
+    if not paper_enabled:
+        return
+
+    watermark_cfg = cfg.get("watermark") if isinstance(cfg.get("watermark"), dict) else {}
+    lf_cfg = watermark_cfg.get("lf") if isinstance(watermark_cfg.get("lf"), dict) else {}
+    ecc_value = lf_cfg.get("ecc", "sparse_ldpc")
+
+    if isinstance(ecc_value, int):
+        # paper 模式禁止 legacy int ecc，必须使用 sparse_ldpc 单一路径。
+        raise ValueError(
+            "paper_faithfulness requires watermark.lf.ecc='sparse_ldpc'; "
+            f"legacy int ecc is not allowed (got {ecc_value})"
+        )
+
+
 def load_frozen_contracts_interpretation(
     *,
     allow_non_authoritative: bool = False
@@ -612,6 +649,9 @@ def load_and_validate_config(
     # Ablation 归一化（在 override 应用之后、cfg_digest 计算之前）。
     # 必须在 policy_path 验证之前完成，以便 ablation.normalized 纳入 cfg_digest。
     normalize_ablation_flags(cfg)
+
+    # Paper 模式 LF ECC 门禁前移到配置阶段，避免运行时才发现分支不兼容。
+    _validate_paper_lf_ecc_gate(cfg)
 
     policy_path = cfg.get("policy_path")
     if not isinstance(policy_path, str) or not policy_path:

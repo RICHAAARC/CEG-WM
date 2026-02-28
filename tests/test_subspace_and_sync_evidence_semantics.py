@@ -99,16 +99,16 @@ def test_sync_quality_semantics_contains_quantitative_secondary_evidence_level()
     semantics = cast(Dict[str, Any], semantics)
     assert semantics.get("score_type") == "interpretable_geometry_consistency"
     assert semantics.get("trusted_as_primary_geometry_evidence") is False
-    assert semantics.get("score_version") == "latent_sync_geometry_consistency_v2"
+    assert semantics.get("score_version") == "latent_sync_geometry_consistency"
     assert semantics.get("evidence_level") == "quantitative_secondary"
 
     metrics = output.get("sync_quality_metrics")
     if isinstance(metrics, dict):
         metrics = cast(Dict[str, Any], metrics)
-        components = metrics.get("quality_components_v2")
+        components = metrics.get("quality_components")
         assert isinstance(components, dict)
         components = cast(Dict[str, Any], components)
-        assert components.get("version") == "latent_sync_quality_components_v2"
+        assert components.get("version") == "latent_sync_quality_components"
 
 
 def test_geometry_runtime_inputs_disable_latent_proxy_under_paper_mode() -> None:

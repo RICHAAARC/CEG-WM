@@ -17,21 +17,21 @@ def _load_cfg(path: str) -> dict:
 def test_runtime_resolver_sets_capabilities_v2_digest_for_default_profile() -> None:
     cfg = _load_cfg("configs/default.yaml")
     _, _, digest_v1 = runtime_resolver.build_runtime_impl_set_from_cfg(cfg)
-    digest_v2 = cfg.get("impl_set_capabilities_v2_digest")
+    digest_extended = cfg.get("impl_set_capabilities_extended_digest")
 
     assert isinstance(digest_v1, str)
     assert len(digest_v1) == 64
-    assert isinstance(digest_v2, str)
-    assert len(digest_v2) == 64
+    assert isinstance(digest_extended, str)
+    assert len(digest_extended) == 64
 
 
 def test_runtime_resolver_sets_capabilities_v2_digest_for_paper_profile() -> None:
     cfg = _load_cfg("configs/paper_full_cuda.yaml")
     _, _, digest_v1 = runtime_resolver.build_runtime_impl_set_from_cfg(cfg)
-    digest_v2 = cfg.get("impl_set_capabilities_v2_digest")
+    digest_extended = cfg.get("impl_set_capabilities_extended_digest")
 
     assert isinstance(digest_v1, str)
     assert len(digest_v1) == 64
-    assert isinstance(digest_v2, str)
-    assert len(digest_v2) == 64
-    assert digest_v1 != digest_v2
+    assert isinstance(digest_extended, str)
+    assert len(digest_extended) == 64
+    assert digest_v1 != digest_extended

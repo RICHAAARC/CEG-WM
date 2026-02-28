@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -34,8 +35,13 @@ SALIENCY_SOURCE_PROXY_V1 = "proxy_v1"
 SALIENCY_SOURCE_MODEL_V2 = "model_v2"
 SALIENCY_SOURCE_AUTO_FALLBACK = "auto_fallback"
 
+SEMANTIC_MODEL_BACKEND_BASNET = "basnet"
+SEMANTIC_MODEL_BACKEND_INSPYRENET = "inspyrenet"
+
 MASK_ABSENT_REASON_DISABLED = "mask_disabled_by_config"
 ROUTING_ABSENT_REASON_MASK_DISABLED = "routing_mask_disabled"
+
+_SALIENCY_MODEL_CACHE: Dict[str, Any] = {}
 
 # 允许的失败原因枚举。
 ALLOWED_MASK_FAILURE_REASONS = {
@@ -709,7 +715,7 @@ def _resolve_mask_params(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(mask_impl_id, str) or not mask_impl_id:
         mask_impl_id = SEMANTIC_SALIENCY_IMPL_ID
 
-    semantic_model_source = mask_cfg.get("semantic_model_source", "offline_heuristic")
+    semantic_model_source = mask_cfg.get("semantic_model_source", SEMANTIC_MODEL_BACKEND_BASNET)
     semantic_model_version = mask_cfg.get("semantic_model_version", "v1")
     semantic_weights_id = mask_cfg.get("semantic_weights_id", "builtin")
     semantic_model_path = mask_cfg.get("semantic_model_path")
@@ -741,6 +747,54 @@ def _resolve_mask_params(cfg: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _normalize_semantic_model_source(model_source: Any) -> str:
+    """
+    功能：归一化语义模型后端来源标记。
+
+    Normalize semantic model backend source label.
+
+    Args:
+        model_source: Raw model source value from cfg.
+
+    Returns:
+        Normalized backend label with BASNet as default.
+    """
+    if not isinstance(model_source, str):
+        return SEMANTIC_MODEL_BACKEND_BASNET
+
+    normalized = model_source.strip().lower()
+    if normalized in {"inspyrenet", "inspyre", "inspyre_net"}:
+        return SEMANTIC_MODEL_BACKEND_INSPYRENET
+    if normalized in {
+        "basnet",
+        "offline_heuristic",
+        "model_v2",
+        "offline",
+        "local",
+        "builtin",
+        "default",
+    }:
+        return SEMANTIC_MODEL_BACKEND_BASNET
+    return SEMANTIC_MODEL_BACKEND_BASNET
+
+
+def _resolve_semantic_model_backend(mask_params: Dict[str, Any]) -> str:
+    """
+    功能：解析语义模型后端类型。
+
+    Resolve semantic model backend type from mask parameters.
+
+    Args:
+        mask_params: Canonical mask parameter mapping.
+
+    Returns:
+        Backend label in {"basnet", "inspyrenet"}.
+    """
+    if not isinstance(mask_params, dict):
+        raise TypeError("mask_params must be dict")
+    return _normalize_semantic_model_source(mask_params.get("semantic_model_source"))
+
+
 def _probe_model_v2_availability(mask_params: Dict[str, Any]) -> bool:
     """
     功能：探测 model_v2 显著性来源可用性。 
@@ -757,8 +811,151 @@ def _probe_model_v2_availability(mask_params: Dict[str, Any]) -> bool:
         return False
     model_path = mask_params.get("semantic_model_path")
     if isinstance(model_path, str) and model_path:
-        return Path(model_path).exists() and Path(model_path).is_file()
+        model_file = Path(model_path)
+        if not (model_file.exists() and model_file.is_file()):
+            return False
+        try:
+            import torch
+            _ = torch.load(str(model_file), map_location="cpu")
+            return True
+        except Exception:
+            # 权重不可加载，视为不可用。
+            return False
     return False
+
+
+def _compute_weights_sha256(model_path: Optional[str]) -> str:
+    """
+    功能：计算模型权重文件 SHA256。
+
+    Compute SHA256 digest for model weights file.
+
+    Args:
+        model_path: Model file path.
+
+    Returns:
+        SHA256 hex digest or <absent>.
+    """
+    if not isinstance(model_path, str) or not model_path:
+        return "<absent>"
+    model_file = Path(model_path)
+    if not (model_file.exists() and model_file.is_file()):
+        return "<absent>"
+    digest_hasher = hashlib.sha256()
+    with model_file.open("rb") as file_handle:
+        while True:
+            chunk = file_handle.read(1024 * 1024)
+            if not chunk:
+                break
+            digest_hasher.update(chunk)
+    return digest_hasher.hexdigest()
+
+
+def _load_saliency_model(mask_params: Dict[str, Any]) -> Any:
+    """
+    功能：加载并缓存显著性模型。
+
+    Load and cache saliency model from local path.
+
+    Args:
+        mask_params: Mask parameter mapping.
+
+    Returns:
+        Loaded model object.
+
+    Raises:
+        FileNotFoundError: If model file is missing.
+        RuntimeError: If model cannot be loaded.
+    """
+    if not isinstance(mask_params, dict):
+        raise TypeError("mask_params must be dict")
+    backend = _resolve_semantic_model_backend(mask_params)
+    model_path = mask_params.get("semantic_model_path")
+    if not isinstance(model_path, str) or not model_path:
+        raise FileNotFoundError("semantic_model_path is required for model_v2")
+
+    model_file = Path(model_path)
+    if not (model_file.exists() and model_file.is_file()):
+        raise FileNotFoundError(f"semantic model path not found: {model_file}")
+
+    cache_key = f"{backend}:{str(model_file.resolve())}"
+    if cache_key in _SALIENCY_MODEL_CACHE:
+        return _SALIENCY_MODEL_CACHE[cache_key]
+
+    try:
+        import torch
+        loaded_obj = torch.load(str(model_file), map_location="cpu")
+        model_obj = loaded_obj
+        if isinstance(loaded_obj, dict) and "model" in loaded_obj:
+            model_obj = loaded_obj.get("model")
+        if hasattr(model_obj, "eval") and callable(model_obj.eval):
+            model_obj.eval()
+        _SALIENCY_MODEL_CACHE[cache_key] = model_obj
+        return model_obj
+    except Exception as exc:
+        raise RuntimeError(f"saliency model load failed: {type(exc).__name__}") from exc
+
+
+def _run_saliency_inference(model: Any, image_tensor: Any, mask_params: Dict[str, Any]) -> np.ndarray:
+    """
+    功能：运行显著性模型推理并返回二维显著图。
+
+    Run saliency model inference and return normalized saliency map.
+
+    Args:
+        model: Loaded model object.
+        image_tensor: Input tensor in shape [1, 3, H, W].
+        mask_params: Mask parameter mapping.
+
+    Returns:
+        Saliency map in [0, 1] with shape [H, W].
+
+    Raises:
+        RuntimeError: If inference fails.
+    """
+    if not isinstance(mask_params, dict):
+        raise TypeError("mask_params must be dict")
+
+    backend = _resolve_semantic_model_backend(mask_params)
+
+    try:
+        import torch
+        if callable(model):
+            with torch.no_grad():
+                output = model(image_tensor)
+        else:
+            raise RuntimeError("saliency model is not callable")
+
+        if backend == SEMANTIC_MODEL_BACKEND_INSPYRENET:
+            if isinstance(output, dict):
+                output = output.get("pred", output.get("saliency", output.get("out")))
+            elif isinstance(output, (list, tuple)) and len(output) > 0:
+                output = output[0]
+        else:
+            if isinstance(output, (list, tuple)) and len(output) > 0:
+                output = output[0]
+            if isinstance(output, dict):
+                output = output.get("saliency", output.get("pred", output.get("out")))
+
+        if not hasattr(output, "detach"):
+            raise RuntimeError("saliency model output must be tensor-like")
+        saliency_tensor = output.detach().float().cpu()
+        while saliency_tensor.ndim > 2:
+            saliency_tensor = saliency_tensor[0]
+
+        saliency_map = saliency_tensor.numpy().astype(np.float32)
+        if saliency_map.ndim != 2:
+            raise RuntimeError("saliency output must be 2D")
+
+        min_value = float(np.min(saliency_map))
+        max_value = float(np.max(saliency_map))
+        if max_value > min_value:
+            saliency_map = (saliency_map - min_value) / (max_value - min_value + 1e-8)
+        else:
+            saliency_map = np.zeros_like(saliency_map, dtype=np.float32)
+        return np.clip(saliency_map, 0.0, 1.0)
+    except Exception as exc:
+        raise RuntimeError(f"saliency inference failed: {type(exc).__name__}") from exc
 
 
 def _build_model_artifact_anchor(mask_params: Dict[str, Any]) -> Dict[str, Any]:
@@ -786,7 +983,8 @@ def _build_model_artifact_anchor(mask_params: Dict[str, Any]) -> Dict[str, Any]:
         "weights_id": mask_params.get("semantic_weights_id", "<absent>"),
         "model_version": mask_params.get("semantic_model_version", "<absent>"),
         "model_path_name": path_name,
-        "model_source": mask_params.get("semantic_model_source", "<absent>"),
+        "model_source": _resolve_semantic_model_backend(mask_params),
+        "weights_sha256": _compute_weights_sha256(model_path if isinstance(model_path, str) else None),
     }
     return {
         "status": "ok",
@@ -983,8 +1181,9 @@ def build_semantic_saliency_mask_v2(
     if not isinstance(params, dict):
         raise TypeError("params must be dict")
 
-    model_source = params.get("semantic_model_source")
-    if isinstance(model_source, str) and model_source in {"hf", "hf_hub", "online", "remote"}:
+    model_source_raw = params.get("semantic_model_source")
+    model_source = _resolve_semantic_model_backend(params)
+    if isinstance(model_source_raw, str) and model_source_raw.strip().lower() in {"hf", "hf_hub", "online", "remote"}:
         # 禁止运行期联网下载语义模型权重。
         raise ValueError("semantic_model_source must be offline; provide semantic_model_path")
 
@@ -994,22 +1193,81 @@ def build_semantic_saliency_mask_v2(
         if not candidate.exists() or not candidate.is_file():
             raise FileNotFoundError(f"semantic model path not found: {candidate}")
 
-    mask, saliency_map, mask_stats, binding = build_semantic_saliency_mask_v1(
-        image=image,
-        image_shape=image_shape,
-        cfg=cfg,
-        params=params,
-    )
-    mask_stats = dict(mask_stats)
-    mask_stats["semantic_model_anchor"] = {
-        "model_source": params.get("semantic_model_source", "offline_heuristic"),
-        "model_version": params.get("semantic_model_version", "v2"),
-        "weights_id": params.get("semantic_weights_id", "<absent>"),
-        "model_path": params.get("semantic_model_path", "<absent>") if isinstance(params.get("semantic_model_path"), str) else "<absent>",
-        "preprocess": params.get("semantic_preprocess", "rgb_normalized"),
-        "thresholding": params.get("semantic_thresholding", "quantile"),
+    image_array = _materialize_image_array(image, image_shape)
+
+    import torch
+
+    model_obj = _load_saliency_model(params)
+    image_tensor = torch.from_numpy(image_array.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0)
+    saliency_map = _run_saliency_inference(model_obj, image_tensor, params)
+
+    threshold_mode = params.get("semantic_thresholding", "quantile")
+    if threshold_mode == "otsu":
+        hist, bin_edges = np.histogram(saliency_map.reshape(-1), bins=256, range=(0.0, 1.0))
+        total = float(np.sum(hist))
+        sum_total = float(np.sum(hist * np.arange(256)))
+        sum_background = 0.0
+        weight_background = 0.0
+        var_max = -1.0
+        threshold_index = 0
+        for index in range(256):
+            weight_background += hist[index]
+            if weight_background <= 0.0:
+                continue
+            weight_foreground = total - weight_background
+            if weight_foreground <= 0.0:
+                break
+            sum_background += index * hist[index]
+            mean_background = sum_background / weight_background
+            mean_foreground = (sum_total - sum_background) / weight_foreground
+            var_between = weight_background * weight_foreground * (mean_background - mean_foreground) ** 2
+            if var_between > var_max:
+                var_max = var_between
+                threshold_index = index
+        threshold = float(bin_edges[min(threshold_index, len(bin_edges) - 2)])
+    else:
+        threshold = float(np.quantile(saliency_map, float(params.get("saliency_threshold_quantile", 0.8))))
+
+    mask = saliency_map >= threshold
+    open_iters = int(params.get("open_iters", 1))
+    close_iters = int(params.get("close_iters", 1))
+    for _ in range(open_iters):
+        mask = _binary_dilate(_binary_erode(mask))
+    for _ in range(close_iters):
+        mask = _binary_erode(_binary_dilate(mask))
+
+    area_ratio = float(np.mean(mask)) if mask.size > 0 else 0.0
+    model_path_name = Path(model_path).name if isinstance(model_path, str) and model_path else "<absent>"
+    mask_stats = {
+        "area_ratio": round(area_ratio, 8),
+        "saliency_threshold": round(float(threshold), 8),
+        "saliency_source_selected": SALIENCY_SOURCE_MODEL_V2,
+        "model_artifact_anchor": {
+            "model_source": model_source,
+            "model_version": params.get("semantic_model_version", "v2"),
+            "weights_id": params.get("semantic_weights_id", "<absent>"),
+            "model_path_name": model_path_name,
+            "weights_sha256": _compute_weights_sha256(model_path if isinstance(model_path, str) else None),
+            "preprocess": params.get("semantic_preprocess", "rgb_normalized"),
+            "thresholding": threshold_mode,
+        },
+        "saliency_provenance": {
+            "source_selected": SALIENCY_SOURCE_MODEL_V2,
+            "source_attempted": [SALIENCY_SOURCE_MODEL_V2],
+            "fallback_used": False,
+            "fallback_reason": "<absent>",
+        },
     }
-    return mask, saliency_map, mask_stats, binding
+    binding = {
+        "space": "image_space",
+        "height": int(image_array.shape[0]),
+        "width": int(image_array.shape[1]),
+        "aspect_ratio": round(float(image_array.shape[1]) / float(image_array.shape[0]), 4) if int(image_array.shape[0]) > 0 else 1.0,
+        "channels": int(image_array.shape[2]),
+        "resize_rule": "identity",
+        "binding_version": "v1",
+    }
+    return mask.astype(bool), saliency_map.astype(np.float32), mask_stats, binding
 
 
 def build_texture_mask_v1(

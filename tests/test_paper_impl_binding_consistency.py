@@ -78,3 +78,44 @@ def test_primary_mismatch_maps_paper_impl_binding_reason_to_field_path() -> None
     reason, field_path = resolve_primary(["lf_impl_binding_fallback_used_under_paper_mode"])
     assert reason == "lf_impl_binding_fallback_used_under_paper_mode"
     assert field_path == "content_evidence.lf_impl_binding.fallback_used"
+
+
+def test_paper_impl_binding_rejects_int_ecc_under_paper_mode() -> None:
+    cfg: Dict[str, Any] = {
+        "paper_faithfulness": {"enabled": True},
+        "watermark": {
+            "lf": {
+                "enabled": True,
+                "ecc": 3,
+            }
+        },
+    }
+    injection_evidence: Dict[str, Any] = {
+        "status": "ok",
+        "lf_impl_binding": {
+            "impl_selected": "lf_coder_prc_v1",
+            "adapter_path": "latent_modifier_channel_lf_v1",
+            "fallback_used": False,
+            "fallback_reason": None,
+            "evidence_level": "primary",
+        },
+        "hf_impl_binding": {
+            "impl_selected": "channel_hf_v1",
+            "adapter_path": "latent_modifier_channel_hf_v1",
+            "fallback_used": False,
+            "fallback_reason": None,
+            "evidence_level": "primary",
+        },
+    }
+
+    evaluate_consistency = getattr(detect_orchestrator, "_evaluate_paper_impl_binding_consistency")
+    status, reason = evaluate_consistency(cfg, injection_evidence)
+    assert status == "mismatch"
+    assert reason == "lf_ecc_int_not_allowed_under_paper_mode"
+
+
+def test_primary_mismatch_maps_lf_ecc_int_reason_to_field_path() -> None:
+    resolve_primary = getattr(detect_orchestrator, "_resolve_primary_mismatch")
+    reason, field_path = resolve_primary(["lf_ecc_int_not_allowed_under_paper_mode"])
+    assert reason == "lf_ecc_int_not_allowed_under_paper_mode"
+    assert field_path == "watermark.lf.ecc"

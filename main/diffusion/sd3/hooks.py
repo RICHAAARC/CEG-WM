@@ -165,3 +165,146 @@ def define_composed_callback(
     composed._injection_hook = injection_hook
     
     return composed
+
+
+class SelfAttentionCaptureHook:
+    """
+    功能：捕获 SD3 self-attention 的 Q/K 投影并重建 attention maps。
+
+    Capture Q/K projections from SD3 attention blocks and reconstruct
+    self-attention maps after inference.
+
+    Args:
+        max_layers: Maximum hooked self-attention layers.
+        sample_steps: Optional sampled step indices.
+    """
+
+    def __init__(self, max_layers: Optional[int] = 8, sample_steps: Optional[set[int]] = None) -> None:
+        self._captures: Dict[tuple[str, int], Dict[str, Any]] = {}
+        self._hook_handles: List[Any] = []
+        self._step_index = 0
+        self._max_layers = max_layers
+        self._sample_steps = sample_steps
+
+    def _make_hook_fn(self, module_name: str, projection: str) -> Callable:
+        def hook_fn(_module: Any, _input: Any, output: Any) -> None:
+            if self._sample_steps is not None and self._step_index not in self._sample_steps:
+                return
+            if not hasattr(output, "detach"):
+                return
+            key = (module_name, self._step_index)
+            if key not in self._captures:
+                self._captures[key] = {}
+            self._captures[key][projection] = output.detach().cpu()
+
+        return hook_fn
+
+    def advance_step(self) -> None:
+        self._step_index += 1
+
+    def register(self, pipeline: Any) -> None:
+        transformer = getattr(pipeline, "transformer", None)
+        if transformer is None:
+            return
+
+        hooked_layers = 0
+        for module_name, module in transformer.named_modules():
+            if ".attn2." in module_name:
+                continue
+            if self._max_layers is not None and hooked_layers >= self._max_layers:
+                break
+
+            if module_name.endswith(".to_q"):
+                parent_name = module_name.rsplit(".", 1)[0]
+                self._hook_handles.append(module.register_forward_hook(self._make_hook_fn(parent_name, "q")))
+            elif module_name.endswith(".to_k"):
+                parent_name = module_name.rsplit(".", 1)[0]
+                self._hook_handles.append(module.register_forward_hook(self._make_hook_fn(parent_name, "k")))
+                hooked_layers += 1
+
+    def collect(self) -> Optional[Any]:
+        import torch
+
+        attention_tensors: List[Any] = []
+        for key in sorted(self._captures.keys()):
+            pair = self._captures[key]
+            q_tensor = pair.get("q")
+            k_tensor = pair.get("k")
+            if q_tensor is None or k_tensor is None:
+                continue
+
+            if q_tensor.ndim == 3:
+                q_view = q_tensor
+                k_view = k_tensor
+            elif q_tensor.ndim == 4:
+                q_view = q_tensor.reshape(-1, q_tensor.shape[-2], q_tensor.shape[-1])
+                k_view = k_tensor.reshape(-1, k_tensor.shape[-2], k_tensor.shape[-1])
+            else:
+                continue
+
+            d_k = q_view.shape[-1]
+            attention_weights = torch.softmax((q_view @ k_view.transpose(-2, -1)) / (d_k ** 0.5), dim=-1)
+            attention_tensors.append(attention_weights)
+
+        self._captures.clear()
+        self._step_index = 0
+
+        if not attention_tensors:
+            return None
+
+        try:
+            return torch.stack(attention_tensors, dim=0)
+        except Exception:
+            return None
+
+    def remove(self) -> None:
+        for handle in self._hook_handles:
+            try:
+                handle.remove()
+            except Exception:
+                continue
+        self._hook_handles = []
+
+
+def register_attention_hooks(pipeline: Any, cfg: Dict[str, Any]) -> SelfAttentionCaptureHook:
+    """
+    功能：注册 SD3 self-attention 捕获 hooks。
+
+    Register self-attention capture hooks on runtime pipeline.
+
+    Args:
+        pipeline: SD3 pipeline object.
+        cfg: Configuration mapping.
+
+    Returns:
+        SelfAttentionCaptureHook instance.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+
+    detect_cfg = cfg.get("detect") if isinstance(cfg.get("detect"), dict) else {}
+    geometry_cfg = detect_cfg.get("geometry") if isinstance(detect_cfg.get("geometry"), dict) else {}
+    max_layers = geometry_cfg.get("attention_capture_max_layers", 8)
+    if not isinstance(max_layers, int) or max_layers <= 0:
+        max_layers = 8
+
+    hook = SelfAttentionCaptureHook(max_layers=max_layers, sample_steps=None)
+    hook.register(pipeline)
+    return hook
+
+
+def remove_attention_hooks(hook_handle: Optional[SelfAttentionCaptureHook]) -> None:
+    """
+    功能：移除 attention capture hooks。
+
+    Remove attention capture hooks safely.
+
+    Args:
+        hook_handle: Hook handle instance.
+
+    Returns:
+        None.
+    """
+    if hook_handle is None:
+        return
+    hook_handle.remove()
