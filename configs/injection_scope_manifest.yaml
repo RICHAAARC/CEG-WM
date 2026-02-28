@@ -112,7 +112,7 @@ operational_notes:
   - "  Watermark.lf.* parameters are critical for reproducibility and must:"
   - "    (a) Be included in plan_digest_include_paths (currently: codebook_id, ecc, strength)"
   - "    (b) Cause plan_digest to change when any parameter is modified"
-  - "    (c) Be verified for consistency during detect phase (S-06 ContentDetector)"
+  - "    (c) Be verified for consistency during detect phase"
   - "    (d) If parameters change but plan_digest does not, status='mismatch' must be returned"
   - "  This audit requirement prevents parameter drift attacks and ensures"
   - "  all watermark parameters remain traceable and auditable."

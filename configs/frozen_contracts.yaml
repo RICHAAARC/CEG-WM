@@ -10,16 +10,15 @@
 # 合同版本与冻结元信息
 # - 用于记录与审计，不应作为运行期分支逻辑的自由输入。
 # ------------------------------
-contract_version: "v1.0"                    # 冻结契约版本号：同一可比较实验集合必须一致。
-frozen_date: "2026-02-04"                   # 冻结日期：用于追溯。
-phase: "phase-1-semantic-freeze"            # 阶段标识：仅用于说明冻结目标，不建议作为代码分支条件。
+contract_version: "v1.0"     # 冻结契约版本号；main/core/contracts.py 强制必填并参与 contract_bound_digest 计算。
+frozen_date: "2026-02-04"    # 冻结日期元信息；当前主链路不参与门禁计算，主要用于审计追溯。
 
 # ------------------------------
 # 权威性声明
 # - 此文件为“冻结语义”的唯一权威来源。
 # ------------------------------
-authority:
-  location: "configs/frozen_contracts.yaml"           # 当前工程的唯一权威路径。
+authority:                   # contracts.py 解释面必填段；用于声明权威来源而非运行分支。
+  location: "configs/frozen_contracts.yaml"           # 权威文件路径；与 contracts.py/freeze_gate.py 的 authoritative path 检查一致。
   uniqueness: "唯一权威。任何其他位置的'契约'文件均为运行配置或过期版本，不具有权威性。"
   modification_policy: "需代码审查 + 影响评估，禁止无审查直接修改。"
 
@@ -28,8 +27,8 @@ authority:
 # - 用于审计扫描，防止事实源分裂。
 # - 临时备份文件，建议也加入列表。
 # ------------------------------
-deprecated_locations:
-  - "policy/frozen_contracts.yaml.backup"
+deprecated_locations:        # contracts.py 解释面必填；用于标记已废弃事实源位置，防止双源漂移。
+  - "policy/frozen_contracts.yaml.backup"   # 废弃路径样例；主要供审计脚本与人工巡检。
 
 # ==============================================================
 # 外部事实源依赖声明
@@ -37,40 +36,50 @@ deprecated_locations:
 #   - freeze_gate 可在写盘前同时校验：contract_digest、whitelist_digest、semantics_digest。
 #   - 本文件不承载 whitelist/semantics 内容，但声明其路径与“必须写入 records 的版本/摘要字段”。
 # ==============================================================
-external_fact_sources:
+external_fact_sources:       # contracts.py 必解析；_collect_required_record_fields 会并入 records 必填锚点。
+  
+  # 冻结契约事实源。
   frozen_contracts:
-    path: "configs/frozen_contracts.yaml"
-    required_record_fields:
+    path: "configs/frozen_contracts.yaml"             # 事实源权威路径；对应 contracts.py 加载入口。
+    required_record_fields:                           # freeze_gate._validate_contract_fields 严格校验这些锚点与已加载对象一致。
       - "contract_version"
       - "contract_digest"
       - "contract_file_sha256"
       - "contract_canon_sha256"
       - "contract_bound_digest"
+  
+  # 运行白名单事实源。
   runtime_whitelist:
-    path: "configs/runtime_whitelist.yaml"
-    required_record_fields:
+    path: "configs/runtime_whitelist.yaml"            # 对应 runtime_whitelist.load_runtime_whitelist 的权威路径。
+    required_record_fields:                           # freeze_gate._validate_whitelist_fields 严格校验。
       - "whitelist_version"
       - "whitelist_digest"
       - "whitelist_file_sha256"
       - "whitelist_canon_sha256"
       - "whitelist_bound_digest"
+  
+  # policy_path 语义事实源。
   policy_path_semantics:
-    path: "configs/policy_path_semantics.yaml"
-    required_record_fields:
+    path: "configs/policy_path_semantics.yaml"        # 对应 runtime_whitelist.load_policy_path_semantics 权威路径。
+    required_record_fields:                           # freeze_gate._validate_semantics_fields 严格校验。
       - "policy_path_semantics_version"
       - "policy_path_semantics_digest"
       - "policy_path_semantics_file_sha256"
       - "policy_path_semantics_canon_sha256"
       - "policy_path_semantics_bound_digest"
+  
+  # 可选扩展事实源。
   records_schema_extensions:
-    path: "configs/records_schema_extensions.yaml"
-    required_record_fields: []
-    recommended_record_fields:
+    path: "configs/records_schema_extensions.yaml"    # 由 contracts._parse_records_schema_extensions 读取。
+    required_record_fields: []                        # 为空表示当前不作为硬失败门槛。
+    recommended_record_fields:                        # freeze_gate._enforce_records_schema_extensions_binding 仅推荐检查（不 fail）。
       - "records_schema_extensions_version"
       - "records_schema_extensions_digest"
       - "records_schema_extensions_file_sha256"
       - "records_schema_extensions_canon_sha256"
       - "records_schema_extensions_bound_digest"
+    
+    # 缺失允许策略；体现旧 records 兼容。
     optional_policy: "absent_ok"
     description: |
       可选事实源：append-only 字段扩展的权威来源。
@@ -85,13 +94,13 @@ external_fact_sources:
 #   - scripts/audits/audit_path_write_bypass.py 静态扫描旁路写盘。
 #   - main.core.records_io 作为唯一写盘聚合点。
 # ==============================================================
-io_write_entrypoints:
+io_write_entrypoints:        # 写入口白名单；主链路通过 records_io 收口并由脚本审计旁路。
   - "write_json"
   - "append_jsonl"
   - "write_text"
   - "write_artifact_json"
   - "write_artifact_json_unbound"
-io_read_entrypoints:
+io_read_entrypoints:         # 读入口白名单；用于约束统一读取路径。
   - "read_jsonl"
   - "read_json"
 io_exceptions: []            # 严格模式：不允许任何写盘例外。
@@ -102,9 +111,9 @@ io_exceptions: []            # 严格模式：不允许任何写盘例外。
 #   - 所有 digest 必须可复算。
 #   - 禁止各模块自行 json.dumps + sha256；必须委托 canonical_digest。
 # ==============================================================
-digest_canonicalization:
-  canonical_module: "main.core.digests"          # 工程统一从 main.core.digests 入口导出。
-  frozen_parameters:
+digest_canonicalization:      # contracts.py 必解析；冻结 digest 计算口径。
+  canonical_module: "main.core.digests"     # 工程统一从 main.core.digests 入口导出。
+  frozen_parameters:                        # 与 main.core.digests 的 canonical JSON 参数语义对齐。
     separators: [",", ":"]
     sort_keys: true
     ensure_ascii: false
@@ -115,11 +124,11 @@ digest_canonicalization:
 #   - 高风险漏洞点的必须修补项：防止 YAML 声明沦为"纸面约束"而被旁路。
 #   - 这些约束是"不可旁路的硬要求"，而非建议。
 # ==============================================================
-gate_enforcement_requirements:
+gate_enforcement_requirements:              # freeze_gate.enforce_gate_requirements / enforce_gate_policies 的规则事实源。
 
   # ---- 域绑定校验缺失 ----
-  impl_identity_domain_binding:
-    enforcement: "must_enforce"
+  impl_identity_domain_binding:             # 主链路已执行：freeze_gate._enforce_impl_identity_domain_binding。
+    enforcement: "must_enforce"             # must_enforce: 失败会阻断写盘。
     requirement: |
       freeze_gate 必须执行按域（domain）的 impl_id 字段路径校验，禁止仅用 allowed_flat 校验。
       对每个 domain：
@@ -129,8 +138,8 @@ gate_enforcement_requirements:
       目的：消除"impl_id 误绑定到错误 domain 字段"的旁路空间。
 
   # ---- version/digest/sha256 强制生成与验证 ----
-  fact_source_binding_integrity:
-    enforcement: "must_enforce"
+  fact_source_binding_integrity:            # 主链路已执行：contract/whitelist/semantics 三源锚点一致性。
+    enforcement: "must_enforce"             # 对应 freeze_gate._enforce_fact_source_binding_integrity。
     requirement: |
       freeze_gate 在 records 写盘前必须对三份事实源（frozen_contracts、runtime_whitelist、policy_path_semantics）执行完整性校验：
         1) 计算并记录三份 YAML 的 file_sha256（原文件内容）
@@ -141,8 +150,8 @@ gate_enforcement_requirements:
       目的：防止攻击者或错误实现写入假值/空值，导致事实源绑定沦为"字段基线缺省标识"。
 
   # ---- cfg_digest 计算顺序冻结 ----
-  cfg_digest_computation_order:
-    enforcement: "must_enforce"
+  cfg_digest_computation_order:             # 主链路已执行：cfg_digest 与 override_applied 的先后关系校验。
+    enforcement: "must_enforce"             # 对应 freeze_gate._enforce_cfg_digest_computation_order。
     requirement: |
       实现必须严格遵循以下顺序且不可颠倒：
         1) load config from file
@@ -153,12 +162,12 @@ gate_enforcement_requirements:
       目的：防止 cfg_digest 对应错误配置，导致 records 解释与对比失真。
 
   # ---- policy_path 语义驱动执行 ----
-  policy_path_semantic_driven_execution:
-    enforcement: "must_enforce"
-    planned_state: "must_enforce"
-    target_version: "v1.0"
-    upgrade_condition: "Execute semantic access control  gate enforces required_chains and on_chain_failure"
-    owner_gate: "execution.semantic_driven_execution"
+  policy_path_semantic_driven_execution:    # 主链路已执行：按 semantics.required_chains / on_chain_failure 驱动。
+    enforcement: "must_enforce"             # 对应 freeze_gate._validate_semantic_driven_execution。
+    planned_state: "must_enforce"           # 规划状态：目标保持硬门禁。
+    target_version: "v1.0"                  # 目标生效版本。
+    upgrade_condition: "Execute semantic access control  gate enforces required_chains and on_chain_failure"  # 升级/收敛条件描述。
+    owner_gate: "execution.semantic_driven_execution"  # 责任门禁标识。
     requirement: |
       decision 前必须读取 policy_path_semantics.yaml 对应 policy_path 的语义投射：
         1) 检查 required_chains：若 required chain 未启用或缺失证据，必须按 on_chain_failure 执行动作（failed/fallback/abstain），禁止自行 if/else 处理
@@ -167,13 +176,13 @@ gate_enforcement_requirements:
       目的：避免融合层语义被代码分支隐式决定，保证可审计性。
 
   # ---- 枚举白名单唯一权威来源 ----
-  enumeration_whitelist_authority:
-    enforcement: "recommended_enforce"
-    planned_state: "must_enforce"
-    target_version: "v1.0"
-    upgrade_condition: "Enum validation must be sourced from runtime_whitelist.yaml/enums"
-    owner_gate: "gate.enumeration_whitelist_authority"
-    authority_source: "runtime_whitelist.yaml/enums"
+  enumeration_whitelist_authority:          # 推荐门禁：当前执行为告警，不阻断写盘。
+    enforcement: "recommended_enforce"      # 对应 freeze_gate.enforce_recommended_requirements。
+    planned_state: "must_enforce"           # 目标状态：后续版本计划升级为硬门禁。
+    target_version: "v1.0"                  # 目标升级版本。
+    upgrade_condition: "Enum validation must be sourced from runtime_whitelist.yaml/enums"  # 达成条件：枚举权威收敛到 whitelist。
+    owner_gate: "gate.enumeration_whitelist_authority"     # 责任门禁标识；用于审计归因。
+    authority_source: "runtime_whitelist.yaml/enums"  # 枚举唯一事实源路径。
     requirement: |
       枚举值的唯一权威来源为 runtime_whitelist.yaml/enums，不可在代码中硬编码并与 YAML 维护两份。
       实践规范：
@@ -183,12 +192,12 @@ gate_enforcement_requirements:
       目的：防止 YAML 与 Python 代码不一致导致的校验绕过。
 
   # ---- args_digest 非方法因素放大 ----
-  args_digest_factor_separation:
-    enforcement: "recommended_enforce"
-    planned_state: "must_enforce"
-    target_version: "v1.0"
-    upgrade_condition: "args_digest_core and args_digest_io are split and validated"
-    owner_gate: "gate.args_digest_factor_separation"
+  args_digest_factor_separation:            # 推荐门禁：当前为审计提醒，避免方法因子与环境因子混淆。
+    enforcement: "recommended_enforce"      # 对应 freeze_gate._check_args_digest_factor_separation。
+    planned_state: "must_enforce"           # 规划状态：后续升级为硬门禁。
+    target_version: "v1.0"                  # 目标升级版本。
+    upgrade_condition: "args_digest_core and args_digest_io are split and validated"  # 达成条件：核心/环境因子摘要分离。
+    owner_gate: "gate.args_digest_factor_separation"  # 责任门禁标识。
     requirement: |
       args_digest 若用于"单因素变化证明"，必须明确区分方法因子与非方法因子：
         1) 方法因子：impl_id、cfg_digest、thresholds_digest（核心证据）
@@ -197,11 +206,11 @@ gate_enforcement_requirements:
       目的：避免输出路径变化造成"看似改变因素很多"，干扰单因素变化归因。
 
   # ---- facts extra keys 闭包策略 ----
-  facts_extra_keys_policy:
-    enforcement: "must_enforce"
-    policy: "fail"
-    scope:
-      allowed_top_level_keys:
+  facts_extra_keys_policy:                  # 主链路已执行：白名单与语义 YAML 顶层/条目键闭包检查。
+    enforcement: "must_enforce"             # 对应 freeze_gate._enforce_facts_extra_keys_policy。
+    policy: "fail"                          # fail: 命中违规立即阻断写盘。
+    scope:                                  # 闭包作用域定义。
+      allowed_top_level_keys:               # 顶层键闭包集合：防止事实源被隐式扩展。
         runtime_whitelist:
           - "whitelist_version"
           - "policy_path"
@@ -209,7 +218,7 @@ gate_enforcement_requirements:
           - "enums"
           - "impl_id"
           - "consistency_rules"
-          - "pipeline_realization"  # 真实 pipeline 构建策略
+          - "pipeline_realization"          # 真实 pipeline 构建策略
         policy_path_semantics:
           - "policy_path_semantics_version"
           - "hard_requirements"
@@ -221,7 +230,7 @@ gate_enforcement_requirements:
           - "condition_enum"
           - "policy_paths"
           - "soft_recommendations"
-      allowed_policy_path_keys:
+      allowed_policy_path_keys:             # policy_paths[*] 允许键闭包。
         - "decoder_type"
         - "description"
         - "required_chains"
@@ -237,39 +246,39 @@ gate_enforcement_requirements:
       目的：防止事实源被悄然扩展导致口径漂移与门禁旁路。
 
   # ---- policy_path 值域闭包策略 ----
-  policy_path_membership_policy:
-    enforcement: "must_enforce"
-    policy: "fail"
-    scope:
-      record_field_path: "policy_path"
-      whitelist_allowed_path: "policy_path.allowed"
+  policy_path_membership_policy:            # 主链路已执行：record.policy_path 必须落在 whitelist.policy_path.allowed。
+    enforcement: "must_enforce"             # 对应 freeze_gate._enforce_policy_path_membership_policy。
+    policy: "fail"                          # fail: 越界取值直接拒绝。
+    scope:                                  # 成员关系校验作用域。
+      record_field_path: "policy_path"      # 被校验的 records 字段路径。
+      whitelist_allowed_path: "policy_path.allowed"        # 允许集合在 whitelist 的路径。
     requirement: |
       record.policy_path 必须属于 runtime_whitelist.yaml 的 policy_path.allowed。
       目的：确保 policy_path 取值严格闭包且可审计。
 
   # ---- override 枚举闭包策略 ----
-  override_enum_policy:
-    enforcement: "must_enforce"
-    policy: "fail"
-    scope:
-      override_entries_path: "override.allowed_overrides"
-      override_arg_name_allowed_path: "override.arg_name_enum.allowed"
-      override_source_allowed_path: "override.source_enum.allowed"
-      override_entry_fields:
-        arg_name: "arg_name"
-        source: "source"
+  override_enum_policy:                     # 主链路已执行：override.allowed_overrides 的 arg_name/source 枚举闭包。
+    enforcement: "must_enforce"             # 对应 freeze_gate._enforce_override_enum_policy。
+    policy: "fail"                          # fail: 枚举漂移直接拒绝。
+    scope:                                  # override 枚举校验作用域。
+      override_entries_path: "override.allowed_overrides"                 # 被校验条目列表路径。
+      override_arg_name_allowed_path: "override.arg_name_enum.allowed"    # arg_name 允许集合路径。
+      override_source_allowed_path: "override.source_enum.allowed"        # source 允许集合路径。
+      override_entry_fields:                # 每个 override 条目的字段映射。
+        arg_name: "arg_name"                # 条目中的 arg_name 字段名。
+        source: "source"                    # 条目中的 source 字段名。
     requirement: |
       runtime_whitelist.override.allowed_overrides 的 arg_name/source 必须属于对应枚举白名单。
       目的：防止 override 枚举漂移导致门禁规则被旁路。
 
   # ---- decoder_type 值域闭包策略 ----
-  decoder_type_policy:
-    enforcement: "must_enforce"
-    policy: "fail"
-    scope:
-      semantics_policy_paths_path: "policy_paths"
-      semantics_decoder_type_field: "decoder_type"
-      whitelist_decoder_type_allowed_path: "enums.decoder_type.allowed"
+  decoder_type_policy:                      # 主链路已执行：semantics.policy_paths[*].decoder_type 需在 whitelist 枚举内。
+    enforcement: "must_enforce"             # 对应 freeze_gate._enforce_decoder_type_policy。
+    policy: "fail"                          # fail: decoder_type 越界直接拒绝。
+    scope:                                  # decoder_type 闭包校验作用域。
+      semantics_policy_paths_path: "policy_paths"          # semantics 中 policy_paths 节点路径。
+      semantics_decoder_type_field: "decoder_type"         # policy_paths 条目中的 decoder_type 字段名。
+      whitelist_decoder_type_allowed_path: "enums.decoder_type.allowed"   # whitelist 允许集合路径。
     requirement: |
       policy_path_semantics.policy_paths[*].decoder_type 必须属于 runtime_whitelist.enums.decoder_type.allowed。
       目的：确保 decoder_type 的取值闭包与可审计性。
@@ -280,8 +289,8 @@ gate_enforcement_requirements:
 #   - records 字段读取必须通过 accessor 统一完成，避免散落硬编码字段路径。
 #   - require_present 仅负责统一报错格式，不得在内部解析 record。
 # ==============================================================
-record_accessors:
-  canonical_module: "main.core.schema"           # schema.py 提供 accessor 或统一导出 accessor。
+record_accessors:            # contracts.py 解释面必填；当前主要作为访问语义契约。
+  canonical_module: "main.core.schema"      # accessor 权威模块；scripts 按约束应优先使用该入口。
   minimum_required_accessors:
     - "get_record_type"
     - "get_sample_id"
@@ -294,9 +303,9 @@ record_accessors:
     - "get_subspace_frame_used"
     - "get_frame_diff"
     - "require_present"
-  delegation_scope:
-    scripts_mandatory: true                 # scripts/ 中的审计脚本必须使用 accessor。
-    main_chain_gradual: false               # 主链路是否强制：当前版本实现可先不强制，但建议后续版本收紧为 true。
+  delegation_scope:                         # scripts_mandatory 针对脚本硬约束；main_chain_gradual 针对主链渐进收敛策略。
+    scripts_mandatory: true                 # scripts/tests 优先消费，审计脚本必须通过 accessor 读取字段。
+    main_chain_gradual: false               # 主链是否立即强制 accessor；false 表示当前仍允许渐进迁移。
   notes: >
     require_present(value, field_path, record_hint) 只能对“已抽取值”做统一报错格式，
     不在内部解析 record。字段路径解析权必须保留在各 accessor 内部。
@@ -305,9 +314,9 @@ record_accessors:
 # Records Schema
 #   - when_chain_enabled 的判定来源。
 # ==============================================================
-records_schema:
+records_schema:              # schema.validate_record + freeze_gate 的核心字段事实源。
   # ---- 链路是否启用的事实来源 ----
-  chain_enablement_fields:
+  chain_enablement_fields:                  # 链路启用判定路径；用于 required_chains 语义检查。
     content: "detect.content.enabled"
     geometry: "detect.geometry.enabled"
 
@@ -315,276 +324,316 @@ records_schema:
   decision_field_path: "decision.is_watermarked"
 
   # ---- 冻结：records 的最小可审计字段集合 ----
-  required_record_fields:
+  required_record_fields:                   # 写盘最小锚点集合；schema/freeze_gate 会校验存在性。
     # schema 版本锁定
-    - schema_version
+    - schema_version                        # records schema 版本锚点。
 
     # 冻结契约绑定
-    - contract_version
-    - contract_digest
-    - contract_file_sha256
-    - contract_canon_sha256
-    - contract_bound_digest
+    - contract_version                      # 冻结契约版本锚点。
+    - contract_digest                       # 冻结契约语义摘要。
+    - contract_file_sha256                  # 冻结契约原文件 SHA256。
+    - contract_canon_sha256                 # 冻结契约 canonical 文本 SHA256。
+    - contract_bound_digest                 # 冻结契约绑定摘要（version+canon+语义）。
 
     # 运行期白名单绑定
-    - whitelist_version
-    - whitelist_digest
-    - whitelist_file_sha256
-    - whitelist_canon_sha256
-    - whitelist_bound_digest
+    - whitelist_version                     # 运行白名单版本锚点。
+    - whitelist_digest                      # 运行白名单语义摘要。
+    - whitelist_file_sha256                 # 运行白名单原文件 SHA256。
+    - whitelist_canon_sha256                # 运行白名单 canonical 文本 SHA256。
+    - whitelist_bound_digest                # 运行白名单绑定摘要。
 
     # policy_path 语义映射绑定
-    - policy_path_semantics_version
-    - policy_path_semantics_digest
-    - policy_path_semantics_file_sha256
-    - policy_path_semantics_canon_sha256
-    - policy_path_semantics_bound_digest
+    - policy_path_semantics_version         # policy_path 语义版本锚点。
+    - policy_path_semantics_digest          # policy_path 语义文件语义摘要。
+    - policy_path_semantics_file_sha256     # policy_path 语义文件原文 SHA256。
+    - policy_path_semantics_canon_sha256    # policy_path 语义文件 canonical SHA256。
+    - policy_path_semantics_bound_digest    # policy_path 语义绑定摘要。
 
     # 单因素可比性坐标
-    - cfg_digest
-    - policy_path
+    - cfg_digest                            # 有效配置摘要（override 之后计算）。
+    - policy_path                           # 策略路径取值（必须受 whitelist 闭包约束）。
 
     # 方法身份坐标
-    - impl.content_extractor_id
-    - impl.geometry_extractor_id
-    - impl.fusion_rule_id
-    - impl.subspace_planner_id
-    - impl.sync_module_id
+    - impl.content_extractor_id             # 内容链提取器实现 ID。
+    - impl.geometry_extractor_id            # 几何链提取器实现 ID。
+    - impl.fusion_rule_id                   # 融合规则实现 ID。
+    - impl.subspace_planner_id              # 子空间规划器实现 ID。
+    - impl.sync_module_id                   # 几何同步模块实现 ID。
 
     # 方法版本坐标
     # 按域拆分：便于审计定位变化源
-    - impl.versions.content_extractor
-    - impl.versions.geometry_extractor
-    - impl.versions.fusion_rule
-    - impl.versions.subspace_planner
-    - impl.versions.sync_module
+    - impl.versions.content_extractor       # 内容链实现版本。
+    - impl.versions.geometry_extractor      # 几何链实现版本。
+    - impl.versions.fusion_rule             # 融合规则实现版本。
+    - impl.versions.subspace_planner        # 子空间规划实现版本。
+    - impl.versions.sync_module             # 同步模块实现版本。
 
     # 方法摘要坐标
     # 按域拆分：便于离线验证实现一致性
-    - impl.digests.content_extractor
-    - impl.digests.geometry_extractor
-    - impl.digests.fusion_rule
-    - impl.digests.subspace_planner
-    - impl.digests.sync_module
+    - impl.digests.content_extractor        # 内容链实现摘要。
+    - impl.digests.geometry_extractor       # 几何链实现摘要。
+    - impl.digests.fusion_rule              # 融合规则实现摘要。
+    - impl.digests.subspace_planner         # 子空间规划实现摘要。
+    - impl.digests.sync_module              # 同步模块实现摘要。
 
     # 统计与判决坐标
-    - thresholds_digest
-    - threshold_metadata_digest
-    - thresholds_rule_id
-    - thresholds_rule_version
+    - thresholds_digest                     # 阈值规范摘要。
+    - threshold_metadata_digest             # 阈值元信息摘要。
+    - thresholds_rule_id                    # 阈值规则 ID。
+    - thresholds_rule_version               # 阈值规则版本。
 
   # ---- 审计义务：decision 字段的存在性与可空性约束 ----
   # decision 的存在性与可空性由"义务规则段"表达，而不是由 required 集合表达。
   # required 仅是"锚点字符串字段集合"；decision 允许 None，体现"可拒绝语义"。
   audit_obligations:
-    decision_field_presence: "required"    # decision 字段必须存在于 records。
-    decision_field_allow_null: true       # decision 字段允许值为 None。
+    decision_field_presence: "required"     # decision 字段必须存在于 records。
+    decision_field_allow_null: true         # decision 字段允许值为 None。
 
   # ---- 字段注册表：所有事实源提到的 records 字段路径必须在此 ----
-  field_paths_registry_semantics: "All record field paths used anywhere in contracts/whitelists/semantics MUST appear here."
-  field_paths_registry:
-    - schema_version
-    - contract_version
-    - contract_digest
-    - contract_file_sha256
-    - contract_canon_sha256
-    - contract_bound_digest
-    - whitelist_version
-    - whitelist_digest
-    - whitelist_file_sha256
-    - whitelist_canon_sha256
-    - whitelist_bound_digest
-    - policy_path_semantics_version
-    - policy_path_semantics_digest
-    - policy_path_semantics_file_sha256
-    - policy_path_semantics_canon_sha256
-    - policy_path_semantics_bound_digest
-    - cfg_digest
-    - policy_path
-    - detect.content.enabled
-    - detect.geometry.enabled
-    - impl.content_extractor_id
-    - impl.geometry_extractor_id
-    - impl.fusion_rule_id
-    - impl.subspace_planner_id
-    - impl.sync_module_id
-    - impl.versions.content_extractor
-    - impl.versions.geometry_extractor
-    - impl.versions.fusion_rule
-    - impl.versions.subspace_planner
-    - impl.versions.sync_module
-    - impl.digests.content_extractor
-    - impl.digests.geometry_extractor
-    - impl.digests.fusion_rule
-    - impl.digests.subspace_planner
-    - impl.digests.sync_module
-    - thresholds_digest
-    - threshold_metadata_digest
-    - thresholds_rule_id
-    - thresholds_rule_version
-    - decision.is_watermarked
-    - status
-    - content_evidence.status
-    - content_evidence.score
-    - geometry_evidence.sync.status
-    - content_evidence.fail_reason
-    - score_audit.content_score_used
-    - geometry_evidence.sync.reason
-    - score_audit.geometry_gate_used
-    - score_audit.geometry_fallback_triggered
-    - score_audit.fusion_rule_used
-    - decision.abstain_reason
-    - score_audit.abstain_triggered_by
-    - content_evidence.mask_digest
-    - content_evidence.mask_stats
-    - content_evidence.mask_stats.saliency_source_selected
-    - content_evidence.mask_stats.saliency_source_attempted
-    - content_evidence.mask_stats.fallback_used
-    - content_evidence.mask_stats.fallback_reason
-    - content_evidence.mask_stats.model_artifact_anchor
-    - content_evidence.mask_stats.saliency_provenance
-    - content_evidence.plan_digest
-    - content_evidence.basis_digest
-    - content_evidence.lf_trace_digest
-    - content_evidence.hf_trace_digest
-    - content_evidence.injection_trace_digest
-    - content_evidence.injection_params_digest
-    - content_evidence.lf_score
-    - content_evidence.hf_score
-    - content_evidence.injection_status
-    - content_evidence.injection_absent_reason
-    - content_evidence.injection_failure_reason
-    - content_evidence.injection_metrics
-    - content_evidence.subspace_binding_digest
-    - content_evidence.lf_statistics_digest
-    - content_evidence.hf_statistics_digest
-    - content_evidence.hf_evidence_summary
-    - content_evidence.subspace_plan.subspace_conditioning
-    - content_evidence.score_parts
-    - content_evidence.content_failure_reason
-    - content_evidence.content_mismatch_reason
-    - content_evidence.content_mismatch_field_path
-    - content_evidence.audit.trajectory_tap_status
-    - content_evidence.audit.trajectory_absent_reason
-    - content_evidence.trajectory_evidence
-    - content_evidence.trajectory_evidence.status
-    - content_evidence.trajectory_evidence.trajectory_spec
-    - content_evidence.trajectory_evidence.trajectory_spec_digest
-    - content_evidence.trajectory_evidence.trajectory_digest
-    - content_evidence.trajectory_evidence.trajectory_metrics
-    - content_evidence.trajectory_evidence.trajectory_stats
-    - content_evidence.trajectory_evidence.trajectory_absent_reason
-    - content_evidence.trajectory_evidence.trajectory_tap_version
-    - content_evidence.trajectory_evidence.audit
-    - content_evidence.trajectory_evidence.audit.trajectory_tap_status
-    - content_evidence.trajectory_evidence.audit.trajectory_absent_reason
-    - content_evidence.trajectory_evidence.device
-    - geometry_evidence.anchor_digest
-    - geometry_evidence.anchor_metrics
-    - geometry_evidence.anchor_source_semantics
-    - geometry_evidence.anchor_evidence_level
-    - geometry_evidence.anchor_blocking_reason
-    - geometry_evidence.sync_digest
-    - geometry_evidence.sync_metrics
-    - geometry_evidence.align_trace_digest
-    - geometry_evidence.geo_score
-    - geometry_evidence.geo_failure_reason
-    - decision.fusion_rule_version
-    - decision.used_threshold_id
-    - decision.routing_decisions
-    - decision.routing_digest
-    - decision.conditional_fpr_notes
-    - content_evidence.detect_lf_score
-    - content_evidence.detect_hf_score
-    - content_evidence.lf_score_drift_status
-    - content_evidence.hf_score_drift_status
-    - content_evidence.trajectory_digest_match
-    - content_evidence.basis_digest_match
-    - content_evidence.detect_lf_statistics
-    - content_evidence.detect_hf_statistics
-    - content_evidence.subspace_consistency_status
-    - content_evidence.lf_impl_binding
-    - content_evidence.hf_impl_binding
-    - content_evidence.subspace_evidence_semantics
-    - content_evidence.subspace_evidence_level
-    - content_evidence.subspace_primary_path
-    - content_evidence.synthetic_pipeline_runtime
-    - impl_set_capabilities_v2_digest
+  field_paths_registry_semantics: "All record field paths used anywhere in contracts/whitelists/semantics MUST appear here."  # 注册表语义声明。
+  field_paths_registry:      # 字段路径全量注册表；scripts/audits 会检查新增字段是否登记。
+
+    # Schema 与冻结绑定锚点
+    - schema_version                        # records schema 版本。
+    - contract_version                      # 冻结契约版本。
+    - contract_digest                       # 冻结契约语义摘要。
+    - contract_file_sha256                  # 冻结契约文件 SHA256。
+    - contract_canon_sha256                 # 冻结契约 canonical SHA256。
+    - contract_bound_digest                 # 冻结契约绑定摘要。
+
+    # Runtime whitelist 绑定锚点
+    - whitelist_version                     # 运行白名单版本。
+    - whitelist_digest                      # 运行白名单语义摘要。
+    - whitelist_file_sha256                 # 运行白名单文件 SHA256。
+    - whitelist_canon_sha256                # 运行白名单 canonical SHA256。
+    - whitelist_bound_digest                # 运行白名单绑定摘要。
+
+    # Policy path 语义映射与配置锚点
+    - policy_path_semantics_version         # 语义映射版本。
+    - policy_path_semantics_digest          # 语义映射摘要。
+    - policy_path_semantics_file_sha256     # 语义映射文件 SHA256。
+    - policy_path_semantics_canon_sha256    # 语义映射 canonical SHA256。
+    - policy_path_semantics_bound_digest    # 语义映射绑定摘要。
+    - cfg_digest                            # 生效配置摘要。
+
+    # 链路启用与实现身份锚点
+    - policy_path                           # policy 路径枚举值。
+    - detect.content.enabled                # 内容链是否启用。
+    - detect.geometry.enabled               # 几何链是否启用。
+    - impl.content_extractor_id             # 内容链实现 ID。
+    - impl.geometry_extractor_id            # 几何链实现 ID。
+    - impl.fusion_rule_id                   # 融合规则实现 ID。
+    - impl.subspace_planner_id              # 子空间规划实现 ID。
+    - impl.sync_module_id                   # 同步模块实现 ID。
+
+    # 实现版本锚点
+    - impl.versions.content_extractor       # 内容链实现版本。
+    - impl.versions.geometry_extractor      # 几何链实现版本。
+    - impl.versions.fusion_rule             # 融合规则实现版本。
+    - impl.versions.subspace_planner        # 子空间规划实现版本。
+    - impl.versions.sync_module             # 同步模块实现版本。
+
+    # 实现摘要锚点
+    - impl.digests.content_extractor        # 内容链实现摘要。
+    - impl.digests.geometry_extractor       # 几何链实现摘要。
+    - impl.digests.fusion_rule              # 融合规则实现摘要。
+    - impl.digests.subspace_planner         # 子空间规划实现摘要。
+    - impl.digests.sync_module              # 同步模块实现摘要。
+
+    # 阈值与判决规则锚点
+    - thresholds_digest                     # 阈值规范摘要。
+    - threshold_metadata_digest             # 阈值元信息摘要。
+    - thresholds_rule_id                    # 阈值规则 ID。
+    - thresholds_rule_version               # 阈值规则版本。
+
+    # 核心判决与状态字段
+    - decision.is_watermarked               # 最终水印判决布尔值。
+    - status                                # 检测过程状态。
+
+    # Content 证据（基础状态/分数/门控）
+    - content_evidence.status                    # 内容证据状态。
+    - content_evidence.score                     # 内容链综合得分。
+    - content_evidence.fail_reason               # 内容链失败原因。
+    - score_audit.content_score_used             # 融合时使用的内容得分。
+    - score_audit.geometry_gate_used             # 几何门控是否启用/命中。
+    - score_audit.geometry_fallback_triggered    # 几何回退是否触发。
+    - score_audit.fusion_rule_used               # 实际使用的融合规则。
+
+    # Content 掩码与显著性溯源
+    - content_evidence.mask_digest                              # 语义掩码摘要。
+    - content_evidence.mask_stats                               # 掩码统计整体对象。
+    - content_evidence.mask_stats.saliency_source_selected      # 实际选用显著性来源。
+    - content_evidence.mask_stats.saliency_source_attempted     # 尝试过的显著性来源。
+    - content_evidence.mask_stats.fallback_used                 # 掩码是否使用回退。
+    - content_evidence.mask_stats.fallback_reason               # 掩码回退原因。
+    - content_evidence.mask_stats.model_artifact_anchor         # 掩码模型工件锚点。
+    - content_evidence.mask_stats.saliency_provenance           # 显著性来源溯源信息。
+
+    # Content 子空间/注入与轨迹锚点
+    - content_evidence.plan_digest               # 子空间计划摘要。
+    - content_evidence.basis_digest              # 基底摘要。
+    - content_evidence.lf_trace_digest           # LF 轨迹摘要。
+    - content_evidence.hf_trace_digest           # HF 轨迹摘要。
+    - content_evidence.injection_trace_digest    # 注入轨迹摘要。
+    - content_evidence.injection_params_digest   # 注入参数摘要。
+    - content_evidence.lf_score                  # 低频得分。
+    - content_evidence.hf_score                  # 高频得分。
+    - content_evidence.injection_status          # 注入状态。
+    - content_evidence.injection_absent_reason   # 注入缺失原因。
+    - content_evidence.injection_failure_reason  # 注入失败原因。
+    - content_evidence.injection_metrics         # 注入度量集合。
+    - content_evidence.subspace_binding_digest   # 子空间绑定摘要。
+    - content_evidence.lf_statistics_digest      # LF 统计摘要。
+    - content_evidence.hf_statistics_digest      # HF 统计摘要。
+    - content_evidence.hf_evidence_summary       # 高频证据摘要对象。
+    - content_evidence.subspace_plan.subspace_conditioning # 子空间条件化说明。
+    - content_evidence.score_parts               # 评分分解项。
+    - content_evidence.content_failure_reason    # 内容链失败原因（标准化字段）。
+    - content_evidence.content_mismatch_reason   # 内容链不一致原因。
+    - content_evidence.content_mismatch_field_path         # 不一致字段路径。
+    - content_evidence.audit.trajectory_tap_status         # 轨迹 tap 审计状态。
+    - content_evidence.audit.trajectory_absent_reason      # 轨迹缺失原因（审计）。
+    - content_evidence.trajectory_evidence       # 轨迹证据对象。
+    - content_evidence.trajectory_evidence.status          # 轨迹证据状态。
+    - content_evidence.trajectory_evidence.trajectory_spec # 轨迹规范对象。
+    - content_evidence.trajectory_evidence.trajectory_spec_digest    # 轨迹规范摘要。
+    - content_evidence.trajectory_evidence.trajectory_digest         # 轨迹摘要。
+    - content_evidence.trajectory_evidence.trajectory_metrics        # 轨迹度量。
+    - content_evidence.trajectory_evidence.trajectory_stats          # 轨迹统计。
+    - content_evidence.trajectory_evidence.trajectory_absent_reason  # 轨迹证据缺失原因。
+    - content_evidence.trajectory_evidence.trajectory_tap_version    # 轨迹 tap 版本。
+    - content_evidence.trajectory_evidence.audit           # 轨迹证据审计对象。
+    - content_evidence.trajectory_evidence.audit.trajectory_tap_status    # 轨迹 tap 审计状态（内层）。
+    - content_evidence.trajectory_evidence.audit.trajectory_absent_reason # 轨迹 tap 缺失原因（内层）。
+    - content_evidence.trajectory_evidence.device          # 轨迹采集设备信息。
+
+    # Geometry 证据锚点
+    - geometry_evidence.anchor_digest            # 几何锚点摘要。
+    - geometry_evidence.anchor_metrics           # 几何锚点度量。
+    - geometry_evidence.anchor_source_semantics  # 几何锚点来源语义。
+    - geometry_evidence.anchor_evidence_level    # 几何锚点证据级别。
+    - geometry_evidence.anchor_blocking_reason   # 几何锚点阻断原因。
+    - geometry_evidence.sync_digest              # 几何同步摘要。
+    - geometry_evidence.sync_metrics             # 几何同步度量。
+    - geometry_evidence.sync.status              # 几何同步状态。
+    - geometry_evidence.sync.reason              # 几何同步原因说明。
+    - geometry_evidence.align_trace_digest       # 几何对齐轨迹摘要。
+    - geometry_evidence.geo_score                # 几何得分。
+    - geometry_evidence.geo_failure_reason       # 几何链失败原因。
+
+    # 决策路由与阈值使用明细
+    - decision.fusion_rule_version               # 决策使用的融合规则版本。
+    - decision.fusion_rule_digest                # 决策融合规则摘要。
+    - decision.used_threshold_id                 # 决策使用的阈值 ID。
+    - decision.routing_decisions                 # 决策路由明细。
+    - decision.routing_digest                    # 决策路由摘要。
+    - decision.abstain_reason                    # 决策弃权原因。
+    - score_audit.abstain_triggered_by           # 触发弃权的条件来源。
+    - decision.conditional_fpr_notes             # 条件 FPR 注释信息。
+
+    # 检测阶段一致性/漂移审计字段
+    - content_evidence.detect_lf_score           # 检测阶段 LF 得分。
+    - content_evidence.detect_hf_score           # 检测阶段 HF 得分。
+    - content_evidence.lf_score_drift_status     # LF 得分漂移状态。
+    - content_evidence.hf_score_drift_status     # HF 得分漂移状态。
+    - content_evidence.trajectory_digest_match   # 轨迹摘要是否匹配。
+    - content_evidence.basis_digest_match        # 基底摘要是否匹配。
+    - content_evidence.detect_lf_statistics      # 检测阶段 LF 统计。
+    - content_evidence.detect_hf_statistics      # 检测阶段 HF 统计。
+    - content_evidence.subspace_consistency_status    # 子空间一致性状态。
+    - content_evidence.lf_impl_binding           # LF 实现绑定信息。
+    - content_evidence.hf_impl_binding           # HF 实现绑定信息。
+    - content_evidence.subspace_evidence_semantics    # 子空间证据语义标签。
+    - content_evidence.subspace_evidence_level   # 子空间证据级别。
+    - content_evidence.subspace_primary_path     # 子空间主路径。
+    - content_evidence.synthetic_pipeline_runtime     # 合成 pipeline 运行信息。
+    - impl_set_capabilities_v2_digest            # impl 能力集摘要（v2）。
+
     # ---- Paper Faithfulness 对齐证据字段 ----
-    - paper_faithfulness.spec_version
-    - paper_faithfulness.spec_digest
-    - paper_faithfulness.spec_file_sha256
-    - paper_faithfulness.spec_canon_sha256
-    - paper_faithfulness.spec_bound_digest
-    - content_evidence.pipeline_fingerprint
-    - content_evidence.pipeline_fingerprint_digest
-    - content_evidence.injection_site_spec
-    - content_evidence.injection_site_digest
-    - content_evidence.alignment_report
-    - content_evidence.alignment_digest
-    - content_evidence.lf.ecc_spec_digest
-    - content_evidence.hf_evidence_summary.repetition_factor
+    # 论文忠实性（Paper Faithfulness）绑定锚点
+    - paper_faithfulness.spec_version            # 论文忠实性规范版本。
+    - paper_faithfulness.spec_digest             # 论文忠实性规范摘要。
+    - paper_faithfulness.spec_file_sha256        # 论文忠实性规范文件 SHA256。
+    - paper_faithfulness.spec_canon_sha256       # 论文忠实性规范 canonical SHA256。
+    - paper_faithfulness.spec_bound_digest       # 论文忠实性规范绑定摘要。
+    - paper_faithfulness.absent_reasons          # 论文忠实性缺失原因列表。
+    - paper_faithfulness.fail_reasons            # 论文忠实性失败原因列表。
+    - paper_faithfulness.mismatch_reasons        # 论文忠实性不一致原因列表。
+    - paper_faithfulness.status                  # 论文忠实性状态。
+
+    - content_evidence.pipeline_fingerprint      # pipeline 指纹对象。
+    - content_evidence.pipeline_fingerprint_digest         # pipeline 指纹摘要。
+    - content_evidence.injection_site_spec       # 注入位点规范。
+    - content_evidence.injection_site_digest     # 注入位点摘要。
+    - content_evidence.alignment_report          # 对齐报告对象。
+    - content_evidence.alignment_digest          # 对齐报告摘要。
+    - content_evidence.lf.ecc_spec_digest        # LF ECC 规范摘要。
+    - content_evidence.hf_evidence_summary.repetition_factor         # HF 证据重复因子。
+
+    # 产物/攻击/校准审计字段（仅 scripts/tests/离线审计主消费）
+    - artifact_sha256                           # 产物文件 SHA256。
+    - attack_random_seed                        # 攻击随机种子。
+    - attack_trace                              # 攻击过程轨迹。
+    - attack_trace_digest                       # 攻击轨迹摘要。
+    - calibration_is_fallback                   # 校准是否走回退路径。
+    - calibration_mode                          # 校准模式。
+
+    # 掩码算法实现与参数绑定审计
+    - content_evidence.mask_stats.mask_fallback_reason               # 掩码算法回退原因。
+    - content_evidence.mask_stats.mask_impl_id                       # 掩码实现 ID。
+    - content_evidence.mask_stats.mask_params_digest                 # 掩码参数摘要。
+    - content_evidence.mask_stats.mask_resolution_binding            # 掩码分辨率绑定信息。
+    - content_evidence.mask_stats.mask_source_impl_identity          # 掩码来源实现身份。
+    - content_evidence.mask_stats.routing_digest                     # 掩码路由摘要。
+    - content_evidence.mask_stats.routing_summary                    # 掩码路由摘要对象。
+    - content_evidence.subspace_plan.hf_basis                        # 子空间计划 HF 基底。
+    - content_evidence.subspace_plan.hf_region_index_spec            # HF 区域索引规范。
+    - content_evidence.subspace_plan.lf_basis                        # 子空间计划 LF 基底。
+    - content_evidence.subspace_plan.lf_region_index_spec            # LF 区域索引规范。
+    - content_evidence.subspace_plan.region_index_digest             # 区域索引摘要。
+    - content_evidence.subspace_plan.subspace_evidence_semantics     # 子空间证据语义（计划层）。
+
+    # 运行模式与回退状态字段（仅 scripts/tests/离线审计主消费）
+    - decision.geo_gate_applied             # 是否应用几何门控。
+    - decision.rescue_band_version          # 救援带版本。
+    - detect_runtime_is_fallback            # detect 运行时是否回退。
+    - detect_runtime_mode                   # detect 运行模式。
+    - detect_runtime_status                 # detect 运行状态。
+    - embed_trace                           # embed 执行轨迹。
+    - embed_trace.identity_mode             # embed 身份模式。
+    - embed_trace.identity_reason           # embed 身份模式原因。
+    - evaluation_is_fallback                # evaluation 是否回退。
+    - evaluation_mode                       # evaluation 模式。
+
+    # Geometry 扩展配置与质量语义字段（仅 scripts/tests/离线审计主消费）
+    - geometry_evidence.align_config_digest      # 几何对齐配置摘要。
+    - geometry_evidence.align_metrics            # 几何对齐指标。
+    - geometry_evidence.anchor_config_digest     # 几何锚点配置摘要。
+    - geometry_evidence.geo_score_direction      # 几何得分方向定义。
+    - geometry_evidence.resolution_binding       # 几何分辨率绑定。
+    - geometry_evidence.stability_metrics        # 几何稳定性指标。
+    - geometry_evidence.sync_config_digest       # 几何同步配置摘要。
+    - geometry_evidence.sync_quality_metrics     # 几何同步质量指标。
+    - geometry_evidence.sync_quality_metrics.quality_components_v2   # 同步质量分量（v2）。
+    - geometry_evidence.sync_quality_semantics   # 同步质量语义说明。
     
-    - artifact_sha256
-    - attack_random_seed
-    - attack_trace
-    - attack_trace_digest
-    - calibration_is_fallback
-    - calibration_mode
-    - content_evidence.mask_stats.mask_fallback_reason
-    - content_evidence.mask_stats.mask_impl_id
-    - content_evidence.mask_stats.mask_params_digest
-    - content_evidence.mask_stats.mask_resolution_binding
-    - content_evidence.mask_stats.mask_source_impl_identity
-    - content_evidence.mask_stats.routing_digest
-    - content_evidence.mask_stats.routing_summary
-    - content_evidence.subspace_plan.hf_basis
-    - content_evidence.subspace_plan.hf_region_index_spec
-    - content_evidence.subspace_plan.lf_basis
-    - content_evidence.subspace_plan.lf_region_index_spec
-    - content_evidence.subspace_plan.region_index_digest
-    - content_evidence.subspace_plan.subspace_evidence_semantics
-    - decision.fusion_rule_digest
-    - decision.geo_gate_applied
-    - decision.rescue_band_version
-    - detect_runtime_is_fallback
-    - detect_runtime_mode
-    - detect_runtime_status
-    - embed_trace
-    - embed_trace.identity_mode
-    - embed_trace.identity_reason
-    - evaluation_is_fallback
-    - evaluation_mode
-    - geometry_evidence.align_config_digest
-    - geometry_evidence.align_metrics
-    - geometry_evidence.anchor_config_digest
-    - geometry_evidence.geo_score_direction
-    - geometry_evidence.resolution_binding
-    - geometry_evidence.stability_metrics
-    - geometry_evidence.sync_config_digest
-    - geometry_evidence.sync_quality_metrics
-    - geometry_evidence.sync_quality_metrics.quality_components_v2
-    - geometry_evidence.sync_quality_semantics
-    - input_sha256
-    - mask_resolution_binding
-    - mask_source_impl_identity
-    - paper_faithfulness.absent_reasons
-    - paper_faithfulness.fail_reasons
-    - paper_faithfulness.mismatch_reasons
-    - paper_faithfulness.status
-    - plan_digest_expected
-    - plan_digest_observed
-    - plan_digest_status
-    - plan_input_digest
-    - plan_input_schema_version
-    - routing_digest
-    - routing_summary
+    # 顶层输入与路由锚点（仅 scripts/tests/离线审计主消费）
+    - input_sha256                          # 输入文件 SHA256。
+    - mask_resolution_binding               # 掩码分辨率绑定（顶层）。
+    - mask_source_impl_identity             # 掩码来源实现身份（顶层）。
+    - plan_digest_expected                  # 期望计划摘要。
+    - plan_digest_observed                  # 观测计划摘要。
+    - plan_digest_status                    # 计划摘要一致性状态。
+    - plan_input_digest                     # 计划输入摘要。
+    - plan_input_schema_version             # 计划输入 schema 版本。
+    - routing_digest                        # 路由摘要（顶层）。
+    - routing_summary                       # 路由摘要对象（顶层）。
 
 # ------------------------------
 # 字段别名：用于历史兼容
 # - 为空表示当前版本实现不启用别名机制。
 # ------------------------------
-field_aliases: {}
+field_aliases: {}            # 历史别名映射；当前为空表示不启用别名兼容。
 
 # ==============================================================
 # Impl Identity Binding
@@ -592,12 +641,12 @@ field_aliases: {}
 #   - field_paths_by_domain 定义每个 domain 对应的 records 字段路径。
 #   - 后续版本的方法注入只能改变 impl.*_id 值，gate 必须验证值属于 whitelist 对应 domain 的 allowed 集合。
 # ==============================================================
-impl_identity:
-  required: true
+impl_identity:               # impl 身份绑定契约；freeze_gate._validate_impl_identity_fields 按域校验。
+  required: true             # true 表示 impl 身份锚点为硬必填。
 
   # ---- domain 与 records 字段路径的映射冻结 ----
   # 必须与 runtime_whitelist.yaml 中 impl_id.allowed_by_domain 的 key 完全对齐。
-  field_paths_by_domain:
+  field_paths_by_domain:                    # 域到 records 字段路径映射（用于 impl_id 按域校验）。
     content_extractor: "impl.content_extractor_id"
     geometry_extractor: "impl.geometry_extractor_id"
     fusion_rule: "impl.fusion_rule_id"
@@ -605,14 +654,14 @@ impl_identity:
     sync_module: "impl.sync_module_id"
 
   # ---- 按域拆分的版本与摘要字段 ----
-  version_field_paths_by_domain:
+  version_field_paths_by_domain:            # 域到 impl.versions.* 路径映射（版本差异定位）。
     content_extractor: "impl.versions.content_extractor"
     geometry_extractor: "impl.versions.geometry_extractor"
     fusion_rule: "impl.versions.fusion_rule"
     subspace_planner: "impl.versions.subspace_planner"
     sync_module: "impl.versions.sync_module"
 
-  digest_field_paths_by_domain:
+  digest_field_paths_by_domain:             # 域到 impl.digests.* 路径映射（实现摘要差异定位）。
     content_extractor: "impl.digests.content_extractor"
     geometry_extractor: "impl.digests.geometry_extractor"
     fusion_rule: "impl.digests.fusion_rule"
@@ -634,40 +683,40 @@ impl_identity:
 #   - status 表达“检测过程状态”，不是最终水印判决。
 #   - 最终判决必须使用 decision.is_watermarked 等独立字段，严禁复用 status。
 # ==============================================================
-status_enum:
-  allowed_values: ["ok", "failed", "mismatch", "absent"]
+status_enum:                 # 过程状态枚举（不是最终判决）。
+  allowed_values: ["ok", "failed", "mismatch", "absent"]  # 同类差异：ok=流程完成；failed=执行失败；mismatch=与生成元数据不一致；absent=输入缺失。
   definitions:
-    ok: "检测完成，无异常"
-    failed: "检测过程发生异常或逻辑错误，具体原因见 fail_reason"
-    mismatch: "检测与生成元数据不一致，具体原因见 mismatch_reason"
-    absent: "检测输入缺少必需字段，无法执行检测"
+    ok: "检测完成，无异常"                          # 流程成功完成且无失败/冲突语义。
+    failed: "检测过程发生异常或逻辑错误，具体原因见 fail_reason"    # 执行失败语义，原因由 fail_reason 枚举限定。
+    mismatch: "检测与生成元数据不一致，具体原因见 mismatch_reason"  # 一致性冲突语义，原因由 mismatch_reason 枚举限定。
+    absent: "检测输入缺少必需字段，无法执行检测"             # 输入缺失语义，表示前置条件不足而非算法失败。
   immutable: true
   notes: "此字段严禁改名、重定义语义。若需表达最终水印判决，使用 decision.is_watermarked，不得复用 status。"
 
-fail_reason_enum:
+fail_reason_enum:            # status==failed 时的原因枚举（运行失败语义）。
   allowed_values:
-    - "missing_required_field"
-    - "pattern_seed_mismatch"
-    - "subspace_frame_mismatch"
-    - "cfg_digest_mismatch"
-    - "inversion_failed"
-    - "trace_extraction_failed"
-    - "evidence_computation_failed"
-    - "decoder_error"
-    - "unknown"
+    - "missing_required_field"              # 缺少检测必需输入字段，流程无法继续。
+    - "pattern_seed_mismatch"               # pattern seed 与期望值不一致。
+    - "subspace_frame_mismatch"             # 子空间 frame 与预期不一致（执行期失败语义）。
+    - "cfg_digest_mismatch"                 # 有效配置摘要与记录不一致。
+    - "inversion_failed"                    # 逆过程/反演步骤执行失败。
+    - "trace_extraction_failed"             # trace 提取阶段失败。
+    - "evidence_computation_failed"         # 证据计算阶段失败。
+    - "decoder_error"                       # 解码器执行异常或输出非法。
+    - "unknown"                             # 未归类失败（仅兜底，建议减少使用）。
   usage: "仅在 status == 'failed' 时填充"
   immutable: true
 
-mismatch_reason_enum:
+mismatch_reason_enum:        # status==mismatch 时的原因枚举（一致性冲突语义）。
   allowed_values:
-    - "subspace_frame_mismatch"
-    - "cfg_digest_mismatch"
-    - "plan_digest_mismatch"
-    - "basis_digest_mismatch"
-    - "planner_impl_identity_mismatch"
-    - "trajectory_spec_digest_mismatch"
-    - "trajectory_digest_mismatch"
-    - "trajectory_evidence_invalid"
+    - "subspace_frame_mismatch"             # 子空间 frame 与生成侧记录不一致（一致性冲突）。
+    - "cfg_digest_mismatch"                 # cfg_digest 与生成侧记录不一致。
+    - "plan_digest_mismatch"                # 计划摘要与记录不一致。
+    - "basis_digest_mismatch"               # 基函数/基底摘要不一致。
+    - "planner_impl_identity_mismatch"      # planner 实现身份（id/version/digest）不一致。
+    - "trajectory_spec_digest_mismatch"     # trajectory 规格摘要不一致。
+    - "trajectory_digest_mismatch"          # trajectory 实例摘要不一致。
+    - "trajectory_evidence_invalid"         # trajectory 证据结构存在缺失或非法。
   usage: "仅在 status == 'mismatch' 时填充"
   immutable: true
 
@@ -677,45 +726,45 @@ mismatch_reason_enum:
 #   - 禁止手写 split/regex 解析目录名，必须委托 output_naming 模块。
 #   - policy_path 集合由 validator 委托 runtime_whitelist 校验。
 # ==============================================================
-output_dir_naming:
-  canonical_module: "main.policy.path_policy"    # path_policy 作为唯一输出路径决策层。
-  frozen_format: "cfg_<cfg_digest>_key_<key>_policy_<policy_path>"
+output_dir_naming:           # 当前主链路未直接消费本段，主要作为契约说明与审计提示（contracts.py 未解析该段）。
+  canonical_module: "main.policy.path_policy"    # 唯一输出路径决策层。
+  frozen_format: "cfg_<cfg_digest>_key_<key>_policy_<policy_path>"   # 目录名冻结模板。
   field_spec:
     cfg_digest:
-      type: "hex64"
+      type: "hex64"                              # 字段类型：64 位十六进制摘要。
       source: "cfg 参数的 canonical_digest（通过 canonical_json / canonical_digest）"
-      escapable: false
+      escapable: false                           # 不允许转义编码，需原样写入。
     key:
-      type: "policy_id"
-      regex: "^(?!.*_key_)(?!.*_policy_)[A-Za-z0-9_]+$"
+      type: "policy_id"                          # 字段类型：策略标识符。
+      regex: "^(?!.*_key_)(?!.*_policy_)[A-Za-z0-9_]+$"   # 合法 key 正则约束。
       source: "policy 定义的 policy_id"
-      escapable: false
+      escapable: false                           # 不允许转义编码，避免解析歧义。
       note: "不允许含 '_key_' 或 '_policy_' 子串，以避免与固定分隔符冲突"
     policy_path:
-      type: "path"
+      type: "path"                               # 字段类型：策略路径枚举值。
       source: "融合策略 policy_path 枚举值（与 policy_path_semantics 对齐）；records 中存放解码后的明文枚举值"
-      escaping: "base64url_no_padding"
+      escaping: "base64url_no_padding"           # 编码规则：base64url 且无 '=' padding。
       note: "不得包含 '=' padding；编码端必须输出无 padding 格式。"
-  stable_fields_in_records: ["cfg_digest", "key", "policy_path"]
+  stable_fields_in_records: ["cfg_digest", "key", "policy_path"]     # records 中必须稳定存在的目录名解码字段。
   delegation_rule: "所有目录名生成与解析必须唯一通过 output_naming 模块，禁止手写 split/regex。"
   contract_source: "此规则来自 configs/frozen_contracts.yaml，禁止任意 contract_path 参数绕过。"
   decoder_enum:
-    allowed: ["raw", "base64url_no_padding"]
+    allowed: ["raw", "base64url_no_padding"]     # 支持的解码器枚举：raw=直读；base64url_no_padding=URL 安全 base64 且无 '='。
   parsing_rule:
     format_regex: "^cfg_([0-9a-f]{64})_key_((?!.*_key_)(?!.*_policy_)[A-Za-z0-9_]+)_policy_([a-zA-Z0-9_-]+)$"
     field_extractors:
       cfg_digest:
-        group_index: 1
-        decoder: "raw"
-        validator: "hex64"
+        group_index: 1                           # 正则捕获组索引：第1组。
+        decoder: "raw"                           # 该组无需二次解码。
+        validator: "hex64"                       # 必须是 64 位十六进制摘要。
       key:
-        group_index: 2
-        decoder: "raw"
-        validator: "policy_id_format"
+        group_index: 2                           # 正则捕获组索引：第2组。
+        decoder: "raw"                           # 该组无需二次解码。
+        validator: "policy_id_format"            # 必须满足 policy_id 命名约束。
       policy_path:
-        group_index: 3
-        decoder: "base64url_no_padding"
-        validator: "policy_path_in_whitelist"         # 实际允许集合来自 runtime_whitelist.yaml。
+        group_index: 3                           # 正则捕获组索引：第3组。
+        decoder: "base64url_no_padding"          # 该组按 base64url 无 padding 反解。
+        validator: "policy_path_in_whitelist"    # 实际允许集合来自 runtime_whitelist.yaml。
         note: "decoder 必须按 base64url_no_padding 解释；输入不得含 '='。"
 
 # ==============================================================
@@ -724,37 +773,37 @@ output_dir_naming:
 #   - 所有与阈值相关的功能必须通过 canonical_module 定义的接口访问，禁止各模块自行实现阈值选择、加载、验证逻辑。
 #   - thresholds_digest 与 threshold_metadata_digest 是可比性的关键锚点。
 # ==============================================================
-threshold_management:
+threshold_management:        # 当前主链路未直接消费本段，同名函数存在于 neyman_pearson.py，供实现与审计对齐。
   canonical_module: "main.watermarking.fusion.neyman_pearson"        # neyman_pearson.py 统一管理 NP 口径。
-  threshold_loader_entrypoint: "main.watermarking.fusion.neyman_pearson:load_thresholds_canonical"
-  fpr_key_format: "1e-03"
+  threshold_loader_entrypoint: "main.watermarking.fusion.neyman_pearson:load_thresholds_canonical"   # 阈值加载唯一入口（模块:函数）。
+  fpr_key_format: "1e-03"                        # FPR key 规范样式（科学计数法字符串）。
   fpr_key_spec:
-    exponent_digits: 2
-    example: "1e-03 (for 0.001)"
-    collision_check: true
+    exponent_digits: 2                           # 指数位宽固定为2位（如 -03）。
+    example: "1e-03 (for 0.001)"                 # 人类可读示例，帮助审计比对。
+    collision_check: true                        # 必须执行 key 冲突检测（防不同 FPR 落同一 key）。
   load_thresholds_canonical_signature:
     inputs:
-      thresholds_path: "Path to thresholds JSON file"
-      target_fpr: "float"
+      thresholds_path: "Path to thresholds JSON file"      # 输入阈值文件路径。
+      target_fpr: "float"                        # 目标 FPR（数值语义由 NP 协议定义）。
     outputs:
-      threshold_info: "Dict"
+      threshold_info: "Dict"                     # 返回结构体（包含阈值值、key 与元数据锚点）。
       required_fields:
-        - "threshold_key_used"
-        - "threshold_value_used"
-        - "thresholds_digest"
-        - "threshold_metadata_digest"
-        - "metadata"
-        - "fpr_key_collision_check"
+        - "threshold_key_used"                   # 实际命中的 FPR key。
+        - "threshold_value_used"                 # 实际用于判决的阈值数值。
+        - "thresholds_digest"                    # 阈值文件内容摘要锚点。
+        - "threshold_metadata_digest"            # 阈值元数据摘要锚点。
+        - "metadata"                             # 校准元信息对象。
+        - "fpr_key_collision_check"              # 冲突检测结果标记。
       field_verification_rule: >
         返回值必须包含上述所有 required_fields。
         若任何字段缺失或为 None/null，则视为加载器实现漂移，触发工程审计失败。
   metadata_required_keys:
-    - "method"
-    - "null_source"
-    - "n_null"
-    - "calibration_date"
-    - "quantile_method"
-    - "target_fprs"
+    - "method"                                   # 阈值校准方法名称。
+    - "null_source"                              # 原假设样本来源说明。
+    - "n_null"                                   # 原假设样本数量。
+    - "calibration_date"                         # 校准时间标记。
+    - "quantile_method"                          # 分位数计算协议。
+    - "target_fprs"                              # 该文件覆盖的目标 FPR 集合。
   delegation_rule: >
     所有 FPR key 格式化必须唯一通过 format_fpr_key_canonical。
     run_detect.py 与 run_calibrate.py 必须唯一通过 load_thresholds_canonical 读写阈值。
@@ -766,13 +815,13 @@ threshold_management:
 #   - 禁止隐式使用全局 RNG 状态；关键函数必须显式接收 generator。
 #   - seed_parts → seed_digest 的派生必须可复算、可重演。
 # ==============================================================
-rng_context_management:
+rng_context_management:      # 当前主链路未直接消费本段，RNGScope/stable_seed_from_parts/require_torch_generator 在 time_utils.py 实现。
   canonical_module: "main.core.time_utils"       # time_utils.py 统一管理 RNG 上下文相关功能。
   required_classes:
-    - "RNGScope"
+    - "RNGScope"                                 # 必须存在的上下文管理类。
   required_functions:
-    - "stable_seed_from_parts"
-    - "require_torch_generator"
+    - "stable_seed_from_parts"                   # seed_parts -> 稳定 seed / digest 的派生函数。
+    - "require_torch_generator"                  # 关键生成入口的 generator 显式约束函数。
   rngscope_spec:
     constructor: "RNGScope(seed_parts: Dict, *, torch_device: Optional[str] = None)"
     seed_parts_example: |
@@ -782,11 +831,11 @@ rng_context_management:
         "purpose": "pattern"
       }
     required_properties:
-      - "torch_generator"
-      - "numpy_rng"
-      - "seed_digest"
-      - "seed_value"
-    context_manager: true
+      - "torch_generator"                        # torch 侧随机源。
+      - "numpy_rng"                              # numpy 侧随机源。
+      - "seed_digest"                            # seed_parts 的可审计摘要。
+      - "seed_value"                             # 最终用于初始化 RNG 的整数 seed。
+    context_manager: true                        # 必须支持 with 语义，保证作用域内确定性。
   require_torch_generator_usage: >
     关键生成函数（pattern 生成、tie-break 等）必须显式接收 generator 参数。
     该函数应在函数入口调用，禁止隐式使用全局 RNG 状态。
@@ -822,16 +871,16 @@ rng_context_management:
 #   - 枚举集中管理机制冻结。
 #   - records/report 写入必须调用验证器；出现非法值必须 fail-fast。
 # ==============================================================
-enumeration_whitelists:
-  canonical_module: "main.core.status"           # status.py 统一定义与验证 status/fail/mismatch 枚举。
+enumeration_whitelists:      # 当前主链路未直接消费本段，枚举验证函数在 status.py，实现存在，段落主要用于契约声明。
+  canonical_module: "main.core.status"      # status.py 统一定义与验证 status/fail/mismatch 枚举。
   required_constants:
-    - "ALLOWED_STATUS_VALUES"
-    - "ALLOWED_MISMATCH_REASONS"
-    - "ALLOWED_FAIL_REASONS"
+    - "ALLOWED_STATUS_VALUES"               # status 白名单常量（ok/failed/mismatch/absent）。
+    - "ALLOWED_MISMATCH_REASONS"            # mismatch_reason 白名单常量（一致性冲突原因）。
+    - "ALLOWED_FAIL_REASONS"                # fail_reason 白名单常量（执行失败原因）。
   required_validators:
-    - "validate_status"
-    - "validate_mismatch_reason"
-    - "validate_fail_reason"
+    - "validate_status"                     # status 写入前的合法性校验入口。
+    - "validate_mismatch_reason"            # mismatch_reason 写入前的合法性校验入口。
+    - "validate_fail_reason"                # fail_reason 写入前的合法性校验入口。
   allowed_literal_contexts:
     - context: "function_default_argument"
       description: "函数默认参数，例如 def f(status: str = \"ok\")"
@@ -851,27 +900,27 @@ enumeration_whitelists:
 # 审计元数据
 #   - 仅用于离线/静态审计提示，严禁作为运行期反射依据。
 # ==============================================================
-non_executable_sections:
-  - "audit_metadata"
+non_executable_sections:     # 非执行段白名单；声明这些段仅用于离线审计，不作为运行反射输入。
+  - "audit_metadata"                        # 将 audit_metadata 显式标记为非执行（仅 scripts/tests/人工审计读取）。
 
-audit_metadata:
-  digest_canonicalization:
+audit_metadata:              # 仅 scripts/tests/人工审计消费，主链路不执行此段。
+  digest_canonicalization:                  # 对应 main.core.digests 的审计函数清单。
     required_functions:
-      - "canonical_dumps"
-      - "canonical_digest"
-      - "sha256_hex_bytes"
-      - "strip_excluded_fields"
-  output_dir_naming:
+      - "canonical_dumps"                   # 规范化 JSON 序列化函数（键顺序/格式稳定）。
+      - "canonical_digest"                  # 规范摘要函数（用于 cfg/seed 等锚点）。
+      - "sha256_hex_bytes"                  # 原始字节 SHA256 十六进制实现。
+      - "strip_excluded_fields"             # 计算摘要前剔除排除字段的辅助函数。
+  output_dir_naming:         # 对应目录命名相关函数清单；当前用于离线检查一致性。
     required_functions:
-      - "parse_output_dir_name"
-      - "validate_output_dir_name"
-      - "format_output_dir_name"
-      - "required_fields_from_contract"
-  threshold_management:
+      - "parse_output_dir_name"             # 目录名 -> 字段对象的解析函数。
+      - "validate_output_dir_name"          # 目录名格式与字段合法性校验函数。
+      - "format_output_dir_name"            # 字段对象 -> 目录名的格式化函数。
+      - "required_fields_from_contract"     # 从契约提取必需命名字段的映射函数。
+  threshold_management:       # 对应 NP 阈值模块函数清单；用于审计函数存在性。
     required_functions:
-      - "format_fpr_key_canonical"
-      - "validate_thresholds_metadata"
-      - "load_thresholds_canonical"
+      - "format_fpr_key_canonical"          # FPR key 规范格式化函数。
+      - "validate_thresholds_metadata"      # 阈值元数据字段完整性与语义校验函数。
+      - "load_thresholds_canonical"         # 阈值加载主入口（返回锚点字段）。
 
 # ==============================================================
 # Config Loader
@@ -880,19 +929,19 @@ audit_metadata:
 #   - fixed_facts 规定 当前 Phase 固定事实值，用于压缩自由度。
 #   - args_digest_payload_fields 规定 CLI 参数哪些计入 args_digest。
 # ==============================================================
-config_loader:
-  override_rules_version: "v1"
-  override_scope: "geometry_only"                     # 此阶段推荐仅允许 geometry 开关类覆写。
-  config_path_recording: "basename + cfg_digest"
+config_loader:               # contracts.py 仅解析其中 cfg_digest_include_paths 与 cfg_digest_override_applied_included。
+  override_rules_version: "v1"              # override 规则语义版本；用于跨版本审计时确认口径未漂移。
+  override_scope: "geometry_only"           # 覆写作用域限制：仅允许几何相关开关路径进入 runtime override。
+  config_path_recording: "basename + cfg_digest" # records 中 config_path 的记录策略（文件名 + 有效配置摘要）。
 
   # ---- 处理流程顺序：冻结，不可颠倒 ----
   # cfg_digest 计算顺序冻结的执行保证：cfg_digest 必须在 override 之后计算，才能表达"有效配置"。
-  computation_order:
-    step_1: "load_config_from_file"
-    step_2: "apply_allowed_overrides_from_runtime_whitelist"
-    step_3: "compute_cfg_digest_on_effective_config"
-    step_4: "write_records_with_cfg_digest_and_override_applied_audit"
-    immutable: true
+  computation_order:         # 对应 freeze_gate.cfg_digest_computation_order 的执行顺序约束。
+    step_1: "load_config_from_file"                                       # 第1步：从配置文件载入原始 cfg。
+    step_2: "apply_allowed_overrides_from_runtime_whitelist"              # 第2步：按 whitelist 应用允许的运行期覆写。
+    step_3: "compute_cfg_digest_on_effective_config"                      # 第3步：对“生效后 cfg”计算 cfg_digest。
+    step_4: "write_records_with_cfg_digest_and_override_applied_audit"    # 第4步：写入 records 与 override_applied 审计段。
+    immutable: true                         # 顺序冻结：不得交换步骤，否则破坏可比性与追溯性。
     override_applied_audit_fields:
       - "field_path"                        # 被覆写的配置字段路径。
       - "old_value"                         # 覆写前的值。
@@ -902,83 +951,89 @@ config_loader:
 
   # 允许覆写模式枚举：用于冻结 override_mode 的语义口径。
   # 此阶段仅允许确定赋值，不允许条件选择与附加操作。
-  override_mode_enum:
-    allowed: ["set"]
-    immutable: true
+  override_mode_enum:        # 覆写模式枚举口径；与 override_applied 审计字段联动。
+    allowed: ["set"]                        # 当前仅允许直接赋值覆写（不允许 add/append/expr 等模式）。
+    immutable: true                         # 覆写模式枚举冻结：新增模式需版本化流程。
 
   # allowed_overrides 运行期映射已迁移到 runtime_whitelist.yaml。
 
-  cfg_digest_include_paths:
-    - "watermark.key_id"
-    - "watermark.pattern_id"
-    - "watermark.strength"
-    - "watermark.subspace.enabled"
-    - "watermark.subspace.frame"
-    - "watermark.subspace.selector_id"
-    - "watermark.subspace.grid_rows"
-    - "watermark.subspace.grid_cols"
-    - "watermark.subspace.grid_h"
-    - "watermark.subspace.grid_w"
-    - "watermark.subspace.k"
-    - "watermark.subspace.topk"
-    - "watermark.subspace.score_type"
-    - "watermark.subspace.channel_agg"
-    - "model.model_id"
-    - "model.height"
-    - "model.width"
-    - "model.dtype"
-    - "enable_xformers"
-    - "generation.num_inference_steps"
-    - "generation.guidance_scale"
-    - "detect.content.enabled"
-    - "detect.geometry.enabled"
-    - "detect.method"
-    - "detect.feature"
-    - "evaluate.decoder_type"
-    - "evaluate.target_fpr"
-    # Ablation 实验开关（append-only v1.0）
+  cfg_digest_include_paths:  # 主链路真实使用：config_loader.load_and_validate_config 按该路径子集计算 cfg_digest。
+    - "watermark.key_id"                    # 水印 key 标识：决定密钥域，变化必须影响 cfg_digest。
+    - "watermark.pattern_id"                # 水印 pattern 标识：决定图样方案版本。
+    - "watermark.strength"                  # 注入强度参数：影响嵌入幅度。
+    - "watermark.subspace.enabled"          # 子空间机制总开关。
+    - "watermark.subspace.frame"            # 子空间参考坐标系/帧定义。
+    - "watermark.subspace.selector_id"      # 子空间选择器实现标识。
+    - "watermark.subspace.grid_rows"        # 子空间网格行数。
+    - "watermark.subspace.grid_cols"        # 子空间网格列数。
+    - "watermark.subspace.grid_h"           # 子空间单元高度参数。
+    - "watermark.subspace.grid_w"           # 子空间单元宽度参数。
+    - "watermark.subspace.k"                # 子空间主参数 k（与 topk 同类但语义不同）。
+    - "watermark.subspace.topk"             # 子空间 top-k 选择阈值/数量。
+    - "watermark.subspace.score_type"       # 子空间评分函数类型。
+    - "watermark.subspace.channel_agg"      # 子空间通道聚合策略。
+    - "model.model_id"                      # 模型标识（架构/权重族）。
+    - "model.height"                        # 生成高度配置。
+    - "model.width"                         # 生成宽度配置。
+    - "model.dtype"                         # 模型运行精度。
+    - "enable_xformers"                     # xformers 加速路径开关。
+    - "generation.num_inference_steps"      # 扩散推理步数。
+    - "generation.guidance_scale"           # CFG guidance scale 参数。
+    - "detect.content.enabled"              # 内容证据分支开关。
+    - "detect.geometry.enabled"             # 几何证据分支开关。
+    - "detect.method"                       # 检测方法标识。
+    - "detect.feature"                      # 检测特征类型/来源。
+    - "evaluate.decoder_type"               # 评估阶段解码器类型。
+    - "evaluate.target_fpr"                 # 评估目标 FPR。
+    # Ablation 实验开关
     # 必须包含 ablation.normalized 以便 ablation flags 变化影响 cfg_digest
-    - "ablation.normalized"
+    - "ablation.normalized"                 # Ablation 规范化开关：变化需进入 cfg_digest 以保证实验可追溯。
 
-  cfg_digest_override_applied_included: false
+  cfg_digest_override_applied_included: false    # 主链路真实使用：false 表示 override_applied 审计段不纳入 cfg_digest 输入域。
 
-  fixed_facts:
-    watermark.subspace.channel_agg: "l2_sum"
-    model.dtype: "fp16"
-    evaluate.geometry.enabled: true
+  fixed_facts:                                   # 固定事实约束（实验自由度压缩）；当前主要用于契约说明与审计对齐。
+    watermark.subspace.channel_agg: "l2_sum"     # 固定子空间通道聚合口径，避免聚合方式漂移。
+    model.dtype: "fp16"                          # 固定模型推理 dtype，保证跨运行可比性。
+    evaluate.geometry.enabled: true              # 固定开启几何评估路径，保证报告语义一致。
 
-  args_digest_payload_fields:
+  args_digest_payload_fields:               # args_digest 输入字段白名单；同类差异按命令类型分组。
+    
+    # embed 命令参数字段集合。
     embed:
-      - "config_path"
-      - "seed"
-      - "device"
-      - "dtype"
-      - "key_id"
-      - "num_samples"
-      - "prompts"
-      - "output"
-      - "output_subdir"
+      - "config_path"                       # 配置文件路径参数（参与 args_digest 的来源定位）。
+      - "seed"                              # 生成随机种子输入。
+      - "device"                            # 运行设备选择（cpu/cuda 等）。
+      - "dtype"                             # 推理精度参数（如 fp16/fp32）。
+      - "key_id"                            # 水印 key 标识。
+      - "num_samples"                       # 批量生成样本数。
+      - "prompts"                           # 文本提示词输入集合。
+      - "output"                            # 输出根目录或目标路径。
+      - "output_subdir"                     # 输出子目录命名参数。
+    
+    # detect 命令参数字段集合（含阈值与严格校验开关）。
     detect:
-      - "config_path"
-      - "target_fpr"
-      - "thresholds_file"
-      - "image_dir"
-      - "embed_trace"
-      - "output"
-      - "device"
-      - "dtype"
-      - "threshold"
-      - "calibrate_result"
-      - "no_content"
-      - "strict_integrity_check"
-      - "key_id"
-      - "pattern_seed_override"
-      - "wrong_key"
-      - "strict_freeze_policy"
-      - "enable_geometry"
-      - "disable_geometry"
+      - "config_path"                       # 检测阶段配置文件路径。
+      - "target_fpr"                        # 目标 FPR，用于阈值选择。
+      - "thresholds_file"                   # 阈值文件路径输入。
+      - "image_dir"                         # 待检测图像目录。
+      - "embed_trace"                       # 对应 embed trace 路径（完整性校验输入）。
+      - "output"                            # 检测结果输出路径。
+      - "device"                            # 检测运行设备。
+      - "dtype"                             # 检测推理精度。
+      - "threshold"                         # 直接指定阈值（与文件加载模式区分）。
+      - "calibrate_result"                  # 校准结果文件输入。
+      - "no_content"                        # 关闭内容证据分支开关。
+      - "strict_integrity_check"            # 严格完整性校验开关。
+      - "key_id"                            # 指定检测 key_id。
+      - "pattern_seed_override"             # pattern seed 覆写参数（调试/对照用途）。
+      - "wrong_key"                         # 错 key 对照测试开关。
+      - "strict_freeze_policy"              # 严格冻结策略执行开关。
+      - "enable_geometry"                   # 强制启用几何证据分支。
+      - "disable_geometry"                  # 强制禁用几何证据分支。
+    
+    # calibrate 命令参数字段集合（侧重分位统计输入）。
     calibrate:
-      - "config_path"
-      - "score_field"
-      - "target_fpr"
-      - "max_samples"
+      - "config_path"                       # 校准阶段配置文件路径。
+      - "score_field"                       # 用于分位估计的分数字段名。
+      - "target_fpr"                        # 目标 FPR 集合或单值输入。
+      - "max_samples"                       # 校准使用的最大样本数上限。
