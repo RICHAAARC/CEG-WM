@@ -527,27 +527,35 @@ def _atomic_replace_write_bytes(dst: Path, data: bytes) -> None:
             finally:
                 if fallback_fd is not None:
                     os.close(fallback_fd)
-                # replace 失败后，临时文件仍在，必须清理。
-                if tmp_path.exists():
-                    try:
-                        tmp_path.unlink()
-                    except Exception:
-                        pass
         
     except Exception:
-        # 出错时清理临时文件
+        # 非目标异常必须透传，禁止吞异常。
         if fd is not None:
             try:
                 os.close(fd)
             except Exception:
                 pass
-        if tmp_path is not None and tmp_path.exists():
+        raise
+    finally:
+        # 统一清理 .writing 临时文件，覆盖主路径成功/WinError5 回退/异常分支。
+        if fd is not None:
             try:
-                tmp_path.unlink()
+                os.close(fd)
             except Exception:
                 pass
-        # 重新抛出原异常
-        raise
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except PermissionError:
+                try:
+                    os.chmod(tmp_path, 0o666)
+                    tmp_path.unlink(missing_ok=True)
+                except Exception:
+                    # 临时文件清理失败不应覆盖原始异常语义。
+                    pass
+            except Exception:
+                # 临时文件清理失败不应覆盖原始异常语义。
+                pass
 
 
 def _require_fact_sources_initialized() -> FactSourcesContext:

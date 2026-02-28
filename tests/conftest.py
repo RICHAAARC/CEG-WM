@@ -73,7 +73,7 @@ def _apply_windows_py313_tmp_acl_workaround() -> None:
         return
 
     def _mkdir_acl_safe(path_obj: Path, exist_ok: bool = False) -> None:
-        path_obj.mkdir(mode=0o755, exist_ok=exist_ok)
+        path_obj.mkdir(mode=0o755, parents=True, exist_ok=exist_ok)
 
     def _getbasetemp_acl_safe(self):
         if self._basetemp is not None:
@@ -83,6 +83,7 @@ def _apply_windows_py313_tmp_acl_workaround() -> None:
             basetemp = self._given_basetemp
             if basetemp.exists():
                 pytest_pathlib.rm_rf(basetemp)
+            basetemp.parent.mkdir(parents=True, exist_ok=True)
             _mkdir_acl_safe(basetemp)
             basetemp = basetemp.resolve()
         else:

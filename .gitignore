@@ -72,3 +72,4 @@ tmp/
 audit_tmp/
 artifacts/
 .pytest/
+.pytest*
