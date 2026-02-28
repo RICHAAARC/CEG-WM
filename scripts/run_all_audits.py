@@ -687,7 +687,13 @@ def main():
     scripts_dir = Path(__file__).parent
     explicit_run_root = args.run_root.resolve() if isinstance(args.run_root, Path) else None
     inferred_run_root = _infer_latest_run_root(repo_root)
-    effective_run_root = explicit_run_root if isinstance(explicit_run_root, Path) else inferred_run_root
+    if isinstance(explicit_run_root, Path):
+        effective_run_root = explicit_run_root
+    elif args.strict:
+        # strict 模式禁止隐式推断 run_root，避免历史产物污染当前审计范围。
+        effective_run_root = None
+    else:
+        effective_run_root = inferred_run_root
     
     # 执行所有审计脚本
     all_results = []

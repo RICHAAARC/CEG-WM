@@ -319,6 +319,79 @@ def test_execute_audit_script_forwards_run_root_to_supported_audits(
         assert command[run_root_index + 1] == str(bound_run_root)
 
 
+def test_run_all_audits_strict_ignores_inferred_run_root_for_optional_audits(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：strict 模式无显式 run_root 时不得使用推断 run_root 执行可选审计。 
+
+    Verify strict mode ignores inferred run_root for run_root-sensitive optional audits,
+    preventing historical outputs from being scanned implicitly.
+
+    Args:
+        tmp_path: Temporary repo fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    repo_script = repo_root / "scripts" / "run_all_audits.py"
+    spec = importlib.util.spec_from_file_location("run_all_audits_module_strict_unbound", repo_script)
+    assert spec is not None and spec.loader is not None
+    run_all_audits_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(run_all_audits_module)
+
+    inferred_run_root = tmp_path / "inferred_run"
+    inferred_run_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(run_all_audits_module, "_infer_latest_run_root", lambda _repo_root: inferred_run_root)
+    monkeypatch.setattr(
+        run_all_audits_module,
+        "AUDIT_SCRIPTS",
+        ["audits/audit_protocol_compare_outputs_schema.py"],
+    )
+    monkeypatch.setattr(run_all_audits_module, "_load_spec_audit_requirements", lambda _repo_root: {})
+
+    executed_scripts = []
+
+    def _fake_execute(script_path, repo_root_arg, bound_run_root=None):
+        _ = repo_root_arg
+        executed_scripts.append({
+            "script": script_path.name,
+            "bound_run_root": bound_run_root,
+        })
+        return {
+            "audit_id": "should_not_execute",
+            "gate_name": "gate.should_not_execute",
+            "category": "G",
+            "severity": "BLOCK",
+            "result": "FAIL",
+            "rule": "unexpected execution",
+            "evidence": {},
+            "impact": "unexpected execution",
+            "fix": "skip optional audit without explicit run_root in strict mode",
+        }
+
+    monkeypatch.setattr(run_all_audits_module, "execute_audit_script", _fake_execute)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all_audits.py",
+            "--repo-root",
+            str(repo_root),
+            "--strict",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exit_info:
+        run_all_audits_module.main()
+
+    assert exit_info.value.code == 0
+    assert executed_scripts == []
+
+
 def test_main_prefers_explicit_run_root_over_inferred(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """
     功能：验证 --run-root 显式参数优先于自动推断。 

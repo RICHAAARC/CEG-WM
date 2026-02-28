@@ -521,6 +521,7 @@ def build_aggregate_report(
             )
 
     grouped_rows = _build_grouped_rows(experiment_results)
+    failure_semantics_distribution = _collect_failure_semantics_distribution(experiment_results)
     coverage_manifest = attack_coverage.compute_attack_coverage_manifest()
 
     report = {
@@ -535,6 +536,7 @@ def build_aggregate_report(
         "anchors": anchor_rows,
         "metrics_matrix": metrics_matrix,
         "grouped_metrics": grouped_rows,
+        "failure_semantics_distribution": failure_semantics_distribution,
         "failures": failures,
     }
     return report
@@ -1305,6 +1307,47 @@ def _build_grouped_rows(experiment_results: List[Dict[str, Any]]) -> List[Dict[s
                 group[metric_name] = float(metric_value)
 
     return list(grouped.values())
+
+
+def _collect_failure_semantics_distribution(experiment_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    功能：采集研究模式下 detect 失败语义分布。 
+
+    Collect failure-semantics distribution from detect gate metadata when
+    research collection mode relaxes hard gating.
+
+    Args:
+        experiment_results: Per-run experiment summaries.
+
+    Returns:
+        Distribution payload with relaxed run count and status histogram.
+    """
+    if not isinstance(experiment_results, list):
+        raise TypeError("experiment_results must be list")
+
+    tracked_statuses = ["failed", "absent", "mismatch", "ok", "<absent>"]
+    status_counts: Dict[str, int] = {status_name: 0 for status_name in tracked_statuses}
+    relaxed_runs = 0
+
+    for item in experiment_results:
+        if not isinstance(item, dict):
+            continue
+        if not bool(item.get("detect_gate_relaxed", False)):
+            continue
+
+        relaxed_runs += 1
+        sample_counts_obj = item.get("detect_gate_sample_counts") if isinstance(item.get("detect_gate_sample_counts"), dict) else {}
+        status_value = sample_counts_obj.get("status")
+        if isinstance(status_value, str) and status_value in status_counts:
+            status_counts[status_value] += 1
+        else:
+            status_counts["<absent>"] += 1
+
+    return {
+        "scope": "detect_gate_research_collection",
+        "relaxed_run_count": relaxed_runs,
+        "status_counts": status_counts,
+    }
 
 
 def _safe_str(value: Any) -> str:

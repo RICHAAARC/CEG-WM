@@ -73,3 +73,55 @@ def test_aggregate_report_includes_ablation_group_counts() -> None:
     assert row.get("n_rejected_fail") >= 3
     assert row.get("n_rescue_triggered") == 2
     assert row.get("n_rescue_success") == 1
+
+
+def test_aggregate_report_collects_research_failure_semantics_distribution() -> None:
+    """
+    功能：研究采集模式下聚合报告必须输出失败语义分布。 
+
+    Verify aggregate report includes failure semantics distribution for relaxed detect gate runs.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    experiment_results = [
+        {
+            "grid_item_digest": "a" * 64,
+            "status": "ok",
+            "run_root": "tmp/run_relaxed_mismatch",
+            "detect_gate_relaxed": True,
+            "detect_gate_sample_counts": {"status": "mismatch"},
+            "metrics": {},
+        },
+        {
+            "grid_item_digest": "b" * 64,
+            "status": "ok",
+            "run_root": "tmp/run_relaxed_absent",
+            "detect_gate_relaxed": True,
+            "detect_gate_sample_counts": {"status": "absent"},
+            "metrics": {},
+        },
+        {
+            "grid_item_digest": "c" * 64,
+            "status": "ok",
+            "run_root": "tmp/run_hard_gate",
+            "detect_gate_relaxed": False,
+            "detect_gate_sample_counts": {"status": "failed"},
+            "metrics": {},
+        },
+    ]
+
+    report = build_aggregate_report(experiment_results)
+    distribution = report.get("failure_semantics_distribution")
+
+    assert isinstance(distribution, dict)
+    assert distribution.get("scope") == "detect_gate_research_collection"
+    assert distribution.get("relaxed_run_count") == 2
+    status_counts = distribution.get("status_counts")
+    assert isinstance(status_counts, dict)
+    assert status_counts.get("mismatch") == 1
+    assert status_counts.get("absent") == 1
+    assert status_counts.get("failed") == 0
