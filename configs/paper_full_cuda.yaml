@@ -93,3 +93,4 @@ detect_runtime:
 
 experiment_matrix:
   config_path: "configs/paper_full_cuda.yaml"
+  allow_failed_semantics_collection: true

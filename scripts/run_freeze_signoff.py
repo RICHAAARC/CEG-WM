@@ -795,6 +795,10 @@ def main() -> None:
                     "--require-compare-summary",
                     "--require-all-ok",
                 ])
+        elif relative_script == "audits/audit_repro_bundle_integrity.py":
+            extra_args = [
+                str(run_root),
+            ]
 
         result = execute_audit_script(script_path, repo_root, extra_args=extra_args)
         static_results.append(result)

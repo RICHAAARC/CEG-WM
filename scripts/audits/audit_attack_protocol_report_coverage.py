@@ -497,8 +497,12 @@ def audit_attack_protocol_report_coverage(repo_root: Path, run_root: Optional[Pa
                     "evidence": {
                         **evidence,
                         "status": "evaluation_report.json not found under bound run_root",
+                        "root_cause": "required_artifact_missing_under_bound_run_root",
+                        "expected_artifact": "artifacts/evaluation_report.json",
                         "checked_paths": [str(p) for p in eval_report_paths],
                     },
+                    "impact": "bound run_root lacks evaluation report artifact; protocol coverage cannot be verified",
+                    "fix": "rerun evaluate stage under the same --run-root to generate artifacts/evaluation_report.json",
                 }
             # 如果评测报告不存在，审计返回 N.A.（不适用，因为未运行attack protocol流程）
             return {

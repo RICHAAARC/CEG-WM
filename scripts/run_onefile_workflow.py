@@ -1056,6 +1056,135 @@ def _run_subprocess_for_step(step_command: List[str], repo_root: Path) -> int:
     return int(result.returncode)
 
 
+def _ensure_run_root_artifacts_for_strict_audits(run_root: Path) -> None:
+    """
+    功能：校验 strict 关键审计所需工件是否在当前 run_root 内存在。
+
+    Ensure run_root has mandatory artifacts required by strict bound audits.
+
+    Args:
+        run_root: Unified run_root path.
+
+    Returns:
+        None.
+
+    Raises:
+        FileNotFoundError: If required artifacts are missing.
+    """
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+
+    evaluation_report_path = run_root / "artifacts" / "evaluation_report.json"
+    if not evaluation_report_path.exists() or not evaluation_report_path.is_file():
+        raise FileNotFoundError(
+            "missing evaluation_report for strict bound audit coverage: "
+            f"{evaluation_report_path}"
+        )
+
+
+def _ensure_repro_bundle_ready_for_paper_signoff(repo_root: Path, run_root: Path, cfg_path: Path) -> None:
+    """
+    功能：在 paper signoff 前确保当前 run_root 具备可审计 repro_bundle。
+
+    Ensure repro bundle artifacts are present and valid under current run_root
+    before executing paper signoff.
+
+    Args:
+        repo_root: Repository root path.
+        run_root: Unified run_root path.
+        cfg_path: Effective runtime config path.
+
+    Returns:
+        None.
+
+    Raises:
+        RuntimeError: If repro bundle cannot be generated or validated.
+    """
+    if not isinstance(repo_root, Path):
+        raise TypeError("repo_root must be Path")
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(cfg_path, Path):
+        raise TypeError("cfg_path must be Path")
+
+    _ensure_run_root_artifacts_for_strict_audits(run_root)
+
+    bundle_manifest_path = run_root / "artifacts" / "repro_bundle" / "manifest.json"
+    bundle_pointers_path = run_root / "artifacts" / "repro_bundle" / "pointers.json"
+    if bundle_manifest_path.exists() and bundle_manifest_path.is_file() and bundle_pointers_path.exists() and bundle_pointers_path.is_file():
+        return
+
+    repro_pipeline_command = [
+        sys.executable,
+        str(repo_root / "scripts" / "run_repro_pipeline.py"),
+        "--run-root",
+        str(run_root),
+        "--config",
+        str(cfg_path),
+        "--attack-protocol",
+        str(repo_root / "configs" / "attack_protocol.yaml"),
+        "--repo-root",
+        str(repo_root),
+        "--max-samples",
+        "16",
+    ]
+    repro_result = subprocess.run(
+        repro_pipeline_command,
+        cwd=str(repo_root),
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env={
+            **os.environ,
+            "KMP_DUPLICATE_LIB_OK": os.environ.get("KMP_DUPLICATE_LIB_OK", "TRUE"),
+            "PYTHONIOENCODING": os.environ.get("PYTHONIOENCODING", "utf-8"),
+        },
+    )
+    if repro_result.returncode != 0:
+        raise RuntimeError(
+            "repro bundle preparation failed before paper signoff\n"
+            f"  - run_root: {run_root}\n"
+            f"  - command: {' '.join(repro_pipeline_command)}\n"
+            f"  - stdout_tail: {repro_result.stdout[-1000:]}\n"
+            f"  - stderr_tail: {repro_result.stderr[-1000:]}"
+        )
+
+    repro_audit_command = [
+        sys.executable,
+        str(repo_root / "scripts" / "audits" / "audit_repro_bundle_integrity.py"),
+        str(repo_root),
+        str(run_root),
+    ]
+    repro_audit_result = subprocess.run(
+        repro_audit_command,
+        cwd=str(repo_root),
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env={
+            **os.environ,
+            "PYTHONIOENCODING": os.environ.get("PYTHONIOENCODING", "utf-8"),
+        },
+    )
+    if repro_audit_result.returncode != 0:
+        raise RuntimeError(
+            "repro bundle integrity audit failed before paper signoff\n"
+            f"  - run_root: {run_root}\n"
+            f"  - command: {' '.join(repro_audit_command)}\n"
+            f"  - stdout_tail: {repro_audit_result.stdout[-1000:]}\n"
+            f"  - stderr_tail: {repro_audit_result.stderr[-1000:]}"
+        )
+
+    if not bundle_manifest_path.exists() or not bundle_manifest_path.is_file():
+        raise RuntimeError(f"repro bundle manifest missing after preparation: {bundle_manifest_path}")
+    if not bundle_pointers_path.exists() or not bundle_pointers_path.is_file():
+        raise RuntimeError(f"repro bundle pointers missing after preparation: {bundle_pointers_path}")
+
+
 def run_onefile_workflow(
     repo_root: Path,
     cfg_path: Path,
@@ -1086,6 +1215,20 @@ def run_onefile_workflow(
     experiment_matrix_retry_used = False
     for step in steps:
         step_command = list(step.command)
+        if not dry_run and step.name == "signoff" and profile == PROFILE_PAPER_FULL_CUDA:
+            try:
+                _ensure_repro_bundle_ready_for_paper_signoff(
+                    repo_root=repo_root,
+                    run_root=run_root,
+                    cfg_path=effective_cfg_path,
+                )
+            except Exception as exc:
+                print(
+                    "[onefile] repro bundle pre-signoff closure failed: "
+                    f"{type(exc).__name__}: {exc}",
+                    file=sys.stderr,
+                )
+                return 1
         if step.name in {"calibrate", "evaluate"}:
             stage_cfg_path = _prepare_stage_cfg_path(step.name, run_root, effective_cfg_path, profile)
             step_command = _build_stage_command(step.name, run_root, stage_cfg_path, profile)

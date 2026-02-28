@@ -992,8 +992,8 @@ def _extract_content_raw_scores_from_image(
         image_array = np.asarray(Image.open(image_path).convert("RGB"), dtype=np.uint8)
     except Exception:
         return None, None, {
-            "lf": {"lf_status": "fail", "lf_failure_reason": "detect_image_load_failed"},
-            "hf": {"hf_status": "fail", "hf_failure_reason": "detect_image_load_failed"},
+            "lf": {"lf_status": "failed", "lf_failure_reason": "detect_image_load_failed"},
+            "hf": {"hf_status": "failed", "hf_failure_reason": "detect_image_load_failed"},
         }
 
     plan_dict = _resolve_plan_dict(plan_payload)
@@ -1346,10 +1346,10 @@ def _evaluate_paper_faithfulness_consistency(
 
     Returns:
         Tuple of (status, absent_reasons, mismatch_reasons, fail_reasons).
-        status is one of: "ok", "absent", "mismatch", "fail".
+        status is one of: "ok", "absent", "mismatch", "failed".
         absent_reasons: list of tokens for missing required evidence (non-empty if status="absent").
         mismatch_reasons: list of tokens for inconsistent evidence (non-empty if status="mismatch").
-        fail_reasons: list of tokens for failed validation (non-empty if status="fail").
+        fail_reasons: list of tokens for failed validation (non-empty if status="failed").
 
     Raises:
         TypeError: If input_record type is invalid.
@@ -1420,9 +1420,9 @@ def _evaluate_paper_faithfulness_consistency(
     elif not isinstance(alignment_digest, str) or not alignment_digest:
         mismatch_reasons.append("alignment_digest_missing")
 
-    # (6) 决定最终 status（优先级：fail > mismatch > absent > ok）。
+    # (6) 决定最终 status（优先级：failed > mismatch > absent > ok）。
     if len(fail_reasons) > 0:
-        return "fail", absent_reasons, mismatch_reasons, fail_reasons
+        return "failed", absent_reasons, mismatch_reasons, fail_reasons
     if len(mismatch_reasons) > 0:
         return "mismatch", absent_reasons, mismatch_reasons, fail_reasons
     if len(absent_reasons) > 0:

@@ -120,3 +120,24 @@ def test_signoff_paper_protocol_compare_audit_enforces_run_root_and_all_ok() -> 
     assert "--run-root" in content
     assert "--require-compare-summary" in content
     assert "--require-all-ok" in content
+
+
+def test_signoff_paper_repro_bundle_audit_enforces_bound_run_root() -> None:
+    """
+    功能：验证 paper/publish signoff 会为 repro_bundle_integrity 审计传入 bound run_root。 
+
+    Verify run_freeze_signoff forwards positional bound run_root to
+    audit_repro_bundle_integrity.py in paper/publish profile.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    script_path = _repo_root / "scripts" / "run_freeze_signoff.py"
+    content = script_path.read_text(encoding="utf-8")
+
+    assert "elif relative_script == \"audits/audit_repro_bundle_integrity.py\"" in content
+    assert "extra_args = [" in content
+    assert "str(run_root)" in content

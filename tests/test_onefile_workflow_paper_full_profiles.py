@@ -295,6 +295,71 @@ def test_paper_full_mechanism_assertions_accept_top_level_geometry_payload(tmp_p
     assert all("detect content evidence must include anchor_digest" not in item for item in failures)
     assert all("geometry anchor_metrics must exist" not in item for item in failures)
 
+    def test_onefile_paper_profile_runs_repro_bundle_pre_signoff_closure(
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """
+        功能：验证 paper profile 在 signoff 前执行 repro_bundle 闭环准备。
+
+        Verify onefile paper profile invokes repro-bundle closure hook before signoff.
+
+        Args:
+            monkeypatch: pytest monkeypatch fixture.
+            tmp_path: Temporary path fixture.
+
+        Returns:
+            None.
+        """
+        repo_root = Path(__file__).resolve().parent.parent
+        module = _load_onefile_module(repo_root)
+
+        run_root = tmp_path / "paper_run"
+        run_root.mkdir(parents=True, exist_ok=True)
+        cfg_path = repo_root / "configs" / "paper_full_cuda.yaml"
+
+        calls = {"pre_signoff": 0, "commands": []}
+
+        def _fake_prepare_profile_cfg(_profile, _run_root, _cfg_path):
+            return cfg_path
+
+        def _fake_build_steps(_run_root, _cfg_path, _repo_root, _profile, _signoff_profile):
+            return [
+                module.WorkflowStep(
+                    name="signoff",
+                    command=["python", "scripts/run_freeze_signoff.py"],
+                    artifact_paths=[],
+                )
+            ]
+
+        def _fake_ensure_repro(repo_root, run_root, cfg_path):
+            _ = repo_root
+            _ = run_root
+            _ = cfg_path
+            calls["pre_signoff"] += 1
+
+        def _fake_run_step(step_command, _repo_root):
+            calls["commands"].append(list(step_command))
+            return 0
+
+        monkeypatch.setattr(module, "_prepare_profile_cfg_path", _fake_prepare_profile_cfg)
+        monkeypatch.setattr(module, "build_workflow_steps", _fake_build_steps)
+        monkeypatch.setattr(module, "_ensure_repro_bundle_ready_for_paper_signoff", _fake_ensure_repro)
+        monkeypatch.setattr(module, "_run_subprocess_for_step", _fake_run_step)
+
+        exit_code = module.run_onefile_workflow(
+            repo_root=repo_root,
+            cfg_path=cfg_path,
+            run_root=run_root,
+            profile="paper_full_cuda",
+            signoff_profile="paper",
+            dry_run=False,
+        )
+
+        assert exit_code == 0
+        assert calls["pre_signoff"] == 1
+        assert len(calls["commands"]) == 1
+
 
 def test_paper_full_mechanism_assertions_accept_nested_evaluation_report(tmp_path: Path) -> None:
     """

@@ -322,6 +322,7 @@ def test_execute_audit_script_forwards_run_root_to_supported_audits(
 def test_run_all_audits_strict_ignores_inferred_run_root_for_optional_audits(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """
     功能：strict 模式无显式 run_root 时不得使用推断 run_root 执行可选审计。 
@@ -388,8 +389,22 @@ def test_run_all_audits_strict_ignores_inferred_run_root_for_optional_audits(
     with pytest.raises(SystemExit) as exit_info:
         run_all_audits_module.main()
 
-    assert exit_info.value.code == 0
+    assert exit_info.value.code == 1
     assert executed_scripts == []
+
+    report_obj = json.loads(capsys.readouterr().out)
+    metadata = report_obj.get("metadata") if isinstance(report_obj, dict) else {}
+    summary = report_obj.get("summary") if isinstance(report_obj, dict) else {}
+    results = report_obj.get("results") if isinstance(report_obj, dict) else []
+    assert metadata.get("run_root_scope_mode") == "strict_unbound"
+    assert metadata.get("strict_mode") is True
+    assert summary.get("FreezeSignoffDecision") == "BLOCK_FREEZE"
+    assert any(
+        isinstance(item, dict)
+        and item.get("audit_id") == "audit.strict_requires_bound_run_root"
+        and item.get("result") == "FAIL"
+        for item in results
+    )
 
 
 def test_main_prefers_explicit_run_root_over_inferred(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -416,6 +431,7 @@ def test_main_prefers_explicit_run_root_over_inferred(monkeypatch: pytest.Monkey
     inferred_run_root = tmp_path / "inferred_run"
 
     observed_bindings = []
+    emitted_report: Dict[str, Any] = {}
 
     def _fake_infer(_repo_root):
         return inferred_run_root
@@ -436,8 +452,17 @@ def test_main_prefers_explicit_run_root_over_inferred(monkeypatch: pytest.Monkey
             "fix": "f",
         }
 
+    original_json_dumps = run_all_audits_module.json.dumps
+
+    def _capture_json_dumps(payload, *args, **kwargs):
+        nonlocal emitted_report
+        if isinstance(payload, dict):
+            emitted_report = payload
+        return original_json_dumps(payload, *args, **kwargs)
+
     monkeypatch.setattr(run_all_audits_module, "_infer_latest_run_root", _fake_infer)
     monkeypatch.setattr(run_all_audits_module, "execute_audit_script", _fake_execute)
+    monkeypatch.setattr(run_all_audits_module.json, "dumps", _capture_json_dumps)
     monkeypatch.setattr(run_all_audits_module, "AUDIT_SCRIPTS", ["audits/audit_protocol_compare_outputs_schema.py"])
 
     argv_backup = list(sys.argv)
@@ -457,6 +482,9 @@ def test_main_prefers_explicit_run_root_over_inferred(monkeypatch: pytest.Monkey
 
     assert observed_bindings, "execute_audit_script must be called"
     assert all(binding == explicit_run_root.resolve() for binding in observed_bindings)
+    metadata = emitted_report.get("metadata") if isinstance(emitted_report, dict) else {}
+    assert metadata.get("run_root_scope_mode") == "explicit_bound"
+    assert metadata.get("strict_mode") is False
 
 
 def test_main_skips_run_root_sensitive_audits_when_binding_absent(

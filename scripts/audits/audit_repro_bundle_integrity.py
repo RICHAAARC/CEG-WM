@@ -195,7 +195,21 @@ def main(repo_root_str: Optional[str] = None, run_root_str: Optional[str] = None
     if pointers_obj is not None:
         issues.extend(_validate_pointers(run_root, pointers_obj))
 
+    missing_bundle_files = [
+        issue for issue in issues
+        if isinstance(issue, str) and issue.startswith("missing_file: ")
+    ]
+    missing_bundle_artifacts_only = len(missing_bundle_files) > 0 and len(missing_bundle_files) == len(issues)
+
     if issues:
+        impact_msg = "repro bundle cannot be trusted for paper-level reproducibility"
+        fix_msg = "regenerate repro bundle and ensure pointers sha256 match referenced files"
+        root_cause = "repro_bundle_integrity_violation"
+        if missing_bundle_artifacts_only:
+            impact_msg = "bound run_root lacks repro bundle artifacts; integrity cannot be audited"
+            fix_msg = "rerun repro pipeline under the same --run-root to generate artifacts/repro_bundle/manifest.json and pointers.json"
+            root_cause = "required_artifact_missing_under_bound_run_root"
+
         result = {
             "audit_id": "audit_repro_bundle_integrity",
             "gate_name": "gate_repro_bundle_integrity",
@@ -207,10 +221,11 @@ def main(repo_root_str: Optional[str] = None, run_root_str: Optional[str] = None
                 "run_root": str(run_root),
                 "manifest_path": str(manifest_path),
                 "pointers_path": str(pointers_path),
+                "root_cause": root_cause,
                 "issues": issues[:50],
             },
-            "impact": "repro bundle cannot be trusted for paper-level reproducibility",
-            "fix": "regenerate repro bundle and ensure pointers sha256 match referenced files",
+            "impact": impact_msg,
+            "fix": fix_msg,
         }
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return 1

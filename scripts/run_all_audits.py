@@ -75,7 +75,11 @@ _RUN_ROOT_SENSITIVE_AUDIT_NA_RESULTS: Dict[str, Dict[str, str]] = {
 }
 
 
-def _build_run_root_unbound_na_result(script_name: str, repo_root: Path) -> Dict[str, Any]:
+def _build_run_root_unbound_na_result(
+    script_name: str,
+    repo_root: Path,
+    reason: str = "skip_repo_wide_scan_without_run_root",
+) -> Dict[str, Any]:
     """
     功能：在缺少 run_root 绑定时，为 run_root 敏感审计构造 N.A. 结果。
 
@@ -84,6 +88,7 @@ def _build_run_root_unbound_na_result(script_name: str, repo_root: Path) -> Dict
     Args:
         script_name: Audit script file name.
         repo_root: Repository root path.
+        reason: Deterministic reason token for unbound scope.
 
     Returns:
         Normalized audit result dictionary.
@@ -92,6 +97,8 @@ def _build_run_root_unbound_na_result(script_name: str, repo_root: Path) -> Dict
         raise TypeError("script_name must be non-empty str")
     if not isinstance(repo_root, Path):
         raise TypeError("repo_root must be Path")
+    if not isinstance(reason, str) or not reason:
+        raise TypeError("reason must be non-empty str")
 
     default_obj = _RUN_ROOT_SENSITIVE_AUDIT_NA_RESULTS.get(script_name)
     if not isinstance(default_obj, dict):
@@ -107,12 +114,77 @@ def _build_run_root_unbound_na_result(script_name: str, repo_root: Path) -> Dict
         "evidence": {
             "repo_root": str(repo_root),
             "run_root_binding": "<absent>",
-            "reason": "skip_repo_wide_scan_without_run_root",
+            "reason": reason,
             "script": script_name,
         },
         "impact": "N.A. because run_root binding is required for scope-safe audit",
         "fix": "provide --run-root or generate run_closure for auto inference",
     }
+
+
+def _build_strict_unbound_block_result(repo_root: Path) -> Dict[str, Any]:
+    """
+    功能：strict 模式未显式绑定 run_root 时构造阻断结果。
+
+    Build BLOCK audit result when strict mode is used without explicit --run-root.
+
+    Args:
+        repo_root: Repository root path.
+
+    Returns:
+        Normalized BLOCK audit result dictionary.
+    """
+    if not isinstance(repo_root, Path):
+        raise TypeError("repo_root must be Path")
+
+    return {
+        "audit_id": "audit.strict_requires_bound_run_root",
+        "gate_name": "gate.strict_requires_bound_run_root",
+        "category": "G",
+        "severity": "BLOCK",
+        "result": "FAIL",
+        "rule": "strict mode requires explicit --run-root binding",
+        "evidence": {
+            "repo_root": str(repo_root),
+            "run_root_binding": "<absent>",
+            "reason": "strict_requires_bound_run_root",
+        },
+        "impact": "strict mode without explicit scope can produce ambiguous freeze conclusions",
+        "fix": "rerun with --strict --run-root <current_run_root>",
+    }
+
+
+def _enforce_bound_run_root_in_strict_mode(
+    strict_mode: bool,
+    explicit_run_root: Optional[Path],
+    repo_root: Path,
+    all_results: List[Dict[str, Any]],
+) -> None:
+    """
+    功能：在 strict 模式下强制要求显式 run_root 绑定。
+
+    Enforce explicit run_root binding discipline for strict mode.
+
+    Args:
+        strict_mode: Whether strict mode is enabled.
+        explicit_run_root: Explicit run_root from CLI argument.
+        repo_root: Repository root path.
+        all_results: Mutable audit result list.
+
+    Returns:
+        None.
+    """
+    if not isinstance(strict_mode, bool):
+        raise TypeError("strict_mode must be bool")
+    if explicit_run_root is not None and not isinstance(explicit_run_root, Path):
+        raise TypeError("explicit_run_root must be Path or None")
+    if not isinstance(repo_root, Path):
+        raise TypeError("repo_root must be Path")
+    if not isinstance(all_results, list):
+        raise TypeError("all_results must be list")
+
+    if strict_mode and not isinstance(explicit_run_root, Path):
+        all_results.append(_build_strict_unbound_block_result(repo_root))
 
 
 def _load_spec_audit_requirements(repo_root: Path) -> Dict[str, str]:
@@ -687,13 +759,20 @@ def main():
     scripts_dir = Path(__file__).parent
     explicit_run_root = args.run_root.resolve() if isinstance(args.run_root, Path) else None
     inferred_run_root = _infer_latest_run_root(repo_root)
+    run_root_scope_mode = "unbound_no_discovery"
+    unbound_na_reason = "skip_repo_wide_scan_without_run_root"
     if isinstance(explicit_run_root, Path):
         effective_run_root = explicit_run_root
+        run_root_scope_mode = "explicit_bound"
     elif args.strict:
         # strict 模式禁止隐式推断 run_root，避免历史产物污染当前审计范围。
         effective_run_root = None
+        run_root_scope_mode = "strict_unbound"
+        unbound_na_reason = "strict_mode_requires_explicit_run_root"
     else:
         effective_run_root = inferred_run_root
+        if isinstance(inferred_run_root, Path):
+            run_root_scope_mode = "inferred_bound"
     
     # 执行所有审计脚本
     all_results = []
@@ -707,6 +786,12 @@ def main():
         strict=args.strict,
     )
     all_results.extend(closure_results)
+    _enforce_bound_run_root_in_strict_mode(
+        strict_mode=bool(args.strict),
+        explicit_run_root=explicit_run_root,
+        repo_root=repo_root,
+        all_results=all_results,
+    )
     
     for script_name in AUDIT_SCRIPTS:
         script_path = scripts_dir / script_name
@@ -726,7 +811,13 @@ def main():
             continue
 
         if effective_run_root is None and script_path.name in _RUN_ROOT_OPTIONAL_AUDITS:
-            all_results.append(_build_run_root_unbound_na_result(script_path.name, repo_root))
+            all_results.append(
+                _build_run_root_unbound_na_result(
+                    script_path.name,
+                    repo_root,
+                    reason=unbound_na_reason,
+                )
+            )
             continue
         
         audit_result = execute_audit_script(script_path, repo_root, effective_run_root)
@@ -781,6 +872,8 @@ def main():
         "metadata": {
             "repo_root": str(repo_root),
             "run_root_binding": str(effective_run_root) if isinstance(effective_run_root, Path) else "<auto_discovery_absent>",
+            "run_root_scope_mode": run_root_scope_mode,
+            "strict_mode": bool(args.strict),
             "audit_count": len(all_results),
             "audit_scripts": AUDIT_SCRIPTS,
         },

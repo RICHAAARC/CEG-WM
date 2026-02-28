@@ -382,3 +382,34 @@ def test_run_single_experiment_uses_failed_status_token_on_error(tmp_path: Path,
     summary = experiment_matrix.run_single_experiment(grid_item_cfg)
     assert summary.get("status") == "failed"
     assert "synthetic_failure" in str(summary.get("failure_reason"))
+
+
+def test_build_experiment_grid_propagates_allow_failed_semantics_collection() -> None:
+    """
+    功能：experiment_matrix 配置中的 allow_failed_semantics_collection 必须透传到每个网格项。
+
+    Verify allow_failed_semantics_collection from experiment_matrix config
+    is propagated to each grid item.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    base_cfg = {
+        "output_root": "outputs/test_matrix",
+        "run_name": "test_matrix",
+        "watermark_embed": {"num_seeds": 1},
+        "grid": {
+            "embed_grid": {"num_seeds": [1]},
+            "detect_grid": {},
+        },
+        "experiment_matrix": {
+            "allow_failed_semantics_collection": True,
+        },
+    }
+
+    grid = experiment_matrix.build_experiment_grid(base_cfg)
+    assert isinstance(grid, list) and len(grid) > 0
+    assert all(item.get("allow_failed_semantics_collection") is True for item in grid)

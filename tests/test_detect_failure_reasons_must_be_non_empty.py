@@ -72,7 +72,7 @@ def test_paper_faithfulness_consistency_mismatch_digest_absent_reasons_non_empty
         f"Expected 'paper_spec_digest_absent_or_invalid' in mismatch_reasons, got {mismatch_reasons}"
 
 
-def test_paper_faithfulness_consistency_fail_digest_fail_reasons_non_empty():
+def test_paper_faithfulness_consistency_failed_digest_fail_reasons_non_empty():
     """
     功能：测试 pipeline_fingerprint_digest 标记为 <failed> 时 fail_reasons 必须非空。
 
@@ -99,12 +99,12 @@ def test_paper_faithfulness_consistency_fail_digest_fail_reasons_non_empty():
         input_record=input_record
     )
     
-    # 断言：status 必须为 fail
-    assert status == "fail", f"Expected status='fail', got '{status}'"
+    # 断言：status 必须为 failed
+    assert status == "failed", f"Expected status='failed', got '{status}'"
     
     # 断言：fail_reasons 必须非空（必须包含 pipeline_fingerprint_digest_marked_failed）
     assert isinstance(fail_reasons, list), "fail_reasons must be list"
-    assert len(fail_reasons) > 0, "fail_reasons must be non-empty when status='fail'"
+    assert len(fail_reasons) > 0, "fail_reasons must be non-empty when status='failed'"
     assert "pipeline_fingerprint_digest_marked_failed" in fail_reasons, \
         f"Expected 'pipeline_fingerprint_digest_marked_failed' in fail_reasons, got {fail_reasons}"
 
