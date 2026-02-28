@@ -4029,9 +4029,12 @@ def _run_geometry_chain_with_sync(
     enable_attention_proxy: bool = True,
 ) -> Any:
     """
-    功能：detect 几何链先执行 sync，再执行 geometry extractor。
+    功能：detect 几何链按主辅层级执行：sync 优先，anchor 仅在 sync 成功后启用。
 
-    Run detect geometry chain with explicit sync-first orchestration.
+    Run detect geometry chain with sync-primary/anchor-secondary hard gate.
+    When sync_primary_anchor_secondary is enabled, anchor extraction is
+    gated on sync success to prevent "stable but untrustworthy" pseudo
+    geometry evidence.
 
     Args:
         impl_set: Built runtime implementation set.
@@ -4044,57 +4047,125 @@ def _run_geometry_chain_with_sync(
         raise TypeError("impl_set must be BuiltImplSet")
     if not isinstance(cfg, dict):
         raise TypeError("cfg must be dict")
-    base_inputs = _build_geometry_runtime_inputs(cfg, enable_attention_proxy=enable_attention_proxy)
-    base_inputs["sync_result"] = {
-        "status": "absent",
-        "sync_status": "pending_anchor_first",
-        "geometry_absent_reason": "sync_not_executed_yet",
-    }
 
-    if enable_anchor:
-        anchor_result = _run_geometry_extractor_with_runtime_inputs(impl_set.geometry_extractor, cfg, base_inputs)
-        if not isinstance(anchor_result, dict):
-            anchor_result = {
-                "status": "failed",
-                "geo_score": None,
-                "geometry_failure_reason": "geometry_anchor_result_non_mapping",
+    sync_primary_mode = _is_sync_primary_anchor_secondary_enabled(cfg)
+
+    if sync_primary_mode:
+        # sync_primary 模式：先执行 sync（主几何证据），再按 sync 结果门控 anchor（辅锚点）。
+        # 研究目标：Self-Attention 辅锚点仅在主同步成功后启用。
+        if enable_sync:
+            sync_base_inputs = _build_geometry_runtime_inputs(cfg, enable_attention_proxy=enable_attention_proxy)
+            sync_module = getattr(impl_set, "sync_module", None)
+            sync_result = _run_sync_module_for_detect(sync_module, cfg, sync_base_inputs)
+        else:
+            sync_result = {
+                "status": "absent",
+                "sync_status": "absent",
+                "geometry_absent_reason": "sync_disabled_by_ablation",
             }
-    else:
-        anchor_result = {
-            "status": "absent",
-            "geo_score": None,
-            "geometry_absent_reason": "anchor_disabled_by_ablation",
-            "relation_digest": None,
-            "anchor_digest": None,
-        }
 
-    if enable_sync:
-        sync_inputs = _build_geometry_runtime_inputs(
-            cfg,
-            anchor_result=anchor_result,
-            enable_attention_proxy=enable_attention_proxy,
+        sync_status = _normalize_geometry_chain_status(
+            sync_result.get("sync_status") or sync_result.get("status")
         )
-        sync_module = getattr(impl_set, "sync_module", None)
-        sync_result = _run_sync_module_for_detect(sync_module, cfg, sync_inputs)
+
+        # 辅锚点硬门控：仅当 sync 成功时才执行 anchor，
+        # 避免产出"稳定但不可信"的伪几何证据。
+        anchor_gated_out = False
+        if enable_anchor:
+            if sync_status != "ok":
+                anchor_result = {
+                    "status": "absent",
+                    "geo_score": None,
+                    "geometry_absent_reason": "anchor_gated_by_sync_failure",
+                    "anchor_gate_detail": {
+                        "gate_policy": "sync_primary_anchor_secondary_hard_gate",
+                        "sync_status": sync_status,
+                        "reason": "attention anchor suppressed because primary sync did not succeed",
+                    },
+                    "relation_digest": None,
+                    "anchor_digest": None,
+                }
+                anchor_gated_out = True
+            else:
+                base_inputs = _build_geometry_runtime_inputs(
+                    cfg,
+                    sync_result=sync_result,
+                    enable_attention_proxy=enable_attention_proxy,
+                )
+                anchor_result = _run_geometry_extractor_with_runtime_inputs(
+                    impl_set.geometry_extractor, cfg, base_inputs
+                )
+                if not isinstance(anchor_result, dict):
+                    anchor_result = {
+                        "status": "failed",
+                        "geo_score": None,
+                        "geometry_failure_reason": "geometry_anchor_result_non_mapping",
+                    }
+        else:
+            anchor_result = {
+                "status": "absent",
+                "geo_score": None,
+                "geometry_absent_reason": "anchor_disabled_by_ablation",
+                "relation_digest": None,
+                "anchor_digest": None,
+            }
+            anchor_gated_out = False
     else:
-        sync_result = {
+        # 兼容模式：先执行 anchor，再执行 sync（保持旧有排序）。
+        anchor_gated_out = False
+        base_inputs = _build_geometry_runtime_inputs(cfg, enable_attention_proxy=enable_attention_proxy)
+        base_inputs["sync_result"] = {
             "status": "absent",
-            "sync_status": "absent",
-            "geometry_absent_reason": "sync_disabled_by_ablation",
+            "sync_status": "pending_anchor_first",
+            "geometry_absent_reason": "sync_not_executed_yet",
         }
 
+        if enable_anchor:
+            anchor_result = _run_geometry_extractor_with_runtime_inputs(impl_set.geometry_extractor, cfg, base_inputs)
+            if not isinstance(anchor_result, dict):
+                anchor_result = {
+                    "status": "failed",
+                    "geo_score": None,
+                    "geometry_failure_reason": "geometry_anchor_result_non_mapping",
+                }
+        else:
+            anchor_result = {
+                "status": "absent",
+                "geo_score": None,
+                "geometry_absent_reason": "anchor_disabled_by_ablation",
+                "relation_digest": None,
+                "anchor_digest": None,
+            }
+
+        if enable_sync:
+            sync_inputs = _build_geometry_runtime_inputs(
+                cfg,
+                anchor_result=anchor_result,
+                enable_attention_proxy=enable_attention_proxy,
+            )
+            sync_module = getattr(impl_set, "sync_module", None)
+            sync_result = _run_sync_module_for_detect(sync_module, cfg, sync_inputs)
+        else:
+            sync_result = {
+                "status": "absent",
+                "sync_status": "absent",
+                "geometry_absent_reason": "sync_disabled_by_ablation",
+            }
+
+    # (3) 合并几何证据
     geometry_result = dict(anchor_result)
     if isinstance(geometry_result, dict):
         geometry_result.setdefault("sync_result", sync_result)
         geometry_result.setdefault("anchor_result", anchor_result)
         geometry_result.setdefault("anchor_status", anchor_result.get("status"))
+        geometry_result["anchor_gated_by_sync"] = anchor_gated_out
         anchor_relation_digest = anchor_result.get("relation_digest")
         if isinstance(anchor_relation_digest, str) and anchor_relation_digest:
             geometry_result.setdefault("relation_digest", anchor_relation_digest)
         if isinstance(sync_result, dict):
-            sync_status = sync_result.get("sync_status") or sync_result.get("status")
-            if isinstance(sync_status, str) and sync_status and "sync_status" not in geometry_result:
-                geometry_result["sync_status"] = sync_status
+            sync_status_val = sync_result.get("sync_status") or sync_result.get("status")
+            if isinstance(sync_status_val, str) and sync_status_val and "sync_status" not in geometry_result:
+                geometry_result["sync_status"] = sync_status_val
             if "sync_metrics" not in geometry_result:
                 geometry_result["sync_metrics"] = sync_result.get("sync_quality_metrics")
             sync_quality_semantics = sync_result.get("sync_quality_semantics")

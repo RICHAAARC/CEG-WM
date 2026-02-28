@@ -63,6 +63,9 @@ detect:
   geometry:
     enabled: true
     enable_attention_anchor: true
+    # 显式声明几何证据层级：latent sync 为主几何实现（低阶几何反演），
+    # attention anchor 仅作辅锚点（主同步成功后参与一致性评估）。
+    sync_primary_anchor_secondary: true
 
 enable_mask: true
 mask:
@@ -94,3 +97,11 @@ detect_runtime:
 experiment_matrix:
   config_path: "configs/paper_full_cuda.yaml"
   allow_failed_semantics_collection: true
+  # 默认消融变体轴：覆盖论文核心消融因子
+  # （1）仅内容链（禁用几何）  （2）仅几何链（禁用内容）
+  # （3）禁用辅锚点           （4）禁用 HF 尾截断
+  ablation_variants:
+    - { "disable_geometry_chain": true }
+    - { "disable_content_chain": true }
+    - { "disable_attention_anchor": true }
+    - { "disable_hf_tail_truncation": true }

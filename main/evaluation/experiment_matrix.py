@@ -718,9 +718,14 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
             stage_overrides.append(f"max_samples={max_samples}")
         
         # detect 阶段必须启用 content 检测（experiment_matrix 需要生成检测分数）
+        # detect 阶段的阈值回退是架构必要性：校准工件在 calibrate 阶段才产出，
+        # detect 阶段产出的阈值仅用于中间评分记录，不进入最终判决。
         if stage_name == "detect":
             stage_overrides.append("enable_content_detect=true")
             stage_overrides.append("allow_threshold_fallback_for_tests=true")
+        # embed 阶段必须禁用 content detect，防止配置驱动进入 detect 模式
+        if stage_name == "embed":
+            stage_overrides.append("disable_content_detect=true")
         
         # calibrate 和 evaluate 需要 detect_records_glob 参数
         if stage_name in ["calibrate", "evaluate"]:

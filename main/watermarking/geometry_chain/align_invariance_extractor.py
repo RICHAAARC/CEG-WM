@@ -132,10 +132,6 @@ class RobustSimilarityFitter:
                 converged = True
                 break
 
-        if not converged and iterations >= max_iterations:
-            # 达到迭代上限且数值稳定时视为可用收敛（避免将稳定近似解误判为 fail）。
-            converged = True
-
         predicted = self._predict_points(src_points, params, model_type)
         residuals = np.linalg.norm(predicted - dst_points, axis=1)
         inlier_mask = self.compute_inliers(residuals, inlier_threshold)
@@ -146,6 +142,14 @@ class RobustSimilarityFitter:
         mad_score = 1.0 - _clamp01(float(residual_stats.get("residual_mad", 1.0)))
         variance_score = 1.0 - _clamp01(float(param_uncertainty.get("param_variance_norm", 1.0)))
         fit_stability = _clamp01(0.45 * inlier_ratio + 0.30 * mad_score + 0.25 * variance_score)
+
+        if not converged and iterations >= max_iterations:
+            # 迭代上限却未数值收敛：仅当 fit_stability 超过保守阈值时
+            # 视为"有条件收敛"，否则诚实返回 converged=False，
+            # 避免抬高伪几何证据通过率。
+            _CONDITIONAL_CONVERGENCE_THRESHOLD = 0.6
+            if fit_stability >= _CONDITIONAL_CONVERGENCE_THRESHOLD and inlier_ratio >= 0.5:
+                converged = True
 
         return FitResult(
             converged=converged,

@@ -348,10 +348,22 @@ def check_geometry_anchor_completeness(repo_root: Path) -> Dict[str, Any]:
     if anchor_evidence_level is None or anchor_evidence_level in ("<absent>", "<failed>", ""):
         missing_fields.append("geometry_evidence.anchor_evidence_level")
 
+    # paper 模式下 anchor_evidence_level 不应为 proxy（已知差距审计告警）
+    anchor_evidence_level_warning = None
+    if anchor_evidence_level == "proxy":
+        anchor_evidence_level_warning = (
+            "anchor_evidence_level is 'proxy': "
+            "real_self_attention_map_not_wired_in_runtime. "
+            "Paper goal requires 'authentic' level. "
+            "此项需要真实 SD 模型 workflow 验证是否可补齐。"
+        )
+
     return {
         "check": "geometry_anchor_completeness",
         "pass": len(missing_fields) == 0,
         "missing_fields": missing_fields if missing_fields else [],
+        "anchor_evidence_level": anchor_evidence_level,
+        "anchor_evidence_level_warning": anchor_evidence_level_warning,
         "sync_status": sync_status,
         "record_file": str(record_file)
     }

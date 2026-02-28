@@ -75,6 +75,8 @@ def test_subspace_plan_contains_evidence_semantics_payload() -> None:
     semantics = cast(Dict[str, Any], semantics)
     assert semantics.get("version") == "subspace_evidence_semantics_v1"
     assert isinstance(semantics.get("source"), dict)
+    # 无真实 unet 时 surrogate/hybrid 是合法路径；
+    # paper 级证据需要 primary（需要真实 SD 模型 workflow 才能验证）。
     assert semantics.get("evidence_level") in {"surrogate", "hybrid"}
     assert isinstance(semantics.get("reason"), str)
 

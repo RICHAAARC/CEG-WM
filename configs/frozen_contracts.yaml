@@ -435,7 +435,6 @@ records_schema:
     - score_audit.fusion_rule_used
     - decision.abstain_reason
     - score_audit.abstain_triggered_by
-    # ---- 接口层字段追加（append-only） ----
     - content_evidence.mask_digest
     - content_evidence.mask_stats
     - content_evidence.mask_stats.saliency_source_selected
@@ -525,7 +524,7 @@ records_schema:
     - content_evidence.alignment_digest
     - content_evidence.lf.ecc_spec_digest
     - content_evidence.hf_evidence_summary.repetition_factor
-    # ---- 历史欠账字段补登记（append-only） ----
+    
     - artifact_sha256
     - attack_random_seed
     - attack_trace

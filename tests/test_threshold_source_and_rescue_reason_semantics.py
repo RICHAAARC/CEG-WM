@@ -50,8 +50,9 @@ class TestB1ThresholdSourceAudit:
         
         result = np_fusion.fuse(cfg, content_evidence, geometry_evidence)
         
-        # 验证：threshold_source 应为 "artifact"
-        assert result.audit.get("threshold_source") == "artifact"
+        # 验证：当 artifact 来自 NP 校准工件时，threshold_source 标记为 np_canonical，
+        # 与冻结决策门 threshold_source=np_canonical 约束对齐。
+        assert result.audit.get("threshold_source") == "np_canonical"
         # 验证：used_threshold_value 应来自 artifact
         assert result.audit.get("used_threshold_value") == 0.5
     

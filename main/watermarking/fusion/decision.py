@@ -77,7 +77,9 @@ def get_np_threshold(cfg: Dict[str, Any], thresholds_spec: Dict[str, Any]) -> Tu
 
     thresholds_artifact = cfg.get("__thresholds_artifact__")
     if isinstance(thresholds_artifact, dict):
-        return select_np_threshold_from_artifact(thresholds_artifact), "artifact", False
+        # 阈值来自 NP 校准工件时，threshold_source 标记为 np_canonical，
+        # 与冻结决策门 threshold_source=np_canonical 约束对齐。
+        return select_np_threshold_from_artifact(thresholds_artifact), "np_canonical", False
 
     fallback_enabled_for_tests = bool(cfg.get("allow_threshold_fallback_for_tests", False))
     if not fallback_enabled_for_tests:
