@@ -345,3 +345,40 @@ def test_detect_gate_research_collection_mode_relaxes_and_records_metadata(tmp_p
     assert gate_info.get("reason") == "insufficient_valid_content_score_samples_research_collection_mode"
     assert isinstance(gate_info.get("sample_counts"), dict)
     assert gate_info["sample_counts"].get("valid_content_score_samples") == 0
+
+
+def test_run_single_experiment_uses_failed_status_token_on_error(tmp_path: Path, monkeypatch) -> None:
+    """
+    功能：单实验异常时状态口径必须为 failed（禁止 legacy fail）。
+
+    Verify run_single_experiment returns status="failed" when execution raises.
+
+    Args:
+        tmp_path: pytest temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    monkeypatch.setattr(experiment_matrix, "_derive_run_root", lambda _cfg: tmp_path / "run")
+
+    def _raise_stage_error(_grid_item_cfg, _run_root):
+        raise RuntimeError("synthetic_failure")
+
+    monkeypatch.setattr(experiment_matrix, "_run_stage_sequence", _raise_stage_error)
+
+    grid_item_cfg = {
+        "grid_index": 0,
+        "grid_item_digest": "d" * 64,
+        "cfg_digest": "c" * 64,
+        "ablation_digest": "a" * 64,
+        "attack_protocol_digest": "p" * 64,
+        "attack_protocol_version": "attack_protocol_v1",
+        "attack_protocol_family": "rotate",
+        "model_id": "model_a",
+        "seed": 1,
+    }
+
+    summary = experiment_matrix.run_single_experiment(grid_item_cfg)
+    assert summary.get("status") == "failed"
+    assert "synthetic_failure" in str(summary.get("failure_reason"))

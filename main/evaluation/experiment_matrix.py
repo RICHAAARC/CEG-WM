@@ -155,7 +155,7 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
         "model_id": _safe_str(grid_item_cfg.get("model_id")),
         "seed": grid_item_cfg.get("seed") if isinstance(grid_item_cfg.get("seed"), int) else None,
         "attack_family": _safe_str(grid_item_cfg.get("attack_protocol_family")),
-        "status": "fail",
+        "status": "failed",
         "failure_reason": "<absent>",
         "cfg_digest": _safe_str(grid_item_cfg.get("cfg_digest")),
         "plan_digest": "<absent>",
@@ -258,7 +258,7 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
         _enforce_paper_acceptance_gate(summary=summary, grid_item_cfg=grid_item_cfg, run_root=run_root)
     except Exception as exc:
         # 单实验执行失败，必须记录失败原因并返回。
-        summary["status"] = "fail"
+        summary["status"] = "failed"
         summary["failure_reason"] = f"{type(exc).__name__}: {exc}"
         summary["detect_gate_relaxed"] = bool(detect_gate_info.get("gate_relaxed", False))
         summary["detect_gate_relax_reason"] = _safe_str(detect_gate_info.get("reason"))
@@ -349,19 +349,19 @@ def _enforce_paper_acceptance_gate(summary: Dict[str, Any], grid_item_cfg: Dict[
     t2smark_comparison = summary.get("t2smark_comparison") if isinstance(summary.get("t2smark_comparison"), dict) else {}
 
     if bool(pipeline_runtime_meta.get("synthetic_pipeline", False)):
-        summary["status"] = "fail"
+        summary["status"] = "failed"
         summary["failure_reason"] = "paper_acceptance_failed: synthetic_pipeline_true"
         return
     if detect_runtime_mode != "real":
-        summary["status"] = "fail"
+        summary["status"] = "failed"
         summary["failure_reason"] = f"paper_acceptance_failed: detect_runtime_mode={detect_runtime_mode}"
         return
     if isinstance(geo_available_rate, (int, float)) and float(geo_available_rate) == 0.0:
-        summary["status"] = "fail"
+        summary["status"] = "failed"
         summary["failure_reason"] = "paper_acceptance_failed: geo_available_rate_zero"
         return
     if not bool(t2smark_comparison.get("comparison_ready", False)):
-        summary["status"] = "fail"
+        summary["status"] = "failed"
         summary["failure_reason"] = "paper_acceptance_failed: real_t2smark_baseline_missing"
 
 
