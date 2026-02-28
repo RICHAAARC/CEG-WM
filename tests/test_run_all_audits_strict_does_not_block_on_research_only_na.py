@@ -9,6 +9,8 @@ from typing import Dict, Any, List
 import pytest
 import importlib.util
 from pathlib import Path
+import json
+import sys
 
 
 def validate_audit_result_strict_safe(result: Dict[str, Any]) -> List[str]:
@@ -244,3 +246,220 @@ def test_infer_latest_run_root_prefers_latest_closure(tmp_path: Path) -> None:
 
     inferred = run_all_audits_module._infer_latest_run_root(repo_root)
     assert inferred == newer.parent
+
+
+def test_execute_audit_script_forwards_run_root_to_supported_audits(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：验证 run_all_audits 对支持 run_root 的审计脚本传递 --run-root。 
+
+    Verify execute_audit_script forwards --run-root to protocol_compare,
+    attack_coverage, and experiment_matrix schema audits when bound_run_root is provided.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+
+    Returns:
+        None.
+    """
+    repo_script = Path(__file__).resolve().parent.parent / "scripts" / "run_all_audits.py"
+    spec = importlib.util.spec_from_file_location("run_all_audits_module_forward", repo_script)
+    assert spec is not None and spec.loader is not None
+    run_all_audits_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(run_all_audits_module)
+
+    captured_commands = []
+
+    class _Result:
+        def __init__(self) -> None:
+            self.returncode = 0
+            self.stdout = json.dumps({
+                "audit_id": "x",
+                "gate_name": "g",
+                "category": "G",
+                "severity": "NON_BLOCK",
+                "result": "PASS",
+                "rule": "r",
+                "evidence": {},
+                "impact": "i",
+                "fix": "f",
+            }).encode("utf-8")
+            self.stderr = b""
+
+    def _fake_run(command, capture_output, text, env, timeout):
+        _ = capture_output
+        _ = text
+        _ = env
+        _ = timeout
+        captured_commands.append(list(command))
+        return _Result()
+
+    monkeypatch.setattr(run_all_audits_module.subprocess, "run", _fake_run)
+
+    repo_root = Path(__file__).resolve().parent.parent
+    bound_run_root = tmp_path / "bound_run"
+    protocol_script = repo_root / "scripts" / "audits" / "audit_protocol_compare_outputs_schema.py"
+    coverage_script = repo_root / "scripts" / "audits" / "audit_attack_protocol_report_coverage.py"
+    matrix_script = repo_root / "scripts" / "audits" / "audit_experiment_matrix_outputs_schema.py"
+
+    protocol_result = run_all_audits_module.execute_audit_script(protocol_script, repo_root, bound_run_root)
+    coverage_result = run_all_audits_module.execute_audit_script(coverage_script, repo_root, bound_run_root)
+    matrix_result = run_all_audits_module.execute_audit_script(matrix_script, repo_root, bound_run_root)
+
+    assert protocol_result is not None
+    assert coverage_result is not None
+    assert matrix_result is not None
+    assert len(captured_commands) == 3
+
+    for command in captured_commands:
+        assert "--run-root" in command
+        run_root_index = command.index("--run-root")
+        assert command[run_root_index + 1] == str(bound_run_root)
+
+
+def test_main_prefers_explicit_run_root_over_inferred(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """
+    功能：验证 --run-root 显式参数优先于自动推断。 
+
+    Verify explicit --run-root binding is used instead of inferred run_root.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+        tmp_path: Temporary directory fixture.
+
+    Returns:
+        None.
+    """
+    repo_script = Path(__file__).resolve().parent.parent / "scripts" / "run_all_audits.py"
+    spec = importlib.util.spec_from_file_location("run_all_audits_module_main", repo_script)
+    assert spec is not None and spec.loader is not None
+    run_all_audits_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(run_all_audits_module)
+
+    repo_root = Path(__file__).resolve().parent.parent
+    explicit_run_root = tmp_path / "explicit_run"
+    inferred_run_root = tmp_path / "inferred_run"
+
+    observed_bindings = []
+
+    def _fake_infer(_repo_root):
+        return inferred_run_root
+
+    def _fake_execute(script_path, repo_root_arg, bound_run_root):
+        _ = script_path
+        _ = repo_root_arg
+        observed_bindings.append(bound_run_root)
+        return {
+            "audit_id": "x",
+            "gate_name": "g",
+            "category": "G",
+            "severity": "NON_BLOCK",
+            "result": "PASS",
+            "rule": "r",
+            "evidence": {},
+            "impact": "i",
+            "fix": "f",
+        }
+
+    monkeypatch.setattr(run_all_audits_module, "_infer_latest_run_root", _fake_infer)
+    monkeypatch.setattr(run_all_audits_module, "execute_audit_script", _fake_execute)
+    monkeypatch.setattr(run_all_audits_module, "AUDIT_SCRIPTS", ["audits/audit_protocol_compare_outputs_schema.py"])
+
+    argv_backup = list(sys.argv)
+    try:
+        sys.argv = [
+            str(repo_script),
+            "--repo-root",
+            str(repo_root),
+            "--run-root",
+            str(explicit_run_root),
+        ]
+        with pytest.raises(SystemExit) as exc_info:
+            run_all_audits_module.main()
+        assert exc_info.value.code == 0
+    finally:
+        sys.argv = argv_backup
+
+    assert observed_bindings, "execute_audit_script must be called"
+    assert all(binding == explicit_run_root.resolve() for binding in observed_bindings)
+
+
+def test_main_skips_run_root_sensitive_audits_when_binding_absent(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """
+    功能：当未提供且无法推断 run_root 时，run_root 敏感审计必须返回 N.A.，不得仓库级扫描。
+
+    Verify run_root-sensitive audits are not executed when run_root binding is absent.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+        capsys: pytest stdout/stderr capture fixture.
+
+    Returns:
+        None.
+    """
+    repo_script = Path(__file__).resolve().parent.parent / "scripts" / "run_all_audits.py"
+    spec = importlib.util.spec_from_file_location("run_all_audits_module_scope", repo_script)
+    assert spec is not None and spec.loader is not None
+    run_all_audits_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(run_all_audits_module)
+
+    observed_scripts = []
+
+    def _fake_infer(_repo_root):
+        return None
+
+    def _fake_execute(script_path, repo_root_arg, bound_run_root):
+        _ = repo_root_arg
+        observed_scripts.append((script_path.name, bound_run_root))
+        return {
+            "audit_id": "audit_freeze_surface_integrity",
+            "gate_name": "gate.freeze_surface_integrity",
+            "category": "G",
+            "severity": "BLOCK",
+            "result": "PASS",
+            "rule": "r",
+            "evidence": {},
+            "impact": "i",
+            "fix": "f",
+        }
+
+    monkeypatch.setattr(run_all_audits_module, "_infer_latest_run_root", _fake_infer)
+    monkeypatch.setattr(run_all_audits_module, "execute_audit_script", _fake_execute)
+    monkeypatch.setattr(
+        run_all_audits_module,
+        "AUDIT_SCRIPTS",
+        [
+            "audits/audit_protocol_compare_outputs_schema.py",
+            "audits/audit_attack_protocol_report_coverage.py",
+            "audits/audit_experiment_matrix_outputs_schema.py",
+            "audits/audit_freeze_surface_integrity.py",
+        ],
+    )
+
+    argv_backup = list(sys.argv)
+    try:
+        sys.argv = [
+            str(repo_script),
+            "--repo-root",
+            str(Path(__file__).resolve().parent.parent),
+        ]
+        with pytest.raises(SystemExit) as exc_info:
+            run_all_audits_module.main()
+        assert exc_info.value.code == 0
+    finally:
+        sys.argv = argv_backup
+
+    captured = capsys.readouterr().out
+    assert "skip_repo_wide_scan_without_run_root" in captured
+    assert "audit_protocol_compare_outputs_schema" in captured
+    assert "audit.attack_protocol_report_coverage" in captured
+    assert "experiment_matrix.outputs_schema" in captured
+
+    assert observed_scripts == [
+        ("audit_freeze_surface_integrity.py", None),
+    ]

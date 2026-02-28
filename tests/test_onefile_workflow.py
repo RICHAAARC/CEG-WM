@@ -9,6 +9,7 @@ import importlib.util
 from pathlib import Path
 from typing import Any, List
 import sys
+import json
 
 import pytest
 import yaml
@@ -113,6 +114,12 @@ def test_onefile_workflow_builds_commands_and_fail_fast(monkeypatch: pytest.Monk
 
     assert observed_order == expected_order
     assert any("--strict" in command for command in calls), "strict 审计步骤必须存在"
+    audit_commands = [command for command in calls if "run_all_audits.py" in " ".join(command)]
+    assert len(audit_commands) == 2, "must execute audits and audits_strict"
+    for audit_command in audit_commands:
+        assert "--run-root" in audit_command, "audits command must bind current run_root"
+        run_root_arg_idx = audit_command.index("--run-root")
+        assert audit_command[run_root_arg_idx + 1] == str(run_root)
     detect_commands = [command for command in calls if "-m" in command and "main.cli.run_detect" in command]
     assert detect_commands, "detect command must be present"
     assert "allow_threshold_fallback_for_tests=true" in detect_commands[0]
@@ -250,3 +257,102 @@ def test_onefile_workflow_paper_full_profile_fails_fast_on_mismatched_impl(tmp_p
 
     with pytest.raises(ValueError, match="paper_full_cuda requires impl.sync_module_id"):
         module._prepare_profile_cfg_path("paper_full_cuda", run_root, cfg_path)
+
+
+def test_resolve_default_signoff_profile_for_profile() -> None:
+    """
+    功能：验证 signoff profile 默认解析策略。
+
+    Validate default signoff profile resolution by workflow profile.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    assert module._resolve_default_signoff_profile_for_profile("cpu_smoke", None) == "baseline"
+    assert module._resolve_default_signoff_profile_for_profile("paper_full_cuda", None) == "paper"
+    assert module._resolve_default_signoff_profile_for_profile("paper_full_cuda", "publish") == "publish"
+
+
+def test_build_stage_overrides_sets_embed_detect_content_switch() -> None:
+    """
+    功能：验证 embed/detect 阶段 content detect 开关显式写入 override。
+
+    Validate explicit content detect switch overrides for embed and detect stages.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    embed_overrides = module._build_stage_overrides("embed", "paper_full_cuda")
+    detect_overrides = module._build_stage_overrides("detect", "paper_full_cuda")
+
+    assert "disable_content_detect=true" in embed_overrides
+    assert "enable_content_detect=true" in detect_overrides
+
+
+def test_validate_multi_protocol_compare_summary_rejects_failed_protocol(tmp_path: Path) -> None:
+    """
+    功能：验证 compare summary 含失败协议时触发阻断。
+
+    Validate compare summary validation fails when protocol status is not ok.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    compare_summary_path = tmp_path / "compare_summary.json"
+    compare_summary_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "protocol_compare_v1",
+                "protocols": [{"status": "ok"}, {"status": "fail"}],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="failed protocols"):
+        module._validate_multi_protocol_compare_summary(compare_summary_path)
+
+
+def test_validate_multi_protocol_compare_summary_accepts_all_ok(tmp_path: Path) -> None:
+    """
+    功能：验证 compare summary 全部成功时通过校验。
+
+    Validate compare summary validation passes when all protocols are ok.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    compare_summary_path = tmp_path / "compare_summary.json"
+    compare_summary_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "protocol_compare_v1",
+                "protocols": [{"status": "ok"}],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    module._validate_multi_protocol_compare_summary(compare_summary_path)

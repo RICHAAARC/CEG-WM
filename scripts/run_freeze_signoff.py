@@ -40,6 +40,8 @@ from main.core.records_io import write_artifact_json_unbound, write_artifact_byt
 
 SIGNOFF_REPORT_SCHEMA_VERSION = "v1"
 MATRIX_SCHEMA_AUDIT_SCRIPT = "audits/audit_experiment_matrix_outputs_schema.py"
+PROTOCOL_COMPARE_SCHEMA_AUDIT_SCRIPT = "audits/audit_protocol_compare_outputs_schema.py"
+ATTACK_PROTOCOL_REPORT_COVERAGE_AUDIT_SCRIPT = "audits/audit_attack_protocol_report_coverage.py"
 
 # Baseline 最小审计集合（历史兼容，13 个审计）
 MINIMUM_AUDIT_SCRIPTS = [
@@ -64,6 +66,7 @@ PAPER_PROFILE_ADDITIONAL_AUDITS = [
     "audits/audit_attack_protocol_report_coverage.py",     # 协议—报告覆盖率对齐（paper/publish BLOCK）
     "audits/audit_repro_bundle_integrity.py",              # repro bundle 完整性校验（paper/publish BLOCK）
     MATRIX_SCHEMA_AUDIT_SCRIPT,                             # experiment matrix 汇总工件 schema 门禁（paper/publish BLOCK）
+    PROTOCOL_COMPARE_SCHEMA_AUDIT_SCRIPT,                   # protocol compare 汇总工件 schema 门禁（paper/publish BLOCK）
 ]
 
 
@@ -777,6 +780,21 @@ def main() -> None:
                 extra_args.append("--require-experiment-matrix")
             else:
                 extra_args.append("--no-require-experiment-matrix")
+        elif relative_script == ATTACK_PROTOCOL_REPORT_COVERAGE_AUDIT_SCRIPT:
+            extra_args = [
+                "--run-root",
+                str(run_root),
+            ]
+        elif relative_script == PROTOCOL_COMPARE_SCHEMA_AUDIT_SCRIPT:
+            extra_args = [
+                "--run-root",
+                str(run_root),
+            ]
+            if args.signoff_profile.lower().strip() in {"paper", "publish"}:
+                extra_args.extend([
+                    "--require-compare-summary",
+                    "--require-all-ok",
+                ])
 
         result = execute_audit_script(script_path, repo_root, extra_args=extra_args)
         static_results.append(result)

@@ -1785,7 +1785,6 @@ def _validate_semantic_driven_execution(
                         field_path="execution_report"
                     )
             else:
-                allowed_status = {"ok", "fail", "absent"}
                 status_fields = [
                     "content_chain_status",
                     "geometry_chain_status",
@@ -1793,9 +1792,11 @@ def _validate_semantic_driven_execution(
                 ]
                 for field_name in status_fields:
                     value = execution_report.get(field_name)
-                    if value not in allowed_status:
+                    try:
+                        _normalize_execution_report_chain_status(value, f"execution_report.{field_name}")
+                    except ValueError as exc:
                         msg = (
-                            f"[执行语义门禁] execution_report.{field_name} must be one of {sorted(allowed_status)}"
+                            f"[执行语义门禁] {exc}"
                         )
                         if warn_mode:
                             print(f"[FreezeGate][WARN] {msg}")
@@ -1975,6 +1976,36 @@ def _validate_semantic_driven_execution(
                     gate_name="decision.type_check",
                     field_path=decision_field_path
                 )
+
+
+def _normalize_execution_report_chain_status(raw_status: Any, field_path: str) -> str:
+    """
+    功能：归一化 execution_report 链路状态并阻断非规范值。
+
+    Normalize execution_report chain status and reject non-canonical variants.
+
+    Args:
+        raw_status: Raw status token.
+        field_path: Field path for error context.
+
+    Returns:
+        Canonical status token in {ok, failed, absent}.
+
+    Raises:
+        TypeError: If field_path is invalid.
+        ValueError: If status token is missing or non-canonical.
+    """
+    if not isinstance(field_path, str) or not field_path:
+        raise TypeError("field_path must be non-empty str")
+    if not isinstance(raw_status, str) or not raw_status:
+        raise ValueError(f"{field_path} must be non-empty str in {{'ok','failed','absent'}}")
+
+    normalized = raw_status.strip().lower()
+    if normalized == "fail":
+        raise ValueError(f"{field_path} uses deprecated status 'fail'; use 'failed'")
+    if normalized not in {"ok", "failed", "absent"}:
+        raise ValueError(f"{field_path} must be one of ['absent', 'failed', 'ok']")
+    return normalized
 
 
 def _check_field_override_conflict(

@@ -325,9 +325,96 @@ def _build_stage_overrides(stage_name: str, profile: str) -> List[str]:
             ]
         )
 
+    if stage_name == "embed":
+        overrides.append("disable_content_detect=true")
     if stage_name == "detect":
+        overrides.append("enable_content_detect=true")
         overrides.append("allow_threshold_fallback_for_tests=true")
     return overrides
+
+
+def _resolve_default_signoff_profile_for_profile(profile: str, provided_signoff_profile: str | None) -> str:
+    """
+    功能：按执行 profile 解析 signoff profile 默认值。
+
+    Resolve effective signoff profile by workflow profile with safe defaults.
+
+    Args:
+        profile: Workflow profile.
+        provided_signoff_profile: Optional user provided signoff profile.
+
+    Returns:
+        Effective signoff profile in {baseline, paper, publish}.
+
+    Raises:
+        TypeError: If input type is invalid.
+        ValueError: If provided signoff profile is unsupported.
+    """
+    if not isinstance(profile, str) or not profile:
+        raise TypeError("profile must be non-empty str")
+    if provided_signoff_profile is not None and not isinstance(provided_signoff_profile, str):
+        raise TypeError("provided_signoff_profile must be str or None")
+
+    normalized_profile = _normalize_profile(profile)
+    allowed_signoff_profiles = {"baseline", "paper", "publish"}
+
+    if isinstance(provided_signoff_profile, str) and provided_signoff_profile.strip():
+        normalized_signoff_profile = provided_signoff_profile.strip().lower()
+        if normalized_signoff_profile not in allowed_signoff_profiles:
+            raise ValueError(f"unsupported signoff_profile: {provided_signoff_profile}")
+        return normalized_signoff_profile
+
+    if normalized_profile == PROFILE_PAPER_FULL_CUDA:
+        return "paper"
+    return "baseline"
+
+
+def _validate_multi_protocol_compare_summary(compare_summary_path: Path) -> None:
+    """
+    功能：校验 multi protocol compare_summary 的成功闭环语义。
+
+    Validate protocol compare summary semantics instead of existence-only checks.
+
+    Args:
+        compare_summary_path: Path to compare_summary.json.
+
+    Returns:
+        None.
+
+    Raises:
+        TypeError: If input type is invalid.
+        ValueError: If summary file is missing, malformed, or contains failed protocol items.
+    """
+    if not isinstance(compare_summary_path, Path):
+        raise TypeError("compare_summary_path must be Path")
+    if not compare_summary_path.exists() or not compare_summary_path.is_file():
+        raise ValueError(f"compare summary not found: {compare_summary_path}")
+
+    compare_obj = json.loads(compare_summary_path.read_text(encoding="utf-8"))
+    if not isinstance(compare_obj, dict):
+        raise ValueError("compare summary root must be dict")
+
+    schema_version = compare_obj.get("schema_version")
+    if not isinstance(schema_version, str) or schema_version != "protocol_compare_v1":
+        raise ValueError(f"compare summary schema_version invalid: {schema_version}")
+
+    protocols_obj = compare_obj.get("protocols")
+    if not isinstance(protocols_obj, list) or len(protocols_obj) == 0:
+        raise ValueError("compare summary protocols must be non-empty list")
+
+    failed_protocols = 0
+    for protocol_item in protocols_obj:
+        if not isinstance(protocol_item, dict):
+            failed_protocols += 1
+            continue
+        status_value = protocol_item.get("status")
+        if status_value != "ok":
+            failed_protocols += 1
+
+    if failed_protocols > 0:
+        raise ValueError(
+            f"compare summary contains failed protocols: failed={failed_protocols}, total={len(protocols_obj)}"
+        )
 
 
 def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> Path:
@@ -773,7 +860,14 @@ def build_workflow_steps(
     steps.extend([
         WorkflowStep(
             name="audits",
-            command=[sys.executable, str(scripts_dir / "run_all_audits.py"), "--repo-root", str(repo_root)],
+            command=[
+                sys.executable,
+                str(scripts_dir / "run_all_audits.py"),
+                "--repo-root",
+                str(repo_root),
+                "--run-root",
+                str(run_root),
+            ],
             artifact_paths=[],
         ),
         WorkflowStep(
@@ -783,6 +877,8 @@ def build_workflow_steps(
                 str(scripts_dir / "run_all_audits.py"),
                 "--repo-root",
                 str(repo_root),
+                "--run-root",
+                str(run_root),
                 "--strict",
             ],
             artifact_paths=[],
@@ -1006,6 +1102,18 @@ def run_onefile_workflow(
         if return_code != 0:
             return return_code
 
+        if step.name == "multi_protocol_evaluation" and profile == PROFILE_PAPER_FULL_CUDA and step.artifact_paths:
+            compare_summary_path = step.artifact_paths[0]
+            try:
+                _validate_multi_protocol_compare_summary(compare_summary_path)
+            except Exception as exc:
+                print(
+                    f"[onefile] multi_protocol compare summary validation failed: "
+                    f"{type(exc).__name__}: {exc}",
+                    file=sys.stderr,
+                )
+                return 1
+
         if step.name == "experiment_matrix" and profile == PROFILE_PAPER_FULL_CUDA and step.artifact_paths:
             summary_path = step.artifact_paths[0]
             try:
@@ -1079,7 +1187,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--signoff-profile",
-        default="baseline",
+        default=None,
         choices=["baseline", "paper", "publish"],
         help="Signoff profile passed to run_freeze_signoff.py",
     )
@@ -1115,6 +1223,8 @@ def main() -> None:
     print(f"[onefile] repo_root={repo_root}")
     print(f"[onefile] cfg={cfg_path}")
     print(f"[onefile] profile={args.profile}")
+    resolved_signoff_profile = _resolve_default_signoff_profile_for_profile(args.profile, args.signoff_profile)
+    print(f"[onefile] signoff_profile={resolved_signoff_profile}")
     print(f"[onefile] device={args.device}")
     print(f"[onefile] run_root={run_root}")
     print(f"[onefile] dry_run={args.dry_run}")
@@ -1146,7 +1256,7 @@ def main() -> None:
         cfg_path=cfg_path,
         run_root=run_root,
         profile=args.profile,
-        signoff_profile=args.signoff_profile,
+        signoff_profile=resolved_signoff_profile,
         dry_run=bool(args.dry_run),
     )
     sys.exit(return_code)

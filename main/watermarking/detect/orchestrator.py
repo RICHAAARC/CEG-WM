@@ -659,6 +659,12 @@ def run_detect_orchestrator(
 
     plan_digest_mismatch_reason = plan_digest_reason if plan_digest_reason == "plan_digest_mismatch" else None
 
+    execution_report = _derive_execution_report_from_chain_states(
+        content_evidence_payload=content_evidence_payload,
+        geometry_evidence_payload=geometry_evidence_payload,
+        fusion_result=fusion_result,
+    )
+
     record: Dict[str, Any] = {
         "operation": "detect",
         "detect_runtime_mode": detect_runtime_mode,
@@ -666,12 +672,7 @@ def run_detect_orchestrator(
         "detect_runtime_is_fallback": (detect_runtime_mode != "real"),
         "image_path": "<absent>",
         "score": getattr(fusion_result, "evidence_summary", {}).get("content_score"),
-        "execution_report": {
-            "content_chain_status": "fail" if forced_mismatch else "ok",
-            "geometry_chain_status": "ok",
-            "fusion_status": "fail" if forced_mismatch else "ok",
-            "audit_obligations_satisfied": True
-        },
+        "execution_report": execution_report,
         "input_record_fields": input_fields,
         "plan_digest_expected": expected_plan_digest,
         "plan_digest_observed": detect_time_plan_digest,
@@ -694,6 +695,77 @@ def run_detect_orchestrator(
         }
     }
     return record
+
+
+def _normalize_execution_chain_status(raw_status: Any) -> str:
+    """
+    功能：将链路状态归一化到 ok/absent/failed 三态。
+
+    Normalize execution-chain status into canonical enum {ok, absent, failed}.
+
+    Args:
+        raw_status: Raw status token from runtime payload.
+
+    Returns:
+        Canonical status token.
+    """
+    if not isinstance(raw_status, str) or not raw_status:
+        return "failed"
+    normalized = raw_status.strip().lower()
+    if normalized == "fail":
+        return "failed"
+    if normalized in {"failed", "error", "mismatch"}:
+        return "failed"
+    if normalized in {"absent", "none", "disabled", "not_applicable"}:
+        return "absent"
+    if normalized in {"ok", "synced", "accepted", "rejected", "abstain"}:
+        return "ok"
+    return "failed"
+
+
+def _derive_execution_report_from_chain_states(
+    content_evidence_payload: Any,
+    geometry_evidence_payload: Any,
+    fusion_result: Any,
+) -> Dict[str, Any]:
+    """
+    功能：由 content/geometry/fusion 实际状态推导 execution_report。
+
+    Derive execution_report from actual chain payloads instead of hardcoded statuses.
+
+    Args:
+        content_evidence_payload: Content evidence payload mapping.
+        geometry_evidence_payload: Geometry evidence payload mapping.
+        fusion_result: Fusion decision object.
+
+    Returns:
+        Canonical execution_report mapping.
+    """
+    content_status_raw = None
+    if isinstance(content_evidence_payload, dict):
+        content_status_raw = content_evidence_payload.get("status")
+    content_chain_status = _normalize_execution_chain_status(content_status_raw)
+
+    geometry_status_raw = None
+    if isinstance(geometry_evidence_payload, dict):
+        geometry_status_raw = geometry_evidence_payload.get("status")
+        if geometry_status_raw is None:
+            geometry_status_raw = geometry_evidence_payload.get("sync_status")
+    geometry_chain_status = _normalize_execution_chain_status(geometry_status_raw)
+
+    fusion_status_raw = None
+    if hasattr(fusion_result, "decision_status"):
+        fusion_status_raw = getattr(fusion_result, "decision_status")
+    fusion_chain_status = _normalize_execution_chain_status(fusion_status_raw)
+    if fusion_chain_status == "failed" and content_chain_status == "ok" and geometry_chain_status == "ok":
+        fusion_chain_status = "ok"
+
+    return {
+        "content_chain_status": content_chain_status,
+        "geometry_chain_status": geometry_chain_status,
+        "fusion_status": fusion_chain_status,
+        "audit_obligations_satisfied": True,
+    }
 
 
 def _resolve_cfg_plan_digest(cfg: Dict[str, Any]) -> Optional[str]:
@@ -2050,6 +2122,9 @@ def run_calibrate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> D
     detect_records = _load_records_for_calibration(cfg)
     scores, strata_info = load_scores_for_calibration(detect_records)
     threshold_value, order_stat_info = compute_np_threshold(scores, float(target_fpr))
+    sampling_policy = strata_info.get("sampling_policy") if isinstance(strata_info.get("sampling_policy"), dict) else {}
+    null_source = sampling_policy.get("null_source") if isinstance(sampling_policy.get("null_source"), str) else "<absent>"
+    n_selected_null = sampling_policy.get("n_selected_null") if isinstance(sampling_policy.get("n_selected_null"), int) else len(scores)
 
     threshold_key_used = neyman_pearson.format_fpr_key_canonical(float(target_fpr))
     threshold_id = f"content_score_np_{threshold_key_used}"
@@ -2072,8 +2147,8 @@ def run_calibrate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> D
         "method": "neyman_pearson_v1",
         "score_name": "content_score",
         "target_fpr": float(target_fpr),
-        "null_source": "wrong_key",
-        "n_null": len(scores),
+        "null_source": null_source,
+        "n_null": n_selected_null,
         "n_samples": len(scores),
         "calibration_date": "1970-01-01",
         "quantile_method": "higher",
@@ -2556,6 +2631,21 @@ def load_scores_for_calibration(records: list[Dict[str, Any]]) -> tuple[list[flo
     total = len(records)
     valid = 0
     rejected = 0
+    rejected_label_missing = 0
+    rejected_label_positive = 0
+
+    has_explicit_labels = False
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+        if _resolve_calibration_label(item) is not None:
+            has_explicit_labels = True
+            break
+
+    null_source = "status_ok_unlabeled_detect_records"
+    if has_explicit_labels:
+        null_source = "label_false_from_detect_records"
+
     for item in records:
         if not isinstance(item, dict):
             rejected += 1
@@ -2576,6 +2666,18 @@ def load_scores_for_calibration(records: list[Dict[str, Any]]) -> tuple[list[flo
         if not np.isfinite(score_float):
             rejected += 1
             continue
+
+        if has_explicit_labels:
+            resolved_label = _resolve_calibration_label(item)
+            if resolved_label is None:
+                rejected += 1
+                rejected_label_missing += 1
+                continue
+            if resolved_label is True:
+                rejected += 1
+                rejected_label_positive += 1
+                continue
+
         scores.append(score_float)
         valid += 1
 
@@ -2587,9 +2689,38 @@ def load_scores_for_calibration(records: list[Dict[str, Any]]) -> tuple[list[flo
             "n_total": total,
             "n_valid": valid,
             "n_rejected": rejected,
-        }
+        },
+        "sampling_policy": {
+            "null_source": null_source,
+            "label_field_candidates": ["label", "ground_truth", "is_watermarked"],
+            "records_with_explicit_label": has_explicit_labels,
+            "n_rejected_label_missing": rejected_label_missing,
+            "n_rejected_label_positive": rejected_label_positive,
+            "n_selected_null": valid,
+        },
     }
     return scores, strata_info
+
+
+def _resolve_calibration_label(record: Dict[str, Any]) -> Optional[bool]:
+    """
+    功能：从 detect record 解析校准标签。 
+
+    Resolve calibration label from detect record candidates.
+
+    Args:
+        record: Detect record mapping.
+
+    Returns:
+        Boolean label or None when missing.
+    """
+    if not isinstance(record, dict):
+        raise TypeError("record must be dict")
+    for key_name in ["label", "ground_truth", "is_watermarked"]:
+        value = record.get(key_name)
+        if isinstance(value, bool):
+            return value
+    return None
 
 
 def compute_np_threshold(scores: list[float], target_fpr: float) -> tuple[float, Dict[str, Any]]:
@@ -3977,6 +4108,124 @@ def _run_geometry_chain_with_sync(
                 "sync_relation_digest_bound": relation_digest_bound if isinstance(relation_digest_bound, str) else None,
                 "binding_status": "matched" if isinstance(anchor_relation_digest, str) and isinstance(relation_digest_bound, str) and anchor_relation_digest == relation_digest_bound else "mismatch_or_absent",
             }
+        geometry_result = _enforce_sync_primary_anchor_secondary(
+            cfg=cfg,
+            geometry_result=geometry_result,
+            anchor_result=anchor_result,
+            sync_result=sync_result,
+        )
+    return geometry_result
+
+
+def _is_sync_primary_anchor_secondary_enabled(cfg: Dict[str, Any]) -> bool:
+    """
+    功能：解析 detect 几何链主辅证据切换开关。 
+
+    Resolve controlled switch for sync-primary and anchor-secondary semantics.
+
+    Args:
+        cfg: Runtime configuration mapping.
+
+    Returns:
+        True when sync-primary mode is enabled.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+
+    detect_cfg = cfg.get("detect") if isinstance(cfg.get("detect"), dict) else {}
+    geometry_cfg = detect_cfg.get("geometry") if isinstance(detect_cfg.get("geometry"), dict) else {}
+    explicit_switch = geometry_cfg.get("sync_primary_anchor_secondary")
+    if isinstance(explicit_switch, bool):
+        return explicit_switch
+
+    paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
+    return bool(paper_cfg.get("enabled", False))
+
+
+def _normalize_geometry_chain_status(raw_status: Any) -> str:
+    """
+    功能：归一化几何链状态到 ok/absent/mismatch/failed。 
+
+    Normalize geometry chain status into canonical enum.
+
+    Args:
+        raw_status: Raw status token.
+
+    Returns:
+        Canonical status token.
+    """
+    if not isinstance(raw_status, str) or not raw_status:
+        return "failed"
+    normalized = raw_status.strip().lower()
+    if normalized == "fail":
+        return "failed"
+    if normalized in {"ok", "absent", "mismatch", "failed"}:
+        return normalized
+    if normalized in {"error"}:
+        return "failed"
+    return "failed"
+
+
+def _enforce_sync_primary_anchor_secondary(
+    *,
+    cfg: Dict[str, Any],
+    geometry_result: Dict[str, Any],
+    anchor_result: Dict[str, Any],
+    sync_result: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    功能：在受控开关下执行 sync 主证据、anchor 辅证据语义。 
+
+    Enforce sync-primary and anchor-secondary semantics with rollback-safe switch.
+
+    Args:
+        cfg: Runtime configuration mapping.
+        geometry_result: Geometry payload to mutate.
+        anchor_result: Anchor extraction payload.
+        sync_result: Sync module payload.
+
+    Returns:
+        Updated geometry payload.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(geometry_result, dict):
+        raise TypeError("geometry_result must be dict")
+    if not isinstance(anchor_result, dict):
+        raise TypeError("anchor_result must be dict")
+    if not isinstance(sync_result, dict):
+        raise TypeError("sync_result must be dict")
+
+    enabled = _is_sync_primary_anchor_secondary_enabled(cfg)
+    anchor_status = _normalize_geometry_chain_status(anchor_result.get("status"))
+    sync_status = _normalize_geometry_chain_status(sync_result.get("sync_status") or sync_result.get("status"))
+
+    geometry_result["geometry_evidence_hierarchy"] = {
+        "policy_version": "sync_primary_anchor_secondary_v1",
+        "switch_enabled": enabled,
+        "primary_source": "sync" if enabled else "anchor",
+        "secondary_source": "anchor" if enabled else "sync",
+        "anchor_status": anchor_status,
+        "sync_status": sync_status,
+    }
+
+    if not enabled:
+        return geometry_result
+
+    geometry_result["status"] = sync_status
+    geometry_result["sync_status"] = sync_status
+    geometry_result["anchor_status"] = anchor_status
+    geometry_result["relation_digest_primary_source"] = "anchor_compat"
+
+    if sync_status != "ok":
+        geometry_result["geo_score"] = None
+        failure_reason = sync_result.get("geometry_failure_reason")
+        absent_reason = sync_result.get("geometry_absent_reason")
+        if isinstance(failure_reason, str) and failure_reason:
+            geometry_result["geometry_failure_reason"] = failure_reason
+        elif isinstance(absent_reason, str) and absent_reason:
+            geometry_result["geometry_absent_reason"] = absent_reason
+
     return geometry_result
 
 

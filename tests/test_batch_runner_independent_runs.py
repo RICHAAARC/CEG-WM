@@ -34,6 +34,18 @@ def test_batch_runner_independent_runs(tmp_path: Path, monkeypatch) -> None:
         artifacts_dir = run_root / "artifacts"
         records_dir.mkdir(parents=True, exist_ok=True)
         artifacts_dir.mkdir(parents=True, exist_ok=True)
+        if stage_name == "detect":
+            detect_record_payload = {
+                "operation": "detect",
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": 0.123,
+                },
+            }
+            (records_dir / "detect_record.json").write_text(
+                json.dumps(detect_record_payload),
+                encoding="utf-8",
+            )
         if stage_name == "evaluate":
             eval_report_payload = {
                 "evaluation_report": {

@@ -221,7 +221,18 @@ def test_paper_full_mechanism_assertions_accept_top_level_geometry_payload(tmp_p
     run_root = tmp_path / "run_root"
     compare_dir = run_root / "artifacts" / "multi_protocol_evaluation" / "artifacts" / "protocol_compare"
     compare_dir.mkdir(parents=True, exist_ok=True)
-    (compare_dir / "compare_summary.json").write_text("{}", encoding="utf-8")
+    (compare_dir / "compare_summary.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "protocol_compare_v1",
+                "protocol_count": 1,
+                "protocols": [{"status": "ok"}],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
     cfg = {
         "paper_faithfulness": {"enabled": True},
@@ -303,7 +314,18 @@ def test_paper_full_mechanism_assertions_accept_nested_evaluation_report(tmp_pat
     run_root = tmp_path / "run_root"
     compare_dir = run_root / "artifacts" / "multi_protocol_evaluation" / "artifacts" / "protocol_compare"
     compare_dir.mkdir(parents=True, exist_ok=True)
-    (compare_dir / "compare_summary.json").write_text("{}", encoding="utf-8")
+    (compare_dir / "compare_summary.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "protocol_compare_v1",
+                "protocol_count": 1,
+                "protocols": [{"status": "ok"}],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
     cfg = {
         "paper_faithfulness": {"enabled": True},
@@ -393,7 +415,18 @@ def test_paper_full_mechanism_assertions_reject_latent_mode_sync_only_geometry(t
     run_root = tmp_path / "run_root"
     compare_dir = run_root / "artifacts" / "multi_protocol_evaluation" / "artifacts" / "protocol_compare"
     compare_dir.mkdir(parents=True, exist_ok=True)
-    (compare_dir / "compare_summary.json").write_text("{}", encoding="utf-8")
+    (compare_dir / "compare_summary.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "protocol_compare_v1",
+                "protocol_count": 1,
+                "protocols": [{"status": "ok"}],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
     cfg = {
         "paper_faithfulness": {"enabled": True},
@@ -457,3 +490,35 @@ def test_paper_full_mechanism_assertions_reject_latent_mode_sync_only_geometry(t
     assert all("content_evidence.hf_trace_digest must exist when hf enabled" not in item for item in failures)
     assert any("detect content evidence must include 64-hex anchor_digest" in item for item in failures)
     assert any("detect content evidence must include anchor_metrics" in item for item in failures)
+
+
+def test_assert_multi_protocol_compare_success_rejects_failed_protocol(tmp_path: Path) -> None:
+    """
+    功能：验证 compare summary 存在失败协议时 paper 机制断言必须失败。
+
+    Verify compare summary with failed protocol status is rejected by paper assertion helper.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    assert_module = _load_assert_script_module(repo_root)
+
+    compare_summary_path = tmp_path / "compare_summary.json"
+    compare_summary_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "protocol_compare_v1",
+                "protocols": [{"status": "ok"}, {"status": "fail"}],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    failures = assert_module._assert_multi_protocol_compare_success(compare_summary_path)
+    assert any("failed protocol runs" in item for item in failures)

@@ -148,15 +148,58 @@ def test_prepare_detect_record_for_attack_grouping_writes_attack_fields(tmp_path
     enriched_obj = json.loads(enriched_path.read_text(encoding="utf-8"))
     assert enriched_obj["attack_family"] == "rotate"
     assert enriched_obj["attack_params_version"] == "v1"
-    assert enriched_obj["label"] is True
-    assert enriched_obj["ground_truth"] is True
-    assert enriched_obj["is_watermarked"] is True
+    assert enriched_obj.get("label") is None
+    assert enriched_obj.get("ground_truth") is None
+    assert enriched_obj.get("is_watermarked") is None
+    assert enriched_obj.get("calibration_label_resolution") == "missing"
+    assert enriched_obj.get("calibration_excluded_from_labelled_sampling") is True
     assert isinstance(enriched_obj.get("attack"), dict)
     assert enriched_obj["attack"]["family"] == "rotate"
     assert enriched_obj["attack"]["params_version"] == "v1"
     assert "contract_bound_digest" not in enriched_obj
     assert "whitelist_bound_digest" not in enriched_obj
     assert "policy_path_semantics_bound_digest" not in enriched_obj
+
+
+def test_prepare_detect_record_for_attack_grouping_preserves_false_label(tmp_path: Path) -> None:
+    """
+    功能：若源记录含有效 bool 标签，enrich 结果必须保留该标签语义。
+
+    Verify enrich helper preserves boolean negative label and marks resolution as resolved.
+
+    Args:
+        tmp_path: pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    run_root = tmp_path / "run"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    source_path = records_dir / "detect_record.json"
+    source_path.write_text(
+        json.dumps(
+            {
+                "operation": "detect",
+                "ground_truth": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    grid_item_cfg = {
+        "attack_protocol_family": "rotate",
+        "attack_protocol_path": "configs/attack_protocol.yaml",
+    }
+
+    enriched_path = experiment_matrix._prepare_detect_record_for_attack_grouping(run_root, grid_item_cfg)
+    enriched_obj = json.loads(enriched_path.read_text(encoding="utf-8"))
+
+    assert enriched_obj.get("label") is False
+    assert enriched_obj.get("ground_truth") is False
+    assert enriched_obj.get("is_watermarked") is False
+    assert enriched_obj.get("calibration_label_resolution") == "resolved"
+    assert enriched_obj.get("calibration_excluded_from_labelled_sampling") is None
 
 
 def test_detect_gate_blocks_calibrate_when_no_valid_content_score(tmp_path: Path, monkeypatch) -> None:
@@ -251,3 +294,54 @@ def test_detect_gate_allows_progress_when_content_score_valid(tmp_path: Path, mo
 
     experiment_matrix._run_stage_sequence(grid_item_cfg, tmp_path / "run")
     assert called_stages == ["embed", "detect", "calibrate", "evaluate"]
+
+
+def test_detect_gate_research_collection_mode_relaxes_and_records_metadata(tmp_path: Path, monkeypatch) -> None:
+    """开启研究采集模式后，detect 硬门禁可受控放行并返回 gate_relaxed 元数据。"""
+    called_stages = []
+
+    def _fake_layout(*args, **kwargs):
+        run_root = args[0]
+        (run_root / "records").mkdir(parents=True, exist_ok=True)
+        (run_root / "artifacts").mkdir(parents=True, exist_ok=True)
+        return {
+            "run_root": run_root,
+            "artifacts_dir": run_root / "artifacts",
+            "records_dir": run_root / "records",
+        }
+
+    def _fake_prepare_detect_record(run_root: Path, _grid_item_cfg: dict) -> Path:
+        path = run_root / "artifacts" / "evaluate_inputs" / "detect_record_with_attack.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}", encoding="utf-8")
+        return path
+
+    def _fake_run_stage(stage_name, run_root, config_path, stage_overrides, input_record_path=None):
+        called_stages.append(stage_name)
+        if stage_name == "detect":
+            detect_record_path = run_root / "records" / "detect_record.json"
+            detect_record_path.parent.mkdir(parents=True, exist_ok=True)
+            detect_record_path.write_text(
+                json.dumps({"content_evidence_payload": {"status": "mismatch", "score": 0}}),
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr(experiment_matrix.path_policy, "ensure_output_layout", _fake_layout)
+    monkeypatch.setattr(experiment_matrix, "_prepare_detect_record_for_attack_grouping", _fake_prepare_detect_record)
+    monkeypatch.setattr(experiment_matrix, "_run_stage_command", _fake_run_stage)
+
+    grid_item_cfg = {
+        "config_path": "configs/paper_full_cuda.yaml",
+        "attack_protocol_path": "configs/attack_protocol.yaml",
+        "cfg_snapshot": {"seed": 0, "model_id": "stabilityai/stable-diffusion-3.5-medium"},
+        "ablation_flags": {},
+        "max_samples": None,
+        "allow_failed_semantics_collection": True,
+    }
+
+    gate_info = experiment_matrix._run_stage_sequence(grid_item_cfg, tmp_path / "run")
+    assert called_stages == ["embed", "detect", "calibrate", "evaluate"]
+    assert gate_info.get("gate_relaxed") is True
+    assert gate_info.get("reason") == "insufficient_valid_content_score_samples_research_collection_mode"
+    assert isinstance(gate_info.get("sample_counts"), dict)
+    assert gate_info["sample_counts"].get("valid_content_score_samples") == 0

@@ -14,6 +14,7 @@ Module type: General module
 from __future__ import annotations
 
 import json
+import argparse
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -51,11 +52,12 @@ def _is_ignored_compare_summary_path(path_obj: Path, repo_root: Path) -> bool:
     return False
 
 
-def _find_compare_summary_path(repo_root: Path) -> Optional[Path]:
+def _find_compare_summary_path(repo_root: Path, run_root: Optional[Path] = None) -> Optional[Path]:
     """
     功能：在受控边界内定位 compare_summary.json，避免测试临时产物污染。
 
     Resolve compare_summary.json from controlled locations only.
+    When run_root is provided, only search under that run_root.
 
     Args:
         repo_root: Repository root directory.
@@ -63,6 +65,23 @@ def _find_compare_summary_path(repo_root: Path) -> Optional[Path]:
     Returns:
         Resolved compare_summary path when found, otherwise None.
     """
+    if not isinstance(repo_root, Path):
+        raise TypeError("repo_root must be Path")
+    if run_root is not None and not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path or None")
+
+    if isinstance(run_root, Path):
+        normalized_run_root = run_root.resolve()
+        bound_candidates = [
+            normalized_run_root / "artifacts" / "multi_protocol_evaluation" / "artifacts" / "protocol_compare" / "compare_summary.json",
+            normalized_run_root / "artifacts" / "protocol_compare" / "compare_summary.json",
+            normalized_run_root / "compare_summary.json",
+        ]
+        for candidate_path in bound_candidates:
+            if candidate_path.exists() and candidate_path.is_file():
+                return candidate_path
+        return None
+
     explicit_candidates = [
         repo_root / "outputs" / "multi_protocol_evaluation" / "artifacts" / "protocol_compare" / "compare_summary.json",
         repo_root / "compare_summary.json",
@@ -90,7 +109,12 @@ def _find_compare_summary_path(repo_root: Path) -> Optional[Path]:
     return valid_matches[0]
 
 
-def audit_protocol_compare_outputs_schema(repo_root: Path) -> Dict[str, Any]:
+def audit_protocol_compare_outputs_schema(
+    repo_root: Path,
+    run_root: Optional[Path] = None,
+    require_compare_summary: bool = False,
+    require_all_ok: bool = False,
+) -> Dict[str, Any]:
     """
     功能：审计 protocol compare 汇总工件 schema 与一致性。
 
@@ -107,6 +131,14 @@ def audit_protocol_compare_outputs_schema(repo_root: Path) -> Dict[str, Any]:
     """
     if not isinstance(repo_root, Path):
         raise TypeError("repo_root must be Path")
+    if run_root is not None and not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path or None")
+    if not isinstance(require_compare_summary, bool):
+        raise TypeError("require_compare_summary must be bool")
+    if not isinstance(require_all_ok, bool):
+        raise TypeError("require_all_ok must be bool")
+
+    bound_run_root = run_root.resolve() if isinstance(run_root, Path) else None
 
     audit_id = "audit_protocol_compare_outputs_schema"
     gate_name = "gate.protocol_compare_outputs_schema"
@@ -126,9 +158,24 @@ def audit_protocol_compare_outputs_schema(repo_root: Path) -> Dict[str, Any]:
         "fix": "N/A (not applicable when feature is not used)",
     }
 
-    compare_summary_path = _find_compare_summary_path(repo_root)
+    compare_summary_path = _find_compare_summary_path(repo_root, run_root=run_root)
 
     if compare_summary_path is None:
+        if require_compare_summary:
+            return {
+                "audit_id": audit_id,
+                "gate_name": gate_name,
+                "category": category,
+                "severity": severity,
+                "result": "FAIL",
+                "rule": "protocol_compare summary must exist when required",
+                "evidence": {
+                    "run_root_binding": str(bound_run_root) if isinstance(bound_run_root, Path) else "<auto_discovery>",
+                    "require_compare_summary": True,
+                },
+                "impact": "Missing protocol_compare summary under required scope",
+                "fix": "Generate compare_summary.json for the bound run_root",
+            }
         # 未找到 compare 工件，SKIP
         return default_result
 
@@ -267,9 +314,16 @@ def audit_protocol_compare_outputs_schema(repo_root: Path) -> Dict[str, Any]:
             })
             continue
 
+        if require_all_ok and status != "ok":
+            failures.append({
+                "index": idx,
+                "error": "Protocol status must be 'ok' when require_all_ok=true",
+            })
+            continue
+
         # 检查 run_root
-        run_root = protocol_record.get("run_root")
-        if not isinstance(run_root, str) or not run_root:
+        protocol_run_root = protocol_record.get("run_root")
+        if not isinstance(protocol_run_root, str) or not protocol_run_root:
             failures.append({
                 "index": idx,
                 "error": "Missing or invalid run_root field",
@@ -350,6 +404,9 @@ def audit_protocol_compare_outputs_schema(repo_root: Path) -> Dict[str, Any]:
             "schema_version": schema_version,
             "protocol_count": len(protocols_list),
             "protocol_ids": protocol_ids_seen,
+            "run_root_binding": str(bound_run_root) if isinstance(bound_run_root, Path) else "<auto_discovery>",
+            "require_compare_summary": require_compare_summary,
+            "require_all_ok": require_all_ok,
         },
         "impact": "Protocol compare artifact is valid and consistent",
         "fix": None,
@@ -358,12 +415,34 @@ def audit_protocol_compare_outputs_schema(repo_root: Path) -> Dict[str, Any]:
 
 def main() -> None:
     """CLI entry for protocol compare outputs schema audit."""
-    if len(sys.argv) > 1:
-        repo_root = Path(sys.argv[1])
-    else:
-        repo_root = Path.cwd()
+    parser = argparse.ArgumentParser(description="Audit protocol compare outputs schema")
+    parser.add_argument("repo_root", nargs="?", default=".", help="Repository root path")
+    parser.add_argument("--run-root", dest="run_root", default=None, help="Bound run_root path")
+    parser.add_argument(
+        "--require-compare-summary",
+        dest="require_compare_summary",
+        action="store_true",
+        default=False,
+        help="Fail when compare_summary.json is missing in selected scope",
+    )
+    parser.add_argument(
+        "--require-all-ok",
+        dest="require_all_ok",
+        action="store_true",
+        default=False,
+        help="Fail when any protocol status is not 'ok'",
+    )
+    args = parser.parse_args()
 
-    result = audit_protocol_compare_outputs_schema(repo_root)
+    repo_root = Path(args.repo_root).resolve()
+    run_root = Path(args.run_root).resolve() if isinstance(args.run_root, str) and args.run_root.strip() else None
+
+    result = audit_protocol_compare_outputs_schema(
+        repo_root=repo_root,
+        run_root=run_root,
+        require_compare_summary=bool(args.require_compare_summary),
+        require_all_ok=bool(args.require_all_ok),
+    )
     print(json.dumps(result, indent=2, ensure_ascii=False))
     
     if result.get("result") == "FAIL":

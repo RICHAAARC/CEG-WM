@@ -12,6 +12,7 @@ Module type: Core innovation module
 from __future__ import annotations
 
 import json
+import argparse
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -22,7 +23,7 @@ _UNKNOWN_CONDITION_SENTINELS = {
 }
 
 
-def find_candidate_evaluation_report_paths(repo_root: Path) -> List[Path]:
+def find_candidate_evaluation_report_paths(repo_root: Path, run_root: Optional[Path] = None) -> List[Path]:
     """
     Find candidate evaluation report paths with deterministic priority.
 
@@ -34,6 +35,17 @@ def find_candidate_evaluation_report_paths(repo_root: Path) -> List[Path]:
     """
     if not isinstance(repo_root, Path):
         repo_root = Path(repo_root)
+    if run_root is not None and not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path or None")
+
+    if isinstance(run_root, Path):
+        normalized_run_root = run_root.resolve()
+        return [
+            normalized_run_root / "artifacts" / "evaluation_report.json",
+            normalized_run_root / "artifacts" / "eval_report.json",
+            normalized_run_root / "evaluation_report.json",
+            normalized_run_root / "eval_report.json",
+        ]
 
     static_candidates = [
         repo_root / "outputs" / "smoke_detect" / "evaluation_report.json",
@@ -401,7 +413,7 @@ def collect_reported_conditions_candidates(
     }
 
 
-def audit_attack_protocol_report_coverage(repo_root: Path) -> Dict[str, Any]:
+def audit_attack_protocol_report_coverage(repo_root: Path, run_root: Optional[Path] = None) -> Dict[str, Any]:
     """
     Audit that all attack conditions declared in protocol are executed and reported.
 
@@ -438,6 +450,8 @@ def audit_attack_protocol_report_coverage(repo_root: Path) -> Dict[str, Any]:
     """
     if not isinstance(repo_root, Path):
         repo_root = Path(repo_root)
+    if run_root is not None and not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path or None")
 
     audit_id = "audit.attack_protocol_report_coverage"
     gate_name = "gate.attack_protocol_report_coverage"
@@ -449,6 +463,7 @@ def audit_attack_protocol_report_coverage(repo_root: Path) -> Dict[str, Any]:
         "reported_conditions": [],
         "missed_conditions": [],
         "extra_reported_conditions": [],
+        "run_root_binding": str(run_root.resolve()) if isinstance(run_root, Path) else "<auto_discovery>",
     }
 
     try:
@@ -461,7 +476,7 @@ def audit_attack_protocol_report_coverage(repo_root: Path) -> Dict[str, Any]:
         evidence["declared_conditions"] = declared_conditions
 
         # (2) 尝试加载评测报告（支持多个位置）
-        eval_report_paths = find_candidate_evaluation_report_paths(repo_root)
+        eval_report_paths = find_candidate_evaluation_report_paths(repo_root, run_root=run_root)
 
         reported_candidates = collect_reported_conditions_candidates(
             repo_root,
@@ -471,6 +486,20 @@ def audit_attack_protocol_report_coverage(repo_root: Path) -> Dict[str, Any]:
 
         reported_conditions = reported_candidates.get("reported_conditions", [])
         if not isinstance(reported_conditions, list) or len(reported_conditions) == 0:
+            if isinstance(run_root, Path):
+                return {
+                    "audit_id": audit_id,
+                    "gate_name": gate_name,
+                    "category": "G",
+                    "severity": "BLOCK",
+                    "result": "FAIL",
+                    "rule": "all declared attack conditions must be executed and reported",
+                    "evidence": {
+                        **evidence,
+                        "status": "evaluation_report.json not found under bound run_root",
+                        "checked_paths": [str(p) for p in eval_report_paths],
+                    },
+                }
             # 如果评测报告不存在，审计返回 N.A.（不适用，因为未运行attack protocol流程）
             return {
                 "audit_id": audit_id,
@@ -519,7 +548,7 @@ def audit_attack_protocol_report_coverage(repo_root: Path) -> Dict[str, Any]:
             "audit_id": audit_id,
             "gate_name": gate_name,
             "category": "G",
-            "severity": "BLOCK" if result == "FAIL" else "INFO",
+            "severity": "BLOCK",
             "result": result,
             "rule": "all declared attack conditions must be executed and reported; no undeclared conditions in report",
             "evidence": evidence,
@@ -542,7 +571,7 @@ def audit_attack_protocol_report_coverage(repo_root: Path) -> Dict[str, Any]:
         }
 
 
-def main(repo_root: Optional[str] = None) -> int:
+def main(repo_root: Optional[str] = None, run_root: Optional[str] = None) -> int:
     """
     Main entry point for audit script.
 
@@ -556,9 +585,10 @@ def main(repo_root: Optional[str] = None) -> int:
         repo_root = "."
 
     repo_root_path = Path(repo_root).resolve()
+    run_root_path = Path(run_root).resolve() if isinstance(run_root, str) and run_root.strip() else None
 
     try:
-        result = audit_attack_protocol_report_coverage(repo_root_path)
+        result = audit_attack_protocol_report_coverage(repo_root_path, run_root=run_root_path)
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
         # Exit code: 0 for PASS/N.A., 1 for FAIL, 2 for SKIP (legacy)
@@ -589,5 +619,8 @@ def main(repo_root: Optional[str] = None) -> int:
 
 
 if __name__ == "__main__":
-    repo_root = sys.argv[1] if len(sys.argv) > 1 else "."
-    sys.exit(main(repo_root))
+    parser = argparse.ArgumentParser(description="Audit attack protocol report coverage")
+    parser.add_argument("repo_root", nargs="?", default=".", help="Repository root path")
+    parser.add_argument("--run-root", dest="run_root", default=None, help="Bound run_root path")
+    args = parser.parse_args()
+    sys.exit(main(args.repo_root, args.run_root))

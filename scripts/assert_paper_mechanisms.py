@@ -506,12 +506,64 @@ def _assert_paper_mechanisms(
     compare_summary = run_root / "artifacts" / "multi_protocol_evaluation" / "artifacts" / "protocol_compare" / "compare_summary.json"
     if not compare_summary.exists() or not compare_summary.is_file():
         failures.append(f"multi-protocol compare summary missing: {compare_summary}")
+    else:
+        failures.extend(_assert_multi_protocol_compare_success(compare_summary))
 
     allowed_impl_ids = _load_runtime_whitelist_impl_ids(repo_root)
     cfg_impl_ids = _collect_impl_ids_from_cfg(cfg)
     for impl_id in cfg_impl_ids:
         if impl_id not in allowed_impl_ids:
             failures.append(f"impl_id not in runtime_whitelist: {impl_id}")
+
+    return failures
+
+
+def _assert_multi_protocol_compare_success(compare_summary_path: Path) -> List[str]:
+    """
+    功能：校验 multi-protocol compare 汇总状态是否全量成功。
+
+    Assert protocol compare summary is valid and contains no failed protocol items.
+
+    Args:
+        compare_summary_path: compare_summary.json path.
+
+    Returns:
+        Failure reason list. Empty list means success.
+    """
+    failures: List[str] = []
+    if not isinstance(compare_summary_path, Path):
+        return ["compare summary path must be Path"]
+    if not compare_summary_path.exists() or not compare_summary_path.is_file():
+        return [f"compare summary missing: {compare_summary_path}"]
+
+    try:
+        compare_obj = _load_json(compare_summary_path)
+    except Exception as exc:
+        return [f"compare summary parse failed: {type(exc).__name__}: {exc}"]
+
+    schema_version = compare_obj.get("schema_version")
+    if schema_version != "protocol_compare_v1":
+        failures.append(f"compare summary schema_version must be protocol_compare_v1, got {schema_version}")
+
+    protocols_obj = compare_obj.get("protocols")
+    if not isinstance(protocols_obj, list) or len(protocols_obj) == 0:
+        failures.append("compare summary protocols must be non-empty list")
+        return failures
+
+    failed_count = 0
+    for idx, protocol_item in enumerate(protocols_obj):
+        if not isinstance(protocol_item, dict):
+            failed_count += 1
+            failures.append(f"compare summary protocol item must be dict: index={idx}")
+            continue
+        status_value = protocol_item.get("status")
+        if status_value != "ok":
+            failed_count += 1
+
+    if failed_count > 0:
+        failures.append(
+            f"compare summary contains failed protocol runs: failed={failed_count}, total={len(protocols_obj)}"
+        )
 
     return failures
 

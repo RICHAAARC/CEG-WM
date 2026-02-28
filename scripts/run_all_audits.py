@@ -42,6 +42,79 @@ AUDIT_SCRIPTS = [
 ]
 
 
+_RUN_ROOT_OPTIONAL_AUDITS = {
+    "audit_protocol_compare_outputs_schema.py",
+    "audit_attack_protocol_report_coverage.py",
+    "audit_experiment_matrix_outputs_schema.py",
+}
+
+_RUN_ROOT_POSITIONAL_AUDITS = {
+    "audit_repro_bundle_integrity.py",
+}
+
+
+_RUN_ROOT_SENSITIVE_AUDIT_NA_RESULTS: Dict[str, Dict[str, str]] = {
+    "audit_protocol_compare_outputs_schema.py": {
+        "audit_id": "audit_protocol_compare_outputs_schema",
+        "gate_name": "gate.protocol_compare_outputs_schema",
+        "severity": "NON_BLOCK",
+        "rule": "run_root-sensitive audit requires bound run_root to avoid historical outputs pollution",
+    },
+    "audit_attack_protocol_report_coverage.py": {
+        "audit_id": "audit.attack_protocol_report_coverage",
+        "gate_name": "gate.attack_protocol_report_coverage",
+        "severity": "NON_BLOCK",
+        "rule": "run_root-sensitive audit requires bound run_root to avoid historical outputs pollution",
+    },
+    "audit_experiment_matrix_outputs_schema.py": {
+        "audit_id": "experiment_matrix.outputs_schema",
+        "gate_name": "gate.experiment_matrix_outputs_schema",
+        "severity": "BLOCK",
+        "rule": "run_root-sensitive audit requires bound run_root to avoid historical outputs pollution",
+    },
+}
+
+
+def _build_run_root_unbound_na_result(script_name: str, repo_root: Path) -> Dict[str, Any]:
+    """
+    功能：在缺少 run_root 绑定时，为 run_root 敏感审计构造 N.A. 结果。
+
+    Build deterministic N.A. result for run_root-sensitive audits when binding is unavailable.
+
+    Args:
+        script_name: Audit script file name.
+        repo_root: Repository root path.
+
+    Returns:
+        Normalized audit result dictionary.
+    """
+    if not isinstance(script_name, str) or not script_name:
+        raise TypeError("script_name must be non-empty str")
+    if not isinstance(repo_root, Path):
+        raise TypeError("repo_root must be Path")
+
+    default_obj = _RUN_ROOT_SENSITIVE_AUDIT_NA_RESULTS.get(script_name)
+    if not isinstance(default_obj, dict):
+        raise ValueError(f"unsupported run_root-sensitive script: {script_name}")
+
+    return {
+        "audit_id": default_obj["audit_id"],
+        "gate_name": default_obj["gate_name"],
+        "category": "G",
+        "severity": default_obj["severity"],
+        "result": "N.A.",
+        "rule": default_obj["rule"],
+        "evidence": {
+            "repo_root": str(repo_root),
+            "run_root_binding": "<absent>",
+            "reason": "skip_repo_wide_scan_without_run_root",
+            "script": script_name,
+        },
+        "impact": "N.A. because run_root binding is required for scope-safe audit",
+        "fix": "provide --run-root or generate run_closure for auto inference",
+    }
+
+
 def _load_spec_audit_requirements(repo_root: Path) -> Dict[str, str]:
     """
     功能：从 paper_faithfulness_spec 加载审计门禁要求。
@@ -289,7 +362,7 @@ def _infer_latest_run_root(repo_root: Path) -> Optional[Path]:
 def execute_audit_script(
     script_path: Path,
     repo_root: Path,
-    inferred_run_root: Optional[Path] = None,
+    bound_run_root: Optional[Path] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Execute a single audit script.
@@ -306,17 +379,20 @@ def execute_audit_script(
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         
+        command = [
+            sys.executable,
+            str(script_path),
+            str(repo_root),
+        ]
+
+        if isinstance(bound_run_root, Path):
+            if script_path.name in _RUN_ROOT_POSITIONAL_AUDITS:
+                command.append(str(bound_run_root))
+            elif script_path.name in _RUN_ROOT_OPTIONAL_AUDITS:
+                command.extend(["--run-root", str(bound_run_root)])
+
         result = subprocess.run(
-            [
-                sys.executable,
-                str(script_path),
-                str(repo_root),
-                *(
-                    [str(inferred_run_root)]
-                    if script_path.name == "audit_repro_bundle_integrity.py" and isinstance(inferred_run_root, Path)
-                    else []
-                ),
-            ],
+            command,
             capture_output=True,
             text=False,
             env=env,
@@ -601,6 +677,7 @@ def main():
     
     parser = argparse.ArgumentParser(description="运行所有审计脚本并生成聚合报告")
     parser.add_argument("--repo-root", type=Path, default=Path.cwd(), help="仓库根目录（默认当前目录）")
+    parser.add_argument("--run-root", type=Path, default=None, help="绑定当前运行的 run_root（显式优先）")
     parser.add_argument("--output", type=Path, default=None, help="报告输出路径（默认 stdout）")
     parser.add_argument("--strict", action="store_true", help="严格模式：对抗式扫描未输出命中列表视为 FAIL")
     
@@ -608,7 +685,9 @@ def main():
     
     repo_root = args.repo_root.resolve()
     scripts_dir = Path(__file__).parent
+    explicit_run_root = args.run_root.resolve() if isinstance(args.run_root, Path) else None
     inferred_run_root = _infer_latest_run_root(repo_root)
+    effective_run_root = explicit_run_root if isinstance(explicit_run_root, Path) else inferred_run_root
     
     # 执行所有审计脚本
     all_results = []
@@ -639,8 +718,12 @@ def main():
                 "fix": f"创建审计脚本 {script_name}",
             })
             continue
+
+        if effective_run_root is None and script_path.name in _RUN_ROOT_OPTIONAL_AUDITS:
+            all_results.append(_build_run_root_unbound_na_result(script_path.name, repo_root))
+            continue
         
-        audit_result = execute_audit_script(script_path, repo_root, inferred_run_root)
+        audit_result = execute_audit_script(script_path, repo_root, effective_run_root)
         if audit_result is None:
             continue
         
@@ -691,6 +774,7 @@ def main():
         "results": all_results,
         "metadata": {
             "repo_root": str(repo_root),
+            "run_root_binding": str(effective_run_root) if isinstance(effective_run_root, Path) else "<auto_discovery_absent>",
             "audit_count": len(all_results),
             "audit_scripts": AUDIT_SCRIPTS,
         },

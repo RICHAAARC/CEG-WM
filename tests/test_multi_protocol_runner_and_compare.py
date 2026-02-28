@@ -28,6 +28,9 @@ from scripts.run_multi_protocol_evaluation import (
 from scripts.audits.audit_protocol_compare_outputs_schema import (
     audit_protocol_compare_outputs_schema,
 )
+from scripts.audits.audit_attack_protocol_report_coverage import (
+    audit_attack_protocol_report_coverage,
+)
 
 
 class TestMultiProtocolRunnerCreatesSeparateRunRoots:
@@ -327,6 +330,217 @@ class TestAuditProtocolCompareOutputsSchemaIgnoresPytestArtifacts:
         assert result["evidence"]["path"] == str(official_path)
 
 
+def test_protocol_compare_schema_prefers_bound_run_root(tmp_path: Path) -> None:
+    """
+    功能：验证 protocol_compare 审计在传入 run_root 时仅绑定该 run_root。 
+
+    Verify protocol compare audit uses only bound run_root summary and ignores historical outputs.
+
+    Args:
+        tmp_path: Temporary repository root.
+
+    Returns:
+        None.
+    """
+    repo_root = tmp_path
+
+    polluted_dir = repo_root / "outputs" / "multi_protocol_evaluation" / "artifacts" / "protocol_compare"
+    polluted_dir.mkdir(parents=True, exist_ok=True)
+    (polluted_dir / "compare_summary.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "protocol_compare_v1",
+                "protocol_count": 1,
+                "protocols": [{"status": "fail", "protocol_id": "bad", "attack_protocol_version": "v1", "attack_protocol_digest": "d", "run_root": "x"}],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    bound_run_root = repo_root / "outputs" / "current_run"
+    bound_compare_dir = bound_run_root / "artifacts" / "multi_protocol_evaluation" / "artifacts" / "protocol_compare"
+    bound_compare_dir.mkdir(parents=True, exist_ok=True)
+    bound_summary_path = bound_compare_dir / "compare_summary.json"
+    bound_summary_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "protocol_compare_v1",
+                "protocol_count": 1,
+                "protocols": [
+                    {
+                        "protocol_id": "ok_protocol",
+                        "attack_protocol_version": "attack_protocol_v1",
+                        "attack_protocol_digest": "digest_ok",
+                        "status": "ok",
+                        "failure_reason": "ok",
+                        "run_root": str(bound_run_root),
+                        "anchors": {
+                            "cfg_digest": "cfg",
+                            "plan_digest": "plan",
+                            "thresholds_digest": "thr",
+                            "threshold_metadata_digest": "thr_meta",
+                            "impl_digest": "impl",
+                            "fusion_rule_version": "fusion_v1",
+                            "policy_path": "content_only",
+                        },
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    result = audit_protocol_compare_outputs_schema(repo_root, run_root=bound_run_root)
+    assert result["result"] == "PASS", f"Expected PASS with bound run_root, got {result}"
+    assert result.get("evidence", {}).get("path") == str(bound_summary_path)
+    assert result.get("evidence", {}).get("run_root_binding") == str(bound_run_root.resolve())
+
+
+def test_protocol_compare_schema_binding_not_overridden_by_protocol_record_run_root(tmp_path: Path) -> None:
+    """
+    功能：验证 evidence.run_root_binding 不会被 protocol record 的 run_root 字段覆盖。 
+
+    Verify evidence.run_root_binding is always the bound run_root, not protocol record run_root.
+
+    Args:
+        tmp_path: Temporary repository root.
+
+    Returns:
+        None.
+    """
+    repo_root = tmp_path
+    bound_run_root = repo_root / "outputs" / "bound_run"
+    compare_dir = bound_run_root / "artifacts" / "multi_protocol_evaluation" / "artifacts" / "protocol_compare"
+    compare_dir.mkdir(parents=True, exist_ok=True)
+    (compare_dir / "compare_summary.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "protocol_compare_v1",
+                "protocol_count": 1,
+                "protocols": [
+                    {
+                        "protocol_id": "ok_protocol",
+                        "attack_protocol_version": "attack_protocol_v1",
+                        "attack_protocol_digest": "digest_ok",
+                        "status": "ok",
+                        "failure_reason": "ok",
+                        "run_root": "SHOULD_NOT_OVERRIDE_BOUND_RUN_ROOT",
+                        "anchors": {
+                            "cfg_digest": "cfg",
+                            "plan_digest": "plan",
+                            "thresholds_digest": "thr",
+                            "threshold_metadata_digest": "thr_meta",
+                            "impl_digest": "impl",
+                            "fusion_rule_version": "fusion_v1",
+                            "policy_path": "content_only",
+                        },
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    result = audit_protocol_compare_outputs_schema(repo_root, run_root=bound_run_root)
+    assert result["result"] == "PASS"
+    assert result.get("evidence", {}).get("run_root_binding") == str(bound_run_root.resolve())
+
+
+def test_protocol_compare_schema_require_compare_summary_fails_when_missing(tmp_path: Path) -> None:
+    """
+    功能：验证 require_compare_summary=true 时缺失 compare_summary 必须 FAIL。 
+
+    Verify audit fails when compare summary is required but missing.
+
+    Args:
+        tmp_path: Temporary repository root.
+
+    Returns:
+        None.
+    """
+    repo_root = tmp_path
+    bound_run_root = repo_root / "outputs" / "current_run"
+    bound_run_root.mkdir(parents=True, exist_ok=True)
+
+    result = audit_protocol_compare_outputs_schema(
+        repo_root,
+        run_root=bound_run_root,
+        require_compare_summary=True,
+    )
+    assert result["result"] == "FAIL"
+    assert result["severity"] == "BLOCK"
+
+
+def test_protocol_compare_schema_require_all_ok_fails_on_failed_protocol(tmp_path: Path) -> None:
+    """
+    功能：验证 require_all_ok=true 时任一 protocol 失败即 FAIL。 
+
+    Verify audit fails when any protocol status is not ok under require_all_ok.
+
+    Args:
+        tmp_path: Temporary repository root.
+
+    Returns:
+        None.
+    """
+    repo_root = tmp_path
+    compare_dir = repo_root / "outputs" / "multi_protocol_evaluation" / "artifacts" / "protocol_compare"
+    compare_dir.mkdir(parents=True, exist_ok=True)
+    (compare_dir / "compare_summary.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "protocol_compare_v1",
+                "protocol_count": 2,
+                "protocols": [
+                    {
+                        "protocol_id": "ok_protocol",
+                        "attack_protocol_version": "attack_protocol_v1",
+                        "attack_protocol_digest": "digest_ok",
+                        "status": "ok",
+                        "failure_reason": "ok",
+                        "run_root": str(repo_root / "run_ok"),
+                        "anchors": {
+                            "cfg_digest": "cfg",
+                            "plan_digest": "plan",
+                            "thresholds_digest": "thr",
+                            "threshold_metadata_digest": "thr_meta",
+                            "impl_digest": "impl",
+                            "fusion_rule_version": "fusion_v1",
+                            "policy_path": "content_only",
+                        },
+                    },
+                    {
+                        "protocol_id": "failed_protocol",
+                        "attack_protocol_version": "attack_protocol_v1",
+                        "attack_protocol_digest": "digest_fail",
+                        "status": "fail",
+                        "failure_reason": "runtime_error",
+                        "run_root": str(repo_root / "run_fail"),
+                    },
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    result = audit_protocol_compare_outputs_schema(
+        repo_root,
+        require_compare_summary=True,
+        require_all_ok=True,
+    )
+    assert result["result"] == "FAIL"
+    assert result["severity"] == "BLOCK"
+    assert "Protocol status must be 'ok'" in str(result.get("evidence", {}).get("summary", ""))
+
+
 class TestMakeProtocolSafeKey:
     """测试：protocol safe key 生成"""
 
@@ -359,3 +573,66 @@ class TestMakeProtocolSafeKey:
         assert len(safe_key) > 0
         assert "<" not in safe_key
         assert ">" not in safe_key
+
+
+def test_attack_protocol_report_coverage_prefers_bound_run_root(tmp_path: Path) -> None:
+    """
+    功能：验证 attack protocol 覆盖审计在指定 --run-root 时只绑定当前 run_root。
+
+    Verify run_root-bound audit avoids historical outputs pollution.
+
+    Args:
+        tmp_path: Temporary repository root.
+
+    Returns:
+        None.
+    """
+    repo_root = tmp_path
+    configs_dir = repo_root / "configs"
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    protocol_text = """
+version: "attack_protocol_v1"
+params_versions:
+  rotate::v1:
+    family: "rotate"
+    params: {degrees: [5, 10]}
+"""
+    (configs_dir / "attack_protocol.yaml").write_text(protocol_text, encoding="utf-8")
+
+    polluted_report_path = repo_root / "outputs" / "old_run" / "artifacts" / "evaluation_report.json"
+    polluted_report_path.parent.mkdir(parents=True, exist_ok=True)
+    polluted_report_path.write_text(
+        json.dumps(
+            {
+                "evaluation_report": {
+                    "metrics_by_attack_condition": [
+                        {"group_key": "unknown_attack::unknown_params"}
+                    ]
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    current_run_root = repo_root / "outputs" / "current_run"
+    current_report_path = current_run_root / "artifacts" / "evaluation_report.json"
+    current_report_path.parent.mkdir(parents=True, exist_ok=True)
+    current_report_path.write_text(
+        json.dumps(
+            {
+                "evaluation_report": {
+                    "metrics_by_attack_condition": [
+                        {"group_key": "rotate::v1"}
+                    ]
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    result = audit_attack_protocol_report_coverage(repo_root, run_root=current_run_root)
+    assert result["result"] == "PASS", f"Expected PASS with bound run_root, got {result}"

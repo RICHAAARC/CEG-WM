@@ -79,6 +79,10 @@ def build_experiment_grid(base_cfg: dict) -> list[dict]:
     if max_samples is not None and not isinstance(max_samples, int):
         raise TypeError("experiment_matrix.max_samples must be int or None")
 
+    allow_failed_semantics_collection = matrix_cfg.get("allow_failed_semantics_collection", False)
+    if not isinstance(allow_failed_semantics_collection, bool):
+        raise TypeError("experiment_matrix.allow_failed_semantics_collection must be bool")
+
     grid_items: List[Dict[str, Any]] = []
     grid_index = 0
     for model_id in model_list:
@@ -115,6 +119,7 @@ def build_experiment_grid(base_cfg: dict) -> list[dict]:
                         "config_path": config_path,
                         "attack_protocol_path": attack_protocol_path,
                         "max_samples": max_samples,
+                        "allow_failed_semantics_collection": allow_failed_semantics_collection,
                     }
                     grid_items.append(grid_item)
                     grid_index += 1
@@ -168,11 +173,22 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
             "comparison_ready": False,
             "comparison_source": "real_t2smark_baseline_required",
         },
+        "detect_gate_relaxed": False,
+        "detect_gate_relax_reason": "hard_gate_default",
+        "detect_gate_sample_counts": {},
         "metrics": {},
     }
 
+    detect_gate_info: Dict[str, Any] = {
+        "gate_relaxed": False,
+        "reason": "hard_gate_not_checked",
+        "sample_counts": {},
+    }
+
     try:
-        _run_stage_sequence(grid_item_cfg, run_root)
+        stage_gate_info = _run_stage_sequence(grid_item_cfg, run_root)
+        if isinstance(stage_gate_info, dict):
+            detect_gate_info = stage_gate_info
         eval_report = _read_evaluation_report_for_run(run_root)
         _assert_required_run_artifacts(run_root)
         evaluate_record = _read_optional_json(run_root / "records" / "evaluate_record.json")
@@ -234,6 +250,9 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
                     "conditional_fpr_n": metrics_obj.get("conditional_fpr_n"),
                 },
                 "t2smark_comparison": _extract_t2smark_real_comparison_from_detect_record(run_root),
+                "detect_gate_relaxed": bool(detect_gate_info.get("gate_relaxed", False)),
+                "detect_gate_relax_reason": _safe_str(detect_gate_info.get("reason")),
+                "detect_gate_sample_counts": detect_gate_info.get("sample_counts") if isinstance(detect_gate_info.get("sample_counts"), dict) else {},
             }
         )
         _enforce_paper_acceptance_gate(summary=summary, grid_item_cfg=grid_item_cfg, run_root=run_root)
@@ -241,6 +260,9 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
         # 单实验执行失败，必须记录失败原因并返回。
         summary["status"] = "fail"
         summary["failure_reason"] = f"{type(exc).__name__}: {exc}"
+        summary["detect_gate_relaxed"] = bool(detect_gate_info.get("gate_relaxed", False))
+        summary["detect_gate_relax_reason"] = _safe_str(detect_gate_info.get("reason"))
+        summary["detect_gate_sample_counts"] = detect_gate_info.get("sample_counts") if isinstance(detect_gate_info.get("sample_counts"), dict) else {}
 
     return summary
 
@@ -641,7 +663,7 @@ def _derive_run_root(grid_item_cfg: Dict[str, Any]) -> Path:
     return path_policy.derive_run_root(run_root)
 
 
-def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> None:
+def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[str, Any]:
     """Run embed/detect/calibrate/evaluate sequence for one experiment."""
     layout = path_policy.ensure_output_layout(
         run_root,
@@ -670,6 +692,16 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> None:
         raise TypeError("grid item max_samples must be int or None")
     if not isinstance(ablation_flags, dict):
         raise TypeError("grid item ablation_flags must be dict")
+
+    allow_failed_semantics_collection = grid_item_cfg.get("allow_failed_semantics_collection", False)
+    if not isinstance(allow_failed_semantics_collection, bool):
+        raise TypeError("grid item allow_failed_semantics_collection must be bool")
+
+    detect_gate_info: Dict[str, Any] = {
+        "gate_relaxed": False,
+        "reason": "hard_gate_not_checked",
+        "sample_counts": {},
+    }
 
     for stage_name in ["embed", "detect", "calibrate", "evaluate"]:
         stage_overrides = [
@@ -711,15 +743,27 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> None:
         )
 
         if stage_name == "detect":
-            _assert_min_valid_content_scores_after_detect(run_root, minimum_required=1)
+            detect_gate_info = _assert_min_valid_content_scores_after_detect(
+                run_root,
+                minimum_required=1,
+                allow_failed_semantics_collection=allow_failed_semantics_collection,
+            )
+
+    return detect_gate_info
 
 
-def _assert_min_valid_content_scores_after_detect(run_root: Path, minimum_required: int = 1) -> None:
+def _assert_min_valid_content_scores_after_detect(
+    run_root: Path,
+    minimum_required: int = 1,
+    allow_failed_semantics_collection: bool = False,
+) -> Dict[str, Any]:
     """Fail-fast gate: require at least minimum valid content_score samples after detect."""
     if not isinstance(run_root, Path):
         raise TypeError("run_root must be Path")
     if not isinstance(minimum_required, int) or minimum_required <= 0:
         raise ValueError("minimum_required must be positive int")
+    if not isinstance(allow_failed_semantics_collection, bool):
+        raise TypeError("allow_failed_semantics_collection must be bool")
 
     detect_record_path = run_root / "records" / "detect_record.json"
     detect_record_obj = _read_optional_json(detect_record_path)
@@ -731,6 +775,7 @@ def _assert_min_valid_content_scores_after_detect(run_root: Path, minimum_requir
 
     content_payload = detect_record_obj.get("content_evidence_payload")
     valid_count = 0
+    zero_score_count = 0
     status_value = None
     score_value = None
     if isinstance(content_payload, dict):
@@ -738,13 +783,35 @@ def _assert_min_valid_content_scores_after_detect(run_root: Path, minimum_requir
         score_value = content_payload.get("score")
         if status_value == "ok" and isinstance(score_value, (int, float)) and np.isfinite(float(score_value)):
             valid_count = 1
+            if float(score_value) == 0.0:
+                zero_score_count = 1
 
-    if valid_count < minimum_required:
-        raise RuntimeError(
-            "detect stage gate failed: insufficient valid content_score samples before calibrate; "
-            f"required={minimum_required}, valid={valid_count}, status={status_value}, score={score_value}, "
-            f"path={detect_record_path}"
-        )
+    sample_counts = {
+        "minimum_required": int(minimum_required),
+        "valid_content_score_samples": int(valid_count),
+        "zero_content_score_samples": int(zero_score_count),
+        "status": status_value if isinstance(status_value, str) else "<absent>",
+    }
+
+    if valid_count >= minimum_required:
+        return {
+            "gate_relaxed": False,
+            "reason": "hard_gate_satisfied",
+            "sample_counts": sample_counts,
+        }
+
+    if allow_failed_semantics_collection:
+        return {
+            "gate_relaxed": True,
+            "reason": "insufficient_valid_content_score_samples_research_collection_mode",
+            "sample_counts": sample_counts,
+        }
+
+    raise RuntimeError(
+        "detect stage gate failed: insufficient valid content_score samples before calibrate; "
+        f"required={minimum_required}, valid={valid_count}, status={status_value}, score={score_value}, "
+        f"path={detect_record_path}"
+    )
 
 
 def _resolve_attack_params_version_for_family(grid_item_cfg: Dict[str, Any]) -> str:
@@ -829,6 +896,10 @@ def _prepare_detect_record_for_attack_grouping(run_root: Path, grid_item_cfg: Di
         enriched_record["label"] = label_value
         enriched_record["ground_truth"] = label_value
         enriched_record["is_watermarked"] = label_value
+        enriched_record["calibration_label_resolution"] = "resolved"
+    else:
+        enriched_record["calibration_label_resolution"] = "missing"
+        enriched_record["calibration_excluded_from_labelled_sampling"] = True
     enriched_record["attack_family"] = attack_family
     if isinstance(params_version, str) and params_version and params_version != "<absent>":
         enriched_record["attack_params_version"] = params_version
@@ -855,7 +926,7 @@ def _prepare_detect_record_for_attack_grouping(run_root: Path, grid_item_cfg: Di
 
 
 def _resolve_ground_truth_label_for_record(record: Dict[str, Any]) -> Optional[bool]:
-    """Resolve bool ground-truth label from record, defaulting to positive sample for matrix flow."""
+    """Resolve bool ground-truth label from record and return None when label is absent."""
     if not isinstance(record, dict):
         raise TypeError("record must be dict")
 
@@ -864,7 +935,7 @@ def _resolve_ground_truth_label_for_record(record: Dict[str, Any]) -> Optional[b
         if isinstance(value, bool):
             return value
 
-    return True
+    return None
 
 
 def _run_stage_command(

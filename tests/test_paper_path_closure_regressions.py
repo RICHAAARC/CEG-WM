@@ -120,6 +120,18 @@ class _SyncRelationConsumerStub:
         }
 
 
+class _SyncMismatchStub:
+    def sync_with_context(self, cfg: Dict[str, Any], context: Any, runtime_inputs: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        _ = cfg
+        _ = context
+        _ = runtime_inputs
+        return {
+            "status": "mismatch",
+            "sync_status": "mismatch",
+            "geometry_failure_reason": "sync_quality_below_threshold",
+        }
+
+
 def test_detect_geometry_chain_anchor_then_sync_relation_digest_bound() -> None:
     latents = np.random.default_rng(20260228).normal(size=(1, 4, 16, 16)).astype(np.float32)
     cfg: Dict[str, Any] = {
@@ -150,6 +162,93 @@ def test_detect_geometry_chain_anchor_then_sync_relation_digest_bound() -> None:
     relation_binding = geometry_payload.get("relation_digest_binding")
     assert isinstance(relation_binding, dict)
     assert relation_binding.get("binding_status") == "matched"
+
+
+def test_detect_geometry_chain_paper_path_sync_primary_enabled() -> None:
+    """
+    功能：paper 路径默认启用 sync 主证据，sync 失败时应主导几何状态。 
+
+    Verify paper path enables sync-primary semantics by default.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    latents = np.random.default_rng(202602281).normal(size=(1, 4, 16, 16)).astype(np.float32)
+    cfg: Dict[str, Any] = {
+        "__detect_pipeline_obj__": object(),
+        "__detect_final_latents__": latents,
+        "__runtime_self_attention_maps__": [np.zeros((1, 1), dtype=np.float32)],
+        "paper_faithfulness": {"enabled": True},
+        "detect": {
+            "geometry": {
+                "enabled": True,
+                "enable_attention_anchor": True,
+            }
+        }
+    }
+    impl_set = BuiltImplSet(
+        content_extractor=object(),
+        geometry_extractor=_GeometryStub(),
+        fusion_rule=object(),
+        subspace_planner=object(),
+        sync_module=_SyncMismatchStub(),
+    )
+    run_geometry_chain = getattr(detect_orchestrator, "_run_geometry_chain_with_sync")
+    geometry_result = run_geometry_chain(impl_set, cfg)
+    geometry_payload = cast(Dict[str, Any], geometry_result)
+    assert geometry_payload.get("status") == "mismatch"
+    assert geometry_payload.get("geo_score") is None
+    hierarchy = geometry_payload.get("geometry_evidence_hierarchy")
+    assert isinstance(hierarchy, dict)
+    assert hierarchy.get("switch_enabled") is True
+    assert hierarchy.get("primary_source") == "sync"
+
+
+def test_detect_geometry_chain_paper_path_sync_primary_can_rollback() -> None:
+    """
+    功能：paper 路径显式关闭开关时，保持 anchor 主证据旧语义。 
+
+    Verify explicit rollback switch preserves anchor-primary compatibility.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    latents = np.random.default_rng(202602282).normal(size=(1, 4, 16, 16)).astype(np.float32)
+    cfg: Dict[str, Any] = {
+        "__detect_pipeline_obj__": object(),
+        "__detect_final_latents__": latents,
+        "__runtime_self_attention_maps__": [np.zeros((1, 1), dtype=np.float32)],
+        "paper_faithfulness": {"enabled": True},
+        "detect": {
+            "geometry": {
+                "enabled": True,
+                "enable_attention_anchor": True,
+                "sync_primary_anchor_secondary": False,
+            }
+        }
+    }
+    impl_set = BuiltImplSet(
+        content_extractor=object(),
+        geometry_extractor=_GeometryStub(),
+        fusion_rule=object(),
+        subspace_planner=object(),
+        sync_module=_SyncMismatchStub(),
+    )
+    run_geometry_chain = getattr(detect_orchestrator, "_run_geometry_chain_with_sync")
+    geometry_result = run_geometry_chain(impl_set, cfg)
+    geometry_payload = cast(Dict[str, Any], geometry_result)
+    assert geometry_payload.get("status") == "ok"
+    assert geometry_payload.get("geo_score") == 0.8
+    hierarchy = geometry_payload.get("geometry_evidence_hierarchy")
+    assert isinstance(hierarchy, dict)
+    assert hierarchy.get("switch_enabled") is False
+    assert hierarchy.get("primary_source") == "anchor"
 
 
 def test_image_domain_sidecar_disabled_in_paper_mode() -> None:
