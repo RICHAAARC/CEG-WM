@@ -572,6 +572,66 @@ def _resolve_paper_semantic_model_path(mask_cfg: dict, cfg_path: Path) -> str:
     return configured_path
 
 
+def _load_prompt_lines_from_file(prompt_file_path: Path) -> List[str]:
+    """
+    功能：从 prompts 文件读取非空提示词列表。
+
+    Load non-empty prompt lines from a plain text file.
+
+    Args:
+        prompt_file_path: Prompt file path.
+
+    Returns:
+        Non-empty prompt line list.
+
+    Raises:
+        TypeError: If prompt_file_path type is invalid.
+        ValueError: If prompt file content is invalid.
+    """
+    if not isinstance(prompt_file_path, Path):
+        raise TypeError("prompt_file_path must be Path")
+    if not prompt_file_path.exists() or not prompt_file_path.is_file():
+        raise ValueError(f"prompt file not found: {prompt_file_path}")
+
+    lines = prompt_file_path.read_text(encoding="utf-8").splitlines()
+    prompts: List[str] = []
+    for raw_line in lines:
+        line = raw_line.strip()
+        if line:
+            prompts.append(line)
+
+    if not prompts:
+        raise ValueError(f"prompt file has no non-empty lines: {prompt_file_path}")
+    return prompts
+
+
+def _resolve_prompt_file_path(prompt_file: str, cfg_path: Path) -> Path:
+    """
+    功能：将 prompt 文件路径解析为绝对路径。
+
+    Resolve prompt file path to an absolute path.
+
+    Args:
+        prompt_file: Prompt file path string from config.
+        cfg_path: Source config path.
+
+    Returns:
+        Absolute prompt file path.
+
+    Raises:
+        TypeError: If input types are invalid.
+    """
+    if not isinstance(prompt_file, str) or not prompt_file.strip():
+        raise TypeError("prompt_file must be non-empty str")
+    if not isinstance(cfg_path, Path):
+        raise TypeError("cfg_path must be Path")
+
+    prompt_path = Path(prompt_file.strip()).expanduser()
+    if not prompt_path.is_absolute():
+        return (cfg_path.parent / prompt_path).resolve()
+    return prompt_path.resolve()
+
+
 def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> Path:
     """
     功能：按 profile 生成运行期配置文件。 
@@ -640,6 +700,13 @@ def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> P
     if not isinstance(model_cfg.get("width"), int) or model_cfg.get("width", 0) <= 0:
         model_cfg["width"] = 512
     cfg_obj["model"] = model_cfg
+
+    prompt_file_value = cfg_obj.get("inference_prompt_file")
+    if isinstance(prompt_file_value, str) and prompt_file_value.strip():
+        prompt_file_path = _resolve_prompt_file_path(prompt_file_value, cfg_path)
+        prompt_lines = _load_prompt_lines_from_file(prompt_file_path)
+        cfg_obj["inference_prompt"] = prompt_lines[0]
+        cfg_obj["inference_prompt_file"] = str(prompt_file_path)
 
     watermark_cfg = cfg_obj.get("watermark")
     if not isinstance(watermark_cfg, dict):
@@ -794,6 +861,29 @@ def _prepare_stage_cfg_path(
     else:
         detect_record_glob = str(detect_record_path)
 
+    if profile == PROFILE_PAPER_FULL_CUDA and detect_record_glob and "*" not in detect_record_glob and "?" not in detect_record_glob:
+        stage_cfg_key = "calibration" if stage_name == "calibrate" else "evaluate"
+        stage_cfg_node = cfg_obj.get(stage_cfg_key)
+        stage_cfg = stage_cfg_node if isinstance(stage_cfg_node, dict) else {}
+        prompt_list: Sequence[str] | None = None
+        prompts_file_value = stage_cfg.get("minimal_ground_truth_prompts_file")
+        if isinstance(prompts_file_value, str) and prompts_file_value.strip():
+            prompts_file_path = _resolve_prompt_file_path(prompts_file_value, cfg_path)
+            prompt_list = _load_prompt_lines_from_file(prompts_file_path)
+            pair_count = len(prompt_list)
+        else:
+            pair_count = stage_cfg.get("minimal_ground_truth_pair_count", 1)
+            if not isinstance(pair_count, int) or pair_count <= 0:
+                pair_count = 1
+
+        detect_record_glob = _prepare_detect_records_with_minimal_ground_truth(
+            run_root,
+            Path(detect_record_glob),
+            stage_name,
+            pair_count=pair_count,
+            prompts=prompt_list,
+        )
+
     if stage_name == "calibrate":
         calibration_cfg = cfg_obj.get("calibration")
         if not isinstance(calibration_cfg, dict):
@@ -818,6 +908,108 @@ def _prepare_stage_cfg_path(
         yaml.safe_dump(cfg_obj, allow_unicode=True, sort_keys=False)
     )
     return stage_cfg_path
+
+
+def _prepare_detect_records_with_minimal_ground_truth(
+    run_root: Path,
+    source_detect_path: Path,
+    stage_name: str,
+    pair_count: int = 1,
+    prompts: Sequence[str] | None = None,
+) -> str:
+    """
+    功能：为 calibrate/evaluate 生成最小正负标签 detect records 集合。 
+
+    Build minimal labeled detect records bundle (positive + negative)
+    for paper profile calibration/evaluation closure.
+
+    Args:
+        run_root: Unified run_root path.
+        source_detect_path: Source detect record path.
+        stage_name: Stage name in {calibrate, evaluate}.
+        pair_count: Number of positive/negative pairs to generate.
+        prompts: Optional prompt list used to drive each pair.
+
+    Returns:
+        Glob pattern string matching generated labeled detect records.
+
+    Raises:
+        TypeError: If input types are invalid.
+        ValueError: If source detect record is invalid.
+    """
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(source_detect_path, Path):
+        raise TypeError("source_detect_path must be Path")
+    if not isinstance(stage_name, str) or stage_name not in {"calibrate", "evaluate"}:
+        raise TypeError("stage_name must be one of {'calibrate', 'evaluate'}")
+    if not isinstance(pair_count, int) or pair_count <= 0:
+        raise TypeError("pair_count must be positive int")
+    if prompts is not None:
+        if not isinstance(prompts, Sequence):
+            raise TypeError("prompts must be Sequence[str] or None")
+        if len(prompts) != pair_count:
+            raise ValueError("prompts length must equal pair_count")
+
+    if not source_detect_path.exists() or not source_detect_path.is_file():
+        return str(source_detect_path)
+
+    source_payload = json.loads(source_detect_path.read_text(encoding="utf-8"))
+    if not isinstance(source_payload, dict):
+        raise ValueError("source detect record must be JSON object")
+
+    workflow_cfg_dir = run_root / "artifacts" / "workflow_cfg"
+    workflow_cfg_dir.mkdir(parents=True, exist_ok=True)
+
+    for pair_index in range(pair_count):
+        positive_payload = json.loads(json.dumps(source_payload, ensure_ascii=False))
+        positive_payload["label"] = True
+        positive_payload["ground_truth"] = True
+        positive_payload["is_watermarked"] = True
+
+        negative_payload = json.loads(json.dumps(source_payload, ensure_ascii=False))
+        negative_payload["label"] = False
+        negative_payload["ground_truth"] = False
+        negative_payload["is_watermarked"] = False
+
+        if prompts is not None:
+            prompt_value = prompts[pair_index]
+            if not isinstance(prompt_value, str) or not prompt_value.strip():
+                raise ValueError("prompt entry must be non-empty str")
+            positive_payload["inference_prompt"] = prompt_value
+            negative_payload["inference_prompt"] = prompt_value
+
+        negative_content_node = negative_payload.get("content_evidence_payload")
+        if isinstance(negative_content_node, dict):
+            negative_content = negative_content_node
+        else:
+            negative_content = {}
+            negative_payload["content_evidence_payload"] = negative_content
+
+        if negative_content.get("status") == "ok":
+            negative_content["score"] = float(-1.0 - pair_index * 1e-6)
+            negative_content["calibration_sample_usage"] = "synthetic_negative_for_ground_truth_closure"
+            negative_content["calibration_sample_origin"] = "synthetic_negative_bundle_v1"
+
+        if pair_count == 1:
+            positive_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_positive.json"
+            negative_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_negative.json"
+        else:
+            positive_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_positive_{pair_index:03d}.json"
+            negative_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_negative_{pair_index:03d}.json"
+
+        _write_artifact_text_unbound(
+            run_root,
+            positive_path,
+            json.dumps(positive_payload, ensure_ascii=False, indent=2),
+        )
+        _write_artifact_text_unbound(
+            run_root,
+            negative_path,
+            json.dumps(negative_payload, ensure_ascii=False, indent=2),
+        )
+
+    return str((workflow_cfg_dir / f"detect_records_{stage_name}_gt_*.json"))
 
 
 def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profile: str) -> Path:

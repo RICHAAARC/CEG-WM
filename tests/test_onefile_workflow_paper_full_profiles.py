@@ -759,6 +759,200 @@ def test_onefile_detect_record_scoring_allows_fallback_when_sidecar_disabled(tmp
     assert content_payload.get("calibration_sample_is_synthetic_fallback") is True
 
 
+def test_onefile_prepare_stage_cfg_path_injects_minimal_ground_truth_bundle(tmp_path: Path) -> None:
+    """
+    功能：验证 paper_full_cuda 的 calibrate/evaluate 阶段会注入最小 GT bundle。 
+
+    Verify paper_full_cuda stage config injects minimal labeled detect records glob.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    detect_record_path = records_dir / "detect_record.json"
+    detect_record_path.write_text(
+        json.dumps(
+            {
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": 0.5,
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    cfg_path = tmp_path / "paper_cfg.yaml"
+    cfg_path.write_text(
+        "calibration:\n  detect_records_glob: null\n"
+        "evaluate:\n  detect_records_glob: null\n  thresholds_path: null\n",
+        encoding="utf-8",
+    )
+
+    calibrate_cfg_path = module._prepare_stage_cfg_path("calibrate", run_root, cfg_path, "paper_full_cuda")
+    calibrate_cfg_obj = module.yaml.safe_load(calibrate_cfg_path.read_text(encoding="utf-8"))
+    calibrate_glob = calibrate_cfg_obj.get("calibration", {}).get("detect_records_glob")
+    assert isinstance(calibrate_glob, str)
+    assert "detect_records_calibrate_gt_*.json" in calibrate_glob
+
+    positive_path = run_root / "artifacts" / "workflow_cfg" / "detect_records_calibrate_gt_positive.json"
+    negative_path = run_root / "artifacts" / "workflow_cfg" / "detect_records_calibrate_gt_negative.json"
+    assert positive_path.exists()
+    assert negative_path.exists()
+
+    positive_payload = json.loads(positive_path.read_text(encoding="utf-8"))
+    negative_payload = json.loads(negative_path.read_text(encoding="utf-8"))
+    assert positive_payload.get("is_watermarked") is True
+    assert negative_payload.get("is_watermarked") is False
+
+    evaluate_cfg_path = module._prepare_stage_cfg_path("evaluate", run_root, cfg_path, "paper_full_cuda")
+    evaluate_cfg_obj = module.yaml.safe_load(evaluate_cfg_path.read_text(encoding="utf-8"))
+    evaluate_glob = evaluate_cfg_obj.get("evaluate", {}).get("detect_records_glob")
+    assert isinstance(evaluate_glob, str)
+    assert "detect_records_evaluate_gt_*.json" in evaluate_glob
+
+
+def test_onefile_prepare_stage_cfg_path_supports_multiple_ground_truth_pairs(tmp_path: Path) -> None:
+    """
+    功能：验证可通过配置生成多对 GT records bundle。 
+
+    Verify stage config can generate multiple GT record pairs via pair_count.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root_multi"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    detect_record_path = records_dir / "detect_record.json"
+    detect_record_path.write_text(
+        json.dumps(
+            {
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": 0.55,
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    cfg_path = tmp_path / "paper_cfg_multi.yaml"
+    cfg_path.write_text(
+        "calibration:\n"
+        "  detect_records_glob: null\n"
+        "  minimal_ground_truth_pair_count: 3\n"
+        "evaluate:\n"
+        "  detect_records_glob: null\n"
+        "  thresholds_path: null\n"
+        "  minimal_ground_truth_pair_count: 2\n",
+        encoding="utf-8",
+    )
+
+    calibrate_cfg_path = module._prepare_stage_cfg_path("calibrate", run_root, cfg_path, "paper_full_cuda")
+    calibrate_cfg_obj = module.yaml.safe_load(calibrate_cfg_path.read_text(encoding="utf-8"))
+    calibrate_glob = calibrate_cfg_obj.get("calibration", {}).get("detect_records_glob")
+    assert isinstance(calibrate_glob, str)
+    assert "detect_records_calibrate_gt_*.json" in calibrate_glob
+
+    workflow_cfg_dir = run_root / "artifacts" / "workflow_cfg"
+    calibrate_files = sorted(workflow_cfg_dir.glob("detect_records_calibrate_gt_*.json"))
+    assert len(calibrate_files) == 6
+
+    evaluate_cfg_path = module._prepare_stage_cfg_path("evaluate", run_root, cfg_path, "paper_full_cuda")
+    evaluate_cfg_obj = module.yaml.safe_load(evaluate_cfg_path.read_text(encoding="utf-8"))
+    evaluate_glob = evaluate_cfg_obj.get("evaluate", {}).get("detect_records_glob")
+    assert isinstance(evaluate_glob, str)
+    assert "detect_records_evaluate_gt_*.json" in evaluate_glob
+
+    evaluate_files = sorted(workflow_cfg_dir.glob("detect_records_evaluate_gt_*.json"))
+    assert len(evaluate_files) == 4
+
+
+def test_onefile_prepare_stage_cfg_path_uses_prompt_list_as_gt_driver(tmp_path: Path) -> None:
+    """
+    功能：验证可通过 prompts 文件驱动 GT records 生成与 prompt 注入。
+
+    Verify prompts file drives GT pair count and prompt injection into generated records.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root_prompt_file"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    detect_record_path = records_dir / "detect_record.json"
+    detect_record_path.write_text(
+        json.dumps(
+            {
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": 0.61,
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    prompts_path = tmp_path / "prompts_3.txt"
+    prompts_path.write_text("prompt one\nprompt two\nprompt three\n", encoding="utf-8")
+
+    cfg_path = tmp_path / "paper_cfg_prompt_file.yaml"
+    cfg_path.write_text(
+        "calibration:\n"
+        "  detect_records_glob: null\n"
+        "  minimal_ground_truth_pair_count: 99\n"
+        f"  minimal_ground_truth_prompts_file: \"{prompts_path.name}\"\n"
+        "evaluate:\n"
+        "  detect_records_glob: null\n"
+        "  thresholds_path: null\n",
+        encoding="utf-8",
+    )
+
+    calibrate_cfg_path = module._prepare_stage_cfg_path("calibrate", run_root, cfg_path, "paper_full_cuda")
+    calibrate_cfg_obj = module.yaml.safe_load(calibrate_cfg_path.read_text(encoding="utf-8"))
+    calibrate_glob = calibrate_cfg_obj.get("calibration", {}).get("detect_records_glob")
+    assert isinstance(calibrate_glob, str)
+    assert "detect_records_calibrate_gt_*.json" in calibrate_glob
+
+    workflow_cfg_dir = run_root / "artifacts" / "workflow_cfg"
+    calibrate_files = sorted(workflow_cfg_dir.glob("detect_records_calibrate_gt_*.json"))
+    assert len(calibrate_files) == 6
+
+    positive_file = next(item for item in calibrate_files if "positive_000" in item.name)
+    negative_file = next(item for item in calibrate_files if "negative_000" in item.name)
+    positive_payload = json.loads(positive_file.read_text(encoding="utf-8"))
+    negative_payload = json.loads(negative_file.read_text(encoding="utf-8"))
+    assert positive_payload.get("inference_prompt") == "prompt one"
+    assert negative_payload.get("inference_prompt") == "prompt one"
+
+
 def test_paper_full_mechanism_assertions_fail_fast_on_proxy_paths(tmp_path: Path) -> None:
     """
     功能：验证 paper 机制断言在 proxy 路径下 fail-fast。

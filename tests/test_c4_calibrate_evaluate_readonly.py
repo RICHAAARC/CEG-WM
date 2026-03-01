@@ -59,6 +59,31 @@ def test_load_scores_for_calibration_filters_invalid_records() -> None:
     assert strata["sampling_policy"]["n_rejected_synthetic_fallback"] == 1
 
 
+def test_load_scores_for_calibration_optional_formal_sidecar_filter() -> None:
+    """Validate optional filtering for formal sidecar-disabled marker samples."""
+    records = [
+        {
+            "content_evidence_payload": {
+                "status": "ok",
+                "score": 0.31,
+                "calibration_sample_usage": "formal_with_sidecar_disabled_marker",
+            }
+        },
+        {"content_evidence_payload": {"status": "ok", "score": 0.62}},
+    ]
+
+    default_scores, default_strata = load_scores_for_calibration(records)
+    assert default_scores == [0.31, 0.62]
+    assert default_strata["sampling_policy"]["exclude_formal_sidecar_disabled_marker"] is False
+    assert default_strata["sampling_policy"]["n_rejected_formal_sidecar_marker"] == 0
+
+    strict_cfg = {"calibration": {"exclude_formal_sidecar_disabled_marker": True}}
+    strict_scores, strict_strata = load_scores_for_calibration(records, strict_cfg)
+    assert strict_scores == [0.62]
+    assert strict_strata["sampling_policy"]["exclude_formal_sidecar_disabled_marker"] is True
+    assert strict_strata["sampling_policy"]["n_rejected_formal_sidecar_marker"] == 1
+
+
 def test_load_thresholds_artifact_controlled_requires_fields(tmp_path: Path) -> None:
     """Validate missing required field detection for thresholds artifact."""
     artifact_path = tmp_path / "thresholds.json"

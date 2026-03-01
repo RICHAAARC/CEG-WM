@@ -25,6 +25,7 @@ hf_revision: "main"
 # ==============================================================
 inference_enabled: true
 inference_prompt: "a serene landscape with mountains and a lake"
+inference_prompt_file: "prompts/prompts_1.txt"  # 若存在则优先从文件首个非空行导入 prompt
 inference_num_steps: 28
 inference_guidance_scale: 7.0
 inference_height: 512
@@ -137,6 +138,7 @@ ablation:
 # ==============================================================
 calibration:
   detect_records_glob: null  # detect 记录 glob 路径（由 experiment_matrix 注入）
+  minimal_ground_truth_prompts_file: null  # 可选：通过 prompts 文件驱动 GT 对数（行数即 pair_count）
 
 # ==============================================================
 # 评估 (Evaluate) 配置
@@ -144,6 +146,7 @@ calibration:
 evaluate:
   detect_records_glob: null  # detect 记录 glob 路径（由 experiment_matrix 注入）
   thresholds_path: null      # 阈值工件路径（由 experiment_matrix 注入）
+  minimal_ground_truth_prompts_file: null  # 可选：通过 prompts 文件驱动 GT 对数（行数即 pair_count）
 
 # ==============================================================
 # 实现标识

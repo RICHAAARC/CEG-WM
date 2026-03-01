@@ -14,6 +14,7 @@ pipeline_build_enabled: true
 
 inference_enabled: true
 inference_prompt: "a serene landscape with mountains and a lake"
+inference_prompt_file: "prompts/paper_small.txt"
 inference_num_steps: 28
 inference_guidance_scale: 7.0
 inference_height: 512
@@ -88,10 +89,14 @@ embed:
 
 calibration:
   detect_records_glob: null  # detect 记录 glob 路径（由 experiment_matrix 注入）
+  minimal_ground_truth_pair_count: 30  # onefile 最小 GT 闭环生成对数（positive/negative）
+  minimal_ground_truth_prompts_file: null  # 可选：通过 prompts 文件驱动 GT 对数（行数即 pair_count）
 
 evaluate:
   detect_records_glob: null  # detect 记录 glob 路径（由 experiment_matrix 注入）
   thresholds_path: null      # 阈值工件路径（由 experiment_matrix 注入）
+  minimal_ground_truth_pair_count: 30  # onefile 最小 GT 闭环生成对数（positive/negative）
+  minimal_ground_truth_prompts_file: null  # 可选：通过 prompts 文件驱动 GT 对数（行数即 pair_count）
 
 impl:
   content_extractor_id: "unified_content_extractor_v1"

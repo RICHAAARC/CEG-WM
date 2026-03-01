@@ -1273,11 +1273,33 @@ def _build_content_inputs_for_detect(
         return inputs
 
     image_path = _resolve_detect_image_path(cfg, input_record)
-    if image_path is None:
-        return None
-    inputs["image_path"] = str(image_path)
-    inputs["input_source"] = "image_path"
-    return inputs
+    if image_path is not None:
+        inputs["image_path"] = str(image_path)
+        inputs["input_source"] = "image_path"
+
+    input_content_evidence: Dict[str, Any] = {}
+    if isinstance(input_record, dict):
+        content_node = input_record.get("content_evidence")
+        if isinstance(content_node, dict):
+            input_content_evidence = cast(Dict[str, Any], content_node)
+
+    expected_plan_digest = _resolve_expected_plan_digest(input_record)
+    if isinstance(expected_plan_digest, str) and expected_plan_digest:
+        inputs["expected_plan_digest"] = expected_plan_digest
+
+    observed_plan_digest = input_content_evidence.get("plan_digest")
+    if isinstance(observed_plan_digest, str) and observed_plan_digest:
+        inputs["observed_plan_digest"] = observed_plan_digest
+        inputs["plan_digest"] = observed_plan_digest
+
+    for evidence_key in ["lf_evidence", "hf_evidence", "statistics", "injection_evidence"]:
+        evidence_value = input_content_evidence.get(evidence_key)
+        if evidence_value is not None:
+            inputs[evidence_key] = evidence_value
+
+    if inputs:
+        return inputs
+    return None
 
 
 def _resolve_plan_dict(plan_payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -2290,7 +2312,7 @@ def run_calibrate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> D
         raise TypeError("thresholds_spec.target_fpr must be number")
 
     detect_records = _load_records_for_calibration(cfg)
-    scores, strata_info = load_scores_for_calibration(detect_records)
+    scores, strata_info = load_scores_for_calibration(detect_records, cfg)
     threshold_value, order_stat_info = compute_np_threshold(scores, float(target_fpr))
     sampling_policy_node = strata_info.get("sampling_policy")
     sampling_policy = cast(Dict[str, Any], sampling_policy_node) if isinstance(sampling_policy_node, dict) else {}
@@ -2735,7 +2757,10 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
     return record
 
 
-def load_scores_for_calibration(records: list[Dict[str, Any]]) -> tuple[list[float], Dict[str, Any]]:
+def load_scores_for_calibration(
+    records: list[Dict[str, Any]],
+    cfg: Optional[Dict[str, Any]] = None,
+) -> tuple[list[float], Dict[str, Any]]:
     """
     功能：从 detect records 加载校准分数。 
 
@@ -2743,10 +2768,14 @@ def load_scores_for_calibration(records: list[Dict[str, Any]]) -> tuple[list[flo
 
     Args:
         records: Detect records list.
+        cfg: Optional runtime config used for strict calibration filtering.
 
     Returns:
         Tuple of (scores, strata_info).
     """
+    if cfg is not None and not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict or None")
+
     scores: list[float] = []
     total = len(records)
     valid = 0
@@ -2754,6 +2783,14 @@ def load_scores_for_calibration(records: list[Dict[str, Any]]) -> tuple[list[flo
     rejected_label_missing = 0
     rejected_label_positive = 0
     rejected_synthetic_fallback = 0
+    rejected_formal_sidecar_marker = 0
+
+    calibration_cfg: Dict[str, Any] = {}
+    if isinstance(cfg, dict):
+        calibration_node = cfg.get("calibration")
+        if isinstance(calibration_node, dict):
+            calibration_cfg = cast(Dict[str, Any], calibration_node)
+    exclude_formal_sidecar_marker = bool(calibration_cfg.get("exclude_formal_sidecar_disabled_marker", False))
 
     has_explicit_labels = False
     for item in records:
@@ -2777,6 +2814,12 @@ def load_scores_for_calibration(records: list[Dict[str, Any]]) -> tuple[list[flo
                 rejected += 1
                 rejected_synthetic_fallback += 1
                 continue
+            if exclude_formal_sidecar_marker:
+                usage_value = content_payload_mapping.get("calibration_sample_usage")
+                if usage_value == "formal_with_sidecar_disabled_marker":
+                    rejected += 1
+                    rejected_formal_sidecar_marker += 1
+                    continue
         if status_value != "ok":
             rejected += 1
             continue
@@ -2818,6 +2861,8 @@ def load_scores_for_calibration(records: list[Dict[str, Any]]) -> tuple[list[flo
             "n_rejected_label_missing": rejected_label_missing,
             "n_rejected_label_positive": rejected_label_positive,
             "n_rejected_synthetic_fallback": rejected_synthetic_fallback,
+            "n_rejected_formal_sidecar_marker": rejected_formal_sidecar_marker,
+            "exclude_formal_sidecar_disabled_marker": exclude_formal_sidecar_marker,
             "n_selected_null": valid,
         },
     }
