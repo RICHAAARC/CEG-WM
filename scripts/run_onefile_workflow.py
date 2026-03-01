@@ -627,9 +627,18 @@ def _resolve_prompt_file_path(prompt_file: str, cfg_path: Path) -> Path:
         raise TypeError("cfg_path must be Path")
 
     prompt_path = Path(prompt_file.strip()).expanduser()
-    if not prompt_path.is_absolute():
-        return (cfg_path.parent / prompt_path).resolve()
-    return prompt_path.resolve()
+    if prompt_path.is_absolute():
+        return prompt_path.resolve()
+
+    candidate_from_cfg_dir = (cfg_path.parent / prompt_path).resolve()
+    if candidate_from_cfg_dir.exists() and candidate_from_cfg_dir.is_file():
+        return candidate_from_cfg_dir
+
+    candidate_from_repo_root = (REPO_ROOT / prompt_path).resolve()
+    if candidate_from_repo_root.exists() and candidate_from_repo_root.is_file():
+        return candidate_from_repo_root
+
+    return candidate_from_cfg_dir
 
 
 def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> Path:

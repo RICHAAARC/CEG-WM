@@ -953,6 +953,42 @@ def test_onefile_prepare_stage_cfg_path_uses_prompt_list_as_gt_driver(tmp_path: 
     assert negative_payload.get("inference_prompt") == "prompt one"
 
 
+def test_onefile_resolve_prompt_file_path_fallbacks_to_repo_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：验证 prompt 相对路径在 cfg 目录缺失时可回退到仓库根目录解析。
+
+    Verify prompt path resolution falls back to repo root when cfg-relative file is absent.
+
+    Args:
+        tmp_path: Temporary path fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    fake_repo_root = tmp_path / "fake_repo"
+    cfg_dir = fake_repo_root / "configs"
+    prompts_dir = fake_repo_root / "prompts"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    prompts_dir.mkdir(parents=True, exist_ok=True)
+
+    prompt_file = prompts_dir / "paper_small.txt"
+    prompt_file.write_text("prompt-a\n", encoding="utf-8")
+
+    cfg_path = cfg_dir / "paper_full_cuda.yaml"
+    cfg_path.write_text("inference_prompt_file: \"prompts/paper_small.txt\"\n", encoding="utf-8")
+
+    monkeypatch.setattr(module, "REPO_ROOT", fake_repo_root)
+    resolved_path = module._resolve_prompt_file_path("prompts/paper_small.txt", cfg_path)
+    assert resolved_path == prompt_file.resolve()
+
+
 def test_paper_full_mechanism_assertions_fail_fast_on_proxy_paths(tmp_path: Path) -> None:
     """
     功能：验证 paper 机制断言在 proxy 路径下 fail-fast。
