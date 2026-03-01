@@ -11,6 +11,7 @@ Module type: General module
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -1215,6 +1216,178 @@ def _ensure_run_root_artifacts_for_strict_audits(run_root: Path) -> None:
         )
 
 
+def _load_optional_json_dict(path: Path) -> dict:
+    """
+    功能：读取可选 JSON 文件并返回 dict。 
+
+    Read optional JSON file and return dict; return empty dict when absent or invalid.
+
+    Args:
+        path: Target JSON path.
+
+    Returns:
+        Parsed dictionary or empty dict.
+    """
+    if not isinstance(path, Path):
+        raise TypeError("path must be Path")
+    if not path.exists() or not path.is_file():
+        return {}
+    parsed_obj = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(parsed_obj, dict):
+        return {}
+    return parsed_obj
+
+
+def _compute_file_sha256(path: Path) -> str:
+    """
+    功能：计算文件 SHA256 摘要。 
+
+    Compute SHA256 digest for one file.
+
+    Args:
+        path: File path.
+
+    Returns:
+        SHA256 hex digest.
+    """
+    if not isinstance(path, Path):
+        raise TypeError("path must be Path")
+    hasher = hashlib.sha256()
+    with path.open("rb") as file_obj:
+        for chunk in iter(lambda: file_obj.read(8192), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def _first_present_anchor_str(*values: object) -> str:
+    """
+    功能：返回首个有效锚点字符串。 
+
+    Return the first non-empty and non-absent string anchor value.
+
+    Args:
+        values: Candidate anchor values.
+
+    Returns:
+        First valid anchor string or "<absent>".
+    """
+    for value in values:
+        if isinstance(value, str) and value and value != "<absent>":
+            return value
+    return "<absent>"
+
+
+def _build_minimal_repro_bundle(run_root: Path) -> None:
+    """
+    功能：基于现有 run_root 产物生成最小可审计 repro_bundle。 
+
+    Build minimal repro_bundle manifest and pointers using existing run_root artifacts,
+    without re-running pipeline stages.
+
+    Args:
+        run_root: Unified run_root path.
+
+    Returns:
+        None.
+
+    Raises:
+        FileNotFoundError: If required source artifacts are missing.
+    """
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+
+    evaluation_report_obj = _load_optional_json_dict(run_root / "artifacts" / "evaluation_report.json")
+    nested_report_obj = evaluation_report_obj.get("evaluation_report")
+    if isinstance(nested_report_obj, dict):
+        evaluation_report_obj = nested_report_obj
+
+    evaluate_record_obj = _load_optional_json_dict(run_root / "records" / "evaluate_record.json")
+    run_closure_obj = _load_optional_json_dict(run_root / "artifacts" / "run_closure.json")
+
+    required_pointer_files = [
+        run_root / "artifacts" / "run_closure.json",
+        run_root / "records" / "evaluate_record.json",
+        run_root / "artifacts" / "evaluation_report.json",
+        run_root / "artifacts" / "signoff" / "signoff_report.json",
+    ]
+    for source_path in required_pointer_files:
+        if not source_path.exists() or not source_path.is_file():
+            raise FileNotFoundError(f"required source artifact missing: {source_path}")
+
+    pointers_obj = {
+        "schema_version": "v1",
+        "files": [
+            {
+                "path": str(source_path.relative_to(run_root).as_posix()),
+                "sha256": _compute_file_sha256(source_path),
+            }
+            for source_path in required_pointer_files
+        ],
+    }
+
+    manifest_obj = {
+        "schema_version": "v1",
+        "cfg_digest": _first_present_anchor_str(
+            evaluation_report_obj.get("cfg_digest"),
+            evaluate_record_obj.get("cfg_digest"),
+            run_closure_obj.get("cfg_digest"),
+        ),
+        "plan_digest": _first_present_anchor_str(
+            evaluation_report_obj.get("plan_digest"),
+            evaluate_record_obj.get("plan_digest"),
+            run_closure_obj.get("plan_digest"),
+        ),
+        "thresholds_digest": _first_present_anchor_str(
+            evaluation_report_obj.get("thresholds_digest"),
+            evaluate_record_obj.get("thresholds_digest"),
+            run_closure_obj.get("thresholds_digest"),
+        ),
+        "threshold_metadata_digest": _first_present_anchor_str(
+            evaluation_report_obj.get("threshold_metadata_digest"),
+            evaluate_record_obj.get("threshold_metadata_digest"),
+            run_closure_obj.get("threshold_metadata_digest"),
+        ),
+        "impl_digest": _first_present_anchor_str(
+            evaluation_report_obj.get("impl_digest"),
+            evaluate_record_obj.get("impl_digest"),
+            run_closure_obj.get("impl_digest"),
+            run_closure_obj.get("impl_identity_digest"),
+        ),
+        "fusion_rule_version": _first_present_anchor_str(
+            evaluation_report_obj.get("fusion_rule_version"),
+            evaluate_record_obj.get("fusion_rule_version"),
+            run_closure_obj.get("fusion_rule_version"),
+        ),
+        "attack_protocol_version": _first_present_anchor_str(
+            evaluation_report_obj.get("attack_protocol_version"),
+            evaluate_record_obj.get("attack_protocol_version"),
+        ),
+        "attack_protocol_digest": _first_present_anchor_str(
+            evaluation_report_obj.get("attack_protocol_digest"),
+            evaluate_record_obj.get("attack_protocol_digest"),
+        ),
+        "policy_path": _first_present_anchor_str(
+            evaluation_report_obj.get("policy_path"),
+            evaluate_record_obj.get("policy_path"),
+            run_closure_obj.get("policy_path"),
+        ),
+        "pointers_rel_path": "artifacts/repro_bundle/pointers.json",
+    }
+
+    repro_bundle_dir = run_root / "artifacts" / "repro_bundle"
+    repro_bundle_dir.mkdir(parents=True, exist_ok=True)
+    _write_artifact_text_unbound(
+        run_root,
+        repro_bundle_dir / "pointers.json",
+        json.dumps(pointers_obj, ensure_ascii=False, indent=2),
+    )
+    _write_artifact_text_unbound(
+        run_root,
+        repro_bundle_dir / "manifest.json",
+        json.dumps(manifest_obj, ensure_ascii=False, indent=2),
+    )
+
+
 def _ensure_repro_bundle_ready_for_paper_signoff(repo_root: Path, run_root: Path, cfg_path: Path) -> None:
     """
     功能：在 paper signoff 前确保当前 run_root 具备可审计 repro_bundle。
@@ -1247,42 +1420,41 @@ def _ensure_repro_bundle_ready_for_paper_signoff(repo_root: Path, run_root: Path
     if bundle_manifest_path.exists() and bundle_manifest_path.is_file() and bundle_pointers_path.exists() and bundle_pointers_path.is_file():
         return
 
-    repro_pipeline_command = [
-        sys.executable,
-        str(repo_root / "scripts" / "run_repro_pipeline.py"),
-        "--run-root",
-        str(run_root),
-        "--config",
-        str(cfg_path),
-        "--attack-protocol",
-        str(repo_root / "configs" / "attack_protocol.yaml"),
-        "--repo-root",
-        str(repo_root),
-        "--max-samples",
-        "16",
-    ]
-    repro_result = subprocess.run(
-        repro_pipeline_command,
-        cwd=str(repo_root),
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env={
-            **os.environ,
-            "KMP_DUPLICATE_LIB_OK": os.environ.get("KMP_DUPLICATE_LIB_OK", "TRUE"),
-            "PYTHONIOENCODING": os.environ.get("PYTHONIOENCODING", "utf-8"),
-        },
-    )
-    if repro_result.returncode != 0:
-        raise RuntimeError(
-            "repro bundle preparation failed before paper signoff\n"
-            f"  - run_root: {run_root}\n"
-            f"  - command: {' '.join(repro_pipeline_command)}\n"
-            f"  - stdout_tail: {repro_result.stdout[-1000:]}\n"
-            f"  - stderr_tail: {repro_result.stderr[-1000:]}"
+    signoff_report_path = run_root / "artifacts" / "signoff" / "signoff_report.json"
+    if not signoff_report_path.exists() or not signoff_report_path.is_file():
+        signoff_command = [
+            sys.executable,
+            str(repo_root / "scripts" / "run_freeze_signoff.py"),
+            "--run-root",
+            str(run_root),
+            "--repo-root",
+            str(repo_root),
+            "--signoff-profile",
+            "paper",
+        ]
+        signoff_result = subprocess.run(
+            signoff_command,
+            cwd=str(repo_root),
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env={
+                **os.environ,
+                "PYTHONIOENCODING": os.environ.get("PYTHONIOENCODING", "utf-8"),
+            },
         )
+        if (signoff_result.returncode != 0) and (not signoff_report_path.exists() or not signoff_report_path.is_file()):
+            raise RuntimeError(
+                "signoff artifact preparation failed before repro bundle build\n"
+                f"  - run_root: {run_root}\n"
+                f"  - command: {' '.join(signoff_command)}\n"
+                f"  - stdout_tail: {signoff_result.stdout[-1000:]}\n"
+                f"  - stderr_tail: {signoff_result.stderr[-1000:]}"
+            )
+
+    _build_minimal_repro_bundle(run_root)
 
     repro_audit_command = [
         sys.executable,
