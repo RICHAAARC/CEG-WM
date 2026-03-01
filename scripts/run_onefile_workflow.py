@@ -1568,11 +1568,17 @@ def _ensure_attack_protocol_report_coverage_ready(repo_root: Path, run_root: Pat
         target_obj = nested_report_obj
 
     metrics_obj = target_obj.get("metrics_by_attack_condition")
-    if isinstance(metrics_obj, list) and any(
-        isinstance(item, dict) and isinstance(item.get("group_key"), str) and item.get("group_key")
-        for item in metrics_obj
-    ):
-        return
+    if isinstance(metrics_obj, list):
+        non_unknown_group_keys = {
+            item.get("group_key")
+            for item in metrics_obj
+            if isinstance(item, dict)
+            and isinstance(item.get("group_key"), str)
+            and item.get("group_key")
+            and item.get("group_key") != "unknown_attack::unknown_params"
+        }
+        if non_unknown_group_keys:
+            return
 
     declared_conditions = _resolve_declared_attack_conditions(repo_root)
     if not declared_conditions:

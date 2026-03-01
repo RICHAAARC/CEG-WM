@@ -271,6 +271,58 @@ def test_onefile_coverage_ready_fills_metrics_by_attack_condition(tmp_path: Path
     assert all(isinstance(item, dict) and isinstance(item.get("group_key"), str) for item in metrics_obj)
 
 
+def test_onefile_coverage_ready_replaces_unknown_only_metrics(tmp_path: Path) -> None:
+    """
+    功能：验证仅有 unknown sentinel 条目时，pre-audits 仍会补齐声明条件。 
+
+    Verify pre-audits fills declared conditions when report only has unknown sentinel.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    artifacts_dir = run_root / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    report_path = artifacts_dir / "evaluation_report.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "evaluation_report": {
+                    "metrics_by_attack_condition": [
+                        {
+                            "group_key": "unknown_attack::unknown_params"
+                        }
+                    ]
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    module._ensure_attack_protocol_report_coverage_ready(repo_root, run_root)
+
+    repaired_obj = json.loads(report_path.read_text(encoding="utf-8"))
+    nested_obj = repaired_obj.get("evaluation_report")
+    assert isinstance(nested_obj, dict)
+    metrics_obj = nested_obj.get("metrics_by_attack_condition")
+    assert isinstance(metrics_obj, list)
+    group_keys = {
+        item.get("group_key")
+        for item in metrics_obj
+        if isinstance(item, dict) and isinstance(item.get("group_key"), str)
+    }
+    assert "unknown_attack::unknown_params" not in group_keys
+    assert len(group_keys) > 0
+
+
 def test_onefile_paper_profile_prepares_repro_bundle_before_audits(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
