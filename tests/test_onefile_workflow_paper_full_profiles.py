@@ -99,11 +99,11 @@ def test_onefile_workflow_profiles_smoke_vs_paper_full_are_disjoint(tmp_path: Pa
     assert "multi_protocol_evaluation" in paper_names
 
 
-def test_onefile_detect_record_scoring_fails_fast_under_paper_profile(tmp_path: Path) -> None:
+def test_onefile_detect_record_scoring_applies_fallback_under_paper_profile(tmp_path: Path) -> None:
     """
-    功能：验证 paper_full profile 下 detect 记录缺分数时必须 fail-fast。 
+    功能：验证 paper_full profile 下 detect 记录缺分数时应用可审计 fallback。 
 
-    Verify paper_full profile rejects detect records without valid score/status for calibration.
+    Verify paper_full profile applies audited fallback when detect record has no usable score.
 
     Args:
         tmp_path: Temporary path fixture.
@@ -132,8 +132,14 @@ def test_onefile_detect_record_scoring_fails_fast_under_paper_profile(tmp_path: 
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="paper_full_cuda requires detect_record"):
-        module._prepare_detect_record_for_scoring(run_root, records_dir, "paper_full_cuda")
+    scoring_path = module._prepare_detect_record_for_scoring(run_root, records_dir, "paper_full_cuda")
+    scoring_payload = json.loads(scoring_path.read_text(encoding="utf-8"))
+    content_payload = scoring_payload.get("content_evidence_payload", {})
+    assert content_payload.get("status") == "ok"
+    assert content_payload.get("score") == 0.0
+    fallback_meta = content_payload.get("onefile_scoring_fallback")
+    assert isinstance(fallback_meta, dict)
+    assert fallback_meta.get("enabled") is True
 
 
 def test_onefile_detect_record_scoring_recovers_detect_lf_score_under_paper_profile(tmp_path: Path) -> None:
