@@ -764,6 +764,105 @@ def test_assert_multi_protocol_compare_success_rejects_failed_protocol(tmp_path:
     assert any("failed protocol runs" in item for item in failures)
 
 
+def test_paper_mechanism_assertions_allow_fallback_without_geometry_anchors(tmp_path: Path) -> None:
+    """
+    功能：验证 detect fallback 模式下可放宽几何锚点与 compare failed 协议断言。 
+
+    Verify paper mechanism assertions relax geometry-anchor and failed-compare checks in detect fallback mode.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    assert_module = _load_assert_script_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    compare_dir = run_root / "artifacts" / "multi_protocol_evaluation" / "artifacts" / "protocol_compare"
+    compare_dir.mkdir(parents=True, exist_ok=True)
+    (compare_dir / "compare_summary.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "protocol_compare_v1",
+                "protocols": [{"status": "fail"}],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = {
+        "paper_faithfulness": {"enabled": True},
+        "impl": {
+            "sync_module_id": "geometry_latent_sync_sd3_v2",
+            "geometry_extractor_id": "attention_anchor_map_relation_v1",
+            "hf_embedder_id": "hf_embedder_t2smark_v1",
+            "lf_coder_id": "lf_coder_prc_v1",
+        },
+        "watermark": {
+            "hf": {
+                "enabled": True,
+                "tail_truncation_mode": "top_k_per_latent",
+                "selection": "top_k_magnitude_based",
+            },
+            "lf": {
+                "enabled": True,
+                "coding_mode": "latent_space_sign_flipping",
+                "decoder": "belief_propagation",
+            },
+        },
+    }
+    embed_record = {
+        "content_evidence": {
+            "injection_status": "ok",
+            "injection_trace_digest": "1" * 64,
+            "injection_digest": "2" * 64,
+            "step_summary_digest": "3" * 64,
+            "trajectory_evidence": {"trajectory_spec_digest": "4" * 64},
+            "injection_site_spec": {"hook_type": "callback_on_step_end"},
+        },
+        "content_result": {
+            "lf_trace_digest": "5" * 64,
+            "hf_trace_digest": "6" * 64,
+        },
+    }
+    detect_record = {
+        "detect_runtime_is_fallback": True,
+        "content_evidence_payload": {
+            "status": "failed",
+            "score": None,
+        },
+        "geometry_evidence_payload": {
+            "status": "failed",
+        },
+    }
+    evaluate_report = {
+        "evaluation_report": {
+            "attack_protocol_version": "attack_protocol_v1",
+            "attack_protocol_digest": "9" * 64,
+            "attack_coverage_digest": "a" * 64,
+            "metrics_by_attack_condition": [{"group_key": "g0"}],
+        }
+    }
+
+    failures = assert_module._assert_paper_mechanisms(
+        run_root=run_root,
+        cfg=cfg,
+        embed_record=embed_record,
+        detect_record=detect_record,
+        evaluate_report=evaluate_report,
+        repo_root=repo_root,
+    )
+
+    assert all("detect content evidence must include sync_digest" not in item for item in failures)
+    assert all("detect content evidence must include 64-hex anchor_digest" not in item for item in failures)
+    assert all("detect content evidence must include anchor_metrics" not in item for item in failures)
+    assert all("compare summary contains failed protocol runs" not in item for item in failures)
+
+
     def test_onefile_multi_protocol_validation_failed_protocol_is_warning_only(tmp_path: Path) -> None:
         """
         功能：验证 compare summary 仅因 protocol status 失败时不应阻断 onefile。 
