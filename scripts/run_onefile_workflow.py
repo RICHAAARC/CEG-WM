@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -681,28 +682,72 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
         content_payload = {}
         payload["content_evidence_payload"] = content_payload
 
+    def _coerce_finite_float(value: object) -> float | None:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            numeric_value = float(value)
+            if math.isfinite(numeric_value):
+                return numeric_value
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+            try:
+                numeric_value = float(stripped)
+            except ValueError:
+                return None
+            if math.isfinite(numeric_value):
+                return numeric_value
+        return None
+
     score_value = content_payload.get("score")
     status_value = content_payload.get("status")
-    score_valid = isinstance(score_value, (int, float))
+    normalized_score_value = _coerce_finite_float(score_value)
+    score_valid = normalized_score_value is not None
     status_ok = status_value == "ok"
 
     if status_ok and score_valid:
-        return source_detect_path
+        assert normalized_score_value is not None
+        if isinstance(score_value, (int, float)):
+            content_payload["score"] = float(normalized_score_value)
+            return source_detect_path
+        content_payload["score"] = float(normalized_score_value)
+        normalized_detect_path = run_root / "artifacts" / "workflow_cfg" / "detect_record_for_scoring.json"
+        normalized_detect_path.parent.mkdir(parents=True, exist_ok=True)
+        _write_artifact_text_unbound(
+            run_root,
+            normalized_detect_path,
+            json.dumps(payload, ensure_ascii=False, indent=2)
+        )
+        if profile == PROFILE_PAPER_FULL_CUDA:
+            print("[onefile] PAPER_SCORE_NORMALIZED source=content_evidence_payload.score")
+        return normalized_detect_path
 
     recovered_score = None
     recovered_field = None
     if status_ok:
         score_parts_node = content_payload.get("score_parts")
         score_parts = score_parts_node if isinstance(score_parts_node, dict) else {}
+        content_evidence_node = payload.get("content_evidence")
+        content_evidence = content_evidence_node if isinstance(content_evidence_node, dict) else {}
+        fusion_result_node = payload.get("fusion_result")
+        fusion_result = fusion_result_node if isinstance(fusion_result_node, dict) else {}
+        evidence_summary_node = fusion_result.get("evidence_summary") if isinstance(fusion_result.get("evidence_summary"), dict) else {}
         score_candidates = [
             ("detect_lf_score", content_payload.get("detect_lf_score")),
             ("lf_score", content_payload.get("lf_score")),
             ("score_parts.content_score", score_parts.get("content_score")),
             ("score_parts.detect_lf_score", score_parts.get("detect_lf_score")),
+            ("content_evidence.score", content_evidence.get("score")),
+            ("record.score", payload.get("score")),
+            ("fusion_result.evidence_summary.content_score", evidence_summary_node.get("content_score")),
         ]
         for field_name, candidate_value in score_candidates:
-            if isinstance(candidate_value, (int, float)):
-                recovered_score = float(candidate_value)
+            numeric_candidate = _coerce_finite_float(candidate_value)
+            if numeric_candidate is not None:
+                recovered_score = numeric_candidate
                 recovered_field = field_name
                 break
 
