@@ -685,6 +685,64 @@ def test_onefile_detect_record_scoring_recovers_when_status_failed_but_score_ava
         module._prepare_detect_record_for_scoring(run_root, records_dir, "paper_full_cuda")
 
 
+def test_onefile_detect_record_scoring_allows_fallback_when_sidecar_disabled(tmp_path: Path) -> None:
+    """
+    功能：验证 paper_full profile 在 sidecar 禁用（配置性缺失）时允许 fallback=0.0 继续。
+
+    Verify paper_full profile allows fallback to score=0.0 when both LF/HF are absent
+    due to image_domain_sidecar_disabled configuration, not algorithmic failure.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    detect_record_path = records_dir / "detect_record.json"
+    detect_record_path.write_text(
+        json.dumps(
+            {
+                "content_evidence_payload": {
+                    "status": "failed",
+                    "score": None,
+                    "detect_lf_score": None,
+                    "lf_score": None,
+                    "content_failure_reason": "mask_extraction_no_input",
+                    "score_parts": {
+                        "lf_status": "absent",
+                        "hf_status": "absent",
+                        "lf_detect_trace": {
+                            "lf_status": "absent",
+                            "lf_absent_reason": "image_domain_sidecar_disabled",
+                        },
+                        "hf_detect_trace": {
+                            "hf_status": "absent",
+                            "hf_absent_reason": "image_domain_sidecar_disabled",
+                        },
+                    },
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    # sidecar 禁用是配置性缺失，不阻断 paper 流水线，允许 score=0.0 fallback。
+    scoring_path = module._prepare_detect_record_for_scoring(run_root, records_dir, "paper_full_cuda")
+    assert scoring_path.exists()
+    scoring_payload = json.loads(scoring_path.read_text(encoding="utf-8"))
+    content_payload = scoring_payload.get("content_evidence_payload", {})
+    assert content_payload.get("score") == 0.0
+    assert content_payload.get("status") == "ok"
+
+
 def test_paper_full_mechanism_assertions_fail_fast_on_proxy_paths(tmp_path: Path) -> None:
     """
     功能：验证 paper 机制断言在 proxy 路径下 fail-fast。

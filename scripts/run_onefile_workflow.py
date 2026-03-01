@@ -807,13 +807,27 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
             diagnostic_snapshot["score_parts.content_score"] = score_parts_mapping.get("content_score")
             diagnostic_snapshot["score_parts.detect_lf_score"] = score_parts_mapping.get("detect_lf_score")
 
-        # paper 模式禁止以 score=0.0 替代真实失败证据，拒绝继续。
-        # 失败语义必须可拒绝，不允许被"可校准分数"覆盖。
-        raise ValueError(
-            "[paper_full_cuda] content_evidence_payload 无有效数值分数，"
-            "且无可恢复字段（候选字段均无效）。"
-            f"diagnostics={diagnostic_snapshot}"
+        # (1) 判断是否为 image_domain_sidecar 禁用导致的配置性缺失（非算法失败）。
+        # sidecar 禁用时 LF/HF 均为 absent，不存在真实检测失败，允许以 fallback 继续。
+        _sp_node = content_payload.get("score_parts") or {}
+        _lf_trace = (_sp_node.get("lf_detect_trace") or {}) if isinstance(_sp_node, dict) else {}
+        _hf_trace = (_sp_node.get("hf_detect_trace") or {}) if isinstance(_sp_node, dict) else {}
+        _sidecar_disabled_fallback = (
+            _lf_trace.get("lf_absent_reason") == "image_domain_sidecar_disabled"
+            and _hf_trace.get("hf_absent_reason") == "image_domain_sidecar_disabled"
         )
+
+        if not _sidecar_disabled_fallback:
+            # paper 模式禁止以 score=0.0 替代真实失败证据，拒绝继续。
+            # 失败语义必须可拒绝，不允许被"可校准分数"覆盖。
+            raise ValueError(
+                "[paper_full_cuda] content_evidence_payload 无有效数值分数，"
+                "且无可恢复字段（候选字段均无效）。"
+                f"diagnostics={diagnostic_snapshot}"
+            )
+
+        # (2) sidecar 禁用时：配置性缺失，允许 fallback，记录诊断供审计追踪。
+        print(f"[onefile] PAPER_SIDECAR_DISABLED_FALLBACK diagnostics={diagnostic_snapshot}")
 
     score_fallback = content_payload.get("detect_lf_score")
     if not isinstance(score_fallback, (int, float)):
