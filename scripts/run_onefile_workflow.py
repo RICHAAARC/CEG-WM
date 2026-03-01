@@ -1599,9 +1599,13 @@ def _ensure_experiment_matrix_grid_summary_anchors(run_root: Path) -> None:
             changed = True
 
     if changed:
-        summary_path.write_text(
+        matrix_batch_root = run_root / "outputs" / "experiment_matrix"
+        matrix_artifacts_dir = matrix_batch_root / "artifacts"
+        records_io.write_artifact_text_unbound(
+            matrix_batch_root,
+            matrix_artifacts_dir,
+            str(summary_path),
             json.dumps(summary_obj, ensure_ascii=False, indent=2),
-            encoding="utf-8",
         )
 
 

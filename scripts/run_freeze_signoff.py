@@ -200,21 +200,6 @@ def execute_audit_script(
     stdout_text = _decode_bytes(result.stdout)
     stderr_text = _decode_bytes(result.stderr)
 
-    if result.returncode != 0:
-        return {
-            "audit_id": f"ERROR.{script_path.stem}",
-            "severity": "BLOCK",
-            "result": "FAIL",
-            "rule": f"audit script failed: {script_path.name}",
-            "impact": "audit script returned non-zero",
-            "fix": "fix audit script exit behavior",
-            "evidence": {
-                "exit_code": result.returncode,
-                "stdout_text": stdout_text[:1000],
-                "stderr_text": stderr_text[:1000],
-            },
-        }
-
     output = stdout_text.strip()
     if not output:
         return {
@@ -234,6 +219,21 @@ def execute_audit_script(
     try:
         parsed_any = json.loads(output)
     except json.JSONDecodeError as exc:
+        if result.returncode != 0:
+            return {
+                "audit_id": f"ERROR.{script_path.stem}",
+                "severity": "BLOCK",
+                "result": "FAIL",
+                "rule": f"audit script failed: {script_path.name}",
+                "impact": "audit script returned non-zero and output is not valid JSON",
+                "fix": "fix audit script exit behavior or JSON output",
+                "evidence": {
+                    "exit_code": result.returncode,
+                    "stdout_text": stdout_text[:1000],
+                    "stderr_text": stderr_text[:1000],
+                    "json_error": f"{type(exc).__name__}: {exc}",
+                },
+            }
         return {
             "audit_id": f"ERROR.{script_path.stem}",
             "severity": "BLOCK",
@@ -256,6 +256,11 @@ def execute_audit_script(
         }
 
     parsed = cast(Dict[str, Any], parsed_any)
+    if result.returncode != 0:
+        # 审计脚本按约定使用非零退出码表示 FAIL；只要 JSON 结构有效，应返回其原始结果而非 ERROR 包装。
+        parsed.setdefault("evidence", {})
+        if isinstance(parsed.get("evidence"), dict):
+            parsed["evidence"].setdefault("exit_code", result.returncode)
     return parsed
 
 
