@@ -762,3 +762,41 @@ def test_assert_multi_protocol_compare_success_rejects_failed_protocol(tmp_path:
 
     failures = assert_module._assert_multi_protocol_compare_success(compare_summary_path)
     assert any("failed protocol runs" in item for item in failures)
+
+
+    def test_onefile_multi_protocol_validation_failed_protocol_is_warning_only(tmp_path: Path) -> None:
+        """
+        功能：验证 compare summary 仅因 protocol status 失败时不应阻断 onefile。 
+
+        Verify protocol-status failures in compare summary are warning-only in onefile gate.
+
+        Args:
+            tmp_path: Temporary path fixture.
+
+        Returns:
+            None.
+        """
+        repo_root = Path(__file__).resolve().parent.parent
+        module = _load_onefile_module(repo_root)
+
+        error = ValueError("compare summary contains failed protocols: failed=1, total=1")
+        assert module._should_block_on_multi_protocol_validation_error(error) is False
+
+
+    def test_onefile_multi_protocol_validation_schema_error_blocks(tmp_path: Path) -> None:
+        """
+        功能：验证 compare summary 结构错误必须阻断 onefile。 
+
+        Verify malformed compare summary errors must block onefile workflow.
+
+        Args:
+            tmp_path: Temporary path fixture.
+
+        Returns:
+            None.
+        """
+        repo_root = Path(__file__).resolve().parent.parent
+        module = _load_onefile_module(repo_root)
+
+        error = ValueError("compare summary schema_version invalid: unknown")
+        assert module._should_block_on_multi_protocol_validation_error(error) is True

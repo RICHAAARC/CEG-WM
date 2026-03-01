@@ -420,6 +420,29 @@ def _validate_multi_protocol_compare_summary(compare_summary_path: Path) -> None
         )
 
 
+def _should_block_on_multi_protocol_validation_error(exc: Exception) -> bool:
+    """
+    功能：判定 multi protocol compare 校验异常是否应阻断 onefile 流程。 
+
+    Decide whether compare-summary validation error should stop onefile workflow.
+
+    Args:
+        exc: Exception raised during compare-summary validation.
+
+    Returns:
+        True when workflow must stop; False when warning-only continuation is allowed.
+    """
+    if not isinstance(exc, Exception):
+        raise TypeError("exc must be Exception")
+
+    message = str(exc)
+    # 协议状态失败属于运行期能力结果，可记录告警后继续。
+    if "compare summary contains failed protocols" in message:
+        return False
+    # 文件缺失、schema 错误、结构损坏等必须阻断。
+    return True
+
+
 def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> Path:
     """
     功能：按 profile 生成运行期配置文件。 
@@ -1360,12 +1383,17 @@ def run_onefile_workflow(
             try:
                 _validate_multi_protocol_compare_summary(compare_summary_path)
             except Exception as exc:
+                if _should_block_on_multi_protocol_validation_error(exc):
+                    print(
+                        f"[onefile] multi_protocol compare summary validation failed: "
+                        f"{type(exc).__name__}: {exc}",
+                        file=sys.stderr,
+                    )
+                    return 1
                 print(
-                    f"[onefile] multi_protocol compare summary validation failed: "
-                    f"{type(exc).__name__}: {exc}",
-                    file=sys.stderr,
+                    f"[onefile] multi_protocol compare summary warning (continue): "
+                    f"{type(exc).__name__}: {exc}"
                 )
-                return 1
 
         if step.name == "experiment_matrix" and profile == PROFILE_PAPER_FULL_CUDA and step.artifact_paths:
             summary_path = step.artifact_paths[0]
