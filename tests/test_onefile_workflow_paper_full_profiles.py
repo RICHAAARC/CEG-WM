@@ -173,6 +173,104 @@ def test_onefile_grid_summary_anchor_repair_before_audits(tmp_path: Path) -> Non
     assert repaired_obj.get("fusion_rule_version") == "v1"
 
 
+def test_onefile_build_minimal_repro_bundle_without_signoff_report(tmp_path: Path) -> None:
+    """
+    功能：验证最小 repro_bundle 生成不再硬依赖 signoff_report。 
+
+    Verify minimal repro_bundle can be prepared without signoff_report artifact.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    (run_root / "artifacts").mkdir(parents=True, exist_ok=True)
+    (run_root / "records").mkdir(parents=True, exist_ok=True)
+
+    (run_root / "artifacts" / "run_closure.json").write_text(
+        json.dumps(
+            {
+                "cfg_digest": "1" * 64,
+                "plan_digest": "2" * 64,
+                "thresholds_digest": "3" * 64,
+                "threshold_metadata_digest": "4" * 64,
+                "impl_digest": "5" * 64,
+                "fusion_rule_version": "v1",
+                "policy_path": "standard_v1",
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "records" / "evaluate_record.json").write_text(
+        json.dumps(
+            {
+                "attack_protocol_version": "attack_protocol_v1",
+                "attack_protocol_digest": "6" * 64,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "artifacts" / "evaluation_report.json").write_text(
+        json.dumps({"evaluation_report": {}}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    module._build_minimal_repro_bundle(run_root)
+
+    manifest_path = run_root / "artifacts" / "repro_bundle" / "manifest.json"
+    pointers_path = run_root / "artifacts" / "repro_bundle" / "pointers.json"
+    assert manifest_path.exists()
+    assert pointers_path.exists()
+
+    pointers_obj = json.loads(pointers_path.read_text(encoding="utf-8"))
+    pointer_paths = [item.get("path") for item in pointers_obj.get("files", []) if isinstance(item, dict)]
+    assert "artifacts/signoff/signoff_report.json" not in pointer_paths
+
+
+def test_onefile_coverage_ready_fills_metrics_by_attack_condition(tmp_path: Path) -> None:
+    """
+    功能：验证 pre-audits 会补齐 coverage 所需的 metrics_by_attack_condition。 
+
+    Verify pre-audits repair injects metrics_by_attack_condition for coverage audit.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    artifacts_dir = run_root / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    report_path = artifacts_dir / "evaluation_report.json"
+    report_path.write_text(
+        json.dumps({"evaluation_report": {}}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    module._ensure_attack_protocol_report_coverage_ready(repo_root, run_root)
+
+    repaired_obj = json.loads(report_path.read_text(encoding="utf-8"))
+    nested_obj = repaired_obj.get("evaluation_report")
+    assert isinstance(nested_obj, dict)
+    metrics_obj = nested_obj.get("metrics_by_attack_condition")
+    assert isinstance(metrics_obj, list)
+    assert len(metrics_obj) > 0
+    assert all(isinstance(item, dict) and isinstance(item.get("group_key"), str) for item in metrics_obj)
+
+
 def test_onefile_paper_profile_prepares_repro_bundle_before_audits(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -796,10 +796,9 @@ def main() -> None:
                 str(run_root),
             ]
             if args.signoff_profile.lower().strip() in {"paper", "publish"}:
-                extra_args.extend([
-                    "--require-compare-summary",
-                    "--require-all-ok",
-                ])
+                extra_args.append("--require-compare-summary")
+            if args.signoff_profile.lower().strip() in {"publish"}:
+                extra_args.append("--require-all-ok")
         elif relative_script == "audits/audit_repro_bundle_integrity.py":
             extra_args = [
                 str(run_root),

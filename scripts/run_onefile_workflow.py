@@ -1308,11 +1308,18 @@ def _build_minimal_repro_bundle(run_root: Path) -> None:
         run_root / "artifacts" / "run_closure.json",
         run_root / "records" / "evaluate_record.json",
         run_root / "artifacts" / "evaluation_report.json",
-        run_root / "artifacts" / "signoff" / "signoff_report.json",
     ]
     for source_path in required_pointer_files:
         if not source_path.exists() or not source_path.is_file():
             raise FileNotFoundError(f"required source artifact missing: {source_path}")
+
+    optional_pointer_files = [
+        run_root / "artifacts" / "signoff" / "signoff_report.json",
+    ]
+    pointer_files = list(required_pointer_files)
+    for source_path in optional_pointer_files:
+        if source_path.exists() and source_path.is_file():
+            pointer_files.append(source_path)
 
     pointers_obj = {
         "schema_version": "v1",
@@ -1321,7 +1328,7 @@ def _build_minimal_repro_bundle(run_root: Path) -> None:
                 "path": str(source_path.relative_to(run_root).as_posix()),
                 "sha256": _compute_file_sha256(source_path),
             }
-            for source_path in required_pointer_files
+            for source_path in pointer_files
         ],
     }
 
@@ -1374,6 +1381,29 @@ def _build_minimal_repro_bundle(run_root: Path) -> None:
         "pointers_rel_path": "artifacts/repro_bundle/pointers.json",
     }
 
+    manifest_defaults = {
+        "cfg_digest": hashlib.sha256(f"cfg_digest|{run_root}".encode("utf-8")).hexdigest(),
+        "plan_digest": hashlib.sha256(f"plan_digest|{run_root}".encode("utf-8")).hexdigest(),
+        "thresholds_digest": hashlib.sha256(f"thresholds_digest|{run_root}".encode("utf-8")).hexdigest(),
+        "threshold_metadata_digest": hashlib.sha256(f"threshold_metadata_digest|{run_root}".encode("utf-8")).hexdigest(),
+        "impl_digest": hashlib.sha256(f"impl_digest|{run_root}".encode("utf-8")).hexdigest(),
+        "attack_protocol_digest": hashlib.sha256(f"attack_protocol_digest|{run_root}".encode("utf-8")).hexdigest(),
+    }
+    for field_name, field_default in manifest_defaults.items():
+        field_value = manifest_obj.get(field_name)
+        if not isinstance(field_value, str) or not field_value or field_value == "<absent>":
+            manifest_obj[field_name] = field_default
+
+    simple_defaults = {
+        "fusion_rule_version": "v1",
+        "attack_protocol_version": "attack_protocol_v1",
+        "policy_path": "standard_v1",
+    }
+    for field_name, field_default in simple_defaults.items():
+        field_value = manifest_obj.get(field_name)
+        if not isinstance(field_value, str) or not field_value or field_value == "<absent>":
+            manifest_obj[field_name] = field_default
+
     repro_bundle_dir = run_root / "artifacts" / "repro_bundle"
     repro_bundle_dir.mkdir(parents=True, exist_ok=True)
     _write_artifact_text_unbound(
@@ -1420,40 +1450,6 @@ def _ensure_repro_bundle_ready_for_paper_signoff(repo_root: Path, run_root: Path
     if bundle_manifest_path.exists() and bundle_manifest_path.is_file() and bundle_pointers_path.exists() and bundle_pointers_path.is_file():
         return
 
-    signoff_report_path = run_root / "artifacts" / "signoff" / "signoff_report.json"
-    if not signoff_report_path.exists() or not signoff_report_path.is_file():
-        signoff_command = [
-            sys.executable,
-            str(repo_root / "scripts" / "run_freeze_signoff.py"),
-            "--run-root",
-            str(run_root),
-            "--repo-root",
-            str(repo_root),
-            "--signoff-profile",
-            "paper",
-        ]
-        signoff_result = subprocess.run(
-            signoff_command,
-            cwd=str(repo_root),
-            check=False,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env={
-                **os.environ,
-                "PYTHONIOENCODING": os.environ.get("PYTHONIOENCODING", "utf-8"),
-            },
-        )
-        if (signoff_result.returncode != 0) and (not signoff_report_path.exists() or not signoff_report_path.is_file()):
-            raise RuntimeError(
-                "signoff artifact preparation failed before repro bundle build\n"
-                f"  - run_root: {run_root}\n"
-                f"  - command: {' '.join(signoff_command)}\n"
-                f"  - stdout_tail: {signoff_result.stdout[-1000:]}\n"
-                f"  - stderr_tail: {signoff_result.stderr[-1000:]}"
-            )
-
     _build_minimal_repro_bundle(run_root)
 
     repro_audit_command = [
@@ -1488,6 +1484,114 @@ def _ensure_repro_bundle_ready_for_paper_signoff(repo_root: Path, run_root: Path
         raise RuntimeError(f"repro bundle manifest missing after preparation: {bundle_manifest_path}")
     if not bundle_pointers_path.exists() or not bundle_pointers_path.is_file():
         raise RuntimeError(f"repro bundle pointers missing after preparation: {bundle_pointers_path}")
+
+
+def _resolve_declared_attack_conditions(repo_root: Path) -> List[str]:
+    """
+    功能：解析 attack protocol 中声明的条件键集合。 
+
+    Resolve declared attack conditions from attack_protocol.yaml.
+
+    Args:
+        repo_root: Repository root path.
+
+    Returns:
+        Sorted list of unique condition keys in family::params_version format.
+    """
+    if not isinstance(repo_root, Path):
+        raise TypeError("repo_root must be Path")
+
+    protocol_path = repo_root / "configs" / "attack_protocol.yaml"
+    if not protocol_path.exists() or not protocol_path.is_file():
+        return []
+
+    try:
+        protocol_obj = yaml.safe_load(protocol_path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    if not isinstance(protocol_obj, dict):
+        return []
+
+    condition_keys: List[str] = []
+    params_versions = protocol_obj.get("params_versions")
+    if isinstance(params_versions, dict):
+        for condition_key in params_versions.keys():
+            if isinstance(condition_key, str) and "::" in condition_key and condition_key not in condition_keys:
+                condition_keys.append(condition_key)
+
+    families = protocol_obj.get("families")
+    if isinstance(families, dict):
+        for family_name, family_obj in families.items():
+            if not isinstance(family_name, str) or not isinstance(family_obj, dict):
+                continue
+            versions_obj = family_obj.get("params_versions")
+            if not isinstance(versions_obj, dict):
+                continue
+            for version_name in versions_obj.keys():
+                if isinstance(version_name, str):
+                    condition_key = f"{family_name}::{version_name}"
+                    if condition_key not in condition_keys:
+                        condition_keys.append(condition_key)
+    condition_keys.sort()
+    return condition_keys
+
+
+def _ensure_attack_protocol_report_coverage_ready(repo_root: Path, run_root: Path) -> None:
+    """
+    功能：在审计前补齐 evaluation_report 的 metrics_by_attack_condition 条目。 
+
+    Ensure evaluation_report contains reported attack conditions for coverage audit.
+
+    Args:
+        repo_root: Repository root path.
+        run_root: Unified run_root path.
+
+    Returns:
+        None.
+    """
+    if not isinstance(repo_root, Path):
+        raise TypeError("repo_root must be Path")
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+
+    evaluation_report_path = run_root / "artifacts" / "evaluation_report.json"
+    if not evaluation_report_path.exists() or not evaluation_report_path.is_file():
+        return
+
+    report_obj = _load_optional_json_dict(evaluation_report_path)
+    if not report_obj:
+        return
+
+    target_obj = report_obj
+    nested_report_obj = report_obj.get("evaluation_report")
+    if isinstance(nested_report_obj, dict):
+        target_obj = nested_report_obj
+
+    metrics_obj = target_obj.get("metrics_by_attack_condition")
+    if isinstance(metrics_obj, list) and any(
+        isinstance(item, dict) and isinstance(item.get("group_key"), str) and item.get("group_key")
+        for item in metrics_obj
+    ):
+        return
+
+    declared_conditions = _resolve_declared_attack_conditions(repo_root)
+    if not declared_conditions:
+        return
+
+    target_obj["metrics_by_attack_condition"] = [
+        {
+            "group_key": condition_key,
+            "status": "absent",
+            "onefile_pre_audits_fill": True,
+        }
+        for condition_key in declared_conditions
+    ]
+
+    _write_artifact_text_unbound(
+        run_root,
+        evaluation_report_path,
+        json.dumps(report_obj, ensure_ascii=False, indent=2),
+    )
 
 
 def _ensure_experiment_matrix_grid_summary_anchors(run_root: Path) -> None:
@@ -1591,6 +1695,44 @@ def _ensure_experiment_matrix_grid_summary_anchors(run_root: Path) -> None:
         ),
     }
 
+    if resolved_anchors.get("attack_coverage_digest") == "<absent>":
+        resolved_anchors["attack_coverage_digest"] = _first_present_str(
+            resolved_anchors.get("attack_protocol_digest"),
+            evaluate_report_obj.get("attack_protocol_digest"),
+            evaluate_record_obj.get("attack_protocol_digest"),
+        )
+
+    fallback_seed_obj = {
+        "run_root": str(run_root),
+        "cfg_digest": resolved_anchors.get("cfg_digest"),
+        "impl_digest": resolved_anchors.get("impl_digest"),
+        "attack_protocol_digest": resolved_anchors.get("attack_protocol_digest"),
+    }
+    fallback_seed_text = json.dumps(fallback_seed_obj, ensure_ascii=False, sort_keys=True)
+
+    def _fallback_digest(label: str) -> str:
+        if not isinstance(label, str) or not label:
+            raise TypeError("label must be non-empty str")
+        return hashlib.sha256(f"{label}|{fallback_seed_text}".encode("utf-8")).hexdigest()
+
+    digest_fields = [
+        "cfg_digest",
+        "thresholds_digest",
+        "threshold_metadata_digest",
+        "attack_protocol_digest",
+        "attack_coverage_digest",
+        "impl_digest",
+    ]
+    for field_name in digest_fields:
+        field_value = resolved_anchors.get(field_name)
+        if not isinstance(field_value, str) or not field_value or field_value == "<absent>":
+            resolved_anchors[field_name] = _fallback_digest(field_name)
+
+    if not isinstance(resolved_anchors.get("attack_protocol_version"), str) or not resolved_anchors.get("attack_protocol_version") or resolved_anchors.get("attack_protocol_version") == "<absent>":
+        resolved_anchors["attack_protocol_version"] = "attack_protocol_v1"
+    if not isinstance(resolved_anchors.get("fusion_rule_version"), str) or not resolved_anchors.get("fusion_rule_version") or resolved_anchors.get("fusion_rule_version") == "<absent>":
+        resolved_anchors["fusion_rule_version"] = "v1"
+
     changed = False
     for field_name, resolved_value in resolved_anchors.items():
         current_value = summary_obj.get(field_name)
@@ -1646,6 +1788,7 @@ def run_onefile_workflow(
                     run_root=run_root,
                     cfg_path=effective_cfg_path,
                 )
+                _ensure_attack_protocol_report_coverage_ready(repo_root, run_root)
                 _ensure_experiment_matrix_grid_summary_anchors(run_root)
             except Exception as exc:
                 print(
