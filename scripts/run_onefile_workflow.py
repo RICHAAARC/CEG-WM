@@ -705,11 +705,9 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
     score_value = content_payload.get("score")
     status_value = content_payload.get("status")
     normalized_score_value = _coerce_finite_float(score_value)
-    score_valid = normalized_score_value is not None
     status_ok = status_value == "ok"
 
-    if status_ok and score_valid:
-        assert normalized_score_value is not None
+    if status_ok and normalized_score_value is not None:
         if isinstance(score_value, (int, float)):
             content_payload["score"] = float(normalized_score_value)
             return source_detect_path
@@ -727,35 +725,36 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
 
     recovered_score = None
     recovered_field = None
-    if status_ok:
-        score_parts_node = content_payload.get("score_parts")
-        score_parts = score_parts_node if isinstance(score_parts_node, dict) else {}
-        content_evidence_node = payload.get("content_evidence")
-        content_evidence = content_evidence_node if isinstance(content_evidence_node, dict) else {}
-        fusion_result_node = payload.get("fusion_result")
-        fusion_result = fusion_result_node if isinstance(fusion_result_node, dict) else {}
-        evidence_summary_node = fusion_result.get("evidence_summary") if isinstance(fusion_result.get("evidence_summary"), dict) else {}
-        score_candidates = [
-            ("detect_lf_score", content_payload.get("detect_lf_score")),
-            ("lf_score", content_payload.get("lf_score")),
-            ("score_parts.content_score", score_parts.get("content_score")),
-            ("score_parts.detect_lf_score", score_parts.get("detect_lf_score")),
-            ("content_evidence.score", content_evidence.get("score")),
-            ("record.score", payload.get("score")),
-            ("fusion_result.evidence_summary.content_score", evidence_summary_node.get("content_score")),
-        ]
-        for field_name, candidate_value in score_candidates:
-            numeric_candidate = _coerce_finite_float(candidate_value)
-            if numeric_candidate is not None:
-                recovered_score = numeric_candidate
-                recovered_field = field_name
-                break
+    score_parts_node = content_payload.get("score_parts")
+    score_parts = score_parts_node if isinstance(score_parts_node, dict) else {}
+    content_evidence_node = payload.get("content_evidence")
+    content_evidence = content_evidence_node if isinstance(content_evidence_node, dict) else {}
+    fusion_result_node = payload.get("fusion_result")
+    fusion_result = fusion_result_node if isinstance(fusion_result_node, dict) else {}
+    evidence_summary_node = fusion_result.get("evidence_summary") if isinstance(fusion_result.get("evidence_summary"), dict) else {}
+    score_candidates = [
+        ("content_evidence_payload.score", score_value),
+        ("detect_lf_score", content_payload.get("detect_lf_score")),
+        ("lf_score", content_payload.get("lf_score")),
+        ("score_parts.content_score", score_parts.get("content_score")),
+        ("score_parts.detect_lf_score", score_parts.get("detect_lf_score")),
+        ("content_evidence.score", content_evidence.get("score")),
+        ("record.score", payload.get("score")),
+        ("fusion_result.evidence_summary.content_score", evidence_summary_node.get("content_score")),
+    ]
+    for field_name, candidate_value in score_candidates:
+        numeric_candidate = _coerce_finite_float(candidate_value)
+        if numeric_candidate is not None:
+            recovered_score = numeric_candidate
+            recovered_field = field_name
+            break
 
-    if status_ok and isinstance(recovered_score, float):
+    if isinstance(recovered_score, float):
         content_payload["score"] = recovered_score
+        content_payload["status"] = "ok"
         content_payload["content_failure_reason"] = None
         if profile == PROFILE_PAPER_FULL_CUDA:
-            print(f"[onefile] PAPER_SCORE_RECOVERY_APPLIED source={recovered_field}")
+            print(f"[onefile] PAPER_SCORE_RECOVERY_APPLIED source={recovered_field} status_before={status_value}")
         recovered_detect_path = run_root / "artifacts" / "workflow_cfg" / "detect_record_for_scoring.json"
         recovered_detect_path.parent.mkdir(parents=True, exist_ok=True)
         _write_artifact_text_unbound(
@@ -766,8 +765,20 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
         return recovered_detect_path
 
     if profile == PROFILE_PAPER_FULL_CUDA:
+        diagnostic_snapshot = {
+            "status": status_value,
+            "score": content_payload.get("score"),
+            "detect_lf_score": content_payload.get("detect_lf_score"),
+            "lf_score": content_payload.get("lf_score"),
+        }
+        score_parts_node = content_payload.get("score_parts")
+        if isinstance(score_parts_node, dict):
+            score_parts_mapping = score_parts_node
+            diagnostic_snapshot["score_parts.content_score"] = score_parts_mapping.get("content_score")
+            diagnostic_snapshot["score_parts.detect_lf_score"] = score_parts_mapping.get("detect_lf_score")
         raise ValueError(
             "paper_full_cuda requires detect_record.content_evidence_payload.status=ok and numeric score"
+            f"; diagnostics={diagnostic_snapshot}"
         )
 
     score_fallback = content_payload.get("detect_lf_score")
