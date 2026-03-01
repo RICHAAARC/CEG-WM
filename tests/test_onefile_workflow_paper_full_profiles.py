@@ -136,6 +136,47 @@ def test_onefile_detect_record_scoring_fails_fast_under_paper_profile(tmp_path: 
         module._prepare_detect_record_for_scoring(run_root, records_dir, "paper_full_cuda")
 
 
+def test_onefile_detect_record_scoring_recovers_detect_lf_score_under_paper_profile(tmp_path: Path) -> None:
+    """
+    功能：验证 paper_full profile 在 status=ok 且 score 缺失时可从 detect_lf_score 恢复。 
+
+    Verify paper_full profile recovers numeric score from detect_lf_score when status is ok.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    detect_record_path = records_dir / "detect_record.json"
+    detect_record_path.write_text(
+        json.dumps(
+            {
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": None,
+                    "detect_lf_score": 0.37,
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    scoring_path = module._prepare_detect_record_for_scoring(run_root, records_dir, "paper_full_cuda")
+    scoring_payload = json.loads(scoring_path.read_text(encoding="utf-8"))
+    content_payload = scoring_payload.get("content_evidence_payload", {})
+    assert content_payload.get("status") == "ok"
+    assert content_payload.get("score") == 0.37
+
+
 def test_paper_full_mechanism_assertions_fail_fast_on_proxy_paths(tmp_path: Path) -> None:
     """
     功能：验证 paper 机制断言在 proxy 路径下 fail-fast。

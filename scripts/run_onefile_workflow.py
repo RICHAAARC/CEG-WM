@@ -689,6 +689,37 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
     if status_ok and score_valid:
         return source_detect_path
 
+    recovered_score = None
+    recovered_field = None
+    if status_ok:
+        score_parts_node = content_payload.get("score_parts")
+        score_parts = score_parts_node if isinstance(score_parts_node, dict) else {}
+        score_candidates = [
+            ("detect_lf_score", content_payload.get("detect_lf_score")),
+            ("lf_score", content_payload.get("lf_score")),
+            ("score_parts.content_score", score_parts.get("content_score")),
+            ("score_parts.detect_lf_score", score_parts.get("detect_lf_score")),
+        ]
+        for field_name, candidate_value in score_candidates:
+            if isinstance(candidate_value, (int, float)):
+                recovered_score = float(candidate_value)
+                recovered_field = field_name
+                break
+
+    if status_ok and isinstance(recovered_score, float):
+        content_payload["score"] = recovered_score
+        content_payload["content_failure_reason"] = None
+        if profile == PROFILE_PAPER_FULL_CUDA:
+            print(f"[onefile] PAPER_SCORE_RECOVERY_APPLIED source={recovered_field}")
+        recovered_detect_path = run_root / "artifacts" / "workflow_cfg" / "detect_record_for_scoring.json"
+        recovered_detect_path.parent.mkdir(parents=True, exist_ok=True)
+        _write_artifact_text_unbound(
+            run_root,
+            recovered_detect_path,
+            json.dumps(payload, ensure_ascii=False, indent=2)
+        )
+        return recovered_detect_path
+
     if profile == PROFILE_PAPER_FULL_CUDA:
         raise ValueError(
             "paper_full_cuda requires detect_record.content_evidence_payload.status=ok and numeric score"
