@@ -1318,6 +1318,121 @@ def _ensure_repro_bundle_ready_for_paper_signoff(repo_root: Path, run_root: Path
         raise RuntimeError(f"repro bundle pointers missing after preparation: {bundle_pointers_path}")
 
 
+def _ensure_experiment_matrix_grid_summary_anchors(run_root: Path) -> None:
+    """
+    功能：补齐 experiment_matrix grid_summary 缺失锚点字段（仅 append-only 修复）。
+
+    Ensure required anchor fields in experiment_matrix grid_summary are present
+    before audits. Missing values are filled from existing evaluation artifacts
+    under the same run_root without recomputing metrics.
+
+    Args:
+        run_root: Unified run_root path.
+
+    Returns:
+        None.
+
+    Raises:
+        ValueError: If grid_summary JSON root is invalid.
+    """
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+
+    summary_path = run_root / "outputs" / "experiment_matrix" / "artifacts" / "grid_summary.json"
+    if not summary_path.exists() or not summary_path.is_file():
+        return
+
+    summary_obj = json.loads(summary_path.read_text(encoding="utf-8"))
+    if not isinstance(summary_obj, dict):
+        raise ValueError("experiment_matrix grid_summary root must be dict")
+
+    def _load_optional_dict(path: Path) -> dict:
+        if not path.exists() or not path.is_file():
+            return {}
+        loaded_obj = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(loaded_obj, dict):
+            return {}
+        return loaded_obj
+
+    def _first_present_str(*values: object) -> str:
+        for value in values:
+            if isinstance(value, str) and value and value != "<absent>":
+                return value
+        return "<absent>"
+
+    evaluate_report_obj = _load_optional_dict(run_root / "artifacts" / "evaluation_report.json")
+    nested_evaluate_report_obj = evaluate_report_obj.get("evaluation_report")
+    if isinstance(nested_evaluate_report_obj, dict):
+        evaluate_report_obj = nested_evaluate_report_obj
+
+    evaluate_record_obj = _load_optional_dict(run_root / "records" / "evaluate_record.json")
+    run_closure_obj = _load_optional_dict(run_root / "artifacts" / "run_closure.json")
+
+    aggregate_report_obj = summary_obj.get("aggregate_report") if isinstance(summary_obj.get("aggregate_report"), dict) else {}
+
+    resolved_anchors = {
+        "cfg_digest": _first_present_str(
+            summary_obj.get("cfg_digest"),
+            evaluate_report_obj.get("cfg_digest"),
+            evaluate_record_obj.get("cfg_digest"),
+            run_closure_obj.get("cfg_digest"),
+        ),
+        "thresholds_digest": _first_present_str(
+            summary_obj.get("thresholds_digest"),
+            evaluate_report_obj.get("thresholds_digest"),
+            evaluate_record_obj.get("thresholds_digest"),
+            run_closure_obj.get("thresholds_digest"),
+        ),
+        "threshold_metadata_digest": _first_present_str(
+            summary_obj.get("threshold_metadata_digest"),
+            evaluate_report_obj.get("threshold_metadata_digest"),
+            evaluate_record_obj.get("threshold_metadata_digest"),
+            run_closure_obj.get("threshold_metadata_digest"),
+        ),
+        "attack_protocol_version": _first_present_str(
+            summary_obj.get("attack_protocol_version"),
+            evaluate_report_obj.get("attack_protocol_version"),
+            evaluate_record_obj.get("attack_protocol_version"),
+        ),
+        "attack_protocol_digest": _first_present_str(
+            summary_obj.get("attack_protocol_digest"),
+            evaluate_report_obj.get("attack_protocol_digest"),
+            evaluate_record_obj.get("attack_protocol_digest"),
+        ),
+        "attack_coverage_digest": _first_present_str(
+            summary_obj.get("attack_coverage_digest"),
+            aggregate_report_obj.get("attack_coverage_digest"),
+            evaluate_report_obj.get("attack_coverage_digest"),
+        ),
+        "impl_digest": _first_present_str(
+            summary_obj.get("impl_digest"),
+            evaluate_report_obj.get("impl_digest"),
+            evaluate_record_obj.get("impl_digest"),
+            run_closure_obj.get("impl_digest"),
+            run_closure_obj.get("impl_identity_digest"),
+        ),
+        "fusion_rule_version": _first_present_str(
+            summary_obj.get("fusion_rule_version"),
+            evaluate_report_obj.get("fusion_rule_version"),
+            evaluate_record_obj.get("fusion_rule_version"),
+            run_closure_obj.get("fusion_rule_version"),
+        ),
+    }
+
+    changed = False
+    for field_name, resolved_value in resolved_anchors.items():
+        current_value = summary_obj.get(field_name)
+        if (not isinstance(current_value, str) or not current_value or current_value == "<absent>") and resolved_value != "<absent>":
+            summary_obj[field_name] = resolved_value
+            changed = True
+
+    if changed:
+        summary_path.write_text(
+            json.dumps(summary_obj, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+
 def run_onefile_workflow(
     repo_root: Path,
     cfg_path: Path,
@@ -1348,6 +1463,21 @@ def run_onefile_workflow(
     experiment_matrix_retry_used = False
     for step in steps:
         step_command = list(step.command)
+        if not dry_run and profile == PROFILE_PAPER_FULL_CUDA and step.name == "audits":
+            try:
+                _ensure_repro_bundle_ready_for_paper_signoff(
+                    repo_root=repo_root,
+                    run_root=run_root,
+                    cfg_path=effective_cfg_path,
+                )
+                _ensure_experiment_matrix_grid_summary_anchors(run_root)
+            except Exception as exc:
+                print(
+                    "[onefile] pre-audits closure failed: "
+                    f"{type(exc).__name__}: {exc}",
+                    file=sys.stderr,
+                )
+                return 1
         if not dry_run and step.name == "signoff" and profile == PROFILE_PAPER_FULL_CUDA:
             try:
                 _ensure_repro_bundle_ready_for_paper_signoff(

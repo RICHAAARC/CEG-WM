@@ -99,6 +99,161 @@ def test_onefile_workflow_profiles_smoke_vs_paper_full_are_disjoint(tmp_path: Pa
     assert "multi_protocol_evaluation" in paper_names
 
 
+def test_onefile_grid_summary_anchor_repair_before_audits(tmp_path: Path) -> None:
+    """
+    功能：验证 onefile 在审计前可补齐 experiment_matrix grid_summary 缺失锚点。 
+
+    Verify onefile anchor repair fills missing grid_summary anchors from run_root artifacts.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    summary_path = run_root / "outputs" / "experiment_matrix" / "artifacts" / "grid_summary.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(
+        json.dumps(
+            {
+                "strict": False,
+                "executed": 1,
+                "results": [],
+                "cfg_digest": "<absent>",
+                "thresholds_digest": "<absent>",
+                "threshold_metadata_digest": "<absent>",
+                "attack_protocol_version": "<absent>",
+                "attack_protocol_digest": "<absent>",
+                "attack_coverage_digest": "<absent>",
+                "impl_digest": "<absent>",
+                "fusion_rule_version": "<absent>",
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    artifacts_dir = run_root / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    (run_root / "records").mkdir(parents=True, exist_ok=True)
+
+    (artifacts_dir / "evaluation_report.json").write_text(
+        json.dumps(
+            {
+                "cfg_digest": "a" * 64,
+                "thresholds_digest": "b" * 64,
+                "threshold_metadata_digest": "c" * 64,
+                "attack_protocol_version": "attack_protocol_v1",
+                "attack_protocol_digest": "d" * 64,
+                "attack_coverage_digest": "e" * 64,
+                "impl_digest": "f" * 64,
+                "fusion_rule_version": "v1",
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    module._ensure_experiment_matrix_grid_summary_anchors(run_root)
+
+    repaired_obj = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert repaired_obj.get("cfg_digest") == "a" * 64
+    assert repaired_obj.get("thresholds_digest") == "b" * 64
+    assert repaired_obj.get("threshold_metadata_digest") == "c" * 64
+    assert repaired_obj.get("attack_protocol_version") == "attack_protocol_v1"
+    assert repaired_obj.get("attack_protocol_digest") == "d" * 64
+    assert repaired_obj.get("attack_coverage_digest") == "e" * 64
+    assert repaired_obj.get("impl_digest") == "f" * 64
+    assert repaired_obj.get("fusion_rule_version") == "v1"
+
+
+def test_onefile_paper_profile_prepares_repro_bundle_before_audits(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：验证 paper profile 在 audits 前执行 repro bundle 闭环准备。 
+
+    Verify onefile paper profile invokes repro-bundle closure hook before audits.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "paper_run"
+    run_root.mkdir(parents=True, exist_ok=True)
+    cfg_path = repo_root / "configs" / "paper_full_cuda.yaml"
+
+    calls = {
+        "ensure_repro": 0,
+        "ensure_matrix": 0,
+        "commands": [],
+    }
+
+    def _fake_prepare_profile_cfg(_profile, _run_root, _cfg_path):
+        return cfg_path
+
+    def _fake_build_steps(_run_root, _cfg_path, _repo_root, _profile, _signoff_profile):
+        return [
+            module.WorkflowStep(
+                name="audits",
+                command=["python", "scripts/run_all_audits.py"],
+                artifact_paths=[],
+            ),
+            module.WorkflowStep(
+                name="signoff",
+                command=["python", "scripts/run_freeze_signoff.py"],
+                artifact_paths=[],
+            ),
+        ]
+
+    def _fake_ensure_repro(repo_root, run_root, cfg_path):
+        _ = repo_root
+        _ = run_root
+        _ = cfg_path
+        calls["ensure_repro"] += 1
+
+    def _fake_ensure_matrix(run_root):
+        _ = run_root
+        calls["ensure_matrix"] += 1
+
+    def _fake_run_step(step_command, _repo_root):
+        calls["commands"].append(list(step_command))
+        return 0
+
+    monkeypatch.setattr(module, "_prepare_profile_cfg_path", _fake_prepare_profile_cfg)
+    monkeypatch.setattr(module, "build_workflow_steps", _fake_build_steps)
+    monkeypatch.setattr(module, "_ensure_repro_bundle_ready_for_paper_signoff", _fake_ensure_repro)
+    monkeypatch.setattr(module, "_ensure_experiment_matrix_grid_summary_anchors", _fake_ensure_matrix)
+    monkeypatch.setattr(module, "_run_subprocess_for_step", _fake_run_step)
+
+    exit_code = module.run_onefile_workflow(
+        repo_root=repo_root,
+        cfg_path=cfg_path,
+        run_root=run_root,
+        profile="paper_full_cuda",
+        signoff_profile="paper",
+        dry_run=False,
+    )
+
+    assert exit_code == 0
+    assert calls["ensure_repro"] == 2
+    assert calls["ensure_matrix"] == 1
+    assert len(calls["commands"]) == 2
+
+
 def test_onefile_detect_record_scoring_applies_fallback_under_paper_profile(tmp_path: Path) -> None:
     """
     功能：验证 paper_full profile 下 detect 记录缺分数时应用可审计 fallback。 
