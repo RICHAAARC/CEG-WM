@@ -1005,6 +1005,7 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
         if not isinstance(calibrated_content_payload, dict):
             calibrated_content_payload = {}
             calibrated_payload["content_evidence_payload"] = calibrated_content_payload
+        calibrated_content_payload.pop("calibration_sample_is_synthetic_fallback", None)
         calibrated_content_payload["calibration_sample_usage"] = "formal_with_sidecar_disabled_marker"
 
         calibrated_detect_path = run_root / "artifacts" / "workflow_cfg" / "detect_record_for_calibration.json"

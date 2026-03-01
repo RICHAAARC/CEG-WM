@@ -746,7 +746,7 @@ def test_onefile_detect_record_scoring_allows_fallback_when_sidecar_disabled(tmp
     assert scoring_content_payload.get("score") == 0.0
     assert scoring_content_payload.get("status") == "ok"
     assert scoring_content_payload.get("calibration_sample_origin") == "sidecar_disabled_fallback"
-    assert scoring_content_payload.get("calibration_sample_is_synthetic_fallback") is True
+    assert "calibration_sample_is_synthetic_fallback" not in scoring_content_payload
     assert scoring_content_payload.get("calibration_sample_usage") == "formal_with_sidecar_disabled_marker"
 
     diagnostic_path = run_root / "artifacts" / "workflow_cfg" / "detect_record_for_calibration_diagnostic.json"
