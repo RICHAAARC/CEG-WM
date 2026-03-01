@@ -3601,6 +3601,54 @@ def _build_attention_maps_from_latents(latents: Any) -> Any:
     return correlation
 
 
+def _precompute_relation_digest_for_sync(
+    cfg: Dict[str, Any],
+    enable_attention_proxy: bool = True,
+) -> str | None:
+    """
+    功能：sync_primary 模式下为 sync 预计算 relation_digest（不产出 anchor 证据字段）。
+
+    Pre-compute a relation_digest seed from available attention inputs so that
+    sync_primary mode can provide a non-None relation_digest to the v2 sync module
+    without first executing the anchor extractor.
+
+    The computed digest is derived solely from attention map statistics; it does not
+    constitute an anchor result and must not be written to records.
+
+    Args:
+        cfg: Configuration mapping with optional transient attention fields.
+        enable_attention_proxy: Whether proxy attention maps are allowed as source.
+
+    Returns:
+        Hex digest string if attention inputs are available, otherwise None.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+
+    # (1) 优先使用真实 runtime self-attention。
+    attention_maps = _resolve_runtime_self_attention_maps(cfg)
+
+    # (2) 如无真实 attention，且允许 proxy，则从 latents 构造代理 attention。
+    if attention_maps is None and enable_attention_proxy:
+        latents = cfg.get("__detect_final_latents__")
+        attention_maps = _build_attention_maps_from_latents(latents)
+
+    if attention_maps is None:
+        return None
+
+    try:
+        attention_arr = np.asarray(attention_maps)
+        return digests.canonical_sha256({
+            "shape": list(attention_arr.shape),
+            "mean": float(np.mean(attention_arr)),
+            "std": float(np.std(attention_arr)),
+            "max": float(np.max(attention_arr)),
+            "min": float(np.min(attention_arr)),
+        })
+    except Exception:
+        return None
+
+
 def _resolve_runtime_self_attention_maps(cfg: Dict[str, Any]) -> Any:
     """
     功能：解析 detect 侧真实 self-attention maps 载荷。
@@ -3828,8 +3876,19 @@ def _run_geometry_chain_with_sync(
     if sync_primary_mode:
         # sync_primary 模式：先执行 sync（主几何证据），再按 sync 结果门控 anchor（辅锚点）。
         # 研究目标：Self-Attention 辅锚点仅在主同步成功后启用。
+        #
+        # relation_digest 修复：sync v2 要求 relation_digest 来自 anchor 注意力对比，
+        # 但 sync_primary 先于 anchor，形成循环依赖。解决方案：在 sync 前基于可用
+        # attention 输入预计算一个纯统计摘要（不产出 anchor 证据字段），注入 sync 输入。
+        # anchor hard-gate 语义（sync 失败时 anchor=absent）保持不变。
         if enable_sync:
+            precomputed_relation_digest = _precompute_relation_digest_for_sync(
+                cfg, enable_attention_proxy=enable_attention_proxy
+            )
             sync_base_inputs = _build_geometry_runtime_inputs(cfg, enable_attention_proxy=enable_attention_proxy)
+            if isinstance(precomputed_relation_digest, str) and precomputed_relation_digest:
+                sync_base_inputs["relation_digest"] = precomputed_relation_digest
+                sync_base_inputs["relation_digest_source"] = "precomputed_for_sync_primary"
             sync_module = getattr(impl_set, "sync_module", None)
             sync_result: Dict[str, Any] = _run_sync_module_for_detect(sync_module, cfg, sync_base_inputs)
         else:

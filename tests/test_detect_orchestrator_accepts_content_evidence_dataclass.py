@@ -145,15 +145,15 @@ class TestDetectOrchestratorWithContentDetector:
         # 验证返回的是 ContentEvidence 数据类。
         assert isinstance(evidence, ContentEvidence)
         assert evidence.status == "ok"
-        # S-04 阶段：content_score = lf_score（仅 LF 主通道，HF 未启用）
-        assert abs(evidence.score - 0.6) < 1e-10  # = lf_score (LF-only in S-04)
+        # content_score = lf_score（仅 LF 主通道，HF 未启用）
+        assert abs(evidence.score - 0.6) < 1e-10
         
         # 验证适配转换不报错。
         adapted = _adapt_content_evidence_for_fusion(evidence)
         
         assert isinstance(adapted, dict)
         assert adapted["status"] == "ok"
-        # S-04 阶段：score = lf_score
+        # score = lf_score
         assert abs(adapted["score"] - 0.6) < 1e-10
 
     def test_detect_orchestrator_payload_preservation(self) -> None:

@@ -258,6 +258,19 @@ def extract_reported_conditions(report: Dict[str, Any]) -> List[str]:
         if not isinstance(item, dict):
             continue
 
+        # 预填充标记一律不计覆盖——这些不代表真实执行。
+        if item.get("onefile_pre_audits_fill") is True:
+            continue
+
+        # 非执行完成状态（absent/failed/mismatch 等）不计覆盖。
+        status = item.get("status")
+        if status not in {"ok", "success", "completed"}:
+            continue
+
+        # 至少有真实执行计数（n_total 是唯一确认的 per-condition 执行字段）。
+        if not isinstance(item.get("n_total"), (int, float)):
+            continue
+
         group_key = item.get("group_key")
         if isinstance(group_key, str) and group_key not in conditions:
             conditions.append(group_key)

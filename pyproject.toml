@@ -1,3 +1,32 @@
+[project]
+name = "ceg-wm"
+version = "0.1.0"
+description = "语义显著性自适应流形水印系统（CEG-WM）"
+requires-python = ">=3.10"
+
+# 最小运行依赖（Minimal runtime dependencies）
+# 完整环境快照见 requirements.txt；此处仅列出核心依赖，供第三方复现使用。
+dependencies = [
+    "torch>=2.1.0",
+    "torchvision>=0.16.0",
+    "diffusers>=0.30.0",
+    "transformers>=4.40.0",
+    "safetensors>=0.4.0",
+    "accelerate>=0.30.0",
+    "huggingface_hub>=0.22.0",
+    "pyyaml>=6.0",
+    "numpy>=1.24.0",
+    "Pillow>=10.0.0",
+    "tqdm>=4.65.0",
+]
+
+[project.optional-dependencies]
+# 开发与审计工具（Development & audit tools）
+dev = [
+    "pytest>=7.4.0",
+    "pytest-timeout>=2.1.0",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 norecursedirs = ["scripts/Freezen_Door"]

@@ -1069,7 +1069,10 @@ def _write_grid_artifacts(
         path=str(grid_summary_path),
         obj={
             "strict": strict,
+            "total": len(results),
             "executed": len(results),
+            "succeeded": sum(1 for r in results if isinstance(r, dict) and r.get("status") == "ok"),
+            "failed": sum(1 for r in results if isinstance(r, dict) and r.get("status") != "ok"),
             "results": results,
             **anchors_obj,  # append-only: 补齐锚点字段全集
         },

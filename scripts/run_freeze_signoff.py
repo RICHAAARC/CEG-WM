@@ -797,7 +797,8 @@ def main() -> None:
             ]
             if args.signoff_profile.lower().strip() in {"paper", "publish"}:
                 extra_args.append("--require-compare-summary")
-            if args.signoff_profile.lower().strip() in {"publish"}:
+            if args.signoff_profile.lower().strip() in {"paper", "publish"}:
+                # paper 与 publish 均要求所有主协议通过，否则阻断 signoff。
                 extra_args.append("--require-all-ok")
         elif relative_script == "audits/audit_repro_bundle_integrity.py":
             extra_args = [

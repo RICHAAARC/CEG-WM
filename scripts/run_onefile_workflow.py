@@ -20,8 +20,14 @@ import subprocess
 import sys
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone as _tz
 from pathlib import Path
+
+# Python 3.10 兼容：3.11+ 才引入 datetime.UTC，此处向下兼容
+if hasattr(__import__("datetime"), "UTC"):
+    from datetime import UTC
+else:
+    UTC = _tz.utc
 from typing import List, Sequence
 import yaml
 
@@ -801,30 +807,13 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
             diagnostic_snapshot["score_parts.content_score"] = score_parts_mapping.get("content_score")
             diagnostic_snapshot["score_parts.detect_lf_score"] = score_parts_mapping.get("detect_lf_score")
 
-        content_payload["status"] = "ok"
-        content_payload["score"] = 0.0
-        content_payload["content_failure_reason"] = None
-        content_payload["onefile_scoring_fallback"] = {
-            "enabled": True,
-            "fallback_reason": "paper_full_cuda_missing_numeric_content_score",
-            "fallback_score": 0.0,
-            "diagnostics": diagnostic_snapshot,
-        }
-        payload["onefile_scoring_fallback"] = {
-            "enabled": True,
-            "source": "_prepare_detect_record_for_scoring",
-            "profile": PROFILE_PAPER_FULL_CUDA,
-            "diagnostics": diagnostic_snapshot,
-        }
-        print(f"[onefile] PAPER_SCORE_FALLBACK_APPLIED diagnostics={diagnostic_snapshot}")
-        fallback_detect_path = run_root / "artifacts" / "workflow_cfg" / "detect_record_for_scoring.json"
-        fallback_detect_path.parent.mkdir(parents=True, exist_ok=True)
-        _write_artifact_text_unbound(
-            run_root,
-            fallback_detect_path,
-            json.dumps(payload, ensure_ascii=False, indent=2)
+        # paper 模式禁止以 score=0.0 替代真实失败证据，拒绝继续。
+        # 失败语义必须可拒绝，不允许被"可校准分数"覆盖。
+        raise ValueError(
+            "[paper_full_cuda] content_evidence_payload 无有效数值分数，"
+            "且无可恢复字段（候选字段均无效）。"
+            f"diagnostics={diagnostic_snapshot}"
         )
-        return fallback_detect_path
 
     score_fallback = content_payload.get("detect_lf_score")
     if not isinstance(score_fallback, (int, float)):
@@ -1536,15 +1525,18 @@ def _resolve_declared_attack_conditions(repo_root: Path) -> List[str]:
     return condition_keys
 
 
-def _ensure_attack_protocol_report_coverage_ready(repo_root: Path, run_root: Path) -> None:
+def _ensure_attack_protocol_report_coverage_ready(repo_root: Path, run_root: Path, profile: str) -> None:
     """
     功能：在审计前补齐 evaluation_report 的 metrics_by_attack_condition 条目。 
 
     Ensure evaluation_report contains reported attack conditions for coverage audit.
+    Only pre-fills absent entries for non-paper profiles; paper_full_cuda requires
+    real execution coverage and must not accept pre-filled absent placeholders.
 
     Args:
         repo_root: Repository root path.
         run_root: Unified run_root path.
+        profile: Workflow profile name. Pre-fill is disabled for paper_full_cuda.
 
     Returns:
         None.
@@ -1553,6 +1545,12 @@ def _ensure_attack_protocol_report_coverage_ready(repo_root: Path, run_root: Pat
         raise TypeError("repo_root must be Path")
     if not isinstance(run_root, Path):
         raise TypeError("run_root must be Path")
+    if not isinstance(profile, str):
+        raise TypeError("profile must be str")
+
+    # paper 模式禁止预填充 absent 占位条目——coverage 必须来自真实执行。
+    if _normalize_profile(profile) == PROFILE_PAPER_FULL_CUDA:
+        return
 
     evaluation_report_path = run_root / "artifacts" / "evaluation_report.json"
     if not evaluation_report_path.exists() or not evaluation_report_path.is_file():
@@ -1708,19 +1706,9 @@ def _ensure_experiment_matrix_grid_summary_anchors(run_root: Path) -> None:
             evaluate_record_obj.get("attack_protocol_digest"),
         )
 
-    fallback_seed_obj = {
-        "run_root": str(run_root),
-        "cfg_digest": resolved_anchors.get("cfg_digest"),
-        "impl_digest": resolved_anchors.get("impl_digest"),
-        "attack_protocol_digest": resolved_anchors.get("attack_protocol_digest"),
-    }
-    fallback_seed_text = json.dumps(fallback_seed_obj, ensure_ascii=False, sort_keys=True)
-
-    def _fallback_digest(label: str) -> str:
-        if not isinstance(label, str) or not label:
-            raise TypeError("label must be non-empty str")
-        return hashlib.sha256(f"{label}|{fallback_seed_text}".encode("utf-8")).hexdigest()
-
+    # 注：缺失的 digest 字段保持 <absent>，不回填占位计算值。
+    # 下游 audit_experiment_matrix_outputs_schema 对 <absent> 为 BLOCK 级 FAIL，
+    # 此处收紧为"硬阻断"，使缺失证据可拒绝。
     digest_fields = [
         "cfg_digest",
         "thresholds_digest",
@@ -1729,10 +1717,9 @@ def _ensure_experiment_matrix_grid_summary_anchors(run_root: Path) -> None:
         "attack_coverage_digest",
         "impl_digest",
     ]
+    # 仅将已解析到真实值的字段写回（<absent> 不写入，保持原状让审计拒绝）。
     for field_name in digest_fields:
-        field_value = resolved_anchors.get(field_name)
-        if not isinstance(field_value, str) or not field_value or field_value == "<absent>":
-            resolved_anchors[field_name] = _fallback_digest(field_name)
+        pass  # 解析逻辑已在 resolved_anchors 中完成，无需额外补全占位。
 
     if not isinstance(resolved_anchors.get("attack_protocol_version"), str) or not resolved_anchors.get("attack_protocol_version") or resolved_anchors.get("attack_protocol_version") == "<absent>":
         resolved_anchors["attack_protocol_version"] = "attack_protocol_v1"
@@ -1742,7 +1729,7 @@ def _ensure_experiment_matrix_grid_summary_anchors(run_root: Path) -> None:
     changed = False
     for field_name, resolved_value in resolved_anchors.items():
         current_value = summary_obj.get(field_name)
-        if (not isinstance(current_value, str) or not current_value or current_value == "<absent>") and resolved_value != "<absent>":
+        if (not isinstance(current_value, str) or not current_value or current_value == "<absent>") and resolved_value not in (None, "<absent>"):
             summary_obj[field_name] = resolved_value
             changed = True
 
@@ -1789,7 +1776,7 @@ def run_onefile_workflow(
         step_command = list(step.command)
         if not dry_run and profile == PROFILE_PAPER_FULL_CUDA and step.name == "audits":
             try:
-                _ensure_attack_protocol_report_coverage_ready(repo_root, run_root)
+                _ensure_attack_protocol_report_coverage_ready(repo_root, run_root, profile)
                 _ensure_experiment_matrix_grid_summary_anchors(run_root)
                 _ensure_repro_bundle_ready_for_paper_signoff(
                     repo_root=repo_root,

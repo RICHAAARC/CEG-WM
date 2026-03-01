@@ -575,7 +575,7 @@ def test_cli_missing_fusion_result_fails_fast() -> None:
     
     try:
         if fusion_result is None:
-            # S-01.1 fail-fast：fusion_result 缺失必须抛异常。
+            # fusion_result 缺失必须抛异常。
             raise ValueError("fusion_result is required in record but was None")
         # 如果到达此处，说明 fail-fast 未被强制。
         pytest.fail("Expected ValueError for missing fusion_result, but none was raised")

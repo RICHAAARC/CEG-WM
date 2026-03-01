@@ -90,7 +90,7 @@ class TestSubspacePlannerBasic:
         assert result.status == "absent"
         assert result.plan is None
         assert result.plan_digest is None
-        # S-03 改进：absent 时记录 plan_failure_reason="planner_disabled_by_policy" 作为审计标记
+        # absent 时记录 plan_failure_reason="planner_disabled_by_policy" 作为审计标记
         assert result.plan_failure_reason == "planner_disabled_by_policy"
 
     def test_subspace_planner_default_path_not_test_mode_synthetic(self):
@@ -866,7 +866,7 @@ class TestShallowDiffuseParameterBinding:
 
 class TestSubspacePlanDigestSupplementary:
     """
-    补强测试集（S-03 机制补强）
+    补强测试集
     验证：plan_digest 可复算、输入域收敛、轨迹特征绑定、失败语义严格
     """
 

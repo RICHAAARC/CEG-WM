@@ -1,7 +1,4 @@
 """
-File purpose: Integration tests for S-02 SemanticMaskProvider implementation.
-Module type: General module
-
 功能说明：
 - 验证 SemanticMaskProvider 的可重复性和写盘路径限制。
 - 验证 mask_digest 计算、mask_stats 提取、resolution_binding 绑定。

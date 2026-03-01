@@ -80,6 +80,7 @@ detect:
 enable_mask: true
 mask:
   impl_id: "semantic_saliency_v2"
+  saliency_source: "model_v2"   # 强制使用真实模型，禁止自动 proxy fallback（P1-4 修复）
 
 embed:
   test_mode_identity: false
@@ -111,7 +112,8 @@ experiment_matrix:
   # （1）仅内容链（禁用几何）  （2）仅几何链（禁用内容）
   # （3）禁用辅锚点           （4）禁用 HF 尾截断
   ablation_variants:
-    - { "disable_geometry_chain": true }
-    - { "disable_content_chain": true }
-    - { "disable_attention_anchor": true }
-    - { "disable_hf_tail_truncation": true }
+    - { "enable_geometry": false }        # 禁用几何链（对应 ablation.enable_geometry=false）
+    - { "enable_content": false }         # 禁用内容链（对应 ablation.enable_content=false）
+    - { "enable_anchor": false }          # 禁用辅锚点（对应 ablation.enable_anchor=false）
+    # 注：disable_hf_tail_truncation 语义不等价于 enable_hf=false（后者关闭整个 HF 通道），
+    # 暂移至 P2，待 whitelist 新增受控字段后恢复。

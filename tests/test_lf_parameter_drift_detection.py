@@ -285,7 +285,6 @@ class TestLFParameterAuditRequirement:
         两种情况都应该在检测侧被检查，返回 status="mismatch"。
         """
         # 这个测试是一个审计需求的声明
-        # 具体实现需要在 S-06 ContentDetector 中添加 plan_digest 验证逻辑
         
         # 预期：
         # - 嵌入：计算 plan_digest 时，使用 cfg_digest + mask_digest + 
