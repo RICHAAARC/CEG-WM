@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, cast
 
 import numpy as np
+from numpy.typing import NDArray
 from PIL import Image
 
 from main.core import digests
@@ -88,9 +89,6 @@ def _call_content_extractor_extract(
     Returns:
         Extractor return payload.
     """
-    if not isinstance(cfg, dict):
-        raise TypeError("cfg must be dict")
-
     extract_fn = getattr(extractor, "extract", None)
     if not callable(extract_fn):
         raise TypeError("content_extractor.extract must be callable")
@@ -1241,11 +1239,6 @@ def _build_content_inputs_for_detect(
     Returns:
         Input mapping with image_path when available, otherwise None.
     """
-    if not isinstance(cfg, dict):
-        raise TypeError("cfg must be dict")
-    if input_record is not None and not isinstance(input_record, dict):
-        raise TypeError("input_record must be dict or None")
-
     image_path = _resolve_detect_image_path(cfg, input_record)
     if image_path is None:
         return None
@@ -3644,7 +3637,7 @@ def _is_image_domain_sidecar_enabled(cfg: Dict[str, Any], ablation_override: boo
     return True
 
 
-def _safe_corrcoef(channels: np.ndarray) -> np.ndarray:
+def _safe_corrcoef(channels: NDArray[np.float64]) -> NDArray[np.float64]:
     """
     功能：用纯 NumPy 基础运算替代 np.corrcoef，避免 Windows/BLAS 进程崩溃。
 
@@ -3732,9 +3725,6 @@ def _precompute_relation_digest_for_sync(
     Returns:
         Hex digest string if attention inputs are available, otherwise None.
     """
-    if not isinstance(cfg, dict):
-        raise TypeError("cfg must be dict")
-
     # (1) 优先使用真实 runtime self-attention。
     attention_maps = _resolve_runtime_self_attention_maps(cfg)
 
@@ -4275,10 +4265,10 @@ def _run_geometry_extractor_with_runtime_inputs(
             attention_source = runtime_inputs.get("attention_maps_source")
             if isinstance(attention_source, str) and attention_source and "attention_capture_source" not in extracted_mapping:
                 extracted_mapping["attention_capture_source"] = attention_source
-        return extracted
+        return cast(Any, extracted)
     except TypeError:
         # 兼容旧实现：仅接受 cfg 参数。
-        return extract_method(cfg)
+        return cast(Any, extract_method(cfg))
 
 
 def _get_ablation_normalized(cfg: Dict[str, Any]) -> Dict[str, Any]:

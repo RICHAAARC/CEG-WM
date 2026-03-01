@@ -735,10 +735,19 @@ def test_onefile_detect_record_scoring_allows_fallback_when_sidecar_disabled(tmp
         encoding="utf-8",
     )
 
-    # sidecar 禁用是配置性缺失：写诊断补全文件，但正式校准输入仍使用原始 detect_record。
+    # sidecar 禁用是配置性缺失：写诊断补全文件，并生成带来源标记的正式校准输入。
     scoring_path = module._prepare_detect_record_for_scoring(run_root, records_dir, "paper_full_cuda")
     assert scoring_path.exists()
-    assert scoring_path == detect_record_path
+    assert scoring_path != detect_record_path
+    assert scoring_path.name == "detect_record_for_calibration.json"
+
+    scoring_payload = json.loads(scoring_path.read_text(encoding="utf-8"))
+    scoring_content_payload = scoring_payload.get("content_evidence_payload", {})
+    assert scoring_content_payload.get("score") == 0.0
+    assert scoring_content_payload.get("status") == "ok"
+    assert scoring_content_payload.get("calibration_sample_origin") == "sidecar_disabled_fallback"
+    assert scoring_content_payload.get("calibration_sample_is_synthetic_fallback") is True
+    assert scoring_content_payload.get("calibration_sample_usage") == "formal_with_sidecar_disabled_marker"
 
     diagnostic_path = run_root / "artifacts" / "workflow_cfg" / "detect_record_for_calibration_diagnostic.json"
     assert diagnostic_path.exists()

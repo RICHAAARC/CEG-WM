@@ -940,8 +940,23 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
         )
         print("[onefile] CALIBRATION_DIAGNOSTIC_WRITTEN source=sidecar_disabled_fallback")
 
-        # paper 模式默认严格口径：正式校准仅使用原始真实 detect_record。
-        return source_detect_path
+        # 恢复 workflow 连通性：为 calibrate 生成带来源标记的正式输入样本。
+        calibrated_payload = json.loads(json.dumps(diagnostic_payload, ensure_ascii=False))
+        calibrated_content_payload = calibrated_payload.get("content_evidence_payload")
+        if not isinstance(calibrated_content_payload, dict):
+            calibrated_content_payload = {}
+            calibrated_payload["content_evidence_payload"] = calibrated_content_payload
+        calibrated_content_payload["calibration_sample_usage"] = "formal_with_sidecar_disabled_marker"
+
+        calibrated_detect_path = run_root / "artifacts" / "workflow_cfg" / "detect_record_for_calibration.json"
+        calibrated_detect_path.parent.mkdir(parents=True, exist_ok=True)
+        _write_artifact_text_unbound(
+            run_root,
+            calibrated_detect_path,
+            json.dumps(calibrated_payload, ensure_ascii=False, indent=2)
+        )
+        print("[onefile] CALIBRATION_INPUT_WRITTEN source=sidecar_disabled_fallback")
+        return calibrated_detect_path
 
     score_fallback = content_payload.get("detect_lf_score")
     if not isinstance(score_fallback, (int, float)):
