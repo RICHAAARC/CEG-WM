@@ -961,7 +961,10 @@ def encode_low_freq_dct(
         bit = -1.0 if rng.random() < 0.5 else 1.0
         bit_values.append(bit)
         for channel_idx in range(channels):
-            block = work[r0:r0 + block_size, c0:c0 + block_size, channel_idx]
+            # np.ascontiguousarray 确保切片内存连续，避免非连续视图传入 BLAS 矩阵乘法时触发进程崩溃。
+            block = np.ascontiguousarray(
+                work[r0:r0 + block_size, c0:c0 + block_size, channel_idx]
+            )
             coeff = _dct2(block, dct_matrix)
             for ci, cj in coeff_indices:
                 coeff[ci, cj] = coeff[ci, cj] + bit * alpha

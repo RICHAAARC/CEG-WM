@@ -260,7 +260,7 @@ def test_onefile_coverage_ready_fills_metrics_by_attack_condition(tmp_path: Path
         encoding="utf-8",
     )
 
-    module._ensure_attack_protocol_report_coverage_ready(repo_root, run_root)
+    module._ensure_attack_protocol_report_coverage_ready(repo_root, run_root, "cpu_smoke")
 
     repaired_obj = json.loads(report_path.read_text(encoding="utf-8"))
     nested_obj = repaired_obj.get("evaluation_report")
@@ -307,7 +307,7 @@ def test_onefile_coverage_ready_replaces_unknown_only_metrics(tmp_path: Path) ->
         encoding="utf-8",
     )
 
-    module._ensure_attack_protocol_report_coverage_ready(repo_root, run_root)
+    module._ensure_attack_protocol_report_coverage_ready(repo_root, run_root, "cpu_smoke")
 
     repaired_obj = json.loads(report_path.read_text(encoding="utf-8"))
     nested_obj = repaired_obj.get("evaluation_report")
@@ -360,7 +360,7 @@ def test_onefile_pre_audits_order_runs_repro_after_coverage_and_matrix(
             ),
         ]
 
-    def _fake_coverage(_repo_root, _run_root):
+    def _fake_coverage(_repo_root, _run_root, _profile):
         call_order.append("coverage")
 
     def _fake_matrix(_run_root):
@@ -478,9 +478,10 @@ def test_onefile_paper_profile_prepares_repro_bundle_before_audits(
 
 def test_onefile_detect_record_scoring_applies_fallback_under_paper_profile(tmp_path: Path) -> None:
     """
-    功能：验证 paper_full profile 下 detect 记录缺分数时应用可审计 fallback。 
+    功能：验证 paper_full profile 下 detect 记录无任何可恢复分数时拒绝 fallback（抛出 ValueError）。 
 
-    Verify paper_full profile applies audited fallback when detect record has no usable score.
+    Verify paper_full profile raises ValueError when detect record has no usable score,
+    since paper mode forbids fallback to prevent polluting NP calibration distribution.
 
     Args:
         tmp_path: Temporary path fixture.
@@ -509,14 +510,10 @@ def test_onefile_detect_record_scoring_applies_fallback_under_paper_profile(tmp_
         encoding="utf-8",
     )
 
-    scoring_path = module._prepare_detect_record_for_scoring(run_root, records_dir, "paper_full_cuda")
-    scoring_payload = json.loads(scoring_path.read_text(encoding="utf-8"))
-    content_payload = scoring_payload.get("content_evidence_payload", {})
-    assert content_payload.get("status") == "ok"
-    assert content_payload.get("score") == 0.0
-    fallback_meta = content_payload.get("onefile_scoring_fallback")
-    assert isinstance(fallback_meta, dict)
-    assert fallback_meta.get("enabled") is True
+    # paper 模式禁止无分数时的 fallback，拒绝继续以防污染 NP 校准输入分布。
+    import pytest as _pytest
+    with _pytest.raises(ValueError, match="content_evidence_payload"):
+        module._prepare_detect_record_for_scoring(run_root, records_dir, "paper_full_cuda")
 
 
 def test_onefile_detect_record_scoring_recovers_detect_lf_score_under_paper_profile(tmp_path: Path) -> None:
@@ -647,9 +644,11 @@ def test_onefile_detect_record_scoring_recovers_fusion_summary_score_under_paper
 
 def test_onefile_detect_record_scoring_recovers_when_status_failed_but_score_available(tmp_path: Path) -> None:
     """
-    功能：验证 paper_full profile 在 status=failed 但存在可恢复分数时可生成 scoring record。 
+    功能：验证 paper_full profile 在 status=failed 时拒绝 score 恢复，保留失败语义。
 
-    Verify paper_full profile recovers scoring record when status is failed but numeric score exists.
+    Verify paper_full profile raises ValueError when status is failed,
+    even if a numeric score field exists. Failed evidence must not be
+    rewritten as calibratable score.
 
     Args:
         tmp_path: Temporary path fixture.
@@ -680,12 +679,10 @@ def test_onefile_detect_record_scoring_recovers_when_status_failed_but_score_ava
         encoding="utf-8",
     )
 
-    scoring_path = module._prepare_detect_record_for_scoring(run_root, records_dir, "paper_full_cuda")
-    scoring_payload = json.loads(scoring_path.read_text(encoding="utf-8"))
-    content_payload = scoring_payload.get("content_evidence_payload", {})
-    assert content_payload.get("status") == "ok"
-    assert content_payload.get("score") == 0.28
-    assert content_payload.get("content_failure_reason") is None
+    # paper 模式下 status=failed 证据不得被改写为 ok，必须抛出 ValueError。
+    import pytest as _pytest
+    with _pytest.raises(ValueError, match="content_evidence_payload"):
+        module._prepare_detect_record_for_scoring(run_root, records_dir, "paper_full_cuda")
 
 
 def test_paper_full_mechanism_assertions_fail_fast_on_proxy_paths(tmp_path: Path) -> None:

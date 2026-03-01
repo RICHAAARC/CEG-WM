@@ -779,7 +779,7 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
             recovered_field = field_name
             break
 
-    if isinstance(recovered_score, float):
+    if isinstance(recovered_score, float) and status_value != "failed":
         content_payload["score"] = recovered_score
         content_payload["status"] = "ok"
         content_payload["content_failure_reason"] = None

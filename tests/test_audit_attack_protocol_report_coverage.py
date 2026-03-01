@@ -130,9 +130,9 @@ class TestExtractReportedConditions:
         report = {
             "report_type": "evaluation_report",
             "metrics_by_attack_condition": [
-                {"group_key": "crop::v1", "n_total": 120},
-                {"group_key": "gaussian_blur::v1", "n_total": 100},
-                {"group_key": "rotate::v1", "n_total": 150},
+                {"group_key": "crop::v1", "n_total": 120, "status": "ok"},
+                {"group_key": "gaussian_blur::v1", "n_total": 100, "status": "ok"},
+                {"group_key": "rotate::v1", "n_total": 150, "status": "ok"},
             ],
         }
 
@@ -181,9 +181,9 @@ class TestExtractReportedConditions:
         report = {
             "report_type": "evaluation_report",
             "metrics_by_attack_condition": [
-                {"group_key": "rotate::v1", "n_total": 100},
-                {"group_key": "rotate::v1", "n_total": 50},  # 重复
-                {"group_key": "crop::v1", "n_total": 80},
+                {"group_key": "rotate::v1", "n_total": 100, "status": "ok"},
+                {"group_key": "rotate::v1", "n_total": 50, "status": "ok"},  # 重复
+                {"group_key": "crop::v1", "n_total": 80, "status": "ok"},
             ],
         }
 
@@ -203,8 +203,8 @@ class TestExtractReportedConditions:
             "evaluation_report": {
                 "report_type": "evaluation_report",
                 "metrics_by_attack_condition": [
-                    {"group_key": "rotate::v1", "n_total": 100},
-                    {"group_key": "crop::v1", "n_total": 80},
+                    {"group_key": "rotate::v1", "n_total": 100, "status": "ok"},
+                    {"group_key": "crop::v1", "n_total": 80, "status": "ok"},
                 ],
             },
         }
@@ -235,8 +235,8 @@ class TestAuditEquality:
         report = {
             "report_type": "evaluation_report",
             "metrics_by_attack_condition": [
-                {"group_key": "crop::v1"},
-                {"group_key": "rotate::v1"},
+                {"group_key": "crop::v1", "status": "ok", "n_total": 10},
+                {"group_key": "rotate::v1", "status": "ok", "n_total": 10},
             ],
         }
 
@@ -279,8 +279,8 @@ class TestAuditEquality:
         report = {
             "report_type": "evaluation_report",
             "metrics_by_attack_condition": [
-                {"group_key": "crop::v1"},
-                {"group_key": "rotate::v1"},
+                {"group_key": "crop::v1", "status": "ok", "n_total": 10},
+                {"group_key": "rotate::v1", "status": "ok", "n_total": 10},
             ],
         }
 
@@ -319,8 +319,8 @@ class TestAuditEquality:
         report = {
             "report_type": "evaluation_report",
             "metrics_by_attack_condition": [
-                {"group_key": "rotate::v1"},
-                {"group_key": "undeclared::v1"},  # 多报的
+                {"group_key": "rotate::v1", "status": "ok", "n_total": 10},
+                {"group_key": "undeclared::v1", "status": "ok", "n_total": 10},  # 多报的
             ],
         }
 
@@ -435,7 +435,7 @@ class TestAuditScriptMainEntry:
         }
         report = {
             "report_type": "evaluation_report",
-            "metrics_by_attack_condition": [{"group_key": "test::v1"}],
+            "metrics_by_attack_condition": [{"group_key": "test::v1", "status": "ok", "n_total": 10}],
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -468,7 +468,7 @@ class TestAuditScriptMainEntry:
         }
         report = {
             "report_type": "evaluation_report",
-            "metrics_by_attack_condition": [{"group_key": "test::v1"}],
+            "metrics_by_attack_condition": [{"group_key": "test::v1", "status": "ok", "n_total": 10}],
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -504,7 +504,7 @@ def test_audit_finds_report_in_outputs_artifacts_run_root() -> None:
     }
     report = {
         "report_type": "evaluation_report",
-        "metrics_by_attack_condition": [{"group_key": "rotate::v1"}],
+        "metrics_by_attack_condition": [{"group_key": "rotate::v1", "status": "ok", "n_total": 10}],
     }
 
     with tempfile.TemporaryDirectory() as tmpdir:

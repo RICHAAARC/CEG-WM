@@ -81,6 +81,7 @@ enable_mask: true
 mask:
   impl_id: "semantic_saliency_v2"
   saliency_source: "model_v2"   # 强制使用真实模型，禁止自动 proxy fallback（P1-4 修复）
+  semantic_model_path: "/content/models/inspyrenet/inspyrenet_plus_ultra.pth"
 
 embed:
   test_mode_identity: false

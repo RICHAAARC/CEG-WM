@@ -3557,6 +3557,29 @@ def _is_image_domain_sidecar_enabled(cfg: Dict[str, Any], ablation_override: boo
     return True
 
 
+def _safe_corrcoef(channels: np.ndarray) -> np.ndarray:
+    """
+    功能：用纯 NumPy 基础运算替代 np.corrcoef，避免 Windows/BLAS 进程崩溃。
+
+    Compute a correlation-coefficient-like matrix without calling np.corrcoef,
+    which triggers Fatal Python error: Aborted on Windows with certain NumPy builds.
+    Numerically equivalent: row-wise centering + L2 normalization + inner product.
+
+    Args:
+        channels: 2-D float array of shape [C, N_tokens].
+
+    Returns:
+        Correlation matrix of shape [C, C], dtype float64.
+    """
+    mat = channels.astype(np.float64)
+    mat = mat - mat.mean(axis=1, keepdims=True)
+    norms = np.sqrt((mat * mat).sum(axis=1, keepdims=True))
+    # 零方差行（常量通道）归一化分母置 1，等价于 np.corrcoef 的 nan_to_num 处理。
+    norms = np.where(norms < 1e-10, 1.0, norms)
+    mat = mat / norms
+    return mat @ mat.T
+
+
 def _build_attention_maps_from_latents(latents: Any) -> Any:
     """
     功能：从 latent 构造可复算 attention maps 代理。
@@ -3595,7 +3618,7 @@ def _build_attention_maps_from_latents(latents: Any) -> Any:
     channels = latent_first.reshape(latent_first.shape[0], -1)
     if channels.shape[0] < 2:
         return None
-    correlation = np.asarray(np.corrcoef(channels), dtype=np.float64)
+    correlation = np.asarray(_safe_corrcoef(channels), dtype=np.float64)
     if not np.isfinite(correlation).all():
         correlation = np.asarray(np.nan_to_num(correlation, nan=0.0, posinf=0.0, neginf=0.0), dtype=np.float64)
     return correlation

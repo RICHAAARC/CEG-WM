@@ -624,7 +624,7 @@ params_versions:
             {
                 "evaluation_report": {
                     "metrics_by_attack_condition": [
-                        {"group_key": "rotate::v1"}
+                        {"group_key": "rotate::v1", "status": "ok", "n_total": 10}
                     ]
                 }
             },
