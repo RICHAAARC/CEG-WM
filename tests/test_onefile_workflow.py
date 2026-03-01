@@ -201,13 +201,25 @@ def test_onefile_workflow_paper_full_profile_generates_real_sd3_config(tmp_path:
 
     run_root = tmp_path / "paper_full_run"
     cfg_path = repo_root / "configs" / "paper_full_cuda.yaml"
+    cfg_obj = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    if not isinstance(cfg_obj, dict):
+        raise RuntimeError("paper_full_cuda config must be mapping")
+    local_model_path = tmp_path / "inspyrenet_plus_ultra.pth"
+    local_model_path.write_bytes(b"unit-test-model")
+    mask_cfg = cfg_obj.get("mask") if isinstance(cfg_obj.get("mask"), dict) else {}
+    mask_cfg["semantic_model_path"] = str(local_model_path)
+    cfg_obj["mask"] = mask_cfg
+    local_cfg_path = tmp_path / "paper_full_cuda_local.yaml"
+    local_cfg_path.write_text(yaml.safe_dump(cfg_obj, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
-    profile_cfg_path = module._prepare_profile_cfg_path("paper_full_cuda", run_root, cfg_path)
+    profile_cfg_path = module._prepare_profile_cfg_path("paper_full_cuda", run_root, local_cfg_path)
     profile_cfg_text = profile_cfg_path.read_text(encoding="utf-8")
     profile_cfg_obj = yaml.safe_load(profile_cfg_text)
 
     assert profile_cfg_obj["impl"]["sync_module_id"] == "geometry_latent_sync_sd3_v2"
     assert profile_cfg_obj["impl"]["geometry_extractor_id"] == "attention_anchor_map_relation_v1"
+    assert profile_cfg_obj["mask"]["semantic_model_path"] == str(local_model_path.resolve())
+    assert profile_cfg_obj["embed"]["geometry"]["sync_strength"] == 0.2
     assert "device: cuda" in profile_cfg_text
     assert "enabled: true" in profile_cfg_text
     assert "alignment_check: true" in profile_cfg_text
@@ -256,6 +268,38 @@ def test_onefile_workflow_paper_full_profile_fails_fast_on_mismatched_impl(tmp_p
     cfg_path.write_text(yaml.safe_dump(cfg_obj, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
     with pytest.raises(ValueError, match="paper_full_cuda requires impl.sync_module_id"):
+        module._prepare_profile_cfg_path("paper_full_cuda", run_root, cfg_path)
+
+
+def test_onefile_workflow_paper_full_profile_fails_fast_on_missing_semantic_model(tmp_path: Path) -> None:
+    """
+    功能：验证 paper_full_cuda 在 semantic model 路径不可用时立即失败。
+
+    Verify paper_full_cuda fails fast when semantic model path is unavailable.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "paper_full_missing_model"
+    cfg_obj = {
+        "impl": {
+            "sync_module_id": "geometry_latent_sync_sd3_v2",
+            "geometry_extractor_id": "attention_anchor_map_relation_v1",
+        },
+        "mask": {
+            "semantic_model_path": "/content/models/inspyrenet/inspyrenet_plus_ultra.pth",
+        },
+    }
+    cfg_path = tmp_path / "missing_model.yaml"
+    cfg_path.write_text(yaml.safe_dump(cfg_obj, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="semantic model path is unavailable"):
         module._prepare_profile_cfg_path("paper_full_cuda", run_root, cfg_path)
 
 

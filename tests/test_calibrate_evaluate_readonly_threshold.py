@@ -36,6 +36,14 @@ def test_load_scores_for_calibration_filters_invalid_records() -> None:
     records = [
         {"content_evidence_payload": {"status": "ok", "score": 0.5}},
         {"content_evidence_payload": {"status": "ok", "score": 0.7}},
+        {
+            "content_evidence_payload": {
+                "status": "ok",
+                "score": 0.6,
+                "calibration_sample_origin": "sidecar_disabled_fallback",
+                "calibration_sample_is_synthetic_fallback": True,
+            }
+        },
         {"content_evidence_payload": {"status": "failed", "score": 0.8}},
         {"content_evidence_payload": {"status": "ok", "score": "0.2"}},
         {"content_evidence_payload": {"status": "ok", "score": float("nan")}},
@@ -45,9 +53,10 @@ def test_load_scores_for_calibration_filters_invalid_records() -> None:
     scores, strata = load_scores_for_calibration(records)
 
     assert scores == [0.5, 0.7]
-    assert strata["global"]["n_total"] == 6
+    assert strata["global"]["n_total"] == 7
     assert strata["global"]["n_valid"] == 2
-    assert strata["global"]["n_rejected"] == 4
+    assert strata["global"]["n_rejected"] == 5
+    assert strata["sampling_policy"]["n_rejected_synthetic_fallback"] == 1
 
 
 def test_load_thresholds_artifact_controlled_requires_fields(tmp_path: Path) -> None:

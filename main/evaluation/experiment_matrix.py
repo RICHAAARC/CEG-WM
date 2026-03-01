@@ -739,7 +739,10 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
             stage_overrides.append(f"evaluate_thresholds_path={json.dumps(str(thresholds_path))}")
         
         for key, value in sorted(ablation_flags.items()):
-            stage_overrides.append(f"ablation.{key}={str(value).lower()}")
+            # key 形如 "enable_geometry"；统一使用 ablation_enable_* arg_name 格式，
+            # 避免 field_path 格式在 whitelist 中因 enable/disable 双条目引发歧义错误。
+            suffix = key[len("enable_"):] if key.startswith("enable_") else key
+            stage_overrides.append(f"ablation_enable_{suffix}={str(value).lower()}")
 
 
         _run_stage_command(

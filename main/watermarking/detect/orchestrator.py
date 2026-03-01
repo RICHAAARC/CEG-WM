@@ -208,6 +208,10 @@ def run_detect_orchestrator(
         if content_evidence_payload is None:
             content_evidence_payload = {}
         _merge_injection_evidence(content_evidence_payload, injection_evidence)
+    if isinstance(content_evidence_payload, dict) and isinstance(detect_content_inputs, dict):
+        detect_input_source = detect_content_inputs.get("input_source")
+        if isinstance(detect_input_source, str) and detect_input_source:
+            content_evidence_payload["input_source"] = detect_input_source
 
     geometry_evidence_payload: Dict[str, Any] | None = _as_dict_payload(geometry_result)
 
@@ -1230,21 +1234,50 @@ def _build_content_inputs_for_detect(
     """
     功能：构造 detect 阶段 content extractor 主输入。
 
-    Build content extractor inputs for detect stage from resolved image path.
+    Build content extractor inputs for detect stage with explicit input priority.
 
     Args:
         cfg: Configuration mapping.
         input_record: Optional embed/detect input record.
 
     Returns:
-        Input mapping with image_path when available, otherwise None.
+        Input mapping with explicit source marker when available, otherwise None.
     """
+    explicit_image = cfg.get("__detect_input_image__")
+    explicit_latent = cfg.get("__detect_final_latents__")
+
+    if isinstance(input_record, dict):
+        if explicit_image is None:
+            explicit_image = input_record.get("image")
+        if explicit_latent is None:
+            explicit_latent = input_record.get("latent")
+
+        record_inputs_node = input_record.get("inputs")
+        record_inputs = cast(Dict[str, Any], record_inputs_node) if isinstance(record_inputs_node, dict) else {}
+        if explicit_image is None:
+            explicit_image = record_inputs.get("image")
+        if explicit_latent is None:
+            explicit_latent = record_inputs.get("latent")
+
+    inputs: Dict[str, Any] = {}
+    if explicit_image is not None:
+        inputs["image"] = explicit_image
+        inputs["input_source"] = "image"
+        if explicit_latent is not None:
+            inputs["latent"] = explicit_latent
+        return inputs
+
+    if explicit_latent is not None:
+        inputs["latent"] = explicit_latent
+        inputs["input_source"] = "latent"
+        return inputs
+
     image_path = _resolve_detect_image_path(cfg, input_record)
     if image_path is None:
         return None
-    return {
-        "image_path": str(image_path),
-    }
+    inputs["image_path"] = str(image_path)
+    inputs["input_source"] = "image_path"
+    return inputs
 
 
 def _resolve_plan_dict(plan_payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -2720,6 +2753,7 @@ def load_scores_for_calibration(records: list[Dict[str, Any]]) -> tuple[list[flo
     rejected = 0
     rejected_label_missing = 0
     rejected_label_positive = 0
+    rejected_synthetic_fallback = 0
 
     has_explicit_labels = False
     for item in records:
@@ -2739,6 +2773,10 @@ def load_scores_for_calibration(records: list[Dict[str, Any]]) -> tuple[list[flo
             content_payload_mapping = cast(Dict[str, Any], content_payload)
             status_value = content_payload_mapping.get("status")
             score_value = content_payload_mapping.get("score")
+            if _is_synthetic_fallback_calibration_sample(content_payload_mapping):
+                rejected += 1
+                rejected_synthetic_fallback += 1
+                continue
         if status_value != "ok":
             rejected += 1
             continue
@@ -2779,10 +2817,39 @@ def load_scores_for_calibration(records: list[Dict[str, Any]]) -> tuple[list[flo
             "records_with_explicit_label": has_explicit_labels,
             "n_rejected_label_missing": rejected_label_missing,
             "n_rejected_label_positive": rejected_label_positive,
+            "n_rejected_synthetic_fallback": rejected_synthetic_fallback,
             "n_selected_null": valid,
         },
     }
     return scores, strata_info
+
+
+def _is_synthetic_fallback_calibration_sample(content_payload: Dict[str, Any]) -> bool:
+    """
+    功能：判定样本是否属于 synthetic fallback 校准样本。 
+
+    Determine whether calibration sample is synthetic fallback and must be excluded.
+
+    Args:
+        content_payload: Content evidence payload mapping.
+
+    Returns:
+        True when sample is synthetic fallback, otherwise False.
+    """
+    if not isinstance(content_payload, dict):
+        raise TypeError("content_payload must be dict")
+
+    synthetic_flag = content_payload.get("calibration_sample_is_synthetic_fallback")
+    if synthetic_flag is True:
+        return True
+
+    origin_value = content_payload.get("calibration_sample_origin")
+    usage_value = content_payload.get("calibration_sample_usage")
+    if isinstance(origin_value, str) and isinstance(usage_value, str):
+        if origin_value in {"synthetic_fallback", "sidecar_disabled_fallback"} and "synthetic" in usage_value:
+            return True
+
+    return False
 
 
 def _resolve_calibration_label(record: Dict[str, Any]) -> Optional[bool]:

@@ -514,6 +514,63 @@ def _ensure_default_embed_input_image(run_root: Path) -> Path:
     return target_path.resolve()
 
 
+def _resolve_paper_semantic_model_path(mask_cfg: dict, cfg_path: Path) -> str:
+    """
+    功能：解析 paper_full_cuda 的 semantic model 路径并执行受控映射。 
+
+    Resolve semantic model path for paper_full_cuda with controlled /content mapping.
+
+    Args:
+        mask_cfg: Mask config mapping.
+        cfg_path: Source config path.
+
+    Returns:
+        Absolute semantic model file path.
+
+    Raises:
+        TypeError: If input types are invalid.
+        ValueError: If semantic model path is missing or unresolved.
+    """
+    if not isinstance(mask_cfg, dict):
+        raise TypeError("mask_cfg must be dict")
+    if not isinstance(cfg_path, Path):
+        raise TypeError("cfg_path must be Path")
+
+    semantic_model_path = mask_cfg.get("semantic_model_path")
+    if not isinstance(semantic_model_path, str) or not semantic_model_path.strip():
+        raise ValueError("paper_full_cuda requires mask.semantic_model_path for semantic model loading")
+
+    configured_path = semantic_model_path.strip()
+    resolved_direct = Path(configured_path).expanduser()
+    if not resolved_direct.is_absolute():
+        resolved_direct = (cfg_path.parent / resolved_direct).resolve()
+    else:
+        resolved_direct = resolved_direct.resolve()
+
+    if resolved_direct.exists() and resolved_direct.is_file():
+        return str(resolved_direct)
+
+    mapping_candidates: list[Path] = []
+    if configured_path.startswith("/content/"):
+        relative_part = configured_path[len("/content/"):].lstrip("/")
+        if relative_part:
+            mapping_candidates.append((REPO_ROOT / relative_part).resolve())
+
+    for candidate in mapping_candidates:
+        if candidate.exists() and candidate.is_file():
+            print(
+                "[onefile] PAPER_SEMANTIC_MODEL_PATH_MAPPED "
+                f"from={configured_path} to={candidate}"
+            )
+            return str(candidate)
+
+    raise ValueError(
+        "paper_full_cuda semantic model path is unavailable; "
+        f"configured={configured_path}, resolved={resolved_direct}, "
+        f"mapping_candidates={[str(item) for item in mapping_candidates]}"
+    )
+
+
 def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> Path:
     """
     功能：按 profile 生成运行期配置文件。 
@@ -612,12 +669,13 @@ def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> P
 
     mask_cfg = cfg_obj.get("mask") if isinstance(cfg_obj.get("mask"), dict) else {}
     mask_cfg["impl_id"] = "semantic_saliency_v2"
+    mask_cfg["semantic_model_path"] = _resolve_paper_semantic_model_path(mask_cfg, cfg_path)
     cfg_obj["mask"] = mask_cfg
 
     embed_cfg = cfg_obj.get("embed") if isinstance(cfg_obj.get("embed"), dict) else {}
     embed_cfg["test_mode_identity"] = False
     embed_geometry_cfg = embed_cfg.get("geometry") if isinstance(embed_cfg.get("geometry"), dict) else {}
-    embed_geometry_cfg["sync_strength"] = 0.1
+    embed_geometry_cfg["sync_strength"] = 0.2
     embed_cfg["geometry"] = embed_geometry_cfg
 
     configured_input_image_path = _resolve_embed_input_image_path_from_cfg(cfg_obj)
