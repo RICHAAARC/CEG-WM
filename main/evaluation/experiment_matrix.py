@@ -723,9 +723,8 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
         if stage_name == "detect":
             stage_overrides.append("enable_content_detect=true")
             stage_overrides.append("allow_threshold_fallback_for_tests=true")
-        # embed 阶段必须禁用 content detect，防止配置驱动进入 detect 模式
-        if stage_name == "embed":
-            stage_overrides.append("disable_content_detect=true")
+        # embed 阶段不强制写入 disable_content_detect 覆盖项。
+        # 由配置与 whitelist 统一约束，避免 override_value_mismatch。
         
         # calibrate 和 evaluate 需要 detect_records_glob 参数
         if stage_name in ["calibrate", "evaluate"]:
