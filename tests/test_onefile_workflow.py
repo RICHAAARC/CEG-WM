@@ -271,11 +271,11 @@ def test_onefile_workflow_paper_full_profile_fails_fast_on_mismatched_impl(tmp_p
         module._prepare_profile_cfg_path("paper_full_cuda", run_root, cfg_path)
 
 
-def test_onefile_workflow_paper_full_profile_fails_fast_on_missing_semantic_model(tmp_path: Path) -> None:
+def test_onefile_workflow_paper_full_profile_keeps_unresolved_semantic_model_path(tmp_path: Path) -> None:
     """
-    功能：验证 paper_full_cuda 在 semantic model 路径不可用时立即失败。
+    功能：验证 paper_full_cuda 在 semantic model 路径不可用时保留原路径并继续。
 
-    Verify paper_full_cuda fails fast when semantic model path is unavailable.
+    Verify paper_full_cuda keeps unresolved semantic model path without startup hard-fail.
 
     Args:
         tmp_path: Temporary path fixture.
@@ -299,8 +299,9 @@ def test_onefile_workflow_paper_full_profile_fails_fast_on_missing_semantic_mode
     cfg_path = tmp_path / "missing_model.yaml"
     cfg_path.write_text(yaml.safe_dump(cfg_obj, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="semantic model path is unavailable"):
-        module._prepare_profile_cfg_path("paper_full_cuda", run_root, cfg_path)
+    profile_cfg_path = module._prepare_profile_cfg_path("paper_full_cuda", run_root, cfg_path)
+    profile_cfg_obj = yaml.safe_load(profile_cfg_path.read_text(encoding="utf-8"))
+    assert profile_cfg_obj["mask"]["semantic_model_path"] == "/content/models/inspyrenet/inspyrenet_plus_ultra.pth"
 
 
 def test_resolve_default_signoff_profile_for_profile() -> None:

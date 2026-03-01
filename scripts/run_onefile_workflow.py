@@ -525,11 +525,11 @@ def _resolve_paper_semantic_model_path(mask_cfg: dict, cfg_path: Path) -> str:
         cfg_path: Source config path.
 
     Returns:
-        Absolute semantic model file path.
+        Semantic model path for runtime config.
 
     Raises:
         TypeError: If input types are invalid.
-        ValueError: If semantic model path is missing or unresolved.
+        ValueError: If semantic model path is missing.
     """
     if not isinstance(mask_cfg, dict):
         raise TypeError("mask_cfg must be dict")
@@ -564,11 +564,12 @@ def _resolve_paper_semantic_model_path(mask_cfg: dict, cfg_path: Path) -> str:
             )
             return str(candidate)
 
-    raise ValueError(
-        "paper_full_cuda semantic model path is unavailable; "
-        f"configured={configured_path}, resolved={resolved_direct}, "
+    print(
+        "[onefile] PAPER_SEMANTIC_MODEL_PATH_UNRESOLVED "
+        f"configured={configured_path} resolved={resolved_direct} "
         f"mapping_candidates={[str(item) for item in mapping_candidates]}"
     )
+    return configured_path
 
 
 def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> Path:
