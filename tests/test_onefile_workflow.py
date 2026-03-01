@@ -291,7 +291,7 @@ def test_build_stage_overrides_sets_embed_detect_content_switch() -> None:
     embed_overrides = module._build_stage_overrides("embed", "paper_full_cuda")
     detect_overrides = module._build_stage_overrides("detect", "paper_full_cuda")
 
-    assert "disable_content_detect=true" in embed_overrides
+    assert "disable_content_detect=false" in embed_overrides
     assert "enable_content_detect=true" in detect_overrides
 
 

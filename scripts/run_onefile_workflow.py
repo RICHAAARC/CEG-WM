@@ -326,7 +326,7 @@ def _build_stage_overrides(stage_name: str, profile: str) -> List[str]:
         )
 
     if stage_name == "embed":
-        overrides.append("disable_content_detect=true")
+        overrides.append("disable_content_detect=false")
     if stage_name == "detect":
         overrides.append("enable_content_detect=true")
         # detect 阶段阈值回退为架构必要性（校准工件在 calibrate 阶段产出），
