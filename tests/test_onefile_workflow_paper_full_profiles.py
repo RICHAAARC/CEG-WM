@@ -323,6 +323,78 @@ def test_onefile_coverage_ready_replaces_unknown_only_metrics(tmp_path: Path) ->
     assert len(group_keys) > 0
 
 
+def test_onefile_pre_audits_order_runs_repro_after_coverage_and_matrix(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：验证 audits 前预修复顺序为 coverage/matrix 在前，repro_bundle 在后。 
+
+    Verify pre-audits order runs repro bundle after coverage and matrix repairs.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "paper_run"
+    run_root.mkdir(parents=True, exist_ok=True)
+    cfg_path = repo_root / "configs" / "paper_full_cuda.yaml"
+
+    call_order = []
+
+    def _fake_prepare_profile_cfg(_profile, _run_root, _cfg_path):
+        return cfg_path
+
+    def _fake_build_steps(_run_root, _cfg_path, _repo_root, _profile, _signoff_profile):
+        return [
+            module.WorkflowStep(
+                name="audits",
+                command=["python", "scripts/run_all_audits.py"],
+                artifact_paths=[],
+            ),
+        ]
+
+    def _fake_coverage(_repo_root, _run_root):
+        call_order.append("coverage")
+
+    def _fake_matrix(_run_root):
+        call_order.append("matrix")
+
+    def _fake_repro(repo_root, run_root, cfg_path):
+        _ = repo_root
+        _ = run_root
+        _ = cfg_path
+        call_order.append("repro")
+
+    def _fake_run_step(_step_command, _repo_root):
+        return 0
+
+    monkeypatch.setattr(module, "_prepare_profile_cfg_path", _fake_prepare_profile_cfg)
+    monkeypatch.setattr(module, "build_workflow_steps", _fake_build_steps)
+    monkeypatch.setattr(module, "_ensure_attack_protocol_report_coverage_ready", _fake_coverage)
+    monkeypatch.setattr(module, "_ensure_experiment_matrix_grid_summary_anchors", _fake_matrix)
+    monkeypatch.setattr(module, "_ensure_repro_bundle_ready_for_paper_signoff", _fake_repro)
+    monkeypatch.setattr(module, "_run_subprocess_for_step", _fake_run_step)
+
+    exit_code = module.run_onefile_workflow(
+        repo_root=repo_root,
+        cfg_path=cfg_path,
+        run_root=run_root,
+        profile="paper_full_cuda",
+        signoff_profile="paper",
+        dry_run=False,
+    )
+
+    assert exit_code == 0
+    assert call_order == ["coverage", "matrix", "repro"]
+
+
 def test_onefile_paper_profile_prepares_repro_bundle_before_audits(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

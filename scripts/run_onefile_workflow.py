@@ -1789,13 +1789,13 @@ def run_onefile_workflow(
         step_command = list(step.command)
         if not dry_run and profile == PROFILE_PAPER_FULL_CUDA and step.name == "audits":
             try:
+                _ensure_attack_protocol_report_coverage_ready(repo_root, run_root)
+                _ensure_experiment_matrix_grid_summary_anchors(run_root)
                 _ensure_repro_bundle_ready_for_paper_signoff(
                     repo_root=repo_root,
                     run_root=run_root,
                     cfg_path=effective_cfg_path,
                 )
-                _ensure_attack_protocol_report_coverage_ready(repo_root, run_root)
-                _ensure_experiment_matrix_grid_summary_anchors(run_root)
             except Exception as exc:
                 print(
                     "[onefile] pre-audits closure failed: "
