@@ -353,7 +353,7 @@ class AttentionAnchorExtractor:
         """
         latents_first = latents_np[0]
         channels = int(latents_first.shape[0])
-        token_vectors = np.transpose(latents_first, (1, 2, 0)).reshape(-1, channels)
+        token_vectors = np.transpose(latents_first, (1, 2, 0)).reshape(-1, channels).astype(np.float32, copy=False)
 
         top_k = self._resolve_anchor_top_k(cfg)
         token_count = int(token_vectors.shape[0])
@@ -368,7 +368,9 @@ class AttentionAnchorExtractor:
 
         norms = np.linalg.norm(token_vectors, axis=1, keepdims=True)
         token_vectors = token_vectors / (norms + 1e-12)
-        similarity = token_vectors @ token_vectors.T
+        similarity = np.sum(token_vectors[:, None, :] * token_vectors[None, :, :], axis=2)
+        if not np.isfinite(similarity).all():
+            similarity = np.nan_to_num(similarity, nan=-1.0, posinf=-1.0, neginf=-1.0)
         np.fill_diagonal(similarity, -1.0)
         effective_k = min(top_k, max(1, token_count - 1))
 
@@ -381,10 +383,10 @@ class AttentionAnchorExtractor:
             for neighbor in row:
                 hist[int(neighbor % hist_bins)] += 1
 
-        gram = token_vectors.T @ token_vectors
-        eigenvalues = np.linalg.eigvalsh(gram)
-        eigenvalues = np.sort(eigenvalues)[::-1]
-        spectral_signature = [round(float(v), 6) for v in eigenvalues[:4]]
+        channel_energy = np.sum(np.square(token_vectors), axis=0)
+        if not np.isfinite(channel_energy).all():
+            channel_energy = np.nan_to_num(channel_energy, nan=0.0, posinf=0.0, neginf=0.0)
+        spectral_signature = [round(float(v), 6) for v in np.sort(channel_energy)[::-1][:4]]
 
         return {
             "summary_version": "attention_anchor_relation_summary_v1",

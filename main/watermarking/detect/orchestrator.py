@@ -3688,6 +3688,11 @@ def _build_geometry_runtime_inputs(
         runtime_inputs["attention_maps"] = prebuilt_attention_maps
         runtime_inputs["attention_maps_source"] = "runtime_self_attention"
         runtime_inputs["attention_maps_evidence_level"] = "primary"
+        capture_source = cfg.get("__runtime_self_attention_source__")
+        if isinstance(capture_source, str) and capture_source:
+            runtime_inputs["attention_capture_source"] = capture_source
+        else:
+            runtime_inputs["attention_capture_source"] = "hook_capture"
     if enable_attention_proxy:
         if "attention_maps" not in runtime_inputs:
             if paper_enabled:
@@ -4092,7 +4097,16 @@ def _run_geometry_extractor_with_runtime_inputs(
         # geometry_extractor 协议不合法，必须 fail-fast。
         raise TypeError("geometry_extractor.extract must be callable")
     try:
-        return extract_method(cfg, inputs=runtime_inputs)
+        extracted = extract_method(cfg, inputs=runtime_inputs)
+        if isinstance(extracted, dict):
+            extracted_mapping = cast(Dict[str, Any], extracted)
+            capture_source = runtime_inputs.get("attention_capture_source")
+            if isinstance(capture_source, str) and capture_source:
+                extracted_mapping["attention_capture_source"] = capture_source
+            attention_source = runtime_inputs.get("attention_maps_source")
+            if isinstance(attention_source, str) and attention_source and "attention_capture_source" not in extracted_mapping:
+                extracted_mapping["attention_capture_source"] = attention_source
+        return extracted
     except TypeError:
         # 兼容旧实现：仅接受 cfg 参数。
         return extract_method(cfg)

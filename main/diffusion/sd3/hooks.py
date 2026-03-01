@@ -179,12 +179,18 @@ class SelfAttentionCaptureHook:
         sample_steps: Optional sampled step indices.
     """
 
-    def __init__(self, max_layers: Optional[int] = 8, sample_steps: Optional[set[int]] = None) -> None:
+    def __init__(
+        self,
+        max_layers: Optional[int] = 8,
+        sample_steps: Optional[set[int]] = None,
+        layer_whitelist: Optional[set[str]] = None,
+    ) -> None:
         self._captures: Dict[tuple[str, int], Dict[str, Any]] = {}
         self._hook_handles: List[Any] = []
         self._step_index = 0
         self._max_layers = max_layers
         self._sample_steps = sample_steps
+        self._layer_whitelist = layer_whitelist
 
     def _make_hook_fn(self, module_name: str, projection: str) -> Callable:
         def hook_fn(_module: Any, _input: Any, output: Any) -> None:
@@ -216,9 +222,13 @@ class SelfAttentionCaptureHook:
 
             if module_name.endswith(".to_q"):
                 parent_name = module_name.rsplit(".", 1)[0]
+                if self._layer_whitelist is not None and parent_name not in self._layer_whitelist:
+                    continue
                 self._hook_handles.append(module.register_forward_hook(self._make_hook_fn(parent_name, "q")))
             elif module_name.endswith(".to_k"):
                 parent_name = module_name.rsplit(".", 1)[0]
+                if self._layer_whitelist is not None and parent_name not in self._layer_whitelist:
+                    continue
                 self._hook_handles.append(module.register_forward_hook(self._make_hook_fn(parent_name, "k")))
                 hooked_layers += 1
 
@@ -288,7 +298,33 @@ def register_attention_hooks(pipeline: Any, cfg: Dict[str, Any]) -> SelfAttentio
     if not isinstance(max_layers, int) or max_layers <= 0:
         max_layers = 8
 
-    hook = SelfAttentionCaptureHook(max_layers=max_layers, sample_steps=None)
+    sample_steps: Optional[set[int]] = None
+    sample_steps_node = geometry_cfg.get("attention_capture_sample_steps")
+    if isinstance(sample_steps_node, list):
+        parsed_steps = {
+            int(item)
+            for item in sample_steps_node
+            if isinstance(item, int) and item >= 0
+        }
+        if parsed_steps:
+            sample_steps = parsed_steps
+
+    layer_whitelist: Optional[set[str]] = None
+    whitelist_node = geometry_cfg.get("attention_capture_layer_whitelist")
+    if isinstance(whitelist_node, list):
+        normalized_layers = {
+            item.strip()
+            for item in whitelist_node
+            if isinstance(item, str) and item.strip()
+        }
+        if normalized_layers:
+            layer_whitelist = normalized_layers
+
+    hook = SelfAttentionCaptureHook(
+        max_layers=max_layers,
+        sample_steps=sample_steps,
+        layer_whitelist=layer_whitelist,
+    )
     hook.register(pipeline)
     return hook
 

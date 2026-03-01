@@ -534,6 +534,12 @@ def run_detect(
             }
             final_latents = None
         else:
+            detect_cfg = cfg.get("detect") if isinstance(cfg.get("detect"), dict) else {}
+            geometry_cfg = detect_cfg.get("geometry") if isinstance(detect_cfg.get("geometry"), dict) else {}
+            capture_attention = bool(
+                geometry_cfg.get("enabled", False)
+                and geometry_cfg.get("enable_attention_anchor", False)
+            )
             inference_result = infer_runtime.run_sd3_inference(
                 cfg,
                 pipeline_obj,
@@ -541,7 +547,8 @@ def run_detect(
                 seed,
                 injection_context=injection_context,
                 injection_modifier=injection_modifier,
-                capture_final_latents=True  # 捕获最后的 latents 用于 detect 侧评分
+                capture_final_latents=True,  # 捕获最后的 latents 用于 detect 侧评分
+                capture_attention=capture_attention,
             )
             inference_status = inference_result.get("inference_status")
             inference_error = inference_result.get("inference_error")
@@ -550,6 +557,9 @@ def run_detect(
             injection_evidence = inference_result.get("injection_evidence")
             final_latents = inference_result.get("final_latents")
             runtime_self_attention_maps = inference_result.get("runtime_self_attention_maps")
+            runtime_self_attention_source = None
+            if isinstance(inference_runtime_meta, dict):
+                runtime_self_attention_source = inference_runtime_meta.get("runtime_self_attention_source")
         
         # 将最后的 latents 存储到 cfg 的临时字段，供 detect orchestrator 使用。
         # 这些 latents 不会被写入 records，只在内存中处理。
@@ -557,6 +567,8 @@ def run_detect(
             cfg["__detect_final_latents__"] = final_latents
         if runtime_self_attention_maps is not None:
             cfg["__runtime_self_attention_maps__"] = runtime_self_attention_maps
+        if isinstance(runtime_self_attention_source, str) and runtime_self_attention_source:
+            cfg["__runtime_self_attention_source__"] = runtime_self_attention_source
         cfg["__detect_pipeline_obj__"] = pipeline_obj
         cfg["__pipeline_runtime_meta__"] = pipeline_result.get("pipeline_runtime_meta")
         

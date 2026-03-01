@@ -63,6 +63,16 @@ detect:
   geometry:
     enabled: true
     enable_attention_anchor: true
+    attention_capture_max_layers: 8
+    attention_capture_layer_whitelist:
+      - "transformer_blocks.0.attn"
+      - "transformer_blocks.1.attn"
+      - "transformer_blocks.2.attn"
+      - "transformer_blocks.3.attn"
+      - "transformer_blocks.4.attn"
+      - "transformer_blocks.5.attn"
+      - "transformer_blocks.6.attn"
+      - "transformer_blocks.7.attn"
     # 显式声明几何证据层级：latent sync 为主几何实现（低阶几何反演），
     # attention anchor 仅作辅锚点（主同步成功后参与一致性评估）。
     sync_primary_anchor_secondary: true

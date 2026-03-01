@@ -25,6 +25,67 @@ GEO_UNAVAILABILITY_REASONS = {
 }
 
 
+def _solve_linear_system_gaussian(matrix: np.ndarray, vector: np.ndarray) -> Optional[np.ndarray]:
+    """
+    功能：使用高斯消元求解小规模线性系统。 
+
+    Solve small linear system via Gaussian elimination with partial pivoting.
+
+    Args:
+        matrix: Square coefficient matrix.
+        vector: Right-hand-side vector.
+
+    Returns:
+        Solution vector or None when matrix is singular/invalid.
+    """
+    if matrix.ndim != 2:
+        return None
+    if vector.ndim != 1:
+        return None
+    rows, cols = matrix.shape
+    if rows != cols or vector.shape[0] != rows:
+        return None
+
+    augmented = np.concatenate(
+        [matrix.astype(np.float64, copy=True), vector.reshape(-1, 1).astype(np.float64, copy=True)],
+        axis=1,
+    )
+    size = rows
+
+    for pivot_index in range(size):
+        pivot_row = pivot_index
+        pivot_value = abs(float(augmented[pivot_row, pivot_index]))
+        for row_index in range(pivot_index + 1, size):
+            candidate_value = abs(float(augmented[row_index, pivot_index]))
+            if candidate_value > pivot_value:
+                pivot_row = row_index
+                pivot_value = candidate_value
+
+        if pivot_value <= 1e-12:
+            return None
+
+        if pivot_row != pivot_index:
+            row_copy = augmented[pivot_index].copy()
+            augmented[pivot_index] = augmented[pivot_row]
+            augmented[pivot_row] = row_copy
+
+        pivot_scalar = float(augmented[pivot_index, pivot_index])
+        augmented[pivot_index] = augmented[pivot_index] / pivot_scalar
+
+        for row_index in range(size):
+            if row_index == pivot_index:
+                continue
+            factor = float(augmented[row_index, pivot_index])
+            if abs(factor) <= 1e-15:
+                continue
+            augmented[row_index] = augmented[row_index] - factor * augmented[pivot_index]
+
+    solution = augmented[:, -1]
+    if not np.isfinite(solution).all():
+        return None
+    return solution.astype(np.float64)
+
+
 @dataclass(frozen=True)
 class FitResult:
     """
@@ -368,9 +429,16 @@ class RobustSimilarityFitter:
         repeated_weights = np.repeat(np.sqrt(np.clip(weights, 1e-8, 1.0)), 2)
         weighted_design = design * repeated_weights[:, None]
         weighted_target = target * repeated_weights
-        try:
-            solved, _, _, _ = np.linalg.lstsq(weighted_design, weighted_target, rcond=None)
-        except np.linalg.LinAlgError:
+        if not np.isfinite(weighted_design).all() or not np.isfinite(weighted_target).all():
+            return None
+        gram_matrix = np.sum(
+            weighted_design[:, :, None] * weighted_design[:, None, :],
+            axis=0,
+        )
+        rhs_vector = np.sum(weighted_design * weighted_target[:, None], axis=0)
+        regularization = np.eye(gram_matrix.shape[0], dtype=np.float64) * 1e-8
+        solved = _solve_linear_system_gaussian(gram_matrix + regularization, rhs_vector)
+        if solved is None:
             return None
         return solved.astype(np.float64)
 
