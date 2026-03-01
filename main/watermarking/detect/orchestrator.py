@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import glob
+import inspect
 from pathlib import Path
 from typing import Any, Dict, Optional, cast
 
@@ -67,6 +68,51 @@ def _as_dict_payload(value: Any) -> Dict[str, Any] | None:
     return None
 
 
+def _call_content_extractor_extract(
+    extractor: Any,
+    cfg: Dict[str, Any],
+    inputs: Optional[Dict[str, Any]],
+    cfg_digest: Optional[str],
+) -> Any:
+    """
+    功能：兼容不同 extract 签名调用 content_extractor。
+
+    Call content_extractor.extract with backward-compatible signature handling.
+
+    Args:
+        extractor: Content extractor instance.
+        cfg: Configuration mapping.
+        inputs: Optional content input mapping.
+        cfg_digest: Optional config digest.
+
+    Returns:
+        Extractor return payload.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+
+    extract_fn = getattr(extractor, "extract", None)
+    if not callable(extract_fn):
+        raise TypeError("content_extractor.extract must be callable")
+
+    signature = inspect.signature(extract_fn)
+    params = signature.parameters
+    positional_args: list[Any] = []
+    keyword_args: Dict[str, Any] = {}
+
+    if "inputs" in params:
+        keyword_args["inputs"] = inputs
+    elif len(params) >= 2 and inputs is not None:
+        positional_args.append(inputs)
+
+    if "cfg_digest" in params:
+        keyword_args["cfg_digest"] = cfg_digest
+    elif len(params) >= 3 and cfg_digest is not None and len(positional_args) >= 1:
+        positional_args.append(cfg_digest)
+
+    return extract_fn(cfg, *positional_args, **keyword_args)
+
+
 def run_detect_orchestrator(
     cfg: Dict[str, Any],
     impl_set: BuiltImplSet,
@@ -123,6 +169,8 @@ def run_detect_orchestrator(
     if paper_enabled:
         enable_attention_proxy = False
 
+    detect_content_inputs = _build_content_inputs_for_detect(cfg, input_record)
+
     # Ablation: 禁用 content 模块时返回 absent 语义。
     content_result: Any
     if not enable_content:
@@ -130,7 +178,12 @@ def run_detect_orchestrator(
     elif content_result_override is not None:
         content_result = cast(Any, content_result_override)
     else:
-        content_result = impl_set.content_extractor.extract(cfg)
+        content_result = _call_content_extractor_extract(
+            impl_set.content_extractor,
+            cfg,
+            detect_content_inputs,
+            cfg_digest,
+        )
     
     # Ablation: 禁用 geometry 模块时返回 absent 语义。
     if not enable_geometry:
@@ -193,7 +246,12 @@ def run_detect_orchestrator(
         detect_content_cfg_for_planner["enabled"] = False
         detect_cfg_for_planner["content"] = detect_content_cfg_for_planner
         cfg_for_planner["detect"] = detect_cfg_for_planner
-        planner_content_result = impl_set.content_extractor.extract(cfg_for_planner)
+        planner_content_result = _call_content_extractor_extract(
+            impl_set.content_extractor,
+            cfg_for_planner,
+            detect_content_inputs,
+            cfg_digest,
+        )
         planner_content_payload = _as_dict_payload(planner_content_result)
         if isinstance(planner_content_payload, dict):
             mask_digest = planner_content_payload.get("mask_digest")
@@ -1165,6 +1223,35 @@ def _resolve_detect_image_path(cfg: Dict[str, Any], input_record: Optional[Dict[
             if path.exists() and path.is_file():
                 return path
     return None
+
+
+def _build_content_inputs_for_detect(
+    cfg: Dict[str, Any],
+    input_record: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """
+    功能：构造 detect 阶段 content extractor 主输入。
+
+    Build content extractor inputs for detect stage from resolved image path.
+
+    Args:
+        cfg: Configuration mapping.
+        input_record: Optional embed/detect input record.
+
+    Returns:
+        Input mapping with image_path when available, otherwise None.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if input_record is not None and not isinstance(input_record, dict):
+        raise TypeError("input_record must be dict or None")
+
+    image_path = _resolve_detect_image_path(cfg, input_record)
+    if image_path is None:
+        return None
+    return {
+        "image_path": str(image_path),
+    }
 
 
 def _resolve_plan_dict(plan_payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:

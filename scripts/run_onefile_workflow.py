@@ -450,6 +450,70 @@ def _should_block_on_multi_protocol_validation_error(exc: Exception) -> bool:
     return True
 
 
+def _resolve_embed_input_image_path_from_cfg(cfg_obj: dict) -> str | None:
+    """
+    功能：从运行期配置解析 embed 输入图路径。
+
+    Resolve embed input image path from runtime config mapping.
+
+    Args:
+        cfg_obj: Runtime config mapping.
+
+    Returns:
+        Image path string when available, otherwise None.
+    """
+    if not isinstance(cfg_obj, dict):
+        raise TypeError("cfg_obj must be dict")
+
+    candidates = [
+        cfg_obj.get("__embed_input_image_path__"),
+        cfg_obj.get("input_image_path"),
+    ]
+    embed_node = cfg_obj.get("embed")
+    embed_cfg = embed_node if isinstance(embed_node, dict) else {}
+    if embed_cfg:
+        candidates.append(embed_cfg.get("input_image_path"))
+
+    for value in candidates:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _ensure_default_embed_input_image(run_root: Path) -> Path:
+    """
+    功能：生成默认 embed 输入图像工件并返回路径。
+
+    Generate a deterministic default embed input image artifact.
+
+    Args:
+        run_root: Unified run_root path.
+
+    Returns:
+        Absolute path to generated default image.
+    """
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+
+    target_path = run_root / "artifacts" / "workflow_cfg" / "default_embed_input.png"
+    if target_path.exists() and target_path.is_file():
+        return target_path.resolve()
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        from PIL import Image
+    except Exception as exc:
+        raise RuntimeError(f"Pillow unavailable for default embed input generation: {type(exc).__name__}") from exc
+
+    image_size = 512
+    grad_x = Image.linear_gradient("L").resize((image_size, image_size))
+    grad_y = grad_x.transpose(Image.Transpose.ROTATE_90)
+    grad_mix = Image.blend(grad_x, grad_y, alpha=0.5)
+    default_image = Image.merge("RGB", (grad_x, grad_y, grad_mix))
+    default_image.save(target_path, format="PNG")
+    return target_path.resolve()
+
+
 def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> Path:
     """
     功能：按 profile 生成运行期配置文件。 
@@ -552,6 +616,28 @@ def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> P
 
     embed_cfg = cfg_obj.get("embed") if isinstance(cfg_obj.get("embed"), dict) else {}
     embed_cfg["test_mode_identity"] = False
+    embed_geometry_cfg = embed_cfg.get("geometry") if isinstance(embed_cfg.get("geometry"), dict) else {}
+    embed_geometry_cfg["sync_strength"] = 0.1
+    embed_cfg["geometry"] = embed_geometry_cfg
+
+    configured_input_image_path = _resolve_embed_input_image_path_from_cfg(cfg_obj)
+    if configured_input_image_path is not None:
+        resolved_input_image_path = Path(configured_input_image_path).expanduser()
+        if not resolved_input_image_path.is_absolute():
+            resolved_input_image_path = (cfg_path.parent / resolved_input_image_path).resolve()
+        else:
+            resolved_input_image_path = resolved_input_image_path.resolve()
+        if not resolved_input_image_path.exists() or not resolved_input_image_path.is_file():
+            raise ValueError(
+                "paper_full_cuda embed input image not found: "
+                f"{resolved_input_image_path}. "
+                "Set embed.input_image_path to an existing file or remove it to use generated default image."
+            )
+        embed_cfg["input_image_path"] = str(resolved_input_image_path)
+    else:
+        default_input_image_path = _ensure_default_embed_input_image(run_root)
+        embed_cfg["input_image_path"] = str(default_input_image_path)
+
     cfg_obj["embed"] = embed_cfg
 
     profile_cfg_path = run_root / "artifacts" / "workflow_cfg" / "profile_paper_full_cuda.yaml"
@@ -828,6 +914,34 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
 
         # (2) sidecar 禁用时：配置性缺失，允许 fallback，记录诊断供审计追踪。
         print(f"[onefile] PAPER_SIDECAR_DISABLED_FALLBACK diagnostics={diagnostic_snapshot}")
+
+        diagnostic_payload = json.loads(json.dumps(payload, ensure_ascii=False))
+        diagnostic_content_payload = diagnostic_payload.get("content_evidence_payload")
+        if not isinstance(diagnostic_content_payload, dict):
+            diagnostic_content_payload = {}
+            diagnostic_payload["content_evidence_payload"] = diagnostic_content_payload
+
+        diagnostic_score = diagnostic_content_payload.get("detect_lf_score")
+        if not isinstance(diagnostic_score, (int, float)):
+            diagnostic_score = 0.0
+
+        diagnostic_content_payload["status"] = "ok"
+        diagnostic_content_payload["score"] = float(diagnostic_score)
+        diagnostic_content_payload["content_failure_reason"] = None
+        diagnostic_content_payload["calibration_sample_origin"] = "sidecar_disabled_fallback"
+        diagnostic_content_payload["calibration_sample_is_synthetic_fallback"] = True
+
+        diagnostic_detect_path = run_root / "artifacts" / "workflow_cfg" / "detect_record_for_calibration_diagnostic.json"
+        diagnostic_detect_path.parent.mkdir(parents=True, exist_ok=True)
+        _write_artifact_text_unbound(
+            run_root,
+            diagnostic_detect_path,
+            json.dumps(diagnostic_payload, ensure_ascii=False, indent=2)
+        )
+        print("[onefile] CALIBRATION_DIAGNOSTIC_WRITTEN source=sidecar_disabled_fallback")
+
+        # paper 模式默认严格口径：正式校准仅使用原始真实 detect_record。
+        return source_detect_path
 
     score_fallback = content_payload.get("detect_lf_score")
     if not isinstance(score_fallback, (int, float)):

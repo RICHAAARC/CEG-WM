@@ -687,10 +687,11 @@ def test_onefile_detect_record_scoring_recovers_when_status_failed_but_score_ava
 
 def test_onefile_detect_record_scoring_allows_fallback_when_sidecar_disabled(tmp_path: Path) -> None:
     """
-    功能：验证 paper_full profile 在 sidecar 禁用（配置性缺失）时允许 fallback=0.0 继续。
+    功能：验证 paper_full profile 在 sidecar 禁用时仅写诊断补全，不污染正式校准输入。
 
-    Verify paper_full profile allows fallback to score=0.0 when both LF/HF are absent
-    due to image_domain_sidecar_disabled configuration, not algorithmic failure.
+    Verify paper_full profile writes diagnostic fallback sample when both LF/HF are
+    absent due to image_domain_sidecar_disabled, while returning original detect record
+    for formal calibration input.
 
     Args:
         tmp_path: Temporary path fixture.
@@ -734,13 +735,19 @@ def test_onefile_detect_record_scoring_allows_fallback_when_sidecar_disabled(tmp
         encoding="utf-8",
     )
 
-    # sidecar 禁用是配置性缺失，不阻断 paper 流水线，允许 score=0.0 fallback。
+    # sidecar 禁用是配置性缺失：写诊断补全文件，但正式校准输入仍使用原始 detect_record。
     scoring_path = module._prepare_detect_record_for_scoring(run_root, records_dir, "paper_full_cuda")
     assert scoring_path.exists()
-    scoring_payload = json.loads(scoring_path.read_text(encoding="utf-8"))
-    content_payload = scoring_payload.get("content_evidence_payload", {})
+    assert scoring_path == detect_record_path
+
+    diagnostic_path = run_root / "artifacts" / "workflow_cfg" / "detect_record_for_calibration_diagnostic.json"
+    assert diagnostic_path.exists()
+    diagnostic_payload = json.loads(diagnostic_path.read_text(encoding="utf-8"))
+    content_payload = diagnostic_payload.get("content_evidence_payload", {})
     assert content_payload.get("score") == 0.0
     assert content_payload.get("status") == "ok"
+    assert content_payload.get("calibration_sample_origin") == "sidecar_disabled_fallback"
+    assert content_payload.get("calibration_sample_is_synthetic_fallback") is True
 
 
 def test_paper_full_mechanism_assertions_fail_fast_on_proxy_paths(tmp_path: Path) -> None:

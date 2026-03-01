@@ -110,11 +110,14 @@ experiment_matrix:
   config_path: "configs/paper_full_cuda.yaml"
   allow_failed_semantics_collection: true
   # 默认消融变体轴：覆盖论文核心消融因子
-  # （1）仅内容链（禁用几何）  （2）仅几何链（禁用内容）
-  # （3）禁用辅锚点           （4）禁用 HF 尾截断
+  # （1）仅内容链，禁用几何
+  # （2）仅几何链，禁用内容
+  # （3）禁用辅锚点
+  # （4）仅 LF 低频，禁用 HF
+  # （5）仅 HF 高频，禁用 LF
   ablation_variants:
     - { "enable_geometry": false }        # 禁用几何链（对应 ablation.enable_geometry=false）
     - { "enable_content": false }         # 禁用内容链（对应 ablation.enable_content=false）
     - { "enable_anchor": false }          # 禁用辅锚点（对应 ablation.enable_anchor=false）
-    # 注：disable_hf_tail_truncation 语义不等价于 enable_hf=false（后者关闭整个 HF 通道），
-    # 暂移至 P2，待 whitelist 新增受控字段后恢复。
+    - { "enable_hf": false }              # 禁用 HF 高频通道，仅保留 LF（验证低频编码对隐蔽性的独立贡献）
+    - { "enable_lf": false }              # 禁用 LF 低频通道，仅保留 HF（验证尾截断对鲁棒性的独立贡献）

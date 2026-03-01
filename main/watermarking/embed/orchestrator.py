@@ -133,6 +133,10 @@ def run_embed_orchestrator(
     enable_hf = ablation_normalized.get("enable_hf", bool(cfg.get("watermark", {}).get("hf", {}).get("enabled", False)))
 
     content_inputs = _build_content_inputs_for_embed(cfg)
+    if content_inputs is None:
+        cfg["__embed_content_input_absent_reason__"] = "embed_input_image_path_missing"
+    else:
+        cfg.pop("__embed_content_input_absent_reason__", None)
     
     # Ablation: 禁用 content 模块时返回 absent 语义。
     content_result: Any
