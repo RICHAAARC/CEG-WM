@@ -240,3 +240,22 @@ def test_ablation_absent_reason_is_traceable():
     # 断言：相同原因的 trace_digest 必须可复现。
     content_absent_2 = _build_ablation_absent_content_evidence("content_chain_disabled_by_ablation")
     assert content_absent["audit"]["trace_digest"] == content_absent_2["audit"]["trace_digest"], "trace_digest must be reproducible"
+
+
+def test_embed_execution_chain_status_normalizes_deprecated_fail() -> None:
+    """
+    功能：验证 embed 链路状态归一化会将 fail 统一映射为 failed。
+
+    Verify embed execution-chain status normalization maps deprecated fail to failed.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If deprecated fail is not normalized to failed.
+    """
+    from main.watermarking.embed.orchestrator import _normalize_execution_chain_status
+
+    assert _normalize_execution_chain_status("fail") == "failed"
+    assert _normalize_execution_chain_status("ok") == "ok"
+    assert _normalize_execution_chain_status("absent") == "absent"

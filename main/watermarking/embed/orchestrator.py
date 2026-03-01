@@ -57,6 +57,32 @@ def _as_dict_payload(value: Any) -> Dict[str, Any] | None:
     return None
 
 
+def _normalize_execution_chain_status(raw_status: Any) -> str:
+    """
+    功能：将链路状态归一化到 ok/absent/failed 三态。
+
+    Normalize execution-chain status into canonical enum {ok, absent, failed}.
+
+    Args:
+        raw_status: Raw status token from runtime payload.
+
+    Returns:
+        Canonical status token.
+    """
+    if not isinstance(raw_status, str) or not raw_status:
+        return "failed"
+    normalized = raw_status.strip().lower()
+    if normalized == "fail":
+        return "failed"
+    if normalized in {"failed", "error", "mismatch"}:
+        return "failed"
+    if normalized in {"absent", "none", "disabled", "not_applicable"}:
+        return "absent"
+    if normalized in {"ok", "synced", "accepted", "rejected", "abstain"}:
+        return "ok"
+    return "failed"
+
+
 def run_embed_orchestrator(
     cfg: Dict[str, Any],
     impl_set: BuiltImplSet,
@@ -134,16 +160,9 @@ def run_embed_orchestrator(
     _normalize_content_evidence_optional_mappings(content_evidence_payload)
     
     # 捕获 content_chain 的执行状态（用于 execution_report）。
-    # 允许的值：ok / fail / absent
-    content_chain_status = "ok"
+    # 统一归一化为 ok / absent / failed，避免写出废弃枚举 fail。
     content_status = content_evidence_payload.get("status", "unknown")
-    if isinstance(content_status, str):
-        if content_status == "absent":
-            content_chain_status = "absent"
-        elif content_status != "ok":
-            content_chain_status = "fail"
-    elif content_status != "ok":
-        content_chain_status = "fail"
+    content_chain_status = _normalize_execution_chain_status(content_status)
     
     # 提取 mask_digest 以绑定到规划器。
     mask_digest = content_evidence_payload.get("mask_digest")
@@ -262,7 +281,7 @@ def run_embed_orchestrator(
         #     geometry 链不参与，geometry_chain_status 置为 "absent"。
         "execution_report": {
             "content_chain_status": content_chain_status,
-            "geometry_chain_status": sync_result.get("status", "absent"),
+            "geometry_chain_status": _normalize_execution_chain_status(sync_result.get("status", "absent")),
             "fusion_status": "absent",
             "audit_obligations_satisfied": True
         }
