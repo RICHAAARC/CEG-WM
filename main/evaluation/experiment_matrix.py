@@ -677,8 +677,12 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
 
     config_path = grid_item_cfg.get("config_path", "configs/paper_full_cuda.yaml")
     attack_protocol_path = grid_item_cfg.get("attack_protocol_path", config_loader.ATTACK_PROTOCOL_PATH)
-    seed_value = grid_item_cfg.get("cfg_snapshot", {}).get("seed")
-    model_id = grid_item_cfg.get("cfg_snapshot", {}).get("model_id")
+    cfg_snapshot_obj = grid_item_cfg.get("cfg_snapshot", {})
+    if not isinstance(cfg_snapshot_obj, dict):
+        raise TypeError("grid item cfg_snapshot must be dict")
+
+    seed_value = cfg_snapshot_obj.get("seed")
+    model_id = cfg_snapshot_obj.get("model_id")
     max_samples = grid_item_cfg.get("max_samples")
     ablation_flags = grid_item_cfg.get("ablation_flags", {})
 
@@ -694,6 +698,9 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
         raise TypeError("grid item max_samples must be int or None")
     if not isinstance(ablation_flags, dict):
         raise TypeError("grid item ablation_flags must be dict")
+
+    ablation_snapshot = cfg_snapshot_obj.get("ablation")
+    ablation_override_enabled = isinstance(ablation_snapshot, dict)
 
     allow_failed_semantics_collection = grid_item_cfg.get("allow_failed_semantics_collection", False)
     if not isinstance(allow_failed_semantics_collection, bool):
@@ -737,11 +744,12 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
             thresholds_path = run_root / "artifacts" / "thresholds" / "thresholds_artifact.json"
             stage_overrides.append(f"evaluate_thresholds_path={json.dumps(str(thresholds_path))}")
         
-        for key, value in sorted(ablation_flags.items()):
-            # key 形如 "enable_geometry"；统一使用 ablation_enable_* arg_name 格式，
-            # 避免 field_path 格式在 whitelist 中因 enable/disable 双条目引发歧义错误。
-            suffix = key[len("enable_"):] if key.startswith("enable_") else key
-            stage_overrides.append(f"ablation_enable_{suffix}={str(value).lower()}")
+        if ablation_override_enabled:
+            for key, value in sorted(ablation_flags.items()):
+                # key 形如 "enable_geometry"；统一使用 ablation_enable_* arg_name 格式，
+                # 避免 field_path 格式在 whitelist 中因 enable/disable 双条目引发歧义错误。
+                suffix = key[len("enable_"):] if key.startswith("enable_") else key
+                stage_overrides.append(f"ablation_enable_{suffix}={str(value).lower()}")
 
 
         _run_stage_command(

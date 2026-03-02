@@ -1448,7 +1448,6 @@ def ensure_required_fields(
         # operation 缺失时仅执行基础注入，避免破坏最小路径兼容性。
         return record
 
-    # 统计适用矩阵注入（阶段 2：扩展字段注入 + warn 模式校验）
     # 根据 operation 字段判断 record 类型，预填充统计相关字段
     record_kind = _resolve_record_kind(record)
     thresholds_spec = None
