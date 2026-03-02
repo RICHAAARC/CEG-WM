@@ -226,7 +226,10 @@ def run_calibrate(output_dir: str, config_path: str, overrides: list[str] | None
                 raise ValueError(format_fact_sources_mismatch(snapshot, bound_fact_sources))
 
             try:
-                impl_identity, impl_set, impl_set_capabilities_digest = runtime_resolver.build_runtime_impl_set_from_cfg(cfg)
+                impl_identity, impl_set, impl_set_capabilities_digest = runtime_resolver.build_runtime_impl_set_from_cfg(
+                    cfg,
+                    whitelist,
+                )
             except Exception as exc:
                 set_failure_status(run_meta, RunFailureReason.IMPL_RESOLVE_FAILED, exc)
                 raise

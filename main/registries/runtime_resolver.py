@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, Optional, List
 
 from main.core import digests
 from main.core.errors import MissingRequiredFieldError, GateEnforcementError
+from main.policy.runtime_whitelist import RuntimeWhitelist, assert_impl_allowed
 from main.registries import content_registry, geometry_registry, fusion_registry
 from main.registries import impl_identity as impl_identity_module
 from main.registries.capabilities import ImplCapabilities, assert_impl_set_compatible
@@ -325,7 +326,10 @@ def build_impl_set(resolved: ResolvedImplFactories, cfg: Dict[str, Any]) -> Buil
     )
 
 
-def build_runtime_impl_set_from_cfg(cfg: Dict[str, Any]) -> tuple[ImplIdentity, BuiltImplSet, str]:
+def build_runtime_impl_set_from_cfg(
+    cfg: Dict[str, Any],
+    whitelist: Optional[RuntimeWhitelist] = None,
+) -> tuple[ImplIdentity, BuiltImplSet, str]:
     """
     功能：从 cfg 构建运行期 impl_set。
 
@@ -333,6 +337,8 @@ def build_runtime_impl_set_from_cfg(cfg: Dict[str, Any]) -> tuple[ImplIdentity, 
 
     Args:
         cfg: Config mapping.
+        whitelist: Optional runtime whitelist. When provided, impl identity
+            must pass whitelist enforcement before impl construction.
 
     Returns:
         Tuple of (ImplIdentity, BuiltImplSet, impl_set_capabilities_digest).
@@ -346,6 +352,9 @@ def build_runtime_impl_set_from_cfg(cfg: Dict[str, Any]) -> tuple[ImplIdentity, 
         raise TypeError("cfg must be dict")
 
     identity = parse_impl_identity_from_cfg(cfg)
+    if whitelist is not None:
+        # 运行期白名单门禁：阻止未许可 impl_id 进入实例化流程。
+        assert_impl_allowed(whitelist, identity.as_dict())
     resolved = resolve_impl_factories(identity)
     impl_set = build_impl_set(resolved, cfg)
 

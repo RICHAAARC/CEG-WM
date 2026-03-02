@@ -227,7 +227,10 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
             run_meta["run_root_reuse_reason"] = allow_nonempty_run_root_reason
 
             try:
-                impl_identity, impl_set, impl_set_capabilities_digest = runtime_resolver.build_runtime_impl_set_from_cfg(cfg)
+                impl_identity, impl_set, impl_set_capabilities_digest = runtime_resolver.build_runtime_impl_set_from_cfg(
+                    cfg,
+                    whitelist,
+                )
             except Exception as exc:
                 set_failure_status(run_meta, RunFailureReason.IMPL_RESOLVE_FAILED, exc)
                 raise
@@ -298,6 +301,19 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
             # 序列化 fusion_result 为可 JSON 化的 dict，覆盖原值。
             record["fusion_result"] = fusion_result.to_dict()
 
+            metrics_node = record.get("metrics")
+            metrics_payload = cast(Dict[str, Any], metrics_node) if isinstance(metrics_node, dict) else {}
+            n_pos = metrics_payload.get("n_pos")
+            n_neg = metrics_payload.get("n_neg")
+            is_degenerate_evaluate = (
+                isinstance(n_pos, int) and n_pos <= 0
+            ) or (
+                isinstance(n_neg, int) and n_neg <= 0
+            )
+            if is_degenerate_evaluate:
+                # append-only: 仅在退化分支标记 evaluate_status。
+                record["evaluate_status"] = "degenerate"
+
             try:
                 schema.validate_record(record, interpretation=interpretation)
             except Exception as exc:
@@ -331,6 +347,10 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
             except Exception as exc:
                 set_failure_status(run_meta, RunFailureReason.GATE_FAILED, exc)
                 raise
+
+            if is_degenerate_evaluate:
+                # 退化评估必须在落盘后强制失败，防止静默通过下游门禁。
+                raise ValueError("Degenerate evaluation: n_pos or n_neg must be positive")
     except Exception as exc:
         if run_meta.get("status_ok", True):
             set_failure_status(run_meta, RunFailureReason.RUNTIME_ERROR, exc)

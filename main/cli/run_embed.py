@@ -257,7 +257,10 @@ def run_embed(
             run_meta["model_provenance_canon_sha256"] = pipeline_result.get("model_provenance_canon_sha256")
 
             try:
-                impl_identity, impl_set, impl_set_capabilities_digest = runtime_resolver.build_runtime_impl_set_from_cfg(cfg)
+                impl_identity, impl_set, impl_set_capabilities_digest = runtime_resolver.build_runtime_impl_set_from_cfg(
+                    cfg,
+                    whitelist,
+                )
             except Exception as exc:
                 set_failure_status(run_meta, RunFailureReason.IMPL_RESOLVE_FAILED, exc)
                 raise

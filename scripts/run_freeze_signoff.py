@@ -459,7 +459,8 @@ def validate_run_root_evidence(run_root: Path) -> Dict[str, Any]:
 
 def compute_signoff_decision(
     static_audits: List[Dict[str, Any]],
-    evidence_report: Dict[str, Any]
+    evidence_report: Dict[str, Any],
+    evaluate_record: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     功能：综合静态审计与 run_root 证据校验结果生成签署决策。
@@ -479,8 +480,11 @@ def compute_signoff_decision(
     ]
 
     evidence_failed = evidence_report.get("status") != "ok"
+    evaluate_degenerate = False
+    if isinstance(evaluate_record, dict):
+        evaluate_degenerate = evaluate_record.get("evaluate_status") == "degenerate"
 
-    if block_fails or evidence_failed:
+    if block_fails or evidence_failed or evaluate_degenerate:
         decision = "BLOCK_FREEZE"
     else:
         decision = "ALLOW_FREEZE"
@@ -505,6 +509,15 @@ def compute_signoff_decision(
             "impact": "freeze sign-off evidence is incomplete or inconsistent",
             "fix": "regenerate run outputs and ensure run_closure/manifest/audits are complete",
             "errors": evidence_report.get("errors", []),
+        })
+
+    if evaluate_degenerate:
+        reasons.append({
+            "source": "evaluate_record",
+            "audit_id": "evaluate.degenerate_status_block",
+            "rule": "evaluate_status must not be degenerate for freeze signoff",
+            "impact": "evaluation metrics are degenerate; freeze signoff must be blocked",
+            "fix": "re-run evaluate with valid positive and negative sample counts",
         })
 
     return {
@@ -815,8 +828,15 @@ def main() -> None:
     print(f"[Freeze Signoff] 快照冻结约束文件...")
     snapshot_result = snapshot_frozen_constraints(repo_root, run_root)
 
+    evaluate_record_path = run_root / "records" / "evaluate_record.json"
+    evaluate_record, _ = _load_json_file(evaluate_record_path)
+
     # 计算签署决策
-    decision = compute_signoff_decision(static_results, evidence_report)
+    decision = compute_signoff_decision(
+        static_results,
+        evidence_report,
+        evaluate_record=evaluate_record,
+    )
 
     # 抽取冻结锚点
     anchors = extract_anchors_from_run_closure(run_root)
