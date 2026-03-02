@@ -362,14 +362,15 @@ def test_run_stage_sequence_skips_ablation_overrides_when_cfg_snapshot_has_no_ab
     for stage_name in ["embed", "detect", "calibrate", "evaluate"]:
         overrides = captured_overrides.get(stage_name, [])
         assert all(not item.startswith("ablation_enable_") for item in overrides)
+        assert "enable_paper_faithfulness=false" in overrides
 
 
-def test_run_stage_sequence_disables_paper_faithfulness_when_ablation_present(monkeypatch) -> None:
+def test_run_stage_sequence_disables_paper_faithfulness_for_all_matrix_items(monkeypatch) -> None:
     """
-    功能：当存在 ablation 覆盖时，矩阵子实验需关闭 paper faithfulness 门禁。
+    功能：矩阵子实验统一关闭 paper faithfulness 门禁（含 baseline 与 ablation）。
 
     Verify _run_stage_sequence appends enable_paper_faithfulness=false
-    for all stages when ablation flags are provided.
+    for all stages regardless of ablation flags.
 
     Args:
         monkeypatch: pytest monkeypatch fixture.
