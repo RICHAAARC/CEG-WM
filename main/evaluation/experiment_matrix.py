@@ -701,6 +701,7 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
 
     ablation_snapshot = cfg_snapshot_obj.get("ablation")
     ablation_override_enabled = isinstance(ablation_snapshot, dict)
+    has_ablation_overrides = bool(ablation_flags)
 
     allow_failed_semantics_collection = grid_item_cfg.get("allow_failed_semantics_collection", False)
     if not isinstance(allow_failed_semantics_collection, bool):
@@ -723,6 +724,8 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
             stage_overrides.append(f"model_id={json.dumps(model_id)}")
         if isinstance(max_samples, int):
             stage_overrides.append(f"max_samples={max_samples}")
+        if has_ablation_overrides:
+            stage_overrides.append("enable_paper_faithfulness=false")
         
         # detect 阶段必须启用 content 检测（experiment_matrix 需要生成检测分数）
         # detect 阶段的阈值回退是架构必要性：校准工件在 calibrate 阶段才产出，

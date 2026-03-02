@@ -742,6 +742,11 @@ def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> P
     detect_cfg["geometry"] = geometry_cfg
     cfg_obj["detect"] = detect_cfg
 
+    experiment_matrix_cfg = cfg_obj.get("experiment_matrix") if isinstance(cfg_obj.get("experiment_matrix"), dict) else {}
+    # paper 复现实验主流程仅保留 faithful baseline；ablation 由独立流程执行。
+    experiment_matrix_cfg["ablation_variants"] = [{}]
+    cfg_obj["experiment_matrix"] = experiment_matrix_cfg
+
     _validate_paper_profile_impl_constraints(cfg_obj, frozen_impl_constraints)
 
     mask_cfg = cfg_obj.get("mask") if isinstance(cfg_obj.get("mask"), dict) else {}

@@ -323,6 +323,40 @@ def test_onefile_coverage_ready_replaces_unknown_only_metrics(tmp_path: Path) ->
     assert len(group_keys) > 0
 
 
+def test_prepare_profile_cfg_path_sets_paper_matrix_baseline_only(tmp_path: Path) -> None:
+    """
+    功能：验证 paper_full_cuda 运行期配置将 experiment_matrix 固定为 baseline-only。 
+
+    Verify _prepare_profile_cfg_path forces experiment_matrix.ablation_variants to [{}]
+    in paper_full_cuda runtime profile config.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "paper_run"
+    run_root.mkdir(parents=True, exist_ok=True)
+    cfg_path = repo_root / "configs" / "paper_full_cuda.yaml"
+
+    profile_cfg_path = module._prepare_profile_cfg_path(
+        "paper_full_cuda",
+        run_root,
+        cfg_path,
+    )
+
+    profile_cfg_obj = module.yaml.safe_load(profile_cfg_path.read_text(encoding="utf-8"))
+    assert isinstance(profile_cfg_obj, dict)
+
+    matrix_cfg = profile_cfg_obj.get("experiment_matrix")
+    assert isinstance(matrix_cfg, dict)
+    assert matrix_cfg.get("ablation_variants") == [{}]
+
+
 def test_onefile_pre_audits_order_runs_repro_after_coverage_and_matrix(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

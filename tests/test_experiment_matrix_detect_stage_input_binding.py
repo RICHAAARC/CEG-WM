@@ -364,6 +364,74 @@ def test_run_stage_sequence_skips_ablation_overrides_when_cfg_snapshot_has_no_ab
         assert all(not item.startswith("ablation_enable_") for item in overrides)
 
 
+def test_run_stage_sequence_disables_paper_faithfulness_when_ablation_present(monkeypatch) -> None:
+    """
+    功能：当存在 ablation 覆盖时，矩阵子实验需关闭 paper faithfulness 门禁。
+
+    Verify _run_stage_sequence appends enable_paper_faithfulness=false
+    for all stages when ablation flags are provided.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    captured_overrides = {}
+
+    def _fake_layout(*args, **kwargs):
+        return {
+            "run_root": args[0],
+            "artifacts_dir": args[0] / "artifacts",
+            "records_dir": args[0] / "records",
+        }
+
+    def _fake_run_stage_command(stage_name, run_root, config_path, stage_overrides, input_record_path=None):
+        captured_overrides[stage_name] = list(stage_overrides)
+        if stage_name == "detect":
+            detect_record_path = run_root / "records" / "detect_record.json"
+            detect_record_path.parent.mkdir(parents=True, exist_ok=True)
+            detect_record_path.write_text(
+                json.dumps({"content_evidence_payload": {"status": "ok", "score": 0.3}}),
+                encoding="utf-8",
+            )
+
+    def _fake_prepare_detect_record(run_root: Path, _grid_item_cfg: dict) -> Path:
+        path = run_root / "artifacts" / "evaluate_inputs" / "detect_record_with_attack.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}", encoding="utf-8")
+        return path
+
+    monkeypatch.setattr(experiment_matrix.path_policy, "ensure_output_layout", _fake_layout)
+    monkeypatch.setattr(experiment_matrix, "_run_stage_command", _fake_run_stage_command)
+    monkeypatch.setattr(experiment_matrix, "_prepare_detect_record_for_attack_grouping", _fake_prepare_detect_record)
+
+    grid_item_cfg = {
+        "config_path": "configs/paper_full_cuda.yaml",
+        "attack_protocol_path": "configs/attack_protocol.yaml",
+        "cfg_snapshot": {
+            "seed": 0,
+            "model_id": "stabilityai/stable-diffusion-3.5-medium",
+            "ablation": {
+                "enable_content": None,
+            },
+        },
+        "ablation_flags": {
+            "enable_content": False,
+        },
+        "max_samples": None,
+    }
+
+    experiment_matrix._run_stage_sequence(
+        grid_item_cfg,
+        Path("outputs/experiment_matrix/experiments/item_0001"),
+    )
+
+    for stage_name in ["embed", "detect", "calibrate", "evaluate"]:
+        overrides = captured_overrides.get(stage_name, [])
+        assert "enable_paper_faithfulness=false" in overrides
+
+
 def test_detect_gate_research_collection_mode_relaxes_and_records_metadata(tmp_path: Path, monkeypatch) -> None:
     """开启研究采集模式后，detect 硬门禁可受控放行并返回 gate_relaxed 元数据。"""
     called_stages = []

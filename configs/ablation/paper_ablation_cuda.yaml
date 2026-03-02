@@ -1,0 +1,179 @@
+# ==============================================================
+# Ablation 专用配置（paper_ablation_cuda）
+# - 本文件用于“消融实验”研究，不用于论文最终结论口径。
+# - 相比 paper_full_cuda.yaml，本文件开启 experiment_matrix.ablation_variants
+#   以系统评估模块裁剪（content/geometry/anchor/LF/HF）的影响。
+# - 若目标是 paper-faithful 最终结论，请使用 configs/paper_full_cuda.yaml。
+# ==============================================================
+
+policy_path: "content_with_geometry_gate"
+
+target_fpr: 0.01
+
+allow_nonempty_run_root: false
+allow_nonempty_run_root_reason: null
+
+device: "cuda"
+
+model_id: "stabilityai/stable-diffusion-3.5-medium"
+hf_revision: "main"
+pipeline_impl_id: "sd3_diffusers_real_v1"
+pipeline_build_enabled: true
+
+inference_enabled: true
+inference_prompt: "a serene landscape with mountains and a lake"
+inference_prompt_file: "prompts/paper_small.txt"
+inference_num_steps: 28
+inference_guidance_scale: 7.0
+inference_height: 512
+inference_width: 512
+
+seed: null
+allow_threshold_fallback_for_tests: false
+
+trajectory_tap:
+  enabled: true
+  tensor_types: ["latent"]
+  module_paths: ["transformer"]
+  stats_precision_digits: 6
+
+paper_faithfulness:
+  enabled: true
+  alignment_check: true
+  check_pipeline_fingerprint: true
+  check_trajectory_digest: true
+
+watermark:
+  subspace:
+    enabled: true
+    timestep_start: 0
+    timestep_end: 27
+    trajectory_step_stride: 1
+    sample_count: 28
+    feature_dim: 128
+  lf:
+    enabled: true
+    variance: 1.5
+    ecc: "sparse_ldpc"
+    ecc_sparsity: 3
+    message_length: 64
+    coding_mode: "latent_space_sign_flipping"
+    decoder: "belief_propagation"
+  hf:
+    enabled: true
+    tail_truncation_ratio: 0.1
+    tail_truncation_mode: "top_k_per_latent"
+    selection: "top_k_magnitude_based"
+    tau: 2.0
+
+detect:
+  content:
+    enabled: true
+  geometry:
+    enabled: true
+    enable_attention_anchor: true
+    attention_capture_max_layers: 8
+    attention_capture_layer_whitelist:
+      - "transformer_blocks.0.attn"
+      - "transformer_blocks.1.attn"
+      - "transformer_blocks.2.attn"
+      - "transformer_blocks.3.attn"
+      - "transformer_blocks.4.attn"
+      - "transformer_blocks.5.attn"
+      - "transformer_blocks.6.attn"
+      - "transformer_blocks.7.attn"
+    sync_primary_anchor_secondary: true
+
+enable_mask: true
+mask:
+  impl_id: "semantic_saliency_v2"
+  saliency_source: "model_v2"
+  semantic_model_path: "../models/inspyrenet/ckpt_base.pth"
+
+embed:
+  test_mode_identity: false
+
+ablation:
+  # ===================== 消融开关总面板 =====================
+  # 在这里定义“可被消融”的模块级开关字段。
+  # 约定：
+  # - null：表示该开关不在配置层强制，交由 experiment_matrix.ablation_variants 覆写。
+  # - true/false：表示固定开启/关闭（会作用于全部实验项）。
+  #
+  # 使用建议：
+  # 1) 先在本段声明开关字段；
+  # 2) 再在 experiment_matrix.ablation_variants 中组合这些字段做网格实验。
+  # ========================================================
+
+  # 内容链开关：控制 content evidence 计算与内容判别路径。
+  enable_content: null
+
+  # 几何链开关：控制 geometry evidence 与同步/门控相关路径。
+  enable_geometry: null
+
+  # 辅助锚点开关：控制 attention anchor 等辅证路径。
+  enable_anchor: null
+
+  # LF 低频通道开关：控制 LF 编码/检测分支。
+  enable_lf: null
+
+  # HF 高频通道开关：控制 HF 编码/检测分支。
+  enable_hf: null
+
+  # 仅 LF 模式：true 时应与 hf_only 互斥。
+  lf_only: false
+
+  # 仅 HF 模式：true 时应与 lf_only 互斥。
+  hf_only: false
+
+calibration:
+  detect_records_glob: null
+  minimal_ground_truth_pair_count: 30
+  minimal_ground_truth_prompts_file: null
+  exclude_formal_sidecar_disabled_marker: true
+
+evaluate:
+  detect_records_glob: null
+  thresholds_path: null
+  minimal_ground_truth_pair_count: 30
+  minimal_ground_truth_prompts_file: null
+
+impl:
+  content_extractor_id: "unified_content_extractor_v1"
+  geometry_extractor_id: "attention_anchor_map_relation_v1"
+  fusion_rule_id: "fusion_neyman_pearson_v1"
+  subspace_planner_id: "subspace_planner_v1"
+  sync_module_id: "geometry_latent_sync_sd3_v2"
+  hf_embedder_id: "hf_embedder_t2smark_v1"
+  lf_coder_id: "lf_coder_prc_v1"
+  use_latent_per_step: true
+
+detect_runtime:
+  image_domain_sidecar_enabled: true
+
+experiment_matrix:
+  config_path: "configs/ablation/paper_ablation_cuda.yaml"
+  allow_failed_semantics_collection: true
+
+  # ===================== 消融组合定义区 =====================
+  # 每个字典表示“一组消融实验配置”，会通过 CLI override 覆写到 ablation.* 字段。
+  # 扩展方式：
+  # - 单模块消融：新增 { "enable_xxx": false }
+  # - 联合消融：新增 { "enable_xxx": false, "enable_yyy": false }
+  # - 恢复基线：使用空字典 {}
+  # ========================================================
+  ablation_variants:
+    # 仅内容链：禁用 geometry（评估几何链贡献）。
+    - { "enable_geometry": false }
+
+    # 仅几何链：禁用 content（评估内容链贡献）。
+    - { "enable_content": false }
+
+    # 关闭辅锚点：评估 anchor 辅证贡献。
+    - { "enable_anchor": false }
+
+    # 仅 LF：禁用 HF，评估 LF 独立贡献。
+    - { "enable_hf": false }
+
+    # 仅 HF：禁用 LF，评估 HF 独立贡献。
+    - { "enable_lf": false }
