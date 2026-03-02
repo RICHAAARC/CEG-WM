@@ -87,6 +87,15 @@ mask:
 embed:
   test_mode_identity: false
 
+ablation:
+  enable_content: null
+  enable_geometry: null
+  enable_anchor: null
+  enable_lf: null
+  enable_hf: null
+  lf_only: false
+  hf_only: false
+
 calibration:
   detect_records_glob: null  # detect 记录 glob 路径（由 experiment_matrix 注入）
   minimal_ground_truth_pair_count: 30  # onefile 最小 GT 闭环生成对数（positive/negative）
