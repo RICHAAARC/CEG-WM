@@ -1163,6 +1163,57 @@ def test_prepare_detect_records_clone_mode_recovers_failed_source_for_negative_g
     assert content_payload.get("calibration_sample_origin") == "synthetic_negative_bundle_from_failed_source_v1"
 
 
+def test_prepare_detect_records_clone_mode_normalizes_positive_from_recovered_failed_source(tmp_path: Path) -> None:
+    """
+    功能：验证单分支 clone 回退场景会将 recovered failed 源正样本标准化为 status=ok。 
+
+    Verify clone-based GT generation normalizes positive sample to status=ok
+    when source detect record is failed but already has recovered score metadata.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root_clone_positive_recovery"
+    source_detect_path = run_root / "records" / "detect_record_for_scoring.json"
+    source_detect_path.parent.mkdir(parents=True, exist_ok=True)
+    source_detect_path.write_text(
+        json.dumps(
+            {
+                "content_evidence_payload": {
+                    "status": "failed",
+                    "score": -0.0042,
+                    "content_failure_reason": "mask_extraction_no_input",
+                    "calibration_score_recovery_reason": "mask_extraction_no_input_with_hf_trace",
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    module._prepare_detect_records_with_minimal_ground_truth(
+        run_root=run_root,
+        source_detect_path=source_detect_path,
+        stage_name="evaluate",
+    )
+
+    positive_path = run_root / "artifacts" / "workflow_cfg" / "detect_records_evaluate_gt_positive.json"
+    assert positive_path.exists()
+    positive_payload = json.loads(positive_path.read_text(encoding="utf-8"))
+    positive_content = positive_payload.get("content_evidence_payload", {})
+    assert positive_content.get("status") == "ok"
+    assert positive_content.get("content_failure_reason") is None
+    assert positive_content.get("score") == -0.0042
+    assert positive_content.get("calibration_sample_origin") == "formal_positive_recovered_from_failed_source_v1"
+
+
 def test_onefile_prepare_stage_cfg_path_uses_prompt_list_as_gt_driver(tmp_path: Path) -> None:
     """
     功能：验证可通过 prompts 文件驱动 GT records 生成与 prompt 注入。

@@ -1076,6 +1076,24 @@ def _prepare_detect_records_with_minimal_ground_truth(
     if not isinstance(source_payload, dict):
         raise ValueError("source detect record must be JSON object")
 
+    def _normalize_positive_payload_if_recovered_failed(payload: Dict[str, Any]) -> None:
+        content_node = payload.get("content_evidence_payload")
+        if not isinstance(content_node, dict):
+            return
+        status_value = content_node.get("status")
+        score_value = content_node.get("score")
+        recovered_reason_value = content_node.get("calibration_score_recovery_reason")
+        score_is_numeric = isinstance(score_value, (int, float)) and not isinstance(score_value, bool)
+        if (
+            status_value != "ok"
+            and isinstance(recovered_reason_value, str)
+            and bool(recovered_reason_value)
+            and score_is_numeric
+        ):
+            content_node["status"] = "ok"
+            content_node["content_failure_reason"] = None
+            content_node["calibration_sample_origin"] = "formal_positive_recovered_from_failed_source_v1"
+
     # 如果有真实的负样本 detect 记录，直接聚合而不是 clone
     if branch_neg_detect_record is not None and branch_neg_detect_record.exists() and branch_neg_detect_record.is_file():
         try:
@@ -1109,6 +1127,7 @@ def _prepare_detect_records_with_minimal_ground_truth(
                 pos_payload["label"] = True
                 pos_payload["ground_truth"] = True
                 pos_payload["is_watermarked"] = True
+                _normalize_positive_payload_if_recovered_failed(pos_payload)
 
                 neg_payload["label"] = False
                 neg_payload["ground_truth"] = False
@@ -1174,6 +1193,7 @@ def _prepare_detect_records_with_minimal_ground_truth(
         positive_payload["label"] = True
         positive_payload["ground_truth"] = True
         positive_payload["is_watermarked"] = True
+        _normalize_positive_payload_if_recovered_failed(positive_payload)
 
         negative_payload = json.loads(json.dumps(source_payload, ensure_ascii=False))
         negative_payload["label"] = False
