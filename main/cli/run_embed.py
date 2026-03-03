@@ -390,6 +390,8 @@ def run_embed(
             trajectory_evidence = inference_result.get("trajectory_evidence")
             injection_evidence = inference_result.get("injection_evidence")
             final_latents = inference_result.get("final_latents") if enable_latent_sync else None
+            # SD 推理输出图像（latent-per-step 模式下的水印图像）
+            sd_output_image = inference_result.get("output_image")
             if pipeline_obj is not None:
                 cfg["__embed_pipeline_obj__"] = pipeline_obj
             if final_latents is not None:
@@ -486,6 +488,45 @@ def run_embed(
                 raise TypeError("orchestrator output must be dict")
             record["cfg_digest"] = cfg_digest
             record["policy_path"] = cfg["policy_path"]
+
+            # 若 watermarked_path 仍为占位值（latent-per-step 模式下 orchestrator 不写磁盘图像），
+            # 则将 sd_output_image 保存到 artifacts/watermarked/watermarked.png，并回填 record。
+            if (
+                record.get("watermarked_path") in ("<absent>", None)
+                and sd_output_image is not None
+                and hasattr(sd_output_image, "save")
+            ):
+                try:
+                    _wm_output_rel = "watermarked/watermarked.png"
+                    _artifacts_dir_str = cfg.get("__artifacts_dir__")
+                    _run_root_str = cfg.get("__run_root_dir__")
+                    if isinstance(_artifacts_dir_str, str) and isinstance(_run_root_str, str):
+                        from pathlib import Path as _Path
+                        _artifacts_dir = _Path(_artifacts_dir_str)
+                        _run_root = _Path(_run_root_str)
+                        _wm_out_path = (_artifacts_dir / _wm_output_rel).resolve()
+                        _wm_out_path.parent.mkdir(parents=True, exist_ok=True)
+                        from main.policy import path_policy as _pp
+                        _pp.validate_output_target(_wm_out_path, "artifact", _run_root)
+                        sd_output_image.save(str(_wm_out_path), format="PNG")
+                        _wm_sha256 = digests.file_sha256(_wm_out_path)
+                        try:
+                            _wm_rel = str(_wm_out_path.relative_to(_run_root))
+                        except ValueError:
+                            _wm_rel = str(_wm_out_path)
+                        record["watermarked_path"] = str(_wm_out_path)
+                        record["artifact_sha256"] = _wm_sha256
+                        record["artifact_rel_path"] = _wm_rel
+                        record["watermarked_artifact_sha256"] = _wm_sha256
+                        record["watermarked_artifact_rel_path"] = _wm_rel
+                        record["watermarked_path_source"] = "sd_output_image"
+                        print(f"[Embed] SD 输出图像已保存：{_wm_out_path} (sha256={_wm_sha256[:16]}...)")
+                    else:
+                        print("[Embed] [WARN] __artifacts_dir__ 或 __run_root_dir__ 未设置，跳过 SD 输出图像保存")
+                except Exception as _wm_save_exc:
+                    # 保存失败时写入审计字段，不中断流程。
+                    record["watermarked_path_save_error"] = f"{type(_wm_save_exc).__name__}: {_wm_save_exc}"
+                    print(f"[Embed] [WARN] SD 输出图像保存失败：{_wm_save_exc}")
             if isinstance(pipeline_result, dict):
                 record["pipeline_impl_id"] = pipeline_result.get("pipeline_impl_id")
                 record["pipeline_provenance"] = pipeline_result.get("pipeline_provenance")

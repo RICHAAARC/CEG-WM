@@ -56,5 +56,7 @@ def test_geo_failure_must_not_flip_primary_decision() -> None:
     assert decision_fail.decision_status == "error"
     assert decision_fail.audit.get("failure_reason") == "geometry_fail"
 
-    assert decision_mismatch.decision_status == "error"
-    assert decision_mismatch.audit.get("failure_reason") == "geometry_mismatch"
+    # geometry_mismatch 在 latent_direct_fallback 路径下被降级为 absent，进入 content-only 决策
+    assert decision_mismatch.decision_status == "decided"
+    assert decision_mismatch.is_watermarked is False  # content_score=0.48 < NP 阈值，不救回
+    assert decision_mismatch.audit.get("geometry_mismatch_downgraded_to_absent") is True

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
-import importlib
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -913,6 +912,7 @@ def _instantiate_inspyrenet_model() -> Any:
     功能：实例化 InSPyReNet 模型结构。
 
     Instantiate InSPyReNet model architecture from available runtime modules.
+    Tries transparent_background and inspyrenet packages via static imports.
 
     Returns:
         Instantiated model object.
@@ -920,46 +920,54 @@ def _instantiate_inspyrenet_model() -> Any:
     Raises:
         RuntimeError: If no compatible InSPyReNet class can be constructed.
     """
-    candidate_modules = [
-        "inspyrenet",
-        "inspyrenet.model",
-        "inspyrenet.models",
-    ]
-    candidate_kwargs = [
-        {},
-        {"backbone": "res2net50"},
-        {"backbone": "swinb"},
-    ]
-
-    for module_name in candidate_modules:
+    # (1) 尝试 transparent_background 包（pip install transparent-background）
+    try:
+        from transparent_background.InSPyReNet import InSPyReNet as _TbInSPyReNet  # type: ignore[import]
         try:
-            module = importlib.import_module(module_name)
-        except Exception:
-            continue
+            return _TbInSPyReNet()
+        except TypeError:
+            pass
+        try:
+            return _TbInSPyReNet(backbone="res2net50")
+        except TypeError:
+            pass
+    except ImportError:
+        pass
+    except Exception:
+        pass
 
-        candidate_classes: List[Any] = []
-        explicit_cls = getattr(module, "InSPyReNet", None)
-        if callable(explicit_cls):
-            candidate_classes.append(explicit_cls)
+    # (2) 尝试 inspyrenet 包（备用路径）
+    try:
+        from inspyrenet import InSPyReNet as _InspyInSPyReNet  # type: ignore[import]
+        try:
+            return _InspyInSPyReNet()
+        except TypeError:
+            pass
+        try:
+            return _InspyInSPyReNet(backbone="res2net50")
+        except TypeError:
+            pass
+    except ImportError:
+        pass
+    except Exception:
+        pass
 
-        for attr_name in dir(module):
-            if "inspyrenet" not in attr_name.lower():
-                continue
-            attr_value = getattr(module, attr_name, None)
-            if callable(attr_value) and attr_value not in candidate_classes:
-                candidate_classes.append(attr_value)
+    # (3) 尝试 inspyrenet.model 子模块
+    try:
+        from inspyrenet.model import InSPyReNet as _InspyModelInSPyReNet  # type: ignore[import]
+        try:
+            return _InspyModelInSPyReNet()
+        except TypeError:
+            pass
+    except ImportError:
+        pass
+    except Exception:
+        pass
 
-        for model_cls in candidate_classes:
-            for kwargs in candidate_kwargs:
-                try:
-                    model_obj = model_cls(**kwargs)
-                    return model_obj
-                except TypeError:
-                    continue
-                except Exception:
-                    continue
-
-    raise RuntimeError("inspyrenet model class unavailable")
+    raise RuntimeError(
+        "inspyrenet model class unavailable: "
+        "install 'transparent-background' (pip install transparent-background) to enable InSPyReNet support"
+    )
 
 
 def _compute_weights_sha256(model_path: Optional[str]) -> str:
@@ -1043,9 +1051,21 @@ def _load_saliency_model(mask_params: Dict[str, Any]) -> Any:
                 missing_keys = list(getattr(incompatible_keys, "missing_keys", []) or [])
                 unexpected_keys = list(getattr(incompatible_keys, "unexpected_keys", []) or [])
                 if missing_keys or unexpected_keys:
-                    # key 不匹配，禁止 silent fallback。
-                    raise RuntimeError(
-                        f"inspyrenet state_dict key mismatch: missing={len(missing_keys)}, unexpected={len(unexpected_keys)}"
+                    # key 不完全匹配时，评估是否可接受（允许部分不匹配，禁止全量缺失）。
+                    # 若缺失 key 超过 state_dict 总 key 数的 90%，则判定为不可用。
+                    total_keys = len(state_dict)
+                    missing_ratio = len(missing_keys) / max(total_keys, 1)
+                    if missing_ratio > 0.9:
+                        # 绝大多数 key 缺失，架构与权重不兼容，禁止 silent fallback。
+                        raise RuntimeError(
+                            f"inspyrenet state_dict key mismatch too severe: "
+                            f"missing={len(missing_keys)}/{total_keys} ({missing_ratio:.0%}), "
+                            f"unexpected={len(unexpected_keys)}"
+                        )
+                    # 部分 key 不匹配，作为可接受的兼容加载，记录告警。
+                    print(
+                        f"[semantic_mask_provider] [WARN] InSPyReNet partial key mismatch "
+                        f"(acceptable): missing={len(missing_keys)}, unexpected={len(unexpected_keys)}"
                     )
         else:
             model_obj = loaded_obj

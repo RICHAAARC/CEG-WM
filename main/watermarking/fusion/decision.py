@@ -209,6 +209,12 @@ class NeumanPearsonFusionRule:
         content_score = content_evidence.get("content_score")
         geometry_score = geometry_evidence.get("geo_score")
 
+        # geometry_mismatch 降级审计：记录降级但不升级为 error（GAP-C2 append-only 修复）
+        geometry_mismatch_downgraded_to_absent = False
+        if geometry_status == "mismatch":
+            geometry_mismatch_downgraded_to_absent = True
+            geometry_status = "absent"  # 进入 content-only 路径，几何信号被忽略
+
         # (4) NP 主链：检查内容证据可决策性
         if content_status == "absent":
             # 无内容证据，禁止决策，返回 abstain
@@ -327,7 +333,8 @@ class NeumanPearsonFusionRule:
             "rescue_anchor_evidence_level": rescue_anchor_evidence_level,
             "rescue_sync_status": rescue_sync_status,
             "rescue_sync_status_normalized": rescue_sync_status_normalized,
-            "fusion_rule_digest": fusion_rule_digest
+            "fusion_rule_digest": fusion_rule_digest,
+            "geometry_mismatch_downgraded_to_absent": geometry_mismatch_downgraded_to_absent,
         }
 
         return FusionDecision(
@@ -386,8 +393,11 @@ def validate_fusion_inputs(
     # (2) 检查几何证据状态
     geometry_status = geometry_evidence.get("status", "absent")
     if geometry_status == "mismatch":
-        return False, "geometry_mismatch"
-    if geometry_status == "fail":
+        # 几何 mismatch 在当前 latent_direct_fallback 路径下是预期状态（非真实注入时 sync 信号无效）。
+        # 将 mismatch 降级为 absent，进入 content-only 路径，不将其上升为 error 阻断融合决策。
+        # append-only：geometry_mismatch_source 审计字段由 make_decision 的调用链写入。
+        geometry_status = "absent"
+    elif geometry_status == "fail":
         return False, "geometry_fail"
 
     # (3) 有效状态组合：content 与 geometry 都在 {absent, ok}

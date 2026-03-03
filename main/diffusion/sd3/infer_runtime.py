@@ -100,6 +100,7 @@ def run_sd3_inference(
     runtime_self_attention_maps: Any = None
     runtime_attention_source = "<absent>"
     attention_capture_hook = None
+    output_image = None  # SD 推理输出图像（PIL Image），供调用方保存到磁盘
 
     # (1) 检查 pipeline_obj 是否可用
     if pipeline_obj is None:
@@ -401,10 +402,12 @@ def run_sd3_inference(
                 tap_status
             )
 
-        # 提取输出摘要
+        # 提取输出摘要，并保存输出图像对象供调用方持久化。
+        output_image = None
         if hasattr(output, "images") and output.images is not None and len(output.images) > 0:
             inference_runtime_meta["output_image_count"] = len(output.images)
             first_image = output.images[0]
+            output_image = first_image
             if hasattr(first_image, "size"):
                 inference_runtime_meta["output_image_size"] = list(first_image.size)
             if hasattr(first_image, "mode"):
@@ -451,6 +454,7 @@ def run_sd3_inference(
         ),
         "final_latents": detect_latents_storage.get("final_latents") if detect_latents_storage is not None else None,
         "runtime_self_attention_maps": runtime_self_attention_maps,
+        "output_image": output_image,  # SD 推理输出图像（PIL Image 或 None）
     }
 
 
