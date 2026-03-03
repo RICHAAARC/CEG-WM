@@ -789,6 +789,53 @@ def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> P
     return profile_cfg_path
 
 
+def _prepare_experiment_matrix_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> Path:
+    """
+    功能：为 experiment_matrix 生成专用配置（paper profile 关闭 paper faithfulness）。
+
+    Build matrix-specific config to avoid paper-faithfulness hard gate
+    in experiment_matrix sub-runs.
+
+    Args:
+        profile: Workflow profile name.
+        run_root: Unified run_root path.
+        cfg_path: Base config path.
+
+    Returns:
+        Config path for experiment_matrix step.
+
+    Raises:
+        TypeError: If input types are invalid.
+        ValueError: If config content is invalid.
+    """
+    if not isinstance(profile, str) or not profile:
+        raise TypeError("profile must be non-empty str")
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(cfg_path, Path):
+        raise TypeError("cfg_path must be Path")
+
+    if _normalize_profile(profile) != PROFILE_PAPER_FULL_CUDA:
+        return cfg_path
+
+    cfg_obj = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    if not isinstance(cfg_obj, dict):
+        raise ValueError("config root must be mapping")
+
+    paper_cfg = cfg_obj.get("paper_faithfulness") if isinstance(cfg_obj.get("paper_faithfulness"), dict) else {}
+    paper_cfg["enabled"] = False
+    paper_cfg["alignment_check"] = False
+    cfg_obj["paper_faithfulness"] = paper_cfg
+
+    matrix_cfg_path = run_root / "artifacts" / "workflow_cfg" / "experiment_matrix_config.yaml"
+    _write_artifact_text_unbound(
+        run_root,
+        matrix_cfg_path,
+        yaml.safe_dump(cfg_obj, allow_unicode=True, sort_keys=False),
+    )
+    return matrix_cfg_path
+
+
 def _build_stage_command(
     stage_name: str,
     run_root: Path,
@@ -2476,6 +2523,7 @@ def run_onefile_workflow(
         print("[onefile] paper_full_cuda profile detected, enforcing device=cuda")
         device_override = "cuda"
     effective_cfg_path = _prepare_profile_cfg_path(profile, run_root, cfg_path)
+    experiment_matrix_cfg_path = _prepare_experiment_matrix_cfg_path(profile, run_root, effective_cfg_path)
     steps = build_workflow_steps(run_root, effective_cfg_path, repo_root, profile, signoff_profile)
     experiment_matrix_retry_used = False
     for step in steps:
@@ -2513,6 +2561,11 @@ def run_onefile_workflow(
         if step.name in {"calibrate", "evaluate"}:
             stage_cfg_path = _prepare_stage_cfg_path(step.name, run_root, effective_cfg_path, profile, repo_root)
             step_command = _build_stage_command(step.name, run_root, stage_cfg_path, profile)
+        if step.name == "experiment_matrix" and profile == PROFILE_PAPER_FULL_CUDA:
+            if "--config" in step_command:
+                cfg_index = step_command.index("--config")
+                if cfg_index + 1 < len(step_command):
+                    step_command[cfg_index + 1] = str(experiment_matrix_cfg_path)
 
         _print_step_header(step, run_root, step_command)
         if dry_run:

@@ -16,6 +16,7 @@ from typing import Any, Dict
 import pytest
 
 from scripts.audits.audit_write_bypass_scan import run_audit
+from scripts import run_experiment_matrix as run_experiment_matrix_module
 from scripts.run_experiment_matrix import main as run_experiment_matrix_main
 
 
@@ -177,3 +178,58 @@ def test_write_bypass_scan_blocks_scripts_open_write(tmp_path: Path) -> None:
         if item.get("classification") == "FAIL"
     ]
     assert "run_experiment_matrix.py" in fail_paths
+
+
+def test_run_experiment_matrix_batch_disables_paper_faithfulness_for_matrix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：run_experiment_matrix_batch 应在矩阵子运行中关闭 paper faithfulness。 
+
+    Verify run_experiment_matrix_batch normalizes paper_faithfulness.enabled to False
+    before building experiment grid.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    captured_cfg: Dict[str, Any] = {}
+
+    def _fake_load_yaml_with_provenance(_path: Path):
+        return ({"paper_faithfulness": {"enabled": True, "alignment_check": True}}, {})
+
+    def _fake_normalize_ablation_flags(_cfg: Dict[str, Any]) -> None:
+        return None
+
+    def _fake_build_grid(cfg: Dict[str, Any]):
+        captured_cfg.update(cfg)
+        return [{"dummy": True}]
+
+    def _fake_run_grid(_grid, strict: bool = False):
+        return {
+            "total": 1,
+            "executed": 1,
+            "succeeded": 1,
+            "failed": 0,
+            "batch_root": "outputs/experiment_matrix",
+        }
+
+    monkeypatch.setattr(run_experiment_matrix_module.config_loader, "load_yaml_with_provenance", _fake_load_yaml_with_provenance)
+    monkeypatch.setattr(run_experiment_matrix_module.config_loader, "normalize_ablation_flags", _fake_normalize_ablation_flags)
+    monkeypatch.setattr(run_experiment_matrix_module.experiment_matrix, "build_experiment_grid", _fake_build_grid)
+    monkeypatch.setattr(run_experiment_matrix_module.experiment_matrix, "run_experiment_grid", _fake_run_grid)
+
+    summary = run_experiment_matrix_module.run_experiment_matrix_batch(
+        config_path="configs/paper_full_cuda.yaml",
+        strict=False,
+        validate_protocol=False,
+        batch_root=None,
+    )
+
+    assert summary.get("failed") == 0
+    paper_cfg = captured_cfg.get("paper_faithfulness")
+    assert isinstance(paper_cfg, dict)
+    assert paper_cfg.get("enabled") is False
+    assert paper_cfg.get("alignment_check") is False

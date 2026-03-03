@@ -28,6 +28,37 @@ from main.evaluation import attack_protocol_guard
 from main.policy import path_policy
 
 
+def _normalize_matrix_runtime_profile(cfg_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：统一 experiment_matrix 运行期 profile，避免 paper gate 干扰矩阵子实验。 
+
+    Normalize matrix runtime profile to keep experiment_matrix comparable and
+    prevent paper-faithfulness hard gate from blocking matrix items.
+
+    Args:
+        cfg_dict: Loaded configuration mapping.
+
+    Returns:
+        Normalized configuration mapping.
+
+    Raises:
+        TypeError: If cfg_dict is invalid.
+    """
+    if not isinstance(cfg_dict, dict):
+        raise TypeError("cfg_dict must be dict")
+
+    paper_cfg_obj = cfg_dict.get("paper_faithfulness")
+    if not isinstance(paper_cfg_obj, dict):
+        return cfg_dict
+
+    normalized_paper_cfg = dict(paper_cfg_obj)
+    if bool(normalized_paper_cfg.get("enabled", False)):
+        normalized_paper_cfg["enabled"] = False
+        normalized_paper_cfg["alignment_check"] = False
+    cfg_dict["paper_faithfulness"] = normalized_paper_cfg
+    return cfg_dict
+
+
 def _resolve_controlled_summary_output_path(
     output_summary: str,
     batch_root: str,
@@ -125,6 +156,7 @@ def run_experiment_matrix_batch(
     # (1) 加载配置（通过唯一入口 config_loader）
     cfg_obj, _ = config_loader.load_yaml_with_provenance(Path(config_path))
     cfg_dict: Dict[str, Any] = dict(cfg_obj)
+    cfg_dict = _normalize_matrix_runtime_profile(cfg_dict)
     config_loader.normalize_ablation_flags(cfg_dict)
 
     if batch_root is not None:

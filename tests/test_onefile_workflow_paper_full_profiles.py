@@ -357,6 +357,120 @@ def test_prepare_profile_cfg_path_sets_paper_matrix_baseline_only(tmp_path: Path
     assert matrix_cfg.get("ablation_variants") == [{}]
 
 
+def test_prepare_experiment_matrix_cfg_path_disables_paper_faithfulness(tmp_path: Path) -> None:
+    """
+    功能：验证 experiment_matrix 专用配置关闭 paper faithfulness。
+
+    Verify matrix-specific config disables paper_faithfulness for paper_full_cuda.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "paper_run"
+    run_root.mkdir(parents=True, exist_ok=True)
+    cfg_path = repo_root / "configs" / "paper_full_cuda.yaml"
+
+    profile_cfg_path = module._prepare_profile_cfg_path("paper_full_cuda", run_root, cfg_path)
+    matrix_cfg_path = module._prepare_experiment_matrix_cfg_path("paper_full_cuda", run_root, profile_cfg_path)
+    matrix_cfg_obj = module.yaml.safe_load(matrix_cfg_path.read_text(encoding="utf-8"))
+
+    assert isinstance(matrix_cfg_obj, dict)
+    paper_cfg = matrix_cfg_obj.get("paper_faithfulness")
+    assert isinstance(paper_cfg, dict)
+    assert paper_cfg.get("enabled") is False
+    assert paper_cfg.get("alignment_check") is False
+
+
+def test_run_onefile_workflow_uses_matrix_specific_cfg_for_experiment_matrix(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：验证 onefile 在 experiment_matrix 步骤使用 matrix 专用配置。
+
+    Verify run_onefile_workflow replaces experiment_matrix --config with
+    matrix-specific config path under paper_full_cuda profile.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "paper_run"
+    run_root.mkdir(parents=True, exist_ok=True)
+    cfg_path = repo_root / "configs" / "paper_full_cuda.yaml"
+
+    effective_cfg_path = run_root / "artifacts" / "workflow_cfg" / "profile_paper_full_cuda.yaml"
+    matrix_cfg_path = run_root / "artifacts" / "workflow_cfg" / "experiment_matrix_config.yaml"
+    effective_cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    effective_cfg_path.write_text("paper_faithfulness:\n  enabled: true\n", encoding="utf-8")
+    matrix_cfg_path.write_text("paper_faithfulness:\n  enabled: false\n", encoding="utf-8")
+
+    captured_commands: list[list[str]] = []
+
+    def _fake_prepare_profile_cfg(_profile, _run_root, _cfg_path):
+        return effective_cfg_path
+
+    def _fake_prepare_matrix_cfg(_profile, _run_root, _cfg_path):
+        return matrix_cfg_path
+
+    def _fake_build_steps(_run_root, _cfg_path, _repo_root, _profile, _signoff_profile):
+        return [
+            module.WorkflowStep(
+                name="experiment_matrix",
+                command=[
+                    "python",
+                    str(repo_root / "scripts" / "run_experiment_matrix.py"),
+                    "--config",
+                    str(effective_cfg_path),
+                    "--batch-root",
+                    str(run_root / "outputs" / "experiment_matrix"),
+                ],
+                artifact_paths=[run_root / "outputs" / "experiment_matrix" / "artifacts" / "grid_summary.json"],
+            )
+        ]
+
+    def _fake_run_step(step_command, _repo_root):
+        captured_commands.append(list(step_command))
+        return 0
+
+    def _fake_load_summary(_summary_path: Path) -> dict:
+        return {"total": 1, "failed": 0, "succeeded": 1}
+
+    monkeypatch.setattr(module, "_prepare_profile_cfg_path", _fake_prepare_profile_cfg)
+    monkeypatch.setattr(module, "_prepare_experiment_matrix_cfg_path", _fake_prepare_matrix_cfg)
+    monkeypatch.setattr(module, "build_workflow_steps", _fake_build_steps)
+    monkeypatch.setattr(module, "_run_subprocess_for_step", _fake_run_step)
+    monkeypatch.setattr(module, "_load_experiment_matrix_summary", _fake_load_summary)
+
+    exit_code = module.run_onefile_workflow(
+        repo_root=repo_root,
+        cfg_path=cfg_path,
+        run_root=run_root,
+        profile="paper_full_cuda",
+        signoff_profile="paper",
+        dry_run=False,
+    )
+
+    assert exit_code == 0
+    assert captured_commands, "experiment_matrix step command must be executed"
+    command = captured_commands[0]
+    assert "--config" in command
+    config_idx = command.index("--config")
+    assert command[config_idx + 1] == str(matrix_cfg_path)
+
+
 def test_onefile_pre_audits_order_runs_repro_after_coverage_and_matrix(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
