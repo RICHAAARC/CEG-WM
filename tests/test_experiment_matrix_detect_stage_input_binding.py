@@ -296,6 +296,75 @@ def test_detect_gate_allows_progress_when_content_score_valid(tmp_path: Path, mo
     assert called_stages == ["embed", "detect", "calibrate", "evaluate"]
 
 
+def test_run_stage_sequence_only_binds_attacked_detect_glob_for_evaluate(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """
+    功能：矩阵子实验中仅 evaluate 绑定 attacked detect 记录，calibrate 不应绑定单条记录。
+
+    Verify experiment matrix binds attacked detect record only for evaluate stage,
+    while calibrate stage keeps default sampling path.
+
+    Args:
+        tmp_path: pytest temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    captured_overrides = {}
+
+    def _fake_layout(*args, **kwargs):
+        run_root = args[0]
+        (run_root / "records").mkdir(parents=True, exist_ok=True)
+        (run_root / "artifacts").mkdir(parents=True, exist_ok=True)
+        return {
+            "run_root": run_root,
+            "artifacts_dir": run_root / "artifacts",
+            "records_dir": run_root / "records",
+        }
+
+    def _fake_prepare_detect_record(run_root: Path, _grid_item_cfg: dict) -> Path:
+        path = run_root / "artifacts" / "evaluate_inputs" / "detect_record_with_attack.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}", encoding="utf-8")
+        return path
+
+    def _fake_run_stage_command(stage_name, run_root, config_path, stage_overrides, input_record_path=None):
+        captured_overrides[stage_name] = list(stage_overrides)
+        if stage_name == "detect":
+            detect_record_path = run_root / "records" / "detect_record.json"
+            detect_record_path.parent.mkdir(parents=True, exist_ok=True)
+            detect_record_path.write_text(
+                json.dumps({"content_evidence_payload": {"status": "ok", "score": 0.2}}),
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr(experiment_matrix.path_policy, "ensure_output_layout", _fake_layout)
+    monkeypatch.setattr(experiment_matrix, "_prepare_detect_record_for_attack_grouping", _fake_prepare_detect_record)
+    monkeypatch.setattr(experiment_matrix, "_run_stage_command", _fake_run_stage_command)
+
+    grid_item_cfg = {
+        "config_path": "configs/paper_full_cuda.yaml",
+        "attack_protocol_path": "configs/attack_protocol.yaml",
+        "cfg_snapshot": {
+            "seed": 0,
+            "model_id": "stabilityai/stable-diffusion-3.5-medium",
+        },
+        "ablation_flags": {},
+        "max_samples": None,
+    }
+
+    experiment_matrix._run_stage_sequence(grid_item_cfg, tmp_path / "run")
+
+    calibrate_overrides = captured_overrides.get("calibrate", [])
+    evaluate_overrides = captured_overrides.get("evaluate", [])
+
+    assert all(not item.startswith("calibrate_detect_records_glob=") for item in calibrate_overrides)
+    assert any(item.startswith("evaluate_detect_records_glob=") for item in evaluate_overrides)
+
+
 def test_run_stage_sequence_skips_ablation_overrides_when_cfg_snapshot_has_no_ablation(
     monkeypatch,
 ) -> None:

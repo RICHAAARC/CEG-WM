@@ -733,8 +733,9 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
         # embed 阶段不强制写入 disable_content_detect 覆盖项。
         # 由配置与 whitelist 统一约束，避免 override_value_mismatch。
         
-        # calibrate 和 evaluate 需要 detect_records_glob 参数
-        if stage_name in ["calibrate", "evaluate"]:
+        # evaluate 需要 attacked detect record 输入；
+        # calibrate 不应绑定单条 attacked 记录，否则会触发 n_pos/n_neg=0 门禁失败。
+        if stage_name == "evaluate":
             detect_record_path = _prepare_detect_record_for_attack_grouping(run_root, grid_item_cfg)
             arg_name = f"{stage_name}_detect_records_glob"
             stage_overrides.append(f"{arg_name}={json.dumps(str(detect_record_path))}")
