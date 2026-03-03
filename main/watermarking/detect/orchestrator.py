@@ -1235,6 +1235,7 @@ def _build_content_inputs_for_detect(
     功能：构造 detect 阶段 content extractor 主输入。
 
     Build content extractor inputs for detect stage with explicit input priority.
+    Falls back to reading input_image_path from input_record when available.
 
     Args:
         cfg: Configuration mapping.
@@ -1276,6 +1277,18 @@ def _build_content_inputs_for_detect(
     if image_path is not None:
         inputs["image_path"] = str(image_path)
         inputs["input_source"] = "image_path"
+    else:
+        # 从 input_record (embed_record) 中读取保存的 input_image_path 作为回退方案
+        if isinstance(input_record, dict):
+            record_inputs = input_record.get("inputs")
+            if isinstance(record_inputs, dict):
+                embedded_image_path = record_inputs.get("input_image_path")
+                if isinstance(embedded_image_path, str) and embedded_image_path.strip():
+                    from pathlib import Path as PathLib
+                    candidate_path = PathLib(embedded_image_path.strip())
+                    if candidate_path.exists() and candidate_path.is_file():
+                        inputs["image_path"] = str(candidate_path.resolve())
+                        inputs["input_source"] = "image_path_from_embed_record"
 
     input_content_evidence: Dict[str, Any] = {}
     if isinstance(input_record, dict):

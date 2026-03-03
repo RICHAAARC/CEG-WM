@@ -504,6 +504,16 @@ def run_embed(
             record["inference_error"] = run_meta.get("inference_error")
             record["inference_runtime_meta"] = run_meta.get("inference_runtime_meta")
             
+            # 为 detect 侧保存关键输入信息：input_image_path 和输入配置（用于重建）
+            # 注：final_latents 张量不序列化；detect 侧应通过自己的 inference 或从 embed 配置重建
+            inputs_record = {}
+            if isinstance(input_image_path, str) and input_image_path.strip():
+                inputs_record["input_image_path"] = input_image_path.strip()
+            elif "image" in cfg.get("__embed_input_image_path__", ""):
+                inputs_record["input_image_path"] = cfg.get("__embed_input_image_path__")
+            if inputs_record:
+                record["inputs"] = inputs_record
+            
             content_evidence = record.get("content_evidence")
             if not isinstance(content_evidence, dict):
                 content_evidence = {}

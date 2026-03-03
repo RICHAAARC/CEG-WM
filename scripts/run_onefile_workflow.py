@@ -2263,6 +2263,7 @@ def run_onefile_workflow(
     profile: str,
     signoff_profile: str,
     dry_run: bool,
+    device_override: str | None = None,
 ) -> int:
     """
     功能：执行 onefile 全链路编排。 
@@ -2276,11 +2277,17 @@ def run_onefile_workflow(
         profile: Workflow profile.
         signoff_profile: Signoff profile.
         dry_run: Whether to print commands without execution.
+        device_override: Optional device override (cuda/cpu).
 
     Returns:
         Process exit code. Returns first failed step return code, or 0 on success.
     """
     profile = _normalize_profile(profile)
+    
+    # paper_full_cuda profile requires cuda device
+    if profile == PROFILE_PAPER_FULL_CUDA and device_override != "cpu":
+        print("[onefile] paper_full_cuda profile detected, enforcing device=cuda")
+        device_override = "cuda"
     effective_cfg_path = _prepare_profile_cfg_path(profile, run_root, cfg_path)
     steps = build_workflow_steps(run_root, effective_cfg_path, repo_root, profile, signoff_profile)
     experiment_matrix_retry_used = False
@@ -2493,6 +2500,7 @@ def main() -> None:
         profile=args.profile,
         signoff_profile=resolved_signoff_profile,
         dry_run=bool(args.dry_run),
+        device_override=args.device,
     )
     sys.exit(return_code)
 
