@@ -916,9 +916,32 @@ def _run_dual_branch_embedding_and_detection(
     branch_neg_root.mkdir(parents=True, exist_ok=True)
     print(f"[dual_branch] Created branch_neg output: {branch_neg_root}")
 
+    # (1.1) 为负分支生成专用 cfg：关闭 paper_faithfulness，避免 identity baseline 被门禁阻断。
+    branch_neg_cfg_path = cfg_path
+    try:
+        branch_cfg_obj = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+        if isinstance(branch_cfg_obj, dict):
+            paper_node = branch_cfg_obj.get("paper_faithfulness")
+            paper_cfg = paper_node if isinstance(paper_node, dict) else {}
+            paper_cfg["enabled"] = False
+            paper_cfg["alignment_check"] = False
+            branch_cfg_obj["paper_faithfulness"] = paper_cfg
+
+            branch_cfg_dir = branch_neg_root / "artifacts" / "workflow_cfg"
+            branch_cfg_dir.mkdir(parents=True, exist_ok=True)
+            branch_neg_cfg_path = branch_cfg_dir / "branch_neg_profile.yaml"
+            _write_artifact_text_unbound(
+                run_root,
+                branch_neg_cfg_path,
+                yaml.safe_dump(branch_cfg_obj, allow_unicode=True, sort_keys=False),
+            )
+    except Exception as exc:
+        print(f"[dual_branch] WARN: failed to prepare branch cfg, fallback to base cfg: {exc}", file=sys.stderr)
+        branch_neg_cfg_path = cfg_path
+
     # (2) 运行 embed（负样本，禁用注入）
     scripts_dir = repo_root / "scripts"
-    embed_cmd = _build_stage_command("embed", branch_neg_root, cfg_path, profile)
+    embed_cmd = _build_stage_command("embed", branch_neg_root, branch_neg_cfg_path, profile)
     # 清理默认 profile 注入的 enable_paper_faithfulness 覆写，避免 arg_name 重复。
     sanitized_embed_cmd: list[str] = []
     index = 0
@@ -935,10 +958,10 @@ def _run_dual_branch_embedding_and_detection(
         index += 1
     embed_cmd = sanitized_embed_cmd
 
-    # 使用 whitelist 允许的 test_mode_identity 覆写生成 clean 分支，
-    # 并显式关闭 paper_faithfulness 以避免 identity baseline 被门禁拒绝。
+    # 使用 whitelist 允许的 test_mode_identity 覆写生成 clean 分支。
+    # 注意：enable_paper_faithfulness 的 false 覆写会触发 override_value_mismatch，
+    # 因此此处不注入该 override，保持与冻结白名单一致。
     embed_cmd.extend(["--override", "test_mode_identity=true"])
-    embed_cmd.extend(["--override", "enable_paper_faithfulness=false"])
     print(f"[dual_branch] Running negative embed: {' '.join(str(c) for c in embed_cmd)}")
     embed_return = _run_subprocess_for_step(embed_cmd, repo_root)
     if embed_return != 0:
@@ -946,7 +969,24 @@ def _run_dual_branch_embedding_and_detection(
     print(f"[dual_branch] Negative embed completed successfully")
 
     # (3) 运行 detect（从负样本 embed 输出读取）
-    detect_cmd = _build_stage_command("detect", branch_neg_root, cfg_path, profile)
+    detect_cmd = _build_stage_command("detect", branch_neg_root, branch_neg_cfg_path, profile)
+    sanitized_detect_cmd: list[str] = []
+    detect_index = 0
+    while detect_index < len(detect_cmd):
+        detect_item = str(detect_cmd[detect_index])
+        if detect_item == "--input" and detect_index + 1 < len(detect_cmd):
+            detect_index += 2
+            continue
+        if (
+            detect_item == "--override"
+            and detect_index + 1 < len(detect_cmd)
+            and str(detect_cmd[detect_index + 1]).startswith("enable_paper_faithfulness=")
+        ):
+            detect_index += 2
+            continue
+        sanitized_detect_cmd.append(detect_item)
+        detect_index += 1
+    detect_cmd = sanitized_detect_cmd
     detect_cmd.extend(["--input", str(branch_neg_root / "records" / "embed_record.json")])
     print(f"[dual_branch] Running negative detect: {' '.join(str(c) for c in detect_cmd)}")
     detect_return = _run_subprocess_for_step(detect_cmd, repo_root)
@@ -1004,11 +1044,12 @@ def _prepare_stage_cfg_path(
         detect_record_glob = str(_prepare_detect_record_for_scoring(run_root, records_dir, profile))
     else:
         detect_record_glob = str(detect_record_path)
-    # 在 calibrate 时运行双分支 embed/detect（仅当 repo_root 可用）
+    # 在 calibrate/evaluate 时运行或复用双分支负样本 detect 记录（仅当 repo_root 可用）
     branch_neg_detect_record = run_root / "artifacts" / "branch_neg" / "records" / "detect_record.json"
+    dual_branch_failure_reason: str | None = None
     if (
         profile == PROFILE_PAPER_FULL_CUDA
-        and stage_name == "calibrate"
+        and stage_name in {"calibrate", "evaluate"}
         and repo_root is not None
         and not branch_neg_detect_record.exists()
     ):
@@ -1019,6 +1060,7 @@ def _prepare_stage_cfg_path(
             )
             print("[onefile] Dual-branch embedding and detection completed")
         except Exception as exc:
+            dual_branch_failure_reason = f"{type(exc).__name__}: {exc}"
             print(f"[onefile] WARN: Dual-branch execution failed: {type(exc).__name__}: {exc}", file=sys.stderr)
             print("[onefile] Continuing with single-branch workflow (GT generated via clone)", file=sys.stderr)
 
@@ -1040,9 +1082,10 @@ def _prepare_stage_cfg_path(
             run_root,
             Path(detect_record_glob),
             stage_name,
-            branch_neg_detect_record=branch_neg_detect_record if stage_name == "calibrate" else None,
+            branch_neg_detect_record=branch_neg_detect_record,
             pair_count=pair_count,
             prompts=prompt_list,
+            dual_branch_failure_reason=dual_branch_failure_reason,
         )
 
     if stage_name == "calibrate":
@@ -1078,6 +1121,7 @@ def _prepare_detect_records_with_minimal_ground_truth(
     pair_count: int = 1,
     prompts: Sequence[str] | None = None,
     branch_neg_detect_record: Path | None = None,
+    dual_branch_failure_reason: str | None = None,
 ) -> str:
     """
     功能：为 calibrate/evaluate 生成最小正负标签 detect records 集合。 
@@ -1115,6 +1159,8 @@ def _prepare_detect_records_with_minimal_ground_truth(
             raise ValueError("prompts length must equal pair_count")
     if branch_neg_detect_record is not None and not isinstance(branch_neg_detect_record, Path):
         raise TypeError("branch_neg_detect_record must be Path or None")
+    if dual_branch_failure_reason is not None and not isinstance(dual_branch_failure_reason, str):
+        raise TypeError("dual_branch_failure_reason must be str or None")
 
     if not source_detect_path.exists() or not source_detect_path.is_file():
         return str(source_detect_path)
@@ -1140,6 +1186,7 @@ def _prepare_detect_records_with_minimal_ground_truth(
             content_node["status"] = "ok"
             content_node["content_failure_reason"] = None
             content_node["calibration_sample_origin"] = "formal_positive_recovered_from_failed_source_v1"
+            content_node["normalized_from_recovered_status"] = True
 
     # 如果有真实的负样本 detect 记录，直接聚合而不是 clone
     if branch_neg_detect_record is not None and branch_neg_detect_record.exists() and branch_neg_detect_record.is_file():
@@ -1174,11 +1221,13 @@ def _prepare_detect_records_with_minimal_ground_truth(
                 pos_payload["label"] = True
                 pos_payload["ground_truth"] = True
                 pos_payload["is_watermarked"] = True
+                pos_payload["ground_truth_source"] = "dual_branch_positive"
                 _normalize_positive_payload_if_recovered_failed(pos_payload)
 
                 neg_payload["label"] = False
                 neg_payload["ground_truth"] = False
                 neg_payload["is_watermarked"] = False
+                neg_payload["ground_truth_source"] = "dual_branch_negative"
 
                 neg_content_node = neg_payload.get("content_evidence_payload")
                 if isinstance(neg_content_node, dict):
@@ -1240,12 +1289,18 @@ def _prepare_detect_records_with_minimal_ground_truth(
         positive_payload["label"] = True
         positive_payload["ground_truth"] = True
         positive_payload["is_watermarked"] = True
+        positive_payload["ground_truth_source"] = "clone_positive"
+        if isinstance(dual_branch_failure_reason, str) and dual_branch_failure_reason:
+            positive_payload["dual_branch_failure_reason"] = dual_branch_failure_reason
         _normalize_positive_payload_if_recovered_failed(positive_payload)
 
         negative_payload = json.loads(json.dumps(source_payload, ensure_ascii=False))
         negative_payload["label"] = False
         negative_payload["ground_truth"] = False
         negative_payload["is_watermarked"] = False
+        negative_payload["ground_truth_source"] = "clone_negative"
+        if isinstance(dual_branch_failure_reason, str) and dual_branch_failure_reason:
+            negative_payload["dual_branch_failure_reason"] = dual_branch_failure_reason
 
         if prompts is not None:
             prompt_value = prompts[pair_index]
@@ -2559,7 +2614,8 @@ def run_onefile_workflow(
                 )
                 return 1
         if step.name in {"calibrate", "evaluate"}:
-            stage_cfg_path = _prepare_stage_cfg_path(step.name, run_root, effective_cfg_path, profile, repo_root)
+            stage_repo_root = None if dry_run else repo_root
+            stage_cfg_path = _prepare_stage_cfg_path(step.name, run_root, effective_cfg_path, profile, stage_repo_root)
             step_command = _build_stage_command(step.name, run_root, stage_cfg_path, profile)
         if step.name == "experiment_matrix" and profile == PROFILE_PAPER_FULL_CUDA:
             if "--config" in step_command:

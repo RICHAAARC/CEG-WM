@@ -185,6 +185,16 @@ class NeumanPearsonFusionRule:
                 "decision_status": "error",
                 "failure_reason": primary_failure_reason or "invalid_inputs"
             }
+            if primary_failure_reason == "geometry_mismatch":
+                mismatch_source = geometry_evidence.get("mismatch_source")
+                if isinstance(mismatch_source, str) and mismatch_source:
+                    audit["geometry_mismatch_source"] = mismatch_source
+                else:
+                    sync_result = geometry_evidence.get("sync_result")
+                    if isinstance(sync_result, dict):
+                        audit["geometry_mismatch_source"] = "sync_result"
+                    else:
+                        audit["geometry_mismatch_source"] = "unknown"
             return FusionDecision(
                 is_watermarked=None,
                 decision_status="error",

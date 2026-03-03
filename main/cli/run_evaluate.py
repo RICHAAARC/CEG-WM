@@ -382,6 +382,17 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
 
             metrics_node = record.get("metrics")
             metrics_payload = cast(Dict[str, Any], metrics_node) if isinstance(metrics_node, dict) else {}
+            for metric_key in [
+                "tpr_at_fpr_primary",
+                "fpr_empirical",
+                "fnr_empirical",
+                "n_total",
+                "n_pos",
+                "n_neg",
+            ]:
+                if metric_key in metrics_payload and metric_key not in record:
+                    # append-only：保留 metrics.*，镜像顶层关键指标供历史读取口径使用。
+                    record[metric_key] = metrics_payload.get(metric_key)
             n_pos = metrics_payload.get("n_pos")
             n_neg = metrics_payload.get("n_neg")
             is_degenerate_evaluate = (

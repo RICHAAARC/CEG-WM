@@ -212,6 +212,9 @@ def run_detect_orchestrator(
         detect_input_source = detect_content_inputs.get("input_source")
         if isinstance(detect_input_source, str) and detect_input_source:
             content_evidence_payload["input_source"] = detect_input_source
+        detect_image_path_source = detect_content_inputs.get("image_path_source")
+        if isinstance(detect_image_path_source, str) and detect_image_path_source:
+            content_evidence_payload["image_path_source"] = detect_image_path_source
 
     geometry_evidence_payload: Dict[str, Any] | None = _as_dict_payload(geometry_result)
 
@@ -1074,7 +1077,7 @@ def _extract_content_raw_scores_from_image(
     lf_score = None
     lf_trace: Dict[str, Any] = {"lf_status": "absent", "lf_absent_reason": "lf_unavailable"}
 
-    image_path = _resolve_detect_image_path(cfg, input_record)
+    image_path, image_path_source = _resolve_detect_image_path_with_source(cfg, input_record)
     image_array: Optional[Any] = None
     if image_path is not None:
         try:
@@ -1161,6 +1164,10 @@ def _extract_content_raw_scores_from_image(
         hf_score = None
         hf_trace = {"hf_status": "absent", "hf_absent_reason": "hf_disabled_by_config"}
 
+    if isinstance(image_path_source, str) and image_path_source:
+        lf_trace["image_path_source"] = image_path_source
+        hf_trace["image_path_source"] = image_path_source
+
     return lf_score, hf_score, {"lf": lf_trace, "hf": hf_trace}
 
 
@@ -1211,20 +1218,37 @@ def _bind_raw_scores_to_content_payload(
             score_parts["hf_failure_reason"] = hf_trace.get("hf_failure_reason")
 
 
-def _resolve_detect_image_path(cfg: Dict[str, Any], input_record: Optional[Dict[str, Any]]) -> Optional[Path]:
-    candidates = [
-        cfg.get("__detect_input_image_path__"),
-        cfg.get("input_image_path"),
+def _resolve_detect_image_path_with_source(
+    cfg: Dict[str, Any],
+    input_record: Optional[Dict[str, Any]],
+) -> tuple[Optional[Path], Optional[str]]:
+    candidates: list[tuple[str, Any]] = [
+        ("cfg.__detect_input_image_path__", cfg.get("__detect_input_image_path__")),
+        ("cfg.input_image_path", cfg.get("input_image_path")),
     ]
+
     if isinstance(input_record, dict):
-        candidates.append(input_record.get("watermarked_path"))
-        candidates.append(input_record.get("image_path"))
-    for value in candidates:
+        candidates.extend(
+            [
+                ("input_record.watermarked_path", input_record.get("watermarked_path")),
+                ("input_record.image_path", input_record.get("image_path")),
+            ]
+        )
+        record_inputs = input_record.get("inputs")
+        if isinstance(record_inputs, dict):
+            candidates.append(("input_record.inputs.input_image_path", record_inputs.get("input_image_path")))
+
+    for source_name, value in candidates:
         if isinstance(value, str) and value:
             path = Path(value).resolve()
             if path.exists() and path.is_file():
-                return path
-    return None
+                return path, source_name
+    return None, None
+
+
+def _resolve_detect_image_path(cfg: Dict[str, Any], input_record: Optional[Dict[str, Any]]) -> Optional[Path]:
+    resolved_path, _ = _resolve_detect_image_path_with_source(cfg, input_record)
+    return resolved_path
 
 
 def _build_content_inputs_for_detect(
@@ -1273,22 +1297,12 @@ def _build_content_inputs_for_detect(
         inputs["input_source"] = "latent"
         return inputs
 
-    image_path = _resolve_detect_image_path(cfg, input_record)
+    image_path, image_path_source = _resolve_detect_image_path_with_source(cfg, input_record)
     if image_path is not None:
         inputs["image_path"] = str(image_path)
         inputs["input_source"] = "image_path"
-    else:
-        # 从 input_record (embed_record) 中读取保存的 input_image_path 作为回退方案
-        if isinstance(input_record, dict):
-            record_inputs = input_record.get("inputs")
-            if isinstance(record_inputs, dict):
-                embedded_image_path = record_inputs.get("input_image_path")
-                if isinstance(embedded_image_path, str) and embedded_image_path.strip():
-                    from pathlib import Path as PathLib
-                    candidate_path = PathLib(embedded_image_path.strip())
-                    if candidate_path.exists() and candidate_path.is_file():
-                        inputs["image_path"] = str(candidate_path.resolve())
-                        inputs["input_source"] = "image_path_from_embed_record"
+        if isinstance(image_path_source, str) and image_path_source:
+            inputs["image_path_source"] = image_path_source
 
     input_content_evidence: Dict[str, Any] = {}
     if isinstance(input_record, dict):
@@ -2796,6 +2810,7 @@ def load_scores_for_calibration(
     rejected_label_missing = 0
     rejected_label_positive = 0
     rejected_synthetic_fallback = 0
+    rejected_synthetic_negative_closure = 0
     rejected_formal_sidecar_marker = 0
 
     calibration_cfg: Dict[str, Any] = {}
@@ -2804,6 +2819,7 @@ def load_scores_for_calibration(
         if isinstance(calibration_node, dict):
             calibration_cfg = cast(Dict[str, Any], calibration_node)
     exclude_formal_sidecar_marker = bool(calibration_cfg.get("exclude_formal_sidecar_disabled_marker", False))
+    exclude_synthetic_negative_closure = bool(calibration_cfg.get("exclude_synthetic_negative_closure_marker", False))
 
     has_explicit_labels = False
     for item in records:
@@ -2832,6 +2848,12 @@ def load_scores_for_calibration(
                 if usage_value == "formal_with_sidecar_disabled_marker":
                     rejected += 1
                     rejected_formal_sidecar_marker += 1
+                    continue
+            if exclude_synthetic_negative_closure:
+                usage_value = content_payload_mapping.get("calibration_sample_usage")
+                if usage_value == "synthetic_negative_for_ground_truth_closure":
+                    rejected += 1
+                    rejected_synthetic_negative_closure += 1
                     continue
         if status_value != "ok":
             rejected += 1
@@ -2874,8 +2896,10 @@ def load_scores_for_calibration(
             "n_rejected_label_missing": rejected_label_missing,
             "n_rejected_label_positive": rejected_label_positive,
             "n_rejected_synthetic_fallback": rejected_synthetic_fallback,
+            "n_rejected_synthetic_negative_closure": rejected_synthetic_negative_closure,
             "n_rejected_formal_sidecar_marker": rejected_formal_sidecar_marker,
             "exclude_formal_sidecar_disabled_marker": exclude_formal_sidecar_marker,
+            "exclude_synthetic_negative_closure_marker": exclude_synthetic_negative_closure,
             "n_selected_null": valid,
         },
     }

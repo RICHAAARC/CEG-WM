@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 
 def _load_onefile_module(repo_root: Path):
@@ -1091,6 +1092,81 @@ def test_onefile_prepare_stage_cfg_path_supports_multiple_ground_truth_pairs(tmp
     assert len(evaluate_files) == 4
 
 
+def test_onefile_prepare_stage_cfg_path_propagates_dual_branch_failure_reason(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：验证 dual-branch 失败后回退 clone 的 GT 记录会写入失败原因审计字段。
+
+    Verify stage config fallback writes dual_branch_failure_reason into clone GT records.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root_failure_reason"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    detect_record_path = records_dir / "detect_record.json"
+    detect_record_path.write_text(
+        json.dumps(
+            {
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": 0.42,
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    cfg_path = tmp_path / "paper_cfg_failure_reason.yaml"
+    cfg_path.write_text(
+        "calibration:\n"
+        "  detect_records_glob: null\n"
+        "evaluate:\n"
+        "  detect_records_glob: null\n"
+        "  thresholds_path: null\n",
+        encoding="utf-8",
+    )
+
+    def _fake_dual_branch_failure(*args: Any, **kwargs: Any) -> Any:
+        _ = args
+        _ = kwargs
+        raise RuntimeError("dual_branch detect failed with return code 1")
+
+    monkeypatch.setattr(module, "_run_dual_branch_embedding_and_detection", _fake_dual_branch_failure)
+
+    calibrate_cfg_path = module._prepare_stage_cfg_path(
+        "calibrate",
+        run_root,
+        cfg_path,
+        "paper_full_cuda",
+        repo_root,
+    )
+    assert calibrate_cfg_path.exists()
+
+    positive_path = run_root / "artifacts" / "workflow_cfg" / "detect_records_calibrate_gt_positive.json"
+    negative_path = run_root / "artifacts" / "workflow_cfg" / "detect_records_calibrate_gt_negative.json"
+    assert positive_path.exists()
+    assert negative_path.exists()
+
+    positive_payload = json.loads(positive_path.read_text(encoding="utf-8"))
+    negative_payload = json.loads(negative_path.read_text(encoding="utf-8"))
+    assert "dual_branch_failure_reason" in positive_payload
+    assert "dual_branch_failure_reason" in negative_payload
+    assert "RuntimeError" in str(positive_payload.get("dual_branch_failure_reason"))
+
+
 def test_dual_branch_embed_uses_whitelisted_test_mode_identity_override(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1143,10 +1219,23 @@ def test_dual_branch_embed_uses_whitelisted_test_mode_identity_override(
     assert detect_path.exists()
     embed_commands = [command for command in calls if "-m" in command and "main.cli.run_embed" in command]
     assert embed_commands
+    embed_cfg_index = embed_commands[0].index("--config") + 1
+    embed_cfg_path = Path(str(embed_commands[0][embed_cfg_index]))
+    embed_cfg_obj = yaml.safe_load(embed_cfg_path.read_text(encoding="utf-8"))
+    assert isinstance(embed_cfg_obj, dict)
+    paper_cfg = embed_cfg_obj.get("paper_faithfulness")
+    assert isinstance(paper_cfg, dict)
+    assert paper_cfg.get("enabled") is False
+    assert paper_cfg.get("alignment_check") is False
+
     assert "test_mode_identity=true" in embed_commands[0]
-    assert "enable_paper_faithfulness=false" in embed_commands[0]
+    assert "enable_paper_faithfulness=false" not in embed_commands[0]
     assert "enable_paper_faithfulness=true" not in embed_commands[0]
     assert "embed.injection_enabled=false" not in embed_commands[0]
+
+    detect_commands = [command for command in calls if "-m" in command and "main.cli.run_detect" in command]
+    assert detect_commands
+    assert detect_commands[0].count("--input") == 1
 
 
 def test_prepare_detect_records_recovers_dual_branch_negative_score_for_calibration(tmp_path: Path) -> None:
@@ -1326,6 +1415,54 @@ def test_prepare_detect_records_clone_mode_normalizes_positive_from_recovered_fa
     assert positive_content.get("content_failure_reason") is None
     assert positive_content.get("score") == -0.0042
     assert positive_content.get("calibration_sample_origin") == "formal_positive_recovered_from_failed_source_v1"
+
+
+def test_prepare_detect_records_clone_mode_keeps_dual_branch_failure_reason(tmp_path: Path) -> None:
+    """
+    功能：验证 clone 回退时会把 dual-branch 失败原因写入 GT 审计字段。
+
+    Verify clone fallback records include dual_branch_failure_reason audit field.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root_clone_reason"
+    source_detect_path = run_root / "records" / "detect_record_for_scoring.json"
+    source_detect_path.parent.mkdir(parents=True, exist_ok=True)
+    source_detect_path.write_text(
+        json.dumps(
+            {
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": 0.5,
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    failure_reason = "RuntimeError: dual_branch detect failed with return code 1"
+    module._prepare_detect_records_with_minimal_ground_truth(
+        run_root=run_root,
+        source_detect_path=source_detect_path,
+        stage_name="calibrate",
+        dual_branch_failure_reason=failure_reason,
+    )
+
+    positive_path = run_root / "artifacts" / "workflow_cfg" / "detect_records_calibrate_gt_positive.json"
+    negative_path = run_root / "artifacts" / "workflow_cfg" / "detect_records_calibrate_gt_negative.json"
+    positive_payload = json.loads(positive_path.read_text(encoding="utf-8"))
+    negative_payload = json.loads(negative_path.read_text(encoding="utf-8"))
+    assert positive_payload.get("dual_branch_failure_reason") == failure_reason
+    assert negative_payload.get("dual_branch_failure_reason") == failure_reason
 
 
 def test_onefile_prepare_stage_cfg_path_uses_prompt_list_as_gt_driver(tmp_path: Path) -> None:

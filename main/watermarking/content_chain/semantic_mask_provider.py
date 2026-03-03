@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import importlib
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -863,18 +864,102 @@ def _probe_model_v2_availability(mask_params: Dict[str, Any]) -> bool:
     if not isinstance(mask_params, dict):
         return False
     model_path = mask_params.get("semantic_model_path")
-    if isinstance(model_path, str) and model_path:
-        model_file = Path(model_path)
-        if not (model_file.exists() and model_file.is_file()):
-            return False
+    if not isinstance(model_path, str) or not model_path:
+        return False
+
+    model_file = Path(model_path)
+    if not (model_file.exists() and model_file.is_file()):
+        return False
+
+    backend = _resolve_semantic_model_backend(mask_params)
+    try:
+        model_obj = _load_saliency_model(mask_params)
+    except Exception:
+        # 模型结构与权重最小加载校验失败。
+        return False
+
+    if backend == SEMANTIC_MODEL_BACKEND_INSPYRENET:
+        return callable(model_obj)
+    return True
+
+
+def _extract_state_dict_payload(loaded_obj: Any) -> Optional[Dict[str, Any]]:
+    """
+    功能：从加载对象提取可用于 load_state_dict 的权重字典。
+
+    Extract a state_dict-like payload from loaded checkpoint object.
+
+    Args:
+        loaded_obj: Object loaded by torch.load.
+
+    Returns:
+        State dictionary when available; otherwise None.
+    """
+    if not isinstance(loaded_obj, dict):
+        return None
+
+    for key_name in ["state_dict", "model_state_dict", "weights"]:
+        payload = loaded_obj.get(key_name)
+        if isinstance(payload, dict) and payload:
+            return payload
+
+    if loaded_obj and all(isinstance(key, str) for key in loaded_obj.keys()):
+        return loaded_obj
+    return None
+
+
+def _instantiate_inspyrenet_model() -> Any:
+    """
+    功能：实例化 InSPyReNet 模型结构。
+
+    Instantiate InSPyReNet model architecture from available runtime modules.
+
+    Returns:
+        Instantiated model object.
+
+    Raises:
+        RuntimeError: If no compatible InSPyReNet class can be constructed.
+    """
+    candidate_modules = [
+        "inspyrenet",
+        "inspyrenet.model",
+        "inspyrenet.models",
+    ]
+    candidate_kwargs = [
+        {},
+        {"backbone": "res2net50"},
+        {"backbone": "swinb"},
+    ]
+
+    for module_name in candidate_modules:
         try:
-            import torch
-            _ = torch.load(str(model_file), map_location="cpu")
-            return True
+            module = importlib.import_module(module_name)
         except Exception:
-            # 权重不可加载，视为不可用。
-            return False
-    return False
+            continue
+
+        candidate_classes: List[Any] = []
+        explicit_cls = getattr(module, "InSPyReNet", None)
+        if callable(explicit_cls):
+            candidate_classes.append(explicit_cls)
+
+        for attr_name in dir(module):
+            if "inspyrenet" not in attr_name.lower():
+                continue
+            attr_value = getattr(module, attr_name, None)
+            if callable(attr_value) and attr_value not in candidate_classes:
+                candidate_classes.append(attr_value)
+
+        for model_cls in candidate_classes:
+            for kwargs in candidate_kwargs:
+                try:
+                    model_obj = model_cls(**kwargs)
+                    return model_obj
+                except TypeError:
+                    continue
+                except Exception:
+                    continue
+
+    raise RuntimeError("inspyrenet model class unavailable")
 
 
 def _compute_weights_sha256(model_path: Optional[str]) -> str:
@@ -938,15 +1023,41 @@ def _load_saliency_model(mask_params: Dict[str, Any]) -> Any:
     try:
         import torch
         loaded_obj = torch.load(str(model_file), map_location="cpu")
-        model_obj = loaded_obj
-        if isinstance(loaded_obj, dict) and "model" in loaded_obj:
-            model_obj = loaded_obj.get("model")
+
+        if backend == SEMANTIC_MODEL_BACKEND_INSPYRENET:
+            if callable(loaded_obj):
+                model_obj = loaded_obj
+            elif isinstance(loaded_obj, dict) and callable(loaded_obj.get("model")):
+                model_obj = loaded_obj.get("model")
+            else:
+                state_dict = _extract_state_dict_payload(loaded_obj)
+                if not isinstance(state_dict, dict) or not state_dict:
+                    # inspyrenet 权重结构异常，必须显式失败。
+                    raise RuntimeError("inspyrenet checkpoint missing state_dict payload")
+
+                model_obj = _instantiate_inspyrenet_model()
+                if not hasattr(model_obj, "load_state_dict") or not callable(model_obj.load_state_dict):
+                    # 模型对象不支持 state_dict 加载，必须失败。
+                    raise RuntimeError("inspyrenet model object missing load_state_dict")
+                incompatible_keys = model_obj.load_state_dict(state_dict, strict=False)
+                missing_keys = list(getattr(incompatible_keys, "missing_keys", []) or [])
+                unexpected_keys = list(getattr(incompatible_keys, "unexpected_keys", []) or [])
+                if missing_keys or unexpected_keys:
+                    # key 不匹配，禁止 silent fallback。
+                    raise RuntimeError(
+                        f"inspyrenet state_dict key mismatch: missing={len(missing_keys)}, unexpected={len(unexpected_keys)}"
+                    )
+        else:
+            model_obj = loaded_obj
+            if isinstance(loaded_obj, dict) and "model" in loaded_obj:
+                model_obj = loaded_obj.get("model")
+
         if hasattr(model_obj, "eval") and callable(model_obj.eval):
             model_obj.eval()
         _SALIENCY_MODEL_CACHE[cache_key] = model_obj
         return model_obj
     except Exception as exc:
-        raise RuntimeError(f"saliency model load failed: {type(exc).__name__}") from exc
+        raise RuntimeError(f"saliency model load failed: {type(exc).__name__}: {exc}") from exc
 
 
 def _run_saliency_inference(model: Any, image_tensor: Any, mask_params: Dict[str, Any]) -> np.ndarray:

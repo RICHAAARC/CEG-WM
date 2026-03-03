@@ -242,6 +242,50 @@ def test_onefile_workflow_paper_full_profile_generates_real_sd3_config(tmp_path:
     assert "assert_paper_mechanisms" in step_names
 
 
+def test_onefile_workflow_dry_run_skips_dual_branch_execution(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：验证 dry-run 模式不会执行 dual-branch 子流程。 
+
+    Verify dry-run mode does not invoke dual-branch embed/detect execution.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "paper_dry_run"
+    cfg_path = repo_root / "configs" / "paper_full_cuda.yaml"
+    dual_branch_calls = {"count": 0}
+
+    def _forbid_dual_branch(*args: Any, **kwargs: Any) -> Any:
+        _ = args
+        _ = kwargs
+        dual_branch_calls["count"] += 1
+        raise AssertionError("dual-branch should not run in dry-run")
+
+    monkeypatch.setattr(module, "_run_dual_branch_embedding_and_detection", _forbid_dual_branch)
+
+    exit_code = module.run_onefile_workflow(
+        repo_root=repo_root,
+        cfg_path=cfg_path,
+        run_root=run_root,
+        profile="paper_full_cuda",
+        signoff_profile="paper",
+        dry_run=True,
+    )
+
+    assert exit_code == 0
+    assert dual_branch_calls["count"] == 0
+
+
 def test_onefile_workflow_paper_full_profile_fails_fast_on_mismatched_impl(tmp_path: Path) -> None:
     """
     功能：验证 paper_full_cuda 对关键 impl 错配执行 fail-fast。 
