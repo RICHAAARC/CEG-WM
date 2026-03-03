@@ -977,6 +977,191 @@ def test_onefile_prepare_stage_cfg_path_supports_multiple_ground_truth_pairs(tmp
     assert len(evaluate_files) == 4
 
 
+def test_dual_branch_embed_uses_whitelisted_test_mode_identity_override(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：验证 dual-branch 负样本 embed 使用 whitelist 允许的 test_mode_identity 覆写。 
+
+    Verify dual-branch negative embed uses whitelisted test_mode_identity override
+    instead of forbidden embed.injection_enabled override.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    run_root.mkdir(parents=True, exist_ok=True)
+    cfg_path = repo_root / "configs" / "paper_full_cuda.yaml"
+
+    calls = []
+
+    def _fake_run_step(command, _repo_root):
+        calls.append(list(command))
+        command_text = " ".join(str(item) for item in command)
+        branch_neg_root = run_root / "artifacts" / "branch_neg"
+        records_dir = branch_neg_root / "records"
+        records_dir.mkdir(parents=True, exist_ok=True)
+        if "-m main.cli.run_embed" in command_text:
+            (records_dir / "embed_record.json").write_text("{}", encoding="utf-8")
+            return 0
+        if "-m main.cli.run_detect" in command_text:
+            (records_dir / "detect_record.json").write_text("{}", encoding="utf-8")
+            return 0
+        return 0
+
+    monkeypatch.setattr(module, "_run_subprocess_for_step", _fake_run_step)
+
+    _, detect_path = module._run_dual_branch_embedding_and_detection(
+        repo_root=repo_root,
+        cfg_path=cfg_path,
+        run_root=run_root,
+        profile="paper_full_cuda",
+    )
+
+    assert detect_path.exists()
+    embed_commands = [command for command in calls if "-m" in command and "main.cli.run_embed" in command]
+    assert embed_commands
+    assert "test_mode_identity=true" in embed_commands[0]
+    assert "enable_paper_faithfulness=false" in embed_commands[0]
+    assert "embed.injection_enabled=false" not in embed_commands[0]
+
+
+def test_prepare_detect_records_recovers_dual_branch_negative_score_for_calibration(tmp_path: Path) -> None:
+    """
+    功能：验证 dual-branch 负样本记录在 score 缺失时可从 hf_score_raw 恢复为校准可用样本。 
+
+    Verify minimal GT preparation recovers negative score from hf_detect_trace.hf_score_raw
+    and marks it as formal dual-branch recovery sample.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    run_root.mkdir(parents=True, exist_ok=True)
+
+    source_detect_path = run_root / "records" / "detect_record_for_scoring.json"
+    source_detect_path.parent.mkdir(parents=True, exist_ok=True)
+    source_detect_path.write_text(
+        json.dumps(
+            {
+                "content_evidence_payload": {
+                    "status": "failed",
+                    "score": -0.1,
+                    "content_failure_reason": "mask_extraction_no_input",
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    branch_neg_detect_path = run_root / "artifacts" / "branch_neg" / "records" / "detect_record.json"
+    branch_neg_detect_path.parent.mkdir(parents=True, exist_ok=True)
+    branch_neg_detect_path.write_text(
+        json.dumps(
+            {
+                "content_evidence_payload": {
+                    "status": "failed",
+                    "score": None,
+                    "score_parts": {
+                        "hf_detect_trace": {
+                            "hf_status": "ok",
+                            "hf_score_raw": -0.023,
+                        }
+                    },
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    glob_pattern = module._prepare_detect_records_with_minimal_ground_truth(
+        run_root=run_root,
+        source_detect_path=source_detect_path,
+        stage_name="calibrate",
+        branch_neg_detect_record=branch_neg_detect_path,
+    )
+    assert "detect_records_calibrate_gt_*.json" in glob_pattern
+
+    negative_path = run_root / "artifacts" / "workflow_cfg" / "detect_records_calibrate_gt_negative.json"
+    assert negative_path.exists()
+    negative_payload = json.loads(negative_path.read_text(encoding="utf-8"))
+    content_payload = negative_payload.get("content_evidence_payload", {})
+    assert content_payload.get("status") == "ok"
+    assert content_payload.get("score") == -0.023
+    assert content_payload.get("calibration_sample_origin") == "dual_branch_negative_recovery"
+    assert content_payload.get("calibration_sample_usage") == "formal_with_dual_branch_negative_marker"
+
+
+def test_prepare_detect_records_clone_mode_recovers_failed_source_for_negative_gt(tmp_path: Path) -> None:
+    """
+    功能：验证单分支 clone 回退场景可从 failed 源恢复负样本 GT 分数。 
+
+    Verify clone-based GT generation can recover negative sample when source
+    detect record is failed but already has recovered score metadata.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root_clone_recovery"
+    source_detect_path = run_root / "records" / "detect_record_for_scoring.json"
+    source_detect_path.parent.mkdir(parents=True, exist_ok=True)
+    source_detect_path.write_text(
+        json.dumps(
+            {
+                "content_evidence_payload": {
+                    "status": "failed",
+                    "score": -0.0042,
+                    "content_failure_reason": "mask_extraction_no_input",
+                    "calibration_score_recovery_reason": "mask_extraction_no_input_with_hf_trace",
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    glob_pattern = module._prepare_detect_records_with_minimal_ground_truth(
+        run_root=run_root,
+        source_detect_path=source_detect_path,
+        stage_name="calibrate",
+    )
+    assert "detect_records_calibrate_gt_*.json" in glob_pattern
+
+    negative_path = run_root / "artifacts" / "workflow_cfg" / "detect_records_calibrate_gt_negative.json"
+    assert negative_path.exists()
+    negative_payload = json.loads(negative_path.read_text(encoding="utf-8"))
+    content_payload = negative_payload.get("content_evidence_payload", {})
+    assert content_payload.get("status") == "ok"
+    assert content_payload.get("score") == -1.0
+    assert content_payload.get("calibration_sample_usage") == "synthetic_negative_for_ground_truth_closure"
+    assert content_payload.get("calibration_sample_origin") == "synthetic_negative_bundle_from_failed_source_v1"
+
+
 def test_onefile_prepare_stage_cfg_path_uses_prompt_list_as_gt_driver(tmp_path: Path) -> None:
     """
     功能：验证可通过 prompts 文件驱动 GT records 生成与 prompt 注入。
