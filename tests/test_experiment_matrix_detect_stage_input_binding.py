@@ -362,14 +362,14 @@ def test_run_stage_sequence_skips_ablation_overrides_when_cfg_snapshot_has_no_ab
     for stage_name in ["embed", "detect", "calibrate", "evaluate"]:
         overrides = captured_overrides.get(stage_name, [])
         assert all(not item.startswith("ablation_enable_") for item in overrides)
-        assert "enable_paper_faithfulness=false" in overrides
+        assert all(not item.startswith("enable_paper_faithfulness=") for item in overrides)
 
 
 def test_run_stage_sequence_disables_paper_faithfulness_for_all_matrix_items(monkeypatch) -> None:
     """
-    功能：矩阵子实验统一关闭 paper faithfulness 门禁（含 baseline 与 ablation）。
+    功能：矩阵子实验不应强制注入 paper faithfulness 覆盖（含 baseline 与 ablation）。
 
-    Verify _run_stage_sequence appends enable_paper_faithfulness=false
+    Verify _run_stage_sequence does not append any enable_paper_faithfulness override
     for all stages regardless of ablation flags.
 
     Args:
@@ -430,7 +430,7 @@ def test_run_stage_sequence_disables_paper_faithfulness_for_all_matrix_items(mon
 
     for stage_name in ["embed", "detect", "calibrate", "evaluate"]:
         overrides = captured_overrides.get(stage_name, [])
-        assert "enable_paper_faithfulness=false" in overrides
+        assert all(not item.startswith("enable_paper_faithfulness=") for item in overrides)
 
 
 def test_detect_gate_research_collection_mode_relaxes_and_records_metadata(tmp_path: Path, monkeypatch) -> None:
