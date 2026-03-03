@@ -1031,6 +1031,7 @@ def test_dual_branch_embed_uses_whitelisted_test_mode_identity_override(
     assert embed_commands
     assert "test_mode_identity=true" in embed_commands[0]
     assert "enable_paper_faithfulness=false" in embed_commands[0]
+    assert "enable_paper_faithfulness=true" not in embed_commands[0]
     assert "embed.injection_enabled=false" not in embed_commands[0]
 
 

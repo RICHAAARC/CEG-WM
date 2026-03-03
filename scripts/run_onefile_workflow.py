@@ -872,6 +872,22 @@ def _run_dual_branch_embedding_and_detection(
     # (2) 运行 embed（负样本，禁用注入）
     scripts_dir = repo_root / "scripts"
     embed_cmd = _build_stage_command("embed", branch_neg_root, cfg_path, profile)
+    # 清理默认 profile 注入的 enable_paper_faithfulness 覆写，避免 arg_name 重复。
+    sanitized_embed_cmd: list[str] = []
+    index = 0
+    while index < len(embed_cmd):
+        current_item = str(embed_cmd[index])
+        if (
+            current_item == "--override"
+            and index + 1 < len(embed_cmd)
+            and str(embed_cmd[index + 1]).startswith("enable_paper_faithfulness=")
+        ):
+            index += 2
+            continue
+        sanitized_embed_cmd.append(current_item)
+        index += 1
+    embed_cmd = sanitized_embed_cmd
+
     # 使用 whitelist 允许的 test_mode_identity 覆写生成 clean 分支，
     # 并显式关闭 paper_faithfulness 以避免 identity baseline 被门禁拒绝。
     embed_cmd.extend(["--override", "test_mode_identity=true"])
