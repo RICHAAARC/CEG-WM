@@ -828,25 +828,92 @@ def _build_stage_command(
     return command
 
 
+def _run_dual_branch_embedding_and_detection(
+    repo_root: Path,
+    cfg_path: Path,
+    run_root: Path,
+    profile: str
+) -> tuple[Path, Path]:
+    """
+    功能：执行双分支嵌入与检测（生成负样本）。
+
+    Run negative branch embed and detect for dual-branch workflow.
+    Creates branch_neg subdirectory and executes:
+    - embed with injection_enabled=false override
+    - detect using branch_neg embed output
+
+    Args:
+        repo_root: Repository root path.
+        cfg_path: Base config path.
+        run_root: Unified run_root path.
+        profile: Workflow profile.
+
+    Returns:
+        Tuple of (branch_neg_output_root, branch_neg_detect_record_path).
+
+    Raises:
+        RuntimeError: If embed or detect fails.
+    """
+    if not isinstance(repo_root, Path) or not isinstance(cfg_path, Path):
+        raise TypeError("repo_root and cfg_path must be Path")
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+
+    # (1) 创建负样本分支输出目录
+    branch_neg_root = run_root / "artifacts" / "branch_neg"
+    if branch_neg_root.exists():
+        try:
+            shutil.rmtree(branch_neg_root)
+        except Exception as e:
+            print(f"[dual_branch] WARN: Failed to clean branch_neg: {e}", file=sys.stderr)
+    branch_neg_root.mkdir(parents=True, exist_ok=True)
+    print(f"[dual_branch] Created branch_neg output: {branch_neg_root}")
+
+    # (2) 运行 embed（负样本，禁用注入）
+    scripts_dir = repo_root / "scripts"
+    embed_cmd = _build_stage_command("embed", branch_neg_root, cfg_path, profile)
+    # 添加 override 禁用注入
+    embed_cmd.extend(["--override", "embed.injection_enabled=false"])
+    print(f"[dual_branch] Running negative embed: {' '.join(str(c) for c in embed_cmd)}")
+    embed_return = _run_subprocess_for_step(embed_cmd, repo_root)
+    if embed_return != 0:
+        raise RuntimeError(f"dual_branch embed failed with return code {embed_return}")
+    print(f"[dual_branch] Negative embed completed successfully")
+
+    # (3) 运行 detect（从负样本 embed 输出读取）
+    detect_cmd = _build_stage_command("detect", branch_neg_root, cfg_path, profile)
+    detect_cmd.extend(["--input", str(branch_neg_root / "records" / "embed_record.json")])
+    print(f"[dual_branch] Running negative detect: {' '.join(str(c) for c in detect_cmd)}")
+    detect_return = _run_subprocess_for_step(detect_cmd, repo_root)
+    if detect_return != 0:
+        raise RuntimeError(f"dual_branch detect failed with return code {detect_return}")
+    print(f"[dual_branch] Negative detect completed successfully")
+
+    # (4) 验证输出文件存在并返回路径
+    branch_neg_detect_record = branch_neg_root / "records" / "detect_record.json"
+    if not branch_neg_detect_record.exists():
+        raise RuntimeError(f"dual_branch detect output not found: {branch_neg_detect_record}")
+
+    return branch_neg_root, branch_neg_detect_record
+
+
 def _prepare_stage_cfg_path(
     stage_name: str,
     run_root: Path,
     cfg_path: Path,
     profile: str,
+    repo_root: Path,
 ) -> Path:
     """
     功能：为特定阶段生成补全字段后的配置文件。 
-
     Build stage-specific config file when extra fields are required by stage logic.
-
     Args:
         stage_name: Stage name.
         run_root: Unified run_root path.
         cfg_path: Base config path.
-
+        repo_root: Repository root path (for dual-branch operations).
     Returns:
         Config path for current stage.
-
     Raises:
         TypeError: If inputs are invalid.
         ValueError: If config content is invalid.
@@ -857,23 +924,33 @@ def _prepare_stage_cfg_path(
         raise TypeError("run_root must be Path")
     if not isinstance(cfg_path, Path):
         raise TypeError("cfg_path must be Path")
-
+    if not isinstance(repo_root, Path):
+        raise TypeError("repo_root must be Path")
     if stage_name not in {"calibrate", "evaluate"}:
         return cfg_path
-
     profile = _normalize_profile(profile)
-
     cfg_text = cfg_path.read_text(encoding="utf-8")
     cfg_obj = yaml.safe_load(cfg_text)
     if not isinstance(cfg_obj, dict):
         raise ValueError("config root must be mapping")
-
     records_dir = run_root / "records"
     detect_record_path = records_dir / "detect_record.json"
     if detect_record_path.exists() and detect_record_path.is_file():
         detect_record_glob = str(_prepare_detect_record_for_scoring(run_root, records_dir, profile))
     else:
         detect_record_glob = str(detect_record_path)
+    # 在 calibrate 时运行双分支 embed/detect
+    branch_neg_detect_record = run_root / "artifacts" / "branch_neg" / "records" / "detect_record.json"
+    if profile == PROFILE_PAPER_FULL_CUDA and stage_name == "calibrate" and not branch_neg_detect_record.exists():
+        try:
+            print("[onefile] Running dual-branch embedding and detection (P0-3)...")
+            _, branch_neg_detect_record = _run_dual_branch_embedding_and_detection(
+                repo_root, cfg_path, run_root, profile
+            )
+            print("[onefile] Dual-branch embedding and detection completed")
+        except Exception as exc:
+            print(f"[onefile] WARN: Dual-branch execution failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+            print("[onefile] Continuing with single-branch workflow (GT generated via clone)", file=sys.stderr)
 
     if profile == PROFILE_PAPER_FULL_CUDA and detect_record_glob and "*" not in detect_record_glob and "?" not in detect_record_glob:
         stage_cfg_key = "calibration" if stage_name == "calibrate" else "evaluate"
@@ -889,11 +966,11 @@ def _prepare_stage_cfg_path(
             pair_count = stage_cfg.get("minimal_ground_truth_pair_count", 1)
             if not isinstance(pair_count, int) or pair_count <= 0:
                 pair_count = 1
-
         detect_record_glob = _prepare_detect_records_with_minimal_ground_truth(
             run_root,
             Path(detect_record_glob),
             stage_name,
+            branch_neg_detect_record=branch_neg_detect_record if stage_name == "calibrate" else None,
             pair_count=pair_count,
             prompts=prompt_list,
         )
@@ -930,6 +1007,7 @@ def _prepare_detect_records_with_minimal_ground_truth(
     stage_name: str,
     pair_count: int = 1,
     prompts: Sequence[str] | None = None,
+    branch_neg_detect_record: Path | None = None,
 ) -> str:
     """
     功能：为 calibrate/evaluate 生成最小正负标签 detect records 集合。 
@@ -941,6 +1019,7 @@ def _prepare_detect_records_with_minimal_ground_truth(
         run_root: Unified run_root path.
         source_detect_path: Source detect record path.
         stage_name: Stage name in {calibrate, evaluate}.
+        branch_neg_detect_record: Optional path to neg branch detect record (P0-3 dual-branch mode).
         pair_count: Number of positive/negative pairs to generate.
         prompts: Optional prompt list used to drive each pair.
 
@@ -964,6 +1043,8 @@ def _prepare_detect_records_with_minimal_ground_truth(
             raise TypeError("prompts must be Sequence[str] or None")
         if len(prompts) != pair_count:
             raise ValueError("prompts length must equal pair_count")
+    if branch_neg_detect_record is not None and not isinstance(branch_neg_detect_record, Path):
+        raise TypeError("branch_neg_detect_record must be Path or None")
 
     if not source_detect_path.exists() or not source_detect_path.is_file():
         return str(source_detect_path)
@@ -971,6 +1052,42 @@ def _prepare_detect_records_with_minimal_ground_truth(
     source_payload = json.loads(source_detect_path.read_text(encoding="utf-8"))
     if not isinstance(source_payload, dict):
         raise ValueError("source detect record must be JSON object")
+
+    # 如果有真实的负样本 detect 记录，直接聚合而不是 clone
+    if branch_neg_detect_record is not None and branch_neg_detect_record.exists() and branch_neg_detect_record.is_file():
+        try:
+            neg_payload = json.loads(branch_neg_detect_record.read_text(encoding="utf-8"))
+            if isinstance(neg_payload, dict):
+                workflow_cfg_dir = run_root / "artifacts" / "workflow_cfg"
+                workflow_cfg_dir.mkdir(parents=True, exist_ok=True)
+
+                # 直接使用正负样本，不进行 clone 操作
+                pos_payload = json.loads(json.dumps(source_payload, ensure_ascii=False))
+                pos_payload["label"] = True
+                pos_payload["ground_truth"] = True
+                pos_payload["is_watermarked"] = True
+
+                neg_payload["label"] = False
+                neg_payload["ground_truth"] = False
+                neg_payload["is_watermarked"] = False
+
+                pos_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_positive.json"
+                neg_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_negative.json"
+
+                _write_artifact_text_unbound(
+                    run_root,
+                    pos_path,
+                    json.dumps(pos_payload, ensure_ascii=False, indent=2),
+                )
+                _write_artifact_text_unbound(
+                    run_root,
+                    neg_path,
+                    json.dumps(neg_payload, ensure_ascii=False, indent=2),
+                )
+                return str((workflow_cfg_dir / f"detect_records_{stage_name}_gt_*.json"))
+        except Exception as exc:
+            print(f"[GT] WARN: Dual-branch aggregation failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+            print("[GT] Falling back to clone-based GT generation", file=sys.stderr)
 
     workflow_cfg_dir = run_root / "artifacts" / "workflow_cfg"
     workflow_cfg_dir.mkdir(parents=True, exist_ok=True)
@@ -1130,21 +1247,7 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
             recovered_field = field_name
             break
 
-    if isinstance(recovered_score, float) and status_value != "failed":
-        content_payload["score"] = recovered_score
-        content_payload["status"] = "ok"
-        content_payload["content_failure_reason"] = None
-        if profile == PROFILE_PAPER_FULL_CUDA:
-            print(f"[onefile] PAPER_SCORE_RECOVERY_APPLIED source={recovered_field} status_before={status_value}")
-        recovered_detect_path = run_root / "artifacts" / "workflow_cfg" / "detect_record_for_scoring.json"
-        recovered_detect_path.parent.mkdir(parents=True, exist_ok=True)
-        _write_artifact_text_unbound(
-            run_root,
-            recovered_detect_path,
-            json.dumps(payload, ensure_ascii=False, indent=2)
-        )
-        return recovered_detect_path
-
+    # 移除status改写逻辑，禁止失败语义被恢复分数覆盖
     if profile == PROFILE_PAPER_FULL_CUDA:
         diagnostic_snapshot = {
             "status": status_value,
@@ -2214,7 +2317,7 @@ def run_onefile_workflow(
                 )
                 return 1
         if step.name in {"calibrate", "evaluate"}:
-            stage_cfg_path = _prepare_stage_cfg_path(step.name, run_root, effective_cfg_path, profile)
+            stage_cfg_path = _prepare_stage_cfg_path(step.name, run_root, effective_cfg_path, profile, repo_root)
             step_command = _build_stage_command(step.name, run_root, stage_cfg_path, profile)
 
         _print_step_header(step, run_root, step_command)

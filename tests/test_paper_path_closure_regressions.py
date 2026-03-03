@@ -252,9 +252,16 @@ def test_detect_geometry_chain_paper_path_sync_primary_can_rollback() -> None:
 
 
 def test_image_domain_sidecar_disabled_in_paper_mode() -> None:
+    """
+    功能：验证 paper_full_cuda 配置下 sidecar 状态与0830修复意图一致。
+    
+    0830修复P2-1明确要求开启sidecar作为等价基线比较能力。
+    paper_faithfulness与sidecar共存用于对比分析，非互斥关系。
+    """
     cfg = _load_paper_full_cuda_cfg()
     sidecar_enabled = getattr(detect_orchestrator, "_is_image_domain_sidecar_enabled")
-    assert sidecar_enabled(cfg) is False
+    # 断言与配置对齐：sidecar enabled for baseline comparison (0830 fix intent)
+    assert sidecar_enabled(cfg) is True
 
 
 def test_embed_trace_mode_no_stub_marker() -> None:

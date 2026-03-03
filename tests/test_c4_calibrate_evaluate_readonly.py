@@ -8,6 +8,9 @@ from pathlib import Path
 
 import pytest
 
+from main.cli import run_calibrate as run_calibrate_module
+from main.cli import run_evaluate as run_evaluate_module
+
 from main.registries.runtime_resolver import BuiltImplSet
 from main.watermarking.detect.orchestrator import (
     evaluate_records_against_threshold,
@@ -291,3 +294,45 @@ def test_run_calibrate_orchestrator_conditional_fpr_records_are_deterministic(tm
     record_b = run_calibrate_orchestrator(cfg, impl_set)
 
     assert record_a["threshold_metadata_artifact"]["conditional_fpr_records"] == record_b["threshold_metadata_artifact"]["conditional_fpr_records"]
+
+
+def test_calibrate_label_balance_gate_rejects_empty_negative_set(tmp_path: Path) -> None:
+    """Validate calibrate preflight gate rejects detect records without negative labels."""
+    detect_record_path = tmp_path / "detect_pos.json"
+    detect_record_path.write_text(
+        json.dumps(
+            {
+                "label": True,
+                "content_evidence_payload": {"status": "ok", "score": 0.8},
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = {
+        "calibration": {
+            "detect_records_glob": str(detect_record_path),
+        }
+    }
+    with pytest.raises(ValueError, match="n_pos=1, n_neg=0"):
+        run_calibrate_module._validate_detect_record_label_balance_for_calibration(cfg)
+
+
+def test_evaluate_label_balance_gate_rejects_empty_positive_set(tmp_path: Path) -> None:
+    """Validate evaluate preflight gate rejects detect records without positive labels."""
+    detect_record_path = tmp_path / "detect_neg.json"
+    detect_record_path.write_text(
+        json.dumps(
+            {
+                "label": False,
+                "content_evidence_payload": {"status": "ok", "score": 0.1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = {
+        "evaluate": {
+            "detect_records_glob": str(detect_record_path),
+        }
+    }
+    with pytest.raises(ValueError, match="n_pos=0, n_neg=1"):
+        run_evaluate_module._validate_detect_record_label_balance_for_evaluate(cfg)

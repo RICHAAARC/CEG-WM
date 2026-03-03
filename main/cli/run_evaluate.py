@@ -9,6 +9,7 @@
 
 import sys
 import argparse
+import glob
 from pathlib import Path
 import uuid
 from typing import Any, Dict, cast
@@ -50,6 +51,80 @@ from main.cli.run_common import (
     normalize_nondeterminism_notes,
     build_cli_config_migration_hint
 )
+
+
+def _resolve_label_from_detect_record(record: Dict[str, Any]) -> bool | None:
+    """
+    功能：从 detect record 解析布尔标签。 
+
+    Resolve boolean label from detect record candidates.
+
+    Args:
+        record: Detect record mapping.
+
+    Returns:
+        True/False label, or None when missing.
+    """
+    if not isinstance(record, dict):
+        raise TypeError("record must be dict")
+    for key_name in ["label", "ground_truth", "is_watermarked"]:
+        value = record.get(key_name)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)) and value in (0, 1):
+            return bool(value)
+    return None
+
+
+def _validate_detect_record_label_balance_for_evaluate(cfg: Dict[str, Any]) -> None:
+    """
+    功能：校验评估阶段 detect_records 的正负样本计数。 
+
+    Validate detect record label balance before evaluate execution.
+
+    Args:
+        cfg: Runtime config mapping.
+
+    Returns:
+        None.
+
+    Raises:
+        ValueError: If records glob is missing or n_pos/n_neg is zero.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+
+    evaluate_node = cfg.get("evaluate")
+    evaluate_cfg = evaluate_node if isinstance(evaluate_node, dict) else {}
+    records_glob = evaluate_cfg.get("detect_records_glob")
+    if not isinstance(records_glob, str) or not records_glob:
+        raise ValueError("evaluate.detect_records_glob is required")
+
+    matched_paths = sorted(glob.glob(records_glob, recursive=True))
+    if len(matched_paths) == 0:
+        raise ValueError(f"no detect records matched: {records_glob}")
+
+    n_pos = 0
+    n_neg = 0
+    for path_str in matched_paths:
+        path_obj = Path(path_str)
+        if not path_obj.is_file():
+            continue
+        payload = records_io.read_json(str(path_obj))
+        if not isinstance(payload, dict):
+            continue
+        label_value = _resolve_label_from_detect_record(payload)
+        if label_value is True:
+            n_pos += 1
+        elif label_value is False:
+            n_neg += 1
+
+    if n_pos <= 0 or n_neg <= 0:
+        # 样本空集风险，必须 fail-fast 阻断评估。
+        raise ValueError(
+            "evaluate requires both positive and negative labeled detect records "
+            f"(n_pos={n_pos}, n_neg={n_neg}, detect_records_glob={records_glob})"
+        )
 
 
 def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None = None) -> None:
@@ -171,6 +246,9 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
                 raise
             run_meta["cfg_digest"] = cfg_digest
             run_meta["policy_path"] = cfg["policy_path"]
+
+            # P1-3: 样本有效性前置门禁（n_pos/n_neg 不能为0）。
+            _validate_detect_record_label_balance_for_evaluate(cfg)
 
             seed_parts, seed_digest, seed_value, seed_rule_id = build_seed_audit(cfg, "evaluate")
             cfg["seed"] = seed_value

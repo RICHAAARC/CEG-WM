@@ -73,3 +73,6 @@ audit_tmp/
 artifacts/
 .pytest/
 .pytest*
+
+# Modles
+models/

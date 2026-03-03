@@ -111,3 +111,48 @@ def test_saliency_source_model_unavailable_returns_explicit_fail() -> None:
     assert result.status == "failed"
     assert result.content_failure_reason == "saliency_source_model_unavailable"
     assert isinstance(result.audit.get("fallback_reason"), str)
+
+
+def test_saliency_source_model_v2_runtime_failure_is_fail_fast(monkeypatch) -> None:
+    provider = SemanticMaskProvider(
+        impl_id=SEMANTIC_MASK_PROVIDER_ID,
+        impl_version=SEMANTIC_MASK_PROVIDER_VERSION,
+        impl_digest=digests.canonical_sha256({
+            "impl_id": SEMANTIC_MASK_PROVIDER_ID,
+            "impl_version": SEMANTIC_MASK_PROVIDER_VERSION,
+        }),
+    )
+
+    def _fake_probe(_params):
+        return True
+
+    def _raise_v2(*args, **kwargs):
+        raise RuntimeError("forced_v2_runtime_failure")
+
+    monkeypatch.setattr(
+        "main.watermarking.content_chain.semantic_mask_provider._probe_model_v2_availability",
+        _fake_probe,
+    )
+    monkeypatch.setattr(
+        "main.watermarking.content_chain.semantic_mask_provider.build_semantic_saliency_mask_v2",
+        _raise_v2,
+    )
+
+    cfg = {
+        "enable_mask": True,
+        "mask": {
+            "saliency_source": "model_v2",
+            "semantic_model_path": "C:/fake/model.pt",
+        },
+    }
+    inputs = {
+        "image": [1, 2, 3],
+        "image_shape": (64, 64, 3),
+    }
+
+    result = provider.extract(cfg, inputs=inputs, cfg_digest="cfg_digest_anchor")
+
+    assert result.status == "failed"
+    assert result.content_failure_reason == "saliency_source_model_v2_runtime_failed"
+    assert result.mask_digest is None
+    assert result.audit.get("mask_source_type") == "semantic_model_v2"

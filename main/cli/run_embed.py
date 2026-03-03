@@ -312,27 +312,18 @@ def run_embed(
             injection_site_spec = None
             injection_site_digest = None
             
-            # 无论 plan 是否存在都必须生成 injection_site_spec
+            # 延迟 injection_site_spec 创建到 POST-ORCHESTRATOR
+            # 此处仅创建 injection_context 和 injection_modifier （驱动 inference）
+            # injection_site_spec 将在 orchestrator 后根据真实 plan_digest 创建
             try:
                 if isinstance(plan_payload, dict) and isinstance(plan_digest, str) and plan_digest:
-                    # 计划存在：包含详细的plan digest和注入模式
+                    # 计划存在：基于 PRE-COMPUTED plan 创建推理时所需的 context
+                    # 注意：此 plan_digest 是临时的，真实 plan_digest 将由 orchestrator 计算
                     injection_context = build_injection_context_from_plan(cfg, plan_payload, plan_digest)
                     injection_modifier = LatentModifier(LATENT_MODIFIER_ID, LATENT_MODIFIER_VERSION)
-                    
-                    injection_site_spec, injection_site_digest = injection_site_binder.build_injection_site_spec(
-                        hook_type="callback_on_step_end",
-                        target_module_name="StableDiffusion3Pipeline",
-                        target_tensor_name="latents",
-                        hook_timing="after_scheduler_step",
-                        injection_rule_summary={
-                            "plan_digest": plan_digest,
-                            "injection_mode": "subspace_projection"
-                        },
-                        cfg=cfg
-                    )
-                    print(f"[Paper-Faithful] Injection site spec generated (with plan): {injection_site_digest[:16]}...")
+                    print(f"[Paper-Faithful] Injection context created from PRE-COMPUTED plan (POST-ORCHESTRATOR决定最终spec)")
                 else:
-                    # 计划缺失：构造最小可审计 plan，并启用注入上下文以满足 paper_faithfulness 证据要求。
+                    # 计划缺失：基于 fallback plan 创建推理时所需的 context
                     fallback_plan_payload = {
                         "plan_status": "fallback_runtime_plan",
                         "planner_params": {
@@ -343,24 +334,11 @@ def run_embed(
                     fallback_plan_digest = digests.canonical_sha256(fallback_plan_payload)
                     injection_context = build_injection_context_from_plan(cfg, fallback_plan_payload, fallback_plan_digest)
                     injection_modifier = LatentModifier(LATENT_MODIFIER_ID, LATENT_MODIFIER_VERSION)
-
-                    # 计划缺失：仍然生成最小化的 injection_site_spec（必须）
-                    injection_site_spec, injection_site_digest = injection_site_binder.build_injection_site_spec(
-                        hook_type="callback_on_step_end",
-                        target_module_name="StableDiffusion3Pipeline",
-                        target_tensor_name="latents",
-                        hook_timing="after_scheduler_step",
-                        injection_rule_summary={
-                            "plan_digest": fallback_plan_digest,
-                            "injection_mode": "latent_direct_fallback"
-                        },
-                        cfg=cfg
-                    )
-                    print(f"[Paper-Faithful] Injection site spec generated (minimal): {injection_site_digest[:16]}...")
-            except Exception as inj_site_exc:
-                print(f"[Paper-Faithful] [WARN] Injection site binding failed: {inj_site_exc}")
-                injection_site_spec = {"status": "failed", "error": str(inj_site_exc)}
-                injection_site_digest = "<failed>"
+                    print(f"[Paper-Faithful] Injection context created from FALLBACK plan (POST-ORCHESTRATOR决定最终spec)")
+            except Exception as inj_ctx_exc:
+                print(f"[Paper-Faithful] [WARN] Injection context creation failed: {inj_ctx_exc}")
+                injection_context = None
+                injection_modifier = None
             
             # (7.7) Real Dataflow Smoke: 在 pipeline_result 之后调用 inference
             pipeline_obj = pipeline_result.get("pipeline_obj")
@@ -537,13 +515,79 @@ def run_embed(
             if pipeline_fingerprint_digest is not None:
                 content_evidence["pipeline_fingerprint_digest"] = pipeline_fingerprint_digest
             
+            # POST-ORCHESTRATOR 创建最终的 injection_site_spec
+            # 使用 orchestrator 计算的真实 plan_digest 来确定 injection_mode
+            orchestrator_plan_digest = content_evidence.get("plan_digest")
+            try:
+                if isinstance(orchestrator_plan_digest, str) and orchestrator_plan_digest:
+                    # 真实 plan_digest 存在 → subspace_projection 模式
+                    injection_site_spec, injection_site_digest = injection_site_binder.build_injection_site_spec(
+                        hook_type="callback_on_step_end",
+                        target_module_name="StableDiffusion3Pipeline",
+                        target_tensor_name="latents",
+                        hook_timing="after_scheduler_step",
+                        injection_rule_summary={
+                            "plan_digest": orchestrator_plan_digest,
+                            "injection_mode": "subspace_projection"
+                        },
+                        cfg=cfg
+                    )
+                    print(f"[Paper-Faithful] Injection site spec built (POST-ORCHESTRATOR with real plan_digest): {injection_site_digest[:16]}...")
+                else:
+                    # plan_digest 缺失（orchestrator 也未能生成）→ fallback 模式
+                    fallback_plan_payload = {
+                        "plan_status": "fallback_runtime_plan_post_orchestrator",
+                        "planner_params": {
+                            "rank": 8,
+                            "source": "post_orchestrator_fallback"
+                        }
+                    }
+                    fallback_plan_digest = digests.canonical_sha256(fallback_plan_payload)
+                    injection_site_spec, injection_site_digest = injection_site_binder.build_injection_site_spec(
+                        hook_type="callback_on_step_end",
+                        target_module_name="StableDiffusion3Pipeline",
+                        target_tensor_name="latents",
+                        hook_timing="after_scheduler_step",
+                        injection_rule_summary={
+                            "plan_digest": fallback_plan_digest,
+                            "injection_mode": "latent_direct_fallback"
+                        },
+                        cfg=cfg
+                    )
+                    print(f"[Paper-Faithful] Injection site spec built (POST-ORCHESTRATOR fallback): {injection_site_digest[:16]}...")
+                    # 同时更新 content_evidence 的 plan_digest（如果为空）
+                    if not isinstance(orchestrator_plan_digest, str) or not orchestrator_plan_digest:
+                        content_evidence["plan_digest"] = fallback_plan_digest
+            except Exception as final_inj_exc:
+                print(f"[Paper-Faithful] [WARN] Final injection site building failed: {final_inj_exc}")
+                injection_site_spec = {"status": "failed", "error": str(final_inj_exc)}
+                injection_site_digest = "<failed>"
+            
             # 写入 injection_site_spec 和 injection_site_digest
+            # 同步校验plan_digest口径一致性
             if injection_site_spec is not None:
                 content_evidence["injection_site_spec"] = injection_site_spec
+                # 提取injection_site_spec中的plan_digest
+                injection_rule_summary = injection_site_spec.get("injection_rule_summary")
+                if isinstance(injection_rule_summary, dict):
+                    spec_plan_digest = injection_rule_summary.get("plan_digest")
+                    orchestrator_plan_digest = content_evidence.get("plan_digest")
+                    # 校验口径一致性
+                    if isinstance(spec_plan_digest, str) and spec_plan_digest:
+                        if orchestrator_plan_digest is None or orchestrator_plan_digest == "":
+                            # orchestrator未写入或为空，同步spec中的plan_digest
+                            content_evidence["plan_digest"] = spec_plan_digest
+                        elif orchestrator_plan_digest != spec_plan_digest:
+                            # 口径不一致，写入mismatch原因但不静默覆盖
+                            content_evidence["plan_digest_mismatch"] = {
+                                "orchestrator_value": orchestrator_plan_digest,
+                                "injection_site_value": spec_plan_digest,
+                                "mismatch_reason": "pre_computation_vs_orchestrator_divergence"
+                            }
             if injection_site_digest is not None:
                 content_evidence["injection_site_digest"] = injection_site_digest
             
-            # (S-C) Paper Faithfulness: 调用 alignment_evaluator（必达）
+            # Paper Faithfulness: 调用 alignment_evaluator（必达）
             paper_spec = None
             paper_spec_digest = None
             try:
