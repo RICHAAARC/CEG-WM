@@ -509,8 +509,10 @@ def run_embed(
             inputs_record = {}
             if isinstance(input_image_path, str) and input_image_path.strip():
                 inputs_record["input_image_path"] = input_image_path.strip()
-            elif "image" in cfg.get("__embed_input_image_path__", ""):
-                inputs_record["input_image_path"] = cfg.get("__embed_input_image_path__")
+            else:
+                cfg_input_image_path = cfg.get("__embed_input_image_path__")
+                if isinstance(cfg_input_image_path, str) and cfg_input_image_path.strip():
+                    inputs_record["input_image_path"] = cfg_input_image_path.strip()
             if inputs_record:
                 record["inputs"] = inputs_record
             
