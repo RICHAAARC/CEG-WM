@@ -233,3 +233,6 @@ def test_run_experiment_matrix_batch_disables_paper_faithfulness_for_matrix(
     assert isinstance(paper_cfg, dict)
     assert paper_cfg.get("enabled") is False
     assert paper_cfg.get("alignment_check") is False
+    matrix_cfg = captured_cfg.get("experiment_matrix")
+    assert isinstance(matrix_cfg, dict)
+    assert matrix_cfg.get("config_path") == "configs/paper_full_cuda.yaml"

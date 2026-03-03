@@ -168,6 +168,14 @@ def run_experiment_matrix_batch(
         else:
             raise TypeError("experiment_matrix config must be dict when present")
 
+    matrix_cfg_obj = cfg_dict.get("experiment_matrix")
+    if matrix_cfg_obj is None:
+        matrix_cfg_obj = {}
+        cfg_dict["experiment_matrix"] = matrix_cfg_obj
+    elif not isinstance(matrix_cfg_obj, dict):
+        raise TypeError("experiment_matrix config must be dict when present")
+    matrix_cfg_obj["config_path"] = config_path
+
     # (2) 可选：执行协议可实现性门禁（评测前 fail-fast）
     if validate_protocol:
         protocol_spec = protocol_loader.load_attack_protocol_spec(cfg_dict)
