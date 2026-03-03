@@ -1236,6 +1236,14 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
         ("lf_score", content_payload.get("lf_score")),
         ("score_parts.content_score", score_parts.get("content_score")),
         ("score_parts.detect_lf_score", score_parts.get("detect_lf_score")),
+        (
+            "score_parts.hf_detect_trace.hf_score_raw",
+            (
+                score_parts.get("hf_detect_trace", {}).get("hf_score_raw")
+                if isinstance(score_parts.get("hf_detect_trace"), dict)
+                else None
+            ),
+        ),
         ("content_evidence.score", content_evidence.get("score")),
         ("record.score", payload.get("score")),
         ("fusion_result.evidence_summary.content_score", evidence_summary_node.get("content_score")),
@@ -1246,6 +1254,21 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
             recovered_score = numeric_candidate
             recovered_field = field_name
             break
+
+    if recovered_score is not None and status_ok:
+        content_payload["score"] = float(recovered_score)
+        recovered_detect_path = run_root / "artifacts" / "workflow_cfg" / "detect_record_for_scoring.json"
+        recovered_detect_path.parent.mkdir(parents=True, exist_ok=True)
+        _write_artifact_text_unbound(
+            run_root,
+            recovered_detect_path,
+            json.dumps(payload, ensure_ascii=False, indent=2)
+        )
+        if profile == PROFILE_PAPER_FULL_CUDA:
+            print(
+                f"[onefile] PAPER_SCORE_RECOVERY_APPLIED source={recovered_field} status=ok"
+            )
+        return recovered_detect_path
 
     # 移除status改写逻辑，禁止失败语义被恢复分数覆盖
     if profile == PROFILE_PAPER_FULL_CUDA:
@@ -1260,6 +1283,38 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
             score_parts_mapping = score_parts_node
             diagnostic_snapshot["score_parts.content_score"] = score_parts_mapping.get("content_score")
             diagnostic_snapshot["score_parts.detect_lf_score"] = score_parts_mapping.get("detect_lf_score")
+            hf_detect_trace_node = score_parts_mapping.get("hf_detect_trace")
+            if isinstance(hf_detect_trace_node, dict):
+                diagnostic_snapshot["score_parts.hf_detect_trace.hf_status"] = hf_detect_trace_node.get("hf_status")
+                diagnostic_snapshot["score_parts.hf_detect_trace.hf_score_raw"] = hf_detect_trace_node.get("hf_score_raw")
+
+        if recovered_score is not None:
+            hf_trace_for_recovery = score_parts.get("hf_detect_trace") if isinstance(score_parts, dict) else {}
+            hf_status_ok = (
+                isinstance(hf_trace_for_recovery, dict)
+                and hf_trace_for_recovery.get("hf_status") == "ok"
+            )
+            failure_reason_value = content_payload.get("content_failure_reason")
+            is_mask_input_missing = failure_reason_value == "mask_extraction_no_input"
+            from_hf_trace_raw = recovered_field == "score_parts.hf_detect_trace.hf_score_raw"
+            if is_mask_input_missing and hf_status_ok and from_hf_trace_raw:
+                content_payload["score"] = float(recovered_score)
+                content_payload["calibration_score_recovery_source"] = recovered_field
+                content_payload["calibration_score_recovery_reason"] = "mask_extraction_no_input_with_hf_trace"
+
+                recovered_detect_path = run_root / "artifacts" / "workflow_cfg" / "detect_record_for_scoring.json"
+                recovered_detect_path.parent.mkdir(parents=True, exist_ok=True)
+                _write_artifact_text_unbound(
+                    run_root,
+                    recovered_detect_path,
+                    json.dumps(payload, ensure_ascii=False, indent=2)
+                )
+                print(
+                    "[onefile] PAPER_SCORE_RECOVERY_APPLIED "
+                    f"source={recovered_field} status={status_value} "
+                    "mode=failed_semantics_preserved"
+                )
+                return recovered_detect_path
 
         # (1) 判断是否为 image_domain_sidecar 禁用导致的配置性缺失（非算法失败）。
         # sidecar 禁用时 LF/HF 均为 absent，不存在真实检测失败，允许以 fallback 继续。

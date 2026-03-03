@@ -719,6 +719,62 @@ def test_onefile_detect_record_scoring_recovers_when_status_failed_but_score_ava
         module._prepare_detect_record_for_scoring(run_root, records_dir, "paper_full_cuda")
 
 
+def test_onefile_detect_record_scoring_allows_hf_trace_recovery_with_failed_semantics(tmp_path: Path) -> None:
+    """
+    功能：验证 paper_full profile 在 mask_extraction_no_input 下允许使用 HF trace 分数恢复，但不改写失败语义。
+
+    Verify paper_full profile may recover score from hf_detect_trace.hf_score_raw
+    when content failure reason is mask_extraction_no_input and hf_status is ok,
+    while preserving failed status semantics.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    detect_record_path = records_dir / "detect_record.json"
+    detect_record_path.write_text(
+        json.dumps(
+            {
+                "content_evidence_payload": {
+                    "status": "failed",
+                    "score": None,
+                    "content_failure_reason": "mask_extraction_no_input",
+                    "score_parts": {
+                        "hf_status": "ok",
+                        "lf_status": "absent",
+                        "hf_detect_trace": {
+                            "hf_status": "ok",
+                            "hf_score_raw": -0.0041727437,
+                        },
+                    },
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    scoring_path = module._prepare_detect_record_for_scoring(run_root, records_dir, "paper_full_cuda")
+    assert scoring_path.exists()
+    assert scoring_path.name == "detect_record_for_scoring.json"
+
+    scoring_payload = json.loads(scoring_path.read_text(encoding="utf-8"))
+    content_payload = scoring_payload.get("content_evidence_payload", {})
+    assert content_payload.get("status") == "failed"
+    assert content_payload.get("content_failure_reason") == "mask_extraction_no_input"
+    assert content_payload.get("score") == -0.0041727437
+    assert content_payload.get("calibration_score_recovery_source") == "score_parts.hf_detect_trace.hf_score_raw"
+
+
 def test_onefile_detect_record_scoring_allows_fallback_when_sidecar_disabled(tmp_path: Path) -> None:
     """
     功能：验证 paper_full profile 在 sidecar 禁用时仅写诊断补全，不污染正式校准输入。
