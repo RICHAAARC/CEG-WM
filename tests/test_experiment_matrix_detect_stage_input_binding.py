@@ -6,6 +6,7 @@ Module type: General module
 
 from __future__ import annotations
 
+import glob
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -296,15 +297,15 @@ def test_detect_gate_allows_progress_when_content_score_valid(tmp_path: Path, mo
     assert called_stages == ["embed", "detect", "calibrate", "evaluate"]
 
 
-def test_run_stage_sequence_only_binds_attacked_detect_glob_for_evaluate(
+def test_run_stage_sequence_binds_labelled_detect_glob_for_calibrate_and_evaluate(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
     """
-    功能：矩阵子实验中仅 evaluate 绑定 attacked detect 记录，calibrate 不应绑定单条记录。
+    功能：矩阵子实验中 calibrate/evaluate 都应绑定带标签的 detect 记录 glob。
 
-    Verify experiment matrix binds attacked detect record only for evaluate stage,
-    while calibrate stage keeps default sampling path.
+    Verify experiment matrix binds labelled detect records glob for both calibrate
+    and evaluate stages.
 
     Args:
         tmp_path: pytest temporary directory.
@@ -325,11 +326,12 @@ def test_run_stage_sequence_only_binds_attacked_detect_glob_for_evaluate(
             "records_dir": run_root / "records",
         }
 
-    def _fake_prepare_detect_record(run_root: Path, _grid_item_cfg: dict) -> Path:
-        path = run_root / "artifacts" / "evaluate_inputs" / "detect_record_with_attack.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("{}", encoding="utf-8")
-        return path
+    def _fake_prepare_labelled_glob(run_root: Path, _grid_item_cfg: dict) -> str:
+        labelled_dir = run_root / "artifacts" / "evaluate_inputs" / "labelled_detect_records"
+        labelled_dir.mkdir(parents=True, exist_ok=True)
+        (labelled_dir / "detect_record_label_pos.json").write_text("{}", encoding="utf-8")
+        (labelled_dir / "detect_record_label_neg.json").write_text("{}", encoding="utf-8")
+        return str(labelled_dir / "*.json")
 
     def _fake_run_stage_command(stage_name, run_root, config_path, stage_overrides, input_record_path=None):
         captured_overrides[stage_name] = list(stage_overrides)
@@ -342,7 +344,7 @@ def test_run_stage_sequence_only_binds_attacked_detect_glob_for_evaluate(
             )
 
     monkeypatch.setattr(experiment_matrix.path_policy, "ensure_output_layout", _fake_layout)
-    monkeypatch.setattr(experiment_matrix, "_prepare_detect_record_for_attack_grouping", _fake_prepare_detect_record)
+    monkeypatch.setattr(experiment_matrix, "_prepare_labelled_detect_records_glob_for_matrix", _fake_prepare_labelled_glob)
     monkeypatch.setattr(experiment_matrix, "_run_stage_command", _fake_run_stage_command)
 
     grid_item_cfg = {
@@ -361,8 +363,56 @@ def test_run_stage_sequence_only_binds_attacked_detect_glob_for_evaluate(
     calibrate_overrides = captured_overrides.get("calibrate", [])
     evaluate_overrides = captured_overrides.get("evaluate", [])
 
-    assert all(not item.startswith("calibrate_detect_records_glob=") for item in calibrate_overrides)
+    assert any(item.startswith("calibrate_detect_records_glob=") for item in calibrate_overrides)
     assert any(item.startswith("evaluate_detect_records_glob=") for item in evaluate_overrides)
+
+
+def test_prepare_labelled_detect_records_glob_contains_pos_and_neg_labels(tmp_path: Path) -> None:
+    """
+    功能：matrix 标注样本生成必须产出正负两类 bool 标签记录。
+
+    Verify helper creates a labelled detect-record glob with both positive and
+    negative boolean labels for calibration/evaluate label-balance gates.
+
+    Args:
+        tmp_path: pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    run_root = tmp_path / "run"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    detect_record_path = records_dir / "detect_record.json"
+    detect_record_path.write_text(
+        json.dumps(
+            {
+                "operation": "detect",
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": 0.25,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    grid_item_cfg = {
+        "attack_protocol_family": "rotate",
+        "attack_protocol_path": "configs/attack_protocol.yaml",
+    }
+
+    records_glob = experiment_matrix._prepare_labelled_detect_records_glob_for_matrix(run_root, grid_item_cfg)
+    matched_paths = sorted(glob.glob(records_glob))
+
+    assert len(matched_paths) == 2
+    payloads = [json.loads(Path(path_str).read_text(encoding="utf-8")) for path_str in matched_paths]
+
+    labels = sorted(payload.get("label") for payload in payloads)
+    assert labels == [False, True]
+    assert all(payload.get("ground_truth") in {False, True} for payload in payloads)
+    assert all(payload.get("is_watermarked") in {False, True} for payload in payloads)
+    assert all(payload.get("calibration_excluded_from_labelled_sampling") is None for payload in payloads)
 
 
 def test_run_stage_sequence_skips_ablation_overrides_when_cfg_snapshot_has_no_ablation(

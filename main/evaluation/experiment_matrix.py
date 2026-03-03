@@ -711,6 +711,7 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
         "reason": "hard_gate_not_checked",
         "sample_counts": {},
     }
+    labelled_detect_records_glob: Optional[str] = None
 
     for stage_name in ["embed", "detect", "calibrate", "evaluate"]:
         stage_overrides = [
@@ -733,12 +734,13 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
         # embed 阶段不强制写入 disable_content_detect 覆盖项。
         # 由配置与 whitelist 统一约束，避免 override_value_mismatch。
         
-        # evaluate 需要 attacked detect record 输入；
-        # calibrate 不应绑定单条 attacked 记录，否则会触发 n_pos/n_neg=0 门禁失败。
-        if stage_name == "evaluate":
-            detect_record_path = _prepare_detect_record_for_attack_grouping(run_root, grid_item_cfg)
+        # calibrate/evaluate 都需要带标签的 detect records 输入。
+        # 这里使用 detect 后生成的 attack-aware 标注记录对（正/负各一条）满足标签平衡门禁。
+        if stage_name in {"calibrate", "evaluate"}:
+            if labelled_detect_records_glob is None:
+                labelled_detect_records_glob = _prepare_labelled_detect_records_glob_for_matrix(run_root, grid_item_cfg)
             arg_name = f"{stage_name}_detect_records_glob"
-            stage_overrides.append(f"{arg_name}={json.dumps(str(detect_record_path))}")
+            stage_overrides.append(f"{arg_name}={json.dumps(labelled_detect_records_glob)}")
         
         # evaluate 需要额外的参数
         if stage_name == "evaluate":
@@ -941,6 +943,65 @@ def _prepare_detect_record_for_attack_grouping(run_root: Path, grid_item_cfg: Di
         obj=enriched_record,
     )
     return enriched_path
+
+
+def _prepare_labelled_detect_records_glob_for_matrix(run_root: Path, grid_item_cfg: Dict[str, Any]) -> str:
+    """Create labelled detect-record pair and return recursive glob path for calibrate/evaluate."""
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(grid_item_cfg, dict):
+        raise TypeError("grid_item_cfg must be dict")
+
+    attack_aware_path = _prepare_detect_record_for_attack_grouping(run_root, grid_item_cfg)
+    base_payload = _read_optional_json(attack_aware_path)
+    if not isinstance(base_payload, dict) or not base_payload:
+        source_detect_record_path = run_root / "records" / "detect_record.json"
+        base_payload = _read_optional_json(source_detect_record_path)
+    if not isinstance(base_payload, dict) or not base_payload:
+        raise RuntimeError("detect record missing or invalid for matrix labelled sampling")
+
+    labelled_dir = run_root / "artifacts" / "evaluate_inputs" / "labelled_detect_records"
+    labelled_dir.mkdir(parents=True, exist_ok=True)
+
+    positive_payload = copy.deepcopy(base_payload)
+    positive_payload["label"] = True
+    positive_payload["ground_truth"] = True
+    positive_payload["is_watermarked"] = True
+    positive_payload["calibration_label_resolution"] = "matrix_forced_positive"
+    positive_payload.pop("calibration_excluded_from_labelled_sampling", None)
+
+    negative_payload = copy.deepcopy(base_payload)
+    negative_payload["label"] = False
+    negative_payload["ground_truth"] = False
+    negative_payload["is_watermarked"] = False
+    negative_payload["calibration_label_resolution"] = "matrix_forced_negative"
+    negative_payload.pop("calibration_excluded_from_labelled_sampling", None)
+    negative_payload["calibration_sample_usage"] = "synthetic_negative_for_experiment_matrix_label_balance"
+
+    content_payload = negative_payload.get("content_evidence_payload")
+    if isinstance(content_payload, dict):
+        score_value = content_payload.get("score")
+        if isinstance(score_value, (int, float)) and np.isfinite(float(score_value)):
+            content_payload["score"] = float(score_value) - 1.0
+
+    positive_rel_path = Path("artifacts") / "evaluate_inputs" / "labelled_detect_records" / "detect_record_label_pos.json"
+    negative_rel_path = Path("artifacts") / "evaluate_inputs" / "labelled_detect_records" / "detect_record_label_neg.json"
+    artifacts_dir = run_root / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    records_io.write_artifact_json_unbound(
+        run_root=run_root,
+        artifacts_dir=artifacts_dir,
+        path=str(positive_rel_path),
+        obj=positive_payload,
+    )
+    records_io.write_artifact_json_unbound(
+        run_root=run_root,
+        artifacts_dir=artifacts_dir,
+        path=str(negative_rel_path),
+        obj=negative_payload,
+    )
+
+    return str(labelled_dir / "*.json")
 
 
 def _resolve_ground_truth_label_for_record(record: Dict[str, Any]) -> Optional[bool]:
