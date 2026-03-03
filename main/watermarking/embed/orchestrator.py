@@ -879,11 +879,13 @@ def _build_lf_image_embed_params(cfg: Dict[str, Any]) -> Dict[str, Any]:
     watermark_cfg = cast(Dict[str, Any], watermark_node) if isinstance(watermark_node, dict) else {}
     lf_node = watermark_cfg.get("lf")
     lf_cfg = cast(Dict[str, Any], lf_node) if isinstance(lf_node, dict) else {}
+    ecc_value = lf_cfg.get("ecc", 1)
+    redundancy = ecc_value if isinstance(ecc_value, int) else 1
     return {
         "dct_block_size": int(lf_cfg.get("dct_block_size", 8)),
         "lf_coeff_indices": lf_cfg.get("lf_coeff_indices", [[1, 1], [1, 2], [2, 1]]),
         "alpha": float(lf_cfg.get("strength", 1.5)),
-        "redundancy": int(lf_cfg.get("ecc", 1)),
+        "redundancy": int(redundancy),
         "variance": float(lf_cfg.get("variance", 1.5)),
     }
 
