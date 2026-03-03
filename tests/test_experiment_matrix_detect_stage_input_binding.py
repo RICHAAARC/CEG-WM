@@ -414,6 +414,16 @@ def test_prepare_labelled_detect_records_glob_contains_pos_and_neg_labels(tmp_pa
     assert all(payload.get("is_watermarked") in {False, True} for payload in payloads)
     assert all(payload.get("calibration_excluded_from_labelled_sampling") is None for payload in payloads)
 
+    for payload in payloads:
+        content_node = payload.get("content_evidence_payload")
+        assert isinstance(content_node, dict)
+        assert content_node.get("status") == "ok"
+        assert isinstance(content_node.get("score"), (int, float))
+
+    positive_payload = next(item for item in payloads if item.get("label") is True)
+    negative_payload = next(item for item in payloads if item.get("label") is False)
+    assert float(negative_payload["content_evidence_payload"]["score"]) < float(positive_payload["content_evidence_payload"]["score"])
+
 
 def test_run_stage_sequence_skips_ablation_overrides_when_cfg_snapshot_has_no_ablation(
     monkeypatch,

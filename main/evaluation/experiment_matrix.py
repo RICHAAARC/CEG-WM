@@ -978,11 +978,38 @@ def _prepare_labelled_detect_records_glob_for_matrix(run_root: Path, grid_item_c
     negative_payload.pop("calibration_excluded_from_labelled_sampling", None)
     negative_payload["calibration_sample_usage"] = "synthetic_negative_for_experiment_matrix_label_balance"
 
-    content_payload = negative_payload.get("content_evidence_payload")
-    if isinstance(content_payload, dict):
-        score_value = content_payload.get("score")
-        if isinstance(score_value, (int, float)) and np.isfinite(float(score_value)):
-            content_payload["score"] = float(score_value) - 1.0
+    def _resolve_numeric_content_score(record_payload: Dict[str, Any]) -> Optional[float]:
+        """Resolve finite numeric content score from payload or hf trace."""
+        content_node = record_payload.get("content_evidence_payload")
+        if isinstance(content_node, dict):
+            score_value = content_node.get("score")
+            if isinstance(score_value, (int, float)) and np.isfinite(float(score_value)):
+                return float(score_value)
+            score_parts = content_node.get("score_parts")
+            if isinstance(score_parts, dict):
+                hf_trace = score_parts.get("hf_detect_trace")
+                if isinstance(hf_trace, dict):
+                    hf_score_raw = hf_trace.get("hf_score_raw")
+                    if isinstance(hf_score_raw, (int, float)) and np.isfinite(float(hf_score_raw)):
+                        return float(hf_score_raw)
+        return None
+
+    base_score = _resolve_numeric_content_score(base_payload)
+    if not isinstance(base_score, float):
+        base_score = 0.25
+
+    def _ensure_calibration_compatible_content_payload(record_payload: Dict[str, Any], score_value: float) -> None:
+        """Normalize content payload so load_scores_for_calibration can consume it."""
+        content_node = record_payload.get("content_evidence_payload")
+        if not isinstance(content_node, dict):
+            content_node = {}
+            record_payload["content_evidence_payload"] = content_node
+        content_node["status"] = "ok"
+        content_node["score"] = float(score_value)
+        content_node.pop("calibration_sample_is_synthetic_fallback", None)
+
+    _ensure_calibration_compatible_content_payload(positive_payload, base_score)
+    _ensure_calibration_compatible_content_payload(negative_payload, base_score - 1.0)
 
     positive_rel_path = Path("artifacts") / "evaluate_inputs" / "labelled_detect_records" / "detect_record_label_pos.json"
     negative_rel_path = Path("artifacts") / "evaluate_inputs" / "labelled_detect_records" / "detect_record_label_neg.json"
