@@ -124,7 +124,7 @@ def test_saliency_source_model_v2_runtime_failure_is_fail_fast(monkeypatch) -> N
     )
 
     def _fake_probe(_params):
-        return True
+        return True, None
 
     def _raise_v2(*args, **kwargs):
         raise RuntimeError("forced_v2_runtime_failure")

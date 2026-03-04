@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from main.core import digests
@@ -312,8 +312,9 @@ class SemanticMaskProvider:
             )
 
         # （3）掩码计算（确定性轻量算法：梯度幅值 + 开闭操作）。
+        _probe_available, _probe_failure_reason = _probe_model_v2_availability(mask_params)
         availability_probe = {
-            "model_available": _probe_model_v2_availability(mask_params)
+            "model_available": _probe_available
         }
         saliency_decision = select_saliency_source(cfg, availability_probe)
 
@@ -329,6 +330,7 @@ class SemanticMaskProvider:
                     "fallback_reason": saliency_decision.fallback_reason,
                     "model_artifact_anchor": saliency_decision.model_artifact_anchor,
                     "mask_source_type": MASK_SOURCE_TYPE_SEMANTIC_MODEL_V2,
+                    "probe_failure_reason": _probe_failure_reason,
                 },
                 mask_digest=None,
                 mask_stats=None,
@@ -848,9 +850,9 @@ def _resolve_semantic_model_backend(mask_params: Dict[str, Any]) -> str:
     return _normalize_semantic_model_source(mask_params.get("semantic_model_source"))
 
 
-def _probe_model_v2_availability(mask_params: Dict[str, Any]) -> bool:
+def _probe_model_v2_availability(mask_params: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     """
-    功能：探测 model_v2 显著性来源可用性。 
+    功能：探测 model_v2 显著性来源可用性，并返回失败原因以供审计。
 
     Probe deterministic availability for model-based saliency source.
 
@@ -858,28 +860,30 @@ def _probe_model_v2_availability(mask_params: Dict[str, Any]) -> bool:
         mask_params: Canonical mask parameter mapping.
 
     Returns:
-        True if model artifact is available; otherwise False.
+        Tuple of (available, failure_reason). failure_reason is None when available is True.
     """
     if not isinstance(mask_params, dict):
-        return False
+        return False, "probe_invalid_params_type"
     model_path = mask_params.get("semantic_model_path")
     if not isinstance(model_path, str) or not model_path:
-        return False
+        return False, "probe_model_path_missing"
 
     model_file = Path(model_path)
     if not (model_file.exists() and model_file.is_file()):
-        return False
+        return False, f"probe_model_file_not_found: {model_file}"
 
     backend = _resolve_semantic_model_backend(mask_params)
     try:
         model_obj = _load_saliency_model(mask_params)
-    except Exception:
-        # 模型结构与权重最小加载校验失败。
-        return False
+    except Exception as exc:
+        # 模型结构与权重最小加载校验失败，记录具体异常以供审计。
+        return False, f"probe_load_failed: {type(exc).__name__}: {exc}"
 
     if backend == SEMANTIC_MODEL_BACKEND_INSPYRENET:
-        return callable(model_obj)
-    return True
+        if not callable(model_obj):
+            return False, "probe_inspyrenet_not_callable"
+        return True, None
+    return True, None
 
 
 def _extract_state_dict_payload(loaded_obj: Any) -> Optional[Dict[str, Any]]:

@@ -10,6 +10,7 @@ Module type: General module
 """
 
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -70,6 +71,7 @@ def test_atomic_replace_write_bytes_primary_path_success(
     assert not list(tmp_path.glob("*.writing"))
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="WinError 5 回退路径仅适用于 Windows")
 def test_atomic_replace_write_bytes_winerror_5_fallback_success(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -155,6 +157,7 @@ def test_atomic_replace_write_bytes_mkstemp_error_must_raise(
     assert not dst.exists()
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="WinError 5 回退路径仅适用于 Windows")
 def test_atomic_replace_write_bytes_winerror_5_fallback_write_error_raises(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
