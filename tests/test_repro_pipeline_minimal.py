@@ -109,6 +109,21 @@ def _make_stage_runner() -> Any:
         records_dir.mkdir(parents=True, exist_ok=True)
         artifacts_dir.mkdir(parents=True, exist_ok=True)
 
+        if stage_name == "detect":
+            # _prepare_minimal_gt_detect_records 需要该文件存在（分数可缺失，会走 0.25 回退）
+            (records_dir / "detect_record.json").write_text(
+                json.dumps(
+                    {
+                        "operation": "detect",
+                        "content_evidence_payload": {
+                            "score": 0.8,
+                            "status": "ok",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
         if stage_name == "calibrate":
             thresholds_dir = artifacts_dir / "thresholds"
             thresholds_dir.mkdir(parents=True, exist_ok=True)
