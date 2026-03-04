@@ -2581,6 +2581,10 @@ def run_onefile_workflow(
     experiment_matrix_cfg_path = _prepare_experiment_matrix_cfg_path(profile, run_root, effective_cfg_path)
     steps = build_workflow_steps(run_root, effective_cfg_path, repo_root, profile, signoff_profile)
     experiment_matrix_retry_used = False
+    # audits/audits_strict 步骤失败时不立即退出，允许 signoff 步骤继续执行以记录
+    # BLOCK_FREEZE 决策；所有后续步骤完成后再返回延迟失败码。
+    _SIGNOFF_MUST_RUN_STEPS = {"audits", "audits_strict"}
+    deferred_failure_code: int | None = None
     for step in steps:
         step_command = list(step.command)
         if not dry_run and profile == PROFILE_PAPER_FULL_CUDA and step.name == "audits":
@@ -2633,7 +2637,17 @@ def run_onefile_workflow(
         _print_step_footer(step, return_code)
         _print_artifact_presence(step.artifact_paths)
         if return_code != 0:
-            return return_code
+            if step.name in _SIGNOFF_MUST_RUN_STEPS:
+                # audits/audits_strict 失败（BLOCK_FREEZE）时延迟返回，确保 signoff 步骤
+                # 仍然执行以正式记录 signoff_report.json；否则 signoff_report 永远不存在。
+                print(
+                    f"[onefile] step={step.name} returned {return_code} (BLOCK_FREEZE); "
+                    "deferred — signoff will still run to record the decision"
+                )
+                if deferred_failure_code is None:
+                    deferred_failure_code = return_code
+            else:
+                return return_code
 
         if step.name == "multi_protocol_evaluation" and profile == PROFILE_PAPER_FULL_CUDA and step.artifact_paths:
             compare_summary_path = step.artifact_paths[0]
@@ -2700,6 +2714,13 @@ def run_onefile_workflow(
                     file=sys.stderr,
                 )
                 return 1
+    # 所有步骤（含 signoff）执行完毕后，若 audits/audits_strict 有延迟失败码则上报。
+    if deferred_failure_code is not None:
+        print(
+            f"[onefile] workflow completed with deferred audits failure code={deferred_failure_code} "
+            "(signoff was allowed to run; check signoff_report.json for decision)"
+        )
+        return deferred_failure_code
     return 0
 
 
