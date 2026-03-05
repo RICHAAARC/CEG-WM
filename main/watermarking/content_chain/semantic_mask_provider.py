@@ -925,20 +925,20 @@ def _instantiate_inspyrenet_model() -> Any:
         RuntimeError: If no compatible InSPyReNet class can be constructed.
     """
 
+    # GPU 诊断日志结论：内部执行 base_size[0]，base_size 必须为 list/tuple，不可为整数。
     _CANDIDATE_KWARGS = [
-        # 针对 InSPyReNet 基类：backbone + in_channels 为必选参数
-        {"backbone": "res2net50_v1b_26w_4s", "in_channels": 3},
-        {"backbone": "res2net50", "in_channels": 3},
-        {"backbone": "res2net50_v1b_26w_4s", "in_channels": 3, "depth": 64, "base_size": 1024},
-        {"backbone": "res2net50", "in_channels": 3, "depth": 64, "base_size": 1024},
-        # 针对 InSPyReNet_SwinB：depth + pretrained + base_size 为必选参数
-        {"depth": [2, 2, 6, 2], "pretrained": False, "base_size": 1024},
-        {"depth": 4, "pretrained": False, "base_size": 1024},
-        # 历史候选（容错保留）
+        # 针对 InSPyReNet 基类：backbone + in_channels 必选，base_size 必须为 list
+        {"backbone": "res2net50_v1b_26w_4s", "in_channels": 3, "base_size": [1024, 1024]},
+        {"backbone": "res2net50", "in_channels": 3, "base_size": [1024, 1024]},
+        {"backbone": "res2net50_v1b_26w_4s", "in_channels": 3, "depth": 64, "base_size": [1024, 1024]},
+        {"backbone": "res2net50", "in_channels": 3, "depth": 64, "base_size": [1024, 1024]},
+        {"backbone": "res2net50_v1b_26w_4s", "in_channels": 3, "base_size": [384, 384]},
+        {"backbone": "res2net50", "in_channels": 3, "base_size": [384, 384]},
+        # 针对 InSPyReNet_SwinB：depth + pretrained + base_size 必选，base_size 为 list
+        {"depth": [2, 2, 6, 2], "pretrained": False, "base_size": [1024, 1024]},
+        {"depth": 4, "pretrained": False, "base_size": [1024, 1024]},
+        # 无参（容错兜底）
         {},
-        {"base_size": 1024, "backbone": "res2net50", "nclass": 1},
-        {"backbone": "res2net50", "nclass": 1},
-        {"backbone": "res2net50"},
     ]
     # 收集所有尝试路径的失败原因，用于最终 RuntimeError 诊断。
     _attempt_log: "list[str]" = []
