@@ -1480,9 +1480,26 @@ def build_semantic_saliency_mask_v2(
         mask = _binary_erode(_binary_dilate(mask))
 
     area_ratio = float(np.mean(mask)) if mask.size > 0 else 0.0
+    # 计算 routing 所需结构字段（与 v1 对齐），缺失则导致 subspace_plan 为空。
+    component_count = _count_connected_components(mask)
+    largest_component_ratio = _largest_component_ratio(mask)
+    boundary_length = _mask_boundary_length(mask)
+    perimeter_to_area = float(boundary_length / max(1.0, float(mask.sum())))
+    downsample_grid = _build_downsample_binary_grid(mask, rows=8, cols=8)
+    downsample_grid_digest = digests.canonical_sha256({"grid": downsample_grid.tolist()})
+    true_indices = np.flatnonzero(downsample_grid.reshape(-1)).astype(int).tolist()
+
     model_path_name = Path(model_path).name if isinstance(model_path, str) and model_path else "<absent>"
     mask_stats = {
         "area_ratio": round(area_ratio, 8),
+        "foreground_coverage_ratio": round(area_ratio, 8),
+        "connected_components": int(component_count),
+        "largest_component_ratio": round(float(largest_component_ratio), 8),
+        "boundary_length": int(boundary_length),
+        "perimeter_to_area_ratio": round(float(perimeter_to_area), 8),
+        "downsample_grid_shape": [8, 8],
+        "downsample_grid_true_indices": true_indices,
+        "downsample_grid_digest": downsample_grid_digest,
         "saliency_threshold": round(float(threshold), 8),
         "saliency_source_selected": SALIENCY_SOURCE_MODEL_V2,
         "model_artifact_anchor": {
