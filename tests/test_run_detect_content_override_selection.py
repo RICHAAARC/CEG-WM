@@ -12,6 +12,58 @@ from main.cli import run_detect
 from main.cli.run_detect import resolve_content_override_from_input_record
 
 
+def test_resolve_content_override_skips_embed_content_result_with_null_score() -> None:
+    """
+    功能：embed 模式 content_result 中 status=ok 但 score=None 时不应覆盖 detect 计算。
+
+    Ensure embed-style content_result with ok status but None score is ignored.
+    This is the exact pattern produced by repro pipeline embed stage, which
+    triggers fusion crash (content_score must be number) when used as detect override.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    input_record: Dict[str, Any] = {
+        "content_result": {
+            "status": "ok",
+            "score": None,
+            "content_score": None,
+        }
+    }
+
+    resolved = resolve_content_override_from_input_record(input_record)
+    assert resolved is None, (
+        "embed-mode content_result with score=None must not be returned as detect override"
+    )
+
+
+def test_resolve_content_override_returns_content_result_when_score_valid() -> None:
+    """
+    功能：content_result 具有有效 score 时应被返回为 detect 覆盖项。
+
+    Ensure content_result with valid score is returned for detect override.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    input_record: Dict[str, Any] = {
+        "content_result": {
+            "status": "ok",
+            "score": 0.75,
+        }
+    }
+
+    resolved = resolve_content_override_from_input_record(input_record)
+    assert isinstance(resolved, dict)
+    assert resolved.get("score") == 0.75
+
+
 def test_resolve_content_override_skips_embed_absent_content_evidence() -> None:
     """
     功能：仅有 embed 侧 absent content_evidence 时不应覆盖 detect 计算。

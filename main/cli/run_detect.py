@@ -90,9 +90,12 @@ def resolve_content_override_from_input_record(input_record: Dict[str, Any]) -> 
 
         status_value = content_candidate.get("status")
         score_value = content_candidate.get("score")
-        if content_key == "content_evidence":
+        # content_result 与 content_evidence 均可能来自 embed 模式；
+        # embed 模式下 status=ok 但 score=None，不能作为 detect 融合输入。
+        # content_evidence_payload 是专属的 detect 输出格式，直接信任其 score 字段。
+        if content_key in {"content_result", "content_evidence"}:
             if status_value != "ok" or not isinstance(score_value, (int, float)):
-                # embed 侧 content_evidence 常为 absent；不能覆盖 detect 计算。
+                # embed 侧提取结果无有效 score，不覆盖 detect 侧自行计算。
                 continue
 
         return content_candidate

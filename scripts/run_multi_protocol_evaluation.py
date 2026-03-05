@@ -270,7 +270,13 @@ def _run_single_protocol_pipeline(
         )
 
         if result.returncode != 0:
-            error_msg = f"pipeline execution failed (exit code {result.returncode})"
+            stdout_tail = result.stdout[-600:] if result.stdout else ""
+            stderr_tail = result.stderr[-600:] if result.stderr else ""
+            error_msg = (
+                f"pipeline execution failed (exit code {result.returncode})\n"
+                f"  stdout_tail: {stdout_tail}\n"
+                f"  stderr_tail: {stderr_tail}"
+            )
             raise RuntimeError(error_msg)
 
         # (3) 从 evaluation_report 提取锚点字段
