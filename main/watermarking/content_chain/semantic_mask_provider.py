@@ -924,13 +924,22 @@ def _instantiate_inspyrenet_model() -> Any:
     Raises:
         RuntimeError: If no compatible InSPyReNet class can be constructed.
     """
-    # ckpt_base.pth 对应 InSPyReNet_Res2Net50（transparent-background 1.3.x 的 per-backbone 派生类）。
-    # 候选参数组：按优先级从高到低，兼容基类与派生类两种签名。
+    # transparent-background 1.3.4 实际类签名（从 GPU 运行诊断日志逆向得出）：
+    #   InSPyReNet(backbone, in_channels, depth=64, base_size=1024, threshold=0.5)
+    #   InSPyReNet_SwinB(depth, pretrained, base_size, ...)
+    # ckpt_base.pth 对应 Res2Net50 backbone，in_channels=3（RGB）。
     _CANDIDATE_KWARGS = [
+        # 针对 InSPyReNet 基类：backbone + in_channels 为必选参数
+        {"backbone": "res2net50_v1b_26w_4s", "in_channels": 3},
+        {"backbone": "res2net50", "in_channels": 3},
+        {"backbone": "res2net50_v1b_26w_4s", "in_channels": 3, "depth": 64, "base_size": 1024},
+        {"backbone": "res2net50", "in_channels": 3, "depth": 64, "base_size": 1024},
+        # 针对 InSPyReNet_SwinB：depth + pretrained + base_size 为必选参数
+        {"depth": [2, 2, 6, 2], "pretrained": False, "base_size": 1024},
+        {"depth": 4, "pretrained": False, "base_size": 1024},
+        # 历史候选（容错保留）
         {},
         {"base_size": 1024, "backbone": "res2net50", "nclass": 1},
-        {"base_size": [1024, 1024], "backbone": "res2net50", "nclass": 1},
-        {"base_size": 384, "backbone": "res2net50", "nclass": 1},
         {"backbone": "res2net50", "nclass": 1},
         {"backbone": "res2net50"},
     ]
