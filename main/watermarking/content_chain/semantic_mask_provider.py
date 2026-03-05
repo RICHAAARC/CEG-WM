@@ -925,22 +925,33 @@ def _instantiate_inspyrenet_model() -> Any:
         RuntimeError: If no compatible InSPyReNet class can be constructed.
     """
 
-    # GPU 诊断日志结论：内部执行 base_size[0]，base_size 必须为 list/tuple，不可为整数。
-    # 通道数不匹配原因：depth 默认值为 4，ckpt_base.pth 要求 depth=64。
-    # 必须将 depth=64 候选置于列表首位，确保 _try_class 优先使用正确通道数。
+    # GPU 诊断日志结论（多轮迭代确认）：
+    #   (1) base_size 内部执行 base_size[0]，必须为 list/tuple，不可为整数。
+    #   (2) depth 默认值为 4，ckpt_base.pth 要求 depth=64。
+    #   (3) InSPyReNet_Res2Net50（transparent-background 1.3.4）不接受 backbone/in_channels 参数，
+    #       带 backbone 的候选全部 TypeError，最终错误落到 depth=4 默认值。
+    #   修复：最优先候选使用 {"depth": 64, "pretrained": False, "base_size": [1024, 1024]}。
     _CANDIDATE_KWARGS = [
-        # 优先：backbone + in_channels + depth=64 + base_size 列表（ckpt_base.pth 对应配置）
+        # 最优先：depth=64 + pretrained + base_size（无 backbone/in_channels）。
+        # 诊断结论：InSPyReNet_Res2Net50 在 transparent-background 1.3.4 不接受 backbone/in_channels 参数，
+        # 只接受 depth/pretrained/base_size；带 backbone 的候选会 TypeError，落到 depth=4 默认值。
+        {"depth": 64, "pretrained": False, "base_size": [1024, 1024]},
+        {"depth": 64, "base_size": [1024, 1024]},
+        {"depth": 64, "pretrained": False, "base_size": [384, 384]},
+        {"depth": 64, "base_size": [384, 384]},
+        # 兼容层：backbone + in_channels + depth=64（适用于 InSPyReNet 基类直接调用的场景）
         {"backbone": "res2net50_v1b_26w_4s", "in_channels": 3, "depth": 64, "base_size": [1024, 1024]},
         {"backbone": "res2net50", "in_channels": 3, "depth": 64, "base_size": [1024, 1024]},
         {"backbone": "res2net50_v1b_26w_4s", "in_channels": 3, "depth": 64, "base_size": [384, 384]},
         {"backbone": "res2net50", "in_channels": 3, "depth": 64, "base_size": [384, 384]},
-        # 次优：无 depth（默认值，用于其他 ckpt 场景）
+        # 次优（无 depth，使用默认值）
         {"backbone": "res2net50_v1b_26w_4s", "in_channels": 3, "base_size": [1024, 1024]},
         {"backbone": "res2net50", "in_channels": 3, "base_size": [1024, 1024]},
-        # 针对 InSPyReNet_SwinB：depth + pretrained + base_size 必选，base_size 为 list
+        # 针对 InSPyReNet_SwinB：depth 为 list + pretrained + base_size
         {"depth": [2, 2, 6, 2], "pretrained": False, "base_size": [1024, 1024]},
+        # 兜底：depth=4（默认值）
         {"depth": 4, "pretrained": False, "base_size": [1024, 1024]},
-        # 无参（容错兜底）
+        # 无参（最终容错）
         {},
     ]
     # 收集所有尝试路径的失败原因，用于最终 RuntimeError 诊断。
