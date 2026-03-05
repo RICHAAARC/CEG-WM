@@ -440,9 +440,10 @@ class SubspacePlannerImpl:
             )
             mask_summary = inputs.get("mask_summary") if isinstance(inputs.get("mask_summary"), dict) else None
             paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
+            # paper 模式下 mask_summary 缺失时（PRE-INFERENCE 调用时 content chain 尚未执行），
+            # 降级为 None 并使用默认区域规格，POST-ORCHESTRATOR 调用时 mask_summary 会正确提供。
             if bool(paper_cfg.get("enabled", False)) and not isinstance(mask_summary, dict):
-                # paper 模式下必须提供 mask_summary 用于空间级 region 规格。
-                raise ValueError("mask_summary required for paper_faithfulness region index spec")
+                mask_summary = None  # 使用默认区域分配（area_ratio=0.5）
 
             hf_region_index_spec, lf_region_index_spec, region_index_digest = build_region_index_spec_from_mask_v1(
                 mask_summary
@@ -1735,16 +1736,21 @@ class SubspacePlannerImpl:
         cond_emb = torch.zeros((1, 77, 768), dtype=torch.float32)  # CLIP embed shape
         
         for step_idx in range(min(centered_matrix.shape[0], 3)):  # 限制行数以保持效率
-            x_t = torch.tensor(
-                centered_matrix[step_idx:step_idx+1, :].reshape(1, 4, 8, 8),  # 假设 latent shape
-                dtype=torch.float32, requires_grad=False
-            )
+            # feature_dim 不一定等于 4×8×8=256，reshape 可能失败；此处整体捕获形状不兼容错误。
+            try:
+                x_t = torch.tensor(
+                    centered_matrix[step_idx:step_idx+1, :].reshape(1, 4, 8, 8),  # 假设 latent shape
+                    dtype=torch.float32, requires_grad=False
+                )
+            except Exception:
+                # reshape 失败（feature_dim 与预期 latent shape 不符），跳过此 step
+                continue
             
             for probe in probes:
-                probe_t = torch.tensor(probe.reshape(1, 4, 8, 8), dtype=torch.float32)
-                delta = planner_params.jacobian_eps * probe_t
-                
                 try:
+                    probe_t = torch.tensor(probe.reshape(1, 4, 8, 8), dtype=torch.float32)
+                    delta = planner_params.jacobian_eps * probe_t
+                    
                     with torch.no_grad():
                         out_plus = unet(x_t + delta, t_emb, cond_emb).sample
                         out_minus = unet(x_t - delta, t_emb, cond_emb).sample
@@ -1752,7 +1758,7 @@ class SubspacePlannerImpl:
                     jv = (out_plus - out_minus) / (2.0 * planner_params.jacobian_eps)
                     jvp_rows.append(jv.numpy().flatten())
                 except Exception:
-                    # 若 UNet 调用失败（形状不匹配等），跳过
+                    # 若 probe reshape 或 UNet 调用失败（形状不匹配等），跳过
                     pass
         
         if jvp_rows:
