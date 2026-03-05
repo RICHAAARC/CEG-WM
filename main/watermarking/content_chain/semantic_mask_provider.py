@@ -924,17 +924,25 @@ def _instantiate_inspyrenet_model() -> Any:
     Raises:
         RuntimeError: If no compatible InSPyReNet class can be constructed.
     """
+    # ckpt_base.pth 使用 base_size=1024, backbone="res2net50", nclass=1 训练。
+    # 构造函数签名：InSPyReNet(base_size, backbone, nclass=1)，不支持无参调用。
+    _CANDIDATE_KWARGS = [
+        {"base_size": 1024, "backbone": "res2net50", "nclass": 1},
+        {"base_size": [1024, 1024], "backbone": "res2net50", "nclass": 1},
+        {"base_size": 384, "backbone": "res2net50", "nclass": 1},
+        {"backbone": "res2net50", "nclass": 1},
+        {"backbone": "res2net50"},
+        {},
+    ]
+
     # (1) 尝试 transparent_background 包（pip install transparent-background）
     try:
         from transparent_background.InSPyReNet import InSPyReNet as _TbInSPyReNet  # type: ignore[import]
-        try:
-            return _TbInSPyReNet()
-        except TypeError:
-            pass
-        try:
-            return _TbInSPyReNet(backbone="res2net50")
-        except TypeError:
-            pass
+        for _kwargs in _CANDIDATE_KWARGS:
+            try:
+                return _TbInSPyReNet(**_kwargs)
+            except TypeError:
+                continue
     except ImportError:
         pass
     except Exception:
@@ -943,14 +951,11 @@ def _instantiate_inspyrenet_model() -> Any:
     # (2) 尝试 inspyrenet 包（备用路径）
     try:
         from inspyrenet import InSPyReNet as _InspyInSPyReNet  # type: ignore[import]
-        try:
-            return _InspyInSPyReNet()
-        except TypeError:
-            pass
-        try:
-            return _InspyInSPyReNet(backbone="res2net50")
-        except TypeError:
-            pass
+        for _kwargs in _CANDIDATE_KWARGS:
+            try:
+                return _InspyInSPyReNet(**_kwargs)
+            except TypeError:
+                continue
     except ImportError:
         pass
     except Exception:
@@ -959,10 +964,11 @@ def _instantiate_inspyrenet_model() -> Any:
     # (3) 尝试 inspyrenet.model 子模块
     try:
         from inspyrenet.model import InSPyReNet as _InspyModelInSPyReNet  # type: ignore[import]
-        try:
-            return _InspyModelInSPyReNet()
-        except TypeError:
-            pass
+        for _kwargs in _CANDIDATE_KWARGS:
+            try:
+                return _InspyModelInSPyReNet(**_kwargs)
+            except TypeError:
+                continue
     except ImportError:
         pass
     except Exception:
@@ -1034,7 +1040,8 @@ def _load_saliency_model(mask_params: Dict[str, Any]) -> Any:
 
     try:
         import torch
-        loaded_obj = torch.load(str(model_file), map_location="cpu")
+        # weights_only=False：ckpt_base.pth 为 state_dict，兼容 PyTorch >= 2.4 默认值变更。
+        loaded_obj = torch.load(str(model_file), map_location="cpu", weights_only=False)
 
         if backend == SEMANTIC_MODEL_BACKEND_INSPYRENET:
             if callable(loaded_obj):
