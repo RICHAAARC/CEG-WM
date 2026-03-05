@@ -387,7 +387,7 @@ def validate_fusion_inputs(
     content_status = content_evidence.get("status", "absent")
     if content_status == "mismatch":
         return False, "content_mismatch"
-    if content_status == "fail":
+    if content_status in {"fail", "failed"}:
         return False, "content_fail"
 
     # (2) 检查几何证据状态
@@ -397,7 +397,7 @@ def validate_fusion_inputs(
         # 将 mismatch 降级为 absent，进入 content-only 路径，不将其上升为 error 阻断融合决策。
         # append-only：geometry_mismatch_source 审计字段由 make_decision 的调用链写入。
         geometry_status = "absent"
-    elif geometry_status == "fail":
+    elif geometry_status in {"fail", "failed"}:
         return False, "geometry_fail"
 
     # (3) 有效状态组合：content 与 geometry 都在 {absent, ok}

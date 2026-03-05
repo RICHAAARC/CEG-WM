@@ -3672,15 +3672,22 @@ def _adapt_content_evidence_for_fusion(content_evidence: Any) -> Dict[str, Any]:
         TypeError: If content_evidence type is unrecognized.
     """
     if isinstance(content_evidence, dict):
-        # 已是字典，直接返回。
-        return cast(Dict[str, Any], content_evidence)
+        # 已是字典，直接返回；但需确保 content_score 字段存在（fusion rule 读取该键，
+        # 而部分来源只写 score 键）。
+        result_dict = cast(Dict[str, Any], content_evidence)
+        if "content_score" not in result_dict and "score" in result_dict:
+            result_dict["content_score"] = result_dict["score"]
+        return result_dict
     
     # 尝试用 .as_dict() 方法。
     if hasattr(content_evidence, "as_dict") and callable(content_evidence.as_dict):
         try:
             converted = content_evidence.as_dict()
             if isinstance(converted, dict):
-                return cast(Dict[str, Any], converted)
+                converted_dict = cast(Dict[str, Any], converted)
+                if "content_score" not in converted_dict and "score" in converted_dict:
+                    converted_dict["content_score"] = converted_dict["score"]
+                return converted_dict
         except Exception:
             # 如果 .as_dict() 失败，继续尝试属性提取。
             pass
@@ -3695,6 +3702,11 @@ def _adapt_content_evidence_for_fusion(content_evidence: Any) -> Dict[str, Any]:
                        "content_failure_reason"]:
         if hasattr(content_evidence, field_name):
             adapted[field_name] = getattr(content_evidence, field_name)
+    
+    # 确保 content_score 字段存在：fusion rule 读取 content_score，
+    # 而 ContentEvidence 数据类只有 score 字段（两者语义等价）。
+    if "content_score" not in adapted and "score" in adapted:
+        adapted["content_score"] = adapted["score"]
     
     return adapted if adapted else {"status": "unknown"}
 
