@@ -1377,7 +1377,13 @@ class SubspacePlannerImpl:
         feature_dim = subspace_cfg.get("feature_dim", 128)
         timestep_start = subspace_cfg.get("timestep_start", 0)
         timestep_end = subspace_cfg.get("timestep_end", 30)
-        seed = subspace_cfg.get("seed", cfg.get("seed", 0))
+        # seed 允许 null（YAML：seed: null），需兼容 None → 降级为 0；
+        # 不能直接用 subspace_cfg.get("seed", cfg.get("seed", 0))，
+        # 因为 cfg["seed"]=None 时 get() 返回 None 而非默认值 0。
+        _seed_candidate = subspace_cfg.get("seed")
+        if _seed_candidate is None:
+            _seed_candidate = cfg.get("seed")
+        seed = _read_int(_seed_candidate, 0)
         float_round_digits = subspace_cfg.get("float_round_digits", 8)
         trajectory_step_stride = subspace_cfg.get("trajectory_step_stride", 1)
         # 统一解析：spectrum_topk > topk（兼容性读取）
