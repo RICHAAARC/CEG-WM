@@ -595,9 +595,12 @@ def run_detect_orchestrator(
     final_latents = cfg.get("__detect_final_latents__")  # 从 CLI 层捕获的最后 latents
 
     if not forced_mismatch and final_latents is not None and isinstance(plan_payload, dict):
-        # 从 plan_payload 提取 LF/HF basis
-        lf_basis = plan_payload.get("lf_basis")
-        hf_basis = plan_payload.get("hf_basis")
+        # plan_payload 是 SubspacePlanEvidence 的 dict 化结构，
+        # lf_basis/hf_basis 在 plan_payload["plan"] 内层，而非顶层。
+        _plan_inner = plan_payload.get("plan")
+        _plan_inner_dict = cast(Dict[str, Any], _plan_inner) if isinstance(_plan_inner, dict) else {}
+        lf_basis = _plan_inner_dict.get("lf_basis")
+        hf_basis = _plan_inner_dict.get("hf_basis")
 
         # 从 input_record 提取 embed 侧分数（兼容 content_evidence 承载）。
         embed_lf_score = None
