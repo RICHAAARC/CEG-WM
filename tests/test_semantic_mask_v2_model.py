@@ -36,7 +36,7 @@ def test_semantic_mask_v2_supports_basnet_and_inspyrenet(monkeypatch: pytest.Mon
             payload = torch.ones((batch_size, 1, height, width), dtype=torch.float32)
             return {self._output_key: payload}
 
-    def _fake_torch_load(path: str, map_location: str = "cpu"):
+    def _fake_torch_load(path: str, map_location: str = "cpu", **kwargs):
         if "inspy" in path.lower():
             return DummyModel("pred")
         return DummyModel("saliency")

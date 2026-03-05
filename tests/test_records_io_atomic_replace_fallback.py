@@ -166,19 +166,35 @@ def test_atomic_replace_write_bytes_winerror_5_fallback_write_error_raises(
     功能：WinError 5 回退写入失败时必须抛出异常。
 
     Verify fallback write failure is not swallowed.
+
+    Notes:
+        monkeypatch must NOT globally replace os.open with a blanket raiser:
+        tempfile._mkstemp_inner on Windows catches PermissionError and retries
+        indefinitely when os.access(dir, W_OK) is True, causing an infinite loop.
+        Instead, distinguish mkstemp calls (which carry os.O_EXCL) from the
+        fallback open (O_WRONLY|O_CREAT|O_TRUNC, no O_EXCL) and only raise for
+        the latter.
     """
+    import os as _os_module
+
     dst = tmp_path / "artifact.bin"
     payload = b"fallback-write-error"
 
     def _raise_winerror_5(self: Path, target: Path) -> Path:
         raise _build_permission_error_with_winerror(5)
 
-    def _raise_open_error(*_args, **_kwargs):
+    _original_os_open = _os_module.open
+
+    def _raise_on_fallback_open(path, flags, mode: int = 0o666, **kwargs):
+        # mkstemp 使用 O_EXCL（独占创建）；回退路径使用 O_WRONLY|O_CREAT|O_TRUNC，不带 O_EXCL
+        # 仅对回退路径抛出异常，避免破坏 tempfile._mkstemp_inner 的内部 open 调用
+        if flags & _os_module.O_EXCL:
+            return _original_os_open(path, flags, mode, **kwargs)
         raise PermissionError("fallback-open-failed")
 
     monkeypatch.setattr(records_io.os, "name", "nt", raising=False)
     monkeypatch.setattr(Path, "replace", _raise_winerror_5)
-    monkeypatch.setattr(records_io.os, "open", _raise_open_error)
+    monkeypatch.setattr(records_io.os, "open", _raise_on_fallback_open)
 
     with pytest.raises(PermissionError, match="fallback-open-failed"):
         records_io._atomic_replace_write_bytes(dst, payload)
