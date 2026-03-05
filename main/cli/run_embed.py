@@ -570,7 +570,13 @@ def run_embed(
             
             # POST-ORCHESTRATOR 创建最终的 injection_site_spec
             # 使用 orchestrator 计算的真实 plan_digest 来确定 injection_mode
-            orchestrator_plan_digest = content_evidence.get("plan_digest")
+            # 修复：orchestrator 通过 bind_plan_to_record 写的是 record["plan_digest"]（顶层），
+            # 不写 content_evidence["plan_digest"]，需从顶层 record 读取真实值。
+            orchestrator_plan_digest = content_evidence.get("plan_digest") or record.get("plan_digest")
+            # 若顶层有真实 plan_digest，同步写入 content_evidence 供审计字段口径一致。
+            if isinstance(orchestrator_plan_digest, str) and orchestrator_plan_digest:
+                if not content_evidence.get("plan_digest"):
+                    content_evidence["plan_digest"] = orchestrator_plan_digest
             try:
                 if isinstance(orchestrator_plan_digest, str) and orchestrator_plan_digest:
                     # 真实 plan_digest 存在 → subspace_projection 模式
