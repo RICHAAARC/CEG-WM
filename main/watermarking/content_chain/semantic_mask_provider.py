@@ -924,60 +924,88 @@ def _instantiate_inspyrenet_model() -> Any:
     Raises:
         RuntimeError: If no compatible InSPyReNet class can be constructed.
     """
-    # ckpt_base.pth 使用 base_size=1024, backbone="res2net50", nclass=1 训练。
-    # 构造函数签名：InSPyReNet(base_size, backbone, nclass=1)，不支持无参调用。
+    # ckpt_base.pth 对应 InSPyReNet_Res2Net50（transparent-background 1.3.x 的 per-backbone 派生类）。
+    # 候选参数组：按优先级从高到低，兼容基类与派生类两种签名。
     _CANDIDATE_KWARGS = [
+        {},
         {"base_size": 1024, "backbone": "res2net50", "nclass": 1},
         {"base_size": [1024, 1024], "backbone": "res2net50", "nclass": 1},
         {"base_size": 384, "backbone": "res2net50", "nclass": 1},
         {"backbone": "res2net50", "nclass": 1},
         {"backbone": "res2net50"},
-        {},
     ]
+    # 收集所有尝试路径的失败原因，用于最终 RuntimeError 诊断。
+    _attempt_log: "list[str]" = []
 
-    # (1) 尝试 transparent_background 包（pip install transparent-background）
-    try:
-        from transparent_background.InSPyReNet import InSPyReNet as _TbInSPyReNet  # type: ignore[import]
-        for _kwargs in _CANDIDATE_KWARGS:
+    def _try_class(cls_name: str, cls: Any) -> "Any | None":
+        """尝试用候选参数组逐一实例化，返回成功对象或 None。"""
+        for _kw in _CANDIDATE_KWARGS:
             try:
-                return _TbInSPyReNet(**_kwargs)
-            except TypeError:
-                continue
-    except ImportError:
-        pass
-    except Exception:
-        pass
+                obj = cls(**_kw)
+                _attempt_log.append(f"{cls_name}({_kw}): OK")
+                return obj
+            except Exception as _exc:
+                _attempt_log.append(f"{cls_name}({_kw}): {type(_exc).__name__}: {_exc}")
+        return None
 
-    # (2) 尝试 inspyrenet 包（备用路径）
+    # (1) transparent_background 包：优先尝试派生类 InSPyReNet_Res2Net50（ckpt_base.pth 对应类）。
+    try:
+        import transparent_background.InSPyReNet as _tb_mod  # type: ignore[import]
+        _attempt_log.append("import transparent_background.InSPyReNet module: OK")
+        for _cls_name in ["InSPyReNet_Res2Net50", "InSPyReNet_SwinS", "InSPyReNet_SwinB", "InSPyReNet"]:
+            _cls = getattr(_tb_mod, _cls_name, None)
+            if _cls is not None:
+                _obj = _try_class(f"tb.{_cls_name}", _cls)
+                if _obj is not None:
+                    return _obj
+            else:
+                _attempt_log.append(f"tb.{_cls_name}: not found in module")
+    except ImportError as _e:
+        _attempt_log.append(f"import transparent_background.InSPyReNet: ImportError: {_e}")
+    except Exception as _e:
+        _attempt_log.append(f"import transparent_background.InSPyReNet: {type(_e).__name__}: {_e}")
+
+    # (2) transparent_background 顶层导出（有些版本路径不同）
+    try:
+        import transparent_background as _tb_top  # type: ignore[import]
+        _attempt_log.append("import transparent_background top: OK")
+        for _cls_name in ["InSPyReNet_Res2Net50", "InSPyReNet_SwinS", "InSPyReNet"]:
+            _cls = getattr(_tb_top, _cls_name, None)
+            if _cls is not None:
+                _obj = _try_class(f"tbtop.{_cls_name}", _cls)
+                if _obj is not None:
+                    return _obj
+    except ImportError as _e:
+        _attempt_log.append(f"import transparent_background top: ImportError: {_e}")
+    except Exception as _e:
+        _attempt_log.append(f"import transparent_background top: {type(_e).__name__}: {_e}")
+
+    # (3) inspyrenet 包（备用路径）
     try:
         from inspyrenet import InSPyReNet as _InspyInSPyReNet  # type: ignore[import]
-        for _kwargs in _CANDIDATE_KWARGS:
-            try:
-                return _InspyInSPyReNet(**_kwargs)
-            except TypeError:
-                continue
-    except ImportError:
-        pass
-    except Exception:
-        pass
+        _attempt_log.append("import inspyrenet.InSPyReNet: OK")
+        _obj = _try_class("InspyInSPyReNet", _InspyInSPyReNet)
+        if _obj is not None:
+            return _obj
+    except ImportError as _e:
+        _attempt_log.append(f"import inspyrenet InSPyReNet: ImportError: {_e}")
+    except Exception as _e:
+        _attempt_log.append(f"import inspyrenet InSPyReNet: {type(_e).__name__}: {_e}")
 
-    # (3) 尝试 inspyrenet.model 子模块
+    # (4) inspyrenet.model 子模块
     try:
         from inspyrenet.model import InSPyReNet as _InspyModelInSPyReNet  # type: ignore[import]
-        for _kwargs in _CANDIDATE_KWARGS:
-            try:
-                return _InspyModelInSPyReNet(**_kwargs)
-            except TypeError:
-                continue
-    except ImportError:
-        pass
-    except Exception:
-        pass
+        _attempt_log.append("import inspyrenet.model.InSPyReNet: OK")
+        _obj = _try_class("InspyModelInSPyReNet", _InspyModelInSPyReNet)
+        if _obj is not None:
+            return _obj
+    except ImportError as _e:
+        _attempt_log.append(f"import inspyrenet.model InSPyReNet: ImportError: {_e}")
+    except Exception as _e:
+        _attempt_log.append(f"import inspyrenet.model InSPyReNet: {type(_e).__name__}: {_e}")
 
-    raise RuntimeError(
-        "inspyrenet model class unavailable: "
-        "install 'transparent-background' (pip install transparent-background) to enable InSPyReNet support"
-    )
+    _diag = " | ".join(_attempt_log) if _attempt_log else "no attempts logged"
+    raise RuntimeError(f"inspyrenet model class unavailable. attempts: [{_diag}]")
 
 
 def _compute_weights_sha256(model_path: Optional[str]) -> str:
