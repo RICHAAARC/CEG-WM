@@ -178,10 +178,14 @@ def _build_stage_command(
         command.extend(["--override", f"seed={json.dumps(seeds)}"])
     # Note: max_samples is not a valid override parameter and is handled by the caller
     if stage_name == "detect":
+        # repro 流水线：detect 在 calibrate 之前执行，尚无阈值工件，
+        # 需显式启用 fallback，与 onefile 主工作流保持一致。
         command.extend(
             [
                 "--input",
                 str(run_root / "records" / "embed_record.json"),
+                "--override",
+                "allow_threshold_fallback_for_tests=true",
             ]
         )
     return command
