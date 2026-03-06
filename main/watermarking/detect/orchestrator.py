@@ -648,6 +648,9 @@ def run_detect_orchestrator(
         # 追加 detect 侧分数与一致性状态到 content_evidence
         content_evidence_payload["detect_lf_score"] = detect_lf_score
         content_evidence_payload["detect_hf_score"] = detect_hf_score
+        # 当 hf_basis is None（surrogate 路径）时，显式写入 HF 缺失原因。
+        if hf_basis is None:
+            content_evidence_payload["detect_hf_score_absent_reason"] = "hf_basis_not_computed_in_surrogate_mode"
 
         lf_score_drift_status = None
         if detect_lf_status == "ok":
@@ -762,6 +765,20 @@ def run_detect_orchestrator(
             "fail_reasons": paper_fail_reasons
         }
     }
+
+    # (append-only) 构建 final_decision 顶层稳定判决快照，供后续冻结与审查使用。
+    # 所有字段从 fusion_result 只读投影，不替换原有 fusion_result 字段。
+    try:
+        _fd_audit = getattr(fusion_result, "audit", {})
+        record["final_decision"] = {
+            "decision_status": getattr(fusion_result, "decision_status", None),
+            "is_watermarked": getattr(fusion_result, "is_watermarked", None),
+            "routing_decisions": getattr(fusion_result, "routing_decisions", None),
+            "threshold_source": _fd_audit.get("threshold_source") if isinstance(_fd_audit, dict) else None,
+        }
+    except Exception:
+        record["final_decision"] = None
+
     return record
 
 
@@ -1122,6 +1139,8 @@ def _extract_content_raw_scores_from_image(
                     "bp_iteration_count": prc_trace_payload.get("bp_iteration_count"),
                     "parity_check_digest": prc_trace_payload.get("parity_check_digest"),
                     "lf_failure_reason": prc_trace_payload.get("lf_failure_reason"),
+                    # (append-only) 透传 bp_converge_status 诊断字段，允许缺失为 null。
+                    "bp_converge_status": prc_trace_payload.get("bp_converge_status"),
                     "lf_detect_path": "lf_coder_prc_latent",
                 }
             except Exception as exc:
@@ -1204,6 +1223,9 @@ def _bind_raw_scores_to_content_payload(
     prc_latent_status = lf_trace.get("lf_status")
     if isinstance(prc_latent_status, str) and prc_latent_status:
         score_parts["prc_latent_status"] = prc_latent_status
+    # 补齐 lf_status 顶层口径（if-not-in 守卫，不覆写 ContentDetector 已写入值）。
+    if "lf_status" not in score_parts and isinstance(prc_latent_status, str) and prc_latent_status:
+        score_parts["lf_status"] = prc_latent_status
 
     hf_status = hf_trace.get("hf_status")
     if hf_status == "absent" and hf_trace.get("hf_absent_reason") == "hf_disabled_by_config":

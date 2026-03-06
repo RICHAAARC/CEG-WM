@@ -1021,3 +1021,64 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "图像质量均值指标：SSIM。"
+
+  # ==============================================================
+  # 2030 修复版本新增字段（append-only v2030）
+  # - 所有新字段 required=false, missing_semantics=absent_ok
+  # - 不影响旧 records 的兼容读取
+  # ==============================================================
+  - path: "final_decision"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "detect 顶层稳定判决快照（从 fusion_result 只读投影，append-only）。"
+
+  - path: "final_decision.decision_status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "判决状态（decided/abstain/error），镜像自 fusion_result.decision_status。"
+
+  - path: "final_decision.is_watermarked"
+    layer: "diagnostic"
+    type: "boolean_flag"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "水印判决结果：decided 时为布尔值，abstain/error 时为 null。"
+
+  - path: "final_decision.threshold_source"
+    layer: "anchor"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "判决阈值来源（np_canonical 等），镜像自 fusion_result.audit.threshold_source。"
+
+  - path: "final_decision.routing_decisions"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "路由决策快照，镜像自 fusion_result.routing_decisions。"
+
+  - path: "content_evidence.score_parts.lf_status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "LF 检测顶层状态（与 prc_latent_status 保持对称，ok/absent/failed）。"
+
+  - path: "content_evidence.score_parts.lf_detect_trace.bp_converge_status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "BP 解码收敛状态诊断字段（ok/degraded），不参与 lf_trace_digest 输入域。"
+
+  - path: "content_evidence.detect_hf_score_absent_reason"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "detect 侧 HF 分数缺失原因（surrogate 模式下 hf_basis 未生成时填写）。"

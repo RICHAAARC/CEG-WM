@@ -514,6 +514,305 @@ def _ensure_default_embed_input_image(run_root: Path) -> Path:
     return target_path.resolve()
 
 
+def _apply_pil_image_attack(
+    image_path: Path,
+    attack_family: str,
+    params: dict,
+    output_path: Path,
+) -> bool:
+    """
+    功能：使用 PIL 对图像应用指定攻击族变换并保存到输出路径。
+
+    Apply a PIL-based image-domain attack transformation.
+
+    Args:
+        image_path: Source image path.
+        attack_family: Attack family name (identity/jpeg/gaussian_noise/rotate/resize/crop).
+        params: Attack parameters dict from attack_protocol.yaml.
+        output_path: Target output image path.
+
+    Returns:
+        True when attack applied successfully; False otherwise.
+    """
+    if not isinstance(image_path, Path) or not image_path.is_file():
+        return False
+    if not isinstance(attack_family, str) or not attack_family:
+        return False
+    if not isinstance(output_path, Path):
+        return False
+
+    try:
+        from PIL import Image
+        import numpy as np
+        import io
+    except ImportError:
+        return False
+
+    try:
+        img = Image.open(image_path).convert("RGB")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if attack_family in {"none", "identity"}:
+            img.save(output_path, format="PNG")
+            return True
+
+        if attack_family == "jpeg":
+            quality_list = params.get("quality", [85])
+            quality = quality_list[0] if isinstance(quality_list, list) and quality_list else 85
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=int(quality))
+            buf.seek(0)
+            img_decoded = Image.open(buf).convert("RGB")
+            img_decoded.save(output_path, format="PNG")
+            return True
+
+        if attack_family == "gaussian_noise":
+            sigma_list = params.get("sigma", [0.01])
+            sigma = sigma_list[0] if isinstance(sigma_list, list) and sigma_list else 0.01
+            arr = np.asarray(img, dtype=np.float32) / 255.0
+            noise = np.random.default_rng(seed=42).normal(0, float(sigma), arr.shape).astype(np.float32)
+            arr_noisy = np.clip(arr + noise, 0.0, 1.0)
+            Image.fromarray((arr_noisy * 255).astype(np.uint8)).save(output_path, format="PNG")
+            return True
+
+        if attack_family == "rotate":
+            degrees_list = params.get("degrees", [10])
+            degrees = degrees_list[0] if isinstance(degrees_list, list) and degrees_list else 10
+            img.rotate(float(degrees), expand=False).save(output_path, format="PNG")
+            return True
+
+        if attack_family == "resize":
+            scale_list = params.get("scale_factors", [0.9])
+            scale = scale_list[0] if isinstance(scale_list, list) and scale_list else 0.9
+            w, h = img.size
+            new_w, new_h = max(1, int(w * float(scale))), max(1, int(h * float(scale)))
+            img_resized = img.resize((new_w, new_h), Image.LANCZOS)
+            # 还原尺寸以保持一致性
+            img_resized = img_resized.resize((w, h), Image.LANCZOS)
+            img_resized.save(output_path, format="PNG")
+            return True
+
+        if attack_family == "gaussian_blur":
+            from PIL import ImageFilter
+            kernel_list = params.get("kernel_size", [3])
+            radius = (kernel_list[0] if isinstance(kernel_list, list) and kernel_list else 3) / 2.0
+            img.filter(ImageFilter.GaussianBlur(radius=radius)).save(output_path, format="PNG")
+            return True
+
+    except Exception as exc:
+        print(f"[onefile/attack] WARN: failed to apply {attack_family}: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return False
+
+    return False
+
+
+def _load_attack_families_from_protocol(repo_root: Path) -> List[dict]:
+    """
+    功能：从 attack_protocol.yaml 加载攻击族列表（名称 + 参数版本 + 参数）。
+
+    Load attack family entries from attack_protocol.yaml for coverage generation.
+
+    Args:
+        repo_root: Repository root path.
+
+    Returns:
+        List of dicts with keys: family, params_version, params.
+    """
+    if not isinstance(repo_root, Path):
+        return []
+
+    protocol_path = repo_root / "configs" / "attack_protocol.yaml"
+    if not protocol_path.exists():
+        return []
+
+    try:
+        protocol_obj = yaml.safe_load(protocol_path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+    if not isinstance(protocol_obj, dict):
+        return []
+
+    result: List[dict] = []
+    families = protocol_obj.get("families")
+    if not isinstance(families, dict):
+        return result
+
+    for family_name, family_obj in families.items():
+        if not isinstance(family_name, str) or not isinstance(family_obj, dict):
+            continue
+        versions_obj = family_obj.get("params_versions")
+        if not isinstance(versions_obj, dict):
+            continue
+        for version_name, version_params in versions_obj.items():
+            if not isinstance(version_name, str):
+                continue
+            result.append({
+                "family": family_name,
+                "params_version": version_name,
+                "params": version_params if isinstance(version_params, dict) else {},
+            })
+    return result
+
+
+def _run_attack_coverage_detections(
+    repo_root: Path,
+    run_root: Path,
+    cfg_path: Path,
+    profile: str,
+    max_families: int = 4,
+) -> None:
+    """
+    功能：在 embed 完成后，对水印图像应用攻击族变换并运行 detect，补齐攻击覆盖。
+
+    Apply attacks from attack_protocol.yaml to the watermarked image and run detect
+    for each variant. Results are stored under artifacts/attacked_detects/{family}_v1/.
+    The identity baseline is labeled as 'none::v1'.
+
+    Args:
+        repo_root: Repository root path.
+        run_root: Unified run_root path.
+        cfg_path: Config file path for detect.
+        profile: Workflow profile.
+        max_families: Maximum number of attack families to process (limits Colab cost).
+
+    Returns:
+        None. Failures are non-fatal (logged as warnings).
+    """
+    if not isinstance(repo_root, Path) or not isinstance(run_root, Path):
+        return
+    if not isinstance(cfg_path, Path) or not cfg_path.exists():
+        return
+
+    # (1) 读取 embed record，获取水印图像路径。
+    embed_record_path = run_root / "records" / "embed_record.json"
+    if not embed_record_path.exists():
+        print("[onefile/attack_coverage] WARN: embed_record.json not found, skipping attack coverage", file=sys.stderr)
+        return
+
+    try:
+        embed_record_obj = json.loads(embed_record_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"[onefile/attack_coverage] WARN: failed to load embed_record: {exc}", file=sys.stderr)
+        return
+
+    if not isinstance(embed_record_obj, dict):
+        return
+
+    watermarked_path_str = embed_record_obj.get("watermarked_path") or embed_record_obj.get("image_path")
+    if not isinstance(watermarked_path_str, str) or not watermarked_path_str:
+        print("[onefile/attack_coverage] WARN: watermarked_path absent in embed_record, skipping", file=sys.stderr)
+        return
+
+    watermarked_path = Path(watermarked_path_str)
+    if not watermarked_path.exists():
+        print(f"[onefile/attack_coverage] WARN: watermarked image not found: {watermarked_path}", file=sys.stderr)
+        return
+
+    # (2) 加载攻击族配置（来自 attack_protocol.yaml）。
+    attack_families = _load_attack_families_from_protocol(repo_root)
+
+    # identity baseline 必须显式标签，不得使用 unknown 占位。
+    attack_conditions: List[dict] = [
+        {"family": "none", "params_version": "v1", "params": {}}
+    ]
+    # 从 attack_protocol.yaml 取前 max_families-1 个非复合攻击家族。
+    count = 0
+    for entry in attack_families:
+        if count >= max_families - 1:
+            break
+        if entry.get("family") == "composite":
+            continue
+        attack_conditions.append(entry)
+        count += 1
+
+    attacks_root = run_root / "artifacts" / "attacked_detects"
+
+    protocol_path = repo_root / "configs" / "attack_protocol.yaml"
+    for condition in attack_conditions:
+        family = condition["family"]
+        pv = condition["params_version"]
+        params = condition["params"]
+        variant_label = f"{family}_{pv}"
+        variant_root = attacks_root / variant_label
+        variant_root.mkdir(parents=True, exist_ok=True)
+
+        # (3) 应用图像域攻击，保存变体图像。
+        attacked_image_path = variant_root / f"attacked_{variant_label}.png"
+        attack_ok = _apply_pil_image_attack(watermarked_path, family, params, attacked_image_path)
+        if not attack_ok:
+            print(f"[onefile/attack_coverage] WARN: attack={variant_label} apply failed, skipping variant", file=sys.stderr)
+            continue
+
+        # (4) 为该攻击族生成单条件攻击协议配置（确保 inject_attack_condition_fields 能匹配唯一条件）。
+        single_protocol = {
+            "version": "attack_protocol_v1",
+            "families": {
+                family: {
+                    "description": f"single-condition: {variant_label}",
+                    "params_versions": {pv: params},
+                }
+            },
+            "params_versions": {
+                f"{family}::{pv}": {"family": family, "params": params},
+            },
+        }
+        single_protocol_path = variant_root / "attack_protocol_single.yaml"
+        single_protocol_path.write_text(yaml.safe_dump(single_protocol, allow_unicode=True), encoding="utf-8")
+
+        # (5) 为该变体生成覆写了 attack_protocol 路径与图像路径的 cfg。
+        try:
+            cfg_obj = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"[onefile/attack_coverage] WARN: cfg load failed for {variant_label}: {exc}", file=sys.stderr)
+            continue
+        if not isinstance(cfg_obj, dict):
+            continue
+
+        # 关闭 paper_faithfulness，避免 attack 变体被门禁阻断。
+        pf_node = cfg_obj.get("paper_faithfulness")
+        pf_cfg = pf_node if isinstance(pf_node, dict) else {}
+        pf_cfg["enabled"] = False
+        pf_cfg["alignment_check"] = False
+        cfg_obj["paper_faithfulness"] = pf_cfg
+        # 注入单条件攻击协议路径。
+        cfg_obj["attack_protocol_path"] = str(single_protocol_path)
+
+        variant_cfg_path = variant_root / "variant_cfg.yaml"
+        variant_cfg_path.write_text(yaml.safe_dump(cfg_obj, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+        # (6) 构建并执行 detect 命令（与 _build_stage_command 保持一致）。
+        detect_cmd = [
+            sys.executable,
+            "-m",
+            "main.cli.run_detect",
+            "--out",
+            str(variant_root),
+            "--config",
+            str(variant_cfg_path),
+            "--input",
+            str(embed_record_path),
+            "--override",
+            f"input_image_path={attacked_image_path}",
+            "--override",
+            "run_root_reuse_allowed=true",
+            "--override",
+            f'run_root_reuse_reason="attack_coverage_{variant_label}"',
+            "--override",
+            "allow_threshold_fallback_for_tests=true",
+        ]
+
+        print(f"[onefile/attack_coverage] detect variant={variant_label}")
+        try:
+            ret = _run_subprocess_for_step(detect_cmd, repo_root)
+            if ret != 0:
+                print(f"[onefile/attack_coverage] WARN: detect variant={variant_label} returned {ret}", file=sys.stderr)
+        except Exception as exc:
+            print(f"[onefile/attack_coverage] WARN: detect subprocess failed for {variant_label}: {exc}", file=sys.stderr)
+
+    print(f"[onefile/attack_coverage] Completed attack coverage under: {attacks_root}")
+
+
 def _resolve_paper_semantic_model_path(mask_cfg: dict, cfg_path: Path) -> str:
     """
     功能：解析 paper_full_cuda 的 semantic model 路径并执行受控映射。 
@@ -1099,7 +1398,19 @@ def _prepare_stage_cfg_path(
         evaluate_cfg = cfg_obj.get("evaluate")
         if not isinstance(evaluate_cfg, dict):
             evaluate_cfg = {}
-        evaluate_cfg["detect_records_glob"] = detect_record_glob
+        # 攻击覆盖：对非 paper_full_cuda 模式，将攻击变体 detect 记录也纳入 glob，
+        # 确保 metrics_by_attack_condition 中出现真实攻击分组而非 unknown 占位。
+        attacked_detects_glob = str(run_root / "artifacts" / "attacked_detects" / "*" / "records" / "detect_record.json")
+        if _normalize_profile(profile) != PROFILE_PAPER_FULL_CUDA:
+            attacked_detects_dir = run_root / "artifacts" / "attacked_detects"
+            if attacked_detects_dir.exists() and any(attacked_detects_dir.iterdir()):
+                # 有攻击变体记录时，使用逗号分隔的多 glob 路径（evaluate 支持 glob 扩展）。
+                evaluate_cfg["detect_records_glob"] = detect_record_glob
+                evaluate_cfg["detect_records_glob_extra"] = attacked_detects_glob
+            else:
+                evaluate_cfg["detect_records_glob"] = detect_record_glob
+        else:
+            evaluate_cfg["detect_records_glob"] = detect_record_glob
         evaluate_cfg["thresholds_path"] = str(run_root / "artifacts" / "thresholds" / "thresholds_artifact.json")
         cfg_obj["evaluate"] = evaluate_cfg
 
@@ -2701,6 +3012,17 @@ def run_onefile_workflow(
                 print(
                     f"[onefile] multi_protocol compare summary warning (continue): "
                     f"{type(exc).__name__}: {exc}"
+                )
+
+        # embed 成功完成后，为非 paper 模式（paper 模式由 multi_protocol_evaluation 负责）
+        # 补充攻击覆盖生成，确保 evaluate 产物中有真实攻击分组。
+        if step.name == "embed" and return_code == 0 and profile != PROFILE_PAPER_FULL_CUDA:
+            try:
+                _run_attack_coverage_detections(repo_root, run_root, effective_cfg_path, profile)
+            except Exception as exc:
+                print(
+                    f"[onefile] WARN: attack coverage detections failed: {type(exc).__name__}: {exc}",
+                    file=sys.stderr,
                 )
 
         if step.name == "experiment_matrix" and profile == PROFILE_PAPER_FULL_CUDA and step.artifact_paths:

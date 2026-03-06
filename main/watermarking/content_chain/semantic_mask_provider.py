@@ -864,11 +864,19 @@ def _probe_model_v2_availability(mask_params: Dict[str, Any]) -> Tuple[bool, Opt
     """
     if not isinstance(mask_params, dict):
         return False, "probe_invalid_params_type"
-    model_path = mask_params.get("semantic_model_path")
-    if not isinstance(model_path, str) or not model_path:
+    raw_model_path = mask_params.get("semantic_model_path")
+    if not isinstance(raw_model_path, str) or not raw_model_path:
         return False, "probe_model_path_missing"
 
-    model_file = Path(model_path)
+    # 统一路径解析基准为工程根目录，消除对 CWD 的隐式依赖。
+    # 相对路径以 semantic_mask_provider.py 向上 3 级（即工程根 CEG-WM/）为基准拼接。
+    raw_path = Path(raw_model_path)
+    if raw_path.is_absolute():
+        model_file = raw_path
+    else:
+        project_root = Path(__file__).resolve().parents[2]
+        model_file = project_root / raw_path
+
     if not (model_file.exists() and model_file.is_file()):
         return False, f"probe_model_file_not_found: {model_file}"
 

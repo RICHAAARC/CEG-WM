@@ -1381,6 +1381,8 @@ class LFCoderPRC:
             "cfg_digest": cfg_digest,
         }
         trace["lf_trace_digest"] = digests.canonical_sha256(trace)
+        # bp_converge_status \u8ffd\u52a0\u5728 lf_trace_digest \u8ba1\u7b97\u4e4b\u540e\uff0c\u4e0d\u53c2\u4e0e\u6458\u8981\u8f93\u5165\u57df\u3002
+        trace["bp_converge_status"] = "ok" if bp_converged else "degraded"
 
         return lf_score, trace
 
