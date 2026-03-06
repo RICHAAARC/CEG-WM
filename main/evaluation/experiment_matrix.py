@@ -841,8 +841,8 @@ def _run_global_calibrate(
     global_calibrate_root = path_policy.derive_run_root(
         Path(batch_root) / "global_calibrate"
     )
-    # neg 标注暂存目录与 global_calibrate_root 分离，避免 calibrate 输出目录污染。
-    neg_staged_dir = global_calibrate_root / "neg_staged"
+    # neg 标注暂存目录位于 global_calibrate_root/artifacts/ 内，满足受控写盘路径约束。
+    neg_staged_dir = global_calibrate_root / "artifacts" / "neg_staged"
     neg_staged_dir.mkdir(parents=True, exist_ok=True)
 
     # (2) 为每条 neg detect record 追加 label=False 标注并写入暂存目录。
@@ -869,7 +869,12 @@ def _run_global_calibrate(
         # 确保 content payload status=ok，使 load_scores_for_calibration 不拒绝该样本。
         labeled_neg["content_evidence_payload"]["status"] = "ok"
         staged_path = neg_staged_dir / f"neg_record_{idx:04d}.json"
-        staged_path.write_text(json.dumps(labeled_neg), encoding="utf-8")
+        records_io.write_artifact_text_unbound(
+            run_root=global_calibrate_root,
+            artifacts_dir=neg_staged_dir,
+            path=str(staged_path),
+            content=json.dumps(labeled_neg),
+        )
         staged_count += 1
 
     if staged_count == 0:

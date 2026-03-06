@@ -830,7 +830,12 @@ def _run_attack_coverage_detections(
             },
         }
         single_protocol_path = variant_root / "attack_protocol_single.yaml"
-        single_protocol_path.write_text(yaml.safe_dump(single_protocol, allow_unicode=True), encoding="utf-8")
+        records_io.write_artifact_text_unbound(
+            run_root=run_root,
+            artifacts_dir=variant_root,
+            path=str(single_protocol_path),
+            content=yaml.safe_dump(single_protocol, allow_unicode=True),
+        )
 
         # (5) 为该变体生成覆写了 attack_protocol 路径与图像路径的 cfg。
         try:
@@ -850,8 +855,13 @@ def _run_attack_coverage_detections(
         # 注入单条件攻击协议路径。
         cfg_obj["attack_protocol_path"] = str(single_protocol_path)
 
-        variant_cfg_path = variant_root / "variant_cfg.yaml"
-        variant_cfg_path.write_text(yaml.safe_dump(cfg_obj, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        variant_cfg_path = variant_root / "artifacts" / "variant_cfg.yaml"
+        records_io.write_artifact_text_unbound(
+            run_root=run_root,
+            artifacts_dir=variant_root,
+            path=str(variant_cfg_path),
+            content=yaml.safe_dump(cfg_obj, allow_unicode=True, sort_keys=False),
+        )
 
         # (6) 构建并执行 detect 命令（与 _build_stage_command 保持一致）。
         detect_cmd = [
