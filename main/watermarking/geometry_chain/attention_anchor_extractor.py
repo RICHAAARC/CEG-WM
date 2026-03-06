@@ -685,6 +685,12 @@ class AttentionAnchorMapRelation:
                 "self_attention_authentic": is_authentic_attention,
                 "proxy_version": None if is_authentic_attention else "attention_proxy_v1",
             },
+            "anchor_metrics": {
+                "extraction_source": "attention_map_relation",
+                "n_edges": len(relation_graph_topk.get("edges", [])) if isinstance(relation_graph_topk, dict) else 0,
+                "relation_digest": relation_digest,
+                "anchor_evidence_level": "authentic" if is_authentic_attention else "proxy",
+            },
             "geometry_failure_reason": None,
         }
 

@@ -4284,6 +4284,11 @@ def _run_geometry_chain_with_sync(
     relation_digest_bound = sync_result.get("relation_digest_bound")
     if isinstance(relation_digest_bound, str) and relation_digest_bound:
         geometry_result["relation_digest_bound"] = relation_digest_bound
+    # sync_digest 提升：将 sync_result.sync_digest 暴露于顶层，供 assert_paper_mechanisms 读取。
+    if not isinstance(geometry_result.get("sync_digest"), str) or not geometry_result.get("sync_digest"):
+        sync_digest_val = sync_result.get("sync_digest")
+        if isinstance(sync_digest_val, str) and sync_digest_val:
+            geometry_result["sync_digest"] = sync_digest_val
     geometry_result["relation_digest_binding"] = {
         "anchor_relation_digest": anchor_relation_digest if isinstance(anchor_relation_digest, str) else None,
         "sync_relation_digest_bound": relation_digest_bound if isinstance(relation_digest_bound, str) else None,
