@@ -326,7 +326,7 @@ def test_run_stage_sequence_binds_labelled_detect_glob_for_calibrate_and_evaluat
             "records_dir": run_root / "records",
         }
 
-    def _fake_prepare_labelled_glob(run_root: Path, _grid_item_cfg: dict) -> str:
+    def _fake_prepare_labelled_glob(run_root: Path, _grid_item_cfg: dict, neg_detect_record_path=None) -> str:
         labelled_dir = run_root / "artifacts" / "evaluate_inputs" / "labelled_detect_records"
         labelled_dir.mkdir(parents=True, exist_ok=True)
         (labelled_dir / "detect_record_label_pos.json").write_text("{}", encoding="utf-8")

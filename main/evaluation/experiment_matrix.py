@@ -401,10 +401,62 @@ def run_experiment_grid(grid: list[dict], strict: bool = True) -> dict:
     results: List[Dict[str, Any]] = []
     first_failure: Optional[Dict[str, Any]] = None
 
+    # (1) 按 (model_id, seed) 分组预生成真实负样本 detect record。
+    # 论文级严谨要求：FPR 校准须使用真实干净图像分布，而非合成偏移（base_score - 1.0）。
+    # 每组仅发起 1 次额外 SD 推理（embed identity + detect），8 个 grid item 共用 1 个结果。
+    neg_detect_record_cache: Dict[Tuple[str, int], Optional[Path]] = {}
+    for item in grid:
+        if not isinstance(item, dict):
+            continue
+        m_id = item.get("model_id")
+        s_val = item.get("seed")
+        if not isinstance(m_id, str) or not isinstance(s_val, int):
+            continue
+        neg_key: Tuple[str, int] = (m_id, s_val)
+        if neg_key not in neg_detect_record_cache:
+            try:
+                neg_detect_record_cache[neg_key] = _run_neg_embed_detect_for_cache(
+                    model_id=m_id,
+                    seed=s_val,
+                    config_path=str(item.get("config_path", "configs/paper_full_cuda.yaml")),
+                    batch_root=str(item.get("batch_root", "outputs/experiment_matrix")),
+                    max_samples=item.get("max_samples"),
+                )
+            except Exception:
+                # neg 预生成失败时降级为合成方案，不中止 grid 执行。
+                neg_detect_record_cache[neg_key] = None
+
+    # (2) 全局 calibrate：汇总所有 neg 记录产出共享阈值，实现校准集与测试集的严格分离。
+    # 论文级要求：NP 阈值必须在独立的 null 分布上估计，不得与测试集（攻击后正样本）重合。
+    shared_thresholds_path: Optional[Path] = None
+    if grid:
+        first_item = grid[0]
+        try:
+            shared_thresholds_path = _run_global_calibrate(
+                batch_root=str(first_item.get("batch_root", "outputs/experiment_matrix")),
+                config_path=str(first_item.get("config_path", "configs/paper_full_cuda.yaml")),
+                neg_detect_record_cache=neg_detect_record_cache,
+            )
+        except Exception:
+            # 全局 calibrate 失败时降级为 per-item calibrate，不中止 grid 执行。
+            shared_thresholds_path = None
+
+    # (3) 主循环：将 neg_detect_record_path 与 shared_thresholds_path 注入各 grid item。
     for item in grid:
         if not isinstance(item, dict):
             raise TypeError("grid items must be dict")
-        result = run_single_experiment(item)
+        m_id = item.get("model_id")
+        s_val = item.get("seed")
+        neg_key_for_item = (m_id, s_val) if (isinstance(m_id, str) and isinstance(s_val, int)) else None
+        neg_path = neg_detect_record_cache.get(neg_key_for_item) if neg_key_for_item is not None else None
+
+        run_item = dict(item)
+        if neg_path is not None:
+            run_item["neg_detect_record_path"] = str(neg_path)
+        if shared_thresholds_path is not None:
+            run_item["shared_thresholds_path"] = str(shared_thresholds_path)
+
+        result = run_single_experiment(run_item)
         results.append(result)
         if result.get("status") != "ok" and first_failure is None:
             first_failure = result
@@ -665,6 +717,188 @@ def _derive_run_root(grid_item_cfg: Dict[str, Any]) -> Path:
     return path_policy.derive_run_root(run_root)
 
 
+def _run_neg_embed_detect_for_cache(
+    model_id: str,
+    seed: int,
+    config_path: str,
+    batch_root: str,
+    max_samples: Optional[int],
+) -> Optional[Path]:
+    """
+    功能：为 (model_id, seed) 预生成真实负样本 detect record 并缓存。
+
+    Run embed (test_mode_identity=true, no watermark injection) then detect on the
+    resulting clean image to obtain a real negative-sample content score. Results are
+    cached under batch_root/neg_cache/ and reused within the current experiment-matrix
+    session to avoid redundant SD inference.
+
+    Args:
+        model_id: Stable Diffusion model identifier string.
+        seed: Reproducibility seed integer.
+        config_path: Base config YAML path passed to each CLI stage.
+        batch_root: Batch output root; neg cache is written to batch_root/neg_cache/.
+        max_samples: Optional max_samples override, or None to use config default.
+
+    Returns:
+        Path to the cached detect_record.json when generation succeeds, else None.
+    """
+    if not isinstance(model_id, str) or not model_id:
+        return None
+    if not isinstance(seed, int):
+        return None
+    if not isinstance(config_path, str) or not config_path:
+        return None
+    if not isinstance(batch_root, str) or not batch_root:
+        return None
+    if max_samples is not None and not isinstance(max_samples, int):
+        return None
+
+    # (model_id, seed) 的 canonical digest 作为确定性缓存 key，避免路径含特殊字符。
+    cache_key = digests.canonical_sha256({"model_id": model_id, "seed": seed})
+    neg_run_root = path_policy.derive_run_root(
+        Path(batch_root) / "neg_cache" / f"neg_{cache_key[:16]}"
+    )
+    neg_detect_record_path = neg_run_root / "records" / "detect_record.json"
+
+    # 缓存命中：直接返回已存在的 detect record，无需重复 SD 推理。
+    if neg_detect_record_path.exists() and neg_detect_record_path.is_file():
+        return neg_detect_record_path
+
+    # 公共 override 项：seed / model_id / allow_nonempty_run_root。
+    # allow_nonempty_run_root=true 确保 embed 与 detect 均可运行在同一目录。
+    common_overrides: List[str] = [
+        "allow_nonempty_run_root=true",
+        'allow_nonempty_run_root_reason="neg_cache"',
+        f"seed={seed}",
+        f"model_id={json.dumps(model_id)}",
+    ]
+    if isinstance(max_samples, int):
+        common_overrides.append(f"max_samples={max_samples}")
+
+    # (1) embed 阶段：test_mode_identity=true 跳过水印注入，生成干净图像作为负样本来源。
+    embed_overrides = list(common_overrides) + ["test_mode_identity=true"]
+    _run_stage_command(
+        stage_name="embed",
+        run_root=neg_run_root,
+        config_path=Path(config_path),
+        stage_overrides=embed_overrides,
+    )
+
+    # (2) detect 阶段：对干净图像执行 content 检测，获取真实负样本分数。
+    # allow_threshold_fallback_for_tests=true 因校准工件此时尚未产出。
+    detect_overrides = list(common_overrides) + [
+        "enable_content_detect=true",
+        "allow_threshold_fallback_for_tests=true",
+    ]
+    _run_stage_command(
+        stage_name="detect",
+        run_root=neg_run_root,
+        config_path=Path(config_path),
+        stage_overrides=detect_overrides,
+    )
+
+    if neg_detect_record_path.exists() and neg_detect_record_path.is_file():
+        return neg_detect_record_path
+    return None
+
+
+def _run_global_calibrate(
+    batch_root: str,
+    config_path: str,
+    neg_detect_record_cache: Dict[Tuple[str, int], Optional[Path]],
+) -> Optional[Path]:
+    """
+    功能：使用所有预生成的真实负样本产出全局共享 NP 阈值工件。
+
+    Aggregate all valid neg detect records from the cache, label them as negative,
+    write to a staging directory, then run one global calibrate stage. This ensures
+    the calibration null distribution is independent of the test set (attacked
+    watermarked images), satisfying the paper-level train/test separation requirement.
+
+    Args:
+        batch_root: Batch output root; global calibrate writes to batch_root/global_calibrate/.
+        config_path: Base config YAML path for the calibrate CLI.
+        neg_detect_record_cache: Mapping of (model_id, seed) → detect_record path.
+
+    Returns:
+        Path to the shared thresholds_artifact.json, or None on failure.
+    """
+    if not isinstance(batch_root, str) or not batch_root:
+        return None
+    if not isinstance(config_path, str) or not config_path:
+        return None
+    if not isinstance(neg_detect_record_cache, dict):
+        return None
+
+    # (1) 收集所有有效的 neg detect record path，跳过生成失败的条目。
+    valid_neg_paths: List[Path] = [
+        p for p in neg_detect_record_cache.values()
+        if p is not None and p.exists() and p.is_file()
+    ]
+    if not valid_neg_paths:
+        return None
+
+    global_calibrate_root = path_policy.derive_run_root(
+        Path(batch_root) / "global_calibrate"
+    )
+    # neg 标注暂存目录与 global_calibrate_root 分离，避免 calibrate 输出目录污染。
+    neg_staged_dir = global_calibrate_root / "neg_staged"
+    neg_staged_dir.mkdir(parents=True, exist_ok=True)
+
+    # (2) 为每条 neg detect record 追加 label=False 标注并写入暂存目录。
+    # load_scores_for_calibration 在 has_explicit_labels=True 时仅使用 label=False 的记录
+    # 作为 null 分布，与 label=True 的正样本完全隔离。
+    staged_count = 0
+    for idx, neg_path in enumerate(valid_neg_paths):
+        neg_record = _read_optional_json(neg_path)
+        if not isinstance(neg_record, dict) or not neg_record:
+            continue
+        content_node = neg_record.get("content_evidence_payload")
+        if not isinstance(content_node, dict):
+            continue
+        score_val = content_node.get("score")
+        if not isinstance(score_val, (int, float)) or not np.isfinite(float(score_val)):
+            continue
+        labeled_neg = copy.deepcopy(neg_record)
+        labeled_neg["label"] = False
+        labeled_neg["ground_truth"] = False
+        labeled_neg["is_watermarked"] = False
+        labeled_neg["calibration_label_resolution"] = "global_calibrate_real_neg"
+        labeled_neg["ground_truth_source"] = "real_neg_embed_detect"
+        labeled_neg["calibration_sample_usage"] = "real_negative_global_calibrate_null_distribution"
+        # 确保 content payload status=ok，使 load_scores_for_calibration 不拒绝该样本。
+        labeled_neg["content_evidence_payload"]["status"] = "ok"
+        staged_path = neg_staged_dir / f"neg_record_{idx:04d}.json"
+        staged_path.write_text(json.dumps(labeled_neg), encoding="utf-8")
+        staged_count += 1
+
+    if staged_count == 0:
+        return None
+
+    neg_glob = str(neg_staged_dir / "*.json")
+
+    # (3) 运行一次全局 calibrate：使用所有 neg 记录作为 null 分布，产出共享阈值工件。
+    # 全局 calibrate 本身不需要 GPU（仅读取 JSON 做统计），执行极快。
+    global_calibrate_overrides: List[str] = [
+        "allow_nonempty_run_root=true",
+        'allow_nonempty_run_root_reason="global_calibrate"',
+        f"calibrate_detect_records_glob={json.dumps(neg_glob)}",
+    ]
+    _run_stage_command(
+        stage_name="calibrate",
+        run_root=global_calibrate_root,
+        config_path=Path(config_path),
+        stage_overrides=global_calibrate_overrides,
+    )
+
+    shared_thresholds_path = (
+        global_calibrate_root / "artifacts" / "thresholds" / "thresholds_artifact.json"
+    )
+    if shared_thresholds_path.exists() and shared_thresholds_path.is_file():
+        return shared_thresholds_path
+    return None
+
+
 def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[str, Any]:
     """Run embed/detect/calibrate/evaluate sequence for one experiment."""
     layout = path_policy.ensure_output_layout(
@@ -713,7 +947,39 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
     }
     labelled_detect_records_glob: Optional[str] = None
 
+    # 从 grid_item_cfg 读取由 run_experiment_grid 预注入的共享阈值路径与真实负样本路径。
+    # shared_thresholds_path 存在时：跳过 per-item calibrate，evaluate 使用全局阈值。
+    # 降级条件：shared_thresholds_path 缺失或文件不存在时，回落 per-item calibrate 路径。
+    shared_thresholds_path_str = grid_item_cfg.get("shared_thresholds_path")
+    shared_thresholds_path_val: Optional[Path] = (
+        Path(shared_thresholds_path_str)
+        if isinstance(shared_thresholds_path_str, str) and shared_thresholds_path_str
+        else None
+    )
+    use_shared_thresholds = (
+        shared_thresholds_path_val is not None
+        and shared_thresholds_path_val.exists()
+        and shared_thresholds_path_val.is_file()
+    )
+
+    neg_path_str = grid_item_cfg.get("neg_detect_record_path")
+    neg_detect_record_path_for_stage: Optional[Path] = (
+        Path(neg_path_str) if isinstance(neg_path_str, str) and neg_path_str else None
+    )
+
     for stage_name in ["embed", "detect", "calibrate", "evaluate"]:
+        # 全局阈值可用时跳过 per-item calibrate：
+        # 校准集（neg_cache 的全体 neg 记录）与测试集（per-item 攻击正样本）已在
+        # run_experiment_grid 层严格分离，per-item calibrate 会把二者混用，不符合
+        # NP 阈值估计的独立同分布要求。
+        if stage_name == "calibrate" and use_shared_thresholds:
+            # 在跳过前预先准备 labelled_detect_records_glob，供后续 evaluate 阶段使用。
+            if labelled_detect_records_glob is None:
+                labelled_detect_records_glob = _prepare_labelled_detect_records_glob_for_matrix(
+                    run_root, grid_item_cfg, neg_detect_record_path=neg_detect_record_path_for_stage
+                )
+            continue
+
         stage_overrides = [
             "allow_nonempty_run_root=true",
             'allow_nonempty_run_root_reason="experiment_grid"',
@@ -724,7 +990,7 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
             stage_overrides.append(f"model_id={json.dumps(model_id)}")
         if isinstance(max_samples, int):
             stage_overrides.append(f"max_samples={max_samples}")
-        
+
         # detect 阶段必须启用 content 检测（experiment_matrix 需要生成检测分数）
         # detect 阶段的阈值回退是架构必要性：校准工件在 calibrate 阶段才产出，
         # detect 阶段产出的阈值仅用于中间评分记录，不进入最终判决。
@@ -733,27 +999,35 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
             stage_overrides.append("allow_threshold_fallback_for_tests=true")
         # embed 阶段不强制写入 disable_content_detect 覆盖项。
         # 由配置与 whitelist 统一约束，避免 override_value_mismatch。
-        
+
         # calibrate/evaluate 都需要带标签的 detect records 输入。
         # 这里使用 detect 后生成的 attack-aware 标注记录对（正/负各一条）满足标签平衡门禁。
         if stage_name in {"calibrate", "evaluate"}:
             if labelled_detect_records_glob is None:
-                labelled_detect_records_glob = _prepare_labelled_detect_records_glob_for_matrix(run_root, grid_item_cfg)
+                labelled_detect_records_glob = _prepare_labelled_detect_records_glob_for_matrix(
+                    run_root, grid_item_cfg, neg_detect_record_path=neg_detect_record_path_for_stage
+                )
             arg_name = f"{stage_name}_detect_records_glob"
             stage_overrides.append(f"{arg_name}={json.dumps(labelled_detect_records_glob)}")
-        
-        # evaluate 需要额外的参数
+
+        # evaluate 阈值来源：优先使用全局共享阈值，降级时使用 per-item calibrate 产出的本地阈值。
         if stage_name == "evaluate":
-            thresholds_path = run_root / "artifacts" / "thresholds" / "thresholds_artifact.json"
-            stage_overrides.append(f"evaluate_thresholds_path={json.dumps(str(thresholds_path))}")
-        
+            if use_shared_thresholds:
+                stage_overrides.append(
+                    f"evaluate_thresholds_path={json.dumps(str(shared_thresholds_path_val))}"
+                )
+            else:
+                local_thresholds_path = run_root / "artifacts" / "thresholds" / "thresholds_artifact.json"
+                stage_overrides.append(
+                    f"evaluate_thresholds_path={json.dumps(str(local_thresholds_path))}"
+                )
+
         if ablation_override_enabled:
             for key, value in sorted(ablation_flags.items()):
                 # key 形如 "enable_geometry"；统一使用 ablation_enable_* arg_name 格式，
                 # 避免 field_path 格式在 whitelist 中因 enable/disable 双条目引发歧义错误。
                 suffix = key[len("enable_"):] if key.startswith("enable_") else key
                 stage_overrides.append(f"ablation_enable_{suffix}={str(value).lower()}")
-
 
         _run_stage_command(
             stage_name=stage_name,
@@ -945,8 +1219,33 @@ def _prepare_detect_record_for_attack_grouping(run_root: Path, grid_item_cfg: Di
     return enriched_path
 
 
-def _prepare_labelled_detect_records_glob_for_matrix(run_root: Path, grid_item_cfg: Dict[str, Any]) -> str:
-    """Create labelled detect-record pair and return recursive glob path for calibrate/evaluate."""
+def _prepare_labelled_detect_records_glob_for_matrix(
+    run_root: Path,
+    grid_item_cfg: Dict[str, Any],
+    neg_detect_record_path: Optional[Path] = None,
+) -> str:
+    """
+    功能：构建带标签正负样本对并返回 glob 路径供 calibrate/evaluate 消费。
+
+    Create labelled detect-record pair (positive from attacked watermarked image,
+    negative from real clean image or synthetic fallback) and return a glob path
+    covering both records for downstream calibrate/evaluate stages.
+
+    Args:
+        run_root: Per-experiment run output root directory.
+        grid_item_cfg: Grid item config dict for the current experiment.
+        neg_detect_record_path: Optional path to a real negative-sample detect_record.json
+            produced by _run_neg_embed_detect_for_cache. When provided and valid, the
+            content score is read from this record. When absent or invalid, falls back
+            to (base_score - 1.0) synthetic offset.
+
+    Returns:
+        Glob pattern string matching both labelled record files.
+
+    Raises:
+        TypeError: If run_root or grid_item_cfg types are invalid.
+        RuntimeError: If detect record is missing or invalid.
+    """
     if not isinstance(run_root, Path):
         raise TypeError("run_root must be Path")
     if not isinstance(grid_item_cfg, dict):
@@ -1009,7 +1308,26 @@ def _prepare_labelled_detect_records_glob_for_matrix(run_root: Path, grid_item_c
         content_node.pop("calibration_sample_is_synthetic_fallback", None)
 
     _ensure_calibration_compatible_content_payload(positive_payload, base_score)
-    _ensure_calibration_compatible_content_payload(negative_payload, base_score - 1.0)
+
+    # 优先使用预生成的真实负样本分数（干净图像经 identity embed + detect 产出）。
+    # 真实分数保证 FPR 校准在真实负样本分布上进行，满足论文级严谨要求。
+    # 降级条件：neg_detect_record_path 缺失、文件不存在或分数无效，则回落合成方案。
+    neg_score: Optional[float] = None
+    if (
+        neg_detect_record_path is not None
+        and neg_detect_record_path.exists()
+        and neg_detect_record_path.is_file()
+    ):
+        neg_payload_real = _read_optional_json(neg_detect_record_path)
+        neg_score = _resolve_numeric_content_score(neg_payload_real)
+
+    if isinstance(neg_score, float):
+        _ensure_calibration_compatible_content_payload(negative_payload, neg_score)
+        negative_payload["ground_truth_source"] = "real_neg_embed_detect"
+        negative_payload["calibration_sample_usage"] = "real_negative_for_experiment_matrix_label_balance"
+    else:
+        # 降级：neg 生成失败或分数无效，使用合成得分（base_score - 1.0）。
+        _ensure_calibration_compatible_content_payload(negative_payload, base_score - 1.0)
 
     positive_rel_path = Path("artifacts") / "evaluate_inputs" / "labelled_detect_records" / "detect_record_label_pos.json"
     negative_rel_path = Path("artifacts") / "evaluate_inputs" / "labelled_detect_records" / "detect_record_label_neg.json"
