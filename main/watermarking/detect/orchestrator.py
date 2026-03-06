@@ -4295,6 +4295,16 @@ def _run_geometry_chain_with_sync(
         anchor_result=anchor_result,
         sync_result=sync_result,
     )
+    # sync_primary 模式下 sync 成功时，将 sync geo_score（quality_score）写入 geometry_result，
+    # 确保 _extract_geometry_score 可读取到有效浮点分数。
+    if sync_primary_mode:
+        sync_status_for_geo = _normalize_geometry_chain_status(
+            sync_result.get("sync_status") or sync_result.get("status")
+        )
+        if sync_status_for_geo == "ok":
+            sync_geo = sync_result.get("geo_score")
+            if isinstance(sync_geo, (int, float)) and np.isfinite(float(sync_geo)):
+                geometry_result["geo_score"] = float(sync_geo)
     return geometry_result
 
 

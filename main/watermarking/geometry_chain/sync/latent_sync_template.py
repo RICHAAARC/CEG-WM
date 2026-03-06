@@ -909,13 +909,14 @@ class GeometryLatentSyncSD3V2:
         runtime_inputs = inputs or {}
         relation_digest = runtime_inputs.get("relation_digest")
 
-        # If relation_digest is missing and we require it for v2, fail with mismatch
+        # embed 侧不提供 relation_digest（无 anchor），语义为 absent 而非 mismatch。
+        # detect 侧通过 precomputed_relation_digest 注入，因此不会走此分支。
         if relation_digest is None:
             return {
-                "status": "mismatch",
+                "status": "absent",
                 "geo_score": None,
                 "sync_digest": None,
-                "geometry_failure_reason": "relation_digest_missing_for_v2",
+                "geometry_absent_reason": "relation_digest_absent_embed_mode",
                 "sync_quality_semantics": {
                     "score_type": "interpretable_geometry_consistency",
                     "score_version": "latent_sync_geometry_consistency",
@@ -1007,7 +1008,7 @@ class GeometryLatentSyncSD3V2:
 
         return {
             "status": "ok",
-            "geo_score": None,  # Will be computed by align module
+            "geo_score": float(sync_quality_metrics.get("quality_score", 0.0)),  # 用 sync quality_score 作为几何分数
             "sync_digest": sync_digest,
             "sync_config_digest": sync_config_digest,
             "sync_quality_metrics": sync_quality_metrics,

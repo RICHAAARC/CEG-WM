@@ -191,9 +191,10 @@ def test_sync_module_v2_sync_with_context_ok_path() -> None:
 
 def test_sync_module_v2_relation_digest_missing_returns_mismatch() -> None:
     """
-    功能：v2 在缺失 relation_digest 时必须返回 mismatch 语义。
+    功能：v2 在缺失 relation_digest 时必须返回 absent 语义（embed 侧无 anchor，属正常路径）。
 
-    v2 must return mismatch semantics when relation_digest is absent.
+    v2 must return absent semantics when relation_digest is missing,
+    reflecting the embed-side execution path where no anchor is available.
 
     Args:
         None.
@@ -213,9 +214,9 @@ def test_sync_module_v2_relation_digest_missing_returns_mismatch() -> None:
     )
     result = instance.sync_with_context(cfg, context)
     assert isinstance(result, dict)
-    assert result.get("sync_status") == "mismatch"
+    assert result.get("sync_status") == "absent"
     assert result.get("sync_success") is False
-    assert result.get("geometry_failure_reason") == "relation_digest_missing_for_v2"
+    assert result.get("geometry_absent_reason") == "relation_digest_absent_embed_mode"
 
 
 def test_detect_run_sync_module_for_v2_no_nameerror() -> None:
