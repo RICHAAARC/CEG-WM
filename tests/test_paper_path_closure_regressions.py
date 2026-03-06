@@ -253,9 +253,7 @@ def test_detect_geometry_chain_paper_path_sync_primary_can_rollback() -> None:
 
 def test_image_domain_sidecar_disabled_in_paper_mode() -> None:
     """
-    功能：验证 paper_full_cuda 配置下 sidecar 状态与0830修复意图一致。
-    
-    0830修复P2-1明确要求开启sidecar作为等价基线比较能力。
+    功能：验证 paper_full_cuda 配置下 sidecar 状态。
     paper_faithfulness与sidecar共存用于对比分析，非互斥关系。
     """
     cfg = _load_paper_full_cuda_cfg()

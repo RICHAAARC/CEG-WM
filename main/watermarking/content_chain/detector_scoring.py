@@ -341,6 +341,25 @@ def extract_lf_score_from_detect_latents(
                 dtype=torch.float32,
                 device=latents_flat.device
             )
+            # 维度不匹配时先用 latent_projection_spec 将 latent 随机索引降至
+            # feature_dim，与 embed 侧 _sample_from_diffusion_pipeline 的
+            # 公式 (seed + 7919 + t_idx * 131 + sample_idx) 保持一致。
+            if latents_flat.shape[0] != proj_matrix_t.shape[0]:
+                latent_proj_spec = lf_basis.get("latent_projection_spec")
+                if not isinstance(latent_proj_spec, dict):
+                    return None, "latent_projection_spec_missing"
+                feature_dim = int(latent_proj_spec.get("feature_dim", proj_matrix_t.shape[0]))
+                seed = int(latent_proj_spec.get("seed", 0))
+                t_idx = int(latent_proj_spec.get("edit_timestep", 0))
+                sample_idx = int(latent_proj_spec.get("sample_idx", 0))
+                projection_seed = seed + 7919 + t_idx * 131 + sample_idx
+                rng = np.random.default_rng(projection_seed)
+                projection_indices = rng.integers(
+                    0, max(1, latents_flat.shape[0]), size=feature_dim
+                )
+                latents_flat = latents_flat[
+                    torch.tensor(projection_indices, device=latents_flat.device)
+                ]
             lf_coeffs = torch.matmul(latents_flat, proj_matrix_t)
             coeffs_norm = float(torch.linalg.vector_norm(lf_coeffs).item())
         else:
@@ -352,6 +371,21 @@ def extract_lf_score_from_detect_latents(
             latents_np = np.asarray(detect_latents, dtype=np.float32).copy()
             latents_flat = latents_np.reshape(-1)
             proj_matrix_np = np.asarray(projection_matrix, dtype=np.float32)
+            # numpy 路径同样处理维度不匹配。
+            if latents_flat.shape[0] != proj_matrix_np.shape[0]:
+                latent_proj_spec = lf_basis.get("latent_projection_spec")
+                if not isinstance(latent_proj_spec, dict):
+                    return None, "latent_projection_spec_missing"
+                feature_dim = int(latent_proj_spec.get("feature_dim", proj_matrix_np.shape[0]))
+                seed = int(latent_proj_spec.get("seed", 0))
+                t_idx = int(latent_proj_spec.get("edit_timestep", 0))
+                sample_idx = int(latent_proj_spec.get("sample_idx", 0))
+                projection_seed = seed + 7919 + t_idx * 131 + sample_idx
+                rng = np.random.default_rng(projection_seed)
+                projection_indices = rng.integers(
+                    0, max(1, latents_flat.shape[0]), size=feature_dim
+                )
+                latents_flat = latents_flat[projection_indices]
             lf_coeffs = np.dot(latents_flat, proj_matrix_np)
             coeffs_norm = float(np.linalg.norm(lf_coeffs))
         

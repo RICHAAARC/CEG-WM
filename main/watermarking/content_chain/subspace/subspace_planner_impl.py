@@ -2375,6 +2375,17 @@ class SubspacePlannerImpl:
         }
         if channel == "lf":
             payload["projection_matrix"] = quantized.tolist()
+            # latent_projection_spec：记录 embed 侧将原始 latent 降至 feature_dim
+            # 的随机索引选取参数，detect 侧用同一公式复现投影，避免维度不匹配。
+            # 公式：projection_seed = seed + 7919 + t_idx * 131 + sample_idx
+            payload["latent_projection_spec"] = {
+                "spec_version": "v1",
+                "method": "random_index_selection",
+                "feature_dim": planner_params.feature_dim,
+                "seed": planner_params.seed,
+                "edit_timestep": planner_params.edit_timestep,
+                "sample_idx": 0,
+            }
         else:
             payload["hf_projection_matrix"] = quantized.tolist()
         payload["basis_payload_digest"] = digests.canonical_sha256(payload)

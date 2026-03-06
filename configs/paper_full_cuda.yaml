@@ -81,7 +81,7 @@ detect:
 enable_mask: true
 mask:
   impl_id: "semantic_saliency_v2"
-  saliency_source: "model_v2"   # 强制使用真实模型，禁止自动 proxy fallback（P1-4 修复）
+  saliency_source: "model_v2"   # 强制使用真实模型，禁止自动 proxy fallback
   semantic_model_source: "inspyrenet"
   semantic_model_path: "../models/inspyrenet/ckpt_base.pth"
 

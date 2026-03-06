@@ -232,7 +232,7 @@ def run_calibrate(output_dir: str, config_path: str, overrides: list[str] | None
         run_meta["cfg_digest"] = cfg_digest
         run_meta["policy_path"] = cfg["policy_path"]
 
-        # P1-3: 样本有效性前置门禁（n_pos/n_neg 不能为0）。
+        # 样本有效性前置门禁（n_pos/n_neg 不能为0）。
         _validate_detect_record_label_balance_for_calibration(cfg)
 
         seed_parts, seed_digest, seed_value, seed_rule_id = build_seed_audit(cfg, "calibrate")

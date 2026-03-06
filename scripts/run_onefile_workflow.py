@@ -1054,7 +1054,7 @@ def _prepare_stage_cfg_path(
         and not branch_neg_detect_record.exists()
     ):
         try:
-            print("[onefile] Running dual-branch embedding and detection (P0-3)...")
+            print("[onefile] Running dual-branch embedding and detection ...")
             _, branch_neg_detect_record = _run_dual_branch_embedding_and_detection(
                 repo_root, cfg_path, run_root, profile
             )
@@ -1133,7 +1133,7 @@ def _prepare_detect_records_with_minimal_ground_truth(
         run_root: Unified run_root path.
         source_detect_path: Source detect record path.
         stage_name: Stage name in {calibrate, evaluate}.
-        branch_neg_detect_record: Optional path to neg branch detect record (P0-3 dual-branch mode).
+        branch_neg_detect_record: Optional path to neg branch detect record.
         pair_count: Number of positive/negative pairs to generate.
         prompts: Optional prompt list used to drive each pair.
 
