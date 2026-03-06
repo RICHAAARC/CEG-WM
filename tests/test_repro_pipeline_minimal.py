@@ -298,3 +298,46 @@ def test_repro_pipeline_outputs_under_run_root(tmp_path: Path) -> None:
         None.
     """
     test_repro_pipeline_generates_manifest_and_outputs_under_run_root(tmp_path)
+
+
+def test_repro_calibrate_gt_negative_uses_repro_marker(tmp_path: Path) -> None:
+    """
+    功能：验证 repro 负样本 usage marker 不会命中 synthetic closure 过滤。 
+
+    Verify repro GT negative sample uses a repro-specific usage marker.
+
+    Args:
+        tmp_path: Pytest temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_repro_pipeline_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    config_path, attack_protocol_path = _write_minimal_yaml_files(tmp_path)
+
+    module.run_repro_pipeline(
+        run_root=run_root,
+        config_path=config_path,
+        attack_protocol_path=attack_protocol_path,
+        seeds="seed_test",
+        max_samples=4,
+        repo_root=repo_root,
+        stage_runner=_make_stage_runner(),
+        signoff_runner=_make_signoff_runner(),
+    )
+
+    negative_path = (
+        run_root
+        / "artifacts"
+        / "repro"
+        / "gt_calibrate"
+        / "detect_record_calibrate_gt_negative.json"
+    )
+    negative_obj = json.loads(negative_path.read_text(encoding="utf-8"))
+    content_payload = negative_obj.get("content_evidence_payload", {})
+
+    assert content_payload.get("calibration_sample_usage") == "repro_ground_truth_closure_negative_marker"
+    assert content_payload.get("calibration_sample_usage") != "synthetic_negative_for_ground_truth_closure"

@@ -422,7 +422,8 @@ def _prepare_minimal_gt_detect_records(
     neg_content["score"] = float(base_score) - 1.0
     neg_content["status"] = "ok"
     neg_content["calibration_sample_origin"] = "synthetic_negative_bundle_v1"
-    neg_content["calibration_sample_usage"] = "synthetic_negative_for_ground_truth_closure"
+    # repro pipeline 生成的最小 GT 负样本用于 NP calibration 闭环，不应被 onefile synthetic closure 过滤规则误伤。
+    neg_content["calibration_sample_usage"] = "repro_ground_truth_closure_negative_marker"
 
     neg_path = gt_dir / f"detect_record_{stage_name}_gt_negative.json"
     write_artifact_text_unbound(
