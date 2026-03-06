@@ -290,7 +290,8 @@ def run_detect(
     output_dir: str,
     config_path: str,
     input_record_path: str | None = None,
-    overrides: list[str] | None = None
+    overrides: list[str] | None = None,
+    thresholds_path: str | None = None,
 ) -> None:
     """
     功能：执行检测流程，本阶段为基线实现。
@@ -302,6 +303,7 @@ def run_detect(
         config_path: YAML config path.
         input_record_path: Optional input record path (baseline if not provided).
         overrides: Optional CLI override args list.
+        thresholds_path: Optional path to thresholds artifact for NP threshold injection.
     
     Returns:
         None.
@@ -455,6 +457,18 @@ def run_detect(
         impl_set_capabilities_extended_digest = cfg.get("impl_set_capabilities_extended_digest")
         if isinstance(impl_set_capabilities_extended_digest, str) and impl_set_capabilities_extended_digest:
             run_meta["impl_set_capabilities_extended_digest"] = impl_set_capabilities_extended_digest
+
+        # （1）thresholds_path 注入：若提供，加载 NP 阈值工件并注入 cfg["__thresholds_artifact__"]。
+        # 加载失败时 fail-fast，不允许 silent fallback 至 test-only 阈值。
+        if isinstance(thresholds_path, str) and thresholds_path:
+            _tp_resolved = str(Path(thresholds_path).resolve())
+            try:
+                _thresholds_obj = detect_orchestrator.load_thresholds_artifact_controlled(_tp_resolved)
+                cfg["__thresholds_artifact__"] = _thresholds_obj
+                run_meta["thresholds_path_injected"] = _tp_resolved
+            except Exception as exc:
+                set_failure_status(run_meta, RunFailureReason.CONFIG_INVALID, exc)
+                raise
 
         # 预先计算 content 与 subspace 计划，用于注入上下文。
         # 这里必须使用 embed-mode 提取 mask_digest，避免 detect-mode 在无 detector_inputs 时返回 absent。
@@ -864,11 +878,16 @@ def main():
         default=None,
         help="Override config key=value (JSON value). Can be repeated."
     )
+    parser.add_argument(
+        "--thresholds-path",
+        default=None,
+        help="Path to thresholds artifact JSON for NP threshold injection."
+    )
     
     args = parser.parse_args()
     
     try:
-        run_detect(args.out, args.config, args.input, args.override)
+        run_detect(args.out, args.config, args.input, args.override, thresholds_path=args.thresholds_path)
         sys.exit(0)
     except Exception as e:
         print(f"[Detect] [ERROR] Error: {e}", file=sys.stderr)

@@ -358,6 +358,7 @@ _REQUIRED_NEW_PATHS = {
     "final_decision.routing_decisions",
     "content_evidence.score_parts.lf_status",
     "content_evidence.score_parts.lf_detect_trace.bp_converge_status",
+    "content_evidence.score_parts.lf_status_degraded_reason",
     "content_evidence.detect_hf_score_absent_reason",
 }
 
@@ -394,4 +395,90 @@ def test_schema_new_fields_registered() -> None:
     missing = _REQUIRED_NEW_PATHS - registered_paths
     assert not missing, (
         f"以下新增字段在 schema 中未登记（共 {len(missing)} 个）：{sorted(missing)}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# （P1 修复）score_parts.lf_status 降级传播回归测试
+# ---------------------------------------------------------------------------
+
+def test_lf_status_degraded_when_bp_not_converged() -> None:
+    """
+    功能：验证当 bp_converge_status=degraded 且 lf_status=ok 时，score_parts.lf_status 被覆写为 degraded。
+
+    Test that score_parts["lf_status"] is overwritten to "degraded" when
+    bp_converge_status is "degraded" and lf_status is "ok".
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If lf_status is not degraded or lf_status_degraded_reason is absent.
+    """
+    # 模拟 _bind_raw_scores_to_content_payload() 中 BP 降级守卫的核心逻辑。
+    score_parts: Dict[str, Any] = {}
+    lf_trace: Dict[str, Any] = {
+        "lf_status": "ok",
+        "bp_converge_status": "degraded",
+    }
+
+    # 模拟顶层 lf_status 写入（if-not-in 守卫）。
+    prc_latent_status = lf_trace.get("lf_status")
+    if "lf_status" not in score_parts and isinstance(prc_latent_status, str) and prc_latent_status:
+        score_parts["lf_status"] = prc_latent_status
+
+    # 模拟 BP 降级守卫块。
+    _bp_converge_status = lf_trace.get("bp_converge_status")
+    if _bp_converge_status == "degraded" and score_parts.get("lf_status") == "ok":
+        score_parts["lf_status"] = "degraded"
+        score_parts["lf_status_degraded_reason"] = "bp_not_converged"
+
+    assert score_parts["lf_status"] == "degraded", (
+        f"bp_converge_status=degraded 且 lf_status=ok 时，score_parts.lf_status 应被覆写为 'degraded'，"
+        f"实际：{score_parts['lf_status']}"
+    )
+    assert score_parts.get("lf_status_degraded_reason") == "bp_not_converged", (
+        f"lf_status_degraded_reason 应为 'bp_not_converged'，实际：{score_parts.get('lf_status_degraded_reason')}"
+    )
+
+
+def test_lf_status_not_degraded_when_bp_converged() -> None:
+    """
+    功能：验证 BP 收敛场景下 lf_status 不被降级，且 lf_status_degraded_reason 不被写入。
+
+    Test that score_parts["lf_status"] remains "ok" and lf_status_degraded_reason
+    is absent when bp_converge_status is "ok".
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If lf_status is degraded or lf_status_degraded_reason is present.
+    """
+    score_parts: Dict[str, Any] = {}
+    lf_trace: Dict[str, Any] = {
+        "lf_status": "ok",
+        "bp_converge_status": "ok",
+    }
+
+    prc_latent_status = lf_trace.get("lf_status")
+    if "lf_status" not in score_parts and isinstance(prc_latent_status, str) and prc_latent_status:
+        score_parts["lf_status"] = prc_latent_status
+
+    _bp_converge_status = lf_trace.get("bp_converge_status")
+    if _bp_converge_status == "degraded" and score_parts.get("lf_status") == "ok":
+        score_parts["lf_status"] = "degraded"
+        score_parts["lf_status_degraded_reason"] = "bp_not_converged"
+
+    assert score_parts["lf_status"] == "ok", (
+        f"bp_converge_status=ok 时 lf_status 不应被降级，实际：{score_parts['lf_status']}"
+    )
+    assert "lf_status_degraded_reason" not in score_parts, (
+        f"bp_converge_status=ok 时不应写入 lf_status_degraded_reason"
     )

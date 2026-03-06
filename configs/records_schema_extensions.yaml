@@ -1082,3 +1082,14 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "detect 侧 HF 分数缺失原因（surrogate 模式下 hf_basis 未生成时填写）。"
+
+  # ==============================================================
+  # P1 修复新增字段（append-only v2030-patch2）
+  # - lf_status 从 "ok" 降级为 "degraded" 时的诊断原因字段
+  # ==============================================================
+  - path: "content_evidence.score_parts.lf_status_degraded_reason"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "lf_status 被降级为 degraded 时的诊断原因（当前唯一值：bp_not_converged）。"

@@ -655,6 +655,78 @@ def _load_attack_families_from_protocol(repo_root: Path) -> List[dict]:
     return result
 
 
+def _run_redetect_with_np_thresholds(
+    repo_root: Path,
+    run_root: Path,
+    cfg_path: Path,
+    profile: str,
+) -> None:
+    """
+    功能：在 calibrate 完成后，使用 NP 校准阈值工件重跑一次 detect（re-detect）。
+
+    Re-run detect with NP canonical thresholds artifact produced by calibrate.
+    Results are stored in artifacts/detect_np/ (independent subdirectory; does not
+    overwrite the original detect_record.json consumed by calibrate).
+
+    Args:
+        repo_root: Repository root path.
+        run_root: Unified run_root path.
+        cfg_path: Config file path for detect.
+        profile: Workflow profile.
+
+    Returns:
+        None.
+
+    Raises:
+        RuntimeError: If the re-detect subprocess returns non-zero or record is absent.
+    """
+    if not isinstance(repo_root, Path) or not isinstance(run_root, Path):
+        return
+    if not isinstance(cfg_path, Path) or not cfg_path.exists():
+        return
+
+    thresholds_artifact = run_root / "artifacts" / "thresholds" / "thresholds_artifact.json"
+    if not thresholds_artifact.exists():
+        print(
+            "[onefile/redetect] WARN: thresholds_artifact.json not found, skipping re-detect",
+            file=sys.stderr,
+        )
+        return
+
+    detect_np_root = run_root / "artifacts" / "detect_np"
+    embed_record = run_root / "records" / "embed_record.json"
+
+    # 构建 re-detect 命令：使用 main.cli.run_detect 入口，--out 指向独立子目录，
+    # 追加 --thresholds-path 注入 NP 阈值工件，不覆盖原始 detect_record.json。
+    command = [
+        sys.executable,
+        "-m",
+        "main.cli.run_detect",
+        "--out",
+        str(detect_np_root),
+        "--config",
+        str(cfg_path),
+        "--input",
+        str(embed_record),
+        "--thresholds-path",
+        str(thresholds_artifact),
+    ]
+    for item in _build_stage_overrides("detect", profile):
+        command.extend(["--override", item])
+    # detect_np 写入同一 run_root 内的子目录，需允许非空父目录写入。
+    command.extend(["--override", "allow_nonempty_run_root=true"])
+
+    print(f"[onefile/redetect] Running NP-threshold re-detect → {detect_np_root}")
+    return_code = _run_subprocess_for_step(command, repo_root)
+    if return_code != 0:
+        raise RuntimeError(f"re-detect subprocess returned {return_code}")
+
+    detect_np_record = detect_np_root / "records" / "detect_record.json"
+    if not detect_np_record.exists():
+        raise RuntimeError("re-detect returned 0 but detect_record.json is absent")
+    print(f"[onefile/redetect] re-detect completed: {detect_np_record}")
+
+
 def _run_attack_coverage_detections(
     repo_root: Path,
     run_root: Path,
@@ -1398,6 +1470,13 @@ def _prepare_stage_cfg_path(
         evaluate_cfg = cfg_obj.get("evaluate")
         if not isinstance(evaluate_cfg, dict):
             evaluate_cfg = {}
+        # detect_np 守卫：若 calibrate 成功产出了 re-detect 记录（NP canonical 阈值），
+        # 将 detect_records_glob 替换为该记录，保证 evaluate 消费 NP 语义判决。
+        # 失败回退：文件不存在时保留原始 detect_record_glob，不中断 evaluate。
+        _detect_np_record = run_root / "artifacts" / "detect_np" / "records" / "detect_record.json"
+        if _detect_np_record.exists() and _detect_np_record.stat().st_size > 0:
+            detect_record_glob = str(_detect_np_record)
+            print(f"[onefile] detect_np record found; using for evaluate: {_detect_np_record}")
         # 攻击覆盖：对非 paper_full_cuda 模式，将攻击变体 detect 记录也纳入 glob，
         # 确保 metrics_by_attack_condition 中出现真实攻击分组而非 unknown 占位。
         attacked_detects_glob = str(run_root / "artifacts" / "attacked_detects" / "*" / "records" / "detect_record.json")
@@ -3022,6 +3101,17 @@ def run_onefile_workflow(
             except Exception as exc:
                 print(
                     f"[onefile] WARN: attack coverage detections failed: {type(exc).__name__}: {exc}",
+                    file=sys.stderr,
+                )
+
+        # calibrate 成功完成后，重跑一次 detect（re-detect），使用 NP 阈值工件，
+        # 产物写入独立子目录 artifacts/detect_np/，不覆盖原始 detect_record.json。
+        if step.name == "calibrate" and return_code == 0:
+            try:
+                _run_redetect_with_np_thresholds(repo_root, run_root, effective_cfg_path, profile)
+            except Exception as exc:
+                print(
+                    f"[onefile] WARN: NP-threshold re-detect failed: {type(exc).__name__}: {exc}",
                     file=sys.stderr,
                 )
 

@@ -1227,6 +1227,14 @@ def _bind_raw_scores_to_content_payload(
     if "lf_status" not in score_parts and isinstance(prc_latent_status, str) and prc_latent_status:
         score_parts["lf_status"] = prc_latent_status
 
+    # （P1 修复）BP 收敛状态降级守卫：
+    # 当 bp_converge_status="degraded" 且 lf_status 仍为 "ok" 时，将顶层 lf_status 覆写为 "degraded"。
+    # 不改动 low_freq_coder 的 trace["status"]，不影响 ContentDetector 决策链，仅修正诊断字段语义。
+    _bp_converge_status = lf_trace.get("bp_converge_status")
+    if _bp_converge_status == "degraded" and score_parts.get("lf_status") == "ok":
+        score_parts["lf_status"] = "degraded"
+        score_parts["lf_status_degraded_reason"] = "bp_not_converged"
+
     hf_status = hf_trace.get("hf_status")
     if hf_status == "absent" and hf_trace.get("hf_absent_reason") == "hf_disabled_by_config":
         content_evidence_payload.pop("hf_score", None)
