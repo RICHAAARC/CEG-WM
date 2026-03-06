@@ -10,6 +10,7 @@ import pytest
 
 from main.registries.runtime_resolver import BuiltImplSet
 from main.watermarking.detect.orchestrator import (
+    _load_records_for_evaluate,
     evaluate_records_against_threshold,
     load_scores_for_calibration,
     load_thresholds_artifact_controlled,
@@ -291,3 +292,87 @@ def test_run_calibrate_orchestrator_conditional_fpr_records_are_deterministic(tm
     record_b = run_calibrate_orchestrator(cfg, impl_set)
 
     assert record_a["threshold_metadata_artifact"]["conditional_fpr_records"] == record_b["threshold_metadata_artifact"]["conditional_fpr_records"]
+
+
+def test_load_records_for_evaluate_excludes_synthetic_negative_closure_when_enabled(tmp_path: Path) -> None:
+    """Validate evaluate loader filters synthetic negative closure samples when enabled."""
+    keep_path = tmp_path / "detect_keep.json"
+    keep_path.write_text(
+        json.dumps(
+            {
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": 0.63,
+                },
+                "label": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    filtered_path = tmp_path / "detect_filtered.json"
+    filtered_path.write_text(
+        json.dumps(
+            {
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": -1.0,
+                    "calibration_sample_usage": "synthetic_negative_for_ground_truth_closure",
+                },
+                "label": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = {
+        "evaluate": {
+            "detect_records_glob": str(tmp_path / "detect_*.json"),
+            "exclude_synthetic_negative_closure_marker": True,
+        }
+    }
+
+    loaded = _load_records_for_evaluate(cfg)
+    assert len(loaded) == 1
+    assert loaded[0]["content_evidence_payload"]["score"] == 0.63
+
+
+def test_load_records_for_evaluate_keeps_synthetic_negative_closure_by_default(tmp_path: Path) -> None:
+    """Validate evaluate loader keeps synthetic negative closure samples by default."""
+    normal_path = tmp_path / "detect_normal.json"
+    normal_path.write_text(
+        json.dumps(
+            {
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": 0.41,
+                },
+                "label": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    closure_path = tmp_path / "detect_closure.json"
+    closure_path.write_text(
+        json.dumps(
+            {
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": -1.0,
+                    "calibration_sample_usage": "synthetic_negative_for_ground_truth_closure",
+                },
+                "label": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = {
+        "evaluate": {
+            "detect_records_glob": str(tmp_path / "detect_*.json"),
+        }
+    }
+
+    loaded = _load_records_for_evaluate(cfg)
+    assert len(loaded) == 2

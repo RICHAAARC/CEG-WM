@@ -113,3 +113,76 @@ def test_detect_lf_uses_image_dct_for_int_ecc(tmp_path: Path) -> None:
 
     if lf_trace.get("lf_status") == "ok":
         assert isinstance(lf_score, float)
+
+
+def test_bind_raw_scores_keeps_lf_status_and_appends_prc_latent_status() -> None:
+    """
+    功能：验证 raw score 绑定不会覆写 lf_status，并追加 prc_latent_status。 
+
+    Verify raw-score binding keeps lf_status semantics and appends prc_latent_status.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    payload: Dict[str, Any] = {
+        "status": "ok",
+        "score_parts": {
+            "lf_status": "ok",
+        },
+    }
+    traces: Dict[str, Any] = {
+        "lf": {
+            "lf_status": "failed",
+            "lf_failure_reason": "lf_insufficient_latent_dimension",
+        },
+        "hf": {
+            "hf_status": "absent",
+            "hf_absent_reason": "hf_disabled_by_config",
+        },
+    }
+
+    detect_orchestrator._bind_raw_scores_to_content_payload(  # pyright: ignore[reportPrivateUsage]
+        content_evidence_payload=payload,
+        lf_score=None,
+        hf_score=None,
+        traces=traces,
+    )
+
+    score_parts = payload.get("score_parts")
+    assert isinstance(score_parts, dict)
+    score_parts_dict: Dict[str, Any] = score_parts
+    assert score_parts_dict.get("lf_status") == "ok"
+    assert score_parts_dict.get("prc_latent_status") == "failed"
+
+
+def test_detect_mask_digest_passthrough_from_input_record_when_missing() -> None:
+    """
+    功能：验证 detect 成功且缺失 mask_digest 时会从 input_record 透传。 
+
+    Verify detect mask_digest is passed through from input_record when content status is ok.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    payload: Dict[str, Any] = {
+        "status": "ok",
+        "score": 0.77,
+        "mask_digest": None,
+    }
+    input_record: Dict[str, Any] = {
+        "content_evidence": {
+            "mask_digest": "abc123maskdigest",
+        }
+    }
+
+    detect_orchestrator._populate_detect_mask_digest_from_input_record(  # pyright: ignore[reportPrivateUsage]
+        content_evidence_payload=payload,
+        input_record=input_record,
+    )
+    assert payload.get("mask_digest") == "abc123maskdigest"

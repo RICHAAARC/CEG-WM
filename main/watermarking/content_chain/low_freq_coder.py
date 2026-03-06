@@ -1330,6 +1330,8 @@ class LFCoderPRC:
             return None, {
                 "status": "failed",
                 "lf_failure_reason": "lf_insufficient_latent_dimension",
+                "available_latent_dim": int(len(flat_latents)),
+                "required_block_length": int(block_length),
                 "lf_trace_digest": digests.canonical_sha256({"failure": "insufficient_dim"}),
             }
 
@@ -1368,6 +1370,8 @@ class LFCoderPRC:
             "bp_converged": bp_converged,
             "bp_iteration_count": bp_iteration_count,
             "block_length": block_length,
+            "available_latent_dim": int(len(flat_latents)),
+            "required_block_length": int(block_length),
             "syndrome_weight": int(decode_result["syndrome_weight"]),
             "llr_summary_digest": llr_summary_digest,
             "parity_check_digest": ldpc_spec["parity_check_digest"],
@@ -1416,6 +1420,21 @@ def _flatten_recursive_to_list(value: Any, sink: list) -> None:
     if isinstance(value, (int, float)):
         sink.append(float(value))
         return
+    if isinstance(value, np.ndarray):
+        for item in value.reshape(-1).tolist():
+            _flatten_recursive_to_list(item, sink)
+        return
+    # 兼容 torch.Tensor 输入但不引入硬依赖。
+    if hasattr(value, "detach") and hasattr(value, "cpu") and hasattr(value, "numpy"):
+        try:
+            tensor_np = value.detach().cpu().numpy()
+            if isinstance(tensor_np, np.ndarray):
+                for item in tensor_np.reshape(-1).tolist():
+                    _flatten_recursive_to_list(item, sink)
+                return
+        except Exception:
+            # tensor 转换失败时，回退到后续通用分支。
+            pass
     if isinstance(value, dict):
         for key in sorted(value.keys()):
             _flatten_recursive_to_list(value[key], sink)

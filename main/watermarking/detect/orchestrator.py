@@ -715,6 +715,7 @@ def run_detect_orchestrator(
             detect_runtime_mode = "real"
 
     _bind_scores_if_ok(content_evidence_payload)
+    _populate_detect_mask_digest_from_input_record(content_evidence_payload, input_record)
 
     # 删除临时的 latents 字段，确保不写入 records
     cfg.pop("__detect_final_latents__", None)
@@ -1200,7 +1201,9 @@ def _bind_raw_scores_to_content_payload(
 
     content_evidence_payload["lf_score"] = lf_score
     score_parts["lf_detect_trace"] = lf_trace
-    score_parts["lf_status"] = lf_trace.get("lf_status", "failed")
+    prc_latent_status = lf_trace.get("lf_status")
+    if isinstance(prc_latent_status, str) and prc_latent_status:
+        score_parts["prc_latent_status"] = prc_latent_status
 
     hf_status = hf_trace.get("hf_status")
     if hf_status == "absent" and hf_trace.get("hf_absent_reason") == "hf_disabled_by_config":
@@ -1219,6 +1222,42 @@ def _bind_raw_scores_to_content_payload(
             score_parts["hf_absent_reason"] = hf_trace.get("hf_absent_reason")
         if "hf_failure_reason" in hf_trace:
             score_parts["hf_failure_reason"] = hf_trace.get("hf_failure_reason")
+
+
+def _populate_detect_mask_digest_from_input_record(
+    content_evidence_payload: Dict[str, Any],
+    input_record: Optional[Dict[str, Any]],
+) -> None:
+    """
+    功能：当 detect content 成功且 mask_digest 缺失时，从 input_record 透传。 
+
+    Populate detect-side mask_digest from input_record when status is ok but digest is absent.
+
+    Args:
+        content_evidence_payload: Mutable detect content payload.
+        input_record: Optional upstream record payload.
+
+    Returns:
+        None.
+    """
+    if not isinstance(content_evidence_payload, dict):
+        return
+    if content_evidence_payload.get("status") != "ok":
+        return
+
+    current_mask_digest = content_evidence_payload.get("mask_digest")
+    if isinstance(current_mask_digest, str) and current_mask_digest:
+        return
+
+    if not isinstance(input_record, dict):
+        return
+    input_content_node = input_record.get("content_evidence")
+    if not isinstance(input_content_node, dict):
+        return
+    input_content_payload = cast(Dict[str, Any], input_content_node)
+    input_mask_digest = input_content_payload.get("mask_digest")
+    if isinstance(input_mask_digest, str) and input_mask_digest:
+        content_evidence_payload["mask_digest"] = input_mask_digest
 
 
 def _resolve_detect_image_path_with_source(
@@ -3095,7 +3134,25 @@ def _load_records_for_evaluate(cfg: Dict[str, Any]) -> list[Dict[str, Any]]:
         records_glob = records_glob_candidate if isinstance(records_glob_candidate, str) else None
     if not isinstance(records_glob, str) or not records_glob:
         raise ValueError("evaluate.detect_records_glob is required")
-    return _load_records_by_glob(records_glob)
+    records = _load_records_by_glob(records_glob)
+
+    evaluate_cfg_node = cfg.get("evaluate")
+    evaluate_cfg = cast(Dict[str, Any], evaluate_cfg_node) if isinstance(evaluate_cfg_node, dict) else {}
+    exclude_synthetic_negative_closure = bool(evaluate_cfg.get("exclude_synthetic_negative_closure_marker", False))
+    if not exclude_synthetic_negative_closure:
+        return records
+
+    filtered_records: list[Dict[str, Any]] = []
+    for item in records:
+        content_node = item.get("content_evidence_payload")
+        if not isinstance(content_node, dict):
+            filtered_records.append(item)
+            continue
+        content_payload = cast(Dict[str, Any], content_node)
+        if _is_synthetic_negative_closure_sample(content_payload):
+            continue
+        filtered_records.append(item)
+    return filtered_records
 
 
 def _resolve_thresholds_path_for_evaluate(cfg: Dict[str, Any]) -> Path:
@@ -3799,6 +3856,24 @@ def _is_image_domain_sidecar_enabled(cfg: Dict[str, Any], ablation_override: boo
     if bool(paper_cfg.get("enabled", False)):
         return False
     return True
+
+
+def _is_synthetic_negative_closure_sample(content_payload: Dict[str, Any]) -> bool:
+    """
+    功能：判定样本是否为 synthetic negative closure 标记样本。 
+
+    Determine whether sample is marked as synthetic negative closure.
+
+    Args:
+        content_payload: Content evidence payload mapping.
+
+    Returns:
+        True when sample should be excluded as synthetic negative closure.
+    """
+    if not isinstance(content_payload, dict):
+        raise TypeError("content_payload must be dict")
+    usage_value = content_payload.get("calibration_sample_usage")
+    return usage_value == "synthetic_negative_for_ground_truth_closure"
 
 
 def _safe_corrcoef(channels: NDArray[np.float64]) -> NDArray[np.float64]:

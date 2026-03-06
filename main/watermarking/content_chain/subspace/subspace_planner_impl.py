@@ -2355,8 +2355,9 @@ class SubspacePlannerImpl:
         matrix_np = np.asarray(basis_matrix, dtype=np.float32)
         if matrix_np.ndim != 2:
             raise ValueError("basis_matrix must be rank-2")
-        max_cols = min(16, matrix_np.shape[1])
-        matrix_np = matrix_np[:, :max_cols]
+        if channel == "hf":
+            max_cols = min(16, matrix_np.shape[1])
+            matrix_np = matrix_np[:, :max_cols]
         quantized = np.round(matrix_np, 6).astype(np.float32)
         payload = {
             "basis_payload_version": "v1",

@@ -1463,6 +1463,8 @@ def test_prepare_detect_records_clone_mode_keeps_dual_branch_failure_reason(tmp_
     negative_payload = json.loads(negative_path.read_text(encoding="utf-8"))
     assert positive_payload.get("dual_branch_failure_reason") == failure_reason
     assert negative_payload.get("dual_branch_failure_reason") == failure_reason
+    negative_content = negative_payload.get("content_evidence_payload", {})
+    assert negative_content.get("calibration_sample_usage") == "synthetic_negative_for_ground_truth_closure"
 
 
 def test_onefile_prepare_stage_cfg_path_uses_prompt_list_as_gt_driver(tmp_path: Path) -> None:
@@ -1529,6 +1531,73 @@ def test_onefile_prepare_stage_cfg_path_uses_prompt_list_as_gt_driver(tmp_path: 
     negative_payload = json.loads(negative_file.read_text(encoding="utf-8"))
     assert positive_payload.get("inference_prompt") == "prompt one"
     assert negative_payload.get("inference_prompt") == "prompt one"
+
+
+def test_prepare_detect_records_dual_branch_respects_pair_count_and_indexed_names(tmp_path: Path) -> None:
+    """
+    功能：验证 dual_branch 聚合在 pair_count>1 时生成索引化正负样本文件。 
+
+    Verify dual-branch aggregation generates indexed positive/negative files for pair_count>1.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root_dual_branch_pair_count"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    source_detect_path = records_dir / "detect_record_for_scoring.json"
+    source_detect_path.write_text(
+        json.dumps(
+            {
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": 0.72,
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    branch_neg_detect_path = run_root / "artifacts" / "branch_neg" / "records" / "detect_record.json"
+    branch_neg_detect_path.parent.mkdir(parents=True, exist_ok=True)
+    branch_neg_detect_path.write_text(
+        json.dumps(
+            {
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": -0.18,
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    glob_pattern = module._prepare_detect_records_with_minimal_ground_truth(
+        run_root=run_root,
+        source_detect_path=source_detect_path,
+        stage_name="evaluate",
+        branch_neg_detect_record=branch_neg_detect_path,
+        pair_count=3,
+    )
+    assert "detect_records_evaluate_gt_*.json" in glob_pattern
+
+    workflow_cfg_dir = run_root / "artifacts" / "workflow_cfg"
+    generated_files = sorted(workflow_cfg_dir.glob("detect_records_evaluate_gt_*.json"))
+    assert len(generated_files) == 6
+    assert (workflow_cfg_dir / "detect_records_evaluate_gt_positive_000.json").exists()
+    assert (workflow_cfg_dir / "detect_records_evaluate_gt_negative_000.json").exists()
+    assert (workflow_cfg_dir / "detect_records_evaluate_gt_positive_002.json").exists()
+    assert (workflow_cfg_dir / "detect_records_evaluate_gt_negative_002.json").exists()
 
 
 def test_onefile_resolve_prompt_file_path_fallbacks_to_repo_root(

@@ -1216,66 +1216,83 @@ def _prepare_detect_records_with_minimal_ground_truth(
                             return numeric_value
                     return None
 
-                # 直接使用正负样本，不进行 clone 操作。
-                # dual_branch 路径使用真实 detect record，禁止强制覆写 status。
-                pos_payload = json.loads(json.dumps(source_payload, ensure_ascii=False))
-                pos_payload["label"] = True
-                pos_payload["ground_truth"] = True
-                pos_payload["is_watermarked"] = True
-                pos_payload["ground_truth_source"] = "dual_branch_positive"
+                for pair_index in range(pair_count):
+                    # 直接使用正负样本，不进行 clone 操作。
+                    # dual_branch 路径使用真实 detect record，禁止强制覆写 status。
+                    pos_payload = json.loads(json.dumps(source_payload, ensure_ascii=False))
+                    pos_payload["label"] = True
+                    pos_payload["ground_truth"] = True
+                    pos_payload["is_watermarked"] = True
+                    pos_payload["ground_truth_source"] = "dual_branch_positive"
+                    if prompts is not None:
+                        prompt_value = prompts[pair_index]
+                        if not isinstance(prompt_value, str) or not prompt_value.strip():
+                            raise ValueError("prompt entry must be non-empty str")
+                        pos_payload["inference_prompt"] = prompt_value
+                    _normalize_positive_payload_if_recovered_failed(pos_payload)
 
-                neg_payload["label"] = False
-                neg_payload["ground_truth"] = False
-                neg_payload["is_watermarked"] = False
-                neg_payload["ground_truth_source"] = "dual_branch_negative"
+                    neg_payload_per_pair = json.loads(json.dumps(neg_payload, ensure_ascii=False))
+                    neg_payload_per_pair["label"] = False
+                    neg_payload_per_pair["ground_truth"] = False
+                    neg_payload_per_pair["is_watermarked"] = False
+                    neg_payload_per_pair["ground_truth_source"] = "dual_branch_negative"
+                    if prompts is not None:
+                        prompt_value = prompts[pair_index]
+                        if not isinstance(prompt_value, str) or not prompt_value.strip():
+                            raise ValueError("prompt entry must be non-empty str")
+                        neg_payload_per_pair["inference_prompt"] = prompt_value
 
-                neg_content_node = neg_payload.get("content_evidence_payload")
-                if isinstance(neg_content_node, dict):
-                    neg_content = neg_content_node
-                else:
-                    neg_content = {}
-                    neg_payload["content_evidence_payload"] = neg_content
+                    neg_content_node = neg_payload_per_pair.get("content_evidence_payload")
+                    if isinstance(neg_content_node, dict):
+                        neg_content = neg_content_node
+                    else:
+                        neg_content = {}
+                        neg_payload_per_pair["content_evidence_payload"] = neg_content
 
-                neg_status_value = neg_content.get("status")
-                neg_score_value = _coerce_finite_float(neg_content.get("score"))
-                if not (neg_status_value == "ok" and neg_score_value is not None):
-                    neg_score_parts_node = neg_content.get("score_parts")
-                    neg_score_parts = neg_score_parts_node if isinstance(neg_score_parts_node, dict) else {}
-                    neg_hf_trace_node = neg_score_parts.get("hf_detect_trace")
-                    neg_hf_trace = neg_hf_trace_node if isinstance(neg_hf_trace_node, dict) else {}
-                    recovery_candidates = [
-                        neg_content.get("score"),
-                        neg_content.get("detect_lf_score"),
-                        neg_content.get("lf_score"),
-                        neg_score_parts.get("content_score"),
-                        neg_score_parts.get("detect_lf_score"),
-                        neg_hf_trace.get("hf_score_raw"),
-                    ]
-                    recovered_score = None
-                    for candidate_value in recovery_candidates:
-                        numeric_candidate = _coerce_finite_float(candidate_value)
-                        if numeric_candidate is not None:
-                            recovered_score = numeric_candidate
-                            break
-                    if recovered_score is not None:
-                        neg_content["status"] = "ok"
-                        neg_content["score"] = float(recovered_score)
-                        neg_content["calibration_sample_origin"] = "dual_branch_negative_recovery"
-                        neg_content["calibration_sample_usage"] = "formal_with_dual_branch_negative_marker"
+                    neg_status_value = neg_content.get("status")
+                    neg_score_value = _coerce_finite_float(neg_content.get("score"))
+                    if not (neg_status_value == "ok" and neg_score_value is not None):
+                        neg_score_parts_node = neg_content.get("score_parts")
+                        neg_score_parts = neg_score_parts_node if isinstance(neg_score_parts_node, dict) else {}
+                        neg_hf_trace_node = neg_score_parts.get("hf_detect_trace")
+                        neg_hf_trace = neg_hf_trace_node if isinstance(neg_hf_trace_node, dict) else {}
+                        recovery_candidates = [
+                            neg_content.get("score"),
+                            neg_content.get("detect_lf_score"),
+                            neg_content.get("lf_score"),
+                            neg_score_parts.get("content_score"),
+                            neg_score_parts.get("detect_lf_score"),
+                            neg_hf_trace.get("hf_score_raw"),
+                        ]
+                        recovered_score = None
+                        for candidate_value in recovery_candidates:
+                            numeric_candidate = _coerce_finite_float(candidate_value)
+                            if numeric_candidate is not None:
+                                recovered_score = numeric_candidate
+                                break
+                        if recovered_score is not None:
+                            neg_content["status"] = "ok"
+                            neg_content["score"] = float(recovered_score)
+                            neg_content["calibration_sample_origin"] = "dual_branch_negative_recovery"
+                            neg_content["calibration_sample_usage"] = "formal_with_dual_branch_negative_marker"
 
-                pos_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_positive.json"
-                neg_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_negative.json"
+                    if pair_count == 1:
+                        pos_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_positive.json"
+                        neg_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_negative.json"
+                    else:
+                        pos_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_positive_{pair_index:03d}.json"
+                        neg_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_negative_{pair_index:03d}.json"
 
-                _write_artifact_text_unbound(
-                    run_root,
-                    pos_path,
-                    json.dumps(pos_payload, ensure_ascii=False, indent=2),
-                )
-                _write_artifact_text_unbound(
-                    run_root,
-                    neg_path,
-                    json.dumps(neg_payload, ensure_ascii=False, indent=2),
-                )
+                    _write_artifact_text_unbound(
+                        run_root,
+                        pos_path,
+                        json.dumps(pos_payload, ensure_ascii=False, indent=2),
+                    )
+                    _write_artifact_text_unbound(
+                        run_root,
+                        neg_path,
+                        json.dumps(neg_payload_per_pair, ensure_ascii=False, indent=2),
+                    )
                 return str((workflow_cfg_dir / f"detect_records_{stage_name}_gt_*.json"))
         except Exception as exc:
             print(f"[GT] WARN: Dual-branch aggregation failed: {type(exc).__name__}: {exc}", file=sys.stderr)
@@ -1355,6 +1372,10 @@ def _prepare_detect_records_with_minimal_ground_truth(
                 negative_content["calibration_sample_origin"] = "synthetic_negative_bundle_from_failed_source_v1"
             else:
                 negative_content["calibration_sample_origin"] = "synthetic_negative_bundle_v1"
+
+        if isinstance(dual_branch_failure_reason, str) and dual_branch_failure_reason:
+            negative_content["calibration_sample_usage"] = "synthetic_negative_for_ground_truth_closure"
+            negative_content["dual_branch_failure_reason"] = dual_branch_failure_reason
 
         if pair_count == 1:
             positive_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_positive.json"
