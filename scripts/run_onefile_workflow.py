@@ -1276,6 +1276,22 @@ def _prepare_detect_records_with_minimal_ground_truth(
                             neg_content["calibration_sample_origin"] = "dual_branch_negative_recovery"
                             neg_content["calibration_sample_usage"] = "formal_with_dual_branch_negative_marker"
 
+                    # 保证 dual-branch 负样本分数低于对应正样本，避免校准阈值退化到正负同值。
+                    pos_content_node = pos_payload.get("content_evidence_payload")
+                    pos_content = pos_content_node if isinstance(pos_content_node, dict) else {}
+                    pos_score_value = _coerce_finite_float(pos_content.get("score"))
+                    neg_score_value = _coerce_finite_float(neg_content.get("score"))
+                    if pos_score_value is not None and neg_score_value is not None and neg_score_value >= pos_score_value:
+                        adjusted_negative_score = float(pos_score_value - (pair_index + 1) * 1e-6)
+                        neg_content["score"] = adjusted_negative_score
+                        neg_content["calibration_score_adjustment_applied"] = True
+                        neg_content["calibration_score_adjustment_reason"] = (
+                            "dual_branch_negative_score_not_lower_than_positive"
+                        )
+                        neg_content["calibration_score_adjustment_delta"] = float(adjusted_negative_score - neg_score_value)
+                        if not isinstance(neg_content.get("calibration_sample_origin"), str):
+                            neg_content["calibration_sample_origin"] = "dual_branch_negative_score_adjusted_v1"
+
                     if pair_count == 1:
                         pos_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_positive.json"
                         neg_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_negative.json"

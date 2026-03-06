@@ -1305,13 +1305,94 @@ def test_prepare_detect_records_recovers_dual_branch_negative_score_for_calibrat
     assert "detect_records_calibrate_gt_*.json" in glob_pattern
 
     negative_path = run_root / "artifacts" / "workflow_cfg" / "detect_records_calibrate_gt_negative.json"
+    positive_path = run_root / "artifacts" / "workflow_cfg" / "detect_records_calibrate_gt_positive.json"
     assert negative_path.exists()
+    assert positive_path.exists()
+    positive_payload = json.loads(positive_path.read_text(encoding="utf-8"))
     negative_payload = json.loads(negative_path.read_text(encoding="utf-8"))
+    positive_score = positive_payload.get("content_evidence_payload", {}).get("score")
     content_payload = negative_payload.get("content_evidence_payload", {})
     assert content_payload.get("status") == "ok"
-    assert content_payload.get("score") == -0.023
+    assert isinstance(positive_score, (int, float))
+    assert isinstance(content_payload.get("score"), (int, float))
+    assert content_payload.get("score") < positive_score
     assert content_payload.get("calibration_sample_origin") == "dual_branch_negative_recovery"
     assert content_payload.get("calibration_sample_usage") == "formal_with_dual_branch_negative_marker"
+    assert content_payload.get("calibration_score_adjustment_applied") is True
+
+
+def test_prepare_detect_records_dual_branch_enforces_negative_score_separation(tmp_path: Path) -> None:
+    """
+    功能：验证 dual-branch 正负同分时会对负样本执行最小分数分离。 
+
+    Verify dual-branch GT generation enforces negative score separation
+    when negative score is not lower than positive score.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root_dual_branch_separation"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+
+    source_detect_path = records_dir / "detect_record_for_scoring.json"
+    source_detect_path.write_text(
+        json.dumps(
+            {
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": 0.91,
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    branch_neg_detect_path = run_root / "artifacts" / "branch_neg" / "records" / "detect_record.json"
+    branch_neg_detect_path.parent.mkdir(parents=True, exist_ok=True)
+    branch_neg_detect_path.write_text(
+        json.dumps(
+            {
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": 0.91,
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    module._prepare_detect_records_with_minimal_ground_truth(
+        run_root=run_root,
+        source_detect_path=source_detect_path,
+        stage_name="calibrate",
+        branch_neg_detect_record=branch_neg_detect_path,
+    )
+
+    positive_path = run_root / "artifacts" / "workflow_cfg" / "detect_records_calibrate_gt_positive.json"
+    negative_path = run_root / "artifacts" / "workflow_cfg" / "detect_records_calibrate_gt_negative.json"
+    positive_payload = json.loads(positive_path.read_text(encoding="utf-8"))
+    negative_payload = json.loads(negative_path.read_text(encoding="utf-8"))
+
+    positive_score = positive_payload.get("content_evidence_payload", {}).get("score")
+    negative_content = negative_payload.get("content_evidence_payload", {})
+    negative_score = negative_content.get("score")
+
+    assert isinstance(positive_score, (int, float))
+    assert isinstance(negative_score, (int, float))
+    assert negative_score < positive_score
+    assert negative_content.get("calibration_score_adjustment_applied") is True
+    assert negative_content.get("calibration_score_adjustment_reason") == "dual_branch_negative_score_not_lower_than_positive"
 
 
 def test_prepare_detect_records_clone_mode_recovers_failed_source_for_negative_gt(tmp_path: Path) -> None:
