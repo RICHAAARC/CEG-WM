@@ -654,6 +654,10 @@ def run_detect(
                 print(f"[Detect] Loading input record from {input_record_path}...")
                 input_record = records_io.read_json(input_record_path)
                 print(f"[Detect]   Loaded input record with {len(input_record)} fields")
+                # 从 embed_record 读取 latent 空间统计，注入 cfg 供几何同步 cross-comparison。
+                _input_latent_stats = input_record.get("latent_spatial_stats")
+                if isinstance(_input_latent_stats, dict):
+                    cfg["__embed_latent_spatial_stats__"] = _input_latent_stats
             else:
                 print("[Detect] No input record provided, using baseline")
                 input_record = {"baseline_input": True}

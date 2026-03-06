@@ -1216,13 +1216,13 @@ def _prepare_detect_records_with_minimal_ground_truth(
                             return numeric_value
                     return None
 
-                # 直接使用正负样本，不进行 clone 操作
+                # 直接使用正负样本，不进行 clone 操作。
+                # dual_branch 路径使用真实 detect record，禁止强制覆写 status。
                 pos_payload = json.loads(json.dumps(source_payload, ensure_ascii=False))
                 pos_payload["label"] = True
                 pos_payload["ground_truth"] = True
                 pos_payload["is_watermarked"] = True
                 pos_payload["ground_truth_source"] = "dual_branch_positive"
-                _normalize_positive_payload_if_recovered_failed(pos_payload)
 
                 neg_payload["label"] = False
                 neg_payload["ground_truth"] = False

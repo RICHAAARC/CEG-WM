@@ -965,7 +965,10 @@ class GeometryLatentSyncSD3V2:
 
         # Compute sync quality metrics
         try:
-            sync_quality_metrics = self._compute_sync_quality(latents_np, relation_digest)
+            sync_quality_metrics = self._compute_sync_quality(
+                latents_np, relation_digest,
+                embed_latent_stats=runtime_inputs.get("embed_latent_stats"),
+            )
         except Exception as e:
             return {
                 "status": "failed",
@@ -1021,16 +1024,24 @@ class GeometryLatentSyncSD3V2:
     def _compute_sync_quality(
         self,
         latents_np: np.ndarray,
-        relation_digest: str
+        relation_digest: str,
+        embed_latent_stats: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         功能：计算同步质量指标。
 
         Compute sync quality metrics using latents and relation_digest.
+        When embed_latent_stats is provided, cross-comparison between embed
+        and detect spatial statistics is used as the primary quality signal,
+        providing genuine discriminability between watermarked and non-watermarked
+        samples. Falls back to internal-statistics mode when absent.
 
         Args:
             latents_np: Latents numpy array.
             relation_digest: Relation digest from anchor extractor.
+            embed_latent_stats: Optional embed-side latent spatial statistics
+                from embed_record.latent_spatial_stats (contrast_ratio,
+                spectral_peak_ratio, peak_sharpness, stats_version).
 
         Returns:
             Sync quality metrics mapping.
@@ -1064,21 +1075,49 @@ class GeometryLatentSyncSD3V2:
         relation_alignment = float(1.0 - abs(relation_norm - min(1.0, contrast_ratio / 4.0)))
         relation_alignment = float(max(0.0, min(1.0, relation_alignment)))
 
-        quality_score = 0.35 * min(1.0, contrast_ratio / 2.0) + 0.35 * min(1.0, spectral_peak_ratio / 3.0) + 0.30 * relation_alignment
-        quality_score = float(max(0.0, min(1.0, quality_score)))
-        uncertainty = float(max(0.0, min(1.0, 1.0 - quality_score)))
-
-        return {
-            "contrast_ratio": float(round(contrast_ratio, 6)),
-            "peak_sharpness": float(round(peak_sharpness, 6)),
-            "spectral_peak_ratio": float(round(spectral_peak_ratio, 6)),
-            "relation_alignment": float(round(relation_alignment, 6)),
-            "quality_score": float(round(quality_score, 6)),
-            "uncertainty": float(round(uncertainty, 6)),
-            "relation_digest_bound": relation_digest,
-            "quality_method": "interpretable_latent_spectrum_relation_consistency",
-            "quality_components": {
+        # embed vs detect cross-comparison：当 embed_latent_stats 可用时，
+        # 用 embed/detect 空间统计的相似度替代单侧统计，
+        # 从而提供真实的判别力：水印图像与非水印图像的 latent 空间统计应显著差异。
+        if isinstance(embed_latent_stats, dict):
+            embed_contrast = float(embed_latent_stats.get("contrast_ratio", 0.0))
+            embed_spr = float(embed_latent_stats.get("spectral_peak_ratio", 0.0))
+            # 对比相似度：1 - 差异率，差异率用 max 归一化避免除以零。
+            max_cr = max(embed_contrast, contrast_ratio, 0.01)
+            contrast_sim = float(max(0.0, 1.0 - abs(embed_contrast - contrast_ratio) / max_cr))
+            max_spr = max(embed_spr, spectral_peak_ratio, 0.01)
+            spr_sim = float(max(0.0, 1.0 - abs(embed_spr - spectral_peak_ratio) / max_spr))
+            quality_score = 0.45 * contrast_sim + 0.45 * spr_sim + 0.10 * relation_alignment
+            quality_score = float(max(0.0, min(1.0, quality_score)))
+            uncertainty = float(max(0.0, min(1.0, 1.0 - quality_score)))
+            quality_components: Dict[str, Any] = {
+                "version": "latent_sync_quality_components_v2_cross",
+                "quality_mode": "cross_similarity",
+                "contrast_sim": round(contrast_sim, 6),
+                "spr_sim": round(spr_sim, 6),
+                "relation_component": round(relation_alignment, 6),
+                "embed_contrast_ratio": round(embed_contrast, 6),
+                "embed_spectral_peak_ratio": round(embed_spr, 6),
+                "detect_contrast_ratio": round(contrast_ratio, 6),
+                "detect_spectral_peak_ratio": round(spectral_peak_ratio, 6),
+                "weights": {
+                    "contrast_sim": 0.45,
+                    "spr_sim": 0.45,
+                    "relation_component": 0.10,
+                },
+                "constraints": {
+                    "quality_score_in_unit_interval": bool(0.0 <= quality_score <= 1.0),
+                    "uncertainty_is_one_minus_quality_score": float(round(abs((1.0 - quality_score) - uncertainty), 6)),
+                },
+                "primary_evidence": True,
+                "evidence_level": "cross_comparison",
+            }
+        else:
+            quality_score = 0.35 * min(1.0, contrast_ratio / 2.0) + 0.35 * min(1.0, spectral_peak_ratio / 3.0) + 0.30 * relation_alignment
+            quality_score = float(max(0.0, min(1.0, quality_score)))
+            uncertainty = float(max(0.0, min(1.0, 1.0 - quality_score)))
+            quality_components = {
                 "version": "latent_sync_quality_components",
+                "quality_mode": "internal_statistics",
                 "contrast_component": float(round(min(1.0, contrast_ratio / 2.0), 6)),
                 "spectral_component": float(round(min(1.0, spectral_peak_ratio / 3.0), 6)),
                 "relation_component": float(round(relation_alignment, 6)),
@@ -1093,5 +1132,16 @@ class GeometryLatentSyncSD3V2:
                 },
                 "primary_evidence": False,
                 "evidence_level": "supporting",
-            },
+            }
+
+        return {
+            "contrast_ratio": float(round(contrast_ratio, 6)),
+            "peak_sharpness": float(round(peak_sharpness, 6)),
+            "spectral_peak_ratio": float(round(spectral_peak_ratio, 6)),
+            "relation_alignment": float(round(relation_alignment, 6)),
+            "quality_score": float(round(quality_score, 6)),
+            "uncertainty": float(round(uncertainty, 6)),
+            "relation_digest_bound": relation_digest,
+            "quality_method": "interpretable_latent_spectrum_relation_consistency",
+            "quality_components": quality_components,
         }

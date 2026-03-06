@@ -4045,6 +4045,11 @@ def _build_geometry_runtime_inputs(
         if isinstance(sync_digest, str) and sync_digest:
             runtime_inputs["sync_digest"] = sync_digest
         runtime_inputs["sync_result"] = sync_result
+    # embed 侧 latent 空间统计（由 run_detect.py 从 input_record 注入），
+    # 供 sync 模块做 cross-comparison 替代单侧统计。
+    embed_latent_stats = cfg.get("__embed_latent_spatial_stats__")
+    if isinstance(embed_latent_stats, dict):
+        runtime_inputs["embed_latent_stats"] = embed_latent_stats
     return runtime_inputs
 
 

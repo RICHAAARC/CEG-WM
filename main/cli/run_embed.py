@@ -396,6 +396,39 @@ def run_embed(
                 cfg["__embed_pipeline_obj__"] = pipeline_obj
             if final_latents is not None:
                 cfg["__embed_final_latents__"] = final_latents
+            # 计算 embed 侧 latent 空间统计，作为 detect 侧几何同步的 cross-comparison 基线。
+            if final_latents is not None:
+                try:
+                    import numpy as _np_lat
+                    _lat = final_latents
+                    if hasattr(_lat, "cpu"):
+                        _lat = _lat.cpu()
+                    if hasattr(_lat, "numpy"):
+                        _lat = _lat.numpy()
+                    _arr = _np_lat.asarray(_lat, dtype=_np_lat.float32)
+                    if _arr.ndim == 4:
+                        _se = _np_lat.mean(_np_lat.abs(_arr[0]), axis=0)
+                        _std = float(_np_lat.std(_se))
+                        _mean = float(_np_lat.mean(_se) + 1e-12)
+                        _cr = _std / _mean
+                        _flat = _se.reshape(-1)
+                        _pk = float(_np_lat.max(_flat))
+                        _med = float(_np_lat.median(_flat) + 1e-12)
+                        _spec = _np_lat.fft.fftshift(_np_lat.abs(_np_lat.fft.fft2(_se)))
+                        _cy, _cx = _spec.shape[0] // 2, _spec.shape[1] // 2
+                        _spec[_cy, _cx] = 0.0
+                        _sv = _np_lat.sort(_spec.reshape(-1))
+                        _t1 = float(_sv[-1]) if _sv.size > 0 else 0.0
+                        _t2 = float(_sv[-2]) if _sv.size > 1 else 0.0
+                        _spr = float(_t1 / (_t2 + 1e-12)) if _t1 > 0.0 else 0.0
+                        cfg["__embed_latent_spatial_stats__"] = {
+                            "contrast_ratio": round(_cr, 6),
+                            "peak_sharpness": round(float(_pk / _med), 6),
+                            "spectral_peak_ratio": round(_spr, 6),
+                            "stats_version": "v1",
+                        }
+                except Exception:
+                    pass  # 统计计算失败不阻断主流程
             
             # 构造 infer_trace 并计算 digest
             infer_trace_obj = infer_trace.build_infer_trace(
@@ -483,9 +516,13 @@ def run_embed(
             )
             cfg.pop("__embed_pipeline_obj__", None)
             cfg.pop("__embed_final_latents__", None)
+            # 将 embed 侧 latent 空间统计写入 record，供 detect 侧几何同步 cross-comparison。
+            _embed_latent_stats = cfg.pop("__embed_latent_spatial_stats__", None)
             if not isinstance(record, dict):
                 # record 类型不符合预期，必须 fail-fast。
                 raise TypeError("orchestrator output must be dict")
+            if isinstance(_embed_latent_stats, dict):
+                record["latent_spatial_stats"] = _embed_latent_stats
             record["cfg_digest"] = cfg_digest
             record["policy_path"] = cfg["policy_path"]
 
