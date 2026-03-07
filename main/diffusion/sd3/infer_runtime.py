@@ -691,6 +691,11 @@ def _build_injection_cfg(cfg: Dict[str, Any], context: InjectionContext) -> Dict
         "watermark_seed": watermark_seed,
         "lf_impl_binding": lf_impl_binding,
         "hf_impl_binding": hf_impl_binding,
+        # （修复 Bug-B）将 plan_digest 及 LDPC 参数传入注入配置，
+        # 使 apply_low_freq_encoding_torch 能派生与 detect_score() 一致的 LDPC 码字。
+        "lf_plan_digest": getattr(context, "plan_digest", None),
+        "lf_message_length": lf_cfg.get("message_length", 64),
+        "lf_ecc_sparsity": lf_cfg.get("ecc_sparsity", 3),
     }
 
 

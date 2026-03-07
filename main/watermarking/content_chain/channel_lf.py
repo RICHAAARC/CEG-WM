@@ -13,16 +13,100 @@ Module type: Core innovation module
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, Optional, Tuple
+import random as _random
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
 from main.core import digests
+from .ldpc_codec import build_ldpc_spec, encode_message_bits
 
 
 LF_CHANNEL_IMPL_ID = "low_freq_coder_v1"
 LF_CHANNEL_VERSION = "v1"
 LF_TRACE_VERSION = "v1"
+
+
+def _has_plan_digest(cfg: Dict[str, Any]) -> bool:
+    """判断 cfg 中是否存在有效 plan_digest。"""
+    pd = cfg.get("lf_plan_digest") or cfg.get("watermark", {}).get("plan_digest", "")
+    return isinstance(pd, str) and bool(pd)
+
+
+def _get_ldpc_codeword_bits(cfg: Dict[str, Any], n: int) -> List[int]:
+    """
+    功能：从 plan_digest 派生 LDPC 码字（±1 列表）。
+
+    Derive deterministic LDPC codeword from plan_digest.
+    Matches the seed derivation used in LFCoderPRC.detect_score().
+
+    Args:
+        cfg: Injection config containing lf_plan_digest / lf_message_length / lf_ecc_sparsity.
+        n: Number of codeword bits required (= block_length = 96).
+
+    Returns:
+        List of ±1 integers of length n. Falls back to ones if plan_digest absent.
+    """
+    plan_digest: str = cfg.get("lf_plan_digest") or cfg.get("watermark", {}).get("plan_digest", "")
+    if not isinstance(plan_digest, str) or not plan_digest:
+        # 无 plan_digest 时回退全 +1（中性）。
+        return [1] * n
+
+    message_length = int(cfg.get("lf_message_length") or cfg.get("watermark", {}).get("lf", {}).get("message_length", 64))
+    ecc_sparsity = int(cfg.get("lf_ecc_sparsity") or cfg.get("watermark", {}).get("lf", {}).get("ecc_sparsity", 3))
+
+    # 与 detect_score() 相同的种子派生逻辑。
+    seed = int(digests.canonical_sha256({"plan_digest": plan_digest, "tag": "lf_message"})[:16], 16)
+    rng = _random.Random(seed)
+    message_bits: List[int] = [1 if rng.random() < 0.5 else -1 for _ in range(message_length)]
+
+    ldpc_spec = build_ldpc_spec(
+        message_length=message_length,
+        ecc_sparsity=ecc_sparsity,
+        seed_key=f"{plan_digest}:{message_length}:{ecc_sparsity}:embed",
+    )
+    encoded: List[int] = encode_message_bits(message_bits, ldpc_spec)
+
+    # 截断或补全到 n 位。
+    if len(encoded) >= n:
+        return encoded[:n]
+    return encoded + [1] * (n - len(encoded))
+
+
+def _derive_ldpc_codeword_from_cfg(cfg: Dict[str, Any], n: int, device: Any) -> Any:
+    """
+    功能：生成 torch 格式的 LDPC ±1 码字张量。
+
+    Generate torch LDPC codeword tensor for embed-side LF encoding.
+
+    Args:
+        cfg: Injection config.
+        n: Number of codeword bits required.
+        device: Torch device.
+
+    Returns:
+        Torch float32 tensor of ±1, shape (n,).
+    """
+    import torch
+    bits = _get_ldpc_codeword_bits(cfg, n)
+    return torch.tensor(bits, dtype=torch.float32, device=device)
+
+
+def _derive_ldpc_codeword_from_cfg_np(cfg: Dict[str, Any], n: int) -> np.ndarray:
+    """
+    功能：生成 numpy 格式的 LDPC ±1 码字数组（numpy 路径）。
+
+    Generate numpy LDPC codeword array for embed-side LF encoding.
+
+    Args:
+        cfg: Injection config.
+        n: Number of codeword bits required.
+
+    Returns:
+        Numpy float32 array of ±1, shape (n,).
+    """
+    bits = _get_ldpc_codeword_bits(cfg, n)
+    return np.array(bits, dtype=np.float32)
 
 
 def compute_lf_basis_projection_torch(latents: Any, basis: Dict[str, Any]) -> Any:
@@ -99,22 +183,22 @@ def apply_low_freq_encoding_torch(coeffs: Any, key: int, cfg: Dict[str, Any]) ->
     if not isinstance(strength, (int, float)) or strength < 0:
         raise ValueError(f"lf_strength must be non-negative, got {strength}")
 
+    n = int(coeffs.shape[0])
+
+    # 伪高斯幅度仍用 key 派生（步骤相关，合法）。
     generator = torch.Generator(device=coeffs.device)
     generator.manual_seed(int(key))
     pseudogaussian_factors = torch.randn(
-        coeffs.shape[0],
+        n,
         generator=generator,
         device=coeffs.device,
         dtype=torch.float32
     )
-    code_bits = torch.randint(
-        low=0,
-        high=2,
-        size=(coeffs.shape[0],),
-        generator=generator,
-        device=coeffs.device
-    )
-    codeword = code_bits.to(dtype=torch.float32) * 2.0 - 1.0
+
+    # （修复 Bug-B）从 plan_digest 派生固定 LDPC 码字，与 detect_score() 的
+    # expected_bits 种子一致，确保 embed/detect 两侧码字匹配。
+    codeword = _derive_ldpc_codeword_from_cfg(cfg, n, coeffs.device)
+
     watermark_pattern = codeword * torch.abs(pseudogaussian_factors)
 
     coeffs_fp32 = coeffs.to(dtype=torch.float32)
@@ -123,10 +207,11 @@ def apply_low_freq_encoding_torch(coeffs: Any, key: int, cfg: Dict[str, Any]) ->
     encoding_evidence = {
         "strength_applied": float(strength),
         "pattern_seed": int(key),
+        "codeword_source": "ldpc_plan_digest" if _has_plan_digest(cfg) else "random_fallback",
         "coeffs_before_norm": float(torch.linalg.vector_norm(coeffs_fp32).item()),
         "coeffs_after_norm": float(torch.linalg.vector_norm(encoded_coeffs).item()),
         "pattern_norm": float(torch.linalg.vector_norm(watermark_pattern).item()),
-        "coeffs_count": int(coeffs.shape[0])
+        "coeffs_count": n,
     }
     return encoded_coeffs, encoding_evidence
 
@@ -265,29 +350,32 @@ def apply_low_freq_encoding(
     if not isinstance(strength, (int, float)) or strength < 0:
         raise ValueError(f"lf_strength must be non-negative, got {strength}")
     
-    # 生成伪高斯采样向量：基于 key seed 与 coeffs 维度。
+    n = int(coeffs.shape[0])
+
+    # 伪高斯幅度仍用 key 派生（步骤相关，合法）。
     np.random.seed(key)
-    pseudogaussian_factors = np.random.randn(coeffs.shape[0]).astype(np.float32)
-    
-    # 生成二进制码字（±1）。
-    codeword = 2 * (np.random.binomial(1, 0.5, coeffs.shape[0]) - 0.5)
-    
+    pseudogaussian_factors = np.random.randn(n).astype(np.float32)
+
+    # （修复 Bug-B）从 plan_digest 派生固定 LDPC 码字（numpy 路径）。
+    codeword_np = _derive_ldpc_codeword_from_cfg_np(cfg, n)
+
     # 伪高斯采样：codeword * |randn()|。
-    watermark_pattern = codeword * np.abs(pseudogaussian_factors)
-    
+    watermark_pattern = codeword_np * np.abs(pseudogaussian_factors)
+
     # 以 strength 系数应用水印。
     encoded_coeffs = coeffs + strength * watermark_pattern
-    
+
     # 构造编码证据（摘要不含原始张量）。
     encoding_evidence = {
         "strength_applied": float(strength),
         "pattern_seed": int(key),
+        "codeword_source": "ldpc_plan_digest" if _has_plan_digest(cfg) else "random_fallback",
         "coeffs_before_norm": float(np.linalg.norm(coeffs)),
         "coeffs_after_norm": float(np.linalg.norm(encoded_coeffs)),
         "pattern_norm": float(np.linalg.norm(watermark_pattern)),
-        "coeffs_count": int(coeffs.shape[0])
+        "coeffs_count": n,
     }
-    
+
     return encoded_coeffs.astype(np.float32), encoding_evidence
 
 

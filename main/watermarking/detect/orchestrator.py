@@ -1124,11 +1124,14 @@ def _extract_content_raw_scores_from_image(
                     }
                 )
                 lf_coder = LFCoderPRC(LF_CODER_PRC_ID, LF_CODER_PRC_VERSION, prc_impl_digest)
+                # （修复 Bug-A）从 plan_dict 提取 lf_basis，传给 detect_score() 做投影。
+                lf_basis_for_decode = plan_dict.get("lf_basis") if isinstance(plan_dict.get("lf_basis"), dict) else None
                 lf_score, prc_trace = lf_coder.detect_score(
                     cfg=cfg,
                     latent_features=detect_latents,
                     plan_digest=plan_digest,
                     cfg_digest=cfg_digest,
+                    lf_basis=lf_basis_for_decode,
                 )
                 prc_trace_payload = prc_trace
                 lf_trace = {

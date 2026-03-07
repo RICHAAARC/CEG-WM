@@ -1271,7 +1271,8 @@ class LFCoderPRC:
         cfg: Dict[str, Any],
         latent_features: Any,
         plan_digest: str,
-        cfg_digest: Optional[str] = None
+        cfg_digest: Optional[str] = None,
+        lf_basis: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Optional[float], Dict[str, Any]]:
         """
         功能：PRC belief propagation decoding.
@@ -1280,9 +1281,13 @@ class LFCoderPRC:
 
         Args:
             cfg: Configuration dict.
-            latent_features: Input latent features.
+            latent_features: Input latent features (full SD3 latent or array).
             plan_digest: Plan digest binding.
             cfg_digest: Optional cfg digest.
+            lf_basis: LF subspace basis dict with projection_matrix.
+                      When provided, latent_features are projected through
+                      lf_basis before LDPC decoding to recover the embedded
+                      LF coefficients (fixes Bug-A: projection missing).
 
         Returns:
             Tuple of (lf_score, lf_detect_trace).
@@ -1317,14 +1322,33 @@ class LFCoderPRC:
         ecc_sparsity = int(lf_cfg.get("ecc_sparsity", 3))
         bp_iterations = int(lf_cfg.get("bp_iterations", 10))
 
-        # Extract flattened latents
-        flat_latents = _flatten_to_list(latent_features)
         ldpc_spec = build_ldpc_spec(
             message_length=message_length,
             ecc_sparsity=ecc_sparsity,
             seed_key=f"{plan_digest}:{message_length}:{ecc_sparsity}:embed",
         )
         block_length = int(ldpc_spec.get("n", message_length))
+
+        # （修复 Bug-A）若提供 lf_basis，先将 latent 投影到 LF 子空间，
+        # 恢复 embed 侧施加水印的 96 个 LF 系数，再做 LDPC 解码。
+        # 不投影时回退到原始展平（信号极弱，通常无法解码）。
+        lf_projection_used = False
+        if lf_basis is not None and isinstance(lf_basis, dict):
+            try:
+                from . import channel_lf as _ch_lf
+                is_torch = hasattr(latent_features, "detach")
+                if is_torch:
+                    projected = _ch_lf.compute_lf_basis_projection_torch(latent_features, lf_basis)
+                    flat_latents = projected.detach().cpu().numpy().reshape(-1).tolist()
+                else:
+                    projected = _ch_lf.compute_lf_basis_projection(latent_features, lf_basis)
+                    flat_latents = projected.reshape(-1).tolist()
+                lf_projection_used = True
+            except Exception:
+                # 投影失败时回退展平原始 latent。
+                flat_latents = _flatten_to_list(latent_features)
+        else:
+            flat_latents = _flatten_to_list(latent_features)
 
         if len(flat_latents) < block_length:
             return None, {
@@ -1372,6 +1396,7 @@ class LFCoderPRC:
             "block_length": block_length,
             "available_latent_dim": int(len(flat_latents)),
             "required_block_length": int(block_length),
+            "lf_projection_used": lf_projection_used,
             "syndrome_weight": int(decode_result["syndrome_weight"]),
             "llr_summary_digest": llr_summary_digest,
             "parity_check_digest": ldpc_spec["parity_check_digest"],
