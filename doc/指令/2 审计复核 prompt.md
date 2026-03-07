@@ -283,7 +283,7 @@ fpr_empirical != null
 risk_item_id:
 
 验证结论:
-VALID / INVALID / PARTIALLY_VALID / ALREADY_FIXED
+结论正确 / 结论错误 / 部分成立 / 代码已修复
 
 证据:
 文件路径 + 行号
@@ -291,15 +291,6 @@ VALID / INVALID / PARTIALLY_VALID / ALREADY_FIXED
 说明:
 为何报告结论成立或不成立
 ```
-
-含义：
-
-| 结论              | 含义     |
-| --------------- | ------ |
-| VALID           | 报告结论正确 |
-| INVALID         | 报告结论错误 |
-| PARTIALLY_VALID | 部分成立   |
-| ALREADY_FIXED   | 代码已修复  |
 
 ---
 

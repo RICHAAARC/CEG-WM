@@ -486,7 +486,33 @@ def run_detect(
         detect_content_cfg_for_preplan["enabled"] = False
         detect_cfg_for_preplan["content"] = detect_content_cfg_for_preplan
         cfg_for_preplan["detect"] = detect_cfg_for_preplan
-        content_result_pre = impl_set.content_extractor.extract(cfg_for_preplan)
+
+        # P1b：在 bound_fact_sources 上下文之外，用标准库对 input_record_path 做最小解析，
+        # 提取 watermarked_path 并作为 pre-plan 的图像输入，使 detect-side mask_digest
+        # 与 embed-side 对齐（同一图像 → 同一 subspace injection_context）。
+        # 优先级：(1) input_record_path 中的 watermarked_path；(2) cfg 中的 probe_image_path；(3) 无 inputs。
+        _preplan_inputs: dict | None = None
+        if input_record_path:
+            try:
+                import json as _json
+                with open(input_record_path, "r", encoding="utf-8") as _f:
+                    _pre_record = _json.load(_f)
+                _wm_path = _pre_record.get("watermarked_path")
+                if isinstance(_wm_path, str) and _wm_path and _wm_path != "<absent>":
+                    _wm_path_resolved = str(Path(_wm_path).resolve())
+                    if Path(_wm_path_resolved).is_file():
+                        _preplan_inputs = {"image_path": _wm_path_resolved}
+                    else:
+                        print(f"[Detect][preplan] watermarked_path 不可达，跳过图像输入: {_wm_path_resolved}")
+            except Exception as _pre_exc:
+                # 最小解析失败时维持现有 no-input 行为，不阻断主流程。
+                print(f"[Detect][preplan] input_record 最小解析失败，使用无输入模式: {_pre_exc}")
+        if _preplan_inputs is None:
+            _probe_img = cfg.get("detect", {}).get("content", {}).get("probe_image_path")
+            if isinstance(_probe_img, str) and _probe_img:
+                _preplan_inputs = {"image_path": _probe_img}
+
+        content_result_pre = impl_set.content_extractor.extract(cfg_for_preplan, inputs=_preplan_inputs)
         mask_digest = None
         if isinstance(content_result_pre, dict):
             mask_digest = content_result_pre.get("mask_digest")

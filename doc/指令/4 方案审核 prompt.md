@@ -359,7 +359,7 @@ evaluate_record.json
 
 ```
 步骤ID
-结论: VALID / INVALID / PARTIALLY_VALID
+结论: 可行 / 不可行 / 部分可行
 证据: 文件 + 行号
 说明
 ```

@@ -869,12 +869,13 @@ def _probe_model_v2_availability(mask_params: Dict[str, Any]) -> Tuple[bool, Opt
         return False, "probe_model_path_missing"
 
     # 统一路径解析基准为工程根目录，消除对 CWD 的隐式依赖。
-    # 相对路径以 semantic_mask_provider.py 向上 3 级（即工程根 CEG-WM/）为基准拼接。
+    # 文件层级：main/watermarking/content_chain/semantic_mask_provider.py
+    # parents[0]=content_chain/, parents[1]=watermarking/, parents[2]=main/, parents[3]=CEG-WM/（工程根）。
     raw_path = Path(raw_model_path)
     if raw_path.is_absolute():
         model_file = raw_path
     else:
-        project_root = Path(__file__).resolve().parents[2]
+        project_root = Path(__file__).resolve().parents[3]
         model_file = project_root / raw_path
 
     if not (model_file.exists() and model_file.is_file()):
