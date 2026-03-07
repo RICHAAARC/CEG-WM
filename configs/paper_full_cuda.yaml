@@ -130,6 +130,6 @@ experiment_matrix:
   # seeds 控制 neg_cache 与 grid 的样本规模。
   # N=3 时 global calibrate null 分布含 3 条独立记录，总 grid = 3×8 = 24 items。
   # 论文级 α=1% 需 N≥100；当前 N=3 用于机制验证阶段。
-  seeds: [0, 1, 2]
+  seeds: [0, 1]
   # 论文复现实验主配置：仅保留 faithful baseline。
   # 消融实验请使用 configs/ablation 目录下的专用配置。
