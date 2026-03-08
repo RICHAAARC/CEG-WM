@@ -3067,6 +3067,239 @@ def _ensure_experiment_matrix_grid_summary_anchors(run_root: Path) -> None:
         )
 
 
+def _run_attestation_after_embed(run_root: Path, cfg_path: Path) -> None:
+    """
+    功能：embed 完成后构建 generation attestation statement 并保存工件。
+
+    Post-embed hook: build attestation statement from embed_record + cfg-configured
+    secret keys (read from environment variables). Saves
+    artifacts/attestation/attestation_statement.json. Non-blocking: skips silently
+    when attestation is disabled or required environment variables are absent.
+
+    Args:
+        run_root: Unified run_root path.
+        cfg_path: Config YAML path (used to read attestation section).
+
+    Returns:
+        None.
+    """
+    if not isinstance(run_root, Path) or not isinstance(cfg_path, Path):
+        return
+
+    # (1) 加载配置，读取 attestation 节。
+    cfg_obj: dict = {}
+    try:
+        cfg_obj = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        print(f"[onefile/attestation] WARN: failed to load cfg for attestation: {exc}", file=sys.stderr)
+        return
+    if not isinstance(cfg_obj, dict):
+        return
+
+    attest_cfg = cfg_obj.get("attestation")
+    if not isinstance(attest_cfg, dict) or not attest_cfg.get("enabled"):
+        print("[onefile/attestation] attestation.enabled=false 或节缺失，跳过 attestation statement 构建")
+        return
+
+    # (2) 从环境变量读取密钥（不入版本控制）。
+    k_master_var = attest_cfg.get("k_master_env_var", "CEG_WM_K_MASTER")
+    k_prompt_var = attest_cfg.get("k_prompt_env_var", "CEG_WM_K_PROMPT")
+    k_seed_var = attest_cfg.get("k_seed_env_var", "CEG_WM_K_SEED")
+    k_master = os.environ.get(str(k_master_var), "")
+    k_prompt = os.environ.get(str(k_prompt_var), "")
+    k_seed = os.environ.get(str(k_seed_var), "")
+
+    if not k_master or not k_prompt or not k_seed:
+        print(
+            f"[onefile/attestation] WARN: 环境变量 {k_master_var}/{k_prompt_var}/{k_seed_var} "
+            "未设置，跳过 attestation statement 构建（非阻断）",
+            file=sys.stderr,
+        )
+        return
+
+    # (3) 加载 embed_record.json，提取 plan_digest。
+    embed_record_path = run_root / "records" / "embed_record.json"
+    if not embed_record_path.exists():
+        print("[onefile/attestation] WARN: embed_record.json 不存在，跳过", file=sys.stderr)
+        return
+    try:
+        embed_record: dict = json.loads(embed_record_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"[onefile/attestation] WARN: embed_record.json 解析失败: {exc}", file=sys.stderr)
+        return
+    if not isinstance(embed_record, dict):
+        return
+
+    plan_digest = embed_record.get("plan_digest")
+    if not isinstance(plan_digest, str) or not plan_digest:
+        print("[onefile/attestation] WARN: embed_record 中 plan_digest 缺失，跳过", file=sys.stderr)
+        return
+
+    # (4) 解析 model_id、prompt、seed（均来自 cfg）。
+    model_id = cfg_obj.get("model_id")
+    if not isinstance(model_id, str) or not model_id:
+        model_id = "sd3"
+    prompt = cfg_obj.get("inference_prompt")
+    if not isinstance(prompt, str):
+        prompt = ""
+    seed_raw = cfg_obj.get("seed") or embed_record.get("seed")
+    seed_int = int(seed_raw) if isinstance(seed_raw, (int, float)) and not isinstance(seed_raw, bool) else 0
+
+    # (5) 调用 build_embed_attestation 构造 attestation payload。
+    from main.watermarking.embed.orchestrator import build_embed_attestation  # type: ignore[import-untyped]
+
+    result = build_embed_attestation(
+        k_master=k_master,
+        model_id=model_id,
+        prompt=prompt,
+        seed=seed_int,
+        plan_digest=plan_digest,
+        k_prompt=k_prompt,
+        k_seed=k_seed,
+        latent_snapshots=None,       # 子进程模式无法传递 latent tensor，轨迹混合不可用
+        use_trajectory_mix=False,
+    )
+
+    # (6) 序列化保存（不含派生密钥 keys 和原始 bytes 字段）。
+    attest_dir = run_root / "artifacts" / "attestation"
+    attest_dir.mkdir(parents=True, exist_ok=True)
+    save_bundle = {
+        "statement": result["statement"],
+        "attestation_digest": result["attestation_digest"],
+        "lf_payload_hex": result["lf_payload_hex"],
+        "trace_commit": result["trace_commit"],
+        "geo_anchor_seed": result["geo_anchor_seed"],
+        "attestation_status": result["attestation_status"],
+    }
+    statement_path = attest_dir / "attestation_statement.json"
+    statement_path.write_text(json.dumps(save_bundle, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(
+        f"[onefile/attestation] attestation statement 已写入: {statement_path} "
+        f"d_A={result['attestation_digest'][:16]}..."
+    )
+
+
+def _run_attestation_verification_after_detect(run_root: Path, cfg_path: Path) -> None:
+    """
+    功能：detect 完成后验证 generation attestation 并保存溯源结果工件。
+
+    Post-detect hook: load attestation statement from embed, extract detect evidence,
+    call verify_attestation(), and save artifacts/attestation/attestation_result.json.
+    Non-blocking: skips silently when attestation is disabled or statement absent.
+
+    Args:
+        run_root: Unified run_root path.
+        cfg_path: Config YAML path (used to read attestation section).
+
+    Returns:
+        None.
+    """
+    if not isinstance(run_root, Path) or not isinstance(cfg_path, Path):
+        return
+
+    # (1) 加载配置，读取 attestation 节。
+    cfg_obj: dict = {}
+    try:
+        cfg_obj = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        print(f"[onefile/attestation] WARN: 配置加载失败: {exc}", file=sys.stderr)
+        return
+    if not isinstance(cfg_obj, dict):
+        return
+
+    attest_cfg = cfg_obj.get("attestation")
+    if not isinstance(attest_cfg, dict) or not attest_cfg.get("enabled"):
+        return
+
+    # (2) 从环境变量读取 k_master（verify 只需主密钥）。
+    k_master_var = attest_cfg.get("k_master_env_var", "CEG_WM_K_MASTER")
+    k_master = os.environ.get(str(k_master_var), "")
+    if not k_master:
+        print(
+            f"[onefile/attestation] WARN: {k_master_var} 未设置，跳过 attestation 验证（非阻断）",
+            file=sys.stderr,
+        )
+        return
+
+    # (3) 加载 embed 阶段写入的 attestation_statement.json。
+    statement_path = run_root / "artifacts" / "attestation" / "attestation_statement.json"
+    if not statement_path.exists():
+        print(
+            "[onefile/attestation] WARN: attestation_statement.json 不存在（embed 阶段可能未写入），跳过验证",
+            file=sys.stderr,
+        )
+        return
+    try:
+        attest_bundle: dict = json.loads(statement_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"[onefile/attestation] WARN: attestation_statement.json 解析失败: {exc}", file=sys.stderr)
+        return
+
+    candidate_statement = attest_bundle.get("statement")
+    if not isinstance(candidate_statement, dict):
+        print("[onefile/attestation] WARN: statement 字段缺失，跳过验证", file=sys.stderr)
+        return
+
+    # (4) 加载 detect_record.json，提取内容与几何证据。
+    detect_record_path = run_root / "records" / "detect_record.json"
+    if not detect_record_path.exists():
+        print("[onefile/attestation] WARN: detect_record.json 不存在，跳过验证", file=sys.stderr)
+        return
+    try:
+        detect_record: dict = json.loads(detect_record_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"[onefile/attestation] WARN: detect_record.json 解析失败: {exc}", file=sys.stderr)
+        return
+    if not isinstance(detect_record, dict):
+        return
+
+    # 内容证据（LF 代理，用于 verify_attestation 的 content_evidence 参数）。
+    content_evidence = detect_record.get("content_evidence") or detect_record.get("content_evidence_payload")
+    if not isinstance(content_evidence, dict):
+        content_evidence = None
+
+    # 几何链得分（从多个可能字段中依次查找）。
+    geo_score: "float | None" = None
+    for geo_key in ("geometry_evidence", "sync_result", "geo_evidence"):
+        geo_node = detect_record.get(geo_key)
+        if isinstance(geo_node, dict):
+            for score_key in ("score", "geo_score", "sync_score"):
+                _s = geo_node.get(score_key)
+                if isinstance(_s, (int, float)) and not isinstance(_s, bool):
+                    geo_score = float(_s)
+                    break
+            if geo_score is not None:
+                break
+
+    # (5) 调用 verify_attestation 进行溯源验证。
+    from main.watermarking.detect.orchestrator import verify_attestation  # type: ignore[import-untyped]
+
+    result = verify_attestation(
+        k_master=k_master,
+        candidate_statement=candidate_statement,
+        content_evidence=content_evidence,
+        geo_score=geo_score,
+        lf_weight=float(attest_cfg.get("lf_weight", 0.5)),
+        hf_weight=float(attest_cfg.get("hf_weight", 0.3)),
+        geo_weight=float(attest_cfg.get("geo_weight", 0.2)),
+        attested_threshold=float(attest_cfg.get("threshold", 0.65)),
+    )
+
+    # (6) 保存 attestation_result.json。
+    attest_dir = run_root / "artifacts" / "attestation"
+    attest_dir.mkdir(parents=True, exist_ok=True)
+    result_path = attest_dir / "attestation_result.json"
+    result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    verdict = result.get("verdict", "unknown")
+    fusion_score = result.get("fusion_score")
+    score_str = f"{fusion_score:.4f}" if isinstance(fusion_score, float) else str(fusion_score)
+    print(
+        f"[onefile/attestation] 溯源验证完成: verdict={verdict} fusion_score={score_str} "
+        f"path={result_path}"
+    )
+
+
 def run_onefile_workflow(
     repo_root: Path,
     cfg_path: Path,
@@ -3188,6 +3421,16 @@ def run_onefile_workflow(
                     f"{type(exc).__name__}: {exc}"
                 )
 
+        # 在 embed 成功后构建 generation attestation statement（全 profile 执行，keys 由环境变量控制）。
+        if step.name == "embed" and return_code == 0:
+            try:
+                _run_attestation_after_embed(run_root, effective_cfg_path)
+            except Exception as exc:
+                print(
+                    f"[onefile] WARN: attestation after embed failed: {type(exc).__name__}: {exc}",
+                    file=sys.stderr,
+                )
+
         # embed 成功完成后，为非 paper 模式（paper 模式由 multi_protocol_evaluation 负责）
         # 补充攻击覆盖生成，确保 evaluate 产物中有真实攻击分组。
         if step.name == "embed" and return_code == 0 and profile != PROFILE_PAPER_FULL_CUDA:
@@ -3207,6 +3450,16 @@ def run_onefile_workflow(
             except Exception as exc:
                 print(
                     f"[onefile] WARN: NP-threshold re-detect failed: {type(exc).__name__}: {exc}",
+                    file=sys.stderr,
+                )
+
+        # 在 detect 成功后验证 generation attestation（全 profile 执行，keys 由环境变量控制）。
+        if step.name == "detect" and return_code == 0:
+            try:
+                _run_attestation_verification_after_detect(run_root, effective_cfg_path)
+            except Exception as exc:
+                print(
+                    f"[onefile] WARN: attestation verification after detect failed: {type(exc).__name__}: {exc}",
                     file=sys.stderr,
                 )
 

@@ -122,6 +122,20 @@ impl:
   lf_coder_id: "lf_coder_prc_v1"
   use_latent_per_step: true
 
+# 密码学生成溯源（Cryptographic Generation Attestation）配置。
+# 密钥从环境变量读取，不入版本控制；未设置环境变量时跳过 attestation（非阻断）。
+# 设置方法：export CEG_WM_K_MASTER=<hex64> CEG_WM_K_PROMPT=<hex32> CEG_WM_K_SEED=<hex32>
+attestation:
+  enabled: true
+  k_master_env_var: "CEG_WM_K_MASTER"  # 主密钥环境变量名
+  k_prompt_env_var: "CEG_WM_K_PROMPT"  # prompt 承诺密钥环境变量名
+  k_seed_env_var: "CEG_WM_K_SEED"      # seed 承诺密钥环境变量名
+  threshold: 0.65    # attested 判决阈值（方法论定义默认值）
+  lf_weight: 0.5     # LF 通道融合权重
+  hf_weight: 0.3     # HF 通道融合权重
+  geo_weight: 0.2    # GEO 通道融合权重
+  use_trajectory_mix: false  # 子进程模式无法传递 latent tensor，禁用轨迹混合
+
 detect_runtime:
   image_domain_sidecar_enabled: true
 
