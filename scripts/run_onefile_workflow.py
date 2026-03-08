@@ -480,14 +480,26 @@ def _resolve_embed_input_image_path_from_cfg(cfg_obj: dict) -> str | None:
     return None
 
 
-def _ensure_default_embed_input_image(run_root: Path) -> Path:
+def _ensure_default_embed_input_image(
+    run_root: Path,
+    prompt: str | None = None,
+    seed: int | None = None,
+    cfg_obj: dict | None = None,
+) -> Path:
     """
     功能：生成默认 embed 输入图像工件并返回路径。
 
-    Generate a deterministic default embed input image artifact.
+    Generate a default embed input image artifact for SemanticMaskProvider.
+    When prompt and cfg_obj are available, attempts SD3 preview generation
+    (no injection hook) to obtain a semantically valid preview image matching the
+    target generation condition. Falls back to a synthetic gradient image when the
+    SD3 pipeline is unavailable (e.g., CPU-only or missing dependencies).
 
     Args:
         run_root: Unified run_root path.
+        prompt: Optional inference prompt for SD3 preview generation.
+        seed: Optional random seed for deterministic SD3 preview.
+        cfg_obj: Optional full config object (used to resolve model params).
 
     Returns:
         Absolute path to generated default image.
@@ -500,6 +512,63 @@ def _ensure_default_embed_input_image(run_root: Path) -> Path:
         return target_path.resolve()
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # 【P0-A】Preview Generation：以目标 prompt + seed 执行无注入 SD3 推理，
+    # 生成与水印图像语义一致的预览图，供 SemanticMaskProvider 提取有效掩码。
+    # 仅在 prompt 可用且 diffusers 可导入时启用；否则退回合成梯度图（向后兼容）。
+    if isinstance(prompt, str) and prompt.strip():
+        try:
+            import torch
+            from diffusers import StableDiffusion3Pipeline  # type: ignore[import-untyped]
+
+            _model_cfg = (cfg_obj or {}).get("model") if isinstance(cfg_obj, dict) else None
+            _model_cfg = _model_cfg if isinstance(_model_cfg, dict) else {}
+            _height = int(_model_cfg.get("height", 512))
+            _width = int(_model_cfg.get("width", 512))
+            _dtype_str = _model_cfg.get("dtype", "float16")
+            _torch_dtype = torch.float16 if "16" in str(_dtype_str) else torch.float32
+
+            # model_id：优先使用 cfg 中指定路径，否则使用默认 SD3 模型。
+            _model_id = (cfg_obj or {}).get("model_id") if isinstance(cfg_obj, dict) else None
+            if not isinstance(_model_id, str) or not _model_id.strip():
+                _model_id = "stabilityai/stable-diffusion-3-medium-diffusers"
+
+            print(f"[P0-A] Running SD3 preview generation for embed input (prompt={repr(prompt[:60])})")
+            _pipeline = StableDiffusion3Pipeline.from_pretrained(
+                _model_id,
+                torch_dtype=_torch_dtype,
+            )
+            _device = "cuda" if torch.cuda.is_available() else "cpu"
+            _pipeline = _pipeline.to(_device)
+
+            _generator = None
+            if seed is not None:
+                _generator = torch.Generator(device=_device).manual_seed(int(seed))
+
+            with torch.no_grad():
+                _preview = _pipeline(
+                    prompt=prompt.strip(),
+                    height=_height,
+                    width=_width,
+                    generator=_generator,
+                    num_inference_steps=28,
+                ).images[0]
+
+            _preview.save(target_path, format="PNG")
+            del _pipeline
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            print(f"[P0-A] SD3 preview saved: {target_path}")
+            return target_path.resolve()
+
+        except Exception as _preview_exc:
+            print(
+                f"[P0-A] WARN: SD3 preview generation failed ({type(_preview_exc).__name__}: {_preview_exc}); "
+                "falling back to synthetic gradient image",
+                file=sys.stderr,
+            )
+
+    # 回退路径：合成线性颜色梯度图（语义失真，SemanticMaskProvider 掩码质量低）。
     try:
         from PIL import Image
     except Exception as exc:
@@ -1156,7 +1225,14 @@ def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> P
             )
         embed_cfg["input_image_path"] = str(resolved_input_image_path)
     else:
-        default_input_image_path = _ensure_default_embed_input_image(run_root)
+        _embed_prompt = cfg_obj.get("inference_prompt")
+        _embed_seed = cfg_obj.get("seed")
+        default_input_image_path = _ensure_default_embed_input_image(
+            run_root,
+            prompt=_embed_prompt if isinstance(_embed_prompt, str) else None,
+            seed=int(_embed_seed) if isinstance(_embed_seed, int) else None,
+            cfg_obj=cfg_obj,
+        )
         embed_cfg["input_image_path"] = str(default_input_image_path)
 
     cfg_obj["embed"] = embed_cfg
@@ -1624,6 +1700,8 @@ def _prepare_detect_records_with_minimal_ground_truth(
                     pos_payload["ground_truth"] = True
                     pos_payload["is_watermarked"] = True
                     pos_payload["ground_truth_source"] = "dual_branch_positive"
+                    # 【P0-C】为每对正样本赋予唯一 run_id，保证统计样本独立性。
+                    pos_payload["run_id"] = str(uuid.uuid4())
                     if prompts is not None:
                         prompt_value = prompts[pair_index]
                         if not isinstance(prompt_value, str) or not prompt_value.strip():
@@ -1636,6 +1714,8 @@ def _prepare_detect_records_with_minimal_ground_truth(
                     neg_payload_per_pair["ground_truth"] = False
                     neg_payload_per_pair["is_watermarked"] = False
                     neg_payload_per_pair["ground_truth_source"] = "dual_branch_negative"
+                    # 【P0-C】为每对负样本赋予唯一 run_id，保证统计样本独立性。
+                    neg_payload_per_pair["run_id"] = str(uuid.uuid4())
                     if prompts is not None:
                         prompt_value = prompts[pair_index]
                         if not isinstance(prompt_value, str) or not prompt_value.strip():
@@ -1723,6 +1803,8 @@ def _prepare_detect_records_with_minimal_ground_truth(
         positive_payload["ground_truth"] = True
         positive_payload["is_watermarked"] = True
         positive_payload["ground_truth_source"] = "clone_positive"
+        # 【P0-C】为每对克隆正样本赋予唯一 run_id，满足统计样本记录级独立性。
+        positive_payload["run_id"] = str(uuid.uuid4())
         if isinstance(dual_branch_failure_reason, str) and dual_branch_failure_reason:
             positive_payload["dual_branch_failure_reason"] = dual_branch_failure_reason
         _normalize_positive_payload_if_recovered_failed(positive_payload)
@@ -1732,6 +1814,8 @@ def _prepare_detect_records_with_minimal_ground_truth(
         negative_payload["ground_truth"] = False
         negative_payload["is_watermarked"] = False
         negative_payload["ground_truth_source"] = "clone_negative"
+        # 【P0-C】为每对克隆负样本赋予唯一 run_id，满足统计样本记录级独立性。
+        negative_payload["run_id"] = str(uuid.uuid4())
         if isinstance(dual_branch_failure_reason, str) and dual_branch_failure_reason:
             negative_payload["dual_branch_failure_reason"] = dual_branch_failure_reason
 

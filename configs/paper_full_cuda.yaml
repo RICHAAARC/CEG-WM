@@ -101,7 +101,7 @@ ablation:
 calibration:
   detect_records_glob: null  # detect 记录 glob 路径（由 experiment_matrix 注入）
   minimal_ground_truth_pair_count: 100  # onefile 最小 GT 闭环生成对数（positive/negative）；≥100 保证离散 FPR 粒度 1/100≤1%
-  minimal_ground_truth_prompts_file: null  # 可选：通过 prompts 文件驱动 GT 对数（行数即 pair_count）
+  minimal_ground_truth_prompts_file: null  # 可选：通过 prompts 文件驱动 GT 对数（行数即 pair_count）；注意：仅影响元数据字段，不触发独立推理，STATIC-8 需代码层修复
   exclude_formal_sidecar_disabled_marker: true
   exclude_synthetic_negative_closure_marker: true
 
@@ -109,7 +109,7 @@ evaluate:
   detect_records_glob: null  # detect 记录 glob 路径（由 experiment_matrix 注入）
   thresholds_path: null      # 阈值工件路径（由 experiment_matrix 注入）
   minimal_ground_truth_pair_count: 100  # onefile 最小 GT 闭环生成对数（positive/negative）；≥100 保证离散 FPR 粒度 1/100≤1%
-  minimal_ground_truth_prompts_file: null  # 可选：通过 prompts 文件驱动 GT 对数（行数即 pair_count）
+  minimal_ground_truth_prompts_file: null  # 可选：通过 prompts 文件驱动 GT 对数（行数即 pair_count）；注意：仅影响元数据字段，不触发独立推理，STATIC-8 需代码层修复
   exclude_synthetic_negative_closure_marker: true
 
 impl:

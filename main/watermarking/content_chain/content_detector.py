@@ -199,6 +199,17 @@ class ContentDetector:
                 default_score=normalized_inputs.get("hf_score"),
                 channel_name="hf"
             )
+            # 【P0-B】_extract_channel() 的 dict 分支忽略 default_score，
+            # 当 hf_evidence dict 不含 hf_score 键时返回 None。
+            # 若图像域旁路分数（detector_inputs["hf_score"] = hf_score_raw）可用，
+            # 则以 max(0.0, hf_score_raw) 直接作为主评分，跳过 compute_hf_score()
+            # 的 SD3 轨迹 L2 路径（轨迹 L2 均值 ≈262，对所有 SD3 图像无判别性）。
+            if hf_score is None:
+                hf_raw = normalized_inputs.get("hf_score")
+                if isinstance(hf_raw, (int, float)) and not isinstance(hf_raw, bool):
+                    hf_score = max(0.0, float(hf_raw))
+                    hf_status = "ok"
+                    hf_failure_reason = None
             hf_statistics = extract_high_freq_statistics(normalized_inputs)
             hf_statistics_digest = hf_statistics.get("statistics_digest") if isinstance(hf_statistics, dict) else None
             if hf_score is None and isinstance(hf_statistics, dict) and hf_statistics.get("status") == "ok":

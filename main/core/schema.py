@@ -1462,7 +1462,19 @@ def ensure_required_fields(
     # threshold_source 字段注入（阶段 2：仅统计类记录）
     if record_kind == "statistical":
         if "threshold_source" not in record:
-            record["threshold_source"] = "np_canonical"
+            # 【P2-A】从融合层实际值透传，避免无条件硬填 "np_canonical" 造成误导性口径倒置。
+            # 优先读取 fusion_result.audit.threshold_source，次选 final_decision.threshold_source。
+            _fusion_ts = None
+            _fusion_result = record.get("fusion_result")
+            if isinstance(_fusion_result, dict):
+                _audit_node = _fusion_result.get("audit")
+                if isinstance(_audit_node, dict):
+                    _fusion_ts = _audit_node.get("threshold_source")
+            if not isinstance(_fusion_ts, str) or not _fusion_ts:
+                _final_decision = record.get("final_decision")
+                if isinstance(_final_decision, dict):
+                    _fusion_ts = _final_decision.get("threshold_source")
+            record["threshold_source"] = _fusion_ts if isinstance(_fusion_ts, str) and _fusion_ts else "<absent>"
         thresholds_spec = build_thresholds_spec(cfg)
         expected_target_fpr = thresholds_spec.get("target_fpr")
         if not isinstance(expected_target_fpr, (int, float)):
