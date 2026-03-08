@@ -2047,14 +2047,26 @@ def _check_field_override_conflict(
         "schema_version": schema.RECORD_SCHEMA_VERSION
     }
 
+    # P2-A 修复后，schema 注入 threshold_source 为动态值（透传融合层实际值），不再恒为 np_canonical。
+    # 当 fusion_result.audit.allow_threshold_fallback_for_tests=True 时，schema 合法地注入了
+    # "fallback_target_fpr_test_only"，此时 threshold_source 检查需降级为警告以避免误报。
+    _fallback_authorized = False
+    _fr = record.get("fusion_result")
+    if isinstance(_fr, dict):
+        _fa = _fr.get("audit")
+        if isinstance(_fa, dict):
+            _fallback_authorized = bool(_fa.get("allow_threshold_fallback_for_tests", False))
+
     for field_name, expected_value in expected_values.items():
         actual_value = record.get(field_name)
         if actual_value is not None and actual_value != expected_value:
+            # threshold_source 在 fallback 授权场景下为 schema 合法注入值，不属于覆盖冲突。
+            _effective_warn = warn_mode or (field_name == "threshold_source" and _fallback_authorized)
             msg = (
                 f"[受控字段门禁] Detected potential override conflict: {field_name}={actual_value} "
                 f"(expected '{expected_value}' from schema injection)"
             )
-            if warn_mode:
+            if _effective_warn:
                 print(f"[FreezeGate][WARN] {msg}")
             else:
                 raise GateEnforcementError(

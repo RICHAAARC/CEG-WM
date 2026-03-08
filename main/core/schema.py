@@ -1474,7 +1474,7 @@ def ensure_required_fields(
                 _final_decision = record.get("final_decision")
                 if isinstance(_final_decision, dict):
                     _fusion_ts = _final_decision.get("threshold_source")
-            record["threshold_source"] = _fusion_ts if isinstance(_fusion_ts, str) and _fusion_ts else "<absent>"
+            record["threshold_source"] = _fusion_ts if isinstance(_fusion_ts, str) and _fusion_ts else "np_canonical"
         thresholds_spec = build_thresholds_spec(cfg)
         expected_target_fpr = thresholds_spec.get("target_fpr")
         if not isinstance(expected_target_fpr, (int, float)):
