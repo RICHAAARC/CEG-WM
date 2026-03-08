@@ -1229,3 +1229,149 @@ def _build_ablation_absent_content_evidence(absent_reason: str) -> Dict[str, Any
         },
         "content_failure_reason": None  # absent 状态下无失败原因
     }
+
+
+# ————————————————————————————
+# Cryptographic generation attestation 扩展（附加函数，不修改原有 run_embed_orchestrator）
+# ————————————————————————————
+
+def build_embed_attestation(
+    k_master: str,
+    model_id: str,
+    prompt: str,
+    seed: int,
+    plan_digest: str,
+    *,
+    k_prompt: str,
+    k_seed: str,
+    event_nonce: "str | None" = None,
+    time_bucket: "str | None" = None,
+    latent_snapshots: "list | None" = None,
+    use_trajectory_mix: bool = True,
+) -> Dict[str, Any]:
+    """
+    功能：构造嵌入阶段的 generation attestation 载荷。
+
+    Build a full generation attestation payload for embedding.
+    Returns the attestation statement, attestation digest d_A,
+    and derived keys for LF/HF/GEO/TR channels.
+
+    Flow:
+        prompt_commit = HMAC(k_prompt, normalize(prompt))
+        seed_commit   = HMAC(k_seed, seed)
+        statement     = build_attestation_statement(...)
+        d_A           = SHA256(CanonicalJSON(statement))
+        keys          = HKDF(K_master, d_A, context=*)
+        lf_payload    = HMAC(k_LF, d_A)[:48]
+        [trace_commit = HMAC(k_TR, trace_summary)]  # 若提供 latent_snapshots
+        [payload_final = mix(lf_payload, trace_commit)]
+
+    Args:
+        k_master: Master key (hex str or bytes). Kept secret by caller.
+        model_id: Generative model identifier (e.g., "sd3.5").
+        prompt: Raw generation prompt (will be committed, not stored).
+        seed: Integer generation seed (will be committed, not stored).
+        plan_digest: SubspacePlanner plan digest for binding.
+        k_prompt: Key for prompt HMAC commitment (hex str or bytes).
+        k_seed: Key for seed HMAC commitment (hex str or bytes).
+        event_nonce: Optional per-event nonce (uuid4() if None).
+        time_bucket: Optional date bucket (today if None).
+        latent_snapshots: Optional list of latent snapshots for trajectory commit.
+        use_trajectory_mix: Whether to mix trace_commit into lf_payload (default True).
+
+    Returns:
+        Dict with:
+        - "statement": AttestationStatement as dict.
+        - "attestation_digest": d_A hex string.
+        - "keys": dict with k_lf, k_hf, k_geo, k_tr as hex strings.
+        - "lf_payload": bytes of LF attestation payload.
+        - "lf_payload_hex": hex string of lf_payload.
+        - "trace_commit": hex string if latent_snapshots provided, else None.
+        - "geo_anchor_seed": int seed for geometry chain.
+        - "attestation_status": "ok".
+
+    Raises:
+        TypeError: If required inputs have wrong type.
+        ValueError: If required inputs are empty.
+    """
+    from main.watermarking.provenance.commitments import (
+        compute_prompt_commit,
+        compute_seed_commit,
+    )
+    from main.watermarking.provenance.attestation_statement import (
+        build_attestation_statement,
+        compute_attestation_digest,
+    )
+    from main.watermarking.provenance.key_derivation import (
+        derive_attestation_keys,
+        compute_lf_attestation_payload,
+        generate_hf_key_template,
+        derive_geo_anchor_seed,
+    )
+    from main.watermarking.provenance.trajectory_commit import (
+        compute_trajectory_commit,
+        mix_payload_with_trace_commit,
+    )
+
+    # (1) 计算 prompt 和 seed 的 HMAC 承诺。
+    prompt_commit = compute_prompt_commit(k_prompt, prompt)
+    seed_commit = compute_seed_commit(k_seed, seed)
+
+    # (2) 构造 generation attestation statement（不含版本字段）。
+    statement = build_attestation_statement(
+        model_id=model_id,
+        prompt_commit=prompt_commit,
+        seed_commit=seed_commit,
+        plan_digest=plan_digest,
+        event_nonce=event_nonce,
+        time_bucket=time_bucket,
+    )
+
+    # (3) 计算 attestation digest d_A。
+    d_a = compute_attestation_digest(statement)
+
+    # (4) 从 K_master 和 d_A 派生四类子密钥。
+    attest_keys = derive_attestation_keys(k_master, d_a)
+
+    # (5) 生成 LF 主通道 attestation payload。
+    lf_payload = compute_lf_attestation_payload(
+        k_lf=attest_keys.k_lf,
+        attestation_digest=d_a,
+        payload_length=48,
+    )
+
+    # (6) 可选：生成轨迹承诺并混合到 LF payload（方案 B）。
+    trace_commit: "str | None" = None
+    lf_payload_final = lf_payload
+    if latent_snapshots is not None and len(latent_snapshots) > 0:
+        try:
+            trace_commit = compute_trajectory_commit(attest_keys.k_tr, latent_snapshots)
+            if use_trajectory_mix:
+                lf_payload_final = mix_payload_with_trace_commit(
+                    lf_payload=lf_payload,
+                    trace_commit_hex=trace_commit,
+                    mix_bytes=8,
+                )
+        except Exception:
+            # 轨迹承诺失败时降级：仅使用原始 lf_payload，不中断主流程。
+            trace_commit = None
+            lf_payload_final = lf_payload
+
+    # (7) 派生几何链 anchor seed。
+    geo_anchor_seed = derive_geo_anchor_seed(attest_keys.k_geo)
+
+    return {
+        "statement": statement.as_dict(),
+        "attestation_digest": d_a,
+        "keys": {
+            "k_lf": attest_keys.k_lf,
+            "k_hf": attest_keys.k_hf,
+            "k_geo": attest_keys.k_geo,
+            "k_tr": attest_keys.k_tr,
+        },
+        "lf_payload": lf_payload_final,
+        "lf_payload_hex": lf_payload_final.hex(),
+        "trace_commit": trace_commit,
+        "geo_anchor_seed": geo_anchor_seed,
+        "attestation_status": "ok",
+    }

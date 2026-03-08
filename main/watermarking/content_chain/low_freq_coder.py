@@ -1469,3 +1469,147 @@ def _flatten_recursive_to_list(value: Any, sink: list) -> None:
     if isinstance(value, (list, tuple)):
         for item in value:
             _flatten_recursive_to_list(item, sink)
+
+
+# ————————————————————————————
+# Cryptographic generation attestation 扩展（附加，不破坏既有接口）
+# ————————————————————————————
+
+def compute_lf_attestation_score(
+    latent_features: Any,
+    k_lf: str,
+    attestation_digest: str,
+    lf_params: Optional[Dict[str, Any]] = None,
+    payload_length: int = 48,
+) -> Dict[str, Any]:
+    """
+    功能：计算 LF 通道的 attestation 得分（检测侧）。
+
+    Compute the LF channel attestation score by measuring correlation between
+    the image's LF latent features and the expected attestation payload.
+
+    The attestation payload is derived as:
+        payload = truncate(HMAC(k_LF, d_A), payload_length)
+        expected_bits = [(b >> i) & 1 for b in payload for i in range(8)]
+    The score is the fraction of LF posteriors whose sign agrees with expected bits.
+    Score direction: higher value indicates stronger attestation evidence.
+
+    Args:
+        latent_features: LF latent features (list or array) from the image.
+        k_lf: LF channel derived key (hex str or bytes).
+        attestation_digest: Attestation digest d_A (hex str).
+        lf_params: Optional LF parameter overrides (variance, block_length, etc.).
+        payload_length: Attestation payload length in bytes (default 48 = 384 bits).
+
+    Returns:
+        Dict with keys:
+        - "lf_attestation_score": float in [0, 1], higher indicates attestation match.
+        - "status": "ok" | "failed".
+        - "n_bits_compared": number of bits compared.
+        - "attestation_digest": echoed d_A.
+        - "lf_attestation_trace_digest": reproducible audit digest.
+
+    Raises:
+        TypeError: If inputs are of invalid type.
+        ValueError: If inputs are empty or invalid.
+    """
+    from .low_freq_coder import recover_posteriors_erf
+    import hashlib
+    import hmac as _hmac
+
+    if not isinstance(k_lf, str) or not k_lf:
+        raise ValueError("k_lf must be non-empty str")
+    if not isinstance(attestation_digest, str) or not attestation_digest:
+        raise ValueError("attestation_digest must be non-empty str")
+
+    # 解析 LF 参数（支持覆盖）。
+    params = lf_params or {}
+    variance = float(params.get("variance", 1.5))
+    block_length = int(params.get("block_length", min(payload_length * 8, 256)))
+
+    # 派生 k_LF 字节。
+    try:
+        key_bytes = bytes.fromhex(k_lf)
+    except ValueError:
+        key_bytes = k_lf.encode("utf-8")
+
+    # 计算 attestation payload bits：HMAC(k_LF, d_A)[:payload_length]。
+    message = attestation_digest.encode("utf-8")
+    if payload_length <= 32:
+        raw_payload = _hmac.new(key_bytes, message, hashlib.sha256).digest()[:payload_length]
+    else:
+        # HKDF-Expand 延伸（与 key_derivation.compute_lf_attestation_payload 一致）。
+        prk = _hmac.new(key_bytes, message, hashlib.sha256).digest()
+        raw_payload = b""
+        t_prev = b""
+        counter = 1
+        while len(raw_payload) < payload_length:
+            t_i = _hmac.new(prk, t_prev + b"lf_payload" + bytes([counter]), hashlib.sha256).digest()
+            raw_payload += t_i
+            t_prev = t_i
+            counter += 1
+        raw_payload = raw_payload[:payload_length]
+
+    # 将 payload 展开为 ±1 比特序列。
+    expected_bit_signs = []
+    for byte_val in raw_payload:
+        for bit_pos in range(8):
+            bit = (byte_val >> bit_pos) & 1
+            expected_bit_signs.append(1 if bit == 1 else -1)
+
+    # 扁平化 latent features。
+    try:
+        flat = _flatten_to_list(latent_features)
+    except Exception:
+        return {
+            "lf_attestation_score": None,
+            "status": "failed",
+            "n_bits_compared": 0,
+            "attestation_digest": attestation_digest,
+            "lf_attestation_trace_digest": digests.canonical_sha256({
+                "error": "flatten_failed", "d_A": attestation_digest
+            }),
+        }
+
+    # 取前 block_length 个潜变量（与期望比特数对齐）。
+    n_compare = min(block_length, len(flat), len(expected_bit_signs))
+    if n_compare <= 0:
+        return {
+            "lf_attestation_score": None,
+            "status": "failed",
+            "n_bits_compared": 0,
+            "attestation_digest": attestation_digest,
+            "lf_attestation_trace_digest": digests.canonical_sha256({
+                "error": "insufficient_latents", "d_A": attestation_digest
+            }),
+        }
+
+    # 计算后验概率（erf-based）。
+    posteriors = recover_posteriors_erf(flat[:n_compare], variance)
+
+    # 计算符号一致率：posterior_i * expected_bit_sign_i > 0 则一致。
+    agreements = sum(
+        1 for p, e in zip(posteriors, expected_bit_signs[:n_compare])
+        if p * e > 0
+    )
+    lf_attestation_score = float(agreements) / float(n_compare)
+
+    # 构造审计摘要（可复算）。
+    trace_payload = {
+        "channel": "lf",
+        "attestation_digest": attestation_digest,
+        "variance": variance,
+        "block_length": block_length,
+        "payload_length": payload_length,
+        "n_bits_compared": n_compare,
+        "lf_attestation_score": round(lf_attestation_score, 6),
+    }
+    trace_digest = digests.canonical_sha256(trace_payload)
+
+    return {
+        "lf_attestation_score": lf_attestation_score,
+        "status": "ok",
+        "n_bits_compared": n_compare,
+        "attestation_digest": attestation_digest,
+        "lf_attestation_trace_digest": trace_digest,
+    }

@@ -521,15 +521,16 @@ def _ensure_default_embed_input_image(
             import torch
             from diffusers import StableDiffusion3Pipeline  # type: ignore[import-untyped]
 
-            _model_cfg = (cfg_obj or {}).get("model") if isinstance(cfg_obj, dict) else None
-            _model_cfg = _model_cfg if isinstance(_model_cfg, dict) else {}
-            _height = int(_model_cfg.get("height", 512))
-            _width = int(_model_cfg.get("width", 512))
-            _dtype_str = _model_cfg.get("dtype", "float16")
+            # 从顶层 cfg 读取推理参数：inference_height/inference_width 在 YAML 中为顶层键。
+            _cfg = cfg_obj if isinstance(cfg_obj, dict) else {}
+            _height = int(_cfg.get("inference_height", 512))
+            _width = int(_cfg.get("inference_width", 512))
+            _model_sub = _cfg.get("model") if isinstance(_cfg.get("model"), dict) else {}
+            _dtype_str = _model_sub.get("dtype", _cfg.get("model_dtype", "float16"))
             _torch_dtype = torch.float16 if "16" in str(_dtype_str) else torch.float32
 
             # model_id：优先使用 cfg 中指定路径，否则使用默认 SD3 模型。
-            _model_id = (cfg_obj or {}).get("model_id") if isinstance(cfg_obj, dict) else None
+            _model_id = _cfg.get("model_id")
             if not isinstance(_model_id, str) or not _model_id.strip():
                 _model_id = "stabilityai/stable-diffusion-3-medium-diffusers"
 

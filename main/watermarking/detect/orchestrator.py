@@ -4748,3 +4748,250 @@ def _build_ablation_absent_geometry_evidence(absent_reason: str) -> Dict[str, An
         "align_trace_digest": None,
         "geo_failure_reason": None  # absent 状态下无失败原因
     }
+
+
+# ————————————————————————————
+# Cryptographic generation attestation 验证（附加函数，不修改原有 run_detect_orchestrator）
+# ————————————————————————————
+
+def verify_attestation(
+    k_master: str,
+    candidate_statement: Dict[str, Any],
+    content_evidence: Optional[Dict[str, Any]] = None,
+    hf_values: Optional[Any] = None,
+    lf_latent_features: Optional[Any] = None,
+    geo_score: Optional[float] = None,
+    *,
+    lf_weight: float = 0.5,
+    hf_weight: float = 0.3,
+    geo_weight: float = 0.2,
+    attested_threshold: float = 0.65,
+    lf_params: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    功能：验证图像是否来自一次真实生成事件（cryptographic generation attestation）。
+
+    Verify whether an image originated from a specific generation event by
+    reconstructing the attestation keys from a candidate statement and measuring
+    multi-channel score fusion.
+
+    Verification answers the proposition:
+        "Does this image originate from this specific generation event?"
+    rather than merely:
+        "Does this image contain a watermark?"
+
+    Detection flow:
+        1. Reconstruct statement from candidate dict.
+        2. Compute d_A = SHA256(CanonicalJSON(statement)).
+        3. Derive keys: k_LF, k_HF, k_GEO, k_TR via HKDF(K_master, d_A).
+        4. Compute S_LF = LF attestation score (latent posterior vs payload).
+        5. Compute S_HF = HF attestation score (HF values vs key template).
+        6. Compute S_GEO from provided geo_score.
+        7. Fuse: score = w_LF*S_LF + w_HF*S_HF + w_GEO*S_GEO.
+        8. Output attested | mismatch | absent.
+
+    Output semantics:
+        - "attested": score >= attested_threshold; image originates from this event.
+        - "mismatch": statement fields mismatched or score < attested_threshold.
+        - "absent": required inputs (LF latents or HF values) are not available.
+
+    Args:
+        k_master: Master key (hex str) used for key derivation.
+        candidate_statement: Dict representing the candidate attestation statement.
+        content_evidence: Optional content detection evidence dict (for lf_score fallback).
+        hf_values: Optional HF channel feature values for template correlation.
+        lf_latent_features: Optional LF latent features for attestation bit correlation.
+        geo_score: Optional geometry chain score (0–1), passed through.
+        lf_weight: Score weight for LF channel (default 0.5).
+        hf_weight: Score weight for HF channel (default 0.3).
+        geo_weight: Score weight for GEO channel (default 0.2).
+        attested_threshold: Fusion score threshold for "attested" verdict (default 0.65).
+        lf_params: Optional LF parameter dict for attestation score computation.
+
+    Returns:
+        Dict with:
+        - "verdict": "attested" | "mismatch" | "absent".
+        - "fusion_score": float or None.
+        - "channel_scores": dict with lf, hf, geo sub-scores.
+        - "attestation_digest": d_A used for key derivation.
+        - "statement": echoed candidate statement dict.
+        - "attestation_trace_digest": reproducible audit digest.
+        - "mismatch_reasons": list of strings explaining any mismatch.
+
+    Raises:
+        TypeError: If k_master or candidate_statement has wrong type.
+        ValueError: If k_master is empty.
+    """
+    from main.watermarking.provenance.attestation_statement import (
+        statement_from_dict,
+        compute_attestation_digest,
+        verify_statement_fields,
+    )
+    from main.watermarking.provenance.key_derivation import (
+        derive_attestation_keys,
+    )
+    from main.watermarking.content_chain.low_freq_coder import (
+        compute_lf_attestation_score,
+    )
+    from main.watermarking.content_chain.high_freq_embedder import (
+        compute_hf_attestation_score,
+    )
+
+    if not isinstance(k_master, str) or not k_master:
+        raise ValueError("k_master must be non-empty str")
+    if not isinstance(candidate_statement, dict):
+        raise TypeError("candidate_statement must be dict")
+
+    mismatch_reasons: list = []
+
+    # (1) 验证并重建 statement。
+    if not verify_statement_fields(candidate_statement):
+        mismatch_reasons.append("statement_fields_invalid")
+        return {
+            "verdict": "mismatch",
+            "fusion_score": None,
+            "channel_scores": {"lf": None, "hf": None, "geo": None},
+            "attestation_digest": None,
+            "statement": candidate_statement,
+            "attestation_trace_digest": None,
+            "mismatch_reasons": mismatch_reasons,
+        }
+
+    try:
+        statement = statement_from_dict(candidate_statement)
+    except (TypeError, ValueError) as exc:
+        mismatch_reasons.append(f"statement_parse_failed: {exc}")
+        return {
+            "verdict": "mismatch",
+            "fusion_score": None,
+            "channel_scores": {"lf": None, "hf": None, "geo": None},
+            "attestation_digest": None,
+            "statement": candidate_statement,
+            "attestation_trace_digest": None,
+            "mismatch_reasons": mismatch_reasons,
+        }
+
+    # (2) 计算 attestation digest d_A。
+    d_a = compute_attestation_digest(statement)
+
+    # (3) 派生四类子密钥。
+    try:
+        attest_keys = derive_attestation_keys(k_master, d_a)
+    except (TypeError, ValueError) as exc:
+        mismatch_reasons.append(f"key_derivation_failed: {exc}")
+        return {
+            "verdict": "mismatch",
+            "fusion_score": None,
+            "channel_scores": {"lf": None, "hf": None, "geo": None},
+            "attestation_digest": d_a,
+            "statement": candidate_statement,
+            "attestation_trace_digest": None,
+            "mismatch_reasons": mismatch_reasons,
+        }
+
+    # (4) 计算各通道 attestation 得分。
+    s_lf: Optional[float] = None
+    s_hf: Optional[float] = None
+    s_geo: Optional[float] = None
+
+    # LF 通道：基于 latent 后验与 attestation payload 的符号一致率。
+    if lf_latent_features is not None:
+        try:
+            lf_result = compute_lf_attestation_score(
+                latent_features=lf_latent_features,
+                k_lf=attest_keys.k_lf,
+                attestation_digest=d_a,
+                lf_params=lf_params,
+            )
+            if lf_result.get("status") == "ok":
+                s_lf = lf_result.get("lf_attestation_score")
+        except Exception:
+            mismatch_reasons.append("lf_attestation_score_failed")
+    elif content_evidence is not None:
+        # 回退：使用现有内容检测分数作为 LF 代理。
+        raw_lf = content_evidence.get("lf_score")
+        if isinstance(raw_lf, (int, float)):
+            s_lf = float(raw_lf)
+
+    # HF 通道：基于 HF 值与 key-conditioned template 的符号相关。
+    if hf_values is not None:
+        try:
+            hf_result = compute_hf_attestation_score(
+                hf_values=hf_values,
+                k_hf=attest_keys.k_hf,
+            )
+            if hf_result.get("status") == "ok":
+                s_hf = hf_result.get("hf_attestation_score")
+        except Exception:
+            mismatch_reasons.append("hf_attestation_score_failed")
+
+    # GEO 通道：直接使用调用方提供的几何链得分。
+    if geo_score is not None and isinstance(geo_score, (int, float)):
+        s_geo = float(max(0.0, min(1.0, geo_score)))
+
+    # (5) 检查是否缺少必要输入。
+    if s_lf is None and s_hf is None and s_geo is None:
+        return {
+            "verdict": "absent",
+            "fusion_score": None,
+            "channel_scores": {"lf": None, "hf": None, "geo": None},
+            "attestation_digest": d_a,
+            "statement": candidate_statement,
+            "attestation_trace_digest": None,
+            "mismatch_reasons": ["all_channel_scores_absent"],
+        }
+
+    # (6) 加权融合（仅对有效通道归一化权重）。
+    effective_weights: Dict[str, float] = {}
+    if s_lf is not None:
+        effective_weights["lf"] = lf_weight
+    if s_hf is not None:
+        effective_weights["hf"] = hf_weight
+    if s_geo is not None:
+        effective_weights["geo"] = geo_weight
+
+    total_weight = sum(effective_weights.values())
+    if total_weight < 1e-9:
+        fusion_score = None
+        verdict = "absent"
+    else:
+        channel_vals: Dict[str, float] = {"lf": s_lf or 0.0, "hf": s_hf or 0.0, "geo": s_geo or 0.0}
+        fusion_score = sum(
+            channel_vals[ch] * w / total_weight
+            for ch, w in effective_weights.items()
+        )
+        fusion_score = float(max(0.0, min(1.0, fusion_score)))
+        if fusion_score >= attested_threshold:
+            verdict = "attested"
+        else:
+            if mismatch_reasons:
+                verdict = "mismatch"
+            else:
+                verdict = "mismatch"
+                mismatch_reasons.append(f"fusion_score_below_threshold: {fusion_score:.4f} < {attested_threshold}")
+
+    # (7) 构造审计摘要（可复算）。
+    trace_payload: Dict[str, Any] = {
+        "attestation_digest": d_a,
+        "lf_weight": lf_weight,
+        "hf_weight": hf_weight,
+        "geo_weight": geo_weight,
+        "attested_threshold": attested_threshold,
+        "s_lf": round(s_lf, 6) if s_lf is not None else None,
+        "s_hf": round(s_hf, 6) if s_hf is not None else None,
+        "s_geo": round(s_geo, 6) if s_geo is not None else None,
+        "fusion_score": round(fusion_score, 6) if fusion_score is not None else None,
+        "verdict": verdict,
+    }
+    from main.core import digests as _digests
+    attestation_trace_digest = _digests.canonical_sha256(trace_payload)
+
+    return {
+        "verdict": verdict,
+        "fusion_score": fusion_score,
+        "channel_scores": {"lf": s_lf, "hf": s_hf, "geo": s_geo},
+        "attestation_digest": d_a,
+        "statement": candidate_statement,
+        "attestation_trace_digest": attestation_trace_digest,
+        "mismatch_reasons": mismatch_reasons,
+    }
