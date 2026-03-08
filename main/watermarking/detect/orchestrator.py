@@ -2453,17 +2453,25 @@ def run_calibrate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> D
         "stratification": strata_info,
         "sample_digest": digests.canonical_sha256({"scores": [round(float(v), 12) for v in scores]}),
     }
+    # 过滤出仅 null 样本（与 load_scores_for_calibration 保持一致：排除 label=True 的正样本）。
+    # null_strata / conditional_fpr 语义要求统计对象仅为 null（负）样本，不能混入正样本。
+    has_explicit_labels = strata_info.get("sampling_policy", {}).get("records_with_explicit_label", False)
+    if has_explicit_labels:
+        null_records_for_stats = [r for r in detect_records if _resolve_calibration_label(r) is not True]
+    else:
+        null_records_for_stats = detect_records
+
     threshold_metadata_artifact["null_strata"] = _compute_null_strata_for_calibration(
-        detect_records,
+        null_records_for_stats,
         float(threshold_value),
         cfg,
     )
     threshold_metadata_artifact["conditional_fpr"] = _compute_conditional_fpr_for_calibration(
-        detect_records,
+        null_records_for_stats,
         float(threshold_value),
     )
     threshold_metadata_artifact["conditional_fpr_records"] = _compute_conditional_fpr_records_for_calibration(
-        detect_records,
+        null_records_for_stats,
         float(threshold_value),
         cfg,
     )
