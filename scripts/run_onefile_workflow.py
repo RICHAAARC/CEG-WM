@@ -1555,11 +1555,18 @@ def _prepare_stage_cfg_path(
         evaluate_cfg = cfg_obj.get("evaluate")
         if not isinstance(evaluate_cfg, dict):
             evaluate_cfg = {}
-        # detect_np 守卫：若 calibrate 成功产出了 re-detect 记录（NP canonical 阈值），
-        # 将 detect_records_glob 替换为该记录，保证 evaluate 消费 NP 语义判决。
-        # 失败回退：文件不存在时保留原始 detect_record_glob，不中断 evaluate。
+        # detect_np 守卫：仅对非 paper_full_cuda 模式生效。
+        # paper_full_cuda 的 evaluate 已通过 thresholds_path 注入 NP 阈值，
+        # detect_records_glob 由 _prepare_detect_records_with_minimal_ground_truth
+        # 准备好正/负样本 JSONL，不得被单张图像的 detect_np 记录覆写。
+        # 非 paper_full_cuda 模式：若 calibrate 成功产出了 re-detect 记录，
+        # 替换为该记录以保证 evaluate 消费 NP 语义判决。
         _detect_np_record = run_root / "artifacts" / "detect_np" / "records" / "detect_record.json"
-        if _detect_np_record.exists() and _detect_np_record.stat().st_size > 0:
+        if (
+            _normalize_profile(profile) != PROFILE_PAPER_FULL_CUDA
+            and _detect_np_record.exists()
+            and _detect_np_record.stat().st_size > 0
+        ):
             detect_record_glob = str(_detect_np_record)
             print(f"[onefile] detect_np record found; using for evaluate: {_detect_np_record}")
         # 攻击覆盖：对非 paper_full_cuda 模式，将攻击变体 detect 记录也纳入 glob，
