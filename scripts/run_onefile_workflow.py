@@ -3177,7 +3177,11 @@ def _run_attestation_after_embed(run_root: Path, cfg_path: Path) -> None:
         "attestation_status": result["attestation_status"],
     }
     statement_path = attest_dir / "attestation_statement.json"
-    statement_path.write_text(json.dumps(save_bundle, ensure_ascii=False, indent=2), encoding="utf-8")
+    _write_artifact_text_unbound(
+        run_root,
+        statement_path,
+        json.dumps(save_bundle, ensure_ascii=False, indent=2),
+    )
     print(
         f"[onefile/attestation] attestation statement 已写入: {statement_path} "
         f"d_A={result['attestation_digest'][:16]}..."
@@ -3294,7 +3298,11 @@ def _run_attestation_verification_after_detect(run_root: Path, cfg_path: Path) -
     attest_dir = run_root / "artifacts" / "attestation"
     attest_dir.mkdir(parents=True, exist_ok=True)
     result_path = attest_dir / "attestation_result.json"
-    result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    _write_artifact_text_unbound(
+        run_root,
+        result_path,
+        json.dumps(result, ensure_ascii=False, indent=2),
+    )
 
     verdict = result.get("verdict", "unknown")
     fusion_score = result.get("fusion_score")
