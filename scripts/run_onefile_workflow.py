@@ -783,8 +783,6 @@ def _run_redetect_with_np_thresholds(
     ]
     for item in _build_stage_overrides("detect", profile):
         command.extend(["--override", item])
-    # detect_np 写入同一 run_root 内的子目录，需允许非空父目录写入。
-    command.extend(["--override", "allow_nonempty_run_root=true"])
 
     print(f"[onefile/redetect] Running NP-threshold re-detect → {detect_np_root}")
     return_code = _run_subprocess_for_step(command, repo_root)

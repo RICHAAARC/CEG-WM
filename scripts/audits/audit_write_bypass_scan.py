@@ -379,7 +379,7 @@ def _is_within_controlled_function(filepath: Path, lineno: int) -> bool:
     Returns:
         True if line is within append_jsonl, write_json, write_text, etc.
     """
-    # 受控写盘函数列表（records_io.py 中的规范入口函数）
+    # 受控写盘函数列表（records_io.py 中的规范入口函数及其核心私有辅助函数）
     controlled_functions = [
         "append_jsonl",
         "write_json",
@@ -391,7 +391,9 @@ def _is_within_controlled_function(filepath: Path, lineno: int) -> bool:
         "write_artifact_bytes_unbound",
         "write_artifact_text_unbound",
         "copy_file_controlled",
-        "copy_file_controlled_unbound"
+        "copy_file_controlled_unbound",
+        # 核心私有写盘辅助函数（由上层受控函数调用，包含 Windows WinError 5 回退路径）
+        "_atomic_replace_write_bytes",
     ]
     
     try:
