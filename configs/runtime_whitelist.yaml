@@ -12,7 +12,8 @@
 # ------------------------------
 # 白名单版本：用于 records 记录与审计。
 # ------------------------------
-whitelist_version: "v1.0"    # 运行期白名单版本号：任意一次运行必须记录到 records 中，且不可由 CLI 任意指定。
+whitelist_version: "v1.1"    # 运行期白名单版本号：任意一次运行必须记录到 records 中，且不可由 CLI 任意指定。
+                             # v1.0→v1.1：追加 detect_calibration_artifact_path override（P1-A，2026-03-10）。
 
 # ==============================================================
 # policy_path 允许集合
@@ -233,6 +234,11 @@ override:
       allowed_values: [true]
       source: "cli"
       description: "实验矩阵：detect 阶段允许阈值工件缺失时启用受控 fallback，仅用于生成后续 calibrate/evaluate 输入"
+    - arg_name: "detect_calibration_artifact_path"
+      field_path: "detect.calibration_artifact_path"
+      override_mode: "set"
+      source: "cli"
+      description: "实验矩阵：允许设置 detect 阶段的 calibration 阈值工件路径，解决单图 detect NP 阈值注入不自足问题（P1-A）"
 
   # 覆写 source 的枚举白名单（gate 必须校验）
   source_enum:
@@ -280,6 +286,7 @@ override:
       - "evaluate_detect_records_glob"
       - "evaluate_thresholds_path"
       - "allow_threshold_fallback_for_tests"
+      - "detect_calibration_artifact_path"  # P1-A 追加（v1.1）
     immutable: true
     notes: "必须与 allowed_overrides[*].arg_name 的值集完全一致。新增 override 必须同步更新此枚举。"
 

@@ -16,7 +16,7 @@
 # 与 frozen_contracts.yaml 中 policy_path_semantics_version 绑定
 # 注：顶层仅保留 policy_path_semantics_version；不再使用 semantics_version（已移至 _artifact_audit）
 # ==============================================================
-policy_path_semantics_version: "v1.0"
+policy_path_semantics_version: "v1.1"  # 同步 runtime_whitelist.yaml v1.1（P1-A，2026-03-10）
 
 # ==============================================================
 # 0) 硬约束：必须满足的执行性规则

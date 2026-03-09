@@ -470,6 +470,24 @@ def run_detect(
                 set_failure_status(run_meta, RunFailureReason.CONFIG_INVALID, exc)
                 raise
 
+        # P1-A：calibration_artifact_path 自动发现：若 thresholds_path 参数未注入阈值工件，
+        # 则尝试从 cfg.detect.calibration_artifact_path 加载（使同一受控加载函数）。
+        # 加载失败时 fail-fast，不允许降级为 fallback；thresholds_path 参数优先于配置字段。
+        if cfg.get("__thresholds_artifact__") is None:
+            _detect_cfg_p1a = cfg.get("detect") or {}
+            _cal_artifact_path = _detect_cfg_p1a.get("calibration_artifact_path")
+            if isinstance(_cal_artifact_path, str) and _cal_artifact_path:
+                _cal_resolved = str(Path(_cal_artifact_path).resolve())
+                try:
+                    _thresholds_obj = detect_orchestrator.load_thresholds_artifact_controlled(_cal_resolved)
+                    cfg["__thresholds_artifact__"] = _thresholds_obj
+                    run_meta["thresholds_path_injected"] = _cal_resolved
+                    run_meta["thresholds_source"] = "detect_calibration_artifact_path"
+                except Exception as exc:
+                    # 加载失败时 fail-fast，不允许 silent fallback。
+                    set_failure_status(run_meta, RunFailureReason.CONFIG_INVALID, exc)
+                    raise
+
         # 预先计算 content 与 subspace 计划，用于注入上下文。
         # 这里必须使用 embed-mode 提取 mask_digest，避免 detect-mode 在无 detector_inputs 时返回 absent。
         cfg_for_preplan = dict(cfg)

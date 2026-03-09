@@ -51,7 +51,7 @@ watermark:
     message_length: 64
     coding_mode: "latent_space_sign_flipping"
     decoder: "belief_propagation"
-    bp_iterations: 50
+    bp_iterations: 100  # 从 50 提升至 100，改善 LF BP 收敛概率（RUNTIME-02 验证后可进一步调整）
   hf:
     enabled: true
     tail_truncation_ratio: 0.1
@@ -78,6 +78,8 @@ detect:
     # 显式声明几何证据层级：latent sync 为主几何实现（低阶几何反演），
     # attention anchor 仅作辅锚点（主同步成功后参与一致性评估）。
     sync_primary_anchor_secondary: true
+  calibration_artifact_path: null  # NP 阈值工件路径；null 表示运行时通过 --thresholds_path 注入
+                                   # 可设为 outputs/.../artifacts/thresholds/thresholds.json（或由 experiment_matrix override 注入）
 
 enable_mask: true
 mask:
@@ -88,6 +90,9 @@ mask:
 
 embed:
   test_mode_identity: false
+  preview_generation:
+    enabled: true                          # 在正式嵌入前执行无注入预览推理，消除 embed 输入图主链不自足
+    artifact_rel_path: "preview/preview.png"  # 预览图相对 artifacts/ 的路径（用于审计）
 
 ablation:
   enable_content: null
@@ -142,9 +147,10 @@ detect_runtime:
 experiment_matrix:
   config_path: "configs/paper_full_cuda.yaml"
   allow_failed_semantics_collection: true
-  # seeds 控制 neg_cache 与 grid 的样本规模。
-  # N=3 时 global calibrate null 分布含 3 条独立记录，总 grid = 3×8 = 24 items。
-  # 论文级 α=1% 需 N≥100；当前 N=3 用于机制验证阶段。
+  # seeds 数量控制正样本规模：论文级 FPR ≤ 1% 需 n_pos ≥ 100，种子数应 ≥ 100。
+  # 当前 seeds=[0,1] 为机制验证阶段（仅 2 个 seed）；正式论文运行请扩展为 range(100)。
+  # 运行时通过 scripts/run_experiment_matrix.py 自动映射 seeds 为 CLI overrides（seed=0, seed=1, ...）。
+  # ⚠ STATIC-02 未修复：glob=null 时 calibrate/evaluate 仍 raise ValueError；需独立实施 seeds 扩展 + glob 注入。
   seeds: [0, 1]
   # 论文复现实验主配置：仅保留 faithful baseline。
   # 消融实验请使用 configs/ablation 目录下的专用配置。

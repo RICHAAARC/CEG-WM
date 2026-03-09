@@ -281,6 +281,62 @@ def run_embed(
                 if isinstance(default_input, str) and default_input.strip():
                     cfg["__embed_input_image_path__"] = default_input.strip()
 
+            # P0-A Preview Generation：若主链输入图仍为 None，且配置启用了 preview_generation，
+            # 则先执行一次无注入 SD3 推理，将生成图作为语义掩码的输入，消除对外部图像的依赖。
+            # preview 推理失败时不中断流程，失败语义传播至内容链（injection_mode 降级）。
+            _embed_cfg_pg = (cfg.get("embed") or {}).get("preview_generation") or {}
+            if _embed_cfg_pg.get("enabled", False) and cfg.get("__embed_input_image_path__") is None:
+                preview_pipeline_obj = pipeline_result.get("pipeline_obj") if isinstance(pipeline_result, dict) else None
+                preview_device = cfg.get("device", "cpu")
+                preview_seed = seed_value
+                _pg_status = "failed"
+                _pg_reason = None
+                _preview_tmp_path = None
+                try:
+                    import tempfile
+                    _preview_infer_result = infer_runtime.run_sd3_inference(
+                        cfg,
+                        preview_pipeline_obj,
+                        preview_device,
+                        preview_seed,
+                        injection_context=None,
+                        injection_modifier=None,
+                        capture_final_latents=False
+                    )
+                    _preview_status = _preview_infer_result.get("status") if isinstance(_preview_infer_result, dict) else None
+                    if _preview_status == "ok":
+                        _preview_image = _preview_infer_result.get("output_image")
+                        if _preview_image is not None:
+                            _tmp_fd, _preview_tmp_path = tempfile.mkstemp(suffix=".png", prefix="ceg_wm_preview_")
+                            import os as _os
+                            _os.close(_tmp_fd)
+                            _preview_image.save(_preview_tmp_path)
+                            cfg["__embed_input_image_path__"] = _preview_tmp_path
+                            _pg_status = "ok"
+                            print(f"[Preview Generation] 预览图已生成，路径：{_preview_tmp_path}")
+                        else:
+                            _pg_reason = "preview_inference_no_output_image"
+                            print(f"[Preview Generation] 推理成功但无 output_image，跳过。")
+                    else:
+                        _pg_reason = f"preview_inference_status={_preview_status}"
+                        print(f"[Preview Generation] 推理状态非 ok（{_preview_status}），跳过。")
+                except Exception as _pg_exc:
+                    _pg_reason = str(_pg_exc)
+                    print(f"[Preview Generation] 推理异常：{_pg_exc}，跳过。")
+                run_meta["preview_generation"] = {
+                    "enabled": True,
+                    "status": _pg_status,
+                    "reason": _pg_reason,
+                    "seed": preview_seed,
+                    "tmp_path": _preview_tmp_path,
+                }
+                if _pg_status != "ok":
+                    # preview 失败时保持 __embed_input_image_path__ 为 None，
+                    # 内容链将以 status="failed" 返回，injection_mode 降级为 latent_direct_fallback。
+                    cfg.pop("__embed_input_image_path__", None)
+            elif not _embed_cfg_pg.get("enabled", False):
+                run_meta["preview_generation"] = {"enabled": False, "status": "skipped", "reason": None, "seed": None, "tmp_path": None}
+
             # 预先计算 content 与 subspace 计划，用于注入上下文。
             content_inputs_pre = embed_orchestrator._build_content_inputs_for_embed(cfg)
             content_result_pre = impl_set.content_extractor.extract(
