@@ -167,7 +167,6 @@ def _run_detect(enable_align_invariance: bool) -> Dict[str, Any]:
     )
     cfg = _build_cfg(enable_align_invariance=enable_align_invariance)
     cfg["__detect_pipeline_obj__"] = _Pipeline()
-    cfg["__detect_final_latents__"] = np.random.RandomState(6).randn(1, 4, 8, 8).astype(np.float32)
     input_record: Dict[str, Any] = {
         "plan_digest": "plan_ok",
         "basis_digest": "basis_ok",

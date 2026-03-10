@@ -592,7 +592,7 @@ def run_detect_orchestrator(
 
     # 实现 detect 侧同构分数与一致性校验
     detect_runtime_mode = "fallback_identity_v0"  # 默认：未获得可用 detect 同构分数
-    detect_traj_cache = cfg.get("__detect_trajectory_latent_cache__")  # Phase 3：trajectory cache
+    detect_traj_cache = cfg.get("__detect_trajectory_latent_cache__")
 
     if not forced_mismatch and isinstance(plan_payload, dict):
         # plan_payload 是 SubspacePlanEvidence 的 dict 化结构，
@@ -726,9 +726,8 @@ def run_detect_orchestrator(
     _bind_scores_if_ok(content_evidence_payload)
     _populate_detect_mask_digest_from_input_record(content_evidence_payload, input_record)
 
-    # 删除临时的 latents 字段，确保不写入 records
+    # 删除临时的 transient 字段，确保不写入 records
     cfg.pop("__detect_trajectory_latent_cache__", None)
-    cfg.pop("__detect_final_latents__", None)
     cfg.pop("__detect_pipeline_obj__", None)
     cfg.pop("__pipeline_runtime_meta__", None)
     cfg.pop("__detect_attention_maps__", None)
@@ -1385,7 +1384,7 @@ def _build_content_inputs_for_detect(
         Input mapping with explicit source marker when available, otherwise None.
     """
     explicit_image = cfg.get("__detect_input_image__")
-    explicit_latent = cfg.get("__detect_final_latents__")
+    explicit_latent = None
 
     if isinstance(input_record, dict):
         if explicit_image is None:
@@ -2112,9 +2111,9 @@ def _resolve_trajectory_tap_status(trajectory_evidence: Dict[str, Any]) -> Optio
         if isinstance(value, str) and value:
             return value
 
-    legacy = trajectory_evidence.get("status")
-    if isinstance(legacy, str) and legacy:
-        return legacy
+    compat_value = trajectory_evidence.get("status")
+    if isinstance(compat_value, str) and compat_value:
+        return compat_value
     return None
 
 
@@ -2137,9 +2136,9 @@ def _resolve_trajectory_absent_reason(trajectory_evidence: Dict[str, Any]) -> Op
         if isinstance(value, str) and value:
             return value
 
-    legacy = trajectory_evidence.get("trajectory_absent_reason")
-    if isinstance(legacy, str) and legacy:
-        return legacy
+    compat_value = trajectory_evidence.get("trajectory_absent_reason")
+    if isinstance(compat_value, str) and compat_value:
+        return compat_value
     return None
 
 
@@ -2416,11 +2415,8 @@ def _build_planner_inputs_for_runtime(
     }
     inputs: Dict[str, Any] = {"trace_signature": trace_signature}
     runtime_pipeline = cfg.get("__detect_pipeline_obj__")
-    runtime_latents = cfg.get("__detect_final_latents__")
     if runtime_pipeline is not None:
         inputs["pipeline"] = runtime_pipeline
-    if runtime_latents is not None:
-        inputs["latents"] = runtime_latents
     # 将 detect 侧 per-step latent 缓存传递给 planner（内存传递，不写入 records）。
     runtime_traj_cache = cfg.get("__detect_trajectory_latent_cache__")
     if runtime_traj_cache is not None:
@@ -3963,73 +3959,6 @@ def _is_synthetic_negative_closure_sample(content_payload: Dict[str, Any]) -> bo
     return usage_value == "synthetic_negative_for_ground_truth_closure"
 
 
-def _safe_corrcoef(channels: NDArray[np.float64]) -> NDArray[np.float64]:
-    """
-    功能：用纯 NumPy 基础运算替代 np.corrcoef，避免 Windows/BLAS 进程崩溃。
-
-    Compute a correlation-coefficient-like matrix without calling np.corrcoef,
-    which triggers Fatal Python error: Aborted on Windows with certain NumPy builds.
-    Numerically equivalent: row-wise centering + L2 normalization + inner product.
-
-    Args:
-        channels: 2-D float array of shape [C, N_tokens].
-
-    Returns:
-        Correlation matrix of shape [C, C], dtype float64.
-    """
-    mat = channels.astype(np.float64)
-    mat = mat - mat.mean(axis=1, keepdims=True)
-    norms = np.sqrt((mat * mat).sum(axis=1, keepdims=True))
-    # 零方差行（常量通道）归一化分母置 1，等价于 np.corrcoef 的 nan_to_num 处理。
-    norms = np.where(norms < 1e-10, 1.0, norms)
-    mat = mat / norms
-    return mat @ mat.T
-
-
-def _build_attention_maps_from_latents(latents: Any) -> Any:
-    """
-    功能：从 latent 构造可复算 attention maps 代理。
-
-    Build deterministic attention-map proxy from latents.
-
-    Args:
-        latents: Tensor-like or numpy latent array.
-
-    Returns:
-        Attention proxy array or None.
-    """
-    if latents is None:
-        return None
-    latents_candidate: Any = None
-    if isinstance(latents, np.ndarray):
-        latents_candidate = cast(Any, latents)
-    elif callable(getattr(latents, "detach", None)):
-        detached = latents.detach()
-        cpu_fn = getattr(detached, "cpu", None)
-        if callable(cpu_fn):
-            detached = cpu_fn()
-        numpy_fn = getattr(detached, "numpy", None)
-        if callable(numpy_fn):
-            latents_candidate = cast(Any, numpy_fn())
-        else:
-            return None
-    else:
-        return None
-    latents_np = np.asarray(latents_candidate)
-    if latents_np.ndim != 4:
-        return None
-    latent_first = latents_np[0]
-    if latent_first.ndim != 3:
-        return None
-    channels = latent_first.reshape(latent_first.shape[0], -1)
-    if channels.shape[0] < 2:
-        return None
-    correlation = np.asarray(_safe_corrcoef(channels), dtype=np.float64)
-    if not np.isfinite(correlation).all():
-        correlation = np.asarray(np.nan_to_num(correlation, nan=0.0, posinf=0.0, neginf=0.0), dtype=np.float64)
-    return correlation
-
-
 def _precompute_relation_digest_for_sync(
     cfg: Dict[str, Any],
     enable_attention_proxy: bool = True,
@@ -4051,13 +3980,8 @@ def _precompute_relation_digest_for_sync(
     Returns:
         Hex digest string if attention inputs are available, otherwise None.
     """
-    # (1) 优先使用真实 runtime self-attention。
+    # 仅使用真实 runtime self-attention；不再从 final_latents 构造代理 attention。
     attention_maps = _resolve_runtime_self_attention_maps(cfg)
-
-    # (2) 如无真实 attention，且允许 proxy，则从 latents 构造代理 attention。
-    if attention_maps is None and enable_attention_proxy:
-        latents = cfg.get("__detect_final_latents__")
-        attention_maps = _build_attention_maps_from_latents(latents)
 
     if attention_maps is None:
         return None
@@ -4151,7 +4075,6 @@ def _build_geometry_runtime_inputs(
     """
     runtime_inputs: Dict[str, Any] = {
         "pipeline": cfg.get("__detect_pipeline_obj__"),
-        "latents": cfg.get("__detect_final_latents__"),
         "rng": cfg.get("rng"),
     }
     paper_node = cfg.get("paper_faithfulness")
@@ -4174,20 +4097,9 @@ def _build_geometry_runtime_inputs(
                 runtime_inputs["attention_proxy_absent_reason"] = "paper_mode_requires_runtime_self_attention"
                 runtime_inputs["attention_maps_missing_reason"] = "runtime_self_attention_missing_under_paper_mode"
                 return runtime_inputs
-            attention_maps = _build_attention_maps_from_latents(runtime_inputs.get("latents"))
-            if attention_maps is not None:
-                attention_maps_arr = np.asarray(attention_maps)
-                runtime_inputs["attention_maps"] = attention_maps
-                runtime_inputs["attention_maps_source"] = "latent_proxy"
-                runtime_inputs["attention_maps_evidence_level"] = "fallback"
-                runtime_inputs["attention_maps_fallback_reason"] = "runtime_self_attention_missing"
-                runtime_inputs["attention_maps_digest"] = digests.canonical_sha256({
-                    "shape": list(attention_maps_arr.shape),
-                    "mean": float(np.mean(attention_maps_arr)),
-                    "std": float(np.std(attention_maps_arr)),
-                    "max": float(np.max(attention_maps_arr)),
-                    "min": float(np.min(attention_maps_arr)),
-                })
+            # latent proxy 路径已移除；无真实 self-attention 时 attention_maps 缺失。
+            runtime_inputs["attention_proxy_status"] = "absent"
+            runtime_inputs["attention_proxy_absent_reason"] = "runtime_self_attention_missing_no_proxy"
     else:
         runtime_inputs["attention_proxy_status"] = "absent"
         runtime_inputs["attention_proxy_absent_reason"] = "attention_proxy_disabled_by_ablation"

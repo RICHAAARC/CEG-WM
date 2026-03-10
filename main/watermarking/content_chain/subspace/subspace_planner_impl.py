@@ -1807,39 +1807,6 @@ class SubspacePlannerImpl:
         jacobian_like = jacobian_like - np.mean(jacobian_like, axis=0, keepdims=True)
         return jacobian_like, "surrogate_transition"
 
-    def _build_jacobian_probe_samples(
-        self,
-        centered_matrix: np.ndarray,
-        planner_params: _PlannerParams
-    ) -> np.ndarray:
-        """
-        功能：（兼容接口）从转移算子构造 Jacobian 近似样本。
-
-        Legacy interface: build Jacobian-surrogate samples from adjacent trajectory differences.
-        This is now superseded by _estimate_jvp_matrix but kept for backward compatibility.
-
-        Args:
-            centered_matrix: Centered trajectory matrix.
-            planner_params: Parsed planner parameters.
-
-        Returns:
-            Jacobian-surrogate sample matrix.
-
-        Raises:
-            ValueError: If centered matrix is invalid.
-        """
-        # 兼容性包装：调用新的 JVP 估算，但只返回样本矩阵
-        jvp_samples, _ = self._estimate_jvp_from_transition(
-            centered_matrix=centered_matrix,
-            probes=self._build_deterministic_probe_vectors(
-                feature_dim=centered_matrix.shape[1],
-                probe_count=planner_params.jacobian_probe_count,
-                seed=planner_params.seed
-            ),
-            planner_params=planner_params
-        )
-        return jvp_samples
-
     def _estimate_transition_alpha(self, x_t: np.ndarray, x_tp1: np.ndarray) -> float:
         """
         功能：估计轨迹转移的一阶缩放参数。
@@ -2608,100 +2575,62 @@ class SubspacePlannerImpl:
         unet = inputs.get("unet")
         scheduler = inputs.get("scheduler")
         pipeline = inputs.get("pipeline")
-        runtime_latents = inputs.get("latents")
-        
+
         # 如果没有真实 UNet，降级到确定性轨迹
         if unet is None and pipeline is None:
             return self._sample_deterministic_trajectory(planner_params, cfg, planner_params.seed)
-        
+
         # 构造时间步列表
         timesteps_list = self._build_timestep_sequence(planner_params)
         timesteps_digest = digests.canonical_sha256({"timesteps": timesteps_list})
-        
-        # 采样状态（优先 runtime latents 驱动；无法获取时才退回代理状态）。
+
+        # 唯一路径：trajectory cache 精确驱动，不依赖 final_latents。
         samples_list: List[np.ndarray] = []
-        
+
         trace_signature = inputs.get("trace_signature", {}) if isinstance(inputs, dict) else {}
         guidance_scale = _read_float(trace_signature.get("guidance_scale"), 1.0)
         num_inference_steps = _read_int(trace_signature.get("num_inference_steps"), planner_params.sample_count)
-        
+
         has_runtime_jvp_binding = bool(
             callable(inputs.get("jvp_operator"))
             or unet is not None
             or getattr(pipeline, "unet", None) is not None
             or getattr(pipeline, "transformer", None) is not None
         )
-        sample_semantics = "runtime_pipeline_bound_with_unet" if has_runtime_jvp_binding else "runtime_pipeline_bound"
-        sample_source = "runtime_latents_projection_pipeline_bound"
+        sample_source = "real_diffusion_trajectory_zT"
+        sample_semantics = "runtime_trajectory_latent_captured"
         surrogate_reason = None
         latents_digest = "<absent>"
 
-        latents_array = None
-        if runtime_latents is not None:
-            try:
-                latents_array = np.asarray(runtime_latents, dtype=np.float64)
-            except Exception:
-                latents_array = None
+        from .trajectory_feature_space import extract_trajectory_feature_np
+        tfs_planning = {
+            "feature_dim": planner_params.feature_dim,
+            "projection_seed": planner_params.seed + planner_params.edit_timestep,
+        }
+        trajectory_latent_cache = inputs.get("trajectory_latent_cache")
+        cache_available_steps: List[int] = []
+        if trajectory_latent_cache is not None and not trajectory_latent_cache.is_empty():
+            cache_available_steps = trajectory_latent_cache.available_steps()
 
-        if isinstance(latents_array, np.ndarray) and latents_array.ndim >= 2 and np.isfinite(latents_array).all():
-            base_vector = latents_array.reshape(-1)
-            latents_digest = digests.canonical_sha256(
-                {
-                    "shape": list(latents_array.shape),
-                    "mean": float(np.mean(base_vector)),
-                    "std": float(np.std(base_vector)),
-                    "l2": float(np.linalg.norm(base_vector)),
-                }
-            )
-            # TFSW 特征提取：使用固定投影矩阵 P（projection_seed = planner_seed + edit_timestep）。
-            # (1) 优先从 trajectory_latent_cache 获取真实 z_t（各时步扩散 latent）。
-            # (2) 缓存命中时直接提取特征 φ = Pᵀ vec(normalize(z_t))。
-            # (3) paper 模式：缓存缺失或精确时步不命中均 raise ValueError（无降级兜底）。
-            # (4) 非 paper 模式：缓存缺失时以最近可用时步的 z_t 填充；缓存为空则退回合成扰动。
-            # 禁止使用 sample_idx 参与 projection_seed，保证特征空间跨样本一致性。
-            from .trajectory_feature_space import (
-                extract_trajectory_feature_np,
-                normalize_masked_latent_np,
-                build_projection_matrix_np,
-            )
-            tfs_planning = {
-                "feature_dim": planner_params.feature_dim,
-                "projection_seed": planner_params.seed + planner_params.edit_timestep,
-            }
-            # 预先构造投影矩阵（规划阶段只需一次）。
-            P_plan = build_projection_matrix_np(tfs_planning, latents_array.shape)
-
-            trajectory_latent_cache = inputs.get("trajectory_latent_cache")
-            cache_available_steps: List[int] = []
-            if trajectory_latent_cache is not None and not trajectory_latent_cache.is_empty():
-                cache_available_steps = trajectory_latent_cache.available_steps()
-                sample_source = "real_diffusion_trajectory_zT"
-                sample_semantics = "runtime_trajectory_latent_captured"
-
-            # 唯一路径：严格 exact-only trajectory 采样，无最近步兜底，无合成降级。
-            if not cache_available_steps:
-                raise ValueError(
-                    "trajectory_cache_absent_or_empty_cannot_build_basis"
-                )
-            for t_idx in timesteps_list:
-                z_t_arr = trajectory_latent_cache.get(t_idx)
-                if z_t_arr is None:
-                    raise ValueError(
-                        f"exact_timestep_miss_{t_idx}_available_{sorted(cache_available_steps)}"
-                    )
-                try:
-                    z_t_np = np.asarray(z_t_arr, dtype=np.float64)
-                    phi = extract_trajectory_feature_np(z_t_np, tfs_planning)
-                    samples_list.append(phi.astype(np.float64))
-                except Exception as exc:
-                    raise ValueError(
-                        f"feature_extraction_failed_step_{t_idx}:{type(exc).__name__}"
-                    ) from exc
-        else:
-            # 禁止无 latents 的任何 surrogate 路径。
+        # 唯一路径：严格 exact-only trajectory 采样，无最近步兜底，无合成降级。
+        if not cache_available_steps:
             raise ValueError(
-                "no_runtime_latents_for_trajectory_basis_sampling"
+                "trajectory_cache_absent_or_empty_cannot_build_basis"
             )
+        for t_idx in timesteps_list:
+            z_t_arr = trajectory_latent_cache.get(t_idx)
+            if z_t_arr is None:
+                raise ValueError(
+                    f"exact_timestep_miss_{t_idx}_available_{sorted(cache_available_steps)}"
+                )
+            try:
+                z_t_np = np.asarray(z_t_arr, dtype=np.float64)
+                phi = extract_trajectory_feature_np(z_t_np, tfs_planning)
+                samples_list.append(phi.astype(np.float64))
+            except Exception as exc:
+                raise ValueError(
+                    f"feature_extraction_failed_step_{t_idx}:{type(exc).__name__}"
+                ) from exc
         
         samples = np.asarray(samples_list, dtype=np.float64)
         

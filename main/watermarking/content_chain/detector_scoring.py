@@ -317,7 +317,7 @@ def validate_basis_digest_consistency(
 
 
 # ---------------------------------------------------------------------------
-# Detect-side trajectory-based TFSW scoring（Phase 3：用真实 z_{t_e} 替代 final_latents）
+# Detect-side trajectory-based TFSW scoring
 # ---------------------------------------------------------------------------
 
 def resolve_detect_trajectory_latent_for_timestep(

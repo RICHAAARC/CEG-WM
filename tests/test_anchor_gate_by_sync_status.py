@@ -74,9 +74,9 @@ class _SyncFailStub:
 
 def _build_paper_cfg(latents: np.ndarray) -> Dict[str, Any]:
     """构造启用 sync_primary_anchor_secondary 的 paper 模式配置"""
+    _ = latents  # latents 不再使用
     return {
         "__detect_pipeline_obj__": object(),
-        "__detect_final_latents__": latents,
         "paper_faithfulness": {"enabled": True},
         "detect": {
             "geometry": {

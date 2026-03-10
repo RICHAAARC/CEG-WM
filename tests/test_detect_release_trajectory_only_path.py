@@ -1,5 +1,5 @@
 """
-File purpose: 验证 detect 侧 trajectory-only 评分路径（Phase 5：彻底移除 legacy path）。
+File purpose: 验证 detect 侧 trajectory-only 评分路径（legacy latent path 已删除）。
 Module type: General module
 
 Tests that after full legacy path removal:
@@ -39,7 +39,7 @@ def _make_cache_with_step(step_index: int) -> LatentTrajectoryCache:
 def test_legacy_lf_detect_latents_function_removed() -> None:
     """
     extract_lf_score_from_detect_latents must be completely removed from detector_scoring.
-    It must not exist as an attribute; Phase 5 deletes it (not just blocks it).
+    It must not exist as an attribute; it has been fully deleted (not just blocked).
     """
     assert not hasattr(detector_scoring, "extract_lf_score_from_detect_latents"), (
         "extract_lf_score_from_detect_latents still exists in detector_scoring — should be deleted"
@@ -49,7 +49,7 @@ def test_legacy_lf_detect_latents_function_removed() -> None:
 def test_legacy_hf_detect_latents_function_removed() -> None:
     """
     extract_hf_score_from_detect_latents must be completely removed from detector_scoring.
-    Phase 5 deletes it entirely.
+    It has been fully deleted.
     """
     assert not hasattr(detector_scoring, "extract_hf_score_from_detect_latents"), (
         "extract_hf_score_from_detect_latents still exists in detector_scoring — should be deleted"

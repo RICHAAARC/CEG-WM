@@ -53,9 +53,8 @@ def _minimal_planner_cfg(
     feature_dim: int = 4,
     sample_count: int = 4,
     timestep_end: int = 3,
-    paper_mode: bool = True,
 ) -> Dict[str, Any]:
-    """构造最小化 planner 配置（paper_mode 参数保留仅供测试调用兼容，现已无分支差异）。"""
+    """构造最小化 planner 配置（始终启用 paper_faithfulness）。"""
     cfg: Dict[str, Any] = {
         "watermark": {
             "subspace": {
@@ -70,10 +69,9 @@ def _minimal_planner_cfg(
                 "edit_timestep": 0,
                 "num_inference_steps": timestep_end + 1,
             }
-        }
+        },
+        "paper_faithfulness": {"enabled": True},
     }
-    if paper_mode:
-        cfg["paper_faithfulness"] = {"enabled": True}
     return cfg
 
 
@@ -92,8 +90,7 @@ def test_lf_uses_trajectory_path_label() -> None:
     功能：paper 模式下 LF 检测路径标签必须为 lf_coder_prc_trajectory。
 
     Verify that paper_faithfulness.enabled=True routes LF scoring through
-    trajectory cache path ("lf_coder_prc_trajectory"), regardless of whether
-    __detect_final_latents__ is set.
+    trajectory cache path ("lf_coder_prc_trajectory"), using exact trajectory cache hit.
 
     Args:
         None.
@@ -115,8 +112,6 @@ def test_lf_uses_trajectory_path_label() -> None:
             "hf": {"enabled": False},
         },
         "__detect_trajectory_latent_cache__": cache,
-        # final_latents 不应被 paper 路径访问
-        "__detect_final_latents__": [0.1] * 8,
     }
 
     _, _, traces = detect_orchestrator._extract_content_raw_scores_from_image(  # pyright: ignore[reportPrivateUsage]
@@ -324,14 +319,12 @@ def test_planner_raises_when_cache_absent() -> None:
         None.
     """
     planner = _make_planner()
-    cfg = _minimal_planner_cfg(feature_dim=4, sample_count=4, timestep_end=3, paper_mode=True)
+    cfg = _minimal_planner_cfg(feature_dim=4, sample_count=4, timestep_end=3)
 
-    latents = np.ones((1, 1, 2, 3), dtype=np.float32)  # 6 elements >= feature_dim=4
     fake_pipeline = _FakePipeline()
 
     inputs: Dict[str, Any] = {
         "pipeline": fake_pipeline,
-        "latents": latents,
         "trace_signature": {
             "num_inference_steps": 4,
             "guidance_scale": 7.0,
@@ -363,18 +356,16 @@ def test_planner_raises_on_exact_timestep_miss() -> None:
         None.
     """
     planner = _make_planner()
-    cfg = _minimal_planner_cfg(feature_dim=4, sample_count=4, timestep_end=3, paper_mode=True)
+    cfg = _minimal_planner_cfg(feature_dim=4, sample_count=4, timestep_end=3)
 
     # 构造 cache：仅有 step=100，不在规划器的 [0,1,2,3] 范围内
     z_t = np.ones((1, 1, 2, 3), dtype=np.float32)
     cache = _make_trajectory_cache({100: z_t})
 
-    latents = np.ones((1, 1, 2, 3), dtype=np.float32)
     fake_pipeline = _FakePipeline()
 
     inputs: Dict[str, Any] = {
         "pipeline": fake_pipeline,
-        "latents": latents,
         "trajectory_latent_cache": cache,
         "trace_signature": {
             "num_inference_steps": 4,
@@ -407,7 +398,7 @@ def test_planner_succeeds_on_exact_cache_hit() -> None:
     """
     planner = _make_planner()
     # timestep_end=3, sample_count=4 → 时步序列 = [0, 1, 2, 3]
-    cfg = _minimal_planner_cfg(feature_dim=4, sample_count=4, timestep_end=3, paper_mode=True)
+    cfg = _minimal_planner_cfg(feature_dim=4, sample_count=4, timestep_end=3)
 
     # 使用多样化 z_t，避免归一化后全零 → SVD 秩不足。
     rng = np.random.default_rng(42)
@@ -415,12 +406,10 @@ def test_planner_succeeds_on_exact_cache_hit() -> None:
         {i: rng.standard_normal((1, 1, 2, 3)).astype(np.float32) for i in range(4)}
     )
 
-    latents = rng.standard_normal((1, 1, 2, 3)).astype(np.float32)
     fake_pipeline = _FakePipeline()
 
     inputs: Dict[str, Any] = {
         "pipeline": fake_pipeline,
-        "latents": latents,
         "trajectory_latent_cache": cache,
         "trace_signature": {
             "num_inference_steps": 4,
@@ -433,39 +422,3 @@ def test_planner_succeeds_on_exact_cache_hit() -> None:
     result = planner.plan(cfg, mask_digest="m1", cfg_digest="c1", inputs=inputs)
     assert result.status == "ok"
     assert result.plan_digest is not None
-
-
-def test_planner_raises_when_no_runtime_latents() -> None:
-    """
-    功能：latents 缺失时 planner 应 raise ValueError（无 surrogate 降级）。
-
-    Verify that when inputs["latents"] is absent, SubspacePlannerImpl.plan()
-    returns status="failed" (surrogate fallback is blocked).
-
-    Args:
-        None.
-
-    Returns:
-        None.
-    """
-    planner = _make_planner()
-    cfg = _minimal_planner_cfg(feature_dim=4, sample_count=4, timestep_end=3, paper_mode=True)
-
-    z_t = np.ones((1, 1, 2, 3), dtype=np.float32)
-    cache = _make_trajectory_cache({0: z_t, 1: z_t, 2: z_t, 3: z_t})
-    fake_pipeline = _FakePipeline()
-
-    # latents 故意不提供 → 触发 else 分支 surrogate → 应 raise ValueError。
-    inputs: Dict[str, Any] = {
-        "pipeline": fake_pipeline,
-        "trajectory_latent_cache": cache,
-        "trace_signature": {
-            "num_inference_steps": 4,
-            "guidance_scale": 7.0,
-            "height": 64,
-            "width": 64,
-        },
-    }
-
-    result = planner.plan(cfg, mask_digest="m1", cfg_digest="c1", inputs=inputs)
-    assert result.status == "failed"

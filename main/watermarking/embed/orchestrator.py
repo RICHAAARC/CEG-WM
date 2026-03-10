@@ -980,9 +980,9 @@ def _extract_mask_binding(content_evidence_payload: Any) -> Dict[str, Any] | Non
     binding = mask_stats.get("mask_resolution_binding")
     if isinstance(binding, dict):
         return cast(Dict[str, Any], binding)
-    legacy = mask_stats.get("resolution_binding")
-    if isinstance(legacy, dict):
-        return cast(Dict[str, Any], legacy)
+    compat_binding = mask_stats.get("resolution_binding")
+    if isinstance(compat_binding, dict):
+        return cast(Dict[str, Any], compat_binding)
     return None
 
 

@@ -187,7 +187,6 @@ def _run_detect_with_sync(enable_latent_sync: bool) -> Dict[str, Any]:
     }
     cfg = _build_cfg(enable_latent_sync=enable_latent_sync)
     cfg["__detect_pipeline_obj__"] = _Pipeline()
-    cfg["__detect_final_latents__"] = np.random.RandomState(6).randn(1, 4, 8, 8).astype(np.float32)
     return run_detect_orchestrator(
         cfg,
         impl_set,

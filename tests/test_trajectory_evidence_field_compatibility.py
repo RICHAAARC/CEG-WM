@@ -36,11 +36,11 @@ def test_trajectory_tap_status_prefers_audit_field() -> None:
     assert _resolve_trajectory_tap_status(trajectory_evidence) == "ok"
 
 
-def test_trajectory_tap_status_fallback_to_legacy_field() -> None:
+def test_trajectory_tap_status_uses_flat_status_field_when_audit_absent() -> None:
     """
     功能：新字段缺失时应兼容回退到旧 status 字段。
 
-    Legacy status field should be used when audit field is absent.
+    Flat status field should be used when audit.trajectory_tap_status is absent.
 
     Args:
         None.
@@ -77,11 +77,11 @@ def test_trajectory_absent_reason_prefers_audit_field() -> None:
     assert _resolve_trajectory_absent_reason(trajectory_evidence) == "tap_disabled"
 
 
-def test_inject_trajectory_audit_fields_supports_legacy_source() -> None:
+def test_inject_trajectory_audit_fields_from_flat_trajectory_source() -> None:
     """
-    功能：旧字段输入应可写入 content_evidence.audit 新字段。
+    功能：旧平铺字段输入应可写入 content_evidence.audit 新字段。
 
-    Legacy trajectory fields should be injected into content audit fields.
+    Flat trajectory fields should be injected into content audit fields.
 
     Args:
         None.

@@ -48,12 +48,13 @@ def run_sd3_inference(
         pipeline_obj: Pipeline object (may be None if unbuilt).
         device: Device string ("cpu", "cuda", etc.) or None.
         seed: Random seed integer or None.
-        capture_final_latents: Optional bool to capture final latents from inference (for detect-side scoring).
+        capture_final_latents: Optional bool to capture final latents from inference (for embed-side latent sync).
         capture_attention: Optional bool to register attention capture hooks.
         trajectory_latent_cache: Optional LatentTrajectoryCache for per-step latent tensor storage.
 
     Returns:
-        Dict with inference_status, inference_error, inference_runtime_meta, and optional final_latents.
+        Dict with inference_status, inference_error, inference_runtime_meta, and optional final_latents
+        (only present when capture_final_latents=True, used for embed-side latent sync).
 
     Raises:
         TypeError: If cfg is invalid.
@@ -75,7 +76,7 @@ def run_sd3_inference(
         raise TypeError("capture_attention must be bool")
 
     inference_enabled = cfg.get("inference_enabled", False)
-    detect_latents_storage = {"final_latents": None} if capture_final_latents else None
+    latent_sync_storage = {"final_latents": None} if capture_final_latents else None
 
     if not inference_enabled:
         return {
@@ -276,15 +277,15 @@ def run_sd3_inference(
             """
             功能：捕获推理过程中的最后一次 latents。
 
-            Capture the latest latents during inference for detect-side scoring.
+            Capture the latest latents during inference for embed-side latent sync.
             """
             if not isinstance(callback_kwargs, dict):
                 return callback_kwargs
             latents = callback_kwargs.get("latents")
             if latents is None:
                 return callback_kwargs
-            if detect_latents_storage is not None:
-                detect_latents_storage["final_latents"] = latents
+            if latent_sync_storage is not None:
+                latent_sync_storage["final_latents"] = latents
             return callback_kwargs
 
         # 构造注入回调（闭包捕获 InjectionContext）。
@@ -456,7 +457,7 @@ def run_sd3_inference(
             injection_context,
             absent_reason="injection_not_available"
         ),
-        "final_latents": detect_latents_storage.get("final_latents") if detect_latents_storage is not None else None,
+        "final_latents": latent_sync_storage.get("final_latents") if latent_sync_storage is not None else None,
         "runtime_self_attention_maps": runtime_self_attention_maps,
         "output_image": output_image,  # SD 推理输出图像（PIL Image 或 None）
     }

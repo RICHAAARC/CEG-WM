@@ -57,7 +57,7 @@ class _GeometryStub:
     def extract(self, cfg: Dict[str, Any], inputs: Dict[str, Any] | None = None) -> Dict[str, Any]:
         _ = cfg
         assert isinstance(inputs, dict)
-        assert "attention_maps" in inputs
+        # attention_maps 仅在真实 self-attention 可用时存在；latent proxy 路径已移除
         assert "sync_result" in inputs
         return {
             "status": "ok",
@@ -68,10 +68,8 @@ class _GeometryStub:
 
 
 def test_detect_geometry_chain_runs_sync_then_extract() -> None:
-    latents = np.random.default_rng(20260227).normal(size=(1, 4, 16, 16)).astype(np.float32)
     cfg: Dict[str, Any] = {
         "__detect_pipeline_obj__": object(),
-        "__detect_final_latents__": latents,
         "detect": {
             "geometry": {
                 "enabled": True,
@@ -133,10 +131,8 @@ class _SyncMismatchStub:
 
 
 def test_detect_geometry_chain_anchor_then_sync_relation_digest_bound() -> None:
-    latents = np.random.default_rng(20260228).normal(size=(1, 4, 16, 16)).astype(np.float32)
     cfg: Dict[str, Any] = {
         "__detect_pipeline_obj__": object(),
-        "__detect_final_latents__": latents,
         "detect": {
             "geometry": {
                 "enabled": True,
@@ -177,9 +173,9 @@ def test_detect_geometry_chain_paper_path_sync_primary_enabled() -> None:
         None.
     """
     latents = np.random.default_rng(202602281).normal(size=(1, 4, 16, 16)).astype(np.float32)
+    _ = latents  # latents 不再直接注入 cfg
     cfg: Dict[str, Any] = {
         "__detect_pipeline_obj__": object(),
-        "__detect_final_latents__": latents,
         "__runtime_self_attention_maps__": [np.zeros((1, 1), dtype=np.float32)],
         "paper_faithfulness": {"enabled": True},
         "detect": {
@@ -220,9 +216,9 @@ def test_detect_geometry_chain_paper_path_sync_primary_can_rollback() -> None:
         None.
     """
     latents = np.random.default_rng(202602282).normal(size=(1, 4, 16, 16)).astype(np.float32)
+    _ = latents  # latents 不再直接注入 cfg
     cfg: Dict[str, Any] = {
         "__detect_pipeline_obj__": object(),
-        "__detect_final_latents__": latents,
         "__runtime_self_attention_maps__": [np.zeros((1, 1), dtype=np.float32)],
         "paper_faithfulness": {"enabled": True},
         "detect": {

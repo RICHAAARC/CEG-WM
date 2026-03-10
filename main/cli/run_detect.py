@@ -596,7 +596,6 @@ def run_detect(
                 "injection_metrics": None,
                 "subspace_binding_digest": None,
             }
-            final_latents = None
             _detect_traj_cache = trajectory_tap.LatentTrajectoryCache()
         else:
             detect_cfg = cfg.get("detect") if isinstance(cfg.get("detect"), dict) else {}
@@ -614,7 +613,7 @@ def run_detect(
                 seed,
                 injection_context=injection_context,
                 injection_modifier=injection_modifier,
-                capture_final_latents=True,  # 捕获最后的 latents 用于 detect 侧评分
+                capture_final_latents=False,
                 capture_attention=capture_attention,
                 trajectory_latent_cache=_detect_traj_cache,
             )
@@ -623,16 +622,11 @@ def run_detect(
             inference_runtime_meta = inference_result.get("inference_runtime_meta")
             trajectory_evidence = inference_result.get("trajectory_evidence")
             injection_evidence = inference_result.get("injection_evidence")
-            final_latents = inference_result.get("final_latents")
             runtime_self_attention_maps = inference_result.get("runtime_self_attention_maps")
             runtime_self_attention_source = None
             if isinstance(inference_runtime_meta, dict):
                 runtime_self_attention_source = inference_runtime_meta.get("runtime_self_attention_source")
         
-        # 将最后的 latents 存储到 cfg 的临时字段，供 detect orchestrator 使用。
-        # 这些 latents 不会被写入 records，只在内存中处理。
-        if final_latents is not None:
-            cfg["__detect_final_latents__"] = final_latents
         if runtime_self_attention_maps is not None:
             cfg["__runtime_self_attention_maps__"] = runtime_self_attention_maps
         if isinstance(runtime_self_attention_source, str) and runtime_self_attention_source:

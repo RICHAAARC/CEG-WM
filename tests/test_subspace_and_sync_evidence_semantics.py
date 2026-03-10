@@ -125,7 +125,6 @@ def test_geometry_runtime_inputs_disable_latent_proxy_under_paper_mode() -> None
     """
     cfg: Dict[str, Any] = {
         "paper_faithfulness": {"enabled": True},
-        "__detect_final_latents__": np.random.default_rng(20260301).normal(size=(1, 4, 8, 8)).astype(np.float32),
     }
     build_inputs = getattr(detect_orchestrator, "_build_geometry_runtime_inputs")
     runtime_inputs = build_inputs(cfg, enable_attention_proxy=True)
