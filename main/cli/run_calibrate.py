@@ -75,7 +75,7 @@ def _resolve_label_from_detect_record(record: Dict[str, Any]) -> bool | None:
     return None
 
 
-def _validate_detect_record_label_balance_for_calibration(cfg: Dict[str, Any]) -> None:
+def _validate_detect_record_label_balance_for_calibration(cfg: Dict[str, Any]) -> tuple[int, int]:
     """
     功能：校验校准阶段 detect_records 的正负样本计数。 
 
@@ -85,7 +85,7 @@ def _validate_detect_record_label_balance_for_calibration(cfg: Dict[str, Any]) -
         cfg: Runtime config mapping.
 
     Returns:
-        None.
+        Tuple of (n_pos, n_neg) label counts from matched detect records.
 
     Raises:
         ValueError: If records glob is missing or n_pos/n_neg is zero.
@@ -124,6 +124,7 @@ def _validate_detect_record_label_balance_for_calibration(cfg: Dict[str, Any]) -
             "calibration requires both positive and negative labeled detect records "
             f"(n_pos={n_pos}, n_neg={n_neg}, detect_records_glob={records_glob})"
         )
+    return n_pos, n_neg
 
 
 def run_calibrate(output_dir: str, config_path: str, overrides: list[str] | None = None) -> None:
@@ -232,8 +233,8 @@ def run_calibrate(output_dir: str, config_path: str, overrides: list[str] | None
         run_meta["cfg_digest"] = cfg_digest
         run_meta["policy_path"] = cfg["policy_path"]
 
-        # 样本有效性前置门禁（n_pos/n_neg 不能为0）。
-        _validate_detect_record_label_balance_for_calibration(cfg)
+        # 样本有效性前置门禁（n_pos/n_neg 不能为0），同时获取样本计数用于落盘。
+        n_pos_labeled, n_neg_labeled = _validate_detect_record_label_balance_for_calibration(cfg)
 
         seed_parts, seed_digest, seed_value, seed_rule_id = build_seed_audit(cfg, "calibrate")
         cfg["seed"] = seed_value
@@ -325,6 +326,9 @@ def run_calibrate(output_dir: str, config_path: str, overrides: list[str] | None
             record = run_calibrate_orchestrator(cfg, impl_set)
             record["cfg_digest"] = cfg_digest
             record["policy_path"] = cfg["policy_path"]
+            # 写入正负样本计数，用于审计校准数据集组成。
+            record["n_pos"] = n_pos_labeled
+            record["n_neg"] = n_neg_labeled
             override_applied = cfg.get("override_applied")
             if override_applied is not None:
                 record["override_applied"] = override_applied

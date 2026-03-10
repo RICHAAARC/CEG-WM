@@ -186,11 +186,12 @@ def test_bp_converge_status_ok_when_converged() -> None:
 
 def test_bp_converge_status_degraded_when_not_converged() -> None:
     """
-    功能：验证 bp_converged=False 时 bp_converge_status 为 'degraded'。
+    功能：验证 correlation_v1 检测器下 bp_converge_status 始终为 'ok'。
 
-    Test bp_converge_status equals 'degraded' when BP decoder does not converge.
-    Uses patch to mock decode_soft_llr so that bp_converged=False is reliably triggered
-    without requiring invalid configuration.
+    Test bp_converge_status is always 'ok' under correlation_v1 detector.
+    The correlation-based detector replaces BP decoding; there is no BP
+    non-convergence scenario. Patching decode_soft_llr has no observable
+    effect since it is no longer called.
 
     Args:
         None.
@@ -199,7 +200,7 @@ def test_bp_converge_status_degraded_when_not_converged() -> None:
         None.
 
     Raises:
-        AssertionError: If bp_converge_status is not 'degraded'.
+        AssertionError: If bp_converge_status is not 'ok'.
     """
     import numpy as np
 
@@ -208,7 +209,7 @@ def test_bp_converge_status_degraded_when_not_converged() -> None:
     latents = np.random.RandomState(99).randn(200).tolist()
     plan_digest = digests.canonical_sha256({"plan": "test_not_converged"})
 
-    # mock decode_soft_llr，使 bp_converged=False（模拟未收敛场景）
+    # correlation_v1 检测器不调用 decode_soft_llr，patch 不产生副作用。
     _mock_decode_result = {
         "decoded_bits": [0] * 16,
         "bp_converged": False,
@@ -226,8 +227,9 @@ def test_bp_converge_status_degraded_when_not_converged() -> None:
         )
 
     assert "bp_converge_status" in trace, "trace 中应含 bp_converge_status 字段"
-    assert trace["bp_converge_status"] == "degraded", (
-        f"bp_converged=False 时 bp_converge_status 应为 'degraded'，实际：{trace['bp_converge_status']}"
+    # correlation_v1 不存在 BP 不收敛问题，bp_converge_status 始终为 'ok'。
+    assert trace["bp_converge_status"] == "ok", (
+        f"correlation_v1 检测器下 bp_converge_status 应为 'ok'，实际：{trace['bp_converge_status']}"
     )
 
 

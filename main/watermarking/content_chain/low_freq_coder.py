@@ -1275,25 +1275,35 @@ class LFCoderPRC:
         lf_basis: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Optional[float], Dict[str, Any]]:
         """
-        功能：PRC belief propagation decoding.
+        功能：基于白化 Pearson 相关的 LF 水印存在性检测（correlation_v1）。
 
-        Detect watermark using belief propagation decoder.
+        Detect LF watermark using whitened template correlation.
+        Computes Pearson correlation between whitened LF coefficients and
+        the deterministic LDPC codeword template derived from plan_digest.
+        Replaces prior BP-based decoder which was misaligned with the additive
+        pseudo-gaussian embedding in latent_modifier.
 
         Args:
             cfg: Configuration dict.
             latent_features: Input latent features (full SD3 latent or array).
-            plan_digest: Plan digest binding.
+            plan_digest: Plan digest binding (must match embedding side).
             cfg_digest: Optional cfg digest.
             lf_basis: LF subspace basis dict with projection_matrix.
-                      When provided, latent_features are projected through
-                      lf_basis before LDPC decoding to recover the embedded
-                      LF coefficients (fixes Bug-A: projection missing).
+                      When provided, projects latent_features to LF subspace
+                      before correlation to recover embedded LF coefficients.
 
         Returns:
             Tuple of (lf_score, lf_detect_trace).
+            lf_score in [0, 1]: 0.5 = null hypothesis, >0.5 = watermark evidence.
+            Score is defined as sigmoid(correlation_scale * pearson_corr).
 
         Raises:
             TypeError: If inputs are invalid.
+
+        Notes:
+            detect_variant: correlation_v1.
+            LDPC/BP code retained for future payload recovery path;
+            current detection is correlation-based, not decoding-based.
         """
         if not isinstance(cfg, dict):
             raise TypeError("cfg must be dict")
@@ -1309,18 +1319,10 @@ class LFCoderPRC:
                 "lf_trace_digest": digests.canonical_sha256({"absent": "lf_disabled"}),
             }
 
-        decoder = lf_cfg.get("decoder", "belief_propagation")
-        if decoder != "belief_propagation":
-            return None, {
-                "status": "failed",
-                "lf_failure_reason": "lf_decoder_mismatch",
-                "lf_trace_digest": digests.canonical_sha256({"failure": "decoder_mismatch"}),
-            }
-
-        variance = float(lf_cfg.get("variance", 1.5))
         message_length = int(lf_cfg.get("message_length", 64))
         ecc_sparsity = int(lf_cfg.get("ecc_sparsity", 3))
-        bp_iterations = int(lf_cfg.get("bp_iterations", 10))
+        # correlation_scale 控制 sigmoid 灵敏度；默认 10.0，需 GPU 跑后经 NP 校准微调。
+        correlation_scale = float(lf_cfg.get("correlation_scale", 10.0))
 
         ldpc_spec = build_ldpc_spec(
             message_length=message_length,
@@ -1328,10 +1330,10 @@ class LFCoderPRC:
             seed_key=f"{plan_digest}:{message_length}:{ecc_sparsity}:embed",
         )
         block_length = int(ldpc_spec.get("n", message_length))
+        parity_check_digest = ldpc_spec["parity_check_digest"]
 
-        # （修复 Bug-A）若提供 lf_basis，先将 latent 投影到 LF 子空间，
-        # 恢复 embed 侧施加水印的 96 个 LF 系数，再做 LDPC 解码。
-        # 不投影时回退到原始展平（信号极弱，通常无法解码）。
+        # （1）投影到 LF 子空间，恢复嵌入侧施加水印的低频系数。
+        # 不提供 lf_basis 时回退展平（信号极弱，仅用于兜底审计）。
         lf_projection_used = False
         if lf_basis is not None and isinstance(lf_basis, dict):
             try:
@@ -1339,75 +1341,70 @@ class LFCoderPRC:
                 is_torch = hasattr(latent_features, "detach")
                 if is_torch:
                     projected = _ch_lf.compute_lf_basis_projection_torch(latent_features, lf_basis)
-                    flat_latents = projected.detach().cpu().numpy().reshape(-1).tolist()
+                    coeffs_arr = projected.detach().cpu().numpy().astype(np.float64).flatten()
                 else:
                     projected = _ch_lf.compute_lf_basis_projection(latent_features, lf_basis)
-                    flat_latents = projected.reshape(-1).tolist()
+                    coeffs_arr = np.asarray(projected, dtype=np.float64).flatten()
                 lf_projection_used = True
             except Exception:
-                # 投影失败时回退展平原始 latent。
-                flat_latents = _flatten_to_list(latent_features)
+                # 投影失败时回退展平原始 latent，记录 lf_projection_used=False。
+                coeffs_arr = np.array(_flatten_to_list(latent_features), dtype=np.float64)
         else:
-            flat_latents = _flatten_to_list(latent_features)
+            coeffs_arr = np.array(_flatten_to_list(latent_features), dtype=np.float64)
 
-        if len(flat_latents) < block_length:
+        if len(coeffs_arr) < block_length:
             return None, {
                 "status": "failed",
                 "lf_failure_reason": "lf_insufficient_latent_dimension",
-                "available_latent_dim": int(len(flat_latents)),
+                "available_latent_dim": int(len(coeffs_arr)),
                 "required_block_length": int(block_length),
                 "lf_trace_digest": digests.canonical_sha256({"failure": "insufficient_dim"}),
             }
 
-        # Recover posteriors using erf-based recovery
-        posteriors = recover_posteriors_erf(flat_latents[:block_length], variance)
-        llr_values = [float((2.0 * p) / max(variance, 1e-8)) for p in posteriors]
-
-        decode_result = decode_soft_llr(llr_values, ldpc_spec, bp_iterations)
-        decoded_bits = decode_result["decoded_bits"]
-        bp_converged = bool(decode_result["bp_converged"])
-        bp_iteration_count = int(decode_result["bp_iteration_count"])
-
+        # (2) Reconstruct the codeword template t (identical seed derivation as in embed path)
         seed = int(digests.canonical_sha256({"plan_digest": plan_digest, "tag": "lf_message"})[:16], 16)
-        import random
-        rng = random.Random(seed)
-        expected_bits = [1 if rng.random() < 0.5 else -1 for _ in range(message_length)]
+        import random as _random_mod
+        _rng = _random_mod.Random(seed)
+        message_bits = [1 if _rng.random() < 0.5 else -1 for _ in range(message_length)]
+        code_bits = encode_message_bits(message_bits, ldpc_spec)
+        codeword = np.array(code_bits, dtype=np.float64)
 
-        agreement = 0
-        for exp_bit, dec_bit in zip(expected_bits, decoded_bits[:message_length]):
-            if exp_bit == dec_bit:
-                agreement += 1
+        # (3) Whitened correlation detection
+        c = coeffs_arr[:block_length]
+        eps = 1e-8
+        c_mean = float(np.mean(c))
+        c_std = float(np.std(c))
+        c_whitened = (c - c_mean) / (c_std + eps)
+        t_norm = float(np.linalg.norm(codeword))
+        t_normalized = codeword / (t_norm + eps)
+        raw_corr = float(np.dot(c_whitened, t_normalized))
 
-        # Score is defined as expected/decoded bit agreement ratio in [0, 1].
-        lf_score = float(agreement) / float(message_length) if message_length > 0 else 0.0
+        # (4) Sigmoid mapping to [0, 1]
+        lf_score = 1.0 / (1.0 + math.exp(-correlation_scale * raw_corr))
 
-        # Build trace
-        llr_summary_digest = digests.canonical_sha256({
-            "variance": variance,
-            "posteriors_digest": digests.canonical_sha256({"posteriors": posteriors[:10]}),
-            "decoded_bits_digest": digests.canonical_sha256({"decoded_bits": decoded_bits[:16]}),
-        })
         trace = {
             "status": "ok",
             "lf_score": lf_score,
-            "bp_iterations": bp_iterations,
-            "bp_converged": bp_converged,
-            "bp_iteration_count": bp_iteration_count,
+            "raw_correlation": raw_corr,
+            "c_mean": c_mean,
+            "c_std": c_std,
             "block_length": block_length,
-            "available_latent_dim": int(len(flat_latents)),
+            "available_latent_dim": int(len(coeffs_arr)),
             "required_block_length": int(block_length),
             "lf_projection_used": lf_projection_used,
-            "syndrome_weight": int(decode_result["syndrome_weight"]),
-            "llr_summary_digest": llr_summary_digest,
-            "parity_check_digest": ldpc_spec["parity_check_digest"],
+            "syndrome_weight": None,
+            "parity_check_digest": parity_check_digest,
+            "correlation_scale": correlation_scale,
+            "detect_variant": "correlation_v1",
             "impl_id": self.impl_id,
             "impl_version": self.impl_version,
             "plan_digest": plan_digest,
             "cfg_digest": cfg_digest,
+            "bp_converged": None,
+            "bp_iteration_count": None,
         }
         trace["lf_trace_digest"] = digests.canonical_sha256(trace)
-        # bp_converge_status \u8ffd\u52a0\u5728 lf_trace_digest \u8ba1\u7b97\u4e4b\u540e\uff0c\u4e0d\u53c2\u4e0e\u6458\u8981\u8f93\u5165\u57df\u3002
-        trace["bp_converge_status"] = "ok" if bp_converged else "degraded"
+        trace["bp_converge_status"] = "ok"
 
         return lf_score, trace
 

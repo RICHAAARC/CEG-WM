@@ -110,8 +110,11 @@ def test_lf_coder_prc_embed_detect_exposes_ldpc_bp_fields() -> None:
     assert isinstance(lf_score, float)
     assert isinstance(detect_trace, dict)
     assert detect_trace.get("status") == "ok"
-    assert isinstance(detect_trace.get("bp_converged"), bool)
-    assert isinstance(detect_trace.get("bp_iteration_count"), int)
+    # correlation_v1 不使用 BP，bp_converged/bp_iteration_count 固定为 None
+    assert detect_trace.get("bp_converged") is None
+    assert detect_trace.get("bp_iteration_count") is None
+    assert detect_trace.get("detect_variant") == "correlation_v1"
+    assert isinstance(detect_trace.get("raw_correlation"), float)
     assert isinstance(detect_trace.get("parity_check_digest"), str)
 
 
