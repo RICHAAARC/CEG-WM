@@ -2389,6 +2389,16 @@ class SubspacePlannerImpl:
             }
         else:
             payload["hf_projection_matrix"] = quantized.tolist()
+            # HF 与 LF 共享相同的 latent 降维规范，避免 SD3 高维 latent 与
+            # 128-dim 规划基底之间的维度不匹配。
+            payload["latent_projection_spec"] = {
+                "spec_version": "v1",
+                "method": "random_index_selection",
+                "feature_dim": planner_params.feature_dim,
+                "seed": planner_params.seed,
+                "edit_timestep": planner_params.edit_timestep,
+                "sample_idx": 0,
+            }
         payload["basis_payload_digest"] = digests.canonical_sha256(payload)
         return payload
 

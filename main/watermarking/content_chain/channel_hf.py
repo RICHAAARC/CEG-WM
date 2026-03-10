@@ -73,10 +73,24 @@ def compute_hf_basis_projection_torch(latents: Any, basis: Dict[str, Any]) -> An
     )
     if basis_matrix_t.ndim != 2:
         raise ValueError("hf_projection_matrix must be rank-2")
+    # 维度不匹配时，用 latent_projection_spec 随机索引降维以匹配 basis 行数。
+    # 与 channel_lf 使用相同索引公式：projection_seed = seed + 7919 + t_idx*131 + sample_idx
     if latents_flat.shape[0] != basis_matrix_t.shape[0]:
-        raise ValueError(
-            f"latents dimension {latents_flat.shape[0]} != basis dimension {basis_matrix_t.shape[0]}"
-        )
+        latent_proj_spec = basis.get("latent_projection_spec")
+        if latent_proj_spec is None or latent_proj_spec.get("method") != "random_index_selection":
+            raise ValueError(
+                f"latents dimension {latents_flat.shape[0]} != basis dimension {basis_matrix_t.shape[0]}, "
+                "but latent_projection_spec absent or not random_index_selection"
+            )
+        feature_dim = int(latent_proj_spec.get("feature_dim", 128))
+        seed = int(latent_proj_spec.get("seed", 0))
+        t_idx = int(latent_proj_spec.get("edit_timestep", 0))
+        sample_idx = int(latent_proj_spec.get("sample_idx", 0))
+        projection_seed = seed + 7919 + t_idx * 131 + sample_idx
+        rng = np.random.default_rng(projection_seed)
+        indices = rng.integers(0, max(1, int(latents_flat.shape[0])), size=feature_dim)
+        indices_t = torch.as_tensor(indices, dtype=torch.long, device=latents_flat.device)
+        latents_flat = latents_flat[indices_t]
     return torch.matmul(latents_flat, basis_matrix_t)
 
 
@@ -178,8 +192,30 @@ def reconstruct_from_hf_coeffs_torch(
     if basis_matrix_t.ndim != 2:
         raise ValueError("hf_projection_matrix must be rank-2")
 
-    latents_flat = torch.matmul(basis_matrix_t, coeffs.to(dtype=torch.float32))
-    reconstructed = latents_flat.reshape(latents_shape)
+    basis_dim = basis_matrix_t.shape[0]
+    full_dim = int(np.prod(latents_shape))
+    latents_sub = torch.matmul(basis_matrix_t, coeffs.to(dtype=torch.float32))
+    # basis_dim < full_dim 时（如 SD3 65536-dim），散射回完整维度。
+    # 使用与 compute_hf_basis_projection_torch 相同的 latent_projection_spec 索引公式。
+    if basis_dim < full_dim:
+        latent_proj_spec = basis.get("latent_projection_spec")
+        if latent_proj_spec is None or latent_proj_spec.get("method") != "random_index_selection":
+            raise ValueError(
+                "HF basis_dim < full_dim but latent_projection_spec absent or not random_index_selection"
+            )
+        feature_dim = int(latent_proj_spec.get("feature_dim", 128))
+        seed = int(latent_proj_spec.get("seed", 0))
+        t_idx = int(latent_proj_spec.get("edit_timestep", 0))
+        sample_idx = int(latent_proj_spec.get("sample_idx", 0))
+        projection_seed = seed + 7919 + t_idx * 131 + sample_idx
+        rng = np.random.default_rng(projection_seed)
+        indices = rng.integers(0, max(1, full_dim), size=feature_dim)
+        indices_t = torch.as_tensor(indices, dtype=torch.long, device=coeffs.device)
+        output = torch.zeros(full_dim, dtype=torch.float32, device=coeffs.device)
+        output[indices_t] = latents_sub
+        reconstructed = output.reshape(latents_shape)
+    else:
+        reconstructed = latents_sub.reshape(latents_shape)
     return reconstructed.to(dtype=dtype)
 
 
