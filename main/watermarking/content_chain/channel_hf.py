@@ -73,24 +73,30 @@ def compute_hf_basis_projection_torch(latents: Any, basis: Dict[str, Any]) -> An
     )
     if basis_matrix_t.ndim != 2:
         raise ValueError("hf_projection_matrix must be rank-2")
-    # 维度不匹配时，用 latent_projection_spec 随机索引降维以匹配 basis 行数。
-    # 与 channel_lf 使用相同索引公式：projection_seed = seed + 7919 + t_idx*131 + sample_idx
+    # 维度不匹配时，使用 trajectory_feature_spec（TFSW 主路径）将 latent 降至 feature_dim。
+    # 与 LF 使用相同的 projection_seed 保证两通道在同一特征空间内。
     if latents_flat.shape[0] != basis_matrix_t.shape[0]:
-        latent_proj_spec = basis.get("latent_projection_spec")
-        if latent_proj_spec is None or latent_proj_spec.get("method") != "random_index_selection":
-            raise ValueError(
-                f"latents dimension {latents_flat.shape[0]} != basis dimension {basis_matrix_t.shape[0]}, "
-                "but latent_projection_spec absent or not random_index_selection"
-            )
-        feature_dim = int(latent_proj_spec.get("feature_dim", 128))
-        seed = int(latent_proj_spec.get("seed", 0))
-        t_idx = int(latent_proj_spec.get("edit_timestep", 0))
-        sample_idx = int(latent_proj_spec.get("sample_idx", 0))
-        projection_seed = seed + 7919 + t_idx * 131 + sample_idx
-        rng = np.random.default_rng(projection_seed)
-        indices = rng.integers(0, max(1, int(latents_flat.shape[0])), size=feature_dim)
-        indices_t = torch.as_tensor(indices, dtype=torch.long, device=latents_flat.device)
-        latents_flat = latents_flat[indices_t]
+        tfs = basis.get("trajectory_feature_spec")
+        if isinstance(tfs, dict) and tfs.get("feature_operator") == "masked_normalized_random_projection":
+            from .subspace.trajectory_feature_space import extract_trajectory_feature_torch
+            latents_flat = extract_trajectory_feature_torch(latents, tfs)
+        else:
+            # backward-compat：latent_projection_spec 随机索引路径。
+            latent_proj_spec = basis.get("latent_projection_spec")
+            if latent_proj_spec is None or latent_proj_spec.get("method") != "random_index_selection":
+                raise ValueError(
+                    f"latents dimension {latents_flat.shape[0]} != basis dimension {basis_matrix_t.shape[0]}: "
+                    "neither trajectory_feature_spec nor latent_projection_spec found in basis"
+                )
+            feature_dim = int(latent_proj_spec.get("feature_dim", 128))
+            seed = int(latent_proj_spec.get("seed", 0))
+            t_idx = int(latent_proj_spec.get("edit_timestep", 0))
+            sample_idx = int(latent_proj_spec.get("sample_idx", 0))
+            projection_seed = seed + 7919 + t_idx * 131 + sample_idx
+            rng = np.random.default_rng(projection_seed)
+            indices = rng.integers(0, max(1, int(latents_flat.shape[0])), size=feature_dim)
+            indices_t = torch.as_tensor(indices, dtype=torch.long, device=latents_flat.device)
+            latents_flat = latents_flat[indices_t]
     return torch.matmul(latents_flat, basis_matrix_t)
 
 
@@ -195,25 +201,30 @@ def reconstruct_from_hf_coeffs_torch(
     basis_dim = basis_matrix_t.shape[0]
     full_dim = int(np.prod(latents_shape))
     latents_sub = torch.matmul(basis_matrix_t, coeffs.to(dtype=torch.float32))
-    # basis_dim < full_dim 时（如 SD3 65536-dim），散射回完整维度。
-    # 使用与 compute_hf_basis_projection_torch 相同的 latent_projection_spec 索引公式。
+    # basis_dim < full_dim：优先使用 trajectory_feature_spec TFSW pullback。
     if basis_dim < full_dim:
-        latent_proj_spec = basis.get("latent_projection_spec")
-        if latent_proj_spec is None or latent_proj_spec.get("method") != "random_index_selection":
-            raise ValueError(
-                "HF basis_dim < full_dim but latent_projection_spec absent or not random_index_selection"
-            )
-        feature_dim = int(latent_proj_spec.get("feature_dim", 128))
-        seed = int(latent_proj_spec.get("seed", 0))
-        t_idx = int(latent_proj_spec.get("edit_timestep", 0))
-        sample_idx = int(latent_proj_spec.get("sample_idx", 0))
-        projection_seed = seed + 7919 + t_idx * 131 + sample_idx
-        rng = np.random.default_rng(projection_seed)
-        indices = rng.integers(0, max(1, full_dim), size=feature_dim)
-        indices_t = torch.as_tensor(indices, dtype=torch.long, device=coeffs.device)
-        output = torch.zeros(full_dim, dtype=torch.float32, device=coeffs.device)
-        output[indices_t] = latents_sub
-        reconstructed = output.reshape(latents_shape)
+        tfs = basis.get("trajectory_feature_spec")
+        if isinstance(tfs, dict) and tfs.get("feature_operator") == "masked_normalized_random_projection":
+            from .subspace.trajectory_feature_space import pullback_feature_delta_torch
+            reconstructed = pullback_feature_delta_torch(latents_sub, tfs, latents_shape)
+        else:
+            # backward-compat：latent_projection_spec scatter-back。
+            latent_proj_spec = basis.get("latent_projection_spec")
+            if latent_proj_spec is None or latent_proj_spec.get("method") != "random_index_selection":
+                raise ValueError(
+                    "HF basis_dim < full_dim but neither trajectory_feature_spec nor latent_projection_spec found in basis"
+                )
+            feature_dim = int(latent_proj_spec.get("feature_dim", 128))
+            seed = int(latent_proj_spec.get("seed", 0))
+            t_idx = int(latent_proj_spec.get("edit_timestep", 0))
+            sample_idx = int(latent_proj_spec.get("sample_idx", 0))
+            projection_seed = seed + 7919 + t_idx * 131 + sample_idx
+            rng = np.random.default_rng(projection_seed)
+            indices = rng.integers(0, max(1, full_dim), size=feature_dim)
+            indices_t = torch.as_tensor(indices, dtype=torch.long, device=coeffs.device)
+            output = torch.zeros(full_dim, dtype=torch.float32, device=coeffs.device)
+            output[indices_t] = latents_sub
+            reconstructed = output.reshape(latents_shape)
     else:
         reconstructed = latents_sub.reshape(latents_shape)
     return reconstructed.to(dtype=dtype)

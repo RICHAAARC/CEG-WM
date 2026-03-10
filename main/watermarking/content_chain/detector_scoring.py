@@ -284,206 +284,6 @@ def compute_content_score(
         return None, f"unknown_rule_version: {rule_version}"
 
 
-def extract_lf_score_from_detect_latents(
-    detect_latents: Optional[Any],
-    lf_basis: Optional[Dict[str, Any]],
-    embed_lf_score: Optional[float],
-    cfg: Dict[str, Any]
-) -> Tuple[Optional[float], str]:
-    """
-    功能：从 detect-side 真实推理张量提取 LF 分数（同构方式）。
-    
-    Extract LF score from detect-side latent tensor using same method as embed side.
-    Enables reproducible cross-validation between embed and detect traces.
-    
-    Args:
-        detect_latents: Detect-side latent tensor (torch.Tensor or np.ndarray).
-        lf_basis: LF basis dict with projection_matrix.
-        embed_lf_score: Embed-side LF score for consistency check.
-        cfg: Configuration mapping.
-    
-    Returns:
-        Tuple of (detect_lf_score, status).
-        detect_lf_score=None if absent/failed; else float in [0, 1].
-        status: "ok" / "absent" / "failed" / "mismatch".
-    
-    Raises:
-        TypeError: If inputs types invalid.
-    """
-    if not isinstance(cfg, dict):
-        return None, "cfg_invalid_type"
-    
-    if detect_latents is None:
-        return None, "detect_latents_missing"
-    
-    if lf_basis is None:
-        return None, "lf_basis_missing"
-    
-    try:
-        # 尝试 torch 路径。
-        is_torch = False
-        try:
-            import torch
-            is_torch = torch.is_tensor(detect_latents)
-        except Exception:
-            is_torch = False
-        
-        if is_torch:
-            import torch
-            projection_matrix = lf_basis.get("projection_matrix")
-            if projection_matrix is None:
-                return None, "projection_matrix_missing"
-            
-            # 投影到 LF 子空间并计算系数范数。
-            latents_flat = detect_latents.reshape(-1).to(dtype=torch.float32)
-            proj_matrix_t = torch.as_tensor(
-                projection_matrix,
-                dtype=torch.float32,
-                device=latents_flat.device
-            )
-            # 维度不匹配时先用 latent_projection_spec 将 latent 随机索引降至
-            # feature_dim，与 embed 侧 _sample_from_diffusion_pipeline 的
-            # 公式 (seed + 7919 + t_idx * 131 + sample_idx) 保持一致。
-            if latents_flat.shape[0] != proj_matrix_t.shape[0]:
-                latent_proj_spec = lf_basis.get("latent_projection_spec")
-                if not isinstance(latent_proj_spec, dict):
-                    return None, "latent_projection_spec_missing"
-                feature_dim = int(latent_proj_spec.get("feature_dim", proj_matrix_t.shape[0]))
-                seed = int(latent_proj_spec.get("seed", 0))
-                t_idx = int(latent_proj_spec.get("edit_timestep", 0))
-                sample_idx = int(latent_proj_spec.get("sample_idx", 0))
-                projection_seed = seed + 7919 + t_idx * 131 + sample_idx
-                rng = np.random.default_rng(projection_seed)
-                projection_indices = rng.integers(
-                    0, max(1, latents_flat.shape[0]), size=feature_dim
-                )
-                latents_flat = latents_flat[
-                    torch.tensor(projection_indices, device=latents_flat.device)
-                ]
-            lf_coeffs = torch.matmul(latents_flat, proj_matrix_t)
-            coeffs_norm = float(torch.linalg.vector_norm(lf_coeffs).item())
-        else:
-            # numpy 路径。
-            projection_matrix = lf_basis.get("projection_matrix")
-            if projection_matrix is None:
-                return None, "projection_matrix_missing"
-            
-            latents_np = np.asarray(detect_latents, dtype=np.float32).copy()
-            latents_flat = latents_np.reshape(-1)
-            proj_matrix_np = np.asarray(projection_matrix, dtype=np.float32)
-            # numpy 路径同样处理维度不匹配。
-            if latents_flat.shape[0] != proj_matrix_np.shape[0]:
-                latent_proj_spec = lf_basis.get("latent_projection_spec")
-                if not isinstance(latent_proj_spec, dict):
-                    return None, "latent_projection_spec_missing"
-                feature_dim = int(latent_proj_spec.get("feature_dim", proj_matrix_np.shape[0]))
-                seed = int(latent_proj_spec.get("seed", 0))
-                t_idx = int(latent_proj_spec.get("edit_timestep", 0))
-                sample_idx = int(latent_proj_spec.get("sample_idx", 0))
-                projection_seed = seed + 7919 + t_idx * 131 + sample_idx
-                rng = np.random.default_rng(projection_seed)
-                projection_indices = rng.integers(
-                    0, max(1, latents_flat.shape[0]), size=feature_dim
-                )
-                latents_flat = latents_flat[projection_indices]
-            lf_coeffs = np.dot(latents_flat, proj_matrix_np)
-            coeffs_norm = float(np.linalg.norm(lf_coeffs))
-        
-        # 计算分数（与 embed 侧同样的阈值）。
-        lf_score_threshold = cfg.get("lf_score_threshold", 10.0)
-        detect_lf_score = min(1.0, max(0.0, coeffs_norm / float(lf_score_threshold)))
-        
-        # 可选：检查与 embed-side 分数的一致性。
-        if embed_lf_score is not None:
-            score_delta = abs(detect_lf_score - embed_lf_score)
-            # 允许小的偏差（数值差异）。
-            if score_delta > 0.15:  # 15% 差异视为 mismatch。
-                return detect_lf_score, "lf_score_drift_detected"
-        
-        return detect_lf_score, "ok"
-    
-    except Exception as e:
-        return None, f"lf_extraction_failed: {type(e).__name__}"
-
-
-def extract_hf_score_from_detect_latents(
-    detect_latents: Optional[Any],
-    hf_basis: Optional[Dict[str, Any]],
-    embed_hf_score: Optional[float],
-    cfg: Dict[str, Any]
-) -> Tuple[Optional[float], str]:
-    """
-    功能：从 detect-side 真实推理张量提取 HF 分数（同构方式）。
-    
-    Extract HF score from detect-side latent tensor using same method as embed side.
-    
-    Args:
-        detect_latents: Detect-side latent tensor.
-        hf_basis: HF basis dict with hf_projection_matrix.
-        embed_hf_score: Embed-side HF score for consistency check.
-        cfg: Configuration mapping.
-    
-    Returns:
-        Tuple of (detect_hf_score, status).
-    
-    Raises:
-        TypeError: If inputs types invalid.
-    """
-    if not isinstance(cfg, dict):
-        return None, "cfg_invalid_type"
-    
-    if detect_latents is None:
-        return None, "detect_latents_missing"
-    
-    if hf_basis is None:
-        return None, "hf_basis_missing"
-    
-    try:
-        is_torch = False
-        try:
-            import torch
-            is_torch = torch.is_tensor(detect_latents)
-        except Exception:
-            is_torch = False
-        
-        if is_torch:
-            import torch
-            projection_matrix = hf_basis.get("hf_projection_matrix")
-            if projection_matrix is None:
-                return None, "hf_projection_matrix_missing"
-            
-            latents_flat = detect_latents.reshape(-1).to(dtype=torch.float32)
-            proj_matrix_t = torch.as_tensor(
-                projection_matrix,
-                dtype=torch.float32,
-                device=latents_flat.device
-            )
-            hf_coeffs = torch.matmul(latents_flat, proj_matrix_t)
-            coeffs_norm = float(torch.linalg.vector_norm(hf_coeffs).item())
-        else:
-            projection_matrix = hf_basis.get("hf_projection_matrix")
-            if projection_matrix is None:
-                return None, "hf_projection_matrix_missing"
-            
-            latents_np = np.asarray(detect_latents, dtype=np.float32).copy()
-            latents_flat = latents_np.reshape(-1)
-            proj_matrix_np = np.asarray(projection_matrix, dtype=np.float32)
-            hf_coeffs = np.dot(latents_flat, proj_matrix_np)
-            coeffs_norm = float(np.linalg.norm(hf_coeffs))
-        
-        hf_score_threshold = cfg.get("hf_score_threshold", 5.0)
-        detect_hf_score = min(1.0, max(0.0, coeffs_norm / float(hf_score_threshold)))
-        
-        if embed_hf_score is not None:
-            score_delta = abs(detect_hf_score - embed_hf_score)
-            if score_delta > 0.15:
-                return detect_hf_score, "hf_score_drift_detected"
-        
-        return detect_hf_score, "ok"
-    
-    except Exception as e:
-        return None, f"hf_extraction_failed: {type(e).__name__}"
-
 
 def validate_basis_digest_consistency(
     embed_basis_digest: Optional[str],
@@ -514,3 +314,151 @@ def validate_basis_digest_consistency(
         return True, "basis_digest_consistent"
     else:
         return False, "basis_digest_mismatch"
+
+
+# ---------------------------------------------------------------------------
+# Detect-side trajectory-based TFSW scoring（Phase 3：用真实 z_{t_e} 替代 final_latents）
+# ---------------------------------------------------------------------------
+
+def resolve_detect_trajectory_latent_for_timestep(
+    trajectory_cache: Optional[Any],
+    edit_timestep: int,
+) -> Tuple[Optional[Any], str]:
+    """
+    Resolve z_t from detect-side LatentTrajectoryCache at the given edit_timestep.
+
+    Exact-only: no nearest-step fallback. A timestep mismatch is treated as a
+    hard failure to enforce trajectory-consistent TFSW (z_{t_e} exact match).
+
+    Args:
+        trajectory_cache: LatentTrajectoryCache instance or None.
+        edit_timestep: Target diffusion step index (0-based), matching planner edit_timestep.
+
+    Returns:
+        Tuple of (z_t_or_none, status_str).
+        status_str values: "ok_exact",
+        "absent_empty_cache", "absent_exact_timestep_mismatch_edit_*_available_*".
+    """
+    if trajectory_cache is None or trajectory_cache.is_empty():
+        return None, "absent_empty_cache"
+    z_t = trajectory_cache.get(edit_timestep)
+    if z_t is not None:
+        return z_t, "ok_exact"
+    available = trajectory_cache.available_steps()
+    return None, f"absent_exact_timestep_mismatch_edit_{edit_timestep}_available_{sorted(available)}"
+
+
+def extract_lf_score_from_detect_trajectory(
+    trajectory_cache: Optional[Any],
+    lf_basis: Optional[Dict[str, Any]],
+    embed_lf_score: Optional[float],
+    cfg: Dict[str, Any],
+) -> Tuple[Optional[float], str]:
+    """
+    功能：从 detect 侧 trajectory cache 中取出 z_{t_e}，走 TFSW 路径提取 LF 分数。
+
+    Extract LF score from detect-side trajectory latent via Trajectory Feature Space
+    Watermarking (TFSW): phi = P^T vec(normalize(z_{t_e})).
+
+    Uses exact-only timestep resolution; no nearest-step fallback.
+
+    Args:
+        trajectory_cache: LatentTrajectoryCache instance capturing detect-side latents.
+        lf_basis: LF basis dict with trajectory_feature_spec and projection_matrix.
+        embed_lf_score: Embed-side LF score for drift consistency check.
+        cfg: Configuration mapping.
+
+    Returns:
+        Tuple of (lf_score_or_none, status_str).
+    """
+    if not isinstance(cfg, dict):
+        return None, "cfg_invalid_type"
+    if lf_basis is None:
+        return None, "lf_basis_missing"
+    tfs = lf_basis.get("trajectory_feature_spec")
+    if not isinstance(tfs, dict) or tfs.get("feature_operator") != "masked_normalized_random_projection":
+        return None, "tfs_spec_missing_or_invalid"
+    edit_timestep = int(tfs.get("edit_timestep", 0))
+    z_t, resolution_status = resolve_detect_trajectory_latent_for_timestep(
+        trajectory_cache, edit_timestep
+    )
+    if z_t is None:
+        return None, f"trajectory_latent_absent: {resolution_status}"
+    try:
+        from main.watermarking.content_chain.subspace.trajectory_feature_space import (
+            extract_trajectory_feature_np,
+        )
+        phi = extract_trajectory_feature_np(np.asarray(z_t, dtype=np.float64), tfs)
+        projection_matrix = lf_basis.get("projection_matrix")
+        if projection_matrix is None:
+            return None, "projection_matrix_missing"
+        proj_np = np.asarray(projection_matrix, dtype=np.float32)
+        if phi.shape[0] != proj_np.shape[0]:
+            return None, f"phi_dim_mismatch_{phi.shape[0]}_vs_{proj_np.shape[0]}"
+        lf_coeffs = np.dot(phi.astype(np.float32), proj_np)
+        coeffs_norm = float(np.linalg.norm(lf_coeffs))
+        lf_score_threshold = float(cfg.get("lf_score_threshold", 10.0))
+        detect_lf_score = min(1.0, max(0.0, coeffs_norm / lf_score_threshold))
+        if embed_lf_score is not None and abs(detect_lf_score - float(embed_lf_score)) > 0.15:
+            return detect_lf_score, f"lf_score_drift_detected_trajectory_{resolution_status}"
+        return detect_lf_score, f"ok_trajectory_{resolution_status}"
+    except Exception as exc:
+        return None, f"lf_trajectory_score_failed: {type(exc).__name__}"
+
+
+def extract_hf_score_from_detect_trajectory(
+    trajectory_cache: Optional[Any],
+    hf_basis: Optional[Dict[str, Any]],
+    embed_hf_score: Optional[float],
+    cfg: Dict[str, Any],
+) -> Tuple[Optional[float], str]:
+    """
+    功能：从 detect 侧 trajectory cache 中取出 z_{t_e}，走 TFSW 路径提取 HF 分数。
+
+    Extract HF score from detect-side trajectory latent via Trajectory Feature Space
+    Watermarking (TFSW): phi = P^T vec(normalize(z_{t_e})), then project with hf_projection_matrix.
+
+    Uses exact-only timestep resolution; no nearest-step fallback.
+
+    Args:
+        trajectory_cache: LatentTrajectoryCache instance capturing detect-side latents.
+        hf_basis: HF basis dict with trajectory_feature_spec and hf_projection_matrix.
+        embed_hf_score: Embed-side HF score for drift consistency check.
+        cfg: Configuration mapping.
+
+    Returns:
+        Tuple of (hf_score_or_none, status_str).
+    """
+    if not isinstance(cfg, dict):
+        return None, "cfg_invalid_type"
+    if hf_basis is None:
+        return None, "hf_basis_missing"
+    tfs = hf_basis.get("trajectory_feature_spec")
+    if not isinstance(tfs, dict) or tfs.get("feature_operator") != "masked_normalized_random_projection":
+        return None, "tfs_spec_missing_or_invalid"
+    edit_timestep = int(tfs.get("edit_timestep", 0))
+    z_t, resolution_status = resolve_detect_trajectory_latent_for_timestep(
+        trajectory_cache, edit_timestep
+    )
+    if z_t is None:
+        return None, f"trajectory_latent_absent: {resolution_status}"
+    try:
+        from main.watermarking.content_chain.subspace.trajectory_feature_space import (
+            extract_trajectory_feature_np,
+        )
+        phi = extract_trajectory_feature_np(np.asarray(z_t, dtype=np.float64), tfs)
+        hf_projection_matrix = hf_basis.get("hf_projection_matrix")
+        if hf_projection_matrix is None:
+            return None, "hf_projection_matrix_missing"
+        proj_np = np.asarray(hf_projection_matrix, dtype=np.float32)
+        if phi.shape[0] != proj_np.shape[0]:
+            return None, f"phi_dim_mismatch_{phi.shape[0]}_vs_{proj_np.shape[0]}"
+        hf_coeffs = np.dot(phi.astype(np.float32), proj_np)
+        coeffs_norm = float(np.linalg.norm(hf_coeffs))
+        hf_score_threshold = float(cfg.get("hf_score_threshold", 5.0))
+        detect_hf_score = min(1.0, max(0.0, coeffs_norm / hf_score_threshold))
+        if embed_hf_score is not None and abs(detect_hf_score - float(embed_hf_score)) > 0.15:
+            return detect_hf_score, f"hf_score_drift_detected_trajectory_{resolution_status}"
+        return detect_hf_score, f"ok_trajectory_{resolution_status}"
+    except Exception as exc:
+        return None, f"hf_trajectory_score_failed: {type(exc).__name__}"

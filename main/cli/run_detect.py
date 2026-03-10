@@ -597,6 +597,7 @@ def run_detect(
                 "subspace_binding_digest": None,
             }
             final_latents = None
+            _detect_traj_cache = trajectory_tap.LatentTrajectoryCache()
         else:
             detect_cfg = cfg.get("detect") if isinstance(cfg.get("detect"), dict) else {}
             geometry_cfg = detect_cfg.get("geometry") if isinstance(detect_cfg.get("geometry"), dict) else {}
@@ -604,6 +605,8 @@ def run_detect(
                 geometry_cfg.get("enabled", False)
                 and geometry_cfg.get("enable_attention_anchor", False)
             )
+            # 为 detect 侧创建 per-step latent 缓存（与 embed 侧对称，不写入 records）。
+            _detect_traj_cache = trajectory_tap.LatentTrajectoryCache()
             inference_result = infer_runtime.run_sd3_inference(
                 cfg,
                 pipeline_obj,
@@ -613,6 +616,7 @@ def run_detect(
                 injection_modifier=injection_modifier,
                 capture_final_latents=True,  # 捕获最后的 latents 用于 detect 侧评分
                 capture_attention=capture_attention,
+                trajectory_latent_cache=_detect_traj_cache,
             )
             inference_status = inference_result.get("inference_status")
             inference_error = inference_result.get("inference_error")
@@ -635,6 +639,9 @@ def run_detect(
             cfg["__runtime_self_attention_source__"] = runtime_self_attention_source
         cfg["__detect_pipeline_obj__"] = pipeline_obj
         cfg["__pipeline_runtime_meta__"] = pipeline_result.get("pipeline_runtime_meta")
+        # 将 detect 侧 per-step latent 缓存注入 cfg（内存传递，不写入 records）。
+        if not _detect_traj_cache.is_empty():
+            cfg["__detect_trajectory_latent_cache__"] = _detect_traj_cache
         
         # 构造 infer_trace 并计算 digest
         infer_trace_obj = infer_trace.build_infer_trace(

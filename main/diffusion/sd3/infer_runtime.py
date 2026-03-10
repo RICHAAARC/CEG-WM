@@ -36,6 +36,7 @@ def run_sd3_inference(
     injection_modifier: Optional[LatentModifier] = None,
     capture_final_latents: bool = False,
     capture_attention: bool = False,
+    trajectory_latent_cache: Optional[trajectory_tap.LatentTrajectoryCache] = None,
 ) -> Dict[str, Any]:
     """
     功能：执行 SD3 推理并返回 inference_runtime_meta。
@@ -48,6 +49,8 @@ def run_sd3_inference(
         device: Device string ("cpu", "cuda", etc.) or None.
         seed: Random seed integer or None.
         capture_final_latents: Optional bool to capture final latents from inference (for detect-side scoring).
+        capture_attention: Optional bool to register attention capture hooks.
+        trajectory_latent_cache: Optional LatentTrajectoryCache for per-step latent tensor storage.
 
     Returns:
         Dict with inference_status, inference_error, inference_runtime_meta, and optional final_latents.
@@ -373,7 +376,8 @@ def run_sd3_inference(
             infer_kwargs,
             inference_runtime_meta,
             seed=seed,
-            device=device
+            device=device,
+            latent_capture_cache=trajectory_latent_cache
         )
         output = tap_call_result.get("output")
         trajectory_evidence = tap_call_result.get("trajectory_evidence")

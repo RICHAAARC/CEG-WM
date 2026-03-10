@@ -42,6 +42,99 @@ ALLOWED_ABSENT_REASONS = {
 }
 
 
+class LatentTrajectoryCache:
+    """
+    功能：推理过程中各时步 latent 张量的内存缓存（不写入 records）。
+
+    In-memory cache for per-step latent tensors captured during diffusion inference.
+    This class is intentionally separate from trajectory evidence and is never written
+    to disk or included in any records schema.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+
+    def __init__(self) -> None:
+        # {step_index: numpy_array}，仅内存存储。
+        self._cache: Dict[int, Any] = {}
+
+    def capture(self, step_index: int, latent: Any) -> None:
+        """
+        功能：缓存指定时步的 latent 张量副本。
+
+        Store a copy of the latent tensor for the given step index.
+
+        Args:
+            step_index: Zero-based denoising step index.
+            latent: Latent tensor (torch.Tensor or numpy array).
+
+        Returns:
+            None.
+        """
+        if not isinstance(step_index, int) or step_index < 0:
+            return
+        if latent is None:
+            return
+        try:
+            # 优先转换为 numpy，避免持有 torch tensor 引用导致的内存占用。
+            if hasattr(latent, "detach"):
+                arr = latent.detach().cpu()
+            else:
+                arr = latent
+            if hasattr(arr, "numpy"):
+                arr = arr.numpy()
+            import numpy as _np
+            self._cache[step_index] = _np.array(arr, dtype=_np.float32, copy=True)
+        except Exception:
+            # 张量转换失败时静默跳过，不阻断推理流程。
+            pass
+
+    def get(self, step_index: int) -> Optional[Any]:
+        """
+        功能：获取指定时步的 latent 缓存（无则返回 None）。
+
+        Retrieve cached latent for the given step index, or None if absent.
+
+        Args:
+            step_index: Zero-based denoising step index.
+
+        Returns:
+            Numpy array of cached latent, or None.
+        """
+        return self._cache.get(step_index)
+
+    def available_steps(self) -> List[int]:
+        """
+        功能：返回已缓存时步的有序列表。
+
+        Return sorted list of cached step indices.
+
+        Args:
+            None.
+
+        Returns:
+            Sorted list of integer step indices.
+        """
+        return sorted(self._cache.keys())
+
+    def is_empty(self) -> bool:
+        """
+        功能：判断缓存是否为空。
+
+        Return True when no steps have been captured.
+
+        Args:
+            None.
+
+        Returns:
+            Boolean empty flag.
+        """
+        return len(self._cache) == 0
+
+
 @dataclass(frozen=True)
 class TrajectorySpec:
     """
@@ -231,12 +324,15 @@ def tap_from_pipeline(
     inference_runtime_meta: Dict[str, Any],
     *,
     seed: Optional[int],
-    device: Optional[str]
+    device: Optional[str],
+    latent_capture_cache: Optional["LatentTrajectoryCache"] = None
 ) -> Dict[str, Any]:
     """
-    功能：在 SD3 推理循环中原位采样 trajectory 摘要。
+    功能：在 SD3 推理循环中原位采样 trajectory 摘要，并可选地缓存原始 latent 张量。
 
     Tap real inference tensors from pipeline callback and build digest-only evidence.
+    When latent_capture_cache is provided, each step's raw latent tensor is stored
+    in memory for downstream planner use (not written to records).
 
     Args:
         cfg: Runtime configuration mapping.
@@ -245,6 +341,7 @@ def tap_from_pipeline(
         inference_runtime_meta: Parsed runtime meta before pipeline execution.
         seed: Deterministic seed for reproducibility.
         device: Runtime device label.
+        latent_capture_cache: Optional LatentTrajectoryCache for in-memory tensor storage.
 
     Returns:
         Mapping with output, trajectory_evidence, and tap_status.
@@ -318,6 +415,9 @@ def tap_from_pipeline(
                 "scheduler_timestep": _normalize_scheduler_step(timestep),
                 "stats": _summarize_tensor(latents, spec.stats_precision_digits)
             }
+        # 若调用方提供了缓存对象，则同时保存原始 latent 张量副本（不写入 records）。
+        if latent_capture_cache is not None:
+            latent_capture_cache.capture(step_index, latents)
         return callback_kwargs
 
     callback_kwargs = dict(infer_kwargs)

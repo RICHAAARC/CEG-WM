@@ -2,7 +2,7 @@
 测试用例：detect 侧 LF 分支选择与 ecc 双语义兼容。
 
 功能说明：
-- 验证 ecc="sparse_ldpc" 时 detect 侧优先使用 LFCoderPRC latent 路径。
+- 验证 ecc="sparse_ldpc" 时 detect 侧必须使用 trajectory-consistent TFSW 路径。
 - 验证 ecc=int 时 detect 侧使用 image DCT fallback 路径。
 """
 
@@ -15,13 +15,24 @@ import numpy as np
 from PIL import Image
 
 from main.watermarking.detect import orchestrator as detect_orchestrator
+from main.diffusion.sd3.trajectory_tap import LatentTrajectoryCache
 
 
-def test_detect_lf_prefers_prc_path_for_sparse_ldpc() -> None:
+def _make_traj_cache_with_step(step: int, values: list) -> LatentTrajectoryCache:
+    """build a LatentTrajectoryCache containing a single timestep."""
+    import numpy as np
+    cache = LatentTrajectoryCache()
+    cache.capture(step, np.array(values, dtype=np.float32).reshape(1, 1, -1, 1))
+    return cache
+
+
+def test_detect_lf_uses_trajectory_path_for_sparse_ldpc() -> None:
     """
-    功能：验证 sparse_ldpc 走 latent PRC 检测分支。
+    功能：验证 sparse_ldpc 必须走 trajectory-consistent TFSW 路径，不存在 legacy latent 分支。
 
-    Verify that detect LF path uses latent PRC branch when ecc="sparse_ldpc".
+    Verify that detect LF path always uses trajectory-consistent TFSW branch
+    (lf_detect_path=="lf_coder_prc_trajectory") when ecc="sparse_ldpc".
+    The legacy "lf_coder_prc_latent" path must never appear.
 
     Args:
         None.
@@ -29,6 +40,20 @@ def test_detect_lf_prefers_prc_path_for_sparse_ldpc() -> None:
     Returns:
         None.
     """
+    from main.core import digests
+    lf_basis: Any = {
+        "trajectory_feature_spec": {
+            "feature_operator": "masked_normalized_random_projection",
+            "feature_dim": 4,
+            "projection_seed": 0,
+            "edit_timestep": 0,
+        }
+    }
+    import numpy as np
+    rng = np.random.default_rng(42)
+    cache = LatentTrajectoryCache()
+    cache.capture(0, rng.standard_normal((1, 1, 2, 4)).astype(np.float32))
+
     cfg: Dict[str, Any] = {
         "watermark": {
             "key_id": "k1",
@@ -42,13 +67,13 @@ def test_detect_lf_prefers_prc_path_for_sparse_ldpc() -> None:
             },
             "hf": {"enabled": False},
         },
-        "__detect_final_latents__": [0.1, -0.2, 0.3, -0.4, 0.5, -0.6, 0.7, -0.8],
+        "__detect_trajectory_latent_cache__": cache,
     }
 
     lf_score, hf_score, traces = detect_orchestrator._extract_content_raw_scores_from_image(  # pyright: ignore[reportPrivateUsage]
         cfg=cfg,
         input_record=None,
-        plan_payload={"plan": {"band_spec": {}}},
+        plan_payload={"plan": {"lf_basis": lf_basis, "band_spec": {}}},
         plan_digest="plan_digest_for_test",
         cfg_digest="cfg_digest_for_test",
     )
@@ -57,7 +82,9 @@ def test_detect_lf_prefers_prc_path_for_sparse_ldpc() -> None:
     traces_dict: Dict[str, Any] = traces
     lf_node = traces_dict.get("lf")
     lf_trace: Dict[str, Any] = cast(Dict[str, Any], lf_node) if isinstance(lf_node, dict) else {}
-    assert lf_trace.get("lf_detect_path") == "lf_coder_prc_latent"
+    # 必须是 trajectory 路径，不得是 legacy latent 路径
+    assert lf_trace.get("lf_detect_path") == "lf_coder_prc_trajectory"
+    assert lf_trace.get("lf_detect_path") != "lf_coder_prc_latent"
     assert lf_trace.get("lf_status") in {"ok", "failed", "absent"}
     assert hf_score is None
 

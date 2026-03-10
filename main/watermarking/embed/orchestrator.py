@@ -539,6 +539,10 @@ def _build_planner_inputs_for_runtime(
             inputs["unet"] = runtime_unet
     if runtime_latents is not None:
         inputs["latents"] = runtime_latents
+    # 将推理期间捕获的 per-step latent 缓存传递给 planner（内存传递，不写入 records）。
+    runtime_traj_cache = cfg.get("__embed_trajectory_latent_cache__")
+    if runtime_traj_cache is not None:
+        inputs["trajectory_latent_cache"] = runtime_traj_cache
     if trajectory_evidence is not None:
         inputs["trajectory_evidence"] = trajectory_evidence
     if isinstance(content_evidence_payload, dict):

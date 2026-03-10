@@ -146,23 +146,30 @@ def compute_lf_basis_projection_torch(latents: Any, basis: Dict[str, Any]) -> An
     if basis_matrix_t.ndim != 2:
         raise ValueError("projection_matrix must be rank-2")
     if latents_flat.shape[0] != basis_matrix_t.shape[0]:
-        # 维度不匹配时，尝试用 latent_projection_spec 做随机索引降维以匹配 basis 行数。
-        # 公式：projection_seed = seed + 7919 + t_idx * 131 + sample_idx（与规划器一致）。
-        latent_proj_spec = basis.get("latent_projection_spec")
-        if not isinstance(latent_proj_spec, dict) or latent_proj_spec.get("method") != "random_index_selection":
-            raise ValueError(
-                f"latents dimension {latents_flat.shape[0]} != basis dimension {basis_matrix_t.shape[0]}"
-            )
-        import numpy as np
-        feature_dim = int(latent_proj_spec.get("feature_dim", basis_matrix_t.shape[0]))
-        seed = int(latent_proj_spec.get("seed", 0))
-        t_idx = int(latent_proj_spec.get("edit_timestep", 0))
-        sample_idx = int(latent_proj_spec.get("sample_idx", 0))
-        projection_seed = seed + 7919 + t_idx * 131 + sample_idx
-        rng = np.random.default_rng(projection_seed)
-        indices = rng.integers(0, max(1, int(latents_flat.shape[0])), size=feature_dim)
-        indices_t = torch.as_tensor(indices, dtype=torch.long, device=latents_flat.device)
-        latents_flat = latents_flat[indices_t]
+        # 维度不匹配：使用 trajectory_feature_spec（TFSW 主路径）将 latent 降至 feature_dim。
+        # 公式：projection_seed = planner_seed + edit_timestep（不含 sample_idx）。
+        tfs = basis.get("trajectory_feature_spec")
+        if isinstance(tfs, dict) and tfs.get("feature_operator") == "masked_normalized_random_projection":
+            from .subspace.trajectory_feature_space import extract_trajectory_feature_torch
+            latents_flat = extract_trajectory_feature_torch(latents, tfs)
+        else:
+            # backward-compat：latent_projection_spec 随机索引路径（将被废弃）。
+            latent_proj_spec = basis.get("latent_projection_spec")
+            if not isinstance(latent_proj_spec, dict) or latent_proj_spec.get("method") != "random_index_selection":
+                raise ValueError(
+                    f"latents dimension {latents_flat.shape[0]} != basis dimension {basis_matrix_t.shape[0]}: "
+                    "neither trajectory_feature_spec nor latent_projection_spec found in basis"
+                )
+            import numpy as _np
+            feature_dim = int(latent_proj_spec.get("feature_dim", basis_matrix_t.shape[0]))
+            seed = int(latent_proj_spec.get("seed", 0))
+            t_idx = int(latent_proj_spec.get("edit_timestep", 0))
+            sample_idx = int(latent_proj_spec.get("sample_idx", 0))
+            projection_seed = seed + 7919 + t_idx * 131 + sample_idx
+            rng = _np.random.default_rng(projection_seed)
+            indices = rng.integers(0, max(1, int(latents_flat.shape[0])), size=feature_dim)
+            indices_t = torch.as_tensor(indices, dtype=torch.long, device=latents_flat.device)
+            latents_flat = latents_flat[indices_t]
     return torch.matmul(latents_flat, basis_matrix_t)
 
 
@@ -274,7 +281,7 @@ def reconstruct_from_lf_coeffs_torch(
     if basis_matrix_t.ndim != 2:
         raise ValueError("projection_matrix must be rank-2")
 
-    # latents_sub: (basis_dim,) = basis_matrix (basis_dim, rank) @ coeffs (rank,)
+    # latents_sub: basis B (basis_dim, rank) @ coeffs (rank,) = 特征空间向量 (basis_dim,)
     latents_sub = torch.matmul(basis_matrix_t, coeffs.to(dtype=torch.float32))
     basis_dim = int(basis_matrix_t.shape[0])
     full_dim = 1
@@ -282,26 +289,32 @@ def reconstruct_from_lf_coeffs_torch(
         full_dim *= s
 
     if basis_dim < full_dim:
-        # basis 行数小于完整 latent 维度：需通过 latent_projection_spec 散射回完整维度。
-        # 与 compute_lf_basis_projection_torch 使用相同的索引公式，保证可逆性。
-        latent_proj_spec = basis.get("latent_projection_spec")
-        if not isinstance(latent_proj_spec, dict) or latent_proj_spec.get("method") != "random_index_selection":
-            raise ValueError(
-                f"reconstruction dim mismatch: basis_dim={basis_dim} < full_dim={full_dim}, "
-                "but latent_projection_spec absent or not random_index_selection"
-            )
-        import numpy as np
-        feature_dim = int(latent_proj_spec.get("feature_dim", basis_dim))
-        seed = int(latent_proj_spec.get("seed", 0))
-        t_idx = int(latent_proj_spec.get("edit_timestep", 0))
-        sample_idx = int(latent_proj_spec.get("sample_idx", 0))
-        projection_seed = seed + 7919 + t_idx * 131 + sample_idx
-        rng = np.random.default_rng(projection_seed)
-        indices = rng.integers(0, max(1, full_dim), size=feature_dim)
-        indices_t = torch.as_tensor(indices, dtype=torch.long, device=coeffs.device)
-        output = torch.zeros(full_dim, dtype=torch.float32, device=coeffs.device)
-        output[indices_t] = latents_sub
-        reconstructed = output.reshape(latents_shape)
+        # basis_dim < full_dim：需把特征向量映射回完整 latent 维度。
+        # 优先使用 trajectory_feature_spec（TFSW pullback）。
+        tfs = basis.get("trajectory_feature_spec")
+        if isinstance(tfs, dict) and tfs.get("feature_operator") == "masked_normalized_random_projection":
+            from .subspace.trajectory_feature_space import pullback_feature_delta_torch
+            reconstructed = pullback_feature_delta_torch(latents_sub, tfs, latents_shape)
+        else:
+            # backward-compat：latent_projection_spec scatter-back 路径。
+            latent_proj_spec = basis.get("latent_projection_spec")
+            if not isinstance(latent_proj_spec, dict) or latent_proj_spec.get("method") != "random_index_selection":
+                raise ValueError(
+                    f"reconstruction dim mismatch: basis_dim={basis_dim} < full_dim={full_dim}, "
+                    "but neither trajectory_feature_spec nor latent_projection_spec found in basis"
+                )
+            import numpy as _np
+            feature_dim = int(latent_proj_spec.get("feature_dim", basis_dim))
+            seed = int(latent_proj_spec.get("seed", 0))
+            t_idx = int(latent_proj_spec.get("edit_timestep", 0))
+            sample_idx = int(latent_proj_spec.get("sample_idx", 0))
+            projection_seed = seed + 7919 + t_idx * 131 + sample_idx
+            rng = _np.random.default_rng(projection_seed)
+            indices = rng.integers(0, max(1, full_dim), size=feature_dim)
+            indices_t = torch.as_tensor(indices, dtype=torch.long, device=coeffs.device)
+            output = torch.zeros(full_dim, dtype=torch.float32, device=coeffs.device)
+            output[indices_t] = latents_sub
+            reconstructed = output.reshape(latents_shape)
     else:
         reconstructed = latents_sub.reshape(latents_shape)
     return reconstructed.to(dtype=dtype)

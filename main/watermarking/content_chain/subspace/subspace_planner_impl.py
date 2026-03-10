@@ -2376,29 +2376,20 @@ class SubspacePlannerImpl:
         }
         if channel == "lf":
             payload["projection_matrix"] = quantized.tolist()
-            # latent_projection_spec：记录 embed 侧将原始 latent 降至 feature_dim
-            # 的随机索引选取参数，detect 侧用同一公式复现投影，避免维度不匹配。
-            # 公式：projection_seed = seed + 7919 + t_idx * 131 + sample_idx
-            payload["latent_projection_spec"] = {
-                "spec_version": "v1",
-                "method": "random_index_selection",
-                "feature_dim": planner_params.feature_dim,
-                "seed": planner_params.seed,
-                "edit_timestep": planner_params.edit_timestep,
-                "sample_idx": 0,
-            }
         else:
             payload["hf_projection_matrix"] = quantized.tolist()
-            # HF 与 LF 共享相同的 latent 降维规范，避免 SD3 高维 latent 与
-            # 128-dim 规划基底之间的维度不匹配。
-            payload["latent_projection_spec"] = {
-                "spec_version": "v1",
-                "method": "random_index_selection",
-                "feature_dim": planner_params.feature_dim,
-                "seed": planner_params.seed,
-                "edit_timestep": planner_params.edit_timestep,
-                "sample_idx": 0,
-            }
+        # trajectory_feature_spec：TFSW 核心字段，记录 embed/detect 侧将高维 latent
+        # 映射到低维特征空间的随机投影参数。
+        # 公式：projection_seed = planner_seed + edit_timestep（不含 sample_idx）
+        # 保证特征空间跨样本一致性（同一 edit_timestep 下所有样本共享同一投影矩阵 P）。
+        projection_seed = planner_params.seed + planner_params.edit_timestep
+        payload["trajectory_feature_spec"] = {
+            "spec_version": "v1",
+            "feature_operator": "masked_normalized_random_projection",
+            "feature_dim": planner_params.feature_dim,
+            "projection_seed": projection_seed,
+            "edit_timestep": planner_params.edit_timestep,
+        }
         payload["basis_payload_digest"] = digests.canonical_sha256(payload)
         return payload
 
@@ -2662,27 +2653,55 @@ class SubspacePlannerImpl:
                     "l2": float(np.linalg.norm(base_vector)),
                 }
             )
-            for sample_idx, t_idx in enumerate(timesteps_list):
-                projection_seed = planner_params.seed + 7919 + int(t_idx) * 131 + sample_idx
-                projection_rng = np.random.default_rng(projection_seed)
-                projection_indices = projection_rng.integers(0, max(1, base_vector.size), size=planner_params.feature_dim)
-                state = base_vector[projection_indices]
-                state = state - float(np.mean(state))
-                state_norm = float(np.linalg.norm(state) + 1e-12)
-                state = state / state_norm
-                timescale = max(0.1, 1.0 - t_idx / max(1, num_inference_steps))
-                state = state * (0.85 + 0.15 * timescale)
-                samples_list.append(state)
-        else:
-            sample_semantics = "runtime_driven_surrogate_fallback"
-            sample_source = "pipeline_presence_proxy"
-            surrogate_reason = "runtime_latents_absent_using_seeded_proxy"
-            rng = np.random.default_rng(planner_params.seed + 13531)
+            # TFSW 特征提取：使用固定投影矩阵 P（projection_seed = planner_seed + edit_timestep）。
+            # (1) 优先从 trajectory_latent_cache 获取真实 z_t（各时步扩散 latent）。
+            # (2) 缓存命中时直接提取特征 φ = Pᵀ vec(normalize(z_t))。
+            # (3) paper 模式：缓存缺失或精确时步不命中均 raise ValueError（无降级兜底）。
+            # (4) 非 paper 模式：缓存缺失时以最近可用时步的 z_t 填充；缓存为空则退回合成扰动。
+            # 禁止使用 sample_idx 参与 projection_seed，保证特征空间跨样本一致性。
+            from .trajectory_feature_space import (
+                extract_trajectory_feature_np,
+                normalize_masked_latent_np,
+                build_projection_matrix_np,
+            )
+            tfs_planning = {
+                "feature_dim": planner_params.feature_dim,
+                "projection_seed": planner_params.seed + planner_params.edit_timestep,
+            }
+            # 预先构造投影矩阵（规划阶段只需一次）。
+            P_plan = build_projection_matrix_np(tfs_planning, latents_array.shape)
+
+            trajectory_latent_cache = inputs.get("trajectory_latent_cache")
+            cache_available_steps: List[int] = []
+            if trajectory_latent_cache is not None and not trajectory_latent_cache.is_empty():
+                cache_available_steps = trajectory_latent_cache.available_steps()
+                sample_source = "real_diffusion_trajectory_zT"
+                sample_semantics = "runtime_trajectory_latent_captured"
+
+            # 唯一路径：严格 exact-only trajectory 采样，无最近步兜底，无合成降级。
+            if not cache_available_steps:
+                raise ValueError(
+                    "trajectory_cache_absent_or_empty_cannot_build_basis"
+                )
             for t_idx in timesteps_list:
-                state = rng.normal(loc=0.0, scale=1.0, size=(planner_params.feature_dim,))
-                timescale = max(0.1, 1.0 - t_idx / max(1, num_inference_steps))
-                state = state * (0.8 + 0.2 * timescale)
-                samples_list.append(state)
+                z_t_arr = trajectory_latent_cache.get(t_idx)
+                if z_t_arr is None:
+                    raise ValueError(
+                        f"exact_timestep_miss_{t_idx}_available_{sorted(cache_available_steps)}"
+                    )
+                try:
+                    z_t_np = np.asarray(z_t_arr, dtype=np.float64)
+                    phi = extract_trajectory_feature_np(z_t_np, tfs_planning)
+                    samples_list.append(phi.astype(np.float64))
+                except Exception as exc:
+                    raise ValueError(
+                        f"feature_extraction_failed_step_{t_idx}:{type(exc).__name__}"
+                    ) from exc
+        else:
+            # 禁止无 latents 的任何 surrogate 路径。
+            raise ValueError(
+                "no_runtime_latents_for_trajectory_basis_sampling"
+            )
         
         samples = np.asarray(samples_list, dtype=np.float64)
         

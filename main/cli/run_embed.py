@@ -440,6 +440,9 @@ def run_embed(
                 pipeline_fingerprint_digest = digests.canonical_sha256(pipeline_fingerprint)
             
             enable_latent_sync = resolve_enable_latent_sync(cfg)
+            # 为 planner 构造内存 latent 缓存（不写入 records）。
+            from main.diffusion.sd3.trajectory_tap import LatentTrajectoryCache
+            _traj_latent_cache = LatentTrajectoryCache()
             inference_result = infer_runtime.run_sd3_inference(
                 cfg,
                 pipeline_obj,
@@ -447,7 +450,8 @@ def run_embed(
                 seed,
                 injection_context=injection_context,
                 injection_modifier=injection_modifier,
-                capture_final_latents=enable_latent_sync
+                capture_final_latents=enable_latent_sync,
+                trajectory_latent_cache=_traj_latent_cache
             )
             inference_status = inference_result.get("inference_status")
             inference_error = inference_result.get("inference_error")
@@ -461,6 +465,9 @@ def run_embed(
                 cfg["__embed_pipeline_obj__"] = pipeline_obj
             if final_latents is not None:
                 cfg["__embed_final_latents__"] = final_latents
+            # 将 latent 缓存传递给 planner（不写入 records，仅内存传递）。
+            if not _traj_latent_cache.is_empty():
+                cfg["__embed_trajectory_latent_cache__"] = _traj_latent_cache
             # 计算 embed 侧 latent 空间统计，作为 detect 侧几何同步的 cross-comparison 基线。
             if final_latents is not None:
                 try:
@@ -581,6 +588,7 @@ def run_embed(
             )
             cfg.pop("__embed_pipeline_obj__", None)
             cfg.pop("__embed_final_latents__", None)
+            cfg.pop("__embed_trajectory_latent_cache__", None)
             # 将 embed 侧 latent 空间统计写入 record，供 detect 侧几何同步 cross-comparison。
             _embed_latent_stats = cfg.pop("__embed_latent_spatial_stats__", None)
             if not isinstance(record, dict):

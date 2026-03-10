@@ -592,9 +592,9 @@ def run_detect_orchestrator(
 
     # 实现 detect 侧同构分数与一致性校验
     detect_runtime_mode = "fallback_identity_v0"  # 默认：未获得可用 detect 同构分数
-    final_latents = cfg.get("__detect_final_latents__")  # 从 CLI 层捕获的最后 latents
+    detect_traj_cache = cfg.get("__detect_trajectory_latent_cache__")  # Phase 3：trajectory cache
 
-    if not forced_mismatch and final_latents is not None and isinstance(plan_payload, dict):
+    if not forced_mismatch and isinstance(plan_payload, dict):
         # plan_payload 是 SubspacePlanEvidence 的 dict 化结构，
         # lf_basis/hf_basis 在 plan_payload["plan"] 内层，而非顶层。
         _plan_inner = plan_payload.get("plan")
@@ -616,21 +616,24 @@ def run_detect_orchestrator(
                 if embed_hf_score is None:
                     embed_hf_score = embed_content_payload.get("hf_score")
 
-        # 计算 detect 侧 LF 分数（同构方式）
-        detect_lf_score, detect_lf_status = detector_scoring.extract_lf_score_from_detect_latents(
-            final_latents,
-            lf_basis,
-            embed_lf_score,
-            cfg
-        )
-
-        # 计算 detect 侧 HF 分数（同构方式）
-        detect_hf_score, detect_hf_status = detector_scoring.extract_hf_score_from_detect_latents(
-            final_latents,
-            hf_basis,
-            embed_hf_score,
-            cfg
-        )
+        # --- 评分路径：trajectory cache 可用 → TFSW z_{t_e} 精确评分；否则显式失败 ---
+        if detect_traj_cache is not None and not detect_traj_cache.is_empty():
+            # 主路径：使用真实 z_{t_e} 走 TFSW（exact-only）。
+            detect_lf_score, detect_lf_status = detector_scoring.extract_lf_score_from_detect_trajectory(
+                detect_traj_cache,
+                lf_basis,
+                embed_lf_score,
+                cfg,
+            )
+            detect_hf_score, detect_hf_status = detector_scoring.extract_hf_score_from_detect_trajectory(
+                detect_traj_cache,
+                hf_basis,
+                embed_hf_score,
+                cfg,
+            )
+        else:
+            detect_lf_score, detect_lf_status = None, "no_trajectory_cache"
+            detect_hf_score, detect_hf_status = None, "no_trajectory_cache"
 
         # 校验 plan_digest 与 basis_digest 一致性
         embed_plan_digest = input_record.get("plan_digest") if input_record else None
@@ -653,15 +656,17 @@ def run_detect_orchestrator(
             content_evidence_payload["detect_hf_score_absent_reason"] = "hf_basis_not_computed_in_surrogate_mode"
 
         lf_score_drift_status = None
-        if detect_lf_status == "ok":
+        _lf_st = detect_lf_status or ""
+        if _lf_st.startswith("ok_trajectory_ok_exact"):
             lf_score_drift_status = "ok"
-        elif detect_lf_status == "lf_score_drift_detected":
+        elif "drift_detected" in _lf_st:
             lf_score_drift_status = "drift_detected"
 
         hf_score_drift_status = None
-        if detect_hf_status == "ok":
+        _hf_st = detect_hf_status or ""
+        if _hf_st.startswith("ok_trajectory_ok_exact"):
             hf_score_drift_status = "ok"
-        elif detect_hf_status == "hf_score_drift_detected":
+        elif "drift_detected" in _hf_st:
             hf_score_drift_status = "drift_detected"
 
         if lf_score_drift_status is not None:
@@ -709,8 +714,9 @@ def run_detect_orchestrator(
         runtime_built = bool(pipeline_runtime_meta.get("status") == "built")
 
         # 如果 detect 侧分数有效、未命中不一致且运行期为真实非 synthetic pipeline，则标记为真实运行模式。
+        _lf_ok = (detect_lf_status == "ok" or (detect_lf_status or "").startswith("ok_trajectory_"))
         if (
-            detect_lf_status == "ok"
+            _lf_ok
             and subspace_consistency_status != "inconsistent"
             and runtime_built
             and (not synthetic_pipeline_runtime)
@@ -721,6 +727,7 @@ def run_detect_orchestrator(
     _populate_detect_mask_digest_from_input_record(content_evidence_payload, input_record)
 
     # 删除临时的 latents 字段，确保不写入 records
+    cfg.pop("__detect_trajectory_latent_cache__", None)
     cfg.pop("__detect_final_latents__", None)
     cfg.pop("__detect_pipeline_obj__", None)
     cfg.pop("__pipeline_runtime_meta__", None)
@@ -1106,52 +1113,86 @@ def _extract_content_raw_scores_from_image(
         except Exception:
             image_array = None
 
-    # S3 统一口径：ecc="sparse_ldpc" 时优先走 LFCoderPRC latent detect 分支。
+    # S3 统一口径：ecc="sparse_ldpc" 唯一路径为 trajectory-consistent TFSW。
+    # z_{t_e}（detect 侧 trajectory cache exact hit）→ φ → PRC 解码。
+    # 不存在 final_latents legacy path，不存在兼容分支。
     if isinstance(ecc_value, str) and ecc_value == "sparse_ldpc":
-        detect_latents = cfg.get("__detect_final_latents__")
-        if detect_latents is None or not isinstance(plan_digest, str) or not plan_digest:
+        lf_basis_for_decode = plan_dict.get("lf_basis") if isinstance(plan_dict.get("lf_basis"), dict) else None
+        detect_traj_cache = cfg.get("__detect_trajectory_latent_cache__")
+        if lf_basis_for_decode is None:
             lf_trace = {
                 "lf_status": "absent",
-                "lf_absent_reason": "lf_prc_missing_latents_or_plan_digest",
-                "lf_detect_path": "lf_coder_prc_latent",
+                "lf_absent_reason": "lf_basis_missing_for_trajectory_path",
+                "lf_detect_path": "lf_coder_prc_trajectory",
+            }
+        elif not isinstance(plan_digest, str) or not plan_digest:
+            lf_trace = {
+                "lf_status": "absent",
+                "lf_absent_reason": "plan_digest_missing_for_trajectory_path",
+                "lf_detect_path": "lf_coder_prc_trajectory",
+            }
+        elif detect_traj_cache is None or detect_traj_cache.is_empty():
+            lf_trace = {
+                "lf_status": "absent",
+                "lf_absent_reason": "trajectory_cache_absent",
+                "lf_detect_path": "lf_coder_prc_trajectory",
             }
         else:
-            try:
-                prc_impl_digest = digests.canonical_sha256(
-                    {
-                        "impl_id": LF_CODER_PRC_ID,
-                        "impl_version": LF_CODER_PRC_VERSION,
+            tfs = lf_basis_for_decode.get("trajectory_feature_spec")
+            if not isinstance(tfs, dict) or tfs.get("feature_operator") != "masked_normalized_random_projection":
+                lf_trace = {
+                    "lf_status": "absent",
+                    "lf_absent_reason": "trajectory_feature_spec_invalid",
+                    "lf_detect_path": "lf_coder_prc_trajectory",
+                }
+            else:
+                edit_timestep = int(tfs.get("edit_timestep", 0))
+                z_t, resolution_status = detector_scoring.resolve_detect_trajectory_latent_for_timestep(
+                    detect_traj_cache, edit_timestep
+                )
+                if z_t is None:
+                    lf_trace = {
+                        "lf_status": "absent",
+                        "lf_absent_reason": f"trajectory_latent_absent:{resolution_status}",
+                        "lf_detect_path": "lf_coder_prc_trajectory",
                     }
-                )
-                lf_coder = LFCoderPRC(LF_CODER_PRC_ID, LF_CODER_PRC_VERSION, prc_impl_digest)
-                # （修复 Bug-A）从 plan_dict 提取 lf_basis，传给 detect_score() 做投影。
-                lf_basis_for_decode = plan_dict.get("lf_basis") if isinstance(plan_dict.get("lf_basis"), dict) else None
-                lf_score, prc_trace = lf_coder.detect_score(
-                    cfg=cfg,
-                    latent_features=detect_latents,
-                    plan_digest=plan_digest,
-                    cfg_digest=cfg_digest,
-                    lf_basis=lf_basis_for_decode,
-                )
-                prc_trace_payload = prc_trace
-                lf_trace = {
-                    "lf_status": prc_trace_payload.get("status", "failed"),
-                    "lf_score": lf_score,
-                    "lf_trace_digest": prc_trace_payload.get("lf_trace_digest"),
-                    "bp_converged": prc_trace_payload.get("bp_converged"),
-                    "bp_iteration_count": prc_trace_payload.get("bp_iteration_count"),
-                    "parity_check_digest": prc_trace_payload.get("parity_check_digest"),
-                    "lf_failure_reason": prc_trace_payload.get("lf_failure_reason"),
-                    # (append-only) 透传 bp_converge_status 诊断字段，允许缺失为 null。
-                    "bp_converge_status": prc_trace_payload.get("bp_converge_status"),
-                    "lf_detect_path": "lf_coder_prc_latent",
-                }
-            except Exception as exc:
-                lf_trace = {
-                    "lf_status": "failed",
-                    "lf_failure_reason": f"lf_prc_detect_failed:{type(exc).__name__}",
-                    "lf_detect_path": "lf_coder_prc_latent",
-                }
+                else:
+                    try:
+                        from main.watermarking.content_chain.subspace.trajectory_feature_space import (
+                            extract_trajectory_feature_np,
+                        )
+                        phi = extract_trajectory_feature_np(np.asarray(z_t, dtype=np.float64), tfs)
+                        prc_impl_digest = digests.canonical_sha256(
+                            {
+                                "impl_id": LF_CODER_PRC_ID,
+                                "impl_version": LF_CODER_PRC_VERSION,
+                            }
+                        )
+                        lf_coder = LFCoderPRC(LF_CODER_PRC_ID, LF_CODER_PRC_VERSION, prc_impl_digest)
+                        lf_score, prc_trace = lf_coder.detect_score(
+                            cfg=cfg,
+                            latent_features=phi,
+                            plan_digest=plan_digest,
+                            cfg_digest=cfg_digest,
+                            lf_basis=lf_basis_for_decode,
+                        )
+                        lf_trace = {
+                            "lf_status": prc_trace.get("status", "failed"),
+                            "lf_score": lf_score,
+                            "lf_trace_digest": prc_trace.get("lf_trace_digest"),
+                            "bp_converged": prc_trace.get("bp_converged"),
+                            "bp_iteration_count": prc_trace.get("bp_iteration_count"),
+                            "parity_check_digest": prc_trace.get("parity_check_digest"),
+                            "lf_failure_reason": prc_trace.get("lf_failure_reason"),
+                            "bp_converge_status": prc_trace.get("bp_converge_status"),
+                            "lf_detect_path": "lf_coder_prc_trajectory",
+                        }
+                    except Exception as exc:
+                        lf_trace = {
+                            "lf_status": "failed",
+                            "lf_failure_reason": f"lf_prc_trajectory_detect_failed:{type(exc).__name__}",
+                            "lf_detect_path": "lf_coder_prc_trajectory",
+                        }
     else:
         if image_array is None:
             lf_trace = {
@@ -2380,6 +2421,10 @@ def _build_planner_inputs_for_runtime(
         inputs["pipeline"] = runtime_pipeline
     if runtime_latents is not None:
         inputs["latents"] = runtime_latents
+    # 将 detect 侧 per-step latent 缓存传递给 planner（内存传递，不写入 records）。
+    runtime_traj_cache = cfg.get("__detect_trajectory_latent_cache__")
+    if runtime_traj_cache is not None:
+        inputs["trajectory_latent_cache"] = runtime_traj_cache
     if trajectory_evidence is not None:
         inputs["trajectory_evidence"] = trajectory_evidence
     if content_evidence_payload is not None:
