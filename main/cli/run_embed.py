@@ -358,7 +358,16 @@ def run_embed(
                 inputs=planner_inputs
             )
 
-            plan_payload = subspace_result_pre.as_dict() if hasattr(subspace_result_pre, "as_dict") else subspace_result_pre
+            # 提取内层 plan dict（含 lf_basis/hf_basis 顶层键），供 injection context 使用。
+            # 不能用 as_dict()（外层 evidence 包装），否则 _build_plan_for_injection 找不到
+            # lf_basis 顶层键，会回退到运行时 basis 绑定，导致 embed/detect basis 不一致。
+            if hasattr(subspace_result_pre, "plan") and isinstance(subspace_result_pre.plan, dict):
+                plan_payload = subspace_result_pre.plan
+            elif hasattr(subspace_result_pre, "as_dict"):
+                _evidence_dict = subspace_result_pre.as_dict()
+                plan_payload = _evidence_dict.get("plan") if isinstance(_evidence_dict.get("plan"), dict) else _evidence_dict
+            else:
+                plan_payload = subspace_result_pre
             plan_digest = getattr(subspace_result_pre, "plan_digest", None)
             if isinstance(plan_payload, dict) and not isinstance(plan_digest, str):
                 plan_digest = plan_payload.get("plan_digest")
