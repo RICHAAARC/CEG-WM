@@ -1332,45 +1332,79 @@ class LFCoderPRC:
         block_length = int(ldpc_spec.get("n", message_length))
         parity_check_digest = ldpc_spec["parity_check_digest"]
 
-        # （1）投影到 LF 子空间，恢复嵌入侧施加水印的低频系数。
-        # 不提供 lf_basis 时回退展平（信号极弱，仅用于兜底审计）。
-        lf_projection_used = False
-        if lf_basis is not None and isinstance(lf_basis, dict):
-            try:
-                from . import channel_lf as _ch_lf
-                is_torch = hasattr(latent_features, "detach")
-                if is_torch:
-                    projected = _ch_lf.compute_lf_basis_projection_torch(latent_features, lf_basis)
-                    coeffs_arr = projected.detach().cpu().numpy().astype(np.float64).flatten()
-                else:
-                    projected = _ch_lf.compute_lf_basis_projection(latent_features, lf_basis)
-                    coeffs_arr = np.asarray(projected, dtype=np.float64).flatten()
-                lf_projection_used = True
-            except Exception:
-                # 投影失败时回退展平原始 latent，记录 lf_projection_used=False。
-                coeffs_arr = np.array(_flatten_to_list(latent_features), dtype=np.float64)
-        else:
-            coeffs_arr = np.array(_flatten_to_list(latent_features), dtype=np.float64)
-
-        if len(coeffs_arr) < block_length:
+        # （1）将 latent 展平，若维度与 basis 不匹配则用 latent_projection_spec 做
+        # 随机索引降维（与 embed 侧 _sample_from_diffusion_pipeline 使用相同公式：
+        # projection_seed = seed + 7919 + t_idx * 131 + sample_idx），随后投影到
+        # LF 子空间（basis_rank 维）。lf_basis 缺失时直接返回 failed，不再静默回退。
+        if lf_basis is None or not isinstance(lf_basis, dict):
             return None, {
                 "status": "failed",
-                "lf_failure_reason": "lf_insufficient_latent_dimension",
-                "available_latent_dim": int(len(coeffs_arr)),
-                "required_block_length": int(block_length),
-                "lf_trace_digest": digests.canonical_sha256({"failure": "insufficient_dim"}),
+                "lf_failure_reason": "lf_basis_required_but_absent",
+                "lf_trace_digest": digests.canonical_sha256({"failure": "lf_basis_absent"}),
             }
 
-        # (2) Reconstruct the codeword template t (identical seed derivation as in embed path)
+        basis_matrix_raw = lf_basis.get("projection_matrix")
+        if basis_matrix_raw is None:
+            return None, {
+                "status": "failed",
+                "lf_failure_reason": "lf_basis_projection_matrix_missing",
+                "lf_trace_digest": digests.canonical_sha256({"failure": "no_projection_matrix"}),
+            }
+        basis_matrix_np = np.asarray(basis_matrix_raw, dtype=np.float64)
+        basis_rank = int(lf_basis.get("basis_rank", basis_matrix_np.shape[1]))
+
+        # 展平 latent_features 为一维 float64 向量。
+        if hasattr(latent_features, "detach"):
+            latents_flat = latent_features.detach().cpu().numpy().astype(np.float64).reshape(-1)
+        else:
+            latents_flat = np.asarray(latent_features, dtype=np.float64).reshape(-1)
+
+        # 若维度不匹配，先用 latent_projection_spec 将全量 latent 随机索引到 feature_dim 维。
+        if latents_flat.shape[0] != basis_matrix_np.shape[0]:
+            latent_proj_spec = lf_basis.get("latent_projection_spec")
+            if not isinstance(latent_proj_spec, dict):
+                return None, {
+                    "status": "failed",
+                    "lf_failure_reason": "lf_dim_mismatch_no_projection_spec",
+                    "available_dim": int(latents_flat.shape[0]),
+                    "required_dim": int(basis_matrix_np.shape[0]),
+                    "lf_trace_digest": digests.canonical_sha256({"failure": "dim_mismatch_no_spec"}),
+                }
+            feature_dim = int(latent_proj_spec.get("feature_dim", basis_matrix_np.shape[0]))
+            proj_seed = int(latent_proj_spec.get("seed", 0))
+            t_idx = int(latent_proj_spec.get("edit_timestep", 0))
+            sample_idx = int(latent_proj_spec.get("sample_idx", 0))
+            projection_seed = proj_seed + 7919 + t_idx * 131 + sample_idx
+            index_rng = np.random.default_rng(projection_seed)
+            projection_indices = index_rng.integers(0, max(1, latents_flat.shape[0]), size=feature_dim)
+            latents_flat = latents_flat[projection_indices]
+
+        # 最终维度检查；理论上此时必然匹配。
+        if latents_flat.shape[0] != basis_matrix_np.shape[0]:
+            return None, {
+                "status": "failed",
+                "lf_failure_reason": "lf_dim_mismatch_after_index_selection",
+                "available_dim": int(latents_flat.shape[0]),
+                "required_dim": int(basis_matrix_np.shape[0]),
+                "lf_trace_digest": digests.canonical_sha256({"failure": "dim_mismatch_after_sel"}),
+            }
+
+        # 投影：(feature_dim,) @ (feature_dim, basis_rank) → (basis_rank,) = 8 维 LF 系数。
+        coeffs_arr = np.dot(latents_flat, basis_matrix_np)
+        lf_projection_used = True
+
+        # (2) 重建码字模板 t；与 embed 侧 _get_ldpc_codeword_bits(cfg, n=basis_rank)
+        # 完全相同的种子推导，截断到 basis_rank 位（8 位），在系数空间做相关。
         seed = int(digests.canonical_sha256({"plan_digest": plan_digest, "tag": "lf_message"})[:16], 16)
         import random as _random_mod
         _rng = _random_mod.Random(seed)
         message_bits = [1 if _rng.random() < 0.5 else -1 for _ in range(message_length)]
         code_bits = encode_message_bits(message_bits, ldpc_spec)
-        codeword = np.array(code_bits, dtype=np.float64)
+        # 取前 basis_rank 位（与 embed 侧 n=basis_rank 截断一致）。
+        codeword = np.array(code_bits[:basis_rank], dtype=np.float64)
 
-        # (3) Whitened correlation detection
-        c = coeffs_arr[:block_length]
+        # (3) Whitened correlation detection（在 basis_rank 维系数空间）。
+        c = coeffs_arr[:basis_rank]
         eps = 1e-8
         c_mean = float(np.mean(c))
         c_std = float(np.std(c))
@@ -1388,9 +1422,9 @@ class LFCoderPRC:
             "raw_correlation": raw_corr,
             "c_mean": c_mean,
             "c_std": c_std,
-            "block_length": block_length,
+            "basis_rank": basis_rank,
+            "correlation_dim": int(len(c)),
             "available_latent_dim": int(len(coeffs_arr)),
-            "required_block_length": int(block_length),
             "lf_projection_used": lf_projection_used,
             "syndrome_weight": None,
             "parity_check_digest": parity_check_digest,

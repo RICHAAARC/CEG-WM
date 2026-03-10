@@ -54,6 +54,25 @@ def _build_lf_cfg(enabled: bool = True) -> Dict[str, Any]:
     }
 
 
+def _build_lf_basis(latent_dim: int = 200, feature_dim: int = 128, basis_rank: int = 8, seed: int = 42) -> Dict[str, Any]:
+    """构造用于测试的最小合法 lf_basis，匹配修改后的 detect_score() 签名。"""
+    import numpy as np
+    rng = np.random.RandomState(seed)
+    projection_matrix = rng.randn(feature_dim, basis_rank).astype(np.float32)
+    return {
+        "projection_matrix": projection_matrix.tolist(),
+        "basis_rank": basis_rank,
+        "latent_projection_spec": {
+            "spec_version": "v1",
+            "method": "random_index_selection",
+            "feature_dim": feature_dim,
+            "seed": seed,
+            "edit_timestep": 0,
+            "sample_idx": 0,
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # (1) final_decision 字段存在性与语义测试
 # ---------------------------------------------------------------------------
@@ -165,11 +184,13 @@ def test_bp_converge_status_ok_when_converged() -> None:
     import numpy as np
     latents = np.random.RandomState(42).randn(200).tolist()
     plan_digest = digests.canonical_sha256({"plan": "test_converge_ok"})
+    lf_basis = _build_lf_basis(latent_dim=200, feature_dim=128, basis_rank=8, seed=42)
 
     lf_score, trace = lf_coder.detect_score(
         cfg=cfg,
         latent_features=latents,
         plan_digest=plan_digest,
+        lf_basis=lf_basis,
     )
 
     assert "bp_converge_status" in trace, "trace 中应含 bp_converge_status 字段"
@@ -216,6 +237,7 @@ def test_bp_converge_status_degraded_when_not_converged() -> None:
         "bp_iteration_count": 5,
         "syndrome_weight": 3,
     }
+    lf_basis = _build_lf_basis(latent_dim=200, feature_dim=128, basis_rank=8, seed=99)
     with patch(
         "main.watermarking.content_chain.low_freq_coder.decode_soft_llr",
         return_value=_mock_decode_result,
@@ -224,6 +246,7 @@ def test_bp_converge_status_degraded_when_not_converged() -> None:
             cfg=cfg,
             latent_features=latents,
             plan_digest=plan_digest,
+            lf_basis=lf_basis,
         )
 
     assert "bp_converge_status" in trace, "trace 中应含 bp_converge_status 字段"
@@ -258,11 +281,13 @@ def test_bp_converge_status_excluded_from_lf_trace_digest() -> None:
     import numpy as np
     latents = np.random.RandomState(7).randn(200).tolist()
     plan_digest = digests.canonical_sha256({"plan": "test_digest_isolation"})
+    lf_basis = _build_lf_basis(latent_dim=200, feature_dim=128, basis_rank=8, seed=7)
 
     lf_score, trace = lf_coder.detect_score(
         cfg=cfg,
         latent_features=latents,
         plan_digest=plan_digest,
+        lf_basis=lf_basis,
     )
 
     recorded_digest = trace.get("lf_trace_digest")

@@ -101,11 +101,21 @@ def test_lf_coder_prc_embed_detect_exposes_ldpc_bp_fields() -> None:
     assert trace_summary.get("block_length") == latent_length
     assert isinstance(trace_summary.get("parity_check_digest"), str)
 
+    # 构造 lf_basis：feature_dim=latent_length（直接投影，无需索引降维）。
+    basis_rank = 8
+    rng = np.random.RandomState(7)
+    proj_matrix = rng.randn(latent_length, basis_rank).astype(np.float32)
+    lf_basis = {
+        "projection_matrix": proj_matrix.tolist(),
+        "basis_rank": basis_rank,
+    }
+
     lf_score, detect_trace = coder.detect_score(
         cfg=cfg,
         latent_features=embed_result.get("latent_features_embedded"),
         plan_digest=plan_digest,
         cfg_digest=cfg_digest,
+        lf_basis=lf_basis,
     )
     assert isinstance(lf_score, float)
     assert isinstance(detect_trace, dict)
@@ -120,9 +130,9 @@ def test_lf_coder_prc_embed_detect_exposes_ldpc_bp_fields() -> None:
 
 def test_lf_coder_prc_detect_flattens_numpy_array_and_reports_latent_dims() -> None:
     """
-    功能：验证 detect 支持 numpy.ndarray 扁平化并输出维度审计字段。 
+    功能：验证 detect 支持 numpy.ndarray 输入并输出维度审计字段。
 
-    Verify detect supports numpy.ndarray flattening and emits latent dimension audit fields.
+    Verify detect supports numpy.ndarray input and emits dimension audit fields.
 
     Args:
         None.
@@ -137,27 +147,35 @@ def test_lf_coder_prc_detect_flattens_numpy_array_and_reports_latent_dims() -> N
     impl_digest = digests.canonical_sha256({"impl_id": LF_CODER_PRC_ID, "impl_version": LF_CODER_PRC_VERSION})
     coder = LFCoderPRC(LF_CODER_PRC_ID, LF_CODER_PRC_VERSION, impl_digest)
 
-    ldpc_spec = build_ldpc_spec(message_length=message_length, ecc_sparsity=3, seed_key=f"{plan_digest}:{message_length}:3:embed")
-    block_length = int(ldpc_spec.get("n", message_length))
-    latent_array = np.asarray([0.1 * (index + 1) for index in range(block_length)], dtype=np.float32).reshape(2, -1)
+    # 构造 128 维 numpy 输入，lf_basis 直接匹配（无需索引降维）。
+    feature_dim = 128
+    basis_rank = 8
+    latent_array = np.random.RandomState(11).randn(feature_dim).astype(np.float32)
+    proj_matrix = np.random.RandomState(22).randn(feature_dim, basis_rank).astype(np.float32)
+    lf_basis = {
+        "projection_matrix": proj_matrix.tolist(),
+        "basis_rank": basis_rank,
+    }
 
     lf_score, detect_trace = coder.detect_score(
         cfg=cfg,
         latent_features=latent_array,
         plan_digest=plan_digest,
         cfg_digest="cfg_digest_numpy",
+        lf_basis=lf_basis,
     )
     assert isinstance(lf_score, float)
     assert detect_trace.get("status") == "ok"
-    assert detect_trace.get("available_latent_dim") == block_length
-    assert detect_trace.get("required_block_length") == block_length
+    # available_latent_dim = len(coeffs_arr) = basis_rank（投影后维度）。
+    assert detect_trace.get("available_latent_dim") == basis_rank
+    assert detect_trace.get("correlation_dim") == basis_rank
 
 
 def test_lf_coder_prc_detect_accepts_tensor_like_input_without_torch_dependency() -> None:
     """
-    功能：验证 detect 支持 tensor-like 输入扁平化且失败分支带维度审计字段。 
+    功能：验证 detect 在 lf_basis 缺失时显式返回 failed，不静默回退。
 
-    Verify detect supports tensor-like flattening and failed path emits dimension audit fields.
+    Verify detect returns explicit failure when lf_basis is absent, no silent fallback.
 
     Args:
         None.
@@ -185,7 +203,7 @@ def test_lf_coder_prc_detect_accepts_tensor_like_input_without_torch_dependency(
     impl_digest = digests.canonical_sha256({"impl_id": LF_CODER_PRC_ID, "impl_version": LF_CODER_PRC_VERSION})
     coder = LFCoderPRC(LF_CODER_PRC_ID, LF_CODER_PRC_VERSION, impl_digest)
 
-    # 故意给不足维度，验证 failed 审计字段。
+    # lf_basis 缺失时应显式失败，不再静默回退。
     fake_tensor = _FakeTensor(np.asarray([[0.1, -0.2, 0.3]], dtype=np.float32))
     lf_score, detect_trace = coder.detect_score(
         cfg=cfg,
@@ -196,7 +214,4 @@ def test_lf_coder_prc_detect_accepts_tensor_like_input_without_torch_dependency(
 
     assert lf_score is None
     assert detect_trace.get("status") == "failed"
-    assert detect_trace.get("lf_failure_reason") == "lf_insufficient_latent_dimension"
-    assert isinstance(detect_trace.get("available_latent_dim"), int)
-    assert isinstance(detect_trace.get("required_block_length"), int)
-    assert detect_trace.get("available_latent_dim") < detect_trace.get("required_block_length")
+    assert detect_trace.get("lf_failure_reason") == "lf_basis_required_but_absent"
