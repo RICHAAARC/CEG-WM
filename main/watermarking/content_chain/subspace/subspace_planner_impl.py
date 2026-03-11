@@ -2852,10 +2852,10 @@ class SubspacePlannerImpl:
             "mask_shape": planner_params.mask_shape,
             "mask_radius": planner_params.mask_radius,
             "w_channel": planner_params.w_channel,
-            "measurement_primitives": ["l1_distance", "p_value"],
+            "measurement_primitives": ["matched_correlation", "energy_statistics"],
             "score_anchor": {
-                "higher_is_watermarked": False,
-                "threshold_semantics": "p_value_cdf_low_means_watermark_present"
+                "higher_is_watermarked": True,
+                "threshold_semantics": "correlation_high_means_watermark_present"
             }
         }
 
@@ -2996,6 +2996,111 @@ def _read_int(value: Any, default: int) -> int:
     if isinstance(value, int):
         return value
     return int(default)
+
+
+SUBSPACE_PLANNER_V2_ID = "subspace_planner_v2"
+SUBSPACE_PLANNER_V2_VERSION = "v2"
+
+
+class SubspacePlannerV2(SubspacePlannerImpl):
+    """
+    功能：子空间规划器 v2，补充语义域标注字段。
+
+    Extended subspace planner that augments the v1 plan with semantic domain fields:
+    smooth_semantic_region, texture_semantic_region, lf_domain, hf_domain,
+    domain_overlap_ratio, cross_orthogonality.
+
+    Args:
+        impl_id: Implementation identifier string (must be subspace_planner_v2).
+        impl_version: Implementation version string.
+        impl_digest: Implementation digest string.
+
+    Returns:
+        None.
+
+    Raises:
+        ValueError: If constructor inputs are invalid.
+    """
+
+    def plan(
+        self,
+        cfg: Dict[str, Any],
+        mask_digest: Optional[str] = None,
+        cfg_digest: Optional[str] = None,
+        inputs: Optional[Dict[str, Any]] = None
+    ) -> SubspacePlanEvidence:
+        """
+        功能：执行 v2 子空间规划，附加语义域标注字段。
+
+        Plan subspace and augment output with semantic domain annotations.
+
+        Args:
+            cfg: Configuration mapping.
+            mask_digest: Optional semantic mask digest.
+            cfg_digest: Optional canonical config digest.
+            inputs: Optional planning inputs containing trajectory features.
+
+        Returns:
+            SubspacePlanEvidence with additional semantic domain fields in plan.
+
+        Raises:
+            TypeError: If input types are invalid.
+        """
+        base_evidence = super().plan(cfg, mask_digest=mask_digest, cfg_digest=cfg_digest, inputs=inputs)
+
+        # status 非 ok 时直接透传，不修改
+        if base_evidence.status != "ok" or base_evidence.plan is None:
+            return base_evidence
+
+        base_plan = base_evidence.plan
+        lf_region = base_plan.get("lf_region_index_spec") or {}
+        hf_region = base_plan.get("hf_region_index_spec") or {}
+
+        lf_indices = set(lf_region.get("selected_indices") or [])
+        hf_indices = set(hf_region.get("selected_indices") or [])
+        overlap = lf_indices & hf_indices
+        total = len(lf_indices | hf_indices) or 1
+        domain_overlap_ratio = round(len(overlap) / total, 6)
+
+        # 正交性估计：LF/HF 位置集合无交叉时 cross_orthogonality = 1.0
+        cross_orthogonality = round(1.0 - domain_overlap_ratio, 6)
+
+        lf_basis = base_plan.get("lf_basis") or {}
+        hf_basis = base_plan.get("hf_basis") or {}
+
+        augmented_plan = {
+            **base_plan,
+            # 平滑语义区域 = LF 区域（低频对应平滑内容）
+            "smooth_semantic_region": lf_region,
+            # 纹理语义区域 = HF 区域（高频对应纹理内容）
+            "texture_semantic_region": hf_region,
+            "lf_domain": {
+                "channel": "lf",
+                "basis_channel": lf_basis.get("channel"),
+                "basis_rank": lf_basis.get("rank"),
+                "region_count": len(lf_indices),
+                "region_index_spec": lf_region,
+            },
+            "hf_domain": {
+                "channel": "hf",
+                "basis_channel": hf_basis.get("channel"),
+                "basis_rank": hf_basis.get("rank"),
+                "region_count": len(hf_indices),
+                "region_index_spec": hf_region,
+            },
+            "domain_overlap_ratio": domain_overlap_ratio,
+            "cross_orthogonality": cross_orthogonality,
+        }
+
+        return SubspacePlanEvidence(
+            status=base_evidence.status,
+            plan=augmented_plan,
+            basis_digest=base_evidence.basis_digest,
+            plan_digest=base_evidence.plan_digest,
+            audit=base_evidence.audit,
+            plan_stats=base_evidence.plan_stats,
+            plan_failure_reason=base_evidence.plan_failure_reason,
+        )
 
 
 def _build_planner_trace_payload(

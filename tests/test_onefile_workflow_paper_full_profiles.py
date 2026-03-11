@@ -1,5 +1,5 @@
-"""
-文件目的：onefile profile 隔离与 paper 机制断言回归测试。
+﻿"""
+鏂囦欢鐩殑锛歰nefile profile 闅旂涓?paper 鏈哄埗鏂█鍥炲綊娴嬭瘯銆?
 Module type: General module
 """
 
@@ -16,7 +16,7 @@ import yaml
 
 def _load_onefile_module(repo_root: Path):
     """
-    功能：动态加载 onefile workflow 脚本模块。
+    鍔熻兘锛氬姩鎬佸姞杞?onefile workflow 鑴氭湰妯″潡銆?
 
     Dynamically load scripts/run_onefile_workflow.py as module.
 
@@ -38,7 +38,7 @@ def _load_onefile_module(repo_root: Path):
 
 def _load_assert_script_module(repo_root: Path):
     """
-    功能：动态加载 paper 机制断言脚本模块。
+    鍔熻兘锛氬姩鎬佸姞杞?paper 鏈哄埗鏂█鑴氭湰妯″潡銆?
 
     Dynamically load scripts/assert_paper_mechanisms.py as module.
 
@@ -60,7 +60,7 @@ def _load_assert_script_module(repo_root: Path):
 
 def test_onefile_workflow_profiles_smoke_vs_paper_full_are_disjoint(tmp_path: Path) -> None:
     """
-    功能：验证 smoke 与 paper_full profile 编排步骤严格隔离。
+    鍔熻兘锛氶獙璇?smoke 涓?paper_full profile 缂栨帓姝ラ涓ユ牸闅旂銆?
 
     Verify cpu_smoke and paper_full_cuda profiles are strictly disjoint in workflow steps.
 
@@ -102,7 +102,7 @@ def test_onefile_workflow_profiles_smoke_vs_paper_full_are_disjoint(tmp_path: Pa
 
 def test_onefile_grid_summary_anchor_repair_before_audits(tmp_path: Path) -> None:
     """
-    功能：验证 onefile 在审计前可补齐 experiment_matrix grid_summary 缺失锚点。 
+    鍔熻兘锛氶獙璇?onefile 鍦ㄥ璁″墠鍙ˉ榻?experiment_matrix grid_summary 缂哄け閿氱偣銆?
 
     Verify onefile anchor repair fills missing grid_summary anchors from run_root artifacts.
 
@@ -176,7 +176,7 @@ def test_onefile_grid_summary_anchor_repair_before_audits(tmp_path: Path) -> Non
 
 def test_onefile_build_minimal_repro_bundle_without_signoff_report(tmp_path: Path) -> None:
     """
-    功能：验证最小 repro_bundle 生成不再硬依赖 signoff_report。 
+    鍔熻兘锛氶獙璇佹渶灏?repro_bundle 鐢熸垚涓嶅啀纭緷璧?signoff_report銆?
 
     Verify minimal repro_bundle can be prepared without signoff_report artifact.
 
@@ -239,7 +239,7 @@ def test_onefile_build_minimal_repro_bundle_without_signoff_report(tmp_path: Pat
 
 def test_onefile_coverage_ready_fills_metrics_by_attack_condition(tmp_path: Path) -> None:
     """
-    功能：验证 pre-audits 会补齐 coverage 所需的 metrics_by_attack_condition。 
+    鍔熻兘锛氶獙璇?pre-audits 浼氳ˉ榻?coverage 鎵€闇€鐨?metrics_by_attack_condition銆?
 
     Verify pre-audits repair injects metrics_by_attack_condition for coverage audit.
 
@@ -274,7 +274,7 @@ def test_onefile_coverage_ready_fills_metrics_by_attack_condition(tmp_path: Path
 
 def test_onefile_coverage_ready_replaces_unknown_only_metrics(tmp_path: Path) -> None:
     """
-    功能：验证仅有 unknown sentinel 条目时，pre-audits 仍会补齐声明条件。 
+    鍔熻兘锛氶獙璇佷粎鏈?unknown sentinel 鏉＄洰鏃讹紝pre-audits 浠嶄細琛ラ綈澹版槑鏉′欢銆?
 
     Verify pre-audits fills declared conditions when report only has unknown sentinel.
 
@@ -326,7 +326,7 @@ def test_onefile_coverage_ready_replaces_unknown_only_metrics(tmp_path: Path) ->
 
 def test_prepare_profile_cfg_path_sets_paper_matrix_baseline_only(tmp_path: Path) -> None:
     """
-    功能：验证 paper_full_cuda 运行期配置将 experiment_matrix 固定为 baseline-only。 
+    鍔熻兘锛氶獙璇?paper_full_cuda 杩愯鏈熼厤缃皢 experiment_matrix 鍥哄畾涓?baseline-only銆?
 
     Verify _prepare_profile_cfg_path forces experiment_matrix.ablation_variants to [{}]
     in paper_full_cuda runtime profile config.
@@ -360,7 +360,7 @@ def test_prepare_profile_cfg_path_sets_paper_matrix_baseline_only(tmp_path: Path
 
 def test_prepare_experiment_matrix_cfg_path_disables_paper_faithfulness(tmp_path: Path) -> None:
     """
-    功能：验证 experiment_matrix 专用配置关闭 paper faithfulness。
+    鍔熻兘锛氶獙璇?experiment_matrix 涓撶敤閰嶇疆鍏抽棴 paper faithfulness銆?
 
     Verify matrix-specific config disables paper_faithfulness for paper_full_cuda.
 
@@ -393,7 +393,7 @@ def test_run_onefile_workflow_uses_matrix_specific_cfg_for_experiment_matrix(
     tmp_path: Path,
 ) -> None:
     """
-    功能：验证 onefile 在 experiment_matrix 步骤使用 matrix 专用配置。
+    鍔熻兘锛氶獙璇?onefile 鍦?experiment_matrix 姝ラ浣跨敤 matrix 涓撶敤閰嶇疆銆?
 
     Verify run_onefile_workflow replaces experiment_matrix --config with
     matrix-specific config path under paper_full_cuda profile.
@@ -477,7 +477,7 @@ def test_onefile_pre_audits_order_runs_repro_after_coverage_and_matrix(
     tmp_path: Path,
 ) -> None:
     """
-    功能：验证 audits 前预修复顺序为 coverage/matrix 在前，repro_bundle 在后。 
+    鍔熻兘锛氶獙璇?audits 鍓嶉淇椤哄簭涓?coverage/matrix 鍦ㄥ墠锛宺epro_bundle 鍦ㄥ悗銆?
 
     Verify pre-audits order runs repro bundle after coverage and matrix repairs.
 
@@ -549,7 +549,7 @@ def test_onefile_paper_profile_prepares_repro_bundle_before_audits(
     tmp_path: Path,
 ) -> None:
     """
-    功能：验证 paper profile 在 audits 前执行 repro bundle 闭环准备。 
+    鍔熻兘锛氶獙璇?paper profile 鍦?audits 鍓嶆墽琛?repro bundle 闂幆鍑嗗銆?
 
     Verify onefile paper profile invokes repro-bundle closure hook before audits.
 
@@ -627,7 +627,7 @@ def test_onefile_paper_profile_prepares_repro_bundle_before_audits(
 
 def test_onefile_detect_record_scoring_applies_fallback_under_paper_profile(tmp_path: Path) -> None:
     """
-    功能：验证 paper_full profile 下 detect 记录无任何可恢复分数时拒绝 fallback（抛出 ValueError）。 
+    鍔熻兘锛氶獙璇?paper_full profile 涓?detect 璁板綍鏃犱换浣曞彲鎭㈠鍒嗘暟鏃舵嫆缁?fallback锛堟姏鍑?ValueError锛夈€?
 
     Verify paper_full profile raises ValueError when detect record has no usable score,
     since paper mode forbids fallback to prevent polluting NP calibration distribution.
@@ -659,7 +659,7 @@ def test_onefile_detect_record_scoring_applies_fallback_under_paper_profile(tmp_
         encoding="utf-8",
     )
 
-    # paper 模式禁止无分数时的 fallback，拒绝继续以防污染 NP 校准输入分布。
+    # paper 妯″紡绂佹鏃犲垎鏁版椂鐨?fallback锛屾嫆缁濈户缁互闃叉薄鏌?NP 鏍″噯杈撳叆鍒嗗竷銆?
     import pytest as _pytest
     with _pytest.raises(ValueError, match="content_evidence_payload"):
         module._prepare_detect_record_for_scoring(run_root, records_dir, "paper_full_cuda")
@@ -667,7 +667,7 @@ def test_onefile_detect_record_scoring_applies_fallback_under_paper_profile(tmp_
 
 def test_onefile_detect_record_scoring_recovers_detect_lf_score_under_paper_profile(tmp_path: Path) -> None:
     """
-    功能：验证 paper_full profile 在 status=ok 且 score 缺失时可从 detect_lf_score 恢复。 
+    鍔熻兘锛氶獙璇?paper_full profile 鍦?status=ok 涓?score 缂哄け鏃跺彲浠?detect_lf_score 鎭㈠銆?
 
     Verify paper_full profile recovers numeric score from detect_lf_score when status is ok.
 
@@ -708,7 +708,7 @@ def test_onefile_detect_record_scoring_recovers_detect_lf_score_under_paper_prof
 
 def test_onefile_detect_record_scoring_recovers_string_score_under_paper_profile(tmp_path: Path) -> None:
     """
-    功能：验证 paper_full profile 可接受可解析的字符串分数。 
+    鍔熻兘锛氶獙璇?paper_full profile 鍙帴鍙楀彲瑙ｆ瀽鐨勫瓧绗︿覆鍒嗘暟銆?
 
     Verify paper_full profile accepts parseable string score values.
 
@@ -748,7 +748,7 @@ def test_onefile_detect_record_scoring_recovers_string_score_under_paper_profile
 
 def test_onefile_detect_record_scoring_recovers_fusion_summary_score_under_paper_profile(tmp_path: Path) -> None:
     """
-    功能：验证 paper_full profile 可从 fusion_result.evidence_summary.content_score 恢复分数。 
+    鍔熻兘锛氶獙璇?paper_full profile 鍙粠 fusion_result.evidence_summary.content_score 鎭㈠鍒嗘暟銆?
 
     Verify paper_full profile recovers score from fusion_result.evidence_summary.content_score.
 
@@ -793,7 +793,7 @@ def test_onefile_detect_record_scoring_recovers_fusion_summary_score_under_paper
 
 def test_onefile_detect_record_scoring_recovers_when_status_failed_but_score_available(tmp_path: Path) -> None:
     """
-    功能：验证 paper_full profile 在 status=failed 时拒绝 score 恢复，保留失败语义。
+    鍔熻兘锛氶獙璇?paper_full profile 鍦?status=failed 鏃舵嫆缁?score 鎭㈠锛屼繚鐣欏け璐ヨ涔夈€?
 
     Verify paper_full profile raises ValueError when status is failed,
     even if a numeric score field exists. Failed evidence must not be
@@ -828,7 +828,7 @@ def test_onefile_detect_record_scoring_recovers_when_status_failed_but_score_ava
         encoding="utf-8",
     )
 
-    # paper 模式下 status=failed 证据不得被改写为 ok，必须抛出 ValueError。
+    # paper 妯″紡涓?status=failed 璇佹嵁涓嶅緱琚敼鍐欎负 ok锛屽繀椤绘姏鍑?ValueError銆?
     import pytest as _pytest
     with _pytest.raises(ValueError, match="content_evidence_payload"):
         module._prepare_detect_record_for_scoring(run_root, records_dir, "paper_full_cuda")
@@ -836,7 +836,7 @@ def test_onefile_detect_record_scoring_recovers_when_status_failed_but_score_ava
 
 def test_onefile_detect_record_scoring_allows_hf_trace_recovery_with_failed_semantics(tmp_path: Path) -> None:
     """
-    功能：验证 paper_full profile 在 mask_extraction_no_input 下允许使用 HF trace 分数恢复，但不改写失败语义。
+    鍔熻兘锛氶獙璇?paper_full profile 鍦?mask_extraction_no_input 涓嬪厑璁镐娇鐢?HF trace 鍒嗘暟鎭㈠锛屼絾涓嶆敼鍐欏け璐ヨ涔夈€?
 
     Verify paper_full profile may recover score from hf_detect_trace.hf_score_raw
     when content failure reason is mask_extraction_no_input and hf_status is ok,
@@ -892,7 +892,7 @@ def test_onefile_detect_record_scoring_allows_hf_trace_recovery_with_failed_sema
 
 def test_onefile_detect_record_scoring_allows_fallback_when_sidecar_disabled(tmp_path: Path) -> None:
     """
-    功能：验证 paper_full profile 在 sidecar 禁用时仅写诊断补全，不污染正式校准输入。
+    鍔熻兘锛氶獙璇?paper_full profile 鍦?sidecar 绂佺敤鏃朵粎鍐欒瘖鏂ˉ鍏紝涓嶆薄鏌撴寮忔牎鍑嗚緭鍏ャ€?
 
     Verify paper_full profile writes diagnostic fallback sample when both LF/HF are
     absent due to image_domain_sidecar_disabled, while returning original detect record
@@ -940,7 +940,7 @@ def test_onefile_detect_record_scoring_allows_fallback_when_sidecar_disabled(tmp
         encoding="utf-8",
     )
 
-    # sidecar 禁用是配置性缺失：写诊断补全文件，并生成带来源标记的正式校准输入。
+    # sidecar 绂佺敤鏄厤缃€х己澶憋細鍐欒瘖鏂ˉ鍏ㄦ枃浠讹紝骞剁敓鎴愬甫鏉ユ簮鏍囪鐨勬寮忔牎鍑嗚緭鍏ャ€?
     scoring_path = module._prepare_detect_record_for_scoring(run_root, records_dir, "paper_full_cuda")
     assert scoring_path.exists()
     assert scoring_path != detect_record_path
@@ -966,7 +966,7 @@ def test_onefile_detect_record_scoring_allows_fallback_when_sidecar_disabled(tmp
 
 def test_onefile_prepare_stage_cfg_path_injects_minimal_ground_truth_bundle(tmp_path: Path) -> None:
     """
-    功能：验证 paper_full_cuda 的 calibrate/evaluate 阶段会注入最小 GT bundle。 
+    鍔熻兘锛氶獙璇?paper_full_cuda 鐨?calibrate/evaluate 闃舵浼氭敞鍏ユ渶灏?GT bundle銆?
 
     Verify paper_full_cuda stage config injects minimal labeled detect records glob.
 
@@ -1029,7 +1029,7 @@ def test_onefile_prepare_stage_cfg_path_injects_minimal_ground_truth_bundle(tmp_
 
 def test_onefile_prepare_stage_cfg_path_supports_multiple_ground_truth_pairs(tmp_path: Path) -> None:
     """
-    功能：验证可通过配置生成多对 GT records bundle。 
+    鍔熻兘锛氶獙璇佸彲閫氳繃閰嶇疆鐢熸垚澶氬 GT records bundle銆?
 
     Verify stage config can generate multiple GT record pairs via pair_count.
 
@@ -1097,7 +1097,7 @@ def test_onefile_prepare_stage_cfg_path_propagates_dual_branch_failure_reason(
     tmp_path: Path,
 ) -> None:
     """
-    功能：验证 dual-branch 失败后回退 clone 的 GT 记录会写入失败原因审计字段。
+    鍔熻兘锛氶獙璇?dual-branch 澶辫触鍚庡洖閫€ clone 鐨?GT 璁板綍浼氬啓鍏ュけ璐ュ師鍥犲璁″瓧娈点€?
 
     Verify stage config fallback writes dual_branch_failure_reason into clone GT records.
 
@@ -1172,7 +1172,7 @@ def test_dual_branch_embed_uses_whitelisted_test_mode_identity_override(
     tmp_path: Path,
 ) -> None:
     """
-    功能：验证 dual-branch 负样本 embed 使用 whitelist 允许的 test_mode_identity 覆写。 
+    鍔熻兘锛氶獙璇?dual-branch 璐熸牱鏈?embed 浣跨敤 whitelist 鍏佽鐨?test_mode_identity 瑕嗗啓銆?
 
     Verify dual-branch negative embed uses whitelisted test_mode_identity override
     instead of forbidden embed.injection_enabled override.
@@ -1240,7 +1240,7 @@ def test_dual_branch_embed_uses_whitelisted_test_mode_identity_override(
 
 def test_prepare_detect_records_recovers_dual_branch_negative_score_for_calibration(tmp_path: Path) -> None:
     """
-    功能：验证 dual-branch 负样本记录在 score 缺失时可从 hf_score_raw 恢复为校准可用样本。 
+    鍔熻兘锛氶獙璇?dual-branch 璐熸牱鏈褰曞湪 score 缂哄け鏃跺彲浠?hf_score_raw 鎭㈠涓烘牎鍑嗗彲鐢ㄦ牱鏈€?
 
     Verify minimal GT preparation recovers negative score from hf_detect_trace.hf_score_raw
     and marks it as formal dual-branch recovery sample.
@@ -1323,7 +1323,7 @@ def test_prepare_detect_records_recovers_dual_branch_negative_score_for_calibrat
 
 def test_prepare_detect_records_dual_branch_enforces_negative_score_separation(tmp_path: Path) -> None:
     """
-    功能：验证 dual-branch 正负同分时会对负样本执行最小分数分离。 
+    鍔熻兘锛氶獙璇?dual-branch 姝ｈ礋鍚屽垎鏃朵細瀵硅礋鏍锋湰鎵ц鏈€灏忓垎鏁板垎绂汇€?
 
     Verify dual-branch GT generation enforces negative score separation
     when negative score is not lower than positive score.
@@ -1397,7 +1397,7 @@ def test_prepare_detect_records_dual_branch_enforces_negative_score_separation(t
 
 def test_prepare_detect_records_clone_mode_recovers_failed_source_for_negative_gt(tmp_path: Path) -> None:
     """
-    功能：验证单分支 clone 回退场景可从 failed 源恢复负样本 GT 分数。 
+    鍔熻兘锛氶獙璇佸崟鍒嗘敮 clone 鍥為€€鍦烘櫙鍙粠 failed 婧愭仮澶嶈礋鏍锋湰 GT 鍒嗘暟銆?
 
     Verify clone-based GT generation can recover negative sample when source
     detect record is failed but already has recovered score metadata.
@@ -1449,7 +1449,7 @@ def test_prepare_detect_records_clone_mode_recovers_failed_source_for_negative_g
 
 def test_prepare_detect_records_clone_mode_normalizes_positive_from_recovered_failed_source(tmp_path: Path) -> None:
     """
-    功能：验证单分支 clone 回退场景会将 recovered failed 源正样本标准化为 status=ok。 
+    鍔熻兘锛氶獙璇佸崟鍒嗘敮 clone 鍥為€€鍦烘櫙浼氬皢 recovered failed 婧愭鏍锋湰鏍囧噯鍖栦负 status=ok銆?
 
     Verify clone-based GT generation normalizes positive sample to status=ok
     when source detect record is failed but already has recovered score metadata.
@@ -1500,7 +1500,7 @@ def test_prepare_detect_records_clone_mode_normalizes_positive_from_recovered_fa
 
 def test_prepare_detect_records_clone_mode_keeps_dual_branch_failure_reason(tmp_path: Path) -> None:
     """
-    功能：验证 clone 回退时会把 dual-branch 失败原因写入 GT 审计字段。
+    鍔熻兘锛氶獙璇?clone 鍥為€€鏃朵細鎶?dual-branch 澶辫触鍘熷洜鍐欏叆 GT 瀹¤瀛楁銆?
 
     Verify clone fallback records include dual_branch_failure_reason audit field.
 
@@ -1550,7 +1550,7 @@ def test_prepare_detect_records_clone_mode_keeps_dual_branch_failure_reason(tmp_
 
 def test_onefile_prepare_stage_cfg_path_uses_prompt_list_as_gt_driver(tmp_path: Path) -> None:
     """
-    功能：验证可通过 prompts 文件驱动 GT records 生成与 prompt 注入。
+    鍔熻兘锛氶獙璇佸彲閫氳繃 prompts 鏂囦欢椹卞姩 GT records 鐢熸垚涓?prompt 娉ㄥ叆銆?
 
     Verify prompts file drives GT pair count and prompt injection into generated records.
 
@@ -1616,7 +1616,7 @@ def test_onefile_prepare_stage_cfg_path_uses_prompt_list_as_gt_driver(tmp_path: 
 
 def test_prepare_detect_records_dual_branch_respects_pair_count_and_indexed_names(tmp_path: Path) -> None:
     """
-    功能：验证 dual_branch 聚合在 pair_count>1 时生成索引化正负样本文件。 
+    鍔熻兘锛氶獙璇?dual_branch 鑱氬悎鍦?pair_count>1 鏃剁敓鎴愮储寮曞寲姝ｈ礋鏍锋湰鏂囦欢銆?
 
     Verify dual-branch aggregation generates indexed positive/negative files for pair_count>1.
 
@@ -1686,7 +1686,7 @@ def test_onefile_resolve_prompt_file_path_fallbacks_to_repo_root(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
-    功能：验证 prompt 相对路径在 cfg 目录缺失时可回退到仓库根目录解析。
+    鍔熻兘锛氶獙璇?prompt 鐩稿璺緞鍦?cfg 鐩綍缂哄け鏃跺彲鍥為€€鍒颁粨搴撴牴鐩綍瑙ｆ瀽銆?
 
     Verify prompt path resolution falls back to repo root when cfg-relative file is absent.
 
@@ -1719,7 +1719,7 @@ def test_onefile_resolve_prompt_file_path_fallbacks_to_repo_root(
 
 def test_paper_full_mechanism_assertions_fail_fast_on_proxy_paths(tmp_path: Path) -> None:
     """
-    功能：验证 paper 机制断言在 proxy 路径下 fail-fast。
+    鍔熻兘锛氶獙璇?paper 鏈哄埗鏂█鍦?proxy 璺緞涓?fail-fast銆?
 
     Verify mechanism assertion fails fast when proxy HF/LF configuration is used.
 
@@ -1739,8 +1739,8 @@ def test_paper_full_mechanism_assertions_fail_fast_on_proxy_paths(tmp_path: Path
     cfg = {
         "paper_faithfulness": {"enabled": True},
         "impl": {
-            "sync_module_id": "geometry_sync_baseline_v1",
-            "geometry_extractor_id": "geometry_baseline_identity_v1",
+            "sync_module_id": "geometry_latent_sync_sd3_v3",
+            "geometry_extractor_id": "attention_anchor_map_relation_v2",
         },
         "watermark": {
             "hf": {
@@ -1786,7 +1786,7 @@ def test_paper_full_mechanism_assertions_fail_fast_on_proxy_paths(tmp_path: Path
 
 def test_paper_full_mechanism_assertions_accept_top_level_geometry_payload(tmp_path: Path) -> None:
     """
-    功能：验证断言脚本可从 detect 顶层 geometry payload 读取几何锚点。 
+    鍔熻兘锛氶獙璇佹柇瑷€鑴氭湰鍙粠 detect 椤跺眰 geometry payload 璇诲彇鍑犱綍閿氱偣銆?
 
     Verify mechanism assertion accepts geometry anchors from top-level geometry payload.
 
@@ -1818,10 +1818,10 @@ def test_paper_full_mechanism_assertions_accept_top_level_geometry_payload(tmp_p
     cfg = {
         "paper_faithfulness": {"enabled": True},
         "impl": {
-            "sync_module_id": "geometry_latent_sync_sd3_v2",
-            "geometry_extractor_id": "attention_anchor_map_relation_v1",
-            "hf_embedder_id": "hf_embedder_t2smark_v1",
-            "lf_coder_id": "lf_coder_prc_v1",
+            "sync_module_id": "geometry_latent_sync_sd3_v3",
+            "geometry_extractor_id": "attention_anchor_map_relation_v2",
+            "hf_embedder_id": "high_freq_template_codec_v2",
+            "lf_coder_id": "low_freq_template_codec_v2",
         },
         "watermark": {
             "hf": {
@@ -1881,7 +1881,7 @@ def test_paper_full_mechanism_assertions_accept_top_level_geometry_payload(tmp_p
         tmp_path: Path,
     ) -> None:
         """
-        功能：验证 paper profile 在 signoff 前执行 repro_bundle 闭环准备。
+        鍔熻兘锛氶獙璇?paper profile 鍦?signoff 鍓嶆墽琛?repro_bundle 闂幆鍑嗗銆?
 
         Verify onefile paper profile invokes repro-bundle closure hook before signoff.
 
@@ -1944,7 +1944,7 @@ def test_paper_full_mechanism_assertions_accept_top_level_geometry_payload(tmp_p
 
 def test_paper_full_mechanism_assertions_accept_nested_evaluation_report(tmp_path: Path) -> None:
     """
-    功能：验证断言脚本兼容嵌套 evaluation_report 与可选 injection_site.status。 
+    鍔熻兘锛氶獙璇佹柇瑷€鑴氭湰鍏煎宓屽 evaluation_report 涓庡彲閫?injection_site.status銆?
 
     Verify mechanism assertion accepts nested evaluation_report payload and optional site status.
 
@@ -1976,10 +1976,10 @@ def test_paper_full_mechanism_assertions_accept_nested_evaluation_report(tmp_pat
     cfg = {
         "paper_faithfulness": {"enabled": True},
         "impl": {
-            "sync_module_id": "geometry_latent_sync_sd3_v2",
-            "geometry_extractor_id": "attention_anchor_map_relation_v1",
-            "hf_embedder_id": "hf_embedder_t2smark_v1",
-            "lf_coder_id": "lf_coder_prc_v1",
+            "sync_module_id": "geometry_latent_sync_sd3_v3",
+            "geometry_extractor_id": "attention_anchor_map_relation_v2",
+            "hf_embedder_id": "high_freq_template_codec_v2",
+            "lf_coder_id": "low_freq_template_codec_v2",
         },
         "watermark": {
             "hf": {
@@ -2045,7 +2045,7 @@ def test_paper_full_mechanism_assertions_accept_nested_evaluation_report(tmp_pat
 
 def test_paper_full_mechanism_assertions_reject_latent_mode_sync_only_geometry(tmp_path: Path) -> None:
     """
-    功能：验证 latent per-step 模式下缺失 anchor 证据会触发硬失败。 
+    鍔熻兘锛氶獙璇?latent per-step 妯″紡涓嬬己澶?anchor 璇佹嵁浼氳Е鍙戠‖澶辫触銆?
 
     Verify latent per-step mode rejects sync-only geometry evidence when anchor evidence is absent.
 
@@ -2077,10 +2077,10 @@ def test_paper_full_mechanism_assertions_reject_latent_mode_sync_only_geometry(t
     cfg = {
         "paper_faithfulness": {"enabled": True},
         "impl": {
-            "sync_module_id": "geometry_latent_sync_sd3_v2",
-            "geometry_extractor_id": "attention_anchor_map_relation_v1",
-            "hf_embedder_id": "hf_embedder_t2smark_v1",
-            "lf_coder_id": "lf_coder_prc_v1",
+            "sync_module_id": "geometry_latent_sync_sd3_v3",
+            "geometry_extractor_id": "attention_anchor_map_relation_v2",
+            "hf_embedder_id": "high_freq_template_codec_v2",
+            "lf_coder_id": "low_freq_template_codec_v2",
         },
         "watermark": {
             "hf": {
@@ -2140,7 +2140,7 @@ def test_paper_full_mechanism_assertions_reject_latent_mode_sync_only_geometry(t
 
 def test_assert_multi_protocol_compare_success_rejects_failed_protocol(tmp_path: Path) -> None:
     """
-    功能：验证 compare summary 存在失败协议时 paper 机制断言必须失败。
+    鍔熻兘锛氶獙璇?compare summary 瀛樺湪澶辫触鍗忚鏃?paper 鏈哄埗鏂█蹇呴』澶辫触銆?
 
     Verify compare summary with failed protocol status is rejected by paper assertion helper.
 
@@ -2172,7 +2172,7 @@ def test_assert_multi_protocol_compare_success_rejects_failed_protocol(tmp_path:
 
 def test_paper_mechanism_assertions_allow_fallback_without_geometry_anchors(tmp_path: Path) -> None:
     """
-    功能：验证 detect fallback 模式下可放宽几何锚点与 compare failed 协议断言。 
+    鍔熻兘锛氶獙璇?detect fallback 妯″紡涓嬪彲鏀惧鍑犱綍閿氱偣涓?compare failed 鍗忚鏂█銆?
 
     Verify paper mechanism assertions relax geometry-anchor and failed-compare checks in detect fallback mode.
 
@@ -2203,10 +2203,10 @@ def test_paper_mechanism_assertions_allow_fallback_without_geometry_anchors(tmp_
     cfg = {
         "paper_faithfulness": {"enabled": True},
         "impl": {
-            "sync_module_id": "geometry_latent_sync_sd3_v2",
-            "geometry_extractor_id": "attention_anchor_map_relation_v1",
-            "hf_embedder_id": "hf_embedder_t2smark_v1",
-            "lf_coder_id": "lf_coder_prc_v1",
+            "sync_module_id": "geometry_latent_sync_sd3_v3",
+            "geometry_extractor_id": "attention_anchor_map_relation_v2",
+            "hf_embedder_id": "high_freq_template_codec_v2",
+            "lf_coder_id": "low_freq_template_codec_v2",
         },
         "watermark": {
             "hf": {
@@ -2271,7 +2271,7 @@ def test_paper_mechanism_assertions_allow_fallback_without_geometry_anchors(tmp_
 
     def test_onefile_multi_protocol_validation_failed_protocol_is_warning_only(tmp_path: Path) -> None:
         """
-        功能：验证 compare summary 仅因 protocol status 失败时不应阻断 onefile。 
+        鍔熻兘锛氶獙璇?compare summary 浠呭洜 protocol status 澶辫触鏃朵笉搴旈樆鏂?onefile銆?
 
         Verify protocol-status failures in compare summary are warning-only in onefile gate.
 
@@ -2290,7 +2290,7 @@ def test_paper_mechanism_assertions_allow_fallback_without_geometry_anchors(tmp_
 
     def test_onefile_multi_protocol_validation_schema_error_blocks(tmp_path: Path) -> None:
         """
-        功能：验证 compare summary 结构错误必须阻断 onefile。 
+        鍔熻兘锛氶獙璇?compare summary 缁撴瀯閿欒蹇呴』闃绘柇 onefile銆?
 
         Verify malformed compare summary errors must block onefile workflow.
 
@@ -2305,3 +2305,4 @@ def test_paper_mechanism_assertions_allow_fallback_without_geometry_anchors(tmp_
 
         error = ValueError("compare summary schema_version invalid: unknown")
         assert module._should_block_on_multi_protocol_validation_error(error) is True
+

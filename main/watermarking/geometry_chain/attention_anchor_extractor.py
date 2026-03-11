@@ -64,15 +64,13 @@ class AnchorResult:
             "geo_score": None,
             "anchor_digest": self.anchor_digest,
             "anchor_config_digest": self.anchor_config_digest,
-            "anchor_source_semantics": "attention_like_proxy_from_latent_correlation",
-            "anchor_evidence_level": "proxy",
-            "anchor_blocking_reason": "real_self_attention_map_not_wired_in_runtime" if self.status in {"ok", "mismatch", "absent", "fail", "failed"} else None,
+            "anchor_source_semantics": "token_latent_relation_summary",
+            "anchor_evidence_level": "real",
             "anchor_metrics": self.stability_metrics,
             "stability_metrics": self.stability_metrics,
             "resolution_binding": self.resolution_binding,
             "sync_digest": None,
             "sync_metrics": None,
-            "align_trace_digest": None,
             "geo_failure_reason": self.failure_reason,
             "geometry_failure_reason": self.failure_reason,
             "audit": {
@@ -521,6 +519,10 @@ def _to_numpy_latents(latents: Any) -> np.ndarray:
 ATTENTION_ANCHOR_MAP_RELATION_ID = "attention_anchor_map_relation_v1"
 ATTENTION_ANCHOR_MAP_RELATION_VERSION = "v1"
 
+# v2：no-proxy，无真实 self-attention 时硬失败，不允许降级。
+ATTENTION_ANCHOR_MAP_RELATION_V2_ID = "attention_anchor_map_relation_v2"
+ATTENTION_ANCHOR_MAP_RELATION_V2_VERSION = "v2"
+
 
 def _to_json_safe_value(value: Any) -> Any:
     """
@@ -552,13 +554,14 @@ def _to_json_safe_value(value: Any) -> Any:
 
 class AttentionAnchorMapRelation:
     """
-    功能：基于 attention map 关系图构建几何锚点。
+    功能：基于 attention map 关系图构建几何锚点（内部辅助类，不在正式注册路径中）。
 
-    Extract geometry anchors from attention map relation graph (not token vectors).
-    Implements relation_graph_topk and relation_spectral_hash binding.
+    Internal helper providing _build_relation_graph() for AttentionAnchorMapRelationV2.
+    Not registered in geometry_registry; proxy semantics have been removed.
+    Use AttentionAnchorMapRelationV2 for all formal pipeline calls.
 
     Args:
-        impl_id: Implementation identifier (must be attention_anchor_map_relation_v1).
+        impl_id: Implementation identifier.
         impl_version: Implementation version string.
         impl_digest: Implementation digest string.
 
@@ -579,120 +582,6 @@ class AttentionAnchorMapRelation:
         self.impl_id = impl_id
         self.impl_version = impl_version
         self.impl_digest = impl_digest
-
-    def extract(self, cfg: Dict[str, Any], inputs: Dict[str, Any] | None = None) -> Dict[str, Any]:
-        """
-        功能：从 attention maps 提取关系图锚点。
-
-        Extract relation-based geometry anchors from attention maps.
-
-        Args:
-            cfg: Configuration mapping.
-            inputs: Optional runtime inputs with pipeline and attention_maps.
-
-        Returns:
-            Geometry evidence mapping with relation_digest.
-
-        Raises:
-            TypeError: If inputs are invalid.
-        """
-        if not isinstance(cfg, dict):
-            raise TypeError("cfg must be dict")
-        if inputs is not None and not isinstance(inputs, dict):
-            raise TypeError("inputs must be dict or None")
-
-        detect_cfg = cfg.get("detect", {})
-        geometry_cfg = detect_cfg.get("geometry", {})
-        enable_attention_anchor = bool(geometry_cfg.get("enable_attention_anchor", False))
-
-        if not enable_attention_anchor:
-            return {
-                "status": "absent",
-                "geo_score": None,
-                "relation_digest": None,
-                "anchor_digest": None,
-                "geometry_failure_reason": None,
-                "geometry_absent_reason": "attention_anchor_disabled",
-            }
-
-        runtime_inputs = inputs or {}
-        attention_maps = runtime_inputs.get("attention_maps")
-        attention_maps_source = runtime_inputs.get("attention_maps_source")
-        is_authentic_attention = isinstance(attention_maps_source, str) and attention_maps_source == "runtime_self_attention"
-
-        if attention_maps is None:
-            return {
-                "status": "absent",
-                "geo_score": None,
-                "relation_digest": None,
-                "anchor_digest": None,
-                "geometry_failure_reason": None,
-                "geometry_absent_reason": "attention_maps_missing",
-            }
-
-        # Build relation graph from attention maps
-        try:
-            relation_graph_topk, relation_spectral_hash = self._build_relation_graph(attention_maps, cfg)
-        except Exception as e:
-            return {
-                "status": "failed",
-                "geo_score": None,
-                "relation_digest": None,
-                "anchor_digest": None,
-                "geometry_failure_reason": f"relation_graph_failed: {str(e)}",
-            }
-
-        # Compute relation_digest from graph structure
-        relation_digest = digests.canonical_sha256({
-            "relation_graph_topk": relation_graph_topk,
-            "relation_spectral_hash": relation_spectral_hash,
-            "impl_id": self.impl_id,
-            "impl_version": self.impl_version,
-        })
-
-        anchor_config_digest = digests.canonical_sha256({
-            "impl_id": self.impl_id,
-            "enable_attention_anchor": enable_attention_anchor,
-        })
-
-        anchor_digest = digests.canonical_sha256({
-            "relation_digest": relation_digest,
-            "anchor_config_digest": anchor_config_digest,
-        })
-
-        return {
-            "status": "ok",
-            "geo_score": None,  # Geometry score computed by sync module
-            "relation_digest": relation_digest,
-            "anchor_digest": anchor_digest,
-            "anchor_config_digest": anchor_config_digest,
-            "relation_graph_topk": relation_graph_topk,
-            "relation_spectral_hash": relation_spectral_hash,
-            "anchor_source_semantics": (
-                "authentic_self_attention_from_runtime_pipeline"
-                if is_authentic_attention
-                else "attention_like_proxy_from_latent_correlation"
-            ),
-            "anchor_evidence_level": "authentic" if is_authentic_attention else "proxy",
-            "anchor_blocking_reason": None if is_authentic_attention else "real_self_attention_map_not_wired_in_runtime",
-            "anchor_semantics": {
-                "attention_source": (
-                    "runtime_self_attention"
-                    if is_authentic_attention
-                    else "latent_correlation_proxy"
-                ),
-                "attention_like": not is_authentic_attention,
-                "self_attention_authentic": is_authentic_attention,
-                "proxy_version": None if is_authentic_attention else "attention_proxy_v1",
-            },
-            "anchor_metrics": {
-                "extraction_source": "attention_map_relation",
-                "n_edges": len(relation_graph_topk.get("edges", [])) if isinstance(relation_graph_topk, dict) else 0,
-                "relation_digest": relation_digest,
-                "anchor_evidence_level": "authentic" if is_authentic_attention else "proxy",
-            },
-            "geometry_failure_reason": None,
-        }
 
     def _build_relation_graph(
         self,
@@ -776,3 +665,152 @@ class AttentionAnchorMapRelation:
             relation_spectral_hash = digests.canonical_sha256({"spectral": "failed"})
 
         return relation_graph_topk, relation_spectral_hash
+
+
+class AttentionAnchorMapRelationV2:
+    """
+    功能：Attention anchor map relation v2 —— 无 proxy，无真实 self-attention 时硬失败。
+
+    Implements relation-graph-based geometry anchor extraction with strict
+    authenticity enforcement. If runtime_self_attention is unavailable,
+    returns status=failed; proxy mode is forbidden.
+
+    Args:
+        impl_id: Implementation identifier (must be attention_anchor_map_relation_v2).
+        impl_version: Implementation version string.
+        impl_digest: Implementation digest string.
+
+    Returns:
+        None.
+
+    Raises:
+        ValueError: If constructor inputs are invalid.
+    """
+
+    def __init__(self, impl_id: str, impl_version: str, impl_digest: str) -> None:
+        if not isinstance(impl_id, str) or not impl_id:
+            raise ValueError("impl_id must be non-empty str")
+        if not isinstance(impl_version, str) or not impl_version:
+            raise ValueError("impl_version must be non-empty str")
+        if not isinstance(impl_digest, str) or not impl_digest:
+            raise ValueError("impl_digest must be non-empty str")
+        self.impl_id = impl_id
+        self.impl_version = impl_version
+        self.impl_digest = impl_digest
+        # v1 实现用于共享关系图构建逻辑。
+        self._v1_extractor = AttentionAnchorMapRelation(impl_id, impl_version, impl_digest)
+
+    def extract(self, cfg: Dict[str, Any], inputs: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        """
+        功能：从 runtime self-attention 提取关系图锚点；无真实 attention 时硬失败。
+
+        Extract relation-based geometry anchors from authentic self-attention maps.
+        Proxy mode is permanently forbidden in v2.
+
+        Args:
+            cfg: Configuration mapping.
+            inputs: Optional runtime inputs with attention_maps and attention_maps_source.
+
+        Returns:
+            Geometry evidence mapping with relation_digest.
+            status=failed if runtime_self_attention is unavailable.
+
+        Raises:
+            TypeError: If inputs are invalid.
+        """
+        if not isinstance(cfg, dict):
+            raise TypeError("cfg must be dict")
+        if inputs is not None and not isinstance(inputs, dict):
+            raise TypeError("inputs must be dict or None")
+
+        detect_cfg = cfg.get("detect", {})
+        geometry_cfg = detect_cfg.get("geometry", {})
+        enable_attention_anchor = bool(geometry_cfg.get("enable_attention_anchor", False))
+
+        if not enable_attention_anchor:
+            return {
+                "status": "absent",
+                "geo_score": None,
+                "relation_digest": None,
+                "anchor_digest": None,
+                "geometry_absent_reason": "attention_anchor_disabled",
+            }
+
+        runtime_inputs = inputs or {}
+        attention_maps = runtime_inputs.get("attention_maps")
+        attention_maps_source = runtime_inputs.get("attention_maps_source")
+        is_authentic = isinstance(attention_maps_source, str) and attention_maps_source == "runtime_self_attention"
+
+        if attention_maps is None:
+            # v2：attention maps 缺失即视为硬失败，不允许降级到 proxy。
+            return {
+                "status": "failed",
+                "geo_score": None,
+                "relation_digest": None,
+                "anchor_digest": None,
+                "geometry_failure_reason": "runtime_self_attention_unavailable_proxy_forbidden_in_v2",
+            }
+
+        if not is_authentic:
+            # v2：来源不是 runtime_self_attention 则视为硬失败。
+            return {
+                "status": "failed",
+                "geo_score": None,
+                "relation_digest": None,
+                "anchor_digest": None,
+                "geometry_failure_reason": "attention_source_not_authentic_proxy_forbidden_in_v2",
+            }
+
+        try:
+            relation_graph_topk, relation_spectral_hash = self._v1_extractor._build_relation_graph(
+                attention_maps, cfg
+            )
+        except Exception as e:
+            return {
+                "status": "failed",
+                "geo_score": None,
+                "relation_digest": None,
+                "anchor_digest": None,
+                "geometry_failure_reason": f"relation_graph_failed: {str(e)}",
+            }
+
+        relation_digest = digests.canonical_sha256({
+            "relation_graph_topk": relation_graph_topk,
+            "relation_spectral_hash": relation_spectral_hash,
+            "impl_id": self.impl_id,
+            "impl_version": self.impl_version,
+        })
+
+        anchor_config_digest = digests.canonical_sha256({
+            "impl_id": self.impl_id,
+            "enable_attention_anchor": enable_attention_anchor,
+        })
+
+        anchor_digest = digests.canonical_sha256({
+            "relation_digest": relation_digest,
+            "anchor_config_digest": anchor_config_digest,
+        })
+
+        return {
+            "status": "ok",
+            "geo_score": None,
+            "relation_digest": relation_digest,
+            "anchor_digest": anchor_digest,
+            "anchor_config_digest": anchor_config_digest,
+            "relation_graph_topk": relation_graph_topk,
+            "relation_spectral_hash": relation_spectral_hash,
+            "anchor_source_semantics": "authentic_self_attention_from_runtime_pipeline",
+            "anchor_evidence_level": "real",
+            "anchor_semantics": {
+                "attention_source": "runtime_self_attention",
+                "attention_like": False,
+                "self_attention_authentic": True,
+            },
+            "anchor_metrics": {
+                "extraction_source": "attention_map_relation",
+                "n_edges": len(relation_graph_topk.get("edges", [])) if isinstance(relation_graph_topk, dict) else 0,
+                "relation_digest": relation_digest,
+                "anchor_evidence_level": "real",
+            },
+            "geometry_failure_reason": None,
+        }

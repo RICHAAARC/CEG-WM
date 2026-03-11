@@ -1175,11 +1175,11 @@ def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> P
     hf_cfg = watermark_cfg.get("hf") if isinstance(watermark_cfg.get("hf"), dict) else {}
     lf_cfg = watermark_cfg.get("lf") if isinstance(watermark_cfg.get("lf"), dict) else {}
     hf_cfg["enabled"] = True
-    hf_cfg["tail_truncation_mode"] = "top_k_per_latent"
-    hf_cfg["selection"] = "top_k_magnitude_based"
+    hf_cfg["tail_truncation_mode"] = "keyed_template_correlation"
+    hf_cfg["selection"] = "keyed_rademacher_template"
     lf_cfg["enabled"] = True
-    lf_cfg["coding_mode"] = "latent_space_sign_flipping"
-    lf_cfg["decoder"] = "belief_propagation"
+    lf_cfg["coding_mode"] = "pseudogaussian_template_additive"
+    lf_cfg["decoder"] = "matched_correlation"
     watermark_cfg["hf"] = hf_cfg
     watermark_cfg["lf"] = lf_cfg
     cfg_obj["watermark"] = watermark_cfg

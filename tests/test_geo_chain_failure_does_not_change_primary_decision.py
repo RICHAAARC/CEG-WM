@@ -20,7 +20,7 @@ def test_geo_chain_failure_does_not_change_primary_decision() -> None:
     Returns:
         None.
     """
-    factory = resolve_fusion_rule("fusion_neyman_pearson_v1")
+    factory = resolve_fusion_rule("fusion_neyman_pearson_v2")
     fusion_rule = factory({})
 
     cfg = {

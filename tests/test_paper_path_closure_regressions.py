@@ -1,4 +1,4 @@
-"""
+﻿"""
 File purpose: 论文主路径收口回归测试。
 Module type: General module
 """
@@ -25,17 +25,17 @@ def test_paper_full_cuda_fusion_is_np() -> None:
     cfg = _load_paper_full_cuda_cfg()
     raw_impl_cfg = cfg.get("impl")
     impl_cfg = cast(Dict[str, Any], raw_impl_cfg if isinstance(raw_impl_cfg, dict) else {})
-    assert impl_cfg.get("fusion_rule_id") == "fusion_neyman_pearson_v1"
+    assert impl_cfg.get("fusion_rule_id") == "fusion_neyman_pearson_v2"
 
     identity = runtime_resolver.parse_impl_identity_from_cfg(cfg)
-    assert identity.fusion_rule_id == "fusion_neyman_pearson_v1"
+    assert identity.fusion_rule_id == "fusion_neyman_pearson_v2"
 
 
 def test_runtime_resolver_builds_hf_lf_from_impl_identity() -> None:
     cfg = _load_paper_full_cuda_cfg()
     identity, impl_set, _ = runtime_resolver.build_runtime_impl_set_from_cfg(cfg)
-    assert identity.hf_embedder_id == "hf_embedder_t2smark_v1"
-    assert identity.lf_coder_id == "lf_coder_prc_v1"
+    assert identity.hf_embedder_id == "high_freq_template_codec_v2"
+    assert identity.lf_coder_id == "low_freq_template_codec_v2"
     assert impl_set.hf_embedder is not None
     assert impl_set.lf_coder is not None
 
@@ -249,13 +249,13 @@ def test_detect_geometry_chain_paper_path_sync_primary_can_rollback() -> None:
 
 def test_image_domain_sidecar_disabled_in_paper_mode() -> None:
     """
-    功能：验证 paper_full_cuda 配置下 sidecar 状态。
-    paper_faithfulness与sidecar共存用于对比分析，非互斥关系。
+    功能：验证 paper_full_cuda 配置下 sidecar 禁用状态。
+    v2.0 收口后，论文正式路径（paper_faithfulness.enabled=True）禁止 image-domain sidecar。
     """
     cfg = _load_paper_full_cuda_cfg()
     sidecar_enabled = getattr(detect_orchestrator, "_is_image_domain_sidecar_enabled")
-    # 断言与配置对齐：sidecar enabled for baseline comparison (0830 fix intent)
-    assert sidecar_enabled(cfg) is True
+    # v2.0 收口：paper 正式路径 image_domain_sidecar_enabled=false，sidecar 必须禁用
+    assert sidecar_enabled(cfg) is False
 
 
 def test_embed_trace_mode_no_stub_marker() -> None:

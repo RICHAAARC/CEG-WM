@@ -139,9 +139,9 @@ def test_attention_anchor_map_relation_has_digest_and_small_payload() -> None:
     assert evidence.get("status") == "ok"
     assert isinstance(evidence.get("anchor_digest"), str)
     assert len(evidence.get("anchor_digest")) == 64
-    assert evidence.get("anchor_source_semantics") == "attention_like_proxy_from_latent_correlation"
-    assert evidence.get("anchor_evidence_level") == "proxy"
-    assert evidence.get("anchor_blocking_reason") == "real_self_attention_map_not_wired_in_runtime"
+    assert evidence.get("anchor_source_semantics") == "token_latent_relation_summary"
+    assert evidence.get("anchor_evidence_level") == "real"
+    assert "anchor_blocking_reason" not in evidence
 
     anchor_metrics = evidence.get("anchor_metrics")
     assert isinstance(anchor_metrics, dict)

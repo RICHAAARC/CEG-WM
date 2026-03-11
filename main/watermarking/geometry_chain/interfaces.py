@@ -34,7 +34,9 @@ class GeometryEvidence:
         anchor_metrics: Optional anchor stability metrics.
         sync_digest: Optional sync template digest.
         sync_metrics: Optional sync quality metrics.
-        align_trace_digest: Optional alignment trace digest.
+        align_trace_digest: Optional alignment trace digest. 【历史兼容字段，v2.0 正式路径不写出，仅用于读取历史 records】
+        align_metrics: Optional geometry alignment statistics. 【历史兼容字段，v2.0 正式路径不写出，仅用于读取历史 records】
+        align_config_digest: Optional geometry alignment config digest. 【历史兼容字段，v2.0 正式路径不写出，仅用于读取历史 records】
         geo_score: Optional geometry score.
         geo_failure_reason: Optional geometry failure reason.
                All values must be JSON-serializable strings or dicts.
@@ -145,9 +147,8 @@ class GeometryEvidence:
             "sync_metrics": self.sync_metrics,
             "sync_config_digest": self.sync_config_digest,
             "sync_quality_metrics": self.sync_quality_metrics,
-            "align_trace_digest": self.align_trace_digest,
-            "align_metrics": self.align_metrics,
-            "align_config_digest": self.align_config_digest,
+            # 历史兼容字段（v2.0 正式路径不序列化）：align_trace_digest / align_metrics / align_config_digest
+            # 已退出当前 formal path，仅保留 dataclass 属性供历史 records 读取层使用。
             "geo_score": self.geo_score,
             "geo_score_direction": self.geo_score_direction,
             "geo_failure_reason": self.geo_failure_reason

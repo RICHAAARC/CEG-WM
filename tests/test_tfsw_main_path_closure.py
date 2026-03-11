@@ -1,4 +1,4 @@
-"""
+﻿"""
 测试用例：TFSW 主路径收口（trajectory-consistent LF 检测 + planner exact-only）。
 
 功能说明：
@@ -87,10 +87,10 @@ class _FakePipeline:
 
 def test_lf_uses_trajectory_path_label() -> None:
     """
-    功能：paper 模式下 LF 检测路径标签必须为 lf_coder_prc_trajectory。
+    功能： paper 模式下 LF 检测路径标签必须为 low_freq_template_trajectory。
 
     Verify that paper_faithfulness.enabled=True routes LF scoring through
-    trajectory cache path ("lf_coder_prc_trajectory"), using exact trajectory cache hit.
+    trajectory cache path ("low_freq_template_trajectory"), using exact trajectory cache hit.
 
     Args:
         None.
@@ -123,7 +123,7 @@ def test_lf_uses_trajectory_path_label() -> None:
     )
 
     lf_trace = cast(Dict[str, Any], traces.get("lf", {}))
-    assert lf_trace.get("lf_detect_path") == "lf_coder_prc_trajectory"
+    assert lf_trace.get("lf_detect_path") == "low_freq_template_trajectory"
     assert lf_trace.get("lf_status") in {"ok", "failed", "absent"}
 
 
@@ -160,7 +160,7 @@ def test_lf_absent_when_trajectory_cache_absent() -> None:
     )
 
     lf_trace = cast(Dict[str, Any], traces.get("lf", {}))
-    assert lf_trace.get("lf_detect_path") == "lf_coder_prc_trajectory"
+    assert lf_trace.get("lf_detect_path") == "low_freq_template_trajectory"
     assert lf_trace.get("lf_status") == "absent"
     assert lf_trace.get("lf_absent_reason") == "trajectory_cache_absent"
 
@@ -200,7 +200,7 @@ def test_lf_absent_when_trajectory_cache_empty() -> None:
     )
 
     lf_trace = cast(Dict[str, Any], traces.get("lf", {}))
-    assert lf_trace.get("lf_detect_path") == "lf_coder_prc_trajectory"
+    assert lf_trace.get("lf_detect_path") == "low_freq_template_trajectory"
     assert lf_trace.get("lf_status") == "absent"
     assert lf_trace.get("lf_absent_reason") == "trajectory_cache_absent"
 
@@ -240,7 +240,7 @@ def test_lf_absent_when_lf_basis_missing() -> None:
     )
 
     lf_trace = cast(Dict[str, Any], traces.get("lf", {}))
-    assert lf_trace.get("lf_detect_path") == "lf_coder_prc_trajectory"
+    assert lf_trace.get("lf_detect_path") == "low_freq_template_trajectory"
     assert lf_trace.get("lf_status") == "absent"
     assert lf_trace.get("lf_absent_reason") == "lf_basis_missing_for_trajectory_path"
 
@@ -283,7 +283,7 @@ def test_lf_absent_on_exact_timestep_mismatch() -> None:
     )
 
     lf_trace = cast(Dict[str, Any], traces.get("lf", {}))
-    assert lf_trace.get("lf_detect_path") == "lf_coder_prc_trajectory"
+    assert lf_trace.get("lf_detect_path") == "low_freq_template_trajectory"
     assert lf_trace.get("lf_status") == "absent"
     absent_reason = lf_trace.get("lf_absent_reason", "")
     assert "trajectory_latent_absent" in absent_reason

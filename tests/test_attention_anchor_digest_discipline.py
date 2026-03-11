@@ -87,4 +87,4 @@ def test_geometry_attention_impl_is_in_runtime_whitelist() -> None:
     impl_cfg = whitelist.data.get("impl_id", {})
     allowed_by_domain = impl_cfg.get("allowed_by_domain", {})
     geometry_impls = allowed_by_domain.get("geometry_extractor", [])
-    assert "geometry_attention_anchor_sd3_v1" in geometry_impls
+    assert "attention_anchor_map_relation_v2" in geometry_impls

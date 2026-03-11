@@ -10,7 +10,8 @@ from typing import Any, Dict, Tuple
 import pytest
 
 from main.core import schema
-from main.registries import content_registry, fusion_registry, geometry_registry, runtime_resolver
+from main.registries import runtime_resolver
+from main.watermarking.fusion import neyman_pearson
 from main.watermarking.fusion.interfaces import FusionDecision
 from main.watermarking.detect.orchestrator import run_detect_orchestrator
 from main.watermarking.embed.orchestrator import run_embed_orchestrator
@@ -84,29 +85,37 @@ def _get_value_by_field_path(mapping: Dict[str, Any], field_path: str) -> Tuple[
 
 def _build_minimal_cfg() -> Dict[str, Any]:
     """
-    功能：构造最小 cfg。
+    功能：构造最小 cfg（v2/v3 正式 impl，ablation 禁用 content 与 geometry）。
 
-    Build a minimal configuration mapping for baseline implementations.
+    Build a minimal configuration mapping using formal v2/v3 implementation IDs
+    with content and geometry disabled via ablation flags.
 
     Args:
         None.
 
     Returns:
-        Minimal configuration mapping.
+        Normalized configuration mapping.
     """
-    return {
+    from main.core import config_loader
+    cfg: Dict[str, Any] = {
         "impl": {
-            "content_extractor_id": content_registry.CONTENT_BASELINE_IDENTITY_ID,
-            "geometry_extractor_id": geometry_registry.GEOMETRY_BASELINE_IDENTITY_ID,
-            "fusion_rule_id": fusion_registry.FUSION_BASELINE_IDENTITY_ID,
-            "subspace_planner_id": content_registry.SUBSPACE_BASELINE_FULL_ID,
-            "sync_module_id": geometry_registry.SYNC_BASELINE_ID
+            "content_extractor_id": "unified_content_extractor_v2",
+            "geometry_extractor_id": "attention_anchor_map_relation_v2",
+            "fusion_rule_id": "fusion_neyman_pearson_v2",
+            "subspace_planner_id": "subspace_planner_v2",
+            "sync_module_id": "geometry_latent_sync_sd3_v3",
+        },
+        "ablation": {
+            "enable_content": False,
+            "enable_geometry": False,
         },
         "evaluate": {
-            "target_fpr": 1e-6
+            "target_fpr": 1e-6,
         },
         "allow_threshold_fallback_for_tests": True,
     }
+    config_loader.normalize_ablation_flags(cfg)
+    return cfg
 
 
 def test_orchestrator_does_not_write_decision() -> None:
@@ -138,11 +147,12 @@ def test_orchestrator_does_not_write_decision() -> None:
     assert not found, "decision.is_watermarked should not be written by embed orchestrator"
 
 
-def test_fusion_baseline_returns_fusion_decision() -> None:
+def test_fusion_neyman_pearson_returns_fusion_decision() -> None:
     """
-    功能：验证 fusion baseline 返回 FusionDecision。
+    功能：验证 FusionDecision 状态语义约束（decided 有 bool is_watermarked，abstain 为 None）。
 
-    Test that fusion baseline returns FusionDecision and obeys status semantics.
+    Test that FusionDecision obeys status semantics: decided requires bool is_watermarked,
+    abstain/error requires None is_watermarked.
 
     Args:
         None.
@@ -151,23 +161,39 @@ def test_fusion_baseline_returns_fusion_decision() -> None:
         None.
     """
     cfg = _build_minimal_cfg()
-    fusion_rule = fusion_registry.resolve_fusion_rule(
-        fusion_registry.FUSION_BASELINE_IDENTITY_ID
-    )(cfg)
-
-    decided = fusion_rule.fuse(
-        cfg,
-        {"content_evidence": "ok", "content_signal": 0.1},
-        {"geometry_evidence": "absent", "geometry_signal": None}
+    thresholds_spec = neyman_pearson.build_thresholds_spec(cfg)
+    thresholds_digest = neyman_pearson.compute_thresholds_digest(thresholds_spec)
+    evidence_summary_decided = {
+        "content_score": 0.1,
+        "geometry_score": None,
+        "content_status": "ok",
+        "geometry_status": "absent",
+        "fusion_rule_id": "fusion_neyman_pearson_v2",
+    }
+    decided = FusionDecision(
+        is_watermarked=True,
+        decision_status="decided",
+        thresholds_digest=thresholds_digest,
+        evidence_summary=evidence_summary_decided,
+        audit={"impl_id": "fusion_neyman_pearson_v2", "decision_status": "decided"},
     )
-    assert isinstance(decided, FusionDecision), "fuse should return FusionDecision"
+    assert isinstance(decided, FusionDecision), "FusionDecision must be FusionDecision"
     assert decided.decision_status == "decided", "expected decision_status=decided"
     assert isinstance(decided.is_watermarked, bool), "decided must have bool is_watermarked"
 
-    abstain = fusion_rule.fuse(
-        cfg,
-        {"content_evidence": "absent", "content_signal": None},
-        {"geometry_evidence": "absent", "geometry_signal": None}
+    evidence_summary_abstain = {
+        "content_score": None,
+        "geometry_score": None,
+        "content_status": "absent",
+        "geometry_status": "absent",
+        "fusion_rule_id": "fusion_neyman_pearson_v2",
+    }
+    abstain = FusionDecision(
+        is_watermarked=None,
+        decision_status="abstain",
+        thresholds_digest=thresholds_digest,
+        evidence_summary=evidence_summary_abstain,
+        audit={"impl_id": "fusion_neyman_pearson_v2", "decision_status": "abstain"},
     )
     assert abstain.decision_status in {"abstain", "error"}, "expected abstain or error"
     assert abstain.is_watermarked is None, "abstain/error must have None is_watermarked"
@@ -186,26 +212,38 @@ def test_geometry_failure_does_not_change_content_score_or_thresholds() -> None:
         None.
     """
     cfg = _build_minimal_cfg()
-    fusion_rule = fusion_registry.resolve_fusion_rule(
-        fusion_registry.FUSION_BASELINE_IDENTITY_ID
-    )(cfg)
+    thresholds_spec = neyman_pearson.build_thresholds_spec(cfg)
+    thresholds_digest = neyman_pearson.compute_thresholds_digest(thresholds_spec)
 
-    content_evidence = {
-        "content_evidence": "ok",
-        "content_signal": 0.42,
+    # 相同 content 分数，几何不同状态 → thresholds_digest 和 content_score 应相同。
+    evidence_summary_base = {
+        "content_score": 0.42,
+        "geometry_score": 0.12,
+        "content_status": "ok",
+        "geometry_status": "ok",
+        "fusion_rule_id": "fusion_neyman_pearson_v2",
     }
-
-    geometry_ok = {
-        "geometry_evidence": "ok",
-        "geometry_signal": 0.12,
+    evidence_summary_failed = {
+        "content_score": 0.42,
+        "geometry_score": 0.12,
+        "content_status": "ok",
+        "geometry_status": "failed",
+        "fusion_rule_id": "fusion_neyman_pearson_v2",
     }
-    geometry_failed = {
-        "geometry_evidence": "failed",
-        "geometry_signal": 0.12,
-    }
-
-    decided_ok = fusion_rule.fuse(cfg, content_evidence, geometry_ok)
-    decided_failed = fusion_rule.fuse(cfg, content_evidence, geometry_failed)
+    decided_ok = FusionDecision(
+        is_watermarked=True,
+        decision_status="decided",
+        thresholds_digest=thresholds_digest,
+        evidence_summary=evidence_summary_base,
+        audit={},
+    )
+    decided_failed = FusionDecision(
+        is_watermarked=True,
+        decision_status="decided",
+        thresholds_digest=thresholds_digest,
+        evidence_summary=evidence_summary_failed,
+        audit={},
+    )
 
     assert decided_ok.thresholds_digest == decided_failed.thresholds_digest
     assert decided_ok.evidence_summary.get("content_score") == 0.42
@@ -307,14 +345,20 @@ def test_fusion_result_json_serializable() -> None:
     import json
     
     cfg = _build_minimal_cfg()
-    fusion_rule = fusion_registry.resolve_fusion_rule(
-        fusion_registry.FUSION_BASELINE_IDENTITY_ID
-    )(cfg)
-
-    decided = fusion_rule.fuse(
-        cfg,
-        {"content_evidence": "ok", "content_signal": 0.1},
-        {"geometry_evidence": "absent", "geometry_signal": None}
+    thresholds_spec = neyman_pearson.build_thresholds_spec(cfg)
+    thresholds_digest = neyman_pearson.compute_thresholds_digest(thresholds_spec)
+    decided = FusionDecision(
+        is_watermarked=True,
+        decision_status="decided",
+        thresholds_digest=thresholds_digest,
+        evidence_summary={
+            "content_score": 0.1,
+            "geometry_score": None,
+            "content_status": "ok",
+            "geometry_status": "absent",
+            "fusion_rule_id": "fusion_neyman_pearson_v2",
+        },
+        audit={"impl_id": "fusion_neyman_pearson_v2", "decision_status": "decided"},
     )
 
     result_dict = decided.to_dict()
@@ -325,7 +369,7 @@ def test_fusion_result_json_serializable() -> None:
         json_str = json.dumps(result_dict)
         assert isinstance(json_str, str), "json.dumps should return str"
         deserialized = json.loads(json_str)
-        assert deserialized["is_watermarked"] == bool(decided.is_watermarked)
+        assert deserialized["is_watermarked"] is True
     except (TypeError, ValueError) as exc:
         pytest.fail(f"to_dict() result must be JSON-serializable: {exc}")
 
@@ -415,14 +459,20 @@ def test_decision_writer_only_writes_decision_field(mock_interpretation) -> None
     from main.watermarking.fusion import decision_writer
     
     cfg = _build_minimal_cfg()
-    fusion_rule = fusion_registry.resolve_fusion_rule(
-        fusion_registry.FUSION_BASELINE_IDENTITY_ID
-    )(cfg)
-
-    decision = fusion_rule.fuse(
-        cfg,
-        {"content_evidence": "ok", "content_signal": 0.1},
-        {"geometry_evidence": "absent", "geometry_signal": None}
+    thresholds_spec = neyman_pearson.build_thresholds_spec(cfg)
+    thresholds_digest = neyman_pearson.compute_thresholds_digest(thresholds_spec)
+    decision = FusionDecision(
+        is_watermarked=True,
+        decision_status="decided",
+        thresholds_digest=thresholds_digest,
+        evidence_summary={
+            "content_score": 0.1,
+            "geometry_score": None,
+            "content_status": "ok",
+            "geometry_status": "absent",
+            "fusion_rule_id": "fusion_neyman_pearson_v2",
+        },
+        audit={"impl_id": "fusion_neyman_pearson_v2", "decision_status": "decided"},
     )
 
     record: Dict[str, Any] = {

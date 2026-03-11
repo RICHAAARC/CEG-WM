@@ -1,5 +1,5 @@
-"""
-File purpose: C3 真实嵌入与最小检测闭环回归测试。
+﻿"""
+File purpose: C3 鐪熷疄宓屽叆涓庢渶灏忔娴嬮棴鐜洖褰掓祴璇曘€?
 Module type: General module
 """
 
@@ -85,8 +85,8 @@ class _SubspacePlannerStub:
         self.plan_digest = plan_digest
         self.basis_digest = basis_digest
         self.impl_identity = {
-            "impl_id": "subspace_planner_v1",
-            "impl_version": "v1",
+            "impl_id": "subspace_planner_v2",
+            "impl_version": "v2",
             "impl_digest": _hex_anchor("subspace_planner_impl"),
         }
 
@@ -125,8 +125,8 @@ class _SubspacePlannerStub:
             basis_digest=self.basis_digest,
             plan_digest=self.plan_digest,
             audit={
-                "impl_identity": "subspace_planner_v1",
-                "impl_version": "v1",
+                "impl_identity": "subspace_planner_v2",
+                "impl_version": "v2",
                 "impl_digest": _hex_anchor("planner_audit_impl"),
                 "trace_digest": _hex_anchor("planner_trace"),
             },
@@ -290,3 +290,4 @@ def test_no_write_bypass_for_watermarked_artifact(tmp_path: Path, monkeypatch: A
     _run_embed_with_context(tmp_path, cfg, input_image)
 
     assert call_count["value"] >= 1
+

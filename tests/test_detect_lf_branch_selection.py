@@ -31,8 +31,8 @@ def test_detect_lf_uses_trajectory_path_for_sparse_ldpc() -> None:
     功能：验证 sparse_ldpc 必须走 trajectory-consistent TFSW 路径，不存在 legacy latent 分支。
 
     Verify that detect LF path always uses trajectory-consistent TFSW branch
-    (lf_detect_path=="lf_coder_prc_trajectory") when ecc="sparse_ldpc".
-    The legacy "lf_coder_prc_latent" path must never appear.
+    (lf_detect_path=="low_freq_template_trajectory") when ecc="sparse_ldpc".
+    The legacy "low_freq_template_latent" path must never appear.
 
     Args:
         None.
@@ -83,8 +83,8 @@ def test_detect_lf_uses_trajectory_path_for_sparse_ldpc() -> None:
     lf_node = traces_dict.get("lf")
     lf_trace: Dict[str, Any] = cast(Dict[str, Any], lf_node) if isinstance(lf_node, dict) else {}
     # 必须是 trajectory 路径，不得是 legacy latent 路径
-    assert lf_trace.get("lf_detect_path") == "lf_coder_prc_trajectory"
-    assert lf_trace.get("lf_detect_path") != "lf_coder_prc_latent"
+    assert lf_trace.get("lf_detect_path") == "low_freq_template_trajectory"
+    assert lf_trace.get("lf_detect_path") != "low_freq_template_latent"
     assert lf_trace.get("lf_status") in {"ok", "failed", "absent"}
     assert hf_score is None
 
@@ -92,11 +92,12 @@ def test_detect_lf_uses_trajectory_path_for_sparse_ldpc() -> None:
         assert isinstance(lf_score, float)
 
 
-def test_detect_lf_uses_image_dct_for_int_ecc(tmp_path: Path) -> None:
+def test_detect_lf_image_dct_fallback_hard_fails_in_v2(tmp_path: Path) -> None:
     """
-    功能：验证 int ecc 走 image DCT fallback 检测分支。
+    功能：验证 image DCT fallback 路径在 v2.0 收口后触发 RuntimeError。
 
-    Verify that detect LF path uses image DCT fallback branch when ecc is int.
+    Verify that the image DCT fallback path raises RuntimeError after v2.0 single-path
+    closure. Only ecc='sparse_ldpc' trajectory path is permitted in the formal pipeline.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
@@ -122,31 +123,22 @@ def test_detect_lf_uses_image_dct_for_int_ecc(tmp_path: Path) -> None:
         }
     }
 
-    lf_score, hf_score, traces = detect_orchestrator._extract_content_raw_scores_from_image(  # pyright: ignore[reportPrivateUsage]
-        cfg=cfg,
-        input_record={"image_path": str(image_path)},
-        plan_payload={"plan": {"band_spec": {}}},
-        plan_digest="plan_digest_for_test",
-        cfg_digest="cfg_digest_for_test",
-    )
-
-    assert isinstance(traces, dict)
-    traces_dict: Dict[str, Any] = traces
-    lf_node = traces_dict.get("lf")
-    lf_trace: Dict[str, Any] = cast(Dict[str, Any], lf_node) if isinstance(lf_node, dict) else {}
-    assert lf_trace.get("lf_detect_path") == "image_dct_fallback"
-    assert lf_trace.get("lf_status") in {"ok", "absent", "failed"}
-    assert hf_score is None
-
-    if lf_trace.get("lf_status") == "ok":
-        assert isinstance(lf_score, float)
+    import pytest
+    with pytest.raises(RuntimeError, match="image_dct_fallback path reached"):
+        detect_orchestrator._extract_content_raw_scores_from_image(  # pyright: ignore[reportPrivateUsage]
+            cfg=cfg,
+            input_record={"image_path": str(image_path)},
+            plan_payload={"plan": {"band_spec": {}}},
+            plan_digest="plan_digest_for_test",
+            cfg_digest="cfg_digest_for_test",
+        )
 
 
-def test_bind_raw_scores_keeps_lf_status_and_appends_prc_latent_status() -> None:
+def test_bind_raw_scores_keeps_lf_status_and_appends_lf_template_status() -> None:
     """
-    功能：验证 raw score 绑定不会覆写 lf_status，并追加 prc_latent_status。 
+    功能：验证 raw score 绑定不会覆写 lf_status，并追加 lf_template_status。
 
-    Verify raw-score binding keeps lf_status semantics and appends prc_latent_status.
+    Verify raw-score binding keeps lf_status semantics and appends lf_template_status.
 
     Args:
         None.
@@ -182,7 +174,7 @@ def test_bind_raw_scores_keeps_lf_status_and_appends_prc_latent_status() -> None
     assert isinstance(score_parts, dict)
     score_parts_dict: Dict[str, Any] = score_parts
     assert score_parts_dict.get("lf_status") == "ok"
-    assert score_parts_dict.get("prc_latent_status") == "failed"
+    assert score_parts_dict.get("lf_template_status") == "failed"
 
 
 def test_detect_mask_digest_passthrough_from_input_record_when_missing() -> None:

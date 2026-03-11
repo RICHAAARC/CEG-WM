@@ -16,8 +16,8 @@ from main.diffusion.sd3.hooks import register_attention_hooks, remove_attention_
 from main.diffusion.sd3.callback_composer import InjectionContext
 from main.watermarking.content_chain.latent_modifier import LatentModifier
 from main.watermarking.content_chain import channel_lf, channel_hf
-from main.watermarking.content_chain.low_freq_coder import LF_CODER_PRC_ID
-from main.watermarking.content_chain.high_freq_embedder import HF_EMBEDDER_T2SMARK_ID
+from main.watermarking.content_chain.low_freq_coder import LOW_FREQ_TEMPLATE_CODEC_V2_ID
+from main.watermarking.content_chain.high_freq_embedder import HIGH_FREQ_TEMPLATE_CODEC_V2_ID
 from main.core import digests
 
 
@@ -616,39 +616,28 @@ def _build_injection_cfg(cfg: Dict[str, Any], context: InjectionContext) -> Dict
     lf_impl_selected = impl_cfg.get("lf_coder_id") if isinstance(impl_cfg.get("lf_coder_id"), str) else None
     hf_impl_selected = impl_cfg.get("hf_embedder_id") if isinstance(impl_cfg.get("hf_embedder_id"), str) else None
 
-    lf_equivalent_ids = {LF_CODER_PRC_ID}
-    hf_equivalent_ids = {HF_EMBEDDER_T2SMARK_ID}
+    lf_equivalent_ids = {LOW_FREQ_TEMPLATE_CODEC_V2_ID}
+    hf_equivalent_ids = {HIGH_FREQ_TEMPLATE_CODEC_V2_ID}
 
     lf_is_primary = bool(context.enable_lf and lf_impl_selected == channel_lf.LF_CHANNEL_IMPL_ID)
     lf_is_equivalent = bool(context.enable_lf and lf_impl_selected in lf_equivalent_ids)
-    lf_fallback_used = bool(context.enable_lf and not lf_is_primary and not lf_is_equivalent)
+    lf_non_primary = bool(context.enable_lf and not lf_is_primary and not lf_is_equivalent)
 
     hf_is_primary = bool(context.enable_hf and hf_impl_selected == channel_hf.HF_CHANNEL_IMPL_ID)
     hf_is_equivalent = bool(context.enable_hf and hf_impl_selected in hf_equivalent_ids)
-    hf_fallback_used = bool(context.enable_hf and not hf_is_primary and not hf_is_equivalent)
+    hf_non_primary = bool(context.enable_hf and not hf_is_primary and not hf_is_equivalent)
 
     lf_impl_binding = {
         "impl_selected": lf_impl_selected,
-        "adapter_path": "latent_modifier_channel_lf_v1" if context.enable_lf else "ablation_switchboard",
-        "fallback_used": lf_fallback_used,
         "evidence_level": (
             "primary"
             if lf_is_primary
             else ("primary_equivalent" if lf_is_equivalent else "adapter_fallback")
         ),
-        "equivalence_mode": "prc_to_channel_lf_parameter_mapping_v1" if lf_is_equivalent else None,
-        "fallback_reason": (
-            "lf_channel_disabled_by_ablation"
-            if not context.enable_lf
-            else (
-                "lf_impl_missing"
-                if lf_impl_selected is None
-                else (
-                    "lf_impl_embed_interface_absent_for_latent_modifier"
-                    if lf_fallback_used
-                    else None
-                )
-            )
+        "equivalence_mode": (
+            "lf_template_to_channel_lf_parameter_mapping_v2"
+            if lf_impl_selected == LOW_FREQ_TEMPLATE_CODEC_V2_ID and lf_is_equivalent
+            else None
         ),
         "binding_class": (
             "primary"
@@ -659,26 +648,15 @@ def _build_injection_cfg(cfg: Dict[str, Any], context: InjectionContext) -> Dict
     }
     hf_impl_binding = {
         "impl_selected": hf_impl_selected,
-        "adapter_path": "latent_modifier_channel_hf_v1" if context.enable_hf else "ablation_switchboard",
-        "fallback_used": hf_fallback_used,
         "evidence_level": (
             "primary"
             if hf_is_primary
             else ("primary_equivalent" if hf_is_equivalent else "adapter_fallback")
         ),
-        "equivalence_mode": "t2smark_to_channel_hf_parameter_mapping_v1" if hf_is_equivalent else None,
-        "fallback_reason": (
-            "hf_channel_disabled_by_ablation"
-            if not context.enable_hf
-            else (
-                "hf_impl_missing"
-                if hf_impl_selected is None
-                else (
-                    "hf_impl_embed_interface_absent_for_latent_modifier"
-                    if hf_fallback_used
-                    else None
-                )
-            )
+        "equivalence_mode": (
+            "hf_template_to_channel_hf_parameter_mapping_v2"
+            if hf_impl_selected == HIGH_FREQ_TEMPLATE_CODEC_V2_ID and hf_is_equivalent
+            else None
         ),
         "binding_class": (
             "primary"

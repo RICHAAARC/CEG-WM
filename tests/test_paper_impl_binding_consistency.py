@@ -1,6 +1,5 @@
-"""
-File purpose: paper 模式 impl 绑定一致性门禁回归测试。
-Module type: General module
+﻿"""
+File purpose: paper 妯″紡 impl 缁戝畾涓€鑷存€ч棬绂佸洖褰掓祴璇曘€?Module type: General module
 """
 
 from __future__ import annotations
@@ -14,17 +13,11 @@ def test_paper_impl_binding_rejects_fallback_binding() -> None:
     cfg: Dict[str, Any] = {"paper_faithfulness": {"enabled": True}}
     injection_evidence: Dict[str, Any] = {
         "lf_impl_binding": {
-            "impl_selected": "lf_coder_prc_v1",
-            "adapter_path": "latent_modifier_channel_lf_v1",
-            "fallback_used": True,
-            "fallback_reason": "lf_impl_embed_interface_absent_for_latent_modifier",
+            "impl_selected": "low_freq_template_codec_v2",
             "evidence_level": "adapter_fallback",
         },
         "hf_impl_binding": {
-            "impl_selected": "hf_embedder_t2smark_v1",
-            "adapter_path": "latent_modifier_channel_hf_v1",
-            "fallback_used": False,
-            "fallback_reason": None,
+            "impl_selected": "high_freq_template_codec_v2",
             "evidence_level": "primary",
         },
     }
@@ -32,7 +25,7 @@ def test_paper_impl_binding_rejects_fallback_binding() -> None:
     evaluate_consistency = getattr(detect_orchestrator, "_evaluate_paper_impl_binding_consistency")
     status, reason = evaluate_consistency(cfg, injection_evidence)
     assert status == "mismatch"
-    assert reason == "lf_impl_binding_fallback_used_under_paper_mode"
+    assert reason == "lf_impl_binding_non_primary_binding_under_paper_mode"
 
 
 def test_paper_impl_binding_accepts_primary_bindings() -> None:
@@ -40,16 +33,10 @@ def test_paper_impl_binding_accepts_primary_bindings() -> None:
     injection_evidence: Dict[str, Any] = {
         "lf_impl_binding": {
             "impl_selected": "channel_lf_v1",
-            "adapter_path": "latent_modifier_channel_lf_v1",
-            "fallback_used": False,
-            "fallback_reason": None,
             "evidence_level": "primary",
         },
         "hf_impl_binding": {
             "impl_selected": "channel_hf_v1",
-            "adapter_path": "latent_modifier_channel_hf_v1",
-            "fallback_used": False,
-            "fallback_reason": None,
             "evidence_level": "primary",
         },
     }
@@ -75,9 +62,9 @@ def test_paper_impl_binding_non_ok_detect_evidence_returns_absent() -> None:
 
 def test_primary_mismatch_maps_paper_impl_binding_reason_to_field_path() -> None:
     resolve_primary = getattr(detect_orchestrator, "_resolve_primary_mismatch")
-    reason, field_path = resolve_primary(["lf_impl_binding_fallback_used_under_paper_mode"])
-    assert reason == "lf_impl_binding_fallback_used_under_paper_mode"
-    assert field_path == "content_evidence.lf_impl_binding.fallback_used"
+    reason, field_path = resolve_primary(["lf_impl_binding_non_primary_binding_under_paper_mode"])
+    assert reason == "lf_impl_binding_non_primary_binding_under_paper_mode"
+    assert field_path == "content_evidence.lf_impl_binding.evidence_level"
 
 
 def test_paper_impl_binding_rejects_int_ecc_under_paper_mode() -> None:
@@ -93,17 +80,11 @@ def test_paper_impl_binding_rejects_int_ecc_under_paper_mode() -> None:
     injection_evidence: Dict[str, Any] = {
         "status": "ok",
         "lf_impl_binding": {
-            "impl_selected": "lf_coder_prc_v1",
-            "adapter_path": "latent_modifier_channel_lf_v1",
-            "fallback_used": False,
-            "fallback_reason": None,
+            "impl_selected": "low_freq_template_codec_v2",
             "evidence_level": "primary",
         },
         "hf_impl_binding": {
             "impl_selected": "channel_hf_v1",
-            "adapter_path": "latent_modifier_channel_hf_v1",
-            "fallback_used": False,
-            "fallback_reason": None,
             "evidence_level": "primary",
         },
     }
@@ -119,3 +100,4 @@ def test_primary_mismatch_maps_lf_ecc_int_reason_to_field_path() -> None:
     reason, field_path = resolve_primary(["lf_ecc_int_not_allowed_under_paper_mode"])
     assert reason == "lf_ecc_int_not_allowed_under_paper_mode"
     assert field_path == "watermark.lf.ecc"
+

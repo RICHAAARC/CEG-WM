@@ -19,8 +19,8 @@ from main.registries.fusion_registry import resolve_fusion_rule
 
 @pytest.fixture
 def np_fusion_rule() -> NeumanPearsonFusionRule:
-    """构造 Neyman-Pearson 融合规则实例。"""
-    factory = resolve_fusion_rule("fusion_neyman_pearson_v1")
+    """构造 Neyman-Pearson 融合规则 v2 实例。"""
+    factory = resolve_fusion_rule("fusion_neyman_pearson_v2")
     return factory({})
 
 

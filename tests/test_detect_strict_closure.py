@@ -1,4 +1,4 @@
-"""
+﻿"""
 File purpose: Detect strict closure regression tests.
 Module type: General module
 """
@@ -90,8 +90,8 @@ class _SubspacePlannerStub:
             "plan": {
                 "planner_input_digest": "planner_input_digest_ok",
                 "planner_impl_identity": {
-                    "impl_id": "subspace_planner_v1",
-                    "impl_version": "v1",
+                    "impl_id": "subspace_planner_v2",
+                    "impl_version": "v2",
                     "impl_digest": "digest",
                 },
             },
@@ -136,8 +136,8 @@ def _build_matching_input_record() -> Dict[str, Any]:
         "plan_digest": "plan_detect",
         "basis_digest": "basis_detect",
         "subspace_planner_impl_identity": {
-            "impl_id": "subspace_planner_v1",
-            "impl_version": "v1",
+            "impl_id": "subspace_planner_v2",
+            "impl_version": "v2",
             "impl_digest": "digest",
         },
         "content_evidence_payload": {
@@ -278,3 +278,4 @@ def test_scores_written_only_when_status_ok() -> None:
     assert ok_payload["score"] == 0.6
     assert ok_payload["lf_score"] == 0.6
     assert ok_payload["status"] == "ok"
+

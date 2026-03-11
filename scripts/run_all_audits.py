@@ -736,7 +736,13 @@ def _summarize_evidence(evidence: Any) -> str:
             fail_count = evidence.get("fail_count", 0)
             return f"{fail_count} 处命中点" if fail_count > 0 else "命中列表为空"
         elif "checks" in evidence:
-            failed_checks = [k for k, v in evidence["checks"].items() if not v.get("pass", False)]
+            checks = evidence["checks"]
+            if isinstance(checks, dict):
+                failed_checks = [k for k, v in checks.items() if not v.get("pass", False)]
+            elif isinstance(checks, list):
+                failed_checks = [c.get("check", "?") for c in checks if isinstance(c, dict) and not c.get("pass", False)]
+            else:
+                failed_checks = []
             return f"失败的检查: {', '.join(failed_checks)}" if failed_checks else "检查通过"
         else:
             return str(evidence)[:100]

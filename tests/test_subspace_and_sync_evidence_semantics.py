@@ -82,7 +82,7 @@ def test_subspace_plan_contains_evidence_semantics_payload() -> None:
 
 
 def test_sync_quality_semantics_contains_quantitative_secondary_evidence_level() -> None:
-    factory = resolve_sync_module("geometry_latent_sync_sd3_v2")
+    factory = resolve_sync_module("geometry_latent_sync_sd3_v3")
     sync_module = factory({})
     cfg: Dict[str, Any] = {
         "model_id": "stabilityai/stable-diffusion-3.5-medium",
@@ -97,10 +97,10 @@ def test_sync_quality_semantics_contains_quantitative_secondary_evidence_level()
     semantics = output.get("sync_quality_semantics")
     assert isinstance(semantics, dict)
     semantics = cast(Dict[str, Any], semantics)
-    assert semantics.get("score_type") == "interpretable_geometry_consistency"
+    assert semantics.get("score_type") == "template_correlation_geometry_score"
     assert semantics.get("trusted_as_primary_geometry_evidence") is False
-    assert semantics.get("score_version") == "latent_sync_geometry_consistency"
-    assert semantics.get("evidence_level") == "quantitative_secondary"
+    assert semantics.get("score_version") == "geometry_latent_sync_sd3_v3"
+    assert semantics.get("evidence_level") == "primary"
 
     metrics = output.get("sync_quality_metrics")
     if isinstance(metrics, dict):
@@ -127,8 +127,8 @@ def test_geometry_runtime_inputs_disable_latent_proxy_under_paper_mode() -> None
         "paper_faithfulness": {"enabled": True},
     }
     build_inputs = getattr(detect_orchestrator, "_build_geometry_runtime_inputs")
-    runtime_inputs = build_inputs(cfg, enable_attention_proxy=True)
+    runtime_inputs = build_inputs(cfg)
     assert isinstance(runtime_inputs, dict)
     assert runtime_inputs.get("attention_maps") is None
-    assert runtime_inputs.get("attention_proxy_status") == "absent"
-    assert runtime_inputs.get("attention_proxy_absent_reason") == "paper_mode_requires_runtime_self_attention"
+    assert runtime_inputs.get("attention_maps_source") == "absent"
+    assert runtime_inputs.get("attention_maps_missing_reason") == "runtime_self_attention_missing_under_paper_mode"

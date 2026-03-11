@@ -1,23 +1,24 @@
-injection_scope_manifest_version: "v1.1"  # 版本提升：追加 LF 参数漂移检测审计需求
+injection_scope_manifest_version: "v2.0"  # v2.0：论文正式路径收口，移除全部旧 v1 paper-impl；仅保留 v2/v3 正式实现及必要测试支架
 
 allowed_impl_ids:
 
-  # content chain 真实实现
-  - "semantic_mask_provider_v1"
-  - "low_freq_coder_v1"  # LF 子空间水印编码器
-  - "content_detector_v1"  # 统一内容检测器（LF+HF 融合）
-  - "unified_content_extractor_v1"  # Embed + Detect 双模式
-  
-  # subspace 真实实现
-  - "subspace_planner_v1"
-  
-  # 基线实现
-  - "content_baseline_identity_v1"
-  - "subspace_baseline_full_v1"
-  - "geometry_baseline_identity_v1"
-  - "geometry_sync_baseline_v1"
-  - "fusion_baseline_identity_v1"
-  
+  # ---- v2/v3 content chain 正式实现 ----
+  - "semantic_mask_provider_v1"                   # 语义掩码提供器（基础支架，继续保留）
+  - "semantic_mask_provider_saliency_source_policy_v1"  # saliency 策略版（继续保留）
+  - "unified_content_extractor_v2"                # Embed + Detect v2 正式实现
+  - "low_freq_template_codec_v2"                   # LF 低频模板编码器 v2 正式实现
+  - "high_freq_template_codec_v2"                  # HF 高频模板编码器 v2 正式实现
+
+  # ---- v2 subspace 正式实现 ----
+  - "subspace_planner_v2"                         # 子空间规划器 v2 正式实现
+
+  # ---- 几何链 v2/v3 正式实现 ----
+  - "attention_anchor_map_relation_v2"             # 无 proxy 几何锚点 v2 正式实现
+  - "geometry_latent_sync_sd3_v3"                 # geo_score=template_match_score v3 正式实现
+
+  # ---- 融合层 v2 正式实现 ----
+  - "fusion_neyman_pearson_v2"                    # NP 融合 v2 正式实现
+
   # 注意：此列表必须是 runtime_whitelist.yaml:impl_id.allowed_flat 的子集或相等。
   # 违反闭合性将触发 BLOCK_FREEZE。
   # 生产部署前必须通过审计脚本 audit_injection_scope_manifest_binding.py 校验。
@@ -80,7 +81,7 @@ digest_scope:
     - "watermark.lf.strength"
     - "watermark.lf.delta"
     - "watermark.lf.block_length"
-    - "watermark.lf.variance"  # PRC 伪高斯方差（pseudogaussian variance），默认 1.5
+    - "watermark.lf.variance"  # 伪高斯方差（pseudogaussian variance），默认 1.5
     - "watermark.hf.codebook_id"
     - "watermark.hf.ecc"
     - "watermark.hf.enabled"

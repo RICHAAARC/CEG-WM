@@ -3,7 +3,7 @@
 # - 仅追加字段，默认允许 absent。
 # - 本文件作为接口层字段事实源，用于审计与字段登记对齐。
 # ==============================================================
-version: "v1"
+version: "v2"  # v1→v2：论文正式路径收口（2026-03-12）；align/fallback 字段迁出当前 formal path，标记为 deprecated_in_formal_path。
 append_only: true
 
 type_definitions:
@@ -87,13 +87,15 @@ fields:
     type: "boolean_flag"
     required: false
     missing_semantics: "absent_ok"
-    description: "显著性来源是否触发 fallback。"
+    deprecated_in_formal_path: "v2"  # v2.0 论文正式路径收口后不再写出；仅保留以兼容历史 records 读取。
+    description: "【历史兼容字段，v2.0 正式路径不写出】显著性来源是否触发 fallback。"
   - path: "content_evidence.mask_stats.fallback_reason"
     layer: "diagnostic"
     type: "reason_string"
     required: false
     missing_semantics: "absent_ok"
-    description: "显著性来源 fallback 原因（禁止静默降级）。"
+    deprecated_in_formal_path: "v2"  # v2.0 论文正式路径收口后不再写出；仅保留以兼容历史 records 读取。
+    description: "【历史兼容字段，v2.0 正式路径不写出】显著性来源 fallback 原因（禁止静默降级）。"
   - path: "content_evidence.mask_stats.model_artifact_anchor"
     layer: "anchor"
     type: "json_dict"
@@ -399,13 +401,13 @@ fields:
     type: "reason_string"
     required: false
     missing_semantics: "absent_ok"
-    description: "锚点语义来源声明（proxy attention-like / real attention）。"
+    description: "锚点语义来源声明（正式路径产出 token_latent_relation_summary）。"
   - path: "geometry_evidence.anchor_evidence_level"
     layer: "diagnostic"
     type: "reason_string"
     required: false
     missing_semantics: "absent_ok"
-    description: "锚点证据级别声明（proxy/real/blocking）。"
+    description: "锚点证据级别声明（正式路径产出 real）。"
   - path: "geometry_evidence.anchor_blocking_reason"
     layer: "diagnostic"
     type: "reason_string"
@@ -471,19 +473,22 @@ fields:
     type: "digest_hex64"
     required: false
     missing_semantics: "absent_ok"
-    description: "对齐痕迹摘要。"
+    deprecated_in_formal_path: "v2"  # align_invariance 整体退出 formal path（2026-03-12）；保留供历史 records 读取。
+    description: "【历史兼容字段，v2.0 正式路径不写出】对齐痕迹摘要。"
   - path: "geometry_evidence.align_metrics"
     layer: "diagnostic"
     type: "metrics_dict"
     required: false
     missing_semantics: "absent_ok"
-    description: "几何对齐统计摘要（关系一致率、邻接保持率、残差分位等）。"
+    deprecated_in_formal_path: "v2"  # align_invariance 整体退出 formal path（2026-03-12）；保留供历史 records 读取。
+    description: "【历史兼容字段，v2.0 正式路径不写出】几何对齐统计摘要（关系一致率、邻接保持率、残差分位等）。"
   - path: "geometry_evidence.align_config_digest"
     layer: "anchor"
     type: "digest_hex64"
     required: false
     missing_semantics: "absent_ok"
-    description: "几何对齐配置输入域摘要。"
+    deprecated_in_formal_path: "v2"  # align_invariance 整体退出 formal path（2026-03-12）；保留供历史 records 读取。
+    description: "【历史兼容字段，v2.0 正式路径不写出】几何对齐配置输入域摘要。"
   - path: "geometry_evidence.geo_score"
     layer: "diagnostic"
     type: "score_float"
@@ -649,13 +654,13 @@ fields:
     type: "json_dict"
     required: false
     missing_semantics: "absent_ok"
-    description: "LF 实现绑定语义（impl_selected/adapter_path/fallback_used/fallback_reason）。"
+    description: "LF 实现绑定字段（impl_selected/adapter_path/evidence_level/equivalence_mode/fallback_used/fallback_reason/binding_class/impl_binding_version）。正式路径（latent per-step）中 adapter_path 为 lf_channel_latent_v2。"
   - path: "content_evidence.hf_impl_binding"
     layer: "anchor"
     type: "json_dict"
     required: false
     missing_semantics: "absent_ok"
-    description: "HF 实现绑定语义（impl_selected/adapter_path/fallback_used/fallback_reason）。"
+    description: "HF 实现绑定字段（impl_selected/adapter_path/evidence_level/equivalence_mode/fallback_used/fallback_reason/binding_class/impl_binding_version）。正式路径（latent per-step）中 adapter_path 为 hf_channel_latent_v2。"
   - path: "impl_set_capabilities_extended_digest"
     layer: "anchor"
     type: "digest_hex64"

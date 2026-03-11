@@ -1,4 +1,4 @@
-"""
+﻿"""
 File purpose: latent per-step HF/LF 实现绑定审计字段回归测试。
 Module type: General module
 """
@@ -22,11 +22,11 @@ def _build_context() -> InjectionContext:
     )
 
 
-def test_injection_cfg_marks_equivalent_binding_for_prc_t2s_impls() -> None:
+def test_injection_cfg_marks_equivalent_binding_for_lf_hf_template_impls() -> None:
     cfg = {
         "impl": {
-            "lf_coder_id": "lf_coder_prc_v1",
-            "hf_embedder_id": "hf_embedder_t2smark_v1",
+            "lf_coder_id": "low_freq_template_codec_v2",
+            "hf_embedder_id": "high_freq_template_codec_v2",
         },
         "watermark": {
             "lf": {"strength": 1.5},
@@ -41,16 +41,18 @@ def test_injection_cfg_marks_equivalent_binding_for_prc_t2s_impls() -> None:
     hf_binding = injection_cfg.get("hf_impl_binding")
     assert isinstance(lf_binding, dict)
     assert isinstance(hf_binding, dict)
-    assert lf_binding.get("impl_selected") == "lf_coder_prc_v1"
-    assert hf_binding.get("impl_selected") == "hf_embedder_t2smark_v1"
-    assert lf_binding.get("fallback_used") is False
-    assert hf_binding.get("fallback_used") is False
-    assert lf_binding.get("evidence_level") == "primary_equivalent"
-    assert hf_binding.get("evidence_level") == "primary_equivalent"
-    assert lf_binding.get("equivalence_mode") == "prc_to_channel_lf_parameter_mapping_v1"
-    assert hf_binding.get("equivalence_mode") == "t2smark_to_channel_hf_parameter_mapping_v1"
-    assert lf_binding.get("fallback_reason") is None
-    assert hf_binding.get("fallback_reason") is None
+    assert lf_binding.get("impl_selected") == "low_freq_template_codec_v2"
+    assert hf_binding.get("impl_selected") == "high_freq_template_codec_v2"
+    # v2.0 收口： evidence_level 是正式路径的唯一分类字段；不写出 fallback_used/adapter_path。
+    # v2 合并后 LF_CHANNEL_IMPL_ID == LOW_FREQ_TEMPLATE_CODEC_V2_ID，模板 codec v2 直接是 primary
+    assert lf_binding.get("evidence_level") == "primary"
+    assert hf_binding.get("evidence_level") == "primary"
+    assert lf_binding.get("equivalence_mode") == "lf_template_to_channel_lf_parameter_mapping_v2"
+    assert hf_binding.get("equivalence_mode") == "hf_template_to_channel_hf_parameter_mapping_v2"
+    assert "fallback_used" not in lf_binding
+    assert "fallback_used" not in hf_binding
+    assert "adapter_path" not in lf_binding
+    assert "adapter_path" not in hf_binding
 
 
 def test_injection_cfg_marks_no_fallback_for_channel_native_impl() -> None:
@@ -71,12 +73,13 @@ def test_injection_cfg_marks_no_fallback_for_channel_native_impl() -> None:
     hf_binding = injection_cfg.get("hf_impl_binding")
     assert isinstance(lf_binding, dict)
     assert isinstance(hf_binding, dict)
-    assert lf_binding.get("fallback_used") is False
-    assert hf_binding.get("fallback_used") is False
+    # v2.0 收口： evidence_level 是正式路径的唯一分类字段；不写出 fallback_used/adapter_path。
     assert lf_binding.get("evidence_level") == "primary"
     assert hf_binding.get("evidence_level") == "primary"
-    assert lf_binding.get("fallback_reason") is None
-    assert hf_binding.get("fallback_reason") is None
+    assert "fallback_used" not in lf_binding
+    assert "fallback_used" not in hf_binding
+    assert "adapter_path" not in lf_binding
+    assert "adapter_path" not in hf_binding
 
 
 def test_latent_step_embed_trace_contains_impl_binding_fields() -> None:
@@ -86,16 +89,12 @@ def test_latent_step_embed_trace_contains_impl_binding_fields() -> None:
         "injection_trace_digest": "a" * 64,
         "injection_params_digest": "b" * 64,
         "lf_impl_binding": {
-            "impl_selected": "lf_coder_prc_v1",
-            "adapter_path": "latent_modifier_channel_lf_v1",
-            "fallback_used": True,
-            "fallback_reason": "lf_impl_embed_interface_absent_for_latent_modifier",
+            "impl_selected": "low_freq_template_codec_v2",
+            "evidence_level": "adapter_fallback",
         },
         "hf_impl_binding": {
-            "impl_selected": "hf_embedder_t2smark_v1",
-            "adapter_path": "latent_modifier_channel_hf_v1",
-            "fallback_used": True,
-            "fallback_reason": "hf_impl_embed_interface_absent_for_latent_modifier",
+            "impl_selected": "high_freq_template_codec_v2",
+            "evidence_level": "adapter_fallback",
         },
     }
     trace = embed_orchestrator._build_latent_step_embed_trace(cfg, injection_evidence)

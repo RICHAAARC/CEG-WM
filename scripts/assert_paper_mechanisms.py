@@ -388,17 +388,24 @@ def _assert_paper_mechanisms(
 
     if hf_cfg.get("enabled") is not True:
         failures.append("watermark.hf.enabled must be true")
-    if hf_cfg.get("tail_truncation_mode") != "top_k_per_latent":
-        failures.append("watermark.hf.tail_truncation_mode must be top_k_per_latent")
-    if hf_cfg.get("selection") != "top_k_magnitude_based":
-        failures.append("watermark.hf.selection must be top_k_magnitude_based")
+    if hf_cfg.get("tail_truncation_mode") != "keyed_template_correlation":
+        failures.append("watermark.hf.tail_truncation_mode must be keyed_template_correlation")
+    if hf_cfg.get("selection") != "keyed_rademacher_template":
+        failures.append("watermark.hf.selection must be keyed_rademacher_template")
 
     if lf_cfg.get("enabled") is not True:
         failures.append("watermark.lf.enabled must be true")
-    if lf_cfg.get("coding_mode") != "latent_space_sign_flipping":
-        failures.append("watermark.lf.coding_mode must be latent_space_sign_flipping")
-    if lf_cfg.get("decoder") != "belief_propagation":
-        failures.append("watermark.lf.decoder must be belief_propagation")
+    if lf_cfg.get("coding_mode") != "pseudogaussian_template_additive":
+        failures.append("watermark.lf.coding_mode must be pseudogaussian_template_additive")
+    if lf_cfg.get("decoder") != "matched_correlation":
+        failures.append("watermark.lf.decoder must be matched_correlation")
+
+    # v2.0 收口：论文正式路径禁止 image-domain sidecar
+    detect_runtime_cfg = cfg.get("detect_runtime") if isinstance(cfg.get("detect_runtime"), dict) else {}
+    if detect_runtime_cfg.get("image_domain_sidecar_enabled") is not False:
+        failures.append(
+            "detect_runtime.image_domain_sidecar_enabled must be false in paper mode (v2.0 closure)"
+        )
 
     embed_content = _pick_mapping(embed_record, [["content_evidence"], ["content_result"]]) or {}
     injection_status = _pick_str(embed_content, [["injection_status"]])
@@ -544,6 +551,49 @@ def _assert_paper_mechanisms(
     for impl_id in cfg_impl_ids:
         if impl_id not in allowed_impl_ids:
             failures.append(f"impl_id not in runtime_whitelist: {impl_id}")
+
+    # v2.0 收口断言：旧私有 HF 纹理评分函数必须不存在
+    hf_embedder_path = repo_root / "main" / "watermarking" / "content_chain" / "high_freq_embedder.py"
+    if hf_embedder_path.exists():
+        source = hf_embedder_path.read_text(encoding="utf-8")
+        if "_hf_image_texture_score" in source:
+            failures.append("_hf_image_texture_score must not exist in high_freq_embedder.py (v2.0 closure)")
+
+    # v2.0 收口断言：旧 baseline content extractor 文件必须不存在
+    baseline_path = repo_root / "main" / "watermarking" / "content_chain" / "content_baseline_extractor.py"
+    if baseline_path.exists():
+        failures.append("content_baseline_extractor.py must not exist (v2.0 closure)")
+
+    # v2.0 收口断言：旧 align invariance extractor 文件必须不存在
+    align_path = repo_root / "main" / "watermarking" / "geometry_chain" / "align_invariance_extractor.py"
+    if align_path.exists():
+        failures.append("align_invariance_extractor.py must not exist (v2.0 closure)")
+
+    # v2.0 收口断言：正式实现路径不得写出 adapter_path/fallback_used/fallback_reason 旧语义字段
+    infer_runtime_path = repo_root / "main" / "diffusion" / "sd3" / "infer_runtime.py"
+    if infer_runtime_path.exists():
+        ir_source = infer_runtime_path.read_text(encoding="utf-8")
+        for forbidden_field in ("\"adapter_path\"", "\"fallback_used\"", "\"fallback_reason\""):
+            # 允许在注释中出现（以 # 开头的行）；仅检查非注释赋值行
+            for line in ir_source.splitlines():
+                stripped = line.strip()
+                if forbidden_field in stripped and not stripped.startswith("#") and "_build_injection_cfg" not in stripped:
+                    failures.append(
+                        f"infer_runtime.py 正式路径不得写出旧语义字段 {forbidden_field} (v2.0 closure)"
+                    )
+                    break
+
+    embed_orch_path = repo_root / "main" / "watermarking" / "embed" / "orchestrator.py"
+    if embed_orch_path.exists():
+        eo_source = embed_orch_path.read_text(encoding="utf-8")
+        for forbidden_field in ("\"adapter_path\"", "\"fallback_used\"", "\"fallback_reason\""):
+            for line in eo_source.splitlines():
+                stripped = line.strip()
+                if forbidden_field in stripped and not stripped.startswith("#"):
+                    failures.append(
+                        f"embed/orchestrator.py 正式路径不得写出旧语义字段 {forbidden_field} (v2.0 closure)"
+                    )
+                    break
 
     return failures
 

@@ -1,5 +1,5 @@
-"""
-File purpose: 验证新增行为参数未纳入摘要输入域时必须触发 mismatch。
+﻿"""
+File purpose: 楠岃瘉鏂板琛屼负鍙傛暟鏈撼鍏ユ憳瑕佽緭鍏ュ煙鏃跺繀椤昏Е鍙?mismatch銆?
 Module type: General module
 """
 
@@ -12,8 +12,8 @@ def _build_subspace_result(topk_value: int) -> dict:
     return {
         "plan": {
             "planner_impl_identity": {
-                "impl_id": "subspace_planner_v1",
-                "impl_version": "v1",
+                "impl_id": "subspace_planner_v2",
+                "impl_version": "v2",
                 "impl_digest": "abc",
             },
             "verifiable_input_domain_spec": {
@@ -29,7 +29,7 @@ def _build_subspace_result(topk_value: int) -> dict:
 
 def test_new_params_must_be_in_digest_or_fail() -> None:
     """
-    功能：新增参数变化但沿用旧摘要时，必须触发 mismatch。
+    鍔熻兘锛氭柊澧炲弬鏁板彉鍖栦絾娌跨敤鏃ф憳瑕佹椂锛屽繀椤昏Е鍙?mismatch銆?
 
     New behavior-affecting params must be reflected in digest domain.
     If params change while stale digest is reused, verification must fail.
@@ -63,3 +63,4 @@ def test_new_params_must_be_in_digest_or_fail() -> None:
     )
     assert status == "mismatch"
     assert reason == "plan_digest_mismatch"
+

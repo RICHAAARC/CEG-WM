@@ -4,16 +4,77 @@
 功能说明：
 - 验证 lf_score 确实依赖 latent_features 的实际数值。
 - 验证不同输入产生不同的 lf_score。
-- 验证 lf_score 在同一配置下对不同输入的响应。
+- 验证相同输入的 lf_score 可复算。
 """
 
 from __future__ import annotations
 
+import numpy as np
+
 from typing import Any, Dict, List
 
-import pytest
+from main.core import digests
+from main.watermarking.content_chain.low_freq_coder import (
+    LowFreqTemplateCodecV2,
+    LOW_FREQ_TEMPLATE_CODEC_V2_ID,
+    LOW_FREQ_TEMPLATE_CODEC_V2_VERSION,
+)
 
-from main.watermarking.content_chain.low_freq_coder import LowFreqCoder
+
+def _make_coder() -> LowFreqTemplateCodecV2:
+    impl_digest = digests.canonical_sha256({
+        "impl_id": LOW_FREQ_TEMPLATE_CODEC_V2_ID,
+        "impl_version": LOW_FREQ_TEMPLATE_CODEC_V2_VERSION,
+    })
+    return LowFreqTemplateCodecV2(
+        LOW_FREQ_TEMPLATE_CODEC_V2_ID,
+        LOW_FREQ_TEMPLATE_CODEC_V2_VERSION,
+        impl_digest,
+    )
+
+
+def _build_lf_basis(feature_dim: int = 64, basis_rank: int = 8, seed: int = 42) -> Dict[str, Any]:
+    """构造用于测试的最小合法 lf_basis。"""
+    rng = np.random.RandomState(seed)
+    projection_matrix = rng.randn(feature_dim, basis_rank).astype(np.float32)
+    return {
+        "projection_matrix": projection_matrix.tolist(),
+        "basis_rank": basis_rank,
+        "latent_projection_spec": {
+            "spec_version": "v1",
+            "method": "random_index_selection",
+            "feature_dim": feature_dim,
+            "seed": seed,
+            "edit_timestep": 0,
+            "sample_idx": 0,
+        },
+    }
+
+
+_BASE_CFG: Dict[str, Any] = {
+    "watermark": {
+        "lf": {
+            "enabled": True,
+            "message_length": 16,
+            "ecc_sparsity": 3,
+            "correlation_scale": 10.0,
+        }
+    }
+}
+_PLAN_DIGEST = "test_score_sensitivity_plan"
+_LF_BASIS = _build_lf_basis(feature_dim=64, basis_rank=8, seed=42)
+
+
+def _score(latent_features: List[float]) -> float:
+    coder = _make_coder()
+    score, trace = coder.detect_score(
+        cfg=_BASE_CFG,
+        latent_features=latent_features,
+        plan_digest=_PLAN_DIGEST,
+        lf_basis=_LF_BASIS,
+    )
+    assert trace["status"] == "ok", f"Expected ok, got {trace['status']}"
+    return score
 
 
 def test_lf_score_depends_on_latent_features() -> None:
@@ -31,65 +92,24 @@ def test_lf_score_depends_on_latent_features() -> None:
     Raises:
         AssertionError: If lf_score is identical for different inputs.
     """
-    cfg: Dict[str, Any] = {
-        "watermark": {
-            "plan_digest": "test_plan_digest_001",
-            "lf": {
-                "enabled": True,
-                "codebook_id": "lf_codebook_v1",
-                "ecc": 3,
-                "strength": 0.5,
-                "delta": 1.0,
-                "block_length": 8
-            }
-        }
-    }
+    rng = np.random.RandomState(1)
+    inputs_1 = rng.randn(64).tolist()
+    inputs_2 = rng.randn(64).tolist()
+    inputs_3 = np.ones(64).tolist()
 
-    coder = LowFreqCoder(
-        impl_id="low_freq_coder_v1",
-        impl_version="v1",
-        impl_digest="test_impl_digest"
-    )
+    score_1 = _score(inputs_1)
+    score_2 = _score(inputs_2)
+    score_3 = _score(inputs_3)
 
-    # 不同的输入向量。
-    inputs_1: Dict[str, Any] = {
-        "latent_features": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
-        "latent_shape": (8,)
-    }
-
-    inputs_2: Dict[str, Any] = {
-        "latent_features": [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2],
-        "latent_shape": (8,)
-    }
-
-    inputs_3: Dict[str, Any] = {
-        "latent_features": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-        "latent_shape": (8,)
-    }
-
-    # 执行编码。
-    result_1 = coder.extract(cfg=cfg, inputs=inputs_1)
-    result_2 = coder.extract(cfg=cfg, inputs=inputs_2)
-    result_3 = coder.extract(cfg=cfg, inputs=inputs_3)
-
-    assert result_1.status == "ok", "Encoding 1 failed"
-    assert result_2.status == "ok", "Encoding 2 failed"
-    assert result_3.status == "ok", "Encoding 3 failed"
-
-    score_1 = result_1.lf_score
-    score_2 = result_2.lf_score
-    score_3 = result_3.lf_score
-
-    # 验证分数不同（至少有两个不同）。
-    assert not (score_1 == score_2 == score_3), \
-        f"lf_score should vary with different inputs, got {score_1}, {score_2}, {score_3}"
+    # 至少有两个分数不同。
+    assert not (score_1 == score_2 == score_3),         f"lf_score should vary with different inputs, got {score_1}, {score_2}, {score_3}"
 
 
 def test_lf_score_distribution_varies_across_inputs() -> None:
     """
     功能：验证 lf_score 在多个输入上的分布有差异。
 
-    Test that lf_score distribution varies across multiple inputs.
+    Test that lf_score distribution has sufficient variance across multiple inputs.
 
     Args:
         None.
@@ -100,54 +120,22 @@ def test_lf_score_distribution_varies_across_inputs() -> None:
     Raises:
         AssertionError: If lf_score variance is too low.
     """
-    cfg: Dict[str, Any] = {
-        "watermark": {
-            "plan_digest": "test_plan_digest_001",
-            "lf": {
-                "enabled": True,
-                "codebook_id": "lf_codebook_v1",
-                "ecc": 3,
-                "strength": 0.5,
-                "delta": 1.0,
-                "block_length": 8
-            }
-        }
-    }
-
-    coder = LowFreqCoder(
-        impl_id="low_freq_coder_v1",
-        impl_version="v1",
-        impl_digest="test_impl_digest"
-    )
-
-    # 生成多个不同的输入向量。
-    import random
-    random.seed(42)
-
+    rng = np.random.RandomState(42)
     scores: List[float] = []
-    for i in range(10):
-        latent_features = [random.uniform(-1.0, 1.0) for _ in range(8)]
-        inputs = {
-            "latent_features": latent_features,
-            "latent_shape": (8,)
-        }
-        result = coder.extract(cfg=cfg, inputs=inputs)
-        assert result.status == "ok", f"Encoding {i} failed: {result.content_failure_reason}"
-        scores.append(result.lf_score)
+    for _ in range(10):
+        latent_features = rng.randn(64).tolist()
+        scores.append(_score(latent_features))
 
-    # 验证分数的方差不为零（即有差异）。
     mean = sum(scores) / len(scores)
     variance = sum((s - mean) ** 2 for s in scores) / len(scores)
-
-    assert variance > 1e-6, \
-        f"lf_score variance is too low ({variance}), indicating insufficient input sensitivity"
+    assert variance > 1e-6,         f"lf_score variance 过低（{variance}），输入敏感性不足"
 
 
 def test_lf_score_same_input_produces_same_score() -> None:
     """
-    功能：验证同一输入产生相同的 lf_score（可复算）。
+    功能：验证相同输入产生相同的 lf_score（可复算）。
 
-    Test that the same input produces the same lf_score (reproducibility).
+    Test that identical inputs produce identical lf_score (reproducibility).
 
     Args:
         None.
@@ -158,40 +146,8 @@ def test_lf_score_same_input_produces_same_score() -> None:
     Raises:
         AssertionError: If lf_score is not reproducible.
     """
-    cfg: Dict[str, Any] = {
-        "watermark": {
-            "plan_digest": "test_plan_digest_001",
-            "lf": {
-                "enabled": True,
-                "codebook_id": "lf_codebook_v1",
-                "ecc": 3,
-                "strength": 0.5,
-                "delta": 1.0,
-                "block_length": 8
-            }
-        }
-    }
-
-    inputs: Dict[str, Any] = {
-        "latent_features": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
-        "latent_shape": (8,)
-    }
-
-    coder = LowFreqCoder(
-        impl_id="low_freq_coder_v1",
-        impl_version="v1",
-        impl_digest="test_impl_digest"
-    )
-
-    # 执行多次编码。
-    result_1 = coder.extract(cfg=cfg, inputs=inputs)
-    result_2 = coder.extract(cfg=cfg, inputs=inputs)
-    result_3 = coder.extract(cfg=cfg, inputs=inputs)
-
-    assert result_1.status == "ok"
-    assert result_2.status == "ok"
-    assert result_3.status == "ok"
-
-    # 验证分数完全相同（可复算）。
-    assert result_1.lf_score == result_2.lf_score == result_3.lf_score, \
-        "lf_score must be reproducible for the same input"
+    rng = np.random.RandomState(99)
+    latents = rng.randn(64).tolist()
+    score_1 = _score(latents)
+    score_2 = _score(latents)
+    assert score_1 == score_2,         f"相同输入的 lf_score 应完全一致，实际 {score_1} vs {score_2}"

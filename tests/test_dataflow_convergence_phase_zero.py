@@ -1,5 +1,5 @@
-"""
-File purpose: Dataflow Convergence 阶段回归测试。
+﻿"""
+File purpose: Dataflow Convergence 闃舵鍥炲綊娴嬭瘯銆?
 Module type: General module
 """
 
@@ -22,7 +22,7 @@ from main.watermarking.fusion.interfaces import FusionDecision
 
 def _hex_anchor(tag: str) -> str:
     """
-    功能：生成稳定十六进制摘要。 
+    鍔熻兘锛氱敓鎴愮ǔ瀹氬崄鍏繘鍒舵憳瑕併€?
 
     Build deterministic SHA256 hex digest anchor.
 
@@ -37,7 +37,7 @@ def _hex_anchor(tag: str) -> str:
 
 def _write_png(path: Path) -> None:
     """
-    功能：写入最小有效 PNG 文件。 
+    鍔熻兘锛氬啓鍏ユ渶灏忔湁鏁?PNG 鏂囦欢銆?
 
     Write a minimal valid PNG bytes payload.
 
@@ -113,8 +113,8 @@ class _SubspacePlannerStub:
         self.plan_digest = plan_digest
         self.basis_digest = basis_digest
         self.impl_identity = {
-            "impl_id": "subspace_planner_v1",
-            "impl_version": "v1",
+            "impl_id": "subspace_planner_v2",
+            "impl_version": "v2",
             "impl_digest": _hex_anchor("subspace_planner_impl"),
         }
 
@@ -143,8 +143,8 @@ class _SubspacePlannerStub:
             basis_digest=self.basis_digest,
             plan_digest=self.plan_digest,
             audit={
-                "impl_identity": "subspace_planner_v1",
-                "impl_version": "v1",
+                "impl_identity": "subspace_planner_v2",
+                "impl_version": "v2",
                 "impl_digest": _hex_anchor("planner_audit_impl"),
                 "trace_digest": _hex_anchor("planner_trace"),
             },
@@ -186,7 +186,7 @@ def _build_base_cfg() -> Dict[str, Any]:
 
 def _set_value_by_field_path(mapping: Dict[str, Any], field_path: str, value: Any) -> None:
     """
-    功能：按点路径写入映射字段。 
+    鍔熻兘锛氭寜鐐硅矾寰勫啓鍏ユ槧灏勫瓧娈点€?
 
     Set a nested mapping value by dotted field path.
 
@@ -209,7 +209,7 @@ def _set_value_by_field_path(mapping: Dict[str, Any], field_path: str, value: An
 
 def _build_minimal_valid_record(interpretation: Any) -> Dict[str, Any]:
     """
-    功能：构建可通过 validate_record 的最小记录。 
+    鍔熻兘锛氭瀯寤哄彲閫氳繃 validate_record 鐨勬渶灏忚褰曘€?
 
     Build a minimal record satisfying required fields.
 
@@ -427,3 +427,4 @@ def test_embed_identity_trace_marks_baseline_fields(tmp_path: Path) -> None:
     assert embed_trace.get("note") == "content_embedding_real_v1"
     assert isinstance(embed_trace.get("lf_trace_digest"), str)
     assert isinstance(embed_trace.get("lf_trace_summary"), dict)
+

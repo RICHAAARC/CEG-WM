@@ -13,11 +13,11 @@ def test_registry_whitelist_required_for_planner_impl() -> None:
     whitelist = load_runtime_whitelist()
 
     impl_identity = {
-        "content_extractor_id": "content_baseline_identity_v1",
-        "geometry_extractor_id": "geometry_baseline_identity_v1",
-        "fusion_rule_id": "fusion_baseline_identity_v1",
+        "content_extractor_id": "unified_content_extractor_v2",
+        "geometry_extractor_id": "attention_anchor_map_relation_v2",
+        "fusion_rule_id": "fusion_neyman_pearson_v2",
         "subspace_planner_id": "subspace_planner_not_whitelisted_v1",
-        "sync_module_id": "geometry_sync_baseline_v1"
+        "sync_module_id": "geometry_latent_sync_sd3_v3"
     }
 
     with pytest.raises(GateEnforcementError):

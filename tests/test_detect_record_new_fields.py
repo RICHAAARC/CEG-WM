@@ -26,16 +26,16 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from main.core import digests
-from main.watermarking.content_chain.low_freq_coder import LFCoderPRC, LF_CODER_PRC_ID, LF_CODER_PRC_VERSION
+from main.watermarking.content_chain.low_freq_coder import LowFreqTemplateCodecV2, LOW_FREQ_TEMPLATE_CODEC_V2_ID, LOW_FREQ_TEMPLATE_CODEC_V2_VERSION
 
 
 # ---------------------------------------------------------------------------
 # 辅助函数
 # ---------------------------------------------------------------------------
 
-def _make_lf_coder() -> LFCoderPRC:
-    impl_digest = digests.canonical_sha256({"impl_id": LF_CODER_PRC_ID, "impl_version": LF_CODER_PRC_VERSION})
-    return LFCoderPRC(LF_CODER_PRC_ID, LF_CODER_PRC_VERSION, impl_digest)
+def _make_lf_coder() -> LowFreqTemplateCodecV2:
+    impl_digest = digests.canonical_sha256({"impl_id": LOW_FREQ_TEMPLATE_CODEC_V2_ID, "impl_version": LOW_FREQ_TEMPLATE_CODEC_V2_VERSION})
+    return LowFreqTemplateCodecV2(LOW_FREQ_TEMPLATE_CODEC_V2_ID, LOW_FREQ_TEMPLATE_CODEC_V2_VERSION, impl_digest)
 
 
 def _build_lf_cfg(enabled: bool = True) -> Dict[str, Any]:
@@ -165,9 +165,10 @@ def test_final_decision_abstain_is_watermarked_null() -> None:
 
 def test_bp_converge_status_ok_when_converged() -> None:
     """
-    功能：验证 bp_converged=True 时 bp_converge_status 为 'ok'。
+    功能：验证 V2 correlation 检测器下 trace 不含 bp_converge_status，并具备 lf_trace_digest。
 
-    Test bp_converge_status equals 'ok' when BP decoder converges.
+    Test that V2 correlation detector trace has no bp_converge_status field
+    and contains lf_trace_digest and detect_variant fields.
 
     Args:
         None.
@@ -176,11 +177,10 @@ def test_bp_converge_status_ok_when_converged() -> None:
         None.
 
     Raises:
-        AssertionError: If bp_converge_status is not 'ok'.
+        AssertionError: If trace contains bp_converge_status or lacks lf_trace_digest.
     """
     lf_coder = _make_lf_coder()
     cfg = _build_lf_cfg(enabled=True)
-    # 构造足够长的随机 latent（至少 block_length）
     import numpy as np
     latents = np.random.RandomState(42).randn(200).tolist()
     plan_digest = digests.canonical_sha256({"plan": "test_converge_ok"})
@@ -193,26 +193,22 @@ def test_bp_converge_status_ok_when_converged() -> None:
         lf_basis=lf_basis,
     )
 
-    assert "bp_converge_status" in trace, "trace 中应含 bp_converge_status 字段"
-    # 当 bp_converged=True 时（通常迭代次数足够），status 应为 'ok'
-    if trace.get("bp_converged") is True:
-        assert trace["bp_converge_status"] == "ok", (
-            f"bp_converged=True 时 bp_converge_status 应为 'ok'，实际：{trace['bp_converge_status']}"
-        )
-    elif trace.get("bp_converged") is False:
-        assert trace["bp_converge_status"] == "degraded", (
-            f"bp_converged=False 时 bp_converge_status 应为 'degraded'，实际：{trace['bp_converge_status']}"
-        )
+    # V2 使用 correlation_v2 检测器，不存在 BP 收敛问题，不应有 bp_converge_status。
+    assert "bp_converge_status" not in trace, (
+        f"V2 不使用 BP 解码，trace 不应含 bp_converge_status，实际 keys：{list(trace.keys())}"
+    )
+    assert "lf_trace_digest" in trace, "trace 中应含 lf_trace_digest 字段"
+    assert trace.get("detect_variant") == "correlation_v2", (
+        f"V2 detect_variant 应为 correlation_v2，实际：{trace.get('detect_variant')}"
+    )
 
 
 def test_bp_converge_status_degraded_when_not_converged() -> None:
     """
-    功能：验证 correlation_v1 检测器下 bp_converge_status 始终为 'ok'。
+    功能：验证 V2 correlation_v2 检测器下 trace 不含 BP 相关字段。
 
-    Test bp_converge_status is always 'ok' under correlation_v1 detector.
-    The correlation-based detector replaces BP decoding; there is no BP
-    non-convergence scenario. Patching decode_soft_llr has no observable
-    effect since it is no longer called.
+    Test that V2 correlation_v2 detector produces no BP-related fields.
+    V2 replaces BP decoding with Pearson correlation; no convergence state exists.
 
     Args:
         None.
@@ -221,7 +217,7 @@ def test_bp_converge_status_degraded_when_not_converged() -> None:
         None.
 
     Raises:
-        AssertionError: If bp_converge_status is not 'ok'.
+        AssertionError: If trace contains bp_converge_status or bp_converged.
     """
     import numpy as np
 
@@ -229,30 +225,21 @@ def test_bp_converge_status_degraded_when_not_converged() -> None:
     cfg = _build_lf_cfg(enabled=True)
     latents = np.random.RandomState(99).randn(200).tolist()
     plan_digest = digests.canonical_sha256({"plan": "test_not_converged"})
-
-    # correlation_v1 检测器不调用 decode_soft_llr，patch 不产生副作用。
-    _mock_decode_result = {
-        "decoded_bits": [0] * 16,
-        "bp_converged": False,
-        "bp_iteration_count": 5,
-        "syndrome_weight": 3,
-    }
     lf_basis = _build_lf_basis(latent_dim=200, feature_dim=128, basis_rank=8, seed=99)
-    with patch(
-        "main.watermarking.content_chain.low_freq_coder.decode_soft_llr",
-        return_value=_mock_decode_result,
-    ):
-        lf_score, trace = lf_coder.detect_score(
-            cfg=cfg,
-            latent_features=latents,
-            plan_digest=plan_digest,
-            lf_basis=lf_basis,
-        )
 
-    assert "bp_converge_status" in trace, "trace 中应含 bp_converge_status 字段"
-    # correlation_v1 不存在 BP 不收敛问题，bp_converge_status 始终为 'ok'。
-    assert trace["bp_converge_status"] == "ok", (
-        f"correlation_v1 检测器下 bp_converge_status 应为 'ok'，实际：{trace['bp_converge_status']}"
+    lf_score, trace = lf_coder.detect_score(
+        cfg=cfg,
+        latent_features=latents,
+        plan_digest=plan_digest,
+        lf_basis=lf_basis,
+    )
+
+    # V2 不使用 BP，不应包含 BP 相关字段。
+    assert "bp_converge_status" not in trace, (
+        f"V2 trace 不应含 bp_converge_status，实际 keys：{list(trace.keys())}"
+    )
+    assert "bp_converged" not in trace, (
+        f"V2 trace 不应含 bp_converged，实际 keys：{list(trace.keys())}"
     )
 
 
@@ -296,12 +283,12 @@ def test_bp_converge_status_excluded_from_lf_trace_digest() -> None:
     # 去除 lf_trace_digest 与 bp_converge_status（均在摘要计算后写入），重算摘要
     trace_for_digest = {
         k: v for k, v in trace.items()
-        if k not in {"lf_trace_digest", "bp_converge_status"}
+        if k not in {"lf_trace_digest"}
     }
     recomputed_digest = digests.canonical_sha256(trace_for_digest)
 
     assert recomputed_digest == recorded_digest, (
-        f"去除 bp_converge_status 后重算的摘要应与 lf_trace_digest 一致；"
+        f"去除 lf_trace_digest 后重算的摘要应与记录值一致；"
         f"recorded={recorded_digest[:16]}… recomputed={recomputed_digest[:16]}…"
     )
 
@@ -453,9 +440,9 @@ def test_lf_status_degraded_when_bp_not_converged() -> None:
     }
 
     # 模拟顶层 lf_status 写入（if-not-in 守卫）。
-    prc_latent_status = lf_trace.get("lf_status")
-    if "lf_status" not in score_parts and isinstance(prc_latent_status, str) and prc_latent_status:
-        score_parts["lf_status"] = prc_latent_status
+    lf_template_status = lf_trace.get("lf_status")
+    if "lf_status" not in score_parts and isinstance(lf_template_status, str) and lf_template_status:
+        score_parts["lf_status"] = lf_template_status
 
     # 模拟 BP 降级守卫块。
     _bp_converge_status = lf_trace.get("bp_converge_status")
@@ -494,9 +481,9 @@ def test_lf_status_not_degraded_when_bp_converged() -> None:
         "bp_converge_status": "ok",
     }
 
-    prc_latent_status = lf_trace.get("lf_status")
-    if "lf_status" not in score_parts and isinstance(prc_latent_status, str) and prc_latent_status:
-        score_parts["lf_status"] = prc_latent_status
+    lf_template_status = lf_trace.get("lf_status")
+    if "lf_status" not in score_parts and isinstance(lf_template_status, str) and lf_template_status:
+        score_parts["lf_status"] = lf_template_status
 
     _bp_converge_status = lf_trace.get("bp_converge_status")
     if _bp_converge_status == "degraded" and score_parts.get("lf_status") == "ok":

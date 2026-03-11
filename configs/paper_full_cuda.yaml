@@ -1,4 +1,4 @@
-policy_path: "content_with_geometry_gate"
+policy_path: "content_np_geo_rescue_v2"
 
 target_fpr: 0.01
 
@@ -49,14 +49,14 @@ watermark:
     ecc: "sparse_ldpc"
     ecc_sparsity: 3
     message_length: 64
-    coding_mode: "latent_space_sign_flipping"
-    decoder: "belief_propagation"
+    coding_mode: "pseudogaussian_template_additive"
+    decoder: "matched_correlation"
     bp_iterations: 100  # 从 50 提升至 100，改善 LF BP 收敛概率（RUNTIME-02 验证后可进一步调整）
   hf:
     enabled: true
     tail_truncation_ratio: 0.1
-    tail_truncation_mode: "top_k_per_latent"
-    selection: "top_k_magnitude_based"
+    tail_truncation_mode: "keyed_template_correlation"
+    selection: "keyed_rademacher_template"
     tau: 2.0
 
 detect:
@@ -118,13 +118,13 @@ evaluate:
   exclude_synthetic_negative_closure_marker: true
 
 impl:
-  content_extractor_id: "unified_content_extractor_v1"
-  geometry_extractor_id: "attention_anchor_map_relation_v1"
-  fusion_rule_id: "fusion_neyman_pearson_v1"
-  subspace_planner_id: "subspace_planner_v1"
-  sync_module_id: "geometry_latent_sync_sd3_v2"
-  hf_embedder_id: "hf_embedder_t2smark_v1"
-  lf_coder_id: "lf_coder_prc_v1"
+  content_extractor_id: "unified_content_extractor_v2"
+  geometry_extractor_id: "attention_anchor_map_relation_v2"
+  fusion_rule_id: "fusion_neyman_pearson_v2"
+  subspace_planner_id: "subspace_planner_v2"
+  sync_module_id: "geometry_latent_sync_sd3_v3"
+  hf_embedder_id: "high_freq_template_codec_v2"
+  lf_coder_id: "low_freq_template_codec_v2"
   use_latent_per_step: true
 
 # 密码学生成溯源（Cryptographic Generation Attestation）配置。
@@ -142,7 +142,7 @@ attestation:
   use_trajectory_mix: false  # 子进程模式无法传递 latent tensor，禁用轨迹混合
 
 detect_runtime:
-  image_domain_sidecar_enabled: true
+  image_domain_sidecar_enabled: false  # 论文正式路径不允许 image-domain sidecar（v2.0 收口）
 
 experiment_matrix:
   config_path: "configs/paper_full_cuda.yaml"

@@ -1050,3 +1050,27 @@ config_loader:               # contracts.py 仅解析其中 cfg_digest_include_p
       - "score_field"                       # 用于分位估计的分数字段名。
       - "target_fpr"                        # 目标 FPR 集合或单值输入。
       - "max_samples"                       # 校准使用的最大样本数上限。
+
+# ==============================================================
+# v2.0 单一路径收口追加（append-only, 2026-04-01）
+#   - 本节为追加段，不修改 v1.0 任何已冻结内容。
+#   - 声明 v2.0 正式实现的路径语义约束与机制收口。
+# ==============================================================
+single_path_closure_v2:
+  version: "v2.0"
+  frozen_date: "2026-04-01"
+  description: >
+    v2.0 收口：论文级单一路径、单一机制、无 fallback、无 proxy、无 sidecar 的正式实现声明。
+    本节是 v1.0 冻结契约的追加扩展，不允许修改 v1.0 已冻结字段。
+  closure_policy_path: "content_np_geo_rescue_v2"       # 论文正式路径唯一枚举标识。
+  sidecar_disabled: true                                # 论文正式路径禁止 image-domain sidecar。
+  proxy_disabled_in_paper_mode: true                    # paper_faithfulness.enabled=True 时强制禁用 attention proxy。
+  geo_gate_semantics: "one_sided_lower_bound"           # 几何门控语义：单侧下界（geometry_score >= geo_gate_lower）。
+  geo_gate_upper_role: "audit_only"                     # geo_gate_upper 仅用于审计兼容，不参与判决。
+  fallback_policy: "forbidden"                          # 禁止任何内容/几何回退路径。
+  enforcement_note: >
+    运行期 paper_faithfulness.enabled=True 时，必须同时强制：
+    (1) enable_attention_proxy=False；
+    (2) enable_image_sidecar=False；
+    (3) geo_gate 采用单侧下界逻辑（geometry_score >= geo_gate_lower）；
+    (4) policy_path 取值为 content_np_geo_rescue_v2。

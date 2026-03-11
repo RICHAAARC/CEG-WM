@@ -88,7 +88,6 @@ def normalize_ablation_flags(cfg: Dict[str, Any]) -> None:
     enable_hf = ablation.get("enable_hf")
     enable_sync = ablation.get("enable_sync")
     enable_anchor = ablation.get("enable_anchor")
-    enable_attention_proxy = ablation.get("enable_attention_proxy")
     enable_image_sidecar = ablation.get("enable_image_sidecar")
     lf_only = ablation.get("lf_only", False)
     hf_only = ablation.get("hf_only", False)
@@ -121,7 +120,6 @@ def normalize_ablation_flags(cfg: Dict[str, Any]) -> None:
     enable_hf_resolved = _resolve_bool(enable_hf, False)
     enable_sync_resolved = _resolve_bool(enable_sync, True)
     enable_anchor_resolved = _resolve_bool(enable_anchor, True)
-    enable_attention_proxy_resolved = _resolve_bool(enable_attention_proxy, True)
     enable_image_sidecar_resolved = _resolve_bool(enable_image_sidecar, True)
 
     # 应用互斥约束覆写。
@@ -144,7 +142,6 @@ def normalize_ablation_flags(cfg: Dict[str, Any]) -> None:
         "enable_hf": enable_hf_resolved,
         "enable_sync": enable_sync_resolved,
         "enable_anchor": enable_anchor_resolved,
-        "enable_attention_proxy": enable_attention_proxy_resolved,
         "enable_image_sidecar": enable_image_sidecar_resolved,
         "lf_only": lf_only,
         "hf_only": hf_only,
@@ -161,7 +158,6 @@ def normalize_ablation_flags(cfg: Dict[str, Any]) -> None:
     ablation["enable_hf"] = enable_hf_resolved
     ablation["enable_sync"] = enable_sync_resolved
     ablation["enable_anchor"] = enable_anchor_resolved
-    ablation["enable_attention_proxy"] = enable_attention_proxy_resolved
     ablation["enable_image_sidecar"] = enable_image_sidecar_resolved
     ablation["normalized"] = normalized
 

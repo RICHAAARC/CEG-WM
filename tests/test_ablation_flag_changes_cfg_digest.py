@@ -129,7 +129,6 @@ def test_ablation_flag_changes_cfg_digest():
         for detect_switch in [
             "enable_sync",
             "enable_anchor",
-            "enable_attention_proxy",
             "enable_image_sidecar",
         ]:
             assert detect_switch in normalized, f"{detect_switch} must be included in ablation.normalized"

@@ -202,8 +202,8 @@ class TestDetectOrchestratorWithContentDetector:
         mock_impl_set.subspace_planner = mock_subspace_planner
         planner_input_digest = "planner_input_digest_ok"
         planner_impl_identity = {
-            "impl_id": "subspace_planner_v1",
-            "impl_version": "v1",
+            "impl_id": "subspace_planner_v2",
+            "impl_version": "v2",
             "impl_digest": "digest"
         }
         mock_subspace_planner.plan.return_value = SimpleNamespace(
@@ -334,8 +334,8 @@ class TestDetectOrchestratorWithContentDetector:
         mock_impl_set.subspace_planner = mock_subspace_planner
         planner_input_digest = "planner_input_digest_ok"
         planner_impl_identity = {
-            "impl_id": "subspace_planner_v1",
-            "impl_version": "v1",
+            "impl_id": "subspace_planner_v2",
+            "impl_version": "v2",
             "impl_digest": "digest"
         }
         mock_subspace_planner.plan.return_value = SimpleNamespace(

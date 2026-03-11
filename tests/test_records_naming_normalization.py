@@ -1,5 +1,5 @@
-"""
-File purpose: Records 命名规范化回归测试。
+﻿"""
+File purpose: Records 鍛藉悕瑙勮寖鍖栧洖褰掓祴璇曘€?
 Module type: General module
 """
 
@@ -24,7 +24,7 @@ FORBIDDEN_TOKENS = ["demo", "synthetic", "debug", "test_only"]
 
 def _hex_anchor(tag: str) -> str:
     """
-    功能：生成稳定十六进制摘要。
+    鍔熻兘锛氱敓鎴愮ǔ瀹氬崄鍏繘鍒舵憳瑕併€?
 
     Build deterministic SHA256 hex digest anchor.
 
@@ -39,7 +39,7 @@ def _hex_anchor(tag: str) -> str:
 
 def _write_png(path: Path) -> None:
     """
-    功能：写入最小有效 PNG 文件。
+    鍔熻兘锛氬啓鍏ユ渶灏忔湁鏁?PNG 鏂囦欢銆?
 
     Write a minimal valid PNG bytes payload.
 
@@ -107,8 +107,8 @@ class _SubspacePlannerStub:
         self.plan_digest = plan_digest
         self.basis_digest = basis_digest
         self.impl_identity = {
-            "impl_id": "subspace_planner_v1",
-            "impl_version": "v1",
+            "impl_id": "subspace_planner_v2",
+            "impl_version": "v2",
             "impl_digest": _hex_anchor("planner_impl"),
         }
 
@@ -147,8 +147,8 @@ class _SubspacePlannerStub:
             basis_digest=self.basis_digest,
             plan_digest=self.plan_digest,
             audit={
-                "impl_identity": "subspace_planner_v1",
-                "impl_version": "v1",
+                "impl_identity": "subspace_planner_v2",
+                "impl_version": "v2",
                 "impl_digest": _hex_anchor("planner_audit"),
                 "trace_digest": _hex_anchor("planner_trace"),
             },
@@ -207,7 +207,7 @@ def _assert_no_forbidden_tokens(value: Any, path: str) -> None:
 
 def test_records_identity_value_is_normalized_or_absent(tmp_path: Path) -> None:
     """
-    功能：验证 identity 模式的命名规范化。
+    鍔熻兘锛氶獙璇?identity 妯″紡鐨勫懡鍚嶈鑼冨寲銆?
 
     Validate identity-mode naming normalization for embed records.
 
@@ -264,7 +264,7 @@ def test_records_identity_value_is_normalized_or_absent(tmp_path: Path) -> None:
 
 def test_records_forbidden_tokens_not_present_in_values(tmp_path: Path) -> None:
     """
-    功能：验证关键记录字段不包含禁止词。
+    鍔熻兘锛氶獙璇佸叧閿褰曞瓧娈典笉鍖呭惈绂佹璇嶃€?
 
     Validate forbidden tokens are absent from key record values.
 
@@ -320,3 +320,4 @@ def test_records_forbidden_tokens_not_present_in_values(tmp_path: Path) -> None:
 
     _assert_no_forbidden_tokens(embed_record, "embed_record")
     _assert_no_forbidden_tokens(detect_record, "detect_record")
+

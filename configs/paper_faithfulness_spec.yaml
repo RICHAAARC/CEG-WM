@@ -9,9 +9,9 @@
 # ------------------------------
 # 规范版本与冻结元信息
 # ------------------------------
-paper_faithfulness_spec_version: "v1.0"
-frozen_date: "2026-02-20"
-phase: "phase-1-alignment-spec-freeze"
+paper_faithfulness_spec_version: "v2.0"
+frozen_date: "2026-06-01"
+phase: "phase-2-paper-grade-formal-impl-freeze"
 
 # ------------------------------
 # 权威性声明
@@ -75,17 +75,17 @@ target_method_families:
             - "sample_stride"
 
   # ------------------------------
-  # T2SMark 对齐规范
+  # HF 高频模板编码器对齐规范
   # ------------------------------
-  t2s_mark:
-    paper_citation: "T2SMark: Tail-Truncation Sampling for Robust Diffusion Watermarking (arXiv:...)"
+  high_freq_template_codec:
+    paper_citation: "keyed Rademacher template tail-truncation watermarking"
     enabled: true
     alignment_dimensions:
 
-      # 1) Tail Truncation 采样规则（Tail-Truncation Sampling）
+      # 1) Tail Truncation 采样规则（Keyed Rademacher Template）
       tail_truncation:
-        required_alignment: "top_k_magnitude_based"
-        alignment_rule: "必须使用 top-k 截断规则，基于 magnitude 排序，而非随机采样。"
+        required_alignment: "keyed_rademacher_template"
+        alignment_rule: "必须使用基于 plan_digest 导出的 Rademacher 双极模板（±1）注入，无需 top-k magnitude 排序。"
         deviation_policy: "禁止偏差"
         evidence_field_paths:
           - "content_evidence.hf_trace_digest"
@@ -94,7 +94,7 @@ target_method_families:
           k_field_path: "watermark.hf.tail_truncation_ratio"
           mode_field_path: "watermark.hf.tail_truncation_mode"
           required_values:
-            tail_truncation_mode: "top_k_per_latent"
+            tail_truncation_mode: "keyed_template_correlation"
 
       # 2) 重复码编码（Repetition Code）
       repetition_code:
@@ -110,25 +110,34 @@ target_method_families:
 
       # 3) 检测阈值校准（Detection Threshold Calibration）
       threshold_calibration:
-        required_alignment: "sum_of_products"
-        alignment_rule: "检测得分必须使用 sum-of-products 公式：p = watermarked_vec * v_value 的分组和。"
+        required_alignment: "template_matched_correlation"
+        implementation_note: |
+          实际实现：whitened Pearson correlation 与 sigmoid 映射。
+          HF 检测分数从 Rademacher 模板与实测 latent 的 Pearson 相关系数计算，
+          不使用 energy statistics 或 top-k magnitude。
+        alignment_rule: "检测得分必须使用模板匹配相关分（whitened Pearson），不允许 energy statistics。"
         deviation_policy: "禁止偏差"
         evidence_field_paths:
           - "content_evidence.hf_score"
           - "thresholds_digest"
 
   # ------------------------------
-  # PRC (Pseudorandom Code) 对齐规范
+  # LF 低频模板编码器对齐规范
   # ------------------------------
-  prc:
-    paper_citation: "PRC: Provably Robust and Stealthy Watermarking for Diffusion Models (arXiv:2309...)"
+  low_freq_template_codec:
+    paper_citation: "pseudogaussian template additive watermarking"
     enabled: true
     alignment_dimensions:
 
       # 1) 编码域（Encoding Domain）
       encoding_domain:
-        required_alignment: "latent_space_sign_flipping"
-        alignment_rule: "水印必须编码在 latent 符号翻转上（±1），通过 one-time pad 与伪高斯噪声实现隐蔽性。"
+        required_alignment: "pseudogaussian_template_additive"
+        implementation_note: |
+          实际实现：additive pseudogaussian 模板注入。
+          配置项 watermark.lf.coding_mode = "pseudogaussian_template_additive"；
+          嵌入：latent[i] += variance * code_bits[i]（加法注入，非符号翻转）。
+          检测使用 whitened Pearson correlation（matched correlation）。
+        alignment_rule: "水印必须通过加法模板注入 latent 系数域，检测使用 matched correlation。"
         deviation_policy: "禁止偏差"
         evidence_field_paths:
           - "content_evidence.lf_trace_digest"
@@ -136,7 +145,7 @@ target_method_families:
         parameter_binding:
           variance_field_path: "watermark.lf.variance"
           required_values:
-            variance: 1.5  # PRC 伪高斯方差（pseudogaussian variance）
+            variance: 1.5  # 伪高斯方差（pseudogaussian variance）
 
       # 2) 纠错码参数（ECC Parameters）
       ecc_parameters:
@@ -151,10 +160,14 @@ target_method_families:
           sparsity_field_path: "watermark.lf.ecc_sparsity"
           message_length_field_path: "watermark.lf.message_length"
 
-      # 3) BP 解码器（BP Decoder）
+      # 3) 匹配相关评分（Matched Correlation Decoder）
       bp_decoder:
-        required_alignment: "belief_propagation"
-        alignment_rule: "检测必须使用 BP 解码器与 test bits 验证机制。"
+        required_alignment: "matched_correlation"
+        implementation_note: |
+          实际实现：whitened Pearson correlation scoring。
+          score = whitened Pearson correlation between detected projection and codeword。
+          无需 BP 迭代（watermark.lf.decoder = "matched_correlation"）。
+        alignment_rule: "检测必须使用 matched correlation 评分（whitened Pearson），无需 BP 迭代。"
         deviation_policy: "禁止偏差"
         evidence_field_paths:
           - "content_evidence.lf_score"
@@ -245,8 +258,8 @@ alignment_check_rules:
       - "content_evidence.injection_site_spec"
     required_keys_by_method:
       shallow_diffuse: ["hook_type", "target_tensor"]
-      t2s_mark: ["hook_type", "truncation_site"]
-      prc: ["hook_type", "encoding_site"]
+      hf_template_codec: ["hook_type", "truncation_site"]
+      lf_template_codec: ["hook_type", "encoding_site"]
     failure_action: "FAIL"
     failure_message: "注入点规范与 paper_spec 不一致"
 
@@ -254,12 +267,12 @@ alignment_check_rules:
   method_specific_parameter_binding:
     check_type: "parameter_binding"
     bindings:
-      t2s_mark:
+      hf_template_codec:
         - field_path: "watermark.hf.tail_truncation_mode"
           required_value: "top_k_per_latent"
         - field_path: "watermark.hf.enabled"
           required_value: true
-      prc:
+      lf_template_codec:
         - field_path: "watermark.lf.variance"
           required_value: 1.5
         - field_path: "watermark.lf.ecc"
@@ -317,3 +330,36 @@ test_gate_requirements:
     test_file: "tests/test_paper_faithfulness_gate.py"
     test_function: "test_injection_site_change_must_update_digest"
     check_rule: "hook 位置变化但未更新 injection_site_digest 必须 FAIL"
+
+# ==============================================================
+# 单一路径收口约束（Single Path Closure Constraints）
+#   （v2.0 追加，append-only）
+#   明确论文正式执行路径的排他性限制：
+#   - 无 fallback：不允许静默降级为非正式实现。
+#   - 无 proxy：不允许使用 attention proxy 代替真实 self-attention。
+#   - 无 sidecar：不允许 image-domain sidecar 注入额外评分。
+#   - 无旁路：唯一论文级闭环路径，无备选执行分支。
+# ==============================================================
+single_path_closure_constraints:
+  version: "v2.0"
+  frozen_date: "2026-04-01"
+
+  no_fallback:
+    constraint: "禁止任何 fallback 降级路径（content_fallback_no_geometry 等策略不允许出现在正式运行中）。"
+    enforcement: "freeze_gate 拒绝写入 'fallback_used=true' 的 records。"
+    policy_path_check: "policy_path 不允许为 content_fallback_no_geometry。"
+
+  no_proxy:
+    constraint: "禁止使用 attention proxy 替代真实 self-attention 几何证据。"
+    enforcement: "paper_faithfulness.enabled=true 时，代码层强制 enable_attention_proxy=False。"
+    impl_constraint: "anchor_evidence_level 必须为 'real'，不允许 'proxy'。"
+
+  no_sidecar:
+    constraint: "禁止 image-domain sidecar 向内容评分注入图像域原始分数。"
+    enforcement: "detect_runtime.image_domain_sidecar_enabled 必须为 false 或缺失（默认 false 在 paper 模式下）。"
+    config_check: "configs/paper_full_cuda.yaml 和 configs/ablation/paper_ablation_cuda.yaml 中 image_domain_sidecar_enabled 必须为 false。"
+
+  fusion_gate_semantics:
+    constraint: "几何救回门控（geo gate）必须为单侧（geometry_score >= geo_gate_threshold），不允许双侧上限截断。"
+    rationale: "双侧截断会错误地拒绝高置信度几何证据，与论文单调性假设矛盾。"
+    enforcement: "_check_geo_gate 使用 geometry_score >= geo_gate_lower，geo_gate_upper 字段仅为审计保留。"

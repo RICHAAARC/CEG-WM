@@ -486,8 +486,6 @@ class SemanticMaskProvider:
         mask_stats_with_binding["saliency_source_attempted"] = {
             "sequence": saliency_decision.source_attempted
         }
-        mask_stats_with_binding["fallback_used"] = saliency_decision.fallback_used or isinstance(fallback_reason, str)
-        mask_stats_with_binding["fallback_reason"] = fallback_reason if isinstance(fallback_reason, str) else saliency_decision.fallback_reason
         mask_stats_with_binding["model_artifact_anchor"] = saliency_decision.model_artifact_anchor
         mask_stats_with_binding["saliency_provenance"] = {
             "source_selected": saliency_decision.source_selected,

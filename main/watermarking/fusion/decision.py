@@ -252,8 +252,6 @@ class NeumanPearsonFusionRule:
         content_decision = content_score >= np_threshold
         rescue_band_applied = False
         geo_gate_applied = False
-        rescue_blocked_reason = None
-        rescue_anchor_evidence_level = geometry_evidence.get("anchor_evidence_level", "proxy")
         rescue_sync_status = geometry_evidence.get("sync_status", geometry_status)
         rescue_sync_status_normalized = "ok" if rescue_sync_status in {"ok", "synced"} else rescue_sync_status
 
@@ -263,20 +261,14 @@ class NeumanPearsonFusionRule:
         if (geometry_status == "ok" and 
             isinstance(geometry_score, (int, float)) and 
             not content_decision):  # NP 决策为 False，才考虑救回
-
-            # 新增：几何可信度门控（proxy 几何默认不可信，除非 sync_status 已为 ok）。
-            geo_trusted = (rescue_anchor_evidence_level != "proxy") or (rescue_sync_status_normalized == "ok")
-            if not geo_trusted:
-                rescue_blocked_reason = "proxy_geometry_not_trusted"
-            else:
-                # 检查是否在 rescue band 范围内（下界）
-                if _is_rescue_candidate(content_score, np_threshold, rescue_band_spec):
-                    # 检查几何门控条件
-                    geo_gate_applied = _check_geo_gate(content_score, geometry_score, rescue_band_spec)
-                    if geo_gate_applied:
-                        # 几何门控通过：救回为 True（单侧）
-                        rescue_band_applied = True
-                        content_decision = True
+            # 检查是否在 rescue band 范围内（下界）
+            if _is_rescue_candidate(content_score, np_threshold, rescue_band_spec):
+                # 检查几何门控条件
+                geo_gate_applied = _check_geo_gate(content_score, geometry_score, rescue_band_spec)
+                if geo_gate_applied:
+                    # 几何门控通过：救回为 True（单侧）
+                    rescue_band_applied = True
+                    content_decision = True
 
         # (8) 计算融合规则摘要
         # 提取 target_fpr（用于摘要计算）
@@ -297,8 +289,6 @@ class NeumanPearsonFusionRule:
             "rescue_band_version": RESCUE_BAND_VERSION if rescue_band_applied else None,
             "geo_gate_applied": geo_gate_applied,
             "allow_threshold_fallback_for_tests": fallback_enabled_for_tests,
-            "rescue_blocked_reason": rescue_blocked_reason,
-            "rescue_anchor_evidence_level": rescue_anchor_evidence_level,
             "rescue_sync_status": rescue_sync_status,
             "rescue_sync_status_normalized": rescue_sync_status_normalized,
         }
@@ -329,8 +319,7 @@ class NeumanPearsonFusionRule:
             "rescue_reason": "rescued_by_geo_gate" if rescue_band_applied else None,
             "rescue_band_version": RESCUE_BAND_VERSION if rescue_band_applied else None,
             "geo_gate_applied": geo_gate_applied,
-            "rescue_blocked_reason": rescue_blocked_reason,
-            "rescue_anchor_evidence_level": rescue_anchor_evidence_level,
+            "rescue_blocked_reason": None,
             "rescue_sync_status": rescue_sync_status,
             "rescue_sync_status_normalized": rescue_sync_status_normalized,
             "fusion_rule_digest": fusion_rule_digest,
@@ -515,15 +504,16 @@ def _check_geo_gate(
         # rescue_band_spec 类型不合法，必须 fail-fast。
         raise TypeError("rescue_band_spec must be dict")
 
-    # 几何门控：geo_score 应在 [geo_gate_lower, geo_gate_upper] 范围内
+    # 几何门控（v2.0 收口）：单侧下界，geometry_score >= geo_gate_lower 即通过。
+    # geo_gate_upper 保留在 spec 中用于审计兼容，不参与判决。
     geo_gate_lower = rescue_band_spec.get("geo_gate_lower", 0.3)
-    geo_gate_upper = rescue_band_spec.get("geo_gate_upper", 0.7)
+    geo_gate_upper = rescue_band_spec.get("geo_gate_upper", 0.7)  # 保留用于审计兼容，不参与判决
 
     if not (0 <= geometry_score <= 1):
         # geometry_score 归一化范围不合法，必须 fail-fast。
         raise ValueError(f"geometry_score must be in [0,1], got {geometry_score}")
 
-    return geo_gate_lower <= geometry_score <= geo_gate_upper
+    return geometry_score >= geo_gate_lower  # 单侧下界门控（v2.0 收口）
 
 
 def compute_fusion_rule_digest(payload: Dict[str, Any]) -> str:

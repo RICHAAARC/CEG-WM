@@ -53,7 +53,7 @@ def _build_lf_ok(score: float = 0.81) -> ContentEvidence:
         status="ok",
         score=score,
         audit={
-            "impl_identity": "low_freq_coder_v1",
+            "impl_identity": "low_freq_template_codec_v2",
             "impl_version": "v1",
             "impl_digest": "digest",
             "trace_digest": "trace",

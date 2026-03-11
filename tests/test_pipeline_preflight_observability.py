@@ -1,4 +1,4 @@
-"""
+﻿"""
 File purpose: Validate pipeline preflight observability and digest invariance.
 Module type: General module
 """
@@ -133,8 +133,8 @@ def test_preflight_fields_do_not_affect_cfg_or_plan_digest(monkeypatch: pytest.M
     subspace_result = SimpleNamespace(
         plan={
             "planner_impl_identity": {
-                "impl_id": "subspace_planner_v1",
-                "impl_version": "v1",
+                "impl_id": "subspace_planner_v2",
+                "impl_version": "v2",
                 "impl_digest": "digest",
             },
             "verifiable_input_domain_spec": {
@@ -190,3 +190,4 @@ def test_preflight_fields_are_written_to_run_closure_append_only() -> None:
     assert payload["pipeline_build_status"] == "failed"
     assert payload["pipeline_build_failure_reason"] == "dependency_version_mismatch"
     assert payload["pipeline_build_failure_summary"] == "diffusers_import_failed"
+

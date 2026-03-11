@@ -217,13 +217,13 @@ def run_embed_orchestrator(
         hf_impl_id = impl_cfg.get("hf_embedder_id")
         lf_impl_id = impl_cfg.get("lf_coder_id")
         
-        # 检查HF embedder必须是T2SMark
-        if hf_impl_id and hf_impl_id != "hf_embedder_t2smark_v1":
-            raise ValueError(f"paper_faithfulness requires hf_embedder_t2smark_v1, got {hf_impl_id}")
+        # 检查 HF embedder 必须是 high_freq_template_codec_v2
+        if hf_impl_id and hf_impl_id != "high_freq_template_codec_v2":
+            raise ValueError(f"paper_faithfulness requires high_freq_template_codec_v2, got {hf_impl_id}")
         
-        # 检查LF coder必须是PRC
-        if lf_impl_id and lf_impl_id != "lf_coder_prc_v1":
-            raise ValueError(f"paper_faithfulness requires lf_coder_prc_v1, got {lf_impl_id}")
+        # 检查 LF coder 必须是 low_freq_template_codec_v2
+        if lf_impl_id and lf_impl_id != "low_freq_template_codec_v2":
+            raise ValueError(f"paper_faithfulness requires low_freq_template_codec_v2, got {lf_impl_id}")
     
     if use_latent_per_step:
         embed_trace: Dict[str, Any] = _build_latent_step_embed_trace(cfg, injection_evidence)
@@ -683,10 +683,7 @@ def _apply_content_embedding_pipeline(
     lf_params = _build_lf_image_embed_params(cfg)
     lf_impl_binding: Dict[str, Any] = {
         "impl_selected": getattr(getattr(impl_set, "lf_coder", None), "impl_id", None),
-        "adapter_path": "image_dct_fallback",
-        "fallback_used": True,
-        "evidence_level": "adapter_fallback",
-        "fallback_reason": "lf_impl_embed_interface_absent",
+        "evidence_level": "channel_absent",
     }
     lf_watermarked: Any = None
     lf_trace_summary: Dict[str, Any] = {
@@ -730,23 +727,17 @@ def _apply_content_embedding_pipeline(
             lf_watermarked = np.clip(np.round(embedded_np.reshape(image_array.shape)), 0, 255).astype(np.uint8)
             lf_trace_summary = {
                 "lf_status": "ok",
-                "lf_mode": "impl_set_lf_coder_adapter_v1",
+                "lf_mode": "impl_set_lf_coder_adapter_v2",
                 "lf_embedding_digest": lf_impl_result.get("embedding_digest"),
             }
             lf_impl_binding = {
                 "impl_selected": getattr(lf_coder, "impl_id", None),
-                "adapter_path": "lf_coder.embed_apply_image_proxy_v1",
-                "fallback_used": False,
                 "evidence_level": "primary",
-                "fallback_reason": None,
             }
         except Exception as exc:
             lf_impl_binding = {
                 "impl_selected": getattr(lf_coder, "impl_id", None),
-                "adapter_path": "image_dct_fallback",
-                "fallback_used": True,
-                "evidence_level": "adapter_fallback",
-                "fallback_reason": f"lf_impl_embed_apply_failed:{type(exc).__name__}",
+                "evidence_level": "channel_failed",
             }
             lf_watermarked = None
 
@@ -758,10 +749,7 @@ def _apply_content_embedding_pipeline(
         }
         lf_impl_binding = {
             "impl_selected": getattr(lf_coder, "impl_id", None) if lf_coder is not None else None,
-            "adapter_path": "ablation_switchboard",
-            "fallback_used": False,
             "evidence_level": "ablation_disabled",
-            "fallback_reason": None,
         }
     elif lf_watermarked is None:
         encode_low_freq_dct_fn = getattr(low_freq_coder_module, "encode_low_freq_dct")
@@ -798,10 +786,7 @@ def _apply_content_embedding_pipeline(
         hf_embedder = getattr(impl_set, "hf_embedder", None)
         hf_impl_binding: Dict[str, Any] = {
             "impl_selected": getattr(hf_embedder, "impl_id", None),
-            "adapter_path": "image_hf_fallback",
-            "fallback_used": True,
-            "evidence_level": "adapter_fallback",
-            "fallback_reason": "hf_impl_image_adapter_absent",
+            "evidence_level": "channel_absent",
         }
         embed_high_freq_pattern_fn = getattr(high_freq_embedder_module, "embed_high_freq_pattern")
         hf_watermarked, hf_trace_summary = embed_high_freq_pattern_fn(lf_watermarked, routing_summary, key_material, hf_params)
@@ -827,10 +812,7 @@ def _apply_content_embedding_pipeline(
         content_evidence_payload.pop("hf_score", None)
         content_evidence_payload["hf_impl_binding"] = {
             "impl_selected": getattr(getattr(impl_set, "hf_embedder", None), "impl_id", None),
-            "adapter_path": "ablation_switchboard" if not enable_hf else "image_hf_fallback",
-            "fallback_used": False if not enable_hf else True,
-            "evidence_level": "ablation_disabled" if not enable_hf else "adapter_fallback",
-            "fallback_reason": None if not enable_hf else "hf_impl_image_adapter_absent",
+            "evidence_level": "ablation_disabled" if not enable_hf else "channel_absent",
         }
         score_parts.pop("hf_status", None)
         score_parts.pop("hf_metrics", None)

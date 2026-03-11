@@ -216,15 +216,15 @@ def test_onefile_workflow_paper_full_profile_generates_real_sd3_config(tmp_path:
     profile_cfg_text = profile_cfg_path.read_text(encoding="utf-8")
     profile_cfg_obj = yaml.safe_load(profile_cfg_text)
 
-    assert profile_cfg_obj["impl"]["sync_module_id"] == "geometry_latent_sync_sd3_v2"
-    assert profile_cfg_obj["impl"]["geometry_extractor_id"] == "attention_anchor_map_relation_v1"
+    assert profile_cfg_obj["impl"]["sync_module_id"] == "geometry_latent_sync_sd3_v3"
+    assert profile_cfg_obj["impl"]["geometry_extractor_id"] == "attention_anchor_map_relation_v2"
     assert profile_cfg_obj["mask"]["semantic_model_path"] == str(local_model_path.resolve())
     assert profile_cfg_obj["embed"]["geometry"]["sync_strength"] == 0.2
     assert "device: cuda" in profile_cfg_text
     assert "enabled: true" in profile_cfg_text
     assert "alignment_check: true" in profile_cfg_text
-    assert "tail_truncation_mode: top_k_per_latent" in profile_cfg_text
-    assert "coding_mode: latent_space_sign_flipping" in profile_cfg_text
+    assert "tail_truncation_mode: keyed_template_correlation" in profile_cfg_text
+    assert "coding_mode: pseudogaussian_template_additive" in profile_cfg_text
 
     steps = module.build_workflow_steps(
         run_root=run_root,
@@ -305,7 +305,7 @@ def test_onefile_workflow_paper_full_profile_fails_fast_on_mismatched_impl(tmp_p
     cfg_obj = {
         "impl": {
             "sync_module_id": "geometry_latent_sync_sd3_v1",
-            "geometry_extractor_id": "geometry_align_invariance_sd3_v1",
+            "geometry_extractor_id": "attention_anchor_map_relation_v2",
         }
     }
     cfg_path = tmp_path / "bad_impl_config.yaml"
@@ -333,8 +333,8 @@ def test_onefile_workflow_paper_full_profile_keeps_unresolved_semantic_model_pat
     run_root = tmp_path / "paper_full_missing_model"
     cfg_obj = {
         "impl": {
-            "sync_module_id": "geometry_latent_sync_sd3_v2",
-            "geometry_extractor_id": "attention_anchor_map_relation_v1",
+            "sync_module_id": "geometry_latent_sync_sd3_v3",
+            "geometry_extractor_id": "attention_anchor_map_relation_v2",
         },
         "mask": {
             "semantic_model_path": "/content/models/inspyrenet/inspyrenet_plus_ultra.pth",

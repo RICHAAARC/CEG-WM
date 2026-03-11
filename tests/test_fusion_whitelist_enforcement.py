@@ -18,27 +18,17 @@ from main.registries.fusion_registry import (
 )
 
 
-def test_fusion_baseline_whitelist_present() -> None:
-    """
-    验证：fusion_baseline_identity_v1 在白名单中。
-    """
-    allowed_ids = list_fusion_impl_ids()
-
-    assert "fusion_baseline_identity_v1" in allowed_ids, \
-        "fusion_baseline_identity_v1 must be whitelisted"
-
-
 def test_fusion_neyman_pearson_whitelist_present() -> None:
     """
-    验证：fusion_neyman_pearson_v1 在白名单中。
+    验证：fusion_neyman_pearson_v2 在白名单中。
     """
     allowed_ids = list_fusion_impl_ids()
 
-    assert "fusion_neyman_pearson_v1" in allowed_ids, \
-        "fusion_neyman_pearson_v1 must be whitelisted"
+    assert "fusion_neyman_pearson_v2" in allowed_ids, \
+        "fusion_neyman_pearson_v2 must be whitelisted"
 
 
-def test_fusion_impl_ids_resolvable(np_fusion_impl_id: str = "fusion_neyman_pearson_v1") -> None:
+def test_fusion_impl_ids_resolvable(np_fusion_impl_id: str = "fusion_neyman_pearson_v2") -> None:
     """
     验证：白名单中的 impl_id 可通过 resolve_fusion_rule 正确解析。
     """
@@ -66,15 +56,13 @@ def test_fusion_rule_only_whitelisted_ids() -> None:
     """
     ids = list_fusion_impl_ids()
 
-    # (1) 应至少有基线和真实实现
-    assert len(ids) >= 2, \
-        "must have at least 2 fusion rule implementations"
+    # (1) 应该至少有正式实现
+    assert len(ids) >= 1, \
+        "must have at least 1 fusion rule implementation"
 
-    # (2) 应包含 baseline 和 NP 实现
-    assert "fusion_baseline_identity_v1" in ids, \
-        "list must include fusion_baseline_identity_v1"
-    assert "fusion_neyman_pearson_v1" in ids, \
-        "list must include fusion_neyman_pearson_v1"
+    # (2) 应包含 NP 正式实现
+    assert "fusion_neyman_pearson_v2" in ids, \
+        "list must include fusion_neyman_pearson_v2"
 
     # (3) 验证列表中每个 id 都可解析
     for impl_id in ids:

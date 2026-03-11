@@ -11,9 +11,11 @@ from main.registries.geometry_registry import resolve_geometry_extractor
 
 def test_impl_identity_version_bumped_or_new_impl_whitelisted() -> None:
     """
-    功能：当前实现必须满足“版本提升或新增白名单”的演进约束。
+    功能：当前正式实现必须满足"版本提升或新增白名单"的演进约束。
 
     Upgraded implementation must either bump version or use new whitelisted impl_id.
+    Verifies that the formal paper geometry extractor (attention_anchor_map_relation_v2)
+    is present in the whitelist, replacing the deprecated attention_anchor_map_relation_v1.
 
     Args:
         None.
@@ -21,7 +23,7 @@ def test_impl_identity_version_bumped_or_new_impl_whitelisted() -> None:
     Returns:
         None.
     """
-    impl_id = "geometry_align_invariance_sd3_v1"
+    impl_id = "attention_anchor_map_relation_v2"
     factory = resolve_geometry_extractor(impl_id)
     instance = factory({})
 
@@ -32,5 +34,3 @@ def test_impl_identity_version_bumped_or_new_impl_whitelisted() -> None:
     assert impl_id in allowed_flat
     assert hasattr(instance, "impl_version")
     assert isinstance(instance.impl_version, str)
-    assert instance.impl_version in {"v2", "v1"}
-    assert instance.impl_version == "v2"

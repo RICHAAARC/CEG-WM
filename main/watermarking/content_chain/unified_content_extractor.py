@@ -24,6 +24,9 @@ from .interfaces import ContentEvidence
 UNIFIED_CONTENT_EXTRACTOR_ID = "unified_content_extractor_v1"
 UNIFIED_CONTENT_EXTRACTOR_VERSION = "v1"
 
+UNIFIED_CONTENT_EXTRACTOR_V2_ID = "unified_content_extractor_v2"
+UNIFIED_CONTENT_EXTRACTOR_V2_VERSION = "v2"
+
 
 class UnifiedContentExtractor:
     """
@@ -130,4 +133,26 @@ class UnifiedContentExtractor:
         else:
             # Embed 模式：调用 SemanticMaskProvider
             return self._mask_provider.extract(cfg, inputs=inputs, cfg_digest=cfg_digest)
+
+
+class UnifiedContentExtractorV2(UnifiedContentExtractor):
+    """
+    功能：统一内容链提取器 v2，与 v1 逻辑相同但绑定 v2 impl_id。
+
+    Upgraded content extractor binding to unified_content_extractor_v2 impl_id.
+    All logic is identical to UnifiedContentExtractor; only the impl identity differs.
+
+    Args:
+        impl_id: Implementation identifier string (must be unified_content_extractor_v2).
+        impl_version: Implementation version string.
+        impl_digest: Implementation digest string.
+
+    Returns:
+        None.
+
+    Raises:
+        ValueError: If constructor arguments are invalid.
+    """
+
+    pass
 

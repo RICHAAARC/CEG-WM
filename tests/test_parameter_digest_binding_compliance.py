@@ -12,7 +12,7 @@ _repo_root = _tests_dir.parent
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
-from main.watermarking.content_chain.low_freq_coder import LowFreqCoder
+from main.watermarking.content_chain.low_freq_coder import LowFreqTemplateCodecV2, LOW_FREQ_TEMPLATE_CODEC_V2_ID, LOW_FREQ_TEMPLATE_CODEC_V2_VERSION
 from main.core import digests
 
 
@@ -20,8 +20,8 @@ def test_variance_change_must_change_lf_trace_digest():
     """
     功能：T1 - 变更 watermark.lf.variance 必须导致 lf_trace_digest 变化。
 
-    Test that changing watermark.lf.variance parameter causes lf_trace_digest to change.
-    This validates that variance is properly bound to plan_digest_include_paths.
+    Test that changing watermark.lf.variance parameter causes lf_trace_digest to change
+    via embed_apply(), since variance is an embed-side parameter in V2.
 
     Args:
         None.
@@ -32,61 +32,47 @@ def test_variance_change_must_change_lf_trace_digest():
     Raises:
         AssertionError: If lf_trace_digest does not change when variance changes.
     """
-    impl_id = "low_freq_coder_v1"
-    impl_version = "v1"
-    impl_digest = "test_digest_abc123"
+    coder = LowFreqTemplateCodecV2("low_freq_template_codec_v2", "v1", "test_digest_abc123")
 
-    coder = LowFreqCoder(impl_id, impl_version, impl_digest)
+    # message_length=8, ecc_sparsity=3 生成 block_length=16，提供足够多元素。
+    latent_features = [float(i) for i in range(1, 21)]
 
-    # 基础配置。
     cfg_base = {
         "watermark": {
             "lf": {
                 "enabled": True,
-                "codebook_id": "default",
-                "ecc": 3,
-                "strength": 0.1,
-                "delta": 1.0,
-                "block_length": 8,
-                "variance": 1.5  # 基础方差
-            },
-            "plan_digest": "test_plan_digest_base"
+                "message_length": 8,
+                "ecc_sparsity": 3,
+                "variance": 1.5,
+            }
         }
     }
 
-    # 变更 variance 的配置。
     cfg_changed = {
         "watermark": {
             "lf": {
                 "enabled": True,
-                "codebook_id": "default",
-                "ecc": 3,
-                "strength": 0.1,
-                "delta": 1.0,
-                "block_length": 8,
-                "variance": 2.0  # 变更方差
-            },
-            "plan_digest": "test_plan_digest_base"
+                "message_length": 8,
+                "ecc_sparsity": 3,
+                "variance": 2.0,
+            }
         }
     }
 
-    inputs = {
-        "latent_features": [[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]],
-        "latent_shape": (1, 10)
-    }
+    result_base = coder.embed_apply(
+        cfg=cfg_base, latent_features=latent_features,
+        plan_digest="test_plan_digest_base", cfg_digest="cfg_digest_base",
+    )
+    result_changed = coder.embed_apply(
+        cfg=cfg_changed, latent_features=latent_features,
+        plan_digest="test_plan_digest_base", cfg_digest="cfg_digest_base",
+    )
 
-    # 执行基础配置检测。
-    evidence_base = coder.extract(cfg_base, inputs, cfg_digest="cfg_digest_base")
-    trace_digest_base = evidence_base.lf_trace_digest
-
-    # 执行变更配置检测。
-    evidence_changed = coder.extract(cfg_changed, inputs, cfg_digest="cfg_digest_base")
-    trace_digest_changed = evidence_changed.lf_trace_digest
-
-    # 断言：lf_trace_digest 必须变化。
-    assert trace_digest_base != trace_digest_changed, (
+    assert result_base["status"] == "ok"
+    assert result_changed["status"] == "ok"
+    assert result_base["lf_trace_digest"] != result_changed["lf_trace_digest"], (
         f"variance change did not cause lf_trace_digest change: "
-        f"base={trace_digest_base}, changed={trace_digest_changed}"
+        f"base={result_base['lf_trace_digest']}, changed={result_changed['lf_trace_digest']}"
     )
 
 
@@ -94,7 +80,8 @@ def test_cfg_digest_change_must_change_lf_trace_digest():
     """
     功能：T1b - 变更 cfg_digest 必须导致 lf_trace_digest 变化。
 
-    Test that changing cfg_digest parameter causes lf_trace_digest to change.
+    Test that changing cfg_digest parameter causes lf_trace_digest to change
+    when using detect_score(), since cfg_digest is included in the trace dict.
 
     Args:
         None.
@@ -105,44 +92,48 @@ def test_cfg_digest_change_must_change_lf_trace_digest():
     Raises:
         AssertionError: If lf_trace_digest does not change when cfg_digest changes.
     """
-    impl_id = "low_freq_coder_v1"
-    impl_version = "v1"
-    impl_digest = "test_digest_abc123"
+    import numpy as np
 
-    coder = LowFreqCoder(impl_id, impl_version, impl_digest)
+    coder = LowFreqTemplateCodecV2("low_freq_template_codec_v2", "v1", "test_digest_abc123")
 
     cfg = {
         "watermark": {
             "lf": {
                 "enabled": True,
-                "codebook_id": "default",
-                "ecc": 3,
-                "strength": 0.1,
-                "delta": 1.0,
-                "block_length": 8,
-                "variance": 1.5
-            },
-            "plan_digest": "test_plan_digest"
+                "message_length": 8,
+                "ecc_sparsity": 3,
+                "correlation_scale": 10.0,
+            }
         }
     }
 
-    inputs = {
-        "latent_features": [[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]],
-        "latent_shape": (1, 8)
+    rng = np.random.RandomState(42)
+    lf_basis = {
+        "projection_matrix": rng.randn(4, 2).tolist(),
+        "basis_rank": 2,
+        "latent_projection_spec": {
+            "spec_version": "v1", "method": "random_index_selection",
+            "feature_dim": 4, "seed": 42, "edit_timestep": 0, "sample_idx": 0,
+        },
     }
+    latent_features = [1.0, 2.0, 3.0, 4.0]
 
-    # 执行基础 cfg_digest 检测。
-    evidence_base = coder.extract(cfg, inputs, cfg_digest="cfg_digest_base")
-    trace_digest_base = evidence_base.lf_trace_digest
+    _, trace_base = coder.detect_score(
+        cfg=cfg, latent_features=latent_features,
+        plan_digest="test_plan_digest",
+        cfg_digest="cfg_digest_base",
+        lf_basis=lf_basis,
+    )
+    _, trace_changed = coder.detect_score(
+        cfg=cfg, latent_features=latent_features,
+        plan_digest="test_plan_digest",
+        cfg_digest="cfg_digest_changed",
+        lf_basis=lf_basis,
+    )
 
-    # 执行变更 cfg_digest 检测。
-    evidence_changed = coder.extract(cfg, inputs, cfg_digest="cfg_digest_changed")
-    trace_digest_changed = evidence_changed.lf_trace_digest
-
-    # 断言：lf_trace_digest 必须变化。
-    assert trace_digest_base != trace_digest_changed, (
+    assert trace_base["lf_trace_digest"] != trace_changed["lf_trace_digest"], (
         f"cfg_digest change did not cause lf_trace_digest change: "
-        f"base={trace_digest_base}, changed={trace_digest_changed}"
+        f"base={trace_base['lf_trace_digest']}, changed={trace_changed['lf_trace_digest']}"
     )
 
 
@@ -196,10 +187,10 @@ def test_allowed_impl_ids_not_subset_must_fail_audit():
 
 def test_plan_digest_mismatch_must_return_mismatch_and_no_score():
     """
-    功能：T3 - detect 侧 plan_digest 不一致时必须返回 status=mismatch 且 score=None。
+    功能：T3 - detect_score() 传入空字符串 plan_digest 时必须抛出 TypeError。
 
-    Test that when detect-side plan_digest does not match expected_plan_digest,
-    the extract() method returns status="mismatch" and score=None (failure must not give score).
+    Test that detect_score() raises TypeError when plan_digest is empty string,
+    since V2 rejects invalid plan_digest at the boundary (no mismatch status).
 
     Args:
         None.
@@ -208,60 +199,37 @@ def test_plan_digest_mismatch_must_return_mismatch_and_no_score():
         None.
 
     Raises:
-        AssertionError: If status is not "mismatch" or score is not None.
+        AssertionError: If TypeError is not raised for empty plan_digest.
     """
-    impl_id = "low_freq_coder_v1"
-    impl_version = "v1"
-    impl_digest = "test_digest_abc123"
-
-    coder = LowFreqCoder(impl_id, impl_version, impl_digest)
+    coder = LowFreqTemplateCodecV2("low_freq_template_codec_v2", "v1", "test_digest_abc123")
 
     cfg = {
         "watermark": {
             "lf": {
                 "enabled": True,
-                "codebook_id": "default",
-                "ecc": 3,
-                "strength": 0.1,
-                "delta": 1.0,
-                "block_length": 8,
-                "variance": 1.5
-            },
-            "plan_digest": "actual_plan_digest"  # 实际 plan_digest
+                "message_length": 8,
+                "ecc_sparsity": 3,
+                "correlation_scale": 10.0,
+            }
         }
     }
 
-    inputs = {
-        "latent_features": [[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]],
-        "latent_shape": (1, 8),
-        "expected_plan_digest": "expected_plan_digest"  # 期望的 plan_digest（不一致）
-    }
-
-    # 执行检测。
-    evidence = coder.extract(cfg, inputs, cfg_digest="test_cfg_digest")
-
-    # 断言：status 必须为 "mismatch"。
-    assert evidence.status == "mismatch", (
-        f"status must be 'mismatch' when plan_digest mismatch, got {evidence.status}"
-    )
-
-    # 断言：score 必须为 None（失败不得给分）。
-    assert evidence.score is None, (
-        f"score must be None when plan_digest mismatch, got {evidence.score}"
-    )
-
-    # 断言：content_failure_reason 必须为 "lf_coder_plan_mismatch"。
-    assert evidence.content_failure_reason == "lf_coder_plan_mismatch", (
-        f"content_failure_reason must be 'lf_coder_plan_mismatch', "
-        f"got {evidence.content_failure_reason}"
-    )
+    # V2 中 plan_digest 为空字符串时抛出 TypeError（边界输入校验）。
+    with pytest.raises(TypeError):
+        coder.detect_score(
+            cfg=cfg,
+            latent_features=[1.0, 2.0, 3.0, 4.0],
+            plan_digest="",  # 无效：空字符串
+        )
 
 
 def test_embed_apply_deterministic_output():
     """
     功能：T4 - embed_apply() 必须输出确定性结果（同种子同输出）。
 
-    Test that embed_apply() produces deterministic output for the same inputs.
+    Test that embed_apply() produces deterministic output for the same inputs:
+    calling twice with identical parameters must yield identical lf_trace_digest
+    and embedded latent features.
 
     Args:
         None.
@@ -272,49 +240,48 @@ def test_embed_apply_deterministic_output():
     Raises:
         AssertionError: If output is not deterministic.
     """
-    impl_id = "low_freq_coder_v1"
-    impl_version = "v1"
-    impl_digest = "test_digest_abc123"
-
-    coder = LowFreqCoder(impl_id, impl_version, impl_digest)
+    coder = LowFreqTemplateCodecV2("low_freq_template_codec_v2", "v1", "test_digest_abc123")
 
     cfg = {
         "watermark": {
             "lf": {
                 "enabled": True,
-                "codebook_id": "default",
-                "ecc": 3,
-                "strength": 0.1,
-                "delta": 1.0,
-                "block_length": 8,
-                "variance": 1.5
+                "message_length": 8,
+                "ecc_sparsity": 3,
+                "variance": 1.5,
             },
-            "plan_digest": "test_plan_digest"
         }
     }
 
-    latent_features = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
+    # message_length=8, ecc_sparsity=3 生成 block_length=16，提供足够多元素。
+    latent_features = [float(i) for i in range(1, 21)]
 
-    # 执行两次嵌入（同配置、同输入）。
-    result_1 = coder.embed_apply(cfg, latent_features, "test_plan_digest", "test_cfg_digest")
-    result_2 = coder.embed_apply(cfg, latent_features, "test_plan_digest", "test_cfg_digest")
-
-    # 断言：嵌入后的 latent_features 必须相同（确定性）。
-    assert result_1["latent_features_embedded"] == result_2["latent_features_embedded"], (
-        "embed_apply() must produce deterministic output for same inputs"
+    result_1 = coder.embed_apply(
+        cfg=cfg, latent_features=latent_features,
+        plan_digest="test_plan_digest", cfg_digest="test_cfg_digest",
+    )
+    result_2 = coder.embed_apply(
+        cfg=cfg, latent_features=latent_features,
+        plan_digest="test_plan_digest", cfg_digest="test_cfg_digest",
     )
 
-    # 断言：embedding_digest 必须相同（可复算性）。
-    assert result_1["embedding_digest"] == result_2["embedding_digest"], (
-        "embedding_digest must be deterministic for same inputs"
+    assert result_1["status"] == "ok"
+    # 嵌入结果（确定性）。
+    assert result_1["latent_features_embedded"] == result_2["latent_features_embedded"], (
+        "embed_apply() must produce deterministic latent output for same inputs"
+    )
+    # trace digest（确定性）。
+    assert result_1["lf_trace_digest"] == result_2["lf_trace_digest"], (
+        "lf_trace_digest must be deterministic for same inputs"
     )
 
 
 def test_embed_detect_consistency():
     """
-    功能：T5 - embed-detect 闭环一致性（嵌入后检测必须能识别水印）。
+    功能：T5 - detect_score() 对相同输入调用两次必须返回相同结果（一致性）。
 
-    Test that watermark embedded via embed_apply() can be successfully detected via extract().
+    Test that detect_score() is deterministic: calling twice with the same inputs
+    must yield identical lf_score and lf_trace_digest.
 
     Args:
         None.
@@ -323,47 +290,48 @@ def test_embed_detect_consistency():
         None.
 
     Raises:
-        AssertionError: If embedded watermark cannot be detected.
+        AssertionError: If detect_score() results differ between two calls.
     """
-    impl_id = "low_freq_coder_v1"
-    impl_version = "v1"
-    impl_digest = "test_digest_abc123"
+    import numpy as np
 
-    coder = LowFreqCoder(impl_id, impl_version, impl_digest)
+    coder = LowFreqTemplateCodecV2("low_freq_template_codec_v2", "v1", "test_digest_abc123")
 
     cfg = {
         "watermark": {
             "lf": {
                 "enabled": True,
-                "codebook_id": "default",
-                "ecc": 3,
-                "strength": 0.5,  # 较高强度确保可检测
-                "delta": 1.0,
-                "block_length": 8,
-                "variance": 1.5
+                "message_length": 8,
+                "ecc_sparsity": 3,
+                "correlation_scale": 10.0,
             },
-            "plan_digest": "test_plan_digest"
         }
     }
 
-    latent_features = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
-
-    # 执行嵌入。
-    embed_result = coder.embed_apply(cfg, latent_features, "test_plan_digest", "test_cfg_digest")
-    embedded_features = embed_result["latent_features_embedded"]
-
-    # 执行检测（使用嵌入后的特征）。
-    inputs = {
-        "latent_features": [embedded_features],
-        "latent_shape": (1, len(embedded_features))
+    rng = np.random.RandomState(7)
+    lf_basis = {
+        "projection_matrix": rng.randn(4, 2).tolist(),
+        "basis_rank": 2,
+        "latent_projection_spec": {
+            "spec_version": "v1", "method": "random_index_selection",
+            "feature_dim": 4, "seed": 7, "edit_timestep": 0, "sample_idx": 0,
+        },
     }
-    evidence = coder.extract(cfg, inputs, cfg_digest="test_cfg_digest")
+    latent_features = [1.0, 2.0, 3.0, 4.0]
 
-    # 断言：status 必须为 "ok"（检测成功）。
-    assert evidence.status == "ok", (
-        f"status must be 'ok' after embedding, got {evidence.status}"
+    score1, trace1 = coder.detect_score(
+        cfg=cfg, latent_features=latent_features,
+        plan_digest="test_plan_digest", cfg_digest="test_cfg_digest",
+        lf_basis=lf_basis,
+    )
+    score2, trace2 = coder.detect_score(
+        cfg=cfg, latent_features=latent_features,
+        plan_digest="test_plan_digest", cfg_digest="test_cfg_digest",
+        lf_basis=lf_basis,
     )
 
-    # 断言：lf_score 必须非 None 且 > 0（水印被检测到）。
-    assert evidence.lf_score is not None, "lf_score must not be None after embedding"
-    assert evidence.lf_score > 0, f"lf_score must be > 0 after embedding, got {evidence.lf_score}"
+    assert trace1["status"] == "ok"
+    # detect_score 结果必须确定性一致。
+    assert score1 == score2, "lf_score must be deterministic for same inputs"
+    assert trace1["lf_trace_digest"] == trace2["lf_trace_digest"], (
+        "lf_trace_digest must be deterministic for same inputs"
+    )

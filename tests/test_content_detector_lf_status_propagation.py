@@ -47,7 +47,7 @@ def test_content_detector_propagates_lf_absent_status() -> None:
     lf_evidence = ContentEvidence(
         status="absent",
         score=None,
-        audit={"impl_identity": "low_freq_coder_v1", "impl_version": "v1", "impl_digest": "test", "trace_digest": "test"},
+        audit={"impl_identity": "low_freq_template_codec_v2", "impl_version": "v1", "impl_digest": "test", "trace_digest": "test"},
         lf_score=None,
         content_failure_reason=None
     )
@@ -102,7 +102,7 @@ def test_content_detector_propagates_lf_mismatch_status() -> None:
     lf_evidence = ContentEvidence(
         status="mismatch",
         score=None,
-        audit={"impl_identity": "low_freq_coder_v1", "impl_version": "v1", "impl_digest": "test", "trace_digest": "test"},
+        audit={"impl_identity": "low_freq_template_codec_v2", "impl_version": "v1", "impl_digest": "test", "trace_digest": "test"},
         lf_score=None,
         content_failure_reason="lf_coder_plan_mismatch"
     )
@@ -159,7 +159,7 @@ def test_content_detector_propagates_lf_failed_status() -> None:
     lf_evidence = ContentEvidence(
         status="failed",
         score=None,
-        audit={"impl_identity": "low_freq_coder_v1", "impl_version": "v1", "impl_digest": "test", "trace_digest": "test"},
+        audit={"impl_identity": "low_freq_template_codec_v2", "impl_version": "v1", "impl_digest": "test", "trace_digest": "test"},
         lf_score=None,
         content_failure_reason="lf_coder_encoding_failed"
     )
@@ -216,7 +216,7 @@ def test_content_detector_success_with_lf_score() -> None:
     lf_evidence = ContentEvidence(
         status="ok",
         score=0.75,
-        audit={"impl_identity": "low_freq_coder_v1", "impl_version": "v1", "impl_digest": "test", "trace_digest": "test"},
+        audit={"impl_identity": "low_freq_template_codec_v2", "impl_version": "v1", "impl_digest": "test", "trace_digest": "test"},
         lf_score=0.75,
         content_failure_reason=None
     )

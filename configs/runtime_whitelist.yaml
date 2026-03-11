@@ -12,8 +12,9 @@
 # ------------------------------
 # 白名单版本：用于 records 记录与审计。
 # ------------------------------
-whitelist_version: "v1.1"    # 运行期白名单版本号：任意一次运行必须记录到 records 中，且不可由 CLI 任意指定。
+whitelist_version: "v2.0"    # 运行期白名单版本号：任意一次运行必须记录到 records 中，且不可由 CLI 任意指定。
                              # v1.0→v1.1：追加 detect_calibration_artifact_path override（P1-A，2026-03-10）。
+                             # v1.1→v2.0：论文正式路径收口（2026-03-11）；移除全部旧 v1 paper-impl；仅保留 v2/v3 正式实现族与测试支架基线。
 
 # ==============================================================
 # policy_path 允许集合
@@ -27,13 +28,18 @@ policy_path:
     # 基础单链策略。
     - "content_only"         # 仅内容链。
 
-    # 显式组合策略。
-    # 几何作为 gate 或可选证据。
-    - "content_with_geometry_gate"          # 内容为主，几何门控。
-    - "content_fallback_no_geometry"        # 几何失败或未启用时的回退。
-
     # 强拒绝/弃权策略：内容链失败即 abstain，用于严格审计、压低 FPR。
     - "content_failed_abstain"
+
+    # 论文级单一正式路径（v2.0 追加，append-only）
+    # 单侧几何门控，无 fallback/proxy/sidecar。
+    - "content_np_geo_rescue_v2"
+
+    # ---- 已废弃（deprecated v2.0，formal_run_forbidden）----
+    # 以下策略路径在 v2.0 论文正式路径收口后禁止用于正式 run；
+    # 保留仅用于历史审计兼容，不可删除（append-only）。
+    # - "content_with_geometry_gate"   # 旧组合策略，已被 content_np_geo_rescue_v2 取代
+    # - "content_fallback_no_geometry" # 旧几何失败回退策略，已废弃
 
 # ==============================================================
 # CLI/运行期覆写允许集合
@@ -179,17 +185,6 @@ override:
       allowed_values: [false]
       source: "cli"
       description: "Ablation：禁用几何 anchor（传递 =false 强制禁用）"
-    - arg_name: "ablation_enable_attention_proxy"
-      field_path: "ablation.enable_attention_proxy"
-      override_mode: "set"
-      source: "cli"
-      description: "Ablation：覆写 attention proxy 开关"
-    - arg_name: "ablation_disable_attention_proxy"
-      field_path: "ablation.enable_attention_proxy"
-      override_mode: "set"
-      allowed_values: [false]
-      source: "cli"
-      description: "Ablation：禁用 attention proxy（传递 =false 强制禁用）"
     - arg_name: "ablation_enable_image_sidecar"
       field_path: "ablation.enable_image_sidecar"
       override_mode: "set"
@@ -275,8 +270,6 @@ override:
       - "ablation_disable_sync"
       - "ablation_enable_anchor"
       - "ablation_disable_anchor"
-      - "ablation_enable_attention_proxy"
-      - "ablation_disable_attention_proxy"
       - "ablation_enable_image_sidecar"
       - "ablation_disable_image_sidecar"
       # Experiment Matrix 实验网格枚举
@@ -342,9 +335,10 @@ enums:
   # saliency_source：显著性来源策略枚举（append-only）。
   saliency_source:
     allowed:
-      - "proxy_v1"
       - "model_v2"
       - "auto_fallback"
+      # ---- 已废弃（deprecated v2.0）----
+      # - "proxy_v1"  # 代理显著性源，论文正式路径禁止使用
 
   # subspace_method：子空间规划相关枚举，表示“如何选子空间”。
   subspace_method:
@@ -368,168 +362,75 @@ impl_id:
 
   # 运行期 gate 判定使用扁平化集合，语义分组仅用于审计展示。
   allowed_flat:
-    - "content_baseline_identity_v1"
+    # 语义掩码提供器（基础支撑，不依赖旧 paper-impl）
     - "semantic_mask_provider_v1"
     - "semantic_mask_provider_saliency_source_policy_v1"
-    - "low_freq_coder_v1"
-    - "high_freq_coder_v1"
-    - "unified_latent_modifier_v1"
-    - "content_detector_v1"  # 统一内容检测器
-    - "unified_content_extractor_v1"  # Embed + Detect 双模式
-    - "geometry_baseline_identity_v1"
-    - "geometry_attention_anchor_sd3_v1"
-    - "geometry_latent_sync_sd3_v1"
-    - "geometry_align_invariance_sd3_v1"
-    - "fusion_baseline_identity_v1"
-    - "subspace_baseline_full_v1"
-    - "subspace_planner_v1"
-    - "subspace_planner_mask_conditioned_v1"
-    - "geometry_sync_baseline_v1"
     # Paper Faithfulness 模块 impl_id（append-only v1.0）
     - "sd3_pipeline_inspector_v1"
     - "sd3_diffusion_tracer_v1"
     - "injection_site_binder_v1"
     - "paper_alignment_evaluator_v1"
-    - "hf_embedder_t2smark_v1"
-    - "lf_coder_prc_v1"
-    - "attention_anchor_map_relation_v1"
-    - "geometry_latent_sync_sd3_v2"
+    # v2/v3 正式实现（唯一合规正式路径）
+    - "high_freq_template_codec_v2"
+    - "low_freq_template_codec_v2"
+    - "unified_content_extractor_v2"
+    - "subspace_planner_v2"
+    - "attention_anchor_map_relation_v2"
+    - "geometry_latent_sync_sd3_v3"
+    - "fusion_neyman_pearson_v2"
+    # ---- 已废弃 impl_id（deprecated v2.0，formal_run_forbidden，append-only 审计记录）----
+    # - "content_baseline_identity_v1"         # 旧内容基线，已废弃
+    # - "low_freq_coder_v1"                    # 旧 LF 基线，被 low_freq_template_codec_v2 取代
+    # - "high_freq_coder_v1"                   # 旧 HF 基线，被 high_freq_template_codec_v2 取代
+    # - "unified_latent_modifier_v1"           # 旧 latent 修改器，已废弃
+    # - "content_detector_v1"                  # 旧内容检测器，被 unified_content_extractor_v2 取代
+    # - "unified_content_extractor_v1"         # 旧统一提取器，被 v2 取代
+    # - "geometry_attention_anchor_sd3_v1"     # 旧几何锚点，被 attention_anchor_map_relation_v2 取代
+    # - "subspace_planner_v1"                  # 旧子空间规划器，被 v2 取代
+    # - "subspace_planner_mask_conditioned_v1" # 旧 mask-conditioned 规划器，被 v2 取代
+    # - "high_freq_template_codec_v1"           # 旧 HF embedder，被 v2 取代
+    # - "low_freq_template_codec_v1"            # 旧 LF coder，被 v2 取代
+    # - "attention_anchor_map_relation_v1"     # 旧关系提取器，被 v2 取代
+    # - "geometry_latent_sync_sd3_v2"          # 旧 sync v2，被 v3 取代
+    # - "fusion_neyman_pearson_v1"             # 旧 NP 融合，被 v2 取代
+    # - "geometry_align_invariance_sd3_v1"     # 旧几何对齐，已完全退出
+    # - "geometry_latent_sync_sd3_v1"          # 旧同步 v1，已完全退出
+    # - "subspace_baseline_full_v1"            # 旧 subspace 基线，已完全退出
 
   allowed_by_domain:
 
     content_extractor:
-      # 内容证据链基线实现：
-      # - 不注入任何真实水印信号。
-      # - 可返回空证据或固定格式的基线统计量。
-      # - 仅用于验证框架闭环与审计链路。
-      - "content_baseline_identity_v1"
-      
-      # 语义掩码提供器：
-      # - 从输入图像或 latent 中提取语义掩码。
-      # - 支持 enable_mask 配置参数控制启用/禁用。
-      # - 生成可复算的掩码摘要与分辨率绑定。
-      # - 用于 content_evidence 中的 mask_digest、mask_stats 字段。
+      # 语义掩码提供器（基础支撑）
       - "semantic_mask_provider_v1"
       - "semantic_mask_provider_saliency_source_policy_v1"
 
-      # 低频水印编码器：
-      # - 在 LF（低频）子空间施加隐蔽编码，作为主通道。
-      # - 支持 enable_lf 配置参数控制启用/禁用。
-      # - 生成可复算的 lf_trace_digest，绑定计划与编码参数。
-      # - 输出 lf_score，方向性固定（高值表示强证据）。
-      # - 严格区分 absent/failed/mismatch 语义。
-      - "low_freq_coder_v1"
-
-      # 高频水印鲁棒化器：
-      # - 在 HF（高频）子空间施加鲁棒约束与尾部截断。
-      # - 支持 enable_hf 配置参数控制启用/禁用。
-      # - 与 LF 通道正交，HF 失败不影响 LF 分数。
-      # - 生成可复算的 hf_trace_digest，绑定计划与约束参数。
-      # - 输出 hf_score，方向性固定（高值表示强证据）。
-      - "high_freq_coder_v1"
-
-      # 统一 latent 修改器：
-      # - 在 SD3 推理循环中协调 LF/HF 子空间修改。
-      # - 通过 callback_on_step_end hook 与 diffusers 集成。
-      # - 生成 step 级证据用于最终摘要计算。
-      # - 仅改 latent 张量，不写原始张量到 records。
-      - "unified_latent_modifier_v1"
-
-      # 内容检测器：
-      # - 统一从 LF/HF 子空间检测水印，输出融合得分。
-      # - 严格校验 plan_digest 一致性，不一致时返回 mismatch。
-      # - 输出 content_score、score_parts（lf_score/hf_score）。
-      # - 失败时 score=None，content_failure_reason 单一主因上报。
-      - "content_detector_v1"
-
-      # 统一内容提取器：
-      # - 根据 detect.content.enabled 自动切换 Embed/Detect 模式。
-      # - Embed 模式：调用 SemanticMaskProvider 提取 mask_digest。
-      # - Detect 模式：调用 ContentDetector 执行 LF/HF 检测。
-      # - 保持 embed/detect 使用同一 impl_id 的简洁性。
-      - "unified_content_extractor_v1"
+      # v2/v3 正式实现（唯一合规路径）
+      # - unified_content_extractor_v2：统一 Embed/Detect 双模式提取器。
+      # - high_freq_template_codec_v2：HF 高频模板匹配嵌入，keyed Rademacher + 相关检测。
+      # - low_freq_template_codec_v2：LF 低频伪高斯模板加性注入 + matched_correlation 检测。
+      - "unified_content_extractor_v2"
+      - "high_freq_template_codec_v2"
+      - "low_freq_template_codec_v2"
 
     geometry_extractor:
-      # 几何证据链基线实现：
-      # - 不生成几何指纹。
-      # - 可返回 canonical 状态或空几何证据。
-      # - 用于测试几何链路与 fallback / abstain 语义。
-      - "geometry_baseline_identity_v1"
-
-      # 几何注意力锚点实现：
-      # - 仅支持 SD3 transformer token 关系摘要。
-      # - 输出 anchor_digest、stability_metrics、resolution_binding。
-      # - 不写原始 attention / token 高维数据到 records。
-      - "geometry_attention_anchor_sd3_v1"
-
-      # 几何 latent 同步模板实现：
-      # - 基于 latent 频域摘要生成 sync_digest 与同步质量指标。
-      # - 输出量化同步初值，不写原始 latent 或可逆高维信息。
-      - "geometry_latent_sync_sd3_v1"
-
-      # 几何对齐与不变性评分实现：
-      # - 聚合 anchor + sync 证据，输出 align_trace_digest 与 geo_score。
-      # - 不写原始坐标、不写完整匹配点列表、不写可逆高维参数。
-      - "geometry_align_invariance_sd3_v1"
-
-      # 注意力锚点映射关系实现：
-      # - 提取 attention map 关系摘要。
-      # - 输出锚点关系 digest 与稳定性指标。
-      - "attention_anchor_map_relation_v1"
-
-      # 几何 latent 同步模板 v2 实现：
-      # - 基于 latent 频域摘要生成 sync_digest 与同步质量指标。
-      # - 增强版同步质量评估与 trajectory 绑定。
-      - "geometry_latent_sync_sd3_v2"
+      # v2 正式实现（唯一合规路径）
+      # - attention_anchor_map_relation_v2：无 proxy，runtime self-attention 直接锚点，硬失败语义。
+      - "attention_anchor_map_relation_v2"
 
     fusion_rule:
-      # 融合规则基线实现：
-      # - 采用恒等映射或固定规则。
-      # - 不引入统计权重或真实阈值比较。
-      # - 用于验证 policy_path 与 decision 流程。
-      - "fusion_baseline_identity_v1"
-
-      # 融合规则真实实现（Neyman-Pearson 主控 + 几何辅助）：
-      # - NP 阈值主链控制，从 thresholds_digest 只读选择阈值（禁止重估）。
-      # - 几何证据作为辅助：仅在 content 分数边界附近（rescue band）通过几何门控提供增益。
-      # - 唯一决策出口，返回 FusionDecision with is_watermarked ∈ {bool, None}。
-      # - 计算 fusion_rule_digest，记录 rescue_band_version、geo_gate_applied 等审计信息。
-      # - 失败语义：无融合输入或失败时返回 decision_status ∈ {"abstain", "error"}。
-      - "fusion_neyman_pearson_v1"
+      # v2 正式实现（唯一合规路径）
+      # - fusion_neyman_pearson_v2：NP 主控，geo 辅助，无 proxy 门控，单一决策出口。
+      - "fusion_neyman_pearson_v2"
 
     subspace_planner:
-      # 子空间规划基线实现：
-      # - 不进行真实子空间选择。
-      # - 可返回 full-space / None / 预定义空 frame。
-      # - 用于固化 subspace_frame 的审计语义。
-      - "subspace_baseline_full_v1"
-      
-      # 子空间规划器真实实现：
-      # - 执行低维子空间估计并输出摘要化 subspace_spec。
-      # - 计算可复算的 plan_digest/basis_digest，绑定 mask_digest、cfg_digest 与 impl_identity。
-      # - 规划器禁用或输入缺失时返回 absent，估计失败时返回 failed。
-      # - 支持浅层注入分段（edit_timestep）与掩码子空间定义（mask_shape/w_channel）。
-      # - 支持频域（complex FFT）与时域（spatial）注入方案。
-      # - 支持可选的通道解耦回填策略（enable_channel_refill）。
-      # - 输出完整的 injection_config 与 detection_domain_spec，供检测侧复现。
-      - "subspace_planner_v1"
-      - "subspace_planner_mask_conditioned_v1"
+      # v2 正式实现（唯一合规路径）
+      # - subspace_planner_v2：带语义域注释的子空间规划器，detection_domain_spec 明确 higher_is_watermarked。
+      - "subspace_planner_v2"
 
     sync_module:
-      # 同步模块基线实现：
-      # - 不执行真实同步。
-      # - 可显式返回 success / unavailable 的固定状态。
-      # - 用于测试 geometry gate 与 failure 语义。
-      - "geometry_sync_baseline_v1"
-      # 同步模块 SD3 latent 同步实现：
-      # - 返回结构化同步状态与失败原因。
-      # - 不执行真实同步或写盘操作。
-      - "geometry_latent_sync_sd3_v1"
-
-      # 同步模块 SD3 latent 同步 v2 实现：
-      # - 增强版同步质量评估与 trajectory 绑定。
-      # - 返回结构化同步状态与失败原因。
-      - "geometry_latent_sync_sd3_v2"
+      # v3 正式实现（唯一合规路径）
+      # - geometry_latent_sync_sd3_v3：geo_score = template_match_score，无 quality_score 旁路。
+      - "geometry_latent_sync_sd3_v3"
 
   # 是否允许出现未在 allowed_by_domain 中声明的 domain。
   # v1 阶段为 false。
@@ -563,7 +464,7 @@ consistency_rules:
   policy_path_semantics_version_source: "configs/policy_path_semantics.yaml:policy_path_semantics_version"
   policy_path_semantics_digest_source: "configs/policy_path_semantics.yaml (canonical SHA256)"
   notes: "这四个字段必须由 freeze_gate 在写盘前一并校验，缺失任何字段均为 fail-fast。"
-  paper_acceptance_require_real_t2smark_baseline: true
+  paper_acceptance_require_template_codec_baseline: true
 
   # ---- Override 层的枚举校验（新增） ----
   override_source_validation:

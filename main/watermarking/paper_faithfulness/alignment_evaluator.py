@@ -390,21 +390,21 @@ def _check_method_specific_parameters(
             "na_reason": "无方法特定参数绑定要求"
         }
 
-    # 检查每个方法的参数绑定（示例：T2SMark 和 PRC）。
+    # 检查每个方法的参数绑定。
     failures = []
 
-    # T2SMark 绑定检查。
-    t2s_bindings = bindings.get("t2s_mark", [])
-    for binding in t2s_bindings:
+    # HF 模板编码器绑定检查。
+    hf_bindings = bindings.get("hf_template_codec", [])
+    for binding in hf_bindings:
         field_path = binding.get("field_path")
         required_value = binding.get("required_value")
         actual_value = _get_nested_value(cfg, field_path)
         if actual_value != required_value:
             failures.append(f"{field_path}: expected {required_value}, got {actual_value}")
 
-    # PRC 绑定检查。
-    prc_bindings = bindings.get("prc", [])
-    for binding in prc_bindings:
+    # LF 模板编码器绑定检查。
+    lf_bindings = bindings.get("lf_template_codec", [])
+    for binding in lf_bindings:
         field_path = binding.get("field_path")
         required_value = binding.get("required_value")
         actual_value = _get_nested_value(cfg, field_path)

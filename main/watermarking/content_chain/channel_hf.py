@@ -21,9 +21,9 @@ import numpy as np
 from main.core import digests
 
 
-HF_CHANNEL_IMPL_ID = "high_freq_coder_v1"
-HF_CHANNEL_VERSION = "v1"
-HF_TRACE_VERSION = "v1"
+HF_CHANNEL_IMPL_ID = "high_freq_template_codec_v2"
+HF_CHANNEL_VERSION = "v2"
+HF_TRACE_VERSION = "v2"
 
 HF_ABSENT_REASONS = {
     "hf_disabled_by_config",

@@ -1,8 +1,8 @@
 """
 检测、评估与校准编排
 
-功能说明：
-- 执行检测编排流程，包括 plan_digest 一致性验证。
+功能说明�?
+- 执行检测编排流程，包括 plan_digest 一致性验证�?
 
 """
 
@@ -23,24 +23,23 @@ from main.registries.runtime_resolver import BuiltImplSet
 from main.watermarking.content_chain import detector_scoring
 from main.watermarking.common.plan_digest_flow import verify_plan_digest
 from main.watermarking.content_chain.high_freq_embedder import (
-    HighFreqEmbedder,
-    HIGH_FREQ_EMBEDDER_ID,
-    HIGH_FREQ_EMBEDDER_VERSION,
+    HighFreqTemplateCodecV2,
+    HIGH_FREQ_TEMPLATE_CODEC_V2_ID,
+    HIGH_FREQ_TEMPLATE_CODEC_V2_VERSION,
     HF_FAILURE_RULE_VERSION,
 )
 from main.watermarking.content_chain.low_freq_coder import (
-    LFCoderPRC,
-    LF_CODER_PRC_ID,
-    LF_CODER_PRC_VERSION,
+    LowFreqTemplateCodecV2,
+    LOW_FREQ_TEMPLATE_CODEC_V2_ID,
+    LOW_FREQ_TEMPLATE_CODEC_V2_VERSION,
 )
 from main.watermarking.content_chain import high_freq_embedder as high_freq_embedder_module
 from main.watermarking.content_chain import low_freq_coder as low_freq_coder_module
 from main.watermarking.fusion import neyman_pearson
 from main.watermarking.fusion.interfaces import FusionDecision
-from main.watermarking.geometry_chain.align_invariance_extractor import (
-    GEO_AVAILABILITY_RULE_VERSION,
-)
 from main.watermarking.geometry_chain.sync.latent_sync_template import SyncRuntimeContext
+
+GEO_AVAILABILITY_RULE_VERSION = "geo_availability_rule_v1"
 from main.evaluation import protocol_loader as eval_protocol_loader
 from main.evaluation import metrics as eval_metrics
 from main.evaluation import report_builder as eval_report_builder
@@ -49,7 +48,7 @@ from main.evaluation import attack_coverage as eval_attack_coverage
 
 def _as_dict_payload(value: Any) -> Dict[str, Any] | None:
     """
-    功能：将对象规范化为 dict 负载。 
+    功能：将对象规范化为 dict 负载�?
 
     Convert a payload-like object to a dictionary.
 
@@ -76,7 +75,7 @@ def _call_content_extractor_extract(
     cfg_digest: Optional[str],
 ) -> Any:
     """
-    功能：兼容不同 extract 签名调用 content_extractor。
+    功能：兼容不�?extract 签名调用 content_extractor�?
 
     Call content_extractor.extract with backward-compatible signature handling.
 
@@ -122,7 +121,7 @@ def run_detect_orchestrator(
     detect_plan_result_override: Any | None = None
 ) -> Dict[str, Any]:
     """
-    功能：执行检测编排流程，包括 plan_digest 一致性验证。
+    功能：执行检测编排流程，包括 plan_digest 一致性验证�?
 
     Execute detect workflow using injected implementations.
     Validates plan_digest consistency with embed-time plan_digest when available.
@@ -147,29 +146,28 @@ def run_detect_orchestrator(
         TypeError: If inputs are invalid.
     """
     if content_result_override is not None and not isinstance(content_result_override, dict) and not hasattr(content_result_override, "as_dict"):
-        # content_result_override 类型不符合预期，必须 fail-fast。
+        # content_result_override 类型不符合预期，必须 fail-fast�?
         raise TypeError("content_result_override must be dict, ContentEvidence, or None")
     if detect_plan_result_override is not None and not isinstance(detect_plan_result_override, dict) and not hasattr(detect_plan_result_override, "as_dict"):
-        # detect_plan_result_override 类型不符合预期，必须 fail-fast。
+        # detect_plan_result_override 类型不符合预期，必须 fail-fast�?
         raise TypeError("detect_plan_result_override must be dict, SubspacePlan, or None")
 
-    # 读取 ablation.normalized 开关（若缺失则默认全启用）。
+    # 读取 ablation.normalized 开关（若缺失则默认全启用）�?
     ablation_normalized = _get_ablation_normalized(cfg)
     enable_content = ablation_normalized.get("enable_content", True)
     enable_geometry = ablation_normalized.get("enable_geometry", True)
     enable_sync = ablation_normalized.get("enable_sync", True)
     enable_anchor = ablation_normalized.get("enable_anchor", True)
-    enable_attention_proxy = ablation_normalized.get("enable_attention_proxy", True)
     enable_image_sidecar = ablation_normalized.get("enable_image_sidecar", True)
     paper_cfg_raw = cfg.get("paper_faithfulness")
     paper_cfg: Dict[str, Any] = cast(Dict[str, Any], paper_cfg_raw) if isinstance(paper_cfg_raw, dict) else {}
     paper_enabled = bool(paper_cfg.get("enabled", False))
     if paper_enabled:
-        enable_attention_proxy = False
+        enable_image_sidecar = False  # 论文正式路径禁止 image-domain sidecar（v2.0 收口�?
 
     detect_content_inputs = _build_content_inputs_for_detect(cfg, input_record)
 
-    # Ablation: 禁用 content 模块时返回 absent 语义。
+    # Ablation: 禁用 content 模块时返�?absent 语义�?
     content_result: Any
     if not enable_content:
         content_result = _build_ablation_absent_content_evidence("content_chain_disabled_by_ablation")
@@ -183,7 +181,7 @@ def run_detect_orchestrator(
             cfg_digest,
         )
     
-    # Ablation: 禁用 geometry 模块时返回 absent 语义。
+    # Ablation: 禁用 geometry 模块时返�?absent 语义�?
     if not enable_geometry:
         geometry_result = _build_ablation_absent_geometry_evidence("geometry_chain_disabled_by_ablation")
     else:
@@ -192,11 +190,10 @@ def run_detect_orchestrator(
             cfg,
             enable_anchor=bool(enable_anchor),
             enable_sync=bool(enable_sync),
-            enable_attention_proxy=bool(enable_attention_proxy),
         )
 
-    # (1) 统一转换 ContentEvidence / GeometryEvidence 数据类为 dict。
-    # 优先使用 .as_dict() 方法；若不存在则直接使用数据类或字典。
+    # (1) 统一转换 ContentEvidence / GeometryEvidence 数据类为 dict�?
+    # 优先使用 .as_dict() 方法；若不存在则直接使用数据类或字典�?
     content_evidence_payload: Dict[str, Any] | None = _as_dict_payload(content_result)
 
     if trajectory_evidence is not None:
@@ -218,7 +215,7 @@ def run_detect_orchestrator(
 
     geometry_evidence_payload: Dict[str, Any] | None = _as_dict_payload(geometry_result)
 
-    # (2) 构造融合输入适配 dict，兼容 FusionBaselineIdentity 的旧字段读取逻辑。
+    # (2) 构造融合输入适配 dict，兼容不同 content/geometry evidence 数据结构。
     # 优先从 .as_dict() 结果中读取，但为向后兼容也检查数据类属性。
     content_evidence_adapted = _adapt_content_evidence_for_fusion(content_result)
     geometry_evidence_adapted = _adapt_geometry_evidence_for_fusion(geometry_result)
@@ -236,7 +233,7 @@ def run_detect_orchestrator(
                 mask_digest = planner_content_payload.get("mask_digest")
                 planner_inputs = _build_planner_inputs_for_runtime(cfg, None, planner_content_payload)
     if not isinstance(mask_digest, str) or not mask_digest:
-        # detect-mode 前置阶段可能无法提供 mask_digest；为 planner 回退到 embed-mode 提取。
+        # detect-mode 前置阶段可能无法提供 mask_digest；为 planner 回退�?embed-mode 提取�?
         cfg_for_planner = dict(cfg)
         detect_cfg_for_planner = cfg_for_planner.get("detect")
         if isinstance(detect_cfg_for_planner, dict):
@@ -375,19 +372,19 @@ def run_detect_orchestrator(
     if paper_impl_binding_status == "mismatch" and isinstance(paper_impl_binding_reason, str):
         mismatch_reasons.append(paper_impl_binding_reason)
 
-    # (S-D) Paper Faithfulness: 验证 paper faithfulness 证据一致性（必达）
-    # 注意：只在 input_record 存在且包含 paper_faithfulness 信息时才添加到全局 mismatch_reasons
+    # (S-D) Paper Faithfulness: 验证 paper faithfulness 证据一致性（必达�?
+    # 注意：只�?input_record 存在且包�?paper_faithfulness 信息时才添加到全局 mismatch_reasons
     # 这样可以避免单元测试中使用不完整 input_record 时产生副作用
     paper_faithfulness_status, paper_absent_reasons, paper_mismatch_reasons, paper_fail_reasons = _evaluate_paper_faithfulness_consistency(
         input_record=input_record
     )
     
-    # 仅当 paper_faithfulness 显式启用且 input_record 包含对应字段时，才将缺失视为 mismatch。
+    # 仅当 paper_faithfulness 显式启用�?input_record 包含对应字段时，才将缺失视为 mismatch�?
     paper_cfg_raw = cfg.get("paper_faithfulness")
     paper_cfg = cast(Dict[str, Any], paper_cfg_raw) if isinstance(paper_cfg_raw, dict) else {}
     paper_enabled = bool(paper_cfg.get("enabled", False))
     if paper_enabled and input_record is not None and isinstance(input_record.get("paper_faithfulness"), dict):
-        # 启用模式下，paper_faithfulness 缺失或不一致必须进入 mismatch 门禁。
+        # 启用模式下，paper_faithfulness 缺失或不一致必须进�?mismatch 门禁�?
         if paper_mismatch_reasons:
             mismatch_reasons.extend(paper_mismatch_reasons)
 
@@ -580,8 +577,8 @@ def run_detect_orchestrator(
         _bind_scores_if_ok(content_evidence_payload)
         content_evidence_adapted = _adapt_content_evidence_for_fusion(content_evidence_payload)
         
-        # 从 input_record 中提取 calibrate 生成的 thresholds_artifact，
-        # 并注入到 cfg 中供 fusion_rule.fuse() 使用（必须修正：threshold binding error）。
+        # �?input_record 中提�?calibrate 生成�?thresholds_artifact�?
+        # 并注入到 cfg 中供 fusion_rule.fuse() 使用（必须修正：threshold binding error）�?
         if isinstance(input_record, dict) and "thresholds_artifact" in input_record:
             thresholds_artifact = input_record["thresholds_artifact"]
             if isinstance(thresholds_artifact, dict):
@@ -590,19 +587,19 @@ def run_detect_orchestrator(
         fusion_result = impl_set.fusion_rule.fuse(cfg, content_evidence_adapted, geometry_evidence_adapted)
     input_fields = len(input_record or {})
 
-    # 实现 detect 侧同构分数与一致性校验
+    # 实现 detect 侧同构分数与一致性校�?
     detect_runtime_mode = "fallback_identity_v0"  # 默认：未获得可用 detect 同构分数
     detect_traj_cache = cfg.get("__detect_trajectory_latent_cache__")
 
     if not forced_mismatch and isinstance(plan_payload, dict):
-        # plan_payload 是 SubspacePlanEvidence 的 dict 化结构，
-        # lf_basis/hf_basis 在 plan_payload["plan"] 内层，而非顶层。
+        # plan_payload �?SubspacePlanEvidence �?dict 化结构，
+        # lf_basis/hf_basis �?plan_payload["plan"] 内层，而非顶层�?
         _plan_inner = plan_payload.get("plan")
         _plan_inner_dict = cast(Dict[str, Any], _plan_inner) if isinstance(_plan_inner, dict) else {}
         lf_basis = _plan_inner_dict.get("lf_basis")
         hf_basis = _plan_inner_dict.get("hf_basis")
 
-        # 从 input_record 提取 embed 侧分数（兼容 content_evidence 承载）。
+        # �?input_record 提取 embed 侧分数（兼容 content_evidence 承载）�?
         embed_lf_score = None
         embed_hf_score = None
         if isinstance(input_record, dict):
@@ -616,9 +613,9 @@ def run_detect_orchestrator(
                 if embed_hf_score is None:
                     embed_hf_score = embed_content_payload.get("hf_score")
 
-        # --- 评分路径：trajectory cache 可用 → TFSW z_{t_e} 精确评分；否则显式失败 ---
+        # --- 评分路径：trajectory cache 可用 �?TFSW z_{t_e} 精确评分；否则显式失�?---
         if detect_traj_cache is not None and not detect_traj_cache.is_empty():
-            # 主路径：使用真实 z_{t_e} 走 TFSW（exact-only）。
+            # 主路径：使用真实 z_{t_e} �?TFSW（exact-only）�?
             detect_lf_score, detect_lf_status = detector_scoring.extract_lf_score_from_detect_trajectory(
                 detect_traj_cache,
                 lf_basis,
@@ -635,7 +632,7 @@ def run_detect_orchestrator(
             detect_lf_score, detect_lf_status = None, "no_trajectory_cache"
             detect_hf_score, detect_hf_status = None, "no_trajectory_cache"
 
-        # 校验 plan_digest 与 basis_digest 一致性
+        # 校验 plan_digest �?basis_digest 一致�?
         embed_plan_digest = input_record.get("plan_digest") if input_record else None
         embed_basis_digest = input_record.get("basis_digest") if input_record else None
 
@@ -651,7 +648,7 @@ def run_detect_orchestrator(
         # 追加 detect 侧分数与一致性状态到 content_evidence
         content_evidence_payload["detect_lf_score"] = detect_lf_score
         content_evidence_payload["detect_hf_score"] = detect_hf_score
-        # 当 hf_basis is None（surrogate 路径）时，显式写入 HF 缺失原因。
+        # �?hf_basis is None（surrogate 路径）时，显式写�?HF 缺失原因�?
         if hf_basis is None:
             content_evidence_payload["detect_hf_score_absent_reason"] = "hf_basis_not_computed_in_surrogate_mode"
 
@@ -713,7 +710,7 @@ def run_detect_orchestrator(
 
         runtime_built = bool(pipeline_runtime_meta.get("status") == "built")
 
-        # 如果 detect 侧分数有效、未命中不一致且运行期为真实非 synthetic pipeline，则标记为真实运行模式。
+        # 如果 detect 侧分数有效、未命中不一致且运行期为真实�?synthetic pipeline，则标记为真实运行模式�?
         _lf_ok = (detect_lf_status == "ok" or (detect_lf_status or "").startswith("ok_trajectory_"))
         if (
             _lf_ok
@@ -726,7 +723,7 @@ def run_detect_orchestrator(
     _bind_scores_if_ok(content_evidence_payload)
     _populate_detect_mask_digest_from_input_record(content_evidence_payload, input_record)
 
-    # 删除临时的 transient 字段，确保不写入 records
+    # 删除临时�?transient 字段，确保不写入 records
     cfg.pop("__detect_trajectory_latent_cache__", None)
     cfg.pop("__detect_pipeline_obj__", None)
     cfg.pop("__pipeline_runtime_meta__", None)
@@ -757,13 +754,13 @@ def run_detect_orchestrator(
         "plan_digest_validation_status": plan_digest_status,
         "plan_digest_mismatch_reason": primary_mismatch_reason if forced_mismatch else plan_digest_mismatch_reason,
         "allow_cfg_plan_digest_fallback_used": allow_cfg_plan_digest_fallback_used,
-        # (append-only) 保留完整的 payload，供后续升级 fusion 规则时直接消费冻结字段。
+        # (append-only) 保留完整�?payload，供后续升级 fusion 规则时直接消费冻结字段�?
         "content_evidence_payload": content_evidence_payload,
         "geometry_evidence_payload": geometry_evidence_payload,
         "content_result": content_result,
         "geometry_result": geometry_result,
         "fusion_result": fusion_result,
-        # (S-D) Paper Faithfulness: 添加一致性验证结果（结构化 failure semantics）
+        # (S-D) Paper Faithfulness: 添加一致性验证结果（结构�?failure semantics�?
         "paper_faithfulness": {
             "status": paper_faithfulness_status,
             "absent_reasons": paper_absent_reasons,
@@ -772,8 +769,8 @@ def run_detect_orchestrator(
         }
     }
 
-    # (append-only) 构建 final_decision 顶层稳定判决快照，供后续冻结与审查使用。
-    # 所有字段从 fusion_result 只读投影，不替换原有 fusion_result 字段。
+    # (append-only) 构建 final_decision 顶层稳定判决快照，供后续冻结与审查使用�?
+    # 所有字段从 fusion_result 只读投影，不替换原有 fusion_result 字段�?
     try:
         _fd_audit = getattr(fusion_result, "audit", {})
         record["final_decision"] = {
@@ -790,7 +787,7 @@ def run_detect_orchestrator(
 
 def _normalize_execution_chain_status(raw_status: Any) -> str:
     """
-    功能：将链路状态归一化到 ok/absent/failed 三态。
+    功能：将链路状态归一化到 ok/absent/failed 三态�?
 
     Normalize execution-chain status into canonical enum {ok, absent, failed}.
 
@@ -820,7 +817,7 @@ def _derive_execution_report_from_chain_states(
     fusion_result: Any,
 ) -> Dict[str, Any]:
     """
-    功能：由 content/geometry/fusion 实际状态推导 execution_report。
+    功能：由 content/geometry/fusion 实际状态推�?execution_report�?
 
     Derive execution_report from actual chain payloads instead of hardcoded statuses.
 
@@ -863,7 +860,7 @@ def _derive_execution_report_from_chain_states(
 
 def _resolve_cfg_plan_digest(cfg: Dict[str, Any]) -> Optional[str]:
     """
-    功能：从 cfg 读取 plan_digest（仅用于 test_mode）。
+    功能：从 cfg 读取 plan_digest（仅用于 test_mode）�?
 
     Resolve cfg-side plan_digest for test-mode-only fallback.
 
@@ -885,7 +882,7 @@ def _resolve_cfg_plan_digest(cfg: Dict[str, Any]) -> Optional[str]:
 
 def _resolve_detect_test_mode(cfg: Dict[str, Any]) -> bool:
     """
-    功能：解析 detect 的 test_mode 开关。
+    功能：解�?detect �?test_mode 开关�?
 
     Resolve detect test_mode switch from cfg.
 
@@ -915,7 +912,7 @@ def _resolve_detect_test_mode(cfg: Dict[str, Any]) -> bool:
 
 def _bind_scores_if_ok(content_evidence_payload: Dict[str, Any]) -> None:
     """
-    功能：分数写入纪律收口，仅 status=ok 允许数值分数。
+    功能：分数写入纪律收口，�?status=ok 允许数值分数�?
 
     Enforce score write discipline: numeric score fields are allowed only when status="ok".
 
@@ -974,7 +971,7 @@ def _build_hf_detect_evidence(
     trajectory_evidence: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """
-    功能：构造 detect 侧 HF 证据。
+    功能：构�?detect �?HF 证据�?
 
     Build detect-side HF evidence under planner-defined plan.
 
@@ -994,13 +991,13 @@ def _build_hf_detect_evidence(
     """
     embedder = impl_set.hf_embedder
     if embedder is None or not hasattr(embedder, "detect"):
-        embedder = HighFreqEmbedder(
-            impl_id=HIGH_FREQ_EMBEDDER_ID,
-            impl_version=HIGH_FREQ_EMBEDDER_VERSION,
+        embedder = HighFreqTemplateCodecV2(
+            impl_id=HIGH_FREQ_TEMPLATE_CODEC_V2_ID,
+            impl_version=HIGH_FREQ_TEMPLATE_CODEC_V2_VERSION,
             impl_digest=digests.canonical_sha256(
                 {
-                    "impl_id": HIGH_FREQ_EMBEDDER_ID,
-                    "impl_version": HIGH_FREQ_EMBEDDER_VERSION,
+                    "impl_id": HIGH_FREQ_TEMPLATE_CODEC_V2_ID,
+                    "impl_version": HIGH_FREQ_TEMPLATE_CODEC_V2_VERSION,
                 }
             ),
         )
@@ -1066,7 +1063,7 @@ def _extract_content_raw_scores_from_image(
     cfg_digest: Optional[str],
 ) -> tuple[Optional[float], Optional[float], Dict[str, Any]]:
     """
-    功能：从图像提取 LF/HF 原始分数。 
+    功能：从图像提取 LF/HF 原始分数�?
 
     Extract LF/HF raw scores from image artifact for calibration-ready evidence.
 
@@ -1112,9 +1109,6 @@ def _extract_content_raw_scores_from_image(
         except Exception:
             image_array = None
 
-    # S3 统一口径：ecc="sparse_ldpc" 唯一路径为 trajectory-consistent TFSW。
-    # z_{t_e}（detect 侧 trajectory cache exact hit）→ φ → PRC 解码。
-    # 不存在 final_latents legacy path，不存在兼容分支。
     if isinstance(ecc_value, str) and ecc_value == "sparse_ldpc":
         lf_basis_for_decode = plan_dict.get("lf_basis") if isinstance(plan_dict.get("lf_basis"), dict) else None
         detect_traj_cache = cfg.get("__detect_trajectory_latent_cache__")
@@ -1122,19 +1116,19 @@ def _extract_content_raw_scores_from_image(
             lf_trace = {
                 "lf_status": "absent",
                 "lf_absent_reason": "lf_basis_missing_for_trajectory_path",
-                "lf_detect_path": "lf_coder_prc_trajectory",
+                "lf_detect_path": "low_freq_template_trajectory",
             }
         elif not isinstance(plan_digest, str) or not plan_digest:
             lf_trace = {
                 "lf_status": "absent",
                 "lf_absent_reason": "plan_digest_missing_for_trajectory_path",
-                "lf_detect_path": "lf_coder_prc_trajectory",
+                "lf_detect_path": "low_freq_template_trajectory",
             }
         elif detect_traj_cache is None or detect_traj_cache.is_empty():
             lf_trace = {
                 "lf_status": "absent",
                 "lf_absent_reason": "trajectory_cache_absent",
-                "lf_detect_path": "lf_coder_prc_trajectory",
+                "lf_detect_path": "low_freq_template_trajectory",
             }
         else:
             tfs = lf_basis_for_decode.get("trajectory_feature_spec")
@@ -1142,7 +1136,7 @@ def _extract_content_raw_scores_from_image(
                 lf_trace = {
                     "lf_status": "absent",
                     "lf_absent_reason": "trajectory_feature_spec_invalid",
-                    "lf_detect_path": "lf_coder_prc_trajectory",
+                    "lf_detect_path": "low_freq_template_trajectory",
                 }
             else:
                 edit_timestep = int(tfs.get("edit_timestep", 0))
@@ -1153,7 +1147,7 @@ def _extract_content_raw_scores_from_image(
                     lf_trace = {
                         "lf_status": "absent",
                         "lf_absent_reason": f"trajectory_latent_absent:{resolution_status}",
-                        "lf_detect_path": "lf_coder_prc_trajectory",
+                        "lf_detect_path": "low_freq_template_trajectory",
                     }
                 else:
                     try:
@@ -1161,14 +1155,14 @@ def _extract_content_raw_scores_from_image(
                             extract_trajectory_feature_np,
                         )
                         phi = extract_trajectory_feature_np(np.asarray(z_t, dtype=np.float64), tfs)
-                        prc_impl_digest = digests.canonical_sha256(
+                        lf_impl_digest = digests.canonical_sha256(
                             {
-                                "impl_id": LF_CODER_PRC_ID,
-                                "impl_version": LF_CODER_PRC_VERSION,
+                                "impl_id": LOW_FREQ_TEMPLATE_CODEC_V2_ID,
+                                "impl_version": LOW_FREQ_TEMPLATE_CODEC_V2_VERSION,
                             }
                         )
-                        lf_coder = LFCoderPRC(LF_CODER_PRC_ID, LF_CODER_PRC_VERSION, prc_impl_digest)
-                        lf_score, prc_trace = lf_coder.detect_score(
+                        lf_coder = LowFreqTemplateCodecV2(LOW_FREQ_TEMPLATE_CODEC_V2_ID, LOW_FREQ_TEMPLATE_CODEC_V2_VERSION, lf_impl_digest)
+                        lf_score, lf_detect_trace = lf_coder.detect_score(
                             cfg=cfg,
                             latent_features=phi,
                             plan_digest=plan_digest,
@@ -1176,39 +1170,29 @@ def _extract_content_raw_scores_from_image(
                             lf_basis=lf_basis_for_decode,
                         )
                         lf_trace = {
-                            "lf_status": prc_trace.get("status", "failed"),
+                            "lf_status": lf_detect_trace.get("status", "failed"),
                             "lf_score": lf_score,
-                            "lf_trace_digest": prc_trace.get("lf_trace_digest"),
-                            "bp_converged": prc_trace.get("bp_converged"),
-                            "bp_iteration_count": prc_trace.get("bp_iteration_count"),
-                            "parity_check_digest": prc_trace.get("parity_check_digest"),
-                            "lf_failure_reason": prc_trace.get("lf_failure_reason"),
-                            "bp_converge_status": prc_trace.get("bp_converge_status"),
-                            "lf_detect_path": "lf_coder_prc_trajectory",
+                            "lf_trace_digest": lf_detect_trace.get("lf_trace_digest"),
+                            "bp_converged": lf_detect_trace.get("bp_converged"),
+                            "bp_iteration_count": lf_detect_trace.get("bp_iteration_count"),
+                            "parity_check_digest": lf_detect_trace.get("parity_check_digest"),
+                            "lf_failure_reason": lf_detect_trace.get("lf_failure_reason"),
+                            "bp_converge_status": lf_detect_trace.get("bp_converge_status"),
+                            "lf_detect_path": "low_freq_template_trajectory",
                         }
                     except Exception as exc:
                         lf_trace = {
                             "lf_status": "failed",
-                            "lf_failure_reason": f"lf_prc_trajectory_detect_failed:{type(exc).__name__}",
-                            "lf_detect_path": "lf_coder_prc_trajectory",
+                            "lf_failure_reason": f"lf_trajectory_detect_failed:{type(exc).__name__}",
+                            "lf_detect_path": "low_freq_template_trajectory",
                         }
     else:
-        if image_array is None:
-            lf_trace = {
-                "lf_status": "absent",
-                "lf_absent_reason": "detect_image_absent",
-                "lf_detect_path": "image_dct_fallback",
-            }
-        else:
-            lf_params = _build_lf_image_embed_params_for_detect(cfg)
-            detect_low_freq_score_fn = getattr(low_freq_coder_module, "detect_low_freq_score")
-            lf_score, lf_trace = detect_low_freq_score_fn(
-                image_array,
-                band_spec,
-                key_material,
-                lf_params,
-            )
-            lf_trace["lf_detect_path"] = "image_dct_fallback"
+        raise RuntimeError(
+            "image_dct_fallback path reached in _extract_content_raw_scores_from_image: "
+            "this path was removed in v2.0 single-path closure. "
+            "Only ecc='sparse_ldpc' trajectory path is permitted. "
+            "Ensure image_domain_sidecar_enabled=false in paper mode config."
+        )
 
     hf_cfg_node = watermark_cfg.get("hf")
     hf_cfg = cast(Dict[str, Any], hf_cfg_node) if isinstance(hf_cfg_node, dict) else {}
@@ -1218,13 +1202,11 @@ def _extract_content_raw_scores_from_image(
             hf_score = None
             hf_trace = {"hf_status": "absent", "hf_absent_reason": "detect_image_absent"}
         else:
-            hf_params = _build_hf_image_embed_params_for_detect(cfg)
-            detect_high_freq_score_fn = getattr(high_freq_embedder_module, "detect_high_freq_score")
-            hf_score, hf_trace = detect_high_freq_score_fn(
-                image_array,
-                routing_summary,
-                key_material,
-                hf_params,
+            raise RuntimeError(
+                "hf_image_texture_score path reached in _extract_content_raw_scores_from_image: "
+                "this path was removed in v2.0 single-path closure. "
+                "Only HighFreqTemplateCodecV2 class entry is permitted for HF detection. "
+                "Ensure image_domain_sidecar_enabled=false in paper mode config."
             )
     else:
         hf_score = None
@@ -1244,7 +1226,7 @@ def _bind_raw_scores_to_content_payload(
     traces: Dict[str, Any],
 ) -> None:
     """
-    功能：将 LF/HF 原始分数和 trace 写入 content evidence。 
+    功能：将 LF/HF 原始分数�?trace 写入 content evidence�?
 
     Bind LF/HF raw scores and traces into content evidence score_parts.
     """
@@ -1263,16 +1245,16 @@ def _bind_raw_scores_to_content_payload(
 
     content_evidence_payload["lf_score"] = lf_score
     score_parts["lf_detect_trace"] = lf_trace
-    prc_latent_status = lf_trace.get("lf_status")
-    if isinstance(prc_latent_status, str) and prc_latent_status:
-        score_parts["prc_latent_status"] = prc_latent_status
-    # 补齐 lf_status 顶层口径（if-not-in 守卫，不覆写 ContentDetector 已写入值）。
-    if "lf_status" not in score_parts and isinstance(prc_latent_status, str) and prc_latent_status:
-        score_parts["lf_status"] = prc_latent_status
+    lf_template_status = lf_trace.get("lf_status")
+    if isinstance(lf_template_status, str) and lf_template_status:
+        score_parts["lf_template_status"] = lf_template_status
+    # 补齐 lf_status 顶层口径（if-not-in 守卫，不覆写 ContentDetector 已写入值）�?
+    if "lf_status" not in score_parts and isinstance(lf_template_status, str) and lf_template_status:
+        score_parts["lf_status"] = lf_template_status
 
     # （P1 修复）BP 收敛状态降级守卫：
-    # 当 bp_converge_status="degraded" 且 lf_status 仍为 "ok" 时，将顶层 lf_status 覆写为 "degraded"。
-    # 不改动 low_freq_coder 的 trace["status"]，不影响 ContentDetector 决策链，仅修正诊断字段语义。
+    # �?bp_converge_status="degraded" �?lf_status 仍为 "ok" 时，将顶�?lf_status 覆写�?"degraded"�?
+    # 不改�?low_freq_coder �?trace["status"]，不影响 ContentDetector 决策链，仅修正诊断字段语义�?
     _bp_converge_status = lf_trace.get("bp_converge_status")
     if _bp_converge_status == "degraded" and score_parts.get("lf_status") == "ok":
         score_parts["lf_status"] = "degraded"
@@ -1302,7 +1284,7 @@ def _populate_detect_mask_digest_from_input_record(
     input_record: Optional[Dict[str, Any]],
 ) -> None:
     """
-    功能：当 detect content 成功且 mask_digest 缺失时，从 input_record 透传。 
+    功能：当 detect content 成功�?mask_digest 缺失时，�?input_record 透传�?
 
     Populate detect-side mask_digest from input_record when status is ok but digest is absent.
 
@@ -1371,7 +1353,7 @@ def _build_content_inputs_for_detect(
     input_record: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
     """
-    功能：构造 detect 阶段 content extractor 主输入。
+    功能：构�?detect 阶段 content extractor 主输入�?
 
     Build content extractor inputs for detect stage with explicit input priority.
     Falls back to reading input_image_path from input_record when available.
@@ -1484,7 +1466,7 @@ def _build_hf_image_embed_params_for_detect(cfg: Dict[str, Any]) -> Dict[str, An
 
 def _merge_hf_evidence(content_evidence_payload: Dict[str, Any], hf_evidence: Dict[str, Any]) -> None:
     """
-    功能：合并 HF 证据到 content_evidence。
+    功能：合�?HF 证据�?content_evidence�?
 
     Merge HF evidence into content evidence payload using existing registered fields.
 
@@ -1517,7 +1499,7 @@ def _merge_hf_evidence(content_evidence_payload: Dict[str, Any], hf_evidence: Di
 
 def _merge_injection_evidence(content_evidence_payload: Dict[str, Any], injection_evidence: Dict[str, Any]) -> None:
     """
-    功能：合并注入证据到 content_evidence。
+    功能：合并注入证据到 content_evidence�?
     
     Merge injection evidence into content evidence payload using registered fields.
 
@@ -1544,7 +1526,7 @@ def _evaluate_injection_consistency(
     injection_evidence: Optional[Dict[str, Any]]
 ) -> tuple[str, Optional[str]]:
     """
-    功能：校验 embed/detect 两端注入证据一致性。
+    功能：校�?embed/detect 两端注入证据一致性�?
     
     Evaluate injection evidence consistency between embed-time record and detect-time runtime.
 
@@ -1565,7 +1547,7 @@ def _evaluate_injection_consistency(
                 break
 
     if embed_injection is None:
-        # 向后兼容：embed 未提供注入证据时不触发缺失分支。
+        # 向后兼容：embed 未提供注入证据时不触发缺失分支�?
         return "ok", None
     if injection_evidence is None:
         return "absent", "injection_evidence_missing"
@@ -1584,18 +1566,18 @@ def _evaluate_injection_consistency(
     embed_binding_digest = embed_injection.get("subspace_binding_digest")
     detect_binding_digest = injection_evidence.get("subspace_binding_digest")
 
-    # injection_trace_digest、injection_params_digest、subspace_binding_digest 均为运行期
-    # latent 值相关的摘要：embed 和 detect 使用不同推理种子，生成不同 latent 轨迹，
-    # 注入到不同 latent 上的修改向量和幅度天然不同，因此三者跨 run 必然不等。
-    # 此处仅保留格式有效性日志，不再作相等性门禁，避免因预期差异触发 false mismatch。
-    # 真实的计划一致性已由 plan_digest 和 plan_override_for_orchestrator 机制保证。
+    # injection_trace_digest、injection_params_digest、subspace_binding_digest 均为运行�?
+    # latent 值相关的摘要：embed �?detect 使用不同推理种子，生成不�?latent 轨迹�?
+    # 注入到不�?latent 上的修改向量和幅度天然不同，因此三者跨 run 必然不等�?
+    # 此处仅保留格式有效性日志，不再作相等性门禁，避免因预期差异触�?false mismatch�?
+    # 真实的计划一致性已�?plan_digest �?plan_override_for_orchestrator 机制保证�?
     if not isinstance(embed_trace_digest, str) or not isinstance(detect_trace_digest, str):
-        # trace digest 格式无效：降级为 absent 而非 mismatch，不阻断主链。
+        # trace digest 格式无效：降级为 absent 而非 mismatch，不阻断主链�?
         return "absent", "injection_trace_digest_invalid"
     if not isinstance(embed_params_digest, str) or not isinstance(detect_params_digest, str):
-        # params digest 格式无效：降级为 absent 而非 mismatch，不阻断主链。
+        # params digest 格式无效：降级为 absent 而非 mismatch，不阻断主链�?
         return "absent", "injection_params_digest_invalid"
-    # 跨 run 等值校验已移除：trace/params/binding digest 均为 latent-dependent，不可跨 run 比对。
+    # �?run 等值校验已移除：trace/params/binding digest 均为 latent-dependent，不可跨 run 比对�?
     return "ok", None
 
 
@@ -1605,7 +1587,7 @@ def _evaluate_paper_impl_binding_consistency(
     input_record: Optional[Dict[str, Any]] = None,
 ) -> tuple[str, Optional[str]]:
     """
-    功能：在 paper 模式下校验 HF/LF impl 绑定一致性。
+    功能：在 paper 模式下校�?HF/LF impl 绑定一致性�?
 
     Validate impl binding consistency for paper mode and reject fallback-only claims.
 
@@ -1648,15 +1630,16 @@ def _evaluate_paper_impl_binding_consistency(
         impl_selected = binding_payload.get("impl_selected")
         if not isinstance(impl_selected, str) or not impl_selected:
             return "mismatch", f"{channel_name}_impl_selected_absent"
-        fallback_used = binding_payload.get("fallback_used")
-        if bool(fallback_used):
-            return "mismatch", f"{channel_name}_fallback_used_under_paper_mode"
+        evidence_level = binding_payload.get("evidence_level")
+        # 正式路径只允许 primary / primary_equivalent / ablation_disabled；其余为非正式路径绑定。
+        if evidence_level not in {"primary", "primary_equivalent", "ablation_disabled", None}:
+            return "mismatch", f"{channel_name}_non_primary_binding_under_paper_mode"
     return "ok", None
 
 
 def _extract_embed_impl_binding_source(input_record: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """
-    功能：从 embed 输入记录提取 impl 绑定证据来源。
+    功能：从 embed 输入记录提取 impl 绑定证据来源�?
 
     Extract LF/HF impl binding source from embed-time record fields.
 
@@ -1684,7 +1667,7 @@ def _evaluate_paper_faithfulness_consistency(
     input_record: Optional[Dict[str, Any]]
 ) -> tuple[str, list[str], list[str], list[str]]:
     """
-    功能：校验 paper faithfulness 证据一致性（S-D 必达）。
+    功能：校�?paper faithfulness 证据一致性（S-D 必达）�?
 
     Evaluate paper faithfulness evidence consistency between embed-time record.
     Validates: pipeline_fingerprint_digest, injection_site_digest, paper_spec_digest.
@@ -1711,7 +1694,7 @@ def _evaluate_paper_faithfulness_consistency(
         absent_reasons.append("input_record_is_none")
         return "absent", absent_reasons, mismatch_reasons, fail_reasons
 
-    # 提取 embed-time paper faithfulness 证据。
+    # 提取 embed-time paper faithfulness 证据�?
     embed_content_evidence: Optional[Dict[str, Any]] = None
     for key in ["content_evidence_payload", "content_evidence", "content_result"]:
         candidate = input_record.get(key)
@@ -1719,16 +1702,16 @@ def _evaluate_paper_faithfulness_consistency(
             embed_content_evidence = cast(Dict[str, Any], candidate)
             break
 
-    # (1) 验证 content_evidence 存在性（整体 absent 前置检查）。
+    # (1) 验证 content_evidence 存在性（整体 absent 前置检查）�?
     if not isinstance(embed_content_evidence, dict):
         absent_reasons.append("content_evidence_absent")
         return "absent", absent_reasons, mismatch_reasons, fail_reasons
 
-    # content_evidence 存在说明 embed 侧运行了，后续缺失归类为 mismatch。
+    # content_evidence 存在说明 embed 侧运行了，后续缺失归类为 mismatch�?
     paper_node = input_record.get("paper_faithfulness")
     embed_paper_faithfulness = cast(Dict[str, Any], paper_node) if isinstance(paper_node, dict) else None
 
-    # (2) 验证 paper_spec_digest 存在性（mismatch vs fail）。
+    # (2) 验证 paper_spec_digest 存在性（mismatch vs fail）�?
     if embed_paper_faithfulness is not None:
         spec_digest = embed_paper_faithfulness.get("spec_digest")
         if spec_digest == "<absent>":
@@ -1740,7 +1723,7 @@ def _evaluate_paper_faithfulness_consistency(
     else:
         mismatch_reasons.append("paper_faithfulness_section_absent")
 
-    # (3) 验证 pipeline_fingerprint_digest 存在性（mismatch vs fail）。
+    # (3) 验证 pipeline_fingerprint_digest 存在性（mismatch vs fail）�?
     pipeline_fingerprint_digest = embed_content_evidence.get("pipeline_fingerprint_digest")
     if pipeline_fingerprint_digest == "<absent>":
         mismatch_reasons.append("pipeline_fingerprint_digest_marked_absent")
@@ -1749,7 +1732,7 @@ def _evaluate_paper_faithfulness_consistency(
     elif not isinstance(pipeline_fingerprint_digest, str) or not pipeline_fingerprint_digest:
         mismatch_reasons.append("pipeline_fingerprint_digest_missing")
 
-    # (4) 验证 injection_site_digest 存在性（mismatch vs fail）。
+    # (4) 验证 injection_site_digest 存在性（mismatch vs fail）�?
     injection_site_digest = embed_content_evidence.get("injection_site_digest")
     if injection_site_digest == "<absent>":
         mismatch_reasons.append("injection_site_digest_marked_absent")
@@ -1758,7 +1741,7 @@ def _evaluate_paper_faithfulness_consistency(
     elif not isinstance(injection_site_digest, str) or not injection_site_digest:
         mismatch_reasons.append("injection_site_digest_missing")
 
-    # (5) 验证 alignment_digest 存在性（mismatch vs fail）。
+    # (5) 验证 alignment_digest 存在性（mismatch vs fail）�?
     alignment_digest = embed_content_evidence.get("alignment_digest")
     if alignment_digest == "<absent>":
         mismatch_reasons.append("alignment_digest_marked_absent")
@@ -1767,7 +1750,7 @@ def _evaluate_paper_faithfulness_consistency(
     elif not isinstance(alignment_digest, str) or not alignment_digest:
         mismatch_reasons.append("alignment_digest_missing")
 
-    # (6) 决定最终 status（优先级：failed > mismatch > absent > ok）。
+    # (6) 决定最�?status（优先级：failed > mismatch > absent > ok）�?
     if len(fail_reasons) > 0:
         return "failed", absent_reasons, mismatch_reasons, fail_reasons
     if len(mismatch_reasons) > 0:
@@ -1780,7 +1763,7 @@ def _evaluate_paper_faithfulness_consistency(
 
 def _extract_lf_evidence_from_input_record(input_record: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """
-    功能：从 embed record 中提取 LF 证据。
+    功能：从 embed record 中提�?LF 证据�?
 
     Extract LF evidence payload from embed-time input record.
 
@@ -1804,7 +1787,7 @@ def _extract_lf_evidence_from_input_record(input_record: Optional[Dict[str, Any]
 
 def _resolve_expected_plan_digest(input_record: Optional[Dict[str, Any]]) -> Optional[str]:
     """
-    功能：从输入记录解析 expected plan_digest。 
+    功能：从输入记录解析 expected plan_digest�?
 
     Resolve expected plan digest strictly from bound input record payload.
 
@@ -1878,7 +1861,7 @@ def _collect_plan_mismatch_reasons(
     detect_time_planner_impl_identity: Any
 ) -> list[str]:
     """
-    功能：收集计划锚点不一致原因。
+    功能：收集计划锚点不一致原因�?
 
     Collect mismatch reasons for plan/basis/impl identity anchors.
 
@@ -1912,7 +1895,7 @@ def _evaluate_trajectory_consistency(
     detect_planner_input_digest: Optional[str]
 ) -> tuple[str, Optional[str]]:
     """
-    功能：校验 embed/detect 两端 trajectory 证据一致性。
+    功能：校�?embed/detect 两端 trajectory 证据一致性�?
 
     Evaluate trajectory evidence consistency between embed-time record and detect-time runtime.
 
@@ -1940,7 +1923,7 @@ def _evaluate_trajectory_consistency(
         if candidate is None and "trajectory_evidence" in input_record:
             candidate = input_record.get("trajectory_evidence")
         if candidate is not None and not isinstance(candidate, dict):
-            # embed 记录中的 trajectory_evidence 类型不合法，必须 fail-fast。
+            # embed 记录中的 trajectory_evidence 类型不合法，必须 fail-fast�?
             raise TypeError("embed trajectory_evidence must be dict or None")
         if isinstance(candidate, dict):
             embed_trajectory_evidence = cast(Dict[str, Any], candidate)
@@ -1983,7 +1966,7 @@ def _evaluate_trajectory_consistency(
 
 def _extract_embed_planner_input_digest(input_record: Optional[Dict[str, Any]]) -> Optional[str]:
     """
-    功能：从 embed 记录提取 planner_input_digest。
+    功能：从 embed 记录提取 planner_input_digest�?
 
     Extract embed-time planner_input_digest from record payload.
 
@@ -2029,7 +2012,7 @@ def _extract_embed_planner_input_digest(input_record: Optional[Dict[str, Any]]) 
 
 def _is_embed_trajectory_explicit_absent(input_record: Optional[Dict[str, Any]]) -> bool:
     """
-    功能：判断 embed 侧 trajectory 证据是否显式为 absent。
+    功能：判�?embed �?trajectory 证据是否显式�?absent�?
 
     Determine whether embed-side trajectory evidence is explicitly absent.
 
@@ -2067,7 +2050,7 @@ def _inject_trajectory_audit_fields(
     trajectory_evidence: Dict[str, Any]
 ) -> None:
     """
-    功能：将轨迹 tap 子状态写入 content_evidence.audit（兼容新旧字段）。
+    功能：将轨迹 tap 子状态写�?content_evidence.audit（兼容新旧字段）�?
 
     Inject trajectory tap status fields into content_evidence.audit.
 
@@ -2094,7 +2077,7 @@ def _inject_trajectory_audit_fields(
 
 def _resolve_trajectory_tap_status(trajectory_evidence: Dict[str, Any]) -> Optional[str]:
     """
-    功能：优先读取 trajectory audit 子状态，兼容旧 status 字段。
+    功能：优先读�?trajectory audit 子状态，兼容�?status 字段�?
 
     Resolve trajectory tap status with new-field-first compatibility.
 
@@ -2119,7 +2102,7 @@ def _resolve_trajectory_tap_status(trajectory_evidence: Dict[str, Any]) -> Optio
 
 def _resolve_trajectory_absent_reason(trajectory_evidence: Dict[str, Any]) -> Optional[str]:
     """
-    功能：优先读取 trajectory audit 缺失原因，兼容旧字段。
+    功能：优先读�?trajectory audit 缺失原因，兼容旧字段�?
 
     Resolve trajectory absent reason with new-field-first compatibility.
 
@@ -2144,7 +2127,7 @@ def _resolve_trajectory_absent_reason(trajectory_evidence: Dict[str, Any]) -> Op
 
 def _extract_detect_planner_input_digest(detect_plan_result: Any) -> Optional[str]:
     """
-    功能：从 detect 侧规划结果提取 planner_input_digest。
+    功能：从 detect 侧规划结果提�?planner_input_digest�?
 
     Extract detect-time planner_input_digest from planner output.
 
@@ -2186,7 +2169,7 @@ def _extract_detect_planner_input_digest(detect_plan_result: Any) -> Optional[st
 
 def _resolve_mismatch_failure_reason(primary_mismatch_reason: str) -> str:
     """
-    功能：将 mismatch 原因映射为 content_failure_reason。
+    功能：将 mismatch 原因映射�?content_failure_reason�?
 
     Map mismatch reason token to content_failure_reason enum.
 
@@ -2200,7 +2183,7 @@ def _resolve_mismatch_failure_reason(primary_mismatch_reason: str) -> str:
         TypeError: If inputs are invalid.
     """
     if not primary_mismatch_reason:
-        # primary_mismatch_reason 类型不合法，必须 fail-fast。
+        # primary_mismatch_reason 类型不合法，必须 fail-fast�?
         raise TypeError("primary_mismatch_reason must be non-empty str")
 
     reason_map = {
@@ -2233,7 +2216,7 @@ def _build_absent_fusion_decision(
     geometry_evidence_adapted: Dict[str, Any]
 ) -> FusionDecision:
     """
-    功能：构造 absent 的融合判决。
+    功能：构�?absent 的融合判决�?
 
     Build a FusionDecision for absent trajectory evidence.
 
@@ -2273,7 +2256,7 @@ def _build_absent_fusion_decision(
 
 def _resolve_primary_mismatch(mismatch_reasons: list[str]) -> tuple[str, str]:
     """
-    功能：选择单一主 mismatch 原因并返回对应字段路径。
+    功能：选择单一�?mismatch 原因并返回对应字段路径�?
 
     Resolve a single primary mismatch reason and its field path.
 
@@ -2300,8 +2283,8 @@ def _resolve_primary_mismatch(mismatch_reasons: list[str]) -> tuple[str, str]:
         "hf_impl_binding_missing_under_paper_mode": "content_evidence.hf_impl_binding",
         "lf_impl_binding_impl_selected_absent": "content_evidence.lf_impl_binding.impl_selected",
         "hf_impl_binding_impl_selected_absent": "content_evidence.hf_impl_binding.impl_selected",
-        "lf_impl_binding_fallback_used_under_paper_mode": "content_evidence.lf_impl_binding.fallback_used",
-        "hf_impl_binding_fallback_used_under_paper_mode": "content_evidence.hf_impl_binding.fallback_used",
+        "lf_impl_binding_non_primary_binding_under_paper_mode": "content_evidence.lf_impl_binding.evidence_level",
+        "hf_impl_binding_non_primary_binding_under_paper_mode": "content_evidence.hf_impl_binding.evidence_level",
         "lf_ecc_int_not_allowed_under_paper_mode": "watermark.lf.ecc",
         # (S-D) Paper Faithfulness mismatch field paths
         "paper_spec_digest_absent_or_invalid": "paper_faithfulness.spec_digest",
@@ -2328,8 +2311,8 @@ def _resolve_primary_mismatch(mismatch_reasons: list[str]) -> tuple[str, str]:
         "hf_impl_binding_missing_under_paper_mode",
         "lf_impl_binding_impl_selected_absent",
         "hf_impl_binding_impl_selected_absent",
-        "lf_impl_binding_fallback_used_under_paper_mode",
-        "hf_impl_binding_fallback_used_under_paper_mode",
+        "lf_impl_binding_non_primary_binding_under_paper_mode",
+        "hf_impl_binding_non_primary_binding_under_paper_mode",
         "lf_ecc_int_not_allowed_under_paper_mode",
         # (S-D) Paper Faithfulness mismatch priority
         "paper_spec_digest_absent_or_invalid",
@@ -2350,7 +2333,7 @@ def _build_mismatch_fusion_decision(
     geometry_evidence_adapted: Dict[str, Any]
 ) -> FusionDecision:
     """
-    功能：构造 mismatch 的融合失败判决。
+    功能：构�?mismatch 的融合失败判决�?
 
     Build a single-path FusionDecision for mismatch failures.
 
@@ -2391,7 +2374,7 @@ def _build_planner_inputs_for_runtime(
     content_evidence_payload: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    功能：构造规划器输入签名。
+    功能：构造规划器输入签名�?
 
     Build deterministic planner input signature from runtime cfg.
 
@@ -2417,7 +2400,7 @@ def _build_planner_inputs_for_runtime(
     runtime_pipeline = cfg.get("__detect_pipeline_obj__")
     if runtime_pipeline is not None:
         inputs["pipeline"] = runtime_pipeline
-    # 将 detect 侧 per-step latent 缓存传递给 planner（内存传递，不写入 records）。
+    # �?detect �?per-step latent 缓存传递给 planner（内存传递，不写�?records）�?
     runtime_traj_cache = cfg.get("__detect_trajectory_latent_cache__")
     if runtime_traj_cache is not None:
         inputs["trajectory_latent_cache"] = runtime_traj_cache
@@ -2436,7 +2419,7 @@ def _build_planner_inputs_for_runtime(
 
 def run_calibrate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Dict[str, Any]:
     """
-    功能：执行校准流程并产出 NP 阈值工件。
+    功能：执行校准流程并产出 NP 阈值工件�?
 
     Execute calibration workflow and build NP thresholds artifacts.
 
@@ -2494,8 +2477,8 @@ def run_calibrate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> D
         "stratification": strata_info,
         "sample_digest": digests.canonical_sha256({"scores": [round(float(v), 12) for v in scores]}),
     }
-    # 过滤出仅 null 样本（与 load_scores_for_calibration 保持一致：排除 label=True 的正样本）。
-    # null_strata / conditional_fpr 语义要求统计对象仅为 null（负）样本，不能混入正样本。
+    # 过滤出仅 null 样本（与 load_scores_for_calibration 保持一致：排除 label=True 的正样本）�?
+    # null_strata / conditional_fpr 语义要求统计对象仅为 null（负）样本，不能混入正样本�?
     has_explicit_labels = strata_info.get("sampling_policy", {}).get("records_with_explicit_label", False)
     if has_explicit_labels:
         null_records_for_stats = [r for r in detect_records if _resolve_calibration_label(r) is not True]
@@ -2546,7 +2529,7 @@ def run_calibrate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> D
 
 def _pick_first_non_empty_string(values: list[Any]) -> Optional[str]:
     """
-    功能：从候选值列表中提取首个非空字符串。
+    功能：从候选值列表中提取首个非空字符串�?
 
     Select the first non-empty string from candidate values.
 
@@ -2564,7 +2547,7 @@ def _pick_first_non_empty_string(values: list[Any]) -> Optional[str]:
 
 def _resolve_cfg_digest_for_evaluate(cfg: Dict[str, Any], detect_records: list[Dict[str, Any]]) -> str:
     """
-    功能：解析 evaluate 报告的 cfg_digest 锚点。
+    功能：解�?evaluate 报告�?cfg_digest 锚点�?
 
     Resolve cfg_digest anchor for evaluation report.
 
@@ -2593,7 +2576,7 @@ def _resolve_cfg_digest_for_evaluate(cfg: Dict[str, Any], detect_records: list[D
 
 def _resolve_plan_digest_for_evaluate(cfg: Dict[str, Any], detect_records: list[Dict[str, Any]]) -> str:
     """
-    功能：解析 evaluate 报告的 plan_digest 锚点。
+    功能：解�?evaluate 报告�?plan_digest 锚点�?
 
     Resolve plan_digest anchor for evaluation report.
 
@@ -2648,7 +2631,7 @@ def _resolve_threshold_metadata_digest_for_evaluate(
     detect_records: list[Dict[str, Any]],
 ) -> str:
     """
-    功能：解析 evaluate 报告的 threshold_metadata_digest 锚点。
+    功能：解�?evaluate 报告�?threshold_metadata_digest 锚点�?
 
     Resolve threshold metadata digest anchor for evaluation report.
 
@@ -2682,7 +2665,7 @@ def _resolve_threshold_metadata_digest_for_evaluate(
         try:
             payload = records_io.read_json(str(path_obj))
         except Exception:
-            # metadata 工件不可读时跳过当前候选，继续尝试其他来源。
+            # metadata 工件不可读时跳过当前候选，继续尝试其他来源�?
             continue
         if isinstance(payload, dict):
             return digests.canonical_sha256(payload)
@@ -2698,7 +2681,7 @@ def _resolve_threshold_metadata_digest_for_evaluate(
 
 def _resolve_impl_digest_for_evaluate(cfg: Dict[str, Any], detect_records: list[Dict[str, Any]]) -> str:
     """
-    功能：解析 evaluate 报告的 impl_digest 锚点。
+    功能：解�?evaluate 报告�?impl_digest 锚点�?
 
     Resolve implementation digest anchor for evaluation report.
 
@@ -2732,7 +2715,7 @@ def _resolve_impl_digest_for_evaluate(cfg: Dict[str, Any], detect_records: list[
 
 def _resolve_policy_path_for_evaluate(cfg: Dict[str, Any], detect_records: list[Dict[str, Any]]) -> str:
     """
-    功能：解析 evaluate 报告的 policy_path 锚点。
+    功能：解�?evaluate 报告�?policy_path 锚点�?
 
     Resolve policy_path anchor for evaluation report.
 
@@ -2761,7 +2744,7 @@ def _resolve_policy_path_for_evaluate(cfg: Dict[str, Any], detect_records: list[
 
 def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Dict[str, Any]:
     """
-    功能：执行只读阈值评估流程。
+    功能：执行只读阈值评估流程�?
 
     Execute evaluation workflow in readonly-threshold mode.
 
@@ -2779,13 +2762,13 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
     thresholds_obj = load_thresholds_artifact_controlled(str(thresholds_path))
     detect_records = _load_records_for_evaluate(cfg)
     
-    # 记录 evaluate 开始前的 thresholds digest。
+    # 记录 evaluate 开始前�?thresholds digest�?
     thresholds_digest_before = digests.canonical_sha256(thresholds_obj)
     
-    # 使用 evaluation 模块代替内联逻辑。
+    # 使用 evaluation 模块代替内联逻辑�?
     attack_protocol_spec = eval_protocol_loader.load_attack_protocol_spec(cfg)
     
-    # 计算 overall 和 grouped metrics。
+    # 计算 overall �?grouped metrics�?
     aggregated_metrics = eval_metrics.aggregate_metrics(
         detect_records,
         thresholds_obj,
@@ -2794,18 +2777,18 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
     metrics_obj = aggregated_metrics.get("metrics_overall", {})
     breakdown = aggregated_metrics.get("breakdown", {})
     
-    # 重新加载 thresholds 工件并对比 digest。
+    # 重新加载 thresholds 工件并对�?digest�?
     thresholds_obj_after = load_thresholds_artifact_controlled(str(thresholds_path))
     thresholds_digest_after = digests.canonical_sha256(thresholds_obj_after)
     
     if thresholds_digest_before != thresholds_digest_after:
-        # thresholds 工件在 evaluate 过程中被修改，违反 NP 规则。
+        # thresholds 工件�?evaluate 过程中被修改，违�?NP 规则�?
         raise RuntimeError(
             f"thresholds 工件只读性验证失败\n"
             f"  - 路径: {thresholds_path}\n"
             f"  - digest_before: {thresholds_digest_before}\n"
             f"  - digest_after: {thresholds_digest_after}\n"
-            f"  - 原因: evaluate 侧修改或污染了 thresholds 工件"
+            f"  - 原因: evaluate 侧修改或污染�?thresholds 工件"
         )
     attack_group_metrics = aggregated_metrics.get("metrics_by_attack_condition", [])
     ablation_digest = _compute_ablation_digest_for_report(cfg)
@@ -2814,7 +2797,7 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
     coverage_manifest = eval_attack_coverage.compute_attack_coverage_manifest()
     attack_coverage_digest = coverage_manifest.get("attack_coverage_digest", "<absent>")
     
-    # 构造条件指标容器（向后兼容）。
+    # 构造条件指标容器（向后兼容）�?
     conditional_metrics = eval_report_builder.build_conditional_metrics_container(
         attack_protocol_spec.get("version", "<absent>"),
         attack_group_metrics,
@@ -2843,7 +2826,7 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
         used_threshold_id=thresholds_obj.get("threshold_id") if isinstance(thresholds_obj.get("threshold_id"), str) else None,
     )
 
-    # 使用 report_builder 组装完整报告。
+    # 使用 report_builder 组装完整报告�?
     thresholds_digest = digests.canonical_sha256(thresholds_obj)
     threshold_metadata_digest = _resolve_threshold_metadata_digest_for_evaluate(
         cfg,
@@ -2914,7 +2897,7 @@ def load_scores_for_calibration(
     cfg: Optional[Dict[str, Any]] = None,
 ) -> tuple[list[float], Dict[str, Any]]:
     """
-    功能：从 detect records 加载校准分数。 
+    功能：从 detect records 加载校准分数�?
 
     Load calibration scores from detect records using strict status filtering.
 
@@ -3033,7 +3016,7 @@ def load_scores_for_calibration(
 
 def _is_synthetic_fallback_calibration_sample(content_payload: Dict[str, Any]) -> bool:
     """
-    功能：判定样本是否属于 synthetic fallback 校准样本。 
+    功能：判定样本是否属�?synthetic fallback 校准样本�?
 
     Determine whether calibration sample is synthetic fallback and must be excluded.
 
@@ -3061,7 +3044,7 @@ def _is_synthetic_fallback_calibration_sample(content_payload: Dict[str, Any]) -
 
 def _resolve_calibration_label(record: Dict[str, Any]) -> Optional[bool]:
     """
-    功能：从 detect record 解析校准标签。 
+    功能：从 detect record 解析校准标签�?
 
     Resolve calibration label from detect record candidates.
 
@@ -3080,7 +3063,7 @@ def _resolve_calibration_label(record: Dict[str, Any]) -> Optional[bool]:
 
 def compute_np_threshold(scores: list[float], target_fpr: float) -> tuple[float, Dict[str, Any]]:
     """
-    功能：按 order-statistics 计算 NP 阈值。 
+    功能：按 order-statistics 计算 NP 阈值�?
 
     Compute Neyman-Pearson threshold using higher quantile order statistics.
 
@@ -3104,7 +3087,7 @@ def compute_np_threshold(scores: list[float], target_fpr: float) -> tuple[float,
 
 def load_thresholds_artifact_controlled(path: str) -> Dict[str, Any]:
     """
-    功能：只读加载阈值工件。 
+    功能：只读加载阈值工件�?
 
     Load thresholds artifact in read-only mode with schema checks.
 
@@ -3139,7 +3122,7 @@ def evaluate_records_against_threshold(
     attack_protocol_spec: Optional[Dict[str, Any]] = None,
 ) -> tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     """
-    功能：使用只读阈值评测 detect 记录。 
+    功能：使用只读阈值评�?detect 记录�?
 
     Evaluate detect records using precomputed thresholds artifact only.
     Now delegates to evaluation module for metric computation.
@@ -3157,7 +3140,7 @@ def evaluate_records_against_threshold(
         raise TypeError("threshold_value must be number")
     threshold_float = float(threshold_value)
 
-    # 使用 evaluation 模块计算指标。
+    # 使用 evaluation 模块计算指标�?
     if attack_protocol_spec is None:
         attack_protocol_spec = {
             "version": "<absent>",
@@ -3165,28 +3148,28 @@ def evaluate_records_against_threshold(
             "params_version_field_candidates": ["attack_params_version", "attack.params_version"],
         }
 
-    # Overall metrics。
+    # Overall metrics�?
     metrics, breakdown = eval_metrics.compute_overall_metrics(records, threshold_float)
     
-    # 补充 thresholds 工件元数据。
+    # 补充 thresholds 工件元数据�?
     metrics["metric_version"] = "tpr_at_fpr_v1"
     metrics["score_name"] = thresholds_obj.get("score_name", "content_score")
     metrics["target_fpr"] = thresholds_obj.get("target_fpr")
     metrics["threshold_value"] = threshold_float
     metrics["threshold_key_used"] = thresholds_obj.get("threshold_key_used")
 
-    # Grouped metrics。
+    # Grouped metrics�?
     attack_group_metrics = eval_metrics.compute_attack_group_metrics(
         records,
         threshold_float,
         attack_protocol_spec,
     )
 
-    # 计算条件指标中的 "items"（旧字段，用于向后兼容）。
+    # 计算条件指标中的 "items"（旧字段，用于向后兼容）�?
     conditional_metrics_old = _compute_conditional_metrics_for_evaluate(records, threshold_float)
     additional_items = conditional_metrics_old.get("items", [])
 
-    # 构造条件指标容器（向后兼容）。
+    # 构造条件指标容器（向后兼容）�?
     conditional_metrics = eval_report_builder.build_conditional_metrics_container(
         attack_protocol_spec.get("version", "<absent>"),
         attack_group_metrics,
@@ -3317,7 +3300,7 @@ def _extract_content_score_for_stats(record: Dict[str, Any]) -> Optional[float]:
 
 def _build_rescue_band_spec_for_detect(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
-    功能：在 detect 侧构造 rescue band 参数。 
+    功能：在 detect 侧构�?rescue band 参数�?
 
     Build rescue-band parameters for detect-side statistics.
 
@@ -3518,7 +3501,7 @@ def _compute_conditional_fpr_records_for_calibration(
         if hf_failure_decision is True:
             _update_condition_buffer(condition_buffers, "hf_failure_rule", score_float, pred_positive, sample_id)
 
-        # (新增) 跟踪 Geo 可用性规则事件
+        # (新增) 跟踪 Geo 可用性规则事�?
         geo_available = _extract_geo_available(item)
         if geo_available is True:
             _update_condition_buffer(condition_buffers, "geo_availability_rule", score_float, pred_positive, sample_id)
@@ -3594,7 +3577,7 @@ def _update_condition_buffer(
     sample_id: str,
 ) -> None:
     if condition_id not in condition_buffers:
-        # 条件不存在属于调用方逻辑错误，必须 fail-fast。
+        # 条件不存在属于调用方逻辑错误，必�?fail-fast�?
         raise ValueError(f"unknown condition_id: {condition_id}")
     payload = condition_buffers[condition_id]
     payload["scores"].append(float(score_value))
@@ -3662,7 +3645,7 @@ def _extract_align_quality_value(record: Dict[str, Any]) -> Optional[float]:
 
 def _extract_hf_failure_decision(record: Dict[str, Any]) -> Optional[bool]:
     """
-    从记录中提取 HF 失败决策字段。
+    从记录中提取 HF 失败决策字段�?
 
     Extract HF failure decision from content evidence.
 
@@ -3684,7 +3667,7 @@ def _extract_hf_failure_decision(record: Dict[str, Any]) -> Optional[bool]:
 
 def _extract_geo_available(record: Dict[str, Any]) -> Optional[bool]:
     """
-    从记录中提取几何可用性字段。
+    从记录中提取几何可用性字段�?
 
     Extract geometry availability decision from geometry evidence.
 
@@ -3706,7 +3689,7 @@ def _extract_geo_available(record: Dict[str, Any]) -> Optional[bool]:
 
 def _extract_geo_gate_applied(record: Dict[str, Any]) -> Optional[bool]:
     """
-    功能：从 decision 审计区提取 geo gate 是否生效。 
+    功能：从 decision 审计区提�?geo gate 是否生效�?
 
     Extract geo-gate-applied flag from decision payload.
 
@@ -3800,7 +3783,7 @@ def _extract_nested_value(payload: Dict[str, Any], dotted_path: str) -> Any:
 
 def _adapt_content_evidence_for_fusion(content_evidence: Any) -> Dict[str, Any]:
     """
-    功能：将 ContentEvidence 数据类适配为融合规则期望的字典格式。
+    功能：将 ContentEvidence 数据类适配为融合规则期望的字典格式�?
 
     Adapt ContentEvidence (dataclass or dict) to fusion rule expected format.
     Prioritizes .as_dict() method; falls back to direct dict or attribute extraction.
@@ -3815,14 +3798,14 @@ def _adapt_content_evidence_for_fusion(content_evidence: Any) -> Dict[str, Any]:
         TypeError: If content_evidence type is unrecognized.
     """
     if isinstance(content_evidence, dict):
-        # 已是字典，直接返回；但需确保 content_score 字段存在（fusion rule 读取该键，
-        # 而部分来源只写 score 键）。
+        # 已是字典，直接返回；但需确保 content_score 字段存在（fusion rule 读取该键�?
+        # 而部分来源只�?score 键）�?
         result_dict = cast(Dict[str, Any], content_evidence)
         if "content_score" not in result_dict and "score" in result_dict:
             result_dict["content_score"] = result_dict["score"]
         return result_dict
     
-    # 尝试用 .as_dict() 方法。
+    # 尝试�?.as_dict() 方法�?
     if hasattr(content_evidence, "as_dict") and callable(content_evidence.as_dict):
         try:
             converted = content_evidence.as_dict()
@@ -3832,13 +3815,13 @@ def _adapt_content_evidence_for_fusion(content_evidence: Any) -> Dict[str, Any]:
                     converted_dict["content_score"] = converted_dict["score"]
                 return converted_dict
         except Exception:
-            # 如果 .as_dict() 失败，继续尝试属性提取。
+            # 如果 .as_dict() 失败，继续尝试属性提取�?
             pass
     
-    # 从数据类属性直接构造。
+    # 从数据类属性直接构造�?
     adapted: Dict[str, Any] = {}
     
-    # 提取关键字段（来自 ContentEvidence 冻结结构）。
+    # 提取关键字段（来�?ContentEvidence 冻结结构）�?
     for field_name in ["status", "score", "audit", "mask_digest", "mask_stats",
                        "plan_digest", "basis_digest", "lf_trace_digest", "hf_trace_digest",
                        "lf_score", "hf_score", "score_parts", "trajectory_evidence",
@@ -3846,8 +3829,8 @@ def _adapt_content_evidence_for_fusion(content_evidence: Any) -> Dict[str, Any]:
         if hasattr(content_evidence, field_name):
             adapted[field_name] = getattr(content_evidence, field_name)
     
-    # 确保 content_score 字段存在：fusion rule 读取 content_score，
-    # 而 ContentEvidence 数据类只有 score 字段（两者语义等价）。
+    # 确保 content_score 字段存在：fusion rule 读取 content_score�?
+    # �?ContentEvidence 数据类只�?score 字段（两者语义等价）�?
     if "content_score" not in adapted and "score" in adapted:
         adapted["content_score"] = adapted["score"]
     
@@ -3856,7 +3839,7 @@ def _adapt_content_evidence_for_fusion(content_evidence: Any) -> Dict[str, Any]:
 
 def _adapt_geometry_evidence_for_fusion(geometry_evidence: Any) -> Dict[str, Any]:
     """
-    功能：将 GeometryEvidence 数据类适配为融合规则期望的字典格式。
+    功能：将 GeometryEvidence 数据类适配为融合规则期望的字典格式�?
 
     Adapt GeometryEvidence (dataclass or dict) to fusion rule expected format.
     Prioritizes .as_dict() method; falls back to direct dict or attribute extraction.
@@ -3871,31 +3854,29 @@ def _adapt_geometry_evidence_for_fusion(geometry_evidence: Any) -> Dict[str, Any
         TypeError: If geometry_evidence type is unrecognized.
     """
     if isinstance(geometry_evidence, dict):
-        # 已是字典，直接返回。
+        # 已是字典，直接返回�?
         return cast(Dict[str, Any], geometry_evidence)
     
-    # 尝试用 .as_dict() 方法。
+    # 尝试�?.as_dict() 方法�?
     if hasattr(geometry_evidence, "as_dict") and callable(geometry_evidence.as_dict):
         try:
             converted = geometry_evidence.as_dict()
             if isinstance(converted, dict):
                 return cast(Dict[str, Any], converted)
         except Exception:
-            # 如果 .as_dict() 失败，继续尝试属性提取。
+            # 如果 .as_dict() 失败，继续尝试属性提取�?
             pass
     
-    # 从数据类属性直接构造。
+    # 从数据类属性直接构造�?
     adapted: Dict[str, Any] = {}
     
-    # 提取关键字段（来自 GeometryEvidence 冻结结构）。
+    # 提取关键字段（来�?GeometryEvidence 冻结结构）�?
     for field_name in [
         "status",
         "geo_score",
         "audit",
         "anchor_digest",
         "anchor_config_digest",
-        "align_trace_digest",
-        "align_residuals",
         "anchor_metrics",
         "stability_metrics",
         "sync_digest",
@@ -3903,8 +3884,6 @@ def _adapt_geometry_evidence_for_fusion(geometry_evidence: Any) -> Dict[str, Any
         "sync_config_digest",
         "sync_quality_metrics",
         "resolution_binding",
-        "align_metrics",
-        "align_config_digest",
         "geo_score_direction",
         "geo_failure_reason",
         "geometry_failure_reason",
@@ -3917,7 +3896,7 @@ def _adapt_geometry_evidence_for_fusion(geometry_evidence: Any) -> Dict[str, Any
 
 def _is_image_domain_sidecar_enabled(cfg: Dict[str, Any], ablation_override: bool | None = None) -> bool:
     """
-    功能：解析图像域 sidecar 开关。
+    功能：解析图像域 sidecar 开关�?
 
     Resolve whether image-domain detector sidecar is enabled.
 
@@ -3938,12 +3917,13 @@ def _is_image_domain_sidecar_enabled(cfg: Dict[str, Any], ablation_override: boo
     paper_cfg = cast(Dict[str, Any], paper_node) if isinstance(paper_node, dict) else {}
     if bool(paper_cfg.get("enabled", False)):
         return False
-    return True
+    # v2.0 正式路径收口后，sidecar 默认禁用；必须显式配置才能启用�?
+    return False
 
 
 def _is_synthetic_negative_closure_sample(content_payload: Dict[str, Any]) -> bool:
     """
-    功能：判定样本是否为 synthetic negative closure 标记样本。 
+    功能：判定样本是否为 synthetic negative closure 标记样本�?
 
     Determine whether sample is marked as synthetic negative closure.
 
@@ -3959,49 +3939,9 @@ def _is_synthetic_negative_closure_sample(content_payload: Dict[str, Any]) -> bo
     return usage_value == "synthetic_negative_for_ground_truth_closure"
 
 
-def _precompute_relation_digest_for_sync(
-    cfg: Dict[str, Any],
-    enable_attention_proxy: bool = True,
-) -> str | None:
-    """
-    功能：sync_primary 模式下为 sync 预计算 relation_digest（不产出 anchor 证据字段）。
-
-    Pre-compute a relation_digest seed from available attention inputs so that
-    sync_primary mode can provide a non-None relation_digest to the v2 sync module
-    without first executing the anchor extractor.
-
-    The computed digest is derived solely from attention map statistics; it does not
-    constitute an anchor result and must not be written to records.
-
-    Args:
-        cfg: Configuration mapping with optional transient attention fields.
-        enable_attention_proxy: Whether proxy attention maps are allowed as source.
-
-    Returns:
-        Hex digest string if attention inputs are available, otherwise None.
-    """
-    # 仅使用真实 runtime self-attention；不再从 final_latents 构造代理 attention。
-    attention_maps = _resolve_runtime_self_attention_maps(cfg)
-
-    if attention_maps is None:
-        return None
-
-    try:
-        attention_arr = np.asarray(attention_maps)
-        return digests.canonical_sha256({
-            "shape": list(attention_arr.shape),
-            "mean": float(np.mean(attention_arr)),
-            "std": float(np.std(attention_arr)),
-            "max": float(np.max(attention_arr)),
-            "min": float(np.min(attention_arr)),
-        })
-    except Exception:
-        return None
-
-
 def _resolve_runtime_self_attention_maps(cfg: Dict[str, Any]) -> Any:
     """
-    功能：解析 detect 侧真实 self-attention maps 载荷。
+    功能：解�?detect 侧真�?self-attention maps 载荷�?
 
     Resolve runtime self-attention maps from detect transient fields.
 
@@ -4024,7 +3964,7 @@ def _resolve_runtime_self_attention_maps(cfg: Dict[str, Any]) -> Any:
 
 def _extract_subspace_evidence_semantics(plan_payload: Any) -> Dict[str, Any]:
     """
-    功能：从计划载荷中提取子空间证据语义。
+    功能：从计划载荷中提取子空间证据语义�?
 
     Extract subspace evidence semantics from planner payload.
 
@@ -4059,16 +3999,16 @@ def _build_geometry_runtime_inputs(
     cfg: Dict[str, Any],
     sync_result: Dict[str, Any] | None = None,
     anchor_result: Dict[str, Any] | None = None,
-    enable_attention_proxy: bool = True,
 ) -> Dict[str, Any]:
     """
-    功能：构造几何链运行时输入域。
+    功能：构造几何链运行时输入域�?
 
     Build geometry runtime input payload for sync and extractor.
 
     Args:
         cfg: Configuration mapping.
         sync_result: Optional sync result mapping.
+        anchor_result: Optional anchor result mapping.
 
     Returns:
         Runtime inputs mapping.
@@ -4090,19 +4030,11 @@ def _build_geometry_runtime_inputs(
             runtime_inputs["attention_capture_source"] = capture_source
         else:
             runtime_inputs["attention_capture_source"] = "hook_capture"
-    if enable_attention_proxy:
-        if "attention_maps" not in runtime_inputs:
-            if paper_enabled:
-                runtime_inputs["attention_proxy_status"] = "absent"
-                runtime_inputs["attention_proxy_absent_reason"] = "paper_mode_requires_runtime_self_attention"
-                runtime_inputs["attention_maps_missing_reason"] = "runtime_self_attention_missing_under_paper_mode"
-                return runtime_inputs
-            # latent proxy 路径已移除；无真实 self-attention 时 attention_maps 缺失。
-            runtime_inputs["attention_proxy_status"] = "absent"
-            runtime_inputs["attention_proxy_absent_reason"] = "runtime_self_attention_missing_no_proxy"
-    else:
-        runtime_inputs["attention_proxy_status"] = "absent"
-        runtime_inputs["attention_proxy_absent_reason"] = "attention_proxy_disabled_by_ablation"
+    elif paper_enabled:
+        # paper 正式路径要求 runtime self-attention，无则返�?absent�?
+        runtime_inputs["attention_maps_source"] = "absent"
+        runtime_inputs["attention_maps_missing_reason"] = "runtime_self_attention_missing_under_paper_mode"
+        return runtime_inputs
     if isinstance(anchor_result, dict):
         relation_digest = anchor_result.get("relation_digest")
         if isinstance(relation_digest, str) and relation_digest:
@@ -4119,8 +4051,8 @@ def _build_geometry_runtime_inputs(
         if isinstance(sync_digest, str) and sync_digest:
             runtime_inputs["sync_digest"] = sync_digest
         runtime_inputs["sync_result"] = sync_result
-    # embed 侧 latent 空间统计（由 run_detect.py 从 input_record 注入），
-    # 供 sync 模块做 cross-comparison 替代单侧统计。
+    # embed �?latent 空间统计（由 run_detect.py �?input_record 注入），
+    # �?sync 模块�?cross-comparison 替代单侧统计�?
     embed_latent_stats = cfg.get("__embed_latent_spatial_stats__")
     if isinstance(embed_latent_stats, dict):
         runtime_inputs["embed_latent_stats"] = embed_latent_stats
@@ -4129,7 +4061,7 @@ def _build_geometry_runtime_inputs(
 
 def _run_sync_module_for_detect(sync_module: Any, cfg: Dict[str, Any], runtime_inputs: Dict[str, Any]) -> Dict[str, Any]:
     """
-    功能：在 detect 侧执行同步模块。
+    功能：在 detect 侧执行同步模块�?
 
     Execute sync module for detect runtime.
 
@@ -4197,10 +4129,9 @@ def _run_geometry_chain_with_sync(
     *,
     enable_anchor: bool = True,
     enable_sync: bool = True,
-    enable_attention_proxy: bool = True,
 ) -> Any:
     """
-    功能：detect 几何链按主辅层级执行：sync 优先，anchor 仅在 sync 成功后启用。
+    功能：detect 几何链按主辅层级执行：sync 优先，anchor 仅在 sync 成功后启用�?
 
     Run detect geometry chain with sync-primary/anchor-secondary hard gate.
     When sync_primary_anchor_secondary is enabled, anchor extraction is
@@ -4217,21 +4148,13 @@ def _run_geometry_chain_with_sync(
     sync_primary_mode = _is_sync_primary_anchor_secondary_enabled(cfg)
 
     if sync_primary_mode:
-        # sync_primary 模式：先执行 sync（主几何证据），再按 sync 结果门控 anchor（辅锚点）。
-        # 研究目标：Self-Attention 辅锚点仅在主同步成功后启用。
+        # sync_primary 模式：先执行 sync（主几何证据），再按 sync 结果门控 anchor（辅锚点）�?
+        # 研究目标：Self-Attention 辅锚点仅在主同步成功后启用�?
         #
-        # relation_digest 修复：sync v2 要求 relation_digest 来自 anchor 注意力对比，
-        # 但 sync_primary 先于 anchor，形成循环依赖。解决方案：在 sync 前基于可用
-        # attention 输入预计算一个纯统计摘要（不产出 anchor 证据字段），注入 sync 输入。
-        # anchor hard-gate 语义（sync 失败时 anchor=absent）保持不变。
+        # v3 实现：sync v3 使用 template_match_score 作为 geo_score�?
+        # 不再需要预计算 relation_digest（该循环依赖已消除）�?
         if enable_sync:
-            precomputed_relation_digest = _precompute_relation_digest_for_sync(
-                cfg, enable_attention_proxy=enable_attention_proxy
-            )
-            sync_base_inputs = _build_geometry_runtime_inputs(cfg, enable_attention_proxy=enable_attention_proxy)
-            if isinstance(precomputed_relation_digest, str) and precomputed_relation_digest:
-                sync_base_inputs["relation_digest"] = precomputed_relation_digest
-                sync_base_inputs["relation_digest_source"] = "precomputed_for_sync_primary"
+            sync_base_inputs = _build_geometry_runtime_inputs(cfg)
             sync_module = getattr(impl_set, "sync_module", None)
             sync_result: Dict[str, Any] = _run_sync_module_for_detect(sync_module, cfg, sync_base_inputs)
         else:
@@ -4245,8 +4168,8 @@ def _run_geometry_chain_with_sync(
             sync_result.get("sync_status") or sync_result.get("status")
         )
 
-        # 辅锚点硬门控：仅当 sync 成功时才执行 anchor，
-        # 避免产出"稳定但不可信"的伪几何证据。
+        # 辅锚点硬门控：仅�?sync 成功时才执行 anchor�?
+        # 避免产出"稳定但不可信"的伪几何证据�?
         anchor_gated_out = False
         anchor_result: Dict[str, Any]
         if enable_anchor:
@@ -4268,7 +4191,6 @@ def _run_geometry_chain_with_sync(
                 base_inputs = _build_geometry_runtime_inputs(
                     cfg,
                     sync_result=sync_result,
-                    enable_attention_proxy=enable_attention_proxy,
                 )
                 anchor_result_raw = _run_geometry_extractor_with_runtime_inputs(
                     impl_set.geometry_extractor, cfg, base_inputs
@@ -4291,9 +4213,9 @@ def _run_geometry_chain_with_sync(
             }
             anchor_gated_out = False
     else:
-        # 兼容模式：先执行 anchor，再执行 sync（保持旧有排序）。
+        # 兼容模式：先执行 anchor，再执行 sync（保持旧有排序）�?
         anchor_gated_out = False
-        base_inputs = _build_geometry_runtime_inputs(cfg, enable_attention_proxy=enable_attention_proxy)
+        base_inputs = _build_geometry_runtime_inputs(cfg)
         base_inputs["sync_result"] = {
             "status": "absent",
             "sync_status": "pending_anchor_first",
@@ -4327,7 +4249,6 @@ def _run_geometry_chain_with_sync(
             sync_inputs = _build_geometry_runtime_inputs(
                 cfg,
                 anchor_result=anchor_result,
-                enable_attention_proxy=enable_attention_proxy,
             )
             sync_module = getattr(impl_set, "sync_module", None)
             sync_result = _run_sync_module_for_detect(sync_module, cfg, sync_inputs)
@@ -4358,7 +4279,7 @@ def _run_geometry_chain_with_sync(
     relation_digest_bound = sync_result.get("relation_digest_bound")
     if isinstance(relation_digest_bound, str) and relation_digest_bound:
         geometry_result["relation_digest_bound"] = relation_digest_bound
-    # sync_digest 提升：将 sync_result.sync_digest 暴露于顶层，供 assert_paper_mechanisms 读取。
+    # sync_digest 提升：将 sync_result.sync_digest 暴露于顶层，�?assert_paper_mechanisms 读取�?
     if not isinstance(geometry_result.get("sync_digest"), str) or not geometry_result.get("sync_digest"):
         sync_digest_val = sync_result.get("sync_digest")
         if isinstance(sync_digest_val, str) and sync_digest_val:
@@ -4374,8 +4295,8 @@ def _run_geometry_chain_with_sync(
         anchor_result=anchor_result,
         sync_result=sync_result,
     )
-    # sync_primary 模式下 sync 成功时，将 sync geo_score（quality_score）写入 geometry_result，
-    # 确保 _extract_geometry_score 可读取到有效浮点分数。
+    # sync_primary 模式�?sync 成功时，�?sync geo_score（quality_score）写�?geometry_result�?
+    # 确保 _extract_geometry_score 可读取到有效浮点分数�?
     if sync_primary_mode:
         sync_status_for_geo = _normalize_geometry_chain_status(
             sync_result.get("sync_status") or sync_result.get("status")
@@ -4389,7 +4310,7 @@ def _run_geometry_chain_with_sync(
 
 def _is_sync_primary_anchor_secondary_enabled(cfg: Dict[str, Any]) -> bool:
     """
-    功能：解析 detect 几何链主辅证据切换开关。 
+    功能：解�?detect 几何链主辅证据切换开关�?
 
     Resolve controlled switch for sync-primary and anchor-secondary semantics.
 
@@ -4414,7 +4335,7 @@ def _is_sync_primary_anchor_secondary_enabled(cfg: Dict[str, Any]) -> bool:
 
 def _normalize_geometry_chain_status(raw_status: Any) -> str:
     """
-    功能：归一化几何链状态到 ok/absent/mismatch/failed。 
+    功能：归一化几何链状态到 ok/absent/mismatch/failed�?
 
     Normalize geometry chain status into canonical enum.
 
@@ -4444,7 +4365,7 @@ def _enforce_sync_primary_anchor_secondary(
     sync_result: Dict[str, Any],
 ) -> Dict[str, Any]:
     """
-    功能：在受控开关下执行 sync 主证据、anchor 辅证据语义。 
+    功能：在受控开关下执行 sync 主证据、anchor 辅证据语义�?
 
     Enforce sync-primary and anchor-secondary semantics with rollback-safe switch.
 
@@ -4496,7 +4417,7 @@ def _run_geometry_extractor_with_runtime_inputs(
     runtime_inputs: Dict[str, Any] | None = None
 ) -> Any:
     """
-    功能：以兼容方式调用 geometry extractor。 
+    功能：以兼容方式调用 geometry extractor�?
 
     Invoke geometry extractor with runtime inputs when supported.
 
@@ -4511,7 +4432,7 @@ def _run_geometry_extractor_with_runtime_inputs(
         runtime_inputs = _build_geometry_runtime_inputs(cfg)
     extract_method = getattr(geometry_extractor, "extract", None)
     if not callable(extract_method):
-        # geometry_extractor 协议不合法，必须 fail-fast。
+        # geometry_extractor 协议不合法，必须 fail-fast�?
         raise TypeError("geometry_extractor.extract must be callable")
     try:
         extracted = extract_method(cfg, inputs=runtime_inputs)
@@ -4525,13 +4446,13 @@ def _run_geometry_extractor_with_runtime_inputs(
                 extracted_mapping["attention_capture_source"] = attention_source
         return cast(Any, extracted)
     except TypeError:
-        # 兼容旧实现：仅接受 cfg 参数。
+        # 兼容旧实现：仅接�?cfg 参数�?
         return cast(Any, extract_method(cfg))
 
 
 def _get_ablation_normalized(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
-    功能：读取 ablation.normalized 开关段。
+    功能：读�?ablation.normalized 开关段�?
 
     Read ablation.normalized switch settings from cfg.
 
@@ -4556,7 +4477,7 @@ def _get_ablation_normalized(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
 def _compute_ablation_digest_for_report(cfg: Dict[str, Any]) -> str:
     """
-    功能：计算评测报告使用的 ablation_digest。 
+    功能：计算评测报告使用的 ablation_digest�?
 
     Compute canonical ablation digest from normalized ablation config.
 
@@ -4572,7 +4493,7 @@ def _compute_ablation_digest_for_report(cfg: Dict[str, Any]) -> str:
 
 def _compute_ablation_digest_v2_for_report(cfg: Dict[str, Any]) -> str:
     """
-    功能：计算扩展口径 ablation_digest_v2。 
+    功能：计算扩展口�?ablation_digest_v2�?
 
     Compute expanded ablation digest that binds high-impact runtime switches.
 
@@ -4597,7 +4518,7 @@ def _compute_ablation_digest_v2_for_report(cfg: Dict[str, Any]) -> str:
 
 def _collect_attack_trace_digest(records: list[Dict[str, Any]]) -> str:
     """
-    功能：聚合 detect records 中攻击追踪摘要。 
+    功能：聚�?detect records 中攻击追踪摘要�?
 
     Collect deterministic aggregate digest from per-record attack traces.
 
@@ -4628,7 +4549,7 @@ def _collect_attack_trace_digest(records: list[Dict[str, Any]]) -> str:
 
 def _build_ablation_absent_content_evidence(absent_reason: str) -> Dict[str, Any]:
     """
-    功能：构造 ablation 禁用时的 content_evidence absent 语义。
+    功能：构�?ablation 禁用时的 content_evidence absent 语义�?
 
     Build content_evidence with status="absent" for ablation-disabled modules.
 
@@ -4664,13 +4585,13 @@ def _build_ablation_absent_content_evidence(absent_reason: str) -> Dict[str, Any
             "routing_digest": "<absent>",
             "routing_absent_reason": absent_reason,
         },
-        "content_failure_reason": None  # absent 状态下无失败原因
+        "content_failure_reason": None  # absent 状态下无失败原�?
     }
 
 
 def _build_ablation_absent_geometry_evidence(absent_reason: str) -> Dict[str, Any]:
     """
-    功能：构造 ablation 禁用时的 geometry_evidence absent 语义。
+    功能：构�?ablation 禁用时的 geometry_evidence absent 语义�?
 
     Build geometry_evidence with status="absent" for ablation-disabled modules.
 
@@ -4702,14 +4623,13 @@ def _build_ablation_absent_geometry_evidence(absent_reason: str) -> Dict[str, An
         "anchor_metrics": None,
         "sync_digest": None,
         "sync_metrics": None,
-        "align_trace_digest": None,
-        "geo_failure_reason": None  # absent 状态下无失败原因
+        "geo_failure_reason": None  # absent 状态下无失败原�?
     }
 
 
-# ————————————————————————————
-# Cryptographic generation attestation 验证（附加函数，不修改原有 run_detect_orchestrator）
-# ————————————————————————————
+# ———————————————————————————�?
+# Cryptographic generation attestation 验证（附加函数，不修改原�?run_detect_orchestrator�?
+# ———————————————————————————�?
 
 def verify_attestation(
     k_master: str,
@@ -4726,7 +4646,7 @@ def verify_attestation(
     lf_params: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    功能：验证图像是否来自一次真实生成事件（cryptographic generation attestation）。
+    功能：验证图像是否来自一次真实生成事件（cryptographic generation attestation）�?
 
     Verify whether an image originated from a specific generation event by
     reconstructing the attestation keys from a candidate statement and measuring
@@ -4758,7 +4678,7 @@ def verify_attestation(
         content_evidence: Optional content detection evidence dict (for lf_score fallback).
         hf_values: Optional HF channel feature values for template correlation.
         lf_latent_features: Optional LF latent features for attestation bit correlation.
-        geo_score: Optional geometry chain score (0–1), passed through.
+        geo_score: Optional geometry chain score (0�?), passed through.
         lf_weight: Score weight for LF channel (default 0.5).
         hf_weight: Score weight for HF channel (default 0.3).
         geo_weight: Score weight for GEO channel (default 0.2).
@@ -4801,7 +4721,7 @@ def verify_attestation(
 
     mismatch_reasons: list = []
 
-    # (1) 验证并重建 statement。
+    # (1) 验证并重�?statement�?
     if not verify_statement_fields(candidate_statement):
         mismatch_reasons.append("statement_fields_invalid")
         return {
@@ -4828,10 +4748,10 @@ def verify_attestation(
             "mismatch_reasons": mismatch_reasons,
         }
 
-    # (2) 计算 attestation digest d_A。
+    # (2) 计算 attestation digest d_A�?
     d_a = compute_attestation_digest(statement)
 
-    # (3) 派生四类子密钥。
+    # (3) 派生四类子密钥�?
     try:
         attest_keys = derive_attestation_keys(k_master, d_a)
     except (TypeError, ValueError) as exc:
@@ -4846,12 +4766,12 @@ def verify_attestation(
             "mismatch_reasons": mismatch_reasons,
         }
 
-    # (4) 计算各通道 attestation 得分。
+    # (4) 计算各通道 attestation 得分�?
     s_lf: Optional[float] = None
     s_hf: Optional[float] = None
     s_geo: Optional[float] = None
 
-    # LF 通道：基于 latent 后验与 attestation payload 的符号一致率。
+    # LF 通道：基�?latent 后验�?attestation payload 的符号一致率�?
     if lf_latent_features is not None:
         try:
             lf_result = compute_lf_attestation_score(
@@ -4865,12 +4785,12 @@ def verify_attestation(
         except Exception:
             mismatch_reasons.append("lf_attestation_score_failed")
     elif content_evidence is not None:
-        # 回退：使用现有内容检测分数作为 LF 代理。
+        # 回退：使用现有内容检测分数作�?LF 代理�?
         raw_lf = content_evidence.get("lf_score")
         if isinstance(raw_lf, (int, float)):
             s_lf = float(raw_lf)
 
-    # HF 通道：基于 HF 值与 key-conditioned template 的符号相关。
+    # HF 通道：基�?HF 值与 key-conditioned template 的符号相关�?
     if hf_values is not None:
         try:
             hf_result = compute_hf_attestation_score(
@@ -4882,11 +4802,11 @@ def verify_attestation(
         except Exception:
             mismatch_reasons.append("hf_attestation_score_failed")
 
-    # GEO 通道：直接使用调用方提供的几何链得分。
+    # GEO 通道：直接使用调用方提供的几何链得分�?
     if geo_score is not None and isinstance(geo_score, (int, float)):
         s_geo = float(max(0.0, min(1.0, geo_score)))
 
-    # (5) 检查是否缺少必要输入。
+    # (5) 检查是否缺少必要输入�?
     if s_lf is None and s_hf is None and s_geo is None:
         return {
             "verdict": "absent",
@@ -4898,7 +4818,7 @@ def verify_attestation(
             "mismatch_reasons": ["all_channel_scores_absent"],
         }
 
-    # (6) 加权融合（仅对有效通道归一化权重）。
+    # (6) 加权融合（仅对有效通道归一化权重）�?
     effective_weights: Dict[str, float] = {}
     if s_lf is not None:
         effective_weights["lf"] = lf_weight
@@ -4927,7 +4847,7 @@ def verify_attestation(
                 verdict = "mismatch"
                 mismatch_reasons.append(f"fusion_score_below_threshold: {fusion_score:.4f} < {attested_threshold}")
 
-    # (7) 构造审计摘要（可复算）。
+    # (7) 构造审计摘要（可复算）�?
     trace_payload: Dict[str, Any] = {
         "attestation_digest": d_a,
         "lf_weight": lf_weight,

@@ -32,7 +32,7 @@ class TestGeometryAnchorEnforcement:
         detect_dir.mkdir(parents=True)
 
         record = {
-            "policy_path": "content_with_geometry_gate",
+            "policy_path": "content_np_geo_rescue_v2",
             "detect": {
                 "geometry": {
                     "enabled": True
@@ -62,7 +62,7 @@ class TestGeometryAnchorEnforcement:
         detect_dir.mkdir(parents=True)
 
         record = {
-            "policy_path": "content_with_geometry_gate",
+            "policy_path": "content_np_geo_rescue_v2",
             "detect": {
                 "geometry": {
                     "enabled": True
@@ -92,7 +92,7 @@ class TestGeometryAnchorEnforcement:
         detect_dir.mkdir(parents=True)
 
         record = {
-            "policy_path": "content_with_geometry_gate",
+            "policy_path": "content_np_geo_rescue_v2",
             "detect": {
                 "geometry": {
                     "enabled": True
@@ -149,7 +149,7 @@ class TestGeometryAnchorEnforcement:
         detect_dir.mkdir(parents=True)
 
         record = {
-            "policy_path": "content_with_geometry_gate",
+            "policy_path": "content_np_geo_rescue_v2",
             "detect": {
                 "geometry": {
                     "enabled": True
@@ -180,7 +180,7 @@ class TestGeometryAnchorEnforcement:
         detect_dir.mkdir(parents=True)
 
         record = {
-            "policy_path": "content_with_geometry_gate",
+            "policy_path": "content_np_geo_rescue_v2",
             "detect": {
                 "geometry": {
                     "enabled": True

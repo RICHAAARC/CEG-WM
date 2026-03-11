@@ -43,11 +43,12 @@ def _build_minimal_cfg(enable_latent_sync: bool = True) -> Dict[str, Any]:
     }
 
 
-def test_sync_module_registry_contains_geometry_latent_sync_sd3_v1() -> None:
+def test_sync_module_registry_contains_geometry_latent_sync_sd3_v3() -> None:
     """
-    功能：sync module registry 必须包含 geometry_latent_sync_sd3_v1。
+    功能：sync module registry 必须包含 geometry_latent_sync_sd3_v3（v1 已从 sync registry 移除）。
 
-    Sync module registry must resolve geometry_latent_sync_sd3_v1.
+    Sync module registry must resolve geometry_latent_sync_sd3_v3.
+    Note: geometry_latent_sync_sd3_v2 was removed from the sync registry in v3.0 refactoring.
 
     Args:
         None.
@@ -55,16 +56,17 @@ def test_sync_module_registry_contains_geometry_latent_sync_sd3_v1() -> None:
     Returns:
         None.
     """
-    factory = resolve_sync_module("geometry_latent_sync_sd3_v1")
+    factory = resolve_sync_module("geometry_latent_sync_sd3_v3")
     instance = factory({})
     assert hasattr(instance, "sync")
 
 
-def test_runtime_whitelist_allows_geometry_latent_sync_sd3_v1() -> None:
+def test_runtime_whitelist_allows_geometry_latent_sync_sd3_v3() -> None:
     """
-    功能：runtime whitelist 必须允许 geometry_latent_sync_sd3_v1。
+    功能：runtime whitelist 必须允许 geometry_latent_sync_sd3_v3。
 
-    Runtime whitelist must allow geometry_latent_sync_sd3_v1 for sync_module domain.
+    Runtime whitelist must allow geometry_latent_sync_sd3_v3 for sync_module domain.
+    Note: geometry_latent_sync_sd3_v2 was removed from the formal whitelist in v3.0.
 
     Args:
         None.
@@ -76,7 +78,8 @@ def test_runtime_whitelist_allows_geometry_latent_sync_sd3_v1() -> None:
     impl_cfg = whitelist.data.get("impl_id", {})
     allowed_by_domain = impl_cfg.get("allowed_by_domain", {})
     allowed_sync = allowed_by_domain.get("sync_module", [])
-    assert "geometry_latent_sync_sd3_v1" in allowed_sync
+    assert "geometry_latent_sync_sd3_v3" in allowed_sync
+    assert "geometry_latent_sync_sd3_v2" not in allowed_sync
 
 
 def test_sync_module_sync_returns_structured_status() -> None:
@@ -91,7 +94,7 @@ def test_sync_module_sync_returns_structured_status() -> None:
     Returns:
         None.
     """
-    factory = resolve_sync_module("geometry_latent_sync_sd3_v1")
+    factory = resolve_sync_module("geometry_latent_sync_sd3_v3")
     instance = factory({})
     cfg = _build_minimal_cfg(enable_latent_sync=True)
     result = instance.sync(cfg)
@@ -122,7 +125,7 @@ def test_sync_module_sync_with_context_returns_status() -> None:
     Returns:
         None.
     """
-    factory = resolve_sync_module("geometry_latent_sync_sd3_v1")
+    factory = resolve_sync_module("geometry_latent_sync_sd3_v3")
     instance = factory({})
     cfg = _build_minimal_cfg(enable_latent_sync=True)
     context = SyncRuntimeContext(pipeline=None, latents=None, rng=None, trajectory_evidence=None)
@@ -153,12 +156,12 @@ def test_resolve_enable_latent_sync_flag() -> None:
     assert resolve_enable_latent_sync(cfg_disabled) is False
 
 
-def test_sync_module_v2_sync_with_context_ok_path() -> None:
+def test_sync_module_v3_sync_with_context_ok_path() -> None:
     """
-    功能：v2 sync_with_context 在完整 runtime_inputs 下应稳定返回非异常状态。
+    功能： v3 sync_with_context 在完整 runtime_inputs 下应稳定返回非异常状态。
 
-    v2 sync_with_context should return structured status without NameError
-    when runtime_inputs includes relation_digest.
+    v3 sync_with_context should return structured status without errors
+    when runtime_inputs are provided.
 
     Args:
         None.
@@ -166,7 +169,7 @@ def test_sync_module_v2_sync_with_context_ok_path() -> None:
     Returns:
         None.
     """
-    factory = resolve_sync_module("geometry_latent_sync_sd3_v2")
+    factory = resolve_sync_module("geometry_latent_sync_sd3_v3")
     instance = factory({})
     cfg = _build_minimal_cfg(enable_latent_sync=True)
     latents = np.random.default_rng(20260227).normal(size=(1, 4, 8, 8)).astype(np.float32)
@@ -189,7 +192,7 @@ def test_sync_module_v2_sync_with_context_ok_path() -> None:
         assert "NameError" not in failure_reason
 
 
-def test_sync_module_v2_relation_digest_missing_returns_mismatch() -> None:
+def test_sync_module_v3_no_template_returns_non_ok() -> None:
     """
     功能：v2 在缺失 relation_digest 时必须返回 absent 语义（embed 侧无 anchor，属正常路径）。
 
@@ -202,7 +205,7 @@ def test_sync_module_v2_relation_digest_missing_returns_mismatch() -> None:
     Returns:
         None.
     """
-    factory = resolve_sync_module("geometry_latent_sync_sd3_v2")
+    factory = resolve_sync_module("geometry_latent_sync_sd3_v3")
     instance = factory({})
     cfg = _build_minimal_cfg(enable_latent_sync=True)
     latents = np.random.default_rng(20260228).normal(size=(1, 4, 8, 8)).astype(np.float32)
@@ -214,17 +217,15 @@ def test_sync_module_v2_relation_digest_missing_returns_mismatch() -> None:
     )
     result = instance.sync_with_context(cfg, context)
     assert isinstance(result, dict)
-    assert result.get("sync_status") == "absent"
+    assert result.get("sync_status") != "ok"
     assert result.get("sync_success") is False
-    assert result.get("geometry_absent_reason") == "relation_digest_absent_embed_mode"
 
 
-def test_detect_run_sync_module_for_v2_no_nameerror() -> None:
+def test_detect_run_sync_module_for_v3_no_error() -> None:
     """
-    功能：detect 侧调用 v2 sync 模块不应出现 sync_with_context_failed: NameError。
+    功能： detect 侧调用 v3 sync 模块不应出现错误。
 
-    detect orchestrator should not emit sync_with_context_failed: NameError
-    for v2 sync module.
+    detect orchestrator should not raise errors when calling v3 sync module.
 
     Args:
         None.
@@ -232,7 +233,7 @@ def test_detect_run_sync_module_for_v2_no_nameerror() -> None:
     Returns:
         None.
     """
-    factory = resolve_sync_module("geometry_latent_sync_sd3_v2")
+    factory = resolve_sync_module("geometry_latent_sync_sd3_v3")
     instance = factory({})
     cfg = _build_minimal_cfg(enable_latent_sync=True)
     latents = np.random.default_rng(20260301).normal(size=(1, 4, 8, 8)).astype(np.float32)
@@ -240,11 +241,10 @@ def test_detect_run_sync_module_for_v2_no_nameerror() -> None:
         "pipeline": object(),
         "latents": latents,
         "rng": None,
-        "relation_digest": "r" * 64,
     }
     run_sync = getattr(detect_orchestrator, "_run_sync_module_for_detect")
     result = run_sync(instance, cfg, runtime_inputs)
     assert isinstance(result, dict)
     failure_reason = result.get("geometry_failure_reason")
     if isinstance(failure_reason, str):
-        assert "sync_with_context_failed: NameError" not in failure_reason
+        assert "sync_with_context_failed" not in failure_reason

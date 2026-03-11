@@ -259,10 +259,13 @@ policy_paths:
 
   # ------------------------------
   # content_with_geometry_gate：内容证据为主，几何链提供显式同步门禁。
+  # 已废弃（deprecated v2.0）：论文正式路径禁止使用，仅保留用于历史审计兼容性。
   # ------------------------------
   content_with_geometry_gate:
+    deprecated_in_formal_path: true    # v2.0 正式路径收口后禁止使用
+    formal_run_forbidden: true         # 不得出现在 paper_full_cuda.yaml 的 policy_path 中
     decoder_type: "fusion_neyman_pearson"   # 语义：最终判决遵循 NP 范式融合。
-    description: "Content with geometry gate"
+    description: "Content with geometry gate (DEPRECATED in v2.0 — use content_np_geo_rescue_v2)"
 
     required_chains:
       content: true
@@ -313,10 +316,13 @@ policy_paths:
 
   # ------------------------------
   # content_fallback_no_geometry：显式允许几何不可用时显式回退为 content_only。
+  # 已废弃（deprecated v2.0）：论文正式路径禁止使用，仅保留用于历史审计兼容性。
   # ------------------------------
   content_fallback_no_geometry:
+    deprecated_in_formal_path: true    # v2.0 正式路径收口后禁止使用
+    formal_run_forbidden: true         # 不得出现在 paper_full_cuda.yaml 的 policy_path 中
     decoder_type: "fusion_neyman_pearson"
-    description: "Fallback when geometry is unavailable"
+    description: "Fallback when geometry is unavailable (DEPRECATED in v2.0 — use content_np_geo_rescue_v2)"
 
     required_chains:
       content: true
@@ -390,6 +396,67 @@ policy_paths:
         - "decision.abstain_reason"
         - "score_audit.abstain_triggered_by"
         - "content_evidence.fail_reason"
+
+  # ------------------------------
+  # content_np_geo_rescue_v2：论文级单一正式路径（v2.0 追加，append-only）。
+  # 特性：单侧几何门控救回（geometry_score >= geo_gate_threshold），无 fallback、无 proxy、无 sidecar。
+  # 此路径是"单一路径、单一机制、论文级闭环"的正式实现。
+  # ------------------------------
+  content_np_geo_rescue_v2:
+    decoder_type: "fusion_neyman_pearson"
+    description: "Single formal paper path: NP fusion with one-sided geo rescue gate, no fallback/proxy/sidecar"
+
+    required_chains:
+      content: true
+      geometry: true
+    optional_chains:
+      geometry: false
+
+    geometry_gate:
+      enabled: true
+      gate_type: "one_sided_lower_bound"
+      gate_field: "geometry_evidence.geo_score"
+      gate_param: "geo_gate_lower"
+      gate_rule: "geometry_score >= geo_gate_lower"
+      notes: "单侧下界门控；geo_gate_upper 字段仅保留用于审计，不参与判决。"
+
+    rescue_band:
+      enabled: true
+      band_lower: "np_threshold - rescue_band_delta_low"
+      band_upper: "np_threshold"
+      decision_on_rescue: "watermarked=true（几何增益将边界内容决策救回为正）"
+
+    closure_constraints:
+      no_fallback: true
+      no_proxy: true
+      no_sidecar: true
+      no_adapter_path: true
+
+    on_chain_failure:
+      content:
+        action: "failed"
+        set_decision_to: null
+        record_fail_reason: "evidence_computation_failed"
+      geometry:
+        action: "failed"
+        set_decision_to: null
+        record_fail_reason: "geometry_chain_required_but_unavailable"
+
+    audit_obligations:
+      record_fields_level: "core_required"
+      path_required_fields:
+        content:
+          catalog: "content_minimal"
+          condition: "always"
+        geometry:
+          catalog: "geometry_gate_minimal"
+          condition: "always"
+      required_fields:
+        - "geometry_evidence.status"
+        - "geometry_evidence.geo_score"
+        - "score_audit.geo_gate_applied"
+        - "score_audit.fusion_rule_used"
+        - "score_audit.rescue_band_applied"
 
 # ==============================================================
 # 4) 软建议：非强制的审计参考

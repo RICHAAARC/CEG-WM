@@ -48,8 +48,6 @@ _FALLBACK_OPTIONAL_STR_FIELDS = [
     "geometry_evidence.anchor_config_digest",
     "geometry_evidence.sync_digest",
     "geometry_evidence.sync_config_digest",
-    "geometry_evidence.align_trace_digest",
-    "geometry_evidence.align_config_digest",
     "geometry_evidence.geo_score_direction",
     "geometry_evidence.geo_failure_reason",
     "decision.fusion_rule_version",
@@ -75,7 +73,6 @@ _FALLBACK_OPTIONAL_MAPPING_FIELDS = [
     "geometry_evidence.resolution_binding",
     "geometry_evidence.sync_metrics",
     "geometry_evidence.sync_quality_metrics",
-    "geometry_evidence.align_metrics",
     "decision.routing_decisions",
     "decision.conditional_fpr_notes",
     "attack_trace"

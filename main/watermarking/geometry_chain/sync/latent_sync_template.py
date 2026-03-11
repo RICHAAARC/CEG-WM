@@ -790,7 +790,6 @@ class LatentSyncGeometryExtractor:
             "sync_metrics": sync_result.sync_quality_metrics,
             "sync_quality_metrics": sync_result.sync_quality_metrics,
             "resolution_binding": sync_result.resolution_binding,
-            "align_trace_digest": None,
             "geo_failure_reason": sync_result.failure_reason,
             "geometry_failure_reason": sync_result.failure_reason,
             "audit": {
@@ -1145,4 +1144,186 @@ class GeometryLatentSyncSD3V2:
             "relation_digest_bound": relation_digest,
             "quality_method": "interpretable_latent_spectrum_relation_consistency",
             "quality_components": quality_components,
+        }
+
+
+# Paper-faithful geometry latent sync SD3 v3：geo_score 改为 template_match_score
+GEOMETRY_LATENT_SYNC_SD3_V3_ID = "geometry_latent_sync_sd3_v3"
+GEOMETRY_LATENT_SYNC_SD3_V3_VERSION = "v3"
+
+
+class GeometryLatentSyncSD3V3:
+    """
+    功能：SD3 latent sync v3，geo_score 使用 template_match_score。
+
+    Upgraded sync module over v2 that returns template_match_score as geo_score
+    instead of quality_score, closing the geometry chain to a single template
+    correlation loop.
+
+    Args:
+        impl_id: Implementation identifier (must be geometry_latent_sync_sd3_v3).
+        impl_version: Implementation version string.
+        impl_digest: Implementation digest string.
+
+    Returns:
+        None.
+
+    Raises:
+        ValueError: If constructor inputs are invalid.
+    """
+
+    def __init__(self, impl_id: str, impl_version: str, impl_digest: str) -> None:
+        if not isinstance(impl_id, str) or not impl_id:
+            raise ValueError("impl_id must be non-empty str")
+        if not isinstance(impl_version, str) or not impl_version:
+            raise ValueError("impl_version must be non-empty str")
+        if not isinstance(impl_digest, str) or not impl_digest:
+            raise ValueError("impl_digest must be non-empty str")
+        self.impl_id = impl_id
+        self.impl_version = impl_version
+        self.impl_digest = impl_digest
+        # 内部 LatentSyncTemplate 实例用于 template_match_score 计算
+        self._template_engine = LatentSyncTemplate(impl_id, impl_version, impl_digest)
+        # v2 底层实例提供 quality/uncertainty 辅助指标  
+        self._v2_extractor = GeometryLatentSyncSD3V2(impl_id, impl_version, impl_digest)
+
+    def extract(
+        self,
+        cfg: Dict[str, Any],
+        inputs: Dict[str, Any] | None = None,
+        sync_ctx: SyncRuntimeContext | None = None
+    ) -> Dict[str, Any]:
+        """
+        功能：提取 sync 证据，geo_score = template_match_score。
+
+        Extract sync evidence using template correlation as the primary geometry score.
+
+        Args:
+            cfg: Configuration mapping.
+            inputs: Optional runtime inputs with relation_digest from anchor extractor.
+            sync_ctx: Optional sync runtime context.
+
+        Returns:
+            Geometry evidence mapping with geo_score from template_match_score.
+
+        Raises:
+            TypeError: If inputs are invalid.
+        """
+        if not isinstance(cfg, dict):
+            raise TypeError("cfg must be dict")
+        if inputs is not None and not isinstance(inputs, dict):
+            raise TypeError("inputs must be dict or None")
+
+        if not resolve_enable_latent_sync(cfg):
+            return {
+                "status": "absent",
+                "geo_score": None,
+                "sync_digest": None,
+                "geometry_absent_reason": "latent_sync_disabled",
+            }
+
+        runtime_inputs = inputs or {}
+        relation_digest = runtime_inputs.get("relation_digest")
+
+        if relation_digest is None:
+            return {
+                "status": "absent",
+                "geo_score": None,
+                "sync_digest": None,
+                "geometry_absent_reason": "relation_digest_absent_embed_mode",
+            }
+
+        if not isinstance(relation_digest, str) or not relation_digest:
+            return {
+                "status": "mismatch",
+                "geo_score": None,
+                "sync_digest": None,
+                "geometry_failure_reason": "relation_digest_invalid",
+            }
+
+        if sync_ctx is None or sync_ctx.latents is None:
+            return {
+                "status": "absent",
+                "geo_score": None,
+                "sync_digest": None,
+                "geometry_absent_reason": "latents_missing",
+            }
+
+        try:
+            latents_np = _to_numpy_latents(sync_ctx.latents)
+        except Exception as e:
+            return {
+                "status": "failed",
+                "geo_score": None,
+                "sync_digest": None,
+                "geometry_failure_reason": f"latents_conversion_failed: {str(e)}",
+            }
+
+        # (1) 用 LatentSyncTemplate 计算模板匹配分（主几何证据）
+        try:
+            _rng = sync_ctx.rng if sync_ctx is not None else None
+            seed = self._template_engine._resolve_sync_seed(cfg, _rng)
+            template_match_metrics = self._template_engine._compute_template_match_metrics(
+                latents_np, cfg, seed
+            )
+            template_match_score = float(template_match_metrics.get("template_match_score", 0.0))
+        except Exception as e:
+            return {
+                "status": "failed",
+                "geo_score": None,
+                "sync_digest": None,
+                "geometry_failure_reason": f"template_match_computation_failed: {str(e)}",
+            }
+
+        # (2) 用 v2 的 quality 指标作为辅助诊断（不影响 geo_score）
+        try:
+            sync_quality_metrics = self._v2_extractor._compute_sync_quality(
+                latents_np, relation_digest,
+                embed_latent_stats=runtime_inputs.get("embed_latent_stats"),
+            )
+            uncertainty = sync_quality_metrics.get("uncertainty", 1.0)
+        except Exception:
+            sync_quality_metrics = {}
+            uncertainty = 0.0
+
+        if uncertainty > 0.5:
+            return {
+                "status": "mismatch",
+                "geo_score": None,
+                "sync_digest": None,
+                "sync_quality_metrics": sync_quality_metrics,
+                "sync_quality_semantics": {
+                    "score_type": "template_correlation_geometry_score",
+                    "score_version": "geometry_latent_sync_sd3_v3",
+                    "trusted_as_primary_geometry_evidence": False,
+                    "evidence_level": "primary",
+                },
+                "geometry_failure_reason": "sync_uncertainty_too_high",
+            }
+
+        sync_config_digest = digests.canonical_sha256({
+            "impl_id": self.impl_id,
+            "impl_version": self.impl_version,
+        })
+        sync_digest = digests.canonical_sha256({
+            "relation_digest": relation_digest,
+            "sync_config_digest": sync_config_digest,
+            "template_match_score": round(template_match_score, 8),
+        })
+
+        return {
+            "status": "ok",
+            "geo_score": template_match_score,       # v3 核心：以模板匹配分作为几何主分
+            "sync_digest": sync_digest,
+            "sync_config_digest": sync_config_digest,
+            "template_match_metrics": template_match_metrics,
+            "sync_quality_metrics": sync_quality_metrics,
+            "sync_quality_semantics": {
+                "score_type": "template_correlation_geometry_score",
+                "score_version": "geometry_latent_sync_sd3_v3",
+                "trusted_as_primary_geometry_evidence": True,
+                "evidence_level": "primary",
+            },
+            "relation_digest_bound": relation_digest,
+            "geometry_failure_reason": None,
         }

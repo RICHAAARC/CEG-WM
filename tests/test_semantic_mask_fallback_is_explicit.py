@@ -77,8 +77,8 @@ def test_saliency_source_auto_fallback_is_auditable() -> None:
     assert result.status == "ok"
     assert isinstance(result.mask_stats, dict)
     assert result.mask_stats.get("saliency_source_selected") == "proxy_v1"
-    assert result.mask_stats.get("fallback_used") is True
-    assert isinstance(result.mask_stats.get("fallback_reason"), str)
+    assert "fallback_used" not in result.mask_stats
+    assert "fallback_reason" not in result.mask_stats
     saliency_provenance = result.mask_stats.get("saliency_provenance")
     assert isinstance(saliency_provenance, dict)
     assert saliency_provenance.get("fallback_used") is True

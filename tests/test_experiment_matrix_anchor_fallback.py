@@ -97,16 +97,16 @@ def test_run_single_experiment_anchor_fallback_from_records(
     assert summary.get("thresholds_digest") == "thresholds_from_evaluate_record"
     assert summary.get("threshold_metadata_digest") == "threshold_meta_from_evaluate_record"
     assert summary.get("impl_digest") == "impl_identity_digest_from_run_closure"
-    comparison_payload = summary.get("t2smark_comparison")
+    comparison_payload = summary.get("hf_template_comparison")
     assert isinstance(comparison_payload, dict)
-    assert comparison_payload.get("comparison_source") == "real_t2smark_baseline_required"
+    assert comparison_payload.get("comparison_source") == "real_hf_template_baseline_required"
 
 
-def test_extract_t2smark_comparison_reads_baseline_trace(tmp_path: Path) -> None:
+def test_extract_hf_template_comparison_reads_baseline_trace(tmp_path: Path) -> None:
     """
-    功能：验证 t2smark 比较提取会读取 baseline 分数与 trace。 
+    功能：验证 HF 模板比较提取会读取 baseline 分数与 trace。
 
-    Verify t2smark comparison extraction consumes baseline score and trace metadata.
+    Verify HF template baseline comparison extraction consumes baseline score and trace metadata.
 
     Args:
         tmp_path: pytest temp path fixture.
@@ -121,7 +121,7 @@ def test_extract_t2smark_comparison_reads_baseline_trace(tmp_path: Path) -> None
         "content_evidence_payload": {
             "score": 0.91,
         },
-        "t2smark_baseline": {
+        "hf_template_baseline": {
             "status": "ok",
             "score": 0.84,
             "trace": {
@@ -133,9 +133,9 @@ def test_extract_t2smark_comparison_reads_baseline_trace(tmp_path: Path) -> None
     }
     (records_dir / "detect_record.json").write_text(json.dumps(detect_record), encoding="utf-8")
 
-    payload = experiment_matrix._extract_t2smark_real_comparison_from_detect_record(run_root)
+    payload = experiment_matrix._extract_hf_template_baseline_comparison_from_detect_record(run_root)
     assert payload.get("comparison_ready") is True
-    assert payload.get("comparison_source") == "real_t2smark_baseline_record"
+    assert payload.get("comparison_source") == "real_hf_template_baseline_record"
     assert payload.get("baseline_status") == "ok"
     baseline_trace = payload.get("baseline_trace")
     assert isinstance(baseline_trace, dict)

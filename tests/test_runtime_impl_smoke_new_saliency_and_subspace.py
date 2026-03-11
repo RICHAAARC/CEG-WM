@@ -19,7 +19,7 @@ from main.watermarking.content_chain.semantic_mask_provider import (
     SEMANTIC_MASK_PROVIDER_SALIENCY_POLICY_ID,
 )
 from main.watermarking.content_chain.subspace.subspace_planner_impl import (
-    SUBSPACE_PLANNER_MASK_CONDITIONED_ID,
+    SUBSPACE_PLANNER_V2_ID,
 )
 
 
@@ -38,10 +38,10 @@ def _build_runtime_cfg() -> Dict[str, Any]:
     return {
         "impl": {
             "content_extractor_id": SEMANTIC_MASK_PROVIDER_SALIENCY_POLICY_ID,
-            "geometry_extractor_id": "geometry_baseline_identity_v1",
-            "fusion_rule_id": "fusion_baseline_identity_v1",
-            "subspace_planner_id": SUBSPACE_PLANNER_MASK_CONDITIONED_ID,
-            "sync_module_id": "geometry_sync_baseline_v1",
+            "geometry_extractor_id": "attention_anchor_map_relation_v2",
+            "fusion_rule_id": "fusion_neyman_pearson_v2",
+            "subspace_planner_id": SUBSPACE_PLANNER_V2_ID,
+            "sync_module_id": "geometry_latent_sync_sd3_v3",
         },
         "evaluate": {
             "target_fpr": 1e-6,
@@ -91,9 +91,9 @@ def test_runtime_resolver_accepts_new_impl_ids() -> None:
 
     identity, impl_set, _ = runtime_resolver.build_runtime_impl_set_from_cfg(cfg)
     assert identity.content_extractor_id == SEMANTIC_MASK_PROVIDER_SALIENCY_POLICY_ID
-    assert identity.subspace_planner_id == SUBSPACE_PLANNER_MASK_CONDITIONED_ID
+    assert identity.subspace_planner_id == SUBSPACE_PLANNER_V2_ID
     assert getattr(impl_set.content_extractor, "impl_id", "") == SEMANTIC_MASK_PROVIDER_SALIENCY_POLICY_ID
-    assert getattr(impl_set.subspace_planner, "impl_id", "") == SUBSPACE_PLANNER_MASK_CONDITIONED_ID
+    assert getattr(impl_set.subspace_planner, "impl_id", "") == SUBSPACE_PLANNER_V2_ID
 
 
 def test_runtime_smoke_emits_saliency_and_subspace_conditioning_anchors() -> None:
