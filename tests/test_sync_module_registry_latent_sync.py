@@ -1,4 +1,4 @@
-"""
+﻿"""
 File purpose: 同步模块 registry 与白名单补全回归测试。
 Module type: General module
 """
@@ -43,11 +43,11 @@ def _build_minimal_cfg(enable_latent_sync: bool = True) -> Dict[str, Any]:
     }
 
 
-def test_sync_module_registry_contains_geometry_latent_sync_sd3_v3() -> None:
+def test_sync_module_registry_contains_geometry_latent_sync_sd3() -> None:
     """
-    功能：sync module registry 必须包含 geometry_latent_sync_sd3_v3（v1 已从 sync registry 移除）。
+    功能：sync module registry 必须包含 geometry_latent_sync_sd3（v1 已从 sync registry 移除）。
 
-    Sync module registry must resolve geometry_latent_sync_sd3_v3.
+    Sync module registry must resolve geometry_latent_sync_sd3.
     Note: geometry_latent_sync_sd3_v2 was removed from the sync registry in v3.0 refactoring.
 
     Args:
@@ -56,16 +56,16 @@ def test_sync_module_registry_contains_geometry_latent_sync_sd3_v3() -> None:
     Returns:
         None.
     """
-    factory = resolve_sync_module("geometry_latent_sync_sd3_v3")
+    factory = resolve_sync_module("geometry_latent_sync_sd3")
     instance = factory({})
     assert hasattr(instance, "sync")
 
 
-def test_runtime_whitelist_allows_geometry_latent_sync_sd3_v3() -> None:
+def test_runtime_whitelist_allows_geometry_latent_sync_sd3() -> None:
     """
-    功能：runtime whitelist 必须允许 geometry_latent_sync_sd3_v3。
+    功能：runtime whitelist 必须允许 geometry_latent_sync_sd3。
 
-    Runtime whitelist must allow geometry_latent_sync_sd3_v3 for sync_module domain.
+    Runtime whitelist must allow geometry_latent_sync_sd3 for sync_module domain.
     Note: geometry_latent_sync_sd3_v2 was removed from the formal whitelist in v3.0.
 
     Args:
@@ -78,7 +78,7 @@ def test_runtime_whitelist_allows_geometry_latent_sync_sd3_v3() -> None:
     impl_cfg = whitelist.data.get("impl_id", {})
     allowed_by_domain = impl_cfg.get("allowed_by_domain", {})
     allowed_sync = allowed_by_domain.get("sync_module", [])
-    assert "geometry_latent_sync_sd3_v3" in allowed_sync
+    assert "geometry_latent_sync_sd3" in allowed_sync
     assert "geometry_latent_sync_sd3_v2" not in allowed_sync
 
 
@@ -94,7 +94,7 @@ def test_sync_module_sync_returns_structured_status() -> None:
     Returns:
         None.
     """
-    factory = resolve_sync_module("geometry_latent_sync_sd3_v3")
+    factory = resolve_sync_module("geometry_latent_sync_sd3")
     instance = factory({})
     cfg = _build_minimal_cfg(enable_latent_sync=True)
     result = instance.sync(cfg)
@@ -125,7 +125,7 @@ def test_sync_module_sync_with_context_returns_status() -> None:
     Returns:
         None.
     """
-    factory = resolve_sync_module("geometry_latent_sync_sd3_v3")
+    factory = resolve_sync_module("geometry_latent_sync_sd3")
     instance = factory({})
     cfg = _build_minimal_cfg(enable_latent_sync=True)
     context = SyncRuntimeContext(pipeline=None, latents=None, rng=None, trajectory_evidence=None)
@@ -169,7 +169,7 @@ def test_sync_module_v3_sync_with_context_ok_path() -> None:
     Returns:
         None.
     """
-    factory = resolve_sync_module("geometry_latent_sync_sd3_v3")
+    factory = resolve_sync_module("geometry_latent_sync_sd3")
     instance = factory({})
     cfg = _build_minimal_cfg(enable_latent_sync=True)
     latents = np.random.default_rng(20260227).normal(size=(1, 4, 8, 8)).astype(np.float32)
@@ -205,7 +205,7 @@ def test_sync_module_v3_no_template_returns_non_ok() -> None:
     Returns:
         None.
     """
-    factory = resolve_sync_module("geometry_latent_sync_sd3_v3")
+    factory = resolve_sync_module("geometry_latent_sync_sd3")
     instance = factory({})
     cfg = _build_minimal_cfg(enable_latent_sync=True)
     latents = np.random.default_rng(20260228).normal(size=(1, 4, 8, 8)).astype(np.float32)
@@ -233,7 +233,7 @@ def test_detect_run_sync_module_for_v3_no_error() -> None:
     Returns:
         None.
     """
-    factory = resolve_sync_module("geometry_latent_sync_sd3_v3")
+    factory = resolve_sync_module("geometry_latent_sync_sd3")
     instance = factory({})
     cfg = _build_minimal_cfg(enable_latent_sync=True)
     latents = np.random.default_rng(20260301).normal(size=(1, 4, 8, 8)).astype(np.float32)

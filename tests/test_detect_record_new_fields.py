@@ -26,16 +26,16 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from main.core import digests
-from main.watermarking.content_chain.low_freq_coder import LowFreqTemplateCodecV2, LOW_FREQ_TEMPLATE_CODEC_V2_ID, LOW_FREQ_TEMPLATE_CODEC_V2_VERSION
+from main.watermarking.content_chain.low_freq_coder import LowFreqTemplateCodec, LOW_FREQ_TEMPLATE_CODEC_ID, LOW_FREQ_TEMPLATE_CODEC_VERSION
 
 
 # ---------------------------------------------------------------------------
 # 辅助函数
 # ---------------------------------------------------------------------------
 
-def _make_lf_coder() -> LowFreqTemplateCodecV2:
-    impl_digest = digests.canonical_sha256({"impl_id": LOW_FREQ_TEMPLATE_CODEC_V2_ID, "impl_version": LOW_FREQ_TEMPLATE_CODEC_V2_VERSION})
-    return LowFreqTemplateCodecV2(LOW_FREQ_TEMPLATE_CODEC_V2_ID, LOW_FREQ_TEMPLATE_CODEC_V2_VERSION, impl_digest)
+def _make_lf_coder() -> LowFreqTemplateCodec:
+    impl_digest = digests.canonical_sha256({"impl_id": LOW_FREQ_TEMPLATE_CODEC_ID, "impl_version": LOW_FREQ_TEMPLATE_CODEC_VERSION})
+    return LowFreqTemplateCodec(LOW_FREQ_TEMPLATE_CODEC_ID, LOW_FREQ_TEMPLATE_CODEC_VERSION, impl_digest)
 
 
 def _build_lf_cfg(enabled: bool = True) -> Dict[str, Any]:

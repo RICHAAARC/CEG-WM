@@ -22,7 +22,7 @@ from main.core import digests
 from .ldpc_codec import build_ldpc_spec, encode_message_bits
 
 
-LF_CHANNEL_IMPL_ID = "low_freq_template_codec_v2"
+LF_CHANNEL_IMPL_ID = "low_freq_template_codec"
 LF_CHANNEL_VERSION = "v2"
 LF_TRACE_VERSION = "v2"
 
@@ -38,7 +38,7 @@ def _get_ldpc_codeword_bits(cfg: Dict[str, Any], n: int) -> List[int]:
     功能：从 plan_digest 派生 LDPC 码字（±1 列表）。
 
     Derive deterministic LDPC codeword from plan_digest.
-    Matches the seed derivation used in LowFreqTemplateCodecV2.detect_score().
+    Matches the seed derivation used in LowFreqTemplateCodec.detect_score().
 
     Args:
         cfg: Injection config containing lf_plan_digest / lf_message_length / lf_ecc_sparsity.

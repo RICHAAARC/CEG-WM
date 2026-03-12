@@ -1,4 +1,4 @@
-"""
+﻿"""
 功能：审计修复验证测试
 
 Module type: Core innovation module
@@ -22,7 +22,7 @@ class TestB1ThresholdSourceAudit:
     @pytest.fixture
     def np_fusion(self):
         """创建 NeumanPearson 融合规则 v2 实例"""
-        factory = resolve_fusion_rule("fusion_neyman_pearson_v2")
+        factory = resolve_fusion_rule("fusion_neyman_pearson")
         return factory({})
     
     def test_threshold_source_artifact_when_provided(self, np_fusion):
@@ -112,7 +112,7 @@ class TestB3RescueReasonSemantic:
     @pytest.fixture
     def np_fusion(self):
         """创建 NeumanPearson 融合规则 v2 实例"""
-        factory = resolve_fusion_rule("fusion_neyman_pearson_v2")
+        factory = resolve_fusion_rule("fusion_neyman_pearson")
         return factory({})
     
     def test_rescue_reason_correct_when_triggered(self, np_fusion):

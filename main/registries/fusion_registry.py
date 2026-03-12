@@ -1,4 +1,4 @@
-"""
+﻿"""
 融合规则注册表
 
 功能说明：
@@ -49,7 +49,7 @@ def _derive_impl_digest(impl_id: str, impl_version: str) -> str:
 
 
 
-def _build_fusion_neyman_pearson_v2(cfg: Dict[str, Any]) -> NeumanPearsonFusionRule:
+def _build_fusion_neyman_pearson(cfg: Dict[str, Any]) -> NeumanPearsonFusionRule:
     """
     功能：构造融合规则 v2 实现。
 
@@ -59,7 +59,7 @@ def _build_fusion_neyman_pearson_v2(cfg: Dict[str, Any]) -> NeumanPearsonFusionR
         cfg: Config mapping.
 
     Returns:
-        NeumanPearsonFusionRule instance bound to fusion_neyman_pearson_v2.
+        NeumanPearsonFusionRule instance bound to fusion_neyman_pearson.
 
     Raises:
         TypeError: If cfg is not dict.
@@ -67,14 +67,14 @@ def _build_fusion_neyman_pearson_v2(cfg: Dict[str, Any]) -> NeumanPearsonFusionR
     if not isinstance(cfg, dict):
         raise TypeError("cfg must be dict")
     impl_version = "v2"
-    impl_id = "fusion_neyman_pearson_v2"
+    impl_id = "fusion_neyman_pearson"
     impl_digest = _derive_impl_digest(impl_id, impl_version)
     return NeumanPearsonFusionRule(impl_id, impl_version, impl_digest)
 
 
 _FUSION_REGISTRY.register_factory(
-    "fusion_neyman_pearson_v2",
-    _build_fusion_neyman_pearson_v2,
+    "fusion_neyman_pearson",
+    _build_fusion_neyman_pearson,
     capabilities=ImplCapabilities(
         supports_batching=False,
         requires_cuda=False,

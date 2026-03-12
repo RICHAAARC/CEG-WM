@@ -14,9 +14,9 @@ import numpy as np
 import pytest
 
 from main.watermarking.content_chain.low_freq_coder import (
-    LowFreqTemplateCodecV2,
-    LOW_FREQ_TEMPLATE_CODEC_V2_ID,
-    LOW_FREQ_TEMPLATE_CODEC_V2_VERSION,
+    LowFreqTemplateCodec,
+    LOW_FREQ_TEMPLATE_CODEC_ID,
+    LOW_FREQ_TEMPLATE_CODEC_VERSION,
 )
 
 
@@ -46,10 +46,10 @@ class TestLFParameterDriftDetection:
     预期：lf_trace_digest 随参数变化改变，提供审计追踪依据。
     """
 
-    def _make_coder(self, impl_digest: str = "test_digest_lf_v2") -> LowFreqTemplateCodecV2:
-        return LowFreqTemplateCodecV2(
-            impl_id=LOW_FREQ_TEMPLATE_CODEC_V2_ID,
-            impl_version=LOW_FREQ_TEMPLATE_CODEC_V2_VERSION,
+    def _make_coder(self, impl_digest: str = "test_digest_lf_v2") -> LowFreqTemplateCodec:
+        return LowFreqTemplateCodec(
+            impl_id=LOW_FREQ_TEMPLATE_CODEC_ID,
+            impl_version=LOW_FREQ_TEMPLATE_CODEC_VERSION,
             impl_digest=impl_digest,
         )
 
@@ -302,9 +302,9 @@ class TestLFParameterAuditRequirement:
         预期：同一输入、同一 plan_digest，但 ecc_sparsity 不同时，
              parity_check_digest 不同，因此 lf_trace_digest 必须不同。
         """
-        coder = LowFreqTemplateCodecV2(
-            impl_id=LOW_FREQ_TEMPLATE_CODEC_V2_ID,
-            impl_version=LOW_FREQ_TEMPLATE_CODEC_V2_VERSION,
+        coder = LowFreqTemplateCodec(
+            impl_id=LOW_FREQ_TEMPLATE_CODEC_ID,
+            impl_version=LOW_FREQ_TEMPLATE_CODEC_VERSION,
             impl_digest="test_digest_lf_v1_ecc_change"
         )
 
@@ -358,9 +358,9 @@ class TestLFParameterAuditRequirement:
         预期：同一输入、同一 plan_digest，但 correlation_scale 不同时，
              trace_summary 中的 correlation_scale 字段不同，因此 lf_trace_digest 必须不同。
         """
-        coder = LowFreqTemplateCodecV2(
-            impl_id=LOW_FREQ_TEMPLATE_CODEC_V2_ID,
-            impl_version=LOW_FREQ_TEMPLATE_CODEC_V2_VERSION,
+        coder = LowFreqTemplateCodec(
+            impl_id=LOW_FREQ_TEMPLATE_CODEC_ID,
+            impl_version=LOW_FREQ_TEMPLATE_CODEC_VERSION,
             impl_digest="test_digest_lf_v1_strength_change"
         )
 

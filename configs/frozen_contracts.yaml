@@ -1,4 +1,4 @@
-# ==============================================================
+﻿# ==============================================================
 # 冻结契约
 #   门禁可执行：freeze_gate 在写盘前以本文件为唯一权威来源执行一致性校验。
 #   - 本文件只冻结“语义与口径”，不包含运行期“允许集合”。
@@ -1054,7 +1054,7 @@ single_path_closure_v2:
   description: >
     v2.0 收口：论文级单一路径、单一机制、无 fallback、无 proxy、无 sidecar 的正式实现声明。
     本节是 v1.0 冻结契约的追加扩展，不允许修改 v1.0 已冻结字段。
-  closure_policy_path: "content_np_geo_rescue_v2"       # 论文正式路径唯一枚举标识。
+  closure_policy_path: "content_np_geo_rescue"       # 论文正式路径唯一枚举标识。
   sidecar_disabled: true                                # 论文正式路径禁止 image-domain sidecar。
   proxy_disabled_in_paper_mode: true                    # paper_faithfulness.enabled=True 时强制禁用 attention proxy。
   geo_gate_semantics: "one_sided_lower_bound"           # 几何门控语义：单侧下界（geometry_score >= geo_gate_lower）。
@@ -1065,4 +1065,4 @@ single_path_closure_v2:
     (1) enable_attention_proxy=False；
     (2) enable_image_sidecar=False；
     (3) geo_gate 采用单侧下界逻辑（geometry_score >= geo_gate_lower）；
-    (4) policy_path 取值为 content_np_geo_rescue_v2。
+    (4) policy_path 取值为 content_np_geo_rescue。

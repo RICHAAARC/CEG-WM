@@ -1,4 +1,4 @@
-"""
+﻿"""
 管道壳注册表
 
 功能说明：
@@ -16,8 +16,8 @@ from .registry_base import FactoryType, RegistryBase
 from .capabilities import ImplCapabilities
 
 
-SD3_DIFFUSERS_SHELL_ID = "sd3_diffusers_shell_v1"
-SD3_DIFFUSERS_REAL_ID = "sd3_diffusers_real_v1"
+SD3_DIFFUSERS_SHELL_ID = "sd3_diffusers_shell"
+SD3_DIFFUSERS_REAL_ID = "sd3_diffusers_real"
 
 
 class PipelineShellBaseline:

@@ -1,4 +1,4 @@
-"""
+﻿"""
 SD3 Pipeline Inspector
 
 功能：
@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional, Tuple
 from main.core import digests
 
 
-IMPL_ID = "sd3_pipeline_inspector_v1"
+IMPL_ID = "sd3_pipeline_inspector"
 IMPL_VERSION = "v1"
 
 

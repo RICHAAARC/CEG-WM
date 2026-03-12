@@ -21,8 +21,8 @@ from main.core import digests
 
 
 # 项目内生命名（project-internal naming）
-HIGH_FREQ_TEMPLATE_CODEC_V2_ID = "high_freq_template_codec_v2"
-HIGH_FREQ_TEMPLATE_CODEC_V2_VERSION = "v2"
+HIGH_FREQ_TEMPLATE_CODEC_ID = "high_freq_template_codec"
+HIGH_FREQ_TEMPLATE_CODEC_VERSION = "v2"
 
 # 评分规则版本（与版本化决策规则绑定，非 impl ID）
 CONTENT_SCORE_RULE_VERSION = "content_score_rule_v1"
@@ -50,7 +50,7 @@ HF_FAILURE_DECISION_REASONS = {
 
 
 
-class HighFreqTemplateCodecV2:
+class HighFreqTemplateCodec:
     """
     功能：HF 高频模板编解码 v2 —— keyed Rademacher template + truncation-constrained additive injection + template-matched detection。
 
@@ -60,7 +60,7 @@ class HighFreqTemplateCodecV2:
     Removes top_k_magnitude_based and energy-statistics detection.
 
     Args:
-        impl_id: Implementation identifier (must be high_freq_template_codec_v2).
+        impl_id: Implementation identifier (must be high_freq_template_codec).
         impl_version: Implementation version string.
         impl_digest: Implementation digest string.
 

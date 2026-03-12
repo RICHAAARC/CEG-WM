@@ -1,4 +1,4 @@
-"""
+﻿"""
 功能说明：
 - 验证 SemanticMaskProvider 的可重复性和写盘路径限制。
 - 验证 mask_digest 计算、mask_stats 提取、resolution_binding 绑定。
@@ -259,7 +259,7 @@ class TestSemanticMaskProviderRegistration:
             assert callable(factory), \
                 f"Factory for {SEMANTIC_MASK_PROVIDER_ID} must be callable"
         except ValueError as e:
-            pytest.fail(f"semantic_mask_provider_v1 not registered in content_registry: {e}")
+            pytest.fail(f"semantic_mask_provider not registered in content_registry: {e}")
 
     def test_semantic_mask_provider_factory_produces_instance(self):
         """factory 应能正确构造 SemanticMaskProvider 实例。"""

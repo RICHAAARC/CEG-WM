@@ -13,11 +13,11 @@ def test_paper_impl_binding_rejects_fallback_binding() -> None:
     cfg: Dict[str, Any] = {"paper_faithfulness": {"enabled": True}}
     injection_evidence: Dict[str, Any] = {
         "lf_impl_binding": {
-            "impl_selected": "low_freq_template_codec_v2",
+            "impl_selected": "low_freq_template_codec",
             "evidence_level": "non_compliant",
         },
         "hf_impl_binding": {
-            "impl_selected": "high_freq_template_codec_v2",
+            "impl_selected": "high_freq_template_codec",
             "evidence_level": "primary",
         },
     }
@@ -80,7 +80,7 @@ def test_paper_impl_binding_rejects_int_ecc_under_paper_mode() -> None:
     injection_evidence: Dict[str, Any] = {
         "status": "ok",
         "lf_impl_binding": {
-            "impl_selected": "low_freq_template_codec_v2",
+            "impl_selected": "low_freq_template_codec",
             "evidence_level": "primary",
         },
         "hf_impl_binding": {

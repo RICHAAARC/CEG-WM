@@ -15,20 +15,20 @@ from typing import Any, Dict
 
 from main.core import digests
 from main.watermarking.content_chain.low_freq_coder import (
-    LowFreqTemplateCodecV2,
-    LOW_FREQ_TEMPLATE_CODEC_V2_ID,
-    LOW_FREQ_TEMPLATE_CODEC_V2_VERSION,
+    LowFreqTemplateCodec,
+    LOW_FREQ_TEMPLATE_CODEC_ID,
+    LOW_FREQ_TEMPLATE_CODEC_VERSION,
 )
 
 
-def _make_coder() -> LowFreqTemplateCodecV2:
+def _make_coder() -> LowFreqTemplateCodec:
     impl_digest = digests.canonical_sha256({
-        "impl_id": LOW_FREQ_TEMPLATE_CODEC_V2_ID,
-        "impl_version": LOW_FREQ_TEMPLATE_CODEC_V2_VERSION,
+        "impl_id": LOW_FREQ_TEMPLATE_CODEC_ID,
+        "impl_version": LOW_FREQ_TEMPLATE_CODEC_VERSION,
     })
-    return LowFreqTemplateCodecV2(
-        LOW_FREQ_TEMPLATE_CODEC_V2_ID,
-        LOW_FREQ_TEMPLATE_CODEC_V2_VERSION,
+    return LowFreqTemplateCodec(
+        LOW_FREQ_TEMPLATE_CODEC_ID,
+        LOW_FREQ_TEMPLATE_CODEC_VERSION,
         impl_digest,
     )
 

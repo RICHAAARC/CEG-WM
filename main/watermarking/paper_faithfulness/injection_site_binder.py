@@ -1,4 +1,4 @@
-"""
+﻿"""
 Injection Site Binder
 
 功能：
@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from main.core import digests
 
 
-IMPL_ID = "injection_site_binder_v1"
+IMPL_ID = "injection_site_binder"
 IMPL_VERSION = "v1"
 
 

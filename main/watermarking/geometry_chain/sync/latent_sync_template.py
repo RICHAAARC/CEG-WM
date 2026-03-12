@@ -1,4 +1,4 @@
-"""
+﻿"""
 File purpose: 基于 SD3 latent 频域摘要生成同步模板证据。
 Module type: General module
 """
@@ -835,12 +835,12 @@ def _to_numpy_latents(latents: Any) -> np.ndarray:
     return result
 
 
-# Paper-faithful geometry latent sync SD3 v2 with relation digest binding
-GEOMETRY_LATENT_SYNC_SD3_V2_ID = "geometry_latent_sync_sd3_v2"
-GEOMETRY_LATENT_SYNC_SD3_V2_VERSION = "v2"
+# 内部辅助类常量：v2 quality helper（不对外导出）
+_GEOMETRY_LATENT_SYNC_SD3_QUALITY_ID = "geometry_latent_sync_sd3_v2"
+_GEOMETRY_LATENT_SYNC_SD3_QUALITY_VERSION = "v2"
 
 
-class GeometryLatentSyncSD3V2:
+class _GeometryLatentSyncSD3QualityHelper:
     """
     功能：SD3 latent sync v2 with relation_digest binding.
 
@@ -1090,7 +1090,7 @@ class GeometryLatentSyncSD3V2:
             quality_score = float(max(0.0, min(1.0, quality_score)))
             uncertainty = float(max(0.0, min(1.0, 1.0 - quality_score)))
             quality_components: Dict[str, Any] = {
-                "version": "latent_sync_quality_components_v2_cross",
+                "version": "latent_sync_quality_components_cross",
                 "quality_mode": "cross_similarity",
                 "contrast_sim": round(contrast_sim, 6),
                 "spr_sim": round(spr_sim, 6),
@@ -1148,11 +1148,11 @@ class GeometryLatentSyncSD3V2:
 
 
 # Paper-faithful geometry latent sync SD3 v3：geo_score 改为 template_match_score
-GEOMETRY_LATENT_SYNC_SD3_V3_ID = "geometry_latent_sync_sd3_v3"
-GEOMETRY_LATENT_SYNC_SD3_V3_VERSION = "v3"
+GEOMETRY_LATENT_SYNC_SD3_ID = "geometry_latent_sync_sd3"
+GEOMETRY_LATENT_SYNC_SD3_VERSION = "v3"
 
 
-class GeometryLatentSyncSD3V3:
+class GeometryLatentSyncSD3:
     """
     功能：SD3 latent sync v3，geo_score 使用 template_match_score。
 
@@ -1161,7 +1161,7 @@ class GeometryLatentSyncSD3V3:
     correlation loop.
 
     Args:
-        impl_id: Implementation identifier (must be geometry_latent_sync_sd3_v3).
+        impl_id: Implementation identifier (must be geometry_latent_sync_sd3).
         impl_version: Implementation version string.
         impl_digest: Implementation digest string.
 
@@ -1185,7 +1185,7 @@ class GeometryLatentSyncSD3V3:
         # 内部 LatentSyncTemplate 实例用于 template_match_score 计算
         self._template_engine = LatentSyncTemplate(impl_id, impl_version, impl_digest)
         # v2 底层实例提供 quality/uncertainty 辅助指标  
-        self._v2_extractor = GeometryLatentSyncSD3V2(impl_id, impl_version, impl_digest)
+        self._quality_extractor = _GeometryLatentSyncSD3QualityHelper(impl_id, impl_version, impl_digest)
 
     def extract(
         self,
@@ -1277,7 +1277,7 @@ class GeometryLatentSyncSD3V3:
 
         # (2) 用 v2 的 quality 指标作为辅助诊断（不影响 geo_score）
         try:
-            sync_quality_metrics = self._v2_extractor._compute_sync_quality(
+            sync_quality_metrics = self._quality_extractor._compute_sync_quality(
                 latents_np, relation_digest,
                 embed_latent_stats=runtime_inputs.get("embed_latent_stats"),
             )
@@ -1294,7 +1294,7 @@ class GeometryLatentSyncSD3V3:
                 "sync_quality_metrics": sync_quality_metrics,
                 "sync_quality_semantics": {
                     "score_type": "template_correlation_geometry_score",
-                    "score_version": "geometry_latent_sync_sd3_v3",
+                    "score_version": "geometry_latent_sync_sd3",
                     "trusted_as_primary_geometry_evidence": False,
                     "evidence_level": "primary",
                 },
@@ -1320,7 +1320,7 @@ class GeometryLatentSyncSD3V3:
             "sync_quality_metrics": sync_quality_metrics,
             "sync_quality_semantics": {
                 "score_type": "template_correlation_geometry_score",
-                "score_version": "geometry_latent_sync_sd3_v3",
+                "score_version": "geometry_latent_sync_sd3",
                 "trusted_as_primary_geometry_evidence": True,
                 "evidence_level": "primary",
             },

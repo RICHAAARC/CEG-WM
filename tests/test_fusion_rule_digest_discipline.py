@@ -1,4 +1,4 @@
-"""
+﻿"""
 测试融合规则摘要纪律
 
 功能：
@@ -22,7 +22,7 @@ from main.registries.fusion_registry import resolve_fusion_rule
 @pytest.fixture
 def np_fusion_rule() -> NeumanPearsonFusionRule:
     """构造 Neyman-Pearson 融合规则 v2 实例。"""
-    factory = resolve_fusion_rule("fusion_neyman_pearson_v2")
+    factory = resolve_fusion_rule("fusion_neyman_pearson")
     return factory({})
 
 
@@ -111,7 +111,7 @@ def test_compute_fusion_rule_digest_standalone(np_fusion_rule: NeumanPearsonFusi
     验证：compute_fusion_rule_digest() 函数可独立计算且一致。
     """
     payload1 = {
-        "impl_id": "fusion_neyman_pearson_v2",
+        "impl_id": "fusion_neyman_pearson",
         "impl_version": "v2",
         "rule_version": "v2",
         "np_threshold": 0.5,
@@ -120,7 +120,7 @@ def test_compute_fusion_rule_digest_standalone(np_fusion_rule: NeumanPearsonFusi
         "geo_gate_applied": False
     }
     payload2 = {
-        "impl_id": "fusion_neyman_pearson_v2",
+        "impl_id": "fusion_neyman_pearson",
         "impl_version": "v2",
         "rule_version": "v2",
         "np_threshold": 0.5,
@@ -156,12 +156,12 @@ def test_fusion_rule_digest_sensitive_to_impl_id(np_fusion_rule: NeumanPearsonFu
     digest_np = result_np.routing_digest or result_np.audit.get("fusion_rule_digest")
 
     # (2) 验证 fusion_rule_id 正确
-    assert result_np.evidence_summary["fusion_rule_id"] == "fusion_neyman_pearson_v2", \
+    assert result_np.evidence_summary["fusion_rule_id"] == "fusion_neyman_pearson", \
         "evidence_summary must reflect correct impl_id"
 
     # (3) 验证摘要包含 impl_id 信息（通过 audit 确认）
     assert isinstance(result_np.audit, dict), "audit must be dict"
-    assert result_np.audit.get("impl_id") == "fusion_neyman_pearson_v2", \
+    assert result_np.audit.get("impl_id") == "fusion_neyman_pearson", \
         "audit must record impl_id"
 
 

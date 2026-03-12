@@ -1,4 +1,4 @@
-"""
+﻿"""
 File purpose: 记录追加字段的 schema 兼容性回归测试。
 
 Module type: Core innovation module
@@ -160,14 +160,14 @@ def test_records_schema_new_fields_valid_types_pass(mock_interpretation):
     _set_value_by_field_path(record, "content_evidence.mask_digest", "a" * 64)
     _set_value_by_field_path(record, "content_evidence.mask_stats", {"area_ratio": 0.1})
     _set_value_by_field_path(record, "content_evidence.mask_stats.mask_resolution_binding", {"height": 512, "width": 512})
-    _set_value_by_field_path(record, "content_evidence.mask_stats.mask_source_impl_identity", {"impl_id": "semantic_mask_provider_v1", "impl_version": "v1", "impl_digest": "a" * 64})
+    _set_value_by_field_path(record, "content_evidence.mask_stats.mask_source_impl_identity", {"impl_id": "semantic_mask_provider", "impl_version": "v1", "impl_digest": "a" * 64})
     _set_value_by_field_path(record, "content_evidence.mask_stats.mask_params_digest", "b" * 64)
     _set_value_by_field_path(record, "content_evidence.mask_stats.routing_digest", "c" * 64)
     _set_value_by_field_path(record, "content_evidence.mask_stats.routing_summary", {"path": "lf"})
-    _set_value_by_field_path(record, "content_evidence.mask_stats.saliency_source_selected", "proxy_v1")
-    _set_value_by_field_path(record, "content_evidence.mask_stats.saliency_source_attempted", {"sequence": ["model_v2", "proxy_v1"]})
+    _set_value_by_field_path(record, "content_evidence.mask_stats.saliency_source_selected", "proxy")
+    _set_value_by_field_path(record, "content_evidence.mask_stats.saliency_source_attempted", {"sequence": ["model", "proxy"]})
     _set_value_by_field_path(record, "content_evidence.mask_stats.model_artifact_anchor", {"artifact_digest": "a" * 64})
-    _set_value_by_field_path(record, "content_evidence.mask_stats.saliency_provenance", {"source_selected": "proxy_v1"})
+    _set_value_by_field_path(record, "content_evidence.mask_stats.saliency_provenance", {"source_selected": "proxy"})
     _set_value_by_field_path(record, "content_evidence.lf_score", 0.12)
     _set_value_by_field_path(record, "content_evidence.injection_status", "ok")
     _set_value_by_field_path(record, "content_evidence.injection_absent_reason", "unsupported_pipeline")
@@ -200,7 +200,7 @@ def test_records_schema_new_fields_valid_types_pass(mock_interpretation):
     _set_value_by_field_path(record, "routing_digest", "c" * 64)
     _set_value_by_field_path(record, "routing_summary", {"path": "lf"})
     _set_value_by_field_path(record, "mask_resolution_binding", {"height": 512, "width": 512})
-    _set_value_by_field_path(record, "mask_source_impl_identity", {"impl_id": "semantic_mask_provider_v1", "impl_version": "v1", "impl_digest": "d" * 64})
+    _set_value_by_field_path(record, "mask_source_impl_identity", {"impl_id": "semantic_mask_provider", "impl_version": "v1", "impl_digest": "d" * 64})
     _set_value_by_field_path(
         record,
         "embed_trace",

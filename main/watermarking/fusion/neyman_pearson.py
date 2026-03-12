@@ -17,7 +17,7 @@ from typing import Any, Dict, List
 from main.core import digests
 
 
-RULE_ID = "fusion_neyman_pearson_v1"
+RULE_ID = "fusion_neyman_pearson"
 RULE_VERSION = "v1"
 
 REQUIRED_METADATA_KEYS = [

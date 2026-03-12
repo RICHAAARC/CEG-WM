@@ -23,7 +23,7 @@ from main.watermarking.fusion.neyman_pearson import compute_thresholds_digest
 def _build_cfg() -> Dict[str, Any]:
     return {
         "policy_path": "content_chain.enabled",
-        "pipeline_impl_id": "sd3_diffusers_real_v1",
+        "pipeline_impl_id": "sd3_diffusers_real",
         "pipeline_build_enabled": True,
         "model_id": "stabilityai/stable-diffusion-3-medium",
         "model_source": "local",
@@ -133,7 +133,7 @@ def test_preflight_fields_do_not_affect_cfg_or_plan_digest(monkeypatch: pytest.M
     subspace_result = SimpleNamespace(
         plan={
             "planner_impl_identity": {
-                "impl_id": "subspace_planner_v2",
+                "impl_id": "subspace_planner",
                 "impl_version": "v2",
                 "impl_digest": "digest",
             },

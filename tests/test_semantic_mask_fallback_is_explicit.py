@@ -1,4 +1,4 @@
-"""
+﻿"""
 文件目的：语义掩码 fallback 显式标记回归测试。
 Module type: General module
 """
@@ -32,14 +32,14 @@ def test_saliency_source_impl_selection_is_explicit(monkeypatch) -> None:
         raise RuntimeError("forced_saliency_unavailable")
 
     monkeypatch.setattr(
-        "main.watermarking.content_chain.semantic_mask_provider.build_semantic_saliency_mask_v1",
+        "main.watermarking.content_chain.semantic_mask_provider.build_semantic_saliency_mask_proxy",
         _raise_saliency,
     )
 
     cfg = {
         "enable_mask": True,
         "mask": {
-            "impl_id": "semantic_saliency_v1",
+            "impl_id": "semantic_saliency_proxy",
         },
     }
     inputs = {
@@ -51,10 +51,10 @@ def test_saliency_source_impl_selection_is_explicit(monkeypatch) -> None:
 
     assert result.status == "ok"
     assert isinstance(result.mask_stats, dict)
-    assert result.mask_stats.get("mask_impl_id") == "texture_gradient_v1"
+    assert result.mask_stats.get("mask_impl_id") == "texture_gradient"
     # v3 闭包：formal path 不再写出 mask_fallback_reason，实现选择由 mask_impl_id 显式表达
     assert "mask_fallback_reason" not in result.mask_stats
-    assert result.audit.get("mask_impl_id") == "texture_gradient_v1"
+    assert result.audit.get("mask_impl_id") == "texture_gradient"
 
 
 def test_saliency_source_auto_fallback_is_auditable() -> None:
@@ -83,12 +83,12 @@ def test_saliency_source_auto_fallback_is_auditable() -> None:
 
     assert result.status == "ok"
     assert isinstance(result.mask_stats, dict)
-    assert result.mask_stats.get("saliency_source_selected") == "proxy_v1"
+    assert result.mask_stats.get("saliency_source_selected") == "proxy"
     assert "fallback_used" not in result.mask_stats
     assert "fallback_reason" not in result.mask_stats
     saliency_provenance = result.mask_stats.get("saliency_provenance")
     assert isinstance(saliency_provenance, dict)
-    assert saliency_provenance.get("source_selected") == "proxy_v1"
+    assert saliency_provenance.get("source_selected") == "proxy"
     assert len(saliency_provenance.get("source_attempted", [])) > 1
 
 
@@ -105,7 +105,7 @@ def test_saliency_source_model_unavailable_returns_explicit_fail() -> None:
     cfg = {
         "enable_mask": True,
         "mask": {
-            "saliency_source": "model_v2",
+            "saliency_source": "model",
             "semantic_model_path": "Z:/path/not_exists/model.safetensors",
         },
     }
@@ -142,14 +142,14 @@ def test_saliency_source_model_v2_runtime_failure_is_fail_fast(monkeypatch) -> N
         _fake_probe,
     )
     monkeypatch.setattr(
-        "main.watermarking.content_chain.semantic_mask_provider.build_semantic_saliency_mask_v2",
+        "main.watermarking.content_chain.semantic_mask_provider.build_semantic_saliency_mask_model",
         _raise_v2,
     )
 
     cfg = {
         "enable_mask": True,
         "mask": {
-            "saliency_source": "model_v2",
+            "saliency_source": "model",
             "semantic_model_path": "C:/fake/model.pt",
         },
     }
@@ -163,4 +163,4 @@ def test_saliency_source_model_v2_runtime_failure_is_fail_fast(monkeypatch) -> N
     assert result.status == "failed"
     assert result.content_failure_reason == "saliency_source_model_v2_runtime_failed"
     assert result.mask_digest is None
-    assert result.audit.get("mask_source_type") == "semantic_model_v2"
+    assert result.audit.get("mask_source_type") == "semantic_model"

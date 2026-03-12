@@ -21,18 +21,16 @@ from .content_detector import ContentDetector, CONTENT_DETECTOR_ID, CONTENT_DETE
 from .interfaces import ContentEvidence
 
 
-UNIFIED_CONTENT_EXTRACTOR_ID = "unified_content_extractor_v1"
-UNIFIED_CONTENT_EXTRACTOR_VERSION = "v1"
-
-UNIFIED_CONTENT_EXTRACTOR_V2_ID = "unified_content_extractor_v2"
-UNIFIED_CONTENT_EXTRACTOR_V2_VERSION = "v2"
+_UNIFIED_CONTENT_EXTRACTOR_LEGACY_ID = "unified_content_extractor_legacy"
+UNIFIED_CONTENT_EXTRACTOR_ID = "unified_content_extractor"
+UNIFIED_CONTENT_EXTRACTOR_VERSION = "v2"
 
 
-class UnifiedContentExtractor:
+class _UnifiedContentExtractorBase:
     """
-    功能：统一内容链提取器（Embed + Detect 双模式）。
+    功能：统一内容链提取器基类（Embed + Detect 双模式，内部实现）。
 
-    Unified content extractor supporting both embed and detect modes.
+    Internal base class for unified content extractor supporting both embed and detect modes.
     Automatically delegates to SemanticMaskProvider (embed) or ContentDetector (detect)
     based on detect.content.enabled configuration.
 
@@ -135,15 +133,15 @@ class UnifiedContentExtractor:
             return self._mask_provider.extract(cfg, inputs=inputs, cfg_digest=cfg_digest)
 
 
-class UnifiedContentExtractorV2(UnifiedContentExtractor):
+class UnifiedContentExtractor(_UnifiedContentExtractorBase):
     """
-    功能：统一内容链提取器 v2，与 v1 逻辑相同但绑定 v2 impl_id。
+    功能：统一内容链提取器（稳定公共类，绑定 unified_content_extractor impl_id）。
 
-    Upgraded content extractor binding to unified_content_extractor_v2 impl_id.
-    All logic is identical to UnifiedContentExtractor; only the impl identity differs.
+    Stable public unified content extractor. All extraction logic is implemented
+    in _UnifiedContentExtractorBase; this class provides the canonical public symbol.
 
     Args:
-        impl_id: Implementation identifier string (must be unified_content_extractor_v2).
+        impl_id: Implementation identifier string (must be unified_content_extractor).
         impl_version: Implementation version string.
         impl_digest: Implementation digest string.
 

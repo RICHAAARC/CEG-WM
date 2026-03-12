@@ -22,21 +22,21 @@ from main.core import digests
 from .interfaces import ContentEvidence
 
 
-SEMANTIC_MASK_PROVIDER_ID = "semantic_mask_provider_v1"
+SEMANTIC_MASK_PROVIDER_ID = "semantic_mask_provider"
 SEMANTIC_MASK_PROVIDER_VERSION = "v1"
-SEMANTIC_MASK_PROVIDER_SALIENCY_POLICY_ID = "semantic_mask_provider_saliency_source_policy_v1"
+SEMANTIC_MASK_PROVIDER_SALIENCY_POLICY_ID = "semantic_mask_provider_saliency_policy"
 SEMANTIC_MASK_PROVIDER_SALIENCY_POLICY_VERSION = "v1"
 SEMANTIC_MASK_TRACE_VERSION = "v2"
-SEMANTIC_SALIENCY_IMPL_ID = "semantic_saliency_v1"
-SEMANTIC_SALIENCY_V2_IMPL_ID = "semantic_saliency_v2"
-TEXTURE_FALLBACK_IMPL_ID = "texture_gradient_v1"
+SEMANTIC_SALIENCY_PROXY_IMPL_ID = "semantic_saliency_proxy"
+SEMANTIC_SALIENCY_MODEL_IMPL_ID = "semantic_saliency_model"
+TEXTURE_FALLBACK_IMPL_ID = "texture_gradient"
 
-MASK_SOURCE_TYPE_SEMANTIC_MODEL_V2 = "semantic_model_v2"
-MASK_SOURCE_TYPE_SEMANTIC_MODEL_V1 = "semantic_model_v1"
+MASK_SOURCE_TYPE_SEMANTIC_MODEL = "semantic_model"
+MASK_SOURCE_TYPE_SEMANTIC_PROXY_MODEL = "semantic_model_proxy"
 MASK_SOURCE_TYPE_TEXTURE_GRADIENT_PROXY = "texture_gradient_proxy"
 
-SALIENCY_SOURCE_PROXY_V1 = "proxy_v1"
-SALIENCY_SOURCE_MODEL_V2 = "model_v2"
+SALIENCY_SOURCE_PROXY = "proxy"
+SALIENCY_SOURCE_MODEL = "model"
 SALIENCY_SOURCE_AUTO_FALLBACK = "auto_fallback"
 
 SEMANTIC_MODEL_BACKEND_BASNET = "basnet"
@@ -66,15 +66,15 @@ def _resolve_mask_source_type(mask_impl_id: str) -> str:
         mask_impl_id: Mask implementation identifier.
 
     Returns:
-        One of semantic_model_v2 / semantic_model_v1 / texture_gradient_proxy.
+        One of semantic_model / semantic_model_proxy / texture_gradient_proxy.
     """
     if not isinstance(mask_impl_id, str):
         raise TypeError("mask_impl_id must be str")
-    if mask_impl_id == SEMANTIC_SALIENCY_V2_IMPL_ID:
-        return MASK_SOURCE_TYPE_SEMANTIC_MODEL_V2
+    if mask_impl_id == SEMANTIC_SALIENCY_MODEL_IMPL_ID:
+        return MASK_SOURCE_TYPE_SEMANTIC_MODEL
     if mask_impl_id == TEXTURE_FALLBACK_IMPL_ID:
         return MASK_SOURCE_TYPE_TEXTURE_GRADIENT_PROXY
-    return MASK_SOURCE_TYPE_SEMANTIC_MODEL_V1
+    return MASK_SOURCE_TYPE_SEMANTIC_PROXY_MODEL
 
 
 @dataclass(frozen=True)
@@ -118,7 +118,7 @@ class SemanticMaskProvider:
     bound to configuration and inputs via canonical SHA256.
 
     Args:
-        impl_id: Implementation identifier string (frozen to semantic_mask_provider_v1).
+        impl_id: Implementation identifier string (frozen to semantic_mask_provider).
         impl_version: Implementation version string (frozen to v1).
         impl_digest: Implementation digest computed from source code.
 
@@ -312,7 +312,7 @@ class SemanticMaskProvider:
         }
         saliency_decision = select_saliency_source(cfg, availability_probe)
 
-        if saliency_decision.source_selected == SALIENCY_SOURCE_MODEL_V2 and not availability_probe["model_available"]:
+        if saliency_decision.source_selected == SALIENCY_SOURCE_MODEL and not availability_probe["model_available"]:
             return ContentEvidence(
                 status="failed",
                 score=None,
@@ -321,7 +321,7 @@ class SemanticMaskProvider:
                     "saliency_source_selected": saliency_decision.source_selected,
                     "saliency_source_attempted": saliency_decision.source_attempted,
                     "model_artifact_anchor": saliency_decision.model_artifact_anchor,
-                    "mask_source_type": MASK_SOURCE_TYPE_SEMANTIC_MODEL_V2,
+                    "mask_source_type": MASK_SOURCE_TYPE_SEMANTIC_MODEL,
                     "probe_failure_reason": _probe_failure_reason,
                 },
                 mask_digest=None,
@@ -338,17 +338,17 @@ class SemanticMaskProvider:
 
         try:
             mask_impl_id = saliency_decision.selected_impl_id
-            if mask_impl_id in {SEMANTIC_SALIENCY_IMPL_ID, SEMANTIC_SALIENCY_V2_IMPL_ID}:
+            if mask_impl_id in {SEMANTIC_SALIENCY_PROXY_IMPL_ID, SEMANTIC_SALIENCY_MODEL_IMPL_ID}:
                 try:
-                    if mask_impl_id == SEMANTIC_SALIENCY_V2_IMPL_ID:
-                        mask_array, saliency_map, mask_stats, mask_binding = build_semantic_saliency_mask_v2(
+                    if mask_impl_id == SEMANTIC_SALIENCY_MODEL_IMPL_ID:
+                        mask_array, saliency_map, mask_stats, mask_binding = build_semantic_saliency_mask_model(
                             image=image_data,
                             image_shape=image_shape,
                             cfg=cfg,
                             params=mask_params,
                         )
                     else:
-                        mask_array, saliency_map, mask_stats, mask_binding = build_semantic_saliency_mask_v1(
+                        mask_array, saliency_map, mask_stats, mask_binding = build_semantic_saliency_mask_proxy(
                             image=image_data,
                             image_shape=image_shape,
                             cfg=cfg,
@@ -356,8 +356,8 @@ class SemanticMaskProvider:
                         )
                 except Exception as saliency_exc:
                     _ = saliency_exc  # 来源切换由 mask_impl_id / saliency_source_attempted 显式表达
-                    if mask_impl_id == SEMANTIC_SALIENCY_V2_IMPL_ID:
-                        if saliency_decision.source_selected == SALIENCY_SOURCE_MODEL_V2:
+                    if mask_impl_id == SEMANTIC_SALIENCY_MODEL_IMPL_ID:
+                        if saliency_decision.source_selected == SALIENCY_SOURCE_MODEL:
                             # 显式 model_v2 模式禁止自动降级，必须 fail-fast。
                             return ContentEvidence(
                                 status="failed",
@@ -367,7 +367,7 @@ class SemanticMaskProvider:
                                     "saliency_source_selected": saliency_decision.source_selected,
                                     "saliency_source_attempted": saliency_decision.source_attempted,
                                     "model_artifact_anchor": saliency_decision.model_artifact_anchor,
-                                    "mask_source_type": MASK_SOURCE_TYPE_SEMANTIC_MODEL_V2,
+                                    "mask_source_type": MASK_SOURCE_TYPE_SEMANTIC_MODEL,
                                 },
                                 mask_digest=None,
                                 mask_stats=None,
@@ -381,16 +381,16 @@ class SemanticMaskProvider:
                                 content_failure_reason="saliency_source_model_v2_runtime_failed"
                             )
                         try:
-                            mask_array, saliency_map, mask_stats, mask_binding = build_semantic_saliency_mask_v1(
+                            mask_array, saliency_map, mask_stats, mask_binding = build_semantic_saliency_mask_proxy(
                                 image=image_data,
                                 image_shape=image_shape,
                                 cfg=cfg,
                                 params=mask_params,
                             )
-                            mask_impl_id = SEMANTIC_SALIENCY_IMPL_ID
+                            mask_impl_id = SEMANTIC_SALIENCY_PROXY_IMPL_ID
                         except Exception:
                             mask_impl_id = TEXTURE_FALLBACK_IMPL_ID
-                            mask_array, mask_stats, mask_binding = build_texture_mask_v1(
+                            mask_array, mask_stats, mask_binding = build_texture_mask(
                                 image=image_data,
                                 image_shape=image_shape,
                                 cfg=cfg,
@@ -399,7 +399,7 @@ class SemanticMaskProvider:
                             saliency_map = mask_array.astype(np.float32)
                     else:
                         mask_impl_id = TEXTURE_FALLBACK_IMPL_ID
-                        mask_array, mask_stats, mask_binding = build_texture_mask_v1(
+                        mask_array, mask_stats, mask_binding = build_texture_mask(
                             image=image_data,
                             image_shape=image_shape,
                             cfg=cfg,
@@ -407,7 +407,7 @@ class SemanticMaskProvider:
                         )
                         saliency_map = mask_array.astype(np.float32)
             else:
-                mask_array, mask_stats, mask_binding = build_texture_mask_v1(
+                mask_array, mask_stats, mask_binding = build_texture_mask(
                     image=image_data,
                     image_shape=image_shape,
                     cfg=cfg,
@@ -613,7 +613,7 @@ def _compute_semantic_mask(
         TypeError: If image_data type is unsupported.
     """
     mask_params = _resolve_mask_params(cfg)
-    mask_array, mask_stats, mask_binding = build_texture_mask_v1(
+    mask_array, mask_stats, mask_binding = build_texture_mask(
         image=image_data,
         image_shape=image_shape,
         cfg=cfg,
@@ -746,9 +746,9 @@ def _resolve_mask_params(cfg: Dict[str, Any]) -> Dict[str, Any]:
     open_iters = max(0, min(open_iters, 3))
     close_iters = max(0, min(close_iters, 3))
 
-    mask_impl_id = mask_cfg.get("impl_id", SEMANTIC_SALIENCY_V2_IMPL_ID)
+    mask_impl_id = mask_cfg.get("impl_id", SEMANTIC_SALIENCY_MODEL_IMPL_ID)
     if not isinstance(mask_impl_id, str) or not mask_impl_id:
-        mask_impl_id = SEMANTIC_SALIENCY_IMPL_ID
+        mask_impl_id = SEMANTIC_SALIENCY_PROXY_IMPL_ID
 
     semantic_model_source = mask_cfg.get("semantic_model_source", SEMANTIC_MODEL_BACKEND_BASNET)
     semantic_model_version = mask_cfg.get("semantic_model_version", "v1")
@@ -763,7 +763,7 @@ def _resolve_mask_params(cfg: Dict[str, Any]) -> Dict[str, Any]:
         saliency_threshold_quantile = threshold_quantile
     saliency_threshold_quantile = max(0.5, min(float(saliency_threshold_quantile), 0.98))
     saliency_source = mask_cfg.get("saliency_source", SALIENCY_SOURCE_AUTO_FALLBACK)
-    if saliency_source not in {SALIENCY_SOURCE_PROXY_V1, SALIENCY_SOURCE_MODEL_V2, SALIENCY_SOURCE_AUTO_FALLBACK}:
+    if saliency_source not in {SALIENCY_SOURCE_PROXY, SALIENCY_SOURCE_MODEL, SALIENCY_SOURCE_AUTO_FALLBACK}:
         saliency_source = SALIENCY_SOURCE_AUTO_FALLBACK
 
     return {
@@ -803,7 +803,7 @@ def _normalize_semantic_model_source(model_source: Any) -> str:
     if normalized in {
         "basnet",
         "offline_heuristic",
-        "model_v2",
+        "model",
         "offline",
         "local",
         "builtin",
@@ -1245,53 +1245,53 @@ def select_saliency_source(cfg: Dict[str, Any], availability_probe: Dict[str, An
 
     mask_cfg = cfg.get("mask") if isinstance(cfg.get("mask"), dict) else {}
     saliency_source = mask_cfg.get("saliency_source", SALIENCY_SOURCE_AUTO_FALLBACK)
-    if saliency_source not in {SALIENCY_SOURCE_PROXY_V1, SALIENCY_SOURCE_MODEL_V2, SALIENCY_SOURCE_AUTO_FALLBACK}:
+    if saliency_source not in {SALIENCY_SOURCE_PROXY, SALIENCY_SOURCE_MODEL, SALIENCY_SOURCE_AUTO_FALLBACK}:
         saliency_source = SALIENCY_SOURCE_AUTO_FALLBACK
 
     model_available = bool(availability_probe.get("model_available", False))
     anchor = _build_model_artifact_anchor(_resolve_mask_params(cfg))
 
-    if saliency_source == SALIENCY_SOURCE_PROXY_V1:
+    if saliency_source == SALIENCY_SOURCE_PROXY:
         return SaliencySourceDecision(
-            source_selected=SALIENCY_SOURCE_PROXY_V1,
-            source_attempted=[SALIENCY_SOURCE_PROXY_V1],
+            source_selected=SALIENCY_SOURCE_PROXY,
+            source_attempted=[SALIENCY_SOURCE_PROXY],
             model_artifact_anchor=anchor,
-            selected_impl_id=SEMANTIC_SALIENCY_IMPL_ID,
+            selected_impl_id=SEMANTIC_SALIENCY_PROXY_IMPL_ID,
         )
 
-    if saliency_source == SALIENCY_SOURCE_MODEL_V2:
+    if saliency_source == SALIENCY_SOURCE_MODEL:
         if model_available:
             return SaliencySourceDecision(
-                source_selected=SALIENCY_SOURCE_MODEL_V2,
-                source_attempted=[SALIENCY_SOURCE_MODEL_V2],
+                source_selected=SALIENCY_SOURCE_MODEL,
+                source_attempted=[SALIENCY_SOURCE_MODEL],
                 model_artifact_anchor=anchor,
-                selected_impl_id=SEMANTIC_SALIENCY_V2_IMPL_ID,
+                selected_impl_id=SEMANTIC_SALIENCY_MODEL_IMPL_ID,
             )
         return SaliencySourceDecision(
-            source_selected=SALIENCY_SOURCE_MODEL_V2,
-            source_attempted=[SALIENCY_SOURCE_MODEL_V2],
+            source_selected=SALIENCY_SOURCE_MODEL,
+            source_attempted=[SALIENCY_SOURCE_MODEL],
             model_artifact_anchor=anchor,
-            selected_impl_id=SEMANTIC_SALIENCY_V2_IMPL_ID,
+            selected_impl_id=SEMANTIC_SALIENCY_MODEL_IMPL_ID,
         )
 
     if model_available:
         return SaliencySourceDecision(
-            source_selected=SALIENCY_SOURCE_MODEL_V2,
-            source_attempted=[SALIENCY_SOURCE_MODEL_V2],
+            source_selected=SALIENCY_SOURCE_MODEL,
+            source_attempted=[SALIENCY_SOURCE_MODEL],
             model_artifact_anchor=anchor,
-            selected_impl_id=SEMANTIC_SALIENCY_V2_IMPL_ID,
+            selected_impl_id=SEMANTIC_SALIENCY_MODEL_IMPL_ID,
         )
 
     # auto_fallback：模型不可用时选择 proxy_v1，通过 source_attempted 记录尝试序列。
     return SaliencySourceDecision(
-        source_selected=SALIENCY_SOURCE_PROXY_V1,
-        source_attempted=[SALIENCY_SOURCE_MODEL_V2, SALIENCY_SOURCE_PROXY_V1],
+        source_selected=SALIENCY_SOURCE_PROXY,
+        source_attempted=[SALIENCY_SOURCE_MODEL, SALIENCY_SOURCE_PROXY],
         model_artifact_anchor=anchor,
-        selected_impl_id=SEMANTIC_SALIENCY_IMPL_ID,
+        selected_impl_id=SEMANTIC_SALIENCY_PROXY_IMPL_ID,
     )
 
 
-def build_semantic_saliency_mask_v1(
+def build_semantic_saliency_mask_proxy(
     image: Any,
     image_shape: Optional[Any],
     cfg: Dict[str, Any],
@@ -1376,7 +1376,7 @@ def build_semantic_saliency_mask_v1(
     return mask.astype(bool), saliency_map, mask_stats, binding
 
 
-def build_semantic_saliency_mask_v2(
+def build_semantic_saliency_mask_model(
     image: Any,
     image_shape: Optional[Any],
     cfg: Dict[str, Any],
@@ -1481,7 +1481,7 @@ def build_semantic_saliency_mask_v2(
         "downsample_grid_true_indices": true_indices,
         "downsample_grid_digest": downsample_grid_digest,
         "saliency_threshold": round(float(threshold), 8),
-        "saliency_source_selected": SALIENCY_SOURCE_MODEL_V2,
+        "saliency_source_selected": SALIENCY_SOURCE_MODEL,
         "model_artifact_anchor": {
             "model_source": model_source,
             "model_version": params.get("semantic_model_version", "v2"),
@@ -1492,8 +1492,8 @@ def build_semantic_saliency_mask_v2(
             "thresholding": threshold_mode,
         },
         "saliency_provenance": {
-            "source_selected": SALIENCY_SOURCE_MODEL_V2,
-            "source_attempted": [SALIENCY_SOURCE_MODEL_V2],
+            "source_selected": SALIENCY_SOURCE_MODEL,
+            "source_attempted": [SALIENCY_SOURCE_MODEL],
         },
     }
     binding = {
@@ -1508,7 +1508,7 @@ def build_semantic_saliency_mask_v2(
     return mask.astype(bool), saliency_map.astype(np.float32), mask_stats, binding
 
 
-def build_texture_mask_v1(
+def build_texture_mask(
     image: Any,
     image_shape: Optional[Any],
     cfg: Dict[str, Any],

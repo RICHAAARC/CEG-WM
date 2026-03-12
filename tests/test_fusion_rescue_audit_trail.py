@@ -1,4 +1,4 @@
-"""
+﻿"""
 测试 rescue band 审计与版本控制
 
 功能：
@@ -19,7 +19,7 @@ from main.registries.fusion_registry import resolve_fusion_rule
 @pytest.fixture
 def np_fusion_rule() -> NeumanPearsonFusionRule:
     """构造 Neyman-Pearson 融合规则 v2 实例。"""
-    factory = resolve_fusion_rule("fusion_neyman_pearson_v2")
+    factory = resolve_fusion_rule("fusion_neyman_pearson")
     return factory({})
 
 

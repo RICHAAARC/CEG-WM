@@ -90,7 +90,7 @@ class _SubspacePlannerStub:
             "plan": {
                 "planner_input_digest": "planner_input_digest_ok",
                 "planner_impl_identity": {
-                    "impl_id": "subspace_planner_v2",
+                    "impl_id": "subspace_planner",
                     "impl_version": "v2",
                     "impl_digest": "digest",
                 },
@@ -136,7 +136,7 @@ def _build_matching_input_record() -> Dict[str, Any]:
         "plan_digest": "plan_detect",
         "basis_digest": "basis_detect",
         "subspace_planner_impl_identity": {
-            "impl_id": "subspace_planner_v2",
+            "impl_id": "subspace_planner",
             "impl_version": "v2",
             "impl_digest": "digest",
         },

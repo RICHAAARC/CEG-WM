@@ -18,7 +18,7 @@ from main.watermarking.fusion.interfaces import FusionDecision
 
 
 # 融合规则实现的 impl_id 定义
-FUSION_RULE_ID = "fusion_neyman_pearson_v1"
+FUSION_RULE_ID = "fusion_neyman_pearson"
 FUSION_RULE_VERSION = "v1"
 
 # Rescue band 版本标记（用于审计可重现性）
@@ -254,15 +254,19 @@ class NeumanPearsonFusionRule:
         geo_gate_applied = False
         rescue_sync_status = geometry_evidence.get("sync_status", geometry_status)
         rescue_sync_status_normalized = "ok" if rescue_sync_status in {"ok", "synced"} else rescue_sync_status
+        rescue_anchor_evidence_level = geometry_evidence.get("anchor_evidence_level")
 
         # (7) 几何辅助（rescue band）：单侧救回策略
         # 口径修正：仅允许救回 False → True，禁止翻转 True → False
         rescue_band_spec = _build_rescue_band_spec(cfg)
+        rescue_blocked_reason: Optional[str] = None
         if (geometry_status == "ok" and 
             isinstance(geometry_score, (int, float)) and 
             not content_decision):  # NP 决策为 False，才考虑救回
-            # 检查是否在 rescue band 范围内（下界）
-            if _is_rescue_candidate(content_score, np_threshold, rescue_band_spec):
+            # 门控：proxy 锚点 + sync 不 ok 时，禁止 rescue（低质量几何信号不可救回）
+            if rescue_anchor_evidence_level == "proxy" and rescue_sync_status_normalized != "ok":
+                rescue_blocked_reason = "proxy_geometry_not_trusted"
+            elif _is_rescue_candidate(content_score, np_threshold, rescue_band_spec):
                 # 检查几何门控条件
                 geo_gate_applied = _check_geo_gate(content_score, geometry_score, rescue_band_spec)
                 if geo_gate_applied:
@@ -319,7 +323,8 @@ class NeumanPearsonFusionRule:
             "rescue_reason": "rescued_by_geo_gate" if rescue_band_applied else None,
             "rescue_band_version": RESCUE_BAND_VERSION if rescue_band_applied else None,
             "geo_gate_applied": geo_gate_applied,
-            "rescue_blocked_reason": None,
+            "rescue_blocked_reason": rescue_blocked_reason,
+            "rescue_anchor_evidence_level": rescue_anchor_evidence_level,
             "rescue_sync_status": rescue_sync_status,
             "rescue_sync_status_normalized": rescue_sync_status_normalized,
             "fusion_rule_digest": fusion_rule_digest,

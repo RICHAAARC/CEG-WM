@@ -1,4 +1,4 @@
-policy_path: "content_np_geo_rescue_v2"
+﻿policy_path: "content_np_geo_rescue"
 
 target_fpr: 0.01
 
@@ -9,7 +9,7 @@ device: "cuda"
 
 model_id: "stabilityai/stable-diffusion-3.5-medium"
 hf_revision: "main"
-pipeline_impl_id: "sd3_diffusers_real_v1"
+pipeline_impl_id: "sd3_diffusers_real"
 pipeline_build_enabled: true
 
 inference_enabled: true
@@ -83,8 +83,8 @@ detect:
 
 enable_mask: true
 mask:
-  impl_id: "semantic_saliency_v2"
-  saliency_source: "model_v2"   # 强制使用真实模型，禁止自动 proxy fallback
+  impl_id: "semantic_saliency_model"
+  saliency_source: "model"   # 强制使用真实模型，禁止自动 proxy fallback
   semantic_model_source: "inspyrenet"
   semantic_model_path: "models/inspyrenet/ckpt_base.pth"
 
@@ -117,13 +117,13 @@ evaluate:
   exclude_synthetic_negative_closure_marker: true
 
 impl:
-  content_extractor_id: "unified_content_extractor_v2"
-  geometry_extractor_id: "attention_anchor_map_relation_v2"
-  fusion_rule_id: "fusion_neyman_pearson_v2"
-  subspace_planner_id: "subspace_planner_v2"
-  sync_module_id: "geometry_latent_sync_sd3_v3"
-  hf_embedder_id: "high_freq_template_codec_v2"
-  lf_coder_id: "low_freq_template_codec_v2"
+  content_extractor_id: "unified_content_extractor"
+  geometry_extractor_id: "attention_anchor_extractor"
+  fusion_rule_id: "fusion_neyman_pearson"
+  subspace_planner_id: "subspace_planner"
+  sync_module_id: "geometry_latent_sync_sd3"
+  hf_embedder_id: "high_freq_template_codec"
+  lf_coder_id: "low_freq_template_codec"
   use_latent_per_step: true
 
 # 密码学生成溯源（Cryptographic Generation Attestation）配置。

@@ -1668,8 +1668,8 @@ def test_paper_full_mechanism_assertions_fail_fast_on_proxy_paths(tmp_path: Path
     cfg = {
         "paper_faithfulness": {"enabled": True},
         "impl": {
-            "sync_module_id": "geometry_latent_sync_sd3_v3",
-            "geometry_extractor_id": "attention_anchor_map_relation_v2",
+            "sync_module_id": "geometry_latent_sync_sd3",
+            "geometry_extractor_id": "attention_anchor_extractor",
         },
         "watermark": {
             "hf": {
@@ -1747,10 +1747,10 @@ def test_paper_full_mechanism_assertions_accept_top_level_geometry_payload(tmp_p
     cfg = {
         "paper_faithfulness": {"enabled": True},
         "impl": {
-            "sync_module_id": "geometry_latent_sync_sd3_v3",
-            "geometry_extractor_id": "attention_anchor_map_relation_v2",
-            "hf_embedder_id": "high_freq_template_codec_v2",
-            "lf_coder_id": "low_freq_template_codec_v2",
+            "sync_module_id": "geometry_latent_sync_sd3",
+            "geometry_extractor_id": "attention_anchor_extractor",
+            "hf_embedder_id": "high_freq_template_codec",
+            "lf_coder_id": "low_freq_template_codec",
         },
         "watermark": {
             "hf": {
@@ -1905,10 +1905,10 @@ def test_paper_full_mechanism_assertions_accept_nested_evaluation_report(tmp_pat
     cfg = {
         "paper_faithfulness": {"enabled": True},
         "impl": {
-            "sync_module_id": "geometry_latent_sync_sd3_v3",
-            "geometry_extractor_id": "attention_anchor_map_relation_v2",
-            "hf_embedder_id": "high_freq_template_codec_v2",
-            "lf_coder_id": "low_freq_template_codec_v2",
+            "sync_module_id": "geometry_latent_sync_sd3",
+            "geometry_extractor_id": "attention_anchor_extractor",
+            "hf_embedder_id": "high_freq_template_codec",
+            "lf_coder_id": "low_freq_template_codec",
         },
         "watermark": {
             "hf": {
@@ -2006,10 +2006,10 @@ def test_paper_full_mechanism_assertions_reject_latent_mode_sync_only_geometry(t
     cfg = {
         "paper_faithfulness": {"enabled": True},
         "impl": {
-            "sync_module_id": "geometry_latent_sync_sd3_v3",
-            "geometry_extractor_id": "attention_anchor_map_relation_v2",
-            "hf_embedder_id": "high_freq_template_codec_v2",
-            "lf_coder_id": "low_freq_template_codec_v2",
+            "sync_module_id": "geometry_latent_sync_sd3",
+            "geometry_extractor_id": "attention_anchor_extractor",
+            "hf_embedder_id": "high_freq_template_codec",
+            "lf_coder_id": "low_freq_template_codec",
         },
         "watermark": {
             "hf": {
@@ -2132,10 +2132,10 @@ def test_paper_mechanism_assertions_allow_fallback_without_geometry_anchors(tmp_
     cfg = {
         "paper_faithfulness": {"enabled": True},
         "impl": {
-            "sync_module_id": "geometry_latent_sync_sd3_v3",
-            "geometry_extractor_id": "attention_anchor_map_relation_v2",
-            "hf_embedder_id": "high_freq_template_codec_v2",
-            "lf_coder_id": "low_freq_template_codec_v2",
+            "sync_module_id": "geometry_latent_sync_sd3",
+            "geometry_extractor_id": "attention_anchor_extractor",
+            "hf_embedder_id": "high_freq_template_codec",
+            "lf_coder_id": "low_freq_template_codec",
         },
         "watermark": {
             "hf": {

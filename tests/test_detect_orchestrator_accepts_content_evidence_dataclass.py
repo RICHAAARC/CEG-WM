@@ -1,4 +1,4 @@
-"""
+﻿"""
 File purpose: Regression tests for detect orchestrator with ContentEvidence dataclass.
 Module type: General module
 
@@ -202,7 +202,7 @@ class TestDetectOrchestratorWithContentDetector:
         mock_impl_set.subspace_planner = mock_subspace_planner
         planner_input_digest = "planner_input_digest_ok"
         planner_impl_identity = {
-            "impl_id": "subspace_planner_v2",
+            "impl_id": "subspace_planner",
             "impl_version": "v2",
             "impl_digest": "digest"
         }
@@ -334,7 +334,7 @@ class TestDetectOrchestratorWithContentDetector:
         mock_impl_set.subspace_planner = mock_subspace_planner
         planner_input_digest = "planner_input_digest_ok"
         planner_impl_identity = {
-            "impl_id": "subspace_planner_v2",
+            "impl_id": "subspace_planner",
             "impl_version": "v2",
             "impl_digest": "digest"
         }

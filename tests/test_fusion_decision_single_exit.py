@@ -1,4 +1,4 @@
-"""
+﻿"""
 File purpose: 决策唯一出口与 FusionDecision 语义回归测试（Decision single-exit and semantics tests）。
 Module type: General module
 """
@@ -99,11 +99,11 @@ def _build_minimal_cfg() -> Dict[str, Any]:
     from main.core import config_loader
     cfg: Dict[str, Any] = {
         "impl": {
-            "content_extractor_id": "unified_content_extractor_v2",
-            "geometry_extractor_id": "attention_anchor_map_relation_v2",
-            "fusion_rule_id": "fusion_neyman_pearson_v2",
-            "subspace_planner_id": "subspace_planner_v2",
-            "sync_module_id": "geometry_latent_sync_sd3_v3",
+            "content_extractor_id": "unified_content_extractor",
+            "geometry_extractor_id": "attention_anchor_extractor",
+            "fusion_rule_id": "fusion_neyman_pearson",
+            "subspace_planner_id": "subspace_planner",
+            "sync_module_id": "geometry_latent_sync_sd3",
         },
         "ablation": {
             "enable_content": False,
@@ -168,14 +168,14 @@ def test_fusion_neyman_pearson_returns_fusion_decision() -> None:
         "geometry_score": None,
         "content_status": "ok",
         "geometry_status": "absent",
-        "fusion_rule_id": "fusion_neyman_pearson_v2",
+        "fusion_rule_id": "fusion_neyman_pearson",
     }
     decided = FusionDecision(
         is_watermarked=True,
         decision_status="decided",
         thresholds_digest=thresholds_digest,
         evidence_summary=evidence_summary_decided,
-        audit={"impl_id": "fusion_neyman_pearson_v2", "decision_status": "decided"},
+        audit={"impl_id": "fusion_neyman_pearson", "decision_status": "decided"},
     )
     assert isinstance(decided, FusionDecision), "FusionDecision must be FusionDecision"
     assert decided.decision_status == "decided", "expected decision_status=decided"
@@ -186,14 +186,14 @@ def test_fusion_neyman_pearson_returns_fusion_decision() -> None:
         "geometry_score": None,
         "content_status": "absent",
         "geometry_status": "absent",
-        "fusion_rule_id": "fusion_neyman_pearson_v2",
+        "fusion_rule_id": "fusion_neyman_pearson",
     }
     abstain = FusionDecision(
         is_watermarked=None,
         decision_status="abstain",
         thresholds_digest=thresholds_digest,
         evidence_summary=evidence_summary_abstain,
-        audit={"impl_id": "fusion_neyman_pearson_v2", "decision_status": "abstain"},
+        audit={"impl_id": "fusion_neyman_pearson", "decision_status": "abstain"},
     )
     assert abstain.decision_status in {"abstain", "error"}, "expected abstain or error"
     assert abstain.is_watermarked is None, "abstain/error must have None is_watermarked"
@@ -221,14 +221,14 @@ def test_geometry_failure_does_not_change_content_score_or_thresholds() -> None:
         "geometry_score": 0.12,
         "content_status": "ok",
         "geometry_status": "ok",
-        "fusion_rule_id": "fusion_neyman_pearson_v2",
+        "fusion_rule_id": "fusion_neyman_pearson",
     }
     evidence_summary_failed = {
         "content_score": 0.42,
         "geometry_score": 0.12,
         "content_status": "ok",
         "geometry_status": "failed",
-        "fusion_rule_id": "fusion_neyman_pearson_v2",
+        "fusion_rule_id": "fusion_neyman_pearson",
     }
     decided_ok = FusionDecision(
         is_watermarked=True,
@@ -356,9 +356,9 @@ def test_fusion_result_json_serializable() -> None:
             "geometry_score": None,
             "content_status": "ok",
             "geometry_status": "absent",
-            "fusion_rule_id": "fusion_neyman_pearson_v2",
+            "fusion_rule_id": "fusion_neyman_pearson",
         },
-        audit={"impl_id": "fusion_neyman_pearson_v2", "decision_status": "decided"},
+        audit={"impl_id": "fusion_neyman_pearson", "decision_status": "decided"},
     )
 
     result_dict = decided.to_dict()
@@ -470,9 +470,9 @@ def test_decision_writer_only_writes_decision_field(mock_interpretation) -> None
             "geometry_score": None,
             "content_status": "ok",
             "geometry_status": "absent",
-            "fusion_rule_id": "fusion_neyman_pearson_v2",
+            "fusion_rule_id": "fusion_neyman_pearson",
         },
-        audit={"impl_id": "fusion_neyman_pearson_v2", "decision_status": "decided"},
+        audit={"impl_id": "fusion_neyman_pearson", "decision_status": "decided"},
     )
 
     record: Dict[str, Any] = {

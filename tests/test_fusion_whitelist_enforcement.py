@@ -1,4 +1,4 @@
-"""
+﻿"""
 测试融合规则白名单强制
 
 功能：
@@ -20,15 +20,15 @@ from main.registries.fusion_registry import (
 
 def test_fusion_neyman_pearson_whitelist_present() -> None:
     """
-    验证：fusion_neyman_pearson_v2 在白名单中。
+    验证：fusion_neyman_pearson 在白名单中。
     """
     allowed_ids = list_fusion_impl_ids()
 
-    assert "fusion_neyman_pearson_v2" in allowed_ids, \
-        "fusion_neyman_pearson_v2 must be whitelisted"
+    assert "fusion_neyman_pearson" in allowed_ids, \
+        "fusion_neyman_pearson must be whitelisted"
 
 
-def test_fusion_impl_ids_resolvable(np_fusion_impl_id: str = "fusion_neyman_pearson_v2") -> None:
+def test_fusion_impl_ids_resolvable(np_fusion_impl_id: str = "fusion_neyman_pearson") -> None:
     """
     验证：白名单中的 impl_id 可通过 resolve_fusion_rule 正确解析。
     """
@@ -61,8 +61,8 @@ def test_fusion_rule_only_whitelisted_ids() -> None:
         "must have at least 1 fusion rule implementation"
 
     # (2) 应包含 NP 正式实现
-    assert "fusion_neyman_pearson_v2" in ids, \
-        "list must include fusion_neyman_pearson_v2"
+    assert "fusion_neyman_pearson" in ids, \
+        "list must include fusion_neyman_pearson"
 
     # (3) 验证列表中每个 id 都可解析
     for impl_id in ids:

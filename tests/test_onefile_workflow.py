@@ -1,4 +1,4 @@
-"""
+﻿"""
 文件目的：onefile workflow 编排回归测试。
 Module type: General module
 """
@@ -216,8 +216,8 @@ def test_onefile_workflow_paper_full_profile_generates_real_sd3_config(tmp_path:
     profile_cfg_text = profile_cfg_path.read_text(encoding="utf-8")
     profile_cfg_obj = yaml.safe_load(profile_cfg_text)
 
-    assert profile_cfg_obj["impl"]["sync_module_id"] == "geometry_latent_sync_sd3_v3"
-    assert profile_cfg_obj["impl"]["geometry_extractor_id"] == "attention_anchor_map_relation_v2"
+    assert profile_cfg_obj["impl"]["sync_module_id"] == "geometry_latent_sync_sd3"
+    assert profile_cfg_obj["impl"]["geometry_extractor_id"] == "attention_anchor_extractor"
     assert profile_cfg_obj["mask"]["semantic_model_path"] == str(local_model_path.resolve())
     assert profile_cfg_obj["embed"]["geometry"]["sync_strength"] == 0.2
     assert "device: cuda" in profile_cfg_text
@@ -305,7 +305,7 @@ def test_onefile_workflow_paper_full_profile_fails_fast_on_mismatched_impl(tmp_p
     cfg_obj = {
         "impl": {
             "sync_module_id": "geometry_latent_sync_sd3_v1",
-            "geometry_extractor_id": "attention_anchor_map_relation_v2",
+            "geometry_extractor_id": "attention_anchor_extractor",
         }
     }
     cfg_path = tmp_path / "bad_impl_config.yaml"
@@ -333,8 +333,8 @@ def test_onefile_workflow_paper_full_profile_keeps_unresolved_semantic_model_pat
     run_root = tmp_path / "paper_full_missing_model"
     cfg_obj = {
         "impl": {
-            "sync_module_id": "geometry_latent_sync_sd3_v3",
-            "geometry_extractor_id": "attention_anchor_map_relation_v2",
+            "sync_module_id": "geometry_latent_sync_sd3",
+            "geometry_extractor_id": "attention_anchor_extractor",
         },
         "mask": {
             "semantic_model_path": "/content/models/inspyrenet/inspyrenet_plus_ultra.pth",

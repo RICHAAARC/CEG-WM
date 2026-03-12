@@ -408,7 +408,7 @@ def build_runtime_impl_set_from_cfg(
     impl_set_capabilities_digest = compute_impl_set_capabilities_digest(impl_caps_list[:5])
     cfg["impl_set_capabilities_digest"] = impl_set_capabilities_digest
     # 并行计算扩展口径：覆盖 HF/LF 域，保持 v1 返回契约不变。
-    impl_set_capabilities_extended_digest = compute_impl_set_capabilities_digest_v2(impl_caps_list)
+    impl_set_capabilities_extended_digest = compute_impl_set_capabilities_digest_extended(impl_caps_list)
     cfg["impl_set_capabilities_extended_digest"] = impl_set_capabilities_extended_digest
 
     return identity, impl_set, impl_set_capabilities_digest
@@ -645,9 +645,9 @@ def compute_impl_set_capabilities_digest(impl_caps_list: List[ImplCapabilities])
     return digests.canonical_sha256(canonical_caps)
 
 
-def compute_impl_set_capabilities_digest_v2(impl_caps_list: List[ImplCapabilities]) -> str:
+def compute_impl_set_capabilities_digest_extended(impl_caps_list: List[ImplCapabilities]) -> str:
     """
-    功能：计算 impl_set capabilities v2 摘要（包含 HF/LF 扩展域）。
+    功能：计算 impl_set capabilities 扩展摘要（包含 HF/LF 扩展域）。
 
     Compute impl_set_capabilities_extended_digest from aggregated capabilities.
     Preserves v1 fields and extends domain coverage to optional HF/LF domains.

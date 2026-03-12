@@ -1,4 +1,4 @@
-# ==============================================================
+﻿# ==============================================================
 # 运行期白名单
 #   本文件定义“运行期允许集合”，用于门禁收口。
 #   - 限制 policy_path 只能取允许集合中的值。
@@ -35,12 +35,12 @@ policy_path:
 
     # 论文级单一正式路径（v2.0 追加，append-only）
     # 单侧几何门控，无 fallback/proxy/sidecar。
-    - "content_np_geo_rescue_v2"
+    - "content_np_geo_rescue"
 
     # ---- 已废弃（deprecated v2.0，formal_run_forbidden）----
     # 以下策略路径在 v2.0 论文正式路径收口后禁止用于正式 run；
     # 保留仅用于历史审计兼容，不可删除（append-only）。
-    # - "content_with_geometry_gate"   # 旧组合策略，已被 content_np_geo_rescue_v2 取代
+    # - "content_with_geometry_gate"   # 旧组合策略，已被 content_np_geo_rescue 取代
     # - "content_fallback_no_geometry" # 旧几何失败回退策略，已废弃
 
 # ==============================================================
@@ -318,23 +318,23 @@ enums:
   pattern_type:
     allowed:
       - "gaussian_iid"
-      - "gaussian_iid_v1"
+      - "gaussian_iid_rng"
       - "rademacher"
 
   # mask_impl_id：语义掩码实现枚举（append-only）。
   mask_impl_id:
     allowed:
-      - "semantic_saliency_v1"
-      - "semantic_saliency_v2"
-      - "texture_gradient_v1"
+      - "semantic_saliency_proxy"
+      - "semantic_saliency_model"
+      - "texture_gradient"
 
   # saliency_source：显著性来源策略枚举（append-only）。
   saliency_source:
     allowed:
-      - "model_v2"
+      - "model"
       - "auto_fallback"
       # ---- 已废弃（deprecated v2.0）----
-      # - "proxy_v1"  # 代理显著性源，论文正式路径禁止使用
+      # - "proxy"  # 代理显著性源，论文正式路径禁止使用
 
   # subspace_method：子空间规划相关枚举，表示“如何选子空间”。
   subspace_method:
@@ -359,29 +359,29 @@ impl_id:
   # 运行期 gate 判定使用扁平化集合，语义分组仅用于审计展示。
   allowed_flat:
     # 语义掩码提供器（基础支撑，不依赖旧 paper-impl）
-    - "semantic_mask_provider_v1"
-    - "semantic_mask_provider_saliency_source_policy_v1"
+    - "semantic_mask_provider"
+    - "semantic_mask_provider_saliency_policy"
     # Paper Faithfulness 模块 impl_id（append-only v1.0）
-    - "sd3_pipeline_inspector_v1"
-    - "sd3_diffusion_tracer_v1"
-    - "injection_site_binder_v1"
-    - "paper_alignment_evaluator_v1"
+    - "sd3_pipeline_inspector"
+    - "sd3_diffusion_tracer"
+    - "injection_site_binder"
+    - "paper_alignment_evaluator"
     # v2/v3 正式实现（唯一合规正式路径）
-    - "high_freq_template_codec_v2"
-    - "low_freq_template_codec_v2"
-    - "unified_content_extractor_v2"
-    - "subspace_planner_v2"
-    - "attention_anchor_map_relation_v2"
-    - "geometry_latent_sync_sd3_v3"
-    - "fusion_neyman_pearson_v2"
+    - "high_freq_template_codec"
+    - "low_freq_template_codec"
+    - "unified_content_extractor"
+    - "subspace_planner"
+    - "attention_anchor_extractor"
+    - "geometry_latent_sync_sd3"
+    - "fusion_neyman_pearson"
     # ---- 已废弃 impl_id（deprecated v2.0，formal_run_forbidden，append-only 审计记录）----
     # - "content_baseline_identity_v1"         # 旧内容基线，已废弃
-    # - "low_freq_coder_v1"                    # 旧 LF 基线，被 low_freq_template_codec_v2 取代
-    # - "high_freq_coder_v1"                   # 旧 HF 基线，被 high_freq_template_codec_v2 取代
+    # - "low_freq_coder_v1"                    # 旧 LF 基线，被 low_freq_template_codec 取代
+    # - "high_freq_coder_v1"                   # 旧 HF 基线，被 high_freq_template_codec 取代
     # - "unified_latent_modifier_v1"           # 旧 latent 修改器，已废弃
-    # - "content_detector_v1"                  # 旧内容检测器，被 unified_content_extractor_v2 取代
+    # - "content_detector_v1"                  # 旧内容检测器，被 unified_content_extractor 取代
     # - "unified_content_extractor_v1"         # 旧统一提取器，被 v2 取代
-    # - "geometry_attention_anchor_sd3_v1"     # 旧几何锚点，被 attention_anchor_map_relation_v2 取代
+    # - "geometry_attention_anchor_sd3_v1"     # 旧几何锚点，被 attention_anchor_extractor 取代
     # - "subspace_planner_v1"                  # 旧子空间规划器，被 v2 取代
     # - "subspace_planner_mask_conditioned_v1" # 旧 mask-conditioned 规划器，被 v2 取代
     # - "high_freq_template_codec_v1"           # 旧 HF embedder，被 v2 取代
@@ -397,36 +397,36 @@ impl_id:
 
     content_extractor:
       # 语义掩码提供器（基础支撑）
-      - "semantic_mask_provider_v1"
-      - "semantic_mask_provider_saliency_source_policy_v1"
+      - "semantic_mask_provider"
+      - "semantic_mask_provider_saliency_policy"
 
       # v2/v3 正式实现（唯一合规路径）
-      # - unified_content_extractor_v2：统一 Embed/Detect 双模式提取器。
-      # - high_freq_template_codec_v2：HF 高频模板匹配嵌入，keyed Rademacher + 相关检测。
-      # - low_freq_template_codec_v2：LF 低频伪高斯模板加性注入 + matched_correlation 检测。
-      - "unified_content_extractor_v2"
-      - "high_freq_template_codec_v2"
-      - "low_freq_template_codec_v2"
+      # - unified_content_extractor：统一 Embed/Detect 双模式提取器。
+      # - high_freq_template_codec：HF 高频模板匹配嵌入，keyed Rademacher + 相关检测。
+      # - low_freq_template_codec：LF 低频伪高斯模板加性注入 + matched_correlation 检测。
+      - "unified_content_extractor"
+      - "high_freq_template_codec"
+      - "low_freq_template_codec"
 
     geometry_extractor:
       # v2 正式实现（唯一合规路径）
-      # - attention_anchor_map_relation_v2：无 proxy，runtime self-attention 直接锚点，硬失败语义。
-      - "attention_anchor_map_relation_v2"
+      # - attention_anchor_extractor：无 proxy，runtime self-attention 直接锚点，硬失败语义。
+      - "attention_anchor_extractor"
 
     fusion_rule:
       # v2 正式实现（唯一合规路径）
-      # - fusion_neyman_pearson_v2：NP 主控，geo 辅助，无 proxy 门控，单一决策出口。
-      - "fusion_neyman_pearson_v2"
+      # - fusion_neyman_pearson：NP 主控，geo 辅助，无 proxy 门控，单一决策出口。
+      - "fusion_neyman_pearson"
 
     subspace_planner:
       # v2 正式实现（唯一合规路径）
-      # - subspace_planner_v2：带语义域注释的子空间规划器，detection_domain_spec 明确 higher_is_watermarked。
-      - "subspace_planner_v2"
+      # - subspace_planner：带语义域注释的子空间规划器，detection_domain_spec 明确 higher_is_watermarked。
+      - "subspace_planner"
 
     sync_module:
       # v3 正式实现（唯一合规路径）
-      # - geometry_latent_sync_sd3_v3：geo_score = template_match_score，无 quality_score 旁路。
-      - "geometry_latent_sync_sd3_v3"
+      # - geometry_latent_sync_sd3：geo_score = template_match_score，无 quality_score 旁路。
+      - "geometry_latent_sync_sd3"
 
   # 是否允许出现未在 allowed_by_domain 中声明的 domain。
   # v1 阶段为 false。
@@ -545,4 +545,4 @@ pipeline_realization:
     - "float32"
     - "float16"
     - "bfloat16"
-  notes: "启用此策略后，才能使用 sd3_diffusers_real_v1 实现"
+  notes: "启用此策略后，才能使用 sd3_diffusers_real 实现"

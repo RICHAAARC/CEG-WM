@@ -1,4 +1,4 @@
-"""
+﻿"""
 File purpose: Whitelist enforcement test for planner impl id.
 Module type: General module
 """
@@ -13,11 +13,11 @@ def test_registry_whitelist_required_for_planner_impl() -> None:
     whitelist = load_runtime_whitelist()
 
     impl_identity = {
-        "content_extractor_id": "unified_content_extractor_v2",
-        "geometry_extractor_id": "attention_anchor_map_relation_v2",
-        "fusion_rule_id": "fusion_neyman_pearson_v2",
+        "content_extractor_id": "unified_content_extractor",
+        "geometry_extractor_id": "attention_anchor_extractor",
+        "fusion_rule_id": "fusion_neyman_pearson",
         "subspace_planner_id": "subspace_planner_not_whitelisted_v1",
-        "sync_module_id": "geometry_latent_sync_sd3_v3"
+        "sync_module_id": "geometry_latent_sync_sd3"
     }
 
     with pytest.raises(GateEnforcementError):

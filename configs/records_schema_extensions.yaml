@@ -1,4 +1,4 @@
-# ==============================================================
+﻿# ==============================================================
 # Records schema extensions
 # - 仅追加字段，默认允许 absent。
 # - 本文件作为接口层字段事实源，用于审计与字段登记对齐。
@@ -45,7 +45,7 @@ fields:
     type: "reason_string"
     required: false
     missing_semantics: "absent_ok"
-    description: "掩码实现标识（semantic_saliency_v1 或 texture_gradient_v1）。"
+    description: "掩码实现标识（semantic_saliency_proxy 或 texture_gradient）。"
   - path: "content_evidence.mask_stats.mask_params_digest"
     layer: "anchor"
     type: "digest_hex64"

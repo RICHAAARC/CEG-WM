@@ -1,4 +1,4 @@
-"""
+﻿"""
 File purpose: Regressions for Pillow compatibility and synthetic artifact hash stability.
 Module type: General module
 """
@@ -61,7 +61,7 @@ def test_synthetic_pipeline_artifact_sha256_is_stable(tmp_path: Path, monkeypatc
     )
 
     cfg: dict[str, Any] = {
-        "pipeline_impl_id": "sd3_diffusers_shell_v1",
+        "pipeline_impl_id": "sd3_diffusers_shell",
         "pipeline_build_enabled": True,
         "model": {"height": 32, "width": 32, "dtype": "float32"},
         "inference_num_steps": 4,

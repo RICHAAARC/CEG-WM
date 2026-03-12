@@ -37,7 +37,7 @@ ALLOWED_PLANNER_FAILURE_REASONS = {
 }
 
 
-def build_region_index_spec_from_mask_v1(mask: Any) -> Tuple[Dict[str, Any], Dict[str, Any], str]:
+def build_region_index_spec_from_mask(mask: Any) -> Tuple[Dict[str, Any], Dict[str, Any], str]:
     """
     功能：将掩码空间结构转换为区域索引规格。 
 
@@ -425,7 +425,7 @@ class SubspacePlannerImpl:
             basis_digest = self._derive_basis_digest(basis_summary["basis_digest_payload"])
             plan_origin = "planner_v1_band_spec"
             routing_digest_ref = self._extract_routing_digest_ref(inputs)
-            band_spec, band_spec_digest, band_metrics = self.build_subspace_plan_v1(
+            band_spec, band_spec_digest, band_metrics = self.build_subspace_plan(
                 cfg=cfg,
                 inputs=inputs,
                 planner_params=planner_params,
@@ -439,7 +439,7 @@ class SubspacePlannerImpl:
             if bool(paper_cfg.get("enabled", False)) and not isinstance(mask_summary, dict):
                 mask_summary = None  # 使用默认区域分配（area_ratio=0.5）
 
-            hf_region_index_spec, lf_region_index_spec, region_index_digest = build_region_index_spec_from_mask_v1(
+            hf_region_index_spec, lf_region_index_spec, region_index_digest = build_region_index_spec_from_mask(
                 mask_summary
             )
             hf_region_index_spec["feature_dim_anchor"] = planner_params.feature_dim
@@ -2104,7 +2104,7 @@ class SubspacePlannerImpl:
             return candidate
         return "<absent>"
 
-    def build_subspace_plan_v1(
+    def build_subspace_plan(
         self,
         cfg: Dict[str, Any],
         inputs: Dict[str, Any],
@@ -2952,11 +2952,11 @@ def _read_int(value: Any, default: int) -> int:
     return int(default)
 
 
-SUBSPACE_PLANNER_V2_ID = "subspace_planner_v2"
-SUBSPACE_PLANNER_V2_VERSION = "v2"
+SUBSPACE_PLANNER_ID = "subspace_planner"
+SUBSPACE_PLANNER_VERSION = "v2"
 
 
-class SubspacePlannerV2(SubspacePlannerImpl):
+class SubspacePlanner(SubspacePlannerImpl):
     """
     功能：子空间规划器 v2，补充语义域标注字段。
 
@@ -2965,7 +2965,7 @@ class SubspacePlannerV2(SubspacePlannerImpl):
     domain_overlap_ratio, cross_orthogonality.
 
     Args:
-        impl_id: Implementation identifier string (must be subspace_planner_v2).
+        impl_id: Implementation identifier string (must be subspace_planner).
         impl_version: Implementation version string.
         impl_digest: Implementation digest string.
 

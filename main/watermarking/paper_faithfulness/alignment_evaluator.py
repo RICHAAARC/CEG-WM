@@ -1,4 +1,4 @@
-"""
+﻿"""
 Paper Alignment Evaluator
 
 功能：
@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from main.core import digests
 
 
-IMPL_ID = "paper_alignment_evaluator_v1"
+IMPL_ID = "paper_alignment_evaluator"
 IMPL_VERSION = "v1"
 
 

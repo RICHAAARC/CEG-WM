@@ -25,17 +25,17 @@ def test_paper_full_cuda_fusion_is_np() -> None:
     cfg = _load_paper_full_cuda_cfg()
     raw_impl_cfg = cfg.get("impl")
     impl_cfg = cast(Dict[str, Any], raw_impl_cfg if isinstance(raw_impl_cfg, dict) else {})
-    assert impl_cfg.get("fusion_rule_id") == "fusion_neyman_pearson_v2"
+    assert impl_cfg.get("fusion_rule_id") == "fusion_neyman_pearson"
 
     identity = runtime_resolver.parse_impl_identity_from_cfg(cfg)
-    assert identity.fusion_rule_id == "fusion_neyman_pearson_v2"
+    assert identity.fusion_rule_id == "fusion_neyman_pearson"
 
 
 def test_runtime_resolver_builds_hf_lf_from_impl_identity() -> None:
     cfg = _load_paper_full_cuda_cfg()
     identity, impl_set, _ = runtime_resolver.build_runtime_impl_set_from_cfg(cfg)
-    assert identity.hf_embedder_id == "high_freq_template_codec_v2"
-    assert identity.lf_coder_id == "low_freq_template_codec_v2"
+    assert identity.hf_embedder_id == "high_freq_template_codec"
+    assert identity.lf_coder_id == "low_freq_template_codec"
     assert impl_set.hf_embedder is not None
     assert impl_set.lf_coder is not None
 

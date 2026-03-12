@@ -113,7 +113,7 @@ class _SubspacePlannerStub:
         self.plan_digest = plan_digest
         self.basis_digest = basis_digest
         self.impl_identity = {
-            "impl_id": "subspace_planner_v2",
+            "impl_id": "subspace_planner",
             "impl_version": "v2",
             "impl_digest": _hex_anchor("subspace_planner_impl"),
         }
@@ -143,7 +143,7 @@ class _SubspacePlannerStub:
             basis_digest=self.basis_digest,
             plan_digest=self.plan_digest,
             audit={
-                "impl_identity": "subspace_planner_v2",
+                "impl_identity": "subspace_planner",
                 "impl_version": "v2",
                 "impl_digest": _hex_anchor("planner_audit_impl"),
                 "trace_digest": _hex_anchor("planner_trace"),

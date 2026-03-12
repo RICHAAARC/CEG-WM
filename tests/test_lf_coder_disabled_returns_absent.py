@@ -2,7 +2,7 @@
 测试用例：T3 - enable=false 必须返回 absent 且无 score
 
 功能说明：
-- 验证当 watermark.lf.enabled=false 时，LowFreqTemplateCodecV2 返回 status="absent"。
+- 验证当 watermark.lf.enabled=false 时，LowFreqTemplateCodec 返回 status="absent"。
 - 验证 absent 状态下 score 和 lf_score 必须为 None。
 - 验证 absent 是"弃权"语义，不是错误。
 """
@@ -13,20 +13,20 @@ from typing import Any, Dict
 
 from main.core import digests
 from main.watermarking.content_chain.low_freq_coder import (
-    LowFreqTemplateCodecV2,
-    LOW_FREQ_TEMPLATE_CODEC_V2_ID,
-    LOW_FREQ_TEMPLATE_CODEC_V2_VERSION,
+    LowFreqTemplateCodec,
+    LOW_FREQ_TEMPLATE_CODEC_ID,
+    LOW_FREQ_TEMPLATE_CODEC_VERSION,
 )
 
 
-def _make_coder() -> LowFreqTemplateCodecV2:
+def _make_coder() -> LowFreqTemplateCodec:
     impl_digest = digests.canonical_sha256({
-        "impl_id": LOW_FREQ_TEMPLATE_CODEC_V2_ID,
-        "impl_version": LOW_FREQ_TEMPLATE_CODEC_V2_VERSION,
+        "impl_id": LOW_FREQ_TEMPLATE_CODEC_ID,
+        "impl_version": LOW_FREQ_TEMPLATE_CODEC_VERSION,
     })
-    return LowFreqTemplateCodecV2(
-        LOW_FREQ_TEMPLATE_CODEC_V2_ID,
-        LOW_FREQ_TEMPLATE_CODEC_V2_VERSION,
+    return LowFreqTemplateCodec(
+        LOW_FREQ_TEMPLATE_CODEC_ID,
+        LOW_FREQ_TEMPLATE_CODEC_VERSION,
         impl_digest,
     )
 
@@ -35,7 +35,7 @@ def test_lf_coder_disabled_returns_absent_status() -> None:
     """
     功能：验证 LF 禁用时返回 absent 状态。
 
-    Test that LowFreqTemplateCodecV2 returns status="absent" when watermark.lf.enabled=false.
+    Test that LowFreqTemplateCodec returns status="absent" when watermark.lf.enabled=false.
 
     Args:
         None.

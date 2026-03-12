@@ -1,4 +1,4 @@
-"""
+﻿"""
 功能：验证 experiment_matrix 锚点字段的回退提取。
 
 Module type: General module
@@ -125,7 +125,7 @@ def test_extract_hf_template_comparison_reads_baseline_trace(tmp_path: Path) -> 
             "status": "ok",
             "score": 0.84,
             "trace": {
-                "pipeline_impl_id": "sd3_diffusers_real_v1",
+                "pipeline_impl_id": "sd3_diffusers_real",
                 "infer_trace_canon_sha256": "a" * 64,
                 "cfg_digest": "b" * 64,
             },
@@ -139,4 +139,4 @@ def test_extract_hf_template_comparison_reads_baseline_trace(tmp_path: Path) -> 
     assert payload.get("baseline_status") == "ok"
     baseline_trace = payload.get("baseline_trace")
     assert isinstance(baseline_trace, dict)
-    assert baseline_trace.get("pipeline_impl_id") == "sd3_diffusers_real_v1"
+    assert baseline_trace.get("pipeline_impl_id") == "sd3_diffusers_real"

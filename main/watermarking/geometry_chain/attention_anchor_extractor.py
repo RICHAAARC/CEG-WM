@@ -1,4 +1,4 @@
-"""
+﻿"""
 File purpose: 基于 SD3 Transformer token 关系生成几何锚点摘要与稳定性指标。
 Module type: General module
 """
@@ -515,13 +515,13 @@ def _to_numpy_latents(latents: Any) -> np.ndarray:
     return latents_np
 
 
-# Paper-faithful attention anchor map relation impl
-ATTENTION_ANCHOR_MAP_RELATION_ID = "attention_anchor_map_relation_v1"
-ATTENTION_ANCHOR_MAP_RELATION_VERSION = "v1"
+# 旧 v1 实现标识符，不对外导出
+_ATTENTION_ANCHOR_MAP_RELATION_LEGACY_ID = "attention_anchor_map_relation_v1"
+_ATTENTION_ANCHOR_MAP_RELATION_LEGACY_VERSION = "v1"
 
 # v2：no-proxy，无真实 self-attention 时硬失败，不允许降级。
-ATTENTION_ANCHOR_MAP_RELATION_V2_ID = "attention_anchor_map_relation_v2"
-ATTENTION_ANCHOR_MAP_RELATION_V2_VERSION = "v2"
+ATTENTION_ANCHOR_EXTRACTOR_ID = "attention_anchor_extractor"
+ATTENTION_ANCHOR_EXTRACTOR_VERSION = "v2"
 
 
 def _to_json_safe_value(value: Any) -> Any:
@@ -556,9 +556,9 @@ class AttentionAnchorMapRelation:
     """
     功能：基于 attention map 关系图构建几何锚点（内部辅助类，不在正式注册路径中）。
 
-    Internal helper providing _build_relation_graph() for AttentionAnchorMapRelationV2.
+    Internal helper providing _build_relation_graph() for AttentionAnchorMapRelationExtractor.
     Not registered in geometry_registry; proxy semantics have been removed.
-    Use AttentionAnchorMapRelationV2 for all formal pipeline calls.
+    Use AttentionAnchorMapRelationExtractor for all formal pipeline calls.
 
     Args:
         impl_id: Implementation identifier.
@@ -667,16 +667,16 @@ class AttentionAnchorMapRelation:
         return relation_graph_topk, relation_spectral_hash
 
 
-class AttentionAnchorMapRelationV2:
+class AttentionAnchorMapRelationExtractor:
     """
-    功能：Attention anchor map relation v2 —— 无 proxy，无真实 self-attention 时硬失败。
+    功能：Attention anchor map relation 提取器 —— 无 proxy，无真实 self-attention 时硬失败。
 
     Implements relation-graph-based geometry anchor extraction with strict
     authenticity enforcement. If runtime_self_attention is unavailable,
     returns status=failed; proxy mode is forbidden.
 
     Args:
-        impl_id: Implementation identifier (must be attention_anchor_map_relation_v2).
+        impl_id: Implementation identifier (must be attention_anchor_extractor).
         impl_version: Implementation version string.
         impl_digest: Implementation digest string.
 
@@ -698,7 +698,7 @@ class AttentionAnchorMapRelationV2:
         self.impl_version = impl_version
         self.impl_digest = impl_digest
         # v1 实现用于共享关系图构建逻辑。
-        self._v1_extractor = AttentionAnchorMapRelation(impl_id, impl_version, impl_digest)
+        self._relation_extractor = AttentionAnchorMapRelation(impl_id, impl_version, impl_digest)
 
     def extract(self, cfg: Dict[str, Any], inputs: Dict[str, Any] | None = None) -> Dict[str, Any]:
         """
@@ -762,7 +762,7 @@ class AttentionAnchorMapRelationV2:
             }
 
         try:
-            relation_graph_topk, relation_spectral_hash = self._v1_extractor._build_relation_graph(
+            relation_graph_topk, relation_spectral_hash = self._relation_extractor._build_relation_graph(
                 attention_maps, cfg
             )
         except Exception as e:

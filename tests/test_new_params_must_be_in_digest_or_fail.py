@@ -12,7 +12,7 @@ def _build_subspace_result(topk_value: int) -> dict:
     return {
         "plan": {
             "planner_impl_identity": {
-                "impl_id": "subspace_planner_v2",
+                "impl_id": "subspace_planner",
                 "impl_version": "v2",
                 "impl_digest": "abc",
             },

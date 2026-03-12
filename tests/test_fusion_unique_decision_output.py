@@ -1,4 +1,4 @@
-"""
+﻿"""
 测试融合规则唯一决策出口
 
 功能：
@@ -20,7 +20,7 @@ from main.registries.fusion_registry import resolve_fusion_rule
 @pytest.fixture
 def np_fusion_rule() -> NeumanPearsonFusionRule:
     """构造 Neyman-Pearson 融合规则 v2 实例。"""
-    factory = resolve_fusion_rule("fusion_neyman_pearson_v2")
+    factory = resolve_fusion_rule("fusion_neyman_pearson")
     return factory({})
 
 
@@ -154,5 +154,5 @@ def test_fusion_decided_evidence_summary_complete(np_fusion_rule: NeumanPearsonF
         "evidence_summary.geometry_score must match input"
 
     # (3) 验证 fusion_rule_id 正确
-    assert result.evidence_summary["fusion_rule_id"] == "fusion_neyman_pearson_v2", \
+    assert result.evidence_summary["fusion_rule_id"] == "fusion_neyman_pearson", \
         "evidence_summary.fusion_rule_id must match implementation"

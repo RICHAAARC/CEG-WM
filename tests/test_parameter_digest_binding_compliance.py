@@ -12,7 +12,7 @@ _repo_root = _tests_dir.parent
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
-from main.watermarking.content_chain.low_freq_coder import LowFreqTemplateCodecV2, LOW_FREQ_TEMPLATE_CODEC_V2_ID, LOW_FREQ_TEMPLATE_CODEC_V2_VERSION
+from main.watermarking.content_chain.low_freq_coder import LowFreqTemplateCodec, LOW_FREQ_TEMPLATE_CODEC_ID, LOW_FREQ_TEMPLATE_CODEC_VERSION
 from main.core import digests
 
 
@@ -32,7 +32,7 @@ def test_variance_change_must_change_lf_trace_digest():
     Raises:
         AssertionError: If lf_trace_digest does not change when variance changes.
     """
-    coder = LowFreqTemplateCodecV2("low_freq_template_codec_v2", "v1", "test_digest_abc123")
+    coder = LowFreqTemplateCodec("low_freq_template_codec", "v1", "test_digest_abc123")
 
     # message_length=8, ecc_sparsity=3 生成 block_length=16，提供足够多元素。
     latent_features = [float(i) for i in range(1, 21)]
@@ -94,7 +94,7 @@ def test_cfg_digest_change_must_change_lf_trace_digest():
     """
     import numpy as np
 
-    coder = LowFreqTemplateCodecV2("low_freq_template_codec_v2", "v1", "test_digest_abc123")
+    coder = LowFreqTemplateCodec("low_freq_template_codec", "v1", "test_digest_abc123")
 
     cfg = {
         "watermark": {
@@ -201,7 +201,7 @@ def test_plan_digest_mismatch_must_return_mismatch_and_no_score():
     Raises:
         AssertionError: If TypeError is not raised for empty plan_digest.
     """
-    coder = LowFreqTemplateCodecV2("low_freq_template_codec_v2", "v1", "test_digest_abc123")
+    coder = LowFreqTemplateCodec("low_freq_template_codec", "v1", "test_digest_abc123")
 
     cfg = {
         "watermark": {
@@ -240,7 +240,7 @@ def test_embed_apply_deterministic_output():
     Raises:
         AssertionError: If output is not deterministic.
     """
-    coder = LowFreqTemplateCodecV2("low_freq_template_codec_v2", "v1", "test_digest_abc123")
+    coder = LowFreqTemplateCodec("low_freq_template_codec", "v1", "test_digest_abc123")
 
     cfg = {
         "watermark": {
@@ -294,7 +294,7 @@ def test_embed_detect_consistency():
     """
     import numpy as np
 
-    coder = LowFreqTemplateCodecV2("low_freq_template_codec_v2", "v1", "test_digest_abc123")
+    coder = LowFreqTemplateCodec("low_freq_template_codec", "v1", "test_digest_abc123")
 
     cfg = {
         "watermark": {

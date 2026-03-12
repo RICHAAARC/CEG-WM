@@ -1,4 +1,4 @@
-policy_path: "content_only"
+﻿policy_path: "content_only"
 
 # 统计口径默认配置
 target_fpr: 0.01
@@ -149,10 +149,10 @@ evaluate:
 # 实现标识
 # ==============================================================
 impl:
-  content_extractor_id: "unified_content_extractor_v2"     # Embed + Detect v2 正式实现
-  geometry_extractor_id: "attention_anchor_map_relation_v2"  # 几何锚点提取器 v2 正式实现
-  fusion_rule_id: "fusion_neyman_pearson_v2"                # NP 融合规则 v2 正式实现
-  subspace_planner_id: "subspace_planner_v2"                # 子空间规划器 v2 正式实现
-  sync_module_id: "geometry_latent_sync_sd3_v3"             # 几何 latent 同步模块 v3 正式实现
-  hf_embedder_id: "high_freq_template_codec_v2"          # HF 高频模板编码器 v2 正式实现
-  lf_coder_id: "low_freq_template_codec_v2"               # LF 低频模板编码器 v2 正式实现
+  content_extractor_id: "unified_content_extractor"     # Embed + Detect v2 正式实现
+  geometry_extractor_id: "attention_anchor_extractor"  # 几何锚点提取器 v2 正式实现
+  fusion_rule_id: "fusion_neyman_pearson"                # NP 融合规则 v2 正式实现
+  subspace_planner_id: "subspace_planner"                # 子空间规划器 v2 正式实现
+  sync_module_id: "geometry_latent_sync_sd3"             # 几何 latent 同步模块 v3 正式实现
+  hf_embedder_id: "high_freq_template_codec"          # HF 高频模板编码器 v2 正式实现
+  lf_coder_id: "low_freq_template_codec"               # LF 低频模板编码器 v2 正式实现

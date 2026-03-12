@@ -1,4 +1,4 @@
-"""
+﻿"""
 SD3 Diffusion Tracer
 
 功能：
@@ -18,7 +18,7 @@ import numpy as np
 from main.core import digests
 
 
-IMPL_ID = "sd3_diffusion_tracer_v1"
+IMPL_ID = "sd3_diffusion_tracer"
 IMPL_VERSION = "v1"
 
 

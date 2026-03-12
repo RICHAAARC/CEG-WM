@@ -1,4 +1,4 @@
-"""
+﻿"""
 File purpose: 验证几何链失败不会改变 NP 主链判决。
 Module type: General module
 """
@@ -20,7 +20,7 @@ def test_geo_chain_failure_does_not_change_primary_decision() -> None:
     Returns:
         None.
     """
-    factory = resolve_fusion_rule("fusion_neyman_pearson_v2")
+    factory = resolve_fusion_rule("fusion_neyman_pearson")
     fusion_rule = factory({})
 
     cfg = {

@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from main.watermarking.content_chain.semantic_mask_provider import (
-    build_semantic_saliency_mask_v2,
+    build_semantic_saliency_mask_model,
     _normalize_semantic_model_source,
 )
 
@@ -59,14 +59,14 @@ def test_semantic_mask_v2_supports_basnet_and_inspyrenet(monkeypatch: pytest.Mon
         "close_iters": 0,
         "semantic_preprocess": "rgb_normalized",
     }
-    _, _, basnet_stats, _ = build_semantic_saliency_mask_v2(image, image.shape, cfg, basnet_params)
+    _, _, basnet_stats, _ = build_semantic_saliency_mask_model(image, image.shape, cfg, basnet_params)
 
     inspy_model_path = tmp_path / "inspy_dummy.pt"
     inspy_model_path.write_bytes(b"dummy")
     inspy_params = dict(basnet_params)
     inspy_params["semantic_model_source"] = "inspyrenet"
     inspy_params["semantic_model_path"] = str(inspy_model_path)
-    _, _, inspy_stats, _ = build_semantic_saliency_mask_v2(image, image.shape, cfg, inspy_params)
+    _, _, inspy_stats, _ = build_semantic_saliency_mask_model(image, image.shape, cfg, inspy_params)
 
     assert basnet_stats["model_artifact_anchor"]["model_source"] == "basnet"
     assert inspy_stats["model_artifact_anchor"]["model_source"] == "inspyrenet"

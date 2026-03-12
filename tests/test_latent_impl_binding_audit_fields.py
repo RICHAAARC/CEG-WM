@@ -25,8 +25,8 @@ def _build_context() -> InjectionContext:
 def test_injection_cfg_marks_equivalent_binding_for_lf_hf_template_impls() -> None:
     cfg = {
         "impl": {
-            "lf_coder_id": "low_freq_template_codec_v2",
-            "hf_embedder_id": "high_freq_template_codec_v2",
+            "lf_coder_id": "low_freq_template_codec",
+            "hf_embedder_id": "high_freq_template_codec",
         },
         "watermark": {
             "lf": {"strength": 1.5},
@@ -41,14 +41,14 @@ def test_injection_cfg_marks_equivalent_binding_for_lf_hf_template_impls() -> No
     hf_binding = injection_cfg.get("hf_impl_binding")
     assert isinstance(lf_binding, dict)
     assert isinstance(hf_binding, dict)
-    assert lf_binding.get("impl_selected") == "low_freq_template_codec_v2"
-    assert hf_binding.get("impl_selected") == "high_freq_template_codec_v2"
+    assert lf_binding.get("impl_selected") == "low_freq_template_codec"
+    assert hf_binding.get("impl_selected") == "high_freq_template_codec"
     # v2.0 收口： evidence_level 是正式路径的唯一分类字段；不写出 fallback_used/adapter_path。
-    # v2 合并后 LF_CHANNEL_IMPL_ID == LOW_FREQ_TEMPLATE_CODEC_V2_ID，模板 codec v2 直接是 primary
+    # v2 合并后 LF_CHANNEL_IMPL_ID == LOW_FREQ_TEMPLATE_CODEC_ID，模板 codec v2 直接是 primary
     assert lf_binding.get("evidence_level") == "primary"
     assert hf_binding.get("evidence_level") == "primary"
-    assert lf_binding.get("equivalence_mode") == "lf_template_to_channel_lf_parameter_mapping_v2"
-    assert hf_binding.get("equivalence_mode") == "hf_template_to_channel_hf_parameter_mapping_v2"
+    assert lf_binding.get("equivalence_mode") == "lf_template_to_channel_lf_parameter_mapping"
+    assert hf_binding.get("equivalence_mode") == "hf_template_to_channel_hf_parameter_mapping"
     assert "fallback_used" not in lf_binding
     assert "fallback_used" not in hf_binding
     assert "adapter_path" not in lf_binding
@@ -89,11 +89,11 @@ def test_latent_step_embed_trace_contains_impl_binding_fields() -> None:
         "injection_trace_digest": "a" * 64,
         "injection_params_digest": "b" * 64,
         "lf_impl_binding": {
-            "impl_selected": "low_freq_template_codec_v2",
+            "impl_selected": "low_freq_template_codec",
             "evidence_level": "non_compliant",
         },
         "hf_impl_binding": {
-            "impl_selected": "high_freq_template_codec_v2",
+            "impl_selected": "high_freq_template_codec",
             "evidence_level": "non_compliant",
         },
     }

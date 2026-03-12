@@ -1,4 +1,4 @@
-# ==============================================================
+﻿# ==============================================================
 # 策略路径语义映射
 #   本文件是 policy_path 的“语义唯一来源”。
 #   - 解释每个 policy_path 在系统层面意味着什么。
@@ -265,7 +265,7 @@ policy_paths:
     deprecated_in_formal_path: true    # v2.0 正式路径收口后禁止使用
     formal_run_forbidden: true         # 不得出现在 paper_full_cuda.yaml 的 policy_path 中
     decoder_type: "fusion_neyman_pearson"   # 语义：最终判决遵循 NP 范式融合。
-    description: "Content with geometry gate (DEPRECATED in v2.0 — use content_np_geo_rescue_v2)"
+    description: "Content with geometry gate (DEPRECATED in v2.0 — use content_np_geo_rescue)"
 
     required_chains:
       content: true
@@ -322,7 +322,7 @@ policy_paths:
     deprecated_in_formal_path: true    # v2.0 正式路径收口后禁止使用
     formal_run_forbidden: true         # 不得出现在 paper_full_cuda.yaml 的 policy_path 中
     decoder_type: "fusion_neyman_pearson"
-    description: "Fallback when geometry is unavailable (DEPRECATED in v2.0 — use content_np_geo_rescue_v2)"
+    description: "Fallback when geometry is unavailable (DEPRECATED in v2.0 — use content_np_geo_rescue)"
 
     required_chains:
       content: true
@@ -398,11 +398,11 @@ policy_paths:
         - "content_evidence.fail_reason"
 
   # ------------------------------
-  # content_np_geo_rescue_v2：论文级单一正式路径（v2.0 追加，append-only）。
+  # content_np_geo_rescue：论文级单一正式路径（v2.0 追加，append-only）。
   # 特性：单侧几何门控救回（geometry_score >= geo_gate_threshold），无 fallback、无 proxy、无 sidecar。
   # 此路径是"单一路径、单一机制、论文级闭环"的正式实现。
   # ------------------------------
-  content_np_geo_rescue_v2:
+  content_np_geo_rescue:
     decoder_type: "fusion_neyman_pearson"
     description: "Single formal paper path: NP fusion with one-sided geo rescue gate, no fallback/proxy/sidecar"
 

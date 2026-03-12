@@ -1,4 +1,4 @@
-"""
+﻿"""
 File purpose: 子空间与同步质量证据语义回归测试。
 Module type: General module
 """
@@ -82,7 +82,7 @@ def test_subspace_plan_contains_evidence_semantics_payload() -> None:
 
 
 def test_sync_quality_semantics_contains_quantitative_secondary_evidence_level() -> None:
-    factory = resolve_sync_module("geometry_latent_sync_sd3_v3")
+    factory = resolve_sync_module("geometry_latent_sync_sd3")
     sync_module = factory({})
     cfg: Dict[str, Any] = {
         "model_id": "stabilityai/stable-diffusion-3.5-medium",
@@ -99,7 +99,7 @@ def test_sync_quality_semantics_contains_quantitative_secondary_evidence_level()
     semantics = cast(Dict[str, Any], semantics)
     assert semantics.get("score_type") == "template_correlation_geometry_score"
     assert semantics.get("trusted_as_primary_geometry_evidence") is False
-    assert semantics.get("score_version") == "geometry_latent_sync_sd3_v3"
+    assert semantics.get("score_version") == "geometry_latent_sync_sd3"
     assert semantics.get("evidence_level") == "primary"
 
     metrics = output.get("sync_quality_metrics")

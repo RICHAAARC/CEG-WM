@@ -7,7 +7,7 @@ from main.registries.fusion_registry import resolve_fusion_rule
 
 
 def test_proxy_geometry_blocks_rescue_when_sync_not_ok() -> None:
-    fusion = resolve_fusion_rule("fusion_neyman_pearson_v1")({})
+    fusion = resolve_fusion_rule("fusion_neyman_pearson")({})
     cfg = {
         "target_fpr": 0.5,
         "rescue_band_delta_low": 0.1,

@@ -1,4 +1,4 @@
-"""
+﻿"""
 功能：验证 _probe_model_v2_availability 中工程根路径解析使用 parents[3] 而非 parents[2]
 
 Module type: General module
@@ -36,7 +36,7 @@ class TestProbeModelPathResolution:
         dummy_model_path = "models/inspyrenet/ckpt_base.pth"
         mask_params = {
             "semantic_model_path": dummy_model_path,
-            "saliency_source": "model_v2",
+            "saliency_source": "model",
             "semantic_model_source": "inspyrenet",
         }
 
@@ -86,7 +86,7 @@ class TestProbeModelPathResolution:
         """
         mask_params = {
             "semantic_model_path": "models/inspyrenet/ckpt_base.pth",
-            "saliency_source": "model_v2",
+            "saliency_source": "model",
             "semantic_model_source": "inspyrenet",
         }
         # 不 mock exists，使用真实文件系统：CI 环境无模型文件，probe_failure_reason 必为非 None
@@ -115,7 +115,7 @@ class TestProbeModelPathResolution:
 
         mask_params = {
             "semantic_model_path": "models/inspyrenet/ckpt_base.pth",
-            "saliency_source": "model_v2",
+            "saliency_source": "model",
             "semantic_model_source": "inspyrenet",
         }
         callable_stub = MagicMock(return_value=None)

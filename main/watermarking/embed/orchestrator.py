@@ -1,4 +1,4 @@
-"""
+﻿"""
 嵌入流程编排
 
 功能说明：
@@ -214,13 +214,13 @@ def run_embed_orchestrator(
         hf_impl_id = impl_cfg.get("hf_embedder_id")
         lf_impl_id = impl_cfg.get("lf_coder_id")
         
-        # 检查 HF embedder 必须是 high_freq_template_codec_v2
-        if hf_impl_id and hf_impl_id != "high_freq_template_codec_v2":
-            raise ValueError(f"paper_faithfulness requires high_freq_template_codec_v2, got {hf_impl_id}")
+        # 检查 HF embedder 必须是 high_freq_template_codec
+        if hf_impl_id and hf_impl_id != "high_freq_template_codec":
+            raise ValueError(f"paper_faithfulness requires high_freq_template_codec, got {hf_impl_id}")
         
-        # 检查 LF coder 必须是 low_freq_template_codec_v2
-        if lf_impl_id and lf_impl_id != "low_freq_template_codec_v2":
-            raise ValueError(f"paper_faithfulness requires low_freq_template_codec_v2, got {lf_impl_id}")
+        # 检查 LF coder 必须是 low_freq_template_codec
+        if lf_impl_id and lf_impl_id != "low_freq_template_codec":
+            raise ValueError(f"paper_faithfulness requires low_freq_template_codec, got {lf_impl_id}")
     
     if use_latent_per_step:
         embed_trace: Dict[str, Any] = _build_latent_step_embed_trace(cfg, injection_evidence)

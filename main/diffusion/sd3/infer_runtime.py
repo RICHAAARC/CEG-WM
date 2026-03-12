@@ -1,4 +1,4 @@
-"""
+﻿"""
 SD3 推理流
 
 功能说明：
@@ -16,8 +16,8 @@ from main.diffusion.sd3.hooks import register_attention_hooks, remove_attention_
 from main.diffusion.sd3.callback_composer import InjectionContext
 from main.watermarking.content_chain.latent_modifier import LatentModifier
 from main.watermarking.content_chain import channel_lf, channel_hf
-from main.watermarking.content_chain.low_freq_coder import LOW_FREQ_TEMPLATE_CODEC_V2_ID
-from main.watermarking.content_chain.high_freq_embedder import HIGH_FREQ_TEMPLATE_CODEC_V2_ID
+from main.watermarking.content_chain.low_freq_coder import LOW_FREQ_TEMPLATE_CODEC_ID
+from main.watermarking.content_chain.high_freq_embedder import HIGH_FREQ_TEMPLATE_CODEC_ID
 from main.core import digests
 
 
@@ -616,8 +616,8 @@ def _build_injection_cfg(cfg: Dict[str, Any], context: InjectionContext) -> Dict
     lf_impl_selected = impl_cfg.get("lf_coder_id") if isinstance(impl_cfg.get("lf_coder_id"), str) else None
     hf_impl_selected = impl_cfg.get("hf_embedder_id") if isinstance(impl_cfg.get("hf_embedder_id"), str) else None
 
-    lf_equivalent_ids = {LOW_FREQ_TEMPLATE_CODEC_V2_ID}
-    hf_equivalent_ids = {HIGH_FREQ_TEMPLATE_CODEC_V2_ID}
+    lf_equivalent_ids = {LOW_FREQ_TEMPLATE_CODEC_ID}
+    hf_equivalent_ids = {HIGH_FREQ_TEMPLATE_CODEC_ID}
 
     lf_is_primary = bool(context.enable_lf and lf_impl_selected == channel_lf.LF_CHANNEL_IMPL_ID)
     lf_is_equivalent = bool(context.enable_lf and lf_impl_selected in lf_equivalent_ids)
@@ -635,8 +635,8 @@ def _build_injection_cfg(cfg: Dict[str, Any], context: InjectionContext) -> Dict
             else ("primary_equivalent" if lf_is_equivalent else "non_compliant")
         ),
         "equivalence_mode": (
-            "lf_template_to_channel_lf_parameter_mapping_v2"
-            if lf_impl_selected == LOW_FREQ_TEMPLATE_CODEC_V2_ID and lf_is_equivalent
+            "lf_template_to_channel_lf_parameter_mapping"
+            if lf_impl_selected == LOW_FREQ_TEMPLATE_CODEC_ID and lf_is_equivalent
             else None
         ),
         "binding_class": (
@@ -654,8 +654,8 @@ def _build_injection_cfg(cfg: Dict[str, Any], context: InjectionContext) -> Dict
             else ("primary_equivalent" if hf_is_equivalent else "non_compliant")
         ),
         "equivalence_mode": (
-            "hf_template_to_channel_hf_parameter_mapping_v2"
-            if hf_impl_selected == HIGH_FREQ_TEMPLATE_CODEC_V2_ID and hf_is_equivalent
+            "hf_template_to_channel_hf_parameter_mapping"
+            if hf_impl_selected == HIGH_FREQ_TEMPLATE_CODEC_ID and hf_is_equivalent
             else None
         ),
         "binding_class": (

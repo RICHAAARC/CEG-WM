@@ -12,14 +12,14 @@ from typing import Any, Dict
 
 from main.core import digests
 from main.watermarking.geometry_chain.attention_anchor_extractor import (
-    AttentionAnchorMapRelationV2,
-    ATTENTION_ANCHOR_MAP_RELATION_V2_ID,
-    ATTENTION_ANCHOR_MAP_RELATION_V2_VERSION,
+    AttentionAnchorMapRelationExtractor,
+    ATTENTION_ANCHOR_EXTRACTOR_ID,
+    ATTENTION_ANCHOR_EXTRACTOR_VERSION,
 )
 from main.watermarking.geometry_chain.sync.latent_sync_template import (
-    GeometryLatentSyncSD3V3,
-    GEOMETRY_LATENT_SYNC_SD3_V3_ID,
-    GEOMETRY_LATENT_SYNC_SD3_V3_VERSION,
+    GeometryLatentSyncSD3,
+    GEOMETRY_LATENT_SYNC_SD3_ID,
+    GEOMETRY_LATENT_SYNC_SD3_VERSION,
     SyncResult,
     SyncRuntimeContext,
 )
@@ -60,33 +60,33 @@ def _derive_impl_digest(impl_id: str, impl_version: str) -> str:
     })
 
 
-def _build_attention_anchor_map_relation_v2(cfg: Dict[str, Any]) -> AttentionAnchorMapRelationV2:
+def _build_attention_anchor_extractor(cfg: Dict[str, Any]) -> AttentionAnchorMapRelationExtractor:
     """
-    功能：构造 attention anchor map relation v2 实现（无 proxy 模式）。
+    功能：构造 attention anchor map relation 实现（无 proxy 模式）。
 
-    Build attention anchor map relation v2 geometry extractor (no proxy mode).
+    Build attention anchor map relation geometry extractor (no proxy mode).
 
     Args:
         cfg: Config mapping.
 
     Returns:
-        AttentionAnchorMapRelationV2 instance.
+        AttentionAnchorMapRelationExtractor instance.
 
     Raises:
         TypeError: If cfg is not dict.
     """
     if not isinstance(cfg, dict):
         raise TypeError("cfg must be dict")
-    impl_version = ATTENTION_ANCHOR_MAP_RELATION_V2_VERSION
-    impl_digest = _derive_impl_digest(ATTENTION_ANCHOR_MAP_RELATION_V2_ID, impl_version)
-    return AttentionAnchorMapRelationV2(ATTENTION_ANCHOR_MAP_RELATION_V2_ID, impl_version, impl_digest)
+    impl_version = ATTENTION_ANCHOR_EXTRACTOR_VERSION
+    impl_digest = _derive_impl_digest(ATTENTION_ANCHOR_EXTRACTOR_ID, impl_version)
+    return AttentionAnchorMapRelationExtractor(ATTENTION_ANCHOR_EXTRACTOR_ID, impl_version, impl_digest)
 
 
-class SyncGeometryLatentSyncSD3V3:
+class SyncGeometryLatentSyncSD3:
     """
-    功能：SD3 latent sync v3 同步模块包装器。
+    功能：SD3 latent sync 同步模块包装器。
 
-    Sync module wrapper for GeometryLatentSyncSD3V3 extractor providing
+    Sync module wrapper for GeometryLatentSyncSD3 extractor providing
     sync() and sync_with_context() interfaces.
 
     Args:
@@ -111,7 +111,7 @@ class SyncGeometryLatentSyncSD3V3:
         self.impl_id = impl_id
         self.impl_version = impl_version
         self.impl_digest = impl_digest
-        self._extractor = GeometryLatentSyncSD3V3(impl_id, impl_version, impl_digest)
+        self._extractor = GeometryLatentSyncSD3(impl_id, impl_version, impl_digest)
 
     def sync(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -221,31 +221,31 @@ class SyncGeometryLatentSyncSD3V3:
         return "failed"
 
 
-def _build_geometry_latent_sync_sd3_v3(cfg: Dict[str, Any]) -> SyncGeometryLatentSyncSD3V3:
+def _build_geometry_latent_sync_sd3(cfg: Dict[str, Any]) -> SyncGeometryLatentSyncSD3:
     """
-    功能：构造 geometry latent sync SD3 v3 同步模块。
+    功能：构造 geometry latent sync SD3 同步模块。
 
-    Build geometry latent sync SD3 v3 sync module wrapper.
+    Build geometry latent sync SD3 sync module wrapper.
 
     Args:
         cfg: Config mapping.
 
     Returns:
-        SyncGeometryLatentSyncSD3V3 instance.
+        SyncGeometryLatentSyncSD3 instance.
 
     Raises:
         TypeError: If cfg is not dict.
     """
     if not isinstance(cfg, dict):
         raise TypeError("cfg must be dict")
-    impl_version = GEOMETRY_LATENT_SYNC_SD3_V3_VERSION
-    impl_digest = _derive_impl_digest(GEOMETRY_LATENT_SYNC_SD3_V3_ID, impl_version)
-    return SyncGeometryLatentSyncSD3V3(GEOMETRY_LATENT_SYNC_SD3_V3_ID, impl_version, impl_digest)
+    impl_version = GEOMETRY_LATENT_SYNC_SD3_VERSION
+    impl_digest = _derive_impl_digest(GEOMETRY_LATENT_SYNC_SD3_ID, impl_version)
+    return SyncGeometryLatentSyncSD3(GEOMETRY_LATENT_SYNC_SD3_ID, impl_version, impl_digest)
 
 
 _GEOMETRY_REGISTRY.register_factory(
-    ATTENTION_ANCHOR_MAP_RELATION_V2_ID,
-    _build_attention_anchor_map_relation_v2,
+    ATTENTION_ANCHOR_EXTRACTOR_ID,
+    _build_attention_anchor_extractor,
     capabilities=ImplCapabilities(
         supports_batching=False,
         requires_cuda=False,
@@ -255,8 +255,8 @@ _GEOMETRY_REGISTRY.register_factory(
     )
 )
 _SYNC_REGISTRY.register_factory(
-    GEOMETRY_LATENT_SYNC_SD3_V3_ID,
-    _build_geometry_latent_sync_sd3_v3,
+    GEOMETRY_LATENT_SYNC_SD3_ID,
+    _build_geometry_latent_sync_sd3,
     capabilities=ImplCapabilities(
         supports_batching=False,
         requires_cuda=False,

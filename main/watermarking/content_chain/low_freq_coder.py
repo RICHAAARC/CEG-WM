@@ -117,8 +117,8 @@ def recover_posteriors_erf(latents: list, variance: float = 1.5) -> list:
 
 
 # 项目内生命名（project-internal naming）
-LOW_FREQ_TEMPLATE_CODEC_V2_ID = "low_freq_template_codec_v2"
-LOW_FREQ_TEMPLATE_CODEC_V2_VERSION = "v2"
+LOW_FREQ_TEMPLATE_CODEC_ID = "low_freq_template_codec"
+LOW_FREQ_TEMPLATE_CODEC_VERSION = "v2"
 
 def encode_low_freq_dct(
     image_array: np.ndarray,
@@ -580,7 +580,7 @@ def compute_lf_attestation_score(
 
 
 
-class LowFreqTemplateCodecV2:
+class LowFreqTemplateCodec:
     """
     功能：LF 低频模板编解码 v2 —— keyed pseudogaussian template + additive injection 闭环。
 
@@ -589,7 +589,7 @@ class LowFreqTemplateCodecV2:
     through the same coefficient-domain template on both embed and detect sides.
 
     Args:
-        impl_id: Implementation identifier (must be low_freq_template_codec_v2).
+        impl_id: Implementation identifier (must be low_freq_template_codec).
         impl_version: Implementation version string.
         impl_digest: Implementation digest string.
 
