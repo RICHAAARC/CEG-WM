@@ -205,63 +205,6 @@ def _assert_no_forbidden_tokens(value: Any, path: str) -> None:
         return
 
 
-def test_records_identity_value_is_normalized_or_absent(tmp_path: Path) -> None:
-    """
-    鍔熻兘锛氶獙璇?identity 妯″紡鐨勫懡鍚嶈鑼冨寲銆?
-
-    Validate identity-mode naming normalization for embed records.
-
-    Args:
-        tmp_path: Temporary path fixture.
-
-    Returns:
-        None.
-    """
-    run_root = tmp_path / "run"
-    records_dir = run_root / "records"
-    artifacts_dir = run_root / "artifacts"
-    logs_dir = run_root / "logs"
-    records_dir.mkdir(parents=True, exist_ok=True)
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
-    logs_dir.mkdir(parents=True, exist_ok=True)
-
-    input_image = tmp_path / "inputs" / "input.png"
-    _write_png(input_image)
-
-    contracts = load_frozen_contracts(config_loader.FROZEN_CONTRACTS_PATH)
-    whitelist = load_runtime_whitelist(config_loader.RUNTIME_WHITELIST_PATH)
-    semantics = load_policy_path_semantics(config_loader.POLICY_PATH_SEMANTICS_PATH)
-    injection_scope_manifest = load_injection_scope_manifest(config_loader.INJECTION_SCOPE_MANIFEST_PATH)
-
-    plan_digest = _hex_anchor("embed_plan")
-    basis_digest = _hex_anchor("embed_basis")
-    impl_set = _build_impl_set(plan_digest=plan_digest, basis_digest=basis_digest)
-
-    cfg = _build_base_cfg()
-    cfg["embed"]["embed_identity_mode"] = True
-    cfg["__run_root_dir__"] = str(run_root)
-    cfg["__artifacts_dir__"] = str(artifacts_dir)
-    cfg["__embed_input_image_path__"] = str(input_image)
-
-    with bound_fact_sources(
-        contracts,
-        whitelist,
-        semantics,
-        run_root,
-        records_dir,
-        artifacts_dir,
-        logs_dir,
-        injection_scope_manifest=injection_scope_manifest,
-    ):
-        record = run_embed_orchestrator(cfg, impl_set, cfg_digest=_hex_anchor("cfg_embed"))
-
-    embed_trace = record.get("embed_trace")
-    assert isinstance(embed_trace, dict)
-    assert embed_trace.get("embed_mode") == "baseline_identity_v0"
-    assert embed_trace.get("identity_mode") is True
-    assert embed_trace.get("identity_reason") == "identity_pipeline"
-
-
 def test_records_forbidden_tokens_not_present_in_values(tmp_path: Path) -> None:
     """
     鍔熻兘锛氶獙璇佸叧閿褰曞瓧娈典笉鍖呭惈绂佹璇嶃€?

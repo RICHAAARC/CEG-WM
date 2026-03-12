@@ -206,9 +206,6 @@ def run_embed_orchestrator(
     if paper_enabled and not use_latent_per_step:
         # paper 模式下必须走 latent per-step 主路径。
         raise ValueError("paper_faithfulness requires latent per-step embed path")
-    if paper_enabled and io_anchors.get("identity_mode", False):
-        # paper 模式下禁止 identity baseline。
-        raise ValueError("paper_faithfulness forbids identity baseline embed")
     
     # Paper-faithful mode强制检查HF/LF实现（阶段4）
     if paper_enabled:
@@ -230,14 +227,11 @@ def run_embed_orchestrator(
     else:
         embed_trace = {
             "embed_mode": io_anchors["embed_mode"],
-            "identity_mode": io_anchors.get("identity_mode"),
-            "identity_reason": io_anchors.get("identity_reason"),
             "note": "content_embedding_real_v1",
         }
 
     if (
         not use_latent_per_step
-        and not io_anchors.get("identity_mode", False)
         and io_anchors["image_path"] != "<absent>"
     ):
         input_image = Image.open(io_anchors["image_path"]).convert("RGB")
@@ -582,8 +576,6 @@ def _prepare_embed_real_io_anchors(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "run_root": "<absent>",
         "artifacts_dir": "<absent>",
         "output_rel": "watermarked/watermarked.png",
-        "identity_mode": False,
-        "identity_reason": None,
     }
 
     input_image_path = _resolve_embed_input_image_path(cfg)
@@ -616,19 +608,6 @@ def _prepare_embed_real_io_anchors(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
     output_path = (artifacts_dir / output_rel).resolve()
     path_policy.validate_output_target(output_path, "artifact", run_root)
-
-    test_mode_identity = bool(embed_cfg.get("embed_identity_mode", False))
-    if test_mode_identity:
-        records_io.copy_file_controlled(input_path, output_path, kind="artifact")
-        result["embed_mode"] = "baseline_identity_v0"
-        result["identity_mode"] = True
-        result["identity_reason"] = "identity_pipeline"
-        result["watermarked_path"] = str(output_path)
-        result["artifact_sha256"] = digests.file_sha256(output_path)
-        try:
-            result["artifact_rel_path"] = str(output_path.relative_to(run_root))
-        except ValueError:
-            result["artifact_rel_path"] = str(output_path)
 
     result["image_path"] = str(input_path)
     result["input_sha256"] = digests.file_sha256(input_path)

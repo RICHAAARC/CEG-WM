@@ -205,11 +205,8 @@ def test_records_schema_new_fields_valid_types_pass(mock_interpretation):
         record,
         "embed_trace",
         {
-            "embed_mode": "baseline_identity_v0",
-            "identity_mode": True,
-            "identity_reason": "identity_pipeline",
-            "identity_fields": ["seed", "strength"],
-            "note": "baseline_identity_only",
+            "embed_mode": "content_real_v1",
+            "note": "content_embedding_real_v1",
         },
     )
 

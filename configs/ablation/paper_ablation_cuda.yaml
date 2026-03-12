@@ -91,7 +91,6 @@ mask:
   semantic_model_path: "../models/inspyrenet/ckpt_base.pth"
 
 embed:
-  test_mode_identity: false
 
 ablation:
   # ===================== 消融开关总面板 =====================

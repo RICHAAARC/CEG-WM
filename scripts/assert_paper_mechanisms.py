@@ -686,6 +686,59 @@ def _assert_paper_mechanisms(
                     )
                     break
 
+    # v5 闭包断言：embed/orchestrator.py 不得包含 embed_identity_mode / baseline_identity_v0
+    orchestrator_path = repo_root / "main" / "watermarking" / "embed" / "orchestrator.py"
+    if orchestrator_path.exists():
+        orchestrator_source = orchestrator_path.read_text(encoding="utf-8")
+        for v5_forbidden in ("embed_identity_mode", "baseline_identity_v0", "identity_pipeline"):
+            for oline in orchestrator_source.splitlines():
+                ostripped = oline.strip()
+                if v5_forbidden in ostripped and not ostripped.startswith("#"):
+                    failures.append(
+                        f"embed/orchestrator.py 正式路径不得包含 identity baseline 符号 '{v5_forbidden}' (v5 closure)"
+                    )
+                    break
+
+    # v5 闭包断言：runtime_whitelist.yaml 不得在 allowed_overrides / arg_name_enum 中保留 embed_identity_mode
+    runtime_whitelist_path = repo_root / "configs" / "runtime_whitelist.yaml"
+    if runtime_whitelist_path.exists():
+        whitelist_text = runtime_whitelist_path.read_text(encoding="utf-8")
+        if "embed_identity_mode" in whitelist_text:
+            failures.append(
+                "runtime_whitelist.yaml 不得保留 embed_identity_mode 条目 (v5 closure)"
+            )
+
+    # v5 闭包断言：paper_full_cuda.yaml 不得包含 test_mode_identity
+    paper_full_path = repo_root / "configs" / "paper_full_cuda.yaml"
+    if paper_full_path.exists():
+        paper_full_text = paper_full_path.read_text(encoding="utf-8")
+        if "test_mode_identity" in paper_full_text:
+            failures.append(
+                "configs/paper_full_cuda.yaml 不得保留 test_mode_identity 键 (v5 closure)"
+            )
+
+    # v5 闭包断言：run_onefile_workflow.py 不得使用 embed_identity_mode=true 作为 CLI 覆写参数
+    onefile_path = repo_root / "scripts" / "run_onefile_workflow.py"
+    if onefile_path.exists():
+        onefile_text = onefile_path.read_text(encoding="utf-8")
+        if "embed_identity_mode=true" in onefile_text.lower():
+            failures.append(
+                "scripts/run_onefile_workflow.py 不得使用 embed_identity_mode=true 覆写 (v5 closure)"
+            )
+
+    # v5 闭包断言：正式测试集合不得消费 identity baseline 旧符号
+    formal_naming_test_path = repo_root / "tests" / "test_records_naming_normalization.py"
+    if formal_naming_test_path.exists():
+        naming_test_source = formal_naming_test_path.read_text(encoding="utf-8")
+        for v5_test_forbidden in ("embed_identity_mode", "baseline_identity_v0", "identity_pipeline"):
+            for nline in naming_test_source.splitlines():
+                nstripped = nline.strip()
+                if v5_test_forbidden in nstripped and not nstripped.startswith("#"):
+                    failures.append(
+                        f"test_records_naming_normalization.py 正式测试集合不得消费旧符号 '{v5_test_forbidden}' (v5 closure)"
+                    )
+                    break
+
     return failures
 
 

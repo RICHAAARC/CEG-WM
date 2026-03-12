@@ -89,7 +89,6 @@ mask:
   semantic_model_path: "models/inspyrenet/ckpt_base.pth"
 
 embed:
-  test_mode_identity: false
   preview_generation:
     enabled: true                          # 在正式嵌入前执行无注入预览推理，消除 embed 输入图主链不自足
     artifact_rel_path: "preview/preview.png"  # 预览图相对 artifacts/ 的路径（用于审计）

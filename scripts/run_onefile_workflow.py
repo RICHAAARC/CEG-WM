@@ -322,7 +322,6 @@ def _build_stage_overrides(stage_name: str, profile: str) -> List[str]:
             [
                 "force_cpu=\"cpu\"",
                 "enable_trace_tap=true",
-                "embed_identity_mode=true",
             ]
         )
     if profile == PROFILE_PAPER_FULL_CUDA:
@@ -1204,7 +1203,6 @@ def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> P
     cfg_obj["mask"] = mask_cfg
 
     embed_cfg = cfg_obj.get("embed") if isinstance(cfg_obj.get("embed"), dict) else {}
-    embed_cfg["embed_identity_mode"] = False
     embed_geometry_cfg = embed_cfg.get("geometry") if isinstance(embed_cfg.get("geometry"), dict) else {}
     embed_geometry_cfg["sync_strength"] = 0.2
     embed_cfg["geometry"] = embed_geometry_cfg
@@ -1340,10 +1338,11 @@ def _run_dual_branch_embedding_and_detection(
     """
     功能：执行双分支嵌入与检测（生成负样本）。
 
-    Run negative branch embed and detect for dual-branch workflow.
-    Creates branch_neg subdirectory and executes:
-    - embed with embed_identity_mode=true override
-    - detect using branch_neg embed output
+    Run negative branch detect for dual-branch workflow using clean input copy.
+    Creates branch_neg subdirectory and executes detect on original clean image:
+    - Copies original clean input image to branch_neg artifacts (no embed step)
+    - Creates minimal embed record referencing clean image as negative artifact
+    - Runs detect using branch_neg embed record as input
 
     Args:
         repo_root: Repository root path.
@@ -1355,7 +1354,7 @@ def _run_dual_branch_embedding_and_detection(
         Tuple of (branch_neg_output_root, branch_neg_detect_record_path).
 
     Raises:
-        RuntimeError: If embed or detect fails.
+        RuntimeError: If clean image resolution or detect fails.
     """
     if not isinstance(repo_root, Path) or not isinstance(cfg_path, Path):
         raise TypeError("repo_root and cfg_path must be Path")
@@ -1372,7 +1371,87 @@ def _run_dual_branch_embedding_and_detection(
     branch_neg_root.mkdir(parents=True, exist_ok=True)
     print(f"[dual_branch] Created branch_neg output: {branch_neg_root}")
 
-    # (1.1) 为负分支生成专用 cfg：关闭 paper_faithfulness，避免 identity baseline 被门禁阻断。
+    # (2) 解析原始干净输入图像路径（负样本来源）。
+    # 优先从主分支 embed_record.json 中读取 image_path；
+    # 失败则从 cfg 中解析 embed.input_image_path。
+    original_input_path: Path | None = None
+    main_embed_record_path = run_root / "records" / "embed_record.json"
+    if main_embed_record_path.exists():
+        try:
+            main_record_obj = json.loads(main_embed_record_path.read_text(encoding="utf-8"))
+            main_image_path_str = main_record_obj.get("image_path")
+            if isinstance(main_image_path_str, str) and main_image_path_str and main_image_path_str != "<absent>":
+                candidate = Path(main_image_path_str)
+                if candidate.exists() and candidate.is_file():
+                    original_input_path = candidate
+        except Exception as exc:
+            print(f"[dual_branch] WARN: failed to read main embed record for input path: {exc}", file=sys.stderr)
+
+    if original_input_path is None:
+        try:
+            cfg_obj = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+            fallback_path = _resolve_embed_input_image_path_from_cfg(cfg_obj)
+            if fallback_path is not None:
+                candidate = Path(fallback_path)
+                if not candidate.is_absolute():
+                    candidate = (cfg_path.parent / candidate).resolve()
+                if candidate.exists() and candidate.is_file():
+                    original_input_path = candidate
+        except Exception as exc:
+            print(f"[dual_branch] WARN: failed to resolve input image from cfg: {exc}", file=sys.stderr)
+
+    if original_input_path is None:
+        raise RuntimeError(
+            "dual_branch: cannot resolve clean input image for negative branch. "
+            "Ensure main embed has run and embed_record.json contains image_path, "
+            "or set embed.input_image_path in cfg."
+        )
+
+    # (3) 将干净输入图像复制到负样本分支 artifacts 目录（脚本层辅助，不经过生产嵌入流）。
+    neg_artifacts_dir = branch_neg_root / "artifacts" / "watermarked"
+    neg_artifacts_dir.mkdir(parents=True, exist_ok=True)
+    neg_image_dest = neg_artifacts_dir / "watermarked.png"
+    # 读取原始图像字节并通过受控写路径写入，避免直接 shutil.copy2 绕过写盘策略。
+    _neg_image_bytes = original_input_path.read_bytes()
+    records_io.write_artifact_bytes_unbound(
+        run_root,
+        run_root / "artifacts",
+        str(neg_image_dest),
+        _neg_image_bytes,
+    )
+    print(f"[dual_branch] Copied clean image to negative branch: {neg_image_dest}")
+
+    # (4) 计算 SHA256，创建最小化 embed 记录供 detect 读取。
+    import hashlib as _hashlib
+    def _sha256_file(path: Path) -> str:
+        h = _hashlib.sha256()
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(65536), b""):
+                h.update(chunk)
+        return h.hexdigest()
+
+    neg_sha256 = _sha256_file(neg_image_dest)
+    neg_records_dir = branch_neg_root / "records"
+    neg_records_dir.mkdir(parents=True, exist_ok=True)
+    neg_embed_record = {
+        "operation": "embed",
+        "embed_mode": "explicit_negative_no_watermark",
+        "watermarked_path": str(neg_image_dest),
+        "image_path": str(original_input_path),
+        "artifact_sha256": neg_sha256,
+        "watermarked_artifact_sha256": neg_sha256,
+        "is_watermarked": False,
+        "negative_branch_note": "clean image copy for dual-branch calibration; no production embed orchestrator used",
+    }
+    neg_embed_record_path = neg_records_dir / "embed_record.json"
+    _write_artifact_text_unbound(
+        run_root,
+        neg_embed_record_path,
+        json.dumps(neg_embed_record, ensure_ascii=False, indent=2),
+    )
+    print(f"[dual_branch] Created synthetic negative embed record: {neg_embed_record_path}")
+
+    # (5) 为负分支生成专用 cfg（关闭 paper_faithfulness，避免门禁干扰）。
     branch_neg_cfg_path = cfg_path
     try:
         branch_cfg_obj = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
@@ -1395,36 +1474,7 @@ def _run_dual_branch_embedding_and_detection(
         print(f"[dual_branch] WARN: failed to prepare branch cfg, fallback to base cfg: {exc}", file=sys.stderr)
         branch_neg_cfg_path = cfg_path
 
-    # (2) 运行 embed（负样本，禁用注入）
-    scripts_dir = repo_root / "scripts"
-    embed_cmd = _build_stage_command("embed", branch_neg_root, branch_neg_cfg_path, profile)
-    # 清理默认 profile 注入的 enable_paper_faithfulness 覆写，避免 arg_name 重复。
-    sanitized_embed_cmd: list[str] = []
-    index = 0
-    while index < len(embed_cmd):
-        current_item = str(embed_cmd[index])
-        if (
-            current_item == "--override"
-            and index + 1 < len(embed_cmd)
-            and str(embed_cmd[index + 1]).startswith("enable_paper_faithfulness=")
-        ):
-            index += 2
-            continue
-        sanitized_embed_cmd.append(current_item)
-        index += 1
-    embed_cmd = sanitized_embed_cmd
-
-    # 使用 whitelist 允许的 embed_identity_mode 覆写生成 clean 分支。
-    # 注意：enable_paper_faithfulness 的 false 覆写会触发 override_value_mismatch，
-    # 因此此处不注入该 override，保持与冻结白名单一致。
-    embed_cmd.extend(["--override", "embed_identity_mode=true"])
-    print(f"[dual_branch] Running negative embed: {' '.join(str(c) for c in embed_cmd)}")
-    embed_return = _run_subprocess_for_step(embed_cmd, repo_root)
-    if embed_return != 0:
-        raise RuntimeError(f"dual_branch embed failed with return code {embed_return}")
-    print(f"[dual_branch] Negative embed completed successfully")
-
-    # (3) 运行 detect（从负样本 embed 输出读取）
+    # (6) 运行 detect（从负分支合成 embed 记录读取干净图像路径）。
     detect_cmd = _build_stage_command("detect", branch_neg_root, branch_neg_cfg_path, profile)
     sanitized_detect_cmd: list[str] = []
     detect_index = 0
@@ -1443,14 +1493,14 @@ def _run_dual_branch_embedding_and_detection(
         sanitized_detect_cmd.append(detect_item)
         detect_index += 1
     detect_cmd = sanitized_detect_cmd
-    detect_cmd.extend(["--input", str(branch_neg_root / "records" / "embed_record.json")])
+    detect_cmd.extend(["--input", str(neg_embed_record_path)])
     print(f"[dual_branch] Running negative detect: {' '.join(str(c) for c in detect_cmd)}")
     detect_return = _run_subprocess_for_step(detect_cmd, repo_root)
     if detect_return != 0:
         raise RuntimeError(f"dual_branch detect failed with return code {detect_return}")
     print(f"[dual_branch] Negative detect completed successfully")
 
-    # (4) 验证输出文件存在并返回路径
+    # (7) 验证输出文件存在并返回路径。
     branch_neg_detect_record = branch_neg_root / "records" / "detect_record.json"
     if not branch_neg_detect_record.exists():
         raise RuntimeError(f"dual_branch detect output not found: {branch_neg_detect_record}")

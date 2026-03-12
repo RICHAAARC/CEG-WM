@@ -790,20 +790,6 @@ fields:
     missing_semantics: "absent_ok"
     description: "embed 基线身份标记字段（防止误当真实嵌入参数）。"
 
-  - path: "embed_trace.identity_mode"
-    layer: "diagnostic"
-    type: "boolean_flag"
-    required: false
-    missing_semantics: "absent_ok"
-    description: "embed 基线身份模式标记。"
-
-  - path: "embed_trace.identity_reason"
-    layer: "diagnostic"
-    type: "reason_string"
-    required: false
-    missing_semantics: "absent_ok"
-    description: "embed 基线身份模式原因枚举。"
-
   - path: "plan_digest_expected"
     layer: "anchor"
     type: "digest_hex64"
