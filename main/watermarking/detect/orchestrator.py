@@ -850,9 +850,9 @@ def _derive_execution_report_from_chain_states(
 
 def _resolve_cfg_plan_digest(cfg: Dict[str, Any]) -> Optional[str]:
     """
-    功能：从 cfg 读取 plan_digest（仅用于 test_mode）�?
+    功能：从 cfg 读取 plan_digest。
 
-    Resolve cfg-side plan_digest for test-mode-only fallback.
+    Resolve cfg-side plan_digest from cfg.
 
     Args:
         cfg: Configuration mapping.
@@ -868,36 +868,6 @@ def _resolve_cfg_plan_digest(cfg: Dict[str, Any]) -> Optional[str]:
     if isinstance(candidate, str) and candidate:
         return candidate
     return None
-
-
-def _resolve_detect_test_mode(cfg: Dict[str, Any]) -> bool:
-    """
-    功能：解�?detect �?test_mode 开关�?
-
-    Resolve detect test_mode switch from cfg.
-
-    Args:
-        cfg: Configuration mapping.
-
-    Returns:
-        True if detect test_mode is enabled.
-    """
-    direct = cfg.get("test_mode")
-    if isinstance(direct, bool):
-        return direct
-    detect_cfg = cfg.get("detect")
-    if isinstance(detect_cfg, dict):
-        detect_payload = cast(Dict[str, Any], detect_cfg)
-        runtime_cfg = detect_payload.get("runtime")
-        if isinstance(runtime_cfg, dict):
-            runtime_payload = cast(Dict[str, Any], runtime_cfg)
-            runtime_test_mode = runtime_payload.get("test_mode")
-            if isinstance(runtime_test_mode, bool):
-                return runtime_test_mode
-        detect_test_mode = detect_payload.get("test_mode")
-        if isinstance(detect_test_mode, bool):
-            return detect_test_mode
-    return False
 
 
 def _bind_scores_if_ok(content_evidence_payload: Dict[str, Any]) -> None:

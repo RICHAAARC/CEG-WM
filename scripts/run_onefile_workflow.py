@@ -322,7 +322,7 @@ def _build_stage_overrides(stage_name: str, profile: str) -> List[str]:
             [
                 "force_cpu=\"cpu\"",
                 "enable_trace_tap=true",
-                "test_mode_identity=true",
+                "embed_identity_mode=true",
             ]
         )
     if profile == PROFILE_PAPER_FULL_CUDA:
@@ -1204,7 +1204,7 @@ def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> P
     cfg_obj["mask"] = mask_cfg
 
     embed_cfg = cfg_obj.get("embed") if isinstance(cfg_obj.get("embed"), dict) else {}
-    embed_cfg["test_mode_identity"] = False
+    embed_cfg["embed_identity_mode"] = False
     embed_geometry_cfg = embed_cfg.get("geometry") if isinstance(embed_cfg.get("geometry"), dict) else {}
     embed_geometry_cfg["sync_strength"] = 0.2
     embed_cfg["geometry"] = embed_geometry_cfg
@@ -1342,7 +1342,7 @@ def _run_dual_branch_embedding_and_detection(
 
     Run negative branch embed and detect for dual-branch workflow.
     Creates branch_neg subdirectory and executes:
-    - embed with test_mode_identity=true override
+    - embed with embed_identity_mode=true override
     - detect using branch_neg embed output
 
     Args:
@@ -1414,10 +1414,10 @@ def _run_dual_branch_embedding_and_detection(
         index += 1
     embed_cmd = sanitized_embed_cmd
 
-    # 使用 whitelist 允许的 test_mode_identity 覆写生成 clean 分支。
+    # 使用 whitelist 允许的 embed_identity_mode 覆写生成 clean 分支。
     # 注意：enable_paper_faithfulness 的 false 覆写会触发 override_value_mismatch，
     # 因此此处不注入该 override，保持与冻结白名单一致。
-    embed_cmd.extend(["--override", "test_mode_identity=true"])
+    embed_cmd.extend(["--override", "embed_identity_mode=true"])
     print(f"[dual_branch] Running negative embed: {' '.join(str(c) for c in embed_cmd)}")
     embed_return = _run_subprocess_for_step(embed_cmd, repo_root)
     if embed_return != 0:

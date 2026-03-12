@@ -727,7 +727,7 @@ def _run_neg_embed_detect_for_cache(
     """
     功能：为 (model_id, seed) 预生成真实负样本 detect record 并缓存。
 
-    Run embed (test_mode_identity=true, no watermark injection) then detect on the
+    Run embed (embed_identity_mode=true, no watermark injection) then detect on the
     resulting clean image to obtain a real negative-sample content score. Results are
     cached under batch_root/neg_cache/ and reused within the current experiment-matrix
     session to avoid redundant SD inference.
@@ -775,8 +775,8 @@ def _run_neg_embed_detect_for_cache(
     if isinstance(max_samples, int):
         common_overrides.append(f"max_samples={max_samples}")
 
-    # (1) embed 阶段：test_mode_identity=true 跳过水印注入，生成干净图像作为负样本来源。
-    embed_overrides = list(common_overrides) + ["test_mode_identity=true"]
+    # (1) embed 阶段：embed_identity_mode=true 跳过水印注入，生成干净图像作为负样本来源。
+    embed_overrides = list(common_overrides) + ["embed_identity_mode=true"]
     _run_stage_command(
         stage_name="embed",
         run_root=neg_run_root,

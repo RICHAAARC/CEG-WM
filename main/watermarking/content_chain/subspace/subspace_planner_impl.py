@@ -423,7 +423,7 @@ class SubspacePlannerImpl:
                 mask_digest=mask_digest
             )
             basis_digest = self._derive_basis_digest(basis_summary["basis_digest_payload"])
-            plan_origin = "test_mode_synthetic" if basis_summary.get("samples_anchor", {}).get("source") == "test_mode_synthetic" else "planner_v1_band_spec"
+            plan_origin = "planner_v1_band_spec"
             routing_digest_ref = self._extract_routing_digest_ref(inputs)
             band_spec, band_spec_digest, band_metrics = self.build_subspace_plan_v1(
                 cfg=cfg,
@@ -2515,13 +2515,6 @@ class SubspacePlannerImpl:
                 planner_params=planner_params,
                 cfg=cfg,
             )
-        elif self._is_test_synthetic_enabled(cfg, inputs):
-            # 路径 C：仅测试模式可启用的合成轨迹。
-            samples, samples_anchor = self._sample_deterministic_trajectory(
-                planner_params=planner_params,
-                cfg=cfg,
-                base_seed=planner_params.seed
-            )
         else:
             raise ValueError("planner inputs missing required trajectory source for planner_v1")
         
@@ -2703,7 +2696,7 @@ class SubspacePlannerImpl:
             "moments_digest": moments_digest,
             "guidance_scale": self._normalize_float(guidance_scale, planner_params.float_round_digits),
             "num_inference_steps": num_steps,
-            "source": "test_mode_synthetic"
+            "source": "deterministic_fallback"
         }
         
         return samples, samples_anchor
@@ -2756,33 +2749,6 @@ class SubspacePlannerImpl:
             "source": "trace_signature_projection",
         }
         return samples, anchor
-
-    def _is_test_synthetic_enabled(self, cfg: Dict[str, Any], inputs: Dict[str, Any]) -> bool:
-        """
-        功能：判定是否允许测试模式合成轨迹路径。 
-
-        Decide whether test-mode synthetic trajectory path is enabled.
-
-        Args:
-            cfg: Configuration mapping.
-            inputs: Planner input mapping.
-
-        Returns:
-            True when test-mode synthetic path is explicitly enabled.
-        """
-        if not isinstance(cfg, dict):
-            return False
-        if not isinstance(inputs, dict):
-            return False
-
-        if bool(inputs.get("test_mode", False)):
-            return True
-
-        subspace_cfg = cfg.get("watermark", {}).get("subspace", {})
-        if isinstance(subspace_cfg, dict) and bool(subspace_cfg.get("allow_synthetic_trajectory", False)):
-            return True
-
-        return bool(cfg.get("allow_synthetic_trajectory", False))
 
     def _build_timestep_sequence(self, planner_params: _PlannerParams) -> List[int]:
         """

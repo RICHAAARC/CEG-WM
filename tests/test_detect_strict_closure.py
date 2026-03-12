@@ -166,16 +166,17 @@ def _build_matching_trajectory_evidence() -> Dict[str, Any]:
 def test_detect_missing_pipeline_is_fail_fast_by_default() -> None:
     cfg = _build_cfg()
     with pytest.raises(RuntimeError, match="detect_missing_pipeline_dependency"):
-        assert_detect_runtime_dependencies(cfg, {"test_mode": False}, pipeline_obj=None)
+        assert_detect_runtime_dependencies(cfg, {}, pipeline_obj=None)
 
 
-def test_allow_missing_pipeline_only_in_test_mode_or_explicit_flag() -> None:
+def test_allow_missing_pipeline_only_with_explicit_flag() -> None:
+    # test_mode 不再放行缺失 pipeline，只有显式 allow_flag 可通过校验。
     cfg_test_mode = _build_cfg(detect={"content": {"enabled": True}, "runtime": {"test_mode": True}})
-    decision_test_mode = assert_detect_runtime_dependencies(cfg_test_mode, {"test_mode": False}, pipeline_obj=None)
-    assert decision_test_mode["allow_missing_pipeline_for_detect"] is True
+    with pytest.raises(RuntimeError, match="detect_missing_pipeline_dependency"):
+        assert_detect_runtime_dependencies(cfg_test_mode, {}, pipeline_obj=None)
 
     cfg_allow_flag = _build_cfg(runtime={"allow_missing_pipeline_for_detect": True})
-    decision_allow_flag = assert_detect_runtime_dependencies(cfg_allow_flag, {"test_mode": False}, pipeline_obj=None)
+    decision_allow_flag = assert_detect_runtime_dependencies(cfg_allow_flag, {}, pipeline_obj=None)
     assert decision_allow_flag["allow_missing_pipeline_for_detect"] is True
 
     record = run_detect_orchestrator(

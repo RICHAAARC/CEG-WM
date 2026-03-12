@@ -564,9 +564,7 @@ def run_detect(
 
         dependency_guard = assert_detect_runtime_dependencies(
             cfg,
-            {
-                "test_mode": _resolve_detect_test_mode(cfg)
-            },
+            {},
             pipeline_obj
         )
 
@@ -575,8 +573,7 @@ def run_detect(
             inference_error = "detect_missing_pipeline_dependency"
             inference_runtime_meta = {
                 "dependency_guard": {
-                    "allow_missing_pipeline_for_detect": True,
-                    "test_mode": bool(dependency_guard.get("test_mode", False)),
+                    "allow_missing_pipeline_for_detect": bool(dependency_guard.get("allow_flag", False)),
                     "allow_flag": bool(dependency_guard.get("allow_flag", False))
                 }
             }
@@ -944,36 +941,6 @@ def main():
         sys.exit(1)
 
 
-def _resolve_detect_test_mode(cfg: Dict[str, Any]) -> bool:
-    """
-    功能：解析 detect test_mode 开关。
-
-    Resolve detect test mode switch from config.
-
-    Args:
-        cfg: Configuration mapping.
-
-    Returns:
-        True when detect test mode is enabled.
-    """
-    if not isinstance(cfg, dict):
-        return False
-    direct = cfg.get("test_mode")
-    if isinstance(direct, bool):
-        return direct
-    detect_cfg = cfg.get("detect")
-    if isinstance(detect_cfg, dict):
-        runtime_cfg = detect_cfg.get("runtime")
-        if isinstance(runtime_cfg, dict):
-            runtime_test_mode = runtime_cfg.get("test_mode")
-            if isinstance(runtime_test_mode, bool):
-                return runtime_test_mode
-        detect_test_mode = detect_cfg.get("test_mode")
-        if isinstance(detect_test_mode, bool):
-            return detect_test_mode
-    return False
-
-
 def _resolve_allow_missing_pipeline_for_detect(cfg: Dict[str, Any]) -> bool:
     """
     功能：解析 detect 缺失 pipeline 显式放行开关。
@@ -1012,18 +979,18 @@ def assert_detect_runtime_dependencies(
     功能：detect 运行依赖前置校验。
 
     Enforce strict detect runtime dependency policy.
-    Missing pipeline is allowed only in test_mode or explicit allow flag.
+    Missing pipeline is allowed only via explicit allow flag.
 
     Args:
         cfg: Configuration mapping.
-        inputs: Runtime inputs mapping.
+        inputs: Runtime inputs mapping (unused, kept for call-site compatibility).
         pipeline_obj: Built pipeline object.
 
     Returns:
         Guard decision mapping.
 
     Raises:
-        RuntimeError: If pipeline dependency is missing in production mode.
+        RuntimeError: If pipeline dependency is missing without explicit allow flag.
         TypeError: If inputs are invalid.
     """
     if not isinstance(cfg, dict):
@@ -1031,17 +998,15 @@ def assert_detect_runtime_dependencies(
     if not isinstance(inputs, dict):
         raise TypeError("inputs must be dict")
 
-    test_mode = bool(inputs.get("test_mode", False)) or _resolve_detect_test_mode(cfg)
     allow_flag = _resolve_allow_missing_pipeline_for_detect(cfg)
 
-    if pipeline_obj is None and not test_mode and not allow_flag:
-        # production 默认 fail-fast，防止 fallback 污染统计口径。
+    if pipeline_obj is None and not allow_flag:
+        # 生产默认 fail-fast，缺失 pipeline 不再因 test_mode 放行。
         raise RuntimeError("detect_missing_pipeline_dependency")
 
     return {
-        "test_mode": bool(test_mode),
         "allow_flag": bool(allow_flag),
-        "allow_missing_pipeline_for_detect": bool(test_mode or allow_flag),
+        "allow_missing_pipeline_for_detect": bool(allow_flag),
     }
 
 

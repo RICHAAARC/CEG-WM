@@ -617,7 +617,7 @@ def _prepare_embed_real_io_anchors(cfg: Dict[str, Any]) -> Dict[str, Any]:
     output_path = (artifacts_dir / output_rel).resolve()
     path_policy.validate_output_target(output_path, "artifact", run_root)
 
-    test_mode_identity = bool(embed_cfg.get("test_mode_identity", False))
+    test_mode_identity = bool(embed_cfg.get("embed_identity_mode", False))
     if test_mode_identity:
         records_io.copy_file_controlled(input_path, output_path, kind="artifact")
         result["embed_mode"] = "baseline_identity_v0"

@@ -1167,14 +1167,14 @@ def test_onefile_prepare_stage_cfg_path_propagates_dual_branch_failure_reason(
     assert "RuntimeError" in str(positive_payload.get("dual_branch_failure_reason"))
 
 
-def test_dual_branch_embed_uses_whitelisted_test_mode_identity_override(
+def test_dual_branch_embed_uses_whitelisted_embed_identity_mode_override(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """
-    鍔熻兘锛氶獙璇?dual-branch 璐熸牱鏈?embed 浣跨敤 whitelist 鍏佽鐨?test_mode_identity 瑕嗗啓銆?
+    功能：验证 dual-branch 负样本 embed 使用 whitelist 允许的 embed_identity_mode 覆写。
 
-    Verify dual-branch negative embed uses whitelisted test_mode_identity override
+    Verify dual-branch negative embed uses whitelisted embed_identity_mode override
     instead of forbidden embed.injection_enabled override.
 
     Args:
@@ -1228,7 +1228,7 @@ def test_dual_branch_embed_uses_whitelisted_test_mode_identity_override(
     assert paper_cfg.get("enabled") is False
     assert paper_cfg.get("alignment_check") is False
 
-    assert "test_mode_identity=true" in embed_commands[0]
+    assert "embed_identity_mode=true" in embed_commands[0]
     assert "enable_paper_faithfulness=false" not in embed_commands[0]
     assert "enable_paper_faithfulness=true" not in embed_commands[0]
     assert "embed.injection_enabled=false" not in embed_commands[0]

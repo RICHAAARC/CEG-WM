@@ -137,8 +137,8 @@ class TestSubspacePlannerBasic:
         assert result.plan.get("denoise_trace_digest") == "<absent>"
         assert result.plan.get("attention_anchor_ref_digest") == "<absent>"
 
-    def test_subspace_planner_synthetic_requires_test_mode_or_allow_flag(self):
-        """test_mode_synthetic 仅允许在 test_mode/allow_synthetic_trajectory 下启用。"""
+    def test_subspace_planner_without_pipeline_returns_absent(self):
+        """移除 test_mode_synthetic 路径后，缺失 pipeline 的情况统一返回 absent。"""
         planner = SubspacePlannerImpl(
             impl_id=SUBSPACE_PLANNER_ID,
             impl_version=SUBSPACE_PLANNER_VERSION,
@@ -168,14 +168,14 @@ class TestSubspacePlannerBasic:
         assert result_without_flag.status == "absent"
         assert result_without_flag.plan_failure_reason == "planner_input_absent"
 
+        # test_mode 不再赋予合成轨迹访问权，缺失 pipeline 同样返回 absent。
         result_with_test_mode = planner.plan(
             cfg,
             mask_digest="mask_digest_001",
             inputs={"test_mode": True}
         )
-        assert result_with_test_mode.status == "ok"
-        assert isinstance(result_with_test_mode.plan, dict)
-        assert result_with_test_mode.plan.get("plan_origin") == "test_mode_synthetic"
+        assert result_with_test_mode.status == "absent"
+        assert result_with_test_mode.plan_failure_reason == "planner_input_absent"
 
 
 class TestPlanDigestBinding:

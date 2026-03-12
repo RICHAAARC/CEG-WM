@@ -12,7 +12,7 @@
 # ------------------------------
 # 白名单版本：用于 records 记录与审计。
 # ------------------------------
-whitelist_version: "v2.0"    # 运行期白名单版本号：任意一次运行必须记录到 records 中，且不可由 CLI 任意指定。
+whitelist_version: "v2.1"    # 运行期白名单版本号：任意一次运行必须记录到 records 中，且不可由 CLI 任意指定。
                              # v1.0→v1.1：追加 detect_calibration_artifact_path override（P1-A，2026-03-10）。
                              # v1.1→v2.0：论文正式路径收口（2026-03-11）；移除全部旧 v1 paper-impl；仅保留 v2/v3 正式实现族与测试支架基线。
 
@@ -100,11 +100,11 @@ override:
       set_value: true
       source: "cli"
       description: "启用轨迹采样：启用 trajectory tap 以产出可复算的轨迹摘要"
-    - arg_name: "test_mode_identity"
-      field_path: "embed.test_mode_identity"
+    - arg_name: "embed_identity_mode"
+      field_path: "embed.embed_identity_mode"
       override_mode: "set"
       source: "cli"
-      description: "测试模式基线检验：启用 identity 模式后 content/geometry 使用基线实现"
+      description: "嵌入恒等模式：启用后 content/geometry 使用基线实现（用于负样本生成）"
     
     # Ablation 实验开关 CLI overrides (append-only v1.0)
     # 允许通过 CLI 覆写 ablation.enable_* 开关，用于消融实验控制
@@ -254,7 +254,7 @@ override:
       - "force_cpu"
       - "enable_paper_faithfulness"
       - "enable_trace_tap"
-      - "test_mode_identity"
+      - "embed_identity_mode"
       # Ablation 实验开关枚举（append-only v1.0）
       - "ablation_enable_content"
       - "ablation_disable_content"

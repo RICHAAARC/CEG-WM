@@ -238,7 +238,7 @@ def test_records_identity_value_is_normalized_or_absent(tmp_path: Path) -> None:
     impl_set = _build_impl_set(plan_digest=plan_digest, basis_digest=basis_digest)
 
     cfg = _build_base_cfg()
-    cfg["embed"]["test_mode_identity"] = True
+    cfg["embed"]["embed_identity_mode"] = True
     cfg["__run_root_dir__"] = str(run_root)
     cfg["__artifacts_dir__"] = str(artifacts_dir)
     cfg["__embed_input_image_path__"] = str(input_image)
