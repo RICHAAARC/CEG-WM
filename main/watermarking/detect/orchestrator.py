@@ -538,13 +538,30 @@ def run_detect_orchestrator(
                 },
             }
         lf_evidence = _extract_lf_evidence_from_input_record(input_record)
+
+        # 正式 LF detect 步骤：trajectory latent + LDPC 闭环相关验证（与 LowFreqTemplateCodec.detect_score() 相同路径）。
+        # 在 detector_inputs 构建前完成，使分数通过 detector_inputs["lf_score"] 进入 ContentDetector。
+        _lf_direct_detect_score: Optional[float] = None
+        if isinstance(plan_payload, dict):
+            _plan_early = plan_payload.get("plan")
+            _plan_early_dict = cast(Dict[str, Any], _plan_early) if isinstance(_plan_early, dict) else {}
+            _lf_basis_early = _plan_early_dict.get("lf_basis")
+            _dtc_early = cfg.get("__detect_trajectory_latent_cache__")
+            _active_pd = embed_time_plan_digest if isinstance(embed_time_plan_digest, str) and embed_time_plan_digest else detect_time_plan_digest
+            if _lf_basis_early is not None and _dtc_early is not None and not _dtc_early.is_empty():
+                _lf_s, _lf_st = detector_scoring.extract_lf_score_from_detect_trajectory(
+                    _dtc_early, _lf_basis_early, None, cfg, plan_digest=_active_pd
+                )
+                if _lf_s is not None:
+                    _lf_direct_detect_score = _lf_s
+
         detector_inputs: Dict[str, Any] = {
             "expected_plan_digest": expected_plan_digest,
             "observed_plan_digest": detect_time_plan_digest,
             "plan_digest": detect_time_plan_digest,
             "lf_evidence": lf_evidence,
             "hf_evidence": hf_evidence,
-            "lf_score": lf_raw_score,
+            "lf_score": _lf_direct_detect_score if _lf_direct_detect_score is not None else lf_raw_score,
             "hf_score": hf_raw_score,
             "lf_detect_trace": raw_score_traces.get("lf"),
             "hf_detect_trace": raw_score_traces.get("hf"),
@@ -607,18 +624,22 @@ def run_detect_orchestrator(
 
         # --- 评分路径：trajectory cache 可用 ??TFSW z_{t_e} 精确评分；否则显式失??---
         if detect_traj_cache is not None and not detect_traj_cache.is_empty():
-            # 主路径：使用真实 z_{t_e} ??TFSW（exact-only）??
+            # 主路径：使用真实 z_{t_e} ??TFSW（exact-only）。
+            # plan_digest 必须传入以派生 LDPC / Rademacher 模板（闭环验证要求）。
+            _active_pd_audit = embed_time_plan_digest if isinstance(embed_time_plan_digest, str) and embed_time_plan_digest else detect_time_plan_digest
             detect_lf_score, detect_lf_status = detector_scoring.extract_lf_score_from_detect_trajectory(
                 detect_traj_cache,
                 lf_basis,
                 embed_lf_score,
                 cfg,
+                plan_digest=_active_pd_audit,
             )
             detect_hf_score, detect_hf_status = detector_scoring.extract_hf_score_from_detect_trajectory(
                 detect_traj_cache,
                 hf_basis,
                 embed_hf_score,
                 cfg,
+                plan_digest=_active_pd_audit,
             )
         else:
             detect_lf_score, detect_lf_status = None, "no_trajectory_cache"

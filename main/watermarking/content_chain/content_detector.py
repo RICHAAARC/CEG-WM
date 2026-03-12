@@ -175,14 +175,16 @@ class ContentDetector:
         )
         lf_statistics = extract_low_freq_statistics(normalized_inputs)
         lf_statistics_digest = lf_statistics.get("statistics_digest") if isinstance(lf_statistics, dict) else None
-        if lf_score is None and isinstance(lf_statistics, dict) and lf_statistics.get("status") == "ok":
-            lf_score = compute_lf_score(
-                lf_statistics=lf_statistics,
-                injection_evidence=normalized_inputs.get("injection_evidence"),
-                lf_evidence=normalized_inputs.get("lf_evidence")
-            )
-            lf_status = "ok"
-            lf_failure_reason = None
+        # 【LF 正式分数直通】orchestrator 将 trajectory-LDPC 闭环分数写入 detector_inputs["lf_score"]；
+        # 若 _extract_channel() 未从 lf_evidence dict 中取得 lf_score，则从 normalized_inputs["lf_score"] 直接读取，
+        # 与 HF P0-B 路径对称。
+        if lf_score is None:
+            lf_raw = normalized_inputs.get("lf_score")
+            if isinstance(lf_raw, (int, float)) and not isinstance(lf_raw, bool):
+                lf_score = max(0.0, float(lf_raw))
+                lf_status = "ok"
+                lf_failure_reason = None
+        # 正式 LF 评分必须来自 LowFreqTemplateCodec 闭环路径；统计代理回退路径已移除。
 
         hf_enabled = bool(cfg.get("watermark", {}).get("hf", {}).get("enabled", False))
         if hf_enabled:
@@ -205,14 +207,7 @@ class ContentDetector:
                     hf_failure_reason = None
             hf_statistics = extract_high_freq_statistics(normalized_inputs)
             hf_statistics_digest = hf_statistics.get("statistics_digest") if isinstance(hf_statistics, dict) else None
-            if hf_score is None and isinstance(hf_statistics, dict) and hf_statistics.get("status") == "ok":
-                hf_score = compute_hf_score(
-                    hf_statistics=hf_statistics,
-                    injection_evidence=normalized_inputs.get("injection_evidence"),
-                    hf_evidence=normalized_inputs.get("hf_evidence")
-                )
-                hf_status = "ok"
-                hf_failure_reason = None
+            # 正式 HF 评分必须来自 HighFreqTemplateCodec 闭环路径；统计代理回退路径已移除。
         else:
             hf_status, hf_score, hf_failure_reason = "absent", None, "hf_disabled_by_config"
             hf_statistics_digest = None

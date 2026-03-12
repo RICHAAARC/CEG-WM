@@ -71,35 +71,13 @@ def extract_lf_score_from_evidence(
     elif lf_status != "ok":
         return None, f"lf_status_unknown: {lf_status}"
     
-    # LF 状态为 ok，尝试计算分数。
-    # 简化实现：使用 metrics 中的预计算统计量。
-    lf_metrics = lf_evidence.get("lf_metrics")
-    if not isinstance(lf_metrics, dict):
-        # 若无 metrics，尝试从 latent 重新计算。
-        if latent_or_trajectory is not None and plan is not None:
-            try:
-                basis = plan.get("lf_basis")
-                if basis is not None:
-                    score = channel_lf.extract_lf_score(
-                        latent_or_trajectory,
-                        basis,
-                        cfg=cfg
-                    )
-                    return score, "ok"
-            except Exception as e:
-                return None, f"lf_extraction_failed: {type(e).__name__}"
-        else:
-            return None, "lf_metrics_missing"
-    
-    # 基于 metrics 计算分数（差分能量）。
-    before_norm = lf_metrics.get("before_norm", 0.0)
-    after_norm = lf_metrics.get("after_norm", 0.0)
-    if isinstance(before_norm, (int, float)) and isinstance(after_norm, (int, float)):
-        # 能量差作为证据强度。
-        energy_ratio = max(0.0, (after_norm - before_norm) / (before_norm + 1e-8))
-        return float(energy_ratio), "ok"
-    
-    return None, "lf_metrics_incomplete"
+    # 证据 dict 内存在正式检测分数时，直接读取，禁止以能量代理替代。
+    lf_score_direct = lf_evidence.get("lf_score")
+    if isinstance(lf_score_direct, (int, float)) and not isinstance(lf_score_direct, bool):
+        return max(0.0, float(lf_score_direct)), "ok"
+
+    # 未找到直接检测分数；返回 absent 语义，而非以 before_norm/after_norm 能量差代理。
+    return None, "lf_detect_score_not_in_evidence"
 
 
 def extract_hf_score_from_evidence(
@@ -149,31 +127,13 @@ def extract_hf_score_from_evidence(
     elif hf_status != "ok":
         return None, f"hf_status_unknown: {hf_status}"
     
-    # HF 状态为 ok，尝试计算分数。
-    hf_metrics = hf_evidence.get("hf_metrics")
-    if not isinstance(hf_metrics, dict):
-        # 若无 metrics，尝试从 latent 重新计算。
-        if latent_or_trajectory is not None and plan is not None:
-            try:
-                basis = plan.get("hf_basis")
-                if basis is not None:
-                    score = channel_hf.extract_hf_score(
-                        latent_or_trajectory,
-                        basis,
-                        cfg=cfg
-                    )
-                    return score, "ok"
-            except Exception as e:
-                return None, f"hf_extraction_failed: {type(e).__name__}"
-        else:
-            return None, "hf_metrics_missing"
-    
-    # 基于 metrics 计算分数（能量）。
-    constrained_norm = hf_metrics.get("coeffs_after_norm", 0.0)
-    if isinstance(constrained_norm, (int, float)):
-        return float(max(0.0, constrained_norm)), "ok"
-    
-    return None, "hf_metrics_incomplete"
+    # 证据 dict 内存在正式检测分数时，直接读取，禁止以 coeffs_after_norm 能量代理替代。
+    hf_score_direct = hf_evidence.get("hf_score")
+    if isinstance(hf_score_direct, (int, float)) and not isinstance(hf_score_direct, bool):
+        return max(0.0, float(hf_score_direct)), "ok"
+
+    # 未找到直接检测分数；返回 absent 语义，而非以范数代理。
+    return None, "hf_detect_score_not_in_evidence"
 
 
 def validate_plan_digest_consistency(
@@ -353,12 +313,17 @@ def extract_lf_score_from_detect_trajectory(
     lf_basis: Optional[Dict[str, Any]],
     embed_lf_score: Optional[float],
     cfg: Dict[str, Any],
+    plan_digest: Optional[str] = None,
 ) -> Tuple[Optional[float], str]:
     """
-    功能：从 detect 侧 trajectory cache 中取出 z_{t_e}，走 TFSW 路径提取 LF 分数。
+    功能：从 detect 侧 trajectory cache 中取出 z_{t_e}，走 TFSW + LDPC 相关验证路径提取 LF 分数。
 
     Extract LF score from detect-side trajectory latent via Trajectory Feature Space
-    Watermarking (TFSW): phi = P^T vec(normalize(z_{t_e})).
+    Watermarking (TFSW) and LDPC whitened Pearson correlation.
+
+    Formal path: phi = extract_trajectory_feature(z_{t_e}, tfs),
+    coeffs = phi @ projection_matrix, then correlate with LDPC codeword derived
+    from plan_digest (same derivation as embed side via _derive_template).
 
     Uses exact-only timestep resolution; no nearest-step fallback.
 
@@ -367,10 +332,13 @@ def extract_lf_score_from_detect_trajectory(
         lf_basis: LF basis dict with trajectory_feature_spec and projection_matrix.
         embed_lf_score: Embed-side LF score for drift consistency check.
         cfg: Configuration mapping.
+        plan_digest: Plan digest for LDPC codeword derivation (same as embed side).
 
     Returns:
         Tuple of (lf_score_or_none, status_str).
+        lf_score in [0, 1]; higher indicates watermark evidence (LDPC correlation).
     """
+    import math as _math
     if not isinstance(cfg, dict):
         return None, "cfg_invalid_type"
     if lf_basis is None:
@@ -396,9 +364,36 @@ def extract_lf_score_from_detect_trajectory(
         if phi.shape[0] != proj_np.shape[0]:
             return None, f"phi_dim_mismatch_{phi.shape[0]}_vs_{proj_np.shape[0]}"
         lf_coeffs = np.dot(phi.astype(np.float32), proj_np)
-        coeffs_norm = float(np.linalg.norm(lf_coeffs))
-        lf_score_threshold = float(cfg.get("lf_score_threshold", 10.0))
-        detect_lf_score = min(1.0, max(0.0, coeffs_norm / lf_score_threshold))
+
+        # 正式路径：LDPC 码字相关验证（与 LowFreqTemplateCodec.detect_score() 相同路径）。
+        if isinstance(plan_digest, str) and plan_digest:
+            from main.watermarking.content_chain.low_freq_coder import LowFreqTemplateCodec as _lf_codec_cls
+            from main.watermarking.content_chain.low_freq_coder import (
+                LOW_FREQ_TEMPLATE_CODEC_ID as _lf_id,
+                LOW_FREQ_TEMPLATE_CODEC_VERSION as _lf_ver,
+            )
+            from main.core import digests as _digs
+            _codec = _lf_codec_cls(_lf_id, _lf_ver, _digs.canonical_sha256({"impl_id": _lf_id, "impl_version": _lf_ver}))
+            lf_cfg = cfg.get("watermark", {}).get("lf", {})
+            message_length = int(lf_cfg.get("message_length", 64))
+            ecc_sparsity = int(lf_cfg.get("ecc_sparsity", 3))
+            correlation_scale = float(lf_cfg.get("correlation_scale", 10.0))
+            code_bits, _ = _codec._derive_template(plan_digest, message_length, ecc_sparsity)
+            basis_rank = int(lf_coeffs.shape[0])
+            codeword = np.array(code_bits[:basis_rank], dtype=np.float64)
+            c = lf_coeffs[:basis_rank].astype(np.float64)
+            eps = 1e-8
+            c_mean = float(np.mean(c))
+            c_std = float(np.std(c))
+            c_whitened = (c - c_mean) / (c_std + eps)
+            t_norm = float(np.linalg.norm(codeword))
+            t_normalized = codeword / (t_norm + eps)
+            raw_corr = float(np.dot(c_whitened, t_normalized))
+            detect_lf_score = 1.0 / (1.0 + _math.exp(-correlation_scale * raw_corr))
+        else:
+            # plan_digest 缺失时返回 absent，禁止以 norm 代替码字相关验证。
+            return None, "lf_plan_digest_missing_cannot_derive_codeword"
+
         if embed_lf_score is not None and abs(detect_lf_score - float(embed_lf_score)) > 0.15:
             return detect_lf_score, f"lf_score_drift_detected_trajectory_{resolution_status}"
         return detect_lf_score, f"ok_trajectory_{resolution_status}"
@@ -411,12 +406,18 @@ def extract_hf_score_from_detect_trajectory(
     hf_basis: Optional[Dict[str, Any]],
     embed_hf_score: Optional[float],
     cfg: Dict[str, Any],
+    plan_digest: Optional[str] = None,
 ) -> Tuple[Optional[float], str]:
     """
-    功能：从 detect 侧 trajectory cache 中取出 z_{t_e}，走 TFSW 路径提取 HF 分数。
+    功能：从 detect 侧 trajectory cache 中取出 z_{t_e}，走 TFSW + keyed Rademacher 模板相关验证路径提取 HF 分数。
 
     Extract HF score from detect-side trajectory latent via Trajectory Feature Space
-    Watermarking (TFSW): phi = P^T vec(normalize(z_{t_e})), then project with hf_projection_matrix.
+    Watermarking (TFSW) and keyed Rademacher template correlation.
+
+    Formal path: phi = extract_trajectory_feature(z_{t_e}, tfs),
+    coeffs = phi @ hf_projection_matrix, then whitened Pearson correlation
+    against the keyed Rademacher template derived deterministically from plan_digest.
+    Replicates exactly HighFreqTemplateCodec._run_channel() detect logic.
 
     Uses exact-only timestep resolution; no nearest-step fallback.
 
@@ -425,10 +426,13 @@ def extract_hf_score_from_detect_trajectory(
         hf_basis: HF basis dict with trajectory_feature_spec and hf_projection_matrix.
         embed_hf_score: Embed-side HF score for drift consistency check.
         cfg: Configuration mapping.
+        plan_digest: Plan digest for Rademacher template derivation (same as embed side).
 
     Returns:
         Tuple of (hf_score_or_none, status_str).
+        hf_score in [0, 1]; higher indicates watermark evidence (template correlation).
     """
+    import math as _math
     if not isinstance(cfg, dict):
         return None, "cfg_invalid_type"
     if hf_basis is None:
@@ -454,9 +458,29 @@ def extract_hf_score_from_detect_trajectory(
         if phi.shape[0] != proj_np.shape[0]:
             return None, f"phi_dim_mismatch_{phi.shape[0]}_vs_{proj_np.shape[0]}"
         hf_coeffs = np.dot(phi.astype(np.float32), proj_np)
-        coeffs_norm = float(np.linalg.norm(hf_coeffs))
-        hf_score_threshold = float(cfg.get("hf_score_threshold", 5.0))
-        detect_hf_score = min(1.0, max(0.0, coeffs_norm / hf_score_threshold))
+
+        # 正式路径：keyed Rademacher 模板相关验证（与 HighFreqTemplateCodec.detect() 相同路径）。
+        if isinstance(plan_digest, str) and plan_digest:
+            from main.core import digests as _digs
+            n_positions = int(hf_coeffs.shape[0])
+            # 与 HighFreqTemplateCodec._derive_hf_template() 相同的种子派生逻辑。
+            seed = int(_digs.canonical_sha256({"plan_digest": plan_digest, "tag": "hf_template_v2"})[:16], 16)
+            rng = np.random.default_rng(seed % (2 ** 32))
+            template = rng.choice([-1.0, 1.0], size=max(1, n_positions)).astype(np.float64)
+            hf_cfg = cfg.get("watermark", {}).get("hf", {})
+            correlation_scale = float(hf_cfg.get("correlation_scale", 10.0))
+            measured = hf_coeffs.astype(np.float64)
+            t_norm = float(np.linalg.norm(template))
+            m_mean = float(np.mean(measured))
+            m_std = max(float(np.std(measured)), 1e-8)
+            m_whitened = (measured - m_mean) / m_std
+            t_normalized = template / (t_norm + 1e-8)
+            raw_corr = float(np.dot(m_whitened, t_normalized))
+            detect_hf_score = 1.0 / (1.0 + _math.exp(-correlation_scale * raw_corr))
+        else:
+            # plan_digest 缺失时返回 absent，禁止以 norm 代替模板相关验证。
+            return None, "hf_plan_digest_missing_cannot_derive_template"
+
         if embed_hf_score is not None and abs(detect_hf_score - float(embed_hf_score)) > 0.15:
             return detect_hf_score, f"hf_score_drift_detected_trajectory_{resolution_status}"
         return detect_hf_score, f"ok_trajectory_{resolution_status}"

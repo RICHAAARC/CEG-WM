@@ -20,7 +20,7 @@ from main.core import digests
 from main.watermarking.content_chain.subspace.planner_interface import SubspacePlanEvidence
 
 
-SUBSPACE_PLANNER_ID = "subspace_planner_v1"
+SUBSPACE_PLANNER_ID = "subspace_planner"
 SUBSPACE_PLANNER_VERSION = "v1"
 SUBSPACE_PLANNER_MASK_CONDITIONED_ID = "subspace_planner_mask_conditioned_v1"
 SUBSPACE_PLANNER_MASK_CONDITIONED_VERSION = "v1"
@@ -701,15 +701,40 @@ class SubspacePlannerImpl:
             spectrum_topk=planner_params.spectrum_topk
         )
 
+        # 全域 SVD 主基向量：用于全局能量指标和 top_indices（保持统计摘要不变）。
         basis = vh[:effective_rank, :]
+        basis_importance = np.mean(np.abs(basis), axis=0)
+        top_index_count = min(32, basis_importance.shape[0])
+        top_indices = np.argsort(-basis_importance)[:top_index_count].tolist()
+
+        # 步骤 4b：区域路由分区 SVD — 按 conditioning 特征列分区，分别做 LF/HF 子 SVD。
+        # LF 投影矩阵作用于 lf_feature_cols 子集，HF 投影矩阵作用于 hf_feature_cols 子集。
+        hf_feature_cols = list(subspace_conditioning.selected_feature_indices)
+        lf_feature_cols = sorted(set(range(feature_matrix.shape[1])) - set(hf_feature_cols))
+
+        # fallback 初始值：全域 SVD 的前 effective_rank 右奇异向量。
         lf_projection_matrix = basis.T
         hf_basis_candidates = vh[effective_rank:effective_rank + effective_rank, :]
         if hf_basis_candidates.shape[0] == 0:
             hf_basis_candidates = basis
         hf_projection_matrix = hf_basis_candidates.T
-        basis_importance = np.mean(np.abs(basis), axis=0)
-        top_index_count = min(32, basis_importance.shape[0])
-        top_indices = np.argsort(-basis_importance)[:top_index_count].tolist()
+
+        if len(lf_feature_cols) >= 2 and len(hf_feature_cols) >= 2:
+            lf_sub = decomposition_matrix[:, lf_feature_cols]
+            hf_sub = decomposition_matrix[:, hf_feature_cols]
+            try:
+                _, _, vh_lf = np.linalg.svd(lf_sub, full_matrices=False)
+                _, _, vh_hf = np.linalg.svd(hf_sub, full_matrices=False)
+                eff_lf = min(effective_rank, vh_lf.shape[0])
+                eff_hf = min(effective_rank, vh_hf.shape[0])
+                if eff_lf > 0:
+                    lf_projection_matrix = vh_lf[:eff_lf, :].T
+                if eff_hf > 0:
+                    hf_projection_matrix = vh_hf[:eff_hf, :].T
+            except Exception:
+                # SVD 分区失败：保持全域 fallback 投影矩阵，不抛出异常。
+                hf_feature_cols = []
+                lf_feature_cols = []
 
         singular_preview = [
             self._normalize_float(float(value), planner_params.float_round_digits)
@@ -775,6 +800,11 @@ class SubspacePlannerImpl:
             "subspace_spec": subspace_spec,
             "subspace_conditioning": subspace_conditioning.digest_payload(),
             "subspace_evidence_semantics": subspace_evidence_semantics,
+            # 区域路由桥摘要：绑定 conditioning 特征列分区与 LF/HF 子 SVD 结果。
+            "routing_bridge": {
+                "hf_feature_cols": hf_feature_cols,
+                "lf_feature_cols": lf_feature_cols,
+            },
             # 新增：可验证输入域锚点
             "verifiable_input_domain": {
                 "samples_anchor": samples_anchor,
@@ -798,6 +828,9 @@ class SubspacePlannerImpl:
             "basis_digest_payload": basis_digest_payload,
             "lf_projection_matrix": lf_projection_matrix,
             "hf_projection_matrix": hf_projection_matrix,
+            # 区域路由分区特征列索引：供 _build_high_freq_subspace_spec 使用。
+            "hf_feature_cols": hf_feature_cols,
+            "lf_feature_cols": lf_feature_cols,
             # 新增：可验证锚点供 plan_digest 使用
             "samples_anchor": samples_anchor,
             "jvp_anchor": jvp_anchor
@@ -1270,9 +1303,12 @@ class SubspacePlannerImpl:
         功能：从规划摘要中派生 HF 子空间摘要。
 
         Derive high-frequency subspace summary strictly from planner basis summary.
+        When region-routed split SVD bridge is active, selected_indices comes from
+        conditioning.selected_feature_indices (mask-routed). Falls back to global SVD
+        tail-half when bridge is not available.
 
         Args:
-            basis_summary: Basis summary mapping containing subspace_spec.
+            basis_summary: Basis summary mapping containing subspace_spec and hf_feature_cols.
 
         Returns:
             High-frequency subspace summary mapping.
@@ -1282,6 +1318,18 @@ class SubspacePlannerImpl:
         """
         if not isinstance(basis_summary, dict):
             raise TypeError("basis_summary must be dict")
+
+        # 优先使用区域路由桥的分区特征列（来自 conditioning.selected_feature_indices）。
+        hf_feature_cols = basis_summary.get("hf_feature_cols")
+        if isinstance(hf_feature_cols, list) and len(hf_feature_cols) > 0:
+            return {
+                "selector": "conditioning_mask_routing_v1",
+                "selected_indices": hf_feature_cols,
+                "selected_count": len(hf_feature_cols),
+                "source_field": "conditioning.selected_feature_indices",
+            }
+
+        # fallback：全域 SVD 尾半部（分区失败或 conditioning 无索引时使用）。
         subspace_spec = basis_summary.get("subspace_spec")
         if not isinstance(subspace_spec, dict):
             return {
@@ -1603,6 +1651,15 @@ class SubspacePlannerImpl:
             )
         else:
             # 路径 B：Surrogate transition-based JVP（总是可用）
+            # paper 正式路径保护：paper_faithfulness.enabled=True 时禁止 surrogate 回退，
+            # 必须通过 jvp_operator 提供真实 JVP（SD3.5 无 UNet，只有 transformer）。
+            paper_cfg = cfg.get("paper_faithfulness", {}) if isinstance(cfg, dict) else {}
+            paper_mode = bool(paper_cfg.get("enabled", False)) if isinstance(paper_cfg, dict) else False
+            if paper_mode:
+                raise ValueError(
+                    "paper formal path requires jvp_operator: SD3.5 uses transformer (no unet); "
+                    "provide jvp_operator via planner inputs or disable paper_faithfulness.enabled"
+                )
             jvp_samples, jvp_source = self._estimate_jvp_from_transition(
                 centered_matrix=centered_matrix,
                 probes=probes,

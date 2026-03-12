@@ -262,7 +262,8 @@ class HighFreqTemplateCodec:
                 "alpha": alpha,
             }
         else:
-            # （2）detect 模式：计算运行期值与模板的 whitened Pearson correlation。
+            # （2）detect 模式：截断鲁棒通道检测（keyed Rademacher template + HF 截断通道符号一致率）。
+            # 高幅值子带（|coeff| >= threshold）构成正式 HF 通道；在通道内统计期望符号（±1）对齐率。
             if len(flat_values) == 0:
                 return {
                     "status": "failed",
@@ -274,13 +275,36 @@ class HighFreqTemplateCodec:
                 [flat_values[idx] if idx < len(flat_values) else 0.0 for idx in selected_indices],
                 dtype=np.float64,
             )
-            t_norm = float(np.linalg.norm(template))
-            m_mean = float(np.mean(measured))
-            m_std = max(float(np.std(measured)), 1e-8)
-            m_whitened = (measured - m_mean) / m_std
-            t_normalized = template / (t_norm + 1e-8)
-            raw_corr = float(np.dot(m_whitened, t_normalized))
-            hf_score = 1.0 / (1.0 + math.exp(-correlation_scale * raw_corr))
+            # (2.1) 截断参数：tail_truncation_ratio 表示"高幅值保留比例"的补（尾部）。
+            tail_ratio = float(hf_cfg.get("tail_truncation_ratio", 0.1))
+            tail_ratio = max(0.0, min(0.95, tail_ratio))
+            threshold_percentile = (1.0 - tail_ratio) * 100.0
+            abs_measured = np.abs(measured)
+            threshold = float(np.percentile(abs_measured, threshold_percentile)) if len(abs_measured) > 0 else 0.0
+            # (2.2) 通道内系数：|coeff| >= threshold（高幅值 = HF 通道）。
+            in_channel = abs_measured >= threshold
+            n_in_channel = int(np.sum(in_channel))
+            retention_ratio = float(n_in_channel / max(1, len(measured)))
+            # (2.3) 通道内符号一致率（期望符号来自 plan_digest，与 embed 共用推导路径）。
+            if n_in_channel > 0:
+                signs_measured = np.sign(measured[in_channel])
+                signs_expected = template[in_channel]
+                nonzero = signs_measured != 0
+                if np.any(nonzero):
+                    sign_agreement = float(np.mean(signs_measured[nonzero] == signs_expected[nonzero]))
+                else:
+                    sign_agreement = 0.5
+            else:
+                # 截断通道为空（阈值异常），回退到全域符号一致率。
+                signs_measured = np.sign(measured)
+                nonzero = signs_measured != 0
+                if np.any(nonzero):
+                    sign_agreement = float(np.mean(signs_measured[nonzero] == template[nonzero]))
+                else:
+                    sign_agreement = 0.5
+            # (2.4) HF 分数：以 sigmoid 将 sign_agreement ∈ [0,1] 映射到 [0,1]。
+            raw_stat = 2.0 * sign_agreement - 1.0  # ∈ [-1, 1]，0 = 纯随机，1 = 完美一致
+            hf_score = 1.0 / (1.0 + math.exp(-correlation_scale * raw_stat))
 
             template_digest = digests.canonical_sha256({
                 "plan_digest": plan_digest,
@@ -291,9 +315,12 @@ class HighFreqTemplateCodec:
             trace_summary = {
                 "impl_id": self.impl_id,
                 "impl_version": self.impl_version,
-                "coding_mode": "keyed_rademacher_template_matched",
+                "coding_mode": "keyed_rademacher_truncation_channel",
                 "n_positions": n_positions,
-                "raw_correlation": raw_corr,
+                "tail_truncation_ratio": tail_ratio,
+                "retention_ratio": retention_ratio,
+                "sign_agreement": sign_agreement,
+                "raw_stat": raw_stat,
                 "hf_score": hf_score,
                 "correlation_scale": correlation_scale,
                 "plan_digest": plan_digest,
@@ -308,7 +335,9 @@ class HighFreqTemplateCodec:
                 "hf_score": hf_score,
                 "hf_trace_digest": hf_trace_digest,
                 "hf_template_match_score": hf_score,
-                "raw_correlation": raw_corr,
+                "tail_truncation_ratio": tail_ratio,
+                "retention_ratio": retention_ratio,
+                "sign_agreement": sign_agreement,
                 "template_digest": template_digest,
                 "n_positions": n_positions,
             }

@@ -30,7 +30,7 @@ from main.diffusion.sd3.callback_composer import compose_step_end_callbacks
 TRAJECTORY_TAP_VERSION = "v1"
 DEFAULT_STATS_PRECISION_DIGITS = 6
 DEFAULT_TENSOR_TYPES = ["latent"]
-DEFAULT_MODULE_PATHS = ["unet"]
+DEFAULT_MODULE_PATHS = ["transformer"]
 
 ALLOWED_ABSENT_REASONS = {
     "tap_disabled",
