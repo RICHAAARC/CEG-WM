@@ -201,10 +201,7 @@ def test_missing_expected_plan_digest_is_absent_and_no_scores() -> None:
     assert payload.get("score") is None
     assert payload.get("lf_score") is None
     assert payload.get("hf_score") is None
-
-    cfg_test_mode = _build_cfg(detect={"content": {"enabled": True}, "runtime": {"test_mode": True}})
-    record_test_mode = run_detect_orchestrator(cfg_test_mode, _build_impl_set(), input_record={}, cfg_digest="cfg_digest")
-    assert record_test_mode["allow_cfg_plan_digest_fallback_used"] is True
+    # formal path 语义闭包清理：不再从 cfg 回填 expected_plan_digest，test_mode 路径与正式路径统一
 
 
 def test_resolve_expected_plan_digest_from_embed_trace_injection_evidence() -> None:

@@ -14,7 +14,7 @@ def test_paper_impl_binding_rejects_fallback_binding() -> None:
     injection_evidence: Dict[str, Any] = {
         "lf_impl_binding": {
             "impl_selected": "low_freq_template_codec_v2",
-            "evidence_level": "adapter_fallback",
+            "evidence_level": "non_compliant",
         },
         "hf_impl_binding": {
             "impl_selected": "high_freq_template_codec_v2",

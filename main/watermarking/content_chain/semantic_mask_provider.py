@@ -87,16 +87,12 @@ class SaliencySourceDecision:
     Args:
         source_selected: Selected saliency source.
         source_attempted: Attempted saliency source list in order.
-        fallback_used: Whether fallback is activated.
-        fallback_reason: Explicit fallback reason.
         model_artifact_anchor: Model anchor digest payload.
         selected_impl_id: Selected mask implementation id.
     """
 
     source_selected: str
     source_attempted: List[str]
-    fallback_used: bool
-    fallback_reason: str
     model_artifact_anchor: Dict[str, Any]
     selected_impl_id: str
 
@@ -105,8 +101,6 @@ class SaliencySourceDecision:
         return {
             "saliency_source_selected": self.source_selected,
             "saliency_source_attempted": self.source_attempted,
-            "fallback_used": self.fallback_used,
-            "fallback_reason": self.fallback_reason,
             "model_artifact_anchor": self.model_artifact_anchor,
             "selected_impl_id": self.selected_impl_id,
         }
@@ -318,7 +312,7 @@ class SemanticMaskProvider:
         }
         saliency_decision = select_saliency_source(cfg, availability_probe)
 
-        if saliency_decision.source_selected == SALIENCY_SOURCE_MODEL_V2 and not availability_probe["model_available"] and not saliency_decision.fallback_used:
+        if saliency_decision.source_selected == SALIENCY_SOURCE_MODEL_V2 and not availability_probe["model_available"]:
             return ContentEvidence(
                 status="failed",
                 score=None,
@@ -326,8 +320,6 @@ class SemanticMaskProvider:
                     **audit,
                     "saliency_source_selected": saliency_decision.source_selected,
                     "saliency_source_attempted": saliency_decision.source_attempted,
-                    "fallback_used": saliency_decision.fallback_used,
-                    "fallback_reason": saliency_decision.fallback_reason,
                     "model_artifact_anchor": saliency_decision.model_artifact_anchor,
                     "mask_source_type": MASK_SOURCE_TYPE_SEMANTIC_MODEL_V2,
                     "probe_failure_reason": _probe_failure_reason,
@@ -346,7 +338,6 @@ class SemanticMaskProvider:
 
         try:
             mask_impl_id = saliency_decision.selected_impl_id
-            fallback_reason = None
             if mask_impl_id in {SEMANTIC_SALIENCY_IMPL_ID, SEMANTIC_SALIENCY_V2_IMPL_ID}:
                 try:
                     if mask_impl_id == SEMANTIC_SALIENCY_V2_IMPL_ID:
@@ -364,7 +355,7 @@ class SemanticMaskProvider:
                             params=mask_params,
                         )
                 except Exception as saliency_exc:
-                    fallback_reason = f"semantic_model_unavailable: {type(saliency_exc).__name__}"
+                    _ = saliency_exc  # 来源切换由 mask_impl_id / saliency_source_attempted 显式表达
                     if mask_impl_id == SEMANTIC_SALIENCY_V2_IMPL_ID:
                         if saliency_decision.source_selected == SALIENCY_SOURCE_MODEL_V2:
                             # 显式 model_v2 模式禁止自动降级，必须 fail-fast。
@@ -375,8 +366,6 @@ class SemanticMaskProvider:
                                     **audit,
                                     "saliency_source_selected": saliency_decision.source_selected,
                                     "saliency_source_attempted": saliency_decision.source_attempted,
-                                    "fallback_used": False,
-                                    "fallback_reason": fallback_reason,
                                     "model_artifact_anchor": saliency_decision.model_artifact_anchor,
                                     "mask_source_type": MASK_SOURCE_TYPE_SEMANTIC_MODEL_V2,
                                 },
@@ -476,7 +465,6 @@ class SemanticMaskProvider:
         }
         mask_stats_with_binding["mask_impl_id"] = mask_impl_id
         mask_stats_with_binding["mask_source_type"] = _resolve_mask_source_type(mask_impl_id)
-        mask_stats_with_binding["mask_fallback_reason"] = fallback_reason if isinstance(fallback_reason, str) else "<absent>"
         mask_stats_with_binding["saliency_mean"] = round(float(np.mean(saliency_map)), 8)
         mask_stats_with_binding["saliency_std"] = round(float(np.std(saliency_map)), 8)
         mask_stats_with_binding["mask_params_digest"] = mask_params_digest
@@ -490,8 +478,6 @@ class SemanticMaskProvider:
         mask_stats_with_binding["saliency_provenance"] = {
             "source_selected": saliency_decision.source_selected,
             "source_attempted": saliency_decision.source_attempted,
-            "fallback_used": bool(saliency_decision.fallback_used or isinstance(fallback_reason, str)),
-            "fallback_reason": fallback_reason if isinstance(fallback_reason, str) else saliency_decision.fallback_reason,
             "model_artifact_anchor": saliency_decision.model_artifact_anchor,
         }
         mask_stats_with_binding["mask_metadata"] = {
@@ -501,15 +487,11 @@ class SemanticMaskProvider:
             "preprocess": mask_params.get("semantic_preprocess", "<absent>"),
             "thresholding": mask_params.get("semantic_thresholding", "<absent>"),
             "threshold": mask_stats.get("saliency_threshold", "<absent>"),
-            "fallback_reason": fallback_reason if isinstance(fallback_reason, str) else "<absent>",
         }
         audit["mask_impl_id"] = mask_impl_id
         audit["mask_source_type"] = _resolve_mask_source_type(mask_impl_id)
-        audit["mask_fallback_reason"] = fallback_reason if isinstance(fallback_reason, str) else "<absent>"
         audit["saliency_source_selected"] = saliency_decision.source_selected
         audit["saliency_source_attempted"] = saliency_decision.source_attempted
-        audit["fallback_used"] = bool(saliency_decision.fallback_used or isinstance(fallback_reason, str))
-        audit["fallback_reason"] = fallback_reason if isinstance(fallback_reason, str) else saliency_decision.fallback_reason
         audit["model_artifact_anchor"] = saliency_decision.model_artifact_anchor
 
         # 5. 成功路径：返回 ok 状态（掩码成功提取的结构证据）。
@@ -1273,8 +1255,6 @@ def select_saliency_source(cfg: Dict[str, Any], availability_probe: Dict[str, An
         return SaliencySourceDecision(
             source_selected=SALIENCY_SOURCE_PROXY_V1,
             source_attempted=[SALIENCY_SOURCE_PROXY_V1],
-            fallback_used=False,
-            fallback_reason="<absent>",
             model_artifact_anchor=anchor,
             selected_impl_id=SEMANTIC_SALIENCY_IMPL_ID,
         )
@@ -1284,16 +1264,12 @@ def select_saliency_source(cfg: Dict[str, Any], availability_probe: Dict[str, An
             return SaliencySourceDecision(
                 source_selected=SALIENCY_SOURCE_MODEL_V2,
                 source_attempted=[SALIENCY_SOURCE_MODEL_V2],
-                fallback_used=False,
-                fallback_reason="<absent>",
                 model_artifact_anchor=anchor,
                 selected_impl_id=SEMANTIC_SALIENCY_V2_IMPL_ID,
             )
         return SaliencySourceDecision(
             source_selected=SALIENCY_SOURCE_MODEL_V2,
             source_attempted=[SALIENCY_SOURCE_MODEL_V2],
-            fallback_used=False,
-            fallback_reason="model_artifact_unavailable",
             model_artifact_anchor=anchor,
             selected_impl_id=SEMANTIC_SALIENCY_V2_IMPL_ID,
         )
@@ -1302,17 +1278,14 @@ def select_saliency_source(cfg: Dict[str, Any], availability_probe: Dict[str, An
         return SaliencySourceDecision(
             source_selected=SALIENCY_SOURCE_MODEL_V2,
             source_attempted=[SALIENCY_SOURCE_MODEL_V2],
-            fallback_used=False,
-            fallback_reason="<absent>",
             model_artifact_anchor=anchor,
             selected_impl_id=SEMANTIC_SALIENCY_V2_IMPL_ID,
         )
 
+    # auto_fallback：模型不可用时选择 proxy_v1，通过 source_attempted 记录尝试序列。
     return SaliencySourceDecision(
         source_selected=SALIENCY_SOURCE_PROXY_V1,
         source_attempted=[SALIENCY_SOURCE_MODEL_V2, SALIENCY_SOURCE_PROXY_V1],
-        fallback_used=True,
-        fallback_reason="model_artifact_unavailable_auto_fallback_proxy",
         model_artifact_anchor=anchor,
         selected_impl_id=SEMANTIC_SALIENCY_IMPL_ID,
     )
@@ -1521,8 +1494,6 @@ def build_semantic_saliency_mask_v2(
         "saliency_provenance": {
             "source_selected": SALIENCY_SOURCE_MODEL_V2,
             "source_attempted": [SALIENCY_SOURCE_MODEL_V2],
-            "fallback_used": False,
-            "fallback_reason": "<absent>",
         },
     }
     binding = {

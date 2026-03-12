@@ -595,6 +595,97 @@ def _assert_paper_mechanisms(
                     )
                     break
 
+    # v3 闭包断言：semantic_mask_provider.py formal path 不得写出 mask_fallback_reason / fallback_used / fallback_reason
+    mask_provider_path = repo_root / "main" / "watermarking" / "content_chain" / "semantic_mask_provider.py"
+    if mask_provider_path.exists():
+        mp_source = mask_provider_path.read_text(encoding="utf-8")
+        for forbidden_mp_field in ("\"mask_fallback_reason\"", "\"fallback_used\"", "\"fallback_reason\""):
+            for line in mp_source.splitlines():
+                stripped = line.strip()
+                if forbidden_mp_field in stripped and not stripped.startswith("#"):
+                    failures.append(
+                        f"semantic_mask_provider.py formal path 不得写出旧字段 {forbidden_mp_field} (v3 closure)"
+                    )
+                    break
+
+    # v3 闭包断言：content_detector.py formal path 不得存在 test_mode 参与 plan_digest 回填逻辑
+    content_detector_path = repo_root / "main" / "watermarking" / "content_chain" / "content_detector.py"
+    if content_detector_path.exists():
+        cd_source = content_detector_path.read_text(encoding="utf-8")
+        for line in cd_source.splitlines():
+            stripped = line.strip()
+            # 检查 test_mode 与 plan_digest 从 cfg 回填的关联逻辑
+            if (
+                "test_mode" in stripped
+                and ("plan_digest" in stripped or "cfg_plan_digest" in stripped)
+                and not stripped.startswith("#")
+            ):
+                failures.append(
+                    "content_detector.py formal path 不得存在 test_mode 参与 plan_digest 回填逻辑 (v3 closure)"
+                )
+                break
+
+    # v3 闭包断言：detect/orchestrator.py formal path detector_inputs 不得包含 test_mode 字段
+    detect_orch_path = repo_root / "main" / "watermarking" / "detect" / "orchestrator.py"
+    if detect_orch_path.exists():
+        do_source = detect_orch_path.read_text(encoding="utf-8")
+        in_detector_inputs = False
+        for line in do_source.splitlines():
+            stripped = line.strip()
+            # 定位 detector_inputs 字典构造块（以 "detector_inputs" 赋值开头）
+            if "detector_inputs" in stripped and "Dict[str, Any]" in stripped:
+                in_detector_inputs = True
+            if in_detector_inputs:
+                if stripped.startswith("}"):
+                    in_detector_inputs = False
+                elif "\"test_mode\"" in stripped and not stripped.startswith("#"):
+                    failures.append(
+                        "detect/orchestrator.py detector_inputs 不得包含 \"test_mode\" 字段 (v3 closure)"
+                    )
+                    in_detector_inputs = False
+                    break
+
+    # v4 闭包断言：当前 formal schema 文件不得显式保留 historical_fields: 段
+    schema_ext_path = repo_root / "configs" / "records_schema_extensions.yaml"
+    if schema_ext_path.exists():
+        schema_ext_text = schema_ext_path.read_text(encoding="utf-8")
+        import yaml as _yaml
+        try:
+            schema_ext_obj = _yaml.safe_load(schema_ext_text)
+            if isinstance(schema_ext_obj, dict) and "historical_fields" in schema_ext_obj:
+                failures.append(
+                    "records_schema_extensions.yaml 当前 formal schema 文件不得显式保留 historical_fields: 段 (v4 closure)"
+                )
+        except Exception:
+            failures.append("records_schema_extensions.yaml 解析失败，无法验证 historical_fields 闭包")
+
+    # v4 闭包断言：当前 formal contract 文件不得显式保留 historical_field_paths: 段
+    frozen_contracts_path = repo_root / "configs" / "frozen_contracts.yaml"
+    if frozen_contracts_path.exists():
+        frozen_contracts_text = frozen_contracts_path.read_text(encoding="utf-8")
+        try:
+            frozen_contracts_obj = _yaml.safe_load(frozen_contracts_text)
+            if isinstance(frozen_contracts_obj, dict) and "historical_field_paths" in frozen_contracts_obj:
+                failures.append(
+                    "frozen_contracts.yaml 当前 formal contract 文件不得显式保留 historical_field_paths: 段 (v4 closure)"
+                )
+        except Exception:
+            failures.append("frozen_contracts.yaml 解析失败，无法验证 historical_field_paths 闭包")
+
+    # v4 闭包断言：当前正式测试集合不得消费旧 fallback_*/align_* 字段
+    formal_test_path = repo_root / "tests" / "test_records_schema_append_only_fields.py"
+    if formal_test_path.exists():
+        formal_test_source = formal_test_path.read_text(encoding="utf-8")
+        for forbidden_test_field in ("\"fallback_used\"", "\"fallback_reason\"", "\"mask_fallback_reason\"",
+                                     "\"align_trace_digest\"", "\"align_metrics\"", "\"align_config_digest\""):
+            for tline in formal_test_source.splitlines():
+                tstripped = tline.strip()
+                if forbidden_test_field in tstripped and not tstripped.startswith("#"):
+                    failures.append(
+                        f"test_records_schema_append_only_fields.py 正式测试集合不得消费旧字段 {forbidden_test_field} (v4 closure)"
+                    )
+                    break
+
     return failures
 
 

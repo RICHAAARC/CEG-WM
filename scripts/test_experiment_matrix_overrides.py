@@ -22,9 +22,8 @@ from main.policy import override_rules
 def test_experiment_matrix_overrides():
     """测试 experiment_matrix 的 override 参数"""
     
-    # 加载 whitelist
-    whitelist_path = project_root / "configs" / "runtime_whitelist.yaml"
-    whitelist = load_runtime_whitelist(str(whitelist_path))
+    # 加载 whitelist（必须使用权威相对路径，cwd 由 pytest 固定在 repo root）
+    whitelist = load_runtime_whitelist()
     
     print("=" * 80)
     print("测试 experiment_matrix 的 override 参数")

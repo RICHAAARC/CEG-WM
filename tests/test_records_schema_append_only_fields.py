@@ -166,8 +166,6 @@ def test_records_schema_new_fields_valid_types_pass(mock_interpretation):
     _set_value_by_field_path(record, "content_evidence.mask_stats.routing_summary", {"path": "lf"})
     _set_value_by_field_path(record, "content_evidence.mask_stats.saliency_source_selected", "proxy_v1")
     _set_value_by_field_path(record, "content_evidence.mask_stats.saliency_source_attempted", {"sequence": ["model_v2", "proxy_v1"]})
-    _set_value_by_field_path(record, "content_evidence.mask_stats.fallback_used", True)
-    _set_value_by_field_path(record, "content_evidence.mask_stats.fallback_reason", "model_artifact_unavailable_auto_fallback_proxy")
     _set_value_by_field_path(record, "content_evidence.mask_stats.model_artifact_anchor", {"artifact_digest": "a" * 64})
     _set_value_by_field_path(record, "content_evidence.mask_stats.saliency_provenance", {"source_selected": "proxy_v1"})
     _set_value_by_field_path(record, "content_evidence.lf_score", 0.12)

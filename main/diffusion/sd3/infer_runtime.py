@@ -632,7 +632,7 @@ def _build_injection_cfg(cfg: Dict[str, Any], context: InjectionContext) -> Dict
         "evidence_level": (
             "primary"
             if lf_is_primary
-            else ("primary_equivalent" if lf_is_equivalent else "adapter_fallback")
+            else ("primary_equivalent" if lf_is_equivalent else "non_compliant")
         ),
         "equivalence_mode": (
             "lf_template_to_channel_lf_parameter_mapping_v2"
@@ -642,7 +642,7 @@ def _build_injection_cfg(cfg: Dict[str, Any], context: InjectionContext) -> Dict
         "binding_class": (
             "primary"
             if lf_is_primary
-            else ("primary_equivalent" if lf_is_equivalent else "adapter_fallback")
+            else ("primary_equivalent" if lf_is_equivalent else "non_compliant")
         ),
         "impl_binding_version": "v2",
     }
@@ -651,7 +651,7 @@ def _build_injection_cfg(cfg: Dict[str, Any], context: InjectionContext) -> Dict
         "evidence_level": (
             "primary"
             if hf_is_primary
-            else ("primary_equivalent" if hf_is_equivalent else "adapter_fallback")
+            else ("primary_equivalent" if hf_is_equivalent else "non_compliant")
         ),
         "equivalence_mode": (
             "hf_template_to_channel_hf_parameter_mapping_v2"
@@ -661,7 +661,7 @@ def _build_injection_cfg(cfg: Dict[str, Any], context: InjectionContext) -> Dict
         "binding_class": (
             "primary"
             if hf_is_primary
-            else ("primary_equivalent" if hf_is_equivalent else "adapter_fallback")
+            else ("primary_equivalent" if hf_is_equivalent else "non_compliant")
         ),
         "impl_binding_version": "v2",
     }

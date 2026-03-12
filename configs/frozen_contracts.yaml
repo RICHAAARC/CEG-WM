@@ -10,7 +10,7 @@
 # 合同版本与冻结元信息
 # - 用于记录与审计，不应作为运行期分支逻辑的自由输入。
 # ------------------------------
-contract_version: "v1.0"     # 冻结契约版本号；main/core/contracts.py 强制必填并参与 contract_bound_digest 计算。
+contract_version: "v1.2"     # 冻结契约版本号；v1.1→v1.2 formal path 最终闭包收口（2026-03-12）：historical_field_paths 段已从当前 formal contract 文件彻底移除，旧字段信息不再显式保留在任何 formal 文件中；当前 formal contract 只绑定当前正式机制。
 frozen_date: "2026-02-04"    # 冻结日期元信息；当前主链路不参与门禁计算，主要用于审计追溯。
 
 # ------------------------------
@@ -465,8 +465,6 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
     - content_evidence.mask_stats.saliency_source_selected      # 实际选用显著性来源。
     - content_evidence.mask_stats.saliency_source_attempted     # 尝试过的显著性来源。
     - content_evidence.mask_stats.saliency_provenance           # 显著性来源溯源信息。
-    - content_evidence.mask_stats.fallback_used                 # 掩码是否使用回退。
-    - content_evidence.mask_stats.fallback_reason               # 掩码回退原因。
     - content_evidence.mask_stats.model_artifact_anchor         # 掩码模型工件锚点。
     - content_evidence.mask_stats.model_artifact_anchor.weights_sha256    # 显著性模型权重摘要锚点。
 
@@ -522,7 +520,6 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
     - geometry_evidence.sync_inject_status       # embed 侧同步注入状态。
     - geometry_evidence.sync_inject_strength     # embed 侧同步注入强度。
     - geometry_evidence.template_digest          # embed 侧同步模板摘要。
-    - geometry_evidence.align_trace_digest       # 几何对齐轨迹摘要。
     - geometry_evidence.geo_score                # 几何得分。
     - geometry_evidence.geo_failure_reason       # 几何链失败原因。
 
@@ -590,7 +587,6 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
     - calibration_mode                          # 校准模式。
 
     # 掩码算法实现与参数绑定审计
-    - content_evidence.mask_stats.mask_fallback_reason               # 掩码算法回退原因。
     - content_evidence.mask_stats.mask_impl_id                       # 掩码实现 ID。
     - content_evidence.mask_stats.mask_params_digest                 # 掩码参数摘要。
     - content_evidence.mask_stats.mask_resolution_binding            # 掩码分辨率绑定信息。
@@ -617,8 +613,6 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
     - evaluation_mode                       # evaluation 模式。
 
     # Geometry 扩展配置与质量语义字段（仅 scripts/tests/离线审计主消费）
-    - geometry_evidence.align_config_digest      # 几何对齐配置摘要。
-    - geometry_evidence.align_metrics            # 几何对齐指标。
     - geometry_evidence.anchor_config_digest     # 几何锚点配置摘要。
     - geometry_evidence.geo_score_direction      # 几何得分方向定义。
     - geometry_evidence.resolution_binding       # 几何分辨率绑定。

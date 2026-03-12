@@ -120,19 +120,12 @@ class ContentDetector:
             )
 
         normalized_inputs: Dict[str, Any] = inputs or {}
-        test_mode = bool(normalized_inputs.get("test_mode", False))
-        disable_cfg_plan_digest_fallback = bool(normalized_inputs.get("disable_cfg_plan_digest_fallback", False))
         expected_plan_digest = normalized_inputs.get("expected_plan_digest")
         observed_plan_digest = normalized_inputs.get("observed_plan_digest")
         if expected_plan_digest is None:
             legacy_expected = normalized_inputs.get("plan_digest_expected")
             if isinstance(legacy_expected, str) and legacy_expected:
                 expected_plan_digest = legacy_expected
-
-        if expected_plan_digest is None and test_mode and not disable_cfg_plan_digest_fallback:
-            cfg_plan_digest = cfg.get("watermark", {}).get("plan_digest")
-            if isinstance(cfg_plan_digest, str) and cfg_plan_digest:
-                expected_plan_digest = cfg_plan_digest
 
         if expected_plan_digest is None:
             legacy_plan_digest = normalized_inputs.get("plan_digest")

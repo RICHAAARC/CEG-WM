@@ -3,7 +3,7 @@
 # - 仅追加字段，默认允许 absent。
 # - 本文件作为接口层字段事实源，用于审计与字段登记对齐。
 # ==============================================================
-version: "v2"  # v1→v2：论文正式路径收口（2026-03-12）；align/fallback 字段迁出当前 formal path，标记为 deprecated_in_formal_path。
+version: "v4"  # v3→v4 (2026-03-12)：formal path 最终闭包收口；historical_fields: 段已从当前 formal schema 文件移除，旧字段信息不再显式保留在任何 formal 文件中。当前 formal schema 只表达当前正式机制。
 append_only: true
 
 type_definitions:
@@ -46,12 +46,6 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "掩码实现标识（semantic_saliency_v1 或 texture_gradient_v1）。"
-  - path: "content_evidence.mask_stats.mask_fallback_reason"
-    layer: "diagnostic"
-    type: "reason_string"
-    required: false
-    missing_semantics: "absent_ok"
-    description: "语义掩码 fallback 原因（禁止静默 fallback）。"
   - path: "content_evidence.mask_stats.mask_params_digest"
     layer: "anchor"
     type: "digest_hex64"
@@ -82,20 +76,6 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "显著性来源策略尝试序列（append-only）。"
-  - path: "content_evidence.mask_stats.fallback_used"
-    layer: "diagnostic"
-    type: "boolean_flag"
-    required: false
-    missing_semantics: "absent_ok"
-    deprecated_in_formal_path: "v2"  # v2.0 论文正式路径收口后不再写出；仅保留以兼容历史 records 读取。
-    description: "【历史兼容字段，v2.0 正式路径不写出】显著性来源是否触发 fallback。"
-  - path: "content_evidence.mask_stats.fallback_reason"
-    layer: "diagnostic"
-    type: "reason_string"
-    required: false
-    missing_semantics: "absent_ok"
-    deprecated_in_formal_path: "v2"  # v2.0 论文正式路径收口后不再写出；仅保留以兼容历史 records 读取。
-    description: "【历史兼容字段，v2.0 正式路径不写出】显著性来源 fallback 原因（禁止静默降级）。"
   - path: "content_evidence.mask_stats.model_artifact_anchor"
     layer: "anchor"
     type: "json_dict"
@@ -468,27 +448,6 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "同步质量语义声明（heuristic/supporting，禁止主证据误标）。"
-  - path: "geometry_evidence.align_trace_digest"
-    layer: "anchor"
-    type: "digest_hex64"
-    required: false
-    missing_semantics: "absent_ok"
-    deprecated_in_formal_path: "v2"  # align_invariance 整体退出 formal path（2026-03-12）；保留供历史 records 读取。
-    description: "【历史兼容字段，v2.0 正式路径不写出】对齐痕迹摘要。"
-  - path: "geometry_evidence.align_metrics"
-    layer: "diagnostic"
-    type: "metrics_dict"
-    required: false
-    missing_semantics: "absent_ok"
-    deprecated_in_formal_path: "v2"  # align_invariance 整体退出 formal path（2026-03-12）；保留供历史 records 读取。
-    description: "【历史兼容字段，v2.0 正式路径不写出】几何对齐统计摘要（关系一致率、邻接保持率、残差分位等）。"
-  - path: "geometry_evidence.align_config_digest"
-    layer: "anchor"
-    type: "digest_hex64"
-    required: false
-    missing_semantics: "absent_ok"
-    deprecated_in_formal_path: "v2"  # align_invariance 整体退出 formal path（2026-03-12）；保留供历史 records 读取。
-    description: "【历史兼容字段，v2.0 正式路径不写出】几何对齐配置输入域摘要。"
   - path: "geometry_evidence.geo_score"
     layer: "diagnostic"
     type: "score_float"
@@ -654,13 +613,13 @@ fields:
     type: "json_dict"
     required: false
     missing_semantics: "absent_ok"
-    description: "LF 实现绑定字段（impl_selected/adapter_path/evidence_level/equivalence_mode/fallback_used/fallback_reason/binding_class/impl_binding_version）。正式路径（latent per-step）中 adapter_path 为 lf_channel_latent_v2。"
+    description: "LF 实现绑定字段（impl_selected/evidence_level/equivalence_mode/binding_class/impl_binding_version）。"
   - path: "content_evidence.hf_impl_binding"
     layer: "anchor"
     type: "json_dict"
     required: false
     missing_semantics: "absent_ok"
-    description: "HF 实现绑定字段（impl_selected/adapter_path/evidence_level/equivalence_mode/fallback_used/fallback_reason/binding_class/impl_binding_version）。正式路径（latent per-step）中 adapter_path 为 hf_channel_latent_v2。"
+    description: "HF 实现绑定字段（impl_selected/evidence_level/equivalence_mode/binding_class/impl_binding_version）。"
   - path: "impl_set_capabilities_extended_digest"
     layer: "anchor"
     type: "digest_hex64"
@@ -752,14 +711,14 @@ fields:
     type: "digest_hex64"
     required: false
     missing_semantics: "absent_ok"
-    description: "LF 纠错码规范摘要（PRC 等方法的 ECC 参数）。"
+    description: "LF 纠错码规范摘要。"
   
   - path: "content_evidence.hf_evidence_summary.repetition_factor"
     layer: "diagnostic"
     type: "score_float"
     required: false
     missing_semantics: "absent_ok"
-    description: "HF 重复因子（T2SMark 等方法的 repetition code 参数）。"
+    description: "HF 重复因子。"
   # ==============================================================
   # Paper Faithfulness detect 侧一致性验证扩展（append-only v1.0）
   # - 结构化 failure semantics：absent_reasons / mismatch_reasons / fail_reasons

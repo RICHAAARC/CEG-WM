@@ -283,13 +283,7 @@ def run_detect_orchestrator(
     )
 
     expected_plan_digest = _resolve_expected_plan_digest(input_record)
-    detect_test_mode = _resolve_detect_test_mode(cfg)
-    allow_cfg_plan_digest_fallback_used = False
-    if expected_plan_digest is None and detect_test_mode:
-        cfg_plan_digest = _resolve_cfg_plan_digest(cfg)
-        if isinstance(cfg_plan_digest, str) and cfg_plan_digest:
-            expected_plan_digest = cfg_plan_digest
-            allow_cfg_plan_digest_fallback_used = True
+    # formal path 语义闭包：不再从 cfg 回填 expected_plan_digest，测试模式与正式模式路径统一
     embed_time_plan_digest = expected_plan_digest
     embed_time_basis_digest = None
     embed_time_planner_impl_identity = None
@@ -547,9 +541,7 @@ def run_detect_orchestrator(
         detector_inputs: Dict[str, Any] = {
             "expected_plan_digest": expected_plan_digest,
             "observed_plan_digest": detect_time_plan_digest,
-            "disable_cfg_plan_digest_fallback": (not detect_test_mode),
             "plan_digest": detect_time_plan_digest,
-            "test_mode": detect_test_mode,
             "lf_evidence": lf_evidence,
             "hf_evidence": hf_evidence,
             "lf_score": lf_raw_score,
@@ -753,8 +745,6 @@ def run_detect_orchestrator(
         "plan_digest_status": plan_digest_status,
         "plan_digest_validation_status": plan_digest_status,
         "plan_digest_mismatch_reason": primary_mismatch_reason if forced_mismatch else plan_digest_mismatch_reason,
-        "allow_cfg_plan_digest_fallback_used": allow_cfg_plan_digest_fallback_used,
-        # (append-only) 保留完整�?payload，供后续升级 fusion 规则时直接消费冻结字段�?
         "content_evidence_payload": content_evidence_payload,
         "geometry_evidence_payload": geometry_evidence_payload,
         "content_result": content_result,

@@ -232,8 +232,6 @@ class SubspaceConditioning:
         masked_dim_count: Number of selected feature dimensions.
         unmasked_dim_count: Number of non-selected feature dimensions.
         mask_area_ratio: Mask area ratio in [0, 1].
-        fallback_used: Whether fallback branch is used.
-        fallback_reason: Fallback reason string.
         selected_feature_indices: Selected feature index list.
         region_strengths: Per-feature modulation strengths in [0, 1].
         modulation_mode: Semantic modulation mode label.
@@ -248,8 +246,6 @@ class SubspaceConditioning:
     masked_dim_count: int
     unmasked_dim_count: int
     mask_area_ratio: float
-    fallback_used: bool
-    fallback_reason: str
     selected_feature_indices: List[int]
     region_strengths: List[float]
     modulation_mode: str
@@ -276,8 +272,6 @@ class SubspaceConditioning:
             "masked_dim_count": self.masked_dim_count,
             "unmasked_dim_count": self.unmasked_dim_count,
             "mask_area_ratio": self.mask_area_ratio,
-            "fallback_used": self.fallback_used,
-            "fallback_reason": self.fallback_reason,
             "selected_feature_indices": self.selected_feature_indices,
             "region_strengths": self.region_strengths,
             "modulation_mode": self.modulation_mode,
@@ -898,8 +892,6 @@ class SubspacePlannerImpl:
         raw_indices = mask_summary.get("downsample_grid_true_indices")
         selected_feature_indices: List[int] = []
         conditioning_mode = "full_feature_fallback"
-        fallback_used = False
-        fallback_reason = "<absent>"
 
         mapping_mode = "mask_index_hash_projection_v1"
         mapping_inputs = {
@@ -927,16 +919,14 @@ class SubspacePlannerImpl:
                 conditioning_mode = "mask_indices_v1"
 
         if len(selected_feature_indices) == 0:
-            fallback_used = True
-            fallback_reason = "mask_indices_absent_or_invalid"
+            # 掩码索引缺失或无效，使用面积比例驱动的等差分区（非 fallback，是内部备选策略）。
             conditioning_mode = "mask_ratio_v1"
             masked_dim_count = max(2, int(round(mask_area_ratio * feature_dim)))
             masked_dim_count = min(feature_dim, masked_dim_count)
             selected_feature_indices = list(range(masked_dim_count))
 
         if len(selected_feature_indices) >= feature_dim:
-            fallback_used = True
-            fallback_reason = "mask_selected_full_feature_domain"
+            # 掩码选择了全特征域，降级为全域模式。
             conditioning_mode = "full_feature_fallback"
             selected_feature_indices = list(range(feature_dim))
 
@@ -983,8 +973,6 @@ class SubspacePlannerImpl:
             masked_dim_count=masked_dim_count,
             unmasked_dim_count=unmasked_dim_count,
             mask_area_ratio=mask_area_ratio,
-            fallback_used=fallback_used,
-            fallback_reason=fallback_reason,
             selected_feature_indices=selected_feature_indices,
             region_strengths=region_strengths,
             modulation_mode="semantic_strength_modulation_v1",

@@ -36,8 +36,7 @@ def _normalize_impl_binding(binding: Optional[Dict[str, Any]]) -> Optional[Dict[
         if isinstance(evidence_level, str) and evidence_level:
             normalized["binding_class"] = evidence_level
         else:
-            fallback_used = bool(normalized.get("fallback_used", False))
-            normalized["binding_class"] = "adapter_fallback" if fallback_used else "primary"
+            normalized["binding_class"] = "primary"
     return normalized
 
 

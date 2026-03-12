@@ -90,11 +90,11 @@ def test_latent_step_embed_trace_contains_impl_binding_fields() -> None:
         "injection_params_digest": "b" * 64,
         "lf_impl_binding": {
             "impl_selected": "low_freq_template_codec_v2",
-            "evidence_level": "adapter_fallback",
+            "evidence_level": "non_compliant",
         },
         "hf_impl_binding": {
             "impl_selected": "high_freq_template_codec_v2",
-            "evidence_level": "adapter_fallback",
+            "evidence_level": "non_compliant",
         },
     }
     trace = embed_orchestrator._build_latent_step_embed_trace(cfg, injection_evidence)

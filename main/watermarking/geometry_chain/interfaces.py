@@ -34,9 +34,6 @@ class GeometryEvidence:
         anchor_metrics: Optional anchor stability metrics.
         sync_digest: Optional sync template digest.
         sync_metrics: Optional sync quality metrics.
-        align_trace_digest: Optional alignment trace digest. 【历史兼容字段，v2.0 正式路径不写出，仅用于读取历史 records】
-        align_metrics: Optional geometry alignment statistics. 【历史兼容字段，v2.0 正式路径不写出，仅用于读取历史 records】
-        align_config_digest: Optional geometry alignment config digest. 【历史兼容字段，v2.0 正式路径不写出，仅用于读取历史 records】
         geo_score: Optional geometry score.
         geo_failure_reason: Optional geometry failure reason.
                All values must be JSON-serializable strings or dicts.
@@ -58,9 +55,6 @@ class GeometryEvidence:
     sync_metrics: Optional[Dict[str, Any]] = None
     sync_config_digest: Optional[str] = None
     sync_quality_metrics: Optional[Dict[str, Any]] = None
-    align_trace_digest: Optional[str] = None
-    align_metrics: Optional[Dict[str, Any]] = None
-    align_config_digest: Optional[str] = None
     geo_score: Optional[float] = None
     geo_score_direction: Optional[str] = None
     geo_failure_reason: Optional[str] = None
@@ -112,9 +106,6 @@ class GeometryEvidence:
         _validate_optional_mapping(self.sync_metrics, "sync_metrics")
         _validate_optional_str(self.sync_config_digest, "sync_config_digest")
         _validate_optional_mapping(self.sync_quality_metrics, "sync_quality_metrics")
-        _validate_optional_str(self.align_trace_digest, "align_trace_digest")
-        _validate_optional_mapping(self.align_metrics, "align_metrics")
-        _validate_optional_str(self.align_config_digest, "align_config_digest")
         _validate_optional_number(self.geo_score, "geo_score")
         _validate_optional_str(self.geo_score_direction, "geo_score_direction")
         _validate_optional_str(self.geo_failure_reason, "geo_failure_reason")
@@ -147,8 +138,6 @@ class GeometryEvidence:
             "sync_metrics": self.sync_metrics,
             "sync_config_digest": self.sync_config_digest,
             "sync_quality_metrics": self.sync_quality_metrics,
-            # 历史兼容字段（v2.0 正式路径不序列化）：align_trace_digest / align_metrics / align_config_digest
-            # 已退出当前 formal path，仅保留 dataclass 属性供历史 records 读取层使用。
             "geo_score": self.geo_score,
             "geo_score_direction": self.geo_score_direction,
             "geo_failure_reason": self.geo_failure_reason

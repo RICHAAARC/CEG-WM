@@ -646,7 +646,7 @@ class LowFreqTemplateCodecV2:
         cfg_digest: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        功能：PRC v2 加性 pseudogaussian template 嵌入。
+        功能：在潜变量系数域应用加性伪高斯模板注入。
 
         Apply additive pseudogaussian template injection in latent coefficient domain.
         Replaces sign-flipping. Template direction: codeword ∈ {-1, +1}, scale = variance.

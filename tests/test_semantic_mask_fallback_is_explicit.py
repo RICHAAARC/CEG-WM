@@ -11,7 +11,14 @@ from main.watermarking.content_chain.semantic_mask_provider import (
 )
 
 
-def test_semantic_mask_fallback_is_explicit(monkeypatch) -> None:
+def test_saliency_source_impl_selection_is_explicit(monkeypatch) -> None:
+    """
+    功能：验证 saliency 模型不可用时，formal path 不写出 mask_fallback_reason，而是通过 mask_impl_id 显式记录实现选择。
+
+    Verify that when the semantic saliency model is unavailable, the formal path
+    does not write `mask_fallback_reason` to mask_stats; instead, the implementation
+    selection is recorded explicitly via `mask_impl_id` and `saliency_source_selected`.
+    """
     provider = SemanticMaskProvider(
         impl_id=SEMANTIC_MASK_PROVIDER_ID,
         impl_version=SEMANTIC_MASK_PROVIDER_VERSION,
@@ -45,8 +52,8 @@ def test_semantic_mask_fallback_is_explicit(monkeypatch) -> None:
     assert result.status == "ok"
     assert isinstance(result.mask_stats, dict)
     assert result.mask_stats.get("mask_impl_id") == "texture_gradient_v1"
-    assert isinstance(result.mask_stats.get("mask_fallback_reason"), str)
-    assert result.mask_stats.get("mask_fallback_reason") != "<absent>"
+    # v3 闭包：formal path 不再写出 mask_fallback_reason，实现选择由 mask_impl_id 显式表达
+    assert "mask_fallback_reason" not in result.mask_stats
     assert result.audit.get("mask_impl_id") == "texture_gradient_v1"
 
 
@@ -81,7 +88,8 @@ def test_saliency_source_auto_fallback_is_auditable() -> None:
     assert "fallback_reason" not in result.mask_stats
     saliency_provenance = result.mask_stats.get("saliency_provenance")
     assert isinstance(saliency_provenance, dict)
-    assert saliency_provenance.get("fallback_used") is True
+    assert saliency_provenance.get("source_selected") == "proxy_v1"
+    assert len(saliency_provenance.get("source_attempted", [])) > 1
 
 
 def test_saliency_source_model_unavailable_returns_explicit_fail() -> None:
@@ -110,7 +118,7 @@ def test_saliency_source_model_unavailable_returns_explicit_fail() -> None:
 
     assert result.status == "failed"
     assert result.content_failure_reason == "saliency_source_model_unavailable"
-    assert isinstance(result.audit.get("fallback_reason"), str)
+    assert isinstance(result.audit.get("probe_failure_reason"), str)
 
 
 def test_saliency_source_model_v2_runtime_failure_is_fail_fast(monkeypatch) -> None:
