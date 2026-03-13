@@ -9,10 +9,11 @@ Build claim-to-evidence trace maps suitable for audits and submission reviews.
 ## Execute
 
 1. Extract explicit claims from user text or paper draft sections.
-2. Map each claim to code anchors, config anchors, test anchors, and output anchors.
-3. Mark missing anchors or weak links as traceability gaps.
-4. Distinguish static-confirmable claims from runtime-required claims.
-5. Produce a structured traceability matrix with risk levels.
+2. Map each claim to `configs/` and `main/` first because they define the core release path.
+3. Add `tests/`, `scripts/`, `notebook/`, and outputs only as supporting traceability anchors; helper scripts must not override the semantics in `main/`.
+4. Mark missing anchors or weak links as traceability gaps.
+5. Distinguish static-confirmable claims from runtime-required claims.
+6. Produce a structured traceability matrix with risk levels.
 
 ## Repository Anchors
 

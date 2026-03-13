@@ -20,9 +20,9 @@ Ensure attack protocols are valid, executable, and comparable across experiments
 - `main/evaluation/attack_protocol_guard.py`
 - `main/evaluation/attack_runner.py`
 - `main/evaluation/attack_plan.py`
-- `tests/test_attack_protocol_implementable.py`
+- `tests/test_attack_runner_protocol_only.py`
 - `tests/test_attack_protocol_guard_blocks_unknown_family.py`
-- `tests/test_attack_protocol_report_coverage.py`
+- `tests/test_audit_attack_protocol_report_coverage.py`
 
 ## Output Contract
 

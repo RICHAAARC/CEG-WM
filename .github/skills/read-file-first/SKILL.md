@@ -29,7 +29,7 @@ Enforce real file reads before any analysis. Conversation history and memory sum
 | `main/watermarking/fusion/decision.py` | `decision_status` 所有可能值 |
 | `main/watermarking/geometry_chain/sync/latent_sync_template.py` | uncertainty 门控、`sync_strength` 默认值 |
 
-**第三批：真实产物（字段级逐项对比）**
+**第三批：真实产物（若工作区存在则字段级逐项对比；不存在时必须明确记录为未提供产物）**
 - `outputs/GPU Outputs/colab_run_paper_full_cuda/records/embed_record.json`
 - `outputs/GPU Outputs/colab_run_paper_full_cuda/records/detect_record.json`
 - `outputs/GPU Outputs/colab_run_paper_full_cuda/records/calibration_record.json`
@@ -40,19 +40,19 @@ Enforce real file reads before any analysis. Conversation history and memory sum
 ### 禁止项
 - **不得**依赖对话历史中的摘要或代码片段引用替代真实读取。
 - **不得**以"之前已读过"为由跳过任何文件。
-- **不得**在未读产物文件的情况下引用产物字段值。
-- **不得**混用两套产物：`colab_run_paper_full_cuda/` 与 `audit_diagnostics/` 是**不同场景的不同产物**，字段不可交叉引用。
+- **不得**在未读产物文件的情况下引用产物字段值；若工作区不存在对应产物，必须先明确记录“产物缺失/未提供”。
+- **不得**混用两套产物：GPU Colab 实运行记录与本地诊断记录是**不同场景的不同产物**，字段不可交叉引用。
 
 ### 产物边界隔离
 | 产物集 | 场景 | 允许用途 |
 |--------|------|----------|
-| `colab_run_paper_full_cuda/records/` | 真实 GPU Colab 运行 | 论文链路字段级证据 |
-| `audit_diagnostics/` | 本地无图像输入诊断运行 | 仅用于诊断本地无图像场景 |
+| GPU Colab 实运行记录 | 真实 GPU Colab 运行 | 论文链路字段级证据 |
+| 本地诊断记录 | 本地无图像输入诊断运行 | 仅用于诊断本地无图像场景 |
 
 ### `scripts/` 边界
 - `scripts/` 中的代码**仅作为审计结构辅助**，不得将其作为产物字段追踪链路的一部分。
-- `run_onefile_workflow.py` 是 Colab 辅助脚本，不是核心流程。
-- 若 `run_onefile_workflow.py` 中涉及输入构造或输出写入，必须回到 `main/` 对应文件确认，并以 `main/` 为准。
+- `scripts/run_onefile_workflow.py` 是 Colab 辅助脚本，不是核心流程。
+- 若 `scripts/run_onefile_workflow.py` 中涉及输入构造或输出写入，必须回到 `main/` 对应文件确认，并以 `main/` 为准。
 
 ### 核心发布边界
 - 项目核心发布仅包含 `configs/` 和 `main/`。
@@ -76,11 +76,11 @@ Enforce real file reads before any analysis. Conversation history and memory sum
 □ main/watermarking/content_chain/unified_content_extractor.py       — 已读 / 未读
 □ main/watermarking/fusion/decision.py      — 已读 / 未读
 □ main/watermarking/geometry_chain/sync/latent_sync_template.py — 已读 / 未读
-□ outputs/.../embed_record.json       — 已读 / 未读
-□ outputs/.../detect_record.json      — 已读 / 未读
-□ outputs/.../calibration_record.json — 已读 / 未读
-□ outputs/.../evaluate_record.json    — 已读 / 未读
-产物集隔离确认：colab_run_paper_full_cuda / audit_diagnostics 未混用
+□ outputs/.../embed_record.json       — 已读 / 未读 / 工作区不存在
+□ outputs/.../detect_record.json      — 已读 / 未读 / 工作区不存在
+□ outputs/.../calibration_record.json — 已读 / 未读 / 工作区不存在
+□ outputs/.../evaluate_record.json    — 已读 / 未读 / 工作区不存在
+产物集隔离确认：GPU Colab 实运行记录 / 本地诊断记录 未混用
 ```
 
 ## Repository Anchors

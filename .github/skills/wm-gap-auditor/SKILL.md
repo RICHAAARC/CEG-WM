@@ -9,11 +9,11 @@ Produce a defensible gap audit tied to repository evidence.
 ## Execute
 
 1. Extract target claims from user text and project docs.
-2. Build a claim-to-anchor map across `main/`, `configs/`, `scripts/`, and `tests/`.
+2. Build a claim-to-anchor map with `configs/` and `main/` as the core release truth source; use `scripts/` and `tests/` only as auxiliary evidence.
 3. Validate each claim with static evidence first:
 - Read implementation paths.
 - Read contract/config paths.
-- Run only relevant tests or audit scripts when they can decide the claim.
+- Run only relevant tests or audit scripts when they can decide the claim, but do not let helper script behavior override `main/`.
 4. Classify each gap item into exactly one bucket:
 - `static-audit-confirmable`
 - `requires-real-sd-workflow`
@@ -32,14 +32,18 @@ For every item include:
 
 Prioritize these anchors before expanding search:
 - `configs/paper_faithfulness_spec.yaml`
-- `scripts/run_onefile_workflow.py`
 - `notebook/Colab_Workflow.ipynb`
 - `main/watermarking/content_chain/`
 - `main/watermarking/geometry_chain/`
 - `main/watermarking/fusion/`
 - `main/policy/`
 - `tests/test_onefile_workflow.py`
-- `tests/test_onefile_workflow_paper_full_profiles.py`
+- `tests/test_publish_workflow_uses_paper_profile_by_default.py`
+- `tests/test_paper_faithfulness_gate.py`
+
+Use these only as auxiliary workflow anchors after core files:
+- `scripts/run_onefile_workflow.py`
+- `notebook/Colab_Workflow.ipynb`
 
 ## Classification Rules
 

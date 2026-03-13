@@ -12,10 +12,12 @@ Verify workflow closure for paper-faithful execution.
 - `notebook/Colab_Workflow.ipynb`
 - `configs/paper_faithfulness_spec.yaml`
 - `scripts/run_onefile_workflow.py`
-2. Confirm profile and path policy are explicit and frozen where required.
-3. Confirm outputs include auditable evidence-chain fields (status, quality, reason, bundle metadata).
-4. Run workflow-focused tests when available.
-5. Separate findings into:
+2. Treat `scripts/run_onefile_workflow.py` as a Colab helper, not the core implementation source of truth.
+3. When script behavior touches input construction or output writing, trace the corresponding path back into `main/` before drawing conclusions.
+4. Confirm profile and path policy are explicit and frozen where required.
+5. Confirm outputs include auditable evidence-chain fields (status, quality, reason, bundle metadata).
+6. Run workflow-focused tests when available.
+7. Separate findings into:
 - statically provable workflow defects
 - defects requiring real SD runtime to decide
 
@@ -30,7 +32,6 @@ Verify workflow closure for paper-faithful execution.
 ## Suggested Test Targets
 
 - `tests/test_onefile_workflow.py`
-- `tests/test_onefile_workflow_paper_full_profiles.py`
 - `tests/test_publish_workflow_uses_paper_profile_by_default.py`
 - `tests/test_paper_faithfulness_gate.py`
 
