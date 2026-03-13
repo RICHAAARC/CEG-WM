@@ -4,7 +4,7 @@
 功能说明：
 - 验证 sparse_ldpc 唯一路径：trajectory cache z_{t_e} → φ → PRC 解码，无 legacy latent 分支。
 - 验证 planner exact-only 约束：缓存缺失或时步不命中均 raise ValueError（无最近时步兜底）。
-- 验证 planner 无 latents 时 raise ValueError（无 surrogate 降级）。
+- 验证 planner 无 latents 时 raise ValueError（无 fallback 降级）。
 
 Module type: General module
 """
@@ -290,7 +290,7 @@ def test_lf_absent_on_exact_timestep_mismatch() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 测试二：planner exact-only（无最近时步兜底，无 surrogate 降级）
+# 测试二：planner exact-only（无最近时步兜底，无 fallback 降级）
 # ---------------------------------------------------------------------------
 
 def _make_planner() -> SubspacePlannerImpl:

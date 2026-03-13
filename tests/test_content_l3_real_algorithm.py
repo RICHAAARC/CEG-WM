@@ -14,6 +14,11 @@ from main.watermarking.content_chain.unified_content_extractor import (
     UNIFIED_CONTENT_EXTRACTOR_ID,
     UNIFIED_CONTENT_EXTRACTOR_VERSION
 )
+from main.watermarking.content_chain.subspace.subspace_planner_impl import (
+    SUBSPACE_PLANNER_ID,
+    SUBSPACE_PLANNER_VERSION,
+    SubspacePlannerImpl,
+)
 from main.watermarking.content_chain.semantic_mask_provider import (
     SemanticMaskProvider,
     SEMANTIC_MASK_PROVIDER_ID
@@ -301,4 +306,65 @@ def test_semantic_mask_provider_returns_mask_digest_when_enabled():
         assert result.content_failure_reason is not None, "Failure reason must be present when status=failed"
     else:
         pytest.fail(f"Unexpected status: {result.status}")
+
+
+def test_content_l3_subspace_plan_requires_nonempty_route_basis_bridge():
+    """
+    功能：验证内容链 L3 子空间计划必须输出非空强语义 bridge。
+
+    Verify content-chain L3 planner emits a non-empty route-first bridge.
+    """
+    impl_digest = digests.canonical_sha256(
+        {"impl_id": SUBSPACE_PLANNER_ID, "impl_version": SUBSPACE_PLANNER_VERSION}
+    )
+    planner = SubspacePlannerImpl(SUBSPACE_PLANNER_ID, SUBSPACE_PLANNER_VERSION, impl_digest)
+
+    cfg = {
+        "watermark": {
+            "subspace": {
+                "enabled": True,
+                "rank": 4,
+                "sample_count": 8,
+                "feature_dim": 16,
+                "seed": 13,
+                "timestep_start": 0,
+                "timestep_end": 6,
+            }
+        }
+    }
+    inputs = {
+        "trace_signature": {
+            "num_inference_steps": 20,
+            "guidance_scale": 7.0,
+            "height": 512,
+            "width": 512,
+        },
+        "mask_summary": {
+            "area_ratio": 0.4,
+            "downsample_grid_shape": [8, 8],
+            "downsample_grid_true_indices": [0, 1, 2, 8, 9, 10],
+            "downsample_grid_digest": "a" * 64,
+        },
+        "routing_digest": "b" * 64,
+    }
+
+    result = planner.plan(cfg, mask_digest="mask_digest_l3", cfg_digest="cfg_digest_l3", inputs=inputs)
+
+    assert result.status == "ok"
+    assert isinstance(result.plan, dict)
+    route_basis_bridge = result.plan.get("route_basis_bridge")
+    assert isinstance(route_basis_bridge, dict)
+    assert route_basis_bridge.get("bridge_version") == "route_basis_bridge"
+    assert route_basis_bridge.get("feature_routing_digest")
+
+    route_layer = route_basis_bridge.get("route_layer")
+    routed_matrix_layer = route_basis_bridge.get("routed_matrix_layer")
+    dual_subspace_estimation = route_basis_bridge.get("dual_subspace_estimation")
+    assert isinstance(route_layer, dict)
+    assert isinstance(routed_matrix_layer, dict)
+    assert isinstance(dual_subspace_estimation, dict)
+    assert route_layer.get("route_source") == "mask_region_index_spec"
+    assert routed_matrix_layer.get("matrix_source") == "build_routed_decomposition_matrices"
+    assert dual_subspace_estimation.get("lf_basis_source") == "lf_decomposition_matrix"
+    assert dual_subspace_estimation.get("hf_basis_source") == "hf_decomposition_matrix"
 

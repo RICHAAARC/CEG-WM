@@ -145,8 +145,8 @@ def build_runtime_jvp_operator_from_cache(
 
     Build a runtime-derived feature-space JVP operator from exact cached SD3 trajectory
     latents. The operator is estimated from consecutive runtime states after projecting
-    them into the planner feature space, so paper-mode JVP no longer depends on legacy
-    unet or surrogate-transition branches.
+    them into the planner feature space, so paper-mode JVP stays bound to the runtime
+    transformer-side trajectory operator instead of legacy surrogate wording.
 
     Args:
         cfg: Configuration mapping.
@@ -249,48 +249,144 @@ def _compute_matrix_digest(matrix: Any) -> Optional[str]:
     return digests.canonical_sha256(np.round(matrix_np, 8).tolist())
 
 
+def _normalize_routed_feature_partition(
+    selected_feature_indices: List[int],
+    feature_dim: int,
+) -> Tuple[List[int], List[int], Optional[str]]:
+    if feature_dim <= 1:
+        raise ValueError("feature_dim must be > 1 for routed dual subspace estimation")
+
+    normalized_hf_cols = sorted(
+        {
+            int(index)
+            for index in selected_feature_indices
+            if isinstance(index, int) and 0 <= int(index) < feature_dim
+        }
+    )
+    hf_index_set = set(normalized_hf_cols)
+    normalized_lf_cols = [index for index in range(feature_dim) if index not in hf_index_set]
+    rebalance_policy: Optional[str] = None
+
+    if len(normalized_hf_cols) == 0 or len(normalized_lf_cols) == 0:
+        route_order = normalized_hf_cols + normalized_lf_cols
+        if len(route_order) == 0:
+            route_order = list(range(feature_dim))
+        preferred_hf_count = len(normalized_hf_cols)
+        if preferred_hf_count <= 0:
+            preferred_hf_count = max(1, feature_dim // 2)
+        preferred_hf_count = min(max(1, preferred_hf_count), feature_dim - 1)
+        normalized_hf_cols = route_order[:preferred_hf_count]
+        normalized_lf_cols = route_order[preferred_hf_count:]
+        rebalance_policy = "preserve_route_order_min_dual_partition"
+
+    return normalized_hf_cols, normalized_lf_cols, rebalance_policy
+
+
+def _build_partition_projection_matrix(
+    routed_matrix: Any,
+    feature_cols: List[int],
+    feature_dim: int,
+    requested_rank: int,
+) -> Tuple[np.ndarray, int]:
+    routed_matrix_np = np.asarray(routed_matrix, dtype=np.float64)
+    if routed_matrix_np.ndim != 2:
+        raise ValueError("routed_matrix must be rank-2")
+    if len(feature_cols) == 0:
+        raise ValueError("feature_cols must be non-empty")
+    if feature_dim <= 0:
+        raise ValueError("feature_dim must be positive")
+    if requested_rank <= 0:
+        raise ValueError("requested_rank must be positive")
+
+    _, _, vh_partition = np.linalg.svd(routed_matrix_np, full_matrices=False)
+    effective_partition_rank = min(requested_rank, vh_partition.shape[0])
+    if effective_partition_rank <= 0:
+        raise ValueError("partition rank must remain positive after clipping")
+
+    local_projection_matrix = vh_partition[:effective_partition_rank, :].T
+    projection_matrix = np.zeros((feature_dim, effective_partition_rank), dtype=np.float64)
+    projection_matrix[np.asarray(feature_cols, dtype=np.int64), :] = local_projection_matrix
+    return projection_matrix, effective_partition_rank
+
+
 def _build_route_basis_bridge(
-    hf_feature_cols: List[int],
-    lf_feature_cols: List[int],
-    lf_decomposition_matrix: Any,
-    hf_decomposition_matrix: Any,
-    *,
-    routing_digest_ref: Optional[str] = None,
-    region_index_digest: Optional[str] = None,
-    hf_region_selected_indices: Optional[List[int]] = None,
-    lf_region_selected_indices: Optional[List[int]] = None,
-    lf_basis_rank: Optional[int] = None,
-    hf_basis_rank: Optional[int] = None,
+    feature_routing: Dict[str, Any],
+    routed_matrices: Dict[str, Any],
+    routed_subspaces: Dict[str, Any],
 ) -> Dict[str, Any]:
-    lf_matrix_np = np.asarray(lf_decomposition_matrix, dtype=np.float64)
-    hf_matrix_np = np.asarray(hf_decomposition_matrix, dtype=np.float64)
+    lf_trajectory_matrix = np.asarray(routed_matrices.get("lf_trajectory_matrix"), dtype=np.float64)
+    hf_trajectory_matrix = np.asarray(routed_matrices.get("hf_trajectory_matrix"), dtype=np.float64)
+    lf_jvp_matrix = np.asarray(routed_matrices.get("lf_jvp_matrix"), dtype=np.float64)
+    hf_jvp_matrix = np.asarray(routed_matrices.get("hf_jvp_matrix"), dtype=np.float64)
+    lf_decomposition_matrix = np.asarray(routed_matrices.get("lf_decomposition_matrix"), dtype=np.float64)
+    hf_decomposition_matrix = np.asarray(routed_matrices.get("hf_decomposition_matrix"), dtype=np.float64)
+    lf_basis_matrix = np.asarray(routed_subspaces.get("lf_projection_matrix"), dtype=np.float64)
+    hf_basis_matrix = np.asarray(routed_subspaces.get("hf_projection_matrix"), dtype=np.float64)
+
     return {
-        "bridge_version": "route_basis_bridge_v2",
-        "routing_digest_ref": routing_digest_ref,
-        "region_index_digest": region_index_digest,
-        "hf_feature_cols": list(hf_feature_cols),
-        "lf_feature_cols": list(lf_feature_cols),
+        "bridge_version": "route_basis_bridge",
+        "routing_digest_ref": feature_routing.get("routing_digest_ref"),
+        "region_index_digest": feature_routing.get("region_index_digest"),
+        "feature_routing_digest": feature_routing.get("feature_routing_digest"),
+        "hf_feature_cols": list(feature_routing.get("hf_feature_cols", [])),
+        "lf_feature_cols": list(feature_routing.get("lf_feature_cols", [])),
         "route_layer": {
-            "routing_digest_ref": routing_digest_ref,
-            "region_index_digest": region_index_digest,
-            "hf_region_selected_indices": list(hf_region_selected_indices or []),
-            "lf_region_selected_indices": list(lf_region_selected_indices or []),
+            "route_source": feature_routing.get("route_source"),
+            "feature_routing_source": feature_routing.get("feature_routing_source"),
+            "feature_routing_mode": feature_routing.get("feature_routing_mode"),
+            "routing_digest_ref": feature_routing.get("routing_digest_ref"),
+            "region_index_digest": feature_routing.get("region_index_digest"),
+            "feature_routing_digest": feature_routing.get("feature_routing_digest"),
+            "feature_dim": feature_routing.get("feature_dim"),
+            "hf_region_selected_indices": list(feature_routing.get("hf_region_selected_indices", [])),
+            "lf_region_selected_indices": list(feature_routing.get("lf_region_selected_indices", [])),
+            "hf_feature_cols_source": feature_routing.get("hf_feature_cols_source"),
+            "lf_feature_cols_source": feature_routing.get("lf_feature_cols_source"),
+            "route_rebalance_policy": feature_routing.get("route_rebalance_policy", "not_required"),
+            "routing_stage_order": [
+                "build_feature_routing_from_mask",
+                "build_routed_decomposition_matrices",
+                "estimate_routed_dual_subspaces",
+            ],
         },
         "feature_bridge_layer": {
-            "binding_source": "conditioning.selected_feature_indices",
+            "binding_source": "hf_region_index_spec_and_lf_region_index_spec",
             "route_to_feature_bridge": "mask_routed_feature_partition",
-            "hf_feature_cols": list(hf_feature_cols),
-            "lf_feature_cols": list(lf_feature_cols),
-            "feature_partition_complete": bool(len(hf_feature_cols) > 0 or len(lf_feature_cols) > 0),
+            "hf_feature_cols": list(feature_routing.get("hf_feature_cols", [])),
+            "lf_feature_cols": list(feature_routing.get("lf_feature_cols", [])),
+            "feature_partition_complete": bool(
+                len(feature_routing.get("hf_feature_cols", [])) > 0
+                and len(feature_routing.get("lf_feature_cols", [])) > 0
+            ),
+        },
+        "routed_matrix_layer": {
+            "matrix_source": "build_routed_decomposition_matrices",
+            "lf_trajectory_matrix_source": "trajectory_matrix[:, lf_feature_cols]",
+            "hf_trajectory_matrix_source": "trajectory_matrix[:, hf_feature_cols]",
+            "lf_jvp_matrix_source": "jvp_matrix[:, lf_feature_cols]",
+            "hf_jvp_matrix_source": "jvp_matrix[:, hf_feature_cols]",
+            "lf_decomposition_matrix_source": "stack(lf_trajectory_matrix, lf_jvp_matrix)",
+            "hf_decomposition_matrix_source": "stack(hf_trajectory_matrix, hf_jvp_matrix)",
+            "lf_trajectory_matrix_shape": list(lf_trajectory_matrix.shape),
+            "hf_trajectory_matrix_shape": list(hf_trajectory_matrix.shape),
+            "lf_jvp_matrix_shape": list(lf_jvp_matrix.shape),
+            "hf_jvp_matrix_shape": list(hf_jvp_matrix.shape),
+            "lf_decomposition_matrix_shape": list(lf_decomposition_matrix.shape),
+            "hf_decomposition_matrix_shape": list(hf_decomposition_matrix.shape),
+            "lf_decomposition_matrix_digest": _compute_matrix_digest(lf_decomposition_matrix),
+            "hf_decomposition_matrix_digest": _compute_matrix_digest(hf_decomposition_matrix),
         },
         "dual_subspace_estimation": {
-            "estimation_rule": "dual_subspace_partition_svd",
-            "lf_basis_rank": lf_basis_rank,
-            "hf_basis_rank": hf_basis_rank,
-            "lf_decomposition_matrix_shape": list(lf_matrix_np.shape),
-            "hf_decomposition_matrix_shape": list(hf_matrix_np.shape),
-            "lf_decomposition_matrix_digest": _compute_matrix_digest(lf_matrix_np),
-            "hf_decomposition_matrix_digest": _compute_matrix_digest(hf_matrix_np),
+            "estimation_rule": "route_first_dual_subspace_svd",
+            "estimation_input": "routed_decomposition_matrices",
+            "lf_basis_source": "lf_decomposition_matrix",
+            "hf_basis_source": "hf_decomposition_matrix",
+            "lf_basis_rank": routed_subspaces.get("lf_basis_rank"),
+            "hf_basis_rank": routed_subspaces.get("hf_basis_rank"),
+            "lf_basis_matrix_shape": list(lf_basis_matrix.shape),
+            "hf_basis_matrix_shape": list(hf_basis_matrix.shape),
+            "lf_basis_matrix_digest": _compute_matrix_digest(lf_basis_matrix),
+            "hf_basis_matrix_digest": _compute_matrix_digest(hf_basis_matrix),
         },
     }
 
@@ -575,15 +671,16 @@ class SubspacePlannerImpl:
 
         try:
             planner_params = self._parse_planner_params(cfg)
+            routing_digest_ref = self._extract_routing_digest_ref(inputs)
             basis_summary = self._estimate_low_dim_subspace(
                 cfg=cfg,
                 inputs=inputs,
                 planner_params=planner_params,
-                mask_digest=mask_digest
+                mask_digest=mask_digest,
+                routing_digest_ref=routing_digest_ref,
             )
             basis_digest = self._derive_basis_digest(basis_summary["basis_digest_payload"])
             plan_origin = "planner_v1_band_spec"
-            routing_digest_ref = self._extract_routing_digest_ref(inputs)
             band_spec, band_spec_digest, band_metrics = self.build_subspace_plan(
                 cfg=cfg,
                 inputs=inputs,
@@ -591,24 +688,9 @@ class SubspacePlannerImpl:
                 basis_summary=basis_summary,
                 routing_digest_ref=routing_digest_ref,
             )
-            mask_summary = inputs.get("mask_summary") if isinstance(inputs.get("mask_summary"), dict) else None
-            paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
-            # paper 模式下 mask_summary 缺失时（PRE-INFERENCE 调用时 content chain 尚未执行），
-            # 降级为 None 并使用默认区域规格，POST-ORCHESTRATOR 调用时 mask_summary 会正确提供。
-            if bool(paper_cfg.get("enabled", False)) and not isinstance(mask_summary, dict):
-                mask_summary = None  # 使用默认区域分配（area_ratio=0.5）
-
-            hf_region_index_spec, lf_region_index_spec, region_index_digest = build_region_index_spec_from_mask(
-                mask_summary
-            )
-            hf_region_index_spec["feature_dim_anchor"] = planner_params.feature_dim
-            lf_region_index_spec["feature_dim_anchor"] = planner_params.feature_dim
-            region_index_digest = digests.canonical_sha256(
-                {
-                    "hf_region_index_spec": hf_region_index_spec,
-                    "lf_region_index_spec": lf_region_index_spec,
-                }
-            )
+            hf_region_index_spec = basis_summary.get("hf_region_index_spec", {})
+            lf_region_index_spec = basis_summary.get("lf_region_index_spec", {})
+            region_index_digest = basis_summary.get("region_index_digest")
             lf_basis = self._build_executable_basis_payload(
                 basis_matrix=basis_summary.get("lf_projection_matrix"),
                 planner_params=planner_params,
@@ -628,18 +710,7 @@ class SubspacePlannerImpl:
             high_freq_subspace_spec = self._build_high_freq_subspace_spec(
                 basis_summary=basis_summary
             )
-            route_basis_bridge = _build_route_basis_bridge(
-                hf_feature_cols=list(basis_summary.get("hf_feature_cols", [])),
-                lf_feature_cols=list(basis_summary.get("lf_feature_cols", [])),
-                lf_decomposition_matrix=basis_summary.get("lf_projection_matrix"),
-                hf_decomposition_matrix=basis_summary.get("hf_projection_matrix"),
-                routing_digest_ref=routing_digest_ref,
-                region_index_digest=region_index_digest,
-                hf_region_selected_indices=list(hf_region_index_spec.get("selected_indices", [])),
-                lf_region_selected_indices=list(lf_region_index_spec.get("selected_indices", [])),
-                lf_basis_rank=lf_basis.get("basis_rank"),
-                hf_basis_rank=hf_basis.get("basis_rank"),
-            )
+            route_basis_bridge = basis_summary.get("route_basis_bridge", {})
             
             plan_payload = self._build_plan_payload_for_digest(
                 cfg=cfg,
@@ -787,14 +858,15 @@ class SubspacePlannerImpl:
         cfg: Dict[str, Any],
         inputs: Dict[str, Any],
         planner_params: _PlannerParams,
-        mask_digest: str
+        mask_digest: str,
+        routing_digest_ref: str,
     ) -> Dict[str, Any]:
         """
         功能：估计低维子空间并提取摘要（集成可验证采样和真实 JVP）。
 
         Estimate low-dimensional subspace from trajectory features by SVD.
-        Integrates verifiable trajectory sampling and runtime-operator / transition-fit
-        Jacobian estimates.
+        Integrates verifiable trajectory sampling, route-first feature partitioning,
+        and routed dual-subspace estimation driven by runtime-operator / fallback JVP.
 
         Args:
             cfg: Configuration mapping.
@@ -818,10 +890,17 @@ class SubspacePlannerImpl:
         )
         feature_matrix = self._align_feature_matrix(trajectory_samples, planner_params)
         mask_summary = inputs.get("mask_summary") if isinstance(inputs.get("mask_summary"), dict) else {}
+        feature_routing = self._build_feature_routing_from_mask(
+            mask_summary=mask_summary,
+            planner_params=planner_params,
+            mask_digest=mask_digest,
+            routing_digest_ref=routing_digest_ref,
+        )
         subspace_conditioning = self.build_subspace_conditioning(
             mask_summary=mask_summary,
             planner_params=planner_params,
             mask_digest=mask_digest,
+            hf_region_index_spec=feature_routing.get("hf_region_index_spec"),
         )
         feature_matrix = self._apply_mask_conditioning_to_feature_matrix(
             feature_matrix=feature_matrix,
@@ -842,7 +921,25 @@ class SubspacePlannerImpl:
             planner_params=planner_params
         )
         
-        # 步骤 4：组合轨迹和 JVP 进行 SVD
+        # 步骤 4：先构建 routed decomposition matrices，再分别估计 LF/HF basis。
+        routed_matrices = self._build_routed_decomposition_matrices(
+            trajectory_matrix=centered,
+            jvp_matrix=jvp_samples,
+            feature_routing=feature_routing,
+        )
+        routed_subspaces = self._estimate_routed_dual_subspaces(
+            routed_matrices=routed_matrices,
+            feature_routing=feature_routing,
+            feature_dim=feature_matrix.shape[1],
+            requested_rank=planner_params.rank,
+        )
+        route_basis_bridge = _build_route_basis_bridge(
+            feature_routing=feature_routing,
+            routed_matrices=routed_matrices,
+            routed_subspaces=routed_subspaces,
+        )
+
+        # 步骤 5：全局谱仅用于统计摘要，不再作为 LF/HF basis 的估计输入。
         decomposition_matrix = np.concatenate([centered, jvp_samples], axis=0)
         try:
             _, singular_values, vh = np.linalg.svd(decomposition_matrix, full_matrices=False)
@@ -881,37 +978,6 @@ class SubspacePlannerImpl:
         basis_importance = np.mean(np.abs(basis), axis=0)
         top_index_count = min(32, basis_importance.shape[0])
         top_indices = np.argsort(-basis_importance)[:top_index_count].tolist()
-
-        # 步骤 4b：区域路由分区 SVD。
-        # route_layer：将 mask 路由绑定到 selected_feature_indices。
-        # feature_bridge_layer：将 routed features 显式划分为 LF/HF 两个特征集合。
-        # dual_subspace_estimation：分别在两个特征集合上执行独立 SVD，得到 LF/HF decomposition matrix。
-        hf_feature_cols = list(subspace_conditioning.selected_feature_indices)
-        lf_feature_cols = sorted(set(range(feature_matrix.shape[1])) - set(hf_feature_cols))
-
-        # fallback 初始值：全域 SVD 的前 effective_rank 右奇异向量。
-        lf_projection_matrix = basis.T
-        hf_basis_candidates = vh[effective_rank:effective_rank + effective_rank, :]
-        if hf_basis_candidates.shape[0] == 0:
-            hf_basis_candidates = basis
-        hf_projection_matrix = hf_basis_candidates.T
-
-        if len(lf_feature_cols) >= 2 and len(hf_feature_cols) >= 2:
-            lf_sub = decomposition_matrix[:, lf_feature_cols]
-            hf_sub = decomposition_matrix[:, hf_feature_cols]
-            try:
-                _, _, vh_lf = np.linalg.svd(lf_sub, full_matrices=False)
-                _, _, vh_hf = np.linalg.svd(hf_sub, full_matrices=False)
-                eff_lf = min(effective_rank, vh_lf.shape[0])
-                eff_hf = min(effective_rank, vh_hf.shape[0])
-                if eff_lf > 0:
-                    lf_projection_matrix = vh_lf[:eff_lf, :].T
-                if eff_hf > 0:
-                    hf_projection_matrix = vh_hf[:eff_hf, :].T
-            except Exception:
-                # SVD 分区失败：保持全域 fallback 投影矩阵，不抛出异常。
-                hf_feature_cols = []
-                lf_feature_cols = []
 
         singular_preview = [
             self._normalize_float(float(value), planner_params.float_round_digits)
@@ -977,13 +1043,8 @@ class SubspacePlannerImpl:
             "subspace_spec": subspace_spec,
             "subspace_conditioning": subspace_conditioning.digest_payload(),
             "subspace_evidence_semantics": subspace_evidence_semantics,
-            # 区域路由桥摘要：绑定 conditioning 特征列分区与 LF/HF 子 SVD 结果。
-            "route_basis_bridge": _build_route_basis_bridge(
-                hf_feature_cols=hf_feature_cols,
-                lf_feature_cols=lf_feature_cols,
-                lf_decomposition_matrix=lf_projection_matrix,
-                hf_decomposition_matrix=hf_projection_matrix,
-            ),
+            # 区域路由桥摘要：route 先驱动 routed matrices，再驱动 dual-subspace basis。
+            "route_basis_bridge": route_basis_bridge,
             # 新增：可验证输入域锚点
             "verifiable_input_domain": {
                 "samples_anchor": samples_anchor,
@@ -1005,17 +1066,17 @@ class SubspacePlannerImpl:
             "subspace_conditioning": subspace_conditioning.as_dict(),
             "subspace_evidence_semantics": subspace_evidence_semantics,
             "basis_digest_payload": basis_digest_payload,
-            "lf_projection_matrix": lf_projection_matrix,
-            "hf_projection_matrix": hf_projection_matrix,
+            "lf_projection_matrix": routed_subspaces.get("lf_projection_matrix"),
+            "hf_projection_matrix": routed_subspaces.get("hf_projection_matrix"),
+            "lf_routed_matrix": routed_matrices.get("lf_decomposition_matrix"),
+            "hf_routed_matrix": routed_matrices.get("hf_decomposition_matrix"),
+            "hf_region_index_spec": feature_routing.get("hf_region_index_spec"),
+            "lf_region_index_spec": feature_routing.get("lf_region_index_spec"),
+            "region_index_digest": feature_routing.get("region_index_digest"),
             # 区域路由分区特征列索引：供 _build_high_freq_subspace_spec 使用。
-            "hf_feature_cols": hf_feature_cols,
-            "lf_feature_cols": lf_feature_cols,
-            "route_basis_bridge": _build_route_basis_bridge(
-                hf_feature_cols=hf_feature_cols,
-                lf_feature_cols=lf_feature_cols,
-                lf_decomposition_matrix=lf_projection_matrix,
-                hf_decomposition_matrix=hf_projection_matrix,
-            ),
+            "hf_feature_cols": feature_routing.get("hf_feature_cols", []),
+            "lf_feature_cols": feature_routing.get("lf_feature_cols", []),
+            "route_basis_bridge": route_basis_bridge,
             # 新增：可验证锚点供 plan_digest 使用
             "samples_anchor": samples_anchor,
             "jvp_anchor": jvp_anchor
@@ -1045,7 +1106,7 @@ class SubspacePlannerImpl:
 
         sample_source = samples_anchor.get("source") if isinstance(samples_anchor.get("source"), str) else "<absent>"
         sample_semantics = samples_anchor.get("sample_semantics") if isinstance(samples_anchor.get("sample_semantics"), str) else "<absent>"
-        surrogate_reason = samples_anchor.get("surrogate_reason") if isinstance(samples_anchor.get("surrogate_reason"), str) else "<absent>"
+        fallback_reason = samples_anchor.get("fallback_reason") if isinstance(samples_anchor.get("fallback_reason"), str) else "<absent>"
         jvp_source = jvp_anchor.get("jvp_source") if isinstance(jvp_anchor.get("jvp_source"), str) else "runtime_operator_missing"
 
         if jvp_source == "runtime_operator" and sample_semantics in {
@@ -1063,7 +1124,7 @@ class SubspacePlannerImpl:
         else:
             evidence_level = "non_primary"
             primary_path = "runtime_operator_required_for_primary_path"
-            evidence_reason = surrogate_reason if surrogate_reason != "<absent>" else "runtime_operator_missing"
+            evidence_reason = fallback_reason if fallback_reason != "<absent>" else "runtime_operator_missing"
 
         return {
             "version": "subspace_evidence_semantics_v1",
@@ -1082,6 +1143,7 @@ class SubspacePlannerImpl:
         mask_summary: Dict[str, Any],
         planner_params: _PlannerParams,
         mask_digest: str,
+        hf_region_index_spec: Optional[Dict[str, Any]] = None,
     ) -> SubspaceConditioning:
         """
         功能：构建子空间语义条件化信息。 
@@ -1108,7 +1170,13 @@ class SubspacePlannerImpl:
             mask_area_ratio = 0.5
         mask_area_ratio = self._normalize_float(max(0.0, min(float(mask_area_ratio), 1.0)), planner_params.float_round_digits)
 
-        raw_indices = mask_summary.get("downsample_grid_true_indices")
+        raw_indices = None
+        if isinstance(hf_region_index_spec, dict):
+            candidate_indices = hf_region_index_spec.get("selected_indices")
+            if isinstance(candidate_indices, list):
+                raw_indices = candidate_indices
+        if raw_indices is None:
+            raw_indices = mask_summary.get("downsample_grid_true_indices")
         selected_feature_indices: List[int] = []
         conditioning_mode = "full_feature_fallback"
 
@@ -1199,6 +1267,169 @@ class SubspacePlannerImpl:
             mapping_digest=mapping_digest,
             mapping_stats=mapping_stats,
         )
+
+    def _build_feature_routing_from_mask(
+        self,
+        mask_summary: Dict[str, Any],
+        planner_params: _PlannerParams,
+        mask_digest: str,
+        routing_digest_ref: str,
+    ) -> Dict[str, Any]:
+        """
+        功能：从 mask 路由输入构建可直接驱动 feature 级 routed matrix 的路由对象。
+
+        Build feature routing from mask-derived region specs.
+
+        Args:
+            mask_summary: Mask summary mapping.
+            planner_params: Planner parameter bundle.
+            mask_digest: Bound mask digest.
+            routing_digest_ref: External routing digest anchor.
+
+        Returns:
+            Routing mapping that directly drives routed matrix construction.
+        """
+        hf_region_index_spec, lf_region_index_spec, region_index_digest = build_region_index_spec_from_mask(mask_summary)
+        hf_region_index_spec["feature_dim_anchor"] = planner_params.feature_dim
+        lf_region_index_spec["feature_dim_anchor"] = planner_params.feature_dim
+        region_index_digest = digests.canonical_sha256(
+            {
+                "hf_region_index_spec": hf_region_index_spec,
+                "lf_region_index_spec": lf_region_index_spec,
+            }
+        )
+
+        mapping_inputs = {
+            "mask_digest": mask_digest,
+            "feature_dim": planner_params.feature_dim,
+        }
+        hf_region_selected_indices = list(hf_region_index_spec.get("selected_indices", []))
+        hf_feature_candidates = [
+            self._map_mask_index_to_feature_index(
+                raw_index=int(value),
+                feature_dim=planner_params.feature_dim,
+                mapping_inputs=mapping_inputs,
+            )
+            for value in hf_region_selected_indices
+            if isinstance(value, int)
+        ]
+        hf_feature_cols, lf_feature_cols, route_rebalance_policy = _normalize_routed_feature_partition(
+            hf_feature_candidates,
+            planner_params.feature_dim,
+        )
+
+        routing_payload = {
+            "route_source": "mask_region_index_spec",
+            "feature_routing_source": "mask_index_hash_projection_v1",
+            "feature_routing_mode": "hard_feature_cols",
+            "routing_digest_ref": routing_digest_ref,
+            "region_index_digest": region_index_digest,
+            "mask_digest": mask_digest,
+            "feature_dim": planner_params.feature_dim,
+            "hf_region_selected_indices": hf_region_selected_indices,
+            "lf_region_selected_indices": list(lf_region_index_spec.get("selected_indices", [])),
+            "hf_feature_cols": hf_feature_cols,
+            "lf_feature_cols": lf_feature_cols,
+            "route_rebalance_policy": route_rebalance_policy or "not_required",
+        }
+        feature_routing_digest = digests.canonical_sha256(routing_payload)
+        return {
+            **routing_payload,
+            "feature_routing_digest": feature_routing_digest,
+            "hf_feature_cols_source": "hf_region_index_spec.selected_indices",
+            "lf_feature_cols_source": "complement_partition_bound_to_lf_region_index_spec",
+            "hf_region_index_spec": hf_region_index_spec,
+            "lf_region_index_spec": lf_region_index_spec,
+        }
+
+    def _build_routed_decomposition_matrices(
+        self,
+        trajectory_matrix: np.ndarray,
+        jvp_matrix: np.ndarray,
+        feature_routing: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        功能：根据 feature routing 显式构建 LF/HF routed decomposition matrices。
+
+        Build channel-specific routed decomposition matrices from trajectory and JVP features.
+
+        Args:
+            trajectory_matrix: Centered trajectory feature matrix.
+            jvp_matrix: JVP feature matrix.
+            feature_routing: Feature routing mapping.
+
+        Returns:
+            Routed matrix mapping for LF/HF decomposition.
+        """
+        if not isinstance(trajectory_matrix, np.ndarray) or trajectory_matrix.ndim != 2:
+            raise ValueError("trajectory_matrix must be rank-2 ndarray")
+        if not isinstance(jvp_matrix, np.ndarray) or jvp_matrix.ndim != 2:
+            raise ValueError("jvp_matrix must be rank-2 ndarray")
+
+        lf_feature_cols = list(feature_routing.get("lf_feature_cols", []))
+        hf_feature_cols = list(feature_routing.get("hf_feature_cols", []))
+        if len(lf_feature_cols) == 0 or len(hf_feature_cols) == 0:
+            raise ValueError("feature routing must produce non-empty lf/hf feature partitions")
+
+        lf_trajectory_matrix = trajectory_matrix[:, lf_feature_cols]
+        hf_trajectory_matrix = trajectory_matrix[:, hf_feature_cols]
+        lf_jvp_matrix = jvp_matrix[:, lf_feature_cols]
+        hf_jvp_matrix = jvp_matrix[:, hf_feature_cols]
+        lf_decomposition_matrix = np.concatenate([lf_trajectory_matrix, lf_jvp_matrix], axis=0)
+        hf_decomposition_matrix = np.concatenate([hf_trajectory_matrix, hf_jvp_matrix], axis=0)
+
+        return {
+            "lf_trajectory_matrix": lf_trajectory_matrix,
+            "hf_trajectory_matrix": hf_trajectory_matrix,
+            "lf_jvp_matrix": lf_jvp_matrix,
+            "hf_jvp_matrix": hf_jvp_matrix,
+            "lf_decomposition_matrix": lf_decomposition_matrix,
+            "hf_decomposition_matrix": hf_decomposition_matrix,
+        }
+
+    def _estimate_routed_dual_subspaces(
+        self,
+        routed_matrices: Dict[str, Any],
+        feature_routing: Dict[str, Any],
+        feature_dim: int,
+        requested_rank: int,
+    ) -> Dict[str, Any]:
+        """
+        功能：在 LF/HF routed decomposition matrices 上分别估计 dual subspaces。
+
+        Estimate LF/HF bases directly from routed decomposition matrices.
+
+        Args:
+            routed_matrices: Routed decomposition matrices.
+            feature_routing: Feature routing mapping.
+            feature_dim: Full planner feature dimension.
+            requested_rank: Requested basis rank.
+
+        Returns:
+            Dual-subspace estimation mapping.
+        """
+        try:
+            lf_projection_matrix, lf_basis_rank = _build_partition_projection_matrix(
+                routed_matrices.get("lf_decomposition_matrix"),
+                list(feature_routing.get("lf_feature_cols", [])),
+                feature_dim,
+                requested_rank,
+            )
+            hf_projection_matrix, hf_basis_rank = _build_partition_projection_matrix(
+                routed_matrices.get("hf_decomposition_matrix"),
+                list(feature_routing.get("hf_feature_cols", [])),
+                feature_dim,
+                requested_rank,
+            )
+        except Exception as exc:
+            raise RuntimeError("route partition svd failed") from exc
+
+        return {
+            "lf_projection_matrix": lf_projection_matrix,
+            "hf_projection_matrix": hf_projection_matrix,
+            "lf_basis_rank": lf_basis_rank,
+            "hf_basis_rank": hf_basis_rank,
+        }
 
     def _map_mask_index_to_feature_index(
         self,
@@ -1522,7 +1753,7 @@ class SubspacePlannerImpl:
                 "selected_indices": hf_feature_cols,
                 "selected_count": len(hf_feature_cols),
                 "source_field": "conditioning.selected_feature_indices",
-                "bridge_version": "route_basis_bridge_v2",
+                "bridge_version": "route_basis_bridge",
             }
 
         # fallback：全域 SVD 尾半部（分区失败或 conditioning 无索引时使用）。
@@ -1787,7 +2018,7 @@ class SubspacePlannerImpl:
 
         Estimate Jacobian-Vector Products (JVP) from an explicit runtime operator.
         Paper-faithful SD3.5 path only accepts runtime-operator JVP and rejects legacy
-        unet semantics.
+        surrogate wording.
 
         Args:
             cfg: Configuration mapping.
@@ -1813,18 +2044,18 @@ class SubspacePlannerImpl:
             raise ValueError("centered_matrix must be 2D")
         if centered_matrix.shape[0] < 2:
             raise ValueError("centered_matrix must have at least two rows")
-        
+
         # 构造确定性探针向量（所有 JVP 计算的基础）
         probes = self._build_deterministic_probe_vectors(
             feature_dim=centered_matrix.shape[1],
             probe_count=planner_params.jacobian_probe_count,
             seed=planner_params.seed
         )
-        
+
         probe_vectors_digest = digests.canonical_sha256({
             "probes": np.round(probes, 8).tolist()[:min(4, len(probes))]
         })
-        
+
         paper_cfg = cfg.get("paper_faithfulness", {}) if isinstance(cfg, dict) else {}
         paper_mode = bool(paper_cfg.get("enabled", False)) if isinstance(paper_cfg, dict) else False
         jvp_operator = inputs.get("jvp_operator") if isinstance(inputs, dict) else None
@@ -1848,7 +2079,7 @@ class SubspacePlannerImpl:
                     planner_params=planner_params,
                 )
         else:
-            # paper 正式路径保护：paper_faithfulness.enabled=True 时禁止 surrogate 回退，
+            # paper 正式路径保护：paper_faithfulness.enabled=True 时禁止 fallback 回退，
             # 必须通过 jvp_operator 提供真实 JVP。
             if paper_mode:
                 raise ValueError(
@@ -1860,13 +2091,13 @@ class SubspacePlannerImpl:
                 probes=probes,
                 planner_params=planner_params
             )
-        
+
         # 计算 JVP 能量摘要（不存储大矩阵）
         jvp_energy = np.sum(jvp_samples ** 2, axis=1)
         total_jvp_energy = float(np.sum(jvp_energy))
         _, jvp_singular_values, _ = np.linalg.svd(jvp_samples, full_matrices=False)
         jvp_spectrum = np.abs(jvp_singular_values)
-        
+
         jvp_anchor = {
             "jvp_anchor_version": "v1",
             "probe_seed": planner_params.seed,
@@ -1890,7 +2121,7 @@ class SubspacePlannerImpl:
                 )
             }
         }
-        
+
         return jvp_samples, jvp_anchor
 
     def _estimate_jvp_from_operator(
@@ -1941,7 +2172,7 @@ class SubspacePlannerImpl:
         planner_params: _PlannerParams
     ) -> Tuple[np.ndarray, str]:
         """
-        功能：从轨迹转移拟合的 JVP 逼近（Surrogate 机制）。
+        功能：从轨迹转移拟合的 JVP 逼近（Fallback 机制）。
 
         Estimate JVP from a fitted transition operator for non-paper fallback mode.
 
@@ -2657,7 +2888,7 @@ class SubspacePlannerImpl:
 
         Args:
             cfg: Configuration mapping.
-            inputs: Planner inputs (may contain unet/pipeline context).
+            inputs: Planner inputs (may contain runtime pipeline context).
             planner_params: Planner parameter bundle.
             sample_kind: Sample kind ("pipeline_trajectory" or "trace_signature").
 
@@ -2749,7 +2980,7 @@ class SubspacePlannerImpl:
         has_runtime_jvp_binding = bool(callable(inputs.get("jvp_operator")))
         sample_source = "real_diffusion_trajectory_zT"
         sample_semantics = "runtime_trajectory_latent_captured"
-        surrogate_reason = None
+        fallback_reason = None
         latents_digest = "<absent>"
 
         from .trajectory_feature_space import extract_trajectory_feature_np
@@ -2801,8 +3032,8 @@ class SubspacePlannerImpl:
             "num_inference_steps": num_inference_steps,
             "source": sample_source,
             "sample_semantics": sample_semantics,
-            "surrogate_reason": surrogate_reason if isinstance(surrogate_reason, str) and surrogate_reason else "<absent>",
-            "surrogate_class": "fallback" if isinstance(surrogate_reason, str) and surrogate_reason else "none",
+            "fallback_reason": fallback_reason if isinstance(fallback_reason, str) and fallback_reason else "<absent>",
+            "fallback_class": "fallback" if isinstance(fallback_reason, str) and fallback_reason else "none",
             "latents_digest": latents_digest,
             "runtime_jvp_binding": has_runtime_jvp_binding,
         }

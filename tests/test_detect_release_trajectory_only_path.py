@@ -14,11 +14,15 @@ Tests that after full legacy path removal:
 
 from __future__ import annotations
 
-import numpy as np
 import inspect
+import numpy as np
 
 from main.diffusion.sd3.trajectory_tap import LatentTrajectoryCache
 from main.watermarking.content_chain import detector_scoring
+from main.watermarking.content_chain.subspace.subspace_planner_impl import (
+    SubspacePlannerImpl,
+    build_runtime_jvp_operator_from_cache,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -178,3 +182,11 @@ def test_exact_hit_returns_ok_exact() -> None:
     )
     assert z_t is not None, "Exact hit must return the latent"
     assert status == "ok_exact", f"Expected ok_exact, got: {status!r}"
+
+
+def test_sd35_formal_jvp_semantics_has_no_unet_wording() -> None:
+    planner_source = inspect.getsource(SubspacePlannerImpl._estimate_jvp_matrix).lower()
+    runtime_operator_source = inspect.getsource(build_runtime_jvp_operator_from_cache).lower()
+
+    assert "unet" not in planner_source
+    assert "unet" not in runtime_operator_source

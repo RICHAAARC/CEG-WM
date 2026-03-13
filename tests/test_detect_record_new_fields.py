@@ -317,16 +317,16 @@ def test_detect_hf_score_absent_reason_written_when_hf_basis_none() -> None:
         "detect_lf_score": 0.85,
         "detect_hf_score": None,
     }
-    hf_basis = None  # surrogate 路径
+    hf_basis = None  # detect plan 未提供 HF basis
 
     if hf_basis is None:
-        content_evidence_payload["detect_hf_score_absent_reason"] = "hf_basis_not_computed_in_surrogate_mode"
+        content_evidence_payload["detect_hf_score_absent_reason"] = "hf_basis_absent_in_detect_plan"
 
     assert "detect_hf_score_absent_reason" in content_evidence_payload, (
         "hf_basis is None 时应写入 detect_hf_score_absent_reason"
     )
     assert content_evidence_payload["detect_hf_score_absent_reason"] == \
-        "hf_basis_not_computed_in_surrogate_mode", (
+        "hf_basis_absent_in_detect_plan", (
         f"absent_reason 值不符预期：{content_evidence_payload['detect_hf_score_absent_reason']}"
     )
 
@@ -350,10 +350,10 @@ def test_detect_hf_score_absent_reason_not_written_when_hf_basis_present() -> No
         "detect_lf_score": 0.85,
         "detect_hf_score": 0.72,
     }
-    hf_basis = {"some": "basis_data"}  # 非 surrogate 路径
+    hf_basis = {"some": "basis_data"}  # detect plan 已提供 HF basis
 
     if hf_basis is None:
-        content_evidence_payload["detect_hf_score_absent_reason"] = "hf_basis_not_computed_in_surrogate_mode"
+        content_evidence_payload["detect_hf_score_absent_reason"] = "hf_basis_absent_in_detect_plan"
 
     assert "detect_hf_score_absent_reason" not in content_evidence_payload, (
         "hf_basis 非 None 时不应写入 detect_hf_score_absent_reason"

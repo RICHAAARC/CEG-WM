@@ -93,17 +93,27 @@ def test_region_index_spec_is_produced_and_digest_anchored() -> None:
     assert isinstance(hf_spec, dict)
     assert isinstance(lf_spec, dict)
     assert isinstance(route_basis_bridge, dict)
-    assert route_basis_bridge.get("bridge_version") == "route_basis_bridge_v2"
+    assert route_basis_bridge.get("bridge_version") == "route_basis_bridge"
     assert route_basis_bridge.get("region_index_digest") == plan.get("region_index_digest")
     route_layer = route_basis_bridge.get("route_layer")
     feature_bridge_layer = route_basis_bridge.get("feature_bridge_layer")
+    routed_matrix_layer = route_basis_bridge.get("routed_matrix_layer")
     dual_subspace_estimation = route_basis_bridge.get("dual_subspace_estimation")
     assert isinstance(route_layer, dict)
     assert isinstance(feature_bridge_layer, dict)
+    assert isinstance(routed_matrix_layer, dict)
     assert isinstance(dual_subspace_estimation, dict)
     assert feature_bridge_layer.get("route_to_feature_bridge") == "mask_routed_feature_partition"
-    assert isinstance(dual_subspace_estimation.get("lf_decomposition_matrix_digest"), str)
-    assert isinstance(dual_subspace_estimation.get("hf_decomposition_matrix_digest"), str)
+    assert routed_matrix_layer.get("matrix_source") == "build_routed_decomposition_matrices"
+    assert routed_matrix_layer.get("lf_decomposition_matrix_source") == "stack(lf_trajectory_matrix, lf_jvp_matrix)"
+    assert routed_matrix_layer.get("hf_decomposition_matrix_source") == "stack(hf_trajectory_matrix, hf_jvp_matrix)"
+    assert isinstance(routed_matrix_layer.get("lf_decomposition_matrix_digest"), str)
+    assert isinstance(routed_matrix_layer.get("hf_decomposition_matrix_digest"), str)
+    assert dual_subspace_estimation.get("estimation_input") == "routed_decomposition_matrices"
+    assert dual_subspace_estimation.get("lf_basis_source") == "lf_decomposition_matrix"
+    assert dual_subspace_estimation.get("hf_basis_source") == "hf_decomposition_matrix"
+    assert isinstance(dual_subspace_estimation.get("lf_basis_matrix_digest"), str)
+    assert isinstance(dual_subspace_estimation.get("hf_basis_matrix_digest"), str)
 
     recomputed = digests.canonical_sha256(
         {

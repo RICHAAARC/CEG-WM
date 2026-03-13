@@ -476,7 +476,6 @@ def _build_hf_channel_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
 def compute_hf_attestation_score(
     hf_values: Any,
     k_hf: str,
-    template_size: int = 256,
 ) -> Dict[str, Any]:
     """
     功能：计算 HF 通道的 attestation 得分（tail-truncation 能量证据）。
@@ -492,8 +491,7 @@ def compute_hf_attestation_score(
     Args:
         hf_values: HF feature values (list of float or numpy array).
         k_hf: HF attestation key token. Accepted for attestation-call binding,
-            but not used to derive any HF template.
-        template_size: Reserved compatibility parameter. Must remain positive.
+            but not used to derive any keyed template or correlation codeword.
 
     Returns:
         Dict with keys:
@@ -510,8 +508,6 @@ def compute_hf_attestation_score(
     """
     if not k_hf:
         raise ValueError("k_hf must be non-empty str")
-    if template_size <= 0:
-        raise ValueError("template_size must be positive int")
 
     try:
         if hasattr(hf_values, "cpu"):
@@ -543,15 +539,17 @@ def compute_hf_attestation_score(
             }),
         }
 
-    abs_values = np.abs(np.asarray(flat_hf, dtype=np.float64))
-    n_compare = int(abs_values.shape[0])
+    coeffs = np.asarray(flat_hf, dtype=np.float32)
+    n_compare = int(coeffs.shape[0])
     threshold_percentile = 75.0
-    threshold_value = float(np.percentile(abs_values, threshold_percentile))
-    retained_mask = abs_values >= threshold_value
-    retained_count = int(np.sum(retained_mask))
-    retained_ratio = float(retained_count / n_compare) if n_compare > 0 else 0.0
-    total_energy = float(np.sum(abs_values ** 2))
-    retained_energy = float(np.sum((abs_values[retained_mask]) ** 2))
+    constrained_coeffs, constraint_evidence = channel_hf.apply_hf_truncation_constraint(
+        coeffs,
+        {"hf_threshold_percentile": threshold_percentile},
+    )
+    coeffs_before_norm = float(constraint_evidence.get("coeffs_before_norm", 0.0))
+    coeffs_after_norm = float(constraint_evidence.get("coeffs_after_norm", 0.0))
+    total_energy = coeffs_before_norm * coeffs_before_norm
+    retained_energy = coeffs_after_norm * coeffs_after_norm
     if total_energy < 1e-12:
         hf_attestation_score = 0.0
     else:
@@ -560,12 +558,11 @@ def compute_hf_attestation_score(
     trace_payload: Dict[str, Any] = {
         "channel": "hf",
         "attestation_mode": "projection_tail_truncation_energy",
-        "compat_template_size": template_size,
         "n_values_used": n_compare,
-        "threshold_percentile_applied": threshold_percentile,
-        "threshold_value": round(threshold_value, 8),
-        "retained_count": retained_count,
-        "retained_ratio": round(retained_ratio, 8),
+        "threshold_percentile_applied": float(constraint_evidence.get("threshold_percentile_applied", threshold_percentile)),
+        "threshold_value": round(float(constraint_evidence.get("threshold_value", 0.0)), 8),
+        "retained_count": int(constraint_evidence.get("coeffs_retained_count", 0)),
+        "retained_ratio": round(float(constraint_evidence.get("retention_ratio", 0.0)), 8),
         "hf_attestation_score": round(hf_attestation_score, 6),
     }
     trace_digest = digests.canonical_sha256(trace_payload)
@@ -574,7 +571,7 @@ def compute_hf_attestation_score(
         "hf_attestation_score": hf_attestation_score,
         "status": "ok",
         "n_values_used": n_compare,
-        "threshold_percentile_applied": threshold_percentile,
-        "retained_ratio": retained_ratio,
+        "threshold_percentile_applied": float(constraint_evidence.get("threshold_percentile_applied", threshold_percentile)),
+        "retained_ratio": float(constraint_evidence.get("retention_ratio", 0.0)),
         "hf_attestation_trace_digest": trace_digest,
     }

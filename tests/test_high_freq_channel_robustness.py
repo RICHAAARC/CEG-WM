@@ -10,11 +10,13 @@ Module type: General module
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from typing import Any, Dict
 
 from scripts.audits.audit_records_fields_append_only import run_audit
 from main.core import digests
+from main.watermarking.content_chain.high_freq_embedder import compute_hf_attestation_score
 from main.watermarking.content_chain.interfaces import ContentEvidence
 from main.watermarking.content_chain.unified_content_extractor import UnifiedContentExtractor
 from main.watermarking.content_chain.subspace.subspace_planner_impl import (
@@ -114,7 +116,7 @@ def test_hf_parameter_drift_changes_plan_digest_binding() -> None:
                 "codebook_id": "hf_codebook_v1",
                 "ecc": 2,
                 "tail_truncation_ratio": 0.10,
-                "tail_truncation_mode": "gaussian",
+                "tail_truncation_mode": "projection_tail_truncation",
             },
         }
     }
@@ -134,7 +136,7 @@ def test_hf_parameter_drift_changes_plan_digest_binding() -> None:
                 "codebook_id": "hf_codebook_v1",
                 "ecc": 2,
                 "tail_truncation_ratio": 0.35,
-                "tail_truncation_mode": "gaussian",
+                "tail_truncation_mode": "projection_tail_truncation",
             },
         }
     }
@@ -213,6 +215,15 @@ def test_hf_failure_does_not_mutate_lf_evidence() -> None:
     assert result.score is None
     assert result.content_failure_reason == "hf_detection_failed"
     assert lf_evidence.lf_score == 0.73
+
+
+def test_hf_attestation_has_no_template_compatibility_residue() -> None:
+    signature = inspect.signature(compute_hf_attestation_score)
+    assert "template_size" not in signature.parameters
+
+    source = inspect.getsource(compute_hf_attestation_score).lower()
+    assert "compat_template_size" not in source
+    assert "template_size" not in source
 
 
 def test_new_hf_field_unregistered_must_fail_audit(tmp_path: Path) -> None:
