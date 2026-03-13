@@ -3206,12 +3206,22 @@ def _run_attestation_after_embed(run_root: Path, cfg_path: Path) -> None:
         "geo_anchor_seed": result["geo_anchor_seed"],
         "attestation_status": result["attestation_status"],
     }
+    signed_bundle = result.get("signed_bundle")
+    if isinstance(signed_bundle, dict):
+        save_bundle["signed_bundle"] = signed_bundle
     statement_path = attest_dir / "attestation_statement.json"
     _write_artifact_text_unbound(
         run_root,
         statement_path,
         json.dumps(save_bundle, ensure_ascii=False, indent=2),
     )
+    if isinstance(signed_bundle, dict):
+        bundle_path = attest_dir / "attestation_bundle.json"
+        _write_artifact_text_unbound(
+            run_root,
+            bundle_path,
+            json.dumps(signed_bundle, ensure_ascii=False, indent=2),
+        )
     print(
         f"[onefile/attestation] attestation statement 已写入: {statement_path} "
         f"d_A={result['attestation_digest'][:16]}..."
@@ -3274,7 +3284,19 @@ def _run_attestation_verification_after_detect(run_root: Path, cfg_path: Path) -
         print(f"[onefile/attestation] WARN: attestation_statement.json 解析失败: {exc}", file=sys.stderr)
         return
 
+    attestation_bundle = None
+    bundle_path = run_root / "artifacts" / "attestation" / "attestation_bundle.json"
+    if bundle_path.exists():
+        try:
+            bundle_payload = json.loads(bundle_path.read_text(encoding="utf-8"))
+            if isinstance(bundle_payload, dict):
+                attestation_bundle = bundle_payload
+        except Exception as exc:
+            print(f"[onefile/attestation] WARN: attestation_bundle.json 解析失败: {exc}", file=sys.stderr)
+
     candidate_statement = attest_bundle.get("statement")
+    if not isinstance(candidate_statement, dict) and isinstance(attestation_bundle, dict):
+        candidate_statement = attestation_bundle.get("statement")
     if not isinstance(candidate_statement, dict):
         print("[onefile/attestation] WARN: statement 字段缺失，跳过验证", file=sys.stderr)
         return
@@ -3316,6 +3338,7 @@ def _run_attestation_verification_after_detect(run_root: Path, cfg_path: Path) -
     result = verify_attestation(
         k_master=k_master,
         candidate_statement=candidate_statement,
+        attestation_bundle=attestation_bundle,
         content_evidence=content_evidence,
         geo_score=geo_score,
         lf_weight=float(attest_cfg.get("lf_weight", 0.5)),

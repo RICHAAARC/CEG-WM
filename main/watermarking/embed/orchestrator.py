@@ -1269,6 +1269,7 @@ def build_embed_attestation(
     from main.watermarking.provenance.attestation_statement import (
         build_attestation_statement,
         compute_attestation_digest,
+        build_signed_attestation_bundle,
     )
     from main.watermarking.provenance.key_derivation import (
         derive_attestation_keys,
@@ -1330,6 +1331,14 @@ def build_embed_attestation(
     return {
         "statement": statement.as_dict(),
         "attestation_digest": d_a,
+        "signed_bundle": build_signed_attestation_bundle(
+            statement,
+            d_a,
+            k_master,
+            lf_payload_hex=lf_payload_final.hex(),
+            trace_commit=trace_commit,
+            geo_anchor_seed=geo_anchor_seed,
+        ),
         "keys": {
             "k_lf": attest_keys.k_lf,
             "k_hf": attest_keys.k_hf,

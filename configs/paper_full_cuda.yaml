@@ -54,6 +54,7 @@ watermark:
     bp_iterations: 100  # 从 50 提升至 100，改善 LF BP 收敛概率（RUNTIME-02 验证后可进一步调整）
   hf:
     enabled: true
+    selection: "attestation_conditioned_projection_tail"
     tail_truncation_ratio: 0.1
     tail_truncation_mode: "projection_tail_truncation"
     tau: 2.0
@@ -64,6 +65,7 @@ detect:
   geometry:
     enabled: true
     enable_attention_anchor: true
+    enable_align_invariance: true
     attention_capture_max_layers: 8
     attention_capture_layer_whitelist:
       - "transformer_blocks.0.attn"
@@ -77,6 +79,7 @@ detect:
     # 显式声明几何证据层级：latent sync 为主几何实现（低阶几何反演），
     # attention anchor 仅作辅锚点（主同步成功后参与一致性评估）。
     sync_primary_anchor_secondary: true
+    align_inverse_max_residual: 0.18
   calibration_artifact_path: null  # NP 阈值工件路径；null 表示运行时通过 --thresholds_path 注入
                                    # 可设为 outputs/.../artifacts/thresholds/thresholds.json（或由 experiment_matrix override 注入）
 
@@ -133,6 +136,10 @@ attestation:
   k_master_env_var: "CEG_WM_K_MASTER"  # 主密钥环境变量名
   k_prompt_env_var: "CEG_WM_K_PROMPT"  # prompt 承诺密钥环境变量名
   k_seed_env_var: "CEG_WM_K_SEED"      # seed 承诺密钥环境变量名
+  signature_algorithm: "ed25519"
+  signed_bundle_schema: "gen_attest_bundle_v1"
+  signer_certificate_schema: "gen_attest_signer_cert_v1"
+  require_signed_bundle_verification: true
   threshold: 0.65    # attested 判决阈值（方法论定义默认值）
   lf_weight: 0.5     # LF 通道融合权重
   hf_weight: 0.3     # HF 通道融合权重

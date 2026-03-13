@@ -4686,6 +4686,7 @@ def _build_ablation_absent_geometry_evidence(absent_reason: str) -> Dict[str, An
 def verify_attestation(
     k_master: str,
     candidate_statement: Dict[str, Any],
+    attestation_bundle: Optional[Dict[str, Any]] = None,
     content_evidence: Optional[Dict[str, Any]] = None,
     hf_values: Optional[Any] = None,
     lf_latent_features: Optional[Any] = None,
@@ -4755,6 +4756,7 @@ def verify_attestation(
         statement_from_dict,
         compute_attestation_digest,
         verify_statement_fields,
+        verify_signed_attestation_bundle,
     )
     from main.watermarking.provenance.key_derivation import (
         derive_attestation_keys,
@@ -4766,12 +4768,39 @@ def verify_attestation(
         compute_hf_attestation_score,
     )
 
-    if not isinstance(k_master, str) or not k_master:
+    if not k_master:
         raise ValueError("k_master must be non-empty str")
-    if not isinstance(candidate_statement, dict):
-        raise TypeError("candidate_statement must be dict")
 
     mismatch_reasons: list[str] = []
+    bundle_verification: Optional[Dict[str, Any]] = None
+
+    if attestation_bundle is not None:
+        try:
+            bundle_verification = verify_signed_attestation_bundle(attestation_bundle, k_master)
+        except Exception as exc:
+            mismatch_reasons.append(f"bundle_verification_failed: {exc}")
+            return {
+                "verdict": "mismatch",
+                "fusion_score": None,
+                "channel_scores": {"lf": None, "hf": None, "geo": None},
+                "attestation_digest": None,
+                "statement": candidate_statement,
+                "attestation_trace_digest": None,
+                "mismatch_reasons": mismatch_reasons,
+                "bundle_verification": {"status": "mismatch", "mismatch_reasons": mismatch_reasons},
+            }
+        if bundle_verification.get("status") != "ok":
+            mismatch_reasons.extend(list(bundle_verification.get("mismatch_reasons") or []))
+            return {
+                "verdict": "mismatch",
+                "fusion_score": None,
+                "channel_scores": {"lf": None, "hf": None, "geo": None},
+                "attestation_digest": bundle_verification.get("attestation_digest"),
+                "statement": candidate_statement,
+                "attestation_trace_digest": None,
+                "mismatch_reasons": mismatch_reasons,
+                "bundle_verification": bundle_verification,
+            }
 
     # (1) 验证并重建 statement。
     if not verify_statement_fields(candidate_statement):
@@ -4848,6 +4877,8 @@ def verify_attestation(
             hf_result = compute_hf_attestation_score(
                 hf_values=hf_values,
                 k_hf=attest_keys.k_hf,
+                attestation_event_digest=d_a,
+                plan_digest=statement.plan_digest,
             )
             if hf_result.get("status") == "ok":
                 s_hf = hf_result.get("hf_attestation_score")
@@ -4855,7 +4886,7 @@ def verify_attestation(
             mismatch_reasons.append("hf_attestation_score_failed")
 
     # GEO 通道：直接使用调用方提供的几何链得分。
-    if geo_score is not None and isinstance(geo_score, (int, float)):
+    if geo_score is not None:
         s_geo = float(max(0.0, min(1.0, geo_score)))
 
     # (5) 检查是否缺少必要输入。
@@ -4911,6 +4942,7 @@ def verify_attestation(
         "s_geo": round(s_geo, 6) if s_geo is not None else None,
         "fusion_score": round(fusion_score, 6) if fusion_score is not None else None,
         "verdict": verdict,
+        "bundle_status": bundle_verification.get("status") if isinstance(bundle_verification, dict) else None,
     }
     from main.core import digests as _digests
     attestation_trace_digest = _digests.canonical_sha256(trace_payload)
@@ -4923,4 +4955,5 @@ def verify_attestation(
         "statement": candidate_statement,
         "attestation_trace_digest": attestation_trace_digest,
         "mismatch_reasons": mismatch_reasons,
+        "bundle_verification": bundle_verification,
     }

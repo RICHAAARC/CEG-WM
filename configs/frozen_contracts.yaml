@@ -10,7 +10,7 @@
 # 合同版本与冻结元信息
 # - 用于记录与审计，不应作为运行期分支逻辑的自由输入。
 # ------------------------------
-contract_version: "v1.3"     # 冻结契约版本号；v1.1→v1.2 formal path 最终闭包收口（2026-03-12）：historical_field_paths 段已从当前 formal contract 文件彻底移除，旧字段信息不再显式保留在任何 formal 文件中；当前 formal contract 只绑定当前正式机制。v1.2→v1.3 从可选字段列表中移除 embed_trace.identity_mode 与 embed_trace.identity_reason（2026-03-12）：生产嵌入实现不再承载 identity baseline。
+contract_version: "v1.4"     # 冻结契约版本号；v1.1→v1.2 formal path 最终闭包收口（2026-03-12）：historical_field_paths 段已从当前 formal contract 文件彻底移除，旧字段信息不再显式保留在任何 formal 文件中；当前 formal contract 只绑定当前正式机制。v1.2→v1.3 从可选字段列表中移除 embed_trace.identity_mode 与 embed_trace.identity_reason（2026-03-12）：生产嵌入实现不再承载 identity baseline。v1.3→v1.4 追加 attestation signed bundle 验签门禁语义（2026-03-13）：onefile/detect 溯源结果若声明 signed bundle，则必须执行内部 trust chain 验证。
 frozen_date: "2026-02-04"    # 冻结日期元信息；当前主链路不参与门禁计算，主要用于审计追溯。
 
 # ------------------------------
@@ -160,6 +160,18 @@ gate_enforcement_requirements:              # freeze_gate.enforce_gate_requireme
         4) write records with both cfg_digest and override_applied audit segment
       override_applied 审计段必须记录：field_path、old_value、new_value、source、override_mode
       目的：防止 cfg_digest 对应错误配置，导致 records 解释与对比失真。
+
+  attestation_bundle_verification:
+    enforcement: "must_enforce"
+    requirement: |
+      若运行输出声明存在 cryptographic generation attestation signed bundle，
+      detect / onefile 验证阶段必须先执行以下检查，再消费任意 attestation statement：
+        1) 校验 signed bundle.schema 与 signer_certificate.schema
+        2) 校验 attestation_digest 与 CanonicalJSON(statement) 的重算结果一致
+        3) 校验 signer_certificate 由内部 trust root 签发
+        4) 校验 bundle signature 覆盖 statement/attestation_digest/lf_payload_hex/trace_commit/geo_anchor_seed
+      任一检查失败时必须返回 mismatch，禁止降级为“仅 statement 存在即继续融合”。
+      目的：防止 statement 被脱链篡改后仍进入多通道融合，破坏 attestation 审计闭环。
 
   # ---- policy_path 语义驱动执行 ----
   policy_path_semantic_driven_execution:    # 主链路已执行：按 semantics.required_chains / on_chain_failure 驱动。

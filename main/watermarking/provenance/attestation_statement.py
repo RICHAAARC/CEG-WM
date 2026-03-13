@@ -19,9 +19,9 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 
 # statement schema 标识符（固定字符串）。
@@ -37,6 +37,9 @@ _ALLOWED_FIELDS = frozenset([
     "event_nonce",
     "time_bucket",
 ])
+
+ATTESTATION_BUNDLE_SCHEMA = "gen_attest_bundle_v1"
+ATTESTATION_SIGNER_CERT_SCHEMA = "gen_attest_signer_cert_v1"
 
 
 @dataclass(frozen=True)
@@ -106,6 +109,70 @@ def _canonical_json_dumps(obj: Dict[str, Any]) -> bytes:
         separators=(",", ":"),
         ensure_ascii=False,
     ).encode("utf-8")
+
+
+def _load_ed25519() -> Any:
+    """功能：延迟加载 Ed25519 实现。"""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+
+    return {
+        "Ed25519PrivateKey": Ed25519PrivateKey,
+        "Ed25519PublicKey": Ed25519PublicKey,
+    }
+
+
+def _to_key_bytes(key: Union[str, bytes]) -> bytes:
+    """功能：将密钥材料统一转换为 bytes。"""
+    if isinstance(key, bytes):
+        if not key:
+            raise ValueError("key must be non-empty bytes")
+        return key
+    if isinstance(key, str):
+        if not key:
+            raise ValueError("key must be non-empty str")
+        try:
+            return bytes.fromhex(key)
+        except ValueError:
+            return key.encode("utf-8")
+    raise TypeError(f"key must be str or bytes, got {type(key).__name__}")
+
+
+def _derive_attestation_private_key(k_master: Union[str, bytes], label: str) -> Any:
+    """功能：从主密钥确定性派生内部签名私钥。"""
+    if not isinstance(label, str) or not label:
+        raise ValueError("label must be non-empty str")
+    ed25519_mod = _load_ed25519()
+    seed = hashlib.sha256(label.encode("utf-8") + b":" + _to_key_bytes(k_master)).digest()
+    return ed25519_mod["Ed25519PrivateKey"].from_private_bytes(seed)
+
+
+def _build_signer_certificate_payload(signer_public_key_hex: str) -> Dict[str, Any]:
+    """功能：构造内部 signer 证书负载。"""
+    return {
+        "schema": ATTESTATION_SIGNER_CERT_SCHEMA,
+        "algorithm": "ed25519",
+        "purpose": "generation_attestation_bundle",
+        "signer_public_key_hex": signer_public_key_hex,
+    }
+
+
+def _build_bundle_signature_payload(
+    statement_dict: Dict[str, Any],
+    attestation_digest: str,
+    *,
+    lf_payload_hex: Optional[str],
+    trace_commit: Optional[str],
+    geo_anchor_seed: Optional[int],
+) -> Dict[str, Any]:
+    """功能：构造 attestation bundle 的签名域。"""
+    return {
+        "schema": ATTESTATION_BUNDLE_SCHEMA,
+        "statement": statement_dict,
+        "attestation_digest": attestation_digest,
+        "lf_payload_hex": lf_payload_hex,
+        "trace_commit": trace_commit,
+        "geo_anchor_seed": geo_anchor_seed,
+    }
 
 
 def build_attestation_statement(
@@ -259,3 +326,181 @@ def statement_from_dict(d: Dict[str, Any]) -> AttestationStatement:
         event_nonce=str(d["event_nonce"]),
         time_bucket=str(d["time_bucket"]),
     )
+
+
+def build_signed_attestation_bundle(
+    statement: AttestationStatement,
+    attestation_digest: str,
+    k_master: Union[str, bytes],
+    *,
+    lf_payload_hex: Optional[str] = None,
+    trace_commit: Optional[str] = None,
+    geo_anchor_seed: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    功能：构造带内部信任链的 signed attestation bundle。
+
+    Build a signed attestation bundle with an internal trust chain.
+
+    Args:
+        statement: Attestation statement instance.
+        attestation_digest: Canonical statement digest.
+        k_master: Master key material used to derive root and signer keys.
+        lf_payload_hex: Optional LF payload hex string.
+        trace_commit: Optional trajectory commit hex string.
+        geo_anchor_seed: Optional geometry anchor seed.
+
+    Returns:
+        Signed attestation bundle mapping.
+    """
+    if not isinstance(statement, AttestationStatement):
+        raise TypeError("statement must be AttestationStatement")
+    if not isinstance(attestation_digest, str) or not attestation_digest:
+        raise ValueError("attestation_digest must be non-empty str")
+
+    root_private_key = _derive_attestation_private_key(k_master, "attestation_root")
+    signer_private_key = _derive_attestation_private_key(k_master, "attestation_signer")
+    root_public_key_hex = root_private_key.public_key().public_bytes_raw().hex()
+    signer_public_key_hex = signer_private_key.public_key().public_bytes_raw().hex()
+
+    signer_certificate_payload = _build_signer_certificate_payload(signer_public_key_hex)
+    signer_certificate_signature_hex = root_private_key.sign(
+        _canonical_json_dumps(signer_certificate_payload)
+    ).hex()
+
+    statement_dict = statement.as_dict()
+    signature_payload = _build_bundle_signature_payload(
+        statement_dict,
+        attestation_digest,
+        lf_payload_hex=lf_payload_hex,
+        trace_commit=trace_commit,
+        geo_anchor_seed=geo_anchor_seed,
+    )
+    signature_payload_digest = hashlib.sha256(_canonical_json_dumps(signature_payload)).hexdigest()
+    bundle_signature_hex = signer_private_key.sign(_canonical_json_dumps(signature_payload)).hex()
+
+    return {
+        "schema": ATTESTATION_BUNDLE_SCHEMA,
+        "statement": statement_dict,
+        "attestation_digest": attestation_digest,
+        "lf_payload_hex": lf_payload_hex,
+        "trace_commit": trace_commit,
+        "geo_anchor_seed": geo_anchor_seed,
+        "signature": {
+            "algorithm": "ed25519",
+            "signature_hex": bundle_signature_hex,
+            "signed_fields_digest": signature_payload_digest,
+        },
+        "trust_chain": {
+            "root_public_key_hex": root_public_key_hex,
+            "signer_certificate": {
+                "payload": signer_certificate_payload,
+                "signature_hex": signer_certificate_signature_hex,
+            },
+        },
+    }
+
+
+def verify_signed_attestation_bundle(bundle: Dict[str, Any], k_master: Union[str, bytes]) -> Dict[str, Any]:
+    """
+    功能：验证 signed attestation bundle 的签名与内部信任链。
+
+    Verify a signed attestation bundle including the internal trust chain.
+
+    Args:
+        bundle: Signed attestation bundle mapping.
+        k_master: Master key material used to derive the expected trust root.
+
+    Returns:
+        Verification result mapping.
+    """
+    if not isinstance(bundle, dict):
+        raise TypeError("bundle must be dict")
+
+    ed25519_mod = _load_ed25519()
+    mismatch_reasons = []
+    if bundle.get("schema") != ATTESTATION_BUNDLE_SCHEMA:
+        mismatch_reasons.append("bundle_schema_invalid")
+        return {"status": "mismatch", "mismatch_reasons": mismatch_reasons}
+
+    statement_dict = bundle.get("statement")
+    if not isinstance(statement_dict, dict) or not verify_statement_fields(statement_dict):
+        mismatch_reasons.append("bundle_statement_invalid")
+        return {"status": "mismatch", "mismatch_reasons": mismatch_reasons}
+
+    statement = statement_from_dict(statement_dict)
+    recomputed_digest = compute_attestation_digest(statement)
+    bundle_digest = bundle.get("attestation_digest")
+    if not isinstance(bundle_digest, str) or bundle_digest != recomputed_digest:
+        mismatch_reasons.append("bundle_digest_mismatch")
+
+    trust_chain = bundle.get("trust_chain") if isinstance(bundle.get("trust_chain"), dict) else {}
+    signer_certificate = trust_chain.get("signer_certificate") if isinstance(trust_chain.get("signer_certificate"), dict) else {}
+    cert_payload = signer_certificate.get("payload") if isinstance(signer_certificate.get("payload"), dict) else {}
+    cert_signature_hex = signer_certificate.get("signature_hex")
+    root_public_key_hex = trust_chain.get("root_public_key_hex")
+    if not isinstance(root_public_key_hex, str) or not root_public_key_hex:
+        mismatch_reasons.append("bundle_root_public_key_absent")
+        return {"status": "mismatch", "mismatch_reasons": mismatch_reasons}
+
+    expected_root_private_key = _derive_attestation_private_key(k_master, "attestation_root")
+    expected_root_public_key_hex = expected_root_private_key.public_key().public_bytes_raw().hex()
+    if root_public_key_hex != expected_root_public_key_hex:
+        mismatch_reasons.append("bundle_root_public_key_mismatch")
+        return {"status": "mismatch", "mismatch_reasons": mismatch_reasons}
+
+    if not isinstance(cert_signature_hex, str) or not cert_signature_hex:
+        mismatch_reasons.append("bundle_signer_certificate_signature_absent")
+        return {"status": "mismatch", "mismatch_reasons": mismatch_reasons}
+    try:
+        expected_root_private_key.public_key().verify(
+            bytes.fromhex(cert_signature_hex),
+            _canonical_json_dumps(cert_payload),
+        )
+    except Exception:
+        mismatch_reasons.append("bundle_signer_certificate_signature_invalid")
+        return {"status": "mismatch", "mismatch_reasons": mismatch_reasons}
+
+    signer_public_key_hex = cert_payload.get("signer_public_key_hex") if isinstance(cert_payload, dict) else None
+    if not isinstance(signer_public_key_hex, str) or not signer_public_key_hex:
+        mismatch_reasons.append("bundle_signer_public_key_absent")
+        return {"status": "mismatch", "mismatch_reasons": mismatch_reasons}
+
+    signature_node = bundle.get("signature") if isinstance(bundle.get("signature"), dict) else {}
+    bundle_signature_hex = signature_node.get("signature_hex")
+    if not isinstance(bundle_signature_hex, str) or not bundle_signature_hex:
+        mismatch_reasons.append("bundle_signature_absent")
+        return {"status": "mismatch", "mismatch_reasons": mismatch_reasons}
+
+    signature_payload = _build_bundle_signature_payload(
+        statement_dict,
+        recomputed_digest,
+        lf_payload_hex=bundle.get("lf_payload_hex") if isinstance(bundle.get("lf_payload_hex"), str) else None,
+        trace_commit=bundle.get("trace_commit") if isinstance(bundle.get("trace_commit"), str) else None,
+        geo_anchor_seed=int(bundle.get("geo_anchor_seed")) if isinstance(bundle.get("geo_anchor_seed"), int) else None,
+    )
+    expected_signed_fields_digest = hashlib.sha256(_canonical_json_dumps(signature_payload)).hexdigest()
+    signed_fields_digest = signature_node.get("signed_fields_digest")
+    if not isinstance(signed_fields_digest, str) or signed_fields_digest != expected_signed_fields_digest:
+        mismatch_reasons.append("bundle_signed_fields_digest_mismatch")
+
+    signer_public_key = ed25519_mod["Ed25519PublicKey"].from_public_bytes(bytes.fromhex(signer_public_key_hex))
+    try:
+        signer_public_key.verify(bytes.fromhex(bundle_signature_hex), _canonical_json_dumps(signature_payload))
+    except Exception:
+        mismatch_reasons.append("bundle_signature_invalid")
+
+    if mismatch_reasons:
+        return {
+            "status": "mismatch",
+            "attestation_digest": recomputed_digest,
+            "mismatch_reasons": mismatch_reasons,
+        }
+
+    return {
+        "status": "ok",
+        "attestation_digest": recomputed_digest,
+        "mismatch_reasons": [],
+        "signer_public_key_hex": signer_public_key_hex,
+        "root_public_key_hex": root_public_key_hex,
+    }

@@ -14,6 +14,8 @@ Module type: Core innovation module
 from __future__ import annotations
 
 import math
+import hashlib
+import hmac
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
@@ -35,6 +37,111 @@ HF_FAILURE_REASONS = {
     "hf_basis_mismatch",
     "hf_encoding_failed",
 }
+
+
+def _resolve_plan_digest(cfg: Dict[str, Any]) -> str:
+    """功能：统一解析 HF 绑定的 plan_digest。"""
+    if not isinstance(cfg, dict):
+        return ""
+    watermark_cfg = cfg.get("watermark") if isinstance(cfg.get("watermark"), dict) else {}
+    candidate = cfg.get("plan_digest") or watermark_cfg.get("plan_digest")
+    return candidate if isinstance(candidate, str) else ""
+
+
+def _resolve_hf_attestation_event_digest(cfg: Dict[str, Any]) -> Optional[str]:
+    """功能：统一解析 HF attestation 事件摘要。"""
+    if not isinstance(cfg, dict):
+        return None
+    candidate = cfg.get("hf_attestation_event_digest") or cfg.get("attestation_event_digest") or cfg.get("attestation_digest")
+    if isinstance(candidate, str) and candidate:
+        return candidate
+    watermark_cfg = cfg.get("watermark") if isinstance(cfg.get("watermark"), dict) else {}
+    candidate = watermark_cfg.get("attestation_event_digest") or watermark_cfg.get("attestation_digest")
+    return candidate if isinstance(candidate, str) and candidate else None
+
+
+def _resolve_hf_attestation_key(cfg: Dict[str, Any]) -> Optional[str]:
+    """功能：统一解析 HF attestation 子密钥。"""
+    if not isinstance(cfg, dict):
+        return None
+    candidate = cfg.get("hf_attestation_key") or cfg.get("k_hf")
+    if isinstance(candidate, str) and candidate:
+        return candidate
+    runtime_cfg = cfg.get("attestation_runtime") if isinstance(cfg.get("attestation_runtime"), dict) else {}
+    candidate = runtime_cfg.get("k_hf")
+    return candidate if isinstance(candidate, str) and candidate else None
+
+
+def derive_hf_challenge_bundle(cfg: Dict[str, Any], n: int) -> Dict[str, Any]:
+    """
+    功能：派生 HF robust challenge 模板。
+
+    Derive the attestation-conditioned HF robust challenge bundle.
+
+    Args:
+        cfg: Runtime configuration mapping.
+        n: Number of HF coefficients.
+
+    Returns:
+        Challenge bundle with deterministic weights and ordering.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(n, int) or n <= 0:
+        raise ValueError("n must be positive int")
+
+    plan_digest = _resolve_plan_digest(cfg)
+    attestation_event_digest = _resolve_hf_attestation_event_digest(cfg)
+    k_hf = _resolve_hf_attestation_key(cfg)
+
+    challenge_source = "plan_digest"
+    if attestation_event_digest and k_hf:
+        try:
+            key_bytes = bytes.fromhex(k_hf)
+        except ValueError:
+            key_bytes = k_hf.encode("utf-8")
+        message = f"{attestation_event_digest}:{plan_digest}:hf_challenge".encode("utf-8")
+        seed_hex = hmac.new(key_bytes, message, hashlib.sha256).hexdigest()
+        challenge_source = "attestation_event_digest"
+    else:
+        seed_hex = digests.canonical_sha256(
+            {
+                "channel": "hf",
+                "plan_digest": plan_digest,
+                "attestation_event_digest": attestation_event_digest,
+                "tag": "hf_challenge",
+            }
+        )
+
+    challenge_seed = int(seed_hex[:16], 16)
+    rng = np.random.default_rng(challenge_seed)
+    ordering = rng.permutation(n)
+    weights = (0.75 + 0.5 * rng.random(n)).astype(np.float32)
+    weight_vector = np.ones(n, dtype=np.float32)
+    weight_vector[ordering] = weights
+    gating_mask = (rng.random(n) >= 0.15).astype(np.float32)
+    challenge_digest = digests.canonical_sha256(
+        {
+            "channel": "hf",
+            "plan_digest": plan_digest,
+            "attestation_event_digest": attestation_event_digest,
+            "challenge_source": challenge_source,
+            "challenge_seed": challenge_seed,
+            "ordering_head": ordering[: min(32, n)].tolist(),
+            "weight_head": [round(float(v), 6) for v in weight_vector[: min(32, n)].tolist()],
+            "gating_head": gating_mask[: min(32, n)].astype(int).tolist(),
+        }
+    )
+    return {
+        "challenge_seed": challenge_seed,
+        "challenge_source": challenge_source,
+        "challenge_digest": challenge_digest,
+        "plan_digest": plan_digest,
+        "attestation_event_digest": attestation_event_digest,
+        "weights": weight_vector,
+        "ordering": ordering.astype(np.int32),
+        "gating_mask": gating_mask,
+    }
 
 
 def compute_hf_basis_projection_torch(latents: Any, basis: Dict[str, Any]) -> Any:
@@ -131,7 +238,10 @@ def apply_hf_truncation_constraint_torch(coeffs: Any, cfg: Dict[str, Any]) -> Tu
         raise ValueError(f"hf_threshold_percentile must be in [0, 100], got {hf_threshold_percentile}")
 
     coeffs_fp32 = coeffs.to(dtype=torch.float32)
-    abs_coeffs = torch.abs(coeffs_fp32)
+    challenge_bundle = derive_hf_challenge_bundle(cfg, int(coeffs.shape[0]))
+    weights = torch.as_tensor(challenge_bundle["weights"], dtype=torch.float32, device=coeffs.device)
+    gating_mask = torch.as_tensor(challenge_bundle["gating_mask"], dtype=torch.float32, device=coeffs.device)
+    abs_coeffs = torch.abs(coeffs_fp32) * weights * torch.clamp(gating_mask, min=0.0)
     quantile = float(hf_threshold_percentile) / 100.0
     threshold_value = torch.quantile(abs_coeffs, quantile)
 
@@ -149,7 +259,11 @@ def apply_hf_truncation_constraint_torch(coeffs: Any, cfg: Dict[str, Any]) -> Tu
         "coeffs_after_norm": float(torch.linalg.vector_norm(constrained_coeffs).item()),
         "coeffs_retained_count": retained_count,
         "coeffs_total_count": total_count,
-        "retention_ratio": retention_ratio
+        "retention_ratio": retention_ratio,
+        "challenge_digest": challenge_bundle["challenge_digest"],
+        "challenge_seed": int(challenge_bundle["challenge_seed"]),
+        "challenge_source": challenge_bundle["challenge_source"],
+        "attestation_event_digest": challenge_bundle["attestation_event_digest"],
     }
     return constrained_coeffs, constraint_evidence
 
@@ -314,7 +428,10 @@ def apply_hf_truncation_constraint(
         raise ValueError(f"hf_threshold_percentile must be in [0, 100], got {hf_threshold_percentile}")
     
     # 计算尾部阈值（基于绝对值百分位数）。
-    abs_coeffs = np.abs(coeffs)
+    challenge_bundle = derive_hf_challenge_bundle(cfg, int(coeffs.shape[0]))
+    weights = np.asarray(challenge_bundle["weights"], dtype=np.float32)
+    gating_mask = np.asarray(challenge_bundle["gating_mask"], dtype=np.float32)
+    abs_coeffs = np.abs(coeffs) * weights * gating_mask
     threshold_value = np.percentile(abs_coeffs, hf_threshold_percentile)
     
     # 应用截断：保留超过阈值的系数，其余置零。
@@ -329,7 +446,11 @@ def apply_hf_truncation_constraint(
         "coeffs_after_norm": float(np.linalg.norm(constrained_coeffs)),
         "coeffs_retained_count": int(np.sum(mask)),
         "coeffs_total_count": int(coeffs.shape[0]),
-        "retention_ratio": float(np.sum(mask) / coeffs.shape[0])
+        "retention_ratio": float(np.sum(mask) / coeffs.shape[0]),
+        "challenge_digest": challenge_bundle["challenge_digest"],
+        "challenge_seed": int(challenge_bundle["challenge_seed"]),
+        "challenge_source": challenge_bundle["challenge_source"],
+        "attestation_event_digest": challenge_bundle["attestation_event_digest"],
     }
     
     return constrained_coeffs.astype(np.float32), constraint_evidence

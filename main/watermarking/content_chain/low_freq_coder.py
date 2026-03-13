@@ -20,8 +20,9 @@ import numpy as np
 
 from main.core import digests
 
+from . import channel_lf
 from .interfaces import ContentEvidence
-from .ldpc_codec import build_ldpc_spec, encode_message_bits
+from .ldpc_codec import build_ldpc_spec, decode_soft_llr
 
 
 def erf(x: float) -> float:
@@ -611,32 +612,34 @@ class LowFreqTemplateCodec:
         self.impl_version = impl_version
         self.impl_digest = impl_digest
 
-    def _derive_template(self, plan_digest: str, message_length: int, ecc_sparsity: int) -> Tuple[List[int], Any]:
+    def _build_runtime_cfg(
+        self,
+        cfg: Dict[str, Any],
+        plan_digest: str,
+        *,
+        basis_digest: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
-        功能：从 plan_digest 派生 LDPC 码字模板，供 embed 与 detect 共享。
+        功能：构造绑定 plan/basis 的 LF 运行时配置。
 
-        Derive LDPC codeword template deterministically from plan_digest.
-        Shared by embed_apply and detect_score to ensure closed-loop consistency.
+        Build LF runtime config enriched with plan and basis anchors.
 
         Args:
-            plan_digest: Plan digest binding.
-            message_length: LF message length.
-            ecc_sparsity: LDPC parity check sparsity.
+            cfg: Base runtime config.
+            plan_digest: Bound plan digest.
+            basis_digest: Optional basis digest.
 
         Returns:
-            Tuple of (code_bits list, ldpc_spec dict).
+            Runtime config mapping for shared LF operators.
         """
-        import random as _rand
-        seed = int(digests.canonical_sha256({"plan_digest": plan_digest, "tag": "lf_message"})[:16], 16)
-        rng = _rand.Random(seed)
-        message_bits = [1 if rng.random() < 0.5 else -1 for _ in range(message_length)]
-        ldpc_spec = build_ldpc_spec(
-            message_length=message_length,
-            ecc_sparsity=ecc_sparsity,
-            seed_key=f"{plan_digest}:{message_length}:{ecc_sparsity}:embed",
-        )
-        code_bits = encode_message_bits(message_bits, ldpc_spec)
-        return code_bits, ldpc_spec
+        runtime_cfg = dict(cfg)
+        watermark_cfg = dict(cfg.get("watermark", {})) if isinstance(cfg.get("watermark"), dict) else {}
+        watermark_cfg["plan_digest"] = plan_digest
+        if isinstance(basis_digest, str) and basis_digest:
+            runtime_cfg["lf_basis_digest"] = basis_digest
+            watermark_cfg["basis_digest"] = basis_digest
+        runtime_cfg["watermark"] = watermark_cfg
+        return runtime_cfg
 
     def embed_apply(
         self,
@@ -679,11 +682,10 @@ class LowFreqTemplateCodec:
             }
 
         variance = float(lf_cfg.get("variance", 1.5))
-        message_length = int(lf_cfg.get("message_length", 64))
-        ecc_sparsity = int(lf_cfg.get("ecc_sparsity", 3))
-
-        code_bits, ldpc_spec = self._derive_template(plan_digest, message_length, ecc_sparsity)
-        block_length = int(ldpc_spec.get("n", len(code_bits)))
+        runtime_cfg = self._build_runtime_cfg(cfg, plan_digest)
+        template_bundle = channel_lf.derive_lf_template_bundle(runtime_cfg, len(_flatten_to_list(latent_features)))
+        ldpc_spec = template_bundle["ldpc_spec"]
+        block_length = int(ldpc_spec.get("n", len(template_bundle["codeword_bipolar"])))
         parity_check_digest = ldpc_spec["parity_check_digest"]
 
         flat_latents = _flatten_to_list(latent_features)
@@ -695,23 +697,34 @@ class LowFreqTemplateCodec:
                 "lf_trace_digest": digests.canonical_sha256({"failure": "insufficient_dim"}),
             }
 
-        # （1）在系数域做加性注入：latent[i] += variance * codeword[i]。
-        # 与 sign_flipping（latent *= scale）本质不同：加性不破坏原始绝对幅值符号。
+        coeffs = np.asarray(flat_latents[:block_length], dtype=np.float32)
+        encoded_coeffs, encoding_evidence = channel_lf.apply_low_freq_encoding(
+            coeffs=coeffs,
+            key=0,
+            cfg=runtime_cfg,
+        )
         embedded_latents = list(flat_latents)
-        for i in range(block_length):
-            embedded_latents[i] += variance * float(code_bits[i])
+        for index in range(block_length):
+            embedded_latents[index] = float(encoded_coeffs[index])
 
         trace_summary = {
             "impl_id": self.impl_id,
             "impl_version": self.impl_version,
             "coding_mode": "pseudogaussian_template_additive",
             "variance": variance,
-            "message_length": message_length,
+            "message_length": int(lf_cfg.get("message_length", 64)),
             "block_length": block_length,
-            "ecc_sparsity": ecc_sparsity,
+            "ecc_sparsity": int(lf_cfg.get("ecc_sparsity", 3)),
             "parity_check_digest": parity_check_digest,
             "plan_digest": plan_digest,
             "cfg_digest": cfg_digest,
+            "basis_digest": template_bundle.get("basis_digest"),
+            "attestation_event_digest": template_bundle.get("attestation_event_digest"),
+            "message_source": template_bundle.get("message_source"),
+            "pseudogaussian_seed": template_bundle.get("pseudogaussian_seed"),
+            "decoder_mode": template_bundle.get("decoder_mode"),
+            "bp_iterations": template_bundle.get("bp_iterations"),
+            "encoding_evidence": encoding_evidence,
             "mode": "embed",
         }
         lf_trace_digest = digests.canonical_sha256(trace_summary)
@@ -770,13 +783,7 @@ class LowFreqTemplateCodec:
                 "lf_trace_digest": digests.canonical_sha256({"absent": "lf_disabled"}),
             }
 
-        message_length = int(lf_cfg.get("message_length", 64))
-        ecc_sparsity = int(lf_cfg.get("ecc_sparsity", 3))
         correlation_scale = float(lf_cfg.get("correlation_scale", 10.0))
-
-        code_bits, ldpc_spec = self._derive_template(plan_digest, message_length, ecc_sparsity)
-        block_length = int(ldpc_spec.get("n", message_length))
-        parity_check_digest = ldpc_spec["parity_check_digest"]
 
         if lf_basis is None or not isinstance(lf_basis, dict):
             return None, {
@@ -794,6 +801,22 @@ class LowFreqTemplateCodec:
             }
         basis_matrix_np = np.asarray(basis_matrix_raw, dtype=np.float64)
         basis_rank = int(lf_basis.get("basis_rank", basis_matrix_np.shape[1]))
+        basis_digest = None
+        if isinstance(lf_basis.get("basis_digest"), str) and lf_basis.get("basis_digest"):
+            basis_digest = str(lf_basis.get("basis_digest"))
+        else:
+            basis_digest = digests.canonical_sha256(
+                {
+                    "basis_rank": basis_rank,
+                    "projection_matrix": basis_matrix_np.tolist(),
+                }
+            )
+
+        runtime_cfg = self._build_runtime_cfg(cfg, plan_digest, basis_digest=basis_digest)
+        template_bundle = channel_lf.derive_lf_template_bundle(runtime_cfg, max(basis_rank, 1))
+        ldpc_spec = template_bundle["ldpc_spec"]
+        block_length = int(ldpc_spec.get("n", basis_rank))
+        parity_check_digest = ldpc_spec["parity_check_digest"]
 
         if hasattr(latent_features, "detach"):
             latents_flat = latent_features.detach().cpu().numpy().astype(np.float64).reshape(-1)
@@ -825,23 +848,44 @@ class LowFreqTemplateCodec:
             }
 
         coeffs_arr = np.dot(latents_flat, basis_matrix_np)
-        codeword = np.array(code_bits[:basis_rank], dtype=np.float64)
+        template = np.asarray(template_bundle["template"], dtype=np.float64)
+        codeword = np.asarray(template_bundle["codeword_bipolar"], dtype=np.float64)
 
         c = coeffs_arr[:basis_rank]
         eps = 1e-8
         c_mean = float(np.mean(c))
         c_std = float(np.std(c))
         c_whitened = (c - c_mean) / (c_std + eps)
-        t_norm = float(np.linalg.norm(codeword))
-        t_normalized = codeword / (t_norm + eps)
+        template_head = template[:basis_rank]
+        t_norm = float(np.linalg.norm(template_head))
+        t_normalized = template_head / (t_norm + eps)
         raw_corr = float(np.dot(c_whitened, t_normalized))
 
-        lf_score = 1.0 / (1.0 + math.exp(-correlation_scale * raw_corr))
+        variance = float(lf_cfg.get("variance", 1.5))
+        llr_values = channel_lf.build_lf_soft_llr(
+            coeffs=np.asarray(c, dtype=np.float32),
+            template_bundle=template_bundle,
+            variance=variance,
+        )
+        bp_iterations = int(template_bundle["bp_iterations"])
+        decode_result = decode_soft_llr(llr_values, ldpc_spec, bp_iterations)
+        decoded_bits = decode_result["decoded_bits"]
+        expected_codeword = np.asarray(template_bundle["codeword_bipolar"], dtype=np.int32)
+        agreement_count = 0
+        compare_count = min(len(decoded_bits), int(expected_codeword.shape[0]))
+        for index in range(compare_count):
+            if int(decoded_bits[index]) == int(expected_codeword[index]):
+                agreement_count += 1
+        codeword_agreement = float(agreement_count / compare_count) if compare_count > 0 else 0.0
+        correlation_score = 1.0 / (1.0 + math.exp(-correlation_scale * raw_corr))
+        lf_score = float(round(0.5 * correlation_score + 0.5 * codeword_agreement, 8))
 
         trace = {
             "status": "ok",
             "lf_score": lf_score,
             "raw_correlation": raw_corr,
+            "correlation_score": float(correlation_score),
+            "codeword_agreement": round(codeword_agreement, 8),
             "c_mean": c_mean,
             "c_std": c_std,
             "basis_rank": basis_rank,
@@ -850,10 +894,19 @@ class LowFreqTemplateCodec:
             "correlation_scale": correlation_scale,
             "detect_variant": "correlation_v2",
             "higher_is_watermarked": True,
+            "decoder_mode": template_bundle.get("decoder_mode"),
+            "soft_decode_called": True,
+            "bp_converged": bool(decode_result.get("bp_converged")),
+            "bp_iteration_count": int(decode_result.get("bp_iteration_count", 0)),
+            "syndrome_weight": int(decode_result.get("syndrome_weight", 0)),
             "impl_id": self.impl_id,
             "impl_version": self.impl_version,
             "plan_digest": plan_digest,
             "cfg_digest": cfg_digest,
+            "basis_digest": basis_digest,
+            "attestation_event_digest": template_bundle.get("attestation_event_digest"),
+            "message_source": template_bundle.get("message_source"),
+            "pseudogaussian_seed": template_bundle.get("pseudogaussian_seed"),
         }
         trace["lf_trace_digest"] = digests.canonical_sha256(trace)
         return lf_score, trace

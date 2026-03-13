@@ -470,12 +470,25 @@ def _build_hf_channel_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
         tail_ratio = max(0.0, min(0.95, tail_ratio))
         percentile_value = (1.0 - tail_ratio) * 100.0
     percentile_value = max(0.0, min(100.0, percentile_value))
-    return {"hf_threshold_percentile": percentile_value}
+    channel_cfg: Dict[str, Any] = {"hf_threshold_percentile": percentile_value}
+    plan_digest = cfg.get("plan_digest") or watermark_cfg.get("plan_digest")
+    if isinstance(plan_digest, str) and plan_digest:
+        channel_cfg["plan_digest"] = plan_digest
+    attestation_event_digest = cfg.get("attestation_event_digest") or cfg.get("attestation_digest") or watermark_cfg.get("attestation_event_digest")
+    if isinstance(attestation_event_digest, str) and attestation_event_digest:
+        channel_cfg["attestation_event_digest"] = attestation_event_digest
+    k_hf = cfg.get("hf_attestation_key") or cfg.get("k_hf")
+    if isinstance(k_hf, str) and k_hf:
+        channel_cfg["hf_attestation_key"] = k_hf
+    return channel_cfg
 
 
 def compute_hf_attestation_score(
     hf_values: Any,
     k_hf: str,
+    *,
+    attestation_event_digest: Optional[str] = None,
+    plan_digest: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     功能：计算 HF 通道的 attestation 得分（tail-truncation 能量证据）。
@@ -542,9 +555,17 @@ def compute_hf_attestation_score(
     coeffs = np.asarray(flat_hf, dtype=np.float32)
     n_compare = int(coeffs.shape[0])
     threshold_percentile = 75.0
-    constrained_coeffs, constraint_evidence = channel_hf.apply_hf_truncation_constraint(
+    channel_cfg: Dict[str, Any] = {
+        "hf_threshold_percentile": threshold_percentile,
+        "hf_attestation_key": k_hf,
+    }
+    if isinstance(attestation_event_digest, str) and attestation_event_digest:
+        channel_cfg["attestation_event_digest"] = attestation_event_digest
+    if isinstance(plan_digest, str) and plan_digest:
+        channel_cfg["plan_digest"] = plan_digest
+    _, constraint_evidence = channel_hf.apply_hf_truncation_constraint(
         coeffs,
-        {"hf_threshold_percentile": threshold_percentile},
+        channel_cfg,
     )
     coeffs_before_norm = float(constraint_evidence.get("coeffs_before_norm", 0.0))
     coeffs_after_norm = float(constraint_evidence.get("coeffs_after_norm", 0.0))
@@ -564,6 +585,8 @@ def compute_hf_attestation_score(
         "retained_count": int(constraint_evidence.get("coeffs_retained_count", 0)),
         "retained_ratio": round(float(constraint_evidence.get("retention_ratio", 0.0)), 8),
         "hf_attestation_score": round(hf_attestation_score, 6),
+        "challenge_digest": constraint_evidence.get("challenge_digest"),
+        "challenge_source": constraint_evidence.get("challenge_source"),
     }
     trace_digest = digests.canonical_sha256(trace_payload)
 
@@ -573,5 +596,7 @@ def compute_hf_attestation_score(
         "n_values_used": n_compare,
         "threshold_percentile_applied": float(constraint_evidence.get("threshold_percentile_applied", threshold_percentile)),
         "retained_ratio": float(constraint_evidence.get("retention_ratio", 0.0)),
+        "challenge_digest": constraint_evidence.get("challenge_digest"),
+        "challenge_source": constraint_evidence.get("challenge_source"),
         "hf_attestation_trace_digest": trace_digest,
     }

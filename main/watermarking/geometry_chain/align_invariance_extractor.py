@@ -614,6 +614,11 @@ class GeometryAligner:
         refined_transform = self._params_to_quantized_transform(fit_result.model_type, fit_result.params)
         inlier_array = np.asarray(fit_result.inlier_mask, dtype=np.float64)
         inlier_ratio = float(np.mean(inlier_array)) if inlier_array.size > 0 else 0.0
+        fitted_transform = {
+            "model_type": fit_result.model_type,
+            "transform_quantized": refined_transform,
+        }
+        recovery_validation = self._validate_inverse_recovery(correspondences, fitted_transform, cfg)
         return {
             "status": "ok",
             "model_type": fit_result.model_type,
@@ -627,6 +632,7 @@ class GeometryAligner:
                 "param_uncertainty": fit_result.param_uncertainty,
                 "inlier_ratio": inlier_ratio,
                 "robust_loss": self._resolve_align_robust_loss(cfg),
+                "recovery_validation": recovery_validation,
             },
         }
 
@@ -691,6 +697,11 @@ class GeometryAligner:
         rotation_bins = int(support.get("rotation_bins", self._resolve_rotation_bins(cfg)))
         scale_bins = int(support.get("scale_bins", self._resolve_scale_bins(cfg)))
         match_count_estimate = int(max(4, round(inlier_ratio * float(max(8, rotation_bins + scale_bins)))))
+        recovery_validation = fit_diagnostics.get("recovery_validation") if isinstance(fit_diagnostics.get("recovery_validation"), dict) else {}
+        inverse_recovery_median = float(recovery_validation.get("inverse_recovery_median", 1.0))
+        inverse_recovery_max = float(recovery_validation.get("inverse_recovery_max", 1.0))
+        cycle_reprojection_median = float(recovery_validation.get("cycle_reprojection_median", 1.0))
+        inverse_consistency = _clamp01(1.0 - max(inverse_recovery_median, cycle_reprojection_median))
 
         return {
             "relation_consistency": round(relation_consistency, 6),
@@ -709,6 +720,11 @@ class GeometryAligner:
             "residual_q25": round(_clamp01(residual_q25), 6),
             "residual_q75": round(_clamp01(residual_q75), 6),
             "param_variance_norm": round(_clamp01(param_variance_norm), 6),
+            "inverse_recovery_median": round(_clamp01(inverse_recovery_median), 6),
+            "inverse_recovery_max": round(_clamp01(inverse_recovery_max), 6),
+            "cycle_reprojection_median": round(_clamp01(cycle_reprojection_median), 6),
+            "inverse_consistency": round(inverse_consistency, 6),
+            "inverse_recovery_success": bool(recovery_validation.get("recovery_success", False)),
         }
 
     def compute_align_trace_digest(self, payload: Dict[str, Any]) -> str:
@@ -827,6 +843,99 @@ class GeometryAligner:
             ],
             axis=1,
         )
+
+    def _validate_inverse_recovery(
+        self,
+        correspondences: List[Dict[str, Any]],
+        transform: Dict[str, Any],
+        cfg: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        功能：执行几何反演恢复与 cycle 复验。
+
+        Validate the estimated transform with inverse recovery and forward cycle reprojection.
+
+        Args:
+            correspondences: Source and destination correspondences.
+            transform: Estimated transform payload.
+            cfg: Configuration mapping.
+
+        Returns:
+            Recovery validation mapping.
+        """
+        src_points, dst_points = self._robust_fitter._build_point_arrays(correspondences)
+        if src_points.shape[0] == 0 or dst_points.shape[0] == 0:
+            return {
+                "recovery_success": False,
+                "inverse_recovery_median": 1.0,
+                "inverse_recovery_max": 1.0,
+                "cycle_reprojection_median": 1.0,
+                "cycle_reprojection_max": 1.0,
+            }
+
+        inverse_transform = self._invert_transform_payload(transform)
+        if inverse_transform is None:
+            return {
+                "recovery_success": False,
+                "inverse_recovery_median": 1.0,
+                "inverse_recovery_max": 1.0,
+                "cycle_reprojection_median": 1.0,
+                "cycle_reprojection_max": 1.0,
+            }
+
+        recovered_src = self._apply_transform(dst_points, inverse_transform)
+        cycle_dst = self._apply_transform(recovered_src, transform)
+        inverse_residuals = np.linalg.norm(recovered_src - src_points, axis=1)
+        cycle_residuals = np.linalg.norm(cycle_dst - dst_points, axis=1)
+        recovery_threshold = self._resolve_align_inverse_max_residual(cfg)
+        recovery_success = bool(
+            np.median(inverse_residuals) <= recovery_threshold
+            and np.median(cycle_residuals) <= recovery_threshold
+            and np.max(inverse_residuals) <= 2.0 * recovery_threshold
+            and np.max(cycle_residuals) <= 2.0 * recovery_threshold
+        )
+        return {
+            "recovery_success": recovery_success,
+            "inverse_recovery_median": float(np.median(inverse_residuals)),
+            "inverse_recovery_max": float(np.max(inverse_residuals)),
+            "cycle_reprojection_median": float(np.median(cycle_residuals)),
+            "cycle_reprojection_max": float(np.max(cycle_residuals)),
+        }
+
+    def _invert_transform_payload(self, transform: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        quantized = transform.get("transform_quantized") if isinstance(transform.get("transform_quantized"), dict) else {}
+        model_type = str(transform.get("model_type", "similarity")).lower()
+        theta = np.deg2rad(float(quantized.get("rotation_degree_q", 0.0)))
+        scale_factor = float(quantized.get("scale_factor_q", 1.0))
+        tx = float(quantized.get("translation_x_q", 0.0))
+        ty = float(quantized.get("translation_y_q", 0.0))
+        if scale_factor <= 1e-8:
+            return None
+
+        cos_v = float(np.cos(theta))
+        sin_v = float(np.sin(theta))
+        rotation_matrix = np.asarray([[cos_v, -sin_v], [sin_v, cos_v]], dtype=np.float64)
+        inverse_linear = (1.0 / scale_factor) * rotation_matrix.T
+        inverse_translation = -inverse_linear @ np.asarray([tx, ty], dtype=np.float64)
+        inverse_theta = float(np.rad2deg(np.arctan2(inverse_linear[1, 0], inverse_linear[0, 0])))
+        inverse_scale = float(np.sqrt(inverse_linear[0, 0] ** 2 + inverse_linear[1, 0] ** 2))
+        return {
+            "model_type": model_type,
+            "transform_quantized": {
+                "rotation_degree_q": round(inverse_theta, 4),
+                "scale_factor_q": round(inverse_scale, 6),
+                "translation_x_q": round(float(inverse_translation[0]), 6),
+                "translation_y_q": round(float(inverse_translation[1]), 6),
+            },
+        }
+
+    def _resolve_align_inverse_max_residual(self, cfg: Dict[str, Any]) -> float:
+        detect_cfg = cfg.get("detect") if isinstance(cfg.get("detect"), dict) else {}
+        geometry_cfg = detect_cfg.get("geometry") if isinstance(detect_cfg.get("geometry"), dict) else {}
+        value = geometry_cfg.get("align_inverse_max_residual", 0.18)
+        if not isinstance(value, (int, float)):
+            return 0.18
+        return max(0.01, min(1.0, float(value)))
 
     def _params_to_quantized_transform(self, model_type: str, params: List[float]) -> Dict[str, float]:
         if model_type == "affine":
@@ -1137,6 +1246,20 @@ class GeometryAlignInvarianceExtractor:
             return self._build_terminal_evidence(
                 status="fail",
                 reason="align_param_variance_above_threshold",
+                anchor_evidence=anchor_evidence,
+                sync_evidence=sync_evidence,
+                align_trace_digest=None,
+                align_metrics=align_metrics,
+                geo_score=None,
+                geo_score_direction=None,
+                align_config_digest=align_config_digest,
+                score_digest=None,
+            )
+
+        if not bool(align_metrics.get("inverse_recovery_success", False)):
+            return self._build_terminal_evidence(
+                status="fail",
+                reason="align_inverse_reprojection_above_threshold",
                 anchor_evidence=anchor_evidence,
                 sync_evidence=sync_evidence,
                 align_trace_digest=None,
@@ -1481,6 +1604,7 @@ class GeometryAlignInvarianceExtractor:
             "align_sync_quality_min": self._resolve_align_sync_quality_min(cfg),
             "align_anchor_min_concentration": self._resolve_align_anchor_min_concentration(cfg),
             "align_attention_consistency_min_stability": self._resolve_align_attention_consistency_min_stability(cfg),
+            "align_inverse_max_residual": self._aligner._resolve_align_inverse_max_residual(cfg),
             "sync_rotation_bins": geometry_cfg.get("sync_rotation_bins", 36),
             "sync_scale_bins": geometry_cfg.get("sync_scale_bins", 16),
             "model_id": cfg.get("model_id"),

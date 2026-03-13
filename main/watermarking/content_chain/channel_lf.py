@@ -13,6 +13,7 @@ Module type: Core innovation module
 from __future__ import annotations
 
 import math
+import hmac
 import random as _random
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -25,6 +26,225 @@ from .ldpc_codec import build_ldpc_spec, encode_message_bits
 LF_CHANNEL_IMPL_ID = "low_freq_template_codec"
 LF_CHANNEL_VERSION = "v2"
 LF_TRACE_VERSION = "v2"
+
+
+def _resolve_lf_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """功能：规范化 LF 配置视图。"""
+    watermark_cfg = cfg.get("watermark") if isinstance(cfg.get("watermark"), dict) else {}
+    lf_cfg = watermark_cfg.get("lf") if isinstance(watermark_cfg.get("lf"), dict) else {}
+    return dict(lf_cfg)
+
+
+def _resolve_plan_digest(cfg: Dict[str, Any]) -> str:
+    """功能：统一解析 LF 绑定的 plan_digest。"""
+    watermark_cfg = cfg.get("watermark") if isinstance(cfg.get("watermark"), dict) else {}
+    candidate = cfg.get("lf_plan_digest") or watermark_cfg.get("plan_digest") or cfg.get("plan_digest")
+    return candidate if isinstance(candidate, str) else ""
+
+
+def _resolve_basis_digest(cfg: Dict[str, Any]) -> Optional[str]:
+    """功能：统一解析 basis_digest。"""
+    candidate = cfg.get("lf_basis_digest") or cfg.get("basis_digest")
+    if isinstance(candidate, str) and candidate:
+        return candidate
+    watermark_cfg = cfg.get("watermark") if isinstance(cfg.get("watermark"), dict) else {}
+    candidate = watermark_cfg.get("basis_digest")
+    return candidate if isinstance(candidate, str) and candidate else None
+
+
+def _resolve_attestation_event_digest(cfg: Dict[str, Any]) -> Optional[str]:
+    """功能：统一解析 attestation 事件摘要。"""
+    direct_candidate = (
+        cfg.get("lf_attestation_event_digest")
+        or cfg.get("attestation_event_digest")
+        or cfg.get("attestation_digest")
+    )
+    if isinstance(direct_candidate, str) and direct_candidate:
+        return direct_candidate
+    watermark_cfg = cfg.get("watermark") if isinstance(cfg.get("watermark"), dict) else {}
+    watermark_candidate = watermark_cfg.get("attestation_event_digest") or watermark_cfg.get("attestation_digest")
+    if isinstance(watermark_candidate, str) and watermark_candidate:
+        return watermark_candidate
+    attestation_cfg = cfg.get("attestation") if isinstance(cfg.get("attestation"), dict) else {}
+    candidate = attestation_cfg.get("event_digest") or attestation_cfg.get("attestation_digest")
+    return candidate if isinstance(candidate, str) and candidate else None
+
+
+def _resolve_lf_attestation_key(cfg: Dict[str, Any]) -> Optional[str]:
+    """功能：统一解析 LF attestation 子密钥。"""
+    candidate = cfg.get("lf_attestation_key") or cfg.get("k_lf")
+    if isinstance(candidate, str) and candidate:
+        return candidate
+    attestation_runtime = cfg.get("attestation_runtime") if isinstance(cfg.get("attestation_runtime"), dict) else {}
+    candidate = attestation_runtime.get("k_lf")
+    if isinstance(candidate, str) and candidate:
+        return candidate
+    watermark_cfg = cfg.get("watermark") if isinstance(cfg.get("watermark"), dict) else {}
+    candidate = watermark_cfg.get("k_lf")
+    return candidate if isinstance(candidate, str) and candidate else None
+
+
+def _resolve_decoder_mode(cfg: Dict[str, Any]) -> str:
+    """功能：解析 LF decoder mode。"""
+    lf_cfg = _resolve_lf_cfg(cfg)
+    decoder = lf_cfg.get("decoder", "bp_soft_llr")
+    if not isinstance(decoder, str) or not decoder:
+        return "bp_soft_llr"
+    return decoder
+
+
+def _resolve_bp_iterations(cfg: Dict[str, Any]) -> int:
+    """功能：解析 BP 迭代次数。"""
+    lf_cfg = _resolve_lf_cfg(cfg)
+    value = lf_cfg.get("bp_iterations", 50)
+    if not isinstance(value, int):
+        return 50
+    return max(1, value)
+
+
+def _payload_bytes_to_bipolar_bits(payload: bytes, required_length: int) -> List[int]:
+    """功能：将 payload bytes 展开为双极性比特。"""
+    bits: List[int] = []
+    for byte_value in payload:
+        for bit_index in range(8):
+            bit = (byte_value >> bit_index) & 1
+            bits.append(1 if bit == 1 else -1)
+            if len(bits) >= required_length:
+                return bits
+    while len(bits) < required_length:
+        bits.append(1)
+    return bits
+
+
+def derive_lf_template_bundle(cfg: Dict[str, Any], n: int) -> Dict[str, Any]:
+    """
+    功能：统一派生 LF 模板闭环所需的码字、幅度与审计锚点。
+
+    Derive the formal LF template bundle shared by embed and detect.
+
+    Args:
+        cfg: Runtime configuration mapping.
+        n: Number of coefficients required.
+
+    Returns:
+        Template bundle containing codeword, amplitudes, LDPC spec, and audit anchors.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(n, int) or n <= 0:
+        raise ValueError("n must be positive int")
+
+    lf_cfg = _resolve_lf_cfg(cfg)
+    plan_digest = _resolve_plan_digest(cfg)
+    message_length = int(lf_cfg.get("message_length", 64))
+    ecc_sparsity = int(lf_cfg.get("ecc_sparsity", 3))
+    basis_digest = _resolve_basis_digest(cfg)
+    attestation_event_digest = _resolve_attestation_event_digest(cfg)
+    k_lf = _resolve_lf_attestation_key(cfg)
+
+    message_source = "plan_digest"
+    if attestation_event_digest and k_lf:
+        from main.watermarking.provenance.key_derivation import compute_lf_attestation_payload
+
+        payload_length = max(1, int(math.ceil(float(message_length) / 8.0)))
+        payload = compute_lf_attestation_payload(k_lf, attestation_event_digest, payload_length=payload_length)
+        message_bits = _payload_bytes_to_bipolar_bits(payload, message_length)
+        message_source = "attestation_event_digest"
+    else:
+        seed_material = {
+            "plan_digest": plan_digest,
+            "tag": "lf_message",
+            "basis_digest": basis_digest,
+            "attestation_event_digest": attestation_event_digest,
+        }
+        seed = int(digests.canonical_sha256(seed_material)[:16], 16)
+        rng = _random.Random(seed)
+        message_bits = [1 if rng.random() < 0.5 else -1 for _ in range(message_length)]
+
+    ldpc_seed_key = digests.canonical_sha256(
+        {
+            "plan_digest": plan_digest,
+            "basis_digest": basis_digest,
+            "attestation_event_digest": attestation_event_digest,
+            "message_length": message_length,
+            "ecc_sparsity": ecc_sparsity,
+            "message_source": message_source,
+            "channel": "lf",
+        }
+    )
+    ldpc_spec = build_ldpc_spec(
+        message_length=message_length,
+        ecc_sparsity=ecc_sparsity,
+        seed_key=ldpc_seed_key,
+    )
+    code_bits = encode_message_bits(message_bits, ldpc_spec)
+    codeword = np.array(code_bits[:n] + [1] * max(0, n - len(code_bits)), dtype=np.float32)
+
+    template_seed_material = {
+        "channel": "lf",
+        "plan_digest": plan_digest,
+        "basis_digest": basis_digest,
+        "attestation_event_digest": attestation_event_digest,
+        "message_source": message_source,
+        "parity_check_digest": ldpc_spec.get("parity_check_digest"),
+    }
+    pseudogaussian_seed = int(digests.canonical_sha256(template_seed_material)[:16], 16)
+    rng_np = np.random.default_rng(pseudogaussian_seed)
+    amplitudes = np.abs(rng_np.standard_normal(n)).astype(np.float32)
+    signed_template = codeword * amplitudes
+
+    return {
+        "message_bits": message_bits,
+        "message_source": message_source,
+        "codeword_bipolar": codeword,
+        "ldpc_spec": ldpc_spec,
+        "parity_check_digest": ldpc_spec.get("parity_check_digest"),
+        "pseudogaussian_seed": pseudogaussian_seed,
+        "amplitudes": amplitudes,
+        "template": signed_template,
+        "plan_digest": plan_digest,
+        "basis_digest": basis_digest,
+        "attestation_event_digest": attestation_event_digest,
+        "decoder_mode": _resolve_decoder_mode(cfg),
+        "bp_iterations": _resolve_bp_iterations(cfg),
+    }
+
+
+def build_lf_soft_llr(coeffs: np.ndarray, template_bundle: Dict[str, Any], variance: float) -> List[float]:
+    """
+    功能：根据模板方向与幅度构造 LF 软判决 LLR。
+
+    Build LF soft-decision LLR values from coefficient-domain observations.
+
+    Args:
+        coeffs: Observed LF coefficients.
+        template_bundle: Shared LF template bundle.
+        variance: LF variance used during embedding.
+
+    Returns:
+        LLR list aligned with LDPC block length.
+    """
+    if not isinstance(coeffs, np.ndarray):
+        raise TypeError("coeffs must be np.ndarray")
+    if not isinstance(template_bundle, dict):
+        raise TypeError("template_bundle must be dict")
+    if not isinstance(variance, (int, float)) or variance <= 0:
+        raise ValueError("variance must be positive number")
+
+    ldpc_spec = template_bundle.get("ldpc_spec") if isinstance(template_bundle.get("ldpc_spec"), dict) else {}
+    block_length = int(ldpc_spec.get("n", coeffs.shape[0]))
+    template = np.asarray(template_bundle.get("template", []), dtype=np.float64)
+    llr_values: List[float] = []
+    effective_count = min(int(coeffs.shape[0]), int(template.shape[0]), block_length)
+    for index in range(effective_count):
+        observed = float(coeffs[index])
+        template_value = float(template[index])
+        amplitude = max(abs(template_value), 1e-6)
+        sign = 1.0 if template_value >= 0.0 else -1.0
+        llr_values.append(float((observed * sign) / (float(variance) * amplitude)))
+    while len(llr_values) < block_length:
+        llr_values.append(0.0)
+    return llr_values
 
 
 def _has_plan_digest(cfg: Dict[str, Any]) -> bool:
@@ -47,30 +267,8 @@ def _get_ldpc_codeword_bits(cfg: Dict[str, Any], n: int) -> List[int]:
     Returns:
         List of ±1 integers of length n. Falls back to ones if plan_digest absent.
     """
-    plan_digest: str = cfg.get("lf_plan_digest") or cfg.get("watermark", {}).get("plan_digest", "")
-    if not isinstance(plan_digest, str) or not plan_digest:
-        # 无 plan_digest 时回退全 +1（中性）。
-        return [1] * n
-
-    message_length = int(cfg.get("lf_message_length") or cfg.get("watermark", {}).get("lf", {}).get("message_length", 64))
-    ecc_sparsity = int(cfg.get("lf_ecc_sparsity") or cfg.get("watermark", {}).get("lf", {}).get("ecc_sparsity", 3))
-
-    # 与 detect_score() 相同的种子派生逻辑。
-    seed = int(digests.canonical_sha256({"plan_digest": plan_digest, "tag": "lf_message"})[:16], 16)
-    rng = _random.Random(seed)
-    message_bits: List[int] = [1 if rng.random() < 0.5 else -1 for _ in range(message_length)]
-
-    ldpc_spec = build_ldpc_spec(
-        message_length=message_length,
-        ecc_sparsity=ecc_sparsity,
-        seed_key=f"{plan_digest}:{message_length}:{ecc_sparsity}:embed",
-    )
-    encoded: List[int] = encode_message_bits(message_bits, ldpc_spec)
-
-    # 截断或补全到 n 位。
-    if len(encoded) >= n:
-        return encoded[:n]
-    return encoded + [1] * (n - len(encoded))
+    template_bundle = derive_lf_template_bundle(cfg, n)
+    return [int(v) for v in np.asarray(template_bundle["codeword_bipolar"], dtype=np.int32).tolist()]
 
 
 def _derive_ldpc_codeword_from_cfg(cfg: Dict[str, Any], n: int, device: Any) -> Any:
@@ -200,35 +398,34 @@ def apply_low_freq_encoding_torch(coeffs: Any, key: int, cfg: Dict[str, Any]) ->
     if not isinstance(cfg, dict):
         raise TypeError("cfg must be dict")
 
-    strength = cfg.get("lf_strength", 1.5)
+    lf_cfg = _resolve_lf_cfg(cfg)
+    strength = cfg.get("lf_strength")
+    if not isinstance(strength, (int, float)):
+        strength = lf_cfg.get("strength", lf_cfg.get("variance", 1.5))
     if not isinstance(strength, (int, float)) or strength < 0:
         raise ValueError(f"lf_strength must be non-negative, got {strength}")
 
     n = int(coeffs.shape[0])
-
-    # 伪高斯幅度仍用 key 派生（步骤相关，合法）。
-    generator = torch.Generator(device=coeffs.device)
-    generator.manual_seed(int(key))
-    pseudogaussian_factors = torch.randn(
-        n,
-        generator=generator,
+    template_bundle = derive_lf_template_bundle(cfg, n)
+    watermark_pattern = torch.as_tensor(
+        template_bundle["template"],
+        dtype=torch.float32,
         device=coeffs.device,
-        dtype=torch.float32
     )
-
-    # （修复 Bug-B）从 plan_digest 派生固定 LDPC 码字，与 detect_score() 的
-    # expected_bits 种子一致，确保 embed/detect 两侧码字匹配。
-    codeword = _derive_ldpc_codeword_from_cfg(cfg, n, coeffs.device)
-
-    watermark_pattern = codeword * torch.abs(pseudogaussian_factors)
 
     coeffs_fp32 = coeffs.to(dtype=torch.float32)
     encoded_coeffs = coeffs_fp32 + float(strength) * watermark_pattern
 
     encoding_evidence = {
         "strength_applied": float(strength),
-        "pattern_seed": int(key),
-        "codeword_source": "ldpc_plan_digest" if _has_plan_digest(cfg) else "random_fallback",
+        "pattern_seed": int(template_bundle["pseudogaussian_seed"]),
+        "runtime_step_key": int(key),
+        "codeword_source": str(template_bundle["message_source"]),
+        "parity_check_digest": template_bundle["parity_check_digest"],
+        "basis_digest": template_bundle["basis_digest"],
+        "attestation_event_digest": template_bundle["attestation_event_digest"],
+        "decoder_mode": template_bundle["decoder_mode"],
+        "bp_iterations": int(template_bundle["bp_iterations"]),
         "coeffs_before_norm": float(torch.linalg.vector_norm(coeffs_fp32).item()),
         "coeffs_after_norm": float(torch.linalg.vector_norm(encoded_coeffs).item()),
         "pattern_norm": float(torch.linalg.vector_norm(watermark_pattern).item()),
@@ -401,21 +598,16 @@ def apply_low_freq_encoding(
         raise TypeError("cfg must be dict")
     
     # 获取编码强度参数。
-    strength = cfg.get("lf_strength", 1.5)
+    lf_cfg = _resolve_lf_cfg(cfg)
+    strength = cfg.get("lf_strength")
+    if not isinstance(strength, (int, float)):
+        strength = lf_cfg.get("strength", lf_cfg.get("variance", 1.5))
     if not isinstance(strength, (int, float)) or strength < 0:
         raise ValueError(f"lf_strength must be non-negative, got {strength}")
     
     n = int(coeffs.shape[0])
-
-    # 伪高斯幅度仍用 key 派生（步骤相关，合法）。
-    np.random.seed(key)
-    pseudogaussian_factors = np.random.randn(n).astype(np.float32)
-
-    # （修复 Bug-B）从 plan_digest 派生固定 LDPC 码字（numpy 路径）。
-    codeword_np = _derive_ldpc_codeword_from_cfg_np(cfg, n)
-
-    # 伪高斯采样：codeword * |randn()|。
-    watermark_pattern = codeword_np * np.abs(pseudogaussian_factors)
+    template_bundle = derive_lf_template_bundle(cfg, n)
+    watermark_pattern = np.asarray(template_bundle["template"], dtype=np.float32)
 
     # 以 strength 系数应用水印。
     encoded_coeffs = coeffs + strength * watermark_pattern
@@ -423,8 +615,14 @@ def apply_low_freq_encoding(
     # 构造编码证据（摘要不含原始张量）。
     encoding_evidence = {
         "strength_applied": float(strength),
-        "pattern_seed": int(key),
-        "codeword_source": "ldpc_plan_digest" if _has_plan_digest(cfg) else "random_fallback",
+        "pattern_seed": int(template_bundle["pseudogaussian_seed"]),
+        "runtime_step_key": int(key),
+        "codeword_source": str(template_bundle["message_source"]),
+        "parity_check_digest": template_bundle["parity_check_digest"],
+        "basis_digest": template_bundle["basis_digest"],
+        "attestation_event_digest": template_bundle["attestation_event_digest"],
+        "decoder_mode": template_bundle["decoder_mode"],
+        "bp_iterations": int(template_bundle["bp_iterations"]),
         "coeffs_before_norm": float(np.linalg.norm(coeffs)),
         "coeffs_after_norm": float(np.linalg.norm(encoded_coeffs)),
         "pattern_norm": float(np.linalg.norm(watermark_pattern)),
