@@ -409,15 +409,14 @@ def extract_hf_score_from_detect_trajectory(
     plan_digest: Optional[str] = None,
 ) -> Tuple[Optional[float], str]:
     """
-    功能：从 detect 侧 trajectory cache 中取出 z_{t_e}，走 TFSW + keyed Rademacher 模板相关验证路径提取 HF 分数。
+    功能：从 detect 侧 trajectory cache 中取出 z_{t_e}，走 TFSW + HF truncation 通道提取 HF 分数。
 
     Extract HF score from detect-side trajectory latent via Trajectory Feature Space
-    Watermarking (TFSW) and keyed Rademacher template correlation.
+    Watermarking (TFSW) and planner-bounded HF truncation scoring.
 
     Formal path: phi = extract_trajectory_feature(z_{t_e}, tfs),
-    coeffs = phi @ hf_projection_matrix, then whitened Pearson correlation
-    against the keyed Rademacher template derived deterministically from plan_digest.
-    Replicates exactly HighFreqTemplateCodec._run_channel() detect logic.
+    coeffs = phi @ hf_projection_matrix, then deterministic tail truncation is
+    applied before constrained HF energy is measured.
 
     Uses exact-only timestep resolution; no nearest-step fallback.
 
@@ -426,13 +425,12 @@ def extract_hf_score_from_detect_trajectory(
         hf_basis: HF basis dict with trajectory_feature_spec and hf_projection_matrix.
         embed_hf_score: Embed-side HF score for drift consistency check.
         cfg: Configuration mapping.
-        plan_digest: Plan digest for Rademacher template derivation (same as embed side).
+        plan_digest: Optional plan digest, used only for audit parity with embed-side callers.
 
     Returns:
         Tuple of (hf_score_or_none, status_str).
-        hf_score in [0, 1]; higher indicates watermark evidence (template correlation).
+        hf_score is non-negative; larger indicates stronger truncation evidence.
     """
-    import math as _math
     if not isinstance(cfg, dict):
         return None, "cfg_invalid_type"
     if hf_basis is None:
@@ -451,35 +449,21 @@ def extract_hf_score_from_detect_trajectory(
             extract_trajectory_feature_np,
         )
         phi = extract_trajectory_feature_np(np.asarray(z_t, dtype=np.float64), tfs)
-        hf_projection_matrix = hf_basis.get("hf_projection_matrix")
-        if hf_projection_matrix is None:
-            return None, "hf_projection_matrix_missing"
-        proj_np = np.asarray(hf_projection_matrix, dtype=np.float32)
-        if phi.shape[0] != proj_np.shape[0]:
-            return None, f"phi_dim_mismatch_{phi.shape[0]}_vs_{proj_np.shape[0]}"
-        hf_coeffs = np.dot(phi.astype(np.float32), proj_np)
-
-        # 正式路径：keyed Rademacher 模板相关验证（与 HighFreqTemplateCodec.detect() 相同路径）。
-        if isinstance(plan_digest, str) and plan_digest:
-            from main.core import digests as _digs
-            n_positions = int(hf_coeffs.shape[0])
-            # 与 HighFreqTemplateCodec._derive_hf_template() 相同的种子派生逻辑。
-            seed = int(_digs.canonical_sha256({"plan_digest": plan_digest, "tag": "hf_template_v2"})[:16], 16)
-            rng = np.random.default_rng(seed % (2 ** 32))
-            template = rng.choice([-1.0, 1.0], size=max(1, n_positions)).astype(np.float64)
-            hf_cfg = cfg.get("watermark", {}).get("hf", {})
-            correlation_scale = float(hf_cfg.get("correlation_scale", 10.0))
-            measured = hf_coeffs.astype(np.float64)
-            t_norm = float(np.linalg.norm(template))
-            m_mean = float(np.mean(measured))
-            m_std = max(float(np.std(measured)), 1e-8)
-            m_whitened = (measured - m_mean) / m_std
-            t_normalized = template / (t_norm + 1e-8)
-            raw_corr = float(np.dot(m_whitened, t_normalized))
-            detect_hf_score = 1.0 / (1.0 + _math.exp(-correlation_scale * raw_corr))
+        hf_cfg = cfg.get("watermark", {}).get("hf", {})
+        if not isinstance(hf_cfg, dict):
+            hf_cfg = {}
+        threshold_percentile = hf_cfg.get("threshold_percentile")
+        if isinstance(threshold_percentile, (int, float)):
+            percentile_value = float(threshold_percentile)
         else:
-            # plan_digest 缺失时返回 absent，禁止以 norm 代替模板相关验证。
-            return None, "hf_plan_digest_missing_cannot_derive_template"
+            tail_ratio = float(hf_cfg.get("tail_truncation_ratio", 0.1))
+            tail_ratio = max(0.0, min(0.95, tail_ratio))
+            percentile_value = (1.0 - tail_ratio) * 100.0
+        detect_hf_score = channel_hf.extract_hf_score(
+            phi.astype(np.float32),
+            hf_basis,
+            {"hf_threshold_percentile": percentile_value},
+        )
 
         if embed_hf_score is not None and abs(detect_hf_score - float(embed_hf_score)) > 0.15:
             return detect_hf_score, f"hf_score_drift_detected_trajectory_{resolution_status}"

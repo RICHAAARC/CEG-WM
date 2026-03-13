@@ -394,7 +394,7 @@ def _check_method_specific_parameters(
     failures = []
 
     # HF 模板编码器绑定检查。
-    hf_bindings = bindings.get("hf_template_codec", [])
+    hf_bindings = bindings.get("hf_truncation_codec", [])
     for binding in hf_bindings:
         field_path = binding.get("field_path")
         required_value = binding.get("required_value")

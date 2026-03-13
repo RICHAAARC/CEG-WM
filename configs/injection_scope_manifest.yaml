@@ -7,7 +7,7 @@ allowed_impl_ids:
   - "semantic_mask_provider_saliency_policy"  # saliency 策略版（继续保留）
   - "unified_content_extractor"                # Embed + Detect v2 正式实现
   - "low_freq_template_codec"                   # LF 低频模板编码器 v2 正式实现
-  - "high_freq_template_codec"                  # HF 高频模板编码器 v2 正式实现
+  - "high_freq_truncation_codec"                # HF 高频截断编码器 v2 正式实现
 
   # ---- v2 subspace 正式实现 ----
   - "subspace_planner"                         # 子空间规划器 v2 正式实现

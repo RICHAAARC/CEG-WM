@@ -5,7 +5,7 @@ Module type: General module
 功能说明：
 - 验证 detect 编排器兼容 ContentEvidence 数据类（不仅仅是 dict）。
 - 验证融合规则入口能从 ContentEvidence 适配字典中读取预期的字段。
-- 验证 content_detector_v1 实现下的完整流程（extract → adapt → fuse）。
+- 验证 unified_content_extractor 实现下的完整流程（extract → adapt → fuse）。
 """
 
 from typing import Any, Dict
@@ -14,7 +14,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from main.watermarking.content_chain.content_detector import ContentDetector, CONTENT_DETECTOR_ID, CONTENT_DETECTOR_VERSION
+from main.watermarking.content_chain.unified_content_extractor import (
+    UnifiedContentExtractor,
+    UNIFIED_CONTENT_EXTRACTOR_ID,
+    UNIFIED_CONTENT_EXTRACTOR_VERSION,
+)
 from main.watermarking.content_chain.interfaces import ContentEvidence
 from main.watermarking.detect.orchestrator import (
     run_detect_orchestrator,
@@ -111,15 +115,15 @@ class TestGeometryEvidenceDataclassAdaptation:
         assert adapted["status"] == "absent"
 
 
-class TestDetectOrchestratorWithContentDetector:
-    """测试 detect 编排器与 ContentDetector 集成。"""
+class TestDetectOrchestratorWithUnifiedContentExtractor:
+    """测试 detect 编排器与 UnifiedContentExtractor 集成。"""
 
     def test_detect_orchestrator_accepts_content_evidence_dataclass(self) -> None:
         """检测编排器成功处理 ContentEvidence 数据类。"""
-        # 构造一个 ContentDetector 直接调用。
-        detector = ContentDetector(
-            impl_id=CONTENT_DETECTOR_ID,
-            impl_version=CONTENT_DETECTOR_VERSION,
+        # 构造一个 UnifiedContentExtractor 直接调用。
+        detector = UnifiedContentExtractor(
+            impl_id=UNIFIED_CONTENT_EXTRACTOR_ID,
+            impl_version=UNIFIED_CONTENT_EXTRACTOR_VERSION,
             impl_digest="test_digest_detector_v1"
         )
         
@@ -129,17 +133,20 @@ class TestDetectOrchestratorWithContentDetector:
                 "content": {"enabled": True}
             },
             "watermark": {
-                "plan_digest": "test_plan_digest_123"
+                "plan_digest": "test_plan_digest_123",
+                "hf": {"enabled": False},
             }
         }
         
         inputs = {
-            "lf_score": 0.6,
-            "hf_score": 0.7,
             "plan_digest": "test_plan_digest_123"
+            ,"lf_evidence": {
+                "status": "ok",
+                "lf_score": 0.6,
+            },
         }
         
-        # 调用 content_detector 的 extract 方法。
+        # 调用 unified_content_extractor 的 extract 方法。
         evidence = detector.extract(cfg, inputs=inputs, cfg_digest="cfg_dig_123")
         
         # 验证返回的是 ContentEvidence 数据类。
@@ -171,8 +178,8 @@ class TestDetectOrchestratorWithContentDetector:
             status="ok",
             score=0.7,
             audit={
-                "impl_identity": CONTENT_DETECTOR_ID,
-                "impl_version": CONTENT_DETECTOR_VERSION,
+                "impl_identity": UNIFIED_CONTENT_EXTRACTOR_ID,
+                "impl_version": UNIFIED_CONTENT_EXTRACTOR_VERSION,
                 "impl_digest": "test_detector_digest",
                 "trace_digest": "test_trace_digest"
             },
@@ -302,13 +309,13 @@ class TestDetectOrchestratorWithContentDetector:
         mock_fusion_rule = Mock()
         mock_subspace_planner = Mock()
         
-        # ContentDetector 返回 ContentEvidence 数据类，包含 plan_digest 不一致。
+        # UnifiedContentExtractor 返回 ContentEvidence 数据类，包含 plan_digest 不一致。
         mock_content_evidence = ContentEvidence(
             status="mismatch",
             score=None,
             audit={
-                "impl_identity": CONTENT_DETECTOR_ID,
-                "impl_version": CONTENT_DETECTOR_VERSION,
+                "impl_identity": UNIFIED_CONTENT_EXTRACTOR_ID,
+                "impl_version": UNIFIED_CONTENT_EXTRACTOR_VERSION,
                 "impl_digest": "detector_digest",
                 "trace_digest": "trace"
             },
@@ -420,8 +427,8 @@ class TestDetectOrchestratorWithContentDetector:
             status="ok",
             score=0.82,
             audit={
-                "impl_identity": "content_detector_v1",
-                "impl_version": "v1",
+                "impl_identity": "unified_content_extractor",
+                "impl_version": "v2",
                 "impl_digest": "e9f3e4b",
                 "trace_digest": "f8a2c1d"
             },

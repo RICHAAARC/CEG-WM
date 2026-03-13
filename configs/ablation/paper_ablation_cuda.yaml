@@ -62,8 +62,8 @@ watermark:
   hf:
     enabled: true
     tail_truncation_ratio: 0.1
-    tail_truncation_mode: "keyed_template_correlation"
-    selection: "keyed_rademacher_template"
+    tail_truncation_mode: "keyed_rademacher_truncation_channel"
+    selection: "keyed_rademacher_truncation"
     tau: 2.0
 
 detect:
@@ -143,7 +143,7 @@ impl:
   fusion_rule_id: "fusion_neyman_pearson"
   subspace_planner_id: "subspace_planner"
   sync_module_id: "geometry_latent_sync_sd3"
-  hf_embedder_id: "high_freq_template_codec"
+  hf_embedder_id: "high_freq_truncation_codec"
   lf_coder_id: "low_freq_template_codec"
   use_latent_per_step: true
 

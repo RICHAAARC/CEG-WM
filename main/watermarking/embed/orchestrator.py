@@ -24,6 +24,9 @@ from main.watermarking.common.plan_digest_flow import (
     build_content_plan_and_digest,
     bind_plan_to_record,
 )
+from main.watermarking.content_chain.subspace.subspace_planner_impl import (
+    build_runtime_jvp_operator_from_cache,
+)
 from main.watermarking.content_chain.high_freq_embedder import (
     compute_hf_trace_digest,
 )
@@ -207,16 +210,18 @@ def run_embed_orchestrator(
         # paper 模式下必须走 latent per-step 主路径。
         raise ValueError("paper_faithfulness requires latent per-step embed path")
     
-    # Paper-faithful mode强制检查HF/LF实现（阶段4）
+    # Paper-faithful mode 强制检查 HF/LF 正式实现（阶段 4）。
     if paper_enabled:
         impl_cfg_raw = cfg.get("impl")
         impl_cfg = cast(Dict[str, Any], impl_cfg_raw) if isinstance(impl_cfg_raw, dict) else {}
         hf_impl_id = impl_cfg.get("hf_embedder_id")
         lf_impl_id = impl_cfg.get("lf_coder_id")
         
-        # 检查 HF embedder 必须是 high_freq_template_codec
-        if hf_impl_id and hf_impl_id != "high_freq_template_codec":
-            raise ValueError(f"paper_faithfulness requires high_freq_template_codec, got {hf_impl_id}")
+        # 检查 HF embedder 必须是 formal truncation codec。
+        if hf_impl_id and hf_impl_id != high_freq_embedder_module.HIGH_FREQ_TRUNCATION_CODEC_ID:
+            raise ValueError(
+                f"paper_faithfulness requires {high_freq_embedder_module.HIGH_FREQ_TRUNCATION_CODEC_ID}, got {hf_impl_id}"
+            )
         
         # 检查 LF coder 必须是 low_freq_template_codec
         if lf_impl_id and lf_impl_id != "low_freq_template_codec":
@@ -526,17 +531,15 @@ def _build_planner_inputs_for_runtime(
     runtime_latents = cfg.get("__embed_final_latents__")
     if runtime_pipeline is not None:
         inputs["pipeline"] = runtime_pipeline
-        runtime_unet = getattr(runtime_pipeline, "unet", None)
-        if runtime_unet is None:
-            runtime_unet = getattr(runtime_pipeline, "transformer", None)
-        if runtime_unet is not None:
-            inputs["unet"] = runtime_unet
     if runtime_latents is not None:
         inputs["latents"] = runtime_latents
     # 将推理期间捕获的 per-step latent 缓存传递给 planner（内存传递，不写入 records）。
     runtime_traj_cache = cfg.get("__embed_trajectory_latent_cache__")
     if runtime_traj_cache is not None:
         inputs["trajectory_latent_cache"] = runtime_traj_cache
+        runtime_jvp_operator = build_runtime_jvp_operator_from_cache(cfg, runtime_traj_cache)
+        if callable(runtime_jvp_operator):
+            inputs["jvp_operator"] = runtime_jvp_operator
     if trajectory_evidence is not None:
         inputs["trajectory_evidence"] = trajectory_evidence
     if isinstance(content_evidence_payload, dict):

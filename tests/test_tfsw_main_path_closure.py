@@ -21,6 +21,7 @@ from main.watermarking.content_chain.subspace.subspace_planner_impl import (
     SubspacePlannerImpl,
     SUBSPACE_PLANNER_ID,
     SUBSPACE_PLANNER_VERSION,
+    build_runtime_jvp_operator_from_cache,
 )
 from main.core import digests
 
@@ -367,6 +368,7 @@ def test_planner_raises_on_exact_timestep_miss() -> None:
     inputs: Dict[str, Any] = {
         "pipeline": fake_pipeline,
         "trajectory_latent_cache": cache,
+        "jvp_operator": build_runtime_jvp_operator_from_cache(cfg, cache),
         "trace_signature": {
             "num_inference_steps": 4,
             "guidance_scale": 7.0,
@@ -411,6 +413,7 @@ def test_planner_succeeds_on_exact_cache_hit() -> None:
     inputs: Dict[str, Any] = {
         "pipeline": fake_pipeline,
         "trajectory_latent_cache": cache,
+        "jvp_operator": build_runtime_jvp_operator_from_cache(cfg, cache),
         "trace_signature": {
             "num_inference_steps": 4,
             "guidance_scale": 7.0,

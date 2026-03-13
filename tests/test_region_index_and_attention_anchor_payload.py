@@ -89,8 +89,12 @@ def test_region_index_spec_is_produced_and_digest_anchored() -> None:
 
     hf_spec = plan.get("hf_region_index_spec")
     lf_spec = plan.get("lf_region_index_spec")
+    route_basis_bridge = plan.get("route_basis_bridge")
     assert isinstance(hf_spec, dict)
     assert isinstance(lf_spec, dict)
+    assert isinstance(route_basis_bridge, dict)
+    assert route_basis_bridge.get("bridge_version") == "route_basis_bridge_v1"
+    assert route_basis_bridge.get("region_index_digest") == plan.get("region_index_digest")
 
     recomputed = digests.canonical_sha256(
         {

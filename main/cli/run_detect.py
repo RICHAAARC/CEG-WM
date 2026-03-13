@@ -208,11 +208,11 @@ def _inject_attack_condition_fields(record: Dict[str, Any], cfg: Dict[str, Any])
     record["attack"] = attack_obj
 
 
-def _build_hf_template_baseline_payload(record: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
+def _build_hf_truncation_baseline_payload(record: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
-    功能：构造 HF template baseline 对比载荷。 
+    功能：构造 HF truncation baseline 对比载荷。 
 
-    Build real HF template baseline payload from detect-time evidence for
+    Build real HF truncation baseline payload from detect-time evidence for
     same-sample comparison in experiment matrix.
 
     Args:
@@ -220,7 +220,7 @@ def _build_hf_template_baseline_payload(record: Dict[str, Any], cfg: Dict[str, A
         cfg: Runtime configuration mapping.
 
     Returns:
-        HF template baseline payload mapping.
+        HF truncation baseline payload mapping.
 
     Raises:
         TypeError: If inputs are invalid.
@@ -234,9 +234,9 @@ def _build_hf_template_baseline_payload(record: Dict[str, Any], cfg: Dict[str, A
         "status": "absent",
         "score": None,
         "score_source": "detect_record.content_evidence_payload.detect_hf_score",
-        "baseline_impl_id": "high_freq_template_codec_v1",
+        "baseline_impl_id": "high_freq_truncation_codec_v2",
         "baseline_version": "v1",
-        "baseline_absent_reason": "hf_template_score_unavailable",
+        "baseline_absent_reason": "hf_truncation_score_unavailable",
         "comparison_scope": "same_sample_real_pipeline",
         "trace": {
             "pipeline_impl_id": record.get("pipeline_impl_id", "<absent>"),
@@ -804,7 +804,7 @@ def run_detect(
             record["inference_status"] = run_meta.get("inference_status")
             record["inference_error"] = run_meta.get("inference_error")
             record["inference_runtime_meta"] = run_meta.get("inference_runtime_meta")
-            record["hf_template_baseline"] = _build_hf_template_baseline_payload(record, cfg)
+            record["hf_template_baseline"] = _build_hf_truncation_baseline_payload(record, cfg)
 
             schema.ensure_required_fields(record, cfg, interpretation)
 

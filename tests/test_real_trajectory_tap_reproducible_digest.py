@@ -64,7 +64,7 @@ def _build_cfg() -> Dict[str, Any]:
             "enabled": True,
             "stats_precision_digits": 6,
             "tensor_types": ["latent"],
-            "module_paths": ["unet"]
+            "module_paths": ["transformer"]
         },
         "watermark": {
             "subspace": {

@@ -136,6 +136,110 @@ def build_region_index_spec_from_mask(mask: Any) -> Tuple[Dict[str, Any], Dict[s
     return hf_region_index_spec, lf_region_index_spec, region_index_digest
 
 
+def build_runtime_jvp_operator_from_cache(
+    cfg: Dict[str, Any],
+    trajectory_latent_cache: Any,
+) -> Any:
+    """
+    功能：从运行时 trajectory cache 构造显式 JVP 算子。
+
+    Build a runtime-derived feature-space JVP operator from exact cached SD3 trajectory
+    latents. The operator is estimated from consecutive runtime states after projecting
+    them into the planner feature space, so paper-mode JVP no longer depends on legacy
+    unet or surrogate-transition branches.
+
+    Args:
+        cfg: Configuration mapping.
+        trajectory_latent_cache: LatentTrajectoryCache-like object.
+
+    Returns:
+        Callable JVP operator or None when runtime cache is unavailable.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if trajectory_latent_cache is None or not hasattr(trajectory_latent_cache, "available_steps"):
+        return None
+    if hasattr(trajectory_latent_cache, "is_empty") and trajectory_latent_cache.is_empty():
+        return None
+
+    available_steps = trajectory_latent_cache.available_steps()
+    if not isinstance(available_steps, list) or len(available_steps) < 2:
+        return None
+
+    subspace_cfg = cfg.get("watermark", {}).get("subspace", {})
+    if not isinstance(subspace_cfg, dict):
+        subspace_cfg = {}
+    seed_candidate = subspace_cfg.get("seed")
+    if seed_candidate is None:
+        seed_candidate = cfg.get("seed")
+    planner_seed = _read_int(seed_candidate, 0)
+    feature_dim = _read_int(subspace_cfg.get("feature_dim"), 128)
+    edit_timestep = _read_int(subspace_cfg.get("edit_timestep"), 0)
+    if feature_dim <= 0:
+        return None
+
+    from .trajectory_feature_space import extract_trajectory_feature_np
+
+    trajectory_feature_spec = {
+        "feature_operator": "masked_normalized_random_projection",
+        "feature_dim": feature_dim,
+        "projection_seed": planner_seed + edit_timestep,
+        "edit_timestep": edit_timestep,
+    }
+
+    feature_rows: List[np.ndarray] = []
+    next_rows: List[np.ndarray] = []
+    for step_index in available_steps[:-1]:
+        current_latent = trajectory_latent_cache.get(step_index)
+        next_latent = trajectory_latent_cache.get(step_index + 1)
+        if current_latent is None or next_latent is None:
+            continue
+        try:
+            current_feature = extract_trajectory_feature_np(
+                np.asarray(current_latent, dtype=np.float64),
+                trajectory_feature_spec,
+            ).astype(np.float64)
+            next_feature = extract_trajectory_feature_np(
+                np.asarray(next_latent, dtype=np.float64),
+                trajectory_feature_spec,
+            ).astype(np.float64)
+        except Exception:
+            # 运行时轨迹特征提取失败时不构造假算子，交由上层保持 fail-fast 语义。
+            continue
+        if current_feature.shape != next_feature.shape or current_feature.ndim != 1:
+            continue
+        feature_rows.append(current_feature)
+        next_rows.append(next_feature)
+
+    if len(feature_rows) < 2:
+        return None
+
+    feature_matrix = np.asarray(feature_rows, dtype=np.float64)
+    next_matrix = np.asarray(next_rows, dtype=np.float64)
+    feature_center = feature_matrix - np.mean(feature_matrix, axis=0, keepdims=True)
+    next_center = next_matrix - np.mean(next_matrix, axis=0, keepdims=True)
+
+    try:
+        operator_matrix, _, _, _ = np.linalg.lstsq(feature_center, next_center, rcond=1e-6)
+    except Exception:
+        return None
+
+    if operator_matrix.ndim != 2:
+        return None
+
+    def _runtime_operator(state_vector: Any, probe_vector: Any, eps: float) -> np.ndarray:
+        state_np = np.asarray(state_vector, dtype=np.float64).reshape(-1)
+        probe_np = np.asarray(probe_vector, dtype=np.float64).reshape(-1)
+        if state_np.shape[0] != operator_matrix.shape[0]:
+            raise ValueError("state_vector dimension mismatch for runtime jvp operator")
+        if probe_np.shape[0] != operator_matrix.shape[0]:
+            raise ValueError("probe_vector dimension mismatch for runtime jvp operator")
+        _ = eps
+        return np.matmul(probe_np, operator_matrix)
+
+    return _runtime_operator
+
+
 def _downsample_mask_to_grid(mask_array: np.ndarray, rows: int, cols: int) -> np.ndarray:
     """
     功能：将掩码下采样为固定网格布尔阵列。 
@@ -466,6 +570,21 @@ class SubspacePlannerImpl:
             # 推断特征域标签
             feature_source_tag = self._infer_feature_source(inputs)
             normalization_tag = "centering_with_jacobian_probes"
+            high_freq_subspace_spec = self._build_high_freq_subspace_spec(
+                basis_summary=basis_summary
+            )
+            route_basis_bridge = {
+                "bridge_version": "route_basis_bridge_v1",
+                "binding_source": "conditioning.selected_feature_indices",
+                "routing_digest_ref": routing_digest_ref,
+                "region_index_digest": region_index_digest,
+                "hf_feature_cols": basis_summary.get("hf_feature_cols", []),
+                "lf_feature_cols": basis_summary.get("lf_feature_cols", []),
+                "hf_region_selected_indices": hf_region_index_spec.get("selected_indices", []),
+                "lf_region_selected_indices": lf_region_index_spec.get("selected_indices", []),
+                "hf_basis_rank": hf_basis.get("basis_rank"),
+                "lf_basis_rank": lf_basis.get("basis_rank"),
+            }
             
             plan_payload = self._build_plan_payload_for_digest(
                 cfg=cfg,
@@ -479,6 +598,8 @@ class SubspacePlannerImpl:
                 region_index_digest=region_index_digest,
                 lf_basis=lf_basis,
                 hf_basis=hf_basis,
+                route_basis_bridge=route_basis_bridge,
+                high_freq_subspace_spec=high_freq_subspace_spec,
                 subspace_conditioning=basis_summary.get("subspace_conditioning"),
                 feature_source_tag=feature_source_tag,
                 normalization_tag=normalization_tag,
@@ -490,10 +611,6 @@ class SubspacePlannerImpl:
             detection_domain_spec = self._build_detection_input_domain_spec(
                 planner_params=planner_params,
                 cfg=cfg
-            )
-
-            high_freq_subspace_spec = self._build_high_freq_subspace_spec(
-                basis_summary=basis_summary
             )
 
             plan = {
@@ -542,7 +659,8 @@ class SubspacePlannerImpl:
                     "channel_mix_policy": "channel_refill" if planner_params.enable_channel_refill else "none"
                 },
                 "detection_domain_spec": detection_domain_spec,
-                "high_freq_subspace_spec": high_freq_subspace_spec
+                "high_freq_subspace_spec": high_freq_subspace_spec,
+                "route_basis_bridge": route_basis_bridge,
             }
 
             plan_stats = {
@@ -562,6 +680,7 @@ class SubspacePlannerImpl:
                 "hf_basis_shape": hf_basis.get("basis_shape"),
                 "subspace_evidence_semantics": basis_summary.get("subspace_evidence_semantics"),
                 "subspace_conditioning": basis_summary.get("subspace_conditioning"),
+                "route_basis_bridge": route_basis_bridge,
             }
 
             return SubspacePlanEvidence(
@@ -619,7 +738,8 @@ class SubspacePlannerImpl:
         功能：估计低维子空间并提取摘要（集成可验证采样和真实 JVP）。
 
         Estimate low-dimensional subspace from trajectory features by SVD.
-        Integrates verifiable trajectory sampling and real/surrogate Jacobian estimates.
+        Integrates verifiable trajectory sampling and runtime-operator / transition-fit
+        Jacobian estimates.
 
         Args:
             cfg: Configuration mapping.
@@ -659,7 +779,7 @@ class SubspacePlannerImpl:
         # 步骤 2：中心化
         centered = feature_matrix - np.mean(feature_matrix, axis=0, keepdims=True)
         
-        # 步骤 3：估算真实或 Surrogate JVP
+        # 步骤 3：估算真实 runtime-operator 或非 paper 的 transition-fit JVP
         jvp_samples, jvp_anchor = self._estimate_jvp_matrix(
             cfg=cfg,
             inputs=inputs,
@@ -758,7 +878,7 @@ class SubspacePlannerImpl:
             "feature_dim": planner_params.feature_dim,
             "jacobian_probe_count": planner_params.jacobian_probe_count,
             "jacobian_eps": self._normalize_float(planner_params.jacobian_eps, planner_params.float_round_digits),
-            "jvp_source": jvp_anchor.get("jvp_source", "surrogate_transition")
+            "jvp_source": jvp_anchor.get("jvp_source", "runtime_operator_missing")
         }
         
         subspace_spec = {
@@ -801,7 +921,9 @@ class SubspacePlannerImpl:
             "subspace_conditioning": subspace_conditioning.digest_payload(),
             "subspace_evidence_semantics": subspace_evidence_semantics,
             # 区域路由桥摘要：绑定 conditioning 特征列分区与 LF/HF 子 SVD 结果。
-            "routing_bridge": {
+            "route_basis_bridge": {
+                "bridge_version": "route_basis_bridge_v1",
+                "binding_source": "conditioning.selected_feature_indices",
                 "hf_feature_cols": hf_feature_cols,
                 "lf_feature_cols": lf_feature_cols,
             },
@@ -831,6 +953,12 @@ class SubspacePlannerImpl:
             # 区域路由分区特征列索引：供 _build_high_freq_subspace_spec 使用。
             "hf_feature_cols": hf_feature_cols,
             "lf_feature_cols": lf_feature_cols,
+            "route_basis_bridge": {
+                "bridge_version": "route_basis_bridge_v1",
+                "binding_source": "conditioning.selected_feature_indices",
+                "hf_feature_cols": hf_feature_cols,
+                "lf_feature_cols": lf_feature_cols,
+            },
             # 新增：可验证锚点供 plan_digest 使用
             "samples_anchor": samples_anchor,
             "jvp_anchor": jvp_anchor
@@ -844,7 +972,7 @@ class SubspacePlannerImpl:
         """
         功能：构造子空间主证据语义摘要。
 
-        Build explicit semantics summary for subspace primary/surrogate evidence.
+        Build explicit semantics summary for subspace primary/runtime-fallback evidence.
 
         Args:
             samples_anchor: Trajectory sampling anchor mapping.
@@ -861,23 +989,24 @@ class SubspacePlannerImpl:
         sample_source = samples_anchor.get("source") if isinstance(samples_anchor.get("source"), str) else "<absent>"
         sample_semantics = samples_anchor.get("sample_semantics") if isinstance(samples_anchor.get("sample_semantics"), str) else "<absent>"
         surrogate_reason = samples_anchor.get("surrogate_reason") if isinstance(samples_anchor.get("surrogate_reason"), str) else "<absent>"
-        jvp_source = jvp_anchor.get("jvp_source") if isinstance(jvp_anchor.get("jvp_source"), str) else "surrogate_transition"
+        jvp_source = jvp_anchor.get("jvp_source") if isinstance(jvp_anchor.get("jvp_source"), str) else "runtime_operator_missing"
 
-        if jvp_source in {"real_unet", "runtime_operator"} and sample_semantics in {
+        if jvp_source == "runtime_operator" and sample_semantics in {
             "runtime_pipeline_bound",
-            "runtime_pipeline_bound_with_unet",
+            "runtime_pipeline_bound_with_transformer",
+            "runtime_trajectory_latent_captured",
         }:
             evidence_level = "primary"
-            primary_path = "runtime_pipeline_bound_jvp_primary_path"
-            evidence_reason = "runtime_pipeline_and_jvp_bound"
-        elif jvp_source in {"real_unet", "runtime_operator"}:
-            evidence_level = "hybrid"
-            primary_path = "real_jvp_with_partial_runtime_trajectory"
-            evidence_reason = "real_jvp_available_but_trajectory_not_fully_pipeline_bound"
+            primary_path = "runtime_trajectory_plus_runtime_operator"
+            evidence_reason = "runtime_trajectory_and_runtime_operator_bound"
+        elif jvp_source == "runtime_operator":
+            evidence_level = "non_primary"
+            primary_path = "runtime_operator_without_runtime_trajectory"
+            evidence_reason = "runtime_operator_available_but_trajectory_not_runtime_bound"
         else:
-            evidence_level = "surrogate"
-            primary_path = "surrogate_transition_jvp_and_surrogate_trajectory_samples"
-            evidence_reason = surrogate_reason if surrogate_reason != "<absent>" else "real_unet_jvp_unavailable"
+            evidence_level = "non_primary"
+            primary_path = "runtime_operator_required_for_primary_path"
+            evidence_reason = surrogate_reason if surrogate_reason != "<absent>" else "runtime_operator_missing"
 
         return {
             "version": "subspace_evidence_semantics_v1",
@@ -1097,6 +1226,8 @@ class SubspacePlannerImpl:
         region_index_digest: str,
         lf_basis: Dict[str, Any],
         hf_basis: Dict[str, Any],
+        route_basis_bridge: Dict[str, Any],
+        high_freq_subspace_spec: Dict[str, Any],
         subspace_conditioning: Optional[Dict[str, Any]] = None,
         feature_source_tag: Optional[str] = None,
         normalization_tag: Optional[str] = None,
@@ -1205,7 +1336,7 @@ class SubspacePlannerImpl:
             },
             # 样本与 JVP 来源表征
             "samples_source": samples_anchor.get("source", "deterministic_trajectory"),
-            "jvp_source": jvp_anchor.get("jvp_source", "surrogate_transition"),
+            "jvp_source": jvp_anchor.get("jvp_source", "runtime_operator_missing"),
             # 摘要锚点（作为 basis_digest 的补充）
             "samples_anchor_digest": digests.canonical_sha256(samples_anchor),
             "jvp_anchor_digest": digests.canonical_sha256(jvp_anchor)
@@ -1259,6 +1390,8 @@ class SubspacePlannerImpl:
             "lf_region_index_spec": lf_region_index_spec,
             "lf_basis": lf_basis,
             "hf_basis": hf_basis,
+            "route_basis_bridge": route_basis_bridge,
+            "high_freq_subspace_spec": high_freq_subspace_spec,
             "subspace_conditioning": subspace_conditioning if isinstance(subspace_conditioning, dict) else {},
             "basis_summary": {
                 "rank": basis_summary["rank"],
@@ -1266,7 +1399,8 @@ class SubspacePlannerImpl:
                 "null_space_dim": basis_summary["null_space_dim"],
                 "null_space_energy_ratio": basis_summary["null_space_energy_ratio"],
                 "spectrum_summary": basis_summary["spectrum_summary"],
-                "subspace_spec": basis_summary["subspace_spec"]
+                "subspace_spec": basis_summary["subspace_spec"],
+                "route_basis_bridge": route_basis_bridge,
             }
         }
 
@@ -1320,13 +1454,18 @@ class SubspacePlannerImpl:
             raise TypeError("basis_summary must be dict")
 
         # 优先使用区域路由桥的分区特征列（来自 conditioning.selected_feature_indices）。
-        hf_feature_cols = basis_summary.get("hf_feature_cols")
+        route_basis_bridge = basis_summary.get("route_basis_bridge")
+        if isinstance(route_basis_bridge, dict):
+            hf_feature_cols = route_basis_bridge.get("hf_feature_cols")
+        else:
+            hf_feature_cols = basis_summary.get("hf_feature_cols")
         if isinstance(hf_feature_cols, list) and len(hf_feature_cols) > 0:
             return {
                 "selector": "conditioning_mask_routing_v1",
                 "selected_indices": hf_feature_cols,
                 "selected_count": len(hf_feature_cols),
                 "source_field": "conditioning.selected_feature_indices",
+                "bridge_version": "route_basis_bridge_v1",
             }
 
         # fallback：全域 SVD 尾半部（分区失败或 conditioning 无索引时使用）。
@@ -1589,13 +1728,13 @@ class SubspacePlannerImpl:
         """
         功能：基于真实去噪网络的 JVP 估算（论文级机制关键）。
 
-        Estimate Jacobian-Vector Products (JVP) based on actual denoising network.
-        If unet is provided in inputs, use real network; otherwise use surrogate mechanism.
-        All probe parameters are anchored to digest for verifiability.
+        Estimate Jacobian-Vector Products (JVP) from an explicit runtime operator.
+        Paper-faithful SD3.5 path only accepts runtime-operator JVP and rejects legacy
+        unet semantics.
 
         Args:
             cfg: Configuration mapping.
-            inputs: Planner inputs (may contain unet).
+            inputs: Planner inputs (may contain jvp_operator).
             centered_matrix: Centered trajectory matrix.
             planner_params: Planner parameters.
 
@@ -1606,7 +1745,7 @@ class SubspacePlannerImpl:
                 - "probe_seed_digest": SHA256 of probe seed
                 - "probe_count_digest": SHA256 of probe count
                 - "jacobian_eps_digest": SHA256 of eps value
-                - "jvp_source": "real_unet" or "surrogate_transition"
+                - "jvp_source": "runtime_operator" or "transition_fit"
                 - "probe_vectors_digest": SHA256 of probe vectors
                 - "jvp_energy_summary": spectral summary
 
@@ -1629,9 +1768,7 @@ class SubspacePlannerImpl:
             "probes": np.round(probes, 8).tolist()[:min(4, len(probes))]
         })
         
-        # 检查是否有真实 JVP operator / UNet。
         jvp_operator = inputs.get("jvp_operator") if isinstance(inputs, dict) else None
-        unet = inputs.get("unet") if isinstance(inputs, dict) else None
 
         if callable(jvp_operator):
             jvp_samples, jvp_source = self._estimate_jvp_from_operator(
@@ -1640,24 +1777,14 @@ class SubspacePlannerImpl:
                 probes=probes,
                 planner_params=planner_params,
             )
-        elif unet is not None:
-            # 路径 A：真实 UNet JVP（要求 UNet 在 inputs 中）
-            jvp_samples, jvp_source = self._estimate_jvp_from_unet(
-                unet=unet,
-                centered_matrix=centered_matrix,
-                probes=probes,
-                planner_params=planner_params,
-                cfg=cfg
-            )
         else:
-            # 路径 B：Surrogate transition-based JVP（总是可用）
             # paper 正式路径保护：paper_faithfulness.enabled=True 时禁止 surrogate 回退，
-            # 必须通过 jvp_operator 提供真实 JVP（SD3.5 无 UNet，只有 transformer）。
+            # 必须通过 jvp_operator 提供真实 JVP（SD3.5 无 UNet，只有 transformer/runtime operator）。
             paper_cfg = cfg.get("paper_faithfulness", {}) if isinstance(cfg, dict) else {}
             paper_mode = bool(paper_cfg.get("enabled", False)) if isinstance(paper_cfg, dict) else False
             if paper_mode:
                 raise ValueError(
-                    "paper formal path requires jvp_operator: SD3.5 uses transformer (no unet); "
+                    "paper formal path requires jvp_operator: SD3.5 uses transformer/runtime operator (no unet); "
                     "provide jvp_operator via planner inputs or disable paper_faithfulness.enabled"
                 )
             jvp_samples, jvp_source = self._estimate_jvp_from_transition(
@@ -1739,81 +1866,6 @@ class SubspacePlannerImpl:
         jvp_samples = jvp_samples - np.mean(jvp_samples, axis=0, keepdims=True)
         return jvp_samples, "runtime_operator"
 
-    def _estimate_jvp_from_unet(
-        self,
-        unet,  # Real UNet2DConditionModel from diffusers
-        centered_matrix: np.ndarray,
-        probes: np.ndarray,
-        planner_params: _PlannerParams,
-        cfg: Dict[str, Any]
-    ) -> Tuple[np.ndarray, str]:
-        """
-        功能：从真实 UNet 计算 JVP（若 UNet 可用）。
-
-        Compute JVP from actual UNet via finite differences on denoising network outputs.
-
-        Args:
-            unet: Real UNet2DConditionModel.
-            centered_matrix: Centered trajectory matrix.
-            probes: Probe vectors.
-            planner_params: Planner parameters.
-            cfg: Configuration mapping.
-
-        Returns:
-            Tuple of (jvp_samples, "real_unet").
-
-        Raises:
-            RuntimeError: If UNet forward pass fails.
-        """
-        try:
-            import torch
-        except ImportError:
-            # 如果 torch 不可用，降级到 surrogate
-            return self._estimate_jvp_from_transition(centered_matrix, probes, planner_params)
-        
-        jvp_rows: List[np.ndarray] = []
-        
-        # 选择 edit_timestep 处进行 JVP 计算
-        edit_t = planner_params.edit_timestep
-        t_emb = torch.tensor([edit_t], dtype=torch.float32)
-        
-        # 简化的条件嵌入（null conditioning）
-        cond_emb = torch.zeros((1, 77, 768), dtype=torch.float32)  # CLIP embed shape
-        
-        for step_idx in range(min(centered_matrix.shape[0], 3)):  # 限制行数以保持效率
-            # feature_dim 不一定等于 4×8×8=256，reshape 可能失败；此处整体捕获形状不兼容错误。
-            try:
-                x_t = torch.tensor(
-                    centered_matrix[step_idx:step_idx+1, :].reshape(1, 4, 8, 8),  # 假设 latent shape
-                    dtype=torch.float32, requires_grad=False
-                )
-            except Exception:
-                # reshape 失败（feature_dim 与预期 latent shape 不符），跳过此 step
-                continue
-            
-            for probe in probes:
-                try:
-                    probe_t = torch.tensor(probe.reshape(1, 4, 8, 8), dtype=torch.float32)
-                    delta = planner_params.jacobian_eps * probe_t
-                    
-                    with torch.no_grad():
-                        out_plus = unet(x_t + delta, t_emb, cond_emb).sample
-                        out_minus = unet(x_t - delta, t_emb, cond_emb).sample
-                    
-                    jv = (out_plus - out_minus) / (2.0 * planner_params.jacobian_eps)
-                    jvp_rows.append(jv.numpy().flatten())
-                except Exception:
-                    # 若 probe reshape 或 UNet 调用失败（形状不匹配等），跳过
-                    pass
-        
-        if jvp_rows:
-            jvp_samples = np.asarray(jvp_rows, dtype=np.float64)
-            jvp_samples = jvp_samples - np.mean(jvp_samples, axis=0, keepdims=True)
-            return jvp_samples, "real_unet"
-        else:
-            # 若 JVP 计算失败，降级到 surrogate
-            return self._estimate_jvp_from_transition(centered_matrix, probes, planner_params)
-
     def _estimate_jvp_from_transition(
         self,
         centered_matrix: np.ndarray,
@@ -1823,7 +1875,7 @@ class SubspacePlannerImpl:
         """
         功能：从轨迹转移拟合的 JVP 逼近（Surrogate 机制）。
 
-        Estimate JVP from fitted transition operator (surrogate mechanism for when real unet unavailable).
+        Estimate JVP from a fitted transition operator for non-paper fallback mode.
 
         Args:
             centered_matrix: Centered trajectory matrix.
@@ -1831,7 +1883,7 @@ class SubspacePlannerImpl:
             planner_params: Planner parameters.
 
         Returns:
-            Tuple of (jvp_samples, "surrogate_transition").
+            Tuple of (jvp_samples, "transition_fit").
         """
         x_t = centered_matrix[:-1, :]
         x_tp1 = centered_matrix[1:, :]
@@ -1850,7 +1902,7 @@ class SubspacePlannerImpl:
         
         jacobian_like = np.asarray(jacobian_rows, dtype=np.float64)
         jacobian_like = jacobian_like - np.mean(jacobian_like, axis=0, keepdims=True)
-        return jacobian_like, "surrogate_transition"
+        return jacobian_like, "transition_fit"
 
     def _estimate_transition_alpha(self, x_t: np.ndarray, x_tp1: np.ndarray) -> float:
         """
@@ -2554,11 +2606,10 @@ class SubspacePlannerImpl:
         Raises:
             ValueError: If sampling configuration is invalid.
         """
-        # 检查是否 pipeline 对象在 inputs 中
-        has_unet = "unet" in inputs and inputs["unet"] is not None
+        # 检查是否存在运行时 pipeline 对象
         has_pipeline = "pipeline" in inputs and inputs["pipeline"] is not None
         
-        if has_unet or has_pipeline:
+        if has_pipeline:
             # 路径 A：真实管线采样（可选）
             samples, samples_anchor = self._sample_from_diffusion_pipeline(
                 inputs=inputs,
@@ -2597,25 +2648,23 @@ class SubspacePlannerImpl:
         cfg: Dict[str, Any]
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
         """
-        功能：从真实扩散管线采样轨迹（若 UNet/Pipeline 可用）。
+        功能：从真实扩散运行时 pipeline 采样轨迹。
 
-        Sample trajectory from actual diffusion pipeline if unet/pipeline provided in inputs.
+        Sample trajectory from the actual runtime diffusion pipeline when it is provided.
 
         Args:
-            inputs: Planner inputs containing unet/pipeline.
+            inputs: Planner inputs containing runtime pipeline context.
             planner_params: Planner parameters.
             cfg: Configuration mapping.
 
         Returns:
             Tuple of (samples, anchor) where anchor contains provenance info.
         """
-        # 提取 UNet（如果可用）
-        unet = inputs.get("unet")
         scheduler = inputs.get("scheduler")
         pipeline = inputs.get("pipeline")
 
-        # 如果没有真实 UNet，降级到确定性轨迹
-        if unet is None and pipeline is None:
+        # 如果没有真实 runtime pipeline，降级到确定性轨迹
+        if pipeline is None:
             return self._sample_deterministic_trajectory(planner_params, cfg, planner_params.seed)
 
         # 构造时间步列表
@@ -2629,12 +2678,7 @@ class SubspacePlannerImpl:
         guidance_scale = _read_float(trace_signature.get("guidance_scale"), 1.0)
         num_inference_steps = _read_int(trace_signature.get("num_inference_steps"), planner_params.sample_count)
 
-        has_runtime_jvp_binding = bool(
-            callable(inputs.get("jvp_operator"))
-            or unet is not None
-            or getattr(pipeline, "unet", None) is not None
-            or getattr(pipeline, "transformer", None) is not None
-        )
+        has_runtime_jvp_binding = bool(callable(inputs.get("jvp_operator")))
         sample_source = "real_diffusion_trajectory_zT"
         sample_semantics = "runtime_trajectory_latent_captured"
         surrogate_reason = None
@@ -3308,7 +3352,7 @@ def create_run_closure_trajectory_anchors(
     probe_seed: int,
     jacobian_eps: float,
     timesteps_list: List[int],
-    jvp_source: str = "surrogate_transition"
+    jvp_source: str = "runtime_operator"
 ) -> Dict[str, Any]:
     """
     功能：为 run_closure 创建轨迹采样锚点（供 embed 侧使用）。
@@ -3321,7 +3365,7 @@ def create_run_closure_trajectory_anchors(
         probe_seed: Probe seed value.
         jacobian_eps: Jacobian epsilon value.
         timesteps_list: List of timestep indices used in sampling.
-        jvp_source: Source identifier ("real_unet" or "surrogate_transition").
+        jvp_source: Source identifier ("runtime_operator" or "transition_fit").
 
     Returns:
         Dict with timesteps_digest, probe_seed_digest, jacobian_eps_digest, etc.

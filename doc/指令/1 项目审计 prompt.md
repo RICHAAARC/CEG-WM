@@ -87,7 +87,7 @@
 * `main/watermarking/content_chain/semantic_mask_provider.py`
   重点：`extract()`、`_probe_model_v2_availability()`。
 
-* `main/watermarking/content_chain/content_detector.py`
+* `main/watermarking/content_chain/unified_content_extractor.py`
   重点：`extract()` 的期望输入字段、输入结构、失败语义。
 
 * `main/watermarking/fusion/decision.py`
@@ -215,8 +215,8 @@ detect 端必须形成**正式内容证据成功状态**，且 LF / HF 正式状
 
 1. `_resolve_detect_image_path()` 在当前 workflow 中能否获得有效图像路径？
 2. `SemanticMaskProvider.extract(inputs={"image_path": ...})` 是否成功产出 `mask_digest`？
-3. `ContentDetector.extract()` 实际期望的输入字段是什么？必须基于源码真实列出，不得猜测。
-4. `_build_content_inputs_for_detect()` 实际提供的输入字段，与 `ContentDetector.extract()` 期望字段是否匹配？
+3. `UnifiedContentExtractor.extract()` 实际期望的输入字段是什么？必须基于源码真实列出，不得猜测。
+4. `_build_content_inputs_for_detect()` 实际提供的输入字段，与 `UnifiedContentExtractor.extract()` 期望字段是否匹配？
 5. 若不匹配，LF / HF 是否存在其他产出路径？这些路径产出的到底是“正式内容证据”，还是“辅助 trace / 辅助分数”？
 6. 当前正式 LF / HF 状态失败，是因为：
 

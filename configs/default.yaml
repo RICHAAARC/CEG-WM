@@ -154,5 +154,5 @@ impl:
   fusion_rule_id: "fusion_neyman_pearson"                # NP 融合规则 v2 正式实现
   subspace_planner_id: "subspace_planner"                # 子空间规划器 v2 正式实现
   sync_module_id: "geometry_latent_sync_sd3"             # 几何 latent 同步模块 v3 正式实现
-  hf_embedder_id: "high_freq_template_codec"          # HF 高频模板编码器 v2 正式实现
+  hf_embedder_id: "high_freq_truncation_codec"        # HF 高频截断编码器 v2 正式实现
   lf_coder_id: "low_freq_template_codec"               # LF 低频模板编码器 v2 正式实现

@@ -113,8 +113,8 @@ class TestCollectTrajectorySamples:
 class TestEstimateJVPMatrix:
     """测试 JVP 矩阵估算函数。"""
 
-    def test_estimate_jvp_matrix_returns_jvp_and_anchor(self):
-        """JVP 估算函数应返回 JVP 样本和摘要锚点。"""
+    def test_estimate_jvp_matrix_uses_runtime_operator_on_formal_path(self):
+        """paper formal path 提供 runtime operator 时应返回 runtime_operator 锚点。"""
         planner = SubspacePlannerImpl(
             impl_id=SUBSPACE_PLANNER_ID,
             impl_version=SUBSPACE_PLANNER_VERSION,
@@ -122,6 +122,7 @@ class TestEstimateJVPMatrix:
         )
 
         cfg = {
+            "paper_faithfulness": {"enabled": True},
             "watermark": {
                 "subspace": {
                     "enabled": True,
@@ -140,7 +141,10 @@ class TestEstimateJVPMatrix:
         # 创建一个简单的中心化矩阵
         centered = np.random.randn(8, 16).astype(np.float64)
         
-        inputs = {}  # 没有 UNet，应该使用 surrogate
+        def _runtime_operator(state_vector: np.ndarray, probe_vector: np.ndarray, eps: float) -> np.ndarray:
+            return state_vector + probe_vector * eps
+
+        inputs = {"jvp_operator": _runtime_operator}
         
         jvp_samples, jvp_anchor = planner._estimate_jvp_matrix(cfg, inputs, centered, planner_params)
 
@@ -153,10 +157,10 @@ class TestEstimateJVPMatrix:
         assert "probe_seed_digest" in jvp_anchor
         assert "probe_count_digest" in jvp_anchor
         assert "jacobian_eps_digest" in jvp_anchor
-        assert jvp_anchor["jvp_source"] == "surrogate_transition"
+        assert jvp_anchor["jvp_source"] == "runtime_operator"
 
-    def test_estimate_jvp_matrix_is_deterministic(self):
-        """JVP 估算应具有确定性。"""
+    def test_estimate_jvp_matrix_rejects_missing_runtime_operator_on_formal_path(self):
+        """paper formal path 缺失 runtime operator 时必须 fail-fast。"""
         planner = SubspacePlannerImpl(
             impl_id=SUBSPACE_PLANNER_ID,
             impl_version=SUBSPACE_PLANNER_VERSION,
@@ -164,6 +168,7 @@ class TestEstimateJVPMatrix:
         )
 
         cfg = {
+            "paper_faithfulness": {"enabled": True},
             "watermark": {
                 "subspace": {
                     "enabled": True,
@@ -179,7 +184,39 @@ class TestEstimateJVPMatrix:
 
         planner_params = planner._parse_planner_params(cfg)
         centered = np.random.randn(8, 16).astype(np.float64)
-        inputs = {}
+
+        with pytest.raises(ValueError, match="paper formal path requires jvp_operator"):
+            planner._estimate_jvp_matrix(cfg, {}, centered, planner_params)
+
+    def test_estimate_jvp_matrix_is_deterministic(self):
+        """JVP 估算应具有确定性。"""
+        planner = SubspacePlannerImpl(
+            impl_id=SUBSPACE_PLANNER_ID,
+            impl_version=SUBSPACE_PLANNER_VERSION,
+            impl_digest=digests.canonical_sha256({"test": "digest"})
+        )
+
+        cfg = {
+            "paper_faithfulness": {"enabled": True},
+            "watermark": {
+                "subspace": {
+                    "enabled": True,
+                    "rank": 4,
+                    "sample_count": 8,
+                    "feature_dim": 16,
+                    "seed": 42,
+                    "jacobian_probe_count": 2,
+                    "jacobian_eps": 1e-3
+                }
+            }
+        }
+
+        planner_params = planner._parse_planner_params(cfg)
+        centered = np.random.randn(8, 16).astype(np.float64)
+        def _runtime_operator(state_vector: np.ndarray, probe_vector: np.ndarray, eps: float) -> np.ndarray:
+            return state_vector + probe_vector * eps
+
+        inputs = {"jvp_operator": _runtime_operator}
         
         jvp1, anchor1 = planner._estimate_jvp_matrix(cfg, inputs, centered, planner_params)
         jvp2, anchor2 = planner._estimate_jvp_matrix(cfg, inputs, centered, planner_params)
@@ -284,14 +321,15 @@ class TestDetectSideMismatchVerification:
                 "probe_spec": {
                     "probe_seed_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
                 },
-                "jvp_source": "surrogate_transition"
+                "jvp_source": "runtime_operator"
             }
         }
 
         # 一致性检查
         closure_anchors = {
             "timesteps_digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "probe_seed_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+            "probe_seed_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "jvp_source": "runtime_operator"
         }
 
         is_consistent, reason = verify_verifiable_input_domain(plan_payload, closure_anchors, strict_mode=True)
@@ -305,7 +343,7 @@ class TestDetectSideMismatchVerification:
                 "timesteps_spec": {
                     "timesteps_digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
                 },
-                "jvp_source": "surrogate_transition"
+                "jvp_source": "runtime_operator"
             }
         }
 
@@ -350,7 +388,7 @@ class TestDetectSideMismatchVerification:
             probe_seed=42,
             jacobian_eps=1e-3,
             timesteps_list=timesteps,
-            jvp_source="surrogate_transition"
+            jvp_source="runtime_operator"
         )
 
         # 验证锚点包含必需的字段
@@ -360,7 +398,7 @@ class TestDetectSideMismatchVerification:
         assert "samples_anchor" in anchors
         assert "samples_anchor_digest" in anchors
         assert "jvp_source" in anchors
-        assert anchors["jvp_source"] == "surrogate_transition"
+        assert anchors["jvp_source"] == "runtime_operator"
 
     def test_create_run_closure_trajectory_anchors_is_deterministic(self):
         """锚点创建函数应具有确定性。"""
@@ -371,14 +409,16 @@ class TestDetectSideMismatchVerification:
             trajectory_samples=samples,
             probe_seed=42,
             jacobian_eps=1e-3,
-            timesteps_list=timesteps
+            timesteps_list=timesteps,
+            jvp_source="runtime_operator"
         )
 
         anchors2 = create_run_closure_trajectory_anchors(
             trajectory_samples=samples,
             probe_seed=42,
             jacobian_eps=1e-3,
-            timesteps_list=timesteps
+            timesteps_list=timesteps,
+            jvp_source="runtime_operator"
         )
 
         # 两次调用应产生相同的摘要

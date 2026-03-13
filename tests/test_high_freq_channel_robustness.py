@@ -15,8 +15,8 @@ from typing import Any, Dict
 
 from scripts.audits.audit_records_fields_append_only import run_audit
 from main.core import digests
-from main.watermarking.content_chain.content_detector import ContentDetector
 from main.watermarking.content_chain.interfaces import ContentEvidence
+from main.watermarking.content_chain.unified_content_extractor import UnifiedContentExtractor
 from main.watermarking.content_chain.subspace.subspace_planner_impl import (
     SUBSPACE_PLANNER_ID,
     SUBSPACE_PLANNER_VERSION,
@@ -24,10 +24,10 @@ from main.watermarking.content_chain.subspace.subspace_planner_impl import (
 )
 
 
-def _build_detector() -> ContentDetector:
-    return ContentDetector(
-        impl_id="content_detector_v1",
-        impl_version="v1",
+def _build_detector() -> UnifiedContentExtractor:
+    return UnifiedContentExtractor(
+        impl_id="unified_content_extractor",
+        impl_version="v2",
         impl_digest="test_impl_digest_s05",
     )
 

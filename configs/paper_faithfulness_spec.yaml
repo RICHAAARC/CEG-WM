@@ -77,45 +77,41 @@ target_method_families:
   # ------------------------------
   # HF 高频模板编码器对齐规范
   # ------------------------------
-  high_freq_template_codec:
-    paper_citation: "keyed Rademacher template tail-truncation watermarking"
+  high_freq_truncation_codec:
+    paper_citation: "planner-bounded high-frequency subspace tail-truncation watermarking"
     enabled: true
     alignment_dimensions:
 
-      # 1) Tail Truncation 采样规则（Keyed Rademacher Template）
+      # 1) Planner 绑定的 HF 子空间投影
+      hf_subspace_projection:
+        required_alignment: "planner_bound_hf_projection"
+        alignment_rule: "HF formal path 必须先投影到 planner 输出的 hf_basis，再在该子空间内执行 tail truncation；不得在实现层重新派生 template、codeword 或自选子空间。"
+        deviation_policy: "禁止偏差"
+        evidence_field_paths:
+          - "content_evidence.basis_digest"
+          - "content_evidence.hf_trace_digest"
+          - "content_evidence.hf_evidence_summary"
+
+      # 2) Tail Truncation 规则
       tail_truncation:
-        required_alignment: "keyed_rademacher_template"
-        alignment_rule: "必须使用基于 plan_digest 导出的 Rademacher 双极模板（±1）注入，无需 top-k magnitude 排序。"
+        required_alignment: "projection_tail_truncation"
+        alignment_rule: "必须对 HF projection coefficients 执行确定性尾部截断；tail_truncation_ratio 与 threshold_percentile 的对应关系必须唯一，且不得回退到 top-k magnitude template 或随机 codeword。"
         deviation_policy: "禁止偏差"
         evidence_field_paths:
           - "content_evidence.hf_trace_digest"
           - "content_evidence.hf_evidence_summary"
         parameter_binding:
           k_field_path: "watermark.hf.tail_truncation_ratio"
-          mode_field_path: "watermark.hf.tail_truncation_mode"
-          required_values:
-            tail_truncation_mode: "keyed_template_correlation"
-
-      # 2) 重复码编码（Repetition Code）
-      repetition_code:
-        required_alignment: "rademacher_bipolar"
-        alignment_rule: "codeword 必须使用 Rademacher 双极性重复码（±1），重复因子 r 由 FPR 决定。"
-        deviation_policy: "禁止偏差"
-        evidence_field_paths:
-          - "content_evidence.hf_evidence_summary.repetition_factor"
-          - "content_evidence.injection_params_digest"
-        parameter_binding:
-          repetition_factor_derivation: "2 * Φ(-τ) * n / m"
-          tau_field_path: "watermark.hf.tau"
+          percentile_field_path: "watermark.hf.threshold_percentile"
 
       # 3) 检测阈值校准（Detection Threshold Calibration）
       threshold_calibration:
-        required_alignment: "template_matched_correlation"
+        required_alignment: "constrained_hf_energy"
         implementation_note: |
-          实际实现：whitened Pearson correlation 与 sigmoid 映射。
-          HF 检测分数从 Rademacher 模板与实测 latent 的 Pearson 相关系数计算，
-          不使用 energy statistics 或 top-k magnitude。
-        alignment_rule: "检测得分必须使用模板匹配相关分（whitened Pearson），不允许 energy statistics。"
+          实际实现：对 planner-bound HF projection coefficients 执行同构 tail truncation，
+          然后以 constrained coefficient energy 作为 HF 检测分数。
+          不允许 template correlation、Rademacher sign pattern、repetition code 或 top-k magnitude fallback。
+        alignment_rule: "检测得分必须来自 planner-bound truncation channel 的 constrained energy；score direction 为 larger indicates stronger watermark evidence。"
         deviation_policy: "禁止偏差"
         evidence_field_paths:
           - "content_evidence.hf_score"
@@ -258,7 +254,7 @@ alignment_check_rules:
       - "content_evidence.injection_site_spec"
     required_keys_by_method:
       shallow_diffuse: ["hook_type", "target_tensor"]
-      hf_template_codec: ["hook_type", "truncation_site"]
+      hf_truncation_codec: ["hook_type", "truncation_site"]
       lf_template_codec: ["hook_type", "encoding_site"]
     failure_action: "FAIL"
     failure_message: "注入点规范与 paper_spec 不一致"
@@ -267,9 +263,9 @@ alignment_check_rules:
   method_specific_parameter_binding:
     check_type: "parameter_binding"
     bindings:
-      hf_template_codec:
+      hf_truncation_codec:
         - field_path: "watermark.hf.tail_truncation_mode"
-          required_value: "top_k_per_latent"
+          required_value: "keyed_rademacher_truncation_channel"
         - field_path: "watermark.hf.enabled"
           required_value: true
       lf_template_codec:

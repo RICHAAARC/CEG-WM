@@ -23,9 +23,9 @@ from main.registries.runtime_resolver import BuiltImplSet
 from main.watermarking.content_chain import detector_scoring
 from main.watermarking.common.plan_digest_flow import verify_plan_digest
 from main.watermarking.content_chain.high_freq_embedder import (
-    HighFreqTemplateCodec,
-    HIGH_FREQ_TEMPLATE_CODEC_ID,
-    HIGH_FREQ_TEMPLATE_CODEC_VERSION,
+    HighFreqTruncationCodec,
+    HIGH_FREQ_TRUNCATION_CODEC_ID,
+    HIGH_FREQ_TRUNCATION_CODEC_VERSION,
     HF_FAILURE_RULE_VERSION,
 )
 from main.watermarking.content_chain.low_freq_coder import (
@@ -35,6 +35,9 @@ from main.watermarking.content_chain.low_freq_coder import (
 )
 from main.watermarking.content_chain import high_freq_embedder as high_freq_embedder_module
 from main.watermarking.content_chain import low_freq_coder as low_freq_coder_module
+from main.watermarking.content_chain.subspace.subspace_planner_impl import (
+    build_runtime_jvp_operator_from_cache,
+)
 from main.watermarking.fusion import neyman_pearson
 from main.watermarking.fusion.interfaces import FusionDecision
 from main.watermarking.geometry_chain.sync.latent_sync_template import SyncRuntimeContext
@@ -537,10 +540,7 @@ def run_detect_orchestrator(
                     ),
                 },
             }
-        lf_evidence = _extract_lf_evidence_from_input_record(input_record)
-
-        # 正式 LF detect 步骤：trajectory latent + LDPC 闭环相关验证（与 LowFreqTemplateCodec.detect_score() 相同路径）。
-        # 在 detector_inputs 构建前完成，使分数通过 detector_inputs["lf_score"] 进入 ContentDetector。
+        # 正式 LF detect 步骤：trajectory latent + LDPC 闭环相关验证。
         _lf_direct_detect_score: Optional[float] = None
         if isinstance(plan_payload, dict):
             _plan_early = plan_payload.get("plan")
@@ -555,14 +555,16 @@ def run_detect_orchestrator(
                 if _lf_s is not None:
                     _lf_direct_detect_score = _lf_s
 
+        lf_detect_evidence = _build_lf_detect_evidence(
+            _lf_direct_detect_score if _lf_direct_detect_score is not None else lf_raw_score,
+            raw_score_traces.get("lf"),
+        )
         detector_inputs: Dict[str, Any] = {
             "expected_plan_digest": expected_plan_digest,
             "observed_plan_digest": detect_time_plan_digest,
             "plan_digest": detect_time_plan_digest,
-            "lf_evidence": lf_evidence,
+            "lf_evidence": lf_detect_evidence,
             "hf_evidence": hf_evidence,
-            "lf_score": _lf_direct_detect_score if _lf_direct_detect_score is not None else lf_raw_score,
-            "hf_score": hf_raw_score,
             "lf_detect_trace": raw_score_traces.get("lf"),
             "hf_detect_trace": raw_score_traces.get("hf"),
             "trajectory_evidence": trajectory_evidence,
@@ -581,8 +583,6 @@ def run_detect_orchestrator(
             _inject_trajectory_audit_fields(content_evidence_payload, trajectory_evidence)
         if injection_evidence is not None:
             _merge_injection_evidence(content_evidence_payload, injection_evidence)
-        _merge_hf_evidence(content_evidence_payload, hf_evidence)
-        _bind_raw_scores_to_content_payload(content_evidence_payload, lf_raw_score, hf_raw_score, raw_score_traces)
         _bind_scores_if_ok(content_evidence_payload)
         content_evidence_adapted = _adapt_content_evidence_for_fusion(content_evidence_payload)
         
@@ -972,20 +972,65 @@ def _build_hf_detect_evidence(
     """
     embedder = impl_set.hf_embedder
     if embedder is None or not hasattr(embedder, "detect"):
-        embedder = HighFreqTemplateCodec(
-            impl_id=HIGH_FREQ_TEMPLATE_CODEC_ID,
-            impl_version=HIGH_FREQ_TEMPLATE_CODEC_VERSION,
+        embedder = HighFreqTruncationCodec(
+            impl_id=HIGH_FREQ_TRUNCATION_CODEC_ID,
+            impl_version=HIGH_FREQ_TRUNCATION_CODEC_VERSION,
             impl_digest=digests.canonical_sha256(
                 {
-                    "impl_id": HIGH_FREQ_TEMPLATE_CODEC_ID,
-                    "impl_version": HIGH_FREQ_TEMPLATE_CODEC_VERSION,
+                    "impl_id": HIGH_FREQ_TRUNCATION_CODEC_ID,
+                    "impl_version": HIGH_FREQ_TRUNCATION_CODEC_VERSION,
                 }
             ),
         )
 
+    plan_dict = _resolve_plan_dict(plan_payload)
+    hf_basis = plan_dict.get("hf_basis") if isinstance(plan_dict.get("hf_basis"), dict) else None
+    if not isinstance(hf_basis, dict):
+        return {
+            "status": "mismatch",
+            "hf_score": None,
+            "hf_trace_digest": None,
+            "hf_evidence_summary": {
+                "hf_status": "mismatch",
+                "hf_failure_reason": "hf_subspace_missing",
+            },
+            "content_failure_reason": "hf_subspace_missing",
+        }
+
+    tfs = hf_basis.get("trajectory_feature_spec")
+    if not isinstance(tfs, dict):
+        return {
+            "status": "failed",
+            "hf_score": None,
+            "hf_trace_digest": None,
+            "hf_evidence_summary": {
+                "hf_status": "failed",
+                "hf_failure_reason": "hf_basis_missing_trajectory_feature_spec",
+            },
+            "content_failure_reason": "hf_basis_missing_trajectory_feature_spec",
+        }
+
+    detect_traj_cache = cfg.get("__detect_trajectory_latent_cache__")
+    edit_timestep = int(tfs.get("edit_timestep", 0))
+    detect_latent, resolution_status = detector_scoring.resolve_detect_trajectory_latent_for_timestep(
+        detect_traj_cache,
+        edit_timestep,
+    )
+    if detect_latent is None:
+        return {
+            "status": "absent",
+            "hf_score": None,
+            "hf_trace_digest": None,
+            "hf_evidence_summary": {
+                "hf_status": "absent",
+                "hf_absent_reason": f"trajectory_latent_absent:{resolution_status}",
+            },
+            "content_failure_reason": f"trajectory_latent_absent:{resolution_status}",
+        }
+
     expected_plan_digest = embed_time_plan_digest if isinstance(embed_time_plan_digest, str) and embed_time_plan_digest else plan_digest
     detect_result = embedder.detect(
-        latents_or_features=trajectory_evidence,
+        latents_or_features=detect_latent,
         plan=plan_payload,
         cfg=cfg,
         cfg_digest=cfg_digest,
@@ -1033,6 +1078,12 @@ def _build_hf_detect_evidence(
         }
     if "hf_score" not in evidence:
         evidence["hf_score"] = hf_score
+    if "hf_evidence_summary" not in evidence:
+        evidence["hf_evidence_summary"] = {
+            "hf_status": evidence.get("status"),
+            "hf_absent_reason": evidence.get("hf_absent_reason"),
+            "hf_failure_reason": evidence.get("hf_failure_reason"),
+        }
     return evidence
 
 
@@ -1186,7 +1237,7 @@ def _extract_content_raw_scores_from_image(
             raise RuntimeError(
                 "hf_image_texture_score path reached in _extract_content_raw_scores_from_image: "
                 "this path was removed in v2.0 single-path closure. "
-                "Only HighFreqTemplateCodec class entry is permitted for HF detection. "
+                "Only HighFreqTruncationCodec class entry is permitted for HF detection. "
                 "Ensure image_domain_sidecar_enabled=false in paper mode config."
             )
     else:
@@ -1229,13 +1280,13 @@ def _bind_raw_scores_to_content_payload(
     lf_template_status = lf_trace.get("lf_status")
     if isinstance(lf_template_status, str) and lf_template_status:
         score_parts["lf_template_status"] = lf_template_status
-    # 补齐 lf_status 顶层口径（if-not-in 守卫，不覆写 ContentDetector 已写入值）??
+    # 补齐 lf_status 顶层口径（if-not-in 守卫，不覆写统一提取器已写入值）??
     if "lf_status" not in score_parts and isinstance(lf_template_status, str) and lf_template_status:
         score_parts["lf_status"] = lf_template_status
 
     # （P1 修复）BP 收敛状态降级守卫：
     # ??bp_converge_status="degraded" ??lf_status 仍为 "ok" 时，将顶??lf_status 覆写??"degraded"??
-    # 不改??low_freq_coder ??trace["status"]，不影响 ContentDetector 决策链，仅修正诊断字段语义??
+    # 不改??low_freq_coder ??trace["status"]，不影响统一提取器决策链，仅修正诊断字段语义??
     _bp_converge_status = lf_trace.get("bp_converge_status")
     if _bp_converge_status == "degraded" and score_parts.get("lf_status") == "ok":
         score_parts["lf_status"] = "degraded"
@@ -1407,6 +1458,56 @@ def _build_content_inputs_for_detect(
     return None
 
 
+def _build_lf_detect_evidence(
+    lf_score: Optional[float],
+    lf_trace: Any,
+) -> Dict[str, Any]:
+    """
+    功能：将 detect 侧 LF 闭环结果封装为正式 evidence。
+
+    Build LF detect evidence so UnifiedContentExtractor consumes structured evidence rather than
+    proxy raw-score side channels.
+
+    Args:
+        lf_score: Detect-side LF score.
+        lf_trace: Detect-side LF trace mapping.
+
+    Returns:
+        LF evidence mapping.
+    """
+    trace_payload = cast(Dict[str, Any], lf_trace) if isinstance(lf_trace, dict) else {}
+    lf_status = trace_payload.get("lf_status") if isinstance(trace_payload.get("lf_status"), str) else "absent"
+    if lf_status == "ok" and isinstance(lf_score, (int, float)):
+        return {
+            "status": "ok",
+            "lf_score": float(lf_score),
+            "lf_trace_digest": trace_payload.get("lf_trace_digest"),
+            "bp_converged": trace_payload.get("bp_converged"),
+            "bp_iteration_count": trace_payload.get("bp_iteration_count"),
+            "parity_check_digest": trace_payload.get("parity_check_digest"),
+        }
+    if lf_status == "mismatch":
+        return {
+            "status": "mismatch",
+            "lf_score": None,
+            "content_failure_reason": trace_payload.get("lf_failure_reason") or "lf_plan_mismatch",
+            "lf_trace_digest": trace_payload.get("lf_trace_digest"),
+        }
+    if lf_status == "failed":
+        return {
+            "status": "failed",
+            "lf_score": None,
+            "content_failure_reason": trace_payload.get("lf_failure_reason") or "lf_detection_failed",
+            "lf_trace_digest": trace_payload.get("lf_trace_digest"),
+        }
+    return {
+        "status": "absent",
+        "lf_score": None,
+        "content_failure_reason": trace_payload.get("lf_absent_reason"),
+        "lf_trace_digest": trace_payload.get("lf_trace_digest"),
+    }
+
+
 def _resolve_plan_dict(plan_payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if isinstance(plan_payload, dict):
         plan_node = plan_payload.get("plan")
@@ -1443,39 +1544,6 @@ def _build_hf_image_embed_params_for_detect(cfg: Dict[str, Any]) -> Dict[str, An
         "tail_truncation_mode": hf_cfg.get("tail_truncation_mode", "top_k_per_latent"),
         "sampling_stride": int(hf_cfg.get("sampling_stride", 1)),
     }
-
-
-def _merge_hf_evidence(content_evidence_payload: Dict[str, Any], hf_evidence: Dict[str, Any]) -> None:
-    """
-    功能：合??HF 证据??content_evidence??
-
-    Merge HF evidence into content evidence payload using existing registered fields.
-
-    Args:
-        content_evidence_payload: Mutable content evidence mapping.
-        hf_evidence: HF evidence mapping.
-
-    Returns:
-        None.
-    """
-    content_evidence_payload["hf_trace_digest"] = hf_evidence.get("hf_trace_digest")
-    content_evidence_payload["hf_score"] = hf_evidence.get("hf_score")
-
-    score_parts = content_evidence_payload.get("score_parts")
-    if not isinstance(score_parts, dict):
-        score_parts = {}
-        content_evidence_payload["score_parts"] = score_parts
-
-    score_parts["content_score_rule_version"] = hf_evidence.get("content_score_rule_version")
-    score_parts["hf_status"] = hf_evidence.get("status")
-    summary_node = hf_evidence.get("hf_evidence_summary")
-    summary_payload = cast(Dict[str, Any], summary_node) if isinstance(summary_node, dict) else {}
-    if summary_payload:
-        score_parts["hf_metrics"] = summary_payload
-        if "hf_absent_reason" in summary_payload:
-            score_parts["hf_absent_reason"] = summary_payload.get("hf_absent_reason")
-        if "hf_failure_reason" in summary_payload:
-            score_parts["hf_failure_reason"] = summary_payload.get("hf_failure_reason")
 
 
 def _merge_injection_evidence(content_evidence_payload: Dict[str, Any], injection_evidence: Dict[str, Any]) -> None:
@@ -1612,8 +1680,8 @@ def _evaluate_paper_impl_binding_consistency(
         if not isinstance(impl_selected, str) or not impl_selected:
             return "mismatch", f"{channel_name}_impl_selected_absent"
         evidence_level = binding_payload.get("evidence_level")
-        # 正式路径只允许 primary / primary_equivalent / ablation_disabled；其余为非正式路径绑定。
-        if evidence_level not in {"primary", "primary_equivalent", "ablation_disabled", None}:
+        # 正式路径只允许 primary / ablation_disabled；其余为非正式路径绑定。
+        if evidence_level not in {"primary", "ablation_disabled", None}:
             return "mismatch", f"{channel_name}_non_primary_binding_under_paper_mode"
     return "ok", None
 
@@ -2385,6 +2453,9 @@ def _build_planner_inputs_for_runtime(
     runtime_traj_cache = cfg.get("__detect_trajectory_latent_cache__")
     if runtime_traj_cache is not None:
         inputs["trajectory_latent_cache"] = runtime_traj_cache
+        runtime_jvp_operator = build_runtime_jvp_operator_from_cache(cfg, runtime_traj_cache)
+        if callable(runtime_jvp_operator):
+            inputs["jvp_operator"] = runtime_jvp_operator
     if trajectory_evidence is not None:
         inputs["trajectory_evidence"] = trajectory_evidence
     if content_evidence_payload is not None:
@@ -4643,7 +4714,7 @@ def verify_attestation(
         2. Compute d_A = SHA256(CanonicalJSON(statement)).
         3. Derive keys: k_LF, k_HF, k_GEO, k_TR via HKDF(K_master, d_A).
         4. Compute S_LF = LF attestation score (latent posterior vs payload).
-        5. Compute S_HF = HF attestation score (HF values vs key template).
+        5. Compute S_HF = HF attestation score from supplied HF feature values.
         6. Compute S_GEO from provided geo_score.
         7. Fuse: score = w_LF*S_LF + w_HF*S_HF + w_GEO*S_GEO.
         8. Output attested | mismatch | absent.
@@ -4657,7 +4728,7 @@ def verify_attestation(
         k_master: Master key (hex str) used for key derivation.
         candidate_statement: Dict representing the candidate attestation statement.
         content_evidence: Optional content detection evidence dict (for lf_score fallback).
-        hf_values: Optional HF channel feature values for template correlation.
+        hf_values: Optional HF channel feature values for HF attestation scoring.
         lf_latent_features: Optional LF latent features for attestation bit correlation.
         geo_score: Optional geometry chain score (0??), passed through.
         lf_weight: Score weight for LF channel (default 0.5).

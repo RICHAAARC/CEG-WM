@@ -18,10 +18,6 @@ from main.watermarking.content_chain.semantic_mask_provider import (
     SemanticMaskProvider,
     SEMANTIC_MASK_PROVIDER_ID
 )
-from main.watermarking.content_chain.content_detector import (
-    ContentDetector,
-    CONTENT_DETECTOR_ID
-)
 from main.core import digests
 
 

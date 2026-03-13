@@ -25,7 +25,7 @@ Enforce real file reads before any analysis. Conversation history and memory sum
 | `main/watermarking/embed/orchestrator.py` | `_build_content_inputs_for_embed`、`_resolve_embed_input_image_path` |
 | `main/watermarking/detect/orchestrator.py` | `_build_content_inputs_for_detect`、`_resolve_detect_image_path`、real 模式门控、`_build_mismatch_fusion_decision` |
 | `main/watermarking/content_chain/semantic_mask_provider.py` | `extract()`、`_probe_model_v2_availability()` |
-| `main/watermarking/content_chain/content_detector.py` | `extract()` 的期望输入字段 |
+| `main/watermarking/content_chain/unified_content_extractor.py` | `extract()` 的期望输入字段 |
 | `main/watermarking/fusion/decision.py` | `decision_status` 所有可能值 |
 | `main/watermarking/geometry_chain/sync/latent_sync_template.py` | uncertainty 门控、`sync_strength` 默认值 |
 
@@ -73,7 +73,7 @@ Enforce real file reads before any analysis. Conversation history and memory sum
 □ main/watermarking/embed/orchestrator.py   — 已读 / 未读
 □ main/watermarking/detect/orchestrator.py  — 已读 / 未读
 □ main/watermarking/content_chain/semantic_mask_provider.py — 已读 / 未读
-□ main/watermarking/content_chain/content_detector.py       — 已读 / 未读
+□ main/watermarking/content_chain/unified_content_extractor.py       — 已读 / 未读
 □ main/watermarking/fusion/decision.py      — 已读 / 未读
 □ main/watermarking/geometry_chain/sync/latent_sync_template.py — 已读 / 未读
 □ outputs/.../embed_record.json       — 已读 / 未读

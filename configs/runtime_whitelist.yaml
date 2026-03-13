@@ -1,4 +1,4 @@
-﻿# ==============================================================
+# ==============================================================
 # 运行期白名单
 #   本文件定义“运行期允许集合”，用于门禁收口。
 #   - 限制 policy_path 只能取允许集合中的值。
@@ -367,7 +367,7 @@ impl_id:
     - "injection_site_binder"
     - "paper_alignment_evaluator"
     # v2/v3 正式实现（唯一合规正式路径）
-    - "high_freq_template_codec"
+    - "high_freq_truncation_codec"
     - "low_freq_template_codec"
     - "unified_content_extractor"
     - "subspace_planner"
@@ -377,14 +377,14 @@ impl_id:
     # ---- 已废弃 impl_id（deprecated v2.0，formal_run_forbidden，append-only 审计记录）----
     # - "content_baseline_identity_v1"         # 旧内容基线，已废弃
     # - "low_freq_coder_v1"                    # 旧 LF 基线，被 low_freq_template_codec 取代
-    # - "high_freq_coder_v1"                   # 旧 HF 基线，被 high_freq_template_codec 取代
+    # - "high_freq_coder_v1"                   # 旧 HF 基线，被 high_freq_truncation_codec 取代
     # - "unified_latent_modifier_v1"           # 旧 latent 修改器，已废弃
-    # - "content_detector_v1"                  # 旧内容检测器，被 unified_content_extractor 取代
+    # - "unified_content_extractor"                  # 旧内容检测器，被 unified_content_extractor 取代
     # - "unified_content_extractor_v1"         # 旧统一提取器，被 v2 取代
     # - "geometry_attention_anchor_sd3_v1"     # 旧几何锚点，被 attention_anchor_extractor 取代
     # - "subspace_planner_v1"                  # 旧子空间规划器，被 v2 取代
     # - "subspace_planner_mask_conditioned_v1" # 旧 mask-conditioned 规划器，被 v2 取代
-    # - "high_freq_template_codec_v1"           # 旧 HF embedder，被 v2 取代
+    # - "high_freq_template_codec_v1"           # 旧 HF embedder，被 v2 truncation codec 取代
     # - "low_freq_template_codec_v1"            # 旧 LF coder，被 v2 取代
     # - "attention_anchor_map_relation_v1"     # 旧关系提取器，被 v2 取代
     # - "geometry_latent_sync_sd3_v2"          # 旧 sync v2，被 v3 取代
@@ -402,10 +402,10 @@ impl_id:
 
       # v2/v3 正式实现（唯一合规路径）
       # - unified_content_extractor：统一 Embed/Detect 双模式提取器。
-      # - high_freq_template_codec：HF 高频模板匹配嵌入，keyed Rademacher + 相关检测。
+      # - high_freq_truncation_codec：HF 高频截断通道嵌入，keyed Rademacher + truncation-channel 检测。
       # - low_freq_template_codec：LF 低频伪高斯模板加性注入 + matched_correlation 检测。
       - "unified_content_extractor"
-      - "high_freq_template_codec"
+      - "high_freq_truncation_codec"
       - "low_freq_template_codec"
 
     geometry_extractor:
@@ -460,7 +460,7 @@ consistency_rules:
   policy_path_semantics_version_source: "configs/policy_path_semantics.yaml:policy_path_semantics_version"
   policy_path_semantics_digest_source: "configs/policy_path_semantics.yaml (canonical SHA256)"
   notes: "这四个字段必须由 freeze_gate 在写盘前一并校验，缺失任何字段均为 fail-fast。"
-  paper_acceptance_require_template_codec_baseline: true
+  paper_acceptance_require_formal_codec_baseline: true
 
   # ---- Override 层的枚举校验（新增） ----
   override_source_validation:

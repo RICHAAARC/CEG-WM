@@ -94,7 +94,7 @@ main/watermarking/embed/orchestrator.py
 main/watermarking/detect/orchestrator.py
 
 main/watermarking/content_chain/semantic_mask_provider.py
-main/watermarking/content_chain/content_detector.py
+main/watermarking/content_chain/unified_content_extractor.py
 
 main/watermarking/fusion/decision.py
 
@@ -218,7 +218,7 @@ hf_status == ok
 
 1. detect 输入图像路径
 2. semantic mask 提取
-3. ContentDetector 输入结构
+3. UnifiedContentExtractor 输入结构
 4. content_inputs 构造
 5. LF/HF 证据来源
 6. sidecar 条件

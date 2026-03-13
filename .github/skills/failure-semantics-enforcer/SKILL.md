@@ -17,7 +17,7 @@ Ensure failures remain explicit, informative, and non-score-producing where requ
 ## Repository Anchors
 
 - `main/core/status.py`
-- `main/watermarking/content_chain/content_detector.py`
+- `main/watermarking/content_chain/unified_content_extractor.py`
 - `main/watermarking/geometry_chain/interfaces.py`
 - `main/watermarking/fusion/decision.py`
 - `tests/test_detect_failure_reasons_must_be_non_empty.py`

@@ -220,10 +220,11 @@ def test_onefile_workflow_paper_full_profile_generates_real_sd3_config(tmp_path:
     assert profile_cfg_obj["impl"]["geometry_extractor_id"] == "attention_anchor_extractor"
     assert profile_cfg_obj["mask"]["semantic_model_path"] == str(local_model_path.resolve())
     assert profile_cfg_obj["embed"]["geometry"]["sync_strength"] == 0.2
+    assert profile_cfg_obj["watermark"]["hf"]["tail_truncation_mode"] == cfg_obj["watermark"]["hf"]["tail_truncation_mode"]
+    assert profile_cfg_obj["watermark"]["hf"]["selection"] == cfg_obj["watermark"]["hf"]["selection"]
     assert "device: cuda" in profile_cfg_text
     assert "enabled: true" in profile_cfg_text
     assert "alignment_check: true" in profile_cfg_text
-    assert "tail_truncation_mode: keyed_template_correlation" in profile_cfg_text
     assert "coding_mode: pseudogaussian_template_additive" in profile_cfg_text
 
     steps = module.build_workflow_steps(
@@ -239,7 +240,8 @@ def test_onefile_workflow_paper_full_profile_generates_real_sd3_config(tmp_path:
     assert "force_cpu=\"cpu\"" not in embed_command_text
     step_names = [item.name for item in steps]
     assert "multi_protocol_evaluation" in step_names
-    assert "assert_paper_mechanisms" in step_names
+    assert "experiment_matrix" in step_names
+    assert "assert_paper_mechanisms" not in step_names
 
 
 def test_onefile_workflow_dry_run_skips_dual_branch_execution(

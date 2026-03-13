@@ -36,7 +36,7 @@ flowchart TD
     I --> J[Detect Runtime Inference]
     J --> K[final_latents + trajectory_evidence]
     G --> L[Detect-side Plan/Basis Consistency Check]
-    K --> M[ContentDetector<br/>LF/HF score]
+    K --> M[UnifiedContentExtractor<br/>LF/HF score]
     L --> M
 
     J --> N[Geometry Chain<br/>Sync(primary)+Anchor(secondary)+Align]
@@ -119,8 +119,7 @@ d_{\text{routing}} = \mathrm{SHA256}(\mathrm{CanonJSON}(\text{routing\_summary})
 构造 JVP 样本 \(\mathbf{J}\in \mathbb{R}^{m\times d}\)，来源优先级：
 
 1. runtime operator（可调用 JVP）；
-2. real unet JVP；
-3. surrogate transition（后备）。
+2. transition fit（非 paper 后备）。
 
 ### 6.3 SVD 子空间
 
@@ -237,7 +236,7 @@ d_{\text{routing}} = \mathrm{SHA256}(\mathrm{CanonJSON}(\text{routing\_summary})
 
 ## 8.3 内容评分
 
-`ContentDetector.extract(...)` 对 LF/HF 合成规则：
+`UnifiedContentExtractor.extract(...)` 对 LF/HF 合成规则：
 
 - HF absent：\(s_c = s_{\text{LF}}\)
 - HF available：

@@ -118,7 +118,7 @@ main/watermarking/detect/orchestrator.py
 
 ```
 main/watermarking/content_chain/semantic_mask_provider.py
-main/watermarking/content_chain/content_detector.py
+main/watermarking/content_chain/unified_content_extractor.py
 ```
 
 ---

@@ -75,10 +75,29 @@ def test_subspace_plan_contains_evidence_semantics_payload() -> None:
     semantics = cast(Dict[str, Any], semantics)
     assert semantics.get("version") == "subspace_evidence_semantics_v1"
     assert isinstance(semantics.get("source"), dict)
-    # 无真实 unet 时 surrogate/hybrid 是合法路径；
-    # paper 级证据需要 primary（需要真实 SD 模型 workflow 才能验证）。
-    assert semantics.get("evidence_level") in {"surrogate", "hybrid"}
+    assert semantics.get("evidence_level") != "primary"
     assert isinstance(semantics.get("reason"), str)
+
+
+def test_subspace_plan_paper_mode_requires_runtime_operator_for_primary_path() -> None:
+    impl_digest = digests.canonical_sha256(
+        {"impl_id": SUBSPACE_PLANNER_ID, "impl_version": SUBSPACE_PLANNER_VERSION}
+    )
+    planner = SubspacePlannerImpl(SUBSPACE_PLANNER_ID, SUBSPACE_PLANNER_VERSION, impl_digest)
+
+    cfg = _build_planner_cfg()
+    cfg["paper_faithfulness"] = {"enabled": True}
+
+    result = planner.plan(
+        cfg,
+        mask_digest="mask_digest_anchor",
+        cfg_digest="cfg_digest_anchor",
+        inputs=_build_planner_inputs(),
+    )
+
+    assert result.status == "failed"
+    assert result.plan is None
+    assert result.plan_failure_reason == "invalid_subspace_params"
 
 
 def test_sync_quality_semantics_contains_quantitative_secondary_evidence_level() -> None:

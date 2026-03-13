@@ -21,7 +21,7 @@ import numpy as np
 from main.core import digests
 
 
-HF_CHANNEL_IMPL_ID = "high_freq_template_codec"
+HF_CHANNEL_IMPL_ID = "high_freq_truncation_codec"
 HF_CHANNEL_VERSION = "v2"
 HF_TRACE_VERSION = "v2"
 

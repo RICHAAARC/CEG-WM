@@ -1,5 +1,5 @@
 """
-File purpose: ContentDetector formal path plan_digest closure guard tests.
+File purpose: UnifiedContentExtractor formal path plan_digest closure guard tests.
 Module type: General module
 
 v3 闭包语义：
@@ -10,21 +10,21 @@ v3 闭包语义：
 """
 
 from main.core import digests
-from main.watermarking.content_chain.content_detector import (
-    ContentDetector,
-    CONTENT_DETECTOR_ID,
-    CONTENT_DETECTOR_VERSION,
+from main.watermarking.content_chain.unified_content_extractor import (
+    UnifiedContentExtractor,
+    UNIFIED_CONTENT_EXTRACTOR_ID,
+    UNIFIED_CONTENT_EXTRACTOR_VERSION,
 )
 
 
-def _build_detector() -> ContentDetector:
-    return ContentDetector(
-        impl_id=CONTENT_DETECTOR_ID,
-        impl_version=CONTENT_DETECTOR_VERSION,
+def _build_detector() -> UnifiedContentExtractor:
+    return UnifiedContentExtractor(
+        impl_id=UNIFIED_CONTENT_EXTRACTOR_ID,
+        impl_version=UNIFIED_CONTENT_EXTRACTOR_VERSION,
         impl_digest=digests.canonical_sha256(
             {
-                "impl_id": CONTENT_DETECTOR_ID,
-                "impl_version": CONTENT_DETECTOR_VERSION,
+                "impl_id": UNIFIED_CONTENT_EXTRACTOR_ID,
+                "impl_version": UNIFIED_CONTENT_EXTRACTOR_VERSION,
             }
         ),
     )
@@ -59,7 +59,7 @@ def test_formal_detector_absent_when_no_plan_digest_in_inputs() -> None:
             "lf_evidence": {
                 "status": "ok",
                 "lf_score": 0.8,
-            }
+            },
         },
         cfg_digest="cfg_digest_anchor",
     )
@@ -122,7 +122,7 @@ def test_formal_detector_ignores_test_mode_in_inputs() -> None:
             "hf": {
                 "enabled": False,
             },
-        },
+            },
     }
     detector = _build_detector()
 

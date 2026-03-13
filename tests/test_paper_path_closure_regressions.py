@@ -12,6 +12,8 @@ import numpy as np
 from main.core import config_loader
 from main.registries import runtime_resolver
 from main.registries.runtime_resolver import BuiltImplSet
+from main.watermarking.content_chain.high_freq_embedder import HIGH_FREQ_TRUNCATION_CODEC_ID
+from main.watermarking.content_chain.low_freq_coder import LOW_FREQ_TEMPLATE_CODEC_ID
 from main.watermarking.detect import orchestrator as detect_orchestrator
 from main.watermarking.embed import orchestrator as embed_orchestrator
 
@@ -33,11 +35,16 @@ def test_paper_full_cuda_fusion_is_np() -> None:
 
 def test_runtime_resolver_builds_hf_lf_from_impl_identity() -> None:
     cfg = _load_paper_full_cuda_cfg()
+    impl_cfg = cast(Dict[str, Any], cfg.get("impl") if isinstance(cfg.get("impl"), dict) else {})
     identity, impl_set, _ = runtime_resolver.build_runtime_impl_set_from_cfg(cfg)
-    assert identity.hf_embedder_id == "high_freq_template_codec"
-    assert identity.lf_coder_id == "low_freq_template_codec"
+    assert impl_cfg.get("hf_embedder_id") == HIGH_FREQ_TRUNCATION_CODEC_ID
+    assert impl_cfg.get("lf_coder_id") == LOW_FREQ_TEMPLATE_CODEC_ID
+    assert identity.hf_embedder_id == impl_cfg.get("hf_embedder_id")
+    assert identity.lf_coder_id == impl_cfg.get("lf_coder_id")
     assert impl_set.hf_embedder is not None
     assert impl_set.lf_coder is not None
+    assert getattr(impl_set.hf_embedder, "impl_id", None) == impl_cfg.get("hf_embedder_id")
+    assert getattr(impl_set.lf_coder, "impl_id", None) == impl_cfg.get("lf_coder_id")
 
 
 class _SyncStub:

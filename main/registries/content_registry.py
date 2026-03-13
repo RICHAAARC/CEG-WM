@@ -27,9 +27,9 @@ from main.watermarking.content_chain.low_freq_coder import (
     LOW_FREQ_TEMPLATE_CODEC_VERSION,
 )
 from main.watermarking.content_chain.high_freq_embedder import (
-    HighFreqTemplateCodec,
-    HIGH_FREQ_TEMPLATE_CODEC_ID,
-    HIGH_FREQ_TEMPLATE_CODEC_VERSION,
+    HighFreqTruncationCodec,
+    HIGH_FREQ_TRUNCATION_CODEC_ID,
+    HIGH_FREQ_TRUNCATION_CODEC_VERSION,
 )
 from main.watermarking.content_chain.subspace.subspace_planner_impl import (
     SubspacePlanner,
@@ -142,26 +142,26 @@ def _build_low_freq_template_codec(cfg: Dict[str, Any]) -> LowFreqTemplateCodec:
     return LowFreqTemplateCodec(LOW_FREQ_TEMPLATE_CODEC_ID, impl_version, impl_digest)
 
 
-def _build_high_freq_template_codec(cfg: Dict[str, Any]) -> HighFreqTemplateCodec:
+def _build_high_freq_truncation_codec(cfg: Dict[str, Any]) -> HighFreqTruncationCodec:
     """
-    功能：构造 HF 高频模板编码器实现。
+    功能：构造 HF 高频截断编码器实现。
 
-    Build HF high-frequency template codec (keyed Rademacher template + correlation detection).
+    Build HF high-frequency truncation codec (planner-bounded projection + tail truncation).
 
     Args:
         cfg: Config mapping.
 
     Returns:
-        HighFreqTemplateCodec instance.
+        HighFreqTruncationCodec instance.
 
     Raises:
         TypeError: If cfg is not dict.
     """
     if not isinstance(cfg, dict):
         raise TypeError("cfg must be dict")
-    impl_version = HIGH_FREQ_TEMPLATE_CODEC_VERSION
-    impl_digest = _derive_impl_digest(HIGH_FREQ_TEMPLATE_CODEC_ID, impl_version)
-    return HighFreqTemplateCodec(HIGH_FREQ_TEMPLATE_CODEC_ID, impl_version, impl_digest)
+    impl_version = HIGH_FREQ_TRUNCATION_CODEC_VERSION
+    impl_digest = _derive_impl_digest(HIGH_FREQ_TRUNCATION_CODEC_ID, impl_version)
+    return HighFreqTruncationCodec(HIGH_FREQ_TRUNCATION_CODEC_ID, impl_version, impl_digest)
 
 
 def _build_unified_content_extractor(cfg: Dict[str, Any]) -> UnifiedContentExtractor:
@@ -242,8 +242,8 @@ _CONTENT_REGISTRY.register_factory(
     )
 )
 _CONTENT_REGISTRY.register_factory(
-    HIGH_FREQ_TEMPLATE_CODEC_ID,
-    _build_high_freq_template_codec,
+    HIGH_FREQ_TRUNCATION_CODEC_ID,
+    _build_high_freq_truncation_codec,
     capabilities=ImplCapabilities(
         supports_batching=False,
         requires_cuda=False,

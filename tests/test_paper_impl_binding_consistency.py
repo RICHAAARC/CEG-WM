@@ -6,6 +6,9 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from main.watermarking.content_chain import channel_hf, channel_lf
+from main.watermarking.content_chain.high_freq_embedder import HIGH_FREQ_TRUNCATION_CODEC_ID
+from main.watermarking.content_chain.low_freq_coder import LOW_FREQ_TEMPLATE_CODEC_ID
 from main.watermarking.detect import orchestrator as detect_orchestrator
 
 
@@ -13,11 +16,11 @@ def test_paper_impl_binding_rejects_fallback_binding() -> None:
     cfg: Dict[str, Any] = {"paper_faithfulness": {"enabled": True}}
     injection_evidence: Dict[str, Any] = {
         "lf_impl_binding": {
-            "impl_selected": "low_freq_template_codec",
+            "impl_selected": LOW_FREQ_TEMPLATE_CODEC_ID,
             "evidence_level": "non_compliant",
         },
         "hf_impl_binding": {
-            "impl_selected": "high_freq_template_codec",
+            "impl_selected": channel_hf.HF_CHANNEL_IMPL_ID,
             "evidence_level": "primary",
         },
     }
@@ -32,11 +35,11 @@ def test_paper_impl_binding_accepts_primary_bindings() -> None:
     cfg: Dict[str, Any] = {"paper_faithfulness": {"enabled": True}}
     injection_evidence: Dict[str, Any] = {
         "lf_impl_binding": {
-            "impl_selected": "channel_lf_v1",
+            "impl_selected": channel_lf.LF_CHANNEL_IMPL_ID,
             "evidence_level": "primary",
         },
         "hf_impl_binding": {
-            "impl_selected": "channel_hf_v1",
+            "impl_selected": channel_hf.HF_CHANNEL_IMPL_ID,
             "evidence_level": "primary",
         },
     }
@@ -80,11 +83,11 @@ def test_paper_impl_binding_rejects_int_ecc_under_paper_mode() -> None:
     injection_evidence: Dict[str, Any] = {
         "status": "ok",
         "lf_impl_binding": {
-            "impl_selected": "low_freq_template_codec",
+            "impl_selected": LOW_FREQ_TEMPLATE_CODEC_ID,
             "evidence_level": "primary",
         },
         "hf_impl_binding": {
-            "impl_selected": "channel_hf_v1",
+            "impl_selected": HIGH_FREQ_TRUNCATION_CODEC_ID,
             "evidence_level": "primary",
         },
     }

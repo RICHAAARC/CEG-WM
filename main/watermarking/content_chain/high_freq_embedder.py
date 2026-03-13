@@ -11,18 +11,18 @@ Module type: Core innovation module
 
 from __future__ import annotations
 
-import math
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 import numpy as np
 
 from main.core import digests
+from main.watermarking.content_chain import channel_hf
 
 
 
 # 项目内生命名（project-internal naming）
-HIGH_FREQ_TEMPLATE_CODEC_ID = "high_freq_template_codec"
-HIGH_FREQ_TEMPLATE_CODEC_VERSION = "v2"
+HIGH_FREQ_TRUNCATION_CODEC_ID = "high_freq_truncation_codec"
+HIGH_FREQ_TRUNCATION_CODEC_VERSION = "v2"
 
 # 评分规则版本（与版本化决策规则绑定，非 impl ID）
 CONTENT_SCORE_RULE_VERSION = "content_score_rule_v1"
@@ -50,17 +50,17 @@ HF_FAILURE_DECISION_REASONS = {
 
 
 
-class HighFreqTemplateCodec:
+class HighFreqTruncationCodec:
     """
-    功能：HF 高频模板编解码 v2 —— keyed Rademacher template + truncation-constrained additive injection + template-matched detection。
+        功能：HF 高频截断编解码 v2 —— planner-bounded subspace projection + tail truncation + constrained energy scoring。
 
-    Implements a closed-loop HF encode/detect cycle:
-      embed: derive Rademacher template from plan_digest; add alpha * template at hf_basis positions.
-      detect: measure correlation between runtime values at same positions and the same template.
-    Removes top_k_magnitude_based and energy-statistics detection.
+        Implements a closed-loop HF truncation family:
+            embed: project to planner-provided HF basis and enforce deterministic tail truncation.
+            detect: project to the same basis and score constrained HF energy.
+        The formal path does not derive or correlate any keyed template.
 
     Args:
-        impl_id: Implementation identifier (must be high_freq_template_codec).
+        impl_id: Implementation identifier (must be high_freq_truncation_codec).
         impl_version: Implementation version string.
         impl_digest: Implementation digest string.
 
@@ -72,33 +72,15 @@ class HighFreqTemplateCodec:
     """
 
     def __init__(self, impl_id: str, impl_version: str, impl_digest: str) -> None:
-        if not isinstance(impl_id, str) or not impl_id:
+        if not impl_id:
             raise ValueError("impl_id must be non-empty str")
-        if not isinstance(impl_version, str) or not impl_version:
+        if not impl_version:
             raise ValueError("impl_version must be non-empty str")
-        if not isinstance(impl_digest, str) or not impl_digest:
+        if not impl_digest:
             raise ValueError("impl_digest must be non-empty str")
         self.impl_id = impl_id
         self.impl_version = impl_version
         self.impl_digest = impl_digest
-
-    def _derive_hf_template(self, plan_digest: str, n_positions: int) -> np.ndarray:
-        """
-        功能：从 plan_digest 派生 Rademacher ±1 模板，embed/detect 共用同一推导路径。
-
-        Derive Rademacher (±1) template deterministically from plan_digest.
-        Shared computation ensures embed and detect use identical template.
-
-        Args:
-            plan_digest: Plan digest binding.
-            n_positions: Number of HF positions (template length).
-
-        Returns:
-            numpy array of float64 Rademacher values in {-1, +1}.
-        """
-        seed = int(digests.canonical_sha256({"plan_digest": plan_digest, "tag": "hf_template_v2"})[:16], 16)
-        rng = np.random.default_rng(seed % (2 ** 32))
-        return rng.choice([-1.0, 1.0], size=max(1, n_positions)).astype(np.float64)
 
     def embed(
         self,
@@ -110,9 +92,9 @@ class HighFreqTemplateCodec:
         expected_plan_digest: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        功能：HF template codec v2 embed with keyed template additive injection.
+        功能：HF truncation codec v2 embed。
 
-        Apply keyed Rademacher template at HF basis positions with truncation constraint.
+        Apply planner-bounded HF projection and deterministic tail truncation.
 
         Args:
             latents: Latent features.
@@ -143,10 +125,10 @@ class HighFreqTemplateCodec:
         expected_plan_digest: Optional[str] = None,
     ) -> Tuple[Optional[float], Dict[str, Any]]:
         """
-        功能：HF template codec v2 detect with keyed template matched correlation.
+        功能：HF truncation codec v2 detect。
 
-        Detect HF watermark by computing whitened Pearson correlation between
-        runtime values at hf_basis positions and the keyed Rademacher template.
+        Detect HF watermark by projecting to the planner-bounded HF basis and
+        scoring constrained HF energy after deterministic truncation.
 
         Args:
             latents_or_features: Input features.
@@ -157,7 +139,7 @@ class HighFreqTemplateCodec:
 
         Returns:
             Tuple of (hf_score, hf_evidence).
-            hf_score in [0, 1]; higher values indicate template match.
+            hf_score is non-negative; larger indicates stronger HF truncation evidence.
 
         Raises:
             TypeError: If cfg is invalid.
@@ -177,12 +159,13 @@ class HighFreqTemplateCodec:
         expected_plan_digest: Optional[str],
         mode: str,
     ) -> Dict[str, Any]:
-        if not isinstance(cfg, dict):
-            raise TypeError("cfg must be dict")
         if mode not in {"embed", "detect"}:
             raise ValueError("mode must be 'embed' or 'detect'")
 
-        hf_cfg = cfg.get("watermark", {}).get("hf", {})
+        watermark_cfg_raw = cfg.get("watermark", {})
+        watermark_cfg: Dict[str, Any] = cast(Dict[str, Any], watermark_cfg_raw) if isinstance(watermark_cfg_raw, dict) else {}
+        hf_cfg_raw = watermark_cfg.get("hf", {})
+        hf_cfg: Dict[str, Any] = cast(Dict[str, Any], hf_cfg_raw) if isinstance(hf_cfg_raw, dict) else {}
         enabled = hf_cfg.get("enabled", False)
         if not enabled:
             return {
@@ -198,6 +181,10 @@ class HighFreqTemplateCodec:
                 "hf_score": None,
                 "hf_failure_reason": "hf_missing_plan",
                 "hf_trace_digest": digests.canonical_sha256({"failure": "hf_missing_plan"}),
+                "hf_evidence_summary": {
+                    "hf_status": "mismatch",
+                    "hf_failure_reason": "hf_missing_plan",
+                },
             }
 
         plan_digest = _extract_plan_digest(plan)
@@ -208,138 +195,113 @@ class HighFreqTemplateCodec:
                     "hf_score": None,
                     "hf_failure_reason": "hf_plan_mismatch",
                     "hf_trace_digest": digests.canonical_sha256({"failure": "hf_plan_mismatch"}),
+                    "hf_evidence_summary": {
+                        "hf_status": "mismatch",
+                        "hf_failure_reason": "hf_plan_mismatch",
+                    },
                 }
 
-        selected_indices = _extract_hf_indices_from_plan(plan)
-        n_positions = len(selected_indices)
-        if n_positions == 0:
+        hf_basis = _extract_hf_basis(plan)
+        if not isinstance(hf_basis, dict):
             return {
                 "status": "mismatch",
                 "hf_score": None,
                 "hf_failure_reason": "hf_subspace_missing",
                 "hf_trace_digest": digests.canonical_sha256({"failure": "hf_subspace_missing"}),
+                "hf_evidence_summary": {
+                    "hf_status": "mismatch",
+                    "hf_failure_reason": "hf_subspace_missing",
+                },
             }
 
-        template = self._derive_hf_template(plan_digest, n_positions)
-        alpha = float(hf_cfg.get("variance", hf_cfg.get("tau", 1.0)))
-        # truncation constraint：限制注入幅值上限，避免破坏潜变量分布。
-        alpha = max(0.01, min(5.0, alpha))
-        correlation_scale = float(hf_cfg.get("correlation_scale", 10.0))
+        channel_cfg = _build_hf_channel_cfg(cfg)
 
-        flat_values = _flatten_to_float_list(latents)
+        try:
+            feature_vector = _prepare_hf_feature_vector(latents, hf_basis)
+        except Exception:
+            return {
+                "status": "failed",
+                "hf_score": None,
+                "hf_failure_reason": "hf_invalid_input",
+                "hf_trace_digest": digests.canonical_sha256({"failure": "hf_invalid_input"}),
+                "hf_evidence_summary": {
+                    "hf_status": "failed",
+                    "hf_failure_reason": "hf_invalid_input",
+                },
+            }
+
+        coeffs = channel_hf.compute_hf_basis_projection(feature_vector, hf_basis)
+        constrained_coeffs, constraint_evidence = channel_hf.apply_hf_truncation_constraint(coeffs, channel_cfg)
+        threshold_percentile = float(channel_cfg.get("hf_threshold_percentile", 75.0))
+        tail_ratio = float(round(1.0 - threshold_percentile / 100.0, 8))
 
         if mode == "embed":
-            # （1）加性 template 注入，在 hf_basis 位置上叠加 alpha * template[i]。
-            embedded = list(flat_values) if flat_values else []
-            for i, idx in enumerate(selected_indices):
-                if idx < len(embedded):
-                    embedded[idx] += alpha * float(template[i])
-            template_digest = digests.canonical_sha256({
-                "plan_digest": plan_digest,
-                "n_positions": n_positions,
-                "alpha": alpha,
-                "tag": "hf_template_v2",
-            })
-            trace_summary = {
+            constrained_features = channel_hf.reconstruct_from_hf_coeffs(
+                constrained_coeffs,
+                hf_basis,
+                feature_vector.shape,
+            )
+            trace_summary: Dict[str, Any] = {
                 "impl_id": self.impl_id,
                 "impl_version": self.impl_version,
-                "coding_mode": "keyed_rademacher_template_additive",
-                "n_positions": n_positions,
-                "alpha": alpha,
+                "coding_mode": "hf_projection_tail_truncation",
                 "plan_digest": plan_digest,
                 "cfg_digest": cfg_digest,
-                "template_digest": template_digest,
+                "basis_rank": int(hf_basis.get("basis_rank", len(constrained_coeffs))),
+                "tail_truncation_ratio": tail_ratio,
+                "threshold_percentile_applied": threshold_percentile,
+                **constraint_evidence,
                 "mode": "embed",
             }
             hf_trace_digest = digests.canonical_sha256(trace_summary)
             return {
                 "status": "ok",
-                "hf_score": None,  # embed 端不产出检测分数
-                "latent_features_embedded": embedded,
+                "hf_score": None,
                 "hf_trace_digest": hf_trace_digest,
-                "template_digest": template_digest,
-                "n_positions": n_positions,
-                "alpha": alpha,
+                "tail_truncation_ratio": tail_ratio,
+                "threshold_percentile_applied": threshold_percentile,
+                "latent_features_embedded": constrained_features.reshape(-1).tolist(),
+                "hf_evidence_summary": {
+                    "hf_status": "ok",
+                    "hf_detect_variant": "projection_tail_truncation",
+                    "basis_rank": int(hf_basis.get("basis_rank", len(constrained_coeffs))),
+                    "tail_truncation_ratio": tail_ratio,
+                    "threshold_percentile_applied": threshold_percentile,
+                    **constraint_evidence,
+                },
             }
-        else:
-            # （2）detect 模式：截断鲁棒通道检测（keyed Rademacher template + HF 截断通道符号一致率）。
-            # 高幅值子带（|coeff| >= threshold）构成正式 HF 通道；在通道内统计期望符号（±1）对齐率。
-            if len(flat_values) == 0:
-                return {
-                    "status": "failed",
-                    "hf_score": None,
-                    "hf_failure_reason": "hf_invalid_input",
-                    "hf_trace_digest": digests.canonical_sha256({"failure": "empty_latents"}),
-                }
-            measured = np.array(
-                [flat_values[idx] if idx < len(flat_values) else 0.0 for idx in selected_indices],
-                dtype=np.float64,
-            )
-            # (2.1) 截断参数：tail_truncation_ratio 表示"高幅值保留比例"的补（尾部）。
-            tail_ratio = float(hf_cfg.get("tail_truncation_ratio", 0.1))
-            tail_ratio = max(0.0, min(0.95, tail_ratio))
-            threshold_percentile = (1.0 - tail_ratio) * 100.0
-            abs_measured = np.abs(measured)
-            threshold = float(np.percentile(abs_measured, threshold_percentile)) if len(abs_measured) > 0 else 0.0
-            # (2.2) 通道内系数：|coeff| >= threshold（高幅值 = HF 通道）。
-            in_channel = abs_measured >= threshold
-            n_in_channel = int(np.sum(in_channel))
-            retention_ratio = float(n_in_channel / max(1, len(measured)))
-            # (2.3) 通道内符号一致率（期望符号来自 plan_digest，与 embed 共用推导路径）。
-            if n_in_channel > 0:
-                signs_measured = np.sign(measured[in_channel])
-                signs_expected = template[in_channel]
-                nonzero = signs_measured != 0
-                if np.any(nonzero):
-                    sign_agreement = float(np.mean(signs_measured[nonzero] == signs_expected[nonzero]))
-                else:
-                    sign_agreement = 0.5
-            else:
-                # 截断通道为空（阈值异常），回退到全域符号一致率。
-                signs_measured = np.sign(measured)
-                nonzero = signs_measured != 0
-                if np.any(nonzero):
-                    sign_agreement = float(np.mean(signs_measured[nonzero] == template[nonzero]))
-                else:
-                    sign_agreement = 0.5
-            # (2.4) HF 分数：以 sigmoid 将 sign_agreement ∈ [0,1] 映射到 [0,1]。
-            raw_stat = 2.0 * sign_agreement - 1.0  # ∈ [-1, 1]，0 = 纯随机，1 = 完美一致
-            hf_score = 1.0 / (1.0 + math.exp(-correlation_scale * raw_stat))
 
-            template_digest = digests.canonical_sha256({
-                "plan_digest": plan_digest,
-                "n_positions": n_positions,
-                "alpha": alpha,
-                "tag": "hf_template_v2",
-            })
-            trace_summary = {
-                "impl_id": self.impl_id,
-                "impl_version": self.impl_version,
-                "coding_mode": "keyed_rademacher_truncation_channel",
-                "n_positions": n_positions,
+        hf_score = channel_hf.extract_hf_score(feature_vector, hf_basis, channel_cfg)
+        trace_summary: Dict[str, Any] = {
+            "impl_id": self.impl_id,
+            "impl_version": self.impl_version,
+            "coding_mode": "hf_projection_tail_truncation",
+            "plan_digest": plan_digest,
+            "cfg_digest": cfg_digest,
+            "basis_rank": int(hf_basis.get("basis_rank", len(constrained_coeffs))),
+            "tail_truncation_ratio": tail_ratio,
+            "threshold_percentile_applied": threshold_percentile,
+            "hf_score": float(hf_score),
+            "higher_is_watermarked": True,
+            **constraint_evidence,
+            "mode": "detect",
+        }
+        hf_trace_digest = digests.canonical_sha256(trace_summary)
+        return {
+            "status": "ok",
+            "hf_score": float(hf_score),
+            "hf_trace_digest": hf_trace_digest,
+            "tail_truncation_ratio": tail_ratio,
+            "threshold_percentile_applied": threshold_percentile,
+            "hf_evidence_summary": {
+                "hf_status": "ok",
+                "hf_detect_variant": "projection_tail_truncation",
+                "basis_rank": int(hf_basis.get("basis_rank", len(constrained_coeffs))),
                 "tail_truncation_ratio": tail_ratio,
-                "retention_ratio": retention_ratio,
-                "sign_agreement": sign_agreement,
-                "raw_stat": raw_stat,
-                "hf_score": hf_score,
-                "correlation_scale": correlation_scale,
-                "plan_digest": plan_digest,
-                "cfg_digest": cfg_digest,
-                "template_digest": template_digest,
+                "threshold_percentile_applied": threshold_percentile,
+                **constraint_evidence,
                 "higher_is_watermarked": True,
-                "mode": "detect",
             }
-            hf_trace_digest = digests.canonical_sha256(trace_summary)
-            return {
-                "status": "ok",
-                "hf_score": hf_score,
-                "hf_trace_digest": hf_trace_digest,
-                "hf_template_match_score": hf_score,
-                "tail_truncation_ratio": tail_ratio,
-                "retention_ratio": retention_ratio,
-                "sign_agreement": sign_agreement,
-                "template_digest": template_digest,
-                "n_positions": n_positions,
             }
 
 
@@ -366,16 +328,10 @@ def embed_high_freq_pattern(
     Raises:
         TypeError: If input types are invalid.
     """
-    if not isinstance(image_array, np.ndarray):
-        raise TypeError("image_array must be np.ndarray")
     if image_array.ndim != 3:
         raise ValueError("image_array must be HWC array")
-    if not isinstance(routing_summary, dict):
-        raise TypeError("routing_summary must be dict")
-    if not isinstance(key_material, str) or not key_material:
+    if not key_material:
         raise TypeError("key_material must be non-empty str")
-    if not isinstance(params, dict):
-        raise TypeError("params must be dict")
 
     beta = float(params.get("beta", 2.0))
     tail_ratio = float(params.get("tail_truncation_ratio", 0.1))
@@ -422,7 +378,7 @@ def embed_high_freq_pattern(
         work[:, :, channel_idx] = channel.reshape(work.shape[:2])
 
     watermarked = np.clip(np.rint(work), 0, 255).astype(np.uint8)
-    hf_trace_summary = {
+    hf_trace_summary: Dict[str, Any] = {
         "hf_status": "ok",
         "method": "texture_region_weak_pattern",
         "tail_truncation_ratio": tail_ratio,
@@ -448,140 +404,73 @@ def compute_hf_trace_digest(hf_trace_summary: Dict[str, Any]) -> str:
     Returns:
         SHA256 digest string.
     """
-    if not isinstance(hf_trace_summary, dict):
-        raise TypeError("hf_trace_summary must be dict")
     return digests.canonical_sha256(hf_trace_summary)
 
 
 def _extract_plan_digest(plan: Dict[str, Any]) -> Optional[str]:
-    if not isinstance(plan, dict):
-        raise TypeError("plan must be dict")
     direct = plan.get("plan_digest")
     if isinstance(direct, str) and direct:
         return direct
     nested_plan = plan.get("plan")
     if isinstance(nested_plan, dict):
+        nested_plan = cast(Dict[str, Any], nested_plan)
         nested_digest = nested_plan.get("plan_digest")
         if isinstance(nested_digest, str) and nested_digest:
             return nested_digest
     return None
 
 
-def _extract_hf_indices_from_plan(plan: Dict[str, Any]) -> List[int]:
-    if not isinstance(plan, dict):
-        raise TypeError("plan must be dict")
+def _extract_hf_basis(plan: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     candidate_plan = plan
-    if isinstance(plan.get("plan"), dict):
-        candidate_plan = plan["plan"]
-
-    hf_spec = candidate_plan.get("high_freq_subspace_spec")
-    if isinstance(hf_spec, dict):
-        indices = hf_spec.get("selected_indices")
-        if isinstance(indices, list):
-            return [int(index) for index in indices if isinstance(index, int) and index >= 0]
-
-    subspace_spec = candidate_plan.get("subspace_spec")
-    if not isinstance(subspace_spec, dict):
-        return []
-    top_indices = subspace_spec.get("top_feature_indices")
-    if not isinstance(top_indices, list) or len(top_indices) == 0:
-        return []
-
-    normalized = [int(index) for index in top_indices if isinstance(index, int) and index >= 0]
-    if len(normalized) == 0:
-        return []
-
-    split = max(1, len(normalized) // 2)
-    return normalized[-split:]
+    nested_plan = plan.get("plan")
+    if isinstance(nested_plan, dict):
+        candidate_plan = cast(Dict[str, Any], nested_plan)
+    hf_basis = candidate_plan.get("hf_basis")
+    if isinstance(hf_basis, dict):
+        return cast(Dict[str, Any], hf_basis)
+    return None
 
 
-def _flatten_to_float_list(value: Any) -> List[float]:
-    values: List[float] = []
-    _flatten_recursive(value, values)
-    return values
+def _prepare_hf_feature_vector(latents: Any, hf_basis: Dict[str, Any]) -> np.ndarray:
+    latents_np = np.asarray(latents, dtype=np.float32)
+    feature_vector = latents_np.reshape(-1)
+    basis_matrix = hf_basis.get("hf_projection_matrix")
+    if basis_matrix is None:
+        raise ValueError("hf_projection_matrix is required")
+    basis_matrix_np = np.asarray(basis_matrix, dtype=np.float32)
+    if basis_matrix_np.ndim != 2:
+        raise ValueError("hf_projection_matrix must be rank-2")
+    if feature_vector.shape[0] == basis_matrix_np.shape[0]:
+        return feature_vector
+
+    trajectory_feature_spec_raw = hf_basis.get("trajectory_feature_spec")
+    trajectory_feature_spec = (
+        cast(Dict[str, Any], trajectory_feature_spec_raw)
+        if isinstance(trajectory_feature_spec_raw, dict)
+        else None
+    )
+    if isinstance(trajectory_feature_spec, dict) and trajectory_feature_spec.get("feature_operator") == "masked_normalized_random_projection":
+        from main.watermarking.content_chain.subspace.trajectory_feature_space import extract_trajectory_feature_np
+
+        return np.asarray(extract_trajectory_feature_np(latents_np.astype(np.float64), trajectory_feature_spec), dtype=np.float32)
+
+    raise ValueError("hf feature dimension mismatches basis and no trajectory_feature_spec is available")
 
 
-def _flatten_recursive(value: Any, sink: List[float]) -> None:
-    if value is None:
-        return
-    if isinstance(value, (int, float)):
-        sink.append(float(value))
-        return
-    if isinstance(value, dict):
-        for key in sorted(value.keys()):
-            _flatten_recursive(value[key], sink)
-        return
-    if isinstance(value, (list, tuple)):
-        for item in value:
-            _flatten_recursive(item, sink)
-
-
-def _sample_by_indices(flat_values: List[float], selected_indices: List[int]) -> List[float]:
-    if len(flat_values) == 0:
-        return []
-    sampled: List[float] = []
-    max_index = len(flat_values) - 1
-    for index in selected_indices:
-        if index <= max_index:
-            sampled.append(flat_values[index])
-    return sampled
-
-
-def _compute_hf_score(values: List[float]) -> float:
-    if len(values) == 0:
-        return 0.0
-    abs_values = [abs(value) for value in values]
-    mean_abs = sum(abs_values) / len(abs_values)
-    centered = [value - (sum(values) / len(values)) for value in values]
-    centered_energy = _mean_square(centered)
-    raw_score = mean_abs + centered_energy
-    return _round_float(raw_score)
-
-
-def _mean_square(values: Iterable[float]) -> float:
-    values_list = list(values)
-    if len(values_list) == 0:
-        return 0.0
-    return float(sum(value * value for value in values_list) / len(values_list))
-
-
-def _round_float(value: float) -> float:
-    return float(round(float(value), 8))
-
-
-def _read_float(value: Any, default_value: float) -> float:
-    if isinstance(value, bool):
-        raise TypeError("boolean is not valid float value")
-    if not isinstance(default_value, float):
-        raise TypeError("default_value must be float")
-    if value is None:
-        return default_value
-    if not isinstance(value, (int, float)):
-        raise TypeError("value must be float-like")
-    casted = float(value)
-    if casted < 0.0 or casted > 0.95:
-        raise ValueError("tail_truncation_ratio must be in [0.0, 0.95]")
-    return casted
-
-
-def _read_int(value: Any, default_value: int) -> int:
-    if not isinstance(default_value, int) or default_value <= 0:
-        raise TypeError("default_value must be positive int")
-    if value is None:
-        return default_value
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise TypeError("sampling_stride must be positive int")
-    if value <= 0:
-        raise ValueError("sampling_stride must be positive int")
-    return value
-
-
-def _read_truncation_mode(value: Any) -> str:
-    if not isinstance(value, str) or not value:
-        raise TypeError("tail_truncation_mode must be non-empty str")
-    if value not in {"gaussian", "winsor", "top_k_per_latent"}:
-        raise ValueError("tail_truncation_mode must be gaussian, winsor, or top_k_per_latent")
-    return value
+def _build_hf_channel_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    watermark_cfg_raw = cfg.get("watermark", {})
+    watermark_cfg: Dict[str, Any] = cast(Dict[str, Any], watermark_cfg_raw) if isinstance(watermark_cfg_raw, dict) else {}
+    hf_cfg_raw = watermark_cfg.get("hf", {})
+    hf_cfg: Dict[str, Any] = cast(Dict[str, Any], hf_cfg_raw) if isinstance(hf_cfg_raw, dict) else {}
+    threshold_percentile = hf_cfg.get("threshold_percentile")
+    if isinstance(threshold_percentile, (int, float)):
+        percentile_value = float(threshold_percentile)
+    else:
+        tail_ratio = float(hf_cfg.get("tail_truncation_ratio", 0.1))
+        tail_ratio = max(0.0, min(0.95, tail_ratio))
+        percentile_value = (1.0 - tail_ratio) * 100.0
+    percentile_value = max(0.0, min(100.0, percentile_value))
+    return {"hf_threshold_percentile": percentile_value}
 
 
 def compute_hf_attestation_score(
@@ -621,9 +510,9 @@ def compute_hf_attestation_score(
     import hashlib
     import hmac as _hmac
 
-    if not isinstance(k_hf, str) or not k_hf:
+    if not k_hf:
         raise ValueError("k_hf must be non-empty str")
-    if not isinstance(template_size, int) or template_size <= 0:
+    if template_size <= 0:
         raise ValueError("template_size must be positive int")
 
     # 派生 k_HF 字节。
@@ -645,7 +534,7 @@ def compute_hf_attestation_score(
     template_raw = template_raw[:template_size]
 
     # 将 template 展开为 ±1 符号序列。
-    template_signs = []
+    template_signs: List[float] = []
     for byte_val in template_raw:
         for bit_pos in range(8):
             bit = (byte_val >> bit_pos) & 1
@@ -654,14 +543,14 @@ def compute_hf_attestation_score(
     # 规范化 hf_values 为列表。
     try:
         if hasattr(hf_values, "cpu"):
-            flat_hf = hf_values.cpu().detach().reshape(-1).tolist()
+            flat_hf: List[float] = [float(v) for v in hf_values.cpu().detach().reshape(-1).tolist()]
         elif hasattr(hf_values, "flatten"):
             import numpy as _np
-            flat_hf = _np.asarray(hf_values, dtype=float).flatten().tolist()
+            flat_hf = [float(v) for v in _np.asarray(hf_values, dtype=float).flatten().tolist()]
         elif isinstance(hf_values, list):
-            flat_hf = [float(v) for v in hf_values]
+            flat_hf = [float(v) for v in cast(List[Any], hf_values)]
         else:
-            flat_hf = list(hf_values)
+            flat_hf = [float(v) for v in list(hf_values)]
     except Exception:
         return {
             "hf_attestation_score": None,
@@ -697,7 +586,7 @@ def compute_hf_attestation_score(
         hf_attestation_score = max(0.0, min(1.0, hf_attestation_score))
 
     # 构造审计摘要（可复算）。
-    trace_payload = {
+    trace_payload: Dict[str, Any] = {
         "channel": "hf",
         "k_hf_prefix": k_hf[:16],
         "template_size": template_size,
