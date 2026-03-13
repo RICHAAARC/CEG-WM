@@ -288,6 +288,101 @@ def test_onefile_workflow_dry_run_skips_dual_branch_execution(
     assert dual_branch_calls["count"] == 0
 
 
+def test_onefile_attestation_hook_reuses_embed_record_payload(tmp_path: Path) -> None:
+    """
+    功能：验证 embed 后置 hook 只复用主路径 attestation 工件而不重算。
+
+    Validate the embed post-hook materializes attestation artifacts directly from
+    embed_record payload.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text("attestation:\n  enabled: true\n", encoding="utf-8")
+    (run_root / "records").mkdir(parents=True, exist_ok=True)
+
+    embed_record = {
+        "attestation": {
+            "status": "ok",
+            "statement": {"schema": "gen_attest_v1", "model_id": "m", "prompt_commit": "1", "seed_commit": "2", "plan_digest": "3", "event_nonce": "4", "time_bucket": "2026-03-13"},
+            "attestation_digest": "aa" * 32,
+            "event_binding_digest": "bb" * 32,
+            "lf_payload_hex": "cc" * 16,
+            "trace_commit": "dd" * 32,
+            "geo_anchor_seed": 7,
+            "signed_bundle": {"schema": "gen_attest_bundle_v1", "signature": {"signature_hex": "ee" * 64}},
+        }
+    }
+    (run_root / "records" / "embed_record.json").write_text(
+        json.dumps(embed_record, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    module._run_attestation_after_embed(run_root, cfg_path)
+
+    statement_artifact = json.loads(
+        (run_root / "artifacts" / "attestation" / "attestation_statement.json").read_text(encoding="utf-8")
+    )
+    bundle_artifact = json.loads(
+        (run_root / "artifacts" / "attestation" / "attestation_bundle.json").read_text(encoding="utf-8")
+    )
+
+    assert statement_artifact["statement"] == embed_record["attestation"]["statement"]
+    assert statement_artifact["event_binding_digest"] == "bb" * 32
+    assert statement_artifact["trace_commit"] == "dd" * 32
+    assert bundle_artifact == embed_record["attestation"]["signed_bundle"]
+
+
+def test_onefile_attestation_verify_hook_reuses_detect_record_payload(tmp_path: Path) -> None:
+    """
+    功能：验证 detect 后置 hook 只复用主路径 attestation 结果而不重算。
+
+    Validate the detect post-hook materializes attestation_result directly from
+    detect_record payload.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text("attestation:\n  enabled: true\n", encoding="utf-8")
+    (run_root / "records").mkdir(parents=True, exist_ok=True)
+
+    detect_record = {
+        "attestation": {
+            "verdict": "attested",
+            "fusion_score": 0.92,
+            "authenticity_result": {"status": "authentic"},
+            "final_event_attested_decision": {"status": "attested", "is_event_attested": True},
+        }
+    }
+    (run_root / "records" / "detect_record.json").write_text(
+        json.dumps(detect_record, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    module._run_attestation_verification_after_detect(run_root, cfg_path)
+
+    result_artifact = json.loads(
+        (run_root / "artifacts" / "attestation" / "attestation_result.json").read_text(encoding="utf-8")
+    )
+    assert result_artifact == detect_record["attestation"]
+
+
 def test_onefile_workflow_paper_full_profile_fails_fast_on_mismatched_impl(tmp_path: Path) -> None:
     """
     功能：验证 paper_full_cuda 对关键 impl 错配执行 fail-fast。 

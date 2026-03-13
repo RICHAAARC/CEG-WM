@@ -113,6 +113,273 @@ def _call_content_extractor_extract(
     return extract_fn(cfg, *positional_args, **keyword_args)
 
 
+def _extract_input_attestation_payload(input_record: Optional[Dict[str, Any]]) -> Dict[str, Any] | None:
+    """
+    功能：从 embed 输入记录提取 attestation 载荷。
+
+    Extract attestation payload from the embed-side input record.
+
+    Args:
+        input_record: Optional input record mapping.
+
+    Returns:
+        Attestation payload mapping or None.
+    """
+    if not isinstance(input_record, dict):
+        return None
+    attestation_node = input_record.get("attestation")
+    attestation_payload = cast(Dict[str, Any], attestation_node) if isinstance(attestation_node, dict) else {}
+    candidate_statement = attestation_payload.get("statement")
+    if not isinstance(candidate_statement, dict):
+        candidate_statement = input_record.get("attestation_statement")
+    attestation_bundle = attestation_payload.get("signed_bundle")
+    if not isinstance(attestation_bundle, dict):
+        attestation_bundle = input_record.get("attestation_bundle")
+    trace_commit = attestation_payload.get("trace_commit")
+    if not isinstance(trace_commit, str) or not trace_commit:
+        if isinstance(attestation_bundle, dict):
+            bundle_trace_commit = attestation_bundle.get("trace_commit")
+            if isinstance(bundle_trace_commit, str) and bundle_trace_commit:
+                trace_commit = bundle_trace_commit
+            else:
+                trace_commit = None
+        else:
+            trace_commit = None
+    if not isinstance(candidate_statement, dict):
+        return None
+    return {
+        "candidate_statement": candidate_statement,
+        "attestation_bundle": attestation_bundle if isinstance(attestation_bundle, dict) else None,
+        "trace_commit": trace_commit,
+    }
+
+
+def _bind_detect_attestation_runtime_to_cfg(cfg: Dict[str, Any], attestation_context: Dict[str, Any]) -> None:
+    """
+    功能：将 detect 主链 attestation 运行时变量绑定到 cfg。
+
+    Bind detect-side attestation runtime variables into cfg for LF/HF/GEO use.
+
+    Args:
+        cfg: Mutable configuration mapping.
+        attestation_context: Detect attestation context mapping.
+
+    Returns:
+        None.
+    """
+    if not isinstance(attestation_context, dict):
+        return
+    runtime_bindings = attestation_context.get("runtime_bindings")
+    if not isinstance(runtime_bindings, dict):
+        return
+
+    cfg["attestation_runtime"] = runtime_bindings
+    cfg["attestation_digest"] = runtime_bindings.get("attestation_digest")
+    cfg["attestation_event_digest"] = runtime_bindings.get("event_binding_digest")
+    cfg["lf_attestation_event_digest"] = runtime_bindings.get("event_binding_digest")
+    cfg["hf_attestation_event_digest"] = runtime_bindings.get("event_binding_digest")
+    cfg["lf_attestation_key"] = runtime_bindings.get("k_lf")
+    cfg["hf_attestation_key"] = runtime_bindings.get("k_hf")
+    cfg["k_lf"] = runtime_bindings.get("k_lf")
+    cfg["k_hf"] = runtime_bindings.get("k_hf")
+    cfg["k_geo"] = runtime_bindings.get("k_geo")
+    cfg["geo_anchor_seed"] = runtime_bindings.get("geo_anchor_seed")
+
+    watermark_node = cfg.get("watermark")
+    watermark_cfg = cast(Dict[str, Any], watermark_node) if isinstance(watermark_node, dict) else {}
+    watermark_cfg = dict(watermark_cfg)
+    watermark_cfg["attestation_digest"] = runtime_bindings.get("attestation_digest")
+    watermark_cfg["attestation_event_digest"] = runtime_bindings.get("event_binding_digest")
+    cfg["watermark"] = watermark_cfg
+
+
+def _prepare_detect_attestation_context(cfg: Dict[str, Any], input_record: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    功能：为 detect 主链准备 attestation 条件化上下文。
+
+    Prepare attestation context for the detect main path. When the signed bundle
+    authenticates successfully, the resulting event keys are injected into
+    LF/HF/GEO execution. Statement-only mode is preserved as an explicit
+    non-authentic layer.
+
+    Args:
+        cfg: Configuration mapping.
+        input_record: Optional embed-side input record.
+
+    Returns:
+        Detect attestation context mapping.
+    """
+    attestation_node = cfg.get("attestation")
+    attestation_cfg = cast(Dict[str, Any], attestation_node) if isinstance(attestation_node, dict) else {}
+    if not bool(attestation_cfg.get("enabled", False)):
+        return {
+            "attestation_status": "absent",
+            "attestation_absent_reason": "attestation_disabled",
+        }
+
+    payload = _extract_input_attestation_payload(input_record)
+    if not isinstance(payload, dict):
+        return {
+            "attestation_status": "absent",
+            "attestation_absent_reason": "attestation_statement_absent",
+        }
+
+    from main.watermarking.provenance.attestation_statement import (
+        compute_attestation_digest,
+        statement_from_dict,
+        verify_signed_attestation_bundle,
+    )
+    from main.watermarking.provenance.key_derivation import derive_attestation_keys, derive_geo_anchor_seed
+
+    candidate_statement = payload.get("candidate_statement")
+    if not isinstance(candidate_statement, dict):
+        return {
+            "attestation_status": "absent",
+            "attestation_absent_reason": "attestation_statement_absent",
+        }
+
+    try:
+        statement = statement_from_dict(candidate_statement)
+    except Exception as exc:
+        return {
+            "attestation_status": "mismatch",
+            "attestation_failure_reason": f"attestation_statement_invalid:{type(exc).__name__}",
+            "candidate_statement": candidate_statement,
+        }
+
+    attestation_digest = compute_attestation_digest(statement)
+    trace_commit = payload.get("trace_commit")
+    if not isinstance(trace_commit, str) or not trace_commit:
+        trace_commit = None
+
+    k_master = cfg.get("__attestation_verify_k_master__")
+    if not isinstance(k_master, str) or not k_master:
+        return {
+            "attestation_status": "absent",
+            "attestation_absent_reason": "attestation_master_key_missing",
+            "candidate_statement": candidate_statement,
+            "attestation_bundle": payload.get("attestation_bundle"),
+            "attestation_digest": attestation_digest,
+            "trace_commit": trace_commit,
+        }
+
+    bundle_verification = None
+    attestation_bundle = payload.get("attestation_bundle")
+    if isinstance(attestation_bundle, dict):
+        bundle_verification = verify_signed_attestation_bundle(attestation_bundle, k_master)
+        if bundle_verification.get("status") != "ok":
+            return {
+                "attestation_status": "mismatch",
+                "candidate_statement": candidate_statement,
+                "attestation_bundle": attestation_bundle,
+                "bundle_verification": bundle_verification,
+                "attestation_digest": attestation_digest,
+                "trace_commit": trace_commit,
+            }
+        authenticity_status = "authentic"
+    else:
+        authenticity_status = "statement_only"
+
+    attest_keys = derive_attestation_keys(k_master, attestation_digest, trajectory_commit=trace_commit)
+    return {
+        "attestation_status": "ok",
+        "authenticity_status": authenticity_status,
+        "candidate_statement": candidate_statement,
+        "attestation_bundle": attestation_bundle if isinstance(attestation_bundle, dict) else None,
+        "bundle_verification": bundle_verification,
+        "attestation_digest": attestation_digest,
+        "event_binding_digest": attest_keys.event_binding_digest,
+        "trace_commit": trace_commit,
+        "runtime_bindings": {
+            "attestation_digest": attestation_digest,
+            "event_binding_digest": attest_keys.event_binding_digest,
+            "k_lf": attest_keys.k_lf,
+            "k_hf": attest_keys.k_hf,
+            "k_geo": attest_keys.k_geo,
+            "geo_anchor_seed": derive_geo_anchor_seed(attest_keys.k_geo),
+        },
+    }
+
+
+def _build_detect_attestation_result(
+    cfg: Dict[str, Any],
+    attestation_context: Dict[str, Any],
+    content_evidence_payload: Optional[Dict[str, Any]],
+    geometry_evidence_payload: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    功能：构造 detect 侧 attestation 分层结果。
+
+    Build the detect-side layered attestation result with authenticity, image
+    evidence, and final event-attested decision.
+
+    Args:
+        cfg: Configuration mapping.
+        attestation_context: Prepared detect attestation context.
+        content_evidence_payload: Optional content evidence mapping.
+        geometry_evidence_payload: Optional geometry evidence mapping.
+
+    Returns:
+        Attestation result mapping.
+    """
+    if not isinstance(attestation_context, dict):
+        return {
+            "status": "absent",
+            "attestation_absent_reason": "attestation_context_invalid",
+        }
+
+    candidate_statement = attestation_context.get("candidate_statement")
+    attestation_bundle = attestation_context.get("attestation_bundle")
+    k_master = cfg.get("__attestation_verify_k_master__")
+    if not isinstance(candidate_statement, dict):
+        return {
+            "status": attestation_context.get("attestation_status", "absent"),
+            "attestation_absent_reason": attestation_context.get("attestation_absent_reason", "attestation_statement_absent"),
+            "authenticity_result": {
+                "status": attestation_context.get("authenticity_status", "absent"),
+                "bundle_status": attestation_context.get("bundle_verification", {}).get("status") if isinstance(attestation_context.get("bundle_verification"), dict) else None,
+                "statement_status": "absent",
+            },
+            "image_evidence_result": {"status": "absent", "channel_scores": {"lf": None, "hf": None, "geo": None}},
+            "final_event_attested_decision": {"status": "absent", "is_event_attested": False},
+        }
+    if not isinstance(k_master, str) or not k_master:
+        return {
+            "status": "absent",
+            "attestation_absent_reason": "attestation_master_key_missing",
+            "authenticity_result": {
+                "status": attestation_context.get("authenticity_status", "absent"),
+                "bundle_status": attestation_context.get("bundle_verification", {}).get("status") if isinstance(attestation_context.get("bundle_verification"), dict) else None,
+                "statement_status": "parsed",
+            },
+            "image_evidence_result": {"status": "absent", "channel_scores": {"lf": None, "hf": None, "geo": None}},
+            "final_event_attested_decision": {"status": "absent", "is_event_attested": False},
+        }
+
+    geo_score = None
+    if isinstance(geometry_evidence_payload, dict):
+        raw_geo_score = geometry_evidence_payload.get("geo_score")
+        if isinstance(raw_geo_score, (int, float)):
+            geo_score = float(raw_geo_score)
+
+    attestation_node = cfg.get("attestation")
+    attestation_cfg = cast(Dict[str, Any], attestation_node) if isinstance(attestation_node, dict) else {}
+
+    result = verify_attestation(
+        k_master=k_master,
+        candidate_statement=candidate_statement,
+        attestation_bundle=attestation_bundle if isinstance(attestation_bundle, dict) else None,
+        content_evidence=content_evidence_payload if isinstance(content_evidence_payload, dict) else None,
+        geo_score=geo_score,
+        lf_weight=float(attestation_cfg.get("lf_weight", 0.5)),
+        hf_weight=float(attestation_cfg.get("hf_weight", 0.3)),
+        geo_weight=float(attestation_cfg.get("geo_weight", 0.2)),
+        attested_threshold=float(attestation_cfg.get("threshold", 0.65)),
+    )
+    result["status"] = result.get("verdict")
+    return result
+
+
 def run_detect_orchestrator(
     cfg: Dict[str, Any],
     impl_set: BuiltImplSet,
@@ -167,6 +434,9 @@ def run_detect_orchestrator(
     paper_enabled = bool(paper_cfg.get("enabled", False))
     if paper_enabled:
         enable_image_sidecar = False  # 论文正式路径禁止 image-domain sidecar（v2.0 收口）。
+
+    attestation_context = _prepare_detect_attestation_context(cfg, input_record)
+    _bind_detect_attestation_runtime_to_cfg(cfg, attestation_context)
 
     detect_content_inputs = _build_content_inputs_for_detect(cfg, input_record)
 
@@ -735,6 +1005,21 @@ def run_detect_orchestrator(
 
     _bind_scores_if_ok(content_evidence_payload)
     _populate_detect_mask_digest_from_input_record(content_evidence_payload, input_record)
+    if isinstance(content_evidence_payload, dict):
+        if isinstance(attestation_context.get("event_binding_digest"), str):
+            content_evidence_payload["attestation_event_digest"] = attestation_context.get("event_binding_digest")
+    if isinstance(geometry_evidence_payload, dict):
+        if isinstance(attestation_context.get("event_binding_digest"), str):
+            geometry_evidence_payload["attestation_event_digest"] = attestation_context.get("event_binding_digest")
+        if isinstance(attestation_context.get("trace_commit"), str):
+            geometry_evidence_payload["attestation_trace_commit"] = attestation_context.get("trace_commit")
+
+    attestation_result = _build_detect_attestation_result(
+        cfg,
+        attestation_context,
+        content_evidence_payload if isinstance(content_evidence_payload, dict) else None,
+        geometry_evidence_payload if isinstance(geometry_evidence_payload, dict) else None,
+    )
 
     # 删除临时 transient 字段，确保不写入 records
     cfg.pop("__detect_trajectory_latent_cache__", None)
@@ -771,6 +1056,7 @@ def run_detect_orchestrator(
         "content_result": content_result,
         "geometry_result": geometry_result,
         "fusion_result": fusion_result,
+        "attestation": attestation_result,
         # (S-D) Paper Faithfulness: 添加一致性验证结果（结构 failure semantics 
         "paper_faithfulness": {
             "status": paper_faithfulness_status,
@@ -789,6 +1075,7 @@ def run_detect_orchestrator(
             "is_watermarked": getattr(fusion_result, "is_watermarked", None),
             "routing_decisions": getattr(fusion_result, "routing_decisions", None),
             "threshold_source": _fd_audit.get("threshold_source") if isinstance(_fd_audit, dict) else None,
+            "event_attested": bool(record.get("attestation", {}).get("final_event_attested_decision", {}).get("is_event_attested")) if isinstance(record.get("attestation"), dict) else False,
         }
     except Exception:
         record["final_decision"] = None
@@ -4773,6 +5060,8 @@ def verify_attestation(
 
     mismatch_reasons: list[str] = []
     bundle_verification: Optional[Dict[str, Any]] = None
+    authenticity_status = "statement_only"
+    trace_commit: Optional[str] = None
 
     if attestation_bundle is not None:
         try:
@@ -4788,6 +5077,11 @@ def verify_attestation(
                 "attestation_trace_digest": None,
                 "mismatch_reasons": mismatch_reasons,
                 "bundle_verification": {"status": "mismatch", "mismatch_reasons": mismatch_reasons},
+                "authenticity_result": {
+                    "status": "mismatch",
+                    "bundle_status": "mismatch",
+                    "statement_status": "unknown",
+                },
             }
         if bundle_verification.get("status") != "ok":
             mismatch_reasons.extend(list(bundle_verification.get("mismatch_reasons") or []))
@@ -4800,7 +5094,16 @@ def verify_attestation(
                 "attestation_trace_digest": None,
                 "mismatch_reasons": mismatch_reasons,
                 "bundle_verification": bundle_verification,
+                "authenticity_result": {
+                    "status": "mismatch",
+                    "bundle_status": bundle_verification.get("status"),
+                    "statement_status": "parsed",
+                },
             }
+        authenticity_status = "authentic"
+        bundle_trace_commit = attestation_bundle.get("trace_commit")
+        if isinstance(bundle_trace_commit, str) and bundle_trace_commit:
+            trace_commit = bundle_trace_commit
 
     # (1) 验证并重建 statement。
     if not verify_statement_fields(candidate_statement):
@@ -4827,6 +5130,11 @@ def verify_attestation(
             "statement": candidate_statement,
             "attestation_trace_digest": None,
             "mismatch_reasons": mismatch_reasons,
+            "authenticity_result": {
+                "status": "mismatch",
+                "bundle_status": bundle_verification.get("status") if isinstance(bundle_verification, dict) else None,
+                "statement_status": "parse_failed",
+            },
         }
 
     # (2) 计算 attestation digest d_A。
@@ -4834,7 +5142,7 @@ def verify_attestation(
 
     # (3) 派生四类子密钥。
     try:
-        attest_keys = derive_attestation_keys(k_master, d_a)
+        attest_keys = derive_attestation_keys(k_master, d_a, trajectory_commit=trace_commit)
     except (TypeError, ValueError) as exc:
         mismatch_reasons.append(f"key_derivation_failed: {exc}")
         return {
@@ -4845,6 +5153,11 @@ def verify_attestation(
             "statement": candidate_statement,
             "attestation_trace_digest": None,
             "mismatch_reasons": mismatch_reasons,
+            "authenticity_result": {
+                "status": "mismatch",
+                "bundle_status": bundle_verification.get("status") if isinstance(bundle_verification, dict) else None,
+                "statement_status": "parsed",
+            },
         }
 
     # (4) 计算各通道 attestation 得分。
@@ -4858,7 +5171,7 @@ def verify_attestation(
             lf_result = compute_lf_attestation_score(
                 latent_features=lf_latent_features,
                 k_lf=attest_keys.k_lf,
-                attestation_digest=d_a,
+                attestation_digest=attest_keys.event_binding_digest,
                 lf_params=lf_params,
             )
             if lf_result.get("status") == "ok":
@@ -4877,7 +5190,7 @@ def verify_attestation(
             hf_result = compute_hf_attestation_score(
                 hf_values=hf_values,
                 k_hf=attest_keys.k_hf,
-                attestation_event_digest=d_a,
+                attestation_event_digest=attest_keys.event_binding_digest,
                 plan_digest=statement.plan_digest,
             )
             if hf_result.get("status") == "ok":
@@ -4896,9 +5209,23 @@ def verify_attestation(
             "fusion_score": None,
             "channel_scores": {"lf": None, "hf": None, "geo": None},
             "attestation_digest": d_a,
+            "event_binding_digest": attest_keys.event_binding_digest,
             "statement": candidate_statement,
             "attestation_trace_digest": None,
             "mismatch_reasons": ["all_channel_scores_absent"],
+            "authenticity_result": {
+                "status": authenticity_status,
+                "bundle_status": bundle_verification.get("status") if isinstance(bundle_verification, dict) else None,
+                "statement_status": "parsed",
+            },
+            "image_evidence_result": {
+                "status": "absent",
+                "channel_scores": {"lf": None, "hf": None, "geo": None},
+            },
+            "final_event_attested_decision": {
+                "status": "absent",
+                "is_event_attested": False,
+            },
         }
 
     # (6) 加权融合（仅对有效通道归一化权重）。
@@ -4913,7 +5240,7 @@ def verify_attestation(
     total_weight = sum(effective_weights.values())
     if total_weight < 1e-9:
         fusion_score = None
-        verdict = "absent"
+        image_evidence_status = "absent"
     else:
         channel_vals: Dict[str, float] = {"lf": s_lf or 0.0, "hf": s_hf or 0.0, "geo": s_geo or 0.0}
         fusion_score = sum(
@@ -4921,18 +5248,45 @@ def verify_attestation(
             for ch, w in effective_weights.items()
         )
         fusion_score = float(max(0.0, min(1.0, fusion_score)))
-        if fusion_score >= attested_threshold:
+        image_evidence_status = "ok"
+
+    if fusion_score is None:
+        verdict = "absent"
+    elif fusion_score >= attested_threshold:
+        if authenticity_status == "authentic":
             verdict = "attested"
         else:
-            if mismatch_reasons:
-                verdict = "mismatch"
-            else:
-                verdict = "mismatch"
-                mismatch_reasons.append(f"fusion_score_below_threshold: {fusion_score:.4f} < {attested_threshold}")
+            verdict = "absent"
+            mismatch_reasons.append("bundle_authenticity_absent")
+    else:
+        verdict = "mismatch"
+        mismatch_reasons.append(f"fusion_score_below_threshold: {fusion_score:.4f} < {attested_threshold}")
+
+    authenticity_result = {
+        "status": authenticity_status,
+        "bundle_status": bundle_verification.get("status") if isinstance(bundle_verification, dict) else None,
+        "statement_status": "parsed",
+        "attestation_digest": d_a,
+        "event_binding_digest": attest_keys.event_binding_digest,
+        "trace_commit": trace_commit,
+    }
+    image_evidence_result = {
+        "status": image_evidence_status,
+        "channel_scores": {"lf": s_lf, "hf": s_hf, "geo": s_geo},
+        "fusion_score": fusion_score,
+        "threshold": attested_threshold,
+    }
+    final_event_attested_decision = {
+        "status": verdict,
+        "is_event_attested": bool(verdict == "attested"),
+        "authenticity_status": authenticity_status,
+        "image_evidence_status": image_evidence_status,
+    }
 
     # (7) 构造审计摘要（可复算）。
     trace_payload: Dict[str, Any] = {
         "attestation_digest": d_a,
+        "event_binding_digest": attest_keys.event_binding_digest,
         "lf_weight": lf_weight,
         "hf_weight": hf_weight,
         "geo_weight": geo_weight,
@@ -4943,6 +5297,8 @@ def verify_attestation(
         "fusion_score": round(fusion_score, 6) if fusion_score is not None else None,
         "verdict": verdict,
         "bundle_status": bundle_verification.get("status") if isinstance(bundle_verification, dict) else None,
+        "authenticity_status": authenticity_status,
+        "image_evidence_status": image_evidence_status,
     }
     from main.core import digests as _digests
     attestation_trace_digest = _digests.canonical_sha256(trace_payload)
@@ -4952,8 +5308,12 @@ def verify_attestation(
         "fusion_score": fusion_score,
         "channel_scores": {"lf": s_lf, "hf": s_hf, "geo": s_geo},
         "attestation_digest": d_a,
+        "event_binding_digest": attest_keys.event_binding_digest,
         "statement": candidate_statement,
         "attestation_trace_digest": attestation_trace_digest,
         "mismatch_reasons": mismatch_reasons,
         "bundle_verification": bundle_verification,
+        "authenticity_result": authenticity_result,
+        "image_evidence_result": image_evidence_result,
+        "final_event_attested_decision": final_event_attested_decision,
     }

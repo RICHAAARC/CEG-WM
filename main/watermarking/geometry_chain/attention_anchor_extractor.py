@@ -13,6 +13,49 @@ import numpy as np
 from main.core import digests
 
 
+def _resolve_attestation_event_digest(cfg: Dict[str, Any]) -> Optional[str]:
+    """
+    功能：解析锚点链 attestation 事件摘要。
+
+    Resolve the event-level attestation digest for anchor conditioning.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Event binding digest or None.
+    """
+    runtime_node = cfg.get("attestation_runtime")
+    runtime_cfg = runtime_node if isinstance(runtime_node, dict) else {}
+    candidate = cfg.get("attestation_event_digest") or runtime_cfg.get("event_binding_digest") or cfg.get("attestation_digest")
+    if isinstance(candidate, str) and candidate:
+        return candidate
+    return None
+
+
+def _resolve_geo_anchor_seed(cfg: Dict[str, Any]) -> Optional[int]:
+    """
+    功能：解析 attestation 派生的几何锚点种子。
+
+    Resolve the deterministic geometry anchor seed from the attestation runtime.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Integer seed or None.
+    """
+    runtime_node = cfg.get("attestation_runtime")
+    runtime_cfg = runtime_node if isinstance(runtime_node, dict) else {}
+    candidate = cfg.get("geo_anchor_seed")
+    if isinstance(candidate, int):
+        return int(candidate)
+    candidate = runtime_cfg.get("geo_anchor_seed")
+    if isinstance(candidate, int):
+        return int(candidate)
+    return None
+
+
 @dataclass(frozen=True)
 class AnchorResult:
     """
@@ -374,6 +417,20 @@ class AttentionAnchorExtractor:
 
         neighbor_indices = np.argpartition(-similarity, effective_k - 1, axis=1)[:, :effective_k]
         neighbor_indices = np.sort(neighbor_indices, axis=1)
+        attestation_event_digest = _resolve_attestation_event_digest(cfg)
+        geo_anchor_seed = _resolve_geo_anchor_seed(cfg)
+        anchor_offset = 0
+        if attestation_event_digest is not None or geo_anchor_seed is not None:
+            offset_payload = {
+                "anchor_binding_version": "attention_anchor_binding_v1",
+                "attestation_event_digest": attestation_event_digest if isinstance(attestation_event_digest, str) and attestation_event_digest else "<absent>",
+                "geo_anchor_seed": int(geo_anchor_seed) if isinstance(geo_anchor_seed, int) else "<absent>",
+                "token_count": token_count,
+            }
+            anchor_offset = int(digests.canonical_sha256(offset_payload)[:8], 16) % max(1, token_count)
+            if anchor_offset > 0:
+                neighbor_indices = (neighbor_indices + anchor_offset) % token_count
+                token_vectors = np.roll(token_vectors, shift=anchor_offset, axis=0)
 
         hist_bins = min(64, token_count)
         hist = np.zeros(hist_bins, dtype=np.int64)
@@ -392,6 +449,9 @@ class AttentionAnchorExtractor:
             "token_count": token_count,
             "neighbor_hist": [int(v) for v in hist.tolist()],
             "spectral_signature": spectral_signature,
+            "attestation_event_digest": attestation_event_digest,
+            "geo_anchor_seed": geo_anchor_seed,
+            "anchor_offset": int(anchor_offset),
         }
 
     def _resolve_enable_attention_anchor(self, cfg: Dict[str, Any]) -> bool:
@@ -460,6 +520,8 @@ class AttentionAnchorExtractor:
             "enable_attention_anchor": bool(self._resolve_enable_attention_anchor(cfg)),
             "anchor_top_k": self._resolve_anchor_top_k(cfg),
             "model_id": cfg.get("model_id"),
+            "attestation_event_digest": _resolve_attestation_event_digest(cfg),
+            "geo_anchor_seed": _resolve_geo_anchor_seed(cfg),
         }
 
     def _impl_identity(self) -> Dict[str, str]:

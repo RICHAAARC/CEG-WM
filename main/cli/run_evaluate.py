@@ -127,6 +127,40 @@ def _validate_detect_record_label_balance_for_evaluate(cfg: Dict[str, Any]) -> N
         )
 
 
+def _autofill_evaluate_inputs(cfg: Dict[str, Any], run_root: Path) -> None:
+    """
+    功能：为 paper/onefile 标准路径自动补全 evaluate 输入工件位置。
+
+    Autofill evaluate.detect_records_glob and evaluate.thresholds_path from the
+    current run_root when the config leaves them unset.
+
+    Args:
+        cfg: Mutable runtime config mapping.
+        run_root: Current run root path.
+
+    Returns:
+        None.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+
+    evaluate_node = cfg.get("evaluate")
+    evaluate_cfg = evaluate_node if isinstance(evaluate_node, dict) else {}
+    evaluate_cfg = dict(evaluate_cfg)
+    existing_glob = evaluate_cfg.get("detect_records_glob")
+    if not isinstance(existing_glob, str) or not existing_glob:
+        evaluate_cfg["detect_records_glob"] = str((run_root / "records" / "*detect*.json").resolve())
+
+    existing_thresholds_path = evaluate_cfg.get("thresholds_path")
+    if not isinstance(existing_thresholds_path, str) or not existing_thresholds_path:
+        thresholds_path = (run_root / "artifacts" / "thresholds" / "thresholds_artifact.json").resolve()
+        evaluate_cfg["thresholds_path"] = str(thresholds_path)
+
+    cfg["evaluate"] = evaluate_cfg
+
+
 def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None = None) -> None:
     """
     功能：执行评估流程（只读阈值模式）。
@@ -246,6 +280,8 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
                 raise
             run_meta["cfg_digest"] = cfg_digest
             run_meta["policy_path"] = cfg["policy_path"]
+
+            _autofill_evaluate_inputs(cfg, run_root)
 
             # 样本有效性前置门禁（n_pos/n_neg 不能为0）。
             _validate_detect_record_label_balance_for_evaluate(cfg)

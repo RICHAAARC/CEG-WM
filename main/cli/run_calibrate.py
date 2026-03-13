@@ -127,6 +127,38 @@ def _validate_detect_record_label_balance_for_calibration(cfg: Dict[str, Any]) -
     return n_pos, n_neg
 
 
+def _autofill_calibration_detect_records_glob(cfg: Dict[str, Any], run_root: Path) -> None:
+    """
+    功能：为 paper/onefile 标准路径自动补全 calibration.detect_records_glob。
+
+    Autofill calibration.detect_records_glob from the current run_root when the
+    config leaves it unset. This keeps paper_full profiles immediately runnable
+    without expanding the formal override surface.
+
+    Args:
+        cfg: Mutable runtime config mapping.
+        run_root: Current run root path.
+
+    Returns:
+        None.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+
+    calibration_node = cfg.get("calibration")
+    calibration_cfg = calibration_node if isinstance(calibration_node, dict) else {}
+    existing_glob = calibration_cfg.get("detect_records_glob")
+    if isinstance(existing_glob, str) and existing_glob:
+        return
+
+    candidate_glob = str((run_root / "records" / "*detect*.json").resolve())
+    calibration_cfg = dict(calibration_cfg)
+    calibration_cfg["detect_records_glob"] = candidate_glob
+    cfg["calibration"] = calibration_cfg
+
+
 def run_calibrate(output_dir: str, config_path: str, overrides: list[str] | None = None) -> None:
     """
     功能：执行校准流程。
@@ -232,6 +264,8 @@ def run_calibrate(output_dir: str, config_path: str, overrides: list[str] | None
             raise
         run_meta["cfg_digest"] = cfg_digest
         run_meta["policy_path"] = cfg["policy_path"]
+
+        _autofill_calibration_detect_records_glob(cfg, run_root)
 
         # 样本有效性前置门禁（n_pos/n_neg 不能为0），同时获取样本计数用于落盘。
         n_pos_labeled, n_neg_labeled = _validate_detect_record_label_balance_for_calibration(cfg)

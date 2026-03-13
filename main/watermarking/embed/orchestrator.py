@@ -86,6 +86,227 @@ def _normalize_execution_chain_status(raw_status: Any) -> str:
     return "failed"
 
 
+def _extract_embed_attestation_secrets(cfg: Dict[str, Any]) -> Dict[str, Any] | None:
+    """
+    功能：提取 embed 主链 attestation 所需的临时密钥输入。
+
+    Extract transient attestation secret inputs injected by the CLI layer.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Secret input mapping or None.
+    """
+    secret_node = cfg.get("__attestation_secret_inputs__")
+    if isinstance(secret_node, dict):
+        return cast(Dict[str, Any], secret_node)
+    return None
+
+
+def _collect_embed_attestation_latent_snapshots(cfg: Dict[str, Any]) -> Sequence[Any] | None:
+    """
+    功能：从内存 trajectory cache 收集 attestation 所需的 latent 快照。
+
+    Collect latent snapshots for trajectory commit from the in-memory trajectory cache.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Ordered latent snapshot sequence when available; otherwise None.
+    """
+    cache = cfg.get("__embed_trajectory_latent_cache__")
+    if cache is None or not hasattr(cache, "available_steps") or not hasattr(cache, "get"):
+        return None
+    steps = cache.available_steps()
+    snapshots: list[Any] = []
+    for step_index in steps:
+        snapshot = cache.get(step_index)
+        if snapshot is not None:
+            snapshots.append(snapshot)
+    return snapshots or None
+
+
+def _bind_attestation_runtime_to_cfg(cfg: Dict[str, Any], attestation_payload: Dict[str, Any]) -> None:
+    """
+    功能：将 attestation 运行时变量绑定到 cfg，供 LF/HF/GEO 主链消费。
+
+    Bind attestation runtime variables into cfg for LF/HF/GEO execution.
+
+    Args:
+        cfg: Mutable configuration mapping.
+        attestation_payload: Attestation payload mapping.
+
+    Returns:
+        None.
+    """
+    if not isinstance(attestation_payload, dict):
+        return
+    if attestation_payload.get("attestation_status") != "ok":
+        return
+    runtime_bindings = attestation_payload.get("runtime_bindings")
+    if not isinstance(runtime_bindings, dict):
+        return
+
+    cfg["attestation_runtime"] = runtime_bindings
+    cfg["attestation_digest"] = runtime_bindings.get("attestation_digest")
+    cfg["attestation_event_digest"] = runtime_bindings.get("event_binding_digest")
+    cfg["lf_attestation_event_digest"] = runtime_bindings.get("event_binding_digest")
+    cfg["hf_attestation_event_digest"] = runtime_bindings.get("event_binding_digest")
+    cfg["lf_attestation_key"] = runtime_bindings.get("k_lf")
+    cfg["hf_attestation_key"] = runtime_bindings.get("k_hf")
+    cfg["k_lf"] = runtime_bindings.get("k_lf")
+    cfg["k_hf"] = runtime_bindings.get("k_hf")
+    cfg["k_geo"] = runtime_bindings.get("k_geo")
+    cfg["geo_anchor_seed"] = runtime_bindings.get("geo_anchor_seed")
+
+    watermark_node = cfg.get("watermark")
+    watermark_cfg = cast(Dict[str, Any], watermark_node) if isinstance(watermark_node, dict) else {}
+    watermark_cfg = dict(watermark_cfg)
+    watermark_cfg["attestation_digest"] = runtime_bindings.get("attestation_digest")
+    watermark_cfg["attestation_event_digest"] = runtime_bindings.get("event_binding_digest")
+    cfg["watermark"] = watermark_cfg
+
+
+def _clear_attestation_runtime_from_cfg(cfg: Dict[str, Any]) -> None:
+    """
+    功能：清理仅运行期使用的 attestation 临时字段。
+
+    Remove transient attestation runtime fields after orchestration completes.
+
+    Args:
+        cfg: Mutable configuration mapping.
+
+    Returns:
+        None.
+    """
+    for field_name in [
+        "attestation_runtime",
+        "attestation_digest",
+        "attestation_event_digest",
+        "lf_attestation_event_digest",
+        "hf_attestation_event_digest",
+        "lf_attestation_key",
+        "hf_attestation_key",
+        "k_lf",
+        "k_hf",
+        "k_geo",
+        "geo_anchor_seed",
+    ]:
+        cfg.pop(field_name, None)
+    watermark_node = cfg.get("watermark")
+    if isinstance(watermark_node, dict):
+        watermark_cfg = dict(cast(Dict[str, Any], watermark_node))
+        watermark_cfg.pop("attestation_digest", None)
+        watermark_cfg.pop("attestation_event_digest", None)
+        cfg["watermark"] = watermark_cfg
+
+
+def _sanitize_embed_attestation_payload(attestation_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：生成可写入 records 的 attestation 安全载荷。
+
+    Build a record-safe attestation payload that excludes derived secret keys.
+
+    Args:
+        attestation_payload: Raw attestation payload mapping.
+
+    Returns:
+        Record-safe attestation mapping.
+    """
+    if not isinstance(attestation_payload, dict):
+        return {
+            "status": "absent",
+            "attestation_absent_reason": "attestation_payload_invalid",
+        }
+    if attestation_payload.get("attestation_status") != "ok":
+        return {
+            "status": attestation_payload.get("attestation_status", "absent"),
+            "attestation_absent_reason": attestation_payload.get("attestation_absent_reason"),
+            "attestation_failure_reason": attestation_payload.get("attestation_failure_reason"),
+            "missing_secret_fields": attestation_payload.get("missing_secret_fields"),
+        }
+    return {
+        "status": "ok",
+        "statement": attestation_payload.get("statement"),
+        "attestation_digest": attestation_payload.get("attestation_digest"),
+        "event_binding_digest": attestation_payload.get("event_binding_digest"),
+        "lf_payload_hex": attestation_payload.get("lf_payload_hex"),
+        "trace_commit": attestation_payload.get("trace_commit"),
+        "geo_anchor_seed": attestation_payload.get("geo_anchor_seed"),
+        "signed_bundle": attestation_payload.get("signed_bundle"),
+        "signed_bundle_present": isinstance(attestation_payload.get("signed_bundle"), dict),
+        "trajectory_snapshot_count": attestation_payload.get("trajectory_snapshot_count"),
+    }
+
+
+def _build_embed_attestation_runtime(cfg: Dict[str, Any], plan_digest: str) -> Dict[str, Any]:
+    """
+    功能：在 embed 主链中构造正式 attestation 运行时载荷。
+
+    Build the formal attestation payload used by the embed main path.
+
+    Args:
+        cfg: Configuration mapping.
+        plan_digest: Canonical content plan digest.
+
+    Returns:
+        Attestation payload mapping with runtime bindings and record-safe fields.
+    """
+    attestation_node = cfg.get("attestation")
+    attestation_cfg = cast(Dict[str, Any], attestation_node) if isinstance(attestation_node, dict) else {}
+    if not bool(attestation_cfg.get("enabled", False)):
+        return {
+            "attestation_status": "absent",
+            "attestation_absent_reason": "attestation_disabled",
+        }
+
+    secret_inputs = _extract_embed_attestation_secrets(cfg)
+    required_fields = ["k_master", "k_prompt", "k_seed"]
+    missing_secret_fields = [field_name for field_name in required_fields if not isinstance((secret_inputs or {}).get(field_name), str) or not str((secret_inputs or {}).get(field_name)).strip()]
+    if missing_secret_fields:
+        return {
+            "attestation_status": "absent",
+            "attestation_absent_reason": "attestation_secret_missing",
+            "missing_secret_fields": missing_secret_fields,
+        }
+
+    model_id = cfg.get("model_id")
+    prompt = cfg.get("inference_prompt")
+    seed_value = cfg.get("seed")
+    latent_snapshots = _collect_embed_attestation_latent_snapshots(cfg)
+
+    try:
+        result = build_embed_attestation(
+            k_master=str(secret_inputs.get("k_master")),
+            model_id=model_id if isinstance(model_id, str) and model_id else "sd3",
+            prompt=prompt if isinstance(prompt, str) else "",
+            seed=int(seed_value) if isinstance(seed_value, int) else 0,
+            plan_digest=plan_digest,
+            k_prompt=str(secret_inputs.get("k_prompt")),
+            k_seed=str(secret_inputs.get("k_seed")),
+            latent_snapshots=latent_snapshots,
+            use_trajectory_mix=bool(attestation_cfg.get("use_trajectory_mix", True)),
+        )
+    except Exception as exc:
+        return {
+            "attestation_status": "failed",
+            "attestation_failure_reason": f"embed_attestation_build_failed:{type(exc).__name__}",
+        }
+
+    result["trajectory_snapshot_count"] = len(latent_snapshots) if latent_snapshots is not None else 0
+    result["runtime_bindings"] = {
+        "attestation_digest": result.get("attestation_digest"),
+        "event_binding_digest": result.get("event_binding_digest"),
+        "k_lf": result.get("keys", {}).get("k_lf") if isinstance(result.get("keys"), dict) else None,
+        "k_hf": result.get("keys", {}).get("k_hf") if isinstance(result.get("keys"), dict) else None,
+        "k_geo": result.get("keys", {}).get("k_geo") if isinstance(result.get("keys"), dict) else None,
+        "geo_anchor_seed": result.get("geo_anchor_seed"),
+    }
+    return result
+
+
 def run_embed_orchestrator(
     cfg: Dict[str, Any],
     impl_set: BuiltImplSet,
@@ -192,8 +413,6 @@ def run_embed_orchestrator(
             inputs=planner_inputs
         )
     
-    sync_result = _run_sync_module(cfg, impl_set, sync_runtime_context)
-
     plan_obj, plan_digest, plan_input_digest, plan_meta = build_content_plan_and_digest(
         cfg,
         subspace_result,
@@ -201,6 +420,8 @@ def run_embed_orchestrator(
         mask_binding=_extract_mask_binding(content_evidence_payload),
         mask_params_digest=_extract_mask_params_digest(content_evidence_payload),
     )
+    attestation_payload = _build_embed_attestation_runtime(cfg, plan_digest)
+    _bind_attestation_runtime_to_cfg(cfg, attestation_payload)
     io_anchors = _prepare_embed_real_io_anchors(cfg)
     use_latent_per_step = _should_use_latent_per_step_path(cfg)
     paper_cfg_raw = cfg.get("paper_faithfulness")
@@ -227,97 +448,110 @@ def run_embed_orchestrator(
         if lf_impl_id and lf_impl_id != "low_freq_template_codec":
             raise ValueError(f"paper_faithfulness requires low_freq_template_codec, got {lf_impl_id}")
     
-    if use_latent_per_step:
-        embed_trace: Dict[str, Any] = _build_latent_step_embed_trace(cfg, injection_evidence)
-    else:
-        embed_trace = {
-            "embed_mode": io_anchors["embed_mode"],
-            "note": "content_embedding_real_v1",
-        }
+    try:
+        sync_result = _run_sync_module(cfg, impl_set, sync_runtime_context)
 
-    if (
-        not use_latent_per_step
-        and io_anchors["image_path"] != "<absent>"
-    ):
-        input_image = Image.open(io_anchors["image_path"]).convert("RGB")
-        watermarked_image, pipeline_trace = _apply_content_embedding_pipeline(
-            impl_set=impl_set,
-            image=input_image,
-            plan=plan_obj,
-            cfg=cfg,
-            cfg_digest=cfg_digest,
+        if use_latent_per_step:
+            embed_trace = _build_latent_step_embed_trace(cfg, injection_evidence)
+        else:
+            embed_trace = {
+                "embed_mode": io_anchors["embed_mode"],
+                "note": "content_embedding_real_v1",
+            }
+        embed_trace["attestation_status"] = attestation_payload.get("attestation_status")
+        if attestation_payload.get("attestation_status") == "ok":
+            embed_trace["attestation_event_digest"] = attestation_payload.get("event_binding_digest")
+            embed_trace["signed_bundle_present"] = isinstance(attestation_payload.get("signed_bundle"), dict)
+        else:
+            embed_trace["attestation_absent_reason"] = attestation_payload.get("attestation_absent_reason")
+            embed_trace["attestation_failure_reason"] = attestation_payload.get("attestation_failure_reason")
+
+        if (
+            not use_latent_per_step
+            and io_anchors["image_path"] != "<absent>"
+        ):
+            input_image = Image.open(io_anchors["image_path"]).convert("RGB")
+            watermarked_image, pipeline_trace = _apply_content_embedding_pipeline(
+                impl_set=impl_set,
+                image=input_image,
+                plan=plan_obj,
+                cfg=cfg,
+                cfg_digest=cfg_digest,
+                plan_digest=plan_digest,
+                content_evidence_payload=content_evidence_payload,
+                enable_lf=bool(enable_lf),
+                enable_hf=bool(enable_hf),
+            )
+            artifact_rel_path, artifact_sha256, watermarked_path = _write_watermarked_artifact_controlled(
+                watermarked_image=watermarked_image,
+                run_root=Path(io_anchors["run_root"]),
+                artifacts_dir=Path(io_anchors["artifacts_dir"]),
+                output_rel=io_anchors["output_rel"],
+            )
+            io_anchors["watermarked_path"] = watermarked_path
+            io_anchors["artifact_rel_path"] = artifact_rel_path
+            io_anchors["artifact_sha256"] = artifact_sha256
+            embed_trace.update(pipeline_trace)
+
+        # 构造返回的业务字段映射。
+        record_fields: Dict[str, Any] = {
+            "operation": "embed",
+            "embed_mode": embed_trace.get("embed_mode", io_anchors["embed_mode"]),
+            "image_path": io_anchors["image_path"],
+            "watermarked_path": io_anchors["watermarked_path"],
+            "input_sha256": io_anchors["input_sha256"],
+            "artifact_sha256": io_anchors["artifact_sha256"],
+            "artifact_rel_path": io_anchors["artifact_rel_path"],
+            "watermarked_artifact_sha256": io_anchors["artifact_sha256"],
+            "watermarked_artifact_rel_path": io_anchors["artifact_rel_path"],
+            "seed": 42,
+            "strength": 0.5,
+            "embed_trace": embed_trace,
+            "content_result": content_evidence_payload,
+            "content_evidence": content_evidence_payload,
+            "sync_result": sync_result,
+            "attestation": _sanitize_embed_attestation_payload(attestation_payload),
+            # 添加 execution_report（冻结门禁要求）。
+            # 注：embed 阶段未执行融合，fusion_status 置为 "absent"；
+            #     geometry 链不参与，geometry_chain_status 置为 "absent"。
+            "execution_report": {
+                "content_chain_status": content_chain_status,
+                "geometry_chain_status": _normalize_execution_chain_status(sync_result.get("status", "absent")),
+                "fusion_status": "absent",
+                "audit_obligations_satisfied": True
+            }
+        }
+        bind_plan_to_record(
+            record_fields,
+            plan_obj=plan_obj,
             plan_digest=plan_digest,
-            content_evidence_payload=content_evidence_payload,
-            enable_lf=bool(enable_lf),
-            enable_hf=bool(enable_hf),
+            plan_input_digest=plan_input_digest,
+            plan_meta=plan_meta,
         )
-        artifact_rel_path, artifact_sha256, watermarked_path = _write_watermarked_artifact_controlled(
-            watermarked_image=watermarked_image,
-            run_root=Path(io_anchors["run_root"]),
-            artifacts_dir=Path(io_anchors["artifacts_dir"]),
-            output_rel=io_anchors["output_rel"],
-        )
-        io_anchors["watermarked_path"] = watermarked_path
-        io_anchors["artifact_rel_path"] = artifact_rel_path
-        io_anchors["artifact_sha256"] = artifact_sha256
-        embed_trace.update(pipeline_trace)
-
-    # 构造返回的业务字段映射。
-    record_fields: Dict[str, Any] = {
-        "operation": "embed",
-        "embed_mode": embed_trace.get("embed_mode", io_anchors["embed_mode"]),
-        "image_path": io_anchors["image_path"],
-        "watermarked_path": io_anchors["watermarked_path"],
-        "input_sha256": io_anchors["input_sha256"],
-        "artifact_sha256": io_anchors["artifact_sha256"],
-        "artifact_rel_path": io_anchors["artifact_rel_path"],
-        "watermarked_artifact_sha256": io_anchors["artifact_sha256"],
-        "watermarked_artifact_rel_path": io_anchors["artifact_rel_path"],
-        "seed": 42,
-        "strength": 0.5,
-        "embed_trace": embed_trace,
-        "content_result": content_evidence_payload,
-        "content_evidence": content_evidence_payload,
-        "sync_result": sync_result,
-        # 添加 execution_report（冻结门禁要求）。
-        # 注：embed 阶段未执行融合，fusion_status 置为 "absent"；
-        #     geometry 链不参与，geometry_chain_status 置为 "absent"。
-        "execution_report": {
-            "content_chain_status": content_chain_status,
-            "geometry_chain_status": _normalize_execution_chain_status(sync_result.get("status", "absent")),
-            "fusion_status": "absent",
-            "audit_obligations_satisfied": True
-        }
-    }
-    bind_plan_to_record(
-        record_fields,
-        plan_obj=plan_obj,
-        plan_digest=plan_digest,
-        plan_input_digest=plan_input_digest,
-        plan_meta=plan_meta,
-    )
-    _bind_mask_and_routing_evidence_to_record(record_fields, content_evidence_payload)
-    
-    subspace_payload = _as_dict_payload(subspace_result)
-    if isinstance(subspace_payload, dict):
-        basis_digest = subspace_payload.get("basis_digest")
-        if isinstance(basis_digest, str) and basis_digest:
-            record_fields["basis_digest"] = basis_digest
-        plan_stats = subspace_payload.get("plan_stats")
-        if isinstance(plan_stats, dict):
-            record_fields["plan_stats"] = plan_stats
-        # 写入规划器失败原因（可观测性字段，仅在失败时非 None）。
-        plan_failure_reason = subspace_payload.get("plan_failure_reason")
-        if plan_failure_reason is not None:
-            record_fields["plan_failure_reason"] = plan_failure_reason
-        plan_node = subspace_payload.get("plan")
-        if isinstance(plan_node, dict):
-            plan_node_payload = cast(Dict[str, Any], plan_node)
-            record_fields["subspace_rank"] = plan_node_payload.get("rank")
-            record_fields["subspace_energy_ratio"] = plan_node_payload.get("energy_ratio")
-            record_fields["subspace_planner_impl_identity"] = plan_node_payload.get("planner_impl_identity")
-    
-    return record_fields
+        _bind_mask_and_routing_evidence_to_record(record_fields, content_evidence_payload)
+        
+        subspace_payload = _as_dict_payload(subspace_result)
+        if isinstance(subspace_payload, dict):
+            basis_digest = subspace_payload.get("basis_digest")
+            if isinstance(basis_digest, str) and basis_digest:
+                record_fields["basis_digest"] = basis_digest
+            plan_stats = subspace_payload.get("plan_stats")
+            if isinstance(plan_stats, dict):
+                record_fields["plan_stats"] = plan_stats
+            # 写入规划器失败原因（可观测性字段，仅在失败时非 None）。
+            plan_failure_reason = subspace_payload.get("plan_failure_reason")
+            if plan_failure_reason is not None:
+                record_fields["plan_failure_reason"] = plan_failure_reason
+            plan_node = subspace_payload.get("plan")
+            if isinstance(plan_node, dict):
+                plan_node_payload = cast(Dict[str, Any], plan_node)
+                record_fields["subspace_rank"] = plan_node_payload.get("rank")
+                record_fields["subspace_energy_ratio"] = plan_node_payload.get("energy_ratio")
+                record_fields["subspace_planner_impl_identity"] = plan_node_payload.get("planner_impl_identity")
+        
+        return record_fields
+    finally:
+        _clear_attestation_runtime_from_cfg(cfg)
 
 
 def _run_sync_module(
@@ -1298,32 +1532,33 @@ def build_embed_attestation(
     # (3) 计算 attestation digest d_A。
     d_a = compute_attestation_digest(statement)
 
-    # (4) 从 K_master 和 d_A 派生四类子密钥。
-    attest_keys = derive_attestation_keys(k_master, d_a)
+    # (4) 先从 statement digest 派生 k_TR，用于计算 trajectory_commit。
+    trace_keys = derive_attestation_keys(k_master, d_a)
 
-    # (5) 生成 LF 主通道 attestation payload。
-    lf_payload = compute_lf_attestation_payload(
-        k_lf=attest_keys.k_lf,
-        attestation_digest=d_a,
-        payload_length=48,
-    )
-
-    # (6) 可选：生成轨迹承诺并混合到 LF payload（方案 B）。
+    # (5) 计算轨迹承诺，再用 statement + trajectory_commit 联合派生事件密钥。
     trace_commit: "str | None" = None
-    lf_payload_final = lf_payload
     if latent_snapshots is not None and len(latent_snapshots) > 0:
         try:
-            trace_commit = compute_trajectory_commit(attest_keys.k_tr, latent_snapshots)
-            if use_trajectory_mix:
-                lf_payload_final = mix_payload_with_trace_commit(
-                    lf_payload=lf_payload,
-                    trace_commit_hex=trace_commit,
-                    mix_bytes=8,
-                )
+            trace_commit = compute_trajectory_commit(trace_keys.k_tr, latent_snapshots)
         except Exception:
-            # 轨迹承诺失败时降级：仅使用原始 lf_payload，不中断主流程。
+            # 轨迹承诺失败时降级为 statement-only 事件绑定，不中断主流程。
             trace_commit = None
-            lf_payload_final = lf_payload
+
+    attest_keys = derive_attestation_keys(k_master, d_a, trajectory_commit=trace_commit)
+
+    # (6) 生成以 event_binding_digest 为输入域的 LF 主通道 attestation payload。
+    lf_payload = compute_lf_attestation_payload(
+        k_lf=attest_keys.k_lf,
+        attestation_digest=attest_keys.event_binding_digest,
+        payload_length=48,
+    )
+    lf_payload_final = lf_payload
+    if trace_commit is not None and use_trajectory_mix:
+        lf_payload_final = mix_payload_with_trace_commit(
+            lf_payload=lf_payload,
+            trace_commit_hex=trace_commit,
+            mix_bytes=8,
+        )
 
     # (7) 派生几何链 anchor seed。
     geo_anchor_seed = derive_geo_anchor_seed(attest_keys.k_geo)
@@ -1331,6 +1566,7 @@ def build_embed_attestation(
     return {
         "statement": statement.as_dict(),
         "attestation_digest": d_a,
+        "event_binding_digest": attest_keys.event_binding_digest,
         "signed_bundle": build_signed_attestation_bundle(
             statement,
             d_a,
@@ -1344,6 +1580,7 @@ def build_embed_attestation(
             "k_hf": attest_keys.k_hf,
             "k_geo": attest_keys.k_geo,
             "k_tr": attest_keys.k_tr,
+            "event_binding_digest": attest_keys.event_binding_digest,
         },
         "lf_payload": lf_payload_final,
         "lf_payload_hex": lf_payload_final.hex(),

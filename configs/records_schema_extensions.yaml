@@ -3,7 +3,7 @@
 # - 仅追加字段，默认允许 absent。
 # - 本文件作为接口层字段事实源，用于审计与字段登记对齐。
 # ==============================================================
-version: "v4"  # v3→v4 (2026-03-12)：formal path 最终闭包收口；historical_fields: 段已从当前 formal schema 文件移除，旧字段信息不再显式保留在任何 formal 文件中。当前 formal schema 只表达当前正式机制。
+version: "v5"  # v3→v4 (2026-03-12)：formal path 最终闭包收口；historical_fields: 段已从当前 formal schema 文件移除，旧字段信息不再显式保留在任何 formal 文件中。当前 formal schema 只表达当前正式机制。v4→v5 (2026-03-13)：追加 attestation 事件绑定、真实性/图像证据双层语义与 event-attested 判决字段。
 append_only: true
 
 type_definitions:
@@ -1011,6 +1011,90 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "路由决策快照，镜像自 fusion_result.routing_decisions。"
+
+  - path: "final_decision.event_attested"
+    layer: "diagnostic"
+    type: "boolean_flag"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "事件级 attestation 最终判决（仅当真实性与图像证据同时成立时为 true）。"
+
+  - path: "attestation"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "attestation 分层结果总载荷（embed 侧为事件声明，detect 侧为真实性/图像证据/最终判决）。"
+
+  - path: "attestation.status"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "attestation 总状态（ok/absent/failed/mismatch 或 detect 侧 verdict）。"
+
+  - path: "attestation.statement"
+    layer: "anchor"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "生成事件 statement 载荷。"
+
+  - path: "attestation.attestation_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "statement 级 attestation digest。"
+
+  - path: "attestation.event_binding_digest"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "statement_digest 与 trajectory_commit 联合导出的事件级绑定摘要。"
+
+  - path: "attestation.trace_commit"
+    layer: "anchor"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "关键步 compact summary 轨迹承诺摘要。"
+
+  - path: "attestation.geo_anchor_seed"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "几何链事件锚点种子。"
+
+  - path: "attestation.signed_bundle"
+    layer: "anchor"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "signed attestation bundle（存在时必须先通过 trust chain 验签）。"
+
+  - path: "attestation.authenticity_result"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "真实性层结果（bundle/statement authenticity）。"
+
+  - path: "attestation.image_evidence_result"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "图像内证据层结果（事件条件化 LF/HF/GEO 分数与融合）。"
+
+  - path: "attestation.final_event_attested_decision"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "最终事件级 attestation 判决（真实性与图像证据联合）。"
 
   - path: "content_evidence.score_parts.lf_status"
     layer: "diagnostic"

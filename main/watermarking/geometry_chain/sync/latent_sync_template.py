@@ -111,6 +111,49 @@ def resolve_enable_latent_sync(cfg: Dict[str, Any]) -> bool:
     return bool(enabled) if isinstance(enabled, bool) else False
 
 
+def _resolve_attestation_event_digest(cfg: Dict[str, Any]) -> Optional[str]:
+    """
+    功能：解析几何链 attestation 事件摘要。
+
+    Resolve the event-level attestation digest for geometry conditioning.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Event binding digest or None.
+    """
+    runtime_node = cfg.get("attestation_runtime")
+    runtime_cfg = runtime_node if isinstance(runtime_node, dict) else {}
+    candidate = cfg.get("attestation_event_digest") or runtime_cfg.get("event_binding_digest") or cfg.get("attestation_digest")
+    if isinstance(candidate, str) and candidate:
+        return candidate
+    return None
+
+
+def _resolve_geo_anchor_seed(cfg: Dict[str, Any]) -> Optional[int]:
+    """
+    功能：解析几何链事件锚点种子。
+
+    Resolve the deterministic event-conditioned geometry seed.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Integer seed or None.
+    """
+    runtime_node = cfg.get("attestation_runtime")
+    runtime_cfg = runtime_node if isinstance(runtime_node, dict) else {}
+    candidate = cfg.get("geo_anchor_seed")
+    if isinstance(candidate, int):
+        return int(candidate)
+    candidate = runtime_cfg.get("geo_anchor_seed")
+    if isinstance(candidate, int):
+        return int(candidate)
+    return None
+
+
 class LatentSyncTemplate:
     """
     功能：提取几何同步模板摘要与质量指标。
@@ -216,6 +259,8 @@ class LatentSyncTemplate:
             "shape": list(template.shape),
             "seed": int(seed),
             "fft_bins": self._resolve_fft_bins(cfg),
+            "attestation_event_digest": _resolve_attestation_event_digest(cfg),
+            "geo_anchor_seed": _resolve_geo_anchor_seed(cfg),
         })
 
         inject_trace = {
@@ -375,18 +420,34 @@ class LatentSyncTemplate:
 
         seed_value = cfg.get("seed")
         if isinstance(seed_value, int):
-            return int(seed_value)
+            base_seed = int(seed_value)
+        else:
+            base_seed = None
 
-        if isinstance(rng, int):
-            return int(rng)
-        if hasattr(rng, "randint") and callable(getattr(rng, "randint")):
+        if base_seed is None and isinstance(rng, int):
+            base_seed = int(rng)
+        if base_seed is None and hasattr(rng, "randint") and callable(getattr(rng, "randint")):
             try:
                 sampled = rng.randint(0, 2 ** 31 - 1)
                 if isinstance(sampled, int):
-                    return int(sampled)
+                    base_seed = int(sampled)
             except Exception:
                 pass
-        return 42
+        if base_seed is None:
+            base_seed = 42
+
+        attestation_event_digest = _resolve_attestation_event_digest(cfg)
+        geo_anchor_seed = _resolve_geo_anchor_seed(cfg)
+        if attestation_event_digest is None and geo_anchor_seed is None:
+            return base_seed
+
+        seed_binding_payload = {
+            "seed_binding_version": "latent_sync_attestation_seed_v1",
+            "base_seed": int(base_seed),
+            "attestation_event_digest": attestation_event_digest if isinstance(attestation_event_digest, str) and attestation_event_digest else "<absent>",
+            "geo_anchor_seed": int(geo_anchor_seed) if isinstance(geo_anchor_seed, int) else "<absent>",
+        }
+        return int(digests.canonical_sha256(seed_binding_payload)[:8], 16) & 0x7FFFFFFF
 
     def _compute_template_match_metrics(self, latents_np: np.ndarray, cfg: Dict[str, Any], seed: int) -> Dict[str, Any]:
         """
@@ -417,6 +478,8 @@ class LatentSyncTemplate:
                     "shape": list(template.shape),
                     "seed": int(seed),
                     "fft_bins": self._resolve_fft_bins(cfg),
+                    "attestation_event_digest": _resolve_attestation_event_digest(cfg),
+                    "geo_anchor_seed": _resolve_geo_anchor_seed(cfg),
                 }
             )
             return {
@@ -451,6 +514,8 @@ class LatentSyncTemplate:
                 "shape": list(template.shape),
                 "seed": int(seed),
                 "fft_bins": self._resolve_fft_bins(cfg),
+                "attestation_event_digest": _resolve_attestation_event_digest(cfg),
+                "geo_anchor_seed": _resolve_geo_anchor_seed(cfg),
             }
         )
 
@@ -649,6 +714,8 @@ class LatentSyncTemplate:
             "sync_rotation_bins": self._resolve_rotation_bins(cfg),
             "sync_scale_bins": self._resolve_scale_bins(cfg),
             "model_id": cfg.get("model_id"),
+            "attestation_event_digest": _resolve_attestation_event_digest(cfg),
+            "geo_anchor_seed": _resolve_geo_anchor_seed(cfg),
         }
 
     def _resolve_enable_latent_sync(self, cfg: Dict[str, Any]) -> bool:

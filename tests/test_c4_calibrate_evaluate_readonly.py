@@ -336,3 +336,24 @@ def test_evaluate_label_balance_gate_rejects_empty_positive_set(tmp_path: Path) 
     }
     with pytest.raises(ValueError, match="n_pos=0, n_neg=1"):
         run_evaluate_module._validate_detect_record_label_balance_for_evaluate(cfg)
+
+
+def test_calibrate_cli_autofills_detect_records_glob_from_run_root(tmp_path: Path) -> None:
+    """Validate calibration CLI autofills detect_records_glob from run_root."""
+    cfg = {"calibration": {}}
+
+    run_calibrate_module._autofill_calibration_detect_records_glob(cfg, tmp_path)
+
+    assert cfg["calibration"]["detect_records_glob"] == str((tmp_path / "records" / "*detect*.json").resolve())
+
+
+def test_evaluate_cli_autofills_records_glob_and_thresholds_path_from_run_root(tmp_path: Path) -> None:
+    """Validate evaluate CLI autofills detect glob and thresholds artifact path."""
+    cfg = {"evaluate": {}}
+
+    run_evaluate_module._autofill_evaluate_inputs(cfg, tmp_path)
+
+    assert cfg["evaluate"]["detect_records_glob"] == str((tmp_path / "records" / "*detect*.json").resolve())
+    assert cfg["evaluate"]["thresholds_path"] == str(
+        (tmp_path / "artifacts" / "thresholds" / "thresholds_artifact.json").resolve()
+    )

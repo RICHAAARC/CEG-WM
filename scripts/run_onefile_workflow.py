@@ -3136,23 +3136,14 @@ def _run_attestation_after_embed(run_root: Path, cfg_path: Path) -> None:
         print("[onefile/attestation] attestation.enabled=false 或节缺失，跳过 attestation statement 构建")
         return
 
-    # (2) 从环境变量读取密钥（不入版本控制）。
-    k_master_var = attest_cfg.get("k_master_env_var", "CEG_WM_K_MASTER")
-    k_prompt_var = attest_cfg.get("k_prompt_env_var", "CEG_WM_K_PROMPT")
-    k_seed_var = attest_cfg.get("k_seed_env_var", "CEG_WM_K_SEED")
-    k_master = os.environ.get(str(k_master_var), "")
-    k_prompt = os.environ.get(str(k_prompt_var), "")
-    k_seed = os.environ.get(str(k_seed_var), "")
-
-    if not k_master or not k_prompt or not k_seed:
-        print(
-            f"[onefile/attestation] WARN: 环境变量 {k_master_var}/{k_prompt_var}/{k_seed_var} "
-            "未设置，跳过 attestation statement 构建（非阻断）",
-            file=sys.stderr,
-        )
+    attestation_dir = run_root / "artifacts" / "attestation"
+    statement_path = attestation_dir / "attestation_statement.json"
+    bundle_path = attestation_dir / "attestation_bundle.json"
+    if statement_path.exists():
+        print(f"[onefile/attestation] 主路径 attestation statement 已存在，直接复用: {statement_path}")
         return
 
-    # (3) 加载 embed_record.json，提取 plan_digest。
+    # (2) 读取 embed_record.json 中主路径已经生成的 attestation 结果。
     embed_record_path = run_root / "records" / "embed_record.json"
     if not embed_record_path.exists():
         print("[onefile/attestation] WARN: embed_record.json 不存在，跳过", file=sys.stderr)
@@ -3165,66 +3156,36 @@ def _run_attestation_after_embed(run_root: Path, cfg_path: Path) -> None:
     if not isinstance(embed_record, dict):
         return
 
-    plan_digest = embed_record.get("plan_digest")
-    if not isinstance(plan_digest, str) or not plan_digest:
-        print("[onefile/attestation] WARN: embed_record 中 plan_digest 缺失，跳过", file=sys.stderr)
+    attestation_payload = embed_record.get("attestation")
+    if not isinstance(attestation_payload, dict) or attestation_payload.get("status") != "ok":
+        print("[onefile/attestation] WARN: embed_record 未包含主路径 attestation 成功结果，跳过", file=sys.stderr)
         return
 
-    # (4) 解析 model_id、prompt、seed（均来自 cfg）。
-    model_id = cfg_obj.get("model_id")
-    if not isinstance(model_id, str) or not model_id:
-        model_id = "sd3"
-    prompt = cfg_obj.get("inference_prompt")
-    if not isinstance(prompt, str):
-        prompt = ""
-    seed_raw = cfg_obj.get("seed") or embed_record.get("seed")
-    seed_int = int(seed_raw) if isinstance(seed_raw, (int, float)) and not isinstance(seed_raw, bool) else 0
-
-    # (5) 调用 build_embed_attestation 构造 attestation payload。
-    from main.watermarking.embed.orchestrator import build_embed_attestation  # type: ignore[import-untyped]
-
-    result = build_embed_attestation(
-        k_master=k_master,
-        model_id=model_id,
-        prompt=prompt,
-        seed=seed_int,
-        plan_digest=plan_digest,
-        k_prompt=k_prompt,
-        k_seed=k_seed,
-        latent_snapshots=None,       # 子进程模式无法传递 latent tensor，轨迹混合不可用
-        use_trajectory_mix=False,
-    )
-
-    # (6) 序列化保存（不含派生密钥 keys 和原始 bytes 字段）。
-    attest_dir = run_root / "artifacts" / "attestation"
-    attest_dir.mkdir(parents=True, exist_ok=True)
+    attestation_dir.mkdir(parents=True, exist_ok=True)
     save_bundle = {
-        "statement": result["statement"],
-        "attestation_digest": result["attestation_digest"],
-        "lf_payload_hex": result["lf_payload_hex"],
-        "trace_commit": result["trace_commit"],
-        "geo_anchor_seed": result["geo_anchor_seed"],
-        "attestation_status": result["attestation_status"],
+        "statement": attestation_payload.get("statement"),
+        "attestation_digest": attestation_payload.get("attestation_digest"),
+        "event_binding_digest": attestation_payload.get("event_binding_digest"),
+        "lf_payload_hex": attestation_payload.get("lf_payload_hex"),
+        "trace_commit": attestation_payload.get("trace_commit"),
+        "geo_anchor_seed": attestation_payload.get("geo_anchor_seed"),
+        "attestation_status": attestation_payload.get("status"),
     }
-    signed_bundle = result.get("signed_bundle")
-    if isinstance(signed_bundle, dict):
-        save_bundle["signed_bundle"] = signed_bundle
-    statement_path = attest_dir / "attestation_statement.json"
     _write_artifact_text_unbound(
         run_root,
         statement_path,
         json.dumps(save_bundle, ensure_ascii=False, indent=2),
     )
+    signed_bundle = attestation_payload.get("signed_bundle")
     if isinstance(signed_bundle, dict):
-        bundle_path = attest_dir / "attestation_bundle.json"
         _write_artifact_text_unbound(
             run_root,
             bundle_path,
             json.dumps(signed_bundle, ensure_ascii=False, indent=2),
         )
     print(
-        f"[onefile/attestation] attestation statement 已写入: {statement_path} "
-        f"d_A={result['attestation_digest'][:16]}..."
+        f"[onefile/attestation] 复用主路径 attestation 工件: {statement_path} "
+        f"d_A={str(attestation_payload.get('attestation_digest', ''))[:16]}..."
     )
 
 
@@ -3260,48 +3221,13 @@ def _run_attestation_verification_after_detect(run_root: Path, cfg_path: Path) -
     if not isinstance(attest_cfg, dict) or not attest_cfg.get("enabled"):
         return
 
-    # (2) 从环境变量读取 k_master（verify 只需主密钥）。
-    k_master_var = attest_cfg.get("k_master_env_var", "CEG_WM_K_MASTER")
-    k_master = os.environ.get(str(k_master_var), "")
-    if not k_master:
-        print(
-            f"[onefile/attestation] WARN: {k_master_var} 未设置，跳过 attestation 验证（非阻断）",
-            file=sys.stderr,
-        )
+    attestation_dir = run_root / "artifacts" / "attestation"
+    result_path = attestation_dir / "attestation_result.json"
+    if result_path.exists():
+        print(f"[onefile/attestation] 主路径 attestation_result 已存在，直接复用: {result_path}")
         return
 
-    # (3) 加载 embed 阶段写入的 attestation_statement.json。
-    statement_path = run_root / "artifacts" / "attestation" / "attestation_statement.json"
-    if not statement_path.exists():
-        print(
-            "[onefile/attestation] WARN: attestation_statement.json 不存在（embed 阶段可能未写入），跳过验证",
-            file=sys.stderr,
-        )
-        return
-    try:
-        attest_bundle: dict = json.loads(statement_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        print(f"[onefile/attestation] WARN: attestation_statement.json 解析失败: {exc}", file=sys.stderr)
-        return
-
-    attestation_bundle = None
-    bundle_path = run_root / "artifacts" / "attestation" / "attestation_bundle.json"
-    if bundle_path.exists():
-        try:
-            bundle_payload = json.loads(bundle_path.read_text(encoding="utf-8"))
-            if isinstance(bundle_payload, dict):
-                attestation_bundle = bundle_payload
-        except Exception as exc:
-            print(f"[onefile/attestation] WARN: attestation_bundle.json 解析失败: {exc}", file=sys.stderr)
-
-    candidate_statement = attest_bundle.get("statement")
-    if not isinstance(candidate_statement, dict) and isinstance(attestation_bundle, dict):
-        candidate_statement = attestation_bundle.get("statement")
-    if not isinstance(candidate_statement, dict):
-        print("[onefile/attestation] WARN: statement 字段缺失，跳过验证", file=sys.stderr)
-        return
-
-    # (4) 加载 detect_record.json，提取内容与几何证据。
+    # (2) 读取 detect_record.json 中主路径已经生成的 attestation 结果。
     detect_record_path = run_root / "records" / "detect_record.json"
     if not detect_record_path.exists():
         print("[onefile/attestation] WARN: detect_record.json 不存在，跳过验证", file=sys.stderr)
@@ -3314,43 +3240,13 @@ def _run_attestation_verification_after_detect(run_root: Path, cfg_path: Path) -
     if not isinstance(detect_record, dict):
         return
 
-    # 内容证据（LF 代理，用于 verify_attestation 的 content_evidence 参数）。
-    content_evidence = detect_record.get("content_evidence") or detect_record.get("content_evidence_payload")
-    if not isinstance(content_evidence, dict):
-        content_evidence = None
+    result = detect_record.get("attestation")
+    if not isinstance(result, dict) or not result:
+        print("[onefile/attestation] WARN: detect_record 未包含主路径 attestation 结果，跳过", file=sys.stderr)
+        return
 
-    # 几何链得分（从多个可能字段中依次查找）。
-    geo_score: "float | None" = None
-    for geo_key in ("geometry_evidence", "sync_result", "geo_evidence"):
-        geo_node = detect_record.get(geo_key)
-        if isinstance(geo_node, dict):
-            for score_key in ("score", "geo_score", "sync_score"):
-                _s = geo_node.get(score_key)
-                if isinstance(_s, (int, float)) and not isinstance(_s, bool):
-                    geo_score = float(_s)
-                    break
-            if geo_score is not None:
-                break
-
-    # (5) 调用 verify_attestation 进行溯源验证。
-    from main.watermarking.detect.orchestrator import verify_attestation  # type: ignore[import-untyped]
-
-    result = verify_attestation(
-        k_master=k_master,
-        candidate_statement=candidate_statement,
-        attestation_bundle=attestation_bundle,
-        content_evidence=content_evidence,
-        geo_score=geo_score,
-        lf_weight=float(attest_cfg.get("lf_weight", 0.5)),
-        hf_weight=float(attest_cfg.get("hf_weight", 0.3)),
-        geo_weight=float(attest_cfg.get("geo_weight", 0.2)),
-        attested_threshold=float(attest_cfg.get("threshold", 0.65)),
-    )
-
-    # (6) 保存 attestation_result.json。
-    attest_dir = run_root / "artifacts" / "attestation"
-    attest_dir.mkdir(parents=True, exist_ok=True)
-    result_path = attest_dir / "attestation_result.json"
+    # (3) 保存 attestation_result.json。
+    attestation_dir.mkdir(parents=True, exist_ok=True)
     _write_artifact_text_unbound(
         run_root,
         result_path,

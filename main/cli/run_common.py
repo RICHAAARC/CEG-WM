@@ -5,6 +5,7 @@ CLI 入口层公共辅助逻辑
 - 提供 CLI 入口层共享的冻结面相关辅助函数，避免入口分叉导致的语义漂移。
 """
 
+import os
 from typing import Dict, Any, Optional, Tuple
 from main.core.contracts import FrozenContracts, get_contract_interpretation
 from main.core.errors import MissingRequiredFieldError, RunFailureReason
@@ -17,6 +18,79 @@ from main.core import time_utils
 
 _SEED_RULE_ID = "stable_seed_from_parts_v1"
 _REQUIRED_SEED_PART_KEYS = {"key_id", "sample_idx", "purpose"}
+
+
+def resolve_attestation_env_inputs(
+    cfg: Dict[str, Any],
+    *,
+    require_prompt_seed: bool,
+) -> Dict[str, Any]:
+    """
+    功能：从环境变量解析 attestation 主链所需的密钥输入。
+
+    Resolve attestation secret inputs from environment variables for the main
+    embed/detect CLI path. The resolved values are transient and must never be
+    persisted to cfg_audit or records.
+
+    Args:
+        cfg: Configuration mapping.
+        require_prompt_seed: Whether k_prompt and k_seed are required.
+
+    Returns:
+        Mapping with resolution status, env var names, missing fields, and any
+        resolved secret values.
+
+    Raises:
+        TypeError: If cfg is invalid.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+
+    attestation_node = cfg.get("attestation")
+    attestation_cfg = attestation_node if isinstance(attestation_node, dict) else {}
+    if not bool(attestation_cfg.get("enabled", False)):
+        return {
+            "status": "absent",
+            "attestation_absent_reason": "attestation_disabled",
+        }
+
+    k_master_env_var = str(attestation_cfg.get("k_master_env_var", "CEG_WM_K_MASTER"))
+    k_prompt_env_var = str(attestation_cfg.get("k_prompt_env_var", "CEG_WM_K_PROMPT"))
+    k_seed_env_var = str(attestation_cfg.get("k_seed_env_var", "CEG_WM_K_SEED"))
+
+    result: Dict[str, Any] = {
+        "status": "ok",
+        "k_master_env_var": k_master_env_var,
+        "k_prompt_env_var": k_prompt_env_var,
+        "k_seed_env_var": k_seed_env_var,
+    }
+
+    k_master = os.environ.get(k_master_env_var, "")
+    if isinstance(k_master, str) and k_master.strip():
+        result["k_master"] = k_master.strip()
+
+    if require_prompt_seed:
+        k_prompt = os.environ.get(k_prompt_env_var, "")
+        k_seed = os.environ.get(k_seed_env_var, "")
+        if isinstance(k_prompt, str) and k_prompt.strip():
+            result["k_prompt"] = k_prompt.strip()
+        if isinstance(k_seed, str) and k_seed.strip():
+            result["k_seed"] = k_seed.strip()
+
+    missing_secret_fields = []
+    if not isinstance(result.get("k_master"), str) or not result.get("k_master"):
+        missing_secret_fields.append("k_master")
+    if require_prompt_seed and (not isinstance(result.get("k_prompt"), str) or not result.get("k_prompt")):
+        missing_secret_fields.append("k_prompt")
+    if require_prompt_seed and (not isinstance(result.get("k_seed"), str) or not result.get("k_seed")):
+        missing_secret_fields.append("k_seed")
+
+    if missing_secret_fields:
+        result["status"] = "absent"
+        result["attestation_absent_reason"] = "attestation_secret_missing"
+        result["missing_secret_fields"] = missing_secret_fields
+
+    return result
 
 
 def build_cli_config_migration_hint(exc: Exception) -> Optional[str]:

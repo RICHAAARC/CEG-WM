@@ -19,7 +19,9 @@ from __future__ import annotations
 import hashlib
 import hmac
 from dataclasses import dataclass
-from typing import Union
+from typing import Optional, Union
+
+from main.watermarking.provenance.attestation_statement import compute_event_binding_digest
 
 
 # 四类子密钥的 context 标签（domain separation 核心，不可更改）。
@@ -46,12 +48,14 @@ class AttestationKeys:
         k_geo: Key for geometry chain anchor template derivation.
         k_tr: Key for generation trajectory commit computation.
         attestation_digest: The d_A value used to derive these keys.
+        event_binding_digest: The joint event digest used for LF/HF/GEO derivation.
     """
     k_lf: str
     k_hf: str
     k_geo: str
     k_tr: str
     attestation_digest: str
+    event_binding_digest: str
 
 
 def _hkdf_extract(salt: bytes, ikm: bytes) -> bytes:
@@ -140,22 +144,31 @@ def _to_key_bytes(key: Union[str, bytes]) -> bytes:
 def derive_attestation_keys(
     k_master: Union[str, bytes],
     attestation_digest: str,
+    *,
+    trajectory_commit: Optional[str] = None,
+    event_binding_digest: Optional[str] = None,
 ) -> AttestationKeys:
     """
     功能：从 K_master 和 d_A 派生四类 attestation 子密钥。
 
-    Derive four domain-separated cryptographic keys from K_master and attestation digest.
-    Uses HKDF (RFC 5869) with HMAC-SHA256 as the underlying hash function.
+    Derive four domain-separated cryptographic keys from K_master, statement
+    digest, and event binding digest. The trace key k_TR is derived from the
+    statement digest so that trajectory_commit can be computed first. The LF/HF/GEO
+    event keys are derived from the joint event binding digest
+    compute_event_binding_digest(statement_digest, trajectory_commit).
 
     Key derivation:
-        k_LF   = HKDF(K_master, d_A, context="lf")
-        k_HF   = HKDF(K_master, d_A, context="hf")
-        k_GEO  = HKDF(K_master, d_A, context="geo")
         k_TR   = HKDF(K_master, d_A, context="trace")
+        d_E    = compute_event_binding_digest(d_A, trajectory_commit)
+        k_LF   = HKDF(K_master, d_E, context="lf")
+        k_HF   = HKDF(K_master, d_E, context="hf")
+        k_GEO  = HKDF(K_master, d_E, context="geo")
 
     Args:
         k_master: Master key as hex string or raw bytes.
         attestation_digest: d_A (lowercase hex SHA256 string, 64 chars).
+        trajectory_commit: Optional trajectory commit used to bind event keys.
+        event_binding_digest: Optional precomputed event binding digest.
 
     Returns:
         AttestationKeys instance with all four derived keys as hex strings.
@@ -173,18 +186,34 @@ def derive_attestation_keys(
         raise ValueError(
             f"attestation_digest must be a valid hex string, got: {attestation_digest[:16]}..."
         )
+    if event_binding_digest is not None:
+        if not isinstance(event_binding_digest, str) or not event_binding_digest:
+            raise ValueError("event_binding_digest must be non-empty str when provided")
+        try:
+            bytes.fromhex(event_binding_digest)
+        except ValueError:
+            raise ValueError("event_binding_digest must be a valid hex string")
+    elif trajectory_commit is not None and not isinstance(trajectory_commit, str):
+        raise TypeError("trajectory_commit must be str or None")
 
     salt = _to_key_bytes(k_master)
-    ikm = attestation_digest.encode("utf-8")
+    trace_ikm = attestation_digest.encode("utf-8")
+    resolved_event_binding_digest = (
+        event_binding_digest
+        if isinstance(event_binding_digest, str) and event_binding_digest
+        else compute_event_binding_digest(attestation_digest, trajectory_commit)
+    )
+    event_ikm = resolved_event_binding_digest.encode("utf-8")
 
-    # HKDF Extract：生成 PRK（与 d_A 绑定，与 K_master 绑定）。
-    prk = _hkdf_extract(salt, ikm)
+    # HKDF Extract：trace key 绑定 statement digest，LF/HF/GEO 绑定 event digest。
+    trace_prk = _hkdf_extract(salt, trace_ikm)
+    event_prk = _hkdf_extract(salt, event_ikm)
 
     # HKDF Expand：domain separation 通过不同 context 标签实现。
-    raw_lf = _hkdf_expand(prk, _CONTEXT_LF, _HKDF_OUTPUT_LEN)
-    raw_hf = _hkdf_expand(prk, _CONTEXT_HF, _HKDF_OUTPUT_LEN)
-    raw_geo = _hkdf_expand(prk, _CONTEXT_GEO, _HKDF_OUTPUT_LEN)
-    raw_tr = _hkdf_expand(prk, _CONTEXT_TRACE, _HKDF_OUTPUT_LEN)
+    raw_lf = _hkdf_expand(event_prk, _CONTEXT_LF, _HKDF_OUTPUT_LEN)
+    raw_hf = _hkdf_expand(event_prk, _CONTEXT_HF, _HKDF_OUTPUT_LEN)
+    raw_geo = _hkdf_expand(event_prk, _CONTEXT_GEO, _HKDF_OUTPUT_LEN)
+    raw_tr = _hkdf_expand(trace_prk, _CONTEXT_TRACE, _HKDF_OUTPUT_LEN)
 
     return AttestationKeys(
         k_lf=raw_lf.hex(),
@@ -192,6 +221,7 @@ def derive_attestation_keys(
         k_geo=raw_geo.hex(),
         k_tr=raw_tr.hex(),
         attestation_digest=attestation_digest,
+        event_binding_digest=resolved_event_binding_digest,
     )
 
 

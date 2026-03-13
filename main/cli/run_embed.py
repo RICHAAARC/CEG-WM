@@ -63,8 +63,49 @@ from main.cli.run_common import (
     build_determinism_controls,
     normalize_nondeterminism_notes,
     build_injection_context_from_plan,
-    build_cli_config_migration_hint
+    build_cli_config_migration_hint,
+    resolve_attestation_env_inputs,
 )
+
+
+def _write_embed_attestation_artifacts(
+    record: dict,
+    artifacts_dir: Path,
+) -> None:
+    """
+    功能：将 embed 主链生成的 attestation 工件落盘到 artifacts/attestation。
+
+    Persist embed-side attestation artifacts produced by the main path.
+
+    Args:
+        record: Embed record mapping.
+        artifacts_dir: Current run artifacts directory.
+
+    Returns:
+        None.
+    """
+    if not isinstance(record, dict):
+        return
+    attestation_node = record.get("attestation")
+    attestation_payload = attestation_node if isinstance(attestation_node, dict) else {}
+    if attestation_payload.get("status") != "ok":
+        return
+
+    attestation_dir = artifacts_dir / "attestation"
+    attestation_dir.mkdir(parents=True, exist_ok=True)
+    statement_payload = {
+        "statement": attestation_payload.get("statement"),
+        "attestation_digest": attestation_payload.get("attestation_digest"),
+        "event_binding_digest": attestation_payload.get("event_binding_digest"),
+        "lf_payload_hex": attestation_payload.get("lf_payload_hex"),
+        "trace_commit": attestation_payload.get("trace_commit"),
+        "geo_anchor_seed": attestation_payload.get("geo_anchor_seed"),
+        "attestation_status": attestation_payload.get("status"),
+    }
+    records_io.write_artifact_json(str(attestation_dir / "attestation_statement.json"), statement_payload)
+    signed_bundle = attestation_payload.get("signed_bundle")
+    if isinstance(signed_bundle, dict):
+        records_io.write_artifact_json(str(attestation_dir / "attestation_bundle.json"), signed_bundle)
 
 
 def bind_impl_identity_fields(
@@ -561,6 +602,16 @@ def run_embed(
             # 将 cfg_audit digest 锚定字段写入 run_meta。
             run_meta["cfg_pruned_for_digest_canon_sha256"] = cfg_audit_metadata["cfg_pruned_for_digest_canon_sha256"]
             run_meta["cfg_audit_canon_sha256"] = cfg_audit_metadata["cfg_audit_canon_sha256"]
+
+            attestation_env_inputs = resolve_attestation_env_inputs(cfg, require_prompt_seed=True)
+            if isinstance(attestation_env_inputs, dict) and attestation_env_inputs.get("status") in {"ok", "absent"}:
+                transient_secret_inputs = {
+                    key_name: attestation_env_inputs.get(key_name)
+                    for key_name in ["k_master", "k_prompt", "k_seed"]
+                    if isinstance(attestation_env_inputs.get(key_name), str) and attestation_env_inputs.get(key_name)
+                }
+                if transient_secret_inputs:
+                    cfg["__attestation_secret_inputs__"] = transient_secret_inputs
             
             # 记录路径策略配置与审计字段。
             run_meta["path_policy"] = {
@@ -586,6 +637,7 @@ def run_embed(
                 injection_evidence=injection_evidence,
                 sync_runtime_context=sync_runtime_context
             )
+            cfg.pop("__attestation_secret_inputs__", None)
             cfg.pop("__embed_pipeline_obj__", None)
             cfg.pop("__embed_final_latents__", None)
             cfg.pop("__embed_trajectory_latent_cache__", None)
@@ -858,6 +910,8 @@ def run_embed(
             except Exception as exc:
                 set_failure_status(run_meta, RunFailureReason.GATE_FAILED, exc)
                 raise
+
+            _write_embed_attestation_artifacts(record, artifacts_dir)
     except Exception as exc:
         if run_meta.get("status_ok", True):
             set_failure_status(run_meta, RunFailureReason.RUNTIME_ERROR, exc)

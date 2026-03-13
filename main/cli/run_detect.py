@@ -59,8 +59,33 @@ from main.cli.run_common import (
     build_determinism_controls,
     normalize_nondeterminism_notes,
     build_injection_context_from_plan,
-    build_cli_config_migration_hint
+    build_cli_config_migration_hint,
+    resolve_attestation_env_inputs,
 )
+
+
+def _write_detect_attestation_artifact(record: Dict[str, Any], artifacts_dir: Path) -> None:
+    """
+    功能：将 detect 主链产生的 attestation 结果落盘到 artifacts/attestation。
+
+    Persist detect-side attestation result produced by the main path.
+
+    Args:
+        record: Detect record mapping.
+        artifacts_dir: Current run artifacts directory.
+
+    Returns:
+        None.
+    """
+    if not isinstance(record, dict):
+        return
+    attestation_node = record.get("attestation")
+    attestation_payload = attestation_node if isinstance(attestation_node, dict) else {}
+    if not attestation_payload:
+        return
+    attestation_dir = artifacts_dir / "attestation"
+    attestation_dir.mkdir(parents=True, exist_ok=True)
+    records_io.write_artifact_json(str(attestation_dir / "attestation_result.json"), attestation_payload)
 
 
 def resolve_content_override_from_input_record(input_record: Dict[str, Any]) -> Dict[str, Any] | None:
@@ -689,6 +714,12 @@ def run_detect(
         run_meta["cfg_pruned_for_digest_canon_sha256"] = cfg_audit_metadata["cfg_pruned_for_digest_canon_sha256"]
         run_meta["cfg_audit_canon_sha256"] = cfg_audit_metadata["cfg_audit_canon_sha256"]
 
+        attestation_env_inputs = resolve_attestation_env_inputs(cfg, require_prompt_seed=False)
+        if isinstance(attestation_env_inputs, dict):
+            k_master = attestation_env_inputs.get("k_master")
+            if isinstance(k_master, str) and k_master:
+                cfg["__attestation_verify_k_master__"] = k_master
+
         with records_io.bound_fact_sources(
             contracts,
             whitelist,
@@ -750,6 +781,7 @@ def run_detect(
                 content_result_override=content_override_for_orchestrator,
                 detect_plan_result_override=plan_override_for_orchestrator
             )
+            cfg.pop("__attestation_verify_k_master__", None)
             if record is None:
                 exc = RuntimeError("record_construction_failed: record is None")
                 set_failure_status(run_meta, RunFailureReason.RUNTIME_ERROR, exc)
@@ -858,6 +890,8 @@ def run_detect(
             except Exception as exc:
                 set_failure_status(run_meta, RunFailureReason.GATE_FAILED, exc)
                 raise
+
+            _write_detect_attestation_artifact(record, artifacts_dir)
     except Exception as exc:
         if run_meta.get("status_ok", True):
             set_failure_status(run_meta, RunFailureReason.RUNTIME_ERROR, exc)

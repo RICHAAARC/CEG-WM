@@ -264,6 +264,41 @@ def compute_attestation_digest(statement: AttestationStatement) -> str:
     return hashlib.sha256(canonical_bytes).hexdigest()
 
 
+def compute_event_binding_digest(
+    statement_digest: str,
+    trajectory_commit: Optional[str] = None,
+) -> str:
+    """
+    功能：计算事件级绑定摘要，联合绑定 statement 与 trajectory commit。
+
+    Compute the event-level binding digest from the statement digest and the
+    compact trajectory commit. This digest is the formal event token consumed by
+    LF/HF/GEO channels. The statement digest remains the statement-level anchor.
+
+    Args:
+        statement_digest: Canonical statement digest.
+        trajectory_commit: Optional compact trajectory commit hex string.
+
+    Returns:
+        Lowercase hex SHA256 digest string.
+
+    Raises:
+        TypeError: If inputs are of invalid type.
+        ValueError: If statement_digest is empty.
+    """
+    if not isinstance(statement_digest, str) or not statement_digest:
+        raise ValueError("statement_digest must be non-empty str")
+    if trajectory_commit is not None and not isinstance(trajectory_commit, str):
+        raise TypeError("trajectory_commit must be str or None")
+
+    binding_payload = {
+        "binding_version": "attestation_event_binding_v1",
+        "statement_digest": statement_digest,
+        "trajectory_commit": trajectory_commit if isinstance(trajectory_commit, str) and trajectory_commit else "<absent>",
+    }
+    return hashlib.sha256(_canonical_json_dumps(binding_payload)).hexdigest()
+
+
 def verify_statement_fields(statement_dict: Dict[str, Any]) -> bool:
     """
     功能：验证 statement 字典字段是否合法（不含版本字段、字段完整）。

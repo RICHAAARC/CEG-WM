@@ -11,6 +11,7 @@ from main.watermarking.provenance.attestation_statement import (
     build_attestation_statement,
     build_signed_attestation_bundle,
     compute_attestation_digest,
+    compute_event_binding_digest,
     verify_signed_attestation_bundle,
 )
 from main.watermarking.detect.orchestrator import verify_attestation
@@ -117,3 +118,90 @@ def test_verify_attestation_rejects_invalid_signed_bundle() -> None:
     assert isinstance(bundle_verification, dict)
     assert bundle_verification.get("status") == "mismatch"
     assert "bundle_signature_invalid" in list(bundle_verification.get("mismatch_reasons") or [])
+
+
+def test_compute_event_binding_digest_changes_with_trace_commit() -> None:
+    """
+    功能：事件绑定摘要必须联合绑定 trajectory commit。
+
+    Event binding digest must change when trajectory_commit changes.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    payload = _build_statement()
+
+    digest_without_trace = compute_event_binding_digest(payload["attestation_digest"])
+    digest_with_trace = compute_event_binding_digest(payload["attestation_digest"], "cc" * 32)
+
+    assert digest_without_trace != digest_with_trace
+
+
+def test_verify_attestation_statement_only_cannot_become_event_attested() -> None:
+    """
+    功能：仅有 statement 而缺少真实性证明时，最终 event-attested 必须为 false。
+
+    Statement-only mode must not produce a final event-attested decision.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    payload = _build_statement()
+
+    result = verify_attestation(
+        k_master="5" * 64,
+        candidate_statement=payload["statement"],
+        content_evidence={"lf_score": 1.0},
+        geo_score=1.0,
+    )
+
+    assert result.get("verdict") == "absent"
+    assert "bundle_authenticity_absent" in list(result.get("mismatch_reasons") or [])
+    authenticity_result = result.get("authenticity_result")
+    assert isinstance(authenticity_result, dict)
+    assert authenticity_result.get("status") == "statement_only"
+    final_decision = result.get("final_event_attested_decision")
+    assert isinstance(final_decision, dict)
+    assert final_decision.get("is_event_attested") is False
+
+
+def test_verify_attestation_authentic_bundle_can_become_event_attested() -> None:
+    """
+    功能：真实性通过且图像证据足够时，最终 event-attested 必须为 true。
+
+    Authentic bundles with sufficient image evidence must become event-attested.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    payload = _build_statement()
+
+    result = verify_attestation(
+        k_master="5" * 64,
+        candidate_statement=payload["statement"],
+        attestation_bundle=payload["bundle"],
+        content_evidence={"lf_score": 1.0},
+        geo_score=1.0,
+    )
+
+    assert result.get("verdict") == "attested"
+    assert result.get("event_binding_digest")
+    authenticity_result = result.get("authenticity_result")
+    assert isinstance(authenticity_result, dict)
+    assert authenticity_result.get("status") == "authentic"
+    image_evidence_result = result.get("image_evidence_result")
+    assert isinstance(image_evidence_result, dict)
+    assert image_evidence_result.get("status") == "ok"
+    final_decision = result.get("final_event_attested_decision")
+    assert isinstance(final_decision, dict)
+    assert final_decision.get("status") == "attested"
+    assert final_decision.get("is_event_attested") is True
