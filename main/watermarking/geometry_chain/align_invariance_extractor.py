@@ -151,7 +151,7 @@ class RobustSimilarityFitter:
         if model_type not in {"similarity", "affine"}:
             model_type = "similarity"
 
-        src_points, dst_points = self._build_point_arrays(correspondences)
+        src_points, dst_points, base_weights = self._build_point_arrays(correspondences)
         min_points = 3 if model_type == "similarity" else 4
         if src_points.shape[0] < min_points:
             return FitResult(
@@ -174,7 +174,7 @@ class RobustSimilarityFitter:
         params = self._initial_params_from_transform(initial_transform, model_type)
         converged = False
         iterations = 0
-        weights = np.ones(src_points.shape[0], dtype=np.float64)
+        weights = base_weights.copy()
 
         for iterations in range(1, max_iterations + 1):
             next_params = self._solve_weighted_model(src_points, dst_points, weights, model_type)
@@ -185,7 +185,7 @@ class RobustSimilarityFitter:
             residuals = np.linalg.norm(predicted - dst_points, axis=1)
             mad = self._compute_mad(residuals)
             sigma = max(1e-8, 1.4826 * mad)
-            weights = self._compute_irls_weights(residuals, sigma, robust_loss)
+            weights = base_weights * self._compute_irls_weights(residuals, sigma, robust_loss)
 
             delta = float(np.linalg.norm(next_params - params))
             params = next_params
@@ -344,9 +344,10 @@ class RobustSimilarityFitter:
             "bootstrap_valid_rounds": float(len(estimates)),
         }
 
-    def _build_point_arrays(self, correspondences: List[Dict[str, Any]]) -> tuple[np.ndarray, np.ndarray]:
+    def _build_point_arrays(self, correspondences: List[Dict[str, Any]]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         src_points: List[List[float]] = []
         dst_points: List[List[float]] = []
+        weights: List[float] = []
         for item in correspondences:
             if not isinstance(item, dict):
                 continue
@@ -362,7 +363,16 @@ class RobustSimilarityFitter:
                 continue
             src_points.append([float(src[0]), float(src[1])])
             dst_points.append([float(dst[0]), float(dst[1])])
-        return np.asarray(src_points, dtype=np.float64), np.asarray(dst_points, dtype=np.float64)
+            raw_weight = item.get("weight", 1.0)
+            weight = float(raw_weight) if isinstance(raw_weight, (int, float)) else 1.0
+            if not bool(item.get("visibility", True)):
+                weight = min(weight, 0.25)
+            weights.append(float(max(1e-4, min(1.0, weight))))
+        return (
+            np.asarray(src_points, dtype=np.float64),
+            np.asarray(dst_points, dtype=np.float64),
+            np.asarray(weights, dtype=np.float64),
+        )
 
     def _initial_params_from_transform(self, initial_transform: Dict[str, Any], model_type: str) -> np.ndarray:
         quantized = initial_transform.get("transform_quantized") if isinstance(initial_transform.get("transform_quantized"), dict) else {}
@@ -591,8 +601,10 @@ class GeometryAligner:
             },
         }
 
-        correspondences = self._build_correspondences(anchor_metrics, sync_metrics, initial_transform)
+        correspondences = self._build_correspondences(anchor_data, sync_data, initial_transform, cfg)
+        correspondence_summary = self._summarize_correspondences(correspondences)
         fit_result = self._robust_fitter.fit(initial_transform, correspondences, cfg)
+        effective_inlier_ratio = self._compute_effective_inlier_ratio(fit_result.inlier_mask, correspondences)
 
         if not fit_result.converged:
             return {
@@ -602,23 +614,23 @@ class GeometryAligner:
                 "fit_stability": float(fit_result.fit_stability),
                 "transform_quantized": initial_transform["transform_quantized"],
                 "support": initial_transform["support"],
+                "observed_correspondences": correspondences,
+                "observed_correspondence_summary": correspondence_summary,
                 "fit_diagnostics": {
                     "iterations": fit_result.iterations,
                     "residual_stats": fit_result.residual_stats,
                     "param_uncertainty": fit_result.param_uncertainty,
-                    "inlier_ratio": float(np.mean(np.asarray(fit_result.inlier_mask, dtype=np.float64))) if fit_result.inlier_mask else 0.0,
+                    "inlier_ratio": effective_inlier_ratio,
                     "robust_loss": self._resolve_align_robust_loss(cfg),
                 },
             }
 
         refined_transform = self._params_to_quantized_transform(fit_result.model_type, fit_result.params)
-        inlier_array = np.asarray(fit_result.inlier_mask, dtype=np.float64)
-        inlier_ratio = float(np.mean(inlier_array)) if inlier_array.size > 0 else 0.0
         fitted_transform = {
             "model_type": fit_result.model_type,
             "transform_quantized": refined_transform,
         }
-        recovery_validation = self._validate_inverse_recovery(correspondences, fitted_transform, cfg)
+        recovery_validation = self._validate_inverse_recovery(correspondences, fitted_transform, cfg, anchor_data, sync_data)
         return {
             "status": "ok",
             "model_type": fit_result.model_type,
@@ -626,15 +638,40 @@ class GeometryAligner:
             "fit_stability": float(fit_result.fit_stability),
             "transform_quantized": refined_transform,
             "support": initial_transform["support"],
+            "observed_correspondences": correspondences,
+            "observed_correspondence_summary": correspondence_summary,
             "fit_diagnostics": {
                 "iterations": fit_result.iterations,
                 "residual_stats": fit_result.residual_stats,
                 "param_uncertainty": fit_result.param_uncertainty,
-                "inlier_ratio": inlier_ratio,
+                "inlier_ratio": effective_inlier_ratio,
                 "robust_loss": self._resolve_align_robust_loss(cfg),
                 "recovery_validation": recovery_validation,
             },
         }
+
+    def _compute_effective_inlier_ratio(
+        self,
+        inlier_mask: List[bool],
+        correspondences: List[Dict[str, Any]],
+    ) -> float:
+        inlier_array = np.asarray(inlier_mask, dtype=np.float64)
+        if inlier_array.size == 0:
+            return 0.0
+        weights: List[float] = []
+        for item in correspondences[: int(inlier_array.size)]:
+            if not isinstance(item, dict):
+                weights.append(1.0)
+                continue
+            base_weight = float(item.get("weight", 1.0))
+            visibility = 1.0 if bool(item.get("visibility", True)) else 0.0
+            weights.append(max(0.0, base_weight) * visibility)
+        if len(weights) != int(inlier_array.size):
+            return float(np.mean(inlier_array))
+        weight_array = np.asarray(weights, dtype=np.float64)
+        if float(np.sum(weight_array)) <= 1e-8:
+            return float(np.mean(inlier_array))
+        return float(np.clip(np.mean(inlier_array * weight_array), 0.0, 1.0))
 
     def compute_align_metrics(
         self,
@@ -702,6 +739,10 @@ class GeometryAligner:
         inverse_recovery_max = float(recovery_validation.get("inverse_recovery_max", 1.0))
         cycle_reprojection_median = float(recovery_validation.get("cycle_reprojection_median", 1.0))
         inverse_consistency = _clamp01(1.0 - max(inverse_recovery_median, cycle_reprojection_median))
+        template_overlap_consistency = float(recovery_validation.get("template_overlap_consistency", 0.0))
+        recovered_sync_consistency = float(recovery_validation.get("recovered_sync_consistency", 0.0))
+        recovered_anchor_consistency = float(recovery_validation.get("recovered_anchor_consistency", 0.0))
+        observed_correspondence_summary = transform_result.get("observed_correspondence_summary") if isinstance(transform_result.get("observed_correspondence_summary"), dict) else {}
 
         return {
             "relation_consistency": round(relation_consistency, 6),
@@ -725,6 +766,11 @@ class GeometryAligner:
             "cycle_reprojection_median": round(_clamp01(cycle_reprojection_median), 6),
             "inverse_consistency": round(inverse_consistency, 6),
             "inverse_recovery_success": bool(recovery_validation.get("recovery_success", False)),
+            "observed_correspondence_count": int(observed_correspondence_summary.get("count", 0)),
+            "visible_correspondence_count": int(observed_correspondence_summary.get("visible_count", 0)),
+            "template_overlap_consistency": round(_clamp01(template_overlap_consistency), 6),
+            "recovered_sync_consistency": round(_clamp01(recovered_sync_consistency), 6),
+            "recovered_anchor_consistency": round(_clamp01(recovered_anchor_consistency), 6),
         }
 
     def compute_align_trace_digest(self, payload: Dict[str, Any]) -> str:
@@ -783,34 +829,99 @@ class GeometryAligner:
 
     def _build_correspondences(
         self,
-        anchor_metrics: Dict[str, Any],
-        sync_metrics: Dict[str, Any],
+        anchor_data: Dict[str, Any],
+        sync_data: Dict[str, Any],
         initial_transform: Dict[str, Any],
+        cfg: Dict[str, Any],
     ) -> List[Dict[str, Any]]:
-        grid_vals = np.linspace(-1.0, 1.0, num=5, dtype=np.float64)
-        src_points = np.stack(np.meshgrid(grid_vals, grid_vals), axis=-1).reshape(-1, 2)
-        clean_dst = self._apply_transform(src_points, initial_transform)
-
-        residual_score = float(sync_metrics.get("residual_score", 0.0))
-        anchor_entropy = float(anchor_metrics.get("neighbor_entropy", 0.0))
-        anchor_concentration = float(anchor_metrics.get("top1_concentration", 0.0))
-        support = initial_transform.get("support") if isinstance(initial_transform.get("support"), dict) else {}
-        rotation_bin = int(support.get("rotation_bin", 0))
-        scale_bin = int(support.get("scale_bin", 0))
-        seed = int(rotation_bin * 131 + scale_bin * 17 + round(anchor_concentration * 1000.0))
-        rng = np.random.RandomState(seed)
-        noise_sigma = 0.01 + 0.07 * _clamp01(residual_score) + 0.03 * _clamp01(anchor_entropy / 8.0)
-        noise = rng.normal(loc=0.0, scale=noise_sigma, size=clean_dst.shape)
-        dst_points = clean_dst + noise
-
         correspondences: List[Dict[str, Any]] = []
-        for idx in range(src_points.shape[0]):
+        if not isinstance(anchor_data, dict):
+            return correspondences
+        if not isinstance(sync_data, dict):
+            return correspondences
+        if not isinstance(cfg, dict):
+            return correspondences
+
+        anchor_observations = anchor_data.get("anchor_observations") if isinstance(anchor_data.get("anchor_observations"), dict) else {}
+        observed_anchor_candidates = anchor_observations.get("observed_anchor_candidates") if isinstance(anchor_observations.get("observed_anchor_candidates"), list) else []
+        anchor_match_candidates = anchor_observations.get("anchor_match_candidates") if isinstance(anchor_observations.get("anchor_match_candidates"), list) else []
+
+        sync_observations = sync_data.get("sync_observations") if isinstance(sync_data.get("sync_observations"), dict) else {}
+        observed_sync_peaks = sync_observations.get("observed_sync_peaks") if isinstance(sync_observations.get("observed_sync_peaks"), list) else []
+        sync_support = float(np.mean([float(item.get("confidence", 0.0)) for item in observed_sync_peaks])) if observed_sync_peaks else 0.0
+        support_weight = 0.65 + 0.35 * _clamp01(sync_support)
+
+        for candidate in observed_anchor_candidates:
+            if not isinstance(candidate, dict):
+                continue
+            reference_coord = self._coord_to_point(candidate.get("reference_coord"))
+            observed_coord = self._coord_to_point(candidate.get("observed_coord"))
+            if reference_coord is None or observed_coord is None:
+                continue
+            confidence = float(candidate.get("confidence", 0.0))
             correspondences.append(
                 {
-                    "src": [float(src_points[idx, 0]), float(src_points[idx, 1])],
-                    "dst": [float(dst_points[idx, 0]), float(dst_points[idx, 1])],
+                    "src": reference_coord,
+                    "dst": observed_coord,
+                    "weight": round(_clamp01(0.75 * confidence + 0.25 * support_weight), 6),
+                    "visibility": bool(candidate.get("visibility", True)),
+                    "inlier_prior": round(_clamp01(0.60 * confidence + 0.40 * support_weight), 6),
+                    "source": "anchor_candidate",
                 }
             )
+
+        for match_candidate in anchor_match_candidates:
+            if not isinstance(match_candidate, dict):
+                continue
+            reference_coord = self._coord_to_point(match_candidate.get("source_reference_coord"))
+            observed_coord = self._coord_to_point(match_candidate.get("observed_target_coord"))
+            if reference_coord is None or observed_coord is None:
+                continue
+            match_score = float(match_candidate.get("match_score", 0.0))
+            correspondences.append(
+                {
+                    "src": reference_coord,
+                    "dst": observed_coord,
+                    "weight": round(_clamp01(0.70 * match_score + 0.30 * support_weight), 6),
+                    "visibility": bool(match_candidate.get("visibility", True)),
+                    "inlier_prior": round(_clamp01(0.55 * match_score + 0.45 * support_weight), 6),
+                    "source": "anchor_relation",
+                }
+            )
+
+        max_correspondences = self._resolve_align_max_correspondence_count(cfg)
+        correspondences.sort(key=lambda item: float(item.get("weight", 0.0)), reverse=True)
+        return correspondences[:max_correspondences]
+
+    def _coord_to_point(self, coord_payload: Any) -> List[float] | None:
+        if not isinstance(coord_payload, dict):
+            return None
+        x_value = coord_payload.get("x")
+        y_value = coord_payload.get("y")
+        if not isinstance(x_value, (int, float)) or not isinstance(y_value, (int, float)):
+            return None
+        return [float(x_value), float(y_value)]
+
+    def _summarize_correspondences(self, correspondences: List[Dict[str, Any]]) -> Dict[str, Any]:
+        visible_count = 0
+        source_histogram: Dict[str, int] = {}
+        weight_values: List[float] = []
+        for item in correspondences:
+            if not isinstance(item, dict):
+                continue
+            source_name = str(item.get("source", "unknown"))
+            source_histogram[source_name] = int(source_histogram.get(source_name, 0)) + 1
+            if bool(item.get("visibility", True)):
+                visible_count += 1
+            weight_value = item.get("weight")
+            if isinstance(weight_value, (int, float)):
+                weight_values.append(float(weight_value))
+        return {
+            "count": int(len(correspondences)),
+            "visible_count": int(visible_count),
+            "source_histogram": source_histogram,
+            "weight_mean": round(float(np.mean(weight_values)) if weight_values else 0.0, 6),
+        }
         return correspondences
 
     def _apply_transform(self, src_points: np.ndarray, transform: Dict[str, Any]) -> np.ndarray:
@@ -849,6 +960,8 @@ class GeometryAligner:
         correspondences: List[Dict[str, Any]],
         transform: Dict[str, Any],
         cfg: Dict[str, Any],
+        anchor_data: Dict[str, Any],
+        sync_data: Dict[str, Any],
     ) -> Dict[str, Any]:
         """
         功能：执行几何反演恢复与 cycle 复验。
@@ -863,7 +976,7 @@ class GeometryAligner:
         Returns:
             Recovery validation mapping.
         """
-        src_points, dst_points = self._robust_fitter._build_point_arrays(correspondences)
+        src_points, dst_points, weights = self._robust_fitter._build_point_arrays(correspondences)
         if src_points.shape[0] == 0 or dst_points.shape[0] == 0:
             return {
                 "recovery_success": False,
@@ -871,6 +984,9 @@ class GeometryAligner:
                 "inverse_recovery_max": 1.0,
                 "cycle_reprojection_median": 1.0,
                 "cycle_reprojection_max": 1.0,
+                "template_overlap_consistency": 0.0,
+                "recovered_sync_consistency": 0.0,
+                "recovered_anchor_consistency": 0.0,
             }
 
         inverse_transform = self._invert_transform_payload(transform)
@@ -881,6 +997,9 @@ class GeometryAligner:
                 "inverse_recovery_max": 1.0,
                 "cycle_reprojection_median": 1.0,
                 "cycle_reprojection_max": 1.0,
+                "template_overlap_consistency": 0.0,
+                "recovered_sync_consistency": 0.0,
+                "recovered_anchor_consistency": 0.0,
             }
 
         recovered_src = self._apply_transform(dst_points, inverse_transform)
@@ -888,11 +1007,51 @@ class GeometryAligner:
         inverse_residuals = np.linalg.norm(recovered_src - src_points, axis=1)
         cycle_residuals = np.linalg.norm(cycle_dst - dst_points, axis=1)
         recovery_threshold = self._resolve_align_inverse_max_residual(cfg)
+        within_bounds = np.logical_and(np.abs(recovered_src[:, 0]) <= 1.1, np.abs(recovered_src[:, 1]) <= 1.1)
+        template_overlap_consistency = float(np.average(within_bounds.astype(np.float64), weights=weights)) if weights.size > 0 else 0.0
+
+        anchor_success_mask = np.asarray(
+            [
+                item.get("source") in {"anchor_candidate", "anchor_relation"}
+                and bool(item.get("visibility", True))
+                for item in correspondences
+            ],
+            dtype=bool,
+        )
+        anchor_consistency = 0.0
+        if anchor_success_mask.size > 0 and bool(np.any(anchor_success_mask)):
+            anchor_scores = np.logical_and(
+                inverse_residuals[anchor_success_mask] <= recovery_threshold,
+                cycle_residuals[anchor_success_mask] <= recovery_threshold,
+            ).astype(np.float64)
+            anchor_weights = weights[anchor_success_mask]
+            anchor_consistency = float(np.average(anchor_scores, weights=anchor_weights)) if anchor_weights.size > 0 else 0.0
+
+        sync_metrics = sync_data.get("sync_metrics") if isinstance(sync_data.get("sync_metrics"), dict) else {}
+        support = transform.get("support") if isinstance(transform.get("support"), dict) else {}
+        fitted_rotation = float((transform.get("transform_quantized") or {}).get("rotation_degree_q", 0.0)) if isinstance(transform.get("transform_quantized"), dict) else 0.0
+        fitted_scale = float((transform.get("transform_quantized") or {}).get("scale_factor_q", 1.0)) if isinstance(transform.get("transform_quantized"), dict) else 1.0
+        rotation_bins = int(sync_metrics.get("rotation_bins", support.get("rotation_bins", self._resolve_rotation_bins(cfg))))
+        scale_bins = int(sync_metrics.get("scale_bins", support.get("scale_bins", self._resolve_scale_bins(cfg))))
+        expected_rotation = round((float(sync_metrics.get("rotation_bin", 0)) / float(max(1, rotation_bins))) * 360.0, 4)
+        center_scale = float(scale_bins - 1) / 2.0
+        scale_offset = (float(sync_metrics.get("scale_bin", 0)) - center_scale) / float(max(1.0, center_scale))
+        expected_scale = round(1.0 + 0.2 * scale_offset, 6)
+        rotation_error = abs(((fitted_rotation - expected_rotation + 180.0) % 360.0) - 180.0) / 45.0
+        scale_error = abs(fitted_scale - expected_scale) / max(0.25, expected_scale)
+        sync_match_confidence = float(sync_metrics.get("match_confidence", 0.0))
+        recovered_sync_consistency = _clamp01(1.0 - 0.55 * min(1.0, rotation_error) - 0.45 * min(1.0, scale_error))
+        recovered_sync_consistency = _clamp01(0.7 * recovered_sync_consistency + 0.3 * sync_match_confidence)
+
+        recovered_anchor_consistency = _clamp01(anchor_consistency)
         recovery_success = bool(
             np.median(inverse_residuals) <= recovery_threshold
             and np.median(cycle_residuals) <= recovery_threshold
             and np.max(inverse_residuals) <= 2.0 * recovery_threshold
             and np.max(cycle_residuals) <= 2.0 * recovery_threshold
+            and template_overlap_consistency >= self._resolve_align_template_overlap_min(cfg)
+            and recovered_sync_consistency >= self._resolve_align_recovered_sync_consistency_min(cfg)
+            and recovered_anchor_consistency >= self._resolve_align_recovered_anchor_consistency_min(cfg)
         )
         return {
             "recovery_success": recovery_success,
@@ -900,6 +1059,9 @@ class GeometryAligner:
             "inverse_recovery_max": float(np.max(inverse_residuals)),
             "cycle_reprojection_median": float(np.median(cycle_residuals)),
             "cycle_reprojection_max": float(np.max(cycle_residuals)),
+            "template_overlap_consistency": float(template_overlap_consistency),
+            "recovered_sync_consistency": float(recovered_sync_consistency),
+            "recovered_anchor_consistency": float(recovered_anchor_consistency),
         }
 
     def _invert_transform_payload(self, transform: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -936,6 +1098,38 @@ class GeometryAligner:
         if not isinstance(value, (int, float)):
             return 0.18
         return max(0.01, min(1.0, float(value)))
+
+    def _resolve_align_max_correspondence_count(self, cfg: Dict[str, Any]) -> int:
+        detect_cfg = cfg.get("detect") if isinstance(cfg.get("detect"), dict) else {}
+        geometry_cfg = detect_cfg.get("geometry") if isinstance(detect_cfg.get("geometry"), dict) else {}
+        value = geometry_cfg.get("align_max_correspondence_count", 24)
+        if not isinstance(value, int):
+            return 24
+        return max(6, min(64, value))
+
+    def _resolve_align_template_overlap_min(self, cfg: Dict[str, Any]) -> float:
+        detect_cfg = cfg.get("detect") if isinstance(cfg.get("detect"), dict) else {}
+        geometry_cfg = detect_cfg.get("geometry") if isinstance(detect_cfg.get("geometry"), dict) else {}
+        value = geometry_cfg.get("align_template_overlap_min", 0.70)
+        if not isinstance(value, (int, float)):
+            return 0.70
+        return max(0.0, min(1.0, float(value)))
+
+    def _resolve_align_recovered_sync_consistency_min(self, cfg: Dict[str, Any]) -> float:
+        detect_cfg = cfg.get("detect") if isinstance(cfg.get("detect"), dict) else {}
+        geometry_cfg = detect_cfg.get("geometry") if isinstance(detect_cfg.get("geometry"), dict) else {}
+        value = geometry_cfg.get("align_recovered_sync_consistency_min", 0.0)
+        if not isinstance(value, (int, float)):
+            return 0.0
+        return max(0.0, min(1.0, float(value)))
+
+    def _resolve_align_recovered_anchor_consistency_min(self, cfg: Dict[str, Any]) -> float:
+        detect_cfg = cfg.get("detect") if isinstance(cfg.get("detect"), dict) else {}
+        geometry_cfg = detect_cfg.get("geometry") if isinstance(detect_cfg.get("geometry"), dict) else {}
+        value = geometry_cfg.get("align_recovered_anchor_consistency_min", 0.50)
+        if not isinstance(value, (int, float)):
+            return 0.50
+        return max(0.0, min(1.0, float(value)))
 
     def _params_to_quantized_transform(self, model_type: str, params: List[float]) -> Dict[str, float]:
         if model_type == "affine":
@@ -1323,6 +1517,7 @@ class GeometryAlignInvarianceExtractor:
             geo_available=geo_available,
             geo_availability_rule_version=GEO_AVAILABILITY_RULE_VERSION,
             geo_unavailability_reason=geo_unavailability_reason,
+            transform_result=transform_result,
         )
 
     def _build_absent_evidence(
@@ -1360,9 +1555,11 @@ class GeometryAlignInvarianceExtractor:
         geo_available: bool | None = None,
         geo_availability_rule_version: str | None = None,
         geo_unavailability_reason: str | None = None,
+        transform_result: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         anchor_data = anchor_evidence if isinstance(anchor_evidence, dict) else {}
         sync_data = sync_evidence if isinstance(sync_evidence, dict) else {}
+        transform_data = transform_result if isinstance(transform_result, dict) else {}
         trace_payload = {
             "status": status,
             "reason": reason,
@@ -1380,10 +1577,12 @@ class GeometryAlignInvarianceExtractor:
             "anchor_config_digest": anchor_data.get("anchor_config_digest"),
             "anchor_metrics": anchor_data.get("anchor_metrics"),
             "stability_metrics": anchor_data.get("stability_metrics"),
+            "anchor_observations": anchor_data.get("anchor_observations"),
             "sync_digest": sync_data.get("sync_digest"),
             "sync_config_digest": sync_data.get("sync_config_digest"),
             "sync_metrics": sync_data.get("sync_metrics"),
             "sync_quality_metrics": sync_data.get("sync_quality_metrics"),
+            "sync_observations": sync_data.get("sync_observations"),
             "resolution_binding": _merge_resolution_binding(
                 anchor_data.get("resolution_binding"),
                 sync_data.get("resolution_binding"),
@@ -1391,6 +1590,10 @@ class GeometryAlignInvarianceExtractor:
             "align_trace_digest": align_trace_digest,
             "align_metrics": align_metrics,
             "align_config_digest": align_config_digest,
+            "observed_correspondences": {
+                "items": transform_data.get("observed_correspondences")
+            } if isinstance(transform_data.get("observed_correspondences"), list) else transform_data.get("observed_correspondences"),
+            "observed_correspondence_summary": transform_data.get("observed_correspondence_summary"),
             "geo_failure_reason": reason,
             "geometry_failure_reason": reason,
             "audit": {
@@ -1566,6 +1769,38 @@ class GeometryAlignInvarianceExtractor:
             return 0.0
         return max(0.0, min(1.0, float(value)))
 
+    def _resolve_align_max_correspondence_count(self, cfg: Dict[str, Any]) -> int:
+        detect_cfg = cfg.get("detect") if isinstance(cfg.get("detect"), dict) else {}
+        geometry_cfg = detect_cfg.get("geometry") if isinstance(detect_cfg.get("geometry"), dict) else {}
+        value = geometry_cfg.get("align_max_correspondence_count", 24)
+        if not isinstance(value, int):
+            return 24
+        return max(6, min(64, value))
+
+    def _resolve_align_template_overlap_min(self, cfg: Dict[str, Any]) -> float:
+        detect_cfg = cfg.get("detect") if isinstance(cfg.get("detect"), dict) else {}
+        geometry_cfg = detect_cfg.get("geometry") if isinstance(detect_cfg.get("geometry"), dict) else {}
+        value = geometry_cfg.get("align_template_overlap_min", 0.70)
+        if not isinstance(value, (int, float)):
+            return 0.70
+        return max(0.0, min(1.0, float(value)))
+
+    def _resolve_align_recovered_sync_consistency_min(self, cfg: Dict[str, Any]) -> float:
+        detect_cfg = cfg.get("detect") if isinstance(cfg.get("detect"), dict) else {}
+        geometry_cfg = detect_cfg.get("geometry") if isinstance(detect_cfg.get("geometry"), dict) else {}
+        value = geometry_cfg.get("align_recovered_sync_consistency_min", 0.0)
+        if not isinstance(value, (int, float)):
+            return 0.0
+        return max(0.0, min(1.0, float(value)))
+
+    def _resolve_align_recovered_anchor_consistency_min(self, cfg: Dict[str, Any]) -> float:
+        detect_cfg = cfg.get("detect") if isinstance(cfg.get("detect"), dict) else {}
+        geometry_cfg = detect_cfg.get("geometry") if isinstance(detect_cfg.get("geometry"), dict) else {}
+        value = geometry_cfg.get("align_recovered_anchor_consistency_min", 0.50)
+        if not isinstance(value, (int, float)):
+            return 0.50
+        return max(0.0, min(1.0, float(value)))
+
     def _compute_attention_consistency(
         self,
         anchor_evidence: Dict[str, Any],
@@ -1589,7 +1824,7 @@ class GeometryAlignInvarianceExtractor:
         if not isinstance(model_type, str):
             model_type = "similarity"
         return {
-            "domain_version": "geometry_align_cfg_domain_v1",
+            "domain_version": "geometry_align_cfg_domain_v2",
             "enable_align_invariance": bool(self._resolve_enable_align_invariance(cfg)),
             "align_model_type": model_type,
             "align_min_inlier_ratio": self._resolve_align_min_inlier_ratio(cfg),
@@ -1598,6 +1833,7 @@ class GeometryAlignInvarianceExtractor:
             "align_inlier_threshold": geometry_cfg.get("align_inlier_threshold", 0.22),
             "align_bootstrap_rounds": geometry_cfg.get("align_bootstrap_rounds", 8),
             "align_bootstrap_sample_ratio": geometry_cfg.get("align_bootstrap_sample_ratio", 0.75),
+            "align_max_correspondence_count": self._resolve_align_max_correspondence_count(cfg),
             "align_fit_stability_min": geometry_cfg.get("align_fit_stability_min", 0.45),
             "align_available_max_residual_mad": self._resolve_align_available_max_residual_mad(cfg),
             "align_available_max_param_variance": self._resolve_align_available_max_param_variance(cfg),
@@ -1605,6 +1841,9 @@ class GeometryAlignInvarianceExtractor:
             "align_anchor_min_concentration": self._resolve_align_anchor_min_concentration(cfg),
             "align_attention_consistency_min_stability": self._resolve_align_attention_consistency_min_stability(cfg),
             "align_inverse_max_residual": self._aligner._resolve_align_inverse_max_residual(cfg),
+            "align_template_overlap_min": self._resolve_align_template_overlap_min(cfg),
+            "align_recovered_sync_consistency_min": self._resolve_align_recovered_sync_consistency_min(cfg),
+            "align_recovered_anchor_consistency_min": self._resolve_align_recovered_anchor_consistency_min(cfg),
             "sync_rotation_bins": geometry_cfg.get("sync_rotation_bins", 36),
             "sync_scale_bins": geometry_cfg.get("sync_scale_bins", 16),
             "model_id": cfg.get("model_id"),

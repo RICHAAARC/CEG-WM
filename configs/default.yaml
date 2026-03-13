@@ -134,15 +134,15 @@ ablation:
 # 校准 (Calibration) 配置
 # ==============================================================
 calibration:
-  detect_records_glob: null  # detect 记录 glob 路径（由 experiment_matrix 注入）
+  detect_records_glob: null  # detect 记录 glob 路径；为空时由标准 workflow / CLI 基于当前 run_root 自动解析
   minimal_ground_truth_prompts_file: null  # 可选：通过 prompts 文件驱动 GT 对数（行数即 pair_count）
 
 # ==============================================================
 # 评估 (Evaluate) 配置
 # ==============================================================
 evaluate:
-  detect_records_glob: null  # detect 记录 glob 路径（由 experiment_matrix 注入）
-  thresholds_path: null      # 阈值工件路径（由 experiment_matrix 注入）
+  detect_records_glob: null  # detect 记录 glob 路径；为空时由标准 workflow / CLI 基于当前 run_root 自动解析
+  thresholds_path: null      # 阈值工件路径；为空时由标准 workflow / CLI 基于当前 run_root 自动解析
   minimal_ground_truth_prompts_file: null  # 可选：通过 prompts 文件驱动 GT 对数（行数即 pair_count）
 
 # ==============================================================

@@ -9,7 +9,7 @@
 # ------------------------------
 # 规范版本与冻结元信息
 # ------------------------------
-paper_faithfulness_spec_version: "v2.0"
+paper_faithfulness_spec_version: "v2.1"
 frozen_date: "2026-06-01"
 phase: "phase-2-paper-grade-formal-impl-freeze"
 
@@ -160,10 +160,10 @@ target_method_families:
       bp_decoder:
         required_alignment: "matched_correlation"
         implementation_note: |
-          实际实现：whitened Pearson correlation scoring。
-          score = whitened Pearson correlation between detected projection and codeword。
-          无需 BP 迭代（watermark.lf.decoder = "matched_correlation"）。
-        alignment_rule: "检测必须使用 matched correlation 评分（whitened Pearson），无需 BP 迭代。"
+          实际实现：先计算 whitened Pearson correlation / soft reliability evidence，
+          再将其送入 sparse LDPC BP decode；watermark.lf.decoder = "matched_correlation"
+          仅表示 formal scoring token，不表示绕过 BP 迭代。
+        alignment_rule: "检测必须以 matched correlation（whitened Pearson）为主评分语义，并可结合 sparse LDPC BP decode 完成恢复。"
         deviation_policy: "禁止偏差"
         evidence_field_paths:
           - "content_evidence.lf_score"

@@ -81,6 +81,7 @@ class AnchorResult:
     stability_metrics: Optional[Dict[str, Any]]
     resolution_binding: Optional[Dict[str, Any]]
     failure_reason: Optional[str]
+    anchor_observations: Optional[Dict[str, Any]] = None
 
     def as_geometry_evidence(self, impl_identity: Dict[str, str]) -> Dict[str, Any]:
         """
@@ -111,6 +112,7 @@ class AnchorResult:
             "anchor_evidence_level": "real",
             "anchor_metrics": self.stability_metrics,
             "stability_metrics": self.stability_metrics,
+            "anchor_observations": self.anchor_observations,
             "resolution_binding": self.resolution_binding,
             "sync_digest": None,
             "sync_metrics": None,
@@ -277,6 +279,11 @@ class AttentionAnchorExtractor:
             stability_metrics=stability_metrics,
             resolution_binding=resolution_binding,
             failure_reason=None,
+            anchor_observations={
+                "observed_anchor_candidates": relation_summary.get("observed_anchor_candidates"),
+                "anchor_match_candidates": relation_summary.get("anchor_match_candidates"),
+                "anchor_observation_summary": relation_summary.get("anchor_observation_summary"),
+            },
         )
 
     def compute_anchor_digest(self, anchor_payload: Dict[str, Any]) -> str:
@@ -323,6 +330,8 @@ class AttentionAnchorExtractor:
             "top1_concentration": round(concentration, 6),
             "spectral_signature": attn_summary.get("spectral_signature", []),
             "token_count": int(attn_summary.get("token_count", 0)),
+            "candidate_confidence_mean": round(float(attn_summary.get("candidate_confidence_mean", 0.0)), 6),
+            "visible_candidate_count": int(attn_summary.get("visible_candidate_count", 0)),
             "availability_score": 1.0,
         }
 
@@ -443,6 +452,61 @@ class AttentionAnchorExtractor:
             channel_energy = np.nan_to_num(channel_energy, nan=0.0, posinf=0.0, neginf=0.0)
         spectral_signature = [round(float(v), 6) for v in np.sort(channel_energy)[::-1][:4]]
 
+        centrality_scores = np.mean(
+            similarity[np.arange(token_count)[:, None], neighbor_indices],
+            axis=1,
+        )
+        candidate_count = min(self._resolve_anchor_candidate_count(cfg), token_count)
+        candidate_indices = np.argsort(-centrality_scores)[:candidate_count]
+        grid_height = int(latents_first.shape[1])
+        grid_width = int(latents_first.shape[2])
+
+        observed_anchor_candidates: list[Dict[str, Any]] = []
+        anchor_match_candidates: list[Dict[str, Any]] = []
+        candidate_confidences: list[float] = []
+        visible_candidate_count = 0
+
+        for rank_index, observed_index in enumerate(candidate_indices.tolist()):
+            reference_index = int((observed_index - anchor_offset) % token_count)
+            candidate_confidence = float(max(0.0, min(1.0, (centrality_scores[observed_index] + 1.0) / 2.0)))
+            visibility = bool(candidate_confidence >= 0.15)
+            if visibility:
+                visible_candidate_count += 1
+            candidate_confidences.append(candidate_confidence)
+            descriptor = {
+                "mean_similarity": round(float(centrality_scores[observed_index]), 8),
+                "max_similarity": round(float(np.max(similarity[observed_index, neighbor_indices[observed_index]])), 8),
+                "channel_energy": round(float(np.linalg.norm(token_vectors[observed_index])), 8),
+                "neighbor_dispersion": round(float(np.std(similarity[observed_index, neighbor_indices[observed_index]])), 8),
+            }
+            observed_anchor_candidates.append(
+                {
+                    "rank": int(rank_index),
+                    "observed_token_index": int(observed_index),
+                    "reference_token_index": int(reference_index),
+                    "observed_coord": self._index_to_normalized_coord(int(observed_index), grid_height, grid_width),
+                    "reference_coord": self._index_to_normalized_coord(int(reference_index), grid_height, grid_width),
+                    "confidence": round(candidate_confidence, 8),
+                    "visibility": visibility,
+                    "descriptor": descriptor,
+                }
+            )
+
+            match_limit = min(2, int(neighbor_indices.shape[1]))
+            for relation_rank, observed_neighbor in enumerate(neighbor_indices[observed_index, :match_limit].tolist()):
+                reference_neighbor = int((int(observed_neighbor) - anchor_offset) % token_count)
+                match_score = float(max(0.0, min(1.0, (float(similarity[observed_index, int(observed_neighbor)]) + 1.0) / 2.0)))
+                anchor_match_candidates.append(
+                    {
+                        "candidate_rank": int(rank_index),
+                        "relation_rank": int(relation_rank),
+                        "source_reference_coord": self._index_to_normalized_coord(reference_neighbor, grid_height, grid_width),
+                        "observed_target_coord": self._index_to_normalized_coord(int(observed_neighbor), grid_height, grid_width),
+                        "match_score": round(match_score, 8),
+                        "visibility": bool(match_score >= 0.1),
+                    }
+                )
+
         return {
             "summary_version": "attention_anchor_relation_summary_v1",
             "top_k": effective_k,
@@ -452,6 +516,16 @@ class AttentionAnchorExtractor:
             "attestation_event_digest": attestation_event_digest,
             "geo_anchor_seed": geo_anchor_seed,
             "anchor_offset": int(anchor_offset),
+            "observed_anchor_candidates": observed_anchor_candidates,
+            "anchor_match_candidates": anchor_match_candidates,
+            "visible_candidate_count": int(visible_candidate_count),
+            "candidate_confidence_mean": round(float(np.mean(candidate_confidences)) if candidate_confidences else 0.0, 8),
+            "anchor_observation_summary": {
+                "candidate_count": int(len(observed_anchor_candidates)),
+                "match_count": int(len(anchor_match_candidates)),
+                "visible_candidate_count": int(visible_candidate_count),
+                "candidate_confidence_mean": round(float(np.mean(candidate_confidences)) if candidate_confidences else 0.0, 8),
+            },
         }
 
     def _resolve_enable_attention_anchor(self, cfg: Dict[str, Any]) -> bool:
@@ -501,6 +575,26 @@ class AttentionAnchorExtractor:
             return 16
         return top_k
 
+    def _resolve_anchor_candidate_count(self, cfg: Dict[str, Any]) -> int:
+        detect_cfg = cfg.get("detect") if isinstance(cfg.get("detect"), dict) else {}
+        geometry_cfg = detect_cfg.get("geometry") if isinstance(detect_cfg.get("geometry"), dict) else {}
+        value = geometry_cfg.get("anchor_candidate_count", 6)
+        if not isinstance(value, int):
+            return 6
+        return max(3, min(12, value))
+
+    def _index_to_normalized_coord(self, token_index: int, grid_height: int, grid_width: int) -> Dict[str, float]:
+        row_index = int(token_index // max(1, grid_width))
+        col_index = int(token_index % max(1, grid_width))
+        center_y = float(max(1, grid_height - 1)) / 2.0
+        center_x = float(max(1, grid_width - 1)) / 2.0
+        norm_y = 0.0 if center_y <= 0.0 else (float(row_index) - center_y) / center_y
+        norm_x = 0.0 if center_x <= 0.0 else (float(col_index) - center_x) / center_x
+        return {
+            "y": round(float(norm_y), 6),
+            "x": round(float(norm_x), 6),
+        }
+
     def _build_anchor_config_domain(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
         """
         功能：构造锚点配置输入域。
@@ -519,6 +613,7 @@ class AttentionAnchorExtractor:
             "domain_version": "attention_anchor_cfg_domain_v1",
             "enable_attention_anchor": bool(self._resolve_enable_attention_anchor(cfg)),
             "anchor_top_k": self._resolve_anchor_top_k(cfg),
+            "anchor_candidate_count": self._resolve_anchor_candidate_count(cfg),
             "model_id": cfg.get("model_id"),
             "attestation_event_digest": _resolve_attestation_event_digest(cfg),
             "geo_anchor_seed": _resolve_geo_anchor_seed(cfg),

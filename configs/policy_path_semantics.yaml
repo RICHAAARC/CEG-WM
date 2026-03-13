@@ -16,7 +16,7 @@
 # 与 frozen_contracts.yaml 中 policy_path_semantics_version 绑定
 # 注：顶层仅保留 policy_path_semantics_version；不再使用 semantics_version（已移至 _artifact_audit）
 # ==============================================================
-policy_path_semantics_version: "v2.1"  # v2.0→v2.1：同步 runtime_whitelist.yaml v2.1；test_mode_identity 重命名为 embed_identity_mode已移出 formal path。
+policy_path_semantics_version: "v2.2"  # v2.0→v2.1：同步 runtime_whitelist.yaml v2.1；test_mode_identity 重命名为 embed_identity_mode已移出 formal path。v2.1→v2.2：追加 geometry recovery observations 与 recovered consistency 的正式审计语义。
 
 # ==============================================================
 # 0) 硬约束：必须满足的执行性规则
@@ -162,6 +162,8 @@ field_catalog:
       - "geometry_evidence.anchor_digest"
       - "geometry_evidence.anchor_metrics"
       - "geometry_evidence.anchor_evidence_level"
+      - "geometry_evidence.sync_observations"
+      - "geometry_evidence.anchor_observations"
 
     # 推荐审计字段（可选）。
     recommended:
@@ -454,6 +456,10 @@ policy_paths:
       required_fields:
         - "geometry_evidence.status"
         - "geometry_evidence.geo_score"
+        - "geometry_evidence.observed_correspondence_summary"
+        - "geometry_evidence.align_metrics.template_overlap_consistency"
+        - "geometry_evidence.align_metrics.recovered_sync_consistency"
+        - "geometry_evidence.align_metrics.recovered_anchor_consistency"
         - "score_audit.geo_gate_applied"
         - "score_audit.fusion_rule_used"
         - "score_audit.rescue_band_applied"

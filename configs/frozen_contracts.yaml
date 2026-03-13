@@ -624,13 +624,22 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
 
     # Geometry 扩展配置与质量语义字段（仅 scripts/tests/离线审计主消费）
     - geometry_evidence.anchor_config_digest     # 几何锚点配置摘要。
+    - geometry_evidence.anchor_observations      # 几何锚点观测载荷。
     - geometry_evidence.geo_score_direction      # 几何得分方向定义。
+    - geometry_evidence.observed_correspondences # align 观测对应集合。
+    - geometry_evidence.observed_correspondence_summary # align 观测对应摘要。
     - geometry_evidence.resolution_binding       # 几何分辨率绑定。
     - geometry_evidence.stability_metrics        # 几何稳定性指标。
     - geometry_evidence.sync_config_digest       # 几何同步配置摘要。
+    - geometry_evidence.sync_observations        # 几何同步观测载荷。
     - geometry_evidence.sync_quality_metrics     # 几何同步质量指标。
     - geometry_evidence.sync_quality_metrics.quality_components      # 几何同步质量分量。
     - geometry_evidence.sync_quality_semantics   # 几何同步质量语义说明。
+    - geometry_evidence.align_metrics.template_overlap_consistency   # 恢复域 template overlap consistency。
+    - geometry_evidence.align_metrics.recovered_sync_consistency     # 恢复域 sync consistency。
+    - geometry_evidence.align_metrics.recovered_anchor_consistency   # 恢复域 anchor consistency。
+    - geometry_evidence.align_metrics.observed_correspondence_count  # 观测对应总数。
+    - geometry_evidence.align_metrics.visible_correspondence_count   # 可见观测对应数。
     - quality_metrics.mean_psnr                  # 图像质量 PSNR。
     - quality_metrics.mean_ssim                  # 图像质量 SSIM。
     

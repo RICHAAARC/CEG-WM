@@ -50,7 +50,7 @@ watermark:
     ecc_sparsity: 3
     message_length: 64
     coding_mode: "pseudogaussian_template_additive"
-    decoder: "matched_correlation"
+    decoder: "matched_correlation"  # 保留 formal token；实际检测为 whitened Pearson correlation + soft LLR + sparse LDPC BP decode 的组合路径
     bp_iterations: 100  # 从 50 提升至 100，改善 LF BP 收敛概率（RUNTIME-02 验证后可进一步调整）
   hf:
     enabled: true
@@ -80,6 +80,10 @@ detect:
     # attention anchor 仅作辅锚点（主同步成功后参与一致性评估）。
     sync_primary_anchor_secondary: true
     align_inverse_max_residual: 0.18
+    align_max_correspondence_count: 24
+    align_template_overlap_min: 0.70
+    align_recovered_sync_consistency_min: 0.55
+    align_recovered_anchor_consistency_min: 0.50
   calibration_artifact_path: null  # NP 阈值工件路径；null 表示运行时通过 --thresholds_path 注入
                                    # 可设为 outputs/.../artifacts/thresholds/thresholds.json（或由 experiment_matrix override 注入）
 
@@ -155,8 +159,8 @@ experiment_matrix:
   allow_failed_semantics_collection: true
   # seeds 数量控制正样本规模：论文级 FPR ≤ 1% 需 n_pos ≥ 100，种子数应 ≥ 100。
   # 当前 seeds=[0,1] 为机制验证阶段（仅 2 个 seed）；正式论文运行请扩展为 range(100)。
-  # 运行时通过 scripts/run_experiment_matrix.py 自动映射 seeds 为 CLI overrides（seed=0, seed=1, ...）。
-  # ⚠ STATIC-02 未修复：glob=null 时 calibrate/evaluate 仍 raise ValueError；需独立实施 seeds 扩展 + glob 注入。
+  # 运行时通过 scripts/run_experiment_matrix.py 自动映射 seeds 为 CLI overrides（seed=0, seed=1, ...），
+  # calibrate/evaluate 的 detect_records_glob 与 thresholds_path 在标准 workflow 中由当前 run_root 自动补全。
   seeds: [0, 1]
   # 论文复现实验主配置：仅保留 faithful baseline。
   # 消融实验请使用 configs/ablation 目录下的专用配置。

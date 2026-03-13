@@ -38,6 +38,7 @@ class SyncResult:
     sync_quality_metrics: Optional[Dict[str, Any]]
     resolution_binding: Optional[Dict[str, Any]]
     failure_reason: Optional[str]
+    sync_observations: Optional[Dict[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -343,6 +344,7 @@ class LatentSyncTemplate:
                 sync_quality_metrics=None,
                 resolution_binding=None,
                 failure_reason=str(validation.get("failure_reason") or "sync_input_invalid"),
+                sync_observations=None,
             )
 
         latents_np = _to_numpy_latents(latents)
@@ -355,6 +357,7 @@ class LatentSyncTemplate:
                 sync_quality_metrics=None,
                 resolution_binding=None,
                 failure_reason="sync_transformer_absent",
+                sync_observations=None,
             )
 
         try:
@@ -381,6 +384,9 @@ class LatentSyncTemplate:
                 "impl_identity": self._impl_identity(),
                 "template_digest": template_match_metrics["template_digest"],
                 "template_match_score": template_match_metrics["template_match_score"],
+                "observed_sync_peaks": sync_summary.get("observed_sync_peaks"),
+                "template_support_points": sync_summary.get("template_support_points"),
+                "sync_response_summary": sync_summary.get("sync_response_summary"),
             }
             sync_digest = self.compute_sync_digest(sync_payload)
             return SyncResult(
@@ -390,6 +396,12 @@ class LatentSyncTemplate:
                 sync_quality_metrics=sync_quality_metrics,
                 resolution_binding=resolution_binding,
                 failure_reason=None,
+                sync_observations={
+                    "observed_sync_peaks": sync_summary.get("observed_sync_peaks"),
+                    "template_support_points": sync_summary.get("template_support_points"),
+                    "sync_response_summary": sync_summary.get("sync_response_summary"),
+                    "template_support_summary": sync_summary.get("template_support_summary"),
+                },
             )
         except Exception:
             # 同步模板提取异常，必须结构化标记 fail。
@@ -400,6 +412,7 @@ class LatentSyncTemplate:
                 sync_quality_metrics=None,
                 resolution_binding=None,
                 failure_reason="latent_sync_extraction_failed",
+                sync_observations=None,
             )
 
     def _resolve_sync_seed(self, cfg: Dict[str, Any], rng: Any) -> int:
@@ -528,6 +541,99 @@ class LatentSyncTemplate:
             "template_digest": template_digest,
         }
 
+    def _resolve_sync_peak_top_k(self, cfg: Dict[str, Any]) -> int:
+        detect_cfg = cfg.get("detect") if isinstance(cfg.get("detect"), dict) else {}
+        geometry_cfg = detect_cfg.get("geometry") if isinstance(detect_cfg.get("geometry"), dict) else {}
+        value = geometry_cfg.get("sync_peak_top_k", 6)
+        if not isinstance(value, int):
+            return 6
+        return max(2, min(16, value))
+
+    def _normalize_frequency_coordinate(self, row_index: int, col_index: int, height: int, width: int) -> Dict[str, float]:
+        center_y = float(max(1, height - 1)) / 2.0
+        center_x = float(max(1, width - 1)) / 2.0
+        norm_y = 0.0 if center_y <= 0.0 else (float(row_index) - center_y) / center_y
+        norm_x = 0.0 if center_x <= 0.0 else (float(col_index) - center_x) / center_x
+        return {
+            "y": round(float(norm_y), 6),
+            "x": round(float(norm_x), 6),
+        }
+
+    def _extract_sync_peak_candidates(self, spectrum_center: np.ndarray, cfg: Dict[str, Any]) -> list[Dict[str, Any]]:
+        if not isinstance(spectrum_center, np.ndarray) or spectrum_center.ndim != 2:
+            raise TypeError("spectrum_center must be rank-2 np.ndarray")
+
+        peak_top_k = min(self._resolve_sync_peak_top_k(cfg), int(spectrum_center.size))
+        flat = spectrum_center.reshape(-1)
+        if peak_top_k <= 0 or flat.size == 0:
+            return []
+
+        selected = np.argpartition(-flat, peak_top_k - 1)[:peak_top_k]
+        selected = selected[np.argsort(-flat[selected])]
+        global_mean = float(np.mean(flat) + 1e-12)
+        global_std = float(np.std(flat) + 1e-12)
+        height, width = spectrum_center.shape
+        candidates: list[Dict[str, Any]] = []
+
+        for rank_index, flat_index in enumerate(selected.tolist()):
+            peak_value = float(flat[flat_index])
+            row_index, col_index = np.unravel_index(int(flat_index), spectrum_center.shape)
+            patch = spectrum_center[
+                max(0, row_index - 1):min(height, row_index + 2),
+                max(0, col_index - 1):min(width, col_index + 2),
+            ]
+            local_mean = float(np.mean(patch) + 1e-12)
+            local_std = float(np.std(patch) + 1e-12)
+            local_contrast = float((peak_value - local_mean) / local_std)
+            confidence = max(
+                0.0,
+                min(
+                    1.0,
+                    0.55 * (peak_value / (peak_value + global_mean))
+                    + 0.45 * (peak_value / (peak_value + global_std)),
+                ),
+            )
+            candidates.append(
+                {
+                    "rank": int(rank_index),
+                    "coord": {"row": int(row_index), "col": int(col_index)},
+                    "normalized_coord": self._normalize_frequency_coordinate(int(row_index), int(col_index), height, width),
+                    "peak_strength": round(peak_value, 8),
+                    "local_mean": round(local_mean, 8),
+                    "local_std": round(local_std, 8),
+                    "local_contrast": round(local_contrast, 8),
+                    "confidence": round(float(confidence), 8),
+                    "visibility": bool(peak_value > global_mean),
+                }
+            )
+        return candidates
+
+    def _extract_template_support_points(self, shape: tuple[int, ...], cfg: Dict[str, Any], seed: int) -> list[Dict[str, Any]]:
+        template = self._build_sync_template(shape, cfg, seed)
+        support_coords = np.argwhere(np.abs(template) > 1e-8)
+        if support_coords.size == 0:
+            return []
+
+        height, width = template.shape
+        scored_points = []
+        for row_index, col_index in support_coords.tolist():
+            radius = float(np.sqrt((float(row_index) - float(height) / 2.0) ** 2 + (float(col_index) - float(width) / 2.0) ** 2))
+            scored_points.append((radius, int(row_index), int(col_index)))
+        scored_points.sort(key=lambda item: (item[0], item[1], item[2]))
+
+        template_points: list[Dict[str, Any]] = []
+        for rank_index, (_, row_index, col_index) in enumerate(scored_points[:self._resolve_sync_peak_top_k(cfg)]):
+            template_points.append(
+                {
+                    "rank": int(rank_index),
+                    "coord": {"row": int(row_index), "col": int(col_index)},
+                    "reference_coord": self._normalize_frequency_coordinate(int(row_index), int(col_index), height, width),
+                    "visibility": True,
+                    "confidence": 1.0,
+                }
+            )
+        return template_points
+
     def compute_sync_digest(self, payload: Dict[str, Any]) -> str:
         """
         功能：计算同步摘要 digest。
@@ -563,7 +669,26 @@ class LatentSyncTemplate:
         peak_ratio = float(summary.get("peak_ratio", 0.0))
         residual_score = float(summary.get("residual_score", 0.0))
         radial_entropy = float(summary.get("radial_entropy", 0.0))
-        match_confidence = max(0.0, min(1.0, 0.6 * peak_ratio + 0.4 * (1.0 - residual_score)))
+        observed_sync_peaks = summary.get("observed_sync_peaks") if isinstance(summary.get("observed_sync_peaks"), list) else []
+        peak_confidence_mean = float(np.mean([float(item.get("confidence", 0.0)) for item in observed_sync_peaks])) if observed_sync_peaks else 0.0
+        peak_local_contrast_mean = float(
+            np.mean(
+                [
+                    max(0.0, min(1.0, float(item.get("local_contrast", 0.0)) / 4.0))
+                    for item in observed_sync_peaks
+                ]
+            )
+        ) if observed_sync_peaks else 0.0
+        match_confidence = max(
+            0.0,
+            min(
+                1.0,
+                0.35 * max(0.0, min(1.0, peak_ratio / 8.0))
+                + 0.25 * (1.0 - max(0.0, min(1.0, residual_score)))
+                + 0.25 * max(0.0, min(1.0, peak_confidence_mean))
+                + 0.15 * max(0.0, min(1.0, peak_local_contrast_mean)),
+            ),
+        )
         return {
             "peak_ratio": round(peak_ratio, 6),
             "residual_score": round(residual_score, 6),
@@ -571,8 +696,18 @@ class LatentSyncTemplate:
             "rotation_bin": int(summary.get("rotation_bin", 0)),
             "scale_bin": int(summary.get("scale_bin", 0)),
             "match_confidence": round(match_confidence, 6),
+            "observed_peak_count": int(len(observed_sync_peaks)),
+            "peak_confidence_mean": round(max(0.0, min(1.0, peak_confidence_mean)), 6),
+            "peak_local_contrast_mean": round(max(0.0, min(1.0, peak_local_contrast_mean)), 6),
             "availability_score": 1.0,
             "sync_evidence_level": "primary",
+            "quality_components": {
+                "version": "latent_sync_quality_components",
+                "peak_ratio_term": round(max(0.0, min(1.0, peak_ratio / 8.0)), 6),
+                "residual_term": round(1.0 - max(0.0, min(1.0, residual_score)), 6),
+                "peak_confidence_term": round(max(0.0, min(1.0, peak_confidence_mean)), 6),
+                "local_contrast_term": round(max(0.0, min(1.0, peak_local_contrast_mean)), 6),
+            },
         }
 
     def build_resolution_binding(self, transformer: Any, latents_np: np.ndarray, cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -683,6 +818,9 @@ class LatentSyncTemplate:
             "residual_q": round(float(residual_score), 4),
             "histogram_q": [round(float(v), 6) for v in probs.tolist()],
         }
+        observed_sync_peaks = self._extract_sync_peak_candidates(spectrum_center, cfg)
+        template_support_points = self._extract_template_support_points(latents_np.shape, cfg, self._resolve_sync_seed(cfg, None))
+        top_peak = observed_sync_peaks[0] if observed_sync_peaks else {}
         return {
             "summary_version": "latent_sync_template_summary_v1",
             "sync_signature": sync_signature,
@@ -691,6 +829,21 @@ class LatentSyncTemplate:
             "radial_entropy": float(radial_entropy),
             "rotation_bin": rotation_bin,
             "scale_bin": scale_bin,
+            "observed_sync_peaks": observed_sync_peaks,
+            "template_support_points": template_support_points,
+            "sync_response_summary": {
+                "map_shape": [int(spectrum_center.shape[0]), int(spectrum_center.shape[1])],
+                "response_mean": round(float(np.mean(spectrum_center)), 8),
+                "response_std": round(float(np.std(spectrum_center)), 8),
+                "response_energy": round(float(np.sum(np.square(spectrum_center))), 8),
+                "top_peak_strength": round(float(top_peak.get("peak_strength", 0.0)), 8),
+                "top_peak_confidence": round(float(top_peak.get("confidence", 0.0)), 8),
+                "top_peak_local_contrast": round(float(top_peak.get("local_contrast", 0.0)), 8),
+            },
+            "template_support_summary": {
+                "support_count": int(len(template_support_points)),
+                "peak_limit": int(self._resolve_sync_peak_top_k(cfg)),
+            },
         }
 
     def _build_sync_config_domain(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -711,6 +864,7 @@ class LatentSyncTemplate:
             "domain_version": "latent_sync_cfg_domain_v1",
             "enable_latent_sync": bool(self._resolve_enable_latent_sync(cfg)),
             "sync_fft_bins": self._resolve_fft_bins(cfg),
+            "sync_peak_top_k": self._resolve_sync_peak_top_k(cfg),
             "sync_rotation_bins": self._resolve_rotation_bins(cfg),
             "sync_scale_bins": self._resolve_scale_bins(cfg),
             "model_id": cfg.get("model_id"),
@@ -856,6 +1010,7 @@ class LatentSyncGeometryExtractor:
             "sync_config_digest": sync_result.sync_config_digest,
             "sync_metrics": sync_result.sync_quality_metrics,
             "sync_quality_metrics": sync_result.sync_quality_metrics,
+            "sync_observations": sync_result.sync_observations,
             "resolution_binding": sync_result.resolution_binding,
             "geo_failure_reason": sync_result.failure_reason,
             "geometry_failure_reason": sync_result.failure_reason,
