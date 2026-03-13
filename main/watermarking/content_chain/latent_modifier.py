@@ -21,7 +21,7 @@ from main.watermarking.content_chain import channel_lf
 from main.watermarking.content_chain import channel_hf
 
 
-LATENT_MODIFIER_ID = "unified_latent_modifier_v1"
+LATENT_MODIFIER_ID = "unified_latent_modifier"
 LATENT_MODIFIER_VERSION = "v1"
 
 

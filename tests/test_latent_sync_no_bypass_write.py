@@ -11,7 +11,11 @@ import numpy as np
 from _pytest.monkeypatch import MonkeyPatch
 
 from main.core import records_io
-from main.watermarking.geometry_chain.sync.latent_sync_template import LatentSyncGeometryExtractor
+from main.watermarking.geometry_chain.sync.latent_sync_template import (
+    GEOMETRY_LATENT_SYNC_SD3_ID,
+    GEOMETRY_LATENT_SYNC_SD3_VERSION,
+    LatentSyncGeometryExtractor,
+)
 
 
 class _TransformerConfig:
@@ -48,7 +52,7 @@ def test_latent_sync_extractor_must_not_write_records_or_artifacts(monkeypatch: 
     monkeypatch.setattr(records_io, "write_artifact_json", _forbidden_call)
     monkeypatch.setattr(records_io, "copy_file_controlled", _forbidden_call)
 
-    extractor = LatentSyncGeometryExtractor("geometry_latent_sync_sd3_v1", "v1", "a" * 64)
+    extractor = LatentSyncGeometryExtractor(GEOMETRY_LATENT_SYNC_SD3_ID, GEOMETRY_LATENT_SYNC_SD3_VERSION, "a" * 64)
     cfg: Dict[str, Any] = {
         "model_id": "stabilityai/stable-diffusion-3-medium",
         "inference_height": 512,

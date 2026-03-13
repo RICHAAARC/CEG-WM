@@ -14,7 +14,11 @@ from main.registries.runtime_resolver import BuiltImplSet
 from main.watermarking.content_chain.interfaces import ContentEvidence
 from main.watermarking.detect.orchestrator import run_detect_orchestrator
 from main.watermarking.fusion.interfaces import FusionDecision
-from main.watermarking.geometry_chain.sync.latent_sync_template import LatentSyncGeometryExtractor
+from main.watermarking.geometry_chain.sync.latent_sync_template import (
+    GEOMETRY_LATENT_SYNC_SD3_ID,
+    GEOMETRY_LATENT_SYNC_SD3_VERSION,
+    LatentSyncGeometryExtractor,
+)
 
 
 class _ContentExtractorStub:
@@ -156,7 +160,7 @@ def _build_cfg(enable_latent_sync: bool) -> Dict[str, Any]:
 
 
 def _run_detect_with_sync(enable_latent_sync: bool) -> Dict[str, Any]:
-    geometry_extractor = LatentSyncGeometryExtractor("geometry_latent_sync_sd3_v1", "v1", "a" * 64)
+    geometry_extractor = LatentSyncGeometryExtractor(GEOMETRY_LATENT_SYNC_SD3_ID, GEOMETRY_LATENT_SYNC_SD3_VERSION, "a" * 64)
     impl_set = BuiltImplSet(
         content_extractor=_ContentExtractorStub(),
         geometry_extractor=geometry_extractor,

@@ -17,7 +17,11 @@ import numpy as np
 
 from main.watermarking.content_chain import channel_lf
 from main.watermarking.content_chain import channel_hf
-from main.watermarking.content_chain.latent_modifier import LatentModifier
+from main.watermarking.content_chain.latent_modifier import (
+    LATENT_MODIFIER_ID,
+    LATENT_MODIFIER_VERSION,
+    LatentModifier,
+)
 from main.diffusion.sd3 import hooks
 from main.core import digests
 
@@ -62,8 +66,8 @@ def run_inference_with_latent_modifier(
     
     # 创建 LatentModifier 实例。
     modifier = LatentModifier(
-        impl_id="unified_latent_modifier_v1",
-        impl_version="v1"
+        impl_id=LATENT_MODIFIER_ID,
+        impl_version=LATENT_MODIFIER_VERSION
     )
     
     # 定义 callback。

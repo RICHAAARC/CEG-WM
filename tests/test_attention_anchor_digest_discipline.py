@@ -9,7 +9,11 @@ import copy
 import numpy as np
 
 from main.policy.runtime_whitelist import load_runtime_whitelist
-from main.watermarking.geometry_chain.attention_anchor_extractor import AttentionAnchorExtractor
+from main.watermarking.geometry_chain.attention_anchor_extractor import (
+    ATTENTION_ANCHOR_EXTRACTOR_ID,
+    ATTENTION_ANCHOR_EXTRACTOR_VERSION,
+    AttentionAnchorExtractor,
+)
 
 
 class _TransformerConfig:
@@ -52,8 +56,8 @@ def test_anchor_digest_must_change_when_anchor_top_k_changes() -> None:
         None.
     """
     extractor = AttentionAnchorExtractor(
-        "geometry_attention_anchor_sd3_v1",
-        "v1",
+        ATTENTION_ANCHOR_EXTRACTOR_ID,
+        ATTENTION_ANCHOR_EXTRACTOR_VERSION,
         "a" * 64,
     )
     pipeline = _Pipeline()

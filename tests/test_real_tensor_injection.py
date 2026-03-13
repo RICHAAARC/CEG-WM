@@ -116,12 +116,16 @@ def test_latent_modifier():
     """
     测试统一 latent 修改器。
     """
-    from main.watermarking.content_chain.latent_modifier import LatentModifier
+    from main.watermarking.content_chain.latent_modifier import (
+        LATENT_MODIFIER_ID,
+        LATENT_MODIFIER_VERSION,
+        LatentModifier,
+    )
     
     # 创建修改器。
     modifier = LatentModifier(
-        impl_id="unified_latent_modifier_v1",
-        impl_version="v1"
+        impl_id=LATENT_MODIFIER_ID,
+        impl_version=LATENT_MODIFIER_VERSION
     )
     
     # 创建模拟 latent 和 plan。

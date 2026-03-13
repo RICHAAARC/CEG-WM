@@ -10,7 +10,11 @@ from typing import Any, Dict
 import numpy as np
 
 from main.core import records_io
-from main.watermarking.geometry_chain.attention_anchor_extractor import AttentionAnchorExtractor
+from main.watermarking.geometry_chain.attention_anchor_extractor import (
+    ATTENTION_ANCHOR_EXTRACTOR_ID,
+    ATTENTION_ANCHOR_EXTRACTOR_VERSION,
+    AttentionAnchorExtractor,
+)
 
 
 class _TransformerConfig:
@@ -48,8 +52,8 @@ def test_attention_anchor_extractor_must_not_write_records_or_artifacts(monkeypa
     monkeypatch.setattr(records_io, "copy_file_controlled", _forbidden_call)
 
     extractor = AttentionAnchorExtractor(
-        "geometry_attention_anchor_sd3_v1",
-        "v1",
+        ATTENTION_ANCHOR_EXTRACTOR_ID,
+        ATTENTION_ANCHOR_EXTRACTOR_VERSION,
         "a" * 64,
     )
 

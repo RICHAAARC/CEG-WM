@@ -10,7 +10,11 @@ from typing import Any, Dict
 
 import numpy as np
 
-from main.watermarking.geometry_chain.sync.latent_sync_template import LatentSyncTemplate
+from main.watermarking.geometry_chain.sync.latent_sync_template import (
+    GEOMETRY_LATENT_SYNC_SD3_ID,
+    GEOMETRY_LATENT_SYNC_SD3_VERSION,
+    LatentSyncTemplate,
+)
 
 
 class _TransformerConfig:
@@ -54,7 +58,7 @@ def test_sync_digest_must_change_when_sync_config_changes() -> None:
     Returns:
         None.
     """
-    template = LatentSyncTemplate("geometry_latent_sync_sd3_v1", "v1", "a" * 64)
+    template = LatentSyncTemplate(GEOMETRY_LATENT_SYNC_SD3_ID, GEOMETRY_LATENT_SYNC_SD3_VERSION, "a" * 64)
     pipeline = _Pipeline()
     latents = np.random.RandomState(21).randn(1, 4, 8, 8).astype(np.float32)
 

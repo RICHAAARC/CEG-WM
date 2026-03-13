@@ -2575,7 +2575,7 @@ def _build_absent_fusion_decision(
         "geometry_score": geometry_evidence_adapted.get("geo_score"),
         "content_status": "absent",
         "geometry_status": geometry_evidence_adapted.get("status", "absent"),
-        "fusion_rule_id": "detect_absent_guard_v1"
+        "fusion_rule_id": "detect_absent_guard"
     }
     audit: Dict[str, Any] = {
         "guard": "trajectory_absent_guard",
@@ -2689,7 +2689,7 @@ def _build_mismatch_fusion_decision(
         "geometry_score": geometry_evidence_adapted.get("geo_score"),
         "content_status": "mismatch",
         "geometry_status": geometry_evidence_adapted.get("status", "absent"),
-        "fusion_rule_id": "detect_mismatch_guard_v1"
+        "fusion_rule_id": "detect_mismatch_guard"
     }
     audit: Dict[str, Any] = {
         "guard": "plan_anchor_consistency",
@@ -2958,7 +2958,7 @@ def _resolve_plan_digest_for_evaluate(cfg: Dict[str, Any], detect_records: list[
         })
     if fallback_signatures:
         return digests.canonical_sha256({
-            "rule": "evaluate_plan_digest_fallback_v1",
+            "rule": "evaluate_plan_digest_fallback",
             "attack_signatures": fallback_signatures,
         })
     return "<absent>"
@@ -3131,7 +3131,7 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
         )
     attack_group_metrics = aggregated_metrics.get("metrics_by_attack_condition", [])
     ablation_digest = _compute_ablation_digest_for_report(cfg)
-    ablation_digest_v2 = _compute_ablation_digest_extended_for_report(cfg)
+    ablation_digest_extended = _compute_ablation_digest_extended_for_report(cfg)
     attack_trace_digest = _collect_attack_trace_digest(detect_records)
     coverage_manifest = eval_attack_coverage.compute_attack_coverage_manifest()
     attack_coverage_digest = coverage_manifest.get("attack_coverage_digest", "<absent>")
@@ -3153,7 +3153,7 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
             "geometry_score": None,
             "content_status": "aggregate",
             "geometry_status": "aggregate",
-            "fusion_rule_id": "evaluate_readonly_thresholds_v1",
+            "fusion_rule_id": "evaluate_readonly_thresholds",
         },
         audit={
             "impl_identity": "evaluate_orchestrator",
@@ -3196,10 +3196,9 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
         attack_trace_digest=attack_trace_digest,
         attack_coverage_digest=attack_coverage_digest,
     )
-    report_obj["ablation_digest_v2"] = ablation_digest_v2
     anchors = report_obj.get("anchors") if isinstance(report_obj.get("anchors"), dict) else None
     if isinstance(anchors, dict):
-        anchors["ablation_digest_v2"] = ablation_digest_v2
+        anchors["ablation_digest_extended"] = ablation_digest_extended
     
     # append-only 加入 readonly guard 记录
     report_obj["thresholds_readonly_guard"] = {
@@ -4722,7 +4721,7 @@ def _enforce_sync_primary_anchor_secondary(
     sync_status = _normalize_geometry_chain_status(sync_result.get("sync_status") or sync_result.get("status"))
 
     geometry_result["geometry_evidence_hierarchy"] = {
-        "policy_version": "sync_primary_anchor_secondary_v1",
+        "policy_version": "sync_primary_anchor_secondary",
         "switch_enabled": enabled,
         "primary_source": "sync" if enabled else "anchor",
         "secondary_source": "anchor" if enabled else "sync",
@@ -4832,7 +4831,7 @@ def _compute_ablation_digest_for_report(cfg: Dict[str, Any]) -> str:
 
 def _compute_ablation_digest_extended_for_report(cfg: Dict[str, Any]) -> str:
     """
-    功能：计算扩展口径 ablation_digest_v2。
+    功能：计算扩展口径 ablation_digest_extended。
 
     Compute expanded ablation digest that binds high-impact runtime switches.
 

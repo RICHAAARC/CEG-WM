@@ -11,8 +11,16 @@ from typing import Any, Dict
 import numpy as np
 
 from main.watermarking.geometry_chain.align_invariance_extractor import GeometryAlignInvarianceExtractor, GeometryAligner
-from main.watermarking.geometry_chain.attention_anchor_extractor import AttentionAnchorExtractor
-from main.watermarking.geometry_chain.sync.latent_sync_template import LatentSyncTemplate
+from main.watermarking.geometry_chain.attention_anchor_extractor import (
+    ATTENTION_ANCHOR_EXTRACTOR_ID,
+    ATTENTION_ANCHOR_EXTRACTOR_VERSION,
+    AttentionAnchorExtractor,
+)
+from main.watermarking.geometry_chain.sync.latent_sync_template import (
+    GEOMETRY_LATENT_SYNC_SD3_ID,
+    GEOMETRY_LATENT_SYNC_SD3_VERSION,
+    LatentSyncTemplate,
+)
 
 
 class _TransformerConfig:
@@ -141,7 +149,7 @@ def test_sync_extract_emits_recovery_observations() -> None:
     Returns:
         None.
     """
-    sync_module = LatentSyncTemplate("geometry_latent_sync_sd3_v1", "v1", "a" * 64)
+    sync_module = LatentSyncTemplate(GEOMETRY_LATENT_SYNC_SD3_ID, GEOMETRY_LATENT_SYNC_SD3_VERSION, "a" * 64)
     pipeline = _Pipeline()
     latents = np.random.RandomState(11).randn(1, 4, 16, 16).astype(np.float32)
 
@@ -170,7 +178,7 @@ def test_anchor_extract_emits_recovery_observations() -> None:
     Returns:
         None.
     """
-    extractor = AttentionAnchorExtractor("geometry_attention_anchor_sd3_v1", "v1", "a" * 64)
+    extractor = AttentionAnchorExtractor(ATTENTION_ANCHOR_EXTRACTOR_ID, ATTENTION_ANCHOR_EXTRACTOR_VERSION, "a" * 64)
     pipeline = _Pipeline()
     latents = np.random.RandomState(13).randn(1, 4, 16, 16).astype(np.float32)
 

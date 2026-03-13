@@ -364,8 +364,8 @@ class _UnifiedContentExtractorBase:
             hf_reason = hf_failure_reason if isinstance(hf_failure_reason, str) else "hf_disabled_by_config"
             return float(lf_score), {
                 "content_score_rule_version": "content_score_rule_v1",
-                "rule_id": "lf_only_when_hf_absent_v1",
-                "content_score_rule_id": "lf_only_when_hf_absent_v1",
+                "rule_id": "lf_only_when_hf_absent",
+                "content_score_rule_id": "lf_only_when_hf_absent",
                 "lf_score": lf_score,
                 "hf_score": "<absent>",
                 "hf_status": "absent",
@@ -375,8 +375,8 @@ class _UnifiedContentExtractorBase:
         if hf_score is None:
             return float(lf_score), {
                 "content_score_rule_version": "content_score_rule_v1",
-                "rule_id": "lf_only_default_v1",
-                "content_score_rule_id": "lf_only_default_v1",
+                "rule_id": "lf_only_default",
+                "content_score_rule_id": "lf_only_default",
                 "lf_score": lf_score,
                 "hf_score": "<absent>",
                 "hf_status": "absent",
@@ -388,8 +388,8 @@ class _UnifiedContentExtractorBase:
         content_score = float(round(lf_score * weight_lf + hf_score * weight_hf, 8))
         return content_score, {
             "content_score_rule_version": "content_score_rule_v1",
-            "rule_id": "lf_hf_weighted_sum_v1",
-            "content_score_rule_id": "lf_hf_weighted_sum_v1",
+            "rule_id": "lf_hf_weighted_sum",
+            "content_score_rule_id": "lf_hf_weighted_sum",
             "lf_score": lf_score,
             "hf_score": hf_score,
             "weights": {"lf": weight_lf, "hf": weight_hf},

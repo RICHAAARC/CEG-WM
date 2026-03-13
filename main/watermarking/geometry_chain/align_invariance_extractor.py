@@ -11,8 +11,17 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from main.core import digests
-from main.watermarking.geometry_chain.attention_anchor_extractor import AttentionAnchorExtractor
-from main.watermarking.geometry_chain.sync.latent_sync_template import LatentSyncGeometryExtractor, LatentSyncTemplate
+from main.watermarking.geometry_chain.attention_anchor_extractor import (
+    ATTENTION_ANCHOR_EXTRACTOR_ID,
+    ATTENTION_ANCHOR_EXTRACTOR_VERSION,
+    AttentionAnchorExtractor,
+)
+from main.watermarking.geometry_chain.sync.latent_sync_template import (
+    GEOMETRY_LATENT_SYNC_SD3_ID,
+    GEOMETRY_LATENT_SYNC_SD3_VERSION,
+    LatentSyncGeometryExtractor,
+    LatentSyncTemplate,
+)
 
 
 GEO_AVAILABILITY_RULE_VERSION = "geo_availability_rule_v1"
@@ -546,9 +555,9 @@ class GeometryAligner:
     def __init__(self) -> None:
         self._robust_fitter = RobustSimilarityFitter()
         self._sync_template = LatentSyncTemplate(
-            "geometry_latent_sync_sd3_v1",
-            "v1",
-            digests.canonical_sha256({"impl_id": "geometry_latent_sync_sd3_v1", "impl_version": "v1"}),
+            GEOMETRY_LATENT_SYNC_SD3_ID,
+            GEOMETRY_LATENT_SYNC_SD3_VERSION,
+            digests.canonical_sha256({"impl_id": GEOMETRY_LATENT_SYNC_SD3_ID, "impl_version": GEOMETRY_LATENT_SYNC_SD3_VERSION}),
         )
 
     def estimate_transform(self, anchor_data: Dict[str, Any], sync_data: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -1548,14 +1557,14 @@ class GeometryAlignInvarianceExtractor:
         self._aligner = GeometryAligner()
         self._scorer = InvarianceScorer()
         self._anchor_extractor = AttentionAnchorExtractor(
-            "geometry_attention_anchor_sd3_v1",
-            "v1",
-            digests.canonical_sha256({"impl_id": "geometry_attention_anchor_sd3_v1", "impl_version": "v1"}),
+            ATTENTION_ANCHOR_EXTRACTOR_ID,
+            ATTENTION_ANCHOR_EXTRACTOR_VERSION,
+            digests.canonical_sha256({"impl_id": ATTENTION_ANCHOR_EXTRACTOR_ID, "impl_version": ATTENTION_ANCHOR_EXTRACTOR_VERSION}),
         )
         self._sync_extractor = LatentSyncGeometryExtractor(
-            "geometry_latent_sync_sd3_v1",
-            "v1",
-            digests.canonical_sha256({"impl_id": "geometry_latent_sync_sd3_v1", "impl_version": "v1"}),
+            GEOMETRY_LATENT_SYNC_SD3_ID,
+            GEOMETRY_LATENT_SYNC_SD3_VERSION,
+            digests.canonical_sha256({"impl_id": GEOMETRY_LATENT_SYNC_SD3_ID, "impl_version": GEOMETRY_LATENT_SYNC_SD3_VERSION}),
         )
 
     def extract(self, cfg: Dict[str, Any], inputs: Dict[str, Any] | None = None) -> Dict[str, Any]:

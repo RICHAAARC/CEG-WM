@@ -16,7 +16,11 @@ from main.watermarking.content_chain.subspace.subspace_planner_impl import (
     SUBSPACE_PLANNER_VERSION,
     SubspacePlannerImpl,
 )
-from main.watermarking.geometry_chain.attention_anchor_extractor import AttentionAnchorExtractor
+from main.watermarking.geometry_chain.attention_anchor_extractor import (
+    ATTENTION_ANCHOR_EXTRACTOR_ID,
+    ATTENTION_ANCHOR_EXTRACTOR_VERSION,
+    AttentionAnchorExtractor,
+)
 
 
 def _build_planner_cfg() -> dict:
@@ -137,9 +141,9 @@ def test_attention_anchor_map_relation_has_digest_and_small_payload() -> None:
         None.
     """
     impl_digest = digests.canonical_sha256(
-        {"impl_id": "geometry_attention_anchor_sd3_v1", "impl_version": "v1"}
+        {"impl_id": ATTENTION_ANCHOR_EXTRACTOR_ID, "impl_version": ATTENTION_ANCHOR_EXTRACTOR_VERSION}
     )
-    extractor = AttentionAnchorExtractor("geometry_attention_anchor_sd3_v1", "v1", impl_digest)
+    extractor = AttentionAnchorExtractor(ATTENTION_ANCHOR_EXTRACTOR_ID, ATTENTION_ANCHOR_EXTRACTOR_VERSION, impl_digest)
 
     cfg = {
         "model_id": "stabilityai/stable-diffusion-3.5-medium",
