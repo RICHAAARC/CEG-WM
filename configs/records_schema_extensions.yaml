@@ -3,7 +3,7 @@
 # - 仅追加字段，默认允许 absent。
 # - 本文件作为接口层字段事实源，用于审计与字段登记对齐。
 # ==============================================================
-version: "v6"  # v3→v4 (2026-03-12)：formal path 最终闭包收口；historical_fields: 段已从当前 formal schema 文件移除，旧字段信息不再显式保留在任何 formal 文件中。当前 formal schema 只表达当前正式机制。v4→v5 (2026-03-13)：追加 attestation 事件绑定、真实性/图像证据双层语义与 event-attested 判决字段。v5→v6 (2026-03-13)：追加 geometry recovery observations、observed correspondences 与 recovered consistency 字段。
+version: "v7"  # v3→v4 (2026-03-12)：formal path 最终闭包收口；historical_fields: 段已从当前 formal schema 文件移除，旧字段信息不再显式保留在任何 formal 文件中。当前 formal schema 只表达当前正式机制。v4→v5 (2026-03-13)：追加 attestation 事件绑定、真实性/图像证据双层语义与 event-attested 判决字段。v5→v6 (2026-03-13)：追加 geometry recovery observations、observed correspondences 与 recovered consistency 字段。v6→v7 (2026-03-13)：追加 coarse registration 与 recovered-domain sync revalidation 细分字段。
 append_only: true
 
 type_definitions:
@@ -1176,6 +1176,76 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "恢复后 anchor consistency；larger indicates stronger support."
+
+  - path: "geometry_evidence.align_metrics.coarse_registration_success"
+    layer: "diagnostic"
+    type: "boolean_flag"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "观测驱动 coarse registration 是否成功。"
+
+  - path: "geometry_evidence.align_metrics.coarse_registration_support_count"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "进入 coarse registration 支撑的观测对应数量。"
+
+  - path: "geometry_evidence.align_metrics.coarse_registration_confidence"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "观测驱动 coarse registration 的最佳 hypothesis confidence。"
+
+  - path: "geometry_evidence.align_metrics.recovered_sync_match_score"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "恢复域 sync 真实匹配得分；larger indicates stronger support."
+
+  - path: "geometry_evidence.align_metrics.recovered_sync_confidence"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "恢复域 sync 观测置信度。"
+
+  - path: "geometry_evidence.align_metrics.recovered_sync_support_overlap"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "恢复域 sync support overlap。"
+
+  - path: "geometry_evidence.align_metrics.recovered_sync_visibility"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "恢复域 sync 可见性统计。"
+
+  - path: "geometry_evidence.align_metrics.recovered_sync_peak_strength"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "恢复域 sync 峰值强度统计。"
+
+  - path: "geometry_evidence.align_metrics.recovered_sync_local_contrast"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "恢复域 sync 局部对比度统计。"
+
+  - path: "geometry_evidence.align_metrics.sync_parameter_agreement"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "rotation/scale 参数一致性辅助项；不得替代 recovered-domain sync revalidation。"
 
   - path: "geometry_evidence.align_metrics.observed_correspondence_count"
     layer: "diagnostic"

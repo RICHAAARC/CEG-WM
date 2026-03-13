@@ -378,77 +378,6 @@ def _resolve_default_signoff_profile_for_profile(profile: str, provided_signoff_
     return "baseline"
 
 
-def _validate_multi_protocol_compare_summary(compare_summary_path: Path) -> None:
-    """
-    功能：校验 multi protocol compare_summary 的成功闭环语义。
-
-    Validate protocol compare summary semantics instead of existence-only checks.
-
-    Args:
-        compare_summary_path: Path to compare_summary.json.
-
-    Returns:
-        None.
-
-    Raises:
-        TypeError: If input type is invalid.
-        ValueError: If summary file is missing, malformed, or contains failed protocol items.
-    """
-    if not isinstance(compare_summary_path, Path):
-        raise TypeError("compare_summary_path must be Path")
-    if not compare_summary_path.exists() or not compare_summary_path.is_file():
-        raise ValueError(f"compare summary not found: {compare_summary_path}")
-
-    compare_obj = json.loads(compare_summary_path.read_text(encoding="utf-8"))
-    if not isinstance(compare_obj, dict):
-        raise ValueError("compare summary root must be dict")
-
-    schema_version = compare_obj.get("schema_version")
-    if not isinstance(schema_version, str) or schema_version != "protocol_compare_v1":
-        raise ValueError(f"compare summary schema_version invalid: {schema_version}")
-
-    protocols_obj = compare_obj.get("protocols")
-    if not isinstance(protocols_obj, list) or len(protocols_obj) == 0:
-        raise ValueError("compare summary protocols must be non-empty list")
-
-    failed_protocols = 0
-    for protocol_item in protocols_obj:
-        if not isinstance(protocol_item, dict):
-            failed_protocols += 1
-            continue
-        status_value = protocol_item.get("status")
-        if status_value != "ok":
-            failed_protocols += 1
-
-    if failed_protocols > 0:
-        raise ValueError(
-            f"compare summary contains failed protocols: failed={failed_protocols}, total={len(protocols_obj)}"
-        )
-
-
-def _should_block_on_multi_protocol_validation_error(exc: Exception) -> bool:
-    """
-    功能：判定 multi protocol compare 校验异常是否应阻断 onefile 流程。 
-
-    Decide whether compare-summary validation error should stop onefile workflow.
-
-    Args:
-        exc: Exception raised during compare-summary validation.
-
-    Returns:
-        True when workflow must stop; False when warning-only continuation is allowed.
-    """
-    if not isinstance(exc, Exception):
-        raise TypeError("exc must be Exception")
-
-    message = str(exc)
-    # 协议状态失败属于运行期能力结果，可记录告警后继续。
-    if "compare summary contains failed protocols" in message:
-        return False
-    # 文件缺失、schema 错误、结构损坏等必须阻断。
-    return True
-
-
 def _resolve_embed_input_image_path_from_cfg(cfg_obj: dict) -> str | None:
     """
     功能：从运行期配置解析 embed 输入图路径。
@@ -1568,29 +1497,32 @@ def _prepare_stage_cfg_path(
             print(f"[onefile] WARN: Dual-branch execution failed: {type(exc).__name__}: {exc}", file=sys.stderr)
             print("[onefile] Continuing with single-branch workflow (GT generated via clone)", file=sys.stderr)
 
-    if profile == PROFILE_PAPER_FULL_CUDA and detect_record_glob and "*" not in detect_record_glob and "?" not in detect_record_glob:
+    if detect_record_glob and "*" not in detect_record_glob and "?" not in detect_record_glob:
         stage_cfg_key = "calibration" if stage_name == "calibrate" else "evaluate"
         stage_cfg_node = cfg_obj.get(stage_cfg_key)
         stage_cfg = stage_cfg_node if isinstance(stage_cfg_node, dict) else {}
         prompt_list: Sequence[str] | None = None
         prompts_file_value = stage_cfg.get("minimal_ground_truth_prompts_file")
+        pair_count = stage_cfg.get("minimal_ground_truth_pair_count")
+
         if isinstance(prompts_file_value, str) and prompts_file_value.strip():
             prompts_file_path = _resolve_prompt_file_path(prompts_file_value, cfg_path)
             prompt_list = _load_prompt_lines_from_file(prompts_file_path)
             pair_count = len(prompt_list)
-        else:
-            pair_count = stage_cfg.get("minimal_ground_truth_pair_count", 1)
-            if not isinstance(pair_count, int) or pair_count <= 0:
-                pair_count = 1
-        detect_record_glob = _prepare_detect_records_with_minimal_ground_truth(
-            run_root,
-            Path(detect_record_glob),
-            stage_name,
-            branch_neg_detect_record=branch_neg_detect_record,
-            pair_count=pair_count,
-            prompts=prompt_list,
-            dual_branch_failure_reason=dual_branch_failure_reason,
-        )
+
+        if not isinstance(pair_count, int) or pair_count <= 0:
+            pair_count = 1 if profile == PROFILE_PAPER_FULL_CUDA else 0
+
+        if pair_count > 0:
+            detect_record_glob = _prepare_detect_records_with_minimal_ground_truth(
+                run_root,
+                Path(detect_record_glob),
+                stage_name,
+                branch_neg_detect_record=branch_neg_detect_record,
+                pair_count=pair_count,
+                prompts=prompt_list,
+                dual_branch_failure_reason=dual_branch_failure_reason,
+            )
 
     if stage_name == "calibrate":
         calibration_cfg = cfg_obj.get("calibration")
@@ -2296,31 +2228,9 @@ def build_workflow_steps(
     ]
 
     if profile == PROFILE_PAPER_FULL_CUDA:
-        multi_protocol_base = run_root / "artifacts" / "multi_protocol_evaluation"
         experiment_matrix_batch_root = run_root / "outputs" / "experiment_matrix"
         steps.extend(
             [
-                WorkflowStep(
-                    name="multi_protocol_evaluation",
-                    command=[
-                        sys.executable,
-                        str(scripts_dir / "run_multi_protocol_evaluation.py"),
-                        "--base-cfg",
-                        str(cfg_path),
-                        "--protocol",
-                        str(repo_root / "configs" / "attack_protocol.yaml"),
-                        "--mode",
-                        "repro",
-                        "--run-root-base",
-                        str(multi_protocol_base),
-                        "--continue-on-fail",
-                        "--repo-root",
-                        str(repo_root),
-                    ],
-                    artifact_paths=[
-                        multi_protocol_base / "artifacts" / "protocol_compare" / "compare_summary.json",
-                    ],
-                ),
                 WorkflowStep(
                     name="experiment_matrix",
                     command=[
@@ -3366,23 +3276,6 @@ def run_onefile_workflow(
             else:
                 return return_code
 
-        if step.name == "multi_protocol_evaluation" and profile == PROFILE_PAPER_FULL_CUDA and step.artifact_paths:
-            compare_summary_path = step.artifact_paths[0]
-            try:
-                _validate_multi_protocol_compare_summary(compare_summary_path)
-            except Exception as exc:
-                if _should_block_on_multi_protocol_validation_error(exc):
-                    print(
-                        f"[onefile] multi_protocol compare summary validation failed: "
-                        f"{type(exc).__name__}: {exc}",
-                        file=sys.stderr,
-                    )
-                    return 1
-                print(
-                    f"[onefile] multi_protocol compare summary warning (continue): "
-                    f"{type(exc).__name__}: {exc}"
-                )
-
         # 在 embed 成功后构建 generation attestation statement（全 profile 执行，keys 由环境变量控制）。
         if step.name == "embed" and return_code == 0:
             try:
@@ -3393,8 +3286,8 @@ def run_onefile_workflow(
                     file=sys.stderr,
                 )
 
-        # embed 成功完成后，为非 paper 模式（paper 模式由 multi_protocol_evaluation 负责）
-        # 补充攻击覆盖生成，确保 evaluate 产物中有真实攻击分组。
+        # embed 成功完成后，为非 paper 模式补充攻击覆盖生成，
+        # 确保 evaluate 产物中有真实攻击分组；paper 模式由 experiment_matrix 提供正式覆盖。
         if step.name == "embed" and return_code == 0 and profile != PROFILE_PAPER_FULL_CUDA:
             try:
                 _run_attack_coverage_detections(repo_root, run_root, effective_cfg_path, profile)

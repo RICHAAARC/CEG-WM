@@ -13,6 +13,14 @@ import numpy as np
 from main.core import digests
 
 
+def _clamp_unit_interval(value: float) -> float:
+    if value < 0.0:
+        return 0.0
+    if value > 1.0:
+        return 1.0
+    return float(value)
+
+
 @dataclass(frozen=True)
 class SyncResult:
     """
@@ -633,6 +641,184 @@ class LatentSyncTemplate:
                 }
             )
         return template_points
+
+    def revalidate_recovered_sync(
+        self,
+        sync_observations: Dict[str, Any],
+        inverse_transform: Dict[str, Any],
+        cfg: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        功能：在恢复坐标系中复验 sync 观测。 
+
+        Revalidate sync observations in the recovered coordinate system using
+        recovered peak coordinates against the template support points.
+
+        Args:
+            sync_observations: Sync observation payload from the attacked sample.
+            inverse_transform: Inverse transform that maps observed coordinates to the recovered domain.
+            cfg: Configuration mapping.
+
+        Returns:
+            Recovered-domain sync observation summary and consistency metrics.
+        """
+        if not isinstance(sync_observations, dict):
+            raise TypeError("sync_observations must be dict")
+        if not isinstance(inverse_transform, dict):
+            raise TypeError("inverse_transform must be dict")
+        if not isinstance(cfg, dict):
+            raise TypeError("cfg must be dict")
+
+        observed_sync_peaks = sync_observations.get("observed_sync_peaks") if isinstance(sync_observations.get("observed_sync_peaks"), list) else []
+        template_support_points = sync_observations.get("template_support_points") if isinstance(sync_observations.get("template_support_points"), list) else []
+        if not observed_sync_peaks or not template_support_points:
+            return {
+                "recovered_sync_peak_strength": 0.0,
+                "recovered_sync_local_contrast": 0.0,
+                "recovered_sync_confidence": 0.0,
+                "recovered_sync_visibility": 0.0,
+                "recovered_sync_support_overlap": 0.0,
+                "recovered_sync_match_score": 0.0,
+                "recovered_sync_consistency": 0.0,
+            }
+
+        matching_radius = max(0.08, min(0.45, float(self._resolve_inverse_recovery_radius(cfg))))
+        template_points = []
+        for template_point in template_support_points:
+            reference_coord = template_point.get("reference_coord")
+            if not isinstance(reference_coord, dict):
+                continue
+            template_x = reference_coord.get("x")
+            template_y = reference_coord.get("y")
+            if not isinstance(template_x, (int, float)) or not isinstance(template_y, (int, float)):
+                continue
+            template_points.append(
+                {
+                    "coord": np.asarray([float(template_x), float(template_y)], dtype=np.float64),
+                    "visibility": bool(template_point.get("visibility", True)),
+                }
+            )
+
+        if not template_points:
+            return {
+                "recovered_sync_peak_strength": 0.0,
+                "recovered_sync_local_contrast": 0.0,
+                "recovered_sync_confidence": 0.0,
+                "recovered_sync_visibility": 0.0,
+                "recovered_sync_support_overlap": 0.0,
+                "recovered_sync_match_score": 0.0,
+                "recovered_sync_consistency": 0.0,
+            }
+
+        used_template_indices: set[int] = set()
+        match_scores: list[float] = []
+        confidence_scores: list[float] = []
+        visibility_scores: list[float] = []
+        local_contrast_scores: list[float] = []
+        peak_strength_scores: list[float] = []
+
+        for peak_payload in observed_sync_peaks:
+            if not isinstance(peak_payload, dict):
+                continue
+            normalized_coord = peak_payload.get("normalized_coord")
+            recovered_coord = self._transform_normalized_coord(normalized_coord, inverse_transform)
+            if recovered_coord is None:
+                continue
+            best_index = None
+            best_distance = None
+            for template_index, template_point in enumerate(template_points):
+                if template_index in used_template_indices:
+                    continue
+                distance = float(np.linalg.norm(recovered_coord - template_point["coord"]))
+                if best_distance is None or distance < best_distance:
+                    best_distance = distance
+                    best_index = template_index
+            if best_index is None or best_distance is None or best_distance > matching_radius:
+                continue
+
+            used_template_indices.add(best_index)
+            peak_confidence = float(peak_payload.get("confidence", 0.0))
+            peak_local_contrast = _clamp_unit_interval(float(peak_payload.get("local_contrast", 0.0)) / 4.0)
+            peak_strength = float(peak_payload.get("peak_strength", 0.0))
+            peak_strength_norm = peak_strength / (1.0 + abs(peak_strength))
+            peak_visibility = 1.0 if bool(peak_payload.get("visibility", False)) else 0.0
+            distance_score = _clamp_unit_interval(1.0 - best_distance / matching_radius)
+            match_score = _clamp_unit_interval(
+                0.45 * distance_score
+                + 0.25 * _clamp_unit_interval(peak_confidence)
+                + 0.15 * peak_local_contrast
+                + 0.15 * peak_visibility
+            )
+            match_scores.append(match_score)
+            confidence_scores.append(_clamp_unit_interval(peak_confidence))
+            visibility_scores.append(peak_visibility)
+            local_contrast_scores.append(peak_local_contrast)
+            peak_strength_scores.append(_clamp_unit_interval(peak_strength_norm))
+
+        support_overlap = float(len(used_template_indices)) / float(max(1, len(template_points)))
+        recovered_sync_match_score = float(np.mean(match_scores)) if match_scores else 0.0
+        recovered_sync_confidence = float(np.mean(confidence_scores)) if confidence_scores else 0.0
+        recovered_sync_visibility = float(np.mean(visibility_scores)) if visibility_scores else 0.0
+        recovered_sync_local_contrast = float(np.mean(local_contrast_scores)) if local_contrast_scores else 0.0
+        recovered_sync_peak_strength = float(np.mean(peak_strength_scores)) if peak_strength_scores else 0.0
+        recovered_sync_consistency = _clamp_unit_interval(
+            0.50 * recovered_sync_match_score
+            + 0.30 * recovered_sync_confidence
+            + 0.20 * support_overlap
+        )
+        return {
+            "recovered_sync_peak_strength": round(recovered_sync_peak_strength, 6),
+            "recovered_sync_local_contrast": round(recovered_sync_local_contrast, 6),
+            "recovered_sync_confidence": round(recovered_sync_confidence, 6),
+            "recovered_sync_visibility": round(recovered_sync_visibility, 6),
+            "recovered_sync_support_overlap": round(_clamp_unit_interval(support_overlap), 6),
+            "recovered_sync_match_score": round(recovered_sync_match_score, 6),
+            "recovered_sync_consistency": round(recovered_sync_consistency, 6),
+        }
+
+    def _transform_normalized_coord(self, coord_payload: Any, transform: Dict[str, Any]) -> Optional[np.ndarray]:
+        if not isinstance(coord_payload, dict):
+            return None
+        x_value = coord_payload.get("x")
+        y_value = coord_payload.get("y")
+        if not isinstance(x_value, (int, float)) or not isinstance(y_value, (int, float)):
+            return None
+
+        src_point = np.asarray([[float(x_value), float(y_value)]], dtype=np.float64)
+        model_type = str(transform.get("model_type", "similarity")).lower()
+        quantized = transform.get("transform_quantized") if isinstance(transform.get("transform_quantized"), dict) else {}
+        theta = np.deg2rad(float(quantized.get("rotation_degree_q", 0.0)))
+        scale_factor = float(quantized.get("scale_factor_q", 1.0))
+        translation_x = float(quantized.get("translation_x_q", 0.0))
+        translation_y = float(quantized.get("translation_y_q", 0.0))
+        cos_value = float(np.cos(theta))
+        sin_value = float(np.sin(theta))
+
+        if model_type == "affine":
+            transformed = np.stack(
+                [
+                    scale_factor * (cos_value * src_point[:, 0] - sin_value * src_point[:, 1]) + translation_x,
+                    scale_factor * (sin_value * src_point[:, 0] + cos_value * src_point[:, 1]) + translation_y,
+                ],
+                axis=1,
+            )
+        else:
+            transformed = np.stack(
+                [
+                    scale_factor * (cos_value * src_point[:, 0] - sin_value * src_point[:, 1]) + translation_x,
+                    scale_factor * (sin_value * src_point[:, 0] + cos_value * src_point[:, 1]) + translation_y,
+                ],
+                axis=1,
+            )
+        return transformed[0]
+
+    def _resolve_inverse_recovery_radius(self, cfg: Dict[str, Any]) -> float:
+        detect_cfg = cfg.get("detect") if isinstance(cfg.get("detect"), dict) else {}
+        geometry_cfg = detect_cfg.get("geometry") if isinstance(detect_cfg.get("geometry"), dict) else {}
+        value = geometry_cfg.get("align_inverse_max_residual", 0.18)
+        if not isinstance(value, (int, float)):
+            return 0.18 * 2.0
+        return float(value) * 2.0
 
     def compute_sync_digest(self, payload: Dict[str, Any]) -> str:
         """

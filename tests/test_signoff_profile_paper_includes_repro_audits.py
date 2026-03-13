@@ -52,10 +52,8 @@ def test_signoff_profile_paper_includes_implementable_and_repro_bundle():
         "paper profile 必须包含 audit_attack_protocol_implementable.py"
     assert "audits/audit_repro_bundle_integrity.py" in paper_audits, \
         "paper profile 必须包含 audit_repro_bundle_integrity.py"
-    assert "audits/audit_protocol_compare_outputs_schema.py" in paper_audits, \
-        "paper profile 必须包含 audit_protocol_compare_outputs_schema.py"
 
-    # 验证数量（baseline 12 + paper 2 = 14）
+    # 验证数量（baseline + paper additions）
     expected_count = len(MINIMUM_AUDIT_SCRIPTS) + len(PAPER_PROFILE_ADDITIONAL_AUDITS)
     assert len(paper_audits) == expected_count, \
         f"paper profile 必须包含 {expected_count} 个审计，实际为 {len(paper_audits)}"
@@ -98,28 +96,6 @@ def test_signoff_profile_publish_includes_matrix_schema_audit():
     publish_audits = resolve_signoff_profile("publish")
     assert MATRIX_SCHEMA_AUDIT_SCRIPT in publish_audits, \
         "publish profile 必须包含 audit_experiment_matrix_outputs_schema.py"
-
-
-def test_signoff_paper_protocol_compare_audit_enforces_run_root_and_all_ok() -> None:
-    """
-    功能：验证 paper/publish signoff 会为 protocol_compare 审计传入强绑定与全成功开关。
-
-    Verify run_freeze_signoff passes --run-root, --require-compare-summary,
-    and --require-all-ok for protocol compare audit in paper/publish profile.
-
-    Args:
-        None.
-
-    Returns:
-        None.
-    """
-    script_path = _repo_root / "scripts" / "run_freeze_signoff.py"
-    content = script_path.read_text(encoding="utf-8")
-
-    assert "elif relative_script == PROTOCOL_COMPARE_SCHEMA_AUDIT_SCRIPT" in content
-    assert "--run-root" in content
-    assert "--require-compare-summary" in content
-    assert "--require-all-ok" in content
 
 
 def test_signoff_paper_repro_bundle_audit_enforces_bound_run_root() -> None:

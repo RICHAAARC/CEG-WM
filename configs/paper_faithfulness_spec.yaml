@@ -21,6 +21,20 @@ authority:
   uniqueness: "唯一权威。本文件定义所有 paper-faithful 对齐约束。"
   modification_policy: "需代码审查 + 影响评估，禁止无审查直接修改。"
 
+profile_roles:
+  default_runtime:
+    config_path: "configs/default.yaml"
+    role: "baseline_smoke_debug"
+    rule: "default.yaml 仅承担 baseline / smoke / generic debug 运行期角色，不承担 paper formal acceptance 角色。"
+  cpu_smoke_runtime:
+    config_path: "configs/smoke_cpu.yaml"
+    role: "lightweight_closure_verification"
+    rule: "smoke_cpu 允许 synthetic pipeline 执行主链接线验证，但不得解释为论文正式结果。"
+  paper_formal_runtime:
+    config_path: "configs/paper_full_cuda.yaml"
+    role: "paper_full_formal_gpu_acceptance"
+    rule: "paper_full_cuda 是唯一正式 GPU paper profile；formal output expectation 必须基于真实 SD3.5 GPU 与正式 attestation 环境验证。"
+
 # ==============================================================
 # 目标方法族（Target Method Families）
 #   - 声明所支持的论文方法类别及其核心对齐维度。
@@ -275,6 +289,45 @@ alignment_check_rules:
           required_value: "sparse_ldpc"
     failure_action: "FAIL"
     failure_message: "方法特定参数未正确绑定"
+
+# ==============================================================
+# 几何正式链收口（Geometry Formal Closure）
+#   - 定义 geometry 正式主链的唯一语义。
+#   - 明确恢复域复验必须基于真实观测，而不是参数代理。
+# ==============================================================
+geometry_formal_closure:
+  enabled: true
+  primary_secondary_order:
+    primary: "sync"
+    secondary: "anchor"
+    rule: "必须先完成 sync primary 定位，再启用 anchor secondary 细化。"
+
+  registration_pipeline:
+    steps:
+      - "extract sync top-k peaks with peak strength, local contrast, confidence, and visibility"
+      - "extract anchor candidates and anchor match candidates with confidence and visibility"
+      - "build observed correspondences from sync and anchor observations"
+      - "estimate coarse registration from observations only"
+      - "run robust refinement with confidence-weighted correspondences"
+      - "run explicit inverse recovery"
+      - "revalidate recovered-domain sync, anchor, and template overlap consistency"
+
+  hard_constraints:
+    coarse_registration_source: "observed_correspondences_only"
+    recovered_sync_consistency_source: "recovered_domain_sync_observations"
+    forbid_parameter_proxy_for_recovered_sync: true
+    forbid_anchor_concentration_translation_proxy: true
+    forbid_proxy_grid_correspondence: true
+
+  audit_evidence_fields:
+    - "geometry_evidence.observed_correspondences"
+    - "geometry_evidence.observed_correspondence_summary"
+    - "geometry_evidence.align_metrics.coarse_registration_success"
+    - "geometry_evidence.align_metrics.coarse_registration_confidence"
+    - "geometry_evidence.align_metrics.sync_parameter_agreement"
+    - "geometry_evidence.align_metrics.recovered_sync_match_score"
+    - "geometry_evidence.align_metrics.recovered_sync_support_overlap"
+    - "geometry_evidence.align_metrics.recovered_sync_consistency"
 
 # ==============================================================
 # 审计与测试门禁要求（Audit & Test Gate Requirements）

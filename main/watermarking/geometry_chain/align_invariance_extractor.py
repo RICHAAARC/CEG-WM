@@ -12,7 +12,7 @@ import numpy as np
 
 from main.core import digests
 from main.watermarking.geometry_chain.attention_anchor_extractor import AttentionAnchorExtractor
-from main.watermarking.geometry_chain.sync.latent_sync_template import LatentSyncGeometryExtractor
+from main.watermarking.geometry_chain.sync.latent_sync_template import LatentSyncGeometryExtractor, LatentSyncTemplate
 
 
 GEO_AVAILABILITY_RULE_VERSION = "geo_availability_rule_v1"
@@ -545,6 +545,11 @@ class GeometryAligner:
 
     def __init__(self) -> None:
         self._robust_fitter = RobustSimilarityFitter()
+        self._sync_template = LatentSyncTemplate(
+            "geometry_latent_sync_sd3_v1",
+            "v1",
+            digests.canonical_sha256({"impl_id": "geometry_latent_sync_sd3_v1", "impl_version": "v1"}),
+        )
 
     def estimate_transform(self, anchor_data: Dict[str, Any], sync_data: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -568,41 +573,29 @@ class GeometryAligner:
             raise TypeError("cfg must be dict")
 
         model_type = self._resolve_align_model_type(cfg)
-        sync_metrics = sync_data.get("sync_metrics") if isinstance(sync_data.get("sync_metrics"), dict) else {}
-        anchor_metrics = anchor_data.get("stability_metrics") if isinstance(anchor_data.get("stability_metrics"), dict) else {}
-
-        rotation_bins = self._resolve_rotation_bins(cfg)
-        scale_bins = self._resolve_scale_bins(cfg)
-        rotation_bin = int(sync_metrics.get("rotation_bin", 0))
-        scale_bin = int(sync_metrics.get("scale_bin", 0))
-
-        rotation_degree = round((float(rotation_bin) / float(max(1, rotation_bins))) * 360.0, 4)
-        center_scale = float(scale_bins - 1) / 2.0
-        scale_offset = (float(scale_bin) - center_scale) / float(max(1.0, center_scale))
-        scale_factor = round(1.0 + 0.2 * scale_offset, 6)
-        anchor_concentration = float(anchor_metrics.get("top1_concentration", 0.0))
-        translation_x = round((anchor_concentration - 0.5) * 2.0, 6)
-        translation_y = round((0.5 - anchor_concentration) * 2.0, 6)
-
-        initial_transform = {
-            "status": "ok",
-            "model_type": model_type,
-            "transform_quantized": {
-                "rotation_degree_q": rotation_degree,
-                "scale_factor_q": scale_factor,
-                "translation_x_q": translation_x,
-                "translation_y_q": translation_y,
-            },
-            "support": {
-                "rotation_bin": rotation_bin,
-                "scale_bin": scale_bin,
-                "rotation_bins": rotation_bins,
-                "scale_bins": scale_bins,
-            },
-        }
-
-        correspondences = self._build_correspondences(anchor_data, sync_data, initial_transform, cfg)
+        correspondences = self._build_correspondences(anchor_data, sync_data, {}, cfg)
         correspondence_summary = self._summarize_correspondences(correspondences)
+        initial_transform = self._build_initial_transform_from_observations(anchor_data, sync_data, correspondences, cfg)
+        if initial_transform.get("status") != "ok":
+            return {
+                "status": "fail",
+                "model_type": model_type,
+                "align_success": False,
+                "fit_stability": 0.0,
+                "transform_quantized": None,
+                "support": initial_transform.get("support"),
+                "observed_correspondences": correspondences,
+                "observed_correspondence_summary": correspondence_summary,
+                "fit_diagnostics": {
+                    "iterations": 0,
+                    "residual_stats": {},
+                    "param_uncertainty": {},
+                    "inlier_ratio": 0.0,
+                    "robust_loss": self._resolve_align_robust_loss(cfg),
+                    "coarse_registration_summary": initial_transform.get("coarse_hypothesis_summary"),
+                },
+            }
+
         fit_result = self._robust_fitter.fit(initial_transform, correspondences, cfg)
         effective_inlier_ratio = self._compute_effective_inlier_ratio(fit_result.inlier_mask, correspondences)
 
@@ -622,6 +615,7 @@ class GeometryAligner:
                     "param_uncertainty": fit_result.param_uncertainty,
                     "inlier_ratio": effective_inlier_ratio,
                     "robust_loss": self._resolve_align_robust_loss(cfg),
+                    "coarse_registration_summary": initial_transform.get("coarse_hypothesis_summary"),
                 },
             }
 
@@ -646,6 +640,7 @@ class GeometryAligner:
                 "param_uncertainty": fit_result.param_uncertainty,
                 "inlier_ratio": effective_inlier_ratio,
                 "robust_loss": self._resolve_align_robust_loss(cfg),
+                "coarse_registration_summary": initial_transform.get("coarse_hypothesis_summary"),
                 "recovery_validation": recovery_validation,
             },
         }
@@ -735,6 +730,7 @@ class GeometryAligner:
         scale_bins = int(support.get("scale_bins", self._resolve_scale_bins(cfg)))
         match_count_estimate = int(max(4, round(inlier_ratio * float(max(8, rotation_bins + scale_bins)))))
         recovery_validation = fit_diagnostics.get("recovery_validation") if isinstance(fit_diagnostics.get("recovery_validation"), dict) else {}
+        coarse_registration_summary = fit_diagnostics.get("coarse_registration_summary") if isinstance(fit_diagnostics.get("coarse_registration_summary"), dict) else {}
         inverse_recovery_median = float(recovery_validation.get("inverse_recovery_median", 1.0))
         inverse_recovery_max = float(recovery_validation.get("inverse_recovery_max", 1.0))
         cycle_reprojection_median = float(recovery_validation.get("cycle_reprojection_median", 1.0))
@@ -742,6 +738,7 @@ class GeometryAligner:
         template_overlap_consistency = float(recovery_validation.get("template_overlap_consistency", 0.0))
         recovered_sync_consistency = float(recovery_validation.get("recovered_sync_consistency", 0.0))
         recovered_anchor_consistency = float(recovery_validation.get("recovered_anchor_consistency", 0.0))
+        sync_parameter_agreement = float(recovery_validation.get("sync_parameter_agreement", 0.0))
         observed_correspondence_summary = transform_result.get("observed_correspondence_summary") if isinstance(transform_result.get("observed_correspondence_summary"), dict) else {}
 
         return {
@@ -768,8 +765,18 @@ class GeometryAligner:
             "inverse_recovery_success": bool(recovery_validation.get("recovery_success", False)),
             "observed_correspondence_count": int(observed_correspondence_summary.get("count", 0)),
             "visible_correspondence_count": int(observed_correspondence_summary.get("visible_count", 0)),
+            "coarse_registration_success": bool(coarse_registration_summary.get("coarse_registration_success", False)),
+            "coarse_registration_support_count": int(coarse_registration_summary.get("coarse_support_count", 0)),
+            "coarse_registration_confidence": round(_clamp01(float(coarse_registration_summary.get("coarse_confidence", 0.0))), 6),
             "template_overlap_consistency": round(_clamp01(template_overlap_consistency), 6),
             "recovered_sync_consistency": round(_clamp01(recovered_sync_consistency), 6),
+            "recovered_sync_match_score": round(_clamp01(float(recovery_validation.get("recovered_sync_match_score", 0.0))), 6),
+            "recovered_sync_confidence": round(_clamp01(float(recovery_validation.get("recovered_sync_confidence", 0.0))), 6),
+            "recovered_sync_support_overlap": round(_clamp01(float(recovery_validation.get("recovered_sync_support_overlap", 0.0))), 6),
+            "recovered_sync_visibility": round(_clamp01(float(recovery_validation.get("recovered_sync_visibility", 0.0))), 6),
+            "recovered_sync_peak_strength": round(_clamp01(float(recovery_validation.get("recovered_sync_peak_strength", 0.0))), 6),
+            "recovered_sync_local_contrast": round(_clamp01(float(recovery_validation.get("recovered_sync_local_contrast", 0.0))), 6),
+            "sync_parameter_agreement": round(_clamp01(sync_parameter_agreement), 6),
             "recovered_anchor_consistency": round(_clamp01(recovered_anchor_consistency), 6),
         }
 
@@ -848,8 +855,34 @@ class GeometryAligner:
 
         sync_observations = sync_data.get("sync_observations") if isinstance(sync_data.get("sync_observations"), dict) else {}
         observed_sync_peaks = sync_observations.get("observed_sync_peaks") if isinstance(sync_observations.get("observed_sync_peaks"), list) else []
+        template_support_points = sync_observations.get("template_support_points") if isinstance(sync_observations.get("template_support_points"), list) else []
         sync_support = float(np.mean([float(item.get("confidence", 0.0)) for item in observed_sync_peaks])) if observed_sync_peaks else 0.0
         support_weight = 0.65 + 0.35 * _clamp01(sync_support)
+
+        sync_pair_count = min(len(observed_sync_peaks), len(template_support_points))
+        for pair_index in range(sync_pair_count):
+            observed_peak = observed_sync_peaks[pair_index]
+            template_point = template_support_points[pair_index]
+            if not isinstance(observed_peak, dict) or not isinstance(template_point, dict):
+                continue
+            reference_coord = self._coord_to_point(template_point.get("reference_coord"))
+            observed_coord = self._coord_to_point(observed_peak.get("normalized_coord"))
+            if reference_coord is None or observed_coord is None:
+                continue
+            peak_confidence = float(observed_peak.get("confidence", 0.0))
+            peak_local_contrast = _clamp01(float(observed_peak.get("local_contrast", 0.0)) / 4.0)
+            peak_visibility = bool(observed_peak.get("visibility", False))
+            correspondences.append(
+                {
+                    "src": reference_coord,
+                    "dst": observed_coord,
+                    "weight": round(_clamp01(0.55 * peak_confidence + 0.25 * peak_local_contrast + 0.20 * support_weight), 6),
+                    "visibility": peak_visibility,
+                    "inlier_prior": round(_clamp01(0.60 * peak_confidence + 0.40 * peak_local_contrast), 6),
+                    "source": "sync_peak",
+                    "source_type": "sync",
+                }
+            )
 
         for candidate in observed_anchor_candidates:
             if not isinstance(candidate, dict):
@@ -867,6 +900,7 @@ class GeometryAligner:
                     "visibility": bool(candidate.get("visibility", True)),
                     "inlier_prior": round(_clamp01(0.60 * confidence + 0.40 * support_weight), 6),
                     "source": "anchor_candidate",
+                    "source_type": "anchor",
                 }
             )
 
@@ -886,6 +920,7 @@ class GeometryAligner:
                     "visibility": bool(match_candidate.get("visibility", True)),
                     "inlier_prior": round(_clamp01(0.55 * match_score + 0.45 * support_weight), 6),
                     "source": "anchor_relation",
+                    "source_type": "anchor",
                 }
             )
 
@@ -922,7 +957,212 @@ class GeometryAligner:
             "source_histogram": source_histogram,
             "weight_mean": round(float(np.mean(weight_values)) if weight_values else 0.0, 6),
         }
-        return correspondences
+
+    def _build_initial_transform_from_observations(
+        self,
+        anchor_data: Dict[str, Any],
+        sync_data: Dict[str, Any],
+        correspondences: List[Dict[str, Any]],
+        cfg: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if not isinstance(anchor_data, dict):
+            raise TypeError("anchor_data must be dict")
+        if not isinstance(sync_data, dict):
+            raise TypeError("sync_data must be dict")
+        if not isinstance(correspondences, list):
+            raise TypeError("correspondences must be list")
+        if not isinstance(cfg, dict):
+            raise TypeError("cfg must be dict")
+
+        model_type = self._resolve_align_model_type(cfg)
+        sync_metrics = sync_data.get("sync_metrics") if isinstance(sync_data.get("sync_metrics"), dict) else {}
+        support = {
+            "rotation_bin": int(sync_metrics.get("rotation_bin", 0)),
+            "scale_bin": int(sync_metrics.get("scale_bin", 0)),
+            "rotation_bins": self._resolve_rotation_bins(cfg),
+            "scale_bins": self._resolve_scale_bins(cfg),
+        }
+        if len(correspondences) < 2:
+            return {
+                "status": "fail",
+                "model_type": model_type,
+                "support": support,
+                "coarse_hypothesis_summary": {
+                    "coarse_registration_success": False,
+                    "coarse_support_count": int(len(correspondences)),
+                    "coarse_confidence": 0.0,
+                    "reason": "observed_correspondence_count_insufficient",
+                },
+            }
+
+        sync_correspondences = [item for item in correspondences if str(item.get("source_type", "")) == "sync"]
+        anchor_correspondences = [item for item in correspondences if str(item.get("source_type", "")) == "anchor"]
+        hypotheses: List[Dict[str, Any]] = []
+        top_sync = sync_correspondences[: min(4, len(sync_correspondences))]
+        for left_index in range(len(top_sync)):
+            for right_index in range(left_index + 1, len(top_sync)):
+                sync_hypothesis = self._solve_similarity_from_seed_pairs(
+                    top_sync[left_index],
+                    top_sync[right_index],
+                    model_type,
+                )
+                if sync_hypothesis is not None:
+                    hypotheses.append(sync_hypothesis)
+
+        if len(anchor_correspondences) >= 2:
+            anchor_hypothesis = self._solve_similarity_from_subset(anchor_correspondences[: min(8, len(anchor_correspondences))], model_type)
+            if anchor_hypothesis is not None:
+                hypotheses.append(anchor_hypothesis)
+
+        full_hypothesis = self._solve_similarity_from_subset(correspondences[: min(12, len(correspondences))], model_type)
+        if full_hypothesis is not None:
+            hypotheses.append(full_hypothesis)
+
+        if not hypotheses:
+            return {
+                "status": "fail",
+                "model_type": model_type,
+                "support": support,
+                "coarse_hypothesis_summary": {
+                    "coarse_registration_success": False,
+                    "coarse_support_count": int(len(correspondences)),
+                    "coarse_confidence": 0.0,
+                    "reason": "coarse_hypothesis_unavailable",
+                },
+            }
+
+        scored_hypotheses = [
+            self._score_coarse_hypothesis(hypothesis, correspondences, sync_correspondences, anchor_correspondences, cfg)
+            for hypothesis in hypotheses
+        ]
+        scored_hypotheses.sort(key=lambda item: float(item.get("coarse_confidence", 0.0)), reverse=True)
+        best_hypothesis = scored_hypotheses[0]
+        return {
+            "status": "ok",
+            "model_type": model_type,
+            "transform_quantized": best_hypothesis.get("transform_quantized"),
+            "support": support,
+            "coarse_hypothesis_summary": {
+                "coarse_registration_success": True,
+                "coarse_support_count": int(best_hypothesis.get("coarse_support_count", 0)),
+                "coarse_confidence": round(_clamp01(float(best_hypothesis.get("coarse_confidence", 0.0))), 6),
+                "best_hypothesis_score": round(_clamp01(float(best_hypothesis.get("coarse_confidence", 0.0))), 6),
+                "candidate_count": int(len(scored_hypotheses)),
+                "selected_hypothesis_source": best_hypothesis.get("hypothesis_source"),
+            },
+        }
+
+    def _solve_similarity_from_seed_pairs(
+        self,
+        left_item: Dict[str, Any],
+        right_item: Dict[str, Any],
+        model_type: str,
+    ) -> Optional[Dict[str, Any]]:
+        left_src = self._point_array(left_item.get("src"))
+        left_dst = self._point_array(left_item.get("dst"))
+        right_src = self._point_array(right_item.get("src"))
+        right_dst = self._point_array(right_item.get("dst"))
+        if left_src is None or left_dst is None or right_src is None or right_dst is None:
+            return None
+        src_delta = right_src - left_src
+        dst_delta = right_dst - left_dst
+        src_norm = float(np.linalg.norm(src_delta))
+        dst_norm = float(np.linalg.norm(dst_delta))
+        if src_norm <= 1e-8 or dst_norm <= 1e-8:
+            return None
+        scale_factor = dst_norm / src_norm
+        rotation_degree = float(
+            np.rad2deg(
+                np.arctan2(dst_delta[1], dst_delta[0]) - np.arctan2(src_delta[1], src_delta[0])
+            )
+        )
+        theta = np.deg2rad(rotation_degree)
+        cos_value = float(np.cos(theta))
+        sin_value = float(np.sin(theta))
+        transformed_left = np.asarray(
+            [
+                scale_factor * (cos_value * left_src[0] - sin_value * left_src[1]),
+                scale_factor * (sin_value * left_src[0] + cos_value * left_src[1]),
+            ],
+            dtype=np.float64,
+        )
+        translation = left_dst - transformed_left
+        return {
+            "model_type": model_type,
+            "transform_quantized": {
+                "rotation_degree_q": round(rotation_degree, 4),
+                "scale_factor_q": round(scale_factor, 6),
+                "translation_x_q": round(float(translation[0]), 6),
+                "translation_y_q": round(float(translation[1]), 6),
+            },
+            "hypothesis_source": "sync_pair",
+        }
+
+    def _solve_similarity_from_subset(
+        self,
+        subset: List[Dict[str, Any]],
+        model_type: str,
+    ) -> Optional[Dict[str, Any]]:
+        src_points, dst_points, weights = self._robust_fitter._build_point_arrays(subset)
+        min_points = 3 if model_type == "similarity" else 4
+        if src_points.shape[0] < min_points:
+            return None
+        solved = self._robust_fitter._solve_weighted_model(src_points, dst_points, weights, model_type)
+        if solved is None:
+            return None
+        return {
+            "model_type": model_type,
+            "transform_quantized": self._params_to_quantized_transform(model_type, [float(value) for value in solved.tolist()]),
+            "hypothesis_source": "observed_subset",
+        }
+
+    def _score_coarse_hypothesis(
+        self,
+        hypothesis: Dict[str, Any],
+        correspondences: List[Dict[str, Any]],
+        sync_correspondences: List[Dict[str, Any]],
+        anchor_correspondences: List[Dict[str, Any]],
+        cfg: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        src_points, dst_points, weights = self._robust_fitter._build_point_arrays(correspondences)
+        if src_points.shape[0] == 0:
+            scored = dict(hypothesis)
+            scored["coarse_confidence"] = 0.0
+            scored["coarse_support_count"] = 0
+            return scored
+
+        predicted = self._apply_transform(src_points, hypothesis)
+        residuals = np.linalg.norm(predicted - dst_points, axis=1)
+        inlier_threshold = max(0.05, min(0.5, self._robust_fitter._resolve_align_inlier_threshold(cfg) * 1.5))
+        residual_scores = np.maximum(0.0, 1.0 - residuals / inlier_threshold)
+        weighted_fit = float(np.average(residual_scores, weights=weights)) if weights.size > 0 else 0.0
+
+        sync_support_count = 0
+        anchor_support_count = 0
+        for item, residual in zip(correspondences, residuals.tolist()):
+            if float(residual) > inlier_threshold:
+                continue
+            source_type = str(item.get("source_type", ""))
+            if source_type == "sync":
+                sync_support_count += 1
+            elif source_type == "anchor":
+                anchor_support_count += 1
+
+        sync_support_ratio = float(sync_support_count) / float(max(1, len(sync_correspondences))) if sync_correspondences else 0.0
+        anchor_support_ratio = float(anchor_support_count) / float(max(1, len(anchor_correspondences))) if anchor_correspondences else 0.0
+        coarse_confidence = _clamp01(0.50 * weighted_fit + 0.30 * sync_support_ratio + 0.20 * anchor_support_ratio)
+        scored = dict(hypothesis)
+        scored["coarse_confidence"] = coarse_confidence
+        scored["coarse_support_count"] = int(sync_support_count + anchor_support_count)
+        return scored
+
+    def _point_array(self, point_payload: Any) -> Optional[np.ndarray]:
+        if not isinstance(point_payload, (list, tuple)) or len(point_payload) != 2:
+            return None
+        x_value, y_value = point_payload
+        if not isinstance(x_value, (int, float)) or not isinstance(y_value, (int, float)):
+            return None
+        return np.asarray([float(x_value), float(y_value)], dtype=np.float64)
 
     def _apply_transform(self, src_points: np.ndarray, transform: Dict[str, Any]) -> np.ndarray:
         model_type = str(transform.get("model_type", "similarity")).lower()
@@ -1039,9 +1279,13 @@ class GeometryAligner:
         expected_scale = round(1.0 + 0.2 * scale_offset, 6)
         rotation_error = abs(((fitted_rotation - expected_rotation + 180.0) % 360.0) - 180.0) / 45.0
         scale_error = abs(fitted_scale - expected_scale) / max(0.25, expected_scale)
-        sync_match_confidence = float(sync_metrics.get("match_confidence", 0.0))
-        recovered_sync_consistency = _clamp01(1.0 - 0.55 * min(1.0, rotation_error) - 0.45 * min(1.0, scale_error))
-        recovered_sync_consistency = _clamp01(0.7 * recovered_sync_consistency + 0.3 * sync_match_confidence)
+        sync_parameter_agreement = _clamp01(1.0 - 0.55 * min(1.0, rotation_error) - 0.45 * min(1.0, scale_error))
+        recovered_sync_validation = self._sync_template.revalidate_recovered_sync(
+            sync_data.get("sync_observations") if isinstance(sync_data.get("sync_observations"), dict) else {},
+            inverse_transform,
+            cfg,
+        )
+        recovered_sync_consistency = float(recovered_sync_validation.get("recovered_sync_consistency", 0.0))
 
         recovered_anchor_consistency = _clamp01(anchor_consistency)
         recovery_success = bool(
@@ -1061,6 +1305,13 @@ class GeometryAligner:
             "cycle_reprojection_max": float(np.max(cycle_residuals)),
             "template_overlap_consistency": float(template_overlap_consistency),
             "recovered_sync_consistency": float(recovered_sync_consistency),
+            "recovered_sync_match_score": float(recovered_sync_validation.get("recovered_sync_match_score", 0.0)),
+            "recovered_sync_confidence": float(recovered_sync_validation.get("recovered_sync_confidence", 0.0)),
+            "recovered_sync_support_overlap": float(recovered_sync_validation.get("recovered_sync_support_overlap", 0.0)),
+            "recovered_sync_visibility": float(recovered_sync_validation.get("recovered_sync_visibility", 0.0)),
+            "recovered_sync_peak_strength": float(recovered_sync_validation.get("recovered_sync_peak_strength", 0.0)),
+            "recovered_sync_local_contrast": float(recovered_sync_validation.get("recovered_sync_local_contrast", 0.0)),
+            "sync_parameter_agreement": float(sync_parameter_agreement),
             "recovered_anchor_consistency": float(recovered_anchor_consistency),
         }
 

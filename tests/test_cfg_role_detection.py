@@ -10,7 +10,6 @@ Verifies that spec configs cannot be passed to paper_full_cuda profile.
 import pytest
 import tempfile
 from pathlib import Path
-from typing import Dict, Any
 import yaml
 
 # 添加 scripts 目录到路径以导入 run_onefile_workflow 函数
@@ -171,6 +170,41 @@ class TestCfgRoleValidation:
         finally:
             if cfg_path.exists():
                 cfg_path.unlink()
+
+
+def test_actual_runtime_configs_are_detected_as_runtime() -> None:
+    """测试实际运行期配置文件被识别为 runtime。"""
+    repo_root = Path(__file__).resolve().parent.parent
+    runtime_cfg_paths = [
+        repo_root / "configs" / "default.yaml",
+        repo_root / "configs" / "smoke_cpu.yaml",
+        repo_root / "configs" / "paper_full_cuda.yaml",
+    ]
+
+    for cfg_path in runtime_cfg_paths:
+        cfg_obj = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+        assert isinstance(cfg_obj, dict)
+        assert _detect_cfg_role(cfg_obj) == CFG_ROLE_RUNTIME
+
+
+def test_actual_spec_config_is_detected_as_spec() -> None:
+    """测试实际 paper faithfulness spec 被识别为 spec。"""
+    repo_root = Path(__file__).resolve().parent.parent
+    spec_cfg_path = repo_root / "configs" / "paper_faithfulness_spec.yaml"
+    spec_cfg_obj = yaml.safe_load(spec_cfg_path.read_text(encoding="utf-8"))
+
+    assert isinstance(spec_cfg_obj, dict)
+    assert _detect_cfg_role(spec_cfg_obj) == CFG_ROLE_SPEC
+
+
+def test_smoke_cpu_profile_accepts_actual_smoke_runtime_config() -> None:
+    """测试 cpu_smoke profile 接受真实 smoke_cpu 运行期配置。"""
+    repo_root = Path(__file__).resolve().parent.parent
+    cfg_path = repo_root / "configs" / "smoke_cpu.yaml"
+    cfg_obj = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+
+    assert isinstance(cfg_obj, dict)
+    _validate_cfg_role_for_profile(cfg_obj, cfg_path, PROFILE_CPU_SMOKE)
 
 
 if __name__ == "__main__":

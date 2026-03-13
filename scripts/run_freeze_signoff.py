@@ -40,7 +40,6 @@ from main.core.records_io import write_artifact_json_unbound, write_artifact_byt
 
 SIGNOFF_REPORT_SCHEMA_VERSION = "v1"
 MATRIX_SCHEMA_AUDIT_SCRIPT = "audits/audit_experiment_matrix_outputs_schema.py"
-PROTOCOL_COMPARE_SCHEMA_AUDIT_SCRIPT = "audits/audit_protocol_compare_outputs_schema.py"
 ATTACK_PROTOCOL_REPORT_COVERAGE_AUDIT_SCRIPT = "audits/audit_attack_protocol_report_coverage.py"
 
 # Baseline 最小审计集合（历史兼容，13 个审计）
@@ -55,6 +54,7 @@ MINIMUM_AUDIT_SCRIPTS = [
     "audits/audit_network_access_scan.py",
     "audits/audit_no_empty_py_modules.py",              # 发布收口：禁止非初始化空文件（signoff BLOCK）
     "audits/audit_evaluation_report_schema.py",         # 报告锚点字段完整性（signoff BLOCK）
+    "audits/audit_records_fields_append_only.py",       # append-only 字段注册一致性（signoff BLOCK）
     "audits/audit_thresholds_readonly_enforcement.py",  # thresholds 只读保护（signoff BLOCK）
     "audits/audit_attack_protocol_hardcoding.py",       # attack protocol 事实源强制（signoff BLOCK）
     "audits/audit_runtime_impl_smoke_new_saliency_and_subspace.py",  # 新 impl runtime smoke（signoff NON_BLOCK）
@@ -66,7 +66,6 @@ PAPER_PROFILE_ADDITIONAL_AUDITS = [
     "audits/audit_attack_protocol_report_coverage.py",     # 协议—报告覆盖率对齐（paper/publish BLOCK）
     "audits/audit_repro_bundle_integrity.py",              # repro bundle 完整性校验（paper/publish BLOCK）
     MATRIX_SCHEMA_AUDIT_SCRIPT,                             # experiment matrix 汇总工件 schema 门禁（paper/publish BLOCK）
-    PROTOCOL_COMPARE_SCHEMA_AUDIT_SCRIPT,                   # protocol compare 汇总工件 schema 门禁（paper/publish BLOCK）
 ]
 
 
@@ -803,16 +802,6 @@ def main() -> None:
                 "--run-root",
                 str(run_root),
             ]
-        elif relative_script == PROTOCOL_COMPARE_SCHEMA_AUDIT_SCRIPT:
-            extra_args = [
-                "--run-root",
-                str(run_root),
-            ]
-            if args.signoff_profile.lower().strip() in {"paper", "publish"}:
-                extra_args.append("--require-compare-summary")
-            if args.signoff_profile.lower().strip() in {"paper", "publish"}:
-                # paper 与 publish 均要求所有主协议通过，否则阻断 signoff。
-                extra_args.append("--require-all-ok")
         elif relative_script == "audits/audit_repro_bundle_integrity.py":
             extra_args = [
                 str(run_root),

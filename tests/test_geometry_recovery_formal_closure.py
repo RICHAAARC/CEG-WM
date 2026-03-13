@@ -57,8 +57,13 @@ def test_geometry_recovery_fields_are_registered_in_formal_contracts() -> None:
         "geometry_evidence.sync_observations",
         "geometry_evidence.observed_correspondences",
         "geometry_evidence.observed_correspondence_summary",
+        "geometry_evidence.align_metrics.coarse_registration_success",
+        "geometry_evidence.align_metrics.coarse_registration_confidence",
         "geometry_evidence.align_metrics.template_overlap_consistency",
         "geometry_evidence.align_metrics.recovered_sync_consistency",
+        "geometry_evidence.align_metrics.recovered_sync_match_score",
+        "geometry_evidence.align_metrics.recovered_sync_support_overlap",
+        "geometry_evidence.align_metrics.sync_parameter_agreement",
         "geometry_evidence.align_metrics.recovered_anchor_consistency",
     ]
 
@@ -66,7 +71,11 @@ def test_geometry_recovery_fields_are_registered_in_formal_contracts() -> None:
         assert field_name in extensions_text
         assert field_name in contracts_text
 
+    assert "geometry_formal_closure" in spec_text
+    assert "forbid_parameter_proxy_for_recovered_sync: true" in spec_text
+    assert "observation-driven coarse registration" in Path("configs/paper_full_cuda.yaml").read_text(encoding="utf-8")
     assert "geometry_evidence.observed_correspondence_summary" in semantics_text
     assert "geometry_evidence.align_metrics.recovered_sync_consistency" in semantics_text
+    assert "geometry_evidence.align_metrics.sync_parameter_agreement" in semantics_text
     assert "无需 BP 迭代" not in spec_text
     assert "sparse LDPC BP decode" in spec_text

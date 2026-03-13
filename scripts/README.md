@@ -7,13 +7,14 @@
 ```
 scripts/
 ├── run_onefile_workflow.py                             # 一键全链路（embed/detect/calibrate/evaluate/audits/signoff）
-├── run_cpu_first_e2e_verification.py                   # CPU-first 端到端闭环验证
+├── run_cpu_first_e2e_verification.py                   # CPU smoke 闭环验收
+├── run_paper_full_workflow_verification.py             # paper_full CUDA 正式验收
 ├── run_all_audits.py                                    # 审计聚合器（主入口）
 ├── run_freeze_signoff.py                                # 冻结签署工具（baseline/paper/publish profile）
-├── run_multi_protocol_evaluation.py                     # 多协议评测编排
 ├── run_experiment_matrix.py                             # 试验矩阵聚合器
 ├── run_publish_workflow.py                              # publish 工作流编排
 ├── run_repro_pipeline.py                                # 复现实验流水线
+├── workflow_acceptance_common.py                        # workflow 验收摘要共用工具
 └── audits/
   ├── audit_write_bypass_scan.py                         # records.write_path_is_unbypassable（legacy_code=B1/B5）
   ├── audit_yaml_loader_uniqueness.py                    # config.yaml_loader_is_safe_and_unique（legacy_code=A6）
@@ -23,6 +24,7 @@ scripts/
   ├── audit_dangerous_exec_and_pickle_scan.py            # runtime.dangerous_execution_and_deserialization_blocked（legacy_code=D9）
   ├── audit_network_access_scan.py                       # runtime.network_access_is_audited_or_blocked（legacy_code=D10）
   ├── audit_evaluation_report_schema.py                  # evaluation_report 锚点字段完整性（signoff BLOCK）
+  ├── audit_records_fields_append_only.py                # append-only 字段注册一致性（signoff BLOCK）
   ├── audit_attack_protocol_implementable.py             # attack protocol 协议—实现一致性（paper/publish BLOCK）
   ├── audit_attack_protocol_report_coverage.py           # attack protocol 声明与报告覆盖率对齐（paper/publish BLOCK）
   ├── audit_experiment_matrix_outputs_schema.py          # experiment matrix 工件 schema（paper/publish BLOCK）
@@ -35,6 +37,20 @@ tests/
 ```
 
 ## 使用方法
+
+### 验收入口
+
+CPU smoke 闭环验收：
+
+```powershell
+python scripts/run_cpu_first_e2e_verification.py --config configs/smoke_cpu.yaml
+```
+
+paper_full CUDA 正式验收：
+
+```powershell
+python scripts/run_paper_full_workflow_verification.py --config configs/paper_full_cuda.yaml
+```
 
 ### 0. 一键评测复现与审计流程（稳定锚点）
 

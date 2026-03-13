@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-文件目的：CPU smoke 闭环验收脚本。
+文件目的：paper_full GPU 正式验收脚本。
 Module type: General module
 
 职责边界：
-1. 复用 onefile formal wiring，执行轻量 profile 的 embed → detect → calibrate → evaluate → audits → signoff。
-2. 默认使用 synthetic pipeline smoke 配置，不依赖真实 SD3.5 权重。
-3. 输出脚本级结构化摘要，不改写正式 records schema。
+1. 复用 onefile 正式主链，执行 paper_full_cuda profile 的 formal 验收。
+2. 在执行前检查 GPU 工具与 attestation 环境变量，区分环境阻断与代码问题。
+3. 输出脚本级结构化摘要，不引入平行正式 workflow。
 """
 
 from __future__ import annotations
@@ -22,12 +22,16 @@ _repo_root = _scripts_dir.parent
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
-from scripts.run_onefile_workflow import PROFILE_CPU_SMOKE, run_onefile_workflow
-from scripts.workflow_acceptance_common import build_cpu_smoke_summary, write_workflow_summary
+from scripts.run_onefile_workflow import PROFILE_PAPER_FULL_CUDA, run_onefile_workflow
+from scripts.workflow_acceptance_common import (
+    build_formal_gpu_summary,
+    detect_formal_gpu_preflight,
+    write_workflow_summary,
+)
 
 
-DEFAULT_CONFIG_PATH = Path("configs/smoke_cpu.yaml")
-DEFAULT_RUN_ROOT = Path("outputs/onefile_cpu_smoke_verify")
+DEFAULT_CONFIG_PATH = Path("configs/paper_full_cuda.yaml")
+DEFAULT_RUN_ROOT = Path("outputs/onefile_paper_full_cuda_verify")
 
 
 def _resolve_repo_path(path_value: str) -> Path:
@@ -42,7 +46,7 @@ def _resolve_repo_path(path_value: str) -> Path:
     Returns:
         Resolved absolute path.
     """
-    if not path_value.strip():
+    if not isinstance(path_value, str) or not path_value.strip():
         raise TypeError("path_value must be non-empty str")
     candidate = Path(path_value.strip())
     if candidate.is_absolute():
@@ -50,35 +54,52 @@ def _resolve_repo_path(path_value: str) -> Path:
     return (_repo_root / candidate).resolve()
 
 
-def run_cpu_smoke_verification(
+def run_paper_full_workflow_verification(
     run_root: Path,
     config_path: Path,
     dry_run: bool = False,
 ) -> Dict[str, Any]:
     """
-    功能：执行 CPU smoke 闭环验收。
+    功能：执行 paper_full GPU 正式验收。
 
-    Run CPU-first smoke verification using onefile workflow wiring.
+    Run formal paper_full workflow verification.
 
     Args:
         run_root: Target workflow run root.
-        config_path: Smoke runtime config path.
+        config_path: Formal runtime config path.
         dry_run: Whether to skip subprocess execution.
 
     Returns:
         Mapping with workflow exit code, summary, and summary path.
     """
-    workflow_exit_code = run_onefile_workflow(
-        repo_root=_repo_root,
-        cfg_path=config_path,
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(config_path, Path):
+        raise TypeError("config_path must be Path")
+    if not isinstance(dry_run, bool):
+        raise TypeError("dry_run must be bool")
+
+    preflight = detect_formal_gpu_preflight(config_path)
+    workflow_exit_code = 2
+    if bool(preflight.get("ok", False)):
+        workflow_exit_code = run_onefile_workflow(
+            repo_root=_repo_root,
+            cfg_path=config_path,
+            run_root=run_root,
+            profile=PROFILE_PAPER_FULL_CUDA,
+            signoff_profile="paper",
+            dry_run=dry_run,
+        )
+    elif bool(dry_run):
+        workflow_exit_code = 0
+
+    summary = build_formal_gpu_summary(
         run_root=run_root,
-        profile=PROFILE_CPU_SMOKE,
-        signoff_profile="baseline",
-        dry_run=dry_run,
-        device_override="cpu",
+        cfg_path=config_path,
+        workflow_exit_code=workflow_exit_code,
+        preflight=preflight,
     )
-    summary = build_cpu_smoke_summary(run_root, config_path, workflow_exit_code)
-    summary_path = write_workflow_summary(run_root, "cpu_smoke_summary.json", summary)
+    summary_path = write_workflow_summary(run_root, "paper_full_formal_summary.json", summary)
     return {
         "workflow_exit_code": workflow_exit_code,
         "summary": summary,
@@ -90,7 +111,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     """
     功能：构建命令行参数解析器。
 
-    Build CLI parser for CPU smoke verification.
+    Build CLI parser for paper_full formal verification.
 
     Args:
         None.
@@ -99,17 +120,17 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         Configured argument parser.
     """
     parser = argparse.ArgumentParser(
-        description="Run CPU smoke closure verification using onefile workflow wiring."
+        description="Run formal paper_full CUDA workflow verification."
     )
     parser.add_argument(
         "--config",
         default=str(DEFAULT_CONFIG_PATH.as_posix()),
-        help="Smoke runtime config path (default: configs/smoke_cpu.yaml)",
+        help="Formal runtime config path (default: configs/paper_full_cuda.yaml)",
     )
     parser.add_argument(
         "--run-root",
         default=str(DEFAULT_RUN_ROOT.as_posix()),
-        help="Workflow run_root for smoke verification (default: outputs/onefile_cpu_smoke_verify)",
+        help="Workflow run_root for formal verification (default: outputs/onefile_paper_full_cuda_verify)",
     )
     parser.add_argument(
         "--dry-run",
@@ -123,7 +144,7 @@ def main() -> int:
     """
     功能：CLI 主入口。
 
-    Execute CPU smoke verification and emit structured summary.
+    Execute paper_full formal verification and emit structured summary.
 
     Args:
         None.
@@ -137,7 +158,7 @@ def main() -> int:
     config_path = _resolve_repo_path(args.config)
     run_root = _resolve_repo_path(args.run_root)
 
-    result = run_cpu_smoke_verification(
+    result = run_paper_full_workflow_verification(
         run_root=run_root,
         config_path=config_path,
         dry_run=bool(args.dry_run),
@@ -145,10 +166,12 @@ def main() -> int:
     summary = result["summary"]
 
     print(json.dumps(summary, indent=2, ensure_ascii=False))
-    print(f"[cpu-smoke] summary_path={result['summary_path']}")
+    print(f"[paper-full] summary_path={result['summary_path']}")
 
-    if bool(summary.get("smoke_verdict", False)):
+    if bool(summary.get("formal_output_expectation_ok", False)):
         return 0
+    if bool(summary.get("environment_blocked", False)):
+        return 2
     if bool(args.dry_run) and int(result["workflow_exit_code"]) == 0:
         return 0
     return 1

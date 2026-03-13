@@ -31,6 +31,7 @@ AUDIT_SCRIPTS = [
     "audits/audit_paper_faithfulness_runtime_must_have.py",  # 运行期必达证据审计
     "audits/audit_no_empty_py_modules.py",                   # 发布收口：禁止非初始化空文件
     "audits/audit_evaluation_report_schema.py",              # 证报告锚点字段完整性
+    "audits/audit_records_fields_append_only.py",            # append-only 字段注册一致性
     "audits/audit_thresholds_readonly_enforcement.py",       # thresholds 只读保护
     "audits/audit_attack_protocol_hardcoding.py",            # attack protocol 事实源强制
     "audits/audit_attack_protocol_implementable.py",         # attack protocol 协议—实现一致性门禁
@@ -38,12 +39,10 @@ AUDIT_SCRIPTS = [
     "audits/audit_runtime_impl_smoke_new_saliency_and_subspace.py",  # 新 impl runtime smoke 收口
     "audits/audit_repro_bundle_integrity.py",               # repro bundle 完整性校验
     "audits/audit_experiment_matrix_outputs_schema.py",      # experiment matrix 汇总工件 schema 完整性
-    "audits/audit_protocol_compare_outputs_schema.py",      # protocol compare 汇总工件 schema 与一致性（research-only）
 ]
 
 
 _RUN_ROOT_OPTIONAL_AUDITS = {
-    "audit_protocol_compare_outputs_schema.py",
     "audit_attack_protocol_report_coverage.py",
     "audit_experiment_matrix_outputs_schema.py",
 }
@@ -54,12 +53,6 @@ _RUN_ROOT_POSITIONAL_AUDITS = {
 
 
 _RUN_ROOT_SENSITIVE_AUDIT_NA_RESULTS: Dict[str, Dict[str, str]] = {
-    "audit_protocol_compare_outputs_schema.py": {
-        "audit_id": "audit_protocol_compare_outputs_schema",
-        "gate_name": "gate.protocol_compare_outputs_schema",
-        "severity": "NON_BLOCK",
-        "rule": "run_root-sensitive audit requires bound run_root to avoid historical outputs pollution",
-    },
     "audit_attack_protocol_report_coverage.py": {
         "audit_id": "audit.attack_protocol_report_coverage",
         "gate_name": "gate.attack_protocol_report_coverage",

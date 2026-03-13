@@ -76,8 +76,9 @@ detect:
       - "transformer_blocks.5.attn"
       - "transformer_blocks.6.attn"
       - "transformer_blocks.7.attn"
-    # 显式声明几何证据层级：latent sync 为主几何实现（低阶几何反演），
-    # attention anchor 仅作辅锚点（主同步成功后参与一致性评估）。
+    # 显式声明几何正式链：sync primary -> anchor secondary ->
+    # observation-driven coarse registration -> robust refinement -> inverse recovery ->
+    # recovered-domain sync/anchor/overlap revalidation。
     sync_primary_anchor_secondary: true
     align_inverse_max_residual: 0.18
     align_max_correspondence_count: 24

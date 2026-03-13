@@ -37,6 +37,12 @@ def _base_cfg() -> Dict[str, Any]:
                 "enable_latent_sync": True,
                 "enable_align_invariance": True,
                 "align_min_inlier_ratio": 0.2,
+                "align_available_max_residual_mad": 1.0,
+                "align_available_max_param_variance": 1.0,
+                "align_inverse_max_residual": 1.0,
+                "align_template_overlap_min": 0.0,
+                "align_recovered_sync_consistency_min": 0.0,
+                "align_recovered_anchor_consistency_min": 0.0,
                 "align_attention_consistency_min_stability": 0.2,
             }
         },

@@ -239,8 +239,8 @@ def test_onefile_workflow_paper_full_profile_generates_real_sd3_config(tmp_path:
     assert "enable_trace_tap=true" in embed_command_text
     assert "force_cpu=\"cpu\"" not in embed_command_text
     step_names = [item.name for item in steps]
-    assert "multi_protocol_evaluation" in step_names
     assert "experiment_matrix" in step_names
+    assert "multi_protocol_evaluation" not in step_names
     assert "assert_paper_mechanisms" not in step_names
 
 
@@ -481,64 +481,3 @@ def test_build_stage_overrides_sets_embed_detect_content_switch() -> None:
     assert "enable_content_detect=true" in detect_overrides
 
 
-def test_validate_multi_protocol_compare_summary_rejects_failed_protocol(tmp_path: Path) -> None:
-    """
-    功能：验证 compare summary 含失败协议时触发阻断。
-
-    Validate compare summary validation fails when protocol status is not ok.
-
-    Args:
-        tmp_path: Temporary path fixture.
-
-    Returns:
-        None.
-    """
-    repo_root = Path(__file__).resolve().parent.parent
-    module = _load_onefile_module(repo_root)
-
-    compare_summary_path = tmp_path / "compare_summary.json"
-    compare_summary_path.write_text(
-        json.dumps(
-            {
-                "schema_version": "protocol_compare_v1",
-                "protocols": [{"status": "ok"}, {"status": "fail"}],
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ValueError, match="failed protocols"):
-        module._validate_multi_protocol_compare_summary(compare_summary_path)
-
-
-def test_validate_multi_protocol_compare_summary_accepts_all_ok(tmp_path: Path) -> None:
-    """
-    功能：验证 compare summary 全部成功时通过校验。
-
-    Validate compare summary validation passes when all protocols are ok.
-
-    Args:
-        tmp_path: Temporary path fixture.
-
-    Returns:
-        None.
-    """
-    repo_root = Path(__file__).resolve().parent.parent
-    module = _load_onefile_module(repo_root)
-
-    compare_summary_path = tmp_path / "compare_summary.json"
-    compare_summary_path.write_text(
-        json.dumps(
-            {
-                "schema_version": "protocol_compare_v1",
-                "protocols": [{"status": "ok"}],
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-
-    module._validate_multi_protocol_compare_summary(compare_summary_path)

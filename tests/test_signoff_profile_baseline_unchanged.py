@@ -51,9 +51,9 @@ def test_signoff_profile_baseline_unchanged():
         assert audit in baseline_audits, \
             f"baseline profile 必须包含核心审计 '{audit}'，实际缺失"
 
-    # 验证数量（历史为 13 个）
-    assert len(baseline_audits) == 13, \
-        f"baseline profile 必须包含 13 个审计，实际为 {len(baseline_audits)}"
+    # 验证数量（当前最小集合为 14 个）
+    assert len(baseline_audits) == 14, \
+        f"baseline profile 必须包含 14 个审计，实际为 {len(baseline_audits)}"
 
 
 def test_signoff_profile_baseline_audits_unchanged():

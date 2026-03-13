@@ -9,10 +9,10 @@ target_fpr: 0.01
 allow_nonempty_run_root: false
 allow_nonempty_run_root_reason: null
 
-# ==============================================================
-# 设备配置（CPU 优先闭环验证）
-# ==============================================================
-device: "cpu"  # 禁忌/强制 CPU（可通过 CLI override --override force_cpu 覆盖）
+# ============================================================== 
+# 设备配置（baseline / smoke / generic debug profile）
+# ============================================================== 
+device: "cpu"  # baseline 默认设备；正式 paper GPU 验收请使用 paper_full_cuda.yaml
 
 # ==============================================================
 # SD3 模型配置
@@ -21,7 +21,7 @@ model_id: "stabilityai/stable-diffusion-3.5-medium"
 hf_revision: "main"
 
 # ==============================================================
-# 推理配置（真实闭合验证）
+# 推理配置（baseline / smoke debug）
 # ==============================================================
 inference_enabled: true
 inference_prompt: "a serene landscape with mountains and a lake"
@@ -47,10 +47,10 @@ trajectory_tap:
   stats_precision_digits: 6
 
 # ==============================================================
-# Paper Faithfulness 配置（必达对齐验证）
+# Paper Faithfulness 配置（baseline 默认值，非正式 paper 角色）
 # ==============================================================
 paper_faithfulness:
-  enabled: true  # 启用论文对齐验证
+  enabled: true  # baseline 默认开启；正式 paper 验收以 paper_full_cuda.yaml 为准
   alignment_check: true
   
   # 检查：Pipeline fingerprint（离散结构指纹）
@@ -78,7 +78,7 @@ watermark:
     message_length: 64
 
   hf:
-    enabled: false  # HF 通道可选（初期禁用）
+    enabled: false  # baseline 默认关闭；smoke / formal profile 可显式启用
     tail_truncation_ratio: 0.1
     tail_truncation_mode: "projection_tail_truncation"
     tau: 2.0
@@ -90,7 +90,7 @@ detect:
   content:
     enabled: false  # Embed 模式（检测在 detect 侧启用）
   geometry:
-    enabled: false
+    enabled: false  # baseline 默认关闭；smoke / formal profile 可显式启用
 
 # ==============================================================
 # 内容链配置
