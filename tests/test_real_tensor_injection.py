@@ -13,7 +13,14 @@ Module type: Test module
 import sys
 import pytest
 import numpy as np
+import torch
 from typing import Dict, Any, Optional
+
+
+def _stable_qr_basis(matrix: np.ndarray) -> np.ndarray:
+    tensor = torch.as_tensor(np.asarray(matrix, dtype=np.float64), dtype=torch.float64)
+    q_tensor, _ = torch.linalg.qr(tensor, mode="reduced")
+    return q_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
 
 
 def test_lf_projection_and_encoding():
@@ -30,7 +37,7 @@ def test_lf_projection_and_encoding():
     lf_rank = 8
     projection_matrix = np.random.randn(latent_dim, lf_rank).astype(np.float32)
     # 正交化。
-    projection_matrix, _ = np.linalg.qr(projection_matrix)
+    projection_matrix = _stable_qr_basis(projection_matrix)
     
     basis = {"projection_matrix": projection_matrix}
     cfg = {"lf_enabled": True, "lf_strength": 1.5}
@@ -74,7 +81,7 @@ def test_hf_projection_and_constraint():
     
     hf_rank = 8
     projection_matrix = np.random.randn(latent_dim, hf_rank).astype(np.float32)
-    projection_matrix, _ = np.linalg.qr(projection_matrix)
+    projection_matrix = _stable_qr_basis(projection_matrix)
     
     basis = {"hf_projection_matrix": projection_matrix}
     cfg = {"hf_enabled": True, "hf_threshold_percentile": 75.0}
@@ -125,10 +132,10 @@ def test_latent_modifier():
     hf_rank = 8
     
     lf_basis_matrix = np.random.randn(latent_dim, lf_rank).astype(np.float32)
-    lf_basis_matrix, _ = np.linalg.qr(lf_basis_matrix)
+    lf_basis_matrix = _stable_qr_basis(lf_basis_matrix)
     
     hf_basis_matrix = np.random.randn(latent_dim, hf_rank).astype(np.float32)
-    hf_basis_matrix, _ = np.linalg.qr(hf_basis_matrix)
+    hf_basis_matrix = _stable_qr_basis(hf_basis_matrix)
     
     plan = {
         "lf_basis": {"projection_matrix": lf_basis_matrix},

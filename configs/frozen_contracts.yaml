@@ -250,6 +250,8 @@ gate_enforcement_requirements:              # freeze_gate.enforce_gate_requireme
         - "on_chain_failure"
         - "audit_obligations"
         - "geometry_gate"
+        - "closure_constraints"
+        - "rescue_band"
     requirement: |
       facts YAML 的 extra keys 必须在契约声明的范围内闭包：
         1) runtime_whitelist 顶层仅允许 allowed_top_level_keys.runtime_whitelist
@@ -664,6 +666,27 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
     - plan_input_schema_version             # 计划输入 schema 版本。
     - routing_digest                        # 路由摘要（顶层）。
     - routing_summary                       # 路由摘要对象（顶层）。
+    - final_decision                        # detect 顶层稳定判决快照。
+    - final_decision.decision_status        # 稳定判决状态。
+    - final_decision.is_watermarked         # 稳定判决布尔结果。
+    - final_decision.threshold_source       # 稳定判决阈值来源。
+    - final_decision.routing_decisions      # 稳定判决路由快照。
+    - final_decision.event_attested         # 稳定判决事件级 attestation 结果。
+    - attestation                           # attestation 分层结果总载荷。
+    - attestation.status                    # attestation 总状态。
+    - attestation.statement                 # 生成事件 statement 载荷。
+    - attestation.attestation_digest        # statement 级 attestation 摘要。
+    - attestation.event_binding_digest      # 事件级绑定摘要。
+    - attestation.trace_commit              # 轨迹承诺摘要。
+    - attestation.geo_anchor_seed           # 几何链事件锚点种子。
+    - attestation.signed_bundle             # signed attestation bundle。
+    - attestation.authenticity_result       # 真实性层结果。
+    - attestation.image_evidence_result     # 图像内证据层结果。
+    - attestation.final_event_attested_decision # 最终事件级 attestation 判决。
+    - content_evidence.score_parts.lf_status # LF 检测顶层状态。
+    - content_evidence.score_parts.lf_detect_trace.bp_converge_status # LF BP 收敛状态诊断字段。
+    - content_evidence.detect_hf_score_absent_reason # detect 侧 HF 分数缺失原因。
+    - content_evidence.score_parts.lf_status_degraded_reason # LF 状态降级原因。
 
 # ------------------------------
 # 字段别名：用于历史兼容

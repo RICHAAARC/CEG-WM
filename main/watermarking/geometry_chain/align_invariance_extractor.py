@@ -1258,11 +1258,15 @@ class GeometryAligner:
             ],
             dtype=bool,
         )
+        anchor_inverse_residuals = np.asarray([], dtype=np.float64)
+        anchor_cycle_residuals = np.asarray([], dtype=np.float64)
         anchor_consistency = 0.0
         if anchor_success_mask.size > 0 and bool(np.any(anchor_success_mask)):
+            anchor_inverse_residuals = inverse_residuals[anchor_success_mask]
+            anchor_cycle_residuals = cycle_residuals[anchor_success_mask]
             anchor_scores = np.logical_and(
-                inverse_residuals[anchor_success_mask] <= recovery_threshold,
-                cycle_residuals[anchor_success_mask] <= recovery_threshold,
+                anchor_inverse_residuals <= recovery_threshold,
+                anchor_cycle_residuals <= recovery_threshold,
             ).astype(np.float64)
             anchor_weights = weights[anchor_success_mask]
             anchor_consistency = float(np.average(anchor_scores, weights=anchor_weights)) if anchor_weights.size > 0 else 0.0
@@ -1288,11 +1292,16 @@ class GeometryAligner:
         recovered_sync_consistency = float(recovered_sync_validation.get("recovered_sync_consistency", 0.0))
 
         recovered_anchor_consistency = _clamp01(anchor_consistency)
+        anchor_inverse_ok = True
+        anchor_cycle_ok = True
+        if anchor_inverse_residuals.size > 0:
+            anchor_inverse_ok = bool(np.max(anchor_inverse_residuals) <= 2.0 * recovery_threshold)
+            anchor_cycle_ok = bool(np.max(anchor_cycle_residuals) <= 2.0 * recovery_threshold)
         recovery_success = bool(
             np.median(inverse_residuals) <= recovery_threshold
             and np.median(cycle_residuals) <= recovery_threshold
-            and np.max(inverse_residuals) <= 2.0 * recovery_threshold
-            and np.max(cycle_residuals) <= 2.0 * recovery_threshold
+            and anchor_inverse_ok
+            and anchor_cycle_ok
             and template_overlap_consistency >= self._resolve_align_template_overlap_min(cfg)
             and recovered_sync_consistency >= self._resolve_align_recovered_sync_consistency_min(cfg)
             and recovered_anchor_consistency >= self._resolve_align_recovered_anchor_consistency_min(cfg)

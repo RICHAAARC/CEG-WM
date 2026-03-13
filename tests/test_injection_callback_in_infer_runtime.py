@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 import numpy as np
+import torch
 
 from main.core import digests
 from main.diffusion.sd3.callback_composer import InjectionContext
@@ -95,12 +96,18 @@ def _build_cfg() -> Dict[str, Any]:
     }
 
 
+def _stable_qr_basis(matrix: np.ndarray) -> np.ndarray:
+    tensor = torch.as_tensor(np.asarray(matrix, dtype=np.float64), dtype=torch.float64)
+    q_tensor, _ = torch.linalg.qr(tensor, mode="reduced")
+    return q_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
+
+
 def _build_plan_with_basis(latent_dim: int, rank: int, seed: int) -> Dict[str, Any]:
     rng = np.random.default_rng(seed)
     lf_matrix = rng.normal(0.0, 1.0, size=(latent_dim, rank)).astype(np.float32)
-    lf_matrix, _ = np.linalg.qr(lf_matrix)
+    lf_matrix = _stable_qr_basis(lf_matrix)
     hf_matrix = rng.normal(0.0, 1.0, size=(latent_dim, rank)).astype(np.float32)
-    hf_matrix, _ = np.linalg.qr(hf_matrix)
+    hf_matrix = _stable_qr_basis(hf_matrix)
     return {
         "lf_basis": {"projection_matrix": lf_matrix.tolist()},
         "hf_basis": {"hf_projection_matrix": hf_matrix.tolist()},

@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import math
 import numpy as np
+import torch
 
 from main.core import digests
 from main.watermarking.content_chain.subspace.planner_interface import SubspacePlanEvidence
@@ -35,6 +36,41 @@ ALLOWED_PLANNER_FAILURE_REASONS = {
     "rank_computation_failed",
     "unknown"
 }
+
+
+def _stable_svd(matrix: Any) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    matrix_np = np.asarray(matrix, dtype=np.float64)
+    if matrix_np.ndim != 2:
+        raise ValueError("svd input must be rank-2")
+
+    matrix_tensor = torch.as_tensor(matrix_np, dtype=torch.float64)
+    try:
+        u_tensor, s_tensor, vh_tensor = torch.linalg.svd(matrix_tensor, full_matrices=False)
+    except RuntimeError as exc:
+        raise RuntimeError("svd failed") from exc
+
+    return (
+        u_tensor.detach().cpu().numpy().astype(np.float64, copy=False),
+        s_tensor.detach().cpu().numpy().astype(np.float64, copy=False),
+        vh_tensor.detach().cpu().numpy().astype(np.float64, copy=False),
+    )
+
+
+def _stable_lstsq(left: Any, right: Any, rcond: float = 1e-6) -> np.ndarray:
+    left_np = np.asarray(left, dtype=np.float64)
+    right_np = np.asarray(right, dtype=np.float64)
+    if left_np.ndim != 2 or right_np.ndim != 2:
+        raise ValueError("lstsq inputs must be rank-2")
+    if left_np.shape[0] != right_np.shape[0]:
+        raise ValueError("lstsq row count mismatch")
+
+    left_tensor = torch.as_tensor(left_np, dtype=torch.float64)
+    right_tensor = torch.as_tensor(right_np, dtype=torch.float64)
+    try:
+        solution = torch.linalg.lstsq(left_tensor, right_tensor, rcond=float(rcond)).solution
+    except RuntimeError as exc:
+        raise RuntimeError("lstsq failed") from exc
+    return solution.detach().cpu().numpy().astype(np.float64, copy=False)
 
 
 def build_region_index_spec_from_mask(mask: Any) -> Tuple[Dict[str, Any], Dict[str, Any], str]:
@@ -220,7 +256,7 @@ def build_runtime_jvp_operator_from_cache(
     next_center = next_matrix - np.mean(next_matrix, axis=0, keepdims=True)
 
     try:
-        operator_matrix, _, _, _ = np.linalg.lstsq(feature_center, next_center, rcond=1e-6)
+        operator_matrix = _stable_lstsq(feature_center, next_center, rcond=1e-6)
     except Exception:
         return None
 
@@ -298,7 +334,7 @@ def _build_partition_projection_matrix(
     if requested_rank <= 0:
         raise ValueError("requested_rank must be positive")
 
-    _, _, vh_partition = np.linalg.svd(routed_matrix_np, full_matrices=False)
+    _, _, vh_partition = _stable_svd(routed_matrix_np)
     effective_partition_rank = min(requested_rank, vh_partition.shape[0])
     if effective_partition_rank <= 0:
         raise ValueError("partition rank must remain positive after clipping")
@@ -941,10 +977,7 @@ class SubspacePlannerImpl:
 
         # 步骤 5：全局谱仅用于统计摘要，不再作为 LF/HF basis 的估计输入。
         decomposition_matrix = np.concatenate([centered, jvp_samples], axis=0)
-        try:
-            _, singular_values, vh = np.linalg.svd(decomposition_matrix, full_matrices=False)
-        except Exception as exc:
-            raise RuntimeError("svd failed") from exc
+        _, singular_values, vh = _stable_svd(decomposition_matrix)
 
         if singular_values.size == 0:
             raise ValueError("empty singular spectrum")
@@ -2095,7 +2128,7 @@ class SubspacePlannerImpl:
         # 计算 JVP 能量摘要（不存储大矩阵）
         jvp_energy = np.sum(jvp_samples ** 2, axis=1)
         total_jvp_energy = float(np.sum(jvp_energy))
-        _, jvp_singular_values, _ = np.linalg.svd(jvp_samples, full_matrices=False)
+        _, jvp_singular_values, _ = _stable_svd(jvp_samples)
         jvp_spectrum = np.abs(jvp_singular_values)
 
         jvp_anchor = {

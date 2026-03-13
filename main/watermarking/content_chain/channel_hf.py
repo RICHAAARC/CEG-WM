@@ -27,6 +27,21 @@ HF_CHANNEL_IMPL_ID = "high_freq_truncation_codec"
 HF_CHANNEL_VERSION = "v2"
 HF_TRACE_VERSION = "v2"
 
+
+def _stable_vector_matrix_dot(vector: np.ndarray, matrix: np.ndarray) -> np.ndarray:
+    """功能：使用非 BLAS 路径计算向量与矩阵乘法。"""
+    vector_fp32 = np.asarray(vector, dtype=np.float32)
+    matrix_fp32 = np.asarray(matrix, dtype=np.float32)
+    if vector_fp32.ndim != 1:
+        raise ValueError("vector must be rank-1")
+    if matrix_fp32.ndim != 2:
+        raise ValueError("matrix must be rank-2")
+    if vector_fp32.shape[0] != matrix_fp32.shape[0]:
+        raise ValueError(
+            f"vector dimension {vector_fp32.shape[0]} != matrix dimension {matrix_fp32.shape[0]}"
+        )
+    return np.einsum("i,ij->j", vector_fp32, matrix_fp32, dtype=np.float32)
+
 HF_ABSENT_REASONS = {
     "hf_disabled_by_config",
 }
@@ -390,7 +405,7 @@ def compute_hf_basis_projection(latents: np.ndarray | Any, basis: Dict[str, Any]
             f"latents dimension {latents_flat.shape[0]} != basis dimension {basis_matrix_np.shape[0]}"
         )
     
-    coeffs = np.dot(latents_flat, basis_matrix_np)  # shape: (hf_rank,)
+    coeffs = _stable_vector_matrix_dot(latents_flat, basis_matrix_np)  # shape: (hf_rank,)
     return coeffs.astype(np.float32)
 
 
@@ -498,7 +513,7 @@ def reconstruct_from_hf_coeffs(
         basis_matrix_np = np.asarray(basis_matrix, dtype=np.float32)
     
     # 反演。
-    latents_flat = np.dot(coeffs, basis_matrix_np.T)
+    latents_flat = _stable_vector_matrix_dot(coeffs, basis_matrix_np.T)
     
     # 恢复原始形状。
     latents_reconstructed = latents_flat.reshape(latents_shape).astype(np.float32)

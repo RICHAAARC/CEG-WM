@@ -264,8 +264,6 @@ policy_paths:
   # 已废弃（deprecated v2.0）：论文正式路径禁止使用，仅保留用于历史审计兼容性。
   # ------------------------------
   content_with_geometry_gate:
-    deprecated_in_formal_path: true    # v2.0 正式路径收口后禁止使用
-    formal_run_forbidden: true         # 不得出现在 paper_full_cuda.yaml 的 policy_path 中
     decoder_type: "fusion_neyman_pearson"   # 语义：最终判决遵循 NP 范式融合。
     description: "Content with geometry gate (DEPRECATED in v2.0 — use content_np_geo_rescue)"
 
@@ -321,8 +319,6 @@ policy_paths:
   # 已废弃（deprecated v2.0）：论文正式路径禁止使用，仅保留用于历史审计兼容性。
   # ------------------------------
   content_fallback_no_geometry:
-    deprecated_in_formal_path: true    # v2.0 正式路径收口后禁止使用
-    formal_run_forbidden: true         # 不得出现在 paper_full_cuda.yaml 的 policy_path 中
     decoder_type: "fusion_neyman_pearson"
     description: "Fallback when geometry is unavailable (DEPRECATED in v2.0 — use content_np_geo_rescue)"
 

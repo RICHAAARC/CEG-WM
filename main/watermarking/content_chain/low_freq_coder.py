@@ -369,12 +369,29 @@ def _build_dct_matrix(block_size: int) -> np.ndarray:
     return matrix
 
 
+def _safe_small_matmul(left: np.ndarray, right: np.ndarray) -> np.ndarray:
+    if left.ndim != 2 or right.ndim != 2:
+        raise ValueError("matrix operands must be 2D")
+    if left.shape[1] != right.shape[0]:
+        raise ValueError("matrix dimensions are not aligned")
+
+    left64 = left.astype(np.float64, copy=False)
+    right64 = right.astype(np.float64, copy=False)
+    result = np.zeros((left64.shape[0], right64.shape[1]), dtype=np.float64)
+    for row_index in range(left64.shape[0]):
+        row_result = np.zeros((right64.shape[1],), dtype=np.float64)
+        for inner_index in range(left64.shape[1]):
+            row_result += float(left64[row_index, inner_index]) * right64[inner_index]
+        result[row_index] = row_result
+    return result.astype(np.float32)
+
+
 def _dct2(block: np.ndarray, dct_matrix: np.ndarray) -> np.ndarray:
-    return dct_matrix @ block @ dct_matrix.T
+    return _safe_small_matmul(_safe_small_matmul(dct_matrix, block), dct_matrix.T)
 
 
 def _idct2(coeff: np.ndarray, idct_matrix: np.ndarray) -> np.ndarray:
-    return idct_matrix @ coeff @ idct_matrix.T
+    return _safe_small_matmul(_safe_small_matmul(idct_matrix, coeff), idct_matrix.T)
 
 
 def _flatten_to_list(value: Any) -> list:
@@ -896,9 +913,6 @@ class LowFreqTemplateCodec:
             "higher_is_watermarked": True,
             "decoder_mode": template_bundle.get("decoder_mode"),
             "soft_decode_called": True,
-            "bp_converged": bool(decode_result.get("bp_converged")),
-            "bp_iteration_count": int(decode_result.get("bp_iteration_count", 0)),
-            "syndrome_weight": int(decode_result.get("syndrome_weight", 0)),
             "impl_id": self.impl_id,
             "impl_version": self.impl_version,
             "plan_digest": plan_digest,

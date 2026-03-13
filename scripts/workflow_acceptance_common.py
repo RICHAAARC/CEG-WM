@@ -231,6 +231,11 @@ def build_cpu_smoke_summary(run_root: Path, cfg_path: Path, workflow_exit_code: 
     calibrate_readonly_ok = bool(calibration_record.get("thresholds_artifact_path") and state["exists"]["thresholds_artifact"])
     evaluate_readonly_ok = bool(readonly_guard.get("unchanged") is True)
     lightweight_validation_mode = bool(runtime_meta.get("synthetic_pipeline", False) or cfg_obj.get("pipeline_impl_id") == "sd3_diffusers_shell")
+    freeze_signoff_decision = signoff_summary.get("freeze_signoff_decision")
+    if not isinstance(freeze_signoff_decision, str) or not freeze_signoff_decision:
+        freeze_signoff_decision = signoff_report.get("freeze_signoff_decision")
+    if not isinstance(freeze_signoff_decision, str) or not freeze_signoff_decision:
+        freeze_signoff_decision = signoff_summary.get("FreezeSignoffDecision", "<absent>")
     smoke_verdict = bool(
         workflow_exit_code == 0
         and workflow_runnable
@@ -260,7 +265,7 @@ def build_cpu_smoke_summary(run_root: Path, cfg_path: Path, workflow_exit_code: 
         "evaluate_readonly_ok": evaluate_readonly_ok,
         "lightweight_validation_mode": lightweight_validation_mode,
         "smoke_verdict": smoke_verdict,
-        "signoff_decision": signoff_summary.get("FreezeSignoffDecision", "<absent>"),
+        "signoff_decision": freeze_signoff_decision,
         "details": {
             "pipeline_impl_id": detect_record.get("pipeline_impl_id", state["embed_record"].get("pipeline_impl_id", "<absent>")),
             "synthetic_pipeline": bool(runtime_meta.get("synthetic_pipeline", False)),
@@ -330,6 +335,11 @@ def build_formal_gpu_summary(
     calibrate_readonly_ok = bool(calibration_record.get("thresholds_artifact_path") and state["exists"]["thresholds_artifact"])
     evaluate_readonly_ok = bool(readonly_guard.get("unchanged") is True)
     geo_score_semantics_ok = _compute_geo_score_semantics_ok(geometry_payload) if geometry_payload else True
+    freeze_signoff_decision = signoff_summary.get("freeze_signoff_decision")
+    if not isinstance(freeze_signoff_decision, str) or not freeze_signoff_decision:
+        freeze_signoff_decision = signoff_report.get("freeze_signoff_decision")
+    if not isinstance(freeze_signoff_decision, str) or not freeze_signoff_decision:
+        freeze_signoff_decision = signoff_summary.get("FreezeSignoffDecision", "<absent>")
     formal_output_expectation_ok = bool(
         pipeline_execution_ok
         and bool(preflight.get("ok", False))
@@ -344,7 +354,7 @@ def build_formal_gpu_summary(
         and calibrate_readonly_ok
         and evaluate_readonly_ok
         and geo_score_semantics_ok
-        and signoff_summary.get("FreezeSignoffDecision") == "ALLOW_FREEZE"
+        and freeze_signoff_decision == "ALLOW_FREEZE"
     )
 
     return {
@@ -365,7 +375,7 @@ def build_formal_gpu_summary(
         "calibrate_readonly_ok": calibrate_readonly_ok,
         "evaluate_readonly_ok": evaluate_readonly_ok,
         "geo_score_semantics_ok": geo_score_semantics_ok,
-        "signoff_decision": signoff_summary.get("FreezeSignoffDecision", "<absent>"),
+        "signoff_decision": freeze_signoff_decision,
         "details": {
             "pipeline_impl_id": detect_record.get("pipeline_impl_id", state["embed_record"].get("pipeline_impl_id", "<absent>")),
             "synthetic_pipeline": bool(runtime_meta.get("synthetic_pipeline", False)),

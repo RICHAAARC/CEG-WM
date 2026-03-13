@@ -28,6 +28,34 @@ LF_CHANNEL_VERSION = "v2"
 LF_TRACE_VERSION = "v2"
 
 
+def _stable_vector_matrix_dot(vector: np.ndarray, matrix: np.ndarray) -> np.ndarray:
+    """功能：使用非 BLAS 路径计算向量与矩阵乘法。"""
+    vector_fp32 = np.asarray(vector, dtype=np.float32)
+    matrix_fp32 = np.asarray(matrix, dtype=np.float32)
+    if vector_fp32.ndim != 1:
+        raise ValueError("vector must be rank-1")
+    if matrix_fp32.ndim != 2:
+        raise ValueError("matrix must be rank-2")
+    if vector_fp32.shape[0] != matrix_fp32.shape[0]:
+        raise ValueError(
+            f"vector dimension {vector_fp32.shape[0]} != matrix dimension {matrix_fp32.shape[0]}"
+        )
+    return np.einsum("i,ij->j", vector_fp32, matrix_fp32, dtype=np.float32)
+
+
+def _stable_vector_dot(left: np.ndarray, right: np.ndarray) -> float:
+    """功能：使用非 BLAS 路径计算两个向量的点积。"""
+    left_fp32 = np.asarray(left, dtype=np.float32)
+    right_fp32 = np.asarray(right, dtype=np.float32)
+    if left_fp32.ndim != 1 or right_fp32.ndim != 1:
+        raise ValueError("left and right must be rank-1")
+    if left_fp32.shape[0] != right_fp32.shape[0]:
+        raise ValueError(
+            f"left dimension {left_fp32.shape[0]} != right dimension {right_fp32.shape[0]}"
+        )
+    return float(np.einsum("i,i->", left_fp32, right_fp32, dtype=np.float32))
+
+
 def _resolve_lf_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """功能：规范化 LF 配置视图。"""
     watermark_cfg = cfg.get("watermark") if isinstance(cfg.get("watermark"), dict) else {}
@@ -563,7 +591,7 @@ def compute_lf_basis_projection(latents: np.ndarray | Any, basis: Dict[str, Any]
             f"latents dimension {latents_flat.shape[0]} != basis dimension {basis_matrix_np.shape[0]}"
         )
     
-    coeffs = np.dot(latents_flat, basis_matrix_np)  # shape: (lf_rank,)
+    coeffs = _stable_vector_matrix_dot(latents_flat, basis_matrix_np)  # shape: (lf_rank,)
     return coeffs.astype(np.float32)
 
 
@@ -674,7 +702,7 @@ def reconstruct_from_lf_coeffs(
         basis_matrix_np = np.asarray(basis_matrix, dtype=np.float32)
     
     # 反演：latents_reconstructed = coeffs @ basis_matrix.T。
-    latents_flat = np.dot(coeffs, basis_matrix_np.T)  # shape: (latent_dim,)
+    latents_flat = _stable_vector_matrix_dot(coeffs, basis_matrix_np.T)  # shape: (latent_dim,)
     
     # 恢复原始形状。
     latents_reconstructed = latents_flat.reshape(latents_shape).astype(np.float32)
@@ -732,7 +760,7 @@ def extract_lf_score(
         # 计算相关系数。
         normalization = np.linalg.norm(coeffs) * np.linalg.norm(reference_pattern)
         if normalization > 1e-8:
-            score = np.dot(coeffs, reference_pattern) / normalization
+            score = _stable_vector_dot(coeffs, reference_pattern) / normalization
             score = max(0.0, score)  # 约束非负。
         else:
             score = 0.0

@@ -1,0 +1,114 @@
+# Project-scoped Codex config that can be synced with the repository.
+
+[mcp_servers.gitnexus]
+command = "npx"
+args = ["-y", "gitnexus", "mcp"]
+env = { http_proxy = "http://127.0.0.1:10792", https_proxy = "http://127.0.0.1:10792", HTTP_PROXY = "http://127.0.0.1:10792", HTTPS_PROXY = "http://127.0.0.1:10792" }
+
+[[skills.config]]
+path = "../.github/skills/ablation-readiness-auditor/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/artifact-lineage-tracker/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/attack-protocol-steward/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/attack-sweep-orchestrator/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/codex-openai-proxy/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/colab-environment-bootstrapper/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/content-subspace-adaptation-auditor/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/cross-paper-baseline-comparator/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/dataset-provenance-guard/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/evidence-schema-guardian/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/failure-semantics-enforcer/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/geometry-sync-reliability-auditor/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/impl-whitelist-governor/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/metric-semantic-lock/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/negative-result-recorder/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/np-threshold-calibrator/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/paper-claim-traceability-auditor/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/paper-figure-table-exporter/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/paper-workflow-verifier/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/policy-path-integrity-auditor/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/read-file-first/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/release-regression-gate/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/repro-bundle-signoff/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/runtime-cost-profiler/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/sd-runtime-readiness-checker/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/seed-determinism-auditor/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = "../.github/skills/wm-gap-auditor/SKILL.md"
+enabled = true

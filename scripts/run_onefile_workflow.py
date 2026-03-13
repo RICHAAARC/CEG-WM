@@ -871,7 +871,7 @@ def _run_attack_coverage_detections(
             "--input",
             str(embed_record_path),
             "--override",
-            f"input_image_path={attacked_image_path}",
+            f"input_image_path={json.dumps(str(attacked_image_path), ensure_ascii=False)}",
             "--override",
             "run_root_reuse_allowed=true",
             "--override",
@@ -1511,7 +1511,7 @@ def _prepare_stage_cfg_path(
             pair_count = len(prompt_list)
 
         if not isinstance(pair_count, int) or pair_count <= 0:
-            pair_count = 1 if profile == PROFILE_PAPER_FULL_CUDA else 0
+            pair_count = 1 if (profile == PROFILE_PAPER_FULL_CUDA or stage_name == "evaluate") else 0
 
         if pair_count > 0:
             detect_record_glob = _prepare_detect_records_with_minimal_ground_truth(
@@ -1546,6 +1546,8 @@ def _prepare_stage_cfg_path(
             _normalize_profile(profile) != PROFILE_PAPER_FULL_CUDA
             and _detect_np_record.exists()
             and _detect_np_record.stat().st_size > 0
+            and "*" not in detect_record_glob
+            and "?" not in detect_record_glob
         ):
             detect_record_glob = str(_detect_np_record)
             print(f"[onefile] detect_np record found; using for evaluate: {_detect_np_record}")
@@ -3226,6 +3228,23 @@ def run_onefile_workflow(
             except Exception as exc:
                 print(
                     "[onefile] pre-audits closure failed: "
+                    f"{type(exc).__name__}: {exc}",
+                    file=sys.stderr,
+                )
+                return 1
+        if not dry_run and profile != PROFILE_PAPER_FULL_CUDA and step.name == "audits":
+            try:
+                repro_pointer_sources = [
+                    run_root / "artifacts" / "run_closure.json",
+                    run_root / "records" / "evaluate_record.json",
+                    run_root / "artifacts" / "evaluation_report.json",
+                ]
+                if all(path.exists() and path.is_file() for path in repro_pointer_sources):
+                    _ensure_run_root_artifacts_for_strict_audits(run_root)
+                    _build_minimal_repro_bundle(run_root)
+            except Exception as exc:
+                print(
+                    "[onefile] pre-audits repro bundle closure failed: "
                     f"{type(exc).__name__}: {exc}",
                     file=sys.stderr,
                 )
