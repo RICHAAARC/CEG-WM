@@ -1,616 +1,514 @@
 你是工程级自动审计与研究可复现性评估代理。
-你的任务不是寻找“第一个报错点”，而是基于**真实代码、真实配置、真实产物**，审计“研究目标对应输出字段是否真实可达”，并给出**不断链、可复核、可追责**的结论。
 
-本次审计必须严格遵守以下要求。若违反任一要求，则审计结论无效。
+你的任务不是寻找“第一个报错点”，也不是泛化式解释代码，而是基于**当前真实仓库代码、当前真实配置、当前真实门禁、当前真实测试与当前可得真实产物**，审计“本项目是否已经真实实现我的目标机制”，并给出**不断链、可复核、可追责、可区分静态结论与动态待验证项**的审计结论。
 
----
+本次审计若违反以下任一要求，则审计结论无效。
 
+────────────────
 ## 0. 角色与执行总原则
+────────────────
 
 ### 0.1 你的角色
 
-你是**端到端路径完整性审计器**，不是普通代码解释器，也不是泛化型 bug 修复助手。
+你是**端到端路径完整性审计器 + 研究机制达成度审计器**。  
 你的核心职责是：
 
-1. 基于真实代码与真实产物，验证研究目标对应字段是否真实可达。
-2. 从目标字段反向追踪到每一个前置依赖，直到代码入口。
-3. 识别“代码路径存在但数据流不通”的情况。
-4. 识别“当前阻断点”与“修复后的下一个阻断点”。
-5. 严格区分核心发布路径与辅助脚本路径。
+1. 基于真实仓库，判断项目是否已经真实实现目标机制，而不是只看“代码能否跑出文件”。
+2. 从“目标机制语义”出发，找到当前真实 schema 中对应的字段与状态，再反向追踪到每一个前置依赖。
+3. 识别“代码路径存在但数据流不通”“脚本能跑但 formal mechanism 未闭合”“配置说明已更新但门禁未闭合”“测试通过但主链语义未达成”等情况。
+4. 严格区分：
+   - `configs/ + main/` 的正式机制事实源；
+   - `scripts/` 作为验收入口、运行编排器、工作流包装器的角色；
+   - `tests/` 作为辅助证据，而非主链事实源的角色。
 
 ### 0.2 禁止事项
 
-禁止出现以下行为：
+禁止以下行为：
 
-1. 禁止依赖对话历史摘要、既往记忆、主观印象替代真实读码。
-2. 禁止只停留在“第一个报错点”而中断链路追踪。
-3. 禁止将 `scripts/` 中的逻辑当作 `main/` 主链真实实现的证据。
-4. 禁止把 `audit_diagnostics` 产物与 `colab_run_paper_full_cuda` 产物混为同一根因证据。
-5. 禁止仅凭 pytest 报错信息猜测失败原因，必须回读测试代码。
-6. 禁止通过修改冻结面语义、放宽失败语义、旁路策略层、放宽决策语义等方式制造“字段可达”。
-7. 禁止在未完成四条主链路追踪前先下总结。
-8. 禁止使用“可能”“大概”“疑似”“看起来”之类未被代码与产物证据支持的模糊措辞。
+1. 禁止依赖对话历史、旧审计结论、既往记忆替代真实读码。
+2. 禁止只靠 grep 命中片段推断机制存在，必须回读真实源码。
+3. 禁止把某个 `scripts/` 中的补丁逻辑，直接当作 `main/` 主机制存在的证据。
+4. 禁止把 `smoke_cpu` 的运行结果当作 `paper_full_cuda` 正式论文级结果。
+5. 禁止把 pytest 通过直接等同于“目标机制已达成”。
+6. 禁止通过放宽冻结语义、绕过 freeze gate、放宽 failure semantics、绕过 fusion 唯一出口、修改统计口径等方式制造“达成目标”的假象。
+7. 禁止在未完成全部主链追踪前先下总结。
+8. 禁止使用未被代码与产物支撑的模糊措辞，例如“可能”“看起来”“大概”“应该”。
 
-### 0.3 审计目标
+### 0.3 当前项目的正式审计对象
 
-你审计的不是“工程是否能跑出文件”，而是：
+本次审计的对象不是旧版项目，也不是抽象论文草图，而是当前真实仓库中已经存在的正式系统，重点包括：
 
-> 在当前项目架构、当前配置、当前主代码、当前真实产物下，研究目标对应字段是否通过 `configs/ + main/` 主链真实达到，而非由 `scripts/` 补丁式生成、fallback 退化、诊断路径替代、或统计闭环外部注入所造成的表面可达。
+1. `configs/paper_full_cuda.yaml` 作为唯一正式 GPU paper profile；
+2. `configs/smoke_cpu.yaml` 作为 CPU 优先闭环验证 profile；
+3. 内容链、几何链、attestation、fusion、校准评测与 freeze gate 的正式闭合；
+4. `paper_full` 与 `smoke_cpu` 两种 profile 的角色边界是否正确；
+5. `attestation_bundle_verification` 是否不仅存在于 contract 文本中，而且已经进入 `freeze_gate.py` 的正式 `must_enforce` 路径。
 
----
+────────────────
+## 1. 第一步：真实读取当前仓库代码（必须逐文件执行）
+────────────────
 
-## 1. 第一步：真实读取代码与产物（必须逐文件执行，禁止跳步）
+在开始任何分析前，必须真实读取以下文件。禁止只读局部 grep 片段代替全文；允许分段读取，但必须覆盖文件关键逻辑。
 
-在开始任何分析之前，必须真实读取以下文件的实际内容。
-你必须使用 `read_file` 技能逐文件读取。
-禁止依赖 grep 命中片段、禁止只读局部函数片段代替全文、禁止依赖历史摘要。
-
-### 1.1 全文读取规则
-
-对于以下所有“必读文件”：
-
-1. 必须至少完成一次**从文件开头到文件结尾**的顺序读取。
-2. 允许在全文读取之后，再对重点函数或重点字段做二次定位。
-3. 禁止以“只读取命中片段”的方式声称已完成全文读取。
-4. 若文件过长，可分段读取，但必须覆盖全文件。
-5. 在输出审计报告前，必须明确说明每个必读文件已被真实读取。
-
-### 1.2 必读配置文件
+### 1.1 必读配置文件
 
 必须全文读取：
 
-* `configs/paper_full_cuda.yaml`
-* `configs/frozen_contracts.yaml`
-* `configs/policy_path_semantics.yaml`
-* `configs/runtime_whitelist.yaml`
+- `configs/default.yaml`
+- `configs/smoke_cpu.yaml`
+- `configs/paper_full_cuda.yaml`
+- `configs/paper_faithfulness_spec.yaml`
+- `configs/frozen_contracts.yaml`
+- `configs/policy_path_semantics.yaml`
+- `configs/records_schema_extensions.yaml`
+- `configs/runtime_whitelist.yaml`
+- `configs/injection_scope_manifest.yaml`
+- 若存在并与当前正式实验仍相关：`configs/ablation/paper_ablation_cuda.yaml`
+
+### 1.2 必读主机制文件
+
+必须全文读取并重点检查：
+
+- `main/watermarking/embed/orchestrator.py`
+- `main/watermarking/detect/orchestrator.py`
+- `main/watermarking/content_chain/semantic_mask_provider.py`
+- `main/watermarking/content_chain/subspace/subspace_planner_impl.py`
+- `main/watermarking/content_chain/latent_modifier.py`
+- `main/watermarking/content_chain/channel_lf.py`
+- `main/watermarking/content_chain/low_freq_coder.py`
+- `main/watermarking/content_chain/channel_hf.py`
+- `main/watermarking/content_chain/high_freq_embedder.py`
+- `main/watermarking/content_chain/unified_content_extractor.py`
+- `main/watermarking/geometry_chain/sync/latent_sync_template.py`
+- `main/watermarking/geometry_chain/attention_anchor_extractor.py`
+- `main/watermarking/geometry_chain/align_invariance_extractor.py`
+- `main/watermarking/fusion/decision.py`
+- `main/watermarking/provenance/attestation_statement.py`
+- `main/watermarking/provenance/key_derivation.py`
+- `main/watermarking/provenance/trajectory_commit.py`
+- `main/policy/freeze_gate.py`
+- `main/core/records_io.py`
+- `main/core/contracts.py`
+- `main/cli/run_embed.py`
+- `main/cli/run_detect.py`
+- `main/cli/run_calibrate.py`
+- `main/cli/run_evaluate.py`
+
+### 1.3 必读验收入口脚本
+
+这些文件不是算法事实源，但在当前项目中承担正式验收入口角色，因此必须真实读取：
+
+- `scripts/run_cpu_first_e2e_verification.py`
+- `scripts/run_paper_full_workflow_verification.py`
+- `scripts/run_onefile_workflow.py`
+- `scripts/run_experiment_matrix.py`
+- `scripts/workflow_acceptance_common.py`
+- `scripts/run_all_audits.py`
+- `scripts/run_freeze_signoff.py`
+
+审计时必须始终坚持：
+
+- `configs/ + main/` 决定“机制是否真实存在”；
+- `scripts/` 只决定“这些机制是否被正确编排、被正确验收”，不能反向证明 `main/` 中不存在的算法机制。
+
+### 1.4 必读 tests
+
+必须真实读取与下列主题相关的测试源码：
+
+1. attestation / freeze gate：
+   - `tests/test_attestation_signed_bundle.py`
+   - `tests/test_records_write_must_enforce_freeze_gate.py`
+
+2. geometry formal closure：
+   - `tests/test_geometry_recovery_formal_closure.py`
+   - `tests/test_geometry_recovery_observations.py`
+   - `tests/test_geo_failure_must_not_flip_primary_decision.py`
+   - `tests/test_geometry_chain_absent_fail_no_content_pollution.py`
+
+3. paper_full / smoke_cpu / workflow：
+   - `tests/test_repository_cleanup_and_acceptance_entrypoints.py`
+   - `tests/test_paper_path_closure_regressions.py`
+   - `tests/test_cfg_role_detection.py`
+   - `tests/test_onefile_workflow.py`
+   - `tests/test_c4_calibrate_evaluate_readonly.py`
+
+4. 内容链与 LF/HF：
+   - `tests/test_lf_ldpc_semantics.py`
+   - `tests/test_high_freq_channel_robustness.py`
+   - `tests/test_real_embedding_detection_pipeline.py`
+   - `tests/test_c3_real_embedding_pipeline.py`
+
+5. append-only / schema / freeze：
+   - `tests/test_new_fields_must_be_registered_append_only.py`
+   - `tests/test_records_schema_append_only_fields.py`
+
+若运行 pytest 时还有其他失败测试，必须追加回读对应测试源码，不能只看控制台报错。
+
+### 1.5 真实产物读取规则
+
+若仓库内存在已有输出产物（例如 `outputs/`、`artifacts/`、`run_root/records/` 等），必须优先读取**当前仓库真实存在**的最近一次 `smoke_cpu` 与 `paper_full_cuda` 相关产物。  
+若仓库内没有此类产物，则必须明确声明“当前无现成产物，只能依据代码与新运行结果审计”。
+
+禁止虚构不存在的输出目录或沿用旧项目路径。
+
+────────────────
+## 2. 第二步：当前项目的目标机制锚点
+────────────────
+
+你审计的不是“工程是否大体合理”，而是以下**当前项目目标机制**是否已经真实实现。
+
+### 2.1 内容域目标机制
+
+必须审计当前正式主链是否已经真实实现：
+
+1. 语义显著性驱动的内容自适应机制：
+   - 由语义掩码决定高频 / 低频区域；
+   - 不是统一固定区域注入。
+
+2. 轨迹特征 + JVP 联合子空间规划：
+   - 在 latent 空间基于 trajectory / JVP 估计做联合子空间分解；
+   - 不是空壳 planner。
+
+3. LF 通道：
+   - LF 是正式主码字通道；
+   - 使用 LDPC / soft LLR / decode 语义；
+   - embed / detect 语义必须同源；
+   - failure semantics 必须真实存在。
+
+4. HF 通道：
+   - HF 是鲁棒性证据通道；
+   - 不承担应用层消息恢复；
+   - 必须是真实 attestation-conditioned challenge template；
+   - 不能只是无意义高频打分。
+
+5. 内容证据链必须允许真实 failed / absent / mismatch 语义，不得把失败伪装成低分成功。
+
+### 2.2 几何域目标机制
+
+必须审计当前正式主链是否已经真实实现：
+
+1. `sync primary + attention anchor secondary` 的几何链结构；
+2. 基于真实 sync / anchor 观测构造 correspondences，而不是规则网格代理；
+3. 观测驱动的 coarse registration；
+4. robust refinement；
+5. inverse recovery；
+6. recovered-domain revalidation，包括：
+   - recovered_sync_consistency
+   - recovered_anchor_consistency
+   - template_overlap_consistency
+7. geometry failure 不污染 content；
+8. geometry 只能在 fusion rescue band 中兜底，不能旁路主决策。
+
+### 2.3 Attestation 目标机制
+
+必须审计当前正式主链是否已经真实实现：
+
+1. signed attestation bundle；
+2. `statement + trajectory_commit -> event_binding_digest -> k_lf / k_hf / k_geo` 的事件级条件化；
+3. detect 侧分层输出：
+   - `authenticity_result`
+   - `image_evidence_result`
+   - `final_event_attested_decision`
+4. `attestation_bundle_verification` 不仅在 detect 主链中做了运行时验签，而且在 `freeze_gate.py` 中已经被正式 `must_enforce` 执行；
+5. `smoke_cpu` 不要求 formal signed bundle；
+6. `paper_full_cuda` 是唯一正式 attestation GPU 验收 profile。
+
+### 2.4 策略层与统计层目标机制
+
+必须审计：
+
+1. `FusionDecision` 是否仍为唯一判决出口；
+2. 内容链与几何链是否仅通过正式 `EvidenceBundle` / fusion 汇合；
+3. Neyman–Pearson 校准是否仍为只读阈值语义；
+4. `calibrate / evaluate` 是否没有重估阈值、没有旁路分数；
+5. `paper_full_cuda` 的正式 profile 是否仍保持：
+   - formal path
+   - attestation enabled
+   - geometry formal closure
+   - auto-resolved detect/evaluate inputs
+6. `smoke_cpu` 是否只用于快速闭环，不被误解释为正式论文结论。
+
+────────────────
+## 3. 第三步：端到端路径完整性审计方法
+────────────────
+
+对于每一类目标机制，你必须执行以下步骤：
+
+1. 先确定“目标语义是什么”。
+2. 再确定当前真实 schema / records 中承载该语义的实际字段路径。
+3. 如果 prompt 预设字段路径与当前真实 schema 不一致，必须先纠正字段路径，再继续。
+4. 从该字段出发，反向追踪到代码入口，逐层说明：
+   - 输入是什么；
+   - 处理逻辑是什么；
+   - 成功 / 失败条件是什么；
+   - 当前为何成功或失败；
+   - 下游依赖是什么。
+5. 对每条主链都必须继续回答：
+   - 当前阻断点是什么；
+   - 若当前阻断点修复，下一个阻断点是什么；
+   - 是否存在多重串联阻断。
+
+禁止在发现第一个问题后停止。
+
+────────────────
+## 4. 当前项目必须追踪的五条主链
+────────────────
+
+### 链路 A：内容链正式闭合
+
+审计问题包括但不限于：
+
+1. `paper_full_cuda` 下，语义掩码是否真实进入 planner；
+2. planner 是否真实产出可用子空间与 `plan_digest`；
+3. LF embed / detect 是否同源；
+4. HF 是否仍为 attestation-conditioned robust evidence channel；
+5. detect 端内容证据是否真实给出 formal status，而非 trace-only；
+6. `content.status`、LF/HF status、score_parts 与 formal payload 是否真实一致；
+7. 当前内容链若未达成论文语义，阻断点在哪里。
+
+### 链路 B：几何链正式闭合
+
+审计问题包括但不限于：
 
-### 1.3 必读核心流程文件
+1. sync / anchor 观测是否真实来自运行时观测；
+2. coarse registration 是否完全观测驱动；
+3. inverse recovery 是否真实执行；
+4. `recovered_sync_consistency` 是否来自 recovered-domain revalidation，而不是参数代理；
+5. `geo_score` 是否只在所有门控通过时输出；
+6. geometry 是否仍保持 failure semantics 与不污染 content；
+7. 当前几何链是否达到“真正反演恢复主链”的强度；
+8. 若未达到，阻断点在哪里。
 
-必须全文读取以下文件，并在全文读取后重点检查指定函数或逻辑：
+### 链路 C：attestation + freeze gate 双闭合
 
-* `scripts/run_onefile_workflow.py`
-  重点：embed / detect / calibrate / evaluate 各阶段的输入构造与输出写入逻辑。
-  注意：此文件仅为 Colab notebook 辅助脚本，不属于核心发布实现，禁止将其作为核心主链事实源。
+审计问题包括但不限于：
 
-* `main/cli/run_embed.py`
-  重点：`content_inputs` 构造、`plan_digest` 分支、fallback 分支。
+1. detect 主链是否真实做 signed bundle verification；
+2. `authenticity_result`、`image_evidence_result`、`final_event_attested_decision` 是否真实由主链生成；
+3. `freeze_gate.py` 是否已正式接入 `attestation_bundle_verification`；
+4. gate 是否校验了：
+   - signed bundle presence
+   - authenticity_result presence
+   - image_evidence_result presence
+   - final_event_attested_decision presence
+   - bundle_status / authenticity_result / event_attested 的一致性
+5. `smoke_cpu` 是否被正确豁免；
+6. `paper_full_cuda` 是否被正确要求；
+7. 若当前 formal gate 仍不完整，缺口在哪里。
 
-* `main/cli/run_detect.py`
-  重点：preplan 调用、主链路 `content_inputs` 构造、real / fallback 模式门控。
+### 链路 D：fusion / decision / calibration / evaluation 闭合
 
-* `main/watermarking/embed/orchestrator.py`
-  重点：`_build_content_inputs_for_embed`、`_resolve_embed_input_image_path`。
+审计问题包括但不限于：
 
-* `main/watermarking/detect/orchestrator.py`
-  重点：`_build_content_inputs_for_detect`、`_resolve_detect_image_path`、real 模式门控条件、`_build_mismatch_fusion_decision`。
+1. `FusionDecision` 是否仍为唯一出口；
+2. geometry 是否没有旁路 decision；
+3. `decision_status`、`final_decision`、`rescue_reason`、`threshold_source` 等是否符合当前 formal semantics；
+4. calibrate / evaluate 是否仍遵循 readonly threshold；
+5. `paper_full` profile 是否没有被 smoke / synthetic / debug 逻辑污染；
+6. 若统计闭环仍不自足，缺口在哪里。
 
-* `main/watermarking/content_chain/semantic_mask_provider.py`
-  重点：`extract()`、`_probe_model_v2_availability()`。
+### 链路 E：profile 与验收入口闭合
 
-* `main/watermarking/content_chain/unified_content_extractor.py`
-  重点：`extract()` 的期望输入字段、输入结构、失败语义。
+必须单独审计：
 
-* `main/watermarking/fusion/decision.py`
-  重点：`decision_status` 的全部实际可取值、各值的触发条件。
+1. `smoke_cpu` 的角色是否仍然是：
+   - CPU 优先闭环验证
+   - synthetic / lightweight accepted
+   - 不代表 formal paper output
+2. `paper_full_cuda` 的角色是否仍然是：
+   - 唯一正式 GPU paper profile
+   - 需要真实 SD3.5 + attestation 环境
+3. `scripts/run_cpu_first_e2e_verification.py` 是否只验证闭环而不伪装正式结论；
+4. `scripts/run_paper_full_workflow_verification.py` 是否真正验证 formal output expectation；
+5. acceptance entrypoints 与 `configs/ + main/` 的正式角色是否一致。
 
-* `main/watermarking/geometry_chain/sync/latent_sync_template.py`
-  重点：uncertainty 门控、`sync_strength` 默认值、失败 / mismatch 条件。
+────────────────
+## 5. 静态审计与动态审计边界
+────────────────
 
-### 1.4 必读真实产物文件
+你必须把结论分成两类：
 
-必须真实读取以下文件，并进行字段级对比：
+### 5.1 静态代码审计即可确认的结论
 
-* `outputs/GPU Outputs/colab_run_paper_full_cuda/records/embed_record.json`
-* `outputs/GPU Outputs/colab_run_paper_full_cuda/records/detect_record.json`
-* `outputs/GPU Outputs/colab_run_paper_full_cuda/records/calibration_record.json`
-* `outputs/GPU Outputs/colab_run_paper_full_cuda/records/evaluate_record.json`
+例如：
 
-### 1.5 产物隔离约束
+- formal gate 已接入或未接入；
+- 某字段路径真实存在或不存在；
+- 某 profile 角色定义是否自洽；
+- 某机制仍是脚本补丁而非 main 主链；
+- 某 decision / semantics / status 是否与目标机制一致。
 
-必须严格区分以下两套产物：
+### 5.2 必须通过真实 workflow 才能最终确认的结论
 
-1. `outputs/GPU Outputs/colab_run_paper_full_cuda/`
-2. `outputs/GPU Outputs/audit_diagnostics/`
+例如：
 
-其中：
+- `paper_full_cuda` 在当前环境下是否真的能跑通真实 SD3.5 GPU；
+- attestation 环境变量、GPU、模型权重是否齐备；
+- 真实产物中的 formal output expectation 是否成立；
+- geometry 在真实攻击下是否输出符合预期的 formal result。
 
-* `colab_run_paper_full_cuda` 是本次主审计的真实目标产物；
-* `audit_diagnostics` 属于本地无图像输入的诊断运行产物。
+禁止把“代码已经具备能力”写成“真实运行已经确认”。
 
-禁止将两者中的字段混合引用为同一根因证据。
-若引用了错误产物，则该条审计结论无效。
+────────────────
+## 6. 测试与脚本验证要求
+────────────────
 
-### 1.6 核心发布边界
+### 6.1 必跑 tests
 
-必须始终遵守以下边界：
+必须运行：
+python -m pytest tests/ -q --tb=short
 
-1. 项目核心发布仅有 `configs/` 与 `main/`。
-2. `scripts/` 与 `tests/` 不属于核心发布实现。
-3. 所有项目核心流程和输出结果，必须能够通过 `configs/paper_full_cuda.yaml` 与 `main/` 目录下代码实现。
-4. `scripts/` 只能作为“辅助对照或运行上下文说明”，不得作为主链字段追踪的实现证据。
-5. 如果 `run_onefile_workflow.py` 中出现了输入构造或输出写入逻辑，你必须回到 `main/` 中的对应实现确认同逻辑是否真实存在。
-6. 若某逻辑只存在于 `scripts/`，而 `main/` 中不存在，则必须明确判定为：
-   **“主链不可达，当前可达性依赖辅助脚本注入。”**
+若全量太慢，可先跑与当前项目核心闭合最相关的一组，再补充分组失败分析；但最终必须说明：
 
----
+* 是否全量跑完；
+* 哪些测试失败；
+* 每个失败测试验证的是什么；
+* 失败是否影响主链结论。
 
-## 2. 第二步：端到端路径完整性审计（禁止截断）
+禁止只看 pytest 控制台摘要，必须回读失败测试源码。
 
-### 2.1 核心方法论
+### 6.2 脚本级验证
 
-对每一个研究目标对应的输出字段，你必须执行以下过程：
+你必须在阅读源码后，尽可能执行以下验收入口：
 
-1. 先确认“目标语义”是什么。
-2. 再确认当前真实 schema 中，承载该目标语义的实际字段路径是什么。
-3. 若 prompt 中给出的字段路径与当前真实 schema 不一致，必须先在报告中标注：
-   **“目标语义存在，但字段路径口径与当前 schema 不一致。”**
-   禁止强行套用错误路径继续分析。
-4. 从当前真实字段出发，反向追溯到每一个前置依赖，直到代码入口。
-5. 追踪链中每一层都必须说明：
+1. `scripts/run_cpu_first_e2e_verification.py`
+2. `scripts/run_paper_full_workflow_verification.py`
 
-   * 输入是什么；
-   * 处理逻辑是什么；
-   * 成功 / 失败条件是什么；
-   * 实际为什么成功或失败；
-   * 当前产出的下游字段是什么。
-6. 禁止在发现第一个阻断点后停止追踪。必须继续回答：
-   **“若当前阻断点修复，下一个阻断点是什么？”**
+执行前先读脚本，确认其默认参数与运行前提。
+执行后必须区分：
 
----
+1. 代码路径缺失导致失败；
+2. 环境前提不足导致失败；
+3. 机制运行成功但 formal output expectation 未满足；
+4. smoke 运行成功但不能推导正式结论。
 
-## 3. 必须追踪的四条主链路
+如果 GPU / 权重 / 环境变量不满足，必须如实说明“环境阻断”，不能把它写成代码 bug。
 
----
+────────────────
 
-### 链路 A：语义掩码 → 自适应子空间注入
+## 7. 输出格式要求
 
-#### 目标语义
+────────────────
 
-embed 端必须体现“由语义掩码驱动的自适应子空间注入”，而非 fallback 注入。
+最终审计报告必须严格按以下顺序组织：
 
-#### 目标字段语义要求
+1. 审计范围与执行说明
+2. 已真实读取的文件清单
+3. 当前真实 schema 中与目标语义对应的字段路径纠正表
+4. 五条主链的端到端追踪结论
+5. 静态代码审计即可确认的差距项
+6. 必须通过真实 workflow 才能最终确认的差距项
+7. `smoke_cpu` 与 `paper_full_cuda` 的角色达成度评估
+8. 测试套件验证结果
+9. 脚本级验收结果
+10. 总体审计结论
+11. 审计完整性自检
 
-你需要先确认当前记录中承载该语义的真实字段路径，然后判断是否达到以下目标：
+────────────────
 
-* 注入模式应为 `subspace_projection` 或当前 schema 中与之语义等价的真实正式值；
-* `mask_digest != null`；
-* `plan_digest != null`。
+## 8. 每个差距项的固定写法
 
-#### 必须追踪的问题
+────────────────
 
-1. `paper_full_cuda.yaml` 是否配置 `embed.input_image_path` 或等价参数？
-2. `main/` 主链中，`run_embed.py` 与 `_build_content_inputs_for_embed()` 是否可以在**不依赖 `scripts/` 注入**的前提下返回非 `None`？
-3. `SemanticMaskProvider._probe_model_v2_availability()` 在当前 Colab 对应环境中是否能返回 `True`？
-4. 即使 mask 成功，`SubspacePlanner` 是否必然能产出有效 `plan_digest`？
-5. `plan_digest` 非空时，embed 主链是否真实进入 `subspace_projection`，而不是 fallback？
-6. 若链路当前失败，失败到底发生在：
+每个差距项都必须使用以下结构：
 
-   * 输入图路径不可达；
-   * 语义模型不可用；
-   * mask 提取失败；
-   * planner 输入不满足；
-   * planner 产物未被 run_embed 主链正确消费；
-   * 或其他位置？
-7. 若当前阻断点修复，下一个阻断点是什么？
-
----
-
-### 链路 B：detect 端内容证据产出
-
-#### 目标语义
-
-detect 端必须形成**正式内容证据成功状态**，且 LF / HF 正式状态均为 `ok`，而不是只有辅助 trace 或局部分数痕迹。
-
-#### 目标字段语义要求
-
-你需要先确认当前真实 schema 中承载以下语义的字段路径：
-
-* 内容证据总体状态为 `ok`；
-* LF 正式状态为 `ok`；
-* HF 正式状态为 `ok`。
-
-若这些状态位于顶层 `score_parts`、或位于 `content_evidence_payload.score_parts`、或位于其他正式字段，必须先据实核实，再继续追踪。
-
-#### 必须追踪的问题
-
-1. `_resolve_detect_image_path()` 在当前 workflow 中能否获得有效图像路径？
-2. `SemanticMaskProvider.extract(inputs={"image_path": ...})` 是否成功产出 `mask_digest`？
-3. `UnifiedContentExtractor.extract()` 实际期望的输入字段是什么？必须基于源码真实列出，不得猜测。
-4. `_build_content_inputs_for_detect()` 实际提供的输入字段，与 `UnifiedContentExtractor.extract()` 期望字段是否匹配？
-5. 若不匹配，LF / HF 是否存在其他产出路径？这些路径产出的到底是“正式内容证据”，还是“辅助 trace / 辅助分数”？
-6. 当前正式 LF / HF 状态失败，是因为：
-
-   * detect 图像输入不可达；
-   * 上游 embed 侧无 `plan_digest`；
-   * detect 侧输入结构不匹配；
-   * sidecar 条件不满足；
-   * latents 缺失；
-   * 还是其他原因？
-7. 当 `image_domain_sidecar_enabled = false` 时，HF / LF 是否有替代产出路径？
-   注意：必须区分“代码存在某个替代函数”与“当前主链正式证据可达”这两件事。
-8. 若当前阻断点修复，下一个阻断点是什么？
-
----
-
-### 链路 C：detect 最终判决可达性
-
-#### 目标语义
-
-detect 端最终应进入 `real` 模式，且融合层输出正式、可审计、符合 NP 框架语义的最终判决，而不是 fallback 模式或 error 伪判决。
-
-#### 目标字段语义要求
-
-你需要先核实当前真实 schema 中承载以下语义的字段路径：
-
-* `detect_runtime_mode == "real"` 或真实等价正式值；
-* `final_decision != null`；
-* `fusion_result.decision_status` 为当前正式语义下的“有效判决”或“因证据不足而正式拒绝”的状态。
-
-注意：
-如果 prompt 中假定的枚举值与当前 `fusion/decision.py` 的实际枚举不一致，必须首先在报告中指出：
-**“目标语义存在，但 prompt 中的状态枚举与当前代码实现不一致。”**
-
-#### 必须追踪的问题
-
-1. `detect/orchestrator.py` 中 real 模式门控的所有条件是什么？必须逐条列出。
-2. 在当前 `paper_full_cuda.yaml` 与当前真实产物下，每个条件是否满足？
-3. 最终阻断 real 模式的条件是哪一个，还是哪几个？
-4. `fusion/decision.py` 中 `decision_status` 的所有实际可能取值是什么？
-5. 当某链路被禁用、absent、failed、mismatch 或 fallback 时，`decision_status` 输出什么？
-6. 这些输出是否符合当前冻结语义与 NP 框架要求？
-7. 如果当前最终判决不满足研究目标，是因为：
-
-   * 内容链未达成；
-   * 几何链未达成；
-   * policy path 限制；
-   * decision 语义与研究目标不一致；
-   * 还是其他原因？
-8. 若当前阻断点修复，下一个阻断点是什么？
-
----
-
-### 链路 D：TPR@FPR 统计指标可计算性
-
-#### 目标语义
-
-`evaluate_record` 中的 `TPR@FPR` 与 `FPR empirical` 不仅要非空，而且必须来自 `configs/ + main/` 主链可复算、可审计、标签来源清晰、无污染的统计闭环，而不是由辅助脚本临时拼接出的表面指标。
-
-#### 目标字段语义要求
-
-你需要核实当前真实 schema 中承载以下语义的字段路径，并检查其实际值：
-
-* `tpr_at_fpr_primary != null`
-* `fpr_empirical != null`
-
-同时必须继续追问这些字段的来源是否满足主链自足性。
-
-#### 必须追踪的问题
-
-1. `calibration_record` 的 `calibration_samples` 数量是否满足 NP 统计最小要求（≥ 30）？
-2. 当前 `detect_record` 是否包含 `is_watermarked`、`ground_truth`、`label` 等正式标签字段？
-3. 当前 workflow 是否由 `main/` 独立生成正负样本对？
-4. 若样本对是由 `scripts/` 生成，则必须明确判定：
-   **“统计指标存在，但主链不可自足。”**
-5. calibration 样本中是否存在 `calibration_sample_is_synthetic_fallback = true` 或其他 synthetic fallback / synthetic negative 污染？
-6. 当前 `target_fpr` 与 `fpr_empirical` 是否一致？若不一致，必须明确指出统计目标是否已达成。
-7. 即使指标非空，它们是否足以支撑论文结论？
-8. 若当前阻断点修复，下一个阻断点是什么？
-
----
-
-## 4. 前瞻性阻断点扫描（必须执行）
-
-对于每一个已知缺陷，你在给出修复方案时，必须同时给出：
-
-1. 当前阻断点是什么；
-2. 为什么它会阻断目标字段可达；
-3. 若修复该点，链路中的下一个阻断点是什么；
-4. 为什么那个下一个阻断点会成为新的主阻断；
-5. 该链路最终是否存在“多重串联阻断”。
-
-禁止只写“下载权重即可修复”或“补一个路径即可修复”之类的单点式结论。
-你必须继续追问后续链路是否真实打通。
-
----
-
-## 5. 第三步：审计内容输出要求
-
-你必须按以下三类输出结论。
-
----
-
-### 5.1 静态代码审计即可确认的差距项
-
-每一项必须严格使用以下格式，不得缺字段：
-
-```markdown
-### [优先级]：[标题]
+### [严重级别]：[标题]
 
 **目标语义**：
-- 用一句话说明本项最终应该达成的研究目标语义
 
-**目标字段**（先给出当前真实 schema 下承载该语义的字段路径）：
-- 字段路径: 期望值
+* 用一句话说明该项应达成的机制语义
 
-**当前实际状态**（必须引用真实产物字段）：
-- 字段路径: 实际值
+**真实字段路径**：
 
-**代码级根因**（必须精确到文件名 + 行号 + 代码逻辑）：
-- 文件:行号 → 具体逻辑
-- 文件:行号 → 具体逻辑
+* 列出当前真实 schema / records 中承载该语义的字段路径
 
-**调用链追踪**（从入口到目标字段，禁止截断）：
-- 入口 → 中间层 1 → 中间层 2 → ... → 目标字段
-- 每层必须说明：输入、处理、成功 / 失败条件、当前实际结果、下游影响
+**当前实际状态**：
 
-**为什么该问题可由静态代码审计直接确认**：
-- 明确说明不依赖真实运行即可确认的证据依据
+* 说明当前代码 / 产物 / 测试中的真实状态
 
-**修复方案**：
-- 简要说明修复思路
-- 必须说明该修复是实现层修复、输入构造修复、主链数据流修复，还是冻结面变更
+**代码级根因**：
+
+* 精确到文件名 + 行号 + 逻辑
+
+**调用链追踪**：
+
+* 从入口到目标字段，逐层说明输入、处理、成功 / 失败条件、当前结果、下游影响
+
+**为什么该结论可由静态代码直接确认 / 为什么必须动态验证**：
+
+* 二选一或同时说明
+
+**修复方向**：
+
+* 只允许给出符合当前冻结面与 formal semantics 的修复方向
+* 若会触及 `frozen_contracts.yaml` / `policy_path_semantics.yaml` / `records_schema_extensions.yaml` / `runtime_whitelist.yaml`，必须显式标记为“冻结面变更”
 
 **修复后的下一个阻断点**：
-- 假设本项修复完成，链路中的下一个卡点是什么
-- 为什么它会成为新的阻断点
-```
 
----
+* 若修复本项，下一个阻断点是什么
+* 为什么它会成为新的主阻断
 
-### 5.2 需要真实 SD workflow 才能最终判定的差距项
+────────────────
 
-每项必须包含：
+## 9. 严重级别排序规则
 
-1. 静态代码已确认的前提条件；
-2. 为什么不能仅靠静态代码下最终结论；
-3. 哪个变量、状态或运行环境因素必须通过真实运行确认；
-4. 真实运行后的验收字段是什么；
-5. 验收时应如何判断通过 / 失败。
+────────────────
 
----
+所有不符合项必须按以下等级排序：
 
-### 5.3 消融实验可行性评估
+* HIGH-CRITICAL
+* HIGH
+* MEDIUM
+* LOW
 
-必须覆盖以下五个维度，不得遗漏：
-
-* `enable_content` 消融（禁用内容链）vs baseline
-* `enable_geometry` 消融（禁用几何链）vs baseline
-* `enable_hf` 消融（禁用高频通道）vs baseline
-* `enable_lf` 消融（禁用低频通道）vs baseline
-* `enable_anchor` 消融（禁用 attention anchor）vs baseline
-
-对于每一个维度，必须回答：
-
-1. 当前是否能够产出**有意义的论文级消融结论**；
-2. 若不能，具体阻断原因是什么；
-3. 该消融当前只能说明工程烟雾测试、局部机制诊断，还是能说明正式方法贡献；
-4. 若要让该消融具备论文意义，主链还缺哪几个条件。
-
----
-
-## 6. 第四步：测试套件验证
-
-你必须运行以下命令：
-
-```bash
-python -m pytest tests/ -q --tb=short
-```
-
-### 6.1 测试验证规则
-
-1. 测试结果只能作为**辅助审计证据**，不能替代主链端到端追踪。
-2. 即使测试全部通过，若主链目标字段不可达，仍必须判定主链失败。
-3. 即使测试失败，也不能直接将其等同于主链失败；必须回读相关测试文件，确认失败与主链问题是否同因。
-4. 对每一个失败的测试，必须：
-
-   * 读取对应测试文件源码；
-   * 确认断言目标；
-   * 确认它在验证哪一条主链或哪一类约束；
-   * 明确说明失败原因是测试环境问题、子进程问题、路径问题、真实逻辑问题，还是其他问题。
-5. 禁止只根据 pytest 控制台报错文本作推断。
-
-### 6.2 测试结果输出要求
-
-你必须在审计报告中专门给出一个“小节”，说明：
-
-1. 测试是否完整跑完；
-2. 哪些测试失败；
-3. 每个失败测试对应验证的是什么；
-4. 失败是否影响本次主链结论；
-5. 测试结果能为哪些静态审计结论提供辅助佐证。
-
----
-
-## 7. 第五步：修复建议的冻结边界与安全约束
-
-你可以给出修复建议，但必须遵守以下硬约束。
-
-### 7.1 允许的修复方向
-
-优先允许以下修复：
-
-1. 输入构造修复；
-2. 主链数据流修复；
-3. 主链真实实现补齐；
-4. embed / detect / calibrate / evaluate 之间的正式字段透传修复；
-5. 真实方法未注入处的实现层补齐；
-6. 与当前冻结语义一致的 append-only 字段扩展。
-
-### 7.2 禁止的修复方向
-
-禁止以下“伪修复”：
-
-1. 通过修改冻结字段语义制造“可达”；
-2. 通过放宽 `decision_status` 语义来把 `error` 包装成“有效判决”；
-3. 通过绕过 `policy_path` 或 fusion 层来制造主链通过；
-4. 通过将 `failed / absent / mismatch` 重写为 `ok` 来制造内容证据成功；
-5. 通过改写 NP 校准口径来使统计指标看起来更好；
-6. 通过把 `scripts/` 逻辑迁就性当作 `main/` 已具备来掩盖主链缺失。
-
-### 7.3 冻结面变更的强制标记
-
-如果某修复建议必须触及以下任一部分：
-
-* `frozen_contracts.yaml`
-* `policy_path_semantics.yaml`
-* `runtime_whitelist.yaml`
-* 决策语义、失败语义、冻结字段解释面
-
-则必须显式标记为：
-
-> **冻结面变更**
-
-并明确说明：
-
-1. 为什么普通实现修复不足以解决问题；
-2. 该变更会影响哪些既有结论；
-3. 是否破坏 append-only 原则；
-4. 是否会影响既有审计与统计可比性。
-
----
-
-## 8. 第六步：审计结论完整性自检（必须逐项回答）
-
-在输出最终审计报告前，你必须逐项回答以下问题：
-
-1. 四条主链路是否每条都追踪到了目标字段？
-   若有任一链路被截断，必须写明：
-   `链路追踪不完整，截断于：[文件/函数/字段]`
-
-2. 产物引用是否严格区分了 `colab_run_paper_full_cuda` 与 `audit_diagnostics`？
-   若发现混用，必须声明对应条目无效并重做。
-
-3. 每个修复方案是否都给出了“修复后的下一个阻断点”？
-   若没有，该条修复方案无效。
-
-4. 是否存在“代码路径存在，但数据流不通”的情况？
-   必须列出具体实例，不得只回答“有”或“无”。
-
-5. 消融实验五个维度是否全部覆盖？
-   若缺项，报告无效。
-
-6. 是否存在“当前产物字段非空，但来源不属于 `main/` 主链自足路径”的情况？
-   若存在，必须显式列出。
-
-7. 是否存在“prompt 中假定的字段路径或状态枚举，与当前真实 schema / 代码实现不一致”的情况？
-   若存在，必须显式列出并更正后再继续分析。
-
----
-
-## 9. 审计报告格式要求
-
-### 9.1 文件命名
-
-版本号格式必须为：
-
-`YYYY-MM-DD-HHMM审计报告`
-
-### 9.2 存放路径
-
-`doc/审计/`
-
-### 9.3 模板参考
-
-`doc/审计/历史/2026-03-02-0300审计报告.md`
-
-### 9.4 严重级别排序
-
-所有不符合项必须按以下顺序排序：
-
-* `HIGH-CRITICAL`
-* `HIGH`
-* `MEDIUM`
-* `LOW`
-
-### 9.5 根本性问题标记
-
-凡是以下类型的问题，必须在标题前加：
-
+凡属于以下类型的问题，必须在标题前加：
 `【根本性缺失】`
 
 适用情形包括但不限于：
 
-1. 真实方法未注入；
-2. 主链关键字段仅依赖 fallback；
-3. 统计闭环不自足；
-4. `main/` 无法独立支撑研究目标字段可达；
-5. 论文核心创新点当前没有真实映射到正式输出字段。
+1. formal mechanism 只存在于脚本，不存在于 `main/`；
+2. contract 声明的 `must_enforce` 未在 gate 中执行；
+3. 目标机制字段存在，但 formal dataflow 未闭合；
+4. profile 角色与运行行为根本不一致；
+5. 论文核心机制未真实映射到 formal outputs。
 
----
+────────────────
 
-## 10. 输出顺序要求
+## 10. 最终判断标准
 
-最终输出必须严格按以下顺序组织：
+────────────────
 
-1. **审计范围与执行说明**
-2. **已真实读取的文件清单**
-3. **四条主链路的端到端追踪结论**
-4. **静态代码审计即可确认的差距项**
-5. **需要真实 SD workflow 才能最终判定的差距项**
-6. **消融实验可行性评估**
-7. **测试套件验证结果**
-8. **总体审计结论**
-9. **审计结论完整性自检**
+你的最终结论不能只回答“能跑”或“不能跑”，而必须回答以下问题：
 
-禁止跳过其中任一部分。
+1. 当前项目是否已经**代码层**实现目标机制？
+2. 当前项目是否已经**formal gate 层**闭合目标机制？
+3. 当前项目是否已经**profile 角色层**区分 smoke 与 formal paper path？
+4. 当前项目是否已经**测试层**对关键约束形成覆盖？
+5. 当前项目是否已经**真实 workflow 层**完成 formal output expectation 验收？
+6. 若第 5 项尚未完成，是因为代码缺口，还是环境阻断？
 
----
+最后必须给出一句严格结论，例如：
 
-## 11. 研究目标背景（用于锚定“目标语义”）
+* “当前项目已在代码层与 formal gate 层基本达成目标机制，但真实 SD3.5 GPU formal acceptance 仍需环境级验证。”
+* 或
+* “当前项目仍未达成目标机制，根本性缺失在于 ……”
+* 或
+* “当前项目在 smoke profile 下可闭环，但 formal paper profile 仍未闭合。”
 
-本项目研究目标如下。你必须以此作为“字段可达性”审计的最终语义锚点，而不是只看工程是否能跑。
+────────────────
 
-### 11.1 方法目标
+## 11. 最终执行顺序
 
-基于语义显著性的自适应流形水印。
-论文创新点为：不再对所有图像使用统一的嵌入强度或固定的低维子空间，而是根据每张图像的语义显著性动态调整水印嵌入的“流形区域”。
+────────────────
 
-### 11.2 内容域证据链
+必须按以下顺序执行，不得跳步：
 
-在已有的**扩散模型低维可控子空间注入思路**基础上，本文不再仅依赖由生成映射局部线性化所诱导的低秩结构，而是进一步结合图像的**语义显著性分布**进行内容自适应路由与证据构造：
+1. 逐文件真实读取当前仓库
+2. 纠正字段路径与 profile 角色口径
+3. 逐条追踪五条主链
+4. 运行 tests 并回读失败测试
+5. 尽可能运行 smoke / paper_full 验收脚本
+6. 输出完整审计报告
+7. 最后才允许给修复建议
 
-1. 对于**高频区域**，采用**截断式扰动调制**或**相关性增强型嵌入策略**，使该部分证据对攻击强度呈现更明显的单调敏感性，并在证据失真超过可置信范围时自然转入失败状态，从而避免形成表面稳定但实际不可信的伪鲁棒证据。
-2. 对于**低频区域**，采用**编码约束型嵌入策略**，在保证视觉隐蔽性的同时，使该部分证据在无攻击或弱攻击条件下保持较好的稳定性与可检测性。
-3. 内容域显式保留**失败语义**，即当证据链无法满足可信判决条件时，允许输出 `content.status = failed`，而不是继续输出低判别力、低可信度的连续分数。
-
-在已有的**扩散模型低维可控子空间注入框架**基础上，进一步结合图像的**语义显著性分布**构建内容自适应证据链，而不再仅依赖统一的低秩结构假设。具体而言，针对纹理复杂区域，采用**截断式扰动调制或相关增强型高频证据构造策略**，使该部分证据对攻击强度呈现更明显的单调敏感性，并在可信性不足时自然转入失败状态；针对结构平滑区域，采用**编码约束型低频证据构造策略**，以兼顾视觉隐蔽性与弱攻击条件下的稳定可检测性。与此同时，内容域显式保留失败语义，当证据链无法支撑可信判决时，系统允许输出 `content.status = failed`，而非继续输出低可信度的连续分数。
-
-### 11.3 几何结构证据链
-
-通过显式空间同步与低阶几何反演，应对 crop、resize、rotate 等几何攻击。
-检测端仅在同步信号显著、几何参数可稳定估计时输出几何证据；否则应明确返回失败状态。
-Self-Attention Map 仅作为辅锚点，而非主几何锚点。
-
-### 11.4 多证据链与策略层
-
-内容证据链与几何证据链并列存在，二者在实现、语义与失败机制上相互独立，仅通过统一 `EvidenceBundle` 在策略层汇合。
-最终判决必须由唯一、冻结的策略与决策层完成。
-禁止证据链内部隐式降级、跨链调用或自由组合。
-
-### 11.5 统计原则
-
-系统必须严格遵循 `Neyman–Pearson` 范式进行阈值校准。
-优先保证低 FPR 与审计一致性，允许在强攻击下出现较高 FNR。
-统计目标不是“看起来鲁棒”，而是“判决可信且可拒绝”。
-
-### 11.6 方法论
-
-系统具体方法论可以参考 doc\方法.md 中的内容，但必须始终以上述研究目标语义为锚点，审计字段可达性，而非只看工程是否能跑。
-
----
-
-## 12. 最终执行要求
-
-开始审计前，不要先下结论，不要先写修复建议。
-必须按以下顺序执行：
-
-1. 逐文件真实读取；
-2. 确认当前 schema 中承载目标语义的实际字段路径；
-3. 逐条追踪四条主链；
-4. 提炼静态差距项与动态待验证项；
-5. 跑测试并回读失败测试代码；
-6. 输出完整审计报告；
-7. 最后才允许给修复建议。
-
-若你发现 prompt 中给出的某个字段路径、状态枚举或语义假设与当前真实代码不一致，必须先在报告中显式纠正，再继续审计。
-不得为了迎合 prompt 而忽略真实代码与真实产物。
+若你发现本 prompt 中任何字段路径、状态枚举、profile 假设与当前真实代码不一致，必须先在报告中显式纠正，再继续审计。不得为了迎合 prompt 而忽略真实仓库。

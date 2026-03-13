@@ -419,6 +419,7 @@ def enforce_gate_requirements(
         "impl_identity_domain_binding": _enforce_impl_identity_domain_binding,
         "fact_source_binding_integrity": _enforce_fact_source_binding_integrity,
         "cfg_digest_computation_order": _enforce_cfg_digest_computation_order,
+        "attestation_bundle_verification": _enforce_attestation_bundle_verification,
         "policy_path_semantic_driven_execution": lambda record, contracts, whitelist, semantics, interpretation: _validate_semantic_driven_execution(record, semantics, interpretation, warn_mode=False)
     }
     policy_requirement_names = {
@@ -1296,6 +1297,242 @@ def _validate_contract_fields(
         "frozen_contracts.yaml bound digest"
     )
 
+
+def _requires_attestation_bundle_verification(record: Dict[str, Any]) -> bool:
+    """
+    功能：判定 detect 记录是否必须执行 attestation bundle verification 门禁。
+
+    Decide whether the current detect record must satisfy the formal
+    attestation bundle verification gate.
+
+    Args:
+        record: Record mapping to inspect.
+
+    Returns:
+        True when the record belongs to the detect path and attestation is
+        enabled for formal verification semantics; otherwise False.
+
+    Raises:
+        TypeError: If record is invalid.
+    """
+    if not isinstance(record, dict):
+        # record 类型不符合预期，必须 fail-fast。
+        raise TypeError("record must be dict")
+
+    if record.get("operation") != "detect":
+        return False
+
+    attestation_payload = record.get("attestation")
+    if not isinstance(attestation_payload, dict):
+        return False
+
+    if attestation_payload.get("attestation_absent_reason") == "attestation_disabled":
+        return False
+
+    relevant_fields = (
+        "statement",
+        "signed_bundle",
+        "attestation_bundle",
+        "bundle_verification",
+        "authenticity_result",
+        "image_evidence_result",
+        "final_event_attested_decision",
+    )
+    return any(field_name in attestation_payload for field_name in relevant_fields)
+
+
+def _enforce_attestation_bundle_verification(
+    record: Dict[str, Any],
+    contracts: FrozenContracts,
+    whitelist: RuntimeWhitelist,
+    semantics: PolicyPathSemantics,
+    interpretation: ContractInterpretation,
+) -> None:
+    """
+    功能：校验 attestation signed bundle verification 已在 detect 主链正式执行。
+
+    Validate that detect-time attestation bundle verification has already been
+    executed on the main path and that the persisted layered results are
+    semantically self-consistent.
+
+    Args:
+        record: Record mapping to validate.
+        contracts: Loaded frozen contracts.
+        whitelist: Loaded runtime whitelist.
+        semantics: Loaded policy-path semantics.
+        interpretation: Parsed contract interpretation.
+
+    Returns:
+        None.
+
+    Raises:
+        TypeError: If inputs are invalid.
+        GateEnforcementError: If formal attestation verification is missing or inconsistent.
+    """
+    if not isinstance(record, dict):
+        # record 类型不符合预期，必须 fail-fast。
+        raise TypeError("record must be dict")
+    if not isinstance(contracts, FrozenContracts):
+        # contracts 类型不符合预期，必须 fail-fast。
+        raise TypeError("contracts must be FrozenContracts")
+    if not isinstance(whitelist, RuntimeWhitelist):
+        # whitelist 类型不符合预期，必须 fail-fast。
+        raise TypeError("whitelist must be RuntimeWhitelist")
+    if not isinstance(semantics, PolicyPathSemantics):
+        # semantics 类型不符合预期，必须 fail-fast。
+        raise TypeError("semantics must be PolicyPathSemantics")
+    if not isinstance(interpretation, ContractInterpretation):
+        # interpretation 类型不符合预期，必须 fail-fast。
+        raise TypeError("interpretation must be ContractInterpretation")
+
+    if not _requires_attestation_bundle_verification(record):
+        return
+
+    attestation_payload = record.get("attestation")
+    if not isinstance(attestation_payload, dict):
+        raise GateEnforcementError(
+            "attestation payload missing for attestation bundle verification",
+            gate_name="attestation_bundle_verification",
+            field_path="attestation",
+            expected="dict",
+            actual=str(type(attestation_payload).__name__),
+        )
+
+    authenticity_result = attestation_payload.get("authenticity_result")
+    if not isinstance(authenticity_result, dict):
+        raise GateEnforcementError(
+            "authenticity_result required for attestation bundle verification",
+            gate_name="attestation_bundle_verification",
+            field_path="attestation.authenticity_result",
+            expected="dict",
+            actual=str(type(authenticity_result).__name__),
+        )
+
+    image_evidence_result = attestation_payload.get("image_evidence_result")
+    if not isinstance(image_evidence_result, dict):
+        raise GateEnforcementError(
+            "image_evidence_result required for attestation bundle verification",
+            gate_name="attestation_bundle_verification",
+            field_path="attestation.image_evidence_result",
+            expected="dict",
+            actual=str(type(image_evidence_result).__name__),
+        )
+
+    final_event_attested_decision = attestation_payload.get("final_event_attested_decision")
+    if not isinstance(final_event_attested_decision, dict):
+        raise GateEnforcementError(
+            "final_event_attested_decision required for attestation bundle verification",
+            gate_name="attestation_bundle_verification",
+            field_path="attestation.final_event_attested_decision",
+            expected="dict",
+            actual=str(type(final_event_attested_decision).__name__),
+        )
+
+    bundle_verification = attestation_payload.get("bundle_verification")
+    if bundle_verification is not None and not isinstance(bundle_verification, dict):
+        raise GateEnforcementError(
+            "bundle_verification must be dict when present",
+            gate_name="attestation_bundle_verification",
+            field_path="attestation.bundle_verification",
+            expected="dict",
+            actual=str(type(bundle_verification).__name__),
+        )
+
+    signed_bundle = attestation_payload.get("signed_bundle")
+    if signed_bundle is None:
+        signed_bundle = attestation_payload.get("attestation_bundle")
+    if ("signed_bundle" in attestation_payload or "attestation_bundle" in attestation_payload) and (
+        not isinstance(signed_bundle, dict) or not signed_bundle
+    ):
+        raise GateEnforcementError(
+            "signed bundle must be non-empty dict when declared",
+            gate_name="attestation_bundle_verification",
+            field_path=(
+                "attestation.signed_bundle"
+                if "signed_bundle" in attestation_payload
+                else "attestation.attestation_bundle"
+            ),
+            expected="non-empty dict",
+            actual=str(type(signed_bundle).__name__),
+        )
+
+    bundle_status_from_authenticity = authenticity_result.get("bundle_status")
+    bundle_status_from_verification = None
+    if isinstance(bundle_verification, dict):
+        bundle_status_from_verification = bundle_verification.get("status")
+
+    if (
+        isinstance(bundle_status_from_authenticity, str)
+        and isinstance(bundle_status_from_verification, str)
+        and bundle_status_from_authenticity != bundle_status_from_verification
+    ):
+        raise GateEnforcementError(
+            "bundle verification status inconsistent with authenticity_result",
+            gate_name="attestation_bundle_verification",
+            field_path="attestation.authenticity_result.bundle_status",
+            expected=bundle_status_from_verification,
+            actual=bundle_status_from_authenticity,
+        )
+
+    bundle_status = bundle_status_from_authenticity
+    if not isinstance(bundle_status, str) or not bundle_status:
+        bundle_status = bundle_status_from_verification
+    if not isinstance(bundle_status, str) or not bundle_status:
+        raise GateEnforcementError(
+            "bundle_status required for attestation bundle verification",
+            gate_name="attestation_bundle_verification",
+            field_path="attestation.authenticity_result.bundle_status",
+            expected="non-empty str",
+            actual=str(bundle_status),
+        )
+
+    authenticity_status = authenticity_result.get("status")
+    if not isinstance(authenticity_status, str) or not authenticity_status:
+        raise GateEnforcementError(
+            "authenticity_result.status required",
+            gate_name="attestation_bundle_verification",
+            field_path="attestation.authenticity_result.status",
+            expected="non-empty str",
+            actual=str(authenticity_status),
+        )
+
+    is_event_attested = final_event_attested_decision.get("is_event_attested")
+    if not isinstance(is_event_attested, bool):
+        raise GateEnforcementError(
+            "final_event_attested_decision.is_event_attested must be bool",
+            gate_name="attestation_bundle_verification",
+            field_path="attestation.final_event_attested_decision.is_event_attested",
+            expected="bool",
+            actual=str(type(is_event_attested).__name__),
+        )
+
+    if bundle_status != "ok" and is_event_attested:
+        raise GateEnforcementError(
+            "non-ok bundle_status cannot produce event_attested=true",
+            gate_name="attestation_bundle_verification",
+            field_path="attestation.final_event_attested_decision.is_event_attested",
+            expected="False when bundle_status != 'ok'",
+            actual=str(is_event_attested),
+        )
+
+    if bundle_status == "ok" and authenticity_status not in {"authentic", "ok"}:
+        raise GateEnforcementError(
+            "bundle_status ok requires authentic authenticity_result status",
+            gate_name="attestation_bundle_verification",
+            field_path="attestation.authenticity_result.status",
+            expected="authentic",
+            actual=authenticity_status,
+        )
+
+    image_evidence_status = image_evidence_result.get("status")
+    if image_evidence_status == "ok" and bundle_status != "ok":
+        raise GateEnforcementError(
+            "image_evidence_result ok cannot bypass failed or absent bundle verification",
+            gate_name="attestation_bundle_verification",
+            field_path="attestation.image_evidence_result.status",
+            expected="non-ok only when bundle_status is non-ok",
+            actual=str(image_evidence_status),
+        )
 
 def _validate_whitelist_fields(
     record: Dict[str, Any],

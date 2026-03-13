@@ -11,6 +11,43 @@ import pytest
 import json
 
 
+def _load_fact_sources():
+    """
+    功能：加载 freeze gate 测试使用的正式事实源。
+
+    Load authoritative fact sources for freeze gate tests.
+
+    Returns:
+        Tuple of contracts, whitelist, semantics, and interpretation.
+    """
+    from main.core.contracts import load_frozen_contracts, get_contract_interpretation
+    from main.policy.runtime_whitelist import load_runtime_whitelist, load_policy_path_semantics
+
+    contracts = load_frozen_contracts()
+    whitelist = load_runtime_whitelist()
+    semantics = load_policy_path_semantics()
+    interpretation = get_contract_interpretation(contracts)
+    return contracts, whitelist, semantics, interpretation
+
+
+def _build_attestation_gate_record(attestation_payload):
+    """
+    功能：构造 attestation gate 单测使用的最小 detect 记录。
+
+    Build a minimal detect record for attestation gate unit tests.
+
+    Args:
+        attestation_payload: Attestation mapping.
+
+    Returns:
+        Minimal detect record mapping.
+    """
+    return {
+        "operation": "detect",
+        "attestation": attestation_payload,
+    }
+
+
 def test_records_write_requires_freeze_gate_binding(tmp_run_root, mock_interpretation):
     """
     Test that writing records without freeze gate binding fails.
@@ -161,3 +198,265 @@ def test_freeze_gate_assert_prewrite_blocks_invalid_record(mock_interpretation):
     
     error_msg = str(exc_info.value).lower()
     assert any(keyword in error_msg for keyword in ["contract", "required", "missing"])
+
+
+def test_attestation_bundle_gate_is_registered_in_main_dispatch(monkeypatch) -> None:
+    """
+    功能：attestation bundle verification 必须注册到正式 must_enforce 分发。
+
+    The attestation bundle verification handler must be wired into the main
+    must_enforce dispatch path.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    from main.policy import freeze_gate
+
+    contracts, whitelist, semantics, interpretation = _load_fact_sources()
+
+    monkeypatch.setattr(freeze_gate, "_enforce_impl_identity_domain_binding", lambda *args, **kwargs: None)
+    monkeypatch.setattr(freeze_gate, "_enforce_fact_source_binding_integrity", lambda *args, **kwargs: None)
+    monkeypatch.setattr(freeze_gate, "_enforce_cfg_digest_computation_order", lambda *args, **kwargs: None)
+    monkeypatch.setattr(freeze_gate, "_validate_semantic_driven_execution", lambda *args, **kwargs: None)
+
+    smoke_disabled_record = _build_attestation_gate_record(
+        {
+            "status": "absent",
+            "attestation_absent_reason": "attestation_disabled",
+            "authenticity_result": {
+                "status": "absent",
+                "bundle_status": None,
+                "statement_status": "absent",
+            },
+            "image_evidence_result": {
+                "status": "absent",
+                "channel_scores": {"lf": None, "hf": None, "geo": None},
+            },
+            "final_event_attested_decision": {
+                "status": "absent",
+                "is_event_attested": False,
+            },
+        }
+    )
+
+    freeze_gate.enforce_gate_requirements(
+        smoke_disabled_record,
+        interpretation,
+        contracts,
+        whitelist,
+        semantics,
+    )
+
+
+def test_attestation_bundle_gate_rejects_missing_authenticity_result() -> None:
+    """
+    功能：已进入 signed bundle verification 场景但缺少 authenticity_result 时必须拒写。
+
+    Missing authenticity_result must fail when the detect record declares the
+    signed-bundle verification path.
+
+    Returns:
+        None.
+    """
+    from main.policy import freeze_gate
+    from main.core.errors import GateEnforcementError
+
+    contracts, whitelist, semantics, interpretation = _load_fact_sources()
+    record = _build_attestation_gate_record(
+        {
+            "statement": {"schema": "gen_attest_v1"},
+            "image_evidence_result": {
+                "status": "ok",
+                "channel_scores": {"lf": 0.8, "hf": None, "geo": 0.9},
+            },
+            "final_event_attested_decision": {
+                "status": "attested",
+                "is_event_attested": True,
+            },
+        }
+    )
+
+    with pytest.raises(GateEnforcementError, match="authenticity_result required"):
+        freeze_gate._enforce_attestation_bundle_verification(
+            record,
+            contracts,
+            whitelist,
+            semantics,
+            interpretation,
+        )
+
+
+def test_attestation_bundle_gate_rejects_bundle_mismatch_claiming_attested() -> None:
+    """
+    功能：bundle_status 为 mismatch 时不得声称 event_attested=true。
+
+    A mismatched bundle must not be allowed to claim event_attested=true.
+
+    Returns:
+        None.
+    """
+    from main.policy import freeze_gate
+    from main.core.errors import GateEnforcementError
+
+    contracts, whitelist, semantics, interpretation = _load_fact_sources()
+    record = _build_attestation_gate_record(
+        {
+            "statement": {"schema": "gen_attest_v1"},
+            "authenticity_result": {
+                "status": "mismatch",
+                "bundle_status": "mismatch",
+                "statement_status": "parsed",
+            },
+            "bundle_verification": {"status": "mismatch", "mismatch_reasons": ["bundle_digest_mismatch"]},
+            "image_evidence_result": {
+                "status": "absent",
+                "channel_scores": {"lf": None, "hf": None, "geo": None},
+            },
+            "final_event_attested_decision": {
+                "status": "attested",
+                "is_event_attested": True,
+            },
+        }
+    )
+
+    with pytest.raises(GateEnforcementError, match="event_attested=true"):
+        freeze_gate._enforce_attestation_bundle_verification(
+            record,
+            contracts,
+            whitelist,
+            semantics,
+            interpretation,
+        )
+
+
+def test_attestation_bundle_gate_skips_smoke_cpu_disabled_attestation() -> None:
+    """
+    功能：smoke_cpu 且 attestation_disabled 时不应被错误要求 signed bundle。
+
+    The gate must skip signed-bundle enforcement when attestation is disabled
+    for the CPU smoke path.
+
+    Returns:
+        None.
+    """
+    from main.policy import freeze_gate
+
+    contracts, whitelist, semantics, interpretation = _load_fact_sources()
+    record = _build_attestation_gate_record(
+        {
+            "status": "absent",
+            "attestation_absent_reason": "attestation_disabled",
+            "authenticity_result": {
+                "status": "absent",
+                "bundle_status": None,
+                "statement_status": "absent",
+            },
+            "image_evidence_result": {
+                "status": "absent",
+                "channel_scores": {"lf": None, "hf": None, "geo": None},
+            },
+            "final_event_attested_decision": {
+                "status": "absent",
+                "is_event_attested": False,
+            },
+        }
+    )
+
+    freeze_gate._enforce_attestation_bundle_verification(
+        record,
+        contracts,
+        whitelist,
+        semantics,
+        interpretation,
+    )
+
+
+def test_attestation_bundle_gate_requires_complete_layered_results_for_formal_path() -> None:
+    """
+    功能：正式 attestation 路径必须携带完整分层结果且状态一致。
+
+    Formal detect attestation verification must provide complete layered results
+    with mutually consistent bundle status.
+
+    Returns:
+        None.
+    """
+    from main.policy import freeze_gate
+
+    contracts, whitelist, semantics, interpretation = _load_fact_sources()
+    record = _build_attestation_gate_record(
+        {
+            "statement": {"schema": "gen_attest_v1"},
+            "authenticity_result": {
+                "status": "authentic",
+                "bundle_status": "ok",
+                "statement_status": "parsed",
+            },
+            "bundle_verification": {"status": "ok", "mismatch_reasons": []},
+            "image_evidence_result": {
+                "status": "ok",
+                "channel_scores": {"lf": 0.95, "hf": None, "geo": 0.92},
+                "fusion_score": 0.94,
+            },
+            "final_event_attested_decision": {
+                "status": "attested",
+                "is_event_attested": True,
+                "authenticity_status": "authentic",
+                "image_evidence_status": "ok",
+            },
+        }
+    )
+
+    freeze_gate._enforce_attestation_bundle_verification(
+        record,
+        contracts,
+        whitelist,
+        semantics,
+        interpretation,
+    )
+
+
+def test_attestation_bundle_gate_rejects_statement_only_path() -> None:
+    """
+    功能：仅有 statement 且没有 bundle_status 时不得伪装成已完成 bundle verification。
+
+    Statement-only detect results must not be treated as completed signed-bundle
+    verification.
+
+    Returns:
+        None.
+    """
+    from main.policy import freeze_gate
+    from main.core.errors import GateEnforcementError
+
+    contracts, whitelist, semantics, interpretation = _load_fact_sources()
+    record = _build_attestation_gate_record(
+        {
+            "statement": {"schema": "gen_attest_v1"},
+            "authenticity_result": {
+                "status": "statement_only",
+                "bundle_status": None,
+                "statement_status": "parsed",
+            },
+            "image_evidence_result": {
+                "status": "ok",
+                "channel_scores": {"lf": 0.8, "hf": None, "geo": 0.7},
+            },
+            "final_event_attested_decision": {
+                "status": "absent",
+                "is_event_attested": False,
+            },
+        }
+    )
+
+    with pytest.raises(GateEnforcementError, match="bundle_status required"):
+        freeze_gate._enforce_attestation_bundle_verification(
+            record,
+            contracts,
+            whitelist,
+            semantics,
+            interpretation,
+        )
