@@ -95,7 +95,7 @@ target_method_families:
       # 2) Tail Truncation 规则
       tail_truncation:
         required_alignment: "projection_tail_truncation"
-        alignment_rule: "必须对 HF projection coefficients 执行确定性尾部截断；tail_truncation_ratio 与 threshold_percentile 的对应关系必须唯一，且不得回退到 top-k magnitude template 或随机 codeword。"
+        alignment_rule: "必须对 HF projection coefficients 执行确定性尾部截断；tail_truncation_ratio 与 threshold_percentile 的对应关系必须唯一，且不得回退到 top-k magnitude、template correlation 或随机 codeword。"
         deviation_policy: "禁止偏差"
         evidence_field_paths:
           - "content_evidence.hf_trace_digest"
@@ -265,7 +265,7 @@ alignment_check_rules:
     bindings:
       hf_truncation_codec:
         - field_path: "watermark.hf.tail_truncation_mode"
-          required_value: "keyed_rademacher_truncation_channel"
+          required_value: "projection_tail_truncation"
         - field_path: "watermark.hf.enabled"
           required_value: true
       lf_template_codec:

@@ -42,7 +42,7 @@ class AttestationKeys:
 
     Args:
         k_lf: Key for LF channel attestation payload generation.
-        k_hf: Key for HF channel key-conditioned template generation.
+        k_hf: Key for HF channel attestation and truncation binding.
         k_geo: Key for geometry chain anchor template derivation.
         k_tr: Key for generation trajectory commit computation.
         attestation_digest: The d_A value used to derive these keys.
@@ -238,38 +238,6 @@ def compute_lf_attestation_payload(
     # payload_length > 32：使用 HKDF-Expand 延伸。
     prk = hmac.new(key_bytes, message, hashlib.sha256).digest()
     return _hkdf_expand(prk, b"lf_payload", payload_length)
-
-
-def generate_hf_key_template(
-    k_hf: Union[str, bytes],
-    template_size: int = 256,
-) -> bytes:
-    """
-    功能：生成 HF 通道的 key-conditioned template（PRNG 序列）。
-
-    Generate a key-conditioned pseudorandom template for the HF channel.
-    Used for coefficient ranking bias and truncation mask offset.
-
-    Template formula:
-        T_HF = HKDF-Expand(k_HF, context="hf_template", length=template_size)
-
-    Args:
-        k_hf: HF channel derived key as hex str or bytes.
-        template_size: Desired template size in bytes (default 256).
-
-    Returns:
-        Template bytes of requested size.
-
-    Raises:
-        TypeError: If k_hf is of invalid type.
-        ValueError: If template_size <= 0.
-    """
-    if not isinstance(template_size, int) or template_size <= 0:
-        raise ValueError("template_size must be positive int")
-
-    key_bytes = _to_key_bytes(k_hf)
-    # 将 k_HF 自身作为 PRK（已经是 HKDF 派生的高熵密钥）。
-    return _hkdf_expand(key_bytes, b"hf_template", template_size)
 
 
 def derive_geo_anchor_seed(

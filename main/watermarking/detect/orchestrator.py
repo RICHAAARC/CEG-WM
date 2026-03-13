@@ -1541,7 +1541,7 @@ def _build_hf_image_embed_params_for_detect(cfg: Dict[str, Any]) -> Dict[str, An
     return {
         "beta": float(hf_cfg.get("tau", 2.0)),
         "tail_truncation_ratio": float(hf_cfg.get("tail_truncation_ratio", 0.1)),
-        "tail_truncation_mode": hf_cfg.get("tail_truncation_mode", "top_k_per_latent"),
+        "tail_truncation_mode": hf_cfg.get("tail_truncation_mode", "projection_tail_truncation"),
         "sampling_stride": int(hf_cfg.get("sampling_stride", 1)),
     }
 
@@ -4714,7 +4714,7 @@ def verify_attestation(
         2. Compute d_A = SHA256(CanonicalJSON(statement)).
         3. Derive keys: k_LF, k_HF, k_GEO, k_TR via HKDF(K_master, d_A).
         4. Compute S_LF = LF attestation score (latent posterior vs payload).
-        5. Compute S_HF = HF attestation score from supplied HF feature values.
+        5. Compute S_HF = HF truncation attestation score from supplied HF feature values.
         6. Compute S_GEO from provided geo_score.
         7. Fuse: score = w_LF*S_LF + w_HF*S_HF + w_GEO*S_GEO.
         8. Output attested | mismatch | absent.
@@ -4728,7 +4728,7 @@ def verify_attestation(
         k_master: Master key (hex str) used for key derivation.
         candidate_statement: Dict representing the candidate attestation statement.
         content_evidence: Optional content detection evidence dict (for lf_score fallback).
-        hf_values: Optional HF channel feature values for HF attestation scoring.
+        hf_values: Optional HF channel feature values for HF truncation attestation scoring.
         lf_latent_features: Optional LF latent features for attestation bit correlation.
         geo_score: Optional geometry chain score (0??), passed through.
         lf_weight: Score weight for LF channel (default 0.5).
@@ -4842,7 +4842,7 @@ def verify_attestation(
         if isinstance(raw_lf, (int, float)):
             s_lf = float(raw_lf)
 
-    # HF 通道：基??HF 值与 key-conditioned template 的符号相关??
+    # HF 通道：基于 truncation-constrained HF 能量证据。
     if hf_values is not None:
         try:
             hf_result = compute_hf_attestation_score(

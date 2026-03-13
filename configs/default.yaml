@@ -80,7 +80,7 @@ watermark:
   hf:
     enabled: false  # HF 通道可选（初期禁用）
     tail_truncation_ratio: 0.1
-    tail_truncation_mode: "top_k_per_latent"
+    tail_truncation_mode: "projection_tail_truncation"
     tau: 2.0
 
 # ==============================================================

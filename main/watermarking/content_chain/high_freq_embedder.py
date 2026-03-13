@@ -479,68 +479,40 @@ def compute_hf_attestation_score(
     template_size: int = 256,
 ) -> Dict[str, Any]:
     """
-    功能：计算 HF 通道的 attestation 得分（key-conditioned template 相关性）。
+    功能：计算 HF 通道的 attestation 得分（tail-truncation 能量证据）。
 
-    Compute the HF channel attestation score by measuring correlation between
-    the image's high-frequency feature values and a key-conditioned template.
+    Compute the HF channel attestation score from deterministic tail-truncation
+    energy concentration. The formal HF path no longer derives keyed templates,
+    sign patterns, or correlation baselines.
 
-    Template formula:
-        T_HF = HKDF-Expand(k_HF, context="hf_template", length=template_size)
-        t_signs = [(b >> i) & 1 for b in T_HF for i in range(8)]  → ±1 encoding
-
-    The attestation score is the normalized dot product of HF values with t_signs.
-    Score direction: higher value indicates stronger key-conditioned pattern match.
+    The score is defined as the retained HF energy ratio after a fixed
+    percentile-based tail truncation. Larger values indicate stronger
+    truncation-constrained HF evidence.
 
     Args:
         hf_values: HF feature values (list of float or numpy array).
-        k_hf: HF channel derived key (hex str).
-        template_size: Template size in bytes (default 256 = 2048 bits).
+        k_hf: HF attestation key token. Accepted for attestation-call binding,
+            but not used to derive any HF template.
+        template_size: Reserved compatibility parameter. Must remain positive.
 
     Returns:
         Dict with keys:
         - "hf_attestation_score": float in [0, 1], higher indicates attestation match.
         - "status": "ok" | "failed".
         - "n_values_used": number of values correlated.
+        - "threshold_percentile_applied": truncation percentile.
+        - "retained_ratio": retained coefficient ratio after truncation.
         - "hf_attestation_trace_digest": reproducible audit digest.
 
     Raises:
         TypeError: If inputs are of invalid type.
         ValueError: If k_hf is empty.
     """
-    import hashlib
-    import hmac as _hmac
-
     if not k_hf:
         raise ValueError("k_hf must be non-empty str")
     if template_size <= 0:
         raise ValueError("template_size must be positive int")
 
-    # 派生 k_HF 字节。
-    try:
-        key_bytes = bytes.fromhex(k_hf)
-    except ValueError:
-        key_bytes = k_hf.encode("utf-8")
-
-    # HKDF-Expand 生成 key-conditioned template（与 key_derivation.generate_hf_key_template 一致）。
-    template_raw = b""
-    t_prev = b""
-    counter = 1
-    context_info = b"hf_template"
-    while len(template_raw) < template_size:
-        t_i = _hmac.new(key_bytes, t_prev + context_info + bytes([counter]), hashlib.sha256).digest()
-        template_raw += t_i
-        t_prev = t_i
-        counter += 1
-    template_raw = template_raw[:template_size]
-
-    # 将 template 展开为 ±1 符号序列。
-    template_signs: List[float] = []
-    for byte_val in template_raw:
-        for bit_pos in range(8):
-            bit = (byte_val >> bit_pos) & 1
-            template_signs.append(1.0 if bit == 1 else -1.0)
-
-    # 规范化 hf_values 为列表。
     try:
         if hasattr(hf_values, "cpu"):
             flat_hf: List[float] = [float(v) for v in hf_values.cpu().detach().reshape(-1).tolist()]
@@ -561,8 +533,7 @@ def compute_hf_attestation_score(
             }),
         }
 
-    n_compare = min(len(flat_hf), len(template_signs))
-    if n_compare <= 0:
+    if len(flat_hf) <= 0:
         return {
             "hf_attestation_score": None,
             "status": "failed",
@@ -572,25 +543,29 @@ def compute_hf_attestation_score(
             }),
         }
 
-    # 归一化点积：sign correlation。
-    dot = sum(
-        float(flat_hf[i]) * template_signs[i]
-        for i in range(n_compare)
-    )
-    abs_sum = sum(abs(float(flat_hf[i])) for i in range(n_compare))
-    if abs_sum < 1e-12:
-        hf_attestation_score = 0.5
+    abs_values = np.abs(np.asarray(flat_hf, dtype=np.float64))
+    n_compare = int(abs_values.shape[0])
+    threshold_percentile = 75.0
+    threshold_value = float(np.percentile(abs_values, threshold_percentile))
+    retained_mask = abs_values >= threshold_value
+    retained_count = int(np.sum(retained_mask))
+    retained_ratio = float(retained_count / n_compare) if n_compare > 0 else 0.0
+    total_energy = float(np.sum(abs_values ** 2))
+    retained_energy = float(np.sum((abs_values[retained_mask]) ** 2))
+    if total_energy < 1e-12:
+        hf_attestation_score = 0.0
     else:
-        # 归一化到 [0, 1]（点积方向：正相关 → 得分高）。
-        hf_attestation_score = float(0.5 + 0.5 * (dot / abs_sum))
-        hf_attestation_score = max(0.0, min(1.0, hf_attestation_score))
+        hf_attestation_score = float(max(0.0, min(1.0, retained_energy / total_energy)))
 
-    # 构造审计摘要（可复算）。
     trace_payload: Dict[str, Any] = {
         "channel": "hf",
-        "k_hf_prefix": k_hf[:16],
-        "template_size": template_size,
+        "attestation_mode": "projection_tail_truncation_energy",
+        "compat_template_size": template_size,
         "n_values_used": n_compare,
+        "threshold_percentile_applied": threshold_percentile,
+        "threshold_value": round(threshold_value, 8),
+        "retained_count": retained_count,
+        "retained_ratio": round(retained_ratio, 8),
         "hf_attestation_score": round(hf_attestation_score, 6),
     }
     trace_digest = digests.canonical_sha256(trace_payload)
@@ -599,5 +574,7 @@ def compute_hf_attestation_score(
         "hf_attestation_score": hf_attestation_score,
         "status": "ok",
         "n_values_used": n_compare,
+        "threshold_percentile_applied": threshold_percentile,
+        "retained_ratio": retained_ratio,
         "hf_attestation_trace_digest": trace_digest,
     }

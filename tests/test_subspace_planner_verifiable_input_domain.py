@@ -188,6 +188,41 @@ class TestEstimateJVPMatrix:
         with pytest.raises(ValueError, match="paper formal path requires jvp_operator"):
             planner._estimate_jvp_matrix(cfg, {}, centered, planner_params)
 
+    def test_estimate_jvp_matrix_rejects_invalid_runtime_operator_on_formal_path(self):
+        """paper formal path 提供了无效 jvp_operator 时也必须 fail-fast。"""
+        planner = SubspacePlannerImpl(
+            impl_id=SUBSPACE_PLANNER_ID,
+            impl_version=SUBSPACE_PLANNER_VERSION,
+            impl_digest=digests.canonical_sha256({"test": "digest"})
+        )
+
+        cfg = {
+            "paper_faithfulness": {"enabled": True},
+            "watermark": {
+                "subspace": {
+                    "enabled": True,
+                    "rank": 4,
+                    "sample_count": 8,
+                    "feature_dim": 16,
+                    "seed": 42,
+                    "jacobian_probe_count": 2,
+                    "jacobian_eps": 1e-3
+                }
+            }
+        }
+
+        planner_params = planner._parse_planner_params(cfg)
+        centered = np.random.randn(8, 16).astype(np.float64)
+
+        def _invalid_runtime_operator(state_vector: np.ndarray, probe_vector: np.ndarray, eps: float) -> np.ndarray:
+            _ = state_vector
+            _ = probe_vector
+            _ = eps
+            return np.asarray([1.0, 2.0], dtype=np.float64)
+
+        with pytest.raises(ValueError, match="paper formal path requires jvp_operator"):
+            planner._estimate_jvp_matrix(cfg, {"jvp_operator": _invalid_runtime_operator}, centered, planner_params)
+
     def test_estimate_jvp_matrix_is_deterministic(self):
         """JVP 估算应具有确定性。"""
         planner = SubspacePlannerImpl(

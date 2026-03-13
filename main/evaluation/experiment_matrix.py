@@ -166,12 +166,12 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
         "attack_protocol_version": grid_item_cfg.get("attack_protocol_version", "<absent>"),
         "impl_digest": "<absent>",
         "fusion_rule_version": "<absent>",
-        "hf_template_comparison": {
+        "hf_truncation_baseline_comparison": {
             "content_score": None,
-            "hf_template_score": None,
-            "score_delta_content_minus_hf_template": None,
+            "hf_truncation_score": None,
+            "score_delta_content_minus_hf_truncation": None,
             "comparison_ready": False,
-            "comparison_source": "real_hf_template_baseline_required",
+            "comparison_source": "real_hf_truncation_baseline_required",
         },
         "detect_gate_relaxed": False,
         "detect_gate_relax_reason": "hard_gate_default",
@@ -249,7 +249,7 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
                     "conditional_fpr_estimate": metrics_obj.get("conditional_fpr_estimate"),
                     "conditional_fpr_n": metrics_obj.get("conditional_fpr_n"),
                 },
-                "hf_template_comparison": _extract_hf_template_baseline_comparison_from_detect_record(run_root),
+                "hf_truncation_baseline_comparison": _extract_hf_truncation_baseline_comparison_from_detect_record(run_root),
                 "detect_gate_relaxed": bool(detect_gate_info.get("gate_relaxed", False)),
                 "detect_gate_relax_reason": _safe_str(detect_gate_info.get("reason")),
                 "detect_gate_sample_counts": detect_gate_info.get("sample_counts") if isinstance(detect_gate_info.get("sample_counts"), dict) else {},
@@ -279,17 +279,17 @@ def _read_optional_json(path: Path) -> Dict[str, Any]:
     return parsed_obj
 
 
-def _extract_hf_template_baseline_comparison_from_detect_record(run_root: Path) -> Dict[str, Any]:
-    """Extract same-sample comparison values from real HF template baseline record."""
+def _extract_hf_truncation_baseline_comparison_from_detect_record(run_root: Path) -> Dict[str, Any]:
+    """Extract same-sample comparison values from real HF truncation baseline record."""
     if not isinstance(run_root, Path):
         raise TypeError("run_root must be Path")
 
     result: Dict[str, Any] = {
         "content_score": None,
-        "hf_template_score": None,
-        "score_delta_content_minus_hf_template": None,
+        "hf_truncation_score": None,
+        "score_delta_content_minus_hf_truncation": None,
         "comparison_ready": False,
-        "comparison_source": "real_hf_template_baseline_required",
+        "comparison_source": "real_hf_truncation_baseline_required",
         "baseline_status": "absent",
         "baseline_trace": None,
     }
@@ -306,7 +306,7 @@ def _extract_hf_template_baseline_comparison_from_detect_record(run_root: Path) 
     if isinstance(content_score, (int, float)) and np.isfinite(float(content_score)):
         result["content_score"] = float(content_score)
 
-    baseline_payload = detect_record.get("hf_template_baseline")
+    baseline_payload = detect_record.get("hf_truncation_baseline")
     if isinstance(baseline_payload, dict):
         baseline_trace = baseline_payload.get("trace")
         if isinstance(baseline_trace, dict):
@@ -316,12 +316,12 @@ def _extract_hf_template_baseline_comparison_from_detect_record(run_root: Path) 
             result["baseline_status"] = baseline_status
         baseline_score = baseline_payload.get("score")
         if isinstance(baseline_score, (int, float)) and np.isfinite(float(baseline_score)):
-            result["hf_template_score"] = float(baseline_score)
+            result["hf_truncation_score"] = float(baseline_score)
             result["baseline_status"] = "ok"
-            result["comparison_source"] = "real_hf_template_baseline_record"
+            result["comparison_source"] = "real_hf_truncation_baseline_record"
 
-    if isinstance(result.get("content_score"), float) and isinstance(result.get("hf_template_score"), float):
-        result["score_delta_content_minus_hf_template"] = float(result["content_score"] - result["hf_template_score"])
+    if isinstance(result.get("content_score"), float) and isinstance(result.get("hf_truncation_score"), float):
+        result["score_delta_content_minus_hf_truncation"] = float(result["content_score"] - result["hf_truncation_score"])
         result["comparison_ready"] = True
 
     return result
@@ -346,7 +346,7 @@ def _enforce_paper_acceptance_gate(summary: Dict[str, Any], grid_item_cfg: Dict[
     detect_runtime_mode = detect_record.get("detect_runtime_mode") if isinstance(detect_record.get("detect_runtime_mode"), str) else "<absent>"
     metrics = summary.get("metrics") if isinstance(summary.get("metrics"), dict) else {}
     geo_available_rate = metrics.get("geo_available_rate")
-    hf_template_comparison = summary.get("hf_template_comparison") if isinstance(summary.get("hf_template_comparison"), dict) else {}
+    hf_truncation_baseline_comparison = summary.get("hf_truncation_baseline_comparison") if isinstance(summary.get("hf_truncation_baseline_comparison"), dict) else {}
 
     if bool(pipeline_runtime_meta.get("synthetic_pipeline", False)):
         summary["status"] = "failed"
@@ -360,9 +360,9 @@ def _enforce_paper_acceptance_gate(summary: Dict[str, Any], grid_item_cfg: Dict[
         summary["status"] = "failed"
         summary["failure_reason"] = "paper_acceptance_failed: geo_available_rate_zero"
         return
-    if not bool(hf_template_comparison.get("comparison_ready", False)):
+    if not bool(hf_truncation_baseline_comparison.get("comparison_ready", False)):
         summary["status"] = "failed"
-        summary["failure_reason"] = "paper_acceptance_failed: real_hf_template_baseline_missing"
+        summary["failure_reason"] = "paper_acceptance_failed: real_hf_truncation_baseline_missing"
 
 
 def _first_present_str(*values: Any) -> str:
@@ -1471,8 +1471,8 @@ def _write_grid_artifacts(
     grid_summary_path = artifacts_dir / "grid_summary.json"
     grid_manifest_path = artifacts_dir / "grid_manifest.json"
     attack_coverage_manifest_path = artifacts_dir / "attack_coverage_manifest.json"
-    hf_template_comparison_table_path = artifacts_dir / "hf_template_comparison_table.json"
-    hf_template_comparison_table_csv_path = artifacts_dir / "hf_template_comparison_table.csv"
+    hf_truncation_baseline_comparison_table_path = artifacts_dir / "hf_truncation_baseline_comparison_table.json"
+    hf_truncation_baseline_comparison_table_csv_path = artifacts_dir / "hf_truncation_baseline_comparison_table.csv"
 
     grid_manifest = _build_grid_manifest(grid)
 
@@ -1522,18 +1522,18 @@ def _write_grid_artifacts(
             obj=attack_coverage.compute_attack_coverage_manifest(),
         )
 
-    hf_template_comparison_table = _build_hf_template_comparison_table(results)
+    hf_truncation_baseline_comparison_table = _build_hf_truncation_baseline_comparison_table(results)
     records_io.write_artifact_json_unbound(
         run_root=batch_root,
         artifacts_dir=artifacts_dir,
-        path=str(hf_template_comparison_table_path),
-        obj=hf_template_comparison_table,
+        path=str(hf_truncation_baseline_comparison_table_path),
+        obj=hf_truncation_baseline_comparison_table,
     )
     records_io.write_artifact_text_unbound(
         run_root=batch_root,
         artifacts_dir=artifacts_dir,
-        path=str(hf_template_comparison_table_csv_path),
-        content=_build_hf_template_comparison_csv(hf_template_comparison_table),
+        path=str(hf_truncation_baseline_comparison_table_csv_path),
+        content=_build_hf_truncation_baseline_comparison_csv(hf_truncation_baseline_comparison_table),
     )
 
     return {
@@ -1542,19 +1542,19 @@ def _write_grid_artifacts(
         "grid_summary_path": str(grid_summary_path),
         "grid_manifest_path": str(grid_manifest_path),
         "attack_coverage_manifest_path": str(attack_coverage_manifest_path),
-        "hf_template_comparison_table_path": str(hf_template_comparison_table_path),
-        "hf_template_comparison_table_csv_path": str(hf_template_comparison_table_csv_path),
+        "hf_truncation_baseline_comparison_table_path": str(hf_truncation_baseline_comparison_table_path),
+        "hf_truncation_baseline_comparison_table_csv_path": str(hf_truncation_baseline_comparison_table_csv_path),
     }
 
 
-def _build_hf_template_comparison_table(experiment_results: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Build a deterministic same-sample comparison table against real HF template baseline."""
+def _build_hf_truncation_baseline_comparison_table(experiment_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Build a deterministic same-sample comparison table against real HF truncation baseline."""
     if not isinstance(experiment_results, list):
         raise TypeError("experiment_results must be list")
 
     rows: List[Dict[str, Any]] = []
     content_scores: List[float] = []
-    hf_template_scores: List[float] = []
+    hf_truncation_scores: List[float] = []
     score_deltas: List[float] = []
 
     for item in experiment_results:
@@ -1562,26 +1562,26 @@ def _build_hf_template_comparison_table(experiment_results: List[Dict[str, Any]]
             continue
         if item.get("status") != "ok":
             continue
-        comparison_obj = item.get("hf_template_comparison") if isinstance(item.get("hf_template_comparison"), dict) else {}
+        comparison_obj = item.get("hf_truncation_baseline_comparison") if isinstance(item.get("hf_truncation_baseline_comparison"), dict) else {}
         row = {
             "grid_item_digest": _safe_str(item.get("grid_item_digest")),
             "attack_family": _safe_str(item.get("attack_family")),
             "model_id": _safe_str(item.get("model_id")),
             "seed": item.get("seed") if isinstance(item.get("seed"), int) else None,
             "content_score": comparison_obj.get("content_score"),
-            "hf_template_score": comparison_obj.get("hf_template_score"),
-            "score_delta_content_minus_hf_template": comparison_obj.get("score_delta_content_minus_hf_template"),
+            "hf_truncation_score": comparison_obj.get("hf_truncation_score"),
+            "score_delta_content_minus_hf_truncation": comparison_obj.get("score_delta_content_minus_hf_truncation"),
             "comparison_ready": bool(comparison_obj.get("comparison_ready", False)),
         }
         rows.append(row)
 
         content_value = row.get("content_score")
-        hf_template_value = row.get("hf_template_score")
-        delta_value = row.get("score_delta_content_minus_hf_template")
+        hf_truncation_value = row.get("hf_truncation_score")
+        delta_value = row.get("score_delta_content_minus_hf_truncation")
         if isinstance(content_value, (int, float)) and np.isfinite(float(content_value)):
             content_scores.append(float(content_value))
-        if isinstance(hf_template_value, (int, float)) and np.isfinite(float(hf_template_value)):
-            hf_template_scores.append(float(hf_template_value))
+        if isinstance(hf_truncation_value, (int, float)) and np.isfinite(float(hf_truncation_value)):
+            hf_truncation_scores.append(float(hf_truncation_value))
         if isinstance(delta_value, (int, float)) and np.isfinite(float(delta_value)):
             score_deltas.append(float(delta_value))
 
@@ -1589,24 +1589,24 @@ def _build_hf_template_comparison_table(experiment_results: List[Dict[str, Any]]
         "rows_total": len(rows),
         "rows_comparison_ready": sum(1 for row in rows if bool(row.get("comparison_ready", False))),
         "mean_content_score": (float(np.mean(content_scores)) if len(content_scores) > 0 else None),
-        "mean_hf_template_score": (float(np.mean(hf_template_scores)) if len(hf_template_scores) > 0 else None),
-        "mean_delta_content_minus_hf_template": (float(np.mean(score_deltas)) if len(score_deltas) > 0 else None),
+        "mean_hf_truncation_score": (float(np.mean(hf_truncation_scores)) if len(hf_truncation_scores) > 0 else None),
+        "mean_delta_content_minus_hf_truncation": (float(np.mean(score_deltas)) if len(score_deltas) > 0 else None),
     }
 
     return {
-        "schema_version": "hf_template_comparison_table_v1",
+        "schema_version": "hf_truncation_baseline_comparison_table_v1",
         "comparison_definition": {
-            "reference_name": "hf_template_baseline",
-            "reference_source": "detect_record.hf_template_baseline.score",
+            "reference_name": "hf_truncation_baseline",
+            "reference_source": "detect_record.hf_truncation_baseline.score",
             "target_source": "content_evidence_payload.score",
-            "directionality": "positive_delta_means_target_score_higher_than_hf_template",
+            "directionality": "positive_delta_means_target_score_higher_than_hf_truncation",
         },
         "rows": rows,
         "summary": summary,
     }
 
 
-def _build_hf_template_comparison_csv(table_obj: Dict[str, Any]) -> str:
+def _build_hf_truncation_baseline_comparison_csv(table_obj: Dict[str, Any]) -> str:
     """Render comparison table rows to CSV for quick inspection."""
     if not isinstance(table_obj, dict):
         raise TypeError("table_obj must be dict")
@@ -1619,8 +1619,8 @@ def _build_hf_template_comparison_csv(table_obj: Dict[str, Any]) -> str:
         "model_id",
         "seed",
         "content_score",
-        "hf_template_score",
-        "score_delta_content_minus_hf_template",
+        "hf_truncation_score",
+        "score_delta_content_minus_hf_truncation",
         "comparison_ready",
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames)

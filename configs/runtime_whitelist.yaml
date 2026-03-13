@@ -402,7 +402,7 @@ impl_id:
 
       # v2/v3 正式实现（唯一合规路径）
       # - unified_content_extractor：统一 Embed/Detect 双模式提取器。
-      # - high_freq_truncation_codec：HF 高频截断通道嵌入，keyed Rademacher + truncation-channel 检测。
+      # - high_freq_truncation_codec：HF 高频截断通道嵌入，planner-bound projection + tail-truncation 检测。
       # - low_freq_template_codec：LF 低频伪高斯模板加性注入 + matched_correlation 检测。
       - "unified_content_extractor"
       - "high_freq_truncation_codec"

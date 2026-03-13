@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, cast
+from typing import Any, Dict, Sequence, cast
 
 import numpy as np
 from PIL import Image
@@ -716,7 +716,7 @@ def _apply_content_embedding_pipeline(
                 "impl_selected": getattr(lf_coder, "impl_id", None),
                 "evidence_level": "primary",
             }
-        except Exception as exc:
+        except Exception:
             lf_impl_binding = {
                 "impl_selected": getattr(lf_coder, "impl_id", None),
                 "evidence_level": "channel_failed",
@@ -870,7 +870,7 @@ def _build_hf_image_embed_params(cfg: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "beta": float(hf_cfg.get("tau", 2.0)),
         "tail_truncation_ratio": float(hf_cfg.get("tail_truncation_ratio", 0.1)),
-        "tail_truncation_mode": hf_cfg.get("tail_truncation_mode", "top_k_per_latent"),
+        "tail_truncation_mode": hf_cfg.get("tail_truncation_mode", "projection_tail_truncation"),
         "sampling_stride": int(hf_cfg.get("sampling_stride", 1)),
     }
 
@@ -1214,7 +1214,7 @@ def build_embed_attestation(
     k_seed: str,
     event_nonce: "str | None" = None,
     time_bucket: "str | None" = None,
-    latent_snapshots: "list | None" = None,
+    latent_snapshots: Sequence[Any] | None = None,
     use_trajectory_mix: bool = True,
 ) -> Dict[str, Any]:
     """
@@ -1273,7 +1273,6 @@ def build_embed_attestation(
     from main.watermarking.provenance.key_derivation import (
         derive_attestation_keys,
         compute_lf_attestation_payload,
-        generate_hf_key_template,
         derive_geo_anchor_seed,
     )
     from main.watermarking.provenance.trajectory_commit import (

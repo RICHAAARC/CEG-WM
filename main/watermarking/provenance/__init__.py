@@ -10,7 +10,6 @@ Module type: General module
     compute_prompt_commit       — HMAC 承诺 prompt
     compute_seed_commit         — HMAC 承诺 seed
     compute_lf_attestation_payload  — 生成 LF 主通道 attestation payload
-    generate_hf_key_template    — 生成 HF key-conditioned template
     compute_trajectory_commit   — 计算生成轨迹承诺
 """
 

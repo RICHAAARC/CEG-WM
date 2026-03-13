@@ -62,8 +62,7 @@ watermark:
   hf:
     enabled: true
     tail_truncation_ratio: 0.1
-    tail_truncation_mode: "keyed_rademacher_truncation_channel"
-    selection: "keyed_rademacher_truncation"
+    tail_truncation_mode: "projection_tail_truncation"
     tau: 2.0
 
 detect:

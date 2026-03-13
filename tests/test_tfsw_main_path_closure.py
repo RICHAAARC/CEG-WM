@@ -78,7 +78,6 @@ def _minimal_planner_cfg(
 
 class _FakePipeline:
     """仅存在作为 has_pipeline 路由触发器，不执行任何真实推理。"""
-    unet = None
     transformer = None
 
 

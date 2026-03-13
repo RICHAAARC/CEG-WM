@@ -240,6 +240,61 @@ def build_runtime_jvp_operator_from_cache(
     return _runtime_operator
 
 
+def _compute_matrix_digest(matrix: Any) -> Optional[str]:
+    if matrix is None:
+        return None
+    matrix_np = np.asarray(matrix, dtype=np.float64)
+    if matrix_np.ndim != 2:
+        return None
+    return digests.canonical_sha256(np.round(matrix_np, 8).tolist())
+
+
+def _build_route_basis_bridge(
+    hf_feature_cols: List[int],
+    lf_feature_cols: List[int],
+    lf_decomposition_matrix: Any,
+    hf_decomposition_matrix: Any,
+    *,
+    routing_digest_ref: Optional[str] = None,
+    region_index_digest: Optional[str] = None,
+    hf_region_selected_indices: Optional[List[int]] = None,
+    lf_region_selected_indices: Optional[List[int]] = None,
+    lf_basis_rank: Optional[int] = None,
+    hf_basis_rank: Optional[int] = None,
+) -> Dict[str, Any]:
+    lf_matrix_np = np.asarray(lf_decomposition_matrix, dtype=np.float64)
+    hf_matrix_np = np.asarray(hf_decomposition_matrix, dtype=np.float64)
+    return {
+        "bridge_version": "route_basis_bridge_v2",
+        "routing_digest_ref": routing_digest_ref,
+        "region_index_digest": region_index_digest,
+        "hf_feature_cols": list(hf_feature_cols),
+        "lf_feature_cols": list(lf_feature_cols),
+        "route_layer": {
+            "routing_digest_ref": routing_digest_ref,
+            "region_index_digest": region_index_digest,
+            "hf_region_selected_indices": list(hf_region_selected_indices or []),
+            "lf_region_selected_indices": list(lf_region_selected_indices or []),
+        },
+        "feature_bridge_layer": {
+            "binding_source": "conditioning.selected_feature_indices",
+            "route_to_feature_bridge": "mask_routed_feature_partition",
+            "hf_feature_cols": list(hf_feature_cols),
+            "lf_feature_cols": list(lf_feature_cols),
+            "feature_partition_complete": bool(len(hf_feature_cols) > 0 or len(lf_feature_cols) > 0),
+        },
+        "dual_subspace_estimation": {
+            "estimation_rule": "dual_subspace_partition_svd",
+            "lf_basis_rank": lf_basis_rank,
+            "hf_basis_rank": hf_basis_rank,
+            "lf_decomposition_matrix_shape": list(lf_matrix_np.shape),
+            "hf_decomposition_matrix_shape": list(hf_matrix_np.shape),
+            "lf_decomposition_matrix_digest": _compute_matrix_digest(lf_matrix_np),
+            "hf_decomposition_matrix_digest": _compute_matrix_digest(hf_matrix_np),
+        },
+    }
+
+
 def _downsample_mask_to_grid(mask_array: np.ndarray, rows: int, cols: int) -> np.ndarray:
     """
     功能：将掩码下采样为固定网格布尔阵列。 
@@ -573,18 +628,18 @@ class SubspacePlannerImpl:
             high_freq_subspace_spec = self._build_high_freq_subspace_spec(
                 basis_summary=basis_summary
             )
-            route_basis_bridge = {
-                "bridge_version": "route_basis_bridge_v1",
-                "binding_source": "conditioning.selected_feature_indices",
-                "routing_digest_ref": routing_digest_ref,
-                "region_index_digest": region_index_digest,
-                "hf_feature_cols": basis_summary.get("hf_feature_cols", []),
-                "lf_feature_cols": basis_summary.get("lf_feature_cols", []),
-                "hf_region_selected_indices": hf_region_index_spec.get("selected_indices", []),
-                "lf_region_selected_indices": lf_region_index_spec.get("selected_indices", []),
-                "hf_basis_rank": hf_basis.get("basis_rank"),
-                "lf_basis_rank": lf_basis.get("basis_rank"),
-            }
+            route_basis_bridge = _build_route_basis_bridge(
+                hf_feature_cols=list(basis_summary.get("hf_feature_cols", [])),
+                lf_feature_cols=list(basis_summary.get("lf_feature_cols", [])),
+                lf_decomposition_matrix=basis_summary.get("lf_projection_matrix"),
+                hf_decomposition_matrix=basis_summary.get("hf_projection_matrix"),
+                routing_digest_ref=routing_digest_ref,
+                region_index_digest=region_index_digest,
+                hf_region_selected_indices=list(hf_region_index_spec.get("selected_indices", [])),
+                lf_region_selected_indices=list(lf_region_index_spec.get("selected_indices", [])),
+                lf_basis_rank=lf_basis.get("basis_rank"),
+                hf_basis_rank=hf_basis.get("basis_rank"),
+            )
             
             plan_payload = self._build_plan_payload_for_digest(
                 cfg=cfg,
@@ -827,8 +882,10 @@ class SubspacePlannerImpl:
         top_index_count = min(32, basis_importance.shape[0])
         top_indices = np.argsort(-basis_importance)[:top_index_count].tolist()
 
-        # 步骤 4b：区域路由分区 SVD — 按 conditioning 特征列分区，分别做 LF/HF 子 SVD。
-        # LF 投影矩阵作用于 lf_feature_cols 子集，HF 投影矩阵作用于 hf_feature_cols 子集。
+        # 步骤 4b：区域路由分区 SVD。
+        # route_layer：将 mask 路由绑定到 selected_feature_indices。
+        # feature_bridge_layer：将 routed features 显式划分为 LF/HF 两个特征集合。
+        # dual_subspace_estimation：分别在两个特征集合上执行独立 SVD，得到 LF/HF decomposition matrix。
         hf_feature_cols = list(subspace_conditioning.selected_feature_indices)
         lf_feature_cols = sorted(set(range(feature_matrix.shape[1])) - set(hf_feature_cols))
 
@@ -921,12 +978,12 @@ class SubspacePlannerImpl:
             "subspace_conditioning": subspace_conditioning.digest_payload(),
             "subspace_evidence_semantics": subspace_evidence_semantics,
             # 区域路由桥摘要：绑定 conditioning 特征列分区与 LF/HF 子 SVD 结果。
-            "route_basis_bridge": {
-                "bridge_version": "route_basis_bridge_v1",
-                "binding_source": "conditioning.selected_feature_indices",
-                "hf_feature_cols": hf_feature_cols,
-                "lf_feature_cols": lf_feature_cols,
-            },
+            "route_basis_bridge": _build_route_basis_bridge(
+                hf_feature_cols=hf_feature_cols,
+                lf_feature_cols=lf_feature_cols,
+                lf_decomposition_matrix=lf_projection_matrix,
+                hf_decomposition_matrix=hf_projection_matrix,
+            ),
             # 新增：可验证输入域锚点
             "verifiable_input_domain": {
                 "samples_anchor": samples_anchor,
@@ -953,12 +1010,12 @@ class SubspacePlannerImpl:
             # 区域路由分区特征列索引：供 _build_high_freq_subspace_spec 使用。
             "hf_feature_cols": hf_feature_cols,
             "lf_feature_cols": lf_feature_cols,
-            "route_basis_bridge": {
-                "bridge_version": "route_basis_bridge_v1",
-                "binding_source": "conditioning.selected_feature_indices",
-                "hf_feature_cols": hf_feature_cols,
-                "lf_feature_cols": lf_feature_cols,
-            },
+            "route_basis_bridge": _build_route_basis_bridge(
+                hf_feature_cols=hf_feature_cols,
+                lf_feature_cols=lf_feature_cols,
+                lf_decomposition_matrix=lf_projection_matrix,
+                hf_decomposition_matrix=hf_projection_matrix,
+            ),
             # 新增：可验证锚点供 plan_digest 使用
             "samples_anchor": samples_anchor,
             "jvp_anchor": jvp_anchor
@@ -1465,7 +1522,7 @@ class SubspacePlannerImpl:
                 "selected_indices": hf_feature_cols,
                 "selected_count": len(hf_feature_cols),
                 "source_field": "conditioning.selected_feature_indices",
-                "bridge_version": "route_basis_bridge_v1",
+                "bridge_version": "route_basis_bridge_v2",
             }
 
         # fallback：全域 SVD 尾半部（分区失败或 conditioning 无索引时使用）。
@@ -1745,7 +1802,7 @@ class SubspacePlannerImpl:
                 - "probe_seed_digest": SHA256 of probe seed
                 - "probe_count_digest": SHA256 of probe count
                 - "jacobian_eps_digest": SHA256 of eps value
-                - "jvp_source": "runtime_operator" or "transition_fit"
+                - "jvp_source": "runtime_operator" in paper mode, or "transition_fit" only in non-paper fallback mode
                 - "probe_vectors_digest": SHA256 of probe vectors
                 - "jvp_energy_summary": spectral summary
 
@@ -1768,6 +1825,8 @@ class SubspacePlannerImpl:
             "probes": np.round(probes, 8).tolist()[:min(4, len(probes))]
         })
         
+        paper_cfg = cfg.get("paper_faithfulness", {}) if isinstance(cfg, dict) else {}
+        paper_mode = bool(paper_cfg.get("enabled", False)) if isinstance(paper_cfg, dict) else False
         jvp_operator = inputs.get("jvp_operator") if isinstance(inputs, dict) else None
 
         if callable(jvp_operator):
@@ -1777,14 +1836,23 @@ class SubspacePlannerImpl:
                 probes=probes,
                 planner_params=planner_params,
             )
+            if paper_mode and jvp_source != "runtime_operator":
+                raise ValueError(
+                    "paper formal path requires jvp_operator with runtime-validated outputs; "
+                    "provide usable jvp_operator or disable paper_faithfulness.enabled"
+                )
+            if not paper_mode and jvp_source != "runtime_operator":
+                jvp_samples, jvp_source = self._estimate_jvp_from_transition(
+                    centered_matrix=centered_matrix,
+                    probes=probes,
+                    planner_params=planner_params,
+                )
         else:
             # paper 正式路径保护：paper_faithfulness.enabled=True 时禁止 surrogate 回退，
-            # 必须通过 jvp_operator 提供真实 JVP（SD3.5 无 UNet，只有 transformer/runtime operator）。
-            paper_cfg = cfg.get("paper_faithfulness", {}) if isinstance(cfg, dict) else {}
-            paper_mode = bool(paper_cfg.get("enabled", False)) if isinstance(paper_cfg, dict) else False
+            # 必须通过 jvp_operator 提供真实 JVP。
             if paper_mode:
                 raise ValueError(
-                    "paper formal path requires jvp_operator: SD3.5 uses transformer/runtime operator (no unet); "
+                    "paper formal path requires jvp_operator: SD3.5 formal path binds runtime transformer-derived JVP; "
                     "provide jvp_operator via planner inputs or disable paper_faithfulness.enabled"
                 )
             jvp_samples, jvp_source = self._estimate_jvp_from_transition(
@@ -1844,7 +1912,7 @@ class SubspacePlannerImpl:
             planner_params: Planner parameters.
 
         Returns:
-            Tuple of (jvp_samples, "runtime_operator").
+            Tuple of (jvp_samples, "runtime_operator") when the operator yields valid runtime-sized outputs.
         """
         jvp_rows: List[np.ndarray] = []
         row_count = min(centered_matrix.shape[0], 4)
@@ -1860,7 +1928,7 @@ class SubspacePlannerImpl:
                 jvp_rows.append(jvp_np)
 
         if len(jvp_rows) == 0:
-            return self._estimate_jvp_from_transition(centered_matrix, probes, planner_params)
+            return np.zeros((0, centered_matrix.shape[1]), dtype=np.float64), "runtime_operator_invalid"
 
         jvp_samples = np.asarray(jvp_rows, dtype=np.float64)
         jvp_samples = jvp_samples - np.mean(jvp_samples, axis=0, keepdims=True)
@@ -1883,7 +1951,7 @@ class SubspacePlannerImpl:
             planner_params: Planner parameters.
 
         Returns:
-            Tuple of (jvp_samples, "transition_fit").
+            Tuple of (jvp_samples, "transition_fit") for non-paper fallback mode only.
         """
         x_t = centered_matrix[:-1, :]
         x_tp1 = centered_matrix[1:, :]
@@ -3439,7 +3507,7 @@ def _build_high_freq_cfg_binding(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "ecc": hf_cfg.get("ecc"),
         "tau": hf_cfg.get("tau", 2.0),
         "tail_truncation_ratio": hf_cfg.get("tail_truncation_ratio", 0.1),
-        "tail_truncation_mode": hf_cfg.get("tail_truncation_mode", "gaussian"),
+        "tail_truncation_mode": hf_cfg.get("tail_truncation_mode", "projection_tail_truncation"),
         "sampling_stride": hf_cfg.get("sampling_stride", 1),
         "energy_floor": hf_cfg.get("energy_floor", 0.0),
         "energy_cap": hf_cfg.get("energy_cap", 1.0),

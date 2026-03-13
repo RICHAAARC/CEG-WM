@@ -165,7 +165,7 @@ def _build_base_cfg() -> Dict[str, Any]:
             "hf": {
                 "enabled": True,
                 "tail_truncation_ratio": 0.1,
-                "tail_truncation_mode": "top_k_per_latent",
+                "tail_truncation_mode": "projection_tail_truncation",
                 "tau": 2.0,
                 "sampling_stride": 1,
             },

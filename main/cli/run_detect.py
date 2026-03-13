@@ -804,7 +804,7 @@ def run_detect(
             record["inference_status"] = run_meta.get("inference_status")
             record["inference_error"] = run_meta.get("inference_error")
             record["inference_runtime_meta"] = run_meta.get("inference_runtime_meta")
-            record["hf_template_baseline"] = _build_hf_truncation_baseline_payload(record, cfg)
+            record["hf_truncation_baseline"] = _build_hf_truncation_baseline_payload(record, cfg)
 
             schema.ensure_required_fields(record, cfg, interpretation)
 
