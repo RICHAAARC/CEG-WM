@@ -1733,6 +1733,7 @@ def _prepare_detect_records_with_minimal_ground_truth(
                         recovery_candidates = [
                             neg_content.get("score"),
                             neg_content.get("detect_lf_score"),
+                            neg_content.get("detect_hf_score"),
                             neg_content.get("lf_score"),
                             neg_score_parts.get("content_score"),
                             neg_score_parts.get("detect_lf_score"),

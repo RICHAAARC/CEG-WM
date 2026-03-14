@@ -13,6 +13,7 @@ import json
 
 import pytest
 import yaml
+from main.watermarking.detect.orchestrator import load_scores_for_calibration
 
 
 def _load_onefile_module(repo_root: Path):
@@ -363,6 +364,101 @@ def test_dual_branch_negative_cfg_disables_attestation_without_polluting_main_cf
     assert original_cfg["paper_faithfulness"]["alignment_check"] is True
     assert original_cfg["attestation"]["enabled"] is True
     assert original_cfg["attestation"]["require_signed_bundle_verification"] is True
+
+
+def test_dual_branch_negative_hf_only_sample_survives_formal_calibration_filters(tmp_path: Path) -> None:
+    """
+    功能：验证 dual-branch 负样本可从 detect_hf_score 恢复并通过 formal 校准过滤。 
+
+    Verify dual-branch negative aggregation recovers HF-only score from
+    detect_hf_score so calibration still has a valid null sample under formal
+    exclusion rules.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+
+    source_detect_path = records_dir / "detect_record.json"
+    source_detect_path.write_text(
+        json.dumps(
+            {
+                "label": True,
+                "ground_truth": True,
+                "is_watermarked": True,
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": 0.91,
+                    "calibration_sample_usage": "formal_with_sidecar_disabled_marker",
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    branch_neg_detect_path = tmp_path / "branch_neg_detect_record.json"
+    branch_neg_detect_path.write_text(
+        json.dumps(
+            {
+                "label": False,
+                "ground_truth": False,
+                "is_watermarked": False,
+                "content_evidence_payload": {
+                    "status": "absent",
+                    "score": None,
+                    "detect_lf_score": None,
+                    "detect_hf_score": 0.37,
+                    "content_failure_reason": "image_domain_sidecar_disabled_by_ablation",
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    glob_pattern = module._prepare_detect_records_with_minimal_ground_truth(
+        run_root=run_root,
+        source_detect_path=source_detect_path,
+        stage_name="calibrate",
+        pair_count=1,
+        branch_neg_detect_record=branch_neg_detect_path,
+    )
+
+    generated_positive = Path(glob_pattern.replace("*", "positive"))
+    generated_negative = Path(glob_pattern.replace("*", "negative"))
+    positive_payload = json.loads(generated_positive.read_text(encoding="utf-8"))
+    negative_payload = json.loads(generated_negative.read_text(encoding="utf-8"))
+
+    negative_content = negative_payload.get("content_evidence_payload")
+    assert isinstance(negative_content, dict)
+    assert negative_content.get("status") == "ok"
+    assert negative_content.get("score") == 0.37
+    assert negative_content.get("calibration_sample_usage") == "formal_with_dual_branch_negative_marker"
+
+    scores, strata = load_scores_for_calibration(
+        [positive_payload, negative_payload],
+        cfg={
+            "calibration": {
+                "exclude_formal_sidecar_disabled_marker": True,
+                "exclude_synthetic_negative_closure_marker": True,
+            }
+        },
+    )
+    assert scores == [0.37]
+    sampling_policy = strata["sampling_policy"]
+    assert sampling_policy["n_rejected_formal_sidecar_marker"] == 1
+    assert sampling_policy["n_selected_null"] == 1
 
 
 def test_onefile_attestation_hook_reuses_embed_record_payload(tmp_path: Path) -> None:
