@@ -995,8 +995,17 @@ def run_detect_orchestrator(
 
         # 如果 detect 侧分数有效、未命中不一致且运行期为真实 synthetic pipeline，则标记为真实运行模式 
         _lf_ok = (detect_lf_status == "ok" or (detect_lf_status or "").startswith("ok_trajectory_"))
+        _hf_ok = (detect_hf_status == "ok" or (detect_hf_status or "").startswith("ok_trajectory_"))
+        content_failure_reason_value = content_evidence_payload.get("content_failure_reason")
+        hf_only_sidecar_disabled = (
+            isinstance(content_failure_reason_value, str)
+            and content_failure_reason_value in {
+                "image_domain_sidecar_disabled",
+                "image_domain_sidecar_disabled_by_ablation",
+            }
+        )
         if (
-            _lf_ok
+            (_lf_ok or (hf_only_sidecar_disabled and _hf_ok))
             and subspace_consistency_status != "inconsistent"
             and runtime_built
             and (not synthetic_pipeline_runtime)

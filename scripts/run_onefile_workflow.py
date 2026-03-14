@@ -1976,6 +1976,7 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
     score_candidates = [
         ("content_evidence_payload.score", score_value),
         ("detect_lf_score", content_payload.get("detect_lf_score")),
+        ("detect_hf_score", content_payload.get("detect_hf_score")),
         ("lf_score", content_payload.get("lf_score")),
         ("score_parts.content_score", score_parts.get("content_score")),
         ("score_parts.detect_lf_score", score_parts.get("detect_lf_score")),
@@ -2019,7 +2020,9 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
             "status": status_value,
             "score": content_payload.get("score"),
             "detect_lf_score": content_payload.get("detect_lf_score"),
+            "detect_hf_score": content_payload.get("detect_hf_score"),
             "lf_score": content_payload.get("lf_score"),
+            "content_failure_reason": content_payload.get("content_failure_reason"),
         }
         score_parts_node = content_payload.get("score_parts")
         if isinstance(score_parts_node, dict):
@@ -2061,12 +2064,19 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
 
         # (1) 判断是否为 image_domain_sidecar 禁用导致的配置性缺失（非算法失败）。
         # sidecar 禁用时 LF/HF 均为 absent，不存在真实检测失败，允许以 fallback 继续。
+        sidecar_disabled_reasons = {
+            "image_domain_sidecar_disabled",
+            "image_domain_sidecar_disabled_by_ablation",
+        }
         _sp_node = content_payload.get("score_parts") or {}
         _lf_trace = (_sp_node.get("lf_detect_trace") or {}) if isinstance(_sp_node, dict) else {}
         _hf_trace = (_sp_node.get("hf_detect_trace") or {}) if isinstance(_sp_node, dict) else {}
         _sidecar_disabled_fallback = (
-            _lf_trace.get("lf_absent_reason") == "image_domain_sidecar_disabled"
-            and _hf_trace.get("hf_absent_reason") == "image_domain_sidecar_disabled"
+            (
+                _lf_trace.get("lf_absent_reason") in sidecar_disabled_reasons
+                and _hf_trace.get("hf_absent_reason") in sidecar_disabled_reasons
+            )
+            or content_payload.get("content_failure_reason") in sidecar_disabled_reasons
         )
 
         if not _sidecar_disabled_fallback:
@@ -2087,8 +2097,10 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
             diagnostic_content_payload = {}
             diagnostic_payload["content_evidence_payload"] = diagnostic_content_payload
 
-        diagnostic_score = diagnostic_content_payload.get("detect_lf_score")
-        if not isinstance(diagnostic_score, (int, float)):
+        diagnostic_score = _coerce_finite_float(diagnostic_content_payload.get("detect_lf_score"))
+        if diagnostic_score is None:
+            diagnostic_score = _coerce_finite_float(diagnostic_content_payload.get("detect_hf_score"))
+        if diagnostic_score is None:
             diagnostic_score = 0.0
 
         diagnostic_content_payload["status"] = "ok"
@@ -2125,8 +2137,10 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
         print("[onefile] CALIBRATION_INPUT_WRITTEN source=sidecar_disabled_fallback")
         return calibrated_detect_path
 
-    score_fallback = content_payload.get("detect_lf_score")
-    if not isinstance(score_fallback, (int, float)):
+    score_fallback = _coerce_finite_float(content_payload.get("detect_lf_score"))
+    if score_fallback is None:
+        score_fallback = _coerce_finite_float(content_payload.get("detect_hf_score"))
+    if score_fallback is None:
         score_fallback = 0.0
 
     content_payload["status"] = "ok"
