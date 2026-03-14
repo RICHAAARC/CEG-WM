@@ -374,6 +374,143 @@ def test_attestation_bundle_gate_skips_smoke_cpu_disabled_attestation() -> None:
     )
 
 
+def test_detect_attestation_disabled_path_skips_signed_bundle_gate() -> None:
+    """
+    功能：验证 detect 路径在 attestation disabled 时不会触发 signed-bundle 门禁。 
+
+    Verify the detect path emits attestation_disabled semantics that bypass the
+    signed-bundle verification gate.
+
+    Returns:
+        None.
+    """
+    from main.policy import freeze_gate
+    from main.registries.runtime_resolver import BuiltImplSet
+    from main.watermarking.detect import orchestrator as detect_orchestrator
+    from main.watermarking.fusion.interfaces import FusionDecision
+
+    class _ContentExtractorStub:
+        def extract(self, cfg, inputs=None, cfg_digest=None):
+            _ = cfg
+            _ = inputs
+            _ = cfg_digest
+            return {
+                "status": "absent",
+                "score": None,
+                "mask_digest": "m" * 64,
+            }
+
+    class _FusionRuleStub:
+        def fuse(self, cfg, content_evidence, geometry_evidence):
+            _ = cfg
+            return FusionDecision(
+                is_watermarked=None,
+                decision_status="abstain",
+                thresholds_digest="t" * 64,
+                evidence_summary={
+                    "content_score": content_evidence.get("score"),
+                    "geometry_score": geometry_evidence.get("geo_score"),
+                    "content_status": content_evidence.get("status", "absent"),
+                    "geometry_status": geometry_evidence.get("status", "absent"),
+                    "fusion_rule_id": "fusion_stub",
+                },
+                audit={"impl": "fusion_stub"},
+            )
+
+    class _PlannerStub:
+        impl_identity = {
+            "impl_id": "subspace_planner",
+            "impl_version": "v2",
+            "impl_digest": "p" * 64,
+        }
+
+        def plan(self, cfg, mask_digest=None, cfg_digest=None, inputs=None):
+            _ = cfg
+            _ = mask_digest
+            _ = cfg_digest
+            _ = inputs
+            return {
+                "status": "ok",
+                "plan": {
+                    "lf_basis": {"basis_id": "lf"},
+                    "hf_basis": {"basis_id": "hf"},
+                },
+                "plan_digest": "a" * 64,
+                "basis_digest": "b" * 64,
+                "audit": {},
+            }
+
+    cfg = {
+        "attestation": {
+            "enabled": False,
+            "require_signed_bundle_verification": True,
+        },
+        "paper_faithfulness": {"enabled": False},
+        "ablation": {
+            "normalized": {
+                "enable_content": False,
+                "enable_geometry": False,
+                "enable_sync": False,
+                "enable_anchor": False,
+                "enable_image_sidecar": False,
+                "enable_mask": True,
+                "enable_subspace": True,
+                "enable_rescue": False,
+                "enable_lf": False,
+                "enable_hf": False,
+                "lf_only": False,
+                "hf_only": False,
+            }
+        },
+        "watermark": {
+            "subspace": {"enabled": True},
+            "lf": {"enabled": False},
+            "hf": {"enabled": False},
+        },
+        "detect": {
+            "content": {"enabled": False},
+            "geometry": {"enabled": False},
+        },
+        "evaluate": {"target_fpr": 0.01},
+        "inference_num_steps": 4,
+        "inference_guidance_scale": 7.0,
+        "inference_height": 64,
+        "inference_width": 64,
+    }
+
+    impl_set = BuiltImplSet(
+        content_extractor=_ContentExtractorStub(),
+        geometry_extractor=object(),
+        fusion_rule=_FusionRuleStub(),
+        subspace_planner=_PlannerStub(),
+        sync_module=object(),
+    )
+    input_record = {
+        "plan_digest": "a" * 64,
+        "basis_digest": "b" * 64,
+        "subspace_planner_impl_identity": _PlannerStub.impl_identity,
+    }
+
+    detect_record = detect_orchestrator.run_detect_orchestrator(
+        cfg,
+        impl_set,
+        input_record=input_record,
+        cfg_digest="c" * 64,
+    )
+    attestation_payload = detect_record.get("attestation")
+    assert isinstance(attestation_payload, dict)
+    assert attestation_payload.get("attestation_absent_reason") == "attestation_disabled"
+
+    contracts, whitelist, semantics, interpretation = _load_fact_sources()
+    freeze_gate._enforce_attestation_bundle_verification(
+        _build_attestation_gate_record(attestation_payload),
+        contracts,
+        whitelist,
+        semantics,
+        interpretation,
+    )
+
+
 def test_attestation_bundle_gate_requires_complete_layered_results_for_formal_path() -> None:
     """
     功能：正式 attestation 路径必须携带完整分层结果且状态一致。

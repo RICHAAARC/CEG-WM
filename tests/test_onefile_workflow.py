@@ -288,6 +288,83 @@ def test_onefile_workflow_dry_run_skips_dual_branch_execution(
     assert dual_branch_calls["count"] == 0
 
 
+def test_dual_branch_negative_cfg_disables_attestation_without_polluting_main_cfg(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：验证 dual-branch negative branch 专用 cfg 仅在 branch_neg 内关闭 paper 与 attestation。
+
+    Verify branch_neg config disables paper faithfulness and attestation only
+    for the negative branch, without mutating the source cfg.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "paper_run"
+    (run_root / "records").mkdir(parents=True, exist_ok=True)
+    input_image_path = tmp_path / "clean_input.png"
+    input_image_path.write_bytes(b"png-bytes")
+    (run_root / "records" / "embed_record.json").write_text(
+        json.dumps({"image_path": str(input_image_path)}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    cfg_obj = {
+        "paper_faithfulness": {
+            "enabled": True,
+            "alignment_check": True,
+        },
+        "attestation": {
+            "enabled": True,
+            "require_signed_bundle_verification": True,
+        },
+    }
+    cfg_path = tmp_path / "paper_cfg.yaml"
+    cfg_path.write_text(yaml.safe_dump(cfg_obj, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    def _fake_run_subprocess(cmd: list[str], cwd: Path) -> int:
+        _ = cwd
+        cmd_out = Path(cmd[cmd.index("--out") + 1])
+        records_dir = cmd_out / "records"
+        records_dir.mkdir(parents=True, exist_ok=True)
+        (records_dir / "detect_record.json").write_text(
+            json.dumps({"status": "ok"}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return 0
+
+    monkeypatch.setattr(module, "_run_subprocess_for_step", _fake_run_subprocess)
+
+    branch_neg_root, _ = module._run_dual_branch_embedding_and_detection(
+        repo_root=repo_root,
+        cfg_path=cfg_path,
+        run_root=run_root,
+        profile="paper_full_cuda",
+    )
+
+    branch_cfg_path = branch_neg_root / "artifacts" / "workflow_cfg" / "branch_neg_profile.yaml"
+    branch_cfg = yaml.safe_load(branch_cfg_path.read_text(encoding="utf-8"))
+    original_cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+
+    assert branch_cfg["paper_faithfulness"]["enabled"] is False
+    assert branch_cfg["paper_faithfulness"]["alignment_check"] is False
+    assert branch_cfg["attestation"]["enabled"] is False
+    assert branch_cfg["attestation"]["require_signed_bundle_verification"] is False
+
+    assert original_cfg["paper_faithfulness"]["enabled"] is True
+    assert original_cfg["paper_faithfulness"]["alignment_check"] is True
+    assert original_cfg["attestation"]["enabled"] is True
+    assert original_cfg["attestation"]["require_signed_bundle_verification"] is True
+
+
 def test_onefile_attestation_hook_reuses_embed_record_payload(tmp_path: Path) -> None:
     """
     功能：验证 embed 后置 hook 只复用主路径 attestation 工件而不重算。

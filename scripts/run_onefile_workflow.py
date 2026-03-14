@@ -1389,6 +1389,12 @@ def _run_dual_branch_embedding_and_detection(
             paper_cfg["alignment_check"] = False
             branch_cfg_obj["paper_faithfulness"] = paper_cfg
 
+            attestation_node = branch_cfg_obj.get("attestation")
+            attestation_cfg = attestation_node if isinstance(attestation_node, dict) else {}
+            attestation_cfg["enabled"] = False
+            attestation_cfg["require_signed_bundle_verification"] = False
+            branch_cfg_obj["attestation"] = attestation_cfg
+
             branch_cfg_dir = branch_neg_root / "artifacts" / "workflow_cfg"
             branch_cfg_dir.mkdir(parents=True, exist_ok=True)
             branch_neg_cfg_path = branch_cfg_dir / "branch_neg_profile.yaml"
