@@ -48,14 +48,19 @@ def _normalize_matrix_runtime_profile(cfg_dict: Dict[str, Any]) -> Dict[str, Any
         raise TypeError("cfg_dict must be dict")
 
     paper_cfg_obj = cfg_dict.get("paper_faithfulness")
-    if not isinstance(paper_cfg_obj, dict):
-        return cfg_dict
-
-    normalized_paper_cfg = dict(paper_cfg_obj)
-    if bool(normalized_paper_cfg.get("enabled", False)):
+    if isinstance(paper_cfg_obj, dict):
+        normalized_paper_cfg = dict(paper_cfg_obj)
         normalized_paper_cfg["enabled"] = False
         normalized_paper_cfg["alignment_check"] = False
-    cfg_dict["paper_faithfulness"] = normalized_paper_cfg
+        cfg_dict["paper_faithfulness"] = normalized_paper_cfg
+
+    attestation_cfg_obj = cfg_dict.get("attestation")
+    if isinstance(attestation_cfg_obj, dict):
+        normalized_attestation_cfg = dict(attestation_cfg_obj)
+        normalized_attestation_cfg["enabled"] = False
+        normalized_attestation_cfg["require_signed_bundle_verification"] = False
+        cfg_dict["attestation"] = normalized_attestation_cfg
+
     return cfg_dict
 
 

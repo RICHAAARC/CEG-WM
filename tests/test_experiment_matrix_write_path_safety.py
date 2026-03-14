@@ -196,9 +196,13 @@ def test_run_experiment_matrix_batch_disables_paper_faithfulness_for_matrix(
         None.
     """
     captured_cfg: Dict[str, Any] = {}
+    source_cfg: Dict[str, Any] = {
+        "paper_faithfulness": {"enabled": True, "alignment_check": True},
+        "attestation": {"enabled": True, "require_signed_bundle_verification": True},
+    }
 
     def _fake_load_yaml_with_provenance(_path: Path):
-        return ({"paper_faithfulness": {"enabled": True, "alignment_check": True}}, {})
+        return (json.loads(json.dumps(source_cfg)), {})
 
     def _fake_normalize_ablation_flags(_cfg: Dict[str, Any]) -> None:
         return None
@@ -233,6 +237,14 @@ def test_run_experiment_matrix_batch_disables_paper_faithfulness_for_matrix(
     assert isinstance(paper_cfg, dict)
     assert paper_cfg.get("enabled") is False
     assert paper_cfg.get("alignment_check") is False
+    attestation_cfg = captured_cfg.get("attestation")
+    assert isinstance(attestation_cfg, dict)
+    assert attestation_cfg.get("enabled") is False
+    assert attestation_cfg.get("require_signed_bundle_verification") is False
     matrix_cfg = captured_cfg.get("experiment_matrix")
     assert isinstance(matrix_cfg, dict)
     assert matrix_cfg.get("config_path") == "configs/paper_full_cuda.yaml"
+    assert source_cfg["paper_faithfulness"]["enabled"] is True
+    assert source_cfg["paper_faithfulness"]["alignment_check"] is True
+    assert source_cfg["attestation"]["enabled"] is True
+    assert source_cfg["attestation"]["require_signed_bundle_verification"] is True

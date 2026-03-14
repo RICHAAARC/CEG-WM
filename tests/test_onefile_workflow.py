@@ -245,6 +245,57 @@ def test_onefile_workflow_paper_full_profile_generates_real_sd3_config(tmp_path:
     assert "assert_paper_mechanisms" not in step_names
 
 
+def test_experiment_matrix_cfg_disables_attestation_without_polluting_main_cfg(tmp_path: Path) -> None:
+    """
+    功能：验证 experiment_matrix 专用 cfg 仅在 matrix 子运行内关闭 paper 与 attestation。
+
+    Verify matrix-specific config disables paper faithfulness and attestation
+    only for experiment_matrix sub-runs, without mutating the source cfg.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "paper_run"
+    cfg_obj = {
+        "paper_faithfulness": {
+            "enabled": True,
+            "alignment_check": True,
+        },
+        "attestation": {
+            "enabled": True,
+            "require_signed_bundle_verification": True,
+        },
+    }
+    cfg_path = tmp_path / "paper_cfg.yaml"
+    cfg_path.write_text(yaml.safe_dump(cfg_obj, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    matrix_cfg_path = module._prepare_experiment_matrix_cfg_path(
+        "paper_full_cuda",
+        run_root,
+        cfg_path,
+    )
+
+    matrix_cfg = yaml.safe_load(matrix_cfg_path.read_text(encoding="utf-8"))
+    original_cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+
+    assert matrix_cfg_path != cfg_path
+    assert matrix_cfg["paper_faithfulness"]["enabled"] is False
+    assert matrix_cfg["paper_faithfulness"]["alignment_check"] is False
+    assert matrix_cfg["attestation"]["enabled"] is False
+    assert matrix_cfg["attestation"]["require_signed_bundle_verification"] is False
+
+    assert original_cfg["paper_faithfulness"]["enabled"] is True
+    assert original_cfg["paper_faithfulness"]["alignment_check"] is True
+    assert original_cfg["attestation"]["enabled"] is True
+    assert original_cfg["attestation"]["require_signed_bundle_verification"] is True
+
+
 def test_onefile_workflow_dry_run_skips_dual_branch_execution(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

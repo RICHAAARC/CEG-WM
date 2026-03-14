@@ -1208,6 +1208,11 @@ def _prepare_experiment_matrix_cfg_path(profile: str, run_root: Path, cfg_path: 
     paper_cfg["alignment_check"] = False
     cfg_obj["paper_faithfulness"] = paper_cfg
 
+    attestation_cfg = cfg_obj.get("attestation") if isinstance(cfg_obj.get("attestation"), dict) else {}
+    attestation_cfg["enabled"] = False
+    attestation_cfg["require_signed_bundle_verification"] = False
+    cfg_obj["attestation"] = attestation_cfg
+
     matrix_cfg_path = run_root / "artifacts" / "workflow_cfg" / "experiment_matrix_config.yaml"
     _write_artifact_text_unbound(
         run_root,
