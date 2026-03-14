@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 from main.diffusion.sd3.trajectory_tap import LatentTrajectoryCache
 from main.registries.runtime_resolver import BuiltImplSet
+from main.watermarking.content_chain import high_freq_embedder
 from main.watermarking.content_chain.unified_content_extractor import UnifiedContentExtractor
 from main.watermarking.detect import orchestrator as detect_orchestrator
 from main.watermarking.fusion.interfaces import FusionDecision
@@ -105,6 +106,88 @@ class _PlannerStub:
             "basis_digest": "b" * 64,
             "audit": {},
         }
+
+
+class _HfEmbedderDetectStub:
+    """功能：返回最小 HF detect 结果，聚焦 attestation 投影失败语义。"""
+
+    def detect(
+        self,
+        latents_or_features: Any,
+        plan: Optional[Dict[str, Any]] = None,
+        cfg: Optional[Dict[str, Any]] = None,
+        cfg_digest: Optional[str] = None,
+        expected_plan_digest: Optional[str] = None,
+    ) -> tuple[float, Dict[str, Any]]:
+        _ = latents_or_features
+        _ = plan
+        _ = cfg
+        _ = cfg_digest
+        _ = expected_plan_digest
+        return 0.81, {
+            "status": "ok",
+            "hf_score": 0.81,
+            "hf_trace_digest": "f" * 64,
+            "hf_evidence_summary": {"hf_status": "ok"},
+        }
+
+
+def test_build_hf_detect_evidence_records_attestation_projection_failure(monkeypatch: Any) -> None:
+    """
+    功能：验证 HF attestation 投影失败不会被静默吞掉，并保留可审计失败原因。
+
+    Verify HF attestation projection failures remain auditable instead of being silently swallowed.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    monkeypatch.setattr(
+        detect_orchestrator.detector_scoring,
+        "resolve_detect_trajectory_latent_for_timestep",
+        lambda cache, timestep: (object(), "ok"),
+    )
+    monkeypatch.setattr(
+        high_freq_embedder,
+        "_prepare_hf_feature_vector",
+        lambda latent, basis: (_ for _ in ()).throw(RuntimeError("projection_broken")),
+    )
+
+    impl_set = BuiltImplSet(
+        content_extractor=object(),
+        geometry_extractor=object(),
+        fusion_rule=object(),
+        subspace_planner=object(),
+        sync_module=object(),
+        hf_embedder=_HfEmbedderDetectStub(),
+    )
+
+    evidence = detect_orchestrator._build_hf_detect_evidence(
+        impl_set=impl_set,
+        cfg={"__detect_trajectory_latent_cache__": object()},
+        cfg_digest="a" * 64,
+        plan_payload={
+            "plan": {
+                "hf_basis": {
+                    "trajectory_feature_spec": {"edit_timestep": 0},
+                }
+            }
+        },
+        plan_digest="b" * 64,
+        embed_time_plan_digest="b" * 64,
+        trajectory_evidence=None,
+    )
+
+    assert evidence.get("status") == "ok"
+    assert evidence.get("hf_attestation_values") is None
+    assert evidence.get("hf_attestation_status") == "failed"
+    assert evidence.get("hf_attestation_failure_reason") == "hf_attestation_projection_failed:RuntimeError"
+    summary = evidence.get("hf_evidence_summary")
+    assert isinstance(summary, dict)
+    assert summary.get("hf_attestation_status") == "failed"
+    assert summary.get("hf_attestation_failure_reason") == "hf_attestation_projection_failed:RuntimeError"
 
 
 def test_prepare_detect_record_for_scoring_accepts_hf_score_when_sidecar_disabled(tmp_path: Path) -> None:

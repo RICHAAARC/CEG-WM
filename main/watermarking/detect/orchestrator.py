@@ -866,7 +866,16 @@ def run_detect_orchestrator(
             score_parts["hf_trajectory_detect_trace"] = hf_summary
         hf_attestation_values = hf_evidence.get("hf_attestation_values")
         if isinstance(hf_attestation_values, list):
+            content_evidence_payload["hf_attestation_values"] = hf_attestation_values
             score_parts["hf_attestation_values"] = hf_attestation_values
+        hf_attestation_status = hf_evidence.get("hf_attestation_status")
+        if isinstance(hf_attestation_status, str) and hf_attestation_status:
+            content_evidence_payload["hf_attestation_status"] = hf_attestation_status
+            score_parts["hf_attestation_status"] = hf_attestation_status
+        hf_attestation_failure_reason = hf_evidence.get("hf_attestation_failure_reason")
+        if isinstance(hf_attestation_failure_reason, str) and hf_attestation_failure_reason:
+            content_evidence_payload["hf_attestation_failure_reason"] = hf_attestation_failure_reason
+            score_parts["hf_attestation_failure_reason"] = hf_attestation_failure_reason
         _bind_scores_if_ok(content_evidence_payload)
         content_evidence_adapted = _adapt_content_evidence_for_fusion(content_evidence_payload)
         
@@ -1404,14 +1413,27 @@ def _build_hf_detect_evidence(
             "hf_failure_reason": evidence.get("hf_failure_reason"),
         }
     if evidence.get("status") == "ok":
+        summary_node = evidence.get("hf_evidence_summary")
+        summary = cast(Dict[str, Any], summary_node) if isinstance(summary_node, dict) else {}
+        if not isinstance(summary_node, dict):
+            evidence["hf_evidence_summary"] = summary
         try:
             from main.watermarking.content_chain.high_freq_embedder import _prepare_hf_feature_vector
 
             feature_vector = _prepare_hf_feature_vector(detect_latent, hf_basis)
             coeffs = channel_hf.compute_hf_basis_projection(feature_vector, hf_basis)
             evidence["hf_attestation_values"] = np.asarray(coeffs, dtype=np.float32).reshape(-1).tolist()
-        except Exception:
-            pass
+            evidence["hf_attestation_status"] = "ok"
+            evidence.pop("hf_attestation_failure_reason", None)
+            summary["hf_attestation_status"] = "ok"
+            summary.pop("hf_attestation_failure_reason", None)
+        except Exception as exc:
+            # HF attestation 投影失败必须可审计，禁止静默吞掉异常。
+            failure_reason = f"hf_attestation_projection_failed:{type(exc).__name__}"
+            evidence["hf_attestation_status"] = "failed"
+            evidence["hf_attestation_failure_reason"] = failure_reason
+            summary["hf_attestation_status"] = "failed"
+            summary["hf_attestation_failure_reason"] = failure_reason
     return evidence
 
 
@@ -2926,7 +2948,11 @@ def run_calibrate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> D
         "threshold_value": float(threshold_value),
         "threshold_key_used": threshold_key_used,
         "quantile_rule": "higher",
-        "ties_policy": "higher",
+        "ties_policy": "strict_upper_bound",
+        "threshold_value_semantics": "strict_upper_bound",
+        "decision_operator": "score_greater_equal_threshold_value",
+        "selected_order_stat_score": float(order_stat_info.get("selected_order_stat_score")),
+        "effective_relation_to_selected_order_stat": "score_strictly_greater_than_selected_order_stat_score",
     }
     threshold_metadata_artifact: Dict[str, Any] = {
         "calibration_version": "np_v1",
@@ -2940,6 +2966,10 @@ def run_calibrate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> D
         "n_samples": len(scores),
         "calibration_date": "1970-01-01",
         "quantile_method": "higher",
+        "ties_policy": "strict_upper_bound",
+        "threshold_value_semantics": "strict_upper_bound",
+        "decision_operator": "score_greater_equal_threshold_value",
+        "selected_order_stat_score": float(order_stat_info.get("selected_order_stat_score")),
         "target_fprs": [float(target_fpr)],
         "order_statistics": order_stat_info,
         "stratification": strata_info,
@@ -2980,6 +3010,7 @@ def run_calibrate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> D
             "score_name": "content_score",
             "target_fpr": float(target_fpr),
             "threshold_value": float(threshold_value),
+            "selected_order_stat_score": float(order_stat_info.get("selected_order_stat_score")),
             "order_statistics": order_stat_info,
             "stratification": strata_info,
         },

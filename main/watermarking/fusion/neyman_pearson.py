@@ -421,7 +421,11 @@ def compute_np_threshold_from_scores(
     raw_rank = int(math.ceil(quantile * n_samples))
     rank_1based = min(max(1, raw_rank), n_samples)
     index_0based = rank_1based - 1
-    threshold_value = float(sorted_scores[index_0based])
+    selected_order_stat_score = float(sorted_scores[index_0based])
+
+    # 在外部保持 score >= threshold_value，同时将阈值工件收口为严格上界，
+    # 从而把对选中 order statistic 的等值样本判定为不越阈。
+    threshold_value = float(math.nextafter(selected_order_stat_score, math.inf))
 
     order_stat_info = {
         "n_samples": n_samples,
@@ -430,6 +434,10 @@ def compute_np_threshold_from_scores(
         "quantile_rule": "higher",
         "order_stat_rank_1based": rank_1based,
         "order_stat_index_0based": index_0based,
-        "ties_policy": "higher",
+        "selected_order_stat_score": selected_order_stat_score,
+        "threshold_value_semantics": "strict_upper_bound",
+        "decision_operator": "score_greater_equal_threshold_value",
+        "effective_relation_to_selected_order_stat": "score_strictly_greater_than_selected_order_stat_score",
+        "ties_policy": "strict_upper_bound",
     }
     return threshold_value, order_stat_info

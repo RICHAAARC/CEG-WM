@@ -4,6 +4,7 @@ Module type: General module
 """
 
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -25,11 +26,13 @@ def test_compute_np_threshold_from_scores_higher_quantile() -> None:
     scores = [0.11, 0.20, 0.33, 0.45, 0.50]
     threshold_value, order_stat = compute_np_threshold_from_scores(scores, target_fpr=0.2)
 
-    assert threshold_value == pytest.approx(0.45)
+    assert threshold_value == pytest.approx(math.nextafter(0.45, math.inf))
     assert order_stat["n_samples"] == 5
     assert order_stat["order_stat_rank_1based"] == 4
     assert order_stat["order_stat_index_0based"] == 3
+    assert order_stat["selected_order_stat_score"] == pytest.approx(0.45)
     assert order_stat["quantile_rule"] == "higher"
+    assert order_stat["ties_policy"] == "strict_upper_bound"
 
 
 def test_load_scores_for_calibration_filters_invalid_records() -> None:
@@ -252,6 +255,8 @@ def test_run_calibrate_orchestrator_sets_calibration_mode(tmp_path: Path) -> Non
     assert "null_strata" in metadata_artifact
     assert "conditional_fpr" in metadata_artifact
     assert metadata_artifact["conditional_fpr"]["definition"]
+    assert metadata_artifact["threshold_value_semantics"] == "strict_upper_bound"
+    assert metadata_artifact["decision_operator"] == "score_greater_equal_threshold_value"
     assert "conditional_fpr_records" in metadata_artifact
     assert isinstance(metadata_artifact["conditional_fpr_records"], list)
     assert len(metadata_artifact["conditional_fpr_records"]) >= 3
