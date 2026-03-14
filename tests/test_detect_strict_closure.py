@@ -12,6 +12,8 @@ import pytest
 
 from main.cli.run_detect import assert_detect_runtime_dependencies
 from main.core import digests
+from main.policy.runtime_whitelist import load_policy_path_semantics
+from main.registries.fusion_registry import resolve_fusion_rule
 from main.registries.runtime_resolver import BuiltImplSet
 from main.watermarking.detect.orchestrator import run_detect_orchestrator, _bind_scores_if_ok, _resolve_expected_plan_digest
 from main.watermarking.fusion.interfaces import FusionDecision
@@ -29,6 +31,7 @@ class _ContentExtractorStub:
         return {
             "status": self._status,
             "score": self._score if self._status == "ok" else None,
+            "content_score": self._score if self._status == "ok" else None,
             "plan_digest": "plan_detect",
             "basis_digest": "basis_detect",
             "content_failure_reason": None if self._status == "ok" else "detector_extraction_failed",
@@ -55,6 +58,24 @@ class _FusionRuleStub:
         _ = cfg
         return FusionDecision(
             is_watermarked=False,
+            decision_status="decided",
+            thresholds_digest="stub",
+            evidence_summary={
+                "content_score": content_evidence.get("score"),
+                "geometry_score": geometry_evidence.get("geo_score"),
+                "content_status": content_evidence.get("status", "absent"),
+                "geometry_status": geometry_evidence.get("status", "absent"),
+                "fusion_rule_id": "fusion_stub",
+            },
+            audit={"impl": "fusion_stub"},
+        )
+
+
+class _PositiveFusionRuleStub:
+    def fuse(self, cfg: Dict[str, Any], content_evidence: Dict[str, Any], geometry_evidence: Dict[str, Any]) -> FusionDecision:
+        _ = cfg
+        return FusionDecision(
+            is_watermarked=True,
             decision_status="decided",
             thresholds_digest="stub",
             evidence_summary={
@@ -129,6 +150,23 @@ def _build_cfg(**overrides: Any) -> Dict[str, Any]:
     for key, value in overrides.items():
         cfg[key] = value
     return cfg
+
+
+def _build_formal_cfg() -> Dict[str, Any]:
+    return _build_cfg(
+        policy_path="content_np_geo_rescue",
+        paper_faithfulness={"enabled": True},
+        detect={
+            "content": {"enabled": True},
+            "geometry": {
+                "enabled": True,
+                "enable_attention_anchor": True,
+                "sync_primary_anchor_secondary": True,
+            },
+        },
+        __detect_pipeline_obj__=object(),
+        __runtime_self_attention_maps__=[0],
+    )
 
 
 def _build_matching_input_record() -> Dict[str, Any]:
@@ -238,6 +276,212 @@ def test_plan_digest_mismatch_short_circuits_scoring() -> None:
     assert payload.get("lf_score") is None
     assert payload.get("hf_score") is None
     assert payload.get("score_parts") is None
+
+
+@pytest.mark.parametrize(
+    ("geometry_status", "failure_field", "failure_reason"),
+    [
+        ("absent", "geometry_absent_reason", "detect_sync_relation_binding_missing"),
+        ("mismatch", "geometry_failure_reason", "detect_sync_mismatch"),
+    ],
+)
+def test_formal_optional_geometry_chain_keeps_content_positive_decision(
+    monkeypatch: pytest.MonkeyPatch,
+    geometry_status: str,
+    failure_field: str,
+    failure_reason: str,
+) -> None:
+    cfg = _build_formal_cfg()
+    impl_set = BuiltImplSet(
+        content_extractor=_ContentExtractorStub(status="ok", score=0.7),
+        geometry_extractor=_GeometryExtractorStub(),
+        fusion_rule=_PositiveFusionRuleStub(),
+        subspace_planner=_SubspacePlannerStub(),
+        sync_module=_SyncStub(),
+    )
+
+    def _stub_geometry_chain(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+        _ = args
+        _ = kwargs
+        return {
+            "status": geometry_status,
+            "geo_score": None,
+            failure_field: failure_reason,
+        }
+
+    monkeypatch.setattr("main.watermarking.detect.orchestrator._run_geometry_chain_with_sync", _stub_geometry_chain)
+
+    record = run_detect_orchestrator(
+        cfg,
+        impl_set,
+        input_record=_build_matching_input_record(),
+        cfg_digest="cfg_digest",
+        trajectory_evidence=_build_matching_trajectory_evidence(),
+    )
+
+    fusion_result = record["fusion_result"]
+    assert isinstance(fusion_result, FusionDecision)
+    assert fusion_result.decision_status == "decided"
+    assert fusion_result.is_watermarked is True
+    assert fusion_result.audit.get("failure_reason") is None
+    assert record["execution_report"]["geometry_chain_status"] == ("absent" if geometry_status == "absent" else "failed")
+    assert record["final_decision"]["is_watermarked"] is True
+
+
+def test_formal_optional_geometry_failed_keeps_real_fusion_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _build_formal_cfg()
+    factory = resolve_fusion_rule("fusion_neyman_pearson")
+    fusion_rule = factory({})
+    impl_set = BuiltImplSet(
+        content_extractor=_ContentExtractorStub(status="ok", score=0.7),
+        geometry_extractor=_GeometryExtractorStub(),
+        fusion_rule=fusion_rule,
+        subspace_planner=_SubspacePlannerStub(),
+        sync_module=_SyncStub(),
+    )
+
+    monkeypatch.setattr(
+        "main.watermarking.detect.orchestrator._run_geometry_chain_with_sync",
+        lambda *args, **kwargs: {"status": "failed", "geo_score": None, "geometry_failure_reason": "detect_sync_failed"},
+    )
+
+    record = run_detect_orchestrator(
+        cfg,
+        impl_set,
+        input_record=_build_matching_input_record(),
+        cfg_digest="cfg_digest",
+        trajectory_evidence=_build_matching_trajectory_evidence(),
+    )
+
+    fusion_result = record["fusion_result"]
+    assert isinstance(fusion_result, FusionDecision)
+    assert fusion_result.decision_status == "error"
+    assert fusion_result.is_watermarked is None
+    assert fusion_result.audit.get("failure_reason") == "geometry_fail"
+    assert record["final_decision"]["is_watermarked"] is None
+
+
+def test_non_formal_path_keeps_internal_content_only_decision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _build_cfg(
+        policy_path="content_only",
+        detect={
+            "content": {"enabled": True},
+            "geometry": {
+                "enabled": True,
+                "enable_attention_anchor": True,
+            },
+        },
+        __detect_pipeline_obj__=object(),
+    )
+    impl_set = BuiltImplSet(
+        content_extractor=_ContentExtractorStub(status="ok", score=0.7),
+        geometry_extractor=_GeometryExtractorStub(),
+        fusion_rule=_PositiveFusionRuleStub(),
+        subspace_planner=_SubspacePlannerStub(),
+        sync_module=_SyncStub(),
+    )
+
+    monkeypatch.setattr(
+        "main.watermarking.detect.orchestrator._run_geometry_chain_with_sync",
+        lambda *args, **kwargs: {"status": "absent", "geo_score": None, "geometry_absent_reason": "test_absent"},
+    )
+
+    record = run_detect_orchestrator(
+        cfg,
+        impl_set,
+        input_record=_build_matching_input_record(),
+        cfg_digest="cfg_digest",
+        trajectory_evidence=_build_matching_trajectory_evidence(),
+    )
+
+    fusion_result = record["fusion_result"]
+    assert isinstance(fusion_result, FusionDecision)
+    assert fusion_result.decision_status == "decided"
+    assert fusion_result.is_watermarked is True
+
+
+def test_formal_required_chain_closure_follows_loaded_policy_semantics(
+        tmp_path: Any,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+        semantics_path = tmp_path / "policy_path_semantics.yaml"
+        semantics_path.write_text(
+                """
+policy_path_semantics_version: "test"
+policy_paths:
+    alternate_geometry_required:
+        decoder_type: "content_correlation"
+        description: "Alternate geometry-required path"
+        required_chains:
+            content: true
+            geometry: true
+        optional_chains:
+            geometry: false
+        on_chain_failure:
+            content:
+                action: "failed"
+                set_decision_to: null
+                record_fail_reason: "content_chain_required_but_unavailable"
+            geometry:
+                action: "failed"
+                set_decision_to: null
+                record_fail_reason: "alternate_geometry_chain_required"
+        audit_obligations:
+            record_fields_level: "core_required"
+            path_required_fields: {}
+            recommended_fields: []
+""".strip(),
+                encoding="utf-8",
+        )
+        semantics = load_policy_path_semantics(str(semantics_path), allow_non_authoritative=True)
+        cfg = _build_cfg(
+                policy_path="alternate_geometry_required",
+                paper_faithfulness={"enabled": True},
+                detect={
+                        "content": {"enabled": True},
+                        "geometry": {
+                                "enabled": True,
+                                "enable_attention_anchor": True,
+                                "sync_primary_anchor_secondary": True,
+                        },
+                },
+                __detect_pipeline_obj__=object(),
+                __runtime_self_attention_maps__=[0],
+                __policy_path_semantics__=semantics,
+        )
+        impl_set = BuiltImplSet(
+                content_extractor=_ContentExtractorStub(status="ok", score=0.7),
+                geometry_extractor=_GeometryExtractorStub(),
+                fusion_rule=_PositiveFusionRuleStub(),
+                subspace_planner=_SubspacePlannerStub(),
+                sync_module=_SyncStub(),
+        )
+
+        monkeypatch.setattr(
+                "main.watermarking.detect.orchestrator._run_geometry_chain_with_sync",
+                lambda *args, **kwargs: {"status": "absent", "geo_score": None, "geometry_absent_reason": "test_absent"},
+        )
+
+        record = run_detect_orchestrator(
+                cfg,
+                impl_set,
+                input_record=_build_matching_input_record(),
+                cfg_digest="cfg_digest",
+                trajectory_evidence=_build_matching_trajectory_evidence(),
+        )
+
+        fusion_result = record["fusion_result"]
+        assert isinstance(fusion_result, FusionDecision)
+        assert fusion_result.decision_status == "error"
+        assert fusion_result.is_watermarked is None
+        assert fusion_result.audit.get("failure_reason") == "alternate_geometry_chain_required"
+        assert fusion_result.audit.get("formal_policy_path") == "alternate_geometry_required"
+        assert fusion_result.audit.get("formal_required_chain") == "geometry"
+        assert record["final_decision"]["is_watermarked"] is None
 
 
 def test_scores_written_only_when_status_ok() -> None:

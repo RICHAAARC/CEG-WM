@@ -397,18 +397,18 @@ policy_paths:
 
   # ------------------------------
   # content_np_geo_rescue：论文级单一正式路径（v2.0 追加，append-only）。
-  # 特性：单侧几何门控救回（geometry_score >= geo_gate_threshold），无 fallback、无 proxy、无 sidecar。
+  # 特性：内容主判定 + 单侧几何救回（geometry_score >= geo_gate_threshold），无 fallback、无 proxy、无 sidecar。
   # 此路径是"单一路径、单一机制、论文级闭环"的正式实现。
   # ------------------------------
   content_np_geo_rescue:
     decoder_type: "fusion_neyman_pearson"
-    description: "Single formal paper path: NP fusion with one-sided geo rescue gate, no fallback/proxy/sidecar"
+    description: "Single formal paper path: content-primary NP decision with one-sided geo rescue-only auxiliary chain, no fallback/proxy/sidecar"
 
     required_chains:
       content: true
-      geometry: true
-    optional_chains:
       geometry: false
+    optional_chains:
+      geometry: true
 
     geometry_gate:
       enabled: true
@@ -416,7 +416,7 @@ policy_paths:
       gate_field: "geometry_evidence.geo_score"
       gate_param: "geo_gate_lower"
       gate_rule: "geometry_score >= geo_gate_lower"
-      notes: "单侧下界门控；geo_gate_upper 字段仅保留用于审计，不参与判决。"
+      notes: "内容链为主判定；几何链仅在 rescue band 内作为单向辅助救回。geo_gate_upper 字段仅保留用于审计，不参与判决。"
 
     rescue_band:
       enabled: true
@@ -436,9 +436,7 @@ policy_paths:
         set_decision_to: null
         record_fail_reason: "evidence_computation_failed"
       geometry:
-        action: "failed"
-        set_decision_to: null
-        record_fail_reason: "geometry_chain_required_but_unavailable"
+        action: "not_applicable"
 
     audit_obligations:
       record_fields_level: "core_required"
@@ -448,7 +446,7 @@ policy_paths:
           condition: "always"
         geometry:
           catalog: "geometry_gate_minimal"
-          condition: "always"
+          condition: "when_chain_enabled"
       required_fields:
         - "geometry_evidence.status"
         - "geometry_evidence.geo_score"
@@ -464,6 +462,10 @@ policy_paths:
         - "score_audit.geo_gate_applied"
         - "score_audit.fusion_rule_used"
         - "score_audit.rescue_band_applied"
+      recommended_fields:
+        - "geometry_evidence.geometry_absent_reason"
+        - "geometry_evidence.geometry_failure_reason"
+        - "geometry_evidence.geometry_absent_reason_raw"
 
 # ==============================================================
 # 4) 软建议：非强制的审计参考

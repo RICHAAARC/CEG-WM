@@ -47,6 +47,7 @@ from main.evaluation import protocol_loader as eval_protocol_loader
 from main.evaluation import metrics as eval_metrics
 from main.evaluation import report_builder as eval_report_builder
 from main.evaluation import attack_coverage as eval_attack_coverage
+from main.policy.runtime_whitelist import PolicyPathSemantics, load_policy_path_semantics
 
 
 def _as_dict_payload(value: Any) -> Dict[str, Any] | None:
@@ -1054,6 +1055,13 @@ def run_detect_orchestrator(
     cfg.pop("__runtime_self_attention_maps__", None)
 
     plan_digest_mismatch_reason = plan_digest_reason if plan_digest_reason == "plan_digest_mismatch" else None
+
+    fusion_result = _close_formal_required_chain_decision(
+        cfg,
+        content_evidence_payload if isinstance(content_evidence_payload, dict) else {},
+        geometry_evidence_payload if isinstance(geometry_evidence_payload, dict) else {},
+        fusion_result,
+    )
 
     execution_report = _derive_execution_report_from_chain_states(
         content_evidence_payload=content_evidence_payload,
@@ -4454,10 +4462,274 @@ def _extract_subspace_evidence_semantics(plan_payload: Any) -> Dict[str, Any]:
     return {}
 
 
+def _resolve_policy_path_semantics_payload(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：解析当前运行绑定的 policy_path semantics 载荷。
+
+    Resolve active policy_path semantics payload from bound fact source.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Policy semantics mapping, or empty dict when unavailable.
+    """
+    semantics_value = cfg.get("__policy_path_semantics__")
+    if isinstance(semantics_value, PolicyPathSemantics):
+        semantics_data = semantics_value.data
+        return cast(Dict[str, Any], semantics_data) if isinstance(semantics_data, dict) else {}
+    if isinstance(semantics_value, dict):
+        return cast(Dict[str, Any], semantics_value)
+    try:
+        semantics_obj = load_policy_path_semantics()
+    except Exception:
+        return {}
+    return cast(Dict[str, Any], semantics_obj.data) if isinstance(semantics_obj.data, dict) else {}
+
+
+def _resolve_required_chain_policy(
+    cfg: Dict[str, Any],
+    chain_name: str,
+) -> Dict[str, Any] | None:
+    """
+    功能：从 facts source 解析当前 policy_path 的必需链失败语义。
+
+    Resolve required-chain failure semantics from active policy facts.
+
+    Args:
+        cfg: Configuration mapping.
+        chain_name: Required chain name.
+
+    Returns:
+        Chain policy mapping, or None when chain is not required.
+    """
+    if not isinstance(chain_name, str) or not chain_name:
+        return None
+    policy_path = cfg.get("policy_path")
+    if not isinstance(policy_path, str) or not policy_path:
+        return None
+    semantics_payload = _resolve_policy_path_semantics_payload(cfg)
+    policy_paths = semantics_payload.get("policy_paths")
+    if not isinstance(policy_paths, dict):
+        return None
+    policy_spec = policy_paths.get(policy_path)
+    if not isinstance(policy_spec, dict):
+        return None
+    required_chains = policy_spec.get("required_chains")
+    on_chain_failure = policy_spec.get("on_chain_failure")
+    if not isinstance(required_chains, dict) or not isinstance(on_chain_failure, dict):
+        return None
+    if required_chains.get(chain_name) is not True:
+        return None
+    chain_policy = on_chain_failure.get(chain_name)
+    if not isinstance(chain_policy, dict):
+        return None
+    resolved_policy = dict(chain_policy)
+    resolved_policy["policy_path"] = policy_path
+    resolved_policy["chain_name"] = chain_name
+    return resolved_policy
+
+
+def _resolve_detect_sync_latents(cfg: Dict[str, Any]) -> Any:
+    """
+    功能：解析 detect 侧 sync 主路径使用的运行时 latent。 
+
+    Resolve canonical detect-time latent input for sync-primary geometry.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Latest cached detect latent when available; otherwise None.
+    """
+    detect_traj_cache = cfg.get("__detect_trajectory_latent_cache__")
+    if detect_traj_cache is None:
+        return None
+    available_steps = getattr(detect_traj_cache, "available_steps", None)
+    get_step = getattr(detect_traj_cache, "get", None)
+    if not callable(available_steps) or not callable(get_step):
+        return None
+    try:
+        cached_steps = available_steps()
+    except Exception:
+        return None
+    if not isinstance(cached_steps, list) or len(cached_steps) == 0:
+        return None
+    latest_step = cached_steps[-1]
+    if not isinstance(latest_step, int):
+        return None
+    try:
+        return get_step(latest_step)
+    except Exception:
+        return None
+
+
+def _build_pre_sync_relation_binding(
+    geometry_extractor: Any,
+    cfg: Dict[str, Any],
+    runtime_inputs: Dict[str, Any],
+) -> Dict[str, Any] | None:
+    """
+    功能：在 sync-primary 前解析可复用的 relation 绑定。 
+
+    Resolve authoritative relation binding from authentic runtime attention
+    before sync execution, without changing sync-primary semantics.
+
+    Args:
+        geometry_extractor: Geometry extractor instance.
+        cfg: Configuration mapping.
+        runtime_inputs: Runtime input mapping.
+
+    Returns:
+        Mapping with relation binding fields, or None when unavailable.
+    """
+    if geometry_extractor is None:
+        return None
+    if not isinstance(runtime_inputs, dict):
+        return None
+    relation_binding: Dict[str, Any] = {
+        "binding_source": "authentic_runtime_self_attention",
+    }
+    try:
+        precomputed_result = _run_geometry_extractor_with_runtime_inputs(
+            geometry_extractor,
+            cfg,
+            runtime_inputs,
+        )
+    except Exception as exc:
+        relation_binding["binding_status"] = "failed"
+        relation_binding["geometry_failure_reason"] = f"pre_sync_relation_binding_failed: {type(exc).__name__}"
+        return relation_binding
+    if not isinstance(precomputed_result, dict):
+        relation_binding["binding_status"] = "invalid"
+        relation_binding["geometry_failure_reason"] = "pre_sync_relation_binding_non_mapping"
+        return relation_binding
+    precomputed_mapping = cast(Dict[str, Any], precomputed_result)
+    binding_status = _normalize_geometry_chain_status(precomputed_mapping.get("status"))
+    relation_binding["binding_status"] = binding_status
+    geometry_failure_reason = precomputed_mapping.get("geometry_failure_reason")
+    if isinstance(geometry_failure_reason, str) and geometry_failure_reason:
+        relation_binding["geometry_failure_reason"] = geometry_failure_reason
+    geometry_absent_reason = precomputed_mapping.get("geometry_absent_reason")
+    if isinstance(geometry_absent_reason, str) and geometry_absent_reason:
+        relation_binding["geometry_absent_reason"] = geometry_absent_reason
+    if binding_status != "ok":
+        return relation_binding
+    relation_digest = precomputed_mapping.get("relation_digest")
+    if not isinstance(relation_digest, str) or not relation_digest:
+        relation_binding["binding_status"] = "invalid"
+        relation_binding["geometry_failure_reason"] = "pre_sync_relation_digest_missing"
+        return relation_binding
+    relation_binding["relation_digest"] = relation_digest
+    relation_binding["relation_digest_source"] = "authentic_runtime_self_attention"
+    anchor_digest = precomputed_mapping.get("anchor_digest")
+    if isinstance(anchor_digest, str) and anchor_digest:
+        relation_binding["anchor_digest"] = anchor_digest
+    return relation_binding
+
+
+def _normalize_detect_sync_failure_reason(sync_result: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：修正 detect 侧 sync 失败原因的审计语义。 
+
+    Normalize sync failure semantics for detect-path diagnostics.
+
+    Args:
+        sync_result: Sync result mapping.
+
+    Returns:
+        Normalized sync result mapping.
+    """
+    if not isinstance(sync_result, dict):
+        return sync_result
+    normalized_result = dict(sync_result)
+    absent_reason = normalized_result.get("geometry_absent_reason")
+    if absent_reason == "relation_digest_absent_embed_mode":
+        normalized_result["geometry_absent_reason_raw"] = absent_reason
+        normalized_result["geometry_absent_reason"] = "detect_sync_relation_binding_missing"
+    elif absent_reason == "latents_missing":
+        normalized_result["geometry_absent_reason_raw"] = absent_reason
+        normalized_result["geometry_absent_reason"] = "detect_sync_latents_missing"
+    return normalized_result
+
+
+def _close_formal_required_chain_decision(
+    cfg: Dict[str, Any],
+    content_evidence_payload: Dict[str, Any],
+    geometry_evidence_payload: Dict[str, Any],
+    fusion_result: FusionDecision,
+) -> FusionDecision:
+    """
+    功能：在 formal path 下按 facts source 前置收口必需链判决语义。
+
+    Close formal required-chain semantics before record write.
+
+    Args:
+        cfg: Configuration mapping.
+        content_evidence_payload: Content evidence payload mapping.
+        geometry_evidence_payload: Geometry evidence payload mapping.
+        fusion_result: Original fusion decision.
+
+    Returns:
+        Possibly normalized FusionDecision for formal record emission.
+    """
+    chain_payloads = {
+        "content": content_evidence_payload if isinstance(content_evidence_payload, dict) else {},
+        "geometry": geometry_evidence_payload if isinstance(geometry_evidence_payload, dict) else {},
+    }
+    for chain_name, chain_payload in chain_payloads.items():
+        chain_policy = _resolve_required_chain_policy(cfg, chain_name)
+        if not isinstance(chain_policy, dict):
+            continue
+        chain_status = chain_payload.get("status")
+        if chain_status == "ok":
+            continue
+        set_decision_to = chain_policy.get("set_decision_to")
+        if set_decision_to is not None:
+            continue
+
+        normalized_audit = dict(fusion_result.audit) if isinstance(fusion_result.audit, dict) else {}
+        record_fail_reason = chain_policy.get("record_fail_reason")
+        if isinstance(record_fail_reason, str) and record_fail_reason:
+            normalized_audit["failure_reason"] = record_fail_reason
+        normalized_audit["formal_policy_path"] = chain_policy.get("policy_path")
+        normalized_audit["formal_required_chain"] = chain_name
+
+        chain_failure_reason = chain_payload.get(f"{chain_name}_failure_reason")
+        if isinstance(chain_failure_reason, str) and chain_failure_reason:
+            normalized_audit[f"{chain_name}_failure_reason"] = chain_failure_reason
+        chain_absent_reason = chain_payload.get(f"{chain_name}_absent_reason")
+        if isinstance(chain_absent_reason, str) and chain_absent_reason:
+            normalized_audit[f"{chain_name}_absent_reason"] = chain_absent_reason
+        if chain_name == "geometry":
+            geometry_absent_reason_raw = chain_payload.get("geometry_absent_reason_raw")
+            if isinstance(geometry_absent_reason_raw, str) and geometry_absent_reason_raw:
+                normalized_audit["geometry_absent_reason_raw"] = geometry_absent_reason_raw
+
+        normalized_summary = dict(fusion_result.evidence_summary)
+        normalized_summary[f"{chain_name}_status"] = chain_status
+        action = chain_policy.get("action")
+        decision_status = "abstain" if action == "abstain" else "error"
+        return FusionDecision(
+            is_watermarked=None,
+            decision_status=decision_status,
+            thresholds_digest=fusion_result.thresholds_digest,
+            evidence_summary=normalized_summary,
+            audit=normalized_audit,
+            fusion_rule_version=fusion_result.fusion_rule_version,
+            used_threshold_id=fusion_result.used_threshold_id,
+            routing_decisions=fusion_result.routing_decisions,
+            routing_digest=fusion_result.routing_digest,
+            conditional_fpr_notes=fusion_result.conditional_fpr_notes,
+        )
+    return fusion_result
+
+
 def _build_geometry_runtime_inputs(
     cfg: Dict[str, Any],
     sync_result: Dict[str, Any] | None = None,
     anchor_result: Dict[str, Any] | None = None,
+    relation_binding: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """
     功能：构造几何链运行时输入域 
@@ -4476,9 +4748,20 @@ def _build_geometry_runtime_inputs(
         "pipeline": cfg.get("__detect_pipeline_obj__"),
         "rng": cfg.get("rng"),
     }
+    latents = _resolve_detect_sync_latents(cfg)
+    if latents is not None:
+        runtime_inputs["latents"] = latents
     paper_node = cfg.get("paper_faithfulness")
     paper_cfg = cast(Dict[str, Any], paper_node) if isinstance(paper_node, dict) else {}
     paper_enabled = bool(paper_cfg.get("enabled", False))
+    if isinstance(relation_binding, dict):
+        relation_digest = relation_binding.get("relation_digest")
+        if isinstance(relation_digest, str) and relation_digest:
+            runtime_inputs["relation_digest"] = relation_digest
+        anchor_digest = relation_binding.get("anchor_digest")
+        if isinstance(anchor_digest, str) and anchor_digest:
+            runtime_inputs["anchor_digest"] = anchor_digest
+        runtime_inputs["relation_binding"] = relation_binding
     prebuilt_attention_maps = _resolve_runtime_self_attention_maps(cfg)
     if prebuilt_attention_maps is not None:
         runtime_inputs["attention_maps"] = prebuilt_attention_maps
@@ -4562,7 +4845,10 @@ def _run_sync_module_for_detect(sync_module: Any, cfg: Dict[str, Any], runtime_i
                     if lowered in {"ok", "absent", "mismatch", "failed"}:
                         normalized["sync_status"] = lowered
                         normalized["status"] = lowered
-                return normalized
+                relation_binding = runtime_inputs.get("relation_binding")
+                if isinstance(relation_binding, dict):
+                    normalized["relation_binding_diagnostics"] = dict(relation_binding)
+                return _normalize_detect_sync_failure_reason(normalized)
         except Exception as exc:
             return {
                 "status": "failed",
@@ -4573,7 +4859,11 @@ def _run_sync_module_for_detect(sync_module: Any, cfg: Dict[str, Any], runtime_i
     try:
         sync_result = sync_module.sync(cfg)
         if isinstance(sync_result, dict):
-            return cast(Dict[str, Any], sync_result)
+            normalized_sync_result = dict(cast(Dict[str, Any], sync_result))
+            relation_binding = runtime_inputs.get("relation_binding")
+            if isinstance(relation_binding, dict):
+                normalized_sync_result["relation_binding_diagnostics"] = dict(relation_binding)
+            return _normalize_detect_sync_failure_reason(normalized_sync_result)
     except Exception as exc:
         return {
             "status": "failed",
@@ -4610,10 +4900,18 @@ def _run_geometry_chain_with_sync(
         # sync_primary 模式：先执行 sync（主几何证据），再按 sync 结果门控 anchor（辅锚点） 
         # 研究目标：Self-Attention 辅锚点仅在主同步成功后启用 
         #
-        # v3 实现：sync v3 使用 template_match_score 作为 geo_score 
-        # 不再需要预计算 relation_digest（该循环依赖已消除） 
+        # sync 仍为主证据，但 relation binding 需先由真实 runtime self-attention 解析，
+        # 否则 sync 无法在 formal detect 路径闭合自身输入契约。
+        relation_binding = None
         if enable_sync:
             sync_base_inputs = _build_geometry_runtime_inputs(cfg)
+            relation_binding = _build_pre_sync_relation_binding(
+                impl_set.geometry_extractor,
+                cfg,
+                sync_base_inputs,
+            )
+            if isinstance(relation_binding, dict):
+                sync_base_inputs = _build_geometry_runtime_inputs(cfg, relation_binding=relation_binding)
             sync_module = getattr(impl_set, "sync_module", None)
             sync_result: Dict[str, Any] = _run_sync_module_for_detect(sync_module, cfg, sync_base_inputs)
         else:
@@ -4650,6 +4948,7 @@ def _run_geometry_chain_with_sync(
                 base_inputs = _build_geometry_runtime_inputs(
                     cfg,
                     sync_result=sync_result,
+                    relation_binding=relation_binding,
                 )
                 anchor_result_raw = _run_geometry_extractor_with_runtime_inputs(
                     impl_set.geometry_extractor, cfg, base_inputs
@@ -4748,6 +5047,12 @@ def _run_geometry_chain_with_sync(
         "sync_relation_digest_bound": relation_digest_bound if isinstance(relation_digest_bound, str) else None,
         "binding_status": "matched" if isinstance(anchor_relation_digest, str) and isinstance(relation_digest_bound, str) and anchor_relation_digest == relation_digest_bound else "mismatch_or_absent",
     }
+    relation_binding_diagnostics = sync_result.get("relation_binding_diagnostics")
+    if isinstance(relation_binding_diagnostics, dict):
+        geometry_result["relation_binding_diagnostics"] = dict(relation_binding_diagnostics)
+    geometry_absent_reason_raw = sync_result.get("geometry_absent_reason_raw")
+    if isinstance(geometry_absent_reason_raw, str) and geometry_absent_reason_raw:
+        geometry_result["geometry_absent_reason_raw"] = geometry_absent_reason_raw
     geometry_result = _enforce_sync_primary_anchor_secondary(
         cfg=cfg,
         geometry_result=geometry_result,

@@ -374,6 +374,49 @@ def test_attestation_bundle_gate_skips_smoke_cpu_disabled_attestation() -> None:
     )
 
 
+def test_freeze_gate_uses_policy_semantics_for_optional_geometry_chain() -> None:
+    """
+    功能：geometry 非 required 时，freeze gate 不得再强制决策置空。
+
+    Freeze gate must follow policy semantics and skip null-decision enforcement
+    for optional geometry chains.
+
+    Returns:
+        None.
+    """
+    from main.policy import freeze_gate
+
+    contracts, whitelist, semantics, interpretation = _load_fact_sources()
+    policy_paths = semantics.data.get("policy_paths") if hasattr(semantics, "data") else None
+    assert isinstance(policy_paths, dict)
+    paper_policy = policy_paths.get("content_np_geo_rescue")
+    assert isinstance(paper_policy, dict)
+    required_chains = paper_policy.get("required_chains")
+    optional_chains = paper_policy.get("optional_chains")
+    assert isinstance(required_chains, dict)
+    assert isinstance(optional_chains, dict)
+    assert required_chains.get("content") is True
+    assert required_chains.get("geometry") is False
+    assert optional_chains.get("geometry") is True
+
+    record = {
+        "policy_path": "content_np_geo_rescue",
+        "decision": {"is_watermarked": True},
+        "execution_report": {
+            "content_chain_status": "ok",
+            "geometry_chain_status": "failed",
+            "fusion_status": "ok",
+            "audit_obligations_satisfied": True,
+        },
+    }
+
+    freeze_gate._validate_semantic_driven_execution(
+        record,
+        semantics,
+        interpretation,
+    )
+
+
 def test_detect_attestation_disabled_path_skips_signed_bundle_gate() -> None:
     """
     功能：验证 detect 路径在 attestation disabled 时不会触发 signed-bundle 门禁。 
