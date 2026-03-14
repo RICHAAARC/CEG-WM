@@ -724,8 +724,13 @@ def _run_redetect_with_np_thresholds(
 
     if _normalize_profile(profile) == PROFILE_PAPER_FULL_CUDA:
         main_detect_record = run_root / "records" / "detect_record.json"
-        main_detect_record.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(detect_np_record, main_detect_record)
+        records_io.copy_file_controlled_unbound(
+            run_root=run_root,
+            artifacts_dir=run_root / "artifacts",
+            src_path=detect_np_record,
+            dst_path=main_detect_record,
+            kind="record",
+        )
         print(
             f"[onefile/redetect] promoted canonical detect record to main run_root: {main_detect_record}"
         )

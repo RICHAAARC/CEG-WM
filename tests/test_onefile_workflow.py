@@ -756,6 +756,8 @@ def test_run_redetect_promotes_canonical_detect_record_for_paper_profile(
     cfg_path = tmp_path / "paper_cfg.yaml"
     cfg_path.write_text("policy_path: content_np_geo_rescue\n", encoding="utf-8")
 
+    controlled_copy_calls: list[dict[str, Any]] = []
+
     def _fake_run_subprocess(cmd: list[str], cwd: Path) -> int:
         _ = cwd
         detect_np_root = Path(cmd[cmd.index("--out") + 1])
@@ -780,7 +782,27 @@ def test_run_redetect_promotes_canonical_detect_record_for_paper_profile(
         )
         return 0
 
+    def _fake_controlled_copy(
+        run_root: Path,
+        artifacts_dir: Path,
+        src_path: Path,
+        dst_path: Path,
+        kind: str = "artifact",
+    ) -> None:
+        controlled_copy_calls.append(
+            {
+                "run_root": run_root,
+                "artifacts_dir": artifacts_dir,
+                "src_path": src_path,
+                "dst_path": dst_path,
+                "kind": kind,
+            }
+        )
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        dst_path.write_text(src_path.read_text(encoding="utf-8"), encoding="utf-8")
+
     monkeypatch.setattr(module, "_run_subprocess_for_step", _fake_run_subprocess)
+    monkeypatch.setattr(module.records_io, "copy_file_controlled_unbound", _fake_controlled_copy)
 
     module._run_redetect_with_np_thresholds(
         repo_root=repo_root,
@@ -788,6 +810,13 @@ def test_run_redetect_promotes_canonical_detect_record_for_paper_profile(
         cfg_path=cfg_path,
         profile="paper_full_cuda",
     )
+
+    assert len(controlled_copy_calls) == 1
+    assert controlled_copy_calls[0]["run_root"] == run_root
+    assert controlled_copy_calls[0]["artifacts_dir"] == run_root / "artifacts"
+    assert controlled_copy_calls[0]["src_path"] == run_root / "artifacts" / "detect_np" / "records" / "detect_record.json"
+    assert controlled_copy_calls[0]["dst_path"] == run_root / "records" / "detect_record.json"
+    assert controlled_copy_calls[0]["kind"] == "record"
 
     promoted_record = json.loads((run_root / "records" / "detect_record.json").read_text(encoding="utf-8"))
     assert promoted_record.get("threshold_source") == "np_canonical"
