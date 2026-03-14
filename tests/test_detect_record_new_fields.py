@@ -266,6 +266,28 @@ def test_records_schema_extensions_registers_lf_evidence_summary() -> None:
     assert "content_evidence.lf_evidence_summary" in registered_paths
 
 
+def test_frozen_contracts_registers_lf_evidence_summary() -> None:
+    """
+    功能：验证 frozen contracts 已登记 LF canonical evidence summary 字段。
+
+    Test that frozen contracts register the LF canonical evidence summary field.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parents[1]
+    contracts_path = repo_root / "configs" / "frozen_contracts.yaml"
+    contracts_obj = yaml.safe_load(contracts_path.read_text(encoding="utf-8"))
+    records_schema = contracts_obj.get("records_schema") if isinstance(contracts_obj, dict) else None
+    registry = records_schema.get("field_paths_registry") if isinstance(records_schema, dict) else None
+    assert isinstance(registry, list)
+    registered_paths = {item for item in registry if isinstance(item, str)}
+    assert "content_evidence.lf_evidence_summary" in registered_paths
+
+
 # ---------------------------------------------------------------------------
 # (3) bp_converge_status 不进入 lf_trace_digest 输入域的回归测试
 # ---------------------------------------------------------------------------

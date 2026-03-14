@@ -705,3 +705,92 @@ def test_build_stage_overrides_sets_embed_detect_content_switch() -> None:
     assert "enable_content_detect=true" in detect_overrides
 
 
+def test_run_redetect_promotes_canonical_detect_record_for_paper_profile(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：验证 paper profile 的 re-detect 会将 canonical detect record 回写主 run_root。
+
+    Verify paper profile re-detect promotes the canonical detect record back to
+    the main run_root detect record after calibrate.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "paper_full_run"
+    (run_root / "artifacts" / "thresholds").mkdir(parents=True, exist_ok=True)
+    (run_root / "records").mkdir(parents=True, exist_ok=True)
+
+    thresholds_artifact = run_root / "artifacts" / "thresholds" / "thresholds_artifact.json"
+    thresholds_artifact.write_text(
+        json.dumps(
+            {
+                "threshold_id": "content_score_np_1e-02",
+                "score_name": "content_score",
+                "target_fpr": 0.01,
+                "threshold_value": 1.11684145,
+                "threshold_key_used": "content_score_np_1e-02",
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "records" / "embed_record.json").write_text(
+        json.dumps({"status": "ok"}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (run_root / "records" / "detect_record.json").write_text(
+        json.dumps({"threshold_source": "fallback_target_fpr_test_only"}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    cfg_path = tmp_path / "paper_cfg.yaml"
+    cfg_path.write_text("policy_path: content_np_geo_rescue\n", encoding="utf-8")
+
+    def _fake_run_subprocess(cmd: list[str], cwd: Path) -> int:
+        _ = cwd
+        detect_np_root = Path(cmd[cmd.index("--out") + 1])
+        records_dir = detect_np_root / "records"
+        records_dir.mkdir(parents=True, exist_ok=True)
+        (records_dir / "detect_record.json").write_text(
+            json.dumps(
+                {
+                    "threshold_source": "np_canonical",
+                    "final_decision": {"threshold_source": "np_canonical"},
+                    "fusion_result": {
+                        "audit": {
+                            "threshold_source": "np_canonical",
+                            "allow_threshold_fallback_for_tests": False,
+                        }
+                    },
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        return 0
+
+    monkeypatch.setattr(module, "_run_subprocess_for_step", _fake_run_subprocess)
+
+    module._run_redetect_with_np_thresholds(
+        repo_root=repo_root,
+        run_root=run_root,
+        cfg_path=cfg_path,
+        profile="paper_full_cuda",
+    )
+
+    promoted_record = json.loads((run_root / "records" / "detect_record.json").read_text(encoding="utf-8"))
+    assert promoted_record.get("threshold_source") == "np_canonical"
+    assert promoted_record.get("final_decision", {}).get("threshold_source") == "np_canonical"
+
+

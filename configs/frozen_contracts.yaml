@@ -499,6 +499,7 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
     - content_evidence.lf_statistics_digest      # LF 统计摘要。
     - content_evidence.hf_statistics_digest      # HF 统计摘要。
     - content_evidence.hf_evidence_summary       # 高频证据摘要对象。
+    - content_evidence.lf_evidence_summary       # 低频证据摘要对象。
     - content_evidence.subspace_plan.subspace_conditioning # 子空间条件化说明。
     - content_evidence.score_parts               # 评分分解项。
     - content_evidence.content_failure_reason    # 内容链失败原因（标准化字段）。

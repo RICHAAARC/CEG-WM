@@ -132,7 +132,7 @@ def test_lf_absent_when_trajectory_cache_absent() -> None:
     功能：trajectory cache 为 None 时 LF 状态应为 absent。
 
     Verify that absent trajectory cache results in
-    lf_status="absent" with reason "trajectory_cache_absent".
+    lf_status="absent" with the normalized main-path reason.
 
     Args:
         None.
@@ -162,7 +162,8 @@ def test_lf_absent_when_trajectory_cache_absent() -> None:
     lf_trace = cast(Dict[str, Any], traces.get("lf", {}))
     assert lf_trace.get("lf_detect_path") == "low_freq_template_trajectory"
     assert lf_trace.get("lf_status") == "absent"
-    assert lf_trace.get("lf_absent_reason") == "trajectory_cache_absent"
+    assert lf_trace.get("lf_absent_reason") == "lf_timestep_unresolved"
+    assert "lf_resolution_status" not in lf_trace
 
 
 def test_lf_absent_when_trajectory_cache_empty() -> None:
@@ -170,7 +171,7 @@ def test_lf_absent_when_trajectory_cache_empty() -> None:
     功能：trajectory cache 为空时 LF 状态应为 absent。
 
     Verify that an empty (captured nothing) trajectory cache results in
-    lf_status="absent" with reason "trajectory_cache_absent".
+    lf_status="absent" with the normalized main-path reason.
 
     Args:
         None.
@@ -202,7 +203,8 @@ def test_lf_absent_when_trajectory_cache_empty() -> None:
     lf_trace = cast(Dict[str, Any], traces.get("lf", {}))
     assert lf_trace.get("lf_detect_path") == "low_freq_template_trajectory"
     assert lf_trace.get("lf_status") == "absent"
-    assert lf_trace.get("lf_absent_reason") == "trajectory_cache_absent"
+    assert lf_trace.get("lf_absent_reason") == "lf_timestep_unresolved"
+    assert "lf_resolution_status" not in lf_trace
 
 
 def test_lf_absent_when_lf_basis_missing() -> None:
@@ -210,7 +212,7 @@ def test_lf_absent_when_lf_basis_missing() -> None:
     功能：plan 中缺少 lf_basis 时 LF 状态应为 absent。
 
     Verify that missing lf_basis in plan_payload results in
-    lf_status="absent" with reason "lf_basis_missing_for_trajectory_path".
+    lf_status="absent" with the normalized basis-missing reason.
 
     Args:
         None.
@@ -242,7 +244,7 @@ def test_lf_absent_when_lf_basis_missing() -> None:
     lf_trace = cast(Dict[str, Any], traces.get("lf", {}))
     assert lf_trace.get("lf_detect_path") == "low_freq_template_trajectory"
     assert lf_trace.get("lf_status") == "absent"
-    assert lf_trace.get("lf_absent_reason") == "lf_basis_missing_for_trajectory_path"
+    assert lf_trace.get("lf_absent_reason") == "lf_basis_missing"
 
 
 def test_lf_absent_on_exact_timestep_mismatch() -> None:
@@ -250,7 +252,8 @@ def test_lf_absent_on_exact_timestep_mismatch() -> None:
     功能：paper 模式下 edit_timestep 精确不命中时 LF 状态应为 absent。
 
     Verify that a trajectory cache without the required edit_timestep
-    results in lf_status="absent" with trajectory_latent_absent reason.
+    results in lf_status="absent" with normalized main-path reason and
+    preserves the exact resolution status for audit.
 
     Args:
         None.
@@ -285,8 +288,10 @@ def test_lf_absent_on_exact_timestep_mismatch() -> None:
     lf_trace = cast(Dict[str, Any], traces.get("lf", {}))
     assert lf_trace.get("lf_detect_path") == "low_freq_template_trajectory"
     assert lf_trace.get("lf_status") == "absent"
-    absent_reason = lf_trace.get("lf_absent_reason", "")
-    assert "trajectory_latent_absent" in absent_reason
+    assert lf_trace.get("lf_absent_reason") == "lf_timestep_unresolved"
+    resolution_status = lf_trace.get("lf_resolution_status", "")
+    assert isinstance(resolution_status, str)
+    assert resolution_status.startswith("absent_exact_timestep_mismatch")
 
 
 # ---------------------------------------------------------------------------

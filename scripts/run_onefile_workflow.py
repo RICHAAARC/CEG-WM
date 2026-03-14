@@ -663,8 +663,9 @@ def _run_redetect_with_np_thresholds(
     功能：在 calibrate 完成后，使用 NP 校准阈值工件重跑一次 detect（re-detect）。
 
     Re-run detect with NP canonical thresholds artifact produced by calibrate.
-    Results are stored in artifacts/detect_np/ (independent subdirectory; does not
-    overwrite the original detect_record.json consumed by calibrate).
+    Results are stored in artifacts/detect_np/. For paper_full_cuda, the
+    canonical detect record is additionally promoted back to the main run_root
+    after calibrate has already consumed the pre-calibration detect output.
 
     Args:
         repo_root: Repository root path.
@@ -695,7 +696,7 @@ def _run_redetect_with_np_thresholds(
     embed_record = run_root / "records" / "embed_record.json"
 
     # 构建 re-detect 命令：使用 main.cli.run_detect 入口，--out 指向独立子目录，
-    # 追加 --thresholds-path 注入 NP 阈值工件，不覆盖原始 detect_record.json。
+    # 追加 --thresholds-path 注入 NP 阈值工件。
     command = [
         sys.executable,
         "-m",
@@ -720,6 +721,15 @@ def _run_redetect_with_np_thresholds(
     detect_np_record = detect_np_root / "records" / "detect_record.json"
     if not detect_np_record.exists():
         raise RuntimeError("re-detect returned 0 but detect_record.json is absent")
+
+    if _normalize_profile(profile) == PROFILE_PAPER_FULL_CUDA:
+        main_detect_record = run_root / "records" / "detect_record.json"
+        main_detect_record.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(detect_np_record, main_detect_record)
+        print(
+            f"[onefile/redetect] promoted canonical detect record to main run_root: {main_detect_record}"
+        )
+
     print(f"[onefile/redetect] re-detect completed: {detect_np_record}")
 
 
@@ -3344,8 +3354,9 @@ def run_onefile_workflow(
                     file=sys.stderr,
                 )
 
-        # calibrate 成功完成后，重跑一次 detect（re-detect），使用 NP 阈值工件，
-        # 产物写入独立子目录 artifacts/detect_np/，不覆盖原始 detect_record.json。
+        # calibrate 成功完成后，重跑一次 detect（re-detect），使用 NP 阈值工件。
+        # paper_full_cuda 会在该步结束后将 canonical detect_record 回写主 run_root，
+        # 非 paper_full_cuda 仍保持 detect_np 独立子目录语义。
         if step.name == "calibrate" and return_code == 0:
             try:
                 _run_redetect_with_np_thresholds(repo_root, run_root, effective_cfg_path, profile)
