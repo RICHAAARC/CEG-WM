@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 from main.diffusion.sd3.trajectory_tap import LatentTrajectoryCache
 from main.registries.runtime_resolver import BuiltImplSet
+from main.watermarking.content_chain.unified_content_extractor import UnifiedContentExtractor
 from main.watermarking.detect import orchestrator as detect_orchestrator
 from main.watermarking.fusion.interfaces import FusionDecision
 from scripts import run_onefile_workflow
@@ -34,7 +35,7 @@ class _ContentExtractorSidecarDisabledStub:
             "score_parts": None,
             "lf_score": None,
             "hf_score": None,
-            "content_failure_reason": "image_domain_sidecar_disabled_by_ablation",
+            "content_failure_reason": "formal_profile_sidecar_disabled",
         }
 
 
@@ -130,7 +131,7 @@ def test_prepare_detect_record_for_scoring_accepts_hf_score_when_sidecar_disable
             "score_parts": None,
             "detect_lf_score": None,
             "detect_hf_score": 0.91,
-            "content_failure_reason": "image_domain_sidecar_disabled_by_ablation",
+            "content_failure_reason": "formal_profile_sidecar_disabled",
         }
     }
     (records_dir / "detect_record.json").write_text(
@@ -219,3 +220,195 @@ def test_detect_runtime_mode_real_for_hf_only_when_sidecar_disabled(monkeypatch:
     content_payload = record.get("content_evidence_payload")
     assert isinstance(content_payload, dict)
     assert content_payload.get("detect_hf_score") == 0.97
+
+
+def test_resolve_sidecar_disabled_reason_distinguishes_formal_and_ablation() -> None:
+    """
+    功能：验证 formal profile 与 ablation profile 的 sidecar 关闭原因被明确区分。
+
+    Verify formal-profile and ablation sidecar-disabled reasons are distinct.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    assert detect_orchestrator._resolve_sidecar_disabled_reason(True, False) == "formal_profile_sidecar_disabled"
+    assert detect_orchestrator._resolve_sidecar_disabled_reason(False, False) == "ablation_sidecar_disabled"
+
+
+def test_detect_orchestrator_uses_lf_trajectory_evidence_when_sidecar_disabled(monkeypatch: Any) -> None:
+    """
+    功能：验证 sidecar 禁用时 LF trajectory 证据不会再被覆盖成 absent。
+
+    Verify LF trajectory evidence remains canonical when image-domain sidecar is disabled.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    monkeypatch.setattr(
+        detect_orchestrator,
+        "_extract_lf_raw_score_from_trajectory",
+        lambda **kwargs: (
+            0.83,
+            {
+                "lf_status": "ok",
+                "lf_trace_digest": "a" * 64,
+                "bp_converged": True,
+                "bp_iteration_count": 4,
+                "parity_check_digest": "b" * 64,
+                "lf_detect_path": "low_freq_template_trajectory",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        detect_orchestrator,
+        "_build_hf_detect_evidence",
+        lambda **kwargs: {
+            "status": "absent",
+            "hf_score": None,
+            "hf_trace_digest": None,
+            "hf_evidence_summary": {
+                "hf_status": "absent",
+                "hf_absent_reason": "formal_profile_sidecar_disabled",
+            },
+            "content_failure_reason": "formal_profile_sidecar_disabled",
+        },
+    )
+
+    cfg: Dict[str, Any] = {
+        "paper_faithfulness": {"enabled": True},
+        "watermark": {
+            "subspace": {"enabled": True},
+            "lf": {"enabled": True, "ecc": "sparse_ldpc"},
+            "hf": {"enabled": True},
+        },
+        "detect": {
+            "content": {"enabled": True},
+            "geometry": {"enabled": False},
+        },
+        "__pipeline_runtime_meta__": {"status": "built", "synthetic_pipeline": False},
+    }
+    input_record = {
+        "plan_digest": "a" * 64,
+        "basis_digest": "b" * 64,
+        "subspace_planner_impl_identity": _PlannerStub.impl_identity,
+    }
+    content_extractor = UnifiedContentExtractor(
+        impl_id="unified_content_extractor",
+        impl_version="v2",
+        impl_digest="c" * 64,
+    )
+    impl_set = BuiltImplSet(
+        content_extractor=content_extractor,
+        geometry_extractor=_GeometryExtractorStub(),
+        fusion_rule=_FusionRuleStub(),
+        subspace_planner=_PlannerStub(),
+        sync_module=_SyncStub(),
+    )
+
+    record = detect_orchestrator.run_detect_orchestrator(
+        cfg,
+        impl_set,
+        input_record=input_record,
+        cfg_digest="d" * 64,
+    )
+
+    content_payload = record.get("content_evidence_payload")
+    assert isinstance(content_payload, dict)
+    assert content_payload.get("status") == "ok"
+    assert content_payload.get("lf_score") == 0.83
+    lf_summary = content_payload.get("lf_evidence_summary")
+    assert isinstance(lf_summary, dict)
+    assert lf_summary.get("lf_status") == "ok"
+    assert content_payload.get("content_failure_reason") is None
+
+
+def test_detect_orchestrator_records_lf_trajectory_failure_reason_when_sidecar_disabled(monkeypatch: Any) -> None:
+    """
+    功能：验证 sidecar 禁用时 LF trajectory 失败原因会落盘到 detect record。
+
+    Verify LF trajectory failure reasons remain auditable when sidecar is disabled.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    monkeypatch.setattr(
+        detect_orchestrator,
+        "_extract_lf_raw_score_from_trajectory",
+        lambda **kwargs: (
+            None,
+            {
+                "lf_status": "absent",
+                "lf_absent_reason": "lf_projection_matrix_missing",
+                "lf_detect_path": "low_freq_template_trajectory",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        detect_orchestrator,
+        "_build_hf_detect_evidence",
+        lambda **kwargs: {
+            "status": "absent",
+            "hf_score": None,
+            "hf_trace_digest": None,
+            "hf_evidence_summary": {
+                "hf_status": "absent",
+                "hf_absent_reason": "formal_profile_sidecar_disabled",
+            },
+            "content_failure_reason": "formal_profile_sidecar_disabled",
+        },
+    )
+
+    cfg: Dict[str, Any] = {
+        "paper_faithfulness": {"enabled": True},
+        "watermark": {
+            "subspace": {"enabled": True},
+            "lf": {"enabled": True, "ecc": "sparse_ldpc"},
+            "hf": {"enabled": True},
+        },
+        "detect": {
+            "content": {"enabled": True},
+            "geometry": {"enabled": False},
+        },
+        "__pipeline_runtime_meta__": {"status": "built", "synthetic_pipeline": False},
+    }
+    input_record = {
+        "plan_digest": "a" * 64,
+        "basis_digest": "b" * 64,
+        "subspace_planner_impl_identity": _PlannerStub.impl_identity,
+    }
+    content_extractor = UnifiedContentExtractor(
+        impl_id="unified_content_extractor",
+        impl_version="v2",
+        impl_digest="c" * 64,
+    )
+    impl_set = BuiltImplSet(
+        content_extractor=content_extractor,
+        geometry_extractor=_GeometryExtractorStub(),
+        fusion_rule=_FusionRuleStub(),
+        subspace_planner=_PlannerStub(),
+        sync_module=_SyncStub(),
+    )
+
+    record = detect_orchestrator.run_detect_orchestrator(
+        cfg,
+        impl_set,
+        input_record=input_record,
+        cfg_digest="d" * 64,
+    )
+
+    content_payload = record.get("content_evidence_payload")
+    assert isinstance(content_payload, dict)
+    assert content_payload.get("status") == "absent"
+    assert content_payload.get("content_failure_reason") == "lf_projection_matrix_missing"
+    lf_summary = content_payload.get("lf_evidence_summary")
+    assert isinstance(lf_summary, dict)
+    assert lf_summary.get("lf_absent_reason") == "lf_projection_matrix_missing"

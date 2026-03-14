@@ -247,3 +247,69 @@ def test_unified_content_extractor_success_with_lf_score() -> None:
         f"Expected score_parts['lf_score']=0.75, got {result.score_parts.get('lf_score')}"
     assert result.score_parts.get("hf_score") == "<absent>", \
         f"Expected score_parts['hf_score']='<absent>', got {result.score_parts.get('hf_score')}"
+
+
+def test_unified_content_extractor_preserves_hf_metrics_when_lf_absent() -> None:
+    """
+    功能：验证 LF absent 时 canonical HF summary 不会被无差别清空。
+
+    Test that canonical HF summary remains available when LF status is absent.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    cfg: Dict[str, Any] = {
+        "detect": {
+            "content": {
+                "enabled": True
+            }
+        },
+        "watermark": {
+            "hf": {
+                "enabled": True
+            }
+        }
+    }
+
+    inputs: Dict[str, Any] = {
+        "expected_plan_digest": "test_plan_digest_001",
+        "plan_digest": "test_plan_digest_001",
+        "lf_evidence": {
+            "status": "absent",
+            "lf_score": None,
+            "content_failure_reason": "formal_profile_sidecar_disabled",
+            "lf_evidence_summary": {
+                "lf_status": "absent",
+                "lf_absent_reason": "formal_profile_sidecar_disabled",
+            },
+        },
+        "hf_evidence": {
+            "status": "ok",
+            "hf_score": 0.62,
+            "hf_trace_digest": "h" * 64,
+            "hf_evidence_summary": {
+                "hf_status": "ok",
+                "hf_detect_variant": "projection_tail_truncation",
+                "basis_rank": 8,
+            },
+        },
+    }
+
+    detector = UnifiedContentExtractor(
+        impl_id="unified_content_extractor",
+        impl_version="v2",
+        impl_digest="test_impl_digest"
+    )
+
+    result = detector.extract(cfg=cfg, inputs=inputs)
+
+    assert result.status == "absent"
+    assert result.score is None
+    assert result.hf_trace_digest == "h" * 64
+    assert result.score_parts is not None
+    hf_metrics = result.score_parts.get("hf_metrics")
+    assert isinstance(hf_metrics, dict)
+    assert hf_metrics.get("hf_status") == "ok"

@@ -128,7 +128,7 @@ def build_injection_context_from_plan(
     plan_digest: str
 ) -> InjectionContext:
     """
-    功能：基于 plan 构造 InjectionContext（不修改 cfg）。
+    功能：基于 plan 构造 InjectionContext。
     
     Build InjectionContext from plan payload and cfg without mutating cfg.
 
@@ -311,7 +311,7 @@ def bind_impl_identity_fields(
 
 def set_failure_status(run_meta: Dict[str, Any], reason: RunFailureReason, exc: Exception) -> None:
     """
-    功能：设置失败状态与原因（结构化）。
+    功能：设置失败状态与原因。
 
     Set failure status with controlled reason and structured details.
     Ensures GateEnforcementError is serialized with structured fields.
@@ -354,12 +354,12 @@ def set_failure_status(run_meta: Dict[str, Any], reason: RunFailureReason, exc: 
         try:
             tb = sys.exc_info()[2]
             if tb is not None:
-                # 获取首帧（抛出点）。
+                # 获取首帧。
                 frame = tb.tb_frame
                 filename = frame.f_code.co_filename
                 function = frame.f_code.co_name
                 lineno = tb.tb_lineno
-                # 简化路径为模块名（去掉绝对路径前缀）。
+                # 简化路径为模块名。
                 from pathlib import Path
                 try:
                     module_path = Path(filename).relative_to(Path.cwd())

@@ -243,6 +243,29 @@ def test_bp_converge_status_degraded_when_not_converged() -> None:
     )
 
 
+def test_records_schema_extensions_registers_lf_evidence_summary() -> None:
+    """
+    功能：验证 records schema extension 已登记 LF canonical evidence summary 字段。
+
+    Test that records schema extensions register the LF canonical evidence summary field.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parents[1]
+    schema_path = repo_root / "configs" / "records_schema_extensions.yaml"
+    schema_obj = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+    fields = schema_obj.get("fields") if isinstance(schema_obj, dict) else None
+    assert isinstance(fields, list)
+    registered_paths = {
+        item.get("path") for item in fields if isinstance(item, dict)
+    }
+    assert "content_evidence.lf_evidence_summary" in registered_paths
+
+
 # ---------------------------------------------------------------------------
 # (3) bp_converge_status 不进入 lf_trace_digest 输入域的回归测试
 # ---------------------------------------------------------------------------

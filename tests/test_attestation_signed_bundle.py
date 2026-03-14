@@ -14,7 +14,7 @@ from main.watermarking.provenance.attestation_statement import (
     compute_event_binding_digest,
     verify_signed_attestation_bundle,
 )
-from main.watermarking.detect.orchestrator import verify_attestation
+from main.watermarking.detect.orchestrator import _build_detect_attestation_result, verify_attestation
 
 
 def _build_statement() -> Dict[str, Any]:
@@ -205,3 +205,56 @@ def test_verify_attestation_authentic_bundle_can_become_event_attested() -> None
     assert isinstance(final_decision, dict)
     assert final_decision.get("status") == "attested"
     assert final_decision.get("is_event_attested") is True
+
+
+def test_build_detect_attestation_result_bridges_hf_attestation_values() -> None:
+    """
+    功能：验证 detect 侧 attestation 会消费 canonical HF attestation 输入。
+
+    Verify detect-side attestation consumes bridged canonical HF attestation values.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    payload = _build_statement()
+    cfg = {
+        "__attestation_verify_k_master__": "5" * 64,
+        "attestation": {
+            "lf_weight": 0.5,
+            "hf_weight": 0.3,
+            "geo_weight": 0.2,
+            "threshold": 0.65,
+        },
+    }
+    attestation_context = {
+        "candidate_statement": payload["statement"],
+        "attestation_bundle": payload["bundle"],
+        "authenticity_status": "authentic",
+        "bundle_verification": {"status": "ok"},
+    }
+    content_evidence_payload = {
+        "score_parts": {
+            "hf_attestation_values": [1.0, 0.5, 0.25, 0.125],
+        },
+        "hf_evidence_summary": {
+            "hf_status": "ok",
+        },
+    }
+
+    result = _build_detect_attestation_result(
+        cfg=cfg,
+        attestation_context=attestation_context,
+        content_evidence_payload=content_evidence_payload,
+        geometry_evidence_payload=None,
+    )
+
+    image_evidence_result = result.get("image_evidence_result")
+    assert isinstance(image_evidence_result, dict)
+    assert image_evidence_result.get("status") == "ok"
+    channel_scores = result.get("channel_scores")
+    assert isinstance(channel_scores, dict)
+    assert channel_scores.get("hf") is not None
+    assert "all_channel_scores_absent" not in list(result.get("mismatch_reasons") or [])

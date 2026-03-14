@@ -2079,6 +2079,8 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
         sidecar_disabled_reasons = {
             "image_domain_sidecar_disabled",
             "image_domain_sidecar_disabled_by_ablation",
+            "formal_profile_sidecar_disabled",
+            "ablation_sidecar_disabled",
         }
         _sp_node = content_payload.get("score_parts") or {}
         _lf_trace = (_sp_node.get("lf_detect_trace") or {}) if isinstance(_sp_node, dict) else {}

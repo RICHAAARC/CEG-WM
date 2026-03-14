@@ -1,6 +1,10 @@
 """
-File purpose: 实验矩阵一键执行 CLI 入口。
-Module type: General module
+实验矩阵执行 CLI 入口
+
+功能说明：
+- 构建实验矩阵并执行全流程。
+- 包含详细的输入验证与错误处理，确保健壮性与可维护性。
+- 输出实验矩阵执行汇总，包括执行统计与产物路径。
 """
 
 from __future__ import annotations

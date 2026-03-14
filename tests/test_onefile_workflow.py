@@ -469,7 +469,7 @@ def test_dual_branch_negative_hf_only_sample_survives_formal_calibration_filters
                     "score": None,
                     "detect_lf_score": None,
                     "detect_hf_score": 0.37,
-                    "content_failure_reason": "image_domain_sidecar_disabled_by_ablation",
+                    "content_failure_reason": "formal_profile_sidecar_disabled",
                 },
             },
             ensure_ascii=False,

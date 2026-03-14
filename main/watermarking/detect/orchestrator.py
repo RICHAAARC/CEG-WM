@@ -362,6 +362,16 @@ def _build_detect_attestation_result(
         if isinstance(raw_geo_score, (int, float)):
             geo_score = float(raw_geo_score)
 
+    hf_values = None
+    if isinstance(content_evidence_payload, dict):
+        raw_hf_values = content_evidence_payload.get("hf_attestation_values")
+        if raw_hf_values is None:
+            score_parts_node = content_evidence_payload.get("score_parts")
+            if isinstance(score_parts_node, dict):
+                raw_hf_values = score_parts_node.get("hf_attestation_values")
+        if raw_hf_values is not None:
+            hf_values = raw_hf_values
+
     attestation_node = cfg.get("attestation")
     attestation_cfg = cast(Dict[str, Any], attestation_node) if isinstance(attestation_node, dict) else {}
 
@@ -370,6 +380,7 @@ def _build_detect_attestation_result(
         candidate_statement=candidate_statement,
         attestation_bundle=attestation_bundle if isinstance(attestation_bundle, dict) else None,
         content_evidence=content_evidence_payload if isinstance(content_evidence_payload, dict) else None,
+        hf_values=hf_values,
         geo_score=geo_score,
         lf_weight=float(attestation_cfg.get("lf_weight", 0.5)),
         hf_weight=float(attestation_cfg.get("hf_weight", 0.3)),
@@ -508,14 +519,14 @@ def run_detect_orchestrator(
     if not isinstance(mask_digest, str) or not mask_digest:
         # detect-mode 前置阶段可能无法提供 mask_digest；此时回退到 embed-mode 提取，供 planner 使用。
         cfg_for_planner = dict(cfg)
-        detect_cfg_for_planner = cfg_for_planner.get("detect")
-        if isinstance(detect_cfg_for_planner, dict):
-            detect_cfg_for_planner = cast(Dict[str, Any], detect_cfg_for_planner)
+        detect_cfg_node = cfg_for_planner.get("detect")
+        if isinstance(detect_cfg_node, dict):
+            detect_cfg_for_planner = dict(cast(Dict[str, Any], detect_cfg_node))
         else:
             detect_cfg_for_planner = {}
-        detect_content_cfg_for_planner = detect_cfg_for_planner.get("content")
-        if isinstance(detect_content_cfg_for_planner, dict):
-            detect_content_cfg_for_planner = cast(Dict[str, Any], detect_content_cfg_for_planner)
+        detect_content_cfg_node = detect_cfg_for_planner.get("content")
+        if isinstance(detect_content_cfg_node, dict):
+            detect_content_cfg_for_planner = dict(cast(Dict[str, Any], detect_content_cfg_node))
         else:
             detect_content_cfg_for_planner = {}
         detect_content_cfg_for_planner["enabled"] = False
@@ -790,43 +801,27 @@ def run_detect_orchestrator(
                 cfg_digest=cfg_digest,
             )
         else:
-            lf_raw_score = None
+            sidecar_disabled_reason = _resolve_sidecar_disabled_reason(
+                paper_enabled=paper_enabled,
+                enable_image_sidecar=bool(enable_image_sidecar),
+            )
+            lf_raw_score, lf_raw_trace = _extract_lf_raw_score_from_trajectory(
+                cfg=cfg,
+                plan_payload=plan_payload,
+                plan_digest=detect_time_plan_digest,
+                cfg_digest=cfg_digest,
+            )
             hf_raw_score = None
             raw_score_traces = {
-                "lf": {
-                    "lf_status": "absent",
-                    "lf_absent_reason": (
-                        "image_domain_sidecar_disabled_by_ablation"
-                        if not bool(enable_image_sidecar)
-                        else "image_domain_sidecar_disabled"
-                    ),
-                },
+                "lf": lf_raw_trace,
                 "hf": {
                     "hf_status": "absent",
-                    "hf_absent_reason": (
-                        "image_domain_sidecar_disabled_by_ablation"
-                        if not bool(enable_image_sidecar)
-                        else "image_domain_sidecar_disabled"
-                    ),
+                    "hf_absent_reason": sidecar_disabled_reason,
                 },
             }
-        # 正式 LF detect 步骤：trajectory latent + LDPC 闭环相关验证。
-        _lf_direct_detect_score: Optional[float] = None
-        if isinstance(plan_payload, dict):
-            _plan_early = plan_payload.get("plan")
-            _plan_early_dict = cast(Dict[str, Any], _plan_early) if isinstance(_plan_early, dict) else {}
-            _lf_basis_early = _plan_early_dict.get("lf_basis")
-            _dtc_early = cfg.get("__detect_trajectory_latent_cache__")
-            _active_pd = embed_time_plan_digest if isinstance(embed_time_plan_digest, str) and embed_time_plan_digest else detect_time_plan_digest
-            if _lf_basis_early is not None and _dtc_early is not None and not _dtc_early.is_empty():
-                _lf_s, _lf_st = detector_scoring.extract_lf_score_from_detect_trajectory(
-                    _dtc_early, _lf_basis_early, None, cfg, plan_digest=_active_pd
-                )
-                if _lf_s is not None:
-                    _lf_direct_detect_score = _lf_s
 
         lf_detect_evidence = _build_lf_detect_evidence(
-            _lf_direct_detect_score if _lf_direct_detect_score is not None else lf_raw_score,
+            lf_raw_score,
             raw_score_traces.get("lf"),
         )
         detector_inputs: Dict[str, Any] = {
@@ -853,6 +848,24 @@ def run_detect_orchestrator(
             _inject_trajectory_audit_fields(content_evidence_payload, trajectory_evidence)
         if injection_evidence is not None:
             _merge_injection_evidence(content_evidence_payload, injection_evidence)
+        score_parts_node = content_evidence_payload.get("score_parts")
+        score_parts = cast(Dict[str, Any], score_parts_node) if isinstance(score_parts_node, dict) else {}
+        if not isinstance(score_parts_node, dict):
+            content_evidence_payload["score_parts"] = score_parts
+        score_parts["lf_trajectory_detect_trace"] = raw_score_traces.get("lf")
+        score_parts["hf_image_detect_trace"] = raw_score_traces.get("hf")
+        lf_summary = lf_detect_evidence.get("lf_evidence_summary")
+        if isinstance(lf_summary, dict):
+            content_evidence_payload["lf_evidence_summary"] = lf_summary
+            score_parts.setdefault("lf_metrics", lf_summary)
+        hf_summary = hf_evidence.get("hf_evidence_summary")
+        if isinstance(hf_summary, dict):
+            content_evidence_payload["hf_evidence_summary"] = hf_summary
+            score_parts.setdefault("hf_metrics", hf_summary)
+            score_parts["hf_trajectory_detect_trace"] = hf_summary
+        hf_attestation_values = hf_evidence.get("hf_attestation_values")
+        if isinstance(hf_attestation_values, list):
+            score_parts["hf_attestation_values"] = hf_attestation_values
         _bind_scores_if_ok(content_evidence_payload)
         content_evidence_adapted = _adapt_content_evidence_for_fusion(content_evidence_payload)
         
@@ -1002,6 +1015,8 @@ def run_detect_orchestrator(
             and content_failure_reason_value in {
                 "image_domain_sidecar_disabled",
                 "image_domain_sidecar_disabled_by_ablation",
+                "formal_profile_sidecar_disabled",
+                "ablation_sidecar_disabled",
             }
         )
         if (
@@ -1380,7 +1395,132 @@ def _build_hf_detect_evidence(
             "hf_absent_reason": evidence.get("hf_absent_reason"),
             "hf_failure_reason": evidence.get("hf_failure_reason"),
         }
+    if evidence.get("status") == "ok":
+        try:
+            from main.watermarking.content_chain.high_freq_embedder import _prepare_hf_feature_vector
+
+            feature_vector = _prepare_hf_feature_vector(detect_latent, hf_basis)
+            coeffs = channel_hf.compute_hf_basis_projection(feature_vector, hf_basis)
+            evidence["hf_attestation_values"] = np.asarray(coeffs, dtype=np.float32).reshape(-1).tolist()
+        except Exception:
+            pass
     return evidence
+
+
+def _extract_lf_raw_score_from_trajectory(
+    cfg: Dict[str, Any],
+    plan_payload: Optional[Dict[str, Any]],
+    plan_digest: Optional[str],
+    cfg_digest: Optional[str],
+) -> tuple[Optional[float], Dict[str, Any]]:
+    """
+    功能：通过 detect 侧 trajectory 路径提取 LF 原始分数与 trace。
+
+    Extract LF score and trace from the detect-side trajectory path.
+
+    Args:
+        cfg: Configuration mapping.
+        plan_payload: Planner payload mapping.
+        plan_digest: Detect-side plan digest.
+        cfg_digest: Detect-side config digest.
+
+    Returns:
+        Tuple of LF score and LF trace mapping.
+    """
+    plan_dict = _resolve_plan_dict(plan_payload)
+    lf_basis_for_decode = plan_dict.get("lf_basis") if isinstance(plan_dict.get("lf_basis"), dict) else None
+    detect_traj_cache = cfg.get("__detect_trajectory_latent_cache__")
+    if lf_basis_for_decode is None:
+        return None, {
+            "lf_status": "absent",
+            "lf_absent_reason": "lf_basis_missing",
+            "lf_detect_path": "low_freq_template_trajectory",
+        }
+    if not isinstance(plan_digest, str) or not plan_digest:
+        return None, {
+            "lf_status": "absent",
+            "lf_absent_reason": "lf_plan_digest_missing",
+            "lf_detect_path": "low_freq_template_trajectory",
+        }
+    if detect_traj_cache is None or detect_traj_cache.is_empty():
+        return None, {
+            "lf_status": "absent",
+            "lf_absent_reason": "lf_timestep_unresolved",
+            "lf_detect_path": "low_freq_template_trajectory",
+        }
+
+    tfs = lf_basis_for_decode.get("trajectory_feature_spec")
+    if not isinstance(tfs, dict) or tfs.get("feature_operator") != "masked_normalized_random_projection":
+        return None, {
+            "lf_status": "failed",
+            "lf_failure_reason": "lf_trajectory_feature_spec_invalid",
+            "lf_detect_path": "low_freq_template_trajectory",
+        }
+
+    edit_timestep = int(tfs.get("edit_timestep", 0))
+    z_t, resolution_status = detector_scoring.resolve_detect_trajectory_latent_for_timestep(
+        detect_traj_cache, edit_timestep
+    )
+    if z_t is None:
+        return None, {
+            "lf_status": "absent",
+            "lf_absent_reason": "lf_timestep_unresolved",
+            "lf_resolution_status": resolution_status,
+            "lf_detect_path": "low_freq_template_trajectory",
+        }
+
+    try:
+        from main.watermarking.content_chain.subspace.trajectory_feature_space import (
+            extract_trajectory_feature_np,
+        )
+
+        phi = extract_trajectory_feature_np(np.asarray(z_t, dtype=np.float64), tfs)
+        lf_impl_digest = digests.canonical_sha256(
+            {
+                "impl_id": LOW_FREQ_TEMPLATE_CODEC_ID,
+                "impl_version": LOW_FREQ_TEMPLATE_CODEC_VERSION,
+            }
+        )
+        lf_coder = LowFreqTemplateCodec(LOW_FREQ_TEMPLATE_CODEC_ID, LOW_FREQ_TEMPLATE_CODEC_VERSION, lf_impl_digest)
+        lf_score, lf_detect_trace = lf_coder.detect_score(
+            cfg=cfg,
+            latent_features=phi,
+            plan_digest=plan_digest,
+            cfg_digest=cfg_digest,
+            lf_basis=lf_basis_for_decode,
+        )
+        lf_trace = {
+            "lf_status": lf_detect_trace.get("status", "failed"),
+            "lf_score": lf_score,
+            "lf_trace_digest": lf_detect_trace.get("lf_trace_digest"),
+            "bp_converged": lf_detect_trace.get("bp_converged"),
+            "bp_iteration_count": lf_detect_trace.get("bp_iteration_count"),
+            "parity_check_digest": lf_detect_trace.get("parity_check_digest"),
+            "lf_failure_reason": lf_detect_trace.get("lf_failure_reason"),
+            "bp_converge_status": lf_detect_trace.get("bp_converge_status"),
+            "lf_detect_path": "low_freq_template_trajectory",
+        }
+        failure_reason = lf_trace.get("lf_failure_reason")
+        if isinstance(failure_reason, str) and failure_reason:
+            if failure_reason == "lf_basis_required_but_absent":
+                lf_trace["lf_status"] = "absent"
+                lf_trace["lf_absent_reason"] = "lf_basis_missing"
+            elif failure_reason == "projection_matrix_missing":
+                lf_trace["lf_status"] = "absent"
+                lf_trace["lf_absent_reason"] = "lf_projection_matrix_missing"
+            elif failure_reason.startswith("phi_dim_mismatch"):
+                lf_trace["lf_status"] = "failed"
+                lf_trace["lf_failure_reason"] = "lf_dimension_mismatch"
+            elif failure_reason == "plan_digest_missing":
+                lf_trace["lf_status"] = "absent"
+                lf_trace["lf_absent_reason"] = "lf_plan_digest_missing"
+        return lf_score, lf_trace
+    except Exception as exc:
+        return None, {
+            "lf_status": "failed",
+            "lf_failure_reason": f"lf_trajectory_score_failed:{type(exc).__name__}",
+            "lf_detect_path": "low_freq_template_trajectory",
+        }
 
 
 def _extract_content_raw_scores_from_image(
@@ -1438,82 +1578,12 @@ def _extract_content_raw_scores_from_image(
             image_array = None
 
     if isinstance(ecc_value, str) and ecc_value == "sparse_ldpc":
-        lf_basis_for_decode = plan_dict.get("lf_basis") if isinstance(plan_dict.get("lf_basis"), dict) else None
-        detect_traj_cache = cfg.get("__detect_trajectory_latent_cache__")
-        if lf_basis_for_decode is None:
-            lf_trace = {
-                "lf_status": "absent",
-                "lf_absent_reason": "lf_basis_missing_for_trajectory_path",
-                "lf_detect_path": "low_freq_template_trajectory",
-            }
-        elif not isinstance(plan_digest, str) or not plan_digest:
-            lf_trace = {
-                "lf_status": "absent",
-                "lf_absent_reason": "plan_digest_missing_for_trajectory_path",
-                "lf_detect_path": "low_freq_template_trajectory",
-            }
-        elif detect_traj_cache is None or detect_traj_cache.is_empty():
-            lf_trace = {
-                "lf_status": "absent",
-                "lf_absent_reason": "trajectory_cache_absent",
-                "lf_detect_path": "low_freq_template_trajectory",
-            }
-        else:
-            tfs = lf_basis_for_decode.get("trajectory_feature_spec")
-            if not isinstance(tfs, dict) or tfs.get("feature_operator") != "masked_normalized_random_projection":
-                lf_trace = {
-                    "lf_status": "absent",
-                    "lf_absent_reason": "trajectory_feature_spec_invalid",
-                    "lf_detect_path": "low_freq_template_trajectory",
-                }
-            else:
-                edit_timestep = int(tfs.get("edit_timestep", 0))
-                z_t, resolution_status = detector_scoring.resolve_detect_trajectory_latent_for_timestep(
-                    detect_traj_cache, edit_timestep
-                )
-                if z_t is None:
-                    lf_trace = {
-                        "lf_status": "absent",
-                        "lf_absent_reason": f"trajectory_latent_absent:{resolution_status}",
-                        "lf_detect_path": "low_freq_template_trajectory",
-                    }
-                else:
-                    try:
-                        from main.watermarking.content_chain.subspace.trajectory_feature_space import (
-                            extract_trajectory_feature_np,
-                        )
-                        phi = extract_trajectory_feature_np(np.asarray(z_t, dtype=np.float64), tfs)
-                        lf_impl_digest = digests.canonical_sha256(
-                            {
-                                "impl_id": LOW_FREQ_TEMPLATE_CODEC_ID,
-                                "impl_version": LOW_FREQ_TEMPLATE_CODEC_VERSION,
-                            }
-                        )
-                        lf_coder = LowFreqTemplateCodec(LOW_FREQ_TEMPLATE_CODEC_ID, LOW_FREQ_TEMPLATE_CODEC_VERSION, lf_impl_digest)
-                        lf_score, lf_detect_trace = lf_coder.detect_score(
-                            cfg=cfg,
-                            latent_features=phi,
-                            plan_digest=plan_digest,
-                            cfg_digest=cfg_digest,
-                            lf_basis=lf_basis_for_decode,
-                        )
-                        lf_trace = {
-                            "lf_status": lf_detect_trace.get("status", "failed"),
-                            "lf_score": lf_score,
-                            "lf_trace_digest": lf_detect_trace.get("lf_trace_digest"),
-                            "bp_converged": lf_detect_trace.get("bp_converged"),
-                            "bp_iteration_count": lf_detect_trace.get("bp_iteration_count"),
-                            "parity_check_digest": lf_detect_trace.get("parity_check_digest"),
-                            "lf_failure_reason": lf_detect_trace.get("lf_failure_reason"),
-                            "bp_converge_status": lf_detect_trace.get("bp_converge_status"),
-                            "lf_detect_path": "low_freq_template_trajectory",
-                        }
-                    except Exception as exc:
-                        lf_trace = {
-                            "lf_status": "failed",
-                            "lf_failure_reason": f"lf_trajectory_detect_failed:{type(exc).__name__}",
-                            "lf_detect_path": "low_freq_template_trajectory",
-                        }
+        lf_score, lf_trace = _extract_lf_raw_score_from_trajectory(
+            cfg=cfg,
+            plan_payload=plan_payload,
+            plan_digest=plan_digest,
+            cfg_digest=cfg_digest,
+        )
     else:
         raise RuntimeError(
             "image_dct_fallback path reached in _extract_content_raw_scores_from_image: "
@@ -1781,6 +1851,13 @@ def _build_lf_detect_evidence(
             "bp_converged": trace_payload.get("bp_converged"),
             "bp_iteration_count": trace_payload.get("bp_iteration_count"),
             "parity_check_digest": trace_payload.get("parity_check_digest"),
+            "lf_evidence_summary": {
+                "lf_status": "ok",
+                "lf_detect_variant": trace_payload.get("lf_detect_path"),
+                "bp_converged": trace_payload.get("bp_converged"),
+                "bp_iteration_count": trace_payload.get("bp_iteration_count"),
+                "parity_check_digest": trace_payload.get("parity_check_digest"),
+            },
         }
     if lf_status == "mismatch":
         return {
@@ -1788,6 +1865,10 @@ def _build_lf_detect_evidence(
             "lf_score": None,
             "content_failure_reason": trace_payload.get("lf_failure_reason") or "lf_plan_mismatch",
             "lf_trace_digest": trace_payload.get("lf_trace_digest"),
+            "lf_evidence_summary": {
+                "lf_status": "mismatch",
+                "lf_failure_reason": trace_payload.get("lf_failure_reason") or "lf_plan_mismatch",
+            },
         }
     if lf_status == "failed":
         return {
@@ -1795,13 +1876,44 @@ def _build_lf_detect_evidence(
             "lf_score": None,
             "content_failure_reason": trace_payload.get("lf_failure_reason") or "lf_detection_failed",
             "lf_trace_digest": trace_payload.get("lf_trace_digest"),
+            "lf_evidence_summary": {
+                "lf_status": "failed",
+                "lf_failure_reason": trace_payload.get("lf_failure_reason") or "lf_detection_failed",
+            },
         }
     return {
         "status": "absent",
         "lf_score": None,
         "content_failure_reason": trace_payload.get("lf_absent_reason"),
         "lf_trace_digest": trace_payload.get("lf_trace_digest"),
+        "lf_evidence_summary": {
+            "lf_status": "absent",
+            "lf_absent_reason": trace_payload.get("lf_absent_reason"),
+        },
     }
+
+
+def _resolve_sidecar_disabled_reason(
+    paper_enabled: bool,
+    enable_image_sidecar: bool,
+) -> str:
+    """
+    功能：区分 formal profile 与 ablation 的 sidecar 关闭语义。
+
+    Resolve detect-side sidecar-disabled semantics.
+
+    Args:
+        paper_enabled: Whether paper faithfulness is enabled.
+        enable_image_sidecar: Effective sidecar switch after ablation normalization.
+
+    Returns:
+        Canonical sidecar-disabled reason string.
+    """
+    if paper_enabled:
+        return "formal_profile_sidecar_disabled"
+    if not enable_image_sidecar:
+        return "ablation_sidecar_disabled"
+    return "image_domain_sidecar_disabled"
 
 
 def _resolve_plan_dict(plan_payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:

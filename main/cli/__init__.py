@@ -32,11 +32,6 @@ def assert_module_execution(
 
     Returns:
         None.
-
-    Raises:
-        RuntimeError: If executed outside module mode.
-        ImportEnvironmentError: If strict check fails under module mode.
-        TypeError: If inputs are invalid.
     """
     if not isinstance(entry_name, str) or not entry_name:
         # entry_name 输入不合法，必须 fail-fast。

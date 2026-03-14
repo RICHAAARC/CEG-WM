@@ -213,13 +213,29 @@ class _UnifiedContentExtractorBase:
                 propagated_reason = "detector_plan_mismatch"
             if lf_status == "failed" and not isinstance(propagated_reason, str):
                 propagated_reason = "detector_extraction_failed"
+            failure_score_parts: Dict[str, Any] = {
+                "lf_status": lf_status,
+            }
+            if isinstance(lf_summary, dict):
+                failure_score_parts["lf_metrics"] = lf_summary
+            if isinstance(hf_summary, dict):
+                failure_score_parts["hf_metrics"] = hf_summary
+                hf_summary_status = hf_summary.get("hf_status")
+                if isinstance(hf_summary_status, str) and hf_summary_status:
+                    failure_score_parts["hf_status"] = hf_summary_status
+                hf_absent_reason = hf_summary.get("hf_absent_reason")
+                if isinstance(hf_absent_reason, str) and hf_absent_reason:
+                    failure_score_parts["hf_absent_reason"] = hf_absent_reason
+                hf_failure_reason_summary = hf_summary.get("hf_failure_reason")
+                if isinstance(hf_failure_reason_summary, str) and hf_failure_reason_summary:
+                    failure_score_parts["hf_failure_reason"] = hf_failure_reason_summary
             return self._build_detect_result(
                 status=lf_status,
                 score=None,
                 plan_digest=expected_plan_digest,
                 basis_digest=basis_digest,
                 content_failure_reason=propagated_reason,
-                score_parts=None,
+                score_parts=failure_score_parts,
                 lf_score=None,
                 hf_score=None,
                 cfg_digest=cfg_digest,
@@ -525,6 +541,18 @@ def _extract_channel_evidence(
                         failure_reason = reason
                 if status in {"failed", "mismatch"}:
                     reason = summary.get("hf_failure_reason")
+                    if isinstance(reason, str) and reason:
+                        failure_reason = reason
+        if channel_name == "lf":
+            summary_node = evidence_dict.get("lf_evidence_summary")
+            if isinstance(summary_node, dict):
+                summary = cast(Dict[str, Any], summary_node)
+                if status == "absent":
+                    reason = summary.get("lf_absent_reason")
+                    if isinstance(reason, str) and reason:
+                        failure_reason = reason
+                if status in {"failed", "mismatch"}:
+                    reason = summary.get("lf_failure_reason")
                     if isinstance(reason, str) and reason:
                         failure_reason = reason
         status_value = status if isinstance(status, str) else None
