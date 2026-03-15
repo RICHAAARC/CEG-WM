@@ -1,8 +1,10 @@
 ﻿# ==============================================================
-# Records schema extensions
-# - 仅追加字段，默认允许 absent。
-# - 本文件作为接口层字段事实源，用于审计与字段登记对齐。
+# 配置角色：records schema 追加字段事实源
+# - 本文件以 append-only 方式登记 records 可写字段与缺失语义。
+# - 用于 schema 审计、字段注册一致性与门禁对齐。
+# - 本文件不是 workflow 运行配置，不承载模型或推理参数。
 # ==============================================================
+
 version: "v8"  # v3→v4 (2026-03-12)：formal path 最终闭包收口；historical_fields: 段已从当前 formal schema 文件移除，旧字段信息不再显式保留在任何 formal 文件中。当前 formal schema 只表达当前正式机制。v4→v5 (2026-03-13)：追加 attestation 事件绑定、真实性/图像证据双层语义与 event-attested 判决字段。v5→v6 (2026-03-13)：追加 geometry recovery observations、observed correspondences 与 recovered consistency 字段。v6→v7 (2026-03-13)：追加 coarse registration 与 recovered-domain sync revalidation 细分字段。v7→v8 (2026-03-14)：追加 LF canonical evidence summary 字段登记。
 append_only: true
 

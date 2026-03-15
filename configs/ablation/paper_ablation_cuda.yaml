@@ -1,8 +1,8 @@
 ﻿# ==============================================================
-# Ablation 专用配置（paper_ablation_cuda）
+# 配置角色：paper 消融实验配置
 # - 本文件用于“消融实验”研究，不用于论文最终结论口径。
 # - 相比 paper_full_cuda.yaml，本文件开启 experiment_matrix.ablation_variants
-#   以系统评估模块裁剪（content/geometry/anchor/LF/HF）的影响。
+#   以系统评估模块裁剪 content、geometry、anchor、LF、HF 的影响。
 # - 若目标是 paper-faithful 最终结论，请使用 configs/paper_full_cuda.yaml。
 # ==============================================================
 

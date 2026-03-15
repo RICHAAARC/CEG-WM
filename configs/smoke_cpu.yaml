@@ -1,6 +1,10 @@
-# 轻量 smoke profile：用于 CPU 优先闭环验证，不代表论文正式结果。
-# 目标：验证 onefile 主链、records closure、LF/HF 内容路径、
-# calibrate/evaluate 只读阈值链与 signoff 路径均可执行。
+# ==============================================================
+# 配置角色：CPU smoke 闭环验证配置
+# - 本文件用于 CPU 优先的轻量闭环验证，不代表论文正式结果。
+# - 目标是验证 onefile 主链、records closure、LF/HF 内容路径、
+#   calibrate/evaluate 只读阈值链与 signoff 路径可执行。
+# - 若目标是论文正式一体化运行，请使用 configs/paper_full_cuda.yaml。
+# ==============================================================
 
 policy_path: "content_only"
 

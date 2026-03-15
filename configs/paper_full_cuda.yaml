@@ -1,4 +1,15 @@
-﻿policy_path: "content_np_geo_rescue"
+﻿# ==============================================================
+# 配置角色：paper_full_cuda 一体化正式主配置
+# - 本文件用于 paper 语义下的完整机制运行：subspace、LF、HF、geometry
+#   detection 与事件级 attestation 全部启用。
+# - 默认统计主链为 content_score，用于主 calibration/evaluate 闭环。
+# - 同时启用 parallel_attestation_statistics，在不替换主链的前提下，
+#   并行补齐 content_attestation_score 的正式统计闭环。
+# - 若目标是“仅以 attestation 分数作为单一主统计链”运行，请使用
+#   configs/ablation/paper_attestation_score_cuda.yaml。
+# ==============================================================
+
+policy_path: "content_np_geo_rescue"
 
 target_fpr: 0.01
 

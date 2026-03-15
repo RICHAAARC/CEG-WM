@@ -1,5 +1,5 @@
 # ==============================================================
-# Attestation score 专用配置（paper_attestation_score_cuda）
+# 配置角色：attestation score 专用 paper 配置
 # - 本文件用于在 paper_full_cuda 正式运行语义下，单独校准/评测
 #   content_attestation_score 统计链。
 # - 与 configs/paper_full_cuda.yaml 的核心运行语义保持一致；

@@ -1,7 +1,10 @@
 # ==============================================================
-# Attack protocol fact source
-# - append-only versioned evaluation attack configuration.
+# 配置角色：评测攻击协议事实源
+# - 本文件定义 append-only 的 attack family 与 params_version 协议集合。
+# - 用于 calibration/evaluate 与 attack-group metrics 的统一口径。
+# - 本文件不是运行主配置，不直接承载模型、推理或 watermark 开关。
 # ==============================================================
+
 version: "attack_protocol_v1"
 
 family_field_candidates:
