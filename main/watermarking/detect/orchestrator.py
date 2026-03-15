@@ -396,6 +396,104 @@ def _build_detect_attestation_result(
     return result
 
 
+def _resolve_hf_detect_summary(content_evidence: Optional[Dict[str, Any]]) -> Dict[str, Any] | None:
+    if not isinstance(content_evidence, dict):
+        return None
+    hf_summary = content_evidence.get("hf_evidence_summary")
+    if isinstance(hf_summary, dict):
+        return cast(Dict[str, Any], hf_summary)
+    score_parts = content_evidence.get("score_parts")
+    if isinstance(score_parts, dict):
+        hf_metrics = score_parts.get("hf_metrics")
+        if isinstance(hf_metrics, dict):
+            return cast(Dict[str, Any], hf_metrics)
+    return None
+
+
+def _resolve_trace_match_status(detect_value: Any, attestation_value: Any) -> str:
+    if detect_value is None or attestation_value is None:
+        return "absent"
+    if detect_value == attestation_value:
+        return "ok"
+    return "mismatch"
+
+
+def _merge_hf_attestation_trace(
+    hf_trace: Optional[Dict[str, Any]],
+    detect_summary: Optional[Dict[str, Any]],
+    *,
+    attestation_digest: str,
+    event_binding_digest: str,
+    trace_commit: Optional[str],
+    hf_score: Optional[float],
+) -> Dict[str, Any] | None:
+    if not isinstance(hf_trace, dict):
+        return None
+
+    detect_hf_challenge_digest = None
+    detect_hf_challenge_source = None
+    detect_hf_challenge_seed = None
+    detect_hf_threshold_percentile_applied = None
+    detect_hf_coeffs_retained_count = None
+    detect_hf_retention_ratio = None
+    detect_hf_trace_digest = None
+    if isinstance(detect_summary, dict):
+        detect_hf_challenge_digest = detect_summary.get("challenge_digest")
+        detect_hf_challenge_source = detect_summary.get("challenge_source")
+        detect_hf_challenge_seed = detect_summary.get("challenge_seed")
+        detect_hf_threshold_percentile_applied = detect_summary.get("threshold_percentile_applied")
+        detect_hf_coeffs_retained_count = detect_summary.get("coeffs_retained_count")
+        detect_hf_retention_ratio = detect_summary.get("retention_ratio")
+        detect_hf_trace_digest = detect_summary.get("hf_trace_digest")
+
+    challenge_match_status = _resolve_trace_match_status(
+        detect_hf_challenge_digest,
+        hf_trace.get("hf_attestation_challenge_digest"),
+    )
+    threshold_match_status = _resolve_trace_match_status(
+        detect_hf_threshold_percentile_applied,
+        hf_trace.get("hf_attestation_threshold_percentile_applied"),
+    )
+    retained_count_match_status = _resolve_trace_match_status(
+        detect_hf_coeffs_retained_count,
+        hf_trace.get("hf_attestation_retained_count"),
+    )
+
+    comparison_statuses = [
+        challenge_match_status,
+        threshold_match_status,
+        retained_count_match_status,
+    ]
+    if all(status == "absent" for status in comparison_statuses):
+        trace_consistency = "absent"
+    elif any(status == "mismatch" for status in comparison_statuses):
+        trace_consistency = "mismatch"
+    elif any(status == "absent" for status in comparison_statuses):
+        trace_consistency = "partial"
+    else:
+        trace_consistency = "ok"
+
+    return {
+        "artifact_type": "hf_attestation_trace",
+        "attestation_digest": attestation_digest,
+        "event_binding_digest": event_binding_digest,
+        "trace_commit": trace_commit,
+        "hf_attestation_score": hf_score,
+        **hf_trace,
+        "detect_hf_challenge_digest": detect_hf_challenge_digest,
+        "detect_hf_challenge_seed": detect_hf_challenge_seed,
+        "detect_hf_challenge_source": detect_hf_challenge_source,
+        "detect_hf_threshold_percentile_applied": detect_hf_threshold_percentile_applied,
+        "detect_hf_coeffs_retained_count": detect_hf_coeffs_retained_count,
+        "detect_hf_retention_ratio": detect_hf_retention_ratio,
+        "detect_hf_trace_digest": detect_hf_trace_digest,
+        "hf_attestation_challenge_match_status": challenge_match_status,
+        "hf_attestation_threshold_match_status": threshold_match_status,
+        "hf_attestation_retained_count_match_status": retained_count_match_status,
+        "hf_attestation_trace_consistency": trace_consistency,
+    }
+
+
 def run_detect_orchestrator(
     cfg: Dict[str, Any],
     impl_set: BuiltImplSet,
@@ -5632,6 +5730,7 @@ def verify_attestation(
     s_lf: Optional[float] = None
     s_hf: Optional[float] = None
     s_geo: Optional[float] = None
+    hf_attestation_trace: Optional[Dict[str, Any]] = None
 
     # LF 通道：基于 latent 后验与 attestation payload 的符号一致率。
     if lf_latent_features is not None:
@@ -5661,6 +5760,8 @@ def verify_attestation(
                 attestation_event_digest=attest_keys.event_binding_digest,
                 plan_digest=statement.plan_digest,
             )
+            if isinstance(hf_result.get("hf_attestation_trace"), dict):
+                hf_attestation_trace = cast(Dict[str, Any], hf_result.get("hf_attestation_trace"))
             if hf_result.get("status") == "ok":
                 s_hf = hf_result.get("hf_attestation_score")
         except Exception:
@@ -5830,6 +5931,14 @@ def verify_attestation(
         "geo_rescue_applied": geo_rescue_applied,
         "geo_not_used_reason": geo_not_used_reason,
     }
+    hf_trace_artifact = _merge_hf_attestation_trace(
+        hf_attestation_trace,
+        _resolve_hf_detect_summary(content_evidence),
+        attestation_digest=d_a,
+        event_binding_digest=attest_keys.event_binding_digest,
+        trace_commit=trace_commit,
+        hf_score=s_hf,
+    )
     final_event_attested_decision = {
         "status": verdict,
         "is_event_attested": bool(verdict == "attested"),
@@ -5882,4 +5991,5 @@ def verify_attestation(
         "authenticity_result": authenticity_result,
         "image_evidence_result": image_evidence_result,
         "final_event_attested_decision": final_event_attested_decision,
+        "_hf_attestation_trace_artifact": hf_trace_artifact,
     }

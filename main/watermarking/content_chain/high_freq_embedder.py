@@ -533,23 +533,31 @@ def compute_hf_attestation_score(
         else:
             flat_hf = [float(v) for v in list(hf_values)]
     except Exception:
+        failed_trace = {
+            "status": "failed",
+            "hf_attestation_failure_reason": "flatten_failed",
+            "hf_attestation_vector_length": 0,
+        }
         return {
             "hf_attestation_score": None,
             "status": "failed",
             "n_values_used": 0,
-            "hf_attestation_trace_digest": digests.canonical_sha256({
-                "error": "flatten_failed", "k_hf_prefix": k_hf[:8]
-            }),
+            "hf_attestation_trace": failed_trace,
+            "hf_attestation_trace_digest": digests.canonical_sha256(failed_trace),
         }
 
     if len(flat_hf) <= 0:
+        empty_trace = {
+            "status": "failed",
+            "hf_attestation_failure_reason": "empty_hf_values",
+            "hf_attestation_vector_length": 0,
+        }
         return {
             "hf_attestation_score": None,
             "status": "failed",
             "n_values_used": 0,
-            "hf_attestation_trace_digest": digests.canonical_sha256({
-                "error": "empty_hf_values", "k_hf_prefix": k_hf[:8]
-            }),
+            "hf_attestation_trace": empty_trace,
+            "hf_attestation_trace_digest": digests.canonical_sha256(empty_trace),
         }
 
     coeffs = np.asarray(flat_hf, dtype=np.float32)
@@ -563,10 +571,18 @@ def compute_hf_attestation_score(
         channel_cfg["attestation_event_digest"] = attestation_event_digest
     if isinstance(plan_digest, str) and plan_digest:
         channel_cfg["plan_digest"] = plan_digest
-    _, constraint_evidence = channel_hf.apply_hf_truncation_constraint(
+    constrained_coeffs, constraint_evidence = channel_hf.apply_hf_truncation_constraint(
         coeffs,
         channel_cfg,
     )
+    challenge_bundle = channel_hf.derive_hf_challenge_bundle(channel_cfg, n_compare)
+    weight_vector = np.asarray(challenge_bundle["weights"], dtype=np.float32)
+    gating_mask = np.asarray(challenge_bundle["gating_mask"], dtype=np.float32)
+    ordering = np.asarray(challenge_bundle["ordering"], dtype=np.int32)
+    threshold_value = float(constraint_evidence.get("threshold_value", 0.0))
+    weighted_abs_coeffs = np.abs(coeffs) * weight_vector * gating_mask
+    retained_mask = weighted_abs_coeffs >= threshold_value
+    retained_indices = np.flatnonzero(retained_mask).astype(int).tolist()
     coeffs_before_norm = float(constraint_evidence.get("coeffs_before_norm", 0.0))
     coeffs_after_norm = float(constraint_evidence.get("coeffs_after_norm", 0.0))
     total_energy = coeffs_before_norm * coeffs_before_norm
@@ -576,19 +592,52 @@ def compute_hf_attestation_score(
     else:
         hf_attestation_score = float(max(0.0, min(1.0, retained_energy / total_energy)))
 
+    weight_vector_digest = digests.canonical_sha256(
+        {"weight_vector": [round(float(value), 8) for value in weight_vector.tolist()]}
+    )
+    gating_mask_digest = digests.canonical_sha256(
+        {"gating_mask": [int(value) for value in gating_mask.astype(np.int32).tolist()]}
+    )
+    ordering_digest = digests.canonical_sha256(
+        {"ordering": [int(value) for value in ordering.tolist()]}
+    )
+
+    hf_attestation_trace: Dict[str, Any] = {
+        "status": "ok",
+        "hf_attestation_score": hf_attestation_score,
+        "hf_attestation_challenge_digest": constraint_evidence.get("challenge_digest"),
+        "hf_attestation_challenge_seed": int(constraint_evidence.get("challenge_seed", 0)),
+        "hf_attestation_challenge_source": constraint_evidence.get("challenge_source"),
+        "hf_attestation_threshold_percentile_applied": float(
+            constraint_evidence.get("threshold_percentile_applied", threshold_percentile)
+        ),
+        "hf_attestation_threshold_value": threshold_value,
+        "hf_attestation_vector_length": n_compare,
+        "hf_attestation_total_energy": total_energy,
+        "hf_attestation_retained_energy": retained_energy,
+        "hf_attestation_retained_ratio": hf_attestation_score,
+        "hf_attestation_retained_count_ratio": float(
+            constraint_evidence.get("retention_ratio", 0.0)
+        ),
+        "hf_attestation_retained_count": int(
+            constraint_evidence.get("coeffs_retained_count", len(retained_indices))
+        ),
+        "hf_attestation_retained_indices": retained_indices,
+        "hf_attestation_weight_vector_digest": weight_vector_digest,
+        "hf_attestation_weight_vector_nonzero_count": int(np.count_nonzero(weight_vector)),
+        "hf_attestation_gating_mask_digest": gating_mask_digest,
+        "hf_attestation_gating_mask_nonzero_count": int(np.count_nonzero(gating_mask)),
+        "hf_attestation_ordering_digest": ordering_digest,
+        "hf_attestation_ordering_length": int(ordering.shape[0]),
+    }
+
     trace_payload: Dict[str, Any] = {
         "channel": "hf",
         "attestation_mode": "projection_tail_truncation_energy",
-        "n_values_used": n_compare,
-        "threshold_percentile_applied": float(constraint_evidence.get("threshold_percentile_applied", threshold_percentile)),
-        "threshold_value": round(float(constraint_evidence.get("threshold_value", 0.0)), 8),
-        "retained_count": int(constraint_evidence.get("coeffs_retained_count", 0)),
-        "retained_ratio": round(float(constraint_evidence.get("retention_ratio", 0.0)), 8),
-        "hf_attestation_score": round(hf_attestation_score, 6),
-        "challenge_digest": constraint_evidence.get("challenge_digest"),
-        "challenge_source": constraint_evidence.get("challenge_source"),
+        **hf_attestation_trace,
     }
     trace_digest = digests.canonical_sha256(trace_payload)
+    hf_attestation_trace["hf_attestation_trace_digest"] = trace_digest
 
     return {
         "hf_attestation_score": hf_attestation_score,
@@ -598,5 +647,6 @@ def compute_hf_attestation_score(
         "retained_ratio": float(constraint_evidence.get("retention_ratio", 0.0)),
         "challenge_digest": constraint_evidence.get("challenge_digest"),
         "challenge_source": constraint_evidence.get("challenge_source"),
+        "hf_attestation_trace": hf_attestation_trace,
         "hf_attestation_trace_digest": trace_digest,
     }

@@ -64,7 +64,11 @@ from main.cli.run_common import (
 )
 
 
-def _write_detect_attestation_artifact(record: Dict[str, Any], artifacts_dir: Path) -> None:
+def _write_detect_attestation_artifact(
+    record: Dict[str, Any],
+    artifacts_dir: Path,
+    attestation_artifacts: Dict[str, Any] | None = None,
+) -> None:
     """
     功能：将 detect 主链产生的 attestation 结果落盘到 artifacts/attestation。
 
@@ -86,6 +90,27 @@ def _write_detect_attestation_artifact(record: Dict[str, Any], artifacts_dir: Pa
     attestation_dir = artifacts_dir / "attestation"
     attestation_dir.mkdir(parents=True, exist_ok=True)
     records_io.write_artifact_json(str(attestation_dir / "attestation_result.json"), attestation_payload)
+    hf_attestation_trace = None
+    if isinstance(attestation_artifacts, dict):
+        candidate_trace = attestation_artifacts.get("hf_attestation_trace")
+        if isinstance(candidate_trace, dict):
+            hf_attestation_trace = candidate_trace
+    if isinstance(hf_attestation_trace, dict):
+        records_io.write_artifact_json(str(attestation_dir / "hf_attestation_trace.json"), hf_attestation_trace)
+
+
+def _extract_detect_attestation_artifacts(record: Dict[str, Any]) -> Dict[str, Any] | None:
+    if not isinstance(record, dict):
+        return None
+    attestation_node = record.get("attestation")
+    if not isinstance(attestation_node, dict):
+        return None
+    hf_trace_artifact = attestation_node.pop("_hf_attestation_trace_artifact", None)
+    if not isinstance(hf_trace_artifact, dict):
+        return None
+    return {
+        "hf_attestation_trace": hf_trace_artifact,
+    }
 
 
 def resolve_content_override_from_input_record(input_record: Dict[str, Any]) -> Dict[str, Any] | None:
@@ -874,6 +899,7 @@ def run_detect(
             )
             # 序列化 fusion_result 为可 JSON 化的 dict，覆盖原值。
             record["fusion_result"] = fusion_result.to_dict()
+            attestation_artifacts = _extract_detect_attestation_artifacts(record)
 
             try:
                 schema.validate_record(record, interpretation=interpretation)
@@ -891,7 +917,7 @@ def run_detect(
                 set_failure_status(run_meta, RunFailureReason.GATE_FAILED, exc)
                 raise
 
-            _write_detect_attestation_artifact(record, artifacts_dir)
+            _write_detect_attestation_artifact(record, artifacts_dir, attestation_artifacts)
     except Exception as exc:
         if run_meta.get("status_ok", True):
             set_failure_status(run_meta, RunFailureReason.RUNTIME_ERROR, exc)

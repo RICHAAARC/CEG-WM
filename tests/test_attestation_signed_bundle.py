@@ -5,7 +5,10 @@ Module type: General module
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from pathlib import Path
+from typing import Any, Dict, cast
+
+import numpy as np
 
 from main.watermarking.provenance.attestation_statement import (
     build_attestation_statement,
@@ -14,7 +17,15 @@ from main.watermarking.provenance.attestation_statement import (
     compute_event_binding_digest,
     verify_signed_attestation_bundle,
 )
-from main.watermarking.detect.orchestrator import _build_detect_attestation_result, verify_attestation
+from main.watermarking.provenance.key_derivation import derive_attestation_keys
+from main.watermarking.content_chain import channel_hf
+from main.watermarking.content_chain.high_freq_embedder import compute_hf_attestation_score
+from main.watermarking.detect import orchestrator as detect_orchestrator
+from main.cli import run_detect as run_detect_cli
+
+_build_detect_attestation_result = detect_orchestrator._build_detect_attestation_result  # pyright: ignore[reportPrivateUsage]
+verify_attestation = detect_orchestrator.verify_attestation
+_write_detect_attestation_artifact = run_detect_cli._write_detect_attestation_artifact  # pyright: ignore[reportPrivateUsage]
 
 
 def _build_statement() -> Dict[str, Any]:
@@ -382,3 +393,186 @@ def test_verify_attestation_geometry_cannot_replace_missing_content() -> None:
     final_decision = result.get("final_event_attested_decision")
     assert isinstance(final_decision, dict)
     assert final_decision.get("is_event_attested") is False
+
+
+def test_compute_hf_attestation_score_emits_trace_fields() -> None:
+    """
+    功能：验证 HF attestation 评分会输出最小可审计 trace 字段。
+
+    Verify HF attestation scoring emits the required minimal trace fields.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    result = compute_hf_attestation_score(
+        hf_values=[-0.4, -0.7, 1.1, -2.5, -0.6, -0.1, 0.2, 1.0],
+        k_hf="7" * 64,
+        attestation_event_digest="8" * 64,
+        plan_digest="9" * 64,
+    )
+
+    trace = result.get("hf_attestation_trace")
+    trace = cast(Dict[str, Any], result.get("hf_attestation_trace"))
+    assert isinstance(trace, dict)
+    retained_indices = cast(list[int], trace.get("hf_attestation_retained_indices"))
+    assert trace.get("hf_attestation_challenge_digest")
+    assert trace.get("hf_attestation_challenge_source") == "attestation_event_digest"
+    assert trace.get("hf_attestation_threshold_percentile_applied") == 75.0
+    assert trace.get("hf_attestation_vector_length") == 8
+    assert isinstance(retained_indices, list)
+    assert trace.get("hf_attestation_retained_count") == len(retained_indices)
+    assert trace.get("hf_attestation_weight_vector_digest")
+    assert trace.get("hf_attestation_gating_mask_digest")
+    assert trace.get("hf_attestation_ordering_digest")
+    assert trace.get("hf_attestation_trace_digest") == result.get("hf_attestation_trace_digest")
+
+
+def test_verify_attestation_records_hf_trace_consistency_match() -> None:
+    """
+    功能：验证 detect 与 attestation 使用同一 challenge 摘要时会显式记录一致状态。
+
+    Verify trace consistency fields report ok when detect and attestation traces agree.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    payload = _build_statement()
+    hf_values = [0.5, -0.25, 1.5, -2.0, 0.25, 0.75, -0.5, 0.1]
+    attest_keys = derive_attestation_keys(
+        "5" * 64,
+        payload["attestation_digest"],
+        trajectory_commit=payload["bundle"].get("trace_commit"),
+    )
+    expected = compute_hf_attestation_score(
+        hf_values=hf_values,
+        k_hf=attest_keys.k_hf,
+        attestation_event_digest=attest_keys.event_binding_digest,
+        plan_digest=payload["statement"]["plan_digest"],
+    )
+    trace = expected.get("hf_attestation_trace")
+    trace = cast(Dict[str, Any], expected.get("hf_attestation_trace"))
+    assert isinstance(trace, dict)
+
+    result = verify_attestation(
+        k_master="5" * 64,
+        candidate_statement=payload["statement"],
+        attestation_bundle=payload["bundle"],
+        content_evidence={
+            "lf_score": 0.8,
+            "hf_evidence_summary": {
+                "challenge_digest": trace.get("hf_attestation_challenge_digest"),
+                "challenge_seed": trace.get("hf_attestation_challenge_seed"),
+                "challenge_source": trace.get("hf_attestation_challenge_source"),
+                "threshold_percentile_applied": trace.get("hf_attestation_threshold_percentile_applied"),
+                "coeffs_retained_count": trace.get("hf_attestation_retained_count"),
+            },
+        },
+        hf_values=hf_values,
+    )
+
+    trace_artifact = result.get("_hf_attestation_trace_artifact")
+    trace_artifact = cast(Dict[str, Any], result.get("_hf_attestation_trace_artifact"))
+    assert isinstance(trace_artifact, dict)
+    assert trace_artifact.get("hf_attestation_challenge_match_status") == "ok"
+    assert trace_artifact.get("hf_attestation_threshold_match_status") == "ok"
+    assert trace_artifact.get("hf_attestation_retained_count_match_status") == "ok"
+    assert trace_artifact.get("hf_attestation_trace_consistency") == "ok"
+
+
+def test_verify_attestation_records_hf_trace_consistency_mismatch() -> None:
+    """
+    功能：验证 detect 与 attestation 的 percentile 差异会被显式记录，而不是静默消失。
+
+    Verify percentile/count differences are recorded explicitly when detect and attestation diverge.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    payload = _build_statement()
+    hf_values = np.asarray([0.5, -0.25, 1.5, -2.0, 0.25, 0.75, -0.5, 0.1], dtype=np.float32)
+    attest_keys = derive_attestation_keys(
+        "5" * 64,
+        payload["attestation_digest"],
+        trajectory_commit=payload["bundle"].get("trace_commit"),
+    )
+    detect_cfg: Dict[str, Any] = {
+        "hf_threshold_percentile": 90.0,
+        "hf_attestation_key": attest_keys.k_hf,
+        "attestation_event_digest": attest_keys.event_binding_digest,
+        "plan_digest": payload["statement"]["plan_digest"],
+    }
+    _constrained_coeffs, detect_summary = channel_hf.apply_hf_truncation_constraint(hf_values, detect_cfg)
+    _ = _constrained_coeffs
+
+    result = verify_attestation(
+        k_master="5" * 64,
+        candidate_statement=payload["statement"],
+        attestation_bundle=payload["bundle"],
+        content_evidence={
+            "lf_score": 0.8,
+            "hf_evidence_summary": detect_summary,
+        },
+        hf_values=hf_values,
+    )
+
+    trace_artifact = result.get("_hf_attestation_trace_artifact")
+    trace_artifact = cast(Dict[str, Any], result.get("_hf_attestation_trace_artifact"))
+    assert isinstance(trace_artifact, dict)
+    assert trace_artifact.get("hf_attestation_challenge_match_status") == "ok"
+    assert trace_artifact.get("hf_attestation_threshold_match_status") == "mismatch"
+    assert trace_artifact.get("hf_attestation_trace_consistency") == "mismatch"
+    assert result.get("verdict") in {"attested", "mismatch", "absent"}
+
+
+def test_write_detect_attestation_artifact_persists_hf_trace(monkeypatch: Any, tmp_path: Path) -> None:
+    """
+    功能：验证 detect attestation artifact writer 会额外写出 HF attestation trace 工件。
+
+    Verify detect attestation artifact writer emits the standalone HF trace artifact.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    written: Dict[str, Dict[str, Any]] = {}
+
+    def _fake_write_artifact_json(path: str, payload: Dict[str, Any], indent: int = 2, ensure_ascii: bool = False) -> None:
+        _ = indent
+        _ = ensure_ascii
+        written[path.replace("\\", "/")] = payload
+
+    monkeypatch.setattr("main.cli.run_detect.records_io.write_artifact_json", _fake_write_artifact_json)
+
+    record = {
+        "attestation": {
+            "verdict": "mismatch",
+            "fusion_score": 0.53,
+        }
+    }
+    attestation_artifacts = {
+        "hf_attestation_trace": {
+            "artifact_type": "hf_attestation_trace",
+            "hf_attestation_challenge_digest": "a" * 64,
+            "hf_attestation_threshold_percentile_applied": 75.0,
+            "hf_attestation_retained_count": 2,
+        }
+    }
+
+    _write_detect_attestation_artifact(record, tmp_path / "artifacts", attestation_artifacts)
+
+    result_path = str((tmp_path / "artifacts" / "attestation" / "attestation_result.json")).replace("\\", "/")
+    trace_path = str((tmp_path / "artifacts" / "attestation" / "hf_attestation_trace.json")).replace("\\", "/")
+    assert written[result_path] == record["attestation"]
+    assert written[trace_path]["artifact_type"] == "hf_attestation_trace"
