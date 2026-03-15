@@ -150,6 +150,9 @@ attestation:
   lf_weight: 0.5     # LF 通道融合权重
   hf_weight: 0.3     # HF 通道融合权重
   geo_weight: 0.2    # GEO 通道融合权重
+  decision_mode: "content_primary_geo_rescue"  # 事件级 attestation 采用内容主判定、几何单向 rescue
+  rescue_band_delta_low: 0.05  # 仅当内容侧分数落入 [threshold-0.05, threshold) 时允许几何 rescue
+  geo_rescue_min_score: 0.3    # 几何 rescue 的最低可信门槛
   use_trajectory_mix: false  # 子进程模式无法传递 latent tensor，禁用轨迹混合
 
 detect_runtime:

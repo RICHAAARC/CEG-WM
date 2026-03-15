@@ -388,6 +388,9 @@ def _build_detect_attestation_result(
         hf_weight=float(attestation_cfg.get("hf_weight", 0.3)),
         geo_weight=float(attestation_cfg.get("geo_weight", 0.2)),
         attested_threshold=float(attestation_cfg.get("threshold", 0.65)),
+            attestation_decision_mode=str(attestation_cfg.get("decision_mode", "content_primary_geo_rescue")),
+            geo_rescue_band_delta_low=float(attestation_cfg.get("rescue_band_delta_low", 0.05)),
+            geo_rescue_min_score=float(attestation_cfg.get("geo_rescue_min_score", 0.3)),
     )
     result["status"] = result.get("verdict")
     return result
@@ -5440,6 +5443,9 @@ def verify_attestation(
     hf_weight: float = 0.3,
     geo_weight: float = 0.2,
     attested_threshold: float = 0.65,
+    attestation_decision_mode: str = "content_primary_geo_rescue",
+    geo_rescue_band_delta_low: float = 0.05,
+    geo_rescue_min_score: float = 0.3,
     lf_params: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
@@ -5461,8 +5467,9 @@ def verify_attestation(
         4. Compute S_LF = LF attestation score (latent posterior vs payload).
         5. Compute S_HF = HF truncation attestation score from supplied HF feature values.
         6. Compute S_GEO from provided geo_score.
-        7. Fuse: score = w_LF*S_LF + w_HF*S_HF + w_GEO*S_GEO.
-        8. Output attested | mismatch | absent.
+        7. Compute a content-primary attestation score from LF/HF channels.
+        8. Apply geometry as one-way rescue only when configured and eligible.
+        9. Output attested | mismatch | absent.
 
     Output semantics:
         - "attested": score >= attested_threshold; image originates from this event.
@@ -5480,12 +5487,16 @@ def verify_attestation(
         hf_weight: Score weight for HF channel (default 0.3).
         geo_weight: Score weight for GEO channel (default 0.2).
         attested_threshold: Fusion score threshold for "attested" verdict (default 0.65).
+        attestation_decision_mode: Attestation decision mode.
+        geo_rescue_band_delta_low: Lower rescue-band width below attested_threshold.
+        geo_rescue_min_score: Minimum geometry score required for rescue.
         lf_params: Optional LF parameter dict for attestation score computation.
 
     Returns:
         Dict with:
         - "verdict": "attested" | "mismatch" | "absent".
         - "fusion_score": float or None.
+        - "content_attestation_score": float or None.
         - "channel_scores": dict with lf, hf, geo sub-scores.
         - "attestation_digest": d_A used for key derivation.
         - "statement": echoed candidate statement dict.
@@ -5659,17 +5670,27 @@ def verify_attestation(
     if geo_score is not None:
         s_geo = float(max(0.0, min(1.0, geo_score)))
 
+    if attestation_decision_mode not in {"weighted_sum", "content_primary_geo_rescue"}:
+        raise ValueError(
+            "attestation_decision_mode must be one of {'weighted_sum', 'content_primary_geo_rescue'}"
+        )
+
     # (5) 检查是否缺少必要输入。
     if s_lf is None and s_hf is None and s_geo is None:
         return {
             "verdict": "absent",
             "fusion_score": None,
+            "content_attestation_score": None,
             "channel_scores": {"lf": None, "hf": None, "geo": None},
             "attestation_digest": d_a,
             "event_binding_digest": attest_keys.event_binding_digest,
             "statement": candidate_statement,
             "attestation_trace_digest": None,
             "mismatch_reasons": ["all_channel_scores_absent"],
+            "attestation_decision_mode": attestation_decision_mode,
+            "geo_rescue_eligible": False,
+            "geo_rescue_applied": False,
+            "geo_not_used_reason": "all_channel_scores_absent",
             "authenticity_result": {
                 "status": authenticity_status,
                 "bundle_status": bundle_verification.get("status") if isinstance(bundle_verification, dict) else None,
@@ -5678,6 +5699,11 @@ def verify_attestation(
             "image_evidence_result": {
                 "status": "absent",
                 "channel_scores": {"lf": None, "hf": None, "geo": None},
+                "content_attestation_score": None,
+                "decision_mode": attestation_decision_mode,
+                "geo_rescue_eligible": False,
+                "geo_rescue_applied": False,
+                "geo_not_used_reason": "all_channel_scores_absent",
             },
             "final_event_attested_decision": {
                 "status": "absent",
@@ -5685,39 +5711,105 @@ def verify_attestation(
             },
         }
 
-    # (6) 加权融合（仅对有效通道归一化权重）。
-    effective_weights: Dict[str, float] = {}
+    # (6) 先计算内容侧 attestation 主分（LF/HF 归一化）。
+    content_weights: Dict[str, float] = {}
     if s_lf is not None:
-        effective_weights["lf"] = lf_weight
+        content_weights["lf"] = lf_weight
     if s_hf is not None:
-        effective_weights["hf"] = hf_weight
-    if s_geo is not None:
-        effective_weights["geo"] = geo_weight
+        content_weights["hf"] = hf_weight
 
-    total_weight = sum(effective_weights.values())
-    if total_weight < 1e-9:
-        fusion_score = None
-        image_evidence_status = "absent"
+    content_total_weight = sum(content_weights.values())
+    content_attestation_score: Optional[float]
+    if content_total_weight < 1e-9:
+        content_attestation_score = None
     else:
-        channel_vals: Dict[str, float] = {"lf": s_lf or 0.0, "hf": s_hf or 0.0, "geo": s_geo or 0.0}
-        fusion_score = sum(
-            channel_vals[ch] * w / total_weight
-            for ch, w in effective_weights.items()
+        content_channel_vals: Dict[str, float] = {"lf": s_lf or 0.0, "hf": s_hf or 0.0}
+        content_attestation_score = sum(
+            content_channel_vals[ch] * w / content_total_weight
+            for ch, w in content_weights.items()
         )
-        fusion_score = float(max(0.0, min(1.0, fusion_score)))
-        image_evidence_status = "ok"
+        content_attestation_score = float(max(0.0, min(1.0, content_attestation_score)))
 
-    if fusion_score is None:
-        verdict = "absent"
-    elif fusion_score >= attested_threshold:
-        if authenticity_status == "authentic":
-            verdict = "attested"
+    geo_rescue_eligible = False
+    geo_rescue_applied = False
+    geo_not_used_reason: Optional[str] = None
+
+    # (7) 按配置模式判定图像侧 attestation 结果。
+    if attestation_decision_mode == "weighted_sum":
+        effective_weights: Dict[str, float] = {}
+        if s_lf is not None:
+            effective_weights["lf"] = lf_weight
+        if s_hf is not None:
+            effective_weights["hf"] = hf_weight
+        if s_geo is not None:
+            effective_weights["geo"] = geo_weight
+
+        total_weight = sum(effective_weights.values())
+        if total_weight < 1e-9:
+            fusion_score = None
+            image_evidence_status = "absent"
         else:
+            channel_vals: Dict[str, float] = {"lf": s_lf or 0.0, "hf": s_hf or 0.0, "geo": s_geo or 0.0}
+            fusion_score = sum(
+                channel_vals[ch] * w / total_weight
+                for ch, w in effective_weights.items()
+            )
+            fusion_score = float(max(0.0, min(1.0, fusion_score)))
+            image_evidence_status = "ok"
+
+        if s_geo is None:
+            geo_not_used_reason = "geometry_absent"
+        else:
+            geo_not_used_reason = "decision_mode_weighted_sum"
+
+        if fusion_score is None:
             verdict = "absent"
-            mismatch_reasons.append("bundle_authenticity_absent")
+        elif fusion_score >= attested_threshold:
+            if authenticity_status == "authentic":
+                verdict = "attested"
+            else:
+                verdict = "absent"
+                mismatch_reasons.append("bundle_authenticity_absent")
+        else:
+            verdict = "mismatch"
+            mismatch_reasons.append(f"fusion_score_below_threshold: {fusion_score:.4f} < {attested_threshold}")
     else:
-        verdict = "mismatch"
-        mismatch_reasons.append(f"fusion_score_below_threshold: {fusion_score:.4f} < {attested_threshold}")
+        fusion_score = content_attestation_score
+        if content_attestation_score is None:
+            verdict = "absent"
+            image_evidence_status = "absent"
+            geo_not_used_reason = "content_attestation_evidence_absent"
+            mismatch_reasons.append("content_attestation_evidence_absent")
+        else:
+            image_evidence_status = "ok"
+            if authenticity_status != "authentic":
+                verdict = "absent"
+                geo_not_used_reason = "bundle_authenticity_absent"
+                mismatch_reasons.append("bundle_authenticity_absent")
+            elif content_attestation_score >= attested_threshold:
+                verdict = "attested"
+                geo_not_used_reason = "content_attestation_threshold_met"
+            else:
+                rescue_lower_bound = attested_threshold - geo_rescue_band_delta_low
+                geo_rescue_eligible = bool(
+                    s_geo is not None and rescue_lower_bound <= content_attestation_score < attested_threshold
+                )
+                if geo_rescue_eligible and s_geo is not None and s_geo >= geo_rescue_min_score:
+                    verdict = "attested"
+                    geo_rescue_applied = True
+                else:
+                    verdict = "mismatch"
+                    mismatch_reasons.append(
+                        f"content_attestation_score_below_threshold: {content_attestation_score:.4f} < {attested_threshold}"
+                    )
+                    if s_geo is None:
+                        geo_not_used_reason = "geometry_absent"
+                    elif content_attestation_score < rescue_lower_bound:
+                        geo_not_used_reason = "content_score_outside_rescue_band"
+                    elif s_geo < geo_rescue_min_score:
+                        geo_not_used_reason = "geometry_score_below_rescue_min"
+                    else:
+                        geo_not_used_reason = "geometry_rescue_not_applied"
 
     authenticity_result = {
         "status": authenticity_status,
@@ -5731,7 +5823,12 @@ def verify_attestation(
         "status": image_evidence_status,
         "channel_scores": {"lf": s_lf, "hf": s_hf, "geo": s_geo},
         "fusion_score": fusion_score,
+        "content_attestation_score": content_attestation_score,
         "threshold": attested_threshold,
+        "decision_mode": attestation_decision_mode,
+        "geo_rescue_eligible": geo_rescue_eligible,
+        "geo_rescue_applied": geo_rescue_applied,
+        "geo_not_used_reason": geo_not_used_reason,
     }
     final_event_attested_decision = {
         "status": verdict,
@@ -5748,11 +5845,18 @@ def verify_attestation(
         "hf_weight": hf_weight,
         "geo_weight": geo_weight,
         "attested_threshold": attested_threshold,
+        "attestation_decision_mode": attestation_decision_mode,
+        "geo_rescue_band_delta_low": geo_rescue_band_delta_low,
+        "geo_rescue_min_score": geo_rescue_min_score,
         "s_lf": round(s_lf, 6) if s_lf is not None else None,
         "s_hf": round(s_hf, 6) if s_hf is not None else None,
         "s_geo": round(s_geo, 6) if s_geo is not None else None,
+        "content_attestation_score": round(content_attestation_score, 6) if content_attestation_score is not None else None,
         "fusion_score": round(fusion_score, 6) if fusion_score is not None else None,
         "verdict": verdict,
+        "geo_rescue_eligible": geo_rescue_eligible,
+        "geo_rescue_applied": geo_rescue_applied,
+        "geo_not_used_reason": geo_not_used_reason,
         "bundle_status": bundle_verification.get("status") if isinstance(bundle_verification, dict) else None,
         "authenticity_status": authenticity_status,
         "image_evidence_status": image_evidence_status,
@@ -5763,12 +5867,17 @@ def verify_attestation(
     return {
         "verdict": verdict,
         "fusion_score": fusion_score,
+        "content_attestation_score": content_attestation_score,
         "channel_scores": {"lf": s_lf, "hf": s_hf, "geo": s_geo},
         "attestation_digest": d_a,
         "event_binding_digest": attest_keys.event_binding_digest,
         "statement": candidate_statement,
         "attestation_trace_digest": attestation_trace_digest,
         "mismatch_reasons": mismatch_reasons,
+        "attestation_decision_mode": attestation_decision_mode,
+        "geo_rescue_eligible": geo_rescue_eligible,
+        "geo_rescue_applied": geo_rescue_applied,
+        "geo_not_used_reason": geo_not_used_reason,
         "bundle_verification": bundle_verification,
         "authenticity_result": authenticity_result,
         "image_evidence_result": image_evidence_result,

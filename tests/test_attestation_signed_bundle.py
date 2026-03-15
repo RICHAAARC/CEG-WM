@@ -223,6 +223,7 @@ def test_build_detect_attestation_result_bridges_hf_attestation_values() -> None
     cfg = {
         "__attestation_verify_k_master__": "5" * 64,
         "attestation": {
+            "decision_mode": "content_primary_geo_rescue",
             "lf_weight": 0.5,
             "hf_weight": 0.3,
             "geo_weight": 0.2,
@@ -254,7 +255,130 @@ def test_build_detect_attestation_result_bridges_hf_attestation_values() -> None
     image_evidence_result = result.get("image_evidence_result")
     assert isinstance(image_evidence_result, dict)
     assert image_evidence_result.get("status") == "ok"
+    assert image_evidence_result.get("decision_mode") == "content_primary_geo_rescue"
+    assert image_evidence_result.get("content_attestation_score") is not None
     channel_scores = result.get("channel_scores")
     assert isinstance(channel_scores, dict)
     assert channel_scores.get("hf") is not None
     assert "all_channel_scores_absent" not in list(result.get("mismatch_reasons") or [])
+
+
+def test_verify_attestation_content_positive_not_dragged_by_low_geometry() -> None:
+    """
+    功能：当内容侧事件分数已过阈值时，低几何分数不得反向拉低 attestation。
+
+    Low geometry scores must not negate a content-positive attestation decision.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    payload = _build_statement()
+
+    result = verify_attestation(
+        k_master="5" * 64,
+        candidate_statement=payload["statement"],
+        attestation_bundle=payload["bundle"],
+        content_evidence={"lf_score": 0.9},
+        geo_score=0.01,
+    )
+
+    assert result.get("verdict") == "attested"
+    assert result.get("content_attestation_score") == 0.9
+    assert result.get("geo_rescue_applied") is False
+    assert result.get("geo_not_used_reason") == "content_attestation_threshold_met"
+
+
+def test_verify_attestation_geometry_can_rescue_borderline_content() -> None:
+    """
+    功能：当内容侧分数落入 rescue band 且几何满足门槛时，允许单向 rescue。
+
+    Geometry may rescue a borderline content score when the rescue gate is satisfied.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    payload = _build_statement()
+
+    result = verify_attestation(
+        k_master="5" * 64,
+        candidate_statement=payload["statement"],
+        attestation_bundle=payload["bundle"],
+        content_evidence={"lf_score": 0.62},
+        geo_score=0.8,
+        attested_threshold=0.65,
+        geo_rescue_band_delta_low=0.05,
+        geo_rescue_min_score=0.3,
+    )
+
+    assert result.get("verdict") == "attested"
+    assert result.get("content_attestation_score") == 0.62
+    assert result.get("geo_rescue_eligible") is True
+    assert result.get("geo_rescue_applied") is True
+
+
+def test_verify_attestation_geometry_cannot_rescue_below_gate() -> None:
+    """
+    功能：当内容侧落入 rescue band 但几何分数不足时，verdict 必须保持 mismatch。
+
+    Borderline content scores must remain mismatch when geometry fails the rescue gate.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    payload = _build_statement()
+
+    result = verify_attestation(
+        k_master="5" * 64,
+        candidate_statement=payload["statement"],
+        attestation_bundle=payload["bundle"],
+        content_evidence={"lf_score": 0.62},
+        geo_score=0.2,
+        attested_threshold=0.65,
+        geo_rescue_band_delta_low=0.05,
+        geo_rescue_min_score=0.3,
+    )
+
+    assert result.get("verdict") == "mismatch"
+    assert result.get("geo_rescue_eligible") is True
+    assert result.get("geo_rescue_applied") is False
+    assert result.get("geo_not_used_reason") == "geometry_score_below_rescue_min"
+
+
+def test_verify_attestation_geometry_cannot_replace_missing_content() -> None:
+    """
+    功能：当内容主证据缺失时，不允许仅凭几何得到 event-attested。
+
+    Geometry alone must not produce an event-attested verdict when content evidence is absent.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    payload = _build_statement()
+
+    result = verify_attestation(
+        k_master="5" * 64,
+        candidate_statement=payload["statement"],
+        attestation_bundle=payload["bundle"],
+        content_evidence=None,
+        geo_score=1.0,
+    )
+
+    assert result.get("verdict") == "absent"
+    assert result.get("content_attestation_score") is None
+    assert result.get("geo_rescue_applied") is False
+    assert result.get("geo_not_used_reason") == "content_attestation_evidence_absent"
+    final_decision = result.get("final_event_attested_decision")
+    assert isinstance(final_decision, dict)
+    assert final_decision.get("is_event_attested") is False

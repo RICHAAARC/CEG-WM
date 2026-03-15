@@ -126,6 +126,9 @@ attestation:
   lf_weight: 0.5
   hf_weight: 0.3
   geo_weight: 0.2
+  decision_mode: "content_primary_geo_rescue"
+  rescue_band_delta_low: 0.05
+  geo_rescue_min_score: 0.3
   use_trajectory_mix: false
 
 detect_runtime:
