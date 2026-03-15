@@ -594,6 +594,7 @@ def compute_hf_attestation_score(
         hf_attestation_score = 0.0
     else:
         hf_attestation_score = float(max(0.0, min(1.0, retained_energy / total_energy)))
+    hf_attestation_decision_score = float(np.sqrt(hf_attestation_score))
 
     weight_vector_digest = digests.canonical_sha256(
         {"weight_vector": [round(float(value), 8) for value in weight_vector.tolist()]}
@@ -608,6 +609,7 @@ def compute_hf_attestation_score(
     hf_attestation_trace: Dict[str, Any] = {
         "status": "ok",
         "hf_attestation_score": hf_attestation_score,
+        "hf_attestation_decision_score": hf_attestation_decision_score,
         "hf_attestation_plan_digest_used": plan_digest,
         "hf_attestation_challenge_digest": constraint_evidence.get("challenge_digest"),
         "hf_attestation_challenge_seed": int(constraint_evidence.get("challenge_seed", 0)),
@@ -645,6 +647,7 @@ def compute_hf_attestation_score(
 
     return {
         "hf_attestation_score": hf_attestation_score,
+        "hf_attestation_decision_score": hf_attestation_decision_score,
         "status": "ok",
         "n_values_used": n_compare,
         "threshold_percentile_applied": float(constraint_evidence.get("threshold_percentile_applied", threshold_percentile)),

@@ -464,6 +464,7 @@ def _merge_hf_attestation_trace(
     event_binding_digest: str,
     trace_commit: Optional[str],
     hf_score: Optional[float],
+    hf_decision_score: Optional[float],
     detect_hf_plan_digest_used: Optional[str] = None,
 ) -> Dict[str, Any] | None:
     if not isinstance(hf_trace, dict):
@@ -518,6 +519,7 @@ def _merge_hf_attestation_trace(
         "event_binding_digest": event_binding_digest,
         "trace_commit": trace_commit,
         "hf_attestation_score": hf_score,
+        "hf_attestation_decision_score": hf_decision_score,
         **hf_trace,
         "detect_hf_plan_digest_used": detect_hf_plan_digest_used,
         "detect_hf_challenge_digest": detect_hf_challenge_digest,
@@ -3074,9 +3076,10 @@ def run_calibrate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> D
     target_fpr = thresholds_spec.get("target_fpr")
     if not isinstance(target_fpr, (int, float)):
         raise TypeError("thresholds_spec.target_fpr must be number")
+    score_name = _resolve_score_name_for_stats(cfg, mode="calibration")
 
     detect_records = _load_records_for_calibration(cfg)
-    scores, strata_info = load_scores_for_calibration(detect_records, cfg)
+    scores, strata_info = load_scores_for_calibration(detect_records, cfg, score_name=score_name)
     threshold_value, order_stat_info = compute_np_threshold(scores, float(target_fpr))
     sampling_policy_node = strata_info.get("sampling_policy")
     sampling_policy = cast(Dict[str, Any], sampling_policy_node) if isinstance(sampling_policy_node, dict) else {}
@@ -3084,13 +3087,13 @@ def run_calibrate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> D
     n_selected_null = sampling_policy.get("n_selected_null") if isinstance(sampling_policy.get("n_selected_null"), int) else len(scores)
 
     threshold_key_used = neyman_pearson.format_fpr_key_canonical(float(target_fpr))
-    threshold_id = f"content_score_np_{threshold_key_used}"
+    threshold_id = f"{score_name}_np_{threshold_key_used}"
     thresholds_artifact: Dict[str, Any] = {
         "calibration_version": "np_v1",
         "rule_id": neyman_pearson.RULE_ID,
         "rule_version": neyman_pearson.RULE_VERSION,
         "threshold_id": threshold_id,
-        "score_name": "content_score",
+        "score_name": score_name,
         "target_fpr": float(target_fpr),
         "threshold_value": float(threshold_value),
         "threshold_key_used": threshold_key_used,
@@ -3106,7 +3109,7 @@ def run_calibrate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> D
         "rule_id": neyman_pearson.RULE_ID,
         "rule_version": neyman_pearson.RULE_VERSION,
         "method": "neyman_pearson_v1",
-        "score_name": "content_score",
+        "score_name": score_name,
         "target_fpr": float(target_fpr),
         "null_source": null_source,
         "n_null": n_selected_null,
@@ -3134,15 +3137,18 @@ def run_calibrate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> D
         null_records_for_stats,
         float(threshold_value),
         cfg,
+        score_name=score_name,
     )
     threshold_metadata_artifact["conditional_fpr"] = _compute_conditional_fpr_for_calibration(
         null_records_for_stats,
         float(threshold_value),
+        score_name=score_name,
     )
     threshold_metadata_artifact["conditional_fpr_records"] = _compute_conditional_fpr_records_for_calibration(
         null_records_for_stats,
         float(threshold_value),
         cfg,
+        score_name=score_name,
     )
 
     record: Dict[str, Any] = {
@@ -3154,7 +3160,7 @@ def run_calibrate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> D
         "threshold_id": threshold_id,
         "calibration_samples": len(scores),
         "calibration_summary": {
-            "score_name": "content_score",
+            "score_name": score_name,
             "target_fpr": float(target_fpr),
             "threshold_value": float(threshold_value),
             "selected_order_stat_score": float(order_stat_info.get("selected_order_stat_score")),
@@ -3540,6 +3546,7 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
 def load_scores_for_calibration(
     records: list[Dict[str, Any]],
     cfg: Optional[Dict[str, Any]] = None,
+    score_name: str = "content_score",
 ) -> tuple[list[float], Dict[str, Any]]:
     """
     功能：从 detect records 加载校准分数 
@@ -3555,6 +3562,8 @@ def load_scores_for_calibration(
     """
     if cfg is not None and not isinstance(cfg, dict):
         raise TypeError("cfg must be dict or None")
+    if not isinstance(score_name, str) or not score_name:
+        raise TypeError("score_name must be non-empty str")
 
     scores: list[float] = []
     total = len(records)
@@ -3591,7 +3600,6 @@ def load_scores_for_calibration(
         if isinstance(content_payload, dict):
             content_payload_mapping = cast(Dict[str, Any], content_payload)
             status_value = content_payload_mapping.get("status")
-            score_value = content_payload_mapping.get("score")
             if _is_synthetic_fallback_calibration_sample(content_payload_mapping):
                 rejected += 1
                 rejected_synthetic_fallback += 1
@@ -3608,14 +3616,8 @@ def load_scores_for_calibration(
                     rejected += 1
                     rejected_synthetic_negative_closure += 1
                     continue
-        if status_value != "ok":
-            rejected += 1
-            continue
-        if not isinstance(score_value, (int, float)):
-            rejected += 1
-            continue
-        score_float = float(score_value)
-        if not np.isfinite(score_float):
+        score_value = _extract_score_for_stats(item, score_name)
+        if score_value is None:
             rejected += 1
             continue
 
@@ -3630,11 +3632,11 @@ def load_scores_for_calibration(
                 rejected_label_positive += 1
                 continue
 
-        scores.append(score_float)
+        scores.append(float(score_value))
         valid += 1
 
     if len(scores) == 0:
-        raise ValueError("calibration requires at least one valid content_score sample")
+        raise ValueError(f"calibration requires at least one valid {score_name} sample")
 
     strata_info: Dict[str, Any] = {
         "global": {
@@ -3643,6 +3645,7 @@ def load_scores_for_calibration(
             "n_rejected": rejected,
         },
         "sampling_policy": {
+            "score_name": score_name,
             "null_source": null_source,
             "label_field_candidates": ["label", "ground_truth", "is_watermarked"],
             "records_with_explicit_label": has_explicit_labels,
@@ -3657,6 +3660,26 @@ def load_scores_for_calibration(
         },
     }
     return scores, strata_info
+
+
+def _resolve_score_name_for_stats(cfg: Dict[str, Any], mode: str) -> str:
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if mode not in {"calibration", "evaluate"}:
+        raise ValueError("mode must be one of {'calibration', 'evaluate'}")
+
+    override_key = "__calibration_score_name__" if mode == "calibration" else "__evaluate_score_name__"
+    override_value = cfg.get(override_key)
+    if isinstance(override_value, str) and override_value:
+        return override_value
+
+    section_key = "calibration" if mode == "calibration" else "evaluate"
+    section_node = cfg.get(section_key)
+    section_cfg = cast(Dict[str, Any], section_node) if isinstance(section_node, dict) else {}
+    section_value = section_cfg.get("score_name")
+    if isinstance(section_value, str) and section_value:
+        return section_value
+    return "content_score"
 
 
 def _is_synthetic_fallback_calibration_sample(content_payload: Dict[str, Any]) -> bool:
@@ -3784,6 +3807,9 @@ def evaluate_records_against_threshold(
     if not isinstance(threshold_value, (int, float)):
         raise TypeError("threshold_value must be number")
     threshold_float = float(threshold_value)
+    score_name = thresholds_obj.get("score_name", "content_score")
+    if not isinstance(score_name, str) or not score_name:
+        raise TypeError("thresholds artifact score_name must be non-empty str")
 
     # 使用 evaluation 模块计算指标 
     if attack_protocol_spec is None:
@@ -3794,11 +3820,11 @@ def evaluate_records_against_threshold(
         }
 
     # Overall metrics 
-    metrics, breakdown = eval_metrics.compute_overall_metrics(records, threshold_float)
+    metrics, breakdown = eval_metrics.compute_overall_metrics(records, threshold_float, score_name=score_name)
     
     # 补充 thresholds 工件元数据 
     metrics["metric_version"] = "tpr_at_fpr_v1"
-    metrics["score_name"] = thresholds_obj.get("score_name", "content_score")
+    metrics["score_name"] = score_name
     metrics["target_fpr"] = thresholds_obj.get("target_fpr")
     metrics["threshold_value"] = threshold_float
     metrics["threshold_key_used"] = thresholds_obj.get("threshold_key_used")
@@ -3808,10 +3834,11 @@ def evaluate_records_against_threshold(
         records,
         threshold_float,
         attack_protocol_spec,
+        score_name=score_name,
     )
 
     # 计算条件指标中的 "items"（旧字段，用于向后兼容） 
-    conditional_metrics_old = _compute_conditional_metrics_for_evaluate(records, threshold_float)
+    conditional_metrics_old = _compute_conditional_metrics_for_evaluate(records, threshold_float, score_name=score_name)
     additional_items = conditional_metrics_old.get("items", [])
 
     # 构造条件指标容器（向后兼容） 
@@ -3927,20 +3954,48 @@ def _extract_geometry_score(record: Dict[str, Any]) -> Optional[float]:
     return None
 
 
-def _extract_content_score_for_stats(record: Dict[str, Any]) -> Optional[float]:
-    content_node = record.get("content_evidence_payload")
-    if not isinstance(content_node, dict):
+def _extract_score_for_stats(record: Dict[str, Any], score_name: str) -> Optional[float]:
+    if not isinstance(record, dict):
         return None
-    content_payload = cast(Dict[str, Any], content_node)
-    if content_payload.get("status") != "ok":
-        return None
-    score_value = content_payload.get("score")
+    if not isinstance(score_name, str) or not score_name:
+        raise TypeError("score_name must be non-empty str")
+
+    if score_name == "content_score":
+        content_node = record.get("content_evidence_payload")
+        if not isinstance(content_node, dict):
+            return None
+        content_payload = cast(Dict[str, Any], content_node)
+        if content_payload.get("status") != "ok":
+            return None
+        score_value = content_payload.get("score")
+    elif score_name == "content_attestation_score":
+        attestation_node = record.get("attestation")
+        if not isinstance(attestation_node, dict):
+            return None
+        attestation_payload = cast(Dict[str, Any], attestation_node)
+        image_evidence_result_node = attestation_payload.get("image_evidence_result")
+        if not isinstance(image_evidence_result_node, dict):
+            return None
+        image_evidence_result = cast(Dict[str, Any], image_evidence_result_node)
+        if image_evidence_result.get("status") != "ok":
+            return None
+        formal_score_name = image_evidence_result.get("content_attestation_score_name")
+        if isinstance(formal_score_name, str) and formal_score_name and formal_score_name != "content_attestation_score":
+            return None
+        score_value = image_evidence_result.get("content_attestation_score")
+    else:
+        raise ValueError(f"unsupported score_name: {score_name}")
+
     if not isinstance(score_value, (int, float)):
         return None
     score_float = float(score_value)
     if not np.isfinite(score_float):
         return None
     return score_float
+
+
+def _extract_content_score_for_stats(record: Dict[str, Any]) -> Optional[float]:
+    return _extract_score_for_stats(record, "content_score")
 
 
 def _build_rescue_band_spec_for_detect(cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -3968,6 +4023,7 @@ def _compute_null_strata_for_calibration(
     records: list[Dict[str, Any]],
     threshold_value: float,
     cfg: Dict[str, Any],
+    score_name: str = "content_score",
 ) -> Dict[str, Any]:
     valid_content = 0
     geometry_available = 0
@@ -3978,7 +4034,7 @@ def _compute_null_strata_for_calibration(
     delta_low = float(rescue_spec.get("delta_low", 0.05))
     lower_bound = float(threshold_value) - delta_low
     for item in records:
-        score_float = _extract_content_score_for_stats(item)
+        score_float = _extract_score_for_stats(item, score_name)
         if score_float is None:
             continue
         valid_content += 1
@@ -4013,6 +4069,7 @@ def _compute_conditional_fpr_records_for_calibration(
     records: list[Dict[str, Any]],
     threshold_value: float,
     cfg: Dict[str, Any],
+    score_name: str = "content_score",
 ) -> list[Dict[str, Any]]:
     threshold_float = float(threshold_value)
     rescue_spec = _build_rescue_band_spec_for_detect(cfg)
@@ -4115,7 +4172,7 @@ def _compute_conditional_fpr_records_for_calibration(
 
     rescue_lower = threshold_float - delta_low
     for index, item in enumerate(records):
-        score_float = _extract_content_score_for_stats(item)
+        score_float = _extract_score_for_stats(item, score_name)
         if score_float is None:
             continue
         pred_positive = bool(score_float >= threshold_float)
@@ -4167,7 +4224,11 @@ def _compute_conditional_fpr_records_for_calibration(
     ]
 
 
-def _compute_conditional_fpr_for_calibration(records: list[Dict[str, Any]], threshold_value: float) -> Dict[str, Any]:
+def _compute_conditional_fpr_for_calibration(
+    records: list[Dict[str, Any]],
+    threshold_value: float,
+    score_name: str = "content_score",
+) -> Dict[str, Any]:
     global_total = 0
     global_fp = 0
     geo_available_total = 0
@@ -4176,7 +4237,7 @@ def _compute_conditional_fpr_for_calibration(records: list[Dict[str, Any]], thre
     geo_unavailable_fp = 0
 
     for item in records:
-        score_float = _extract_content_score_for_stats(item)
+        score_float = _extract_score_for_stats(item, score_name)
         if score_float is None:
             continue
         pred_positive = bool(score_float >= float(threshold_value))
@@ -4363,7 +4424,11 @@ def _extract_geo_gate_applied(record: Dict[str, Any]) -> Optional[bool]:
     return None
 
 
-def _compute_conditional_metrics_for_evaluate(records: list[Dict[str, Any]], threshold_value: float) -> Dict[str, Any]:
+def _compute_conditional_metrics_for_evaluate(
+    records: list[Dict[str, Any]],
+    threshold_value: float,
+    score_name: str = "content_score",
+) -> Dict[str, Any]:
     groups: Dict[str, Dict[str, int]] = {
         "global": {"tp": 0, "fp": 0, "pos": 0, "neg": 0, "accepted": 0},
         "geometry_available": {"tp": 0, "fp": 0, "pos": 0, "neg": 0, "accepted": 0},
@@ -4371,7 +4436,7 @@ def _compute_conditional_metrics_for_evaluate(records: list[Dict[str, Any]], thr
     }
 
     for item in records:
-        score_float = _extract_content_score_for_stats(item)
+        score_float = _extract_score_for_stats(item, score_name)
         if score_float is None:
             continue
         gt_value = _extract_ground_truth_label(item)
@@ -5780,6 +5845,7 @@ def verify_attestation(
     # (4) 计算各通道 attestation 得分。
     s_lf: Optional[float] = None
     s_hf: Optional[float] = None
+    s_hf_raw: Optional[float] = None
     s_geo: Optional[float] = None
     hf_attestation_trace: Optional[Dict[str, Any]] = None
 
@@ -5815,7 +5881,14 @@ def verify_attestation(
             if isinstance(hf_result.get("hf_attestation_trace"), dict):
                 hf_attestation_trace = cast(Dict[str, Any], hf_result.get("hf_attestation_trace"))
             if hf_result.get("status") == "ok":
-                s_hf = hf_result.get("hf_attestation_score")
+                raw_hf_score = hf_result.get("hf_attestation_score")
+                decision_hf_score = hf_result.get("hf_attestation_decision_score")
+                if isinstance(raw_hf_score, (int, float)):
+                    s_hf_raw = float(raw_hf_score)
+                if isinstance(decision_hf_score, (int, float)):
+                    s_hf = float(decision_hf_score)
+                else:
+                    s_hf = s_hf_raw
         except Exception:
             mismatch_reasons.append("hf_attestation_score_failed")
 
@@ -5975,8 +6048,13 @@ def verify_attestation(
     image_evidence_result = {
         "status": image_evidence_status,
         "channel_scores": {"lf": s_lf, "hf": s_hf, "geo": s_geo},
+        "channel_scores_raw": {"lf": s_lf, "hf": s_hf_raw, "geo": s_geo},
         "fusion_score": fusion_score,
         "content_attestation_score": content_attestation_score,
+        "content_attestation_score_name": "content_attestation_score",
+        "content_attestation_score_semantics": "lf_and_hf_decision_fusion_before_geo_rescue",
+        "hf_attestation_score": s_hf_raw,
+        "hf_attestation_decision_score": s_hf,
         "threshold": attested_threshold,
         "decision_mode": attestation_decision_mode,
         "geo_rescue_eligible": geo_rescue_eligible,
@@ -5989,7 +6067,8 @@ def verify_attestation(
         attestation_digest=d_a,
         event_binding_digest=attest_keys.event_binding_digest,
         trace_commit=trace_commit,
-        hf_score=s_hf,
+        hf_score=s_hf_raw,
+        hf_decision_score=s_hf,
         detect_hf_plan_digest_used=detect_hf_plan_digest_used,
     )
     final_event_attested_decision = {
@@ -6031,6 +6110,9 @@ def verify_attestation(
         "fusion_score": fusion_score,
         "content_attestation_score": content_attestation_score,
         "channel_scores": {"lf": s_lf, "hf": s_hf, "geo": s_geo},
+        "channel_scores_raw": {"lf": s_lf, "hf": s_hf_raw, "geo": s_geo},
+        "hf_attestation_score": s_hf_raw,
+        "hf_attestation_decision_score": s_hf,
         "attestation_digest": d_a,
         "event_binding_digest": attest_keys.event_binding_digest,
         "statement": candidate_statement,

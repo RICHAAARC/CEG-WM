@@ -313,6 +313,8 @@ def test_verify_attestation_content_positive_not_dragged_by_low_geometry() -> No
 
     assert result.get("verdict") == "attested"
     assert result.get("content_attestation_score") == 0.9
+    assert result.get("hf_attestation_score") is None
+    assert result.get("hf_attestation_decision_score") is None
     assert result.get("geo_rescue_applied") is False
     assert result.get("geo_not_used_reason") == "content_attestation_threshold_met"
 
@@ -436,6 +438,8 @@ def test_compute_hf_attestation_score_emits_trace_fields() -> None:
     retained_indices = cast(list[int], trace.get("hf_attestation_retained_indices"))
     assert trace.get("hf_attestation_challenge_digest")
     assert trace.get("hf_attestation_challenge_source") == "attestation_event_digest"
+    assert isinstance(result.get("hf_attestation_decision_score"), float)
+    assert trace.get("hf_attestation_decision_score") == result.get("hf_attestation_decision_score")
     assert trace.get("hf_attestation_plan_digest_used") == "9" * 64
     assert trace.get("hf_attestation_threshold_percentile_applied") == 90.0
     assert trace.get("hf_attestation_vector_length") == 8
@@ -590,6 +594,40 @@ def test_compute_hf_attestation_score_follows_canonical_tail_ratio_mapping() -> 
     changed_trace = cast(Dict[str, Any], changed.get("hf_attestation_trace"))
     assert base_trace.get("hf_attestation_threshold_percentile_applied") == 90.0
     assert changed_trace.get("hf_attestation_threshold_percentile_applied") == 65.0
+
+
+def test_verify_attestation_exposes_hf_raw_and_decision_scores() -> None:
+    """
+    功能：验证 attestation 输出同时暴露 HF raw 分数与判决分数。
+
+    Verify attestation output exposes both HF raw and decision scores.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    payload = _build_statement()
+
+    result = verify_attestation(
+        k_master="5" * 64,
+        candidate_statement=payload["statement"],
+        attestation_bundle=payload["bundle"],
+        content_evidence={"lf_score": 0.8},
+        cfg=_build_hf_runtime_cfg(0.1),
+        hf_values=[0.5, -0.25, 1.5, -2.0, 0.25, 0.75, -0.5, 0.1],
+    )
+
+    raw_hf_score = result.get("hf_attestation_score")
+    decision_hf_score = result.get("hf_attestation_decision_score")
+    image_evidence_result = cast(Dict[str, Any], result.get("image_evidence_result"))
+
+    assert isinstance(raw_hf_score, float)
+    assert isinstance(decision_hf_score, float)
+    assert decision_hf_score >= raw_hf_score
+    assert image_evidence_result.get("hf_attestation_score") == raw_hf_score
+    assert image_evidence_result.get("hf_attestation_decision_score") == decision_hf_score
 
 
 def test_verify_attestation_records_hf_trace_consistency_match_with_canonical_percentile() -> None:

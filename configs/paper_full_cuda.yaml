@@ -111,6 +111,7 @@ ablation:
 
 calibration:
   detect_records_glob: null  # detect 记录 glob 路径；为空时由标准 workflow / CLI 基于当前 run_root 自动解析
+  score_name: "content_score"  # 默认统计主链；若需并行 attestation 统计链，可切为 "content_attestation_score"
   minimal_ground_truth_pair_count: 100  # onefile 最小 GT 闭环生成对数（positive/negative）；≥100 保证离散 FPR 粒度 1/100≤1%
   minimal_ground_truth_prompts_file: "prompts/prompts_100.txt"  # 100 条 prompt 驱动各对克隆样本的 inference_prompt 元数据多样性；run_id 唯一性已由代码层保证（P0-C 已落地）
   exclude_formal_sidecar_disabled_marker: true
@@ -119,9 +120,15 @@ calibration:
 evaluate:
   detect_records_glob: null  # detect 记录 glob 路径；为空时由标准 workflow / CLI 基于当前 run_root 自动解析
   thresholds_path: null      # 阈值工件路径；为空时由标准 workflow / CLI 基于当前 run_root 自动解析
+  score_name: "content_score"  # 默认评测主链；若消费 attestation 阈值工件，应与 calibration.score_name 保持一致
   minimal_ground_truth_pair_count: 100  # onefile 最小 GT 闭环生成对数（positive/negative）；≥100 保证离散 FPR 粒度 1/100≤1%
   minimal_ground_truth_prompts_file: "prompts/prompts_100.txt"  # 100 条 prompt 驱动各对克隆样本的 inference_prompt 元数据多样性；run_id 唯一性已由代码层保证（P0-C 已落地）
   exclude_synthetic_negative_closure_marker: true
+
+parallel_attestation_statistics:
+  enabled: true  # paper onefile 主线保留 content_score，同时并行补齐 attestation 正式统计链
+  calibration_score_name: "content_attestation_score"
+  evaluate_score_name: "content_attestation_score"
 
 impl:
   content_extractor_id: "unified_content_extractor"

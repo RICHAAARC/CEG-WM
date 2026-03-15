@@ -683,6 +683,11 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
     - attestation.signed_bundle             # signed attestation bundle。
     - attestation.authenticity_result       # 真实性层结果。
     - attestation.image_evidence_result     # 图像内证据层结果。
+    - attestation.image_evidence_result.channel_scores_raw # 图像内证据层原始通道分数。
+    - attestation.image_evidence_result.hf_attestation_score # HF attestation 原始得分。
+    - attestation.image_evidence_result.hf_attestation_decision_score # HF attestation 判决得分。
+    - attestation.image_evidence_result.content_attestation_score_name # attestation 内容统计链得分名。
+    - attestation.image_evidence_result.content_attestation_score_semantics # attestation 内容得分语义。
     - attestation.final_event_attested_decision # 最终事件级 attestation 判决。
     - content_evidence.score_parts.lf_status # LF 检测顶层状态。
     - content_evidence.score_parts.lf_detect_trace.bp_converge_status # LF BP 收敛状态诊断字段。

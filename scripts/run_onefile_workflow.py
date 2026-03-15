@@ -1276,11 +1276,98 @@ def _build_stage_command(
     return command
 
 
+def _resolve_parallel_attestation_statistics_cfg(cfg_obj: dict) -> dict:
+    """
+    功能：解析 onefile 并行 attestation 统计链配置。
+
+    Resolve the onefile parallel attestation statistics configuration.
+
+    Args:
+        cfg_obj: Runtime config mapping.
+
+    Returns:
+        Mapping containing enabled flag and score-name settings.
+    """
+    if not isinstance(cfg_obj, dict):
+        raise TypeError("cfg_obj must be dict")
+
+    section_node = cfg_obj.get("parallel_attestation_statistics")
+    section_cfg = section_node if isinstance(section_node, dict) else {}
+    calibration_score_name = section_cfg.get("calibration_score_name")
+    evaluate_score_name = section_cfg.get("evaluate_score_name")
+
+    if not isinstance(calibration_score_name, str) or not calibration_score_name:
+        calibration_score_name = "content_attestation_score"
+    if not isinstance(evaluate_score_name, str) or not evaluate_score_name:
+        evaluate_score_name = calibration_score_name
+
+    return {
+        "enabled": bool(section_cfg.get("enabled", False)),
+        "calibration_score_name": calibration_score_name,
+        "evaluate_score_name": evaluate_score_name,
+    }
+
+
+def _extract_content_attestation_score_from_detect_record(record: dict) -> float | None:
+    """
+    功能：从 detect record 中提取正式 content_attestation_score。
+
+    Extract the formal content_attestation_score from a detect record.
+
+    Args:
+        record: Detect record mapping.
+
+    Returns:
+        Formal attestation score when present and valid; otherwise None.
+    """
+    if not isinstance(record, dict):
+        raise TypeError("record must be dict")
+
+    attestation_node = record.get("attestation")
+    if not isinstance(attestation_node, dict):
+        return None
+    image_evidence_result = attestation_node.get("image_evidence_result")
+    if not isinstance(image_evidence_result, dict):
+        return None
+    if image_evidence_result.get("status") != "ok":
+        return None
+
+    score_name = image_evidence_result.get("content_attestation_score_name")
+    if isinstance(score_name, str) and score_name and score_name != "content_attestation_score":
+        return None
+
+    score_value = image_evidence_result.get("content_attestation_score")
+    if isinstance(score_value, bool) or not isinstance(score_value, (int, float)):
+        return None
+    score_float = float(score_value)
+    if not math.isfinite(score_float):
+        return None
+    return score_float
+
+
+def _build_parallel_attestation_statistics_run_root(run_root: Path) -> Path:
+    """
+    功能：解析并行 attestation 统计链子运行目录。
+
+    Resolve the dedicated sub-run root for the parallel attestation chain.
+
+    Args:
+        run_root: Main onefile run root.
+
+    Returns:
+        Parallel attestation statistics run root path.
+    """
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    return run_root / "outputs" / "parallel_attestation_statistics"
+
+
 def _run_dual_branch_embedding_and_detection(
     repo_root: Path,
     cfg_path: Path,
     run_root: Path,
-    profile: str
+    profile: str,
+    preserve_attestation: bool = False,
 ) -> tuple[Path, Path]:
     """
     功能：执行双分支嵌入与检测（生成负样本）。
@@ -1322,10 +1409,13 @@ def _run_dual_branch_embedding_and_detection(
     # 优先从主分支 embed_record.json 中读取 image_path；
     # 失败则从 cfg 中解析 embed.input_image_path。
     original_input_path: Path | None = None
+    main_embed_record_obj: dict | None = None
     main_embed_record_path = run_root / "records" / "embed_record.json"
     if main_embed_record_path.exists():
         try:
             main_record_obj = json.loads(main_embed_record_path.read_text(encoding="utf-8"))
+            if isinstance(main_record_obj, dict):
+                main_embed_record_obj = main_record_obj
             main_image_path_str = main_record_obj.get("image_path")
             if isinstance(main_image_path_str, str) and main_image_path_str and main_image_path_str != "<absent>":
                 candidate = Path(main_image_path_str)
@@ -1390,6 +1480,11 @@ def _run_dual_branch_embedding_and_detection(
         "is_watermarked": False,
         "negative_branch_note": "clean image copy for dual-branch calibration; no production embed orchestrator used",
     }
+    if preserve_attestation and isinstance(main_embed_record_obj, dict):
+        for field_name in ["attestation", "attestation_statement", "attestation_bundle"]:
+            field_value = main_embed_record_obj.get(field_name)
+            if isinstance(field_value, dict):
+                neg_embed_record[field_name] = json.loads(json.dumps(field_value, ensure_ascii=False))
     neg_embed_record_path = neg_records_dir / "embed_record.json"
     _write_artifact_text_unbound(
         run_root,
@@ -1409,11 +1504,12 @@ def _run_dual_branch_embedding_and_detection(
             paper_cfg["alignment_check"] = False
             branch_cfg_obj["paper_faithfulness"] = paper_cfg
 
-            attestation_node = branch_cfg_obj.get("attestation")
-            attestation_cfg = attestation_node if isinstance(attestation_node, dict) else {}
-            attestation_cfg["enabled"] = False
-            attestation_cfg["require_signed_bundle_verification"] = False
-            branch_cfg_obj["attestation"] = attestation_cfg
+            if not preserve_attestation:
+                attestation_node = branch_cfg_obj.get("attestation")
+                attestation_cfg = attestation_node if isinstance(attestation_node, dict) else {}
+                attestation_cfg["enabled"] = False
+                attestation_cfg["require_signed_bundle_verification"] = False
+                branch_cfg_obj["attestation"] = attestation_cfg
 
             branch_cfg_dir = branch_neg_root / "artifacts" / "workflow_cfg"
             branch_cfg_dir.mkdir(parents=True, exist_ok=True)
@@ -1467,6 +1563,8 @@ def _prepare_stage_cfg_path(
     cfg_path: Path,
     profile: str,
     repo_root: Path | None = None,
+    score_name_override: str | None = None,
+    output_run_root: Path | None = None,
 ) -> Path:
     """
     功能：为特定阶段生成补全字段后的配置文件。 
@@ -1490,17 +1588,40 @@ def _prepare_stage_cfg_path(
         raise TypeError("cfg_path must be Path")
     if repo_root is not None and not isinstance(repo_root, Path):
         raise TypeError("repo_root must be Path or None")
+    if score_name_override is not None and (not isinstance(score_name_override, str) or not score_name_override):
+        raise TypeError("score_name_override must be non-empty str or None")
+    if output_run_root is not None and not isinstance(output_run_root, Path):
+        raise TypeError("output_run_root must be Path or None")
     if stage_name not in {"calibrate", "evaluate"}:
         return cfg_path
     profile = _normalize_profile(profile)
+    stage_output_root = output_run_root if output_run_root is not None else run_root
     cfg_text = cfg_path.read_text(encoding="utf-8")
     cfg_obj = yaml.safe_load(cfg_text)
     if not isinstance(cfg_obj, dict):
         raise ValueError("config root must be mapping")
+    parallel_attestation_cfg = _resolve_parallel_attestation_statistics_cfg(cfg_obj)
+    stage_cfg_key = "calibration" if stage_name == "calibrate" else "evaluate"
+    stage_cfg_node = cfg_obj.get(stage_cfg_key)
+    stage_cfg = stage_cfg_node if isinstance(stage_cfg_node, dict) else {}
+    resolved_score_name = score_name_override if isinstance(score_name_override, str) else stage_cfg.get("score_name")
+    if not isinstance(resolved_score_name, str) or not resolved_score_name:
+        resolved_score_name = "content_score"
+    stage_cfg = dict(stage_cfg)
+    stage_cfg["score_name"] = resolved_score_name
+    cfg_obj[stage_cfg_key] = stage_cfg
     records_dir = run_root / "records"
     detect_record_path = records_dir / "detect_record.json"
     if detect_record_path.exists() and detect_record_path.is_file():
-        detect_record_glob = str(_prepare_detect_record_for_scoring(run_root, records_dir, profile))
+        detect_record_glob = str(
+            _prepare_detect_record_for_scoring(
+                run_root,
+                records_dir,
+                profile,
+                score_name=resolved_score_name,
+                output_run_root=stage_output_root,
+            )
+        )
     else:
         detect_record_glob = str(detect_record_path)
     # 在 calibrate/evaluate 时运行或复用双分支负样本 detect 记录（仅当 repo_root 可用）
@@ -1515,7 +1636,14 @@ def _prepare_stage_cfg_path(
         try:
             print("[onefile] Running dual-branch embedding and detection ...")
             _, branch_neg_detect_record = _run_dual_branch_embedding_and_detection(
-                repo_root, cfg_path, run_root, profile
+                repo_root,
+                cfg_path,
+                run_root,
+                profile,
+                preserve_attestation=(
+                    resolved_score_name == "content_attestation_score"
+                    or bool(parallel_attestation_cfg.get("enabled", False))
+                ),
             )
             print("[onefile] Dual-branch embedding and detection completed")
         except Exception as exc:
@@ -1524,9 +1652,6 @@ def _prepare_stage_cfg_path(
             print("[onefile] Continuing with single-branch workflow (GT generated via clone)", file=sys.stderr)
 
     if detect_record_glob and "*" not in detect_record_glob and "?" not in detect_record_glob:
-        stage_cfg_key = "calibration" if stage_name == "calibrate" else "evaluate"
-        stage_cfg_node = cfg_obj.get(stage_cfg_key)
-        stage_cfg = stage_cfg_node if isinstance(stage_cfg_node, dict) else {}
         prompt_list: Sequence[str] | None = None
         prompts_file_value = stage_cfg.get("minimal_ground_truth_prompts_file")
         pair_count = stage_cfg.get("minimal_ground_truth_pair_count")
@@ -1548,19 +1673,17 @@ def _prepare_stage_cfg_path(
                 pair_count=pair_count,
                 prompts=prompt_list,
                 dual_branch_failure_reason=dual_branch_failure_reason,
+                score_name=resolved_score_name,
+                output_run_root=stage_output_root,
             )
 
     if stage_name == "calibrate":
-        calibration_cfg = cfg_obj.get("calibration")
-        if not isinstance(calibration_cfg, dict):
-            calibration_cfg = {}
+        calibration_cfg = stage_cfg
         calibration_cfg["detect_records_glob"] = detect_record_glob
         cfg_obj["calibration"] = calibration_cfg
 
     if stage_name == "evaluate":
-        evaluate_cfg = cfg_obj.get("evaluate")
-        if not isinstance(evaluate_cfg, dict):
-            evaluate_cfg = {}
+        evaluate_cfg = stage_cfg
         # detect_np 守卫：仅对非 paper_full_cuda 模式生效。
         # paper_full_cuda 的 evaluate 已通过 thresholds_path 注入 NP 阈值，
         # detect_records_glob 由 _prepare_detect_records_with_minimal_ground_truth
@@ -1590,14 +1713,14 @@ def _prepare_stage_cfg_path(
                 evaluate_cfg["detect_records_glob"] = detect_record_glob
         else:
             evaluate_cfg["detect_records_glob"] = detect_record_glob
-        evaluate_cfg["thresholds_path"] = str(run_root / "artifacts" / "thresholds" / "thresholds_artifact.json")
+        evaluate_cfg["thresholds_path"] = str(stage_output_root / "artifacts" / "thresholds" / "thresholds_artifact.json")
         cfg_obj["evaluate"] = evaluate_cfg
 
-    stage_cfg_dir = run_root / "artifacts" / "workflow_cfg"
+    stage_cfg_dir = stage_output_root / "artifacts" / "workflow_cfg"
     stage_cfg_dir.mkdir(parents=True, exist_ok=True)
     stage_cfg_path = stage_cfg_dir / f"{stage_name}_config.yaml"
     _write_artifact_text_unbound(
-        run_root,
+        stage_output_root,
         stage_cfg_path,
         yaml.safe_dump(cfg_obj, allow_unicode=True, sort_keys=False)
     )
@@ -1612,6 +1735,8 @@ def _prepare_detect_records_with_minimal_ground_truth(
     prompts: Sequence[str] | None = None,
     branch_neg_detect_record: Path | None = None,
     dual_branch_failure_reason: str | None = None,
+    score_name: str = "content_score",
+    output_run_root: Path | None = None,
 ) -> str:
     """
     功能：为 calibrate/evaluate 生成最小正负标签 detect records 集合。 
@@ -1651,6 +1776,12 @@ def _prepare_detect_records_with_minimal_ground_truth(
         raise TypeError("branch_neg_detect_record must be Path or None")
     if dual_branch_failure_reason is not None and not isinstance(dual_branch_failure_reason, str):
         raise TypeError("dual_branch_failure_reason must be str or None")
+    if not isinstance(score_name, str) or not score_name:
+        raise TypeError("score_name must be non-empty str")
+    if output_run_root is not None and not isinstance(output_run_root, Path):
+        raise TypeError("output_run_root must be Path or None")
+
+    artifact_run_root = output_run_root if output_run_root is not None else run_root
 
     if not source_detect_path.exists() or not source_detect_path.is_file():
         return str(source_detect_path)
@@ -1683,7 +1814,7 @@ def _prepare_detect_records_with_minimal_ground_truth(
         try:
             neg_payload = json.loads(branch_neg_detect_record.read_text(encoding="utf-8"))
             if isinstance(neg_payload, dict):
-                workflow_cfg_dir = run_root / "artifacts" / "workflow_cfg"
+                workflow_cfg_dir = artifact_run_root / "artifacts" / "workflow_cfg"
                 workflow_cfg_dir.mkdir(parents=True, exist_ok=True)
 
                 def _coerce_finite_float(value: object) -> float | None:
@@ -1743,49 +1874,54 @@ def _prepare_detect_records_with_minimal_ground_truth(
                         neg_content = {}
                         neg_payload_per_pair["content_evidence_payload"] = neg_content
 
-                    neg_status_value = neg_content.get("status")
-                    neg_score_value = _coerce_finite_float(neg_content.get("score"))
-                    if not (neg_status_value == "ok" and neg_score_value is not None):
-                        neg_score_parts_node = neg_content.get("score_parts")
-                        neg_score_parts = neg_score_parts_node if isinstance(neg_score_parts_node, dict) else {}
-                        neg_hf_trace_node = neg_score_parts.get("hf_detect_trace")
-                        neg_hf_trace = neg_hf_trace_node if isinstance(neg_hf_trace_node, dict) else {}
-                        recovery_candidates = [
-                            neg_content.get("score"),
-                            neg_content.get("detect_lf_score"),
-                            neg_content.get("detect_hf_score"),
-                            neg_content.get("lf_score"),
-                            neg_score_parts.get("content_score"),
-                            neg_score_parts.get("detect_lf_score"),
-                            neg_hf_trace.get("hf_score_raw"),
-                        ]
-                        recovered_score = None
-                        for candidate_value in recovery_candidates:
-                            numeric_candidate = _coerce_finite_float(candidate_value)
-                            if numeric_candidate is not None:
-                                recovered_score = numeric_candidate
-                                break
-                        if recovered_score is not None:
-                            neg_content["status"] = "ok"
-                            neg_content["score"] = float(recovered_score)
-                            neg_content["calibration_sample_origin"] = "dual_branch_negative_recovery"
-                            neg_content["calibration_sample_usage"] = "formal_with_dual_branch_negative_marker"
+                    if score_name == "content_score":
+                        neg_status_value = neg_content.get("status")
+                        neg_score_value = _coerce_finite_float(neg_content.get("score"))
+                        if not (neg_status_value == "ok" and neg_score_value is not None):
+                            neg_score_parts_node = neg_content.get("score_parts")
+                            neg_score_parts = neg_score_parts_node if isinstance(neg_score_parts_node, dict) else {}
+                            neg_hf_trace_node = neg_score_parts.get("hf_detect_trace")
+                            neg_hf_trace = neg_hf_trace_node if isinstance(neg_hf_trace_node, dict) else {}
+                            recovery_candidates = [
+                                neg_content.get("score"),
+                                neg_content.get("detect_lf_score"),
+                                neg_content.get("detect_hf_score"),
+                                neg_content.get("lf_score"),
+                                neg_score_parts.get("content_score"),
+                                neg_score_parts.get("detect_lf_score"),
+                                neg_hf_trace.get("hf_score_raw"),
+                            ]
+                            recovered_score = None
+                            for candidate_value in recovery_candidates:
+                                numeric_candidate = _coerce_finite_float(candidate_value)
+                                if numeric_candidate is not None:
+                                    recovered_score = numeric_candidate
+                                    break
+                            if recovered_score is not None:
+                                neg_content["status"] = "ok"
+                                neg_content["score"] = float(recovered_score)
+                                neg_content["calibration_sample_origin"] = "dual_branch_negative_recovery"
+                                neg_content["calibration_sample_usage"] = "formal_with_dual_branch_negative_marker"
 
-                    # 保证 dual-branch 负样本分数低于对应正样本，避免校准阈值退化到正负同值。
-                    pos_content_node = pos_payload.get("content_evidence_payload")
-                    pos_content = pos_content_node if isinstance(pos_content_node, dict) else {}
-                    pos_score_value = _coerce_finite_float(pos_content.get("score"))
-                    neg_score_value = _coerce_finite_float(neg_content.get("score"))
-                    if pos_score_value is not None and neg_score_value is not None and neg_score_value >= pos_score_value:
-                        adjusted_negative_score = float(pos_score_value - (pair_index + 1) * 1e-6)
-                        neg_content["score"] = adjusted_negative_score
-                        neg_content["calibration_score_adjustment_applied"] = True
-                        neg_content["calibration_score_adjustment_reason"] = (
-                            "dual_branch_negative_score_not_lower_than_positive"
-                        )
-                        neg_content["calibration_score_adjustment_delta"] = float(adjusted_negative_score - neg_score_value)
-                        if not isinstance(neg_content.get("calibration_sample_origin"), str):
-                            neg_content["calibration_sample_origin"] = "dual_branch_negative_score_adjusted_v1"
+                        # 保证 dual-branch 负样本分数低于对应正样本，避免校准阈值退化到正负同值。
+                        pos_content_node = pos_payload.get("content_evidence_payload")
+                        pos_content = pos_content_node if isinstance(pos_content_node, dict) else {}
+                        pos_score_value = _coerce_finite_float(pos_content.get("score"))
+                        neg_score_value = _coerce_finite_float(neg_content.get("score"))
+                        if pos_score_value is not None and neg_score_value is not None and neg_score_value >= pos_score_value:
+                            adjusted_negative_score = float(pos_score_value - (pair_index + 1) * 1e-6)
+                            neg_content["score"] = adjusted_negative_score
+                            neg_content["calibration_score_adjustment_applied"] = True
+                            neg_content["calibration_score_adjustment_reason"] = (
+                                "dual_branch_negative_score_not_lower_than_positive"
+                            )
+                            neg_content["calibration_score_adjustment_delta"] = float(adjusted_negative_score - neg_score_value)
+                            if not isinstance(neg_content.get("calibration_sample_origin"), str):
+                                neg_content["calibration_sample_origin"] = "dual_branch_negative_score_adjusted"
+                    elif score_name == "content_attestation_score":
+                        _ = _extract_content_attestation_score_from_detect_record(neg_payload_per_pair)
+                    else:
+                        raise ValueError(f"unsupported score_name: {score_name}")
 
                     if pair_count == 1:
                         pos_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_positive.json"
@@ -1795,12 +1931,12 @@ def _prepare_detect_records_with_minimal_ground_truth(
                         neg_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_negative_{pair_index:03d}.json"
 
                     _write_artifact_text_unbound(
-                        run_root,
+                        artifact_run_root,
                         pos_path,
                         json.dumps(pos_payload, ensure_ascii=False, indent=2),
                     )
                     _write_artifact_text_unbound(
-                        run_root,
+                        artifact_run_root,
                         neg_path,
                         json.dumps(neg_payload_per_pair, ensure_ascii=False, indent=2),
                     )
@@ -1809,7 +1945,7 @@ def _prepare_detect_records_with_minimal_ground_truth(
             print(f"[GT] WARN: Dual-branch aggregation failed: {type(exc).__name__}: {exc}", file=sys.stderr)
             print("[GT] Falling back to clone-based GT generation", file=sys.stderr)
 
-    workflow_cfg_dir = run_root / "artifacts" / "workflow_cfg"
+    workflow_cfg_dir = artifact_run_root / "artifacts" / "workflow_cfg"
     workflow_cfg_dir.mkdir(parents=True, exist_ok=True)
 
     for pair_index in range(pair_count):
@@ -1877,16 +2013,38 @@ def _prepare_detect_records_with_minimal_ground_truth(
             and negative_score_value is not None
         )
 
-        if negative_status_value == "ok" or recovered_from_failed_source:
-            if recovered_from_failed_source and negative_status_value != "ok":
-                negative_content["status"] = "ok"
-                negative_content["content_failure_reason"] = None
-            negative_content["score"] = float(-1.0 - pair_index * 1e-6)
+        if score_name == "content_score":
+            if negative_status_value == "ok" or recovered_from_failed_source:
+                if recovered_from_failed_source and negative_status_value != "ok":
+                    negative_content["status"] = "ok"
+                    negative_content["content_failure_reason"] = None
+                negative_content["score"] = float(-1.0 - pair_index * 1e-6)
+                negative_content["calibration_sample_usage"] = "synthetic_negative_for_ground_truth_closure"
+                if recovered_from_failed_source:
+                    negative_content["calibration_sample_origin"] = "synthetic_negative_bundle_from_failed_source"
+                else:
+                    negative_content["calibration_sample_origin"] = "synthetic_negative_bundle"
+        elif score_name == "content_attestation_score":
             negative_content["calibration_sample_usage"] = "synthetic_negative_for_ground_truth_closure"
-            if recovered_from_failed_source:
-                negative_content["calibration_sample_origin"] = "synthetic_negative_bundle_from_failed_source_v1"
-            else:
-                negative_content["calibration_sample_origin"] = "synthetic_negative_bundle_v1"
+            negative_content["calibration_sample_origin"] = "synthetic_negative_attestation_unavailable"
+            attestation_node = negative_payload.get("attestation")
+            if not isinstance(attestation_node, dict):
+                attestation_node = {}
+                negative_payload["attestation"] = attestation_node
+            image_evidence_node = attestation_node.get("image_evidence_result")
+            if not isinstance(image_evidence_node, dict):
+                image_evidence_node = {}
+                attestation_node["image_evidence_result"] = image_evidence_node
+            image_evidence_node["status"] = "absent"
+            image_evidence_node["content_attestation_score"] = None
+            final_decision_node = attestation_node.get("final_event_attested_decision")
+            if not isinstance(final_decision_node, dict):
+                final_decision_node = {}
+                attestation_node["final_event_attested_decision"] = final_decision_node
+            final_decision_node["status"] = "absent"
+            final_decision_node["is_event_attested"] = False
+        else:
+            raise ValueError(f"unsupported score_name: {score_name}")
 
         if isinstance(dual_branch_failure_reason, str) and dual_branch_failure_reason:
             negative_content["calibration_sample_usage"] = "synthetic_negative_for_ground_truth_closure"
@@ -1900,12 +2058,12 @@ def _prepare_detect_records_with_minimal_ground_truth(
             negative_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_negative_{pair_index:03d}.json"
 
         _write_artifact_text_unbound(
-            run_root,
+            artifact_run_root,
             positive_path,
             json.dumps(positive_payload, ensure_ascii=False, indent=2),
         )
         _write_artifact_text_unbound(
-            run_root,
+            artifact_run_root,
             negative_path,
             json.dumps(negative_payload, ensure_ascii=False, indent=2),
         )
@@ -1913,7 +2071,13 @@ def _prepare_detect_records_with_minimal_ground_truth(
     return str((workflow_cfg_dir / f"detect_records_{stage_name}_gt_*.json"))
 
 
-def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profile: str) -> Path:
+def _prepare_detect_record_for_scoring(
+    run_root: Path,
+    records_dir: Path,
+    profile: str,
+    score_name: str = "content_score",
+    output_run_root: Path | None = None,
+) -> Path:
     """
     功能：为校准/评估准备至少一个可用分数样本记录。 
 
@@ -1934,8 +2098,13 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
         raise TypeError("run_root must be Path")
     if not isinstance(records_dir, Path):
         raise TypeError("records_dir must be Path")
+    if not isinstance(score_name, str) or not score_name:
+        raise TypeError("score_name must be non-empty str")
+    if output_run_root is not None and not isinstance(output_run_root, Path):
+        raise TypeError("output_run_root must be Path or None")
 
     profile = _normalize_profile(profile)
+    artifact_run_root = output_run_root if output_run_root is not None else run_root
 
     source_detect_path = records_dir / "detect_record.json"
     if not source_detect_path.exists() or not source_detect_path.is_file():
@@ -1949,6 +2118,23 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
     if not isinstance(content_payload, dict):
         content_payload = {}
         payload["content_evidence_payload"] = content_payload
+
+    if score_name == "content_attestation_score":
+        attestation_score = _extract_content_attestation_score_from_detect_record(payload)
+        if attestation_score is not None:
+            return source_detect_path
+        if profile == PROFILE_PAPER_FULL_CUDA:
+            attestation_node = payload.get("attestation") if isinstance(payload.get("attestation"), dict) else {}
+            image_evidence = attestation_node.get("image_evidence_result") if isinstance(attestation_node.get("image_evidence_result"), dict) else {}
+            raise ValueError(
+                "[paper_full_cuda] attestation 正式统计链缺少可用 content_attestation_score，"
+                f"diagnostics={{'attestation_status': {image_evidence.get('status')!r}, "
+                f"'content_attestation_score': {image_evidence.get('content_attestation_score')!r}, "
+                f"'content_attestation_score_name': {image_evidence.get('content_attestation_score_name')!r}}}"
+            )
+        return source_detect_path
+    if score_name != "content_score":
+        raise ValueError(f"unsupported score_name: {score_name}")
 
     def _coerce_finite_float(value: object) -> float | None:
         if isinstance(value, bool):
@@ -1980,10 +2166,10 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
             content_payload["score"] = float(normalized_score_value)
             return source_detect_path
         content_payload["score"] = float(normalized_score_value)
-        normalized_detect_path = run_root / "artifacts" / "workflow_cfg" / "detect_record_for_scoring.json"
+        normalized_detect_path = artifact_run_root / "artifacts" / "workflow_cfg" / "detect_record_for_scoring.json"
         normalized_detect_path.parent.mkdir(parents=True, exist_ok=True)
         _write_artifact_text_unbound(
-            run_root,
+            artifact_run_root,
             normalized_detect_path,
             json.dumps(payload, ensure_ascii=False, indent=2)
         )
@@ -2003,8 +2189,9 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
     score_candidates = [
         ("content_evidence_payload.score", score_value),
         ("detect_lf_score", content_payload.get("detect_lf_score")),
-        ("detect_hf_score", content_payload.get("detect_hf_score")),
         ("lf_score", content_payload.get("lf_score")),
+        ("hf_score", content_payload.get("hf_score")),
+        ("detect_hf_score", content_payload.get("detect_hf_score")),
         ("score_parts.content_score", score_parts.get("content_score")),
         ("score_parts.detect_lf_score", score_parts.get("detect_lf_score")),
         (
@@ -2028,10 +2215,10 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
 
     if recovered_score is not None and status_ok:
         content_payload["score"] = float(recovered_score)
-        recovered_detect_path = run_root / "artifacts" / "workflow_cfg" / "detect_record_for_scoring.json"
+        recovered_detect_path = artifact_run_root / "artifacts" / "workflow_cfg" / "detect_record_for_scoring.json"
         recovered_detect_path.parent.mkdir(parents=True, exist_ok=True)
         _write_artifact_text_unbound(
-            run_root,
+            artifact_run_root,
             recovered_detect_path,
             json.dumps(payload, ensure_ascii=False, indent=2)
         )
@@ -2075,10 +2262,10 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
                 content_payload["calibration_score_recovery_source"] = recovered_field
                 content_payload["calibration_score_recovery_reason"] = "mask_extraction_no_input_with_hf_trace"
 
-                recovered_detect_path = run_root / "artifacts" / "workflow_cfg" / "detect_record_for_scoring.json"
+                recovered_detect_path = artifact_run_root / "artifacts" / "workflow_cfg" / "detect_record_for_scoring.json"
                 recovered_detect_path.parent.mkdir(parents=True, exist_ok=True)
                 _write_artifact_text_unbound(
-                    run_root,
+                    artifact_run_root,
                     recovered_detect_path,
                     json.dumps(payload, ensure_ascii=False, indent=2)
                 )
@@ -2128,6 +2315,8 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
 
         diagnostic_score = _coerce_finite_float(diagnostic_content_payload.get("detect_lf_score"))
         if diagnostic_score is None:
+            diagnostic_score = _coerce_finite_float(diagnostic_content_payload.get("hf_score"))
+        if diagnostic_score is None:
             diagnostic_score = _coerce_finite_float(diagnostic_content_payload.get("detect_hf_score"))
         if diagnostic_score is None:
             diagnostic_score = 0.0
@@ -2138,10 +2327,10 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
         diagnostic_content_payload["calibration_sample_origin"] = "sidecar_disabled_fallback"
         diagnostic_content_payload["calibration_sample_is_synthetic_fallback"] = True
 
-        diagnostic_detect_path = run_root / "artifacts" / "workflow_cfg" / "detect_record_for_calibration_diagnostic.json"
+        diagnostic_detect_path = artifact_run_root / "artifacts" / "workflow_cfg" / "detect_record_for_calibration_diagnostic.json"
         diagnostic_detect_path.parent.mkdir(parents=True, exist_ok=True)
         _write_artifact_text_unbound(
-            run_root,
+            artifact_run_root,
             diagnostic_detect_path,
             json.dumps(diagnostic_payload, ensure_ascii=False, indent=2)
         )
@@ -2156,10 +2345,10 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
         calibrated_content_payload.pop("calibration_sample_is_synthetic_fallback", None)
         calibrated_content_payload["calibration_sample_usage"] = "formal_with_sidecar_disabled_marker"
 
-        calibrated_detect_path = run_root / "artifacts" / "workflow_cfg" / "detect_record_for_calibration.json"
+        calibrated_detect_path = artifact_run_root / "artifacts" / "workflow_cfg" / "detect_record_for_calibration.json"
         calibrated_detect_path.parent.mkdir(parents=True, exist_ok=True)
         _write_artifact_text_unbound(
-            run_root,
+            artifact_run_root,
             calibrated_detect_path,
             json.dumps(calibrated_payload, ensure_ascii=False, indent=2)
         )
@@ -2177,14 +2366,160 @@ def _prepare_detect_record_for_scoring(run_root: Path, records_dir: Path, profil
     content_payload["content_failure_reason"] = None
     print("[onefile] CALIBRATION_PATCH_APPLIED scope=smoke_only detect_record_for_calibration")
 
-    calibrated_detect_path = run_root / "artifacts" / "workflow_cfg" / "detect_record_for_calibration.json"
+    calibrated_detect_path = artifact_run_root / "artifacts" / "workflow_cfg" / "detect_record_for_calibration.json"
     calibrated_detect_path.parent.mkdir(parents=True, exist_ok=True)
     _write_artifact_text_unbound(
-        run_root,
+        artifact_run_root,
         calibrated_detect_path,
         json.dumps(payload, ensure_ascii=False, indent=2)
     )
     return calibrated_detect_path
+
+
+def _build_statistics_chain_summary(chain_run_root: Path) -> dict:
+    """
+    功能：收集单条统计链的核心工件锚点与阈值摘要。
+
+    Collect artifact anchors and threshold summary for one statistics chain.
+
+    Args:
+        chain_run_root: Run root of one statistics chain.
+
+    Returns:
+        Summary mapping for the specified chain.
+    """
+    if not isinstance(chain_run_root, Path):
+        raise TypeError("chain_run_root must be Path")
+
+    thresholds_path = chain_run_root / "artifacts" / "thresholds" / "thresholds_artifact.json"
+    calibration_record_path = chain_run_root / "records" / "calibration_record.json"
+    evaluate_record_path = chain_run_root / "records" / "evaluate_record.json"
+    evaluation_report_path = chain_run_root / "artifacts" / "evaluation_report.json"
+
+    thresholds_obj = _load_optional_json_dict(thresholds_path)
+    calibration_record_obj = _load_optional_json_dict(calibration_record_path)
+    evaluate_record_obj = _load_optional_json_dict(evaluate_record_path)
+
+    calibration_summary = calibration_record_obj.get("calibration_summary")
+    if not isinstance(calibration_summary, dict):
+        calibration_summary = {}
+    metrics_obj = evaluate_record_obj.get("metrics")
+    if not isinstance(metrics_obj, dict):
+        metrics_obj = {}
+
+    return {
+        "run_root": str(chain_run_root),
+        "score_name": thresholds_obj.get("score_name") or calibration_summary.get("score_name") or metrics_obj.get("score_name"),
+        "threshold_id": thresholds_obj.get("threshold_id") or calibration_record_obj.get("threshold_id"),
+        "threshold_value": thresholds_obj.get("threshold_value") or calibration_summary.get("threshold_value") or metrics_obj.get("threshold_value"),
+        "threshold_key_used": thresholds_obj.get("threshold_key_used") or calibration_record_obj.get("threshold_key_used") or evaluate_record_obj.get("threshold_key_used"),
+        "thresholds_artifact_path": str(thresholds_path) if thresholds_path.exists() else None,
+        "calibration_record_path": str(calibration_record_path) if calibration_record_path.exists() else None,
+        "evaluate_record_path": str(evaluate_record_path) if evaluate_record_path.exists() else None,
+        "evaluation_report_path": str(evaluation_report_path) if evaluation_report_path.exists() else None,
+    }
+
+
+def _write_parallel_attestation_statistics_summary(run_root: Path, parallel_run_root: Path) -> None:
+    """
+    功能：写出 content 与 attestation 双统计链汇总锚点。
+
+    Write a workflow-level summary covering the primary and parallel attestation
+    statistics chains.
+
+    Args:
+        run_root: Main onefile run root.
+        parallel_run_root: Parallel attestation sub-run root.
+
+    Returns:
+        None.
+    """
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(parallel_run_root, Path):
+        raise TypeError("parallel_run_root must be Path")
+
+    summary_path = run_root / "artifacts" / "parallel_attestation_statistics_summary.json"
+    summary_obj = {
+        "summary_version": "v1",
+        "content_score_chain": _build_statistics_chain_summary(run_root),
+        "content_attestation_score_chain": _build_statistics_chain_summary(parallel_run_root),
+    }
+    _write_artifact_text_unbound(
+        run_root,
+        summary_path,
+        json.dumps(summary_obj, ensure_ascii=False, indent=2),
+    )
+
+
+def _run_parallel_attestation_statistics_workflow(
+    repo_root: Path,
+    run_root: Path,
+    cfg_path: Path,
+    profile: str,
+) -> None:
+    """
+    功能：执行并行 attestation 统计子流程。
+
+    Execute the parallel attestation calibration/evaluation subworkflow without
+    replacing the primary content_score chain.
+
+    Args:
+        repo_root: Repository root path.
+        run_root: Main onefile run root.
+        cfg_path: Effective runtime config path.
+        profile: Workflow profile.
+
+    Returns:
+        None.
+    """
+    if not isinstance(repo_root, Path):
+        raise TypeError("repo_root must be Path")
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(cfg_path, Path):
+        raise TypeError("cfg_path must be Path")
+
+    cfg_obj = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    if not isinstance(cfg_obj, dict):
+        raise ValueError("config root must be mapping")
+
+    parallel_cfg = _resolve_parallel_attestation_statistics_cfg(cfg_obj)
+    if not bool(parallel_cfg.get("enabled", False)):
+        return
+
+    parallel_run_root = _build_parallel_attestation_statistics_run_root(run_root)
+    calibrate_cfg_path = _prepare_stage_cfg_path(
+        "calibrate",
+        run_root,
+        cfg_path,
+        profile,
+        repo_root,
+        score_name_override=str(parallel_cfg.get("calibration_score_name")),
+        output_run_root=parallel_run_root,
+    )
+    calibrate_command = _build_stage_command("calibrate", parallel_run_root, calibrate_cfg_path, profile)
+    print(f"[onefile] Running parallel attestation calibrate: {' '.join(str(item) for item in calibrate_command)}")
+    calibrate_return = _run_subprocess_for_step(calibrate_command, repo_root)
+    if calibrate_return != 0:
+        raise RuntimeError(f"parallel attestation calibrate failed with return code {calibrate_return}")
+
+    evaluate_cfg_path = _prepare_stage_cfg_path(
+        "evaluate",
+        run_root,
+        cfg_path,
+        profile,
+        repo_root,
+        score_name_override=str(parallel_cfg.get("evaluate_score_name")),
+        output_run_root=parallel_run_root,
+    )
+    evaluate_command = _build_stage_command("evaluate", parallel_run_root, evaluate_cfg_path, profile)
+    print(f"[onefile] Running parallel attestation evaluate: {' '.join(str(item) for item in evaluate_command)}")
+    evaluate_return = _run_subprocess_for_step(evaluate_command, repo_root)
+    if evaluate_return != 0:
+        raise RuntimeError(f"parallel attestation evaluate failed with return code {evaluate_return}")
+
+    _write_parallel_attestation_statistics_summary(run_root, parallel_run_root)
 
 
 def _write_artifact_text_unbound(run_root: Path, path: Path, text: str) -> None:
@@ -3370,6 +3705,21 @@ def run_onefile_workflow(
                     f"[onefile] WARN: NP-threshold re-detect failed: {type(exc).__name__}: {exc}",
                     file=sys.stderr,
                 )
+
+        if step.name == "evaluate" and return_code == 0:
+            try:
+                _run_parallel_attestation_statistics_workflow(
+                    repo_root=repo_root,
+                    run_root=run_root,
+                    cfg_path=effective_cfg_path,
+                    profile=profile,
+                )
+            except Exception as exc:
+                print(
+                    f"[onefile] WARN: parallel attestation statistics failed: {type(exc).__name__}: {exc}",
+                    file=sys.stderr,
+                )
+                return 1
 
         # 在 detect 成功后验证 generation attestation（全 profile 执行，keys 由环境变量控制）。
         if step.name == "detect" and return_code == 0:

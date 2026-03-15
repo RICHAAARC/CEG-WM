@@ -417,6 +417,367 @@ def test_dual_branch_negative_cfg_disables_attestation_without_polluting_main_cf
     assert original_cfg["attestation"]["require_signed_bundle_verification"] is True
 
 
+def test_dual_branch_negative_cfg_preserves_attestation_when_requested(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：验证并行 attestation 统计链请求时，negative branch 会保留 attestation 配置与主路径 attestation 载荷。
+
+    Verify negative branch preserves attestation config and embed payload when
+    parallel attestation statistics require formal negative samples.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "paper_run"
+    (run_root / "records").mkdir(parents=True, exist_ok=True)
+    input_image_path = tmp_path / "clean_input.png"
+    input_image_path.write_bytes(b"png-bytes")
+    (run_root / "records" / "embed_record.json").write_text(
+        json.dumps(
+            {
+                "image_path": str(input_image_path),
+                "attestation": {
+                    "status": "ok",
+                    "statement": {"schema": "gen_attest_v1"},
+                    "signed_bundle": {"schema": "gen_attest_bundle_v1"},
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    cfg_obj = {
+        "paper_faithfulness": {
+            "enabled": True,
+            "alignment_check": True,
+        },
+        "attestation": {
+            "enabled": True,
+            "require_signed_bundle_verification": True,
+        },
+    }
+    cfg_path = tmp_path / "paper_cfg.yaml"
+    cfg_path.write_text(yaml.safe_dump(cfg_obj, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    def _fake_run_subprocess(cmd: list[str], cwd: Path) -> int:
+        _ = cwd
+        cmd_out = Path(cmd[cmd.index("--out") + 1])
+        records_dir = cmd_out / "records"
+        records_dir.mkdir(parents=True, exist_ok=True)
+        (records_dir / "detect_record.json").write_text(
+            json.dumps({"status": "ok"}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return 0
+
+    monkeypatch.setattr(module, "_run_subprocess_for_step", _fake_run_subprocess)
+
+    branch_neg_root, _ = module._run_dual_branch_embedding_and_detection(
+        repo_root=repo_root,
+        cfg_path=cfg_path,
+        run_root=run_root,
+        profile="paper_full_cuda",
+        preserve_attestation=True,
+    )
+
+    branch_cfg_path = branch_neg_root / "artifacts" / "workflow_cfg" / "branch_neg_profile.yaml"
+    branch_cfg = yaml.safe_load(branch_cfg_path.read_text(encoding="utf-8"))
+    negative_embed_record = json.loads((branch_neg_root / "records" / "embed_record.json").read_text(encoding="utf-8"))
+
+    assert branch_cfg["attestation"]["enabled"] is True
+    assert branch_cfg["attestation"]["require_signed_bundle_verification"] is True
+    assert isinstance(negative_embed_record.get("attestation"), dict)
+    assert negative_embed_record["attestation"]["statement"]["schema"] == "gen_attest_v1"
+
+
+def test_prepare_detect_records_with_attestation_score_rejects_detect_hf_recovery(tmp_path: Path) -> None:
+    """
+    功能：验证 attestation 统计链不会从 detect_hf_score 恢复正式负样本。
+
+    Verify attestation statistics do not recover formal negatives from
+    detect_hf_score.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+
+    source_detect_path = records_dir / "detect_record.json"
+    source_detect_path.write_text(
+        json.dumps(
+            {
+                "label": True,
+                "ground_truth": True,
+                "is_watermarked": True,
+                "attestation": {
+                    "image_evidence_result": {
+                        "status": "ok",
+                        "content_attestation_score": 0.93,
+                        "content_attestation_score_name": "content_attestation_score",
+                    }
+                },
+                "content_evidence_payload": {"status": "ok", "score": 0.91},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    branch_neg_detect_path = tmp_path / "branch_neg_detect_record.json"
+    branch_neg_detect_path.write_text(
+        json.dumps(
+            {
+                "label": False,
+                "ground_truth": False,
+                "is_watermarked": False,
+                "content_evidence_payload": {
+                    "status": "absent",
+                    "score": None,
+                    "detect_hf_score": 0.37,
+                },
+                "attestation": {
+                    "image_evidence_result": {
+                        "status": "absent",
+                        "content_attestation_score": None,
+                    }
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    glob_pattern = module._prepare_detect_records_with_minimal_ground_truth(
+        run_root=run_root,
+        source_detect_path=source_detect_path,
+        stage_name="calibrate",
+        pair_count=1,
+        branch_neg_detect_record=branch_neg_detect_path,
+        score_name="content_attestation_score",
+    )
+
+    generated_positive = Path(glob_pattern.replace("*", "positive"))
+    generated_negative = Path(glob_pattern.replace("*", "negative"))
+    positive_payload = json.loads(generated_positive.read_text(encoding="utf-8"))
+    negative_payload = json.loads(generated_negative.read_text(encoding="utf-8"))
+
+    negative_attestation = negative_payload.get("attestation")
+    assert isinstance(negative_attestation, dict)
+    assert negative_attestation["image_evidence_result"]["content_attestation_score"] is None
+
+    with pytest.raises(ValueError, match="content_attestation_score"):
+        load_scores_for_calibration(
+            [positive_payload, negative_payload],
+            cfg={
+                "calibration": {
+                    "exclude_formal_sidecar_disabled_marker": True,
+                    "exclude_synthetic_negative_closure_marker": True,
+                }
+            },
+            score_name="content_attestation_score",
+        )
+
+
+def test_parallel_attestation_statistics_workflow_writes_distinct_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：验证 onefile 会在主链之外并行写出独立 attestation 统计链工件与汇总。
+
+    Verify onefile writes distinct parallel attestation statistics artifacts and
+    workflow-level summary anchors without overwriting the primary chain.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    (run_root / "records").mkdir(parents=True, exist_ok=True)
+    (run_root / "artifacts" / "thresholds").mkdir(parents=True, exist_ok=True)
+    (run_root / "artifacts").mkdir(parents=True, exist_ok=True)
+    (run_root / "artifacts" / "branch_neg" / "records").mkdir(parents=True, exist_ok=True)
+
+    cfg_obj = {
+        "paper_faithfulness": {"enabled": True, "alignment_check": True},
+        "attestation": {"enabled": True, "require_signed_bundle_verification": True},
+        "calibration": {"score_name": "content_score", "minimal_ground_truth_pair_count": 1},
+        "evaluate": {"score_name": "content_score", "minimal_ground_truth_pair_count": 1},
+        "parallel_attestation_statistics": {
+            "enabled": True,
+            "calibration_score_name": "content_attestation_score",
+            "evaluate_score_name": "content_attestation_score",
+        },
+    }
+    cfg_path = tmp_path / "paper_cfg.yaml"
+    cfg_path.write_text(yaml.safe_dump(cfg_obj, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    (run_root / "records" / "detect_record.json").write_text(
+        json.dumps(
+            {
+                "label": True,
+                "ground_truth": True,
+                "is_watermarked": True,
+                "content_evidence_payload": {"status": "ok", "score": 0.91},
+                "attestation": {
+                    "image_evidence_result": {
+                        "status": "ok",
+                        "content_attestation_score": 0.89,
+                        "content_attestation_score_name": "content_attestation_score",
+                    }
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "artifacts" / "branch_neg" / "records" / "detect_record.json").write_text(
+        json.dumps(
+            {
+                "label": False,
+                "ground_truth": False,
+                "is_watermarked": False,
+                "content_evidence_payload": {"status": "ok", "score": 0.21},
+                "attestation": {
+                    "image_evidence_result": {
+                        "status": "ok",
+                        "content_attestation_score": 0.12,
+                        "content_attestation_score_name": "content_attestation_score",
+                    }
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    (run_root / "records" / "calibration_record.json").write_text(
+        json.dumps(
+            {
+                "threshold_id": "content_score_np_fpr_0_01",
+                "threshold_key_used": "fpr_0_01",
+                "calibration_summary": {
+                    "score_name": "content_score",
+                    "threshold_value": 0.5,
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "artifacts" / "thresholds" / "thresholds_artifact.json").write_text(
+        json.dumps(
+            {
+                "threshold_id": "content_score_np_fpr_0_01",
+                "score_name": "content_score",
+                "threshold_value": 0.5,
+                "threshold_key_used": "fpr_0_01",
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "records" / "evaluate_record.json").write_text(
+        json.dumps(
+            {
+                "threshold_key_used": "fpr_0_01",
+                "metrics": {"score_name": "content_score", "threshold_value": 0.5},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "artifacts" / "evaluation_report.json").write_text(
+        json.dumps({"evaluation_report": {"score_name": "content_score"}}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    def _fake_run_subprocess(cmd: list[str], cwd: Path) -> int:
+        _ = cwd
+        out_root = Path(cmd[cmd.index("--out") + 1])
+        config_path = Path(cmd[cmd.index("--config") + 1])
+        stage_cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        stage_name = "calibration" if "run_calibrate" in " ".join(cmd) else "evaluate"
+        score_name = stage_cfg[stage_name]["score_name"]
+        (out_root / "records").mkdir(parents=True, exist_ok=True)
+        (out_root / "artifacts" / "thresholds").mkdir(parents=True, exist_ok=True)
+        if stage_name == "calibration":
+            (out_root / "records" / "calibration_record.json").write_text(
+                json.dumps(
+                    {
+                        "threshold_id": f"{score_name}_np_fpr_0_01",
+                        "threshold_key_used": "fpr_0_01",
+                        "calibration_summary": {"score_name": score_name, "threshold_value": 0.42},
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            (out_root / "artifacts" / "thresholds" / "thresholds_artifact.json").write_text(
+                json.dumps(
+                    {
+                        "threshold_id": f"{score_name}_np_fpr_0_01",
+                        "score_name": score_name,
+                        "threshold_value": 0.42,
+                        "threshold_key_used": "fpr_0_01",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        else:
+            (out_root / "records" / "evaluate_record.json").write_text(
+                json.dumps(
+                    {
+                        "threshold_key_used": "fpr_0_01",
+                        "metrics": {"score_name": score_name, "threshold_value": 0.42},
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            (out_root / "artifacts" / "evaluation_report.json").write_text(
+                json.dumps({"evaluation_report": {"score_name": score_name}}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        return 0
+
+    monkeypatch.setattr(module, "_run_subprocess_for_step", _fake_run_subprocess)
+
+    module._run_parallel_attestation_statistics_workflow(
+        repo_root=repo_root,
+        run_root=run_root,
+        cfg_path=cfg_path,
+        profile="paper_full_cuda",
+    )
+
+    summary_path = run_root / "artifacts" / "parallel_attestation_statistics_summary.json"
+    summary_obj = json.loads(summary_path.read_text(encoding="utf-8"))
+    content_chain = summary_obj["content_score_chain"]
+    attestation_chain = summary_obj["content_attestation_score_chain"]
+
+    assert content_chain["score_name"] == "content_score"
+    assert attestation_chain["score_name"] == "content_attestation_score"
+    assert content_chain["threshold_id"] == "content_score_np_fpr_0_01"
+    assert attestation_chain["threshold_id"] == "content_attestation_score_np_fpr_0_01"
+    assert content_chain["thresholds_artifact_path"] != attestation_chain["thresholds_artifact_path"]
+
+
 def test_dual_branch_negative_hf_only_sample_survives_formal_calibration_filters(tmp_path: Path) -> None:
     """
     功能：验证 dual-branch 负样本可从 detect_hf_score 恢复并通过 formal 校准过滤。 
@@ -510,6 +871,45 @@ def test_dual_branch_negative_hf_only_sample_survives_formal_calibration_filters
     sampling_policy = strata["sampling_policy"]
     assert sampling_policy["n_rejected_formal_sidecar_marker"] == 1
     assert sampling_policy["n_selected_null"] == 1
+
+
+def test_prepare_detect_record_for_scoring_prefers_formal_hf_score_over_detect_hf_score(tmp_path: Path) -> None:
+    """
+    功能：验证 onefile 在存在正式 hf_score 时优先使用它，而不是 diagnostic detect_hf_score。
+
+    Verify onefile prefers formal hf_score over diagnostic detect_hf_score when both exist.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    (records_dir / "detect_record.json").write_text(
+        json.dumps(
+            {
+                "content_evidence_payload": {
+                    "status": "absent",
+                    "score": None,
+                    "hf_score": 0.73,
+                    "detect_hf_score": 0.37,
+                    "content_failure_reason": "formal_profile_sidecar_disabled",
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    output_path = module._prepare_detect_record_for_scoring(
+        run_root,
+        records_dir,
+        module.PROFILE_PAPER_FULL_CUDA,
+    )
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    content_payload = payload["content_evidence_payload"]
+    assert content_payload["score"] == 0.73
 
 
 def test_onefile_attestation_hook_reuses_embed_record_payload(tmp_path: Path) -> None:

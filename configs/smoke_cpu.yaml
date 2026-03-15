@@ -94,12 +94,14 @@ ablation:
 
 calibration:
   detect_records_glob: null
+  score_name: "content_score"  # smoke 默认仍校准主 content_score；切换并行 attestation 链时改为 "content_attestation_score"
   minimal_ground_truth_pair_count: 2
   minimal_ground_truth_prompts_file: "prompts/prompts_1.txt"
 
 evaluate:
   detect_records_glob: null
   thresholds_path: null
+  score_name: "content_score"  # 必须与 calibration.score_name 对齐
   minimal_ground_truth_pair_count: 2
   minimal_ground_truth_prompts_file: "prompts/prompts_1.txt"
 

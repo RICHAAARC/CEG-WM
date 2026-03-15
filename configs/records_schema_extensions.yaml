@@ -1095,6 +1095,41 @@ fields:
     missing_semantics: "absent_ok"
     description: "图像内证据层结果（事件条件化 LF/HF/GEO 分数与融合）。"
 
+  - path: "attestation.image_evidence_result.channel_scores_raw"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "图像内证据层原始通道分数（不参与 soften 前的原始值）。"
+
+  - path: "attestation.image_evidence_result.hf_attestation_score"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "HF attestation 原始得分（保留能量比）。"
+
+  - path: "attestation.image_evidence_result.hf_attestation_decision_score"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "HF attestation 判决得分（用于 attestation 内容判决）。"
+
+  - path: "attestation.image_evidence_result.content_attestation_score_name"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "当前 attestation 内容统计链所使用的得分名。"
+
+  - path: "attestation.image_evidence_result.content_attestation_score_semantics"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "attestation 内容得分的语义定义。"
+
   - path: "attestation.final_event_attested_decision"
     layer: "diagnostic"
     type: "json_dict"

@@ -90,6 +90,36 @@ def test_load_scores_for_calibration_optional_formal_sidecar_filter() -> None:
     assert strict_strata["sampling_policy"]["n_rejected_formal_sidecar_marker"] == 1
 
 
+def test_load_scores_for_calibration_attestation_does_not_recover_detect_hf_score() -> None:
+    """Validate attestation calibration never falls back to detect_hf_score."""
+    records = [
+        {
+            "label": True,
+            "attestation": {
+                "image_evidence_result": {
+                    "status": "ok",
+                    "content_attestation_score": 0.81,
+                    "content_attestation_score_name": "content_attestation_score",
+                }
+            },
+            "content_evidence_payload": {"status": "ok", "detect_hf_score": 0.05},
+        },
+        {
+            "label": False,
+            "attestation": {
+                "image_evidence_result": {
+                    "status": "absent",
+                    "content_attestation_score": None,
+                }
+            },
+            "content_evidence_payload": {"status": "ok", "detect_hf_score": 0.91},
+        },
+    ]
+
+    with pytest.raises(ValueError, match="content_attestation_score"):
+        load_scores_for_calibration(records, score_name="content_attestation_score")
+
+
 def test_load_thresholds_artifact_controlled_requires_fields(tmp_path: Path) -> None:
     """Validate missing required field detection for thresholds artifact."""
     artifact_path = tmp_path / "thresholds.json"
@@ -299,6 +329,36 @@ def test_run_calibrate_orchestrator_conditional_fpr_records_are_deterministic(tm
     record_b = run_calibrate_orchestrator(cfg, impl_set)
 
     assert record_a["threshold_metadata_artifact"]["conditional_fpr_records"] == record_b["threshold_metadata_artifact"]["conditional_fpr_records"]
+
+
+def test_evaluate_records_against_threshold_supports_content_attestation_score() -> None:
+    """Validate readonly evaluate supports the parallel content_attestation_score chain."""
+    records = [
+        {
+            "content_evidence_payload": {"status": "ok", "score": 0.1},
+            "attestation": {"image_evidence_result": {"status": "ok", "content_attestation_score": 0.9}},
+            "label": True,
+        },
+        {
+            "content_evidence_payload": {"status": "ok", "score": 0.8},
+            "attestation": {"image_evidence_result": {"status": "ok", "content_attestation_score": 0.2}},
+            "label": False,
+        },
+    ]
+    thresholds_obj = {
+        "threshold_id": "content_attestation_score_np_fpr_0_01",
+        "score_name": "content_attestation_score",
+        "target_fpr": 0.01,
+        "threshold_value": 0.5,
+        "threshold_key_used": "fpr_0_01",
+    }
+
+    metrics, breakdown, _ = evaluate_records_against_threshold(records, thresholds_obj)
+
+    assert metrics["score_name"] == "content_attestation_score"
+    assert metrics["tpr_at_fpr"] == pytest.approx(1.0)
+    assert metrics["fpr_empirical"] == pytest.approx(0.0)
+    assert breakdown["confusion"] == {"tp": 1, "fp": 0, "fn": 0, "tn": 1}
 
 
 def test_calibrate_label_balance_gate_rejects_empty_negative_set(tmp_path: Path) -> None:

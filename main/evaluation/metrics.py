@@ -252,6 +252,7 @@ def _extract_chain_status(record: Dict[str, Any], chain_name: str) -> Optional[s
 def compute_overall_metrics(
     records: List[Dict[str, Any]],
     threshold_value: float,
+    score_name: str = "content_score",
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     功能：计算 overall 指标（未分组）。
@@ -269,6 +270,8 @@ def compute_overall_metrics(
         raise TypeError("records must be list")
     if not isinstance(threshold_value, (int, float)):
         raise TypeError("threshold_value must be number")
+    if not isinstance(score_name, str) or not score_name:
+        raise TypeError("score_name must be non-empty str")
 
     threshold_float = float(threshold_value)
 
@@ -307,13 +310,13 @@ def compute_overall_metrics(
 
         n_total += 1
 
-        content_payload = item.get("content_evidence_payload")
-        if not isinstance(content_payload, dict):
+        score_value, score_status = _extract_score_value_for_metrics(item, score_name)
+        if score_status == "missing_content_payload":
             n_reject += 1
             reject_count_by_reason["missing_content_payload"] += 1
             continue
 
-        if content_payload.get("status") != "ok":
+        if score_status == "status_not_ok":
             n_reject += 1
             reject_count_by_reason["status_not_ok"] += 1
             content_status = _extract_chain_status(item, "content")
@@ -325,7 +328,6 @@ def compute_overall_metrics(
                 reject_count_by_reason["content_fail"] += 1
             continue
 
-        score_value = content_payload.get("score")
         if not isinstance(score_value, (int, float)):
             n_reject += 1
             reject_count_by_reason["invalid_score"] += 1
@@ -386,6 +388,7 @@ def compute_overall_metrics(
     }
 
     metrics = {
+        "score_name": score_name,
         "tpr_at_fpr": tpr_value,
         "tpr_at_fpr_primary": tpr_value,
         "fpr_empirical": fpr_empirical,
@@ -417,6 +420,7 @@ def compute_attack_group_metrics(
     records: List[Dict[str, Any]],
     threshold_value: float,
     protocol_spec: Dict[str, Any],
+    score_name: str = "content_score",
 ) -> List[Dict[str, Any]]:
     """
     功能：按 family::params_version 分组计算指标。
@@ -435,6 +439,8 @@ def compute_attack_group_metrics(
         raise TypeError("records must be list")
     if not isinstance(threshold_value, (int, float)):
         raise TypeError("threshold_value must be number")
+    if not isinstance(score_name, str) or not score_name:
+        raise TypeError("score_name must be non-empty str")
     if not isinstance(protocol_spec, dict):
         protocol_spec = {}
 
@@ -478,12 +484,12 @@ def compute_attack_group_metrics(
             group_stats["reject_count_by_reason"]["invalid_record"] += 1
             continue
 
-        content_payload = item.get("content_evidence_payload")
-        if not isinstance(content_payload, dict):
+        score_value, score_status = _extract_score_value_for_metrics(item, score_name)
+        if score_status == "missing_content_payload":
             group_stats["reject_count_by_reason"]["missing_content_payload"] += 1
             continue
 
-        if content_payload.get("status") != "ok":
+        if score_status == "status_not_ok":
             group_stats["reject_count_by_reason"]["status_not_ok"] += 1
             content_status = _extract_chain_status(item, "content")
             if content_status == "absent":
@@ -494,7 +500,6 @@ def compute_attack_group_metrics(
                 group_stats["reject_count_by_reason"]["content_fail"] += 1
             continue
 
-        score_value = content_payload.get("score")
         if not isinstance(score_value, (int, float)) or not np.isfinite(float(score_value)):
             group_stats["reject_count_by_reason"]["invalid_score"] += 1
             continue
@@ -588,7 +593,7 @@ def compute_attack_group_metrics(
     return result
 
 
-def compute_roc_curve(records: List[Dict[str, Any]]) -> Tuple[List[float], List[float], List[float]]:
+def compute_roc_curve(records: List[Dict[str, Any]], score_name: str = "content_score") -> Tuple[List[float], List[float], List[float]]:
     """
     功能：计算 ROC 曲线（多阈值扫描）。
 
@@ -605,15 +610,22 @@ def compute_roc_curve(records: List[Dict[str, Any]]) -> Tuple[List[float], List[
     """
     if not isinstance(records, list):
         raise TypeError("records must be list")
+    if not isinstance(score_name, str) or not score_name:
+        raise TypeError("score_name must be non-empty str")
 
     score_label_pairs: List[Tuple[float, bool]] = []
     for item in records:
         if not isinstance(item, dict):
             continue
-        content_payload = item.get("content_evidence_payload")
-        if not isinstance(content_payload, dict):
-            continue
-        score_value = content_payload.get("score")
+        if score_name == "content_score":
+            content_payload = item.get("content_evidence_payload")
+            if not isinstance(content_payload, dict):
+                continue
+            score_value = content_payload.get("score")
+        else:
+            score_value, score_status = _extract_score_value_for_metrics(item, score_name)
+            if score_status is not None:
+                continue
         if not isinstance(score_value, (int, float)):
             continue
         score_float = float(score_value)
@@ -728,12 +740,16 @@ def aggregate_metrics(
     threshold_value = thresholds_artifact.get("threshold_value")
     if not isinstance(threshold_value, (int, float)):
         raise ValueError("thresholds_artifact.threshold_value must be number")
+    score_name = thresholds_artifact.get("score_name", "content_score")
+    if not isinstance(score_name, str) or not score_name:
+        raise ValueError("thresholds_artifact.score_name must be non-empty str")
 
-    metrics_overall, breakdown = compute_overall_metrics(records, float(threshold_value))
+    metrics_overall, breakdown = compute_overall_metrics(records, float(threshold_value), score_name=score_name)
     metrics_by_attack_condition = compute_attack_group_metrics(
         records,
         float(threshold_value),
         attack_protocol,
+        score_name=score_name,
     )
     result = {
         "metrics_overall": metrics_overall,
@@ -741,7 +757,7 @@ def aggregate_metrics(
         "metrics_by_attack_condition": metrics_by_attack_condition,
     }
 
-    roc_fpr, roc_tpr, roc_thresholds = compute_roc_curve(records)
+    roc_fpr, roc_tpr, roc_thresholds = compute_roc_curve(records, score_name=score_name)
     auc_value = None
     if roc_fpr and roc_tpr:
         try:
@@ -761,3 +777,40 @@ def aggregate_metrics(
         result["quality_metrics"] = compute_quality_metrics_batch(image_pairs)
 
     return result
+
+
+def _extract_score_value_for_metrics(record: Dict[str, Any], score_name: str) -> Tuple[Optional[float], Optional[str]]:
+    if not isinstance(record, dict):
+        return None, "missing_content_payload"
+    if not isinstance(score_name, str) or not score_name:
+        raise TypeError("score_name must be non-empty str")
+
+    if score_name == "content_score":
+        content_payload = record.get("content_evidence_payload")
+        if not isinstance(content_payload, dict):
+            return None, "missing_content_payload"
+        if content_payload.get("status") != "ok":
+            return None, "status_not_ok"
+        score_value = content_payload.get("score")
+    elif score_name == "content_attestation_score":
+        attestation_node = record.get("attestation")
+        if not isinstance(attestation_node, dict):
+            return None, "status_not_ok"
+        image_evidence_result = attestation_node.get("image_evidence_result")
+        if not isinstance(image_evidence_result, dict):
+            return None, "status_not_ok"
+        if image_evidence_result.get("status") != "ok":
+            return None, "status_not_ok"
+        formal_score_name = image_evidence_result.get("content_attestation_score_name")
+        if isinstance(formal_score_name, str) and formal_score_name and formal_score_name != "content_attestation_score":
+            return None, "status_not_ok"
+        score_value = image_evidence_result.get("content_attestation_score")
+    else:
+        raise ValueError(f"unsupported score_name: {score_name}")
+
+    if not isinstance(score_value, (int, float)):
+        return None, None
+    score_float = float(score_value)
+    if not np.isfinite(score_float):
+        return None, None
+    return score_float, None

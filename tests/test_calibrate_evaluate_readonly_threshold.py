@@ -136,6 +136,48 @@ def test_evaluate_records_against_threshold_uses_readonly_threshold() -> None:
     assert isinstance(conditional_metrics["attack_group_metrics"], list)
 
 
+def test_evaluate_attestation_threshold_ignores_detect_hf_score_fallback() -> None:
+    """Validate attestation readonly evaluate never accepts detect_hf_score fallback."""
+    records = [
+        {
+            "attestation": {
+                "image_evidence_result": {
+                    "status": "ok",
+                    "content_attestation_score": 0.8,
+                    "content_attestation_score_name": "content_attestation_score",
+                }
+            },
+            "content_evidence_payload": {"status": "ok", "detect_hf_score": 0.1},
+            "label": True,
+        },
+        {
+            "attestation": {
+                "image_evidence_result": {
+                    "status": "absent",
+                    "content_attestation_score": None,
+                }
+            },
+            "content_evidence_payload": {"status": "ok", "detect_hf_score": 0.95},
+            "label": False,
+        },
+    ]
+    thresholds_obj = {
+        "threshold_id": "content_attestation_score_np_fpr_0_01",
+        "score_name": "content_attestation_score",
+        "target_fpr": 0.01,
+        "threshold_value": 0.5,
+        "threshold_key_used": "fpr_0_01",
+    }
+
+    metrics, breakdown, _ = evaluate_records_against_threshold(records, thresholds_obj)
+
+    assert metrics["n_total"] == 2
+    assert metrics["n_accepted"] == 1
+    assert metrics["n_rejected"] == 1
+    assert metrics["fpr_empirical"] is None
+    assert breakdown["confusion"] == {"tp": 1, "fp": 0, "fn": 0, "tn": 0}
+
+
 class _ExtractorRaiser:
     def extract(self, cfg):
         _ = cfg

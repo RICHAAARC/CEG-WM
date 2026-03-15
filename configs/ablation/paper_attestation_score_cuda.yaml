@@ -1,0 +1,173 @@
+# ==============================================================
+# Attestation score 专用配置（paper_attestation_score_cuda）
+# - 本文件用于在 paper_full_cuda 正式运行语义下，单独校准/评测
+#   content_attestation_score 统计链。
+# - 与 configs/paper_full_cuda.yaml 的核心运行语义保持一致；
+#   唯一目的，是把 calibration/evaluate 的统计得分入口切换到
+#   content_attestation_score，避免手工改动主配置。
+# - 若目标是默认主链统计，请继续使用 configs/paper_full_cuda.yaml。
+# ==============================================================
+
+policy_path: "content_np_geo_rescue"
+
+target_fpr: 0.01
+
+allow_nonempty_run_root: false
+allow_nonempty_run_root_reason: null
+
+device: "cuda"
+
+model_id: "stabilityai/stable-diffusion-3.5-medium"
+hf_revision: "main"
+pipeline_impl_id: "sd3_diffusers_real"
+pipeline_build_enabled: true
+
+inference_enabled: true
+inference_prompt: "a serene landscape with mountains and a lake"
+inference_prompt_file: "prompts/paper_small.txt"
+inference_num_steps: 28
+inference_guidance_scale: 7.0
+inference_height: 512
+inference_width: 512
+
+seed: null
+allow_threshold_fallback_for_tests: false
+
+trajectory_tap:
+  enabled: true
+  tensor_types: ["latent"]
+  module_paths: ["transformer"]
+  stats_precision_digits: 6
+
+paper_faithfulness:
+  enabled: true
+  alignment_check: true
+  check_pipeline_fingerprint: true
+  check_trajectory_digest: true
+
+watermark:
+  subspace:
+    enabled: true
+    timestep_start: 0
+    timestep_end: 27
+    trajectory_step_stride: 1
+    sample_count: 28
+    feature_dim: 128
+  lf:
+    enabled: true
+    variance: 1.5
+    ecc: "sparse_ldpc"
+    ecc_sparsity: 3
+    message_length: 64
+    coding_mode: "pseudogaussian_template_additive"
+    decoder: "matched_correlation"
+    bp_iterations: 100
+  hf:
+    enabled: true
+    selection: "attestation_conditioned_projection_tail"
+    tail_truncation_ratio: 0.1
+    tail_truncation_mode: "projection_tail_truncation"
+    tau: 2.0
+
+detect:
+  content:
+    enabled: true
+  geometry:
+    enabled: true
+    enable_attention_anchor: true
+    enable_align_invariance: true
+    attention_capture_max_layers: 8
+    attention_capture_layer_whitelist:
+      - "transformer_blocks.0.attn"
+      - "transformer_blocks.1.attn"
+      - "transformer_blocks.2.attn"
+      - "transformer_blocks.3.attn"
+      - "transformer_blocks.4.attn"
+      - "transformer_blocks.5.attn"
+      - "transformer_blocks.6.attn"
+      - "transformer_blocks.7.attn"
+    sync_primary_anchor_secondary: true
+    align_inverse_max_residual: 0.18
+    align_max_correspondence_count: 24
+    align_template_overlap_min: 0.70
+    align_recovered_sync_consistency_min: 0.55
+    align_recovered_anchor_consistency_min: 0.50
+  calibration_artifact_path: null
+
+enable_mask: true
+mask:
+  impl_id: "semantic_saliency_model"
+  saliency_source: "model"
+  semantic_model_source: "inspyrenet"
+  semantic_model_path: "models/inspyrenet/ckpt_base.pth"
+
+embed:
+  preview_generation:
+    enabled: true
+    artifact_rel_path: "preview/preview.png"
+
+ablation:
+  enable_content: null
+  enable_geometry: null
+  enable_anchor: null
+  enable_lf: null
+  enable_hf: null
+  lf_only: false
+  hf_only: false
+
+calibration:
+  detect_records_glob: null
+  score_name: "content_attestation_score"
+  minimal_ground_truth_pair_count: 100
+  minimal_ground_truth_prompts_file: "prompts/prompts_100.txt"
+  exclude_formal_sidecar_disabled_marker: true
+  exclude_synthetic_negative_closure_marker: true
+
+evaluate:
+  detect_records_glob: null
+  thresholds_path: null
+  score_name: "content_attestation_score"
+  minimal_ground_truth_pair_count: 100
+  minimal_ground_truth_prompts_file: "prompts/prompts_100.txt"
+  exclude_synthetic_negative_closure_marker: true
+
+parallel_attestation_statistics:
+  enabled: false  # 专用 ablation 模板自身即以 attestation 为主链，不再额外并行复制同链统计
+  calibration_score_name: "content_attestation_score"
+  evaluate_score_name: "content_attestation_score"
+
+impl:
+  content_extractor_id: "unified_content_extractor"
+  geometry_extractor_id: "attention_anchor_extractor"
+  fusion_rule_id: "fusion_neyman_pearson"
+  subspace_planner_id: "subspace_planner"
+  sync_module_id: "geometry_latent_sync_sd3"
+  hf_embedder_id: "high_freq_truncation_codec"
+  lf_coder_id: "low_freq_template_codec"
+  use_latent_per_step: true
+
+attestation:
+  enabled: true
+  k_master_env_var: "CEG_WM_K_MASTER"
+  k_prompt_env_var: "CEG_WM_K_PROMPT"
+  k_seed_env_var: "CEG_WM_K_SEED"
+  signature_algorithm: "ed25519"
+  signed_bundle_schema: "gen_attest_bundle_v1"
+  signer_certificate_schema: "gen_attest_signer_cert_v1"
+  require_signed_bundle_verification: true
+  threshold: 0.65
+  lf_weight: 0.5
+  hf_weight: 0.3
+  geo_weight: 0.2
+  decision_mode: "content_primary_geo_rescue"
+  rescue_band_delta_low: 0.05
+  geo_rescue_min_score: 0.3
+  use_trajectory_mix: false
+
+detect_runtime:
+  image_domain_sidecar_enabled: false
+
+experiment_matrix:
+  config_path: "configs/ablation/paper_attestation_score_cuda.yaml"
+  allow_failed_semantics_collection: true
+  seeds: [0, 1]

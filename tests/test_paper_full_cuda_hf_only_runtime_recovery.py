@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional
 import numpy as np
 
 from main.diffusion.sd3.trajectory_tap import LatentTrajectoryCache
+from main.cli import run_detect as run_detect_cli
 from main.registries.runtime_resolver import BuiltImplSet
 from main.watermarking.content_chain import high_freq_embedder
 from main.watermarking.content_chain.unified_content_extractor import UnifiedContentExtractor
@@ -299,6 +300,33 @@ def test_prepare_detect_record_for_scoring_accepts_hf_score_when_sidecar_disable
     assert content_payload.get("status") == "ok"
     assert content_payload.get("score") == 0.91
     assert content_payload.get("calibration_sample_usage") == "formal_with_sidecar_disabled_marker"
+
+
+def test_hf_truncation_baseline_payload_marks_detect_hf_score_as_diagnostic_only() -> None:
+    """
+    功能：验证 detect_hf_score fallback 会被明确标注为 diagnostic_only 语义。
+
+    Verify detect_hf_score fallback is explicitly marked as diagnostic-only in
+    the HF truncation baseline payload.
+    """
+    payload = run_detect_cli._build_hf_truncation_baseline_payload(  # pyright: ignore[reportPrivateUsage]
+        {
+            "detect_runtime_mode": "real",
+            "pipeline_runtime_meta": {"synthetic_pipeline": False},
+            "content_evidence_payload": {
+                "detect_hf_score": 0.77,
+            },
+        },
+        {
+            "paper_faithfulness": {"enabled": True},
+            "watermark": {"hf": {"enabled": True}},
+        },
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["score"] == 0.77
+    assert payload["score_source"] == "detect_record.content_evidence_payload.detect_hf_score:diagnostic_only"
+    assert payload["score_semantics"] == "diagnostic_detect_hf_score"
 
 
 def test_detect_runtime_mode_real_for_hf_only_when_sidecar_disabled(monkeypatch: Any) -> None:

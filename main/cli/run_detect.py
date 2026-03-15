@@ -283,7 +283,8 @@ def _build_hf_truncation_baseline_payload(record: Dict[str, Any], cfg: Dict[str,
     result: Dict[str, Any] = {
         "status": "absent",
         "score": None,
-        "score_source": "detect_record.content_evidence_payload.detect_hf_score",
+        "score_source": "detect_record.content_evidence_payload.hf_score",
+        "score_semantics": "formal_content_hf_score",
         "baseline_impl_id": "high_freq_truncation_codec_v2",
         "baseline_version": "v1",
         "baseline_absent_reason": "hf_truncation_score_unavailable",
@@ -318,9 +319,12 @@ def _build_hf_truncation_baseline_payload(record: Dict[str, Any], cfg: Dict[str,
         result["baseline_absent_reason"] = "hf_channel_disabled"
         return result
 
-    score_candidate = content_payload.get("detect_hf_score")
+    score_candidate = content_payload.get("hf_score")
     if not isinstance(score_candidate, (int, float)):
-        score_candidate = content_payload.get("hf_score")
+        score_candidate = content_payload.get("detect_hf_score")
+        if isinstance(score_candidate, (int, float)):
+            result["score_source"] = "detect_record.content_evidence_payload.detect_hf_score:diagnostic_only"
+            result["score_semantics"] = "diagnostic_detect_hf_score"
     if not isinstance(score_candidate, (int, float)):
         result["baseline_absent_reason"] = "hf_score_absent"
         return result
