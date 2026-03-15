@@ -9,6 +9,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import numpy as np
+
 from main.diffusion.sd3.trajectory_tap import LatentTrajectoryCache
 from main.registries.runtime_resolver import BuiltImplSet
 from main.watermarking.content_chain import high_freq_embedder
@@ -188,6 +190,69 @@ def test_build_hf_detect_evidence_records_attestation_projection_failure(monkeyp
     assert isinstance(summary, dict)
     assert summary.get("hf_attestation_status") == "failed"
     assert summary.get("hf_attestation_failure_reason") == "hf_attestation_projection_failed:RuntimeError"
+
+
+def test_build_hf_detect_evidence_emits_attestation_values_when_projection_succeeds(monkeypatch: Any) -> None:
+    """
+    功能：验证 HF attestation 投影成功时会真正产出可桥接的 attestation values。
+
+    Verify successful HF attestation projection emits canonical attestation values.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    monkeypatch.setattr(
+        detect_orchestrator.detector_scoring,
+        "resolve_detect_trajectory_latent_for_timestep",
+        lambda cache, timestep: (object(), "ok"),
+    )
+    monkeypatch.setattr(
+        high_freq_embedder,
+        "_prepare_hf_feature_vector",
+        lambda latent, basis: np.asarray([0.2, 0.4, 0.6], dtype=np.float32),
+    )
+    monkeypatch.setattr(
+        detect_orchestrator.channel_hf,
+        "compute_hf_basis_projection",
+        lambda feature_vector, basis: np.asarray([0.25, 0.5, 0.75], dtype=np.float32),
+    )
+
+    impl_set = BuiltImplSet(
+        content_extractor=object(),
+        geometry_extractor=object(),
+        fusion_rule=object(),
+        subspace_planner=object(),
+        sync_module=object(),
+        hf_embedder=_HfEmbedderDetectStub(),
+    )
+
+    evidence = detect_orchestrator._build_hf_detect_evidence(
+        impl_set=impl_set,
+        cfg={"__detect_trajectory_latent_cache__": object()},
+        cfg_digest="a" * 64,
+        plan_payload={
+            "plan": {
+                "hf_basis": {
+                    "trajectory_feature_spec": {"edit_timestep": 0},
+                }
+            }
+        },
+        plan_digest="b" * 64,
+        embed_time_plan_digest="b" * 64,
+        trajectory_evidence=None,
+    )
+
+    assert evidence.get("status") == "ok"
+    assert evidence.get("hf_attestation_status") == "ok"
+    assert evidence.get("hf_attestation_values") == [0.25, 0.5, 0.75]
+    assert evidence.get("hf_attestation_failure_reason") is None
+    summary = evidence.get("hf_evidence_summary")
+    assert isinstance(summary, dict)
+    assert summary.get("hf_attestation_status") == "ok"
+    assert summary.get("hf_attestation_failure_reason") is None
 
 
 def test_prepare_detect_record_for_scoring_accepts_hf_score_when_sidecar_disabled(tmp_path: Path) -> None:

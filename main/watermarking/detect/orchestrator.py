@@ -21,6 +21,7 @@ from main.core import digests
 from main.core import records_io
 from main.registries.runtime_resolver import BuiltImplSet
 from main.watermarking.content_chain import detector_scoring
+from main.watermarking.content_chain import channel_hf
 from main.watermarking.common.plan_digest_flow import verify_plan_digest
 from main.watermarking.content_chain.high_freq_embedder import (
     HighFreqTruncationCodec,
