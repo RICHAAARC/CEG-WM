@@ -414,6 +414,7 @@ def _build_detect_attestation_result(
         candidate_statement=candidate_statement,
         attestation_bundle=attestation_bundle if isinstance(attestation_bundle, dict) else None,
         content_evidence=content_evidence_payload if isinstance(content_evidence_payload, dict) else None,
+        cfg=cfg,
         hf_values=hf_values,
         geo_score=geo_score,
         lf_weight=float(attestation_cfg.get("lf_weight", 0.5)),
@@ -5577,6 +5578,7 @@ def verify_attestation(
     candidate_statement: Dict[str, Any],
     attestation_bundle: Optional[Dict[str, Any]] = None,
     content_evidence: Optional[Dict[str, Any]] = None,
+    cfg: Optional[Dict[str, Any]] = None,
     hf_values: Optional[Any] = None,
     lf_latent_features: Optional[Any] = None,
     geo_score: Optional[float] = None,
@@ -5623,6 +5625,8 @@ def verify_attestation(
         k_master: Master key (hex str) used for key derivation.
         candidate_statement: Dict representing the candidate attestation statement.
         content_evidence: Optional content detection evidence dict (for lf_score fallback).
+        cfg: Optional runtime configuration mapping used to derive canonical HF
+            truncation semantics for attestation.
         hf_values: Optional HF channel feature values for HF truncation attestation scoring.
         lf_latent_features: Optional LF latent features for attestation bit correlation.
         geo_score: Optional geometry chain score (0-1), passed through.
@@ -5806,6 +5810,7 @@ def verify_attestation(
                 k_hf=attest_keys.k_hf,
                 attestation_event_digest=attest_keys.event_binding_digest,
                 plan_digest=statement.plan_digest,
+                cfg=cfg,
             )
             if isinstance(hf_result.get("hf_attestation_trace"), dict):
                 hf_attestation_trace = cast(Dict[str, Any], hf_result.get("hf_attestation_trace"))

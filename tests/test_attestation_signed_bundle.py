@@ -21,6 +21,7 @@ from main.watermarking.provenance.attestation_statement import (
 from main.watermarking.provenance.key_derivation import derive_attestation_keys
 from main.watermarking.content_chain import channel_hf
 from main.watermarking.content_chain.high_freq_embedder import compute_hf_attestation_score
+from main.watermarking.content_chain import high_freq_embedder as high_freq_embedder_module
 from main.watermarking.detect import orchestrator as detect_orchestrator
 from main.cli import run_detect as run_detect_cli
 
@@ -28,6 +29,18 @@ _build_detect_attestation_result = detect_orchestrator._build_detect_attestation
 _build_hf_detect_evidence = detect_orchestrator._build_hf_detect_evidence  # pyright: ignore[reportPrivateUsage]
 verify_attestation = detect_orchestrator.verify_attestation
 _write_detect_attestation_artifact = run_detect_cli._write_detect_attestation_artifact  # pyright: ignore[reportPrivateUsage]
+
+
+def _build_hf_runtime_cfg(tail_truncation_ratio: float = 0.1) -> Dict[str, Any]:
+    return {
+        "watermark": {
+            "hf": {
+                "enabled": True,
+                "tail_truncation_ratio": tail_truncation_ratio,
+                "tail_truncation_mode": "projection_tail_truncation",
+            }
+        }
+    }
 
 
 def _build_statement() -> Dict[str, Any]:
@@ -414,6 +427,7 @@ def test_compute_hf_attestation_score_emits_trace_fields() -> None:
         k_hf="7" * 64,
         attestation_event_digest="8" * 64,
         plan_digest="9" * 64,
+        cfg=_build_hf_runtime_cfg(0.1),
     )
 
     trace = result.get("hf_attestation_trace")
@@ -423,7 +437,7 @@ def test_compute_hf_attestation_score_emits_trace_fields() -> None:
     assert trace.get("hf_attestation_challenge_digest")
     assert trace.get("hf_attestation_challenge_source") == "attestation_event_digest"
     assert trace.get("hf_attestation_plan_digest_used") == "9" * 64
-    assert trace.get("hf_attestation_threshold_percentile_applied") == 75.0
+    assert trace.get("hf_attestation_threshold_percentile_applied") == 90.0
     assert trace.get("hf_attestation_vector_length") == 8
     assert isinstance(retained_indices, list)
     assert trace.get("hf_attestation_retained_count") == len(retained_indices)
@@ -457,6 +471,7 @@ def test_verify_attestation_records_hf_trace_consistency_match() -> None:
         k_hf=attest_keys.k_hf,
         attestation_event_digest=attest_keys.event_binding_digest,
         plan_digest=payload["statement"]["plan_digest"],
+        cfg=_build_hf_runtime_cfg(0.1),
     )
     trace = expected.get("hf_attestation_trace")
     trace = cast(Dict[str, Any], expected.get("hf_attestation_trace"))
@@ -476,6 +491,7 @@ def test_verify_attestation_records_hf_trace_consistency_match() -> None:
                 "coeffs_retained_count": trace.get("hf_attestation_retained_count"),
             },
         },
+        cfg=_build_hf_runtime_cfg(0.1),
         hf_values=hf_values,
         detect_hf_plan_digest_used=payload["statement"]["plan_digest"],
     )
@@ -527,6 +543,7 @@ def test_verify_attestation_records_hf_trace_consistency_mismatch() -> None:
             "lf_score": 0.8,
             "hf_evidence_summary": detect_summary,
         },
+        cfg=_build_hf_runtime_cfg(0.2),
         hf_values=hf_values,
         detect_hf_plan_digest_used=payload["statement"]["plan_digest"],
     )
@@ -540,6 +557,89 @@ def test_verify_attestation_records_hf_trace_consistency_mismatch() -> None:
     assert trace_artifact.get("hf_attestation_threshold_match_status") == "mismatch"
     assert trace_artifact.get("hf_attestation_trace_consistency") == "mismatch"
     assert result.get("verdict") in {"attested", "mismatch", "absent"}
+
+
+def test_compute_hf_attestation_score_follows_canonical_tail_ratio_mapping() -> None:
+    """
+    功能：验证 attestation 侧 percentile 与 canonical tail_truncation_ratio 同步变化。 
+
+    Verify attestation percentile follows the canonical tail_truncation_ratio mapping.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    base = compute_hf_attestation_score(
+        hf_values=[-0.4, -0.7, 1.1, -2.5, -0.6, -0.1, 0.2, 1.0],
+        k_hf="7" * 64,
+        attestation_event_digest="8" * 64,
+        plan_digest="9" * 64,
+        cfg=_build_hf_runtime_cfg(0.1),
+    )
+    changed = compute_hf_attestation_score(
+        hf_values=[-0.4, -0.7, 1.1, -2.5, -0.6, -0.1, 0.2, 1.0],
+        k_hf="7" * 64,
+        attestation_event_digest="8" * 64,
+        plan_digest="9" * 64,
+        cfg=_build_hf_runtime_cfg(0.35),
+    )
+
+    base_trace = cast(Dict[str, Any], base.get("hf_attestation_trace"))
+    changed_trace = cast(Dict[str, Any], changed.get("hf_attestation_trace"))
+    assert base_trace.get("hf_attestation_threshold_percentile_applied") == 90.0
+    assert changed_trace.get("hf_attestation_threshold_percentile_applied") == 65.0
+
+
+def test_verify_attestation_records_hf_trace_consistency_match_with_canonical_percentile() -> None:
+    """
+    功能：验证 detect 与 attestation 复用同一 canonical HF cfg 时 percentile 一致。 
+
+    Verify detect and attestation share the same canonical HF percentile source.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    payload = _build_statement()
+    hf_values = np.asarray([0.5, -0.25, 1.5, -2.0, 0.25, 0.75, -0.5, 0.1], dtype=np.float32)
+    attest_keys = derive_attestation_keys(
+        "5" * 64,
+        payload["attestation_digest"],
+        trajectory_commit=payload["bundle"].get("trace_commit"),
+    )
+    shared_cfg = _build_hf_runtime_cfg(0.35)
+    detect_cfg = high_freq_embedder_module._build_hf_channel_cfg(  # pyright: ignore[reportPrivateUsage]
+        {
+            **shared_cfg,
+            "hf_attestation_key": attest_keys.k_hf,
+            "attestation_event_digest": attest_keys.event_binding_digest,
+            "plan_digest": payload["statement"]["plan_digest"],
+        }
+    )
+    _constrained_coeffs, detect_summary = channel_hf.apply_hf_truncation_constraint(hf_values, detect_cfg)
+    _ = _constrained_coeffs
+
+    result = verify_attestation(
+        k_master="5" * 64,
+        candidate_statement=payload["statement"],
+        attestation_bundle=payload["bundle"],
+        content_evidence={
+            "lf_score": 0.8,
+            "hf_evidence_summary": detect_summary,
+        },
+        cfg=shared_cfg,
+        hf_values=hf_values,
+        detect_hf_plan_digest_used=payload["statement"]["plan_digest"],
+    )
+
+    trace_artifact = cast(Dict[str, Any], result.get("_hf_attestation_trace_artifact"))
+    assert trace_artifact.get("detect_hf_threshold_percentile_applied") == 65.0
+    assert trace_artifact.get("hf_attestation_threshold_percentile_applied") == 65.0
+    assert trace_artifact.get("hf_attestation_threshold_match_status") == "ok"
 
 
 def test_write_detect_attestation_artifact_persists_hf_trace(monkeypatch: Any, tmp_path: Path) -> None:

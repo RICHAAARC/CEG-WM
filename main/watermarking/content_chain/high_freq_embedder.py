@@ -489,6 +489,7 @@ def compute_hf_attestation_score(
     *,
     attestation_event_digest: Optional[str] = None,
     plan_digest: Optional[str] = None,
+    cfg: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     功能：计算 HF 通道的 attestation 得分（tail-truncation 能量证据）。
@@ -505,6 +506,9 @@ def compute_hf_attestation_score(
         hf_values: HF feature values (list of float or numpy array).
         k_hf: HF attestation key token. Accepted for attestation-call binding,
             but not used to derive any keyed template or correlation codeword.
+        cfg: Optional runtime configuration mapping. When provided, the HF
+            truncation percentile is derived from the same canonical HF channel
+            configuration used by detect-side scoring.
 
     Returns:
         Dict with keys:
@@ -562,15 +566,14 @@ def compute_hf_attestation_score(
 
     coeffs = np.asarray(flat_hf, dtype=np.float32)
     n_compare = int(coeffs.shape[0])
-    threshold_percentile = 75.0
-    channel_cfg: Dict[str, Any] = {
-        "hf_threshold_percentile": threshold_percentile,
-        "hf_attestation_key": k_hf,
-    }
+    cfg_source: Dict[str, Any] = dict(cfg) if isinstance(cfg, dict) else {}
+    channel_cfg = _build_hf_channel_cfg(cfg_source)
+    channel_cfg["hf_attestation_key"] = k_hf
     if isinstance(attestation_event_digest, str) and attestation_event_digest:
         channel_cfg["attestation_event_digest"] = attestation_event_digest
     if isinstance(plan_digest, str) and plan_digest:
         channel_cfg["plan_digest"] = plan_digest
+    threshold_percentile = float(channel_cfg.get("hf_threshold_percentile", 90.0))
     constrained_coeffs, constraint_evidence = channel_hf.apply_hf_truncation_constraint(
         coeffs,
         channel_cfg,
