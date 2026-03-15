@@ -6,6 +6,7 @@ Module type: General module
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, cast
 
 import numpy as np
@@ -24,6 +25,7 @@ from main.watermarking.detect import orchestrator as detect_orchestrator
 from main.cli import run_detect as run_detect_cli
 
 _build_detect_attestation_result = detect_orchestrator._build_detect_attestation_result  # pyright: ignore[reportPrivateUsage]
+_build_hf_detect_evidence = detect_orchestrator._build_hf_detect_evidence  # pyright: ignore[reportPrivateUsage]
 verify_attestation = detect_orchestrator.verify_attestation
 _write_detect_attestation_artifact = run_detect_cli._write_detect_attestation_artifact  # pyright: ignore[reportPrivateUsage]
 
@@ -420,6 +422,7 @@ def test_compute_hf_attestation_score_emits_trace_fields() -> None:
     retained_indices = cast(list[int], trace.get("hf_attestation_retained_indices"))
     assert trace.get("hf_attestation_challenge_digest")
     assert trace.get("hf_attestation_challenge_source") == "attestation_event_digest"
+    assert trace.get("hf_attestation_plan_digest_used") == "9" * 64
     assert trace.get("hf_attestation_threshold_percentile_applied") == 75.0
     assert trace.get("hf_attestation_vector_length") == 8
     assert isinstance(retained_indices, list)
@@ -474,11 +477,14 @@ def test_verify_attestation_records_hf_trace_consistency_match() -> None:
             },
         },
         hf_values=hf_values,
+        detect_hf_plan_digest_used=payload["statement"]["plan_digest"],
     )
 
     trace_artifact = result.get("_hf_attestation_trace_artifact")
     trace_artifact = cast(Dict[str, Any], result.get("_hf_attestation_trace_artifact"))
     assert isinstance(trace_artifact, dict)
+    assert trace_artifact.get("detect_hf_plan_digest_used") == payload["statement"]["plan_digest"]
+    assert trace_artifact.get("hf_attestation_plan_digest_used") == payload["statement"]["plan_digest"]
     assert trace_artifact.get("hf_attestation_challenge_match_status") == "ok"
     assert trace_artifact.get("hf_attestation_threshold_match_status") == "ok"
     assert trace_artifact.get("hf_attestation_retained_count_match_status") == "ok"
@@ -522,11 +528,14 @@ def test_verify_attestation_records_hf_trace_consistency_mismatch() -> None:
             "hf_evidence_summary": detect_summary,
         },
         hf_values=hf_values,
+        detect_hf_plan_digest_used=payload["statement"]["plan_digest"],
     )
 
     trace_artifact = result.get("_hf_attestation_trace_artifact")
     trace_artifact = cast(Dict[str, Any], result.get("_hf_attestation_trace_artifact"))
     assert isinstance(trace_artifact, dict)
+    assert trace_artifact.get("detect_hf_plan_digest_used") == payload["statement"]["plan_digest"]
+    assert trace_artifact.get("hf_attestation_plan_digest_used") == payload["statement"]["plan_digest"]
     assert trace_artifact.get("hf_attestation_challenge_match_status") == "ok"
     assert trace_artifact.get("hf_attestation_threshold_match_status") == "mismatch"
     assert trace_artifact.get("hf_attestation_trace_consistency") == "mismatch"
@@ -576,3 +585,85 @@ def test_write_detect_attestation_artifact_persists_hf_trace(monkeypatch: Any, t
     trace_path = str((tmp_path / "artifacts" / "attestation" / "hf_attestation_trace.json")).replace("\\", "/")
     assert written[result_path] == record["attestation"]
     assert written[trace_path]["artifact_type"] == "hf_attestation_trace"
+
+
+def test_build_hf_detect_evidence_binds_canonical_plan_digest_locally() -> None:
+    """
+    功能：验证 detect 侧 HF challenge 仅在局部 runtime cfg 中绑定 canonical plan_digest。 
+
+    Verify detect-side HF evidence binds the canonical plan digest only in the
+    local HF runtime cfg.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    captured_cfg: Dict[str, Any] = {}
+
+    class _TrajectoryCacheStub:
+        def is_empty(self) -> bool:
+            return False
+
+        def get(self, step_index: int) -> Any:
+            if step_index != 0:
+                return None
+            return np.asarray([1.0], dtype=np.float32)
+
+        def available_steps(self) -> list[int]:
+            return [0]
+
+    class _HfEmbedderStub:
+        def detect(
+            self,
+            *,
+            latents_or_features: Any,
+            plan: Dict[str, Any] | None,
+            cfg: Dict[str, Any],
+            cfg_digest: str | None,
+            expected_plan_digest: str | None,
+        ) -> tuple[float, Dict[str, Any]]:
+            _ = latents_or_features
+            _ = plan
+            _ = cfg_digest
+            _ = expected_plan_digest
+            captured_cfg.update(cfg)
+            return 0.5, {
+                "status": "ok",
+                "hf_score": 0.5,
+                "hf_trace_digest": "a" * 64,
+                "hf_evidence_summary": {
+                    "hf_status": "ok",
+                },
+            }
+
+    cfg: Dict[str, Any] = {
+        "__detect_trajectory_latent_cache__": _TrajectoryCacheStub(),
+        "watermark": {
+            "hf": {"enabled": True},
+            "plan_digest": "1" * 64,
+        },
+    }
+    impl_set = cast(Any, SimpleNamespace(hf_embedder=_HfEmbedderStub()))
+
+    evidence = _build_hf_detect_evidence(
+        impl_set,
+        cfg,
+        cfg_digest=None,
+        plan_payload={
+            "hf_basis": {
+                "trajectory_feature_spec": {"edit_timestep": 0},
+            }
+        },
+        plan_digest="2" * 64,
+        embed_time_plan_digest="3" * 64,
+        trajectory_evidence=None,
+    )
+
+    assert evidence.get("status") == "ok"
+    assert captured_cfg.get("plan_digest") == "3" * 64
+    watermark_cfg = cast(Dict[str, Any], captured_cfg.get("watermark"))
+    assert watermark_cfg.get("plan_digest") == "3" * 64
+    assert cast(Dict[str, Any], cfg.get("watermark")).get("plan_digest") == "1" * 64
+    assert cfg.get("plan_digest") is None

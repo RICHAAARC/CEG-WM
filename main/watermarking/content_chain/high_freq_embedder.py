@@ -605,6 +605,7 @@ def compute_hf_attestation_score(
     hf_attestation_trace: Dict[str, Any] = {
         "status": "ok",
         "hf_attestation_score": hf_attestation_score,
+        "hf_attestation_plan_digest_used": plan_digest,
         "hf_attestation_challenge_digest": constraint_evidence.get("challenge_digest"),
         "hf_attestation_challenge_seed": int(constraint_evidence.get("challenge_seed", 0)),
         "hf_attestation_challenge_source": constraint_evidence.get("challenge_source"),

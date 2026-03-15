@@ -195,6 +195,38 @@ def _bind_detect_attestation_runtime_to_cfg(cfg: Dict[str, Any], attestation_con
     cfg["watermark"] = watermark_cfg
 
 
+def _build_detect_hf_runtime_cfg(cfg: Dict[str, Any], plan_digest: Optional[str]) -> Dict[str, Any]:
+    """
+    功能：为 detect 侧 HF challenge 构造局部运行时 cfg。 
+
+    Build a local runtime cfg for detect-side HF challenge derivation.
+
+    Args:
+        cfg: Base runtime configuration mapping.
+        plan_digest: Canonical plan digest to bind into the HF path.
+
+    Returns:
+        Copied cfg with HF-local plan digest binding applied.
+
+    Raises:
+        TypeError: If cfg is not a dict.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+
+    runtime_cfg = dict(cfg)
+    watermark_node = runtime_cfg.get("watermark")
+    watermark_cfg = cast(Dict[str, Any], watermark_node) if isinstance(watermark_node, dict) else {}
+    watermark_cfg = dict(watermark_cfg)
+
+    if isinstance(plan_digest, str) and plan_digest:
+        runtime_cfg["plan_digest"] = plan_digest
+        watermark_cfg["plan_digest"] = plan_digest
+
+    runtime_cfg["watermark"] = watermark_cfg
+    return runtime_cfg
+
+
 def _prepare_detect_attestation_context(cfg: Dict[str, Any], input_record: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """
     功能：为 detect 主链准备 attestation 条件化上下文。
@@ -391,6 +423,11 @@ def _build_detect_attestation_result(
             attestation_decision_mode=str(attestation_cfg.get("decision_mode", "content_primary_geo_rescue")),
             geo_rescue_band_delta_low=float(attestation_cfg.get("rescue_band_delta_low", 0.05)),
             geo_rescue_min_score=float(attestation_cfg.get("geo_rescue_min_score", 0.3)),
+        detect_hf_plan_digest_used=(
+            cfg.get("__detect_hf_plan_digest_used__")
+            if isinstance(cfg.get("__detect_hf_plan_digest_used__"), str) and cfg.get("__detect_hf_plan_digest_used__")
+            else None
+        ),
     )
     result["status"] = result.get("verdict")
     return result
@@ -426,6 +463,7 @@ def _merge_hf_attestation_trace(
     event_binding_digest: str,
     trace_commit: Optional[str],
     hf_score: Optional[float],
+    detect_hf_plan_digest_used: Optional[str] = None,
 ) -> Dict[str, Any] | None:
     if not isinstance(hf_trace, dict):
         return None
@@ -480,6 +518,7 @@ def _merge_hf_attestation_trace(
         "trace_commit": trace_commit,
         "hf_attestation_score": hf_score,
         **hf_trace,
+        "detect_hf_plan_digest_used": detect_hf_plan_digest_used,
         "detect_hf_challenge_digest": detect_hf_challenge_digest,
         "detect_hf_challenge_seed": detect_hf_challenge_seed,
         "detect_hf_challenge_source": detect_hf_challenge_source,
@@ -1164,6 +1203,7 @@ def run_detect_orchestrator(
     cfg.pop("__detect_attention_maps__", None)
     cfg.pop("__detect_self_attention_maps__", None)
     cfg.pop("__runtime_self_attention_maps__", None)
+    cfg.pop("__detect_hf_plan_digest_used__", None)
 
     plan_digest_mismatch_reason = plan_digest_reason if plan_digest_reason == "plan_digest_mismatch" else None
 
@@ -1459,10 +1499,14 @@ def _build_hf_detect_evidence(
         }
 
     expected_plan_digest = embed_time_plan_digest if isinstance(embed_time_plan_digest, str) and embed_time_plan_digest else plan_digest
+    cfg.pop("__detect_hf_plan_digest_used__", None)
+    hf_runtime_cfg = _build_detect_hf_runtime_cfg(cfg, expected_plan_digest)
+    if isinstance(expected_plan_digest, str) and expected_plan_digest:
+        cfg["__detect_hf_plan_digest_used__"] = expected_plan_digest
     detect_result = embedder.detect(
         latents_or_features=detect_latent,
         plan=plan_payload,
-        cfg=cfg,
+        cfg=hf_runtime_cfg,
         cfg_digest=cfg_digest,
         expected_plan_digest=expected_plan_digest,
     )
@@ -5545,6 +5589,7 @@ def verify_attestation(
     geo_rescue_band_delta_low: float = 0.05,
     geo_rescue_min_score: float = 0.3,
     lf_params: Optional[Dict[str, Any]] = None,
+    detect_hf_plan_digest_used: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     功能：验证图像是否来自一次真实生成事件（cryptographic generation attestation）。
@@ -5589,6 +5634,8 @@ def verify_attestation(
         geo_rescue_band_delta_low: Lower rescue-band width below attested_threshold.
         geo_rescue_min_score: Minimum geometry score required for rescue.
         lf_params: Optional LF parameter dict for attestation score computation.
+        detect_hf_plan_digest_used: Detect-side canonical plan digest used by
+            the HF challenge path.
 
     Returns:
         Dict with:
@@ -5938,6 +5985,7 @@ def verify_attestation(
         event_binding_digest=attest_keys.event_binding_digest,
         trace_commit=trace_commit,
         hf_score=s_hf,
+        detect_hf_plan_digest_used=detect_hf_plan_digest_used,
     )
     final_event_attested_decision = {
         "status": verdict,
