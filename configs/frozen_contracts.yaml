@@ -688,6 +688,9 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
     - attestation.image_evidence_result.content_attestation_score_name # attestation 内容统计链得分名。
     - attestation.image_evidence_result.content_attestation_score_semantics # attestation 内容得分语义。
     - attestation.final_event_attested_decision # 最终事件级 attestation 判决。
+    - attestation.final_event_attested_decision.event_attestation_score # 事件级 attestation 正式统计得分。
+    - attestation.final_event_attested_decision.event_attestation_score_name # 事件级 attestation 正式统计得分名。
+    - attestation.final_event_attested_decision.event_attestation_score_semantics # 事件级 attestation 正式统计得分语义。
     - content_evidence.score_parts.lf_status # LF 检测顶层状态。
     - content_evidence.score_parts.lf_detect_trace.bp_converge_status # LF BP 收敛状态诊断字段。
     - content_evidence.detect_hf_score_absent_reason # detect 侧 HF 分数缺失原因。

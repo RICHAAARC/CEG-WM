@@ -1139,6 +1139,27 @@ fields:
     missing_semantics: "absent_ok"
     description: "最终事件级 attestation 判决（真实性与图像证据联合）。"
 
+  - path: "attestation.final_event_attested_decision.event_attestation_score"
+    layer: "diagnostic"
+    type: "score_float"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "事件级 attestation 正式统计得分（event_attested 时继承内容分，否则在内容分存在时记为 0）。"
+
+  - path: "attestation.final_event_attested_decision.event_attestation_score_name"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "事件级 attestation 正式统计链所使用的得分名。"
+
+  - path: "attestation.final_event_attested_decision.event_attestation_score_semantics"
+    layer: "diagnostic"
+    type: "reason_string"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "事件级 attestation 正式统计得分的语义定义。"
+
   - path: "content_evidence.score_parts.lf_status"
     layer: "diagnostic"
     type: "reason_string"

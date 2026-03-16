@@ -185,8 +185,10 @@ score_audit_naming_rules:
   multi_score_field: "score_audit.content_scores_used"
   alternate_single_score_fields:
     - "score_audit.content_attestation_score_used"
+    - "score_audit.event_attestation_score_used"
   alternate_multi_score_fields:
     - "score_audit.content_attestation_scores_used"
+    - "score_audit.event_attestation_scores_used"
   rule: "单一得分使用单数，多个得分列表使用复数，避免同义字段。"
 
 # ------------------------------

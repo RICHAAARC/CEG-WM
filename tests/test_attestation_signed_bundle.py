@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Any, Dict, cast
 
 import numpy as np
+import pytest
 
 from main.watermarking.provenance.attestation_statement import (
     build_attestation_statement,
@@ -195,6 +196,8 @@ def test_verify_attestation_statement_only_cannot_become_event_attested() -> Non
     final_decision = result.get("final_event_attested_decision")
     assert isinstance(final_decision, dict)
     assert final_decision.get("is_event_attested") is False
+    assert final_decision.get("event_attestation_score") == pytest.approx(0.0)
+    assert final_decision.get("event_attestation_score_name") == "event_attestation_score"
 
 
 def test_verify_attestation_authentic_bundle_can_become_event_attested() -> None:
@@ -231,6 +234,8 @@ def test_verify_attestation_authentic_bundle_can_become_event_attested() -> None
     assert isinstance(final_decision, dict)
     assert final_decision.get("status") == "attested"
     assert final_decision.get("is_event_attested") is True
+    assert final_decision.get("event_attestation_score") == pytest.approx(result.get("content_attestation_score"))
+    assert final_decision.get("event_attestation_score_name") == "event_attestation_score"
 
 
 def test_build_detect_attestation_result_bridges_hf_attestation_values() -> None:
@@ -317,6 +322,9 @@ def test_verify_attestation_content_positive_not_dragged_by_low_geometry() -> No
     assert result.get("hf_attestation_decision_score") is None
     assert result.get("geo_rescue_applied") is False
     assert result.get("geo_not_used_reason") == "content_attestation_threshold_met"
+    final_decision = result.get("final_event_attested_decision")
+    assert isinstance(final_decision, dict)
+    assert final_decision.get("event_attestation_score") == pytest.approx(0.9)
 
 
 def test_verify_attestation_geometry_can_rescue_borderline_content() -> None:
@@ -348,6 +356,9 @@ def test_verify_attestation_geometry_can_rescue_borderline_content() -> None:
     assert result.get("content_attestation_score") == 0.62
     assert result.get("geo_rescue_eligible") is True
     assert result.get("geo_rescue_applied") is True
+    final_decision = result.get("final_event_attested_decision")
+    assert isinstance(final_decision, dict)
+    assert final_decision.get("event_attestation_score") == pytest.approx(0.62)
 
 
 def test_verify_attestation_geometry_cannot_rescue_below_gate() -> None:
@@ -410,6 +421,7 @@ def test_verify_attestation_geometry_cannot_replace_missing_content() -> None:
     final_decision = result.get("final_event_attested_decision")
     assert isinstance(final_decision, dict)
     assert final_decision.get("is_event_attested") is False
+    assert final_decision.get("event_attestation_score") is None
 
 
 def test_compute_hf_attestation_score_emits_trace_fields() -> None:

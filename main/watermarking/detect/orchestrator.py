@@ -3983,6 +3983,19 @@ def _extract_score_for_stats(record: Dict[str, Any], score_name: str) -> Optiona
         if isinstance(formal_score_name, str) and formal_score_name and formal_score_name != "content_attestation_score":
             return None
         score_value = image_evidence_result.get("content_attestation_score")
+    elif score_name == "event_attestation_score":
+        attestation_node = record.get("attestation")
+        if not isinstance(attestation_node, dict):
+            return None
+        attestation_payload = cast(Dict[str, Any], attestation_node)
+        final_decision_node = attestation_payload.get("final_event_attested_decision")
+        if not isinstance(final_decision_node, dict):
+            return None
+        final_decision = cast(Dict[str, Any], final_decision_node)
+        formal_score_name = final_decision.get("event_attestation_score_name")
+        if isinstance(formal_score_name, str) and formal_score_name and formal_score_name != "event_attestation_score":
+            return None
+        score_value = final_decision.get("event_attestation_score")
     else:
         raise ValueError(f"unsupported score_name: {score_name}")
 
@@ -5711,6 +5724,8 @@ def verify_attestation(
         - "verdict": "attested" | "mismatch" | "absent".
         - "fusion_score": float or None.
         - "content_attestation_score": float or None.
+                - "final_event_attested_decision": dict with the event-level verdict and
+                    readonly statistics score.
         - "channel_scores": dict with lf, hf, geo sub-scores.
         - "attestation_digest": d_A used for key derivation.
         - "statement": echoed candidate statement dict.
@@ -6076,6 +6091,13 @@ def verify_attestation(
         "is_event_attested": bool(verdict == "attested"),
         "authenticity_status": authenticity_status,
         "image_evidence_status": image_evidence_status,
+        "event_attestation_score": (
+            content_attestation_score
+            if verdict == "attested"
+            else (0.0 if content_attestation_score is not None else None)
+        ),
+        "event_attestation_score_name": "event_attestation_score",
+        "event_attestation_score_semantics": "content_attestation_score_if_event_attested_else_zero_when_content_score_present",
     }
 
     # (7) 构造审计摘要（可复算）。

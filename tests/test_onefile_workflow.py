@@ -600,11 +600,11 @@ def test_dual_branch_negative_embed_record_preserves_formal_plan_anchors(
     assert "injection_evidence" not in negative_embed_record
 
 
-def test_prepare_detect_records_with_attestation_score_rejects_detect_hf_recovery(tmp_path: Path) -> None:
+def test_prepare_detect_records_with_event_attestation_score_rejects_detect_hf_recovery(tmp_path: Path) -> None:
     """
     功能：验证 attestation 统计链不会从 detect_hf_score 恢复正式负样本。
 
-    Verify attestation statistics do not recover formal negatives from
+    Verify event-attestation statistics do not recover formal negatives from
     detect_hf_score.
     """
     repo_root = Path(__file__).resolve().parent.parent
@@ -626,7 +626,13 @@ def test_prepare_detect_records_with_attestation_score_rejects_detect_hf_recover
                         "status": "ok",
                         "content_attestation_score": 0.93,
                         "content_attestation_score_name": "content_attestation_score",
-                    }
+                    },
+                    "final_event_attested_decision": {
+                        "status": "attested",
+                        "is_event_attested": True,
+                        "event_attestation_score": 0.93,
+                        "event_attestation_score_name": "event_attestation_score",
+                    },
                 },
                 "content_evidence_payload": {"status": "ok", "score": 0.91},
             },
@@ -649,10 +655,13 @@ def test_prepare_detect_records_with_attestation_score_rejects_detect_hf_recover
                     "detect_hf_score": 0.37,
                 },
                 "attestation": {
-                    "image_evidence_result": {
+                    "image_evidence_result": {"status": "absent", "content_attestation_score": None},
+                    "final_event_attested_decision": {
                         "status": "absent",
-                        "content_attestation_score": None,
-                    }
+                        "is_event_attested": False,
+                        "event_attestation_score": None,
+                        "event_attestation_score_name": "event_attestation_score",
+                    },
                 },
             },
             ensure_ascii=False,
@@ -667,7 +676,7 @@ def test_prepare_detect_records_with_attestation_score_rejects_detect_hf_recover
         stage_name="calibrate",
         pair_count=1,
         branch_neg_detect_record=branch_neg_detect_path,
-        score_name="content_attestation_score",
+        score_name="event_attestation_score",
     )
 
     generated_positive = Path(glob_pattern.replace("*", "positive"))
@@ -677,9 +686,9 @@ def test_prepare_detect_records_with_attestation_score_rejects_detect_hf_recover
 
     negative_attestation = negative_payload.get("attestation")
     assert isinstance(negative_attestation, dict)
-    assert negative_attestation["image_evidence_result"]["content_attestation_score"] is None
+    assert negative_attestation["final_event_attested_decision"]["event_attestation_score"] is None
 
-    with pytest.raises(ValueError, match="content_attestation_score"):
+    with pytest.raises(ValueError, match="event_attestation_score"):
         load_scores_for_calibration(
             [positive_payload, negative_payload],
             cfg={
@@ -688,15 +697,15 @@ def test_prepare_detect_records_with_attestation_score_rejects_detect_hf_recover
                     "exclude_synthetic_negative_closure_marker": True,
                 }
             },
-            score_name="content_attestation_score",
+            score_name="event_attestation_score",
         )
 
 
-def test_prepare_detect_records_with_attestation_score_preserves_dual_branch_negative_record(tmp_path: Path) -> None:
+def test_prepare_detect_records_with_event_attestation_score_preserves_dual_branch_negative_record(tmp_path: Path) -> None:
     """
     功能：验证 attestation 统计链会透传 dual-branch negative detect record 的正式 attestation 结果。
 
-    Verify attestation statistics preserve the real dual-branch negative
+    Verify event-attestation statistics preserve the real dual-branch negative
     detect-record attestation result without rewriting it to synthetic absent.
     """
     repo_root = Path(__file__).resolve().parent.parent
@@ -718,7 +727,13 @@ def test_prepare_detect_records_with_attestation_score_preserves_dual_branch_neg
                         "status": "ok",
                         "content_attestation_score": 0.93,
                         "content_attestation_score_name": "content_attestation_score",
-                    }
+                    },
+                    "final_event_attested_decision": {
+                        "status": "attested",
+                        "is_event_attested": True,
+                        "event_attestation_score": 0.93,
+                        "event_attestation_score_name": "event_attestation_score",
+                    },
                 },
                 "content_evidence_payload": {"status": "ok", "score": 0.91},
             },
@@ -749,6 +764,8 @@ def test_prepare_detect_records_with_attestation_score_preserves_dual_branch_neg
                     "final_event_attested_decision": {
                         "status": "unattested",
                         "is_event_attested": False,
+                        "event_attestation_score": 0.0,
+                        "event_attestation_score_name": "event_attestation_score",
                     },
                 },
             },
@@ -764,7 +781,7 @@ def test_prepare_detect_records_with_attestation_score_preserves_dual_branch_neg
         stage_name="calibrate",
         pair_count=1,
         branch_neg_detect_record=branch_neg_detect_path,
-        score_name="content_attestation_score",
+        score_name="event_attestation_score",
     )
 
     generated_positive = Path(glob_pattern.replace("*", "positive"))
@@ -777,6 +794,7 @@ def test_prepare_detect_records_with_attestation_score_preserves_dual_branch_neg
     assert negative_attestation["image_evidence_result"]["status"] == "ok"
     assert negative_attestation["image_evidence_result"]["content_attestation_score"] == pytest.approx(0.14)
     assert negative_attestation["final_event_attested_decision"]["status"] == "unattested"
+    assert negative_attestation["final_event_attested_decision"]["event_attestation_score"] == pytest.approx(0.0)
 
     scores, strata = load_scores_for_calibration(
         [positive_payload, negative_payload],
@@ -786,11 +804,77 @@ def test_prepare_detect_records_with_attestation_score_preserves_dual_branch_neg
                 "exclude_synthetic_negative_closure_marker": True,
             }
         },
-        score_name="content_attestation_score",
+        score_name="event_attestation_score",
     )
 
-    assert scores == [pytest.approx(0.14)]
+    assert scores == [pytest.approx(0.0)]
     assert strata["global"]["n_valid"] == 1
+
+
+def test_prepare_detect_records_with_event_attestation_score_clone_fallback_does_not_rewrite_attestation_status(
+    tmp_path: Path,
+) -> None:
+    """
+    功能：验证 event_attestation_score 的 clone fallback 不再伪造 absent attestation。 
+
+    Verify clone fallback for event_attestation_score does not rewrite the
+    copied attestation verdict to a synthetic absent state.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+
+    source_detect_path = records_dir / "detect_record.json"
+    source_detect_path.write_text(
+        json.dumps(
+            {
+                "label": True,
+                "ground_truth": True,
+                "is_watermarked": True,
+                "attestation": {
+                    "image_evidence_result": {
+                        "status": "ok",
+                        "content_attestation_score": 0.93,
+                        "content_attestation_score_name": "content_attestation_score",
+                    },
+                    "final_event_attested_decision": {
+                        "status": "attested",
+                        "is_event_attested": True,
+                        "event_attestation_score": 0.93,
+                        "event_attestation_score_name": "event_attestation_score",
+                    },
+                },
+                "content_evidence_payload": {"status": "ok", "score": 0.91},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    glob_pattern = module._prepare_detect_records_with_minimal_ground_truth(
+        run_root=run_root,
+        source_detect_path=source_detect_path,
+        stage_name="calibrate",
+        pair_count=1,
+        branch_neg_detect_record=tmp_path / "missing_branch_neg_detect_record.json",
+        score_name="event_attestation_score",
+        dual_branch_failure_reason="RuntimeError: branch negative missing",
+    )
+
+    generated_negative = Path(glob_pattern.replace("*", "negative"))
+    negative_payload = json.loads(generated_negative.read_text(encoding="utf-8"))
+    negative_attestation = negative_payload.get("attestation")
+    assert isinstance(negative_attestation, dict)
+    final_decision = negative_attestation.get("final_event_attested_decision")
+    assert isinstance(final_decision, dict)
+    assert final_decision["status"] == "attested"
+    assert final_decision["is_event_attested"] is True
+    assert final_decision["event_attestation_score"] is None
+    assert negative_attestation["image_evidence_result"]["content_attestation_score"] == pytest.approx(0.93)
 
 
 def test_parallel_attestation_statistics_workflow_writes_distinct_artifacts(
@@ -819,8 +903,8 @@ def test_parallel_attestation_statistics_workflow_writes_distinct_artifacts(
         "evaluate": {"score_name": "content_score", "minimal_ground_truth_pair_count": 1},
         "parallel_attestation_statistics": {
             "enabled": True,
-            "calibration_score_name": "content_attestation_score",
-            "evaluate_score_name": "content_attestation_score",
+            "calibration_score_name": "event_attestation_score",
+            "evaluate_score_name": "event_attestation_score",
         },
     }
     cfg_path = tmp_path / "paper_cfg.yaml"
@@ -838,7 +922,13 @@ def test_parallel_attestation_statistics_workflow_writes_distinct_artifacts(
                         "status": "ok",
                         "content_attestation_score": 0.89,
                         "content_attestation_score_name": "content_attestation_score",
-                    }
+                    },
+                    "final_event_attested_decision": {
+                        "status": "attested",
+                        "is_event_attested": True,
+                        "event_attestation_score": 0.89,
+                        "event_attestation_score_name": "event_attestation_score",
+                    },
                 },
             },
             ensure_ascii=False,
@@ -858,7 +948,13 @@ def test_parallel_attestation_statistics_workflow_writes_distinct_artifacts(
                         "status": "ok",
                         "content_attestation_score": 0.12,
                         "content_attestation_score_name": "content_attestation_score",
-                    }
+                    },
+                    "final_event_attested_decision": {
+                        "status": "unattested",
+                        "is_event_attested": False,
+                        "event_attestation_score": 0.0,
+                        "event_attestation_score_name": "event_attestation_score",
+                    },
                 },
             },
             ensure_ascii=False,
@@ -976,12 +1072,12 @@ def test_parallel_attestation_statistics_workflow_writes_distinct_artifacts(
     summary_path = run_root / "artifacts" / "parallel_attestation_statistics_summary.json"
     summary_obj = json.loads(summary_path.read_text(encoding="utf-8"))
     content_chain = summary_obj["content_score_chain"]
-    attestation_chain = summary_obj["content_attestation_score_chain"]
+    attestation_chain = summary_obj["event_attestation_score_chain"]
 
     assert content_chain["score_name"] == "content_score"
-    assert attestation_chain["score_name"] == "content_attestation_score"
+    assert attestation_chain["score_name"] == "event_attestation_score"
     assert content_chain["threshold_id"] == "content_score_np_fpr_0_01"
-    assert attestation_chain["threshold_id"] == "content_attestation_score_np_fpr_0_01"
+    assert attestation_chain["threshold_id"] == "event_attestation_score_np_fpr_0_01"
     assert content_chain["thresholds_artifact_path"] != attestation_chain["thresholds_artifact_path"]
 
 

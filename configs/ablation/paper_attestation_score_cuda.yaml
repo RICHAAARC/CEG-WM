@@ -1,10 +1,10 @@
 # ==============================================================
 # 配置角色：attestation score 专用 paper 配置
 # - 本文件用于在 paper_full_cuda 正式运行语义下，单独校准/评测
-#   content_attestation_score 统计链。
+#   event_attestation_score 统计链。
 # - 与 configs/paper_full_cuda.yaml 的核心运行语义保持一致；
 #   唯一目的，是把 calibration/evaluate 的统计得分入口切换到
-#   content_attestation_score，避免手工改动主配置。
+#   event_attestation_score，避免手工改动主配置。
 # - 若目标是默认主链统计，请继续使用 configs/paper_full_cuda.yaml。
 # ==============================================================
 
@@ -117,7 +117,7 @@ ablation:
 
 calibration:
   detect_records_glob: null
-  score_name: "content_attestation_score"
+  score_name: "event_attestation_score"
   minimal_ground_truth_pair_count: 100
   minimal_ground_truth_prompts_file: "prompts/prompts_100.txt"
   exclude_formal_sidecar_disabled_marker: true
@@ -126,15 +126,15 @@ calibration:
 evaluate:
   detect_records_glob: null
   thresholds_path: null
-  score_name: "content_attestation_score"
+  score_name: "event_attestation_score"
   minimal_ground_truth_pair_count: 100
   minimal_ground_truth_prompts_file: "prompts/prompts_100.txt"
   exclude_synthetic_negative_closure_marker: true
 
 parallel_attestation_statistics:
   enabled: false  # 专用 ablation 模板自身即以 attestation 为主链，不再额外并行复制同链统计
-  calibration_score_name: "content_attestation_score"
-  evaluate_score_name: "content_attestation_score"
+  calibration_score_name: "event_attestation_score"
+  evaluate_score_name: "event_attestation_score"
 
 impl:
   content_extractor_id: "unified_content_extractor"

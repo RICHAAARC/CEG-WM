@@ -457,6 +457,35 @@ def test_schema_new_fields_registered() -> None:
     )
 
 
+def test_event_attestation_score_paths_registered() -> None:
+    """
+    功能：验证 event_attestation_score 相关字段完成 schema 与 contract 追加登记。
+
+    Validate event_attestation_score field paths are append-only registered in
+    both records_schema_extensions.yaml and frozen_contracts.yaml.
+    """
+    schema_path = _REPO_ROOT / "configs" / "records_schema_extensions.yaml"
+    contracts_path = _REPO_ROOT / "configs" / "frozen_contracts.yaml"
+
+    schema_obj = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+    contracts_obj = yaml.safe_load(contracts_path.read_text(encoding="utf-8"))
+
+    schema_fields = {
+        entry.get("path") for entry in schema_obj.get("fields", [])
+        if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+    }
+    registry_fields = set(contracts_obj.get("records_schema", {}).get("field_paths_registry", []))
+
+    required_paths = {
+        "attestation.final_event_attested_decision.event_attestation_score",
+        "attestation.final_event_attested_decision.event_attestation_score_name",
+        "attestation.final_event_attested_decision.event_attestation_score_semantics",
+    }
+
+    assert required_paths <= schema_fields
+    assert required_paths <= registry_fields
+
+
 # ---------------------------------------------------------------------------
 # （P1 修复）score_parts.lf_status 降级传播回归测试
 # ---------------------------------------------------------------------------

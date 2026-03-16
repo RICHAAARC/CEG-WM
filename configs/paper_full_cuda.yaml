@@ -4,7 +4,7 @@
 #   detection 与事件级 attestation 全部启用。
 # - 默认统计主链为 content_score，用于主 calibration/evaluate 闭环。
 # - 同时启用 parallel_attestation_statistics，在不替换主链的前提下，
-#   并行补齐 content_attestation_score 的正式统计闭环。
+#   并行补齐 event_attestation_score 的正式统计闭环。
 # - 若目标是“仅以 attestation 分数作为单一主统计链”运行，请使用
 #   configs/ablation/paper_attestation_score_cuda.yaml。
 # ==============================================================
@@ -122,7 +122,7 @@ ablation:
 
 calibration:
   detect_records_glob: null  # detect 记录 glob 路径；为空时由标准 workflow / CLI 基于当前 run_root 自动解析
-  score_name: "content_score"  # 默认统计主链；若需并行 attestation 统计链，可切为 "content_attestation_score"
+  score_name: "content_score"  # 默认统计主链；若需切换到事件级 attestation 正式统计链，可改为 "event_attestation_score"
   minimal_ground_truth_pair_count: 100  # onefile 最小 GT 闭环生成对数（positive/negative）；≥100 保证离散 FPR 粒度 1/100≤1%
   minimal_ground_truth_prompts_file: "prompts/prompts_100.txt"  # 100 条 prompt 驱动各对克隆样本的 inference_prompt 元数据多样性；run_id 唯一性已由代码层保证（P0-C 已落地）
   exclude_formal_sidecar_disabled_marker: true
@@ -138,8 +138,8 @@ evaluate:
 
 parallel_attestation_statistics:
   enabled: true  # paper onefile 主线保留 content_score，同时并行补齐 attestation 正式统计链
-  calibration_score_name: "content_attestation_score"
-  evaluate_score_name: "content_attestation_score"
+  calibration_score_name: "event_attestation_score"
+  evaluate_score_name: "event_attestation_score"
 
 impl:
   content_extractor_id: "unified_content_extractor"

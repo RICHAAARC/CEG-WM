@@ -43,6 +43,8 @@ PROFILE_CPU_SMOKE = "cpu_smoke"
 PROFILE_PAPER_FULL_CUDA = "paper_full_cuda"
 LEGACY_PROFILE_CPU_MIN = "cpu_min"
 LEGACY_PROFILE_CUDA_REAL = "cuda_real"
+CONTENT_ATTESTATION_SCORE_NAME = "content_attestation_score"
+EVENT_ATTESTATION_SCORE_NAME = "event_attestation_score"
 PAPER_FROZEN_CONFIG_PATH = REPO_ROOT / "configs" / "paper_full_cuda.yaml"
 PAPER_SPEC_CONFIG_PATH = REPO_ROOT / "configs" / "paper_faithfulness_spec.yaml"
 PAPER_FROZEN_IMPL_REQUIRED_FIELDS = ("sync_module_id", "geometry_extractor_id")
@@ -1297,7 +1299,7 @@ def _resolve_parallel_attestation_statistics_cfg(cfg_obj: dict) -> dict:
     evaluate_score_name = section_cfg.get("evaluate_score_name")
 
     if not isinstance(calibration_score_name, str) or not calibration_score_name:
-        calibration_score_name = "content_attestation_score"
+        calibration_score_name = EVENT_ATTESTATION_SCORE_NAME
     if not isinstance(evaluate_score_name, str) or not evaluate_score_name:
         evaluate_score_name = calibration_score_name
 
@@ -1337,6 +1339,42 @@ def _extract_content_attestation_score_from_detect_record(record: dict) -> float
         return None
 
     score_value = image_evidence_result.get("content_attestation_score")
+    if isinstance(score_value, bool) or not isinstance(score_value, (int, float)):
+        return None
+    score_float = float(score_value)
+    if not math.isfinite(score_float):
+        return None
+    return score_float
+
+
+def _extract_event_attestation_score_from_detect_record(record: dict) -> float | None:
+    """
+    功能：从 detect record 中提取正式 event_attestation_score。
+
+    Extract the formal event_attestation_score from a detect record.
+
+    Args:
+        record: Detect record mapping.
+
+    Returns:
+        Formal event-attestation statistics score when present and valid;
+        otherwise None.
+    """
+    if not isinstance(record, dict):
+        raise TypeError("record must be dict")
+
+    attestation_node = record.get("attestation")
+    if not isinstance(attestation_node, dict):
+        return None
+    final_decision = attestation_node.get("final_event_attested_decision")
+    if not isinstance(final_decision, dict):
+        return None
+
+    score_name = final_decision.get("event_attestation_score_name")
+    if isinstance(score_name, str) and score_name and score_name != EVENT_ATTESTATION_SCORE_NAME:
+        return None
+
+    score_value = final_decision.get("event_attestation_score")
     if isinstance(score_value, bool) or not isinstance(score_value, (int, float)):
         return None
     score_float = float(score_value)
@@ -1690,7 +1728,7 @@ def _prepare_stage_cfg_path(
                 run_root,
                 profile,
                 preserve_attestation=(
-                    resolved_score_name == "content_attestation_score"
+                    resolved_score_name in {CONTENT_ATTESTATION_SCORE_NAME, EVENT_ATTESTATION_SCORE_NAME}
                     or bool(parallel_attestation_cfg.get("enabled", False))
                 ),
             )
@@ -1967,8 +2005,10 @@ def _prepare_detect_records_with_minimal_ground_truth(
                             neg_content["calibration_score_adjustment_delta"] = float(adjusted_negative_score - neg_score_value)
                             if not isinstance(neg_content.get("calibration_sample_origin"), str):
                                 neg_content["calibration_sample_origin"] = "dual_branch_negative_score_adjusted"
-                    elif score_name == "content_attestation_score":
+                    elif score_name == CONTENT_ATTESTATION_SCORE_NAME:
                         _ = _extract_content_attestation_score_from_detect_record(neg_payload_per_pair)
+                    elif score_name == EVENT_ATTESTATION_SCORE_NAME:
+                        _ = _extract_event_attestation_score_from_detect_record(neg_payload_per_pair)
                     else:
                         raise ValueError(f"unsupported score_name: {score_name}")
 
@@ -2073,7 +2113,7 @@ def _prepare_detect_records_with_minimal_ground_truth(
                     negative_content["calibration_sample_origin"] = "synthetic_negative_bundle_from_failed_source"
                 else:
                     negative_content["calibration_sample_origin"] = "synthetic_negative_bundle"
-        elif score_name == "content_attestation_score":
+        elif score_name == CONTENT_ATTESTATION_SCORE_NAME:
             negative_content["calibration_sample_usage"] = "synthetic_negative_for_ground_truth_closure"
             negative_content["calibration_sample_origin"] = "synthetic_negative_attestation_unavailable"
             attestation_node = negative_payload.get("attestation")
@@ -2086,12 +2126,22 @@ def _prepare_detect_records_with_minimal_ground_truth(
                 attestation_node["image_evidence_result"] = image_evidence_node
             image_evidence_node["status"] = "absent"
             image_evidence_node["content_attestation_score"] = None
+        elif score_name == EVENT_ATTESTATION_SCORE_NAME:
+            negative_content["calibration_sample_usage"] = "synthetic_negative_for_ground_truth_closure"
+            negative_content["calibration_sample_origin"] = "synthetic_negative_event_attestation_unavailable"
+            attestation_node = negative_payload.get("attestation")
+            if not isinstance(attestation_node, dict):
+                attestation_node = {}
+                negative_payload["attestation"] = attestation_node
             final_decision_node = attestation_node.get("final_event_attested_decision")
             if not isinstance(final_decision_node, dict):
                 final_decision_node = {}
                 attestation_node["final_event_attested_decision"] = final_decision_node
-            final_decision_node["status"] = "absent"
-            final_decision_node["is_event_attested"] = False
+            final_decision_node["event_attestation_score"] = None
+            final_decision_node["event_attestation_score_name"] = EVENT_ATTESTATION_SCORE_NAME
+            final_decision_node["event_attestation_score_semantics"] = (
+                "content_attestation_score_if_event_attested_else_zero_when_content_score_present"
+            )
         else:
             raise ValueError(f"unsupported score_name: {score_name}")
 
@@ -2168,7 +2218,7 @@ def _prepare_detect_record_for_scoring(
         content_payload = {}
         payload["content_evidence_payload"] = content_payload
 
-    if score_name == "content_attestation_score":
+    if score_name == CONTENT_ATTESTATION_SCORE_NAME:
         attestation_score = _extract_content_attestation_score_from_detect_record(payload)
         if attestation_score is not None:
             return source_detect_path
@@ -2180,6 +2230,25 @@ def _prepare_detect_record_for_scoring(
                 f"diagnostics={{'attestation_status': {image_evidence.get('status')!r}, "
                 f"'content_attestation_score': {image_evidence.get('content_attestation_score')!r}, "
                 f"'content_attestation_score_name': {image_evidence.get('content_attestation_score_name')!r}}}"
+            )
+        return source_detect_path
+    if score_name == EVENT_ATTESTATION_SCORE_NAME:
+        attestation_score = _extract_event_attestation_score_from_detect_record(payload)
+        if attestation_score is not None:
+            return source_detect_path
+        if profile == PROFILE_PAPER_FULL_CUDA:
+            attestation_node = payload.get("attestation") if isinstance(payload.get("attestation"), dict) else {}
+            final_decision = (
+                attestation_node.get("final_event_attested_decision")
+                if isinstance(attestation_node.get("final_event_attested_decision"), dict)
+                else {}
+            )
+            raise ValueError(
+                "[paper_full_cuda] attestation 正式统计链缺少可用 event_attestation_score，"
+                f"diagnostics={{'final_event_status': {final_decision.get('status')!r}, "
+                f"'is_event_attested': {final_decision.get('is_event_attested')!r}, "
+                f"'event_attestation_score': {final_decision.get('event_attestation_score')!r}, "
+                f"'event_attestation_score_name': {final_decision.get('event_attestation_score_name')!r}}}"
             )
         return source_detect_path
     if score_name != "content_score":
@@ -2489,10 +2558,15 @@ def _write_parallel_attestation_statistics_summary(run_root: Path, parallel_run_
         raise TypeError("parallel_run_root must be Path")
 
     summary_path = run_root / "artifacts" / "parallel_attestation_statistics_summary.json"
+    parallel_chain_summary = _build_statistics_chain_summary(parallel_run_root)
+    parallel_score_name = parallel_chain_summary.get("score_name")
+    if not isinstance(parallel_score_name, str) or not parallel_score_name:
+        parallel_score_name = "parallel_attestation_statistics"
+
     summary_obj = {
         "summary_version": "v1",
         "content_score_chain": _build_statistics_chain_summary(run_root),
-        "content_attestation_score_chain": _build_statistics_chain_summary(parallel_run_root),
+        f"{parallel_score_name}_chain": parallel_chain_summary,
     }
     _write_artifact_text_unbound(
         run_root,

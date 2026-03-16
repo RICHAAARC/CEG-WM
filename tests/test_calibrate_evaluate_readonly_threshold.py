@@ -136,15 +136,16 @@ def test_evaluate_records_against_threshold_uses_readonly_threshold() -> None:
     assert isinstance(conditional_metrics["attack_group_metrics"], list)
 
 
-def test_evaluate_attestation_threshold_ignores_detect_hf_score_fallback() -> None:
-    """Validate attestation readonly evaluate never accepts detect_hf_score fallback."""
+def test_evaluate_event_attestation_threshold_ignores_detect_hf_score_fallback() -> None:
+    """Validate event-attestation readonly evaluate never accepts detect_hf_score fallback."""
     records = [
         {
             "attestation": {
-                "image_evidence_result": {
-                    "status": "ok",
-                    "content_attestation_score": 0.8,
-                    "content_attestation_score_name": "content_attestation_score",
+                "final_event_attested_decision": {
+                    "status": "attested",
+                    "is_event_attested": True,
+                    "event_attestation_score": 0.8,
+                    "event_attestation_score_name": "event_attestation_score",
                 }
             },
             "content_evidence_payload": {"status": "ok", "detect_hf_score": 0.1},
@@ -152,9 +153,11 @@ def test_evaluate_attestation_threshold_ignores_detect_hf_score_fallback() -> No
         },
         {
             "attestation": {
-                "image_evidence_result": {
+                "final_event_attested_decision": {
                     "status": "absent",
-                    "content_attestation_score": None,
+                    "is_event_attested": False,
+                    "event_attestation_score": None,
+                    "event_attestation_score_name": "event_attestation_score",
                 }
             },
             "content_evidence_payload": {"status": "ok", "detect_hf_score": 0.95},
@@ -162,8 +165,8 @@ def test_evaluate_attestation_threshold_ignores_detect_hf_score_fallback() -> No
         },
     ]
     thresholds_obj = {
-        "threshold_id": "content_attestation_score_np_fpr_0_01",
-        "score_name": "content_attestation_score",
+        "threshold_id": "event_attestation_score_np_fpr_0_01",
+        "score_name": "event_attestation_score",
         "target_fpr": 0.01,
         "threshold_value": 0.5,
         "threshold_key_used": "fpr_0_01",
