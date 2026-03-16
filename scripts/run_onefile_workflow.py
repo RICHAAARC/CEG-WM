@@ -1362,6 +1362,61 @@ def _build_parallel_attestation_statistics_run_root(run_root: Path) -> Path:
     return run_root / "outputs" / "parallel_attestation_statistics"
 
 
+def _copy_negative_branch_embed_anchors(
+    source_embed_record: dict[str, Any] | None,
+    negative_embed_record: dict[str, Any],
+    preserve_attestation: bool,
+) -> None:
+    """
+    功能：为 dual-branch negative embed record 复制最小 formal 锚点。
+
+    Copy the minimum embed-time formal anchors required by detect-mode
+    plan closure for dual-branch negative samples.
+
+    Args:
+        source_embed_record: Main branch embed record payload.
+        negative_embed_record: Negative branch embed record to mutate.
+        preserve_attestation: Whether attestation payload should be preserved.
+
+    Returns:
+        None.
+    """
+    if source_embed_record is None:
+        return
+    if not isinstance(source_embed_record, dict):
+        raise TypeError("source_embed_record must be dict or None")
+    if not isinstance(negative_embed_record, dict):
+        raise TypeError("negative_embed_record must be dict")
+    if not isinstance(preserve_attestation, bool):
+        raise TypeError("preserve_attestation must be bool")
+
+    for field_name in ["plan_digest", "cfg_digest", "basis_digest"]:
+        field_value = source_embed_record.get(field_name)
+        if isinstance(field_value, str) and field_value:
+            negative_embed_record[field_name] = field_value
+
+    seed_value = source_embed_record.get("seed")
+    if isinstance(seed_value, int):
+        negative_embed_record["seed"] = seed_value
+
+    for field_name in [
+        "subspace_planner_impl_identity",
+        "content_evidence",
+        "content_result",
+        "embed_trace",
+        "injection_evidence",
+    ]:
+        field_value = source_embed_record.get(field_name)
+        if isinstance(field_value, dict):
+            negative_embed_record[field_name] = json.loads(json.dumps(field_value, ensure_ascii=False))
+
+    if preserve_attestation:
+        for field_name in ["attestation", "attestation_statement", "attestation_bundle"]:
+            field_value = source_embed_record.get(field_name)
+            if isinstance(field_value, dict):
+                negative_embed_record[field_name] = json.loads(json.dumps(field_value, ensure_ascii=False))
+
+
 def _run_dual_branch_embedding_and_detection(
     repo_root: Path,
     cfg_path: Path,
@@ -1480,11 +1535,11 @@ def _run_dual_branch_embedding_and_detection(
         "is_watermarked": False,
         "negative_branch_note": "clean image copy for dual-branch calibration; no production embed orchestrator used",
     }
-    if preserve_attestation and isinstance(main_embed_record_obj, dict):
-        for field_name in ["attestation", "attestation_statement", "attestation_bundle"]:
-            field_value = main_embed_record_obj.get(field_name)
-            if isinstance(field_value, dict):
-                neg_embed_record[field_name] = json.loads(json.dumps(field_value, ensure_ascii=False))
+    _copy_negative_branch_embed_anchors(
+        main_embed_record_obj,
+        neg_embed_record,
+        preserve_attestation=preserve_attestation,
+    )
     neg_embed_record_path = neg_records_dir / "embed_record.json"
     _write_artifact_text_unbound(
         run_root,

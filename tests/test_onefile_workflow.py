@@ -494,6 +494,100 @@ def test_dual_branch_negative_cfg_preserves_attestation_when_requested(
     assert negative_embed_record["attestation"]["statement"]["schema"] == "gen_attest_v1"
 
 
+def test_dual_branch_negative_embed_record_preserves_formal_plan_anchors(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：验证 dual-branch negative embed record 会保留 detect formal path 所需的最小计划锚点。
+
+    Verify negative embed record preserves the minimum embed-time plan anchors
+    required by detect formal-path closure.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "paper_run"
+    (run_root / "records").mkdir(parents=True, exist_ok=True)
+    input_image_path = tmp_path / "clean_input.png"
+    input_image_path.write_bytes(b"png-bytes")
+    source_embed_record = {
+        "image_path": str(input_image_path),
+        "plan_digest": "a" * 64,
+        "cfg_digest": "b" * 64,
+        "basis_digest": "c" * 64,
+        "seed": 7,
+        "subspace_planner_impl_identity": {
+            "impl_id": "subspace_planner",
+            "impl_version": "v1",
+            "impl_digest": "d" * 64,
+        },
+        "content_evidence": {
+            "plan_digest": "a" * 64,
+            "mask_digest": "e" * 64,
+            "injection_site_spec": {
+                "injection_rule_summary": {
+                    "plan_digest": "a" * 64,
+                }
+            },
+        },
+        "embed_trace": {
+            "plan_digest": "a" * 64,
+            "injection_evidence": {
+                "plan_digest": "a" * 64,
+            },
+        },
+    }
+    (run_root / "records" / "embed_record.json").write_text(
+        json.dumps(source_embed_record, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    cfg_obj = {
+        "paper_faithfulness": {
+            "enabled": True,
+            "alignment_check": True,
+        },
+        "attestation": {
+            "enabled": False,
+            "require_signed_bundle_verification": False,
+        },
+    }
+    cfg_path = tmp_path / "paper_cfg.yaml"
+    cfg_path.write_text(yaml.safe_dump(cfg_obj, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    def _fake_run_subprocess(cmd: list[str], cwd: Path) -> int:
+        _ = cwd
+        cmd_out = Path(cmd[cmd.index("--out") + 1])
+        records_dir = cmd_out / "records"
+        records_dir.mkdir(parents=True, exist_ok=True)
+        (records_dir / "detect_record.json").write_text(
+            json.dumps({"status": "ok"}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return 0
+
+    monkeypatch.setattr(module, "_run_subprocess_for_step", _fake_run_subprocess)
+
+    branch_neg_root, _ = module._run_dual_branch_embedding_and_detection(
+        repo_root=repo_root,
+        cfg_path=cfg_path,
+        run_root=run_root,
+        profile="paper_full_cuda",
+        preserve_attestation=False,
+    )
+
+    negative_embed_record = json.loads((branch_neg_root / "records" / "embed_record.json").read_text(encoding="utf-8"))
+
+    assert negative_embed_record["plan_digest"] == "a" * 64
+    assert negative_embed_record["cfg_digest"] == "b" * 64
+    assert negative_embed_record["basis_digest"] == "c" * 64
+    assert negative_embed_record["seed"] == 7
+    assert negative_embed_record["subspace_planner_impl_identity"]["impl_id"] == "subspace_planner"
+    assert negative_embed_record["content_evidence"]["mask_digest"] == "e" * 64
+    assert negative_embed_record["embed_trace"]["plan_digest"] == "a" * 64
+
+
 def test_prepare_detect_records_with_attestation_score_rejects_detect_hf_recovery(tmp_path: Path) -> None:
     """
     功能：验证 attestation 统计链不会从 detect_hf_score 恢复正式负样本。
