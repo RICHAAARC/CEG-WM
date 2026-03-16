@@ -1414,7 +1414,8 @@ def _copy_negative_branch_embed_anchors(
     Args:
         source_embed_record: Main branch embed record payload.
         negative_embed_record: Negative branch embed record to mutate.
-        preserve_attestation: Whether attestation payload should be preserved.
+        preserve_attestation: Whether statement-only attestation provenance
+            should be preserved for the negative branch.
 
     Returns:
         None.
@@ -1443,10 +1444,23 @@ def _copy_negative_branch_embed_anchors(
             negative_embed_record[field_name] = json.loads(json.dumps(field_value, ensure_ascii=False))
 
     if preserve_attestation:
-        for field_name in ["attestation", "attestation_statement", "attestation_bundle"]:
-            field_value = source_embed_record.get(field_name)
-            if isinstance(field_value, dict):
-                negative_embed_record[field_name] = json.loads(json.dumps(field_value, ensure_ascii=False))
+        source_attestation_node = source_embed_record.get("attestation")
+        source_attestation = source_attestation_node if isinstance(source_attestation_node, dict) else {}
+        source_statement = source_attestation.get("statement")
+        if not isinstance(source_statement, dict):
+            source_statement = source_embed_record.get("attestation_statement")
+
+        if isinstance(source_statement, dict):
+            provenance_payload: dict[str, Any] = {
+                "statement": json.loads(json.dumps(source_statement, ensure_ascii=False)),
+            }
+
+            for field_name in ["attestation_digest", "event_binding_digest", "trace_commit"]:
+                field_value = source_attestation.get(field_name)
+                if isinstance(field_value, str) and field_value:
+                    provenance_payload[field_name] = field_value
+
+            negative_embed_record["negative_branch_source_attestation_provenance"] = provenance_payload
 
 
 def _run_dual_branch_embedding_and_detection(
@@ -2113,40 +2127,16 @@ def _prepare_detect_records_with_minimal_ground_truth(
                     negative_content["calibration_sample_origin"] = "synthetic_negative_bundle_from_failed_source"
                 else:
                     negative_content["calibration_sample_origin"] = "synthetic_negative_bundle"
-        elif score_name == CONTENT_ATTESTATION_SCORE_NAME:
-            negative_content["calibration_sample_usage"] = "synthetic_negative_for_ground_truth_closure"
-            negative_content["calibration_sample_origin"] = "synthetic_negative_attestation_unavailable"
-            attestation_node = negative_payload.get("attestation")
-            if not isinstance(attestation_node, dict):
-                attestation_node = {}
-                negative_payload["attestation"] = attestation_node
-            image_evidence_node = attestation_node.get("image_evidence_result")
-            if not isinstance(image_evidence_node, dict):
-                image_evidence_node = {}
-                attestation_node["image_evidence_result"] = image_evidence_node
-            image_evidence_node["status"] = "absent"
-            image_evidence_node["content_attestation_score"] = None
-        elif score_name == EVENT_ATTESTATION_SCORE_NAME:
-            negative_content["calibration_sample_usage"] = "synthetic_negative_for_ground_truth_closure"
-            negative_content["calibration_sample_origin"] = "synthetic_negative_event_attestation_unavailable"
-            attestation_node = negative_payload.get("attestation")
-            if not isinstance(attestation_node, dict):
-                attestation_node = {}
-                negative_payload["attestation"] = attestation_node
-            final_decision_node = attestation_node.get("final_event_attested_decision")
-            if not isinstance(final_decision_node, dict):
-                final_decision_node = {}
-                attestation_node["final_event_attested_decision"] = final_decision_node
-            final_decision_node["event_attestation_score"] = None
-            final_decision_node["event_attestation_score_name"] = EVENT_ATTESTATION_SCORE_NAME
-            final_decision_node["event_attestation_score_semantics"] = (
-                "content_attestation_score_if_event_attested_else_zero_when_content_score_present"
-            )
+        elif score_name in {CONTENT_ATTESTATION_SCORE_NAME, EVENT_ATTESTATION_SCORE_NAME}:
+            # attestation 统计链必须保持 detect record 正式字段透传，
+            # 不在 minimal_ground_truth 阶段伪造 absent / None 语义。
+            pass
         else:
             raise ValueError(f"unsupported score_name: {score_name}")
 
         if isinstance(dual_branch_failure_reason, str) and dual_branch_failure_reason:
-            negative_content["calibration_sample_usage"] = "synthetic_negative_for_ground_truth_closure"
+            if score_name == "content_score":
+                negative_content["calibration_sample_usage"] = "synthetic_negative_for_ground_truth_closure"
             negative_content["dual_branch_failure_reason"] = dual_branch_failure_reason
 
         if pair_count == 1:

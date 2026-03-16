@@ -13,6 +13,7 @@ import json
 
 import pytest
 import yaml
+from main.watermarking.detect import orchestrator as detect_orchestrator
 from main.watermarking.detect.orchestrator import load_scores_for_calibration
 
 
@@ -490,8 +491,141 @@ def test_dual_branch_negative_cfg_preserves_attestation_when_requested(
 
     assert branch_cfg["attestation"]["enabled"] is True
     assert branch_cfg["attestation"]["require_signed_bundle_verification"] is True
-    assert isinstance(negative_embed_record.get("attestation"), dict)
-    assert negative_embed_record["attestation"]["statement"]["schema"] == "gen_attest_v1"
+    assert negative_embed_record.get("attestation") is None
+    assert negative_embed_record.get("attestation_statement") is None
+    assert negative_embed_record.get("attestation_bundle") is None
+    provenance_payload = negative_embed_record.get("negative_branch_source_attestation_provenance")
+    assert isinstance(provenance_payload, dict)
+    assert provenance_payload["statement"]["schema"] == "gen_attest_v1"
+
+
+def test_negative_branch_attestation_provenance_is_not_consumed_by_formal_payload_extractor() -> None:
+    """
+    功能：验证 negative branch provenance 不会被 formal attestation payload 提取器直接消费。 
+
+    Verify negative-branch attestation provenance is invisible to the formal
+    attestation payload extractor.
+    """
+    input_record = {
+        "is_watermarked": False,
+        "negative_branch_source_attestation_provenance": {
+            "statement": {"schema": "gen_attest_v1"},
+            "attestation_digest": "a" * 64,
+            "event_binding_digest": "b" * 64,
+        },
+    }
+
+    formal_payload = detect_orchestrator._extract_input_attestation_payload(input_record)
+
+    assert formal_payload is None
+
+
+def test_negative_branch_statement_only_provenance_keeps_image_evidence_but_blocks_event_attestation() -> None:
+    """
+    功能：验证 negative branch 的 statement-only provenance 仅保留 image evidence，不会形成 event attestation。 
+
+    Verify negative-branch statement-only provenance preserves image evidence
+    while forcing the event-level verdict to remain unattested.
+    """
+    cfg = {
+        "attestation": {
+            "enabled": True,
+            "decision_mode": "content_primary_geo_rescue",
+            "lf_weight": 0.5,
+            "hf_weight": 0.3,
+            "geo_weight": 0.2,
+            "threshold": 0.65,
+        },
+        "__attestation_verify_k_master__": "5" * 64,
+    }
+    input_record = {
+        "is_watermarked": False,
+        "negative_branch_source_attestation_provenance": {
+            "statement": {
+                "schema": "gen_attest_v1",
+                "model_id": "m",
+                "prompt_commit": "1",
+                "seed_commit": "2",
+                "plan_digest": "3" * 21 + "3",
+                "event_nonce": "4",
+                "time_bucket": "2026-03-16T00",
+            },
+            "attestation_digest": "a" * 64,
+            "event_binding_digest": "b" * 64,
+        },
+    }
+    content_evidence_payload = {
+        "lf_score": 0.92,
+        "score_parts": {
+            "hf_attestation_values": [1.0, 0.5, 0.25, 0.125],
+        },
+        "hf_evidence_summary": {"hf_status": "ok"},
+    }
+
+    attestation_context = detect_orchestrator._prepare_detect_attestation_context(cfg, input_record)
+    result = detect_orchestrator._build_detect_attestation_result(
+        cfg=cfg,
+        attestation_context=attestation_context,
+        content_evidence_payload=content_evidence_payload,
+        geometry_evidence_payload=None,
+    )
+
+    assert attestation_context["attestation_source"] == "negative_branch_statement_only_provenance"
+    assert attestation_context["authenticity_status"] == "statement_only"
+    image_evidence_result = result.get("image_evidence_result")
+    assert isinstance(image_evidence_result, dict)
+    assert image_evidence_result.get("status") == "ok"
+    assert isinstance(image_evidence_result.get("content_attestation_score"), float)
+    final_decision = result.get("final_event_attested_decision")
+    assert isinstance(final_decision, dict)
+    assert final_decision.get("status") == "absent"
+    assert final_decision.get("is_event_attested") is False
+    assert final_decision.get("event_attestation_score") == pytest.approx(0.0)
+
+
+def test_negative_branch_statement_only_provenance_supports_low_event_attestation_statistics() -> None:
+    """
+    功能：验证 statement-only negative 可作为 event_attestation_score 正式低值样本进入校准。 
+
+    Verify statement-only negatives remain valid formal low-score samples for
+    event_attestation_score calibration.
+    """
+    records = [
+        {
+            "label": True,
+            "attestation": {
+                "final_event_attested_decision": {
+                    "status": "attested",
+                    "is_event_attested": True,
+                    "event_attestation_score": 0.81,
+                    "event_attestation_score_name": "event_attestation_score",
+                }
+            },
+        },
+        {
+            "label": False,
+            "attestation": {
+                "image_evidence_result": {
+                    "status": "ok",
+                    "content_attestation_score": 0.79,
+                    "content_attestation_score_name": "content_attestation_score",
+                },
+                "final_event_attested_decision": {
+                    "status": "absent",
+                    "is_event_attested": False,
+                    "event_attestation_score": 0.0,
+                    "event_attestation_score_name": "event_attestation_score",
+                    "authenticity_status": "statement_only",
+                },
+            },
+            "content_evidence_payload": {"status": "ok", "detect_hf_score": 0.95},
+        },
+    ]
+
+    scores, strata = load_scores_for_calibration(records, score_name="event_attestation_score")
+
+    assert scores == [pytest.approx(0.0)]
+    assert strata["global"]["n_valid"] == 1
 
 
 def test_dual_branch_negative_embed_record_preserves_formal_plan_anchors(
@@ -811,6 +945,94 @@ def test_prepare_detect_records_with_event_attestation_score_preserves_dual_bran
     assert strata["global"]["n_valid"] == 1
 
 
+def test_prepare_detect_records_with_content_attestation_score_clone_fallback_passes_through_formal_payload(
+    tmp_path: Path,
+) -> None:
+    """
+    功能：验证 content_attestation_score 的 clone fallback 不再伪造 absent attestation。 
+
+    Verify clone fallback for content_attestation_score keeps the copied formal
+    attestation payload unchanged instead of rewriting it to synthetic absent.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+
+    source_detect_path = records_dir / "detect_record.json"
+    source_detect_path.write_text(
+        json.dumps(
+            {
+                "label": True,
+                "ground_truth": True,
+                "is_watermarked": True,
+                "attestation": {
+                    "image_evidence_result": {
+                        "status": "ok",
+                        "content_attestation_score": 0.93,
+                        "content_attestation_score_name": "content_attestation_score",
+                    },
+                    "final_event_attested_decision": {
+                        "status": "attested",
+                        "is_event_attested": True,
+                        "event_attestation_score": 0.93,
+                        "event_attestation_score_name": "event_attestation_score",
+                    },
+                },
+                "content_evidence_payload": {"status": "ok", "score": 0.91},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    glob_pattern = module._prepare_detect_records_with_minimal_ground_truth(
+        run_root=run_root,
+        source_detect_path=source_detect_path,
+        stage_name="calibrate",
+        pair_count=1,
+        branch_neg_detect_record=tmp_path / "missing_branch_neg_detect_record.json",
+        score_name="content_attestation_score",
+        dual_branch_failure_reason="RuntimeError: branch negative missing",
+    )
+
+    generated_positive = Path(glob_pattern.replace("*", "positive"))
+    generated_negative = Path(glob_pattern.replace("*", "negative"))
+    positive_payload = json.loads(generated_positive.read_text(encoding="utf-8"))
+    negative_payload = json.loads(generated_negative.read_text(encoding="utf-8"))
+
+    negative_content = negative_payload.get("content_evidence_payload")
+    assert isinstance(negative_content, dict)
+    assert negative_content.get("calibration_sample_usage") is None
+    assert negative_content.get("calibration_sample_origin") is None
+    assert negative_content.get("dual_branch_failure_reason") == "RuntimeError: branch negative missing"
+
+    negative_attestation = negative_payload.get("attestation")
+    assert isinstance(negative_attestation, dict)
+    image_evidence_result = negative_attestation.get("image_evidence_result")
+    assert isinstance(image_evidence_result, dict)
+    assert image_evidence_result["status"] == "ok"
+    assert image_evidence_result["content_attestation_score"] == pytest.approx(0.93)
+
+    scores, strata = load_scores_for_calibration(
+        [positive_payload, negative_payload],
+        cfg={
+            "calibration": {
+                "exclude_formal_sidecar_disabled_marker": True,
+                "exclude_synthetic_negative_closure_marker": True,
+            }
+        },
+        score_name="content_attestation_score",
+    )
+
+    assert scores == [pytest.approx(0.93)]
+    assert strata["global"]["n_valid"] == 1
+    assert strata["sampling_policy"]["n_rejected_synthetic_negative_closure"] == 0
+
+
 def test_prepare_detect_records_with_event_attestation_score_clone_fallback_does_not_rewrite_attestation_status(
     tmp_path: Path,
 ) -> None:
@@ -866,15 +1088,92 @@ def test_prepare_detect_records_with_event_attestation_score_clone_fallback_does
     )
 
     generated_negative = Path(glob_pattern.replace("*", "negative"))
+    generated_positive = Path(glob_pattern.replace("*", "positive"))
+    positive_payload = json.loads(generated_positive.read_text(encoding="utf-8"))
     negative_payload = json.loads(generated_negative.read_text(encoding="utf-8"))
+
+    negative_content = negative_payload.get("content_evidence_payload")
+    assert isinstance(negative_content, dict)
+    assert negative_content.get("calibration_sample_usage") is None
+    assert negative_content.get("calibration_sample_origin") is None
+    assert negative_content.get("dual_branch_failure_reason") == "RuntimeError: branch negative missing"
+
     negative_attestation = negative_payload.get("attestation")
     assert isinstance(negative_attestation, dict)
     final_decision = negative_attestation.get("final_event_attested_decision")
     assert isinstance(final_decision, dict)
     assert final_decision["status"] == "attested"
     assert final_decision["is_event_attested"] is True
-    assert final_decision["event_attestation_score"] is None
+    assert final_decision["event_attestation_score"] == pytest.approx(0.93)
     assert negative_attestation["image_evidence_result"]["content_attestation_score"] == pytest.approx(0.93)
+
+    scores, strata = load_scores_for_calibration(
+        [positive_payload, negative_payload],
+        cfg={
+            "calibration": {
+                "exclude_formal_sidecar_disabled_marker": True,
+                "exclude_synthetic_negative_closure_marker": True,
+            }
+        },
+        score_name="event_attestation_score",
+    )
+
+    assert scores == [pytest.approx(0.93)]
+    assert strata["global"]["n_valid"] == 1
+    assert strata["sampling_policy"]["n_rejected_synthetic_negative_closure"] == 0
+
+
+def test_prepare_detect_records_with_content_score_clone_fallback_keeps_synthetic_negative_closure(
+    tmp_path: Path,
+) -> None:
+    """
+    功能：验证 content_score 主链的 clone fallback 继续保留 synthetic negative closure。 
+
+    Verify clone fallback for content_score keeps the existing synthetic
+    negative closure behavior unchanged.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+
+    source_detect_path = records_dir / "detect_record.json"
+    source_detect_path.write_text(
+        json.dumps(
+            {
+                "label": True,
+                "ground_truth": True,
+                "is_watermarked": True,
+                "content_evidence_payload": {"status": "ok", "score": 0.91},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    glob_pattern = module._prepare_detect_records_with_minimal_ground_truth(
+        run_root=run_root,
+        source_detect_path=source_detect_path,
+        stage_name="calibrate",
+        pair_count=1,
+        branch_neg_detect_record=tmp_path / "missing_branch_neg_detect_record.json",
+        score_name="content_score",
+        dual_branch_failure_reason="RuntimeError: branch negative missing",
+    )
+
+    generated_negative = Path(glob_pattern.replace("*", "negative"))
+    negative_payload = json.loads(generated_negative.read_text(encoding="utf-8"))
+    negative_content = negative_payload.get("content_evidence_payload")
+    assert isinstance(negative_content, dict)
+    assert negative_content["status"] == "ok"
+    assert negative_content["score"] == pytest.approx(-1.0)
+    assert negative_content["calibration_sample_usage"] == "synthetic_negative_for_ground_truth_closure"
+    assert negative_content["calibration_sample_origin"] == "synthetic_negative_bundle"
+    assert negative_content["dual_branch_failure_reason"] == "RuntimeError: branch negative missing"
+
 
 
 def test_parallel_attestation_statistics_workflow_writes_distinct_artifacts(

@@ -181,6 +181,56 @@ def test_evaluate_event_attestation_threshold_ignores_detect_hf_score_fallback()
     assert breakdown["confusion"] == {"tp": 1, "fp": 0, "fn": 0, "tn": 0}
 
 
+def test_evaluate_event_attestation_threshold_accepts_statement_only_negative_zero_score() -> None:
+    """Validate readonly evaluate treats statement-only negatives as formal zero-score samples."""
+    records = [
+        {
+            "attestation": {
+                "final_event_attested_decision": {
+                    "status": "attested",
+                    "is_event_attested": True,
+                    "event_attestation_score": 0.8,
+                    "event_attestation_score_name": "event_attestation_score",
+                }
+            },
+            "label": True,
+        },
+        {
+            "attestation": {
+                "image_evidence_result": {
+                    "status": "ok",
+                    "content_attestation_score": 0.76,
+                    "content_attestation_score_name": "content_attestation_score",
+                },
+                "final_event_attested_decision": {
+                    "status": "absent",
+                    "is_event_attested": False,
+                    "event_attestation_score": 0.0,
+                    "event_attestation_score_name": "event_attestation_score",
+                    "authenticity_status": "statement_only",
+                }
+            },
+            "content_evidence_payload": {"status": "ok", "detect_hf_score": 0.95},
+            "label": False,
+        },
+    ]
+    thresholds_obj = {
+        "threshold_id": "event_attestation_score_np_fpr_0_01",
+        "score_name": "event_attestation_score",
+        "target_fpr": 0.01,
+        "threshold_value": 0.5,
+        "threshold_key_used": "fpr_0_01",
+    }
+
+    metrics, breakdown, _ = evaluate_records_against_threshold(records, thresholds_obj)
+
+    assert metrics["n_total"] == 2
+    assert metrics["n_accepted"] == 2
+    assert metrics["n_rejected"] == 0
+    assert metrics["fpr_empirical"] == pytest.approx(0.0)
+    assert breakdown["confusion"] == {"tp": 1, "fp": 0, "fn": 0, "tn": 1}
+
+
 class _ExtractorRaiser:
     def extract(self, cfg):
         _ = cfg

@@ -123,6 +123,46 @@ def test_load_scores_for_calibration_event_attestation_does_not_recover_detect_h
         load_scores_for_calibration(records, score_name="event_attestation_score")
 
 
+def test_load_scores_for_calibration_event_attestation_accepts_statement_only_negative_zero_score() -> None:
+    """Validate statement-only negatives remain formal zero-score samples for calibration."""
+    records = [
+        {
+            "label": True,
+            "attestation": {
+                "final_event_attested_decision": {
+                    "status": "attested",
+                    "is_event_attested": True,
+                    "event_attestation_score": 0.81,
+                    "event_attestation_score_name": "event_attestation_score",
+                }
+            },
+        },
+        {
+            "label": False,
+            "attestation": {
+                "image_evidence_result": {
+                    "status": "ok",
+                    "content_attestation_score": 0.79,
+                    "content_attestation_score_name": "content_attestation_score",
+                },
+                "final_event_attested_decision": {
+                    "status": "absent",
+                    "is_event_attested": False,
+                    "event_attestation_score": 0.0,
+                    "event_attestation_score_name": "event_attestation_score",
+                    "authenticity_status": "statement_only",
+                },
+            },
+            "content_evidence_payload": {"status": "ok", "detect_hf_score": 0.91},
+        },
+    ]
+
+    scores, strata = load_scores_for_calibration(records, score_name="event_attestation_score")
+
+    assert scores == [pytest.approx(0.0)]
+    assert strata["global"]["n_valid"] == 1
+
+
 def test_load_thresholds_artifact_controlled_requires_fields(tmp_path: Path) -> None:
     """Validate missing required field detection for thresholds artifact."""
     artifact_path = tmp_path / "thresholds.json"

@@ -156,6 +156,42 @@ def _extract_input_attestation_payload(input_record: Optional[Dict[str, Any]]) -
     }
 
 
+def _extract_negative_branch_attestation_provenance(
+    input_record: Optional[Dict[str, Any]],
+) -> Dict[str, Any] | None:
+    """
+    功能：提取 negative branch 的 statement-only attestation provenance。 
+
+    Extract statement-only attestation provenance for the negative branch.
+
+    Args:
+        input_record: Optional input record mapping.
+
+    Returns:
+        Provenance payload with candidate_statement when available; otherwise
+        None.
+    """
+    if not isinstance(input_record, dict):
+        return None
+
+    provenance_node = input_record.get("negative_branch_source_attestation_provenance")
+    provenance_payload = cast(Dict[str, Any], provenance_node) if isinstance(provenance_node, dict) else {}
+    candidate_statement = provenance_payload.get("statement")
+    if not isinstance(candidate_statement, dict):
+        return None
+
+    trace_commit = provenance_payload.get("trace_commit")
+    if not isinstance(trace_commit, str) or not trace_commit:
+        trace_commit = None
+
+    return {
+        "candidate_statement": candidate_statement,
+        "attestation_bundle": None,
+        "trace_commit": trace_commit,
+        "provenance": provenance_payload,
+    }
+
+
 def _bind_detect_attestation_runtime_to_cfg(cfg: Dict[str, Any], attestation_context: Dict[str, Any]) -> None:
     """
     功能：将 detect 主链 attestation 运行时变量绑定到 cfg。
@@ -252,6 +288,18 @@ def _prepare_detect_attestation_context(cfg: Dict[str, Any], input_record: Optio
         }
 
     payload = _extract_input_attestation_payload(input_record)
+    attestation_source = "formal_input_payload"
+    if not isinstance(payload, dict):
+        negative_branch_provenance = _extract_negative_branch_attestation_provenance(input_record)
+        if isinstance(negative_branch_provenance, dict):
+            payload = negative_branch_provenance
+            attestation_source = "negative_branch_statement_only_provenance"
+        else:
+            return {
+                "attestation_status": "absent",
+                "attestation_absent_reason": "attestation_statement_absent",
+            }
+
     if not isinstance(payload, dict):
         return {
             "attestation_status": "absent",
@@ -317,6 +365,7 @@ def _prepare_detect_attestation_context(cfg: Dict[str, Any], input_record: Optio
     attest_keys = derive_attestation_keys(k_master, attestation_digest, trajectory_commit=trace_commit)
     return {
         "attestation_status": "ok",
+        "attestation_source": attestation_source,
         "authenticity_status": authenticity_status,
         "candidate_statement": candidate_statement,
         "attestation_bundle": attestation_bundle if isinstance(attestation_bundle, dict) else None,
