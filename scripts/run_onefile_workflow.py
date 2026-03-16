@@ -1390,7 +1390,7 @@ def _copy_negative_branch_embed_anchors(
     if not isinstance(preserve_attestation, bool):
         raise TypeError("preserve_attestation must be bool")
 
-    for field_name in ["plan_digest", "cfg_digest", "basis_digest"]:
+    for field_name in ["plan_digest", "cfg_digest", "basis_digest", "plan_input_digest", "plan_input_schema_version"]:
         field_value = source_embed_record.get(field_name)
         if isinstance(field_value, str) and field_value:
             negative_embed_record[field_name] = field_value
@@ -1399,13 +1399,7 @@ def _copy_negative_branch_embed_anchors(
     if isinstance(seed_value, int):
         negative_embed_record["seed"] = seed_value
 
-    for field_name in [
-        "subspace_planner_impl_identity",
-        "content_evidence",
-        "content_result",
-        "embed_trace",
-        "injection_evidence",
-    ]:
+    for field_name in ["subspace_planner_impl_identity", "subspace_plan"]:
         field_value = source_embed_record.get(field_name)
         if isinstance(field_value, dict):
             negative_embed_record[field_name] = json.loads(json.dumps(field_value, ensure_ascii=False))

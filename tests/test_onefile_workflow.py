@@ -516,11 +516,19 @@ def test_dual_branch_negative_embed_record_preserves_formal_plan_anchors(
         "plan_digest": "a" * 64,
         "cfg_digest": "b" * 64,
         "basis_digest": "c" * 64,
+        "plan_input_digest": "f" * 64,
+        "plan_input_schema_version": "v1",
         "seed": 7,
         "subspace_planner_impl_identity": {
             "impl_id": "subspace_planner",
             "impl_version": "v1",
             "impl_digest": "d" * 64,
+        },
+        "subspace_plan": {
+            "planner_input_digest": "f" * 64,
+            "verifiable_input_domain_spec": {
+                "planner_input_digest": "f" * 64,
+            },
         },
         "content_evidence": {
             "plan_digest": "a" * 64,
@@ -582,10 +590,14 @@ def test_dual_branch_negative_embed_record_preserves_formal_plan_anchors(
     assert negative_embed_record["plan_digest"] == "a" * 64
     assert negative_embed_record["cfg_digest"] == "b" * 64
     assert negative_embed_record["basis_digest"] == "c" * 64
+    assert negative_embed_record["plan_input_digest"] == "f" * 64
+    assert negative_embed_record["plan_input_schema_version"] == "v1"
     assert negative_embed_record["seed"] == 7
     assert negative_embed_record["subspace_planner_impl_identity"]["impl_id"] == "subspace_planner"
-    assert negative_embed_record["content_evidence"]["mask_digest"] == "e" * 64
-    assert negative_embed_record["embed_trace"]["plan_digest"] == "a" * 64
+    assert negative_embed_record["subspace_plan"]["planner_input_digest"] == "f" * 64
+    assert "content_evidence" not in negative_embed_record
+    assert "embed_trace" not in negative_embed_record
+    assert "injection_evidence" not in negative_embed_record
 
 
 def test_prepare_detect_records_with_attestation_score_rejects_detect_hf_recovery(tmp_path: Path) -> None:
@@ -678,6 +690,107 @@ def test_prepare_detect_records_with_attestation_score_rejects_detect_hf_recover
             },
             score_name="content_attestation_score",
         )
+
+
+def test_prepare_detect_records_with_attestation_score_preserves_dual_branch_negative_record(tmp_path: Path) -> None:
+    """
+    功能：验证 attestation 统计链会透传 dual-branch negative detect record 的正式 attestation 结果。
+
+    Verify attestation statistics preserve the real dual-branch negative
+    detect-record attestation result without rewriting it to synthetic absent.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+
+    source_detect_path = records_dir / "detect_record.json"
+    source_detect_path.write_text(
+        json.dumps(
+            {
+                "label": True,
+                "ground_truth": True,
+                "is_watermarked": True,
+                "attestation": {
+                    "image_evidence_result": {
+                        "status": "ok",
+                        "content_attestation_score": 0.93,
+                        "content_attestation_score_name": "content_attestation_score",
+                    }
+                },
+                "content_evidence_payload": {"status": "ok", "score": 0.91},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    branch_neg_detect_path = tmp_path / "branch_neg_detect_record.json"
+    branch_neg_detect_path.write_text(
+        json.dumps(
+            {
+                "label": False,
+                "ground_truth": False,
+                "is_watermarked": False,
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": 0.14,
+                    "detect_hf_score": 0.88,
+                },
+                "attestation": {
+                    "image_evidence_result": {
+                        "status": "ok",
+                        "content_attestation_score": 0.14,
+                        "content_attestation_score_name": "content_attestation_score",
+                    },
+                    "final_event_attested_decision": {
+                        "status": "unattested",
+                        "is_event_attested": False,
+                    },
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    glob_pattern = module._prepare_detect_records_with_minimal_ground_truth(
+        run_root=run_root,
+        source_detect_path=source_detect_path,
+        stage_name="calibrate",
+        pair_count=1,
+        branch_neg_detect_record=branch_neg_detect_path,
+        score_name="content_attestation_score",
+    )
+
+    generated_positive = Path(glob_pattern.replace("*", "positive"))
+    generated_negative = Path(glob_pattern.replace("*", "negative"))
+    positive_payload = json.loads(generated_positive.read_text(encoding="utf-8"))
+    negative_payload = json.loads(generated_negative.read_text(encoding="utf-8"))
+
+    negative_attestation = negative_payload.get("attestation")
+    assert isinstance(negative_attestation, dict)
+    assert negative_attestation["image_evidence_result"]["status"] == "ok"
+    assert negative_attestation["image_evidence_result"]["content_attestation_score"] == pytest.approx(0.14)
+    assert negative_attestation["final_event_attested_decision"]["status"] == "unattested"
+
+    scores, strata = load_scores_for_calibration(
+        [positive_payload, negative_payload],
+        cfg={
+            "calibration": {
+                "exclude_formal_sidecar_disabled_marker": True,
+                "exclude_synthetic_negative_closure_marker": True,
+            }
+        },
+        score_name="content_attestation_score",
+    )
+
+    assert scores == [pytest.approx(0.14)]
+    assert strata["global"]["n_valid"] == 1
 
 
 def test_parallel_attestation_statistics_workflow_writes_distinct_artifacts(
