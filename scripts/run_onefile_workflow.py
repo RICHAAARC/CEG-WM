@@ -1383,6 +1383,59 @@ def _extract_event_attestation_score_from_detect_record(record: dict) -> float |
     return score_float
 
 
+def _mark_clone_fallback_attestation_unavailable(record: dict[str, Any]) -> None:
+    """
+    功能：将 clone fallback 负样本的 attestation 结果降级为 unavailable。 
+
+    Mark clone-fallback negative attestation results as unavailable so formal
+    attestation statistics reject the sample instead of inheriting source-side
+    verdicts.
+
+    Args:
+        record: Detect record payload to mutate in place.
+
+    Returns:
+        None.
+    """
+    if not isinstance(record, dict):
+        raise TypeError("record must be dict")
+
+    attestation_node = record.get("attestation")
+    attestation_payload = attestation_node if isinstance(attestation_node, dict) else {}
+    attestation_payload = json.loads(json.dumps(attestation_payload, ensure_ascii=False))
+    attestation_payload["status"] = "absent"
+    attestation_payload["attestation_absent_reason"] = "attestation_unavailable_in_clone_fallback"
+
+    image_evidence_node = attestation_payload.get("image_evidence_result")
+    image_evidence_result = image_evidence_node if isinstance(image_evidence_node, dict) else {}
+    image_evidence_result["status"] = "absent"
+    image_evidence_result["content_attestation_score"] = None
+    image_evidence_result["content_attestation_score_name"] = CONTENT_ATTESTATION_SCORE_NAME
+    image_evidence_result["content_attestation_score_semantics"] = (
+        "unavailable_in_clone_fallback_not_a_formal_negative_attestation_sample"
+    )
+    image_evidence_result["attestation_unavailable_reason"] = "attestation_unavailable_in_clone_fallback"
+    attestation_payload["image_evidence_result"] = image_evidence_result
+
+    final_decision_node = attestation_payload.get("final_event_attested_decision")
+    final_decision = final_decision_node if isinstance(final_decision_node, dict) else {}
+    final_decision["status"] = "absent"
+    final_decision["is_event_attested"] = False
+    final_decision["event_attestation_score"] = None
+    final_decision["event_attestation_score_name"] = EVENT_ATTESTATION_SCORE_NAME
+    final_decision["event_attestation_score_semantics"] = (
+        "unavailable_in_clone_fallback_not_a_formal_negative_attestation_sample"
+    )
+    final_decision["attestation_unavailable_reason"] = "attestation_unavailable_in_clone_fallback"
+    attestation_payload["final_event_attested_decision"] = final_decision
+    record["attestation"] = attestation_payload
+
+    content_payload_node = record.get("content_evidence_payload")
+    content_payload = content_payload_node if isinstance(content_payload_node, dict) else {}
+    content_payload["attestation_clone_fallback_status"] = "attestation_unavailable_in_clone_fallback"
+    record["content_evidence_payload"] = content_payload
+
+
 def _build_parallel_attestation_statistics_run_root(run_root: Path) -> Path:
     """
     功能：解析并行 attestation 统计链子运行目录。
@@ -2128,9 +2181,9 @@ def _prepare_detect_records_with_minimal_ground_truth(
                 else:
                     negative_content["calibration_sample_origin"] = "synthetic_negative_bundle"
         elif score_name in {CONTENT_ATTESTATION_SCORE_NAME, EVENT_ATTESTATION_SCORE_NAME}:
-            # attestation 统计链必须保持 detect record 正式字段透传，
-            # 不在 minimal_ground_truth 阶段伪造 absent / None 语义。
-            pass
+            # attestation 统计链中的 clone fallback 不能继承 source formal verdict。
+            # 这里显式标记为 unavailable，使该样本按正式规则被 rejection。
+            _mark_clone_fallback_attestation_unavailable(negative_payload)
         else:
             raise ValueError(f"unsupported score_name: {score_name}")
 

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml
+
 from scripts.audits.audit_records_fields_append_only import run_audit
 
 
@@ -53,3 +55,32 @@ records_schema:
     assert result["result"] == "FAIL"
     missing = result["evidence"]["missing_in_registry"]
     assert "content_evidence.trajectory_evidence.planner_input_digest" in missing
+
+
+def test_negative_branch_attestation_provenance_registered_append_only_in_repo() -> None:
+    """
+    功能：验证 negative branch provenance 字段已在真实仓库中完成 append-only 注册。 
+
+    Validate negative-branch provenance fields are append-only registered in
+    the repository schema and frozen contracts.
+    """
+    repo_root = Path(__file__).resolve().parents[1]
+    schema_obj = yaml.safe_load((repo_root / "configs" / "records_schema_extensions.yaml").read_text(encoding="utf-8"))
+    contracts_obj = yaml.safe_load((repo_root / "configs" / "frozen_contracts.yaml").read_text(encoding="utf-8"))
+
+    schema_fields = {
+        entry.get("path")
+        for entry in schema_obj.get("fields", [])
+        if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+    }
+    registry_fields = set(contracts_obj.get("records_schema", {}).get("field_paths_registry", []))
+    required_paths = {
+        "negative_branch_source_attestation_provenance",
+        "negative_branch_source_attestation_provenance.statement",
+        "negative_branch_source_attestation_provenance.attestation_digest",
+        "negative_branch_source_attestation_provenance.event_binding_digest",
+        "negative_branch_source_attestation_provenance.trace_commit",
+    }
+
+    assert required_paths <= schema_fields
+    assert required_paths <= registry_fields

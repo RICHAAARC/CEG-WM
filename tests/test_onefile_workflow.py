@@ -945,14 +945,15 @@ def test_prepare_detect_records_with_event_attestation_score_preserves_dual_bran
     assert strata["global"]["n_valid"] == 1
 
 
-def test_prepare_detect_records_with_content_attestation_score_clone_fallback_passes_through_formal_payload(
+def test_prepare_detect_records_with_content_attestation_score_clone_fallback_marks_attestation_unavailable(
     tmp_path: Path,
 ) -> None:
     """
-    功能：验证 content_attestation_score 的 clone fallback 不再伪造 absent attestation。 
+    功能：验证 content_attestation_score 的 clone fallback 会将 attestation 标记为 unavailable。 
 
-    Verify clone fallback for content_attestation_score keeps the copied formal
-    attestation payload unchanged instead of rewriting it to synthetic absent.
+    Verify clone fallback for content_attestation_score marks the copied
+    attestation result as unavailable instead of inheriting the source formal
+    verdict.
     """
     repo_root = Path(__file__).resolve().parent.parent
     module = _load_onefile_module(repo_root)
@@ -1014,33 +1015,35 @@ def test_prepare_detect_records_with_content_attestation_score_clone_fallback_pa
     assert isinstance(negative_attestation, dict)
     image_evidence_result = negative_attestation.get("image_evidence_result")
     assert isinstance(image_evidence_result, dict)
-    assert image_evidence_result["status"] == "ok"
-    assert image_evidence_result["content_attestation_score"] == pytest.approx(0.93)
+    assert negative_attestation["status"] == "absent"
+    assert negative_attestation["attestation_absent_reason"] == "attestation_unavailable_in_clone_fallback"
+    assert image_evidence_result["status"] == "absent"
+    assert image_evidence_result["content_attestation_score"] is None
+    assert image_evidence_result["attestation_unavailable_reason"] == "attestation_unavailable_in_clone_fallback"
+    assert negative_content["attestation_clone_fallback_status"] == "attestation_unavailable_in_clone_fallback"
 
-    scores, strata = load_scores_for_calibration(
-        [positive_payload, negative_payload],
-        cfg={
-            "calibration": {
-                "exclude_formal_sidecar_disabled_marker": True,
-                "exclude_synthetic_negative_closure_marker": True,
-            }
-        },
-        score_name="content_attestation_score",
-    )
-
-    assert scores == [pytest.approx(0.93)]
-    assert strata["global"]["n_valid"] == 1
-    assert strata["sampling_policy"]["n_rejected_synthetic_negative_closure"] == 0
+    with pytest.raises(ValueError, match="content_attestation_score"):
+        load_scores_for_calibration(
+            [positive_payload, negative_payload],
+            cfg={
+                "calibration": {
+                    "exclude_formal_sidecar_disabled_marker": True,
+                    "exclude_synthetic_negative_closure_marker": True,
+                }
+            },
+            score_name="content_attestation_score",
+        )
 
 
-def test_prepare_detect_records_with_event_attestation_score_clone_fallback_does_not_rewrite_attestation_status(
+def test_prepare_detect_records_with_event_attestation_score_clone_fallback_marks_attestation_unavailable(
     tmp_path: Path,
 ) -> None:
     """
-    功能：验证 event_attestation_score 的 clone fallback 不再伪造 absent attestation。 
+    功能：验证 event_attestation_score 的 clone fallback 会将 attestation 标记为 unavailable。 
 
-    Verify clone fallback for event_attestation_score does not rewrite the
-    copied attestation verdict to a synthetic absent state.
+    Verify clone fallback for event_attestation_score marks the copied
+    attestation verdict as unavailable instead of inheriting the source formal
+    event-attested result.
     """
     repo_root = Path(__file__).resolve().parent.parent
     module = _load_onefile_module(repo_root)
@@ -1102,25 +1105,28 @@ def test_prepare_detect_records_with_event_attestation_score_clone_fallback_does
     assert isinstance(negative_attestation, dict)
     final_decision = negative_attestation.get("final_event_attested_decision")
     assert isinstance(final_decision, dict)
-    assert final_decision["status"] == "attested"
-    assert final_decision["is_event_attested"] is True
-    assert final_decision["event_attestation_score"] == pytest.approx(0.93)
-    assert negative_attestation["image_evidence_result"]["content_attestation_score"] == pytest.approx(0.93)
+    assert negative_attestation["status"] == "absent"
+    assert negative_attestation["attestation_absent_reason"] == "attestation_unavailable_in_clone_fallback"
+    assert final_decision["status"] == "absent"
+    assert final_decision["is_event_attested"] is False
+    assert final_decision["event_attestation_score"] is None
+    assert final_decision["attestation_unavailable_reason"] == "attestation_unavailable_in_clone_fallback"
+    image_evidence_result = negative_attestation.get("image_evidence_result")
+    assert isinstance(image_evidence_result, dict)
+    assert image_evidence_result["content_attestation_score"] is None
+    assert negative_content["attestation_clone_fallback_status"] == "attestation_unavailable_in_clone_fallback"
 
-    scores, strata = load_scores_for_calibration(
-        [positive_payload, negative_payload],
-        cfg={
-            "calibration": {
-                "exclude_formal_sidecar_disabled_marker": True,
-                "exclude_synthetic_negative_closure_marker": True,
-            }
-        },
-        score_name="event_attestation_score",
-    )
-
-    assert scores == [pytest.approx(0.93)]
-    assert strata["global"]["n_valid"] == 1
-    assert strata["sampling_policy"]["n_rejected_synthetic_negative_closure"] == 0
+    with pytest.raises(ValueError, match="event_attestation_score"):
+        load_scores_for_calibration(
+            [positive_payload, negative_payload],
+            cfg={
+                "calibration": {
+                    "exclude_formal_sidecar_disabled_marker": True,
+                    "exclude_synthetic_negative_closure_marker": True,
+                }
+            },
+            score_name="event_attestation_score",
+        )
 
 
 def test_prepare_detect_records_with_content_score_clone_fallback_keeps_synthetic_negative_closure(

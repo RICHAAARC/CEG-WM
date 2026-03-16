@@ -5,7 +5,7 @@
 # - 本文件不是实验运行主配置，不直接承载具体模型或设备参数。
 # ==============================================================
 
-policy_path_semantics_version: "v2.3"  # v2.0→v2.1：同步 runtime_whitelist.yaml v2.1；test_mode_identity 重命名为 embed_identity_mode已移出 formal path。v2.1→v2.2：追加 geometry recovery observations 与 recovered consistency 的正式审计语义。v2.2→v2.3：追加 coarse registration、sync_parameter_agreement 与 recovered-domain sync revalidation 字段语义。
+policy_path_semantics_version: "v2.3"  # v2.0→v2.1：同步 runtime_whitelist.yaml v2.1；test_mode_identity 重命名为 embed_identity_mode已移出 formal path。v2.1→v2.2：追加 geometry recovery observations 与 recovered consistency 的正式审计语义。v2.2→v2.3：追加 coarse registration、sync_parameter_agreement、recovered-domain sync revalidation 与 negative branch attestation provenance 的诊断路径语义；该 provenance 仅用于 diagnostic/provenance，不能视作 formal attestation payload。
 
 # ==============================================================
 # 0) 硬约束：必须满足的执行性规则
@@ -167,6 +167,19 @@ field_catalog:
       - "content_evidence.subspace_binding_digest"
       - "content_evidence.lf_statistics_digest"
       - "content_evidence.hf_statistics_digest"
+      - "negative_branch_source_attestation_provenance"
+      - "negative_branch_source_attestation_provenance.statement"
+      - "negative_branch_source_attestation_provenance.attestation_digest"
+      - "negative_branch_source_attestation_provenance.event_binding_digest"
+      - "negative_branch_source_attestation_provenance.trace_commit"
+
+  diagnostic_only_field_constraints:
+    - field_path: "negative_branch_source_attestation_provenance"
+      semantics: "diagnostic_provenance_only"
+      rule: "仅用于 dual-branch negative source statement-only provenance，不能视作 formal attestation payload 或 formal negative attestation sample。"
+    - field_path: "negative_branch_source_attestation_provenance.statement"
+      semantics: "diagnostic_statement_copy_only"
+      rule: "statement 拷贝仅用于 provenance 审计，不得作为 detect formal attestation extractor 的输入来源。"
 
 # ------------------------------
 # catalogs 使用约束

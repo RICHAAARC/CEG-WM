@@ -5,7 +5,7 @@
 # - 本文件不是 workflow 运行配置，不承载模型或推理参数。
 # ==============================================================
 
-version: "v8"  # v3→v4 (2026-03-12)：formal path 最终闭包收口；historical_fields: 段已从当前 formal schema 文件移除，旧字段信息不再显式保留在任何 formal 文件中。当前 formal schema 只表达当前正式机制。v4→v5 (2026-03-13)：追加 attestation 事件绑定、真实性/图像证据双层语义与 event-attested 判决字段。v5→v6 (2026-03-13)：追加 geometry recovery observations、observed correspondences 与 recovered consistency 字段。v6→v7 (2026-03-13)：追加 coarse registration 与 recovered-domain sync revalidation 细分字段。v7→v8 (2026-03-14)：追加 LF canonical evidence summary 字段登记。
+version: "v9"  # v3→v4 (2026-03-12)：formal path 最终闭包收口；historical_fields: 段已从当前 formal schema 文件移除，旧字段信息不再显式保留在任何 formal 文件中。当前 formal schema 只表达当前正式机制。v4→v5 (2026-03-13)：追加 attestation 事件绑定、真实性/图像证据双层语义与 event-attested 判决字段。v5→v6 (2026-03-13)：追加 geometry recovery observations、observed correspondences 与 recovered consistency 字段。v6→v7 (2026-03-13)：追加 coarse registration 与 recovered-domain sync revalidation 细分字段。v7→v8 (2026-03-14)：追加 LF canonical evidence summary 字段登记。v8→v9 (2026-03-16)：追加 negative branch attestation provenance 的 append-only 诊断字段登记。
 append_only: true
 
 type_definitions:
@@ -1159,6 +1159,41 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "事件级 attestation 正式统计得分的语义定义。"
+
+  - path: "negative_branch_source_attestation_provenance"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "dual-branch negative source statement-only provenance（仅 diagnostic/provenance 用途，not a formal attestation payload，也不会被 detect formal attestation extractor 消费）。"
+
+  - path: "negative_branch_source_attestation_provenance.statement"
+    layer: "diagnostic"
+    type: "json_dict"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "negative branch source attestation statement 的诊断性拷贝；仅用于 provenance，不构成 formal attestation payload。"
+
+  - path: "negative_branch_source_attestation_provenance.attestation_digest"
+    layer: "diagnostic"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "negative branch source statement 对应的 provenance attestation digest；仅用于诊断追踪。"
+
+  - path: "negative_branch_source_attestation_provenance.event_binding_digest"
+    layer: "diagnostic"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "negative branch source statement 对应的 provenance event binding digest；仅用于诊断追踪。"
+
+  - path: "negative_branch_source_attestation_provenance.trace_commit"
+    layer: "diagnostic"
+    type: "digest_hex64"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "negative branch source statement 对应的 provenance trace commit；仅用于诊断追踪。"
 
   - path: "content_evidence.score_parts.lf_status"
     layer: "diagnostic"

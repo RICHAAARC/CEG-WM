@@ -419,6 +419,11 @@ _REQUIRED_NEW_PATHS = {
     "content_evidence.score_parts.lf_detect_trace.bp_converge_status",
     "content_evidence.score_parts.lf_status_degraded_reason",
     "content_evidence.detect_hf_score_absent_reason",
+    "negative_branch_source_attestation_provenance",
+    "negative_branch_source_attestation_provenance.statement",
+    "negative_branch_source_attestation_provenance.attestation_digest",
+    "negative_branch_source_attestation_provenance.event_binding_digest",
+    "negative_branch_source_attestation_provenance.trace_commit",
 }
 
 
@@ -484,6 +489,64 @@ def test_event_attestation_score_paths_registered() -> None:
 
     assert required_paths <= schema_fields
     assert required_paths <= registry_fields
+
+
+def test_negative_branch_attestation_provenance_paths_registered() -> None:
+    """
+    功能：验证 negative branch attestation provenance 已完成 schema、contract 与 path semantics 注册。 
+
+    Validate negative-branch attestation provenance paths are registered in
+    schema, frozen contracts, and policy path semantics.
+    """
+    schema_path = _REPO_ROOT / "configs" / "records_schema_extensions.yaml"
+    contracts_path = _REPO_ROOT / "configs" / "frozen_contracts.yaml"
+    semantics_path = _REPO_ROOT / "configs" / "policy_path_semantics.yaml"
+
+    schema_obj = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+    contracts_obj = yaml.safe_load(contracts_path.read_text(encoding="utf-8"))
+    semantics_obj = yaml.safe_load(semantics_path.read_text(encoding="utf-8"))
+
+    schema_entries = {
+        entry.get("path"): entry
+        for entry in schema_obj.get("fields", [])
+        if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+    }
+    registry_fields = set(contracts_obj.get("records_schema", {}).get("field_paths_registry", []))
+    recommended_fields = set(
+        semantics_obj.get("field_catalog", {}).get("catalogs", {}).get("recommended", [])
+    )
+    diagnostic_constraints = semantics_obj.get("field_catalog", {}).get("diagnostic_only_field_constraints", [])
+
+    required_paths = {
+        "negative_branch_source_attestation_provenance",
+        "negative_branch_source_attestation_provenance.statement",
+        "negative_branch_source_attestation_provenance.attestation_digest",
+        "negative_branch_source_attestation_provenance.event_binding_digest",
+        "negative_branch_source_attestation_provenance.trace_commit",
+    }
+
+    assert required_paths <= set(schema_entries)
+    assert required_paths <= registry_fields
+    assert required_paths <= recommended_fields
+
+    provenance_entry = schema_entries["negative_branch_source_attestation_provenance"]
+    description = provenance_entry.get("description")
+    assert isinstance(description, str)
+    assert "diagnostic/provenance" in description
+    assert "not a formal attestation payload" in description
+    assert "detect formal attestation extractor" in description
+
+    constraint_index = {
+        entry.get("field_path"): entry
+        for entry in diagnostic_constraints
+        if isinstance(entry, dict) and isinstance(entry.get("field_path"), str)
+    }
+    provenance_constraint = constraint_index.get("negative_branch_source_attestation_provenance")
+    assert isinstance(provenance_constraint, dict)
+    assert provenance_constraint.get("semantics") == "diagnostic_provenance_only"
+    statement_constraint = constraint_index.get("negative_branch_source_attestation_provenance.statement")
+    assert isinstance(statement_constraint, dict)
+    assert "formal attestation extractor" in str(statement_constraint.get("rule"))
 
 
 # ---------------------------------------------------------------------------

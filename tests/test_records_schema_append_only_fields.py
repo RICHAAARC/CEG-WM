@@ -131,11 +131,15 @@ def test_records_schema_new_fields_type_mismatch_fails(mock_interpretation):
     record = _build_minimal_valid_record(schema, mock_interpretation)
     _set_value_by_field_path(record, "content_evidence.mask_digest", 123)
     _set_value_by_field_path(record, "content_evidence.trajectory_evidence", ["not", "a", "dict"])
+    _set_value_by_field_path(record, "negative_branch_source_attestation_provenance", ["not", "a", "dict"])
 
     with pytest.raises(TypeError) as exc_info:
         schema.validate_record(record, interpretation=mock_interpretation)
 
-    assert "content_evidence.mask_digest" in str(exc_info.value)
+    assert (
+        "content_evidence.mask_digest" in str(exc_info.value)
+        or "negative_branch_source_attestation_provenance" in str(exc_info.value)
+    )
 
 
 def test_records_schema_new_fields_valid_types_pass(mock_interpretation):
@@ -201,6 +205,16 @@ def test_records_schema_new_fields_valid_types_pass(mock_interpretation):
     _set_value_by_field_path(record, "routing_summary", {"path": "lf"})
     _set_value_by_field_path(record, "mask_resolution_binding", {"height": 512, "width": 512})
     _set_value_by_field_path(record, "mask_source_impl_identity", {"impl_id": "semantic_mask_provider", "impl_version": "v1", "impl_digest": "d" * 64})
+    _set_value_by_field_path(
+        record,
+        "negative_branch_source_attestation_provenance",
+        {
+            "statement": {"schema": "gen_attest_v1"},
+            "attestation_digest": "a" * 64,
+            "event_binding_digest": "b" * 64,
+            "trace_commit": "c" * 64,
+        },
+    )
     _set_value_by_field_path(
         record,
         "embed_trace",
