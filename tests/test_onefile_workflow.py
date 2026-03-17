@@ -224,6 +224,7 @@ def test_onefile_workflow_paper_full_profile_generates_real_sd3_config(tmp_path:
     assert profile_cfg_obj["embed"]["geometry"]["sync_strength"] == 0.2
     assert profile_cfg_obj["watermark"]["hf"]["tail_truncation_mode"] == cfg_obj["watermark"]["hf"]["tail_truncation_mode"]
     assert profile_cfg_obj["watermark"]["hf"]["selection"] == cfg_obj["watermark"]["hf"]["selection"]
+    assert profile_cfg_obj["watermark"]["subspace"]["rank"] == 128
     assert "device: cuda" in profile_cfg_text
     assert "enabled: true" in profile_cfg_text
     assert "alignment_check: true" in profile_cfg_text
@@ -1484,6 +1485,312 @@ def test_parallel_attestation_statistics_workflow_writes_distinct_artifacts(
     assert content_chain["threshold_id"] == "content_score_np_fpr_0_01"
     assert attestation_chain["threshold_id"] == "event_attestation_score_np_fpr_0_01"
     assert content_chain["thresholds_artifact_path"] != attestation_chain["thresholds_artifact_path"]
+
+
+def test_parallel_attestation_statistics_workflow_prefers_experiment_matrix_attack_aware_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：验证 paper 并行 attestation 统计优先消费 experiment_matrix 的 attack-aware 正样本记录。
+
+    Verify paper parallel attestation statistics prefer experiment_matrix
+    attack-aware positive records while preserving formal positive/negative
+    attestation evidence sources.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    (run_root / "records").mkdir(parents=True, exist_ok=True)
+    (run_root / "artifacts" / "branch_neg" / "records").mkdir(parents=True, exist_ok=True)
+
+    cfg_obj = {
+        "calibration": {"score_name": "content_score", "minimal_ground_truth_pair_count": 1},
+        "evaluate": {"score_name": "content_score", "minimal_ground_truth_pair_count": 1},
+        "parallel_attestation_statistics": {
+            "enabled": True,
+            "calibration_score_name": "event_attestation_score",
+            "evaluate_score_name": "event_attestation_score",
+        },
+    }
+    cfg_path = tmp_path / "paper_cfg.yaml"
+    cfg_path.write_text(yaml.safe_dump(cfg_obj, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    (run_root / "records" / "detect_record.json").write_text(
+        json.dumps(
+            {
+                "label": True,
+                "ground_truth": True,
+                "is_watermarked": True,
+                "inference_prompt": "canonical prompt",
+                "content_evidence_payload": {"status": "ok", "score": 0.91},
+                "attestation": {
+                    "image_evidence_result": {
+                        "status": "ok",
+                        "content_attestation_score": 0.89,
+                        "content_attestation_score_name": "content_attestation_score",
+                    },
+                    "final_event_attested_decision": {
+                        "status": "attested",
+                        "is_event_attested": True,
+                        "event_attestation_score": 0.89,
+                        "event_attestation_score_name": "event_attestation_score",
+                    },
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "artifacts" / "branch_neg" / "records" / "detect_record.json").write_text(
+        json.dumps(
+            {
+                "label": False,
+                "ground_truth": False,
+                "is_watermarked": False,
+                "inference_prompt": "negative prompt",
+                "content_evidence_payload": {"status": "ok", "score": 0.14},
+                "attestation": {
+                    "attestation_source": "negative_branch_statement_only_provenance",
+                    "image_evidence_result": {
+                        "status": "ok",
+                        "content_attestation_score": 0.14,
+                        "content_attestation_score_name": "content_attestation_score",
+                    },
+                    "final_event_attested_decision": {
+                        "status": "unattested",
+                        "is_event_attested": False,
+                        "event_attestation_score": 0.0,
+                        "event_attestation_score_name": "event_attestation_score",
+                    },
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    matrix_detect_path = (
+        run_root
+        / "outputs"
+        / "experiment_matrix"
+        / "experiments"
+        / "item_0000"
+        / "artifacts"
+        / "evaluate_inputs"
+        / "detect_record_with_attack.json"
+    )
+    matrix_detect_path.parent.mkdir(parents=True, exist_ok=True)
+    matrix_detect_path.write_text(
+        json.dumps(
+            {
+                "label": True,
+                "ground_truth": True,
+                "is_watermarked": True,
+                "inference_prompt": "matrix prompt",
+                "attack_family": "jpeg",
+                "attack_params_version": "p1",
+                "attack": {"family": "jpeg", "params_version": "p1"},
+                "content_evidence_payload": {"status": "ok", "score": 0.31},
+                "attestation": {
+                    "attestation_source": "matrix_detect_record_attestation",
+                    "image_evidence_result": {
+                        "status": "ok",
+                        "content_attestation_score": 0.61,
+                        "content_attestation_score_name": "content_attestation_score",
+                    },
+                    "final_event_attested_decision": {
+                        "status": "attested",
+                        "is_event_attested": True,
+                        "event_attestation_score": 0.61,
+                        "event_attestation_score_name": "event_attestation_score",
+                    },
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    observed_stage_names: list[str] = []
+
+    def _fake_run_subprocess(cmd: list[str], cwd: Path) -> int:
+        _ = cwd
+        out_root = Path(cmd[cmd.index("--out") + 1])
+        config_path = Path(cmd[cmd.index("--config") + 1])
+        stage_cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        stage_name = "calibration" if "run_calibrate" in " ".join(cmd) else "evaluate"
+        observed_stage_names.append(stage_name)
+        detect_records_glob = stage_cfg[stage_name]["detect_records_glob"]
+        detect_records_path = Path(detect_records_glob)
+        detect_records = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in sorted(detect_records_path.parent.glob(detect_records_path.name))
+        ]
+        assert len(detect_records) == 2
+
+        positive_payload = next(record for record in detect_records if record.get("label") is True)
+        negative_payload = next(record for record in detect_records if record.get("label") is False)
+
+        assert positive_payload["inference_prompt"] == "matrix prompt"
+        assert positive_payload["attack"]["family"] == "jpeg"
+        assert positive_payload["content_evidence_payload"]["score"] == pytest.approx(0.31)
+        assert positive_payload["attestation"]["attestation_source"] == "matrix_detect_record_attestation"
+        assert positive_payload["attestation"]["final_event_attested_decision"]["event_attestation_score"] == pytest.approx(0.61)
+        assert positive_payload["attestation"]["image_evidence_result"]["content_attestation_score"] == pytest.approx(0.61)
+
+        assert negative_payload["inference_prompt"] == "matrix prompt"
+        assert negative_payload["attack"]["family"] == "jpeg"
+        assert negative_payload["content_evidence_payload"]["score"] == pytest.approx(0.14)
+        assert negative_payload["attestation"]["attestation_source"] == "negative_branch_statement_only_provenance"
+        assert negative_payload["attestation"]["final_event_attested_decision"]["event_attestation_score"] == pytest.approx(0.0)
+
+        (out_root / "records").mkdir(parents=True, exist_ok=True)
+        (out_root / "artifacts" / "thresholds").mkdir(parents=True, exist_ok=True)
+        if stage_name == "calibration":
+            (out_root / "records" / "calibration_record.json").write_text(
+                json.dumps(
+                    {
+                        "threshold_id": "event_attestation_score_np_fpr_0_01",
+                        "threshold_key_used": "fpr_0_01",
+                        "calibration_summary": {
+                            "score_name": "event_attestation_score",
+                            "threshold_value": 0.42,
+                        },
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            (out_root / "artifacts" / "thresholds" / "thresholds_artifact.json").write_text(
+                json.dumps(
+                    {
+                        "threshold_id": "event_attestation_score_np_fpr_0_01",
+                        "score_name": "event_attestation_score",
+                        "threshold_value": 0.42,
+                        "threshold_key_used": "fpr_0_01",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        else:
+            (out_root / "records" / "evaluate_record.json").write_text(
+                json.dumps(
+                    {
+                        "threshold_key_used": "fpr_0_01",
+                        "metrics": {
+                            "score_name": "event_attestation_score",
+                            "threshold_value": 0.42,
+                        },
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            (out_root / "artifacts" / "evaluation_report.json").write_text(
+                json.dumps({"evaluation_report": {"score_name": "event_attestation_score"}}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        return 0
+
+    monkeypatch.setattr(module, "_run_subprocess_for_step", _fake_run_subprocess)
+
+    module._run_parallel_attestation_statistics_workflow(
+        repo_root=repo_root,
+        run_root=run_root,
+        cfg_path=cfg_path,
+        profile="paper_full_cuda",
+    )
+
+    assert observed_stage_names == ["calibration", "evaluate"]
+
+
+def test_onefile_workflow_runs_parallel_attestation_after_experiment_matrix_for_paper_profile(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：验证 paper profile 会在 experiment_matrix 成功后再执行并行 attestation 统计。
+
+    Verify paper profile runs parallel attestation statistics only after the
+    experiment_matrix step has completed successfully.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    cfg_path = tmp_path / "paper_cfg.yaml"
+    cfg_path.write_text(yaml.safe_dump({"evaluate": {}, "calibration": {}}, allow_unicode=True), encoding="utf-8")
+
+    experiment_matrix_summary_path = run_root / "outputs" / "experiment_matrix" / "artifacts" / "grid_summary.json"
+    step_order: list[str] = []
+
+    monkeypatch.setattr(module, "_prepare_profile_cfg_path", lambda profile, run_root_arg, cfg_path_arg: cfg_path_arg)
+    monkeypatch.setattr(module, "_prepare_experiment_matrix_cfg_path", lambda profile, run_root_arg, cfg_path_arg: cfg_path_arg)
+    monkeypatch.setattr(module, "_prepare_stage_cfg_path", lambda *args, **kwargs: cfg_path)
+    monkeypatch.setattr(
+        module,
+        "build_workflow_steps",
+        lambda *args, **kwargs: [
+            module.WorkflowStep(
+                name="evaluate",
+                command=[sys.executable, "-m", "main.cli.run_evaluate", "--out", str(run_root), "--config", str(cfg_path)],
+                artifact_paths=[],
+            ),
+            module.WorkflowStep(
+                name="experiment_matrix",
+                command=[
+                    sys.executable,
+                    str(repo_root / "scripts" / "run_experiment_matrix.py"),
+                    "--config",
+                    str(cfg_path),
+                    "--batch-root",
+                    str(run_root / "outputs" / "experiment_matrix"),
+                ],
+                artifact_paths=[experiment_matrix_summary_path],
+            ),
+        ],
+    )
+
+    def _fake_run_subprocess(cmd: list[str], cwd: Path) -> int:
+        _ = cwd
+        command_text = " ".join(str(item) for item in cmd)
+        if "main.cli.run_evaluate" in command_text:
+            step_order.append("evaluate")
+        elif "run_experiment_matrix.py" in command_text:
+            step_order.append("experiment_matrix")
+            experiment_matrix_summary_path.parent.mkdir(parents=True, exist_ok=True)
+            experiment_matrix_summary_path.write_text(
+                json.dumps({"total": 1, "failed": 0, "succeeded": 1}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        return 0
+
+    monkeypatch.setattr(module, "_run_subprocess_for_step", _fake_run_subprocess)
+    monkeypatch.setattr(module, "_run_parallel_attestation_statistics_workflow", lambda **kwargs: step_order.append("parallel"))
+    monkeypatch.setattr(module, "_print_step_header", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "_print_step_footer", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "_print_artifact_presence", lambda *args, **kwargs: None)
+
+    exit_code = module.run_onefile_workflow(
+        repo_root=repo_root,
+        cfg_path=cfg_path,
+        run_root=run_root,
+        profile="paper_full_cuda",
+        signoff_profile="paper",
+        dry_run=False,
+    )
+
+    assert exit_code == 0
+    assert step_order == ["evaluate", "experiment_matrix", "parallel"]
 
 
 def test_dual_branch_negative_hf_only_sample_survives_formal_calibration_filters(tmp_path: Path) -> None:

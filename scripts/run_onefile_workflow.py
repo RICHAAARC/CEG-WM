@@ -11,6 +11,7 @@ Module type: General module
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import math
@@ -1436,6 +1437,147 @@ def _mark_clone_fallback_attestation_unavailable(record: dict[str, Any]) -> None
     record["content_evidence_payload"] = content_payload
 
 
+def _collect_experiment_matrix_attack_aware_detect_paths(run_root: Path) -> List[Path]:
+    """
+    功能：收集 experiment_matrix 生成的 attack-aware detect 记录路径。
+
+    Collect attack-aware detect-record paths emitted by experiment_matrix.
+
+    Args:
+        run_root: Main onefile run root.
+
+    Returns:
+        Sorted detect-record paths. Returns an empty list when the matrix
+        outputs are absent.
+    """
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+
+    experiments_root = run_root / "outputs" / "experiment_matrix" / "experiments"
+    if not experiments_root.exists() or not experiments_root.is_dir():
+        return []
+
+    return sorted(experiments_root.glob("*/artifacts/evaluate_inputs/detect_record_with_attack.json"))
+
+
+def _prepare_parallel_attestation_detect_records_from_matrix(
+    run_root: Path,
+    output_run_root: Path,
+    stage_name: str,
+    score_name: str,
+) -> str | None:
+    """
+    功能：基于 experiment_matrix 的 attack-aware 正样本记录构建并行 attestation 统计输入。
+
+    Build labelled detect records for parallel attestation statistics from the
+    experiment_matrix attack-aware positives while preserving the formal
+    positive/negative attestation evidence sources.
+
+    Args:
+        run_root: Main onefile run root.
+        output_run_root: Parallel statistics run root.
+        stage_name: Stage name in {calibrate, evaluate}.
+        score_name: Score name requested by the parallel statistics chain.
+
+    Returns:
+        Glob path covering generated labelled records, or None when matrix
+        outputs are unavailable or do not satisfy formal attestation inputs.
+    """
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(output_run_root, Path):
+        raise TypeError("output_run_root must be Path")
+    if not isinstance(stage_name, str) or stage_name not in {"calibrate", "evaluate"}:
+        raise TypeError("stage_name must be one of {'calibrate', 'evaluate'}")
+    if not isinstance(score_name, str) or not score_name:
+        raise TypeError("score_name must be non-empty str")
+
+    if score_name not in {CONTENT_ATTESTATION_SCORE_NAME, EVENT_ATTESTATION_SCORE_NAME}:
+        return None
+
+    def _load_json_record(path: Path) -> Dict[str, Any] | None:
+        if not path.exists() or not path.is_file():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        if not isinstance(payload, dict) or not payload:
+            return None
+        return payload
+
+    positive_source_paths = _collect_experiment_matrix_attack_aware_detect_paths(run_root)
+    if not positive_source_paths:
+        return None
+
+    branch_negative_path = run_root / "artifacts" / "branch_neg" / "records" / "detect_record.json"
+    branch_negative_payload = _load_json_record(branch_negative_path)
+    if not isinstance(branch_negative_payload, dict) or not branch_negative_payload:
+        return None
+
+    if score_name == CONTENT_ATTESTATION_SCORE_NAME:
+        if _extract_content_attestation_score_from_detect_record(branch_negative_payload) is None:
+            return None
+    if score_name == EVENT_ATTESTATION_SCORE_NAME:
+        if _extract_event_attestation_score_from_detect_record(branch_negative_payload) is None:
+            return None
+
+    workflow_cfg_dir = output_run_root / "artifacts" / "workflow_cfg"
+    workflow_cfg_dir.mkdir(parents=True, exist_ok=True)
+    wrote_any = False
+
+    for pair_index, source_path in enumerate(positive_source_paths):
+        base_payload = _load_json_record(source_path)
+        if not isinstance(base_payload, dict) or not base_payload:
+            continue
+        if score_name == CONTENT_ATTESTATION_SCORE_NAME:
+            if _extract_content_attestation_score_from_detect_record(base_payload) is None:
+                continue
+        if score_name == EVENT_ATTESTATION_SCORE_NAME:
+            if _extract_event_attestation_score_from_detect_record(base_payload) is None:
+                continue
+
+        positive_payload = copy.deepcopy(base_payload)
+        positive_payload["label"] = True
+        positive_payload["ground_truth"] = True
+        positive_payload["is_watermarked"] = True
+        positive_payload["ground_truth_source"] = "experiment_matrix_attack_aware_positive"
+        positive_payload["calibration_label_resolution"] = "experiment_matrix_attack_aware_positive"
+        positive_payload.pop("calibration_excluded_from_labelled_sampling", None)
+        positive_payload["run_id"] = str(uuid.uuid4())
+
+        negative_payload = copy.deepcopy(branch_negative_payload)
+        negative_payload["label"] = False
+        negative_payload["ground_truth"] = False
+        negative_payload["is_watermarked"] = False
+        negative_payload["ground_truth_source"] = "experiment_matrix_attack_aware_negative"
+        negative_payload["calibration_label_resolution"] = "experiment_matrix_attack_aware_negative"
+        negative_payload.pop("calibration_excluded_from_labelled_sampling", None)
+        negative_payload["run_id"] = str(uuid.uuid4())
+
+        for metadata_key in ["attack_family", "attack_params_version", "attack", "inference_prompt"]:
+            if metadata_key in base_payload:
+                negative_payload[metadata_key] = copy.deepcopy(base_payload[metadata_key])
+
+        positive_path = workflow_cfg_dir / f"matrix_detect_records_{stage_name}_gt_positive_{pair_index:03d}.json"
+        negative_path = workflow_cfg_dir / f"matrix_detect_records_{stage_name}_gt_negative_{pair_index:03d}.json"
+        _write_artifact_text_unbound(
+            output_run_root,
+            positive_path,
+            json.dumps(positive_payload, ensure_ascii=False, indent=2),
+        )
+        _write_artifact_text_unbound(
+            output_run_root,
+            negative_path,
+            json.dumps(negative_payload, ensure_ascii=False, indent=2),
+        )
+        wrote_any = True
+
+    if not wrote_any:
+        return None
+    return str(workflow_cfg_dir / f"matrix_detect_records_{stage_name}_gt_*.json")
+
+
 def _build_parallel_attestation_statistics_run_root(run_root: Path) -> Path:
     """
     功能：解析并行 attestation 统计链子运行目录。
@@ -1719,6 +1861,7 @@ def _prepare_stage_cfg_path(
     repo_root: Path | None = None,
     score_name_override: str | None = None,
     output_run_root: Path | None = None,
+    detect_records_glob_override: str | None = None,
 ) -> Path:
     """
     功能：为特定阶段生成补全字段后的配置文件。 
@@ -1746,6 +1889,10 @@ def _prepare_stage_cfg_path(
         raise TypeError("score_name_override must be non-empty str or None")
     if output_run_root is not None and not isinstance(output_run_root, Path):
         raise TypeError("output_run_root must be Path or None")
+    if detect_records_glob_override is not None and (
+        not isinstance(detect_records_glob_override, str) or not detect_records_glob_override
+    ):
+        raise TypeError("detect_records_glob_override must be non-empty str or None")
     if stage_name not in {"calibrate", "evaluate"}:
         return cfg_path
     profile = _normalize_profile(profile)
@@ -1766,7 +1913,9 @@ def _prepare_stage_cfg_path(
     cfg_obj[stage_cfg_key] = stage_cfg
     records_dir = run_root / "records"
     detect_record_path = records_dir / "detect_record.json"
-    if detect_record_path.exists() and detect_record_path.is_file():
+    if isinstance(detect_records_glob_override, str) and detect_records_glob_override:
+        detect_record_glob = detect_records_glob_override
+    elif detect_record_path.exists() and detect_record_path.is_file():
         detect_record_glob = str(
             _prepare_detect_record_for_scoring(
                 run_root,
@@ -1805,7 +1954,12 @@ def _prepare_stage_cfg_path(
             print(f"[onefile] WARN: Dual-branch execution failed: {type(exc).__name__}: {exc}", file=sys.stderr)
             print("[onefile] Continuing with single-branch workflow (GT generated via clone)", file=sys.stderr)
 
-    if detect_record_glob and "*" not in detect_record_glob and "?" not in detect_record_glob:
+    if (
+        detect_record_glob
+        and "*" not in detect_record_glob
+        and "?" not in detect_record_glob
+        and detect_records_glob_override is None
+    ):
         prompt_list: Sequence[str] | None = None
         prompts_file_value = stage_cfg.get("minimal_ground_truth_prompts_file")
         pair_count = stage_cfg.get("minimal_ground_truth_pair_count")
@@ -2655,6 +2809,22 @@ def _run_parallel_attestation_statistics_workflow(
         return
 
     parallel_run_root = _build_parallel_attestation_statistics_run_root(run_root)
+    calibrate_detect_records_glob_override: str | None = None
+    evaluate_detect_records_glob_override: str | None = None
+    if _normalize_profile(profile) == PROFILE_PAPER_FULL_CUDA:
+        calibrate_detect_records_glob_override = _prepare_parallel_attestation_detect_records_from_matrix(
+            run_root=run_root,
+            output_run_root=parallel_run_root,
+            stage_name="calibrate",
+            score_name=str(parallel_cfg.get("calibration_score_name")),
+        )
+        evaluate_detect_records_glob_override = _prepare_parallel_attestation_detect_records_from_matrix(
+            run_root=run_root,
+            output_run_root=parallel_run_root,
+            stage_name="evaluate",
+            score_name=str(parallel_cfg.get("evaluate_score_name")),
+        )
+
     calibrate_cfg_path = _prepare_stage_cfg_path(
         "calibrate",
         run_root,
@@ -2663,6 +2833,7 @@ def _run_parallel_attestation_statistics_workflow(
         repo_root,
         score_name_override=str(parallel_cfg.get("calibration_score_name")),
         output_run_root=parallel_run_root,
+        detect_records_glob_override=calibrate_detect_records_glob_override,
     )
     calibrate_command = _build_stage_command("calibrate", parallel_run_root, calibrate_cfg_path, profile)
     print(f"[onefile] Running parallel attestation calibrate: {' '.join(str(item) for item in calibrate_command)}")
@@ -2678,6 +2849,7 @@ def _run_parallel_attestation_statistics_workflow(
         repo_root,
         score_name_override=str(parallel_cfg.get("evaluate_score_name")),
         output_run_root=parallel_run_root,
+        detect_records_glob_override=evaluate_detect_records_glob_override,
     )
     evaluate_command = _build_stage_command("evaluate", parallel_run_root, evaluate_cfg_path, profile)
     print(f"[onefile] Running parallel attestation evaluate: {' '.join(str(item) for item in evaluate_command)}")
@@ -3872,7 +4044,7 @@ def run_onefile_workflow(
                     file=sys.stderr,
                 )
 
-        if step.name == "evaluate" and return_code == 0:
+        if step.name == "evaluate" and return_code == 0 and profile != PROFILE_PAPER_FULL_CUDA:
             try:
                 _run_parallel_attestation_statistics_workflow(
                     repo_root=repo_root,
@@ -3942,6 +4114,20 @@ def run_onefile_workflow(
                 print(
                     "[onefile] experiment_matrix produced zero successful items; "
                     "abort before audits to expose root cause",
+                    file=sys.stderr,
+                )
+                return 1
+
+            try:
+                _run_parallel_attestation_statistics_workflow(
+                    repo_root=repo_root,
+                    run_root=run_root,
+                    cfg_path=effective_cfg_path,
+                    profile=profile,
+                )
+            except Exception as exc:
+                print(
+                    f"[onefile] WARN: parallel attestation statistics failed: {type(exc).__name__}: {exc}",
                     file=sys.stderr,
                 )
                 return 1

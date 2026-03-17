@@ -54,6 +54,7 @@ watermark:
     trajectory_step_stride: 1
     sample_count: 28
     feature_dim: 128
+    rank: 128
   lf:
     enabled: true
     variance: 1.5
