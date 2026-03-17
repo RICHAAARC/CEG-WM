@@ -1215,6 +1215,20 @@ def _prepare_detect_record_for_attack_grouping(run_root: Path, grid_item_cfg: Di
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     enriched_path = artifacts_dir / "evaluate_inputs" / "detect_record_with_attack.json"
 
+    prompt_anchor, prompt_anchor_field = _extract_attack_metadata_source_prompt(enriched_record)
+    if isinstance(prompt_anchor, str) and prompt_anchor:
+        enriched_record["attack_metadata_source_prompt"] = prompt_anchor
+    if isinstance(prompt_anchor_field, str) and prompt_anchor_field:
+        enriched_record["attack_metadata_source_prompt_field"] = prompt_anchor_field
+
+    join_key = _build_attack_metadata_join_key(
+        prompt_anchor,
+        attack_family,
+        params_version if isinstance(params_version, str) and params_version else None,
+    )
+    if isinstance(join_key, str) and join_key:
+        enriched_record["attack_metadata_join_key"] = join_key
+
     records_io.write_artifact_json_unbound(
         run_root=run_root,
         artifacts_dir=artifacts_dir,
@@ -1222,6 +1236,70 @@ def _prepare_detect_record_for_attack_grouping(run_root: Path, grid_item_cfg: Di
         obj=enriched_record,
     )
     return enriched_path
+
+
+def _extract_attack_metadata_source_prompt(record: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
+    """
+    功能：为 attack metadata 绑定解析稳定的 source prompt 锚点。 
+
+    Resolve the stable source prompt anchor used for attack metadata binding.
+
+    Args:
+        record: Detect record mapping.
+
+    Returns:
+        Tuple of (prompt_value, field_path) when available.
+
+    Raises:
+        TypeError: If record is not a dict.
+    """
+    if not isinstance(record, dict):
+        raise TypeError("record must be dict")
+
+    top_level_prompt = record.get("inference_prompt")
+    if isinstance(top_level_prompt, str) and top_level_prompt:
+        return top_level_prompt, "inference_prompt"
+
+    infer_trace_node = record.get("infer_trace")
+    infer_trace = infer_trace_node if isinstance(infer_trace_node, dict) else {}
+    infer_trace_prompt = infer_trace.get("inference_prompt")
+    if isinstance(infer_trace_prompt, str) and infer_trace_prompt:
+        return infer_trace_prompt, "infer_trace.inference_prompt"
+
+    return None, None
+
+
+def _build_attack_metadata_join_key(
+    source_prompt_anchor: Optional[str],
+    attack_family: Optional[str],
+    attack_params_version: Optional[str],
+) -> Optional[str]:
+    """
+    功能：构造 attack metadata 的可审计 join key。 
+
+    Build the canonical join key used to bind attack metadata across records.
+
+    Args:
+        source_prompt_anchor: Stable prompt anchor shared with the source sample.
+        attack_family: Attack family token.
+        attack_params_version: Attack params version token.
+
+    Returns:
+        Canonical join key string when all components are available.
+    """
+    if not isinstance(source_prompt_anchor, str) or not source_prompt_anchor:
+        return None
+    if not isinstance(attack_family, str) or not attack_family:
+        return None
+    if not isinstance(attack_params_version, str) or not attack_params_version:
+        return None
+    return digests.canonical_sha256(
+        {
+            "source_prompt_anchor": source_prompt_anchor,
+            "attack_family": attack_family,
+            "attack_params_version": attack_params_version,
+        }
+    )
 
 
 def _prepare_labelled_detect_records_glob_for_matrix(

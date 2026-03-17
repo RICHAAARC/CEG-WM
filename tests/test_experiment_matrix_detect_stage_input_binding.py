@@ -162,6 +162,56 @@ def test_prepare_detect_record_for_attack_grouping_writes_attack_fields(tmp_path
     assert "policy_path_semantics_bound_digest" not in enriched_obj
 
 
+def test_prepare_detect_record_for_attack_grouping_builds_join_key_from_infer_trace_prompt(
+    tmp_path: Path,
+) -> None:
+    """
+    功能：当 top-level prompt 缺失时，attack metadata join key 必须绑定 infer_trace prompt。 
+
+    Verify detect_record_with_attack binds attack metadata join key from
+    infer_trace.inference_prompt when the top-level inference_prompt is absent.
+
+    Args:
+        tmp_path: pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    run_root = tmp_path / "run"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    source_path = records_dir / "detect_record.json"
+    source_path.write_text(
+        json.dumps(
+            {
+                "operation": "detect",
+                "infer_trace": {
+                    "inference_prompt": "matrix canonical prompt",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    grid_item_cfg = {
+        "attack_protocol_family": "rotate",
+        "attack_protocol_path": "configs/attack_protocol.yaml",
+    }
+
+    enriched_path = experiment_matrix._prepare_detect_record_for_attack_grouping(run_root, grid_item_cfg)
+    enriched_obj = json.loads(enriched_path.read_text(encoding="utf-8"))
+
+    assert enriched_obj.get("inference_prompt") is None
+    assert enriched_obj["infer_trace"]["inference_prompt"] == "matrix canonical prompt"
+    assert enriched_obj["attack_metadata_source_prompt"] == "matrix canonical prompt"
+    assert enriched_obj["attack_metadata_source_prompt_field"] == "infer_trace.inference_prompt"
+    assert enriched_obj["attack_metadata_join_key"] == experiment_matrix._build_attack_metadata_join_key(
+        "matrix canonical prompt",
+        "rotate",
+        "v1",
+    )
+
+
 def test_prepare_detect_record_for_attack_grouping_preserves_false_label(tmp_path: Path) -> None:
     """
     功能：若源记录含有效 bool 标签，enrich 结果必须保留该标签语义。

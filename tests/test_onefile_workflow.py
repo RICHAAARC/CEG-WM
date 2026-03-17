@@ -2075,6 +2075,216 @@ def test_prepare_detect_records_with_event_attestation_score_restores_attack_met
     assert metrics.build_attack_group_key(negative_payload, protocol_spec) == "jpeg::p1"
 
 
+def test_prepare_detect_records_with_event_attestation_score_expands_multi_attack_groups_for_multi_pair_fallback(
+    tmp_path: Path,
+) -> None:
+    """
+    功能：当 matrix top-level prompt 缺失且存在多 attack-group 时，fallback 必须按可信 join key 展开。 
+
+    Verify fallback expands trusted attack metadata contexts for multi-pair,
+    multi-attack-group runs when matrix records only expose infer_trace prompt anchors.
+
+    Args:
+        tmp_path: pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+
+    canonical_prompt = "matrix canonical prompt"
+    source_detect_path = records_dir / "detect_record.json"
+    source_detect_path.write_text(
+        json.dumps(
+            {
+                "label": True,
+                "ground_truth": True,
+                "is_watermarked": True,
+                "inference_prompt": canonical_prompt,
+                "infer_trace": {
+                    "inference_prompt": canonical_prompt,
+                },
+                "content_evidence_payload": {"status": "ok", "score": 0.91},
+                "attestation": {
+                    "attestation_source": "formal_input_payload",
+                    "image_evidence_result": {
+                        "status": "ok",
+                        "content_attestation_score": 0.93,
+                        "content_attestation_score_name": "content_attestation_score",
+                    },
+                    "final_event_attested_decision": {
+                        "status": "attested",
+                        "is_event_attested": True,
+                        "event_attestation_score": 0.93,
+                        "event_attestation_score_name": "event_attestation_score",
+                    },
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    branch_neg_detect_path = run_root / "artifacts" / "branch_neg" / "records" / "detect_record.json"
+    branch_neg_detect_path.parent.mkdir(parents=True, exist_ok=True)
+    branch_neg_detect_path.write_text(
+        json.dumps(
+            {
+                "label": False,
+                "ground_truth": False,
+                "is_watermarked": False,
+                "infer_trace": {
+                    "inference_prompt": canonical_prompt,
+                },
+                "content_evidence_payload": {"status": "ok", "score": 0.14},
+                "attestation": {
+                    "attestation_source": "negative_branch_statement_only_provenance",
+                    "authenticity_result": {
+                        "status": "statement_only",
+                        "bundle_status": "statement_only_provenance_no_bundle",
+                        "statement_status": "parsed",
+                    },
+                    "image_evidence_result": {
+                        "status": "ok",
+                        "content_attestation_score": 0.14,
+                        "content_attestation_score_name": "content_attestation_score",
+                    },
+                    "final_event_attested_decision": {
+                        "status": "unattested",
+                        "is_event_attested": False,
+                        "event_attestation_score": 0.0,
+                        "event_attestation_score_name": "event_attestation_score",
+                    },
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    matrix_specs = [
+        ("jpeg", "p1"),
+        ("rotate", "v1"),
+    ]
+    for index, (attack_family, attack_params_version) in enumerate(matrix_specs):
+        matrix_detect_path = (
+            run_root
+            / "outputs"
+            / "experiment_matrix"
+            / "experiments"
+            / f"item_{index:04d}"
+            / "artifacts"
+            / "evaluate_inputs"
+            / "detect_record_with_attack.json"
+        )
+        matrix_detect_path.parent.mkdir(parents=True, exist_ok=True)
+        matrix_detect_path.write_text(
+            json.dumps(
+                {
+                    "label": True,
+                    "ground_truth": True,
+                    "is_watermarked": True,
+                    "attack_family": attack_family,
+                    "attack_params_version": attack_params_version,
+                    "attack": {
+                        "family": attack_family,
+                        "params_version": attack_params_version,
+                    },
+                    "attack_metadata_source_prompt": canonical_prompt,
+                    "attack_metadata_source_prompt_field": "infer_trace.inference_prompt",
+                    "attack_metadata_join_key": module._build_attack_metadata_join_key(
+                        canonical_prompt,
+                        attack_family,
+                        attack_params_version,
+                    ),
+                    "infer_trace": {
+                        "inference_prompt": canonical_prompt,
+                    },
+                    "attestation": {
+                        "status": "absent",
+                        "attestation_absent_reason": "attestation_disabled",
+                        "final_event_attested_decision": {
+                            "status": "absent",
+                            "is_event_attested": False,
+                        },
+                    },
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+    glob_pattern = module._prepare_detect_records_with_minimal_ground_truth(
+        run_root=run_root,
+        source_detect_path=source_detect_path,
+        stage_name="calibrate",
+        pair_count=2,
+        prompts=["gt prompt 1", "gt prompt 2"],
+        branch_neg_detect_record=branch_neg_detect_path,
+        score_name="event_attestation_score",
+    )
+
+    matched_paths = sorted(Path(glob_pattern).parent.glob(Path(glob_pattern).name))
+    payloads = [json.loads(path.read_text(encoding="utf-8")) for path in matched_paths]
+
+    assert len(payloads) == 8
+
+    join_keys = {payload["attack_metadata_join_key"] for payload in payloads}
+    assert len(join_keys) == 2
+
+    protocol_spec = {
+        "family_field_candidates": ["attack_family", "attack.family", "attack.type"],
+        "params_version_field_candidates": ["attack_params_version", "attack.params_version"],
+    }
+
+    grouped_payloads: dict[str, list[dict[str, Any]]] = {}
+    for payload in payloads:
+        grouped_payloads.setdefault(payload["attack_metadata_join_key"], []).append(payload)
+        assert payload["attack_metadata_source_prompt"] == canonical_prompt
+        assert payload["attack_metadata_source_prompt_field"] == "infer_trace.inference_prompt"
+        assert payload["infer_trace"]["inference_prompt"] == canonical_prompt
+        assert payload["inference_prompt"] in {"gt prompt 1", "gt prompt 2"}
+
+    assert {metrics.build_attack_group_key(group[0], protocol_spec) for group in grouped_payloads.values()} == {
+        "jpeg::p1",
+        "rotate::v1",
+    }
+
+    for group_payloads in grouped_payloads.values():
+        assert len(group_payloads) == 4
+        positive_payloads = [payload for payload in group_payloads if payload.get("label") is True]
+        negative_payloads = [payload for payload in group_payloads if payload.get("label") is False]
+        assert len(positive_payloads) == 2
+        assert len(negative_payloads) == 2
+        assert {payload["inference_prompt"] for payload in positive_payloads} == {"gt prompt 1", "gt prompt 2"}
+        assert {payload["inference_prompt"] for payload in negative_payloads} == {"gt prompt 1", "gt prompt 2"}
+        assert all(payload["attestation"]["attestation_source"] == "formal_input_payload" for payload in positive_payloads)
+        assert all(
+            payload["attestation"]["final_event_attested_decision"]["event_attestation_score"] == pytest.approx(0.93)
+            for payload in positive_payloads
+        )
+        assert all(
+            payload["attestation"]["attestation_source"] == "negative_branch_statement_only_provenance"
+            for payload in negative_payloads
+        )
+        assert all(
+            payload["attestation"]["authenticity_result"]["bundle_status"] == "statement_only_provenance_no_bundle"
+            for payload in negative_payloads
+        )
+        assert all(
+            payload["attestation"]["final_event_attested_decision"]["event_attestation_score"] == pytest.approx(0.0)
+            for payload in negative_payloads
+        )
+
+
 def test_parallel_attestation_statistics_workflow_fallback_preserves_attack_metadata_overlay(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -1460,6 +1460,75 @@ def _collect_experiment_matrix_attack_aware_detect_paths(run_root: Path) -> List
     return sorted(experiments_root.glob("*/artifacts/evaluate_inputs/detect_record_with_attack.json"))
 
 
+def _extract_attack_metadata_source_prompt(record: Dict[str, Any]) -> tuple[str | None, str | None]:
+    """
+    功能：解析 attack metadata 绑定使用的稳定 source prompt 锚点。 
+
+    Resolve the stable source prompt anchor used for attack metadata binding.
+
+    Args:
+        record: Detect record mapping.
+
+    Returns:
+        Tuple of (prompt_value, field_path) when available.
+
+    Raises:
+        TypeError: If record is invalid.
+    """
+    if not isinstance(record, dict):
+        raise TypeError("record must be dict")
+
+    top_level_prompt = record.get("inference_prompt")
+    if isinstance(top_level_prompt, str) and top_level_prompt:
+        return top_level_prompt, "inference_prompt"
+
+    infer_trace_node = record.get("infer_trace")
+    infer_trace = infer_trace_node if isinstance(infer_trace_node, dict) else {}
+    infer_trace_prompt = infer_trace.get("inference_prompt")
+    if isinstance(infer_trace_prompt, str) and infer_trace_prompt:
+        return infer_trace_prompt, "infer_trace.inference_prompt"
+
+    return None, None
+
+
+def _build_attack_metadata_join_key(
+    source_prompt_anchor: str | None,
+    attack_family: str | None,
+    attack_params_version: str | None,
+) -> str | None:
+    """
+    功能：构造 attack metadata 的稳定 join key。 
+
+    Build the canonical join key used to bind attack metadata across fallback records.
+
+    Args:
+        source_prompt_anchor: Stable prompt anchor shared with the source sample.
+        attack_family: Attack family token.
+        attack_params_version: Attack params version token.
+
+    Returns:
+        Canonical join key string when all components are available.
+    """
+    if not isinstance(source_prompt_anchor, str) or not source_prompt_anchor:
+        return None
+    if not isinstance(attack_family, str) or not attack_family:
+        return None
+    if not isinstance(attack_params_version, str) or not attack_params_version:
+        return None
+    return hashlib.sha256(
+        json.dumps(
+            {
+                "source_prompt_anchor": source_prompt_anchor,
+                "attack_family": attack_family,
+                "attack_params_version": attack_params_version,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def _extract_attack_metadata_overlay(record: Dict[str, Any]) -> Dict[str, Any]:
     """
     功能：从记录中提取 attack-aware 分组元数据。 
@@ -1492,6 +1561,18 @@ def _extract_attack_metadata_overlay(record: Dict[str, Any]) -> Dict[str, Any]:
     attack_payload = record.get("attack")
     if isinstance(attack_payload, dict) and attack_payload:
         metadata_overlay["attack"] = copy.deepcopy(attack_payload)
+
+    join_key = record.get("attack_metadata_join_key")
+    if isinstance(join_key, str) and join_key:
+        metadata_overlay["attack_metadata_join_key"] = join_key
+
+    source_prompt_anchor = record.get("attack_metadata_source_prompt")
+    if isinstance(source_prompt_anchor, str) and source_prompt_anchor:
+        metadata_overlay["attack_metadata_source_prompt"] = source_prompt_anchor
+
+    source_prompt_field = record.get("attack_metadata_source_prompt_field")
+    if isinstance(source_prompt_field, str) and source_prompt_field:
+        metadata_overlay["attack_metadata_source_prompt_field"] = source_prompt_field
 
     inference_prompt = record.get("inference_prompt")
     if isinstance(inference_prompt, str) and inference_prompt:
@@ -1532,15 +1613,121 @@ def _collect_experiment_matrix_attack_metadata_candidates(run_root: Path) -> Lis
         if not any(key in metadata_overlay for key in ["attack_family", "attack_params_version", "attack"]):
             continue
 
+        source_prompt_anchor, source_prompt_field = _extract_attack_metadata_source_prompt(record)
+        if isinstance(source_prompt_anchor, str) and source_prompt_anchor:
+            metadata_overlay.setdefault("attack_metadata_source_prompt", source_prompt_anchor)
+        if isinstance(source_prompt_field, str) and source_prompt_field:
+            metadata_overlay.setdefault("attack_metadata_source_prompt_field", source_prompt_field)
+
+        join_key = metadata_overlay.get("attack_metadata_join_key")
+        if not isinstance(join_key, str) or not join_key:
+            join_key = _build_attack_metadata_join_key(
+                source_prompt_anchor,
+                metadata_overlay.get("attack_family") if isinstance(metadata_overlay.get("attack_family"), str) else None,
+                metadata_overlay.get("attack_params_version") if isinstance(metadata_overlay.get("attack_params_version"), str) else None,
+            )
+            if isinstance(join_key, str) and join_key:
+                metadata_overlay["attack_metadata_join_key"] = join_key
+
         candidate_records.append(
             {
                 "path": str(record_path),
                 "inference_prompt": metadata_overlay.get("inference_prompt"),
+                "source_prompt_anchor": source_prompt_anchor,
+                "attack_metadata_join_key": join_key,
                 "metadata_overlay": metadata_overlay,
             }
         )
 
     return candidate_records
+
+
+def _resolve_attack_metadata_generation_contexts(
+    source_payload: Dict[str, Any],
+    source_attack_metadata_overlay: Dict[str, Any],
+    candidate_records: Sequence[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    功能：解析 fallback GT 生成使用的可信 attack metadata 上下文。 
+
+    Resolve trusted attack metadata contexts for fallback GT generation.
+
+    Args:
+        source_payload: Canonical source detect record.
+        source_attack_metadata_overlay: Attack metadata already present on the source.
+        candidate_records: Matrix candidate metadata overlays.
+
+    Returns:
+        Ordered list of trusted metadata overlays. Empty list means no trusted binding.
+
+    Raises:
+        TypeError: If inputs are invalid.
+    """
+    if not isinstance(source_payload, dict):
+        raise TypeError("source_payload must be dict")
+    if not isinstance(source_attack_metadata_overlay, dict):
+        raise TypeError("source_attack_metadata_overlay must be dict")
+    if not isinstance(candidate_records, Sequence):
+        raise TypeError("candidate_records must be Sequence[Dict[str, Any]]")
+
+    if any(
+        key in source_attack_metadata_overlay
+        for key in ["attack_family", "attack_params_version", "attack"]
+    ):
+        source_prompt_anchor, source_prompt_field = _extract_attack_metadata_source_prompt(source_payload)
+        source_overlay = copy.deepcopy(source_attack_metadata_overlay)
+        if isinstance(source_prompt_anchor, str) and source_prompt_anchor:
+            source_overlay.setdefault("attack_metadata_source_prompt", source_prompt_anchor)
+        if isinstance(source_prompt_field, str) and source_prompt_field:
+            source_overlay.setdefault("attack_metadata_source_prompt_field", source_prompt_field)
+        join_key = _build_attack_metadata_join_key(
+            source_prompt_anchor,
+            source_overlay.get("attack_family") if isinstance(source_overlay.get("attack_family"), str) else None,
+            source_overlay.get("attack_params_version") if isinstance(source_overlay.get("attack_params_version"), str) else None,
+        )
+        if isinstance(join_key, str) and join_key:
+            source_overlay.setdefault("attack_metadata_join_key", join_key)
+        return [source_overlay]
+
+    source_prompt_anchor, _ = _extract_attack_metadata_source_prompt(source_payload)
+    matched_candidates: List[Dict[str, Any]] = []
+    if isinstance(source_prompt_anchor, str) and source_prompt_anchor:
+        matched_candidates = [
+            item
+            for item in candidate_records
+            if isinstance(item, dict) and item.get("source_prompt_anchor") == source_prompt_anchor
+        ]
+
+    if not matched_candidates and len(candidate_records) == 1:
+        candidate_item = candidate_records[0]
+        if isinstance(candidate_item, dict):
+            matched_candidates = [candidate_item]
+
+    trusted_contexts: List[Dict[str, Any]] = []
+    seen_join_keys: set[str] = set()
+    for item in matched_candidates:
+        if not isinstance(item, dict):
+            continue
+        metadata_overlay = item.get("metadata_overlay")
+        if not isinstance(metadata_overlay, dict):
+            continue
+        join_key = item.get("attack_metadata_join_key")
+        if not isinstance(join_key, str) or not join_key:
+            join_key = metadata_overlay.get("attack_metadata_join_key")
+        if not isinstance(join_key, str) or not join_key:
+            join_key = _build_attack_metadata_join_key(
+                item.get("source_prompt_anchor") if isinstance(item.get("source_prompt_anchor"), str) else None,
+                metadata_overlay.get("attack_family") if isinstance(metadata_overlay.get("attack_family"), str) else None,
+                metadata_overlay.get("attack_params_version") if isinstance(metadata_overlay.get("attack_params_version"), str) else None,
+            )
+        if not isinstance(join_key, str) or not join_key or join_key in seen_join_keys:
+            continue
+        overlay_copy = copy.deepcopy(metadata_overlay)
+        overlay_copy["attack_metadata_join_key"] = join_key
+        seen_join_keys.add(join_key)
+        trusted_contexts.append(overlay_copy)
+
+    return trusted_contexts
 
 
 def _resolve_attack_metadata_overlay_for_pair(
@@ -2272,17 +2459,33 @@ def _prepare_detect_records_with_minimal_ground_truth(
         raise ValueError("source detect record must be JSON object")
     matrix_attack_metadata_candidates = _collect_experiment_matrix_attack_metadata_candidates(run_root)
     source_attack_metadata_overlay = _extract_attack_metadata_overlay(source_payload)
+    attack_metadata_contexts = _resolve_attack_metadata_generation_contexts(
+        source_payload,
+        source_attack_metadata_overlay,
+        matrix_attack_metadata_candidates,
+    )
+    if not attack_metadata_contexts:
+        attack_metadata_contexts = [{}]
 
-    def _resolve_attack_metadata_overlay_for_prompt(prompt_value: str | None) -> Dict[str, Any]:
-        if any(
-            key in source_attack_metadata_overlay
-            for key in ["attack_family", "attack_params_version", "attack"]
-        ):
-            return copy.deepcopy(source_attack_metadata_overlay)
-        return _resolve_attack_metadata_overlay_for_pair(
-            matrix_attack_metadata_candidates,
-            pair_count,
-            prompt_value,
+    def _resolve_gt_record_paths(
+        workflow_cfg_dir: Path,
+        context_index: int,
+        context_count: int,
+        pair_index: int,
+    ) -> tuple[Path, Path]:
+        if context_count == 1 and pair_count == 1:
+            return (
+                workflow_cfg_dir / f"detect_records_{stage_name}_gt_positive.json",
+                workflow_cfg_dir / f"detect_records_{stage_name}_gt_negative.json",
+            )
+        if context_count == 1:
+            return (
+                workflow_cfg_dir / f"detect_records_{stage_name}_gt_positive_{pair_index:03d}.json",
+                workflow_cfg_dir / f"detect_records_{stage_name}_gt_negative_{pair_index:03d}.json",
+            )
+        return (
+            workflow_cfg_dir / f"detect_records_{stage_name}_gt_positive_{context_index:03d}_{pair_index:03d}.json",
+            workflow_cfg_dir / f"detect_records_{stage_name}_gt_negative_{context_index:03d}_{pair_index:03d}.json",
         )
 
     def _normalize_positive_payload_if_recovered_failed(payload: Dict[str, Any]) -> None:
@@ -2332,118 +2535,115 @@ def _prepare_detect_records_with_minimal_ground_truth(
                             return numeric_value
                     return None
 
-                for pair_index in range(pair_count):
-                    # 直接使用正负样本，不进行 clone 操作。
-                    # dual_branch 路径使用真实 detect record，禁止强制覆写 status。
-                    pos_payload = json.loads(json.dumps(source_payload, ensure_ascii=False))
-                    pos_payload["label"] = True
-                    pos_payload["ground_truth"] = True
-                    pos_payload["is_watermarked"] = True
-                    pos_payload["ground_truth_source"] = "dual_branch_positive"
-                    # 【P0-C】为每对正样本赋予唯一 run_id，保证统计样本独立性。
-                    pos_payload["run_id"] = str(uuid.uuid4())
-                    if prompts is not None:
-                        prompt_value = prompts[pair_index]
-                        if not isinstance(prompt_value, str) or not prompt_value.strip():
-                            raise ValueError("prompt entry must be non-empty str")
-                        pos_payload["inference_prompt"] = prompt_value
-                    else:
-                        prompt_value = pos_payload.get("inference_prompt")
-                        if not isinstance(prompt_value, str) or not prompt_value:
-                            prompt_value = None
-                    attack_metadata_overlay = _resolve_attack_metadata_overlay_for_prompt(prompt_value)
-                    _apply_attack_metadata_overlay(pos_payload, attack_metadata_overlay)
-                    _normalize_positive_payload_if_recovered_failed(pos_payload)
+                context_count = len(attack_metadata_contexts)
+                for context_index, attack_metadata_overlay in enumerate(attack_metadata_contexts):
+                    for pair_index in range(pair_count):
+                        # 直接使用正负样本，不进行 clone 操作。
+                        # dual_branch 路径使用真实 detect record，禁止强制覆写 status。
+                        pos_payload = json.loads(json.dumps(source_payload, ensure_ascii=False))
+                        pos_payload["label"] = True
+                        pos_payload["ground_truth"] = True
+                        pos_payload["is_watermarked"] = True
+                        pos_payload["ground_truth_source"] = "dual_branch_positive"
+                        # 【P0-C】为每对正样本赋予唯一 run_id，保证统计样本独立性。
+                        pos_payload["run_id"] = str(uuid.uuid4())
+                        if prompts is not None:
+                            prompt_value = prompts[pair_index]
+                            if not isinstance(prompt_value, str) or not prompt_value.strip():
+                                raise ValueError("prompt entry must be non-empty str")
+                            pos_payload["inference_prompt"] = prompt_value
+                        _apply_attack_metadata_overlay(pos_payload, attack_metadata_overlay)
+                        _normalize_positive_payload_if_recovered_failed(pos_payload)
 
-                    neg_payload_per_pair = json.loads(json.dumps(neg_payload, ensure_ascii=False))
-                    neg_payload_per_pair["label"] = False
-                    neg_payload_per_pair["ground_truth"] = False
-                    neg_payload_per_pair["is_watermarked"] = False
-                    neg_payload_per_pair["ground_truth_source"] = "dual_branch_negative"
-                    # 【P0-C】为每对负样本赋予唯一 run_id，保证统计样本独立性。
-                    neg_payload_per_pair["run_id"] = str(uuid.uuid4())
-                    if prompts is not None:
-                        prompt_value = prompts[pair_index]
-                        if not isinstance(prompt_value, str) or not prompt_value.strip():
-                            raise ValueError("prompt entry must be non-empty str")
-                        neg_payload_per_pair["inference_prompt"] = prompt_value
-                    _apply_attack_metadata_overlay(neg_payload_per_pair, attack_metadata_overlay)
+                        neg_payload_per_pair = json.loads(json.dumps(neg_payload, ensure_ascii=False))
+                        neg_payload_per_pair["label"] = False
+                        neg_payload_per_pair["ground_truth"] = False
+                        neg_payload_per_pair["is_watermarked"] = False
+                        neg_payload_per_pair["ground_truth_source"] = "dual_branch_negative"
+                        # 【P0-C】为每对负样本赋予唯一 run_id，保证统计样本独立性。
+                        neg_payload_per_pair["run_id"] = str(uuid.uuid4())
+                        if prompts is not None:
+                            prompt_value = prompts[pair_index]
+                            if not isinstance(prompt_value, str) or not prompt_value.strip():
+                                raise ValueError("prompt entry must be non-empty str")
+                            neg_payload_per_pair["inference_prompt"] = prompt_value
+                        _apply_attack_metadata_overlay(neg_payload_per_pair, attack_metadata_overlay)
 
-                    neg_content_node = neg_payload_per_pair.get("content_evidence_payload")
-                    if isinstance(neg_content_node, dict):
-                        neg_content = neg_content_node
-                    else:
-                        neg_content = {}
-                        neg_payload_per_pair["content_evidence_payload"] = neg_content
+                        neg_content_node = neg_payload_per_pair.get("content_evidence_payload")
+                        if isinstance(neg_content_node, dict):
+                            neg_content = neg_content_node
+                        else:
+                            neg_content = {}
+                            neg_payload_per_pair["content_evidence_payload"] = neg_content
 
-                    if score_name == "content_score":
-                        neg_status_value = neg_content.get("status")
-                        neg_score_value = _coerce_finite_float(neg_content.get("score"))
-                        if not (neg_status_value == "ok" and neg_score_value is not None):
-                            neg_score_parts_node = neg_content.get("score_parts")
-                            neg_score_parts = neg_score_parts_node if isinstance(neg_score_parts_node, dict) else {}
-                            neg_hf_trace_node = neg_score_parts.get("hf_detect_trace")
-                            neg_hf_trace = neg_hf_trace_node if isinstance(neg_hf_trace_node, dict) else {}
-                            recovery_candidates = [
-                                neg_content.get("score"),
-                                neg_content.get("detect_lf_score"),
-                                neg_content.get("detect_hf_score"),
-                                neg_content.get("lf_score"),
-                                neg_score_parts.get("content_score"),
-                                neg_score_parts.get("detect_lf_score"),
-                                neg_hf_trace.get("hf_score_raw"),
-                            ]
-                            recovered_score = None
-                            for candidate_value in recovery_candidates:
-                                numeric_candidate = _coerce_finite_float(candidate_value)
-                                if numeric_candidate is not None:
-                                    recovered_score = numeric_candidate
-                                    break
-                            if recovered_score is not None:
-                                neg_content["status"] = "ok"
-                                neg_content["score"] = float(recovered_score)
-                                neg_content["calibration_sample_origin"] = "dual_branch_negative_recovery"
-                                neg_content["calibration_sample_usage"] = "formal_with_dual_branch_negative_marker"
+                        if score_name == "content_score":
+                            neg_status_value = neg_content.get("status")
+                            neg_score_value = _coerce_finite_float(neg_content.get("score"))
+                            if not (neg_status_value == "ok" and neg_score_value is not None):
+                                neg_score_parts_node = neg_content.get("score_parts")
+                                neg_score_parts = neg_score_parts_node if isinstance(neg_score_parts_node, dict) else {}
+                                neg_hf_trace_node = neg_score_parts.get("hf_detect_trace")
+                                neg_hf_trace = neg_hf_trace_node if isinstance(neg_hf_trace_node, dict) else {}
+                                recovery_candidates = [
+                                    neg_content.get("score"),
+                                    neg_content.get("detect_lf_score"),
+                                    neg_content.get("detect_hf_score"),
+                                    neg_content.get("lf_score"),
+                                    neg_score_parts.get("content_score"),
+                                    neg_score_parts.get("detect_lf_score"),
+                                    neg_hf_trace.get("hf_score_raw"),
+                                ]
+                                recovered_score = None
+                                for candidate_value in recovery_candidates:
+                                    numeric_candidate = _coerce_finite_float(candidate_value)
+                                    if numeric_candidate is not None:
+                                        recovered_score = numeric_candidate
+                                        break
+                                if recovered_score is not None:
+                                    neg_content["status"] = "ok"
+                                    neg_content["score"] = float(recovered_score)
+                                    neg_content["calibration_sample_origin"] = "dual_branch_negative_recovery"
+                                    neg_content["calibration_sample_usage"] = "formal_with_dual_branch_negative_marker"
 
-                        # 保证 dual-branch 负样本分数低于对应正样本，避免校准阈值退化到正负同值。
-                        pos_content_node = pos_payload.get("content_evidence_payload")
-                        pos_content = pos_content_node if isinstance(pos_content_node, dict) else {}
-                        pos_score_value = _coerce_finite_float(pos_content.get("score"))
-                        neg_score_value = _coerce_finite_float(neg_content.get("score"))
-                        if pos_score_value is not None and neg_score_value is not None and neg_score_value >= pos_score_value:
-                            adjusted_negative_score = float(pos_score_value - (pair_index + 1) * 1e-6)
-                            neg_content["score"] = adjusted_negative_score
-                            neg_content["calibration_score_adjustment_applied"] = True
-                            neg_content["calibration_score_adjustment_reason"] = (
-                                "dual_branch_negative_score_not_lower_than_positive"
-                            )
-                            neg_content["calibration_score_adjustment_delta"] = float(adjusted_negative_score - neg_score_value)
-                            if not isinstance(neg_content.get("calibration_sample_origin"), str):
-                                neg_content["calibration_sample_origin"] = "dual_branch_negative_score_adjusted"
-                    elif score_name == CONTENT_ATTESTATION_SCORE_NAME:
-                        _ = _extract_content_attestation_score_from_detect_record(neg_payload_per_pair)
-                    elif score_name == EVENT_ATTESTATION_SCORE_NAME:
-                        _ = _extract_event_attestation_score_from_detect_record(neg_payload_per_pair)
-                    else:
-                        raise ValueError(f"unsupported score_name: {score_name}")
+                            # 保证 dual-branch 负样本分数低于对应正样本，避免校准阈值退化到正负同值。
+                            pos_content_node = pos_payload.get("content_evidence_payload")
+                            pos_content = pos_content_node if isinstance(pos_content_node, dict) else {}
+                            pos_score_value = _coerce_finite_float(pos_content.get("score"))
+                            neg_score_value = _coerce_finite_float(neg_content.get("score"))
+                            if pos_score_value is not None and neg_score_value is not None and neg_score_value >= pos_score_value:
+                                adjusted_negative_score = float(pos_score_value - (pair_index + 1) * 1e-6)
+                                neg_content["score"] = adjusted_negative_score
+                                neg_content["calibration_score_adjustment_applied"] = True
+                                neg_content["calibration_score_adjustment_reason"] = (
+                                    "dual_branch_negative_score_not_lower_than_positive"
+                                )
+                                neg_content["calibration_score_adjustment_delta"] = float(adjusted_negative_score - neg_score_value)
+                                if not isinstance(neg_content.get("calibration_sample_origin"), str):
+                                    neg_content["calibration_sample_origin"] = "dual_branch_negative_score_adjusted"
+                        elif score_name == CONTENT_ATTESTATION_SCORE_NAME:
+                            _ = _extract_content_attestation_score_from_detect_record(neg_payload_per_pair)
+                        elif score_name == EVENT_ATTESTATION_SCORE_NAME:
+                            _ = _extract_event_attestation_score_from_detect_record(neg_payload_per_pair)
+                        else:
+                            raise ValueError(f"unsupported score_name: {score_name}")
 
-                    if pair_count == 1:
-                        pos_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_positive.json"
-                        neg_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_negative.json"
-                    else:
-                        pos_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_positive_{pair_index:03d}.json"
-                        neg_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_negative_{pair_index:03d}.json"
+                        pos_path, neg_path = _resolve_gt_record_paths(
+                            workflow_cfg_dir,
+                            context_index,
+                            context_count,
+                            pair_index,
+                        )
 
-                    _write_artifact_text_unbound(
-                        artifact_run_root,
-                        pos_path,
-                        json.dumps(pos_payload, ensure_ascii=False, indent=2),
-                    )
-                    _write_artifact_text_unbound(
-                        artifact_run_root,
-                        neg_path,
-                        json.dumps(neg_payload_per_pair, ensure_ascii=False, indent=2),
-                    )
+                        _write_artifact_text_unbound(
+                            artifact_run_root,
+                            pos_path,
+                            json.dumps(pos_payload, ensure_ascii=False, indent=2),
+                        )
+                        _write_artifact_text_unbound(
+                            artifact_run_root,
+                            neg_path,
+                            json.dumps(neg_payload_per_pair, ensure_ascii=False, indent=2),
+                        )
                 return str((workflow_cfg_dir / f"detect_records_{stage_name}_gt_*.json"))
         except Exception as exc:
             print(f"[GT] WARN: Dual-branch aggregation failed: {type(exc).__name__}: {exc}", file=sys.stderr)
@@ -2452,50 +2652,51 @@ def _prepare_detect_records_with_minimal_ground_truth(
     workflow_cfg_dir = artifact_run_root / "artifacts" / "workflow_cfg"
     workflow_cfg_dir.mkdir(parents=True, exist_ok=True)
 
-    for pair_index in range(pair_count):
-        positive_payload = json.loads(json.dumps(source_payload, ensure_ascii=False))
-        positive_payload["label"] = True
-        positive_payload["ground_truth"] = True
-        positive_payload["is_watermarked"] = True
-        positive_payload["ground_truth_source"] = "clone_positive"
-        # 【P0-C】为每对克隆正样本赋予唯一 run_id，满足统计样本记录级独立性。
-        positive_payload["run_id"] = str(uuid.uuid4())
-        if isinstance(dual_branch_failure_reason, str) and dual_branch_failure_reason:
-            positive_payload["dual_branch_failure_reason"] = dual_branch_failure_reason
-        prompt_value: str | None = None
-        if prompts is None:
-            existing_prompt = positive_payload.get("inference_prompt")
-            if isinstance(existing_prompt, str) and existing_prompt:
-                prompt_value = existing_prompt
-        _normalize_positive_payload_if_recovered_failed(positive_payload)
+    context_count = len(attack_metadata_contexts)
+    for context_index, attack_metadata_overlay in enumerate(attack_metadata_contexts):
+        for pair_index in range(pair_count):
+            positive_payload = json.loads(json.dumps(source_payload, ensure_ascii=False))
+            positive_payload["label"] = True
+            positive_payload["ground_truth"] = True
+            positive_payload["is_watermarked"] = True
+            positive_payload["ground_truth_source"] = "clone_positive"
+            # 【P0-C】为每对克隆正样本赋予唯一 run_id，满足统计样本记录级独立性。
+            positive_payload["run_id"] = str(uuid.uuid4())
+            if isinstance(dual_branch_failure_reason, str) and dual_branch_failure_reason:
+                positive_payload["dual_branch_failure_reason"] = dual_branch_failure_reason
+            if prompts is not None:
+                prompt_value = prompts[pair_index]
+                if not isinstance(prompt_value, str) or not prompt_value.strip():
+                    raise ValueError("prompt entry must be non-empty str")
+                positive_payload["inference_prompt"] = prompt_value
+            _normalize_positive_payload_if_recovered_failed(positive_payload)
 
-        negative_payload = json.loads(json.dumps(source_payload, ensure_ascii=False))
-        negative_payload["label"] = False
-        negative_payload["ground_truth"] = False
-        negative_payload["is_watermarked"] = False
-        negative_payload["ground_truth_source"] = "clone_negative"
-        # 【P0-C】为每对克隆负样本赋予唯一 run_id，满足统计样本记录级独立性。
-        negative_payload["run_id"] = str(uuid.uuid4())
-        if isinstance(dual_branch_failure_reason, str) and dual_branch_failure_reason:
-            negative_payload["dual_branch_failure_reason"] = dual_branch_failure_reason
+            negative_payload = json.loads(json.dumps(source_payload, ensure_ascii=False))
+            negative_payload["label"] = False
+            negative_payload["ground_truth"] = False
+            negative_payload["is_watermarked"] = False
+            negative_payload["ground_truth_source"] = "clone_negative"
+            # 【P0-C】为每对克隆负样本赋予唯一 run_id，满足统计样本记录级独立性。
+            negative_payload["run_id"] = str(uuid.uuid4())
+            if isinstance(dual_branch_failure_reason, str) and dual_branch_failure_reason:
+                negative_payload["dual_branch_failure_reason"] = dual_branch_failure_reason
 
-        if prompts is not None:
-            prompt_value = prompts[pair_index]
-            if not isinstance(prompt_value, str) or not prompt_value.strip():
-                raise ValueError("prompt entry must be non-empty str")
-            positive_payload["inference_prompt"] = prompt_value
-            negative_payload["inference_prompt"] = prompt_value
+            if prompts is not None:
+                prompt_value = prompts[pair_index]
+                if not isinstance(prompt_value, str) or not prompt_value.strip():
+                    raise ValueError("prompt entry must be non-empty str")
+                positive_payload["inference_prompt"] = prompt_value
+                negative_payload["inference_prompt"] = prompt_value
 
-        attack_metadata_overlay = _resolve_attack_metadata_overlay_for_prompt(prompt_value)
-        _apply_attack_metadata_overlay(positive_payload, attack_metadata_overlay)
-        _apply_attack_metadata_overlay(negative_payload, attack_metadata_overlay)
+            _apply_attack_metadata_overlay(positive_payload, attack_metadata_overlay)
+            _apply_attack_metadata_overlay(negative_payload, attack_metadata_overlay)
 
-        negative_content_node = negative_payload.get("content_evidence_payload")
-        if isinstance(negative_content_node, dict):
-            negative_content = negative_content_node
-        else:
-            negative_content = {}
-            negative_payload["content_evidence_payload"] = negative_content
+            negative_content_node = negative_payload.get("content_evidence_payload")
+            if isinstance(negative_content_node, dict):
+                negative_content = negative_content_node
+            else:
+                negative_content = {}
+                negative_payload["content_evidence_payload"] = negative_content
 
         def _coerce_finite_float(value: object) -> float | None:
             if isinstance(value, bool):
@@ -2517,55 +2718,55 @@ def _prepare_detect_records_with_minimal_ground_truth(
                     return numeric_value
             return None
 
-        negative_status_value = negative_content.get("status")
-        negative_score_value = _coerce_finite_float(negative_content.get("score"))
-        recovered_reason_value = negative_content.get("calibration_score_recovery_reason")
-        recovered_from_failed_source = (
-            isinstance(recovered_reason_value, str)
-            and bool(recovered_reason_value)
-            and negative_score_value is not None
-        )
+            negative_status_value = negative_content.get("status")
+            negative_score_value = _coerce_finite_float(negative_content.get("score"))
+            recovered_reason_value = negative_content.get("calibration_score_recovery_reason")
+            recovered_from_failed_source = (
+                isinstance(recovered_reason_value, str)
+                and bool(recovered_reason_value)
+                and negative_score_value is not None
+            )
 
-        if score_name == "content_score":
-            if negative_status_value == "ok" or recovered_from_failed_source:
-                if recovered_from_failed_source and negative_status_value != "ok":
-                    negative_content["status"] = "ok"
-                    negative_content["content_failure_reason"] = None
-                negative_content["score"] = float(-1.0 - pair_index * 1e-6)
-                negative_content["calibration_sample_usage"] = "synthetic_negative_for_ground_truth_closure"
-                if recovered_from_failed_source:
-                    negative_content["calibration_sample_origin"] = "synthetic_negative_bundle_from_failed_source"
-                else:
-                    negative_content["calibration_sample_origin"] = "synthetic_negative_bundle"
-        elif score_name in {CONTENT_ATTESTATION_SCORE_NAME, EVENT_ATTESTATION_SCORE_NAME}:
-            # attestation 统计链中的 clone fallback 不能继承 source formal verdict。
-            # 这里显式标记为 unavailable，使该样本按正式规则被 rejection。
-            _mark_clone_fallback_attestation_unavailable(negative_payload)
-        else:
-            raise ValueError(f"unsupported score_name: {score_name}")
-
-        if isinstance(dual_branch_failure_reason, str) and dual_branch_failure_reason:
             if score_name == "content_score":
-                negative_content["calibration_sample_usage"] = "synthetic_negative_for_ground_truth_closure"
-            negative_content["dual_branch_failure_reason"] = dual_branch_failure_reason
+                if negative_status_value == "ok" or recovered_from_failed_source:
+                    if recovered_from_failed_source and negative_status_value != "ok":
+                        negative_content["status"] = "ok"
+                        negative_content["content_failure_reason"] = None
+                    negative_content["score"] = float(-1.0 - pair_index * 1e-6)
+                    negative_content["calibration_sample_usage"] = "synthetic_negative_for_ground_truth_closure"
+                    if recovered_from_failed_source:
+                        negative_content["calibration_sample_origin"] = "synthetic_negative_bundle_from_failed_source"
+                    else:
+                        negative_content["calibration_sample_origin"] = "synthetic_negative_bundle"
+            elif score_name in {CONTENT_ATTESTATION_SCORE_NAME, EVENT_ATTESTATION_SCORE_NAME}:
+                # attestation 统计链中的 clone fallback 不能继承 source formal verdict。
+                # 这里显式标记为 unavailable，使该样本按正式规则被 rejection。
+                _mark_clone_fallback_attestation_unavailable(negative_payload)
+            else:
+                raise ValueError(f"unsupported score_name: {score_name}")
 
-        if pair_count == 1:
-            positive_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_positive.json"
-            negative_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_negative.json"
-        else:
-            positive_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_positive_{pair_index:03d}.json"
-            negative_path = workflow_cfg_dir / f"detect_records_{stage_name}_gt_negative_{pair_index:03d}.json"
+            if isinstance(dual_branch_failure_reason, str) and dual_branch_failure_reason:
+                if score_name == "content_score":
+                    negative_content["calibration_sample_usage"] = "synthetic_negative_for_ground_truth_closure"
+                negative_content["dual_branch_failure_reason"] = dual_branch_failure_reason
 
-        _write_artifact_text_unbound(
-            artifact_run_root,
-            positive_path,
-            json.dumps(positive_payload, ensure_ascii=False, indent=2),
-        )
-        _write_artifact_text_unbound(
-            artifact_run_root,
-            negative_path,
-            json.dumps(negative_payload, ensure_ascii=False, indent=2),
-        )
+            positive_path, negative_path = _resolve_gt_record_paths(
+                workflow_cfg_dir,
+                context_index,
+                context_count,
+                pair_index,
+            )
+
+            _write_artifact_text_unbound(
+                artifact_run_root,
+                positive_path,
+                json.dumps(positive_payload, ensure_ascii=False, indent=2),
+            )
+            _write_artifact_text_unbound(
+                artifact_run_root,
+                negative_path,
+                json.dumps(negative_payload, ensure_ascii=False, indent=2),
+            )
 
     return str((workflow_cfg_dir / f"detect_records_{stage_name}_gt_*.json"))
 
