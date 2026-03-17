@@ -5,6 +5,8 @@ Module type: General module
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, cast
@@ -17,6 +19,7 @@ from main.watermarking.provenance.attestation_statement import (
     build_signed_attestation_bundle,
     compute_attestation_digest,
     compute_event_binding_digest,
+    statement_from_dict,
     verify_signed_attestation_bundle,
 )
 from main.watermarking.provenance.key_derivation import derive_attestation_keys
@@ -67,6 +70,33 @@ def _build_statement() -> Dict[str, Any]:
         "attestation_digest": digest,
         "bundle": bundle,
     }
+
+
+def _build_matching_lf_attestation_features(
+    statement: Dict[str, Any],
+    k_master: str,
+    trace_commit: str | None = None,
+) -> list[float]:
+    attestation_digest = compute_attestation_digest(statement_from_dict(statement))
+    attest_keys = derive_attestation_keys(k_master, attestation_digest, trajectory_commit=trace_commit)
+    key_bytes = bytes.fromhex(attest_keys.k_lf)
+    message = attest_keys.event_binding_digest.encode("utf-8")
+    prk = hmac.new(key_bytes, message, hashlib.sha256).digest()
+    payload = b""
+    t_prev = b""
+    counter = 1
+    while len(payload) < 48:
+        t_i = hmac.new(prk, t_prev + b"lf_payload" + bytes([counter]), hashlib.sha256).digest()
+        payload += t_i
+        t_prev = t_i
+        counter += 1
+    payload = payload[:48]
+    features: list[float] = []
+    for byte_value in payload:
+        for bit_pos in range(8):
+            bit_value = (byte_value >> bit_pos) & 1
+            features.append(3.0 if bit_value == 1 else -3.0)
+    return features
 
 
 def test_signed_attestation_bundle_roundtrip() -> None:
@@ -342,6 +372,76 @@ def test_build_detect_attestation_result_bridges_hf_attestation_values() -> None
     assert isinstance(channel_scores, dict)
     assert channel_scores.get("hf") is not None
     assert "all_channel_scores_absent" not in list(result.get("mismatch_reasons") or [])
+
+
+def test_build_detect_attestation_result_prefers_real_lf_attestation_features_over_proxy_score() -> None:
+    """
+    功能：detect 侧 attestation 必须优先消费真实 LF 主路径系数，而不是退回低 proxy 分数。
+
+    Detect-side attestation must consume the real LF main-path coefficient
+    vector before falling back to a low lf_score proxy.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    payload = _build_statement()
+    cfg = {
+        "__attestation_verify_k_master__": "5" * 64,
+        "attestation": {
+            "decision_mode": "content_primary_geo_rescue",
+            "lf_weight": 0.5,
+            "hf_weight": 0.3,
+            "geo_weight": 0.2,
+            "threshold": 0.65,
+        },
+    }
+    attestation_context = {
+        "candidate_statement": payload["statement"],
+        "attestation_bundle": payload["bundle"],
+        "attestation_source": "formal_input_payload",
+        "authenticity_status": "authentic",
+        "bundle_verification": {"status": "ok"},
+    }
+    content_evidence_payload = {
+        "status": "ok",
+        "lf_score": 0.25011487,
+        "score_parts": {
+            "hf_attestation_values": [10.0, 0.0, 0.0, 0.0],
+        },
+    }
+
+    result = _build_detect_attestation_result(
+        cfg=cfg,
+        attestation_context=attestation_context,
+        content_evidence_payload=content_evidence_payload,
+        geometry_evidence_payload=None,
+        lf_attestation_features=_build_matching_lf_attestation_features(
+            payload["statement"],
+            "5" * 64,
+            trace_commit=cast(str, payload["bundle"].get("trace_commit")),
+        ),
+    )
+
+    image_evidence_result = result.get("image_evidence_result")
+    assert isinstance(image_evidence_result, dict)
+    assert image_evidence_result.get("status") == "ok"
+    content_attestation_score = image_evidence_result.get("content_attestation_score")
+    assert isinstance(content_attestation_score, float)
+    channel_scores = image_evidence_result.get("channel_scores")
+    assert isinstance(channel_scores, dict)
+    assert isinstance(channel_scores.get("lf"), float)
+    assert float(channel_scores.get("lf")) > 0.5
+    assert float(channel_scores.get("lf")) > content_evidence_payload["lf_score"]
+    assert content_attestation_score > 0.65
+    final_decision = result.get("final_event_attested_decision")
+    assert isinstance(final_decision, dict)
+    assert final_decision.get("status") == "attested"
+    assert final_decision.get("is_event_attested") is True
+    assert isinstance(final_decision.get("event_attestation_score"), float)
+    assert float(final_decision.get("event_attestation_score")) > 0.65
 
 
 def test_verify_attestation_content_positive_not_dragged_by_low_geometry() -> None:

@@ -498,6 +498,7 @@ def _build_detect_attestation_result(
     attestation_context: Dict[str, Any],
     content_evidence_payload: Optional[Dict[str, Any]],
     geometry_evidence_payload: Optional[Dict[str, Any]],
+    lf_attestation_features: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     功能：构造 detect 侧 attestation 分层结果。
@@ -510,6 +511,8 @@ def _build_detect_attestation_result(
         attestation_context: Prepared detect attestation context.
         content_evidence_payload: Optional content evidence mapping.
         geometry_evidence_payload: Optional geometry evidence mapping.
+        lf_attestation_features: Optional LF attestation coefficient vector
+            extracted from the detect main path.
 
     Returns:
         Attestation result mapping.
@@ -577,6 +580,7 @@ def _build_detect_attestation_result(
         content_evidence=content_evidence_payload if isinstance(content_evidence_payload, dict) else None,
         cfg=cfg,
         hf_values=hf_values,
+        lf_latent_features=lf_attestation_features,
         geo_score=geo_score,
         lf_weight=float(attestation_cfg.get("lf_weight", 0.5)),
         hf_weight=float(attestation_cfg.get("hf_weight", 0.3)),
@@ -1354,11 +1358,23 @@ def run_detect_orchestrator(
         if isinstance(attestation_context.get("trace_commit"), str):
             geometry_evidence_payload["attestation_trace_commit"] = attestation_context.get("trace_commit")
 
+    lf_attestation_features = None
+    if (
+        isinstance(content_evidence_payload, dict)
+        and content_evidence_payload.get("status") == "ok"
+        and attestation_context.get("authenticity_status") == "authentic"
+    ):
+        lf_attestation_features = _extract_lf_attestation_features_from_trajectory(
+            cfg,
+            plan_payload,
+        )
+
     attestation_result = _build_detect_attestation_result(
         cfg,
         attestation_context,
         content_evidence_payload if isinstance(content_evidence_payload, dict) else None,
         geometry_evidence_payload if isinstance(geometry_evidence_payload, dict) else None,
+        lf_attestation_features=lf_attestation_features,
     )
 
     # 删除临时 transient 字段，确保不写入 records
@@ -1862,6 +1878,84 @@ def _extract_lf_raw_score_from_trajectory(
             "lf_failure_reason": f"lf_trajectory_score_failed:{type(exc).__name__}",
             "lf_detect_path": "low_freq_template_trajectory",
         }
+
+
+def _extract_lf_attestation_features_from_trajectory(
+    cfg: Dict[str, Any],
+    plan_payload: Optional[Dict[str, Any]],
+) -> Optional[List[float]]:
+    """
+    功能：从 detect 主路径提取 LF attestation 所需的系数向量。
+
+    Extract the LF coefficient vector required by the attestation main path
+    from the detect-side trajectory cache and LF basis.
+
+    Args:
+        cfg: Configuration mapping.
+        plan_payload: Planner payload mapping.
+
+    Returns:
+        LF coefficient vector when available; otherwise None.
+    """
+    plan_dict = _resolve_plan_dict(plan_payload)
+    lf_basis_for_decode = plan_dict.get("lf_basis") if isinstance(plan_dict.get("lf_basis"), dict) else None
+    if not isinstance(lf_basis_for_decode, dict):
+        return None
+
+    detect_traj_cache = cfg.get("__detect_trajectory_latent_cache__")
+    if detect_traj_cache is None or detect_traj_cache.is_empty():
+        return None
+
+    tfs = lf_basis_for_decode.get("trajectory_feature_spec")
+    if not isinstance(tfs, dict) or tfs.get("feature_operator") != "masked_normalized_random_projection":
+        return None
+
+    basis_matrix_raw = lf_basis_for_decode.get("projection_matrix")
+    if basis_matrix_raw is None:
+        return None
+
+    edit_timestep = int(tfs.get("edit_timestep", 0))
+    detect_latent, _ = detector_scoring.resolve_detect_trajectory_latent_for_timestep(
+        detect_traj_cache,
+        edit_timestep,
+    )
+    if detect_latent is None:
+        return None
+
+    try:
+        from main.watermarking.content_chain.subspace.trajectory_feature_space import (
+            extract_trajectory_feature_np,
+        )
+
+        phi = extract_trajectory_feature_np(np.asarray(detect_latent, dtype=np.float64), tfs)
+        basis_matrix_np = np.asarray(basis_matrix_raw, dtype=np.float64)
+        basis_rank = int(lf_basis_for_decode.get("basis_rank", basis_matrix_np.shape[1]))
+
+        if hasattr(phi, "detach"):
+            latents_flat = phi.detach().cpu().numpy().astype(np.float64).reshape(-1)
+        else:
+            latents_flat = np.asarray(phi, dtype=np.float64).reshape(-1)
+
+        if latents_flat.shape[0] != basis_matrix_np.shape[0]:
+            latent_proj_spec = lf_basis_for_decode.get("latent_projection_spec")
+            if not isinstance(latent_proj_spec, dict):
+                return None
+            feature_dim = int(latent_proj_spec.get("feature_dim", basis_matrix_np.shape[0]))
+            proj_seed = int(latent_proj_spec.get("seed", 0))
+            timestep_index = int(latent_proj_spec.get("edit_timestep", 0))
+            sample_index = int(latent_proj_spec.get("sample_idx", 0))
+            projection_seed = proj_seed + 7919 + timestep_index * 131 + sample_index
+            index_rng = np.random.default_rng(projection_seed)
+            projection_indices = index_rng.integers(0, max(1, latents_flat.shape[0]), size=feature_dim)
+            latents_flat = latents_flat[projection_indices]
+
+        if latents_flat.shape[0] != basis_matrix_np.shape[0]:
+            return None
+
+        coeffs_arr = np.dot(latents_flat, basis_matrix_np)
+        return [float(value) for value in coeffs_arr[:basis_rank].tolist()]
+    except Exception:
+        return None
 
 
 def _extract_content_raw_scores_from_image(
