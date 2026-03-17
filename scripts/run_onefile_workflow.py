@@ -1460,6 +1460,179 @@ def _collect_experiment_matrix_attack_aware_detect_paths(run_root: Path) -> List
     return sorted(experiments_root.glob("*/artifacts/evaluate_inputs/detect_record_with_attack.json"))
 
 
+def _extract_attack_metadata_overlay(record: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：从记录中提取 attack-aware 分组元数据。 
+
+    Extract attack-aware grouping metadata from a detect record without
+    touching formal attestation payloads.
+
+    Args:
+        record: Detect record mapping.
+
+    Returns:
+        Mapping containing attack grouping metadata only.
+
+    Raises:
+        TypeError: If record is invalid.
+    """
+    if not isinstance(record, dict):
+        raise TypeError("record must be dict")
+
+    metadata_overlay: Dict[str, Any] = {}
+
+    attack_family = record.get("attack_family")
+    if isinstance(attack_family, str) and attack_family:
+        metadata_overlay["attack_family"] = attack_family
+
+    attack_params_version = record.get("attack_params_version")
+    if isinstance(attack_params_version, str) and attack_params_version:
+        metadata_overlay["attack_params_version"] = attack_params_version
+
+    attack_payload = record.get("attack")
+    if isinstance(attack_payload, dict) and attack_payload:
+        metadata_overlay["attack"] = copy.deepcopy(attack_payload)
+
+    inference_prompt = record.get("inference_prompt")
+    if isinstance(inference_prompt, str) and inference_prompt:
+        metadata_overlay["inference_prompt"] = inference_prompt
+
+    return metadata_overlay
+
+
+def _collect_experiment_matrix_attack_metadata_candidates(run_root: Path) -> List[Dict[str, Any]]:
+    """
+    功能：收集可用于 fallback overlay 的 matrix attack 元数据候选。 
+
+    Collect attack-aware metadata candidates from experiment_matrix outputs for
+    fallback grouping overlay only.
+
+    Args:
+        run_root: Main onefile run root.
+
+    Returns:
+        Candidate list containing prompt binding and metadata payload.
+
+    Raises:
+        TypeError: If run_root is invalid.
+    """
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+
+    candidate_records: List[Dict[str, Any]] = []
+    for record_path in _collect_experiment_matrix_attack_aware_detect_paths(run_root):
+        try:
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(record, dict) or not record:
+            continue
+
+        metadata_overlay = _extract_attack_metadata_overlay(record)
+        if not any(key in metadata_overlay for key in ["attack_family", "attack_params_version", "attack"]):
+            continue
+
+        candidate_records.append(
+            {
+                "path": str(record_path),
+                "inference_prompt": metadata_overlay.get("inference_prompt"),
+                "metadata_overlay": metadata_overlay,
+            }
+        )
+
+    return candidate_records
+
+
+def _resolve_attack_metadata_overlay_for_pair(
+    candidate_records: Sequence[Dict[str, Any]],
+    pair_count: int,
+    prompt_value: str | None,
+) -> Dict[str, Any]:
+    """
+    功能：为单个 GT 样本对解析可信的 attack-aware metadata overlay。 
+
+    Resolve trusted attack grouping metadata for one GT pair while keeping the
+    formal score source unchanged.
+
+    Args:
+        candidate_records: Metadata candidate list collected from matrix outputs.
+        pair_count: Number of GT pairs requested for current stage.
+        prompt_value: Prompt bound to the current pair when available.
+
+    Returns:
+        Attack metadata overlay mapping. Empty dict means no trusted overlay.
+
+    Raises:
+        TypeError: If inputs are invalid.
+    """
+    if not isinstance(candidate_records, Sequence):
+        raise TypeError("candidate_records must be Sequence[Dict[str, Any]]")
+    if not isinstance(pair_count, int) or pair_count <= 0:
+        raise TypeError("pair_count must be positive int")
+    if prompt_value is not None and not isinstance(prompt_value, str):
+        raise TypeError("prompt_value must be str or None")
+
+    if isinstance(prompt_value, str) and prompt_value:
+        matched_candidates = [
+            item.get("metadata_overlay")
+            for item in candidate_records
+            if isinstance(item, dict) and item.get("inference_prompt") == prompt_value
+        ]
+        if len(matched_candidates) == 1 and isinstance(matched_candidates[0], dict):
+            return copy.deepcopy(matched_candidates[0])
+        return {}
+
+    if pair_count == 1 and len(candidate_records) == 1:
+        candidate_overlay = candidate_records[0].get("metadata_overlay")
+        if isinstance(candidate_overlay, dict):
+            return copy.deepcopy(candidate_overlay)
+
+    return {}
+
+
+def _apply_attack_metadata_overlay(payload: Dict[str, Any], metadata_overlay: Dict[str, Any]) -> None:
+    """
+    功能：仅补写 attack-aware 分组元数据，不改 formal attestation 载荷。 
+
+    Apply attack grouping metadata onto a payload without modifying formal
+    attestation subtree or score semantics.
+
+    Args:
+        payload: Detect payload to mutate in place.
+        metadata_overlay: Trusted metadata overlay mapping.
+
+    Returns:
+        None.
+
+    Raises:
+        TypeError: If inputs are invalid.
+    """
+    if not isinstance(payload, dict):
+        raise TypeError("payload must be dict")
+    if not isinstance(metadata_overlay, dict):
+        raise TypeError("metadata_overlay must be dict")
+
+    if not metadata_overlay:
+        return
+
+    # 这里只补写 attack-aware 分组字段，不能覆盖 formal attestation 或 event score。
+    for metadata_key, metadata_value in metadata_overlay.items():
+        if metadata_key == "attack":
+            if not isinstance(payload.get("attack"), dict) or not payload.get("attack"):
+                payload[metadata_key] = copy.deepcopy(metadata_value)
+            continue
+
+        if metadata_key == "inference_prompt":
+            existing_prompt = payload.get("inference_prompt")
+            if not isinstance(existing_prompt, str) or not existing_prompt:
+                payload[metadata_key] = copy.deepcopy(metadata_value)
+            continue
+
+        existing_value = payload.get(metadata_key)
+        if not isinstance(existing_value, str) or not existing_value:
+            payload[metadata_key] = copy.deepcopy(metadata_value)
+
+
 def _prepare_parallel_attestation_detect_records_from_matrix(
     run_root: Path,
     output_run_root: Path,
@@ -2097,6 +2270,20 @@ def _prepare_detect_records_with_minimal_ground_truth(
     source_payload = json.loads(source_detect_path.read_text(encoding="utf-8"))
     if not isinstance(source_payload, dict):
         raise ValueError("source detect record must be JSON object")
+    matrix_attack_metadata_candidates = _collect_experiment_matrix_attack_metadata_candidates(run_root)
+    source_attack_metadata_overlay = _extract_attack_metadata_overlay(source_payload)
+
+    def _resolve_attack_metadata_overlay_for_prompt(prompt_value: str | None) -> Dict[str, Any]:
+        if any(
+            key in source_attack_metadata_overlay
+            for key in ["attack_family", "attack_params_version", "attack"]
+        ):
+            return copy.deepcopy(source_attack_metadata_overlay)
+        return _resolve_attack_metadata_overlay_for_pair(
+            matrix_attack_metadata_candidates,
+            pair_count,
+            prompt_value,
+        )
 
     def _normalize_positive_payload_if_recovered_failed(payload: Dict[str, Any]) -> None:
         content_node = payload.get("content_evidence_payload")
@@ -2160,6 +2347,12 @@ def _prepare_detect_records_with_minimal_ground_truth(
                         if not isinstance(prompt_value, str) or not prompt_value.strip():
                             raise ValueError("prompt entry must be non-empty str")
                         pos_payload["inference_prompt"] = prompt_value
+                    else:
+                        prompt_value = pos_payload.get("inference_prompt")
+                        if not isinstance(prompt_value, str) or not prompt_value:
+                            prompt_value = None
+                    attack_metadata_overlay = _resolve_attack_metadata_overlay_for_prompt(prompt_value)
+                    _apply_attack_metadata_overlay(pos_payload, attack_metadata_overlay)
                     _normalize_positive_payload_if_recovered_failed(pos_payload)
 
                     neg_payload_per_pair = json.loads(json.dumps(neg_payload, ensure_ascii=False))
@@ -2174,6 +2367,7 @@ def _prepare_detect_records_with_minimal_ground_truth(
                         if not isinstance(prompt_value, str) or not prompt_value.strip():
                             raise ValueError("prompt entry must be non-empty str")
                         neg_payload_per_pair["inference_prompt"] = prompt_value
+                    _apply_attack_metadata_overlay(neg_payload_per_pair, attack_metadata_overlay)
 
                     neg_content_node = neg_payload_per_pair.get("content_evidence_payload")
                     if isinstance(neg_content_node, dict):
@@ -2268,6 +2462,11 @@ def _prepare_detect_records_with_minimal_ground_truth(
         positive_payload["run_id"] = str(uuid.uuid4())
         if isinstance(dual_branch_failure_reason, str) and dual_branch_failure_reason:
             positive_payload["dual_branch_failure_reason"] = dual_branch_failure_reason
+        prompt_value: str | None = None
+        if prompts is None:
+            existing_prompt = positive_payload.get("inference_prompt")
+            if isinstance(existing_prompt, str) and existing_prompt:
+                prompt_value = existing_prompt
         _normalize_positive_payload_if_recovered_failed(positive_payload)
 
         negative_payload = json.loads(json.dumps(source_payload, ensure_ascii=False))
@@ -2286,6 +2485,10 @@ def _prepare_detect_records_with_minimal_ground_truth(
                 raise ValueError("prompt entry must be non-empty str")
             positive_payload["inference_prompt"] = prompt_value
             negative_payload["inference_prompt"] = prompt_value
+
+        attack_metadata_overlay = _resolve_attack_metadata_overlay_for_prompt(prompt_value)
+        _apply_attack_metadata_overlay(positive_payload, attack_metadata_overlay)
+        _apply_attack_metadata_overlay(negative_payload, attack_metadata_overlay)
 
         negative_content_node = negative_payload.get("content_evidence_payload")
         if isinstance(negative_content_node, dict):
