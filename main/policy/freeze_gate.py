@@ -46,6 +46,10 @@ from main.registries import pipeline_registry
 from main.diffusion.sd3 import weights_snapshot
 
 
+NEGATIVE_BRANCH_STATEMENT_ONLY_ATTESTATION_SOURCE = "negative_branch_statement_only_provenance"
+STATEMENT_ONLY_PROVENANCE_NO_BUNDLE_STATUS = "statement_only_provenance_no_bundle"
+
+
 def assert_prewrite(
     record: Dict[str, Any],
     contracts: FrozenContracts,
@@ -1341,6 +1345,39 @@ def _requires_attestation_bundle_verification(record: Dict[str, Any]) -> bool:
     return any(field_name in attestation_payload for field_name in relevant_fields)
 
 
+def _is_statement_only_provenance_contract(
+    attestation_payload: Dict[str, Any],
+    authenticity_status: str,
+    bundle_status: str,
+) -> bool:
+    """
+    功能：判定 detect attestation 是否命中受控 statement-only provenance 合同。 
+
+    Decide whether the detect attestation payload matches the controlled
+    statement-only provenance contract.
+
+    Args:
+        attestation_payload: Detect attestation payload.
+        authenticity_status: authenticity_result.status token.
+        bundle_status: authenticity_result.bundle_status token.
+
+    Returns:
+        True when the payload matches the controlled negative-branch
+        statement-only provenance contract; otherwise False.
+    """
+    if authenticity_status != "statement_only":
+        return False
+    if bundle_status != STATEMENT_ONLY_PROVENANCE_NO_BUNDLE_STATUS:
+        return False
+    if attestation_payload.get("attestation_source") != NEGATIVE_BRANCH_STATEMENT_ONLY_ATTESTATION_SOURCE:
+        return False
+    if attestation_payload.get("bundle_verification") is not None:
+        return False
+    if "signed_bundle" in attestation_payload or "attestation_bundle" in attestation_payload:
+        return False
+    return True
+
+
 def _enforce_attestation_bundle_verification(
     record: Dict[str, Any],
     contracts: FrozenContracts,
@@ -1496,6 +1533,23 @@ def _enforce_attestation_bundle_verification(
             actual=str(authenticity_status),
         )
 
+    statement_only_provenance_contract = _is_statement_only_provenance_contract(
+        attestation_payload,
+        authenticity_status,
+        bundle_status,
+    )
+    if (
+        bundle_status == STATEMENT_ONLY_PROVENANCE_NO_BUNDLE_STATUS
+        and not statement_only_provenance_contract
+    ):
+        raise GateEnforcementError(
+            "statement-only provenance bundle_status requires controlled provenance source",
+            gate_name="attestation_bundle_verification",
+            field_path="attestation.attestation_source",
+            expected=NEGATIVE_BRANCH_STATEMENT_ONLY_ATTESTATION_SOURCE,
+            actual=str(attestation_payload.get("attestation_source")),
+        )
+
     is_event_attested = final_event_attested_decision.get("is_event_attested")
     if not isinstance(is_event_attested, bool):
         raise GateEnforcementError(
@@ -1525,7 +1579,7 @@ def _enforce_attestation_bundle_verification(
         )
 
     image_evidence_status = image_evidence_result.get("status")
-    if image_evidence_status == "ok" and bundle_status != "ok":
+    if image_evidence_status == "ok" and bundle_status != "ok" and not statement_only_provenance_contract:
         raise GateEnforcementError(
             "image_evidence_result ok cannot bypass failed or absent bundle verification",
             gate_name="attestation_bundle_verification",

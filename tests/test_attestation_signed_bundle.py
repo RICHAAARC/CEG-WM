@@ -193,11 +193,61 @@ def test_verify_attestation_statement_only_cannot_become_event_attested() -> Non
     authenticity_result = result.get("authenticity_result")
     assert isinstance(authenticity_result, dict)
     assert authenticity_result.get("status") == "statement_only"
+    assert authenticity_result.get("bundle_status") is None
     final_decision = result.get("final_event_attested_decision")
     assert isinstance(final_decision, dict)
     assert final_decision.get("is_event_attested") is False
     assert final_decision.get("event_attestation_score") == pytest.approx(0.0)
     assert final_decision.get("event_attestation_score_name") == "event_attestation_score"
+
+
+def test_build_detect_attestation_result_statement_only_provenance_uses_legal_bundle_status() -> None:
+    """
+    功能：negative branch statement-only provenance 必须生成合法、非空且不可冒充 authentic 的 bundle_status。
+
+    Negative-branch statement-only provenance must emit a legal non-empty
+    bundle_status without claiming authentic bundle verification.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    payload = _build_statement()
+    cfg = {
+        "__attestation_verify_k_master__": "5" * 64,
+        "attestation": {
+            "decision_mode": "content_primary_geo_rescue",
+            "lf_weight": 0.5,
+            "hf_weight": 0.3,
+            "geo_weight": 0.2,
+            "threshold": 0.65,
+        },
+    }
+    attestation_context = {
+        "candidate_statement": payload["statement"],
+        "attestation_bundle": None,
+        "authenticity_status": "statement_only",
+        "attestation_source": "negative_branch_statement_only_provenance",
+        "bundle_verification": None,
+    }
+
+    result = _build_detect_attestation_result(
+        cfg=cfg,
+        attestation_context=attestation_context,
+        content_evidence_payload={"lf_score": 1.0},
+        geometry_evidence_payload=None,
+    )
+
+    authenticity_result = result.get("authenticity_result")
+    assert isinstance(authenticity_result, dict)
+    assert authenticity_result.get("status") == "statement_only"
+    assert authenticity_result.get("bundle_status") == "statement_only_provenance_no_bundle"
+    assert result.get("attestation_source") == "negative_branch_statement_only_provenance"
+    final_decision = result.get("final_event_attested_decision")
+    assert isinstance(final_decision, dict)
+    assert final_decision.get("is_event_attested") is False
 
 
 def test_verify_attestation_authentic_bundle_can_become_event_attested() -> None:

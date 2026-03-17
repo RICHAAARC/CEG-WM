@@ -640,3 +640,51 @@ def test_attestation_bundle_gate_rejects_statement_only_path() -> None:
             semantics,
             interpretation,
         )
+
+
+def test_attestation_bundle_gate_accepts_statement_only_provenance_contract() -> None:
+    """
+    功能：受控 statement-only provenance 合同允许 image evidence 写盘，但不得声称 event_attested=true。
+
+    The controlled statement-only provenance contract may persist image
+    evidence while remaining non-authentic and non-attested.
+
+    Returns:
+        None.
+    """
+    from main.policy import freeze_gate
+
+    contracts, whitelist, semantics, interpretation = _load_fact_sources()
+    record = _build_attestation_gate_record(
+        {
+            "attestation_source": "negative_branch_statement_only_provenance",
+            "statement": {"schema": "gen_attest_v1"},
+            "authenticity_result": {
+                "status": "statement_only",
+                "bundle_status": "statement_only_provenance_no_bundle",
+                "statement_status": "parsed",
+            },
+            "image_evidence_result": {
+                "status": "ok",
+                "channel_scores": {"lf": 0.8, "hf": None, "geo": 0.7},
+                "content_attestation_score": 0.8,
+                "content_attestation_score_name": "content_attestation_score",
+            },
+            "final_event_attested_decision": {
+                "status": "absent",
+                "is_event_attested": False,
+                "authenticity_status": "statement_only",
+                "image_evidence_status": "ok",
+                "event_attestation_score": 0.0,
+                "event_attestation_score_name": "event_attestation_score",
+            },
+        }
+    )
+
+    freeze_gate._enforce_attestation_bundle_verification(
+        record,
+        contracts,
+        whitelist,
+        semantics,
+        interpretation,
+    )

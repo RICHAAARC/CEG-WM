@@ -9,7 +9,7 @@
 # 合同版本与冻结元信息
 # - 用于记录与审计，不应作为运行期分支逻辑的自由输入。
 # ------------------------------
-contract_version: "v1.7"     # 冻结契约版本号；v1.1→v1.2 formal path 最终闭包收口（2026-03-12）：historical_field_paths 段已从当前 formal contract 文件彻底移除，旧字段信息不再显式保留在任何 formal 文件中；当前 formal contract 只绑定当前正式机制。v1.2→v1.3 从可选字段列表中移除 embed_trace.identity_mode 与 embed_trace.identity_reason（2026-03-12）：生产嵌入实现不再承载 identity baseline。v1.3→v1.4 追加 attestation signed bundle 验签门禁语义（2026-03-13）：onefile/detect 溯源结果若声明 signed bundle，则必须执行内部 trust chain 验证。v1.4→v1.5：追加 geometry coarse registration 与 recovered-domain sync revalidation 细分字段冻结登记。v1.5→v1.6：为 policy_path semantics 新增 geometry_chain_required_but_unavailable fail_reason 的 append-only 冻结登记（2026-03-13）。v1.6→v1.7：追加 negative branch attestation provenance 的 append-only 冻结注册（2026-03-16）。
+contract_version: "v1.8"     # 冻结契约版本号；v1.1→v1.2 formal path 最终闭包收口（2026-03-12）：historical_field_paths 段已从当前 formal contract 文件彻底移除，旧字段信息不再显式保留在任何 formal 文件中；当前 formal contract 只绑定当前正式机制。v1.2→v1.3 从可选字段列表中移除 embed_trace.identity_mode 与 embed_trace.identity_reason（2026-03-12）：生产嵌入实现不再承载 identity baseline。v1.3→v1.4 追加 attestation signed bundle 验签门禁语义（2026-03-13）：onefile/detect 溯源结果若声明 signed bundle，则必须执行内部 trust chain 验证。v1.4→v1.5：追加 geometry coarse registration 与 recovered-domain sync revalidation 细分字段冻结登记。v1.5→v1.6：为 policy_path semantics 新增 geometry_chain_required_but_unavailable fail_reason 的 append-only 冻结登记（2026-03-13）。v1.6→v1.7：追加 negative branch attestation provenance 的 append-only 冻结注册（2026-03-16）。v1.7→v1.8：追加 attestation_source 字段与 statement-only provenance no-bundle 合同说明（2026-03-17）。
 frozen_date: "2026-02-04"    # 冻结日期元信息；当前主链路不参与门禁计算，主要用于审计追溯。
 
 # ------------------------------
@@ -170,6 +170,10 @@ gate_enforcement_requirements:              # freeze_gate.enforce_gate_requireme
         3) 校验 signer_certificate 由内部 trust root 签发
         4) 校验 bundle signature 覆盖 statement/attestation_digest/lf_payload_hex/trace_commit/geo_anchor_seed
       任一检查失败时必须返回 mismatch，禁止降级为“仅 statement 存在即继续融合”。
+      唯一受控例外：negative branch statement-only provenance 可在未声明 signed bundle 时
+      写入 attestation.attestation_source=negative_branch_statement_only_provenance，
+      且 attestation.authenticity_result.bundle_status=statement_only_provenance_no_bundle；
+      该路径只允许保留 image evidence，不得声称 authenticity=authentic 或 event_attested=true。
       目的：防止 statement 被脱链篡改后仍进入多通道融合，破坏 attestation 审计闭环。
 
   # ---- policy_path 语义驱动执行 ----
@@ -674,6 +678,7 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
     - final_decision.event_attested         # 稳定判决事件级 attestation 结果。
     - attestation                           # attestation 分层结果总载荷。
     - attestation.status                    # attestation 总状态。
+    - attestation.attestation_source        # attestation 输入来源（formal payload 或受控 statement-only provenance）。
     - attestation.statement                 # 生成事件 statement 载荷。
     - attestation.attestation_digest        # statement 级 attestation 摘要。
     - attestation.event_binding_digest      # 事件级绑定摘要。

@@ -482,6 +482,7 @@ def test_event_attestation_score_paths_registered() -> None:
     registry_fields = set(contracts_obj.get("records_schema", {}).get("field_paths_registry", []))
 
     required_paths = {
+        "attestation.attestation_source",
         "attestation.final_event_attested_decision.event_attestation_score",
         "attestation.final_event_attested_decision.event_attestation_score_name",
         "attestation.final_event_attested_decision.event_attestation_score_semantics",
@@ -489,6 +490,52 @@ def test_event_attestation_score_paths_registered() -> None:
 
     assert required_paths <= schema_fields
     assert required_paths <= registry_fields
+
+
+def test_attestation_source_path_registered_for_statement_only_provenance_contract() -> None:
+    """
+    功能：验证 attestation_source 已完成 schema、contract 与 path semantics 追加登记。 
+
+    Validate attestation_source is append-only registered for the controlled
+    statement-only provenance contract.
+    """
+    schema_path = _REPO_ROOT / "configs" / "records_schema_extensions.yaml"
+    contracts_path = _REPO_ROOT / "configs" / "frozen_contracts.yaml"
+    semantics_path = _REPO_ROOT / "configs" / "policy_path_semantics.yaml"
+
+    schema_obj = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+    contracts_obj = yaml.safe_load(contracts_path.read_text(encoding="utf-8"))
+    semantics_obj = yaml.safe_load(semantics_path.read_text(encoding="utf-8"))
+
+    schema_entries = {
+        entry.get("path"): entry
+        for entry in schema_obj.get("fields", [])
+        if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+    }
+    registry_fields = set(contracts_obj.get("records_schema", {}).get("field_paths_registry", []))
+    recommended_fields = set(
+        semantics_obj.get("field_catalog", {}).get("catalogs", {}).get("recommended", [])
+    )
+    diagnostic_constraints = semantics_obj.get("field_catalog", {}).get("diagnostic_only_field_constraints", [])
+
+    assert "attestation.attestation_source" in schema_entries
+    assert "attestation.attestation_source" in registry_fields
+    assert "attestation.attestation_source" in recommended_fields
+
+    description = schema_entries["attestation.attestation_source"].get("description")
+    assert isinstance(description, str)
+    assert "formal_input_payload" in description
+    assert "negative_branch_statement_only_provenance" in description
+
+    constraint_index = {
+        entry.get("field_path"): entry
+        for entry in diagnostic_constraints
+        if isinstance(entry, dict) and isinstance(entry.get("field_path"), str)
+    }
+    source_constraint = constraint_index.get("attestation.attestation_source")
+    assert isinstance(source_constraint, dict)
+    assert source_constraint.get("semantics") == "attestation_source_contract"
+    assert "statement_only_provenance_no_bundle" in str(source_constraint.get("rule"))
 
 
 def test_negative_branch_attestation_provenance_paths_registered() -> None:
