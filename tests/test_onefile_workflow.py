@@ -1501,6 +1501,103 @@ def test_prepare_detect_records_with_content_score_clone_fallback_restores_attac
     assert negative_payload["content_evidence_payload"]["calibration_sample_usage"] == "synthetic_negative_for_ground_truth_closure"
 
 
+def test_build_minimal_repro_bundle_excludes_signoff_report_self_reference(tmp_path: Path) -> None:
+    """
+    功能：验证最小 repro bundle 不绑定 signoff_report 自身，避免 signoff 自循环失配。
+
+    Verify minimal repro bundle excludes signoff_report from pointers so a
+    later signoff refresh does not invalidate the bundle itself.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    audit_module_path = repo_root / "scripts" / "audits" / "audit_repro_bundle_integrity.py"
+    audit_spec = importlib.util.spec_from_file_location("audit_repro_bundle_integrity", audit_module_path)
+    if audit_spec is None or audit_spec.loader is None:
+        raise RuntimeError(f"failed to load module spec: {audit_module_path}")
+    audit_module = importlib.util.module_from_spec(audit_spec)
+    sys.modules[audit_spec.name] = audit_module
+    audit_spec.loader.exec_module(audit_module)
+
+    run_root = tmp_path / "run_root"
+    (run_root / "artifacts" / "signoff").mkdir(parents=True, exist_ok=True)
+    (run_root / "records").mkdir(parents=True, exist_ok=True)
+
+    (run_root / "artifacts" / "run_closure.json").write_text(
+        json.dumps(
+            {
+                "cfg_digest": "cfg-digest",
+                "plan_digest": "plan-digest",
+                "thresholds_digest": "thresholds-digest",
+                "threshold_metadata_digest": "threshold-metadata-digest",
+                "impl_digest": "impl-digest",
+                "fusion_rule_version": "v1",
+                "policy_path": "content_np_geo_rescue",
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "records" / "evaluate_record.json").write_text(
+        json.dumps(
+            {
+                "cfg_digest": "cfg-digest",
+                "plan_digest": "plan-digest",
+                "thresholds_digest": "thresholds-digest",
+                "threshold_metadata_digest": "threshold-metadata-digest",
+                "impl_digest": "impl-digest",
+                "fusion_rule_version": "v1",
+                "attack_protocol_version": "attack_protocol_v1",
+                "attack_protocol_digest": "attack-protocol-digest",
+                "policy_path": "content_np_geo_rescue",
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "artifacts" / "evaluation_report.json").write_text(
+        json.dumps(
+            {
+                "evaluation_report": {
+                    "cfg_digest": "cfg-digest",
+                    "plan_digest": "plan-digest",
+                    "thresholds_digest": "thresholds-digest",
+                    "threshold_metadata_digest": "threshold-metadata-digest",
+                    "impl_digest": "impl-digest",
+                    "fusion_rule_version": "v1",
+                    "attack_protocol_version": "attack_protocol_v1",
+                    "attack_protocol_digest": "attack-protocol-digest",
+                    "policy_path": "content_np_geo_rescue",
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    signoff_report_path = run_root / "artifacts" / "signoff" / "signoff_report.json"
+    signoff_report_path.write_text(
+        json.dumps({"status": "initial"}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    module._build_minimal_repro_bundle(run_root)
+
+    pointers_path = run_root / "artifacts" / "repro_bundle" / "pointers.json"
+    pointers_obj = json.loads(pointers_path.read_text(encoding="utf-8"))
+    pointer_paths = [item["path"] for item in pointers_obj["files"]]
+    assert "artifacts/signoff/signoff_report.json" not in pointer_paths
+
+    signoff_report_path.write_text(
+        json.dumps({"status": "refreshed"}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    assert audit_module.main(str(repo_root), str(run_root)) == 0
+
+
 
 def test_parallel_attestation_statistics_workflow_writes_distinct_artifacts(
     monkeypatch: pytest.MonkeyPatch,

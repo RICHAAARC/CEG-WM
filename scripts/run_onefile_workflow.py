@@ -2662,6 +2662,26 @@ def _prepare_detect_records_with_minimal_ground_truth(
     workflow_cfg_dir = artifact_run_root / "artifacts" / "workflow_cfg"
     workflow_cfg_dir.mkdir(parents=True, exist_ok=True)
 
+    def _coerce_finite_float(value: object) -> float | None:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            numeric_value = float(value)
+            if math.isfinite(numeric_value):
+                return numeric_value
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+            try:
+                numeric_value = float(stripped)
+            except ValueError:
+                return None
+            if math.isfinite(numeric_value):
+                return numeric_value
+        return None
+
     context_count = len(attack_metadata_contexts)
     for context_index, attack_metadata_overlay in enumerate(attack_metadata_contexts):
         for pair_index in range(pair_count):
@@ -2707,26 +2727,6 @@ def _prepare_detect_records_with_minimal_ground_truth(
             else:
                 negative_content = {}
                 negative_payload["content_evidence_payload"] = negative_content
-
-        def _coerce_finite_float(value: object) -> float | None:
-            if isinstance(value, bool):
-                return None
-            if isinstance(value, (int, float)):
-                numeric_value = float(value)
-                if math.isfinite(numeric_value):
-                    return numeric_value
-                return None
-            if isinstance(value, str):
-                stripped = value.strip()
-                if not stripped:
-                    return None
-                try:
-                    numeric_value = float(stripped)
-                except ValueError:
-                    return None
-                if math.isfinite(numeric_value):
-                    return numeric_value
-            return None
 
             negative_status_value = negative_content.get("status")
             negative_score_value = _coerce_finite_float(negative_content.get("score"))
@@ -3702,13 +3702,7 @@ def _build_minimal_repro_bundle(run_root: Path) -> None:
         if not source_path.exists() or not source_path.is_file():
             raise FileNotFoundError(f"required source artifact missing: {source_path}")
 
-    optional_pointer_files = [
-        run_root / "artifacts" / "signoff" / "signoff_report.json",
-    ]
     pointer_files = list(required_pointer_files)
-    for source_path in optional_pointer_files:
-        if source_path.exists() and source_path.is_file():
-            pointer_files.append(source_path)
 
     pointers_obj = {
         "schema_version": "v1",

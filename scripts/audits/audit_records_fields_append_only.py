@@ -12,6 +12,14 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+
+_AUDITS_DIR = Path(__file__).resolve().parent
+_SCRIPTS_DIR = _AUDITS_DIR.parent
+_REPO_ROOT = _SCRIPTS_DIR.parent
+for _candidate_path in (str(_REPO_ROOT), str(_AUDITS_DIR)):
+    if _candidate_path not in sys.path:
+        sys.path.insert(0, _candidate_path)
+
 try:
     from scripts.audits.gate_label_mapping import resolve_audit_label
 except Exception:

@@ -279,6 +279,10 @@ def test_prepare_labelled_detect_records_uses_real_negative_payload_when_availab
         json.dumps(
             {
                 "operation": "detect",
+                "contract_bound_digest": "contract-anchor",
+                "whitelist_bound_digest": "whitelist-anchor",
+                "policy_path_semantics_bound_digest": "semantics-anchor",
+                "injection_scope_manifest_bound_digest": "injection-anchor",
                 "content_evidence_payload": {
                     "status": "ok",
                     "score": 0.12,
@@ -310,6 +314,10 @@ def test_prepare_labelled_detect_records_uses_real_negative_payload_when_availab
     assert negative_payload.get("positive_only_marker") is None
     assert negative_payload["attack_family"] == "rotate"
     assert float(negative_payload["content_evidence_payload"]["score"]) == 0.12
+    assert negative_payload.get("contract_bound_digest") is None
+    assert negative_payload.get("whitelist_bound_digest") is None
+    assert negative_payload.get("policy_path_semantics_bound_digest") is None
+    assert negative_payload.get("injection_scope_manifest_bound_digest") is None
 
 
 def test_prepare_labelled_detect_records_blocks_synthetic_negative_fallback_in_formal_mode(tmp_path: Path) -> None:

@@ -1714,6 +1714,8 @@ def _prepare_labelled_detect_records_glob_for_matrix(
 
     if isinstance(neg_score, float):
         negative_payload = copy.deepcopy(neg_payload_real)
+        for forbidden_field in _FORBIDDEN_ARTIFACT_ANCHOR_FIELDS:
+            negative_payload.pop(forbidden_field, None)
         for key_name in [
             "attack",
             "attack_family",
