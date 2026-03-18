@@ -253,6 +253,111 @@ def test_prepare_detect_record_for_attack_grouping_preserves_false_label(tmp_pat
     assert enriched_obj.get("calibration_excluded_from_labelled_sampling") is None
 
 
+def test_prepare_labelled_detect_records_uses_real_negative_payload_when_available(tmp_path: Path) -> None:
+    """real neg payload 可用时，negative record 不得再克隆正样本 payload。"""
+    run_root = tmp_path / "run"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    detect_record_path = records_dir / "detect_record.json"
+    detect_record_path.write_text(
+        json.dumps(
+            {
+                "operation": "detect",
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": 0.75,
+                },
+                "positive_only_marker": "attacked_positive",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    neg_detect_record_path = tmp_path / "neg_detect_record.json"
+    neg_detect_record_path.write_text(
+        json.dumps(
+            {
+                "operation": "detect",
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": 0.12,
+                },
+                "neg_only_marker": "real_negative",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    grid_item_cfg = {
+        "attack_protocol_family": "rotate",
+        "attack_protocol_path": "configs/attack_protocol.yaml",
+        "disallow_forced_pair_fallback": True,
+    }
+
+    records_glob = experiment_matrix._prepare_labelled_detect_records_glob_for_matrix(
+        run_root,
+        grid_item_cfg,
+        neg_detect_record_path=neg_detect_record_path,
+    )
+    payloads = [json.loads(Path(path_str).read_text(encoding="utf-8")) for path_str in sorted(glob.glob(records_glob))]
+
+    negative_payload = next(item for item in payloads if item.get("label") is False)
+    assert negative_payload["ground_truth_source"] == "real_neg_embed_detect"
+    assert negative_payload["calibration_sample_usage"] == "real_negative_for_experiment_matrix_label_balance"
+    assert negative_payload["calibration_label_resolution"] == "real_negative_payload"
+    assert negative_payload["neg_only_marker"] == "real_negative"
+    assert negative_payload.get("positive_only_marker") is None
+    assert negative_payload["attack_family"] == "rotate"
+    assert float(negative_payload["content_evidence_payload"]["score"]) == 0.12
+
+
+def test_prepare_labelled_detect_records_blocks_synthetic_negative_fallback_in_formal_mode(tmp_path: Path) -> None:
+    """formal guard 开启时，若 real neg 无效，helper 必须阻断 synthetic fallback。"""
+    run_root = tmp_path / "run"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    detect_record_path = records_dir / "detect_record.json"
+    detect_record_path.write_text(
+        json.dumps(
+            {
+                "operation": "detect",
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": 0.75,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    invalid_neg_detect_record_path = tmp_path / "neg_detect_record_invalid.json"
+    invalid_neg_detect_record_path.write_text(
+        json.dumps(
+            {
+                "operation": "detect",
+                "content_evidence_payload": {
+                    "status": "failed",
+                    "score": None,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    grid_item_cfg = {
+        "attack_protocol_family": "rotate",
+        "attack_protocol_path": "configs/attack_protocol.yaml",
+        "disallow_forced_pair_fallback": True,
+    }
+
+    with pytest.raises(RuntimeError, match="disallows synthetic negative fallback"):
+        experiment_matrix._prepare_labelled_detect_records_glob_for_matrix(
+            run_root,
+            grid_item_cfg,
+            neg_detect_record_path=invalid_neg_detect_record_path,
+        )
+
+
 def test_detect_gate_blocks_calibrate_when_no_valid_content_score(tmp_path: Path, monkeypatch) -> None:
     """detect 后若没有有效 content_score，必须 fail-fast 且不进入 calibrate。"""
     called_stages = []
@@ -865,15 +970,15 @@ def test_run_experiment_grid_fails_fast_when_formal_shared_thresholds_missing(
     assert called["run_single_experiment"] == 0
 
 
-def test_run_stage_sequence_blocks_forced_pair_path_in_formal_mode(
+def test_run_stage_sequence_allows_real_negative_labelled_path_in_formal_mode(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
     """
-    功能：formal matrix 禁止进入 forced pair labelled detect-record 路径。
+    功能：formal matrix 在 real neg payload 可用时，应允许 labelled helper 继续执行。
 
-    Verify _run_stage_sequence raises before calling the forced-pair helper when
-    disallow_forced_pair_fallback is enabled.
+    Verify _run_stage_sequence keeps the labelled helper available when a real
+    negative payload is available and synthetic fallback is not needed.
 
     Args:
         tmp_path: pytest temporary directory.
@@ -883,7 +988,7 @@ def test_run_stage_sequence_blocks_forced_pair_path_in_formal_mode(
         None.
     """
     called_stages = []
-    called_labelled_helper = {"called": False}
+    called_labelled_helper = {"called": 0}
     thresholds_path = tmp_path / "shared_thresholds.json"
     thresholds_path.write_text("{}", encoding="utf-8")
     neg_path = tmp_path / "neg_detect_record.json"
@@ -910,8 +1015,12 @@ def test_run_stage_sequence_blocks_forced_pair_path_in_formal_mode(
             )
 
     def _fake_prepare_labelled_glob(*args, **kwargs):
-        called_labelled_helper["called"] = True
-        raise AssertionError("forced-pair helper must not be called in formal mode")
+        called_labelled_helper["called"] += 1
+        labelled_dir = tmp_path / "run" / "artifacts" / "evaluate_inputs" / "labelled_detect_records"
+        labelled_dir.mkdir(parents=True, exist_ok=True)
+        (labelled_dir / "detect_record_label_pos.json").write_text("{}", encoding="utf-8")
+        (labelled_dir / "detect_record_label_neg.json").write_text("{}", encoding="utf-8")
+        return str(labelled_dir / "*.json")
 
     monkeypatch.setattr(experiment_matrix.path_policy, "ensure_output_layout", _fake_layout)
     monkeypatch.setattr(experiment_matrix, "_run_stage_command", _fake_run_stage)
@@ -930,11 +1039,10 @@ def test_run_stage_sequence_blocks_forced_pair_path_in_formal_mode(
         "disallow_forced_pair_fallback": True,
     }
 
-    with pytest.raises(RuntimeError, match="disallows forced pair fallback"):
-        experiment_matrix._run_stage_sequence(grid_item_cfg, tmp_path / "run")
+    experiment_matrix._run_stage_sequence(grid_item_cfg, tmp_path / "run")
 
-    assert called_stages == ["embed", "detect"]
-    assert called_labelled_helper["called"] is False
+    assert called_stages == ["embed", "detect", "evaluate"]
+    assert called_labelled_helper["called"] == 1
 
 
 def test_run_stage_sequence_preserves_debug_forced_pair_fallback(

@@ -322,7 +322,7 @@ def run_embed(
                 if isinstance(default_input, str) and default_input.strip():
                     cfg["__embed_input_image_path__"] = default_input.strip()
 
-            # P0-A Preview Generation：若主链输入图仍为 None，且配置启用了 preview_generation，
+            # Preview Generation：若主链输入图仍为 None，且配置启用了 preview_generation，
             # 则先执行一次无注入 SD3 推理，将生成图作为语义掩码的输入，消除对外部图像的依赖。
             # preview 推理失败时不中断流程，失败语义传播至内容链（injection_mode 降级）。
             _embed_cfg_pg = (cfg.get("embed") or {}).get("preview_generation") or {}
@@ -344,7 +344,11 @@ def run_embed(
                         injection_modifier=None,
                         capture_final_latents=False
                     )
-                    _preview_status = _preview_infer_result.get("status") if isinstance(_preview_infer_result, dict) else None
+                    _preview_status = None
+                    if isinstance(_preview_infer_result, dict):
+                        _preview_status = _preview_infer_result.get("inference_status")
+                        if not isinstance(_preview_status, str) or not _preview_status:
+                            _preview_status = _preview_infer_result.get("status")
                     if _preview_status == "ok":
                         _preview_image = _preview_infer_result.get("output_image")
                         if _preview_image is not None:

@@ -749,7 +749,6 @@ def _assert_formal_validation_prerequisites(
 
     missing_real_negative_keys: List[str] = []
     require_shared_thresholds = False
-    disallow_forced_pair_fallback = False
 
     for item in grid:
         if not isinstance(item, dict):
@@ -769,10 +768,6 @@ def _assert_formal_validation_prerequisites(
                 )
 
         require_shared_thresholds = require_shared_thresholds or guards["require_shared_thresholds"]
-        disallow_forced_pair_fallback = (
-            disallow_forced_pair_fallback or guards["disallow_forced_pair_fallback"]
-        )
-
     if missing_real_negative_keys:
         missing_keys_joined = "; ".join(sorted(set(missing_real_negative_keys)))
         raise RuntimeError(
@@ -789,12 +784,6 @@ def _assert_formal_validation_prerequisites(
         raise RuntimeError(
             "experiment_matrix formal validation requires shared thresholds from global calibrate; "
             "current run produced no valid thresholds artifact"
-        )
-
-    if disallow_forced_pair_fallback:
-        raise RuntimeError(
-            "experiment_matrix formal validation disallows forced pair fallback; "
-            "current matrix calibrate/evaluate path still depends on _prepare_labelled_detect_records_glob_for_matrix"
         )
 
 
@@ -1202,8 +1191,6 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
         # run_experiment_grid 层严格分离，per-item calibrate 会把二者混用，不符合
         # NP 阈值估计的独立同分布要求。
         if stage_name == "calibrate" and use_shared_thresholds:
-            if formal_validation_guards["disallow_forced_pair_fallback"]:
-                continue
             # 在跳过前预先准备 labelled_detect_records_glob，供后续 evaluate 阶段使用。
             if labelled_detect_records_glob is None:
                 labelled_detect_records_glob = _prepare_labelled_detect_records_glob_for_matrix(
@@ -1234,11 +1221,6 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
         # calibrate/evaluate 都需要带标签的 detect records 输入。
         # 这里使用 detect 后生成的 attack-aware 标注记录对（正/负各一条）满足标签平衡门禁。
         if stage_name in {"calibrate", "evaluate"}:
-            if formal_validation_guards["disallow_forced_pair_fallback"]:
-                raise RuntimeError(
-                    "experiment_matrix formal validation disallows forced pair fallback; "
-                    f"stage={stage_name} would call _prepare_labelled_detect_records_glob_for_matrix"
-                )
             if labelled_detect_records_glob is None:
                 labelled_detect_records_glob = _prepare_labelled_detect_records_glob_for_matrix(
                     run_root, grid_item_cfg, neg_detect_record_path=neg_detect_record_path_for_stage
@@ -1583,6 +1565,8 @@ def _prepare_labelled_detect_records_glob_for_matrix(
     positive_payload["calibration_label_resolution"] = "matrix_forced_positive"
     positive_payload.pop("calibration_excluded_from_labelled_sampling", None)
 
+    disallow_forced_pair_fallback = bool(grid_item_cfg.get("disallow_forced_pair_fallback", False))
+
     negative_payload = copy.deepcopy(base_payload)
     negative_payload["label"] = False
     negative_payload["ground_truth"] = False
@@ -1627,6 +1611,7 @@ def _prepare_labelled_detect_records_glob_for_matrix(
     # 真实分数保证 FPR 校准在真实负样本分布上进行，满足论文级严谨要求。
     # 降级条件：neg_detect_record_path 缺失、文件不存在或分数无效，则回落合成方案。
     neg_score: Optional[float] = None
+    neg_payload_real: Dict[str, Any] = {}
     if (
         neg_detect_record_path is not None
         and neg_detect_record_path.exists()
@@ -1636,10 +1621,31 @@ def _prepare_labelled_detect_records_glob_for_matrix(
         neg_score = _resolve_numeric_content_score(neg_payload_real)
 
     if isinstance(neg_score, float):
+        negative_payload = copy.deepcopy(neg_payload_real)
+        for key_name in [
+            "attack",
+            "attack_family",
+            "attack_params_version",
+            "attack_metadata_source_prompt",
+            "attack_metadata_source_prompt_field",
+            "attack_metadata_join_key",
+        ]:
+            if key_name in base_payload:
+                negative_payload[key_name] = copy.deepcopy(base_payload[key_name])
+        negative_payload["label"] = False
+        negative_payload["ground_truth"] = False
+        negative_payload["is_watermarked"] = False
+        negative_payload["calibration_label_resolution"] = "real_negative_payload"
+        negative_payload.pop("calibration_excluded_from_labelled_sampling", None)
         _ensure_calibration_compatible_content_payload(negative_payload, neg_score)
         negative_payload["ground_truth_source"] = "real_neg_embed_detect"
         negative_payload["calibration_sample_usage"] = "real_negative_for_experiment_matrix_label_balance"
     else:
+        if disallow_forced_pair_fallback:
+            raise RuntimeError(
+                "experiment_matrix formal validation disallows synthetic negative fallback; "
+                "real negative payload is required for labelled detect records"
+            )
         # 降级：neg 生成失败或分数无效，使用合成得分（base_score - 1.0）。
         _ensure_calibration_compatible_content_payload(negative_payload, base_score - 1.0)
 
