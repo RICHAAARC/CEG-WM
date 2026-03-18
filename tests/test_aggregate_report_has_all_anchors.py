@@ -33,6 +33,7 @@ def test_aggregate_report_has_all_anchors() -> None:
             "attack_protocol_version": "attack_protocol_v1",
             "impl_digest": "imp" * 21 + "w",
             "fusion_rule_version": "fusion_v1",
+            "policy_path": "content_np_geo_rescue",
             "metrics": {
                 "tpr_at_fpr": 0.91,
                 "geo_available_rate": 0.84,
@@ -59,7 +60,10 @@ def test_aggregate_report_has_all_anchors() -> None:
         "impl_digest",
         "fusion_rule_version",
         "attack_protocol_version",
+        "policy_path",
         "grid_item_digest",
     ]
     for field_name in required_fields:
         assert field_name in anchor
+
+    assert report.get("policy_path") == "content_np_geo_rescue"

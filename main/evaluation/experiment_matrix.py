@@ -223,6 +223,7 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
         "ablation_digest": _safe_str(grid_item_cfg.get("ablation_digest")),
         "attack_protocol_digest": _safe_str(grid_item_cfg.get("attack_protocol_digest")),
         "attack_protocol_version": grid_item_cfg.get("attack_protocol_version", "<absent>"),
+        "policy_path": "<absent>",
         "impl_digest": "<absent>",
         "fusion_rule_version": "<absent>",
         "hf_truncation_baseline_comparison": {
@@ -269,6 +270,12 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
             evaluate_record.get("threshold_metadata_digest") if isinstance(evaluate_record, dict) else None,
             run_closure.get("threshold_metadata_digest") if isinstance(run_closure, dict) else None,
         )
+        policy_path_value = _first_present_str(
+            evaluate_record.get("policy_path") if isinstance(evaluate_record, dict) else None,
+            run_closure.get("policy_path") if isinstance(run_closure, dict) else None,
+            eval_report.get("policy_path"),
+            eval_report.get("anchors", {}).get("policy_path") if isinstance(eval_report.get("anchors"), dict) else None,
+        )
         impl_digest_value = _first_present_str(
             eval_report.get("impl_digest"),
             evaluate_record.get("impl_digest") if isinstance(evaluate_record, dict) else None,
@@ -292,6 +299,7 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
                 "attack_protocol_digest": _safe_str(eval_report.get("attack_protocol_digest")),
                 "attack_protocol_version": _safe_str(eval_report.get("attack_protocol_version")),
                 "attack_coverage_digest": _safe_str(eval_report.get("attack_coverage_digest")),
+                "policy_path": _safe_str(policy_path_value),
                 "impl_digest": _safe_str(impl_digest_value),
                 "fusion_rule_version": _safe_str(fusion_rule_version_value),
                 "metrics": {
@@ -680,6 +688,13 @@ def build_aggregate_report(
     metrics_matrix: List[Dict[str, Any]] = []
     anchor_rows: List[Dict[str, Any]] = []
     failures: List[Dict[str, Any]] = []
+    policy_path_value = _first_present_str(
+        *[
+            item.get("policy_path")
+            for item in experiment_results
+            if isinstance(item, dict)
+        ]
+    )
 
     for item in experiment_results:
         if not isinstance(item, dict):
@@ -707,6 +722,7 @@ def build_aggregate_report(
             "fusion_rule_version": _safe_str(item.get("fusion_rule_version")),
             "attack_protocol_version": _safe_str(item.get("attack_protocol_version")),
             "run_root": _safe_str(item.get("run_root")),
+            "policy_path": _safe_str(item.get("policy_path")),
         }
         anchor_rows.append(anchor_row)
 
@@ -744,6 +760,7 @@ def build_aggregate_report(
         "failure_count": sum(1 for item in experiment_results if item.get("status") != "ok"),
         "grid_manifest_digest": _safe_str(grid_manifest.get("grid_manifest_digest")) if isinstance(grid_manifest, dict) else "<absent>",
         "attack_coverage_digest": _safe_str(coverage_manifest.get("attack_coverage_digest")),
+        "policy_path": _safe_str(policy_path_value),
         "attack_coverage_manifest": coverage_manifest,
         "anchors": anchor_rows,
         "metrics_matrix": metrics_matrix,

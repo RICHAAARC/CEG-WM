@@ -42,10 +42,12 @@ def test_run_single_experiment_anchor_fallback_from_records(
         "cfg_digest": "cfg_from_evaluate_record",
         "thresholds_digest": "thresholds_from_evaluate_record",
         "threshold_metadata_digest": "threshold_meta_from_evaluate_record",
+        "policy_path": "policy_path_from_evaluate_record",
         "impl_digest": "",
         "fusion_rule_version": "v1",
     }
     run_closure = {
+        "policy_path": "policy_path_from_run_closure",
         "impl_identity_digest": "impl_identity_digest_from_run_closure",
     }
 
@@ -96,10 +98,92 @@ def test_run_single_experiment_anchor_fallback_from_records(
     assert summary.get("cfg_digest") == "cfg_from_evaluate_record"
     assert summary.get("thresholds_digest") == "thresholds_from_evaluate_record"
     assert summary.get("threshold_metadata_digest") == "threshold_meta_from_evaluate_record"
+    assert summary.get("policy_path") == "policy_path_from_evaluate_record"
     assert summary.get("impl_digest") == "impl_identity_digest_from_run_closure"
     comparison_payload = summary.get("hf_truncation_baseline_comparison")
     assert isinstance(comparison_payload, dict)
     assert comparison_payload.get("comparison_source") == "real_hf_truncation_baseline_required"
+
+
+def test_run_single_experiment_policy_path_falls_back_to_run_closure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：当 evaluate_record 缺少 policy_path 时回退到 run_closure。
+
+    Verify policy_path falls back to run_closure when evaluate_record omits it.
+
+    Args:
+        tmp_path: pytest temp path fixture.
+        monkeypatch: pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    run_root = tmp_path / "item_0001"
+    records_dir = run_root / "records"
+    artifacts_dir = run_root / "artifacts"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    evaluate_record = {
+        "cfg_digest": "cfg_from_evaluate_record",
+        "thresholds_digest": "thresholds_from_evaluate_record",
+        "threshold_metadata_digest": "threshold_meta_from_evaluate_record",
+        "fusion_rule_version": "v1",
+    }
+    run_closure = {
+        "policy_path": "policy_path_from_run_closure",
+        "impl_identity_digest": "impl_identity_digest_from_run_closure",
+    }
+
+    (records_dir / "evaluate_record.json").write_text(json.dumps(evaluate_record), encoding="utf-8")
+    (artifacts_dir / "run_closure.json").write_text(json.dumps(run_closure), encoding="utf-8")
+
+    def _fake_derive_run_root(_cfg: Dict[str, Any]) -> Path:
+        return run_root
+
+    def _fake_run_stage_sequence(_cfg: Dict[str, Any], _root: Path) -> None:
+        return None
+
+    def _fake_assert_required_run_artifacts(_root: Path) -> None:
+        return None
+
+    def _fake_read_evaluation_report_for_run(_root: Path) -> Dict[str, Any]:
+        return {
+            "metrics": {},
+            "cfg_digest": "<absent>",
+            "thresholds_digest": "<absent>",
+            "threshold_metadata_digest": "<absent>",
+            "policy_path": "<absent>",
+            "impl_digest": "<absent>",
+            "fusion_rule_version": "v1",
+            "attack_protocol_version": "attack_protocol_v1",
+            "attack_protocol_digest": "attack_digest",
+        }
+
+    monkeypatch.setattr(experiment_matrix, "_derive_run_root", _fake_derive_run_root)
+    monkeypatch.setattr(experiment_matrix, "_run_stage_sequence", _fake_run_stage_sequence)
+    monkeypatch.setattr(experiment_matrix, "_assert_required_run_artifacts", _fake_assert_required_run_artifacts)
+    monkeypatch.setattr(
+        experiment_matrix,
+        "_read_evaluation_report_for_run",
+        _fake_read_evaluation_report_for_run,
+    )
+
+    grid_item_cfg: Dict[str, Any] = {
+        "grid_index": 1,
+        "grid_item_digest": "grid_digest",
+        "cfg_digest": "cfg_from_grid_item",
+        "ablation_digest": "ablation_digest",
+        "attack_protocol_digest": "attack_digest",
+        "attack_protocol_version": "attack_protocol_v1",
+    }
+    summary = experiment_matrix.run_single_experiment(grid_item_cfg)
+
+    assert summary.get("status") == "ok"
+    assert summary.get("policy_path") == "policy_path_from_run_closure"
 
 
 def test_extract_hf_truncation_comparison_reads_baseline_trace(tmp_path: Path) -> None:
@@ -161,6 +245,34 @@ def test_extract_anchors_from_results_includes_policy_path() -> None:
     )
 
     assert anchors["policy_path"] == "content_np_geo_rescue"
+
+
+def test_build_aggregate_report_carries_policy_path_to_top_level_and_anchor_rows() -> None:
+    report = experiment_matrix.build_aggregate_report(
+        [
+            {
+                "grid_item_digest": "g" * 64,
+                "status": "ok",
+                "run_root": "tmp/run_001",
+                "cfg_digest": "cfg_digest",
+                "plan_digest": "plan_digest",
+                "thresholds_digest": "thresholds_digest",
+                "threshold_metadata_digest": "threshold_metadata_digest",
+                "ablation_digest": "ablation_digest",
+                "attack_protocol_digest": "attack_protocol_digest",
+                "attack_protocol_version": "attack_protocol_v1",
+                "impl_digest": "impl_digest",
+                "fusion_rule_version": "fusion_rule_version",
+                "policy_path": "content_np_geo_rescue",
+                "metrics": {},
+            }
+        ]
+    )
+
+    assert report.get("policy_path") == "content_np_geo_rescue"
+    anchors = report.get("anchors")
+    assert isinstance(anchors, list)
+    assert anchors[0].get("policy_path") == "content_np_geo_rescue"
 
 
 def test_annotate_result_relative_paths_adds_run_root_relative() -> None:
