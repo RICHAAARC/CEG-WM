@@ -24,10 +24,13 @@ if str(_repo_root) not in sys.path:
 
 from scripts.run_onefile_workflow import PROFILE_PAPER_FULL_CUDA, run_onefile_workflow
 from scripts.workflow_acceptance_common import (
+    build_path_views,
     collect_workflow_state,
     detect_formal_gpu_preflight,
     load_json_dict,
     load_runtime_config,
+    normalize_path_value,
+    relative_path_under_base,
     write_workflow_summary,
 )
 
@@ -232,8 +235,16 @@ def _build_mini_real_validation_summary(
     matrix_cfg = _as_dict(cfg_obj.get("experiment_matrix"))
     exists = _as_dict(state.get("exists"))
     paths = dict(_as_dict(state.get("paths")))
-    paths["run_closure"] = str(run_root / "artifacts" / "run_closure.json")
-    paths["workflow_log"] = str(run_root / DEFAULT_WORKFLOW_LOG_PATH)
+    paths_relative = dict(_as_dict(state.get("paths_relative")))
+    extra_path_views = build_path_views(
+        run_root,
+        {
+            "run_closure": run_root / "artifacts" / "run_closure.json",
+            "workflow_log": run_root / DEFAULT_WORKFLOW_LOG_PATH,
+        },
+    )
+    paths.update(extra_path_views["paths"])
+    paths_relative.update(extra_path_views["paths_relative"])
 
     issues: List[Dict[str, Any]] = []
     if not bool(preflight.get("ok", False)):
@@ -395,8 +406,10 @@ def _build_mini_real_validation_summary(
 
     return {
         "profile_role": "paper_full_cuda_mini_real_validation",
-        "config_path": str(cfg_path),
-        "run_root": str(run_root),
+        "config_path": normalize_path_value(cfg_path),
+        "config_path_repo_relative": relative_path_under_base(_repo_root, cfg_path),
+        "run_root": normalize_path_value(run_root),
+        "run_root_relative": ".",
         "workflow_exit_code": workflow_exit_code,
         "environment_blocked": not bool(preflight.get("ok", False)),
         "mini_real_validation_ok": mini_real_validation_ok,
@@ -434,6 +447,7 @@ def _build_mini_real_validation_summary(
             "matrix_log_failure_reason": matrix_log_failure_reason,
         },
         "paths": paths,
+        "paths_relative": paths_relative,
     }
 
 

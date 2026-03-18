@@ -34,6 +34,9 @@ from main.core.errors import RunFailureReason, RecordBundleError, FactSourcesNot
 from main.policy import path_policy
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
 ALLOWED_STATUS_VALUES = ["ok", "failed", "mismatch", "absent"]
 ALLOWED_FAIL_REASONS = [
     "missing_required_field",
@@ -738,8 +741,16 @@ def finalize_run(
     model_provenance_error = None
 
     try:
-        model_cfg_path = run_root / "configs" / "model_sd3.yaml"
-        if model_cfg_path.exists() and model_cfg_path.is_file():
+        model_cfg_path = None
+        for candidate_path in [
+            run_root / "configs" / "model_sd3.yaml",
+            _REPO_ROOT / "configs" / "model_sd3.yaml",
+        ]:
+            if candidate_path.exists() and candidate_path.is_file():
+                model_cfg_path = candidate_path
+                break
+
+        if isinstance(model_cfg_path, Path):
             from main.core import config_loader as cfg_loader
             model_cfg, model_prov = cfg_loader.load_yaml_with_provenance(model_cfg_path)
             

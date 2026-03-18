@@ -140,3 +140,36 @@ def test_extract_hf_truncation_comparison_reads_baseline_trace(tmp_path: Path) -
     baseline_trace = payload.get("baseline_trace")
     assert isinstance(baseline_trace, dict)
     assert baseline_trace.get("pipeline_impl_id") == "sd3_diffusers_real"
+
+
+def test_extract_anchors_from_results_includes_policy_path() -> None:
+    anchors = experiment_matrix._extract_anchors_from_results(
+        aggregate_report={},
+        results=[
+            {
+                "status": "ok",
+                "cfg_digest": "cfg_digest",
+                "thresholds_digest": "thresholds_digest",
+                "threshold_metadata_digest": "threshold_metadata_digest",
+                "attack_protocol_version": "attack_protocol_v1",
+                "attack_protocol_digest": "attack_protocol_digest",
+                "impl_digest": "impl_digest",
+                "fusion_rule_version": "v1",
+                "policy_path": "content_np_geo_rescue",
+            }
+        ],
+    )
+
+    assert anchors["policy_path"] == "content_np_geo_rescue"
+
+
+def test_annotate_result_relative_paths_adds_run_root_relative() -> None:
+    results = [
+        {
+            "run_root": "outputs/experiment_matrix/experiments/item_0000_abcd1234",
+        }
+    ]
+
+    experiment_matrix._annotate_result_relative_paths(results, Path("outputs/experiment_matrix"))
+
+    assert results[0]["run_root_relative"] == "experiments/item_0000_abcd1234"

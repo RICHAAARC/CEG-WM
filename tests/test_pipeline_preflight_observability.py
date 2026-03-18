@@ -11,6 +11,7 @@ from typing import Any, Dict
 import pytest
 
 from main.cli.run_detect import assert_detect_runtime_dependencies
+from main.cli.run_evaluate import _bind_evaluate_threshold_anchors_to_run_meta
 from main.core import config_loader
 from main.core.contracts import get_contract_interpretation, load_frozen_contracts
 from main.core.errors import RunFailureReason
@@ -190,4 +191,45 @@ def test_preflight_fields_are_written_to_run_closure_append_only() -> None:
     assert payload["pipeline_build_status"] == "failed"
     assert payload["pipeline_build_failure_reason"] == "dependency_version_mismatch"
     assert payload["pipeline_build_failure_summary"] == "diffusers_import_failed"
+
+
+def test_bind_evaluate_threshold_anchors_to_run_meta_prefers_record_fields() -> None:
+    run_meta: Dict[str, Any] = {}
+    record = {
+        "thresholds_digest": "record_thresholds_digest",
+        "threshold_metadata_digest": "record_threshold_metadata_digest",
+        "target_fpr": 0.01,
+        "evaluation_report": {
+            "anchors": {
+                "thresholds_digest": "report_thresholds_digest",
+                "threshold_metadata_digest": "report_threshold_metadata_digest",
+            }
+        },
+    }
+
+    _bind_evaluate_threshold_anchors_to_run_meta(run_meta, record, cfg={})
+
+    assert run_meta["thresholds_digest"] == "record_thresholds_digest"
+    assert run_meta["threshold_metadata_digest"] == "record_threshold_metadata_digest"
+    assert run_meta["target_fpr"] == 0.01
+
+
+def test_bind_evaluate_threshold_anchors_to_run_meta_falls_back_to_report() -> None:
+    run_meta: Dict[str, Any] = {}
+    record = {
+        "thresholds_digest": "",
+        "threshold_metadata_digest": "",
+        "evaluation_report": {
+            "anchors": {
+                "thresholds_digest": "report_thresholds_digest",
+                "threshold_metadata_digest": "report_threshold_metadata_digest",
+            }
+        },
+    }
+
+    _bind_evaluate_threshold_anchors_to_run_meta(run_meta, record, cfg={"target_fpr": 0.02})
+
+    assert run_meta["thresholds_digest"] == "report_thresholds_digest"
+    assert run_meta["threshold_metadata_digest"] == "report_threshold_metadata_digest"
+    assert run_meta["target_fpr"] == 0.02
 

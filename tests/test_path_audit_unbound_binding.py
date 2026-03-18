@@ -68,3 +68,30 @@ def test_path_audit_not_written_when_fact_sources_unbound(tmp_run_root: Path):
     path_audits_dir = artifacts_dir / "path_audits"
     path_audit_files = sorted(path_audits_dir.glob("path_audit_*.json")) if path_audits_dir.exists() else []
     assert len(path_audit_files) == 0
+
+
+def test_finalize_run_uses_repo_model_config_when_run_root_copy_missing(tmp_run_root: Path):
+    """
+    Test that finalize_run falls back to the repository model config.
+
+    当 run_root/configs/model_sd3.yaml 缺失时，应回退到仓库级 configs/model_sd3.yaml，
+    不再产生伪造的 MODEL_PROVENANCE_MISSING 告警。
+    """
+    from main.core import status
+
+    run_meta = _build_minimal_run_meta()
+    records_dir = tmp_run_root / "records"
+    artifacts_dir = tmp_run_root / "artifacts"
+
+    run_closure_path = status.finalize_run(tmp_run_root, records_dir, artifacts_dir, run_meta)
+    payload = json.loads(run_closure_path.read_text(encoding="utf-8"))
+
+    warning_codes = {
+        item.get("code")
+        for item in (payload.get("audit_warnings") or [])
+        if isinstance(item, dict)
+    }
+    assert "MODEL_PROVENANCE_MISSING" not in warning_codes
+    assert isinstance(payload.get("model_provenance_canon_sha256"), str)
+    assert payload.get("model_provenance_canon_sha256") != "<absent>"
+    assert payload.get("model_provenance_error") == "<absent>"

@@ -19,6 +19,9 @@ from typing import Any, Dict, cast
 from main.core.records_io import write_artifact_json_unbound
 
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
 def _as_dict(value: Any) -> Dict[str, Any]:
     """
     功能：将未知对象收敛为 dict 视图。
@@ -34,6 +37,89 @@ def _as_dict(value: Any) -> Dict[str, Any]:
     if isinstance(value, dict):
         return cast(Dict[str, Any], value)
     return {}
+
+
+def normalize_path_value(path_value: Any) -> str:
+    """
+    功能：将路径值规范化为 POSIX 字符串。 
+
+    Normalize a path-like value into a stable POSIX string.
+
+    Args:
+        path_value: Path-like input.
+
+    Returns:
+        Absolute-or-rooted POSIX path string, or "<absent>" when unavailable.
+    """
+    if isinstance(path_value, Path):
+        return path_value.as_posix()
+    if not isinstance(path_value, str) or not path_value.strip():
+        return "<absent>"
+
+    candidate = Path(path_value.strip()).expanduser()
+    if candidate.is_absolute():
+        return candidate.as_posix()
+    return (_REPO_ROOT / candidate).as_posix()
+
+
+def relative_path_under_base(base_path: Path, path_value: Any) -> str:
+    """
+    功能：将路径值表示为相对 base_path 的 POSIX 路径。 
+
+    Represent a path-like value as a POSIX path relative to base_path.
+
+    Args:
+        base_path: Base directory path.
+        path_value: Path-like input.
+
+    Returns:
+        Relative POSIX path when path_value is under base_path; otherwise
+        "<absent>".
+    """
+    if not isinstance(base_path, Path):
+        raise TypeError("base_path must be Path")
+
+    base_text = normalize_path_value(base_path).rstrip("/")
+    candidate_text = normalize_path_value(path_value)
+    if candidate_text == "<absent>":
+        return "<absent>"
+    if candidate_text == base_text:
+        return "."
+
+    prefix = f"{base_text}/"
+    if candidate_text.startswith(prefix):
+        return candidate_text[len(prefix):]
+    return "<absent>"
+
+
+def build_path_views(run_root: Path, raw_paths: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
+    """
+    功能：为 run_root 下的路径集合构建绝对与相对视图。 
+
+    Build normalized absolute and run_root-relative path views.
+
+    Args:
+        run_root: Workflow run root.
+        raw_paths: Mapping of path labels to path-like values.
+
+    Returns:
+        Mapping with "paths" and "paths_relative" sub-mappings.
+    """
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(raw_paths, dict):
+        raise TypeError("raw_paths must be dict")
+
+    normalized_paths: Dict[str, str] = {}
+    relative_paths: Dict[str, str] = {}
+    for key_name, raw_value in raw_paths.items():
+        normalized_paths[key_name] = normalize_path_value(raw_value)
+        relative_paths[key_name] = relative_path_under_base(run_root, raw_value)
+
+    return {
+        "paths": normalized_paths,
+        "paths_relative": relative_paths,
+    }
 
 
 def load_json_dict(path: Path) -> Dict[str, Any]:
@@ -112,18 +198,24 @@ def collect_workflow_state(run_root: Path) -> Dict[str, Any]:
     if nested_report:
         evaluation_report = nested_report
 
-    return {
-        "paths": {
-            "run_root": str(run_root),
-            "embed_record": str(embed_record_path),
-            "detect_record": str(detect_record_path),
-            "calibration_record": str(calibration_record_path),
-            "evaluate_record": str(evaluate_record_path),
-            "evaluation_report": str(evaluation_report_path),
-            "signoff_report": str(signoff_report_path),
-            "thresholds_artifact": str(thresholds_artifact_path),
-            "experiment_matrix_summary": str(experiment_matrix_summary_path),
+    path_views = build_path_views(
+        run_root,
+        {
+            "run_root": run_root,
+            "embed_record": embed_record_path,
+            "detect_record": detect_record_path,
+            "calibration_record": calibration_record_path,
+            "evaluate_record": evaluate_record_path,
+            "evaluation_report": evaluation_report_path,
+            "signoff_report": signoff_report_path,
+            "thresholds_artifact": thresholds_artifact_path,
+            "experiment_matrix_summary": experiment_matrix_summary_path,
         },
+    )
+
+    return {
+        "paths": path_views["paths"],
+        "paths_relative": path_views["paths_relative"],
         "exists": {
             "embed_record": embed_record_path.exists(),
             "detect_record": detect_record_path.exists(),
@@ -250,7 +342,10 @@ def build_cpu_smoke_summary(run_root: Path, cfg_path: Path, workflow_exit_code: 
 
     return {
         "profile_role": "cpu_smoke",
-        "config_path": str(cfg_path),
+        "config_path": normalize_path_value(cfg_path),
+        "config_path_repo_relative": relative_path_under_base(_REPO_ROOT, cfg_path),
+        "run_root": normalize_path_value(run_root),
+        "run_root_relative": ".",
         "workflow_exit_code": workflow_exit_code,
         "workflow_runnable": workflow_runnable,
         "records_complete": records_complete,
@@ -276,6 +371,7 @@ def build_cpu_smoke_summary(run_root: Path, cfg_path: Path, workflow_exit_code: 
             "geo_score_semantics_ok": _compute_geo_score_semantics_ok(geometry_payload) if geometry_payload else True,
         },
         "paths": state["paths"],
+        "paths_relative": state["paths_relative"],
     }
 
 
@@ -359,7 +455,10 @@ def build_formal_gpu_summary(
 
     return {
         "profile_role": "paper_full_cuda_formal",
-        "config_path": str(cfg_path),
+        "config_path": normalize_path_value(cfg_path),
+        "config_path_repo_relative": relative_path_under_base(_REPO_ROOT, cfg_path),
+        "run_root": normalize_path_value(run_root),
+        "run_root_relative": ".",
         "workflow_exit_code": workflow_exit_code,
         "pipeline_execution_ok": pipeline_execution_ok,
         "formal_output_expectation_ok": formal_output_expectation_ok,
@@ -386,6 +485,7 @@ def build_formal_gpu_summary(
             "preflight": preflight,
         },
         "paths": state["paths"],
+        "paths_relative": state["paths_relative"],
     }
 
 

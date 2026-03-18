@@ -31,6 +31,7 @@ else:
     UTC = _tz.utc
 from typing import List, Sequence
 import yaml
+from scripts.workflow_acceptance_common import build_path_views, normalize_path_value, relative_path_under_base
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
@@ -3105,7 +3106,7 @@ def _prepare_detect_record_for_scoring(
     return calibrated_detect_path
 
 
-def _build_statistics_chain_summary(chain_run_root: Path) -> dict:
+def _build_statistics_chain_summary(chain_run_root: Path, base_run_root: Path | None = None) -> dict:
     """
     功能：收集单条统计链的核心工件锚点与阈值摘要。
 
@@ -3113,17 +3114,37 @@ def _build_statistics_chain_summary(chain_run_root: Path) -> dict:
 
     Args:
         chain_run_root: Run root of one statistics chain.
+        base_run_root: Optional base run_root used to derive relative paths.
 
     Returns:
         Summary mapping for the specified chain.
     """
     if not isinstance(chain_run_root, Path):
         raise TypeError("chain_run_root must be Path")
+    if base_run_root is not None and not isinstance(base_run_root, Path):
+        raise TypeError("base_run_root must be Path or None")
+
+    relative_base_root = base_run_root if base_run_root is not None else chain_run_root
 
     thresholds_path = chain_run_root / "artifacts" / "thresholds" / "thresholds_artifact.json"
     calibration_record_path = chain_run_root / "records" / "calibration_record.json"
     evaluate_record_path = chain_run_root / "records" / "evaluate_record.json"
     evaluation_report_path = chain_run_root / "artifacts" / "evaluation_report.json"
+
+    thresholds_artifact_path_value = str(thresholds_path) if thresholds_path.exists() else None
+    calibration_record_path_value = str(calibration_record_path) if calibration_record_path.exists() else None
+    evaluate_record_path_value = str(evaluate_record_path) if evaluate_record_path.exists() else None
+    evaluation_report_path_value = str(evaluation_report_path) if evaluation_report_path.exists() else None
+
+    path_views = build_path_views(
+        relative_base_root,
+        {
+            "thresholds_artifact_path": thresholds_artifact_path_value,
+            "calibration_record_path": calibration_record_path_value,
+            "evaluate_record_path": evaluate_record_path_value,
+            "evaluation_report_path": evaluation_report_path_value,
+        },
+    )
 
     thresholds_obj = _load_optional_json_dict(thresholds_path)
     calibration_record_obj = _load_optional_json_dict(calibration_record_path)
@@ -3137,15 +3158,22 @@ def _build_statistics_chain_summary(chain_run_root: Path) -> dict:
         metrics_obj = {}
 
     return {
-        "run_root": str(chain_run_root),
+        "run_root": normalize_path_value(chain_run_root),
+        "run_root_relative": relative_path_under_base(relative_base_root, chain_run_root),
         "score_name": thresholds_obj.get("score_name") or calibration_summary.get("score_name") or metrics_obj.get("score_name"),
         "threshold_id": thresholds_obj.get("threshold_id") or calibration_record_obj.get("threshold_id"),
         "threshold_value": thresholds_obj.get("threshold_value") or calibration_summary.get("threshold_value") or metrics_obj.get("threshold_value"),
         "threshold_key_used": thresholds_obj.get("threshold_key_used") or calibration_record_obj.get("threshold_key_used") or evaluate_record_obj.get("threshold_key_used"),
-        "thresholds_artifact_path": str(thresholds_path) if thresholds_path.exists() else None,
-        "calibration_record_path": str(calibration_record_path) if calibration_record_path.exists() else None,
-        "evaluate_record_path": str(evaluate_record_path) if evaluate_record_path.exists() else None,
-        "evaluation_report_path": str(evaluation_report_path) if evaluation_report_path.exists() else None,
+        "thresholds_artifact_path": thresholds_artifact_path_value,
+        "thresholds_artifact_path_relative": path_views["paths_relative"]["thresholds_artifact_path"],
+        "calibration_record_path": calibration_record_path_value,
+        "calibration_record_path_relative": path_views["paths_relative"]["calibration_record_path"],
+        "evaluate_record_path": evaluate_record_path_value,
+        "evaluate_record_path_relative": path_views["paths_relative"]["evaluate_record_path"],
+        "evaluation_report_path": evaluation_report_path_value,
+        "evaluation_report_path_relative": path_views["paths_relative"]["evaluation_report_path"],
+        "paths": path_views["paths"],
+        "paths_relative": path_views["paths_relative"],
     }
 
 
@@ -3169,14 +3197,30 @@ def _write_parallel_attestation_statistics_summary(run_root: Path, parallel_run_
         raise TypeError("parallel_run_root must be Path")
 
     summary_path = run_root / "artifacts" / "parallel_attestation_statistics_summary.json"
-    parallel_chain_summary = _build_statistics_chain_summary(parallel_run_root)
+    parallel_chain_summary = _build_statistics_chain_summary(parallel_run_root, base_run_root=run_root)
     parallel_score_name = parallel_chain_summary.get("score_name")
     if not isinstance(parallel_score_name, str) or not parallel_score_name:
         parallel_score_name = "parallel_attestation_statistics"
 
+    summary_path_views = build_path_views(
+        run_root,
+        {
+            "summary_path": summary_path,
+            "parallel_run_root": parallel_run_root,
+        },
+    )
+
     summary_obj = {
         "summary_version": "v1",
-        "content_score_chain": _build_statistics_chain_summary(run_root),
+        "run_root": normalize_path_value(run_root),
+        "run_root_relative": ".",
+        "summary_path": normalize_path_value(summary_path),
+        "summary_path_relative": summary_path_views["paths_relative"]["summary_path"],
+        "parallel_run_root": normalize_path_value(parallel_run_root),
+        "parallel_run_root_relative": summary_path_views["paths_relative"]["parallel_run_root"],
+        "paths": summary_path_views["paths"],
+        "paths_relative": summary_path_views["paths_relative"],
+        "content_score_chain": _build_statistics_chain_summary(run_root, base_run_root=run_root),
         f"{parallel_score_name}_chain": parallel_chain_summary,
     }
     _write_artifact_text_unbound(
@@ -3666,7 +3710,7 @@ def _first_present_anchor_str(*values: object) -> str:
     return "<absent>"
 
 
-def _build_minimal_repro_bundle(run_root: Path) -> None:
+def _build_minimal_repro_bundle(run_root: Path, cfg_path: Path | None = None) -> None:
     """
     功能：基于现有 run_root 产物生成最小可审计 repro_bundle。 
 
@@ -3675,6 +3719,7 @@ def _build_minimal_repro_bundle(run_root: Path) -> None:
 
     Args:
         run_root: Unified run_root path.
+        cfg_path: Optional effective config path for path-view recording.
 
     Returns:
         None.
@@ -3684,6 +3729,8 @@ def _build_minimal_repro_bundle(run_root: Path) -> None:
     """
     if not isinstance(run_root, Path):
         raise TypeError("run_root must be Path")
+    if cfg_path is not None and not isinstance(cfg_path, Path):
+        raise TypeError("cfg_path must be Path or None")
 
     evaluation_report_obj = _load_optional_json_dict(run_root / "artifacts" / "evaluation_report.json")
     nested_report_obj = evaluation_report_obj.get("evaluation_report")
@@ -3704,8 +3751,22 @@ def _build_minimal_repro_bundle(run_root: Path) -> None:
 
     pointer_files = list(required_pointer_files)
 
+    repro_bundle_dir = run_root / "artifacts" / "repro_bundle"
+    path_views = build_path_views(
+        run_root,
+        {
+            "run_closure": run_root / "artifacts" / "run_closure.json",
+            "evaluate_record": run_root / "records" / "evaluate_record.json",
+            "evaluation_report": run_root / "artifacts" / "evaluation_report.json",
+            "manifest": repro_bundle_dir / "manifest.json",
+            "pointers": repro_bundle_dir / "pointers.json",
+        },
+    )
+
     pointers_obj = {
         "schema_version": "v1",
+        "run_root": normalize_path_value(run_root),
+        "run_root_relative": ".",
         "files": [
             {
                 "path": str(source_path.relative_to(run_root).as_posix()),
@@ -3761,6 +3822,12 @@ def _build_minimal_repro_bundle(run_root: Path) -> None:
             evaluate_record_obj.get("policy_path"),
             run_closure_obj.get("policy_path"),
         ),
+        "config_path": normalize_path_value(cfg_path),
+        "config_path_repo_relative": relative_path_under_base(REPO_ROOT, cfg_path) if isinstance(cfg_path, Path) else "<absent>",
+        "run_root": normalize_path_value(run_root),
+        "run_root_relative": ".",
+        "paths": path_views["paths"],
+        "paths_relative": path_views["paths_relative"],
         "pointers_rel_path": "artifacts/repro_bundle/pointers.json",
     }
 
@@ -3787,7 +3854,6 @@ def _build_minimal_repro_bundle(run_root: Path) -> None:
         if not isinstance(field_value, str) or not field_value or field_value == "<absent>":
             manifest_obj[field_name] = field_default
 
-    repro_bundle_dir = run_root / "artifacts" / "repro_bundle"
     repro_bundle_dir.mkdir(parents=True, exist_ok=True)
     _write_artifact_text_unbound(
         run_root,
@@ -3833,7 +3899,7 @@ def _ensure_repro_bundle_ready_for_paper_signoff(repo_root: Path, run_root: Path
     if bundle_manifest_path.exists() and bundle_manifest_path.is_file() and bundle_pointers_path.exists() and bundle_pointers_path.is_file():
         return
 
-    _build_minimal_repro_bundle(run_root)
+    _build_minimal_repro_bundle(run_root, cfg_path=cfg_path)
 
     repro_audit_command = [
         sys.executable,
@@ -4016,6 +4082,8 @@ def _ensure_experiment_matrix_grid_summary_anchors(run_root: Path) -> None:
     if not summary_path.exists() or not summary_path.is_file():
         return
 
+    matrix_batch_root = run_root / "outputs" / "experiment_matrix"
+
     summary_obj = json.loads(summary_path.read_text(encoding="utf-8"))
     if not isinstance(summary_obj, dict):
         raise ValueError("experiment_matrix grid_summary root must be dict")
@@ -4120,6 +4188,21 @@ def _ensure_experiment_matrix_grid_summary_anchors(run_root: Path) -> None:
     if not isinstance(resolved_anchors.get("fusion_rule_version"), str) or not resolved_anchors.get("fusion_rule_version") or resolved_anchors.get("fusion_rule_version") == "<absent>":
         resolved_anchors["fusion_rule_version"] = "v1"
 
+    summary_path_views = build_path_views(
+        matrix_batch_root,
+        {
+            "summary_path": summary_path,
+        },
+    )
+    path_fills = {
+        "batch_root": normalize_path_value(matrix_batch_root),
+        "batch_root_relative": ".",
+        "summary_path": normalize_path_value(summary_path),
+        "summary_path_relative": summary_path_views["paths_relative"]["summary_path"],
+        "paths": summary_path_views["paths"],
+        "paths_relative": summary_path_views["paths_relative"],
+    }
+
     changed = False
     for field_name, resolved_value in resolved_anchors.items():
         current_value = summary_obj.get(field_name)
@@ -4127,8 +4210,18 @@ def _ensure_experiment_matrix_grid_summary_anchors(run_root: Path) -> None:
             summary_obj[field_name] = resolved_value
             changed = True
 
+    for field_name, resolved_value in path_fills.items():
+        current_value = summary_obj.get(field_name)
+        if field_name in {"paths", "paths_relative"}:
+            if not isinstance(current_value, dict):
+                summary_obj[field_name] = resolved_value
+                changed = True
+            continue
+        if not isinstance(current_value, str) or not current_value or current_value == "<absent>":
+            summary_obj[field_name] = resolved_value
+            changed = True
+
     if changed:
-        matrix_batch_root = run_root / "outputs" / "experiment_matrix"
         matrix_artifacts_dir = matrix_batch_root / "artifacts"
         records_io.write_artifact_text_unbound(
             matrix_batch_root,
@@ -4365,7 +4458,7 @@ def run_onefile_workflow(
                 ]
                 if all(path.exists() and path.is_file() for path in repro_pointer_sources):
                     _ensure_run_root_artifacts_for_strict_audits(run_root)
-                    _build_minimal_repro_bundle(run_root)
+                    _build_minimal_repro_bundle(run_root, cfg_path=effective_cfg_path)
             except Exception as exc:
                 print(
                     "[onefile] pre-audits repro bundle closure failed: "

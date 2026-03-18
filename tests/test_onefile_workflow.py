@@ -1583,12 +1583,21 @@ def test_build_minimal_repro_bundle_excludes_signoff_report_self_reference(tmp_p
         encoding="utf-8",
     )
 
-    module._build_minimal_repro_bundle(run_root)
+    cfg_path = repo_root / "configs" / "paper_full_cuda.yaml"
+
+    module._build_minimal_repro_bundle(run_root, cfg_path=cfg_path)
 
     pointers_path = run_root / "artifacts" / "repro_bundle" / "pointers.json"
     pointers_obj = json.loads(pointers_path.read_text(encoding="utf-8"))
     pointer_paths = [item["path"] for item in pointers_obj["files"]]
     assert "artifacts/signoff/signoff_report.json" not in pointer_paths
+
+    manifest_path = run_root / "artifacts" / "repro_bundle" / "manifest.json"
+    manifest_obj = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest_obj["config_path_repo_relative"] == "configs/paper_full_cuda.yaml"
+    assert manifest_obj["run_root_relative"] == "."
+    assert manifest_obj["paths_relative"]["run_closure"] == "artifacts/run_closure.json"
+    assert pointers_obj["run_root_relative"] == "."
 
     signoff_report_path.write_text(
         json.dumps({"status": "refreshed"}, ensure_ascii=False, indent=2),
@@ -1801,6 +1810,64 @@ def test_parallel_attestation_statistics_workflow_writes_distinct_artifacts(
     assert content_chain["threshold_id"] == "content_score_np_fpr_0_01"
     assert attestation_chain["threshold_id"] == "event_attestation_score_np_fpr_0_01"
     assert content_chain["thresholds_artifact_path"] != attestation_chain["thresholds_artifact_path"]
+    assert summary_obj["run_root_relative"] == "."
+    assert summary_obj["parallel_run_root_relative"] == "outputs/parallel_attestation_statistics"
+    assert content_chain["run_root_relative"] == "."
+    assert attestation_chain["run_root_relative"] == "outputs/parallel_attestation_statistics"
+    assert content_chain["thresholds_artifact_path_relative"] == "artifacts/thresholds/thresholds_artifact.json"
+    assert attestation_chain["thresholds_artifact_path_relative"] == (
+        "outputs/parallel_attestation_statistics/artifacts/thresholds/thresholds_artifact.json"
+    )
+
+
+def test_ensure_experiment_matrix_grid_summary_anchors_adds_path_views(tmp_path: Path) -> None:
+    """
+    功能：验证 onefile 的 grid_summary 收口会补齐 batch_root 与 relative path 视图。
+
+    Verify onefile grid_summary closure appends batch-root path views without
+    mutating existing anchor semantics.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    summary_path = run_root / "outputs" / "experiment_matrix" / "artifacts" / "grid_summary.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(
+        json.dumps(
+            {
+                "total": 1,
+                "succeeded": 1,
+                "failed": 0,
+                "cfg_digest": "cfg-digest",
+                "thresholds_digest": "thresholds-digest",
+                "threshold_metadata_digest": "threshold-metadata-digest",
+                "attack_protocol_version": "attack_protocol_v1",
+                "attack_protocol_digest": "attack-protocol-digest",
+                "attack_coverage_digest": "attack-coverage-digest",
+                "impl_digest": "impl-digest",
+                "fusion_rule_version": "v1",
+                "policy_path": "content_np_geo_rescue",
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    ensure_grid_summary = getattr(module, "_ensure_experiment_matrix_grid_summary_anchors")
+    ensure_grid_summary(run_root)
+
+    summary_obj = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary_obj["batch_root_relative"] == "."
+    assert summary_obj["summary_path_relative"] == "artifacts/grid_summary.json"
+    assert summary_obj["paths_relative"]["summary_path"] == "artifacts/grid_summary.json"
 
 
 def test_parallel_attestation_statistics_workflow_prefers_experiment_matrix_attack_aware_inputs(

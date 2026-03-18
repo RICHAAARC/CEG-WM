@@ -127,6 +127,52 @@ def _validate_detect_record_label_balance_for_evaluate(cfg: Dict[str, Any]) -> N
         )
 
 
+def _bind_evaluate_threshold_anchors_to_run_meta(
+    run_meta: Dict[str, Any],
+    record: Dict[str, Any],
+    cfg: Dict[str, Any],
+) -> None:
+    """
+    功能：将 evaluate 阶段阈值锚点回填到 run_meta。 
+
+    Bind evaluate threshold anchors into run_meta for run_closure emission.
+
+    Args:
+        run_meta: Mutable run metadata mapping.
+        record: Evaluate record mapping.
+        cfg: Runtime config mapping.
+
+    Returns:
+        None.
+    """
+    if not isinstance(run_meta, dict):
+        raise TypeError("run_meta must be dict")
+    if not isinstance(record, dict):
+        raise TypeError("record must be dict")
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+
+    evaluation_report = record.get("evaluation_report") if isinstance(record.get("evaluation_report"), dict) else {}
+    report_anchors = evaluation_report.get("anchors") if isinstance(evaluation_report.get("anchors"), dict) else {}
+
+    def _resolve_anchor_value(field_name: str) -> str:
+        record_value = record.get(field_name)
+        if isinstance(record_value, str) and record_value.strip():
+            return record_value
+        anchor_value = report_anchors.get(field_name)
+        if isinstance(anchor_value, str) and anchor_value.strip():
+            return anchor_value
+        return "<absent>"
+
+    run_meta["thresholds_digest"] = _resolve_anchor_value("thresholds_digest")
+    run_meta["threshold_metadata_digest"] = _resolve_anchor_value("threshold_metadata_digest")
+
+    target_fpr = record.get("target_fpr")
+    if target_fpr is None:
+        target_fpr = cfg.get("target_fpr", "<absent>")
+    run_meta["target_fpr"] = target_fpr
+
+
 def _autofill_evaluate_inputs(cfg: Dict[str, Any], run_root: Path) -> None:
     """
     功能：为 paper/onefile 标准路径自动补全 evaluate 输入工件位置。
@@ -384,6 +430,7 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
             # 口径版本标识写入 run_meta。
             run_meta["thresholds_rule_id"] = record.get("thresholds_rule_id", "<absent>")
             run_meta["thresholds_rule_version"] = record.get("thresholds_rule_version", "<absent>")
+            _bind_evaluate_threshold_anchors_to_run_meta(run_meta, record, cfg)
 
             # 绑定 impl_identity 字段族。
             bind_impl_identity_fields(record, impl_identity, impl_set, contracts)

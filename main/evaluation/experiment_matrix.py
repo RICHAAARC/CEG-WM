@@ -37,6 +37,60 @@ _FORBIDDEN_ARTIFACT_ANCHOR_FIELDS = {
 }
 
 
+def _relative_path_from_base(base_path: Path, path_value: Any) -> str:
+    """
+    功能：将路径值规范化为相对 base_path 的 POSIX 路径。 
+
+    Normalize a path-like value into a POSIX relative path under base_path.
+
+    Args:
+        base_path: Base directory path.
+        path_value: Candidate path-like value.
+
+    Returns:
+        Relative POSIX path when path_value is under base_path; otherwise
+        "<absent>".
+    """
+    if not isinstance(base_path, Path):
+        raise TypeError("base_path must be Path")
+    if not isinstance(path_value, str) or not path_value:
+        return "<absent>"
+
+    base_text = base_path.as_posix().rstrip("/")
+    candidate_text = Path(path_value).as_posix()
+    if candidate_text == base_text:
+        return "."
+
+    prefix = f"{base_text}/"
+    if candidate_text.startswith(prefix):
+        return candidate_text[len(prefix):]
+    return "<absent>"
+
+
+def _annotate_result_relative_paths(results: List[Dict[str, Any]], batch_root: Path) -> None:
+    """
+    功能：为 experiment_matrix 结果补充相对路径视图。 
+
+    Append run_root_relative fields for matrix result portability.
+
+    Args:
+        results: Experiment result list.
+        batch_root: Matrix batch root path.
+
+    Returns:
+        None.
+    """
+    if not isinstance(results, list):
+        raise TypeError("results must be list")
+    if not isinstance(batch_root, Path):
+        raise TypeError("batch_root must be Path")
+
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        item["run_root_relative"] = _relative_path_from_base(batch_root, item.get("run_root"))
+
+
 def build_experiment_grid(base_cfg: dict) -> list[dict]:
     """
     功能：根据基础配置展开实验矩阵。
@@ -569,6 +623,9 @@ def run_experiment_grid(grid: list[dict], strict: bool = True) -> dict:
     grid_manifest = _build_grid_manifest(grid)
     aggregate_report = build_aggregate_report(results, grid_manifest=grid_manifest)
     summary_paths = _write_grid_artifacts(grid, aggregate_report, results, strict)
+    if len(grid) > 0:
+        batch_root_value = grid[0].get("batch_root", "outputs/experiment_matrix")
+        _annotate_result_relative_paths(results, Path(str(batch_root_value)))
 
     # 从 aggregate_report 或 results[0] 提取锚点字段（append-only，不重新计算）
     anchors_obj = _extract_anchors_from_results(aggregate_report, results)
@@ -2234,6 +2291,8 @@ def _extract_anchors_from_results(
     if isinstance(aggregate_report, dict):
         if aggregate_report.get("attack_coverage_digest"):
             anchors["attack_coverage_digest"] = _safe_str(aggregate_report.get("attack_coverage_digest"))
+        if isinstance(aggregate_report.get("policy_path"), str) and aggregate_report.get("policy_path"):
+            anchors["policy_path"] = _safe_str(aggregate_report.get("policy_path"))
 
     # 优先级 2: 从第一个成功的 result 提取（若存在）
     first_ok_result: Optional[Dict[str, Any]] = None
@@ -2251,6 +2310,7 @@ def _extract_anchors_from_results(
             "attack_protocol_digest",
             "impl_digest",
             "fusion_rule_version",
+            "policy_path",
         ]:
             value = first_ok_result.get(key)
             if isinstance(value, str) and value:
