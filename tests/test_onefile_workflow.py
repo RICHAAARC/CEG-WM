@@ -274,6 +274,13 @@ def test_experiment_matrix_cfg_disables_attestation_without_polluting_main_cfg(t
             "enabled": True,
             "require_signed_bundle_verification": True,
         },
+        "input_image_path": "top_level_should_be_removed.png",
+        "embed": {
+            "input_image_path": "main_workflow_default_embed_input.png",
+            "preview_generation": {
+                "enabled": True,
+            },
+        },
     }
     cfg_path = tmp_path / "paper_cfg.yaml"
     cfg_path.write_text(yaml.safe_dump(cfg_obj, allow_unicode=True, sort_keys=False), encoding="utf-8")
@@ -292,11 +299,15 @@ def test_experiment_matrix_cfg_disables_attestation_without_polluting_main_cfg(t
     assert matrix_cfg["paper_faithfulness"]["alignment_check"] is False
     assert matrix_cfg["attestation"]["enabled"] is False
     assert matrix_cfg["attestation"]["require_signed_bundle_verification"] is False
+    assert "input_image_path" not in matrix_cfg
+    assert "input_image_path" not in matrix_cfg["embed"]
 
     assert original_cfg["paper_faithfulness"]["enabled"] is True
     assert original_cfg["paper_faithfulness"]["alignment_check"] is True
     assert original_cfg["attestation"]["enabled"] is True
     assert original_cfg["attestation"]["require_signed_bundle_verification"] is True
+    assert original_cfg["input_image_path"] == "top_level_should_be_removed.png"
+    assert original_cfg["embed"]["input_image_path"] == "main_workflow_default_embed_input.png"
 
 
 def test_onefile_workflow_dry_run_skips_dual_branch_execution(

@@ -1231,6 +1231,16 @@ def _prepare_experiment_matrix_cfg_path(profile: str, run_root: Path, cfg_path: 
     attestation_cfg["require_signed_bundle_verification"] = False
     cfg_obj["attestation"] = attestation_cfg
 
+    # experiment_matrix 需要在子运行内自行解析 embed 输入；不得继承 onefile 主链为
+    # SemanticMaskProvider 预写入的 default_embed_input.png，否则 neg_cache 无法触发
+    # preview_generation 路径，formal real-negative-cache 会被误判为缺失。
+    cfg_obj.pop("__embed_input_image_path__", None)
+    cfg_obj.pop("input_image_path", None)
+    embed_cfg = cfg_obj.get("embed") if isinstance(cfg_obj.get("embed"), dict) else {}
+    if "input_image_path" in embed_cfg:
+        embed_cfg.pop("input_image_path", None)
+    cfg_obj["embed"] = embed_cfg
+
     matrix_cfg_path = run_root / "artifacts" / "workflow_cfg" / "experiment_matrix_config.yaml"
     _write_artifact_text_unbound(
         run_root,

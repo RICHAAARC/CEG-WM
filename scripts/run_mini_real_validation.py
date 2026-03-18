@@ -34,6 +34,7 @@ from scripts.workflow_acceptance_common import (
 
 DEFAULT_CONFIG_PATH = Path("configs/paper_full_cuda_mini_real_validation.yaml")
 DEFAULT_RUN_ROOT = Path("outputs/onefile_paper_full_cuda_mini_real_validation")
+DEFAULT_WORKFLOW_LOG_PATH = Path("logs/mini_real_workflow_execution.log")
 
 
 def _resolve_repo_path(path_value: str) -> Path:
@@ -127,6 +128,33 @@ def _load_matrix_summary(run_root: Path) -> Dict[str, Any]:
     return load_json_dict(run_root / "outputs" / "experiment_matrix" / "artifacts" / "grid_summary.json")
 
 
+def _load_workflow_log_lines(run_root: Path) -> List[str]:
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    workflow_log_path = run_root / DEFAULT_WORKFLOW_LOG_PATH
+    if not workflow_log_path.exists() or not workflow_log_path.is_file():
+        return []
+    try:
+        return workflow_log_path.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return []
+
+
+def _extract_experiment_matrix_log_failure(run_root: Path) -> str:
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+
+    log_lines = _load_workflow_log_lines(run_root)
+    for line in reversed(log_lines):
+        if not isinstance(line, str) or not line:
+            continue
+        if line.startswith("[ExperimentMatrixBatch] [ERROR] "):
+            return line.split("[ExperimentMatrixBatch] [ERROR] ", 1)[1].strip()
+        if line.startswith("RuntimeError: experiment_matrix"):
+            return line.strip()
+    return "<absent>"
+
+
 def _extract_first_failed_matrix_item(matrix_summary: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(matrix_summary, dict):
         raise TypeError("matrix_summary must be dict")
@@ -194,6 +222,7 @@ def _build_mini_real_validation_summary(
     state = collect_workflow_state(run_root)
     run_closure = load_json_dict(run_root / "artifacts" / "run_closure.json")
     matrix_summary = _load_matrix_summary(run_root)
+    matrix_log_failure_reason = _extract_experiment_matrix_log_failure(run_root)
     detect_record = _as_dict(state.get("detect_record"))
     content_payload = _extract_content_payload(detect_record)
     geometry_payload = _extract_geometry_payload(detect_record)
@@ -204,6 +233,7 @@ def _build_mini_real_validation_summary(
     exists = _as_dict(state.get("exists"))
     paths = dict(_as_dict(state.get("paths")))
     paths["run_closure"] = str(run_root / "artifacts" / "run_closure.json")
+    paths["workflow_log"] = str(run_root / DEFAULT_WORKFLOW_LOG_PATH)
 
     issues: List[Dict[str, Any]] = []
     if not bool(preflight.get("ok", False)):
@@ -300,7 +330,9 @@ def _build_mini_real_validation_summary(
                     "failed": int(matrix_summary.get("failed", 0)),
                     "total": int(matrix_summary.get("total", 0)),
                     "first_failure_reason": matrix_failure.get("failure_reason", "<absent>"),
+                    "log_failure_reason": matrix_log_failure_reason,
                     "grid_summary_path": paths.get("experiment_matrix_summary"),
+                    "workflow_log_path": paths.get("workflow_log"),
                 },
                 severity="high",
                 recommended_fix="优先查看 experiment_matrix 的首个 failure_reason，确认是 real neg cache、shared thresholds 还是 forced pair guard 触发。",
@@ -310,14 +342,24 @@ def _build_mini_real_validation_summary(
         _append_issue_once(
             issues,
             _build_issue(
-                issue="experiment_matrix_summary_missing",
+                issue=(
+                    "experiment_matrix_failed_before_summary_write"
+                    if matrix_log_failure_reason != "<absent>"
+                    else "experiment_matrix_summary_missing"
+                ),
                 negative_result_visibility_risk="high",
                 evidence={
                     "workflow_exit_code": workflow_exit_code,
                     "grid_summary_path": paths.get("experiment_matrix_summary"),
+                    "workflow_log_path": paths.get("workflow_log"),
+                    "first_failure_reason": matrix_log_failure_reason,
                 },
                 severity="high",
-                recommended_fix="检查 onefile workflow 是否在 experiment_matrix 步骤前已失败，并回看前序 records/run_closure。",
+                recommended_fix=(
+                    "优先按 workflow_log 中的 experiment_matrix 首个异常修复 formal 前置件后重跑。"
+                    if matrix_log_failure_reason != "<absent>"
+                    else "检查 onefile workflow 是否在 experiment_matrix 步骤前已失败，并回看前序 records/run_closure。"
+                ),
             ),
         )
 
@@ -389,6 +431,7 @@ def _build_mini_real_validation_summary(
             "matrix_total": int(matrix_summary.get("total", 0)),
             "matrix_failed": int(matrix_summary.get("failed", 0)),
             "matrix_first_failure_reason": matrix_failure.get("failure_reason", "<absent>"),
+            "matrix_log_failure_reason": matrix_log_failure_reason,
         },
         "paths": paths,
     }
