@@ -729,3 +729,351 @@ def test_build_experiment_grid_propagates_allow_failed_semantics_collection() ->
     grid = experiment_matrix.build_experiment_grid(base_cfg)
     assert isinstance(grid, list) and len(grid) > 0
     assert all(item.get("allow_failed_semantics_collection") is True for item in grid)
+
+
+def test_build_experiment_grid_propagates_formal_validation_guards() -> None:
+    """
+    功能：experiment_matrix formal guard 必须透传到每个网格项。
+
+    Verify explicit formal-validation guard flags are propagated to each grid item.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    base_cfg = {
+        "model_id": "model_a",
+        "seed": 0,
+        "experiment_matrix": {
+            "require_real_negative_cache": True,
+            "require_shared_thresholds": True,
+            "disallow_forced_pair_fallback": True,
+        },
+    }
+
+    grid = experiment_matrix.build_experiment_grid(base_cfg)
+    assert isinstance(grid, list) and len(grid) > 0
+    assert all(item.get("require_real_negative_cache") is True for item in grid)
+    assert all(item.get("require_shared_thresholds") is True for item in grid)
+    assert all(item.get("disallow_forced_pair_fallback") is True for item in grid)
+
+
+def test_run_experiment_grid_fails_fast_when_formal_real_negative_cache_missing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """
+    功能：formal matrix 若缺少 real negative cache，必须在网格级直接失败。
+
+    Verify run_experiment_grid aborts before per-item execution when guarded items
+    require real negative cache and cache generation fails.
+
+    Args:
+        tmp_path: pytest temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    called = {"run_single_experiment": 0}
+
+    def _fake_neg_cache(**kwargs):
+        raise RuntimeError("neg_cache_failed")
+
+    def _fake_run_single(_grid_item_cfg):
+        called["run_single_experiment"] += 1
+        return {"status": "ok"}
+
+    monkeypatch.setattr(experiment_matrix, "_run_neg_embed_detect_for_cache", _fake_neg_cache)
+    monkeypatch.setattr(experiment_matrix, "_run_global_calibrate", lambda **kwargs: tmp_path / "thresholds.json")
+    monkeypatch.setattr(experiment_matrix, "run_single_experiment", _fake_run_single)
+
+    grid = [
+        {
+            "grid_index": 0,
+            "grid_item_digest": "a" * 64,
+            "cfg_snapshot": {"seed": 1, "model_id": "model_a"},
+            "ablation_flags": {},
+            "attack_protocol_version": "attack_protocol_v1",
+            "batch_root": str(tmp_path / "batch_root"),
+            "config_path": "configs/default.yaml",
+            "attack_protocol_path": "configs/attack_protocol.yaml",
+            "max_samples": 2,
+            "model_id": "model_a",
+            "seed": 1,
+            "require_real_negative_cache": True,
+        },
+    ]
+
+    with pytest.raises(RuntimeError, match="requires real negative cache"):
+        experiment_matrix.run_experiment_grid(grid, strict=True)
+
+    assert called["run_single_experiment"] == 0
+
+
+def test_run_experiment_grid_fails_fast_when_formal_shared_thresholds_missing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """
+    功能：formal matrix 若缺少 shared thresholds，必须在网格级直接失败。
+
+    Verify run_experiment_grid aborts before per-item execution when guarded items
+    require shared thresholds and global calibrate produces no artifact.
+
+    Args:
+        tmp_path: pytest temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    called = {"run_single_experiment": 0}
+    neg_path = tmp_path / "neg_detect_record.json"
+    neg_path.write_text(json.dumps({"content_evidence_payload": {"status": "ok", "score": 0.1}}), encoding="utf-8")
+
+    def _fake_run_single(_grid_item_cfg):
+        called["run_single_experiment"] += 1
+        return {"status": "ok"}
+
+    monkeypatch.setattr(experiment_matrix, "_run_neg_embed_detect_for_cache", lambda **kwargs: neg_path)
+    monkeypatch.setattr(experiment_matrix, "_run_global_calibrate", lambda **kwargs: None)
+    monkeypatch.setattr(experiment_matrix, "run_single_experiment", _fake_run_single)
+
+    grid = [
+        {
+            "grid_index": 0,
+            "grid_item_digest": "a" * 64,
+            "cfg_snapshot": {"seed": 1, "model_id": "model_a"},
+            "ablation_flags": {},
+            "attack_protocol_version": "attack_protocol_v1",
+            "batch_root": str(tmp_path / "batch_root"),
+            "config_path": "configs/default.yaml",
+            "attack_protocol_path": "configs/attack_protocol.yaml",
+            "max_samples": 2,
+            "model_id": "model_a",
+            "seed": 1,
+            "require_shared_thresholds": True,
+        },
+    ]
+
+    with pytest.raises(RuntimeError, match="requires shared thresholds"):
+        experiment_matrix.run_experiment_grid(grid, strict=True)
+
+    assert called["run_single_experiment"] == 0
+
+
+def test_run_stage_sequence_blocks_forced_pair_path_in_formal_mode(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """
+    功能：formal matrix 禁止进入 forced pair labelled detect-record 路径。
+
+    Verify _run_stage_sequence raises before calling the forced-pair helper when
+    disallow_forced_pair_fallback is enabled.
+
+    Args:
+        tmp_path: pytest temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    called_stages = []
+    called_labelled_helper = {"called": False}
+    thresholds_path = tmp_path / "shared_thresholds.json"
+    thresholds_path.write_text("{}", encoding="utf-8")
+    neg_path = tmp_path / "neg_detect_record.json"
+    neg_path.write_text(json.dumps({"content_evidence_payload": {"status": "ok", "score": 0.1}}), encoding="utf-8")
+
+    def _fake_layout(*args, **kwargs):
+        run_root = args[0]
+        (run_root / "records").mkdir(parents=True, exist_ok=True)
+        (run_root / "artifacts").mkdir(parents=True, exist_ok=True)
+        return {
+            "run_root": run_root,
+            "artifacts_dir": run_root / "artifacts",
+            "records_dir": run_root / "records",
+        }
+
+    def _fake_run_stage(stage_name, run_root, config_path, stage_overrides, input_record_path=None):
+        called_stages.append(stage_name)
+        if stage_name == "detect":
+            detect_record_path = run_root / "records" / "detect_record.json"
+            detect_record_path.parent.mkdir(parents=True, exist_ok=True)
+            detect_record_path.write_text(
+                json.dumps({"content_evidence_payload": {"status": "ok", "score": 0.2}}),
+                encoding="utf-8",
+            )
+
+    def _fake_prepare_labelled_glob(*args, **kwargs):
+        called_labelled_helper["called"] = True
+        raise AssertionError("forced-pair helper must not be called in formal mode")
+
+    monkeypatch.setattr(experiment_matrix.path_policy, "ensure_output_layout", _fake_layout)
+    monkeypatch.setattr(experiment_matrix, "_run_stage_command", _fake_run_stage)
+    monkeypatch.setattr(experiment_matrix, "_prepare_labelled_detect_records_glob_for_matrix", _fake_prepare_labelled_glob)
+
+    grid_item_cfg = {
+        "config_path": "configs/paper_full_cuda.yaml",
+        "attack_protocol_path": "configs/attack_protocol.yaml",
+        "cfg_snapshot": {"seed": 0, "model_id": "stabilityai/stable-diffusion-3.5-medium"},
+        "ablation_flags": {},
+        "max_samples": None,
+        "neg_detect_record_path": str(neg_path),
+        "shared_thresholds_path": str(thresholds_path),
+        "require_real_negative_cache": True,
+        "require_shared_thresholds": True,
+        "disallow_forced_pair_fallback": True,
+    }
+
+    with pytest.raises(RuntimeError, match="disallows forced pair fallback"):
+        experiment_matrix._run_stage_sequence(grid_item_cfg, tmp_path / "run")
+
+    assert called_stages == ["embed", "detect"]
+    assert called_labelled_helper["called"] is False
+
+
+def test_run_stage_sequence_preserves_debug_forced_pair_fallback(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """
+    功能：非 formal guard 路径仍应保留 forced pair fallback，供 debug/test 使用。
+
+    Verify the legacy forced-pair labelled fallback remains available when no
+    formal-validation guard is enabled.
+
+    Args:
+        tmp_path: pytest temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    called_stages = []
+    called_labelled_helper = {"called": 0}
+
+    def _fake_layout(*args, **kwargs):
+        run_root = args[0]
+        (run_root / "records").mkdir(parents=True, exist_ok=True)
+        (run_root / "artifacts").mkdir(parents=True, exist_ok=True)
+        return {
+            "run_root": run_root,
+            "artifacts_dir": run_root / "artifacts",
+            "records_dir": run_root / "records",
+        }
+
+    def _fake_run_stage(stage_name, run_root, config_path, stage_overrides, input_record_path=None):
+        called_stages.append(stage_name)
+        if stage_name == "detect":
+            detect_record_path = run_root / "records" / "detect_record.json"
+            detect_record_path.parent.mkdir(parents=True, exist_ok=True)
+            detect_record_path.write_text(
+                json.dumps({"content_evidence_payload": {"status": "ok", "score": 0.2}}),
+                encoding="utf-8",
+            )
+
+    def _fake_prepare_labelled_glob(run_root: Path, _grid_item_cfg: dict, neg_detect_record_path=None) -> str:
+        called_labelled_helper["called"] += 1
+        labelled_dir = run_root / "artifacts" / "evaluate_inputs" / "labelled_detect_records"
+        labelled_dir.mkdir(parents=True, exist_ok=True)
+        (labelled_dir / "detect_record_label_pos.json").write_text("{}", encoding="utf-8")
+        (labelled_dir / "detect_record_label_neg.json").write_text("{}", encoding="utf-8")
+        return str(labelled_dir / "*.json")
+
+    monkeypatch.setattr(experiment_matrix.path_policy, "ensure_output_layout", _fake_layout)
+    monkeypatch.setattr(experiment_matrix, "_run_stage_command", _fake_run_stage)
+    monkeypatch.setattr(experiment_matrix, "_prepare_labelled_detect_records_glob_for_matrix", _fake_prepare_labelled_glob)
+
+    grid_item_cfg = {
+        "config_path": "configs/paper_full_cuda.yaml",
+        "attack_protocol_path": "configs/attack_protocol.yaml",
+        "cfg_snapshot": {"seed": 0, "model_id": "stabilityai/stable-diffusion-3.5-medium"},
+        "ablation_flags": {},
+        "max_samples": None,
+    }
+
+    experiment_matrix._run_stage_sequence(grid_item_cfg, tmp_path / "run")
+
+    assert called_stages == ["embed", "detect", "calibrate", "evaluate"]
+    assert called_labelled_helper["called"] == 1
+
+
+def test_run_neg_embed_detect_for_cache_uses_preview_image_as_detect_input(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """
+    功能：neg cache 必须基于 preview_generation 的 clean 图驱动 detect。 
+
+    Verify neg cache runs embed without embed_identity_mode and passes a preview-based
+    input record into detect.
+
+    Args:
+        tmp_path: pytest temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    batch_root = tmp_path / "batch_root"
+    preview_image_path = tmp_path / "preview_clean.png"
+    preview_image_path.write_bytes(b"preview-bytes")
+
+    captured_embed_command = {}
+    captured_detect_call = {}
+
+    def _fake_subprocess_run(command, capture_output, text):
+        captured_embed_command["command"] = list(command)
+        assert capture_output is True
+        assert text is True
+        return SimpleNamespace(
+            returncode=0,
+            stdout=f"[Preview Generation] 预览图已生成，路径：{preview_image_path}\n",
+            stderr="",
+        )
+
+    def _fake_run_stage_command(stage_name, run_root, config_path, stage_overrides, input_record_path=None):
+        captured_detect_call["stage_name"] = stage_name
+        captured_detect_call["run_root"] = run_root
+        captured_detect_call["config_path"] = config_path
+        captured_detect_call["stage_overrides"] = list(stage_overrides)
+        captured_detect_call["input_record_path"] = input_record_path
+        detect_record_path = run_root / "records" / "detect_record.json"
+        detect_record_path.parent.mkdir(parents=True, exist_ok=True)
+        detect_record_path.write_text(
+            json.dumps({"content_evidence_payload": {"status": "ok", "score": 0.11}}),
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr(experiment_matrix.subprocess, "run", _fake_subprocess_run)
+    monkeypatch.setattr(experiment_matrix, "_run_stage_command", _fake_run_stage_command)
+
+    detect_record_path = experiment_matrix._run_neg_embed_detect_for_cache(
+        model_id="stabilityai/stable-diffusion-3.5-medium",
+        seed=7,
+        config_path="configs/paper_full_cuda.yaml",
+        batch_root=str(batch_root),
+        max_samples=None,
+    )
+
+    assert isinstance(detect_record_path, Path)
+    assert detect_record_path.exists()
+
+    embed_command = captured_embed_command.get("command")
+    assert isinstance(embed_command, list)
+    assert "main.cli.run_embed" in embed_command
+    assert not any("embed_identity_mode=true" == item for item in embed_command)
+
+    assert captured_detect_call.get("stage_name") == "detect"
+    assert "allow_threshold_fallback_for_tests=true" in captured_detect_call.get("stage_overrides", [])
+    input_record_path = captured_detect_call.get("input_record_path")
+    assert isinstance(input_record_path, Path)
+    input_record_obj = json.loads(input_record_path.read_text(encoding="utf-8"))
+    assert input_record_obj["image_path"] == str(preview_image_path)
+    assert input_record_obj["watermarked_path"] == str(preview_image_path)
+    assert input_record_obj["inputs"]["input_image_path"] == str(preview_image_path)

@@ -62,6 +62,7 @@ def build_experiment_grid(base_cfg: dict) -> list[dict]:
     seed_list = _resolve_seed_axis(base_cfg, matrix_cfg)
     attack_families, attack_protocol_version, attack_protocol_digest = _resolve_attack_family_axis(base_cfg, matrix_cfg)
     ablation_variants = _resolve_ablation_axis(matrix_cfg)
+    formal_validation_guards = _resolve_formal_validation_guards(matrix_cfg)
 
     batch_root = matrix_cfg.get("batch_root", "outputs/experiment_matrix")
     if not isinstance(batch_root, str) or not batch_root:
@@ -120,6 +121,9 @@ def build_experiment_grid(base_cfg: dict) -> list[dict]:
                         "attack_protocol_path": attack_protocol_path,
                         "max_samples": max_samples,
                         "allow_failed_semantics_collection": allow_failed_semantics_collection,
+                        "require_real_negative_cache": formal_validation_guards["require_real_negative_cache"],
+                        "require_shared_thresholds": formal_validation_guards["require_shared_thresholds"],
+                        "disallow_forced_pair_fallback": formal_validation_guards["disallow_forced_pair_fallback"],
                     }
                     grid_items.append(grid_item)
                     grid_index += 1
@@ -441,6 +445,12 @@ def run_experiment_grid(grid: list[dict], strict: bool = True) -> dict:
             # 全局 calibrate 失败时降级为 per-item calibrate，不中止 grid 执行。
             shared_thresholds_path = None
 
+    _assert_formal_validation_prerequisites(
+        grid,
+        neg_detect_record_cache=neg_detect_record_cache,
+        shared_thresholds_path=shared_thresholds_path,
+    )
+
     # (3) 主循环：将 neg_detect_record_path 与 shared_thresholds_path 注入各 grid item。
     for item in grid:
         if not isinstance(item, dict):
@@ -688,6 +698,106 @@ def _resolve_ablation_axis(matrix_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     return resolved
 
 
+def _resolve_formal_validation_guards(matrix_cfg: Dict[str, Any]) -> Dict[str, bool]:
+    """Resolve explicit formal-validation guard flags for experiment_matrix."""
+    if not isinstance(matrix_cfg, dict):
+        raise TypeError("matrix_cfg must be dict")
+
+    resolved: Dict[str, bool] = {}
+    for field_name in [
+        "require_real_negative_cache",
+        "require_shared_thresholds",
+        "disallow_forced_pair_fallback",
+    ]:
+        field_value = matrix_cfg.get(field_name, False)
+        if not isinstance(field_value, bool):
+            raise TypeError(f"experiment_matrix.{field_name} must be bool")
+        resolved[field_name] = field_value
+    return resolved
+
+
+def _extract_formal_validation_guards_from_grid_item(grid_item_cfg: Dict[str, Any]) -> Dict[str, bool]:
+    """Extract validated formal-validation guard flags from one grid item."""
+    if not isinstance(grid_item_cfg, dict):
+        raise TypeError("grid_item_cfg must be dict")
+
+    resolved: Dict[str, bool] = {}
+    for field_name in [
+        "require_real_negative_cache",
+        "require_shared_thresholds",
+        "disallow_forced_pair_fallback",
+    ]:
+        field_value = grid_item_cfg.get(field_name, False)
+        if not isinstance(field_value, bool):
+            raise TypeError(f"grid item {field_name} must be bool")
+        resolved[field_name] = field_value
+    return resolved
+
+
+def _assert_formal_validation_prerequisites(
+    grid: List[Dict[str, Any]],
+    neg_detect_record_cache: Dict[Tuple[str, int], Optional[Path]],
+    shared_thresholds_path: Optional[Path],
+) -> None:
+    """Fail-fast when explicit formal-validation guards cannot be satisfied."""
+    if not isinstance(grid, list):
+        raise TypeError("grid must be list")
+    if not isinstance(neg_detect_record_cache, dict):
+        raise TypeError("neg_detect_record_cache must be dict")
+    if shared_thresholds_path is not None and not isinstance(shared_thresholds_path, Path):
+        raise TypeError("shared_thresholds_path must be Path or None")
+
+    missing_real_negative_keys: List[str] = []
+    require_shared_thresholds = False
+    disallow_forced_pair_fallback = False
+
+    for item in grid:
+        if not isinstance(item, dict):
+            raise TypeError("grid items must be dict")
+        guards = _extract_formal_validation_guards_from_grid_item(item)
+        model_id = item.get("model_id")
+        seed_value = item.get("seed")
+        neg_key: Optional[Tuple[str, int]] = None
+        if isinstance(model_id, str) and isinstance(seed_value, int):
+            neg_key = (model_id, seed_value)
+
+        if guards["require_real_negative_cache"]:
+            neg_path = neg_detect_record_cache.get(neg_key) if neg_key is not None else None
+            if neg_path is None or not neg_path.exists() or not neg_path.is_file():
+                missing_real_negative_keys.append(
+                    f"model_id={_safe_str(model_id)}, seed={seed_value if isinstance(seed_value, int) else '<absent>'}"
+                )
+
+        require_shared_thresholds = require_shared_thresholds or guards["require_shared_thresholds"]
+        disallow_forced_pair_fallback = (
+            disallow_forced_pair_fallback or guards["disallow_forced_pair_fallback"]
+        )
+
+    if missing_real_negative_keys:
+        missing_keys_joined = "; ".join(sorted(set(missing_real_negative_keys)))
+        raise RuntimeError(
+            "experiment_matrix formal validation requires real negative cache for every guarded item; "
+            f"missing={missing_keys_joined}"
+        )
+
+    has_shared_thresholds = (
+        shared_thresholds_path is not None
+        and shared_thresholds_path.exists()
+        and shared_thresholds_path.is_file()
+    )
+    if require_shared_thresholds and not has_shared_thresholds:
+        raise RuntimeError(
+            "experiment_matrix formal validation requires shared thresholds from global calibrate; "
+            "current run produced no valid thresholds artifact"
+        )
+
+    if disallow_forced_pair_fallback:
+        raise RuntimeError(
+            "experiment_matrix formal validation disallows forced pair fallback; "
+            "current matrix calibrate/evaluate path still depends on _prepare_labelled_detect_records_glob_for_matrix"
+        )
+
+
 def _apply_ablation_flags(cfg_snapshot: Dict[str, Any], ablation_flags: Dict[str, Any]) -> None:
     """Apply ablation flags into cfg snapshot and normalize."""
     if "ablation" not in cfg_snapshot or not isinstance(cfg_snapshot.get("ablation"), dict):
@@ -727,10 +837,10 @@ def _run_neg_embed_detect_for_cache(
     """
     功能：为 (model_id, seed) 预生成真实负样本 detect record 并缓存。
 
-    Run embed (embed_identity_mode=true, no watermark injection) then detect on the
-    resulting clean image to obtain a real negative-sample content score. Results are
-    cached under batch_root/neg_cache/ and reused within the current experiment-matrix
-    session to avoid redundant SD inference.
+    Run embed once to materialize a clean preview-generation image, then detect on the
+    preview image to obtain a real negative-sample content score. Results are cached
+    under batch_root/neg_cache/ and reused within the current experiment-matrix session
+    to avoid redundant SD inference.
 
     Args:
         model_id: Stable Diffusion model identifier string.
@@ -775,16 +885,18 @@ def _run_neg_embed_detect_for_cache(
     if isinstance(max_samples, int):
         common_overrides.append(f"max_samples={max_samples}")
 
-    # (1) embed 阶段：embed_identity_mode=true 跳过水印注入，生成干净图像作为负样本来源。
-    embed_overrides = list(common_overrides) + ["embed_identity_mode=true"]
-    _run_stage_command(
-        stage_name="embed",
+    # (1) embed 阶段：运行正式 embed 以触发 preview_generation，提取干净 preview 图像。
+    preview_image_path = _run_embed_stage_for_neg_cache_preview(
         run_root=neg_run_root,
         config_path=Path(config_path),
-        stage_overrides=embed_overrides,
+        stage_overrides=list(common_overrides),
+    )
+    preview_input_record_path = _write_neg_preview_input_record(
+        run_root=neg_run_root,
+        preview_image_path=preview_image_path,
     )
 
-    # (2) detect 阶段：对干净图像执行 content 检测，获取真实负样本分数。
+    # (2) detect 阶段：对干净 preview 图像执行 content 检测，获取真实负样本分数。
     # allow_threshold_fallback_for_tests=true 因校准工件此时尚未产出。
     detect_overrides = list(common_overrides) + [
         "enable_content_detect=true",
@@ -795,11 +907,107 @@ def _run_neg_embed_detect_for_cache(
         run_root=neg_run_root,
         config_path=Path(config_path),
         stage_overrides=detect_overrides,
+        input_record_path=preview_input_record_path,
     )
 
     if neg_detect_record_path.exists() and neg_detect_record_path.is_file():
         return neg_detect_record_path
     return None
+
+
+def _run_embed_stage_for_neg_cache_preview(
+    run_root: Path,
+    config_path: Path,
+    stage_overrides: List[str],
+) -> Path:
+    """Run embed stage and resolve the generated clean preview image path."""
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(config_path, Path):
+        raise TypeError("config_path must be Path")
+    if not isinstance(stage_overrides, list):
+        raise TypeError("stage_overrides must be list")
+
+    command = [
+        sys.executable,
+        "-m",
+        "main.cli.run_embed",
+        "--out",
+        str(run_root),
+        "--config",
+        str(config_path),
+    ]
+    for item in stage_overrides:
+        if not isinstance(item, str) or not item:
+            raise ValueError("stage_overrides entries must be non-empty str")
+        command.extend(["--override", item])
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "stage failed: embed\n"
+            f"  - command: {' '.join(command)}\n"
+            f"  - stdout_tail: {result.stdout[-1200:]}\n"
+            f"  - stderr_tail: {result.stderr[-1200:]}"
+        )
+
+    preview_image_path = _extract_preview_image_path_from_embed_stdout(result.stdout)
+    if preview_image_path is None:
+        raise RuntimeError(
+            "neg_cache preview generation path missing in embed stdout; "
+            f"stdout_tail={result.stdout[-1200:]}"
+        )
+    if not preview_image_path.exists() or not preview_image_path.is_file():
+        raise RuntimeError(f"neg_cache preview image path not found: {preview_image_path}")
+    return preview_image_path
+
+
+def _extract_preview_image_path_from_embed_stdout(stdout_text: str) -> Optional[Path]:
+    """Extract clean preview image path from embed stdout."""
+    if not isinstance(stdout_text, str) or not stdout_text:
+        return None
+
+    marker = "[Preview Generation] 预览图已生成，路径："
+    for line in reversed(stdout_text.splitlines()):
+        if marker not in line:
+            continue
+        path_text = line.split(marker, 1)[1].strip()
+        if path_text:
+            return Path(path_text).resolve()
+    return None
+
+
+def _write_neg_preview_input_record(run_root: Path, preview_image_path: Path) -> Path:
+    """Write a minimal input record so detect can consume the clean preview image."""
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(preview_image_path, Path):
+        raise TypeError("preview_image_path must be Path")
+    if not preview_image_path.exists() or not preview_image_path.is_file():
+        raise ValueError(f"preview_image_path not found: {preview_image_path}")
+
+    artifacts_dir = run_root / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    input_record_path = artifacts_dir / "neg_preview_input" / "detect_input_record.json"
+    input_record_payload = {
+        "operation": "embed_preview_input",
+        "image_path": str(preview_image_path),
+        "watermarked_path": str(preview_image_path),
+        "inputs": {
+            "input_image_path": str(preview_image_path),
+        },
+    }
+    records_io.write_artifact_json_unbound(
+        run_root=run_root,
+        artifacts_dir=artifacts_dir,
+        path=str(input_record_path),
+        obj=input_record_payload,
+    )
+    return input_record_path
 
 
 def _run_global_calibrate(
@@ -938,6 +1146,8 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
     if not isinstance(ablation_flags, dict):
         raise TypeError("grid item ablation_flags must be dict")
 
+    formal_validation_guards = _extract_formal_validation_guards_from_grid_item(grid_item_cfg)
+
     ablation_snapshot = cfg_snapshot_obj.get("ablation")
     ablation_override_enabled = isinstance(ablation_snapshot, dict)
 
@@ -971,6 +1181,20 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
     neg_detect_record_path_for_stage: Optional[Path] = (
         Path(neg_path_str) if isinstance(neg_path_str, str) and neg_path_str else None
     )
+    if formal_validation_guards["require_real_negative_cache"]:
+        if (
+            neg_detect_record_path_for_stage is None
+            or not neg_detect_record_path_for_stage.exists()
+            or not neg_detect_record_path_for_stage.is_file()
+        ):
+            raise RuntimeError(
+                "experiment_matrix formal validation requires a valid neg_detect_record_path before per-item execution"
+            )
+
+    if formal_validation_guards["require_shared_thresholds"] and not use_shared_thresholds:
+        raise RuntimeError(
+            "experiment_matrix formal validation requires shared thresholds before per-item execution"
+        )
 
     for stage_name in ["embed", "detect", "calibrate", "evaluate"]:
         # 全局阈值可用时跳过 per-item calibrate：
@@ -978,6 +1202,8 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
         # run_experiment_grid 层严格分离，per-item calibrate 会把二者混用，不符合
         # NP 阈值估计的独立同分布要求。
         if stage_name == "calibrate" and use_shared_thresholds:
+            if formal_validation_guards["disallow_forced_pair_fallback"]:
+                continue
             # 在跳过前预先准备 labelled_detect_records_glob，供后续 evaluate 阶段使用。
             if labelled_detect_records_glob is None:
                 labelled_detect_records_glob = _prepare_labelled_detect_records_glob_for_matrix(
@@ -1008,6 +1234,11 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
         # calibrate/evaluate 都需要带标签的 detect records 输入。
         # 这里使用 detect 后生成的 attack-aware 标注记录对（正/负各一条）满足标签平衡门禁。
         if stage_name in {"calibrate", "evaluate"}:
+            if formal_validation_guards["disallow_forced_pair_fallback"]:
+                raise RuntimeError(
+                    "experiment_matrix formal validation disallows forced pair fallback; "
+                    f"stage={stage_name} would call _prepare_labelled_detect_records_glob_for_matrix"
+                )
             if labelled_detect_records_glob is None:
                 labelled_detect_records_glob = _prepare_labelled_detect_records_glob_for_matrix(
                     run_root, grid_item_cfg, neg_detect_record_path=neg_detect_record_path_for_stage
