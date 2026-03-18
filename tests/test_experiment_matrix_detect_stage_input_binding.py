@@ -6,6 +6,7 @@ Module type: General module
 
 from __future__ import annotations
 
+import copy
 import glob
 import json
 from pathlib import Path
@@ -968,6 +969,95 @@ def test_run_experiment_grid_fails_fast_when_formal_shared_thresholds_missing(
         experiment_matrix.run_experiment_grid(grid, strict=True)
 
     assert called["run_single_experiment"] == 0
+
+
+def test_run_global_calibrate_writes_shared_thresholds_from_neg_only_cache(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """
+    功能：global_calibrate 在仅有真实负样本 cache 时，也必须写出 shared thresholds 工件。
+
+    Verify _run_global_calibrate bypasses the CLI label-balance gate and writes
+    thresholds artifacts directly from the negative-only null distribution.
+
+    Args:
+        tmp_path: pytest temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    neg_path = tmp_path / "neg_detect_record.json"
+    neg_path.write_text(
+        json.dumps(
+            {
+                "operation": "detect",
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": 0.12,
+                },
+                "label": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    captured = {"cfg": None, "impl_set": None}
+
+    def _fake_load_yaml_with_provenance(_config_path):
+        return {
+            "target_fpr": 0.01,
+            "calibration": {
+                "score_name": "content_score",
+                "exclude_formal_sidecar_disabled_marker": True,
+                "exclude_synthetic_negative_closure_marker": True,
+            },
+        }, {"file_sha256": "unused"}
+
+    def _fake_run_calibrate_orchestrator(cfg, impl_set):
+        captured["cfg"] = copy.deepcopy(cfg)
+        captured["impl_set"] = impl_set
+        return {
+            "thresholds_artifact": {
+                "threshold_id": "content_score_np_1e-02",
+                "score_name": "content_score",
+                "target_fpr": 0.01,
+                "threshold_value": 0.12,
+                "threshold_key_used": "1e-02",
+            },
+            "threshold_metadata_artifact": {
+                "method": "neyman_pearson_v1",
+                "null_source": "label_false_from_detect_records",
+                "n_null": 1,
+                "calibration_date": "1970-01-01",
+                "quantile_method": "higher",
+                "target_fprs": [0.01],
+            },
+        }
+
+    monkeypatch.setattr(experiment_matrix.config_loader, "load_yaml_with_provenance", _fake_load_yaml_with_provenance)
+    monkeypatch.setattr(experiment_matrix.detect_orchestrator, "run_calibrate_orchestrator", _fake_run_calibrate_orchestrator)
+
+    thresholds_path = experiment_matrix._run_global_calibrate(
+        batch_root=str(tmp_path / "batch_root"),
+        config_path="configs/paper_full_cuda.yaml",
+        neg_detect_record_cache={(
+            "stabilityai/stable-diffusion-3.5-medium",
+            0,
+        ): neg_path},
+    )
+
+    assert thresholds_path is not None
+    assert thresholds_path.exists()
+    assert thresholds_path.name == "thresholds_artifact.json"
+    staged_glob = Path(captured["cfg"]["calibration"]["detect_records_glob"])
+    assert staged_glob.parent.name == "neg_staged"
+    assert staged_glob.name == "*.json"
+    assert captured["impl_set"] is not None
+
+    threshold_metadata_path = thresholds_path.parent / "threshold_metadata_artifact.json"
+    assert threshold_metadata_path.exists()
 
 
 def test_run_stage_sequence_allows_real_negative_labelled_path_in_formal_mode(

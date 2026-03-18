@@ -26,6 +26,7 @@ from main.core import records_io
 from main.evaluation import protocol_loader
 from main.evaluation import attack_coverage
 from main.policy import path_policy
+from main.watermarking.detect import orchestrator as detect_orchestrator
 
 
 _FORBIDDEN_ARTIFACT_ANCHOR_FIELDS = {
@@ -1079,23 +1080,45 @@ def _run_global_calibrate(
 
     neg_glob = str(neg_staged_dir / "*.json")
 
-    # (3) 运行一次全局 calibrate：使用所有 neg 记录作为 null 分布，产出共享阈值工件。
-    # 全局 calibrate 本身不需要 GPU（仅读取 JSON 做统计），执行极快。
-    global_calibrate_overrides: List[str] = [
-        "allow_nonempty_run_root=true",
-        'allow_nonempty_run_root_reason="global_calibrate"',
-        f"calibrate_detect_records_glob={json.dumps(neg_glob)}",
-    ]
-    _run_stage_command(
-        stage_name="calibrate",
+    # (3) 直接在 experiment_matrix 内生成共享阈值工件。
+    # run_calibrate CLI 入口要求同时存在正负标签样本，而全局 shared thresholds
+    # 在 formal 语义上只依赖真实负样本 null distribution。
+    # 因此这里直接复用 calibrate orchestrator 的统计核心，避免被 CLI 的
+    # label-balance 前置门禁错误阻断。
+    cfg, _ = config_loader.load_yaml_with_provenance(config_path)
+    if not isinstance(cfg, dict):
+        return None
+
+    calibration_cfg = copy.deepcopy(cfg.get("calibration")) if isinstance(cfg.get("calibration"), dict) else {}
+    calibration_cfg["detect_records_glob"] = neg_glob
+    cfg["calibration"] = calibration_cfg
+
+    calibrate_record = detect_orchestrator.run_calibrate_orchestrator(cfg, object())
+    thresholds_artifact = calibrate_record.get("thresholds_artifact")
+    threshold_metadata_artifact = calibrate_record.get("threshold_metadata_artifact")
+    if not isinstance(thresholds_artifact, dict):
+        return None
+    if not isinstance(threshold_metadata_artifact, dict):
+        return None
+
+    thresholds_dir = global_calibrate_root / "artifacts" / "thresholds"
+    thresholds_dir.mkdir(parents=True, exist_ok=True)
+
+    shared_thresholds_path = thresholds_dir / "thresholds_artifact.json"
+    threshold_metadata_path = thresholds_dir / "threshold_metadata_artifact.json"
+    records_io.write_artifact_json_unbound(
         run_root=global_calibrate_root,
-        config_path=Path(config_path),
-        stage_overrides=global_calibrate_overrides,
+        artifacts_dir=thresholds_dir,
+        path=str(shared_thresholds_path),
+        obj=thresholds_artifact,
+    )
+    records_io.write_artifact_json_unbound(
+        run_root=global_calibrate_root,
+        artifacts_dir=thresholds_dir,
+        path=str(threshold_metadata_path),
+        obj=threshold_metadata_artifact,
     )
 
-    shared_thresholds_path = (
-        global_calibrate_root / "artifacts" / "thresholds" / "thresholds_artifact.json"
-    )
     if shared_thresholds_path.exists() and shared_thresholds_path.is_file():
         return shared_thresholds_path
     return None
