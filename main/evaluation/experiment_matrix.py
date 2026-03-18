@@ -1340,6 +1340,7 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
         "sample_counts": {},
     }
     labelled_detect_records_glob: Optional[str] = None
+    formal_evaluate_detect_records_glob: Optional[str] = None
 
     # 从 grid_item_cfg 读取由 run_experiment_grid 预注入的共享阈值路径与真实负样本路径。
     # shared_thresholds_path 存在时：跳过 per-item calibrate，evaluate 使用全局阈值。
@@ -1355,6 +1356,7 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
         and shared_thresholds_path_val.exists()
         and shared_thresholds_path_val.is_file()
     )
+    use_pair_free_formal_evaluate = use_shared_thresholds and formal_validation_guards["require_shared_thresholds"]
 
     neg_path_str = grid_item_cfg.get("neg_detect_record_path")
     neg_detect_record_path_for_stage: Optional[Path] = (
@@ -1381,11 +1383,6 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
         # run_experiment_grid 层严格分离，per-item calibrate 会把二者混用，不符合
         # NP 阈值估计的独立同分布要求。
         if stage_name == "calibrate" and use_shared_thresholds:
-            # 在跳过前预先准备 labelled_detect_records_glob，供后续 evaluate 阶段使用。
-            if labelled_detect_records_glob is None:
-                labelled_detect_records_glob = _prepare_labelled_detect_records_glob_for_matrix(
-                    run_root, grid_item_cfg, neg_detect_record_path=neg_detect_record_path_for_stage
-                )
             continue
 
         stage_overrides = [
@@ -1411,12 +1408,23 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
         # calibrate/evaluate 都需要带标签的 detect records 输入。
         # 这里使用 detect 后生成的 attack-aware 标注记录对（正/负各一条）满足标签平衡门禁。
         if stage_name in {"calibrate", "evaluate"}:
-            if labelled_detect_records_glob is None:
-                labelled_detect_records_glob = _prepare_labelled_detect_records_glob_for_matrix(
-                    run_root, grid_item_cfg, neg_detect_record_path=neg_detect_record_path_for_stage
-                )
             arg_name = f"{stage_name}_detect_records_glob"
-            stage_overrides.append(f"{arg_name}={json.dumps(labelled_detect_records_glob)}")
+            if stage_name == "evaluate" and use_pair_free_formal_evaluate:
+                if formal_evaluate_detect_records_glob is None:
+                    if shared_thresholds_path_val is None:
+                        raise RuntimeError("shared thresholds path missing for formal evaluate inputs")
+                    formal_evaluate_detect_records_glob = _prepare_formal_evaluate_detect_records_glob_for_matrix(
+                        run_root,
+                        grid_item_cfg,
+                        shared_thresholds_path=shared_thresholds_path_val,
+                    )
+                stage_overrides.append(f"{arg_name}={json.dumps(formal_evaluate_detect_records_glob)}")
+            else:
+                if labelled_detect_records_glob is None:
+                    labelled_detect_records_glob = _prepare_labelled_detect_records_glob_for_matrix(
+                        run_root, grid_item_cfg, neg_detect_record_path=neg_detect_record_path_for_stage
+                    )
+                stage_overrides.append(f"{arg_name}={json.dumps(labelled_detect_records_glob)}")
 
         # evaluate 阈值来源：优先使用全局共享阈值，降级时使用 per-item calibrate 产出的本地阈值。
         if stage_name == "evaluate":
@@ -1703,6 +1711,143 @@ def _build_attack_metadata_join_key(
             "attack_params_version": attack_params_version,
         }
     )
+
+
+def _prepare_formal_evaluate_detect_records_glob_for_matrix(
+    run_root: Path,
+    grid_item_cfg: Dict[str, Any],
+    shared_thresholds_path: Path,
+) -> str:
+    """
+    功能：为 formal matrix evaluate 构建 pair-free 输入目录。 
+
+    Create pair-free evaluate inputs for formal experiment-matrix items by
+    staging one attacked positive detect record plus the shared real-negative
+    records produced by global_calibrate.
+
+    Args:
+        run_root: Per-experiment run output root directory.
+        grid_item_cfg: Grid item config dict for the current experiment.
+        shared_thresholds_path: Shared thresholds artifact path under
+            global_calibrate/artifacts/thresholds/.
+
+    Returns:
+        Glob pattern string matching the staged evaluate input records.
+
+    Raises:
+        TypeError: If argument types are invalid.
+        RuntimeError: If positive detect record or shared negatives are unavailable.
+    """
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(grid_item_cfg, dict):
+        raise TypeError("grid_item_cfg must be dict")
+    if not isinstance(shared_thresholds_path, Path):
+        raise TypeError("shared_thresholds_path must be Path")
+
+    attack_aware_path = _prepare_detect_record_for_attack_grouping(run_root, grid_item_cfg)
+    positive_payload = _read_optional_json(attack_aware_path)
+    if not isinstance(positive_payload, dict) or not positive_payload:
+        source_detect_record_path = run_root / "records" / "detect_record.json"
+        positive_payload = _read_optional_json(source_detect_record_path)
+    if not isinstance(positive_payload, dict) or not positive_payload:
+        raise RuntimeError("detect record missing or invalid for formal evaluate inputs")
+
+    positive_score, positive_score_source = _resolve_matrix_calibration_score(positive_payload)
+    if not isinstance(positive_score, float):
+        raise RuntimeError("formal evaluate inputs require a valid attacked positive content score")
+
+    positive_payload = copy.deepcopy(positive_payload)
+    positive_payload["label"] = True
+    positive_payload["ground_truth"] = True
+    positive_payload["is_watermarked"] = True
+    positive_payload["calibration_label_resolution"] = "matrix_forced_positive"
+    positive_payload.pop("calibration_excluded_from_labelled_sampling", None)
+    _ensure_matrix_calibration_compatible_content_payload(
+        positive_payload,
+        positive_score,
+        score_source=positive_score_source,
+    )
+
+    neg_staged_dir = shared_thresholds_path.parent.parent / "neg_staged"
+    if not neg_staged_dir.exists() or not neg_staged_dir.is_dir():
+        raise RuntimeError(
+            "formal evaluate inputs require global_calibrate neg_staged directory; "
+            f"missing={neg_staged_dir}"
+        )
+
+    neg_paths = sorted(path for path in neg_staged_dir.glob("*.json") if path.is_file())
+    if not neg_paths:
+        raise RuntimeError(
+            "formal evaluate inputs require at least one staged real negative record; "
+            f"missing_glob={neg_staged_dir / '*.json'}"
+        )
+
+    staged_dir = run_root / "artifacts" / "evaluate_inputs" / "formal_evaluate_records"
+    staged_dir.mkdir(parents=True, exist_ok=True)
+    artifacts_dir = run_root / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    positive_rel_path = Path("artifacts") / "evaluate_inputs" / "formal_evaluate_records" / "detect_record_positive.json"
+    records_io.write_artifact_json_unbound(
+        run_root=run_root,
+        artifacts_dir=artifacts_dir,
+        path=str(positive_rel_path),
+        obj=positive_payload,
+    )
+
+    staged_negative_count = 0
+    for idx, neg_path in enumerate(neg_paths):
+        neg_payload = _read_optional_json(neg_path)
+        if not isinstance(neg_payload, dict) or not neg_payload:
+            continue
+        neg_score, neg_score_source = _resolve_matrix_calibration_score(neg_payload)
+        if not isinstance(neg_score, float):
+            continue
+
+        neg_payload = copy.deepcopy(neg_payload)
+        for forbidden_field in _FORBIDDEN_ARTIFACT_ANCHOR_FIELDS:
+            neg_payload.pop(forbidden_field, None)
+        for key_name in [
+            "attack",
+            "attack_family",
+            "attack_params_version",
+            "attack_metadata_source_prompt",
+            "attack_metadata_source_prompt_field",
+            "attack_metadata_join_key",
+        ]:
+            if key_name in positive_payload:
+                neg_payload[key_name] = copy.deepcopy(positive_payload[key_name])
+        neg_payload["label"] = False
+        neg_payload["ground_truth"] = False
+        neg_payload["is_watermarked"] = False
+        _ensure_matrix_calibration_compatible_content_payload(
+            neg_payload,
+            neg_score,
+            score_source=neg_score_source,
+        )
+
+        negative_rel_path = (
+            Path("artifacts")
+            / "evaluate_inputs"
+            / "formal_evaluate_records"
+            / f"neg_record_{idx:04d}.json"
+        )
+        records_io.write_artifact_json_unbound(
+            run_root=run_root,
+            artifacts_dir=artifacts_dir,
+            path=str(negative_rel_path),
+            obj=neg_payload,
+        )
+        staged_negative_count += 1
+
+    if staged_negative_count <= 0:
+        raise RuntimeError(
+            "formal evaluate inputs require valid staged real negative scores; "
+            f"source_dir={neg_staged_dir}"
+        )
+
+    return str(staged_dir / "*.json")
 
 
 def _prepare_labelled_detect_records_glob_for_matrix(

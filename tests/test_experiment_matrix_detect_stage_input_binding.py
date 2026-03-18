@@ -647,6 +647,81 @@ def test_prepare_labelled_detect_records_glob_contains_pos_and_neg_labels(tmp_pa
     assert float(negative_payload["content_evidence_payload"]["score"]) < float(positive_payload["content_evidence_payload"]["score"])
 
 
+def test_prepare_formal_evaluate_detect_records_glob_uses_shared_real_negatives(tmp_path: Path) -> None:
+    """formal evaluate 输入必须使用 shared neg_staged，而不是本地 forced negative helper。"""
+    run_root = tmp_path / "run"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    detect_record_path = records_dir / "detect_record.json"
+    detect_record_path.write_text(
+        json.dumps(
+            {
+                "operation": "detect",
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": 0.75,
+                },
+                "infer_trace": {"inference_prompt": "matrix canonical prompt"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    thresholds_path = tmp_path / "global_calibrate" / "artifacts" / "thresholds" / "thresholds_artifact.json"
+    thresholds_path.parent.mkdir(parents=True, exist_ok=True)
+    thresholds_path.write_text("{}", encoding="utf-8")
+
+    neg_staged_dir = thresholds_path.parent.parent / "neg_staged"
+    neg_staged_dir.mkdir(parents=True, exist_ok=True)
+    for idx, score_value in enumerate([0.12, 0.23]):
+        (neg_staged_dir / f"neg_record_{idx:04d}.json").write_text(
+            json.dumps(
+                {
+                    "operation": "detect",
+                    "label": False,
+                    "ground_truth": False,
+                    "is_watermarked": False,
+                    "calibration_label_resolution": "global_calibrate_real_neg",
+                    "ground_truth_source": "real_neg_embed_detect",
+                    "calibration_sample_usage": "real_negative_global_calibrate_null_distribution",
+                    "content_evidence_payload": {
+                        "status": "ok",
+                        "score": score_value,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    grid_item_cfg = {
+        "attack_protocol_family": "rotate",
+        "attack_protocol_path": "configs/attack_protocol.yaml",
+    }
+
+    records_glob = experiment_matrix._prepare_formal_evaluate_detect_records_glob_for_matrix(
+        run_root,
+        grid_item_cfg,
+        shared_thresholds_path=thresholds_path,
+    )
+    matched_paths = sorted(glob.glob(records_glob))
+
+    assert Path(records_glob).parent.name == "formal_evaluate_records"
+    assert len(matched_paths) == 3
+
+    payloads = [json.loads(Path(path_str).read_text(encoding="utf-8")) for path_str in matched_paths]
+    positive_payload = next(item for item in payloads if item.get("label") is True)
+    negative_payloads = [item for item in payloads if item.get("label") is False]
+
+    assert positive_payload["calibration_label_resolution"] == "matrix_forced_positive"
+    assert positive_payload["attack_family"] == "rotate"
+    assert positive_payload["attack"]["family"] == "rotate"
+    assert len(negative_payloads) == 2
+    assert all(item.get("calibration_label_resolution") == "global_calibrate_real_neg" for item in negative_payloads)
+    assert all(item.get("calibration_sample_usage") == "real_negative_global_calibrate_null_distribution" for item in negative_payloads)
+    assert all(item.get("attack_family") == "rotate" for item in negative_payloads)
+    assert all(item.get("attack", {}).get("family") == "rotate" for item in negative_payloads)
+
+
 def test_run_stage_sequence_skips_ablation_overrides_when_cfg_snapshot_has_no_ablation(
     monkeypatch,
 ) -> None:
@@ -1138,15 +1213,15 @@ def test_run_global_calibrate_writes_shared_thresholds_from_neg_only_cache(
     assert threshold_metadata_path.exists()
 
 
-def test_run_stage_sequence_allows_real_negative_labelled_path_in_formal_mode(
+def test_run_stage_sequence_uses_pair_free_formal_evaluate_inputs(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
     """
-    功能：formal matrix 在 real neg payload 可用时，应允许 labelled helper 继续执行。
+    功能：formal matrix 在 shared thresholds 下必须切换到 pair-free evaluate 输入路径。
 
-    Verify _run_stage_sequence keeps the labelled helper available when a real
-    negative payload is available and synthetic fallback is not needed.
+    Verify _run_stage_sequence bypasses the local labelled-pair helper and binds
+    the pair-free formal evaluate input glob when shared thresholds are active.
 
     Args:
         tmp_path: pytest temporary directory.
@@ -1156,7 +1231,9 @@ def test_run_stage_sequence_allows_real_negative_labelled_path_in_formal_mode(
         None.
     """
     called_stages = []
+    captured_overrides = {}
     called_labelled_helper = {"called": 0}
+    called_formal_helper = {"called": 0}
     thresholds_path = tmp_path / "shared_thresholds.json"
     thresholds_path.write_text("{}", encoding="utf-8")
     neg_path = tmp_path / "neg_detect_record.json"
@@ -1174,6 +1251,7 @@ def test_run_stage_sequence_allows_real_negative_labelled_path_in_formal_mode(
 
     def _fake_run_stage(stage_name, run_root, config_path, stage_overrides, input_record_path=None):
         called_stages.append(stage_name)
+        captured_overrides[stage_name] = list(stage_overrides)
         if stage_name == "detect":
             detect_record_path = run_root / "records" / "detect_record.json"
             detect_record_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1190,9 +1268,22 @@ def test_run_stage_sequence_allows_real_negative_labelled_path_in_formal_mode(
         (labelled_dir / "detect_record_label_neg.json").write_text("{}", encoding="utf-8")
         return str(labelled_dir / "*.json")
 
+    def _fake_prepare_formal_glob(*args, **kwargs):
+        called_formal_helper["called"] += 1
+        formal_dir = tmp_path / "run" / "artifacts" / "evaluate_inputs" / "formal_evaluate_records"
+        formal_dir.mkdir(parents=True, exist_ok=True)
+        (formal_dir / "detect_record_positive.json").write_text("{}", encoding="utf-8")
+        (formal_dir / "neg_record_0000.json").write_text("{}", encoding="utf-8")
+        return str(formal_dir / "*.json")
+
     monkeypatch.setattr(experiment_matrix.path_policy, "ensure_output_layout", _fake_layout)
     monkeypatch.setattr(experiment_matrix, "_run_stage_command", _fake_run_stage)
     monkeypatch.setattr(experiment_matrix, "_prepare_labelled_detect_records_glob_for_matrix", _fake_prepare_labelled_glob)
+    monkeypatch.setattr(
+        experiment_matrix,
+        "_prepare_formal_evaluate_detect_records_glob_for_matrix",
+        _fake_prepare_formal_glob,
+    )
 
     grid_item_cfg = {
         "config_path": "configs/paper_full_cuda.yaml",
@@ -1210,7 +1301,10 @@ def test_run_stage_sequence_allows_real_negative_labelled_path_in_formal_mode(
     experiment_matrix._run_stage_sequence(grid_item_cfg, tmp_path / "run")
 
     assert called_stages == ["embed", "detect", "evaluate"]
-    assert called_labelled_helper["called"] == 1
+    assert called_labelled_helper["called"] == 0
+    assert called_formal_helper["called"] == 1
+    evaluate_overrides = captured_overrides.get("evaluate", [])
+    assert any("formal_evaluate_records" in item for item in evaluate_overrides)
 
 
 def test_run_stage_sequence_preserves_debug_forced_pair_fallback(
