@@ -284,6 +284,98 @@ def _read_optional_json(path: Path) -> Dict[str, Any]:
     return parsed_obj
 
 
+def _coerce_finite_float(value: Any) -> Optional[float]:
+    """Return finite float value when the candidate is numeric-like."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        value_float = float(value)
+        if np.isfinite(value_float):
+            return value_float
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            value_float = float(stripped)
+        except ValueError:
+            return None
+        if np.isfinite(value_float):
+            return value_float
+    return None
+
+
+def _resolve_matrix_calibration_score(record_payload: Dict[str, Any]) -> Tuple[Optional[float], Optional[str]]:
+    """Resolve the best available calibration score from a detect record payload."""
+    if not isinstance(record_payload, dict):
+        raise TypeError("record_payload must be dict")
+
+    content_payload = record_payload.get("content_evidence_payload")
+    content_node = content_payload if isinstance(content_payload, dict) else {}
+    score_parts_payload = content_node.get("score_parts")
+    score_parts = score_parts_payload if isinstance(score_parts_payload, dict) else {}
+    hf_trace_payload = score_parts.get("hf_detect_trace")
+    hf_trace = hf_trace_payload if isinstance(hf_trace_payload, dict) else {}
+
+    content_evidence_payload = record_payload.get("content_evidence")
+    content_evidence = content_evidence_payload if isinstance(content_evidence_payload, dict) else {}
+    fusion_result_payload = record_payload.get("fusion_result")
+    fusion_result = fusion_result_payload if isinstance(fusion_result_payload, dict) else {}
+    evidence_summary_payload = fusion_result.get("evidence_summary") if isinstance(fusion_result.get("evidence_summary"), dict) else {}
+
+    score_candidates = [
+        ("content_evidence_payload.score", content_node.get("score")),
+        ("content_evidence_payload.detect_lf_score", content_node.get("detect_lf_score")),
+        ("content_evidence_payload.lf_score", content_node.get("lf_score")),
+        ("content_evidence_payload.hf_score", content_node.get("hf_score")),
+        ("content_evidence_payload.detect_hf_score", content_node.get("detect_hf_score")),
+        ("content_evidence_payload.score_parts.content_score", score_parts.get("content_score")),
+        ("content_evidence_payload.score_parts.detect_lf_score", score_parts.get("detect_lf_score")),
+        ("content_evidence_payload.score_parts.hf_detect_trace.hf_score_raw", hf_trace.get("hf_score_raw")),
+        ("content_evidence.score", content_evidence.get("score")),
+        ("record.score", record_payload.get("score")),
+        ("fusion_result.evidence_summary.content_score", evidence_summary_payload.get("content_score")),
+    ]
+    for field_name, candidate_value in score_candidates:
+        numeric_candidate = _coerce_finite_float(candidate_value)
+        if numeric_candidate is not None:
+            return numeric_candidate, field_name
+    return None, None
+
+
+def _ensure_matrix_calibration_compatible_content_payload(
+    record_payload: Dict[str, Any],
+    score_value: float,
+    score_source: Optional[str] = None,
+    recovered_sample_origin: Optional[str] = None,
+) -> None:
+    """Normalize a record so calibration can consume it as a valid content sample."""
+    if not isinstance(record_payload, dict):
+        raise TypeError("record_payload must be dict")
+    if not isinstance(score_value, (int, float)) or not np.isfinite(float(score_value)):
+        raise TypeError("score_value must be finite numeric")
+    if score_source is not None and (not isinstance(score_source, str) or not score_source):
+        raise TypeError("score_source must be non-empty str or None")
+    if recovered_sample_origin is not None and (
+        not isinstance(recovered_sample_origin, str) or not recovered_sample_origin
+    ):
+        raise TypeError("recovered_sample_origin must be non-empty str or None")
+
+    content_node = record_payload.get("content_evidence_payload")
+    if not isinstance(content_node, dict):
+        content_node = {}
+        record_payload["content_evidence_payload"] = content_node
+    content_node["status"] = "ok"
+    content_node["score"] = float(score_value)
+    content_node.pop("calibration_sample_is_synthetic_fallback", None)
+
+    if isinstance(score_source, str) and score_source != "content_evidence_payload.score":
+        content_node["calibration_score_recovery_reason"] = score_source
+        if isinstance(recovered_sample_origin, str):
+            content_node["calibration_sample_origin"] = recovered_sample_origin
+
+
 def _extract_hf_truncation_baseline_comparison_from_detect_record(run_root: Path) -> Dict[str, Any]:
     """Extract same-sample comparison values from real HF truncation baseline record."""
     if not isinstance(run_root, Path):
@@ -1051,11 +1143,8 @@ def _run_global_calibrate(
         neg_record = _read_optional_json(neg_path)
         if not isinstance(neg_record, dict) or not neg_record:
             continue
-        content_node = neg_record.get("content_evidence_payload")
-        if not isinstance(content_node, dict):
-            continue
-        score_val = content_node.get("score")
-        if not isinstance(score_val, (int, float)) or not np.isfinite(float(score_val)):
+        score_val, score_source = _resolve_matrix_calibration_score(neg_record)
+        if not isinstance(score_val, float):
             continue
         labeled_neg = copy.deepcopy(neg_record)
         labeled_neg["label"] = False
@@ -1064,8 +1153,12 @@ def _run_global_calibrate(
         labeled_neg["calibration_label_resolution"] = "global_calibrate_real_neg"
         labeled_neg["ground_truth_source"] = "real_neg_embed_detect"
         labeled_neg["calibration_sample_usage"] = "real_negative_global_calibrate_null_distribution"
-        # 确保 content payload status=ok，使 load_scores_for_calibration 不拒绝该样本。
-        labeled_neg["content_evidence_payload"]["status"] = "ok"
+        _ensure_matrix_calibration_compatible_content_payload(
+            labeled_neg,
+            score_val,
+            score_source=score_source,
+            recovered_sample_origin="global_calibrate_real_negative_recovery",
+        )
         staged_path = neg_staged_dir / f"neg_record_{idx:04d}.json"
         records_io.write_artifact_text_unbound(
             run_root=global_calibrate_root,
@@ -1598,37 +1691,11 @@ def _prepare_labelled_detect_records_glob_for_matrix(
     negative_payload.pop("calibration_excluded_from_labelled_sampling", None)
     negative_payload["calibration_sample_usage"] = "synthetic_negative_for_experiment_matrix_label_balance"
 
-    def _resolve_numeric_content_score(record_payload: Dict[str, Any]) -> Optional[float]:
-        """Resolve finite numeric content score from payload or hf trace."""
-        content_node = record_payload.get("content_evidence_payload")
-        if isinstance(content_node, dict):
-            score_value = content_node.get("score")
-            if isinstance(score_value, (int, float)) and np.isfinite(float(score_value)):
-                return float(score_value)
-            score_parts = content_node.get("score_parts")
-            if isinstance(score_parts, dict):
-                hf_trace = score_parts.get("hf_detect_trace")
-                if isinstance(hf_trace, dict):
-                    hf_score_raw = hf_trace.get("hf_score_raw")
-                    if isinstance(hf_score_raw, (int, float)) and np.isfinite(float(hf_score_raw)):
-                        return float(hf_score_raw)
-        return None
-
-    base_score = _resolve_numeric_content_score(base_payload)
+    base_score, _ = _resolve_matrix_calibration_score(base_payload)
     if not isinstance(base_score, float):
         base_score = 0.25
 
-    def _ensure_calibration_compatible_content_payload(record_payload: Dict[str, Any], score_value: float) -> None:
-        """Normalize content payload so load_scores_for_calibration can consume it."""
-        content_node = record_payload.get("content_evidence_payload")
-        if not isinstance(content_node, dict):
-            content_node = {}
-            record_payload["content_evidence_payload"] = content_node
-        content_node["status"] = "ok"
-        content_node["score"] = float(score_value)
-        content_node.pop("calibration_sample_is_synthetic_fallback", None)
-
-    _ensure_calibration_compatible_content_payload(positive_payload, base_score)
+    _ensure_matrix_calibration_compatible_content_payload(positive_payload, base_score)
 
     # 优先使用预生成的真实负样本分数（干净图像经 identity embed + detect 产出）。
     # 真实分数保证 FPR 校准在真实负样本分布上进行，满足论文级严谨要求。
@@ -1641,7 +1708,9 @@ def _prepare_labelled_detect_records_glob_for_matrix(
         and neg_detect_record_path.is_file()
     ):
         neg_payload_real = _read_optional_json(neg_detect_record_path)
-        neg_score = _resolve_numeric_content_score(neg_payload_real)
+        neg_score, neg_score_source = _resolve_matrix_calibration_score(neg_payload_real)
+    else:
+        neg_score_source = None
 
     if isinstance(neg_score, float):
         negative_payload = copy.deepcopy(neg_payload_real)
@@ -1660,7 +1729,12 @@ def _prepare_labelled_detect_records_glob_for_matrix(
         negative_payload["is_watermarked"] = False
         negative_payload["calibration_label_resolution"] = "real_negative_payload"
         negative_payload.pop("calibration_excluded_from_labelled_sampling", None)
-        _ensure_calibration_compatible_content_payload(negative_payload, neg_score)
+        _ensure_matrix_calibration_compatible_content_payload(
+            negative_payload,
+            neg_score,
+            score_source=neg_score_source,
+            recovered_sample_origin="real_negative_payload_recovery",
+        )
         negative_payload["ground_truth_source"] = "real_neg_embed_detect"
         negative_payload["calibration_sample_usage"] = "real_negative_for_experiment_matrix_label_balance"
     else:
@@ -1670,7 +1744,7 @@ def _prepare_labelled_detect_records_glob_for_matrix(
                 "real negative payload is required for labelled detect records"
             )
         # 降级：neg 生成失败或分数无效，使用合成得分（base_score - 1.0）。
-        _ensure_calibration_compatible_content_payload(negative_payload, base_score - 1.0)
+        _ensure_matrix_calibration_compatible_content_payload(negative_payload, base_score - 1.0)
 
     positive_rel_path = Path("artifacts") / "evaluate_inputs" / "labelled_detect_records" / "detect_record_label_pos.json"
     negative_rel_path = Path("artifacts") / "evaluate_inputs" / "labelled_detect_records" / "detect_record_label_neg.json"

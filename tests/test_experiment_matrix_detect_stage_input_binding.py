@@ -359,6 +359,64 @@ def test_prepare_labelled_detect_records_blocks_synthetic_negative_fallback_in_f
         )
 
 
+def test_prepare_labelled_detect_records_recovers_real_negative_detect_hf_score(tmp_path: Path) -> None:
+    """real neg 仅有 detect_hf_score 时，helper 也必须恢复可校准分数。"""
+    run_root = tmp_path / "run"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    detect_record_path = records_dir / "detect_record.json"
+    detect_record_path.write_text(
+        json.dumps(
+            {
+                "operation": "detect",
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": 0.75,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    neg_detect_record_path = tmp_path / "neg_detect_record.json"
+    neg_detect_record_path.write_text(
+        json.dumps(
+            {
+                "operation": "detect",
+                "content_evidence_payload": {
+                    "status": "absent",
+                    "score": None,
+                    "detect_hf_score": 0.12,
+                    "content_failure_reason": "formal_profile_sidecar_disabled",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    grid_item_cfg = {
+        "attack_protocol_family": "rotate",
+        "attack_protocol_path": "configs/attack_protocol.yaml",
+        "disallow_forced_pair_fallback": True,
+    }
+
+    records_glob = experiment_matrix._prepare_labelled_detect_records_glob_for_matrix(
+        run_root,
+        grid_item_cfg,
+        neg_detect_record_path=neg_detect_record_path,
+    )
+    payloads = [json.loads(Path(path_str).read_text(encoding="utf-8")) for path_str in sorted(glob.glob(records_glob))]
+
+    negative_payload = next(item for item in payloads if item.get("label") is False)
+    negative_content = negative_payload.get("content_evidence_payload")
+    assert isinstance(negative_content, dict)
+    assert negative_content.get("status") == "ok"
+    assert float(negative_content["score"]) == 0.12
+    assert negative_content.get("calibration_score_recovery_reason") == "content_evidence_payload.detect_hf_score"
+    assert negative_content.get("calibration_sample_origin") == "real_negative_payload_recovery"
+    assert negative_payload.get("calibration_sample_usage") == "real_negative_for_experiment_matrix_label_balance"
+
+
 def test_detect_gate_blocks_calibrate_when_no_valid_content_score(tmp_path: Path, monkeypatch) -> None:
     """detect 后若没有有效 content_score，必须 fail-fast 且不进入 calibrate。"""
     called_stages = []
@@ -994,8 +1052,10 @@ def test_run_global_calibrate_writes_shared_thresholds_from_neg_only_cache(
             {
                 "operation": "detect",
                 "content_evidence_payload": {
-                    "status": "ok",
-                    "score": 0.12,
+                    "status": "absent",
+                    "score": None,
+                    "detect_hf_score": 0.12,
+                    "content_failure_reason": "formal_profile_sidecar_disabled",
                 },
                 "label": False,
             }
@@ -1055,6 +1115,16 @@ def test_run_global_calibrate_writes_shared_thresholds_from_neg_only_cache(
     assert staged_glob.parent.name == "neg_staged"
     assert staged_glob.name == "*.json"
     assert captured["impl_set"] is not None
+
+    staged_paths = sorted(staged_glob.parent.glob("*.json"))
+    assert len(staged_paths) == 1
+    staged_payload = json.loads(staged_paths[0].read_text(encoding="utf-8"))
+    staged_content = staged_payload.get("content_evidence_payload")
+    assert isinstance(staged_content, dict)
+    assert staged_content.get("status") == "ok"
+    assert float(staged_content["score"]) == 0.12
+    assert staged_content.get("calibration_score_recovery_reason") == "content_evidence_payload.detect_hf_score"
+    assert staged_content.get("calibration_sample_origin") == "global_calibrate_real_negative_recovery"
 
     threshold_metadata_path = thresholds_path.parent / "threshold_metadata_artifact.json"
     assert threshold_metadata_path.exists()
