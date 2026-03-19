@@ -14,11 +14,11 @@ _SENTINEL = object()
 
 
 def assert_module_execution(
-    entry_name: str,
+    entry_name: Any,
     *,
     module_package: Any = _SENTINEL,
     module_spec: Any = _SENTINEL,
-    strict: bool = False
+    strict: Any = False
 ) -> None:
     """
     功能：校验 CLI 必须以模块方式执行。

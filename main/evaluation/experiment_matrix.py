@@ -91,7 +91,7 @@ def _annotate_result_relative_paths(results: List[Dict[str, Any]], batch_root: P
         item["run_root_relative"] = _relative_path_from_base(batch_root, item.get("run_root"))
 
 
-def build_experiment_grid(base_cfg: dict) -> list[dict]:
+def build_experiment_grid(base_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     功能：根据基础配置展开实验矩阵。
 
@@ -532,7 +532,7 @@ def _first_present_str(*values: Any) -> str:
     return "<absent>"
 
 
-def run_experiment_grid(grid: list[dict], strict: bool = True) -> dict:
+def run_experiment_grid(grid: List[Dict[str, Any]], strict: bool = True) -> Dict[str, Any]:
     """
     功能：批量执行实验网格并生成汇总工件。
 

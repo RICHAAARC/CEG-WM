@@ -6,7 +6,7 @@ CLI 入口层公共辅助逻辑
 """
 
 import os
-from typing import Dict, Any, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, cast
 from main.core.contracts import FrozenContracts, get_contract_interpretation
 from main.core.errors import MissingRequiredFieldError, RunFailureReason
 from main.registries import runtime_resolver
@@ -20,8 +20,13 @@ _SEED_RULE_ID = "stable_seed_from_parts_v1"
 _REQUIRED_SEED_PART_KEYS = {"key_id", "sample_idx", "purpose"}
 
 
+def _resolve_mapping(parent: Dict[str, Any], key: str) -> Dict[str, Any]:
+    child = parent.get(key)
+    return cast(Dict[str, Any], child) if isinstance(child, dict) else {}
+
+
 def resolve_attestation_env_inputs(
-    cfg: Dict[str, Any],
+    cfg: Any,
     *,
     require_prompt_seed: bool,
 ) -> Dict[str, Any]:
@@ -45,9 +50,9 @@ def resolve_attestation_env_inputs(
     """
     if not isinstance(cfg, dict):
         raise TypeError("cfg must be dict")
+    cfg_dict = cast(Dict[str, Any], cfg)
 
-    attestation_node = cfg.get("attestation")
-    attestation_cfg = attestation_node if isinstance(attestation_node, dict) else {}
+    attestation_cfg = _resolve_mapping(cfg_dict, "attestation")
     if not bool(attestation_cfg.get("enabled", False)):
         return {
             "status": "absent",
@@ -66,18 +71,18 @@ def resolve_attestation_env_inputs(
     }
 
     k_master = os.environ.get(k_master_env_var, "")
-    if isinstance(k_master, str) and k_master.strip():
+    if k_master.strip():
         result["k_master"] = k_master.strip()
 
     if require_prompt_seed:
         k_prompt = os.environ.get(k_prompt_env_var, "")
         k_seed = os.environ.get(k_seed_env_var, "")
-        if isinstance(k_prompt, str) and k_prompt.strip():
+        if k_prompt.strip():
             result["k_prompt"] = k_prompt.strip()
-        if isinstance(k_seed, str) and k_seed.strip():
+        if k_seed.strip():
             result["k_seed"] = k_seed.strip()
 
-    missing_secret_fields = []
+    missing_secret_fields: list[str] = []
     if not isinstance(result.get("k_master"), str) or not result.get("k_master"):
         missing_secret_fields.append("k_master")
     if require_prompt_seed and (not isinstance(result.get("k_prompt"), str) or not result.get("k_prompt")):
@@ -93,7 +98,7 @@ def resolve_attestation_env_inputs(
     return result
 
 
-def build_cli_config_migration_hint(exc: Exception) -> Optional[str]:
+def build_cli_config_migration_hint(exc: Any) -> Optional[str]:
     """
     功能：为配置校验错误生成 CLI 迁移提示。
 
@@ -123,9 +128,9 @@ def build_cli_config_migration_hint(exc: Exception) -> Optional[str]:
 
 
 def build_injection_context_from_plan(
-    cfg: Dict[str, Any],
-    plan_payload: Dict[str, Any],
-    plan_digest: str
+    cfg: Any,
+    plan_payload: Any,
+    plan_digest: Any
 ) -> InjectionContext:
     """
     功能：基于 plan 构造 InjectionContext。
@@ -153,24 +158,26 @@ def build_injection_context_from_plan(
     if not isinstance(plan_digest, str) or not plan_digest:
         # plan_digest 类型不符合预期，必须 fail-fast。
         raise TypeError("plan_digest must be non-empty str")
+    cfg_dict = cast(Dict[str, Any], cfg)
+    plan_payload_dict = cast(Dict[str, Any], plan_payload)
 
-    watermark_cfg = cfg.get("watermark", {}) if isinstance(cfg.get("watermark", {}), dict) else {}
-    lf_cfg = watermark_cfg.get("lf", {}) if isinstance(watermark_cfg.get("lf", {}), dict) else {}
-    hf_cfg = watermark_cfg.get("hf", {}) if isinstance(watermark_cfg.get("hf", {}), dict) else {}
+    watermark_cfg = _resolve_mapping(cfg_dict, "watermark")
+    lf_cfg = _resolve_mapping(watermark_cfg, "lf")
+    hf_cfg = _resolve_mapping(watermark_cfg, "hf")
 
     enable_lf = bool(lf_cfg.get("enabled", False))
     enable_hf = bool(hf_cfg.get("enabled", False))
 
-    lf_strength = lf_cfg.get("strength", cfg.get("lf_strength", 1.5))
-    hf_threshold_percentile = hf_cfg.get("threshold_percentile", cfg.get("hf_threshold_percentile", 75.0))
+    lf_strength = lf_cfg.get("strength", cfg_dict.get("lf_strength", 1.5))
+    hf_threshold_percentile = hf_cfg.get("threshold_percentile", cfg_dict.get("hf_threshold_percentile", 75.0))
 
-    lf_params = {
+    lf_params: Dict[str, Any] = {
         "impl_id": channel_lf.LF_CHANNEL_IMPL_ID,
         "impl_version": channel_lf.LF_CHANNEL_VERSION,
         "lf_strength": lf_strength,
         "lf_enabled": enable_lf
     }
-    hf_params = {
+    hf_params: Dict[str, Any] = {
         "impl_id": channel_hf.HF_CHANNEL_IMPL_ID,
         "impl_version": channel_hf.HF_CHANNEL_VERSION,
         "hf_threshold_percentile": hf_threshold_percentile,
@@ -179,14 +186,15 @@ def build_injection_context_from_plan(
     lf_params_digest = digests.canonical_sha256(lf_params) if enable_lf else ""
     hf_params_digest = digests.canonical_sha256(hf_params) if enable_hf else ""
 
-    device = cfg.get("device", "cpu")
-    dtype = cfg.get("dtype", "float32")
-    if isinstance(cfg.get("model"), dict) and "dtype" in cfg.get("model"):
-        dtype = cfg.get("model").get("dtype", dtype)
+    device = cfg_dict.get("device", "cpu")
+    dtype = cfg_dict.get("dtype", "float32")
+    model_cfg = _resolve_mapping(cfg_dict, "model")
+    if "dtype" in model_cfg:
+        dtype = model_cfg.get("dtype", dtype)
 
     return InjectionContext(
         plan_digest=plan_digest,
-        plan_ref=plan_payload,
+        plan_ref=plan_payload_dict,
         lf_params_digest=lf_params_digest,
         hf_params_digest=hf_params_digest,
         enable_lf=enable_lf,
@@ -329,7 +337,6 @@ def set_failure_status(run_meta: Dict[str, Any], reason: RunFailureReason, exc: 
         TypeError: If inputs are invalid.
     """
     from main.core.errors import GateEnforcementError
-    import traceback
     import sys
 
     run_meta["status_ok"] = False
@@ -378,7 +385,7 @@ def set_failure_status(run_meta: Dict[str, Any], reason: RunFailureReason, exc: 
         }
 
 
-def build_seed_audit(cfg: Dict[str, Any], command: str) -> Tuple[Dict[str, Any], str, int, str]:
+def build_seed_audit(cfg: Any, command: Any) -> Tuple[Dict[str, Any], str, int, str]:
     """
     功能：构造 seed 审计字段与派生 seed_value。
 
@@ -401,28 +408,33 @@ def build_seed_audit(cfg: Dict[str, Any], command: str) -> Tuple[Dict[str, Any],
     if not isinstance(command, str) or not command:
         # command 类型不符合预期，必须 fail-fast。
         raise TypeError("command must be non-empty str")
+    cfg_dict = cast(Dict[str, Any], cfg)
+    validated_command = command
 
-    seed_parts_cfg = cfg.get("seed_parts")
+    seed_parts_cfg = cfg_dict.get("seed_parts")
     if seed_parts_cfg is not None:
         if not isinstance(seed_parts_cfg, dict):
             # seed_parts 类型不符合预期，必须 fail-fast。
             raise TypeError("seed_parts must be dict")
-        if set(seed_parts_cfg.keys()) != _REQUIRED_SEED_PART_KEYS:
+        seed_parts_cfg_dict = cast(Dict[str, Any], seed_parts_cfg)
+        actual_keys = set(seed_parts_cfg_dict.keys())
+        if actual_keys != _REQUIRED_SEED_PART_KEYS:
             raise ValueError(
                 "seed_parts keys mismatch: "
-                f"expected={sorted(_REQUIRED_SEED_PART_KEYS)}, actual={sorted(seed_parts_cfg.keys())}"
+                f"expected={sorted(_REQUIRED_SEED_PART_KEYS)}, actual={sorted(actual_keys)}"
             )
-        seed_parts = dict(seed_parts_cfg)
+        seed_parts: Dict[str, Any] = dict(seed_parts_cfg_dict)
     else:
         key_id = "<absent>"
-        watermark = cfg.get("watermark")
+        watermark = cfg_dict.get("watermark")
         if isinstance(watermark, dict):
-            key_id_value = watermark.get("key_id")
+            watermark_dict = cast(Dict[str, Any], watermark)
+            key_id_value = watermark_dict.get("key_id")
             if isinstance(key_id_value, str) and key_id_value:
                 key_id = key_id_value
 
         sample_idx = 0
-        seed_value = cfg.get("seed")
+        seed_value = cfg_dict.get("seed")
         if isinstance(seed_value, int):
             sample_idx = seed_value
         elif isinstance(seed_value, str) and seed_value.isdigit():
@@ -431,7 +443,7 @@ def build_seed_audit(cfg: Dict[str, Any], command: str) -> Tuple[Dict[str, Any],
         seed_parts = {
             "key_id": key_id,
             "sample_idx": sample_idx,
-            "purpose": command
+            "purpose": validated_command
         }
 
     digests.normalize_for_digest(seed_parts)
@@ -440,7 +452,7 @@ def build_seed_audit(cfg: Dict[str, Any], command: str) -> Tuple[Dict[str, Any],
     return seed_parts, seed_digest, seed_value, _SEED_RULE_ID
 
 
-def build_determinism_controls(cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def build_determinism_controls(cfg: Any) -> Optional[Dict[str, Any]]:
     """
     功能：构造 determinism_controls 审计字段。
 
@@ -458,10 +470,12 @@ def build_determinism_controls(cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not isinstance(cfg, dict):
         # cfg 类型不符合预期，必须 fail-fast。
         raise TypeError("cfg must be dict")
+    cfg_dict = cast(Dict[str, Any], cfg)
 
-    controls = {}
-    if isinstance(cfg.get("determinism_controls"), dict):
-        controls.update(cfg.get("determinism_controls"))
+    controls: Dict[str, Any] = {}
+    determinism_controls = cfg_dict.get("determinism_controls")
+    if isinstance(determinism_controls, dict):
+        controls.update(cast(Dict[str, Any], determinism_controls))
 
     for key in [
         "torch_deterministic",
@@ -469,8 +483,8 @@ def build_determinism_controls(cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "deterministic_algorithms",
         "rng_backend"
     ]:
-        if key in cfg and key not in controls:
-            controls[key] = cfg.get(key)
+        if key in cfg_dict and key not in controls:
+            controls[key] = cfg_dict.get(key)
 
     if not controls:
         return None
@@ -502,10 +516,13 @@ def normalize_nondeterminism_notes(value: Any) -> Optional[Any]:
     if isinstance(value, list):
         if not value:
             raise TypeError("nondeterminism_notes must be non-empty list")
-        for item in value:
+        value_list = cast(list[Any], value)
+        validated_notes: list[str] = []
+        for item in value_list:
             if not isinstance(item, str) or not item:
                 raise TypeError("nondeterminism_notes items must be non-empty str")
-        return list(value)
+            validated_notes.append(item)
+        return validated_notes
     raise TypeError("nondeterminism_notes must be str, list[str], or None")
 
 

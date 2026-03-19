@@ -10,7 +10,7 @@
 import sys
 import argparse
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Callable, Dict, cast
 import uuid
 
 from main.cli import assert_module_execution
@@ -64,8 +64,47 @@ from main.cli.run_common import (
 )
 
 
+_build_planner_inputs_for_runtime = cast(
+    Callable[..., Dict[str, Any]],
+    getattr(detect_orchestrator, "_build_planner_inputs_for_runtime"),
+)
+
+
+def _resolve_detect_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：解析 detect 配置节点为字典映射。
+
+    Resolve cfg["detect"] into a typed mapping.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Detect config mapping or empty dict.
+    """
+    detect_node = cfg.get("detect")
+    return cast(Dict[str, Any], detect_node) if isinstance(detect_node, dict) else {}
+
+
+def _resolve_nested_mapping(parent: Dict[str, Any], key: str) -> Dict[str, Any]:
+    """
+    功能：从父映射中解析子字典节点。
+
+    Resolve a nested mapping field from parent mapping.
+
+    Args:
+        parent: Parent mapping.
+        key: Mapping key.
+
+    Returns:
+        Nested mapping or empty dict.
+    """
+    child_node = parent.get(key)
+    return cast(Dict[str, Any], child_node) if isinstance(child_node, dict) else {}
+
+
 def _write_detect_attestation_artifact(
-    record: Dict[str, Any],
+    record: Any,
     artifacts_dir: Path,
     attestation_artifacts: Dict[str, Any] | None = None,
 ) -> None:
@@ -83,37 +122,40 @@ def _write_detect_attestation_artifact(
     """
     if not isinstance(record, dict):
         return
-    attestation_node = record.get("attestation")
-    attestation_payload = attestation_node if isinstance(attestation_node, dict) else {}
+    record_dict = cast(Dict[str, Any], record)
+    attestation_node = record_dict.get("attestation")
+    attestation_payload: Dict[str, Any] = cast(Dict[str, Any], attestation_node) if isinstance(attestation_node, dict) else {}
     if not attestation_payload:
         return
     attestation_dir = artifacts_dir / "attestation"
     attestation_dir.mkdir(parents=True, exist_ok=True)
     records_io.write_artifact_json(str(attestation_dir / "attestation_result.json"), attestation_payload)
-    hf_attestation_trace = None
+    hf_attestation_trace: Dict[str, Any] | None = None
     if isinstance(attestation_artifacts, dict):
         candidate_trace = attestation_artifacts.get("hf_attestation_trace")
         if isinstance(candidate_trace, dict):
-            hf_attestation_trace = candidate_trace
-    if isinstance(hf_attestation_trace, dict):
+            hf_attestation_trace = cast(Dict[str, Any], candidate_trace)
+    if hf_attestation_trace is not None:
         records_io.write_artifact_json(str(attestation_dir / "hf_attestation_trace.json"), hf_attestation_trace)
 
 
-def _extract_detect_attestation_artifacts(record: Dict[str, Any]) -> Dict[str, Any] | None:
+def _extract_detect_attestation_artifacts(record: Any) -> Dict[str, Any] | None:
     if not isinstance(record, dict):
         return None
-    attestation_node = record.get("attestation")
+    record_dict = cast(Dict[str, Any], record)
+    attestation_node = record_dict.get("attestation")
     if not isinstance(attestation_node, dict):
         return None
-    hf_trace_artifact = attestation_node.pop("_hf_attestation_trace_artifact", None)
+    attestation_dict = cast(Dict[str, Any], attestation_node)
+    hf_trace_artifact = attestation_dict.pop("_hf_attestation_trace_artifact", None)
     if not isinstance(hf_trace_artifact, dict):
         return None
     return {
-        "hf_attestation_trace": hf_trace_artifact,
+        "hf_attestation_trace": cast(Dict[str, Any], hf_trace_artifact),
     }
 
 
-def resolve_content_override_from_input_record(input_record: Dict[str, Any]) -> Dict[str, Any] | None:
+def resolve_content_override_from_input_record(input_record: Any) -> Dict[str, Any] | None:
     """
     功能：从输入记录中解析 detect 可复用的 content 结果覆盖项。
 
@@ -132,14 +174,16 @@ def resolve_content_override_from_input_record(input_record: Dict[str, Any]) -> 
     if not isinstance(input_record, dict):
         # input_record 类型不合法，必须 fail-fast。
         raise TypeError("input_record must be dict")
+    input_record_dict = cast(Dict[str, Any], input_record)
 
     for content_key in ["content_evidence_payload", "content_result", "content_evidence"]:
-        content_candidate = input_record.get(content_key)
+        content_candidate = input_record_dict.get(content_key)
         if not isinstance(content_candidate, dict):
             continue
+        content_candidate_dict = cast(Dict[str, Any], content_candidate)
 
-        status_value = content_candidate.get("status")
-        score_value = content_candidate.get("score")
+        status_value = content_candidate_dict.get("status")
+        score_value = content_candidate_dict.get("score")
         # content_result 与 content_evidence 均可能来自 embed 模式；
         # embed 模式下 status=ok 但 score=None，不能作为 detect 融合输入。
         # content_evidence_payload 是专属的 detect 输出格式，直接信任其 score 字段。
@@ -148,12 +192,12 @@ def resolve_content_override_from_input_record(input_record: Dict[str, Any]) -> 
                 # embed 侧提取结果无有效 score，不覆盖 detect 侧自行计算。
                 continue
 
-        return content_candidate
+        return content_candidate_dict
 
     return None
 
 
-def _resolve_single_attack_condition_from_protocol(cfg: Dict[str, Any]) -> tuple[str, str] | None:
+def _resolve_single_attack_condition_from_protocol(cfg: Any) -> tuple[str, str] | None:
     """
     功能：从攻击协议中解析唯一的 attack 条件键（family::params_version）。
 
@@ -171,32 +215,35 @@ def _resolve_single_attack_condition_from_protocol(cfg: Dict[str, Any]) -> tuple
     """
     if not isinstance(cfg, dict):
         raise TypeError("cfg must be dict")
+    cfg_dict = cast(Dict[str, Any], cfg)
 
-    protocol_spec = protocol_loader.load_attack_protocol_spec(cfg)
-    if not isinstance(protocol_spec, dict):
-        return None
+    protocol_spec_dict = protocol_loader.load_attack_protocol_spec(cfg_dict)
 
     condition_keys: list[str] = []
 
-    params_versions = protocol_spec.get("params_versions")
+    params_versions = protocol_spec_dict.get("params_versions")
     if isinstance(params_versions, dict):
-        for condition_key in params_versions.keys():
-            if isinstance(condition_key, str) and "::" in condition_key:
+        params_versions_dict = cast(Dict[str, Any], params_versions)
+        for condition_key in params_versions_dict.keys():
+            if "::" in condition_key:
                 if condition_key not in condition_keys:
                     condition_keys.append(condition_key)
 
-    families = protocol_spec.get("families")
+    families = protocol_spec_dict.get("families")
     if isinstance(families, dict):
-        for family_name, family_spec in families.items():
-            if not isinstance(family_name, str) or not family_name:
+        families_dict = cast(Dict[str, Any], families)
+        for family_name, family_spec in families_dict.items():
+            if not family_name:
                 continue
             if not isinstance(family_spec, dict):
                 continue
-            family_versions = family_spec.get("params_versions")
+            family_spec_dict = cast(Dict[str, Any], family_spec)
+            family_versions = family_spec_dict.get("params_versions")
             if not isinstance(family_versions, dict):
                 continue
-            for params_version in family_versions.keys():
-                if not isinstance(params_version, str) or not params_version:
+            family_versions_dict = cast(Dict[str, Any], family_versions)
+            for params_version in family_versions_dict.keys():
+                if not params_version:
                     continue
                 condition_key = f"{family_name}::{params_version}"
                 if condition_key not in condition_keys:
@@ -216,7 +263,7 @@ def _is_missing_attack_value(value: Any) -> bool:
     return value in (None, "", "<absent>", "unknown_attack", "unknown_params")
 
 
-def _inject_attack_condition_fields(record: Dict[str, Any], cfg: Dict[str, Any]) -> None:
+def _inject_attack_condition_fields(record: Any, cfg: Any) -> None:
     """
     功能：在 detect record 中补充 attack family 与 params_version 字段。 
 
@@ -236,29 +283,32 @@ def _inject_attack_condition_fields(record: Dict[str, Any], cfg: Dict[str, Any])
         raise TypeError("record must be dict")
     if not isinstance(cfg, dict):
         raise TypeError("cfg must be dict")
+    record_dict = cast(Dict[str, Any], record)
+    cfg_dict = cast(Dict[str, Any], cfg)
 
-    resolved_condition = _resolve_single_attack_condition_from_protocol(cfg)
+    resolved_condition = _resolve_single_attack_condition_from_protocol(cfg_dict)
     if resolved_condition is None:
         return
 
     family, params_version = resolved_condition
 
-    if _is_missing_attack_value(record.get("attack_family")):
-        record["attack_family"] = family
-    if _is_missing_attack_value(record.get("attack_params_version")):
-        record["attack_params_version"] = params_version
+    if _is_missing_attack_value(record_dict.get("attack_family")):
+        record_dict["attack_family"] = family
+    if _is_missing_attack_value(record_dict.get("attack_params_version")):
+        record_dict["attack_params_version"] = params_version
 
-    attack_obj = record.get("attack")
+    attack_obj = record_dict.get("attack")
     if not isinstance(attack_obj, dict):
         attack_obj = {}
-    if _is_missing_attack_value(attack_obj.get("family")):
-        attack_obj["family"] = family
-    if _is_missing_attack_value(attack_obj.get("params_version")):
-        attack_obj["params_version"] = params_version
-    record["attack"] = attack_obj
+    attack_dict = cast(Dict[str, Any], attack_obj)
+    if _is_missing_attack_value(attack_dict.get("family")):
+        attack_dict["family"] = family
+    if _is_missing_attack_value(attack_dict.get("params_version")):
+        attack_dict["params_version"] = params_version
+    record_dict["attack"] = attack_dict
 
 
-def _build_hf_truncation_baseline_payload(record: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
+def _build_hf_truncation_baseline_payload(record: Any, cfg: Any) -> Dict[str, Any]:
     """
     功能：构造 HF truncation baseline 对比载荷。 
 
@@ -279,6 +329,8 @@ def _build_hf_truncation_baseline_payload(record: Dict[str, Any], cfg: Dict[str,
         raise TypeError("record must be dict")
     if not isinstance(cfg, dict):
         raise TypeError("cfg must be dict")
+    record_dict = cast(Dict[str, Any], record)
+    cfg_dict = cast(Dict[str, Any], cfg)
 
     result: Dict[str, Any] = {
         "status": "absent",
@@ -290,21 +342,22 @@ def _build_hf_truncation_baseline_payload(record: Dict[str, Any], cfg: Dict[str,
         "baseline_absent_reason": "hf_truncation_score_unavailable",
         "comparison_scope": "same_sample_real_pipeline",
         "trace": {
-            "pipeline_impl_id": record.get("pipeline_impl_id", "<absent>"),
-            "infer_trace_canon_sha256": record.get("infer_trace_canon_sha256", "<absent>"),
-            "cfg_digest": record.get("cfg_digest", "<absent>"),
+            "pipeline_impl_id": record_dict.get("pipeline_impl_id", "<absent>"),
+            "infer_trace_canon_sha256": record_dict.get("infer_trace_canon_sha256", "<absent>"),
+            "cfg_digest": record_dict.get("cfg_digest", "<absent>"),
         },
     }
 
-    content_payload = record.get("content_evidence_payload")
+    content_payload = record_dict.get("content_evidence_payload")
     if not isinstance(content_payload, dict):
         result["baseline_absent_reason"] = "content_evidence_payload_absent"
         return result
+    content_payload_dict = cast(Dict[str, Any], content_payload)
 
-    paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
-    paper_enabled = bool(paper_cfg.get("enabled", False)) if isinstance(paper_cfg, dict) else False
-    detect_runtime_mode = record.get("detect_runtime_mode")
-    pipeline_runtime_meta = record.get("pipeline_runtime_meta") if isinstance(record.get("pipeline_runtime_meta"), dict) else {}
+    paper_cfg = _resolve_nested_mapping(cfg_dict, "paper_faithfulness")
+    paper_enabled = bool(paper_cfg.get("enabled", False))
+    detect_runtime_mode = record_dict.get("detect_runtime_mode")
+    pipeline_runtime_meta = _resolve_nested_mapping(record_dict, "pipeline_runtime_meta")
 
     if paper_enabled and bool(pipeline_runtime_meta.get("synthetic_pipeline", False)):
         result["baseline_absent_reason"] = "synthetic_pipeline_runtime"
@@ -313,15 +366,15 @@ def _build_hf_truncation_baseline_payload(record: Dict[str, Any], cfg: Dict[str,
         result["baseline_absent_reason"] = f"detect_runtime_mode_not_real:{detect_runtime_mode}"
         return result
 
-    watermark_cfg = cfg.get("watermark") if isinstance(cfg.get("watermark"), dict) else {}
-    hf_cfg = watermark_cfg.get("hf") if isinstance(watermark_cfg.get("hf"), dict) else {}
+    watermark_cfg = _resolve_nested_mapping(cfg_dict, "watermark")
+    hf_cfg = _resolve_nested_mapping(watermark_cfg, "hf")
     if not bool(hf_cfg.get("enabled", False)):
         result["baseline_absent_reason"] = "hf_channel_disabled"
         return result
 
-    score_candidate = content_payload.get("hf_score")
+    score_candidate = content_payload_dict.get("hf_score")
     if not isinstance(score_candidate, (int, float)):
-        score_candidate = content_payload.get("detect_hf_score")
+        score_candidate = content_payload_dict.get("detect_hf_score")
         if isinstance(score_candidate, (int, float)):
             result["score_source"] = "detect_record.content_evidence_payload.detect_hf_score:diagnostic_only"
             result["score_semantics"] = "diagnostic_detect_hf_score"
@@ -341,11 +394,11 @@ def _build_hf_truncation_baseline_payload(record: Dict[str, Any], cfg: Dict[str,
 
 
 def run_detect(
-    output_dir: str,
-    config_path: str,
-    input_record_path: str | None = None,
-    overrides: list[str] | None = None,
-    thresholds_path: str | None = None,
+    output_dir: Any,
+    config_path: Any,
+    input_record_path: Any = None,
+    overrides: Any = None,
+    thresholds_path: Any = None,
 ) -> None:
     """
     功能：执行检测流程，本阶段为基线实现。
@@ -362,12 +415,31 @@ def run_detect(
     Returns:
         None.
     """
-    if not output_dir:
+    if not isinstance(output_dir, str) or not output_dir:
         # output_dir 输入不合法，必须 fail-fast。
         raise ValueError("output_dir must be non-empty str")
-    if not config_path:
+    if not isinstance(config_path, str) or not config_path:
         # config_path 输入不合法，必须 fail-fast。
         raise ValueError("config_path must be non-empty str")
+    if input_record_path is not None and not isinstance(input_record_path, str):
+        # input_record_path 输入不合法，必须 fail-fast。
+        raise TypeError("input_record_path must be str or None")
+    if overrides is not None:
+        if not isinstance(overrides, list):
+            # overrides 输入不合法，必须 fail-fast。
+            raise TypeError("overrides must be list[str] or None")
+        overrides_list = cast(list[Any], overrides)
+        for override_item in overrides_list:
+            if not isinstance(override_item, str):
+                # overrides 元素类型不合法，必须 fail-fast。
+                raise TypeError("overrides must be list[str] or None")
+    if thresholds_path is not None and not isinstance(thresholds_path, str):
+        # thresholds_path 输入不合法，必须 fail-fast。
+        raise TypeError("thresholds_path must be str or None")
+
+    validated_overrides = cast(list[str] | None, overrides)
+    validated_input_record_path = cast(str | None, input_record_path)
+    validated_thresholds_path = cast(str | None, thresholds_path)
 
     run_root = path_policy.derive_run_root(Path(output_dir))
     records_dir = run_root / "records"
@@ -417,8 +489,8 @@ def run_detect(
     }
 
     error = None
-    pipeline_result = None
-    record = None
+    pipeline_result: Dict[str, Any] | None = None
+    record: Dict[str, Any] | None = None
     try:
         # 加载事实源。
         print("[Detect] Loading fact sources...")
@@ -458,7 +530,7 @@ def run_detect(
                 semantics,
                 contracts,
                 interpretation,
-                overrides=overrides
+                overrides=validated_overrides
             )
         except Exception as exc:
             set_failure_status(run_meta, RunFailureReason.CONFIG_INVALID, exc)
@@ -514,8 +586,8 @@ def run_detect(
 
         # （1）thresholds_path 注入：若提供，加载 NP 阈值工件并注入 cfg["__thresholds_artifact__"]。
         # 加载失败时 fail-fast，不允许 silent fallback 至 test-only 阈值。
-        if isinstance(thresholds_path, str) and thresholds_path:
-            _tp_resolved = str(Path(thresholds_path).resolve())
+        if validated_thresholds_path:
+            _tp_resolved = str(Path(validated_thresholds_path).resolve())
             try:
                 _thresholds_obj = detect_orchestrator.load_thresholds_artifact_controlled(_tp_resolved)
                 cfg["__thresholds_artifact__"] = _thresholds_obj
@@ -528,7 +600,7 @@ def run_detect(
         # 则尝试从 cfg.detect.calibration_artifact_path 加载（使同一受控加载函数）。
         # 加载失败时 fail-fast，不允许降级为 fallback；thresholds_path 参数优先于配置字段。
         if cfg.get("__thresholds_artifact__") is None:
-            _detect_cfg_p1a = cfg.get("detect") or {}
+            _detect_cfg_p1a = _resolve_detect_cfg(cfg)
             _cal_artifact_path = _detect_cfg_p1a.get("calibration_artifact_path")
             if isinstance(_cal_artifact_path, str) and _cal_artifact_path:
                 _cal_resolved = str(Path(_cal_artifact_path).resolve())
@@ -545,16 +617,8 @@ def run_detect(
         # 预先计算 content 与 subspace 计划，用于注入上下文。
         # 这里必须使用 embed-mode 提取 mask_digest，避免 detect-mode 在无 detector_inputs 时返回 absent。
         cfg_for_preplan = dict(cfg)
-        detect_cfg_for_preplan = cfg_for_preplan.get("detect")
-        if isinstance(detect_cfg_for_preplan, dict):
-            detect_cfg_for_preplan = dict(detect_cfg_for_preplan)
-        else:
-            detect_cfg_for_preplan = {}
-        detect_content_cfg_for_preplan = detect_cfg_for_preplan.get("content")
-        if isinstance(detect_content_cfg_for_preplan, dict):
-            detect_content_cfg_for_preplan = dict(detect_content_cfg_for_preplan)
-        else:
-            detect_content_cfg_for_preplan = {}
+        detect_cfg_for_preplan = dict(_resolve_detect_cfg(cfg_for_preplan))
+        detect_content_cfg_for_preplan = dict(_resolve_nested_mapping(detect_cfg_for_preplan, "content"))
         detect_content_cfg_for_preplan["enabled"] = False
         detect_cfg_for_preplan["content"] = detect_content_cfg_for_preplan
         cfg_for_preplan["detect"] = detect_cfg_for_preplan
@@ -563,11 +627,11 @@ def run_detect(
         # 提取 watermarked_path 并作为 pre-plan 的图像输入，使 detect-side mask_digest
         # 与 embed-side 对齐（同一图像 → 同一 subspace injection_context）。
         # 优先级：(1) input_record_path 中的 watermarked_path；(2) cfg 中的 probe_image_path；(3) 无 inputs。
-        _preplan_inputs: dict | None = None
-        if input_record_path:
+        _preplan_inputs: Dict[str, Any] | None = None
+        if validated_input_record_path:
             try:
                 import json as _json
-                with open(input_record_path, "r", encoding="utf-8") as _f:
+                with open(validated_input_record_path, "r", encoding="utf-8") as _f:
                     _pre_record = _json.load(_f)
                 _wm_path = _pre_record.get("watermarked_path")
                 if isinstance(_wm_path, str) and _wm_path and _wm_path != "<absent>":
@@ -580,18 +644,19 @@ def run_detect(
                 # 最小解析失败时维持现有 no-input 行为，不阻断主流程。
                 print(f"[Detect][preplan] input_record 最小解析失败，使用无输入模式: {_pre_exc}")
         if _preplan_inputs is None:
-            _probe_img = cfg.get("detect", {}).get("content", {}).get("probe_image_path")
+            _probe_img = _resolve_nested_mapping(_resolve_detect_cfg(cfg), "content").get("probe_image_path")
             if isinstance(_probe_img, str) and _probe_img:
                 _preplan_inputs = {"image_path": _probe_img}
 
         content_result_pre = impl_set.content_extractor.extract(cfg_for_preplan, inputs=_preplan_inputs)
-        mask_digest = None
+        mask_digest: Any = None
         if isinstance(content_result_pre, dict):
-            mask_digest = content_result_pre.get("mask_digest")
+            content_result_pre_dict = cast(Dict[str, Any], content_result_pre)
+            mask_digest = content_result_pre_dict.get("mask_digest")
         elif hasattr(content_result_pre, "mask_digest"):
             mask_digest = content_result_pre.mask_digest
 
-        planner_inputs = detect_orchestrator._build_planner_inputs_for_runtime(cfg, None)
+        planner_inputs = _build_planner_inputs_for_runtime(cfg, None)
         subspace_result_pre = impl_set.subspace_planner.plan(
             cfg,
             mask_digest=mask_digest,
@@ -599,14 +664,19 @@ def run_detect(
             inputs=planner_inputs
         )
 
-        plan_payload = subspace_result_pre.as_dict() if hasattr(subspace_result_pre, "as_dict") else subspace_result_pre
-        plan_digest = getattr(subspace_result_pre, "plan_digest", None)
-        if isinstance(plan_payload, dict) and not isinstance(plan_digest, str):
+        subspace_result_pre_obj: Any = subspace_result_pre
+        plan_payload: Dict[str, Any] | None = None
+        if hasattr(subspace_result_pre, "as_dict"):
+            plan_payload = cast(Dict[str, Any], subspace_result_pre.as_dict())
+        elif isinstance(subspace_result_pre, dict):
+            plan_payload = cast(Dict[str, Any], subspace_result_pre)
+        plan_digest = getattr(subspace_result_pre_obj, "plan_digest", None)
+        if plan_payload is not None and not isinstance(plan_digest, str):
             plan_digest = plan_payload.get("plan_digest")
 
         injection_context = None
         injection_modifier = None
-        if isinstance(plan_payload, dict) and isinstance(plan_digest, str) and plan_digest:
+        if plan_payload is not None and isinstance(plan_digest, str) and plan_digest:
             injection_context = build_injection_context_from_plan(cfg, plan_payload, plan_digest)
             injection_modifier = LatentModifier(LATENT_MODIFIER_ID, LATENT_MODIFIER_VERSION)
 
@@ -615,6 +685,9 @@ def run_detect(
         device = cfg.get("device", "cpu")
         seed = seed_value
         runtime_self_attention_maps = None
+        inference_runtime_meta: Dict[str, Any] | None = None
+        runtime_self_attention_source: str | None = None
+        injection_evidence: Any = None
 
         dependency_guard = assert_detect_runtime_dependencies(
             cfg,
@@ -649,8 +722,8 @@ def run_detect(
             }
             _detect_traj_cache = trajectory_tap.LatentTrajectoryCache()
         else:
-            detect_cfg = cfg.get("detect") if isinstance(cfg.get("detect"), dict) else {}
-            geometry_cfg = detect_cfg.get("geometry") if isinstance(detect_cfg.get("geometry"), dict) else {}
+            detect_cfg = _resolve_detect_cfg(cfg)
+            geometry_cfg = _resolve_nested_mapping(detect_cfg, "geometry")
             capture_attention = bool(
                 geometry_cfg.get("enabled", False)
                 and geometry_cfg.get("enable_attention_anchor", False)
@@ -668,14 +741,21 @@ def run_detect(
                 capture_attention=capture_attention,
                 trajectory_latent_cache=_detect_traj_cache,
             )
-            inference_status = inference_result.get("inference_status")
-            inference_error = inference_result.get("inference_error")
-            inference_runtime_meta = inference_result.get("inference_runtime_meta")
+            inference_status_candidate = inference_result.get("inference_status")
+            inference_status = (
+                inference_status_candidate
+                if isinstance(inference_status_candidate, str) and inference_status_candidate
+                else infer_runtime.INFERENCE_STATUS_FAILED
+            )
+            inference_error_candidate = inference_result.get("inference_error")
+            inference_error = inference_error_candidate if isinstance(inference_error_candidate, str) else None
+            inference_runtime_meta_candidate = inference_result.get("inference_runtime_meta")
+            inference_runtime_meta = cast(Dict[str, Any], inference_runtime_meta_candidate) if isinstance(inference_runtime_meta_candidate, dict) else None
             trajectory_evidence = inference_result.get("trajectory_evidence")
-            injection_evidence = inference_result.get("injection_evidence")
+            injection_evidence_candidate = inference_result.get("injection_evidence")
+            injection_evidence = cast(Dict[str, Any], injection_evidence_candidate) if isinstance(injection_evidence_candidate, dict) else None
             runtime_self_attention_maps = inference_result.get("runtime_self_attention_maps")
-            runtime_self_attention_source = None
-            if isinstance(inference_runtime_meta, dict):
+            if inference_runtime_meta is not None:
                 runtime_self_attention_source = inference_runtime_meta.get("runtime_self_attention_source")
         
         if runtime_self_attention_maps is not None:
@@ -744,10 +824,9 @@ def run_detect(
         run_meta["cfg_audit_canon_sha256"] = cfg_audit_metadata["cfg_audit_canon_sha256"]
 
         attestation_env_inputs = resolve_attestation_env_inputs(cfg, require_prompt_seed=False)
-        if isinstance(attestation_env_inputs, dict):
-            k_master = attestation_env_inputs.get("k_master")
-            if isinstance(k_master, str) and k_master:
-                cfg["__attestation_verify_k_master__"] = k_master
+        k_master = attestation_env_inputs.get("k_master")
+        if isinstance(k_master, str) and k_master:
+            cfg["__attestation_verify_k_master__"] = k_master
 
         with records_io.bound_fact_sources(
             contracts,
@@ -766,9 +845,12 @@ def run_detect(
                 raise ValueError(format_fact_sources_mismatch(snapshot, bound_fact_sources))
 
             # 读取输入 record。
-            if input_record_path:
-                print(f"[Detect] Loading input record from {input_record_path}...")
-                input_record = records_io.read_json(input_record_path)
+            if validated_input_record_path:
+                print(f"[Detect] Loading input record from {validated_input_record_path}...")
+                input_record_obj = records_io.read_json(validated_input_record_path)
+                if not isinstance(input_record_obj, dict):
+                    raise TypeError("input_record must deserialize to dict")
+                input_record = cast(Dict[str, Any], input_record_obj)
                 print(f"[Detect]   Loaded input record with {len(input_record)} fields")
                 # 从 embed_record 读取 latent 空间统计，注入 cfg 供几何同步 cross-comparison。
                 _input_latent_stats = input_record.get("latent_spatial_stats")
@@ -780,10 +862,10 @@ def run_detect(
 
             # 构造 detect record，本阶段为基线实现。
             print("[Detect] Generating detect record (baseline)...")
-            if input_record_path:
+            if validated_input_record_path:
                 content_override_for_orchestrator = resolve_content_override_from_input_record(input_record)
 
-                plan_override_for_orchestrator = None
+                plan_override_for_orchestrator: Dict[str, Any] | None = None
                 input_subspace_plan = input_record.get("subspace_plan")
                 input_plan_digest = input_record.get("plan_digest")
                 input_basis_digest = input_record.get("basis_digest")
@@ -800,7 +882,7 @@ def run_detect(
             else:
                 content_override_for_orchestrator = None
                 plan_override_for_orchestrator = None
-            record = run_detect_orchestrator(
+            record_candidate: Any = run_detect_orchestrator(
                 cfg,
                 impl_set,
                 input_record,
@@ -811,21 +893,26 @@ def run_detect(
                 detect_plan_result_override=plan_override_for_orchestrator
             )
             cfg.pop("__attestation_verify_k_master__", None)
-            if record is None:
+            if record_candidate is None:
                 exc = RuntimeError("record_construction_failed: record is None")
                 set_failure_status(run_meta, RunFailureReason.RUNTIME_ERROR, exc)
                 raise exc
+            if not isinstance(record_candidate, dict):
+                raise TypeError("record_construction_failed: record must be dict")
+            record = cast(Dict[str, Any], record_candidate)
 
             _inject_attack_condition_fields(record, cfg)
             
             # ⭐ 增强项：从 input_record 继承 Embed 侧的摘要字段，用于完全对齐验证
             # 这使得 detect_record.content_evidence_payload 包含 Embed 的摘要，
             # 支持从 Notebook 生成的摘要对照表（checked_digests_alignment_report）
-            if isinstance(input_record, dict) and "content_evidence" in input_record:
-                embed_content_ev = input_record.get("content_evidence", {})
-                detect_payload = record.get("content_evidence_payload", {})
+            if "content_evidence" in input_record:
+                embed_content_ev = input_record.get("content_evidence")
+                detect_payload = record.get("content_evidence_payload")
                 
                 if isinstance(detect_payload, dict) and isinstance(embed_content_ev, dict):
+                    detect_payload_dict = cast(Dict[str, Any], detect_payload)
+                    embed_content_ev_dict = cast(Dict[str, Any], embed_content_ev)
                     # 从 Embed 继承关键摘要字段到 Detect（用于对齐验证）
                     digest_fields = [
                         "pipeline_fingerprint_digest",
@@ -834,23 +921,22 @@ def run_detect(
                         "injection_site_digest"
                     ]
                     for field in digest_fields:
-                        if field not in detect_payload and field in embed_content_ev:
-                            detect_payload[field] = embed_content_ev[field]
+                        if field not in detect_payload_dict and field in embed_content_ev_dict:
+                            detect_payload_dict[field] = embed_content_ev_dict[field]
                     
-                    record["content_evidence_payload"] = detect_payload
+                    record["content_evidence_payload"] = detect_payload_dict
             
             record["cfg_digest"] = cfg_digest
             record["policy_path"] = cfg["policy_path"]
-            if isinstance(pipeline_result, dict):
-                record["pipeline_impl_id"] = pipeline_result.get("pipeline_impl_id")
-                record["pipeline_provenance"] = pipeline_result.get("pipeline_provenance")
-                record["pipeline_provenance_canon_sha256"] = pipeline_result.get("pipeline_provenance_canon_sha256")
-                record["pipeline_runtime_meta"] = pipeline_result.get("pipeline_runtime_meta")
-                record["env_fingerprint_canon_sha256"] = pipeline_result.get("env_fingerprint_canon_sha256")
-                record["diffusers_version"] = pipeline_result.get("diffusers_version")
-                record["transformers_version"] = pipeline_result.get("transformers_version")
-                record["safetensors_version"] = pipeline_result.get("safetensors_version")
-                record["model_provenance_canon_sha256"] = pipeline_result.get("model_provenance_canon_sha256")
+            record["pipeline_impl_id"] = pipeline_result.get("pipeline_impl_id")
+            record["pipeline_provenance"] = pipeline_result.get("pipeline_provenance")
+            record["pipeline_provenance_canon_sha256"] = pipeline_result.get("pipeline_provenance_canon_sha256")
+            record["pipeline_runtime_meta"] = pipeline_result.get("pipeline_runtime_meta")
+            record["env_fingerprint_canon_sha256"] = pipeline_result.get("env_fingerprint_canon_sha256")
+            record["diffusers_version"] = pipeline_result.get("diffusers_version")
+            record["transformers_version"] = pipeline_result.get("transformers_version")
+            record["safetensors_version"] = pipeline_result.get("safetensors_version")
+            record["model_provenance_canon_sha256"] = pipeline_result.get("model_provenance_canon_sha256")
             override_applied = cfg.get("override_applied")
             if override_applied is not None:
                 record["override_applied"] = override_applied
@@ -1005,7 +1091,7 @@ def main():
         sys.exit(1)
 
 
-def _resolve_allow_missing_pipeline_for_detect(cfg: Dict[str, Any]) -> bool:
+def _resolve_allow_missing_pipeline_for_detect(cfg: Any) -> bool:
     """
     功能：解析 detect 缺失 pipeline 显式放行开关。
 
@@ -1019,24 +1105,22 @@ def _resolve_allow_missing_pipeline_for_detect(cfg: Dict[str, Any]) -> bool:
     """
     if not isinstance(cfg, dict):
         return False
-    runtime_cfg = cfg.get("runtime")
-    if isinstance(runtime_cfg, dict):
-        allow_flag = runtime_cfg.get("allow_missing_pipeline_for_detect")
-        if isinstance(allow_flag, bool):
-            return allow_flag
-    detect_cfg = cfg.get("detect")
-    if isinstance(detect_cfg, dict):
-        runtime_detect_cfg = detect_cfg.get("runtime")
-        if isinstance(runtime_detect_cfg, dict):
-            allow_flag = runtime_detect_cfg.get("allow_missing_pipeline_for_detect")
-            if isinstance(allow_flag, bool):
-                return allow_flag
+    cfg_dict = cast(Dict[str, Any], cfg)
+    runtime_cfg = _resolve_nested_mapping(cfg_dict, "runtime")
+    allow_flag = runtime_cfg.get("allow_missing_pipeline_for_detect")
+    if isinstance(allow_flag, bool):
+        return allow_flag
+    detect_cfg = _resolve_detect_cfg(cfg_dict)
+    runtime_detect_cfg = _resolve_nested_mapping(detect_cfg, "runtime")
+    allow_flag = runtime_detect_cfg.get("allow_missing_pipeline_for_detect")
+    if isinstance(allow_flag, bool):
+        return allow_flag
     return False
 
 
 def assert_detect_runtime_dependencies(
-    cfg: Dict[str, Any],
-    inputs: Dict[str, Any],
+    cfg: Any,
+    inputs: Any,
     pipeline_obj: Any
 ) -> Dict[str, Any]:
     """
@@ -1061,8 +1145,9 @@ def assert_detect_runtime_dependencies(
         raise TypeError("cfg must be dict")
     if not isinstance(inputs, dict):
         raise TypeError("inputs must be dict")
+    cfg_dict = cast(Dict[str, Any], cfg)
 
-    allow_flag = _resolve_allow_missing_pipeline_for_detect(cfg)
+    allow_flag = _resolve_allow_missing_pipeline_for_detect(cfg_dict)
 
     if pipeline_obj is None and not allow_flag:
         # 生产默认 fail-fast，缺失 pipeline 不再因 test_mode 放行。

@@ -10,8 +10,8 @@
 import sys
 import argparse
 from pathlib import Path
-from datetime import datetime, timezone
 import uuid
+from typing import Any, Callable, Dict, cast
 
 from main.cli import assert_module_execution
 
@@ -38,7 +38,7 @@ from main.core import config_loader
 from main.core import schema
 from main.core import status
 from main.policy import path_policy
-from main.core.errors import MissingRequiredFieldError, RunFailureReason
+from main.core.errors import RunFailureReason
 from main.registries import runtime_resolver
 from main.diffusion.sd3 import pipeline_factory
 from main.diffusion.sd3 import infer_runtime
@@ -55,7 +55,6 @@ from main.watermarking.content_chain.latent_modifier import (
     LATENT_MODIFIER_VERSION
 )
 from main.cli.run_common import (
-    set_value_by_field_path,
     set_failure_status,
     format_fact_sources_mismatch,
     bind_impl_identity_fields as _bind_impl_identity_fields,
@@ -68,8 +67,51 @@ from main.cli.run_common import (
 )
 
 
+_build_content_inputs_for_embed = cast(
+    Callable[[Dict[str, Any]], Dict[str, Any] | None],
+    getattr(embed_orchestrator, "_build_content_inputs_for_embed"),
+)
+_build_planner_inputs_for_runtime = cast(
+    Callable[..., Dict[str, Any]],
+    getattr(embed_orchestrator, "_build_planner_inputs_for_runtime"),
+)
+
+
+def _resolve_embed_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：解析 embed 配置节点为字典映射。
+
+    Resolve cfg["embed"] into a typed mapping.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Embed config mapping or empty dict.
+    """
+    embed_node = cfg.get("embed")
+    return cast(Dict[str, Any], embed_node) if isinstance(embed_node, dict) else {}
+
+
+def _resolve_preview_generation_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：解析 preview_generation 配置节点为字典映射。
+
+    Resolve embed.preview_generation into a typed mapping.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Preview-generation config mapping or empty dict.
+    """
+    embed_cfg = _resolve_embed_cfg(cfg)
+    preview_node = embed_cfg.get("preview_generation")
+    return cast(Dict[str, Any], preview_node) if isinstance(preview_node, dict) else {}
+
+
 def _write_embed_attestation_artifacts(
-    record: dict,
+    record: Any,
     artifacts_dir: Path,
 ) -> None:
     """
@@ -86,14 +128,15 @@ def _write_embed_attestation_artifacts(
     """
     if not isinstance(record, dict):
         return
-    attestation_node = record.get("attestation")
-    attestation_payload = attestation_node if isinstance(attestation_node, dict) else {}
+    record_dict = cast(Dict[str, Any], record)
+    attestation_node = record_dict.get("attestation")
+    attestation_payload: Dict[str, Any] = cast(Dict[str, Any], attestation_node) if isinstance(attestation_node, dict) else {}
     if attestation_payload.get("status") != "ok":
         return
 
     attestation_dir = artifacts_dir / "attestation"
     attestation_dir.mkdir(parents=True, exist_ok=True)
-    statement_payload = {
+    statement_payload: Dict[str, Any] = {
         "statement": attestation_payload.get("statement"),
         "attestation_digest": attestation_payload.get("attestation_digest"),
         "event_binding_digest": attestation_payload.get("event_binding_digest"),
@@ -105,14 +148,14 @@ def _write_embed_attestation_artifacts(
     records_io.write_artifact_json(str(attestation_dir / "attestation_statement.json"), statement_payload)
     signed_bundle = attestation_payload.get("signed_bundle")
     if isinstance(signed_bundle, dict):
-        records_io.write_artifact_json(str(attestation_dir / "attestation_bundle.json"), signed_bundle)
+        records_io.write_artifact_json(str(attestation_dir / "attestation_bundle.json"), cast(Dict[str, Any], signed_bundle))
 
 
 def bind_impl_identity_fields(
-    record: dict,
+    record: Dict[str, Any],
     identity: runtime_resolver.ImplIdentity,
     impl_set: runtime_resolver.BuiltImplSet,
-    contracts
+    contracts: FrozenContracts
 ) -> None:
     """
     功能：绑定 impl_identity 相关字段。
@@ -136,10 +179,10 @@ def bind_impl_identity_fields(
 
 
 def run_embed(
-    output_dir: str,
-    config_path: str,
-    overrides: list[str] | None = None,
-    input_image_path: str | None = None
+    output_dir: Any,
+    config_path: Any,
+    overrides: Any = None,
+    input_image_path: Any = None
 ) -> None:
     """
     功能：执行嵌入流程，本阶段为基线实现。
@@ -164,6 +207,14 @@ def run_embed(
     if input_image_path is not None and not isinstance(input_image_path, str):
         # input_image_path 输入不合法，必须 fail-fast。
         raise ValueError("input_image_path must be str or None")
+    validated_overrides: list[str] | None = None
+    if isinstance(overrides, list):
+        override_candidates = cast(list[Any], overrides)
+        if any(not isinstance(item, str) or not item for item in override_candidates):
+            # overrides 列表项不合法，必须 fail-fast。
+            raise ValueError("overrides items must be non-empty str")
+        validated_overrides = cast(list[str], override_candidates)
+    validated_input_image_path = input_image_path.strip() if isinstance(input_image_path, str) and input_image_path.strip() else None
 
     # 创建 layout 和最小 run_meta。
     run_root = path_policy.derive_run_root(Path(output_dir))
@@ -175,9 +226,9 @@ def run_embed(
     allow_nonempty_run_root_reason = None
     override_applied_for_layout = None
     
-    # 初始化最小 run_meta，待完善。
+    # 初始化最小 run_meta。
     started_at = time_utils.now_utc_iso_z()
-    run_meta = {
+    run_meta: Dict[str, Any] = {
         "run_id": f"run-{uuid.uuid4().hex}",
         "command": "embed",
         "created_at_utc": started_at,
@@ -208,7 +259,8 @@ def run_embed(
     }
     
     error = None
-    pipeline_result = None
+    pipeline_result: Dict[str, Any] | None = None
+    record: Dict[str, Any] | None = None
     try:
         # 加载事实源。
         print("[Embed] Loading fact sources...")
@@ -263,7 +315,7 @@ def run_embed(
                     semantics,
                     contracts,
                     interpretation,
-                    overrides=overrides
+                    overrides=validated_overrides
                 )
             except Exception as exc:
                 set_failure_status(run_meta, RunFailureReason.CONFIG_INVALID, exc)
@@ -314,20 +366,20 @@ def run_embed(
             if isinstance(impl_set_capabilities_extended_digest, str) and impl_set_capabilities_extended_digest:
                 run_meta["impl_set_capabilities_extended_digest"] = impl_set_capabilities_extended_digest
 
-            if isinstance(input_image_path, str) and input_image_path.strip():
-                cfg["__embed_input_image_path__"] = input_image_path.strip()
+            if validated_input_image_path is not None:
+                cfg["__embed_input_image_path__"] = validated_input_image_path
             else:
-                embed_cfg = cfg.get("embed") if isinstance(cfg.get("embed"), dict) else {}
-                default_input = embed_cfg.get("input_image_path") if isinstance(embed_cfg, dict) else None
+                embed_cfg = _resolve_embed_cfg(cfg)
+                default_input = embed_cfg.get("input_image_path")
                 if isinstance(default_input, str) and default_input.strip():
                     cfg["__embed_input_image_path__"] = default_input.strip()
 
             # Preview Generation：若主链输入图仍为 None，且配置启用了 preview_generation，
             # 则先执行一次无注入 SD3 推理，将生成图作为语义掩码的输入，消除对外部图像的依赖。
             # preview 推理失败时不中断流程，失败语义传播至内容链（injection_mode 降级）。
-            _embed_cfg_pg = (cfg.get("embed") or {}).get("preview_generation") or {}
+            _embed_cfg_pg = _resolve_preview_generation_cfg(cfg)
             if _embed_cfg_pg.get("enabled", False) and cfg.get("__embed_input_image_path__") is None:
-                preview_pipeline_obj = pipeline_result.get("pipeline_obj") if isinstance(pipeline_result, dict) else None
+                preview_pipeline_obj = pipeline_result.get("pipeline_obj")
                 preview_device = cfg.get("device", "cpu")
                 preview_seed = seed_value
                 _pg_status = "failed"
@@ -344,11 +396,9 @@ def run_embed(
                         injection_modifier=None,
                         capture_final_latents=False
                     )
-                    _preview_status = None
-                    if isinstance(_preview_infer_result, dict):
-                        _preview_status = _preview_infer_result.get("inference_status")
-                        if not isinstance(_preview_status, str) or not _preview_status:
-                            _preview_status = _preview_infer_result.get("status")
+                    _preview_status = _preview_infer_result.get("inference_status")
+                    if not isinstance(_preview_status, str) or not _preview_status:
+                        _preview_status = _preview_infer_result.get("status")
                     if _preview_status == "ok":
                         _preview_image = _preview_infer_result.get("output_image")
                         if _preview_image is not None:
@@ -383,7 +433,7 @@ def run_embed(
                 run_meta["preview_generation"] = {"enabled": False, "status": "skipped", "reason": None, "seed": None, "tmp_path": None}
 
             # 预先计算 content 与 subspace 计划，用于注入上下文。
-            content_inputs_pre = embed_orchestrator._build_content_inputs_for_embed(cfg)
+            content_inputs_pre = _build_content_inputs_for_embed(cfg)
             content_result_pre = impl_set.content_extractor.extract(
                 cfg,
                 inputs=content_inputs_pre,
@@ -391,11 +441,12 @@ def run_embed(
             )
             mask_digest = None
             if isinstance(content_result_pre, dict):
-                mask_digest = content_result_pre.get("mask_digest")
+                content_result_pre_dict = cast(Dict[str, Any], content_result_pre)
+                mask_digest = content_result_pre_dict.get("mask_digest")
             elif hasattr(content_result_pre, "mask_digest"):
                 mask_digest = content_result_pre.mask_digest
 
-            planner_inputs = embed_orchestrator._build_planner_inputs_for_runtime(cfg, None)
+            planner_inputs = _build_planner_inputs_for_runtime(cfg, None)
             subspace_result_pre = impl_set.subspace_planner.plan(
                 cfg,
                 mask_digest=mask_digest,
@@ -406,16 +457,19 @@ def run_embed(
             # 提取内层 plan dict（含 lf_basis/hf_basis 顶层键），供 injection context 使用。
             # 不能用 as_dict()（外层 evidence 包装），否则 _build_plan_for_injection 找不到
             # lf_basis 顶层键，会回退到运行时 basis 绑定，导致 embed/detect basis 不一致。
-            if hasattr(subspace_result_pre, "plan") and isinstance(subspace_result_pre.plan, dict):
-                plan_payload = subspace_result_pre.plan
+            plan_candidate = getattr(subspace_result_pre, "plan", None)
+            if isinstance(plan_candidate, dict):
+                plan_payload: Any = cast(Dict[str, Any], plan_candidate)
             elif hasattr(subspace_result_pre, "as_dict"):
-                _evidence_dict = subspace_result_pre.as_dict()
-                plan_payload = _evidence_dict.get("plan") if isinstance(_evidence_dict.get("plan"), dict) else _evidence_dict
+                _evidence_dict = cast(Dict[str, Any], subspace_result_pre.as_dict())
+                _evidence_plan = _evidence_dict.get("plan")
+                plan_payload = cast(Dict[str, Any], _evidence_plan) if isinstance(_evidence_plan, dict) else _evidence_dict
             else:
                 plan_payload = subspace_result_pre
             plan_digest = getattr(subspace_result_pre, "plan_digest", None)
             if isinstance(plan_payload, dict) and not isinstance(plan_digest, str):
-                plan_digest = plan_payload.get("plan_digest")
+                plan_payload_dict = cast(Dict[str, Any], plan_payload)
+                plan_digest = plan_payload_dict.get("plan_digest")
 
             injection_context = None
             injection_modifier = None
@@ -429,12 +483,12 @@ def run_embed(
                 if isinstance(plan_payload, dict) and isinstance(plan_digest, str) and plan_digest:
                     # 计划存在：基于 PRE-COMPUTED plan 创建推理时所需的 context
                     # 注意：此 plan_digest 是临时的，真实 plan_digest 将由 orchestrator 计算
-                    injection_context = build_injection_context_from_plan(cfg, plan_payload, plan_digest)
+                    injection_context = build_injection_context_from_plan(cfg, cast(Dict[str, Any], plan_payload), plan_digest)
                     injection_modifier = LatentModifier(LATENT_MODIFIER_ID, LATENT_MODIFIER_VERSION)
                     print(f"[Paper-Faithful] Injection context created from PRE-COMPUTED plan (POST-ORCHESTRATOR决定最终spec)")
                 else:
                     # 计划缺失：基于 fallback plan 创建推理时所需的 context
-                    fallback_plan_payload = {
+                    fallback_plan_payload: Dict[str, Any] = {
                         "plan_status": "fallback_runtime_plan",
                         "planner_params": {
                             "rank": 8,
@@ -498,7 +552,12 @@ def run_embed(
                 capture_final_latents=enable_latent_sync,
                 trajectory_latent_cache=_traj_latent_cache
             )
-            inference_status = inference_result.get("inference_status")
+            inference_status_value = inference_result.get("inference_status")
+            inference_status = (
+                inference_status_value
+                if isinstance(inference_status_value, str) and inference_status_value
+                else infer_runtime.INFERENCE_STATUS_FAILED
+            )
             inference_error = inference_result.get("inference_error")
             inference_runtime_meta = inference_result.get("inference_runtime_meta")
             trajectory_evidence = inference_result.get("trajectory_evidence")
@@ -526,7 +585,7 @@ def run_embed(
                     if _arr.ndim == 4:
                         _se = _np_lat.mean(_np_lat.abs(_arr[0]), axis=0)
                         _std = float(_np_lat.std(_se))
-                        _mean = float(_np_lat.mean(_se) + 1e-12)
+                        _mean = float(cast(Any, _np_lat.mean(_se))) + 1e-12
                         _cr = _std / _mean
                         _flat = _se.reshape(-1)
                         _pk = float(_np_lat.max(_flat))
@@ -586,11 +645,11 @@ def run_embed(
 
             cfg["__run_root_dir__"] = str(run_root.resolve())
             cfg["__artifacts_dir__"] = str(artifacts_dir.resolve())
-            if isinstance(input_image_path, str) and input_image_path.strip():
-                cfg["__embed_input_image_path__"] = input_image_path.strip()
+            if validated_input_image_path is not None:
+                cfg["__embed_input_image_path__"] = validated_input_image_path
             else:
-                embed_cfg = cfg.get("embed") if isinstance(cfg.get("embed"), dict) else {}
-                default_input = embed_cfg.get("input_image_path") if isinstance(embed_cfg, dict) else None
+                embed_cfg = _resolve_embed_cfg(cfg)
+                default_input = embed_cfg.get("input_image_path")
                 if isinstance(default_input, str) and default_input.strip():
                     cfg["__embed_input_image_path__"] = default_input.strip()
             
@@ -608,12 +667,12 @@ def run_embed(
             run_meta["cfg_audit_canon_sha256"] = cfg_audit_metadata["cfg_audit_canon_sha256"]
 
             attestation_env_inputs = resolve_attestation_env_inputs(cfg, require_prompt_seed=True)
-            if isinstance(attestation_env_inputs, dict) and attestation_env_inputs.get("status") in {"ok", "absent"}:
-                transient_secret_inputs = {
-                    key_name: attestation_env_inputs.get(key_name)
-                    for key_name in ["k_master", "k_prompt", "k_seed"]
-                    if isinstance(attestation_env_inputs.get(key_name), str) and attestation_env_inputs.get(key_name)
-                }
+            if attestation_env_inputs.get("status") in {"ok", "absent"}:
+                transient_secret_inputs: Dict[str, str] = {}
+                for key_name in ["k_master", "k_prompt", "k_seed"]:
+                    key_value = attestation_env_inputs.get(key_name)
+                    if isinstance(key_value, str) and key_value:
+                        transient_secret_inputs[key_name] = key_value
                 if transient_secret_inputs:
                     cfg["__attestation_secret_inputs__"] = transient_secret_inputs
             
@@ -633,7 +692,7 @@ def run_embed(
                 rng=None,
                 trajectory_evidence=trajectory_evidence
             )
-            record = run_embed_orchestrator(
+            record_obj: Any = run_embed_orchestrator(
                 cfg,
                 impl_set,
                 cfg_digest,
@@ -647,9 +706,10 @@ def run_embed(
             cfg.pop("__embed_trajectory_latent_cache__", None)
             # 将 embed 侧 latent 空间统计写入 record，供 detect 侧几何同步 cross-comparison。
             _embed_latent_stats = cfg.pop("__embed_latent_spatial_stats__", None)
-            if not isinstance(record, dict):
+            if not isinstance(record_obj, dict):
                 # record 类型不符合预期，必须 fail-fast。
                 raise TypeError("orchestrator output must be dict")
+            record = cast(Dict[str, Any], record_obj)
             if isinstance(_embed_latent_stats, dict):
                 record["latent_spatial_stats"] = _embed_latent_stats
             record["cfg_digest"] = cfg_digest
@@ -693,16 +753,15 @@ def run_embed(
                     # 保存失败时写入审计字段，不中断流程。
                     record["watermarked_path_save_error"] = f"{type(_wm_save_exc).__name__}: {_wm_save_exc}"
                     print(f"[Embed] [WARN] SD 输出图像保存失败：{_wm_save_exc}")
-            if isinstance(pipeline_result, dict):
-                record["pipeline_impl_id"] = pipeline_result.get("pipeline_impl_id")
-                record["pipeline_provenance"] = pipeline_result.get("pipeline_provenance")
-                record["pipeline_provenance_canon_sha256"] = pipeline_result.get("pipeline_provenance_canon_sha256")
-                record["pipeline_runtime_meta"] = pipeline_result.get("pipeline_runtime_meta")
-                record["env_fingerprint_canon_sha256"] = pipeline_result.get("env_fingerprint_canon_sha256")
-                record["diffusers_version"] = pipeline_result.get("diffusers_version")
-                record["transformers_version"] = pipeline_result.get("transformers_version")
-                record["safetensors_version"] = pipeline_result.get("safetensors_version")
-                record["model_provenance_canon_sha256"] = pipeline_result.get("model_provenance_canon_sha256")
+            record["pipeline_impl_id"] = pipeline_result.get("pipeline_impl_id")
+            record["pipeline_provenance"] = pipeline_result.get("pipeline_provenance")
+            record["pipeline_provenance_canon_sha256"] = pipeline_result.get("pipeline_provenance_canon_sha256")
+            record["pipeline_runtime_meta"] = pipeline_result.get("pipeline_runtime_meta")
+            record["env_fingerprint_canon_sha256"] = pipeline_result.get("env_fingerprint_canon_sha256")
+            record["diffusers_version"] = pipeline_result.get("diffusers_version")
+            record["transformers_version"] = pipeline_result.get("transformers_version")
+            record["safetensors_version"] = pipeline_result.get("safetensors_version")
+            record["model_provenance_canon_sha256"] = pipeline_result.get("model_provenance_canon_sha256")
             
             # 将 inference 相关字段写入 record（append-only）
             record["infer_trace"] = run_meta.get("infer_trace")
@@ -714,8 +773,8 @@ def run_embed(
             # 为 detect 侧保存关键输入信息：input_image_path 和输入配置（用于重建）
             # 注：final_latents 张量不序列化；detect 侧应通过自己的 inference 或从 embed 配置重建
             inputs_record = {}
-            if isinstance(input_image_path, str) and input_image_path.strip():
-                inputs_record["input_image_path"] = input_image_path.strip()
+            if validated_input_image_path is not None:
+                inputs_record["input_image_path"] = validated_input_image_path
             else:
                 cfg_input_image_path = cfg.get("__embed_input_image_path__")
                 if isinstance(cfg_input_image_path, str) and cfg_input_image_path.strip():
@@ -723,16 +782,16 @@ def run_embed(
             if inputs_record:
                 record["inputs"] = inputs_record
             
-            content_evidence = record.get("content_evidence")
-            if not isinstance(content_evidence, dict):
+            content_evidence_node = record.get("content_evidence")
+            if isinstance(content_evidence_node, dict):
+                content_evidence: Dict[str, Any] = cast(Dict[str, Any], content_evidence_node)
+            else:
                 content_evidence = {}
                 record["content_evidence"] = content_evidence
             
             # 写入 pipeline_fingerprint 和 pipeline_fingerprint_digest
-            if pipeline_fingerprint is not None:
-                content_evidence["pipeline_fingerprint"] = pipeline_fingerprint
-            if pipeline_fingerprint_digest is not None:
-                content_evidence["pipeline_fingerprint_digest"] = pipeline_fingerprint_digest
+            content_evidence["pipeline_fingerprint"] = pipeline_fingerprint
+            content_evidence["pipeline_fingerprint_digest"] = pipeline_fingerprint_digest
             
             # POST-ORCHESTRATOR 创建最终的 injection_site_spec
             # 使用 orchestrator 计算的真实 plan_digest 来确定 injection_mode
@@ -760,7 +819,7 @@ def run_embed(
                     print(f"[Paper-Faithful] Injection site spec built (POST-ORCHESTRATOR with real plan_digest): {injection_site_digest[:16]}...")
                 else:
                     # plan_digest 缺失（orchestrator 也未能生成）→ fallback 模式
-                    fallback_plan_payload = {
+                    fallback_plan_payload: Dict[str, Any] = {
                         "plan_status": "fallback_runtime_plan_post_orchestrator",
                         "planner_params": {
                             "rank": 8,
@@ -795,43 +854,43 @@ def run_embed(
             
             # 写入 injection_site_spec 和 injection_site_digest
             # 同步校验plan_digest口径一致性
-            if injection_site_spec is not None:
-                content_evidence["injection_site_spec"] = injection_site_spec
-                # 提取injection_site_spec中的plan_digest
-                injection_rule_summary = injection_site_spec.get("injection_rule_summary")
-                if isinstance(injection_rule_summary, dict):
-                    spec_plan_digest = injection_rule_summary.get("plan_digest")
-                    orchestrator_plan_digest = content_evidence.get("plan_digest")
-                    # 校验口径一致性
-                    if isinstance(spec_plan_digest, str) and spec_plan_digest:
-                        if orchestrator_plan_digest is None or orchestrator_plan_digest == "":
-                            # content_status!=ok 时，不同步 fallback digest 到语义 plan 字段。
-                            content_status = content_evidence.get("status")
-                            if content_status == "ok":
-                                content_evidence["plan_digest"] = spec_plan_digest
-                            else:
-                                content_evidence["fallback_plan_digest"] = spec_plan_digest
-                                content_evidence["fallback_plan_digest_reason"] = "content_status_not_ok"
-                        elif orchestrator_plan_digest != spec_plan_digest:
-                            # 口径不一致，写入mismatch原因但不静默覆盖
-                            content_evidence["plan_digest_mismatch"] = {
-                                "orchestrator_value": orchestrator_plan_digest,
-                                "injection_site_value": spec_plan_digest,
-                                "mismatch_reason": "pre_computation_vs_orchestrator_divergence"
-                            }
-            if injection_site_digest is not None:
-                content_evidence["injection_site_digest"] = injection_site_digest
+            content_evidence["injection_site_spec"] = injection_site_spec
+            # 提取injection_site_spec中的plan_digest
+            injection_rule_summary = injection_site_spec.get("injection_rule_summary")
+            if isinstance(injection_rule_summary, dict):
+                injection_rule_summary_dict = cast(Dict[str, Any], injection_rule_summary)
+                spec_plan_digest = injection_rule_summary_dict.get("plan_digest")
+                orchestrator_plan_digest = content_evidence.get("plan_digest")
+                # 校验口径一致性
+                if isinstance(spec_plan_digest, str) and spec_plan_digest:
+                    if orchestrator_plan_digest is None or orchestrator_plan_digest == "":
+                        # content_status!=ok 时，不同步 fallback digest 到语义 plan 字段。
+                        content_status = content_evidence.get("status")
+                        if content_status == "ok":
+                            content_evidence["plan_digest"] = spec_plan_digest
+                        else:
+                            content_evidence["fallback_plan_digest"] = spec_plan_digest
+                            content_evidence["fallback_plan_digest_reason"] = "content_status_not_ok"
+                    elif orchestrator_plan_digest != spec_plan_digest:
+                        # 口径不一致，写入mismatch原因但不静默覆盖
+                        content_evidence["plan_digest_mismatch"] = {
+                            "orchestrator_value": orchestrator_plan_digest,
+                            "injection_site_value": spec_plan_digest,
+                            "mismatch_reason": "pre_computation_vs_orchestrator_divergence"
+                        }
+            content_evidence["injection_site_digest"] = injection_site_digest
             
             # Paper Faithfulness: 调用 alignment_evaluator（必达）
-            paper_spec = None
-            paper_spec_digest = None
+            paper_spec: Dict[str, Any] = {"status": "absent", "reason": "paper_spec_uninitialized"}
+            paper_spec_digest = "<absent>"
             try:
                 # 加载 paper_faithfulness_spec.yaml（通过唯一入口）
                 from pathlib import Path as PathLib
                 spec_path = PathLib(__file__).parent.parent.parent / "configs" / "paper_faithfulness_spec.yaml"
                 if spec_path.exists():
                     # 使用 config_loader 唯一入口加载 YAML
-                    paper_spec, spec_provenance = config_loader.load_yaml_with_provenance(spec_path)
+                    paper_spec_loaded, spec_provenance = config_loader.load_yaml_with_provenance(spec_path)
+                    paper_spec = dict(paper_spec_loaded)
                     paper_spec_digest = spec_provenance.canon_sha256
                     print(f"[Paper-Faithful] Paper spec loaded: {spec_path.name}, digest: {paper_spec_digest[:16]}...")
                 else:
@@ -844,9 +903,9 @@ def run_embed(
                 paper_spec_digest = "<failed>"
             
             # 调用 alignment_evaluator
-            alignment_report = None
-            alignment_digest = None
-            if isinstance(paper_spec, dict) and paper_spec.get("status") not in ("absent", "failed"):
+            alignment_report: Dict[str, Any] = {"status": "absent", "reason": "alignment_uninitialized"}
+            alignment_digest = "<absent>"
+            if paper_spec.get("status") not in ("absent", "failed"):
                 try:
                     alignment_report, alignment_digest = alignment_evaluator.evaluate_alignment(
                         paper_spec=paper_spec,
@@ -865,10 +924,8 @@ def run_embed(
                 alignment_digest = "<absent>"
             
             # 写入 alignment_report 和 alignment_digest
-            if alignment_report is not None:
-                content_evidence["alignment_report"] = alignment_report
-            if alignment_digest is not None:
-                content_evidence["alignment_digest"] = alignment_digest
+            content_evidence["alignment_report"] = alignment_report
+            content_evidence["alignment_digest"] = alignment_digest
             
             # 写入 paper_spec 绑定字段到顶层 record
             if not isinstance(record.get("paper_faithfulness"), dict):
@@ -944,6 +1001,10 @@ def run_embed(
             raise
         if error is not None:
             raise error
+
+    if record is None:
+        # 成功路径缺失 record 不符合预期，必须 fail-fast。
+        raise RuntimeError("embed record missing after successful execution")
 
     print(f"[Embed] [OK] Embed record written successfully")
     print(f"[Embed]   Record contains {len(record)} fields (15 fact source fields + {len(record) - 15} business fields)")

@@ -53,7 +53,7 @@ from main.cli.run_common import (
 )
 
 
-def _resolve_label_from_detect_record(record: Dict[str, Any]) -> bool | None:
+def _resolve_label_from_detect_record(record: Any) -> bool | None:
     """
     功能：从 detect record 解析布尔标签。 
 
@@ -67,8 +67,9 @@ def _resolve_label_from_detect_record(record: Dict[str, Any]) -> bool | None:
     """
     if not isinstance(record, dict):
         raise TypeError("record must be dict")
+    record_dict = cast(Dict[str, Any], record)
     for key_name in ["label", "ground_truth", "is_watermarked"]:
-        value = record.get(key_name)
+        value = record_dict.get(key_name)
         if isinstance(value, bool):
             return value
         if isinstance(value, (int, float)) and value in (0, 1):
@@ -76,7 +77,7 @@ def _resolve_label_from_detect_record(record: Dict[str, Any]) -> bool | None:
     return None
 
 
-def _validate_detect_record_label_balance_for_evaluate(cfg: Dict[str, Any]) -> None:
+def _validate_detect_record_label_balance_for_evaluate(cfg: Any) -> None:
     """
     功能：校验评估阶段 detect_records 的正负样本计数。 
 
@@ -93,9 +94,10 @@ def _validate_detect_record_label_balance_for_evaluate(cfg: Dict[str, Any]) -> N
     """
     if not isinstance(cfg, dict):
         raise TypeError("cfg must be dict")
+    cfg_dict = cast(Dict[str, Any], cfg)
 
-    evaluate_node = cfg.get("evaluate")
-    evaluate_cfg = evaluate_node if isinstance(evaluate_node, dict) else {}
+    evaluate_node = cfg_dict.get("evaluate")
+    evaluate_cfg: Dict[str, Any] = cast(Dict[str, Any], evaluate_node) if isinstance(evaluate_node, dict) else {}
     records_glob = evaluate_cfg.get("detect_records_glob")
     if not isinstance(records_glob, str) or not records_glob:
         raise ValueError("evaluate.detect_records_glob is required")
@@ -113,7 +115,8 @@ def _validate_detect_record_label_balance_for_evaluate(cfg: Dict[str, Any]) -> N
         payload = records_io.read_json(str(path_obj))
         if not isinstance(payload, dict):
             continue
-        label_value = _resolve_label_from_detect_record(payload)
+        payload_dict = cast(Dict[str, Any], payload)
+        label_value = _resolve_label_from_detect_record(payload_dict)
         if label_value is True:
             n_pos += 1
         elif label_value is False:
@@ -128,9 +131,9 @@ def _validate_detect_record_label_balance_for_evaluate(cfg: Dict[str, Any]) -> N
 
 
 def _bind_evaluate_threshold_anchors_to_run_meta(
-    run_meta: Dict[str, Any],
-    record: Dict[str, Any],
-    cfg: Dict[str, Any],
+    run_meta: Any,
+    record: Any,
+    cfg: Any,
 ) -> None:
     """
     功能：将 evaluate 阶段阈值锚点回填到 run_meta。 
@@ -151,12 +154,21 @@ def _bind_evaluate_threshold_anchors_to_run_meta(
         raise TypeError("record must be dict")
     if not isinstance(cfg, dict):
         raise TypeError("cfg must be dict")
+    run_meta_dict = cast(Dict[str, Any], run_meta)
+    record_dict = cast(Dict[str, Any], record)
+    cfg_dict = cast(Dict[str, Any], cfg)
 
-    evaluation_report = record.get("evaluation_report") if isinstance(record.get("evaluation_report"), dict) else {}
-    report_anchors = evaluation_report.get("anchors") if isinstance(evaluation_report.get("anchors"), dict) else {}
+    evaluation_report_node = record_dict.get("evaluation_report")
+    evaluation_report: Dict[str, Any] = (
+        cast(Dict[str, Any], evaluation_report_node) if isinstance(evaluation_report_node, dict) else {}
+    )
+    report_anchors_node = evaluation_report.get("anchors")
+    report_anchors: Dict[str, Any] = (
+        cast(Dict[str, Any], report_anchors_node) if isinstance(report_anchors_node, dict) else {}
+    )
 
     def _resolve_anchor_value(field_name: str) -> str:
-        record_value = record.get(field_name)
+        record_value = record_dict.get(field_name)
         if isinstance(record_value, str) and record_value.strip():
             return record_value
         anchor_value = report_anchors.get(field_name)
@@ -164,16 +176,16 @@ def _bind_evaluate_threshold_anchors_to_run_meta(
             return anchor_value
         return "<absent>"
 
-    run_meta["thresholds_digest"] = _resolve_anchor_value("thresholds_digest")
-    run_meta["threshold_metadata_digest"] = _resolve_anchor_value("threshold_metadata_digest")
+    run_meta_dict["thresholds_digest"] = _resolve_anchor_value("thresholds_digest")
+    run_meta_dict["threshold_metadata_digest"] = _resolve_anchor_value("threshold_metadata_digest")
 
-    target_fpr = record.get("target_fpr")
+    target_fpr = record_dict.get("target_fpr")
     if target_fpr is None:
-        target_fpr = cfg.get("target_fpr", "<absent>")
-    run_meta["target_fpr"] = target_fpr
+        target_fpr = cfg_dict.get("target_fpr", "<absent>")
+    run_meta_dict["target_fpr"] = target_fpr
 
 
-def _autofill_evaluate_inputs(cfg: Dict[str, Any], run_root: Path) -> None:
+def _autofill_evaluate_inputs(cfg: Any, run_root: Any) -> None:
     """
     功能：为 paper/onefile 标准路径自动补全 evaluate 输入工件位置。
 
@@ -191,10 +203,10 @@ def _autofill_evaluate_inputs(cfg: Dict[str, Any], run_root: Path) -> None:
         raise TypeError("cfg must be dict")
     if not isinstance(run_root, Path):
         raise TypeError("run_root must be Path")
+    cfg_dict = cast(Dict[str, Any], cfg)
 
-    evaluate_node = cfg.get("evaluate")
-    evaluate_cfg = evaluate_node if isinstance(evaluate_node, dict) else {}
-    evaluate_cfg = dict(evaluate_cfg)
+    evaluate_node = cfg_dict.get("evaluate")
+    evaluate_cfg: Dict[str, Any] = dict(cast(Dict[str, Any], evaluate_node)) if isinstance(evaluate_node, dict) else {}
     existing_glob = evaluate_cfg.get("detect_records_glob")
     if not isinstance(existing_glob, str) or not existing_glob:
         evaluate_cfg["detect_records_glob"] = str((run_root / "records" / "*detect*.json").resolve())
@@ -204,10 +216,10 @@ def _autofill_evaluate_inputs(cfg: Dict[str, Any], run_root: Path) -> None:
         thresholds_path = (run_root / "artifacts" / "thresholds" / "thresholds_artifact.json").resolve()
         evaluate_cfg["thresholds_path"] = str(thresholds_path)
 
-    cfg["evaluate"] = evaluate_cfg
+    cfg_dict["evaluate"] = evaluate_cfg
 
 
-def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None = None) -> None:
+def run_evaluate(output_dir: Any, config_path: Any, overrides: Any = None) -> None:
     """
     功能：执行评估流程（只读阈值模式）。
 
@@ -230,6 +242,13 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
     if overrides is not None and not isinstance(overrides, list):
         # overrides 输入不合法，必须 fail-fast。
         raise ValueError("overrides must be list or None")
+    validated_overrides: list[str] | None = None
+    if isinstance(overrides, list):
+        override_candidates = cast(list[Any], overrides)
+        if any(not isinstance(item, str) or not item for item in override_candidates):
+            # overrides 列表项不合法，必须 fail-fast。
+            raise ValueError("overrides items must be non-empty str")
+        validated_overrides = cast(list[str], override_candidates)
 
     # 创建 layout 和最小 run_meta。
     run_root = path_policy.derive_run_root(Path(output_dir))
@@ -243,7 +262,7 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
     
     # 初始化最小 run_meta，待完善。
     started_at = time_utils.now_utc_iso_z()
-    run_meta = {
+    run_meta: Dict[str, Any] = {
         "run_id": f"run-{uuid.uuid4().hex}",
         "command": "evaluate",
         "created_at_utc": started_at,
@@ -265,6 +284,7 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
     }
     
     error = None
+    record: Dict[str, Any] | None = None
     try:
         # 加载事实源。
         print("[Evaluate] Loading fact sources...")
@@ -319,7 +339,7 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
                     semantics,
                     contracts,
                     interpretation,
-                    overrides=overrides
+                    overrides=validated_overrides
                 )
             except Exception as exc:
                 set_failure_status(run_meta, RunFailureReason.CONFIG_INVALID, exc)
@@ -412,9 +432,6 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
             # 构造 evaluation record。
             print("[Evaluate] Generating evaluation record...")
             record = run_evaluate_orchestrator(cfg, impl_set)
-            if not isinstance(record, dict):
-                # record 类型不符合预期，必须 fail-fast。
-                raise TypeError("orchestrator output must be dict")
             record["cfg_digest"] = cfg_digest
             record["policy_path"] = cfg["policy_path"]
             override_applied = cfg.get("override_applied")
@@ -494,8 +511,9 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
                 raise
 
             # 评测报告工件统一收口写盘（records_io artifact 路径）。
-            evaluation_report_payload = record.get("evaluation_report")
-            if isinstance(evaluation_report_payload, dict):
+            evaluation_report_payload_node = record.get("evaluation_report")
+            if isinstance(evaluation_report_payload_node, dict):
+                evaluation_report_payload = cast(Dict[str, Any], evaluation_report_payload_node)
                 evaluation_report_path = artifacts_dir / "evaluation_report.json"
                 path_policy.validate_output_target(evaluation_report_path, "artifact", run_root)
                 eval_report_builder.write_eval_report_via_records_io(
@@ -552,6 +570,10 @@ def run_evaluate(output_dir: str, config_path: str, overrides: list[str] | None 
             raise
         if error is not None:
             raise error
+
+    if record is None:
+        # 成功路径缺失 record 不符合预期，必须 fail-fast。
+        raise RuntimeError("evaluate record missing after successful execution")
 
     print(f"[Evaluate] [OK] Evaluation record written successfully")
     print(f"[Evaluate]   Record contains {len(record)} fields (15 fact source fields + {len(record) - 15} business fields)")

@@ -11,7 +11,7 @@ import sys
 import argparse
 import glob
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, cast
 import uuid
 
 from main.cli import assert_module_execution
@@ -52,7 +52,7 @@ from main.cli.run_common import (
 )
 
 
-def _resolve_label_from_detect_record(record: Dict[str, Any]) -> bool | None:
+def _resolve_label_from_detect_record(record: Any) -> bool | None:
     """
     功能：从 detect record 解析布尔标签。 
 
@@ -66,8 +66,9 @@ def _resolve_label_from_detect_record(record: Dict[str, Any]) -> bool | None:
     """
     if not isinstance(record, dict):
         raise TypeError("record must be dict")
+    record_dict = cast(Dict[str, Any], record)
     for key_name in ["label", "ground_truth", "is_watermarked"]:
-        value = record.get(key_name)
+        value = record_dict.get(key_name)
         if isinstance(value, bool):
             return value
         if isinstance(value, (int, float)) and value in (0, 1):
@@ -75,7 +76,7 @@ def _resolve_label_from_detect_record(record: Dict[str, Any]) -> bool | None:
     return None
 
 
-def _validate_detect_record_label_balance_for_calibration(cfg: Dict[str, Any]) -> tuple[int, int]:
+def _validate_detect_record_label_balance_for_calibration(cfg: Any) -> tuple[int, int]:
     """
     功能：校验校准阶段 detect_records 的正负样本计数。 
 
@@ -92,9 +93,10 @@ def _validate_detect_record_label_balance_for_calibration(cfg: Dict[str, Any]) -
     """
     if not isinstance(cfg, dict):
         raise TypeError("cfg must be dict")
+    cfg_dict = cast(Dict[str, Any], cfg)
 
-    calibration_node = cfg.get("calibration")
-    calibration_cfg = calibration_node if isinstance(calibration_node, dict) else {}
+    calibration_node = cfg_dict.get("calibration")
+    calibration_cfg: Dict[str, Any] = cast(Dict[str, Any], calibration_node) if isinstance(calibration_node, dict) else {}
     records_glob = calibration_cfg.get("detect_records_glob")
     if not isinstance(records_glob, str) or not records_glob:
         raise ValueError("calibration.detect_records_glob is required")
@@ -112,7 +114,8 @@ def _validate_detect_record_label_balance_for_calibration(cfg: Dict[str, Any]) -
         payload = records_io.read_json(str(path_obj))
         if not isinstance(payload, dict):
             continue
-        label_value = _resolve_label_from_detect_record(payload)
+        payload_dict = cast(Dict[str, Any], payload)
+        label_value = _resolve_label_from_detect_record(payload_dict)
         if label_value is True:
             n_pos += 1
         elif label_value is False:
@@ -127,7 +130,7 @@ def _validate_detect_record_label_balance_for_calibration(cfg: Dict[str, Any]) -
     return n_pos, n_neg
 
 
-def _autofill_calibration_detect_records_glob(cfg: Dict[str, Any], run_root: Path) -> None:
+def _autofill_calibration_detect_records_glob(cfg: Any, run_root: Any) -> None:
     """
     功能：为 paper/onefile 标准路径自动补全 calibration.detect_records_glob。
 
@@ -146,9 +149,10 @@ def _autofill_calibration_detect_records_glob(cfg: Dict[str, Any], run_root: Pat
         raise TypeError("cfg must be dict")
     if not isinstance(run_root, Path):
         raise TypeError("run_root must be Path")
+    cfg_dict = cast(Dict[str, Any], cfg)
 
-    calibration_node = cfg.get("calibration")
-    calibration_cfg = calibration_node if isinstance(calibration_node, dict) else {}
+    calibration_node = cfg_dict.get("calibration")
+    calibration_cfg: Dict[str, Any] = cast(Dict[str, Any], calibration_node) if isinstance(calibration_node, dict) else {}
     existing_glob = calibration_cfg.get("detect_records_glob")
     if isinstance(existing_glob, str) and existing_glob:
         return
@@ -156,10 +160,10 @@ def _autofill_calibration_detect_records_glob(cfg: Dict[str, Any], run_root: Pat
     candidate_glob = str((run_root / "records" / "*detect*.json").resolve())
     calibration_cfg = dict(calibration_cfg)
     calibration_cfg["detect_records_glob"] = candidate_glob
-    cfg["calibration"] = calibration_cfg
+    cfg_dict["calibration"] = calibration_cfg
 
 
-def run_calibrate(output_dir: str, config_path: str, overrides: list[str] | None = None) -> None:
+def run_calibrate(output_dir: Any, config_path: Any, overrides: Any = None) -> None:
     """
     功能：执行校准流程。
 
@@ -182,6 +186,16 @@ def run_calibrate(output_dir: str, config_path: str, overrides: list[str] | None
     if not config_path:
         # config_path 输入不合法，必须 fail-fast。
         raise ValueError("config_path must be non-empty str")
+    if overrides is not None and not isinstance(overrides, list):
+        # overrides 输入不合法，必须 fail-fast。
+        raise ValueError("overrides must be list or None")
+    validated_overrides: list[str] | None = None
+    if isinstance(overrides, list):
+        override_candidates = cast(list[Any], overrides)
+        if any(not isinstance(item, str) or not item for item in override_candidates):
+            # overrides 列表项不合法，必须 fail-fast。
+            raise ValueError("overrides items must be non-empty str")
+        validated_overrides = cast(list[str], override_candidates)
 
     # 创建 run_root 与最小 run_meta。
     run_root = path_policy.derive_run_root(Path(output_dir))
@@ -193,7 +207,7 @@ def run_calibrate(output_dir: str, config_path: str, overrides: list[str] | None
     allow_nonempty_run_root_reason = None
     override_applied_for_layout = None
     
-    # 初始化最小 run_meta，待完善。
+    # 初始化最小 run_meta。
     started_at = time_utils.now_utc_iso_z()
     run_meta: Dict[str, Any] = {
         "run_id": f"run-{uuid.uuid4().hex}",
@@ -217,7 +231,7 @@ def run_calibrate(output_dir: str, config_path: str, overrides: list[str] | None
     }
     
     error = None
-    record = None
+    record: Dict[str, Any] | None = None
     try:
         # 加载事实源。
         print("[Calibrate] Loading fact sources...")
@@ -257,7 +271,7 @@ def run_calibrate(output_dir: str, config_path: str, overrides: list[str] | None
                 semantics,
                 contracts,
                 interpretation,
-                overrides=overrides
+                overrides=validated_overrides
             )
         except Exception as exc:
             set_failure_status(run_meta, RunFailureReason.CONFIG_INVALID, exc)
@@ -379,6 +393,8 @@ def run_calibrate(output_dir: str, config_path: str, overrides: list[str] | None
             if not isinstance(threshold_metadata_artifact, dict):
                 # threshold_metadata_artifact 缺失或类型不合法，必须 fail-fast。
                 raise TypeError("threshold_metadata_artifact must be dict")
+            thresholds_artifact_dict = cast(Dict[str, Any], thresholds_artifact)
+            threshold_metadata_artifact_dict = cast(Dict[str, Any], threshold_metadata_artifact)
 
             thresholds_dir = artifacts_dir / "thresholds"
             thresholds_dir.mkdir(parents=True, exist_ok=True)
@@ -387,13 +403,13 @@ def run_calibrate(output_dir: str, config_path: str, overrides: list[str] | None
 
             path_policy.validate_output_target(thresholds_path, "artifact", run_root)
             path_policy.validate_output_target(threshold_metadata_path, "artifact", run_root)
-            records_io.write_artifact_json(str(thresholds_path), thresholds_artifact)
-            records_io.write_artifact_json(str(threshold_metadata_path), threshold_metadata_artifact)
+            records_io.write_artifact_json(str(thresholds_path), thresholds_artifact_dict)
+            records_io.write_artifact_json(str(threshold_metadata_path), threshold_metadata_artifact_dict)
 
             record["thresholds_artifact_path"] = str(thresholds_path)
             record["threshold_metadata_artifact_path"] = str(threshold_metadata_path)
-            record["thresholds_artifact_digest"] = digests.canonical_sha256(thresholds_artifact)
-            record["threshold_metadata_artifact_digest"] = digests.canonical_sha256(threshold_metadata_artifact)
+            record["thresholds_artifact_digest"] = digests.canonical_sha256(thresholds_artifact_dict)
+            record["threshold_metadata_artifact_digest"] = digests.canonical_sha256(threshold_metadata_artifact_dict)
 
             schema.ensure_required_fields(record, cfg, interpretation)
 
