@@ -109,6 +109,59 @@ def test_experiment_matrix_detect_stage_sets_content_enabled_override(monkeypatc
     assert "allow_threshold_fallback_for_tests=true" in detect_overrides
 
 
+def test_experiment_matrix_embed_stage_aligns_content_extractor_override(monkeypatch) -> None:
+    """
+    功能：embed 阶段必须显式对齐 onefile 的 content extractor 模式 override。
+
+    Verify _run_stage_sequence adds disable_content_detect=false for the
+    matrix embed stage so embed uses the same content extractor mode as the
+    onefile embed path.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    captured_overrides = {}
+
+    def _fake_layout(*args, **kwargs):
+        return {
+            "run_root": args[0],
+            "artifacts_dir": args[0] / "artifacts",
+            "records_dir": args[0] / "records",
+        }
+
+    def _fake_run_stage_command(stage_name, run_root, config_path, stage_overrides, input_record_path=None):
+        captured_overrides[stage_name] = list(stage_overrides)
+        if stage_name == "detect":
+            detect_record_path = run_root / "records" / "detect_record.json"
+            detect_record_path.parent.mkdir(parents=True, exist_ok=True)
+            detect_record_path.write_text(
+                json.dumps({"content_evidence_payload": {"status": "ok", "score": 0.1}}),
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr(experiment_matrix.path_policy, "ensure_output_layout", _fake_layout)
+    monkeypatch.setattr(experiment_matrix, "_run_stage_command", _fake_run_stage_command)
+
+    grid_item_cfg = {
+        "config_path": "configs/paper_full_cuda.yaml",
+        "attack_protocol_path": "configs/attack_protocol.yaml",
+        "cfg_snapshot": {
+            "seed": 0,
+            "model_id": "stabilityai/stable-diffusion-3.5-medium",
+        },
+        "ablation_flags": {},
+        "max_samples": None,
+    }
+
+    experiment_matrix._run_stage_sequence(grid_item_cfg, Path("outputs/experiment_matrix/experiments/item_0000"))
+
+    embed_overrides = captured_overrides.get("embed", [])
+    assert "disable_content_detect=false" in embed_overrides
+
+
 def test_prepare_detect_record_for_attack_grouping_writes_attack_fields(tmp_path: Path) -> None:
     """
     功能：为 calibrate/evaluate 生成带 attack 条件字段的 detect 副本。

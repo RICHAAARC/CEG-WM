@@ -1402,8 +1402,8 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
         if stage_name == "detect":
             stage_overrides.append("enable_content_detect=true")
             stage_overrides.append("allow_threshold_fallback_for_tests=true")
-        # embed 阶段不强制写入 disable_content_detect 覆盖项。
-        # 由配置与 whitelist 统一约束，避免 override_value_mismatch。
+        if stage_name == "embed":
+            stage_overrides.append("disable_content_detect=false")
 
         # calibrate/evaluate 都需要带标签的 detect records 输入。
         # 这里使用 detect 后生成的 attack-aware 标注记录对（正/负各一条）满足标签平衡门禁。
