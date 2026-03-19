@@ -784,6 +784,35 @@ def _canonicalize_detect_runtime_mode(detect_runtime_mode: Any) -> Optional[str]
     return normalized_mode
 
 
+def resolve_detect_runtime_mode(record: Dict[str, Any]) -> Optional[str]:
+    """
+    功能：按 canonical-first 规则解析 detect runtime mode。
+
+    Resolve detect runtime mode with canonical-first and legacy-compatible
+    semantics.
+
+    Args:
+        record: Detect record mapping.
+
+    Returns:
+        Canonical runtime mode when available; otherwise the normalized legacy
+        runtime mode. Returns None when neither field is available.
+
+    Raises:
+        TypeError: If record is not a dict.
+    """
+    if not isinstance(record, dict):
+        raise TypeError("record must be dict")
+
+    canonical_mode = record.get("detect_runtime_mode_canonical")
+    normalized_canonical = _canonicalize_detect_runtime_mode(canonical_mode)
+    if normalized_canonical is not None:
+        return normalized_canonical
+
+    legacy_mode = record.get("detect_runtime_mode")
+    return _canonicalize_detect_runtime_mode(legacy_mode)
+
+
 def run_detect_orchestrator(
     cfg: Dict[str, Any],
     impl_set: BuiltImplSet,
@@ -1282,7 +1311,7 @@ def run_detect_orchestrator(
     input_fields = len(input_record or {})
 
     # 实现 detect 侧同构分数与一致性校 
-    detect_runtime_mode = "fallback_identity_v0"  # 默认：未获得可用 detect 同构分数
+    detect_runtime_mode = "fallback_identity"  # 默认：未获得可用 detect 同构分数
     detect_traj_cache = cfg.get("__detect_trajectory_latent_cache__")
 
     if not forced_mismatch and isinstance(plan_payload, dict):

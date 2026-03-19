@@ -448,11 +448,34 @@ def test_detect_runtime_mode_canonical_preserves_legacy_mode() -> None:
         "fallback_identity_v0"
     ) == "fallback_identity"
     assert detect_orchestrator._canonicalize_detect_runtime_mode(  # pyright: ignore[reportPrivateUsage]
+        "fallback_identity"
+    ) == "fallback_identity"
+    assert detect_orchestrator._canonicalize_detect_runtime_mode(  # pyright: ignore[reportPrivateUsage]
         "real"
     ) == "real"
     assert detect_orchestrator._canonicalize_detect_runtime_mode(  # pyright: ignore[reportPrivateUsage]
         None
     ) is None
+
+
+def test_resolve_detect_runtime_mode_prefers_canonical_then_legacy() -> None:
+    """
+    功能：验证 detect runtime mode 解析遵循 canonical-first、legacy-compatible。 
+
+    Validate detect runtime mode resolution prefers canonical field and falls
+    back to the legacy field when canonical is absent.
+    """
+    assert detect_orchestrator.resolve_detect_runtime_mode(  # pyright: ignore[reportPrivateUsage]
+        {
+            "detect_runtime_mode": "fallback_identity_v0",
+            "detect_runtime_mode_canonical": "real",
+        }
+    ) == "real"
+    assert detect_orchestrator.resolve_detect_runtime_mode(  # pyright: ignore[reportPrivateUsage]
+        {
+            "detect_runtime_mode": "fallback_identity_v0",
+        }
+    ) == "fallback_identity"
 
 
 # ---------------------------------------------------------------------------

@@ -1426,6 +1426,45 @@ def test_run_stage_sequence_preserves_debug_forced_pair_fallback(
     assert called_labelled_helper["called"] == 1
 
 
+def test_paper_acceptance_gate_prefers_canonical_runtime_mode(tmp_path: Path) -> None:
+    """
+    功能：验证 paper acceptance gate 优先读取 canonical runtime mode。 
+
+    Verify paper acceptance uses detect_runtime_mode_canonical before the legacy
+    detect_runtime_mode field.
+    """
+    run_root = tmp_path / "run"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    (records_dir / "detect_record.json").write_text(
+        json.dumps(
+            {
+                "detect_runtime_mode": "fallback_identity_v0",
+                "detect_runtime_mode_canonical": "real",
+                "pipeline_runtime_meta": {"synthetic_pipeline": False},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    summary = {
+        "status": "ok",
+        "failure_reason": "ok",
+        "metrics": {"geo_available_rate": 0.5},
+        "hf_truncation_baseline_comparison": {"comparison_ready": True},
+    }
+    grid_item_cfg = {
+        "paper_faithfulness": {"enabled": True},
+    }
+
+    experiment_matrix._enforce_paper_acceptance_gate(summary, grid_item_cfg, run_root)  # pyright: ignore[reportPrivateUsage]
+
+    assert summary["status"] == "ok"
+    assert summary["failure_reason"] == "ok"
+
+
 def test_run_neg_embed_detect_for_cache_uses_preview_image_as_detect_input(
     tmp_path: Path,
     monkeypatch,

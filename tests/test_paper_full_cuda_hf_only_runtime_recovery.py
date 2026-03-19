@@ -358,6 +358,32 @@ def test_hf_truncation_baseline_payload_marks_detect_hf_score_as_diagnostic_only
     assert payload["score_semantics"] == "diagnostic_detect_hf_score"
 
 
+def test_hf_truncation_baseline_payload_prefers_canonical_runtime_mode() -> None:
+    """
+    功能：验证 HF baseline consumer 优先读取 canonical runtime mode。 
+
+    Verify the HF baseline consumer prefers detect_runtime_mode_canonical over
+    a conflicting legacy detect_runtime_mode value.
+    """
+    payload = run_detect_cli._build_hf_truncation_baseline_payload(  # pyright: ignore[reportPrivateUsage]
+        {
+            "detect_runtime_mode": "fallback_identity_v0",
+            "detect_runtime_mode_canonical": "real",
+            "pipeline_runtime_meta": {"synthetic_pipeline": False},
+            "content_evidence_payload": {
+                "detect_hf_score": 0.77,
+            },
+        },
+        {
+            "paper_faithfulness": {"enabled": True},
+            "watermark": {"hf": {"enabled": True}},
+        },
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["score"] == 0.77
+
+
 def test_detect_runtime_mode_real_for_hf_only_when_sidecar_disabled(monkeypatch: Any) -> None:
     """
     功能：验证 sidecar 禁用且 HF trajectory 分数可用时 detect_runtime_mode 仍标记为 real。
@@ -484,7 +510,7 @@ def test_detect_lf_observability_fields_written_when_exact_lf_absent(monkeypatch
         cfg_digest="c" * 64,
     )
 
-    assert record.get("detect_runtime_mode") == "fallback_identity_v0"
+    assert record.get("detect_runtime_mode") == "fallback_identity"
     assert record.get("detect_runtime_mode_canonical") == "fallback_identity"
 
     content_payload = record.get("content_evidence_payload")

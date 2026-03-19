@@ -502,7 +502,7 @@ def _enforce_paper_acceptance_gate(summary: Dict[str, Any], grid_item_cfg: Dict[
 
     detect_record = _read_optional_json(run_root / "records" / "detect_record.json")
     pipeline_runtime_meta = detect_record.get("pipeline_runtime_meta") if isinstance(detect_record.get("pipeline_runtime_meta"), dict) else {}
-    detect_runtime_mode = detect_record.get("detect_runtime_mode") if isinstance(detect_record.get("detect_runtime_mode"), str) else "<absent>"
+    detect_runtime_mode = detect_orchestrator.resolve_detect_runtime_mode(detect_record) or "<absent>"
     metrics = summary.get("metrics") if isinstance(summary.get("metrics"), dict) else {}
     geo_available_rate = metrics.get("geo_available_rate")
     hf_truncation_baseline_comparison = summary.get("hf_truncation_baseline_comparison") if isinstance(summary.get("hf_truncation_baseline_comparison"), dict) else {}

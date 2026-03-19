@@ -356,7 +356,7 @@ def _build_hf_truncation_baseline_payload(record: Any, cfg: Any) -> Dict[str, An
 
     paper_cfg = _resolve_nested_mapping(cfg_dict, "paper_faithfulness")
     paper_enabled = bool(paper_cfg.get("enabled", False))
-    detect_runtime_mode = record_dict.get("detect_runtime_mode")
+    detect_runtime_mode = detect_orchestrator.resolve_detect_runtime_mode(record_dict) or "<absent>"
     pipeline_runtime_meta = _resolve_nested_mapping(record_dict, "pipeline_runtime_meta")
 
     if paper_enabled and bool(pipeline_runtime_meta.get("synthetic_pipeline", False)):
