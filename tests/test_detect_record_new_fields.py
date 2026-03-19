@@ -559,6 +559,9 @@ def test_event_attestation_score_paths_registered() -> None:
         "attestation.final_event_attested_decision.event_attestation_score",
         "attestation.final_event_attested_decision.event_attestation_score_name",
         "attestation.final_event_attested_decision.event_attestation_score_semantics",
+        "attestation.final_event_attested_decision.event_attestation_statistics_score",
+        "attestation.final_event_attested_decision.event_attestation_statistics_score_name",
+        "attestation.final_event_attested_decision.event_attestation_statistics_score_semantics",
     }
 
     assert required_paths <= schema_fields

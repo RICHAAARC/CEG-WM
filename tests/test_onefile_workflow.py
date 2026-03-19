@@ -612,10 +612,13 @@ def test_negative_branch_statement_only_provenance_supports_low_event_attestatio
             "label": True,
             "attestation": {
                 "final_event_attested_decision": {
-                    "status": "attested",
-                    "is_event_attested": True,
-                    "event_attestation_score": 0.81,
+                    "status": "unattested",
+                    "is_event_attested": False,
+                    "authenticity_status": "authentic",
+                    "event_attestation_score": 0.0,
                     "event_attestation_score_name": "event_attestation_score",
+                    "event_attestation_statistics_score": 0.81,
+                    "event_attestation_statistics_score_name": "event_attestation_statistics_score",
                 }
             },
         },
@@ -633,13 +636,15 @@ def test_negative_branch_statement_only_provenance_supports_low_event_attestatio
                     "event_attestation_score": 0.0,
                     "event_attestation_score_name": "event_attestation_score",
                     "authenticity_status": "statement_only",
+                    "event_attestation_statistics_score": 0.0,
+                    "event_attestation_statistics_score_name": "event_attestation_statistics_score",
                 },
             },
             "content_evidence_payload": {"status": "ok", "detect_hf_score": 0.95},
         },
     ]
 
-    scores, strata = load_scores_for_calibration(records, score_name="event_attestation_score")
+    scores, strata = load_scores_for_calibration(records, score_name="event_attestation_statistics_score")
 
     assert scores == [pytest.approx(0.0)]
     assert strata["global"]["n_valid"] == 1
@@ -1634,8 +1639,8 @@ def test_parallel_attestation_statistics_workflow_writes_distinct_artifacts(
         "evaluate": {"score_name": "content_score", "minimal_ground_truth_pair_count": 1},
         "parallel_attestation_statistics": {
             "enabled": True,
-            "calibration_score_name": "event_attestation_score",
-            "evaluate_score_name": "event_attestation_score",
+            "calibration_score_name": "event_attestation_statistics_score",
+            "evaluate_score_name": "event_attestation_statistics_score",
         },
     }
     cfg_path = tmp_path / "paper_cfg.yaml"
@@ -1655,10 +1660,13 @@ def test_parallel_attestation_statistics_workflow_writes_distinct_artifacts(
                         "content_attestation_score_name": "content_attestation_score",
                     },
                     "final_event_attested_decision": {
-                        "status": "attested",
-                        "is_event_attested": True,
-                        "event_attestation_score": 0.89,
+                        "status": "unattested",
+                        "is_event_attested": False,
+                        "authenticity_status": "authentic",
+                        "event_attestation_score": 0.0,
                         "event_attestation_score_name": "event_attestation_score",
+                        "event_attestation_statistics_score": 0.89,
+                        "event_attestation_statistics_score_name": "event_attestation_statistics_score",
                     },
                 },
             },
@@ -1685,6 +1693,9 @@ def test_parallel_attestation_statistics_workflow_writes_distinct_artifacts(
                         "is_event_attested": False,
                         "event_attestation_score": 0.0,
                         "event_attestation_score_name": "event_attestation_score",
+                        "authenticity_status": "statement_only",
+                        "event_attestation_statistics_score": 0.0,
+                        "event_attestation_statistics_score_name": "event_attestation_statistics_score",
                     },
                 },
             },
@@ -1803,12 +1814,12 @@ def test_parallel_attestation_statistics_workflow_writes_distinct_artifacts(
     summary_path = run_root / "artifacts" / "parallel_attestation_statistics_summary.json"
     summary_obj = json.loads(summary_path.read_text(encoding="utf-8"))
     content_chain = summary_obj["content_score_chain"]
-    attestation_chain = summary_obj["event_attestation_score_chain"]
+    attestation_chain = summary_obj["event_attestation_statistics_score_chain"]
 
     assert content_chain["score_name"] == "content_score"
-    assert attestation_chain["score_name"] == "event_attestation_score"
+    assert attestation_chain["score_name"] == "event_attestation_statistics_score"
     assert content_chain["threshold_id"] == "content_score_np_fpr_0_01"
-    assert attestation_chain["threshold_id"] == "event_attestation_score_np_fpr_0_01"
+    assert attestation_chain["threshold_id"] == "event_attestation_statistics_score_np_fpr_0_01"
     assert content_chain["thresholds_artifact_path"] != attestation_chain["thresholds_artifact_path"]
     assert summary_obj["run_root_relative"] == "."
     assert summary_obj["parallel_run_root_relative"] == "outputs/parallel_attestation_statistics"

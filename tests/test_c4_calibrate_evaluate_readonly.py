@@ -163,6 +163,51 @@ def test_load_scores_for_calibration_event_attestation_accepts_statement_only_ne
     assert strata["global"]["n_valid"] == 1
 
 
+def test_load_scores_for_calibration_event_attestation_statistics_accepts_statement_only_negative_zero_score() -> None:
+    """Validate authenticity-constrained event statistics keep statement-only negatives at zero."""
+    records = [
+        {
+            "label": True,
+            "attestation": {
+                "final_event_attested_decision": {
+                    "status": "unattested",
+                    "is_event_attested": False,
+                    "authenticity_status": "authentic",
+                    "event_attestation_score": 0.0,
+                    "event_attestation_score_name": "event_attestation_score",
+                    "event_attestation_statistics_score": 0.81,
+                    "event_attestation_statistics_score_name": "event_attestation_statistics_score",
+                }
+            },
+        },
+        {
+            "label": False,
+            "attestation": {
+                "image_evidence_result": {
+                    "status": "ok",
+                    "content_attestation_score": 0.79,
+                    "content_attestation_score_name": "content_attestation_score",
+                },
+                "final_event_attested_decision": {
+                    "status": "unattested",
+                    "is_event_attested": False,
+                    "authenticity_status": "statement_only",
+                    "event_attestation_score": 0.0,
+                    "event_attestation_score_name": "event_attestation_score",
+                    "event_attestation_statistics_score": 0.0,
+                    "event_attestation_statistics_score_name": "event_attestation_statistics_score",
+                },
+            },
+            "content_evidence_payload": {"status": "ok", "detect_hf_score": 0.91},
+        },
+    ]
+
+    scores, strata = load_scores_for_calibration(records, score_name="event_attestation_statistics_score")
+
+    assert scores == [pytest.approx(0.0)]
+    assert strata["global"]["n_valid"] == 1
+
+
 def test_load_thresholds_artifact_controlled_requires_fields(tmp_path: Path) -> None:
     """Validate missing required field detection for thresholds artifact."""
     artifact_path = tmp_path / "thresholds.json"
@@ -413,6 +458,56 @@ def test_evaluate_records_against_threshold_supports_event_attestation_score() -
     metrics, breakdown, _ = evaluate_records_against_threshold(records, thresholds_obj)
 
     assert metrics["score_name"] == "event_attestation_score"
+    assert metrics["tpr_at_fpr"] == pytest.approx(1.0)
+    assert metrics["fpr_empirical"] == pytest.approx(0.0)
+    assert breakdown["confusion"] == {"tp": 1, "fp": 0, "fn": 0, "tn": 1}
+
+
+def test_evaluate_records_against_threshold_supports_event_attestation_statistics_score() -> None:
+    """Validate readonly evaluate supports authentic pre-verdict event statistics."""
+    records = [
+        {
+            "content_evidence_payload": {"status": "ok", "score": 0.1},
+            "attestation": {
+                "final_event_attested_decision": {
+                    "status": "unattested",
+                    "is_event_attested": False,
+                    "authenticity_status": "authentic",
+                    "event_attestation_score": 0.0,
+                    "event_attestation_score_name": "event_attestation_score",
+                    "event_attestation_statistics_score": 0.9,
+                    "event_attestation_statistics_score_name": "event_attestation_statistics_score",
+                }
+            },
+            "label": True,
+        },
+        {
+            "content_evidence_payload": {"status": "ok", "score": 0.8},
+            "attestation": {
+                "final_event_attested_decision": {
+                    "status": "unattested",
+                    "is_event_attested": False,
+                    "authenticity_status": "statement_only",
+                    "event_attestation_score": 0.0,
+                    "event_attestation_score_name": "event_attestation_score",
+                    "event_attestation_statistics_score": 0.0,
+                    "event_attestation_statistics_score_name": "event_attestation_statistics_score",
+                }
+            },
+            "label": False,
+        },
+    ]
+    thresholds_obj = {
+        "threshold_id": "event_attestation_statistics_score_np_fpr_0_01",
+        "score_name": "event_attestation_statistics_score",
+        "target_fpr": 0.01,
+        "threshold_value": 0.5,
+        "threshold_key_used": "fpr_0_01",
+    }
+
+    metrics, breakdown, _ = evaluate_records_against_threshold(records, thresholds_obj)
+
+    assert metrics["score_name"] == "event_attestation_statistics_score"
     assert metrics["tpr_at_fpr"] == pytest.approx(1.0)
     assert metrics["fpr_empirical"] == pytest.approx(0.0)
     assert breakdown["confusion"] == {"tp": 1, "fp": 0, "fn": 0, "tn": 1}

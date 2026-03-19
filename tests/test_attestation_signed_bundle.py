@@ -229,6 +229,8 @@ def test_verify_attestation_statement_only_cannot_become_event_attested() -> Non
     assert final_decision.get("is_event_attested") is False
     assert final_decision.get("event_attestation_score") == pytest.approx(0.0)
     assert final_decision.get("event_attestation_score_name") == "event_attestation_score"
+    assert final_decision.get("event_attestation_statistics_score") == pytest.approx(0.0)
+    assert final_decision.get("event_attestation_statistics_score_name") == "event_attestation_statistics_score"
 
 
 def test_build_detect_attestation_result_statement_only_provenance_uses_legal_bundle_status() -> None:
@@ -316,6 +318,8 @@ def test_verify_attestation_authentic_bundle_can_become_event_attested() -> None
     assert final_decision.get("is_event_attested") is True
     assert final_decision.get("event_attestation_score") == pytest.approx(result.get("content_attestation_score"))
     assert final_decision.get("event_attestation_score_name") == "event_attestation_score"
+    assert final_decision.get("event_attestation_statistics_score") == pytest.approx(result.get("content_attestation_score"))
+    assert final_decision.get("event_attestation_statistics_score_name") == "event_attestation_statistics_score"
 
 
 def test_build_detect_attestation_result_bridges_hf_attestation_values() -> None:

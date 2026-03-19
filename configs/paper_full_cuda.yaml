@@ -139,8 +139,8 @@ evaluate:
 
 parallel_attestation_statistics:
   enabled: true  # paper onefile 主线保留 content_score，同时并行补齐 attestation 正式统计链
-  calibration_score_name: "event_attestation_score"
-  evaluate_score_name: "event_attestation_score"
+  calibration_score_name: "event_attestation_statistics_score"
+  evaluate_score_name: "event_attestation_statistics_score"
 
 impl:
   content_extractor_id: "unified_content_extractor"

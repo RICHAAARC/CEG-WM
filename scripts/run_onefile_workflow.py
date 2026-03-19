@@ -47,6 +47,7 @@ LEGACY_PROFILE_CPU_MIN = "cpu_min"
 LEGACY_PROFILE_CUDA_REAL = "cuda_real"
 CONTENT_ATTESTATION_SCORE_NAME = "content_attestation_score"
 EVENT_ATTESTATION_SCORE_NAME = "event_attestation_score"
+EVENT_ATTESTATION_STATISTICS_SCORE_NAME = "event_attestation_statistics_score"
 PAPER_FROZEN_CONFIG_PATH = REPO_ROOT / "configs" / "paper_full_cuda.yaml"
 PAPER_SPEC_CONFIG_PATH = REPO_ROOT / "configs" / "paper_faithfulness_spec.yaml"
 PAPER_FROZEN_IMPL_REQUIRED_FIELDS = ("sync_module_id", "geometry_extractor_id")
@@ -1395,6 +1396,46 @@ def _extract_event_attestation_score_from_detect_record(record: dict) -> float |
     return score_float
 
 
+def _extract_event_attestation_statistics_score_from_detect_record(record: dict) -> float | None:
+    """
+    功能：从 detect record 中提取真实性约束的 event_attestation_statistics_score。
+
+    Extract the authenticity-constrained event_attestation_statistics_score
+    from a detect record.
+
+    Args:
+        record: Detect record mapping.
+
+    Returns:
+        Event-level statistics score when present and valid; otherwise None.
+    """
+    if not isinstance(record, dict):
+        raise TypeError("record must be dict")
+
+    attestation_node = record.get("attestation")
+    if not isinstance(attestation_node, dict):
+        return None
+    final_decision = attestation_node.get("final_event_attested_decision")
+    if not isinstance(final_decision, dict):
+        return None
+
+    score_name = final_decision.get("event_attestation_statistics_score_name")
+    if (
+        isinstance(score_name, str)
+        and score_name
+        and score_name != EVENT_ATTESTATION_STATISTICS_SCORE_NAME
+    ):
+        return None
+
+    score_value = final_decision.get("event_attestation_statistics_score")
+    if isinstance(score_value, bool) or not isinstance(score_value, (int, float)):
+        return None
+    score_float = float(score_value)
+    if not math.isfinite(score_float):
+        return None
+    return score_float
+
+
 def _mark_clone_fallback_attestation_unavailable(record: dict[str, Any]) -> None:
     """
     功能：将 clone fallback 负样本的 attestation 结果降级为 unavailable。 
@@ -1436,6 +1477,11 @@ def _mark_clone_fallback_attestation_unavailable(record: dict[str, Any]) -> None
     final_decision["event_attestation_score"] = None
     final_decision["event_attestation_score_name"] = EVENT_ATTESTATION_SCORE_NAME
     final_decision["event_attestation_score_semantics"] = (
+        "unavailable_in_clone_fallback_not_a_formal_negative_attestation_sample"
+    )
+    final_decision["event_attestation_statistics_score"] = None
+    final_decision["event_attestation_statistics_score_name"] = EVENT_ATTESTATION_STATISTICS_SCORE_NAME
+    final_decision["event_attestation_statistics_score_semantics"] = (
         "unavailable_in_clone_fallback_not_a_formal_negative_attestation_sample"
     )
     final_decision["attestation_unavailable_reason"] = "attestation_unavailable_in_clone_fallback"
@@ -1863,7 +1909,11 @@ def _prepare_parallel_attestation_detect_records_from_matrix(
     if not isinstance(score_name, str) or not score_name:
         raise TypeError("score_name must be non-empty str")
 
-    if score_name not in {CONTENT_ATTESTATION_SCORE_NAME, EVENT_ATTESTATION_SCORE_NAME}:
+    if score_name not in {
+        CONTENT_ATTESTATION_SCORE_NAME,
+        EVENT_ATTESTATION_SCORE_NAME,
+        EVENT_ATTESTATION_STATISTICS_SCORE_NAME,
+    }:
         return None
 
     def _load_json_record(path: Path) -> Dict[str, Any] | None:
@@ -1892,6 +1942,9 @@ def _prepare_parallel_attestation_detect_records_from_matrix(
     if score_name == EVENT_ATTESTATION_SCORE_NAME:
         if _extract_event_attestation_score_from_detect_record(branch_negative_payload) is None:
             return None
+    if score_name == EVENT_ATTESTATION_STATISTICS_SCORE_NAME:
+        if _extract_event_attestation_statistics_score_from_detect_record(branch_negative_payload) is None:
+            return None
 
     workflow_cfg_dir = output_run_root / "artifacts" / "workflow_cfg"
     workflow_cfg_dir.mkdir(parents=True, exist_ok=True)
@@ -1906,6 +1959,9 @@ def _prepare_parallel_attestation_detect_records_from_matrix(
                 continue
         if score_name == EVENT_ATTESTATION_SCORE_NAME:
             if _extract_event_attestation_score_from_detect_record(base_payload) is None:
+                continue
+        if score_name == EVENT_ATTESTATION_STATISTICS_SCORE_NAME:
+            if _extract_event_attestation_statistics_score_from_detect_record(base_payload) is None:
                 continue
 
         positive_payload = copy.deepcopy(base_payload)
@@ -2315,7 +2371,11 @@ def _prepare_stage_cfg_path(
                 run_root,
                 profile,
                 preserve_attestation=(
-                    resolved_score_name in {CONTENT_ATTESTATION_SCORE_NAME, EVENT_ATTESTATION_SCORE_NAME}
+                    resolved_score_name in {
+                        CONTENT_ATTESTATION_SCORE_NAME,
+                        EVENT_ATTESTATION_SCORE_NAME,
+                        EVENT_ATTESTATION_STATISTICS_SCORE_NAME,
+                    }
                     or bool(parallel_attestation_cfg.get("enabled", False))
                 ),
             )
@@ -2635,6 +2695,8 @@ def _prepare_detect_records_with_minimal_ground_truth(
                             _ = _extract_content_attestation_score_from_detect_record(neg_payload_per_pair)
                         elif score_name == EVENT_ATTESTATION_SCORE_NAME:
                             _ = _extract_event_attestation_score_from_detect_record(neg_payload_per_pair)
+                        elif score_name == EVENT_ATTESTATION_STATISTICS_SCORE_NAME:
+                            _ = _extract_event_attestation_statistics_score_from_detect_record(neg_payload_per_pair)
                         else:
                             raise ValueError(f"unsupported score_name: {score_name}")
 
@@ -2749,7 +2811,11 @@ def _prepare_detect_records_with_minimal_ground_truth(
                         negative_content["calibration_sample_origin"] = "synthetic_negative_bundle_from_failed_source"
                     else:
                         negative_content["calibration_sample_origin"] = "synthetic_negative_bundle"
-            elif score_name in {CONTENT_ATTESTATION_SCORE_NAME, EVENT_ATTESTATION_SCORE_NAME}:
+            elif score_name in {
+                CONTENT_ATTESTATION_SCORE_NAME,
+                EVENT_ATTESTATION_SCORE_NAME,
+                EVENT_ATTESTATION_STATISTICS_SCORE_NAME,
+            }:
                 # attestation 统计链中的 clone fallback 不能继承 source formal verdict。
                 # 这里显式标记为 unavailable，使该样本按正式规则被 rejection。
                 _mark_clone_fallback_attestation_unavailable(negative_payload)
@@ -2861,6 +2927,25 @@ def _prepare_detect_record_for_scoring(
                 f"'is_event_attested': {final_decision.get('is_event_attested')!r}, "
                 f"'event_attestation_score': {final_decision.get('event_attestation_score')!r}, "
                 f"'event_attestation_score_name': {final_decision.get('event_attestation_score_name')!r}}}"
+            )
+        return source_detect_path
+    if score_name == EVENT_ATTESTATION_STATISTICS_SCORE_NAME:
+        attestation_score = _extract_event_attestation_statistics_score_from_detect_record(payload)
+        if attestation_score is not None:
+            return source_detect_path
+        if profile == PROFILE_PAPER_FULL_CUDA:
+            attestation_node = payload.get("attestation") if isinstance(payload.get("attestation"), dict) else {}
+            final_decision = (
+                attestation_node.get("final_event_attested_decision")
+                if isinstance(attestation_node.get("final_event_attested_decision"), dict)
+                else {}
+            )
+            raise ValueError(
+                "[paper_full_cuda] attestation 正式统计链缺少可用 event_attestation_statistics_score，"
+                f"diagnostics={{'final_event_status': {final_decision.get('status')!r}, "
+                f"'authenticity_status': {final_decision.get('authenticity_status')!r}, "
+                f"'event_attestation_statistics_score': {final_decision.get('event_attestation_statistics_score')!r}, "
+                f"'event_attestation_statistics_score_name': {final_decision.get('event_attestation_statistics_score_name')!r}}}"
             )
         return source_detect_path
     if score_name != "content_score":

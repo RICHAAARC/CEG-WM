@@ -231,6 +231,60 @@ def test_evaluate_event_attestation_threshold_accepts_statement_only_negative_ze
     assert breakdown["confusion"] == {"tp": 1, "fp": 0, "fn": 0, "tn": 1}
 
 
+def test_evaluate_event_attestation_statistics_threshold_uses_authentic_pre_verdict_score() -> None:
+    """Validate readonly evaluate uses authentic event statistics before final attested verdict."""
+    records = [
+        {
+            "attestation": {
+                "final_event_attested_decision": {
+                    "status": "unattested",
+                    "is_event_attested": False,
+                    "authenticity_status": "authentic",
+                    "event_attestation_score": 0.0,
+                    "event_attestation_score_name": "event_attestation_score",
+                    "event_attestation_statistics_score": 0.8,
+                    "event_attestation_statistics_score_name": "event_attestation_statistics_score",
+                }
+            },
+            "label": True,
+        },
+        {
+            "attestation": {
+                "image_evidence_result": {
+                    "status": "ok",
+                    "content_attestation_score": 0.76,
+                    "content_attestation_score_name": "content_attestation_score",
+                },
+                "final_event_attested_decision": {
+                    "status": "unattested",
+                    "is_event_attested": False,
+                    "authenticity_status": "statement_only",
+                    "event_attestation_score": 0.0,
+                    "event_attestation_score_name": "event_attestation_score",
+                    "event_attestation_statistics_score": 0.0,
+                    "event_attestation_statistics_score_name": "event_attestation_statistics_score",
+                }
+            },
+            "content_evidence_payload": {"status": "ok", "detect_hf_score": 0.95},
+            "label": False,
+        },
+    ]
+    thresholds_obj = {
+        "threshold_id": "event_attestation_statistics_score_np_fpr_0_01",
+        "score_name": "event_attestation_statistics_score",
+        "target_fpr": 0.01,
+        "threshold_value": 0.5,
+        "threshold_key_used": "fpr_0_01",
+    }
+
+    metrics, breakdown, _ = evaluate_records_against_threshold(records, thresholds_obj)
+
+    assert metrics["score_name"] == "event_attestation_statistics_score"
+    assert metrics["tpr_at_fpr"] == pytest.approx(1.0)
+    assert metrics["fpr_empirical"] == pytest.approx(0.0)
+    assert breakdown["confusion"] == {"tp": 1, "fp": 0, "fn": 0, "tn": 1}
+
+
 class _ExtractorRaiser:
     def extract(self, cfg):
         _ = cfg
