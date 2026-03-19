@@ -222,3 +222,7 @@ def test_geometry_absent_or_fail_does_not_change_content_score() -> None:
     assert fail_fusion.evidence_summary.get("content_score") == 0.37
     assert absent_fusion.decision_status == "decided"
     assert fail_fusion.decision_status == "decided"
+    assert absent_record["execution_report"]["geometry_chain_status"] == "absent"
+    assert fail_record["execution_report"]["geometry_chain_status"] == "failed"
+    assert absent_record["execution_report"]["fusion_status"] == "ok"
+    assert fail_record["execution_report"]["fusion_status"] == "ok"

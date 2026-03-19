@@ -1581,7 +1581,7 @@ def _normalize_execution_chain_status(raw_status: Any) -> str:
         return "failed"
     if normalized in {"absent", "none", "disabled", "not_applicable"}:
         return "absent"
-    if normalized in {"ok", "synced", "accepted", "rejected", "abstain"}:
+    if normalized in {"ok", "synced", "accepted", "rejected", "abstain", "decided"}:
         return "ok"
     return "failed"
 
