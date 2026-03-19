@@ -43,6 +43,35 @@ class _ContentExtractorSidecarDisabledStub:
         }
 
 
+class _ContentExtractorRawLfOkStub:
+    """功能：构造 raw LF 成功但 exact LF 仍需单独观测的 content payload。"""
+
+    def extract(
+        self,
+        cfg: Dict[str, Any],
+        cfg_digest: Optional[str] = None,
+        inputs: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        _ = cfg
+        _ = cfg_digest
+        _ = inputs
+        return {
+            "status": "ok",
+            "score": 0.91,
+            "score_parts": {
+                "content_score": 0.91,
+                "lf_score": 0.63,
+                "hf_score": 0.28,
+            },
+            "lf_score": 0.63,
+            "hf_score": 0.28,
+            "lf_evidence_summary": {
+                "lf_status": "ok",
+            },
+            "content_failure_reason": None,
+        }
+
+
 class _FusionRuleStub:
     """功能：提供最小融合规则桩，避免测试落入无关逻辑。"""
 
@@ -392,10 +421,80 @@ def test_detect_runtime_mode_real_for_hf_only_when_sidecar_disabled(monkeypatch:
     )
 
     assert record.get("detect_runtime_mode") == "real"
+    assert record.get("detect_runtime_mode_canonical") == "real"
     assert record.get("detect_runtime_is_fallback") is False
     content_payload = record.get("content_evidence_payload")
     assert isinstance(content_payload, dict)
     assert content_payload.get("detect_hf_score") == 0.97
+
+
+def test_detect_lf_observability_fields_written_when_exact_lf_absent(monkeypatch: Any) -> None:
+    """
+    功能：验证 raw LF 成功时，exact LF 缺失原因仍会以独立字段写入 detect record。
+
+    Verify exact LF absent semantics are written to detect records without
+    changing the successful raw LF path.
+    """
+    cache = LatentTrajectoryCache()
+    cache.capture(0, [[[[1.0, 2.0, 3.0, 4.0]]]])
+
+    monkeypatch.setattr(
+        detect_orchestrator.detector_scoring,
+        "extract_lf_score_from_detect_trajectory",
+        lambda *args, **kwargs: (None, "trajectory_latent_absent: absent_empty_cache"),
+    )
+    monkeypatch.setattr(
+        detect_orchestrator.detector_scoring,
+        "extract_hf_score_from_detect_trajectory",
+        lambda *args, **kwargs: (None, "no_trajectory_cache"),
+    )
+
+    cfg: Dict[str, Any] = {
+        "paper_faithfulness": {"enabled": True},
+        "watermark": {
+            "subspace": {"enabled": True},
+            "hf": {"enabled": True},
+            "lf": {"enabled": True},
+        },
+        "detect": {
+            "content": {"enabled": True},
+            "geometry": {"enabled": False},
+        },
+        "__detect_trajectory_latent_cache__": cache,
+        "__pipeline_runtime_meta__": {"status": "built", "synthetic_pipeline": False},
+    }
+
+    input_record = {
+        "plan_digest": "a" * 64,
+        "basis_digest": "b" * 64,
+        "subspace_planner_impl_identity": _PlannerStub.impl_identity,
+    }
+    impl_set = BuiltImplSet(
+        content_extractor=_ContentExtractorRawLfOkStub(),
+        geometry_extractor=_GeometryExtractorStub(),
+        fusion_rule=_FusionRuleStub(),
+        subspace_planner=_PlannerStub(),
+        sync_module=_SyncStub(),
+    )
+
+    record = detect_orchestrator.run_detect_orchestrator(
+        cfg,
+        impl_set,
+        input_record=input_record,
+        cfg_digest="c" * 64,
+    )
+
+    assert record.get("detect_runtime_mode") == "fallback_identity_v0"
+    assert record.get("detect_runtime_mode_canonical") == "fallback_identity"
+
+    content_payload = record.get("content_evidence_payload")
+    assert isinstance(content_payload, dict)
+    assert content_payload.get("lf_score") == 0.63
+    assert content_payload.get("score") == 0.91
+    assert content_payload.get("detect_lf_score") is None
+    assert content_payload.get("detect_lf_status") == "trajectory_latent_absent: absent_empty_cache"
+    assert content_payload.get("detect_lf_absent_reason") == "trajectory_latent_absent: absent_empty_cache"
+    assert content_payload.get("detect_lf_failure_reason") is None
 
 
 def test_resolve_sidecar_disabled_reason_distinguishes_formal_and_ablation() -> None:

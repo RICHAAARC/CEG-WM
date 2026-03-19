@@ -9,7 +9,7 @@
 # 合同版本与冻结元信息
 # - 用于记录与审计，不应作为运行期分支逻辑的自由输入。
 # ------------------------------
-contract_version: "v1.8"     # 冻结契约版本号；v1.1→v1.2 formal path 最终闭包收口（2026-03-12）：historical_field_paths 段已从当前 formal contract 文件彻底移除，旧字段信息不再显式保留在任何 formal 文件中；当前 formal contract 只绑定当前正式机制。v1.2→v1.3 从可选字段列表中移除 embed_trace.identity_mode 与 embed_trace.identity_reason（2026-03-12）：生产嵌入实现不再承载 identity baseline。v1.3→v1.4 追加 attestation signed bundle 验签门禁语义（2026-03-13）：onefile/detect 溯源结果若声明 signed bundle，则必须执行内部 trust chain 验证。v1.4→v1.5：追加 geometry coarse registration 与 recovered-domain sync revalidation 细分字段冻结登记。v1.5→v1.6：为 policy_path semantics 新增 geometry_chain_required_but_unavailable fail_reason 的 append-only 冻结登记（2026-03-13）。v1.6→v1.7：追加 negative branch attestation provenance 的 append-only 冻结注册（2026-03-16）。v1.7→v1.8：追加 attestation_source 字段与 statement-only provenance no-bundle 合同说明（2026-03-17）。
+contract_version: "v1.9"     # 冻结契约版本号；v1.1→v1.2 formal path 最终闭包收口（2026-03-12）：historical_field_paths 段已从当前 formal contract 文件彻底移除，旧字段信息不再显式保留在任何 formal 文件中；当前 formal contract 只绑定当前正式机制。v1.2→v1.3 从可选字段列表中移除 embed_trace.identity_mode 与 embed_trace.identity_reason（2026-03-12）：生产嵌入实现不再承载 identity baseline。v1.3→v1.4 追加 attestation signed bundle 验签门禁语义（2026-03-13）：onefile/detect 溯源结果若声明 signed bundle，则必须执行内部 trust chain 验证。v1.4→v1.5：追加 geometry coarse registration 与 recovered-domain sync revalidation 细分字段冻结登记。v1.5→v1.6：为 policy_path semantics 新增 geometry_chain_required_but_unavailable fail_reason 的 append-only 冻结登记（2026-03-13）。v1.6→v1.7：追加 negative branch attestation provenance 的 append-only 冻结注册（2026-03-16）。v1.7→v1.8：追加 attestation_source 字段与 statement-only provenance no-bundle 合同说明（2026-03-17）。v1.8→v1.9：追加 exact LF observability 字段与 detect runtime canonical 兼容命名字段（2026-03-19）。
 frozen_date: "2026-02-04"    # 冻结日期元信息；当前主链路不参与门禁计算，主要用于审计追溯。
 
 # ------------------------------
@@ -557,6 +557,9 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
 
     # 检测阶段一致性/漂移审计字段
     - content_evidence.detect_lf_score           # 检测阶段 LF 得分。
+    - content_evidence.detect_lf_status          # 检测阶段 exact LF helper 状态。
+    - content_evidence.detect_lf_failure_reason  # 检测阶段 exact LF helper 失败原因。
+    - content_evidence.detect_lf_absent_reason   # 检测阶段 exact LF helper 缺失原因。
     - content_evidence.detect_hf_score           # 检测阶段 HF 得分。
     - content_evidence.lf_score_drift_status     # LF 得分漂移状态。
     - content_evidence.hf_score_drift_status     # HF 得分漂移状态。
@@ -623,6 +626,7 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
     - decision.rescue_band_version          # 救援带版本。
     - detect_runtime_is_fallback            # detect 运行时是否回退。
     - detect_runtime_mode                   # detect 运行模式。
+    - detect_runtime_mode_canonical         # detect 运行模式 canonical 兼容字段。
     - detect_runtime_status                 # detect 运行状态。
     - embed_trace                           # embed 执行轨迹。
     - evaluation_is_fallback                # evaluation 是否回退。

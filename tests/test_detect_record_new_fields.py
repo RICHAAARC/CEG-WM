@@ -27,6 +27,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from main.core import digests
 from main.watermarking.content_chain.low_freq_coder import LowFreqTemplateCodec, LOW_FREQ_TEMPLATE_CODEC_ID, LOW_FREQ_TEMPLATE_CODEC_VERSION
+from main.watermarking.detect import orchestrator as detect_orchestrator
 
 
 # ---------------------------------------------------------------------------
@@ -405,6 +406,55 @@ def test_detect_hf_score_absent_reason_not_written_when_hf_basis_present() -> No
     )
 
 
+def test_detect_lf_observability_fields_classify_absent_and_failure() -> None:
+    """
+    功能：验证 detect LF 可观测字段沿用 helper 状态并正确区分 absent/failure。
+
+    Validate detect LF observability fields preserve helper status and classify
+    absent versus failure without changing LF semantics.
+    """
+    absent_fields = detect_orchestrator._build_detect_lf_observability_fields(  # pyright: ignore[reportPrivateUsage]
+        "trajectory_latent_absent: absent_empty_cache"
+    )
+    assert absent_fields == {
+        "detect_lf_status": "trajectory_latent_absent: absent_empty_cache",
+        "detect_lf_absent_reason": "trajectory_latent_absent: absent_empty_cache",
+    }
+
+    failure_fields = detect_orchestrator._build_detect_lf_observability_fields(  # pyright: ignore[reportPrivateUsage]
+        "lf_trajectory_score_failed: RuntimeError"
+    )
+    assert failure_fields == {
+        "detect_lf_status": "lf_trajectory_score_failed: RuntimeError",
+        "detect_lf_failure_reason": "lf_trajectory_score_failed: RuntimeError",
+    }
+
+    ok_fields = detect_orchestrator._build_detect_lf_observability_fields(  # pyright: ignore[reportPrivateUsage]
+        "ok_trajectory_ok_exact"
+    )
+    assert ok_fields == {
+        "detect_lf_status": "ok_trajectory_ok_exact",
+    }
+
+
+def test_detect_runtime_mode_canonical_preserves_legacy_mode() -> None:
+    """
+    功能：验证 detect runtime canonical 字段只做兼容清理，不改旧字段原值。
+
+    Validate detect runtime canonical mode normalizes legacy fallback naming
+    while preserving the persisted legacy field value.
+    """
+    assert detect_orchestrator._canonicalize_detect_runtime_mode(  # pyright: ignore[reportPrivateUsage]
+        "fallback_identity_v0"
+    ) == "fallback_identity"
+    assert detect_orchestrator._canonicalize_detect_runtime_mode(  # pyright: ignore[reportPrivateUsage]
+        "real"
+    ) == "real"
+    assert detect_orchestrator._canonicalize_detect_runtime_mode(  # pyright: ignore[reportPrivateUsage]
+        None
+    ) is None
+
+
 # ---------------------------------------------------------------------------
 # (5) schema 新字段登记完整性测试
 # ---------------------------------------------------------------------------
@@ -486,6 +536,36 @@ def test_event_attestation_score_paths_registered() -> None:
         "attestation.final_event_attested_decision.event_attestation_score",
         "attestation.final_event_attested_decision.event_attestation_score_name",
         "attestation.final_event_attested_decision.event_attestation_score_semantics",
+    }
+
+    assert required_paths <= schema_fields
+    assert required_paths <= registry_fields
+
+
+def test_detect_lf_observability_and_runtime_canonical_paths_registered() -> None:
+    """
+    功能：验证 exact LF observability 与 runtime canonical 字段已完成 append-only 注册。
+
+    Validate exact LF observability fields and the runtime canonical field are
+    append-only registered in schema and frozen contracts.
+    """
+    schema_path = _REPO_ROOT / "configs" / "records_schema_extensions.yaml"
+    contracts_path = _REPO_ROOT / "configs" / "frozen_contracts.yaml"
+
+    schema_obj = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+    contracts_obj = yaml.safe_load(contracts_path.read_text(encoding="utf-8"))
+
+    schema_fields = {
+        entry.get("path") for entry in schema_obj.get("fields", [])
+        if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+    }
+    registry_fields = set(contracts_obj.get("records_schema", {}).get("field_paths_registry", []))
+
+    required_paths = {
+        "content_evidence.detect_lf_status",
+        "content_evidence.detect_lf_failure_reason",
+        "content_evidence.detect_lf_absent_reason",
+        "detect_runtime_mode_canonical",
     }
 
     assert required_paths <= schema_fields

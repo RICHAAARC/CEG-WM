@@ -702,6 +702,88 @@ def _merge_hf_attestation_trace(
     }
 
 
+def _build_detect_lf_observability_fields(detect_lf_status: Any) -> Dict[str, Any]:
+    """
+    功能：根据 exact LF helper 状态构造 detect LF 可观测字段。
+
+    Build append-only detect LF observability fields from the existing helper
+    status string without changing LF scoring semantics.
+
+    Args:
+        detect_lf_status: Raw status value returned by the exact LF helper.
+
+    Returns:
+        Mapping containing detect_lf_status and, when applicable, exactly one of
+        detect_lf_failure_reason or detect_lf_absent_reason.
+    """
+    if not isinstance(detect_lf_status, str):
+        return {}
+
+    normalized_status = detect_lf_status.strip()
+    if not normalized_status:
+        return {}
+
+    observability_fields: Dict[str, Any] = {
+        "detect_lf_status": normalized_status,
+    }
+    lower_status = normalized_status.lower()
+
+    if normalized_status == "ok" or normalized_status.startswith("ok_") or "drift_detected" in lower_status:
+        return observability_fields
+
+    failure_prefixes = (
+        "cfg_invalid_type",
+        "tfs_spec_missing_or_invalid",
+        "projection_matrix_missing",
+        "phi_dim_mismatch_",
+        "lf_trajectory_score_failed:",
+    )
+    if any(lower_status.startswith(prefix) for prefix in failure_prefixes):
+        observability_fields["detect_lf_failure_reason"] = normalized_status
+        return observability_fields
+
+    absent_statuses = {
+        "no_trajectory_cache",
+        "lf_basis_missing",
+        "lf_plan_digest_missing_cannot_derive_codeword",
+    }
+    if (
+        normalized_status in absent_statuses
+        or normalized_status.startswith("trajectory_latent_absent:")
+        or lower_status.startswith("absent_")
+        or "absent" in lower_status
+    ):
+        observability_fields["detect_lf_absent_reason"] = normalized_status
+        return observability_fields
+
+    observability_fields["detect_lf_failure_reason"] = normalized_status
+    return observability_fields
+
+
+def _canonicalize_detect_runtime_mode(detect_runtime_mode: Any) -> Optional[str]:
+    """
+    功能：输出 detect_runtime_mode 的兼容 canonical 语义名。
+
+    Derive a compatibility-safe canonical runtime mode name without changing the
+    legacy persisted detect_runtime_mode value.
+
+    Args:
+        detect_runtime_mode: Legacy runtime mode value.
+
+    Returns:
+        Canonical runtime mode string, or None when input is unavailable.
+    """
+    if not isinstance(detect_runtime_mode, str):
+        return None
+
+    normalized_mode = detect_runtime_mode.strip()
+    if not normalized_mode:
+        return None
+    if normalized_mode == "fallback_identity_v0":
+        return "fallback_identity"
+    return normalized_mode
+
+
 def run_detect_orchestrator(
     cfg: Dict[str, Any],
     impl_set: BuiltImplSet,
@@ -1264,6 +1346,7 @@ def run_detect_orchestrator(
         # 追加 detect 侧分数与一致性状态到 content_evidence
         content_evidence_payload["detect_lf_score"] = detect_lf_score
         content_evidence_payload["detect_hf_score"] = detect_hf_score
+        content_evidence_payload.update(_build_detect_lf_observability_fields(detect_lf_status))
         # hf_basis is None（detect plan 未提供 HF basis）时，显式写入 HF 缺失原因。
         if hf_basis is None:
             content_evidence_payload["detect_hf_score_absent_reason"] = "hf_basis_absent_in_detect_plan"
@@ -1404,6 +1487,7 @@ def run_detect_orchestrator(
     record: Dict[str, Any] = {
         "operation": "detect",
         "detect_runtime_mode": detect_runtime_mode,
+        "detect_runtime_mode_canonical": _canonicalize_detect_runtime_mode(detect_runtime_mode),
         "detect_runtime_status": "active" if detect_runtime_mode == "real" else "fallback",
         "detect_runtime_is_fallback": (detect_runtime_mode != "real"),
         "image_path": "<absent>",
