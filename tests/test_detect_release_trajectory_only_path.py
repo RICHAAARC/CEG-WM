@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import inspect
 import numpy as np
+import pytest
 
 from main.diffusion.sd3.trajectory_tap import LatentTrajectoryCache
 from main.watermarking.content_chain import detector_scoring
+from main.watermarking.content_chain.subspace import trajectory_feature_space
 from main.watermarking.content_chain.subspace.subspace_planner_impl import (
     SubspacePlannerImpl,
     build_runtime_jvp_operator_from_cache,
@@ -96,6 +98,72 @@ def test_extract_hf_trajectory_has_no_strict_mode_param() -> None:
     assert "strict_mode" not in sig.parameters, (
         f"strict_mode still present in HF trajectory signature: {list(sig.parameters)}"
     )
+
+
+def test_extract_lf_trajectory_uses_formal_template_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    exact LF helper must derive its template bundle through channel_lf.derive_lf_template_bundle.
+    """
+    cache = _make_cache_with_step(step_index=5)
+    captured: dict[str, object] = {}
+
+    def _fake_extract_trajectory_feature_np(_latent: np.ndarray, _tfs: dict[str, object]) -> np.ndarray:
+        return np.asarray([2.0, -1.0], dtype=np.float64)
+
+    def _fake_derive_lf_template_bundle(runtime_cfg: dict[str, object], n: int) -> dict[str, object]:
+        captured["runtime_cfg"] = runtime_cfg
+        captured["n"] = n
+        return {
+            "codeword_bipolar": np.asarray([1.0, -1.0], dtype=np.float32),
+        }
+
+    monkeypatch.setattr(
+        trajectory_feature_space,
+        "extract_trajectory_feature_np",
+        _fake_extract_trajectory_feature_np,
+    )
+    monkeypatch.setattr(
+        detector_scoring.channel_lf,
+        "derive_lf_template_bundle",
+        _fake_derive_lf_template_bundle,
+    )
+
+    lf_basis = {
+        "trajectory_feature_spec": {
+            "feature_operator": "masked_normalized_random_projection",
+            "edit_timestep": 5,
+        },
+        "projection_matrix": np.eye(2, dtype=np.float32),
+        "basis_rank": 2,
+        "basis_digest": "b" * 64,
+    }
+    cfg = {
+        "watermark": {
+            "lf": {
+                "enabled": True,
+                "correlation_scale": 1.0,
+            }
+        }
+    }
+
+    detect_lf_score, detect_lf_status = detector_scoring.extract_lf_score_from_detect_trajectory(
+        trajectory_cache=cache,
+        lf_basis=lf_basis,
+        embed_lf_score=None,
+        cfg=cfg,
+        plan_digest="a" * 64,
+    )
+
+    assert detect_lf_score is not None
+    assert detect_lf_status == "ok_trajectory_ok_exact"
+    assert captured["n"] == 2
+    runtime_cfg = captured["runtime_cfg"]
+    assert isinstance(runtime_cfg, dict)
+    assert runtime_cfg.get("lf_basis_digest") == "b" * 64
+    watermark_cfg = runtime_cfg.get("watermark")
+    assert isinstance(watermark_cfg, dict)
+    assert watermark_cfg.get("plan_digest") == "a" * 64
+    assert watermark_cfg.get("basis_digest") == "b" * 64
 
 
 # ---------------------------------------------------------------------------

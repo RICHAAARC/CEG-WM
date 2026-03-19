@@ -308,6 +308,68 @@ def resolve_detect_trajectory_latent_for_timestep(
     return None, f"absent_exact_timestep_mismatch_edit_{edit_timestep}_available_{sorted(available)}"
 
 
+def _resolve_detect_lf_basis_digest(lf_basis: Dict[str, Any]) -> Optional[str]:
+    """
+    功能：按正式 LF 主链口径解析 detect 侧 basis_digest。
+
+    Resolve detect-side LF basis digest using the same rules as the formal LF
+    detect path.
+
+    Args:
+        lf_basis: LF basis mapping.
+
+    Returns:
+        Canonical basis digest when available; otherwise None.
+    """
+    if not isinstance(lf_basis, dict):
+        return None
+
+    basis_digest = lf_basis.get("basis_digest")
+    if isinstance(basis_digest, str) and basis_digest:
+        return basis_digest
+
+    basis_matrix_raw = lf_basis.get("projection_matrix")
+    if basis_matrix_raw is None:
+        return None
+
+    basis_matrix_np = np.asarray(basis_matrix_raw, dtype=np.float64)
+    basis_rank = int(lf_basis.get("basis_rank", basis_matrix_np.shape[1]))
+    return digests.canonical_sha256(
+        {
+            "basis_rank": basis_rank,
+            "projection_matrix": basis_matrix_np.tolist(),
+        }
+    )
+
+
+def _build_detect_lf_runtime_cfg(
+    cfg: Dict[str, Any],
+    plan_digest: str,
+    basis_digest: Optional[str],
+) -> Dict[str, Any]:
+    """
+    功能：为 exact LF helper 构造与正式 LF 主链一致的运行时配置。
+
+    Build detect-side LF runtime config aligned with the formal LF main path.
+
+    Args:
+        cfg: Base runtime configuration mapping.
+        plan_digest: Canonical plan digest.
+        basis_digest: Optional LF basis digest.
+
+    Returns:
+        Runtime configuration mapping enriched with LF plan/basis anchors.
+    """
+    runtime_cfg = dict(cfg)
+    watermark_cfg = dict(cfg.get("watermark", {})) if isinstance(cfg.get("watermark"), dict) else {}
+    watermark_cfg["plan_digest"] = plan_digest
+    if isinstance(basis_digest, str) and basis_digest:
+        runtime_cfg["lf_basis_digest"] = basis_digest
+        watermark_cfg["basis_digest"] = basis_digest
+    runtime_cfg["watermark"] = watermark_cfg
+    return runtime_cfg
+
+
 def extract_lf_score_from_detect_trajectory(
     trajectory_cache: Optional[Any],
     lf_basis: Optional[Dict[str, Any]],
@@ -364,23 +426,17 @@ def extract_lf_score_from_detect_trajectory(
         if phi.shape[0] != proj_np.shape[0]:
             return None, f"phi_dim_mismatch_{phi.shape[0]}_vs_{proj_np.shape[0]}"
         lf_coeffs = np.dot(phi.astype(np.float32), proj_np)
+        basis_rank = int(lf_basis.get("basis_rank", proj_np.shape[1]))
+        basis_rank = max(1, min(basis_rank, int(lf_coeffs.shape[0])))
 
         # 正式路径：LDPC 码字相关验证（与 LowFreqTemplateCodec.detect_score() 相同路径）。
         if isinstance(plan_digest, str) and plan_digest:
-            from main.watermarking.content_chain.low_freq_coder import LowFreqTemplateCodec as _lf_codec_cls
-            from main.watermarking.content_chain.low_freq_coder import (
-                LOW_FREQ_TEMPLATE_CODEC_ID as _lf_id,
-                LOW_FREQ_TEMPLATE_CODEC_VERSION as _lf_ver,
-            )
-            from main.core import digests as _digs
-            _codec = _lf_codec_cls(_lf_id, _lf_ver, _digs.canonical_sha256({"impl_id": _lf_id, "impl_version": _lf_ver}))
             lf_cfg = cfg.get("watermark", {}).get("lf", {})
-            message_length = int(lf_cfg.get("message_length", 64))
-            ecc_sparsity = int(lf_cfg.get("ecc_sparsity", 3))
             correlation_scale = float(lf_cfg.get("correlation_scale", 10.0))
-            code_bits, _ = _codec._derive_template(plan_digest, message_length, ecc_sparsity)
-            basis_rank = int(lf_coeffs.shape[0])
-            codeword = np.array(code_bits[:basis_rank], dtype=np.float64)
+            basis_digest = _resolve_detect_lf_basis_digest(lf_basis)
+            runtime_cfg = _build_detect_lf_runtime_cfg(cfg, plan_digest, basis_digest)
+            template_bundle = channel_lf.derive_lf_template_bundle(runtime_cfg, basis_rank)
+            codeword = np.asarray(template_bundle["codeword_bipolar"][:basis_rank], dtype=np.float64)
             c = lf_coeffs[:basis_rank].astype(np.float64)
             eps = 1e-8
             c_mean = float(np.mean(c))
