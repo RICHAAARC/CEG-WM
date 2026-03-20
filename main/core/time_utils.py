@@ -11,7 +11,7 @@ import random
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterator, Optional
+from typing import Any, Dict, Iterator, Optional, cast
 
 from main.core import digests
 
@@ -58,18 +58,20 @@ def stable_seed_from_parts(seed_parts: Dict[str, Any]) -> int:
         TypeError: If seed_parts is invalid.
         ValueError: If keys are missing or extra.
     """
-    if not isinstance(seed_parts, dict):
+    seed_parts_value: Any = seed_parts
+    if not isinstance(seed_parts_value, dict):
         # seed_parts 类型不符合预期，必须 fail-fast。
         raise TypeError("seed_parts must be dict")
+    seed_parts_dict = cast(Dict[str, Any], seed_parts_value)
 
-    keys = set(seed_parts.keys())
+    keys = set(seed_parts_dict.keys())
     if keys != _REQUIRED_SEED_KEYS:
         raise ValueError(
             "seed_parts keys mismatch: "
             f"expected={sorted(_REQUIRED_SEED_KEYS)}, actual={sorted(keys)}"
         )
 
-    digest_value = digests.canonical_sha256(seed_parts)
+    digest_value = digests.canonical_sha256(seed_parts_dict)
     seed_value = int(digest_value[:16], 16)
     return seed_value
 
@@ -116,21 +118,24 @@ def rng_context(seed_parts: Dict[str, Any], *, torch_device: Optional[str] = Non
         TypeError: If inputs are invalid.
         ValueError: If seed derivation fails.
     """
-    if not isinstance(seed_parts, dict):
+    seed_parts_value: Any = seed_parts
+    if not isinstance(seed_parts_value, dict):
         # seed_parts 类型不符合预期，必须 fail-fast。
         raise TypeError("seed_parts must be dict")
-    if torch_device is not None and not isinstance(torch_device, str):
+    seed_parts_dict = cast(Dict[str, Any], seed_parts_value)
+    torch_device_value: Any = torch_device
+    if torch_device_value is not None and not isinstance(torch_device_value, str):
         # torch_device 类型不符合预期，必须 fail-fast。
         raise TypeError("torch_device must be str or None")
 
-    seed_value = stable_seed_from_parts(seed_parts)
-    seed_digest = digests.canonical_sha256(seed_parts)
+    seed_value = stable_seed_from_parts(seed_parts_dict)
+    seed_digest = digests.canonical_sha256(seed_parts_dict)
 
     torch_generator = None
     try:
         import torch
 
-        torch_generator = torch.Generator(device=torch_device)
+        torch_generator = torch.Generator(device=torch_device_value)
         torch_generator.manual_seed(seed_value)
     except Exception:
         torch_generator = None
@@ -195,17 +200,18 @@ def validate_utc_iso_z(value: Any, field_path: str) -> None:
         TypeError: If value is not a string.
         ValueError: If value is not a valid UTC ISO timestamp or doesn't end with Z.
     """
-    if not isinstance(field_path, str) or not field_path:
+    field_path_value: Any = field_path
+    if not isinstance(field_path_value, str) or not field_path_value:
         # field_path 输入不合法，必须 fail-fast。
         raise TypeError("field_path must be non-empty str")
 
     if not isinstance(value, str):
         # 时间戳类型不符合预期，必须 fail-fast。
-        raise TypeError(f"invalid_timestamp_type: field_path={field_path}, expected=str, got={type(value).__name__}")
+        raise TypeError(f"invalid_timestamp_type: field_path={field_path_value}, expected=str, got={type(value).__name__}")
 
     if not value.endswith("Z"):
         # 时间戳必须以 Z 结尾（UTC 标记），否则 fail-fast。
-        raise ValueError(f"invalid_timestamp_format: field_path={field_path}, reason=must_end_with_Z, value={value}")
+        raise ValueError(f"invalid_timestamp_format: field_path={field_path_value}, reason=must_end_with_Z, value={value}")
 
     # 尝试解析以验证格式合法性。
     try:
@@ -214,5 +220,5 @@ def validate_utc_iso_z(value: Any, field_path: str) -> None:
     except Exception as exc:
         # 时间戳格式不合法，必须 fail-fast。
         raise ValueError(
-            f"invalid_timestamp_format: field_path={field_path}, reason=not_parseable, value={value}"
+            f"invalid_timestamp_format: field_path={field_path_value}, reason=not_parseable, value={value}"
         ) from exc

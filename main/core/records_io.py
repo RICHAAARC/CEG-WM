@@ -30,7 +30,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Iterator
+from typing import Dict, Any, Optional, List, Iterator, cast
 
 from main.core import schema
 from main.core.contracts import FrozenContracts, ContractInterpretation, get_contract_interpretation
@@ -138,45 +138,57 @@ def bound_fact_sources(
         TypeError: If inputs are invalid.
         ValueError: If layout validation fails.
     """
-    if not isinstance(contracts, FrozenContracts):
+    contracts_obj: Any = contracts
+    if not isinstance(contracts_obj, FrozenContracts):
         # contracts 类型不符合预期，必须 fail-fast。
         raise TypeError("contracts must be FrozenContracts")
-    if not isinstance(whitelist, RuntimeWhitelist):
+    whitelist_obj: Any = whitelist
+    if not isinstance(whitelist_obj, RuntimeWhitelist):
         # whitelist 类型不符合预期，必须 fail-fast。
         raise TypeError("whitelist must be RuntimeWhitelist")
-    if not isinstance(semantics, PolicyPathSemantics):
+    semantics_obj: Any = semantics
+    if not isinstance(semantics_obj, PolicyPathSemantics):
         # semantics 类型不符合预期，必须 fail-fast。
         raise TypeError("semantics must be PolicyPathSemantics")
-    if not isinstance(injection_scope_manifest, InjectionScopeManifest):
+    injection_scope_manifest_obj: Any = injection_scope_manifest
+    if not isinstance(injection_scope_manifest_obj, InjectionScopeManifest):
         # injection_scope_manifest 类型不符合预期，必须 fail-fast。
         raise TypeError("injection_scope_manifest must be InjectionScopeManifest")
-    if not isinstance(run_root, Path):
+    run_root_obj: Any = run_root
+    if not isinstance(run_root_obj, Path):
         # run_root 类型不符合预期，必须 fail-fast。
         raise TypeError("run_root must be Path")
-    if not isinstance(records_dir, Path):
+    records_dir_obj: Any = records_dir
+    if not isinstance(records_dir_obj, Path):
         # records_dir 类型不符合预期，必须 fail-fast。
         raise TypeError("records_dir must be Path")
-    if not isinstance(artifacts_dir, Path):
+    artifacts_dir_obj: Any = artifacts_dir
+    if not isinstance(artifacts_dir_obj, Path):
         # artifacts_dir 类型不符合预期，必须 fail-fast。
         raise TypeError("artifacts_dir must be Path")
-    if not isinstance(logs_dir, Path):
+    logs_dir_obj: Any = logs_dir
+    if not isinstance(logs_dir_obj, Path):
         # logs_dir 类型不符合预期，必须 fail-fast。
         raise TypeError("logs_dir must be Path")
 
-    run_root = run_root.resolve()
-    records_dir = records_dir.resolve()
-    artifacts_dir = artifacts_dir.resolve()
-    logs_dir = logs_dir.resolve()
+    normalized_contracts = contracts_obj
+    normalized_whitelist = whitelist_obj
+    normalized_semantics = semantics_obj
+    normalized_injection_scope_manifest = injection_scope_manifest_obj
+    run_root = run_root_obj.resolve()
+    records_dir = records_dir_obj.resolve()
+    artifacts_dir = artifacts_dir_obj.resolve()
+    logs_dir = logs_dir_obj.resolve()
 
     path_policy.validate_output_target(records_dir, "record", run_root)
     path_policy.validate_output_target(artifacts_dir, "artifact", run_root)
     path_policy.validate_output_target(logs_dir, "log", run_root)
 
     ctx = FactSourcesContext(
-        contracts=contracts,
-        whitelist=whitelist,
-        semantics=semantics,
-        injection_scope_manifest=injection_scope_manifest,
+        contracts=normalized_contracts,
+        whitelist=normalized_whitelist,
+        semantics=normalized_semantics,
+        injection_scope_manifest=normalized_injection_scope_manifest,
         run_root=run_root,
         records_dir=records_dir,
         artifacts_dir=artifacts_dir,
@@ -254,40 +266,49 @@ def build_fact_sources_snapshot(
     Raises:
         TypeError: If inputs are invalid.
     """
-    if not isinstance(contracts, FrozenContracts):
+    contracts_obj: Any = contracts
+    if not isinstance(contracts_obj, FrozenContracts):
         # contracts 类型不符合预期，必须 fail-fast。
         raise TypeError("contracts must be FrozenContracts")
-    if not isinstance(whitelist, RuntimeWhitelist):
+    whitelist_obj: Any = whitelist
+    if not isinstance(whitelist_obj, RuntimeWhitelist):
         # whitelist 类型不符合预期，必须 fail-fast。
         raise TypeError("whitelist must be RuntimeWhitelist")
-    if not isinstance(semantics, PolicyPathSemantics):
+    semantics_obj: Any = semantics
+    if not isinstance(semantics_obj, PolicyPathSemantics):
         # semantics 类型不符合预期，必须 fail-fast。
         raise TypeError("semantics must be PolicyPathSemantics")
-    if not isinstance(injection_scope_manifest, InjectionScopeManifest):
+    injection_scope_manifest_obj: Any = injection_scope_manifest
+    if not isinstance(injection_scope_manifest_obj, InjectionScopeManifest):
         # injection_scope_manifest 类型不符合预期，必须 fail-fast。
         raise TypeError("injection_scope_manifest must be InjectionScopeManifest")
 
+    normalized_contracts = contracts_obj
+    normalized_whitelist = whitelist_obj
+    normalized_semantics = semantics_obj
+    normalized_injection_scope_manifest = injection_scope_manifest_obj
+
     return {
-        "contract_version": contracts.contract_version,
-        "contract_digest": contracts.contract_digest,
-        "contract_file_sha256": contracts.contract_file_sha256,
-        "contract_canon_sha256": contracts.contract_canon_sha256,
-        "contract_bound_digest": contracts.contract_bound_digest,
-        "whitelist_version": whitelist.whitelist_version,
-        "whitelist_digest": whitelist.whitelist_digest,
-        "whitelist_file_sha256": whitelist.whitelist_file_sha256,
-        "whitelist_canon_sha256": whitelist.whitelist_canon_sha256,
-        "whitelist_bound_digest": whitelist.whitelist_bound_digest,
-        "policy_path_semantics_version": semantics.policy_path_semantics_version,
-        "policy_path_semantics_digest": semantics.policy_path_semantics_digest,
-        "policy_path_semantics_file_sha256": semantics.policy_path_semantics_file_sha256,
-        "policy_path_semantics_canon_sha256": semantics.policy_path_semantics_canon_sha256,
-        "policy_path_semantics_bound_digest": semantics.policy_path_semantics_bound_digest,
-        "injection_scope_manifest_version": injection_scope_manifest.injection_scope_manifest_version,
-        "injection_scope_manifest_digest": injection_scope_manifest.injection_scope_manifest_digest,
-        "injection_scope_manifest_file_sha256": injection_scope_manifest.injection_scope_manifest_file_sha256,
-        "injection_scope_manifest_canon_sha256": injection_scope_manifest.injection_scope_manifest_canon_sha256,
-        "injection_scope_manifest_bound_digest": injection_scope_manifest.injection_scope_manifest_bound_digest
+        "contract_version": normalized_contracts.contract_version,
+        "contract_digest": normalized_contracts.contract_digest,
+        "contract_file_sha256": normalized_contracts.contract_file_sha256,
+        "contract_canon_sha256": normalized_contracts.contract_canon_sha256,
+        "contract_bound_digest": normalized_contracts.contract_bound_digest,
+        "whitelist_version": normalized_whitelist.whitelist_version,
+        "whitelist_digest": normalized_whitelist.whitelist_digest,
+        "whitelist_file_sha256": normalized_whitelist.whitelist_file_sha256,
+        "whitelist_canon_sha256": normalized_whitelist.whitelist_canon_sha256,
+        "whitelist_bound_digest": normalized_whitelist.whitelist_bound_digest,
+        "policy_path_semantics_version": normalized_semantics.policy_path_semantics_version,
+        "policy_path_semantics_digest": normalized_semantics.policy_path_semantics_digest,
+        "policy_path_semantics_file_sha256": normalized_semantics.policy_path_semantics_file_sha256,
+        "policy_path_semantics_canon_sha256": normalized_semantics.policy_path_semantics_canon_sha256,
+        "policy_path_semantics_bound_digest": normalized_semantics.policy_path_semantics_bound_digest,
+        "injection_scope_manifest_version": normalized_injection_scope_manifest.injection_scope_manifest_version,
+        "injection_scope_manifest_digest": normalized_injection_scope_manifest.injection_scope_manifest_digest,
+        "injection_scope_manifest_file_sha256": normalized_injection_scope_manifest.injection_scope_manifest_file_sha256,
+        "injection_scope_manifest_canon_sha256": normalized_injection_scope_manifest.injection_scope_manifest_canon_sha256,
+        "injection_scope_manifest_bound_digest": normalized_injection_scope_manifest.injection_scope_manifest_bound_digest
     }
 
 
@@ -310,10 +331,11 @@ def get_recommended_enforce_report() -> Optional[Dict[str, Any]]:
     report = _RECOMMENDED_ENFORCE_REPORT.get()
     if report is None:
         return None
-    if not isinstance(report, dict):
+    report_obj: Any = report
+    if not isinstance(report_obj, dict):
         # 审计报告类型不合法，必须 fail-fast。
         raise TypeError("recommended_enforce_report must be dict")
-    return dict(report)
+    return dict(cast(Dict[str, Any], report_obj))
 
 
 def _update_recommended_enforce_report(report: Optional[Dict[str, Any]]) -> None:
@@ -333,10 +355,11 @@ def _update_recommended_enforce_report(report: Optional[Dict[str, Any]]) -> None
     """
     if report is None:
         return
-    if not isinstance(report, dict):
+    report_obj: Any = report
+    if not isinstance(report_obj, dict):
         # report 类型不合法，必须 fail-fast。
         raise TypeError("recommended_enforce_report must be dict")
-    _RECOMMENDED_ENFORCE_REPORT.set(dict(report))
+    _RECOMMENDED_ENFORCE_REPORT.set(dict(cast(Dict[str, Any], report_obj)))
 
 
 def _ensure_parent_dir(dst: Path) -> None:
@@ -431,9 +454,11 @@ def write_path_validation_audit(
         FactSourcesNotInitializedError: If fact sources are not initialized.
         RecordsWritePolicyError: If path policy validation fails.
     """
-    if not isinstance(audit_record, dict):
+    audit_record_obj: Any = audit_record
+    if not isinstance(audit_record_obj, dict):
         # audit_record 类型不符合预期，必须 fail-fast。
         raise TypeError("audit_record must be dict")
+    audit_record_mapping = cast(Dict[str, Any], audit_record_obj)
     
     ctx = _require_fact_sources_initialized()
     if audit_records_dir is None:
@@ -443,9 +468,10 @@ def write_path_validation_audit(
     
     # 构造唯一的审计文件名：使用目标路径的哈希+时间戳避免重复。
     import hashlib
-    target_path_str = audit_record.get("target_path", "unknown")
+    target_path_str = str(audit_record_mapping.get("target_path", "unknown"))
     target_hash = hashlib.sha256(target_path_str.encode()).hexdigest()[:8]
-    timestamp_str = audit_record.get("timestamp", "").replace(":", "-").replace(".", "-")
+    timestamp_raw = audit_record_mapping.get("timestamp", "")
+    timestamp_str = str(timestamp_raw).replace(":", "-").replace(".", "-")
     audit_filename = f"path_audit_{target_hash}_{timestamp_str}.json"
     audit_path = audit_records_dir / audit_filename
     
@@ -457,7 +483,7 @@ def write_path_validation_audit(
         ctx.run_root,
         ctx.artifacts_dir,
         str(audit_path),
-        audit_record
+        audit_record_mapping
     )
     
     return audit_path
@@ -616,12 +642,14 @@ def _classify_output_kind(path: Path) -> str:
     Raises:
         RecordsWritePolicyError: If target escapes the bound layout.
     """
-    if not isinstance(path, Path):
+    path_obj: Any = path
+    if not isinstance(path_obj, Path):
         # path 类型不符合预期，必须 fail-fast。
         raise TypeError("path must be Path")
 
     ctx = _require_fact_sources_initialized()
-    target = path.resolve()
+    normalized_path = path_obj
+    target = normalized_path.resolve()
     if _is_under_dir(target, ctx.records_dir):
         return "record"
     if _is_under_dir(target, ctx.artifacts_dir):
@@ -630,7 +658,7 @@ def _classify_output_kind(path: Path) -> str:
         return "log"
     raise RecordsWritePolicyError(
         "output path must be under run_root layout: "
-        f"path={path}, run_root={ctx.run_root}"
+        f"path={normalized_path}, run_root={ctx.run_root}"
     )
 
 
@@ -693,11 +721,13 @@ def _validate_record_for_records_path(record: Any, path: Path) -> None:
             f"path={path}, actual_type={type(record).__name__}"
         )
 
+    validated_record = cast(Dict[str, Any], record)
+
     ctx = _require_fact_sources_initialized()
     interpretation = get_contract_interpretation(ctx.contracts)
-    schema.validate_record(record, interpretation=interpretation)
+    schema.validate_record(validated_record, interpretation=interpretation)
     recommendations = assert_prewrite(
-        record,
+        validated_record,
         ctx.contracts,
         ctx.whitelist,
         ctx.semantics
@@ -746,15 +776,18 @@ def _collect_json_keys(value: Any) -> set[str]:
     while stack:
         current = stack.pop()
         if isinstance(current, dict):
-            for key, item in current.items():
-                if not isinstance(key, str):
+            current_mapping = cast(Dict[Any, Any], current)
+            for raw_key, raw_item in current_mapping.items():
+                key_obj: Any = raw_key
+                if not isinstance(key_obj, str):
                     # JSON key 类型不合法，必须 fail-fast。
                     raise TypeError("artifact payload keys must be str")
-                keys.add(key)
-                if isinstance(item, (dict, list)):
-                    stack.append(item)
+                keys.add(key_obj)
+                if isinstance(raw_item, (dict, list)):
+                    stack.append(raw_item)
         elif isinstance(current, list):
-            for item in current:
+            current_items = cast(List[Any], current)
+            for item in current_items:
                 if isinstance(item, (dict, list)):
                     stack.append(item)
         else:
@@ -778,10 +811,11 @@ def _collect_top_level_keys(obj: Dict[str, Any]) -> set[str]:
     Raises:
         TypeError: If obj is not dict.
     """
-    if not isinstance(obj, dict):
+    obj_value: Any = obj
+    if not isinstance(obj_value, dict):
         # obj 类型不符合预期，必须 fail-fast。
         raise TypeError("artifact obj must be dict")
-    return set(obj.keys())
+    return set(cast(Dict[str, Any], obj_value).keys())
 
 
 def _enforce_artifact_semantic_bypass_guard(
@@ -807,32 +841,41 @@ def _enforce_artifact_semantic_bypass_guard(
         TypeError: If inputs are invalid.
         RecordsWritePolicyError: If artifact contains forbidden anchors.
     """
-    if not isinstance(obj, dict):
+    obj_value: Any = obj
+    if not isinstance(obj_value, dict):
         # obj 类型不符合预期，必须 fail-fast。
         raise TypeError("artifact obj must be dict")
-    if not isinstance(dst_path, Path):
+    dst_path_obj: Any = dst_path
+    if not isinstance(dst_path_obj, Path):
         # dst_path 类型不符合预期，必须 fail-fast。
         raise TypeError("dst_path must be Path")
-    if not isinstance(artifacts_dir, Path):
+    artifacts_dir_obj: Any = artifacts_dir
+    if not isinstance(artifacts_dir_obj, Path):
         # artifacts_dir 类型不符合预期，必须 fail-fast。
         raise TypeError("artifacts_dir must be Path")
-    if interpretation is not None and not isinstance(interpretation, ContractInterpretation):
+    interpretation_obj: Any = interpretation
+    if interpretation_obj is not None and not isinstance(interpretation_obj, ContractInterpretation):
         # interpretation 类型不符合预期，必须 fail-fast。
         raise TypeError("interpretation must be ContractInterpretation or None")
 
-    base_dir = artifacts_dir.resolve()
-    target = dst_path.resolve()
+    artifact_obj = cast(Dict[str, Any], obj_value)
+    normalized_dst_path = dst_path_obj
+    normalized_artifacts_dir = artifacts_dir_obj
+    normalized_interpretation = interpretation_obj
+
+    base_dir = normalized_artifacts_dir.resolve()
+    target = normalized_dst_path.resolve()
     try:
         relative_path = target.relative_to(base_dir).as_posix()
     except ValueError as exc:
         # artifacts_dir 约束检查失败，必须 fail-fast。
         raise RecordsWritePolicyError(
             "artifact output must be under artifacts_dir: "
-            f"path={dst_path}, artifacts_dir={artifacts_dir}"
+            f"path={normalized_dst_path}, artifacts_dir={normalized_artifacts_dir}"
         ) from exc
 
-    present_fields = _collect_json_keys(obj)
-    top_level_fields = _collect_top_level_keys(obj) - {"_artifact_audit"}
+    present_fields = _collect_json_keys(artifact_obj)
+    top_level_fields = _collect_top_level_keys(artifact_obj) - {"_artifact_audit"}
 
     # path_audits/ 路径模式允许包含策略版本等审计字段。
     if relative_path.startswith("path_audits/") and relative_path.endswith(".json"):
@@ -842,19 +885,19 @@ def _enforce_artifact_semantic_bypass_guard(
         if forbidden_overlap:
             raise RecordsWritePolicyError(
                 "path_audit payload contains forbidden bound digest fields: "
-                f"path={dst_path}, fields={sorted(forbidden_overlap)}"
+                f"path={normalized_dst_path}, fields={sorted(forbidden_overlap)}"
             )
         # path_audit 作为路径策略审计证据，允许包含策略版本字段，不再进一步检查锚点重叠。
         return
 
     if relative_path in _ARTIFACT_ANCHOR_ALLOWLIST:
         if relative_path == "cfg_audit/cfg_audit.json":
-            top_level_fields = _collect_top_level_keys(obj)
+            top_level_fields = _collect_top_level_keys(artifact_obj)
             extra_top_level = top_level_fields - _ARTIFACT_CFG_AUDIT_ALLOWED_FIELDS
             if extra_top_level:
                 raise RecordsWritePolicyError(
                     "cfg_audit payload contains non-allowlisted top-level fields: "
-                    f"path={dst_path}, fields={sorted(extra_top_level)}"
+                    f"path={normalized_dst_path}, fields={sorted(extra_top_level)}"
                 )
             # cfg_audit 不是 record，无需检查 required_record_fields
             # _artifact_audit 是系统注入的审计子字段，不作为顶级锚点考虑
@@ -865,18 +908,18 @@ def _enforce_artifact_semantic_bypass_guard(
         # artifacts 携带绑定摘要会形成语义旁路，必须 fail-fast。
         raise RecordsWritePolicyError(
             "artifact payload contains forbidden anchor fields: "
-            f"path={dst_path}, fields={sorted(forbidden_overlap)}"
+            f"path={normalized_dst_path}, fields={sorted(forbidden_overlap)}"
         )
 
-    if interpretation is not None:
-        required_fields = set(interpretation.required_record_fields)
+    if normalized_interpretation is not None:
+        required_fields = set(normalized_interpretation.required_record_fields)
         if required_fields:
             overlap = top_level_fields.intersection(required_fields)
             if overlap:
                 # artifacts 具备 records 锚点字段，必须 fail-fast。
                 raise RecordsWritePolicyError(
                     "artifact payload contains record anchor fields: "
-                    f"path={dst_path}, fields={sorted(overlap)}"
+                    f"path={normalized_dst_path}, fields={sorted(overlap)}"
                 )
 
 
@@ -939,21 +982,30 @@ def write_artifact_json(
         indent: JSON indent level.
         ensure_ascii: Whether to ensure ASCII encoding.
     """
-    if not isinstance(path, str) or not path:
+    path_obj: Any = path
+    if not isinstance(path_obj, str) or not path_obj:
         # path 输入不合法，必须 fail-fast。
         raise ValueError("path must be non-empty str")
-    if not isinstance(obj, dict):
+    obj_value: Any = obj
+    if not isinstance(obj_value, dict):
         # obj 类型不符合预期，必须 fail-fast。
         raise TypeError("artifact obj must be dict")
-    if not isinstance(indent, int) or indent < 0:
+    indent_obj: Any = indent
+    if not isinstance(indent_obj, int) or indent_obj < 0:
         # indent 输入不合法，必须 fail-fast。
         raise ValueError("indent must be non-negative int")
-    if not isinstance(ensure_ascii, bool):
+    ensure_ascii_obj: Any = ensure_ascii
+    if not isinstance(ensure_ascii_obj, bool):
         # ensure_ascii 输入不合法，必须 fail-fast。
         raise ValueError("ensure_ascii must be bool")
 
+    normalized_path_str = path_obj
+    artifact_obj = cast(Dict[str, Any], obj_value)
+    normalized_indent = indent_obj
+    normalized_ensure_ascii = ensure_ascii_obj
+
     ctx = _require_fact_sources_initialized()
-    dst_path = Path(path)
+    dst_path = Path(normalized_path_str)
     kind = _classify_output_kind(dst_path)
     if kind != "artifact":
         # artifact 写盘必须隔离到 artifacts 目录。
@@ -963,9 +1015,9 @@ def write_artifact_json(
         )
     path_policy.validate_output_target(dst_path, "artifact", ctx.run_root)
     interpretation = get_contract_interpretation(ctx.contracts)
-    _ensure_artifact_audit_marker(obj)
-    _enforce_artifact_semantic_bypass_guard(obj, dst_path, ctx.artifacts_dir, interpretation)
-    json_str = _json_dumps_stable(obj, indent, ensure_ascii, compact=False)
+    _ensure_artifact_audit_marker(artifact_obj)
+    _enforce_artifact_semantic_bypass_guard(artifact_obj, dst_path, ctx.artifacts_dir, interpretation)
+    json_str = _json_dumps_stable(artifact_obj, normalized_indent, normalized_ensure_ascii, compact=False)
     data = json_str.encode("utf-8")
 
     _atomic_replace_write_bytes(dst_path, data)
@@ -999,30 +1051,43 @@ def write_artifact_json_unbound(
         RecordsWritePolicyError: If path escapes artifacts_dir or other policy violations.
     """
     # 输入类型校验
-    if not isinstance(run_root, Path):
+    run_root_obj: Any = run_root
+    if not isinstance(run_root_obj, Path):
         # run_root 类型不符合预期，必须 fail-fast。
         raise TypeError("run_root must be Path")
-    if not isinstance(artifacts_dir, Path):
+    artifacts_dir_obj: Any = artifacts_dir
+    if not isinstance(artifacts_dir_obj, Path):
         # artifacts_dir 类型不符合预期，必须 fail-fast。
         raise TypeError("artifacts_dir must be Path")
-    if not isinstance(path, str) or not path:
+    path_obj: Any = path
+    if not isinstance(path_obj, str) or not path_obj:
         # path 输入不合法，必须 fail-fast。
         raise ValueError("path must be non-empty str")
-    if not isinstance(obj, dict):
+    obj_value: Any = obj
+    if not isinstance(obj_value, dict):
         # obj 类型不符合预期，必须 fail-fast。
         raise TypeError("artifact obj must be dict")
-    if not isinstance(indent, int) or indent < 0:
+    indent_obj: Any = indent
+    if not isinstance(indent_obj, int) or indent_obj < 0:
         # indent 输入不合法，必须 fail-fast。
         raise ValueError("indent must be non-negative int")
-    if not isinstance(ensure_ascii, bool):
+    ensure_ascii_obj: Any = ensure_ascii
+    if not isinstance(ensure_ascii_obj, bool):
         # ensure_ascii 输入不合法，必须 fail-fast。
         raise ValueError("ensure_ascii must be bool")
+
+    normalized_run_root = run_root_obj
+    normalized_artifacts_dir = artifacts_dir_obj
+    normalized_path_str = path_obj
+    artifact_obj = cast(Dict[str, Any], obj_value)
+    normalized_indent = indent_obj
+    normalized_ensure_ascii = ensure_ascii_obj
     
     # 规范化路径。
-    run_root_resolved = run_root.resolve()
-    artifacts_dir_resolved = artifacts_dir.resolve()
+    run_root_resolved = normalized_run_root.resolve()
+    artifacts_dir_resolved = normalized_artifacts_dir.resolve()
     records_dir_resolved = (run_root_resolved / "records").resolve()
-    dst_path = Path(path)
+    dst_path = Path(normalized_path_str)
     
     # 若 path 非绝对路径，则相对于 run_root 解释。
     if not dst_path.is_absolute():
@@ -1035,7 +1100,7 @@ def write_artifact_json_unbound(
         # 目标路径在 records 目录内，必须 fail-fast。
         raise RecordsWritePolicyError(
             "unbound artifact output must not write to records_dir (semantic bypass): "
-            f"path={dst_path}, records_dir={records_dir_resolved}, run_root={run_root}"
+            f"path={dst_path}, records_dir={records_dir_resolved}, run_root={normalized_run_root}"
         )
     except ValueError:
         # 正常情况：目标路径不在 records 目录内，继续执行。
@@ -1048,7 +1113,7 @@ def write_artifact_json_unbound(
         # artifacts_dir 约束检查失败，目录逃逸，必须 fail-fast。
         raise RecordsWritePolicyError(
             "unbound artifact output must be under artifacts_dir: "
-            f"path={dst_path}, artifacts_dir={artifacts_dir}, run_root={run_root}"
+            f"path={dst_path}, artifacts_dir={normalized_artifacts_dir}, run_root={normalized_run_root}"
         )
     
     # 尽量使用 path_policy 验证。
@@ -1064,11 +1129,11 @@ def write_artifact_json_unbound(
     _ensure_parent_dir(dst_path_resolved)
     
     # 添加审计标记。
-    _ensure_artifact_audit_marker(obj)
+    _ensure_artifact_audit_marker(artifact_obj)
 
     # 序列化为字符串。
-    _enforce_artifact_semantic_bypass_guard(obj, dst_path_resolved, artifacts_dir_resolved, None)
-    json_str = _json_dumps_stable(obj, indent, ensure_ascii, compact=False)
+    _enforce_artifact_semantic_bypass_guard(artifact_obj, dst_path_resolved, artifacts_dir_resolved, None)
+    json_str = _json_dumps_stable(artifact_obj, normalized_indent, normalized_ensure_ascii, compact=False)
     data = json_str.encode("utf-8")
     
     # 原子写盘。
@@ -1101,23 +1166,32 @@ def write_artifact_canon_json_unbound(
         ValueError: If inputs are structurally invalid.
         RecordsWritePolicyError: If path escapes artifacts_dir or other policy violations.
     """
-    if not isinstance(run_root, Path):
+    run_root_obj: Any = run_root
+    if not isinstance(run_root_obj, Path):
         # run_root 类型不符合预期，必须 fail-fast。
         raise TypeError("run_root must be Path")
-    if not isinstance(artifacts_dir, Path):
+    artifacts_dir_obj: Any = artifacts_dir
+    if not isinstance(artifacts_dir_obj, Path):
         # artifacts_dir 类型不符合预期，必须 fail-fast。
         raise TypeError("artifacts_dir must be Path")
-    if not isinstance(path, str) or not path:
+    path_obj: Any = path
+    if not isinstance(path_obj, str) or not path_obj:
         # path 输入不合法，必须 fail-fast。
         raise ValueError("path must be non-empty str")
-    if not isinstance(obj, dict):
+    obj_value: Any = obj
+    if not isinstance(obj_value, dict):
         # obj 类型不符合预期，必须 fail-fast。
         raise TypeError("artifact obj must be dict")
 
-    run_root_resolved = run_root.resolve()
-    artifacts_dir_resolved = artifacts_dir.resolve()
+    normalized_run_root = run_root_obj
+    normalized_artifacts_dir = artifacts_dir_obj
+    normalized_path_str = path_obj
+    artifact_obj = cast(Dict[str, Any], obj_value)
+
+    run_root_resolved = normalized_run_root.resolve()
+    artifacts_dir_resolved = normalized_artifacts_dir.resolve()
     records_dir_resolved = (run_root_resolved / "records").resolve()
-    dst_path = Path(path)
+    dst_path = Path(normalized_path_str)
 
     if not dst_path.is_absolute():
         dst_path = run_root_resolved / dst_path
@@ -1128,7 +1202,7 @@ def write_artifact_canon_json_unbound(
         # 目标路径在 records 目录内，必须 fail-fast。
         raise RecordsWritePolicyError(
             "unbound artifact canonical output must not write to records_dir (semantic bypass): "
-            f"path={dst_path}, records_dir={records_dir_resolved}, run_root={run_root}"
+            f"path={dst_path}, records_dir={records_dir_resolved}, run_root={normalized_run_root}"
         )
     except ValueError:
         pass
@@ -1139,7 +1213,7 @@ def write_artifact_canon_json_unbound(
         # artifacts_dir 约束检查失败，目录逃逸，必须 fail-fast。
         raise RecordsWritePolicyError(
             "unbound artifact canonical output must be under artifacts_dir: "
-            f"path={dst_path}, artifacts_dir={artifacts_dir}, run_root={run_root}"
+            f"path={dst_path}, artifacts_dir={normalized_artifacts_dir}, run_root={normalized_run_root}"
         )
 
     try:
@@ -1151,11 +1225,11 @@ def write_artifact_canon_json_unbound(
         ) from exc
 
     _ensure_parent_dir(dst_path_resolved)
-    _ensure_artifact_audit_marker(obj)
-    _enforce_artifact_semantic_bypass_guard(obj, dst_path_resolved, artifacts_dir_resolved, None)
+    _ensure_artifact_audit_marker(artifact_obj)
+    _enforce_artifact_semantic_bypass_guard(artifact_obj, dst_path_resolved, artifacts_dir_resolved, None)
 
     from main.core import digests
-    data = digests.canonical_json_dumps(obj)
+    data = digests.canonical_json_dumps(artifact_obj)
     _atomic_replace_write_bytes(dst_path_resolved, data)
 
 
@@ -1184,24 +1258,28 @@ def write_artifact_text_unbound(
         ValueError: If inputs are structurally invalid.
         RecordsWritePolicyError: If path escapes artifacts_dir or other policy violations.
     """
-    if not isinstance(run_root, Path):
+    run_root_obj: Any = run_root
+    if not isinstance(run_root_obj, Path):
         # run_root 类型不符合预期，必须 fail-fast。
         raise TypeError("run_root must be Path")
-    if not isinstance(artifacts_dir, Path):
+    artifacts_dir_obj: Any = artifacts_dir
+    if not isinstance(artifacts_dir_obj, Path):
         # artifacts_dir 类型不符合预期，必须 fail-fast。
         raise TypeError("artifacts_dir must be Path")
-    if not isinstance(path, str) or not path:
+    path_obj: Any = path
+    if not isinstance(path_obj, str) or not path_obj:
         # path 输入不合法，必须 fail-fast。
         raise ValueError("path must be non-empty str")
-    if not isinstance(content, str):
+    content_obj: Any = content
+    if not isinstance(content_obj, str):
         # content 类型不合法，必须 fail-fast。
         raise TypeError("content must be str")
 
     # 显式路径策略校验：禁止逃逸。
-    path_policy.validate_output_target(Path(path), "artifact", run_root)
+    path_policy.validate_output_target(Path(path_obj), "artifact", run_root_obj)
 
-    data = content.encode("utf-8")
-    write_artifact_bytes_unbound(run_root, artifacts_dir, path, data)
+    data = content_obj.encode("utf-8")
+    write_artifact_bytes_unbound(run_root_obj, artifacts_dir_obj, path_obj, data)
 
 
 def write_artifact_bytes_unbound(
@@ -1229,13 +1307,16 @@ def write_artifact_bytes_unbound(
         ValueError: If inputs are structurally invalid.
         RecordsWritePolicyError: If path escapes artifacts_dir or other policy violations.
     """
-    if not isinstance(run_root, Path):
+    run_root_obj: Any = run_root
+    if not isinstance(run_root_obj, Path):
         # run_root 类型不符合预期，必须 fail-fast。
         raise TypeError("run_root must be Path")
-    if not isinstance(artifacts_dir, Path):
+    artifacts_dir_obj: Any = artifacts_dir
+    if not isinstance(artifacts_dir_obj, Path):
         # artifacts_dir 类型不符合预期，必须 fail-fast。
         raise TypeError("artifacts_dir must be Path")
-    if not isinstance(path, str) or not path:
+    path_obj: Any = path
+    if not isinstance(path_obj, str) or not path_obj:
         # path 输入不合法，必须 fail-fast。
         raise ValueError("path must be non-empty str")
     if not isinstance(data, (bytes, bytearray)):
@@ -1243,12 +1324,15 @@ def write_artifact_bytes_unbound(
         raise TypeError("data must be bytes")
 
     # 显式路径策略校验：禁止逃逸。
-    path_policy.validate_output_target(Path(path), "artifact", run_root)
+    normalized_run_root = run_root_obj
+    normalized_artifacts_dir = artifacts_dir_obj
+    normalized_path_str = path_obj
+    path_policy.validate_output_target(Path(normalized_path_str), "artifact", normalized_run_root)
 
-    run_root_resolved = run_root.resolve()
-    artifacts_dir_resolved = artifacts_dir.resolve()
+    run_root_resolved = normalized_run_root.resolve()
+    artifacts_dir_resolved = normalized_artifacts_dir.resolve()
     records_dir_resolved = (run_root_resolved / "records").resolve()
-    dst_path = Path(path)
+    dst_path = Path(normalized_path_str)
 
     if not dst_path.is_absolute():
         dst_path = run_root_resolved / dst_path
@@ -1259,7 +1343,7 @@ def write_artifact_bytes_unbound(
         # 目标路径在 records 目录内，必须 fail-fast。
         raise RecordsWritePolicyError(
             "unbound artifact bytes output must not write to records_dir (semantic bypass): "
-            f"path={dst_path}, records_dir={records_dir_resolved}, run_root={run_root}"
+            f"path={dst_path}, records_dir={records_dir_resolved}, run_root={normalized_run_root}"
         )
     except ValueError:
         pass
@@ -1270,7 +1354,7 @@ def write_artifact_bytes_unbound(
         # artifacts_dir 约束检查失败，目录逃逸，必须 fail-fast。
         raise RecordsWritePolicyError(
             "unbound artifact bytes output must be under artifacts_dir: "
-            f"path={dst_path}, artifacts_dir={artifacts_dir}, run_root={run_root}"
+            f"path={dst_path}, artifacts_dir={normalized_artifacts_dir}, run_root={normalized_run_root}"
         )
 
     try:
@@ -1311,12 +1395,14 @@ def append_jsonl(
     if _is_records_target(dst_path):
         # records 写盘必须触发门禁校验。
         _validate_record_for_records_path(record, dst_path)
-    elif not isinstance(record, dict):
+    else:
+        record_obj: Any = record
+        if not isinstance(record_obj, dict):
         # record 类型不符合预期，必须 fail-fast。
-        raise RecordsWritePolicyError(
-            "jsonl record must be dict: "
-            f"path={dst_path}, actual_type={type(record).__name__}"
-        )
+            raise RecordsWritePolicyError(
+                "jsonl record must be dict: "
+                f"path={dst_path}, actual_type={type(record_obj).__name__}"
+            )
     
     # 确保父目录存在。
     _ensure_parent_dir(dst_path)
@@ -1416,24 +1502,28 @@ def _ensure_artifact_audit_marker(obj: Dict[str, Any]) -> None:
         TypeError: If obj or marker types are invalid.
         ValueError: If marker fields are invalid.
     """
-    if not isinstance(obj, dict):
+    obj_value: Any = obj
+    if not isinstance(obj_value, dict):
         # obj 类型不符合预期，必须 fail-fast。
         raise TypeError("artifact obj must be dict")
 
+    artifact_obj = cast(Dict[str, Any], obj_value)
+
     marker_key = "_artifact_audit"
-    if marker_key not in obj:
-        obj[marker_key] = {
+    if marker_key not in artifact_obj:
+        artifact_obj[marker_key] = {
             "schema_version": "v1.0",
             "writer": "records_io"
         }
         return
 
-    marker = obj.get(marker_key)
+    marker = artifact_obj.get(marker_key)
     if not isinstance(marker, dict):
         # marker 类型不符合预期，必须 fail-fast。
         raise TypeError("_artifact_audit must be dict")
-    schema_version = marker.get("schema_version")
-    writer = marker.get("writer")
+    marker_mapping = cast(Dict[str, Any], marker)
+    schema_version = marker_mapping.get("schema_version")
+    writer = marker_mapping.get("writer")
     if not isinstance(schema_version, str) or not schema_version:
         # schema_version 非法，必须 fail-fast。
         raise ValueError("_artifact_audit.schema_version must be non-empty str")
@@ -1508,42 +1598,49 @@ def copy_file_controlled(src_path: Path, dst_path: Path, kind: str = "artifact")
         RecordsWritePolicyError: If destination violates layout constraints.
         GateEnforcementError: If gate enforcement fails.
     """
-    if not isinstance(src_path, Path):
+    src_path_obj: Any = src_path
+    if not isinstance(src_path_obj, Path):
         # src_path 类型不符合预期，必须 fail-fast。
         raise TypeError("src_path must be Path")
-    if not isinstance(dst_path, Path):
+    dst_path_obj: Any = dst_path
+    if not isinstance(dst_path_obj, Path):
         # dst_path 类型不符合预期，必须 fail-fast。
         raise TypeError("dst_path must be Path")
-    if not isinstance(kind, str) or kind not in ("artifact", "record", "log", "env_lock"):
+    kind_obj: Any = kind
+    if not isinstance(kind_obj, str) or kind_obj not in ("artifact", "record", "log", "env_lock"):
         # kind 输入不合法，必须 fail-fast。
-        raise ValueError(f"kind must be 'artifact', 'record', 'log', or 'env_lock', got {kind}")
+        raise ValueError(f"kind must be 'artifact', 'record', 'log', or 'env_lock', got {kind_obj}")
+
+    normalized_src_path = src_path_obj
+    normalized_dst_path = dst_path_obj
+    normalized_kind = kind_obj
     
     ctx = _require_fact_sources_initialized()
     
-    if not src_path.exists() or not src_path.is_file():
+    if not normalized_src_path.exists() or not normalized_src_path.is_file():
         # 源文件缺失，必须 fail-fast。
-        raise FileNotFoundError(f"Source file not found: {src_path}")
+        raise FileNotFoundError(f"Source file not found: {normalized_src_path}")
     
     # 校验输出目标路径。
-    if kind == "env_lock":
+    if normalized_kind == "env_lock":
         expected_lock_path = ctx.run_root / "requirements.txt"
-        if dst_path.resolve() != expected_lock_path.resolve():
+        if normalized_dst_path.resolve() != expected_lock_path.resolve():
             raise RecordsWritePolicyError(
                 "env_lock output must be run_root/requirements.txt: "
-                f"path={dst_path}, expected={expected_lock_path}"
+                f"path={normalized_dst_path}, expected={expected_lock_path}"
             )
     else:
-        path_policy.validate_output_target(dst_path, kind, ctx.run_root)
+        path_policy.validate_output_target(normalized_dst_path, normalized_kind, ctx.run_root)
     
     # 原子性复制（使用 shutil.copy2 保留时间戳）。
     try:
         import shutil
-        dst_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src_path, dst_path)
+        normalized_dst_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(normalized_src_path, normalized_dst_path)
     except Exception as exc:
         # 复制操作失败，必须 fail-fast。
         raise OSError(
-            f"Failed to copy {src_path} to {dst_path}: {exc}"
+            f"Failed to copy {normalized_src_path} to {normalized_dst_path}: {exc}"
         ) from exc
 
 
@@ -1578,42 +1675,52 @@ def copy_file_controlled_unbound(
         RecordsWritePolicyError: If destination violates policy constraints.
         OSError: If copy fails.
     """
-    if not isinstance(run_root, Path):
+    run_root_obj: Any = run_root
+    if not isinstance(run_root_obj, Path):
         # run_root 类型不符合预期，必须 fail-fast。
         raise TypeError("run_root must be Path")
-    if not isinstance(artifacts_dir, Path):
+    artifacts_dir_obj: Any = artifacts_dir
+    if not isinstance(artifacts_dir_obj, Path):
         # artifacts_dir 类型不符合预期，必须 fail-fast。
         raise TypeError("artifacts_dir must be Path")
-    if not isinstance(src_path, Path):
+    src_path_obj: Any = src_path
+    if not isinstance(src_path_obj, Path):
         # src_path 类型不符合预期，必须 fail-fast。
         raise TypeError("src_path must be Path")
-    if not isinstance(dst_path, Path):
+    dst_path_obj: Any = dst_path
+    if not isinstance(dst_path_obj, Path):
         # dst_path 类型不符合预期，必须 fail-fast。
         raise TypeError("dst_path must be Path")
-    if not isinstance(kind, str) or kind not in ("artifact", "record", "log", "env_lock"):
+    kind_obj: Any = kind
+    if not isinstance(kind_obj, str) or kind_obj not in ("artifact", "record", "log", "env_lock"):
         # kind 输入不合法，必须 fail-fast。
-        raise ValueError(f"kind must be 'artifact', 'record', 'log', or 'env_lock', got {kind}")
+        raise ValueError(f"kind must be 'artifact', 'record', 'log', or 'env_lock', got {kind_obj}")
 
-    if not src_path.exists() or not src_path.is_file():
+    normalized_run_root: Path = run_root_obj
+    normalized_src_path: Path = src_path_obj
+    normalized_dst_path: Path = dst_path_obj
+    normalized_kind: str = kind_obj
+
+    if not normalized_src_path.exists() or not normalized_src_path.is_file():
         # 源文件缺失，必须 fail-fast。
-        raise FileNotFoundError(f"Source file not found: {src_path}")
+        raise FileNotFoundError(f"Source file not found: {normalized_src_path}")
 
-    if kind == "env_lock":
-        expected_lock_path = run_root / "requirements.txt"
-        if dst_path.resolve() != expected_lock_path.resolve():
+    if normalized_kind == "env_lock":
+        expected_lock_path = normalized_run_root / "requirements.txt"
+        if normalized_dst_path.resolve() != expected_lock_path.resolve():
             raise RecordsWritePolicyError(
                 "env_lock output must be run_root/requirements.txt: "
-                f"path={dst_path}, expected={expected_lock_path}"
+                f"path={normalized_dst_path}, expected={expected_lock_path}"
             )
     else:
-        path_policy.validate_output_target(dst_path, kind, run_root)
+        path_policy.validate_output_target(normalized_dst_path, normalized_kind, normalized_run_root)
 
     try:
         import shutil
-        dst_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src_path, dst_path)
+        normalized_dst_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(normalized_src_path, normalized_dst_path)
     except Exception as exc:
         # 复制操作失败，必须 fail-fast。
         raise OSError(
-            f"Failed to copy {src_path} to {dst_path}: {exc}"
+            f"Failed to copy {normalized_src_path} to {normalized_dst_path}: {exc}"
         ) from exc

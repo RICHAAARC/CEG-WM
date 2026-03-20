@@ -10,15 +10,14 @@
 
 from __future__ import annotations
 
-import ast
 import hashlib
 import json
 import platform
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional, List, cast
 
 from main.core import records_io
 from main.core import digests
@@ -85,13 +84,14 @@ def validate_status(value: Any, field_path: str = "status") -> str:
         TypeError: If inputs are invalid.
         ValueError: If value is not allowed.
     """
-    if not isinstance(field_path, str) or not field_path:
+    field_path_obj: Any = field_path
+    if not isinstance(field_path_obj, str) or not field_path_obj:
         # field_path 输入不合法，必须 fail-fast。
         raise TypeError("field_path must be non-empty str")
     if not isinstance(value, str) or not value:
-        raise TypeError(f"invalid_status: field_path={field_path}, reason=not_str")
+        raise TypeError(f"invalid_status: field_path={field_path_obj}, reason=not_str")
     if value not in ALLOWED_STATUS_VALUES:
-        raise ValueError(f"invalid_status: field_path={field_path}, reason=not_allowed")
+        raise ValueError(f"invalid_status: field_path={field_path_obj}, reason=not_allowed")
     return value
 
 
@@ -112,13 +112,14 @@ def validate_fail_reason(value: Any, field_path: str = "fail_reason") -> str:
         TypeError: If inputs are invalid.
         ValueError: If value is not allowed.
     """
-    if not isinstance(field_path, str) or not field_path:
+    field_path_obj: Any = field_path
+    if not isinstance(field_path_obj, str) or not field_path_obj:
         # field_path 输入不合法，必须 fail-fast。
         raise TypeError("field_path must be non-empty str")
     if not isinstance(value, str) or not value:
-        raise TypeError(f"invalid_fail_reason: field_path={field_path}, reason=not_str")
+        raise TypeError(f"invalid_fail_reason: field_path={field_path_obj}, reason=not_str")
     if value not in ALLOWED_FAIL_REASONS:
-        raise ValueError(f"invalid_fail_reason: field_path={field_path}, reason=not_allowed")
+        raise ValueError(f"invalid_fail_reason: field_path={field_path_obj}, reason=not_allowed")
     return value
 
 
@@ -139,13 +140,14 @@ def validate_mismatch_reason(value: Any, field_path: str = "mismatch_reason") ->
         TypeError: If inputs are invalid.
         ValueError: If value is not allowed.
     """
-    if not isinstance(field_path, str) or not field_path:
+    field_path_obj: Any = field_path
+    if not isinstance(field_path_obj, str) or not field_path_obj:
         # field_path 输入不合法，必须 fail-fast。
         raise TypeError("field_path must be non-empty str")
     if not isinstance(value, str) or not value:
-        raise TypeError(f"invalid_mismatch_reason: field_path={field_path}, reason=not_str")
+        raise TypeError(f"invalid_mismatch_reason: field_path={field_path_obj}, reason=not_str")
     if value not in ALLOWED_MISMATCH_REASONS:
-        raise ValueError(f"invalid_mismatch_reason: field_path={field_path}, reason=not_allowed")
+        raise ValueError(f"invalid_mismatch_reason: field_path={field_path_obj}, reason=not_allowed")
     return value
 
 
@@ -196,17 +198,21 @@ def _run_pip_command(args: list[str]) -> str:
         TypeError: If args is invalid.
         RuntimeError: If the command fails or times out.
     """
-    if not isinstance(args, list) or not args:
+    args_obj: Any = args
+    if not isinstance(args_obj, list) or not args_obj:
         # args 类型不符合预期，必须 fail-fast。
         raise TypeError("args must be non-empty list")
-    for item in args:
-        if not isinstance(item, str) or not item:
+    normalized_args: List[str] = []
+    args_list = cast(List[Any], args_obj)
+    for item_obj in args_list:
+        if not isinstance(item_obj, str) or not item_obj:
             # args 成员类型不符合预期，必须 fail-fast。
             raise TypeError("args must contain non-empty str items")
+        normalized_args.append(item_obj)
 
     try:
         result = subprocess.run(
-            args,
+            normalized_args,
             capture_output=True,
             text=True,
             timeout=PIP_SUBPROCESS_TIMEOUT_SECONDS
@@ -241,7 +247,7 @@ def _build_env_audit_record() -> Dict[str, Any]:
     global _pip_freeze_cache, _pip_version_cache
     
     generated_at_utc = time_utils.now_utc_iso_z()
-    record = {
+    record: Dict[str, Any] = {
         "python_version": platform.python_version(),
         "platform": platform.platform(),
         "sys_platform": sys.platform,
@@ -359,13 +365,16 @@ def _extract_env_audit_error(record: Dict[str, Any]) -> Optional[str]:
     Raises:
         TypeError: If record is invalid.
     """
-    if not isinstance(record, dict):
+    record_obj: Any = record
+    if not isinstance(record_obj, dict):
         # record 类型不符合预期，必须 fail-fast。
         raise TypeError("record must be dict")
 
-    errors = []
-    pip_version_error = record.get("pip_version_error")
-    pip_freeze_error = record.get("pip_freeze_error")
+    record_mapping = cast(Dict[str, Any], record_obj)
+
+    errors: List[str] = []
+    pip_version_error = record_mapping.get("pip_version_error")
+    pip_freeze_error = record_mapping.get("pip_freeze_error")
     if isinstance(pip_version_error, str) and pip_version_error:
         errors.append(f"pip_version_error={pip_version_error}")
     if isinstance(pip_freeze_error, str) and pip_freeze_error:
@@ -398,33 +407,42 @@ def _write_env_audit_record(
     Raises:
         TypeError: If inputs are invalid.
     """
-    if not isinstance(run_root, Path):
+    run_root_obj: Any = run_root
+    if not isinstance(run_root_obj, Path):
         # run_root 类型不符合预期，必须 fail-fast。
         raise TypeError("run_root must be Path")
-    if not isinstance(artifacts_dir, Path):
+    artifacts_dir_obj: Any = artifacts_dir
+    if not isinstance(artifacts_dir_obj, Path):
         # artifacts_dir 类型不符合预期，必须 fail-fast。
         raise TypeError("artifacts_dir must be Path")
-    if not isinstance(audit_record, dict):
+    audit_record_obj: Any = audit_record
+    if not isinstance(audit_record_obj, dict):
         # audit_record 类型不符合预期，必须 fail-fast。
         raise TypeError("audit_record must be dict")
-    if not isinstance(canon_sha256, str) or not canon_sha256:
+    canon_sha256_obj: Any = canon_sha256
+    if not isinstance(canon_sha256_obj, str) or not canon_sha256_obj:
         # canon_sha256 类型不符合预期，必须 fail-fast。
         raise TypeError("canon_sha256 must be non-empty str")
 
-    env_audits_dir = artifacts_dir / "env_audits"
+    normalized_run_root = run_root_obj
+    normalized_artifacts_dir = artifacts_dir_obj
+    normalized_audit_record = cast(Dict[str, Any], audit_record_obj)
+    normalized_canon_sha256 = canon_sha256_obj
+
+    env_audits_dir = normalized_artifacts_dir / "env_audits"
     env_audits_dir.mkdir(parents=True, exist_ok=True)
-    audit_filename = f"env_audit_{canon_sha256[:8]}.json"
+    audit_filename = f"env_audit_{normalized_canon_sha256[:8]}.json"
     audit_path = env_audits_dir / audit_filename
 
-    logs_dir = run_root / "logs"
+    logs_dir = normalized_run_root / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
     _write_artifact_json_bound(
-        run_root,
-        records_dir=run_root / "records",
-        artifacts_dir=artifacts_dir,
+        normalized_run_root,
+        records_dir=normalized_run_root / "records",
+        artifacts_dir=normalized_artifacts_dir,
         logs_dir=logs_dir,
         dst_path=audit_path,
-        obj=audit_record
+        obj=normalized_audit_record
     )
 
     return audit_path
@@ -458,28 +476,41 @@ def _write_artifact_json_bound(
         TypeError: If inputs are invalid types.
         RecordsWritePolicyError: If binding or write fails.
     """
-    if not isinstance(run_root, Path):
+    run_root_obj: Any = run_root
+    if not isinstance(run_root_obj, Path):
         # run_root 类型不符合预期，必须 fail-fast。
         raise TypeError("run_root must be Path")
-    if not isinstance(records_dir, Path):
+    records_dir_obj: Any = records_dir
+    if not isinstance(records_dir_obj, Path):
         # records_dir 类型不符合预期，必须 fail-fast。
         raise TypeError("records_dir must be Path")
-    if not isinstance(artifacts_dir, Path):
+    artifacts_dir_obj: Any = artifacts_dir
+    if not isinstance(artifacts_dir_obj, Path):
         # artifacts_dir 类型不符合预期，必须 fail-fast。
         raise TypeError("artifacts_dir must be Path")
-    if not isinstance(logs_dir, Path):
+    logs_dir_obj: Any = logs_dir
+    if not isinstance(logs_dir_obj, Path):
         # logs_dir 类型不符合预期，必须 fail-fast。
         raise TypeError("logs_dir must be Path")
-    if not isinstance(dst_path, Path):
+    dst_path_obj: Any = dst_path
+    if not isinstance(dst_path_obj, Path):
         # dst_path 类型不符合预期，必须 fail-fast。
         raise TypeError("dst_path must be Path")
-    if not isinstance(obj, dict):
+    obj_value: Any = obj
+    if not isinstance(obj_value, dict):
         # obj 类型不符合预期，必须 fail-fast。
         raise TypeError("artifact obj must be dict")
 
+    normalized_run_root = run_root_obj
+    normalized_records_dir = records_dir_obj
+    normalized_artifacts_dir = artifacts_dir_obj
+    normalized_logs_dir = logs_dir_obj
+    normalized_dst_path = dst_path_obj
+    normalized_obj = cast(Dict[str, Any], obj_value)
+
     try:
         records_io.get_bound_fact_sources()
-        records_io.write_artifact_json(str(dst_path), obj)
+        records_io.write_artifact_json(str(normalized_dst_path), normalized_obj)
         return
     except FactSourcesNotInitializedError:
         pass
@@ -500,19 +531,38 @@ def _write_artifact_json_bound(
             contracts,
             whitelist,
             semantics,
-            run_root,
-            records_dir,
-            artifacts_dir,
-            logs_dir,
+            normalized_run_root,
+            normalized_records_dir,
+            normalized_artifacts_dir,
+            normalized_logs_dir,
             injection_scope_manifest=injection_scope_manifest
         ):
-            records_io.write_artifact_json(str(dst_path), obj)
+            records_io.write_artifact_json(str(normalized_dst_path), normalized_obj)
     except Exception as exc:
         # 事实源绑定或写盘失败，必须 fail-fast。
         raise RecordsWritePolicyError(
             "artifact write requires bound fact sources: "
-            f"path={dst_path}, error={type(exc).__name__}: {exc}"
+            f"path={normalized_dst_path}, error={type(exc).__name__}: {exc}"
         ) from exc
+
+
+def _ensure_artifact_audit_marker_local(obj: Dict[str, Any]) -> None:
+    """
+    功能：为 artifact 审计对象补齐最小审计标识。
+
+    Add the minimal _artifact_audit marker expected by artifact digests.
+
+    Args:
+        obj: Artifact payload mapping.
+
+    Returns:
+        None.
+    """
+    if "_artifact_audit" not in obj:
+        obj["_artifact_audit"] = {
+            "schema_version": "v1.0",
+            "writer": "records_io"
+        }
 
 
 def finalize_run(
@@ -540,18 +590,27 @@ def finalize_run(
         TypeError: If inputs are of invalid types.
         ValueError: If inputs are structurally invalid.
     """
-    if not isinstance(run_root, Path):
+    run_root_obj: Any = run_root
+    if not isinstance(run_root_obj, Path):
         # run_root 类型不符合预期，必须 fail-fast。
         raise TypeError("run_root must be Path")
-    if not isinstance(records_dir, Path):
+    records_dir_obj: Any = records_dir
+    if not isinstance(records_dir_obj, Path):
         # records_dir 类型不符合预期，必须 fail-fast。
         raise TypeError("records_dir must be Path")
-    if not isinstance(artifacts_dir, Path):
+    artifacts_dir_obj: Any = artifacts_dir
+    if not isinstance(artifacts_dir_obj, Path):
         # artifacts_dir 类型不符合预期，必须 fail-fast。
         raise TypeError("artifacts_dir must be Path")
-    if not isinstance(run_meta, dict):
+    run_meta_obj: Any = run_meta
+    if not isinstance(run_meta_obj, dict):
         # run_meta 类型不符合预期，必须 fail-fast。
         raise TypeError("run_meta must be dict")
+
+    run_root = run_root_obj
+    records_dir = records_dir_obj
+    artifacts_dir = artifacts_dir_obj
+    run_meta = cast(Dict[str, Any], run_meta_obj)
 
     logs_dir = run_root / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -582,13 +641,16 @@ def finalize_run(
         Returns:
             None.
         """
-        warnings = run_meta.get("audit_warnings")
-        if warnings is None:
+        warnings_obj = run_meta.get("audit_warnings")
+        warnings: List[Dict[str, Any]]
+        if warnings_obj is None:
             warnings = []
-        if not isinstance(warnings, list):
+        elif not isinstance(warnings_obj, list):
             # audit_warnings 类型不合法，必须 fail-fast。
             raise TypeError("audit_warnings must be list")
-        entry = {
+        else:
+            warnings = cast(List[Dict[str, Any]], warnings_obj)
+        entry: Dict[str, Any] = {
             "code": code,
             "message": message,
             "exception": exception_name
@@ -602,18 +664,22 @@ def finalize_run(
         bound_fact_sources = None
 
     try:
-        recommended_report = records_io.get_recommended_enforce_report()
-        if recommended_report is None:
+        recommended_report_obj = records_io.get_recommended_enforce_report()
+        recommended_report: Dict[str, Any]
+        if recommended_report_obj is None:
             # 没有推荐门禁报告时，写入结构化空报告。
             recommended_report = {
                 "recommended_enforce_mode": "not_available",
                 "items": [],
                 "reason": "no_recommended_enforce_report_available"
             }
+        else:
+            recommended_report = recommended_report_obj
         run_meta["recommended_enforce_report"] = recommended_report
-        items = recommended_report.get("items")
+        items_obj = recommended_report.get("items")
+        items = cast(List[Any], items_obj) if isinstance(items_obj, list) else None
         item_count = len(items) if isinstance(items, list) else None
-        warning_detail = {
+        warning_detail: Dict[str, Dict[str, Any]] = {
             "recommended_enforce_warning": {
                 "mode": recommended_report.get("recommended_enforce_mode"),
                 "item_count": item_count
@@ -657,8 +723,8 @@ def finalize_run(
     try:
         env_audit_record = _build_env_audit_record()
         # 使用与 artifacts 写盘一致的审计标记，确保 digest 可复算。
-        records_io._ensure_artifact_audit_marker(env_audit_record)
-        env_audit_record_final = {
+        _ensure_artifact_audit_marker_local(env_audit_record)
+        env_audit_record_final: Dict[str, Any] = {
             **env_audit_record,
             "pip_freeze": list(env_audit_record.get("pip_freeze") or [])
         }
@@ -736,7 +802,7 @@ def finalize_run(
         )
 
     # 模型来源审计。
-    model_provenance = None
+    model_provenance: Optional[Dict[str, Any]] = None
     model_provenance_canon_sha256 = None
     model_provenance_error = None
 
@@ -753,13 +819,14 @@ def finalize_run(
         if isinstance(model_cfg_path, Path):
             from main.core import config_loader as cfg_loader
             model_cfg, model_prov = cfg_loader.load_yaml_with_provenance(model_cfg_path)
+            model_cfg_mapping = model_cfg
             
             # 构造 model_provenance 审计对象。
             model_provenance = {
-                "model_id": model_cfg.get("model_id"),
-                "source": model_cfg.get("source"),
-                "revision": model_cfg.get("revision"),
-                "weights_sha256": model_cfg.get("weights_sha256"),
+                "model_id": model_cfg_mapping.get("model_id"),
+                "source": model_cfg_mapping.get("source"),
+                "revision": model_cfg_mapping.get("revision"),
+                "weights_sha256": model_cfg_mapping.get("weights_sha256"),
                 "config_file_sha256": model_prov.file_sha256,
                 "config_canon_sha256": model_prov.canon_sha256
             }
@@ -893,10 +960,11 @@ def finalize_run(
         cudnn_benchmark = None
 
         if isinstance(cfg_from_meta, dict):
-            seed_value = cfg_from_meta.get("seed", "<absent>")
-            rng_backend = cfg_from_meta.get("rng_backend", "<absent>")
-            torch_deterministic = cfg_from_meta.get("torch_deterministic", "<absent>")
-            cudnn_benchmark = cfg_from_meta.get("cudnn_benchmark", "<absent>")
+            cfg_from_meta_mapping = cast(Dict[str, Any], cfg_from_meta)
+            seed_value = cfg_from_meta_mapping.get("seed", "<absent>")
+            rng_backend = cfg_from_meta_mapping.get("rng_backend", "<absent>")
+            torch_deterministic = cfg_from_meta_mapping.get("torch_deterministic", "<absent>")
+            cudnn_benchmark = cfg_from_meta_mapping.get("cudnn_benchmark", "<absent>")
         else:
             # cfg 不可用，显式标记缺失。
             seed_value = "<absent>"
@@ -972,7 +1040,8 @@ def finalize_run(
         command = run_meta.get("command", "unknown")
         
         if isinstance(cfg_from_meta, dict):
-            input_provenance = input_prov_module.build_input_provenance(cfg_from_meta, command)
+            cfg_from_meta_mapping = cast(Dict[str, Any], cfg_from_meta)
+            input_provenance = input_prov_module.build_input_provenance(cfg_from_meta_mapping, command)
         else:
             # cfg 不可用，构造全 <absent> 的输入来源。
             input_provenance = input_prov_module.build_input_provenance({}, command)
@@ -1031,9 +1100,10 @@ def finalize_run(
 
     try:
         if bound_fact_sources is not None:
+            bound_fact_sources_mapping = cast(Dict[str, Any], bound_fact_sources)
             policy_path = run_meta.get("policy_path")
-            semantics_version = bound_fact_sources.get("policy_path_semantics_version")
-            whitelist_version = bound_fact_sources.get("whitelist_version")
+            semantics_version = bound_fact_sources_mapping.get("policy_path_semantics_version")
+            whitelist_version = bound_fact_sources_mapping.get("whitelist_version")
             output_dir_input = run_meta.get("output_dir_input")
             logs_dir = run_root / "logs"
             if isinstance(policy_path, str) and policy_path and policy_path != "<absent>" and isinstance(semantics_version, str) and semantics_version and isinstance(whitelist_version, str) and whitelist_version:
@@ -1147,10 +1217,11 @@ def finalize_run(
                 RECORDS_MANIFEST_NAME,
                 manifest_dir=artifacts_dir
             )
-            manifest = records_io.read_json(str(manifest_path))
-            if not isinstance(manifest, dict):
+            manifest_obj = records_io.read_json(str(manifest_path))
+            if not isinstance(manifest_obj, dict):
                 # manifest 类型不符合预期，必须 fail-fast。
                 raise ValueError("records manifest must be dict")
+            manifest = cast(Dict[str, Any], manifest_obj)
 
             manifest_rel_path = _derive_manifest_rel_path(run_root, manifest_path)
             run_meta["manifest_rel_path"] = manifest_rel_path
@@ -1277,12 +1348,17 @@ def build_run_closure_payload(
         TypeError: If inputs are of invalid types.
         ValueError: If required fields are missing.
     """
-    if not isinstance(run_meta, dict):
+    run_meta_obj: Any = run_meta
+    if not isinstance(run_meta_obj, dict):
         # run_meta 类型不符合预期，必须 fail-fast。
         raise TypeError("run_meta must be dict")
-    if manifest is not None and not isinstance(manifest, dict):
+    manifest_obj: Any = manifest
+    if manifest_obj is not None and not isinstance(manifest_obj, dict):
         # manifest 类型不符合预期，必须 fail-fast。
         raise TypeError("manifest must be dict or None")
+
+    run_meta = cast(Dict[str, Any], run_meta_obj)
+    normalized_manifest = cast(Optional[Dict[str, Any]], manifest_obj)
 
     required_meta_fields = [
         "run_id",
@@ -1302,6 +1378,7 @@ def build_run_closure_payload(
     if not isinstance(status_ok, bool):
         # status_ok 类型不符合预期，必须 fail-fast。
         raise TypeError("status_ok must be bool")
+    anchors: Optional[Dict[str, Any]]
     if status_ok:
         missing_or_absent_fields = _validate_run_meta_for_ok(run_meta)
         if missing_or_absent_fields:
@@ -1313,7 +1390,7 @@ def build_run_closure_payload(
         if status_ok:
             status_reason = RunFailureReason.OK
         else:
-            if manifest is None:
+            if normalized_manifest is None:
                 status_reason = RunFailureReason.RECORDS_ABSENT
             else:
                 # status_reason 缺失且 records 存在，必须 fail-fast。
@@ -1333,14 +1410,15 @@ def build_run_closure_payload(
         if missing_meta:
             # run_meta 字段缺失，必须 fail-fast。
             raise ValueError(f"run_meta missing fields: {missing_meta}")
-        if manifest is None:
+        if normalized_manifest is None:
             # manifest 缺失，必须 fail-fast。
             raise ValueError("manifest must be provided when status_ok is True")
 
-        anchors = manifest.get("anchors")
-        if not isinstance(anchors, dict):
+        anchors_obj = normalized_manifest.get("anchors")
+        if not isinstance(anchors_obj, dict):
             # anchors 类型不符合预期，必须 fail-fast。
             raise ValueError("manifest.anchors must be dict")
+        anchors = cast(Dict[str, Any], anchors_obj)
 
         required_anchor_fields = [
             "contract_bound_digest",
@@ -1352,7 +1430,7 @@ def build_run_closure_payload(
             # anchors 字段缺失，必须 fail-fast。
             raise ValueError(f"manifest.anchors missing fields: {missing_anchor}")
 
-        bundle_canon_sha256 = manifest.get("bundle_canon_sha256")
+        bundle_canon_sha256 = normalized_manifest.get("bundle_canon_sha256")
         if not isinstance(bundle_canon_sha256, str) or not bundle_canon_sha256:
             # bundle_canon_sha256 为空，必须 fail-fast。
             raise ValueError("manifest.bundle_canon_sha256 must be non-empty str")
@@ -1363,17 +1441,21 @@ def build_run_closure_payload(
 
     impl_identity, impl_identity_digest = _normalize_impl_identity_meta(run_meta)
 
-    records_bundle_payload = None
-    facts_anchor_payload = None
+    records_bundle_payload: Optional[Dict[str, Any]] = None
+    facts_anchor_payload: Optional[Dict[str, Any]] = None
     if status_ok:
+        active_anchors = anchors
+        if active_anchors is None:
+            # status_ok 分支下 anchors 必须存在。
+            raise ValueError("manifest.anchors must be available when status_ok is True")
         records_bundle_payload = {
             "manifest_rel_path": run_meta["manifest_rel_path"],
             "bundle_canon_sha256": bundle_canon_sha256
         }
         facts_anchor_payload = {
-            "contract_bound_digest": anchors["contract_bound_digest"],
-            "whitelist_bound_digest": anchors["whitelist_bound_digest"],
-            "policy_path_semantics_bound_digest": anchors["policy_path_semantics_bound_digest"]
+            "contract_bound_digest": active_anchors["contract_bound_digest"],
+            "whitelist_bound_digest": active_anchors["whitelist_bound_digest"],
+            "policy_path_semantics_bound_digest": active_anchors["policy_path_semantics_bound_digest"]
         }
 
     # 从 run_meta 获取 path_audit 相关信息。
@@ -1411,7 +1493,7 @@ def build_run_closure_payload(
         "policy_path_semantics_file_sha256", "policy_path_semantics_canon_sha256",
         "policy_path_semantics_bound_digest"
     ]
-    missing_freeze_anchors = []
+    missing_freeze_anchors: List[str] = []
     for field_name in freeze_anchor_fields:
         value = run_meta.get(field_name)
         if value is None or value == "<absent>":
@@ -1420,10 +1502,12 @@ def build_run_closure_payload(
     # 若冻结锚点缺失且当前不是失败状态，记录为次级失败证据。
     if missing_freeze_anchors and not status_ok:
         # 不覆盖主因，作为次级证据记录到 audit_warnings。
-        warnings = run_meta.get("audit_warnings")
-        if warnings is None:
+        warnings_obj = run_meta.get("audit_warnings")
+        warnings: List[Dict[str, Any]]
+        if warnings_obj is None:
             warnings = []
-        if isinstance(warnings, list):
+        elif isinstance(warnings_obj, list):
+            warnings = cast(List[Dict[str, Any]], warnings_obj)
             warnings.append({
                 "code": "FREEZE_ANCHORS_MISSING_IN_FAILURE_PATH",
                 "message": f"Freeze anchors missing in failure path: {', '.join(missing_freeze_anchors)}",
@@ -1431,7 +1515,7 @@ def build_run_closure_payload(
             })
             run_meta["audit_warnings"] = warnings
     
-    payload = {
+    payload: Dict[str, Any] = {
         "schema_version": RUN_CLOSURE_SCHEMA_VERSION,
         "run_id": run_meta["run_id"],
         "command": run_meta["command"],
@@ -1545,9 +1629,12 @@ def _normalize_impl_identity_meta(run_meta: Dict[str, Any]) -> tuple[Optional[Di
     Raises:
         TypeError: If impl_identity metadata is invalid.
     """
-    if not isinstance(run_meta, dict):
+    run_meta_obj: Any = run_meta
+    if not isinstance(run_meta_obj, dict):
         # run_meta 类型不符合预期，必须 fail-fast。
         raise TypeError("run_meta must be dict")
+
+    run_meta = cast(Dict[str, Any], run_meta_obj)
 
     impl_identity = run_meta.get("impl_identity")
     if impl_identity is None:
@@ -1563,7 +1650,8 @@ def _normalize_impl_identity_meta(run_meta: Dict[str, Any]) -> tuple[Optional[Di
         # impl_identity_digest 类型不合法，必须 fail-fast。
         raise TypeError("impl_identity_digest must be non-empty str")
 
-    return dict(impl_identity), impl_identity_digest
+    impl_identity_mapping = cast(Dict[str, Any], impl_identity)
+    return dict(impl_identity_mapping), impl_identity_digest
 
 
 def _derive_manifest_rel_path(run_root: Path, manifest_path: Path) -> str:
@@ -1579,17 +1667,19 @@ def _derive_manifest_rel_path(run_root: Path, manifest_path: Path) -> str:
     Returns:
         Relative path string.
     """
-    if not isinstance(run_root, Path):
+    run_root_obj: Any = run_root
+    if not isinstance(run_root_obj, Path):
         # run_root 类型不符合预期，必须 fail-fast。
         raise TypeError("run_root must be Path")
-    if not isinstance(manifest_path, Path):
+    manifest_path_obj: Any = manifest_path
+    if not isinstance(manifest_path_obj, Path):
         # manifest_path 类型不符合预期，必须 fail-fast。
         raise TypeError("manifest_path must be Path")
 
     try:
-        return manifest_path.resolve().relative_to(run_root.resolve()).as_posix()
+        return manifest_path_obj.resolve().relative_to(run_root_obj.resolve()).as_posix()
     except ValueError:
-        return manifest_path.name
+        return manifest_path_obj.name
 
 
 def _has_record_files(records_dir: Path) -> bool:
@@ -1605,13 +1695,14 @@ def _has_record_files(records_dir: Path) -> bool:
     Returns:
         True if any record files exist.
     """
-    if not isinstance(records_dir, Path):
+    records_dir_obj: Any = records_dir
+    if not isinstance(records_dir_obj, Path):
         # records_dir 类型不符合预期，必须 fail-fast。
         raise TypeError("records_dir must be Path")
-    if not records_dir.exists() or not records_dir.is_dir():
+    if not records_dir_obj.exists() or not records_dir_obj.is_dir():
         return False
 
-    for path in records_dir.iterdir():
+    for path in records_dir_obj.iterdir():
         if not path.is_file():
             continue
         name = path.name
@@ -1642,9 +1733,12 @@ def _apply_records_absent_defaults(run_meta: Dict[str, Any]) -> None:
     Raises:
         TypeError: If run_meta is invalid.
     """
-    if not isinstance(run_meta, dict):
+    run_meta_obj: Any = run_meta
+    if not isinstance(run_meta_obj, dict):
         # run_meta 类型不符合预期，必须 fail-fast。
         raise TypeError("run_meta must be dict")
+
+    run_meta = cast(Dict[str, Any], run_meta_obj)
 
     run_meta["status_ok"] = False
     status_reason = run_meta.get("status_reason")
@@ -1663,7 +1757,7 @@ def _apply_records_absent_defaults(run_meta: Dict[str, Any]) -> None:
         # reason 已是非 OK，保持不变。
         # 但必须在 details 中补充 records_absent 标记。
         existing_details = run_meta.get("status_details")
-        new_details = {"records_absent": True}
+        new_details: Dict[str, Any] = {"records_absent": True}
         merged_details = _merge_status_details(existing_details, new_details)
         run_meta["status_details"] = merged_details
 
@@ -1685,13 +1779,16 @@ def _apply_records_inconsistent_failure(run_meta: Dict[str, Any], exc: Exception
     Raises:
         TypeError: If inputs are invalid.
     """
-    if not isinstance(run_meta, dict):
+    run_meta_obj: Any = run_meta
+    if not isinstance(run_meta_obj, dict):
         # run_meta 类型不符合预期，必须 fail-fast。
         raise TypeError("run_meta must be dict")
 
+    run_meta = cast(Dict[str, Any], run_meta_obj)
+
     upstream_failure_reason = _extract_upstream_failure_reason(run_meta)
     bundle_error_detail = _extract_bundle_error_detail(exc)
-    new_details = {"bundle_error_detail": bundle_error_detail}
+    new_details: Dict[str, Any] = {"bundle_error_detail": bundle_error_detail}
     if upstream_failure_reason is not None:
         # 审计增强：保留被 records_inconsistent 覆盖的上层失败原因。
         new_details["upstream_failure_reason"] = upstream_failure_reason
@@ -1717,11 +1814,14 @@ def _apply_manifest_anchor_conflict_failure(run_meta: Dict[str, Any], exc: Excep
     Raises:
         TypeError: If run_meta is invalid.
     """
-    if not isinstance(run_meta, dict):
+    run_meta_obj: Any = run_meta
+    if not isinstance(run_meta_obj, dict):
         # run_meta 类型不符合预期，必须 fail-fast。
         raise TypeError("run_meta must be dict")
 
-    conflict_detail = {
+    run_meta = cast(Dict[str, Any], run_meta_obj)
+
+    conflict_detail: Dict[str, Any] = {
         "kind": "manifest_anchor_conflict",
         "error_message": str(exc)
     }
@@ -1752,19 +1852,22 @@ def _merge_status_details(
     Raises:
         TypeError: If new_details is invalid.
     """
-    if not isinstance(new_details, dict):
+    new_details_obj: Any = new_details
+    if not isinstance(new_details_obj, dict):
         # new_details 类型不符合预期，必须 fail-fast。
         raise TypeError("new_details must be dict")
 
+    normalized_new_details = cast(Dict[str, Any], new_details_obj)
+
     if existing_details is None:
-        return dict(new_details)
+        return dict(normalized_new_details)
     if isinstance(existing_details, dict):
-        merged = dict(existing_details)
-        merged.update(new_details)
+        merged: Dict[str, Any] = dict(cast(Dict[str, Any], existing_details))
+        merged.update(normalized_new_details)
         return merged
     return {
         "prior_status_details": existing_details,
-        **new_details
+        **normalized_new_details
     }
 
 
@@ -1783,17 +1886,17 @@ def _extract_bundle_error_detail(exc: Exception) -> Dict[str, Any]:
     Raises:
         TypeError: If exc is invalid.
     """
-    if not isinstance(exc, Exception):
-        # exc 类型不符合预期，必须 fail-fast。
-        raise TypeError("exc must be Exception")
-
     message = str(exc)
     field_name = getattr(exc, "field_name", None)
-    files = getattr(exc, "files", None)
-    if isinstance(field_name, str) and field_name and isinstance(files, list):
+    files_obj = getattr(exc, "files", None)
+    if isinstance(field_name, str) and field_name and isinstance(files_obj, list):
+        files_list: List[str] = []
+        files_values = cast(List[Any], files_obj)
+        for item_obj in files_values:
+            files_list.append(str(item_obj))
         return {
             "field_name": field_name,
-            "files": [str(item) for item in files],
+            "files": files_list,
             "error_message": message
         }
     # 兜底路径：仅保留 error_message，避免绑定 message 模板语义。
@@ -1821,9 +1924,12 @@ def _extract_upstream_failure_reason(run_meta: Dict[str, Any]) -> Optional[str]:
     Raises:
         TypeError: If run_meta is invalid.
     """
-    if not isinstance(run_meta, dict):
+    run_meta_obj: Any = run_meta
+    if not isinstance(run_meta_obj, dict):
         # run_meta 类型不符合预期，必须 fail-fast。
         raise TypeError("run_meta must be dict")
+
+    run_meta = cast(Dict[str, Any], run_meta_obj)
 
     status_reason = run_meta.get("status_reason")
     if isinstance(status_reason, RunFailureReason):
@@ -1856,14 +1962,14 @@ def _apply_run_closure_exception(run_meta: Dict[str, Any], exc: Exception) -> No
     Raises:
         TypeError: If inputs are invalid.
     """
-    if not isinstance(run_meta, dict):
+    run_meta_obj: Any = run_meta
+    if not isinstance(run_meta_obj, dict):
         # run_meta 类型不符合预期，必须 fail-fast。
         raise TypeError("run_meta must be dict")
-    if not isinstance(exc, Exception):
-        # exc 类型不符合预期，必须 fail-fast。
-        raise TypeError("exc must be Exception")
 
-    closure_exception = {
+    run_meta = cast(Dict[str, Any], run_meta_obj)
+
+    closure_exception: Dict[str, Any] = {
         "type": type(exc).__name__,
         "message": str(exc)
     }
@@ -1892,9 +1998,12 @@ def _validate_run_meta_for_ok(run_meta: Dict[str, Any]) -> list[str]:
     Raises:
         TypeError: If run_meta is invalid.
     """
-    if not isinstance(run_meta, dict):
+    run_meta_obj: Any = run_meta
+    if not isinstance(run_meta_obj, dict):
         # run_meta 类型不符合预期，必须 fail-fast。
         raise TypeError("run_meta must be dict")
+
+    run_meta = cast(Dict[str, Any], run_meta_obj)
 
     required_fields = [
         "run_id",
@@ -1909,7 +2018,7 @@ def _validate_run_meta_for_ok(run_meta: Dict[str, Any]) -> list[str]:
     if run_meta.get("impl_identity") is not None or run_meta.get("impl_identity_digest") is not None:
         required_fields.append("impl_identity_digest")
 
-    missing_or_absent_fields = []
+    missing_or_absent_fields: List[str] = []
     for field_name in required_fields:
         value = run_meta.get(field_name)
         if value is None:
@@ -1945,22 +2054,29 @@ def _apply_run_meta_invalid_for_ok(
     Raises:
         TypeError: If inputs are invalid.
     """
-    if not isinstance(run_meta, dict):
+    run_meta_obj: Any = run_meta
+    if not isinstance(run_meta_obj, dict):
         # run_meta 类型不符合预期，必须 fail-fast。
         raise TypeError("run_meta must be dict")
-    if not isinstance(missing_or_absent_fields, list):
+    missing_fields_obj: Any = missing_or_absent_fields
+    if not isinstance(missing_fields_obj, list):
         # missing_or_absent_fields 类型不符合预期，必须 fail-fast。
         raise TypeError("missing_or_absent_fields must be list")
-    for field_name in missing_or_absent_fields:
-        if not isinstance(field_name, str) or not field_name:
+
+    run_meta = cast(Dict[str, Any], run_meta_obj)
+    normalized_missing_fields: List[str] = []
+    missing_fields = cast(List[Any], missing_fields_obj)
+    for field_name_obj in missing_fields:
+        if not isinstance(field_name_obj, str) or not field_name_obj:
             # missing_or_absent_fields 成员不合法，必须 fail-fast。
             raise TypeError("missing_or_absent_fields must contain non-empty str values")
+        normalized_missing_fields.append(field_name_obj)
 
     status_details = _merge_status_details(
         run_meta.get("status_details"),
         {
             "kind": "run_meta_invalid_for_ok",
-            "missing_or_absent_fields": sorted(set(missing_or_absent_fields))
+            "missing_or_absent_fields": sorted(set(normalized_missing_fields))
         }
     )
     run_meta["status_ok"] = False
@@ -1988,17 +2104,23 @@ def _merge_manifest_anchors_into_run_meta(
         TypeError: If inputs are invalid.
         ValueError: If anchor conflicts detected (manifest vs run_meta mismatch).
     """
-    if not isinstance(run_meta, dict):
+    run_meta_obj: Any = run_meta
+    if not isinstance(run_meta_obj, dict):
         # run_meta 类型不符合预期，必须 fail-fast。
         raise TypeError("run_meta must be dict")
-    if not isinstance(manifest, dict):
+    manifest_obj: Any = manifest
+    if not isinstance(manifest_obj, dict):
         # manifest 类型不符合预期，必须 fail-fast。
         raise TypeError("manifest must be dict")
 
-    anchors = manifest.get("anchors")
-    if not isinstance(anchors, dict):
+    run_meta = cast(Dict[str, Any], run_meta_obj)
+    manifest = cast(Dict[str, Any], manifest_obj)
+
+    anchors_obj = manifest.get("anchors")
+    if not isinstance(anchors_obj, dict):
         # anchors 类型不符合预期，必须 fail-fast。
         raise ValueError("manifest.anchors must be dict")
+    anchors = cast(Dict[str, Any], anchors_obj)
 
     # 要回填的关键字段列表。
     required_anchor_fields = [
@@ -2008,7 +2130,7 @@ def _merge_manifest_anchors_into_run_meta(
     ]
 
     # 检查冲突：若 run_meta 中字段存在且与 manifest 不一致，则 fail-fast。
-    conflicts = []
+    conflicts: List[Dict[str, Any]] = []
     for field_name in required_anchor_fields:
         manifest_value = anchors.get(field_name)
         existing_value = run_meta.get(field_name)
@@ -2054,9 +2176,12 @@ def _ensure_run_meta_minimal_contract(run_meta: Dict[str, Any]) -> None:
     Raises:
         TypeError: If run_meta is invalid.
     """
-    if not isinstance(run_meta, dict):
+    run_meta_obj: Any = run_meta
+    if not isinstance(run_meta_obj, dict):
         # run_meta 类型不符合预期，必须 fail-fast。
         raise TypeError("run_meta must be dict")
+
+    run_meta = cast(Dict[str, Any], run_meta_obj)
 
     required_fields = [
         "run_id",
@@ -2085,7 +2210,7 @@ def _ensure_run_meta_minimal_contract(run_meta: Dict[str, Any]) -> None:
         "policy_path_semantics_bound_digest"
     ]
 
-    missing_fields = []
+    missing_fields: List[str] = []
     for field_name in required_fields:
         value = run_meta.get(field_name)
         if isinstance(value, str) and value == "<absent>":
@@ -2128,31 +2253,40 @@ def _cleanup_run_meta_missing_fields(run_meta: Dict[str, Any]) -> None:
     Raises:
         TypeError: If run_meta is invalid.
     """
-    if not isinstance(run_meta, dict):
+    run_meta_obj: Any = run_meta
+    if not isinstance(run_meta_obj, dict):
         # run_meta 类型不符合预期，必须 fail-fast。
         raise TypeError("run_meta must be dict")
+
+    run_meta = cast(Dict[str, Any], run_meta_obj)
 
     status_details = run_meta.get("status_details")
     if not isinstance(status_details, dict):
         return
 
-    missing_fields = status_details.get("run_meta_missing_fields")
-    if not isinstance(missing_fields, list):
+    status_details_mapping = cast(Dict[str, Any], status_details)
+
+    missing_fields_obj = status_details_mapping.get("run_meta_missing_fields")
+    if not isinstance(missing_fields_obj, list):
         return
 
-    unresolved = []
-    for field_name in missing_fields:
+    unresolved: List[str] = []
+    missing_fields = cast(List[Any], missing_fields_obj)
+    for field_name_obj in missing_fields:
+        if not isinstance(field_name_obj, str) or not field_name_obj:
+            continue
+        field_name = field_name_obj
         value = run_meta.get(field_name)
         if value is None or value == "<absent>" or value == "unknown" or value == "":
             unresolved.append(field_name)
 
     if unresolved:
-        status_details["run_meta_missing_fields"] = unresolved
+        status_details_mapping["run_meta_missing_fields"] = unresolved
     else:
-        status_details.pop("run_meta_missing_fields", None)
+        status_details_mapping.pop("run_meta_missing_fields", None)
 
-    if status_details:
-        run_meta["status_details"] = status_details
+    if status_details_mapping:
+        run_meta["status_details"] = status_details_mapping
     else:
         run_meta["status_details"] = None
 
@@ -2173,9 +2307,12 @@ def _validate_run_meta_timestamps(run_meta: Dict[str, Any]) -> None:
         TypeError: If run_meta is invalid or timestamps are not strings.
         ValueError: If timestamps are not valid UTC ISO Z strings.
     """
-    if not isinstance(run_meta, dict):
+    run_meta_obj: Any = run_meta
+    if not isinstance(run_meta_obj, dict):
         # run_meta 类型不符合预期，必须 fail-fast。
         raise TypeError("run_meta must be dict")
+
+    run_meta = cast(Dict[str, Any], run_meta_obj)
 
     time_utils.validate_utc_iso_z(run_meta.get("created_at_utc"), "run_meta.created_at_utc")
     time_utils.validate_utc_iso_z(run_meta.get("started_at"), "run_meta.started_at")
@@ -2197,13 +2334,16 @@ def _resolve_bound_fact_sources(run_meta: Dict[str, Any]) -> tuple[Optional[Dict
     Raises:
         TypeError: If run_meta is invalid.
     """
-    if not isinstance(run_meta, dict):
+    run_meta_obj: Any = run_meta
+    if not isinstance(run_meta_obj, dict):
         # run_meta 类型不符合预期，必须 fail-fast。
         raise TypeError("run_meta must be dict")
 
-    bound_fact_sources = run_meta.get("bound_fact_sources")
-    if isinstance(bound_fact_sources, dict):
-        return bound_fact_sources, "bound"
+    run_meta = cast(Dict[str, Any], run_meta_obj)
+
+    bound_fact_sources_obj = run_meta.get("bound_fact_sources")
+    if isinstance(bound_fact_sources_obj, dict):
+        return cast(Dict[str, Any], bound_fact_sources_obj), "bound"
 
     try:
         return records_io.get_bound_fact_sources(), "bound"
@@ -2230,14 +2370,19 @@ def _backfill_run_meta_contract_from_fact_sources(
     Raises:
         TypeError: If run_meta is invalid.
     """
-    if not isinstance(run_meta, dict):
+    run_meta_obj: Any = run_meta
+    if not isinstance(run_meta_obj, dict):
         # run_meta 类型不符合预期，必须 fail-fast。
         raise TypeError("run_meta must be dict")
     if bound_fact_sources is None:
         return
-    if not isinstance(bound_fact_sources, dict):
+    bound_fact_sources_obj: Any = bound_fact_sources
+    if not isinstance(bound_fact_sources_obj, dict):
         # bound_fact_sources 类型不合法，必须 fail-fast。
         raise TypeError("bound_fact_sources must be dict or None")
+
+    run_meta = cast(Dict[str, Any], run_meta_obj)
+    bound_fact_sources = cast(Dict[str, Any], bound_fact_sources_obj)
 
     contract_fields = [
         "contract_version",
@@ -2296,9 +2441,12 @@ def bind_freeze_anchors_to_run_meta(
     Raises:
         TypeError: If run_meta is invalid.
     """
-    if not isinstance(run_meta, dict):
+    run_meta_obj: Any = run_meta
+    if not isinstance(run_meta_obj, dict):
         # run_meta 类型不符合预期，必须 fail-fast。
         raise TypeError("run_meta must be dict")
+
+    run_meta = cast(Dict[str, Any], run_meta_obj)
 
     # 构建快照以获取所有字段。
     snapshot = records_io.build_fact_sources_snapshot(
@@ -2339,39 +2487,6 @@ def bind_freeze_anchors_to_run_meta(
             run_meta[field_name] = "<absent>"
         else:
             run_meta[field_name] = value
-
-
-def _normalize_records_absence_values(record: Dict[str, Any]) -> None:
-    """
-    功能：规范化 records 中所有缺失值为统一的 "<absent>" 哨兵。
-    
-    Normalize all absence/null/unknown values in records to the frozen sentinel "<absent>".
-    Ensures consistent semantics across all records and run_closure outputs.
-    
-    Args:
-        record: Record dict to normalize in-place.
-    
-    Returns:
-        None.
-    
-    Raises:
-        TypeError: If record is not dict.
-    """
-    if not isinstance(record, dict):
-        raise TypeError(f"record must be dict, got {type(record)}")
-    
-    # 遍历所有记录字段，将 None / "unknown" / "" 规范化为 "<absent>"。
-    # 但保留某些特殊字段的 "unknown" 值。
-    special_fields_allowing_unknown = {"failure_stage"}
-    
-    for key, value in list(record.items()):
-        # 跳过特殊字段
-        if key in special_fields_allowing_unknown:
-            continue
-        
-        # 规范化缺失值
-        if value is None or (isinstance(value, str) and (value == "" or value == "unknown")):
-            record[key] = "<absent>"
 
 
 # run_closure 字段族常量：用于类型分层归一化。
@@ -2416,9 +2531,12 @@ def _normalize_run_closure_absence_values(payload: Dict[str, Any]) -> None:
     Raises:
         TypeError: If payload is invalid.
     """
-    if not isinstance(payload, dict):
+    payload_obj: Any = payload
+    if not isinstance(payload_obj, dict):
         # payload 类型不符合预期，必须 fail-fast。
         raise TypeError("payload must be dict")
+
+    payload = cast(Dict[str, Any], payload_obj)
 
     for key, value in list(payload.items()):
         if key in DICT_OR_NONE_FIELDS:
@@ -2453,9 +2571,12 @@ def _normalize_run_closure_missing(payload: Dict[str, Any]) -> Dict[str, Any]:
     Raises:
         TypeError: If payload is invalid.
     """
-    if not isinstance(payload, dict):
+    payload_obj: Any = payload
+    if not isinstance(payload_obj, dict):
         # payload 类型不符合预期，必须 fail-fast。
         raise TypeError("payload must be dict")
+
+    payload = cast(Dict[str, Any], payload_obj)
 
     required_fields = [
         "impl_identity",
@@ -2478,73 +2599,3 @@ def _normalize_run_closure_missing(payload: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
-def _extract_bundle_field_name(message: str) -> str:
-    """
-    功能：从错误消息提取 field_name。
-
-    Extract field_name from bundle error message.
-
-    Args:
-        message: Error message string.
-
-    Returns:
-        Field name or "unknown" if not found.
-
-    Raises:
-        TypeError: If message is invalid.
-    """
-    if not isinstance(message, str):
-        # message 类型不符合预期，必须 fail-fast。
-        raise TypeError("message must be str")
-
-    marker = "field_name="
-    start = message.find(marker)
-    if start == -1:
-        return "unknown"
-    start += len(marker)
-    end = message.find(",", start)
-    if end == -1:
-        end = len(message)
-    field_name = message[start:end].strip()
-    return field_name or "unknown"
-
-
-def _extract_bundle_files(message: str) -> list[str]:
-    """
-    功能：从错误消息提取 files 列表。
-
-    Extract file list from bundle error message.
-
-    Args:
-        message: Error message string.
-
-    Returns:
-        List of file paths (may be empty).
-
-    Raises:
-        TypeError: If message is invalid.
-    """
-    if not isinstance(message, str):
-        # message 类型不符合预期，必须 fail-fast。
-        raise TypeError("message must be str")
-
-    files_marker = "files="
-    start = message.find(files_marker)
-    if start != -1:
-        raw = message[start + len(files_marker):].strip()
-        try:
-            parsed = ast.literal_eval(raw)
-            if isinstance(parsed, list):
-                return [str(item) for item in parsed]
-        except Exception:
-            pass
-        raw = raw.strip("[]")
-        return [item.strip().strip("'\"") for item in raw.split(",") if item.strip()]
-
-    file_marker = "file="
-    start = message.find(file_marker)
-    if start != -1:
-        value = message[start + len(file_marker):].strip()
-        return [value] if value else []
-
-    return []

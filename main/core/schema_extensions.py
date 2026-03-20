@@ -11,7 +11,7 @@ records_schema_extensions.yaml 加载与解析
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, cast
 
 from main.core import config_loader
 from main.core import digests
@@ -120,28 +120,29 @@ def _validate_extension_entry(entry: Any, index: int) -> Tuple[RecordsSchemaExte
         # entry 类型不符合预期，必须 fail-fast。
         raise TypeError(f"fields[{index}] must be dict")
 
-    path_value = entry.get("path")
+    entry_mapping = cast(Dict[str, Any], entry)
+    path_value: Any = entry_mapping.get("path")
     if not isinstance(path_value, str) or not path_value:
         errors.append(f"fields[{index}].path must be non-empty str")
         return None, errors  # type: ignore
 
-    layer = entry.get("layer")
+    layer: Any = entry_mapping.get("layer")
     if not isinstance(layer, str) or not layer:
         errors.append(f"fields[{index}].layer must be non-empty str")
 
-    type_value = entry.get("type")
+    type_value: Any = entry_mapping.get("type")
     if not isinstance(type_value, str) or not type_value:
         errors.append(f"fields[{index}].type must be non-empty str")
 
-    required = entry.get("required")
+    required: Any = entry_mapping.get("required")
     if not isinstance(required, bool):
         errors.append(f"fields[{index}].required must be bool")
 
-    missing_semantics = entry.get("missing_semantics")
+    missing_semantics: Any = entry_mapping.get("missing_semantics")
     if not isinstance(missing_semantics, str) or not missing_semantics:
         errors.append(f"fields[{index}].missing_semantics must be non-empty str")
 
-    description = entry.get("description")
+    description: Any = entry_mapping.get("description")
     if not isinstance(description, str):
         errors.append(f"fields[{index}].description must be str")
 
@@ -173,38 +174,41 @@ def _validate_extensions_schema(obj: Dict[str, Any]) -> Tuple[List[str], List[Re
     Raises:
         TypeError: If obj or fields are invalid types.
     """
-    if not isinstance(obj, dict):
+    obj_value: Any = obj
+    if not isinstance(obj_value, dict):
         # obj 类型不符合预期，必须 fail-fast。
         raise TypeError("records_schema_extensions root must be dict")
+
+    obj_mapping = cast(Dict[str, Any], obj_value)
 
     errors: List[str] = []
     entries: List[RecordsSchemaExtension] = []
 
-    version = obj.get("version")
+    version = obj_mapping.get("version")
     if not isinstance(version, str) or not version:
         errors.append("version must be non-empty str")
 
-    append_only = obj.get("append_only")
+    append_only = obj_mapping.get("append_only")
     if not isinstance(append_only, bool):
         errors.append("append_only must be bool")
 
     # 提取并校验 type_definitions（可选）
-    type_definitions = obj.get("type_definitions")
+    type_definitions = obj_mapping.get("type_definitions")
     if type_definitions is not None:
         if not isinstance(type_definitions, dict):
             errors.append("type_definitions must be dict when present")
 
     # 提取并校验 fields（必须）
-    fields = obj.get("fields")
+    fields = obj_mapping.get("fields")
     if not isinstance(fields, list):
         errors.append("fields must be list")
         return errors, []
 
-    for index, entry in enumerate(fields):
+    field_entries = cast(List[Any], fields)
+    for index, entry in enumerate(field_entries):
         parsed_entry, entry_errors = _validate_extension_entry(entry, index)
         errors.extend(entry_errors)
-        if parsed_entry is not None:
-            entries.append(parsed_entry)
+        entries.append(parsed_entry)
 
     return errors, entries
 
@@ -235,21 +239,28 @@ def load_records_schema_extensions(
         MissingRequiredFieldError: If required fields are missing (unless allow_missing=True).
         FrozenContractPathNotAuthoritativeError: If non-authoritative path is used.
     """
-    if not isinstance(path, str) or not path:
+    path_obj: Any = path
+    if not isinstance(path_obj, str) or not path_obj:
         # path 输入不合法，必须 fail-fast。
         raise TypeError("path must be non-empty str")
-    if not isinstance(allow_non_authoritative, bool):
+    allow_non_authoritative_obj: Any = allow_non_authoritative
+    if not isinstance(allow_non_authoritative_obj, bool):
         # allow_non_authoritative 输入不合法，必须 fail-fast。
         raise TypeError("allow_non_authoritative must be bool")
-    if not isinstance(allow_missing, bool):
+    allow_missing_obj: Any = allow_missing
+    if not isinstance(allow_missing_obj, bool):
         # allow_missing 输入不合法，必须 fail-fast。
         raise TypeError("allow_missing must be bool")
 
-    normalized_path = Path(path).as_posix()
+    normalized_path_input = path_obj
+    allow_non_authoritative_flag = allow_non_authoritative_obj
+    allow_missing_flag = allow_missing_obj
+
+    normalized_path = Path(normalized_path_input).as_posix()
     if normalized_path != "configs/records_schema_extensions.yaml":
         # 非权威路径例外仅测试环境可用。
         is_test = _is_test_environment()
-        if not (allow_non_authoritative and is_test):
+        if not (allow_non_authoritative_flag and is_test):
             raise FrozenContractPathNotAuthoritativeError(
                 "records_schema_extensions path is not authoritative",
                 field_path="records_schema_extensions_source_path",
@@ -257,10 +268,10 @@ def load_records_schema_extensions(
             )
 
     # 检查文件是否存在
-    path_obj = Path(path)
-    if not path_obj.exists():
+    path_value = Path(normalized_path_input)
+    if not path_value.exists():
         # 文件缺失处理：若允许则返回空扩展，否则 fail-fast。
-        if allow_missing:
+        if allow_missing_flag:
             # 向后兼容：返回空扩展基线结构。
             return EmptyRecordsSchemaExtensions(entries=[], entry_paths=[])
         else:
@@ -268,22 +279,25 @@ def load_records_schema_extensions(
                 "records_schema_extensions.yaml file not found"
             )
 
-    obj, provenance = config_loader.load_yaml_with_provenance(path)
-    if not isinstance(obj, dict):
+    obj, provenance = config_loader.load_yaml_with_provenance(normalized_path_input)
+    obj_value: Any = obj
+    if not isinstance(obj_value, dict):
         # YAML 根类型不符合预期，必须 fail-fast。
         raise TypeError("records_schema_extensions root must be dict")
 
-    validation_errors, entries = _validate_extensions_schema(obj)
+    obj_mapping = cast(Dict[str, Any], obj_value)
+
+    validation_errors, entries = _validate_extensions_schema(obj_mapping)
     if validation_errors:
         # 架构校验失败，必须 fail-fast。
         error_msg = "; ".join(validation_errors)
         raise TypeError(f"records_schema_extensions validation failed: {error_msg}")
 
-    extensions_version = obj.get("version")
+    extensions_version = obj_mapping.get("version")
     if not isinstance(extensions_version, str) or not extensions_version:
         raise MissingRequiredFieldError("version missing in records_schema_extensions")
 
-    extensions_digest = digests.semantic_digest(obj)
+    extensions_digest = digests.semantic_digest(obj_mapping)
     extensions_file_sha256 = provenance.file_sha256
     extensions_canon_sha256 = provenance.canon_sha256
     extensions_bound_digest = digests.bound_digest(
@@ -296,7 +310,7 @@ def load_records_schema_extensions(
     entry_paths = [entry.path for entry in entries]
 
     return RecordsSchemaExtensions(
-        data=obj,
+        data=obj_mapping,
         extensions_version=extensions_version,
         extensions_digest=extensions_digest,
         extensions_file_sha256=extensions_file_sha256,

@@ -9,7 +9,7 @@
 
 import os
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Set, cast
 from dataclasses import dataclass
 
 from . import config_loader
@@ -492,25 +492,34 @@ def load_frozen_contracts(
         MissingRequiredFieldError: If contract_version is missing.
         FrozenContractPathNotAuthoritativeError: If non-authoritative path is used.
     """
-    if not isinstance(path, str) or not path:
+    path_obj: Any = path
+    if not isinstance(path_obj, str) or not path_obj:
         # path 输入不合法，必须 fail-fast。
         raise TypeError("path must be non-empty str")
-    if not isinstance(allow_non_authoritative, bool):
+    allow_non_authoritative_obj: Any = allow_non_authoritative
+    if not isinstance(allow_non_authoritative_obj, bool):
         # allow_non_authoritative 输入不合法，必须 fail-fast。
         raise TypeError("allow_non_authoritative must be bool")
 
-    normalized_path = Path(path).as_posix()
+    normalized_input_path = path_obj
+    allow_non_authoritative_flag = allow_non_authoritative_obj
+
+    normalized_path = Path(normalized_input_path).as_posix()
     if normalized_path != "configs/frozen_contracts.yaml":
         # 非权威路径例外仅测试环境可用
         is_test = _is_test_environment()
-        if not (allow_non_authoritative and is_test):
+        if not (allow_non_authoritative_flag and is_test):
             raise FrozenContractPathNotAuthoritativeError(
                 "frozen_contracts path is not authoritative",
                 field_path="contract_source_path",
                 actual_path=normalized_path
             )
     # 加载 YAML 与 provenance
-    obj, provenance = config_loader.load_yaml_with_provenance(path)
+    obj, provenance = config_loader.load_yaml_with_provenance(normalized_input_path)
+    obj_value: Any = obj
+    if not isinstance(obj_value, dict):
+        raise TypeError("Type mismatch at <root>: expected mapping")
+    obj = cast(Dict[str, Any], obj_value)
     
     # 解析 contract_version
     contract_version = obj.get("contract_version")
@@ -721,10 +730,12 @@ def _require_frozen_contracts(contracts: FrozenContracts) -> None:
     Raises:
         TypeError: If input is not FrozenContracts or data is not mapping.
     """
-    if not isinstance(contracts, FrozenContracts):
+    contracts_obj: Any = contracts
+    if not isinstance(contracts_obj, FrozenContracts):
         # 输入类型不符合预期，必须 fail-fast。
         raise TypeError("Type mismatch at <root>: expected FrozenContracts")
-    if not isinstance(contracts.data, dict):
+    contract_data: Any = contracts_obj.data
+    if not isinstance(contract_data, dict):
         # data 类型不符合预期，必须 fail-fast。
         raise TypeError("Type mismatch at <root>: expected mapping for contracts.data")
 
@@ -746,16 +757,20 @@ def _get_required_field(mapping: Dict[str, Any], key: str, field_path: str) -> A
     Raises:
         MissingRequiredFieldError: If key is missing.
     """
-    if not isinstance(mapping, dict):
+    mapping_obj: Any = mapping
+    if not isinstance(mapping_obj, dict):
         # mapping 类型不符合预期，必须 fail-fast。
         raise TypeError(f"Type mismatch at {field_path}: expected mapping")
-    if not isinstance(key, str) or not key:
+    key_obj: Any = key
+    if not isinstance(key_obj, str) or not key_obj:
         # key 输入不合法，必须 fail-fast。
         raise ValueError("key must be non-empty str")
-    if key not in mapping:
+    mapping_value = cast(Dict[str, Any], mapping_obj)
+    normalized_key = key_obj
+    if normalized_key not in mapping_value:
         # 缺失必需字段，必须 fail-fast。
         raise MissingRequiredFieldError(f"Missing required field: {field_path}")
-    return mapping[key]
+    return mapping_value[normalized_key]
 
 
 def _require_mapping(value: Any, field_path: str) -> Dict[str, Any]:
@@ -774,15 +789,16 @@ def _require_mapping(value: Any, field_path: str) -> Dict[str, Any]:
     Raises:
         TypeError: If value is not a mapping.
     """
-    if not isinstance(field_path, str) or not field_path:
+    field_path_obj: Any = field_path
+    if not isinstance(field_path_obj, str) or not field_path_obj:
         # field_path 输入不合法，必须 fail-fast。
         raise ValueError("field_path must be non-empty str")
     if not isinstance(value, dict):
         # 字段类型不匹配，必须 fail-fast。
         raise TypeError(
-            f"Type mismatch at {field_path}: expected mapping, got {type(value).__name__}"
+            f"Type mismatch at {field_path_obj}: expected mapping, got {type(value).__name__}"
         )
-    return value
+    return cast(Dict[str, Any], value)
 
 
 def _require_str(value: Any, field_path: str) -> str:
@@ -801,13 +817,14 @@ def _require_str(value: Any, field_path: str) -> str:
     Raises:
         TypeError: If value is not a string.
     """
-    if not isinstance(field_path, str) or not field_path:
+    field_path_obj: Any = field_path
+    if not isinstance(field_path_obj, str) or not field_path_obj:
         # field_path 输入不合法，必须 fail-fast。
         raise ValueError("field_path must be non-empty str")
     if not isinstance(value, str):
         # 字段类型不匹配，必须 fail-fast。
         raise TypeError(
-            f"Type mismatch at {field_path}: expected str, got {type(value).__name__}"
+            f"Type mismatch at {field_path_obj}: expected str, got {type(value).__name__}"
         )
     return value
 
@@ -828,13 +845,14 @@ def _require_bool(value: Any, field_path: str) -> bool:
     Raises:
         TypeError: If value is not a boolean.
     """
-    if not isinstance(field_path, str) or not field_path:
+    field_path_obj: Any = field_path
+    if not isinstance(field_path_obj, str) or not field_path_obj:
         # field_path 输入不合法，必须 fail-fast。
         raise ValueError("field_path must be non-empty str")
     if not isinstance(value, bool):
         # 字段类型不匹配，必须 fail-fast。
         raise TypeError(
-            f"Type mismatch at {field_path}: expected bool, got {type(value).__name__}"
+            f"Type mismatch at {field_path_obj}: expected bool, got {type(value).__name__}"
         )
     return value
 
@@ -855,15 +873,16 @@ def _require_list(value: Any, field_path: str) -> List[Any]:
     Raises:
         TypeError: If value is not a list.
     """
-    if not isinstance(field_path, str) or not field_path:
+    field_path_obj: Any = field_path
+    if not isinstance(field_path_obj, str) or not field_path_obj:
         # field_path 输入不合法，必须 fail-fast。
         raise ValueError("field_path must be non-empty str")
     if not isinstance(value, list):
         # 字段类型不匹配，必须 fail-fast。
         raise TypeError(
-            f"Type mismatch at {field_path}: expected list, got {type(value).__name__}"
+            f"Type mismatch at {field_path_obj}: expected list, got {type(value).__name__}"
         )
-    return value
+    return cast(List[Any], value)
 
 
 def _require_list_of_str(value: Any, field_path: str) -> List[str]:
@@ -913,11 +932,6 @@ def _require_mapping_of_str_to_list_of_str(value: Any, field_path: str) -> Dict[
     mapping = _require_mapping(value, field_path)
     validated: Dict[str, List[str]] = {}
     for key, item in mapping.items():
-        if not isinstance(key, str):
-            # 映射键类型不匹配，必须 fail-fast。
-            raise TypeError(
-                f"Type mismatch at {field_path}: expected str keys, got {type(key).__name__}"
-            )
         list_value = _require_list_of_str(item, f"{field_path}.{key}")
         validated[key] = list_value
     return validated
@@ -942,11 +956,6 @@ def _require_mapping_of_str_to_str(value: Any, field_path: str) -> Dict[str, str
     mapping = _require_mapping(value, field_path)
     validated: Dict[str, str] = {}
     for key, item in mapping.items():
-        if not isinstance(key, str):
-            # 映射键类型不匹配，必须 fail-fast。
-            raise TypeError(
-                f"Type mismatch at {field_path}: expected str keys, got {type(key).__name__}"
-            )
         if not isinstance(item, str):
             # 映射值类型不匹配，必须 fail-fast。
             raise TypeError(
@@ -1009,11 +1018,6 @@ def _parse_external_fact_sources(root: Dict[str, Any]) -> Dict[str, ExternalFact
     )
     parsed: Dict[str, ExternalFactSourceSpec] = {}
     for source_name, source_value in sources.items():
-        if not isinstance(source_name, str):
-            # 外部事实源名称类型不匹配，必须 fail-fast。
-            raise TypeError(
-                "Type mismatch at <root>.external_fact_sources: expected str keys"
-            )
         source_path = f"<root>.external_fact_sources.{source_name}"
         source_mapping = _require_mapping(source_value, source_path)
         path_value = _require_str(
@@ -1105,11 +1109,6 @@ def _parse_gate_enforcement_requirements(root: Dict[str, Any]) -> Dict[str, Gate
     )
     parsed: Dict[str, GateEnforcementRequirement] = {}
     for requirement_name, requirement_value in requirements.items():
-        if not isinstance(requirement_name, str):
-            # 门禁要求名称类型不匹配，必须 fail-fast。
-            raise TypeError(
-                "Type mismatch at <root>.gate_enforcement_requirements: expected str keys"
-            )
         requirement_path = f"<root>.gate_enforcement_requirements.{requirement_name}"
         requirement_mapping = _require_mapping(requirement_value, requirement_path)
         enforcement = _require_str(
@@ -1479,12 +1478,14 @@ def _parse_records_schema(root: Dict[str, Any]) -> RecordsSchemaSpec:
     decision_obligation_presence = False
     decision_allow_null = False
     if audit_obligations is not None:
-        if not isinstance(audit_obligations, dict):
+        audit_obligations_obj: Any = audit_obligations
+        if not isinstance(audit_obligations_obj, dict):
             raise TypeError("Type mismatch at <root>.records_schema.audit_obligations: expected mapping")
-        decision_field_presence_str = audit_obligations.get("decision_field_presence")
+        audit_obligations_mapping = cast(Dict[str, Any], audit_obligations_obj)
+        decision_field_presence_str: Any = audit_obligations_mapping.get("decision_field_presence")
         if decision_field_presence_str == "required":
             decision_obligation_presence = True
-        decision_allow_null = audit_obligations.get("decision_field_allow_null", False)
+        decision_allow_null = audit_obligations_mapping.get("decision_field_allow_null", False)
         if not isinstance(decision_allow_null, bool):
             raise TypeError("Type mismatch at <root>.records_schema.audit_obligations.decision_field_allow_null: expected bool")
     
@@ -1745,7 +1746,7 @@ def _parse_records_schema_extensions() -> RecordsSchemaExtensionsSpec:
             optional_mapping_fields=optional_mapping_fields,
             all_optional_field_paths=all_optional_field_paths
         )
-    except Exception as e:
+    except Exception:
         # 异常处理：若加载或解析失败（除了文件缺失），记录但允许继续（向后兼容）
         # 返回空规范
         return RecordsSchemaExtensionsSpec(
@@ -1816,26 +1817,27 @@ def _collect_required_record_fields(
     Returns:
         List of required record field names.
     """
-    if not isinstance(external_fact_sources, dict):
+    external_fact_sources_obj: Any = external_fact_sources
+    if not isinstance(external_fact_sources_obj, dict):
         # 外部事实源类型不符合预期，必须 fail-fast。
         raise TypeError("Type mismatch at <root>.external_fact_sources: expected mapping")
-    if not isinstance(records_schema, RecordsSchemaSpec):
+    records_schema_obj: Any = records_schema
+    if not isinstance(records_schema_obj, RecordsSchemaSpec):
         # records_schema 类型不符合预期，必须 fail-fast。
         raise TypeError("Type mismatch at <root>.records_schema: expected RecordsSchemaSpec")
+
+    sources = cast(Dict[str, ExternalFactSourceSpec], external_fact_sources_obj)
+    parsed_records_schema = records_schema_obj
     required: List[str] = []
-    for source_name, source_spec in external_fact_sources.items():
-        if not isinstance(source_name, str):
-            # 外部事实源名称类型不匹配，必须 fail-fast。
-            raise TypeError(
-                "Type mismatch at <root>.external_fact_sources: expected str keys"
-            )
-        if not isinstance(source_spec, ExternalFactSourceSpec):
+    for source_name, source_spec in sources.items():
+        source_spec_obj: Any = source_spec
+        if not isinstance(source_spec_obj, ExternalFactSourceSpec):
             # 外部事实源结构不符合预期，必须 fail-fast。
             raise TypeError(
                 f"Type mismatch at <root>.external_fact_sources.{source_name}: expected ExternalFactSourceSpec"
             )
-        required.extend(source_spec.required_record_fields)
-    return _merge_required_record_fields(required, records_schema.required_record_fields)
+        required.extend(source_spec_obj.required_record_fields)
+    return _merge_required_record_fields(required, parsed_records_schema.required_record_fields)
 
 
 def _merge_required_record_fields(
@@ -1857,23 +1859,30 @@ def _merge_required_record_fields(
     Raises:
         TypeError: If inputs are invalid.
     """
-    if not isinstance(primary_fields, list):
+    primary_fields_obj: Any = primary_fields
+    if not isinstance(primary_fields_obj, list):
         # primary_fields 类型不符合预期，必须 fail-fast。
         raise TypeError("primary_fields must be list")
-    if not isinstance(secondary_fields, list):
+    secondary_fields_obj: Any = secondary_fields
+    if not isinstance(secondary_fields_obj, list):
         # secondary_fields 类型不符合预期，必须 fail-fast。
         raise TypeError("secondary_fields must be list")
 
+    primary_list = cast(List[str], primary_fields_obj)
+    secondary_list = cast(List[str], secondary_fields_obj)
+
     merged: List[str] = []
-    seen = set()
-    for field_name in primary_fields + secondary_fields:
-        if not isinstance(field_name, str) or not field_name:
+    seen: Set[str] = set()
+    for field_name in primary_list + secondary_list:
+        field_name_obj: Any = field_name
+        if not isinstance(field_name_obj, str) or not field_name_obj:
             # field_name 类型不合法，必须 fail-fast。
             raise TypeError("required_record_fields entries must be non-empty str")
-        if field_name in seen:
+        normalized_field_name = field_name_obj
+        if normalized_field_name in seen:
             continue
-        seen.add(field_name)
-        merged.append(field_name)
+        seen.add(normalized_field_name)
+        merged.append(normalized_field_name)
     return merged
 
 
@@ -1890,14 +1899,17 @@ def _validate_records_schema_required_fields(records_schema: RecordsSchemaSpec) 
         TypeError: If records_schema is invalid.
         ValueError: If required fields are not registered.
     """
-    if not isinstance(records_schema, RecordsSchemaSpec):
+    records_schema_obj: Any = records_schema
+    if not isinstance(records_schema_obj, RecordsSchemaSpec):
         # records_schema 类型不符合预期，必须 fail-fast。
         raise TypeError("records_schema must be RecordsSchemaSpec")
 
-    registry = set(records_schema.field_paths_registry)
+    parsed_records_schema = records_schema_obj
+
+    registry = set(parsed_records_schema.field_paths_registry)
     missing = [
         field_name
-        for field_name in records_schema.required_record_fields
+        for field_name in parsed_records_schema.required_record_fields
         if field_name not in registry
     ]
     if missing:

@@ -10,7 +10,7 @@ records 与 run_closure schema 常量与校验
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, cast
 from main.core import time_utils
 from main.core.contracts import ContractInterpretation
 from main.core.errors import (
@@ -330,15 +330,17 @@ def require_present(value: Any, field_path: str, record_hint: Any | None = None)
         MissingRequiredFieldError: If value is missing.
         TypeError: If inputs are invalid.
     """
-    if not isinstance(field_path, str) or not field_path:
+    field_path_obj: Any = field_path
+    if not isinstance(field_path_obj, str) or not field_path_obj:
         raise TypeError("field_path must be non-empty str")
+    normalized_field_path = field_path_obj
     if record_hint is None and isinstance(value, dict):
-        found, resolved = _get_value_by_field_path(value, field_path)
+        found, resolved = _get_value_by_field_path(cast(Dict[str, Any], value), normalized_field_path)
         if not found:
-            raise MissingRequiredFieldError(f"Missing required field: {field_path}")
+            raise MissingRequiredFieldError(f"Missing required field: {normalized_field_path}")
         return resolved
     if value is None:
-        raise MissingRequiredFieldError(f"Missing required field: {field_path}")
+        raise MissingRequiredFieldError(f"Missing required field: {normalized_field_path}")
     return value
 
 
@@ -360,11 +362,12 @@ def require_type(value: Any, expected_type: type | tuple[type, ...], field_path:
         MissingRequiredFieldError: If value is missing.
         TypeError: If type does not match.
     """
-    if not isinstance(expected_type, (type, tuple)):
+    expected_type_obj: Any = expected_type
+    if not isinstance(expected_type_obj, (type, tuple)):
         raise TypeError("expected_type must be type or tuple of types")
     value = require_present(value, field_path)
-    if not isinstance(value, expected_type):
-        raise TypeError(f"Type mismatch at {field_path}: expected {expected_type}")
+    if not isinstance(value, expected_type_obj):
+        raise TypeError(f"Type mismatch at {field_path}: expected {expected_type_obj}")
     return value
 
 
@@ -381,9 +384,12 @@ def validate_run_closure_payload(payload: Dict[str, Any]) -> None:
         TypeError: If payload is not a dict.
         ValueError: If required fields are missing.
     """
-    if not isinstance(payload, dict):
+    payload_obj: Any = payload
+    if not isinstance(payload_obj, dict):
         # payload 类型不符合预期，必须 fail-fast。
         raise TypeError("payload must be dict")
+
+    payload_mapping = cast(Dict[str, Any], payload_obj)
 
     required_keys = [
         "schema_version",
@@ -415,7 +421,7 @@ def validate_run_closure_payload(payload: Dict[str, Any]) -> None:
         "records_bundle",
         "status"
     ]
-    missing = [key for key in required_keys if key not in payload]
+    missing = [key for key in required_keys if key not in payload_mapping]
     if missing:
         # 关键字段缺失，必须 fail-fast。
         raise ValueError(f"run_closure missing fields: {missing}")
@@ -443,11 +449,12 @@ def validate_run_closure(payload: Dict[str, Any]) -> None:
     if not isinstance(status, dict):
         # status 类型不符合预期，必须 fail-fast。
         raise TypeError("status must be dict")
-    status_ok = status.get("ok")
+    status_mapping = cast(Dict[str, Any], status)
+    status_ok: Any = status_mapping.get("ok")
     if not isinstance(status_ok, bool):
         # status.ok 类型不符合预期，必须 fail-fast。
         raise TypeError("status.ok must be bool")
-    status_reason = status.get("reason")
+    status_reason: Any = status_mapping.get("reason")
     if not isinstance(status_reason, str) or not status_reason:
         # status.reason 类型不符合预期，必须 fail-fast。
         raise TypeError("status.reason must be non-empty str")
@@ -461,11 +468,12 @@ def validate_run_closure(payload: Dict[str, Any]) -> None:
     if not status_ok and status_reason == RunFailureReason.OK.value:
         # status.ok=False 时 reason 不能为 ok。
         raise ValueError("status.reason must not be 'ok' when status.ok is False")
-    status_details = status.get("details")
+    status_details: Any = status_mapping.get("details")
     if status_details is not None:
         _validate_json_like(status_details, "status.details")
         if isinstance(status_details, dict):
-            upstream_reason = status_details.get("upstream_failure_reason")
+            status_details_mapping = cast(Dict[str, Any], status_details)
+            upstream_reason: Any = status_details_mapping.get("upstream_failure_reason")
             if upstream_reason is not None:
                 if not isinstance(upstream_reason, str) or not upstream_reason:
                     # upstream_failure_reason 类型不符合预期，必须 fail-fast。
@@ -638,7 +646,7 @@ def validate_run_closure(payload: Dict[str, Any]) -> None:
         if not isinstance(closure_stage, dict):
             # closure_stage 类型不符合预期，必须 fail-fast。
             raise TypeError("closure_stage must be dict or None")
-        _validate_closure_stage(closure_stage)
+        _validate_closure_stage(cast(Dict[str, Any], closure_stage))
 
 
 def _require_field(record: Dict[str, Any], field_path: str) -> Any:
@@ -659,15 +667,17 @@ def _require_field(record: Dict[str, Any], field_path: str) -> Any:
         TypeError: If inputs are invalid.
         ValueError: If field_path is invalid.
     """
-    if not isinstance(record, dict):
+    record_obj: Any = record
+    if not isinstance(record_obj, dict):
         # record 类型不符合预期，必须 fail-fast。
         raise TypeError("record must be dict")
-    if not isinstance(field_path, str) or not field_path:
+    field_path_obj: Any = field_path
+    if not isinstance(field_path_obj, str) or not field_path_obj:
         # field_path 输入不合法，必须 fail-fast。
         raise ValueError("field_path must be non-empty str")
-    found, value = _get_value_by_field_path(record, field_path)
+    found, value = _get_value_by_field_path(cast(Dict[str, Any], record_obj), field_path_obj)
     if not found:
-        raise MissingRequiredFieldError(f"Missing required field: {field_path}")
+        raise MissingRequiredFieldError(f"Missing required field: {field_path_obj}")
     return value
 
 
@@ -714,7 +724,8 @@ def _should_require_bound_fact_sources(payload: Dict[str, Any], status_ok: bool)
         return True
     closure_stage = payload.get("closure_stage")
     if isinstance(closure_stage, dict):
-        records_present = closure_stage.get("records_present")
+        closure_stage_mapping = cast(Dict[str, Any], closure_stage)
+        records_present: Any = closure_stage_mapping.get("records_present")
         return records_present is True
     return False
 
@@ -738,6 +749,7 @@ def _validate_bound_fact_sources(payload: Dict[str, Any]) -> None:
     bound_fact_sources = payload.get("bound_fact_sources")
     if not isinstance(bound_fact_sources, dict):
         raise ValueError("bound_fact_sources must be dict when required")
+    bound_fact_sources_mapping = cast(Dict[str, Any], bound_fact_sources)
     bound_status = payload.get("bound_fact_sources_status")
     if bound_status is not None:
         if bound_status != "bound" and bound_status != "unbound":
@@ -768,7 +780,7 @@ def _validate_bound_fact_sources(payload: Dict[str, Any]) -> None:
         "injection_scope_manifest_bound_digest"
     ]
     for field_name in required_fields:
-        value = _require_str_field(bound_fact_sources, field_name)
+        value = _require_str_field(bound_fact_sources_mapping, field_name)
         if value == "<absent>":
             raise ValueError(
                 "bound_fact_sources must not contain '<absent>' sentinel: "
@@ -792,9 +804,12 @@ def _validate_run_closure_ok_fields(payload: Dict[str, Any]) -> None:
         TypeError: If payload types are invalid.
         ValueError: If required fields are missing or sentinel.
     """
-    if not isinstance(payload, dict):
+    payload_obj: Any = payload
+    if not isinstance(payload_obj, dict):
         # payload 类型不符合预期，必须 fail-fast。
         raise TypeError("payload must be dict")
+
+    payload_mapping = cast(Dict[str, Any], payload_obj)
 
     _required_fields = [
         "run_id",
@@ -803,23 +818,24 @@ def _validate_run_closure_ok_fields(payload: Dict[str, Any]) -> None:
         "impl_id",
         "impl_version"
     ]
-    if payload.get("impl_identity") is not None or payload.get("impl_identity_digest") is not None:
+    if payload_mapping.get("impl_identity") is not None or payload_mapping.get("impl_identity_digest") is not None:
         _required_fields.append("impl_identity_digest")
 
     for field_name in _required_fields:
-        _value = payload.get(field_name)
+        _value = payload_mapping.get(field_name)
         _assert_non_absent_str(_value, field_name)
 
-    facts_anchor = payload.get("facts_anchor")
+    facts_anchor = payload_mapping.get("facts_anchor")
     if not isinstance(facts_anchor, dict):
         # facts_anchor 类型不符合预期，必须 fail-fast。
         raise TypeError("facts_anchor must be dict when status.ok is True")
+    facts_anchor_mapping = cast(Dict[str, Any], facts_anchor)
     for field_name in [
         "contract_bound_digest",
         "whitelist_bound_digest",
         "policy_path_semantics_bound_digest"
     ]:
-        _value = facts_anchor.get(field_name)
+        _value = facts_anchor_mapping.get(field_name)
         _assert_non_absent_str(_value, f"facts_anchor.{field_name}")
 
 
@@ -840,15 +856,16 @@ def _assert_non_absent_str(value: Any, field_path: str) -> None:
         TypeError: If inputs are invalid.
         ValueError: If value is empty or sentinel.
     """
-    if not isinstance(field_path, str) or not field_path:
+    field_path_obj: Any = field_path
+    if not isinstance(field_path_obj, str) or not field_path_obj:
         # field_path 输入不合法，必须 fail-fast。
         raise TypeError("field_path must be non-empty str")
     if not isinstance(value, str):
         # value 类型不符合预期，必须 fail-fast。
-        raise TypeError(f"{field_path} must be str")
+        raise TypeError(f"{field_path_obj} must be str")
     if not value or value == "<absent>":
         # value 为空或为哨兵值，必须 fail-fast。
-        raise ValueError(f"{field_path} must be non-empty and not '<absent>'")
+        raise ValueError(f"{field_path_obj} must be non-empty and not '<absent>'")
 
 
 def _validate_closure_stage(closure_stage: Dict[str, Any]) -> None:
@@ -867,30 +884,33 @@ def _validate_closure_stage(closure_stage: Dict[str, Any]) -> None:
         TypeError: If field types are invalid.
         ValueError: If field values are invalid.
     """
-    if not isinstance(closure_stage, dict):
+    closure_stage_obj: Any = closure_stage
+    if not isinstance(closure_stage_obj, dict):
         # closure_stage 类型不符合预期，必须 fail-fast。
         raise TypeError("closure_stage must be dict")
 
+    closure_stage_mapping = cast(Dict[str, Any], closure_stage_obj)
+
     # 校验 records_present 字段
-    records_present = closure_stage.get("records_present")
+    records_present = closure_stage_mapping.get("records_present")
     if not isinstance(records_present, bool):
         # records_present 类型不符合预期，必须 fail-fast。
         raise TypeError("closure_stage.records_present must be bool")
 
     # 校验 bundle_attempted 字段
-    bundle_attempted = closure_stage.get("bundle_attempted")
+    bundle_attempted = closure_stage_mapping.get("bundle_attempted")
     if not isinstance(bundle_attempted, bool):
         # bundle_attempted 类型不符合预期，必须 fail-fast。
         raise TypeError("closure_stage.bundle_attempted must be bool")
 
     # 校验 bundle_succeeded 字段
-    bundle_succeeded = closure_stage.get("bundle_succeeded")
+    bundle_succeeded = closure_stage_mapping.get("bundle_succeeded")
     if not isinstance(bundle_succeeded, bool):
         # bundle_succeeded 类型不符合预期，必须 fail-fast。
         raise TypeError("closure_stage.bundle_succeeded must be bool")
 
     # 校验 failure_stage 字段
-    failure_stage = closure_stage.get("failure_stage")
+    failure_stage = closure_stage_mapping.get("failure_stage")
     if failure_stage is not None:
         if not isinstance(failure_stage, str) or not failure_stage:
             # failure_stage 类型不符合预期，必须 fail-fast。
@@ -903,7 +923,7 @@ def _validate_closure_stage(closure_stage: Dict[str, Any]) -> None:
             )
 
     # 校验 upstream_status_reason 字段
-    upstream_reason = closure_stage.get("upstream_status_reason")
+    upstream_reason = closure_stage_mapping.get("upstream_status_reason")
     if upstream_reason is not None:
         if not isinstance(upstream_reason, str) or not upstream_reason:
             # upstream_status_reason 类型不符合预期，必须 fail-fast。
@@ -938,25 +958,30 @@ def validate_record(
         TypeError: If record types are invalid.
         ValueError: If inputs are invalid.
     """
-    if not isinstance(record, dict):
+    record_obj: Any = record
+    if not isinstance(record_obj, dict):
         # record 类型不符合预期，必须 fail-fast。
         raise TypeError("record must be dict")
-    if interpretation is not None and not isinstance(interpretation, ContractInterpretation):
+    interpretation_obj: Any = interpretation
+    if interpretation_obj is not None and not isinstance(interpretation_obj, ContractInterpretation):
         # interpretation 类型不符合预期，必须 fail-fast。
         raise TypeError("interpretation must be ContractInterpretation or None")
 
-    if interpretation is None:
+    if interpretation_obj is None:
         # interpretation 缺失，必须 fail-fast。
         raise ContractInterpretationRequiredError(
             "ContractInterpretation is required for schema.validate_record"
         )
 
-    _validate_json_like(record, "<root>")
+    record_mapping = cast(Dict[str, Any], record_obj)
+    parsed_interpretation = cast(ContractInterpretation, interpretation_obj)
 
-    required_fields = interpretation.required_record_fields
-    decision_field_path = interpretation.records_schema.decision_field_path
+    _validate_json_like(record_mapping, "<root>")
+
+    required_fields = parsed_interpretation.required_record_fields
+    decision_field_path = parsed_interpretation.records_schema.decision_field_path
     for field_path in required_fields:
-        found, value = _get_value_by_field_path(record, field_path)
+        found, value = _get_value_by_field_path(record_mapping, field_path)
         if not found:
             # 必需字段缺失，必须 fail-fast。
             raise MissingRequiredFieldError(f"Missing required field: {field_path}")
@@ -965,15 +990,15 @@ def validate_record(
             raise TypeError(f"Type mismatch at {field_path}: expected str")
 
     # schema_version 必须与权威版本一致，避免调用方绕过 ensure_required_fields。
-    schema_version = record.get("schema_version")
+    schema_version = record_mapping.get("schema_version")
     if schema_version != RECORD_SCHEMA_VERSION:
         raise ValueError(
             f"schema_version mismatch: expected={RECORD_SCHEMA_VERSION}, got={schema_version}"
         )
     
     # decision 字段的校验：若 decision_obligation_presence 为 true，则检查字段存在性与类型。
-    if interpretation.records_schema.decision_obligation_presence:
-        found, value = _get_value_by_field_path(record, decision_field_path)
+    if parsed_interpretation.records_schema.decision_obligation_presence:
+        found, value = _get_value_by_field_path(record_mapping, decision_field_path)
         if not found:
             # decision 字段缺失，必须 fail-fast。
             raise MissingRequiredFieldError(f"Missing required field: {decision_field_path}")
@@ -983,9 +1008,9 @@ def validate_record(
                 f"Type mismatch at {decision_field_path}: expected bool or None"
             )
 
-    impl_identity_spec = interpretation.impl_identity
+    impl_identity_spec = parsed_interpretation.impl_identity
     for _, field_path in impl_identity_spec.field_paths_by_domain.items():
-        found, value = _get_value_by_field_path(record, field_path)
+        found, value = _get_value_by_field_path(record_mapping, field_path)
         if not found:
             if impl_identity_spec.required:
                 # impl_identity 必需字段缺失，必须 fail-fast。
@@ -995,26 +1020,26 @@ def validate_record(
             # impl_identity 字段类型不匹配，必须 fail-fast。
             raise TypeError(f"Type mismatch at {field_path}: expected str")
 
-    pipeline_impl_id = record.get("pipeline_impl_id")
+    pipeline_impl_id = record_mapping.get("pipeline_impl_id")
     if pipeline_impl_id is not None:
         if not isinstance(pipeline_impl_id, str) or not pipeline_impl_id:
             # pipeline_impl_id 类型不符合预期，必须 fail-fast。
             raise TypeError("Type mismatch at pipeline_impl_id: expected non-empty str")
 
-    pipeline_provenance = record.get("pipeline_provenance")
+    pipeline_provenance = record_mapping.get("pipeline_provenance")
     if pipeline_provenance is not None:
         if not isinstance(pipeline_provenance, dict):
             # pipeline_provenance 类型不符合预期，必须 fail-fast。
             raise TypeError("Type mismatch at pipeline_provenance: expected dict")
         _validate_json_like(pipeline_provenance, "pipeline_provenance")
 
-    pipeline_provenance_canon_sha256 = record.get("pipeline_provenance_canon_sha256")
+    pipeline_provenance_canon_sha256 = record_mapping.get("pipeline_provenance_canon_sha256")
     if pipeline_provenance_canon_sha256 is not None:
         if not isinstance(pipeline_provenance_canon_sha256, str) or not pipeline_provenance_canon_sha256:
             # pipeline_provenance_canon_sha256 类型不符合预期，必须 fail-fast。
             raise TypeError("pipeline_provenance_canon_sha256 must be non-empty str")
 
-    pipeline_runtime_meta = record.get("pipeline_runtime_meta")
+    pipeline_runtime_meta = record_mapping.get("pipeline_runtime_meta")
     if pipeline_runtime_meta is not None:
         if not isinstance(pipeline_runtime_meta, dict):
             # pipeline_runtime_meta 类型不符合预期，必须 fail-fast。
@@ -1022,7 +1047,7 @@ def validate_record(
         _validate_json_like(pipeline_runtime_meta, "pipeline_runtime_meta")
 
     # (7.7) Real Dataflow Smoke: inference 相关字段的存在即校验
-    inference_status = record.get("inference_status")
+    inference_status = record_mapping.get("inference_status")
     if inference_status is not None:
         if not isinstance(inference_status, str) or not inference_status:
             # inference_status 类型不符合预期，必须 fail-fast。
@@ -1033,64 +1058,64 @@ def validate_record(
                 f"inference_status must be one of {allowed_inference_status}, got '{inference_status}'"
             )
 
-    inference_error = record.get("inference_error")
+    inference_error = record_mapping.get("inference_error")
     if inference_error is not None:
         if not isinstance(inference_error, str) or not inference_error:
             # inference_error 类型不符合预期，必须 fail-fast。
             raise TypeError("Type mismatch at inference_error: expected non-empty str or None")
 
-    inference_runtime_meta = record.get("inference_runtime_meta")
+    inference_runtime_meta = record_mapping.get("inference_runtime_meta")
     if inference_runtime_meta is not None:
         if not isinstance(inference_runtime_meta, dict):
             # inference_runtime_meta 类型不符合预期，必须 fail-fast。
             raise TypeError("Type mismatch at inference_runtime_meta: expected dict")
         _validate_json_like(inference_runtime_meta, "inference_runtime_meta")
 
-    infer_trace = record.get("infer_trace")
+    infer_trace = record_mapping.get("infer_trace")
     if infer_trace is not None:
         if not isinstance(infer_trace, dict):
             # infer_trace 类型不符合预期，必须 fail-fast。
             raise TypeError("Type mismatch at infer_trace: expected dict")
         _validate_json_like(infer_trace, "infer_trace")
 
-    infer_trace_canon_sha256 = record.get("infer_trace_canon_sha256")
+    infer_trace_canon_sha256 = record_mapping.get("infer_trace_canon_sha256")
     if infer_trace_canon_sha256 is not None:
         if not isinstance(infer_trace_canon_sha256, str) or not infer_trace_canon_sha256:
             # infer_trace_canon_sha256 类型不符合预期，必须 fail-fast。
             raise TypeError("Type mismatch at infer_trace_canon_sha256: expected non-empty str")
 
-    env_fingerprint_canon_sha256 = record.get("env_fingerprint_canon_sha256")
+    env_fingerprint_canon_sha256 = record_mapping.get("env_fingerprint_canon_sha256")
     if env_fingerprint_canon_sha256 is not None:
         if not isinstance(env_fingerprint_canon_sha256, str) or not env_fingerprint_canon_sha256:
             # env_fingerprint_canon_sha256 类型不符合预期，必须 fail-fast。
             raise TypeError("env_fingerprint_canon_sha256 must be non-empty str")
 
-    diffusers_version = record.get("diffusers_version")
+    diffusers_version = record_mapping.get("diffusers_version")
     if diffusers_version is not None:
         if not isinstance(diffusers_version, str) or not diffusers_version:
             # diffusers_version 类型不符合预期，必须 fail-fast。
             raise TypeError("diffusers_version must be non-empty str")
 
-    transformers_version = record.get("transformers_version")
+    transformers_version = record_mapping.get("transformers_version")
     if transformers_version is not None:
         if not isinstance(transformers_version, str) or not transformers_version:
             # transformers_version 类型不符合预期，必须 fail-fast。
             raise TypeError("transformers_version must be non-empty str")
 
-    safetensors_version = record.get("safetensors_version")
+    safetensors_version = record_mapping.get("safetensors_version")
     if safetensors_version is not None:
         if not isinstance(safetensors_version, str) or not safetensors_version:
             # safetensors_version 类型不符合预期，必须 fail-fast。
             raise TypeError("safetensors_version must be non-empty str")
 
-    model_provenance_canon_sha256 = record.get("model_provenance_canon_sha256")
+    model_provenance_canon_sha256 = record_mapping.get("model_provenance_canon_sha256")
     if model_provenance_canon_sha256 is not None:
         if not isinstance(model_provenance_canon_sha256, str) or not model_provenance_canon_sha256:
             # model_provenance_canon_sha256 类型不符合预期，必须 fail-fast。
             raise TypeError("model_provenance_canon_sha256 must be non-empty str")
 
     # 从解释面获取可选字段列表（若启用扩展则使用动态列表，否则使用后备硬编码列表）
-    extensions_spec = interpretation.records_schema_extensions_spec
+    extensions_spec = parsed_interpretation.records_schema_extensions_spec
     if extensions_spec.enabled:
         optional_str_fields = extensions_spec.optional_str_fields
         optional_number_fields = extensions_spec.optional_number_fields
@@ -1101,9 +1126,9 @@ def validate_record(
         optional_number_fields = _FALLBACK_OPTIONAL_NUMBER_FIELDS
         optional_mapping_fields = _FALLBACK_OPTIONAL_MAPPING_FIELDS
 
-    _validate_optional_str_fields(record, optional_str_fields)
-    _validate_optional_number_fields(record, optional_number_fields)
-    _validate_optional_mapping_fields(record, optional_mapping_fields)
+    _validate_optional_str_fields(record_mapping, optional_str_fields)
+    _validate_optional_number_fields(record_mapping, optional_number_fields)
+    _validate_optional_mapping_fields(record_mapping, optional_mapping_fields)
 
 
 def _get_value_by_field_path(record: Dict[str, Any], field_path: str) -> tuple[bool, Any]:
@@ -1123,26 +1148,33 @@ def _get_value_by_field_path(record: Dict[str, Any], field_path: str) -> tuple[b
         TypeError: If record types are invalid.
         ValueError: If field_path is invalid.
     """
-    if not isinstance(record, dict):
+    record_obj: Any = record
+    if not isinstance(record_obj, dict):
         # record 类型不符合预期，必须 fail-fast。
         raise TypeError("record must be dict")
-    if not isinstance(field_path, str) or not field_path:
+    field_path_obj: Any = field_path
+    if not isinstance(field_path_obj, str) or not field_path_obj:
         # field_path 输入不合法，必须 fail-fast。
         raise ValueError("field_path must be non-empty str")
 
-    current: Any = record
-    segments = field_path.split(".")
-    for segment in segments:
+    current_mapping = cast(Dict[str, Any], record_obj)
+    normalized_field_path = field_path_obj
+    segments = normalized_field_path.split(".")
+    for index, segment in enumerate(segments):
         if not segment:
             # field_path 段为空，必须 fail-fast。
-            raise ValueError(f"Invalid field_path segment in {field_path}")
-        if not isinstance(current, dict):
-            # 中间段类型不合法，必须 fail-fast。
-            raise TypeError(f"Type mismatch at {field_path}: expected mapping")
-        if segment not in current:
+            raise ValueError(f"Invalid field_path segment in {normalized_field_path}")
+        if segment not in current_mapping:
             return False, None
-        current = current[segment]
-    return True, current
+        current_value: Any = current_mapping[segment]
+        if index < len(segments) - 1:
+            if not isinstance(current_value, dict):
+                # 中间段类型不合法，必须 fail-fast。
+                raise TypeError(f"Type mismatch at {normalized_field_path}: expected mapping")
+            current_mapping = cast(Dict[str, Any], current_value)
+            continue
+        return True, current_value
+    return True, current_mapping
 
 
 def _validate_json_like(value: Any, field_path: str) -> None:
@@ -1162,24 +1194,29 @@ def _validate_json_like(value: Any, field_path: str) -> None:
         TypeError: If value contains non-JSON-like types.
         ValueError: If field_path is invalid.
     """
-    if not isinstance(field_path, str) or not field_path:
+    field_path_obj: Any = field_path
+    if not isinstance(field_path_obj, str) or not field_path_obj:
         # field_path 输入不合法，必须 fail-fast。
         raise ValueError("field_path must be non-empty str")
+    normalized_field_path = field_path_obj
     if _is_json_scalar(value):
         return
     if isinstance(value, list):
-        for index, item in enumerate(value):
-            _validate_json_like(item, f"{field_path}[{index}]")
+        value_items = cast(List[Any], value)
+        for index, item in enumerate(value_items):
+            _validate_json_like(item, f"{normalized_field_path}[{index}]")
         return
     if isinstance(value, dict):
-        for key, item in value.items():
-            if not isinstance(key, str):
+        value_mapping = cast(Dict[Any, Any], value)
+        for raw_key, item in value_mapping.items():
+            key_obj: Any = raw_key
+            if not isinstance(key_obj, str):
                 # JSON key 类型不合法，必须 fail-fast。
-                raise TypeError(f"Type mismatch at {field_path}: expected str keys")
-            _validate_json_like(item, f"{field_path}.{key}")
+                raise TypeError(f"Type mismatch at {normalized_field_path}: expected str keys")
+            _validate_json_like(item, f"{normalized_field_path}.{key_obj}")
         return
     # 非 JSON-like 类型，必须 fail-fast。
-    raise TypeError(f"Type mismatch at {field_path}: non-JSON-like {type(value).__name__}")
+    raise TypeError(f"Type mismatch at {normalized_field_path}: non-JSON-like {type(value).__name__}")
 
 
 def _validate_optional_str_fields(record: Dict[str, Any], field_paths: List[str]) -> None:
@@ -1199,17 +1236,22 @@ def _validate_optional_str_fields(record: Dict[str, Any], field_paths: List[str]
         TypeError: If inputs are invalid or field types mismatch.
         ValueError: If field path is invalid.
     """
-    if not isinstance(record, dict):
+    record_obj: Any = record
+    if not isinstance(record_obj, dict):
         # record 类型不符合预期，必须 fail-fast。
         raise TypeError("record must be dict")
-    if not isinstance(field_paths, list):
+    field_paths_obj: Any = field_paths
+    if not isinstance(field_paths_obj, list):
         # field_paths 类型不符合预期，必须 fail-fast。
         raise TypeError("field_paths must be list")
-    for field_path in field_paths:
-        if not isinstance(field_path, str) or not field_path:
+    record_mapping = cast(Dict[str, Any], record_obj)
+    normalized_field_paths = cast(List[str], field_paths_obj)
+    for field_path in normalized_field_paths:
+        field_path_obj: Any = field_path
+        if not isinstance(field_path_obj, str) or not field_path_obj:
             # field_path 类型不符合预期，必须 fail-fast。
             raise ValueError("field_path must be non-empty str")
-        found, value = _get_value_by_field_path(record, field_path)
+        found, value = _get_value_by_field_path(record_mapping, field_path_obj)
         if not found or value is None:
             continue
         if not isinstance(value, str) or not value:
@@ -1234,17 +1276,22 @@ def _validate_optional_number_fields(record: Dict[str, Any], field_paths: List[s
         TypeError: If inputs are invalid or field types mismatch.
         ValueError: If field path is invalid.
     """
-    if not isinstance(record, dict):
+    record_obj: Any = record
+    if not isinstance(record_obj, dict):
         # record 类型不符合预期，必须 fail-fast。
         raise TypeError("record must be dict")
-    if not isinstance(field_paths, list):
+    field_paths_obj: Any = field_paths
+    if not isinstance(field_paths_obj, list):
         # field_paths 类型不符合预期，必须 fail-fast。
         raise TypeError("field_paths must be list")
-    for field_path in field_paths:
-        if not isinstance(field_path, str) or not field_path:
+    record_mapping = cast(Dict[str, Any], record_obj)
+    normalized_field_paths = cast(List[str], field_paths_obj)
+    for field_path in normalized_field_paths:
+        field_path_obj: Any = field_path
+        if not isinstance(field_path_obj, str) or not field_path_obj:
             # field_path 类型不符合预期，必须 fail-fast。
             raise ValueError("field_path must be non-empty str")
-        found, value = _get_value_by_field_path(record, field_path)
+        found, value = _get_value_by_field_path(record_mapping, field_path_obj)
         if not found or value is None:
             continue
         if not isinstance(value, (int, float)):
@@ -1269,17 +1316,22 @@ def _validate_optional_mapping_fields(record: Dict[str, Any], field_paths: List[
         TypeError: If inputs are invalid or field types mismatch.
         ValueError: If field path is invalid.
     """
-    if not isinstance(record, dict):
+    record_obj: Any = record
+    if not isinstance(record_obj, dict):
         # record 类型不符合预期，必须 fail-fast。
         raise TypeError("record must be dict")
-    if not isinstance(field_paths, list):
+    field_paths_obj: Any = field_paths
+    if not isinstance(field_paths_obj, list):
         # field_paths 类型不符合预期，必须 fail-fast。
         raise TypeError("field_paths must be list")
-    for field_path in field_paths:
-        if not isinstance(field_path, str) or not field_path:
+    record_mapping = cast(Dict[str, Any], record_obj)
+    normalized_field_paths = cast(List[str], field_paths_obj)
+    for field_path in normalized_field_paths:
+        field_path_obj: Any = field_path
+        if not isinstance(field_path_obj, str) or not field_path_obj:
             # field_path 类型不符合预期，必须 fail-fast。
             raise ValueError("field_path must be non-empty str")
-        found, value = _get_value_by_field_path(record, field_path)
+        found, value = _get_value_by_field_path(record_mapping, field_path_obj)
         if not found or value is None:
             continue
         if not isinstance(value, dict):
@@ -1319,13 +1371,14 @@ def build_thresholds_spec(cfg: Dict[str, Any]) -> Dict[str, Any]:
         TypeError: If cfg or derived fields are invalid.
         ValueError: If required fields are invalid.
     """
-    if not isinstance(cfg, dict):
+    cfg_obj: Any = cfg
+    if not isinstance(cfg_obj, dict):
         # cfg 类型不符合预期，必须 fail-fast。
         raise TypeError("cfg must be dict")
 
     from main.watermarking.fusion import neyman_pearson
 
-    thresholds_spec = neyman_pearson.build_thresholds_spec(cfg)
+    thresholds_spec = neyman_pearson.build_thresholds_spec(cast(Dict[str, Any], cfg_obj))
     _validate_json_like(thresholds_spec, "thresholds_spec")
     return thresholds_spec
 
@@ -1346,18 +1399,21 @@ def compute_thresholds_digest(thresholds_spec: Dict[str, Any]) -> str:
         TypeError: If inputs are invalid.
         ValueError: If digest output is invalid.
     """
-    if not isinstance(thresholds_spec, dict):
+    thresholds_spec_obj: Any = thresholds_spec
+    if not isinstance(thresholds_spec_obj, dict):
         # thresholds_spec 类型不符合预期，必须 fail-fast。
         raise TypeError("thresholds_spec must be dict")
-    _validate_json_like(thresholds_spec, "thresholds_spec")
+    thresholds_spec_mapping = cast(Dict[str, Any], thresholds_spec_obj)
+    _validate_json_like(thresholds_spec_mapping, "thresholds_spec")
 
     from main.watermarking.fusion import neyman_pearson
 
-    thresholds_digest = neyman_pearson.compute_thresholds_digest(thresholds_spec)
-    if not isinstance(thresholds_digest, str) or not thresholds_digest:
+    thresholds_digest = neyman_pearson.compute_thresholds_digest(thresholds_spec_mapping)
+    thresholds_digest_obj: Any = thresholds_digest
+    if not isinstance(thresholds_digest_obj, str) or not thresholds_digest_obj:
         # thresholds_digest 类型不符合预期，必须 fail-fast。
         raise ValueError("thresholds_digest must be non-empty str")
-    return thresholds_digest
+    return thresholds_digest_obj
 
 
 def _resolve_record_kind(record: Dict[str, Any]) -> str:
@@ -1412,12 +1468,17 @@ def ensure_required_fields(
         ContractInterpretationRequiredError: If interpretation is missing.
         ValueError: If existing digest mismatches derived digest or schema_version mismatch.
     """
-    if not isinstance(record, dict):
+    record_obj: Any = record
+    if not isinstance(record_obj, dict):
         # record 类型不符合预期，必须 fail-fast。
         raise TypeError("record must be dict")
-    if not isinstance(cfg, dict):
+    cfg_obj: Any = cfg
+    if not isinstance(cfg_obj, dict):
         # cfg 类型不符合预期，必须 fail-fast。
         raise TypeError("cfg must be dict")
+
+    record = cast(Dict[str, Any], record_obj)
+    cfg = cast(Dict[str, Any], cfg_obj)
     if not isinstance(interpretation, ContractInterpretation):
         # interpretation 缺失或类型不合法，必须 fail-fast。
         raise ContractInterpretationRequiredError(
@@ -1464,13 +1525,16 @@ def ensure_required_fields(
             _fusion_ts = None
             _fusion_result = record.get("fusion_result")
             if isinstance(_fusion_result, dict):
-                _audit_node = _fusion_result.get("audit")
+                _fusion_result_mapping = cast(Dict[str, Any], _fusion_result)
+                _audit_node = _fusion_result_mapping.get("audit")
                 if isinstance(_audit_node, dict):
-                    _fusion_ts = _audit_node.get("threshold_source")
+                    _audit_node_mapping = cast(Dict[str, Any], _audit_node)
+                    _fusion_ts = _audit_node_mapping.get("threshold_source")
             if not isinstance(_fusion_ts, str) or not _fusion_ts:
                 _final_decision = record.get("final_decision")
                 if isinstance(_final_decision, dict):
-                    _fusion_ts = _final_decision.get("threshold_source")
+                    _final_decision_mapping = cast(Dict[str, Any], _final_decision)
+                    _fusion_ts = _final_decision_mapping.get("threshold_source")
             record["threshold_source"] = _fusion_ts if isinstance(_fusion_ts, str) and _fusion_ts else "np_canonical"
         thresholds_spec = build_thresholds_spec(cfg)
         expected_target_fpr = thresholds_spec.get("target_fpr")
@@ -1543,7 +1607,7 @@ def ensure_required_fields(
 
         threshold_metadata_artifact = record.get("threshold_metadata_artifact")
         if isinstance(threshold_metadata_artifact, dict):
-            threshold_metadata = threshold_metadata_artifact
+            threshold_metadata: Dict[str, Any] = cast(Dict[str, Any], threshold_metadata_artifact)
         else:
             threshold_metadata = neyman_pearson.build_threshold_metadata(thresholds_spec)
         threshold_metadata_digest = neyman_pearson.compute_threshold_metadata_digest(threshold_metadata)
@@ -1631,24 +1695,27 @@ def _set_value_by_field_path(record: Dict[str, Any], field_path: str, value: Any
         TypeError: If record types are invalid.
         ValueError: If field_path is invalid.
     """
-    if not isinstance(record, dict):
+    record_obj: Any = record
+    if not isinstance(record_obj, dict):
         # record 类型不符合预期，必须 fail-fast。
         raise TypeError("record must be dict")
-    if not isinstance(field_path, str) or not field_path:
+    field_path_obj: Any = field_path
+    if not isinstance(field_path_obj, str) or not field_path_obj:
         # field_path 输入不合法，必须 fail-fast。
         raise ValueError("field_path must be non-empty str")
 
-    current: Any = record
-    segments = field_path.split(".")
+    current = cast(Dict[str, Any], record_obj)
+    normalized_field_path = field_path_obj
+    segments = normalized_field_path.split(".")
     for segment in segments[:-1]:
         if not segment:
             # field_path 段为空，必须 fail-fast。
-            raise ValueError(f"Invalid field_path segment in {field_path}")
+            raise ValueError(f"Invalid field_path segment in {normalized_field_path}")
         if segment not in current or not isinstance(current[segment], dict):
             current[segment] = {}
-        current = current[segment]
+        current = cast(Dict[str, Any], current[segment])
     last = segments[-1]
     if not last:
         # field_path 末段为空，必须 fail-fast。
-        raise ValueError(f"Invalid field_path segment in {field_path}")
+        raise ValueError(f"Invalid field_path segment in {normalized_field_path}")
     current[last] = value

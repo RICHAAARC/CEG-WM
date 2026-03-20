@@ -180,7 +180,7 @@ class GateEnforcementError(Exception):
         
         # 自动拼接详细错误消息。
         if gate_name or field_path or expected or actual:
-            details = []
+            details: List[str] = []
             if gate_name:
                 details.append(f"gate_name={gate_name}")
             if field_path:

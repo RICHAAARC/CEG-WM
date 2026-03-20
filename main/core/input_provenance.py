@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, cast
 
 from main.core import digests
 
@@ -31,15 +31,20 @@ def build_input_provenance(cfg: Dict[str, Any], command: str) -> Dict[str, Any]:
     Raises:
         TypeError: If inputs are invalid.
     """
-    if not isinstance(cfg, dict):
+    cfg_obj: Any = cfg
+    if not isinstance(cfg_obj, dict):
         # cfg 类型不符合预期，必须 fail-fast。
         raise TypeError("cfg must be dict")
-    if not isinstance(command, str) or not command:
+    command_obj: Any = command
+    if not isinstance(command_obj, str) or not command_obj:
         # command 输入不合法，必须 fail-fast。
         raise TypeError("command must be non-empty str")
 
+    cfg_mapping = cast(Dict[str, Any], cfg_obj)
+    normalized_command = command_obj
+
     provenance = {
-        "command": command,
+        "command": normalized_command,
         "prompt_sha256": "<absent>",
         "negative_prompt_sha256": "<absent>",
         "dataset_manifest_sha256": "<absent>",
@@ -49,31 +54,31 @@ def build_input_provenance(cfg: Dict[str, Any], command: str) -> Dict[str, Any]:
     }
 
     # 提取 prompt 并计算 sha256。
-    prompt = cfg.get("prompt")
+    prompt = cfg_mapping.get("prompt")
     if isinstance(prompt, str) and prompt:
         provenance["prompt_sha256"] = digests.canonical_sha256(prompt)
 
     # 提取 negative_prompt 并计算 sha256。
-    negative_prompt = cfg.get("negative_prompt")
+    negative_prompt = cfg_mapping.get("negative_prompt")
     if isinstance(negative_prompt, str) and negative_prompt:
         provenance["negative_prompt_sha256"] = digests.canonical_sha256(negative_prompt)
 
     # 提取 dataset_manifest。
-    dataset_manifest = cfg.get("dataset_manifest")
+    dataset_manifest = cfg_mapping.get("dataset_manifest")
     if isinstance(dataset_manifest, str) and dataset_manifest:
         provenance["dataset_manifest_sha256"] = digests.canonical_sha256(dataset_manifest)
 
     # 提取 image_list。
-    image_list = cfg.get("image_list")
+    image_list = cfg_mapping.get("image_list")
     if isinstance(image_list, (list, str)) and image_list:
         provenance["image_list_sha256"] = digests.canonical_sha256(image_list)
 
     # 提取数值字段。
-    resolution = cfg.get("resolution")
+    resolution = cfg_mapping.get("resolution")
     if resolution is not None:
         provenance["resolution"] = str(resolution)
 
-    num_steps = cfg.get("num_steps")
+    num_steps = cfg_mapping.get("num_steps")
     if num_steps is not None:
         provenance["num_steps"] = str(num_steps)
 
@@ -95,8 +100,9 @@ def compute_input_provenance_digest(obj: Dict[str, Any]) -> str:
     Raises:
         TypeError: If obj is invalid.
     """
-    if not isinstance(obj, dict):
+    obj_value: Any = obj
+    if not isinstance(obj_value, dict):
         # obj 类型不符合预期，必须 fail-fast。
         raise TypeError("obj must be dict")
 
-    return digests.canonical_sha256(obj)
+    return digests.canonical_sha256(cast(Dict[str, Any], obj_value))

@@ -13,7 +13,7 @@ digest 规范化唯一入口
 import json
 import hashlib
 from pathlib import Path
-from typing import Any, Union
+from typing import Any, Dict, List, Union, cast
 
 from .errors import DigestCanonicalizationError
 
@@ -42,21 +42,24 @@ def normalize_for_digest(obj: Any, path: str = "<root>") -> Any:
     
     # 处理 dict：必须递归检查，且所有 key 必须是 str。
     if isinstance(obj, dict):
-        for key, value in obj.items():
-            if not isinstance(key, str):
+        mapping = cast(Dict[Any, Any], obj)
+        for raw_key, raw_value in mapping.items():
+            key_obj: Any = raw_key
+            if not isinstance(key_obj, str):
                 raise DigestCanonicalizationError(
-                    f"Dict key at {path} must be str, got {type(key).__name__}: {repr(key)}",
+                    f"Dict key at {path} must be str, got {type(key_obj).__name__}: {repr(key_obj)}",
                     field_path=path,
-                    offending_type=f"non-str-dict-key({type(key).__name__})"
+                    offending_type=f"non-str-dict-key({type(key_obj).__name__})"
                 )
-            normalize_for_digest(value, f"{path}.{key}")
-        return obj
+            normalize_for_digest(raw_value, f"{path}.{key_obj}")
+        return cast(Dict[str, Any], obj)
     
     # 处理 list：保持顺序，递归检查元素。
     if isinstance(obj, list):
-        for idx, item in enumerate(obj):
+        items = cast(List[Any], obj)
+        for idx, item in enumerate(items):
             normalize_for_digest(item, f"{path}[{idx}]")
-        return obj
+        return items
     
     # 其他类型一律拒绝。
     raise DigestCanonicalizationError(

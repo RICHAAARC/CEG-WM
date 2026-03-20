@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import platform
 import sys
-from typing import Any, Dict
+from typing import Any, Dict, cast
 
 from main.core import digests
 
@@ -67,8 +67,9 @@ def compute_env_fingerprint_canon_sha256(obj: Dict[str, Any]) -> str:
     Raises:
         TypeError: If obj is invalid.
     """
-    if not isinstance(obj, dict):
+    obj_value: Any = obj
+    if not isinstance(obj_value, dict):
         # obj 类型不符合预期，必须 fail-fast。
         raise TypeError("obj must be dict")
 
-    return digests.canonical_sha256(obj)
+    return digests.canonical_sha256(cast(Dict[str, Any], obj_value))

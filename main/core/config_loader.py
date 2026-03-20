@@ -15,7 +15,7 @@ YAML 加载唯一入口
 
 import yaml
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Union, cast
 from dataclasses import dataclass
 
 from . import digests
@@ -59,38 +59,42 @@ def normalize_ablation_flags(cfg: Dict[str, Any]) -> None:
         TypeError: If cfg or ablation types are invalid.
         ValueError: If mutual exclusion violated or normalized is manually set.
     """
-    if not isinstance(cfg, dict):
+    cfg_obj: Any = cfg
+    if not isinstance(cfg_obj, dict):
         # cfg 类型不合法，必须 fail-fast。
         raise TypeError("cfg must be dict")
 
-    ablation = cfg.get("ablation")
-    if ablation is None:
+    cfg_mapping = cast(Dict[str, Any], cfg_obj)
+    ablation_obj: Any = cfg_mapping.get("ablation")
+    if ablation_obj is None:
         # ablation 段缺失，设置默认值（全部启用）。
-        ablation = {}
-        cfg["ablation"] = ablation
+        ablation_obj = {}
+        cfg_mapping["ablation"] = ablation_obj
 
-    if not isinstance(ablation, dict):
+    if not isinstance(ablation_obj, dict):
         # ablation 类型不合法，必须 fail-fast。
         raise TypeError("ablation must be dict")
+
+    ablation = cast(Dict[str, Any], ablation_obj)
 
     # 禁止用户手动设置 normalized 字段。
     if "normalized" in ablation and ablation["normalized"] is not None:
         raise ValueError("ablation.normalized must not be manually set (auto-generated)")
 
     # 读取用户输入的开关值（null 或 bool）。
-    enable_content = ablation.get("enable_content")
-    enable_geometry = ablation.get("enable_geometry")
-    enable_fusion = ablation.get("enable_fusion")
-    enable_mask = ablation.get("enable_mask")
-    enable_subspace = ablation.get("enable_subspace")
-    enable_rescue = ablation.get("enable_rescue")
-    enable_lf = ablation.get("enable_lf")
-    enable_hf = ablation.get("enable_hf")
-    enable_sync = ablation.get("enable_sync")
-    enable_anchor = ablation.get("enable_anchor")
-    enable_image_sidecar = ablation.get("enable_image_sidecar")
-    lf_only = ablation.get("lf_only", False)
-    hf_only = ablation.get("hf_only", False)
+    enable_content: Any = ablation.get("enable_content")
+    enable_geometry: Any = ablation.get("enable_geometry")
+    enable_fusion: Any = ablation.get("enable_fusion")
+    enable_mask: Any = ablation.get("enable_mask")
+    enable_subspace: Any = ablation.get("enable_subspace")
+    enable_rescue: Any = ablation.get("enable_rescue")
+    enable_lf: Any = ablation.get("enable_lf")
+    enable_hf: Any = ablation.get("enable_hf")
+    enable_sync: Any = ablation.get("enable_sync")
+    enable_anchor: Any = ablation.get("enable_anchor")
+    enable_image_sidecar: Any = ablation.get("enable_image_sidecar")
+    lf_only: Any = ablation.get("lf_only", False)
+    hf_only: Any = ablation.get("hf_only", False)
 
     # 类型校验：lf_only / hf_only 必须为 bool。
     if not isinstance(lf_only, bool):
@@ -178,18 +182,23 @@ def _validate_paper_lf_ecc_gate(cfg: Dict[str, Any]) -> None:
         TypeError: If cfg structure is invalid.
         ValueError: If paper mode is enabled while LF ECC uses legacy int branch.
     """
-    if not isinstance(cfg, dict):
+    cfg_obj: Any = cfg
+    if not isinstance(cfg_obj, dict):
         # cfg 类型不合法，必须 fail-fast。
         raise TypeError("cfg must be dict")
 
-    paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
-    paper_enabled = bool(paper_cfg.get("enabled", False)) if isinstance(paper_cfg, dict) else False
+    cfg_mapping = cast(Dict[str, Any], cfg_obj)
+    paper_cfg_obj: Any = cfg_mapping.get("paper_faithfulness")
+    paper_cfg = cast(Dict[str, Any], paper_cfg_obj) if isinstance(paper_cfg_obj, dict) else {}
+    paper_enabled = bool(paper_cfg.get("enabled", False))
     if not paper_enabled:
         return
 
-    watermark_cfg = cfg.get("watermark") if isinstance(cfg.get("watermark"), dict) else {}
-    lf_cfg = watermark_cfg.get("lf") if isinstance(watermark_cfg.get("lf"), dict) else {}
-    ecc_value = lf_cfg.get("ecc", "sparse_ldpc")
+    watermark_cfg_obj: Any = cfg_mapping.get("watermark")
+    watermark_cfg = cast(Dict[str, Any], watermark_cfg_obj) if isinstance(watermark_cfg_obj, dict) else {}
+    lf_cfg_obj: Any = watermark_cfg.get("lf")
+    lf_cfg = cast(Dict[str, Any], lf_cfg_obj) if isinstance(lf_cfg_obj, dict) else {}
+    ecc_value: Any = lf_cfg.get("ecc", "sparse_ldpc")
 
     if isinstance(ecc_value, int):
         # paper 模式禁止 legacy int ecc，必须使用 sparse_ldpc 单一路径。
@@ -419,28 +428,37 @@ def compute_cfg_digest(
         TypeError: If inputs are invalid.
         ValueError: If include_paths_spec is invalid.
     """
-    if not isinstance(cfg, dict):
+    cfg_obj: Any = cfg
+    if not isinstance(cfg_obj, dict):
         # cfg 类型不符合预期，必须 fail-fast。
         raise TypeError("cfg must be dict")
-    if not isinstance(include_paths_spec, list):
+    include_paths_spec_obj: Any = include_paths_spec
+    if not isinstance(include_paths_spec_obj, list):
         # include_paths_spec 类型不符合预期，必须 fail-fast。
         raise TypeError("include_paths_spec must be list")
-    if not isinstance(include_override_applied, bool):
+    include_override_applied_obj: Any = include_override_applied
+    if not isinstance(include_override_applied_obj, bool):
         # include_override_applied 类型不符合预期，必须 fail-fast。
         raise TypeError("include_override_applied must be bool")
 
-    for path in include_paths_spec:
-        if not isinstance(path, str) or not path:
+    cfg_mapping = cast(Dict[str, Any], cfg_obj)
+    include_paths = cast(List[str], include_paths_spec_obj)
+    include_override = include_override_applied_obj
+
+    for path in include_paths:
+        path_obj: Any = path
+        if not isinstance(path_obj, str) or not path_obj:
             # include_paths_spec 成员不合法，必须 fail-fast。
             raise ValueError("include_paths_spec entries must be non-empty str")
-        if not include_override_applied and path.startswith("override_applied"):
+        normalized_path = path_obj
+        if not include_override and normalized_path.startswith("override_applied"):
             raise ValueError("override_applied must be excluded from cfg_digest")
 
-    effective_paths = list(include_paths_spec)
-    if include_override_applied and "override_applied" not in effective_paths:
+    effective_paths = list(include_paths)
+    if include_override and "override_applied" not in effective_paths:
         effective_paths.append("override_applied")
 
-    pruned_cfg = _prune_cfg_by_include_paths(cfg, effective_paths)
+    pruned_cfg = _prune_cfg_by_include_paths(cfg_mapping, effective_paths)
     return digests.canonical_sha256(pruned_cfg)
 
 
@@ -461,21 +479,28 @@ def _prune_cfg_by_include_paths(cfg: Dict[str, Any], include_paths_spec: List[st
         TypeError: If inputs are invalid.
         ValueError: If include_paths_spec is invalid.
     """
-    if not isinstance(cfg, dict):
+    cfg_obj: Any = cfg
+    if not isinstance(cfg_obj, dict):
         # cfg 类型不符合预期，必须 fail-fast。
         raise TypeError("cfg must be dict")
-    if not isinstance(include_paths_spec, list):
+    include_paths_spec_obj: Any = include_paths_spec
+    if not isinstance(include_paths_spec_obj, list):
         # include_paths_spec 类型不符合预期，必须 fail-fast。
         raise TypeError("include_paths_spec must be list")
 
+    cfg_mapping = cast(Dict[str, Any], cfg_obj)
+    include_paths = cast(List[str], include_paths_spec_obj)
+
     pruned: Dict[str, Any] = {}
-    for field_path in include_paths_spec:
-        if not isinstance(field_path, str) or not field_path:
+    for field_path in include_paths:
+        field_path_obj: Any = field_path
+        if not isinstance(field_path_obj, str) or not field_path_obj:
             raise ValueError("include_paths_spec entries must be non-empty str")
-        found, value = _get_value_by_field_path(cfg, field_path)
+        normalized_field_path = field_path_obj
+        found, value = _get_value_by_field_path(cfg_mapping, normalized_field_path)
         if not found:
             value = None
-        _set_value_by_field_path(pruned, field_path, value)
+        _set_value_by_field_path(pruned, normalized_field_path, value)
     return pruned
 
 
@@ -496,20 +521,31 @@ def _get_value_by_field_path(mapping: Dict[str, Any], field_path: str) -> tuple[
         TypeError: If inputs are invalid.
         ValueError: If field_path is invalid.
     """
-    if not isinstance(mapping, dict):
+    mapping_obj: Any = mapping
+    if not isinstance(mapping_obj, dict):
         # mapping 类型不符合预期，必须 fail-fast。
         raise TypeError("mapping must be dict")
-    if not isinstance(field_path, str) or not field_path:
+    field_path_obj: Any = field_path
+    if not isinstance(field_path_obj, str) or not field_path_obj:
         # field_path 输入不合法，必须 fail-fast。
         raise ValueError("field_path must be non-empty str")
 
-    current: Any = mapping
-    for segment in field_path.split("."):
+    current = cast(Dict[str, Any], mapping_obj)
+    normalized_field_path = field_path_obj
+    segments = normalized_field_path.split(".")
+
+    for index, segment in enumerate(segments):
         if not segment:
-            raise ValueError(f"Invalid field_path segment in {field_path}")
-        if not isinstance(current, dict) or segment not in current:
+            raise ValueError(f"Invalid field_path segment in {normalized_field_path}")
+        if segment not in current:
             return False, None
-        current = current[segment]
+        current_value: Any = current[segment]
+        if index < len(segments) - 1 and not isinstance(current_value, dict):
+            return False, None
+        if isinstance(current_value, dict):
+            current = cast(Dict[str, Any], current_value)
+            continue
+        return True, current_value
     return True, current
 
 
@@ -531,26 +567,29 @@ def _set_value_by_field_path(mapping: Dict[str, Any], field_path: str, value: An
         TypeError: If inputs are invalid.
         ValueError: If field_path is invalid.
     """
-    if not isinstance(mapping, dict):
+    mapping_obj: Any = mapping
+    if not isinstance(mapping_obj, dict):
         # mapping 类型不符合预期，必须 fail-fast。
         raise TypeError("mapping must be dict")
-    if not isinstance(field_path, str) or not field_path:
+    field_path_obj: Any = field_path
+    if not isinstance(field_path_obj, str) or not field_path_obj:
         # field_path 输入不合法，必须 fail-fast。
         raise ValueError("field_path must be non-empty str")
 
-    current: Any = mapping
-    segments = field_path.split(".")
+    current = cast(Dict[str, Any], mapping_obj)
+    normalized_field_path = field_path_obj
+    segments = normalized_field_path.split(".")
     for segment in segments[:-1]:
         if not segment:
-            raise ValueError(f"Invalid field_path segment in {field_path}")
-        next_value = current.get(segment)
+            raise ValueError(f"Invalid field_path segment in {normalized_field_path}")
+        next_value: Any = current.get(segment)
         if not isinstance(next_value, dict):
             next_value = {}
             current[segment] = next_value
-        current = next_value
+        current = cast(Dict[str, Any], next_value)
     last = segments[-1]
     if not last:
-        raise ValueError(f"Invalid field_path segment in {field_path}")
+        raise ValueError(f"Invalid field_path segment in {normalized_field_path}")
     current[last] = value
 
 
@@ -599,7 +638,8 @@ def load_and_validate_config(
         ValueError: If policy_path or overrides are invalid.
         YAMLLoadError: If YAML cannot be loaded.
     """
-    if not isinstance(config_path, (str, Path)):
+    config_path_obj: Any = config_path
+    if not isinstance(config_path_obj, (str, Path)):
         # config_path 类型不符合预期，必须 fail-fast。
         raise TypeError("config_path must be str or Path")
     if whitelist is None or not hasattr(whitelist, "data"):
@@ -616,20 +656,24 @@ def load_and_validate_config(
     if not isinstance(interpretation, ContractInterpretation):
         # interpretation 类型不符合预期，必须 fail-fast。
         raise TypeError("interpretation must be ContractInterpretation")
-    if overrides is not None and not isinstance(overrides, list):
+    overrides_obj: Any = overrides
+    if overrides_obj is not None and not isinstance(overrides_obj, list):
         # overrides 类型不符合预期，必须 fail-fast。
         raise TypeError("overrides must be list or None")
 
-    cfg, _ = load_yaml_with_provenance(config_path)
-    if not isinstance(cfg, dict):
+    normalized_config_path = config_path_obj
+    cfg, _ = load_yaml_with_provenance(normalized_config_path)
+    cfg_obj: Any = cfg
+    if not isinstance(cfg_obj, dict):
         # cfg 类型不符合预期，必须 fail-fast。
         raise TypeError("config root must be dict")
+    cfg = cast(Dict[str, Any], cfg_obj)
 
     from main.policy import override_rules
     override_rules.validate_overrides(cfg, interpretation)
 
-    override_args = overrides or []
-    override_applied = None
+    override_args = cast(list[str], overrides_obj) if overrides_obj is not None else []
+    override_applied: Dict[str, Any] | None = None
     if override_args:
         override_applied = override_rules.apply_cli_overrides(
             cfg,
@@ -672,22 +716,22 @@ def load_and_validate_config(
     cfg_pruned_for_digest = _prune_cfg_by_include_paths(cfg, include_paths_spec)
     cfg_pruned_for_digest_canon_sha256 = digests.canonical_sha256(cfg_pruned_for_digest)
     
-    overrides_applied_summary = None
-    if override_applied is not None and isinstance(override_applied, dict):
+    overrides_applied_summary: Dict[str, Any] | None = None
+    if override_applied is not None:
         overrides_applied_summary = {
             "count": len(override_applied),
             "keys": sorted(override_applied.keys())
         }
-    
-    cfg_audit_record = {
+
+    cfg_audit_record: Dict[str, Any] = {
         "config_path": str(config_path),
         "overrides_applied_summary": overrides_applied_summary,
         "cfg_pruned_for_digest_canon_sha256": cfg_pruned_for_digest_canon_sha256,
         "cfg_digest": cfg_digest
     }
     cfg_audit_canon_sha256 = digests.canonical_sha256(cfg_audit_record)
-    
-    cfg_audit_metadata = {
+
+    cfg_audit_metadata: Dict[str, Any] = {
         **cfg_audit_record,
         "cfg_audit_canon_sha256": cfg_audit_canon_sha256
     }
@@ -715,18 +759,21 @@ def _require_run_root_reuse_override(
         TypeError: If inputs are invalid.
         ValueError: If reuse is enabled without required overrides.
     """
-    if not isinstance(cfg, dict):
+    cfg_obj: Any = cfg
+    if not isinstance(cfg_obj, dict):
         # cfg 类型不符合预期，必须 fail-fast。
         raise TypeError("cfg must be dict")
 
-    allow_nonempty_run_root = cfg.get("allow_nonempty_run_root", False)
+    cfg_mapping = cast(Dict[str, Any], cfg_obj)
+
+    allow_nonempty_run_root: Any = cfg_mapping.get("allow_nonempty_run_root", False)
     if allow_nonempty_run_root is None:
         allow_nonempty_run_root = False
     if not isinstance(allow_nonempty_run_root, bool):
         # allow_nonempty_run_root 类型不符合预期，必须 fail-fast。
         raise TypeError("allow_nonempty_run_root must be bool")
 
-    allow_nonempty_run_root_reason = cfg.get("allow_nonempty_run_root_reason")
+    allow_nonempty_run_root_reason: Any = cfg_mapping.get("allow_nonempty_run_root_reason")
     if allow_nonempty_run_root_reason is not None and not isinstance(allow_nonempty_run_root_reason, str):
         # allow_nonempty_run_root_reason 类型不符合预期，必须 fail-fast。
         raise TypeError("allow_nonempty_run_root_reason must be str or None")
@@ -761,19 +808,27 @@ def _override_applied_includes_field(override_applied: Dict[str, Any], field_pat
     Raises:
         TypeError: If inputs are invalid.
     """
-    if not isinstance(override_applied, dict):
+    override_applied_obj: Any = override_applied
+    if not isinstance(override_applied_obj, dict):
         # override_applied 类型不符合预期，必须 fail-fast。
         raise TypeError("override_applied must be dict")
-    if not isinstance(field_path, str) or not field_path:
+    field_path_obj: Any = field_path
+    if not isinstance(field_path_obj, str) or not field_path_obj:
         # field_path 类型不符合预期，必须 fail-fast。
         raise TypeError("field_path must be non-empty str")
 
-    applied_fields = override_applied.get("applied_fields")
+    override_applied_mapping = cast(Dict[str, Any], override_applied_obj)
+    normalized_field_path = field_path_obj
+
+    applied_fields: Any = override_applied_mapping.get("applied_fields")
     if not isinstance(applied_fields, list):
         return False
-    for item in applied_fields:
-        if not isinstance(item, dict):
+    applied_field_items = cast(List[Any], applied_fields)
+    for item in applied_field_items:
+        item_obj: Any = item
+        if not isinstance(item_obj, dict):
             continue
-        if item.get("field_path") == field_path:
+        item_mapping = cast(Dict[str, Any], item_obj)
+        if item_mapping.get("field_path") == normalized_field_path:
             return True
     return False

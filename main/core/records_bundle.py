@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, cast
 
 from . import digests
 from . import records_io
@@ -126,14 +126,16 @@ def _normalize_manifest_dir(manifest_dir: Path | None, records_dir: Path) -> Pat
     """
     if manifest_dir is None:
         manifest_dir = records_dir
-    if not isinstance(manifest_dir, Path):
+    manifest_dir_obj: Any = manifest_dir
+    if not isinstance(manifest_dir_obj, Path):
         # manifest_dir 类型不符合预期，必须 fail-fast。
         raise RecordBundleError("manifest_dir must be Path")
-    if manifest_dir.exists() and not manifest_dir.is_dir():
+    normalized_manifest_dir = manifest_dir_obj
+    if normalized_manifest_dir.exists() and not normalized_manifest_dir.is_dir():
         # manifest_dir 不是目录，必须 fail-fast。
-        raise RecordBundleError(f"manifest_dir is not a directory: {manifest_dir}")
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    return manifest_dir.resolve()
+        raise RecordBundleError(f"manifest_dir is not a directory: {normalized_manifest_dir}")
+    normalized_manifest_dir.mkdir(parents=True, exist_ok=True)
+    return normalized_manifest_dir.resolve()
 
 
 def _inject_artifact_audit_marker(manifest: Dict[str, Any]) -> None:
@@ -151,12 +153,14 @@ def _inject_artifact_audit_marker(manifest: Dict[str, Any]) -> None:
     Raises:
         RecordBundleError: If inputs are invalid.
     """
-    if not isinstance(manifest, dict):
+    manifest_obj: Any = manifest
+    if not isinstance(manifest_obj, dict):
         # manifest 类型不符合预期，必须 fail-fast。
         raise RecordBundleError("manifest must be dict")
-    if "_artifact_audit" in manifest:
+    manifest_mapping = cast(Dict[str, Any], manifest_obj)
+    if "_artifact_audit" in manifest_mapping:
         return
-    manifest["_artifact_audit"] = {
+    manifest_mapping["_artifact_audit"] = {
         "schema_version": "v1.0",
         "writer": "records_io"
     }
@@ -174,15 +178,17 @@ def _validate_records_dir(records_dir: Path) -> None:
     Raises:
         RecordBundleError: If input is invalid.
     """
-    if not isinstance(records_dir, Path):
+    records_dir_obj: Any = records_dir
+    if not isinstance(records_dir_obj, Path):
         # records_dir 类型不符合预期，必须 fail-fast。
         raise RecordBundleError("records_dir must be Path")
-    if not records_dir.exists():
+    normalized_records_dir = records_dir_obj
+    if not normalized_records_dir.exists():
         # records_dir 不存在，必须 fail-fast。
-        raise RecordBundleError(f"records_dir does not exist: {records_dir}")
-    if not records_dir.is_dir():
+        raise RecordBundleError(f"records_dir does not exist: {normalized_records_dir}")
+    if not normalized_records_dir.is_dir():
         # records_dir 不是目录，必须 fail-fast。
-        raise RecordBundleError(f"records_dir is not a directory: {records_dir}")
+        raise RecordBundleError(f"records_dir is not a directory: {normalized_records_dir}")
 
 
 def _validate_manifest_name(manifest_name: str) -> None:
@@ -197,7 +203,8 @@ def _validate_manifest_name(manifest_name: str) -> None:
     Raises:
         RecordBundleError: If input is invalid.
     """
-    if not isinstance(manifest_name, str) or not manifest_name:
+    manifest_name_obj: Any = manifest_name
+    if not isinstance(manifest_name_obj, str) or not manifest_name_obj:
         # manifest_name 输入不合法，必须 fail-fast。
         raise RecordBundleError("manifest_name must be non-empty str")
 
@@ -215,17 +222,22 @@ def _scan_record_files(records_dir: Path, manifest_name: str) -> List[Path]:
     Returns:
         Sorted list of record file paths.
     """
-    if not isinstance(records_dir, Path):
+    records_dir_obj: Any = records_dir
+    if not isinstance(records_dir_obj, Path):
         # records_dir 类型不符合预期，必须 fail-fast。
         raise RecordBundleError("records_dir must be Path")
-    if not isinstance(manifest_name, str) or not manifest_name:
+    manifest_name_obj: Any = manifest_name
+    if not isinstance(manifest_name_obj, str) or not manifest_name_obj:
         # manifest_name 输入不合法，必须 fail-fast。
         raise RecordBundleError("manifest_name must be non-empty str")
 
-    candidates = list(records_dir.glob("*.json")) + list(records_dir.glob("*.jsonl"))
+    normalized_records_dir = records_dir_obj
+    normalized_manifest_name = manifest_name_obj
+
+    candidates = list(normalized_records_dir.glob("*.json")) + list(normalized_records_dir.glob("*.jsonl"))
     filtered: List[Path] = []
     for path in candidates:
-        if _is_excluded_file(path, manifest_name):
+        if _is_excluded_file(path, normalized_manifest_name):
             continue
         filtered.append(path)
 
@@ -245,15 +257,19 @@ def _is_excluded_file(path: Path, manifest_name: str) -> bool:
     Returns:
         True if excluded.
     """
-    if not isinstance(path, Path):
+    path_obj: Any = path
+    if not isinstance(path_obj, Path):
         # path 类型不符合预期，必须 fail-fast。
         raise RecordBundleError("path must be Path")
-    if not isinstance(manifest_name, str) or not manifest_name:
+    manifest_name_obj: Any = manifest_name
+    if not isinstance(manifest_name_obj, str) or not manifest_name_obj:
         # manifest_name 输入不合法，必须 fail-fast。
         raise RecordBundleError("manifest_name must be non-empty str")
 
-    name = path.name
-    if name == manifest_name:
+    normalized_path = path_obj
+    normalized_manifest_name = manifest_name_obj
+    name = normalized_path.name
+    if name == normalized_manifest_name:
         return True
     if name.startswith(".tmp-"):
         return True
@@ -277,23 +293,28 @@ def _load_records_payload(path: Path) -> Tuple[Any, List[Dict[str, Any]], str]:
     Raises:
         RecordBundleError: If parsing fails.
     """
-    if not isinstance(path, Path):
+    path_obj: Any = path
+    if not isinstance(path_obj, Path):
         # path 类型不符合预期，必须 fail-fast。
         raise RecordBundleError("path must be Path")
 
-    if path.suffix == ".json":
-        obj = _read_json_file(path)
-        if not isinstance(obj, dict):
-            # json 文件内容类型不符合预期，必须 fail-fast。
-            raise RecordBundleError(f"JSON file must contain dict: {path}")
-        return obj, [obj], "json"
+    normalized_path = path_obj
 
-    if path.suffix == ".jsonl":
-        records = _read_jsonl_file(path)
+    if normalized_path.suffix == ".json":
+        obj = _read_json_file(normalized_path)
+        obj_value: Any = obj
+        if not isinstance(obj_value, dict):
+            # json 文件内容类型不符合预期，必须 fail-fast。
+            raise RecordBundleError(f"JSON file must contain dict: {normalized_path}")
+        record_obj = cast(Dict[str, Any], obj_value)
+        return record_obj, [record_obj], "json"
+
+    if normalized_path.suffix == ".jsonl":
+        records = _read_jsonl_file(normalized_path)
         return records, records, "jsonl"
 
     # 扫描结果中出现非支持后缀，必须 fail-fast。
-    raise RecordBundleError(f"Unsupported records file type: {path}")
+    raise RecordBundleError(f"Unsupported records file type: {normalized_path}")
 
 
 def _read_json_file(path: Path) -> Any:
@@ -311,16 +332,19 @@ def _read_json_file(path: Path) -> Any:
     Raises:
         RecordBundleError: If JSON parsing fails.
     """
-    if not isinstance(path, Path):
+    path_obj: Any = path
+    if not isinstance(path_obj, Path):
         # path 类型不符合预期，必须 fail-fast。
         raise RecordBundleError("path must be Path")
 
+    normalized_path = path_obj
+
     try:
-        with path.open("r", encoding="utf-8") as f:
+        with normalized_path.open("r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
         # JSON 解析失败，必须 fail-fast。
-        raise RecordBundleError(f"Failed to parse JSON file {path}: {e}") from e
+        raise RecordBundleError(f"Failed to parse JSON file {normalized_path}: {e}") from e
 
 
 def _read_jsonl_file(path: Path) -> List[Dict[str, Any]]:
@@ -338,33 +362,37 @@ def _read_jsonl_file(path: Path) -> List[Dict[str, Any]]:
     Raises:
         RecordBundleError: If JSONL parsing fails.
     """
-    if not isinstance(path, Path):
+    path_obj: Any = path
+    if not isinstance(path_obj, Path):
         # path 类型不符合预期，必须 fail-fast。
         raise RecordBundleError("path must be Path")
 
+    normalized_path = path_obj
+
     records: List[Dict[str, Any]] = []
     try:
-        with path.open("r", encoding="utf-8") as f:
+        with normalized_path.open("r", encoding="utf-8") as f:
             for line_idx, line in enumerate(f, start=1):
                 stripped = line.strip()
                 if not stripped:
                     continue
                 obj = json.loads(stripped)
-                if not isinstance(obj, dict):
+                obj_value: Any = obj
+                if not isinstance(obj_value, dict):
                     # JSONL 行内容不是 dict，必须 fail-fast。
                     raise RecordBundleError(
-                        f"JSONL line must be dict at {path} line {line_idx}"
+                        f"JSONL line must be dict at {normalized_path} line {line_idx}"
                     )
-                records.append(obj)
+                records.append(cast(Dict[str, Any], obj_value))
     except RecordBundleError:
         raise
     except Exception as e:
         # JSONL 解析失败，必须 fail-fast。
-        raise RecordBundleError(f"Failed to parse JSONL file {path}: {e}") from e
+        raise RecordBundleError(f"Failed to parse JSONL file {normalized_path}: {e}") from e
 
     if not records:
         # JSONL 为空，必须 fail-fast。
-        raise RecordBundleError(f"JSONL file has no records: {path}")
+        raise RecordBundleError(f"JSONL file has no records: {normalized_path}")
 
     return records
 
@@ -394,35 +422,44 @@ def _build_file_entry(
     Raises:
         RecordBundleError: If hashing fails.
     """
-    if not isinstance(records_dir, Path):
+    records_dir_obj: Any = records_dir
+    if not isinstance(records_dir_obj, Path):
         # records_dir 类型不符合预期，必须 fail-fast。
         raise RecordBundleError("records_dir must be Path")
-    if not isinstance(file_path, Path):
+    file_path_obj: Any = file_path
+    if not isinstance(file_path_obj, Path):
         # file_path 类型不符合预期，必须 fail-fast。
         raise RecordBundleError("file_path must be Path")
-    if not isinstance(file_type, str) or not file_type:
+    file_type_obj: Any = file_type
+    if not isinstance(file_type_obj, str) or not file_type_obj:
         # file_type 输入不合法，必须 fail-fast。
         raise RecordBundleError("file_type must be non-empty str")
-    if not isinstance(record_count, int) or record_count < 0:
+    record_count_obj: Any = record_count
+    if not isinstance(record_count_obj, int) or record_count_obj < 0:
         # record_count 输入不合法，必须 fail-fast。
         raise RecordBundleError("record_count must be non-negative int")
 
+    normalized_records_dir = records_dir_obj
+    normalized_file_path = file_path_obj
+    normalized_file_type = file_type_obj
+    normalized_record_count = record_count_obj
+
     try:
-        file_sha256 = digests.file_sha256(file_path)
+        file_sha256 = digests.file_sha256(normalized_file_path)
     except Exception as e:
         # file_sha256 计算失败，必须 fail-fast。
-        raise RecordBundleError(f"Failed to compute file_sha256 for {file_path}: {e}") from e
+        raise RecordBundleError(f"Failed to compute file_sha256 for {normalized_file_path}: {e}") from e
 
     try:
         canon_sha256 = digests.canonical_sha256(obj)
     except Exception as e:
         # canon_sha256 计算失败，必须 fail-fast。
-        raise RecordBundleError(f"Failed to compute canon_sha256 for {file_path}: {e}") from e
+        raise RecordBundleError(f"Failed to compute canon_sha256 for {normalized_file_path}: {e}") from e
 
     return {
-        "path": file_path.relative_to(records_dir).as_posix(),
-        "file_type": file_type,
-        "record_count": record_count,
+        "path": normalized_file_path.relative_to(normalized_records_dir).as_posix(),
+        "file_type": normalized_file_type,
+        "record_count": normalized_record_count,
         "file_sha256": file_sha256,
         "canon_sha256": canon_sha256
     }
@@ -451,18 +488,23 @@ def _validate_anchor_fields(
     Raises:
         RecordBundleError: If anchors are missing or inconsistent.
     """
-    if not isinstance(records_by_file, dict):
+    records_by_file_obj: Any = records_by_file
+    if not isinstance(records_by_file_obj, dict):
         # records_by_file 类型不符合预期，必须 fail-fast。
         raise RecordBundleError("records_by_file must be dict")
-    if not isinstance(records_dir, Path):
+    records_dir_obj: Any = records_dir
+    if not isinstance(records_dir_obj, Path):
         # records_dir 类型不符合预期，必须 fail-fast。
         raise RecordBundleError("records_dir must be Path")
+
+    records_mapping = cast(Dict[Path, List[Dict[str, Any]]], records_by_file_obj)
+    normalized_records_dir = records_dir_obj
 
     anchor_values: Dict[str, str] = {}
 
     for field_name in required_fields:
         value_by_file, missing_files, inconsistent_files = _collect_anchor_values(
-            records_by_file, records_dir, field_name, require_presence=True
+            records_mapping, normalized_records_dir, field_name, require_presence=True
         )
         missing_files = sorted(set(missing_files))
         inconsistent_files = sorted(set(inconsistent_files))
@@ -484,7 +526,7 @@ def _validate_anchor_fields(
 
     for field_name in optional_fields:
         value_by_file, missing_files, inconsistent_files = _collect_anchor_values(
-            records_by_file, records_dir, field_name, require_presence=False
+            records_mapping, normalized_records_dir, field_name, require_presence=False
         )
         inconsistent_files = sorted(set(inconsistent_files))
         if inconsistent_files:
@@ -521,26 +563,35 @@ def _collect_anchor_values(
     Returns:
         Tuple of (value_by_file, missing_files, inconsistent_files).
     """
-    if not isinstance(records_by_file, dict):
+    records_by_file_obj: Any = records_by_file
+    if not isinstance(records_by_file_obj, dict):
         # records_by_file 类型不符合预期，必须 fail-fast。
         raise RecordBundleError("records_by_file must be dict")
-    if not isinstance(records_dir, Path):
+    records_dir_obj: Any = records_dir
+    if not isinstance(records_dir_obj, Path):
         # records_dir 类型不符合预期，必须 fail-fast。
         raise RecordBundleError("records_dir must be Path")
-    if not isinstance(field_name, str) or not field_name:
+    field_name_obj: Any = field_name
+    if not isinstance(field_name_obj, str) or not field_name_obj:
         # field_name 输入不合法，必须 fail-fast。
         raise RecordBundleError("field_name must be non-empty str")
-    if not isinstance(require_presence, bool):
+    require_presence_obj: Any = require_presence
+    if not isinstance(require_presence_obj, bool):
         # require_presence 输入不合法，必须 fail-fast。
         raise RecordBundleError("require_presence must be bool")
+
+    records_mapping = cast(Dict[Path, List[Dict[str, Any]]], records_by_file_obj)
+    normalized_records_dir = records_dir_obj
+    normalized_field_name = field_name_obj
+    normalized_require_presence = require_presence_obj
 
     value_by_file: Dict[str, str] = {}
     missing_files: List[str] = []
     inconsistent_files: List[str] = []
 
-    for file_path, records in records_by_file.items():
-        file_key = file_path.relative_to(records_dir).as_posix()
-        status, value = _extract_field_value(records, field_name, require_presence, file_key)
+    for file_path, records in records_mapping.items():
+        file_key = file_path.relative_to(normalized_records_dir).as_posix()
+        status, value = _extract_field_value(records, normalized_field_name, normalized_require_presence, file_key)
         if status == "missing":
             missing_files.append(file_key)
             continue
@@ -549,7 +600,7 @@ def _collect_anchor_values(
             continue
         value_by_file[file_key] = value
 
-    if require_presence and missing_files:
+    if normalized_require_presence and missing_files:
         return {}, missing_files, []
 
     if value_by_file:
@@ -580,32 +631,41 @@ def _extract_field_value(
     Returns:
         Tuple of (status, value).
     """
-    if not isinstance(records, list):
+    records_obj: Any = records
+    if not isinstance(records_obj, list):
         # records 类型不符合预期，必须 fail-fast。
         raise RecordBundleError("records must be list")
-    if not isinstance(field_name, str) or not field_name:
+    field_name_obj: Any = field_name
+    if not isinstance(field_name_obj, str) or not field_name_obj:
         # field_name 输入不合法，必须 fail-fast。
         raise RecordBundleError("field_name must be non-empty str")
-    if not isinstance(require_presence, bool):
+    require_presence_obj: Any = require_presence
+    if not isinstance(require_presence_obj, bool):
         # require_presence 输入不合法，必须 fail-fast。
         raise RecordBundleError("require_presence must be bool")
-    if not isinstance(file_key, str) or not file_key:
+    file_key_obj: Any = file_key
+    if not isinstance(file_key_obj, str) or not file_key_obj:
         # file_key 输入不合法，必须 fail-fast。
         raise RecordBundleError("file_key must be non-empty str")
 
+    record_list = cast(List[Dict[str, Any]], records_obj)
+    normalized_field_name = field_name_obj
+    normalized_require_presence = require_presence_obj
+    normalized_file_key = file_key_obj
+
     first_value: str | None = None
-    for record in records:
-        if field_name not in record:
-            if require_presence:
+    for record in record_list:
+        if normalized_field_name not in record:
+            if normalized_require_presence:
                 return "missing", ""
             return "missing", ""
-        value = record[field_name]
+        value = record[normalized_field_name]
         if not isinstance(value, str):
             # 锚点字段类型不正确，必须 fail-fast。
             raise RecordBundleError(
-                f"Anchor field must be str: field_name={field_name}, file={file_key}",
-                field_name=field_name,
-                files=[file_key]
+                f"Anchor field must be str: field_name={normalized_field_name}, file={normalized_file_key}",
+                field_name=normalized_field_name,
+                files=[normalized_file_key]
             )
         if first_value is None:
             first_value = value
@@ -635,17 +695,20 @@ def _select_anchor_value(value_by_file: Dict[str, str], field_name: str) -> str:
     Raises:
         RecordBundleError: If values are inconsistent.
     """
-    if not isinstance(value_by_file, dict):
+    value_by_file_obj: Any = value_by_file
+    if not isinstance(value_by_file_obj, dict):
         # value_by_file 类型不符合预期，必须 fail-fast。
         raise RecordBundleError("value_by_file must be dict")
-    if not isinstance(field_name, str) or not field_name:
+    field_name_obj: Any = field_name
+    if not isinstance(field_name_obj, str) or not field_name_obj:
         # field_name 输入不合法，必须 fail-fast。
         raise RecordBundleError("field_name must be non-empty str")
 
-    values = list(value_by_file.values())
+    value_mapping = cast(Dict[str, str], value_by_file_obj)
+    values = list(value_mapping.values())
     if not values:
         # anchor 值为空，必须 fail-fast。
-        raise RecordBundleError(f"No anchor values for {field_name}")
+        raise RecordBundleError(f"No anchor values for {field_name_obj}")
 
     first_value = values[0]
     return first_value
@@ -671,26 +734,35 @@ def _build_manifest(
     Returns:
         Manifest dict.
     """
-    if not isinstance(records_dir, Path):
+    records_dir_obj: Any = records_dir
+    if not isinstance(records_dir_obj, Path):
         # records_dir 类型不符合预期，必须 fail-fast。
         raise RecordBundleError("records_dir must be Path")
-    if not isinstance(manifest_name, str) or not manifest_name:
+    manifest_name_obj: Any = manifest_name
+    if not isinstance(manifest_name_obj, str) or not manifest_name_obj:
         # manifest_name 输入不合法，必须 fail-fast。
         raise RecordBundleError("manifest_name must be non-empty str")
-    if not isinstance(file_entries, list):
+    file_entries_obj: Any = file_entries
+    if not isinstance(file_entries_obj, list):
         # file_entries 类型不符合预期，必须 fail-fast。
         raise RecordBundleError("file_entries must be list")
-    if not isinstance(anchor_values, dict):
+    anchor_values_obj: Any = anchor_values
+    if not isinstance(anchor_values_obj, dict):
         # anchor_values 类型不符合预期，必须 fail-fast。
         raise RecordBundleError("anchor_values must be dict")
 
+    normalized_records_dir = records_dir_obj
+    normalized_manifest_name = manifest_name_obj
+    normalized_file_entries = cast(List[Dict[str, Any]], file_entries_obj)
+    normalized_anchor_values = cast(Dict[str, str], anchor_values_obj)
+
     return {
         "schema_version": "v1.0",
-        "records_dir": records_dir.as_posix(),
-        "manifest_name": manifest_name,
-        "file_count": len(file_entries),
-        "files": file_entries,
-        "anchors": anchor_values
+        "records_dir": normalized_records_dir.as_posix(),
+        "manifest_name": normalized_manifest_name,
+        "file_count": len(normalized_file_entries),
+        "files": normalized_file_entries,
+        "anchors": normalized_anchor_values
     }
 
 
@@ -706,10 +778,11 @@ def _strip_bundle_digest(manifest: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Manifest dict without bundle_canon_sha256.
     """
-    if not isinstance(manifest, dict):
+    manifest_obj: Any = manifest
+    if not isinstance(manifest_obj, dict):
         # manifest 类型不符合预期，必须 fail-fast。
         raise RecordBundleError("manifest must be dict")
 
-    stripped = dict(manifest)
+    stripped = dict(cast(Dict[str, Any], manifest_obj))
     stripped.pop("bundle_canon_sha256", None)
     return stripped
