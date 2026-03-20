@@ -437,16 +437,13 @@ def test_detect_lf_observability_fields_classify_absent_and_failure() -> None:
     }
 
 
-def test_detect_runtime_mode_canonical_preserves_legacy_mode() -> None:
+def test_detect_runtime_mode_canonical_accepts_current_formal_values() -> None:
     """
-    功能：验证 detect runtime canonical 字段只做兼容清理，不改旧字段原值。
+    功能：验证 detect runtime canonical helper 仅接受当前正式值。
 
-    Validate detect runtime canonical mode normalizes legacy fallback naming
-    while preserving the persisted legacy field value.
+    Validate detect runtime canonical helper preserves the current formal
+    runtime mode values.
     """
-    assert detect_orchestrator._canonicalize_detect_runtime_mode(  # pyright: ignore[reportPrivateUsage]
-        "fallback_identity_v0"
-    ) == "fallback_identity"
     assert detect_orchestrator._canonicalize_detect_runtime_mode(  # pyright: ignore[reportPrivateUsage]
         "fallback_identity"
     ) == "fallback_identity"
@@ -467,13 +464,13 @@ def test_resolve_detect_runtime_mode_prefers_canonical_then_legacy() -> None:
     """
     assert detect_orchestrator.resolve_detect_runtime_mode(  # pyright: ignore[reportPrivateUsage]
         {
-            "detect_runtime_mode": "fallback_identity_v0",
+            "detect_runtime_mode": "fallback_identity",
             "detect_runtime_mode_canonical": "real",
         }
     ) == "real"
     assert detect_orchestrator.resolve_detect_runtime_mode(  # pyright: ignore[reportPrivateUsage]
         {
-            "detect_runtime_mode": "fallback_identity_v0",
+            "detect_runtime_mode": "fallback_identity",
         }
     ) == "fallback_identity"
 

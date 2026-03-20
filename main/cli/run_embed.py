@@ -589,7 +589,8 @@ def run_embed(
                         _cr = _std / _mean
                         _flat = _se.reshape(-1)
                         _pk = float(_np_lat.max(_flat))
-                        _med = float(_np_lat.median(_flat) + 1e-12)
+                        _median_value = cast(Any, _np_lat.median(_flat))
+                        _med = float(_median_value) + 1e-12
                         _spec = _np_lat.fft.fftshift(_np_lat.abs(_np_lat.fft.fft2(_se)))
                         _cy, _cx = _spec.shape[0] // 2, _spec.shape[1] // 2
                         _spec[_cy, _cx] = 0.0

@@ -1439,7 +1439,7 @@ def test_paper_acceptance_gate_prefers_canonical_runtime_mode(tmp_path: Path) ->
     (records_dir / "detect_record.json").write_text(
         json.dumps(
             {
-                "detect_runtime_mode": "fallback_identity_v0",
+                "detect_runtime_mode": "fallback_identity",
                 "detect_runtime_mode_canonical": "real",
                 "pipeline_runtime_meta": {"synthetic_pipeline": False},
             },

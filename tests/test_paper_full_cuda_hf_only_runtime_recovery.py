@@ -367,7 +367,7 @@ def test_hf_truncation_baseline_payload_prefers_canonical_runtime_mode() -> None
     """
     payload = run_detect_cli._build_hf_truncation_baseline_payload(  # pyright: ignore[reportPrivateUsage]
         {
-            "detect_runtime_mode": "fallback_identity_v0",
+            "detect_runtime_mode": "fallback_identity",
             "detect_runtime_mode_canonical": "real",
             "pipeline_runtime_meta": {"synthetic_pipeline": False},
             "content_evidence_payload": {

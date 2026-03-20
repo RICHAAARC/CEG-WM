@@ -762,13 +762,12 @@ def _build_detect_lf_observability_fields(detect_lf_status: Any) -> Dict[str, An
 
 def _canonicalize_detect_runtime_mode(detect_runtime_mode: Any) -> Optional[str]:
     """
-    功能：输出 detect_runtime_mode 的兼容 canonical 语义名。
+    功能：输出 detect_runtime_mode 的 canonical 语义名。
 
-    Derive a compatibility-safe canonical runtime mode name without changing the
-    legacy persisted detect_runtime_mode value.
+    Derive the canonical runtime mode name used by canonical-first consumers.
 
     Args:
-        detect_runtime_mode: Legacy runtime mode value.
+        detect_runtime_mode: Detect runtime mode value.
 
     Returns:
         Canonical runtime mode string, or None when input is unavailable.
@@ -779,8 +778,6 @@ def _canonicalize_detect_runtime_mode(detect_runtime_mode: Any) -> Optional[str]
     normalized_mode = detect_runtime_mode.strip()
     if not normalized_mode:
         return None
-    if normalized_mode == "fallback_identity_v0":
-        return "fallback_identity"
     return normalized_mode
 
 
@@ -788,8 +785,7 @@ def resolve_detect_runtime_mode(record: Dict[str, Any]) -> Optional[str]:
     """
     功能：按 canonical-first 规则解析 detect runtime mode。
 
-    Resolve detect runtime mode with canonical-first and legacy-compatible
-    semantics.
+    Resolve detect runtime mode with canonical-first semantics.
 
     Args:
         record: Detect record mapping.
