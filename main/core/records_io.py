@@ -104,6 +104,135 @@ _ARTIFACT_FORBIDDEN_ANCHOR_FIELDS = {
 }
 
 
+def _resolve_governed_artifact_contract(
+    contracts: FrozenContracts,
+    relative_path: str,
+) -> Dict[str, Any] | None:
+    """
+    功能：解析受治理的 artifact 契约条目。
+
+    Resolve the governed artifact contract entry for a relative artifact path.
+
+    Args:
+        contracts: Loaded frozen contracts.
+        relative_path: Artifact path relative to artifacts_dir.
+
+    Returns:
+        Matching artifact contract mapping, or None when path is not governed.
+
+    Raises:
+        RecordsWritePolicyError: If the artifact governance config is malformed.
+    """
+    if not isinstance(contracts, FrozenContracts):
+        # contracts 类型不符合预期，必须 fail-fast。
+        raise TypeError("contracts must be FrozenContracts")
+    if not isinstance(relative_path, str) or not relative_path:
+        # relative_path 输入不合法，必须 fail-fast。
+        raise ValueError("relative_path must be non-empty str")
+
+    artifact_schema = contracts.data.get("artifact_schema")
+    if artifact_schema is None:
+        return None
+    if not isinstance(artifact_schema, dict):
+        # artifact_schema 结构损坏会破坏正式治理，必须 fail-fast。
+        raise RecordsWritePolicyError("frozen_contracts artifact_schema must be mapping")
+
+    append_only = artifact_schema.get("append_only")
+    if append_only is not True:
+        # artifact_schema 必须显式声明 append_only=true。
+        raise RecordsWritePolicyError("frozen_contracts artifact_schema must declare append_only=true")
+
+    artifact_contracts = artifact_schema.get("artifact_contracts")
+    if not isinstance(artifact_contracts, dict):
+        # artifact_contracts 缺失会导致治理裸奔，必须 fail-fast。
+        raise RecordsWritePolicyError("frozen_contracts artifact_schema.artifact_contracts must be mapping")
+
+    for artifact_type, spec in artifact_contracts.items():
+        if not isinstance(artifact_type, str) or not artifact_type:
+            # artifact_type 名称非法，必须 fail-fast。
+            raise RecordsWritePolicyError("artifact contract key must be non-empty str")
+        if not isinstance(spec, dict):
+            # 条目类型损坏，必须 fail-fast。
+            raise RecordsWritePolicyError(
+                f"artifact contract must be mapping: artifact_type={artifact_type}"
+            )
+        spec_relative_path = spec.get("relative_path")
+        if not isinstance(spec_relative_path, str) or not spec_relative_path:
+            # 相对路径缺失会破坏路径治理，必须 fail-fast。
+            raise RecordsWritePolicyError(
+                f"artifact contract relative_path must be non-empty str: artifact_type={artifact_type}"
+            )
+        if spec_relative_path != relative_path:
+            continue
+
+        allowed_top_level_fields = spec.get("allowed_top_level_fields")
+        if not isinstance(allowed_top_level_fields, list) or not allowed_top_level_fields:
+            # 白名单集合缺失会破坏字段治理，必须 fail-fast。
+            raise RecordsWritePolicyError(
+                f"artifact contract allowed_top_level_fields must be non-empty list: artifact_type={artifact_type}"
+            )
+        if not all(isinstance(field_name, str) and field_name for field_name in allowed_top_level_fields):
+            # 白名单成员必须是非空字符串。
+            raise RecordsWritePolicyError(
+                f"artifact contract allowed_top_level_fields must contain only non-empty str: artifact_type={artifact_type}"
+            )
+
+        return {
+            "artifact_type": artifact_type,
+            "relative_path": spec_relative_path,
+            "allowed_top_level_fields": [str(field_name) for field_name in allowed_top_level_fields],
+        }
+    return None
+
+
+def _enforce_governed_artifact_contract(
+    obj: Dict[str, Any],
+    dst_path: Path,
+    relative_path: str,
+    contracts: FrozenContracts,
+) -> None:
+    """
+    功能：对受治理 artifact 执行精确顶层字段白名单校验。
+
+    Enforce exact top-level allowlist validation for governed artifacts.
+
+    Args:
+        obj: Artifact payload mapping.
+        dst_path: Destination artifact path.
+        relative_path: Artifact path relative to artifacts_dir.
+        contracts: Loaded frozen contracts.
+
+    Returns:
+        None.
+
+    Raises:
+        RecordsWritePolicyError: If artifact payload drifts from the governed contract.
+    """
+    governed_contract = _resolve_governed_artifact_contract(contracts, relative_path)
+    if governed_contract is None:
+        return
+
+    artifact_type = obj.get("artifact_type")
+    expected_artifact_type = governed_contract["artifact_type"]
+    if artifact_type != expected_artifact_type:
+        # artifact_type 与治理契约不一致，必须 fail-fast。
+        raise RecordsWritePolicyError(
+            "artifact payload type does not match governed contract: "
+            f"path={dst_path}, expected={expected_artifact_type}, actual={artifact_type}"
+        )
+
+    top_level_fields = _collect_top_level_keys(obj)
+    expected_fields = set(cast(List[str], governed_contract["allowed_top_level_fields"]))
+    extra_top_level = sorted(top_level_fields - expected_fields - {"_artifact_audit"})
+    missing_top_level = sorted(expected_fields - top_level_fields)
+    if extra_top_level or missing_top_level:
+        # 受治理 artifact 必须严格满足 append-only 白名单闭包。
+        raise RecordsWritePolicyError(
+            "artifact payload violates governed top-level allowlist: "
+            f"path={dst_path}, missing={missing_top_level}, extra={extra_top_level}"
+        )
+
+
 @contextmanager
 def bound_fact_sources(
     contracts: FrozenContracts,
@@ -921,6 +1050,14 @@ def _enforce_artifact_semantic_bypass_guard(
                     "artifact payload contains record anchor fields: "
                     f"path={normalized_dst_path}, fields={sorted(overlap)}"
                 )
+
+    ctx = _require_fact_sources_initialized()
+    _enforce_governed_artifact_contract(
+        artifact_obj,
+        normalized_dst_path,
+        relative_path,
+        ctx.contracts,
+    )
 
 
 def write_json(

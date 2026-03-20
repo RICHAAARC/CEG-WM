@@ -482,6 +482,14 @@ def test_compute_lf_attestation_score_emits_agreement_fields() -> None:
             "variance": 1.7,
             "basis_rank": 36,
             "edit_timestep": 12,
+            "plan_digest": "3" * 64,
+            "lf_basis_digest": "6" * 64,
+            "projection_matrix_digest": "7" * 64,
+            "trajectory_feature_spec_digest": "8" * 64,
+            "trajectory_feature_vector": [0.1, -0.2, 0.3],
+            "trajectory_feature_digest": "9" * 64,
+            "projected_lf_digest": "a" * 64,
+            "projection_seed": 17,
             "trajectory_feature_spec": {
                 "feature_operator": "masked_normalized_random_projection",
                 "edit_timestep": 12,
@@ -498,6 +506,22 @@ def test_compute_lf_attestation_score_emits_agreement_fields() -> None:
         "feature_operator": "masked_normalized_random_projection",
         "edit_timestep": 12,
     }
+    assert result.get("plan_digest") == "3" * 64
+    assert result.get("lf_basis_digest") == "6" * 64
+    assert result.get("projection_matrix_digest") == "7" * 64
+    assert result.get("trajectory_feature_spec_digest") == "8" * 64
+    assert result.get("trajectory_feature_vector") == [0.1, -0.2, 0.3]
+    assert result.get("trajectory_feature_digest") == "9" * 64
+    assert result.get("projected_lf_digest") == "a" * 64
+    assert result.get("projection_seed") == 17
+    assert result.get("expected_bit_signs")
+    assert result.get("posterior_values")
+    assert result.get("posterior_signs")
+    assert result.get("posterior_margin_values")
+    assert result.get("agreement_indices") == list(range(int(result.get("n_bits_compared") or 0)))
+    assert result.get("mismatch_indices") == []
+    assert result.get("projected_lf_coeffs")
+    assert result.get("projected_lf_signs")
     assert result.get("lf_attestation_trace_digest")
 
 
@@ -551,6 +575,14 @@ def test_build_detect_attestation_result_emits_lf_trace_artifact() -> None:
             "variance": 1.7,
             "basis_rank": 36,
             "edit_timestep": 12,
+            "plan_digest": "3" * 64,
+            "lf_basis_digest": "6" * 64,
+            "projection_matrix_digest": "7" * 64,
+            "trajectory_feature_spec_digest": "8" * 64,
+            "trajectory_feature_vector": [0.1, -0.2, 0.3],
+            "trajectory_feature_digest": "9" * 64,
+            "projected_lf_digest": "a" * 64,
+            "projection_seed": 17,
             "trajectory_feature_spec": {
                 "feature_operator": "masked_normalized_random_projection",
                 "edit_timestep": 12,
@@ -568,6 +600,22 @@ def test_build_detect_attestation_result_emits_lf_trace_artifact() -> None:
         "feature_operator": "masked_normalized_random_projection",
         "edit_timestep": 12,
     }
+    assert trace_artifact.get("plan_digest") == "3" * 64
+    assert trace_artifact.get("lf_basis_digest") == "6" * 64
+    assert trace_artifact.get("projection_matrix_digest") == "7" * 64
+    assert trace_artifact.get("trajectory_feature_spec_digest") == "8" * 64
+    assert trace_artifact.get("trajectory_feature_vector") == [0.1, -0.2, 0.3]
+    assert trace_artifact.get("trajectory_feature_digest") == "9" * 64
+    assert trace_artifact.get("projected_lf_digest") == "a" * 64
+    assert trace_artifact.get("projection_seed") == 17
+    assert trace_artifact.get("expected_bit_signs")
+    assert trace_artifact.get("posterior_values")
+    assert trace_artifact.get("posterior_signs")
+    assert trace_artifact.get("posterior_margin_values")
+    assert trace_artifact.get("agreement_indices") == list(range(int(trace_artifact.get("n_bits_compared") or 0)))
+    assert trace_artifact.get("mismatch_indices") == []
+    assert trace_artifact.get("projected_lf_coeffs")
+    assert trace_artifact.get("projected_lf_signs")
     assert trace_artifact.get("lf_attestation_trace_digest")
 
 

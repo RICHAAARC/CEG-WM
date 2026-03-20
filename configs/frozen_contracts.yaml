@@ -9,7 +9,7 @@
 # 合同版本与冻结元信息
 # - 用于记录与审计，不应作为运行期分支逻辑的自由输入。
 # ------------------------------
-contract_version: "v1.9"     # 冻结契约版本号；v1.1→v1.2 formal path 最终闭包收口（2026-03-12）：historical_field_paths 段已从当前 formal contract 文件彻底移除，旧字段信息不再显式保留在任何 formal 文件中；当前 formal contract 只绑定当前正式机制。v1.2→v1.3 从可选字段列表中移除 embed_trace.identity_mode 与 embed_trace.identity_reason（2026-03-12）：生产嵌入实现不再承载 identity baseline。v1.3→v1.4 追加 attestation signed bundle 验签门禁语义（2026-03-13）：onefile/detect 溯源结果若声明 signed bundle，则必须执行内部 trust chain 验证。v1.4→v1.5：追加 geometry coarse registration 与 recovered-domain sync revalidation 细分字段冻结登记。v1.5→v1.6：为 policy_path semantics 新增 geometry_chain_required_but_unavailable fail_reason 的 append-only 冻结登记（2026-03-13）。v1.6→v1.7：追加 negative branch attestation provenance 的 append-only 冻结注册（2026-03-16）。v1.7→v1.8：追加 attestation_source 字段与 statement-only provenance no-bundle 合同说明（2026-03-17）。v1.8→v1.9：追加 exact LF observability 字段与 detect runtime canonical 兼容命名字段（2026-03-19）。
+contract_version: "v1.10"     # 冻结契约版本号；v1.1→v1.2 formal path 最终闭包收口（2026-03-12）：historical_field_paths 段已从当前 formal contract 文件彻底移除，旧字段信息不再显式保留在任何 formal 文件中；当前 formal contract 只绑定当前正式机制。v1.2→v1.3 从可选字段列表中移除 embed_trace.identity_mode 与 embed_trace.identity_reason（2026-03-12）：生产嵌入实现不再承载 identity baseline。v1.3→v1.4 追加 attestation signed bundle 验签门禁语义（2026-03-13）：onefile/detect 溯源结果若声明 signed bundle，则必须执行内部 trust chain 验证。v1.4→v1.5：追加 geometry coarse registration 与 recovered-domain sync revalidation 细分字段冻结登记。v1.5→v1.6：为 policy_path semantics 新增 geometry_chain_required_but_unavailable fail_reason 的 append-only 冻结登记（2026-03-13）。v1.6→v1.7：追加 negative branch attestation provenance 的 append-only 冻结注册（2026-03-16）。v1.7→v1.8：追加 attestation_source 字段与 statement-only provenance no-bundle 合同说明（2026-03-17）。v1.8→v1.9：追加 exact LF observability 字段与 detect runtime canonical 兼容命名字段（2026-03-19）。v1.9→v1.10：追加 attestation trace artifact 的 append-only 白名单治理（2026-03-21）。
 frozen_date: "2026-02-04"    # 冻结日期元信息；当前主链路不参与门禁计算，主要用于审计追溯。
 
 # ------------------------------
@@ -84,6 +84,93 @@ external_fact_sources:       # contracts.py 必解析；_collect_required_record
       可选事实源：append-only 字段扩展的权威来源。
       若启用 schema_extensions，则 records必须绑定上述锚点字段；否则允许 absent（但需记录未启用原因）。
       支持向后兼容：旧 records（未绑定该事实源）允许通过，但必须在 run_closure 中标记为 "extensions_not_enabled"。
+
+# ==============================================================
+# Artifact Schema Governance
+#   - artifacts 保持独立于 records schema，不进入 field_paths_registry。
+#   - 对正式使用的 artifact 采用 append-only 白名单治理，防止字段漂移。
+# ==============================================================
+artifact_schema:
+  append_only: true
+  artifact_registry_semantics: "Formally governed artifacts must declare exact top-level field allowlists here without being promoted into records schema field_paths_registry."
+  artifact_contracts:
+    hf_attestation_trace:
+      relative_path: "attestation/hf_attestation_trace.json"
+      description: "HF attestation comparison artifact written by the detect main path."
+      allowed_top_level_fields:
+        - artifact_type
+        - attestation_digest
+        - event_binding_digest
+        - trace_commit
+        - hf_attestation_score
+        - hf_attestation_decision_score
+        - status
+        - hf_attestation_challenge_digest
+        - hf_attestation_challenge_source
+        - hf_attestation_challenge_seed
+        - hf_attestation_plan_digest_used
+        - hf_attestation_threshold_percentile_applied
+        - hf_attestation_threshold_value
+        - hf_attestation_vector_length
+        - hf_attestation_retained_count
+        - hf_attestation_retained_indices
+        - hf_attestation_total_energy
+        - hf_attestation_retained_energy
+        - hf_attestation_retained_ratio
+        - hf_attestation_retained_count_ratio
+        - hf_attestation_weight_vector_digest
+        - hf_attestation_weight_vector_nonzero_count
+        - hf_attestation_gating_mask_digest
+        - hf_attestation_gating_mask_nonzero_count
+        - hf_attestation_ordering_digest
+        - hf_attestation_ordering_length
+        - hf_attestation_trace_digest
+        - detect_hf_plan_digest_used
+        - detect_hf_challenge_digest
+        - detect_hf_challenge_seed
+        - detect_hf_challenge_source
+        - detect_hf_threshold_percentile_applied
+        - detect_hf_coeffs_retained_count
+        - detect_hf_retention_ratio
+        - detect_hf_trace_digest
+        - hf_attestation_challenge_match_status
+        - hf_attestation_threshold_match_status
+        - hf_attestation_retained_count_match_status
+        - hf_attestation_trace_consistency
+    lf_attestation_trace:
+      relative_path: "attestation/lf_attestation_trace.json"
+      description: "LF attestation comparison artifact written by the detect main path."
+      allowed_top_level_fields:
+        - artifact_type
+        - attestation_digest
+        - event_binding_digest
+        - trace_commit
+        - lf_attestation_score
+        - agreement_count
+        - n_bits_compared
+        - basis_rank
+        - variance
+        - edit_timestep
+        - trajectory_feature_spec
+        - trajectory_feature_vector
+        - trajectory_feature_digest
+        - projected_lf_coeffs
+        - projected_lf_signs
+        - projected_lf_digest
+        - expected_bit_signs
+        - posterior_values
+        - posterior_signs
+        - posterior_margin_values
+        - agreement_indices
+        - mismatch_indices
+        - weakest_posterior_indices
+        - weakest_posterior_margins
+        - plan_digest
+        - lf_basis_digest
+        - projection_matrix_digest
+        - trajectory_feature_spec_digest
+        - projection_seed
+        - lf_attestation_trace_digest
 
 # ==============================================================
 # I/O Entry Points & Write Exceptions

@@ -453,6 +453,44 @@ def _flatten_recursive_to_list(value: Any, sink: list) -> None:
             _flatten_recursive_to_list(item, sink)
 
 
+def _posterior_sign(value: float) -> int:
+    """
+    功能：将后验值映射到符号域。
+
+    Convert a posterior value into the attestation sign domain.
+
+    Args:
+        value: Posterior value.
+
+    Returns:
+        Sign indicator in {-1, 0, 1}.
+    """
+    if value > 0.0:
+        return 1
+    if value < 0.0:
+        return -1
+    return 0
+
+
+def _select_weakest_posterior_indices(margins: list[float], limit: int = 8) -> list[int]:
+    """
+    功能：选择后验边际最弱的比特位置。
+
+    Select indices with the weakest posterior margins.
+
+    Args:
+        margins: Posterior margin magnitudes.
+        limit: Maximum number of indices to keep.
+
+    Returns:
+        Indices sorted by ascending posterior margin.
+    """
+    if limit <= 0 or not margins:
+        return []
+    ordered_pairs = sorted(enumerate(margins), key=lambda item: (item[1], item[0]))
+    return [int(index) for index, _ in ordered_pairs[:limit]]
+
+
 # ————————————————————————————
 # Cryptographic generation attestation 扩展（附加，不破坏既有接口）
 # ————————————————————————————
@@ -581,13 +619,32 @@ def compute_lf_attestation_score(
 
     # 计算后验概率（erf-based）。
     posteriors = recover_posteriors_erf(flat[:n_compare], variance)
-
-    # 计算符号一致率：posterior_i * expected_bit_sign_i > 0 则一致。
-    agreement_count = sum(
-        1 for p, e in zip(posteriors, expected_bit_signs[:n_compare])
-        if p * e > 0
-    )
+    expected_bit_signs_compared = [int(value) for value in expected_bit_signs[:n_compare]]
+    posterior_values = [float(value) for value in posteriors[:n_compare]]
+    posterior_signs = [_posterior_sign(value) for value in posterior_values]
+    posterior_margin_values = [abs(value) for value in posterior_values]
+    agreement_indices = [
+        index for index, (posterior_value, expected_sign) in enumerate(zip(posterior_values, expected_bit_signs_compared))
+        if posterior_value * expected_sign > 0
+    ]
+    mismatch_indices = [
+        index for index, (posterior_value, expected_sign) in enumerate(zip(posterior_values, expected_bit_signs_compared))
+        if posterior_value * expected_sign <= 0
+    ]
+    agreement_count = len(agreement_indices)
     lf_attestation_score = float(agreement_count) / float(n_compare)
+    projected_lf_coeffs = [float(value) for value in flat[:basis_rank]]
+    projected_lf_signs = [_posterior_sign(value) for value in projected_lf_coeffs]
+    weakest_posterior_indices = _select_weakest_posterior_indices(posterior_margin_values)
+    weakest_posterior_margins = [float(posterior_margin_values[index]) for index in weakest_posterior_indices]
+    trajectory_feature_vector = params.get("trajectory_feature_vector")
+    trajectory_feature_digest = params.get("trajectory_feature_digest")
+    projected_lf_digest = params.get("projected_lf_digest")
+    plan_digest = params.get("plan_digest")
+    lf_basis_digest = params.get("lf_basis_digest")
+    projection_matrix_digest = params.get("projection_matrix_digest")
+    trajectory_feature_spec_digest = params.get("trajectory_feature_spec_digest")
+    projection_seed = params.get("projection_seed")
 
     # 构造审计摘要（可复算）。
     trace_payload = {
@@ -601,6 +658,16 @@ def compute_lf_attestation_score(
         "n_bits_compared": n_compare,
         "edit_timestep": edit_timestep,
         "trajectory_feature_spec": trajectory_feature_spec,
+        "expected_bit_signs": expected_bit_signs_compared,
+        "posterior_signs": posterior_signs,
+        "posterior_margin_values": posterior_margin_values,
+        "mismatch_indices": mismatch_indices,
+        "trajectory_feature_digest": trajectory_feature_digest,
+        "projected_lf_digest": projected_lf_digest,
+        "plan_digest": plan_digest,
+        "lf_basis_digest": lf_basis_digest,
+        "projection_matrix_digest": projection_matrix_digest,
+        "trajectory_feature_spec_digest": trajectory_feature_spec_digest,
         "lf_attestation_score": round(lf_attestation_score, 6),
     }
     trace_digest = digests.canonical_sha256(trace_payload)
@@ -614,6 +681,24 @@ def compute_lf_attestation_score(
         "variance": variance,
         "edit_timestep": edit_timestep,
         "trajectory_feature_spec": trajectory_feature_spec,
+        "trajectory_feature_vector": trajectory_feature_vector,
+        "trajectory_feature_digest": trajectory_feature_digest,
+        "projected_lf_coeffs": projected_lf_coeffs,
+        "projected_lf_signs": projected_lf_signs,
+        "projected_lf_digest": projected_lf_digest,
+        "expected_bit_signs": expected_bit_signs_compared,
+        "posterior_values": posterior_values,
+        "posterior_signs": posterior_signs,
+        "posterior_margin_values": posterior_margin_values,
+        "agreement_indices": agreement_indices,
+        "mismatch_indices": mismatch_indices,
+        "weakest_posterior_indices": weakest_posterior_indices,
+        "weakest_posterior_margins": weakest_posterior_margins,
+        "plan_digest": plan_digest,
+        "lf_basis_digest": lf_basis_digest,
+        "projection_matrix_digest": projection_matrix_digest,
+        "trajectory_feature_spec_digest": trajectory_feature_spec_digest,
+        "projection_seed": projection_seed,
         "attestation_digest": attestation_digest,
         "lf_attestation_trace_digest": trace_digest,
     }

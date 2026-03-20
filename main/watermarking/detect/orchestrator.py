@@ -765,6 +765,7 @@ def _build_detect_lf_observability_fields(detect_lf_status: Any) -> Dict[str, An
 def _build_lf_attestation_trace_context(
     cfg: Dict[str, Any],
     plan_payload: Optional[Dict[str, Any]],
+    lf_trace_bundle: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any] | None:
     plan_dict = _resolve_plan_dict(plan_payload)
     lf_basis_for_decode = plan_dict.get("lf_basis") if isinstance(plan_dict.get("lf_basis"), dict) else None
@@ -785,11 +786,21 @@ def _build_lf_attestation_trace_context(
         basis_matrix_np = np.asarray(basis_matrix_raw, dtype=np.float64)
         basis_rank = int(basis_matrix_np.shape[1])
 
+    trace_bundle = lf_trace_bundle if isinstance(lf_trace_bundle, dict) else {}
+
     return {
         "variance": float(lf_cfg.get("variance", 1.5)),
         "basis_rank": int(basis_rank) if isinstance(basis_rank, (int, float)) else None,
         "edit_timestep": int(trajectory_feature_spec.get("edit_timestep", 0)),
         "trajectory_feature_spec": trajectory_feature_spec,
+        "trajectory_feature_vector": trace_bundle.get("trajectory_feature_vector"),
+        "trajectory_feature_digest": trace_bundle.get("trajectory_feature_digest"),
+        "projected_lf_digest": trace_bundle.get("projected_lf_digest"),
+        "plan_digest": trace_bundle.get("plan_digest"),
+        "lf_basis_digest": trace_bundle.get("lf_basis_digest"),
+        "projection_matrix_digest": trace_bundle.get("projection_matrix_digest"),
+        "trajectory_feature_spec_digest": trace_bundle.get("trajectory_feature_spec_digest"),
+        "projection_seed": trace_bundle.get("projection_seed"),
     }
 
 
@@ -815,6 +826,24 @@ def _build_lf_attestation_trace_artifact(
         "variance": lf_result.get("variance"),
         "edit_timestep": lf_result.get("edit_timestep"),
         "trajectory_feature_spec": lf_result.get("trajectory_feature_spec"),
+        "trajectory_feature_vector": lf_result.get("trajectory_feature_vector"),
+        "trajectory_feature_digest": lf_result.get("trajectory_feature_digest"),
+        "projected_lf_coeffs": lf_result.get("projected_lf_coeffs"),
+        "projected_lf_signs": lf_result.get("projected_lf_signs"),
+        "projected_lf_digest": lf_result.get("projected_lf_digest"),
+        "expected_bit_signs": lf_result.get("expected_bit_signs"),
+        "posterior_values": lf_result.get("posterior_values"),
+        "posterior_signs": lf_result.get("posterior_signs"),
+        "posterior_margin_values": lf_result.get("posterior_margin_values"),
+        "agreement_indices": lf_result.get("agreement_indices"),
+        "mismatch_indices": lf_result.get("mismatch_indices"),
+        "weakest_posterior_indices": lf_result.get("weakest_posterior_indices"),
+        "weakest_posterior_margins": lf_result.get("weakest_posterior_margins"),
+        "plan_digest": lf_result.get("plan_digest"),
+        "lf_basis_digest": lf_result.get("lf_basis_digest"),
+        "projection_matrix_digest": lf_result.get("projection_matrix_digest"),
+        "trajectory_feature_spec_digest": lf_result.get("trajectory_feature_spec_digest"),
+        "projection_seed": lf_result.get("projection_seed"),
         "lf_attestation_trace_digest": lf_result.get("lf_attestation_trace_digest"),
     }
 
@@ -1532,13 +1561,16 @@ def run_detect_orchestrator(
         and content_evidence_payload.get("status") == "ok"
         and attestation_context.get("authenticity_status") == "authentic"
     ):
-        lf_attestation_features = _extract_lf_attestation_features_from_trajectory(
+        lf_attestation_trace_bundle = _extract_lf_attestation_trace_bundle_from_trajectory(
             cfg,
             plan_payload,
         )
+        if isinstance(lf_attestation_trace_bundle, dict):
+            lf_attestation_features = lf_attestation_trace_bundle.get("lf_attestation_features")
         lf_attestation_trace_context = _build_lf_attestation_trace_context(
             cfg,
             plan_payload,
+            lf_trace_bundle=lf_attestation_trace_bundle if isinstance(lf_attestation_trace_bundle, dict) else None,
         )
 
     attestation_result = _build_detect_attestation_result(
@@ -2054,22 +2086,22 @@ def _extract_lf_raw_score_from_trajectory(
         }
 
 
-def _extract_lf_attestation_features_from_trajectory(
+def _extract_lf_attestation_trace_bundle_from_trajectory(
     cfg: Dict[str, Any],
     plan_payload: Optional[Dict[str, Any]],
-) -> Optional[List[float]]:
+) -> Dict[str, Any] | None:
     """
-    功能：从 detect 主路径提取 LF attestation 所需的系数向量。
+    功能：从 detect 主路径提取 LF attestation 细粒度轨迹证据。
 
-    Extract the LF coefficient vector required by the attestation main path
-    from the detect-side trajectory cache and LF basis.
+    Extract fine-grained LF attestation evidence from the detect-side
+    trajectory cache and LF basis.
 
     Args:
         cfg: Configuration mapping.
         plan_payload: Planner payload mapping.
 
     Returns:
-        LF coefficient vector when available; otherwise None.
+        LF trace bundle when available; otherwise None.
     """
     plan_dict = _resolve_plan_dict(plan_payload)
     lf_basis_for_decode = plan_dict.get("lf_basis") if isinstance(plan_dict.get("lf_basis"), dict) else None
@@ -2127,9 +2159,50 @@ def _extract_lf_attestation_features_from_trajectory(
             return None
 
         coeffs_arr = np.dot(latents_flat, basis_matrix_np)
-        return [float(value) for value in coeffs_arr[:basis_rank].tolist()]
+        projected_lf_coeffs = [float(value) for value in coeffs_arr[:basis_rank].tolist()]
+        trajectory_feature_vector = [float(value) for value in latents_flat.tolist()]
+        plan_digest = plan_payload.get("plan_digest") if isinstance(plan_payload, dict) else None
+        basis_digest = plan_payload.get("basis_digest") if isinstance(plan_payload, dict) else None
+        projection_seed = tfs.get("projection_seed")
+        return {
+            "lf_attestation_features": projected_lf_coeffs,
+            "trajectory_feature_vector": trajectory_feature_vector,
+            "trajectory_feature_digest": digests.canonical_sha256(trajectory_feature_vector),
+            "projected_lf_digest": digests.canonical_sha256(projected_lf_coeffs),
+            "plan_digest": plan_digest if isinstance(plan_digest, str) and plan_digest else None,
+            "lf_basis_digest": (
+                basis_digest if isinstance(basis_digest, str) and basis_digest else digests.canonical_sha256(lf_basis_for_decode)
+            ),
+            "projection_matrix_digest": digests.canonical_sha256(basis_matrix_raw),
+            "trajectory_feature_spec_digest": digests.canonical_sha256(tfs),
+            "projection_seed": int(projection_seed) if isinstance(projection_seed, (int, float)) else None,
+        }
     except Exception:
         return None
+
+
+def _extract_lf_attestation_features_from_trajectory(
+    cfg: Dict[str, Any],
+    plan_payload: Optional[Dict[str, Any]],
+) -> Optional[List[float]]:
+    """
+    功能：从 detect 主路径提取 LF attestation 所需的系数向量。
+
+    Extract the LF coefficient vector required by the attestation main path
+    from the detect-side trajectory cache and LF basis.
+
+    Args:
+        cfg: Configuration mapping.
+        plan_payload: Planner payload mapping.
+
+    Returns:
+        LF coefficient vector when available; otherwise None.
+    """
+    trace_bundle = _extract_lf_attestation_trace_bundle_from_trajectory(cfg, plan_payload)
+    if not isinstance(trace_bundle, dict):
+        return None
+    lf_attestation_features = trace_bundle.get("lf_attestation_features")
+    return cast(Optional[List[float]], lf_attestation_features if isinstance(lf_attestation_features, list) else None)
 
 
 def _extract_content_raw_scores_from_image(
@@ -2142,6 +2215,7 @@ def _extract_content_raw_scores_from_image(
     """
     功能：从图像提取 LF/HF 原始分数 
 
+            lf_trace_bundle=lf_attestation_trace_bundle if isinstance(lf_attestation_trace_bundle, dict) else None,
     Extract LF/HF raw scores from image artifact for calibration-ready evidence.
 
     Args:
