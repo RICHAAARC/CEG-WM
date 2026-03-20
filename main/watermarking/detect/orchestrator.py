@@ -499,6 +499,7 @@ def _build_detect_attestation_result(
     content_evidence_payload: Optional[Dict[str, Any]],
     geometry_evidence_payload: Optional[Dict[str, Any]],
     lf_attestation_features: Optional[Any] = None,
+    lf_attestation_trace_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     功能：构造 detect 侧 attestation 分层结果。
@@ -586,9 +587,10 @@ def _build_detect_attestation_result(
         hf_weight=float(attestation_cfg.get("hf_weight", 0.3)),
         geo_weight=float(attestation_cfg.get("geo_weight", 0.2)),
         attested_threshold=float(attestation_cfg.get("threshold", 0.65)),
-            attestation_decision_mode=str(attestation_cfg.get("decision_mode", "content_primary_geo_rescue")),
-            geo_rescue_band_delta_low=float(attestation_cfg.get("rescue_band_delta_low", 0.05)),
-            geo_rescue_min_score=float(attestation_cfg.get("geo_rescue_min_score", 0.3)),
+        attestation_decision_mode=str(attestation_cfg.get("decision_mode", "content_primary_geo_rescue")),
+        geo_rescue_band_delta_low=float(attestation_cfg.get("rescue_band_delta_low", 0.05)),
+        geo_rescue_min_score=float(attestation_cfg.get("geo_rescue_min_score", 0.3)),
+        lf_params=lf_attestation_trace_context,
         detect_hf_plan_digest_used=(
             cfg.get("__detect_hf_plan_digest_used__")
             if isinstance(cfg.get("__detect_hf_plan_digest_used__"), str) and cfg.get("__detect_hf_plan_digest_used__")
@@ -758,6 +760,63 @@ def _build_detect_lf_observability_fields(detect_lf_status: Any) -> Dict[str, An
 
     observability_fields["detect_lf_failure_reason"] = normalized_status
     return observability_fields
+
+
+def _build_lf_attestation_trace_context(
+    cfg: Dict[str, Any],
+    plan_payload: Optional[Dict[str, Any]],
+) -> Dict[str, Any] | None:
+    plan_dict = _resolve_plan_dict(plan_payload)
+    lf_basis_for_decode = plan_dict.get("lf_basis") if isinstance(plan_dict.get("lf_basis"), dict) else None
+    if not isinstance(lf_basis_for_decode, dict):
+        return None
+
+    trajectory_feature_spec = lf_basis_for_decode.get("trajectory_feature_spec")
+    if not isinstance(trajectory_feature_spec, dict):
+        return None
+
+    watermark_node = cfg.get("watermark")
+    watermark_cfg = cast(Dict[str, Any], watermark_node) if isinstance(watermark_node, dict) else {}
+    lf_cfg = cast(Dict[str, Any], watermark_cfg.get("lf")) if isinstance(watermark_cfg.get("lf"), dict) else {}
+
+    basis_matrix_raw = lf_basis_for_decode.get("projection_matrix")
+    basis_rank = lf_basis_for_decode.get("basis_rank")
+    if basis_rank is None and basis_matrix_raw is not None:
+        basis_matrix_np = np.asarray(basis_matrix_raw, dtype=np.float64)
+        basis_rank = int(basis_matrix_np.shape[1])
+
+    return {
+        "variance": float(lf_cfg.get("variance", 1.5)),
+        "basis_rank": int(basis_rank) if isinstance(basis_rank, (int, float)) else None,
+        "edit_timestep": int(trajectory_feature_spec.get("edit_timestep", 0)),
+        "trajectory_feature_spec": trajectory_feature_spec,
+    }
+
+
+def _build_lf_attestation_trace_artifact(
+    lf_result: Dict[str, Any],
+    *,
+    attestation_digest: str,
+    event_binding_digest: str,
+    trace_commit: Optional[str],
+) -> Dict[str, Any] | None:
+    if not isinstance(lf_result, dict) or lf_result.get("status") != "ok":
+        return None
+
+    return {
+        "artifact_type": "lf_attestation_trace",
+        "attestation_digest": attestation_digest,
+        "event_binding_digest": event_binding_digest,
+        "trace_commit": trace_commit,
+        "lf_attestation_score": lf_result.get("lf_attestation_score"),
+        "agreement_count": lf_result.get("agreement_count"),
+        "n_bits_compared": lf_result.get("n_bits_compared"),
+        "basis_rank": lf_result.get("basis_rank"),
+        "variance": lf_result.get("variance"),
+        "edit_timestep": lf_result.get("edit_timestep"),
+        "trajectory_feature_spec": lf_result.get("trajectory_feature_spec"),
+        "lf_attestation_trace_digest": lf_result.get("lf_attestation_trace_digest"),
+    }
 
 
 def _canonicalize_detect_runtime_mode(detect_runtime_mode: Any) -> Optional[str]:
@@ -1467,12 +1526,17 @@ def run_detect_orchestrator(
             geometry_evidence_payload["attestation_trace_commit"] = attestation_context.get("trace_commit")
 
     lf_attestation_features = None
+    lf_attestation_trace_context = None
     if (
         isinstance(content_evidence_payload, dict)
         and content_evidence_payload.get("status") == "ok"
         and attestation_context.get("authenticity_status") == "authentic"
     ):
         lf_attestation_features = _extract_lf_attestation_features_from_trajectory(
+            cfg,
+            plan_payload,
+        )
+        lf_attestation_trace_context = _build_lf_attestation_trace_context(
             cfg,
             plan_payload,
         )
@@ -1483,6 +1547,7 @@ def run_detect_orchestrator(
         content_evidence_payload if isinstance(content_evidence_payload, dict) else None,
         geometry_evidence_payload if isinstance(geometry_evidence_payload, dict) else None,
         lf_attestation_features=lf_attestation_features,
+        lf_attestation_trace_context=lf_attestation_trace_context,
     )
 
     # 删除临时 transient 字段，确保不写入 records
@@ -6254,6 +6319,7 @@ def verify_attestation(
     s_hf_raw: Optional[float] = None
     s_geo: Optional[float] = None
     hf_attestation_trace: Optional[Dict[str, Any]] = None
+    lf_attestation_trace: Optional[Dict[str, Any]] = None
 
     # LF 通道：基于 latent 后验与 attestation payload 的符号一致率。
     if lf_latent_features is not None:
@@ -6266,6 +6332,12 @@ def verify_attestation(
             )
             if lf_result.get("status") == "ok":
                 s_lf = lf_result.get("lf_attestation_score")
+                lf_attestation_trace = _build_lf_attestation_trace_artifact(
+                    lf_result,
+                    attestation_digest=d_a,
+                    event_binding_digest=attest_keys.event_binding_digest,
+                    trace_commit=trace_commit,
+                )
         except Exception:
             mismatch_reasons.append("lf_attestation_score_failed")
     elif content_evidence is not None:
@@ -6560,5 +6632,6 @@ def verify_attestation(
         "authenticity_result": authenticity_result,
         "image_evidence_result": image_evidence_result,
         "final_event_attested_decision": final_event_attested_decision,
+        "_lf_attestation_trace_artifact": lf_attestation_trace,
         "_hf_attestation_trace_artifact": hf_trace_artifact,
     }

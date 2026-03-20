@@ -57,7 +57,7 @@ watermark:
     rank: 128
   lf:
     enabled: true
-    variance: 1.5
+    variance: 1.7
     ecc: "sparse_ldpc"
     ecc_sparsity: 3
     message_length: 64

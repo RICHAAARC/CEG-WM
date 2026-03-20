@@ -25,6 +25,7 @@ from main.watermarking.provenance.attestation_statement import (
 from main.watermarking.provenance.key_derivation import derive_attestation_keys
 from main.watermarking.content_chain import channel_hf
 from main.watermarking.content_chain.high_freq_embedder import compute_hf_attestation_score
+from main.watermarking.content_chain.low_freq_coder import compute_lf_attestation_score
 from main.watermarking.content_chain import high_freq_embedder as high_freq_embedder_module
 from main.watermarking.detect import orchestrator as detect_orchestrator
 from main.cli import run_detect as run_detect_cli
@@ -448,6 +449,128 @@ def test_build_detect_attestation_result_prefers_real_lf_attestation_features_ov
     assert float(final_decision.get("event_attestation_score")) > 0.65
 
 
+def test_compute_lf_attestation_score_emits_agreement_fields() -> None:
+    """
+    功能：LF attestation 评分必须暴露 agreement 与 trace 字段。
+
+    Verify LF attestation scoring exposes agreement_count and trace fields.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    payload = _build_statement()
+    statement = statement_from_dict(payload["statement"])
+    result = compute_lf_attestation_score(
+        latent_features=_build_matching_lf_attestation_features(
+            payload["statement"],
+            "5" * 64,
+            trace_commit=cast(str, payload["bundle"].get("trace_commit")),
+        ),
+        k_lf=derive_attestation_keys(
+            "5" * 64,
+            payload["attestation_digest"],
+            trajectory_commit=cast(str, payload["bundle"].get("trace_commit")),
+        ).k_lf,
+        attestation_digest=compute_event_binding_digest(
+            payload["attestation_digest"],
+            cast(str, payload["bundle"].get("trace_commit")),
+        ),
+        lf_params={
+            "variance": 1.7,
+            "basis_rank": 36,
+            "edit_timestep": 12,
+            "trajectory_feature_spec": {
+                "feature_operator": "masked_normalized_random_projection",
+                "edit_timestep": 12,
+            },
+        },
+    )
+
+    assert result.get("status") == "ok"
+    assert result.get("agreement_count") == result.get("n_bits_compared")
+    assert result.get("basis_rank") == 36
+    assert result.get("variance") == pytest.approx(1.7)
+    assert result.get("edit_timestep") == 12
+    assert result.get("trajectory_feature_spec") == {
+        "feature_operator": "masked_normalized_random_projection",
+        "edit_timestep": 12,
+    }
+    assert result.get("lf_attestation_trace_digest")
+
+
+def test_build_detect_attestation_result_emits_lf_trace_artifact() -> None:
+    """
+    功能：detect 侧 attestation 必须输出 LF trace 工件。
+
+    Verify detect-side attestation emits the LF trace artifact.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    payload = _build_statement()
+    cfg = {
+        "__attestation_verify_k_master__": "5" * 64,
+        "attestation": {
+            "decision_mode": "content_primary_geo_rescue",
+            "lf_weight": 0.5,
+            "hf_weight": 0.3,
+            "geo_weight": 0.2,
+            "threshold": 0.65,
+        },
+    }
+    attestation_context = {
+        "candidate_statement": payload["statement"],
+        "attestation_bundle": payload["bundle"],
+        "attestation_source": "formal_input_payload",
+        "authenticity_status": "authentic",
+        "bundle_verification": {"status": "ok"},
+    }
+
+    result = _build_detect_attestation_result(
+        cfg=cfg,
+        attestation_context=attestation_context,
+        content_evidence_payload={
+            "status": "ok",
+            "score_parts": {
+                "hf_attestation_values": [10.0, 0.0, 0.0, 0.0],
+            },
+        },
+        geometry_evidence_payload=None,
+        lf_attestation_features=_build_matching_lf_attestation_features(
+            payload["statement"],
+            "5" * 64,
+            trace_commit=cast(str, payload["bundle"].get("trace_commit")),
+        ),
+        lf_attestation_trace_context={
+            "variance": 1.7,
+            "basis_rank": 36,
+            "edit_timestep": 12,
+            "trajectory_feature_spec": {
+                "feature_operator": "masked_normalized_random_projection",
+                "edit_timestep": 12,
+            },
+        },
+    )
+
+    trace_artifact = cast(Dict[str, Any], result.get("_lf_attestation_trace_artifact"))
+    assert trace_artifact.get("artifact_type") == "lf_attestation_trace"
+    assert trace_artifact.get("agreement_count") == trace_artifact.get("n_bits_compared")
+    assert trace_artifact.get("basis_rank") == 36
+    assert trace_artifact.get("variance") == pytest.approx(1.7)
+    assert trace_artifact.get("edit_timestep") == 12
+    assert trace_artifact.get("trajectory_feature_spec") == {
+        "feature_operator": "masked_normalized_random_projection",
+        "edit_timestep": 12,
+    }
+    assert trace_artifact.get("lf_attestation_trace_digest")
+
+
 def test_verify_attestation_content_positive_not_dragged_by_low_geometry() -> None:
     """
     功能：当内容侧事件分数已过阈值时，低几何分数不得反向拉低 attestation。
@@ -846,11 +969,11 @@ def test_verify_attestation_records_hf_trace_consistency_match_with_canonical_pe
     assert trace_artifact.get("hf_attestation_threshold_match_status") == "ok"
 
 
-def test_write_detect_attestation_artifact_persists_hf_trace(monkeypatch: Any, tmp_path: Path) -> None:
+def test_write_detect_attestation_artifact_persists_attestation_traces(monkeypatch: Any, tmp_path: Path) -> None:
     """
-    功能：验证 detect attestation artifact writer 会额外写出 HF attestation trace 工件。
+    功能：验证 detect attestation artifact writer 会额外写出 HF/LF attestation trace 工件。
 
-    Verify detect attestation artifact writer emits the standalone HF trace artifact.
+    Verify detect attestation artifact writer emits the standalone HF/LF trace artifacts.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
@@ -880,15 +1003,32 @@ def test_write_detect_attestation_artifact_persists_hf_trace(monkeypatch: Any, t
             "hf_attestation_challenge_digest": "a" * 64,
             "hf_attestation_threshold_percentile_applied": 75.0,
             "hf_attestation_retained_count": 2,
+        },
+        "lf_attestation_trace": {
+            "artifact_type": "lf_attestation_trace",
+            "lf_attestation_score": 0.6111111111111112,
+            "agreement_count": 22,
+            "n_bits_compared": 36,
+            "basis_rank": 36,
+            "variance": 1.7,
+            "edit_timestep": 12,
+            "trajectory_feature_spec": {
+                "feature_operator": "masked_normalized_random_projection",
+                "edit_timestep": 12,
+            },
+            "lf_attestation_trace_digest": "b" * 64,
         }
     }
 
     _write_detect_attestation_artifact(record, tmp_path / "artifacts", attestation_artifacts)
 
     result_path = str((tmp_path / "artifacts" / "attestation" / "attestation_result.json")).replace("\\", "/")
-    trace_path = str((tmp_path / "artifacts" / "attestation" / "hf_attestation_trace.json")).replace("\\", "/")
+    hf_trace_path = str((tmp_path / "artifacts" / "attestation" / "hf_attestation_trace.json")).replace("\\", "/")
+    lf_trace_path = str((tmp_path / "artifacts" / "attestation" / "lf_attestation_trace.json")).replace("\\", "/")
     assert written[result_path] == record["attestation"]
-    assert written[trace_path]["artifact_type"] == "hf_attestation_trace"
+    assert written[hf_trace_path]["artifact_type"] == "hf_attestation_trace"
+    assert written[lf_trace_path]["artifact_type"] == "lf_attestation_trace"
+    assert written[lf_trace_path]["agreement_count"] == 22
 
 
 def test_build_hf_detect_evidence_binds_canonical_plan_digest_locally() -> None:

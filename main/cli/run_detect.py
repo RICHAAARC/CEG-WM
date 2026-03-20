@@ -131,12 +131,18 @@ def _write_detect_attestation_artifact(
     attestation_dir.mkdir(parents=True, exist_ok=True)
     records_io.write_artifact_json(str(attestation_dir / "attestation_result.json"), attestation_payload)
     hf_attestation_trace: Dict[str, Any] | None = None
+    lf_attestation_trace: Dict[str, Any] | None = None
     if isinstance(attestation_artifacts, dict):
         candidate_trace = attestation_artifacts.get("hf_attestation_trace")
         if isinstance(candidate_trace, dict):
             hf_attestation_trace = cast(Dict[str, Any], candidate_trace)
+        candidate_lf_trace = attestation_artifacts.get("lf_attestation_trace")
+        if isinstance(candidate_lf_trace, dict):
+            lf_attestation_trace = cast(Dict[str, Any], candidate_lf_trace)
     if hf_attestation_trace is not None:
         records_io.write_artifact_json(str(attestation_dir / "hf_attestation_trace.json"), hf_attestation_trace)
+    if lf_attestation_trace is not None:
+        records_io.write_artifact_json(str(attestation_dir / "lf_attestation_trace.json"), lf_attestation_trace)
 
 
 def _extract_detect_attestation_artifacts(record: Any) -> Dict[str, Any] | None:
@@ -148,11 +154,13 @@ def _extract_detect_attestation_artifacts(record: Any) -> Dict[str, Any] | None:
         return None
     attestation_dict = cast(Dict[str, Any], attestation_node)
     hf_trace_artifact = attestation_dict.pop("_hf_attestation_trace_artifact", None)
-    if not isinstance(hf_trace_artifact, dict):
-        return None
-    return {
-        "hf_attestation_trace": cast(Dict[str, Any], hf_trace_artifact),
-    }
+    lf_trace_artifact = attestation_dict.pop("_lf_attestation_trace_artifact", None)
+    artifacts: Dict[str, Any] = {}
+    if isinstance(hf_trace_artifact, dict):
+        artifacts["hf_attestation_trace"] = cast(Dict[str, Any], hf_trace_artifact)
+    if isinstance(lf_trace_artifact, dict):
+        artifacts["lf_attestation_trace"] = cast(Dict[str, Any], lf_trace_artifact)
+    return artifacts or None
 
 
 def resolve_content_override_from_input_record(input_record: Any) -> Dict[str, Any] | None:

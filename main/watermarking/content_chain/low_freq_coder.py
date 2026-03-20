@@ -508,6 +508,8 @@ def compute_lf_attestation_score(
     params = lf_params or {}
     variance = float(params.get("variance", 1.5))
     block_length = int(params.get("block_length", min(payload_length * 8, 256)))
+    edit_timestep = params.get("edit_timestep")
+    trajectory_feature_spec = params.get("trajectory_feature_spec")
 
     # 派生 k_LF 字节。
     try:
@@ -546,7 +548,12 @@ def compute_lf_attestation_score(
         return {
             "lf_attestation_score": None,
             "status": "failed",
+            "agreement_count": 0,
+            "basis_rank": 0,
             "n_bits_compared": 0,
+            "variance": variance,
+            "edit_timestep": edit_timestep,
+            "trajectory_feature_spec": trajectory_feature_spec,
             "attestation_digest": attestation_digest,
             "lf_attestation_trace_digest": digests.canonical_sha256({
                 "error": "flatten_failed", "d_A": attestation_digest
@@ -555,11 +562,17 @@ def compute_lf_attestation_score(
 
     # 取前 block_length 个潜变量（与期望比特数对齐）。
     n_compare = min(block_length, len(flat), len(expected_bit_signs))
+    basis_rank = int(params.get("basis_rank", len(flat)))
     if n_compare <= 0:
         return {
             "lf_attestation_score": None,
             "status": "failed",
+            "agreement_count": 0,
+            "basis_rank": basis_rank,
             "n_bits_compared": 0,
+            "variance": variance,
+            "edit_timestep": edit_timestep,
+            "trajectory_feature_spec": trajectory_feature_spec,
             "attestation_digest": attestation_digest,
             "lf_attestation_trace_digest": digests.canonical_sha256({
                 "error": "insufficient_latents", "d_A": attestation_digest
@@ -570,11 +583,11 @@ def compute_lf_attestation_score(
     posteriors = recover_posteriors_erf(flat[:n_compare], variance)
 
     # 计算符号一致率：posterior_i * expected_bit_sign_i > 0 则一致。
-    agreements = sum(
+    agreement_count = sum(
         1 for p, e in zip(posteriors, expected_bit_signs[:n_compare])
         if p * e > 0
     )
-    lf_attestation_score = float(agreements) / float(n_compare)
+    lf_attestation_score = float(agreement_count) / float(n_compare)
 
     # 构造审计摘要（可复算）。
     trace_payload = {
@@ -582,8 +595,12 @@ def compute_lf_attestation_score(
         "attestation_digest": attestation_digest,
         "variance": variance,
         "block_length": block_length,
+        "basis_rank": basis_rank,
         "payload_length": payload_length,
+        "agreement_count": agreement_count,
         "n_bits_compared": n_compare,
+        "edit_timestep": edit_timestep,
+        "trajectory_feature_spec": trajectory_feature_spec,
         "lf_attestation_score": round(lf_attestation_score, 6),
     }
     trace_digest = digests.canonical_sha256(trace_payload)
@@ -591,7 +608,12 @@ def compute_lf_attestation_score(
     return {
         "lf_attestation_score": lf_attestation_score,
         "status": "ok",
+        "agreement_count": agreement_count,
+        "basis_rank": basis_rank,
         "n_bits_compared": n_compare,
+        "variance": variance,
+        "edit_timestep": edit_timestep,
+        "trajectory_feature_spec": trajectory_feature_spec,
         "attestation_digest": attestation_digest,
         "lf_attestation_trace_digest": trace_digest,
     }
