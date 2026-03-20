@@ -13,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from main.evaluation import experiment_matrix
 
@@ -1530,9 +1531,20 @@ def test_run_neg_embed_detect_for_cache_uses_preview_image_as_detect_input(
     assert isinstance(embed_command, list)
     assert "main.cli.run_embed" in embed_command
     assert not any("embed_identity_mode=true" == item for item in embed_command)
+    assert "--config" in embed_command
+
+    embed_config_index = embed_command.index("--config")
+    embed_config_path = Path(embed_command[embed_config_index + 1])
+    embed_cfg_obj = yaml.safe_load(embed_config_path.read_text(encoding="utf-8"))
+    assert isinstance(embed_cfg_obj, dict)
+    assert embed_cfg_obj["detect"]["content"]["enabled"] is False
+    assert embed_cfg_obj["attestation"]["enabled"] is False
+    assert embed_cfg_obj["attestation"]["require_signed_bundle_verification"] is False
 
     assert captured_detect_call.get("stage_name") == "detect"
     assert "allow_threshold_fallback_for_tests=true" in captured_detect_call.get("stage_overrides", [])
+    detect_config_path = captured_detect_call.get("config_path")
+    assert detect_config_path == embed_config_path
     input_record_path = captured_detect_call.get("input_record_path")
     assert isinstance(input_record_path, Path)
     input_record_obj = json.loads(input_record_path.read_text(encoding="utf-8"))

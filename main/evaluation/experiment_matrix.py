@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+import yaml
 
 from main.core import config_loader, digests
 from main.core import records_io
@@ -1030,6 +1031,11 @@ def _run_neg_embed_detect_for_cache(
     if neg_detect_record_path.exists() and neg_detect_record_path.is_file():
         return neg_detect_record_path
 
+    neg_cache_config_path = _write_neg_cache_runtime_config(
+        base_config_path=Path(config_path),
+        neg_run_root=neg_run_root,
+    )
+
     # 公共 override 项：seed / model_id / allow_nonempty_run_root。
     # allow_nonempty_run_root=true 确保 embed 与 detect 均可运行在同一目录。
     common_overrides: List[str] = [
@@ -1044,7 +1050,7 @@ def _run_neg_embed_detect_for_cache(
     # (1) embed 阶段：运行正式 embed 以触发 preview_generation，提取干净 preview 图像。
     preview_image_path = _run_embed_stage_for_neg_cache_preview(
         run_root=neg_run_root,
-        config_path=Path(config_path),
+        config_path=neg_cache_config_path,
         stage_overrides=list(common_overrides),
     )
     preview_input_record_path = _write_neg_preview_input_record(
@@ -1061,7 +1067,7 @@ def _run_neg_embed_detect_for_cache(
     _run_stage_command(
         stage_name="detect",
         run_root=neg_run_root,
-        config_path=Path(config_path),
+        config_path=neg_cache_config_path,
         stage_overrides=detect_overrides,
         input_record_path=preview_input_record_path,
     )
@@ -1069,6 +1075,54 @@ def _run_neg_embed_detect_for_cache(
     if neg_detect_record_path.exists() and neg_detect_record_path.is_file():
         return neg_detect_record_path
     return None
+
+
+def _write_neg_cache_runtime_config(base_config_path: Path, neg_run_root: Path) -> Path:
+    """
+    功能：为 neg_cache 私有子运行生成受控配置。 
+
+    Build a neg-cache-specific config that preserves the formal matrix path while
+    disabling attestation-only gate requirements for preview embed/detect.
+
+    Args:
+        base_config_path: Base config path used by experiment_matrix.
+        neg_run_root: neg_cache run root.
+
+    Returns:
+        Path to the generated neg_cache config.
+
+    Raises:
+        TypeError: If inputs are invalid.
+        ValueError: If config root is invalid.
+    """
+    if not isinstance(base_config_path, Path):
+        raise TypeError("base_config_path must be Path")
+    if not isinstance(neg_run_root, Path):
+        raise TypeError("neg_run_root must be Path")
+
+    cfg_obj = yaml.safe_load(base_config_path.read_text(encoding="utf-8"))
+    if not isinstance(cfg_obj, dict):
+        raise ValueError("neg_cache config root must be mapping")
+
+    detect_cfg = cfg_obj.get("detect") if isinstance(cfg_obj.get("detect"), dict) else {}
+    detect_content_cfg = detect_cfg.get("content") if isinstance(detect_cfg.get("content"), dict) else {}
+    detect_content_cfg["enabled"] = False
+    detect_cfg["content"] = detect_content_cfg
+    cfg_obj["detect"] = detect_cfg
+
+    attestation_cfg = cfg_obj.get("attestation") if isinstance(cfg_obj.get("attestation"), dict) else {}
+    attestation_cfg["enabled"] = False
+    attestation_cfg["require_signed_bundle_verification"] = False
+    cfg_obj["attestation"] = attestation_cfg
+
+    config_path = neg_run_root / "artifacts" / "workflow_cfg" / "neg_cache_config.yaml"
+    records_io.write_artifact_text_unbound(
+        run_root=neg_run_root,
+        artifacts_dir=config_path.parent,
+        path=str(config_path),
+        content=yaml.safe_dump(cfg_obj, allow_unicode=True, sort_keys=False),
+    )
+    return config_path
 
 
 def _run_embed_stage_for_neg_cache_preview(
