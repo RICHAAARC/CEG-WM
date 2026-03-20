@@ -5,6 +5,7 @@ Module type: General module
 
 from __future__ import annotations
 
+import glob
 import importlib.util
 from pathlib import Path
 from typing import Any, List
@@ -306,10 +307,11 @@ def test_onefile_prompt_contract_files_are_self_contained_for_paper_profiles(tmp
 
 def test_experiment_matrix_cfg_disables_attestation_without_polluting_main_cfg(tmp_path: Path) -> None:
     """
-    功能：验证 experiment_matrix 专用 cfg 仅在 matrix 子运行内关闭 paper 与 attestation。
+    功能：验证并行统计关闭时，experiment_matrix 专用 cfg 才关闭 attestation。
 
     Verify matrix-specific config disables paper faithfulness and attestation
-    only for experiment_matrix sub-runs, without mutating the source cfg.
+    only when parallel attestation statistics are disabled, without mutating
+    the source cfg.
 
     Args:
         tmp_path: Temporary path fixture.
@@ -329,6 +331,9 @@ def test_experiment_matrix_cfg_disables_attestation_without_polluting_main_cfg(t
         "attestation": {
             "enabled": True,
             "require_signed_bundle_verification": True,
+        },
+        "parallel_attestation_statistics": {
+            "enabled": False,
         },
         "input_image_path": "top_level_should_be_removed.png",
         "embed": {
@@ -364,6 +369,177 @@ def test_experiment_matrix_cfg_disables_attestation_without_polluting_main_cfg(t
     assert original_cfg["attestation"]["require_signed_bundle_verification"] is True
     assert original_cfg["input_image_path"] == "top_level_should_be_removed.png"
     assert original_cfg["embed"]["input_image_path"] == "main_workflow_default_embed_input.png"
+
+
+def test_experiment_matrix_cfg_preserves_attestation_when_parallel_statistics_enabled(tmp_path: Path) -> None:
+    """
+    功能：验证并行 attestation 统计启用时，matrix 专用 cfg 保留正式 attestation 设置。
+
+    Verify matrix-specific config preserves attestation settings when
+    parallel attestation statistics are enabled.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "paper_run"
+    cfg_obj = {
+        "paper_faithfulness": {
+            "enabled": True,
+            "alignment_check": True,
+        },
+        "attestation": {
+            "enabled": True,
+            "require_signed_bundle_verification": True,
+        },
+        "parallel_attestation_statistics": {
+            "enabled": True,
+        },
+    }
+    cfg_path = tmp_path / "paper_cfg.yaml"
+    cfg_path.write_text(yaml.safe_dump(cfg_obj, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    matrix_cfg_path = module._prepare_experiment_matrix_cfg_path(
+        "paper_full_cuda",
+        run_root,
+        cfg_path,
+    )
+
+    matrix_cfg = yaml.safe_load(matrix_cfg_path.read_text(encoding="utf-8"))
+    original_cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+
+    assert matrix_cfg_path != cfg_path
+    assert matrix_cfg["paper_faithfulness"]["enabled"] is False
+    assert matrix_cfg["paper_faithfulness"]["alignment_check"] is False
+    assert matrix_cfg["attestation"]["enabled"] is True
+    assert matrix_cfg["attestation"]["require_signed_bundle_verification"] is True
+
+    assert original_cfg["attestation"]["enabled"] is True
+    assert original_cfg["attestation"]["require_signed_bundle_verification"] is True
+
+
+def test_paper_full_cuda_profile_enables_formal_experiment_matrix_guards() -> None:
+    """
+    功能：paper_full_cuda 正式 profile 必须显式启用 formal experiment_matrix guards。
+
+    Verify paper_full_cuda keeps the formal experiment_matrix guard contract
+    aligned with the validated mini-real profile.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    cfg_path = repo_root / "configs" / "paper_full_cuda.yaml"
+
+    cfg_obj = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    assert isinstance(cfg_obj, dict)
+
+    experiment_matrix_cfg = cfg_obj.get("experiment_matrix")
+    assert isinstance(experiment_matrix_cfg, dict)
+    assert experiment_matrix_cfg.get("require_real_negative_cache") is True
+    assert experiment_matrix_cfg.get("require_shared_thresholds") is True
+    assert experiment_matrix_cfg.get("disallow_forced_pair_fallback") is True
+
+
+def test_prepare_parallel_attestation_detect_records_from_matrix_prefers_attack_aware_sources(
+    tmp_path: Path,
+) -> None:
+    """
+    功能：验证并行 attestation 统计链优先生成 experiment_matrix attack-aware 来源。 
+
+    Verify parallel attestation statistics prefers experiment_matrix
+    attack-aware positive and negative sources.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    output_run_root = tmp_path / "parallel_run_root"
+    matrix_item_dir = run_root / "outputs" / "experiment_matrix" / "experiments" / "item_0000" / "artifacts" / "evaluate_inputs"
+    matrix_item_dir.mkdir(parents=True, exist_ok=True)
+
+    positive_payload = {
+        "attack_family": "jpeg",
+        "attack_params_version": "v1",
+        "attack": {"family": "jpeg", "params_version": "v1"},
+        "inference_prompt": "attack-aware prompt",
+        "attestation": {
+            "image_evidence_result": {
+                "status": "ok",
+                "content_attestation_score": 0.46,
+                "content_attestation_score_name": "content_attestation_score",
+            },
+            "final_event_attested_decision": {
+                "status": "mismatch",
+                "is_event_attested": False,
+                "event_attestation_score": 0.0,
+                "event_attestation_score_name": "event_attestation_score",
+                "event_attestation_statistics_score": 0.46,
+                "event_attestation_statistics_score_name": "event_attestation_statistics_score",
+            },
+        },
+    }
+    (matrix_item_dir / "detect_record_with_attack.json").write_text(
+        json.dumps(positive_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    branch_neg_dir = run_root / "artifacts" / "branch_neg" / "records"
+    branch_neg_dir.mkdir(parents=True, exist_ok=True)
+    negative_payload = {
+        "attestation": {
+            "image_evidence_result": {
+                "status": "ok",
+                "content_attestation_score": 0.0,
+                "content_attestation_score_name": "content_attestation_score",
+            },
+            "final_event_attested_decision": {
+                "status": "unattested",
+                "is_event_attested": False,
+                "event_attestation_score": 0.0,
+                "event_attestation_score_name": "event_attestation_score",
+                "event_attestation_statistics_score": 0.0,
+                "event_attestation_statistics_score_name": "event_attestation_statistics_score",
+            },
+        },
+    }
+    (branch_neg_dir / "detect_record.json").write_text(
+        json.dumps(negative_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    records_glob = module._prepare_parallel_attestation_detect_records_from_matrix(
+        run_root=run_root,
+        output_run_root=output_run_root,
+        stage_name="evaluate",
+        score_name="event_attestation_statistics_score",
+    )
+
+    assert isinstance(records_glob, str)
+    generated_paths = sorted(glob.glob(records_glob))
+    assert len(generated_paths) == 2
+
+    generated_payloads = [json.loads(Path(path_str).read_text(encoding="utf-8")) for path_str in generated_paths]
+    sources = {payload.get("ground_truth_source") for payload in generated_payloads}
+
+    assert "experiment_matrix_attack_aware_positive" in sources
+    assert "experiment_matrix_attack_aware_negative" in sources
+    assert "dual_branch_positive" not in sources
+    assert "dual_branch_negative" not in sources
 
 
 def test_onefile_workflow_dry_run_skips_dual_branch_execution(

@@ -1228,10 +1228,12 @@ def _prepare_experiment_matrix_cfg_path(profile: str, run_root: Path, cfg_path: 
     paper_cfg["alignment_check"] = False
     cfg_obj["paper_faithfulness"] = paper_cfg
 
-    attestation_cfg = cfg_obj.get("attestation") if isinstance(cfg_obj.get("attestation"), dict) else {}
-    attestation_cfg["enabled"] = False
-    attestation_cfg["require_signed_bundle_verification"] = False
-    cfg_obj["attestation"] = attestation_cfg
+    parallel_attestation_cfg = _resolve_parallel_attestation_statistics_cfg(cfg_obj)
+    if not bool(parallel_attestation_cfg.get("enabled", False)):
+        attestation_cfg = cfg_obj.get("attestation") if isinstance(cfg_obj.get("attestation"), dict) else {}
+        attestation_cfg["enabled"] = False
+        attestation_cfg["require_signed_bundle_verification"] = False
+        cfg_obj["attestation"] = attestation_cfg
 
     # experiment_matrix 需要在子运行内自行解析 embed 输入；不得继承 onefile 主链为
     # SemanticMaskProvider 预写入的 default_embed_input.png，否则 neg_cache 无法触发

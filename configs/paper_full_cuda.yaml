@@ -184,6 +184,9 @@ experiment_matrix:
   # 当前 seeds=[0,1] 为机制验证阶段（仅 2 个 seed）；正式论文运行请扩展为 range(100)。
   # 运行时通过 scripts/run_experiment_matrix.py 自动映射 seeds 为 CLI overrides（seed=0, seed=1, ...），
   # calibrate/evaluate 的 detect_records_glob 与 thresholds_path 在标准 workflow 中由当前 run_root 自动补全。
+  require_real_negative_cache: true
+  require_shared_thresholds: true
+  disallow_forced_pair_fallback: true
   seeds: [0, 1]
   # 论文复现实验主配置：仅保留 faithful baseline。
   # 消融实验请使用 configs/ablation 目录下的专用配置。
