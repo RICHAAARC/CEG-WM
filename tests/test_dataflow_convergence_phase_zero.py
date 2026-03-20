@@ -246,7 +246,8 @@ def test_detect_must_not_read_plan_digest_from_cfg() -> None:
     assert record["plan_digest_status"] == "ok"
     assert record["plan_digest_expected"] == plan_digest
     assert record["plan_digest_observed"] == plan_digest
-    assert record["detect_runtime_mode"] in {"real", "fallback_identity", "fallback_identity_v0"}
+    assert record["detect_runtime_mode"] in {"real", "fallback_identity"}
+    assert record["detect_runtime_mode_canonical"] in {"real", "fallback_identity"}
     assert record["detect_runtime_is_fallback"] == (record["detect_runtime_mode"] != "real")
 
 

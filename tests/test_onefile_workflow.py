@@ -248,6 +248,62 @@ def test_onefile_workflow_paper_full_profile_generates_real_sd3_config(tmp_path:
     assert "assert_paper_mechanisms" not in step_names
 
 
+def test_onefile_prompt_contract_files_are_self_contained_for_paper_profiles(tmp_path: Path) -> None:
+    """
+    功能：验证 paper onefile profile 所需 prompts 合同在仓库内自包含且可解析。
+
+    Verify prompt-file contracts required by paper onefile profiles are
+    self-contained in the repository and resolvable after profile preparation.
+
+    Args:
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    expected_prompt_contracts = [
+        (repo_root / "configs" / "paper_full_cuda.yaml", 16, 100),
+        (repo_root / "configs" / "paper_full_cuda_mini_real_validation.yaml", 6, 6),
+    ]
+
+    for cfg_path, expected_inference_prompt_count, expected_gt_prompt_count in expected_prompt_contracts:
+        run_root = tmp_path / cfg_path.stem
+        cfg_obj = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+        assert isinstance(cfg_obj, dict)
+
+        prepared_cfg_path = module._prepare_profile_cfg_path("paper_full_cuda", run_root, cfg_path)
+        prepared_cfg_obj = yaml.safe_load(prepared_cfg_path.read_text(encoding="utf-8"))
+        assert isinstance(prepared_cfg_obj, dict)
+
+        inference_prompt_path = module._resolve_prompt_file_path(
+            prepared_cfg_obj["inference_prompt_file"],
+            prepared_cfg_path,
+        )
+        inference_prompt_lines = module._load_prompt_lines_from_file(inference_prompt_path)
+        assert inference_prompt_path.exists()
+        assert len(inference_prompt_lines) == expected_inference_prompt_count
+        assert prepared_cfg_obj["inference_prompt"] == inference_prompt_lines[0]
+
+        calibration_prompt_path = module._resolve_prompt_file_path(
+            prepared_cfg_obj["calibration"]["minimal_ground_truth_prompts_file"],
+            prepared_cfg_path,
+        )
+        calibration_prompt_lines = module._load_prompt_lines_from_file(calibration_prompt_path)
+        assert calibration_prompt_path.exists()
+        assert len(calibration_prompt_lines) == expected_gt_prompt_count
+
+        evaluate_prompt_path = module._resolve_prompt_file_path(
+            prepared_cfg_obj["evaluate"]["minimal_ground_truth_prompts_file"],
+            prepared_cfg_path,
+        )
+        evaluate_prompt_lines = module._load_prompt_lines_from_file(evaluate_prompt_path)
+        assert evaluate_prompt_path == calibration_prompt_path
+        assert evaluate_prompt_lines == calibration_prompt_lines
+
+
 def test_experiment_matrix_cfg_disables_attestation_without_polluting_main_cfg(tmp_path: Path) -> None:
     """
     功能：验证 experiment_matrix 专用 cfg 仅在 matrix 子运行内关闭 paper 与 attestation。
