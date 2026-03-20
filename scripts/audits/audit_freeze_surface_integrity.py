@@ -254,14 +254,43 @@ def check_records_schema_version_injection(repo_root: Path) -> Dict[str, Any]:
 
 
 def _has_interpretation_fail_fast(func_node: ast.FunctionDef) -> bool:
+    alias_names = _collect_interpretation_alias_names(func_node)
     for node in ast.walk(func_node):
-        if isinstance(node, ast.If) and _is_interpretation_none_check(node.test):
+        if isinstance(node, ast.If) and _is_interpretation_none_check(node.test, alias_names):
             if _has_raise(node.body):
                 return True
     return False
 
 
-def _is_interpretation_none_check(test_node: ast.AST) -> bool:
+def _collect_interpretation_alias_names(func_node: ast.FunctionDef) -> Set[str]:
+    alias_names = {"interpretation"}
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(func_node):
+            if isinstance(node, ast.Assign):
+                value_name = _get_name_id(node.value)
+                if value_name not in alias_names:
+                    continue
+                for target in node.targets:
+                    target_name = _get_name_id(target)
+                    if target_name is None or target_name in alias_names:
+                        continue
+                    alias_names.add(target_name)
+                    changed = True
+            elif isinstance(node, ast.AnnAssign):
+                value_name = _get_name_id(node.value)
+                target_name = _get_name_id(node.target)
+                if value_name not in alias_names or target_name is None:
+                    continue
+                if target_name in alias_names:
+                    continue
+                alias_names.add(target_name)
+                changed = True
+    return alias_names
+
+
+def _is_interpretation_none_check(test_node: ast.AST, alias_names: Set[str] | None = None) -> bool:
     if not isinstance(test_node, ast.Compare):
         return False
     if len(test_node.ops) != 1 or len(test_node.comparators) != 1:
@@ -269,11 +298,18 @@ def _is_interpretation_none_check(test_node: ast.AST) -> bool:
     left = test_node.left
     op = test_node.ops[0]
     right = test_node.comparators[0]
-    if not isinstance(left, ast.Name) or left.id != "interpretation":
+    allowed_names = alias_names or {"interpretation"}
+    if not isinstance(left, ast.Name) or left.id not in allowed_names:
         return False
     if not isinstance(op, ast.Is):
         return False
     return isinstance(right, ast.Constant) and right.value is None
+
+
+def _get_name_id(node: ast.AST | None) -> str | None:
+    if not isinstance(node, ast.Name):
+        return None
+    return node.id
 
 
 def _has_raise(nodes: List[ast.stmt]) -> bool:
