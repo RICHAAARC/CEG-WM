@@ -110,6 +110,101 @@ def _resolve_preview_generation_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
     return cast(Dict[str, Any], preview_node) if isinstance(preview_node, dict) else {}
 
 
+def _normalize_plan_digest(value: Any) -> str | None:
+    """
+    功能：将候选 plan digest 规范化为非空字符串。 
+
+    Normalize a candidate plan digest into a non-empty string.
+
+    Args:
+        value: Candidate digest value.
+
+    Returns:
+        Normalized digest string, or None when the input is absent.
+    """
+    if not isinstance(value, str):
+        return None
+    normalized_value = value.strip()
+    if not normalized_value or normalized_value == "<absent>":
+        return None
+    return normalized_value
+
+
+def _bind_embed_plan_digest_consistency(
+    record: Dict[str, Any],
+    content_evidence: Dict[str, Any],
+    injection_plan_digest: Any,
+    formal_plan_digest: Any,
+) -> str:
+    """
+    功能：写入 embed 主链的 plan digest 一致性字段，并在 formal 分叉时显式标记。 
+
+    Bind embed-side plan digest consistency fields and explicitly mark formal divergence.
+
+    Args:
+        record: Mutable embed record mapping.
+        content_evidence: Mutable content evidence mapping.
+        injection_plan_digest: Digest bound during injection-time precomputation.
+        formal_plan_digest: Digest observed from the post-inference formal path.
+
+    Returns:
+        Consistency status string.
+    """
+    if not isinstance(record, dict):
+        raise TypeError("record must be dict")
+    if not isinstance(content_evidence, dict):
+        raise TypeError("content_evidence must be dict")
+
+    normalized_injection_plan_digest = _normalize_plan_digest(injection_plan_digest)
+    normalized_formal_plan_digest = _normalize_plan_digest(formal_plan_digest)
+    record["plan_digest_injection"] = normalized_injection_plan_digest or "<absent>"
+    record["plan_digest_formal"] = normalized_formal_plan_digest or "<absent>"
+    record["plan_digest_expected"] = normalized_injection_plan_digest or "<absent>"
+    record["plan_digest_observed"] = normalized_formal_plan_digest or "<absent>"
+
+    consistency_status = "ok"
+    match_status = "match"
+    mismatch_reason: str | None = None
+    if normalized_injection_plan_digest is None:
+        consistency_status = "absent"
+        match_status = "absent"
+        mismatch_reason = "plan_digest_injection_absent"
+    elif normalized_formal_plan_digest is None:
+        consistency_status = "absent"
+        match_status = "absent"
+        mismatch_reason = "plan_digest_formal_absent"
+    elif normalized_injection_plan_digest != normalized_formal_plan_digest:
+        consistency_status = "mismatch"
+        match_status = "mismatch"
+        mismatch_reason = "plan_digest_mismatch"
+
+    record["plan_digest_status"] = consistency_status
+    record["plan_digest_match_status"] = match_status
+
+    if mismatch_reason is None:
+        record.pop("plan_digest_mismatch_reason", None)
+        content_evidence.pop("plan_digest_mismatch", None)
+        if content_evidence.get("content_mismatch_reason") in {
+            "plan_digest_mismatch",
+            "plan_digest_formal_absent",
+            "plan_digest_injection_absent",
+        }:
+            content_evidence.pop("content_mismatch_reason", None)
+        return consistency_status
+
+    record["plan_digest_mismatch_reason"] = mismatch_reason
+    content_evidence["plan_digest_mismatch"] = {
+        "plan_digest_injection": record["plan_digest_injection"],
+        "plan_digest_formal": record["plan_digest_formal"],
+        "mismatch_reason": mismatch_reason,
+    }
+    if content_evidence.get("status") == "ok":
+        content_evidence["status"] = "mismatch"
+    if not content_evidence.get("content_mismatch_reason"):
+        content_evidence["content_mismatch_reason"] = mismatch_reason
+    return consistency_status
+
+
 def _write_embed_attestation_artifacts(
     record: Any,
     artifacts_dir: Path,
@@ -844,33 +939,39 @@ def run_embed(
             # 写入 pipeline_fingerprint 和 pipeline_fingerprint_digest
             content_evidence["pipeline_fingerprint"] = pipeline_fingerprint
             content_evidence["pipeline_fingerprint_digest"] = pipeline_fingerprint_digest
+
+            injection_plan_digest = _normalize_plan_digest(plan_digest)
+            formal_plan_digest = _normalize_plan_digest(
+                content_evidence.get("plan_digest") or record.get("plan_digest")
+            )
+            if formal_plan_digest is not None and not content_evidence.get("plan_digest"):
+                content_evidence["plan_digest"] = formal_plan_digest
+            _bind_embed_plan_digest_consistency(
+                record,
+                content_evidence,
+                injection_plan_digest,
+                formal_plan_digest,
+            )
             
             # POST-ORCHESTRATOR 创建最终的 injection_site_spec
-            # 使用 orchestrator 计算的真实 plan_digest 来确定 injection_mode
-            # 修复：orchestrator 通过 bind_plan_to_record 写的是 record["plan_digest"]（顶层），
-            # 不写 content_evidence["plan_digest"]，需从顶层 record 读取真实值。
-            orchestrator_plan_digest = content_evidence.get("plan_digest") or record.get("plan_digest")
-            # 若顶层有真实 plan_digest，同步写入 content_evidence 供审计字段口径一致。
-            if isinstance(orchestrator_plan_digest, str) and orchestrator_plan_digest:
-                if not content_evidence.get("plan_digest"):
-                    content_evidence["plan_digest"] = orchestrator_plan_digest
+            # 注入位点必须绑定 injection-time 计划摘要，而不是 post-inference formal 摘要。
             try:
-                if isinstance(orchestrator_plan_digest, str) and orchestrator_plan_digest:
-                    # 真实 plan_digest 存在 → subspace_projection 模式
+                if injection_plan_digest is not None:
+                    # injection-time plan_digest 存在 → subspace_projection 模式
                     injection_site_spec, injection_site_digest = injection_site_binder.build_injection_site_spec(
                         hook_type="callback_on_step_end",
                         target_module_name="StableDiffusion3Pipeline",
                         target_tensor_name="latents",
                         hook_timing="after_scheduler_step",
                         injection_rule_summary={
-                            "plan_digest": orchestrator_plan_digest,
+                            "plan_digest": injection_plan_digest,
                             "injection_mode": "subspace_projection"
                         },
                         cfg=cfg
                     )
-                    print(f"[Paper-Faithful] Injection site spec built (POST-ORCHESTRATOR with real plan_digest): {injection_site_digest[:16]}...")
+                    print(f"[Paper-Faithful] Injection site spec built (POST-ORCHESTRATOR with injection plan_digest): {injection_site_digest[:16]}...")
                 else:
-                    # plan_digest 缺失（orchestrator 也未能生成）→ fallback 模式
+                    # injection-time plan_digest 缺失 → fallback 模式
                     fallback_plan_payload: Dict[str, Any] = {
                         "plan_status": "fallback_runtime_plan_post_orchestrator",
                         "planner_params": {
@@ -905,31 +1006,7 @@ def run_embed(
                 injection_site_digest = "<failed>"
             
             # 写入 injection_site_spec 和 injection_site_digest
-            # 同步校验plan_digest口径一致性
             content_evidence["injection_site_spec"] = injection_site_spec
-            # 提取injection_site_spec中的plan_digest
-            injection_rule_summary = injection_site_spec.get("injection_rule_summary")
-            if isinstance(injection_rule_summary, dict):
-                injection_rule_summary_dict = cast(Dict[str, Any], injection_rule_summary)
-                spec_plan_digest = injection_rule_summary_dict.get("plan_digest")
-                orchestrator_plan_digest = content_evidence.get("plan_digest")
-                # 校验口径一致性
-                if isinstance(spec_plan_digest, str) and spec_plan_digest:
-                    if orchestrator_plan_digest is None or orchestrator_plan_digest == "":
-                        # content_status!=ok 时，不同步 fallback digest 到语义 plan 字段。
-                        content_status = content_evidence.get("status")
-                        if content_status == "ok":
-                            content_evidence["plan_digest"] = spec_plan_digest
-                        else:
-                            content_evidence["fallback_plan_digest"] = spec_plan_digest
-                            content_evidence["fallback_plan_digest_reason"] = "content_status_not_ok"
-                    elif orchestrator_plan_digest != spec_plan_digest:
-                        # 口径不一致，写入mismatch原因但不静默覆盖
-                        content_evidence["plan_digest_mismatch"] = {
-                            "orchestrator_value": orchestrator_plan_digest,
-                            "injection_site_value": spec_plan_digest,
-                            "mismatch_reason": "pre_computation_vs_orchestrator_divergence"
-                        }
             content_evidence["injection_site_digest"] = injection_site_digest
             
             # Paper Faithfulness: 调用 alignment_evaluator（必达）

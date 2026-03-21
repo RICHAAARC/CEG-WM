@@ -825,6 +825,10 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
     - plan_digest_expected                  # 期望计划摘要。
     - plan_digest_observed                  # 观测计划摘要。
     - plan_digest_status                    # 计划摘要一致性状态。
+    - plan_digest_injection                 # injection-time 计划摘要。
+    - plan_digest_formal                    # post-inference formal 计划摘要。
+    - plan_digest_match_status              # embed 主链计划摘要 match 状态。
+    - plan_digest_mismatch_reason           # 计划摘要不一致原因。
     - plan_input_digest                     # 计划输入摘要。
     - plan_input_schema_version             # 计划输入 schema 版本。
     - routing_digest                        # 路由摘要（顶层）。

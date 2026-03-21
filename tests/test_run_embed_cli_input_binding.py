@@ -20,6 +20,79 @@ class _StopAfterContentExtract(Exception):
     """Sentinel exception to stop run_embed after precompute extract."""
 
 
+def test_bind_embed_plan_digest_consistency_marks_match() -> None:
+    """
+    功能：一致的 injection/formal plan digest 必须写出 match 语义。 
+
+    Verify matching injection/formal plan digests emit match semantics.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    record = {}
+    content_evidence = {"status": "ok"}
+
+    status = run_embed_module._bind_embed_plan_digest_consistency(
+        record,
+        content_evidence,
+        "plan_digest_anchor",
+        "plan_digest_anchor",
+    )
+
+    assert status == "ok"
+    assert record["plan_digest_injection"] == "plan_digest_anchor"
+    assert record["plan_digest_formal"] == "plan_digest_anchor"
+    assert record["plan_digest_expected"] == "plan_digest_anchor"
+    assert record["plan_digest_observed"] == "plan_digest_anchor"
+    assert record["plan_digest_status"] == "ok"
+    assert record["plan_digest_match_status"] == "match"
+    assert "plan_digest_mismatch_reason" not in record
+    assert content_evidence["status"] == "ok"
+    assert "plan_digest_mismatch" not in content_evidence
+
+
+def test_bind_embed_plan_digest_consistency_marks_mismatch() -> None:
+    """
+    功能：分叉的 injection/formal plan digest 必须写出 mismatch 语义。 
+
+    Verify divergent injection/formal plan digests emit mismatch semantics.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    record = {}
+    content_evidence = {"status": "ok"}
+
+    status = run_embed_module._bind_embed_plan_digest_consistency(
+        record,
+        content_evidence,
+        "plan_digest_injection_anchor",
+        "plan_digest_formal_anchor",
+    )
+
+    assert status == "mismatch"
+    assert record["plan_digest_injection"] == "plan_digest_injection_anchor"
+    assert record["plan_digest_formal"] == "plan_digest_formal_anchor"
+    assert record["plan_digest_expected"] == "plan_digest_injection_anchor"
+    assert record["plan_digest_observed"] == "plan_digest_formal_anchor"
+    assert record["plan_digest_status"] == "mismatch"
+    assert record["plan_digest_match_status"] == "mismatch"
+    assert record["plan_digest_mismatch_reason"] == "plan_digest_mismatch"
+    assert content_evidence["status"] == "mismatch"
+    assert content_evidence["content_mismatch_reason"] == "plan_digest_mismatch"
+    assert content_evidence["plan_digest_mismatch"] == {
+        "plan_digest_injection": "plan_digest_injection_anchor",
+        "plan_digest_formal": "plan_digest_formal_anchor",
+        "mismatch_reason": "plan_digest_mismatch",
+    }
+
+
 def test_run_embed_binds_input_image_before_content_precompute(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
