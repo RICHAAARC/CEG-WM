@@ -3098,6 +3098,12 @@ def _prepare_detect_record_for_scoring(
             "detect_hf_score": content_payload.get("detect_hf_score"),
             "lf_score": content_payload.get("lf_score"),
             "content_failure_reason": content_payload.get("content_failure_reason"),
+            "plan_digest": content_payload.get("plan_digest"),
+            "basis_digest": content_payload.get("basis_digest"),
+            "plan_digest_status": payload.get("plan_digest_status"),
+            "plan_digest_expected": payload.get("plan_digest_expected"),
+            "plan_digest_observed": payload.get("plan_digest_observed"),
+            "plan_failure_reason": payload.get("plan_failure_reason"),
         }
         score_parts_node = content_payload.get("score_parts")
         if isinstance(score_parts_node, dict):

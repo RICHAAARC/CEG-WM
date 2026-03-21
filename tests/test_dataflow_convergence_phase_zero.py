@@ -294,6 +294,8 @@ def test_embed_produces_real_artifact_and_records_anchor(tmp_path: Path) -> None
     assert record["artifact_sha256"] == digests.file_sha256(output_path)
     assert record["input_sha256"] == digests.file_sha256(input_image)
     assert record["plan_digest"] == plan_digest
+    assert record["basis_digest"] == basis_digest
+    assert record["content_evidence"]["basis_digest"] == basis_digest
 
 
 def test_plan_digest_roundtrip_embed_to_detect_ok(tmp_path: Path) -> None:

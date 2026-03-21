@@ -655,6 +655,8 @@ def run_embed_orchestrator(
             plan_input_digest=plan_input_digest,
             plan_meta=plan_meta,
         )
+        if isinstance(plan_digest, str) and plan_digest and not isinstance(content_evidence_payload.get("plan_digest"), str):
+            content_evidence_payload["plan_digest"] = plan_digest
         _bind_mask_and_routing_evidence_to_record(record_fields, content_evidence_payload)
         
         subspace_payload = _as_dict_payload(subspace_result)
@@ -662,6 +664,8 @@ def run_embed_orchestrator(
             basis_digest = subspace_payload.get("basis_digest")
             if isinstance(basis_digest, str) and basis_digest:
                 record_fields["basis_digest"] = basis_digest
+                if not isinstance(content_evidence_payload.get("basis_digest"), str):
+                    content_evidence_payload["basis_digest"] = basis_digest
             plan_stats = subspace_payload.get("plan_stats")
             if isinstance(plan_stats, dict):
                 plan_stats_payload = dict(cast(Dict[str, Any], plan_stats))
@@ -669,6 +673,14 @@ def run_embed_orchestrator(
                 record_fields["plan_stats"] = plan_stats_payload
             # 写入规划器失败原因（可观测性字段，仅在失败时非 None）。
             plan_failure_reason = subspace_payload.get("plan_failure_reason")
+            if not isinstance(plan_failure_reason, str) or not plan_failure_reason:
+                subspace_absent_reason = subspace_payload.get("subspace_absent_reason")
+                if isinstance(subspace_absent_reason, str) and subspace_absent_reason:
+                    plan_failure_reason = subspace_absent_reason
+                elif isinstance(plan_stats, dict):
+                    planner_absent_reason = plan_stats.get("planner_absent_reason")
+                    if isinstance(planner_absent_reason, str) and planner_absent_reason:
+                        plan_failure_reason = planner_absent_reason
             if plan_failure_reason is not None:
                 record_fields["plan_failure_reason"] = plan_failure_reason
             plan_node = subspace_payload.get("plan")

@@ -150,11 +150,6 @@ def _bind_embed_plan_digest_consistency(
     Returns:
         Consistency status string.
     """
-    if not isinstance(record, dict):
-        raise TypeError("record must be dict")
-    if not isinstance(content_evidence, dict):
-        raise TypeError("content_evidence must be dict")
-
     normalized_injection_plan_digest = _normalize_plan_digest(injection_plan_digest)
     normalized_formal_plan_digest = _normalize_plan_digest(formal_plan_digest)
     record["plan_digest_injection"] = normalized_injection_plan_digest or "<absent>"
@@ -203,6 +198,62 @@ def _bind_embed_plan_digest_consistency(
     if not content_evidence.get("content_mismatch_reason"):
         content_evidence["content_mismatch_reason"] = mismatch_reason
     return consistency_status
+
+
+def _extract_subspace_result_digests(subspace_result: Any) -> tuple[str | None, str | None]:
+    """
+    功能：提取 precomputed subspace 结果中的 plan/basis digest。 
+
+    Extract plan and basis digests from a precomputed subspace result.
+
+    Args:
+        subspace_result: Precomputed planner result object or mapping.
+
+    Returns:
+        Tuple of normalized (plan_digest, basis_digest).
+    """
+    payload: Dict[str, Any] | None = None
+    if isinstance(subspace_result, dict):
+        payload = cast(Dict[str, Any], subspace_result)
+    elif hasattr(subspace_result, "as_dict"):
+        payload_candidate = subspace_result.as_dict()
+        if isinstance(payload_candidate, dict):
+            payload = cast(Dict[str, Any], payload_candidate)
+
+    subspace_result_object = cast(Any, subspace_result)
+    plan_digest = _normalize_plan_digest(getattr(subspace_result_object, "plan_digest", None))
+    if plan_digest is None and isinstance(payload, dict):
+        plan_digest = _normalize_plan_digest(payload.get("plan_digest"))
+
+    basis_digest = _normalize_plan_digest(getattr(subspace_result_object, "basis_digest", None))
+    if basis_digest is None and isinstance(payload, dict):
+        basis_digest = _normalize_plan_digest(payload.get("basis_digest"))
+        if basis_digest is None:
+            plan_node = payload.get("plan")
+            if isinstance(plan_node, dict):
+                plan_node_payload = cast(Dict[str, Any], plan_node)
+                basis_digest = _normalize_plan_digest(plan_node_payload.get("basis_digest"))
+
+    return plan_digest, basis_digest
+
+
+def _resolve_formal_subspace_override(subspace_result: Any) -> Any | None:
+    """
+    功能：仅在 precomputed formal plan 与 basis 都可用时复用 override。 
+
+    Reuse the precomputed subspace override only when both formal plan and
+    basis digests are already available.
+
+    Args:
+        subspace_result: Precomputed planner result object or mapping.
+
+    Returns:
+        Original override payload when formal anchors are complete; otherwise None.
+    """
+    plan_digest, basis_digest = _extract_subspace_result_digests(subspace_result)
+    if plan_digest is None or basis_digest is None:
+        return None
+    return subspace_result
 
 
 def _write_embed_attestation_artifacts(
@@ -590,15 +641,19 @@ def run_embed(
                 plan_payload = cast(Dict[str, Any], _evidence_plan) if isinstance(_evidence_plan, dict) else _evidence_dict
             else:
                 plan_payload = subspace_result_pre
-            plan_digest = getattr(subspace_result_pre, "plan_digest", None)
-            if isinstance(plan_payload, dict) and not isinstance(plan_digest, str):
+            plan_digest_precomputed = getattr(subspace_result_pre, "plan_digest", None)
+            if isinstance(plan_payload, dict) and not isinstance(plan_digest_precomputed, str):
                 plan_payload_dict = cast(Dict[str, Any], plan_payload)
-                plan_digest = plan_payload_dict.get("plan_digest")
+                plan_digest_precomputed = plan_payload_dict.get("plan_digest")
+            plan_digest_precomputed = _normalize_plan_digest(plan_digest_precomputed)
 
             injection_context = None
             injection_modifier = None
             injection_site_spec = None
             injection_site_digest = None
+            fallback_plan_digest = None
+            injection_plan_digest = None
+            injection_plan_source = None
 
             attestation_env_inputs = resolve_attestation_env_inputs(cfg, require_prompt_seed=True)
             if attestation_env_inputs.get("status") in {"ok", "absent"}:
@@ -617,11 +672,11 @@ def run_embed(
             if not isinstance(pinned_time_bucket, str) or not pinned_time_bucket:
                 cfg["__attestation_time_bucket__"] = time_utils.now_utc_iso_z().split("T", 1)[0]
 
-            if isinstance(plan_payload, dict) and isinstance(plan_digest, str) and plan_digest:
-                early_attestation_payload = embed_orchestrator._prepare_embed_attestation_runtime_bindings(cfg, plan_digest)  # pyright: ignore[reportPrivateUsage]
-                if isinstance(early_attestation_payload, dict) and early_attestation_payload.get("attestation_status") == "ok":
+            if isinstance(plan_payload, dict) and isinstance(plan_digest_precomputed, str) and plan_digest_precomputed:
+                early_attestation_payload = embed_orchestrator._prepare_embed_attestation_runtime_bindings(cfg, plan_digest_precomputed)  # pyright: ignore[reportPrivateUsage]
+                if early_attestation_payload.get("attestation_status") == "ok":
                     embed_orchestrator._bind_attestation_runtime_to_cfg(cfg, early_attestation_payload)  # pyright: ignore[reportPrivateUsage]
-                elif isinstance(early_attestation_payload, dict) and early_attestation_payload.get("attestation_status") not in {None, "absent"}:
+                elif early_attestation_payload.get("attestation_status") not in {None, "absent"}:
                     print(
                         "[Paper-Faithful] [WARN] Early attestation runtime unavailable: "
                         f"{early_attestation_payload.get('attestation_failure_reason') or early_attestation_payload.get('attestation_absent_reason')}"
@@ -631,11 +686,13 @@ def run_embed(
             # 此处仅创建 injection_context 和 injection_modifier （驱动 inference）
             # injection_site_spec 将在 orchestrator 后根据真实 plan_digest 创建
             try:
-                if isinstance(plan_payload, dict) and isinstance(plan_digest, str) and plan_digest:
+                if isinstance(plan_payload, dict) and isinstance(plan_digest_precomputed, str) and plan_digest_precomputed:
                     # 计划存在：基于 PRE-COMPUTED plan 创建推理时所需的 context
                     # 注意：此 plan_digest 是临时的，真实 plan_digest 将由 orchestrator 计算
-                    injection_context = build_injection_context_from_plan(cfg, cast(Dict[str, Any], plan_payload), plan_digest)
+                    injection_context = build_injection_context_from_plan(cfg, cast(Dict[str, Any], plan_payload), plan_digest_precomputed)
                     injection_modifier = LatentModifier(LATENT_MODIFIER_ID, LATENT_MODIFIER_VERSION)
+                    injection_plan_digest = plan_digest_precomputed
+                    injection_plan_source = "precomputed"
                     print(f"[Paper-Faithful] Injection context created from PRE-COMPUTED plan (POST-ORCHESTRATOR决定最终spec)")
                 else:
                     # 计划缺失：基于 fallback plan 创建推理时所需的 context
@@ -649,11 +706,15 @@ def run_embed(
                     fallback_plan_digest = digests.canonical_sha256(fallback_plan_payload)
                     injection_context = build_injection_context_from_plan(cfg, fallback_plan_payload, fallback_plan_digest)
                     injection_modifier = LatentModifier(LATENT_MODIFIER_ID, LATENT_MODIFIER_VERSION)
+                    injection_plan_digest = fallback_plan_digest
+                    injection_plan_source = "fallback"
                     print(f"[Paper-Faithful] Injection context created from FALLBACK plan (POST-ORCHESTRATOR决定最终spec)")
             except Exception as inj_ctx_exc:
                 print(f"[Paper-Faithful] [WARN] Injection context creation failed: {inj_ctx_exc}")
                 injection_context = None
                 injection_modifier = None
+                injection_plan_digest = None
+                injection_plan_source = None
             
             # (7.7) Real Dataflow Smoke: 在 pipeline_result 之后调用 inference
             pipeline_obj = pipeline_result.get("pipeline_obj")
@@ -834,6 +895,7 @@ def run_embed(
                 rng=None,
                 trajectory_evidence=trajectory_evidence
             )
+            subspace_result_override = _resolve_formal_subspace_override(subspace_result_pre)
             record_obj: Any = run_embed_orchestrator(
                 cfg,
                 impl_set,
@@ -841,8 +903,8 @@ def run_embed(
                 trajectory_evidence=trajectory_evidence,
                 injection_evidence=injection_evidence,
                 sync_runtime_context=sync_runtime_context,
-                content_result_override=content_result_pre,
-                subspace_result_override=subspace_result_pre,
+                content_result_override=cast(Any, content_result_pre),
+                subspace_result_override=subspace_result_override,
             )
             cfg.pop("__attestation_secret_inputs__", None)
             cfg.pop("__attestation_event_nonce__", None)
@@ -940,12 +1002,20 @@ def run_embed(
             content_evidence["pipeline_fingerprint"] = pipeline_fingerprint
             content_evidence["pipeline_fingerprint_digest"] = pipeline_fingerprint_digest
 
-            injection_plan_digest = _normalize_plan_digest(plan_digest)
             formal_plan_digest = _normalize_plan_digest(
                 content_evidence.get("plan_digest") or record.get("plan_digest")
             )
+            formal_basis_digest = _normalize_plan_digest(
+                content_evidence.get("basis_digest") or record.get("basis_digest")
+            )
             if formal_plan_digest is not None and not content_evidence.get("plan_digest"):
                 content_evidence["plan_digest"] = formal_plan_digest
+            if formal_basis_digest is not None and not content_evidence.get("basis_digest"):
+                content_evidence["basis_digest"] = formal_basis_digest
+            if injection_plan_source == "fallback" and isinstance(injection_plan_digest, str) and injection_plan_digest:
+                content_evidence["fallback_plan_digest"] = injection_plan_digest
+                if not isinstance(content_evidence.get("fallback_plan_digest_reason"), str) or not content_evidence.get("fallback_plan_digest_reason"):
+                    content_evidence["fallback_plan_digest_reason"] = "fallback_injection_plan_used"
             _bind_embed_plan_digest_consistency(
                 record,
                 content_evidence,
@@ -956,7 +1026,7 @@ def run_embed(
             # POST-ORCHESTRATOR 创建最终的 injection_site_spec
             # 注入位点必须绑定 injection-time 计划摘要，而不是 post-inference formal 摘要。
             try:
-                if injection_plan_digest is not None:
+                if injection_plan_source == "precomputed" and injection_plan_digest is not None:
                     # injection-time plan_digest 存在 → subspace_projection 模式
                     injection_site_spec, injection_site_digest = injection_site_binder.build_injection_site_spec(
                         hook_type="callback_on_step_end",
@@ -970,6 +1040,22 @@ def run_embed(
                         cfg=cfg
                     )
                     print(f"[Paper-Faithful] Injection site spec built (POST-ORCHESTRATOR with injection plan_digest): {injection_site_digest[:16]}...")
+                elif injection_plan_source == "fallback" and injection_plan_digest is not None:
+                    injection_site_spec, injection_site_digest = injection_site_binder.build_injection_site_spec(
+                        hook_type="callback_on_step_end",
+                        target_module_name="StableDiffusion3Pipeline",
+                        target_tensor_name="latents",
+                        hook_timing="after_scheduler_step",
+                        injection_rule_summary={
+                            "plan_digest": injection_plan_digest,
+                            "injection_mode": "latent_direct_fallback"
+                        },
+                        cfg=cfg
+                    )
+                    content_evidence["fallback_plan_digest"] = injection_plan_digest
+                    if not isinstance(content_evidence.get("fallback_plan_digest_reason"), str) or not content_evidence.get("fallback_plan_digest_reason"):
+                        content_evidence["fallback_plan_digest_reason"] = "fallback_injection_plan_used"
+                    print(f"[Paper-Faithful] Injection site spec built (POST-ORCHESTRATOR fallback): {injection_site_digest[:16]}...")
                 else:
                     # injection-time plan_digest 缺失 → fallback 模式
                     fallback_plan_payload: Dict[str, Any] = {
@@ -993,13 +1079,12 @@ def run_embed(
                     )
                     print(f"[Paper-Faithful] Injection site spec built (POST-ORCHESTRATOR fallback): {injection_site_digest[:16]}...")
                     # content_status!=ok 时，不写 fallback 摘要到语义 plan 字段。
-                    if injection_plan_digest is None:
-                        content_status = content_evidence.get("status")
-                        if content_status == "ok":
-                            content_evidence["plan_digest"] = fallback_plan_digest
-                        else:
-                            content_evidence["fallback_plan_digest"] = fallback_plan_digest
-                            content_evidence["fallback_plan_digest_reason"] = "content_status_not_ok"
+                    content_status = content_evidence.get("status")
+                    if content_status == "ok":
+                        content_evidence["plan_digest"] = fallback_plan_digest
+                    else:
+                        content_evidence["fallback_plan_digest"] = fallback_plan_digest
+                        content_evidence["fallback_plan_digest_reason"] = "content_status_not_ok"
             except Exception as final_inj_exc:
                 print(f"[Paper-Faithful] [WARN] Final injection site building failed: {final_inj_exc}")
                 injection_site_spec = {"status": "failed", "error": str(final_inj_exc)}

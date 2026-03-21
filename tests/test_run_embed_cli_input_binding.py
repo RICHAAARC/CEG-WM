@@ -93,6 +93,68 @@ def test_bind_embed_plan_digest_consistency_marks_mismatch() -> None:
     }
 
 
+def test_bind_embed_plan_digest_consistency_marks_formal_absent_after_fallback_injection() -> None:
+    """
+    功能：fallback 注入已发生时，不得误报为 injection digest 缺失。 
+
+    Verify fallback injection keeps the injection digest populated and reports
+    a formal-absent mismatch instead of an injection-absent mismatch.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    record = {}
+    content_evidence = {"status": "ok", "fallback_plan_digest": "fallback_digest_anchor"}
+
+    status = run_embed_module._bind_embed_plan_digest_consistency(
+        record,
+        content_evidence,
+        "fallback_digest_anchor",
+        None,
+    )
+
+    assert status == "absent"
+    assert record["plan_digest_injection"] == "fallback_digest_anchor"
+    assert record["plan_digest_formal"] == "<absent>"
+    assert record["plan_digest_match_status"] == "absent"
+    assert record["plan_digest_mismatch_reason"] == "plan_digest_formal_absent"
+    assert content_evidence["content_mismatch_reason"] == "plan_digest_formal_absent"
+
+
+def test_resolve_formal_subspace_override_requires_plan_and_basis() -> None:
+    """
+    功能：仅当 precomputed formal plan 与 basis 都存在时才允许复用 override。 
+
+    Verify the orchestrator only reuses a precomputed subspace override when
+    both formal plan and basis digests are available.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    absent_precompute = {
+        "status": "absent",
+        "plan": {},
+        "plan_digest": None,
+        "basis_digest": None,
+        "plan_stats": {"planner_status": "absent", "planner_absent_reason": "mask_absent"},
+    }
+    formal_precompute = {
+        "status": "ok",
+        "plan": {"rank": 8},
+        "plan_digest": "formal_plan_anchor",
+        "basis_digest": "formal_basis_anchor",
+    }
+
+    assert run_embed_module._resolve_formal_subspace_override(absent_precompute) is None
+    assert run_embed_module._resolve_formal_subspace_override(formal_precompute) is formal_precompute
+
+
 def test_run_embed_binds_input_image_before_content_precompute(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

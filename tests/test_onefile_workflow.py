@@ -3151,6 +3151,57 @@ def test_prepare_detect_record_for_scoring_prefers_formal_hf_score_over_detect_h
     assert content_payload["score"] == 0.73
 
 
+def test_prepare_detect_record_for_scoring_reports_plan_and_basis_diagnostics(tmp_path: Path) -> None:
+    """
+    功能：当 formal content score 缺失时，诊断信息必须包含 plan/basis 主字段线索。 
+
+    Verify plan and basis diagnostics are included when paper_full_cuda fails
+    because no recoverable formal content score exists.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    run_root = tmp_path / "run_root"
+    records_dir = run_root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    (records_dir / "detect_record.json").write_text(
+        json.dumps(
+            {
+                "plan_digest_status": "absent",
+                "plan_digest_expected": None,
+                "plan_digest_observed": "fallback_digest_anchor",
+                "plan_failure_reason": "formal_plan_absent_after_orchestrator",
+                "content_evidence_payload": {
+                    "status": "absent",
+                    "score": None,
+                    "detect_lf_score": None,
+                    "detect_hf_score": None,
+                    "lf_score": None,
+                    "content_failure_reason": "lf_basis_missing",
+                    "plan_digest": "fallback_digest_anchor",
+                    "basis_digest": None,
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        module._prepare_detect_record_for_scoring(
+            run_root,
+            records_dir,
+            module.PROFILE_PAPER_FULL_CUDA,
+        )
+
+    message = str(exc_info.value)
+    assert "'plan_digest': 'fallback_digest_anchor'" in message
+    assert "'basis_digest': None" in message
+    assert "'plan_digest_status': 'absent'" in message
+    assert "'plan_failure_reason': 'formal_plan_absent_after_orchestrator'" in message
+
+
 def test_onefile_attestation_hook_reuses_embed_record_payload(tmp_path: Path) -> None:
     """
     功能：验证 embed 后置 hook 只复用主路径 attestation 工件而不重算。
