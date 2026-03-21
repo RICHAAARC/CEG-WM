@@ -31,6 +31,12 @@ class InjectionContext:
         hf_params_digest: HF channel parameters digest (str, non-empty, required if enable_hf=True).
         enable_lf: Flag to enable LF channel injection (bool).
         enable_hf: Flag to enable HF channel injection (bool).
+        basis_digest: Basis digest bound to the injection-time plan.
+        attestation_digest: Statement digest used by attestation runtime.
+        attestation_event_digest: Canonical event-binding digest for injection.
+        lf_attestation_event_digest: LF-specific event-binding digest.
+        lf_attestation_key: LF attestation key visible to the injection path.
+        event_binding_mode: Explicit event-binding mode token.
         device: Torch device string ('cpu', 'cuda:0', etc.) for execution (str).
         dtype: Torch dtype string ('float32', 'float16', etc.) for computation (str).
 
@@ -45,6 +51,12 @@ class InjectionContext:
     hf_params_digest: str
     enable_lf: bool
     enable_hf: bool
+    basis_digest: Optional[str] = None
+    attestation_digest: Optional[str] = None
+    attestation_event_digest: Optional[str] = None
+    lf_attestation_event_digest: Optional[str] = None
+    lf_attestation_key: Optional[str] = None
+    event_binding_mode: Optional[str] = None
     device: str = "cpu"
     dtype: str = "float32"
     require_basis_region_spec: bool = False
@@ -78,6 +90,17 @@ class InjectionContext:
             raise ValueError("dtype must be non-empty str")
         if not isinstance(self.require_basis_region_spec, bool):
             raise TypeError("require_basis_region_spec must be bool")
+        for field_name in [
+            "basis_digest",
+            "attestation_digest",
+            "attestation_event_digest",
+            "lf_attestation_event_digest",
+            "lf_attestation_key",
+            "event_binding_mode",
+        ]:
+            field_value = getattr(self, field_name)
+            if field_value is not None and not isinstance(field_value, str):
+                raise TypeError(f"{field_name} must be str or None")
 
 
 class LatentInjectionHook:
@@ -162,6 +185,14 @@ class LatentInjectionHook:
                         "enabled": self.context.require_basis_region_spec
                     },
                     "require_basis_region_spec": self.context.require_basis_region_spec,
+                    "basis_digest": self.context.basis_digest,
+                    "lf_basis_digest": self.context.basis_digest,
+                    "attestation_digest": self.context.attestation_digest,
+                    "attestation_event_digest": self.context.attestation_event_digest,
+                    "lf_attestation_event_digest": self.context.lf_attestation_event_digest,
+                    "lf_attestation_key": self.context.lf_attestation_key,
+                    "k_lf": self.context.lf_attestation_key,
+                    "event_binding_mode": self.context.event_binding_mode,
                 },
                 step_index=step_index,
                 key=None  # 内部衍生

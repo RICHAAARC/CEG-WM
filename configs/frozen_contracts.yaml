@@ -187,6 +187,10 @@ artifact_schema:
         - embed_closed_loop_selection_rule
         - n_bits_compared
         - expected_bit_signs
+        - embed_expected_bit_signs
+        - formal_expected_bit_signs
+        - embed_formal_expected_signs_match
+        - expected_signs_mismatch_reason
         - pre_injection_coeffs
         - injected_template_coeffs
         - post_injection_coeffs
@@ -228,6 +232,8 @@ artifact_schema:
         - route_basis_bridge_digest
         - plan_digest
         - basis_digest
+        - embed_formal_expected_signs_match
+        - expected_signs_mismatch_reason
         - primary_evidence
         - per_dimension_summary
         - high_confidence_mismatch_dimensions

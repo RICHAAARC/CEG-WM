@@ -504,6 +504,33 @@ def run_embed(
             injection_modifier = None
             injection_site_spec = None
             injection_site_digest = None
+
+            attestation_env_inputs = resolve_attestation_env_inputs(cfg, require_prompt_seed=True)
+            if attestation_env_inputs.get("status") in {"ok", "absent"}:
+                transient_secret_inputs: Dict[str, str] = {}
+                for key_name in ["k_master", "k_prompt", "k_seed"]:
+                    key_value = attestation_env_inputs.get(key_name)
+                    if isinstance(key_value, str) and key_value:
+                        transient_secret_inputs[key_name] = key_value
+                if transient_secret_inputs:
+                    cfg["__attestation_secret_inputs__"] = transient_secret_inputs
+
+            pinned_event_nonce = cfg.get("__attestation_event_nonce__")
+            if not isinstance(pinned_event_nonce, str) or not pinned_event_nonce:
+                cfg["__attestation_event_nonce__"] = uuid.uuid4().hex
+            pinned_time_bucket = cfg.get("__attestation_time_bucket__")
+            if not isinstance(pinned_time_bucket, str) or not pinned_time_bucket:
+                cfg["__attestation_time_bucket__"] = time_utils.now_utc_iso_z().split("T", 1)[0]
+
+            if isinstance(plan_payload, dict) and isinstance(plan_digest, str) and plan_digest:
+                early_attestation_payload = embed_orchestrator._prepare_embed_attestation_runtime_bindings(cfg, plan_digest)  # pyright: ignore[reportPrivateUsage]
+                if isinstance(early_attestation_payload, dict) and early_attestation_payload.get("attestation_status") == "ok":
+                    embed_orchestrator._bind_attestation_runtime_to_cfg(cfg, early_attestation_payload)  # pyright: ignore[reportPrivateUsage]
+                elif isinstance(early_attestation_payload, dict) and early_attestation_payload.get("attestation_status") not in {None, "absent"}:
+                    print(
+                        "[Paper-Faithful] [WARN] Early attestation runtime unavailable: "
+                        f"{early_attestation_payload.get('attestation_failure_reason') or early_attestation_payload.get('attestation_absent_reason')}"
+                    )
             
             # 延迟 injection_site_spec 创建到 POST-ORCHESTRATOR
             # 此处仅创建 injection_context 和 injection_modifier （驱动 inference）
@@ -696,16 +723,6 @@ def run_embed(
             run_meta["cfg_pruned_for_digest_canon_sha256"] = cfg_audit_metadata["cfg_pruned_for_digest_canon_sha256"]
             run_meta["cfg_audit_canon_sha256"] = cfg_audit_metadata["cfg_audit_canon_sha256"]
 
-            attestation_env_inputs = resolve_attestation_env_inputs(cfg, require_prompt_seed=True)
-            if attestation_env_inputs.get("status") in {"ok", "absent"}:
-                transient_secret_inputs: Dict[str, str] = {}
-                for key_name in ["k_master", "k_prompt", "k_seed"]:
-                    key_value = attestation_env_inputs.get(key_name)
-                    if isinstance(key_value, str) and key_value:
-                        transient_secret_inputs[key_name] = key_value
-                if transient_secret_inputs:
-                    cfg["__attestation_secret_inputs__"] = transient_secret_inputs
-            
             # 记录路径策略配置与审计字段。
             run_meta["path_policy"] = {
                 "allow_nonempty_run_root": bool(allow_nonempty_run_root),
@@ -728,9 +745,13 @@ def run_embed(
                 cfg_digest,
                 trajectory_evidence=trajectory_evidence,
                 injection_evidence=injection_evidence,
-                sync_runtime_context=sync_runtime_context
+                sync_runtime_context=sync_runtime_context,
+                content_result_override=content_result_pre,
+                subspace_result_override=subspace_result_pre,
             )
             cfg.pop("__attestation_secret_inputs__", None)
+            cfg.pop("__attestation_event_nonce__", None)
+            cfg.pop("__attestation_time_bucket__", None)
             cfg.pop("__embed_pipeline_obj__", None)
             cfg.pop("__embed_final_latents__", None)
             cfg.pop("__embed_trajectory_latent_cache__", None)

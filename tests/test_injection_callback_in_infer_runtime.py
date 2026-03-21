@@ -17,6 +17,7 @@ import torch
 from main.core import digests
 from main.diffusion.sd3.callback_composer import InjectionContext
 from main.diffusion.sd3.infer_runtime import run_sd3_inference
+from main.diffusion.sd3 import infer_runtime as infer_runtime_module
 from main.cli.run_common import build_injection_context_from_plan
 from main.watermarking.content_chain.latent_modifier import (
     LatentModifier,
@@ -92,7 +93,14 @@ def _build_cfg() -> Dict[str, Any]:
                 "timestep_start": 0,
                 "timestep_end": 2
             }
-        }
+        },
+        "attestation": {"use_trajectory_mix": False},
+        "attestation_digest": "a" * 64,
+        "attestation_event_digest": "b" * 64,
+        "lf_attestation_event_digest": "b" * 64,
+        "lf_attestation_key": "c" * 64,
+        "k_lf": "c" * 64,
+        "event_binding_mode": "statement_only",
     }
 
 
@@ -109,10 +117,14 @@ def _build_plan_with_basis(latent_dim: int, rank: int, seed: int) -> Dict[str, A
     hf_matrix = rng.normal(0.0, 1.0, size=(latent_dim, rank)).astype(np.float32)
     hf_matrix = _stable_qr_basis(hf_matrix)
     return {
+        "basis_digest": digests.canonical_sha256({"seed": seed, "rank": rank, "tag": "basis"}),
         "lf_basis": {"projection_matrix": lf_matrix.tolist()},
         "hf_basis": {"hf_projection_matrix": hf_matrix.tolist()},
         "planner_params": {"rank": rank}
     }
+
+
+_build_injection_cfg = infer_runtime_module._build_injection_cfg  # pyright: ignore[reportPrivateUsage]
 
 
 def test_injection_callback_smoke() -> None:
@@ -215,3 +227,24 @@ def test_injection_params_not_in_digest_domain_must_mismatch() -> None:
     assert isinstance(injection_evidence, dict)
     assert injection_evidence.get("status") == "mismatch"
     assert injection_evidence.get("injection_failure_reason") == "lf_params_digest_mismatch"
+
+
+def test_build_injection_cfg_carries_attestation_runtime_fields() -> None:
+    """
+    功能：逐 step 注入配置必须显式携带 LF formal sign 所需锚点。
+    """
+    cfg = _build_cfg()
+    latent_dim = 1 * 4 * 8 * 8
+    plan_payload = _build_plan_with_basis(latent_dim, 8, 2026)
+    plan_digest = digests.canonical_sha256(plan_payload)
+
+    injection_context = build_injection_context_from_plan(cfg, plan_payload, plan_digest)
+    injection_cfg = _build_injection_cfg(cfg, injection_context)
+
+    assert injection_cfg.get("attestation_event_digest") == "b" * 64
+    assert injection_cfg.get("lf_attestation_event_digest") == "b" * 64
+    assert injection_cfg.get("lf_attestation_key") == "c" * 64
+    assert injection_cfg.get("k_lf") == "c" * 64
+    assert injection_cfg.get("basis_digest") == plan_payload["basis_digest"]
+    assert injection_cfg.get("lf_basis_digest") == plan_payload["basis_digest"]
+    assert injection_cfg.get("event_binding_mode") == "statement_only"

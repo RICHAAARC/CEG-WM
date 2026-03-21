@@ -83,9 +83,15 @@ def _build_matching_lf_attestation_features(
     trace_commit: str | None = None,
     plan_digest: str | None = None,
     basis_digest: str | None = None,
+    event_binding_mode: str = "trajectory_bound",
 ) -> list[float]:
     attestation_digest = compute_attestation_digest(statement_from_dict(statement))
-    attest_keys = derive_attestation_keys(k_master, attestation_digest, trajectory_commit=trace_commit)
+    attest_keys = derive_attestation_keys(
+        k_master,
+        attestation_digest,
+        trajectory_commit=trace_commit,
+        event_binding_mode=event_binding_mode,
+    )
     template_bundle = channel_lf.derive_lf_template_bundle(
         {
             "watermark": {
@@ -99,6 +105,7 @@ def _build_matching_lf_attestation_features(
             "plan_digest": plan_digest or statement["plan_digest"],
             "lf_basis_digest": basis_digest,
             "basis_digest": basis_digest,
+            "event_binding_mode": event_binding_mode,
         },
         48 * 8,
     )
@@ -204,6 +211,30 @@ def test_compute_event_binding_digest_changes_with_trace_commit() -> None:
     digest_with_trace = compute_event_binding_digest(payload["attestation_digest"], "cc" * 32)
 
     assert digest_without_trace != digest_with_trace
+
+
+def test_derive_attestation_keys_statement_only_ignores_trajectory_commit() -> None:
+    """
+    功能：statement-only 模式下的事件摘要与 k_lf 不得依赖 trajectory_commit。
+    """
+    attestation_digest = _build_statement()["attestation_digest"]
+
+    without_trace = derive_attestation_keys(
+        "5" * 64,
+        attestation_digest,
+        event_binding_mode="statement_only",
+    )
+    with_trace = derive_attestation_keys(
+        "5" * 64,
+        attestation_digest,
+        trajectory_commit="cc" * 32,
+        event_binding_mode="statement_only",
+    )
+
+    assert without_trace.event_binding_mode == "statement_only"
+    assert with_trace.event_binding_mode == "statement_only"
+    assert without_trace.event_binding_digest == with_trace.event_binding_digest
+    assert without_trace.k_lf == with_trace.k_lf
 
 
 def test_verify_attestation_statement_only_cannot_become_event_attested() -> None:
@@ -758,9 +789,112 @@ def test_verify_attestation_statistics_score_stays_zero_for_authentic_mismatch()
     assert final_decision.get("authenticity_status") == "authentic"
     assert final_decision.get("event_attestation_score") == pytest.approx(0.0)
     assert final_decision.get("event_attestation_statistics_score") == pytest.approx(0.0)
-    assert final_decision.get("event_attestation_statistics_score") == pytest.approx(
-        final_decision.get("event_attestation_score")
+
+
+def test_verify_attestation_statement_only_alignment_artifact_matches_embed_signs() -> None:
+    """
+    功能：statement-only 模式下 embed 与 detect 的 LF expected signs 必须完全对齐。
+    """
+    payload = _build_statement()
+    trace_commit = cast(str, payload["bundle"].get("trace_commit"))
+    matching_features = _build_matching_lf_attestation_features(
+        payload["statement"],
+        "5" * 64,
+        trace_commit=trace_commit,
+        plan_digest=payload["statement"]["plan_digest"],
+        basis_digest="6" * 64,
+        event_binding_mode="statement_only",
     )
+    attest_keys = derive_attestation_keys(
+        "5" * 64,
+        payload["attestation_digest"],
+        trajectory_commit=trace_commit,
+        event_binding_mode="statement_only",
+    )
+    template_bundle = channel_lf.derive_lf_template_bundle(
+        {
+            "watermark": {"lf": {"message_length": 64, "ecc_sparsity": 3}},
+            "lf_attestation_event_digest": attest_keys.event_binding_digest,
+            "lf_attestation_key": attest_keys.k_lf,
+            "plan_digest": payload["statement"]["plan_digest"],
+            "lf_basis_digest": "6" * 64,
+            "basis_digest": "6" * 64,
+            "event_binding_mode": "statement_only",
+        },
+        48 * 8,
+    )
+    expected_signs = [int(value) for value in template_bundle["codeword_bipolar"].tolist()[:3]]
+
+    result = verify_attestation(
+        k_master="5" * 64,
+        candidate_statement=payload["statement"],
+        attestation_bundle=payload["bundle"],
+        content_evidence={"lf_score": 0.95},
+        cfg={"attestation": {"use_trajectory_mix": False}},
+        lf_latent_features=matching_features[:3],
+        lf_params={
+            "variance": 1.5,
+            "block_length": 3,
+            "message_length": 64,
+            "ecc_sparsity": 3,
+            "plan_digest": payload["statement"]["plan_digest"],
+            "lf_basis_digest": "6" * 64,
+            "basis_digest": "6" * 64,
+            "event_binding_mode": "statement_only",
+            "pre_injection_coeffs": [-0.4, 0.2, -0.1],
+            "injected_template_coeffs": [0.3, -0.5, 0.4],
+            "post_injection_coeffs": [-0.1, -0.3, 0.3],
+            "embed_expected_bit_signs": expected_signs,
+            "embed_codeword_source": "statement_only_attestation",
+            "embed_attestation_event_digest": attest_keys.event_binding_digest,
+            "embed_event_binding_mode": "statement_only",
+            "embed_basis_digest": "6" * 64,
+            "embed_basis_binding_status": "bound",
+        },
+    )
+
+    alignment_artifact = cast(Dict[str, Any], result.get("_lf_alignment_table_artifact"))
+    assert alignment_artifact.get("expected_bit_signs") == expected_signs
+    assert alignment_artifact.get("formal_expected_bit_signs") == expected_signs
+    assert alignment_artifact.get("embed_expected_bit_signs") == expected_signs
+    assert alignment_artifact.get("embed_formal_expected_signs_match") is True
+    final_decision = cast(Dict[str, Any], result.get("final_event_attested_decision"))
+    assert final_decision.get("event_attestation_score_name") == "event_attestation_score"
+    assert final_decision.get("event_attestation_statistics_score_name") == "event_attestation_statistics_score"
+
+
+def test_lf_planner_risk_report_uses_sign_source_mismatch_guard() -> None:
+    """
+    功能：当 embed/formal expected signs 不一致时，planner 风险报告只能输出 sign_source_mismatch。
+    """
+    alignment_table = {
+        "expected_bit_signs": [1, -1, 1],
+        "embed_expected_bit_signs": [-1, -1, 1],
+        "formal_expected_bit_signs": [1, -1, 1],
+        "embed_formal_expected_signs_match": False,
+        "expected_signs_mismatch_reason": "embed_formal_sign_values_differ",
+        "signed_pre_alignment": [-0.4, -0.2, -0.1],
+        "signed_template_alignment": [0.3, 0.5, 0.4],
+        "signed_post_alignment": [-0.1, 0.3, 0.3],
+        "signed_detect_alignment": [-0.2, -0.2, 0.1],
+        "detect_side_coeffs": [-0.2, 0.2, 0.1],
+        "n_bits_compared": 3,
+        "alignment_margin_threshold": 0.15,
+        "strong_negative_pre_count": 2,
+        "post_still_negative_count": 1,
+        "post_crosses_target_halfspace_count": 2,
+        "detect_reverted_after_post_positive_count": 1,
+        "detect_crosses_target_halfspace_count": 0,
+        "plan_digest": "4" * 64,
+    }
+
+    report = _build_lf_planner_risk_report_artifact(alignment_table, {"basis_digest": "5" * 64})
+
+    assert isinstance(report, dict)
+    assert report.get("risk_classification") == "sign_source_mismatch"
+    assert report.get("host_baseline_dominant_flag") is False
+    assert report.get("basis_sample_mismatch_flag") is False
+    assert report.get("detect_trajectory_shift_flag") is False
 
 
 def test_verify_attestation_geometry_can_rescue_borderline_content() -> None:

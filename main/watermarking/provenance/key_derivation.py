@@ -24,6 +24,14 @@ from typing import Optional, Union
 from main.watermarking.provenance.attestation_statement import compute_event_binding_digest
 
 
+EVENT_BINDING_MODE_STATEMENT_ONLY = "statement_only"
+EVENT_BINDING_MODE_TRAJECTORY_BOUND = "trajectory_bound"
+_ALLOWED_EVENT_BINDING_MODES = {
+    EVENT_BINDING_MODE_STATEMENT_ONLY,
+    EVENT_BINDING_MODE_TRAJECTORY_BOUND,
+}
+
+
 # 四类子密钥的 context 标签（domain separation 核心，不可更改）。
 _CONTEXT_LF = b"lf"
 _CONTEXT_HF = b"hf"
@@ -56,6 +64,29 @@ class AttestationKeys:
     k_tr: str
     attestation_digest: str
     event_binding_digest: str
+    event_binding_mode: str
+
+
+def resolve_attestation_event_binding_mode(use_trajectory_mix: bool) -> str:
+    """
+    功能：将 use_trajectory_mix 映射为显式事件绑定模式。
+
+    Resolve the canonical event-binding mode from the trajectory-mix flag.
+
+    Args:
+        use_trajectory_mix: Whether attestation uses trajectory mixing.
+
+    Returns:
+        Canonical event-binding mode token.
+
+    Raises:
+        TypeError: If use_trajectory_mix is not bool.
+    """
+    if not isinstance(use_trajectory_mix, bool):
+        raise TypeError("use_trajectory_mix must be bool")
+    if use_trajectory_mix:
+        return EVENT_BINDING_MODE_TRAJECTORY_BOUND
+    return EVENT_BINDING_MODE_STATEMENT_ONLY
 
 
 def _hkdf_extract(salt: bytes, ikm: bytes) -> bytes:
@@ -147,6 +178,7 @@ def derive_attestation_keys(
     *,
     trajectory_commit: Optional[str] = None,
     event_binding_digest: Optional[str] = None,
+    event_binding_mode: str = EVENT_BINDING_MODE_TRAJECTORY_BOUND,
 ) -> AttestationKeys:
     """
     功能：从 K_master 和 d_A 派生四类 attestation 子密钥。
@@ -169,6 +201,7 @@ def derive_attestation_keys(
         attestation_digest: d_A (lowercase hex SHA256 string, 64 chars).
         trajectory_commit: Optional trajectory commit used to bind event keys.
         event_binding_digest: Optional precomputed event binding digest.
+        event_binding_mode: Explicit event-binding semantics token.
 
     Returns:
         AttestationKeys instance with all four derived keys as hex strings.
@@ -195,14 +228,20 @@ def derive_attestation_keys(
             raise ValueError("event_binding_digest must be a valid hex string")
     elif trajectory_commit is not None and not isinstance(trajectory_commit, str):
         raise TypeError("trajectory_commit must be str or None")
+    if not isinstance(event_binding_mode, str) or event_binding_mode not in _ALLOWED_EVENT_BINDING_MODES:
+        raise ValueError(
+            "event_binding_mode must be one of "
+            f"{sorted(_ALLOWED_EVENT_BINDING_MODES)}, got {event_binding_mode!r}"
+        )
 
     salt = _to_key_bytes(k_master)
     trace_ikm = attestation_digest.encode("utf-8")
-    resolved_event_binding_digest = (
-        event_binding_digest
-        if isinstance(event_binding_digest, str) and event_binding_digest
-        else compute_event_binding_digest(attestation_digest, trajectory_commit)
-    )
+    if isinstance(event_binding_digest, str) and event_binding_digest:
+        resolved_event_binding_digest = event_binding_digest
+    elif event_binding_mode == EVENT_BINDING_MODE_STATEMENT_ONLY:
+        resolved_event_binding_digest = compute_event_binding_digest(attestation_digest)
+    else:
+        resolved_event_binding_digest = compute_event_binding_digest(attestation_digest, trajectory_commit)
     event_ikm = resolved_event_binding_digest.encode("utf-8")
 
     # HKDF Extract：trace key 绑定 statement digest，LF/HF/GEO 绑定 event digest。
@@ -222,6 +261,7 @@ def derive_attestation_keys(
         k_tr=raw_tr.hex(),
         attestation_digest=attestation_digest,
         event_binding_digest=resolved_event_binding_digest,
+        event_binding_mode=event_binding_mode,
     )
 
 

@@ -25,6 +25,34 @@ def _resolve_mapping(parent: Dict[str, Any], key: str) -> Dict[str, Any]:
     return cast(Dict[str, Any], child) if isinstance(child, dict) else {}
 
 
+def _resolve_plan_basis_digest(plan_payload: Dict[str, Any], cfg: Dict[str, Any]) -> Optional[str]:
+    """
+    功能：解析注入期 basis_digest。
+
+    Resolve the authoritative basis digest for injection-time runtime.
+
+    Args:
+        plan_payload: Planner payload mapping.
+        cfg: Configuration mapping.
+
+    Returns:
+        Basis digest when available.
+    """
+    direct_candidate = plan_payload.get("basis_digest")
+    if isinstance(direct_candidate, str) and direct_candidate:
+        return direct_candidate
+    lf_basis = plan_payload.get("lf_basis") if isinstance(plan_payload.get("lf_basis"), dict) else {}
+    lf_basis_digest = lf_basis.get("basis_digest") or lf_basis.get("projection_matrix_digest")
+    if isinstance(lf_basis_digest, str) and lf_basis_digest:
+        return lf_basis_digest
+    cfg_candidate = cfg.get("basis_digest") or cfg.get("lf_basis_digest")
+    if isinstance(cfg_candidate, str) and cfg_candidate:
+        return cfg_candidate
+    if isinstance(lf_basis, dict) and lf_basis:
+        return digests.canonical_sha256(lf_basis)
+    return None
+
+
 def resolve_attestation_env_inputs(
     cfg: Any,
     *,
@@ -192,6 +220,14 @@ def build_injection_context_from_plan(
     if "dtype" in model_cfg:
         dtype = model_cfg.get("dtype", dtype)
 
+    attestation_runtime = _resolve_mapping(cfg_dict, "attestation_runtime")
+    basis_digest = _resolve_plan_basis_digest(plan_payload_dict, cfg_dict)
+    attestation_digest = cfg_dict.get("attestation_digest") or attestation_runtime.get("attestation_digest")
+    attestation_event_digest = cfg_dict.get("attestation_event_digest") or attestation_runtime.get("event_binding_digest")
+    lf_attestation_event_digest = cfg_dict.get("lf_attestation_event_digest") or attestation_event_digest
+    lf_attestation_key = cfg_dict.get("lf_attestation_key") or cfg_dict.get("k_lf") or attestation_runtime.get("k_lf")
+    event_binding_mode = cfg_dict.get("event_binding_mode") or attestation_runtime.get("event_binding_mode")
+
     return InjectionContext(
         plan_digest=plan_digest,
         plan_ref=plan_payload_dict,
@@ -199,6 +235,16 @@ def build_injection_context_from_plan(
         hf_params_digest=hf_params_digest,
         enable_lf=enable_lf,
         enable_hf=enable_hf,
+        basis_digest=basis_digest if isinstance(basis_digest, str) and basis_digest else None,
+        attestation_digest=attestation_digest if isinstance(attestation_digest, str) and attestation_digest else None,
+        attestation_event_digest=(
+            attestation_event_digest if isinstance(attestation_event_digest, str) and attestation_event_digest else None
+        ),
+        lf_attestation_event_digest=(
+            lf_attestation_event_digest if isinstance(lf_attestation_event_digest, str) and lf_attestation_event_digest else None
+        ),
+        lf_attestation_key=lf_attestation_key if isinstance(lf_attestation_key, str) and lf_attestation_key else None,
+        event_binding_mode=event_binding_mode if isinstance(event_binding_mode, str) and event_binding_mode else None,
         device=device if isinstance(device, str) and device else "cpu",
         dtype=dtype if isinstance(dtype, str) and dtype else "float32"
     )

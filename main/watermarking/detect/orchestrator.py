@@ -472,7 +472,13 @@ def _prepare_detect_attestation_context(cfg: Dict[str, Any], input_record: Optio
     else:
         authenticity_status = "statement_only"
 
-    attest_keys = derive_attestation_keys(k_master, attestation_digest, trajectory_commit=trace_commit)
+    event_binding_mode = "trajectory_bound" if bool(attestation_cfg.get("use_trajectory_mix", True)) else "statement_only"
+    attest_keys = derive_attestation_keys(
+        k_master,
+        attestation_digest,
+        trajectory_commit=trace_commit,
+        event_binding_mode=event_binding_mode,
+    )
     return {
         "attestation_status": "ok",
         "attestation_source": attestation_source,
@@ -482,6 +488,7 @@ def _prepare_detect_attestation_context(cfg: Dict[str, Any], input_record: Optio
         "bundle_verification": bundle_verification,
         "attestation_digest": attestation_digest,
         "event_binding_digest": attest_keys.event_binding_digest,
+        "event_binding_mode": attest_keys.event_binding_mode,
         "trace_commit": trace_commit,
         "runtime_bindings": {
             "attestation_digest": attestation_digest,
@@ -490,6 +497,7 @@ def _prepare_detect_attestation_context(cfg: Dict[str, Any], input_record: Optio
             "k_hf": attest_keys.k_hf,
             "k_geo": attest_keys.k_geo,
             "geo_anchor_seed": derive_geo_anchor_seed(attest_keys.k_geo),
+            "event_binding_mode": attest_keys.event_binding_mode,
         },
     }
 
@@ -794,6 +802,8 @@ def _build_lf_attestation_trace_context(
         basis_rank = int(basis_matrix_np.shape[1])
 
     trace_bundle = lf_trace_bundle if isinstance(lf_trace_bundle, dict) else {}
+    attestation_node = cfg.get("attestation")
+    attestation_cfg = cast(Dict[str, Any], attestation_node) if isinstance(attestation_node, dict) else {}
 
     return {
         "variance": float(lf_cfg.get("variance", 1.5)),
@@ -807,9 +817,11 @@ def _build_lf_attestation_trace_context(
         "projected_lf_digest": trace_bundle.get("projected_lf_digest"),
         "plan_digest": trace_bundle.get("plan_digest"),
         "lf_basis_digest": trace_bundle.get("lf_basis_digest"),
+        "basis_digest": trace_bundle.get("lf_basis_digest"),
         "projection_matrix_digest": trace_bundle.get("projection_matrix_digest"),
         "trajectory_feature_spec_digest": trace_bundle.get("trajectory_feature_spec_digest"),
         "projection_seed": trace_bundle.get("projection_seed"),
+        "event_binding_mode": "trajectory_bound" if bool(attestation_cfg.get("use_trajectory_mix", True)) else "statement_only",
     }
 
 
@@ -831,6 +843,12 @@ def _extract_embed_lf_closed_loop_context(input_record: Optional[Dict[str, Any]]
         "pre_injection_coeffs": lf_closed_loop_summary.get("pre_injection_coeffs"),
         "injected_template_coeffs": lf_closed_loop_summary.get("injected_template_coeffs"),
         "post_injection_coeffs": lf_closed_loop_summary.get("post_injection_coeffs"),
+        "embed_expected_bit_signs": lf_closed_loop_summary.get("expected_bit_signs"),
+        "embed_codeword_source": lf_closed_loop_summary.get("codeword_source"),
+        "embed_attestation_event_digest": lf_closed_loop_summary.get("attestation_event_digest"),
+        "embed_event_binding_mode": lf_closed_loop_summary.get("event_binding_mode"),
+        "embed_basis_digest": lf_closed_loop_summary.get("basis_digest"),
+        "embed_basis_binding_status": lf_closed_loop_summary.get("basis_binding_status"),
         "embed_closed_loop_digest": injection_metrics.get("lf_closed_loop_digest"),
         "embed_closed_loop_step_index": injection_metrics.get("lf_closed_loop_step_index"),
         "embed_closed_loop_selection_rule": injection_metrics.get("lf_closed_loop_selection_rule"),
@@ -852,6 +870,7 @@ def _build_lf_alignment_table_artifact(
     post_coeffs = lf_result.get("post_injection_coeffs")
     detect_coeffs = lf_result.get("projected_lf_coeffs")
     expected_bit_signs = lf_result.get("expected_bit_signs")
+    embed_expected_bit_signs = lf_result.get("embed_expected_bit_signs")
     if not all(isinstance(value, list) for value in [pre_coeffs, template_coeffs, post_coeffs, detect_coeffs, expected_bit_signs]):
         return None
 
@@ -861,6 +880,20 @@ def _build_lf_alignment_table_artifact(
         return None
 
     expected = [int(expected_bit_signs[index]) for index in range(n_rows)]
+    embed_expected = None
+    embed_formal_expected_signs_match = False
+    expected_signs_mismatch_reason = None
+    if isinstance(embed_expected_bit_signs, list):
+        embed_values = [int(embed_expected_bit_signs[index]) for index in range(min(n_rows, len(embed_expected_bit_signs)))]
+        embed_expected = embed_values
+        if len(embed_values) == n_rows:
+            embed_formal_expected_signs_match = embed_values == expected
+            if not embed_formal_expected_signs_match:
+                expected_signs_mismatch_reason = "embed_formal_sign_values_differ"
+        else:
+            expected_signs_mismatch_reason = "embed_formal_sign_length_mismatch"
+    else:
+        expected_signs_mismatch_reason = "embed_expected_bit_signs_absent"
     pre_values = [float(pre_coeffs[index]) for index in range(n_rows)]
     template_values = [float(template_coeffs[index]) for index in range(n_rows)]
     post_values = [float(post_coeffs[index]) for index in range(n_rows)]
@@ -903,6 +936,10 @@ def _build_lf_alignment_table_artifact(
         "embed_closed_loop_selection_rule": lf_result.get("embed_closed_loop_selection_rule"),
         "n_bits_compared": n_rows,
         "expected_bit_signs": expected,
+        "embed_expected_bit_signs": embed_expected,
+        "formal_expected_bit_signs": expected,
+        "embed_formal_expected_signs_match": embed_formal_expected_signs_match,
+        "expected_signs_mismatch_reason": expected_signs_mismatch_reason,
         "pre_injection_coeffs": pre_values,
         "injected_template_coeffs": template_values,
         "post_injection_coeffs": post_values,
@@ -1125,6 +1162,17 @@ def _build_lf_planner_risk_report_artifact(
     if n_rows <= 0:
         return None
 
+    embed_formal_expected_signs_match = lf_alignment_table.get("embed_formal_expected_signs_match")
+    expected_signs_mismatch_reason = lf_alignment_table.get("expected_signs_mismatch_reason")
+    has_sign_source_mismatch = (
+        embed_formal_expected_signs_match is False
+        or (
+            embed_formal_expected_signs_match is None
+            and isinstance(expected_signs_mismatch_reason, str)
+            and bool(expected_signs_mismatch_reason)
+        )
+    )
+
     planner_context_mapping = cast(Dict[str, Any], planner_context) if isinstance(planner_context, dict) else {}
     route_basis_bridge_node = planner_context_mapping.get("route_basis_bridge")
     route_basis_bridge = cast(Dict[str, Any], route_basis_bridge_node) if isinstance(route_basis_bridge_node, dict) else {}
@@ -1197,13 +1245,16 @@ def _build_lf_planner_risk_report_artifact(
     detect_reverted_after_post_positive_count = int(lf_alignment_table.get("detect_reverted_after_post_positive_count") or 0)
     detect_crosses_target_halfspace_count = int(lf_alignment_table.get("detect_crosses_target_halfspace_count") or 0)
 
-    risk_classification = _classify_lf_posterior_risk(
-        n_bits_compared=n_rows,
-        strong_negative_pre_count=strong_negative_pre_count,
-        post_still_negative_count=post_still_negative_count,
-        post_crosses_target_halfspace_count=post_crosses_target_halfspace_count,
-        detect_reverted_after_post_positive_count=detect_reverted_after_post_positive_count,
-    )
+    if has_sign_source_mismatch:
+        risk_classification = "sign_source_mismatch"
+    else:
+        risk_classification = _classify_lf_posterior_risk(
+            n_bits_compared=n_rows,
+            strong_negative_pre_count=strong_negative_pre_count,
+            post_still_negative_count=post_still_negative_count,
+            post_crosses_target_halfspace_count=post_crosses_target_halfspace_count,
+            detect_reverted_after_post_positive_count=detect_reverted_after_post_positive_count,
+        )
 
     dominant_signal = "mixed"
     dominant_count = max(
@@ -1218,6 +1269,8 @@ def _build_lf_planner_risk_report_artifact(
         dominant_signal = "detect_reversion_counts"
     elif risk_classification == "basis_sample_mismatch":
         dominant_signal = "post_still_negative_counts"
+    elif risk_classification == "sign_source_mismatch":
+        dominant_signal = "sign_source_mismatch"
 
     route_layer_node = route_basis_bridge.get("route_layer") if isinstance(route_basis_bridge, dict) else None
     route_layer = cast(Dict[str, Any], route_layer_node) if isinstance(route_layer_node, dict) else {}
@@ -1249,6 +1302,8 @@ def _build_lf_planner_risk_report_artifact(
         "high_confidence_mismatch_count": len(high_confidence_mismatch_dimensions),
         "confidence_threshold": confidence_threshold,
     }
+    if has_sign_source_mismatch:
+        primary_evidence["sign_source_mismatch_reason"] = expected_signs_mismatch_reason
     auxiliary_metrics = _compute_lf_report_auxiliary_metrics(
         signed_pre_alignment=[float(value) for value in signed_pre_alignment[:n_rows]],
         signed_post_alignment=[float(value) for value in signed_post_alignment[:n_rows]],
@@ -1278,6 +1333,8 @@ def _build_lf_planner_risk_report_artifact(
         "route_basis_bridge_digest": route_basis_bridge_digest,
         "plan_digest": lf_alignment_table.get("plan_digest"),
         "basis_digest": planner_context_mapping.get("basis_digest"),
+        "embed_formal_expected_signs_match": embed_formal_expected_signs_match,
+        "expected_signs_mismatch_reason": expected_signs_mismatch_reason,
         "primary_evidence": primary_evidence,
         "per_dimension_summary": per_dimension_summary,
         "high_confidence_mismatch_dimensions": high_confidence_mismatch_dimensions,
@@ -6861,7 +6918,15 @@ def verify_attestation(
 
     # (3) 派生四类子密钥。
     try:
-        attest_keys = derive_attestation_keys(k_master, d_a, trajectory_commit=trace_commit)
+        attestation_node = cfg.get("attestation") if isinstance(cfg, dict) else None
+        attestation_cfg = cast(Dict[str, Any], attestation_node) if isinstance(attestation_node, dict) else {}
+        event_binding_mode = "trajectory_bound" if bool(attestation_cfg.get("use_trajectory_mix", True)) else "statement_only"
+        attest_keys = derive_attestation_keys(
+            k_master,
+            d_a,
+            trajectory_commit=trace_commit,
+            event_binding_mode=event_binding_mode,
+        )
     except (TypeError, ValueError) as exc:
         mismatch_reasons.append(f"key_derivation_failed: {exc}")
         return {

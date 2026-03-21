@@ -128,6 +128,124 @@ def _collect_embed_attestation_latent_snapshots(cfg: Dict[str, Any]) -> Sequence
     return snapshots or None
 
 
+def _resolve_embed_attestation_event_binding_mode(cfg: Dict[str, Any]) -> str:
+    """
+    功能：解析 embed 主链 attestation 事件绑定模式。
+
+    Resolve the canonical embed-side event-binding mode.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Canonical event-binding mode token.
+    """
+    from main.watermarking.provenance.key_derivation import resolve_attestation_event_binding_mode
+
+    attestation_node = cfg.get("attestation")
+    attestation_cfg = cast(Dict[str, Any], attestation_node) if isinstance(attestation_node, dict) else {}
+    return resolve_attestation_event_binding_mode(bool(attestation_cfg.get("use_trajectory_mix", True)))
+
+
+def _resolve_embed_attestation_anchors(cfg: Dict[str, Any]) -> tuple[str | None, str | None]:
+    """
+    功能：读取已 pin 的 attestation anchors。
+
+    Resolve pinned attestation anchors from cfg.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Tuple of (event_nonce, time_bucket).
+    """
+    event_nonce = cfg.get("__attestation_event_nonce__")
+    time_bucket = cfg.get("__attestation_time_bucket__")
+    resolved_event_nonce = event_nonce if isinstance(event_nonce, str) and event_nonce else None
+    resolved_time_bucket = time_bucket if isinstance(time_bucket, str) and time_bucket else None
+    return resolved_event_nonce, resolved_time_bucket
+
+
+def _prepare_embed_attestation_runtime_bindings(cfg: Dict[str, Any], plan_digest: str) -> Dict[str, Any]:
+    """
+    功能：在推理前构造 embed 注入可见的 attestation runtime。
+
+    Prepare the embed-side attestation runtime that is available before inference.
+
+    Args:
+        cfg: Configuration mapping.
+        plan_digest: Precomputed planner digest used by injection.
+
+    Returns:
+        Attestation payload mapping with runtime bindings when available.
+    """
+    attestation_node = cfg.get("attestation")
+    attestation_cfg = cast(Dict[str, Any], attestation_node) if isinstance(attestation_node, dict) else {}
+    event_binding_mode = _resolve_embed_attestation_event_binding_mode(cfg)
+    if event_binding_mode != "statement_only":
+        return {
+            "attestation_status": "absent",
+            "attestation_absent_reason": "early_runtime_unavailable_for_trajectory_bound_mode",
+            "event_binding_mode": event_binding_mode,
+        }
+
+    secret_inputs = _extract_embed_attestation_secrets(cfg)
+    required_fields = ["k_master", "k_prompt", "k_seed"]
+    missing_secret_fields = [
+        field_name
+        for field_name in required_fields
+        if not isinstance((secret_inputs or {}).get(field_name), str) or not str((secret_inputs or {}).get(field_name)).strip()
+    ]
+    if missing_secret_fields:
+        return {
+            "attestation_status": "absent",
+            "attestation_absent_reason": "attestation_secret_missing",
+            "missing_secret_fields": missing_secret_fields,
+            "event_binding_mode": event_binding_mode,
+        }
+
+    event_nonce, time_bucket = _resolve_embed_attestation_anchors(cfg)
+    if event_nonce is None or time_bucket is None:
+        return {
+            "attestation_status": "failed",
+            "attestation_failure_reason": "attestation_anchors_unpinned",
+            "event_binding_mode": event_binding_mode,
+        }
+
+    try:
+        result = build_embed_attestation(
+            k_master=str(secret_inputs.get("k_master")),
+            model_id=str(cfg.get("model_id") or "sd3"),
+            prompt=str(cfg.get("inference_prompt") or ""),
+            seed=int(cfg.get("seed")) if isinstance(cfg.get("seed"), int) else 0,
+            plan_digest=plan_digest,
+            k_prompt=str(secret_inputs.get("k_prompt")),
+            k_seed=str(secret_inputs.get("k_seed")),
+            event_nonce=event_nonce,
+            time_bucket=time_bucket,
+            latent_snapshots=None,
+            use_trajectory_mix=bool(attestation_cfg.get("use_trajectory_mix", True)),
+        )
+    except Exception as exc:
+        return {
+            "attestation_status": "failed",
+            "attestation_failure_reason": f"early_attestation_runtime_build_failed:{type(exc).__name__}",
+            "event_binding_mode": event_binding_mode,
+        }
+
+    result["trajectory_snapshot_count"] = 0
+    result["runtime_bindings"] = {
+        "attestation_digest": result.get("attestation_digest"),
+        "event_binding_digest": result.get("event_binding_digest"),
+        "k_lf": result.get("keys", {}).get("k_lf") if isinstance(result.get("keys"), dict) else None,
+        "k_hf": result.get("keys", {}).get("k_hf") if isinstance(result.get("keys"), dict) else None,
+        "k_geo": result.get("keys", {}).get("k_geo") if isinstance(result.get("keys"), dict) else None,
+        "geo_anchor_seed": result.get("geo_anchor_seed"),
+        "event_binding_mode": result.get("event_binding_mode"),
+    }
+    return result
+
+
 def _bind_attestation_runtime_to_cfg(cfg: Dict[str, Any], attestation_payload: Dict[str, Any]) -> None:
     """
     功能：将 attestation 运行时变量绑定到 cfg，供 LF/HF/GEO 主链消费。
@@ -160,12 +278,14 @@ def _bind_attestation_runtime_to_cfg(cfg: Dict[str, Any], attestation_payload: D
     cfg["k_hf"] = runtime_bindings.get("k_hf")
     cfg["k_geo"] = runtime_bindings.get("k_geo")
     cfg["geo_anchor_seed"] = runtime_bindings.get("geo_anchor_seed")
+    cfg["event_binding_mode"] = runtime_bindings.get("event_binding_mode")
 
     watermark_node = cfg.get("watermark")
     watermark_cfg = cast(Dict[str, Any], watermark_node) if isinstance(watermark_node, dict) else {}
     watermark_cfg = dict(watermark_cfg)
     watermark_cfg["attestation_digest"] = runtime_bindings.get("attestation_digest")
     watermark_cfg["attestation_event_digest"] = runtime_bindings.get("event_binding_digest")
+    watermark_cfg["event_binding_mode"] = runtime_bindings.get("event_binding_mode")
     cfg["watermark"] = watermark_cfg
 
 
@@ -193,6 +313,7 @@ def _clear_attestation_runtime_from_cfg(cfg: Dict[str, Any]) -> None:
         "k_hf",
         "k_geo",
         "geo_anchor_seed",
+        "event_binding_mode",
     ]:
         cfg.pop(field_name, None)
     watermark_node = cfg.get("watermark")
@@ -200,6 +321,7 @@ def _clear_attestation_runtime_from_cfg(cfg: Dict[str, Any]) -> None:
         watermark_cfg = dict(cast(Dict[str, Any], watermark_node))
         watermark_cfg.pop("attestation_digest", None)
         watermark_cfg.pop("attestation_event_digest", None)
+        watermark_cfg.pop("event_binding_mode", None)
         cfg["watermark"] = watermark_cfg
 
 
@@ -232,6 +354,7 @@ def _sanitize_embed_attestation_payload(attestation_payload: Dict[str, Any]) -> 
         "statement": attestation_payload.get("statement"),
         "attestation_digest": attestation_payload.get("attestation_digest"),
         "event_binding_digest": attestation_payload.get("event_binding_digest"),
+        "event_binding_mode": attestation_payload.get("event_binding_mode"),
         "lf_payload_hex": attestation_payload.get("lf_payload_hex"),
         "trace_commit": attestation_payload.get("trace_commit"),
         "geo_anchor_seed": attestation_payload.get("geo_anchor_seed"),
@@ -276,6 +399,7 @@ def _build_embed_attestation_runtime(cfg: Dict[str, Any], plan_digest: str) -> D
     prompt = cfg.get("inference_prompt")
     seed_value = cfg.get("seed")
     latent_snapshots = _collect_embed_attestation_latent_snapshots(cfg)
+    event_nonce, time_bucket = _resolve_embed_attestation_anchors(cfg)
 
     try:
         result = build_embed_attestation(
@@ -286,6 +410,8 @@ def _build_embed_attestation_runtime(cfg: Dict[str, Any], plan_digest: str) -> D
             plan_digest=plan_digest,
             k_prompt=str(secret_inputs.get("k_prompt")),
             k_seed=str(secret_inputs.get("k_seed")),
+            event_nonce=event_nonce,
+            time_bucket=time_bucket,
             latent_snapshots=latent_snapshots,
             use_trajectory_mix=bool(attestation_cfg.get("use_trajectory_mix", True)),
         )
@@ -303,6 +429,7 @@ def _build_embed_attestation_runtime(cfg: Dict[str, Any], plan_digest: str) -> D
         "k_hf": result.get("keys", {}).get("k_hf") if isinstance(result.get("keys"), dict) else None,
         "k_geo": result.get("keys", {}).get("k_geo") if isinstance(result.get("keys"), dict) else None,
         "geo_anchor_seed": result.get("geo_anchor_seed"),
+        "event_binding_mode": result.get("event_binding_mode"),
     }
     return result
 
@@ -1511,6 +1638,7 @@ def build_embed_attestation(
         derive_attestation_keys,
         compute_lf_attestation_payload,
         derive_geo_anchor_seed,
+        resolve_attestation_event_binding_mode,
     )
     from main.watermarking.provenance.trajectory_commit import (
         compute_trajectory_commit,
@@ -1533,9 +1661,14 @@ def build_embed_attestation(
 
     # (3) 计算 attestation digest d_A。
     d_a = compute_attestation_digest(statement)
+    event_binding_mode = resolve_attestation_event_binding_mode(bool(use_trajectory_mix))
 
     # (4) 先从 statement digest 派生 k_TR，用于计算 trajectory_commit。
-    trace_keys = derive_attestation_keys(k_master, d_a)
+    trace_keys = derive_attestation_keys(
+        k_master,
+        d_a,
+        event_binding_mode="statement_only",
+    )
 
     # (5) 计算轨迹承诺，再用 statement + trajectory_commit 联合派生事件密钥。
     trace_commit: "str | None" = None
@@ -1546,7 +1679,12 @@ def build_embed_attestation(
             # 轨迹承诺失败时降级为 statement-only 事件绑定，不中断主流程。
             trace_commit = None
 
-    attest_keys = derive_attestation_keys(k_master, d_a, trajectory_commit=trace_commit)
+    attest_keys = derive_attestation_keys(
+        k_master,
+        d_a,
+        trajectory_commit=trace_commit,
+        event_binding_mode=event_binding_mode,
+    )
 
     # (6) 生成以 event_binding_digest 为输入域的 LF 主通道 attestation payload。
     lf_payload = compute_lf_attestation_payload(
@@ -1569,6 +1707,7 @@ def build_embed_attestation(
         "statement": statement.as_dict(),
         "attestation_digest": d_a,
         "event_binding_digest": attest_keys.event_binding_digest,
+        "event_binding_mode": attest_keys.event_binding_mode,
         "signed_bundle": build_signed_attestation_bundle(
             statement,
             d_a,

@@ -161,7 +161,7 @@ attestation:
   decision_mode: "content_primary_geo_rescue"
   rescue_band_delta_low: 0.05
   geo_rescue_min_score: 0.3
-  use_trajectory_mix: false
+  use_trajectory_mix: false  # statement-only event binding；trajectory_commit 仅保留为 post-hoc audit，不参与 LF/HF/GEO key derivation
 
 detect_runtime:
   image_domain_sidecar_enabled: false

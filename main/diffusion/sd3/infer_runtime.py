@@ -646,6 +646,14 @@ def _build_injection_cfg(cfg: Dict[str, Any], context: InjectionContext) -> Dict
         # （修复 Bug-B）将 plan_digest 及 LDPC 参数传入注入配置，
         # 使 apply_low_freq_encoding_torch 能派生与 detect_score() 一致的 LDPC 码字。
         "lf_plan_digest": getattr(context, "plan_digest", None),
+        "basis_digest": getattr(context, "basis_digest", None),
+        "lf_basis_digest": getattr(context, "basis_digest", None),
+        "attestation_digest": getattr(context, "attestation_digest", None),
+        "attestation_event_digest": getattr(context, "attestation_event_digest", None),
+        "lf_attestation_event_digest": getattr(context, "lf_attestation_event_digest", None),
+        "lf_attestation_key": getattr(context, "lf_attestation_key", None),
+        "k_lf": getattr(context, "lf_attestation_key", None),
+        "event_binding_mode": getattr(context, "event_binding_mode", None),
         "lf_message_length": lf_cfg.get("message_length", 64),
         "lf_ecc_sparsity": lf_cfg.get("ecc_sparsity", 3),
     }
@@ -1065,6 +1073,10 @@ def _summarize_injection_metrics(step_evidence_list: List[Dict[str, Any]]) -> Di
                             "lf_delta_norm": lf_evidence.get("lf_delta_norm"),
                             "lf_closed_loop_summary": lf_closed_loop_summary,
                             "lf_closed_loop_digest": lf_closed_loop_digest,
+                            "codeword_source": encoding_evidence.get("codeword_source"),
+                            "attestation_event_digest": encoding_evidence.get("attestation_event_digest"),
+                            "basis_digest": encoding_evidence.get("basis_digest"),
+                            "event_binding_mode": encoding_evidence.get("event_binding_mode"),
                         }
                     )
 
@@ -1108,4 +1120,8 @@ def _summarize_injection_metrics(step_evidence_list: List[Dict[str, Any]]) -> Di
         metrics["lf_closed_loop_step_index"] = selected_lf_closed_loop.get("step_index")
         metrics["lf_closed_loop_selection_rule"] = "max_lf_delta_norm"
         metrics["lf_closed_loop_candidate_count"] = len(lf_closed_loop_candidates)
+        metrics["lf_codeword_source"] = selected_lf_closed_loop.get("codeword_source")
+        metrics["lf_attestation_event_digest"] = selected_lf_closed_loop.get("attestation_event_digest")
+        metrics["lf_basis_digest"] = selected_lf_closed_loop.get("basis_digest")
+        metrics["event_binding_mode"] = selected_lf_closed_loop.get("event_binding_mode")
     return metrics

@@ -567,10 +567,20 @@ def compute_lf_attestation_score(
         "plan_digest": plan_digest,
         "lf_basis_digest": lf_basis_digest,
         "basis_digest": basis_digest,
+        "event_binding_mode": params.get("event_binding_mode"),
     }
     template_bundle = channel_lf.derive_lf_template_bundle(template_cfg, block_length)
     expected_bit_signs = [int(value) for value in template_bundle["codeword_bipolar"].tolist()]
     parity_check_digest = template_bundle.get("parity_check_digest")
+    codeword_source = template_bundle.get("codeword_source")
+    event_binding_mode = template_bundle.get("event_binding_mode")
+    basis_binding_status = template_bundle.get("basis_binding_status")
+    embed_expected_bit_signs = params.get("embed_expected_bit_signs")
+    embed_codeword_source = params.get("embed_codeword_source")
+    embed_attestation_event_digest = params.get("embed_attestation_event_digest")
+    embed_event_binding_mode = params.get("embed_event_binding_mode")
+    embed_basis_digest = params.get("embed_basis_digest")
+    embed_basis_binding_status = params.get("embed_basis_binding_status")
 
     # 扁平化 latent features。
     try:
@@ -658,6 +668,9 @@ def compute_lf_attestation_score(
         "ecc_sparsity": ecc_sparsity,
         "trajectory_feature_spec": trajectory_feature_spec,
         "expected_bit_signs": expected_bit_signs_compared,
+        "codeword_source": codeword_source,
+        "event_binding_mode": event_binding_mode,
+        "basis_binding_status": basis_binding_status,
         "posterior_signs": posterior_signs,
         "posterior_margin_values": posterior_margin_values,
         "mismatch_indices": mismatch_indices,
@@ -665,6 +678,7 @@ def compute_lf_attestation_score(
         "projected_lf_digest": projected_lf_digest,
         "plan_digest": plan_digest,
         "lf_basis_digest": lf_basis_digest,
+        "basis_digest": basis_digest,
         "parity_check_digest": parity_check_digest,
         "projection_matrix_digest": projection_matrix_digest,
         "trajectory_feature_spec_digest": trajectory_feature_spec_digest,
@@ -689,6 +703,17 @@ def compute_lf_attestation_score(
         "projected_lf_signs": projected_lf_signs,
         "projected_lf_digest": projected_lf_digest,
         "expected_bit_signs": expected_bit_signs_compared,
+        "codeword_source": codeword_source,
+        "event_binding_mode": event_binding_mode,
+        "basis_binding_status": basis_binding_status,
+        "attestation_event_digest": template_bundle.get("attestation_event_digest"),
+        "basis_digest": basis_digest,
+        "embed_expected_bit_signs": embed_expected_bit_signs,
+        "embed_codeword_source": embed_codeword_source,
+        "embed_attestation_event_digest": embed_attestation_event_digest,
+        "embed_event_binding_mode": embed_event_binding_mode,
+        "embed_basis_digest": embed_basis_digest,
+        "embed_basis_binding_status": embed_basis_binding_status,
         "posterior_values": posterior_values,
         "posterior_signs": posterior_signs,
         "posterior_margin_values": posterior_margin_values,

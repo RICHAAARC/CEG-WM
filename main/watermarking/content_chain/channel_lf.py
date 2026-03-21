@@ -87,7 +87,7 @@ def _resolve_attestation_event_digest(cfg: Dict[str, Any]) -> Optional[str]:
         or cfg.get("attestation_event_digest")
         or cfg.get("attestation_digest")
     )
-    if isinstance(direct_candidate, str) and direct_candidate:
+    if isinstance(direct_candidate, str) and direct_candidate: 
         return direct_candidate
     watermark_cfg = cfg.get("watermark") if isinstance(cfg.get("watermark"), dict) else {}
     watermark_candidate = watermark_cfg.get("attestation_event_digest") or watermark_cfg.get("attestation_digest")
@@ -96,6 +96,21 @@ def _resolve_attestation_event_digest(cfg: Dict[str, Any]) -> Optional[str]:
     attestation_cfg = cfg.get("attestation") if isinstance(cfg.get("attestation"), dict) else {}
     candidate = attestation_cfg.get("event_digest") or attestation_cfg.get("attestation_digest")
     return candidate if isinstance(candidate, str) and candidate else None
+
+def _resolve_event_binding_mode(cfg: Dict[str, Any]) -> str:
+    """功能：统一解析 event_binding_mode。"""
+    candidate = cfg.get("event_binding_mode")
+    if isinstance(candidate, str) and candidate:
+        return candidate
+    attestation_runtime = cfg.get("attestation_runtime") if isinstance(cfg.get("attestation_runtime"), dict) else {}
+    candidate = attestation_runtime.get("event_binding_mode")
+    if isinstance(candidate, str) and candidate:
+        return candidate
+    watermark_cfg = cfg.get("watermark") if isinstance(cfg.get("watermark"), dict) else {}
+    candidate = watermark_cfg.get("event_binding_mode")
+    if isinstance(candidate, str) and candidate:
+        return candidate
+    return "trajectory_bound"
 
 
 def _resolve_lf_attestation_key(cfg: Dict[str, Any]) -> Optional[str]:
@@ -169,8 +184,11 @@ def derive_lf_template_bundle(cfg: Dict[str, Any], n: int) -> Dict[str, Any]:
     basis_digest = _resolve_basis_digest(cfg)
     attestation_event_digest = _resolve_attestation_event_digest(cfg)
     k_lf = _resolve_lf_attestation_key(cfg)
+    event_binding_mode = _resolve_event_binding_mode(cfg)
+    basis_binding_status = "bound" if isinstance(basis_digest, str) and basis_digest else "absent"
 
     message_source = "plan_digest"
+    codeword_source = "plan_digest_fallback"
     if attestation_event_digest and k_lf:
         from main.watermarking.provenance.key_derivation import compute_lf_attestation_payload
 
@@ -178,6 +196,10 @@ def derive_lf_template_bundle(cfg: Dict[str, Any], n: int) -> Dict[str, Any]:
         payload = compute_lf_attestation_payload(k_lf, attestation_event_digest, payload_length=payload_length)
         message_bits = _payload_bytes_to_bipolar_bits(payload, message_length)
         message_source = "attestation_event_digest"
+        if event_binding_mode == "statement_only":
+            codeword_source = "statement_only_attestation"
+        else:
+            codeword_source = "trajectory_bound_attestation"
     else:
         seed_material = {
             "plan_digest": plan_digest,
@@ -232,7 +254,10 @@ def derive_lf_template_bundle(cfg: Dict[str, Any], n: int) -> Dict[str, Any]:
         "template": signed_template,
         "plan_digest": plan_digest,
         "basis_digest": basis_digest,
+        "basis_binding_status": basis_binding_status,
         "attestation_event_digest": attestation_event_digest,
+        "event_binding_mode": event_binding_mode,
+        "codeword_source": codeword_source,
         "decoder_mode": _resolve_decoder_mode(cfg),
         "bp_iterations": _resolve_bp_iterations(cfg),
     }
@@ -449,6 +474,11 @@ def apply_low_freq_encoding_torch(coeffs: Any, key: int, cfg: Dict[str, Any]) ->
         "summary_version": "v1",
         "coeffs_count": n,
         "expected_bit_signs": expected_bit_signs,
+        "codeword_source": str(template_bundle["codeword_source"]),
+        "attestation_event_digest": template_bundle["attestation_event_digest"],
+        "basis_digest": template_bundle["basis_digest"],
+        "basis_binding_status": str(template_bundle["basis_binding_status"]),
+        "event_binding_mode": str(template_bundle["event_binding_mode"]),
         "pre_injection_coeffs": [float(value) for value in coeffs_fp32.detach().cpu().tolist()],
         "injected_template_coeffs": [float(value) for value in injected_template.detach().cpu().tolist()],
         "post_injection_coeffs": [float(value) for value in encoded_coeffs.detach().cpu().tolist()],
@@ -459,10 +489,12 @@ def apply_low_freq_encoding_torch(coeffs: Any, key: int, cfg: Dict[str, Any]) ->
         "strength_applied": float(strength),
         "pattern_seed": int(template_bundle["pseudogaussian_seed"]),
         "runtime_step_key": int(key),
-        "codeword_source": str(template_bundle["message_source"]),
+        "codeword_source": str(template_bundle["codeword_source"]),
         "parity_check_digest": template_bundle["parity_check_digest"],
         "basis_digest": template_bundle["basis_digest"],
+        "basis_binding_status": template_bundle["basis_binding_status"],
         "attestation_event_digest": template_bundle["attestation_event_digest"],
+        "event_binding_mode": template_bundle["event_binding_mode"],
         "decoder_mode": template_bundle["decoder_mode"],
         "bp_iterations": int(template_bundle["bp_iterations"]),
         "coeffs_before_norm": float(torch.linalg.vector_norm(coeffs_fp32).item()),
@@ -658,6 +690,11 @@ def apply_low_freq_encoding(
         "summary_version": "v1",
         "coeffs_count": n,
         "expected_bit_signs": expected_bit_signs,
+        "codeword_source": str(template_bundle["codeword_source"]),
+        "attestation_event_digest": template_bundle["attestation_event_digest"],
+        "basis_digest": template_bundle["basis_digest"],
+        "basis_binding_status": str(template_bundle["basis_binding_status"]),
+        "event_binding_mode": str(template_bundle["event_binding_mode"]),
         "pre_injection_coeffs": [float(value) for value in coeffs.tolist()],
         "injected_template_coeffs": [float(value) for value in injected_template.tolist()],
         "post_injection_coeffs": [float(value) for value in encoded_coeffs.tolist()],
@@ -669,10 +706,12 @@ def apply_low_freq_encoding(
         "strength_applied": float(strength),
         "pattern_seed": int(template_bundle["pseudogaussian_seed"]),
         "runtime_step_key": int(key),
-        "codeword_source": str(template_bundle["message_source"]),
+        "codeword_source": str(template_bundle["codeword_source"]),
         "parity_check_digest": template_bundle["parity_check_digest"],
         "basis_digest": template_bundle["basis_digest"],
+        "basis_binding_status": template_bundle["basis_binding_status"],
         "attestation_event_digest": template_bundle["attestation_event_digest"],
+        "event_binding_mode": template_bundle["event_binding_mode"],
         "decoder_mode": template_bundle["decoder_mode"],
         "bp_iterations": int(template_bundle["bp_iterations"]),
         "coeffs_before_norm": float(np.linalg.norm(coeffs)),
