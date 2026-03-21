@@ -132,6 +132,8 @@ def _write_detect_attestation_artifact(
     records_io.write_artifact_json(str(attestation_dir / "attestation_result.json"), attestation_payload)
     hf_attestation_trace: Dict[str, Any] | None = None
     lf_attestation_trace: Dict[str, Any] | None = None
+    lf_alignment_table: Dict[str, Any] | None = None
+    lf_planner_risk_report: Dict[str, Any] | None = None
     if isinstance(attestation_artifacts, dict):
         candidate_trace = attestation_artifacts.get("hf_attestation_trace")
         if isinstance(candidate_trace, dict):
@@ -139,10 +141,22 @@ def _write_detect_attestation_artifact(
         candidate_lf_trace = attestation_artifacts.get("lf_attestation_trace")
         if isinstance(candidate_lf_trace, dict):
             lf_attestation_trace = cast(Dict[str, Any], candidate_lf_trace)
+        candidate_lf_alignment = attestation_artifacts.get("lf_alignment_table")
+        if isinstance(candidate_lf_alignment, dict):
+            lf_alignment_table = cast(Dict[str, Any], candidate_lf_alignment)
+        candidate_lf_planner_risk_report = attestation_artifacts.get("lf_planner_risk_report")
+        if isinstance(candidate_lf_planner_risk_report, dict):
+            lf_planner_risk_report = cast(Dict[str, Any], candidate_lf_planner_risk_report)
     if hf_attestation_trace is not None:
         records_io.write_artifact_json(str(attestation_dir / "hf_attestation_trace.json"), hf_attestation_trace)
     if lf_attestation_trace is not None:
         records_io.write_artifact_json(str(attestation_dir / "lf_attestation_trace.json"), lf_attestation_trace)
+    if lf_alignment_table is not None:
+        records_io.write_artifact_json(str(attestation_dir / "lf_alignment_table.json"), lf_alignment_table)
+    if lf_planner_risk_report is not None:
+        planner_dir = artifacts_dir / "planner"
+        planner_dir.mkdir(parents=True, exist_ok=True)
+        records_io.write_artifact_json(str(planner_dir / "lf_planner_risk_report.json"), lf_planner_risk_report)
 
 
 def _extract_detect_attestation_artifacts(record: Any) -> Dict[str, Any] | None:
@@ -155,11 +169,17 @@ def _extract_detect_attestation_artifacts(record: Any) -> Dict[str, Any] | None:
     attestation_dict = cast(Dict[str, Any], attestation_node)
     hf_trace_artifact = attestation_dict.pop("_hf_attestation_trace_artifact", None)
     lf_trace_artifact = attestation_dict.pop("_lf_attestation_trace_artifact", None)
+    lf_alignment_artifact = attestation_dict.pop("_lf_alignment_table_artifact", None)
+    lf_planner_risk_report_artifact = attestation_dict.pop("_lf_planner_risk_report_artifact", None)
     artifacts: Dict[str, Any] = {}
     if isinstance(hf_trace_artifact, dict):
         artifacts["hf_attestation_trace"] = cast(Dict[str, Any], hf_trace_artifact)
     if isinstance(lf_trace_artifact, dict):
         artifacts["lf_attestation_trace"] = cast(Dict[str, Any], lf_trace_artifact)
+    if isinstance(lf_alignment_artifact, dict):
+        artifacts["lf_alignment_table"] = cast(Dict[str, Any], lf_alignment_artifact)
+    if isinstance(lf_planner_risk_report_artifact, dict):
+        artifacts["lf_planner_risk_report"] = cast(Dict[str, Any], lf_planner_risk_report_artifact)
     return artifacts or None
 
 

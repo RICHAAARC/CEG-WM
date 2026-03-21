@@ -1032,6 +1032,7 @@ def _summarize_injection_metrics(step_evidence_list: List[Dict[str, Any]]) -> Di
     lf_delta_values = []
     hf_delta_values = []
     subspace_binding_digests: List[str] = []
+    lf_closed_loop_candidates: List[Dict[str, Any]] = []
     status_counts: Dict[str, int] = {}
     for step_evidence in step_evidence_list:
         if not isinstance(step_evidence, dict):
@@ -1051,12 +1052,36 @@ def _summarize_injection_metrics(step_evidence_list: List[Dict[str, Any]]) -> Di
         binding_digest = step_evidence.get("runtime_subspace_binding_digest")
         if isinstance(binding_digest, str) and binding_digest:
             subspace_binding_digests.append(binding_digest)
+        lf_evidence = step_evidence.get("lf_evidence")
+        if isinstance(lf_evidence, dict) and lf_evidence.get("status") == "ok":
+            encoding_evidence = lf_evidence.get("encoding_evidence")
+            if isinstance(encoding_evidence, dict):
+                lf_closed_loop_summary = encoding_evidence.get("lf_closed_loop_summary")
+                lf_closed_loop_digest = encoding_evidence.get("lf_closed_loop_digest")
+                if isinstance(lf_closed_loop_summary, dict) and isinstance(lf_closed_loop_digest, str) and lf_closed_loop_digest:
+                    lf_closed_loop_candidates.append(
+                        {
+                            "step_index": step_evidence.get("step_index"),
+                            "lf_delta_norm": lf_evidence.get("lf_delta_norm"),
+                            "lf_closed_loop_summary": lf_closed_loop_summary,
+                            "lf_closed_loop_digest": lf_closed_loop_digest,
+                        }
+                    )
 
     delta_mean = float(sum(delta_values) / len(delta_values)) if delta_values else 0.0
     lf_delta_mean = float(sum(lf_delta_values) / len(lf_delta_values)) if lf_delta_values else 0.0
     hf_delta_mean = float(sum(hf_delta_values) / len(hf_delta_values)) if hf_delta_values else 0.0
     unique_binding = sorted(list(set(subspace_binding_digests)))
     subspace_binding_digest = unique_binding[0] if len(unique_binding) == 1 else None
+    selected_lf_closed_loop = None
+    if lf_closed_loop_candidates:
+        selected_lf_closed_loop = max(
+            lf_closed_loop_candidates,
+            key=lambda item: (
+                float(item.get("lf_delta_norm", 0.0) or 0.0),
+                int(item.get("step_index", -1) or -1),
+            ),
+        )
     summary_payload = {
         "step_count": len(step_evidence_list),
         "combined_status_counts": status_counts,
@@ -1065,8 +1090,10 @@ def _summarize_injection_metrics(step_evidence_list: List[Dict[str, Any]]) -> Di
         "hf_delta_norm_mean": hf_delta_mean,
         "subspace_binding_digest": subspace_binding_digest,
     }
+    if isinstance(selected_lf_closed_loop, dict):
+        summary_payload["lf_closed_loop_digest"] = selected_lf_closed_loop.get("lf_closed_loop_digest")
     step_summary_digest = digests.canonical_sha256(summary_payload)
-    return {
+    metrics = {
         "step_count": len(step_evidence_list),
         "combined_status_counts": status_counts,
         "delta_norm_mean": delta_mean,
@@ -1075,3 +1102,10 @@ def _summarize_injection_metrics(step_evidence_list: List[Dict[str, Any]]) -> Di
         "subspace_binding_digest": subspace_binding_digest,
         "step_summary_digest": step_summary_digest
     }
+    if isinstance(selected_lf_closed_loop, dict):
+        metrics["lf_closed_loop_summary"] = selected_lf_closed_loop.get("lf_closed_loop_summary")
+        metrics["lf_closed_loop_digest"] = selected_lf_closed_loop.get("lf_closed_loop_digest")
+        metrics["lf_closed_loop_step_index"] = selected_lf_closed_loop.get("step_index")
+        metrics["lf_closed_loop_selection_rule"] = "max_lf_delta_norm"
+        metrics["lf_closed_loop_candidate_count"] = len(lf_closed_loop_candidates)
+    return metrics

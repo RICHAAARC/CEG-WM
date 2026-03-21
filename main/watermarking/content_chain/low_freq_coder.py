@@ -645,6 +645,12 @@ def compute_lf_attestation_score(
     projection_matrix_digest = params.get("projection_matrix_digest")
     trajectory_feature_spec_digest = params.get("trajectory_feature_spec_digest")
     projection_seed = params.get("projection_seed")
+    pre_injection_coeffs = params.get("pre_injection_coeffs")
+    injected_template_coeffs = params.get("injected_template_coeffs")
+    post_injection_coeffs = params.get("post_injection_coeffs")
+    embed_closed_loop_digest = params.get("embed_closed_loop_digest")
+    embed_closed_loop_step_index = params.get("embed_closed_loop_step_index")
+    embed_closed_loop_selection_rule = params.get("embed_closed_loop_selection_rule")
 
     # 构造审计摘要（可复算）。
     trace_payload = {
@@ -699,6 +705,12 @@ def compute_lf_attestation_score(
         "projection_matrix_digest": projection_matrix_digest,
         "trajectory_feature_spec_digest": trajectory_feature_spec_digest,
         "projection_seed": projection_seed,
+        "pre_injection_coeffs": pre_injection_coeffs,
+        "injected_template_coeffs": injected_template_coeffs,
+        "post_injection_coeffs": post_injection_coeffs,
+        "embed_closed_loop_digest": embed_closed_loop_digest,
+        "embed_closed_loop_step_index": embed_closed_loop_step_index,
+        "embed_closed_loop_selection_rule": embed_closed_loop_selection_rule,
         "attestation_digest": attestation_digest,
         "lf_attestation_trace_digest": trace_digest,
     }

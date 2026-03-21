@@ -62,6 +62,112 @@ def _build_lf_trace_payload() -> dict:
     }
 
 
+def _build_lf_alignment_payload() -> dict:
+    return {
+        "artifact_type": "lf_alignment_table",
+        "attestation_digest": "a" * 64,
+        "event_binding_digest": "b" * 64,
+        "trace_commit": "c" * 64,
+        "plan_digest": "d" * 64,
+        "lf_basis_digest": "e" * 64,
+        "projection_matrix_digest": "f" * 64,
+        "embed_closed_loop_digest": "1" * 64,
+        "embed_closed_loop_step_index": 12,
+        "embed_closed_loop_selection_rule": "max_lf_delta_norm",
+        "n_bits_compared": 3,
+        "expected_bit_signs": [1, -1, 1],
+        "pre_injection_coeffs": [-0.4, 0.2, -0.1],
+        "injected_template_coeffs": [0.3, -0.5, 0.4],
+        "post_injection_coeffs": [-0.1, -0.3, 0.3],
+        "detect_side_coeffs": [-0.2, 0.2, 0.1],
+        "signed_pre_alignment": [-0.4, -0.2, -0.1],
+        "signed_template_alignment": [0.3, 0.5, 0.4],
+        "signed_post_alignment": [-0.1, 0.3, 0.3],
+        "signed_detect_alignment": [-0.2, -0.2, 0.1],
+        "alignment_margin_threshold": 0.15,
+        "pre_agreement_count": 0,
+        "post_agreement_count": 2,
+        "detect_agreement_count": 1,
+        "strong_negative_pre_count": 2,
+        "strong_negative_post_count": 0,
+        "strong_negative_detect_count": 2,
+        "post_still_negative_count": 1,
+        "post_crosses_target_halfspace_count": 2,
+        "detect_crosses_target_halfspace_count": 0,
+        "detect_reverted_after_post_positive_count": 1,
+        "lf_alignment_table_digest": "2" * 64,
+    }
+
+
+def _build_lf_planner_risk_report_payload() -> dict:
+    return {
+        "artifact_type": "lf_planner_risk_report",
+        "risk_report_version": "v1",
+        "risk_classification": "host_baseline_dominant",
+        "lf_feature_count": 8,
+        "lf_decomposition_shape": [16, 8],
+        "planner_rank": 4,
+        "host_baseline_ratio": 1.8,
+        "sign_stability": 0.9,
+        "reconstruction_residual_ratio": 0.12,
+        "top1_energy_ratio": 0.74,
+        "topk_energy_ratio": 0.92,
+        "host_baseline_dominant_flag": True,
+        "basis_sample_mismatch_flag": False,
+        "detect_trajectory_shift_flag": False,
+        "route_basis_bridge_digest": "3" * 64,
+        "plan_digest": "4" * 64,
+        "basis_digest": "5" * 64,
+        "primary_evidence": {
+            "evidence_type": "lf_closed_loop_posterior_counts",
+            "risk_classification_driver": "host_baseline_dominant",
+        },
+        "per_dimension_summary": [
+            {
+                "dimension_index": 0,
+                "expected_bit_sign": 1,
+                "signed_pre_alignment": -0.4,
+                "signed_template_alignment": 0.3,
+                "signed_post_alignment": -0.1,
+                "signed_detect_alignment": -0.2,
+                "post_positive": False,
+                "detect_positive": False,
+                "is_high_confidence_mismatch": True,
+                "routing_tag": "lf_feature_col:3",
+                "decomposition_group": "mask_routed_projection",
+            }
+        ],
+        "high_confidence_mismatch_dimensions": [
+            {
+                "dimension_index": 0,
+                "signed_pre_alignment": -0.4,
+                "signed_post_alignment": -0.1,
+                "signed_detect_alignment": -0.2,
+                "detect_side_coeff": -0.2,
+                "pre_strong_negative": True,
+                "post_still_negative": True,
+                "detect_reverted_after_post_positive": False,
+            }
+        ],
+        "routing_pattern_summary": {
+            "route_basis_bridge_digest": "3" * 64,
+            "mismatch_dimension_count": 1,
+            "mismatch_dimension_indices": [0],
+            "mismatch_feature_cols": [3],
+            "mismatch_feature_col_counts": {"3": 1},
+        },
+        "host_baseline_risk_summary": {
+            "strong_negative_pre_count": 2,
+            "post_still_negative_count": 1,
+            "detect_reverted_after_post_positive_count": 0,
+            "post_crosses_target_halfspace_count": 1,
+            "detect_crosses_target_halfspace_count": 0,
+            "dominant_signal": "host_baseline_counts",
+            "dominant_count": 2,
+        },
+    }
+
+
 def test_attestation_trace_artifact_contracts_are_registered_append_only() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     contracts_obj = yaml.safe_load((repo_root / "configs" / "frozen_contracts.yaml").read_text(encoding="utf-8"))
@@ -72,6 +178,8 @@ def test_attestation_trace_artifact_contracts_are_registered_append_only() -> No
     artifact_contracts = artifact_schema.get("artifact_contracts")
     assert "lf_attestation_trace" in artifact_contracts
     assert "hf_attestation_trace" in artifact_contracts
+    assert "lf_alignment_table" in artifact_contracts
+    assert "lf_planner_risk_report" in artifact_contracts
 
     lf_allowed_fields = set(artifact_contracts["lf_attestation_trace"]["allowed_top_level_fields"])
     required_lf_fields = {
@@ -93,6 +201,36 @@ def test_attestation_trace_artifact_contracts_are_registered_append_only() -> No
         "projection_seed",
     }
     assert required_lf_fields <= lf_allowed_fields
+
+    alignment_allowed_fields = set(artifact_contracts["lf_alignment_table"]["allowed_top_level_fields"])
+    assert {
+        "pre_injection_coeffs",
+        "injected_template_coeffs",
+        "post_injection_coeffs",
+        "detect_side_coeffs",
+        "signed_pre_alignment",
+        "signed_detect_alignment",
+        "strong_negative_pre_count",
+        "post_still_negative_count",
+        "post_crosses_target_halfspace_count",
+        "detect_reverted_after_post_positive_count",
+        "lf_alignment_table_digest",
+    } <= alignment_allowed_fields
+
+    planner_allowed_fields = set(artifact_contracts["lf_planner_risk_report"]["allowed_top_level_fields"])
+    assert {
+        "risk_classification",
+        "host_baseline_ratio",
+        "reconstruction_residual_ratio",
+        "topk_energy_ratio",
+        "plan_digest",
+        "basis_digest",
+        "primary_evidence",
+        "per_dimension_summary",
+        "high_confidence_mismatch_dimensions",
+        "routing_pattern_summary",
+        "host_baseline_risk_summary",
+    } <= planner_allowed_fields
 
     registry_fields = set(contracts_obj.get("records_schema", {}).get("field_paths_registry", []))
     schema_fields = {
@@ -154,3 +292,51 @@ def test_lf_attestation_trace_artifact_accepts_governed_field_set(tmp_run_root) 
     assert written_payload["artifact_type"] == "lf_attestation_trace"
     assert written_payload["expected_bit_signs"] == [1, -1, 1]
     assert written_payload["_artifact_audit"]["writer"] == "records_io"
+
+
+def test_lf_alignment_table_artifact_accepts_governed_field_set(tmp_run_root) -> None:
+    from main.core import records_io
+
+    contracts, whitelist, semantics, injection_scope_manifest, records_dir, artifacts_dir, logs_dir = _prepare_fact_sources(tmp_run_root)
+    payload = _build_lf_alignment_payload()
+    output_path = artifacts_dir / "attestation" / "lf_alignment_table.json"
+
+    with records_io.bound_fact_sources(
+        contracts,
+        whitelist,
+        semantics,
+        tmp_run_root,
+        records_dir,
+        artifacts_dir,
+        logs_dir,
+        injection_scope_manifest=injection_scope_manifest,
+    ):
+        records_io.write_artifact_json(str(output_path), payload)
+
+    written_payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert written_payload["artifact_type"] == "lf_alignment_table"
+    assert written_payload["post_crosses_target_halfspace_count"] == 2
+
+
+def test_lf_planner_risk_report_artifact_accepts_governed_field_set(tmp_run_root) -> None:
+    from main.core import records_io
+
+    contracts, whitelist, semantics, injection_scope_manifest, records_dir, artifacts_dir, logs_dir = _prepare_fact_sources(tmp_run_root)
+    payload = _build_lf_planner_risk_report_payload()
+    output_path = artifacts_dir / "planner" / "lf_planner_risk_report.json"
+
+    with records_io.bound_fact_sources(
+        contracts,
+        whitelist,
+        semantics,
+        tmp_run_root,
+        records_dir,
+        artifacts_dir,
+        logs_dir,
+        injection_scope_manifest=injection_scope_manifest,
+    ):
+        records_io.write_artifact_json(str(output_path), payload)
+
+    written_payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert written_payload["artifact_type"] == "lf_planner_risk_report"
+    assert written_payload["risk_classification"] == "host_baseline_dominant"

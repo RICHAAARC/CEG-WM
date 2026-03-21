@@ -151,6 +151,35 @@ def _write_embed_attestation_artifacts(
         records_io.write_artifact_json(str(attestation_dir / "attestation_bundle.json"), cast(Dict[str, Any], signed_bundle))
 
 
+def _write_embed_planner_artifacts(
+    planner_artifacts: Dict[str, Any] | None,
+    artifacts_dir: Path,
+) -> None:
+    """
+    功能：将 embed 主链 planner 诊断工件落盘到 artifacts/planner。
+
+    Persist embed-side planner diagnostic artifacts produced by the main path.
+
+    Args:
+        planner_artifacts: Planner artifact mapping.
+        artifacts_dir: Current run artifacts directory.
+
+    Returns:
+        None.
+    """
+    if not isinstance(planner_artifacts, dict):
+        return
+    lf_planner_risk_report = planner_artifacts.get("lf_planner_risk_report")
+    if not isinstance(lf_planner_risk_report, dict):
+        return
+    planner_dir = artifacts_dir / "planner"
+    planner_dir.mkdir(parents=True, exist_ok=True)
+    records_io.write_artifact_json(
+        str(planner_dir / "lf_planner_risk_report.json"),
+        cast(Dict[str, Any], lf_planner_risk_report),
+    )
+
+
 def bind_impl_identity_fields(
     record: Dict[str, Any],
     identity: runtime_resolver.ImplIdentity,
@@ -711,6 +740,9 @@ def run_embed(
                 # record 类型不符合预期，必须 fail-fast。
                 raise TypeError("orchestrator output must be dict")
             record = cast(Dict[str, Any], record_obj)
+            planner_artifacts = {
+                "lf_planner_risk_report": record.pop("_lf_planner_risk_report_artifact", None)
+            }
             if isinstance(_embed_latent_stats, dict):
                 record["latent_spatial_stats"] = _embed_latent_stats
             record["cfg_digest"] = cfg_digest
@@ -974,6 +1006,7 @@ def run_embed(
                 raise
 
             _write_embed_attestation_artifacts(record, artifacts_dir)
+            _write_embed_planner_artifacts(planner_artifacts, artifacts_dir)
     except Exception as exc:
         if run_meta.get("status_ok", True):
             set_failure_status(run_meta, RunFailureReason.RUNTIME_ERROR, exc)

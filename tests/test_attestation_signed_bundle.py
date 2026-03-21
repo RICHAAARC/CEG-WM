@@ -29,11 +29,14 @@ from main.watermarking.content_chain.low_freq_coder import compute_lf_attestatio
 from main.watermarking.content_chain import high_freq_embedder as high_freq_embedder_module
 from main.watermarking.detect import orchestrator as detect_orchestrator
 from main.cli import run_detect as run_detect_cli
+from main.cli import run_embed as run_embed_cli
 
 _build_detect_attestation_result = detect_orchestrator._build_detect_attestation_result  # pyright: ignore[reportPrivateUsage]
 _build_hf_detect_evidence = detect_orchestrator._build_hf_detect_evidence  # pyright: ignore[reportPrivateUsage]
+_build_lf_planner_risk_report_artifact = detect_orchestrator._build_lf_planner_risk_report_artifact  # pyright: ignore[reportPrivateUsage]
 verify_attestation = detect_orchestrator.verify_attestation
 _write_detect_attestation_artifact = run_detect_cli._write_detect_attestation_artifact  # pyright: ignore[reportPrivateUsage]
+_write_embed_planner_artifacts = run_embed_cli._write_embed_planner_artifacts  # pyright: ignore[reportPrivateUsage]
 
 
 def _build_hf_runtime_cfg(tail_truncation_ratio: float = 0.1) -> Dict[str, Any]:
@@ -583,6 +586,26 @@ def test_build_detect_attestation_result_emits_lf_trace_artifact() -> None:
             "trajectory_feature_digest": "9" * 64,
             "projected_lf_digest": "a" * 64,
             "projection_seed": 17,
+            "pre_injection_coeffs": [-0.4, 0.2, -0.1],
+            "injected_template_coeffs": [0.3, -0.5, 0.4],
+            "post_injection_coeffs": [-0.1, -0.3, 0.3],
+            "embed_closed_loop_digest": "b" * 64,
+            "embed_closed_loop_step_index": 12,
+            "embed_closed_loop_selection_rule": "max_lf_delta_norm",
+            "planner_rank": 3,
+            "basis_digest": "c" * 64,
+            "route_basis_bridge": {
+                "region_index_digest": "d" * 64,
+                "lf_feature_cols": [3, 5, 7],
+                "route_layer": {
+                    "route_source": "mask_region_index_spec",
+                    "feature_routing_mode": "mask_routed_projection",
+                    "lf_feature_cols_source": "mask_partition",
+                },
+                "feature_bridge_layer": {
+                    "route_to_feature_bridge": "mask_routed_feature_partition",
+                },
+            },
             "trajectory_feature_spec": {
                 "feature_operator": "masked_normalized_random_projection",
                 "edit_timestep": 12,
@@ -591,6 +614,8 @@ def test_build_detect_attestation_result_emits_lf_trace_artifact() -> None:
     )
 
     trace_artifact = cast(Dict[str, Any], result.get("_lf_attestation_trace_artifact"))
+    alignment_artifact = cast(Dict[str, Any], result.get("_lf_alignment_table_artifact"))
+    planner_artifact = cast(Dict[str, Any], result.get("_lf_planner_risk_report_artifact"))
     assert trace_artifact.get("artifact_type") == "lf_attestation_trace"
     assert trace_artifact.get("agreement_count") == trace_artifact.get("n_bits_compared")
     assert trace_artifact.get("basis_rank") == 36
@@ -617,6 +642,15 @@ def test_build_detect_attestation_result_emits_lf_trace_artifact() -> None:
     assert trace_artifact.get("projected_lf_coeffs")
     assert trace_artifact.get("projected_lf_signs")
     assert trace_artifact.get("lf_attestation_trace_digest")
+    assert alignment_artifact.get("artifact_type") == "lf_alignment_table"
+    assert alignment_artifact.get("pre_injection_coeffs") == [-0.4, 0.2, -0.1]
+    assert alignment_artifact.get("post_injection_coeffs") == [-0.1, -0.3, 0.3]
+    assert alignment_artifact.get("embed_closed_loop_selection_rule") == "max_lf_delta_norm"
+    assert alignment_artifact.get("post_still_negative_count") == 1
+    assert alignment_artifact.get("detect_reverted_after_post_positive_count") == 0
+    assert planner_artifact.get("artifact_type") == "lf_planner_risk_report"
+    assert planner_artifact.get("primary_evidence", {}).get("evidence_type") == "lf_closed_loop_posterior_counts"
+    assert isinstance(planner_artifact.get("routing_pattern_summary", {}).get("mismatch_feature_cols"), list)
 
 
 def test_verify_attestation_content_positive_not_dragged_by_low_geometry() -> None:
@@ -1065,6 +1099,55 @@ def test_write_detect_attestation_artifact_persists_attestation_traces(monkeypat
                 "edit_timestep": 12,
             },
             "lf_attestation_trace_digest": "b" * 64,
+        },
+        "lf_alignment_table": {
+            "artifact_type": "lf_alignment_table",
+            "attestation_digest": "c" * 64,
+            "event_binding_digest": "d" * 64,
+            "trace_commit": "e" * 64,
+            "n_bits_compared": 2,
+            "expected_bit_signs": [1, -1],
+            "pre_injection_coeffs": [-0.2, 0.1],
+            "injected_template_coeffs": [0.3, -0.2],
+            "post_injection_coeffs": [0.1, -0.1],
+            "detect_side_coeffs": [-0.1, 0.2],
+            "signed_pre_alignment": [-0.2, -0.1],
+            "signed_template_alignment": [0.3, 0.2],
+            "signed_post_alignment": [0.1, 0.1],
+            "signed_detect_alignment": [-0.1, -0.2],
+            "alignment_margin_threshold": 0.1,
+            "pre_agreement_count": 0,
+            "post_agreement_count": 2,
+            "detect_agreement_count": 0,
+            "strong_negative_pre_count": 2,
+            "strong_negative_post_count": 0,
+            "strong_negative_detect_count": 2,
+            "post_still_negative_count": 1,
+            "post_crosses_target_halfspace_count": 2,
+            "detect_crosses_target_halfspace_count": 0,
+            "detect_reverted_after_post_positive_count": 1,
+            "lf_alignment_table_digest": "f" * 64,
+        },
+        "lf_planner_risk_report": {
+            "artifact_type": "lf_planner_risk_report",
+            "risk_report_version": "v1",
+            "risk_classification": "detect_trajectory_shift",
+            "plan_digest": "0" * 64,
+            "basis_digest": "1" * 64,
+            "primary_evidence": {
+                "evidence_type": "lf_closed_loop_posterior_counts",
+                "risk_classification_driver": "detect_trajectory_shift",
+            },
+            "per_dimension_summary": [],
+            "high_confidence_mismatch_dimensions": [],
+            "routing_pattern_summary": {
+                "mismatch_dimension_count": 0,
+            },
+            "host_baseline_risk_summary": {
+                "strong_negative_pre_count": 2,
+                "post_still_negative_count": 1,
+                "detect_reverted_after_post_positive_count": 1,
+            },
         }
     }
 
@@ -1073,10 +1156,182 @@ def test_write_detect_attestation_artifact_persists_attestation_traces(monkeypat
     result_path = str((tmp_path / "artifacts" / "attestation" / "attestation_result.json")).replace("\\", "/")
     hf_trace_path = str((tmp_path / "artifacts" / "attestation" / "hf_attestation_trace.json")).replace("\\", "/")
     lf_trace_path = str((tmp_path / "artifacts" / "attestation" / "lf_attestation_trace.json")).replace("\\", "/")
+    lf_alignment_path = str((tmp_path / "artifacts" / "attestation" / "lf_alignment_table.json")).replace("\\", "/")
+    planner_path = str((tmp_path / "artifacts" / "planner" / "lf_planner_risk_report.json")).replace("\\", "/")
     assert written[result_path] == record["attestation"]
     assert written[hf_trace_path]["artifact_type"] == "hf_attestation_trace"
     assert written[lf_trace_path]["artifact_type"] == "lf_attestation_trace"
     assert written[lf_trace_path]["agreement_count"] == 22
+    assert written[lf_alignment_path]["artifact_type"] == "lf_alignment_table"
+    assert written[lf_alignment_path]["post_crosses_target_halfspace_count"] == 2
+    assert written[planner_path]["artifact_type"] == "lf_planner_risk_report"
+    assert written[planner_path]["risk_classification"] == "detect_trajectory_shift"
+
+
+def test_build_lf_planner_risk_report_artifact_classifies_host_baseline_dominant() -> None:
+    artifact = _build_lf_planner_risk_report_artifact(
+        {
+            "plan_digest": "a" * 64,
+            "n_bits_compared": 4,
+            "expected_bit_signs": [1, -1, 1, -1],
+            "detect_side_coeffs": [-0.9, 0.8, -0.7, 0.6],
+            "signed_pre_alignment": [-0.9, -0.8, -0.7, -0.6],
+            "signed_template_alignment": [0.4, 0.4, 0.4, 0.4],
+            "signed_post_alignment": [-0.5, -0.4, -0.3, 0.2],
+            "signed_detect_alignment": [-0.8, -0.7, -0.6, 0.1],
+            "alignment_margin_threshold": 0.2,
+            "strong_negative_pre_count": 4,
+            "post_still_negative_count": 3,
+            "post_crosses_target_halfspace_count": 1,
+            "detect_crosses_target_halfspace_count": 0,
+            "detect_reverted_after_post_positive_count": 0,
+        },
+        {
+            "planner_rank": 4,
+            "basis_digest": "b" * 64,
+            "lf_feature_count": 4,
+            "route_basis_bridge": {
+                "lf_feature_cols": [0, 1, 2, 3],
+                "route_layer": {"feature_routing_mode": "mask_routed_projection"},
+            },
+        },
+    )
+
+    assert artifact is not None
+    assert artifact["risk_classification"] == "host_baseline_dominant"
+    assert artifact["primary_evidence"]["dominant_signal"] == "host_baseline_counts"
+    assert len(artifact["per_dimension_summary"]) == 4
+    assert artifact["host_baseline_risk_summary"]["post_still_negative_count"] == 3
+
+
+def test_build_lf_planner_risk_report_artifact_classifies_basis_sample_mismatch() -> None:
+    artifact = _build_lf_planner_risk_report_artifact(
+        {
+            "plan_digest": "a" * 64,
+            "n_bits_compared": 4,
+            "expected_bit_signs": [1, -1, 1, -1],
+            "detect_side_coeffs": [-0.2, -0.3, 0.1, -0.4],
+            "signed_pre_alignment": [-0.1, 0.1, -0.1, 0.1],
+            "signed_template_alignment": [0.2, 0.2, 0.2, 0.2],
+            "signed_post_alignment": [-0.2, -0.3, -0.1, 0.1],
+            "signed_detect_alignment": [-0.2, -0.3, -0.1, 0.1],
+            "alignment_margin_threshold": 0.1,
+            "strong_negative_pre_count": 0,
+            "post_still_negative_count": 3,
+            "post_crosses_target_halfspace_count": 1,
+            "detect_crosses_target_halfspace_count": 0,
+            "detect_reverted_after_post_positive_count": 0,
+        },
+        {
+            "planner_rank": 4,
+            "basis_digest": "b" * 64,
+            "route_basis_bridge": {
+                "lf_feature_cols": [10, 11, 12, 13],
+                "route_layer": {"feature_routing_mode": "mask_routed_projection"},
+            },
+        },
+    )
+
+    assert artifact is not None
+    assert artifact["risk_classification"] == "basis_sample_mismatch"
+    assert artifact["host_baseline_risk_summary"]["dominant_signal"] == "post_still_negative_counts"
+
+
+def test_build_lf_planner_risk_report_artifact_classifies_detect_trajectory_shift() -> None:
+    artifact = _build_lf_planner_risk_report_artifact(
+        {
+            "plan_digest": "a" * 64,
+            "n_bits_compared": 4,
+            "expected_bit_signs": [1, -1, 1, -1],
+            "detect_side_coeffs": [-0.5, -0.4, 0.3, -0.6],
+            "signed_pre_alignment": [-0.2, -0.1, -0.2, -0.1],
+            "signed_template_alignment": [0.3, 0.3, 0.3, 0.3],
+            "signed_post_alignment": [0.4, 0.5, 0.2, -0.2],
+            "signed_detect_alignment": [-0.5, -0.4, 0.3, -0.6],
+            "alignment_margin_threshold": 0.2,
+            "strong_negative_pre_count": 0,
+            "post_still_negative_count": 1,
+            "post_crosses_target_halfspace_count": 3,
+            "detect_crosses_target_halfspace_count": 0,
+            "detect_reverted_after_post_positive_count": 2,
+        },
+        {
+            "planner_rank": 4,
+            "basis_digest": "b" * 64,
+            "route_basis_bridge": {
+                "lf_feature_cols": [2, 4, 6, 8],
+                "route_layer": {"feature_routing_mode": "mask_routed_projection"},
+            },
+        },
+    )
+
+    assert artifact is not None
+    assert artifact["risk_classification"] == "detect_trajectory_shift"
+    assert artifact["high_confidence_mismatch_dimensions"][0]["detect_reverted_after_post_positive"] is True
+
+
+def test_build_lf_planner_risk_report_artifact_classifies_mixed() -> None:
+    artifact = _build_lf_planner_risk_report_artifact(
+        {
+            "plan_digest": "a" * 64,
+            "n_bits_compared": 8,
+            "expected_bit_signs": [1, -1, 1, -1, 1, -1, 1, -1],
+            "detect_side_coeffs": [-0.2, -0.2, -0.2, -0.2, -0.2, -0.2, 0.2, 0.2],
+            "signed_pre_alignment": [-0.3, -0.2, -0.2, 0.1, 0.2, -0.1, 0.1, 0.2],
+            "signed_template_alignment": [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2],
+            "signed_post_alignment": [-0.1, -0.2, -0.3, 0.3, 0.4, 0.5, -0.2, 0.4],
+            "signed_detect_alignment": [-0.2, -0.2, -0.2, -0.2, -0.2, -0.2, 0.2, 0.2],
+            "alignment_margin_threshold": 0.15,
+            "strong_negative_pre_count": 3,
+            "post_still_negative_count": 4,
+            "post_crosses_target_halfspace_count": 3,
+            "detect_crosses_target_halfspace_count": 0,
+                "detect_reverted_after_post_positive_count": 2,
+        },
+        {
+            "planner_rank": 8,
+            "basis_digest": "b" * 64,
+            "route_basis_bridge": {
+                "lf_feature_cols": [1, 3, 5, 7, 9, 11, 13, 15],
+                "route_layer": {"feature_routing_mode": "mask_routed_projection"},
+            },
+        },
+    )
+
+    assert artifact is not None
+    assert artifact["risk_classification"] == "mixed"
+    assert "routing_pattern_summary" in artifact
+
+
+def test_write_embed_planner_artifacts_persists_lf_risk_report(monkeypatch: Any, tmp_path: Path) -> None:
+    written: Dict[str, Dict[str, Any]] = {}
+
+    def _fake_write_artifact_json(path: str, payload: Dict[str, Any], indent: int = 2, ensure_ascii: bool = False) -> None:
+        _ = indent
+        _ = ensure_ascii
+        written[path.replace("\\", "/")] = payload
+
+    monkeypatch.setattr("main.cli.run_embed.records_io.write_artifact_json", _fake_write_artifact_json)
+
+    _write_embed_planner_artifacts(
+        {
+            "lf_planner_risk_report": {
+                "artifact_type": "lf_planner_risk_report",
+                "risk_report_version": "v1",
+                "risk_classification": "host_baseline_dominant",
+                "host_baseline_ratio": 1.7,
+                "reconstruction_residual_ratio": 0.12,
+                "topk_energy_ratio": 0.91,
+                "plan_digest": "a" * 64,
+                "basis_digest": "b" * 64,
+            }
+        },
+        tmp_path / "artifacts",
+    )
+
+    planner_path = str((tmp_path / "artifacts" / "planner" / "lf_planner_risk_report.json")).replace("\\", "/")
+    assert written[planner_path]["artifact_type"] == "lf_planner_risk_report"
+    assert written[planner_path]["risk_classification"] == "host_baseline_dominant"
 
 
 def test_build_hf_detect_evidence_binds_canonical_plan_digest_locally() -> None:

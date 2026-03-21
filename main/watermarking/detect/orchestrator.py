@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import glob
 import inspect
+import math
 from pathlib import Path
 from typing import Any, Dict, Optional, cast
 
@@ -598,6 +599,12 @@ def _build_detect_attestation_result(
         ),
         attestation_source=attestation_source if isinstance(attestation_source, str) else None,
     )
+    lf_planner_risk_report = _build_lf_planner_risk_report_artifact(
+        cast(Dict[str, Any], result.get("_lf_alignment_table_artifact")) if isinstance(result.get("_lf_alignment_table_artifact"), dict) else {},
+        lf_attestation_trace_context,
+    )
+    if isinstance(lf_planner_risk_report, dict):
+        result["_lf_planner_risk_report_artifact"] = lf_planner_risk_report
     result["status"] = result.get("verdict")
     return _attach_detect_attestation_source(result, attestation_source)
 
@@ -801,6 +808,391 @@ def _build_lf_attestation_trace_context(
         "projection_matrix_digest": trace_bundle.get("projection_matrix_digest"),
         "trajectory_feature_spec_digest": trace_bundle.get("trajectory_feature_spec_digest"),
         "projection_seed": trace_bundle.get("projection_seed"),
+    }
+
+
+def _extract_embed_lf_closed_loop_context(input_record: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not isinstance(input_record, dict):
+        return {}
+    embed_content_evidence = input_record.get("content_evidence")
+    if not isinstance(embed_content_evidence, dict):
+        embed_content_evidence = input_record.get("content_result")
+    if not isinstance(embed_content_evidence, dict):
+        return {}
+    injection_metrics = embed_content_evidence.get("injection_metrics")
+    if not isinstance(injection_metrics, dict):
+        return {}
+    lf_closed_loop_summary = injection_metrics.get("lf_closed_loop_summary")
+    if not isinstance(lf_closed_loop_summary, dict):
+        return {}
+    return {
+        "pre_injection_coeffs": lf_closed_loop_summary.get("pre_injection_coeffs"),
+        "injected_template_coeffs": lf_closed_loop_summary.get("injected_template_coeffs"),
+        "post_injection_coeffs": lf_closed_loop_summary.get("post_injection_coeffs"),
+        "embed_closed_loop_digest": injection_metrics.get("lf_closed_loop_digest"),
+        "embed_closed_loop_step_index": injection_metrics.get("lf_closed_loop_step_index"),
+        "embed_closed_loop_selection_rule": injection_metrics.get("lf_closed_loop_selection_rule"),
+    }
+
+
+def _build_lf_alignment_table_artifact(
+    lf_result: Dict[str, Any],
+    *,
+    attestation_digest: str,
+    event_binding_digest: str,
+    trace_commit: Optional[str],
+) -> Dict[str, Any] | None:
+    if not isinstance(lf_result, dict) or lf_result.get("status") != "ok":
+        return None
+
+    pre_coeffs = lf_result.get("pre_injection_coeffs")
+    template_coeffs = lf_result.get("injected_template_coeffs")
+    post_coeffs = lf_result.get("post_injection_coeffs")
+    detect_coeffs = lf_result.get("projected_lf_coeffs")
+    expected_bit_signs = lf_result.get("expected_bit_signs")
+    if not all(isinstance(value, list) for value in [pre_coeffs, template_coeffs, post_coeffs, detect_coeffs, expected_bit_signs]):
+        return None
+
+    n_compare = int(lf_result.get("n_bits_compared") or 0)
+    n_rows = min(n_compare, len(pre_coeffs), len(template_coeffs), len(post_coeffs), len(detect_coeffs), len(expected_bit_signs))
+    if n_rows <= 0:
+        return None
+
+    expected = [int(expected_bit_signs[index]) for index in range(n_rows)]
+    pre_values = [float(pre_coeffs[index]) for index in range(n_rows)]
+    template_values = [float(template_coeffs[index]) for index in range(n_rows)]
+    post_values = [float(post_coeffs[index]) for index in range(n_rows)]
+    detect_values = [float(detect_coeffs[index]) for index in range(n_rows)]
+
+    signed_pre_alignment = [float(pre_values[index] * expected[index]) for index in range(n_rows)]
+    signed_template_alignment = [float(template_values[index] * expected[index]) for index in range(n_rows)]
+    signed_post_alignment = [float(post_values[index] * expected[index]) for index in range(n_rows)]
+    signed_detect_alignment = [float(detect_values[index] * expected[index]) for index in range(n_rows)]
+
+    template_margins = [abs(value) for value in signed_template_alignment if abs(value) > 0.0]
+    alignment_margin_threshold = float(np.median(np.asarray(template_margins, dtype=np.float64)) * 0.5) if template_margins else 0.0
+    pre_agreement_count = sum(1 for value in signed_pre_alignment if value > 0.0)
+    post_agreement_count = sum(1 for value in signed_post_alignment if value > 0.0)
+    detect_agreement_count = sum(1 for value in signed_detect_alignment if value > 0.0)
+    strong_negative_pre_count = sum(1 for value in signed_pre_alignment if value < -alignment_margin_threshold)
+    strong_negative_post_count = sum(1 for value in signed_post_alignment if value < -alignment_margin_threshold)
+    strong_negative_detect_count = sum(1 for value in signed_detect_alignment if value < -alignment_margin_threshold)
+    post_still_negative_count = sum(1 for value in signed_post_alignment if value < 0.0)
+    post_crosses_target_halfspace_count = sum(
+        1 for pre_value, post_value in zip(signed_pre_alignment, signed_post_alignment) if pre_value <= 0.0 and post_value > 0.0
+    )
+    detect_crosses_target_halfspace_count = sum(
+        1 for post_value, detect_value in zip(signed_post_alignment, signed_detect_alignment) if post_value <= 0.0 and detect_value > 0.0
+    )
+    detect_reverted_after_post_positive_count = sum(
+        1 for post_value, detect_value in zip(signed_post_alignment, signed_detect_alignment) if post_value > 0.0 and detect_value < 0.0
+    )
+
+    artifact = {
+        "artifact_type": "lf_alignment_table",
+        "attestation_digest": attestation_digest,
+        "event_binding_digest": event_binding_digest,
+        "trace_commit": trace_commit,
+        "plan_digest": lf_result.get("plan_digest"),
+        "lf_basis_digest": lf_result.get("lf_basis_digest"),
+        "projection_matrix_digest": lf_result.get("projection_matrix_digest"),
+        "embed_closed_loop_digest": lf_result.get("embed_closed_loop_digest"),
+        "embed_closed_loop_step_index": lf_result.get("embed_closed_loop_step_index"),
+        "embed_closed_loop_selection_rule": lf_result.get("embed_closed_loop_selection_rule"),
+        "n_bits_compared": n_rows,
+        "expected_bit_signs": expected,
+        "pre_injection_coeffs": pre_values,
+        "injected_template_coeffs": template_values,
+        "post_injection_coeffs": post_values,
+        "detect_side_coeffs": detect_values,
+        "signed_pre_alignment": signed_pre_alignment,
+        "signed_template_alignment": signed_template_alignment,
+        "signed_post_alignment": signed_post_alignment,
+        "signed_detect_alignment": signed_detect_alignment,
+        "alignment_margin_threshold": alignment_margin_threshold,
+        "pre_agreement_count": pre_agreement_count,
+        "post_agreement_count": post_agreement_count,
+        "detect_agreement_count": detect_agreement_count,
+        "strong_negative_pre_count": strong_negative_pre_count,
+        "strong_negative_post_count": strong_negative_post_count,
+        "strong_negative_detect_count": strong_negative_detect_count,
+        "post_still_negative_count": post_still_negative_count,
+        "post_crosses_target_halfspace_count": post_crosses_target_halfspace_count,
+        "detect_crosses_target_halfspace_count": detect_crosses_target_halfspace_count,
+        "detect_reverted_after_post_positive_count": detect_reverted_after_post_positive_count,
+    }
+    artifact["lf_alignment_table_digest"] = digests.canonical_sha256(artifact)
+    return artifact
+
+
+def _extract_planner_posterior_context(input_record: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not isinstance(input_record, dict):
+        return {}
+
+    plan_stats_node = input_record.get("plan_stats")
+    plan_stats = cast(Dict[str, Any], plan_stats_node) if isinstance(plan_stats_node, dict) else {}
+    route_basis_bridge_node = plan_stats.get("route_basis_bridge")
+    route_basis_bridge = cast(Dict[str, Any], route_basis_bridge_node) if isinstance(route_basis_bridge_node, dict) else {}
+    subspace_plan_node = input_record.get("subspace_plan")
+    subspace_plan = cast(Dict[str, Any], subspace_plan_node) if isinstance(subspace_plan_node, dict) else {}
+
+    planner_rank = subspace_plan.get("rank")
+    if not isinstance(planner_rank, int):
+        planner_rank = plan_stats.get("rank") if isinstance(plan_stats.get("rank"), int) else None
+
+    return {
+        "planner_rank": planner_rank,
+        "basis_digest": input_record.get("basis_digest"),
+        "route_basis_bridge": route_basis_bridge,
+        "lf_feature_count": len(route_basis_bridge.get("lf_feature_cols", [])) if isinstance(route_basis_bridge.get("lf_feature_cols"), list) else None,
+        "lf_decomposition_shape": plan_stats.get("lf_basis_shape"),
+    }
+
+
+def _resolve_lf_dimension_routing(route_basis_bridge: Dict[str, Any], dimension_index: int) -> Dict[str, Any]:
+    lf_feature_cols = route_basis_bridge.get("lf_feature_cols")
+    feature_col = None
+    if isinstance(lf_feature_cols, list) and dimension_index < len(lf_feature_cols):
+        raw_feature_col = lf_feature_cols[dimension_index]
+        if isinstance(raw_feature_col, int):
+            feature_col = raw_feature_col
+
+    route_layer_node = route_basis_bridge.get("route_layer")
+    route_layer = cast(Dict[str, Any], route_layer_node) if isinstance(route_layer_node, dict) else {}
+    feature_bridge_node = route_basis_bridge.get("feature_bridge_layer")
+    feature_bridge_layer = cast(Dict[str, Any], feature_bridge_node) if isinstance(feature_bridge_node, dict) else {}
+
+    routing_tag = None
+    if isinstance(feature_col, int):
+        routing_tag = f"lf_feature_col:{feature_col}"
+
+    decomposition_group = route_layer.get("feature_routing_mode")
+    if not isinstance(decomposition_group, str) or not decomposition_group:
+        decomposition_group = feature_bridge_layer.get("route_to_feature_bridge")
+    if not isinstance(decomposition_group, str) or not decomposition_group:
+        decomposition_group = None
+
+    return {
+        "lf_feature_col": feature_col,
+        "routing_tag": routing_tag,
+        "decomposition_group": decomposition_group,
+    }
+
+
+def _classify_lf_posterior_risk(
+    *,
+    n_bits_compared: int,
+    strong_negative_pre_count: int,
+    post_still_negative_count: int,
+    post_crosses_target_halfspace_count: int,
+    detect_reverted_after_post_positive_count: int,
+) -> str:
+    if n_bits_compared <= 0:
+        return "mixed"
+
+    dominant_count_threshold = max(2, int(math.ceil(float(n_bits_compared) * 0.25)))
+    host_baseline_dominant = (
+        strong_negative_pre_count >= dominant_count_threshold
+        and post_still_negative_count >= dominant_count_threshold
+        and detect_reverted_after_post_positive_count < post_still_negative_count
+    )
+    detect_trajectory_shift = (
+        post_crosses_target_halfspace_count >= dominant_count_threshold
+        and detect_reverted_after_post_positive_count >= max(2, int(math.ceil(float(post_crosses_target_halfspace_count) * 0.5)))
+    )
+    basis_sample_mismatch = (
+        strong_negative_pre_count < dominant_count_threshold
+        and post_crosses_target_halfspace_count < dominant_count_threshold
+        and post_still_negative_count >= dominant_count_threshold
+    )
+
+    if host_baseline_dominant and not detect_trajectory_shift and not basis_sample_mismatch:
+        return "host_baseline_dominant"
+    if detect_trajectory_shift and not host_baseline_dominant and not basis_sample_mismatch:
+        return "detect_trajectory_shift"
+    if basis_sample_mismatch and not host_baseline_dominant and not detect_trajectory_shift:
+        return "basis_sample_mismatch"
+    return "mixed"
+
+
+def _build_lf_planner_risk_report_artifact(
+    lf_alignment_table: Dict[str, Any],
+    planner_context: Optional[Dict[str, Any]],
+) -> Dict[str, Any] | None:
+    if not isinstance(lf_alignment_table, dict):
+        return None
+
+    expected_bit_signs = lf_alignment_table.get("expected_bit_signs")
+    signed_pre_alignment = lf_alignment_table.get("signed_pre_alignment")
+    signed_template_alignment = lf_alignment_table.get("signed_template_alignment")
+    signed_post_alignment = lf_alignment_table.get("signed_post_alignment")
+    signed_detect_alignment = lf_alignment_table.get("signed_detect_alignment")
+    detect_side_coeffs = lf_alignment_table.get("detect_side_coeffs")
+    if not all(
+        isinstance(value, list)
+        for value in [
+            expected_bit_signs,
+            signed_pre_alignment,
+            signed_template_alignment,
+            signed_post_alignment,
+            signed_detect_alignment,
+            detect_side_coeffs,
+        ]
+    ):
+        return None
+
+    n_bits_compared = int(lf_alignment_table.get("n_bits_compared") or 0)
+    n_rows = min(
+        n_bits_compared,
+        len(expected_bit_signs),
+        len(signed_pre_alignment),
+        len(signed_template_alignment),
+        len(signed_post_alignment),
+        len(signed_detect_alignment),
+        len(detect_side_coeffs),
+    )
+    if n_rows <= 0:
+        return None
+
+    planner_context_mapping = cast(Dict[str, Any], planner_context) if isinstance(planner_context, dict) else {}
+    route_basis_bridge_node = planner_context_mapping.get("route_basis_bridge")
+    route_basis_bridge = cast(Dict[str, Any], route_basis_bridge_node) if isinstance(route_basis_bridge_node, dict) else {}
+    route_basis_bridge_digest = digests.canonical_sha256(route_basis_bridge) if route_basis_bridge else None
+    alignment_margin_threshold = float(lf_alignment_table.get("alignment_margin_threshold") or 0.0)
+    confidence_threshold = max(abs(alignment_margin_threshold), 1e-8)
+
+    per_dimension_summary = []
+    high_confidence_mismatch_dimensions = []
+    mismatch_feature_col_counts: Dict[str, int] = {}
+    mismatch_dimension_indices = []
+    mismatch_feature_cols = []
+
+    for dimension_index in range(n_rows):
+        signed_pre = float(signed_pre_alignment[dimension_index])
+        signed_template = float(signed_template_alignment[dimension_index])
+        signed_post = float(signed_post_alignment[dimension_index])
+        signed_detect = float(signed_detect_alignment[dimension_index])
+        detect_value = float(detect_side_coeffs[dimension_index])
+        routing_info = _resolve_lf_dimension_routing(route_basis_bridge, dimension_index)
+        post_positive = signed_post > 0.0
+        detect_positive = signed_detect > 0.0
+        pre_strong_negative = signed_pre < -confidence_threshold
+        post_still_negative = signed_post < 0.0
+        detect_reverted = signed_post > 0.0 and signed_detect < 0.0
+        is_high_confidence_mismatch = signed_detect < -confidence_threshold
+
+        per_dimension_summary.append(
+            {
+                "dimension_index": dimension_index,
+                "expected_bit_sign": int(expected_bit_signs[dimension_index]),
+                "signed_pre_alignment": signed_pre,
+                "signed_template_alignment": signed_template,
+                "signed_post_alignment": signed_post,
+                "signed_detect_alignment": signed_detect,
+                "post_positive": post_positive,
+                "detect_positive": detect_positive,
+                "is_high_confidence_mismatch": is_high_confidence_mismatch,
+                "routing_tag": routing_info.get("routing_tag"),
+                "decomposition_group": routing_info.get("decomposition_group"),
+            }
+        )
+
+        if is_high_confidence_mismatch:
+            high_confidence_mismatch_dimensions.append(
+                {
+                    "dimension_index": dimension_index,
+                    "signed_pre_alignment": signed_pre,
+                    "signed_post_alignment": signed_post,
+                    "signed_detect_alignment": signed_detect,
+                    "detect_side_coeff": detect_value,
+                    "pre_strong_negative": pre_strong_negative,
+                    "post_still_negative": post_still_negative,
+                    "detect_reverted_after_post_positive": detect_reverted,
+                    "routing_tag": routing_info.get("routing_tag"),
+                    "decomposition_group": routing_info.get("decomposition_group"),
+                }
+            )
+            mismatch_dimension_indices.append(dimension_index)
+            feature_col = routing_info.get("lf_feature_col")
+            if isinstance(feature_col, int):
+                mismatch_feature_cols.append(feature_col)
+                feature_col_key = str(feature_col)
+                mismatch_feature_col_counts[feature_col_key] = mismatch_feature_col_counts.get(feature_col_key, 0) + 1
+
+    strong_negative_pre_count = int(lf_alignment_table.get("strong_negative_pre_count") or 0)
+    post_still_negative_count = int(lf_alignment_table.get("post_still_negative_count") or 0)
+    post_crosses_target_halfspace_count = int(lf_alignment_table.get("post_crosses_target_halfspace_count") or 0)
+    detect_reverted_after_post_positive_count = int(lf_alignment_table.get("detect_reverted_after_post_positive_count") or 0)
+    detect_crosses_target_halfspace_count = int(lf_alignment_table.get("detect_crosses_target_halfspace_count") or 0)
+
+    risk_classification = _classify_lf_posterior_risk(
+        n_bits_compared=n_rows,
+        strong_negative_pre_count=strong_negative_pre_count,
+        post_still_negative_count=post_still_negative_count,
+        post_crosses_target_halfspace_count=post_crosses_target_halfspace_count,
+        detect_reverted_after_post_positive_count=detect_reverted_after_post_positive_count,
+    )
+
+    dominant_signal = "mixed"
+    dominant_count = max(
+        strong_negative_pre_count,
+        post_still_negative_count,
+        detect_reverted_after_post_positive_count,
+        post_crosses_target_halfspace_count,
+    )
+    if risk_classification == "host_baseline_dominant":
+        dominant_signal = "host_baseline_counts"
+    elif risk_classification == "detect_trajectory_shift":
+        dominant_signal = "detect_reversion_counts"
+    elif risk_classification == "basis_sample_mismatch":
+        dominant_signal = "post_still_negative_counts"
+
+    route_layer_node = route_basis_bridge.get("route_layer") if isinstance(route_basis_bridge, dict) else None
+    route_layer = cast(Dict[str, Any], route_layer_node) if isinstance(route_layer_node, dict) else {}
+    routing_pattern_summary = {
+        "route_basis_bridge_digest": route_basis_bridge_digest,
+        "route_source": route_layer.get("route_source"),
+        "feature_routing_mode": route_layer.get("feature_routing_mode"),
+        "lf_feature_cols_source": route_layer.get("lf_feature_cols_source"),
+        "region_index_digest": route_basis_bridge.get("region_index_digest") if isinstance(route_basis_bridge, dict) else None,
+        "mismatch_dimension_count": len(high_confidence_mismatch_dimensions),
+        "mismatch_dimension_indices": mismatch_dimension_indices,
+        "mismatch_feature_cols": mismatch_feature_cols,
+        "mismatch_feature_col_counts": mismatch_feature_col_counts,
+    }
+    host_baseline_risk_summary = {
+        "strong_negative_pre_count": strong_negative_pre_count,
+        "post_still_negative_count": post_still_negative_count,
+        "detect_reverted_after_post_positive_count": detect_reverted_after_post_positive_count,
+        "post_crosses_target_halfspace_count": post_crosses_target_halfspace_count,
+        "detect_crosses_target_halfspace_count": detect_crosses_target_halfspace_count,
+        "dominant_signal": dominant_signal,
+        "dominant_count": dominant_count,
+    }
+    primary_evidence = {
+        "evidence_type": "lf_closed_loop_posterior_counts",
+        "risk_classification_driver": risk_classification,
+        "dominant_signal": dominant_signal,
+        "supporting_counts": host_baseline_risk_summary,
+        "high_confidence_mismatch_count": len(high_confidence_mismatch_dimensions),
+        "confidence_threshold": confidence_threshold,
+    }
+
+    return {
+        "artifact_type": "lf_planner_risk_report",
+        "risk_report_version": "v1",
+        "risk_classification": risk_classification,
+        "lf_feature_count": planner_context_mapping.get("lf_feature_count"),
+        "lf_decomposition_shape": planner_context_mapping.get("lf_decomposition_shape"),
+        "planner_rank": planner_context_mapping.get("planner_rank"),
+        "route_basis_bridge_digest": route_basis_bridge_digest,
+        "plan_digest": lf_alignment_table.get("plan_digest"),
+        "basis_digest": planner_context_mapping.get("basis_digest"),
+        "primary_evidence": primary_evidence,
+        "per_dimension_summary": per_dimension_summary,
+        "high_confidence_mismatch_dimensions": high_confidence_mismatch_dimensions,
+        "routing_pattern_summary": routing_pattern_summary,
+        "host_baseline_risk_summary": host_baseline_risk_summary,
     }
 
 
@@ -1572,6 +1964,10 @@ def run_detect_orchestrator(
             plan_payload,
             lf_trace_bundle=lf_attestation_trace_bundle if isinstance(lf_attestation_trace_bundle, dict) else None,
         )
+        if lf_attestation_trace_context is None:
+            lf_attestation_trace_context = {}
+        lf_attestation_trace_context.update(_extract_embed_lf_closed_loop_context(input_record))
+        lf_attestation_trace_context.update(_extract_planner_posterior_context(input_record))
 
     attestation_result = _build_detect_attestation_result(
         cfg,
@@ -6394,6 +6790,7 @@ def verify_attestation(
     s_geo: Optional[float] = None
     hf_attestation_trace: Optional[Dict[str, Any]] = None
     lf_attestation_trace: Optional[Dict[str, Any]] = None
+    lf_alignment_table: Optional[Dict[str, Any]] = None
 
     # LF 通道：基于 latent 后验与 attestation payload 的符号一致率。
     if lf_latent_features is not None:
@@ -6407,6 +6804,12 @@ def verify_attestation(
             if lf_result.get("status") == "ok":
                 s_lf = lf_result.get("lf_attestation_score")
                 lf_attestation_trace = _build_lf_attestation_trace_artifact(
+                    lf_result,
+                    attestation_digest=d_a,
+                    event_binding_digest=attest_keys.event_binding_digest,
+                    trace_commit=trace_commit,
+                )
+                lf_alignment_table = _build_lf_alignment_table_artifact(
                     lf_result,
                     attestation_digest=d_a,
                     event_binding_digest=attest_keys.event_binding_digest,
@@ -6707,5 +7110,6 @@ def verify_attestation(
         "image_evidence_result": image_evidence_result,
         "final_event_attested_decision": final_event_attested_decision,
         "_lf_attestation_trace_artifact": lf_attestation_trace,
+        "_lf_alignment_table_artifact": lf_alignment_table,
         "_hf_attestation_trace_artifact": hf_trace_artifact,
     }

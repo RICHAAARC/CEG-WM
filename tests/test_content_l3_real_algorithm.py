@@ -18,6 +18,7 @@ from main.watermarking.content_chain.subspace.subspace_planner_impl import (
     SUBSPACE_PLANNER_ID,
     SUBSPACE_PLANNER_VERSION,
     SubspacePlannerImpl,
+    _build_lf_planner_risk_report,
 )
 from main.watermarking.content_chain.semantic_mask_provider import (
     SemanticMaskProvider,
@@ -367,4 +368,56 @@ def test_content_l3_subspace_plan_requires_nonempty_route_basis_bridge():
     assert routed_matrix_layer.get("matrix_source") == "build_routed_decomposition_matrices"
     assert dual_subspace_estimation.get("lf_basis_source") == "lf_decomposition_matrix"
     assert dual_subspace_estimation.get("hf_basis_source") == "hf_decomposition_matrix"
+
+
+def test_lf_planner_risk_report_classifies_host_baseline_dominant() -> None:
+    lf_matrix = [
+        [3.0, 3.0],
+        [3.2, 2.8],
+        [2.9, 3.1],
+        [3.1, 2.9],
+    ]
+    lf_projection_matrix = [
+        [1.0],
+        [1.0],
+        [0.0],
+        [0.0],
+    ]
+    feature_routing = {"lf_feature_cols": [0, 1]}
+
+    report = _build_lf_planner_risk_report(
+        lf_decomposition_matrix=lf_matrix,
+        lf_projection_matrix=lf_projection_matrix,
+        feature_routing=feature_routing,
+        planner_rank=1,
+    )
+
+    assert report["risk_classification"] == "host_baseline_dominant"
+    assert report["host_baseline_dominant_flag"] is True
+
+
+def test_lf_planner_risk_report_classifies_detect_trajectory_shift() -> None:
+    lf_matrix = [
+        [1.0, -1.0],
+        [-1.0, 1.0],
+        [1.0, -1.0],
+        [-1.0, 1.0],
+    ]
+    lf_projection_matrix = [
+        [1.0, 0.0],
+        [0.0, 1.0],
+        [0.0, 0.0],
+        [0.0, 0.0],
+    ]
+    feature_routing = {"lf_feature_cols": [0, 1]}
+
+    report = _build_lf_planner_risk_report(
+        lf_decomposition_matrix=lf_matrix,
+        lf_projection_matrix=lf_projection_matrix,
+        feature_routing=feature_routing,
+        planner_rank=2,
+    )
+
+    assert report["risk_classification"] == "detect_trajectory_shift"
+    assert report["detect_trajectory_shift_flag"] is True
 

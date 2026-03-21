@@ -443,6 +443,17 @@ def apply_low_freq_encoding_torch(coeffs: Any, key: int, cfg: Dict[str, Any]) ->
 
     coeffs_fp32 = coeffs.to(dtype=torch.float32)
     encoded_coeffs = coeffs_fp32 + float(strength) * watermark_pattern
+    injected_template = float(strength) * watermark_pattern
+    expected_bit_signs = [int(value) for value in np.asarray(template_bundle["codeword_bipolar"], dtype=np.float32).tolist()]
+    lf_closed_loop_summary = {
+        "summary_version": "v1",
+        "coeffs_count": n,
+        "expected_bit_signs": expected_bit_signs,
+        "pre_injection_coeffs": [float(value) for value in coeffs_fp32.detach().cpu().tolist()],
+        "injected_template_coeffs": [float(value) for value in injected_template.detach().cpu().tolist()],
+        "post_injection_coeffs": [float(value) for value in encoded_coeffs.detach().cpu().tolist()],
+    }
+    lf_closed_loop_digest = digests.canonical_sha256(lf_closed_loop_summary)
 
     encoding_evidence = {
         "strength_applied": float(strength),
@@ -458,6 +469,8 @@ def apply_low_freq_encoding_torch(coeffs: Any, key: int, cfg: Dict[str, Any]) ->
         "coeffs_after_norm": float(torch.linalg.vector_norm(encoded_coeffs).item()),
         "pattern_norm": float(torch.linalg.vector_norm(watermark_pattern).item()),
         "coeffs_count": n,
+        "lf_closed_loop_summary": lf_closed_loop_summary,
+        "lf_closed_loop_digest": lf_closed_loop_digest,
     }
     return encoded_coeffs, encoding_evidence
 
@@ -639,6 +652,17 @@ def apply_low_freq_encoding(
 
     # 以 strength 系数应用水印。
     encoded_coeffs = coeffs + strength * watermark_pattern
+    injected_template = float(strength) * watermark_pattern
+    expected_bit_signs = [int(value) for value in np.asarray(template_bundle["codeword_bipolar"], dtype=np.float32).tolist()]
+    lf_closed_loop_summary = {
+        "summary_version": "v1",
+        "coeffs_count": n,
+        "expected_bit_signs": expected_bit_signs,
+        "pre_injection_coeffs": [float(value) for value in coeffs.tolist()],
+        "injected_template_coeffs": [float(value) for value in injected_template.tolist()],
+        "post_injection_coeffs": [float(value) for value in encoded_coeffs.tolist()],
+    }
+    lf_closed_loop_digest = digests.canonical_sha256(lf_closed_loop_summary)
 
     # 构造编码证据（摘要不含原始张量）。
     encoding_evidence = {
@@ -655,6 +679,8 @@ def apply_low_freq_encoding(
         "coeffs_after_norm": float(np.linalg.norm(encoded_coeffs)),
         "pattern_norm": float(np.linalg.norm(watermark_pattern)),
         "coeffs_count": n,
+        "lf_closed_loop_summary": lf_closed_loop_summary,
+        "lf_closed_loop_digest": lf_closed_loop_digest,
     }
 
     return encoded_coeffs.astype(np.float32), encoding_evidence

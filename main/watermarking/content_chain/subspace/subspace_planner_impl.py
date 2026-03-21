@@ -73,6 +73,89 @@ def _stable_lstsq(left: Any, right: Any, rcond: float = 1e-6) -> np.ndarray:
     return solution.detach().cpu().numpy().astype(np.float64, copy=False)
 
 
+def _build_lf_planner_risk_report(
+    *,
+    lf_decomposition_matrix: Any,
+    lf_projection_matrix: Any,
+    feature_routing: Dict[str, Any],
+    planner_rank: int,
+) -> Dict[str, Any]:
+    lf_matrix = np.asarray(lf_decomposition_matrix, dtype=np.float64)
+    projection_matrix = np.asarray(lf_projection_matrix, dtype=np.float64)
+    if lf_matrix.ndim != 2 or projection_matrix.ndim != 2:
+        raise ValueError("lf planner risk inputs must be rank-2")
+
+    lf_feature_cols = list(feature_routing.get("lf_feature_cols", []))
+    if len(lf_feature_cols) == 0:
+        raise ValueError("lf_feature_cols must be non-empty")
+
+    basis_subset = projection_matrix[lf_feature_cols, :]
+    if basis_subset.shape[0] != lf_matrix.shape[1]:
+        raise ValueError("lf basis rows must align with routed LF decomposition columns")
+
+    column_means = np.mean(lf_matrix, axis=0)
+    column_stds = np.std(lf_matrix, axis=0)
+    sign_stability = float(np.mean(np.abs(np.mean(np.sign(lf_matrix), axis=0)))) if lf_matrix.size > 0 else 0.0
+    mean_norm = math.sqrt(float(np.sum(column_means * column_means)))
+    std_norm = math.sqrt(float(np.sum(column_stds * column_stds)))
+    host_baseline_ratio = float(mean_norm / max(std_norm, 1e-8))
+
+    basis_response = np.zeros((lf_matrix.shape[0], basis_subset.shape[1]), dtype=np.float64)
+    for row_index in range(lf_matrix.shape[0]):
+        for col_index in range(basis_subset.shape[1]):
+            basis_response[row_index, col_index] = float(np.sum(lf_matrix[row_index] * basis_subset[:, col_index]))
+    lf_energy = float(np.sum(lf_matrix ** 2))
+    response_energy = float(np.sum(basis_response ** 2))
+    normalized_response_ratio = float(response_energy / max(lf_energy, 1e-8))
+    normalized_response_ratio = max(0.0, min(normalized_response_ratio, 1.0))
+    reconstruction_residual_ratio = float(1.0 - normalized_response_ratio)
+
+    column_energy = np.sum(lf_matrix ** 2, axis=0)
+    total_energy = float(np.sum(column_energy))
+    sorted_energy = np.sort(column_energy)[::-1]
+    top1_energy_ratio = float(sorted_energy[0] / total_energy) if total_energy > 0.0 and sorted_energy.size > 0 else 0.0
+    topk = max(1, min(int(planner_rank), int(sorted_energy.shape[0])))
+    topk_energy_ratio = float(np.sum(sorted_energy[:topk]) / total_energy) if total_energy > 0.0 else 0.0
+
+    host_baseline_dominant = host_baseline_ratio >= 1.0 and sign_stability >= 0.55
+    basis_sample_mismatch = reconstruction_residual_ratio >= 0.35
+    detect_trajectory_shift = (
+        host_baseline_ratio < 0.75
+        and reconstruction_residual_ratio < 0.2
+        and sign_stability < 0.45
+    )
+
+    risk_flags = [host_baseline_dominant, basis_sample_mismatch, detect_trajectory_shift]
+    if sum(risk_flags) >= 2:
+        risk_classification = "mixed"
+    elif host_baseline_dominant:
+        risk_classification = "host_baseline_dominant"
+    elif basis_sample_mismatch:
+        risk_classification = "basis_sample_mismatch"
+    elif detect_trajectory_shift:
+        risk_classification = "detect_trajectory_shift"
+    else:
+        risk_classification = "mixed"
+
+    return {
+        "artifact_type": "lf_planner_risk_report",
+        "risk_report_version": "v1",
+        "risk_classification": risk_classification,
+        "lf_feature_count": len(lf_feature_cols),
+        "lf_decomposition_shape": [int(lf_matrix.shape[0]), int(lf_matrix.shape[1])],
+        "planner_rank": int(planner_rank),
+        "host_baseline_ratio": host_baseline_ratio,
+        "sign_stability": sign_stability,
+        "reconstruction_residual_ratio": reconstruction_residual_ratio,
+        "top1_energy_ratio": top1_energy_ratio,
+        "topk_energy_ratio": topk_energy_ratio,
+        "host_baseline_dominant_flag": host_baseline_dominant,
+        "basis_sample_mismatch_flag": basis_sample_mismatch,
+        "detect_trajectory_shift_flag": detect_trajectory_shift,
+        "route_basis_bridge_digest": digests.canonical_sha256(feature_routing),
+    }
+
+
 def build_region_index_spec_from_mask(mask: Any) -> Tuple[Dict[str, Any], Dict[str, Any], str]:
     """
     功能：将掩码空间结构转换为区域索引规格。 
@@ -843,6 +926,7 @@ class SubspacePlannerImpl:
                 "subspace_evidence_semantics": basis_summary.get("subspace_evidence_semantics"),
                 "subspace_conditioning": basis_summary.get("subspace_conditioning"),
                 "route_basis_bridge": route_basis_bridge,
+                "lf_planner_risk_report": basis_summary.get("lf_planner_risk_report"),
             }
 
             return SubspacePlanEvidence(
@@ -986,6 +1070,13 @@ class SubspacePlannerImpl:
         if effective_rank <= 0:
             raise ValueError("rank must be positive after clipping")
 
+        lf_planner_risk_report = _build_lf_planner_risk_report(
+            lf_decomposition_matrix=routed_matrices.get("lf_decomposition_matrix"),
+            lf_projection_matrix=routed_subspaces.get("lf_projection_matrix"),
+            feature_routing=feature_routing,
+            planner_rank=effective_rank,
+        )
+
         singular_energy = singular_values ** 2
         total_energy = float(np.sum(singular_energy))
         if not math.isfinite(total_energy) or total_energy <= 0:
@@ -1110,6 +1201,7 @@ class SubspacePlannerImpl:
             "hf_feature_cols": feature_routing.get("hf_feature_cols", []),
             "lf_feature_cols": feature_routing.get("lf_feature_cols", []),
             "route_basis_bridge": route_basis_bridge,
+            "lf_planner_risk_report": lf_planner_risk_report,
             # 新增：可验证锚点供 plan_digest 使用
             "samples_anchor": samples_anchor,
             "jvp_anchor": jvp_anchor
