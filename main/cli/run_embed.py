@@ -154,20 +154,24 @@ def _as_dict_payload(value: Any) -> Dict[str, Any] | None:
 
 def _requires_statement_only_formal_precompute(cfg: Dict[str, Any]) -> bool:
     """
-    功能：判断当前是否属于必须具备 pre-inference formal plan 的正式路径。 
+    功能：判断当前是否属于 statement_only 两阶段 formal object 正式路径。 
 
-    Determine whether the current run requires a pre-inference formal plan.
+    Determine whether the current run requires the two-stage statement-only
+    formal object flow.
 
     Args:
         cfg: Configuration mapping.
 
     Returns:
-        True when paper formal path requires statement-only precompute.
+        True when paper formal path requires statement-only scaffold plus
+        runtime finalization.
     """
-    paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
+    paper_cfg_node = cfg.get("paper_faithfulness")
+    paper_cfg = cast(Dict[str, Any], paper_cfg_node) if isinstance(paper_cfg_node, dict) else {}
     if not bool(paper_cfg.get("enabled", False)):
         return False
-    attestation_cfg = cfg.get("attestation") if isinstance(cfg.get("attestation"), dict) else {}
+    attestation_cfg_node = cfg.get("attestation")
+    attestation_cfg = cast(Dict[str, Any], attestation_cfg_node) if isinstance(attestation_cfg_node, dict) else {}
     use_trajectory_mix = attestation_cfg.get("use_trajectory_mix")
     return isinstance(use_trajectory_mix, bool) and not use_trajectory_mix
 
@@ -199,13 +203,130 @@ def _resolve_subspace_precompute_failure_reason(subspace_result: Any) -> str:
         status_value = payload.get("status")
         if isinstance(status_value, str) and status_value:
             return f"precompute_status={status_value}"
-    direct_reason = getattr(cast(Any, subspace_result), "plan_failure_reason", None)
+    direct_reason = getattr(subspace_result, "plan_failure_reason", None)
     if isinstance(direct_reason, str) and direct_reason:
         return direct_reason
-    status_value = getattr(cast(Any, subspace_result), "status", None)
+    status_value = getattr(subspace_result, "status", None)
     if isinstance(status_value, str) and status_value:
         return f"precompute_status={status_value}"
     return "precomputed_formal_plan_incomplete"
+
+
+def _build_statement_only_formal_scaffold(
+    cfg: Dict[str, Any],
+    cfg_digest: str | None,
+    seed_value: int | None,
+    content_result_pre_payload: Dict[str, Any] | None,
+    planner_inputs: Dict[str, Any] | None,
+) -> tuple[Dict[str, Any] | None, str | None]:
+    """
+    功能：基于 pre-inference 静态输入域构造 statement_only formal scaffold。 
+
+    Build the pre-inference scaffold for the statement-only formal path.
+
+    Args:
+        cfg: Configuration mapping.
+        cfg_digest: Canonical config digest.
+        seed_value: Resolved runtime seed.
+        content_result_pre_payload: Pre-content payload.
+        planner_inputs: Planner input mapping built before runtime finalization.
+
+    Returns:
+        Tuple of (formal_scaffold, failure_reason).
+    """
+    if not isinstance(content_result_pre_payload, dict):
+        return None, "scaffold_content_payload_absent"
+    if not isinstance(planner_inputs, dict):
+        return None, "scaffold_planner_inputs_absent"
+
+    mask_digest = _normalize_plan_digest(content_result_pre_payload.get("mask_digest"))
+    if mask_digest is None:
+        return None, "scaffold_mask_digest_absent"
+
+    trace_signature = planner_inputs.get("trace_signature")
+    if not isinstance(trace_signature, dict) or not trace_signature:
+        return None, "scaffold_trace_signature_absent"
+
+    mask_summary = planner_inputs.get("mask_summary")
+    if not isinstance(mask_summary, dict) or not mask_summary:
+        return None, "scaffold_mask_summary_absent"
+
+    routing_digest = planner_inputs.get("routing_digest")
+    if not isinstance(routing_digest, str) or not routing_digest:
+        return None, "scaffold_routing_digest_absent"
+
+    formal_scaffold: Dict[str, Any] = {
+        "formal_object_stage": "pre_inference_scaffold",
+        "formal_scaffold_version": "v1",
+        "event_binding_mode": "statement_only",
+        "policy_path": cfg.get("policy_path"),
+        "cfg_digest": cfg_digest,
+        "model_id": cfg.get("model_id"),
+        "seed": seed_value,
+        "prompt": cfg.get("inference_prompt"),
+        "trace_signature": dict(cast(Dict[str, Any], trace_signature)),
+        "mask_digest": mask_digest,
+        "mask_summary": dict(cast(Dict[str, Any], mask_summary)),
+        "routing_digest": routing_digest,
+    }
+    formal_scaffold["formal_scaffold_digest"] = digests.canonical_sha256(formal_scaffold)
+    return formal_scaffold, None
+
+
+def _resolve_runtime_executable_plan_failure_reason(
+    subspace_result: Any,
+    runtime_capture_status: str | None = None,
+) -> str:
+    """
+    功能：解析 runtime executable formal plan finalization 的主失败原因。 
+
+    Resolve the primary failure reason for runtime executable-plan finalization.
+
+    Args:
+        subspace_result: Finalization planner result object or mapping.
+        runtime_capture_status: Optional runtime capture inference status.
+
+    Returns:
+        Structured failure-reason string.
+    """
+    reason = _resolve_subspace_precompute_failure_reason(subspace_result)
+    if reason != "precomputed_formal_plan_incomplete":
+        return reason
+    if isinstance(runtime_capture_status, str) and runtime_capture_status and runtime_capture_status != infer_runtime.INFERENCE_STATUS_OK:
+        return f"runtime_capture_status={runtime_capture_status}"
+    return "runtime_executable_formal_plan_incomplete"
+
+
+def _extract_subspace_plan_payload(subspace_result: Any) -> Dict[str, Any] | None:
+    """
+    功能：提取 subspace 结果中的内层 executable plan 负载。 
+
+    Extract the inner executable plan payload from a subspace result.
+
+    Args:
+        subspace_result: Subspace result object or mapping.
+
+    Returns:
+        Plan payload mapping when available; otherwise None.
+    """
+    plan_candidate = getattr(subspace_result, "plan", None)
+    if isinstance(plan_candidate, dict):
+        return cast(Dict[str, Any], plan_candidate)
+    if hasattr(subspace_result, "as_dict"):
+        payload_candidate = subspace_result.as_dict()
+        if isinstance(payload_candidate, dict):
+            payload = cast(Dict[str, Any], payload_candidate)
+            plan_node = payload.get("plan")
+            if isinstance(plan_node, dict):
+                return cast(Dict[str, Any], plan_node)
+            return payload
+    if isinstance(subspace_result, dict):
+        payload = cast(Dict[str, Any], subspace_result)
+        plan_node = payload.get("plan")
+        if isinstance(plan_node, dict):
+            return cast(Dict[str, Any], plan_node)
+        return payload
+    return None
 
 
 def _bind_embed_plan_digest_consistency(
@@ -317,9 +438,9 @@ def _extract_subspace_result_digests(subspace_result: Any) -> tuple[str | None, 
 
 def _resolve_formal_subspace_override(subspace_result: Any) -> Any | None:
     """
-    功能：仅在 precomputed formal plan 与 basis 都可用时复用 override。 
+    功能：仅在 executable formal plan 与 basis 都可用时复用 override。 
 
-    Reuse the precomputed subspace override only when both formal plan and
+    Reuse the finalized subspace override only when both formal plan and
     basis digests are already available.
 
     Args:
@@ -373,35 +494,6 @@ def _write_embed_attestation_artifacts(
     signed_bundle = attestation_payload.get("signed_bundle")
     if isinstance(signed_bundle, dict):
         records_io.write_artifact_json(str(attestation_dir / "attestation_bundle.json"), cast(Dict[str, Any], signed_bundle))
-
-
-def _write_embed_planner_artifacts(
-    planner_artifacts: Dict[str, Any] | None,
-    artifacts_dir: Path,
-) -> None:
-    """
-    功能：将 embed 主链 planner 诊断工件落盘到 artifacts/planner。
-
-    Persist embed-side planner diagnostic artifacts produced by the main path.
-
-    Args:
-        planner_artifacts: Planner artifact mapping.
-        artifacts_dir: Current run artifacts directory.
-
-    Returns:
-        None.
-    """
-    if not isinstance(planner_artifacts, dict):
-        return
-    lf_planner_risk_report = planner_artifacts.get("lf_planner_risk_report")
-    if not isinstance(lf_planner_risk_report, dict):
-        return
-    planner_dir = artifacts_dir / "planner"
-    planner_dir.mkdir(parents=True, exist_ok=True)
-    records_io.write_artifact_json(
-        str(planner_dir / "lf_planner_risk_report.json"),
-        cast(Dict[str, Any], lf_planner_risk_report),
-    )
 
 
 def bind_impl_identity_fields(
@@ -700,35 +792,56 @@ def run_embed(
             elif hasattr(content_result_pre, "mask_digest"):
                 mask_digest = content_result_pre.mask_digest
 
+            statement_only_formal_path = _requires_statement_only_formal_precompute(cfg)
+            plan_payload: Any = None
+            plan_digest_precomputed = None
+            basis_digest_precomputed = None
+            subspace_result_pre: Any = None
+            subspace_result_runtime_finalized: Any = None
+            formal_scaffold: Dict[str, Any] | None = None
+            runtime_finalization_meta: Dict[str, Any] = {
+                "status": "not_required",
+                "reason": None,
+                "capture_inference_status": None,
+                "trajectory_cache_bound": False,
+                "final_plan_digest": None,
+                "final_basis_digest": None,
+            }
+
             planner_inputs = _build_planner_inputs_for_runtime(cfg, None, content_result_pre_payload)
-            subspace_result_pre = impl_set.subspace_planner.plan(
-                cfg,
-                mask_digest=mask_digest,
-                cfg_digest=cfg_digest,
-                inputs=planner_inputs
-            )
-
-            # 提取内层 plan dict（含 lf_basis/hf_basis 顶层键），供 injection context 使用。
-            # 不能用 as_dict()（外层 evidence 包装），否则 _build_plan_for_injection 找不到
-            # lf_basis 顶层键，会回退到运行时 basis 绑定，导致 embed/detect basis 不一致。
-            plan_candidate = getattr(subspace_result_pre, "plan", None)
-            if isinstance(plan_candidate, dict):
-                plan_payload: Any = cast(Dict[str, Any], plan_candidate)
-            elif hasattr(subspace_result_pre, "as_dict"):
-                _evidence_dict = cast(Dict[str, Any], subspace_result_pre.as_dict())
-                _evidence_plan = _evidence_dict.get("plan")
-                plan_payload = cast(Dict[str, Any], _evidence_plan) if isinstance(_evidence_plan, dict) else _evidence_dict
-            else:
-                plan_payload = subspace_result_pre
-            plan_digest_precomputed, basis_digest_precomputed = _extract_subspace_result_digests(subspace_result_pre)
-
-            if _requires_statement_only_formal_precompute(cfg):
-                if not isinstance(plan_payload, dict) or plan_digest_precomputed is None or basis_digest_precomputed is None:
-                    precompute_failure_reason = _resolve_subspace_precompute_failure_reason(subspace_result_pre)
+            if statement_only_formal_path:
+                formal_scaffold, scaffold_failure_reason = _build_statement_only_formal_scaffold(
+                    cfg,
+                    cfg_digest,
+                    seed_value,
+                    content_result_pre_payload,
+                    planner_inputs,
+                )
+                if formal_scaffold is None:
                     raise ValueError(
-                        "formal path unavailable: pre-inference statement_only plan requires precomputed "
-                        f"plan_digest and basis_digest; reason={precompute_failure_reason}"
+                        "formal scaffold unavailable: statement_only pre-inference scaffold is required; "
+                        f"reason={scaffold_failure_reason or 'scaffold_unavailable'}"
                     )
+                cfg["__formal_scaffold__"] = formal_scaffold
+                run_meta["formal_two_stage"] = {
+                    "scaffold_status": "ok",
+                    "scaffold_reason": None,
+                    "formal_scaffold": formal_scaffold,
+                    "runtime_executable_plan_status": "pending",
+                    "runtime_executable_plan_reason": None,
+                    "runtime_capture_inference_status": None,
+                    "final_plan_digest": None,
+                    "final_basis_digest": None,
+                }
+            else:
+                subspace_result_pre = impl_set.subspace_planner.plan(
+                    cfg,
+                    mask_digest=mask_digest,
+                    cfg_digest=cfg_digest,
+                    inputs=planner_inputs
+                )
+                plan_payload = _extract_subspace_plan_payload(subspace_result_pre)
+                plan_digest_precomputed, basis_digest_precomputed = _extract_subspace_result_digests(subspace_result_pre)
 
             injection_context = None
             injection_modifier = None
@@ -755,6 +868,92 @@ def run_embed(
             if not isinstance(pinned_time_bucket, str) or not pinned_time_bucket:
                 cfg["__attestation_time_bucket__"] = time_utils.now_utc_iso_z().split("T", 1)[0]
 
+            pipeline_obj = pipeline_result.get("pipeline_obj")
+            device = cfg.get("device", "cpu")
+
+            if statement_only_formal_path:
+                from main.diffusion.sd3.trajectory_tap import LatentTrajectoryCache
+
+                runtime_capture_cache = LatentTrajectoryCache()
+                runtime_capture_result = infer_runtime.run_sd3_inference(
+                    cfg,
+                    pipeline_obj,
+                    device,
+                    seed_value,
+                    injection_context=None,
+                    injection_modifier=None,
+                    capture_final_latents=False,
+                    trajectory_latent_cache=runtime_capture_cache,
+                )
+                runtime_capture_status_value = runtime_capture_result.get("inference_status")
+                runtime_capture_status = (
+                    runtime_capture_status_value
+                    if isinstance(runtime_capture_status_value, str) and runtime_capture_status_value
+                    else infer_runtime.INFERENCE_STATUS_FAILED
+                )
+                if pipeline_obj is not None:
+                    cfg["__embed_pipeline_obj__"] = pipeline_obj
+                if not runtime_capture_cache.is_empty():
+                    cfg["__embed_trajectory_latent_cache__"] = runtime_capture_cache
+                planner_inputs_runtime = _build_planner_inputs_for_runtime(
+                    cfg,
+                    runtime_capture_result.get("trajectory_evidence") if isinstance(runtime_capture_result.get("trajectory_evidence"), dict) else None,
+                    content_result_pre_payload,
+                )
+                subspace_result_runtime_finalized = impl_set.subspace_planner.plan(
+                    cfg,
+                    mask_digest=mask_digest,
+                    cfg_digest=cfg_digest,
+                    inputs=planner_inputs_runtime,
+                )
+                plan_payload = _extract_subspace_plan_payload(subspace_result_runtime_finalized)
+                plan_digest_precomputed, basis_digest_precomputed = _extract_subspace_result_digests(subspace_result_runtime_finalized)
+                if not isinstance(plan_payload, dict) or plan_digest_precomputed is None or basis_digest_precomputed is None:
+                    runtime_finalization_reason = _resolve_runtime_executable_plan_failure_reason(
+                        subspace_result_runtime_finalized,
+                        runtime_capture_status=runtime_capture_status,
+                    )
+                    runtime_finalization_meta = {
+                        "status": "failed",
+                        "reason": runtime_finalization_reason,
+                        "capture_inference_status": runtime_capture_status,
+                        "trajectory_cache_bound": not runtime_capture_cache.is_empty(),
+                        "final_plan_digest": plan_digest_precomputed,
+                        "final_basis_digest": basis_digest_precomputed,
+                    }
+                    run_meta["formal_two_stage"] = {
+                        "scaffold_status": "ok",
+                        "scaffold_reason": None,
+                        "formal_scaffold": formal_scaffold,
+                        "runtime_executable_plan_status": "failed",
+                        "runtime_executable_plan_reason": runtime_finalization_reason,
+                        "runtime_capture_inference_status": runtime_capture_status,
+                        "final_plan_digest": plan_digest_precomputed,
+                        "final_basis_digest": basis_digest_precomputed,
+                    }
+                    raise ValueError(
+                        "runtime executable formal plan unavailable: statement_only runtime finalization failed; "
+                        f"reason={runtime_finalization_reason}"
+                    )
+                runtime_finalization_meta = {
+                    "status": "ok",
+                    "reason": None,
+                    "capture_inference_status": runtime_capture_status,
+                    "trajectory_cache_bound": not runtime_capture_cache.is_empty(),
+                    "final_plan_digest": plan_digest_precomputed,
+                    "final_basis_digest": basis_digest_precomputed,
+                }
+                run_meta["formal_two_stage"] = {
+                    "scaffold_status": "ok",
+                    "scaffold_reason": None,
+                    "formal_scaffold": formal_scaffold,
+                    "runtime_executable_plan_status": "ok",
+                    "runtime_executable_plan_reason": None,
+                    "runtime_capture_inference_status": runtime_capture_status,
+                    "final_plan_digest": plan_digest_precomputed,
+                    "final_basis_digest": basis_digest_precomputed,
+                }
+
             if isinstance(plan_payload, dict) and isinstance(plan_digest_precomputed, str) and plan_digest_precomputed:
                 early_attestation_payload = embed_orchestrator._prepare_embed_attestation_runtime_bindings(cfg, plan_digest_precomputed)  # pyright: ignore[reportPrivateUsage]
                 if early_attestation_payload.get("attestation_status") == "ok":
@@ -778,6 +977,8 @@ def run_embed(
                     injection_plan_source = "precomputed"
                     print(f"[Paper-Faithful] Injection context created from PRE-COMPUTED plan (POST-ORCHESTRATOR决定最终spec)")
                 else:
+                    if statement_only_formal_path:
+                        raise ValueError("runtime executable formal plan unavailable: finalized executable plan missing before injection")
                     # 计划缺失：基于 fallback plan 创建推理时所需的 context
                     fallback_plan_payload: Dict[str, Any] = {
                         "plan_status": "fallback_runtime_plan",
@@ -800,8 +1001,6 @@ def run_embed(
                 injection_plan_source = None
             
             # (7.7) Real Dataflow Smoke: 在 pipeline_result 之后调用 inference
-            pipeline_obj = pipeline_result.get("pipeline_obj")
-            device = cfg.get("device", "cpu")
             seed = seed_value
             
             pipeline_fingerprint = None
@@ -978,7 +1177,8 @@ def run_embed(
                 rng=None,
                 trajectory_evidence=trajectory_evidence
             )
-            subspace_result_override = _resolve_formal_subspace_override(subspace_result_pre)
+            effective_subspace_result = subspace_result_runtime_finalized if statement_only_formal_path else subspace_result_pre
+            subspace_result_override = _resolve_formal_subspace_override(effective_subspace_result)
             record_obj: Any = run_embed_orchestrator(
                 cfg,
                 impl_set,
@@ -995,6 +1195,7 @@ def run_embed(
             cfg.pop("__embed_pipeline_obj__", None)
             cfg.pop("__embed_final_latents__", None)
             cfg.pop("__embed_trajectory_latent_cache__", None)
+            cfg.pop("__formal_scaffold__", None)
             # 将 embed 侧 latent 空间统计写入 record，供 detect 侧几何同步 cross-comparison。
             _embed_latent_stats = cfg.pop("__embed_latent_spatial_stats__", None)
             if not isinstance(record_obj, dict):
@@ -1080,6 +1281,18 @@ def run_embed(
             else:
                 content_evidence = {}
                 record["content_evidence"] = content_evidence
+
+            content_audit = content_evidence.get("audit")
+            if not isinstance(content_audit, dict):
+                content_audit = {}
+                content_evidence["audit"] = content_audit
+            if statement_only_formal_path:
+                content_audit["formal_scaffold_status"] = "ok" if isinstance(formal_scaffold, dict) else "failed"
+                if isinstance(formal_scaffold, dict):
+                    content_audit["formal_scaffold_digest"] = formal_scaffold.get("formal_scaffold_digest")
+                content_audit["runtime_executable_plan_status"] = runtime_finalization_meta.get("status")
+                content_audit["runtime_executable_plan_reason"] = runtime_finalization_meta.get("reason")
+                content_audit["runtime_capture_inference_status"] = runtime_finalization_meta.get("capture_inference_status")
             
             # 写入 pipeline_fingerprint 和 pipeline_fingerprint_digest
             content_evidence["pipeline_fingerprint"] = pipeline_fingerprint

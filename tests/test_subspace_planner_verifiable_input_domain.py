@@ -260,6 +260,89 @@ class TestEstimateJVPMatrix:
         assert np.allclose(jvp1, jvp2)
         assert anchor1["probe_seed_digest"] == anchor2["probe_seed_digest"]
 
+    def test_plan_reports_runtime_jvp_operator_required_reason_on_formal_path(self):
+        """paper formal path 缺少 runtime jvp_operator 时，plan 级失败原因不得退化为 invalid_subspace_params。"""
+        planner = SubspacePlannerImpl(
+            impl_id=SUBSPACE_PLANNER_ID,
+            impl_version=SUBSPACE_PLANNER_VERSION,
+            impl_digest=digests.canonical_sha256({"test": "digest"})
+        )
+
+        cfg = {
+            "paper_faithfulness": {"enabled": True},
+            "watermark": {
+                "subspace": {
+                    "enabled": True,
+                    "rank": 4,
+                    "sample_count": 8,
+                    "feature_dim": 16,
+                    "seed": 42,
+                    "jacobian_probe_count": 2,
+                    "jacobian_eps": 1e-3
+                }
+            }
+        }
+
+        inputs = {
+            "trace_signature": {
+                "num_inference_steps": 20,
+                "guidance_scale": 7.0,
+                "height": 512,
+                "width": 512,
+            }
+        }
+
+        result = planner.plan(cfg, mask_digest="mask_digest_001", inputs=inputs)
+
+        assert result.status == "failed"
+        assert result.plan_digest is None
+        assert result.basis_digest is None
+        assert result.plan_failure_reason == "runtime_jvp_operator_required"
+
+    def test_plan_reports_paper_runtime_dependency_reason_for_invalid_runtime_operator(self):
+        """paper formal path 提供无效 runtime operator 时，plan 级失败原因应标记为 runtime dependency unavailable。"""
+        planner = SubspacePlannerImpl(
+            impl_id=SUBSPACE_PLANNER_ID,
+            impl_version=SUBSPACE_PLANNER_VERSION,
+            impl_digest=digests.canonical_sha256({"test": "digest"})
+        )
+
+        cfg = {
+            "paper_faithfulness": {"enabled": True},
+            "watermark": {
+                "subspace": {
+                    "enabled": True,
+                    "rank": 4,
+                    "sample_count": 8,
+                    "feature_dim": 16,
+                    "seed": 42,
+                    "jacobian_probe_count": 2,
+                    "jacobian_eps": 1e-3
+                }
+            }
+        }
+
+        def _invalid_runtime_operator(state_vector: np.ndarray, probe_vector: np.ndarray, eps: float) -> np.ndarray:
+            _ = state_vector
+            _ = probe_vector
+            _ = eps
+            return np.asarray([1.0, 2.0], dtype=np.float64)
+
+        inputs = {
+            "trace_signature": {
+                "num_inference_steps": 20,
+                "guidance_scale": 7.0,
+                "height": 512,
+                "width": 512,
+            },
+            "jvp_operator": _invalid_runtime_operator,
+        }
+
+        result = planner.plan(cfg, mask_digest="mask_digest_001", inputs=inputs)
+
+        assert result.status == "failed"
+        assert result.plan_failure_reason == "paper_formal_runtime_dependency_unavailable"
+
 
 class TestVerifiableInputDomainIntegration:
     """集成测试：验证可验证输入域通过整个 planner 流程。"""

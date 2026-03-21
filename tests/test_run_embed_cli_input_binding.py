@@ -24,6 +24,10 @@ class _StopAfterPlannerPrecompute(Exception):
     """Sentinel exception to stop run_embed after planner precompute."""
 
 
+class _StopAfterRunEmbedOrchestrator(Exception):
+    """Sentinel exception to stop run_embed after entering embed orchestrator."""
+
+
 class _FakeSubspacePlanResult:
     """Minimal subspace result payload for run_embed precompute tests."""
 
@@ -183,6 +187,66 @@ def test_resolve_formal_subspace_override_requires_plan_and_basis() -> None:
 
     assert run_embed_module._resolve_formal_subspace_override(absent_precompute) is None
     assert run_embed_module._resolve_formal_subspace_override(formal_precompute) is formal_precompute
+
+
+def test_build_statement_only_formal_scaffold_uses_static_input_domain() -> None:
+    """
+    功能：statement_only formal scaffold 只能绑定 pre-inference 静态输入域。
+    """
+    cfg_payload = {
+        "policy_path": "content_np_geo_rescue",
+        "model_id": "sd3-test",
+        "inference_prompt": "scaffold prompt",
+    }
+    content_payload = {
+        "mask_digest": "mask_digest_anchor",
+        "mask_stats": {"routing_digest": "routing_digest_anchor", "area_ratio": 0.25},
+    }
+    planner_inputs = {
+        "trace_signature": {"num_inference_steps": 4, "guidance_scale": 7.0, "height": 512, "width": 512},
+        "mask_summary": {"routing_digest": "routing_digest_anchor", "area_ratio": 0.25},
+        "routing_digest": "routing_digest_anchor",
+        "jvp_operator": object(),
+    }
+
+    scaffold, failure_reason = run_embed_module._build_statement_only_formal_scaffold(
+        cfg_payload,
+        "cfg_digest_anchor",
+        7,
+        content_payload,
+        planner_inputs,
+    )
+
+    assert failure_reason is None
+    assert isinstance(scaffold, dict)
+    assert scaffold["formal_object_stage"] == "pre_inference_scaffold"
+    assert scaffold["mask_digest"] == "mask_digest_anchor"
+    assert scaffold["routing_digest"] == "routing_digest_anchor"
+    assert isinstance(scaffold.get("formal_scaffold_digest"), str)
+    assert "plan_digest" not in scaffold
+    assert "basis_digest" not in scaffold
+
+
+def test_build_statement_only_formal_scaffold_requires_routing_digest() -> None:
+    """
+    功能：statement_only formal scaffold 缺少 routing_digest 时必须失败。
+    """
+    scaffold, failure_reason = run_embed_module._build_statement_only_formal_scaffold(
+        {"policy_path": "content_np_geo_rescue"},
+        "cfg_digest_anchor",
+        7,
+        {
+            "mask_digest": "mask_digest_anchor",
+            "mask_stats": {"area_ratio": 0.25},
+        },
+        {
+            "trace_signature": {"num_inference_steps": 4},
+            "mask_summary": {"area_ratio": 0.25},
+        },
+    )
+
+    assert scaffold is None
+    assert failure_reason == "scaffold_routing_digest_absent"
 
 
 def test_run_embed_binds_input_image_before_content_precompute(
@@ -471,12 +535,12 @@ def test_run_embed_preview_generation_binds_generated_input_before_content_preco
     assert Path(preview_path).exists()
 
 
-def test_run_embed_precompute_planner_inputs_include_precontent_payload(
+def test_run_embed_runtime_finalization_planner_inputs_include_precontent_payload(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """
-    功能：pre-inference planner 必须消费 pre-content payload 中的 routing_digest 与 mask_summary。
+    功能：runtime finalization planner 必须消费 pre-content payload 中的 routing_digest 与 mask_summary。
     """
     run_root = tmp_path / "run"
     records_dir = run_root / "records"
@@ -610,6 +674,22 @@ def test_run_embed_precompute_planner_inputs_include_precontent_payload(
         "compute_impl_identity_digest",
         lambda *_: "impl_identity_digest_anchor",
     )
+    def _fake_runtime_capture(*args, **kwargs):
+        trajectory_cache = kwargs.get("trajectory_latent_cache")
+        if trajectory_cache is not None:
+            trajectory_cache.capture(0, np.ones((1, 4, 4, 4), dtype=np.float32))
+            trajectory_cache.capture(1, np.full((1, 4, 4, 4), 2.0, dtype=np.float32))
+            trajectory_cache.capture(2, np.full((1, 4, 4, 4), 3.0, dtype=np.float32))
+        return {
+            "inference_status": "ok",
+            "inference_error": None,
+            "inference_runtime_meta": {},
+            "trajectory_evidence": {},
+            "injection_evidence": {},
+            "output_image": Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8)),
+        }
+
+    monkeypatch.setattr(run_embed_module.infer_runtime, "run_sd3_inference", _fake_runtime_capture)
     monkeypatch.setattr(
         run_embed_module.embed_orchestrator,
         "_prepare_embed_attestation_runtime_bindings",
@@ -627,14 +707,15 @@ def test_run_embed_precompute_planner_inputs_include_precontent_payload(
     assert captured_planner_inputs["mask_digest"] == "mask_digest_anchor"
     assert captured_planner_inputs["inputs"]["routing_digest"] == "routing_digest_anchor"
     assert captured_planner_inputs["inputs"]["mask_summary"]["routing_digest"] == "routing_digest_anchor"
+    assert callable(captured_planner_inputs["inputs"]["jvp_operator"])
 
 
-def test_run_embed_statement_only_formal_path_fails_fast_when_precompute_plan_absent(
+def test_run_embed_statement_only_formal_path_fails_fast_when_runtime_finalization_plan_absent(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """
-    功能：statement_only formal path 若拿不到 precomputed formal plan，必须 fail-fast，不能进入 fallback plan。
+    功能：statement_only formal path 若 runtime finalization 拿不到 executable plan，必须 fail-fast，不能进入 fallback plan。
     """
     run_root = tmp_path / "run"
     records_dir = run_root / "records"
@@ -673,6 +754,7 @@ def test_run_embed_statement_only_formal_path_fails_fast_when_precompute_plan_ab
         "inference_height": 512,
         "inference_width": 512,
     }
+    runtime_capture_calls = {"count": 0}
 
     class _FakeContentExtractor:
         impl_version = "v1"
@@ -695,13 +777,13 @@ def test_run_embed_statement_only_formal_path_fails_fast_when_precompute_plan_ab
             _ = cfg
             _ = mask_digest
             _ = cfg_digest
-            _ = inputs
+            runtime_capture_calls["planner_inputs"] = inputs
             return _FakeSubspacePlanResult(
-                status="absent",
+                status="failed",
                 plan=None,
                 plan_digest=None,
                 basis_digest=None,
-                plan_failure_reason="planner_input_absent",
+                plan_failure_reason="runtime_jvp_operator_required",
             )
 
     class _FakeImplSet:
@@ -762,16 +844,219 @@ def test_run_embed_statement_only_formal_path_fails_fast_when_precompute_plan_ab
         "compute_impl_identity_digest",
         lambda *_: "impl_identity_digest_anchor",
     )
+    def _fake_runtime_capture(*args, **kwargs):
+        runtime_capture_calls["count"] += 1
+        return {
+            "inference_status": "ok",
+            "inference_error": None,
+            "inference_runtime_meta": {},
+            "trajectory_evidence": {},
+            "injection_evidence": {},
+            "output_image": Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8)),
+        }
+
     monkeypatch.setattr(
         run_embed_module.infer_runtime,
         "run_sd3_inference",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("inference must not run after formal path precompute failure")),
+        _fake_runtime_capture,
     )
 
-    with pytest.raises(ValueError, match="formal path unavailable: pre-inference statement_only plan requires precomputed plan_digest and basis_digest; reason=planner_input_absent"):
+    with pytest.raises(ValueError, match="runtime executable formal plan unavailable: statement_only runtime finalization failed; reason=runtime_jvp_operator_required"):
         run_embed_module.run_embed(
             output_dir=str(tmp_path / "out"),
             config_path="configs/default.yaml",
             overrides=None,
             input_image_path=None,
         )
+
+    assert runtime_capture_calls["count"] == 1
+    assert "jvp_operator" not in runtime_capture_calls["planner_inputs"]
+
+
+def test_run_embed_statement_only_formal_path_reaches_orchestrator_with_runtime_finalized_plan(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：statement_only 两阶段 formal object 成功时，workflow 必须越过 embed gate 并进入 orchestrator。
+    """
+    run_root = tmp_path / "run"
+    records_dir = run_root / "records"
+    artifacts_dir = run_root / "artifacts"
+    logs_dir = run_root / "logs"
+
+    @contextmanager
+    def _bound_fact_sources(*args, **kwargs):
+        _ = args
+        _ = kwargs
+        yield
+
+    def _ensure_output_layout(path: Path, **kwargs):
+        _ = kwargs
+        records_dir.mkdir(parents=True, exist_ok=True)
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "run_root": path,
+            "records_dir": records_dir,
+            "artifacts_dir": artifacts_dir,
+            "logs_dir": logs_dir,
+        }
+
+    cfg_payload = {
+        "policy_path": "content_np_geo_rescue",
+        "paper_faithfulness": {"enabled": True},
+        "attestation": {"enabled": True, "use_trajectory_mix": False},
+        "watermark": {
+            "hf": {"enabled": False},
+            "lf": {"enabled": True, "strength": 0.5},
+            "subspace": {"enabled": True, "rank": 8, "sample_count": 4, "feature_dim": 16},
+        },
+        "inference_num_steps": 4,
+        "inference_guidance_scale": 7.0,
+        "inference_height": 512,
+        "inference_width": 512,
+    }
+
+    captured = {"inference_calls": 0}
+
+    class _FakeContentExtractor:
+        impl_version = "v1"
+
+        def extract(self, cfg, inputs=None, cfg_digest=None):
+            _ = cfg
+            _ = inputs
+            _ = cfg_digest
+            return {
+                "status": "ok",
+                "mask_digest": "mask_digest_anchor",
+                "mask_stats": {
+                    "area_ratio": 0.25,
+                    "routing_digest": "routing_digest_anchor",
+                },
+            }
+
+    class _FakeSubspacePlanner:
+        def plan(self, cfg, mask_digest=None, cfg_digest=None, inputs=None):
+            _ = cfg
+            _ = mask_digest
+            _ = cfg_digest
+            captured["planner_inputs"] = inputs
+            return _FakeSubspacePlanResult(
+                status="ok",
+                plan={
+                    "basis_digest": "final_basis_digest_anchor",
+                    "lf_basis": {"basis_digest": "final_basis_digest_anchor"},
+                    "planner_params": {"rank": 8},
+                },
+                plan_digest="final_plan_digest_anchor",
+                basis_digest="final_basis_digest_anchor",
+            )
+
+    class _FakeImplSet:
+        def __init__(self):
+            self.content_extractor = _FakeContentExtractor()
+            self.subspace_planner = _FakeSubspacePlanner()
+
+    class _FakeImplIdentity:
+        content_extractor_id = "unified_content_extractor"
+
+        def as_dict(self):
+            return {"content_extractor_id": self.content_extractor_id}
+
+    monkeypatch.setattr(run_embed_module.path_policy, "derive_run_root", lambda _: run_root)
+    monkeypatch.setattr(run_embed_module.path_policy, "ensure_output_layout", _ensure_output_layout)
+    monkeypatch.setattr(run_embed_module.status, "finalize_run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(run_embed_module, "load_frozen_contracts", lambda *_: {"contracts": "ok"})
+    monkeypatch.setattr(run_embed_module, "load_runtime_whitelist", lambda *_: {"whitelist": "ok"})
+    monkeypatch.setattr(run_embed_module, "load_policy_path_semantics", lambda *_: {"semantics": "ok"})
+    monkeypatch.setattr(run_embed_module.config_loader, "load_injection_scope_manifest", lambda: {"manifest": "ok"})
+    monkeypatch.setattr(run_embed_module.status, "bind_freeze_anchors_to_run_meta", lambda *args, **kwargs: None)
+    monkeypatch.setattr(run_embed_module.records_io, "build_fact_sources_snapshot", lambda *args, **kwargs: {"snapshot": "ok"})
+    monkeypatch.setattr(run_embed_module, "assert_consistent_with_semantics", lambda *args, **kwargs: None)
+    monkeypatch.setattr(run_embed_module.records_io, "bound_fact_sources", _bound_fact_sources)
+    monkeypatch.setattr(run_embed_module.records_io, "get_bound_fact_sources", lambda: {"snapshot": "ok"})
+    monkeypatch.setattr(run_embed_module, "get_contract_interpretation", lambda *_: SimpleNamespace())
+    monkeypatch.setattr(
+        run_embed_module.config_loader,
+        "load_and_validate_config",
+        lambda *args, **kwargs: (dict(cfg_payload), "cfg_digest_anchor", {"cfg_pruned_for_digest_canon_sha256": "a", "cfg_audit_canon_sha256": "b"}),
+    )
+    monkeypatch.setattr(run_embed_module, "build_seed_audit", lambda *args, **kwargs: ({}, "seed_digest", 7, "seed_rule"))
+    monkeypatch.setattr(run_embed_module, "build_determinism_controls", lambda *_: None)
+    monkeypatch.setattr(run_embed_module, "normalize_nondeterminism_notes", lambda *_: None)
+    monkeypatch.setattr(
+        run_embed_module.pipeline_factory,
+        "build_pipeline_shell",
+        lambda *_: {
+            "pipeline_obj": object(),
+            "pipeline_provenance_canon_sha256": "<absent>",
+            "pipeline_status": "built",
+            "pipeline_error": "<absent>",
+            "pipeline_runtime_meta": {},
+            "env_fingerprint_canon_sha256": "<absent>",
+            "diffusers_version": "<absent>",
+            "transformers_version": "<absent>",
+            "safetensors_version": "<absent>",
+            "model_provenance_canon_sha256": "<absent>",
+        },
+    )
+    monkeypatch.setattr(
+        run_embed_module.runtime_resolver,
+        "build_runtime_impl_set_from_cfg",
+        lambda *_: (_FakeImplIdentity(), _FakeImplSet(), "impl_cap_digest"),
+    )
+    monkeypatch.setattr(
+        run_embed_module.runtime_resolver,
+        "compute_impl_identity_digest",
+        lambda *_: "impl_identity_digest_anchor",
+    )
+
+    def _fake_inference(*args, **kwargs):
+        captured["inference_calls"] += 1
+        trajectory_cache = kwargs.get("trajectory_latent_cache")
+        injection_context = kwargs.get("injection_context")
+        if captured["inference_calls"] == 1:
+            assert injection_context is None
+            if trajectory_cache is not None:
+                trajectory_cache.capture(0, np.ones((1, 4, 4, 4), dtype=np.float32))
+                trajectory_cache.capture(1, np.full((1, 4, 4, 4), 2.0, dtype=np.float32))
+                trajectory_cache.capture(2, np.full((1, 4, 4, 4), 3.0, dtype=np.float32))
+        else:
+            assert injection_context is not None
+            captured["injection_plan_digest"] = injection_context.plan_digest
+        return {
+            "inference_status": "ok",
+            "inference_error": None,
+            "inference_runtime_meta": {},
+            "trajectory_evidence": {},
+            "injection_evidence": {"status": "ok"},
+            "output_image": Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8)),
+            "final_latents": None,
+        }
+
+    monkeypatch.setattr(run_embed_module.infer_runtime, "run_sd3_inference", _fake_inference)
+
+    def _fake_run_embed_orchestrator(cfg, impl_set, cfg_digest, **kwargs):
+        _ = impl_set
+        _ = cfg_digest
+        captured["formal_scaffold_digest"] = cfg.get("__formal_scaffold__", {}).get("formal_scaffold_digest")
+        override = kwargs.get("subspace_result_override")
+        captured["override_plan_digest"] = getattr(override, "plan_digest", None)
+        raise _StopAfterRunEmbedOrchestrator("entered orchestrator")
+
+    monkeypatch.setattr(run_embed_module, "run_embed_orchestrator", _fake_run_embed_orchestrator)
+
+    with pytest.raises(_StopAfterRunEmbedOrchestrator):
+        run_embed_module.run_embed(
+            output_dir=str(tmp_path / "out"),
+            config_path="configs/default.yaml",
+            overrides=None,
+            input_image_path=None,
+        )
+
+    assert captured["inference_calls"] == 2
+    assert callable(captured["planner_inputs"]["jvp_operator"])
+    assert captured["injection_plan_digest"] == "final_plan_digest_anchor"
+    assert captured["override_plan_digest"] == "final_plan_digest_anchor"
+    assert captured["formal_scaffold_digest"] != "final_plan_digest_anchor"

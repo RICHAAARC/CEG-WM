@@ -32,6 +32,8 @@ ALLOWED_PLANNER_FAILURE_REASONS = {
     "mask_absent",
     "planner_input_absent",
     "invalid_subspace_params",
+    "runtime_jvp_operator_required",
+    "paper_formal_runtime_dependency_unavailable",
     "decomposition_failed",
     "rank_computation_failed",
     "unknown"
@@ -951,6 +953,10 @@ class SubspacePlannerImpl:
                     plan_failure_reason="planner_input_absent"
                 )
             reason = "invalid_subspace_params"
+            if "requires jvp_operator with runtime-validated outputs" in message:
+                reason = "paper_formal_runtime_dependency_unavailable"
+            elif "requires jvp_operator" in message:
+                reason = "runtime_jvp_operator_required"
             if "rank" in str(exc).lower():
                 reason = "rank_computation_failed"
             return SubspacePlanEvidence(
