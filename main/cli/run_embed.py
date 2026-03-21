@@ -993,7 +993,7 @@ def run_embed(
                     )
                     print(f"[Paper-Faithful] Injection site spec built (POST-ORCHESTRATOR fallback): {injection_site_digest[:16]}...")
                     # content_status!=ok 时，不写 fallback 摘要到语义 plan 字段。
-                    if not isinstance(orchestrator_plan_digest, str) or not orchestrator_plan_digest:
+                    if injection_plan_digest is None:
                         content_status = content_evidence.get("status")
                         if content_status == "ok":
                             content_evidence["plan_digest"] = fallback_plan_digest

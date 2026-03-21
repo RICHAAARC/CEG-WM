@@ -328,6 +328,51 @@ def test_build_detect_attestation_result_statement_only_provenance_uses_legal_bu
     assert final_decision.get("is_event_attested") is False
 
 
+def test_build_detect_attestation_result_missing_statement_uses_absent_bundle_status() -> None:
+    """
+    功能：detect 侧 statement 缺失时必须写出 absent bundle_status，避免 formal gate 因 None 崩溃。
+
+    Detect attestation results with missing statements must emit an explicit
+    absent bundle_status so formal gate enforcement does not fail on None.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    cfg = {
+        "__attestation_verify_k_master__": "5" * 64,
+        "attestation": {
+            "decision_mode": "content_primary_geo_rescue",
+            "lf_weight": 0.5,
+            "hf_weight": 0.3,
+            "geo_weight": 0.2,
+            "threshold": 0.65,
+        },
+    }
+    attestation_context = {
+        "attestation_status": "absent",
+        "attestation_absent_reason": "attestation_statement_absent",
+        "authenticity_status": "absent",
+        "attestation_source": "formal_input_payload",
+        "bundle_verification": None,
+    }
+
+    result = _build_detect_attestation_result(
+        cfg=cfg,
+        attestation_context=attestation_context,
+        content_evidence_payload=None,
+        geometry_evidence_payload=None,
+    )
+
+    authenticity_result = result.get("authenticity_result")
+    assert isinstance(authenticity_result, dict)
+    assert authenticity_result.get("status") == "absent"
+    assert authenticity_result.get("bundle_status") == "absent"
+    assert result.get("attestation_absent_reason") == "attestation_statement_absent"
+
+
 def test_verify_attestation_authentic_bundle_can_become_event_attested() -> None:
     """
     功能：真实性通过且图像证据足够时，最终 event-attested 必须为 true。
