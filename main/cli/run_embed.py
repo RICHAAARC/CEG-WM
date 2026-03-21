@@ -740,9 +740,7 @@ def run_embed(
                 # record 类型不符合预期，必须 fail-fast。
                 raise TypeError("orchestrator output must be dict")
             record = cast(Dict[str, Any], record_obj)
-            planner_artifacts = {
-                "lf_planner_risk_report": record.pop("_lf_planner_risk_report_artifact", None)
-            }
+            record.pop("_lf_planner_risk_report_artifact", None)
             if isinstance(_embed_latent_stats, dict):
                 record["latent_spatial_stats"] = _embed_latent_stats
             record["cfg_digest"] = cfg_digest
@@ -1006,7 +1004,6 @@ def run_embed(
                 raise
 
             _write_embed_attestation_artifacts(record, artifacts_dir)
-            _write_embed_planner_artifacts(planner_artifacts, artifacts_dir)
     except Exception as exc:
         if run_meta.get("status_ok", True):
             set_failure_status(run_meta, RunFailureReason.RUNTIME_ERROR, exc)

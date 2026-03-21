@@ -1015,6 +1015,75 @@ def _classify_lf_posterior_risk(
     return "mixed"
 
 
+def _compute_lf_report_auxiliary_metrics(
+    *,
+    signed_pre_alignment: list[float],
+    signed_post_alignment: list[float],
+    signed_detect_alignment: list[float],
+    detect_side_coeffs: list[float],
+    planner_rank: int | None,
+) -> Dict[str, Any]:
+    """
+    功能：为 LF planner posterior report 补齐治理要求的辅助统计字段。
+
+    Compute governed auxiliary statistics required by the LF planner report
+    contract. These values are descriptive only and do not control the primary
+    posterior classification.
+
+    Args:
+        signed_pre_alignment: Signed pre-injection alignment values.
+        signed_post_alignment: Signed post-injection alignment values.
+        signed_detect_alignment: Signed detect-side alignment values.
+        detect_side_coeffs: Detect-side LF coefficients.
+        planner_rank: Optional planner rank.
+
+    Returns:
+        Mapping with governed auxiliary metric fields.
+    """
+    pre_array = np.asarray(signed_pre_alignment, dtype=np.float64)
+    post_array = np.asarray(signed_post_alignment, dtype=np.float64)
+    detect_array = np.asarray(signed_detect_alignment, dtype=np.float64)
+    coeff_array = np.abs(np.asarray(detect_side_coeffs, dtype=np.float64))
+
+    negative_pre = float(np.sum(pre_array < 0.0))
+    non_negative_pre = float(np.sum(pre_array >= 0.0))
+    host_baseline_ratio = float(negative_pre / max(non_negative_pre, 1.0))
+
+    sign_chain = np.stack(
+        [
+            np.sign(pre_array),
+            np.sign(post_array),
+            np.sign(detect_array),
+        ],
+        axis=0,
+    )
+    stable_mask = np.all(sign_chain == sign_chain[0], axis=0)
+    sign_stability = float(np.mean(stable_mask.astype(np.float64))) if stable_mask.size > 0 else 0.0
+
+    template_gain = np.maximum(np.abs(post_array) - np.abs(pre_array), 0.0)
+    residual_mass = np.maximum(-post_array, 0.0) + np.maximum(-detect_array, 0.0)
+    reconstruction_residual_ratio = float(np.sum(residual_mass) / max(np.sum(np.abs(post_array)) + np.sum(template_gain), 1e-8))
+    reconstruction_residual_ratio = max(0.0, min(reconstruction_residual_ratio, 1.0))
+
+    total_energy = float(np.sum(coeff_array))
+    if total_energy <= 0.0:
+        top1_energy_ratio = 0.0
+        topk_energy_ratio = 0.0
+    else:
+        sorted_energy = np.sort(coeff_array)[::-1]
+        top1_energy_ratio = float(sorted_energy[0] / total_energy)
+        topk = max(1, min(int(planner_rank) if isinstance(planner_rank, int) and planner_rank > 0 else 1, int(sorted_energy.shape[0])))
+        topk_energy_ratio = float(np.sum(sorted_energy[:topk]) / total_energy)
+
+    return {
+        "host_baseline_ratio": host_baseline_ratio,
+        "sign_stability": sign_stability,
+        "reconstruction_residual_ratio": reconstruction_residual_ratio,
+        "top1_energy_ratio": top1_energy_ratio,
+        "topk_energy_ratio": topk_energy_ratio,
+    }
+
+
 def _build_lf_planner_risk_report_artifact(
     lf_alignment_table: Dict[str, Any],
     planner_context: Optional[Dict[str, Any]],
@@ -1058,6 +1127,7 @@ def _build_lf_planner_risk_report_artifact(
     route_basis_bridge_node = planner_context_mapping.get("route_basis_bridge")
     route_basis_bridge = cast(Dict[str, Any], route_basis_bridge_node) if isinstance(route_basis_bridge_node, dict) else {}
     route_basis_bridge_digest = digests.canonical_sha256(route_basis_bridge) if route_basis_bridge else None
+    planner_rank = planner_context_mapping.get("planner_rank") if isinstance(planner_context_mapping.get("planner_rank"), int) else None
     alignment_margin_threshold = float(lf_alignment_table.get("alignment_margin_threshold") or 0.0)
     confidence_threshold = max(abs(alignment_margin_threshold), 1e-8)
 
@@ -1177,6 +1247,16 @@ def _build_lf_planner_risk_report_artifact(
         "high_confidence_mismatch_count": len(high_confidence_mismatch_dimensions),
         "confidence_threshold": confidence_threshold,
     }
+    auxiliary_metrics = _compute_lf_report_auxiliary_metrics(
+        signed_pre_alignment=[float(value) for value in signed_pre_alignment[:n_rows]],
+        signed_post_alignment=[float(value) for value in signed_post_alignment[:n_rows]],
+        signed_detect_alignment=[float(value) for value in signed_detect_alignment[:n_rows]],
+        detect_side_coeffs=[float(value) for value in detect_side_coeffs[:n_rows]],
+        planner_rank=planner_rank,
+    )
+    host_baseline_dominant_flag = risk_classification == "host_baseline_dominant"
+    basis_sample_mismatch_flag = risk_classification == "basis_sample_mismatch"
+    detect_trajectory_shift_flag = risk_classification == "detect_trajectory_shift"
 
     return {
         "artifact_type": "lf_planner_risk_report",
@@ -1184,7 +1264,15 @@ def _build_lf_planner_risk_report_artifact(
         "risk_classification": risk_classification,
         "lf_feature_count": planner_context_mapping.get("lf_feature_count"),
         "lf_decomposition_shape": planner_context_mapping.get("lf_decomposition_shape"),
-        "planner_rank": planner_context_mapping.get("planner_rank"),
+        "planner_rank": planner_rank,
+        "host_baseline_ratio": auxiliary_metrics["host_baseline_ratio"],
+        "sign_stability": auxiliary_metrics["sign_stability"],
+        "reconstruction_residual_ratio": auxiliary_metrics["reconstruction_residual_ratio"],
+        "top1_energy_ratio": auxiliary_metrics["top1_energy_ratio"],
+        "topk_energy_ratio": auxiliary_metrics["topk_energy_ratio"],
+        "host_baseline_dominant_flag": host_baseline_dominant_flag,
+        "basis_sample_mismatch_flag": basis_sample_mismatch_flag,
+        "detect_trajectory_shift_flag": detect_trajectory_shift_flag,
         "route_basis_bridge_digest": route_basis_bridge_digest,
         "plan_digest": lf_alignment_table.get("plan_digest"),
         "basis_digest": planner_context_mapping.get("basis_digest"),

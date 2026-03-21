@@ -538,13 +538,7 @@ def run_embed_orchestrator(
             plan_stats = subspace_payload.get("plan_stats")
             if isinstance(plan_stats, dict):
                 plan_stats_payload = dict(cast(Dict[str, Any], plan_stats))
-                lf_planner_risk_report = plan_stats_payload.pop("lf_planner_risk_report", None)
-                if isinstance(lf_planner_risk_report, dict):
-                    record_fields["_lf_planner_risk_report_artifact"] = {
-                        **cast(Dict[str, Any], lf_planner_risk_report),
-                        "plan_digest": plan_digest,
-                        "basis_digest": basis_digest,
-                    }
+                plan_stats_payload.pop("lf_planner_risk_report", None)
                 record_fields["plan_stats"] = plan_stats_payload
             # 写入规划器失败原因（可观测性字段，仅在失败时非 None）。
             plan_failure_reason = subspace_payload.get("plan_failure_reason")

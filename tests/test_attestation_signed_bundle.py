@@ -1199,6 +1199,14 @@ def test_build_lf_planner_risk_report_artifact_classifies_host_baseline_dominant
 
     assert artifact is not None
     assert artifact["risk_classification"] == "host_baseline_dominant"
+    assert artifact["host_baseline_dominant_flag"] is True
+    assert artifact["basis_sample_mismatch_flag"] is False
+    assert artifact["detect_trajectory_shift_flag"] is False
+    assert isinstance(artifact["host_baseline_ratio"], float)
+    assert isinstance(artifact["sign_stability"], float)
+    assert isinstance(artifact["reconstruction_residual_ratio"], float)
+    assert isinstance(artifact["top1_energy_ratio"], float)
+    assert isinstance(artifact["topk_energy_ratio"], float)
     assert artifact["primary_evidence"]["dominant_signal"] == "host_baseline_counts"
     assert len(artifact["per_dimension_summary"]) == 4
     assert artifact["host_baseline_risk_summary"]["post_still_negative_count"] == 3
@@ -1234,6 +1242,9 @@ def test_build_lf_planner_risk_report_artifact_classifies_basis_sample_mismatch(
 
     assert artifact is not None
     assert artifact["risk_classification"] == "basis_sample_mismatch"
+    assert artifact["host_baseline_dominant_flag"] is False
+    assert artifact["basis_sample_mismatch_flag"] is True
+    assert artifact["detect_trajectory_shift_flag"] is False
     assert artifact["host_baseline_risk_summary"]["dominant_signal"] == "post_still_negative_counts"
 
 
@@ -1267,6 +1278,9 @@ def test_build_lf_planner_risk_report_artifact_classifies_detect_trajectory_shif
 
     assert artifact is not None
     assert artifact["risk_classification"] == "detect_trajectory_shift"
+    assert artifact["host_baseline_dominant_flag"] is False
+    assert artifact["basis_sample_mismatch_flag"] is False
+    assert artifact["detect_trajectory_shift_flag"] is True
     assert artifact["high_confidence_mismatch_dimensions"][0]["detect_reverted_after_post_positive"] is True
 
 
@@ -1300,6 +1314,9 @@ def test_build_lf_planner_risk_report_artifact_classifies_mixed() -> None:
 
     assert artifact is not None
     assert artifact["risk_classification"] == "mixed"
+    assert artifact["host_baseline_dominant_flag"] is False
+    assert artifact["basis_sample_mismatch_flag"] is False
+    assert artifact["detect_trajectory_shift_flag"] is False
     assert "routing_pattern_summary" in artifact
 
 
