@@ -121,12 +121,14 @@ def test_bind_embed_plan_digest_consistency_marks_mismatch() -> None:
     }
 
 
-def test_bind_embed_plan_digest_consistency_marks_formal_absent_after_fallback_injection() -> None:
+def test_bind_embed_plan_digest_consistency_marks_formal_absent_for_compatibility_path_only() -> None:
     """
-    功能：fallback 注入已发生时，不得误报为 injection digest 缺失。 
+    功能：兼容路径若已发生 fallback 注入，不得误报为 injection digest 缺失。 
 
     Verify fallback injection keeps the injection digest populated and reports
     a formal-absent mismatch instead of an injection-absent mismatch.
+    This helper-level behavior is reserved for compatibility paths and must not
+    be interpreted as legal formal-path behavior.
 
     Args:
         None.

@@ -4461,6 +4461,14 @@ def run_evaluate_orchestrator(cfg: Dict[str, Any], impl_set: BuiltImplSet) -> Di
     """
     thresholds_path = _resolve_thresholds_path_for_evaluate(cfg)
     thresholds_obj = load_thresholds_artifact_controlled(str(thresholds_path))
+    if _is_formal_event_attestation_mainline(cfg):
+        threshold_score_name = thresholds_obj.get("score_name", "content_score")
+        if not isinstance(threshold_score_name, str) or not threshold_score_name:
+            raise TypeError("thresholds artifact score_name must be non-empty str")
+        eval_metrics.raise_if_legacy_event_attestation_alias_requested(
+            threshold_score_name,
+            consumer="run_evaluate_orchestrator.thresholds_artifact",
+        )
     detect_records = _load_records_for_evaluate(cfg)
     
     # 记录 evaluate 开始前的 thresholds digest。
@@ -4613,6 +4621,11 @@ def load_scores_for_calibration(
         raise TypeError("cfg must be dict or None")
     if not isinstance(score_name, str) or not score_name:
         raise TypeError("score_name must be non-empty str")
+    if _is_formal_event_attestation_mainline(cfg):
+        eval_metrics.raise_if_legacy_event_attestation_alias_requested(
+            score_name,
+            consumer="load_scores_for_calibration",
+        )
 
     scores: list[float] = []
     total = len(records)
@@ -4729,6 +4742,27 @@ def _resolve_score_name_for_stats(cfg: Dict[str, Any], mode: str) -> str:
     if isinstance(section_value, str) and section_value:
         return section_value
     return "content_score"
+
+
+def _is_formal_event_attestation_mainline(cfg: Optional[Dict[str, Any]]) -> bool:
+    """
+    功能：判定当前 cfg 是否属于 formal event-attestation 主线。
+
+    Determine whether the current config belongs to the formal mainline that
+    must reject legacy event-attestation alias artifacts.
+
+    Args:
+        cfg: Optional configuration mapping.
+
+    Returns:
+        True when paper_faithfulness is enabled; otherwise False.
+    """
+    if not isinstance(cfg, dict):
+        return False
+
+    paper_node = cfg.get("paper_faithfulness")
+    paper_cfg = cast(Dict[str, Any], paper_node) if isinstance(paper_node, dict) else {}
+    return bool(paper_cfg.get("enabled", False))
 
 
 def _is_synthetic_fallback_calibration_sample(content_payload: Dict[str, Any]) -> bool:

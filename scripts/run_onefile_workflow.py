@@ -39,6 +39,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from main.core import records_io
+from main.evaluation import metrics as eval_metrics
 
 
 PROFILE_CPU_SMOKE = "cpu_smoke"
@@ -1333,6 +1334,20 @@ def _resolve_parallel_attestation_statistics_cfg(cfg_obj: dict) -> dict:
     section_cfg = section_node if isinstance(section_node, dict) else {}
     calibration_score_name = section_cfg.get("calibration_score_name")
     evaluate_score_name = section_cfg.get("evaluate_score_name")
+
+    paper_node = cfg_obj.get("paper_faithfulness")
+    paper_cfg = paper_node if isinstance(paper_node, dict) else {}
+    if bool(section_cfg.get("enabled", False)) and bool(paper_cfg.get("enabled", False)):
+        if isinstance(calibration_score_name, str) and calibration_score_name:
+            eval_metrics.raise_if_legacy_event_attestation_alias_requested(
+                calibration_score_name,
+                consumer="parallel_attestation_statistics.calibration_score_name",
+            )
+        if isinstance(evaluate_score_name, str) and evaluate_score_name:
+            eval_metrics.raise_if_legacy_event_attestation_alias_requested(
+                evaluate_score_name,
+                consumer="parallel_attestation_statistics.evaluate_score_name",
+            )
 
     if not isinstance(calibration_score_name, str) or not calibration_score_name:
         calibration_score_name = EVENT_ATTESTATION_SCORE_NAME

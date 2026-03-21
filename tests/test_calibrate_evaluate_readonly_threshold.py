@@ -366,6 +366,43 @@ def test_run_evaluate_orchestrator_readonly_without_extractors(tmp_path: Path) -
     assert result["evaluation_report"]["attack_protocol"]["version"] == "attack_v1"
 
 
+def test_run_evaluate_orchestrator_formal_mainline_rejects_legacy_event_attestation_alias_thresholds(
+    tmp_path: Path,
+) -> None:
+    """Validate formal readonly evaluate rejects legacy alias thresholds artifacts with rerun guidance."""
+    thresholds_path = tmp_path / "thresholds_artifact.json"
+    thresholds_payload = {
+        "threshold_id": "event_attestation_statistics_score_np_fpr_0_01",
+        "score_name": "event_attestation_statistics_score",
+        "target_fpr": 0.01,
+        "threshold_value": 0.5,
+        "threshold_key_used": "fpr_0_01",
+    }
+    thresholds_path.write_text(json.dumps(thresholds_payload), encoding="utf-8")
+
+    cfg = {
+        "paper_faithfulness": {
+            "enabled": True,
+        },
+        "evaluate": {
+            "thresholds_path": str(thresholds_path),
+        },
+    }
+    impl_set = BuiltImplSet(
+        content_extractor=_ExtractorRaiser(),
+        geometry_extractor=_ExtractorRaiser(),
+        fusion_rule=_FusionRaiser(),
+        subspace_planner=object(),
+        sync_module=object(),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="legacy_event_attestation_statistics_score_artifact_requires_rerun",
+    ):
+        run_evaluate_orchestrator(cfg, impl_set)
+
+
 def test_run_calibrate_orchestrator_sets_calibration_mode(tmp_path: Path) -> None:
     """
     功能：验证 calibrate 输出包含规范化运行模式字段。

@@ -208,6 +208,21 @@ def test_load_scores_for_calibration_event_attestation_statistics_alias_accepts_
     assert strata["global"]["n_valid"] == 1
 
 
+def test_load_scores_for_calibration_formal_mainline_rejects_legacy_event_attestation_statistics_alias() -> None:
+    """Validate formal calibration rejects the legacy event-attestation alias with rerun guidance."""
+    cfg = {
+        "paper_faithfulness": {
+            "enabled": True,
+        },
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="legacy_event_attestation_statistics_score_artifact_requires_rerun",
+    ):
+        load_scores_for_calibration([], cfg=cfg, score_name="event_attestation_statistics_score")
+
+
 def test_load_thresholds_artifact_controlled_requires_fields(tmp_path: Path) -> None:
     """Validate missing required field detection for thresholds artifact."""
     artifact_path = tmp_path / "thresholds.json"

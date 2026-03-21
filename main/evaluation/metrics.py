@@ -11,6 +11,91 @@ from typing import Any, Dict, List, Optional, Tuple
 from main.evaluation.image_quality import compute_quality_metrics_batch
 
 
+EVENT_ATTESTATION_SCORE_NAME = "event_attestation_score"
+EVENT_ATTESTATION_SCORE_ALIAS_NAME = "event_attestation_statistics_score"
+LEGACY_EVENT_ATTESTATION_ALIAS_RERUN_REASON = (
+    "legacy_event_attestation_statistics_score_artifact_requires_rerun"
+)
+LEGACY_EVENT_ATTESTATION_ALIAS_RERUN_PROFILES = (
+    "paper_full_cuda_mini_real_validation",
+    "paper_full_cuda",
+)
+
+
+def is_legacy_event_attestation_alias_score_name(score_name: str) -> bool:
+    """
+    功能：判定 score_name 是否为旧 event_attestation_statistics_score alias。
+
+    Determine whether the requested score name is the legacy
+    event_attestation_statistics_score compatibility alias.
+
+    Args:
+        score_name: Candidate score name.
+
+    Returns:
+        True when the score name is the legacy alias; otherwise False.
+    """
+    if not isinstance(score_name, str):
+        raise TypeError("score_name must be str")
+    return score_name == EVENT_ATTESTATION_SCORE_ALIAS_NAME
+
+
+def build_legacy_event_attestation_alias_rerun_guidance() -> Dict[str, Any]:
+    """
+    功能：构造旧 event attestation alias 触发时的统一重跑指引。
+
+    Build the canonical rerun guidance for legacy event-attestation alias
+    artifacts that are no longer accepted by the current formal mainline.
+
+    Args:
+        None.
+
+    Returns:
+        Structured rerun-guidance mapping.
+    """
+    return {
+        "reason": LEGACY_EVENT_ATTESTATION_ALIAS_RERUN_REASON,
+        "legacy_score_name": EVENT_ATTESTATION_SCORE_ALIAS_NAME,
+        "canonical_score_name": EVENT_ATTESTATION_SCORE_NAME,
+        "recommended_rerun_profiles": list(LEGACY_EVENT_ATTESTATION_ALIAS_RERUN_PROFILES),
+    }
+
+
+def raise_if_legacy_event_attestation_alias_requested(score_name: str, consumer: str) -> None:
+    """
+    功能：在 formal 主线请求旧 alias 时抛出统一重跑错误。
+
+    Raise a stable rerun-required error when the formal mainline attempts to
+    consume the legacy event_attestation_statistics_score alias.
+
+    Args:
+        score_name: Requested score name.
+        consumer: Consumer identifier for diagnostics.
+
+    Returns:
+        None.
+
+    Raises:
+        ValueError: If the legacy alias is requested.
+    """
+    if not isinstance(score_name, str) or not score_name:
+        raise TypeError("score_name must be non-empty str")
+    if not isinstance(consumer, str) or not consumer:
+        raise TypeError("consumer must be non-empty str")
+    if not is_legacy_event_attestation_alias_score_name(score_name):
+        return
+
+    rerun_guidance = build_legacy_event_attestation_alias_rerun_guidance()
+    rerun_profiles = ",".join(rerun_guidance["recommended_rerun_profiles"])
+    raise ValueError(
+        f"{consumer} requires rerun with current formal event-attestation artifacts; "
+        f"reason={rerun_guidance['reason']}; "
+        f"requested_score_name={rerun_guidance['legacy_score_name']}; "
+        f"canonical_score_name={rerun_guidance['canonical_score_name']}; "
+        f"recommended_rerun_profiles={rerun_profiles}"
+    )
+
+
 def canonical_condition_key(family: str, params_version: str) -> str:
     """
     功能：生成规范化的条件键（deterministic 排序）。

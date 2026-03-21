@@ -423,6 +423,33 @@ def test_experiment_matrix_cfg_preserves_attestation_when_parallel_statistics_en
     assert original_cfg["attestation"]["require_signed_bundle_verification"] is True
 
 
+def test_parallel_attestation_statistics_cfg_rejects_legacy_alias_for_formal_mainline() -> None:
+    """
+    功能：验证 formal onefile 主线拒绝旧 event_attestation_statistics_score alias 配置。
+
+    Verify the formal onefile mainline rejects the legacy
+    event_attestation_statistics_score alias instead of silently normalizing it.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_onefile_module(repo_root)
+
+    cfg_obj = {
+        "paper_faithfulness": {
+            "enabled": True,
+        },
+        "parallel_attestation_statistics": {
+            "enabled": True,
+            "calibration_score_name": "event_attestation_statistics_score",
+        },
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="legacy_event_attestation_statistics_score_artifact_requires_rerun",
+    ):
+        module._resolve_parallel_attestation_statistics_cfg(cfg_obj)
+
+
 def test_paper_full_cuda_profile_enables_formal_experiment_matrix_guards() -> None:
     """
     功能：paper_full_cuda 正式 profile 必须显式启用 formal experiment_matrix guards。
