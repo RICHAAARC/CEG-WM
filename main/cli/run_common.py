@@ -13,6 +13,7 @@ from main.registries import runtime_resolver
 from main.core import digests
 from main.diffusion.sd3.callback_composer import InjectionContext
 from main.watermarking.content_chain import channel_lf, channel_hf
+from main.watermarking.provenance.key_derivation import resolve_attestation_event_binding_mode
 from main.core import time_utils
 
 
@@ -50,6 +51,40 @@ def _resolve_plan_basis_digest(plan_payload: Dict[str, Any], cfg: Dict[str, Any]
         return cfg_candidate
     if isinstance(lf_basis, dict) and lf_basis:
         return digests.canonical_sha256(lf_basis)
+    return None
+
+
+def _resolve_canonical_event_binding_mode(cfg: Dict[str, Any]) -> Optional[str]:
+    """
+    功能：解析注入链使用的规范化事件绑定模式。
+
+    Resolve the canonical event-binding mode for the injection path.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Canonical event-binding mode when available; otherwise None.
+    """
+    direct_candidate = cfg.get("event_binding_mode")
+    if isinstance(direct_candidate, str) and direct_candidate:
+        return direct_candidate
+
+    attestation_runtime = _resolve_mapping(cfg, "attestation_runtime")
+    runtime_candidate = attestation_runtime.get("event_binding_mode")
+    if isinstance(runtime_candidate, str) and runtime_candidate:
+        return runtime_candidate
+
+    watermark_cfg = _resolve_mapping(cfg, "watermark")
+    watermark_candidate = watermark_cfg.get("event_binding_mode")
+    if isinstance(watermark_candidate, str) and watermark_candidate:
+        return watermark_candidate
+
+    attestation_cfg = _resolve_mapping(cfg, "attestation")
+    use_trajectory_mix = attestation_cfg.get("use_trajectory_mix")
+    if isinstance(use_trajectory_mix, bool):
+        return resolve_attestation_event_binding_mode(use_trajectory_mix)
+
     return None
 
 
@@ -226,7 +261,7 @@ def build_injection_context_from_plan(
     attestation_event_digest = cfg_dict.get("attestation_event_digest") or attestation_runtime.get("event_binding_digest")
     lf_attestation_event_digest = cfg_dict.get("lf_attestation_event_digest") or attestation_event_digest
     lf_attestation_key = cfg_dict.get("lf_attestation_key") or cfg_dict.get("k_lf") or attestation_runtime.get("k_lf")
-    event_binding_mode = cfg_dict.get("event_binding_mode") or attestation_runtime.get("event_binding_mode")
+    event_binding_mode = _resolve_canonical_event_binding_mode(cfg_dict)
 
     return InjectionContext(
         plan_digest=plan_digest,

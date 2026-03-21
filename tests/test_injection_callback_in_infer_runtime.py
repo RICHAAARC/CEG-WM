@@ -19,6 +19,7 @@ from main.diffusion.sd3.callback_composer import InjectionContext
 from main.diffusion.sd3.infer_runtime import run_sd3_inference
 from main.diffusion.sd3 import infer_runtime as infer_runtime_module
 from main.cli.run_common import build_injection_context_from_plan
+from main.watermarking.content_chain import channel_lf
 from main.watermarking.content_chain.latent_modifier import (
     LatentModifier,
     LATENT_MODIFIER_ID,
@@ -248,3 +249,35 @@ def test_build_injection_cfg_carries_attestation_runtime_fields() -> None:
     assert injection_cfg.get("basis_digest") == plan_payload["basis_digest"]
     assert injection_cfg.get("lf_basis_digest") == plan_payload["basis_digest"]
     assert injection_cfg.get("event_binding_mode") == "statement_only"
+
+
+def test_build_injection_context_resolves_statement_only_from_attestation_cfg() -> None:
+    """
+    功能：early runtime 缺失时，InjectionContext 仍必须从 attestation 配置解析 statement_only。
+    """
+    cfg = _build_cfg()
+    cfg.pop("event_binding_mode", None)
+    cfg.pop("attestation_digest", None)
+    cfg.pop("attestation_event_digest", None)
+    cfg.pop("lf_attestation_event_digest", None)
+    cfg.pop("lf_attestation_key", None)
+    cfg.pop("k_lf", None)
+
+    latent_dim = 1 * 4 * 8 * 8
+    plan_payload = _build_plan_with_basis(latent_dim, 8, 2026)
+    plan_digest = digests.canonical_sha256(plan_payload)
+
+    injection_context = build_injection_context_from_plan(cfg, plan_payload, plan_digest)
+
+    assert injection_context.event_binding_mode == "statement_only"
+
+
+def test_channel_lf_resolves_statement_only_from_attestation_cfg() -> None:
+    """
+    功能：LF 通道在 runtime 字段缺失时仍必须遵循 attestation.use_trajectory_mix 的规范化语义。
+    """
+    cfg = {
+        "attestation": {"use_trajectory_mix": False},
+    }
+
+    assert channel_lf._resolve_event_binding_mode(cfg) == "statement_only"

@@ -20,6 +20,34 @@ class _StopAfterContentExtract(Exception):
     """Sentinel exception to stop run_embed after precompute extract."""
 
 
+class _StopAfterPlannerPrecompute(Exception):
+    """Sentinel exception to stop run_embed after planner precompute."""
+
+
+class _FakeSubspacePlanResult:
+    """Minimal subspace result payload for run_embed precompute tests."""
+
+    def __init__(self, status: str, plan: dict | None, plan_digest: str | None, basis_digest: str | None, plan_failure_reason: str | None = None) -> None:
+        self.status = status
+        self.plan = plan
+        self.plan_digest = plan_digest
+        self.basis_digest = basis_digest
+        self.plan_failure_reason = plan_failure_reason
+
+    def as_dict(self) -> dict:
+        return {
+            "status": self.status,
+            "plan": self.plan,
+            "plan_digest": self.plan_digest,
+            "basis_digest": self.basis_digest,
+            "plan_failure_reason": self.plan_failure_reason,
+            "plan_stats": {
+                "planner_status": self.status,
+                "planner_absent_reason": self.plan_failure_reason,
+            },
+        }
+
+
 def test_bind_embed_plan_digest_consistency_marks_match() -> None:
     """
     功能：一致的 injection/formal plan digest 必须写出 match 语义。 
@@ -439,3 +467,309 @@ def test_run_embed_preview_generation_binds_generated_input_before_content_preco
     assert isinstance(preview_path, str)
     assert preview_path.endswith(".png")
     assert Path(preview_path).exists()
+
+
+def test_run_embed_precompute_planner_inputs_include_precontent_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：pre-inference planner 必须消费 pre-content payload 中的 routing_digest 与 mask_summary。
+    """
+    run_root = tmp_path / "run"
+    records_dir = run_root / "records"
+    artifacts_dir = run_root / "artifacts"
+    logs_dir = run_root / "logs"
+
+    @contextmanager
+    def _bound_fact_sources(*args, **kwargs):
+        _ = args
+        _ = kwargs
+        yield
+
+    def _ensure_output_layout(path: Path, **kwargs):
+        _ = kwargs
+        records_dir.mkdir(parents=True, exist_ok=True)
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "run_root": path,
+            "records_dir": records_dir,
+            "artifacts_dir": artifacts_dir,
+            "logs_dir": logs_dir,
+        }
+
+    cfg_payload = {
+        "policy_path": "content_np_geo_rescue",
+        "paper_faithfulness": {"enabled": True},
+        "attestation": {"enabled": True, "use_trajectory_mix": False},
+        "watermark": {
+            "hf": {"enabled": False},
+            "lf": {"enabled": True, "strength": 0.5},
+            "subspace": {"enabled": True, "rank": 8, "sample_count": 4, "feature_dim": 16},
+        },
+        "inference_num_steps": 4,
+        "inference_guidance_scale": 7.0,
+        "inference_height": 512,
+        "inference_width": 512,
+    }
+
+    captured_planner_inputs = {}
+
+    class _FakeContentExtractor:
+        impl_version = "v1"
+
+        def extract(self, cfg, inputs=None, cfg_digest=None):
+            _ = cfg
+            _ = inputs
+            _ = cfg_digest
+            return {
+                "status": "ok",
+                "mask_digest": "mask_digest_anchor",
+                "mask_stats": {
+                    "area_ratio": 0.25,
+                    "routing_digest": "routing_digest_anchor",
+                    "downsample_grid_true_indices": [0, 1, 2],
+                },
+            }
+
+    class _FakeSubspacePlanner:
+        def plan(self, cfg, mask_digest=None, cfg_digest=None, inputs=None):
+            _ = cfg
+            _ = cfg_digest
+            captured_planner_inputs["mask_digest"] = mask_digest
+            captured_planner_inputs["inputs"] = inputs
+            return _FakeSubspacePlanResult(
+                status="ok",
+                plan={
+                    "basis_digest": "basis_digest_anchor",
+                    "lf_basis": {"basis_digest": "basis_digest_anchor"},
+                    "planner_params": {"rank": 8},
+                },
+                plan_digest="plan_digest_anchor",
+                basis_digest="basis_digest_anchor",
+            )
+
+    class _FakeImplSet:
+        def __init__(self):
+            self.content_extractor = _FakeContentExtractor()
+            self.subspace_planner = _FakeSubspacePlanner()
+
+    class _FakeImplIdentity:
+        content_extractor_id = "unified_content_extractor"
+
+        def as_dict(self):
+            return {"content_extractor_id": self.content_extractor_id}
+
+    monkeypatch.setattr(run_embed_module.path_policy, "derive_run_root", lambda _: run_root)
+    monkeypatch.setattr(run_embed_module.path_policy, "ensure_output_layout", _ensure_output_layout)
+    monkeypatch.setattr(run_embed_module.status, "finalize_run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(run_embed_module, "load_frozen_contracts", lambda *_: {"contracts": "ok"})
+    monkeypatch.setattr(run_embed_module, "load_runtime_whitelist", lambda *_: {"whitelist": "ok"})
+    monkeypatch.setattr(run_embed_module, "load_policy_path_semantics", lambda *_: {"semantics": "ok"})
+    monkeypatch.setattr(run_embed_module.config_loader, "load_injection_scope_manifest", lambda: {"manifest": "ok"})
+    monkeypatch.setattr(run_embed_module.status, "bind_freeze_anchors_to_run_meta", lambda *args, **kwargs: None)
+    monkeypatch.setattr(run_embed_module.records_io, "build_fact_sources_snapshot", lambda *args, **kwargs: {"snapshot": "ok"})
+    monkeypatch.setattr(run_embed_module, "assert_consistent_with_semantics", lambda *args, **kwargs: None)
+    monkeypatch.setattr(run_embed_module.records_io, "bound_fact_sources", _bound_fact_sources)
+    monkeypatch.setattr(run_embed_module.records_io, "get_bound_fact_sources", lambda: {"snapshot": "ok"})
+    monkeypatch.setattr(run_embed_module, "get_contract_interpretation", lambda *_: SimpleNamespace())
+    monkeypatch.setattr(
+        run_embed_module.config_loader,
+        "load_and_validate_config",
+        lambda *args, **kwargs: (dict(cfg_payload), "cfg_digest_anchor", {"cfg_pruned_for_digest_canon_sha256": "a", "cfg_audit_canon_sha256": "b"}),
+    )
+    monkeypatch.setattr(run_embed_module, "build_seed_audit", lambda *args, **kwargs: ({}, "seed_digest", 7, "seed_rule"))
+    monkeypatch.setattr(run_embed_module, "build_determinism_controls", lambda *_: None)
+    monkeypatch.setattr(run_embed_module, "normalize_nondeterminism_notes", lambda *_: None)
+    monkeypatch.setattr(
+        run_embed_module.pipeline_factory,
+        "build_pipeline_shell",
+        lambda *_: {
+            "pipeline_obj": object(),
+            "pipeline_provenance_canon_sha256": "<absent>",
+            "pipeline_status": "built",
+            "pipeline_error": "<absent>",
+            "pipeline_runtime_meta": {},
+            "env_fingerprint_canon_sha256": "<absent>",
+            "diffusers_version": "<absent>",
+            "transformers_version": "<absent>",
+            "safetensors_version": "<absent>",
+            "model_provenance_canon_sha256": "<absent>",
+        },
+    )
+    monkeypatch.setattr(
+        run_embed_module.runtime_resolver,
+        "build_runtime_impl_set_from_cfg",
+        lambda *_: (_FakeImplIdentity(), _FakeImplSet(), "impl_cap_digest"),
+    )
+    monkeypatch.setattr(
+        run_embed_module.runtime_resolver,
+        "compute_impl_identity_digest",
+        lambda *_: "impl_identity_digest_anchor",
+    )
+    monkeypatch.setattr(
+        run_embed_module.embed_orchestrator,
+        "_prepare_embed_attestation_runtime_bindings",
+        lambda *args, **kwargs: (_ for _ in ()).throw(_StopAfterPlannerPrecompute("stop after planner precompute")),
+    )
+
+    with pytest.raises(_StopAfterPlannerPrecompute):
+        run_embed_module.run_embed(
+            output_dir=str(tmp_path / "out"),
+            config_path="configs/default.yaml",
+            overrides=None,
+            input_image_path=None,
+        )
+
+    assert captured_planner_inputs["mask_digest"] == "mask_digest_anchor"
+    assert captured_planner_inputs["inputs"]["routing_digest"] == "routing_digest_anchor"
+    assert captured_planner_inputs["inputs"]["mask_summary"]["routing_digest"] == "routing_digest_anchor"
+
+
+def test_run_embed_statement_only_formal_path_fails_fast_when_precompute_plan_absent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：statement_only formal path 若拿不到 precomputed formal plan，必须 fail-fast，不能进入 fallback plan。
+    """
+    run_root = tmp_path / "run"
+    records_dir = run_root / "records"
+    artifacts_dir = run_root / "artifacts"
+    logs_dir = run_root / "logs"
+
+    @contextmanager
+    def _bound_fact_sources(*args, **kwargs):
+        _ = args
+        _ = kwargs
+        yield
+
+    def _ensure_output_layout(path: Path, **kwargs):
+        _ = kwargs
+        records_dir.mkdir(parents=True, exist_ok=True)
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "run_root": path,
+            "records_dir": records_dir,
+            "artifacts_dir": artifacts_dir,
+            "logs_dir": logs_dir,
+        }
+
+    cfg_payload = {
+        "policy_path": "content_np_geo_rescue",
+        "paper_faithfulness": {"enabled": True},
+        "attestation": {"enabled": True, "use_trajectory_mix": False},
+        "watermark": {
+            "hf": {"enabled": False},
+            "lf": {"enabled": True, "strength": 0.5},
+            "subspace": {"enabled": True, "rank": 8, "sample_count": 4, "feature_dim": 16},
+        },
+        "inference_num_steps": 4,
+        "inference_guidance_scale": 7.0,
+        "inference_height": 512,
+        "inference_width": 512,
+    }
+
+    class _FakeContentExtractor:
+        impl_version = "v1"
+
+        def extract(self, cfg, inputs=None, cfg_digest=None):
+            _ = cfg
+            _ = inputs
+            _ = cfg_digest
+            return {
+                "status": "ok",
+                "mask_digest": "mask_digest_anchor",
+                "mask_stats": {
+                    "area_ratio": 0.25,
+                    "routing_digest": "routing_digest_anchor",
+                },
+            }
+
+    class _FakeSubspacePlanner:
+        def plan(self, cfg, mask_digest=None, cfg_digest=None, inputs=None):
+            _ = cfg
+            _ = mask_digest
+            _ = cfg_digest
+            _ = inputs
+            return _FakeSubspacePlanResult(
+                status="absent",
+                plan=None,
+                plan_digest=None,
+                basis_digest=None,
+                plan_failure_reason="planner_input_absent",
+            )
+
+    class _FakeImplSet:
+        def __init__(self):
+            self.content_extractor = _FakeContentExtractor()
+            self.subspace_planner = _FakeSubspacePlanner()
+
+    class _FakeImplIdentity:
+        content_extractor_id = "unified_content_extractor"
+
+        def as_dict(self):
+            return {"content_extractor_id": self.content_extractor_id}
+
+    monkeypatch.setattr(run_embed_module.path_policy, "derive_run_root", lambda _: run_root)
+    monkeypatch.setattr(run_embed_module.path_policy, "ensure_output_layout", _ensure_output_layout)
+    monkeypatch.setattr(run_embed_module.status, "finalize_run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(run_embed_module, "load_frozen_contracts", lambda *_: {"contracts": "ok"})
+    monkeypatch.setattr(run_embed_module, "load_runtime_whitelist", lambda *_: {"whitelist": "ok"})
+    monkeypatch.setattr(run_embed_module, "load_policy_path_semantics", lambda *_: {"semantics": "ok"})
+    monkeypatch.setattr(run_embed_module.config_loader, "load_injection_scope_manifest", lambda: {"manifest": "ok"})
+    monkeypatch.setattr(run_embed_module.status, "bind_freeze_anchors_to_run_meta", lambda *args, **kwargs: None)
+    monkeypatch.setattr(run_embed_module.records_io, "build_fact_sources_snapshot", lambda *args, **kwargs: {"snapshot": "ok"})
+    monkeypatch.setattr(run_embed_module, "assert_consistent_with_semantics", lambda *args, **kwargs: None)
+    monkeypatch.setattr(run_embed_module.records_io, "bound_fact_sources", _bound_fact_sources)
+    monkeypatch.setattr(run_embed_module.records_io, "get_bound_fact_sources", lambda: {"snapshot": "ok"})
+    monkeypatch.setattr(run_embed_module, "get_contract_interpretation", lambda *_: SimpleNamespace())
+    monkeypatch.setattr(
+        run_embed_module.config_loader,
+        "load_and_validate_config",
+        lambda *args, **kwargs: (dict(cfg_payload), "cfg_digest_anchor", {"cfg_pruned_for_digest_canon_sha256": "a", "cfg_audit_canon_sha256": "b"}),
+    )
+    monkeypatch.setattr(run_embed_module, "build_seed_audit", lambda *args, **kwargs: ({}, "seed_digest", 7, "seed_rule"))
+    monkeypatch.setattr(run_embed_module, "build_determinism_controls", lambda *_: None)
+    monkeypatch.setattr(run_embed_module, "normalize_nondeterminism_notes", lambda *_: None)
+    monkeypatch.setattr(
+        run_embed_module.pipeline_factory,
+        "build_pipeline_shell",
+        lambda *_: {
+            "pipeline_obj": object(),
+            "pipeline_provenance_canon_sha256": "<absent>",
+            "pipeline_status": "built",
+            "pipeline_error": "<absent>",
+            "pipeline_runtime_meta": {},
+            "env_fingerprint_canon_sha256": "<absent>",
+            "diffusers_version": "<absent>",
+            "transformers_version": "<absent>",
+            "safetensors_version": "<absent>",
+            "model_provenance_canon_sha256": "<absent>",
+        },
+    )
+    monkeypatch.setattr(
+        run_embed_module.runtime_resolver,
+        "build_runtime_impl_set_from_cfg",
+        lambda *_: (_FakeImplIdentity(), _FakeImplSet(), "impl_cap_digest"),
+    )
+    monkeypatch.setattr(
+        run_embed_module.runtime_resolver,
+        "compute_impl_identity_digest",
+        lambda *_: "impl_identity_digest_anchor",
+    )
+    monkeypatch.setattr(
+        run_embed_module.infer_runtime,
+        "run_sd3_inference",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("inference must not run after formal path precompute failure")),
+    )
+
+    with pytest.raises(ValueError, match="formal path unavailable: pre-inference statement_only plan requires precomputed plan_digest and basis_digest; reason=planner_input_absent"):
+        run_embed_module.run_embed(
+            output_dir=str(tmp_path / "out"),
+            config_path="configs/default.yaml",
+            overrides=None,
+            input_image_path=None,
+        )

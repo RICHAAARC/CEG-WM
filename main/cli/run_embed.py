@@ -130,6 +130,84 @@ def _normalize_plan_digest(value: Any) -> str | None:
     return normalized_value
 
 
+def _as_dict_payload(value: Any) -> Dict[str, Any] | None:
+    """
+    功能：将载荷对象规范化为 dict。 
+
+    Convert a payload-like object to a dictionary.
+
+    Args:
+        value: Candidate payload object.
+
+    Returns:
+        Dictionary payload when available; otherwise None.
+    """
+    if isinstance(value, dict):
+        return cast(Dict[str, Any], value)
+    as_dict_method = getattr(value, "as_dict", None)
+    if callable(as_dict_method):
+        converted = as_dict_method()
+        if isinstance(converted, dict):
+            return cast(Dict[str, Any], converted)
+    return None
+
+
+def _requires_statement_only_formal_precompute(cfg: Dict[str, Any]) -> bool:
+    """
+    功能：判断当前是否属于必须具备 pre-inference formal plan 的正式路径。 
+
+    Determine whether the current run requires a pre-inference formal plan.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        True when paper formal path requires statement-only precompute.
+    """
+    paper_cfg = cfg.get("paper_faithfulness") if isinstance(cfg.get("paper_faithfulness"), dict) else {}
+    if not bool(paper_cfg.get("enabled", False)):
+        return False
+    attestation_cfg = cfg.get("attestation") if isinstance(cfg.get("attestation"), dict) else {}
+    use_trajectory_mix = attestation_cfg.get("use_trajectory_mix")
+    return isinstance(use_trajectory_mix, bool) and not use_trajectory_mix
+
+
+def _resolve_subspace_precompute_failure_reason(subspace_result: Any) -> str:
+    """
+    功能：提取 precompute planner 缺失 formal plan 时的主失败原因。 
+
+    Resolve the primary failure reason for a missing precomputed formal plan.
+
+    Args:
+        subspace_result: Precomputed planner result object or mapping.
+
+    Returns:
+        Structured failure-reason string.
+    """
+    payload = _as_dict_payload(subspace_result)
+    if isinstance(payload, dict):
+        reason = payload.get("plan_failure_reason")
+        if isinstance(reason, str) and reason:
+            return reason
+        plan_stats = payload.get("plan_stats")
+        if isinstance(plan_stats, dict):
+            plan_stats_dict = cast(Dict[str, Any], plan_stats)
+            for key_name in ["planner_absent_reason", "planner_failure_reason"]:
+                stats_reason = plan_stats_dict.get(key_name)
+                if isinstance(stats_reason, str) and stats_reason:
+                    return stats_reason
+        status_value = payload.get("status")
+        if isinstance(status_value, str) and status_value:
+            return f"precompute_status={status_value}"
+    direct_reason = getattr(cast(Any, subspace_result), "plan_failure_reason", None)
+    if isinstance(direct_reason, str) and direct_reason:
+        return direct_reason
+    status_value = getattr(cast(Any, subspace_result), "status", None)
+    if isinstance(status_value, str) and status_value:
+        return f"precompute_status={status_value}"
+    return "precomputed_formal_plan_incomplete"
+
+
 def _bind_embed_plan_digest_consistency(
     record: Dict[str, Any],
     content_evidence: Dict[str, Any],
@@ -614,6 +692,7 @@ def run_embed(
                 inputs=content_inputs_pre,
                 cfg_digest=cfg_digest
             )
+            content_result_pre_payload = _as_dict_payload(content_result_pre)
             mask_digest = None
             if isinstance(content_result_pre, dict):
                 content_result_pre_dict = cast(Dict[str, Any], content_result_pre)
@@ -621,7 +700,7 @@ def run_embed(
             elif hasattr(content_result_pre, "mask_digest"):
                 mask_digest = content_result_pre.mask_digest
 
-            planner_inputs = _build_planner_inputs_for_runtime(cfg, None)
+            planner_inputs = _build_planner_inputs_for_runtime(cfg, None, content_result_pre_payload)
             subspace_result_pre = impl_set.subspace_planner.plan(
                 cfg,
                 mask_digest=mask_digest,
@@ -641,11 +720,15 @@ def run_embed(
                 plan_payload = cast(Dict[str, Any], _evidence_plan) if isinstance(_evidence_plan, dict) else _evidence_dict
             else:
                 plan_payload = subspace_result_pre
-            plan_digest_precomputed = getattr(subspace_result_pre, "plan_digest", None)
-            if isinstance(plan_payload, dict) and not isinstance(plan_digest_precomputed, str):
-                plan_payload_dict = cast(Dict[str, Any], plan_payload)
-                plan_digest_precomputed = plan_payload_dict.get("plan_digest")
-            plan_digest_precomputed = _normalize_plan_digest(plan_digest_precomputed)
+            plan_digest_precomputed, basis_digest_precomputed = _extract_subspace_result_digests(subspace_result_pre)
+
+            if _requires_statement_only_formal_precompute(cfg):
+                if not isinstance(plan_payload, dict) or plan_digest_precomputed is None or basis_digest_precomputed is None:
+                    precompute_failure_reason = _resolve_subspace_precompute_failure_reason(subspace_result_pre)
+                    raise ValueError(
+                        "formal path unavailable: pre-inference statement_only plan requires precomputed "
+                        f"plan_digest and basis_digest; reason={precompute_failure_reason}"
+                    )
 
             injection_context = None
             injection_modifier = None

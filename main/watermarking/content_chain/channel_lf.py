@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from main.core import digests
+from main.watermarking.provenance.key_derivation import resolve_attestation_event_binding_mode
 from .ldpc_codec import build_ldpc_spec, encode_message_bits
 
 
@@ -110,6 +111,10 @@ def _resolve_event_binding_mode(cfg: Dict[str, Any]) -> str:
     candidate = watermark_cfg.get("event_binding_mode")
     if isinstance(candidate, str) and candidate:
         return candidate
+    attestation_cfg = cfg.get("attestation") if isinstance(cfg.get("attestation"), dict) else {}
+    use_trajectory_mix = attestation_cfg.get("use_trajectory_mix")
+    if isinstance(use_trajectory_mix, bool):
+        return resolve_attestation_event_binding_mode(use_trajectory_mix)
     return "trajectory_bound"
 
 
