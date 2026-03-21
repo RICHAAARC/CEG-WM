@@ -846,12 +846,12 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
     - attestation.image_evidence_result.content_attestation_score_name # attestation 内容统计链得分名。
     - attestation.image_evidence_result.content_attestation_score_semantics # attestation 内容得分语义。
     - attestation.final_event_attested_decision # 最终事件级 attestation 判决。
-    - attestation.final_event_attested_decision.event_attestation_score # 事件级 attestation 正式统计得分。
-    - attestation.final_event_attested_decision.event_attestation_score_name # 事件级 attestation 正式统计得分名。
-    - attestation.final_event_attested_decision.event_attestation_score_semantics # 事件级 attestation 正式统计得分语义。
-    - attestation.final_event_attested_decision.event_attestation_statistics_score # 事件级 attestation 真实性约束统计得分。
-    - attestation.final_event_attested_decision.event_attestation_statistics_score_name # 事件级 attestation 真实性约束统计得分名。
-    - attestation.final_event_attested_decision.event_attestation_statistics_score_semantics # 事件级 attestation 真实性约束统计得分语义。
+    - attestation.final_event_attested_decision.event_attestation_score # 事件级 attestation 主正式统计得分。
+    - attestation.final_event_attested_decision.event_attestation_score_name # 事件级 attestation 主正式统计得分名。
+    - attestation.final_event_attested_decision.event_attestation_score_semantics # 事件级 attestation 主正式统计得分语义。
+    - attestation.final_event_attested_decision.event_attestation_statistics_score # 事件级 attestation 旧统计读取端兼容别名，与 event_attestation_score 同值。
+    - attestation.final_event_attested_decision.event_attestation_statistics_score_name # 事件级 attestation 兼容别名字段名。
+    - attestation.final_event_attested_decision.event_attestation_statistics_score_semantics # 事件级 attestation 兼容别名语义说明，不代表独立统计概念。
     - negative_branch_source_attestation_provenance # negative branch source statement-only provenance（仅 diagnostic/provenance，用于 workflow 追溯，不属于 formal attestation payload）。
     - negative_branch_source_attestation_provenance.statement # provenance statement 拷贝（仅诊断）。
     - negative_branch_source_attestation_provenance.attestation_digest # provenance attestation digest（仅诊断）。

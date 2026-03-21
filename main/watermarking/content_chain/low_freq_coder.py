@@ -506,12 +506,12 @@ def compute_lf_attestation_score(
     功能：计算 LF 通道的 attestation 得分（检测侧）。
 
     Compute the LF channel attestation score by measuring correlation between
-    the image's LF latent features and the expected attestation payload.
+    the image's LF latent features and the expected embedded LF codeword sign.
 
-    The attestation payload is derived as:
-        payload = truncate(HMAC(k_LF, d_A), payload_length)
-        expected_bits = [(b >> i) & 1 for b in payload for i in range(8)]
-    The score is the fraction of LF posteriors whose sign agrees with expected bits.
+    The expected sign target must match the embed-side LF template bundle.
+    Therefore detect-side attestation reconstructs the same LF template path via
+    channel_lf.derive_lf_template_bundle(...) and compares posteriors against
+    codeword_bipolar rather than raw payload bits.
     Score direction: higher value indicates stronger attestation evidence.
 
     Args:
@@ -534,8 +534,7 @@ def compute_lf_attestation_score(
         ValueError: If inputs are empty or invalid.
     """
     from .low_freq_coder import recover_posteriors_erf
-    import hashlib
-    import hmac as _hmac
+    from . import channel_lf
 
     if not isinstance(k_lf, str) or not k_lf:
         raise ValueError("k_lf must be non-empty str")
@@ -546,38 +545,32 @@ def compute_lf_attestation_score(
     params = lf_params or {}
     variance = float(params.get("variance", 1.5))
     block_length = int(params.get("block_length", min(payload_length * 8, 256)))
+    message_length = int(params.get("message_length", 64))
+    ecc_sparsity = int(params.get("ecc_sparsity", 3))
     edit_timestep = params.get("edit_timestep")
     trajectory_feature_spec = params.get("trajectory_feature_spec")
 
-    # 派生 k_LF 字节。
-    try:
-        key_bytes = bytes.fromhex(k_lf)
-    except ValueError:
-        key_bytes = k_lf.encode("utf-8")
+    plan_digest = params.get("plan_digest")
+    lf_basis_digest = params.get("lf_basis_digest")
+    basis_digest = params.get("basis_digest", lf_basis_digest)
 
-    # 计算 attestation payload bits：HMAC(k_LF, d_A)[:payload_length]。
-    message = attestation_digest.encode("utf-8")
-    if payload_length <= 32:
-        raw_payload = _hmac.new(key_bytes, message, hashlib.sha256).digest()[:payload_length]
-    else:
-        # HKDF-Expand 延伸（与 key_derivation.compute_lf_attestation_payload 一致）。
-        prk = _hmac.new(key_bytes, message, hashlib.sha256).digest()
-        raw_payload = b""
-        t_prev = b""
-        counter = 1
-        while len(raw_payload) < payload_length:
-            t_i = _hmac.new(prk, t_prev + b"lf_payload" + bytes([counter]), hashlib.sha256).digest()
-            raw_payload += t_i
-            t_prev = t_i
-            counter += 1
-        raw_payload = raw_payload[:payload_length]
-
-    # 将 payload 展开为 ±1 比特序列。
-    expected_bit_signs = []
-    for byte_val in raw_payload:
-        for bit_pos in range(8):
-            bit = (byte_val >> bit_pos) & 1
-            expected_bit_signs.append(1 if bit == 1 else -1)
+    template_cfg = {
+        "watermark": {
+            "lf": {
+                "variance": variance,
+                "message_length": message_length,
+                "ecc_sparsity": ecc_sparsity,
+            }
+        },
+        "lf_attestation_event_digest": attestation_digest,
+        "lf_attestation_key": k_lf,
+        "plan_digest": plan_digest,
+        "lf_basis_digest": lf_basis_digest,
+        "basis_digest": basis_digest,
+    }
+    template_bundle = channel_lf.derive_lf_template_bundle(template_cfg, block_length)
+    expected_bit_signs = [int(value) for value in template_bundle["codeword_bipolar"].tolist()]
+    parity_check_digest = template_bundle.get("parity_check_digest")
 
     # 扁平化 latent features。
     try:
@@ -640,8 +633,6 @@ def compute_lf_attestation_score(
     trajectory_feature_vector = params.get("trajectory_feature_vector")
     trajectory_feature_digest = params.get("trajectory_feature_digest")
     projected_lf_digest = params.get("projected_lf_digest")
-    plan_digest = params.get("plan_digest")
-    lf_basis_digest = params.get("lf_basis_digest")
     projection_matrix_digest = params.get("projection_matrix_digest")
     trajectory_feature_spec_digest = params.get("trajectory_feature_spec_digest")
     projection_seed = params.get("projection_seed")
@@ -663,6 +654,8 @@ def compute_lf_attestation_score(
         "agreement_count": agreement_count,
         "n_bits_compared": n_compare,
         "edit_timestep": edit_timestep,
+        "message_length": message_length,
+        "ecc_sparsity": ecc_sparsity,
         "trajectory_feature_spec": trajectory_feature_spec,
         "expected_bit_signs": expected_bit_signs_compared,
         "posterior_signs": posterior_signs,
@@ -672,6 +665,7 @@ def compute_lf_attestation_score(
         "projected_lf_digest": projected_lf_digest,
         "plan_digest": plan_digest,
         "lf_basis_digest": lf_basis_digest,
+        "parity_check_digest": parity_check_digest,
         "projection_matrix_digest": projection_matrix_digest,
         "trajectory_feature_spec_digest": trajectory_feature_spec_digest,
         "lf_attestation_score": round(lf_attestation_score, 6),
@@ -686,6 +680,8 @@ def compute_lf_attestation_score(
         "n_bits_compared": n_compare,
         "variance": variance,
         "edit_timestep": edit_timestep,
+        "message_length": message_length,
+        "ecc_sparsity": ecc_sparsity,
         "trajectory_feature_spec": trajectory_feature_spec,
         "trajectory_feature_vector": trajectory_feature_vector,
         "trajectory_feature_digest": trajectory_feature_digest,
@@ -702,6 +698,7 @@ def compute_lf_attestation_score(
         "weakest_posterior_margins": weakest_posterior_margins,
         "plan_digest": plan_digest,
         "lf_basis_digest": lf_basis_digest,
+        "parity_check_digest": parity_check_digest,
         "projection_matrix_digest": projection_matrix_digest,
         "trajectory_feature_spec_digest": trajectory_feature_spec_digest,
         "projection_seed": projection_seed,

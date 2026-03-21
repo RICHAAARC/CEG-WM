@@ -47,7 +47,7 @@ LEGACY_PROFILE_CPU_MIN = "cpu_min"
 LEGACY_PROFILE_CUDA_REAL = "cuda_real"
 CONTENT_ATTESTATION_SCORE_NAME = "content_attestation_score"
 EVENT_ATTESTATION_SCORE_NAME = "event_attestation_score"
-EVENT_ATTESTATION_STATISTICS_SCORE_NAME = "event_attestation_statistics_score"
+EVENT_ATTESTATION_SCORE_ALIAS_NAME = "event_attestation_statistics_score"
 PAPER_FROZEN_CONFIG_PATH = REPO_ROOT / "configs" / "paper_full_cuda.yaml"
 PAPER_SPEC_CONFIG_PATH = REPO_ROOT / "configs" / "paper_faithfulness_spec.yaml"
 PAPER_FROZEN_IMPL_REQUIRED_FIELDS = ("sync_module_id", "geometry_extractor_id")
@@ -55,6 +55,27 @@ PAPER_FROZEN_IMPL_REQUIRED_FIELDS = ("sync_module_id", "geometry_extractor_id")
 # cfg 角色枚举
 CFG_ROLE_SPEC = "spec"
 CFG_ROLE_RUNTIME = "runtime"
+
+
+def _normalize_event_attestation_score_name(score_name: str) -> str:
+    """
+    功能：将旧统计别名收口到主 event_attestation_score 名称。
+
+    Normalize legacy event-attestation alias names to the primary
+    event_attestation_score identifier.
+
+    Args:
+        score_name: Candidate score name.
+
+    Returns:
+        Primary score name when the input is the legacy alias; otherwise the
+        original score name.
+    """
+    if not isinstance(score_name, str):
+        raise TypeError("score_name must be str")
+    if score_name == EVENT_ATTESTATION_SCORE_ALIAS_NAME:
+        return EVENT_ATTESTATION_SCORE_NAME
+    return score_name
 
 
 def _detect_cfg_role(cfg_obj: dict) -> str:
@@ -1315,8 +1336,10 @@ def _resolve_parallel_attestation_statistics_cfg(cfg_obj: dict) -> dict:
 
     if not isinstance(calibration_score_name, str) or not calibration_score_name:
         calibration_score_name = EVENT_ATTESTATION_SCORE_NAME
+    calibration_score_name = _normalize_event_attestation_score_name(calibration_score_name)
     if not isinstance(evaluate_score_name, str) or not evaluate_score_name:
         evaluate_score_name = calibration_score_name
+    evaluate_score_name = _normalize_event_attestation_score_name(evaluate_score_name)
 
     return {
         "enabled": bool(section_cfg.get("enabled", False)),
@@ -1372,7 +1395,7 @@ def _extract_event_attestation_score_from_detect_record(record: dict) -> float |
         record: Detect record mapping.
 
     Returns:
-        Formal event-attestation statistics score when present and valid;
+        Formal primary event-attestation score when present and valid;
         otherwise None.
     """
     if not isinstance(record, dict):
@@ -1398,12 +1421,13 @@ def _extract_event_attestation_score_from_detect_record(record: dict) -> float |
     return score_float
 
 
-def _extract_event_attestation_statistics_score_from_detect_record(record: dict) -> float | None:
+def _extract_event_attestation_score_alias_from_detect_record(record: dict) -> float | None:
     """
-    功能：从 detect record 中提取真实性约束的 event_attestation_statistics_score。
+    功能：兼容读取 detect record 中旧的 event_attestation_statistics_score 别名。
 
-    Extract the authenticity-constrained event_attestation_statistics_score
-    from a detect record.
+    Read the legacy event_attestation_statistics_score alias from a detect
+    record. The primary semantics are event_attestation_score; this helper is
+    retained only for backward compatibility with legacy readers.
 
     Args:
         record: Detect record mapping.
@@ -1413,6 +1437,10 @@ def _extract_event_attestation_statistics_score_from_detect_record(record: dict)
     """
     if not isinstance(record, dict):
         raise TypeError("record must be dict")
+
+    primary_score = _extract_event_attestation_score_from_detect_record(record)
+    if primary_score is not None:
+        return primary_score
 
     attestation_node = record.get("attestation")
     if not isinstance(attestation_node, dict):
@@ -1425,7 +1453,7 @@ def _extract_event_attestation_statistics_score_from_detect_record(record: dict)
     if (
         isinstance(score_name, str)
         and score_name
-        and score_name != EVENT_ATTESTATION_STATISTICS_SCORE_NAME
+        and score_name != EVENT_ATTESTATION_SCORE_ALIAS_NAME
     ):
         return None
 
@@ -1436,6 +1464,22 @@ def _extract_event_attestation_statistics_score_from_detect_record(record: dict)
     if not math.isfinite(score_float):
         return None
     return score_float
+
+
+def _extract_event_attestation_statistics_score_from_detect_record(record: dict) -> float | None:
+    """
+    功能：兼容旧调用方读取 event_attestation_statistics_score 别名。 
+
+    Backward-compatible wrapper for legacy callers that still request the
+    event_attestation_statistics_score alias.
+
+    Args:
+        record: Detect record mapping.
+
+    Returns:
+        Event-attestation score value read through the legacy alias contract.
+    """
+    return _extract_event_attestation_score_alias_from_detect_record(record)
 
 
 def _mark_clone_fallback_attestation_unavailable(record: dict[str, Any]) -> None:
@@ -1482,9 +1526,9 @@ def _mark_clone_fallback_attestation_unavailable(record: dict[str, Any]) -> None
         "unavailable_in_clone_fallback_not_a_formal_negative_attestation_sample"
     )
     final_decision["event_attestation_statistics_score"] = None
-    final_decision["event_attestation_statistics_score_name"] = EVENT_ATTESTATION_STATISTICS_SCORE_NAME
+    final_decision["event_attestation_statistics_score_name"] = EVENT_ATTESTATION_SCORE_ALIAS_NAME
     final_decision["event_attestation_statistics_score_semantics"] = (
-        "unavailable_in_clone_fallback_not_a_formal_negative_attestation_sample"
+        "legacy_alias_of_event_attestation_score_unavailable_in_clone_fallback_not_a_formal_negative_attestation_sample"
     )
     final_decision["attestation_unavailable_reason"] = "attestation_unavailable_in_clone_fallback"
     attestation_payload["final_event_attested_decision"] = final_decision
@@ -1914,7 +1958,7 @@ def _prepare_parallel_attestation_detect_records_from_matrix(
     if score_name not in {
         CONTENT_ATTESTATION_SCORE_NAME,
         EVENT_ATTESTATION_SCORE_NAME,
-        EVENT_ATTESTATION_STATISTICS_SCORE_NAME,
+        EVENT_ATTESTATION_SCORE_ALIAS_NAME,
     }:
         return None
 
@@ -1944,8 +1988,8 @@ def _prepare_parallel_attestation_detect_records_from_matrix(
     if score_name == EVENT_ATTESTATION_SCORE_NAME:
         if _extract_event_attestation_score_from_detect_record(branch_negative_payload) is None:
             return None
-    if score_name == EVENT_ATTESTATION_STATISTICS_SCORE_NAME:
-        if _extract_event_attestation_statistics_score_from_detect_record(branch_negative_payload) is None:
+    if score_name == EVENT_ATTESTATION_SCORE_ALIAS_NAME:
+        if _extract_event_attestation_score_alias_from_detect_record(branch_negative_payload) is None:
             return None
 
     workflow_cfg_dir = output_run_root / "artifacts" / "workflow_cfg"
@@ -1962,8 +2006,8 @@ def _prepare_parallel_attestation_detect_records_from_matrix(
         if score_name == EVENT_ATTESTATION_SCORE_NAME:
             if _extract_event_attestation_score_from_detect_record(base_payload) is None:
                 continue
-        if score_name == EVENT_ATTESTATION_STATISTICS_SCORE_NAME:
-            if _extract_event_attestation_statistics_score_from_detect_record(base_payload) is None:
+        if score_name == EVENT_ATTESTATION_SCORE_ALIAS_NAME:
+            if _extract_event_attestation_score_alias_from_detect_record(base_payload) is None:
                 continue
 
         positive_payload = copy.deepcopy(base_payload)
@@ -2376,7 +2420,7 @@ def _prepare_stage_cfg_path(
                     resolved_score_name in {
                         CONTENT_ATTESTATION_SCORE_NAME,
                         EVENT_ATTESTATION_SCORE_NAME,
-                        EVENT_ATTESTATION_STATISTICS_SCORE_NAME,
+                        EVENT_ATTESTATION_SCORE_ALIAS_NAME,
                     }
                     or bool(parallel_attestation_cfg.get("enabled", False))
                 ),
@@ -2697,8 +2741,8 @@ def _prepare_detect_records_with_minimal_ground_truth(
                             _ = _extract_content_attestation_score_from_detect_record(neg_payload_per_pair)
                         elif score_name == EVENT_ATTESTATION_SCORE_NAME:
                             _ = _extract_event_attestation_score_from_detect_record(neg_payload_per_pair)
-                        elif score_name == EVENT_ATTESTATION_STATISTICS_SCORE_NAME:
-                            _ = _extract_event_attestation_statistics_score_from_detect_record(neg_payload_per_pair)
+                        elif score_name == EVENT_ATTESTATION_SCORE_ALIAS_NAME:
+                            _ = _extract_event_attestation_score_alias_from_detect_record(neg_payload_per_pair)
                         else:
                             raise ValueError(f"unsupported score_name: {score_name}")
 
@@ -2816,7 +2860,7 @@ def _prepare_detect_records_with_minimal_ground_truth(
             elif score_name in {
                 CONTENT_ATTESTATION_SCORE_NAME,
                 EVENT_ATTESTATION_SCORE_NAME,
-                EVENT_ATTESTATION_STATISTICS_SCORE_NAME,
+                EVENT_ATTESTATION_SCORE_ALIAS_NAME,
             }:
                 # attestation 统计链中的 clone fallback 不能继承 source formal verdict。
                 # 这里显式标记为 unavailable，使该样本按正式规则被 rejection。
@@ -2931,8 +2975,8 @@ def _prepare_detect_record_for_scoring(
                 f"'event_attestation_score_name': {final_decision.get('event_attestation_score_name')!r}}}"
             )
         return source_detect_path
-    if score_name == EVENT_ATTESTATION_STATISTICS_SCORE_NAME:
-        attestation_score = _extract_event_attestation_statistics_score_from_detect_record(payload)
+    if score_name == EVENT_ATTESTATION_SCORE_ALIAS_NAME:
+        attestation_score = _extract_event_attestation_score_alias_from_detect_record(payload)
         if attestation_score is not None:
             return source_detect_path
         if profile == PROFILE_PAPER_FULL_CUDA:
@@ -2943,9 +2987,9 @@ def _prepare_detect_record_for_scoring(
                 else {}
             )
             raise ValueError(
-                "[paper_full_cuda] attestation 正式统计链缺少可用 event_attestation_statistics_score，"
+                "[paper_full_cuda] attestation 兼容 alias 读取链缺少可用 event_attestation_statistics_score，"
                 f"diagnostics={{'final_event_status': {final_decision.get('status')!r}, "
-                f"'authenticity_status': {final_decision.get('authenticity_status')!r}, "
+                f"'event_attestation_score': {final_decision.get('event_attestation_score')!r}, "
                 f"'event_attestation_statistics_score': {final_decision.get('event_attestation_statistics_score')!r}, "
                 f"'event_attestation_statistics_score_name': {final_decision.get('event_attestation_statistics_score_name')!r}}}"
             )
@@ -3310,6 +3354,8 @@ def _write_parallel_attestation_statistics_summary(run_root: Path, parallel_run_
         "content_score_chain": _build_statistics_chain_summary(run_root, base_run_root=run_root),
         f"{parallel_score_name}_chain": parallel_chain_summary,
     }
+    if parallel_score_name == EVENT_ATTESTATION_SCORE_NAME:
+        summary_obj[f"{EVENT_ATTESTATION_SCORE_ALIAS_NAME}_chain"] = dict(parallel_chain_summary)
     _write_artifact_text_unbound(
         run_root,
         summary_path,

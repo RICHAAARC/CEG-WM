@@ -534,10 +534,11 @@ def test_schema_new_fields_registered() -> None:
 
 def test_event_attestation_score_paths_registered() -> None:
     """
-    功能：验证 event_attestation_score 相关字段完成 schema 与 contract 追加登记。
+    功能：验证 event_attestation_score 主字段与旧 statistics alias 字段完成 schema 与 contract 追加登记。
 
     Validate event_attestation_score field paths are append-only registered in
-    both records_schema_extensions.yaml and frozen_contracts.yaml.
+    both records_schema_extensions.yaml and frozen_contracts.yaml, while the
+    legacy statistics fields remain compatibility aliases.
     """
     schema_path = _REPO_ROOT / "configs" / "records_schema_extensions.yaml"
     contracts_path = _REPO_ROOT / "configs" / "frozen_contracts.yaml"

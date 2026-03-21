@@ -484,9 +484,9 @@ def test_prepare_parallel_attestation_detect_records_from_matrix_prefers_attack_
                 "content_attestation_score_name": "content_attestation_score",
             },
             "final_event_attested_decision": {
-                "status": "mismatch",
-                "is_event_attested": False,
-                "event_attestation_score": 0.0,
+                "status": "attested",
+                "is_event_attested": True,
+                "event_attestation_score": 0.46,
                 "event_attestation_score_name": "event_attestation_score",
                 "event_attestation_statistics_score": 0.46,
                 "event_attestation_statistics_score_name": "event_attestation_statistics_score",
@@ -526,7 +526,7 @@ def test_prepare_parallel_attestation_detect_records_from_matrix_prefers_attack_
         run_root=run_root,
         output_run_root=output_run_root,
         stage_name="evaluate",
-        score_name="event_attestation_statistics_score",
+        score_name="event_attestation_score",
     )
 
     assert isinstance(records_glob, str)
@@ -832,22 +832,22 @@ def test_negative_branch_statement_only_provenance_keeps_image_evidence_but_bloc
     assert final_decision.get("event_attestation_score") == pytest.approx(0.0)
 
 
-def test_negative_branch_statement_only_provenance_supports_low_event_attestation_statistics() -> None:
+def test_negative_branch_statement_only_provenance_supports_low_event_attestation_statistics_alias() -> None:
     """
-    功能：验证 statement-only negative 可作为 event_attestation_score 正式低值样本进入校准。 
+    功能：验证 statement-only negative 可作为旧 statistics alias 的正式低值样本进入校准。 
 
     Verify statement-only negatives remain valid formal low-score samples for
-    event_attestation_score calibration.
+    the legacy event_attestation_statistics_score alias.
     """
     records = [
         {
             "label": True,
             "attestation": {
                 "final_event_attested_decision": {
-                    "status": "unattested",
-                    "is_event_attested": False,
+                    "status": "attested",
+                    "is_event_attested": True,
                     "authenticity_status": "authentic",
-                    "event_attestation_score": 0.0,
+                    "event_attestation_score": 0.81,
                     "event_attestation_score_name": "event_attestation_score",
                     "event_attestation_statistics_score": 0.81,
                     "event_attestation_statistics_score_name": "event_attestation_statistics_score",
@@ -1871,8 +1871,8 @@ def test_parallel_attestation_statistics_workflow_writes_distinct_artifacts(
         "evaluate": {"score_name": "content_score", "minimal_ground_truth_pair_count": 1},
         "parallel_attestation_statistics": {
             "enabled": True,
-            "calibration_score_name": "event_attestation_statistics_score",
-            "evaluate_score_name": "event_attestation_statistics_score",
+            "calibration_score_name": "event_attestation_score",
+            "evaluate_score_name": "event_attestation_score",
         },
     }
     cfg_path = tmp_path / "paper_cfg.yaml"
@@ -1892,10 +1892,10 @@ def test_parallel_attestation_statistics_workflow_writes_distinct_artifacts(
                         "content_attestation_score_name": "content_attestation_score",
                     },
                     "final_event_attested_decision": {
-                        "status": "unattested",
-                        "is_event_attested": False,
+                        "status": "attested",
+                        "is_event_attested": True,
                         "authenticity_status": "authentic",
-                        "event_attestation_score": 0.0,
+                        "event_attestation_score": 0.89,
                         "event_attestation_score_name": "event_attestation_score",
                         "event_attestation_statistics_score": 0.89,
                         "event_attestation_statistics_score_name": "event_attestation_statistics_score",
@@ -2046,17 +2046,21 @@ def test_parallel_attestation_statistics_workflow_writes_distinct_artifacts(
     summary_path = run_root / "artifacts" / "parallel_attestation_statistics_summary.json"
     summary_obj = json.loads(summary_path.read_text(encoding="utf-8"))
     content_chain = summary_obj["content_score_chain"]
-    attestation_chain = summary_obj["event_attestation_statistics_score_chain"]
+    attestation_chain = summary_obj["event_attestation_score_chain"]
+    attestation_alias_chain = summary_obj["event_attestation_statistics_score_chain"]
 
     assert content_chain["score_name"] == "content_score"
-    assert attestation_chain["score_name"] == "event_attestation_statistics_score"
+    assert attestation_chain["score_name"] == "event_attestation_score"
+    assert attestation_alias_chain["score_name"] == "event_attestation_score"
     assert content_chain["threshold_id"] == "content_score_np_fpr_0_01"
-    assert attestation_chain["threshold_id"] == "event_attestation_statistics_score_np_fpr_0_01"
+    assert attestation_chain["threshold_id"] == "event_attestation_score_np_fpr_0_01"
+    assert attestation_alias_chain["threshold_id"] == "event_attestation_score_np_fpr_0_01"
     assert content_chain["thresholds_artifact_path"] != attestation_chain["thresholds_artifact_path"]
     assert summary_obj["run_root_relative"] == "."
     assert summary_obj["parallel_run_root_relative"] == "outputs/parallel_attestation_statistics"
     assert content_chain["run_root_relative"] == "."
     assert attestation_chain["run_root_relative"] == "outputs/parallel_attestation_statistics"
+    assert attestation_alias_chain == attestation_chain
     assert content_chain["thresholds_artifact_path_relative"] == "artifacts/thresholds/thresholds_artifact.json"
     assert attestation_chain["thresholds_artifact_path_relative"] == (
         "outputs/parallel_attestation_statistics/artifacts/thresholds/thresholds_artifact.json"

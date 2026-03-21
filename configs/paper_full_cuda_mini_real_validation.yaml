@@ -132,8 +132,8 @@ evaluate:
 
 parallel_attestation_statistics:
   enabled: true
-  calibration_score_name: "event_attestation_statistics_score"
-  evaluate_score_name: "event_attestation_statistics_score"
+  calibration_score_name: "event_attestation_score"
+  evaluate_score_name: "event_attestation_score"
 
 impl:
   content_extractor_id: "unified_content_extractor"

@@ -231,16 +231,16 @@ def test_evaluate_event_attestation_threshold_accepts_statement_only_negative_ze
     assert breakdown["confusion"] == {"tp": 1, "fp": 0, "fn": 0, "tn": 1}
 
 
-def test_evaluate_event_attestation_statistics_threshold_uses_authentic_pre_verdict_score() -> None:
-    """Validate readonly evaluate uses authentic event statistics before final attested verdict."""
+def test_evaluate_event_attestation_statistics_threshold_alias_uses_event_attested_score() -> None:
+    """Validate readonly evaluate keeps the legacy statistics alias aligned with the primary event score."""
     records = [
         {
             "attestation": {
                 "final_event_attested_decision": {
-                    "status": "unattested",
-                    "is_event_attested": False,
+                    "status": "attested",
+                    "is_event_attested": True,
                     "authenticity_status": "authentic",
-                    "event_attestation_score": 0.0,
+                    "event_attestation_score": 0.8,
                     "event_attestation_score_name": "event_attestation_score",
                     "event_attestation_statistics_score": 0.8,
                     "event_attestation_statistics_score_name": "event_attestation_statistics_score",

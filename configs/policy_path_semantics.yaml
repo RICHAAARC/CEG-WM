@@ -203,12 +203,12 @@ score_audit_naming_rules:
   alternate_single_score_fields:
     - "score_audit.content_attestation_score_used"
     - "score_audit.event_attestation_score_used"
-    - "score_audit.event_attestation_statistics_score_used"
+    - "score_audit.event_attestation_statistics_score_used" # 旧 alias，仅用于历史兼容。
   alternate_multi_score_fields:
     - "score_audit.content_attestation_scores_used"
     - "score_audit.event_attestation_scores_used"
-    - "score_audit.event_attestation_statistics_scores_used"
-  rule: "单一得分使用单数，多个得分列表使用复数，避免同义字段。"
+    - "score_audit.event_attestation_statistics_scores_used" # 旧 alias，仅用于历史兼容。
+  rule: "单一得分使用单数，多个得分列表使用复数；event_attestation_statistics_* 仅作为 event_attestation_* 的历史兼容别名，不表示独立统计语义。"
 
 # ------------------------------
 # condition 枚举与判定来源

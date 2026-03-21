@@ -1179,42 +1179,42 @@ fields:
     type: "score_float"
     required: false
     missing_semantics: "absent_ok"
-    description: "事件级 attestation 正式统计得分（event_attested 时继承内容分，否则在内容分存在时记为 0）。"
+    description: "事件级 attestation 主正式统计得分（event_attested 时继承内容分，否则在内容分存在时记为 0）。"
 
   - path: "attestation.final_event_attested_decision.event_attestation_score_name"
     layer: "diagnostic"
     type: "reason_string"
     required: false
     missing_semantics: "absent_ok"
-    description: "事件级 attestation 正式统计链所使用的得分名。"
+    description: "事件级 attestation 主正式统计链所使用的得分名。"
 
   - path: "attestation.final_event_attested_decision.event_attestation_score_semantics"
     layer: "diagnostic"
     type: "reason_string"
     required: false
     missing_semantics: "absent_ok"
-    description: "事件级 attestation 正式统计得分的语义定义。"
+    description: "事件级 attestation 主正式统计得分的语义定义。"
 
   - path: "attestation.final_event_attested_decision.event_attestation_statistics_score"
     layer: "diagnostic"
     type: "score_float"
     required: false
     missing_semantics: "absent_ok"
-    description: "事件级 attestation 统计链得分（authentic 时继承内容分，否则在内容分存在时记为 0）。"
+    description: "事件级 attestation 旧统计读取端兼容别名，与 event_attestation_score 同值，不表示独立统计语义。"
 
   - path: "attestation.final_event_attested_decision.event_attestation_statistics_score_name"
     layer: "diagnostic"
     type: "reason_string"
     required: false
     missing_semantics: "absent_ok"
-    description: "事件级 attestation 统计链所使用的得分名。"
+    description: "事件级 attestation 兼容别名字段名，仅用于旧读取端兼容。"
 
   - path: "attestation.final_event_attested_decision.event_attestation_statistics_score_semantics"
     layer: "diagnostic"
     type: "reason_string"
     required: false
     missing_semantics: "absent_ok"
-    description: "事件级 attestation 统计链得分的语义定义。"
+    description: "事件级 attestation 兼容别名语义说明，明确该字段只是 event_attestation_score 的历史镜像。"
 
   - path: "negative_branch_source_attestation_provenance"
     layer: "diagnostic"

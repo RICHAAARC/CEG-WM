@@ -823,14 +823,22 @@ def _extract_score_value_for_metrics(record: Dict[str, Any], score_name: str) ->
         final_event_decision = attestation_node.get("final_event_attested_decision")
         if not isinstance(final_event_decision, dict):
             return None, "status_not_ok"
-        formal_score_name = final_event_decision.get("event_attestation_statistics_score_name")
+        primary_score_name = final_event_decision.get("event_attestation_score_name")
+        primary_score_value = final_event_decision.get("event_attestation_score")
         if (
-            isinstance(formal_score_name, str)
-            and formal_score_name
-            and formal_score_name != "event_attestation_statistics_score"
+            (not isinstance(primary_score_name, str) or not primary_score_name or primary_score_name == "event_attestation_score")
+            and isinstance(primary_score_value, (int, float))
         ):
-            return None, "status_not_ok"
-        score_value = final_event_decision.get("event_attestation_statistics_score")
+            score_value = primary_score_value
+        else:
+            formal_score_name = final_event_decision.get("event_attestation_statistics_score_name")
+            if (
+                isinstance(formal_score_name, str)
+                and formal_score_name
+                and formal_score_name != "event_attestation_statistics_score"
+            ):
+                return None, "status_not_ok"
+            score_value = final_event_decision.get("event_attestation_statistics_score")
     else:
         raise ValueError(f"unsupported score_name: {score_name}")
 

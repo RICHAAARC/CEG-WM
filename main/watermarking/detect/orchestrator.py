@@ -797,6 +797,8 @@ def _build_lf_attestation_trace_context(
 
     return {
         "variance": float(lf_cfg.get("variance", 1.5)),
+        "message_length": int(lf_cfg.get("message_length", 64)),
+        "ecc_sparsity": int(lf_cfg.get("ecc_sparsity", 3)),
         "basis_rank": int(basis_rank) if isinstance(basis_rank, (int, float)) else None,
         "edit_timestep": int(trajectory_feature_spec.get("edit_timestep", 0)),
         "trajectory_feature_spec": trajectory_feature_spec,
@@ -4993,14 +4995,22 @@ def _extract_score_for_stats(record: Dict[str, Any], score_name: str) -> Optiona
         if not isinstance(final_decision_node, dict):
             return None
         final_decision = cast(Dict[str, Any], final_decision_node)
-        formal_score_name = final_decision.get("event_attestation_statistics_score_name")
+        primary_score_name = final_decision.get("event_attestation_score_name")
+        primary_score_value = final_decision.get("event_attestation_score")
         if (
-            isinstance(formal_score_name, str)
-            and formal_score_name
-            and formal_score_name != "event_attestation_statistics_score"
+            (not isinstance(primary_score_name, str) or not primary_score_name or primary_score_name == "event_attestation_score")
+            and isinstance(primary_score_value, (int, float))
         ):
-            return None
-        score_value = final_decision.get("event_attestation_statistics_score")
+            score_value = primary_score_value
+        else:
+            formal_score_name = final_decision.get("event_attestation_statistics_score_name")
+            if (
+                isinstance(formal_score_name, str)
+                and formal_score_name
+                and formal_score_name != "event_attestation_statistics_score"
+            ):
+                return None
+            score_value = final_decision.get("event_attestation_statistics_score")
     else:
         raise ValueError(f"unsupported score_name: {score_name}")
 
@@ -6730,8 +6740,9 @@ def verify_attestation(
         - "verdict": "attested" | "mismatch" | "absent".
         - "fusion_score": float or None.
         - "content_attestation_score": float or None.
-                - "final_event_attested_decision": dict with the event-level verdict and
-                    readonly statistics score.
+                - "final_event_attested_decision": dict with the event-level verdict,
+                    primary event_attestation_score, and a legacy alias mirror for
+                    old statistics readers.
         - "channel_scores": dict with lf, hf, geo sub-scores.
         - "attestation_digest": d_A used for key derivation.
         - "statement": echoed candidate statement dict.
@@ -7125,28 +7136,23 @@ def verify_attestation(
         hf_decision_score=s_hf,
         detect_hf_plan_digest_used=detect_hf_plan_digest_used,
     )
-    event_attestation_statistics_score = (
+    event_attestation_score = (
         content_attestation_score
-        if authenticity_status == "authentic"
+        if verdict == "attested"
         else (0.0 if content_attestation_score is not None else None)
     )
+    event_attestation_statistics_score = event_attestation_score
     final_event_attested_decision = {
         "status": verdict,
         "is_event_attested": bool(verdict == "attested"),
         "authenticity_status": authenticity_status,
         "image_evidence_status": image_evidence_status,
-        "event_attestation_score": (
-            content_attestation_score
-            if verdict == "attested"
-            else (0.0 if content_attestation_score is not None else None)
-        ),
+        "event_attestation_score": event_attestation_score,
         "event_attestation_score_name": "event_attestation_score",
         "event_attestation_score_semantics": "content_attestation_score_if_event_attested_else_zero_when_content_score_present",
         "event_attestation_statistics_score": event_attestation_statistics_score,
         "event_attestation_statistics_score_name": "event_attestation_statistics_score",
-        "event_attestation_statistics_score_semantics": (
-            "content_attestation_score_if_authenticity_status_is_authentic_else_zero_when_content_attestation_score_present"
-        ),
+        "event_attestation_statistics_score_semantics": "legacy_alias_of_event_attestation_score_not_an_independent_statistics_semantics",
     }
 
     # (7) 构造审计摘要（可复算）。

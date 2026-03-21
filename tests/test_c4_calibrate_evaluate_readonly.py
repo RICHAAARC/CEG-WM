@@ -163,17 +163,17 @@ def test_load_scores_for_calibration_event_attestation_accepts_statement_only_ne
     assert strata["global"]["n_valid"] == 1
 
 
-def test_load_scores_for_calibration_event_attestation_statistics_accepts_statement_only_negative_zero_score() -> None:
-    """Validate authenticity-constrained event statistics keep statement-only negatives at zero."""
+def test_load_scores_for_calibration_event_attestation_statistics_alias_accepts_event_attested_semantics() -> None:
+    """Validate the legacy statistics alias consumes the primary event-attested semantics."""
     records = [
         {
             "label": True,
             "attestation": {
                 "final_event_attested_decision": {
-                    "status": "unattested",
-                    "is_event_attested": False,
+                    "status": "attested",
+                    "is_event_attested": True,
                     "authenticity_status": "authentic",
-                    "event_attestation_score": 0.0,
+                    "event_attestation_score": 0.81,
                     "event_attestation_score_name": "event_attestation_score",
                     "event_attestation_statistics_score": 0.81,
                     "event_attestation_statistics_score_name": "event_attestation_statistics_score",
@@ -463,17 +463,17 @@ def test_evaluate_records_against_threshold_supports_event_attestation_score() -
     assert breakdown["confusion"] == {"tp": 1, "fp": 0, "fn": 0, "tn": 1}
 
 
-def test_evaluate_records_against_threshold_supports_event_attestation_statistics_score() -> None:
-    """Validate readonly evaluate supports authentic pre-verdict event statistics."""
+def test_evaluate_records_against_threshold_supports_event_attestation_statistics_score_alias() -> None:
+    """Validate readonly evaluate still accepts the legacy statistics alias."""
     records = [
         {
             "content_evidence_payload": {"status": "ok", "score": 0.1},
             "attestation": {
                 "final_event_attested_decision": {
-                    "status": "unattested",
-                    "is_event_attested": False,
+                    "status": "attested",
+                    "is_event_attested": True,
                     "authenticity_status": "authentic",
-                    "event_attestation_score": 0.0,
+                    "event_attestation_score": 0.9,
                     "event_attestation_score_name": "event_attestation_score",
                     "event_attestation_statistics_score": 0.9,
                     "event_attestation_statistics_score_name": "event_attestation_statistics_score",

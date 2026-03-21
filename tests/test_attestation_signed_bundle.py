@@ -24,6 +24,7 @@ from main.watermarking.provenance.attestation_statement import (
 )
 from main.watermarking.provenance.key_derivation import derive_attestation_keys
 from main.watermarking.content_chain import channel_hf
+from main.watermarking.content_chain import channel_lf
 from main.watermarking.content_chain.high_freq_embedder import compute_hf_attestation_score
 from main.watermarking.content_chain.low_freq_coder import compute_lf_attestation_score
 from main.watermarking.content_chain import high_freq_embedder as high_freq_embedder_module
@@ -80,27 +81,31 @@ def _build_matching_lf_attestation_features(
     statement: Dict[str, Any],
     k_master: str,
     trace_commit: str | None = None,
+    plan_digest: str | None = None,
+    basis_digest: str | None = None,
 ) -> list[float]:
     attestation_digest = compute_attestation_digest(statement_from_dict(statement))
     attest_keys = derive_attestation_keys(k_master, attestation_digest, trajectory_commit=trace_commit)
-    key_bytes = bytes.fromhex(attest_keys.k_lf)
-    message = attest_keys.event_binding_digest.encode("utf-8")
-    prk = hmac.new(key_bytes, message, hashlib.sha256).digest()
-    payload = b""
-    t_prev = b""
-    counter = 1
-    while len(payload) < 48:
-        t_i = hmac.new(prk, t_prev + b"lf_payload" + bytes([counter]), hashlib.sha256).digest()
-        payload += t_i
-        t_prev = t_i
-        counter += 1
-    payload = payload[:48]
-    features: list[float] = []
-    for byte_value in payload:
-        for bit_pos in range(8):
-            bit_value = (byte_value >> bit_pos) & 1
-            features.append(3.0 if bit_value == 1 else -3.0)
-    return features
+    template_bundle = channel_lf.derive_lf_template_bundle(
+        {
+            "watermark": {
+                "lf": {
+                    "message_length": 64,
+                    "ecc_sparsity": 3,
+                }
+            },
+            "lf_attestation_event_digest": attest_keys.event_binding_digest,
+            "lf_attestation_key": attest_keys.k_lf,
+            "plan_digest": plan_digest or statement["plan_digest"],
+            "lf_basis_digest": basis_digest,
+            "basis_digest": basis_digest,
+        },
+        48 * 8,
+    )
+    return [
+        3.0 if int(value) > 0 else -3.0
+        for value in template_bundle["codeword_bipolar"].tolist()
+    ]
 
 
 def test_signed_attestation_bundle_roundtrip() -> None:
@@ -234,7 +239,13 @@ def test_verify_attestation_statement_only_cannot_become_event_attested() -> Non
     assert final_decision.get("event_attestation_score") == pytest.approx(0.0)
     assert final_decision.get("event_attestation_score_name") == "event_attestation_score"
     assert final_decision.get("event_attestation_statistics_score") == pytest.approx(0.0)
+    assert final_decision.get("event_attestation_statistics_score") == pytest.approx(
+        final_decision.get("event_attestation_score")
+    )
     assert final_decision.get("event_attestation_statistics_score_name") == "event_attestation_statistics_score"
+    assert final_decision.get("event_attestation_statistics_score_semantics") == (
+        "legacy_alias_of_event_attestation_score_not_an_independent_statistics_semantics"
+    )
 
 
 def test_build_detect_attestation_result_statement_only_provenance_uses_legal_bundle_status() -> None:
@@ -323,7 +334,13 @@ def test_verify_attestation_authentic_bundle_can_become_event_attested() -> None
     assert final_decision.get("event_attestation_score") == pytest.approx(result.get("content_attestation_score"))
     assert final_decision.get("event_attestation_score_name") == "event_attestation_score"
     assert final_decision.get("event_attestation_statistics_score") == pytest.approx(result.get("content_attestation_score"))
+    assert final_decision.get("event_attestation_statistics_score") == pytest.approx(
+        final_decision.get("event_attestation_score")
+    )
     assert final_decision.get("event_attestation_statistics_score_name") == "event_attestation_statistics_score"
+    assert final_decision.get("event_attestation_statistics_score_semantics") == (
+        "legacy_alias_of_event_attestation_score_not_an_independent_statistics_semantics"
+    )
 
 
 def test_build_detect_attestation_result_bridges_hf_attestation_values() -> None:
@@ -471,6 +488,8 @@ def test_compute_lf_attestation_score_emits_agreement_fields() -> None:
             payload["statement"],
             "5" * 64,
             trace_commit=cast(str, payload["bundle"].get("trace_commit")),
+            plan_digest="3" * 64,
+            basis_digest="6" * 64,
         ),
         k_lf=derive_attestation_keys(
             "5" * 64,
@@ -518,6 +537,32 @@ def test_compute_lf_attestation_score_emits_agreement_fields() -> None:
     assert result.get("projected_lf_digest") == "a" * 64
     assert result.get("projection_seed") == 17
     assert result.get("expected_bit_signs")
+    expected_template_bundle = channel_lf.derive_lf_template_bundle(
+        {
+            "watermark": {
+                "lf": {
+                    "variance": 1.7,
+                    "message_length": 64,
+                    "ecc_sparsity": 3,
+                }
+            },
+            "lf_attestation_event_digest": compute_event_binding_digest(
+                payload["attestation_digest"],
+                cast(str, payload["bundle"].get("trace_commit")),
+            ),
+            "lf_attestation_key": derive_attestation_keys(
+                "5" * 64,
+                payload["attestation_digest"],
+                trajectory_commit=cast(str, payload["bundle"].get("trace_commit")),
+            ).k_lf,
+            "plan_digest": "3" * 64,
+            "lf_basis_digest": "6" * 64,
+        },
+        int(result.get("n_bits_compared") or 0),
+    )
+    assert result.get("expected_bit_signs") == [
+        int(value) for value in expected_template_bundle["codeword_bipolar"].tolist()
+    ]
     assert result.get("posterior_values")
     assert result.get("posterior_signs")
     assert result.get("posterior_margin_values")
@@ -573,6 +618,8 @@ def test_build_detect_attestation_result_emits_lf_trace_artifact() -> None:
             payload["statement"],
             "5" * 64,
             trace_commit=cast(str, payload["bundle"].get("trace_commit")),
+                plan_digest="3" * 64,
+                basis_digest="6" * 64,
         ),
         lf_attestation_trace_context={
             "variance": 1.7,
@@ -684,6 +731,36 @@ def test_verify_attestation_content_positive_not_dragged_by_low_geometry() -> No
     final_decision = result.get("final_event_attested_decision")
     assert isinstance(final_decision, dict)
     assert final_decision.get("event_attestation_score") == pytest.approx(0.9)
+
+
+def test_verify_attestation_statistics_score_stays_zero_for_authentic_mismatch() -> None:
+    """
+    功能：authentic 但未 attested 的样本，其统计链分数必须保持 0。 
+
+    Authentic-but-mismatch samples must keep the event statistics score at zero.
+    """
+    payload = _build_statement()
+
+    result = verify_attestation(
+        k_master="5" * 64,
+        candidate_statement=payload["statement"],
+        attestation_bundle=payload["bundle"],
+        content_evidence={"lf_score": 0.62},
+        geo_score=0.1,
+        attested_threshold=0.65,
+        geo_rescue_band_delta_low=0.05,
+        geo_rescue_min_score=0.3,
+    )
+
+    final_decision = result.get("final_event_attested_decision")
+    assert isinstance(final_decision, dict)
+    assert final_decision.get("status") == "mismatch"
+    assert final_decision.get("authenticity_status") == "authentic"
+    assert final_decision.get("event_attestation_score") == pytest.approx(0.0)
+    assert final_decision.get("event_attestation_statistics_score") == pytest.approx(0.0)
+    assert final_decision.get("event_attestation_statistics_score") == pytest.approx(
+        final_decision.get("event_attestation_score")
+    )
 
 
 def test_verify_attestation_geometry_can_rescue_borderline_content() -> None:
