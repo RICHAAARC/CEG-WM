@@ -168,6 +168,70 @@ def test_artifacts_reject_whitelist_digest_fields(tmp_run_root):
             records_io.write_artifact_json(str(output_path), artifact_with_whitelist_digest)
 
 
+def test_unbound_artifact_json_allows_official_runtime_payload_without_fact_sources(tmp_run_root):
+    """
+    Test that unbound artifact JSON writes remain available without fact sources.
+
+    官方 runtime 的 unbound artifact JSON 写盘不应要求 bound_fact_sources 上下文。
+    """
+    try:
+        from main.core import records_io
+    except ImportError:
+        pytest.skip("main.core.records_io module not found")
+
+    run_root = tmp_run_root
+    artifacts_dir = run_root / "artifacts"
+    output_path = artifacts_dir / "workflow_acceptance" / "paper_full_formal_summary.json"
+    payload = {
+        "artifact_type": "workflow_formal_summary",
+        "stage_status": "failed",
+        "failed_step": "experiment_matrix",
+    }
+
+    records_io.write_artifact_json_unbound(
+        run_root,
+        artifacts_dir,
+        str(output_path),
+        payload,
+    )
+
+    assert output_path.exists()
+    written_content = json.loads(output_path.read_text(encoding="utf-8"))
+    assert written_content["artifact_type"] == "workflow_formal_summary"
+    assert written_content["failed_step"] == "experiment_matrix"
+    assert written_content["_artifact_audit"]["writer"] == "records_io"
+
+
+def test_unbound_artifact_json_still_rejects_forbidden_anchor_fields(tmp_run_root):
+    """
+    Test that unbound artifact JSON still blocks semantic bypass fields.
+
+    unbound 写盘恢复后，仍必须阻断 records 语义锚点字段旁路。
+    """
+    try:
+        from main.core import records_io
+    except ImportError:
+        pytest.skip("main.core.records_io module not found")
+
+    run_root = tmp_run_root
+    artifacts_dir = run_root / "artifacts"
+    output_path = artifacts_dir / "workflow_acceptance" / "illegal_summary.json"
+    payload = {
+        "artifact_type": "workflow_formal_summary",
+        "contract_bound_digest": "sha256:forbidden",
+    }
+
+    from main.core.errors import RecordsWritePolicyError
+
+    with pytest.raises(RecordsWritePolicyError):
+        records_io.write_artifact_json_unbound(
+            run_root,
+            artifacts_dir,
+            str(output_path),
+            payload,
+        )
+
+
 def test_critical_outputs_use_controlled_write_path(tmp_run_root):
     """
     Test that critical outputs are written through controlled paths.

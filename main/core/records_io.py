@@ -737,6 +737,22 @@ def _require_fact_sources_initialized() -> FactSourcesContext:
     return ctx
 
 
+def _get_fact_sources_context_optional() -> FactSourcesContext | None:
+    """
+    功能：获取可选的事实源上下文。
+
+    Return the current fact sources context when it is available.
+
+    Args:
+        None.
+
+    Returns:
+        Active FactSourcesContext instance, or None when writes are running in an
+        unbound fallback path.
+    """
+    return _FACT_SOURCES_CONTEXT.get()
+
+
 def _require_records_dir_initialized(path: Path) -> Path:
     """
     功能：要求 records_dir 已初始化。
@@ -1051,7 +1067,9 @@ def _enforce_artifact_semantic_bypass_guard(
                     f"path={normalized_dst_path}, fields={sorted(overlap)}"
                 )
 
-    ctx = _require_fact_sources_initialized()
+    ctx = _get_fact_sources_context_optional()
+    if ctx is None:
+        return
     _enforce_governed_artifact_contract(
         artifact_obj,
         normalized_dst_path,
