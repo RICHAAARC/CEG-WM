@@ -1608,6 +1608,70 @@ def test_build_detect_attestation_result_emits_geo_rescue_diagnostics_artifact()
     assert diagnostics.get("geo_repair_direction_classification") == "scale_misalignment_between_template_score_and_rescue_gate"
 
 
+def test_build_detect_attestation_result_marks_template_confidence_rebinding_when_active() -> None:
+    payload = _build_statement()
+    cfg = {
+        "attestation": {
+            "enabled": True,
+            "use_trajectory_mix": True,
+            "threshold": 0.65,
+            "decision_mode": "content_primary_geo_rescue",
+            "rescue_band_delta_low": 0.05,
+            "geo_rescue_min_score": 0.3,
+        },
+        "__attestation_verify_k_master__": "5" * 64,
+    }
+    attestation_context = {
+        "candidate_statement": payload["statement"],
+        "attestation_bundle": payload["bundle"],
+        "attestation_source": "formal_input_payload",
+        "attestation_status": "ok",
+        "authenticity_status": "authentic",
+        "attestation_digest": payload["attestation_digest"],
+        "event_binding_digest": compute_event_binding_digest(payload["attestation_digest"], cast(str, payload["bundle"].get("trace_commit"))),
+        "trace_commit": payload["bundle"].get("trace_commit"),
+        "bundle_verification": {"status": "ok"},
+    }
+
+    result = _build_detect_attestation_result(
+        cfg=cfg,
+        attestation_context=attestation_context,
+        content_evidence_payload={"status": "ok", "lf_score": 0.62},
+        geometry_evidence_payload={
+            "status": "ok",
+            "geo_score": 0.36,
+            "sync_status": "ok",
+            "anchor_status": "ok",
+            "relation_digest_binding": {"binding_status": "matched"},
+            "sync_metrics": {
+                "quality_score": 0.92,
+                "template_match_score": 0.06,
+                "template_confidence": 0.36,
+                "template_match_threshold": 0.02,
+                "uncertainty": 0.08,
+                "geo_score_source": "template_confidence",
+                "geo_score_repair_enabled": True,
+                "geo_score_repair_mode": "template_confidence",
+                "geo_score_repair_active": True,
+                "geo_score_repair_summary": {
+                    "status": "applied",
+                    "mapping": "template_match_score_clamped_linear_x6",
+                },
+            },
+        },
+    )
+
+    diagnostics = cast(Dict[str, Any], result.get("_geo_rescue_diagnostics_artifact"))
+    assert diagnostics.get("template_confidence") == pytest.approx(0.36)
+    assert diagnostics.get("geo_score") == pytest.approx(0.36)
+    assert diagnostics.get("geo_score_source") == "template_confidence"
+    assert diagnostics.get("geo_score_repair_enabled") is True
+    assert diagnostics.get("geo_score_repair_active") is True
+    assert diagnostics.get("geo_score_repair_mode") == "template_confidence"
+    assert diagnostics.get("geo_scale_classification") == "quality_pass_template_fail_source_template_confidence"
+    assert diagnostics.get("geo_repair_direction_classification") == "template_confidence_rebinding_active"
+
+
 def test_build_lf_planner_risk_report_artifact_classifies_host_baseline_dominant() -> None:
     artifact = _build_lf_planner_risk_report_artifact(
         {

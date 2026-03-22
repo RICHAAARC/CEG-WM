@@ -71,6 +71,9 @@ watermark:
 detect:
   content:
     enabled: true
+    lf_exact_repair:
+      enabled: true
+      mode: "host_template_recenter"
   geometry:
     enabled: true
     enable_attention_anchor: true
@@ -91,6 +94,9 @@ detect:
     align_template_overlap_min: 0.70
     align_recovered_sync_consistency_min: 0.55
     align_recovered_anchor_consistency_min: 0.50
+    geo_score_repair:
+      enabled: false
+      mode: "template_confidence"
   diagnostics:
     lf_protocol_control_enabled: true
     geo_rescue_scale_control_enabled: true

@@ -34,6 +34,7 @@ from main.policy.runtime_whitelist import (
 )
 from main.core import records_io
 from main.core import config_loader
+from main.core import digests
 from main.core import schema
 from main.core import status
 from main.policy import path_policy
@@ -72,6 +73,10 @@ _build_planner_inputs_for_runtime = cast(
 _extract_lf_attestation_trace_bundle_from_trajectory = cast(
     Callable[..., Dict[str, Any] | None],
     getattr(detect_orchestrator, "_extract_lf_attestation_trace_bundle_from_trajectory"),
+)
+_extract_embed_lf_closed_loop_context = cast(
+    Callable[[Dict[str, Any] | None], Dict[str, Any]],
+    getattr(detect_orchestrator, "_extract_embed_lf_closed_loop_context"),
 )
 _resolve_detect_image_path_with_source = cast(
     Callable[..., tuple[Any, Any]],
@@ -127,6 +132,173 @@ def _resolve_detect_diagnostics_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
     detect_cfg = _resolve_detect_cfg(cfg)
     diagnostics_node = detect_cfg.get("diagnostics")
     return cast(Dict[str, Any], diagnostics_node) if isinstance(diagnostics_node, dict) else {}
+
+
+def _resolve_lf_exact_repair_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：解析 LF exact evidence repair 配置。
+
+    Resolve LF exact-evidence repair configuration.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Canonical LF repair config mapping.
+    """
+    detect_cfg = _resolve_detect_cfg(cfg)
+    content_cfg = _resolve_nested_mapping(detect_cfg, "content")
+    repair_node = content_cfg.get("lf_exact_repair")
+    repair_cfg = cast(Dict[str, Any], repair_node) if isinstance(repair_node, dict) else {}
+    enabled_value = repair_cfg.get("enabled")
+    enabled = bool(enabled_value) if isinstance(enabled_value, bool) else True
+    mode_value = repair_cfg.get("mode")
+    mode = mode_value.strip() if isinstance(mode_value, str) and mode_value.strip() else "host_template_recenter"
+    return {"enabled": enabled, "mode": mode}
+
+
+def _build_lf_exact_repair_summary(
+    *,
+    repair_target: str,
+    repair_cfg: Dict[str, Any],
+    raw_coeffs: list[float],
+    repaired_coeffs: list[float],
+    pre_injection_coeffs: list[float],
+    injected_template_coeffs: list[float],
+    expected_bit_signs: list[int] | None,
+) -> Dict[str, Any]:
+    raw_agreement_count = None
+    repaired_agreement_count = None
+    if isinstance(expected_bit_signs, list) and len(expected_bit_signs) >= len(repaired_coeffs):
+        raw_agreement_count = sum(
+            1 for coeff, expected_sign in zip(raw_coeffs, expected_bit_signs) if coeff * expected_sign > 0.0
+        )
+        repaired_agreement_count = sum(
+            1 for coeff, expected_sign in zip(repaired_coeffs, expected_bit_signs) if coeff * expected_sign > 0.0
+        )
+
+    coefficient_l2_delta = 0.0
+    if raw_coeffs:
+        coefficient_l2_delta = float(
+            sum((repaired_value - raw_value) ** 2 for raw_value, repaired_value in zip(raw_coeffs, repaired_coeffs))
+        ) ** 0.5
+
+    return {
+        "repair_target": repair_target,
+        "mapping": "raw_minus_pre_plus_template",
+        "repair_mode": repair_cfg.get("mode"),
+        "raw_projected_lf_coeffs": raw_coeffs,
+        "repaired_projected_lf_coeffs": repaired_coeffs,
+        "pre_injection_coeffs": pre_injection_coeffs,
+        "injected_template_coeffs": injected_template_coeffs,
+        "raw_projected_lf_digest": digests.canonical_sha256(raw_coeffs),
+        "repaired_projected_lf_digest": digests.canonical_sha256(repaired_coeffs),
+        "raw_agreement_count": raw_agreement_count,
+        "repaired_agreement_count": repaired_agreement_count,
+        "coefficient_l2_delta": coefficient_l2_delta,
+    }
+
+
+def _apply_lf_exact_repair_to_trace_bundle(
+    cfg: Dict[str, Any],
+    trace_bundle: Dict[str, Any],
+    embed_lf_context: Dict[str, Any] | None,
+    *,
+    repair_target: str,
+) -> Dict[str, Any]:
+    """
+    功能：在 LF exact evidence 侧执行宿主去中心化后的模板重心回填。
+
+    Apply the LF exact-evidence repair on projected coefficients without
+    changing the downstream scoring definition.
+
+    Args:
+        cfg: Configuration mapping.
+        trace_bundle: Raw LF trace bundle.
+        embed_lf_context: Embed-side LF closed-loop context.
+        repair_target: Diagnostic repair target label.
+
+    Returns:
+        Trace bundle with optional repaired coefficients and audit metadata.
+    """
+    repair_cfg = _resolve_lf_exact_repair_cfg(cfg)
+    result = dict(trace_bundle)
+    result["lf_exact_repair_enabled"] = bool(repair_cfg.get("enabled", True))
+    result["lf_exact_repair_mode"] = repair_cfg.get("mode")
+    result["lf_exact_repair_applied"] = False
+
+    raw_coeffs = result.get("lf_attestation_features")
+    if not isinstance(raw_coeffs, list):
+        result["lf_exact_repair_summary"] = {
+            "repair_target": repair_target,
+            "status": "skipped",
+            "reason": "raw_projected_lf_coeffs_absent",
+        }
+        return result
+
+    raw_coeff_values = [float(value) for value in raw_coeffs]
+    if not bool(repair_cfg.get("enabled", True)):
+        result["lf_exact_repair_summary"] = {
+            "repair_target": repair_target,
+            "status": "disabled",
+            "reason": "lf_exact_repair_disabled_by_config",
+            "raw_projected_lf_digest": digests.canonical_sha256(raw_coeff_values),
+        }
+        return result
+
+    embed_context = cast(Dict[str, Any], embed_lf_context) if isinstance(embed_lf_context, dict) else {}
+    pre_coeffs = embed_context.get("pre_injection_coeffs")
+    template_coeffs = embed_context.get("injected_template_coeffs")
+    expected_bit_signs = embed_context.get("embed_expected_bit_signs")
+    if not isinstance(pre_coeffs, list) or not isinstance(template_coeffs, list):
+        result["lf_exact_repair_summary"] = {
+            "repair_target": repair_target,
+            "status": "skipped",
+            "reason": "embed_closed_loop_repair_inputs_absent",
+            "raw_projected_lf_digest": digests.canonical_sha256(raw_coeff_values),
+        }
+        return result
+
+    n_coeffs = min(len(raw_coeff_values), len(pre_coeffs), len(template_coeffs))
+    if n_coeffs <= 0:
+        result["lf_exact_repair_summary"] = {
+            "repair_target": repair_target,
+            "status": "skipped",
+            "reason": "repair_input_length_invalid",
+            "raw_projected_lf_digest": digests.canonical_sha256(raw_coeff_values),
+        }
+        return result
+
+    pre_coeff_values = [float(pre_coeffs[index]) for index in range(n_coeffs)]
+    template_coeff_values = [float(template_coeffs[index]) for index in range(n_coeffs)]
+    repaired_coeffs = [
+        float(raw_coeff_values[index] - pre_coeff_values[index] + template_coeff_values[index])
+        for index in range(n_coeffs)
+    ]
+    if len(raw_coeff_values) > n_coeffs:
+        repaired_coeffs.extend(raw_coeff_values[n_coeffs:])
+
+    result["lf_attestation_features"] = repaired_coeffs
+    result["projected_lf_digest"] = digests.canonical_sha256(repaired_coeffs)
+    result["lf_exact_repair_applied"] = True
+    result["lf_exact_repair_summary"] = {
+        **_build_lf_exact_repair_summary(
+            repair_target=repair_target,
+            repair_cfg=repair_cfg,
+            raw_coeffs=raw_coeff_values,
+            repaired_coeffs=repaired_coeffs,
+            pre_injection_coeffs=pre_coeff_values,
+            injected_template_coeffs=template_coeff_values,
+            expected_bit_signs=(
+                [int(value) for value in expected_bit_signs[:n_coeffs]]
+                if isinstance(expected_bit_signs, list)
+                else None
+            ),
+        ),
+        "status": "applied",
+        "reason": None,
+    }
+    return result
 
 
 def _resolve_record_runtime_seed(record: Any) -> int | None:
@@ -345,6 +517,8 @@ def _build_lf_protocol_control_context(
         LF protocol-control context mapping.
     """
     embed_seed = _resolve_record_runtime_seed(input_record)
+    repair_cfg = _resolve_lf_exact_repair_cfg(cfg)
+    embed_lf_context = _extract_embed_lf_closed_loop_context(input_record)
     context: Dict[str, Any] = {
         "embed_seed": embed_seed,
         "detect_seed": int(detect_seed),
@@ -361,6 +535,10 @@ def _build_lf_protocol_control_context(
         "same_seed_control_trajectory_digest": None,
         "same_seed_control_inference_status": None,
         "same_seed_control_inference_error": None,
+        "lf_exact_repair_enabled": repair_cfg.get("enabled"),
+        "lf_exact_repair_mode": repair_cfg.get("mode"),
+        "lf_exact_repair_applied": False,
+        "lf_exact_repair_summary": None,
     }
 
     if isinstance(embed_seed, int):
@@ -425,6 +603,17 @@ def _build_lf_protocol_control_context(
         context["same_seed_control_reason"] = "same_seed_control_trace_absent"
         return context
 
+    trace_bundle = _apply_lf_exact_repair_to_trace_bundle(
+        cfg,
+        trace_bundle,
+        embed_lf_context,
+        repair_target="same_seed_control",
+    )
+    context["lf_exact_repair_enabled"] = trace_bundle.get("lf_exact_repair_enabled")
+    context["lf_exact_repair_mode"] = trace_bundle.get("lf_exact_repair_mode")
+    context["lf_exact_repair_applied"] = trace_bundle.get("lf_exact_repair_applied")
+    context["lf_exact_repair_summary"] = trace_bundle.get("lf_exact_repair_summary")
+
     control_coeffs = trace_bundle.get("lf_attestation_features")
     if not isinstance(control_coeffs, list):
         context["same_seed_control_reason"] = "same_seed_control_coeffs_absent"
@@ -462,6 +651,7 @@ def _build_lf_formal_exact_context(
     Returns:
         LF formal exact context mapping.
     """
+    repair_cfg = _resolve_lf_exact_repair_cfg(cfg)
     context: Dict[str, Any] = {
         "formal_exact_evidence_source": "trajectory_rerun_exact_timestep",
         "formal_exact_object_binding_status": "absent",
@@ -469,6 +659,10 @@ def _build_lf_formal_exact_context(
         "image_conditioned_reconstruction_available": False,
         "image_conditioned_reconstruction_status": "absent",
         "formal_exact_trace_bundle": None,
+        "lf_exact_repair_enabled": repair_cfg.get("enabled"),
+        "lf_exact_repair_mode": repair_cfg.get("mode"),
+        "lf_exact_repair_applied": False,
+        "lf_exact_repair_summary": None,
     }
 
     if not isinstance(plan_payload, dict):
@@ -534,12 +728,23 @@ def _build_lf_formal_exact_context(
         context["image_conditioned_reconstruction_status"] = "image_conditioned_projection_failed"
         return context
 
+    trace_bundle = _apply_lf_exact_repair_to_trace_bundle(
+        cfg,
+        trace_bundle,
+        _extract_embed_lf_closed_loop_context(input_record),
+        repair_target="formal_exact",
+    )
+
     context["formal_exact_evidence_source"] = "input_image_conditioned_reconstruction"
     context["formal_exact_object_binding_status"] = "ok"
     context["formal_exact_image_path_source"] = image_path_source
     context["image_conditioned_reconstruction_available"] = True
     context["image_conditioned_reconstruction_status"] = "ok"
     context["formal_exact_trace_bundle"] = trace_bundle
+    context["lf_exact_repair_enabled"] = trace_bundle.get("lf_exact_repair_enabled")
+    context["lf_exact_repair_mode"] = trace_bundle.get("lf_exact_repair_mode")
+    context["lf_exact_repair_applied"] = trace_bundle.get("lf_exact_repair_applied")
+    context["lf_exact_repair_summary"] = trace_bundle.get("lf_exact_repair_summary")
     return context
 
 

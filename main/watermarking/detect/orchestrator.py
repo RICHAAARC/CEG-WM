@@ -1171,6 +1171,10 @@ def _build_lf_retain_breakdown_artifact(
         "formal_exact_evidence_source": lf_result.get("formal_exact_evidence_source"),
         "formal_exact_object_binding_status": lf_result.get("formal_exact_object_binding_status"),
         "formal_exact_image_path_source": lf_result.get("formal_exact_image_path_source"),
+        "lf_exact_repair_enabled": lf_result.get("lf_exact_repair_enabled"),
+        "lf_exact_repair_mode": lf_result.get("lf_exact_repair_mode"),
+        "lf_exact_repair_applied": lf_result.get("lf_exact_repair_applied"),
+        "lf_exact_repair_summary": lf_result.get("lf_exact_repair_summary"),
         "stage_summaries": stage_summaries,
         "breakdown_segments": breakdown_segments,
         "breakdown_summary": {
@@ -1772,6 +1776,10 @@ def _build_lf_attestation_trace_artifact(
         "projection_matrix_digest": lf_result.get("projection_matrix_digest"),
         "trajectory_feature_spec_digest": lf_result.get("trajectory_feature_spec_digest"),
         "projection_seed": lf_result.get("projection_seed"),
+        "lf_exact_repair_enabled": lf_result.get("lf_exact_repair_enabled"),
+        "lf_exact_repair_mode": lf_result.get("lf_exact_repair_mode"),
+        "lf_exact_repair_applied": lf_result.get("lf_exact_repair_applied"),
+        "lf_exact_repair_summary": lf_result.get("lf_exact_repair_summary"),
         "lf_attestation_trace_digest": lf_result.get("lf_attestation_trace_digest"),
     }
 
@@ -1797,6 +1805,10 @@ def _build_geo_rescue_scale_classification(
         if quality_score >= geo_rescue_min_score and template_match_score < geo_rescue_min_score:
             return "quality_pass_template_fail_source_quality"
         return "quality_template_consistent_source_quality"
+    if geo_score_source == "template_confidence":
+        if quality_score >= geo_rescue_min_score and template_match_score < geo_rescue_min_score:
+            return "quality_pass_template_fail_source_template_confidence"
+        return "quality_template_consistent_source_template_confidence"
     return "geo_source_unclassified"
 
 
@@ -1870,6 +1882,14 @@ def _classify_geo_repair_direction(
         and template_match_score is not None
         and quality_score >= geo_rescue_min_score
         and template_match_score < geo_rescue_min_score
+        and geo_score_source == "template_confidence"
+    ):
+        return "template_confidence_rebinding_active"
+    if (
+        quality_score is not None
+        and template_match_score is not None
+        and quality_score >= geo_rescue_min_score
+        and template_match_score < geo_rescue_min_score
         and geo_score_source == "template_match_score"
     ):
         return "quality_good_template_bad_need_score_rebinding_or_recalibration"
@@ -1917,15 +1937,36 @@ def _build_geo_rescue_diagnostics_artifact(
         template_match_metrics = cast(Dict[str, Any], sync_result_mapping.get("template_match_metrics"))
         if isinstance(template_match_metrics.get("template_match_score"), (int, float)):
             template_match_score = float(template_match_metrics.get("template_match_score"))
+    template_confidence = None
+    if isinstance(sync_metrics.get("template_confidence"), (int, float)):
+        template_confidence = float(sync_metrics.get("template_confidence"))
+    elif isinstance(sync_result_mapping.get("template_match_metrics"), dict):
+        template_match_metrics = cast(Dict[str, Any], sync_result_mapping.get("template_match_metrics"))
+        if isinstance(template_match_metrics.get("template_confidence"), (int, float)):
+            template_confidence = float(template_match_metrics.get("template_confidence"))
     uncertainty = float(sync_metrics.get("uncertainty")) if isinstance(sync_metrics.get("uncertainty"), (int, float)) else None
     geo_score = float(channel_scores.get("geo")) if isinstance(channel_scores.get("geo"), (int, float)) else None
 
-    if geo_score is not None and template_match_score is not None and abs(geo_score - template_match_score) <= 1e-9:
+    geo_score_source_candidate = sync_metrics.get("geo_score_source")
+    if isinstance(geo_score_source_candidate, str) and geo_score_source_candidate:
+        geo_score_source = geo_score_source_candidate
+    elif geo_score is not None and template_match_score is not None and abs(geo_score - template_match_score) <= 1e-9:
         geo_score_source = "template_match_score"
+    elif geo_score is not None and template_confidence is not None and abs(geo_score - template_confidence) <= 1e-9:
+        geo_score_source = "template_confidence"
     elif geo_score is not None and quality_score is not None and abs(geo_score - quality_score) <= 1e-9:
         geo_score_source = "quality_score"
     else:
         geo_score_source = "other_or_absent"
+
+    geo_score_repair_enabled = bool(sync_metrics.get("geo_score_repair_enabled", False))
+    geo_score_repair_mode = sync_metrics.get("geo_score_repair_mode") if isinstance(sync_metrics.get("geo_score_repair_mode"), str) else None
+    geo_score_repair_active = bool(sync_metrics.get("geo_score_repair_active", False))
+    geo_score_repair_summary = (
+        cast(Dict[str, Any], sync_metrics.get("geo_score_repair_summary"))
+        if isinstance(sync_metrics.get("geo_score_repair_summary"), dict)
+        else None
+    )
 
     content_attestation_score = attestation_result.get("content_attestation_score")
     if not isinstance(content_attestation_score, (int, float)):
@@ -2033,8 +2074,13 @@ def _build_geo_rescue_diagnostics_artifact(
         "geo_rescue_min_score": geo_rescue_min_score,
         "quality_score": quality_score,
         "template_match_score": template_match_score,
+        "template_confidence": template_confidence,
         "geo_score": geo_score,
         "geo_score_source": geo_score_source,
+        "geo_score_repair_enabled": geo_score_repair_enabled,
+        "geo_score_repair_mode": geo_score_repair_mode,
+        "geo_score_repair_active": geo_score_repair_active,
+        "geo_score_repair_summary": geo_score_repair_summary,
         "geo_rescue_eligible": attestation_result.get("geo_rescue_eligible"),
         "geo_rescue_applied": attestation_result.get("geo_rescue_applied"),
         "geo_not_used_reason": attestation_result.get("geo_not_used_reason"),
@@ -7721,6 +7767,10 @@ def verify_attestation(
                         "same_seed_control_trace_digest",
                         "same_seed_control_trajectory_digest",
                         "detect_exact_timestep_coeffs_same_seed_control",
+                        "lf_exact_repair_enabled",
+                        "lf_exact_repair_mode",
+                        "lf_exact_repair_applied",
+                        "lf_exact_repair_summary",
                     ]:
                         if field_name in lf_params and field_name not in lf_result:
                             lf_result[field_name] = lf_params.get(field_name)

@@ -5,7 +5,7 @@ Module type: General module
 
 import numpy as np
 
-from main.watermarking.geometry_chain.sync.latent_sync_template import LatentSyncTemplate
+from main.watermarking.geometry_chain.sync.latent_sync_template import GeometryLatentSyncSD3, LatentSyncTemplate, SyncRuntimeContext
 
 
 class _TransformerConfig:
@@ -108,3 +108,56 @@ def test_support_aware_template_match_detects_noise_diluted_aligned_signal() -> 
 
     assert aligned_metrics.get("template_match_score", 0.0) > aligned_metrics.get("template_match_threshold", 0.0)
     assert aligned_metrics.get("template_match_score", 0.0) > scrambled_metrics.get("template_match_score", 0.0)
+
+
+def test_geometry_geo_score_repair_rebinds_to_template_confidence_only_when_enabled() -> None:
+    geometry_module = GeometryLatentSyncSD3(
+        impl_id="geometry_latent_sync_sd3",
+        impl_version="v3",
+        impl_digest="unit_digest",
+    )
+    latents = np.zeros((1, 4, 32, 32), dtype=np.float32)
+    sync_ctx = SyncRuntimeContext(pipeline=_Pipeline(), latents=latents, rng=None)
+    inputs = {"relation_digest": "a" * 64}
+    geometry_module._quality_extractor._compute_sync_quality = lambda *_args, **_kwargs: {  # pyright: ignore[reportPrivateUsage]
+        "quality_score": 0.82,
+        "uncertainty": 0.1,
+    }
+
+    cfg_off = {
+        "model_id": "stabilityai/stable-diffusion-3.5-medium",
+        "seed": 123,
+        "detect": {
+            "geometry": {
+                "enabled": True,
+                "enable_latent_sync": True,
+                "sync_fft_bins": 16,
+                "geo_score_repair": {"enabled": False, "mode": "template_confidence"},
+            }
+        },
+    }
+    result_off = geometry_module.extract(cfg_off, inputs=inputs, sync_ctx=sync_ctx)
+
+    assert result_off.get("status") == "ok"
+    assert result_off.get("geo_score") == result_off.get("template_match_metrics", {}).get("template_match_score")
+    assert result_off.get("sync_quality_metrics", {}).get("geo_score_source") == "template_match_score"
+    assert result_off.get("sync_quality_metrics", {}).get("geo_score_repair_active") is False
+
+    cfg_on = {
+        **cfg_off,
+        "detect": {
+            "geometry": {
+                "enabled": True,
+                "enable_latent_sync": True,
+                "sync_fft_bins": 16,
+                "geo_score_repair": {"enabled": True, "mode": "template_confidence"},
+            }
+        },
+    }
+    result_on = geometry_module.extract(cfg_on, inputs=inputs, sync_ctx=sync_ctx)
+
+    assert result_on.get("status") == "ok"
+    assert result_on.get("geo_score") == result_on.get("template_match_metrics", {}).get("template_confidence")
+    assert result_on.get("sync_quality_metrics", {}).get("geo_score_source") == "template_confidence"
+    assert result_on.get("sync_quality_metrics", {}).get("geo_score_repair_active") is True
+    assert result_on.get("geo_score") != result_on.get("sync_quality_metrics", {}).get("quality_score")

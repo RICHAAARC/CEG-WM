@@ -163,6 +163,34 @@ def _resolve_geo_anchor_seed(cfg: Dict[str, Any]) -> Optional[int]:
     return None
 
 
+def _resolve_geo_score_repair_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：解析 GEO 主分重绑定配置。
+
+    Resolve the optional geometry score rebinding configuration.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Canonical geometry score repair config mapping.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+
+    detect_cfg = cfg.get("detect")
+    detect_mapping = detect_cfg if isinstance(detect_cfg, dict) else {}
+    geometry_cfg = detect_mapping.get("geometry")
+    geometry_mapping = geometry_cfg if isinstance(geometry_cfg, dict) else {}
+    repair_node = geometry_mapping.get("geo_score_repair")
+    repair_cfg = repair_node if isinstance(repair_node, dict) else {}
+    enabled_value = repair_cfg.get("enabled")
+    enabled = bool(enabled_value) if isinstance(enabled_value, bool) else False
+    mode_value = repair_cfg.get("mode")
+    mode = mode_value.strip() if isinstance(mode_value, str) and mode_value.strip() else "template_confidence"
+    return {"enabled": enabled, "mode": mode}
+
+
 class LatentSyncTemplate:
     """
     功能：提取几何同步模板摘要与质量指标。
@@ -381,6 +409,7 @@ class LatentSyncTemplate:
             sync_quality_metrics["template_digest"] = template_match_metrics["template_digest"]
             existing_confidence = float(sync_quality_metrics.get("match_confidence", 0.0))
             template_confidence = float(min(1.0, template_match_metrics["template_match_score"] * 6.0))
+            sync_quality_metrics["template_confidence"] = round(template_confidence, 6)
             sync_quality_metrics["match_confidence"] = round(max(existing_confidence, template_confidence), 6)
             sync_config_digest = digests.canonical_sha256(self._build_sync_config_domain(cfg))
 
@@ -1720,6 +1749,8 @@ class GeometryLatentSyncSD3:
                 latents_np, cfg, seed
             )
             template_match_score = float(template_match_metrics.get("template_match_score", 0.0))
+            template_confidence = float(min(1.0, template_match_score * 6.0))
+            template_match_metrics["template_confidence"] = round(template_confidence, 6)
         except Exception as e:
             return {
                 "status": "failed",
@@ -1734,9 +1765,14 @@ class GeometryLatentSyncSD3:
                 latents_np, relation_digest,
                 embed_latent_stats=runtime_inputs.get("embed_latent_stats"),
             )
+            sync_quality_metrics["template_match_score"] = template_match_score
+            sync_quality_metrics["template_confidence"] = round(template_confidence, 6)
             uncertainty = sync_quality_metrics.get("uncertainty", 1.0)
         except Exception:
-            sync_quality_metrics = {}
+            sync_quality_metrics = {
+                "template_match_score": template_match_score,
+                "template_confidence": round(template_confidence, 6),
+            }
             uncertainty = 0.0
 
         if uncertainty > 0.5:
@@ -1758,15 +1794,43 @@ class GeometryLatentSyncSD3:
             "impl_id": self.impl_id,
             "impl_version": self.impl_version,
         })
+        repair_cfg = _resolve_geo_score_repair_cfg(cfg)
+        geo_score_source = "template_match_score"
+        geo_score = template_match_score
+        geo_score_repair_active = False
+        geo_score_repair_summary: Dict[str, Any] = {
+            "status": "disabled",
+            "mode": repair_cfg.get("mode"),
+            "raw_template_match_score": template_match_score,
+            "template_confidence": round(template_confidence, 6),
+            "mapping": "template_match_score_clamped_linear_x6",
+        }
+        if bool(repair_cfg.get("enabled", False)) and repair_cfg.get("mode") == "template_confidence":
+            geo_score_source = "template_confidence"
+            geo_score = template_confidence
+            geo_score_repair_active = True
+            geo_score_repair_summary = {
+                "status": "applied",
+                "mode": repair_cfg.get("mode"),
+                "raw_template_match_score": template_match_score,
+                "template_confidence": round(template_confidence, 6),
+                "mapping": "template_match_score_clamped_linear_x6",
+            }
+        sync_quality_metrics["geo_score_source"] = geo_score_source
+        sync_quality_metrics["geo_score_repair_enabled"] = bool(repair_cfg.get("enabled", False))
+        sync_quality_metrics["geo_score_repair_mode"] = repair_cfg.get("mode")
+        sync_quality_metrics["geo_score_repair_active"] = geo_score_repair_active
+        sync_quality_metrics["geo_score_repair_summary"] = geo_score_repair_summary
         sync_digest = digests.canonical_sha256({
             "relation_digest": relation_digest,
             "sync_config_digest": sync_config_digest,
-            "template_match_score": round(template_match_score, 8),
+            "geo_score_source": geo_score_source,
+            "geo_score": round(geo_score, 8),
         })
 
         return {
             "status": "ok",
-            "geo_score": template_match_score,       # v3 核心：以模板匹配分作为几何主分
+            "geo_score": geo_score,
             "sync_digest": sync_digest,
             "sync_config_digest": sync_config_digest,
             "template_match_metrics": template_match_metrics,
