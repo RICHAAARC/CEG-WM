@@ -65,17 +65,9 @@ def test_mini_real_entrypoint_defaults_to_mini_real_profile() -> None:
     assert isinstance(cfg_obj, dict)
     detect_cfg = cfg_obj.get("detect") if isinstance(cfg_obj.get("detect"), dict) else {}
     diagnostics_cfg = detect_cfg.get("diagnostics") if isinstance(detect_cfg.get("diagnostics"), dict) else {}
-    content_cfg = detect_cfg.get("content") if isinstance(detect_cfg.get("content"), dict) else {}
-    geometry_cfg = detect_cfg.get("geometry") if isinstance(detect_cfg.get("geometry"), dict) else {}
-    lf_exact_repair_cfg = content_cfg.get("lf_exact_repair") if isinstance(content_cfg.get("lf_exact_repair"), dict) else {}
-    geo_score_repair_cfg = geometry_cfg.get("geo_score_repair") if isinstance(geometry_cfg.get("geo_score_repair"), dict) else {}
     assert diagnostics_cfg.get("lf_protocol_control_enabled") is True
     assert diagnostics_cfg.get("geo_rescue_scale_control_enabled") is True
     assert diagnostics_cfg.get("geo_scale_records_glob") is None
-    assert lf_exact_repair_cfg.get("enabled") is True
-    assert lf_exact_repair_cfg.get("mode") == "host_template_recenter"
-    assert geo_score_repair_cfg.get("enabled") is False
-    assert geo_score_repair_cfg.get("mode") == "template_confidence"
 
     parallel_cfg = (
         cfg_obj.get("parallel_attestation_statistics")

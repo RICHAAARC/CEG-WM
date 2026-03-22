@@ -1137,15 +1137,23 @@ def _build_lf_retain_breakdown_artifact(
             "terminal_to_detect_exact_timestep",
         }
     }
+    selected_step_mismatch_lost_positive_count = drift_segments.get("selected_step_to_edit_timestep", {}).get("lost_positive_count")
+    embed_tail_drift_lost_positive_count = drift_segments.get("edit_timestep_to_terminal", {}).get("lost_positive_count")
+    detect_reconstruction_drift_lost_positive_count = drift_segments.get("terminal_to_detect_exact_timestep", {}).get("lost_positive_count")
+    pre_to_detect_retained_positive_ratio = breakdown_segments[-1].get("retained_positive_ratio")
     dominant_drift_segment = None
     if drift_segments:
-        dominant_drift_segment = max(
-            drift_segments.values(),
-            key=lambda item: (
-                int(item.get("lost_positive_count") or 0),
-                int(item.get("sign_flip_count") or 0),
-            ),
-        ).get("segment_name")
+        max_lost_positive_count = max(int(segment.get("lost_positive_count") or 0) for segment in drift_segments.values())
+        if max_lost_positive_count <= 0:
+            dominant_drift_segment = "no_positive_loss_detected"
+        else:
+            dominant_drift_segment = max(
+                drift_segments.values(),
+                key=lambda item: (
+                    int(item.get("lost_positive_count") or 0),
+                    int(item.get("sign_flip_count") or 0),
+                ),
+            ).get("segment_name")
 
     artifact = {
         "artifact_type": "lf_retain_breakdown",
@@ -1178,10 +1186,10 @@ def _build_lf_retain_breakdown_artifact(
         "stage_summaries": stage_summaries,
         "breakdown_segments": breakdown_segments,
         "breakdown_summary": {
-            "selected_step_mismatch_lost_positive_count": drift_segments.get("selected_step_to_edit_timestep", {}).get("lost_positive_count"),
-            "embed_tail_drift_lost_positive_count": drift_segments.get("edit_timestep_to_terminal", {}).get("lost_positive_count"),
-            "detect_reconstruction_drift_lost_positive_count": drift_segments.get("terminal_to_detect_exact_timestep", {}).get("lost_positive_count"),
-            "pre_to_detect_retained_positive_ratio": breakdown_segments[-1].get("retained_positive_ratio"),
+            "selected_step_mismatch_lost_positive_count": selected_step_mismatch_lost_positive_count,
+            "embed_tail_drift_lost_positive_count": embed_tail_drift_lost_positive_count,
+            "detect_reconstruction_drift_lost_positive_count": detect_reconstruction_drift_lost_positive_count,
+            "pre_to_detect_retained_positive_ratio": pre_to_detect_retained_positive_ratio,
             "dominant_drift_segment": dominant_drift_segment,
         },
     }
@@ -1193,6 +1201,28 @@ def _build_lf_retain_breakdown_artifact(
     )
     if isinstance(protocol_control_section, dict):
         artifact.update(protocol_control_section)
+        cross_seed_protocol_loss_count = int(artifact.get("cross_seed_protocol_loss_count") or 0)
+        same_seed_residual_loss_count = int(artifact.get("same_seed_residual_loss_count") or 0)
+        same_seed_residual_loss_ratio = artifact.get("same_seed_residual_loss_ratio")
+        if (
+            int(detect_reconstruction_drift_lost_positive_count or 0) <= 0
+            and isinstance(pre_to_detect_retained_positive_ratio, (int, float))
+            and float(pre_to_detect_retained_positive_ratio) >= 0.95
+        ):
+            if cross_seed_protocol_loss_count <= 0 and same_seed_residual_loss_count <= 0:
+                artifact["protocol_root_cause_classification"] = "no_protocol_loss_detected"
+            elif (
+                cross_seed_protocol_loss_count <= 0
+                and same_seed_residual_loss_count > 0
+                and isinstance(same_seed_residual_loss_ratio, (int, float))
+                and float(same_seed_residual_loss_ratio) <= 0.05
+            ):
+                artifact["protocol_root_cause_classification"] = "minor_same_seed_residual_not_primary"
+            else:
+                artifact["protocol_root_cause_classification"] = artifact.get("protocol_root_cause_classification")
+            control_protocol_summary = artifact.get("control_protocol_summary")
+            if isinstance(control_protocol_summary, dict):
+                control_protocol_summary["protocol_root_cause_classification"] = artifact.get("protocol_root_cause_classification")
     artifact["lf_retain_breakdown_digest"] = digests.canonical_sha256(artifact)
     return artifact
 
@@ -1910,6 +1940,12 @@ def _build_geo_rescue_diagnostics_artifact(
 
     attestation_node = cfg.get("attestation")
     attestation_cfg = cast(Dict[str, Any], attestation_node) if isinstance(attestation_node, dict) else {}
+    detect_node = cfg.get("detect")
+    detect_cfg = cast(Dict[str, Any], detect_node) if isinstance(detect_node, dict) else {}
+    geometry_node = detect_cfg.get("geometry")
+    geometry_cfg = cast(Dict[str, Any], geometry_node) if isinstance(geometry_node, dict) else {}
+    geo_repair_node = geometry_cfg.get("geo_score_repair")
+    geo_repair_cfg = cast(Dict[str, Any], geo_repair_node) if isinstance(geo_repair_node, dict) else {}
     attested_threshold = float(attestation_cfg.get("threshold", 0.65))
     geo_rescue_band_delta_low = float(attestation_cfg.get("rescue_band_delta_low", 0.05))
     geo_rescue_min_score = float(attestation_cfg.get("geo_rescue_min_score", 0.3))
@@ -1947,8 +1983,11 @@ def _build_geo_rescue_diagnostics_artifact(
     uncertainty = float(sync_metrics.get("uncertainty")) if isinstance(sync_metrics.get("uncertainty"), (int, float)) else None
     geo_score = float(channel_scores.get("geo")) if isinstance(channel_scores.get("geo"), (int, float)) else None
 
+    active_geo_score_source_candidate = sync_metrics.get("active_geo_score_source")
     geo_score_source_candidate = sync_metrics.get("geo_score_source")
-    if isinstance(geo_score_source_candidate, str) and geo_score_source_candidate:
+    if isinstance(active_geo_score_source_candidate, str) and active_geo_score_source_candidate:
+        geo_score_source = active_geo_score_source_candidate
+    elif isinstance(geo_score_source_candidate, str) and geo_score_source_candidate:
         geo_score_source = geo_score_source_candidate
     elif geo_score is not None and template_match_score is not None and abs(geo_score - template_match_score) <= 1e-9:
         geo_score_source = "template_match_score"
@@ -1961,11 +2000,21 @@ def _build_geo_rescue_diagnostics_artifact(
 
     geo_score_repair_enabled = bool(sync_metrics.get("geo_score_repair_enabled", False))
     geo_score_repair_mode = sync_metrics.get("geo_score_repair_mode") if isinstance(sync_metrics.get("geo_score_repair_mode"), str) else None
+    if not isinstance(geo_score_repair_mode, str) or not geo_score_repair_mode:
+        geo_score_repair_mode = geo_repair_cfg.get("mode") if isinstance(geo_repair_cfg.get("mode"), str) else "template_confidence"
     geo_score_repair_active = bool(sync_metrics.get("geo_score_repair_active", False))
     geo_score_repair_summary = (
         cast(Dict[str, Any], sync_metrics.get("geo_score_repair_summary"))
         if isinstance(sync_metrics.get("geo_score_repair_summary"), dict)
         else None
+    )
+    geo_repair_enabled = bool(sync_metrics.get("geo_repair_enabled", geo_score_repair_enabled))
+    geo_repair_mode = sync_metrics.get("geo_repair_mode") if isinstance(sync_metrics.get("geo_repair_mode"), str) else geo_score_repair_mode
+    geo_repair_active = bool(sync_metrics.get("geo_repair_active", geo_score_repair_active))
+    geo_repair_summary = (
+        cast(Dict[str, Any], sync_metrics.get("geo_repair_summary"))
+        if isinstance(sync_metrics.get("geo_repair_summary"), dict)
+        else geo_score_repair_summary
     )
 
     content_attestation_score = attestation_result.get("content_attestation_score")
@@ -2077,10 +2126,15 @@ def _build_geo_rescue_diagnostics_artifact(
         "template_confidence": template_confidence,
         "geo_score": geo_score,
         "geo_score_source": geo_score_source,
+        "active_geo_score_source": geo_score_source,
         "geo_score_repair_enabled": geo_score_repair_enabled,
         "geo_score_repair_mode": geo_score_repair_mode,
         "geo_score_repair_active": geo_score_repair_active,
         "geo_score_repair_summary": geo_score_repair_summary,
+        "geo_repair_enabled": geo_repair_enabled,
+        "geo_repair_mode": geo_repair_mode,
+        "geo_repair_active": geo_repair_active,
+        "geo_repair_summary": geo_repair_summary,
         "geo_rescue_eligible": attestation_result.get("geo_rescue_eligible"),
         "geo_rescue_applied": attestation_result.get("geo_rescue_applied"),
         "geo_not_used_reason": attestation_result.get("geo_not_used_reason"),

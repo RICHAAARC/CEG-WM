@@ -1797,30 +1797,39 @@ class GeometryLatentSyncSD3:
         repair_cfg = _resolve_geo_score_repair_cfg(cfg)
         geo_score_source = "template_match_score"
         geo_score = template_match_score
-        geo_score_repair_active = False
-        geo_score_repair_summary: Dict[str, Any] = {
+        geo_repair_active = False
+        geo_repair_summary: Dict[str, Any] = {
             "status": "disabled",
             "mode": repair_cfg.get("mode"),
             "raw_template_match_score": template_match_score,
+            "active_geo_score": template_match_score,
+            "active_geo_score_source": geo_score_source,
             "template_confidence": round(template_confidence, 6),
             "mapping": "template_match_score_clamped_linear_x6",
         }
         if bool(repair_cfg.get("enabled", False)) and repair_cfg.get("mode") == "template_confidence":
             geo_score_source = "template_confidence"
             geo_score = template_confidence
-            geo_score_repair_active = True
-            geo_score_repair_summary = {
+            geo_repair_active = True
+            geo_repair_summary = {
                 "status": "applied",
                 "mode": repair_cfg.get("mode"),
                 "raw_template_match_score": template_match_score,
+                "active_geo_score": geo_score,
+                "active_geo_score_source": geo_score_source,
                 "template_confidence": round(template_confidence, 6),
                 "mapping": "template_match_score_clamped_linear_x6",
             }
         sync_quality_metrics["geo_score_source"] = geo_score_source
+        sync_quality_metrics["active_geo_score_source"] = geo_score_source
         sync_quality_metrics["geo_score_repair_enabled"] = bool(repair_cfg.get("enabled", False))
         sync_quality_metrics["geo_score_repair_mode"] = repair_cfg.get("mode")
-        sync_quality_metrics["geo_score_repair_active"] = geo_score_repair_active
-        sync_quality_metrics["geo_score_repair_summary"] = geo_score_repair_summary
+        sync_quality_metrics["geo_score_repair_active"] = geo_repair_active
+        sync_quality_metrics["geo_score_repair_summary"] = geo_repair_summary
+        sync_quality_metrics["geo_repair_enabled"] = bool(repair_cfg.get("enabled", False))
+        sync_quality_metrics["geo_repair_mode"] = repair_cfg.get("mode")
+        sync_quality_metrics["geo_repair_active"] = geo_repair_active
+        sync_quality_metrics["geo_repair_summary"] = geo_repair_summary
         sync_digest = digests.canonical_sha256({
             "relation_digest": relation_digest,
             "sync_config_digest": sync_config_digest,

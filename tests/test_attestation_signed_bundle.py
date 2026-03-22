@@ -34,6 +34,7 @@ from main.cli import run_embed as run_embed_cli
 
 _build_detect_attestation_result = detect_orchestrator._build_detect_attestation_result  # pyright: ignore[reportPrivateUsage]
 _build_hf_detect_evidence = detect_orchestrator._build_hf_detect_evidence  # pyright: ignore[reportPrivateUsage]
+_build_lf_retain_breakdown_artifact = detect_orchestrator._build_lf_retain_breakdown_artifact  # pyright: ignore[reportPrivateUsage]
 _build_lf_planner_risk_report_artifact = detect_orchestrator._build_lf_planner_risk_report_artifact  # pyright: ignore[reportPrivateUsage]
 verify_attestation = detect_orchestrator.verify_attestation
 _write_detect_attestation_artifact = run_detect_cli._write_detect_attestation_artifact  # pyright: ignore[reportPrivateUsage]
@@ -1597,6 +1598,10 @@ def test_build_detect_attestation_result_emits_geo_rescue_diagnostics_artifact()
     assert diagnostics.get("template_match_score") == pytest.approx(0.05)
     assert diagnostics.get("geo_score") == pytest.approx(0.05)
     assert diagnostics.get("geo_score_source") == "template_match_score"
+    assert diagnostics.get("active_geo_score_source") == "template_match_score"
+    assert diagnostics.get("geo_repair_enabled") is False
+    assert diagnostics.get("geo_repair_active") is False
+    assert diagnostics.get("geo_repair_mode") == "template_confidence"
     assert diagnostics.get("geo_not_used_reason") == "geometry_score_below_rescue_min"
     assert diagnostics.get("geo_scale_classification") == "quality_pass_template_fail_source_template"
     assert diagnostics.get("template_match_internal_threshold") == pytest.approx(0.02)
@@ -1665,11 +1670,54 @@ def test_build_detect_attestation_result_marks_template_confidence_rebinding_whe
     assert diagnostics.get("template_confidence") == pytest.approx(0.36)
     assert diagnostics.get("geo_score") == pytest.approx(0.36)
     assert diagnostics.get("geo_score_source") == "template_confidence"
+    assert diagnostics.get("active_geo_score_source") == "template_confidence"
     assert diagnostics.get("geo_score_repair_enabled") is True
     assert diagnostics.get("geo_score_repair_active") is True
     assert diagnostics.get("geo_score_repair_mode") == "template_confidence"
+    assert diagnostics.get("geo_repair_enabled") is True
+    assert diagnostics.get("geo_repair_active") is True
+    assert diagnostics.get("geo_repair_mode") == "template_confidence"
     assert diagnostics.get("geo_scale_classification") == "quality_pass_template_fail_source_template_confidence"
     assert diagnostics.get("geo_repair_direction_classification") == "template_confidence_rebinding_active"
+
+
+def test_build_lf_retain_breakdown_artifact_relabels_minor_same_seed_residual_as_not_primary() -> None:
+    positive_values = [0.5] * 28
+    same_seed_values = [0.5] * 27 + [-0.1]
+    artifact = _build_lf_retain_breakdown_artifact(
+        {
+            "status": "ok",
+            "n_bits_compared": 28,
+            "plan_digest": "a" * 64,
+            "lf_basis_digest": "b" * 64,
+            "projection_matrix_digest": "c" * 64,
+            "embed_closed_loop_digest": "d" * 64,
+            "embed_closed_loop_step_index": 20,
+            "embed_closed_loop_selection_rule": "max_lf_delta_norm",
+            "edit_timestep": 0,
+            "embed_edit_timestep_step_index": 0,
+            "embed_terminal_step_index": 27,
+            "expected_bit_signs": [1] * 28,
+            "pre_injection_coeffs": positive_values,
+            "selected_step_post_coeffs": positive_values,
+            "embed_edit_timestep_coeffs": positive_values,
+            "embed_terminal_step_coeffs": positive_values,
+            "detect_exact_timestep_coeffs": positive_values,
+            "detect_exact_timestep_coeffs_same_seed_control": same_seed_values,
+            "same_seed_as_embed_available": True,
+            "same_seed_control_status": "ok",
+            "same_seed_control_reason": None,
+            "detect_protocol_classification": "rerun_exact_timestep_different_seed",
+        },
+        attestation_digest="e" * 64,
+        event_binding_digest="f" * 64,
+        trace_commit="g" * 64,
+    )
+
+    assert artifact is not None
+    assert artifact.get("protocol_root_cause_classification") == "minor_same_seed_residual_not_primary"
+    assert artifact.get("control_protocol_summary", {}).get("protocol_root_cause_classification") == "minor_same_seed_residual_not_primary"
+    assert artifact.get("breakdown_summary", {}).get("dominant_drift_segment") == "no_positive_loss_detected"
 
 
 def test_build_lf_planner_risk_report_artifact_classifies_host_baseline_dominant() -> None:

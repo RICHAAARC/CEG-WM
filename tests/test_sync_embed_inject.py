@@ -141,6 +141,8 @@ def test_geometry_geo_score_repair_rebinds_to_template_confidence_only_when_enab
     assert result_off.get("status") == "ok"
     assert result_off.get("geo_score") == result_off.get("template_match_metrics", {}).get("template_match_score")
     assert result_off.get("sync_quality_metrics", {}).get("geo_score_source") == "template_match_score"
+    assert result_off.get("sync_quality_metrics", {}).get("active_geo_score_source") == "template_match_score"
+    assert result_off.get("sync_quality_metrics", {}).get("geo_repair_enabled") is False
     assert result_off.get("sync_quality_metrics", {}).get("geo_score_repair_active") is False
 
     cfg_on = {
@@ -159,5 +161,8 @@ def test_geometry_geo_score_repair_rebinds_to_template_confidence_only_when_enab
     assert result_on.get("status") == "ok"
     assert result_on.get("geo_score") == result_on.get("template_match_metrics", {}).get("template_confidence")
     assert result_on.get("sync_quality_metrics", {}).get("geo_score_source") == "template_confidence"
+    assert result_on.get("sync_quality_metrics", {}).get("active_geo_score_source") == "template_confidence"
+    assert result_on.get("sync_quality_metrics", {}).get("geo_repair_enabled") is True
+    assert result_on.get("sync_quality_metrics", {}).get("geo_repair_active") is True
     assert result_on.get("sync_quality_metrics", {}).get("geo_score_repair_active") is True
     assert result_on.get("geo_score") != result_on.get("sync_quality_metrics", {}).get("quality_score")
