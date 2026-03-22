@@ -119,7 +119,13 @@ def _build_plan_with_basis(latent_dim: int, rank: int, seed: int) -> Dict[str, A
     hf_matrix = _stable_qr_basis(hf_matrix)
     return {
         "basis_digest": digests.canonical_sha256({"seed": seed, "rank": rank, "tag": "basis"}),
-        "lf_basis": {"projection_matrix": lf_matrix.tolist()},
+        "lf_basis": {
+            "projection_matrix": lf_matrix.tolist(),
+            "trajectory_feature_spec": {
+                "feature_operator": "masked_normalized_random_projection",
+                "edit_timestep": 1,
+            },
+        },
         "hf_basis": {"hf_projection_matrix": hf_matrix.tolist()},
         "planner_params": {"rank": rank}
     }
@@ -164,6 +170,12 @@ def test_injection_callback_smoke() -> None:
     assert metrics.get("delta_norm_mean") > 0.0
     assert isinstance(metrics.get("lf_delta_norm_mean"), float)
     assert isinstance(metrics.get("hf_delta_norm_mean"), float)
+    assert metrics.get("lf_edit_timestep") == 1
+    assert metrics.get("lf_closed_loop_step_index") == 2
+    assert metrics.get("lf_edit_timestep_step_index") == 1
+    assert metrics.get("lf_terminal_step_index") == 2
+    assert isinstance(metrics.get("lf_edit_timestep_closed_loop_summary"), dict)
+    assert isinstance(metrics.get("lf_terminal_step_closed_loop_summary"), dict)
 
 
 def test_injection_unsupported_callback_absent() -> None:

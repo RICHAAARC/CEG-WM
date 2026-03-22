@@ -9,7 +9,7 @@ SD3 推理流
 
 from __future__ import annotations
 
-from typing import Dict, Any, Tuple, Optional, List
+from typing import Dict, Any, Tuple, Optional, List, cast
 
 from main.diffusion.sd3 import trajectory_tap
 from main.diffusion.sd3.hooks import register_attention_hooks, remove_attention_hooks
@@ -984,7 +984,10 @@ def _finalize_injection_evidence(
     if not isinstance(step_evidence_list, list) or len(step_evidence_list) == 0:
         return _build_injection_absent_evidence(context, "latents_missing")
 
-    metrics = _summarize_injection_metrics(step_evidence_list)
+    metrics = _summarize_injection_metrics(
+        step_evidence_list,
+        edit_timestep=_resolve_injection_edit_timestep(context),
+    )
     combined_status_counts = metrics.get("combined_status_counts", {}) if isinstance(metrics, dict) else {}
     if isinstance(combined_status_counts, dict):
         non_absent_count = 0
@@ -1023,11 +1026,65 @@ def _finalize_injection_evidence(
     return injection_evidence
 
 
-def _summarize_injection_metrics(step_evidence_list: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _resolve_injection_edit_timestep(context: InjectionContext) -> int | None:
+    """
+    功能：从注入上下文中解析 formal LF edit_timestep。 
+
+    Resolve the canonical LF edit_timestep from the injection context plan.
+
+    Args:
+        context: Injection context carrying the runtime plan reference.
+
+    Returns:
+        Non-negative edit timestep when available; otherwise None.
+    """
+    if not isinstance(context, InjectionContext):
+        return None
+    if not isinstance(context.plan_ref, dict):
+        return None
+
+    plan_ref = cast(Dict[str, Any], context.plan_ref)
+    candidate_basis_nodes = [
+        plan_ref.get("lf_basis"),
+        plan_ref.get("plan") if isinstance(plan_ref.get("plan"), dict) else None,
+    ]
+    for candidate_node in candidate_basis_nodes:
+        if isinstance(candidate_node, dict) and isinstance(candidate_node.get("lf_basis"), dict):
+            candidate_node = candidate_node.get("lf_basis")
+        if not isinstance(candidate_node, dict):
+            continue
+
+        trajectory_feature_spec = candidate_node.get("trajectory_feature_spec")
+        if isinstance(trajectory_feature_spec, dict):
+            edit_timestep = trajectory_feature_spec.get("edit_timestep")
+            if isinstance(edit_timestep, (int, float)) and int(edit_timestep) >= 0:
+                return int(edit_timestep)
+
+        latent_projection_spec = candidate_node.get("latent_projection_spec")
+        if isinstance(latent_projection_spec, dict):
+            edit_timestep = latent_projection_spec.get("edit_timestep")
+            if isinstance(edit_timestep, (int, float)) and int(edit_timestep) >= 0:
+                return int(edit_timestep)
+
+    return None
+
+
+def _summarize_injection_metrics(
+    step_evidence_list: List[Dict[str, Any]],
+    *,
+    edit_timestep: int | None = None,
+) -> Dict[str, Any]:
     """
     功能：汇总注入 step 级指标。
     
     Summarize step evidence metrics without exposing raw tensors.
+
+    Args:
+        step_evidence_list: Step evidence list produced during callback injection.
+        edit_timestep: Canonical LF edit timestep for exact-step observability.
+
+    Returns:
+        Append-only injection metrics mapping.
     """
     if not isinstance(step_evidence_list, list):
         return {
@@ -1094,6 +1151,21 @@ def _summarize_injection_metrics(step_evidence_list: List[Dict[str, Any]]) -> Di
                 int(item.get("step_index", -1) or -1),
             ),
         )
+    edit_timestep_lf_closed_loop = None
+    if isinstance(edit_timestep, int) and edit_timestep >= 0:
+        edit_step_candidates = [
+            item
+            for item in lf_closed_loop_candidates
+            if isinstance(item.get("step_index"), int) and int(item.get("step_index")) == edit_timestep
+        ]
+        if edit_step_candidates:
+            edit_timestep_lf_closed_loop = edit_step_candidates[-1]
+    terminal_lf_closed_loop = None
+    if lf_closed_loop_candidates:
+        terminal_lf_closed_loop = max(
+            lf_closed_loop_candidates,
+            key=lambda item: int(item.get("step_index", -1) or -1),
+        )
     summary_payload = {
         "step_count": len(step_evidence_list),
         "combined_status_counts": status_counts,
@@ -1124,4 +1196,14 @@ def _summarize_injection_metrics(step_evidence_list: List[Dict[str, Any]]) -> Di
         metrics["lf_attestation_event_digest"] = selected_lf_closed_loop.get("attestation_event_digest")
         metrics["lf_basis_digest"] = selected_lf_closed_loop.get("basis_digest")
         metrics["event_binding_mode"] = selected_lf_closed_loop.get("event_binding_mode")
+    if isinstance(edit_timestep, int) and edit_timestep >= 0:
+        metrics["lf_edit_timestep"] = edit_timestep
+    if isinstance(edit_timestep_lf_closed_loop, dict):
+        metrics["lf_edit_timestep_closed_loop_summary"] = edit_timestep_lf_closed_loop.get("lf_closed_loop_summary")
+        metrics["lf_edit_timestep_closed_loop_digest"] = edit_timestep_lf_closed_loop.get("lf_closed_loop_digest")
+        metrics["lf_edit_timestep_step_index"] = edit_timestep_lf_closed_loop.get("step_index")
+    if isinstance(terminal_lf_closed_loop, dict):
+        metrics["lf_terminal_step_closed_loop_summary"] = terminal_lf_closed_loop.get("lf_closed_loop_summary")
+        metrics["lf_terminal_step_closed_loop_digest"] = terminal_lf_closed_loop.get("lf_closed_loop_digest")
+        metrics["lf_terminal_step_index"] = terminal_lf_closed_loop.get("step_index")
     return metrics

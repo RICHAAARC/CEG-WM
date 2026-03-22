@@ -9,7 +9,7 @@
 # 合同版本与冻结元信息
 # - 用于记录与审计，不应作为运行期分支逻辑的自由输入。
 # ------------------------------
-contract_version: "v1.11"     # 冻结契约版本号；v1.1→v1.2 formal path 最终闭包收口（2026-03-12）：historical_field_paths 段已从当前 formal contract 文件彻底移除，旧字段信息不再显式保留在任何 formal 文件中；当前 formal contract 只绑定当前正式机制。v1.2→v1.3 从可选字段列表中移除 embed_trace.identity_mode 与 embed_trace.identity_reason（2026-03-12）：生产嵌入实现不再承载 identity baseline。v1.3→v1.4 追加 attestation signed bundle 验签门禁语义（2026-03-13）：onefile/detect 溯源结果若声明 signed bundle，则必须执行内部 trust chain 验证。v1.4→v1.5：追加 geometry coarse registration 与 recovered-domain sync revalidation 细分字段冻结登记。v1.5→v1.6：为 policy_path semantics 新增 geometry_chain_required_but_unavailable fail_reason 的 append-only 冻结登记（2026-03-13）。v1.6→v1.7：追加 negative branch attestation provenance 的 append-only 冻结注册（2026-03-16）。v1.7→v1.8：追加 attestation_source 字段与 statement-only provenance no-bundle 合同说明（2026-03-17）。v1.8→v1.9：追加 exact LF observability 字段与 detect runtime canonical 兼容命名字段（2026-03-19）。v1.9→v1.10：追加 attestation trace artifact 的 append-only 白名单治理（2026-03-21）。v1.10→v1.11：追加 LF 闭环对齐表与 planner 风险报告 artifact 的 append-only 白名单治理（2026-03-21）。
+contract_version: "v1.12"     # 冻结契约版本号；v1.1→v1.2 formal path 最终闭包收口（2026-03-12）：historical_field_paths 段已从当前 formal contract 文件彻底移除，旧字段信息不再显式保留在任何 formal 文件中；当前 formal contract 只绑定当前正式机制。v1.2→v1.3 从可选字段列表中移除 embed_trace.identity_mode 与 embed_trace.identity_reason（2026-03-12）：生产嵌入实现不再承载 identity baseline。v1.3→v1.4 追加 attestation signed bundle 验签门禁语义（2026-03-13）：onefile/detect 溯源结果若声明 signed bundle，则必须执行内部 trust chain 验证。v1.4→v1.5：追加 geometry coarse registration 与 recovered-domain sync revalidation 细分字段冻结登记。v1.5→v1.6：为 policy_path semantics 新增 geometry_chain_required_but_unavailable fail_reason 的 append-only 冻结登记（2026-03-13）。v1.6→v1.7：追加 negative branch attestation provenance 的 append-only 冻结注册（2026-03-16）。v1.7→v1.8：追加 attestation_source 字段与 statement-only provenance no-bundle 合同说明（2026-03-17）。v1.8→v1.9：追加 exact LF observability 字段与 detect runtime canonical 兼容命名字段（2026-03-19）。v1.9→v1.10：追加 attestation trace artifact 的 append-only 白名单治理（2026-03-21）。v1.10→v1.11：追加 LF 闭环对齐表与 planner 风险报告 artifact 的 append-only 白名单治理（2026-03-21）。v1.11→v1.12：追加 LF retain breakdown 与 GEO rescue diagnostics artifact 的 append-only 白名单治理（2026-03-22）。
 frozen_date: "2026-02-04"    # 冻结日期元信息；当前主链路不参与门禁计算，主要用于审计追溯。
 
 # ------------------------------
@@ -211,6 +211,64 @@ artifact_schema:
         - detect_crosses_target_halfspace_count
         - detect_reverted_after_post_positive_count
         - lf_alignment_table_digest
+    lf_retain_breakdown:
+      relative_path: "attestation/lf_retain_breakdown.json"
+      description: "LF retain breakdown diagnostics artifact written by the detect main path."
+      allowed_top_level_fields:
+        - artifact_type
+        - attestation_digest
+        - event_binding_digest
+        - trace_commit
+        - plan_digest
+        - lf_basis_digest
+        - projection_matrix_digest
+        - embed_closed_loop_digest
+        - embed_closed_loop_step_index
+        - embed_closed_loop_selection_rule
+        - edit_timestep
+        - embed_edit_timestep_step_index
+        - embed_terminal_step_index
+        - n_bits_compared
+        - expected_bit_signs
+        - pre_injection_coeffs
+        - selected_step_post_coeffs
+        - embed_edit_timestep_coeffs
+        - embed_terminal_step_coeffs
+        - detect_exact_timestep_coeffs
+        - stage_summaries
+        - breakdown_segments
+        - breakdown_summary
+        - lf_retain_breakdown_digest
+    geo_rescue_diagnostics:
+      relative_path: "attestation/geo_rescue_diagnostics.json"
+      description: "Geometry rescue scale diagnostics artifact written by the detect main path."
+      allowed_top_level_fields:
+        - artifact_type
+        - attestation_digest
+        - event_binding_digest
+        - trace_commit
+        - decision_mode
+        - content_attestation_score
+        - attested_threshold
+        - geo_rescue_band_delta_low
+        - geo_rescue_band_lower_bound
+        - geo_rescue_min_score
+        - quality_score
+        - template_match_score
+        - geo_score
+        - geo_score_source
+        - geo_rescue_eligible
+        - geo_rescue_applied
+        - geo_not_used_reason
+        - sync_status
+        - anchor_status
+        - relation_digest_binding_status
+        - uncertainty
+        - quality_vs_template_ratio
+        - geo_score_vs_rescue_min_ratio
+        - content_gap_to_attested_threshold
+        - geo_scale_classification
+        - geo_rescue_diagnostics_digest
     lf_planner_risk_report:
       relative_path: "planner/lf_planner_risk_report.json"
       description: "LF planner posterior risk artifact written from the formal closed-loop alignment evidence path."

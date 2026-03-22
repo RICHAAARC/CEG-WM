@@ -174,6 +174,73 @@ def _build_lf_planner_risk_report_payload() -> dict:
     }
 
 
+def _build_lf_retain_breakdown_payload() -> dict:
+    return {
+        "artifact_type": "lf_retain_breakdown",
+        "attestation_digest": "a" * 64,
+        "event_binding_digest": "b" * 64,
+        "trace_commit": "c" * 64,
+        "plan_digest": "d" * 64,
+        "lf_basis_digest": "e" * 64,
+        "projection_matrix_digest": "f" * 64,
+        "embed_closed_loop_digest": "1" * 64,
+        "embed_closed_loop_step_index": 12,
+        "embed_closed_loop_selection_rule": "max_lf_delta_norm",
+        "edit_timestep": 12,
+        "embed_edit_timestep_step_index": 12,
+        "embed_terminal_step_index": 15,
+        "n_bits_compared": 3,
+        "expected_bit_signs": [1, -1, 1],
+        "pre_injection_coeffs": [-0.4, 0.2, -0.1],
+        "selected_step_post_coeffs": [-0.1, -0.3, 0.3],
+        "embed_edit_timestep_coeffs": [-0.2, -0.15, 0.25],
+        "embed_terminal_step_coeffs": [-0.25, -0.1, 0.2],
+        "detect_exact_timestep_coeffs": [-0.2, -0.2, 0.1],
+        "stage_summaries": {
+            "pre_injection": {"positive_count": 0},
+            "selected_step_post": {"positive_count": 2},
+        },
+        "breakdown_segments": [
+            {"segment_name": "selected_step_to_edit_timestep", "lost_positive_count": 1}
+        ],
+        "breakdown_summary": {
+            "dominant_drift_segment": "selected_step_to_edit_timestep",
+        },
+        "lf_retain_breakdown_digest": "2" * 64,
+    }
+
+
+def _build_geo_rescue_diagnostics_payload() -> dict:
+    return {
+        "artifact_type": "geo_rescue_diagnostics",
+        "attestation_digest": "a" * 64,
+        "event_binding_digest": "b" * 64,
+        "trace_commit": "c" * 64,
+        "decision_mode": "content_primary_geo_rescue",
+        "content_attestation_score": 0.62,
+        "attested_threshold": 0.65,
+        "geo_rescue_band_delta_low": 0.05,
+        "geo_rescue_band_lower_bound": 0.6,
+        "geo_rescue_min_score": 0.3,
+        "quality_score": 0.92,
+        "template_match_score": 0.2,
+        "geo_score": 0.2,
+        "geo_score_source": "template_match_score",
+        "geo_rescue_eligible": True,
+        "geo_rescue_applied": False,
+        "geo_not_used_reason": "geometry_score_below_rescue_min",
+        "sync_status": "ok",
+        "anchor_status": "ok",
+        "relation_digest_binding_status": "matched",
+        "uncertainty": 0.08,
+        "quality_vs_template_ratio": 4.6,
+        "geo_score_vs_rescue_min_ratio": 0.666667,
+        "content_gap_to_attested_threshold": 0.03,
+        "geo_scale_classification": "quality_pass_template_fail_source_template",
+        "geo_rescue_diagnostics_digest": "3" * 64,
+    }
+
+
 def test_attestation_trace_artifact_contracts_are_registered_append_only() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     contracts_obj = yaml.safe_load((repo_root / "configs" / "frozen_contracts.yaml").read_text(encoding="utf-8"))
@@ -185,6 +252,8 @@ def test_attestation_trace_artifact_contracts_are_registered_append_only() -> No
     assert "lf_attestation_trace" in artifact_contracts
     assert "hf_attestation_trace" in artifact_contracts
     assert "lf_alignment_table" in artifact_contracts
+    assert "lf_retain_breakdown" in artifact_contracts
+    assert "geo_rescue_diagnostics" in artifact_contracts
     assert "lf_planner_risk_report" in artifact_contracts
 
     lf_allowed_fields = set(artifact_contracts["lf_attestation_trace"]["allowed_top_level_fields"])
@@ -226,6 +295,31 @@ def test_attestation_trace_artifact_contracts_are_registered_append_only() -> No
         "detect_reverted_after_post_positive_count",
         "lf_alignment_table_digest",
     } <= alignment_allowed_fields
+
+    retain_allowed_fields = set(artifact_contracts["lf_retain_breakdown"]["allowed_top_level_fields"])
+    assert {
+        "selected_step_post_coeffs",
+        "embed_edit_timestep_coeffs",
+        "embed_terminal_step_coeffs",
+        "detect_exact_timestep_coeffs",
+        "breakdown_segments",
+        "breakdown_summary",
+        "lf_retain_breakdown_digest",
+    } <= retain_allowed_fields
+
+    geo_allowed_fields = set(artifact_contracts["geo_rescue_diagnostics"]["allowed_top_level_fields"])
+    assert {
+        "quality_score",
+        "template_match_score",
+        "geo_score",
+        "geo_score_source",
+        "geo_rescue_eligible",
+        "geo_rescue_applied",
+        "geo_not_used_reason",
+        "quality_vs_template_ratio",
+        "geo_scale_classification",
+        "geo_rescue_diagnostics_digest",
+    } <= geo_allowed_fields
 
     planner_allowed_fields = set(artifact_contracts["lf_planner_risk_report"]["allowed_top_level_fields"])
     assert {

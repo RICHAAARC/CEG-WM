@@ -615,6 +615,16 @@ def _build_detect_attestation_result(
     )
     if isinstance(lf_planner_risk_report, dict):
         result["_lf_planner_risk_report_artifact"] = lf_planner_risk_report
+    geo_rescue_diagnostics = _build_geo_rescue_diagnostics_artifact(
+        cfg,
+        geometry_evidence_payload if isinstance(geometry_evidence_payload, dict) else None,
+        result,
+        attestation_digest=result.get("attestation_digest") if isinstance(result.get("attestation_digest"), str) else None,
+        event_binding_digest=result.get("event_binding_digest") if isinstance(result.get("event_binding_digest"), str) else None,
+        trace_commit=attestation_context.get("trace_commit") if isinstance(attestation_context.get("trace_commit"), str) else None,
+    )
+    if isinstance(geo_rescue_diagnostics, dict):
+        result["_geo_rescue_diagnostics_artifact"] = geo_rescue_diagnostics
     result["status"] = result.get("verdict")
     return _attach_detect_attestation_source(result, attestation_source)
 
@@ -841,10 +851,19 @@ def _extract_embed_lf_closed_loop_context(input_record: Optional[Dict[str, Any]]
     lf_closed_loop_summary = injection_metrics.get("lf_closed_loop_summary")
     if not isinstance(lf_closed_loop_summary, dict):
         return {}
+    edit_timestep_summary = injection_metrics.get("lf_edit_timestep_closed_loop_summary")
+    if not isinstance(edit_timestep_summary, dict):
+        edit_timestep_summary = {}
+    terminal_step_summary = injection_metrics.get("lf_terminal_step_closed_loop_summary")
+    if not isinstance(terminal_step_summary, dict):
+        terminal_step_summary = {}
     return {
         "pre_injection_coeffs": lf_closed_loop_summary.get("pre_injection_coeffs"),
         "injected_template_coeffs": lf_closed_loop_summary.get("injected_template_coeffs"),
         "post_injection_coeffs": lf_closed_loop_summary.get("post_injection_coeffs"),
+        "selected_step_post_coeffs": lf_closed_loop_summary.get("post_injection_coeffs"),
+        "embed_edit_timestep_coeffs": edit_timestep_summary.get("post_injection_coeffs"),
+        "embed_terminal_step_coeffs": terminal_step_summary.get("post_injection_coeffs"),
         "embed_expected_bit_signs": lf_closed_loop_summary.get("expected_bit_signs"),
         "embed_codeword_source": lf_closed_loop_summary.get("codeword_source"),
         "embed_attestation_event_digest": lf_closed_loop_summary.get("attestation_event_digest"),
@@ -854,6 +873,8 @@ def _extract_embed_lf_closed_loop_context(input_record: Optional[Dict[str, Any]]
         "embed_closed_loop_digest": injection_metrics.get("lf_closed_loop_digest"),
         "embed_closed_loop_step_index": injection_metrics.get("lf_closed_loop_step_index"),
         "embed_closed_loop_selection_rule": injection_metrics.get("lf_closed_loop_selection_rule"),
+        "embed_edit_timestep_step_index": injection_metrics.get("lf_edit_timestep_step_index"),
+        "embed_terminal_step_index": injection_metrics.get("lf_terminal_step_index"),
     }
 
 
@@ -963,6 +984,196 @@ def _build_lf_alignment_table_artifact(
         "detect_reverted_after_post_positive_count": detect_reverted_after_post_positive_count,
     }
     artifact["lf_alignment_table_digest"] = digests.canonical_sha256(artifact)
+    return artifact
+
+
+def _build_lf_retain_breakdown_artifact(
+    lf_result: Dict[str, Any],
+    *,
+    attestation_digest: str,
+    event_binding_digest: str,
+    trace_commit: Optional[str],
+) -> Dict[str, Any] | None:
+    if not isinstance(lf_result, dict) or lf_result.get("status") != "ok":
+        return None
+
+    pre_coeffs = lf_result.get("pre_injection_coeffs")
+    selected_step_post_coeffs = lf_result.get("selected_step_post_coeffs")
+    if not isinstance(selected_step_post_coeffs, list):
+        selected_step_post_coeffs = lf_result.get("post_injection_coeffs")
+    edit_step_coeffs = lf_result.get("embed_edit_timestep_coeffs")
+    terminal_step_coeffs = lf_result.get("embed_terminal_step_coeffs")
+    detect_coeffs = lf_result.get("projected_lf_coeffs")
+    expected_bit_signs = lf_result.get("expected_bit_signs")
+    injected_template_coeffs = lf_result.get("injected_template_coeffs")
+
+    required_lists = [
+        pre_coeffs,
+        selected_step_post_coeffs,
+        edit_step_coeffs,
+        terminal_step_coeffs,
+        detect_coeffs,
+        expected_bit_signs,
+    ]
+    if not all(isinstance(value, list) for value in required_lists):
+        return None
+
+    n_compare = int(lf_result.get("n_bits_compared") or 0)
+    n_rows = min(
+        n_compare,
+        len(cast(list[Any], pre_coeffs)),
+        len(cast(list[Any], selected_step_post_coeffs)),
+        len(cast(list[Any], edit_step_coeffs)),
+        len(cast(list[Any], terminal_step_coeffs)),
+        len(cast(list[Any], detect_coeffs)),
+        len(cast(list[Any], expected_bit_signs)),
+    )
+    if n_rows <= 0:
+        return None
+
+    expected = [int(cast(list[Any], expected_bit_signs)[index]) for index in range(n_rows)]
+    pre_values = [float(cast(list[Any], pre_coeffs)[index]) for index in range(n_rows)]
+    selected_values = [float(cast(list[Any], selected_step_post_coeffs)[index]) for index in range(n_rows)]
+    edit_values = [float(cast(list[Any], edit_step_coeffs)[index]) for index in range(n_rows)]
+    terminal_values = [float(cast(list[Any], terminal_step_coeffs)[index]) for index in range(n_rows)]
+    detect_values = [float(cast(list[Any], detect_coeffs)[index]) for index in range(n_rows)]
+
+    stage_coeffs = {
+        "pre_injection": pre_values,
+        "selected_step_post": selected_values,
+        "embed_edit_timestep": edit_values,
+        "embed_terminal_step": terminal_values,
+        "detect_exact_timestep": detect_values,
+    }
+    stage_signed_alignment = {
+        stage_name: [float(values[index] * expected[index]) for index in range(n_rows)]
+        for stage_name, values in stage_coeffs.items()
+    }
+
+    template_values = None
+    if isinstance(injected_template_coeffs, list):
+        template_values = [
+            float(cast(list[Any], injected_template_coeffs)[index])
+            for index in range(min(n_rows, len(cast(list[Any], injected_template_coeffs))))
+        ]
+    template_margins = [abs(value) for value in (template_values or []) if abs(value) > 0.0]
+    alignment_margin_threshold = float(np.median(np.asarray(template_margins, dtype=np.float64)) * 0.5) if template_margins else 0.0
+
+    def _build_stage_summary(stage_name: str) -> Dict[str, Any]:
+        signed_values = stage_signed_alignment[stage_name]
+        values_np = np.asarray(signed_values, dtype=np.float64)
+        positive_count = sum(1 for value in signed_values if value > 0.0)
+        strong_negative_count = sum(1 for value in signed_values if value < -alignment_margin_threshold)
+        return {
+            "stage_name": stage_name,
+            "positive_count": positive_count,
+            "positive_ratio": float(positive_count / float(n_rows)),
+            "strong_negative_count": strong_negative_count,
+            "mean_signed_alignment": float(np.mean(values_np)),
+            "median_signed_alignment": float(np.median(values_np)),
+        }
+
+    def _build_segment(segment_name: str, from_stage: str, to_stage: str) -> Dict[str, Any]:
+        from_values = stage_signed_alignment[from_stage]
+        to_values = stage_signed_alignment[to_stage]
+        deltas = [float(to_values[index] - from_values[index]) for index in range(n_rows)]
+        from_positive_count = sum(1 for value in from_values if value > 0.0)
+        to_positive_count = sum(1 for value in to_values if value > 0.0)
+        retained_positive_count = sum(
+            1 for from_value, to_value in zip(from_values, to_values) if from_value > 0.0 and to_value > 0.0
+        )
+        gained_positive_count = sum(
+            1 for from_value, to_value in zip(from_values, to_values) if from_value <= 0.0 and to_value > 0.0
+        )
+        lost_positive_count = sum(
+            1 for from_value, to_value in zip(from_values, to_values) if from_value > 0.0 and to_value <= 0.0
+        )
+        sign_flip_count = sum(
+            1
+            for from_value, to_value in zip(from_values, to_values)
+            if (from_value > 0.0 and to_value <= 0.0) or (from_value <= 0.0 and to_value > 0.0)
+        )
+        retained_positive_ratio = None
+        if from_positive_count > 0:
+            retained_positive_ratio = float(retained_positive_count / float(from_positive_count))
+        deltas_np = np.asarray(deltas, dtype=np.float64)
+        return {
+            "segment_name": segment_name,
+            "from_stage": from_stage,
+            "to_stage": to_stage,
+            "from_positive_count": from_positive_count,
+            "to_positive_count": to_positive_count,
+            "retained_positive_count": retained_positive_count,
+            "retained_positive_ratio": retained_positive_ratio,
+            "gained_positive_count": gained_positive_count,
+            "lost_positive_count": lost_positive_count,
+            "sign_flip_count": sign_flip_count,
+            "mean_signed_delta": float(np.mean(deltas_np)),
+            "median_signed_delta": float(np.median(deltas_np)),
+        }
+
+    stage_summaries = {
+        stage_name: _build_stage_summary(stage_name)
+        for stage_name in stage_coeffs.keys()
+    }
+    breakdown_segments = [
+        _build_segment("pre_to_selected_step", "pre_injection", "selected_step_post"),
+        _build_segment("selected_step_to_edit_timestep", "selected_step_post", "embed_edit_timestep"),
+        _build_segment("edit_timestep_to_terminal", "embed_edit_timestep", "embed_terminal_step"),
+        _build_segment("terminal_to_detect_exact_timestep", "embed_terminal_step", "detect_exact_timestep"),
+        _build_segment("pre_to_detect_exact_timestep", "pre_injection", "detect_exact_timestep"),
+    ]
+    drift_segments = {
+        segment["segment_name"]: segment
+        for segment in breakdown_segments
+        if segment["segment_name"] in {
+            "selected_step_to_edit_timestep",
+            "edit_timestep_to_terminal",
+            "terminal_to_detect_exact_timestep",
+        }
+    }
+    dominant_drift_segment = None
+    if drift_segments:
+        dominant_drift_segment = max(
+            drift_segments.values(),
+            key=lambda item: (
+                int(item.get("lost_positive_count") or 0),
+                int(item.get("sign_flip_count") or 0),
+            ),
+        ).get("segment_name")
+
+    artifact = {
+        "artifact_type": "lf_retain_breakdown",
+        "attestation_digest": attestation_digest,
+        "event_binding_digest": event_binding_digest,
+        "trace_commit": trace_commit,
+        "plan_digest": lf_result.get("plan_digest"),
+        "lf_basis_digest": lf_result.get("lf_basis_digest"),
+        "projection_matrix_digest": lf_result.get("projection_matrix_digest"),
+        "embed_closed_loop_digest": lf_result.get("embed_closed_loop_digest"),
+        "embed_closed_loop_step_index": lf_result.get("embed_closed_loop_step_index"),
+        "embed_closed_loop_selection_rule": lf_result.get("embed_closed_loop_selection_rule"),
+        "edit_timestep": lf_result.get("edit_timestep"),
+        "embed_edit_timestep_step_index": lf_result.get("embed_edit_timestep_step_index"),
+        "embed_terminal_step_index": lf_result.get("embed_terminal_step_index"),
+        "n_bits_compared": n_rows,
+        "expected_bit_signs": expected,
+        "pre_injection_coeffs": pre_values,
+        "selected_step_post_coeffs": selected_values,
+        "embed_edit_timestep_coeffs": edit_values,
+        "embed_terminal_step_coeffs": terminal_values,
+        "detect_exact_timestep_coeffs": detect_values,
+        "stage_summaries": stage_summaries,
+        "breakdown_segments": breakdown_segments,
+        "breakdown_summary": {
+            "selected_step_mismatch_lost_positive_count": drift_segments.get("selected_step_to_edit_timestep", {}).get("lost_positive_count"),
+            "embed_tail_drift_lost_positive_count": drift_segments.get("edit_timestep_to_terminal", {}).get("lost_positive_count"),
+            "detect_reconstruction_drift_lost_positive_count": drift_segments.get("terminal_to_detect_exact_timestep", {}).get("lost_positive_count"),
+            "pre_to_detect_retained_positive_ratio": breakdown_segments[-1].get("retained_positive_ratio"),
+            "dominant_drift_segment": dominant_drift_segment,
+        },
+    }
+    artifact["lf_retain_breakdown_digest"] = digests.canonical_sha256(artifact)
     return artifact
 
 
@@ -1387,6 +1598,132 @@ def _build_lf_attestation_trace_artifact(
         "projection_seed": lf_result.get("projection_seed"),
         "lf_attestation_trace_digest": lf_result.get("lf_attestation_trace_digest"),
     }
+
+
+def _build_geo_rescue_scale_classification(
+    *,
+    quality_score: Optional[float],
+    template_match_score: Optional[float],
+    geo_score_source: str,
+    geo_rescue_min_score: float,
+) -> str:
+    if quality_score is None and template_match_score is None:
+        return "metrics_absent"
+    if quality_score is None or template_match_score is None:
+        return "partial_metrics"
+    if geo_score_source == "template_match_score":
+        if quality_score >= geo_rescue_min_score and template_match_score < geo_rescue_min_score:
+            return "quality_pass_template_fail_source_template"
+        if template_match_score > 0.0 and quality_score / template_match_score >= 1.5:
+            return "quality_exceeds_template_source_template"
+        return "quality_template_consistent_source_template"
+    if geo_score_source == "quality_score":
+        if quality_score >= geo_rescue_min_score and template_match_score < geo_rescue_min_score:
+            return "quality_pass_template_fail_source_quality"
+        return "quality_template_consistent_source_quality"
+    return "geo_source_unclassified"
+
+
+def _build_geo_rescue_diagnostics_artifact(
+    cfg: Dict[str, Any],
+    geometry_evidence_payload: Optional[Dict[str, Any]],
+    attestation_result: Dict[str, Any],
+    *,
+    attestation_digest: Optional[str],
+    event_binding_digest: Optional[str],
+    trace_commit: Optional[str],
+) -> Dict[str, Any] | None:
+    if not isinstance(cfg, dict) or not isinstance(attestation_result, dict):
+        return None
+
+    attestation_node = cfg.get("attestation")
+    attestation_cfg = cast(Dict[str, Any], attestation_node) if isinstance(attestation_node, dict) else {}
+    attested_threshold = float(attestation_cfg.get("threshold", 0.65))
+    geo_rescue_band_delta_low = float(attestation_cfg.get("rescue_band_delta_low", 0.05))
+    geo_rescue_min_score = float(attestation_cfg.get("geo_rescue_min_score", 0.3))
+
+    geometry_payload = cast(Dict[str, Any], geometry_evidence_payload) if isinstance(geometry_evidence_payload, dict) else {}
+    sync_metrics = geometry_payload.get("sync_metrics")
+    if not isinstance(sync_metrics, dict):
+        sync_result = geometry_payload.get("sync_result")
+        if isinstance(sync_result, dict) and isinstance(sync_result.get("sync_quality_metrics"), dict):
+            sync_metrics = cast(Dict[str, Any], sync_result.get("sync_quality_metrics"))
+        else:
+            sync_metrics = {}
+    sync_result = geometry_payload.get("sync_result")
+    sync_result_mapping = cast(Dict[str, Any], sync_result) if isinstance(sync_result, dict) else {}
+
+    relation_binding = geometry_payload.get("relation_digest_binding")
+    relation_binding_mapping = cast(Dict[str, Any], relation_binding) if isinstance(relation_binding, dict) else {}
+    channel_scores = cast(Dict[str, Any], attestation_result.get("channel_scores")) if isinstance(attestation_result.get("channel_scores"), dict) else {}
+
+    quality_score = float(sync_metrics.get("quality_score")) if isinstance(sync_metrics.get("quality_score"), (int, float)) else None
+    template_match_score = None
+    if isinstance(sync_metrics.get("template_match_score"), (int, float)):
+        template_match_score = float(sync_metrics.get("template_match_score"))
+    elif isinstance(sync_result_mapping.get("template_match_metrics"), dict):
+        template_match_metrics = cast(Dict[str, Any], sync_result_mapping.get("template_match_metrics"))
+        if isinstance(template_match_metrics.get("template_match_score"), (int, float)):
+            template_match_score = float(template_match_metrics.get("template_match_score"))
+    uncertainty = float(sync_metrics.get("uncertainty")) if isinstance(sync_metrics.get("uncertainty"), (int, float)) else None
+    geo_score = float(channel_scores.get("geo")) if isinstance(channel_scores.get("geo"), (int, float)) else None
+
+    if geo_score is not None and template_match_score is not None and abs(geo_score - template_match_score) <= 1e-9:
+        geo_score_source = "template_match_score"
+    elif geo_score is not None and quality_score is not None and abs(geo_score - quality_score) <= 1e-9:
+        geo_score_source = "quality_score"
+    else:
+        geo_score_source = "other_or_absent"
+
+    content_attestation_score = attestation_result.get("content_attestation_score")
+    if not isinstance(content_attestation_score, (int, float)):
+        content_attestation_score = None
+    content_gap_to_attested_threshold = None
+    if isinstance(content_attestation_score, (int, float)):
+        content_gap_to_attested_threshold = float(attested_threshold - float(content_attestation_score))
+
+    quality_vs_template_ratio = None
+    if quality_score is not None and template_match_score is not None and abs(template_match_score) > 1e-12:
+        quality_vs_template_ratio = float(quality_score / template_match_score)
+
+    geo_score_vs_rescue_min_ratio = None
+    if geo_score is not None and geo_rescue_min_score > 0.0:
+        geo_score_vs_rescue_min_ratio = float(geo_score / geo_rescue_min_score)
+
+    artifact = {
+        "artifact_type": "geo_rescue_diagnostics",
+        "attestation_digest": attestation_digest,
+        "event_binding_digest": event_binding_digest,
+        "trace_commit": trace_commit,
+        "decision_mode": attestation_result.get("attestation_decision_mode"),
+        "content_attestation_score": content_attestation_score,
+        "attested_threshold": attested_threshold,
+        "geo_rescue_band_delta_low": geo_rescue_band_delta_low,
+        "geo_rescue_band_lower_bound": attested_threshold - geo_rescue_band_delta_low,
+        "geo_rescue_min_score": geo_rescue_min_score,
+        "quality_score": quality_score,
+        "template_match_score": template_match_score,
+        "geo_score": geo_score,
+        "geo_score_source": geo_score_source,
+        "geo_rescue_eligible": attestation_result.get("geo_rescue_eligible"),
+        "geo_rescue_applied": attestation_result.get("geo_rescue_applied"),
+        "geo_not_used_reason": attestation_result.get("geo_not_used_reason"),
+        "sync_status": geometry_payload.get("sync_status") or sync_result_mapping.get("sync_status") or sync_result_mapping.get("status"),
+        "anchor_status": geometry_payload.get("anchor_status"),
+        "relation_digest_binding_status": relation_binding_mapping.get("binding_status"),
+        "uncertainty": uncertainty,
+        "quality_vs_template_ratio": quality_vs_template_ratio,
+        "geo_score_vs_rescue_min_ratio": geo_score_vs_rescue_min_ratio,
+        "content_gap_to_attested_threshold": content_gap_to_attested_threshold,
+        "geo_scale_classification": _build_geo_rescue_scale_classification(
+            quality_score=quality_score,
+            template_match_score=template_match_score,
+            geo_score_source=geo_score_source,
+            geo_rescue_min_score=geo_rescue_min_score,
+        ),
+    }
+    artifact["geo_rescue_diagnostics_digest"] = digests.canonical_sha256(artifact)
+    return artifact
 
 
 def _canonicalize_detect_runtime_mode(detect_runtime_mode: Any) -> Optional[str]:
@@ -6991,6 +7328,7 @@ def verify_attestation(
     hf_attestation_trace: Optional[Dict[str, Any]] = None
     lf_attestation_trace: Optional[Dict[str, Any]] = None
     lf_alignment_table: Optional[Dict[str, Any]] = None
+    lf_retain_breakdown: Optional[Dict[str, Any]] = None
 
     # LF 通道：基于 latent 后验与 attestation payload 的符号一致率。
     if lf_latent_features is not None:
@@ -7002,6 +7340,16 @@ def verify_attestation(
                 lf_params=lf_params,
             )
             if lf_result.get("status") == "ok":
+                if isinstance(lf_params, dict):
+                    for field_name in [
+                        "selected_step_post_coeffs",
+                        "embed_edit_timestep_coeffs",
+                        "embed_terminal_step_coeffs",
+                        "embed_edit_timestep_step_index",
+                        "embed_terminal_step_index",
+                    ]:
+                        if field_name in lf_params and field_name not in lf_result:
+                            lf_result[field_name] = lf_params.get(field_name)
                 s_lf = lf_result.get("lf_attestation_score")
                 lf_attestation_trace = _build_lf_attestation_trace_artifact(
                     lf_result,
@@ -7010,6 +7358,12 @@ def verify_attestation(
                     trace_commit=trace_commit,
                 )
                 lf_alignment_table = _build_lf_alignment_table_artifact(
+                    lf_result,
+                    attestation_digest=d_a,
+                    event_binding_digest=attest_keys.event_binding_digest,
+                    trace_commit=trace_commit,
+                )
+                lf_retain_breakdown = _build_lf_retain_breakdown_artifact(
                     lf_result,
                     attestation_digest=d_a,
                     event_binding_digest=attest_keys.event_binding_digest,
@@ -7306,5 +7660,6 @@ def verify_attestation(
         "final_event_attested_decision": final_event_attested_decision,
         "_lf_attestation_trace_artifact": lf_attestation_trace,
         "_lf_alignment_table_artifact": lf_alignment_table,
+        "_lf_retain_breakdown_artifact": lf_retain_breakdown,
         "_hf_attestation_trace_artifact": hf_trace_artifact,
     }

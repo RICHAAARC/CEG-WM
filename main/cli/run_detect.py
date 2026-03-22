@@ -133,6 +133,8 @@ def _write_detect_attestation_artifact(
     hf_attestation_trace: Dict[str, Any] | None = None
     lf_attestation_trace: Dict[str, Any] | None = None
     lf_alignment_table: Dict[str, Any] | None = None
+    lf_retain_breakdown: Dict[str, Any] | None = None
+    geo_rescue_diagnostics: Dict[str, Any] | None = None
     lf_planner_risk_report: Dict[str, Any] | None = None
     if isinstance(attestation_artifacts, dict):
         candidate_trace = attestation_artifacts.get("hf_attestation_trace")
@@ -144,6 +146,12 @@ def _write_detect_attestation_artifact(
         candidate_lf_alignment = attestation_artifacts.get("lf_alignment_table")
         if isinstance(candidate_lf_alignment, dict):
             lf_alignment_table = cast(Dict[str, Any], candidate_lf_alignment)
+        candidate_lf_retain_breakdown = attestation_artifacts.get("lf_retain_breakdown")
+        if isinstance(candidate_lf_retain_breakdown, dict):
+            lf_retain_breakdown = cast(Dict[str, Any], candidate_lf_retain_breakdown)
+        candidate_geo_rescue_diagnostics = attestation_artifacts.get("geo_rescue_diagnostics")
+        if isinstance(candidate_geo_rescue_diagnostics, dict):
+            geo_rescue_diagnostics = cast(Dict[str, Any], candidate_geo_rescue_diagnostics)
         candidate_lf_planner_risk_report = attestation_artifacts.get("lf_planner_risk_report")
         if isinstance(candidate_lf_planner_risk_report, dict):
             lf_planner_risk_report = cast(Dict[str, Any], candidate_lf_planner_risk_report)
@@ -153,6 +161,10 @@ def _write_detect_attestation_artifact(
         records_io.write_artifact_json(str(attestation_dir / "lf_attestation_trace.json"), lf_attestation_trace)
     if lf_alignment_table is not None:
         records_io.write_artifact_json(str(attestation_dir / "lf_alignment_table.json"), lf_alignment_table)
+    if lf_retain_breakdown is not None:
+        records_io.write_artifact_json(str(attestation_dir / "lf_retain_breakdown.json"), lf_retain_breakdown)
+    if geo_rescue_diagnostics is not None:
+        records_io.write_artifact_json(str(attestation_dir / "geo_rescue_diagnostics.json"), geo_rescue_diagnostics)
     if lf_planner_risk_report is not None:
         planner_dir = artifacts_dir / "planner"
         planner_dir.mkdir(parents=True, exist_ok=True)
@@ -170,6 +182,8 @@ def _extract_detect_attestation_artifacts(record: Any) -> Dict[str, Any] | None:
     hf_trace_artifact = attestation_dict.pop("_hf_attestation_trace_artifact", None)
     lf_trace_artifact = attestation_dict.pop("_lf_attestation_trace_artifact", None)
     lf_alignment_artifact = attestation_dict.pop("_lf_alignment_table_artifact", None)
+    lf_retain_breakdown_artifact = attestation_dict.pop("_lf_retain_breakdown_artifact", None)
+    geo_rescue_diagnostics_artifact = attestation_dict.pop("_geo_rescue_diagnostics_artifact", None)
     lf_planner_risk_report_artifact = attestation_dict.pop("_lf_planner_risk_report_artifact", None)
     artifacts: Dict[str, Any] = {}
     if isinstance(hf_trace_artifact, dict):
@@ -178,6 +192,10 @@ def _extract_detect_attestation_artifacts(record: Any) -> Dict[str, Any] | None:
         artifacts["lf_attestation_trace"] = cast(Dict[str, Any], lf_trace_artifact)
     if isinstance(lf_alignment_artifact, dict):
         artifacts["lf_alignment_table"] = cast(Dict[str, Any], lf_alignment_artifact)
+    if isinstance(lf_retain_breakdown_artifact, dict):
+        artifacts["lf_retain_breakdown"] = cast(Dict[str, Any], lf_retain_breakdown_artifact)
+    if isinstance(geo_rescue_diagnostics_artifact, dict):
+        artifacts["geo_rescue_diagnostics"] = cast(Dict[str, Any], geo_rescue_diagnostics_artifact)
     if isinstance(lf_planner_risk_report_artifact, dict):
         artifacts["lf_planner_risk_report"] = cast(Dict[str, Any], lf_planner_risk_report_artifact)
     return artifacts or None

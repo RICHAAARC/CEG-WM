@@ -37,7 +37,20 @@ _build_hf_detect_evidence = detect_orchestrator._build_hf_detect_evidence  # pyr
 _build_lf_planner_risk_report_artifact = detect_orchestrator._build_lf_planner_risk_report_artifact  # pyright: ignore[reportPrivateUsage]
 verify_attestation = detect_orchestrator.verify_attestation
 _write_detect_attestation_artifact = run_detect_cli._write_detect_attestation_artifact  # pyright: ignore[reportPrivateUsage]
-_write_embed_planner_artifacts = run_embed_cli._write_embed_planner_artifacts  # pyright: ignore[reportPrivateUsage]
+
+
+def _write_embed_planner_artifacts(record: Dict[str, Any], artifacts_dir: Path) -> None:
+    if not isinstance(record, dict):
+        return
+    planner_artifact = record.get("lf_planner_risk_report")
+    if not isinstance(planner_artifact, dict):
+        return
+    planner_dir = artifacts_dir / "planner"
+    planner_dir.mkdir(parents=True, exist_ok=True)
+    run_embed_cli.records_io.write_artifact_json(
+        str(planner_dir / "lf_planner_risk_report.json"),
+        cast(Dict[str, Any], planner_artifact),
+    )
 
 
 def _build_hf_runtime_cfg(tail_truncation_ratio: float = 0.1) -> Dict[str, Any]:
@@ -712,6 +725,11 @@ def test_build_detect_attestation_result_emits_lf_trace_artifact() -> None:
             "pre_injection_coeffs": [-0.4, 0.2, -0.1],
             "injected_template_coeffs": [0.3, -0.5, 0.4],
             "post_injection_coeffs": [-0.1, -0.3, 0.3],
+            "selected_step_post_coeffs": [-0.1, -0.3, 0.3],
+            "embed_edit_timestep_coeffs": [-0.2, -0.15, 0.25],
+            "embed_terminal_step_coeffs": [-0.25, -0.1, 0.2],
+            "embed_edit_timestep_step_index": 12,
+            "embed_terminal_step_index": 15,
             "embed_closed_loop_digest": "b" * 64,
             "embed_closed_loop_step_index": 12,
             "embed_closed_loop_selection_rule": "max_lf_delta_norm",
@@ -738,6 +756,7 @@ def test_build_detect_attestation_result_emits_lf_trace_artifact() -> None:
 
     trace_artifact = cast(Dict[str, Any], result.get("_lf_attestation_trace_artifact"))
     alignment_artifact = cast(Dict[str, Any], result.get("_lf_alignment_table_artifact"))
+    retain_artifact = cast(Dict[str, Any], result.get("_lf_retain_breakdown_artifact"))
     planner_artifact = cast(Dict[str, Any], result.get("_lf_planner_risk_report_artifact"))
     assert trace_artifact.get("artifact_type") == "lf_attestation_trace"
     assert trace_artifact.get("agreement_count") == trace_artifact.get("n_bits_compared")
@@ -771,6 +790,12 @@ def test_build_detect_attestation_result_emits_lf_trace_artifact() -> None:
     assert alignment_artifact.get("embed_closed_loop_selection_rule") == "max_lf_delta_norm"
     assert alignment_artifact.get("post_still_negative_count") == 1
     assert alignment_artifact.get("detect_reverted_after_post_positive_count") == 0
+    assert retain_artifact.get("artifact_type") == "lf_retain_breakdown"
+    assert retain_artifact.get("selected_step_post_coeffs") == [-0.1, -0.3, 0.3]
+    assert retain_artifact.get("embed_edit_timestep_coeffs") == [-0.2, -0.15, 0.25]
+    assert retain_artifact.get("embed_terminal_step_coeffs") == [-0.25, -0.1, 0.2]
+    assert retain_artifact.get("breakdown_segments", [])[1].get("segment_name") == "selected_step_to_edit_timestep"
+    assert isinstance(retain_artifact.get("breakdown_summary"), dict)
     assert planner_artifact.get("artifact_type") == "lf_planner_risk_report"
     assert planner_artifact.get("primary_evidence", {}).get("evidence_type") == "lf_closed_loop_posterior_counts"
     assert isinstance(planner_artifact.get("routing_pattern_summary", {}).get("mismatch_feature_cols"), list)
@@ -1384,6 +1409,28 @@ def test_write_detect_attestation_artifact_persists_attestation_traces(monkeypat
             "detect_reverted_after_post_positive_count": 1,
             "lf_alignment_table_digest": "f" * 64,
         },
+        "lf_retain_breakdown": {
+            "artifact_type": "lf_retain_breakdown",
+            "selected_step_post_coeffs": [0.1, -0.1],
+            "embed_edit_timestep_coeffs": [0.0, -0.2],
+            "embed_terminal_step_coeffs": [-0.1, -0.2],
+            "detect_exact_timestep_coeffs": [-0.1, 0.2],
+            "breakdown_segments": [],
+            "breakdown_summary": {"dominant_drift_segment": "selected_step_to_edit_timestep"},
+            "lf_retain_breakdown_digest": "9" * 64,
+        },
+        "geo_rescue_diagnostics": {
+            "artifact_type": "geo_rescue_diagnostics",
+            "quality_score": 0.92,
+            "template_match_score": 0.2,
+            "geo_score": 0.2,
+            "geo_score_source": "template_match_score",
+            "geo_rescue_eligible": True,
+            "geo_rescue_applied": False,
+            "geo_not_used_reason": "geometry_score_below_rescue_min",
+            "geo_scale_classification": "quality_pass_template_fail_source_template",
+            "geo_rescue_diagnostics_digest": "8" * 64,
+        },
         "lf_planner_risk_report": {
             "artifact_type": "lf_planner_risk_report",
             "risk_report_version": "v1",
@@ -1413,6 +1460,8 @@ def test_write_detect_attestation_artifact_persists_attestation_traces(monkeypat
     hf_trace_path = str((tmp_path / "artifacts" / "attestation" / "hf_attestation_trace.json")).replace("\\", "/")
     lf_trace_path = str((tmp_path / "artifacts" / "attestation" / "lf_attestation_trace.json")).replace("\\", "/")
     lf_alignment_path = str((tmp_path / "artifacts" / "attestation" / "lf_alignment_table.json")).replace("\\", "/")
+    lf_retain_path = str((tmp_path / "artifacts" / "attestation" / "lf_retain_breakdown.json")).replace("\\", "/")
+    geo_diag_path = str((tmp_path / "artifacts" / "attestation" / "geo_rescue_diagnostics.json")).replace("\\", "/")
     planner_path = str((tmp_path / "artifacts" / "planner" / "lf_planner_risk_report.json")).replace("\\", "/")
     assert written[result_path] == record["attestation"]
     assert written[hf_trace_path]["artifact_type"] == "hf_attestation_trace"
@@ -1420,8 +1469,68 @@ def test_write_detect_attestation_artifact_persists_attestation_traces(monkeypat
     assert written[lf_trace_path]["agreement_count"] == 22
     assert written[lf_alignment_path]["artifact_type"] == "lf_alignment_table"
     assert written[lf_alignment_path]["post_crosses_target_halfspace_count"] == 2
+    assert written[lf_retain_path]["artifact_type"] == "lf_retain_breakdown"
+    assert written[geo_diag_path]["artifact_type"] == "geo_rescue_diagnostics"
     assert written[planner_path]["artifact_type"] == "lf_planner_risk_report"
     assert written[planner_path]["risk_classification"] == "detect_trajectory_shift"
+
+
+def test_build_detect_attestation_result_emits_geo_rescue_diagnostics_artifact() -> None:
+    payload = _build_statement()
+    cfg = {
+        "attestation": {
+            "enabled": True,
+            "use_trajectory_mix": True,
+            "threshold": 0.65,
+            "decision_mode": "content_primary_geo_rescue",
+            "rescue_band_delta_low": 0.05,
+            "geo_rescue_min_score": 0.3,
+        },
+        "__attestation_verify_k_master__": "5" * 64,
+    }
+    attestation_context = {
+        "candidate_statement": payload["statement"],
+        "attestation_bundle": payload["bundle"],
+        "attestation_source": "formal_input_payload",
+        "attestation_status": "ok",
+        "authenticity_status": "authentic",
+        "attestation_digest": payload["attestation_digest"],
+        "event_binding_digest": compute_event_binding_digest(payload["attestation_digest"], cast(str, payload["bundle"].get("trace_commit"))),
+        "trace_commit": payload["bundle"].get("trace_commit"),
+        "bundle_verification": {"status": "ok"},
+    }
+
+    result = _build_detect_attestation_result(
+        cfg=cfg,
+        attestation_context=attestation_context,
+        content_evidence_payload={
+            "status": "ok",
+            "lf_score": 0.62,
+        },
+        geometry_evidence_payload={
+            "status": "ok",
+            "geo_score": 0.2,
+            "sync_status": "ok",
+            "anchor_status": "ok",
+            "relation_digest_binding": {"binding_status": "matched"},
+            "sync_metrics": {
+                "quality_score": 0.92,
+                "template_match_score": 0.2,
+                "uncertainty": 0.08,
+            },
+        },
+    )
+
+    diagnostics = cast(Dict[str, Any], result.get("_geo_rescue_diagnostics_artifact"))
+    assert result.get("verdict") == "mismatch"
+    assert result.get("content_attestation_score") == pytest.approx(0.62)
+    assert diagnostics.get("artifact_type") == "geo_rescue_diagnostics"
+    assert diagnostics.get("quality_score") == pytest.approx(0.92)
+    assert diagnostics.get("template_match_score") == pytest.approx(0.2)
+    assert diagnostics.get("geo_score") == pytest.approx(0.2)
+    assert diagnostics.get("geo_score_source") == "template_match_score"
+    assert diagnostics.get("geo_not_used_reason") == "geometry_score_below_rescue_min"
+    assert diagnostics.get("geo_scale_classification") == "quality_pass_template_fail_source_template"
 
 
 def test_build_lf_planner_risk_report_artifact_classifies_host_baseline_dominant() -> None:
