@@ -833,6 +833,7 @@ def _build_lf_attestation_trace_context(
         "projection_matrix_digest": trace_bundle.get("projection_matrix_digest"),
         "trajectory_feature_spec_digest": trace_bundle.get("trajectory_feature_spec_digest"),
         "projection_seed": trace_bundle.get("projection_seed"),
+        "formal_exact_evidence_source": trace_bundle.get("formal_exact_evidence_source"),
         "event_binding_mode": "trajectory_bound" if bool(attestation_cfg.get("use_trajectory_mix", True)) else "statement_only",
     }
 
@@ -1167,6 +1168,9 @@ def _build_lf_retain_breakdown_artifact(
         "embed_edit_timestep_coeffs": edit_values,
         "embed_terminal_step_coeffs": terminal_values,
         "detect_exact_timestep_coeffs": detect_values,
+        "formal_exact_evidence_source": lf_result.get("formal_exact_evidence_source"),
+        "formal_exact_object_binding_status": lf_result.get("formal_exact_object_binding_status"),
+        "formal_exact_image_path_source": lf_result.get("formal_exact_image_path_source"),
         "stage_summaries": stage_summaries,
         "breakdown_segments": breakdown_segments,
         "breakdown_summary": {
@@ -2780,9 +2784,13 @@ def run_detect_orchestrator(
         and content_evidence_payload.get("status") == "ok"
         and attestation_context.get("authenticity_status") == "authentic"
     ):
-        lf_attestation_trace_bundle = _extract_lf_attestation_trace_bundle_from_trajectory(
-            cfg,
-            plan_payload,
+        lf_attestation_trace_bundle = (
+            cast(Dict[str, Any], cfg.get("__lf_formal_exact_trace_bundle__"))
+            if isinstance(cfg.get("__lf_formal_exact_trace_bundle__"), dict)
+            else _extract_lf_attestation_trace_bundle_from_trajectory(
+                cfg,
+                plan_payload,
+            )
         )
         if isinstance(lf_attestation_trace_bundle, dict):
             lf_attestation_features = lf_attestation_trace_bundle.get("lf_attestation_features")
@@ -2798,6 +2806,9 @@ def run_detect_orchestrator(
         lf_protocol_control_context = cfg.get("__lf_protocol_control_context__")
         if isinstance(lf_protocol_control_context, dict):
             lf_attestation_trace_context.update(cast(Dict[str, Any], lf_protocol_control_context))
+        lf_formal_exact_context = cfg.get("__lf_formal_exact_context__")
+        if isinstance(lf_formal_exact_context, dict):
+            lf_attestation_trace_context.update(cast(Dict[str, Any], lf_formal_exact_context))
 
     attestation_result = _build_detect_attestation_result(
         cfg,
@@ -2815,6 +2826,8 @@ def run_detect_orchestrator(
     cfg.pop("__detect_attention_maps__", None)
     cfg.pop("__detect_self_attention_maps__", None)
     cfg.pop("__runtime_self_attention_maps__", None)
+    cfg.pop("__lf_formal_exact_trace_bundle__", None)
+    cfg.pop("__lf_formal_exact_context__", None)
     cfg.pop("__detect_hf_plan_digest_used__", None)
 
     plan_digest_mismatch_reason = plan_digest_reason if plan_digest_reason == "plan_digest_mismatch" else None
@@ -7690,6 +7703,9 @@ def verify_attestation(
                         "embed_edit_timestep_coeffs",
                         "embed_terminal_step_coeffs",
                         "detect_exact_timestep_coeffs",
+                        "formal_exact_evidence_source",
+                        "formal_exact_object_binding_status",
+                        "formal_exact_image_path_source",
                         "embed_edit_timestep_step_index",
                         "embed_terminal_step_index",
                         "embed_seed",

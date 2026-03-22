@@ -91,6 +91,10 @@ detect:
     align_template_overlap_min: 0.70
     align_recovered_sync_consistency_min: 0.55
     align_recovered_anchor_consistency_min: 0.50
+  diagnostics:
+    lf_protocol_control_enabled: true
+    geo_rescue_scale_control_enabled: true
+    geo_scale_records_glob: null
   calibration_artifact_path: null
 
 enable_mask: true

@@ -9,9 +9,11 @@ Module type: General module
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Dict
 
 import numpy as np
+from PIL import Image
 import torch
 
 from main.core import digests
@@ -132,6 +134,33 @@ def _build_plan_with_basis(latent_dim: int, rank: int, seed: int) -> Dict[str, A
 
 
 _build_injection_cfg = infer_runtime_module._build_injection_cfg  # pyright: ignore[reportPrivateUsage]
+extract_image_conditioned_latent = infer_runtime_module.extract_image_conditioned_latent
+
+
+class _VaeLatentDistributionStub:
+    def __init__(self, latents: torch.Tensor) -> None:
+        self.mean = latents
+
+
+class _VaeEncodeOutputStub:
+    def __init__(self, latents: torch.Tensor) -> None:
+        self.latent_dist = _VaeLatentDistributionStub(latents)
+
+
+class _VaeStub(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self._anchor = torch.nn.Parameter(torch.ones(1, dtype=torch.float32))
+        self.config = type("_VaeConfig", (), {"scaling_factor": 0.5})()
+
+    def encode(self, tensor: torch.Tensor) -> _VaeEncodeOutputStub:
+        latents = torch.mean(tensor, dim=1, keepdim=True)[:, :, ::8, ::8]
+        return _VaeEncodeOutputStub(latents)
+
+
+class _PipelineWithVaeStub:
+    def __init__(self) -> None:
+        self.vae = _VaeStub()
 
 
 def test_injection_callback_smoke() -> None:
@@ -293,3 +322,30 @@ def test_channel_lf_resolves_statement_only_from_attestation_cfg() -> None:
     }
 
     assert channel_lf._resolve_event_binding_mode(cfg) == "statement_only"
+
+
+def test_extract_image_conditioned_latent_returns_object_bound_latent(tmp_path: Path) -> None:
+    """
+    功能：detect 输入图像必须可通过 VAE encode 恢复 object-bound latent。
+    """
+    image_path = tmp_path / "watermarked.png"
+    image_array = np.full((16, 16, 3), 128, dtype=np.uint8)
+    Image.fromarray(image_array, mode="RGB").save(image_path)
+
+    cfg = _build_cfg()
+    cfg["inference_height"] = 16
+    cfg["inference_width"] = 16
+
+    result = extract_image_conditioned_latent(
+        cfg,
+        _PipelineWithVaeStub(),
+        str(image_path),
+        "cpu",
+    )
+
+    assert result.get("status") == "ok"
+    latent_array = result.get("latent_array")
+    assert isinstance(latent_array, np.ndarray)
+    assert latent_array.shape == (1, 1, 2, 2)
+    assert result.get("latent_source") == "input_image_vae_encode"
+    assert result.get("image_size") == [16, 16]

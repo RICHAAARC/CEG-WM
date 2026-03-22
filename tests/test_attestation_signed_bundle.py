@@ -729,6 +729,9 @@ def test_build_detect_attestation_result_emits_lf_trace_artifact() -> None:
             "embed_edit_timestep_coeffs": [-0.2, -0.15, 0.25],
             "embed_terminal_step_coeffs": [-0.25, -0.1, 0.2],
             "detect_exact_timestep_coeffs": [-0.25, 0.0, 0.2],
+            "formal_exact_evidence_source": "input_image_conditioned_reconstruction",
+            "formal_exact_object_binding_status": "ok",
+            "formal_exact_image_path_source": "input_record.watermarked_path",
             "embed_edit_timestep_step_index": 12,
             "embed_terminal_step_index": 15,
             "embed_closed_loop_digest": "b" * 64,
@@ -807,6 +810,9 @@ def test_build_detect_attestation_result_emits_lf_trace_artifact() -> None:
     assert retain_artifact.get("selected_step_post_coeffs") == [-0.1, -0.3, 0.3]
     assert retain_artifact.get("embed_edit_timestep_coeffs") == [-0.2, -0.15, 0.25]
     assert retain_artifact.get("embed_terminal_step_coeffs") == [-0.25, -0.1, 0.2]
+    assert retain_artifact.get("formal_exact_evidence_source") == "input_image_conditioned_reconstruction"
+    assert retain_artifact.get("formal_exact_object_binding_status") == "ok"
+    assert retain_artifact.get("formal_exact_image_path_source") == "input_record.watermarked_path"
     assert retain_artifact.get("embed_seed") == 7102221260541468996
     assert retain_artifact.get("detect_seed") == 4388340890186534267
     assert retain_artifact.get("same_seed_as_embed_available") is True

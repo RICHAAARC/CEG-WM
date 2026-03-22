@@ -73,6 +73,10 @@ _extract_lf_attestation_trace_bundle_from_trajectory = cast(
     Callable[..., Dict[str, Any] | None],
     getattr(detect_orchestrator, "_extract_lf_attestation_trace_bundle_from_trajectory"),
 )
+_resolve_detect_image_path_with_source = cast(
+    Callable[..., tuple[Any, Any]],
+    getattr(detect_orchestrator, "_resolve_detect_image_path_with_source"),
+)
 
 
 def _resolve_detect_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -432,6 +436,110 @@ def _build_lf_protocol_control_context(
         context["same_seed_control_trace_digest"] = projected_digest
     context["same_seed_control_status"] = "ok"
     context["same_seed_control_reason"] = None
+    return context
+
+
+def _build_lf_formal_exact_context(
+    cfg: Dict[str, Any],
+    input_record: Dict[str, Any],
+    plan_payload: Dict[str, Any] | None,
+    pipeline_obj: Any,
+    device: str,
+) -> Dict[str, Any]:
+    """
+    功能：构建 LF formal exact comparison 的 object-bound 上下文。
+
+    Build the object-bound LF exact comparison context from the detect input
+    image rather than from a clean rerun trajectory.
+
+    Args:
+        cfg: Configuration mapping.
+        input_record: Embed-side input record mapping.
+        plan_payload: Detect-side plan payload override.
+        pipeline_obj: Detect runtime pipeline object.
+        device: Runtime device string.
+
+    Returns:
+        LF formal exact context mapping.
+    """
+    context: Dict[str, Any] = {
+        "formal_exact_evidence_source": "trajectory_rerun_exact_timestep",
+        "formal_exact_object_binding_status": "absent",
+        "formal_exact_image_path_source": None,
+        "image_conditioned_reconstruction_available": False,
+        "image_conditioned_reconstruction_status": "absent",
+        "formal_exact_trace_bundle": None,
+    }
+
+    if not isinstance(plan_payload, dict):
+        context["image_conditioned_reconstruction_status"] = "detect_plan_payload_absent"
+        return context
+
+    plan_node = plan_payload.get("plan") if isinstance(plan_payload.get("plan"), dict) else {}
+    lf_basis = plan_node.get("lf_basis") if isinstance(plan_node.get("lf_basis"), dict) else {}
+    trajectory_feature_spec = (
+        lf_basis.get("trajectory_feature_spec")
+        if isinstance(lf_basis.get("trajectory_feature_spec"), dict)
+        else {}
+    )
+    edit_timestep = trajectory_feature_spec.get("edit_timestep")
+    if not isinstance(edit_timestep, int):
+        context["image_conditioned_reconstruction_status"] = "edit_timestep_absent"
+        return context
+    if int(edit_timestep) != 0:
+        context["image_conditioned_reconstruction_status"] = "unsupported_nonzero_edit_timestep"
+        return context
+
+    image_path_candidate, image_path_source_candidate = _resolve_detect_image_path_with_source(cfg, input_record)
+    image_path = image_path_candidate if isinstance(image_path_candidate, Path) else None
+    image_path_source = image_path_source_candidate if isinstance(image_path_source_candidate, str) else None
+    if image_path is None:
+        context["image_conditioned_reconstruction_status"] = "detect_input_image_absent"
+        return context
+
+    latent_result = infer_runtime.extract_image_conditioned_latent(
+        cfg,
+        pipeline_obj,
+        str(image_path),
+        device,
+    )
+    latent_status = latent_result.get("status") if isinstance(latent_result.get("status"), str) else "failed"
+    if latent_status != "ok":
+        context["image_conditioned_reconstruction_status"] = (
+            latent_result.get("failure_reason")
+            if isinstance(latent_result.get("failure_reason"), str)
+            else "image_conditioned_latent_failed"
+        )
+        return context
+
+    latent_array = latent_result.get("latent_array")
+    if latent_array is None:
+        context["image_conditioned_reconstruction_status"] = "image_conditioned_latent_absent"
+        return context
+
+    image_cache = trajectory_tap.LatentTrajectoryCache()
+    image_cache.capture(int(edit_timestep), latent_array)
+
+    previous_cache = cfg.get("__detect_trajectory_latent_cache__")
+    try:
+        cfg["__detect_trajectory_latent_cache__"] = image_cache
+        trace_bundle = _extract_lf_attestation_trace_bundle_from_trajectory(cfg, plan_payload)
+    finally:
+        if previous_cache is None:
+            cfg.pop("__detect_trajectory_latent_cache__", None)
+        else:
+            cfg["__detect_trajectory_latent_cache__"] = previous_cache
+
+    if not isinstance(trace_bundle, dict):
+        context["image_conditioned_reconstruction_status"] = "image_conditioned_projection_failed"
+        return context
+
+    context["formal_exact_evidence_source"] = "input_image_conditioned_reconstruction"
+    context["formal_exact_object_binding_status"] = "ok"
+    context["formal_exact_image_path_source"] = image_path_source
+    context["image_conditioned_reconstruction_available"] = True
+    context["image_conditioned_reconstruction_status"] = "ok"
+    context["formal_exact_trace_bundle"] = trace_bundle
     return context
 
 
@@ -1258,6 +1366,17 @@ def run_detect(
                         "plan_failure_reason": None,
                     }
 
+                lf_formal_exact_context = _build_lf_formal_exact_context(
+                    cfg,
+                    input_record,
+                    plan_override_for_orchestrator,
+                    pipeline_obj,
+                    str(device),
+                )
+                if isinstance(lf_formal_exact_context.get("formal_exact_trace_bundle"), dict):
+                    cfg["__lf_formal_exact_trace_bundle__"] = lf_formal_exact_context.get("formal_exact_trace_bundle")
+                cfg["__lf_formal_exact_context__"] = lf_formal_exact_context
+
                 diagnostics_cfg = _resolve_detect_diagnostics_cfg(cfg)
                 if bool(diagnostics_cfg.get("geo_rescue_scale_control_enabled", False)):
                     cfg["__geo_rescue_scale_control_context__"] = _scan_geo_rescue_scale_control_context(
@@ -1296,6 +1415,8 @@ def run_detect(
                 content_result_override=content_override_for_orchestrator,
                 detect_plan_result_override=plan_override_for_orchestrator
             )
+            cfg.pop("__lf_formal_exact_trace_bundle__", None)
+            cfg.pop("__lf_formal_exact_context__", None)
             cfg.pop("__lf_protocol_control_context__", None)
             cfg.pop("__geo_rescue_scale_control_context__", None)
             cfg.pop("__attestation_verify_k_master__", None)

@@ -15,6 +15,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 
 def _load_module(module_name: str, module_path: Path) -> Any:
     """
@@ -58,6 +60,22 @@ def test_mini_real_entrypoint_defaults_to_mini_real_profile() -> None:
 
     assert module.DEFAULT_CONFIG_PATH.as_posix() == "configs/paper_full_cuda_mini_real_validation.yaml"
     assert module.DEFAULT_RUN_ROOT.as_posix() == "outputs/onefile_paper_full_cuda_mini_real_validation"
+
+    cfg_obj = yaml.safe_load((repo_root / module.DEFAULT_CONFIG_PATH).read_text(encoding="utf-8"))
+    assert isinstance(cfg_obj, dict)
+    detect_cfg = cfg_obj.get("detect") if isinstance(cfg_obj.get("detect"), dict) else {}
+    diagnostics_cfg = detect_cfg.get("diagnostics") if isinstance(detect_cfg.get("diagnostics"), dict) else {}
+    assert diagnostics_cfg.get("lf_protocol_control_enabled") is True
+    assert diagnostics_cfg.get("geo_rescue_scale_control_enabled") is True
+    assert diagnostics_cfg.get("geo_scale_records_glob") is None
+
+    parallel_cfg = (
+        cfg_obj.get("parallel_attestation_statistics")
+        if isinstance(cfg_obj.get("parallel_attestation_statistics"), dict)
+        else {}
+    )
+    assert parallel_cfg.get("calibration_score_name") == "event_attestation_score"
+    assert parallel_cfg.get("evaluate_score_name") == "event_attestation_score"
 
 
 def test_run_mini_real_validation_emits_structured_failure_summary(

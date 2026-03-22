@@ -9,6 +9,7 @@ SD3 推理流
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, List, cast
 
 from main.diffusion.sd3 import trajectory_tap
@@ -459,6 +460,143 @@ def run_sd3_inference(
         "runtime_self_attention_maps": runtime_self_attention_maps,
         "output_image": output_image,  # SD 推理输出图像（PIL Image 或 None）
     }
+
+
+def extract_image_conditioned_latent(
+    cfg: Dict[str, Any],
+    pipeline_obj: Any,
+    image_path: str,
+    device: str | None = None,
+) -> Dict[str, Any]:
+    """
+    功能：从 detect 输入图像通过 VAE encode 提取 object-bound latent。
+
+    Recover an object-bound latent tensor from the detect input image using
+    the runtime VAE encoder.
+
+    Args:
+        cfg: Configuration mapping.
+        pipeline_obj: Runtime pipeline object expected to expose a VAE.
+        image_path: Input image path.
+        device: Optional runtime device string.
+
+    Returns:
+        Mapping with status, failure_reason, latent_array, image_size, and
+        latent_shape.
+
+    Raises:
+        TypeError: If cfg or image_path has invalid type.
+    """
+    if not isinstance(cfg, dict):
+        # cfg 类型不合法，必须 fail-fast。
+        raise TypeError("cfg must be dict")
+    if not isinstance(image_path, str) or not image_path:
+        # image_path 类型不合法，必须 fail-fast。
+        raise TypeError("image_path must be non-empty str")
+    if device is not None and not isinstance(device, str):
+        # device 类型不合法，必须 fail-fast。
+        raise TypeError("device must be str or None")
+
+    result: Dict[str, Any] = {
+        "status": "absent",
+        "failure_reason": None,
+        "latent_array": None,
+        "image_size": None,
+        "latent_shape": None,
+        "resized_for_vae": False,
+        "latent_source": "input_image_vae_encode",
+    }
+
+    if pipeline_obj is None:
+        result["failure_reason"] = "pipeline_unavailable"
+        return result
+
+    vae = getattr(pipeline_obj, "vae", None)
+    if vae is None or not hasattr(vae, "encode"):
+        result["failure_reason"] = "vae_encode_unavailable"
+        return result
+
+    resolved_path = Path(image_path).resolve()
+    if not resolved_path.exists() or not resolved_path.is_file():
+        result["failure_reason"] = "input_image_missing"
+        return result
+
+    try:
+        import torch
+        from PIL import Image
+
+        resampling_module = getattr(Image, "Resampling", Image)
+        resampling_mode = getattr(resampling_module, "BICUBIC")
+
+        with Image.open(resolved_path) as opened_image:
+            image_rgb = opened_image.convert("RGB")
+            image_width, image_height = image_rgb.size
+            target_width = cfg.get("inference_width")
+            target_height = cfg.get("inference_height")
+            if isinstance(target_width, int) and isinstance(target_height, int) and target_width > 0 and target_height > 0:
+                if image_rgb.size != (int(target_width), int(target_height)):
+                    image_rgb = image_rgb.resize((int(target_width), int(target_height)), resampling_mode)
+                    result["resized_for_vae"] = True
+                image_width, image_height = image_rgb.size
+
+            image_array = image_rgb
+            import numpy as np
+
+            image_tensor = torch.from_numpy(np.asarray(image_array, dtype=np.float32) / 255.0)
+            image_tensor = image_tensor.permute(2, 0, 1).unsqueeze(0)
+            image_tensor = image_tensor * 2.0 - 1.0
+
+        vae_device = torch.device(device or "cpu")
+        vae_dtype = torch.float32
+        try:
+            first_param = next(vae.parameters())
+            vae_device = first_param.device
+            if first_param.dtype.is_floating_point:
+                vae_dtype = first_param.dtype
+        except Exception:
+            vae_dtype_candidate = getattr(vae, "dtype", None)
+            if isinstance(vae_dtype_candidate, torch.dtype) and vae_dtype_candidate.is_floating_point:
+                vae_dtype = vae_dtype_candidate
+
+        if vae_device.type == "cuda" and not torch.cuda.is_available():
+            vae_device = torch.device("cpu")
+
+        encode_input = image_tensor.to(device=vae_device, dtype=vae_dtype)
+        with torch.no_grad():
+            encoded = vae.encode(encode_input)
+
+        latent_dist = getattr(encoded, "latent_dist", None)
+        latents = None
+        if latent_dist is not None and hasattr(latent_dist, "mean"):
+            latents = getattr(latent_dist, "mean")
+        if latents is None and latent_dist is not None and hasattr(latent_dist, "sample"):
+            latents = latent_dist.sample()
+        if latents is None:
+            latents = getattr(encoded, "latents", None)
+        if latents is None or not torch.is_tensor(latents):
+            result["status"] = "failed"
+            result["failure_reason"] = "vae_latents_missing"
+            return result
+
+        scaling_factor = getattr(getattr(vae, "config", None), "scaling_factor", None)
+        if isinstance(scaling_factor, (int, float)) and float(scaling_factor) > 0.0:
+            latents = latents * float(scaling_factor)
+
+        latents_np = latents.detach().to(dtype=torch.float32).cpu().numpy()
+        result["status"] = "ok"
+        result["failure_reason"] = None
+        result["latent_array"] = latents_np
+        result["image_size"] = [int(image_width), int(image_height)]
+        result["latent_shape"] = [int(dim) for dim in latents_np.shape]
+        return result
+    except ImportError as exc:
+        result["status"] = "failed"
+        result["failure_reason"] = f"import_error:{exc}"
+        return result
+    except Exception as exc:
+        result["status"] = "failed"
+        result["failure_reason"] = f"vae_encode_failed:{type(exc).__name__}"
+        return result
 
 
 def _extract_runtime_self_attention_maps(pipeline_obj: Any, output: Any) -> tuple[Any, str]:

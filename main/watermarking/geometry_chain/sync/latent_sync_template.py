@@ -492,8 +492,30 @@ class LatentSyncTemplate:
             raise TypeError("seed must be int")
 
         template = self._build_sync_template(latents_np.shape, cfg, seed)
-        template_norm = float(np.linalg.norm(template))
-        if template_norm <= 1e-12:
+        support_mask = np.abs(template) > 1e-8
+        support_indices = np.argwhere(support_mask)
+        if support_indices.size == 0:
+            template_digest = digests.canonical_sha256(
+                {
+                    "shape": list(template.shape),
+                    "seed": int(seed),
+                    "fft_bins": self._resolve_fft_bins(cfg),
+                    "attestation_event_digest": _resolve_attestation_event_digest(cfg),
+                    "geo_anchor_seed": _resolve_geo_anchor_seed(cfg),
+                }
+            )
+            return {
+                "template_match_score": 0.0,
+                "template_match_p95": 0.0,
+                "template_match_detected": False,
+                "template_match_threshold": 0.0,
+                "template_seed": int(seed),
+                "template_digest": template_digest,
+            }
+
+        support_template = template[support_mask]
+        support_template_norm = float(np.linalg.norm(support_template))
+        if support_template_norm <= 1e-12:
             template_digest = digests.canonical_sha256(
                 {
                     "shape": list(template.shape),
@@ -516,10 +538,33 @@ class LatentSyncTemplate:
         for batch_index in range(latents_np.shape[0]):
             for channel_index in range(latents_np.shape[1]):
                 fft_map = np.fft.fft2(latents_np[batch_index, channel_index].astype(np.float32))
-                fft_norm = float(np.linalg.norm(fft_map))
-                if fft_norm <= 1e-12:
+                support_values = fft_map[support_mask]
+                support_norm = float(np.linalg.norm(support_values))
+                if support_norm <= 1e-12:
                     continue
-                score = float(np.abs(np.vdot(template, fft_map)) / (template_norm * fft_norm + 1e-12))
+                magnitude_map = np.abs(fft_map)
+                total_energy = float(np.sum(magnitude_map))
+                support_energy = float(np.sum(np.abs(support_values)))
+                support_energy_ratio = 0.0 if total_energy <= 1e-12 else support_energy / total_energy
+                support_alignment = float(
+                    np.abs(np.vdot(support_template, support_values))
+                    / (support_template_norm * support_norm + 1e-12)
+                )
+                baseline_scale = float(np.median(magnitude_map) + 1e-12)
+                support_prominence = float(
+                    np.mean(np.abs(support_values) / (np.abs(support_values) + baseline_scale))
+                )
+                score = float(
+                    max(
+                        0.0,
+                        min(
+                            1.0,
+                            0.7 * support_alignment
+                            + 0.2 * np.sqrt(max(support_energy_ratio, 0.0))
+                            + 0.1 * support_prominence,
+                        ),
+                    )
+                )
                 match_scores.append(score)
 
         if match_scores:

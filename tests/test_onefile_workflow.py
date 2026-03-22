@@ -227,6 +227,12 @@ def test_onefile_workflow_paper_full_profile_generates_real_sd3_config(tmp_path:
     assert profile_cfg_obj["watermark"]["hf"]["tail_truncation_mode"] == cfg_obj["watermark"]["hf"]["tail_truncation_mode"]
     assert profile_cfg_obj["watermark"]["hf"]["selection"] == cfg_obj["watermark"]["hf"]["selection"]
     assert profile_cfg_obj["watermark"]["subspace"]["rank"] == 128
+    diagnostics_cfg = profile_cfg_obj["detect"].get("diagnostics") if isinstance(profile_cfg_obj["detect"], dict) else {}
+    assert diagnostics_cfg.get("lf_protocol_control_enabled") is True
+    assert diagnostics_cfg.get("geo_rescue_scale_control_enabled") is True
+    parallel_cfg = profile_cfg_obj.get("parallel_attestation_statistics") if isinstance(profile_cfg_obj.get("parallel_attestation_statistics"), dict) else {}
+    assert parallel_cfg.get("calibration_score_name") == "event_attestation_score"
+    assert parallel_cfg.get("evaluate_score_name") == "event_attestation_score"
     assert "device: cuda" in profile_cfg_text
     assert "enabled: true" in profile_cfg_text
     assert "alignment_check: true" in profile_cfg_text
@@ -303,6 +309,19 @@ def test_onefile_prompt_contract_files_are_self_contained_for_paper_profiles(tmp
         evaluate_prompt_lines = module._load_prompt_lines_from_file(evaluate_prompt_path)
         assert evaluate_prompt_path == calibration_prompt_path
         assert evaluate_prompt_lines == calibration_prompt_lines
+
+        if cfg_path.name == "paper_full_cuda_mini_real_validation.yaml":
+            detect_cfg = prepared_cfg_obj.get("detect") if isinstance(prepared_cfg_obj.get("detect"), dict) else {}
+            diagnostics_cfg = detect_cfg.get("diagnostics") if isinstance(detect_cfg.get("diagnostics"), dict) else {}
+            assert diagnostics_cfg.get("lf_protocol_control_enabled") is True
+            assert diagnostics_cfg.get("geo_rescue_scale_control_enabled") is True
+            parallel_cfg = (
+                prepared_cfg_obj.get("parallel_attestation_statistics")
+                if isinstance(prepared_cfg_obj.get("parallel_attestation_statistics"), dict)
+                else {}
+            )
+            assert parallel_cfg.get("calibration_score_name") == "event_attestation_score"
+            assert parallel_cfg.get("evaluate_score_name") == "event_attestation_score"
 
 
 def test_experiment_matrix_cfg_disables_attestation_without_polluting_main_cfg(tmp_path: Path) -> None:

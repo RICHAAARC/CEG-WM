@@ -81,3 +81,30 @@ def test_sync_embed_detect_roundtrip_improves_template_match_score() -> None:
     injected_match = float(injected_result.sync_quality_metrics.get("template_match_score", 0.0))
     assert injected_match >= base_match
     assert isinstance(injected_result.sync_quality_metrics.get("template_digest"), str)
+
+
+def test_support_aware_template_match_detects_noise_diluted_aligned_signal() -> None:
+    sync_module = LatentSyncTemplate(
+        impl_id="latent_sync_template_v1",
+        impl_version="v1",
+        impl_digest="unit_digest",
+    )
+    cfg = {
+        "embed": {"geometry": {"enable_latent_sync": True, "sync_strength": 0.05}},
+        "detect": {"geometry": {"enable_latent_sync": True, "enabled": True, "sync_fft_bins": 12}},
+    }
+
+    template = sync_module._build_sync_template((1, 1, 32, 32), cfg, 123)  # pyright: ignore[reportPrivateUsage]
+    rng = np.random.default_rng(2026)
+    fft_noise = 6.0 * (
+        rng.normal(0.0, 1.0, size=template.shape)
+        + 1j * rng.normal(0.0, 1.0, size=template.shape)
+    )
+    aligned_latents = np.fft.ifft2(template + fft_noise).real.astype(np.float32)[None, None, :, :]
+    scrambled_latents = np.fft.ifft2(np.roll(template + fft_noise, shift=5, axis=0)).real.astype(np.float32)[None, None, :, :]
+
+    aligned_metrics = sync_module._compute_template_match_metrics(aligned_latents, cfg, 123)  # pyright: ignore[reportPrivateUsage]
+    scrambled_metrics = sync_module._compute_template_match_metrics(scrambled_latents, cfg, 123)  # pyright: ignore[reportPrivateUsage]
+
+    assert aligned_metrics.get("template_match_score", 0.0) > aligned_metrics.get("template_match_threshold", 0.0)
+    assert aligned_metrics.get("template_match_score", 0.0) > scrambled_metrics.get("template_match_score", 0.0)
