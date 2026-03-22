@@ -9,7 +9,7 @@
 # 合同版本与冻结元信息
 # - 用于记录与审计，不应作为运行期分支逻辑的自由输入。
 # ------------------------------
-contract_version: "v1.12"     # 冻结契约版本号；v1.1→v1.2 formal path 最终闭包收口（2026-03-12）：historical_field_paths 段已从当前 formal contract 文件彻底移除，旧字段信息不再显式保留在任何 formal 文件中；当前 formal contract 只绑定当前正式机制。v1.2→v1.3 从可选字段列表中移除 embed_trace.identity_mode 与 embed_trace.identity_reason（2026-03-12）：生产嵌入实现不再承载 identity baseline。v1.3→v1.4 追加 attestation signed bundle 验签门禁语义（2026-03-13）：onefile/detect 溯源结果若声明 signed bundle，则必须执行内部 trust chain 验证。v1.4→v1.5：追加 geometry coarse registration 与 recovered-domain sync revalidation 细分字段冻结登记。v1.5→v1.6：为 policy_path semantics 新增 geometry_chain_required_but_unavailable fail_reason 的 append-only 冻结登记（2026-03-13）。v1.6→v1.7：追加 negative branch attestation provenance 的 append-only 冻结注册（2026-03-16）。v1.7→v1.8：追加 attestation_source 字段与 statement-only provenance no-bundle 合同说明（2026-03-17）。v1.8→v1.9：追加 exact LF observability 字段与 detect runtime canonical 兼容命名字段（2026-03-19）。v1.9→v1.10：追加 attestation trace artifact 的 append-only 白名单治理（2026-03-21）。v1.10→v1.11：追加 LF 闭环对齐表与 planner 风险报告 artifact 的 append-only 白名单治理（2026-03-21）。v1.11→v1.12：追加 LF retain breakdown 与 GEO rescue diagnostics artifact 的 append-only 白名单治理（2026-03-22）。
+contract_version: "v1.13"     # 冻结契约版本号；v1.1→v1.2 formal path 最终闭包收口（2026-03-12）：historical_field_paths 段已从当前 formal contract 文件彻底移除，旧字段信息不再显式保留在任何 formal 文件中；当前 formal contract 只绑定当前正式机制。v1.2→v1.3 从可选字段列表中移除 embed_trace.identity_mode 与 embed_trace.identity_reason（2026-03-12）：生产嵌入实现不再承载 identity baseline。v1.3→v1.4 追加 attestation signed bundle 验签门禁语义（2026-03-13）：onefile/detect 溯源结果若声明 signed bundle，则必须执行内部 trust chain 验证。v1.4→v1.5：追加 geometry coarse registration 与 recovered-domain sync revalidation 细分字段冻结登记。v1.5→v1.6：为 policy_path semantics 新增 geometry_chain_required_but_unavailable fail_reason 的 append-only 冻结登记（2026-03-13）。v1.6→v1.7：追加 negative branch attestation provenance 的 append-only 冻结注册（2026-03-16）。v1.7→v1.8：追加 attestation_source 字段与 statement-only provenance no-bundle 合同说明（2026-03-17）。v1.8→v1.9：追加 exact LF observability 字段与 detect runtime canonical 兼容命名字段（2026-03-19）。v1.9→v1.10：追加 attestation trace artifact 的 append-only 白名单治理（2026-03-21）。v1.10→v1.11：追加 LF 闭环对齐表与 planner 风险报告 artifact 的 append-only 白名单治理（2026-03-21）。v1.11→v1.12：追加 LF retain breakdown 与 GEO rescue diagnostics artifact 的 append-only 白名单治理（2026-03-22）。v1.12→v1.13：追加 LF protocol control 与 GEO scale-control diagnostics 字段治理（2026-03-22）。
 frozen_date: "2026-02-04"    # 冻结日期元信息；当前主链路不参与门禁计算，主要用于审计追溯。
 
 # ------------------------------
@@ -235,6 +235,25 @@ artifact_schema:
         - embed_edit_timestep_coeffs
         - embed_terminal_step_coeffs
         - detect_exact_timestep_coeffs
+        - embed_seed
+        - detect_seed
+        - same_seed_as_embed_available
+        - same_seed_as_embed_value
+        - detect_protocol_classification
+        - image_conditioned_reconstruction_available
+        - image_conditioned_reconstruction_status
+        - same_seed_control_status
+        - same_seed_control_reason
+        - same_seed_control_trace_digest
+        - same_seed_control_trajectory_digest
+        - detect_exact_timestep_coeffs_same_seed_control
+        - cross_seed_protocol_loss_count
+        - same_seed_residual_loss_count
+        - cross_seed_protocol_loss_ratio
+        - same_seed_residual_loss_ratio
+        - protocol_root_cause_classification
+        - control_protocol_segments
+        - control_protocol_summary
         - stage_summaries
         - breakdown_segments
         - breakdown_summary
@@ -268,6 +287,21 @@ artifact_schema:
         - geo_score_vs_rescue_min_ratio
         - content_gap_to_attested_threshold
         - geo_scale_classification
+        - template_match_internal_threshold
+        - template_match_threshold_to_rescue_min_ratio
+        - template_score_scale_band
+        - rescue_gate_scale_classification
+        - positive_template_match_score_summary
+        - positive_quality_score_summary
+        - negative_template_match_score_summary
+        - negative_quality_score_summary
+        - positive_template_to_gate_max_ratio
+        - positive_template_to_internal_threshold_max_ratio
+        - geo_repair_direction_classification
+        - scale_control_scan_source
+        - scale_control_scan_glob
+        - scale_control_scanned_record_count
+        - scale_control_labelled_record_count
         - geo_rescue_diagnostics_digest
     lf_planner_risk_report:
       relative_path: "planner/lf_planner_risk_report.json"

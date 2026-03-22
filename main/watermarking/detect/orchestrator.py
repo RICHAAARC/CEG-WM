@@ -891,7 +891,9 @@ def _build_lf_alignment_table_artifact(
     pre_coeffs = lf_result.get("pre_injection_coeffs")
     template_coeffs = lf_result.get("injected_template_coeffs")
     post_coeffs = lf_result.get("post_injection_coeffs")
-    detect_coeffs = lf_result.get("projected_lf_coeffs")
+    detect_coeffs = lf_result.get("detect_exact_timestep_coeffs")
+    if not isinstance(detect_coeffs, list):
+        detect_coeffs = lf_result.get("projected_lf_coeffs")
     expected_bit_signs = lf_result.get("expected_bit_signs")
     embed_expected_bit_signs = lf_result.get("embed_expected_bit_signs")
     if not all(isinstance(value, list) for value in [pre_coeffs, template_coeffs, post_coeffs, detect_coeffs, expected_bit_signs]):
@@ -1003,7 +1005,9 @@ def _build_lf_retain_breakdown_artifact(
         selected_step_post_coeffs = lf_result.get("post_injection_coeffs")
     edit_step_coeffs = lf_result.get("embed_edit_timestep_coeffs")
     terminal_step_coeffs = lf_result.get("embed_terminal_step_coeffs")
-    detect_coeffs = lf_result.get("projected_lf_coeffs")
+    detect_coeffs = lf_result.get("detect_exact_timestep_coeffs")
+    if not isinstance(detect_coeffs, list):
+        detect_coeffs = lf_result.get("projected_lf_coeffs")
     expected_bit_signs = lf_result.get("expected_bit_signs")
     injected_template_coeffs = lf_result.get("injected_template_coeffs")
 
@@ -1173,8 +1177,176 @@ def _build_lf_retain_breakdown_artifact(
             "dominant_drift_segment": dominant_drift_segment,
         },
     }
+    protocol_control_section = _build_lf_protocol_control_section(
+        lf_result,
+        expected_bit_signs=expected,
+        terminal_values=terminal_values,
+        detect_values=detect_values,
+    )
+    if isinstance(protocol_control_section, dict):
+        artifact.update(protocol_control_section)
     artifact["lf_retain_breakdown_digest"] = digests.canonical_sha256(artifact)
     return artifact
+
+
+def _build_lf_protocol_control_section(
+    lf_result: Dict[str, Any],
+    *,
+    expected_bit_signs: list[int],
+    terminal_values: list[float],
+    detect_values: list[float],
+) -> Dict[str, Any] | None:
+    protocol_classification = lf_result.get("detect_protocol_classification")
+    if not isinstance(protocol_classification, str):
+        protocol_classification = "unknown"
+
+    embed_seed = lf_result.get("embed_seed") if isinstance(lf_result.get("embed_seed"), int) else None
+    detect_seed = lf_result.get("detect_seed") if isinstance(lf_result.get("detect_seed"), int) else None
+    same_seed_available = bool(lf_result.get("same_seed_as_embed_available", False))
+    same_seed_value = lf_result.get("same_seed_as_embed_value") if isinstance(lf_result.get("same_seed_as_embed_value"), int) else None
+    same_seed_control_status = lf_result.get("same_seed_control_status") if isinstance(lf_result.get("same_seed_control_status"), str) else None
+    same_seed_control_reason = lf_result.get("same_seed_control_reason") if isinstance(lf_result.get("same_seed_control_reason"), str) else None
+    image_conditioned_reconstruction_available = bool(lf_result.get("image_conditioned_reconstruction_available", False))
+    image_conditioned_reconstruction_status = (
+        lf_result.get("image_conditioned_reconstruction_status")
+        if isinstance(lf_result.get("image_conditioned_reconstruction_status"), str)
+        else "not_implemented"
+    )
+
+    same_seed_control_coeffs = lf_result.get("detect_exact_timestep_coeffs_same_seed_control")
+    if not isinstance(same_seed_control_coeffs, list) and bool(lf_result.get("same_seed_control_reused_formal_detect", False)):
+        same_seed_control_coeffs = detect_values
+    if isinstance(same_seed_control_coeffs, list):
+        same_seed_control_coeffs = [float(value) for value in same_seed_control_coeffs]
+    else:
+        same_seed_control_coeffs = None
+
+    def _build_transition(segment_name: str, from_signed_values: list[float], to_signed_values: list[float]) -> Dict[str, Any]:
+        from_positive_count = sum(1 for value in from_signed_values if value > 0.0)
+        to_positive_count = sum(1 for value in to_signed_values if value > 0.0)
+        retained_positive_count = sum(
+            1 for from_value, to_value in zip(from_signed_values, to_signed_values) if from_value > 0.0 and to_value > 0.0
+        )
+        lost_positive_count = sum(
+            1 for from_value, to_value in zip(from_signed_values, to_signed_values) if from_value > 0.0 and to_value <= 0.0
+        )
+        gained_positive_count = sum(
+            1 for from_value, to_value in zip(from_signed_values, to_signed_values) if from_value <= 0.0 and to_value > 0.0
+        )
+        sign_flip_count = sum(
+            1
+            for from_value, to_value in zip(from_signed_values, to_signed_values)
+            if (from_value > 0.0 and to_value <= 0.0) or (from_value <= 0.0 and to_value > 0.0)
+        )
+        retained_positive_ratio = None
+        if from_positive_count > 0:
+            retained_positive_ratio = float(retained_positive_count / float(from_positive_count))
+        delta_array = np.asarray(
+            [float(to_value - from_value) for from_value, to_value in zip(from_signed_values, to_signed_values)],
+            dtype=np.float64,
+        )
+        return {
+            "segment_name": segment_name,
+            "from_positive_count": from_positive_count,
+            "to_positive_count": to_positive_count,
+            "retained_positive_count": retained_positive_count,
+            "retained_positive_ratio": retained_positive_ratio,
+            "lost_positive_count": lost_positive_count,
+            "gained_positive_count": gained_positive_count,
+            "sign_flip_count": sign_flip_count,
+            "mean_signed_delta": float(np.mean(delta_array)),
+            "median_signed_delta": float(np.median(delta_array)),
+        }
+
+    result: Dict[str, Any] = {
+        "embed_seed": embed_seed,
+        "detect_seed": detect_seed,
+        "same_seed_as_embed_available": same_seed_available,
+        "same_seed_as_embed_value": same_seed_value,
+        "detect_protocol_classification": protocol_classification,
+        "image_conditioned_reconstruction_available": image_conditioned_reconstruction_available,
+        "image_conditioned_reconstruction_status": image_conditioned_reconstruction_status,
+        "same_seed_control_status": same_seed_control_status,
+        "same_seed_control_reason": same_seed_control_reason,
+        "same_seed_control_trace_digest": lf_result.get("same_seed_control_trace_digest"),
+        "same_seed_control_trajectory_digest": lf_result.get("same_seed_control_trajectory_digest"),
+        "detect_exact_timestep_coeffs_same_seed_control": same_seed_control_coeffs,
+        "cross_seed_protocol_loss_count": None,
+        "same_seed_residual_loss_count": None,
+        "cross_seed_protocol_loss_ratio": None,
+        "same_seed_residual_loss_ratio": None,
+        "protocol_root_cause_classification": "inconclusive",
+        "control_protocol_segments": [],
+        "control_protocol_summary": {
+            "status": same_seed_control_status,
+            "reason": same_seed_control_reason,
+            "protocol_root_cause_classification": "inconclusive",
+        },
+    }
+
+    if not same_seed_available or not isinstance(same_seed_control_coeffs, list):
+        return result
+
+    n_rows = min(len(expected_bit_signs), len(terminal_values), len(detect_values), len(same_seed_control_coeffs))
+    if n_rows <= 0:
+        return result
+
+    terminal_signed = [float(terminal_values[index] * expected_bit_signs[index]) for index in range(n_rows)]
+    detect_signed = [float(detect_values[index] * expected_bit_signs[index]) for index in range(n_rows)]
+    same_seed_signed = [float(same_seed_control_coeffs[index] * expected_bit_signs[index]) for index in range(n_rows)]
+
+    control_segments = [
+        _build_transition("embed_terminal_to_detect_exact_detect_seed", terminal_signed, detect_signed),
+        _build_transition("embed_terminal_to_detect_exact_embed_seed_control", terminal_signed, same_seed_signed),
+        _build_transition("detect_exact_embed_seed_control_to_detect_exact_detect_seed", same_seed_signed, detect_signed),
+    ]
+
+    terminal_positive_count = sum(1 for value in terminal_signed if value > 0.0)
+    same_seed_residual_loss_count = sum(
+        1 for terminal_value, same_seed_value_item in zip(terminal_signed, same_seed_signed) if terminal_value > 0.0 and same_seed_value_item <= 0.0
+    )
+    cross_seed_protocol_loss_count = sum(
+        1
+        for terminal_value, same_seed_value_item, detect_value_item in zip(terminal_signed, same_seed_signed, detect_signed)
+        if terminal_value > 0.0 and same_seed_value_item > 0.0 and detect_value_item <= 0.0
+    )
+    cross_seed_protocol_loss_ratio = None
+    same_seed_residual_loss_ratio = None
+    if terminal_positive_count > 0:
+        cross_seed_protocol_loss_ratio = float(cross_seed_protocol_loss_count / float(terminal_positive_count))
+        same_seed_residual_loss_ratio = float(same_seed_residual_loss_count / float(terminal_positive_count))
+
+    protocol_root_cause_classification = "inconclusive"
+    if cross_seed_protocol_loss_count <= 0 and same_seed_residual_loss_count <= 0:
+        protocol_root_cause_classification = "inconclusive"
+    elif cross_seed_protocol_loss_count > same_seed_residual_loss_count:
+        protocol_root_cause_classification = "cross_seed_rerun_mismatch_dominant"
+    elif same_seed_residual_loss_count > cross_seed_protocol_loss_count:
+        protocol_root_cause_classification = "same_seed_residual_drift_dominant"
+    elif cross_seed_protocol_loss_count > 0 and same_seed_residual_loss_count > 0:
+        protocol_root_cause_classification = "mixed"
+
+    result.update(
+        {
+            "cross_seed_protocol_loss_count": cross_seed_protocol_loss_count,
+            "same_seed_residual_loss_count": same_seed_residual_loss_count,
+            "cross_seed_protocol_loss_ratio": cross_seed_protocol_loss_ratio,
+            "same_seed_residual_loss_ratio": same_seed_residual_loss_ratio,
+            "protocol_root_cause_classification": protocol_root_cause_classification,
+            "control_protocol_segments": control_segments,
+            "control_protocol_summary": {
+                "terminal_positive_count": terminal_positive_count,
+                "cross_seed_protocol_loss_count": cross_seed_protocol_loss_count,
+                "same_seed_residual_loss_count": same_seed_residual_loss_count,
+                "cross_seed_protocol_loss_ratio": cross_seed_protocol_loss_ratio,
+                "same_seed_residual_loss_ratio": same_seed_residual_loss_ratio,
+                "protocol_root_cause_classification": protocol_root_cause_classification,
+                "same_seed_control_status": same_seed_control_status,
+                "same_seed_control_reason": same_seed_control_reason,
+            },
+        }
+    )
+    return result
 
 
 def _extract_planner_posterior_context(input_record: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -1624,6 +1796,82 @@ def _build_geo_rescue_scale_classification(
     return "geo_source_unclassified"
 
 
+def _summarize_geo_distribution(values: list[float]) -> Dict[str, Any] | None:
+    if len(values) == 0:
+        return None
+    values_array = np.asarray(values, dtype=np.float64)
+    return {
+        "sample_count": int(values_array.size),
+        "min": float(np.min(values_array)),
+        "max": float(np.max(values_array)),
+        "mean": float(np.mean(values_array)),
+        "median": float(np.median(values_array)),
+    }
+
+
+def _classify_template_score_scale_band(
+    template_match_score: Optional[float],
+    template_match_internal_threshold: Optional[float],
+    geo_rescue_min_score: float,
+) -> str:
+    if template_match_score is None or template_match_internal_threshold is None:
+        return "inconclusive"
+    if template_match_score < template_match_internal_threshold:
+        return "below_internal_threshold"
+    if template_match_score < geo_rescue_min_score:
+        return "between_internal_threshold_and_rescue_gate"
+    return "at_or_above_rescue_gate"
+
+
+def _classify_rescue_gate_scale(
+    template_match_internal_threshold: Optional[float],
+    geo_rescue_min_score: float,
+    positive_template_to_gate_max_ratio: Optional[float],
+) -> str:
+    if template_match_internal_threshold is None or geo_rescue_min_score <= 0.0:
+        return "inconclusive"
+    threshold_ratio = float(template_match_internal_threshold / geo_rescue_min_score)
+    if positive_template_to_gate_max_ratio is not None and positive_template_to_gate_max_ratio >= 1.0:
+        return "template_scale_sufficient_for_rescue"
+    if threshold_ratio <= 0.25:
+        return "template_internal_threshold_far_below_rescue_gate"
+    if threshold_ratio < 1.0:
+        return "template_scale_and_rescue_gate_comparable"
+    return "template_scale_sufficient_for_rescue"
+
+
+def _classify_geo_repair_direction(
+    *,
+    quality_score: Optional[float],
+    template_match_score: Optional[float],
+    geo_score_source: str,
+    geo_rescue_min_score: float,
+    positive_template_to_gate_max_ratio: Optional[float],
+    positive_template_to_internal_threshold_max_ratio: Optional[float],
+    rescue_gate_scale_classification: str,
+) -> str:
+    if (
+        positive_template_to_internal_threshold_max_ratio is not None
+        and positive_template_to_internal_threshold_max_ratio < 1.0
+    ):
+        return "template_score_extraction_itself_too_weak"
+    if (
+        rescue_gate_scale_classification == "template_internal_threshold_far_below_rescue_gate"
+        and positive_template_to_gate_max_ratio is not None
+        and positive_template_to_gate_max_ratio < 0.5
+    ):
+        return "scale_misalignment_between_template_score_and_rescue_gate"
+    if (
+        quality_score is not None
+        and template_match_score is not None
+        and quality_score >= geo_rescue_min_score
+        and template_match_score < geo_rescue_min_score
+        and geo_score_source == "template_match_score"
+    ):
+        return "quality_good_template_bad_need_score_rebinding_or_recalibration"
+    return "inconclusive"
+
+
 def _build_geo_rescue_diagnostics_artifact(
     cfg: Dict[str, Any],
     geometry_evidence_payload: Optional[Dict[str, Any]],
@@ -1690,6 +1938,84 @@ def _build_geo_rescue_diagnostics_artifact(
     if geo_score is not None and geo_rescue_min_score > 0.0:
         geo_score_vs_rescue_min_ratio = float(geo_score / geo_rescue_min_score)
 
+    template_match_internal_threshold = None
+    if isinstance(sync_metrics.get("template_match_threshold"), (int, float)):
+        template_match_internal_threshold = float(sync_metrics.get("template_match_threshold"))
+    elif isinstance(sync_result_mapping.get("template_match_metrics"), dict):
+        template_match_metrics = cast(Dict[str, Any], sync_result_mapping.get("template_match_metrics"))
+        if isinstance(template_match_metrics.get("template_match_threshold"), (int, float)):
+            template_match_internal_threshold = float(template_match_metrics.get("template_match_threshold"))
+
+    template_match_threshold_to_rescue_min_ratio = None
+    if template_match_internal_threshold is not None and geo_rescue_min_score > 0.0:
+        template_match_threshold_to_rescue_min_ratio = float(template_match_internal_threshold / geo_rescue_min_score)
+
+    geo_scale_control_context = cfg.get("__geo_rescue_scale_control_context__")
+    geo_scale_control_mapping = cast(Dict[str, Any], geo_scale_control_context) if isinstance(geo_scale_control_context, dict) else {}
+    positive_template_scores = [
+        float(value)
+        for value in cast(list[Any], geo_scale_control_mapping.get("positive_template_match_scores", []))
+        if isinstance(value, (int, float))
+    ]
+    positive_quality_scores = [
+        float(value)
+        for value in cast(list[Any], geo_scale_control_mapping.get("positive_quality_scores", []))
+        if isinstance(value, (int, float))
+    ]
+    negative_template_scores = [
+        float(value)
+        for value in cast(list[Any], geo_scale_control_mapping.get("negative_template_match_scores", []))
+        if isinstance(value, (int, float))
+    ]
+    negative_quality_scores = [
+        float(value)
+        for value in cast(list[Any], geo_scale_control_mapping.get("negative_quality_scores", []))
+        if isinstance(value, (int, float))
+    ]
+
+    if bool(geo_scale_control_mapping.get("current_sample_treated_as_positive", False)):
+        if template_match_score is not None:
+            positive_template_scores.append(template_match_score)
+        if quality_score is not None:
+            positive_quality_scores.append(quality_score)
+
+    positive_template_match_score_summary = _summarize_geo_distribution(positive_template_scores)
+    positive_quality_score_summary = _summarize_geo_distribution(positive_quality_scores)
+    negative_template_match_score_summary = _summarize_geo_distribution(negative_template_scores)
+    negative_quality_score_summary = _summarize_geo_distribution(negative_quality_scores)
+
+    positive_template_to_gate_max_ratio = None
+    if positive_template_match_score_summary is not None and geo_rescue_min_score > 0.0:
+        positive_template_to_gate_max_ratio = float(
+            positive_template_match_score_summary.get("max", 0.0) / geo_rescue_min_score
+        )
+
+    positive_template_to_internal_threshold_max_ratio = None
+    if positive_template_match_score_summary is not None and template_match_internal_threshold not in {None, 0.0}:
+        positive_template_to_internal_threshold_max_ratio = float(
+            positive_template_match_score_summary.get("max", 0.0) / float(template_match_internal_threshold)
+        )
+
+    template_score_scale_band = _classify_template_score_scale_band(
+        template_match_score,
+        template_match_internal_threshold,
+        geo_rescue_min_score,
+    )
+    rescue_gate_scale_classification = _classify_rescue_gate_scale(
+        template_match_internal_threshold,
+        geo_rescue_min_score,
+        positive_template_to_gate_max_ratio,
+    )
+    geo_repair_direction_classification = _classify_geo_repair_direction(
+        quality_score=quality_score,
+        template_match_score=template_match_score,
+        geo_score_source=geo_score_source,
+        geo_rescue_min_score=geo_rescue_min_score,
+        positive_template_to_gate_max_ratio=positive_template_to_gate_max_ratio,
+        positive_template_to_internal_threshold_max_ratio=positive_template_to_internal_threshold_max_ratio,
+        rescue_gate_scale_classification=rescue_gate_scale_classification,
+    )
+
     artifact = {
         "artifact_type": "geo_rescue_diagnostics",
         "attestation_digest": attestation_digest,
@@ -1721,6 +2047,21 @@ def _build_geo_rescue_diagnostics_artifact(
             geo_score_source=geo_score_source,
             geo_rescue_min_score=geo_rescue_min_score,
         ),
+        "template_match_internal_threshold": template_match_internal_threshold,
+        "template_match_threshold_to_rescue_min_ratio": template_match_threshold_to_rescue_min_ratio,
+        "template_score_scale_band": template_score_scale_band,
+        "rescue_gate_scale_classification": rescue_gate_scale_classification,
+        "positive_template_match_score_summary": positive_template_match_score_summary,
+        "positive_quality_score_summary": positive_quality_score_summary,
+        "negative_template_match_score_summary": negative_template_match_score_summary,
+        "negative_quality_score_summary": negative_quality_score_summary,
+        "positive_template_to_gate_max_ratio": positive_template_to_gate_max_ratio,
+        "positive_template_to_internal_threshold_max_ratio": positive_template_to_internal_threshold_max_ratio,
+        "geo_repair_direction_classification": geo_repair_direction_classification,
+        "scale_control_scan_source": geo_scale_control_mapping.get("scan_source"),
+        "scale_control_scan_glob": geo_scale_control_mapping.get("scan_glob"),
+        "scale_control_scanned_record_count": geo_scale_control_mapping.get("scanned_record_count"),
+        "scale_control_labelled_record_count": geo_scale_control_mapping.get("labelled_record_count"),
     }
     artifact["geo_rescue_diagnostics_digest"] = digests.canonical_sha256(artifact)
     return artifact
@@ -2454,6 +2795,9 @@ def run_detect_orchestrator(
             lf_attestation_trace_context = {}
         lf_attestation_trace_context.update(_extract_embed_lf_closed_loop_context(input_record))
         lf_attestation_trace_context.update(_extract_planner_posterior_context(input_record))
+        lf_protocol_control_context = cfg.get("__lf_protocol_control_context__")
+        if isinstance(lf_protocol_control_context, dict):
+            lf_attestation_trace_context.update(cast(Dict[str, Any], lf_protocol_control_context))
 
     attestation_result = _build_detect_attestation_result(
         cfg,
@@ -7345,8 +7689,22 @@ def verify_attestation(
                         "selected_step_post_coeffs",
                         "embed_edit_timestep_coeffs",
                         "embed_terminal_step_coeffs",
+                        "detect_exact_timestep_coeffs",
                         "embed_edit_timestep_step_index",
                         "embed_terminal_step_index",
+                        "embed_seed",
+                        "detect_seed",
+                        "same_seed_as_embed_available",
+                        "same_seed_as_embed_value",
+                        "detect_protocol_classification",
+                        "image_conditioned_reconstruction_available",
+                        "image_conditioned_reconstruction_status",
+                        "same_seed_control_status",
+                        "same_seed_control_reason",
+                        "same_seed_control_reused_formal_detect",
+                        "same_seed_control_trace_digest",
+                        "same_seed_control_trajectory_digest",
+                        "detect_exact_timestep_coeffs_same_seed_control",
                     ]:
                         if field_name in lf_params and field_name not in lf_result:
                             lf_result[field_name] = lf_params.get(field_name)

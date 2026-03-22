@@ -8,6 +8,7 @@
 """
 
 import sys
+import glob
 import argparse
 from pathlib import Path
 from typing import Any, Callable, Dict, cast
@@ -68,6 +69,10 @@ _build_planner_inputs_for_runtime = cast(
     Callable[..., Dict[str, Any]],
     getattr(detect_orchestrator, "_build_planner_inputs_for_runtime"),
 )
+_extract_lf_attestation_trace_bundle_from_trajectory = cast(
+    Callable[..., Dict[str, Any] | None],
+    getattr(detect_orchestrator, "_extract_lf_attestation_trace_bundle_from_trajectory"),
+)
 
 
 def _resolve_detect_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -101,6 +106,333 @@ def _resolve_nested_mapping(parent: Dict[str, Any], key: str) -> Dict[str, Any]:
     """
     child_node = parent.get(key)
     return cast(Dict[str, Any], child_node) if isinstance(child_node, dict) else {}
+
+
+def _resolve_detect_diagnostics_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：解析 detect.diagnostics 配置节点。
+
+    Resolve detect-side diagnostics config mapping.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Diagnostics config mapping or empty dict.
+    """
+    detect_cfg = _resolve_detect_cfg(cfg)
+    diagnostics_node = detect_cfg.get("diagnostics")
+    return cast(Dict[str, Any], diagnostics_node) if isinstance(diagnostics_node, dict) else {}
+
+
+def _resolve_record_runtime_seed(record: Any) -> int | None:
+    """
+    功能：从 record 中提取运行期实际 seed。
+
+    Resolve the effective runtime seed from a record payload.
+
+    Args:
+        record: Record mapping.
+
+    Returns:
+        Runtime seed when available; otherwise None.
+    """
+    if not isinstance(record, dict):
+        return None
+    record_dict = cast(Dict[str, Any], record)
+
+    candidate_values = [
+        record_dict.get("seed_value"),
+        _resolve_nested_mapping(record_dict, "inference_runtime_meta").get("seed"),
+        record_dict.get("seed"),
+    ]
+    infer_trace = record_dict.get("infer_trace")
+    if isinstance(infer_trace, dict):
+        infer_trace_dict = cast(Dict[str, Any], infer_trace)
+        candidate_values.append(infer_trace_dict.get("seed"))
+        candidate_values.append(_resolve_nested_mapping(infer_trace_dict, "runtime_meta").get("seed"))
+
+    for candidate in candidate_values:
+        if isinstance(candidate, int):
+            return int(candidate)
+        if isinstance(candidate, str) and candidate.isdigit():
+            return int(candidate)
+    return None
+
+
+def _extract_geo_scale_metrics_from_record(record: Any) -> Dict[str, Any] | None:
+    """
+    功能：从 detect record 中提取 GEO scale-control 所需指标。
+
+    Extract GEO scale-control metrics from a detect record.
+
+    Args:
+        record: Detect record mapping.
+
+    Returns:
+        Metric summary mapping or None when metrics are unavailable.
+    """
+    if not isinstance(record, dict):
+        return None
+    record_dict = cast(Dict[str, Any], record)
+    geometry_payload = record_dict.get("geometry_evidence_payload")
+    if not isinstance(geometry_payload, dict):
+        geometry_payload = record_dict.get("geometry_result")
+    if not isinstance(geometry_payload, dict):
+        return None
+
+    geometry_payload_dict = cast(Dict[str, Any], geometry_payload)
+    sync_metrics = geometry_payload_dict.get("sync_metrics")
+    if not isinstance(sync_metrics, dict):
+        sync_result = geometry_payload_dict.get("sync_result")
+        if isinstance(sync_result, dict) and isinstance(sync_result.get("sync_quality_metrics"), dict):
+            sync_metrics = cast(Dict[str, Any], sync_result.get("sync_quality_metrics"))
+        else:
+            sync_metrics = {}
+    sync_result = geometry_payload_dict.get("sync_result")
+    sync_result_dict = cast(Dict[str, Any], sync_result) if isinstance(sync_result, dict) else {}
+    template_metrics = sync_result_dict.get("template_match_metrics")
+    template_metrics_dict = cast(Dict[str, Any], template_metrics) if isinstance(template_metrics, dict) else {}
+
+    quality_score = sync_metrics.get("quality_score")
+    template_match_score = sync_metrics.get("template_match_score")
+    template_match_threshold = sync_metrics.get("template_match_threshold")
+    if not isinstance(template_match_score, (int, float)):
+        template_match_score = template_metrics_dict.get("template_match_score")
+    if not isinstance(template_match_threshold, (int, float)):
+        template_match_threshold = template_metrics_dict.get("template_match_threshold")
+
+    label_value = None
+    for key_name in ["label", "ground_truth", "is_watermarked"]:
+        candidate_label = record_dict.get(key_name)
+        if isinstance(candidate_label, bool):
+            label_value = candidate_label
+            break
+    if label_value is None:
+        label_resolution = record_dict.get("calibration_label_resolution")
+        if isinstance(label_resolution, str):
+            lowered = label_resolution.lower()
+            if "positive" in lowered:
+                label_value = True
+            elif "negative" in lowered:
+                label_value = False
+
+    if not isinstance(quality_score, (int, float)) and not isinstance(template_match_score, (int, float)):
+        return None
+    return {
+        "quality_score": float(quality_score) if isinstance(quality_score, (int, float)) else None,
+        "template_match_score": float(template_match_score) if isinstance(template_match_score, (int, float)) else None,
+        "template_match_internal_threshold": (
+            float(template_match_threshold) if isinstance(template_match_threshold, (int, float)) else None
+        ),
+        "label": label_value,
+    }
+
+
+def _scan_geo_rescue_scale_control_context(
+    run_root: Path,
+    cfg: Dict[str, Any],
+    *,
+    current_input_is_positive: bool,
+) -> Dict[str, Any]:
+    """
+    功能：扫描现有 detect records，为 GEO scale-control 提供最小批量上下文。
+
+    Scan available detect records to provide minimal GEO scale-control context.
+
+    Args:
+        run_root: Current run root path.
+        cfg: Configuration mapping.
+        current_input_is_positive: Whether the current detect sample should be
+            treated as a positive sample for diagnostics only.
+
+    Returns:
+        Scan context mapping used by GEO diagnostics artifacts.
+    """
+    diagnostics_cfg = _resolve_detect_diagnostics_cfg(cfg)
+    records_glob = diagnostics_cfg.get("geo_scale_records_glob")
+    scan_source = "outputs_parent_rglob"
+    scan_glob = None
+    candidate_paths: list[Path] = []
+    if isinstance(records_glob, str) and records_glob:
+        scan_source = "configured_glob"
+        scan_glob = records_glob
+        candidate_paths = [Path(path_str).resolve() for path_str in glob.glob(records_glob, recursive=True)]
+    else:
+        search_root = run_root.parent if run_root.parent.exists() else run_root
+        candidate_paths = [path.resolve() for path in search_root.rglob("detect_record.json")]
+
+    current_record_path = (run_root / "records" / "detect_record.json").resolve()
+    positive_template_scores: list[float] = []
+    positive_quality_scores: list[float] = []
+    negative_template_scores: list[float] = []
+    negative_quality_scores: list[float] = []
+    scanned_record_count = 0
+    labelled_record_count = 0
+
+    for record_path in sorted(set(candidate_paths)):
+        if not record_path.is_file() or record_path == current_record_path:
+            continue
+        scanned_record_count += 1
+        try:
+            record_obj = records_io.read_json(str(record_path))
+        except Exception:
+            # 历史 records 解析失败时仅跳过，不得阻断正式 detect。
+            continue
+        metrics = _extract_geo_scale_metrics_from_record(record_obj)
+        if not isinstance(metrics, dict):
+            continue
+        label_value = metrics.get("label")
+        if not isinstance(label_value, bool):
+            continue
+        labelled_record_count += 1
+        template_score = metrics.get("template_match_score")
+        quality_score = metrics.get("quality_score")
+        if label_value:
+            if isinstance(template_score, float):
+                positive_template_scores.append(template_score)
+            if isinstance(quality_score, float):
+                positive_quality_scores.append(quality_score)
+        else:
+            if isinstance(template_score, float):
+                negative_template_scores.append(template_score)
+            if isinstance(quality_score, float):
+                negative_quality_scores.append(quality_score)
+
+    return {
+        "scan_source": scan_source,
+        "scan_glob": scan_glob,
+        "scanned_record_count": scanned_record_count,
+        "labelled_record_count": labelled_record_count,
+        "current_sample_treated_as_positive": bool(current_input_is_positive),
+        "positive_template_match_scores": positive_template_scores,
+        "positive_quality_scores": positive_quality_scores,
+        "negative_template_match_scores": negative_template_scores,
+        "negative_quality_scores": negative_quality_scores,
+    }
+
+
+def _build_lf_protocol_control_context(
+    cfg: Dict[str, Any],
+    input_record: Dict[str, Any],
+    plan_payload: Dict[str, Any] | None,
+    pipeline_obj: Any,
+    device: str,
+    detect_seed: int,
+    injection_context: Any,
+    injection_modifier: Any,
+) -> Dict[str, Any]:
+    """
+    功能：构建 LF same-seed control rerun 的纯诊断上下文。
+
+    Build diagnostic-only LF same-seed control rerun context.
+
+    Args:
+        cfg: Configuration mapping.
+        input_record: Embed-side input record mapping.
+        plan_payload: Detect-side plan payload override.
+        pipeline_obj: Detect runtime pipeline object.
+        device: Runtime device string.
+        detect_seed: Formal detect runtime seed.
+        injection_context: Formal detect injection context.
+        injection_modifier: Formal detect latent modifier.
+
+    Returns:
+        LF protocol-control context mapping.
+    """
+    embed_seed = _resolve_record_runtime_seed(input_record)
+    context: Dict[str, Any] = {
+        "embed_seed": embed_seed,
+        "detect_seed": int(detect_seed),
+        "same_seed_as_embed_available": isinstance(embed_seed, int),
+        "same_seed_as_embed_value": int(embed_seed) if isinstance(embed_seed, int) else None,
+        "detect_protocol_classification": "unknown",
+        "image_conditioned_reconstruction_available": False,
+        "image_conditioned_reconstruction_status": "not_implemented",
+        "same_seed_control_status": "absent",
+        "same_seed_control_reason": None,
+        "same_seed_control_reused_formal_detect": False,
+        "detect_exact_timestep_coeffs_same_seed_control": None,
+        "same_seed_control_trace_digest": None,
+        "same_seed_control_trajectory_digest": None,
+        "same_seed_control_inference_status": None,
+        "same_seed_control_inference_error": None,
+    }
+
+    if isinstance(embed_seed, int):
+        if int(embed_seed) == int(detect_seed):
+            context["detect_protocol_classification"] = "rerun_exact_timestep_same_seed"
+            context["same_seed_control_status"] = "formal_detect_already_same_seed"
+            context["same_seed_control_reused_formal_detect"] = True
+            return context
+        context["detect_protocol_classification"] = "rerun_exact_timestep_different_seed"
+    else:
+        context["same_seed_control_reason"] = "embed_runtime_seed_absent"
+        return context
+
+    if pipeline_obj is None:
+        context["same_seed_control_reason"] = "detect_pipeline_unavailable"
+        return context
+    if not isinstance(plan_payload, dict):
+        context["same_seed_control_reason"] = "detect_plan_payload_absent"
+        return context
+
+    control_cache = trajectory_tap.LatentTrajectoryCache()
+    inference_result = infer_runtime.run_sd3_inference(
+        cfg,
+        pipeline_obj,
+        device,
+        int(embed_seed),
+        injection_context=injection_context,
+        injection_modifier=injection_modifier,
+        capture_final_latents=False,
+        capture_attention=False,
+        trajectory_latent_cache=control_cache,
+    )
+    inference_status_candidate = inference_result.get("inference_status")
+    inference_status = inference_status_candidate if isinstance(inference_status_candidate, str) else None
+    inference_error_candidate = inference_result.get("inference_error")
+    inference_error = inference_error_candidate if isinstance(inference_error_candidate, str) else None
+    context["same_seed_control_inference_status"] = inference_status
+    context["same_seed_control_inference_error"] = inference_error
+
+    trajectory_evidence = inference_result.get("trajectory_evidence")
+    if isinstance(trajectory_evidence, dict):
+        trajectory_evidence_dict = cast(Dict[str, Any], trajectory_evidence)
+        trajectory_digest = trajectory_evidence_dict.get("trajectory_digest")
+        if isinstance(trajectory_digest, str) and trajectory_digest:
+            context["same_seed_control_trajectory_digest"] = trajectory_digest
+
+    if inference_status != infer_runtime.INFERENCE_STATUS_OK or control_cache.is_empty():
+        context["same_seed_control_reason"] = "same_seed_control_inference_unavailable"
+        return context
+
+    previous_cache = cfg.get("__detect_trajectory_latent_cache__")
+    try:
+        cfg["__detect_trajectory_latent_cache__"] = control_cache
+        trace_bundle = _extract_lf_attestation_trace_bundle_from_trajectory(cfg, plan_payload)
+    finally:
+        if previous_cache is None:
+            cfg.pop("__detect_trajectory_latent_cache__", None)
+        else:
+            cfg["__detect_trajectory_latent_cache__"] = previous_cache
+
+    if not isinstance(trace_bundle, dict):
+        context["same_seed_control_reason"] = "same_seed_control_trace_absent"
+        return context
+
+    control_coeffs = trace_bundle.get("lf_attestation_features")
+    if not isinstance(control_coeffs, list):
+        context["same_seed_control_reason"] = "same_seed_control_coeffs_absent"
+        return context
+
+    context["detect_exact_timestep_coeffs_same_seed_control"] = control_coeffs
+    projected_digest = trace_bundle.get("projected_lf_digest")
+    if isinstance(projected_digest, str) and projected_digest:
+        context["same_seed_control_trace_digest"] = projected_digest
+    context["same_seed_control_status"] = "ok"
+    context["same_seed_control_reason"] = None
+    return context
 
 
 def _write_detect_attestation_artifact(
@@ -925,9 +1257,35 @@ def run_detect(
                         "plan_stats": input_plan_stats if isinstance(input_plan_stats, dict) else None,
                         "plan_failure_reason": None,
                     }
+
+                diagnostics_cfg = _resolve_detect_diagnostics_cfg(cfg)
+                if bool(diagnostics_cfg.get("geo_rescue_scale_control_enabled", False)):
+                    cfg["__geo_rescue_scale_control_context__"] = _scan_geo_rescue_scale_control_context(
+                        run_root,
+                        cfg,
+                        current_input_is_positive=True,
+                    )
+                if bool(diagnostics_cfg.get("lf_protocol_control_enabled", False)):
+                    cfg["__lf_protocol_control_context__"] = _build_lf_protocol_control_context(
+                        cfg,
+                        input_record,
+                        plan_override_for_orchestrator,
+                        pipeline_obj,
+                        str(device),
+                        int(seed_value),
+                        injection_context,
+                        injection_modifier,
+                    )
             else:
                 content_override_for_orchestrator = None
                 plan_override_for_orchestrator = None
+                diagnostics_cfg = _resolve_detect_diagnostics_cfg(cfg)
+                if bool(diagnostics_cfg.get("geo_rescue_scale_control_enabled", False)):
+                    cfg["__geo_rescue_scale_control_context__"] = _scan_geo_rescue_scale_control_context(
+                        run_root,
+                        cfg,
+                        current_input_is_positive=False,
+                    )
             record_candidate: Any = run_detect_orchestrator(
                 cfg,
                 impl_set,
@@ -938,6 +1296,8 @@ def run_detect(
                 content_result_override=content_override_for_orchestrator,
                 detect_plan_result_override=plan_override_for_orchestrator
             )
+            cfg.pop("__lf_protocol_control_context__", None)
+            cfg.pop("__geo_rescue_scale_control_context__", None)
             cfg.pop("__attestation_verify_k_master__", None)
             if record_candidate is None:
                 exc = RuntimeError("record_construction_failed: record is None")

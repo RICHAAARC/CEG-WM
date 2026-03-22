@@ -728,11 +728,24 @@ def test_build_detect_attestation_result_emits_lf_trace_artifact() -> None:
             "selected_step_post_coeffs": [-0.1, -0.3, 0.3],
             "embed_edit_timestep_coeffs": [-0.2, -0.15, 0.25],
             "embed_terminal_step_coeffs": [-0.25, -0.1, 0.2],
+            "detect_exact_timestep_coeffs": [-0.25, 0.0, 0.2],
             "embed_edit_timestep_step_index": 12,
             "embed_terminal_step_index": 15,
             "embed_closed_loop_digest": "b" * 64,
             "embed_closed_loop_step_index": 12,
             "embed_closed_loop_selection_rule": "max_lf_delta_norm",
+            "embed_seed": 7102221260541468996,
+            "detect_seed": 4388340890186534267,
+            "same_seed_as_embed_available": True,
+            "same_seed_as_embed_value": 7102221260541468996,
+            "detect_protocol_classification": "rerun_exact_timestep_different_seed",
+            "image_conditioned_reconstruction_available": False,
+            "image_conditioned_reconstruction_status": "not_implemented",
+            "same_seed_control_status": "ok",
+            "same_seed_control_reason": None,
+            "same_seed_control_trace_digest": "1" * 64,
+            "same_seed_control_trajectory_digest": "2" * 64,
+            "detect_exact_timestep_coeffs_same_seed_control": [-0.25, -0.1, 0.2],
             "planner_rank": 3,
             "basis_digest": "c" * 64,
             "route_basis_bridge": {
@@ -794,8 +807,21 @@ def test_build_detect_attestation_result_emits_lf_trace_artifact() -> None:
     assert retain_artifact.get("selected_step_post_coeffs") == [-0.1, -0.3, 0.3]
     assert retain_artifact.get("embed_edit_timestep_coeffs") == [-0.2, -0.15, 0.25]
     assert retain_artifact.get("embed_terminal_step_coeffs") == [-0.25, -0.1, 0.2]
+    assert retain_artifact.get("embed_seed") == 7102221260541468996
+    assert retain_artifact.get("detect_seed") == 4388340890186534267
+    assert retain_artifact.get("same_seed_as_embed_available") is True
+    assert retain_artifact.get("same_seed_as_embed_value") == 7102221260541468996
+    assert retain_artifact.get("detect_protocol_classification") == "rerun_exact_timestep_different_seed"
+    assert retain_artifact.get("image_conditioned_reconstruction_available") is False
+    assert retain_artifact.get("detect_exact_timestep_coeffs_same_seed_control") == [-0.25, -0.1, 0.2]
+    assert retain_artifact.get("protocol_root_cause_classification") == "cross_seed_rerun_mismatch_dominant"
+    assert retain_artifact.get("cross_seed_protocol_loss_count") == 1
+    assert retain_artifact.get("same_seed_residual_loss_count") == 0
+    assert isinstance(retain_artifact.get("control_protocol_segments"), list)
+    assert retain_artifact.get("control_protocol_segments", [])[0].get("segment_name") == "embed_terminal_to_detect_exact_detect_seed"
     assert retain_artifact.get("breakdown_segments", [])[1].get("segment_name") == "selected_step_to_edit_timestep"
     assert isinstance(retain_artifact.get("breakdown_summary"), dict)
+    assert isinstance(retain_artifact.get("control_protocol_summary"), dict)
     assert planner_artifact.get("artifact_type") == "lf_planner_risk_report"
     assert planner_artifact.get("primary_evidence", {}).get("evidence_type") == "lf_closed_loop_posterior_counts"
     assert isinstance(planner_artifact.get("routing_pattern_summary", {}).get("mismatch_feature_cols"), list)
@@ -1411,10 +1437,23 @@ def test_write_detect_attestation_artifact_persists_attestation_traces(monkeypat
         },
         "lf_retain_breakdown": {
             "artifact_type": "lf_retain_breakdown",
+            "embed_seed": 7102221260541468996,
+            "detect_seed": 4388340890186534267,
+            "same_seed_as_embed_available": True,
+            "same_seed_as_embed_value": 7102221260541468996,
+            "detect_protocol_classification": "rerun_exact_timestep_different_seed",
             "selected_step_post_coeffs": [0.1, -0.1],
             "embed_edit_timestep_coeffs": [0.0, -0.2],
             "embed_terminal_step_coeffs": [-0.1, -0.2],
             "detect_exact_timestep_coeffs": [-0.1, 0.2],
+            "detect_exact_timestep_coeffs_same_seed_control": [-0.1, -0.2],
+            "cross_seed_protocol_loss_count": 1,
+            "same_seed_residual_loss_count": 0,
+            "cross_seed_protocol_loss_ratio": 0.5,
+            "same_seed_residual_loss_ratio": 0.0,
+            "protocol_root_cause_classification": "cross_seed_rerun_mismatch_dominant",
+            "control_protocol_segments": [],
+            "control_protocol_summary": {"protocol_root_cause_classification": "cross_seed_rerun_mismatch_dominant"},
             "breakdown_segments": [],
             "breakdown_summary": {"dominant_drift_segment": "selected_step_to_edit_timestep"},
             "lf_retain_breakdown_digest": "9" * 64,
@@ -1422,13 +1461,24 @@ def test_write_detect_attestation_artifact_persists_attestation_traces(monkeypat
         "geo_rescue_diagnostics": {
             "artifact_type": "geo_rescue_diagnostics",
             "quality_score": 0.92,
-            "template_match_score": 0.2,
-            "geo_score": 0.2,
+            "template_match_score": 0.05,
+            "geo_score": 0.05,
             "geo_score_source": "template_match_score",
             "geo_rescue_eligible": True,
             "geo_rescue_applied": False,
             "geo_not_used_reason": "geometry_score_below_rescue_min",
             "geo_scale_classification": "quality_pass_template_fail_source_template",
+            "template_match_internal_threshold": 0.02,
+            "template_match_threshold_to_rescue_min_ratio": 0.066667,
+            "template_score_scale_band": "between_internal_threshold_and_rescue_gate",
+            "rescue_gate_scale_classification": "template_internal_threshold_far_below_rescue_gate",
+            "positive_template_match_score_summary": {"sample_count": 2, "min": 0.05, "max": 0.12, "mean": 0.085, "median": 0.085},
+            "positive_quality_score_summary": {"sample_count": 2, "min": 0.9, "max": 0.92, "mean": 0.91, "median": 0.91},
+            "negative_template_match_score_summary": {"sample_count": 1, "min": 0.01, "max": 0.01, "mean": 0.01, "median": 0.01},
+            "negative_quality_score_summary": {"sample_count": 1, "min": 0.2, "max": 0.2, "mean": 0.2, "median": 0.2},
+            "positive_template_to_gate_max_ratio": 0.4,
+            "positive_template_to_internal_threshold_max_ratio": 6.0,
+            "geo_repair_direction_classification": "scale_misalignment_between_template_score_and_rescue_gate",
             "geo_rescue_diagnostics_digest": "8" * 64,
         },
         "lf_planner_risk_report": {
@@ -1486,6 +1536,17 @@ def test_build_detect_attestation_result_emits_geo_rescue_diagnostics_artifact()
             "rescue_band_delta_low": 0.05,
             "geo_rescue_min_score": 0.3,
         },
+        "__geo_rescue_scale_control_context__": {
+            "current_sample_treated_as_positive": True,
+            "positive_template_match_scores": [0.12, 0.1],
+            "positive_quality_scores": [0.91, 0.89],
+            "negative_template_match_scores": [0.01],
+            "negative_quality_scores": [0.2],
+            "scan_source": "configured_glob",
+            "scan_glob": "outputs/**/records/detect_record.json",
+            "scanned_record_count": 3,
+            "labelled_record_count": 3,
+        },
         "__attestation_verify_k_master__": "5" * 64,
     }
     attestation_context = {
@@ -1509,13 +1570,14 @@ def test_build_detect_attestation_result_emits_geo_rescue_diagnostics_artifact()
         },
         geometry_evidence_payload={
             "status": "ok",
-            "geo_score": 0.2,
+            "geo_score": 0.05,
             "sync_status": "ok",
             "anchor_status": "ok",
             "relation_digest_binding": {"binding_status": "matched"},
             "sync_metrics": {
                 "quality_score": 0.92,
-                "template_match_score": 0.2,
+                "template_match_score": 0.05,
+                "template_match_threshold": 0.02,
                 "uncertainty": 0.08,
             },
         },
@@ -1526,11 +1588,18 @@ def test_build_detect_attestation_result_emits_geo_rescue_diagnostics_artifact()
     assert result.get("content_attestation_score") == pytest.approx(0.62)
     assert diagnostics.get("artifact_type") == "geo_rescue_diagnostics"
     assert diagnostics.get("quality_score") == pytest.approx(0.92)
-    assert diagnostics.get("template_match_score") == pytest.approx(0.2)
-    assert diagnostics.get("geo_score") == pytest.approx(0.2)
+    assert diagnostics.get("template_match_score") == pytest.approx(0.05)
+    assert diagnostics.get("geo_score") == pytest.approx(0.05)
     assert diagnostics.get("geo_score_source") == "template_match_score"
     assert diagnostics.get("geo_not_used_reason") == "geometry_score_below_rescue_min"
     assert diagnostics.get("geo_scale_classification") == "quality_pass_template_fail_source_template"
+    assert diagnostics.get("template_match_internal_threshold") == pytest.approx(0.02)
+    assert diagnostics.get("template_match_threshold_to_rescue_min_ratio") == pytest.approx(0.02 / 0.3)
+    assert diagnostics.get("template_score_scale_band") == "between_internal_threshold_and_rescue_gate"
+    assert diagnostics.get("rescue_gate_scale_classification") == "template_internal_threshold_far_below_rescue_gate"
+    assert diagnostics.get("positive_template_to_gate_max_ratio") == pytest.approx(0.12 / 0.3)
+    assert diagnostics.get("positive_template_to_internal_threshold_max_ratio") == pytest.approx(0.12 / 0.02)
+    assert diagnostics.get("geo_repair_direction_classification") == "scale_misalignment_between_template_score_and_rescue_gate"
 
 
 def test_build_lf_planner_risk_report_artifact_classifies_host_baseline_dominant() -> None:
