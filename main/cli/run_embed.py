@@ -77,6 +77,9 @@ _build_planner_inputs_for_runtime = cast(
 )
 
 
+EMBED_CONTENT_RUNTIME_PHASE_PRECOMPUTE = "embed_precompute"
+
+
 def _resolve_embed_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
     功能：解析 embed 配置节点为字典映射。
@@ -839,6 +842,11 @@ def run_embed(
 
             # 预先计算 content 与 subspace 计划，用于注入上下文。
             content_inputs_pre = _build_content_inputs_for_embed(cfg)
+            if isinstance(content_inputs_pre, dict):
+                content_inputs_pre = dict(content_inputs_pre)
+            else:
+                content_inputs_pre = {}
+            content_inputs_pre["content_runtime_phase"] = EMBED_CONTENT_RUNTIME_PHASE_PRECOMPUTE
             content_result_pre = impl_set.content_extractor.extract(
                 cfg,
                 inputs=content_inputs_pre,

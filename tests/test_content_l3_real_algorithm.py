@@ -8,7 +8,10 @@ L3 Content Chain 真实算法必达字段回归测试
 - 严格验证失败语义（absent/failed/mismatch）。
 """
 
+import numpy as np
 import pytest
+from PIL import Image
+
 from main.watermarking.content_chain.unified_content_extractor import (
     UnifiedContentExtractor,
     UNIFIED_CONTENT_EXTRACTOR_ID,
@@ -236,6 +239,58 @@ def test_unified_extractor_detect_mode_plan_mismatch_returns_mismatch():
     assert result.content_failure_reason is not None, "Failure reason must be present when status=mismatch"
     assert "plan_mismatch" in result.content_failure_reason or "detector_plan_mismatch" in result.content_failure_reason, \
         f"Failure reason should mention plan mismatch, got: {result.content_failure_reason}"
+
+
+def test_unified_extractor_embed_precompute_phase_overrides_detect_mode(tmp_path) -> None:
+    """
+    功能：embed 预计算阶段即使 detect.content.enabled=true，也必须走 mask/provider 路径。
+
+    Verify embed precompute phase forces mask extraction even when detect.content.enabled is enabled.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+
+    Returns:
+        None.
+    """
+    input_image = tmp_path / "embed_precompute_input.png"
+    Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8)).save(input_image)
+
+    cfg = {
+        "detect": {
+            "content": {
+                "enabled": True
+            }
+        },
+        "enable_mask": True,
+        "mask": {
+            "saliency_source": "proxy"
+        }
+    }
+
+    impl_digest = digests.canonical_sha256({
+        "impl_id": UNIFIED_CONTENT_EXTRACTOR_ID,
+        "impl_version": UNIFIED_CONTENT_EXTRACTOR_VERSION
+    })
+
+    extractor = UnifiedContentExtractor(
+        UNIFIED_CONTENT_EXTRACTOR_ID,
+        UNIFIED_CONTENT_EXTRACTOR_VERSION,
+        impl_digest
+    )
+
+    result = extractor.extract(
+        cfg,
+        inputs={
+            "image_path": str(input_image),
+            "content_runtime_phase": "embed_precompute",
+        },
+        cfg_digest="test_cfg_digest"
+    )
+
+    assert result.status == "ok", f"Expected ok, got {result.status}"
+    assert isinstance(result.mask_digest, str) and result.mask_digest
+    assert result.score is None
 
 
 def test_l3_content_chain_not_baseline_when_enabled():

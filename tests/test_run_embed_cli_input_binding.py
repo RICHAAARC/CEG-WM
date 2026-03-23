@@ -375,6 +375,7 @@ def test_run_embed_binds_input_image_before_content_precompute(
 
     assert isinstance(captured_inputs.get("inputs"), dict)
     assert captured_inputs["inputs"].get("image_path") == str(input_image)
+    assert captured_inputs["inputs"].get("content_runtime_phase") == run_embed_module.EMBED_CONTENT_RUNTIME_PHASE_PRECOMPUTE
 
 
 def test_run_embed_preview_generation_binds_generated_input_before_content_precompute(
@@ -533,6 +534,7 @@ def test_run_embed_preview_generation_binds_generated_input_before_content_preco
     assert isinstance(preview_path, str)
     assert preview_path.endswith(".png")
     assert Path(preview_path).exists()
+    assert captured_inputs["inputs"].get("content_runtime_phase") == run_embed_module.EMBED_CONTENT_RUNTIME_PHASE_PRECOMPUTE
 
 
 def test_run_embed_runtime_finalization_planner_inputs_include_precontent_payload(

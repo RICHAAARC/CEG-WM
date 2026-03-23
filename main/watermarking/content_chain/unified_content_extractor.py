@@ -23,6 +23,49 @@ from .interfaces import ContentEvidence
 UNIFIED_CONTENT_EXTRACTOR_ID = "unified_content_extractor"
 UNIFIED_CONTENT_EXTRACTOR_VERSION = "v2"
 UNIFIED_CONTENT_TRACE_VERSION = "v3"
+EMBED_CONTENT_RUNTIME_PHASE_PRECOMPUTE = "embed_precompute"
+
+
+def _resolve_content_runtime_phase(inputs: Optional[Dict[str, Any]]) -> str | None:
+    """
+    功能：解析内容提取阶段语义控制字段。
+
+    Resolve the optional runtime-phase control marker for content extraction.
+
+    Args:
+        inputs: Optional extractor input mapping.
+
+    Returns:
+        Normalized runtime-phase token when present; otherwise None.
+    """
+    if not isinstance(inputs, dict):
+        return None
+    runtime_phase = inputs.get("content_runtime_phase")
+    if not isinstance(runtime_phase, str):
+        return None
+    normalized_phase = runtime_phase.strip()
+    if not normalized_phase:
+        return None
+    return normalized_phase
+
+
+def _strip_runtime_control_fields(inputs: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    功能：剥离仅用于模式路由的控制字段，避免污染下游摘要。
+
+    Remove runtime control markers before delegating to downstream providers.
+
+    Args:
+        inputs: Optional extractor input mapping.
+
+    Returns:
+        Sanitized input mapping, or None when the original input is absent.
+    """
+    if inputs is None:
+        return None
+    sanitized_inputs = dict(inputs)
+    sanitized_inputs.pop("content_runtime_phase", None)
+    return sanitized_inputs
 
 
 class _UnifiedContentExtractorBase:
@@ -109,6 +152,14 @@ class _UnifiedContentExtractorBase:
             raise TypeError("inputs must be dict or None")
         if cfg_digest is not None and not isinstance(cfg_digest, str):
             raise TypeError("cfg_digest must be str or None")
+
+        runtime_phase = _resolve_content_runtime_phase(inputs)
+        if runtime_phase == EMBED_CONTENT_RUNTIME_PHASE_PRECOMPUTE:
+            return self._mask_provider.extract(
+                cfg,
+                inputs=_strip_runtime_control_fields(inputs),
+                cfg_digest=cfg_digest,
+            )
 
         # 判断模式
         detect_content_enabled = cfg.get("detect", {}).get("content", {}).get("enabled", False)
