@@ -26,6 +26,38 @@ _CONTENT_SCORE_NAME = "content_score"
 _EVENT_ATTESTATION_SCORE_NAME = "event_attestation_score"
 
 
+def _strip_forbidden_artifact_anchor_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：移除 artifact payload 顶层不允许携带的冻结锚字段。
+
+    Remove forbidden top-level freeze-anchor fields before writing workflow-input
+    artifact payloads.
+
+    Args:
+        payload: Generated detect-record payload copy.
+
+    Returns:
+        Sanitized payload mapping for artifact semantics.
+    """
+    if not isinstance(payload, dict):
+        raise TypeError("payload must be dict")
+
+    sanitized_payload = dict(payload)
+    forbidden_fields = getattr(records_io, "_ARTIFACT_FORBIDDEN_ANCHOR_FIELDS", None)
+    if not isinstance(forbidden_fields, set):
+        forbidden_fields = {
+            "contract_bound_digest",
+            "whitelist_bound_digest",
+            "policy_path_semantics_bound_digest",
+            "injection_scope_manifest_bound_digest",
+        }
+
+    for field_name in forbidden_fields:
+        if isinstance(field_name, str) and field_name:
+            sanitized_payload.pop(field_name, None)
+    return sanitized_payload
+
+
 def _resolve_stage_cfg_key(stage_name: str) -> str:
     """
     功能：解析阶段配置键名。
@@ -330,11 +362,13 @@ def _write_generated_detect_record(
     if not isinstance(payload, dict):
         raise TypeError("payload must be dict")
 
+    sanitized_payload = _strip_forbidden_artifact_anchor_fields(payload)
+
     records_io.write_artifact_json_unbound(
         run_root=run_root,
         artifacts_dir=artifacts_dir,
         path=str(target_path),
-        obj=payload,
+        obj=sanitized_payload,
     )
 
 

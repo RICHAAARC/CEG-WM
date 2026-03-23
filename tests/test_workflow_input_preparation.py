@@ -30,6 +30,10 @@ def test_ensure_minimal_ground_truth_records_generates_labelled_pairs(tmp_path: 
 
     source_record = {
         "operation": "detect",
+        "contract_bound_digest": "contract-anchor",
+        "whitelist_bound_digest": "whitelist-anchor",
+        "policy_path_semantics_bound_digest": "semantics-anchor",
+        "injection_scope_manifest_bound_digest": "injection-anchor",
         "content_evidence_payload": {
             "status": "ok",
             "score": 0.82,
@@ -59,8 +63,18 @@ def test_ensure_minimal_ground_truth_records_generates_labelled_pairs(tmp_path: 
     negative_payload = next(payload for payload in generated_payloads if payload["label"] is False)
     assert positive_payload["label"] is True
     assert negative_payload["label"] is False
+    assert "contract_bound_digest" not in positive_payload
+    assert "whitelist_bound_digest" not in positive_payload
+    assert "policy_path_semantics_bound_digest" not in positive_payload
+    assert "injection_scope_manifest_bound_digest" not in positive_payload
     assert positive_payload["content_evidence_payload"]["status"] == "ok"
     assert negative_payload["content_evidence_payload"]["status"] == "ok"
+    assert positive_payload["ground_truth"] is True
+    assert negative_payload["ground_truth"] is False
+    assert positive_payload["ground_truth_source"] == "workflow_minimal_ground_truth_positive"
+    assert negative_payload["ground_truth_source"] == "workflow_minimal_ground_truth_negative"
+    assert positive_payload["is_watermarked"] is True
+    assert negative_payload["is_watermarked"] is False
     assert positive_payload["content_evidence_payload"]["score"] > negative_payload["content_evidence_payload"]["score"]
 
 
@@ -84,6 +98,10 @@ def test_ensure_minimal_ground_truth_records_supports_event_attestation_score(tm
     source_record = {
         "operation": "detect",
         "label": True,
+        "contract_bound_digest": "contract-anchor",
+        "whitelist_bound_digest": "whitelist-anchor",
+        "policy_path_semantics_bound_digest": "semantics-anchor",
+        "injection_scope_manifest_bound_digest": "injection-anchor",
         "attestation": {
             "final_event_attested_decision": {
                 "status": "attested",
@@ -113,6 +131,11 @@ def test_ensure_minimal_ground_truth_records_supports_event_attestation_score(tm
     generated_payloads = [json.loads(path.read_text(encoding="utf-8")) for path in generated_paths]
     positive_payload = next(payload for payload in generated_payloads if payload["label"] is True)
     negative_payload = next(payload for payload in generated_payloads if payload["label"] is False)
+
+    assert "contract_bound_digest" not in positive_payload
+    assert "whitelist_bound_digest" not in positive_payload
+    assert "policy_path_semantics_bound_digest" not in positive_payload
+    assert "injection_scope_manifest_bound_digest" not in positive_payload
 
     positive_decision = positive_payload["attestation"]["final_event_attested_decision"]
     negative_decision = negative_payload["attestation"]["final_event_attested_decision"]
