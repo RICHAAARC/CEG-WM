@@ -16,6 +16,7 @@ import csv
 import json
 import subprocess
 import sys
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,7 +33,69 @@ from main.core import config_loader
 
 
 WORKFLOW_SECTION_KEY = "paper_ablation_workflow"
-NOTEBOOK_CONFIG_TEMPLATE_VERSION = "paper_ablation_workflow_v1"
+NOTEBOOK_CONFIG_TEMPLATE_VERSION = "paper_ablation_workflow_v2"
+
+DEFAULT_COMPARE_SUMMARY_FIELDS = [
+    "variant_name",
+    "variant_suffix",
+    "variant_group",
+    "variant_category",
+    "attestation_status",
+    "attestation_result_status",
+    "content_attestation_score",
+    "event_attestation_score",
+    "channel_scores_lf",
+    "channel_scores_hf",
+    "channel_scores_geo",
+    "active_score_source",
+    "active_geo_score_source",
+    "geo_repair_enabled",
+    "geo_repair_active",
+    "geo_repair_mode",
+    "geo_score_repair_enabled",
+    "geo_score_repair_active",
+    "geo_score_repair_mode",
+    "geo_repair_direction_classification",
+    "lf_exact_repair_enabled",
+    "lf_exact_repair_applied",
+    "lf_exact_repair_mode",
+    "formal_exact_evidence_source",
+    "protocol_root_cause_classification",
+    "variant_run_root",
+    "detect_record_path",
+    "input_record_path",
+    "config_snapshot_path",
+    "variant_overrides",
+]
+
+DEFAULT_COMPARE_TABLE_FIELDS = [
+    "variant_name",
+    "variant_suffix",
+    "variant_group",
+    "variant_category",
+    "attestation_status",
+    "content_attestation_score",
+    "event_attestation_score",
+    "channel_scores_lf",
+    "channel_scores_hf",
+    "channel_scores_geo",
+    "active_geo_score_source",
+    "geo_repair_enabled",
+    "geo_repair_active",
+    "geo_repair_mode",
+    "geo_score_repair_enabled",
+    "geo_score_repair_active",
+    "geo_score_repair_mode",
+    "geo_repair_direction_classification",
+    "lf_exact_repair_enabled",
+    "lf_exact_repair_applied",
+    "lf_exact_repair_mode",
+    "formal_exact_evidence_source",
+    "protocol_root_cause_classification",
+    "detect_record_path",
+]
+
+_MISSING = object()
 
 
 @dataclass(frozen=True)
@@ -47,6 +110,8 @@ class AblationVariant:
         suffix: Stable directory suffix for outputs.
         description: Variant description.
         enabled: Whether the variant is enabled by default.
+        group: Optional single-variable comparison group label.
+        category: Optional variant category label.
         overrides: Dotted-path overrides applied to the detect-side config snapshot.
         override_group_name: Optional explicit group label when a variant needs
             more than one coordinated override.
@@ -59,6 +124,8 @@ class AblationVariant:
     suffix: str
     description: str
     enabled: bool
+    group: str | None
+    category: str | None
     overrides: Dict[str, Any]
     override_group_name: str | None = None
 
@@ -148,6 +215,18 @@ def _require_non_empty_str(value: Any, field_name: str) -> str:
     return value.strip()
 
 
+def _require_optional_non_empty_str(value: Any, field_name: str) -> str | None:
+    if value is None:
+        return None
+    return _require_non_empty_str(value, field_name)
+
+
+def _require_string_list(value: Any, field_name: str) -> List[str]:
+    if not isinstance(value, list) or not value:
+        raise TypeError(f"{field_name} must be non-empty list[str]")
+    return [_require_non_empty_str(item, field_name) for item in cast(List[Any], value)]
+
+
 def _normalize_dotted_overrides(overrides: Any, field_name: str) -> Dict[str, Any]:
     if overrides is None:
         return {}
@@ -198,6 +277,8 @@ def _load_variant_definitions(workflow_cfg: Dict[str, Any]) -> List[AblationVari
             f"variant[{index}].description",
         )
         enabled = bool(variant_cfg.get("enabled", True))
+        group = _require_optional_non_empty_str(variant_cfg.get("group"), f"variant[{index}].group")
+        category = _require_optional_non_empty_str(variant_cfg.get("category"), f"variant[{index}].category")
         overrides = _normalize_dotted_overrides(variant_cfg.get("overrides"), f"variant[{index}].overrides")
         override_group_name = variant_cfg.get("override_group_name")
         if override_group_name is not None:
@@ -225,6 +306,8 @@ def _load_variant_definitions(workflow_cfg: Dict[str, Any]) -> List[AblationVari
                 suffix=suffix,
                 description=description,
                 enabled=enabled,
+                group=group,
+                category=category,
                 overrides=overrides,
                 override_group_name=override_group_name,
             )
@@ -251,8 +334,39 @@ def _resolve_workflow_cfg(cfg_obj: Any) -> Dict[str, Any]:
     workflow_cfg = _require_mapping(workflow_node, WORKFLOW_SECTION_KEY)
     _require_mapping(workflow_cfg.get("base_embed"), f"{WORKFLOW_SECTION_KEY}.base_embed")
     _require_mapping(workflow_cfg.get("detect_rerun"), f"{WORKFLOW_SECTION_KEY}.detect_rerun")
+    _require_mapping(workflow_cfg.get("compare"), f"{WORKFLOW_SECTION_KEY}.compare")
+    _require_mapping(workflow_cfg.get("notebook_runtime"), f"{WORKFLOW_SECTION_KEY}.notebook_runtime")
     _load_variant_definitions(workflow_cfg)
     return workflow_cfg
+
+
+def _get_dotted_value(node: Any, dotted_path: str) -> Any:
+    current = node
+    for key_name in dotted_path.split("."):
+        if not isinstance(current, dict) or key_name not in current:
+            return _MISSING
+        current = current[key_name]
+    return current
+
+
+def _pick_first_present_value(node: Dict[str, Any], dotted_paths: List[str]) -> Any:
+    for dotted_path in dotted_paths:
+        candidate = _get_dotted_value(node, dotted_path)
+        if candidate is not _MISSING:
+            return candidate
+    return None
+
+
+def _resolve_compare_fields(workflow_cfg: Dict[str, Any], field_name: str, default_fields: List[str]) -> List[str]:
+    compare_cfg = _require_mapping(workflow_cfg.get("compare"), f"{WORKFLOW_SECTION_KEY}.compare")
+    configured_fields = compare_cfg.get(field_name)
+    if configured_fields is None:
+        return list(default_fields)
+    return _require_string_list(configured_fields, f"{WORKFLOW_SECTION_KEY}.compare.{field_name}")
+
+
+def _resolve_notebook_runtime_cfg(workflow_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    return _require_mapping(workflow_cfg.get("notebook_runtime"), f"{WORKFLOW_SECTION_KEY}.notebook_runtime")
 
 
 def _apply_nested_override(cfg_obj: Dict[str, Any], dotted_path: str, value: Any) -> None:
@@ -287,12 +401,28 @@ def _write_yaml_file(path: Path, obj: Dict[str, Any]) -> None:
     )
 
 
-def _ensure_clean_run_root(run_root: Path) -> None:
+def _ensure_clean_run_root(
+    run_root: Path,
+    *,
+    fresh_run: bool,
+    resume: bool,
+    reuse_base_embed_record: Path | None,
+) -> None:
+    if fresh_run and resume:
+        raise ValueError("fresh_run and resume cannot both be true")
+    if fresh_run and reuse_base_embed_record is not None:
+        raise ValueError("fresh_run cannot be combined with reuse_base_embed_record")
     if run_root.exists():
         if not run_root.is_dir():
             raise ValueError(f"run_root exists and is not a directory: {run_root}")
-        if any(run_root.iterdir()):
-            raise ValueError(f"run_root must be empty for paper ablation workflow: {run_root}")
+        has_entries = any(run_root.iterdir())
+        if fresh_run and has_entries:
+            raise ValueError(f"run_root must be empty for fresh_run mode: {run_root}")
+        if has_entries and not resume and reuse_base_embed_record is None:
+            raise ValueError(
+                "run_root is non-empty; use --fresh-run to require an empty run root or "
+                "--resume to continue an existing run"
+            )
     run_root.mkdir(parents=True, exist_ok=True)
 
 
@@ -425,6 +555,16 @@ def _extract_variant_compare_row(
     final_event_decision = _as_dict(attestation_payload.get("final_event_attested_decision"))
     content_payload = _as_dict(detect_record.get("content_evidence_payload"))
     geometry_payload = _as_dict(detect_record.get("geometry_evidence_payload"))
+    geo_rescue_diagnostics = _as_dict(
+        _pick_first_present_value(
+            detect_record,
+            [
+                "geo_rescue_diagnostics_artifact",
+                "_geo_rescue_diagnostics_artifact",
+                "artifacts.geo_rescue_diagnostics_artifact",
+            ],
+        )
+    )
     score_parts = _as_dict(content_payload.get("score_parts"))
     channel_scores = _as_dict(attestation_payload.get("channel_scores"))
     image_channel_scores = _as_dict(image_evidence_result.get("channel_scores"))
@@ -438,6 +578,119 @@ def _extract_variant_compare_row(
     geo_score = channel_scores.get("geo")
     if geo_score is None:
         geo_score = image_channel_scores.get("geo", geometry_payload.get("geo_score"))
+
+    active_geo_score_source = _pick_first_present_value(
+        detect_record,
+        [
+            "active_geo_score_source",
+            "geometry_evidence_payload.active_geo_score_source",
+            "attestation.active_geo_score_source",
+            "attestation.image_evidence_result.active_geo_score_source",
+            "geo_rescue_diagnostics_artifact.active_geo_score_source",
+            "_geo_rescue_diagnostics_artifact.active_geo_score_source",
+        ],
+    )
+    geo_repair_enabled = _pick_first_present_value(
+        detect_record,
+        [
+            "geo_repair_enabled",
+            "geometry_evidence_payload.geo_repair_enabled",
+            "geo_rescue_diagnostics_artifact.geo_repair_enabled",
+            "_geo_rescue_diagnostics_artifact.geo_repair_enabled",
+        ],
+    )
+    geo_repair_active = _pick_first_present_value(
+        detect_record,
+        [
+            "geo_repair_active",
+            "geometry_evidence_payload.geo_repair_active",
+            "geo_rescue_diagnostics_artifact.geo_repair_active",
+            "_geo_rescue_diagnostics_artifact.geo_repair_active",
+        ],
+    )
+    geo_repair_mode = _pick_first_present_value(
+        detect_record,
+        [
+            "geo_repair_mode",
+            "geometry_evidence_payload.geo_repair_mode",
+            "geo_rescue_diagnostics_artifact.geo_repair_mode",
+            "_geo_rescue_diagnostics_artifact.geo_repair_mode",
+        ],
+    )
+    geo_score_repair_enabled = _pick_first_present_value(
+        detect_record,
+        [
+            "geo_score_repair_enabled",
+            "geometry_evidence_payload.geo_score_repair_enabled",
+            "geo_rescue_diagnostics_artifact.geo_score_repair_enabled",
+            "_geo_rescue_diagnostics_artifact.geo_score_repair_enabled",
+        ],
+    )
+    geo_score_repair_active = _pick_first_present_value(
+        detect_record,
+        [
+            "geo_score_repair_active",
+            "geometry_evidence_payload.geo_score_repair_active",
+            "geo_rescue_diagnostics_artifact.geo_score_repair_active",
+            "_geo_rescue_diagnostics_artifact.geo_score_repair_active",
+        ],
+    )
+    geo_score_repair_mode = _pick_first_present_value(
+        detect_record,
+        [
+            "geo_score_repair_mode",
+            "geometry_evidence_payload.geo_score_repair_mode",
+            "geo_rescue_diagnostics_artifact.geo_score_repair_mode",
+            "_geo_rescue_diagnostics_artifact.geo_score_repair_mode",
+        ],
+    )
+    geo_repair_direction_classification = _pick_first_present_value(
+        detect_record,
+        [
+            "geo_repair_direction_classification",
+            "geometry_evidence_payload.geo_repair_direction_classification",
+            "geo_rescue_diagnostics_artifact.geo_repair_direction_classification",
+            "_geo_rescue_diagnostics_artifact.geo_repair_direction_classification",
+        ],
+    )
+    protocol_root_cause_classification = _pick_first_present_value(
+        detect_record,
+        [
+            "protocol_root_cause_classification",
+            "control_protocol_summary.protocol_root_cause_classification",
+            "content_evidence_payload.protocol_root_cause_classification",
+            "attestation.protocol_root_cause_classification",
+        ],
+    )
+    formal_exact_evidence_source = _pick_first_present_value(
+        detect_record,
+        [
+            "formal_exact_evidence_source",
+            "content_evidence_payload.formal_exact_evidence_source",
+            "attestation.formal_exact_evidence_source",
+        ],
+    )
+    lf_exact_repair_enabled = _pick_first_present_value(
+        detect_record,
+        [
+            "lf_exact_repair_enabled",
+            "content_evidence_payload.lf_exact_repair_enabled",
+        ],
+    )
+    lf_exact_repair_applied = _pick_first_present_value(
+        detect_record,
+        [
+            "lf_exact_repair_applied",
+            "content_evidence_payload.lf_exact_repair_applied",
+        ],
+    )
+    lf_exact_repair_mode = _pick_first_present_value(
+        detect_record,
+        [
+            "lf_exact_repair_mode",
+            "content_evidence_payload.lf_exact_repair_mode",
+        ],
+    )
 
     active_score_source = final_event_decision.get("event_attestation_score_name")
     if not isinstance(active_score_source, str) or not active_score_source:
@@ -460,12 +713,15 @@ def _extract_variant_compare_row(
         "variant_name": variant.name,
         "variant_suffix": variant.suffix,
         "variant_description": variant.description,
+        "variant_group": variant.group,
+        "variant_category": variant.category,
         "variant_run_root": str(variant_run_root),
         "detect_record_path": str(detect_record_path),
         "input_record_path": str(input_record_path),
         "config_snapshot_path": str(config_snapshot_path),
         "variant_overrides": variant.overrides,
         "attestation_status": attestation_payload.get("status", final_event_decision.get("status", "<absent>")),
+        "attestation_result_status": attestation_payload.get("status", "<absent>"),
         "content_attestation_score": image_evidence_result.get(
             "content_attestation_score",
             attestation_payload.get("content_attestation_score"),
@@ -474,9 +730,27 @@ def _extract_variant_compare_row(
         "lf_score": lf_score,
         "hf_score": hf_score,
         "geo_score": geo_score,
+        "channel_scores": {"lf": lf_score, "hf": hf_score, "geo": geo_score},
+        "channel_scores_lf": lf_score,
+        "channel_scores_hf": hf_score,
+        "channel_scores_geo": geo_score,
         "content_score": content_payload.get("content_score", content_payload.get("score")),
         "active_score_source": active_score_source,
+        "active_geo_score_source": active_geo_score_source,
+        "geo_repair_enabled": geo_repair_enabled,
+        "geo_repair_active": geo_repair_active,
+        "geo_repair_mode": geo_repair_mode,
+        "geo_score_repair_enabled": geo_score_repair_enabled,
+        "geo_score_repair_active": geo_score_repair_active,
+        "geo_score_repair_mode": geo_score_repair_mode,
+        "geo_repair_direction_classification": geo_repair_direction_classification,
+        "protocol_root_cause_classification": protocol_root_cause_classification,
+        "formal_exact_evidence_source": formal_exact_evidence_source,
+        "lf_exact_repair_enabled": lf_exact_repair_enabled,
+        "lf_exact_repair_applied": lf_exact_repair_applied,
+        "lf_exact_repair_mode": lf_exact_repair_mode,
         "diagnostics_core": diagnostics_core,
+        "geo_rescue_diagnostics": geo_rescue_diagnostics,
     }
 
 
@@ -485,29 +759,17 @@ def _write_json(path: Path, obj: Dict[str, Any]) -> None:
     path.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _write_compare_csv(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
+def _filter_row_fields(row: Dict[str, Any], fieldnames: List[str]) -> Dict[str, Any]:
+    return {field: row.get(field) for field in fieldnames}
+
+
+def _write_compare_csv(path: Path, rows: Iterable[Dict[str, Any]], fieldnames: List[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = [
-        "variant_name",
-        "variant_suffix",
-        "attestation_status",
-        "content_attestation_score",
-        "event_attestation_score",
-        "lf_score",
-        "hf_score",
-        "geo_score",
-        "content_score",
-        "active_score_source",
-        "variant_run_root",
-        "detect_record_path",
-        "input_record_path",
-        "config_snapshot_path",
-    ]
     with path.open("w", encoding="utf-8", newline="") as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
-            writer.writerow({field: row.get(field) for field in fieldnames})
+            writer.writerow(_filter_row_fields(row, fieldnames))
 
 
 def _resolve_selected_variants(
@@ -523,6 +785,19 @@ def _resolve_selected_variants(
     if missing:
         raise ValueError(f"selected variants are not defined: {missing}")
     return selected
+
+
+def _resolve_effective_selected_variant_names(
+    workflow_cfg: Dict[str, Any],
+    selected_variant_names: Optional[List[str]],
+) -> Optional[List[str]]:
+    if selected_variant_names:
+        return selected_variant_names
+    notebook_runtime_cfg = _resolve_notebook_runtime_cfg(workflow_cfg)
+    configured_names = notebook_runtime_cfg.get("selected_variants")
+    if configured_names is None:
+        return None
+    return _require_string_list(configured_names, f"{WORKFLOW_SECTION_KEY}.notebook_runtime.selected_variants")
 
 
 def _resolve_run_root(
@@ -545,6 +820,59 @@ def _resolve_run_root(
     if effective_tag is None:
         effective_tag = datetime.now(timezone.utc).strftime("ablation_%Y%m%d_%H%M%S")
     return (output_root / effective_tag).resolve()
+
+
+def _resolve_reuse_mode(
+    workflow_cfg: Dict[str, Any],
+    *,
+    fresh_run: bool,
+    resume: bool,
+    reuse_base_embed_record: Path | None,
+) -> tuple[bool, bool, Path | None, str]:
+    notebook_runtime_cfg = _resolve_notebook_runtime_cfg(workflow_cfg)
+    effective_reuse_record = reuse_base_embed_record
+    runtime_reuse_mode = notebook_runtime_cfg.get("base_embed_reuse_mode")
+    runtime_reuse_path = notebook_runtime_cfg.get("reuse_base_embed_record")
+
+    if effective_reuse_record is None and isinstance(runtime_reuse_path, str) and runtime_reuse_path.strip():
+        effective_reuse_record = _resolve_repo_path(runtime_reuse_path)
+
+    effective_fresh_run = bool(fresh_run)
+    effective_resume = bool(resume)
+    mode_label = "fresh_run" if effective_fresh_run else "resume" if effective_resume else "new_run"
+
+    if not effective_fresh_run and not effective_resume and effective_reuse_record is None:
+        normalized_mode = runtime_reuse_mode.strip() if isinstance(runtime_reuse_mode, str) and runtime_reuse_mode.strip() else "new_run"
+        if normalized_mode == "fresh_run":
+            effective_fresh_run = True
+            mode_label = "fresh_run"
+        elif normalized_mode == "resume":
+            effective_resume = True
+            mode_label = "resume"
+        elif normalized_mode == "reuse_existing_record":
+            if effective_reuse_record is None:
+                raise ValueError(
+                    "base_embed_reuse_mode=reuse_existing_record requires reuse_base_embed_record to be set"
+                )
+            mode_label = "reuse_existing_record"
+        else:
+            mode_label = normalized_mode
+
+    if effective_reuse_record is not None:
+        mode_label = "reuse_existing_record"
+
+    return effective_fresh_run, effective_resume, effective_reuse_record, mode_label
+
+
+def _archive_run_outputs(run_root: Path) -> Path:
+    archive_path = run_root.parent / f"{run_root.name}_paper_ablation_outputs.zip"
+    if archive_path.exists():
+        archive_path.unlink()
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive_handle:
+        for file_path in sorted(run_root.rglob("*")):
+            if file_path.is_file():
+                archive_handle.write(file_path, arcname=str(file_path.relative_to(run_root.parent)))
+    return archive_path
 
 
 def _prepare_stage_config_for_optional_metrics(
@@ -591,6 +919,9 @@ def run_paper_ablation_workflow(
     run_root: Path | None = None,
     run_tag: str | None = None,
     selected_variant_names: Optional[List[str]] = None,
+    fresh_run: bool = False,
+    resume: bool = False,
+    reuse_base_embed_record: Path | None = None,
     dry_run: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -603,6 +934,10 @@ def run_paper_ablation_workflow(
         run_root: Optional explicit output root.
         run_tag: Optional run tag used when run_root is absent.
         selected_variant_names: Optional variant-name filter.
+        fresh_run: Whether the run root must be empty.
+        resume: Whether to continue an existing run root and reuse completed stages.
+        reuse_base_embed_record: Optional explicit embed record path reused as the
+            shared detect input.
         dry_run: Whether to print commands without executing subprocesses.
 
     Returns:
@@ -614,10 +949,25 @@ def run_paper_ablation_workflow(
     resolved_config_path = _resolve_repo_path(config_path)
     cfg_obj = _read_yaml_config(resolved_config_path)
     workflow_cfg = _resolve_workflow_cfg(cfg_obj)
-    variants = _resolve_selected_variants(_load_variant_definitions(workflow_cfg), selected_variant_names)
+    effective_selected_variant_names = _resolve_effective_selected_variant_names(workflow_cfg, selected_variant_names)
+    variants = _resolve_selected_variants(_load_variant_definitions(workflow_cfg), effective_selected_variant_names)
+    effective_fresh_run, effective_resume, effective_reuse_base_embed_record, reuse_mode = _resolve_reuse_mode(
+        workflow_cfg,
+        fresh_run=fresh_run,
+        resume=resume,
+        reuse_base_embed_record=reuse_base_embed_record,
+    )
     effective_run_root = _resolve_run_root(workflow_cfg, run_root, run_tag)
-    _ensure_clean_run_root(effective_run_root)
+    _ensure_clean_run_root(
+        effective_run_root,
+        fresh_run=effective_fresh_run,
+        resume=effective_resume,
+        reuse_base_embed_record=effective_reuse_base_embed_record,
+    )
     layout = _resolve_layout(workflow_cfg, effective_run_root)
+    summary_fields = _resolve_compare_fields(workflow_cfg, "summary_fields", DEFAULT_COMPARE_SUMMARY_FIELDS)
+    table_fields = _resolve_compare_fields(workflow_cfg, "table_fields", DEFAULT_COMPARE_TABLE_FIELDS)
+    notebook_runtime_cfg = _resolve_notebook_runtime_cfg(workflow_cfg)
 
     base_embed_cfg = _require_mapping(workflow_cfg.get("base_embed"), f"{WORKFLOW_SECTION_KEY}.base_embed")
     base_embed_overrides = _normalize_dotted_overrides(base_embed_cfg.get("overrides"), f"{WORKFLOW_SECTION_KEY}.base_embed.overrides")
@@ -625,21 +975,48 @@ def run_paper_ablation_workflow(
     base_embed_cfg_path = layout.config_snapshot_root / "base_embed_config.yaml"
     _write_yaml_file(base_embed_cfg_path, base_embed_snapshot)
 
-    _run_subprocess(_build_embed_command(layout.base_embed_root, base_embed_cfg_path), _repo_root, dry_run)
-    base_embed_record_path = layout.base_embed_root / "records" / "embed_record.json"
-    if not dry_run and (not base_embed_record_path.exists() or not base_embed_record_path.is_file()):
-        raise FileNotFoundError(f"base embed record missing after embed stage: {base_embed_record_path}")
-
     detect_rerun_cfg = _require_mapping(workflow_cfg.get("detect_rerun"), f"{WORKFLOW_SECTION_KEY}.detect_rerun")
     input_record_rel_path = _require_non_empty_str(
         detect_rerun_cfg.get("input_record_rel_path", "records/embed_record.json"),
         f"{WORKFLOW_SECTION_KEY}.detect_rerun.input_record_rel_path",
     )
+    base_embed_record_rel_path = _require_non_empty_str(
+        base_embed_cfg.get("embed_record_rel_path", input_record_rel_path),
+        f"{WORKFLOW_SECTION_KEY}.base_embed.embed_record_rel_path",
+    )
     variant_dir_pattern = _require_non_empty_str(
         detect_rerun_cfg.get("variant_dir_pattern", "{suffix}"),
         f"{WORKFLOW_SECTION_KEY}.detect_rerun.variant_dir_pattern",
     )
-    base_input_record_path = layout.base_embed_root / input_record_rel_path
+    allow_resume = bool(base_embed_cfg.get("allow_resume", True))
+    allow_reuse_existing_record = bool(base_embed_cfg.get("allow_reuse_existing_record", True))
+    allow_detect_only = bool(detect_rerun_cfg.get("allow_detect_only", True))
+    reuse_existing_detect_results = bool(detect_rerun_cfg.get("reuse_existing_detect_results", False))
+
+    local_base_embed_record_path = layout.base_embed_root / base_embed_record_rel_path
+    if effective_reuse_base_embed_record is not None:
+        if not allow_reuse_existing_record:
+            raise ValueError("base_embed.allow_reuse_existing_record is false, cannot reuse external embed record")
+        base_embed_record_path = _resolve_repo_path(effective_reuse_base_embed_record)
+        if not base_embed_record_path.exists() or not base_embed_record_path.is_file():
+            raise FileNotFoundError(f"reuse_base_embed_record is missing: {base_embed_record_path}")
+        if not allow_detect_only:
+            raise ValueError("detect_rerun.allow_detect_only must be true when reuse_base_embed_record is provided")
+        base_embed_stage_executed = False
+        base_embed_source_mode = "external_embed_record"
+    elif effective_resume and allow_resume and local_base_embed_record_path.exists() and local_base_embed_record_path.is_file():
+        base_embed_record_path = local_base_embed_record_path
+        base_embed_stage_executed = False
+        base_embed_source_mode = "resume_existing_base_embed"
+    else:
+        _run_subprocess(_build_embed_command(layout.base_embed_root, base_embed_cfg_path), _repo_root, dry_run)
+        base_embed_record_path = local_base_embed_record_path
+        if not dry_run and (not base_embed_record_path.exists() or not base_embed_record_path.is_file()):
+            raise FileNotFoundError(f"base embed record missing after embed stage: {base_embed_record_path}")
+        base_embed_stage_executed = True
+        base_embed_source_mode = "new_embed"
+
+    base_input_record_path = base_embed_record_path
 
     variant_rows: List[Dict[str, Any]] = []
     variant_manifest_entries: List[Dict[str, Any]] = []
@@ -652,11 +1029,16 @@ def run_paper_ablation_workflow(
         variant_cfg_path = layout.config_snapshot_root / "variants" / f"{variant.suffix}.yaml"
         _write_yaml_file(variant_cfg_path, variant_snapshot)
 
-        _run_subprocess(
-            _build_detect_command(variant_run_root, variant_cfg_path, base_input_record_path),
-            _repo_root,
-            dry_run,
+        detect_record_path = variant_run_root / "records" / "detect_record.json"
+        reuse_existing_detect_record = bool(
+            effective_resume and reuse_existing_detect_results and detect_record_path.exists() and detect_record_path.is_file()
         )
+        if not reuse_existing_detect_record:
+            _run_subprocess(
+                _build_detect_command(variant_run_root, variant_cfg_path, base_input_record_path),
+                _repo_root,
+                dry_run,
+            )
 
         calibrate_cfg_path = None
         evaluate_cfg_path = None
@@ -681,7 +1063,6 @@ def run_paper_ablation_workflow(
             _write_yaml_file(evaluate_cfg_path, evaluate_snapshot)
             _run_subprocess(_build_evaluate_command(variant_run_root, evaluate_cfg_path), _repo_root, dry_run)
 
-        detect_record_path = variant_run_root / "records" / "detect_record.json"
         if dry_run:
             detect_record_payload = {}
         else:
@@ -706,9 +1087,17 @@ def run_paper_ablation_workflow(
                 "config_snapshot_path": str(variant_cfg_path),
                 "calibrate_config_snapshot_path": str(calibrate_cfg_path) if calibrate_cfg_path is not None else None,
                 "evaluate_config_snapshot_path": str(evaluate_cfg_path) if evaluate_cfg_path is not None else None,
+                "detect_stage_executed": not reuse_existing_detect_record,
+                "reused_existing_detect_record": reuse_existing_detect_record,
+                "group": variant.group,
+                "category": variant.category,
                 "overrides": variant.overrides,
             }
         )
+
+    archive_path = None
+    if bool(notebook_runtime_cfg.get("package_zip", False)):
+        archive_path = _archive_run_outputs(layout.run_root)
 
     manifest_obj: Dict[str, Any] = {
         "schema_version": NOTEBOOK_CONFIG_TEMPLATE_VERSION,
@@ -718,23 +1107,39 @@ def run_paper_ablation_workflow(
             "run_root": str(layout.base_embed_root),
             "embed_record_path": str(base_embed_record_path),
             "config_snapshot_path": str(base_embed_cfg_path),
+            "stage_executed": base_embed_stage_executed,
+            "source_mode": base_embed_source_mode,
+            "reuse_mode": reuse_mode,
+            "reuse_source_path": str(effective_reuse_base_embed_record) if effective_reuse_base_embed_record is not None else None,
             "overrides": base_embed_overrides,
         },
         "detect_rerun": {
             "input_record_path": str(base_input_record_path),
+            "allow_detect_only": allow_detect_only,
+            "reuse_existing_detect_results": reuse_existing_detect_results,
             "enable_calibration": bool(detect_rerun_cfg.get("enable_calibration", False)),
             "enable_evaluate": bool(detect_rerun_cfg.get("enable_evaluate", False)),
             "reuse_thresholds_artifact": detect_rerun_cfg.get("reuse_thresholds_artifact"),
         },
+        "compare": {
+            "summary_fields": summary_fields,
+            "table_fields": table_fields,
+        },
+        "notebook_runtime": notebook_runtime_cfg,
+        "archive_path": str(archive_path) if archive_path is not None else None,
         "variants": variant_manifest_entries,
     }
     compare_summary_obj: Dict[str, Any] = {
-        "schema_version": "paper_ablation_compare_summary_v1",
+        "schema_version": "paper_ablation_compare_summary_v2",
         "run_root": str(layout.run_root),
         "base_embed_run_root": str(layout.base_embed_root),
         "base_embed_record_path": str(base_embed_record_path),
+        "reuse_mode": reuse_mode,
+        "archive_path": str(archive_path) if archive_path is not None else None,
         "variant_count": len(variant_rows),
-        "variants": variant_rows,
+        "summary_fields": summary_fields,
+        "table_fields": table_fields,
+        "variants": [_filter_row_fields(row, summary_fields) for row in variant_rows],
     }
 
     manifest_path = layout.compare_root / "ablation_manifest.json"
@@ -742,15 +1147,17 @@ def run_paper_ablation_workflow(
     compare_table_path = layout.compare_root / "ablation_compare_table.csv"
     _write_json(manifest_path, manifest_obj)
     _write_json(compare_summary_path, compare_summary_obj)
-    _write_compare_csv(compare_table_path, variant_rows)
+    _write_compare_csv(compare_table_path, variant_rows, table_fields)
 
     result: Dict[str, Any] = {
         "run_root": str(layout.run_root),
         "base_embed_run_root": str(layout.base_embed_root),
         "base_embed_record_path": str(base_embed_record_path),
+        "reuse_mode": reuse_mode,
         "manifest_path": str(manifest_path),
         "compare_summary_path": str(compare_summary_path),
         "compare_table_path": str(compare_table_path),
+        "archive_path": str(archive_path) if archive_path is not None else None,
         "variant_names": [variant.name for variant in variants],
     }
     print(json.dumps(result, indent=2, ensure_ascii=False))
@@ -783,6 +1190,21 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Variant name to execute. Can be repeated.",
     )
     parser.add_argument(
+        "--fresh-run",
+        action="store_true",
+        help="Require run_root to be empty before execution.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Reuse completed base embed and detect stages under an existing run_root when possible.",
+    )
+    parser.add_argument(
+        "--reuse-base-embed-record",
+        default=None,
+        help="Explicit existing embed_record.json path reused as the shared detect input.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print commands without executing subprocesses.",
@@ -810,6 +1232,13 @@ def main() -> int:
             run_root=_resolve_repo_path(args.run_root) if isinstance(args.run_root, str) and args.run_root.strip() else None,
             run_tag=args.run_tag,
             selected_variant_names=args.variant,
+            fresh_run=bool(args.fresh_run),
+            resume=bool(args.resume),
+            reuse_base_embed_record=(
+                _resolve_repo_path(args.reuse_base_embed_record)
+                if isinstance(args.reuse_base_embed_record, str) and args.reuse_base_embed_record.strip()
+                else None
+            ),
             dry_run=bool(args.dry_run),
         )
         return 0

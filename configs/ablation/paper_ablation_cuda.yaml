@@ -68,6 +68,9 @@ watermark:
 detect:
   content:
     enabled: true
+    lf_exact_repair:
+      enabled: true
+      mode: "host_template_recenter"
   geometry:
     enabled: true
     enable_attention_anchor: true
@@ -82,6 +85,9 @@ detect:
       - "transformer_blocks.6.attn"
       - "transformer_blocks.7.attn"
     sync_primary_anchor_secondary: true
+    geo_score_repair:
+      enabled: true
+      mode: "template_confidence"
 
 enable_mask: true
 mask:
@@ -177,6 +183,9 @@ paper_ablation_workflow:
   config_snapshot_dir: "compare/config_snapshots"
   base_embed:
     run_subdir: "base_embed"
+    embed_record_rel_path: "records/embed_record.json"
+    allow_resume: true
+    allow_reuse_existing_record: true
     overrides: {}
   detect_rerun:
     variants_dir: "variants"
@@ -184,6 +193,8 @@ paper_ablation_workflow:
     input_record_rel_path: "records/embed_record.json"
     variant_dir_pattern: "{suffix}"
     strict_single_variable: true
+    allow_detect_only: true
+    reuse_existing_detect_results: true
     enable_calibration: false
     enable_evaluate: false
     calibration_detect_records_glob: null
@@ -193,47 +204,104 @@ paper_ablation_workflow:
       - name: "GEO-on"
         suffix: "GEO-on"
         enabled: true
-        description: "Faithful detect baseline with geometry evidence enabled."
-        overrides: {}
+        group: "geo_repair_toggle"
+        category: "detect_single_variable"
+        description: "Same-object detect rerun with GEO repair enabled while keeping the geometry chain intact."
+        overrides:
+          detect.geometry.geo_score_repair.enabled: true
       - name: "GEO-off"
         suffix: "GEO-off"
         enabled: true
-        description: "Disable geometry evidence while reusing the same embedded object."
+        group: "geo_repair_toggle"
+        category: "detect_single_variable"
+        description: "Same-object detect rerun with GEO repair disabled while keeping the geometry chain intact."
         overrides:
-          ablation.enable_geometry: false
-      - name: "LF-on"
-        suffix: "LF-on"
+          detect.geometry.geo_score_repair.enabled: false
+      - name: "LF-repair-on"
+        suffix: "LF-repair-on"
         enabled: true
-        description: "Faithful detect baseline with LF evidence enabled."
-        overrides: {}
-      - name: "LF-off"
-        suffix: "LF-off"
-        enabled: true
-        description: "Disable LF evidence while reusing the same embedded object."
+        group: "lf_repair_toggle"
+        category: "detect_single_variable"
+        description: "Same-object detect rerun with LF exact repair enabled."
         overrides:
-          ablation.enable_lf: false
-      - name: "HF-on"
-        suffix: "HF-on"
+          detect.content.lf_exact_repair.enabled: true
+      - name: "LF-repair-off"
+        suffix: "LF-repair-off"
         enabled: true
-        description: "Faithful detect baseline with HF evidence enabled."
-        overrides: {}
-      - name: "HF-off"
-        suffix: "HF-off"
-        enabled: true
-        description: "Disable HF evidence while reusing the same embedded object."
+        group: "lf_repair_toggle"
+        category: "detect_single_variable"
+        description: "Same-object detect rerun with LF exact repair disabled."
         overrides:
-          ablation.enable_hf: false
-      - name: "ANCHOR-on"
-        suffix: "ANCHOR-on"
-        enabled: true
-        description: "Faithful detect baseline with anchor evidence enabled."
-        overrides: {}
-      - name: "ANCHOR-off"
-        suffix: "ANCHOR-off"
-        enabled: true
-        description: "Disable attention anchor evidence while reusing the same embedded object."
-        overrides:
-          ablation.enable_anchor: false
+          detect.content.lf_exact_repair.enabled: false
+  compare:
+    summary_fields:
+      - variant_name
+      - variant_suffix
+      - variant_group
+      - variant_category
+      - attestation_status
+      - attestation_result_status
+      - content_attestation_score
+      - event_attestation_score
+      - channel_scores_lf
+      - channel_scores_hf
+      - channel_scores_geo
+      - active_score_source
+      - active_geo_score_source
+      - geo_repair_enabled
+      - geo_repair_active
+      - geo_repair_mode
+      - geo_score_repair_enabled
+      - geo_score_repair_active
+      - geo_score_repair_mode
+      - geo_repair_direction_classification
+      - lf_exact_repair_enabled
+      - lf_exact_repair_applied
+      - lf_exact_repair_mode
+      - formal_exact_evidence_source
+      - protocol_root_cause_classification
+      - variant_run_root
+      - detect_record_path
+      - input_record_path
+      - config_snapshot_path
+      - variant_overrides
+    table_fields:
+      - variant_name
+      - variant_suffix
+      - variant_group
+      - variant_category
+      - attestation_status
+      - content_attestation_score
+      - event_attestation_score
+      - channel_scores_lf
+      - channel_scores_hf
+      - channel_scores_geo
+      - active_geo_score_source
+      - geo_repair_enabled
+      - geo_repair_active
+      - geo_repair_mode
+      - geo_score_repair_enabled
+      - geo_score_repair_active
+      - geo_score_repair_mode
+      - geo_repair_direction_classification
+      - lf_exact_repair_enabled
+      - lf_exact_repair_applied
+      - lf_exact_repair_mode
+      - formal_exact_evidence_source
+      - protocol_root_cause_classification
+      - detect_record_path
+  notebook_runtime:
+    repo_source_mode: "local_existing"
+    run_tag: null
+    selected_variants:
+      - "GEO-off"
+      - "GEO-on"
+    base_embed_reuse_mode: "fresh_run"
+    reuse_base_embed_record: null
+    package_zip: true
+    export_to_drive: true
+    output_root: "outputs/Paper_Ablation_Cuda"
+    drive_export_subdir: "Paper_Ablation_Cuda"
 
 experiment_matrix:
   config_path: "configs/ablation/paper_ablation_cuda.yaml"
