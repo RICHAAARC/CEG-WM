@@ -149,6 +149,70 @@ impl:
 detect_runtime:
   image_domain_sidecar_enabled: false  # 论文正式路径不允许 image-domain sidecar（v2.0 收口）
 
+paper_ablation_workflow:
+  output_root: "outputs/Paper_Ablation_Cuda"
+  run_tag: null
+  config_snapshot_dir: "compare/config_snapshots"
+  base_embed:
+    run_subdir: "base_embed"
+    overrides: {}
+  detect_rerun:
+    variants_dir: "variants"
+    compare_dir: "compare"
+    input_record_rel_path: "records/embed_record.json"
+    variant_dir_pattern: "{suffix}"
+    strict_single_variable: true
+    enable_calibration: false
+    enable_evaluate: false
+    calibration_detect_records_glob: null
+    evaluate_detect_records_glob: null
+    reuse_thresholds_artifact: null
+    variants:
+      - name: "GEO-on"
+        suffix: "GEO-on"
+        enabled: true
+        description: "Faithful detect baseline with geometry evidence enabled."
+        overrides: {}
+      - name: "GEO-off"
+        suffix: "GEO-off"
+        enabled: true
+        description: "Disable geometry evidence while reusing the same embedded object."
+        overrides:
+          ablation.enable_geometry: false
+      - name: "LF-on"
+        suffix: "LF-on"
+        enabled: true
+        description: "Faithful detect baseline with LF evidence enabled."
+        overrides: {}
+      - name: "LF-off"
+        suffix: "LF-off"
+        enabled: true
+        description: "Disable LF evidence while reusing the same embedded object."
+        overrides:
+          ablation.enable_lf: false
+      - name: "HF-on"
+        suffix: "HF-on"
+        enabled: true
+        description: "Faithful detect baseline with HF evidence enabled."
+        overrides: {}
+      - name: "HF-off"
+        suffix: "HF-off"
+        enabled: true
+        description: "Disable HF evidence while reusing the same embedded object."
+        overrides:
+          ablation.enable_hf: false
+      - name: "ANCHOR-on"
+        suffix: "ANCHOR-on"
+        enabled: true
+        description: "Faithful detect baseline with anchor evidence enabled."
+        overrides: {}
+      - name: "ANCHOR-off"
+        suffix: "ANCHOR-off"
+        enabled: true
+        description: "Disable attention anchor evidence while reusing the same embedded object."
+        overrides:
+          ablation.enable_anchor: false
+
 experiment_matrix:
   config_path: "configs/ablation/paper_ablation_cuda.yaml"
   allow_failed_semantics_collection: true
