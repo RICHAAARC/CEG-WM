@@ -51,7 +51,7 @@ def select_np_threshold_from_artifact(thresholds_artifact: Dict[str, Any]) -> fl
     return float(threshold_value)
 
 
-def get_np_threshold(cfg: Dict[str, Any], thresholds_spec: Dict[str, Any]) -> Tuple[float, str, bool]:
+def get_np_threshold(cfg: Dict[str, Any], thresholds_spec: Dict[str, Any]) -> Tuple[float | None, str, bool]:
     """
     功能：解析 NP 阈值并返回来源标签。
 
@@ -83,10 +83,9 @@ def get_np_threshold(cfg: Dict[str, Any], thresholds_spec: Dict[str, Any]) -> Tu
 
     fallback_enabled_for_tests = bool(cfg.get("allow_threshold_fallback_for_tests", False))
     if not fallback_enabled_for_tests:
-        # 生产默认禁用 fallback，未提供工件时必须 fail-fast。
-        raise ValueError(
-            "np threshold artifact is required; set __thresholds_artifact__ or explicitly enable allow_threshold_fallback_for_tests"
-        )
+        # 缺失 NP 阈值工件时，detect 前校准阶段仅允许输出 observation-only 结果，
+        # 不得伪装为最终正式判决。
+        return None, "observation_only_pre_calibration", False
 
     target_fpr = thresholds_spec.get("target_fpr")
     if not isinstance(target_fpr, (int, float)):
@@ -240,9 +239,36 @@ class NeumanPearsonFusionRule:
                 audit=audit
             )
 
-        # (5) NP 阈值选择：默认强制 artifact 绑定，fallback 仅测试显式开关可用
+        # (5) NP 阈值选择：优先 artifact；无 artifact 时进入 observation-only 或 legacy test fallback。
         thresholds_artifact = cfg.get("__thresholds_artifact__")
         np_threshold, threshold_source, fallback_enabled_for_tests = get_np_threshold(cfg, thresholds_spec)
+
+        if np_threshold is None:
+            evidence_summary = {
+                "content_score": content_score,
+                "geometry_score": geometry_score,
+                "content_status": content_status,
+                "geometry_status": geometry_status,
+                "fusion_rule_id": self.impl_id,
+            }
+            audit = {
+                "impl_id": self.impl_id,
+                "impl_version": self.impl_version,
+                "impl_digest": self.impl_digest,
+                "decision_status": "abstain",
+                "threshold_source": threshold_source,
+                "used_threshold_value": None,
+                "allow_threshold_fallback_for_tests": fallback_enabled_for_tests,
+                "reason": "np_threshold_artifact_absent_observation_only",
+                "content_observation_ready": isinstance(content_score, (int, float)),
+            }
+            return FusionDecision(
+                is_watermarked=None,
+                decision_status="abstain",
+                thresholds_digest=thresholds_digest,
+                evidence_summary=evidence_summary,
+                audit=audit,
+            )
 
         # (6) NP 主决策：内容分数 vs 阈值
         if not isinstance(content_score, (int, float)):

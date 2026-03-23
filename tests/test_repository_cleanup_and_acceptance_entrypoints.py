@@ -124,3 +124,26 @@ def test_paper_full_entrypoint_defaults_to_formal_profile() -> None:
 
     assert module.DEFAULT_CONFIG_PATH.as_posix() == "configs/paper_full_cuda.yaml"
     assert module.DEFAULT_RUN_ROOT.as_posix() == "outputs/onefile_paper_full_cuda_verify"
+
+
+def test_paper_full_cuda_output_entrypoint_defaults_to_project_outputs_only() -> None:
+    """
+    功能：验证新的 paper_full_cuda 输出导向入口绑定正式配置且不走 formal 验收。
+
+    Verify the new paper_full_cuda output entrypoint binds the official config
+    and uses the output-only run root.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    module = _load_module(
+        "run_paper_full_cuda_test",
+        repo_root / "scripts" / "run_paper_full_cuda.py",
+    )
+
+    assert module.DEFAULT_CONFIG_PATH.as_posix() == "configs/paper_full_cuda.yaml"
+    assert module.DEFAULT_RUN_ROOT.as_posix() == "outputs/colab_run_paper_full_cuda"

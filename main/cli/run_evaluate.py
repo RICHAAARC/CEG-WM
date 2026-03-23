@@ -42,6 +42,7 @@ from main.evaluation import report_builder as eval_report_builder
 from main.watermarking.detect.orchestrator import run_evaluate_orchestrator
 from main.watermarking.fusion import decision_writer
 from main.core.errors import RunFailureReason
+from main.evaluation.workflow_inputs import ensure_minimal_ground_truth_records
 from main.cli.run_common import (
     bind_impl_identity_fields,
     set_failure_status,
@@ -219,6 +220,26 @@ def _autofill_evaluate_inputs(cfg: Any, run_root: Any) -> None:
     cfg_dict["evaluate"] = evaluate_cfg
 
 
+def _ensure_evaluate_detect_records_ready(cfg: Any, run_root: Any) -> Dict[str, Any]:
+    """
+    功能：为 evaluate 阶段补齐主代码内生的最小标签输入。
+
+    Ensure evaluate has a labelled detect-record set prepared by main code.
+
+    Args:
+        cfg: Mutable runtime config mapping.
+        run_root: Current run root path.
+
+    Returns:
+        Preparation summary mapping.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    return ensure_minimal_ground_truth_records(cfg, run_root, "evaluate")
+
+
 def run_evaluate(output_dir: Any, config_path: Any, overrides: Any = None) -> None:
     """
     功能：执行评估流程（只读阈值模式）。
@@ -348,6 +369,7 @@ def run_evaluate(output_dir: Any, config_path: Any, overrides: Any = None) -> No
             run_meta["policy_path"] = cfg["policy_path"]
 
             _autofill_evaluate_inputs(cfg, run_root)
+            run_meta["workflow_input_preparation"] = _ensure_evaluate_detect_records_ready(cfg, run_root)
 
             # 样本有效性前置门禁（n_pos/n_neg 不能为0）。
             _validate_detect_record_label_balance_for_evaluate(cfg)

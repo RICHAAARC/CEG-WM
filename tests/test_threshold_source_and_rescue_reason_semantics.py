@@ -56,13 +56,12 @@ class TestB1ThresholdSourceAudit:
         # 验证：used_threshold_value 应来自 artifact
         assert result.audit.get("used_threshold_value") == 0.5
     
-    def test_threshold_source_fallback_when_artifact_missing(self, np_fusion):
+    def test_threshold_source_observation_only_when_artifact_missing(self, np_fusion):
         """
-        测试：当 __thresholds_artifact__ 缺失时，默认应 fail-fast。
+        测试：当 __thresholds_artifact__ 缺失时，应进入 observation-only 语义。
         """
         cfg = {
             "target_fpr": 0.1
-            # 注意：没有 __thresholds_artifact__
         }
         
         content_evidence = {
@@ -75,8 +74,12 @@ class TestB1ThresholdSourceAudit:
             "status": "ok"
         }
         
-        with pytest.raises(ValueError, match="np threshold artifact is required"):
-            _ = np_fusion.fuse(cfg, content_evidence, geometry_evidence)
+        result = np_fusion.fuse(cfg, content_evidence, geometry_evidence)
+        assert result.decision_status == "abstain"
+        assert result.is_watermarked is None
+        assert result.audit.get("threshold_source") == "observation_only_pre_calibration"
+        assert result.audit.get("reason") == "np_threshold_artifact_absent_observation_only"
+        assert result.evidence_summary.get("content_score") == 0.05
 
     def test_threshold_source_fallback_only_when_test_flag_enabled(self, np_fusion):
         """

@@ -100,6 +100,34 @@ def _resolve_detect_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
     return cast(Dict[str, Any], detect_node) if isinstance(detect_node, dict) else {}
 
 
+def _bind_observation_only_threshold_semantics(cfg: Dict[str, Any], run_meta: Dict[str, Any]) -> None:
+    """
+    功能：在缺失 NP 阈值工件时绑定 observation-only 正式语义。
+
+    Bind the formal observation-only threshold semantics when detect runs before
+    calibration and no NP thresholds artifact is available.
+
+    Args:
+        cfg: Mutable runtime configuration mapping.
+        run_meta: Mutable run metadata mapping.
+
+    Returns:
+        None.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(run_meta, dict):
+        raise TypeError("run_meta must be dict")
+
+    has_thresholds_artifact = isinstance(cfg.get("__thresholds_artifact__"), dict)
+    observation_only_active = (not has_thresholds_artifact) and (not bool(cfg.get("allow_threshold_fallback_for_tests", False)))
+    cfg["__detect_observation_only__"] = observation_only_active
+    if observation_only_active:
+        run_meta["thresholds_source"] = "observation_only_pre_calibration"
+    elif has_thresholds_artifact and "thresholds_source" not in run_meta:
+        run_meta["thresholds_source"] = "np_canonical"
+
+
 def _resolve_nested_mapping(parent: Dict[str, Any], key: str) -> Dict[str, Any]:
     """
     功能：从父映射中解析子字典节点。
@@ -1304,6 +1332,8 @@ def run_detect(
                     # 加载失败时 fail-fast，不允许 silent fallback。
                     set_failure_status(run_meta, RunFailureReason.CONFIG_INVALID, exc)
                     raise
+
+            _bind_observation_only_threshold_semantics(cfg, run_meta)
 
         # 预先计算 content 与 subspace 计划，用于注入上下文。
         # 这里必须使用 embed-mode 提取 mask_digest，避免 detect-mode 在无 detector_inputs 时返回 absent。

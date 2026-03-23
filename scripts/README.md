@@ -1,249 +1,70 @@
-# 审计与工作流脚本使用说明
+# scripts 目录说明
 
-本目录包含工作流编排、冻结前对抗式审计和复现实验相关脚本。
+当前 README 仅保留一条推荐链路：
 
-## 目录结构
+- scripts/run_paper_full_cuda.py
 
-```
-scripts/
-├── run_onefile_workflow.py                             # 一键全链路（embed/detect/calibrate/evaluate/audits/signoff）
-├── run_cpu_first_e2e_verification.py                   # CPU smoke 闭环验收
-├── run_paper_full_workflow_verification.py             # paper_full CUDA 正式验收
-├── run_all_audits.py                                    # 审计聚合器（主入口）
-├── run_freeze_signoff.py                                # 冻结签署工具（baseline/paper/publish profile）
-├── run_experiment_matrix.py                             # 试验矩阵聚合器
-├── run_publish_workflow.py                              # publish 工作流编排
-├── run_repro_pipeline.py                                # 复现实验流水线
-├── workflow_acceptance_common.py                        # workflow 验收摘要共用工具
-└── audits/
-  ├── audit_write_bypass_scan.py                         # records.write_path_is_unbypassable（legacy_code=B1/B5）
-  ├── audit_yaml_loader_uniqueness.py                    # config.yaml_loader_is_safe_and_unique（legacy_code=A6）
-  ├── audit_freeze_surface_integrity.py                  # freeze_surface.integrity_and_single_source_loading（legacy_code=A1-A7）
-  ├── audit_registry_injection_surface.py                # registry.seal_and_runtime_injection_resistance（legacy_code=C1/C4）
-  ├── audit_policy_path_semantics_binding.py             # policy.path_semantics_binding_and_audit_evidence（legacy_code=B3/D1/D2）
-  ├── audit_dangerous_exec_and_pickle_scan.py            # runtime.dangerous_execution_and_deserialization_blocked（legacy_code=D9）
-  ├── audit_network_access_scan.py                       # runtime.network_access_is_audited_or_blocked（legacy_code=D10）
-  ├── audit_evaluation_report_schema.py                  # evaluation_report 锚点字段完整性（signoff BLOCK）
-  ├── audit_records_fields_append_only.py                # append-only 字段注册一致性（signoff BLOCK）
-  ├── audit_attack_protocol_implementable.py             # attack protocol 协议—实现一致性（paper/publish BLOCK）
-  ├── audit_attack_protocol_report_coverage.py           # attack protocol 声明与报告覆盖率对齐（paper/publish BLOCK）
-  ├── audit_experiment_matrix_outputs_schema.py          # experiment matrix 工件 schema（paper/publish BLOCK）
-  └── audit_repro_bundle_integrity.py                    # reproduction bundle 完整性（paper/publish BLOCK）
+## 用途
 
-tests/
-├── conftest.py
-├── test_*.py                                            # 回归测试集（以仓库当前 tests 目录为准）
-└── ...
-```
+scripts/run_paper_full_cuda.py 是 paper_full_cuda 的 output-only 编排入口。
+
+职责边界：
+
+- 顺序执行 embed、detect、calibrate、evaluate。
+- 当配置启用 experiment_matrix 时，补充执行 experiment_matrix。
+- 直接消费 configs/paper_full_cuda.yaml。
+- 不执行 formal acceptance。
+- 不执行 signoff。
+- 不生成旧 formal 验收链路中的补洞型控制逻辑。
 
 ## 使用方法
-
-### 验收入口
-
-CPU smoke 闭环验收：
-
-```powershell
-python scripts/run_cpu_first_e2e_verification.py --config configs/smoke_cpu.yaml
-```
-
-paper_full CUDA 正式验收：
-
-```powershell
-python scripts/run_paper_full_workflow_verification.py --config configs/paper_full_cuda.yaml
-```
-
-### 0. 一键评测复现与审计流程（稳定锚点）
-
-**完整工作流：从评测执行 → 报告生成 → 审计验证**
-
-```powershell
-# 步骤 1: 在仓库根目录执行（需配置好 conda 环境）
-cd d:\Code\CEG-WM
-
-# 步骤 2: 运行评测流程（produce evaluation_report.json）
-# 假设已完成 embed/detect/calibrate，此步仅执行 evaluate
-python -m main.cli.evaluate_cli --config configs/default.yaml --output outputs/smoke_detect
-
-# 步骤 3: 运行审计聚合器（验证所有冻结约束）
-python scripts/run_all_audits.py --repo-root . --output audit_report.json
-
-# 步骤 4: 检查 FreezeSignoffDecision
-# 如果值为 "ALLOW_FREEZE"，说明当前代码满足冻结条件
-python -c "import json; r=json.load(open('audit_report.json')); print(f\"Decision: {r['summary']['FreezeSignoffDecision']}\")"
-
-# 步骤 5: 运行完整回归测试（确保未引入破坏性变更）
-pytest tests/ -q
-```
-
-**关键字段对应支撑锚点：**
-
-| 锚点 | 对应文件 | 关键字段 | 语义 |
-|------|------|------|------|
-| evaluation_report.json | outputs/smoke_detect/ | `cfg_digest`, `attack_protocol_digest` | 评测前后配置一致性 |
-| metrics_by_attack_condition[*] | evaluation_report.json | `group_key` = "family::params_version" | 声明的攻击条件被执行且上报 |
-| audit_report.json | . | `summary.FreezeSignoffDecision` | 冻结审计集合决议 |
-| protocol_conditions_count | audit report (coverage) | 与 reported_conditions_count 对比 | 协议完整性：声明=执行 |
-
-**预期输出示例（PASS 状态）：**
-```json
-{
-  "summary": {
-    "FreezeSignoffDecision": "ALLOW_FREEZE",
-    "BlockingReasons": [],
-    "RiskSummary": "LOW"
-  },
-  "metadata": {
-    "profile": "paper",
-    "audit_count": 16
-  }
-}
-```
-
-### 1. 运行所有审计脚本
 
 在仓库根目录执行：
 
 ```powershell
-python scripts/run_all_audits.py --repo-root . --output audit_report.json
+python scripts/run_paper_full_cuda.py --config configs/paper_full_cuda.yaml --run-root outputs/colab_run_paper_full_cuda
 ```
 
-**参数说明：**
-- `--repo-root`：仓库根目录（默认当前目录）
-- `--output`：报告输出路径（默认输出到 stdout）
-- `--strict`：严格模式，对抗式扫描未输出命中列表视为 FAIL
-
-**退出码：**
-- `0`：允许冻结（FreezeSignoffDecision = ALLOW_FREEZE）
-- `1`：阻止冻结（FreezeSignoffDecision = BLOCK_FREEZE）
-
-### 2. 运行单个审计脚本
+如果当前环境已经就绪，也可以直接使用默认参数：
 
 ```powershell
-python scripts/audits/audit_write_bypass_scan.py .
+python scripts/run_paper_full_cuda.py
 ```
 
-每个审计脚本接受一个参数（仓库根目录），输出 JSON 格式的审计结果。
+## 输入
 
-### 3. 运行测试
+- 配置文件：configs/paper_full_cuda.yaml
+- 运行根目录：默认输出到 outputs/colab_run_paper_full_cuda
 
-安装依赖：
-```powershell
-pip install pytest
-```
+## 主要输出
 
-运行所有测试：
-```powershell
-pytest tests/ -v
-```
+脚本成功执行后，run_root 下的核心产物包括：
 
-运行特定测试：
-```powershell
-pytest tests/test_schema_requires_interpretation.py -v
-```
+- records/embed_record.json
+- records/detect_record.json
+- records/calibration_record.json
+- records/evaluate_record.json
+- artifacts/thresholds/thresholds_artifact.json
+- artifacts/evaluation_report.json
+- artifacts/run_closure.json
 
-## 审计结果格式
+如果 experiment_matrix 启用，还会额外生成：
 
-每个审计脚本输出统一的 JSON 格式：
+- outputs/experiment_matrix/artifacts/grid_summary.json
 
-```json
-{
-  "audit_id": "records.write_path_is_unbypassable",
-  "gate_name": "records.write_path_is_unbypassable",
-  "legacy_code": "B1",
-  "formal_description": "受控写盘路径必须不可旁路。",
-  "category": "B",
-  "severity": "BLOCK",
-  "result": "PASS",
-  "rule": "禁止绕过受控写盘路径直接写入 records 或关键产物",
-  "evidence": {
-    "matches": [],
-    "fail_count": 0
-  },
-  "impact": "未发现阻断级写盘旁路",
-  "fix": "N.A."
-}
-```
+## 适用场景
 
-**字段说明：**
-- `audit_id`：审计项唯一标识
-- `gate_name`：门禁名称
-- `category`：类别（A-G）
-- `severity`：严重性（BLOCK / NON_BLOCK）
-- `result`：结果（PASS / FAIL / SKIP / N.A.）
-- `rule`：规则描述
-- `evidence`：证据（对抗式扫描包含 matches，协议对齐包含 condition 对比）
-- `impact`：影响说明（可选）
-- `fix`：修复建议（可选）
+- notebook/Paper_Full_Cuda.ipynb 的主执行入口
+- 本地或远端 GPU 环境下的 paper_full_cuda 项目输出生成
 
-### 新增审计：audit_attack_protocol_report_coverage
+## 当前约束
 
-**用途**：验证 attack_protocol.yaml 中声明的所有攻击条件（family::params_version）是否都被执行并上报到 evaluation_report.json。
-
-**规则**：
-- ✅ PASS：protocol_conditions_count == reported_conditions_count 且集合相等
-- ❌ FAIL：存在在协议中声明但未出现在报告中的条件（missed_conditions 非空）
-- ⚠️ FAIL：报告中包含未声明的条件（extra_reported_conditions 非空）
-- ⊘ SKIP：evaluation_report.json 尚未生成或路径不可达
-
-**证据字段**：
-```json
-{
-  "audit_id": "audit.attack_protocol_report_coverage",
-  "gate_name": "gate.attack_protocol_report_coverage",
-  "category": "G",
-  "severity": "BLOCK",
-  "result": "PASS|FAIL|SKIP",
-  "rule": "all declared attack conditions must be executed and reported; no undeclared conditions in report",
-  "evidence": {
-    "protocol_version": "attack_protocol_v1",
-    "protocol_spec_path": "configs/attack_protocol.yaml",
-    "eval_report_path": "outputs/smoke_detect/evaluation_report.json",
-    "protocol_conditions_count": 8,
-    "reported_conditions_count": 8,
-    "declared_conditions": ["composite::rotate_resize_v1", "crop::v1", "gaussian_blur::v1", ...],
-    "reported_conditions": [...],
-    "missed_conditions": [],
-    "extra_reported_conditions": []
-  }
-}
-```
-
-**集成位置**：
-- run_all_audits.py AUDIT_SCRIPTS（15 个脚本，排序：协议实现后）
-- paper profile：自动包含（PAPER_PROFILE_ADDITIONAL_AUDITS）
-- publish profile：自动包含（继承 paper）
-
-**失败排查**：
-1. 若 evaluation_report.json 缺失：检查是否已运行 evaluate 步骤
-2. 若 missed_conditions 非空：检查 attack_runner 是否真实执行了声明的攻击族
-3. 若 extra_reported_conditions 非空：协议版本可能滞后，检查是否需要更新 attack_protocol.yaml
-
-## 聚合报告格式
-
-`run_all_audits.py` 输出的聚合报告包含：
-
-```json
-{
-  "summary": {
-    "FreezeSignoffDecision": "ALLOW_FREEZE",
-    "BlockingReasons": [],
-    "RiskSummary": "LOW",
-    "counts": {
-      "PASS": 15,
-      "SKIP": 0,
-      "FAIL": 0,
-      "BLOCK_fails": 0
-    }
-  },
-  "results": [
-    // 所有审计结果明细（15 个审计的逐个输出）
-  ],
+本 README 暂不展开说明 scripts 目录中的其他脚本，后续按需要再补充。
   "metadata": {
     "repo_root": ".",
     "audit_count": 15,
     "profile": "paper"
   }
-}
 ```
 
 ### evaluation_report.json 字段映射表
