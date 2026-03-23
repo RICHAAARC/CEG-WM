@@ -35,10 +35,15 @@ def test_paper_ablation_config_exposes_workflow_section() -> None:
     assert isinstance(config_obj, dict)
     experiment_matrix_cfg = cast(Dict[str, Any], config_obj["experiment_matrix"])
     workflow_cfg = cast(Dict[str, Any], config_obj["paper_ablation_workflow"])
+    embed_cfg = cast(Dict[str, Any], config_obj["embed"])
+    attestation_cfg = cast(Dict[str, Any], config_obj["attestation"])
     variants = cast(List[Dict[str, Any]], workflow_cfg["detect_rerun"]["variants"])
     variant_names = [cast(str, variant["name"]) for variant in variants]
 
     assert isinstance(experiment_matrix_cfg.get("ablation_variants"), list)
+    assert cast(Dict[str, Any], embed_cfg["preview_generation"])["enabled"] is True
+    assert attestation_cfg["enabled"] is True
+    assert attestation_cfg["use_trajectory_mix"] is False
     assert "GEO-on" in variant_names
     assert "GEO-off" in variant_names
     assert "LF-off" in variant_names

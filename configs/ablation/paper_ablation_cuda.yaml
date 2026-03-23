@@ -87,9 +87,13 @@ enable_mask: true
 mask:
   impl_id: "semantic_saliency_model"
   saliency_source: "model"
+  semantic_model_source: "inspyrenet"
   semantic_model_path: "../models/inspyrenet/ckpt_base.pth"
 
 embed:
+  preview_generation:
+    enabled: true
+    artifact_rel_path: "preview/preview.png"
 
 ablation:
   # ===================== 消融开关总面板 =====================
@@ -145,6 +149,24 @@ impl:
   hf_embedder_id: "high_freq_truncation_codec"
   lf_coder_id: "low_freq_template_codec"
   use_latent_per_step: true
+
+attestation:
+  enabled: true
+  k_master_env_var: "CEG_WM_K_MASTER"
+  k_prompt_env_var: "CEG_WM_K_PROMPT"
+  k_seed_env_var: "CEG_WM_K_SEED"
+  signature_algorithm: "ed25519"
+  signed_bundle_schema: "gen_attest_bundle_v1"
+  signer_certificate_schema: "gen_attest_signer_cert_v1"
+  require_signed_bundle_verification: true
+  threshold: 0.65
+  lf_weight: 0.5
+  hf_weight: 0.3
+  geo_weight: 0.2
+  decision_mode: "content_primary_geo_rescue"
+  rescue_band_delta_low: 0.05
+  geo_rescue_min_score: 0.3
+  use_trajectory_mix: false
 
 detect_runtime:
   image_domain_sidecar_enabled: false  # 论文正式路径不允许 image-domain sidecar（v2.0 收口）
