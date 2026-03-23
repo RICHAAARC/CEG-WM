@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import subprocess
 import sys
 from pathlib import Path
@@ -294,6 +295,141 @@ def _emit_workflow_summary(summary_obj: Dict[str, Any]) -> None:
     print(json.dumps(summary_obj, indent=2, ensure_ascii=False, sort_keys=True))
 
 
+def _persist_workflow_summary(run_root: Path, summary_obj: Dict[str, Any]) -> None:
+    """
+    功能：将 workflow 摘要写入 artifacts/workflow_summary.json。
+
+    Persist the workflow summary as a JSON artifact under the run root.
+
+    Args:
+        run_root: Workflow run root.
+        summary_obj: Workflow summary mapping.
+
+    Returns:
+        None.
+    """
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(summary_obj, dict):
+        raise TypeError("summary_obj must be dict")
+
+    summary_path = run_root / "artifacts" / "workflow_summary.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(
+        json.dumps(summary_obj, indent=2, ensure_ascii=False, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
+def _read_json_dict_if_exists(path_obj: Path) -> Dict[str, Any] | None:
+    """
+    功能：读取存在的 JSON 对象文件。
+
+    Read a JSON object file when it exists.
+
+    Args:
+        path_obj: JSON file path.
+
+    Returns:
+        Parsed mapping when the file exists and is valid; otherwise None.
+    """
+    if not isinstance(path_obj, Path):
+        raise TypeError("path_obj must be Path")
+    if not path_obj.exists() or not path_obj.is_file():
+        return None
+    payload = json.loads(path_obj.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return None
+    return dict(payload)
+
+
+def _resolve_main_attestation_evidence(cfg_obj: Dict[str, object], run_root: Path) -> Dict[str, Any]:
+    """
+    功能：核查主链 attestation 是否真实参与并留下证据。
+
+    Verify that the main workflow produced attestation evidence rather than only
+    carrying an enabled configuration flag.
+
+    Args:
+        cfg_obj: Runtime config mapping.
+        run_root: Workflow run root.
+
+    Returns:
+        Attestation evidence summary with status and missing items.
+    """
+    if not isinstance(cfg_obj, dict):
+        raise TypeError("cfg_obj must be dict")
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+
+    attestation_cfg = cfg_obj.get("attestation")
+    attestation_enabled = False
+    if isinstance(attestation_cfg, dict):
+        enabled_value = attestation_cfg.get("enabled")
+        attestation_enabled = bool(enabled_value) if isinstance(enabled_value, bool) else False
+
+    summary: Dict[str, Any] = {
+        "enabled": attestation_enabled,
+        "status": "skipped_disabled",
+        "missing": [],
+        "artifacts": {},
+        "detect_record_attestation_present": False,
+        "event_attestation_score_present": False,
+        "bundle_verification_present": False,
+        "trace_artifact_count": 0,
+    }
+    if not attestation_enabled:
+        return summary
+
+    attestation_dir = run_root / "artifacts" / "attestation"
+    detect_record_path = run_root / "records" / "detect_record.json"
+    result_path = attestation_dir / "attestation_result.json"
+    statement_path = attestation_dir / "attestation_statement.json"
+    bundle_path = attestation_dir / "attestation_bundle.json"
+    trace_paths = sorted(attestation_dir.glob("*attestation_trace.json")) if attestation_dir.exists() else []
+
+    detect_record = _read_json_dict_if_exists(detect_record_path)
+    result_payload = _read_json_dict_if_exists(result_path)
+
+    detect_attestation = detect_record.get("attestation") if isinstance(detect_record, dict) else None
+    summary["detect_record_attestation_present"] = isinstance(detect_attestation, dict)
+
+    final_decision = result_payload.get("final_event_attested_decision") if isinstance(result_payload, dict) else None
+    event_score = final_decision.get("event_attestation_score") if isinstance(final_decision, dict) else None
+    summary["event_attestation_score_present"] = isinstance(event_score, (int, float)) and not isinstance(event_score, bool) and math.isfinite(float(event_score))
+
+    bundle_verification = result_payload.get("bundle_verification") if isinstance(result_payload, dict) else None
+    summary["bundle_verification_present"] = isinstance(bundle_verification, dict)
+    summary["trace_artifact_count"] = len(trace_paths)
+    summary["artifacts"] = {
+        "attestation_dir": str(attestation_dir),
+        "attestation_result_json": result_path.exists(),
+        "attestation_statement_json": statement_path.exists(),
+        "attestation_bundle_json": bundle_path.exists(),
+        "trace_files": [path_obj.name for path_obj in trace_paths],
+    }
+
+    missing_items: List[str] = []
+    if not summary["detect_record_attestation_present"]:
+        missing_items.append("detect_record.attestation")
+    if not summary["event_attestation_score_present"]:
+        missing_items.append("attestation_result.final_event_attested_decision.event_attestation_score")
+    if not result_path.exists():
+        missing_items.append("artifacts/attestation/attestation_result.json")
+    if not statement_path.exists():
+        missing_items.append("artifacts/attestation/attestation_statement.json")
+    if not bundle_path.exists():
+        missing_items.append("artifacts/attestation/attestation_bundle.json")
+    if not summary["bundle_verification_present"]:
+        missing_items.append("attestation_result.bundle_verification")
+    if len(trace_paths) <= 0:
+        missing_items.append("artifacts/attestation/*attestation_trace.json")
+
+    summary["missing"] = missing_items
+    summary["status"] = "ok" if len(missing_items) == 0 else "missing_evidence"
+    return summary
+
+
 def _run_step(step_name: str, command: Sequence[str]) -> int:
     """
     功能：执行单个编排步骤并输出结构化日志。
@@ -342,19 +478,31 @@ def run_paper_full_cuda(config_path: Path, run_root: Path) -> int:
     parallel_cfg = _resolve_parallel_attestation_statistics_cfg(cfg_obj)
     workflow_summary: Dict[str, Any] = {
         "mode": "project_outputs_only",
+        "workflow_status": "running",
         "main_stages": {},
+        "main_chain": {
+            "required_stages": ["embed", "detect", "calibrate", "evaluate"],
+            "status": "running",
+            "attestation": {
+                "enabled": bool(isinstance(cfg_obj.get("attestation"), dict) and cfg_obj.get("attestation", {}).get("enabled") is True),
+                "status": "pending",
+            },
+        },
         "parallel_attestation_statistics": {
             "enabled": bool(parallel_cfg.get("enabled", False)),
+            "required": False,
+            "affects_exit_code": False,
             "status": "skipped",
             "run_root": None,
             "stages": {},
         },
         "experiment_matrix": {
             "enabled": isinstance(cfg_obj.get("experiment_matrix"), dict),
+            "required": False,
             "status": "skipped",
             "return_code": None,
         },
-        "exit_policy": "embed_detect_calibrate_evaluate_and_parallel_required_experiment_matrix_optional",
+        "exit_policy": "embed_detect_calibrate_evaluate_required_parallel_attestation_optional_experiment_matrix_optional",
     }
     stages = ["embed", "detect", "calibrate", "evaluate"]
     for stage_name in stages:
@@ -362,10 +510,25 @@ def run_paper_full_cuda(config_path: Path, run_root: Path) -> int:
         workflow_summary["main_stages"][stage_name] = {"return_code": return_code}
         if return_code != 0:
             workflow_summary["main_status"] = "failed"
+            workflow_summary["main_chain"]["status"] = "failed"
+            workflow_summary["workflow_status"] = "failed"
+            _persist_workflow_summary(run_root, workflow_summary)
             _emit_workflow_summary(workflow_summary)
             return return_code
 
+    attestation_summary = _resolve_main_attestation_evidence(cfg_obj, run_root)
+    workflow_summary["main_chain"]["attestation"] = attestation_summary
+    if attestation_summary.get("status") != "ok":
+        workflow_summary["main_status"] = "failed_attestation_evidence"
+        workflow_summary["main_chain"]["status"] = "failed_attestation_evidence"
+        workflow_summary["workflow_status"] = "failed"
+        _persist_workflow_summary(run_root, workflow_summary)
+        _emit_workflow_summary(workflow_summary)
+        return 1
+
     workflow_summary["main_status"] = "ok"
+    workflow_summary["main_chain"]["status"] = "ok"
+    workflow_summary["workflow_status"] = "ok"
 
     if bool(parallel_cfg.get("enabled", False)):
         parallel_run_root = _build_parallel_attestation_run_root(run_root)
@@ -392,11 +555,12 @@ def run_paper_full_cuda(config_path: Path, run_root: Path) -> int:
                 "score_name": score_name,
             }
             if return_code != 0:
-                parallel_summary["status"] = "failed"
-                workflow_summary["main_status"] = "failed_parallel_attestation_statistics"
-                _emit_workflow_summary(workflow_summary)
-                return return_code
-        parallel_summary["status"] = "ok"
+                parallel_summary["status"] = "failed_optional"
+                workflow_summary["workflow_status"] = "ok_with_optional_failures"
+                print("[paper_full_cuda] parallel_attestation_statistics failed but main workflow outputs are preserved.")
+                break
+        else:
+            parallel_summary["status"] = "ok"
 
     matrix_cfg_obj = cfg_obj.get("experiment_matrix")
     matrix_enabled = isinstance(matrix_cfg_obj, dict)
@@ -408,8 +572,10 @@ def run_paper_full_cuda(config_path: Path, run_root: Path) -> int:
             "return_code": return_code,
         }
         if return_code != 0:
+            workflow_summary["workflow_status"] = "ok_with_optional_failures"
             print("[paper_full_cuda] experiment_matrix failed but main workflow outputs are preserved.")
 
+    _persist_workflow_summary(run_root, workflow_summary)
     _emit_workflow_summary(workflow_summary)
 
     return 0
