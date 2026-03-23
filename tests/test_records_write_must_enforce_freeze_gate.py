@@ -9,6 +9,7 @@ and cannot bypass the gate enforcement.
 
 import pytest
 import json
+from types import SimpleNamespace
 
 
 def _load_fact_sources():
@@ -45,6 +46,54 @@ def _build_attestation_gate_record(attestation_payload):
     return {
         "operation": "detect",
         "attestation": attestation_payload,
+    }
+
+
+def _build_statistical_interpretation_stub():
+    """
+    功能：构造统计门禁单测使用的最小 interpretation 存根。
+
+    Build the minimal interpretation stub required by statistical gate tests.
+
+    Returns:
+        Interpretation-like object exposing required_record_fields.
+    """
+    return SimpleNamespace(required_record_fields=[])
+
+
+def _build_detect_statistical_record(*, threshold_source: str, reason: str, decision_status: str, is_watermarked, allow_fallback: bool = False):
+    """
+    功能：构造 detect 统计门禁单测使用的最小记录。
+
+    Build a minimal detect statistical record for freeze gate tests.
+
+    Args:
+        threshold_source: Top-level threshold source token.
+        reason: fusion_result.audit.reason token.
+        decision_status: final_decision.decision_status token.
+        is_watermarked: final_decision.is_watermarked value.
+        allow_fallback: Whether legacy test fallback is authorized.
+
+    Returns:
+        Minimal detect statistical record mapping.
+    """
+    return {
+        "operation": "detect",
+        "target_fpr": 0.01,
+        "threshold_source": threshold_source,
+        "stats_applicability": "applicable",
+        "final_decision": {
+            "decision_status": decision_status,
+            "is_watermarked": is_watermarked,
+            "threshold_source": threshold_source,
+        },
+        "fusion_result": {
+            "audit": {
+                "threshold_source": threshold_source,
+                "allow_threshold_fallback_for_tests": allow_fallback,
+                "reason": reason,
+            }
+        },
     }
 
 
@@ -597,6 +646,87 @@ def test_attestation_bundle_gate_requires_complete_layered_results_for_formal_pa
         semantics,
         interpretation,
     )
+
+
+def test_freeze_gate_allows_detect_observation_only_intermediate_without_test_fallback() -> None:
+    """
+    功能：detect pre-calibration 的 observation-only 正式中间态必须允许写盘。
+
+    Returns:
+        None.
+    """
+    from main.policy import freeze_gate
+
+    record = _build_detect_statistical_record(
+        threshold_source="observation_only_pre_calibration",
+        reason="np_threshold_artifact_absent_observation_only",
+        decision_status="abstain",
+        is_watermarked=None,
+        allow_fallback=False,
+    )
+
+    freeze_gate._validate_statistical_fields(
+        record,
+        _build_statistical_interpretation_stub(),
+        warn_mode=False,
+    )
+    freeze_gate._check_field_override_conflict(
+        record,
+        _build_statistical_interpretation_stub(),
+        warn_mode=False,
+    )
+
+
+def test_freeze_gate_rejects_non_self_consistent_observation_only_detect_record() -> None:
+    """
+    功能：伪装成 observation-only 的 detect 记录若终态字段不自洽，仍必须拒绝。
+
+    Returns:
+        None.
+    """
+    from main.policy import freeze_gate
+    from main.core.errors import GateEnforcementError
+
+    record = _build_detect_statistical_record(
+        threshold_source="observation_only_pre_calibration",
+        reason="np_threshold_artifact_absent_observation_only",
+        decision_status="decided",
+        is_watermarked=False,
+        allow_fallback=False,
+    )
+
+    with pytest.raises(GateEnforcementError, match="threshold_source must be 'np_canonical'"):
+        freeze_gate._validate_statistical_fields(
+            record,
+            _build_statistical_interpretation_stub(),
+            warn_mode=False,
+        )
+
+
+def test_freeze_gate_still_rejects_detect_terminal_non_np_canonical_threshold_source() -> None:
+    """
+    功能：detect 正式终态若 threshold_source 非 np_canonical，仍必须拒绝。
+
+    Returns:
+        None.
+    """
+    from main.policy import freeze_gate
+    from main.core.errors import GateEnforcementError
+
+    record = _build_detect_statistical_record(
+        threshold_source="fallback_target_fpr_test_only",
+        reason="unexpected_terminal_threshold_source",
+        decision_status="decided",
+        is_watermarked=False,
+        allow_fallback=False,
+    )
+
+    with pytest.raises(GateEnforcementError, match="threshold_source must be 'np_canonical'"):
+        freeze_gate._validate_statistical_fields(
+            record,
+            _build_statistical_interpretation_stub(),
+            warn_mode=False,
+        )
 
 
 def test_attestation_bundle_gate_rejects_statement_only_path() -> None:

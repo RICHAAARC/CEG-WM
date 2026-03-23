@@ -8,7 +8,7 @@
 - 记录 recommended_enforce 的检查结果。
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, cast
 
 from main.core.errors import (
     MissingRequiredFieldError,
@@ -122,6 +122,50 @@ def assert_prewrite(
     _check_field_override_conflict(record, interpretation, warn_mode=False)
     
     return recommendations
+
+
+def _is_detect_observation_only_intermediate(record: Dict[str, Any]) -> bool:
+    """
+    功能：判定 detect 记录是否属于 pre-calibration observation-only 正式中间态。
+
+    Identify the formal detect-side observation-only intermediate state that is
+    legal before calibration artifacts exist.
+
+    Args:
+        record: Detect record mapping.
+
+    Returns:
+        True when the record is a self-consistent observation-only detect
+        intermediate; otherwise False.
+    """
+    if record.get("operation") != "detect":
+        return False
+    if record.get("threshold_source") != "observation_only_pre_calibration":
+        return False
+
+    fusion_result = cast(Dict[str, Any] | None, record.get("fusion_result"))
+    fusion_audit = cast(Dict[str, Any] | None, fusion_result.get("audit") if isinstance(fusion_result, dict) else None)
+    if not isinstance(fusion_audit, dict):
+        return False
+    if bool(fusion_audit.get("allow_threshold_fallback_for_tests", False)):
+        return False
+    if fusion_audit.get("threshold_source") != "observation_only_pre_calibration":
+        return False
+    if fusion_audit.get("reason") != "np_threshold_artifact_absent_observation_only":
+        return False
+
+    final_decision = cast(Dict[str, Any] | None, record.get("final_decision"))
+    if not isinstance(final_decision, dict):
+        return False
+    if final_decision.get("decision_status") != "abstain":
+        return False
+    if final_decision.get("is_watermarked", "__non_null__") is not None:
+        return False
+    final_threshold_source = final_decision.get("threshold_source")
+    if final_threshold_source is not None and final_threshold_source != "observation_only_pre_calibration":
+        return False
+
+    return True
 
 
 def _enforce_pipeline_shell_binding(record: Dict[str, Any], whitelist: RuntimeWhitelist) -> None:
@@ -1918,32 +1962,35 @@ def _validate_statistical_fields(
                 field_path="stats_applicability"
             )
     
-    # threshold_source 必须为 'np_canonical'。
-    # 例外：若 fusion_result.audit.allow_threshold_fallback_for_tests=True，
-    # 则该记录为 calibrate 前的中间 detect 步骤（onefile 主流程合法场景），
-    # 降级为警告不阻断，以允许后续 calibrate → re-detect 流程继续。
+    # threshold_source 默认必须为 'np_canonical'。
+    # 合法例外仅限两类：
+    # (1) detect pre-calibration 的 observation-only 正式中间态；
+    # (2) 历史 test fallback 授权场景（仅兼容旧测试路径）。
     threshold_source = record.get("threshold_source")
     if threshold_source != "np_canonical":
-        _fallback_authorized = False
-        _fusion_audit = None
-        _fr = record.get("fusion_result")
-        if isinstance(_fr, dict):
-            _fusion_audit = _fr.get("audit")
-            if isinstance(_fusion_audit, dict):
-                _fallback_authorized = bool(_fusion_audit.get("allow_threshold_fallback_for_tests", False))
-        _effective_warn = warn_mode or _fallback_authorized
-        msg = (
-            f"[统计口径冻结] threshold_source must be 'np_canonical': "
-            f"operation={operation}, actual={threshold_source}"
-        )
-        if _effective_warn:
-            print(f"[FreezeGate][WARN] {msg}")
+        if _is_detect_observation_only_intermediate(record):
+            threshold_source = "observation_only_pre_calibration"
         else:
-            raise GateEnforcementError(
-                msg,
-                gate_name="statistical.threshold.source.np_canonical",
-                field_path="threshold_source"
+            _fallback_authorized = False
+            _fusion_audit = None
+            _fr = record.get("fusion_result")
+            if isinstance(_fr, dict):
+                _fusion_audit = _fr.get("audit")
+                if isinstance(_fusion_audit, dict):
+                    _fallback_authorized = bool(_fusion_audit.get("allow_threshold_fallback_for_tests", False))
+            _effective_warn = warn_mode or _fallback_authorized
+            msg = (
+                f"[统计口径冻结] threshold_source must be 'np_canonical': "
+                f"operation={operation}, actual={threshold_source}"
             )
+            if _effective_warn:
+                print(f"[FreezeGate][WARN] {msg}")
+            else:
+                raise GateEnforcementError(
+                    msg,
+                    gate_name="statistical.threshold.source.np_canonical",
+                    field_path="threshold_source"
+                )
     
     # stats_applicability 必须为 'applicable'
     stats_applicability = record.get("stats_applicability")
@@ -2338,6 +2385,8 @@ def _check_field_override_conflict(
         "schema_version": schema.RECORD_SCHEMA_VERSION
     }
 
+    observation_only_intermediate = _is_detect_observation_only_intermediate(record)
+
     # P2-A 修复后，schema 注入 threshold_source 为动态值（透传融合层实际值），不再恒为 np_canonical。
     # 当 fusion_result.audit.allow_threshold_fallback_for_tests=True 时，schema 合法地注入了
     # "fallback_target_fpr_test_only"，此时 threshold_source 检查需降级为警告以避免误报。
@@ -2349,6 +2398,8 @@ def _check_field_override_conflict(
             _fallback_authorized = bool(_fa.get("allow_threshold_fallback_for_tests", False))
 
     for field_name, expected_value in expected_values.items():
+        if field_name == "threshold_source" and observation_only_intermediate:
+            continue
         actual_value = record.get(field_name)
         if actual_value is not None and actual_value != expected_value:
             # threshold_source 在 fallback 授权场景下为 schema 合法注入值，不属于覆盖冲突。
