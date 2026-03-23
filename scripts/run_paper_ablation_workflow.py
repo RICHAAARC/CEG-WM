@@ -30,6 +30,7 @@ if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
 from main.core import config_loader
+from scripts import run_onefile_workflow
 
 
 WORKFLOW_SECTION_KEY = "paper_ablation_workflow"
@@ -478,6 +479,30 @@ def _build_runtime_cfg_snapshot(
         _apply_nested_override(snapshot, dotted_path, override_value)
     _normalize_runtime_resource_paths(snapshot, source_config_path)
     return snapshot
+
+
+def _prepare_paper_profile_runtime_config(config_path: Path, run_root: Path) -> Path:
+    """
+    功能：复用 onefile 的 paper_full_cuda profile 配置整理逻辑。
+
+    Reuse the validated onefile paper_full_cuda profile-preparation logic so
+    ablation embed and detect stages consume the same runtime config shape.
+
+    Args:
+        config_path: Snapshot config path written by the ablation workflow.
+        run_root: Stage-specific run root.
+
+    Returns:
+        Path to the prepared runtime config actually consumed by the stage.
+
+    Raises:
+        TypeError: If inputs are invalid.
+    """
+    if not isinstance(config_path, Path):
+        raise TypeError("config_path must be Path")
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    return run_onefile_workflow._prepare_profile_cfg_path("paper_full_cuda", run_root, config_path)
 
 
 def _write_yaml_file(path: Path, obj: Dict[str, Any]) -> None:
@@ -1121,6 +1146,7 @@ def run_paper_ablation_workflow(
     base_embed_snapshot = _build_runtime_cfg_snapshot(cfg_obj, base_embed_overrides, resolved_config_path)
     base_embed_cfg_path = layout.config_snapshot_root / "base_embed_config.yaml"
     _write_yaml_file(base_embed_cfg_path, base_embed_snapshot)
+    prepared_base_embed_cfg_path = _prepare_paper_profile_runtime_config(base_embed_cfg_path, layout.base_embed_root)
 
     detect_rerun_cfg = _require_mapping(workflow_cfg.get("detect_rerun"), f"{WORKFLOW_SECTION_KEY}.detect_rerun")
     input_record_rel_path = _require_non_empty_str(
@@ -1156,7 +1182,7 @@ def run_paper_ablation_workflow(
         base_embed_stage_executed = False
         base_embed_source_mode = "resume_existing_base_embed"
     else:
-        _run_subprocess(_build_embed_command(layout.base_embed_root, base_embed_cfg_path), _repo_root, dry_run)
+        _run_subprocess(_build_embed_command(layout.base_embed_root, prepared_base_embed_cfg_path), _repo_root, dry_run)
         base_embed_record_path = local_base_embed_record_path
         if not dry_run and (not base_embed_record_path.exists() or not base_embed_record_path.is_file()):
             raise FileNotFoundError(f"base embed record missing after embed stage: {base_embed_record_path}")
@@ -1175,6 +1201,7 @@ def run_paper_ablation_workflow(
         variant_snapshot = _build_runtime_cfg_snapshot(cfg_obj, variant.overrides, resolved_config_path)
         variant_cfg_path = layout.config_snapshot_root / "variants" / f"{variant.suffix}.yaml"
         _write_yaml_file(variant_cfg_path, variant_snapshot)
+        prepared_variant_cfg_path = _prepare_paper_profile_runtime_config(variant_cfg_path, variant_run_root)
 
         detect_record_path = variant_run_root / "records" / "detect_record.json"
         reuse_existing_detect_record = bool(
@@ -1182,7 +1209,7 @@ def run_paper_ablation_workflow(
         )
         if not reuse_existing_detect_record:
             _run_subprocess(
-                _build_detect_command(variant_run_root, variant_cfg_path, base_input_record_path),
+                _build_detect_command(variant_run_root, prepared_variant_cfg_path, base_input_record_path),
                 _repo_root,
                 dry_run,
             )
@@ -1220,7 +1247,7 @@ def run_paper_ablation_workflow(
             base_embed_record_path=base_embed_record_path,
             detect_record_path=detect_record_path,
             input_record_path=base_input_record_path,
-            config_snapshot_path=variant_cfg_path,
+            config_snapshot_path=prepared_variant_cfg_path,
             variant_cfg_snapshot=variant_snapshot,
             detect_record=detect_record_payload,
         )
@@ -1233,7 +1260,7 @@ def run_paper_ablation_workflow(
                 "variant_run_root": str(variant_run_root),
                 "input_record_path": str(base_input_record_path),
                 "detect_record_path": str(detect_record_path),
-                "config_snapshot_path": str(variant_cfg_path),
+                "config_snapshot_path": str(prepared_variant_cfg_path),
                 "calibrate_config_snapshot_path": str(calibrate_cfg_path) if calibrate_cfg_path is not None else None,
                 "evaluate_config_snapshot_path": str(evaluate_cfg_path) if evaluate_cfg_path is not None else None,
                 "detect_stage_executed": not reuse_existing_detect_record,
@@ -1274,7 +1301,7 @@ def run_paper_ablation_workflow(
         "base_embed": {
             "run_root": str(layout.base_embed_root),
             "embed_record_path": str(base_embed_record_path),
-            "config_snapshot_path": str(base_embed_cfg_path),
+            "config_snapshot_path": str(prepared_base_embed_cfg_path),
             "stage_executed": base_embed_stage_executed,
             "source_mode": base_embed_source_mode,
             "reuse_mode": reuse_mode,

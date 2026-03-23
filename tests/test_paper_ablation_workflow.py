@@ -197,6 +197,12 @@ def test_run_paper_ablation_workflow_reuses_base_embed_for_detect_variants(
 
     captured_commands = []
 
+    def _fake_prepare_runtime_config(cfg_path: Path, stage_run_root: Path) -> Path:
+        prepared_cfg_path = stage_run_root / "artifacts" / "workflow_cfg" / f"prepared_{cfg_path.stem}.yaml"
+        prepared_cfg_path.parent.mkdir(parents=True, exist_ok=True)
+        prepared_cfg_path.write_text(cfg_path.read_text(encoding="utf-8"), encoding="utf-8")
+        return prepared_cfg_path
+
     def _fake_run(
         command: List[str],
         cwd: str,
@@ -287,6 +293,7 @@ def test_run_paper_ablation_workflow_reuses_base_embed_for_detect_variants(
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(ablation_workflow.subprocess, "run", _fake_run)
+    monkeypatch.setattr(ablation_workflow, "_prepare_paper_profile_runtime_config", _fake_prepare_runtime_config)
 
     run_root = tmp_path / "ablation_run"
     result = ablation_workflow.run_paper_ablation_workflow(
@@ -306,6 +313,14 @@ def test_run_paper_ablation_workflow_reuses_base_embed_for_detect_variants(
     assert "enable_paper_faithfulness=true" in embed_commands[0]
     assert all("enable_content_detect=true" in command for command in detect_commands)
     assert all("allow_threshold_fallback_for_tests=true" in command for command in detect_commands)
+    assert embed_commands[0][embed_commands[0].index("--config") + 1] == str(
+        run_root / "base_embed" / "artifacts" / "workflow_cfg" / "prepared_base_embed_config.yaml"
+    )
+    assert all(
+        str(run_root / "variants") in command[command.index("--config") + 1]
+        and "prepared_" in command[command.index("--config") + 1]
+        for command in detect_commands
+    )
 
     detect_input_paths = [command[command.index("--input") + 1] for command in detect_commands]
     assert len(set(detect_input_paths)) == 1
@@ -326,6 +341,9 @@ def test_run_paper_ablation_workflow_reuses_base_embed_for_detect_variants(
     summary_obj = json.loads(summary_path.read_text(encoding="utf-8"))
 
     assert manifest_obj["base_embed"]["embed_record_path"] == str(run_root / "base_embed" / "records" / "embed_record.json")
+    assert manifest_obj["base_embed"]["config_snapshot_path"] == str(
+        run_root / "base_embed" / "artifacts" / "workflow_cfg" / "prepared_base_embed_config.yaml"
+    )
     assert manifest_obj["base_embed"]["stage_executed"] is True
     assert manifest_obj["base_embed"]["source_mode"] == "new_embed"
     assert manifest_obj["execution_mode"]["effective"]["reuse_mode"] == "fresh_run"
@@ -442,6 +460,7 @@ def test_run_paper_ablation_workflow_resume_reuses_existing_base_embed_and_detec
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(ablation_workflow.subprocess, "run", _fake_run_resume)
+    monkeypatch.setattr(ablation_workflow, "_prepare_paper_profile_runtime_config", lambda cfg_path, stage_run_root: cfg_path)
 
     result = ablation_workflow.run_paper_ablation_workflow(
         config_path=config_path,
@@ -556,6 +575,7 @@ def test_run_paper_ablation_workflow_supports_external_embed_record_reuse(
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(ablation_workflow.subprocess, "run", _fake_run_reuse)
+    monkeypatch.setattr(ablation_workflow, "_prepare_paper_profile_runtime_config", lambda cfg_path, stage_run_root: cfg_path)
 
     result = ablation_workflow.run_paper_ablation_workflow(
         config_path=config_path,
@@ -679,6 +699,7 @@ def test_run_paper_ablation_workflow_normalizes_snapshot_resource_paths(
 
     monkeypatch.setattr(ablation_workflow, "_repo_root", repo_root.resolve())
     monkeypatch.setattr(ablation_workflow.subprocess, "run", _fake_run)
+    monkeypatch.setattr(ablation_workflow, "_prepare_paper_profile_runtime_config", lambda cfg_path, stage_run_root: cfg_path)
 
     result = ablation_workflow.run_paper_ablation_workflow(
         config_path=config_path,
