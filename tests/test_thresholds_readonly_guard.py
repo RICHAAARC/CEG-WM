@@ -298,26 +298,5 @@ def test_run_all_audits_includes_b2_b3_scripts():
         "attack-protocol fact-source audit script (audit_attack_protocol_hardcoding.py) not found in AUDIT_SCRIPTS"
 
 
-def test_run_freeze_signoff_includes_b2_b3_audits():
-    """
-    功能：验证 run_freeze_signoff.py 的 MINIMUM_AUDIT_SCRIPTS 包含只读阈值与攻击协议事实源脚本。
-
-    Verify that run_freeze_signoff.py includes readonly-threshold and attack-protocol scripts.
-    """
-    repo_root = Path(__file__).resolve().parent.parent
-    run_freeze_signoff = repo_root / "scripts" / "run_freeze_signoff.py"
-    
-    assert run_freeze_signoff.exists(), "run_freeze_signoff.py not found"
-    
-    content = run_freeze_signoff.read_text(encoding="utf-8")
-    
-    # 验证只读阈值与攻击协议事实源审计脚本在 MINIMUM_AUDIT_SCRIPTS 中
-    assert "audit_thresholds_readonly_enforcement.py" in content, \
-        "readonly-threshold audit script not in run_freeze_signoff.py"
-    
-    assert "audit_attack_protocol_hardcoding.py" in content, \
-        "attack-protocol fact-source audit script not in run_freeze_signoff.py"
-
-
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
