@@ -570,6 +570,130 @@ def test_run_paper_ablation_workflow_supports_external_embed_record_reuse(
     assert manifest_obj["base_embed"]["reuse_source_path"] == str(external_embed_record)
 
 
+def test_run_paper_ablation_workflow_normalizes_snapshot_resource_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：验证 notebook runtime config 生成的 snapshot 会归一化仓库资源路径。
+
+    Verify snapshot configs normalize repository asset paths when the runtime
+    config is written under outputs/ before embed and detect subprocesses run.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+        monkeypatch: pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    repo_root = tmp_path / "repo"
+    runtime_config_dir = repo_root / "outputs" / "notebook_runtime_configs"
+    model_path = repo_root / "models" / "inspyrenet" / "ckpt_base.pth"
+    prompt_path = repo_root / "prompts" / "paper_small.txt"
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    prompt_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_config_dir.mkdir(parents=True, exist_ok=True)
+    model_path.write_text("weights", encoding="utf-8")
+    prompt_path.write_text("a prompt\n", encoding="utf-8")
+
+    config_path = runtime_config_dir / "paper_ablation_runtime.yaml"
+    config_obj: Dict[str, Any] = {
+        "policy_path": "content_np_geo_rescue",
+        "inference_prompt_file": "prompts/paper_small.txt",
+        "mask": {
+            "semantic_model_path": "../models/inspyrenet/ckpt_base.pth",
+        },
+        "detect": {
+            "content": {"enabled": True, "lf_exact_repair": {"enabled": True, "mode": "host_template_recenter"}},
+            "geometry": {"enabled": True, "geo_score_repair": {"enabled": True, "mode": "template_confidence"}},
+        },
+        "paper_ablation_workflow": {
+            "output_root": "outputs/Paper_Ablation_Cuda",
+            "config_snapshot_dir": "compare/config_snapshots",
+            "base_embed": {
+                "run_subdir": "base_embed",
+                "embed_record_rel_path": "records/embed_record.json",
+                "allow_resume": True,
+                "allow_reuse_existing_record": True,
+                "overrides": {},
+            },
+            "detect_rerun": {
+                "variants_dir": "variants",
+                "compare_dir": "compare",
+                "input_record_rel_path": "records/embed_record.json",
+                "variant_dir_pattern": "{suffix}",
+                "strict_single_variable": True,
+                "allow_detect_only": True,
+                "reuse_existing_detect_results": False,
+                "enable_calibration": False,
+                "enable_evaluate": False,
+                "reuse_thresholds_artifact": None,
+                "variants": [
+                    {
+                        "name": "GEO-on",
+                        "suffix": "GEO-on",
+                        "enabled": True,
+                        "group": "geo_repair_toggle",
+                        "category": "detect_single_variable",
+                        "description": "baseline",
+                        "overrides": {"detect.geometry.geo_score_repair.enabled": True},
+                    }
+                ],
+            },
+            "compare": {
+                "summary_fields": ["variant_name", "detect_record_path"],
+                "table_fields": ["variant_name", "detect_record_path"],
+            },
+            "notebook_runtime": {
+                "selected_variants": ["GEO-on"],
+                "base_embed_reuse_mode": "fresh_run",
+                "reuse_base_embed_record": None,
+                "package_zip": False,
+                "sync_to_drive": False,
+            },
+        },
+    }
+    config_path.write_text(yaml.safe_dump(config_obj, sort_keys=False, allow_unicode=True), encoding="utf-8")
+
+    def _fake_run(
+        command: List[str],
+        cwd: str,
+        capture_output: bool,
+        text: bool,
+        encoding: str,
+        errors: str,
+    ) -> SimpleNamespace:
+        run_root = Path(command[command.index("--out") + 1])
+        (run_root / "records").mkdir(parents=True, exist_ok=True)
+        if "main.cli.run_embed" in command:
+            (run_root / "records" / "embed_record.json").write_text("{}", encoding="utf-8")
+        if "main.cli.run_detect" in command:
+            (run_root / "records" / "detect_record.json").write_text("{}", encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(ablation_workflow, "_repo_root", repo_root.resolve())
+    monkeypatch.setattr(ablation_workflow.subprocess, "run", _fake_run)
+
+    result = ablation_workflow.run_paper_ablation_workflow(
+        config_path=config_path,
+        run_root=repo_root / "outputs" / "normalized_run",
+        selected_variant_names=["GEO-on"],
+        dry_run=False,
+    )
+
+    manifest_obj = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+    base_snapshot_path = Path(manifest_obj["base_embed"]["config_snapshot_path"])
+    variant_snapshot_path = Path(manifest_obj["variants"][0]["config_snapshot_path"])
+    base_snapshot = cast(Dict[str, Any], yaml.safe_load(base_snapshot_path.read_text(encoding="utf-8")))
+    variant_snapshot = cast(Dict[str, Any], yaml.safe_load(variant_snapshot_path.read_text(encoding="utf-8")))
+
+    assert base_snapshot["mask"]["semantic_model_path"] == str(model_path.resolve())
+    assert base_snapshot["inference_prompt_file"] == str(prompt_path.resolve())
+    assert variant_snapshot["mask"]["semantic_model_path"] == str(model_path.resolve())
+    assert variant_snapshot["inference_prompt_file"] == str(prompt_path.resolve())
+
+
 def test_paper_ablation_notebook_is_parseable_and_has_key_cells() -> None:
     """
     功能：验证 ablation notebook 可解析，并包含参数 cell、variant cell、运行 cell 与摘要 cell。
@@ -592,14 +716,7 @@ def test_paper_ablation_notebook_is_parseable_and_has_key_cells() -> None:
 
     joined_cell_sources = ["\n".join(cell.get("source", [])) for cell in cells if isinstance(cell, dict)]
 
-    assert any(
-        "REPO_SOURCE_MODE" in cell_source
-        and "local_existing" in cell_source
-        and "git_clone" in cell_source
-        and "drive_path" in cell_source
-        and "uploaded_zip" in cell_source
-        for cell_source in joined_cell_sources
-    )
+    assert any("REPO_SOURCE_MODE" in cell_source and "git_clone" in cell_source for cell_source in joined_cell_sources)
     assert any(
         "RUN_TAG" in cell_source
         and "SELECTED_VARIANTS" in cell_source

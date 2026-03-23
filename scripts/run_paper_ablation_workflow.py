@@ -97,6 +97,12 @@ DEFAULT_COMPARE_TABLE_FIELDS = [
     "detect_record_path",
 ]
 
+RUNTIME_RESOURCE_DOTTED_PATHS = [
+    "mask.semantic_model_path",
+    "inference_prompt_file",
+    "embed.input_image_path",
+]
+
 _MISSING = object()
 
 
@@ -385,13 +391,92 @@ def _apply_nested_override(cfg_obj: Dict[str, Any], dotted_path: str, value: Any
     current[path_parts[-1]] = value
 
 
-def _build_runtime_cfg_snapshot(base_cfg_obj: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, Any]:
+def _resolve_runtime_resource_path(configured_path: str, source_config_path: Path) -> str:
+    """
+    功能：将运行时配置中的资源路径解析为稳定的绝对路径。
+
+    Resolve runtime-config resource paths into stable absolute paths before
+    stage-specific snapshots are written under outputs/.
+
+    Args:
+        configured_path: Path string from the runtime config.
+        source_config_path: Runtime config path that provided the resource field.
+
+    Returns:
+        Absolute path string when a stable existing candidate is found;
+        otherwise the original configured path.
+
+    Raises:
+        TypeError: If input types are invalid.
+    """
+    if not configured_path.strip():
+        raise TypeError("configured_path must be non-empty str")
+
+    normalized_path = configured_path.strip()
+    candidate_path = Path(normalized_path).expanduser()
+    if candidate_path.is_absolute():
+        resolved_candidate = candidate_path.resolve()
+        if resolved_candidate.exists():
+            return str(resolved_candidate)
+        return normalized_path
+
+    search_candidates: List[Path] = []
+    cfg_relative_candidate = (source_config_path.parent / candidate_path).resolve()
+    search_candidates.append(cfg_relative_candidate)
+
+    repo_relative_candidate = (_repo_root / candidate_path).resolve()
+    if repo_relative_candidate not in search_candidates:
+        search_candidates.append(repo_relative_candidate)
+
+    sanitized_parts = [part for part in candidate_path.parts if part not in {".", ".."}]
+    if sanitized_parts:
+        repo_sanitized_candidate = _repo_root.joinpath(*sanitized_parts).resolve()
+        if repo_sanitized_candidate not in search_candidates:
+            search_candidates.append(repo_sanitized_candidate)
+
+    for resolved_candidate in search_candidates:
+        if resolved_candidate.exists():
+            return str(resolved_candidate)
+    return normalized_path
+
+
+def _normalize_runtime_resource_paths(cfg_snapshot: Dict[str, Any], source_config_path: Path) -> Dict[str, Any]:
+    """
+    功能：修正 notebook runtime config 写入 outputs 后失效的资源路径。
+
+    Normalize known repository asset paths after notebook runtime configs are
+    materialized outside configs/ and before downstream CLI snapshots are used.
+
+    Args:
+        cfg_snapshot: Snapshot mapping without workflow-only fields.
+        source_config_path: Runtime config path used to build the snapshot.
+
+    Returns:
+        Snapshot mapping with normalized resource paths where resolvable.
+
+    Raises:
+        TypeError: If inputs are invalid.
+    """
+    for dotted_path in RUNTIME_RESOURCE_DOTTED_PATHS:
+        current_value = _get_dotted_value(cfg_snapshot, dotted_path)
+        if not isinstance(current_value, str) or not current_value.strip():
+            continue
+        normalized_value = _resolve_runtime_resource_path(current_value, source_config_path)
+        if normalized_value != current_value:
+            _apply_nested_override(cfg_snapshot, dotted_path, normalized_value)
+    return cfg_snapshot
+
+
+def _build_runtime_cfg_snapshot(
+    base_cfg_obj: Dict[str, Any],
+    overrides: Dict[str, Any],
+    source_config_path: Path,
+) -> Dict[str, Any]:
     snapshot = cast(Dict[str, Any], json.loads(json.dumps(base_cfg_obj, ensure_ascii=False)))
-    if not isinstance(snapshot, dict):
-        raise TypeError("snapshot must remain dict")
     snapshot.pop(WORKFLOW_SECTION_KEY, None)
     for dotted_path, override_value in overrides.items():
         _apply_nested_override(snapshot, dotted_path, override_value)
+    _normalize_runtime_resource_paths(snapshot, source_config_path)
     return snapshot
 
 
@@ -993,7 +1078,7 @@ def run_paper_ablation_workflow(
 
     base_embed_cfg = _require_mapping(workflow_cfg.get("base_embed"), f"{WORKFLOW_SECTION_KEY}.base_embed")
     base_embed_overrides = _normalize_dotted_overrides(base_embed_cfg.get("overrides"), f"{WORKFLOW_SECTION_KEY}.base_embed.overrides")
-    base_embed_snapshot = _build_runtime_cfg_snapshot(cfg_obj, base_embed_overrides)
+    base_embed_snapshot = _build_runtime_cfg_snapshot(cfg_obj, base_embed_overrides, resolved_config_path)
     base_embed_cfg_path = layout.config_snapshot_root / "base_embed_config.yaml"
     _write_yaml_file(base_embed_cfg_path, base_embed_snapshot)
 
@@ -1047,7 +1132,7 @@ def run_paper_ablation_workflow(
         variant_run_root = layout.variants_root / variant_rel_dir
         variant_run_root.mkdir(parents=True, exist_ok=True)
 
-        variant_snapshot = _build_runtime_cfg_snapshot(cfg_obj, variant.overrides)
+        variant_snapshot = _build_runtime_cfg_snapshot(cfg_obj, variant.overrides, resolved_config_path)
         variant_cfg_path = layout.config_snapshot_root / "variants" / f"{variant.suffix}.yaml"
         _write_yaml_file(variant_cfg_path, variant_snapshot)
 
