@@ -39,7 +39,7 @@ from main.core import schema
 from main.core import status
 from main.policy import path_policy
 from main.core.errors import RunFailureReason
-from main.registries import runtime_resolver
+from main.registries import runtime_resolver, pipeline_registry
 from main.diffusion.sd3 import pipeline_factory
 from main.diffusion.sd3 import infer_runtime
 from main.diffusion.sd3 import infer_trace
@@ -108,6 +108,64 @@ def _resolve_preview_generation_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
     embed_cfg = _resolve_embed_cfg(cfg)
     preview_node = embed_cfg.get("preview_generation")
     return cast(Dict[str, Any], preview_node) if isinstance(preview_node, dict) else {}
+
+
+def _validate_real_pipeline_identity_fields(cfg: Dict[str, Any], config_path: str) -> None:
+    """
+    功能：在 embed 入口前置校验 real SD3 pipeline 所需身份字段。
+
+    Validate the required identity fields for the real SD3 pipeline before
+    pipeline-shell construction starts.
+
+    Args:
+        cfg: Runtime configuration mapping.
+        config_path: Runtime config path string used for error reporting.
+
+    Returns:
+        None.
+
+    Raises:
+        TypeError: If inputs are invalid.
+        ValueError: If the real pipeline requires explicit identity fields that are absent or invalid.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(config_path, str) or not config_path:
+        raise TypeError("config_path must be non-empty str")
+
+    pipeline_impl_id = cfg.get("pipeline_impl_id")
+    if pipeline_impl_id is None:
+        pipeline_node = cfg.get("pipeline")
+        if isinstance(pipeline_node, dict):
+            pipeline_impl_id = pipeline_node.get("pipeline_impl_id")
+    if pipeline_impl_id != pipeline_registry.SD3_DIFFUSERS_REAL_ID:
+        return
+
+    paper_cfg_node = cfg.get("paper_faithfulness")
+    paper_cfg = cast(Dict[str, Any], paper_cfg_node) if isinstance(paper_cfg_node, dict) else {}
+    build_required = bool(paper_cfg.get("enabled", False))
+    if not build_required:
+        pipeline_build_enabled = cfg.get("pipeline_build_enabled", True)
+        if not isinstance(pipeline_build_enabled, bool):
+            raise ValueError("pipeline_build_enabled must be bool")
+        build_required = pipeline_build_enabled
+    if not build_required:
+        return
+
+    model_source = cfg.get("model_source")
+    allowed_model_sources = {"hf", "hf_hub", "local", "local_path"}
+    if not isinstance(model_source, str) or model_source not in allowed_model_sources:
+        raise ValueError(
+            "real SD3 pipeline requires explicit config field model_source in "
+            f"{config_path}; allowed values={sorted(allowed_model_sources)}"
+        )
+
+    hf_revision = cfg.get("hf_revision")
+    if not isinstance(hf_revision, str) or not hf_revision.strip():
+        raise ValueError(
+            "real SD3 pipeline requires explicit non-empty config field hf_revision in "
+            f"{config_path}"
+        )
 
 
 def _normalize_plan_digest(value: Any) -> str | None:
@@ -682,6 +740,8 @@ def run_embed(
             nondeterminism_notes = normalize_nondeterminism_notes(cfg.get("nondeterminism_notes"))
             if nondeterminism_notes is not None:
                 run_meta["nondeterminism_notes"] = nondeterminism_notes
+
+            _validate_real_pipeline_identity_fields(cfg, config_path)
 
             pipeline_result = pipeline_factory.build_pipeline_shell(cfg)
             run_meta["pipeline_provenance_canon_sha256"] = pipeline_result.get("pipeline_provenance_canon_sha256")

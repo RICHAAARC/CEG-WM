@@ -19,6 +19,7 @@ allow_nonempty_run_root_reason: null
 device: "cuda"
 
 model_id: "stabilityai/stable-diffusion-3.5-medium"
+model_source: "hf"
 hf_revision: "main"
 pipeline_impl_id: "sd3_diffusers_real"
 pipeline_build_enabled: true
