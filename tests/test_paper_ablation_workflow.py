@@ -301,6 +301,11 @@ def test_run_paper_ablation_workflow_reuses_base_embed_for_detect_variants(
 
     assert len(embed_commands) == 1
     assert len(detect_commands) == 2
+    assert "--override" in embed_commands[0]
+    assert "disable_content_detect=false" in embed_commands[0]
+    assert "enable_paper_faithfulness=true" in embed_commands[0]
+    assert all("enable_content_detect=true" in command for command in detect_commands)
+    assert all("allow_threshold_fallback_for_tests=true" in command for command in detect_commands)
 
     detect_input_paths = [command[command.index("--input") + 1] for command in detect_commands]
     assert len(set(detect_input_paths)) == 1

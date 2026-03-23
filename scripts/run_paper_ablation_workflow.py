@@ -566,8 +566,42 @@ def _run_subprocess(command: List[str], cwd: Path, dry_run: bool) -> None:
         )
 
 
+def _build_stage_overrides(stage_name: str) -> List[str]:
+    """
+    功能：构造 paper ablation workflow 的阶段级 CLI overrides。
+
+    Build stage-specific CLI overrides aligned with the validated onefile paper
+    workflow conventions.
+
+    Args:
+        stage_name: Stage name in {embed, detect, calibrate, evaluate}.
+
+    Returns:
+        Ordered CLI override strings.
+
+    Raises:
+        ValueError: If stage_name is unsupported.
+    """
+    if stage_name not in {"embed", "detect", "calibrate", "evaluate"}:
+        raise ValueError(f"unsupported stage_name: {stage_name}")
+
+    reason = json.dumps(f"paper_ablation_workflow_{stage_name}", ensure_ascii=False)
+    overrides = [
+        "run_root_reuse_allowed=true",
+        f"run_root_reuse_reason={reason}",
+        "enable_trace_tap=true",
+        "enable_paper_faithfulness=true",
+    ]
+    if stage_name == "embed":
+        overrides.append("disable_content_detect=false")
+    elif stage_name == "detect":
+        overrides.append("enable_content_detect=true")
+        overrides.append("allow_threshold_fallback_for_tests=true")
+    return overrides
+
+
 def _build_embed_command(run_root: Path, config_path: Path) -> List[str]:
-    return [
+    command = [
         sys.executable,
         "-m",
         "main.cli.run_embed",
@@ -576,10 +610,13 @@ def _build_embed_command(run_root: Path, config_path: Path) -> List[str]:
         "--config",
         str(config_path),
     ]
+    for item in _build_stage_overrides("embed"):
+        command.extend(["--override", item])
+    return command
 
 
 def _build_detect_command(run_root: Path, config_path: Path, input_record_path: Path) -> List[str]:
-    return [
+    command = [
         sys.executable,
         "-m",
         "main.cli.run_detect",
@@ -590,6 +627,9 @@ def _build_detect_command(run_root: Path, config_path: Path, input_record_path: 
         "--input",
         str(input_record_path),
     ]
+    for item in _build_stage_overrides("detect"):
+        command.extend(["--override", item])
+    return command
 
 
 def _build_calibrate_command(run_root: Path, config_path: Path) -> List[str]:
