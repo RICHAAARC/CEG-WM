@@ -737,5 +737,9 @@ def test_paper_ablation_notebook_is_parseable_and_has_key_cells() -> None:
         "inference_prompt_file" in cell_source and "prompt_file_path" in cell_source
         for cell_source in joined_cell_sources
     )
+    assert any(
+        "embed_cfg[\"input_image_path\"]" in cell_source and "runtime_input_image_path" in cell_source
+        for cell_source in joined_cell_sources
+    )
     assert any("ablation_compare_summary.json" in cell_source for cell_source in joined_cell_sources)
     assert any("GOOGLE_DRIVE_EXPORT_DIR" in cell_source and "drive_zip_path" in cell_source for cell_source in joined_cell_sources)
