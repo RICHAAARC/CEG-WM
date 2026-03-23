@@ -62,6 +62,7 @@ DEFAULT_COMPARE_SUMMARY_FIELDS = [
     "formal_exact_evidence_source",
     "protocol_root_cause_classification",
     "variant_run_root",
+    "base_embed_record_path",
     "detect_record_path",
     "input_record_path",
     "config_snapshot_path",
@@ -92,6 +93,7 @@ DEFAULT_COMPARE_TABLE_FIELDS = [
     "lf_exact_repair_mode",
     "formal_exact_evidence_source",
     "protocol_root_cause_classification",
+    "base_embed_record_path",
     "detect_record_path",
 ]
 
@@ -545,9 +547,11 @@ def _as_dict(value: Any) -> Dict[str, Any]:
 def _extract_variant_compare_row(
     variant: AblationVariant,
     variant_run_root: Path,
+    base_embed_record_path: Path,
     detect_record_path: Path,
     input_record_path: Path,
     config_snapshot_path: Path,
+    variant_cfg_snapshot: Dict[str, Any],
     detect_record: Dict[str, Any],
 ) -> Dict[str, Any]:
     attestation_payload = _as_dict(detect_record.get("attestation"))
@@ -568,6 +572,11 @@ def _extract_variant_compare_row(
     score_parts = _as_dict(content_payload.get("score_parts"))
     channel_scores = _as_dict(attestation_payload.get("channel_scores"))
     image_channel_scores = _as_dict(image_evidence_result.get("channel_scores"))
+    variant_detect_cfg = _as_dict(variant_cfg_snapshot.get("detect"))
+    variant_geometry_cfg = _as_dict(variant_detect_cfg.get("geometry"))
+    variant_geo_repair_cfg = _as_dict(variant_geometry_cfg.get("geo_score_repair"))
+    variant_content_cfg = _as_dict(variant_detect_cfg.get("content"))
+    variant_lf_repair_cfg = _as_dict(variant_content_cfg.get("lf_exact_repair"))
 
     lf_score = channel_scores.get("lf")
     if lf_score is None:
@@ -599,6 +608,8 @@ def _extract_variant_compare_row(
             "_geo_rescue_diagnostics_artifact.geo_repair_enabled",
         ],
     )
+    if geo_repair_enabled is None:
+        geo_repair_enabled = variant_geo_repair_cfg.get("enabled")
     geo_repair_active = _pick_first_present_value(
         detect_record,
         [
@@ -617,6 +628,8 @@ def _extract_variant_compare_row(
             "_geo_rescue_diagnostics_artifact.geo_repair_mode",
         ],
     )
+    if geo_repair_mode is None:
+        geo_repair_mode = variant_geo_repair_cfg.get("mode")
     geo_score_repair_enabled = _pick_first_present_value(
         detect_record,
         [
@@ -626,6 +639,8 @@ def _extract_variant_compare_row(
             "_geo_rescue_diagnostics_artifact.geo_score_repair_enabled",
         ],
     )
+    if geo_score_repair_enabled is None:
+        geo_score_repair_enabled = variant_geo_repair_cfg.get("enabled")
     geo_score_repair_active = _pick_first_present_value(
         detect_record,
         [
@@ -644,6 +659,8 @@ def _extract_variant_compare_row(
             "_geo_rescue_diagnostics_artifact.geo_score_repair_mode",
         ],
     )
+    if geo_score_repair_mode is None:
+        geo_score_repair_mode = variant_geo_repair_cfg.get("mode")
     geo_repair_direction_classification = _pick_first_present_value(
         detect_record,
         [
@@ -677,6 +694,8 @@ def _extract_variant_compare_row(
             "content_evidence_payload.lf_exact_repair_enabled",
         ],
     )
+    if lf_exact_repair_enabled is None:
+        lf_exact_repair_enabled = variant_lf_repair_cfg.get("enabled")
     lf_exact_repair_applied = _pick_first_present_value(
         detect_record,
         [
@@ -691,6 +710,8 @@ def _extract_variant_compare_row(
             "content_evidence_payload.lf_exact_repair_mode",
         ],
     )
+    if lf_exact_repair_mode is None:
+        lf_exact_repair_mode = variant_lf_repair_cfg.get("mode")
 
     active_score_source = final_event_decision.get("event_attestation_score_name")
     if not isinstance(active_score_source, str) or not active_score_source:
@@ -716,6 +737,7 @@ def _extract_variant_compare_row(
         "variant_group": variant.group,
         "variant_category": variant.category,
         "variant_run_root": str(variant_run_root),
+        "base_embed_record_path": str(base_embed_record_path),
         "detect_record_path": str(detect_record_path),
         "input_record_path": str(input_record_path),
         "config_snapshot_path": str(config_snapshot_path),
@@ -1070,9 +1092,11 @@ def run_paper_ablation_workflow(
         compare_row = _extract_variant_compare_row(
             variant=variant,
             variant_run_root=variant_run_root,
+            base_embed_record_path=base_embed_record_path,
             detect_record_path=detect_record_path,
             input_record_path=base_input_record_path,
             config_snapshot_path=variant_cfg_path,
+            variant_cfg_snapshot=variant_snapshot,
             detect_record=detect_record_payload,
         )
         variant_rows.append(compare_row)
@@ -1103,6 +1127,25 @@ def run_paper_ablation_workflow(
         "schema_version": NOTEBOOK_CONFIG_TEMPLATE_VERSION,
         "config_path": str(resolved_config_path),
         "run_root": str(layout.run_root),
+        "execution_mode": {
+            "requested": {
+                "fresh_run": bool(fresh_run),
+                "resume": bool(resume),
+                "reuse_base_embed_record": (
+                    str(reuse_base_embed_record) if reuse_base_embed_record is not None else None
+                ),
+            },
+            "effective": {
+                "fresh_run": effective_fresh_run,
+                "resume": effective_resume,
+                "reuse_mode": reuse_mode,
+                "reuse_base_embed_record": (
+                    str(effective_reuse_base_embed_record)
+                    if effective_reuse_base_embed_record is not None
+                    else None
+                ),
+            },
+        },
         "base_embed": {
             "run_root": str(layout.base_embed_root),
             "embed_record_path": str(base_embed_record_path),

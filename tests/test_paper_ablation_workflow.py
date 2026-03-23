@@ -52,9 +52,15 @@ def test_paper_ablation_config_exposes_workflow_section() -> None:
     assert attestation_cfg["use_trajectory_mix"] is False
     assert base_embed_cfg["allow_resume"] is True
     assert base_embed_cfg["allow_reuse_existing_record"] is True
+    assert notebook_runtime_cfg["repo_source_mode"] == "local_existing"
+    assert notebook_runtime_cfg["repo_url"] == "https://github.com/RICHAAARC/CEG-WM.git"
+    assert notebook_runtime_cfg["repo_branch"] == "main"
     assert notebook_runtime_cfg["base_embed_reuse_mode"] == "fresh_run"
+    assert notebook_runtime_cfg["sync_to_drive"] is True
     assert "active_geo_score_source" in cast(List[str], compare_cfg["summary_fields"])
     assert "geo_repair_enabled" in cast(List[str], compare_cfg["table_fields"])
+    assert "base_embed_record_path" in cast(List[str], compare_cfg["summary_fields"])
+    assert "base_embed_record_path" in cast(List[str], compare_cfg["table_fields"])
     assert variant_by_name["GEO-on"]["overrides"] == {"detect.geometry.geo_score_repair.enabled": True}
     assert variant_by_name["GEO-off"]["overrides"] == {"detect.geometry.geo_score_repair.enabled": False}
     assert variant_by_name["LF-repair-on"]["overrides"] == {"detect.content.lf_exact_repair.enabled": True}
@@ -164,6 +170,7 @@ def test_run_paper_ablation_workflow_reuses_base_embed_for_detect_variants(
                     "geo_repair_mode",
                     "formal_exact_evidence_source",
                     "protocol_root_cause_classification",
+                    "base_embed_record_path",
                     "detect_record_path",
                 ],
                 "table_fields": [
@@ -173,6 +180,7 @@ def test_run_paper_ablation_workflow_reuses_base_embed_for_detect_variants(
                     "active_geo_score_source",
                     "geo_repair_enabled",
                     "lf_exact_repair_enabled",
+                    "base_embed_record_path",
                     "detect_record_path",
                 ],
             },
@@ -181,6 +189,7 @@ def test_run_paper_ablation_workflow_reuses_base_embed_for_detect_variants(
                 "base_embed_reuse_mode": "fresh_run",
                 "reuse_base_embed_record": None,
                 "package_zip": True,
+                "sync_to_drive": True,
             },
         },
     }
@@ -314,11 +323,13 @@ def test_run_paper_ablation_workflow_reuses_base_embed_for_detect_variants(
     assert manifest_obj["base_embed"]["embed_record_path"] == str(run_root / "base_embed" / "records" / "embed_record.json")
     assert manifest_obj["base_embed"]["stage_executed"] is True
     assert manifest_obj["base_embed"]["source_mode"] == "new_embed"
+    assert manifest_obj["execution_mode"]["effective"]["reuse_mode"] == "fresh_run"
     assert [variant["suffix"] for variant in manifest_obj["variants"]] == ["GEO-on", "GEO-off"]
     assert summary_obj["variant_count"] == 2
     assert [variant["variant_suffix"] for variant in summary_obj["variants"]] == ["GEO-on", "GEO-off"]
     assert summary_obj["variants"][0]["active_geo_score_source"] == "template_confidence"
     assert summary_obj["variants"][0]["formal_exact_evidence_source"] == "input_image_conditioned_reconstruction"
+    assert summary_obj["variants"][0]["base_embed_record_path"] == str(run_root / "base_embed" / "records" / "embed_record.json")
 
 
 def test_run_paper_ablation_workflow_resume_reuses_existing_base_embed_and_detect_records(
@@ -396,6 +407,7 @@ def test_run_paper_ablation_workflow_resume_reuses_existing_base_embed_and_detec
                 "base_embed_reuse_mode": "resume",
                 "reuse_base_embed_record": None,
                 "package_zip": False,
+                "sync_to_drive": True,
             },
         },
     }
@@ -442,6 +454,7 @@ def test_run_paper_ablation_workflow_resume_reuses_existing_base_embed_and_detec
     manifest_obj = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
     assert manifest_obj["base_embed"]["stage_executed"] is False
     assert manifest_obj["base_embed"]["source_mode"] == "resume_existing_base_embed"
+    assert manifest_obj["execution_mode"]["effective"]["resume"] is True
     assert manifest_obj["variants"][0]["reused_existing_detect_record"] is True
     assert manifest_obj["variants"][1]["reused_existing_detect_record"] is False
 
@@ -515,6 +528,7 @@ def test_run_paper_ablation_workflow_supports_external_embed_record_reuse(
                 "base_embed_reuse_mode": "reuse_existing_record",
                 "reuse_base_embed_record": str(external_embed_record),
                 "package_zip": False,
+                "sync_to_drive": True,
             },
         },
     }
@@ -569,7 +583,7 @@ def test_paper_ablation_notebook_is_parseable_and_has_key_cells() -> None:
     Returns:
         None.
     """
-    notebook_path = Path("notebook/Paper_Ablation_Cuda.ipynb")
+    notebook_path = Path("notebook/Paper_Ablation.ipynb")
     notebook_obj = json.loads(notebook_path.read_text(encoding="utf-8"))
 
     assert isinstance(notebook_obj, dict)
@@ -578,8 +592,25 @@ def test_paper_ablation_notebook_is_parseable_and_has_key_cells() -> None:
 
     joined_cell_sources = ["\n".join(cell.get("source", [])) for cell in cells if isinstance(cell, dict)]
 
-    assert any("REPO_SOURCE_MODE" in cell_source and "git_clone_refresh" in cell_source for cell_source in joined_cell_sources)
-    assert any("RUN_TAG" in cell_source and "BASE_EMBED_REUSE_MODE" in cell_source for cell_source in joined_cell_sources)
+    assert any(
+        "REPO_SOURCE_MODE" in cell_source
+        and "local_existing" in cell_source
+        and "git_clone" in cell_source
+        and "drive_path" in cell_source
+        and "uploaded_zip" in cell_source
+        for cell_source in joined_cell_sources
+    )
+    assert any(
+        "RUN_TAG" in cell_source
+        and "SELECTED_VARIANTS" in cell_source
+        and "FRESH_RUN" in cell_source
+        and "RESUME" in cell_source
+        and "REUSE_BASE_EMBED_RECORD" in cell_source
+        and "PACKAGE_ZIP" in cell_source
+        and "SYNC_TO_DRIVE" in cell_source
+        for cell_source in joined_cell_sources
+    )
     assert any("ABLATION_SWITCH_NAME" in cell_source and "SINGLE_VARIABLE_REASON" in cell_source for cell_source in joined_cell_sources)
     assert any("run_paper_ablation_workflow.py" in cell_source for cell_source in joined_cell_sources)
     assert any("ablation_compare_summary.json" in cell_source for cell_source in joined_cell_sources)
+    assert any("GOOGLE_DRIVE_EXPORT_DIR" in cell_source and "drive_zip_path" in cell_source for cell_source in joined_cell_sources)

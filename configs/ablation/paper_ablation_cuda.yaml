@@ -261,6 +261,7 @@ paper_ablation_workflow:
       - formal_exact_evidence_source
       - protocol_root_cause_classification
       - variant_run_root
+      - base_embed_record_path
       - detect_record_path
       - input_record_path
       - config_snapshot_path
@@ -289,9 +290,12 @@ paper_ablation_workflow:
       - lf_exact_repair_mode
       - formal_exact_evidence_source
       - protocol_root_cause_classification
+      - base_embed_record_path
       - detect_record_path
   notebook_runtime:
     repo_source_mode: "local_existing"
+    repo_url: "https://github.com/RICHAAARC/CEG-WM.git"
+    repo_branch: "main"
     run_tag: null
     selected_variants:
       - "GEO-off"
@@ -299,6 +303,7 @@ paper_ablation_workflow:
     base_embed_reuse_mode: "fresh_run"
     reuse_base_embed_record: null
     package_zip: true
+    sync_to_drive: true
     export_to_drive: true
     output_root: "outputs/Paper_Ablation_Cuda"
     drive_export_subdir: "Paper_Ablation_Cuda"
