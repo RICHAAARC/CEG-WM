@@ -729,5 +729,13 @@ def test_paper_ablation_notebook_is_parseable_and_has_key_cells() -> None:
     )
     assert any("ABLATION_SWITCH_NAME" in cell_source and "SINGLE_VARIABLE_REASON" in cell_source for cell_source in joined_cell_sources)
     assert any("run_paper_ablation_workflow.py" in cell_source for cell_source in joined_cell_sources)
+    assert any(
+        "semantic_model_path" in cell_source and "repo_inspyrenet_model_path.resolve()" in cell_source
+        for cell_source in joined_cell_sources
+    )
+    assert any(
+        "inference_prompt_file" in cell_source and "prompt_file_path" in cell_source
+        for cell_source in joined_cell_sources
+    )
     assert any("ablation_compare_summary.json" in cell_source for cell_source in joined_cell_sources)
     assert any("GOOGLE_DRIVE_EXPORT_DIR" in cell_source and "drive_zip_path" in cell_source for cell_source in joined_cell_sources)
