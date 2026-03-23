@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 
 def _load_module(module_name: str, module_path: Path) -> Any:
     """
@@ -147,3 +149,35 @@ def test_paper_full_cuda_output_entrypoint_defaults_to_project_outputs_only() ->
 
     assert module.DEFAULT_CONFIG_PATH.as_posix() == "configs/paper_full_cuda.yaml"
     assert module.DEFAULT_RUN_ROOT.as_posix() == "outputs/colab_run_paper_full_cuda"
+
+
+def test_paper_full_cuda_config_declares_dtype_and_parallel_statistics() -> None:
+    """
+    功能：paper_full_cuda 正式配置必须显式声明 dtype 与 parallel attestation 统计链。
+
+    Verify the official paper_full_cuda config carries explicit dtype and the
+    parallel attestation statistics chain required by the output-only path.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    cfg_obj = yaml.safe_load((repo_root / "configs" / "paper_full_cuda.yaml").read_text(encoding="utf-8"))
+
+    assert isinstance(cfg_obj, dict)
+    assert cfg_obj.get("model_source") == "hf"
+    assert cfg_obj.get("hf_revision") == "main"
+    model_cfg = cfg_obj.get("model") if isinstance(cfg_obj.get("model"), dict) else {}
+    assert model_cfg.get("dtype") == "float16"
+    parallel_cfg = (
+        cfg_obj.get("parallel_attestation_statistics")
+        if isinstance(cfg_obj.get("parallel_attestation_statistics"), dict)
+        else {}
+    )
+    assert parallel_cfg.get("enabled") is True
+    assert parallel_cfg.get("calibration_score_name") == "event_attestation_score"
+    assert parallel_cfg.get("evaluate_score_name") == "event_attestation_score"
+    assert isinstance(cfg_obj.get("experiment_matrix"), dict)

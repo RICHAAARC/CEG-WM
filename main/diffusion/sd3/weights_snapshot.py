@@ -180,35 +180,33 @@ def _resolve_hf_snapshot_dir(
     功能：解析 Hugging Face snapshot 目录。
 
     Resolve Hugging Face snapshot directory via snapshot_download.
-    
-    Note: Offline-only enforcement is MANDATORY (system default). Network downloads
-    are completely disabled in this version.
+
+    Note: This helper must stay consistent with the actual pipeline build
+    semantics. When the build path allows HF Hub downloads, snapshot resolution
+    must record and reuse the same local_files_only policy instead of rejecting
+    it as a contradictory provenance state.
 
     Args:
         model_id: HF repo id.
         revision: Optional revision.
-        local_files_only: Local-only flag (must be True; ignored if False).
+        local_files_only: Local-only flag used by snapshot_download.
         cache_dir: Optional cache directory.
 
     Returns:
         Tuple of (snapshot_path_or_none, resolved_revision_or_none, error_or_none).
     """
-    # 离线模式强制：HF hub snapshot 禁止网络下载。
-    # Offline-only enforcement: HF hub snapshot_download is disabled.
-    # Return error when local_files_only is False or unset.
-    if isinstance(local_files_only, bool) and not local_files_only:
-        return None, None, "offline_only_enforcement: hf_hub downloads are disabled (local_files_only=True required)"
-    
     try:
         from huggingface_hub import snapshot_download
     except Exception as exc:
         return None, None, f"huggingface_hub import failed: {type(exc).__name__}: {exc}"
 
-    # 强制本地-only 模式；禁止网络下载。
-    # Force local_files_only=True regardless of input.
+    resolved_local_files_only = local_files_only if isinstance(local_files_only, bool) else True
+
+    # snapshot 解析必须与真实 pipeline build 语义一致；若构建阶段允许 HF 下载，
+    # 这里也必须接受同一 local_files_only 配置，而不是自相矛盾地拒绝它。
     download_kwargs: Dict[str, Any] = {
         "repo_id": model_id,
-        "local_files_only": True
+        "local_files_only": resolved_local_files_only
     }
     if revision is not None:
         download_kwargs["revision"] = revision

@@ -24,6 +24,9 @@ hf_revision: "main"
 pipeline_impl_id: "sd3_diffusers_real"
 pipeline_build_enabled: true
 
+model:
+  dtype: "float16"
+
 inference_enabled: true
 inference_prompt: "a serene landscape with mountains and a lake"
 inference_prompt_file: "prompts/paper_small.txt"

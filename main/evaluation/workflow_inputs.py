@@ -23,6 +23,7 @@ from main.core import records_io
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _CONTENT_SCORE_NAME = "content_score"
+_EVENT_ATTESTATION_SCORE_NAME = "event_attestation_score"
 
 
 def _resolve_stage_cfg_key(stage_name: str) -> str:
@@ -162,6 +163,60 @@ def _resolve_content_score_source(record: Dict[str, Any]) -> Tuple[float | None,
         if numeric_value is not None:
             return float(numeric_value), field_name
     return None, None
+
+
+def _resolve_event_attestation_score_source(record: Dict[str, Any]) -> Tuple[float | None, str | None]:
+    """
+    功能：从 detect record 解析正式 event_attestation_score 来源。
+
+    Resolve the formal event-attestation score source from a detect record.
+
+    Args:
+        record: Detect record mapping.
+
+    Returns:
+        Tuple of (score_value, score_source).
+    """
+    if not isinstance(record, dict):
+        raise TypeError("record must be dict")
+
+    attestation_node = record.get("attestation")
+    attestation_payload = cast(Dict[str, Any], attestation_node) if isinstance(attestation_node, dict) else {}
+    final_decision_node = attestation_payload.get("final_event_attested_decision")
+    final_decision = cast(Dict[str, Any], final_decision_node) if isinstance(final_decision_node, dict) else {}
+
+    score_name = final_decision.get("event_attestation_score_name")
+    if isinstance(score_name, str) and score_name and score_name != _EVENT_ATTESTATION_SCORE_NAME:
+        return None, None
+
+    score_value = _coerce_finite_float(final_decision.get("event_attestation_score"))
+    if score_value is None:
+        return None, None
+    return float(score_value), "attestation.final_event_attested_decision.event_attestation_score"
+
+
+def _ensure_event_attestation_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：确保 payload 包含可写入的 attestation.final_event_attested_decision 结构。
+
+    Ensure the payload contains a mutable final-event-attestation structure.
+
+    Args:
+        payload: Detect record payload to mutate.
+
+    Returns:
+        Final decision mapping.
+    """
+    if not isinstance(payload, dict):
+        raise TypeError("payload must be dict")
+
+    attestation_node = payload.get("attestation")
+    attestation_payload = dict(cast(Dict[str, Any], attestation_node)) if isinstance(attestation_node, dict) else {}
+    final_decision_node = attestation_payload.get("final_event_attested_decision")
+    final_decision = dict(cast(Dict[str, Any], final_decision_node)) if isinstance(final_decision_node, dict) else {}
+    attestation_payload["final_event_attested_decision"] = final_decision
+    payload["attestation"] = attestation_payload
+    return final_decision
 
 
 def _resolve_prompt_lines(prompt_file: str) -> List[str]:
@@ -333,8 +388,15 @@ def ensure_minimal_ground_truth_records(
             "detect_records_glob": detect_records_glob,
         }
 
+    source_path = matched_paths[0]
+    source_payload = _read_json_dict(source_path)
+
     score_name = stage_cfg.get("score_name", _CONTENT_SCORE_NAME)
-    if score_name != _CONTENT_SCORE_NAME:
+    if score_name == _CONTENT_SCORE_NAME:
+        source_score, score_source = _resolve_content_score_source(source_payload)
+    elif score_name == _EVENT_ATTESTATION_SCORE_NAME:
+        source_score, score_source = _resolve_event_attestation_score_source(source_payload)
+    else:
         return {
             "generated": False,
             "reason": "score_name_not_supported_for_minimal_generation",
@@ -351,12 +413,9 @@ def ensure_minimal_ground_truth_records(
             "score_name": score_name,
         }
 
-    source_path = matched_paths[0]
-    source_payload = _read_json_dict(source_path)
-    source_score, score_source = _resolve_content_score_source(source_payload)
     if source_score is None:
         raise ValueError(
-            f"{section_key} minimal ground-truth generation requires a usable content score: {source_path}"
+            f"{section_key} minimal ground-truth generation requires a usable {score_name}: {source_path}"
         )
 
     artifacts_dir = run_root / "artifacts"
@@ -382,10 +441,17 @@ def ensure_minimal_ground_truth_records(
             else {}
         )
         positive_content["status"] = "ok"
-        positive_content["score"] = float(source_score)
-        if isinstance(score_source, str) and score_source and score_source != "content_evidence_payload.score":
-            positive_content["calibration_score_recovery_reason"] = score_source
+        if score_name == _CONTENT_SCORE_NAME:
+            positive_content["score"] = float(source_score)
+            if isinstance(score_source, str) and score_source and score_source != "content_evidence_payload.score":
+                positive_content["calibration_score_recovery_reason"] = score_source
         positive_payload["content_evidence_payload"] = positive_content
+        if score_name == _EVENT_ATTESTATION_SCORE_NAME:
+            positive_final_decision = _ensure_event_attestation_payload(positive_payload)
+            positive_final_decision["status"] = "attested"
+            positive_final_decision["is_event_attested"] = True
+            positive_final_decision["event_attestation_score"] = float(source_score)
+            positive_final_decision["event_attestation_score_name"] = _EVENT_ATTESTATION_SCORE_NAME
 
         negative_payload = copy.deepcopy(source_payload)
         negative_payload["label"] = False
@@ -401,10 +467,19 @@ def ensure_minimal_ground_truth_records(
             else {}
         )
         negative_content["status"] = "ok"
-        negative_content["score"] = float(source_score - 1.0 - pair_index * 1e-6)
         negative_content["calibration_sample_origin"] = "workflow_minimal_ground_truth_negative"
         negative_content["calibration_sample_usage"] = "workflow_minimal_ground_truth_label_balance"
+        if score_name == _CONTENT_SCORE_NAME:
+            negative_content["score"] = float(source_score - 1.0 - pair_index * 1e-6)
         negative_payload["content_evidence_payload"] = negative_content
+        if score_name == _EVENT_ATTESTATION_SCORE_NAME:
+            negative_final_decision = _ensure_event_attestation_payload(negative_payload)
+            negative_final_decision["status"] = "absent"
+            negative_final_decision["is_event_attested"] = False
+            negative_final_decision["event_attestation_score"] = 0.0
+            negative_final_decision["event_attestation_score_name"] = _EVENT_ATTESTATION_SCORE_NAME
+            negative_final_decision["authenticity_status"] = "statement_only"
+            negative_payload["ground_truth_source"] = "workflow_minimal_ground_truth_negative_statement_only"
 
         if isinstance(prompt_value, str) and prompt_value.strip():
             positive_payload["inference_prompt"] = prompt_value
