@@ -407,11 +407,36 @@ def _resolve_matrix_calibration_score(record_payload: Dict[str, Any]) -> Tuple[O
     return None, None
 
 
+def _resolve_formal_matrix_content_score(record_payload: Dict[str, Any]) -> Tuple[Optional[float], Optional[str]]:
+    """Resolve the canonical formal-path content score without relaxed recovery."""
+    if not isinstance(record_payload, dict):
+        raise TypeError("record_payload must be dict")
+
+    content_payload = record_payload.get("content_evidence_payload")
+    if not isinstance(content_payload, dict):
+        return None, "content_evidence_payload_missing"
+
+    status_value = content_payload.get("status")
+    if status_value != "ok":
+        return None, f"content_evidence_payload.status={_safe_str(status_value)}"
+
+    recovery_reason = content_payload.get("calibration_score_recovery_reason")
+    if isinstance(recovery_reason, str) and recovery_reason:
+        return None, f"recovered_from={recovery_reason}"
+
+    score_value = _coerce_finite_float(content_payload.get("score"))
+    if score_value is None:
+        return None, "content_evidence_payload.score_missing_or_nonfinite"
+
+    return score_value, "content_evidence_payload.score"
+
+
 def _ensure_matrix_calibration_compatible_content_payload(
     record_payload: Dict[str, Any],
     score_value: float,
     score_source: Optional[str] = None,
     recovered_sample_origin: Optional[str] = None,
+    require_canonical_content_score: bool = False,
 ) -> None:
     """Normalize a record so calibration can consume it as a valid content sample."""
     if not isinstance(record_payload, dict):
@@ -424,14 +449,44 @@ def _ensure_matrix_calibration_compatible_content_payload(
         not isinstance(recovered_sample_origin, str) or not recovered_sample_origin
     ):
         raise TypeError("recovered_sample_origin must be non-empty str or None")
+    if not isinstance(require_canonical_content_score, bool):
+        raise TypeError("require_canonical_content_score must be bool")
 
     content_node = record_payload.get("content_evidence_payload")
     if not isinstance(content_node, dict):
         content_node = {}
         record_payload["content_evidence_payload"] = content_node
+
+    if require_canonical_content_score:
+        existing_status = content_node.get("status")
+        existing_score = _coerce_finite_float(content_node.get("score"))
+        recovery_reason = content_node.get("calibration_score_recovery_reason")
+        if existing_status != "ok":
+            raise RuntimeError(
+                "formal matrix content payload must preserve status=ok; "
+                f"got_status={_safe_str(existing_status)}"
+            )
+        if existing_score is None:
+            raise RuntimeError(
+                "formal matrix content payload requires canonical content_evidence_payload.score"
+            )
+        if score_source != "content_evidence_payload.score":
+            raise RuntimeError(
+                "formal matrix content payload forbids recovered score source; "
+                f"score_source={_safe_str(score_source)}"
+            )
+        if isinstance(recovery_reason, str) and recovery_reason:
+            raise RuntimeError(
+                "formal matrix content payload forbids calibration score recovery markers; "
+                f"recovery_reason={recovery_reason}"
+            )
+
     content_node["status"] = "ok"
     content_node["score"] = float(score_value)
     content_node.pop("calibration_sample_is_synthetic_fallback", None)
+    if require_canonical_content_score:
+        content_node.pop("calibration_score_recovery_reason", None)
+        content_node.pop("calibration_sample_origin", None)
 
     if isinstance(score_source, str) and score_source != "content_evidence_payload.score":
         content_node["calibration_score_recovery_reason"] = score_source
@@ -916,6 +971,7 @@ def _assert_formal_validation_prerequisites(
         raise TypeError("shared_thresholds_path must be Path or None")
 
     missing_real_negative_keys: List[str] = []
+    invalid_real_negative_keys: List[str] = []
     require_shared_thresholds = False
 
     for item in grid:
@@ -934,6 +990,20 @@ def _assert_formal_validation_prerequisites(
                 missing_real_negative_keys.append(
                     f"model_id={_safe_str(model_id)}, seed={seed_value if isinstance(seed_value, int) else '<absent>'}"
                 )
+            else:
+                neg_record = _read_optional_json(neg_path)
+                if not isinstance(neg_record, dict) or not neg_record:
+                    invalid_real_negative_keys.append(
+                        f"model_id={_safe_str(model_id)}, seed={seed_value if isinstance(seed_value, int) else '<absent>'}, "
+                        f"reason=detect_record_missing_or_invalid_json, path={neg_path}"
+                    )
+                else:
+                    _, invalid_reason = _resolve_formal_matrix_content_score(neg_record)
+                    if invalid_reason != "content_evidence_payload.score":
+                        invalid_real_negative_keys.append(
+                            f"model_id={_safe_str(model_id)}, seed={seed_value if isinstance(seed_value, int) else '<absent>'}, "
+                            f"reason={invalid_reason}, path={neg_path}"
+                        )
 
         require_shared_thresholds = require_shared_thresholds or guards["require_shared_thresholds"]
     if missing_real_negative_keys:
@@ -941,6 +1011,12 @@ def _assert_formal_validation_prerequisites(
         raise RuntimeError(
             "experiment_matrix formal validation requires real negative cache for every guarded item; "
             f"missing={missing_keys_joined}"
+        )
+    if invalid_real_negative_keys:
+        invalid_keys_joined = "; ".join(sorted(set(invalid_real_negative_keys)))
+        raise RuntimeError(
+            "experiment_matrix formal validation requires canonical real negative content scores; "
+            f"invalid={invalid_keys_joined}"
         )
 
     has_shared_thresholds = (
@@ -1267,12 +1343,17 @@ def _run_global_calibrate(
     # load_scores_for_calibration 在 has_explicit_labels=True 时仅使用 label=False 的记录
     # 作为 null 分布，与 label=True 的正样本完全隔离。
     staged_count = 0
+    invalid_negatives: List[str] = []
     for idx, neg_path in enumerate(valid_neg_paths):
         neg_record = _read_optional_json(neg_path)
         if not isinstance(neg_record, dict) or not neg_record:
+            invalid_negatives.append(f"path={neg_path}, reason=detect_record_missing_or_invalid_json")
             continue
-        score_val, score_source = _resolve_matrix_calibration_score(neg_record)
-        if not isinstance(score_val, float):
+        score_val, score_source = _resolve_formal_matrix_content_score(neg_record)
+        if not isinstance(score_val, float) or score_source != "content_evidence_payload.score":
+            invalid_negatives.append(
+                f"path={neg_path}, reason={score_source if isinstance(score_source, str) else 'content_evidence_payload.score_missing_or_nonfinite'}"
+            )
             continue
         labeled_neg = copy.deepcopy(neg_record)
         labeled_neg["label"] = False
@@ -1286,6 +1367,7 @@ def _run_global_calibrate(
             score_val,
             score_source=score_source,
             recovered_sample_origin="global_calibrate_real_negative_recovery",
+            require_canonical_content_score=True,
         )
         staged_path = neg_staged_dir / f"neg_record_{idx:04d}.json"
         records_io.write_artifact_text_unbound(
@@ -1296,8 +1378,17 @@ def _run_global_calibrate(
         )
         staged_count += 1
 
+    if invalid_negatives:
+        invalid_negatives_joined = "; ".join(invalid_negatives)
+        raise RuntimeError(
+            "experiment_matrix global calibrate requires canonical real negative content scores; "
+            f"invalid={invalid_negatives_joined}"
+        )
+
     if staged_count == 0:
-        return None
+        raise RuntimeError(
+            "experiment_matrix global calibrate produced no valid real negative samples for shared thresholds"
+        )
 
     neg_glob = str(neg_staged_dir / "*.json")
 
@@ -1807,9 +1898,12 @@ def _prepare_formal_evaluate_detect_records_glob_for_matrix(
     if not isinstance(positive_payload, dict) or not positive_payload:
         raise RuntimeError("detect record missing or invalid for formal evaluate inputs")
 
-    positive_score, positive_score_source = _resolve_matrix_calibration_score(positive_payload)
-    if not isinstance(positive_score, float):
-        raise RuntimeError("formal evaluate inputs require a valid attacked positive content score")
+    positive_score, positive_score_source = _resolve_formal_matrix_content_score(positive_payload)
+    if not isinstance(positive_score, float) or positive_score_source != "content_evidence_payload.score":
+        raise RuntimeError(
+            "formal evaluate inputs require canonical attacked positive content score; "
+            f"reason={positive_score_source if isinstance(positive_score_source, str) else 'content_evidence_payload.score_missing_or_nonfinite'}"
+        )
 
     positive_payload = copy.deepcopy(positive_payload)
     positive_payload["label"] = True
@@ -1821,6 +1915,7 @@ def _prepare_formal_evaluate_detect_records_glob_for_matrix(
         positive_payload,
         positive_score,
         score_source=positive_score_source,
+        require_canonical_content_score=True,
     )
 
     neg_staged_dir = shared_thresholds_path.parent.parent / "neg_staged"
@@ -1851,12 +1946,17 @@ def _prepare_formal_evaluate_detect_records_glob_for_matrix(
     )
 
     staged_negative_count = 0
+    invalid_negatives: List[str] = []
     for idx, neg_path in enumerate(neg_paths):
         neg_payload = _read_optional_json(neg_path)
         if not isinstance(neg_payload, dict) or not neg_payload:
+            invalid_negatives.append(f"path={neg_path}, reason=detect_record_missing_or_invalid_json")
             continue
-        neg_score, neg_score_source = _resolve_matrix_calibration_score(neg_payload)
-        if not isinstance(neg_score, float):
+        neg_score, neg_score_source = _resolve_formal_matrix_content_score(neg_payload)
+        if not isinstance(neg_score, float) or neg_score_source != "content_evidence_payload.score":
+            invalid_negatives.append(
+                f"path={neg_path}, reason={neg_score_source if isinstance(neg_score_source, str) else 'content_evidence_payload.score_missing_or_nonfinite'}"
+            )
             continue
 
         neg_payload = copy.deepcopy(neg_payload)
@@ -1879,6 +1979,7 @@ def _prepare_formal_evaluate_detect_records_glob_for_matrix(
             neg_payload,
             neg_score,
             score_source=neg_score_source,
+            require_canonical_content_score=True,
         )
 
         negative_rel_path = (
@@ -1894,6 +1995,13 @@ def _prepare_formal_evaluate_detect_records_glob_for_matrix(
             obj=neg_payload,
         )
         staged_negative_count += 1
+
+    if invalid_negatives:
+        invalid_negatives_joined = "; ".join(invalid_negatives)
+        raise RuntimeError(
+            "formal evaluate inputs require canonical staged real negative scores; "
+            f"invalid={invalid_negatives_joined}"
+        )
 
     if staged_negative_count <= 0:
         raise RuntimeError(

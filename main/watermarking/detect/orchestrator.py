@@ -3112,6 +3112,8 @@ def _bind_scores_if_ok(content_evidence_payload: Dict[str, Any]) -> None:
         content_evidence_payload["score"] = None
         content_evidence_payload["lf_score"] = None
         content_evidence_payload["hf_score"] = None
+        content_evidence_payload["detect_lf_score"] = None
+        content_evidence_payload["detect_hf_score"] = None
         if score_parts is not None:
             for numeric_key in [
                 "lf_score",
