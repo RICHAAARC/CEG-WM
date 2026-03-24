@@ -152,7 +152,7 @@ evaluate:
   exclude_synthetic_negative_closure_marker: true
 
 parallel_attestation_statistics:
-  enabled: true  # paper onefile 主线保留 content_score，同时并行补齐 event_attestation_score 正式统计链
+  enabled: true  # 独立专项流程参数来源；run_paper_full_cuda 主脚本不自动执行该统计链
   calibration_score_name: "event_attestation_score"
   evaluate_score_name: "event_attestation_score"
 

@@ -34,6 +34,26 @@ def test_ensure_minimal_ground_truth_records_generates_labelled_pairs(tmp_path: 
         "whitelist_bound_digest": "whitelist-anchor",
         "policy_path_semantics_bound_digest": "semantics-anchor",
         "injection_scope_manifest_bound_digest": "injection-anchor",
+        "attestation": {
+            "status": "attested",
+            "verdict": "attested",
+            "content_attestation_score": 0.82,
+            "fusion_score": 0.82,
+            "image_evidence_result": {
+                "status": "ok",
+                "content_attestation_score": 0.82,
+                "fusion_score": 0.82,
+            },
+            "final_event_attested_decision": {
+                "status": "attested",
+                "is_event_attested": True,
+                "event_attestation_score": 0.82,
+                "event_attestation_score_name": "event_attestation_score",
+                "event_attestation_statistics_score": 0.82,
+                "authenticity_status": "authentic",
+                "image_evidence_status": "ok",
+            },
+        },
         "content_evidence_payload": {
             "status": "ok",
             "score": 0.82,
@@ -75,6 +95,17 @@ def test_ensure_minimal_ground_truth_records_generates_labelled_pairs(tmp_path: 
     assert negative_payload["ground_truth_source"] == "workflow_minimal_ground_truth_negative"
     assert positive_payload["is_watermarked"] is True
     assert negative_payload["is_watermarked"] is False
+    assert positive_payload["attestation"]["final_event_attested_decision"]["status"] == "attested"
+    negative_attestation = negative_payload["attestation"]
+    negative_decision = negative_attestation["final_event_attested_decision"]
+    assert negative_attestation["status"] == "absent"
+    assert negative_attestation["verdict"] == "absent"
+    assert negative_attestation["content_attestation_score"] == 0.0
+    assert negative_attestation["fusion_score"] == 0.0
+    assert negative_decision["status"] == "absent"
+    assert negative_decision["is_event_attested"] is False
+    assert negative_decision["event_attestation_score"] == 0.0
+    assert negative_decision["authenticity_status"] == "statement_only"
     assert positive_payload["content_evidence_payload"]["score"] > negative_payload["content_evidence_payload"]["score"]
 
 
@@ -139,6 +170,8 @@ def test_ensure_minimal_ground_truth_records_supports_event_attestation_score(tm
 
     positive_decision = positive_payload["attestation"]["final_event_attested_decision"]
     negative_decision = negative_payload["attestation"]["final_event_attested_decision"]
+    assert negative_payload["attestation"]["status"] == "absent"
+    assert negative_payload["attestation"]["verdict"] == "absent"
     assert positive_decision["event_attestation_score"] == 0.82
     assert positive_decision["event_attestation_score_name"] == "event_attestation_score"
     assert negative_decision["event_attestation_score"] == 0.0

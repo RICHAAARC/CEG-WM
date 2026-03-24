@@ -251,6 +251,55 @@ def _ensure_event_attestation_payload(payload: Dict[str, Any]) -> Dict[str, Any]
     return final_decision
 
 
+def _apply_negative_attestation_semantics(payload: Dict[str, Any]) -> None:
+    """
+    功能：将克隆负样本的 attestation 语义收敛为显式 negative / absent。
+
+    Normalize cloned negative-sample attestation semantics so they remain
+    consistent with label=false and is_watermarked=false while preserving the
+    surrounding structure.
+
+    Args:
+        payload: Generated detect-record payload to mutate in place.
+
+    Returns:
+        None.
+    """
+    if not isinstance(payload, dict):
+        raise TypeError("payload must be dict")
+
+    final_decision = _ensure_event_attestation_payload(payload)
+    final_decision["status"] = "absent"
+    final_decision["is_event_attested"] = False
+    final_decision["event_attestation_score"] = 0.0
+    final_decision["event_attestation_score_name"] = _EVENT_ATTESTATION_SCORE_NAME
+    if "event_attestation_statistics_score" in final_decision:
+        final_decision["event_attestation_statistics_score"] = 0.0
+    final_decision["authenticity_status"] = "statement_only"
+    final_decision["image_evidence_status"] = "absent"
+
+    attestation_node = payload.get("attestation")
+    if not isinstance(attestation_node, dict):
+        return
+
+    attestation_payload = cast(Dict[str, Any], attestation_node)
+    attestation_payload["status"] = "absent"
+    attestation_payload["verdict"] = "absent"
+    if "content_attestation_score" in attestation_payload:
+        attestation_payload["content_attestation_score"] = 0.0
+    if "fusion_score" in attestation_payload:
+        attestation_payload["fusion_score"] = 0.0
+
+    image_evidence_result = attestation_payload.get("image_evidence_result")
+    if isinstance(image_evidence_result, dict):
+        image_evidence_payload = cast(Dict[str, Any], image_evidence_result)
+        image_evidence_payload["status"] = "absent"
+        if "content_attestation_score" in image_evidence_payload:
+            image_evidence_payload["content_attestation_score"] = 0.0
+        if "fusion_score" in image_evidence_payload:
+            image_evidence_payload["fusion_score"] = 0.0
+
+
 def _resolve_prompt_lines(prompt_file: str) -> List[str]:
     """
     功能：解析 prompt 文件中的非空提示词列表。
@@ -506,13 +555,8 @@ def ensure_minimal_ground_truth_records(
         if score_name == _CONTENT_SCORE_NAME:
             negative_content["score"] = float(source_score - 1.0 - pair_index * 1e-6)
         negative_payload["content_evidence_payload"] = negative_content
+        _apply_negative_attestation_semantics(negative_payload)
         if score_name == _EVENT_ATTESTATION_SCORE_NAME:
-            negative_final_decision = _ensure_event_attestation_payload(negative_payload)
-            negative_final_decision["status"] = "absent"
-            negative_final_decision["is_event_attested"] = False
-            negative_final_decision["event_attestation_score"] = 0.0
-            negative_final_decision["event_attestation_score_name"] = _EVENT_ATTESTATION_SCORE_NAME
-            negative_final_decision["authenticity_status"] = "statement_only"
             negative_payload["ground_truth_source"] = "workflow_minimal_ground_truth_negative_statement_only"
 
         if isinstance(prompt_value, str) and prompt_value.strip():

@@ -211,45 +211,6 @@ def _build_parallel_attestation_run_root(run_root: Path) -> Path:
     return run_root / "outputs" / "parallel_attestation_statistics"
 
 
-def _build_parallel_attestation_command(
-    stage_name: str,
-    config_path: Path,
-    run_root: Path,
-    parallel_run_root: Path,
-    score_name: str,
-) -> List[str]:
-    """
-    功能：构造 parallel attestation 统计子流程命令。
-
-    Build a parallel attestation statistics command by reusing the formal CLI
-    stages with score-name overrides only.
-
-    Args:
-        stage_name: Stage name in {calibrate, evaluate}.
-        config_path: Runtime config path.
-        run_root: Main workflow run root containing the source detect record.
-        parallel_run_root: Parallel statistics run root.
-        score_name: Target score name.
-
-    Returns:
-        CLI command argument list.
-    """
-    if stage_name not in {"calibrate", "evaluate"}:
-        raise ValueError(f"unsupported parallel attestation stage_name: {stage_name}")
-    if not isinstance(score_name, str) or not score_name:
-        raise TypeError("score_name must be non-empty str")
-
-    source_detect_glob = (run_root / "records" / "*detect*.json").resolve().as_posix()
-    extra_overrides = [
-        _format_override_arg(f"{ 'calibration' if stage_name == 'calibrate' else 'evaluate' }.score_name", score_name),
-        _format_override_arg(f"{ 'calibration' if stage_name == 'calibrate' else 'evaluate' }.detect_records_glob", source_detect_glob),
-    ]
-    if stage_name == "evaluate":
-        thresholds_path = (parallel_run_root / "artifacts" / "thresholds" / "thresholds_artifact.json").resolve().as_posix()
-        extra_overrides.append(_format_override_arg("evaluate.thresholds_path", thresholds_path))
-    return _build_stage_command(stage_name, config_path, parallel_run_root, extra_overrides)
-
-
 def _build_experiment_matrix_command(config_path: Path, run_root: Path) -> List[str]:
     """
     功能：构造 experiment_matrix 命令。
@@ -492,9 +453,14 @@ def run_paper_full_cuda(config_path: Path, run_root: Path) -> int:
             "enabled": bool(parallel_cfg.get("enabled", False)),
             "required": False,
             "affects_exit_code": False,
-            "status": "skipped",
-            "run_root": None,
-            "stages": {},
+            "status": "detached_not_run" if bool(parallel_cfg.get("enabled", False)) else "disabled",
+            "execution_mode": "independent_post_flow",
+            "script_path": "scripts/run_parallel_attestation_statistics.py",
+            "suggested_run_root": str(_build_parallel_attestation_run_root(run_root)),
+            "configured_score_names": {
+                "calibration": str(parallel_cfg.get("calibration_score_name")),
+                "evaluate": str(parallel_cfg.get("evaluate_score_name")),
+            },
         },
         "experiment_matrix": {
             "enabled": isinstance(cfg_obj.get("experiment_matrix"), dict),
@@ -502,7 +468,7 @@ def run_paper_full_cuda(config_path: Path, run_root: Path) -> int:
             "status": "skipped",
             "return_code": None,
         },
-        "exit_policy": "embed_detect_calibrate_evaluate_required_parallel_attestation_optional_experiment_matrix_optional",
+        "exit_policy": "embed_detect_calibrate_evaluate_required_parallel_attestation_detached_experiment_matrix_optional",
     }
     stages = ["embed", "detect", "calibrate", "evaluate"]
     for stage_name in stages:
@@ -529,38 +495,6 @@ def run_paper_full_cuda(config_path: Path, run_root: Path) -> int:
     workflow_summary["main_status"] = "ok"
     workflow_summary["main_chain"]["status"] = "ok"
     workflow_summary["workflow_status"] = "ok"
-
-    if bool(parallel_cfg.get("enabled", False)):
-        parallel_run_root = _build_parallel_attestation_run_root(run_root)
-        parallel_summary = workflow_summary["parallel_attestation_statistics"]
-        parallel_summary["run_root"] = str(parallel_run_root)
-        parallel_summary["status"] = "running"
-        parallel_plan = [
-            ("parallel_attestation_calibrate", "calibrate", str(parallel_cfg.get("calibration_score_name"))),
-            ("parallel_attestation_evaluate", "evaluate", str(parallel_cfg.get("evaluate_score_name"))),
-        ]
-        for summary_stage_name, cli_stage_name, score_name in parallel_plan:
-            return_code = _run_step(
-                summary_stage_name,
-                _build_parallel_attestation_command(
-                    cli_stage_name,
-                    config_path,
-                    run_root,
-                    parallel_run_root,
-                    score_name,
-                ),
-            )
-            parallel_summary["stages"][summary_stage_name] = {
-                "return_code": return_code,
-                "score_name": score_name,
-            }
-            if return_code != 0:
-                parallel_summary["status"] = "failed_optional"
-                workflow_summary["workflow_status"] = "ok_with_optional_failures"
-                print("[paper_full_cuda] parallel_attestation_statistics failed but main workflow outputs are preserved.")
-                break
-        else:
-            parallel_summary["status"] = "ok"
 
     matrix_cfg_obj = cfg_obj.get("experiment_matrix")
     matrix_enabled = isinstance(matrix_cfg_obj, dict)
