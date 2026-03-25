@@ -38,7 +38,7 @@ def run_experiment_matrix(config_path: str, strict: bool = True) -> Dict[str, An
     cfg_obj, _ = config_loader.load_yaml_with_provenance(Path(config_path))
     cfg_dict: Dict[str, Any] = dict(cfg_obj)
     config_loader.normalize_ablation_flags(cfg_dict)
-    config_loader._validate_paper_lf_ecc_gate(cfg_dict)  # pyright: ignore[reportPrivateUsage]
+    config_loader._validate_paper_lf_ecc_gate(cfg_dict)
     grid = experiment_matrix.build_experiment_grid(cfg_dict)
     return experiment_matrix.run_experiment_grid(grid, strict=strict)
 
@@ -46,7 +46,7 @@ def run_experiment_matrix(config_path: str, strict: bool = True) -> Dict[str, An
 def main() -> None:
     """CLI entry for experiment matrix execution."""
     parser = argparse.ArgumentParser(description="Run experiment matrix and publish aggregate artifacts")
-    parser.add_argument("--config", default="configs/paper_full_cuda.yaml", help="Config YAML path")
+    parser.add_argument("--config", default="configs/default.yaml", help="Config YAML path")
     parser.add_argument(
         "--strict",
         action="store_true",

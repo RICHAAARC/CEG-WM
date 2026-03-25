@@ -204,8 +204,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--config",
-        default="configs/paper_full_cuda.yaml",
-        help="Base config YAML path (default: configs/paper_full_cuda.yaml)",
+        default="configs/default.yaml",
+        help="Base config YAML path (default: configs/default.yaml)",
     )
     parser.add_argument(
         "--strict",

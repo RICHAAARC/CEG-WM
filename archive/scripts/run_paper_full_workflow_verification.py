@@ -30,8 +30,8 @@ from scripts.workflow_acceptance_common import (
 )
 
 
-DEFAULT_CONFIG_PATH = Path("configs/paper_full_cuda.yaml")
-DEFAULT_RUN_ROOT = Path("outputs/onefile_paper_full_cuda_verify")
+DEFAULT_CONFIG_PATH = Path("configs/default.yaml")
+DEFAULT_RUN_ROOT = Path("outputs/onefile_default_verify")
 
 
 def _resolve_repo_path(path_value: str) -> Path:
@@ -125,7 +125,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--config",
         default=str(DEFAULT_CONFIG_PATH.as_posix()),
-        help="Formal runtime config path (default: configs/paper_full_cuda.yaml)",
+        help="Formal runtime config path (default: configs/default.yaml)",
     )
     parser.add_argument(
         "--run-root",

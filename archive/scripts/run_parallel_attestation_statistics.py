@@ -265,7 +265,7 @@ def main() -> int:
     parser.add_argument(
         "--config",
         default=str(paper_full_cuda_workflow.DEFAULT_CONFIG_PATH.as_posix()),
-        help="Runtime config path (default: configs/paper_full_cuda.yaml)",
+        help="Runtime config path (default: configs/default.yaml)",
     )
     parser.add_argument(
         "--run-root",

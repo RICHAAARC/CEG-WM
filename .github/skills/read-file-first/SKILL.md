@@ -11,7 +11,7 @@ Enforce real file reads before any analysis. Conversation history and memory sum
 ### 强制读取清单（按顺序执行）
 
 **第一批：配置文件（必须全文读取）**
-- `configs/paper_full_cuda.yaml`
+- `configs/default.yaml`
 - `configs/frozen_contracts.yaml`
 - `configs/policy_path_semantics.yaml`
 - `configs/runtime_whitelist.yaml`
@@ -56,7 +56,7 @@ Enforce real file reads before any analysis. Conversation history and memory sum
 
 ### 核心发布边界
 - 项目核心发布仅包含 `configs/` 和 `main/`。
-- 所有核心流程分析必须基于 `configs/paper_full_cuda.yaml` + `main/` 目录代码，禁止依赖 `scripts/` 逻辑。
+- 所有核心流程分析必须基于 `configs/default.yaml` + `main/` 目录代码，禁止依赖 `scripts/` 逻辑。
 
 ## Verification Checklist
 
@@ -64,7 +64,7 @@ Enforce real file reads before any analysis. Conversation history and memory sum
 
 ```
 [read-file-first 核验]
-□ configs/paper_full_cuda.yaml        — 已读 / 未读
+□ configs/default.yaml                — 已读 / 未读
 □ configs/frozen_contracts.yaml       — 已读 / 未读
 □ configs/policy_path_semantics.yaml  — 已读 / 未读
 □ configs/runtime_whitelist.yaml      — 已读 / 未读
@@ -86,7 +86,7 @@ Enforce real file reads before any analysis. Conversation history and memory sum
 ## Repository Anchors
 
 始终以如下文件作为分析锚点：
-- `configs/paper_full_cuda.yaml` — 主配置真理源
+- `configs/default.yaml` — 主配置真理源
 - `main/watermarking/` — 核心算法实现
 - `main/policy/` — 决策策略层
 - `main/evaluation/` — 评估指标计算

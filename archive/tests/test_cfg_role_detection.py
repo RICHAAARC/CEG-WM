@@ -165,7 +165,7 @@ class TestCfgRoleValidation:
                 _validate_cfg_role_for_profile(spec_cfg, cfg_path, PROFILE_PAPER_FULL_CUDA)
             
             error_msg = str(exc_info.value)
-            assert "paper_full_cuda.yaml" in error_msg
+            assert "default.yaml" in error_msg
             assert "paper_faithfulness_spec.yaml" in error_msg
         finally:
             if cfg_path.exists():
@@ -178,7 +178,7 @@ def test_actual_runtime_configs_are_detected_as_runtime() -> None:
     runtime_cfg_paths = [
         repo_root / "configs" / "default.yaml",
         repo_root / "configs" / "smoke_cpu.yaml",
-        repo_root / "configs" / "paper_full_cuda.yaml",
+        repo_root / "configs" / "default.yaml",
     ]
 
     for cfg_path in runtime_cfg_paths:

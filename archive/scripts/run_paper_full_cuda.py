@@ -6,7 +6,7 @@ Module type: General module
 职责边界：
 1. 仅顺序编排 embed/detect/calibrate/evaluate 与可选 experiment_matrix。
 2. 不执行 formal acceptance、signoff、workflow summary 或审计补洞。
-3. 不改写论文机制身份字段，直接消费 configs/paper_full_cuda.yaml。
+3. 不改写论文机制身份字段，直接消费 configs/default.yaml。
 """
 
 from __future__ import annotations
@@ -28,8 +28,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 
-DEFAULT_CONFIG_PATH = Path("configs/paper_full_cuda.yaml")
-DEFAULT_RUN_ROOT = Path("outputs/colab_run_paper_full_cuda")
+DEFAULT_CONFIG_PATH = Path("configs/default.yaml")
+DEFAULT_RUN_ROOT = Path("outputs/colab_run_default")
 
 
 def _resolve_repo_path(path_value: str) -> Path:
@@ -507,7 +507,7 @@ def run_paper_full_cuda(config_path: Path, run_root: Path) -> int:
         }
         if return_code != 0:
             workflow_summary["workflow_status"] = "ok_with_optional_failures"
-            print("[paper_full_cuda] experiment_matrix failed but main workflow outputs are preserved.")
+            print("[default] experiment_matrix failed but main workflow outputs are preserved.")
 
     _persist_workflow_summary(run_root, workflow_summary)
     _emit_workflow_summary(workflow_summary)
@@ -519,7 +519,7 @@ def main() -> int:
     """
     功能：CLI 主入口。
 
-    Execute the output-oriented paper_full_cuda workflow.
+    Execute the output-oriented default workflow.
 
     Args:
         None.
@@ -528,17 +528,17 @@ def main() -> int:
         Process exit code.
     """
     parser = argparse.ArgumentParser(
-        description="Run the paper_full_cuda output-oriented workflow."
+        description="Run the default output-oriented workflow."
     )
     parser.add_argument(
         "--config",
         default=str(DEFAULT_CONFIG_PATH.as_posix()),
-        help="Runtime config path (default: configs/paper_full_cuda.yaml)",
+        help="Runtime config path (default: configs/default.yaml)",
     )
     parser.add_argument(
         "--run-root",
         default=str(DEFAULT_RUN_ROOT.as_posix()),
-        help="Workflow run root (default: outputs/colab_run_paper_full_cuda)",
+        help="Workflow run root (default: outputs/colab_run_default)",
     )
     args = parser.parse_args()
 

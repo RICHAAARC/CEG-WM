@@ -43,13 +43,13 @@ from main.evaluation import metrics as eval_metrics
 
 
 PROFILE_CPU_SMOKE = "cpu_smoke"
-PROFILE_PAPER_FULL_CUDA = "paper_full_cuda"
+PROFILE_PAPER_FULL_CUDA = "default"
 LEGACY_PROFILE_CPU_MIN = "cpu_min"
 LEGACY_PROFILE_CUDA_REAL = "cuda_real"
 CONTENT_ATTESTATION_SCORE_NAME = "content_attestation_score"
 EVENT_ATTESTATION_SCORE_NAME = "event_attestation_score"
 EVENT_ATTESTATION_SCORE_ALIAS_NAME = "event_attestation_statistics_score"
-PAPER_FROZEN_CONFIG_PATH = REPO_ROOT / "configs" / "paper_full_cuda.yaml"
+PAPER_FROZEN_CONFIG_PATH = REPO_ROOT / "configs" / "default.yaml"
 PAPER_SPEC_CONFIG_PATH = REPO_ROOT / "configs" / "paper_faithfulness_spec.yaml"
 PAPER_FROZEN_IMPL_REQUIRED_FIELDS = ("sync_module_id", "geometry_extractor_id")
 
@@ -139,12 +139,12 @@ def _validate_cfg_role_for_profile(cfg_obj: dict, cfg_path: Path, profile: str) 
     detected_role = _detect_cfg_role(cfg_obj)
     profile = _normalize_profile(profile)
 
-    # paper_full_cuda profile 对应论文方法，必须只能使用 runtime cfg
+    # default profile 对应论文方法，必须只能使用 runtime cfg
     if profile == PROFILE_PAPER_FULL_CUDA:
         if detected_role == CFG_ROLE_SPEC:
             raise ValueError(
-                f"profile=paper_full_cuda requires runtime config, got spec config: {cfg_path}\n"
-                f"Use configs/paper_full_cuda.yaml as runtime config instead.\n"
+                f"profile=default requires runtime config, got spec config: {cfg_path}\n"
+                f"Use configs/default.yaml as runtime config instead.\n"
                 f"configs/paper_faithfulness_spec.yaml is a specification document, not executable at runtime."
             )
 
@@ -1203,7 +1203,7 @@ def _prepare_profile_cfg_path(profile: str, run_root: Path, cfg_path: Path) -> P
 
     cfg_obj["embed"] = embed_cfg
 
-    profile_cfg_path = run_root / "artifacts" / "workflow_cfg" / "profile_paper_full_cuda.yaml"
+    profile_cfg_path = run_root / "artifacts" / "workflow_cfg" / "profile_default.yaml"
     _write_artifact_text_unbound(
         run_root,
         profile_cfg_path,

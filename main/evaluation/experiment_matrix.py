@@ -126,7 +126,7 @@ def build_experiment_grid(base_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     if not isinstance(batch_root, str) or not batch_root:
         raise ValueError("experiment_matrix.batch_root must be non-empty str")
 
-    config_path = matrix_cfg.get("config_path", "configs/paper_full_cuda.yaml")
+    config_path = matrix_cfg.get("config_path", "configs/default.yaml")
     if not isinstance(config_path, str) or not config_path:
         raise ValueError("experiment_matrix.config_path must be non-empty str")
 
@@ -684,7 +684,7 @@ def run_experiment_grid(grid: List[Dict[str, Any]], strict: bool = True) -> Dict
                 neg_detect_record_cache[neg_key] = _run_neg_embed_detect_for_cache(
                     model_id=m_id,
                     seed=s_val,
-                    config_path=str(item.get("config_path", "configs/paper_full_cuda.yaml")),
+                    config_path=str(item.get("config_path", "configs/default.yaml")),
                     batch_root=str(item.get("batch_root", "outputs/experiment_matrix")),
                     max_samples=item.get("max_samples"),
                 )
@@ -711,7 +711,7 @@ def run_experiment_grid(grid: List[Dict[str, Any]], strict: bool = True) -> Dict
             try:
                 _stage_external_shared_threshold_negatives(
                     shared_thresholds_path=external_shared_thresholds_path,
-                    config_path=str(first_item.get("config_path", "configs/paper_full_cuda.yaml")),
+                    config_path=str(first_item.get("config_path", "configs/default.yaml")),
                     neg_detect_record_cache=neg_detect_record_cache,
                 )
                 shared_thresholds_path = external_shared_thresholds_path
@@ -721,7 +721,7 @@ def run_experiment_grid(grid: List[Dict[str, Any]], strict: bool = True) -> Dict
             try:
                 shared_thresholds_path = _run_global_calibrate(
                     batch_root=str(first_item.get("batch_root", "outputs/experiment_matrix")),
-                    config_path=str(first_item.get("config_path", "configs/paper_full_cuda.yaml")),
+                    config_path=str(first_item.get("config_path", "configs/default.yaml")),
                     neg_detect_record_cache=neg_detect_record_cache,
                 )
             except Exception:
@@ -1698,7 +1698,7 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
     )
     _ = layout
 
-    config_path = grid_item_cfg.get("config_path", "configs/paper_full_cuda.yaml")
+    config_path = grid_item_cfg.get("config_path", "configs/default.yaml")
     attack_protocol_path = grid_item_cfg.get("attack_protocol_path", config_loader.ATTACK_PROTOCOL_PATH)
     cfg_snapshot_obj = grid_item_cfg.get("cfg_snapshot", {})
     if not isinstance(cfg_snapshot_obj, dict):

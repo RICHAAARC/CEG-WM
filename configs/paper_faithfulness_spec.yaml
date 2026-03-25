@@ -30,9 +30,9 @@ profile_roles:
     role: "lightweight_closure_verification"
     rule: "smoke_cpu 允许 synthetic pipeline 执行主链接线验证，但不得解释为论文正式结果。"
   paper_formal_runtime:
-    config_path: "configs/paper_full_cuda.yaml"
+    config_path: "configs/default.yaml"
     role: "paper_full_formal_gpu_acceptance"
-    rule: "paper_full_cuda 是唯一正式 GPU paper profile；formal output expectation 必须基于真实 SD3.5 GPU 与正式 attestation 环境验证。"
+    rule: "default.yaml 是唯一正式 GPU paper profile；formal output expectation 必须基于真实 SD3.5 GPU 与正式 attestation 环境验证。"
 
 # ==============================================================
 # 目标方法族（Target Method Families）
@@ -405,7 +405,7 @@ single_path_closure_constraints:
   no_sidecar:
     constraint: "禁止 image-domain sidecar 向内容评分注入图像域原始分数。"
     enforcement: "detect_runtime.image_domain_sidecar_enabled 必须为 false 或缺失（默认 false 在 paper 模式下）。"
-    config_check: "configs/paper_full_cuda.yaml 和 configs/ablation/paper_ablation_cuda.yaml 中 image_domain_sidecar_enabled 必须为 false。"
+    config_check: "configs/default.yaml 和 configs/ablation/paper_ablation_cuda.yaml 中 image_domain_sidecar_enabled 必须为 false。"
 
   fusion_gate_semantics:
     constraint: "几何救回门控（geo gate）必须为单侧（geometry_score >= geo_gate_threshold），不允许双侧上限截断。"
