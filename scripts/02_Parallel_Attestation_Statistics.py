@@ -48,9 +48,27 @@ from scripts.workflow_acceptance_common import detect_formal_gpu_preflight
 DEFAULT_CONFIG_PATH = Path("configs/default.yaml")
 
 
+def _resolve_source_lineage_paths(extracted_root: Path) -> Dict[str, Path]:
+    return {
+        "source_stage_manifest_path": extracted_root / "artifacts" / "stage_manifest.json",
+        "source_package_manifest_path": extracted_root / "artifacts" / "package_manifest.json",
+        "source_runtime_config_snapshot_path": extracted_root / "runtime_metadata" / "runtime_config_snapshot.yaml",
+        "source_thresholds_artifact_path": extracted_root / "artifacts" / "thresholds" / "thresholds_artifact.json",
+    }
+
+
+def _resolve_prompt_snapshot_path(extracted_root: Path) -> str:
+    prompt_root = extracted_root / "runtime_metadata" / "prompt_snapshot"
+    if prompt_root.exists() and prompt_root.is_dir():
+        for prompt_path in sorted(prompt_root.rglob("*")):
+            if prompt_path.is_file():
+                return normalize_path_value(prompt_path)
+    return "<absent>"
+
+
 def _build_runtime_config(cfg_obj: Dict[str, Any], extracted_root: Path, run_root: Path) -> Dict[str, Any]:
     parallel_cfg = cfg_obj.get("parallel_attestation_statistics")
-    parallel_section = dict(parallel_cfg) if isinstance(parallel_cfg, dict) else {}
+    parallel_section: Dict[str, Any] = dict(cast(Dict[str, Any], parallel_cfg)) if isinstance(parallel_cfg, dict) else {}
     config_copy = json.loads(json.dumps(cfg_obj))
 
     calibration_cfg = dict(config_copy.get("calibration")) if isinstance(config_copy.get("calibration"), dict) else {}
@@ -99,9 +117,11 @@ def _package_outputs(run_root: Path, runtime_state_root: Path, stage_manifest_pa
         "artifacts/thresholds/threshold_metadata_artifact.json": run_root / "artifacts" / "thresholds" / "threshold_metadata_artifact.json",
         "artifacts/evaluation_report.json": run_root / "artifacts" / "evaluation_report.json",
         "artifacts/run_closure.json": run_root / "artifacts" / "run_closure.json",
+        "artifacts/workflow_summary.json": run_root / "artifacts" / "workflow_summary.json",
         "artifacts/stage_manifest.json": stage_manifest_path,
         "runtime_metadata/runtime_config_snapshot.yaml": runtime_config_snapshot_path,
         "lineage/source_stage_manifest.json": source_stage_manifest_copy_path,
+        "lineage/source_package_manifest.json": runtime_state_root / "lineage" / "source_package_manifest.json",
     }.items():
         stage_relative_copy(source_path, package_root, relative_path)
     return package_root
@@ -127,10 +147,18 @@ def run_stage_02(
     source_manifest = cast(Dict[str, Any], source_info["stage_manifest"])
     if source_manifest.get("stage_name") != "01_Paper_Full_Cuda":
         raise ValueError("stage 02 requires a source package produced by 01_Paper_Full_Cuda")
+    extracted_root = Path(str(source_info["extracted_root"]))
+    source_lineage_paths = _resolve_source_lineage_paths(extracted_root)
+    missing_source_lineage = [
+        label for label, path_obj in source_lineage_paths.items()
+        if label != "source_package_manifest_path" and not path_obj.exists()
+    ]
+    if missing_source_lineage:
+        raise FileNotFoundError(f"stage 02 source lineage files missing: {missing_source_lineage}")
 
     cfg_obj = load_yaml_mapping(config_path)
     runtime_config_snapshot_path = runtime_state_root / "runtime_metadata" / "runtime_config_snapshot.yaml"
-    runtime_cfg = _build_runtime_config(cfg_obj, Path(str(source_info["extracted_root"])), run_root)
+    runtime_cfg = _build_runtime_config(cfg_obj, extracted_root, run_root)
     write_yaml_mapping(runtime_config_snapshot_path, runtime_cfg)
 
     preflight = detect_formal_gpu_preflight(runtime_config_snapshot_path)
@@ -158,9 +186,22 @@ def run_stage_02(
 
     source_stage_manifest_copy_path = runtime_state_root / "lineage" / "source_stage_manifest.json"
     copy_stage_manifest_snapshot(source_manifest, source_stage_manifest_copy_path)
+    source_package_manifest_copy_path = runtime_state_root / "lineage" / "source_package_manifest.json"
+    write_json_atomic(source_package_manifest_copy_path, cast(Dict[str, Any], source_info["package_manifest"]))
+
+    workflow_summary_path = run_root / "artifacts" / "workflow_summary.json"
+    write_json_atomic(workflow_summary_path, {
+        "stage_name": STAGE_02_NAME,
+        "stage_run_id": stage_run_id,
+        "source_stage_run_id": source_manifest.get("stage_run_id"),
+        "source_package_path": str(source_info["source_package_path"]),
+        "source_package_sha256": str(source_info["source_package_sha256"]),
+        "stage_results": stage_results,
+        "created_at": utc_now_iso(),
+    })
 
     stage_manifest_path = run_root / "artifacts" / "stage_manifest.json"
-    stage_manifest = {
+    stage_manifest: Dict[str, Any] = {
         "stage_name": STAGE_02_NAME,
         "stage_run_id": stage_run_id,
         "source_stage_name": source_manifest.get("stage_name"),
@@ -169,8 +210,10 @@ def run_stage_02(
         "runtime_config_snapshot_path": normalize_path_value(runtime_config_snapshot_path),
         "run_root": normalize_path_value(run_root),
         "log_root": normalize_path_value(log_root),
+        "logs_root": normalize_path_value(log_root),
         "runtime_state_root": normalize_path_value(runtime_state_root),
         "export_root": normalize_path_value(export_root),
+        "exports_root": normalize_path_value(export_root),
         "records": collect_file_index(run_root, {
             "calibration_record": outputs["calibration_record"],
             "evaluate_record": outputs["evaluate_record"],
@@ -179,8 +222,15 @@ def run_stage_02(
         "threshold_metadata_artifact_path": normalize_path_value(outputs["threshold_metadata_artifact"]),
         "evaluation_report_path": normalize_path_value(outputs["evaluation_report"]),
         "run_closure_path": normalize_path_value(outputs["run_closure"]),
+        "workflow_summary_path": normalize_path_value(workflow_summary_path),
         "source_package_path": str(source_info["source_package_path"]),
         "source_package_sha256": str(source_info["source_package_sha256"]),
+        "source_package_manifest_path": normalize_path_value(source_package_manifest_copy_path),
+        "source_package_manifest_digest": str(source_info["package_manifest_digest"]),
+        "source_stage_manifest_path": normalize_path_value(source_stage_manifest_copy_path),
+        "source_runtime_config_snapshot_path": normalize_path_value(source_lineage_paths["source_runtime_config_snapshot_path"]),
+        "source_prompt_snapshot_path": _resolve_prompt_snapshot_path(extracted_root),
+        "source_thresholds_artifact_path": normalize_path_value(source_lineage_paths["source_thresholds_artifact_path"]),
         "source_stage_manifest_copy_path": normalize_path_value(source_stage_manifest_copy_path),
         "notebook_name": notebook_name,
         "git": collect_git_summary(REPO_ROOT),
@@ -206,10 +256,12 @@ def run_stage_02(
         package_manifest_path=package_manifest_path,
     )
 
-    summary = {
+    summary: Dict[str, Any] = {
         "stage_name": STAGE_02_NAME,
         "stage_run_id": stage_run_id,
         "source_stage_run_id": source_manifest.get("stage_run_id"),
+        "source_package_manifest_path": normalize_path_value(source_package_manifest_copy_path),
+        "source_package_manifest_digest": str(source_info["package_manifest_digest"]),
         "run_root": normalize_path_value(run_root),
         "log_root": normalize_path_value(log_root),
         "runtime_state_root": normalize_path_value(runtime_state_root),
@@ -238,7 +290,7 @@ def main() -> int:
         config_path=resolve_repo_path(args.config),
         source_package_path=resolve_repo_path(args.source_package),
         notebook_name=str(args.notebook_name),
-        stage_run_id=args.stage_run_id or make_stage_run_id(),
+        stage_run_id=args.stage_run_id or make_stage_run_id(STAGE_02_NAME),
     )
     print(json.dumps(summary, indent=2, ensure_ascii=False, sort_keys=True))
     return 0

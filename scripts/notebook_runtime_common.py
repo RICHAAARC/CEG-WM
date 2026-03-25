@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -47,20 +48,41 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def make_stage_run_id() -> str:
+def _sanitize_identifier(value: str) -> str:
+    """
+    功能：将标识字符串规范化为安全片段。
+
+    Normalize a free-form identifier into a filesystem-safe token.
+
+    Args:
+        value: Raw identifier string.
+
+    Returns:
+        Sanitized lowercase identifier token.
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise TypeError("value must be non-empty str")
+    normalized = re.sub(r"[^A-Za-z0-9]+", "_", value.strip()).strip("_")
+    return normalized.lower() or "stage"
+
+
+def make_stage_run_id(stage_name: Optional[str] = None) -> str:
     """
     功能：生成阶段运行唯一标识。
 
     Generate a stable stage run identifier based on UTC time and random suffix.
 
     Args:
-        None.
+        stage_name: Optional stable stage name.
 
     Returns:
         Stage run identifier string.
     """
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    return f"{timestamp}_{uuid.uuid4().hex[:8]}"
+    random_suffix = uuid.uuid4().hex[:8]
+    if isinstance(stage_name, str) and stage_name.strip():
+        return f"{_sanitize_identifier(stage_name)}__{timestamp}__{random_suffix}"
+    return f"stage__{timestamp}__{random_suffix}"
 
 
 def ensure_directory(path_obj: Path) -> Path:
@@ -180,6 +202,24 @@ def write_json_atomic(path_obj: Path, payload: Mapping[str, Any]) -> None:
     )
 
 
+def compute_mapping_sha256(payload: Mapping[str, Any]) -> str:
+    """
+    功能：计算 JSON 映射对象的规范 SHA256。
+
+    Compute a canonical SHA256 digest for one JSON-like mapping.
+
+    Args:
+        payload: Mapping payload.
+
+    Returns:
+        Lowercase hexadecimal SHA256 digest.
+    """
+    if not isinstance(payload, Mapping):
+        raise TypeError("payload must be Mapping")
+    serialized = json.dumps(dict(payload), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
 def read_json_dict(path_obj: Path) -> Dict[str, Any]:
     """
     功能：读取 JSON 对象文件。
@@ -223,6 +263,30 @@ def load_yaml_mapping(path_obj: Path) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"YAML root must be mapping: {path_obj}")
     return cast(Dict[str, Any], payload)
+
+
+def resolve_model_identity(cfg_obj: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    功能：解析配置中的模型标识与 revision。
+
+    Resolve the effective model identifier and revision from the runtime config.
+
+    Args:
+        cfg_obj: Runtime configuration mapping.
+
+    Returns:
+        Mapping with model_id and revision fields.
+    """
+    if not isinstance(cfg_obj, Mapping):
+        raise TypeError("cfg_obj must be Mapping")
+    model_node = cfg_obj.get("model")
+    model_cfg = cast(Dict[str, Any], model_node) if isinstance(model_node, dict) else {}
+    model_id = model_cfg.get("model_id") if isinstance(model_cfg.get("model_id"), str) else cfg_obj.get("model_id")
+    revision = model_cfg.get("revision") if isinstance(model_cfg.get("revision"), str) else cfg_obj.get("hf_revision")
+    return {
+        "model_id": model_id if isinstance(model_id, str) and model_id.strip() else "<absent>",
+        "revision": revision if isinstance(revision, str) and revision.strip() else "<absent>",
+    }
 
 
 def write_yaml_mapping(path_obj: Path, payload: Mapping[str, Any]) -> None:
@@ -633,10 +697,11 @@ def collect_model_summary(cfg_obj: Mapping[str, Any]) -> Dict[str, Any]:
     """
     if not isinstance(cfg_obj, Mapping):
         raise TypeError("cfg_obj must be Mapping")
+    model_identity = resolve_model_identity(cfg_obj)
     summary: Dict[str, Any] = {
-        "model_id": cfg_obj.get("model_id"),
+        "model_id": model_identity["model_id"],
         "model_source": cfg_obj.get("model_source"),
-        "hf_revision": cfg_obj.get("hf_revision"),
+        "hf_revision": model_identity["revision"],
         "hf_home": os.environ.get("HF_HOME", "<absent>"),
         "huggingface_hub_cache": os.environ.get("HUGGINGFACE_HUB_CACHE", "<absent>"),
         "cache_scan_status": "not_attempted",
@@ -688,6 +753,53 @@ def collect_weight_summary(repo_root: Path, cfg_obj: Mapping[str, Any]) -> Dict[
             summary["exists"] = True
             summary["size_bytes"] = int(path_obj.stat().st_size)
             summary["sha256"] = compute_file_sha256(path_obj)
+    return summary
+
+
+def build_directory_digest_summary(directory_path: Path, max_entries: int = 24) -> Dict[str, Any]:
+    """
+    功能：构建目录级清单摘要。
+
+    Build a concise digest summary for a directory tree.
+
+    Args:
+        directory_path: Directory path to summarize.
+        max_entries: Maximum number of file entries to include.
+
+    Returns:
+        Directory digest summary mapping.
+    """
+    if not isinstance(directory_path, Path):
+        raise TypeError("directory_path must be Path")
+    if not isinstance(max_entries, int) or max_entries <= 0:
+        raise TypeError("max_entries must be positive int")
+
+    summary: Dict[str, Any] = {
+        "root_path": normalize_path_value(directory_path),
+        "exists": bool(directory_path.exists() and directory_path.is_dir()),
+        "file_count": 0,
+        "entries": [],
+        "manifest_sha256": "<absent>",
+    }
+    if not directory_path.exists() or not directory_path.is_dir():
+        return summary
+
+    entries: List[Dict[str, Any]] = []
+    for file_path in sorted(directory_path.rglob("*")):
+        if not file_path.is_file():
+            continue
+        entries.append(
+            {
+                "relative_path": file_path.relative_to(directory_path).as_posix(),
+                "size_bytes": int(file_path.stat().st_size),
+                "sha256": compute_file_sha256(file_path),
+            }
+        )
+    summary["file_count"] = len(entries)
+    summary["entries"] = entries[:max_entries]
+    summary["manifest_sha256"] = hashlib.sha256(
+        json.dumps(entries, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
     return summary
 
 
@@ -766,6 +878,291 @@ def build_package_index(file_paths: Iterable[Path], package_root: Path) -> Dict[
         "file_count": len(entries),
         "files": entries,
     }
+
+
+def resolve_export_package_manifest_path(export_root: Path) -> Path:
+    """
+    功能：返回 stage export 目录中的外部 package_manifest 路径。
+
+    Return the canonical external package_manifest path for one export directory.
+
+    Args:
+        export_root: Stage export directory.
+
+    Returns:
+        External package_manifest path.
+    """
+    if not isinstance(export_root, Path):
+        raise TypeError("export_root must be Path")
+    return export_root / "package_manifest.json"
+
+
+def resolve_export_package_index_path(export_root: Path) -> Path:
+    """
+    功能：返回 stage export 目录中的外部 package_index 路径。
+
+    Return the canonical external package_index path for one export directory.
+
+    Args:
+        export_root: Stage export directory.
+
+    Returns:
+        External package_index path.
+    """
+    if not isinstance(export_root, Path):
+        raise TypeError("export_root must be Path")
+    return export_root / "package_index.json"
+
+
+def read_json_from_zip(zip_path: Path, member_name: str) -> Dict[str, Any]:
+    """
+    功能：从 ZIP 中读取 JSON 对象。
+
+    Read one JSON object member from a ZIP archive.
+
+    Args:
+        zip_path: ZIP archive path.
+        member_name: Member path inside the archive.
+
+    Returns:
+        Parsed mapping or an empty mapping when unavailable.
+    """
+    if not isinstance(zip_path, Path):
+        raise TypeError("zip_path must be Path")
+    if not isinstance(member_name, str) or not member_name:
+        raise TypeError("member_name must be non-empty str")
+    if not zip_path.exists() or not zip_path.is_file():
+        return {}
+    try:
+        with zipfile.ZipFile(zip_path, "r") as archive:
+            with archive.open(member_name, "r") as handle:
+                payload = json.loads(handle.read().decode("utf-8"))
+    except Exception:
+        return {}
+    return cast(Dict[str, Any], payload) if isinstance(payload, dict) else {}
+
+
+def find_external_package_manifest(source_package_path: Path) -> Path | None:
+    """
+    功能：定位 ZIP 包同目录的外部 package_manifest。
+
+    Locate the external package_manifest stored alongside a stage package ZIP.
+
+    Args:
+        source_package_path: Stage package ZIP path.
+
+    Returns:
+        External package_manifest path when present.
+    """
+    if not isinstance(source_package_path, Path):
+        raise TypeError("source_package_path must be Path")
+    candidate_paths = [
+        source_package_path.parent / "package_manifest.json",
+        source_package_path.with_suffix(f"{source_package_path.suffix}.package_manifest.json"),
+    ]
+    for candidate_path in candidate_paths:
+        if candidate_path.exists() and candidate_path.is_file():
+            return candidate_path
+    return None
+
+
+def validate_package_manifest_binding(
+    package_path: Path,
+    package_manifest: Mapping[str, Any],
+    *,
+    required_sha_match: bool,
+) -> Dict[str, Any]:
+    """
+    功能：校验 package_manifest 与实际 ZIP 的绑定关系。
+
+    Validate one package manifest against the actual ZIP file.
+
+    Args:
+        package_path: Stage package ZIP path.
+        package_manifest: Candidate package manifest mapping.
+        required_sha_match: Whether package_sha256 must match the ZIP digest.
+
+    Returns:
+        Validation summary mapping.
+    """
+    if not isinstance(package_path, Path):
+        raise TypeError("package_path must be Path")
+    if not isinstance(package_manifest, Mapping):
+        raise TypeError("package_manifest must be Mapping")
+
+    actual_sha256 = compute_file_sha256(package_path)
+    manifest_package_sha256 = package_manifest.get("package_sha256")
+    manifest_package_filename = package_manifest.get("package_filename")
+    result = {
+        "actual_sha256": actual_sha256,
+        "manifest_package_sha256": manifest_package_sha256,
+        "manifest_package_filename": manifest_package_filename,
+        "sha256_match": bool(isinstance(manifest_package_sha256, str) and manifest_package_sha256 == actual_sha256),
+        "filename_match": bool(isinstance(manifest_package_filename, str) and manifest_package_filename == package_path.name),
+        "manifest_digest": compute_mapping_sha256(package_manifest),
+    }
+    if required_sha_match and not bool(result["sha256_match"]):
+        raise ValueError(
+            f"package sha256 mismatch: expected={manifest_package_sha256} actual={actual_sha256} path={package_path}"
+        )
+    if isinstance(manifest_package_filename, str) and manifest_package_filename and manifest_package_filename != package_path.name:
+        raise ValueError(
+            f"package filename mismatch: manifest={manifest_package_filename} actual={package_path.name}"
+        )
+    return result
+
+
+def discover_stage_packages(export_stage_root: Path) -> List[Dict[str, Any]]:
+    """
+    功能：递归发现 stage export 目录下的候选 package。
+
+    Recursively discover candidate stage packages under one export root.
+
+    Args:
+        export_stage_root: Stage export root directory.
+
+    Returns:
+        Candidate package summary list.
+    """
+    if not isinstance(export_stage_root, Path):
+        raise TypeError("export_stage_root must be Path")
+    if not export_stage_root.exists() or not export_stage_root.is_dir():
+        return []
+
+    candidates: List[Dict[str, Any]] = []
+    for zip_path in sorted(export_stage_root.rglob("*.zip")):
+        if not zip_path.is_file():
+            continue
+        external_manifest_path = find_external_package_manifest(zip_path)
+        external_manifest = read_json_dict(external_manifest_path) if isinstance(external_manifest_path, Path) else {}
+        internal_manifest = read_json_from_zip(zip_path, "artifacts/package_manifest.json")
+        stage_manifest = read_json_from_zip(zip_path, "artifacts/stage_manifest.json")
+        manifest_for_sort = external_manifest if external_manifest else internal_manifest
+        package_created_at = manifest_for_sort.get("package_created_at") if isinstance(manifest_for_sort, dict) else None
+        stage_run_id = manifest_for_sort.get("stage_run_id") if isinstance(manifest_for_sort, dict) else None
+        validation_error = None
+        validation_summary: Dict[str, Any] = {}
+        try:
+            if external_manifest:
+                validation_summary = validate_package_manifest_binding(zip_path, external_manifest, required_sha_match=True)
+            elif internal_manifest:
+                validation_summary = validate_package_manifest_binding(zip_path, internal_manifest, required_sha_match=False)
+        except Exception as exc:
+            validation_error = str(exc)
+        candidates.append(
+            {
+                "package_path": zip_path.as_posix(),
+                "package_filename": zip_path.name,
+                "package_created_at": package_created_at or utc_now_iso(),
+                "stage_run_id": stage_run_id or stage_manifest.get("stage_run_id") or "<absent>",
+                "external_manifest_path": normalize_path_value(external_manifest_path) if external_manifest_path else "<absent>",
+                "external_manifest": external_manifest,
+                "internal_manifest": internal_manifest,
+                "stage_manifest": stage_manifest,
+                "validation": validation_summary,
+                "validation_error": validation_error,
+                "mtime": datetime.fromtimestamp(zip_path.stat().st_mtime, timezone.utc).isoformat(),
+            }
+        )
+    candidates.sort(
+        key=lambda item: (
+            item.get("package_created_at") or "",
+            item.get("stage_run_id") or "",
+            item.get("mtime") or "",
+        ),
+        reverse=True,
+    )
+    return candidates
+
+
+def select_latest_stage_package(candidates: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+    """
+    功能：从候选 package 列表中选择最新有效项。
+
+    Select the latest valid stage package from discovered candidates.
+
+    Args:
+        candidates: Candidate package mappings.
+
+    Returns:
+        Selected candidate mapping.
+    """
+    if not isinstance(candidates, Sequence) or not candidates:
+        raise FileNotFoundError("no stage package candidates available")
+
+    for candidate in candidates:
+        if not isinstance(candidate, Mapping):
+            continue
+        if candidate.get("validation_error"):
+            continue
+        validation = candidate.get("validation")
+        if isinstance(validation, Mapping) and validation.get("filename_match"):
+            selection = dict(candidate)
+            selection["selection_reason"] = (
+                "selected the latest candidate by package_created_at/stage_run_id with a valid manifest-to-zip binding"
+            )
+            return selection
+    raise FileNotFoundError("no valid stage package candidate passed manifest binding checks")
+
+
+def tail_text_file(path_obj: Path, max_lines: int = 20) -> List[str]:
+    """
+    功能：返回文本文件尾部若干行。
+
+    Return the last N lines of one text file.
+
+    Args:
+        path_obj: Text file path.
+        max_lines: Maximum number of lines.
+
+    Returns:
+        Tail lines list.
+    """
+    if not isinstance(path_obj, Path):
+        raise TypeError("path_obj must be Path")
+    if not isinstance(max_lines, int) or max_lines <= 0:
+        raise TypeError("max_lines must be positive int")
+    if not path_obj.exists() or not path_obj.is_file():
+        return []
+    lines = path_obj.read_text(encoding="utf-8", errors="replace").splitlines()
+    return lines[-max_lines:]
+
+
+def collect_missing_file_entries(path_mapping: Mapping[str, Path]) -> List[str]:
+    """
+    功能：收集缺失文件标签列表。
+
+    Collect labels whose mapped files are missing.
+
+    Args:
+        path_mapping: Label to Path mapping.
+
+    Returns:
+        Missing label list.
+    """
+    if not isinstance(path_mapping, Mapping):
+        raise TypeError("path_mapping must be Mapping")
+    return [str(label) for label, path_obj in path_mapping.items() if not isinstance(path_obj, Path) or not path_obj.exists()]
+
+
+def summarize_manifest_fields(manifest: Mapping[str, Any], field_names: Sequence[str]) -> Dict[str, Any]:
+    """
+    功能：提取 manifest 关键字段摘要。
+
+    Extract a small manifest summary using selected field names.
+
+    Args:
+        manifest: Manifest mapping.
+        field_names: Selected field names.
+
+    Returns:
+        Manifest summary mapping.
+    """
+    if not isinstance(manifest, Mapping):
+        raise TypeError("manifest must be Mapping")
+    if not isinstance(field_names, Sequence):
+        raise TypeError("field_names must be Sequence")
+    return {str(field_name): manifest.get(str(field_name)) for field_name in field_names}
 
 
 def collect_file_index(base_root: Path, path_mapping: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -854,22 +1251,44 @@ def finalize_stage_package(
         Package manifest mapping.
     """
     package_index_path = package_root / "artifacts" / "package_index.json"
+    package_manifest_internal_path = package_root / "artifacts" / "package_manifest.json"
     package_index = build_package_index(package_root.rglob("*"), package_root)
     write_json_atomic(package_index_path, package_index)
 
     package_filename = build_stage_package_filename(stage_name, stage_run_id, source_stage_run_id)
-    package_path = create_zip_archive_from_directory(package_root, export_root / package_filename)
-    package_manifest = {
-        "package_path": package_path.as_posix(),
-        "package_filename": package_filename,
-        "package_sha256": compute_file_sha256(package_path),
-        "package_created_at": utc_now_iso(),
+    internal_manifest = {
+        "package_manifest_version": "v2",
         "stage_name": stage_name,
         "stage_run_id": stage_run_id,
         "source_stage_run_id": source_stage_run_id,
         "source_stage_package_path": source_stage_package_path,
+        "package_filename": package_filename,
+        "package_path": "<external_zip>",
+        "package_sha256": "<see_external_manifest>",
+        "package_created_at": utc_now_iso(),
+        "package_contents_index_path": "artifacts/package_index.json",
+        "package_manifest_scope": "internal_copy",
     }
+    write_json_atomic(package_manifest_internal_path, internal_manifest)
+
+    package_path = create_zip_archive_from_directory(package_root, export_root / package_filename)
+    package_manifest = {
+        "package_manifest_version": "v2",
+        "package_path": package_path.as_posix(),
+        "package_filename": package_filename,
+        "package_sha256": compute_file_sha256(package_path),
+        "package_created_at": utc_now_iso(),
+        "package_contents_index_path": resolve_export_package_index_path(export_root).as_posix(),
+        "stage_name": stage_name,
+        "stage_run_id": stage_run_id,
+        "source_stage_run_id": source_stage_run_id,
+        "source_stage_package_path": source_stage_package_path,
+        "package_manifest_digest": "<pending>",
+    }
+    package_manifest["package_manifest_digest"] = compute_mapping_sha256(package_manifest)
     write_json_atomic(package_manifest_path, package_manifest)
+    write_json_atomic(resolve_export_package_manifest_path(export_root), package_manifest)
+    write_json_atomic(resolve_export_package_index_path(export_root), package_index)
     return package_manifest
 
 
@@ -909,15 +1328,37 @@ def prepare_source_package(source_package_path: Path, runtime_state_root: Path) 
     local_package_path = package_root / source_package_path.name
     copy_file(source_package_path, local_package_path)
     package_sha256 = compute_file_sha256(local_package_path)
+    external_manifest_source_path = find_external_package_manifest(source_package_path)
+    local_external_manifest_path = package_root / "package_manifest.external.json"
+    external_package_manifest: Dict[str, Any] = {}
+    if isinstance(external_manifest_source_path, Path):
+        copy_file(external_manifest_source_path, local_external_manifest_path)
+        external_package_manifest = read_json_dict(local_external_manifest_path)
+        validate_package_manifest_binding(local_package_path, external_package_manifest, required_sha_match=True)
     extracted_root = package_root / "extracted"
     members = extract_zip_archive(local_package_path, extracted_root)
     stage_manifest = read_stage_manifest_from_package(extracted_root)
+    internal_package_manifest = read_json_dict(extracted_root / "artifacts" / "package_manifest.json")
+    if not internal_package_manifest:
+        raise FileNotFoundError("package_manifest.json missing in extracted package")
+    package_index = read_json_dict(extracted_root / "artifacts" / "package_index.json")
+    package_manifest_for_lineage = external_package_manifest if external_package_manifest else internal_package_manifest
+    if package_manifest_for_lineage.get("stage_name") not in {None, stage_manifest.get("stage_name")}:
+        raise ValueError("source package manifest stage_name does not match source stage_manifest")
+    if package_manifest_for_lineage.get("stage_run_id") not in {None, stage_manifest.get("stage_run_id")}:
+        raise ValueError("source package manifest stage_run_id does not match source stage_manifest")
     return {
         "source_package_path": local_package_path.as_posix(),
         "source_package_sha256": package_sha256,
         "extracted_root": extracted_root.as_posix(),
         "members": members,
         "stage_manifest": stage_manifest,
+        "external_package_manifest_path": normalize_path_value(local_external_manifest_path) if external_package_manifest else "<absent>",
+        "external_package_manifest": external_package_manifest,
+        "internal_package_manifest": internal_package_manifest,
+        "package_manifest": package_manifest_for_lineage,
+        "package_manifest_digest": compute_mapping_sha256(package_manifest_for_lineage),
+        "package_index": package_index,
     }
 
 

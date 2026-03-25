@@ -148,10 +148,13 @@ def run_stage_01(
         "config_source_path": normalize_path_value(config_path),
         "config_source_repo_relative": relative_path_under_base(REPO_ROOT, config_path),
         "runtime_config_snapshot_path": normalize_path_value(runtime_config_snapshot_path),
+        "prompt_snapshot_path": prompt_snapshot.get("snapshot_path"),
         "run_root": normalize_path_value(run_root),
         "log_root": normalize_path_value(log_root),
+        "logs_root": normalize_path_value(log_root),
         "runtime_state_root": normalize_path_value(runtime_state_root),
         "export_root": normalize_path_value(export_root),
+        "exports_root": normalize_path_value(export_root),
         "records": collect_file_index(run_root, {
             "embed_record": outputs["embed_record"],
             "detect_record": outputs["detect_record"],
@@ -162,6 +165,7 @@ def run_stage_01(
         "threshold_metadata_artifact_path": normalize_path_value(outputs["threshold_metadata_artifact"]),
         "evaluation_report_path": normalize_path_value(outputs["evaluation_report"]),
         "run_closure_path": normalize_path_value(outputs["run_closure"]),
+        "workflow_summary_path": normalize_path_value(outputs["workflow_summary"]),
         "prompt_file_path": prompt_snapshot.get("source_path"),
         "prompt_snapshot": prompt_snapshot,
         "notebook_name": notebook_name,
@@ -218,7 +222,7 @@ def main() -> int:
         drive_project_root=resolve_repo_path(args.drive_project_root),
         config_path=resolve_repo_path(args.config),
         notebook_name=str(args.notebook_name),
-        stage_run_id=args.stage_run_id or make_stage_run_id(),
+        stage_run_id=args.stage_run_id or make_stage_run_id(STAGE_01_NAME),
     )
     print(json.dumps(summary, indent=2, ensure_ascii=False, sort_keys=True))
     return 0
