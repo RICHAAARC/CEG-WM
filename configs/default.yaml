@@ -1,165 +1,207 @@
 ﻿# ============================================================== 
 # 配置角色：通用默认基线配置
-# - 本文件用于 baseline、开发联调与非论文正式场景的默认参数承载。
-# - 默认走 content_only 路径，作为通用起点，而非 paper 级完整机制配置。
-# - 若目标是论文正式一体化运行，请使用 configs/paper_full_cuda.yaml。
+# - 本文件用于 paper 语义下的完整机制运行：subspace、LF、HF、geometry
+#   detection 与事件级 attestation 全部启用。
+# - 默认统计主链为 content_score，用于主 calibration/evaluate 正式统计。
+# - 同时启用 parallel_attestation_statistics，在不替换主链的前提下，
+#   并行补齐 event_attestation_score 的正式统计闭环。
+# - 若目标是“仅以 attestation 分数作为单一主统计链”运行，请使用
+#   configs/ablation/paper_attestation_score_cuda.yaml。
 # ============================================================== 
 
-policy_path: "content_only"
+policy_path: "content_np_geo_rescue"
 
-# 统计口径默认配置
 target_fpr: 0.01
 
-# ============================================================== 
-# run_root 复用控制（默认禁用，仅允许通过 CLI override 启用）
-# ============================================================== 
 allow_nonempty_run_root: false
 allow_nonempty_run_root_reason: null
 
-# ============================================================== 
-# 设备配置（baseline / smoke / generic debug profile）
-# ============================================================== 
-device: "cpu"  # baseline 默认设备；正式 paper GPU 验收请使用 paper_full_cuda.yaml
+device: "cuda"
 
-# ==============================================================
-# SD3 模型配置
-# ==============================================================
 model_id: "stabilityai/stable-diffusion-3.5-medium"
+model_source: "hf"
 hf_revision: "main"
+pipeline_impl_id: "sd3_diffusers_real"
+pipeline_build_enabled: true
 
-# ==============================================================
-# 推理配置（baseline / smoke debug）
-# ==============================================================
+model:
+  dtype: "float16"
+
 inference_enabled: true
-inference_prompt: "a serene landscape with mountains and a lake"
-inference_prompt_file: "prompts/prompts_1.txt"  # 若存在则优先从文件首个非空行导入 prompt
+inference_prompt: "a photo of a cat sitting on a sofa"
+inference_prompt_file: "prompts/paper_small.txt"
 inference_num_steps: 28
 inference_guidance_scale: 7.0
 inference_height: 512
 inference_width: 512
 
-# ==============================================================
-# 随机种子配置（Seed Configuration - 可重复性验证）
-# ==============================================================
 seed: null  # 随机种子（null 表示自动生成，可通过 CLI override 覆盖）
 allow_threshold_fallback_for_tests: false
 
-# ==============================================================
-# 轨迹采样配置（Trajectory Tap - 可复算证据）
-# ==============================================================
 trajectory_tap:
-  enabled: true  # 启用轨迹采样（被 paper_faithfulness 强制启用）
+  enabled: true
   tensor_types: ["latent"]
-  module_paths: ["transformer"]  # SD3 使用 Transformer/DiT
+  module_paths: ["transformer"]
   stats_precision_digits: 6
 
-# ==============================================================
-# Paper Faithfulness 配置（baseline 默认值，非正式 paper 角色）
-# ==============================================================
 paper_faithfulness:
-  enabled: true  # baseline 默认开启；正式 paper 验收以 paper_full_cuda.yaml 为准
+  enabled: true
   alignment_check: true
-  
-  # 检查：Pipeline fingerprint（离散结构指纹）
   check_pipeline_fingerprint: true
-  
-  # 检查：Trajectory digest reproducibility（可复算轨迹摘要）
   check_trajectory_digest: true
 
-# ==============================================================
-# 水印子空间配置
-# ==============================================================
 watermark:
   subspace:
+    enabled: true
     timestep_start: 0
-    timestep_end: 27  # num_inference_steps - 1
+    timestep_end: 27
     trajectory_step_stride: 1
     sample_count: 28
     feature_dim: 128
-
+    rank: 128
   lf:
-    enabled: true  # 启用 LF 主通道（真实水印注入）
+    enabled: true
     variance: 1.5
     ecc: "sparse_ldpc"
     ecc_sparsity: 3
     message_length: 64
-
+    coding_mode: "pseudogaussian_template_additive"
+    decoder: "matched_correlation"  # 保留 formal token；实际检测为 whitened Pearson correlation + soft LLR + sparse LDPC BP decode 的组合路径
+    bp_iterations: 100  # 从 50 提升至 100，改善 LF BP 收敛概率（RUNTIME-02 验证后可进一步调整）
   hf:
-    enabled: false  # baseline 默认关闭；smoke / formal profile 可显式启用
+    enabled: true
+    selection: "attestation_conditioned_projection_tail"
     tail_truncation_ratio: 0.1
     tail_truncation_mode: "projection_tail_truncation"
     tau: 2.0
 
-# ==============================================================
-# 检测几何配置
-# ==============================================================
 detect:
   content:
-    enabled: false  # Embed 模式（检测在 detect 侧启用）
+    enabled: true
+    lf_exact_repair:
+      enabled: true
+      mode: "host_template_recenter"
   geometry:
-    enabled: false  # baseline 默认关闭；smoke / formal profile 可显式启用
+    enabled: true
+    enable_attention_anchor: true
+    enable_align_invariance: true
+    attention_capture_max_layers: 8
+    attention_capture_layer_whitelist:
+      - "transformer_blocks.0.attn"
+      - "transformer_blocks.1.attn"
+      - "transformer_blocks.2.attn"
+      - "transformer_blocks.3.attn"
+      - "transformer_blocks.4.attn"
+      - "transformer_blocks.5.attn"
+      - "transformer_blocks.6.attn"
+      - "transformer_blocks.7.attn"
+    # 显式声明几何正式链：sync primary -> anchor secondary ->
+    # observation-driven coarse registration -> robust refinement -> inverse recovery ->
+    # recovered-domain sync/anchor/overlap revalidation。
+    sync_primary_anchor_secondary: true
+    align_inverse_max_residual: 0.18
+    align_max_correspondence_count: 24
+    align_template_overlap_min: 0.70
+    align_recovered_sync_consistency_min: 0.55
+    align_recovered_anchor_consistency_min: 0.50
+    geo_score_repair:
+      enabled: true
+      mode: "template_confidence"
+  diagnostics:
+    lf_protocol_control_enabled: true
+    geo_rescue_scale_control_enabled: true
+    geo_scale_records_glob: null
+  calibration_artifact_path: null  # NP 阈值工件路径；null 表示运行时通过 --thresholds_path 注入
+                                   # 可设为 outputs/.../artifacts/thresholds/thresholds.json（或由 experiment_matrix override 注入）
 
-# ==============================================================
-# 内容链配置
-# ==============================================================
-# enable_mask: false  # 默认禁用
+enable_mask: true
+mask:
+  impl_id: "semantic_saliency_model"
+  saliency_source: "model"   # 强制使用真实模型，禁止自动 proxy fallback
+  semantic_model_source: "inspyrenet"
+  semantic_model_path: "models/inspyrenet/ckpt_base.pth"
 
-# ==============================================================
-# 嵌入配置
-# ==============================================================
-# ==============================================================
-# Ablation 实验开关面板（Ablation Switchboard）
-# - 为 ablation 实验提供统一开关配置段。
-# - normalized 字段由 config_loader.normalize_ablation_flags() 自动生成，用户不应手动设置。
-# - 所有 enable_* 开关必须为 bool，默认 null（表示未显式设置，由归一化逻辑处理）。
-# ==============================================================
+embed:
+  preview_generation:
+    enabled: true                          # 在正式嵌入前执行无注入预览推理，消除 embed 输入图主链不自足
+    artifact_rel_path: "preview/preview.png"  # 预览图相对 artifacts/ 的路径（用于审计）
+
 ablation:
-  # 模块级开关：控制各模块是否参与 pipeline
-  enable_content: null     # 内容链开关（null 表示未设置，归一化后解析为 true）
-  enable_geometry: null    # 几何链开关
-  enable_fusion: null      # 融合决策开关
-  enable_mask: null        # 语义掩码开关
-  enable_subspace: null    # 子空间规划开关
-  enable_rescue: null      # 救援机制开关（保留）
+  enable_content: null
+  enable_geometry: null
+  enable_anchor: null
+  enable_lf: null
+  enable_hf: null
+  lf_only: false
+  hf_only: false
 
-  # 频域开关：控制 LF/HF 通道
-  enable_lf: null          # LF 低频通道开关（默认 true）
-  enable_hf: null          # HF 高频通道开关（默认 false）
-
-  # 互斥约束（归一化时校验）
-  # - lf_only/hf_only 不可同时为 true
-  # - 违反互斥约束时必须 fail-fast
-  lf_only: false           # 仅 LF 模式（启用时强制 enable_lf=true, enable_hf=false）
-  hf_only: false           # 仅 HF 模式（启用时强制 enable_hf=true, enable_lf=false）
-
-  # 归一化输出（自动生成，用户禁止手动设置）
-  # - normalized 字段由 normalize_ablation_flags() 写入，记录最终生效的开关状态
-  # - normalized 必须纳入 cfg_digest 计算，确保 ablation 参数变化可追溯
-  normalized: null
-
-# ==============================================================
-# 校准 (Calibration) 配置
-# ==============================================================
 calibration:
   detect_records_glob: null  # detect 记录 glob 路径；为空时由标准 workflow / CLI 基于当前 run_root 自动解析
-  minimal_ground_truth_prompts_file: null  # 可选：通过 prompts 文件驱动 GT 对数（行数即 pair_count）
+  score_name: "content_score"  # 默认统计主链；若需切换到事件级 attestation 正式统计链，可改为 "event_attestation_score"
+  minimal_ground_truth_pair_count: null  # 正式 profile 不再固定 100 对闭环规模；若提供 prompt 文件，则由真实 prompt 列表长度决定。
+  minimal_ground_truth_prompts_file: "prompts/paper_small.txt"  # 以真实 paper prompt 列表驱动正式统计输入元数据，不再默认使用 prompts_100 闭环语义。
+  exclude_formal_sidecar_disabled_marker: true
+  exclude_synthetic_negative_closure_marker: true
 
-# ==============================================================
-# 评估 (Evaluate) 配置
-# ==============================================================
 evaluate:
   detect_records_glob: null  # detect 记录 glob 路径；为空时由标准 workflow / CLI 基于当前 run_root 自动解析
   thresholds_path: null      # 阈值工件路径；为空时由标准 workflow / CLI 基于当前 run_root 自动解析
-  minimal_ground_truth_prompts_file: null  # 可选：通过 prompts 文件驱动 GT 对数（行数即 pair_count）
+  score_name: "content_score"  # 默认评测主链；若消费 attestation 阈值工件，应与 calibration.score_name 保持一致
+  minimal_ground_truth_pair_count: null  # 正式 profile 不再固定 100 对闭环规模；若提供 prompt 文件，则由真实 prompt 列表长度决定。
+  minimal_ground_truth_prompts_file: "prompts/paper_small.txt"  # 以真实 paper prompt 列表驱动正式统计输入元数据，不再默认使用 prompts_100 闭环语义。
+  exclude_synthetic_negative_closure_marker: true
 
-# ==============================================================
-# 实现标识
-# ==============================================================
+parallel_attestation_statistics:
+  enabled: true  # 独立专项流程参数来源；run_paper_full_cuda 主脚本不自动执行该统计链
+  calibration_score_name: "event_attestation_score"
+  evaluate_score_name: "event_attestation_score"
+
 impl:
-  content_extractor_id: "unified_content_extractor"     # Embed + Detect v2 正式实现
-  geometry_extractor_id: "attention_anchor_extractor"  # 几何锚点提取器 v2 正式实现
-  fusion_rule_id: "fusion_neyman_pearson"                # NP 融合规则 v2 正式实现
-  subspace_planner_id: "subspace_planner"                # 子空间规划器 v2 正式实现
-  sync_module_id: "geometry_latent_sync_sd3"             # 几何 latent 同步模块 v3 正式实现
-  hf_embedder_id: "high_freq_truncation_codec"        # HF 高频截断编码器 v2 正式实现
-  lf_coder_id: "low_freq_template_codec"               # LF 低频模板编码器 v2 正式实现
+  content_extractor_id: "unified_content_extractor"
+  geometry_extractor_id: "attention_anchor_extractor"
+  fusion_rule_id: "fusion_neyman_pearson"
+  subspace_planner_id: "subspace_planner"
+  sync_module_id: "geometry_latent_sync_sd3"
+  hf_embedder_id: "high_freq_truncation_codec"
+  lf_coder_id: "low_freq_template_codec"
+  use_latent_per_step: true
+
+# 密码学生成溯源（Cryptographic Generation Attestation）配置。
+# 密钥从环境变量读取，不入版本控制；未设置环境变量时主路径写出显式 absent semantics，
+# 不再由 onefile 后置 hook 旁路重算 attestation。
+# 设置方法：export CEG_WM_K_MASTER=<hex64> CEG_WM_K_PROMPT=<hex32> CEG_WM_K_SEED=<hex32>
+attestation:
+  enabled: true
+  k_master_env_var: "CEG_WM_K_MASTER"  # 主密钥环境变量名
+  k_prompt_env_var: "CEG_WM_K_PROMPT"  # prompt 承诺密钥环境变量名
+  k_seed_env_var: "CEG_WM_K_SEED"      # seed 承诺密钥环境变量名
+  signature_algorithm: "ed25519"
+  signed_bundle_schema: "gen_attest_bundle_v1"
+  signer_certificate_schema: "gen_attest_signer_cert_v1"
+  require_signed_bundle_verification: true
+  threshold: 0.65    # attested 判决阈值（方法论定义默认值）
+  lf_weight: 0.5     # LF 通道融合权重
+  hf_weight: 0.3     # HF 通道融合权重
+  geo_weight: 0.2    # GEO 通道融合权重
+  decision_mode: "content_primary_geo_rescue"  # 事件级 attestation 采用内容主判定、几何单向 rescue
+  rescue_band_delta_low: 0.05  # 仅当内容侧分数落入 [threshold-0.05, threshold) 时允许几何 rescue
+  geo_rescue_min_score: 0.3    # 几何 rescue 的最低可信门槛
+  use_trajectory_mix: false  # statement-only event binding；trajectory_commit 仅保留为 post-hoc audit，不参与 LF/HF/GEO key derivation
+
+detect_runtime:
+  image_domain_sidecar_enabled: false  # 论文正式路径不允许 image-domain sidecar（v2.0 收口）
+
+experiment_matrix:
+  config_path: "configs/default.yaml"
+  allow_failed_semantics_collection: true
+  formal_score_name: "matrix_lf_score"
+  # seeds 数量控制正样本规模：论文级 FPR ≤ 1% 需 n_pos ≥ 100，种子数应 ≥ 100。
+  # 当前 seeds=[0,1] 为机制验证阶段（仅 2 个 seed）；正式论文运行请扩展为 range(100)。
+  # 运行时通过 scripts/run_experiment_matrix.py 自动映射 seeds 为 CLI overrides（seed=0, seed=1, ...），
+  # calibrate/evaluate 的 detect_records_glob 与 thresholds_path 在标准 workflow 中由当前 run_root 自动补全。
+  require_real_negative_cache: true
+  require_shared_thresholds: true
+  disallow_forced_pair_fallback: true
+  seeds: [0, 1]
+  # 论文复现实验主配置：仅保留 faithful baseline。
+  # 消融实验请使用 configs/ablation 目录下的专用配置。
