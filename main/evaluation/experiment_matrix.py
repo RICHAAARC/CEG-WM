@@ -24,6 +24,7 @@ import yaml
 
 from main.core import config_loader, digests
 from main.core import records_io
+from main.evaluation import metrics as eval_metrics
 from main.evaluation import protocol_loader
 from main.evaluation import attack_coverage
 from main.policy import path_policy
@@ -119,6 +120,7 @@ def build_experiment_grid(base_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     attack_families, attack_protocol_version, attack_protocol_digest = _resolve_attack_family_axis(base_cfg, matrix_cfg)
     ablation_variants = _resolve_ablation_axis(matrix_cfg)
     formal_validation_guards = _resolve_formal_validation_guards(matrix_cfg)
+    formal_score_name = _resolve_matrix_formal_score_name(matrix_cfg)
 
     batch_root = matrix_cfg.get("batch_root", "outputs/experiment_matrix")
     if not isinstance(batch_root, str) or not batch_root:
@@ -177,6 +179,7 @@ def build_experiment_grid(base_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
                         "attack_protocol_path": attack_protocol_path,
                         "max_samples": max_samples,
                         "allow_failed_semantics_collection": allow_failed_semantics_collection,
+                        "formal_score_name": formal_score_name,
                         "require_real_negative_cache": formal_validation_guards["require_real_negative_cache"],
                         "require_shared_thresholds": formal_validation_guards["require_shared_thresholds"],
                         "disallow_forced_pair_fallback": formal_validation_guards["disallow_forced_pair_fallback"],
@@ -407,10 +410,15 @@ def _resolve_matrix_calibration_score(record_payload: Dict[str, Any]) -> Tuple[O
     return None, None
 
 
-def _resolve_formal_matrix_content_score(record_payload: Dict[str, Any]) -> Tuple[Optional[float], Optional[str]]:
-    """Resolve the canonical formal-path content score without relaxed recovery."""
+def _resolve_formal_matrix_score(
+    record_payload: Dict[str, Any],
+    score_name: str,
+) -> Tuple[Optional[float], Optional[str]]:
+    """Resolve the canonical formal-path score for experiment_matrix."""
     if not isinstance(record_payload, dict):
         raise TypeError("record_payload must be dict")
+    if not isinstance(score_name, str) or not score_name:
+        raise TypeError("score_name must be non-empty str")
 
     content_payload = record_payload.get("content_evidence_payload")
     if not isinstance(content_payload, dict):
@@ -419,6 +427,15 @@ def _resolve_formal_matrix_content_score(record_payload: Dict[str, Any]) -> Tupl
     status_value = content_payload.get("status")
     if status_value != "ok":
         return None, f"content_evidence_payload.status={_safe_str(status_value)}"
+
+    if score_name == eval_metrics.MATRIX_LF_SCORE_NAME:
+        score_value = _coerce_finite_float(content_payload.get("lf_score"))
+        if score_value is None:
+            return None, "content_evidence_payload.lf_score_missing_or_nonfinite"
+        return score_value, "content_evidence_payload.lf_score"
+
+    if score_name != "content_score":
+        raise ValueError(f"unsupported matrix formal score_name: {score_name}")
 
     recovery_reason = content_payload.get("calibration_score_recovery_reason")
     if isinstance(recovery_reason, str) and recovery_reason:
@@ -433,14 +450,17 @@ def _resolve_formal_matrix_content_score(record_payload: Dict[str, Any]) -> Tupl
 
 def _ensure_matrix_calibration_compatible_content_payload(
     record_payload: Dict[str, Any],
+    score_name: str,
     score_value: float,
     score_source: Optional[str] = None,
     recovered_sample_origin: Optional[str] = None,
-    require_canonical_content_score: bool = False,
+    require_canonical_matrix_score: bool = False,
 ) -> None:
     """Normalize a record so calibration can consume it as a valid content sample."""
     if not isinstance(record_payload, dict):
         raise TypeError("record_payload must be dict")
+    if not isinstance(score_name, str) or not score_name:
+        raise TypeError("score_name must be non-empty str")
     if not isinstance(score_value, (int, float)) or not np.isfinite(float(score_value)):
         raise TypeError("score_value must be finite numeric")
     if score_source is not None and (not isinstance(score_source, str) or not score_source):
@@ -449,49 +469,73 @@ def _ensure_matrix_calibration_compatible_content_payload(
         not isinstance(recovered_sample_origin, str) or not recovered_sample_origin
     ):
         raise TypeError("recovered_sample_origin must be non-empty str or None")
-    if not isinstance(require_canonical_content_score, bool):
-        raise TypeError("require_canonical_content_score must be bool")
+    if not isinstance(require_canonical_matrix_score, bool):
+        raise TypeError("require_canonical_matrix_score must be bool")
 
     content_node = record_payload.get("content_evidence_payload")
     if not isinstance(content_node, dict):
         content_node = {}
         record_payload["content_evidence_payload"] = content_node
 
-    if require_canonical_content_score:
+    if require_canonical_matrix_score:
         existing_status = content_node.get("status")
-        existing_score = _coerce_finite_float(content_node.get("score"))
-        recovery_reason = content_node.get("calibration_score_recovery_reason")
         if existing_status != "ok":
             raise RuntimeError(
                 "formal matrix content payload must preserve status=ok; "
                 f"got_status={_safe_str(existing_status)}"
             )
-        if existing_score is None:
-            raise RuntimeError(
-                "formal matrix content payload requires canonical content_evidence_payload.score"
-            )
-        if score_source != "content_evidence_payload.score":
-            raise RuntimeError(
-                "formal matrix content payload forbids recovered score source; "
-                f"score_source={_safe_str(score_source)}"
-            )
-        if isinstance(recovery_reason, str) and recovery_reason:
-            raise RuntimeError(
-                "formal matrix content payload forbids calibration score recovery markers; "
-                f"recovery_reason={recovery_reason}"
-            )
+        if score_name == eval_metrics.MATRIX_LF_SCORE_NAME:
+            existing_score = _coerce_finite_float(content_node.get("lf_score"))
+            if existing_score is None:
+                raise RuntimeError(
+                    "formal matrix content payload requires canonical content_evidence_payload.lf_score"
+                )
+            if score_source != "content_evidence_payload.lf_score":
+                raise RuntimeError(
+                    "formal matrix content payload forbids non-canonical matrix_lf_score source; "
+                    f"score_source={_safe_str(score_source)}"
+                )
+        elif score_name == "content_score":
+            existing_score = _coerce_finite_float(content_node.get("score"))
+            recovery_reason = content_node.get("calibration_score_recovery_reason")
+            if existing_score is None:
+                raise RuntimeError(
+                    "formal matrix content payload requires canonical content_evidence_payload.score"
+                )
+            if score_source != "content_evidence_payload.score":
+                raise RuntimeError(
+                    "formal matrix content payload forbids recovered score source; "
+                    f"score_source={_safe_str(score_source)}"
+                )
+            if isinstance(recovery_reason, str) and recovery_reason:
+                raise RuntimeError(
+                    "formal matrix content payload forbids calibration score recovery markers; "
+                    f"recovery_reason={recovery_reason}"
+                )
+        else:
+            raise ValueError(f"unsupported matrix formal score_name: {score_name}")
 
     content_node["status"] = "ok"
-    content_node["score"] = float(score_value)
     content_node.pop("calibration_sample_is_synthetic_fallback", None)
-    if require_canonical_content_score:
-        content_node.pop("calibration_score_recovery_reason", None)
-        content_node.pop("calibration_sample_origin", None)
+    content_node.pop("calibration_score_recovery_reason", None)
+    content_node.pop("calibration_sample_origin", None)
 
-    if isinstance(score_source, str) and score_source != "content_evidence_payload.score":
-        content_node["calibration_score_recovery_reason"] = score_source
-        if isinstance(recovered_sample_origin, str):
-            content_node["calibration_sample_origin"] = recovered_sample_origin
+    if score_name == eval_metrics.MATRIX_LF_SCORE_NAME:
+        content_node["lf_score"] = float(score_value)
+        score_parts_node = content_node.get("score_parts")
+        if isinstance(score_parts_node, dict):
+            score_parts_node["lf_score"] = float(score_value)
+        return
+
+    if score_name == "content_score":
+        content_node["score"] = float(score_value)
+        if not require_canonical_matrix_score and isinstance(score_source, str) and score_source != "content_evidence_payload.score":
+            content_node["calibration_score_recovery_reason"] = score_source
+            if isinstance(recovered_sample_origin, str):
+                content_node["calibration_sample_origin"] = recovered_sample_origin
+        return
+
+    raise ValueError(f"unsupported matrix formal score_name: {score_name}")
 
 
 def _extract_hf_truncation_baseline_comparison_from_detect_record(run_root: Path) -> Dict[str, Any]:
@@ -839,6 +883,36 @@ def _extract_matrix_cfg(base_cfg: Dict[str, Any]) -> Dict[str, Any]:
     return matrix_cfg
 
 
+def _resolve_matrix_formal_score_name(matrix_cfg: Dict[str, Any]) -> str:
+    """Resolve the matrix-only formal score name."""
+    if not isinstance(matrix_cfg, dict):
+        raise TypeError("matrix_cfg must be dict")
+
+    score_name = matrix_cfg.get("formal_score_name", eval_metrics.MATRIX_LF_SCORE_NAME)
+    if not isinstance(score_name, str) or not score_name:
+        raise TypeError("experiment_matrix.formal_score_name must be non-empty str")
+    if score_name != eval_metrics.MATRIX_LF_SCORE_NAME:
+        raise ValueError(
+            "experiment_matrix.formal_score_name must remain matrix_lf_score for the current formal profile"
+        )
+    return score_name
+
+
+def _extract_matrix_formal_score_name_from_grid_item(grid_item_cfg: Dict[str, Any]) -> str:
+    """Extract validated matrix formal score name from one grid item."""
+    if not isinstance(grid_item_cfg, dict):
+        raise TypeError("grid_item_cfg must be dict")
+
+    score_name = grid_item_cfg.get("formal_score_name", eval_metrics.MATRIX_LF_SCORE_NAME)
+    if not isinstance(score_name, str) or not score_name:
+        raise TypeError("grid item formal_score_name must be non-empty str")
+    if score_name != eval_metrics.MATRIX_LF_SCORE_NAME:
+        raise ValueError(
+            "grid item formal_score_name must remain matrix_lf_score for the current formal profile"
+        )
+    return score_name
+
+
 def _resolve_model_axis(base_cfg: Dict[str, Any], matrix_cfg: Dict[str, Any]) -> List[str]:
     """Resolve model axis list."""
     models = matrix_cfg.get("models")
@@ -978,6 +1052,7 @@ def _assert_formal_validation_prerequisites(
         if not isinstance(item, dict):
             raise TypeError("grid items must be dict")
         guards = _extract_formal_validation_guards_from_grid_item(item)
+        formal_score_name = _extract_matrix_formal_score_name_from_grid_item(item)
         model_id = item.get("model_id")
         seed_value = item.get("seed")
         neg_key: Optional[Tuple[str, int]] = None
@@ -998,8 +1073,13 @@ def _assert_formal_validation_prerequisites(
                         f"reason=detect_record_missing_or_invalid_json, path={neg_path}"
                     )
                 else:
-                    _, invalid_reason = _resolve_formal_matrix_content_score(neg_record)
-                    if invalid_reason != "content_evidence_payload.score":
+                    _, invalid_reason = _resolve_formal_matrix_score(neg_record, formal_score_name)
+                    expected_source = (
+                        "content_evidence_payload.lf_score"
+                        if formal_score_name == eval_metrics.MATRIX_LF_SCORE_NAME
+                        else "content_evidence_payload.score"
+                    )
+                    if invalid_reason != expected_source:
                         invalid_real_negative_keys.append(
                             f"model_id={_safe_str(model_id)}, seed={seed_value if isinstance(seed_value, int) else '<absent>'}, "
                             f"reason={invalid_reason}, path={neg_path}"
@@ -1369,6 +1449,12 @@ def _run_global_calibrate(
     if not isinstance(neg_detect_record_cache, dict):
         return None
 
+    cfg, _ = config_loader.load_yaml_with_provenance(config_path)
+    if not isinstance(cfg, dict):
+        return None
+    matrix_cfg = _extract_matrix_cfg(cfg)
+    formal_score_name = _resolve_matrix_formal_score_name(matrix_cfg)
+
     # (1) 收集所有有效的 neg detect record path，跳过生成失败的条目。
     valid_neg_paths: List[Path] = [
         p for p in neg_detect_record_cache.values()
@@ -1394,10 +1480,15 @@ def _run_global_calibrate(
         if not isinstance(neg_record, dict) or not neg_record:
             invalid_negatives.append(f"path={neg_path}, reason=detect_record_missing_or_invalid_json")
             continue
-        score_val, score_source = _resolve_formal_matrix_content_score(neg_record)
-        if not isinstance(score_val, float) or score_source != "content_evidence_payload.score":
+        score_val, score_source = _resolve_formal_matrix_score(neg_record, formal_score_name)
+        expected_source = (
+            "content_evidence_payload.lf_score"
+            if formal_score_name == eval_metrics.MATRIX_LF_SCORE_NAME
+            else "content_evidence_payload.score"
+        )
+        if not isinstance(score_val, float) or score_source != expected_source:
             invalid_negatives.append(
-                f"path={neg_path}, reason={score_source if isinstance(score_source, str) else 'content_evidence_payload.score_missing_or_nonfinite'}"
+                f"path={neg_path}, reason={score_source if isinstance(score_source, str) else expected_source + '_missing_or_nonfinite'}"
             )
             continue
         labeled_neg = copy.deepcopy(neg_record)
@@ -1409,10 +1500,11 @@ def _run_global_calibrate(
         labeled_neg["calibration_sample_usage"] = "real_negative_global_calibrate_null_distribution"
         _ensure_matrix_calibration_compatible_content_payload(
             labeled_neg,
+            formal_score_name,
             score_val,
             score_source=score_source,
             recovered_sample_origin="global_calibrate_real_negative_recovery",
-            require_canonical_content_score=True,
+            require_canonical_matrix_score=True,
         )
         staged_path = neg_staged_dir / f"neg_record_{idx:04d}.json"
         records_io.write_artifact_text_unbound(
@@ -1442,12 +1534,9 @@ def _run_global_calibrate(
     # 在 formal 语义上只依赖真实负样本 null distribution。
     # 因此这里直接复用 calibrate orchestrator 的统计核心，避免被 CLI 的
     # label-balance 前置门禁错误阻断。
-    cfg, _ = config_loader.load_yaml_with_provenance(config_path)
-    if not isinstance(cfg, dict):
-        return None
-
     calibration_cfg = copy.deepcopy(cfg.get("calibration")) if isinstance(cfg.get("calibration"), dict) else {}
     calibration_cfg["detect_records_glob"] = neg_glob
+    calibration_cfg["score_name"] = formal_score_name
     cfg["calibration"] = calibration_cfg
 
     calibrate_record = detect_orchestrator.run_calibrate_orchestrator(cfg, object())
@@ -1935,6 +2024,13 @@ def _prepare_formal_evaluate_detect_records_glob_for_matrix(
     if not isinstance(shared_thresholds_path, Path):
         raise TypeError("shared_thresholds_path must be Path")
 
+    formal_score_name = _extract_matrix_formal_score_name_from_grid_item(grid_item_cfg)
+    expected_source = (
+        "content_evidence_payload.lf_score"
+        if formal_score_name == eval_metrics.MATRIX_LF_SCORE_NAME
+        else "content_evidence_payload.score"
+    )
+
     attack_aware_path = _prepare_detect_record_for_attack_grouping(run_root, grid_item_cfg)
     positive_payload = _read_optional_json(attack_aware_path)
     if not isinstance(positive_payload, dict) or not positive_payload:
@@ -1943,11 +2039,11 @@ def _prepare_formal_evaluate_detect_records_glob_for_matrix(
     if not isinstance(positive_payload, dict) or not positive_payload:
         raise RuntimeError("detect record missing or invalid for formal evaluate inputs")
 
-    positive_score, positive_score_source = _resolve_formal_matrix_content_score(positive_payload)
-    if not isinstance(positive_score, float) or positive_score_source != "content_evidence_payload.score":
+    positive_score, positive_score_source = _resolve_formal_matrix_score(positive_payload, formal_score_name)
+    if not isinstance(positive_score, float) or positive_score_source != expected_source:
         raise RuntimeError(
-            "formal evaluate inputs require canonical attacked positive content score; "
-            f"reason={positive_score_source if isinstance(positive_score_source, str) else 'content_evidence_payload.score_missing_or_nonfinite'}"
+            "formal evaluate inputs require canonical attacked positive matrix score; "
+            f"reason={positive_score_source if isinstance(positive_score_source, str) else expected_source + '_missing_or_nonfinite'}"
         )
 
     positive_payload = copy.deepcopy(positive_payload)
@@ -1958,9 +2054,10 @@ def _prepare_formal_evaluate_detect_records_glob_for_matrix(
     positive_payload.pop("calibration_excluded_from_labelled_sampling", None)
     _ensure_matrix_calibration_compatible_content_payload(
         positive_payload,
+        formal_score_name,
         positive_score,
         score_source=positive_score_source,
-        require_canonical_content_score=True,
+        require_canonical_matrix_score=True,
     )
 
     neg_staged_dir = shared_thresholds_path.parent.parent / "neg_staged"
@@ -1997,10 +2094,10 @@ def _prepare_formal_evaluate_detect_records_glob_for_matrix(
         if not isinstance(neg_payload, dict) or not neg_payload:
             invalid_negatives.append(f"path={neg_path}, reason=detect_record_missing_or_invalid_json")
             continue
-        neg_score, neg_score_source = _resolve_formal_matrix_content_score(neg_payload)
-        if not isinstance(neg_score, float) or neg_score_source != "content_evidence_payload.score":
+        neg_score, neg_score_source = _resolve_formal_matrix_score(neg_payload, formal_score_name)
+        if not isinstance(neg_score, float) or neg_score_source != expected_source:
             invalid_negatives.append(
-                f"path={neg_path}, reason={neg_score_source if isinstance(neg_score_source, str) else 'content_evidence_payload.score_missing_or_nonfinite'}"
+                f"path={neg_path}, reason={neg_score_source if isinstance(neg_score_source, str) else expected_source + '_missing_or_nonfinite'}"
             )
             continue
 
@@ -2022,9 +2119,10 @@ def _prepare_formal_evaluate_detect_records_glob_for_matrix(
         neg_payload["is_watermarked"] = False
         _ensure_matrix_calibration_compatible_content_payload(
             neg_payload,
+            formal_score_name,
             neg_score,
             score_source=neg_score_source,
-            require_canonical_content_score=True,
+            require_canonical_matrix_score=True,
         )
 
         negative_rel_path = (
@@ -2121,7 +2219,7 @@ def _prepare_labelled_detect_records_glob_for_matrix(
     if not isinstance(base_score, float):
         base_score = 0.25
 
-    _ensure_matrix_calibration_compatible_content_payload(positive_payload, base_score)
+    _ensure_matrix_calibration_compatible_content_payload(positive_payload, "content_score", base_score)
 
     # 优先使用预生成的真实负样本分数（干净图像经 identity embed + detect 产出）。
     # 真实分数保证 FPR 校准在真实负样本分布上进行，满足论文级严谨要求。
@@ -2159,6 +2257,7 @@ def _prepare_labelled_detect_records_glob_for_matrix(
         negative_payload.pop("calibration_excluded_from_labelled_sampling", None)
         _ensure_matrix_calibration_compatible_content_payload(
             negative_payload,
+            "content_score",
             neg_score,
             score_source=neg_score_source,
             recovered_sample_origin="real_negative_payload_recovery",
@@ -2172,7 +2271,7 @@ def _prepare_labelled_detect_records_glob_for_matrix(
                 "real negative payload is required for labelled detect records"
             )
         # 降级：neg 生成失败或分数无效，使用合成得分（base_score - 1.0）。
-        _ensure_matrix_calibration_compatible_content_payload(negative_payload, base_score - 1.0)
+        _ensure_matrix_calibration_compatible_content_payload(negative_payload, "content_score", base_score - 1.0)
 
     positive_rel_path = Path("artifacts") / "evaluate_inputs" / "labelled_detect_records" / "detect_record_label_pos.json"
     negative_rel_path = Path("artifacts") / "evaluate_inputs" / "labelled_detect_records" / "detect_record_label_neg.json"

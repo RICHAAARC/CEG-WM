@@ -136,6 +136,38 @@ def test_evaluate_records_against_threshold_uses_readonly_threshold() -> None:
     assert isinstance(conditional_metrics["attack_group_metrics"], list)
 
 
+def test_evaluate_records_against_threshold_supports_matrix_lf_score() -> None:
+    """Validate readonly evaluate can consume matrix_lf_score from detect records."""
+    records = [
+        {
+            "content_evidence_payload": {"status": "ok", "score": 0.91, "lf_score": 0.31},
+            "label": True,
+        },
+        {
+            "content_evidence_payload": {"status": "ok", "score": 0.12, "lf_score": 0.29},
+            "label": False,
+        },
+        {
+            "content_evidence_payload": {"status": "ok", "score": 0.11, "lf_score": 0.42},
+            "label": True,
+        },
+    ]
+    thresholds_obj = {
+        "threshold_id": "matrix_lf_score_np_fpr_0_01",
+        "score_name": "matrix_lf_score",
+        "target_fpr": 0.01,
+        "threshold_value": 0.3,
+        "threshold_key_used": "fpr_0_01",
+    }
+
+    metrics, breakdown, _ = evaluate_records_against_threshold(records, thresholds_obj)
+
+    assert metrics["score_name"] == "matrix_lf_score"
+    assert metrics["tpr_at_fpr"] == pytest.approx(1.0)
+    assert metrics["fpr_empirical"] == pytest.approx(0.0)
+    assert breakdown["confusion"] == {"tp": 2, "fp": 0, "fn": 0, "tn": 1}
+
+
 def test_evaluate_event_attestation_threshold_ignores_detect_hf_score_fallback() -> None:
     """Validate event-attestation readonly evaluate never accepts detect_hf_score fallback."""
     records = [

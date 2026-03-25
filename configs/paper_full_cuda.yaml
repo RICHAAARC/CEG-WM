@@ -194,6 +194,7 @@ detect_runtime:
 experiment_matrix:
   config_path: "configs/paper_full_cuda.yaml"
   allow_failed_semantics_collection: true
+  formal_score_name: "matrix_lf_score"
   # seeds 数量控制正样本规模：论文级 FPR ≤ 1% 需 n_pos ≥ 100，种子数应 ≥ 100。
   # 当前 seeds=[0,1] 为机制验证阶段（仅 2 个 seed）；正式论文运行请扩展为 range(100)。
   # 运行时通过 scripts/run_experiment_matrix.py 自动映射 seeds 为 CLI overrides（seed=0, seed=1, ...），

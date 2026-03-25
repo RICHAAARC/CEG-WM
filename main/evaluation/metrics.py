@@ -13,6 +13,7 @@ from main.evaluation.image_quality import compute_quality_metrics_batch
 
 EVENT_ATTESTATION_SCORE_NAME = "event_attestation_score"
 EVENT_ATTESTATION_SCORE_ALIAS_NAME = "event_attestation_statistics_score"
+MATRIX_LF_SCORE_NAME = "matrix_lf_score"
 LEGACY_EVENT_ATTESTATION_ALIAS_RERUN_REASON = (
     "legacy_event_attestation_statistics_score_artifact_requires_rerun"
 )
@@ -877,6 +878,13 @@ def _extract_score_value_for_metrics(record: Dict[str, Any], score_name: str) ->
         if content_payload.get("status") != "ok":
             return None, "status_not_ok"
         score_value = content_payload.get("score")
+    elif score_name == MATRIX_LF_SCORE_NAME:
+        content_payload = record.get("content_evidence_payload")
+        if not isinstance(content_payload, dict):
+            return None, "missing_content_payload"
+        if content_payload.get("status") != "ok":
+            return None, "status_not_ok"
+        score_value = content_payload.get("lf_score")
     elif score_name == "content_attestation_score":
         attestation_node = record.get("attestation")
         if not isinstance(attestation_node, dict):

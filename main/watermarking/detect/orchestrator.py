@@ -5847,6 +5847,14 @@ def _extract_score_for_stats(record: Dict[str, Any], score_name: str) -> Optiona
         if content_payload.get("status") != "ok":
             return None
         score_value = content_payload.get("score")
+    elif score_name == eval_metrics.MATRIX_LF_SCORE_NAME:
+        content_node = record.get("content_evidence_payload")
+        if not isinstance(content_node, dict):
+            return None
+        content_payload = cast(Dict[str, Any], content_node)
+        if content_payload.get("status") != "ok":
+            return None
+        score_value = content_payload.get("lf_score")
     elif score_name == "content_attestation_score":
         attestation_node = record.get("attestation")
         if not isinstance(attestation_node, dict):

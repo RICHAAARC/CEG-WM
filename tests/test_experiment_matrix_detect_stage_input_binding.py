@@ -714,6 +714,7 @@ def test_prepare_formal_evaluate_detect_records_glob_uses_shared_real_negatives(
                 "content_evidence_payload": {
                     "status": "ok",
                     "score": 0.75,
+                    "lf_score": 0.41,
                 },
                 "infer_trace": {"inference_prompt": "matrix canonical prompt"},
             }
@@ -741,6 +742,7 @@ def test_prepare_formal_evaluate_detect_records_glob_uses_shared_real_negatives(
                     "content_evidence_payload": {
                         "status": "ok",
                         "score": score_value,
+                        "lf_score": score_value,
                     },
                 }
             ),
@@ -1189,10 +1191,10 @@ def test_run_global_calibrate_writes_shared_thresholds_from_neg_only_cache(
             {
                 "operation": "detect",
                 "content_evidence_payload": {
-                    "status": "absent",
-                    "score": None,
-                    "detect_hf_score": 0.12,
-                    "content_failure_reason": "formal_profile_sidecar_disabled",
+                    "status": "ok",
+                    "score": 0.88,
+                    "lf_score": 0.12,
+                    "score_parts": {"lf_score": 0.12},
                 },
                 "label": False,
             }
@@ -1210,6 +1212,9 @@ def test_run_global_calibrate_writes_shared_thresholds_from_neg_only_cache(
                 "exclude_formal_sidecar_disabled_marker": True,
                 "exclude_synthetic_negative_closure_marker": True,
             },
+            "experiment_matrix": {
+                "formal_score_name": "matrix_lf_score",
+            },
         }, {"file_sha256": "unused"}
 
     def _fake_run_calibrate_orchestrator(cfg, impl_set):
@@ -1217,8 +1222,8 @@ def test_run_global_calibrate_writes_shared_thresholds_from_neg_only_cache(
         captured["impl_set"] = impl_set
         return {
             "thresholds_artifact": {
-                "threshold_id": "content_score_np_1e-02",
-                "score_name": "content_score",
+                "threshold_id": "matrix_lf_score_np_1e-02",
+                "score_name": "matrix_lf_score",
                 "target_fpr": 0.01,
                 "threshold_value": 0.12,
                 "threshold_key_used": "1e-02",
@@ -1230,6 +1235,7 @@ def test_run_global_calibrate_writes_shared_thresholds_from_neg_only_cache(
                 "calibration_date": "1970-01-01",
                 "quantile_method": "higher",
                 "target_fprs": [0.01],
+                "score_name": "matrix_lf_score",
             },
         }
 
@@ -1251,6 +1257,7 @@ def test_run_global_calibrate_writes_shared_thresholds_from_neg_only_cache(
     staged_glob = Path(captured["cfg"]["calibration"]["detect_records_glob"])
     assert staged_glob.parent.name == "neg_staged"
     assert staged_glob.name == "*.json"
+    assert captured["cfg"]["calibration"]["score_name"] == "matrix_lf_score"
     assert captured["impl_set"] is not None
 
     staged_paths = sorted(staged_glob.parent.glob("*.json"))
@@ -1259,9 +1266,10 @@ def test_run_global_calibrate_writes_shared_thresholds_from_neg_only_cache(
     staged_content = staged_payload.get("content_evidence_payload")
     assert isinstance(staged_content, dict)
     assert staged_content.get("status") == "ok"
-    assert float(staged_content["score"]) == 0.12
-    assert staged_content.get("calibration_score_recovery_reason") == "content_evidence_payload.detect_hf_score"
-    assert staged_content.get("calibration_sample_origin") == "global_calibrate_real_negative_recovery"
+    assert float(staged_content["score"]) == pytest.approx(0.88)
+    assert float(staged_content["lf_score"]) == pytest.approx(0.12)
+    assert staged_content.get("calibration_score_recovery_reason") is None
+    assert staged_content.get("calibration_sample_origin") is None
 
     threshold_metadata_path = thresholds_path.parent / "threshold_metadata_artifact.json"
     assert threshold_metadata_path.exists()
@@ -1494,6 +1502,19 @@ def test_run_neg_embed_detect_for_cache_uses_preview_image_as_detect_input(
         captured_embed_command["command"] = list(command)
         assert capture_output is True
         assert text is True
+        run_root_index = command.index("--out") + 1
+        embed_run_root = Path(command[run_root_index])
+        embed_record_path = embed_run_root / "records" / "embed_record.json"
+        embed_record_path.parent.mkdir(parents=True, exist_ok=True)
+        embed_record_path.write_text(
+            json.dumps(
+                {
+                    "operation": "embed",
+                    "plan_digest": "neg-preview-plan-digest",
+                }
+            ),
+            encoding="utf-8",
+        )
         return SimpleNamespace(
             returncode=0,
             stdout=f"[Preview Generation] 预览图已生成，路径：{preview_image_path}\n",
