@@ -142,6 +142,12 @@ def build_experiment_grid(base_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     if not isinstance(allow_failed_semantics_collection, bool):
         raise TypeError("experiment_matrix.allow_failed_semantics_collection must be bool")
 
+    external_shared_thresholds_path = matrix_cfg.get("external_shared_thresholds_path")
+    if external_shared_thresholds_path is not None and (
+        not isinstance(external_shared_thresholds_path, str) or not external_shared_thresholds_path
+    ):
+        raise TypeError("experiment_matrix.external_shared_thresholds_path must be non-empty str or None")
+
     grid_items: List[Dict[str, Any]] = []
     grid_index = 0
     for model_id in model_list:
@@ -183,6 +189,7 @@ def build_experiment_grid(base_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
                         "require_real_negative_cache": formal_validation_guards["require_real_negative_cache"],
                         "require_shared_thresholds": formal_validation_guards["require_shared_thresholds"],
                         "disallow_forced_pair_fallback": formal_validation_guards["disallow_forced_pair_fallback"],
+                        "external_shared_thresholds_path": external_shared_thresholds_path,
                     }
                     grid_items.append(grid_item)
                     grid_index += 1
@@ -690,15 +697,36 @@ def run_experiment_grid(grid: List[Dict[str, Any]], strict: bool = True) -> Dict
     shared_thresholds_path: Optional[Path] = None
     if grid:
         first_item = grid[0]
-        try:
-            shared_thresholds_path = _run_global_calibrate(
-                batch_root=str(first_item.get("batch_root", "outputs/experiment_matrix")),
-                config_path=str(first_item.get("config_path", "configs/paper_full_cuda.yaml")),
-                neg_detect_record_cache=neg_detect_record_cache,
-            )
-        except Exception:
-            # 全局 calibrate 失败时降级为 per-item calibrate，不中止 grid 执行。
-            shared_thresholds_path = None
+        external_shared_thresholds_path_obj = first_item.get("external_shared_thresholds_path")
+        external_shared_thresholds_path = (
+            Path(external_shared_thresholds_path_obj)
+            if isinstance(external_shared_thresholds_path_obj, str) and external_shared_thresholds_path_obj
+            else None
+        )
+        if (
+            external_shared_thresholds_path is not None
+            and external_shared_thresholds_path.exists()
+            and external_shared_thresholds_path.is_file()
+        ):
+            try:
+                _stage_external_shared_threshold_negatives(
+                    shared_thresholds_path=external_shared_thresholds_path,
+                    config_path=str(first_item.get("config_path", "configs/paper_full_cuda.yaml")),
+                    neg_detect_record_cache=neg_detect_record_cache,
+                )
+                shared_thresholds_path = external_shared_thresholds_path
+            except Exception:
+                shared_thresholds_path = None
+        else:
+            try:
+                shared_thresholds_path = _run_global_calibrate(
+                    batch_root=str(first_item.get("batch_root", "outputs/experiment_matrix")),
+                    config_path=str(first_item.get("config_path", "configs/paper_full_cuda.yaml")),
+                    neg_detect_record_cache=neg_detect_record_cache,
+                )
+            except Exception:
+                # 全局 calibrate 失败时降级为 per-item calibrate，不中止 grid 执行。
+                shared_thresholds_path = None
 
     _assert_formal_validation_prerequisites(
         grid,
@@ -1568,6 +1596,96 @@ def _run_global_calibrate(
     if shared_thresholds_path.exists() and shared_thresholds_path.is_file():
         return shared_thresholds_path
     return None
+
+
+def _stage_external_shared_threshold_negatives(
+    shared_thresholds_path: Path,
+    config_path: str,
+    neg_detect_record_cache: Dict[Tuple[str, int], Optional[Path]],
+) -> None:
+    """
+    功能：为外部只读 shared thresholds 准备 formal evaluate 所需的 neg_staged 目录。
+
+    Stage labelled real-negative detect records beside an externally supplied
+    shared thresholds artifact so formal evaluate can remain pair-free without
+    recomputing thresholds.
+
+    Args:
+        shared_thresholds_path: Existing shared thresholds artifact path.
+        config_path: Base config YAML path.
+        neg_detect_record_cache: Mapping of (model_id, seed) to negative detect records.
+
+    Returns:
+        None.
+    """
+    if not isinstance(shared_thresholds_path, Path):
+        raise TypeError("shared_thresholds_path must be Path")
+    if not isinstance(config_path, str) or not config_path:
+        raise TypeError("config_path must be non-empty str")
+    if not isinstance(neg_detect_record_cache, dict):
+        raise TypeError("neg_detect_record_cache must be dict")
+    if not shared_thresholds_path.exists() or not shared_thresholds_path.is_file():
+        raise FileNotFoundError(f"external shared thresholds missing: {shared_thresholds_path}")
+
+    cfg, _ = config_loader.load_yaml_with_provenance(config_path)
+    if not isinstance(cfg, dict):
+        raise TypeError("config root must be dict")
+    matrix_cfg = _extract_matrix_cfg(cfg)
+    formal_score_name = _resolve_matrix_formal_score_name(matrix_cfg)
+
+    neg_staged_dir = shared_thresholds_path.parent.parent / "neg_staged"
+    neg_staged_dir.mkdir(parents=True, exist_ok=True)
+    for stale_path in neg_staged_dir.glob("*.json"):
+        if stale_path.is_file():
+            stale_path.unlink()
+
+    valid_neg_paths: List[Path] = [
+        path_obj for path_obj in neg_detect_record_cache.values()
+        if path_obj is not None and path_obj.exists() and path_obj.is_file()
+    ]
+    if not valid_neg_paths:
+        raise RuntimeError("external shared thresholds require at least one real negative record")
+
+    staged_count = 0
+    for idx, neg_path in enumerate(valid_neg_paths):
+        neg_record = _read_optional_json(neg_path)
+        if not isinstance(neg_record, dict) or not neg_record:
+            continue
+        score_val, score_source = _resolve_formal_matrix_score(neg_record, formal_score_name)
+        expected_source = (
+            "content_evidence_payload.lf_score"
+            if formal_score_name == eval_metrics.MATRIX_LF_SCORE_NAME
+            else "content_evidence_payload.score"
+        )
+        if not isinstance(score_val, float) or score_source != expected_source:
+            continue
+
+        labeled_neg = copy.deepcopy(neg_record)
+        labeled_neg["label"] = False
+        labeled_neg["ground_truth"] = False
+        labeled_neg["is_watermarked"] = False
+        labeled_neg["calibration_label_resolution"] = "external_shared_threshold_real_neg"
+        labeled_neg["ground_truth_source"] = "real_neg_embed_detect"
+        labeled_neg["calibration_sample_usage"] = "real_negative_external_shared_threshold_null_distribution"
+        _ensure_matrix_calibration_compatible_content_payload(
+            labeled_neg,
+            formal_score_name,
+            score_val,
+            score_source=score_source,
+            recovered_sample_origin="external_shared_threshold_real_negative_recovery",
+            require_canonical_matrix_score=True,
+        )
+        staged_path = neg_staged_dir / f"neg_record_{idx:04d}.json"
+        records_io.write_artifact_text_unbound(
+            run_root=shared_thresholds_path.parents[2],
+            artifacts_dir=neg_staged_dir,
+            path=str(staged_path),
+            content=json.dumps(labeled_neg),
+        )
+        staged_count += 1
+
+    if staged_count == 0:
+        raise RuntimeError("external shared thresholds produced no valid staged real negative records")
 
 
 def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[str, Any]:
