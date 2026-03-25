@@ -1129,9 +1129,11 @@ def _run_neg_embed_detect_for_cache(
         config_path=neg_cache_config_path,
         stage_overrides=list(common_overrides),
     )
+    embed_record_path = neg_run_root / "records" / "embed_record.json"
     preview_input_record_path = _write_neg_preview_input_record(
         run_root=neg_run_root,
         preview_image_path=preview_image_path,
+        embed_record_path=embed_record_path,
     )
 
     # (2) detect 阶段：对干净 preview 图像执行 content 检测，获取真实负样本分数。
@@ -1267,18 +1269,60 @@ def _extract_preview_image_path_from_embed_stdout(stdout_text: str) -> Optional[
     return None
 
 
-def _write_neg_preview_input_record(run_root: Path, preview_image_path: Path) -> Path:
-    """Write a minimal input record so detect can consume the clean preview image."""
+def _build_neg_preview_detect_binding(embed_record: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract the minimal plan-bound detect binding from one neg-cache embed record."""
+    if not isinstance(embed_record, dict):
+        raise TypeError("embed_record must be dict")
+
+    plan_digest = embed_record.get("plan_digest")
+    if not isinstance(plan_digest, str) or not plan_digest:
+        raise ValueError("neg_cache embed_record.plan_digest must be non-empty str")
+
+    binding_payload: Dict[str, Any] = {
+        "plan_digest": plan_digest,
+    }
+
+    basis_digest = embed_record.get("basis_digest")
+    if isinstance(basis_digest, str) and basis_digest:
+        binding_payload["basis_digest"] = basis_digest
+
+    planner_impl_identity = embed_record.get("subspace_planner_impl_identity")
+    if isinstance(planner_impl_identity, dict) and planner_impl_identity:
+        binding_payload["subspace_planner_impl_identity"] = copy.deepcopy(planner_impl_identity)
+
+    subspace_plan = embed_record.get("subspace_plan")
+    if isinstance(subspace_plan, dict) and subspace_plan:
+        binding_payload["subspace_plan"] = copy.deepcopy(subspace_plan)
+
+    content_evidence = embed_record.get("content_evidence")
+    if isinstance(content_evidence, dict):
+        trajectory_evidence = content_evidence.get("trajectory_evidence")
+        if isinstance(trajectory_evidence, dict) and trajectory_evidence:
+            binding_payload["content_evidence"] = {
+                "trajectory_evidence": copy.deepcopy(trajectory_evidence),
+            }
+
+    return binding_payload
+
+
+def _write_neg_preview_input_record(run_root: Path, preview_image_path: Path, embed_record_path: Path) -> Path:
+    """Write a plan-bound clean-negative input record for neg-cache detect."""
     if not isinstance(run_root, Path):
         raise TypeError("run_root must be Path")
     if not isinstance(preview_image_path, Path):
         raise TypeError("preview_image_path must be Path")
+    if not isinstance(embed_record_path, Path):
+        raise TypeError("embed_record_path must be Path")
     if not preview_image_path.exists() or not preview_image_path.is_file():
         raise ValueError(f"preview_image_path not found: {preview_image_path}")
+    if not embed_record_path.exists() or not embed_record_path.is_file():
+        raise ValueError(f"embed_record_path not found: {embed_record_path}")
 
     artifacts_dir = run_root / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     input_record_path = artifacts_dir / "neg_preview_input" / "detect_input_record.json"
+    embed_record = _read_optional_json(embed_record_path)
+    binding_payload = _build_neg_preview_detect_binding(embed_record)
     input_record_payload = {
         "operation": "embed_preview_input",
         "image_path": str(preview_image_path),
@@ -1287,6 +1331,7 @@ def _write_neg_preview_input_record(run_root: Path, preview_image_path: Path) ->
             "input_image_path": str(preview_image_path),
         },
     }
+    input_record_payload.update(binding_payload)
     records_io.write_artifact_json_unbound(
         run_root=run_root,
         artifacts_dir=artifacts_dir,
