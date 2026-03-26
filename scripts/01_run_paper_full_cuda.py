@@ -598,6 +598,69 @@ def _run_stage(stage_name: str, command: Sequence[str], run_root: Path) -> Dict[
     return result
 
 
+def _read_log_tail(path_value: Any, max_lines: int = 20) -> List[str]:
+    """
+    功能：读取日志文件尾部若干行用于失败诊断。
+
+    Read the tail lines from one log file for failure diagnostics.
+
+    Args:
+        path_value: Log path value.
+        max_lines: Maximum number of lines to keep.
+
+    Returns:
+        Tail lines in original order.
+    """
+    if max_lines <= 0:
+        raise ValueError("max_lines must be positive int")
+    if not isinstance(path_value, (str, Path)):
+        return []
+    path_obj = Path(path_value)
+    if not path_obj.exists() or not path_obj.is_file():
+        return []
+    lines = path_obj.read_text(encoding="utf-8", errors="replace").splitlines()
+    return lines[-max_lines:]
+
+
+def _build_stage_failure_payload(
+    stage_name: str,
+    result: Dict[str, Any],
+    **extra_fields: Any,
+) -> Dict[str, Any]:
+    """
+    功能：构造 stage 失败诊断载荷。
+
+    Build a structured failure payload for one workflow stage.
+
+    Args:
+        stage_name: Workflow stage name.
+        result: Stage execution result mapping.
+        extra_fields: Additional diagnostic fields.
+
+    Returns:
+        JSON-serializable failure payload.
+    """
+    if not isinstance(stage_name, str) or not stage_name:
+        raise TypeError("stage_name must be non-empty str")
+    if not isinstance(result, dict):
+        raise TypeError("result must be dict")
+
+    stdout_log_path = result.get("stdout_log_path")
+    stderr_log_path = result.get("stderr_log_path")
+    failure_payload: Dict[str, Any] = {
+        "stage_name": stage_name,
+        "return_code": int(result.get("return_code", 1)),
+        "status": result.get("status"),
+        "command": result.get("command"),
+        "stdout_log_path": stdout_log_path,
+        "stderr_log_path": stderr_log_path,
+        "stdout_tail": _read_log_tail(stdout_log_path),
+        "stderr_tail": _read_log_tail(stderr_log_path),
+    }
+    failure_payload.update(extra_fields)
+    return failure_payload
+
+
 def _run_source_pool_subrun(
     *,
     index: int,
@@ -641,9 +704,17 @@ def _run_source_pool_subrun(
         result = _run_stage(stage_name, command, prompt_run_root)
         stage_results[stage_name] = result
         if result.get("return_code") != 0:
+            failure_payload = _build_stage_failure_payload(
+                stage_name,
+                result,
+                prompt_index=index,
+                prompt_text=prompt_text,
+                prompt_file=prompt_file_path,
+                prompt_run_root=normalize_path_value(prompt_run_root),
+            )
             raise RuntimeError(
-                f"stage 01 source pool {stage_name} failed for prompt_index={index}: "
-                f"return_code={result.get('return_code')}"
+                "stage 01 source pool stage failed: "
+                f"{json.dumps(failure_payload, ensure_ascii=False, sort_keys=True)}"
             )
 
     source_embed_record_path = prompt_run_root / "records" / "embed_record.json"
@@ -1122,6 +1193,7 @@ def run_paper_full_cuda(config_path: Path, run_root: Path, stage_run_id: Optiona
         result = _run_stage(stage_name, command, run_root)
         pooled_stage_results[stage_name] = result
         if result.get("return_code") != 0:
+            failed_stage_payload = _build_stage_failure_payload(stage_name, result)
             summary_payload: Dict[str, Any] = {
                 "stage_name": "01_Paper_Full_Cuda_mainline",
                 "stage_run_id": stage_run_id,
@@ -1131,8 +1203,10 @@ def run_paper_full_cuda(config_path: Path, run_root: Path, stage_run_id: Optiona
                 "source_pool_prompt_count": len(prompt_pool),
                 "source_pool_stage_results": source_pool_stage_results,
                 "pooled_stage_results": pooled_stage_results,
+                "failed_stage": failed_stage_payload,
             }
             write_json_atomic(run_root / "artifacts" / "workflow_summary.json", summary_payload)
+            print(json.dumps(summary_payload, ensure_ascii=False, sort_keys=True), file=sys.stderr)
             return int(result.get("return_code", 1))
 
     write_json_atomic(run_root / POOLED_THRESHOLD_BUILD_CONTRACT_RELATIVE_PATH, pooled_threshold_build_contract_payload)

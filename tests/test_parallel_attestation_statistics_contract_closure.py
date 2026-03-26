@@ -571,6 +571,138 @@ def test_default_config_enables_stage_01_pool_and_stage_02_target_pair_count() -
     assert config_payload["parallel_attestation_statistics"]["target_pair_count"] == 16
 
 
+def test_stage_01_runner_failure_exposes_log_tails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：验证 stage 01 外层脚本在主链失败时抛出日志路径与日志尾部。
+
+    Verify the stage-01 outer runner exposes log paths and tail lines when the
+    mainline subprocess fails.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    stage_01 = _load_script_module("scripts/01_Paper_Full_Cuda.py", "stage_01_failure_diagnostics")
+    drive_root = tmp_path / "drive"
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("policy_path: content_np_geo_rescue\n", encoding="utf-8")
+
+    run_root = drive_root / "runs" / "stage_01"
+    log_root = drive_root / "logs" / "stage_01"
+    runtime_state_root = drive_root / "runtime_state" / "stage_01"
+    export_root = drive_root / "exports" / "stage_01"
+
+    monkeypatch.setattr(
+        stage_01,
+        "resolve_stage_roots",
+        lambda *_args, **_kwargs: {
+            "run_root": run_root,
+            "log_root": log_root,
+            "runtime_state_root": runtime_state_root,
+            "export_root": export_root,
+        },
+    )
+    monkeypatch.setattr(stage_01, "load_yaml_mapping", lambda _path: {"attestation": {}})
+    monkeypatch.setattr(stage_01, "detect_formal_gpu_preflight", lambda _path: {"ok": True})
+    monkeypatch.setattr(
+        stage_01,
+        "copy_prompt_snapshot",
+        lambda *_args, **_kwargs: {
+            "snapshot_path": str(runtime_state_root / "runtime_metadata" / "prompt_snapshot" / "prompt.txt"),
+            "source_path": "prompts/paper_small.txt",
+        },
+    )
+
+    def _fake_run_command_with_logs(**kwargs: Any) -> Dict[str, Any]:
+        stdout_log_path = Path(kwargs["stdout_log_path"])
+        stderr_log_path = Path(kwargs["stderr_log_path"])
+        stdout_log_path.parent.mkdir(parents=True, exist_ok=True)
+        stderr_log_path.parent.mkdir(parents=True, exist_ok=True)
+        stdout_log_path.write_text("mainline stdout\n", encoding="utf-8")
+        stderr_log_path.write_text("nested failure detail\n", encoding="utf-8")
+        return {
+            "return_code": 1,
+            "stdout_log_path": str(stdout_log_path),
+            "stderr_log_path": str(stderr_log_path),
+            "command": ["python", "scripts/01_run_paper_full_cuda.py"],
+        }
+
+    monkeypatch.setattr(stage_01, "run_command_with_logs", _fake_run_command_with_logs)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        stage_01.run_stage_01(
+            drive_project_root=drive_root,
+            config_path=config_path,
+            notebook_name="01_Paper_Full_Cuda",
+            stage_run_id="stage01_failure",
+        )
+
+    error_text = str(exc_info.value)
+    assert "stage 01 mainline failed" in error_text
+    assert "nested failure detail" in error_text
+    assert "01_mainline_stderr.log" in error_text
+
+
+def test_stage_01_source_pool_failure_exposes_nested_log_tails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：验证 stage 01 source pool 子运行失败时抛出嵌套日志诊断。
+
+    Verify source-pool subrun failures expose nested stage log paths and tail
+    lines.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    runner = _load_script_module("scripts/01_run_paper_full_cuda.py", "stage_01_source_pool_failure_diagnostics")
+    run_root = tmp_path / "stage_01_run"
+
+    def _fake_run_stage(stage_name: str, command: Any, prompt_run_root: Path) -> Dict[str, Any]:
+        _ = command
+        logs_dir = prompt_run_root / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        stdout_log_path = logs_dir / f"{stage_name}_stdout.log"
+        stderr_log_path = logs_dir / f"{stage_name}_stderr.log"
+        stdout_log_path.write_text("source pool stdout\n", encoding="utf-8")
+        stderr_log_path.write_text("embed exploded in source pool\n", encoding="utf-8")
+        return {
+            "return_code": 1,
+            "status": "failed",
+            "command": ["python", stage_name],
+            "stdout_log_path": str(stdout_log_path),
+            "stderr_log_path": str(stderr_log_path),
+        }
+
+    monkeypatch.setattr(runner, "_run_stage", _fake_run_stage)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        runner._run_source_pool_subrun(
+            index=0,
+            prompt_text="prompt text",
+            prompt_file_path="prompts/paper_small.txt",
+            cfg_obj={"policy_path": "content_np_geo_rescue"},
+            run_root=run_root,
+            record_usage="stage_01_direct_source_pool",
+        )
+
+    error_text = str(exc_info.value)
+    assert "stage 01 source pool stage failed" in error_text
+    assert "embed exploded in source pool" in error_text
+    assert "embed_stderr.log" in error_text
+
+
 def test_stage_02_direct_only_build_uses_source_records_and_writes_build_contract(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

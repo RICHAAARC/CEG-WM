@@ -134,6 +134,75 @@ def _package_stage_outputs(
     return package_root
 
 
+def _read_log_tail(path_value: Any, max_lines: int = 20) -> list[str]:
+    """
+    功能：读取日志尾部用于 notebook 失败诊断。
+
+    Read the tail lines from one stage log for notebook diagnostics.
+
+    Args:
+        path_value: Log path value.
+        max_lines: Maximum number of lines to keep.
+
+    Returns:
+        Tail lines in original order.
+    """
+    if max_lines <= 0:
+        raise ValueError("max_lines must be positive int")
+    if not isinstance(path_value, (str, Path)):
+        return []
+    path_obj = Path(path_value)
+    if not path_obj.exists() or not path_obj.is_file():
+        return []
+    lines = path_obj.read_text(encoding="utf-8", errors="replace").splitlines()
+    return lines[-max_lines:]
+
+
+def _build_runner_failure_payload(
+    runner_result: Dict[str, Any],
+    run_root: Path,
+    log_root: Path,
+    stage_run_id: str,
+) -> Dict[str, Any]:
+    """
+    功能：构造 stage 01 主链失败诊断载荷。
+
+    Build the failure payload for the stage-01 mainline runner.
+
+    Args:
+        runner_result: Runner execution result mapping.
+        run_root: Stage run root.
+        log_root: Stage log root.
+        stage_run_id: Stage run identifier.
+
+    Returns:
+        JSON-serializable failure payload.
+    """
+    if not isinstance(runner_result, dict):
+        raise TypeError("runner_result must be dict")
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(log_root, Path):
+        raise TypeError("log_root must be Path")
+    if not isinstance(stage_run_id, str) or not stage_run_id:
+        raise TypeError("stage_run_id must be non-empty str")
+
+    stdout_log_path = runner_result.get("stdout_log_path")
+    stderr_log_path = runner_result.get("stderr_log_path")
+    return {
+        "stage_name": STAGE_01_NAME,
+        "stage_run_id": stage_run_id,
+        "run_root": normalize_path_value(run_root),
+        "log_root": normalize_path_value(log_root),
+        "return_code": int(runner_result.get("return_code", 1)),
+        "command": runner_result.get("command"),
+        "stdout_log_path": stdout_log_path,
+        "stderr_log_path": stderr_log_path,
+        "stdout_tail": _read_log_tail(stdout_log_path),
+        "stderr_tail": _read_log_tail(stderr_log_path),
+    }
+
+
 def run_stage_01(
     *,
     drive_project_root: Path,
@@ -175,7 +244,16 @@ def run_stage_01(
         stderr_log_path=log_root / "01_mainline_stderr.log",
     )
     if runner_result["return_code"] != 0:
-        raise RuntimeError(f"stage 01 mainline failed: return_code={runner_result['return_code']}")
+        failure_payload = _build_runner_failure_payload(
+            runner_result,
+            run_root,
+            log_root,
+            stage_run_id,
+        )
+        raise RuntimeError(
+            "stage 01 mainline failed: "
+            f"{json.dumps(failure_payload, ensure_ascii=False, sort_keys=True)}"
+        )
 
     outputs = _required_stage_outputs(run_root)
     missing_outputs = [label for label, path_obj in outputs.items() if not path_obj.exists()]
