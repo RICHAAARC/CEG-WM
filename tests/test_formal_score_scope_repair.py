@@ -5,6 +5,7 @@ Module type: General module
 
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 
@@ -13,6 +14,28 @@ import yaml
 from main.evaluation import experiment_matrix
 from main.evaluation import metrics as eval_metrics
 from main.evaluation import workflow_inputs
+
+
+def _load_stage_03_module() -> object:
+    """
+    功能：按文件路径加载 stage 03 脚本模块。
+
+    Load the stage 03 script module from its filesystem path.
+
+    Args:
+        None.
+
+    Returns:
+        Loaded module object.
+    """
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "03_Experiment_Matrix_Full.py"
+    spec = importlib.util.spec_from_file_location("stage_03_experiment_matrix_full", script_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"failed to load module spec: {script_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_canonical_score_aliases_are_preferred_over_legacy_detect_helper() -> None:
@@ -345,3 +368,152 @@ def test_formal_stage_03_skips_auxiliary_runtime_by_default(tmp_path: Path, monk
     assert stage_result["auxiliary_analysis"]["status"] == "skipped"
     assert stage_result["auxiliary_analysis"]["failure_reason"] == "auxiliary_analysis_not_requested"
     assert stage_result["auxiliary_analysis"]["auxiliary_analysis_runtime_executed"] is False
+
+
+def test_stage_03_script_syncs_auxiliary_runtime_evidence_to_workflow_summary_and_stage_manifest(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """
+    功能：验证 stage 03 脚本层会把 auxiliary runtime 证据同步到 workflow_summary 与 stage_manifest。
+
+    Validate that the stage 03 script synchronizes auxiliary runtime evidence
+    into workflow_summary and stage_manifest.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    stage_03_module = _load_stage_03_module()
+
+    drive_project_root = tmp_path / "drive"
+    drive_project_root.mkdir(parents=True)
+    source_package_path = tmp_path / "source_stage01.zip"
+    source_package_path.write_text("placeholder", encoding="utf-8")
+    config_path = tmp_path / "default.yaml"
+    config_path.write_text("experiment_matrix: {}\n", encoding="utf-8")
+    stage_roots = {
+        "run_root": drive_project_root / "runs" / "stage03_sync_test",
+        "log_root": drive_project_root / "logs" / "stage03_sync_test",
+        "runtime_state_root": drive_project_root / "runtime_state" / "stage03_sync_test",
+        "export_root": drive_project_root / "exports" / "stage03_sync_test",
+    }
+
+    def _fake_prepare_source_package(_source_package_path, runtime_state_root):
+        extracted_root = runtime_state_root / "source_extracted"
+        (extracted_root / "artifacts" / "thresholds").mkdir(parents=True, exist_ok=True)
+        (extracted_root / "runtime_metadata").mkdir(parents=True, exist_ok=True)
+        stage_03_module.write_json_atomic(
+            extracted_root / "artifacts" / "stage_manifest.json",
+            {"stage_name": "01_Paper_Full_Cuda", "stage_run_id": "stage01_run"},
+        )
+        stage_03_module.write_json_atomic(
+            extracted_root / "artifacts" / "package_manifest.json",
+            {"stage_name": "01_Paper_Full_Cuda", "stage_run_id": "stage01_run"},
+        )
+        stage_03_module.write_json_atomic(
+            extracted_root / "artifacts" / "thresholds" / "thresholds_artifact.json",
+            {"thresholds_digest": "thr01"},
+        )
+        stage_03_module.write_json_atomic(
+            extracted_root / "artifacts" / "thresholds" / "threshold_metadata_artifact.json",
+            {"threshold_metadata_digest": "meta01"},
+        )
+        (extracted_root / "runtime_metadata" / "runtime_config_snapshot.yaml").write_text("experiment_matrix: {}\n", encoding="utf-8")
+        return {
+            "stage_manifest": {"stage_name": "01_Paper_Full_Cuda", "stage_run_id": "stage01_run"},
+            "package_manifest": {"stage_name": "01_Paper_Full_Cuda", "stage_run_id": "stage01_run"},
+            "extracted_root": extracted_root,
+            "source_package_path": source_package_path,
+            "source_package_sha256": "sha256_stage01",
+            "package_manifest_digest": "digest_stage01",
+        }
+
+    def _fake_run_command_with_logs(**kwargs):
+        run_root = stage_roots["run_root"]
+        artifacts_dir = run_root / "artifacts"
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        stage_03_module.write_json_atomic(
+            artifacts_dir / "grid_summary.json",
+            {
+                "primary_evaluation_scope": "system_final",
+                "primary_metric_name": "system_final_metrics",
+                "primary_driver_mode": "system_final_only",
+                "primary_status_source": "system_final_metrics",
+                "primary_summary_basis_scope": "system_final",
+                "primary_summary_basis_metric_name": "system_final_metrics",
+                "auxiliary_scopes": ["content_chain", "lf_channel"],
+                "auxiliary_analysis_runtime_executed": False,
+                "scope_manifest": {
+                    "primary_scope": "system_final",
+                    "primary_metric_name": "system_final_metrics",
+                    "primary_summary_basis_scope": "system_final",
+                    "primary_summary_basis_metric_name": "system_final_metrics",
+                    "auxiliary_scopes": ["content_chain", "lf_channel"],
+                },
+                "system_final_metrics_presence": {
+                    "rows_with_system_final_metrics": 1,
+                    "ok_rows_with_system_final_metrics": 1,
+                    "rows_total": 1,
+                },
+            },
+        )
+        stage_03_module.write_json_atomic(artifacts_dir / "grid_manifest.json", {"grid_manifest_digest": "grid01"})
+        stage_03_module.write_json_atomic(
+            artifacts_dir / "aggregate_report.json",
+            {
+                "primary_evaluation_scope": "system_final",
+                "primary_metric_name": "system_final_metrics",
+                "primary_driver_mode": "system_final_only",
+                "primary_status_source": "system_final_metrics",
+                "primary_summary_basis_scope": "system_final",
+                "primary_summary_basis_metric_name": "system_final_metrics",
+                "auxiliary_scopes": ["content_chain", "lf_channel"],
+                "auxiliary_analysis_runtime_executed": False,
+                "scope_manifest": {
+                    "primary_scope": "system_final",
+                    "primary_metric_name": "system_final_metrics",
+                    "primary_summary_basis_scope": "system_final",
+                    "primary_summary_basis_metric_name": "system_final_metrics",
+                    "auxiliary_scopes": ["content_chain", "lf_channel"],
+                },
+                "system_final_metrics_presence": {
+                    "rows_with_system_final_metrics": 1,
+                    "ok_rows_with_system_final_metrics": 1,
+                    "rows_total": 1,
+                },
+            },
+        )
+        return {"return_code": 0}
+
+    monkeypatch.setattr(stage_03_module, "prepare_source_package", _fake_prepare_source_package)
+    monkeypatch.setattr(stage_03_module, "resolve_stage_roots", lambda *args, **kwargs: stage_roots)
+    monkeypatch.setattr(stage_03_module, "load_yaml_mapping", lambda path: {"experiment_matrix": {}})
+    monkeypatch.setattr(stage_03_module, "detect_formal_gpu_preflight", lambda path: {"ok": True})
+    monkeypatch.setattr(stage_03_module, "run_command_with_logs", _fake_run_command_with_logs)
+    monkeypatch.setattr(stage_03_module, "collect_git_summary", lambda path: {})
+    monkeypatch.setattr(stage_03_module, "collect_python_summary", lambda: {})
+    monkeypatch.setattr(stage_03_module, "collect_cuda_summary", lambda: {})
+    monkeypatch.setattr(stage_03_module, "collect_attestation_env_summary", lambda cfg: {})
+    monkeypatch.setattr(stage_03_module, "collect_model_summary", lambda cfg: {})
+    monkeypatch.setattr(stage_03_module, "collect_weight_summary", lambda repo_root, cfg: {})
+    monkeypatch.setattr(stage_03_module, "collect_file_index", lambda root, mapping: {})
+    monkeypatch.setattr(stage_03_module, "finalize_stage_package", lambda **kwargs: {"package_path": "package.zip", "package_sha256": "sha256_pkg"})
+
+    summary = stage_03_module.run_stage_03(
+        drive_project_root=drive_project_root,
+        config_path=config_path,
+        source_package_path=source_package_path,
+        notebook_name="03_Experiment_Matrix_Full",
+        stage_run_id="stage03_sync_test",
+    )
+
+    stage_manifest = json.loads((stage_roots["run_root"] / "artifacts" / "stage_manifest.json").read_text(encoding="utf-8"))
+    workflow_summary = json.loads((stage_roots["run_root"] / "artifacts" / "workflow_summary.json").read_text(encoding="utf-8"))
+
+    assert summary["status"] == "ok"
+    assert workflow_summary["auxiliary_analysis_runtime_executed"] is False
+    assert stage_manifest["auxiliary_analysis_runtime_executed"] is False

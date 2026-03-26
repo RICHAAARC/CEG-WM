@@ -502,10 +502,15 @@ def _require_grid_summary_anchor_fields(
     """
     missing_fields: List[str] = []
     dict_fields = {"scope_manifest", "system_final_metrics_presence"}
+    bool_fields = {_AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD}
     for field_name in GRID_SUMMARY_REQUIRED_FIELDS:
         field_value = payload.get(field_name)
         if field_name in dict_fields:
             if not isinstance(field_value, dict) or not field_value:
+                missing_fields.append(field_name)
+            continue
+        if field_name in bool_fields:
+            if not isinstance(field_value, bool):
                 missing_fields.append(field_name)
             continue
         if not isinstance(field_value, str) or not str(field_value).strip() or field_value == "<absent>":
@@ -619,6 +624,9 @@ def _validate_stage_json_payloads(
                     missing_fields.append(field_name)
             elif field_name in {"experiment_count", "success_count", "failure_count"}:
                 if not isinstance(field_value, int):
+                    missing_fields.append(field_name)
+            elif field_name == _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD:
+                if not isinstance(field_value, bool):
                     missing_fields.append(field_name)
             elif not field_value and field_value != 0:
                 missing_fields.append(field_name)
