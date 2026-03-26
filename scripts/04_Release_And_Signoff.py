@@ -717,6 +717,20 @@ def _validate_stage_03_primary_contract_payload(
             },
         )
 
+    if payload.get("primary_status_source") != SYSTEM_FINAL_METRIC_NAME:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code=f"stage_03.{payload_label}_primary_status_source_not_system_final_metrics",
+            rule="stage 03 primary contract payloads must bind primary_status_source to system_final_metrics",
+            impact="stage 03 primary status can still be inferred from a non-system-final runtime path",
+            fix="regenerate stage 03 payloads with primary_status_source=system_final_metrics",
+            evidence={
+                "payload_label": payload_label,
+                "actual_primary_status_source": payload.get("primary_status_source"),
+            },
+        )
+
     if payload.get("primary_summary_basis_scope") != SYSTEM_FINAL_SCOPE:
         _append_blocking_reason(
             blocking_reasons,
@@ -889,6 +903,18 @@ def _validate_stage_03_primary_scope_semantics(
             evidence={"actual_primary_driver_mode": primary_driver_mode},
         )
 
+    primary_status_source = aggregate_report_obj.get("primary_status_source")
+    if primary_status_source != SYSTEM_FINAL_METRIC_NAME:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code="stage_03.primary_status_source_not_system_final_metrics",
+            rule="stage 03 aggregate_report.primary_status_source must equal system_final_metrics",
+            impact="stage 03 primary row status may still be controlled by an auxiliary scalar branch",
+            fix="write primary_status_source=system_final_metrics and ensure row status closes on system_final_metrics",
+            evidence={"actual_primary_status_source": primary_status_source},
+        )
+
     primary_summary_basis_scope = aggregate_report_obj.get("primary_summary_basis_scope")
     if primary_summary_basis_scope != SYSTEM_FINAL_SCOPE:
         _append_blocking_reason(
@@ -1037,6 +1063,19 @@ def _validate_stage_03_primary_scope_semantics(
                         "primary_driver_mode": row.get("primary_driver_mode"),
                     },
                 )
+            if row.get("primary_status_source") != SYSTEM_FINAL_METRIC_NAME:
+                _append_blocking_reason(
+                    blocking_reasons,
+                    source="stage_03",
+                    reason_code="stage_03.metrics_matrix_primary_status_source_invalid",
+                    rule="successful metrics_matrix rows must declare system_final_metrics as the sole primary status source",
+                    impact="stage 03 row-level success can still be inferred from an auxiliary scalar-first path",
+                    fix="regenerate metrics_matrix rows so primary_status_source=system_final_metrics on every successful row",
+                    evidence={
+                        "grid_item_digest": row.get("grid_item_digest"),
+                        "primary_status_source": row.get("primary_status_source"),
+                    },
+                )
         if missing_system_final_rows:
             _append_blocking_reason(
                 blocking_reasons,
@@ -1062,6 +1101,7 @@ def _validate_stage_03_primary_scope_semantics(
         "primary_evaluation_scope",
         "primary_metric_name",
         "primary_driver_mode",
+        "primary_status_source",
         "primary_summary_basis_scope",
         "primary_summary_basis_metric_name",
         "scope_manifest",

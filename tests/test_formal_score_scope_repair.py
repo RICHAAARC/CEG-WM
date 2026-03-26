@@ -111,7 +111,9 @@ def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fiel
     assert "scalar_formal_scope" not in grid[0]
     assert "scalar_formal_score_name" not in grid[0]
     assert "formal_score_name" not in grid[0]
+    assert "auxiliary_analysis_metric_name" not in grid[0]
     assert grid[0]["primary_driver_mode"] == "system_final_only"
+    assert experiment_matrix._extract_auxiliary_analysis_metric_name_from_grid_item(grid[0]) == "lf_channel_score"
 
     score_record = {
         "content_evidence_payload": {
@@ -196,10 +198,12 @@ def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fiel
     assert aggregate_report["primary_evaluation_scope"] == "system_final"
     assert aggregate_report["primary_metric_name"] == "system_final_metrics"
     assert aggregate_report["primary_driver_mode"] == "system_final_only"
+    assert aggregate_report["primary_status_source"] == "system_final_metrics"
     assert aggregate_report["primary_summary_basis_scope"] == "system_final"
     assert aggregate_report["primary_summary_basis_metric_name"] == "system_final_metrics"
     assert aggregate_report["scope_manifest"]["primary_summary_basis_metric_name"] == "system_final_metrics"
     assert aggregate_report["scope_manifest"]["auxiliary_scopes"] == ["content_chain", "lf_channel"]
+    assert aggregate_report["metrics_matrix"][0]["primary_status_source"] == "system_final_metrics"
     assert "scalar_formal_scope" not in aggregate_report
     assert "scalar_formal_score_name" not in aggregate_report
     assert "scalar_formal_scope" not in aggregate_report["scope_manifest"]
@@ -246,10 +250,12 @@ def test_schema_and_contracts_register_new_formal_fields() -> None:
     assert "primary_summary_basis_scope" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "primary_summary_basis_metric_name" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "primary_driver_mode" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
+    assert "primary_status_source" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "scope_manifest" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "primary_summary_basis_scope" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "primary_summary_basis_metric_name" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "primary_driver_mode" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
+    assert "primary_status_source" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "scalar_formal_scope" not in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "scalar_formal_score_name" not in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "scalar_formal_scope" not in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]

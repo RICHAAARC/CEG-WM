@@ -17,7 +17,7 @@ import subprocess
 import sys
 from io import StringIO
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 import numpy as np
 import yaml
@@ -135,10 +135,6 @@ def build_experiment_grid(base_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     evaluation_scope = _resolve_matrix_primary_scope(matrix_cfg)
     auxiliary_scopes = _resolve_matrix_auxiliary_scopes(matrix_cfg, evaluation_scope)
     auxiliary_scope_configs = _resolve_matrix_auxiliary_scope_configs(matrix_cfg, auxiliary_scopes)
-    auxiliary_analysis_metric_name = _resolve_matrix_auxiliary_analysis_metric_name(
-        matrix_cfg,
-        auxiliary_scope_configs,
-    )
     primary_summary_basis_scope = _resolve_matrix_primary_summary_basis_scope(matrix_cfg, evaluation_scope)
     scope_manifest = _build_matrix_scope_manifest(
         primary_scope=evaluation_scope,
@@ -212,7 +208,6 @@ def build_experiment_grid(base_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
                         "evaluation_scope": evaluation_scope,
                         "auxiliary_scopes": copy.deepcopy(auxiliary_scopes),
                         "auxiliary_scope_configs": copy.deepcopy(auxiliary_scope_configs),
-                        "auxiliary_analysis_metric_name": auxiliary_analysis_metric_name,
                         "scope_manifest": copy.deepcopy(scope_manifest),
                         "primary_metric_name": _resolve_matrix_primary_metric_name(evaluation_scope),
                         "primary_driver_mode": _SYSTEM_FINAL_PRIMARY_DRIVER_MODE,
@@ -262,6 +257,7 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
         "scope_manifest": copy.deepcopy(grid_item_cfg.get("scope_manifest", {})) if isinstance(grid_item_cfg.get("scope_manifest"), dict) else {},
         "primary_metric_name": _safe_str(grid_item_cfg.get("primary_metric_name")),
         "primary_driver_mode": _safe_str(grid_item_cfg.get("primary_driver_mode")) or _SYSTEM_FINAL_PRIMARY_DRIVER_MODE,
+        "primary_status_source": "<absent>",
         "primary_summary_basis_scope": _safe_str(grid_item_cfg.get("primary_summary_basis_scope")),
         "primary_summary_basis_metric_name": _safe_str(grid_item_cfg.get("primary_summary_basis_metric_name")),
         "status": "failed",
@@ -288,7 +284,7 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
         "detect_gate_sample_counts": {},
         "auxiliary_analysis": {
             "driver_role": "auxiliary_only",
-            "metric_name": _safe_str(grid_item_cfg.get("auxiliary_analysis_metric_name")),
+            "metric_name": _safe_str(_extract_auxiliary_analysis_metric_name_from_grid_item(grid_item_cfg)),
             "status": "not_run",
             "failure_reason": "<absent>",
             "shared_thresholds_used": False,
@@ -362,6 +358,13 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
             detect_record.get("fusion_rule_version") if isinstance(detect_record, dict) else None,
             run_closure.get("fusion_rule_version") if isinstance(run_closure, dict) else None,
         )
+        system_final_metrics = _build_system_final_metrics_for_run(run_root)
+        primary_status_source = _resolve_primary_status_source(system_final_metrics)
+        if primary_status_source != _SYSTEM_FINAL_METRIC_NAME:
+            raise RuntimeError(
+                "system_final primary path did not produce a closed labelled result set; "
+                f"primary_status_source={primary_status_source}"
+            )
         summary.update(
             {
                 "status": "ok",
@@ -378,6 +381,7 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
                 "impl_digest": _safe_str(impl_digest_value),
                 "fusion_rule_version": _safe_str(fusion_rule_version_value),
                 "primary_driver_mode": _SYSTEM_FINAL_PRIMARY_DRIVER_MODE,
+                "primary_status_source": primary_status_source,
                 "auxiliary_analysis": auxiliary_analysis_info,
                 "metrics": {
                     "tpr_at_fpr": metrics_obj.get("tpr_at_fpr_primary", metrics_obj.get("tpr_at_fpr")),
@@ -392,7 +396,7 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
                     "n_rescue_success": metrics_obj.get("n_rescue_success"),
                     "conditional_fpr_estimate": metrics_obj.get("conditional_fpr_estimate"),
                     "conditional_fpr_n": metrics_obj.get("conditional_fpr_n"),
-                    _SYSTEM_FINAL_METRIC_NAME: _build_system_final_metrics_for_run(run_root),
+                    _SYSTEM_FINAL_METRIC_NAME: system_final_metrics,
                     "auxiliary_scope_metrics": _build_auxiliary_scope_metrics_for_run(run_root),
                 },
                 "hf_truncation_baseline_comparison": _extract_hf_truncation_baseline_comparison_from_detect_record(run_root),
@@ -714,6 +718,26 @@ def _build_system_final_metrics_for_run(run_root: Path) -> Dict[str, Any]:
         "event_attestation_status_counts": event_attestation_status_counts,
         "geo_not_used_reason_counts": geo_not_used_reason_counts,
     }
+
+
+def _resolve_primary_status_source(system_final_metrics: Dict[str, Any]) -> str:
+    """Resolve the persisted primary status source for one matrix row."""
+    if not isinstance(system_final_metrics, dict):
+        raise TypeError("system_final_metrics must be dict")
+
+    if system_final_metrics.get("scope") != _SYSTEM_FINAL_SCOPE:
+        return "<absent>"
+
+    n_total = system_final_metrics.get("n_total")
+    n_positive = system_final_metrics.get("n_positive")
+    n_negative = system_final_metrics.get("n_negative")
+    if not isinstance(n_total, int) or n_total <= 0:
+        return "<absent>"
+    if not isinstance(n_positive, int) or n_positive <= 0:
+        return "<absent>"
+    if not isinstance(n_negative, int) or n_negative <= 0:
+        return "<absent>"
+    return _SYSTEM_FINAL_METRIC_NAME
 
 
 def _build_auxiliary_scope_metrics_for_run(run_root: Path) -> Dict[str, Any]:
@@ -1273,6 +1297,8 @@ def run_experiment_grid(grid: List[Dict[str, Any]], strict: bool = True) -> Dict
         "failed": sum(1 for item in results if item.get("status") != "ok"),
         "primary_evaluation_scope": aggregate_report.get("primary_evaluation_scope", _SYSTEM_FINAL_SCOPE),
         "primary_metric_name": aggregate_report.get("primary_metric_name", _SYSTEM_FINAL_METRIC_NAME),
+        "primary_driver_mode": aggregate_report.get("primary_driver_mode", _SYSTEM_FINAL_PRIMARY_DRIVER_MODE),
+        "primary_status_source": aggregate_report.get("primary_status_source", _SYSTEM_FINAL_METRIC_NAME),
         "primary_summary_basis_scope": aggregate_report.get("primary_summary_basis_scope", _SYSTEM_FINAL_SCOPE),
         "primary_summary_basis_metric_name": aggregate_report.get("primary_summary_basis_metric_name", _SYSTEM_FINAL_METRIC_NAME),
         "auxiliary_scopes": aggregate_report.get("auxiliary_scopes", []),
@@ -1348,6 +1374,7 @@ def build_aggregate_report(
             "status": status_value,
             "evaluation_scope": _safe_str(item.get("evaluation_scope")),
             "primary_metric_name": _safe_str(item.get("primary_metric_name")),
+            "primary_status_source": _safe_str(item.get("primary_status_source")),
             "cfg_digest": _safe_str(item.get("cfg_digest")),
             "plan_digest": _safe_str(item.get("plan_digest")),
             "thresholds_digest": _safe_str(item.get("thresholds_digest")),
@@ -1363,6 +1390,9 @@ def build_aggregate_report(
         anchor_rows.append(anchor_row)
 
         metrics_obj = item.get("metrics") if isinstance(item.get("metrics"), dict) else {}
+        primary_status_source_value = _safe_str(item.get("primary_status_source"))
+        if primary_status_source_value == "<absent>" and isinstance(metrics_obj.get(_SYSTEM_FINAL_METRIC_NAME), dict):
+            primary_status_source_value = _SYSTEM_FINAL_METRIC_NAME
         metrics_matrix.append(
             {
                 "grid_item_digest": grid_item_digest,
@@ -1370,6 +1400,7 @@ def build_aggregate_report(
                 "evaluation_scope": _safe_str(item.get("evaluation_scope")),
                 "primary_metric_name": _safe_str(item.get("primary_metric_name")),
                 "primary_driver_mode": _safe_str(item.get("primary_driver_mode")) or _SYSTEM_FINAL_PRIMARY_DRIVER_MODE,
+                "primary_status_source": primary_status_source_value,
                 "tpr_at_fpr": metrics_obj.get("tpr_at_fpr"),
                 "geo_available_rate": metrics_obj.get("geo_available_rate"),
                 "rescue_rate": metrics_obj.get("rescue_rate"),
@@ -1398,6 +1429,7 @@ def build_aggregate_report(
     primary_summary_basis_scope = _SYSTEM_FINAL_SCOPE
     primary_summary_basis_metric_name = _SYSTEM_FINAL_METRIC_NAME
     primary_driver_mode = _SYSTEM_FINAL_PRIMARY_DRIVER_MODE
+    primary_status_source = _SYSTEM_FINAL_METRIC_NAME
     auxiliary_scopes = (
         list(experiment_results[0].get("auxiliary_scopes", []))
         if experiment_results and isinstance(experiment_results[0].get("auxiliary_scopes"), list)
@@ -1429,6 +1461,7 @@ def build_aggregate_report(
         "primary_evaluation_scope": primary_evaluation_scope,
         "primary_metric_name": primary_metric_name,
         "primary_driver_mode": primary_driver_mode,
+        "primary_status_source": primary_status_source,
         "primary_summary_basis_scope": primary_summary_basis_scope,
         "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
         "auxiliary_scopes": auxiliary_scopes,
@@ -1512,17 +1545,14 @@ def _extract_auxiliary_analysis_metric_name_from_grid_item(grid_item_cfg: Dict[s
     if not isinstance(grid_item_cfg, dict):
         raise TypeError("grid_item_cfg must be dict")
 
-    metric_name = grid_item_cfg.get("auxiliary_analysis_metric_name")
-    if metric_name is None:
+    auxiliary_scope_configs = grid_item_cfg.get("auxiliary_scope_configs")
+    if auxiliary_scope_configs is None:
         return None
-    if not isinstance(metric_name, str) or not metric_name:
-        raise TypeError("grid item auxiliary_analysis_metric_name must be non-empty str when provided")
-    if eval_metrics.is_lf_channel_score_name(metric_name):
-        return eval_metrics.LF_CHANNEL_SCORE_NAME
-    if eval_metrics.is_content_chain_score_name(metric_name):
-        return eval_metrics.CONTENT_CHAIN_SCORE_NAME
-    raise ValueError(
-        "grid item auxiliary_analysis_metric_name must resolve to content_chain_score or lf_channel_score"
+    if not isinstance(auxiliary_scope_configs, dict):
+        raise TypeError("grid item auxiliary_scope_configs must be dict when provided")
+    return _resolve_matrix_auxiliary_analysis_metric_name(
+        {},
+        cast(Dict[str, Dict[str, Any]], auxiliary_scope_configs),
     )
 
 
@@ -2329,7 +2359,6 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
         "sample_counts": {},
     }
     labelled_detect_records_glob: Optional[str] = None
-    formal_evaluate_detect_records_glob: Optional[str] = None
 
     # 从 grid_item_cfg 读取由 run_experiment_grid 预注入的共享阈值路径与真实负样本路径。
     # shared_thresholds_path 存在时：跳过 per-item calibrate，evaluate 使用全局阈值。
@@ -2351,29 +2380,7 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
     neg_detect_record_path_for_stage: Optional[Path] = (
         Path(neg_path_str) if isinstance(neg_path_str, str) and neg_path_str else None
     )
-    if formal_validation_guards["require_real_negative_cache"]:
-        if (
-            neg_detect_record_path_for_stage is None
-            or not neg_detect_record_path_for_stage.exists()
-            or not neg_detect_record_path_for_stage.is_file()
-        ):
-            raise RuntimeError(
-                "experiment_matrix formal validation requires a valid neg_detect_record_path before per-item execution"
-            )
-
-    if formal_validation_guards["require_shared_thresholds"] and not use_shared_thresholds:
-        raise RuntimeError(
-            "experiment_matrix formal validation requires shared thresholds before per-item execution"
-        )
-
-    for stage_name in ["embed", "detect", "calibrate", "evaluate"]:
-        # 全局阈值可用时跳过 per-item calibrate：
-        # 校准集（neg_cache 的全体 neg 记录）与测试集（per-item 攻击正样本）已在
-        # run_experiment_grid 层严格分离，per-item calibrate 会把二者混用，不符合
-        # NP 阈值估计的独立同分布要求。
-        if stage_name == "calibrate" and use_shared_thresholds:
-            continue
-
+    for stage_name in ["embed", "detect"]:
         stage_overrides = [
             "allow_nonempty_run_root=true",
             'allow_nonempty_run_root_reason="experiment_grid"',
@@ -2393,39 +2400,6 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
             stage_overrides.append("allow_threshold_fallback_for_tests=true")
         if stage_name == "embed":
             stage_overrides.append("disable_content_detect=false")
-
-        # calibrate/evaluate 都需要带标签的 detect records 输入。
-        # 这里使用 detect 后生成的 attack-aware 标注记录对（正/负各一条）满足标签平衡门禁。
-        if stage_name in {"calibrate", "evaluate"}:
-            arg_name = f"{stage_name}_detect_records_glob"
-            if stage_name == "evaluate" and use_pair_free_formal_evaluate:
-                if formal_evaluate_detect_records_glob is None:
-                    if shared_thresholds_path_val is None:
-                        raise RuntimeError("shared thresholds path missing for auxiliary-analysis evaluate inputs")
-                    formal_evaluate_detect_records_glob = _prepare_formal_evaluate_detect_records_glob_for_matrix(
-                        run_root,
-                        grid_item_cfg,
-                        shared_thresholds_path=shared_thresholds_path_val,
-                    )
-                stage_overrides.append(f"{arg_name}={json.dumps(formal_evaluate_detect_records_glob)}")
-            else:
-                if labelled_detect_records_glob is None:
-                    labelled_detect_records_glob = _prepare_labelled_detect_records_glob_for_matrix(
-                        run_root, grid_item_cfg, neg_detect_record_path=neg_detect_record_path_for_stage
-                    )
-                stage_overrides.append(f"{arg_name}={json.dumps(labelled_detect_records_glob)}")
-
-        # evaluate 阈值来源：优先使用全局共享阈值，降级时使用 per-item calibrate 产出的本地阈值。
-        if stage_name == "evaluate":
-            if use_shared_thresholds:
-                stage_overrides.append(
-                    f"evaluate_thresholds_path={json.dumps(str(shared_thresholds_path_val))}"
-                )
-            else:
-                local_thresholds_path = run_root / "artifacts" / "thresholds" / "thresholds_artifact.json"
-                stage_overrides.append(
-                    f"evaluate_thresholds_path={json.dumps(str(local_thresholds_path))}"
-                )
 
         if ablation_override_enabled:
             for key, value in sorted(ablation_flags.items()):
@@ -2447,8 +2421,244 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
                 minimum_required=1,
                 allow_failed_semantics_collection=allow_failed_semantics_collection,
             )
+            labelled_detect_records_glob = _prepare_system_final_labelled_detect_records_glob_for_matrix(
+                run_root,
+                grid_item_cfg,
+                neg_detect_record_path=neg_detect_record_path_for_stage,
+            )
 
-    return detect_gate_info
+    auxiliary_analysis = _run_auxiliary_analysis_sequence(
+        run_root=run_root,
+        grid_item_cfg=grid_item_cfg,
+        labelled_detect_records_glob=labelled_detect_records_glob,
+        neg_detect_record_path=neg_detect_record_path_for_stage,
+        shared_thresholds_path=shared_thresholds_path_val,
+        use_shared_thresholds=use_shared_thresholds,
+        use_pair_free_formal_evaluate=use_pair_free_formal_evaluate,
+        require_shared_thresholds=formal_validation_guards["require_shared_thresholds"],
+    )
+
+    return {
+        "detect_gate_info": detect_gate_info,
+        "auxiliary_analysis": auxiliary_analysis,
+    }
+
+
+def _run_auxiliary_analysis_sequence(
+    *,
+    run_root: Path,
+    grid_item_cfg: Dict[str, Any],
+    labelled_detect_records_glob: Optional[str],
+    neg_detect_record_path: Optional[Path],
+    shared_thresholds_path: Optional[Path],
+    use_shared_thresholds: bool,
+    use_pair_free_formal_evaluate: bool,
+    require_shared_thresholds: bool,
+) -> Dict[str, Any]:
+    """Run calibrate/evaluate as an auxiliary-only branch after primary closure."""
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(grid_item_cfg, dict):
+        raise TypeError("grid_item_cfg must be dict")
+    if labelled_detect_records_glob is not None and (not isinstance(labelled_detect_records_glob, str) or not labelled_detect_records_glob):
+        raise TypeError("labelled_detect_records_glob must be non-empty str or None")
+    if neg_detect_record_path is not None and not isinstance(neg_detect_record_path, Path):
+        raise TypeError("neg_detect_record_path must be Path or None")
+    if shared_thresholds_path is not None and not isinstance(shared_thresholds_path, Path):
+        raise TypeError("shared_thresholds_path must be Path or None")
+    if not isinstance(use_shared_thresholds, bool):
+        raise TypeError("use_shared_thresholds must be bool")
+    if not isinstance(use_pair_free_formal_evaluate, bool):
+        raise TypeError("use_pair_free_formal_evaluate must be bool")
+    if not isinstance(require_shared_thresholds, bool):
+        raise TypeError("require_shared_thresholds must be bool")
+
+    auxiliary_metric_name = _extract_auxiliary_analysis_metric_name_from_grid_item(grid_item_cfg)
+    auxiliary_analysis_info: Dict[str, Any] = {
+        "driver_role": "auxiliary_only",
+        "metric_name": _safe_str(auxiliary_metric_name),
+        "status": "skipped",
+        "failure_reason": "auxiliary_analysis_not_requested",
+        "shared_thresholds_used": False,
+        "pair_free_evaluate_used": False,
+    }
+    if auxiliary_metric_name is None:
+        return auxiliary_analysis_info
+
+    if require_shared_thresholds and not use_shared_thresholds:
+        auxiliary_analysis_info["failure_reason"] = "auxiliary_shared_thresholds_missing"
+        return auxiliary_analysis_info
+
+    config_path = grid_item_cfg.get("config_path", "configs/default.yaml")
+    if not isinstance(config_path, str) or not config_path:
+        raise ValueError("grid_item_cfg.config_path must be non-empty str")
+
+    cfg_snapshot_obj = grid_item_cfg.get("cfg_snapshot", {})
+    if not isinstance(cfg_snapshot_obj, dict):
+        raise TypeError("grid item cfg_snapshot must be dict")
+
+    seed_value = cfg_snapshot_obj.get("seed")
+    model_id = cfg_snapshot_obj.get("model_id")
+    max_samples = grid_item_cfg.get("max_samples")
+    ablation_flags = grid_item_cfg.get("ablation_flags", {})
+    if not isinstance(ablation_flags, dict):
+        raise TypeError("grid item ablation_flags must be dict")
+    ablation_override_enabled = isinstance(cfg_snapshot_obj.get("ablation"), dict)
+
+    try:
+        for stage_name in ["calibrate", "evaluate"]:
+            if stage_name == "calibrate" and use_shared_thresholds:
+                continue
+
+            stage_overrides = [
+                "allow_nonempty_run_root=true",
+                'allow_nonempty_run_root_reason="experiment_grid"',
+            ]
+            if isinstance(seed_value, int):
+                stage_overrides.append(f"seed={seed_value}")
+            if isinstance(model_id, str) and model_id:
+                stage_overrides.append(f"model_id={json.dumps(model_id)}")
+            if isinstance(max_samples, int):
+                stage_overrides.append(f"max_samples={max_samples}")
+
+            arg_name = f"{stage_name}_detect_records_glob"
+            if stage_name == "evaluate" and use_pair_free_formal_evaluate:
+                if shared_thresholds_path is None:
+                    raise RuntimeError("shared thresholds path missing for auxiliary-analysis evaluate inputs")
+                formal_evaluate_detect_records_glob = _prepare_formal_evaluate_detect_records_glob_for_matrix(
+                    run_root,
+                    grid_item_cfg,
+                    shared_thresholds_path=shared_thresholds_path,
+                )
+                stage_overrides.append(f"{arg_name}={json.dumps(formal_evaluate_detect_records_glob)}")
+            else:
+                if labelled_detect_records_glob is None:
+                    labelled_detect_records_glob = _prepare_labelled_detect_records_glob_for_matrix(
+                        run_root,
+                        grid_item_cfg,
+                        neg_detect_record_path=neg_detect_record_path,
+                    )
+                stage_overrides.append(f"{arg_name}={json.dumps(labelled_detect_records_glob)}")
+
+            if stage_name == "evaluate":
+                if use_shared_thresholds:
+                    stage_overrides.append(
+                        f"evaluate_thresholds_path={json.dumps(str(shared_thresholds_path))}"
+                    )
+                else:
+                    local_thresholds_path = run_root / "artifacts" / "thresholds" / "thresholds_artifact.json"
+                    stage_overrides.append(
+                        f"evaluate_thresholds_path={json.dumps(str(local_thresholds_path))}"
+                    )
+
+            if ablation_override_enabled:
+                for key, value in sorted(ablation_flags.items()):
+                    suffix = key[len("enable_"):] if key.startswith("enable_") else key
+                    stage_overrides.append(f"ablation_enable_{suffix}={str(value).lower()}")
+
+            _run_stage_command(
+                stage_name=stage_name,
+                run_root=run_root,
+                config_path=Path(config_path),
+                stage_overrides=stage_overrides,
+            )
+    except Exception as exc:
+        auxiliary_analysis_info["status"] = "failed"
+        auxiliary_analysis_info["failure_reason"] = f"{type(exc).__name__}: {exc}"
+        auxiliary_analysis_info["shared_thresholds_used"] = bool(use_shared_thresholds)
+        auxiliary_analysis_info["pair_free_evaluate_used"] = bool(use_pair_free_formal_evaluate)
+        return auxiliary_analysis_info
+
+    auxiliary_analysis_info["status"] = "ok"
+    auxiliary_analysis_info["failure_reason"] = "ok"
+    auxiliary_analysis_info["shared_thresholds_used"] = bool(use_shared_thresholds)
+    auxiliary_analysis_info["pair_free_evaluate_used"] = bool(use_pair_free_formal_evaluate)
+    return auxiliary_analysis_info
+
+
+def _prepare_system_final_labelled_detect_records_glob_for_matrix(
+    run_root: Path,
+    grid_item_cfg: Dict[str, Any],
+    neg_detect_record_path: Optional[Path] = None,
+) -> str:
+    """Create the labelled detect-record pair used by the primary system_final path."""
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(grid_item_cfg, dict):
+        raise TypeError("grid_item_cfg must be dict")
+    if neg_detect_record_path is not None and not isinstance(neg_detect_record_path, Path):
+        raise TypeError("neg_detect_record_path must be Path or None")
+
+    attack_aware_path = _prepare_detect_record_for_attack_grouping(run_root, grid_item_cfg)
+    positive_payload = _read_optional_json(attack_aware_path)
+    if not isinstance(positive_payload, dict) or not positive_payload:
+        positive_payload = _read_optional_json(run_root / "records" / "detect_record.json")
+    if not isinstance(positive_payload, dict) or not positive_payload:
+        raise RuntimeError("detect record missing or invalid for system_final labelled sampling")
+
+    if (
+        neg_detect_record_path is None
+        or not neg_detect_record_path.exists()
+        or not neg_detect_record_path.is_file()
+    ):
+        raise RuntimeError(
+            "system_final primary evaluation requires a valid neg_detect_record_path before per-item execution"
+        )
+
+    negative_payload = _read_optional_json(neg_detect_record_path)
+    if not isinstance(negative_payload, dict) or not negative_payload:
+        raise RuntimeError("real negative detect record missing or invalid for system_final labelled sampling")
+
+    labelled_dir = run_root / "artifacts" / "evaluate_inputs" / "labelled_detect_records"
+    labelled_dir.mkdir(parents=True, exist_ok=True)
+    artifacts_dir = run_root / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    positive_payload = copy.deepcopy(positive_payload)
+    positive_payload["label"] = True
+    positive_payload["ground_truth"] = True
+    positive_payload["is_watermarked"] = True
+    positive_payload["calibration_label_resolution"] = "matrix_primary_positive"
+    positive_payload["system_final_label_resolution"] = "matrix_primary_positive"
+    positive_payload.pop("calibration_excluded_from_labelled_sampling", None)
+
+    negative_payload = copy.deepcopy(negative_payload)
+    for forbidden_field in _FORBIDDEN_ARTIFACT_ANCHOR_FIELDS:
+        negative_payload.pop(forbidden_field, None)
+    for key_name in [
+        "attack",
+        "attack_family",
+        "attack_params_version",
+        "attack_metadata_source_prompt",
+        "attack_metadata_source_prompt_field",
+        "attack_metadata_join_key",
+    ]:
+        if key_name in positive_payload:
+            negative_payload[key_name] = copy.deepcopy(positive_payload[key_name])
+    negative_payload["label"] = False
+    negative_payload["ground_truth"] = False
+    negative_payload["is_watermarked"] = False
+    negative_payload["ground_truth_source"] = "real_neg_embed_detect"
+    negative_payload["calibration_label_resolution"] = "matrix_primary_negative"
+    negative_payload["system_final_label_resolution"] = "matrix_primary_negative"
+    negative_payload.pop("calibration_excluded_from_labelled_sampling", None)
+
+    positive_rel_path = Path("artifacts") / "evaluate_inputs" / "labelled_detect_records" / "detect_record_label_pos.json"
+    negative_rel_path = Path("artifacts") / "evaluate_inputs" / "labelled_detect_records" / "detect_record_label_neg.json"
+    records_io.write_artifact_json_unbound(
+        run_root=run_root,
+        artifacts_dir=artifacts_dir,
+        path=str(positive_rel_path),
+        obj=positive_payload,
+    )
+    records_io.write_artifact_json_unbound(
+        run_root=run_root,
+        artifacts_dir=artifacts_dir,
+        path=str(negative_rel_path),
+        obj=negative_payload,
+    )
+
+    return str(labelled_dir / "*.json")
 
 
 def _assert_min_valid_content_scores_after_detect(
@@ -2873,11 +3083,10 @@ def _prepare_labelled_detect_records_glob_for_matrix(
     neg_detect_record_path: Optional[Path] = None,
 ) -> str:
     """
-    功能：构建带标签正负样本对并返回 glob 路径供 calibrate/evaluate 消费。
+    功能：构建 auxiliary-analysis 带标签正负样本对并返回 glob 路径供 calibrate/evaluate 消费。
 
-    Create labelled detect-record pair (positive from attacked watermarked image,
-    negative from real clean image or synthetic fallback) and return a glob path
-    covering both records for downstream calibrate/evaluate stages.
+    Create an auxiliary-analysis labelled detect-record pair and return a glob
+    path covering both records for downstream calibrate/evaluate stages.
 
     Args:
         run_root: Per-experiment run output root directory.
