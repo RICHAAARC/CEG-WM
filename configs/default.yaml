@@ -196,6 +196,7 @@ experiment_matrix:
   allow_failed_semantics_collection: true
   primary_scope: "system_final"
   primary_summary_basis_scope: "system_final"
+  enable_auxiliary_analysis_runtime: false
   auxiliary_scopes: ["content_chain", "lf_channel"]
   evaluation_scope: "system_final"
   auxiliary_scope_configs:

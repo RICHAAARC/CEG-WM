@@ -57,6 +57,7 @@ SYSTEM_FINAL_SCOPE = "system_final"
 CONTENT_CHAIN_SCOPE = "content_chain"
 LF_CHANNEL_SCOPE = "lf_channel"
 SYSTEM_FINAL_METRIC_NAME = "system_final_metrics"
+_AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD = "auxiliary_analysis_runtime_executed"
 REQUIRED_STAGE_03_AUXILIARY_SCOPES = [CONTENT_CHAIN_SCOPE, LF_CHANNEL_SCOPE]
 SYSTEM_FINAL_PRIMARY_DRIVER_MODE = "system_final_only"
 
@@ -89,6 +90,7 @@ GRID_SUMMARY_REQUIRED_FIELDS = [
     "primary_summary_basis_metric_name",
     "scope_manifest",
     "system_final_metrics_presence",
+    _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD,
 ]
 
 AGGREGATE_REPORT_REQUIRED_FIELDS = [
@@ -108,6 +110,7 @@ AGGREGATE_REPORT_REQUIRED_FIELDS = [
     "anchors",
     "metrics_matrix",
     "system_final_metrics_presence",
+    _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD,
 ]
 
 FORBIDDEN_STAGE_03_PRIMARY_CONTRACT_FIELDS = {
@@ -759,6 +762,34 @@ def _validate_stage_03_primary_contract_payload(
             },
         )
 
+    auxiliary_analysis_runtime_executed = payload.get(_AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD)
+    if not isinstance(auxiliary_analysis_runtime_executed, bool):
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code=f"stage_03.{payload_label}_auxiliary_analysis_runtime_evidence_missing",
+            rule="stage 03 primary contract payloads must publish an explicit auxiliary-analysis runtime evidence boolean",
+            impact="stage 04 cannot determine whether stage 03 executed the auxiliary scalar runtime",
+            fix="write auxiliary_analysis_runtime_executed as an explicit boolean in every stage 03 primary contract payload",
+            evidence={
+                "payload_label": payload_label,
+                "actual_value": auxiliary_analysis_runtime_executed,
+            },
+        )
+    elif auxiliary_analysis_runtime_executed:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code=f"stage_03.{payload_label}_auxiliary_analysis_runtime_executed",
+            rule="formal stage 03 must not execute auxiliary calibrate/evaluate runtime unless explicitly accepted outside the release path",
+            impact="stage 03 package proves that the auxiliary scalar runtime still executed inside the formal path",
+            fix="rerun stage 03 with enable_auxiliary_analysis_runtime disabled for the formal profile",
+            evidence={
+                "payload_label": payload_label,
+                _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD: auxiliary_analysis_runtime_executed,
+            },
+        )
+
     auxiliary_scopes_raw = payload.get("auxiliary_scopes")
     auxiliary_scopes = cast(List[str], auxiliary_scopes_raw) if isinstance(auxiliary_scopes_raw, list) else []
     missing_auxiliary_scopes = [scope_name for scope_name in REQUIRED_STAGE_03_AUXILIARY_SCOPES if scope_name not in auxiliary_scopes]
@@ -1015,6 +1046,17 @@ def _validate_stage_03_primary_scope_semantics(
 
     metrics_rows_raw = aggregate_report_obj.get("metrics_matrix")
     metrics_rows = cast(List[Dict[str, Any]], metrics_rows_raw) if isinstance(metrics_rows_raw, list) else []
+    aggregate_auxiliary_runtime_executed = aggregate_report_obj.get(_AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD)
+    if not isinstance(aggregate_auxiliary_runtime_executed, bool):
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code="stage_03.auxiliary_analysis_runtime_evidence_missing",
+            rule="stage 03 aggregate_report must expose an explicit auxiliary-analysis runtime evidence boolean",
+            impact="stage 04 cannot audit whether formal stage 03 remained system_final-first without auxiliary runtime residuals",
+            fix="write aggregate_report.auxiliary_analysis_runtime_executed as a boolean",
+            evidence={"actual_value": aggregate_auxiliary_runtime_executed},
+        )
     ok_rows: List[Dict[str, Any]] = [row for row in metrics_rows if row.get("status") == "ok"]
     if not ok_rows:
         _append_blocking_reason(
@@ -1076,6 +1118,30 @@ def _validate_stage_03_primary_scope_semantics(
                         "primary_status_source": row.get("primary_status_source"),
                     },
                 )
+            row_auxiliary_runtime_executed = row.get(_AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD)
+            if not isinstance(row_auxiliary_runtime_executed, bool):
+                _append_blocking_reason(
+                    blocking_reasons,
+                    source="stage_03",
+                    reason_code="stage_03.metrics_matrix_auxiliary_analysis_runtime_evidence_missing",
+                    rule="successful metrics_matrix rows must publish auxiliary_analysis_runtime_executed as an explicit boolean",
+                    impact="stage 04 cannot audit whether a successful formal row ran the auxiliary scalar runtime",
+                    fix="write auxiliary_analysis_runtime_executed on every metrics_matrix row",
+                    evidence={"grid_item_digest": row.get("grid_item_digest")},
+                )
+            elif row_auxiliary_runtime_executed:
+                _append_blocking_reason(
+                    blocking_reasons,
+                    source="stage_03",
+                    reason_code="stage_03.metrics_matrix_auxiliary_analysis_runtime_executed",
+                    rule="successful metrics_matrix rows must not execute auxiliary calibrate/evaluate runtime in formal stage 03",
+                    impact="a successful formal stage 03 row still executed the auxiliary scalar runtime",
+                    fix="rerun stage 03 with enable_auxiliary_analysis_runtime disabled for the formal profile",
+                    evidence={
+                        "grid_item_digest": row.get("grid_item_digest"),
+                        _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD: row_auxiliary_runtime_executed,
+                    },
+                )
         if missing_system_final_rows:
             _append_blocking_reason(
                 blocking_reasons,
@@ -1104,6 +1170,7 @@ def _validate_stage_03_primary_scope_semantics(
         "primary_status_source",
         "primary_summary_basis_scope",
         "primary_summary_basis_metric_name",
+        _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD,
         "scope_manifest",
         "system_final_metrics_presence",
     ]:

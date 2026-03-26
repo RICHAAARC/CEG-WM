@@ -43,6 +43,7 @@ _CONTENT_CHAIN_SCOPE = "content_chain"
 _LF_CHANNEL_SCOPE = "lf_channel"
 _SYSTEM_FINAL_METRIC_NAME = "system_final_metrics"
 _SYSTEM_FINAL_PRIMARY_DRIVER_MODE = "system_final_only"
+_AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD = "auxiliary_analysis_runtime_executed"
 _MATRIX_EVALUATION_SCOPES = {
     _SYSTEM_FINAL_SCOPE,
     _CONTENT_CHAIN_SCOPE,
@@ -216,6 +217,7 @@ def build_experiment_grid(base_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
                         "require_real_negative_cache": formal_validation_guards["require_real_negative_cache"],
                         "require_shared_thresholds": formal_validation_guards["require_shared_thresholds"],
                         "disallow_forced_pair_fallback": formal_validation_guards["disallow_forced_pair_fallback"],
+                        "enable_auxiliary_analysis_runtime": _resolve_matrix_enable_auxiliary_analysis_runtime(matrix_cfg),
                         "external_shared_thresholds_path": external_shared_thresholds_path,
                     }
                     grid_items.append(grid_item)
@@ -282,6 +284,7 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
         "detect_gate_relaxed": False,
         "detect_gate_relax_reason": "hard_gate_default",
         "detect_gate_sample_counts": {},
+        _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD: False,
         "auxiliary_analysis": {
             "driver_role": "auxiliary_only",
             "metric_name": _safe_str(_extract_auxiliary_analysis_metric_name_from_grid_item(grid_item_cfg)),
@@ -289,6 +292,7 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
             "failure_reason": "<absent>",
             "shared_thresholds_used": False,
             "pair_free_evaluate_used": False,
+            _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD: False,
         },
         "metrics": {},
     }
@@ -309,6 +313,9 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
             auxiliary_analysis_candidate = stage_gate_info.get("auxiliary_analysis")
             if isinstance(auxiliary_analysis_candidate, dict):
                 auxiliary_analysis_info = auxiliary_analysis_candidate
+        auxiliary_analysis_info[_AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD] = bool(
+            auxiliary_analysis_info.get(_AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD, False)
+        )
         eval_report = _read_optional_evaluation_report_for_run(run_root)
         evaluate_record = _read_optional_json(run_root / "records" / "evaluate_record.json")
         detect_record = _read_optional_json(run_root / "records" / "detect_record.json")
@@ -382,6 +389,9 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
                 "fusion_rule_version": _safe_str(fusion_rule_version_value),
                 "primary_driver_mode": _SYSTEM_FINAL_PRIMARY_DRIVER_MODE,
                 "primary_status_source": primary_status_source,
+                _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD: bool(
+                    auxiliary_analysis_info.get(_AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD, False)
+                ),
                 "auxiliary_analysis": auxiliary_analysis_info,
                 "metrics": {
                     "tpr_at_fpr": metrics_obj.get("tpr_at_fpr_primary", metrics_obj.get("tpr_at_fpr")),
@@ -413,6 +423,9 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
         summary["detect_gate_relaxed"] = bool(detect_gate_info.get("gate_relaxed", False))
         summary["detect_gate_relax_reason"] = _safe_str(detect_gate_info.get("reason"))
         summary["detect_gate_sample_counts"] = detect_gate_info.get("sample_counts") if isinstance(detect_gate_info.get("sample_counts"), dict) else {}
+        summary[_AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD] = bool(
+            auxiliary_analysis_info.get(_AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD, False)
+        )
         summary["auxiliary_analysis"] = auxiliary_analysis_info
 
     return summary
@@ -1302,6 +1315,10 @@ def run_experiment_grid(grid: List[Dict[str, Any]], strict: bool = True) -> Dict
         "primary_summary_basis_scope": aggregate_report.get("primary_summary_basis_scope", _SYSTEM_FINAL_SCOPE),
         "primary_summary_basis_metric_name": aggregate_report.get("primary_summary_basis_metric_name", _SYSTEM_FINAL_METRIC_NAME),
         "auxiliary_scopes": aggregate_report.get("auxiliary_scopes", []),
+        _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD: aggregate_report.get(
+            _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD,
+            False,
+        ),
         "scope_manifest": aggregate_report.get("scope_manifest", {}),
         "system_final_metrics_presence": aggregate_report.get("system_final_metrics_presence", {}),
         "aggregate_report": aggregate_report,
@@ -1401,6 +1418,14 @@ def build_aggregate_report(
                 "primary_metric_name": _safe_str(item.get("primary_metric_name")),
                 "primary_driver_mode": _safe_str(item.get("primary_driver_mode")) or _SYSTEM_FINAL_PRIMARY_DRIVER_MODE,
                 "primary_status_source": primary_status_source_value,
+                _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD: bool(
+                    item.get(
+                        _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD,
+                        item.get("auxiliary_analysis", {}).get(_AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD, False)
+                        if isinstance(item.get("auxiliary_analysis"), dict)
+                        else False,
+                    )
+                ),
                 "tpr_at_fpr": metrics_obj.get("tpr_at_fpr"),
                 "geo_available_rate": metrics_obj.get("geo_available_rate"),
                 "rescue_rate": metrics_obj.get("rescue_rate"),
@@ -1455,6 +1480,18 @@ def build_aggregate_report(
     ok_rows_with_system_final_metrics = sum(
         1 for row in metrics_matrix if row.get("status") == "ok" and isinstance(row.get(_SYSTEM_FINAL_METRIC_NAME), dict)
     )
+    auxiliary_analysis_runtime_executed = any(
+        bool(
+            item.get(
+                _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD,
+                item.get("auxiliary_analysis", {}).get(_AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD, False)
+                if isinstance(item.get("auxiliary_analysis"), dict)
+                else False,
+            )
+        )
+        for item in experiment_results
+        if isinstance(item, dict)
+    )
 
     report = {
         "aggregate_report_version": "aggregate_v1",
@@ -1465,6 +1502,7 @@ def build_aggregate_report(
         "primary_summary_basis_scope": primary_summary_basis_scope,
         "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
         "auxiliary_scopes": auxiliary_scopes,
+        _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD: auxiliary_analysis_runtime_executed,
         "scope_manifest": scope_manifest,
         "experiment_matrix_digest": digests.canonical_sha256(canonical_items),
         "experiment_count": len(experiment_results),
@@ -1540,6 +1578,17 @@ def _resolve_matrix_auxiliary_analysis_metric_name(
     )
 
 
+def _resolve_matrix_enable_auxiliary_analysis_runtime(matrix_cfg: Dict[str, Any]) -> bool:
+    """Resolve whether the auxiliary-analysis runtime is explicitly enabled."""
+    if not isinstance(matrix_cfg, dict):
+        raise TypeError("matrix_cfg must be dict")
+
+    field_value = matrix_cfg.get("enable_auxiliary_analysis_runtime", False)
+    if not isinstance(field_value, bool):
+        raise TypeError("experiment_matrix.enable_auxiliary_analysis_runtime must be bool")
+    return field_value
+
+
 def _extract_auxiliary_analysis_metric_name_from_grid_item(grid_item_cfg: Dict[str, Any]) -> Optional[str]:
     """Extract the optional auxiliary-analysis metric name from one grid item."""
     if not isinstance(grid_item_cfg, dict):
@@ -1554,6 +1603,17 @@ def _extract_auxiliary_analysis_metric_name_from_grid_item(grid_item_cfg: Dict[s
         {},
         cast(Dict[str, Dict[str, Any]], auxiliary_scope_configs),
     )
+
+
+def _extract_auxiliary_analysis_runtime_enabled_from_grid_item(grid_item_cfg: Dict[str, Any]) -> bool:
+    """Extract whether the auxiliary-analysis runtime is enabled for one grid item."""
+    if not isinstance(grid_item_cfg, dict):
+        raise TypeError("grid_item_cfg must be dict")
+
+    field_value = grid_item_cfg.get("enable_auxiliary_analysis_runtime", False)
+    if not isinstance(field_value, bool):
+        raise TypeError("grid item enable_auxiliary_analysis_runtime must be bool")
+    return field_value
 
 
 def _resolve_model_axis(base_cfg: Dict[str, Any], matrix_cfg: Dict[str, Any]) -> List[str]:
@@ -1696,7 +1756,8 @@ def _assert_auxiliary_analysis_prerequisites(
             raise TypeError("grid items must be dict")
         guards = _extract_formal_validation_guards_from_grid_item(item)
         auxiliary_metric_name = _extract_auxiliary_analysis_metric_name_from_grid_item(item)
-        if auxiliary_metric_name is None:
+        auxiliary_runtime_enabled = _extract_auxiliary_analysis_runtime_enabled_from_grid_item(item)
+        if auxiliary_metric_name is None or not auxiliary_runtime_enabled:
             continue
         model_id = item.get("model_id")
         seed_value = item.get("seed")
@@ -2427,16 +2488,27 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
                 neg_detect_record_path=neg_detect_record_path_for_stage,
             )
 
-    auxiliary_analysis = _run_auxiliary_analysis_sequence(
-        run_root=run_root,
-        grid_item_cfg=grid_item_cfg,
-        labelled_detect_records_glob=labelled_detect_records_glob,
-        neg_detect_record_path=neg_detect_record_path_for_stage,
-        shared_thresholds_path=shared_thresholds_path_val,
-        use_shared_thresholds=use_shared_thresholds,
-        use_pair_free_formal_evaluate=use_pair_free_formal_evaluate,
-        require_shared_thresholds=formal_validation_guards["require_shared_thresholds"],
-    )
+    if _extract_auxiliary_analysis_runtime_enabled_from_grid_item(grid_item_cfg):
+        auxiliary_analysis = _run_auxiliary_analysis_sequence(
+            run_root=run_root,
+            grid_item_cfg=grid_item_cfg,
+            labelled_detect_records_glob=labelled_detect_records_glob,
+            neg_detect_record_path=neg_detect_record_path_for_stage,
+            shared_thresholds_path=shared_thresholds_path_val,
+            use_shared_thresholds=use_shared_thresholds,
+            use_pair_free_formal_evaluate=use_pair_free_formal_evaluate,
+            require_shared_thresholds=formal_validation_guards["require_shared_thresholds"],
+        )
+    else:
+        auxiliary_analysis = {
+            "driver_role": "auxiliary_only",
+            "metric_name": _safe_str(_extract_auxiliary_analysis_metric_name_from_grid_item(grid_item_cfg)),
+            "status": "skipped",
+            "failure_reason": "auxiliary_analysis_not_requested",
+            "shared_thresholds_used": False,
+            "pair_free_evaluate_used": False,
+            _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD: False,
+        }
 
     return {
         "detect_gate_info": detect_gate_info,
@@ -2481,6 +2553,7 @@ def _run_auxiliary_analysis_sequence(
         "failure_reason": "auxiliary_analysis_not_requested",
         "shared_thresholds_used": False,
         "pair_free_evaluate_used": False,
+        _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD: False,
     }
     if auxiliary_metric_name is None:
         return auxiliary_analysis_info
@@ -2506,6 +2579,7 @@ def _run_auxiliary_analysis_sequence(
     ablation_override_enabled = isinstance(cfg_snapshot_obj.get("ablation"), dict)
 
     try:
+        auxiliary_analysis_info[_AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD] = True
         for stage_name in ["calibrate", "evaluate"]:
             if stage_name == "calibrate" and use_shared_thresholds:
                 continue
@@ -3368,9 +3442,15 @@ def _write_grid_artifacts(
             "failed": sum(1 for r in results if isinstance(r, dict) and r.get("status") != "ok"),
             "primary_evaluation_scope": aggregate_report.get("primary_evaluation_scope", _SYSTEM_FINAL_SCOPE),
             "primary_metric_name": aggregate_report.get("primary_metric_name", _SYSTEM_FINAL_METRIC_NAME),
+            "primary_driver_mode": aggregate_report.get("primary_driver_mode", _SYSTEM_FINAL_PRIMARY_DRIVER_MODE),
+            "primary_status_source": aggregate_report.get("primary_status_source", _SYSTEM_FINAL_METRIC_NAME),
             "primary_summary_basis_scope": aggregate_report.get("primary_summary_basis_scope", _SYSTEM_FINAL_SCOPE),
             "primary_summary_basis_metric_name": aggregate_report.get("primary_summary_basis_metric_name", _SYSTEM_FINAL_METRIC_NAME),
             "auxiliary_scopes": aggregate_report.get("auxiliary_scopes", []),
+            _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD: aggregate_report.get(
+                _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD,
+                False,
+            ),
             "scope_manifest": aggregate_report.get("scope_manifest", {}),
             "system_final_metrics_presence": aggregate_report.get("system_final_metrics_presence", {}),
             "results": results,

@@ -5,7 +5,7 @@
 # - 本文件不是 workflow 运行配置，不承载模型或推理参数。
 # ==============================================================
 
-version: "v14"  # v3→v4 (2026-03-12)：formal path 最终闭包收口；historical_fields: 段已从当前 formal schema 文件移除，旧字段信息不再显式保留在任何 formal 文件中。当前 formal schema 只表达当前正式机制。v4→v5 (2026-03-13)：追加 attestation 事件绑定、真实性/图像证据双层语义与 event-attested 判决字段。v5→v6 (2026-03-13)：追加 geometry recovery observations、observed correspondences 与 recovered consistency 字段。v6→v7 (2026-03-13)：追加 coarse registration 与 recovered-domain sync revalidation 细分字段。v7→v8 (2026-03-14)：追加 LF canonical evidence summary 字段登记。v8→v9 (2026-03-16)：追加 negative branch attestation provenance 的 append-only 诊断字段登记。v9→v10 (2026-03-17)：追加 attestation_source 字段并冻结 statement-only provenance 的受控 no-bundle 语义。v10→v11 (2026-03-19)：追加 exact LF observability 字段与 detect runtime canonical 兼容命名字段。v11→v12 (2026-03-20)：收口 detect runtime mode 当前正式合同描述。v12→v13 (2026-03-20)：移除 detect runtime 历史旧值名在当前 schema 正文中的残留，正式合同仅保留 real / fallback_identity。v13→v14 (2026-03-26)：追加 content_chain_score、lf_channel_score、lf_correlation_score 及 attestation LF 桥接字段登记。
+version: "v15"  # v3→v4 (2026-03-12)：formal path 最终闭包收口；historical_fields: 段已从当前 formal schema 文件移除，旧字段信息不再显式保留在任何 formal 文件中。当前 formal schema 只表达当前正式机制。v4→v5 (2026-03-13)：追加 attestation 事件绑定、真实性/图像证据双层语义与 event-attested 判决字段。v5→v6 (2026-03-13)：追加 geometry recovery observations、observed correspondences 与 recovered consistency 字段。v6→v7 (2026-03-13)：追加 coarse registration 与 recovered-domain sync revalidation 细分字段。v7→v8 (2026-03-14)：追加 LF canonical evidence summary 字段登记。v8→v9 (2026-03-16)：追加 negative branch attestation provenance 的 append-only 诊断字段登记。v9→v10 (2026-03-17)：追加 attestation_source 字段并冻结 statement-only provenance 的受控 no-bundle 语义。v10→v11 (2026-03-19)：追加 exact LF observability 字段与 detect runtime canonical 兼容命名字段。v11→v12 (2026-03-20)：收口 detect runtime mode 当前正式合同描述。v12→v13 (2026-03-20)：移除 detect runtime 历史旧值名在当前 schema 正文中的残留，正式合同仅保留 real / fallback_identity。v13→v14 (2026-03-26)：追加 content_chain_score、lf_channel_score、lf_correlation_score 及 attestation LF 桥接字段登记。v14→v15 (2026-03-26)：追加 experiment_matrix auxiliary_analysis_runtime_executed 显式证据字段登记。
 append_only: true
 
 type_definitions:
@@ -1354,6 +1354,13 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "lf_status 被降级为 degraded 时的诊断原因（当前唯一值：bp_not_converged）。"
+
+  - path: "experiment_matrix.auxiliary_analysis_runtime_executed"
+    layer: "diagnostic"
+    type: "boolean_flag"
+    required: false
+    missing_semantics: "absent_ok"
+    description: "Stage 03 package 显式记录是否执行了 auxiliary analysis runtime。"
 
   - path: "geometry_evidence.anchor_observations"
     layer: "diagnostic"

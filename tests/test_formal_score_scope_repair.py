@@ -78,6 +78,7 @@ def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fiel
     matrix_cfg = {
         "primary_scope": "system_final",
         "primary_summary_basis_scope": "system_final",
+        "enable_auxiliary_analysis_runtime": False,
         "auxiliary_scopes": ["content_chain", "lf_channel"],
         "auxiliary_scope_configs": {
             "content_chain": {"metric_name": "content_chain_score"},
@@ -113,7 +114,9 @@ def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fiel
     assert "formal_score_name" not in grid[0]
     assert "auxiliary_analysis_metric_name" not in grid[0]
     assert grid[0]["primary_driver_mode"] == "system_final_only"
+    assert grid[0]["enable_auxiliary_analysis_runtime"] is False
     assert experiment_matrix._extract_auxiliary_analysis_metric_name_from_grid_item(grid[0]) == "lf_channel_score"
+    assert experiment_matrix._extract_auxiliary_analysis_runtime_enabled_from_grid_item(grid[0]) is False
 
     score_record = {
         "content_evidence_payload": {
@@ -181,8 +184,10 @@ def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fiel
                 ),
                 "primary_metric_name": "system_final_metrics",
                 "primary_driver_mode": "system_final_only",
+                "primary_status_source": "system_final_metrics",
                 "primary_summary_basis_scope": "system_final",
                 "primary_summary_basis_metric_name": "system_final_metrics",
+                "auxiliary_analysis_runtime_executed": False,
                 "policy_path": "content_np_geo_rescue",
                 "metrics": {
                     "system_final_metrics": system_final_metrics,
@@ -201,9 +206,11 @@ def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fiel
     assert aggregate_report["primary_status_source"] == "system_final_metrics"
     assert aggregate_report["primary_summary_basis_scope"] == "system_final"
     assert aggregate_report["primary_summary_basis_metric_name"] == "system_final_metrics"
+    assert aggregate_report["auxiliary_analysis_runtime_executed"] is False
     assert aggregate_report["scope_manifest"]["primary_summary_basis_metric_name"] == "system_final_metrics"
     assert aggregate_report["scope_manifest"]["auxiliary_scopes"] == ["content_chain", "lf_channel"]
     assert aggregate_report["metrics_matrix"][0]["primary_status_source"] == "system_final_metrics"
+    assert aggregate_report["metrics_matrix"][0]["auxiliary_analysis_runtime_executed"] is False
     assert "scalar_formal_scope" not in aggregate_report
     assert "scalar_formal_score_name" not in aggregate_report
     assert "scalar_formal_scope" not in aggregate_report["scope_manifest"]
@@ -240,6 +247,7 @@ def test_schema_and_contracts_register_new_formal_fields() -> None:
         "content_evidence.lf_correlation_score",
         "attestation.image_evidence_result.lf_channel_score",
         "attestation.final_event_attested_decision.lf_attestation_score",
+        "experiment_matrix.auxiliary_analysis_runtime_executed",
     }
     assert required_paths.issubset(schema_paths)
     assert required_paths.issubset(contract_paths)
@@ -251,12 +259,89 @@ def test_schema_and_contracts_register_new_formal_fields() -> None:
     assert "primary_summary_basis_metric_name" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "primary_driver_mode" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "primary_status_source" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
+    assert "auxiliary_analysis_runtime_executed" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "scope_manifest" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "primary_summary_basis_scope" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "primary_summary_basis_metric_name" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "primary_driver_mode" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "primary_status_source" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
+    assert "auxiliary_analysis_runtime_executed" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "scalar_formal_scope" not in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "scalar_formal_score_name" not in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "scalar_formal_scope" not in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "scalar_formal_score_name" not in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
+
+
+def test_formal_stage_03_skips_auxiliary_runtime_by_default(tmp_path: Path, monkeypatch) -> None:
+    """
+    功能：验证 formal stage 03 默认不执行 auxiliary runtime。
+
+    Validate that formal stage 03 skips the auxiliary runtime by default.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    matrix_cfg = {
+        "primary_scope": "system_final",
+        "primary_summary_basis_scope": "system_final",
+        "enable_auxiliary_analysis_runtime": False,
+        "auxiliary_scopes": ["content_chain", "lf_channel"],
+        "auxiliary_scope_configs": {
+            "content_chain": {"metric_name": "content_chain_score"},
+            "lf_channel": {
+                "metric_name": "lf_channel_score",
+                "analysis_metric_name": "lf_channel_score",
+            },
+        },
+        "models": ["sd3"],
+        "seeds": [0],
+        "attack_protocol_families": ["rotate"],
+    }
+    grid_item = experiment_matrix.build_experiment_grid(
+        {
+            "model_id": "sd3",
+            "seed": 0,
+            "attack_protocol_path": "configs/attack_protocol.yaml",
+            "experiment_matrix": matrix_cfg,
+        }
+    )[0]
+
+    auxiliary_runtime_calls = []
+
+    monkeypatch.setattr(experiment_matrix.path_policy, "ensure_output_layout", lambda *args, **kwargs: {})
+    monkeypatch.setattr(experiment_matrix, "_run_stage_command", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        experiment_matrix,
+        "_assert_min_valid_content_scores_after_detect",
+        lambda *args, **kwargs: {"gate_relaxed": False, "reason": "ok", "sample_counts": {"valid": 1}},
+    )
+    monkeypatch.setattr(
+        experiment_matrix,
+        "_prepare_system_final_labelled_detect_records_glob_for_matrix",
+        lambda *args, **kwargs: str(tmp_path / "labelled" / "*.json"),
+    )
+
+    def _fake_run_auxiliary_analysis_sequence(**kwargs):
+        auxiliary_runtime_calls.append(kwargs)
+        return {
+            "driver_role": "auxiliary_only",
+            "metric_name": "lf_channel_score",
+            "status": "ok",
+            "failure_reason": "ok",
+            "shared_thresholds_used": False,
+            "pair_free_evaluate_used": False,
+            "auxiliary_analysis_runtime_executed": True,
+        }
+
+    monkeypatch.setattr(experiment_matrix, "_run_auxiliary_analysis_sequence", _fake_run_auxiliary_analysis_sequence)
+
+    stage_result = experiment_matrix._run_stage_sequence(grid_item, tmp_path / "formal_stage03")
+
+    assert auxiliary_runtime_calls == []
+    assert stage_result["auxiliary_analysis"]["status"] == "skipped"
+    assert stage_result["auxiliary_analysis"]["failure_reason"] == "auxiliary_analysis_not_requested"
+    assert stage_result["auxiliary_analysis"]["auxiliary_analysis_runtime_executed"] is False

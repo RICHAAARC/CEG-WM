@@ -264,6 +264,7 @@ def _build_stage_03_package(
     primary_summary_basis_metric_name: str = "system_final_metrics",
     include_system_final_metrics: bool = True,
     include_auxiliary_scopes: bool = True,
+    auxiliary_analysis_runtime_executed: bool = False,
     include_legacy_scalar_contract: bool = False,
     include_internal_scalar_driver_residual: bool = False,
     legacy_scalar_formal_scope: str = "lf_channel",
@@ -332,6 +333,7 @@ def _build_stage_03_package(
         "primary_summary_basis_scope": primary_summary_basis_scope,
         "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
         "auxiliary_scopes": auxiliary_scopes,
+        "auxiliary_analysis_runtime_executed": auxiliary_analysis_runtime_executed,
         "scope_manifest": scope_manifest,
         "system_final_metrics_presence": system_final_metrics_presence,
     }
@@ -364,6 +366,7 @@ def _build_stage_03_package(
         "primary_metric_name": "system_final_metrics",
         "primary_driver_mode": primary_driver_mode,
         "primary_status_source": primary_status_source,
+        "auxiliary_analysis_runtime_executed": auxiliary_analysis_runtime_executed,
         "primary_summary_basis_scope": primary_summary_basis_scope,
         "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
         "auxiliary_scope_metrics": {
@@ -387,6 +390,7 @@ def _build_stage_03_package(
         "primary_metric_name": "system_final_metrics",
         "primary_driver_mode": primary_driver_mode,
         "primary_status_source": primary_status_source,
+        "auxiliary_analysis_runtime_executed": auxiliary_analysis_runtime_executed,
         "primary_summary_basis_scope": primary_summary_basis_scope,
         "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
         "cfg_digest": "cfg03",
@@ -423,6 +427,7 @@ def _build_stage_03_package(
             "primary_metric_name": "system_final_metrics",
             "primary_driver_mode": primary_driver_mode,
             "primary_status_source": primary_status_source,
+            "auxiliary_analysis_runtime_executed": auxiliary_analysis_runtime_executed,
             "primary_summary_basis_scope": primary_summary_basis_scope,
             "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
             "auxiliary_scopes": auxiliary_scopes,
@@ -437,6 +442,7 @@ def _build_stage_03_package(
             "primary_metric_name": "system_final_metrics",
             "primary_driver_mode": primary_driver_mode,
             "primary_status_source": primary_status_source,
+            "auxiliary_analysis_runtime_executed": auxiliary_analysis_runtime_executed,
             "primary_summary_basis_scope": primary_summary_basis_scope,
             "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
             "auxiliary_scopes": auxiliary_scopes,
@@ -458,6 +464,7 @@ def _build_stage_03_package(
             "primary_metric_name": "system_final_metrics",
             "primary_driver_mode": primary_driver_mode,
             "primary_status_source": primary_status_source,
+            "auxiliary_analysis_runtime_executed": auxiliary_analysis_runtime_executed,
             "primary_summary_basis_scope": primary_summary_basis_scope,
             "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
             "auxiliary_scopes": auxiliary_scopes,
@@ -841,3 +848,44 @@ def test_stage_04_blocks_when_stage_03_primary_status_source_is_not_system_final
     assert signoff_report["decision"] == "BLOCK_FREEZE"
     reason_codes = {item["reason_code"] for item in signoff_report["blocking_reasons"]}
     assert "stage_03.primary_status_source_not_system_final_metrics" in reason_codes
+
+
+def test_stage_04_blocks_when_stage_03_auxiliary_runtime_was_executed(tmp_path: Path) -> None:
+    """
+    功能：验证 stage 04 看到 stage 03 显式声明 auxiliary runtime 已执行时必须 BLOCK_FREEZE。
+
+    Verify that stage 04 blocks freeze when the stage 03 package explicitly
+    declares auxiliary_analysis_runtime_executed as true.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    module = _load_stage_04_module()
+    drive_project_root = tmp_path / "drive_project_root"
+    stage_01_info = _build_stage_01_package(tmp_path / "case_auxiliary_runtime_executed")
+    stage_02_info = _build_stage_02_package(tmp_path / "case_auxiliary_runtime_executed", stage_01_info)
+    stage_03_info = _build_stage_03_package(
+        tmp_path / "case_auxiliary_runtime_executed",
+        stage_01_info,
+        auxiliary_analysis_runtime_executed=True,
+    )
+
+    summary = module.run_stage_04(
+        drive_project_root=drive_project_root,
+        stage_01_package_path=stage_01_info["package_path"],
+        stage_02_package_path=stage_02_info["package_path"],
+        stage_03_package_path=stage_03_info["package_path"],
+        config_path=DEFAULT_CONFIG_PATH,
+        notebook_name="04_Release_And_Signoff",
+        stage_run_id="stage04_auxiliary_runtime_executed",
+        require_stage_02=True,
+        require_stage_03=True,
+    )
+
+    signoff_report = json.loads(Path(summary["signoff_report_path"]).read_text(encoding="utf-8"))
+    assert signoff_report["decision"] == "BLOCK_FREEZE"
+    reason_codes = {item["reason_code"] for item in signoff_report["blocking_reasons"]}
+    assert "stage_03.aggregate_report_auxiliary_analysis_runtime_executed" in reason_codes
