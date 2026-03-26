@@ -985,7 +985,7 @@ def _ensure_auxiliary_analysis_compatible_content_payload(
         existing_status = content_node.get("status")
         if existing_status != "ok":
             raise RuntimeError(
-                "formal matrix content payload must preserve status=ok; "
+                "auxiliary analysis content payload must preserve status=ok; "
                 f"got_status={_safe_str(existing_status)}"
             )
         if eval_metrics.is_lf_channel_score_name(metric_name):
@@ -994,11 +994,11 @@ def _ensure_auxiliary_analysis_compatible_content_payload(
                 existing_score = _coerce_finite_float(content_node.get("lf_score"))
             if existing_score is None:
                 raise RuntimeError(
-                    "formal matrix content payload requires canonical content_evidence_payload.lf_channel_score"
+                    "auxiliary analysis payload requires canonical content_evidence_payload.lf_channel_score"
                 )
             if score_source != "content_evidence_payload.lf_channel_score":
                 raise RuntimeError(
-                    "formal matrix content payload forbids non-canonical lf_channel_score source; "
+                    "auxiliary analysis payload forbids non-canonical lf_channel_score source; "
                     f"score_source={_safe_str(score_source)}"
                 )
         elif eval_metrics.is_content_chain_score_name(metric_name):
@@ -1008,16 +1008,16 @@ def _ensure_auxiliary_analysis_compatible_content_payload(
             recovery_reason = content_node.get("calibration_score_recovery_reason")
             if existing_score is None:
                 raise RuntimeError(
-                    "formal matrix content payload requires canonical content_evidence_payload.content_chain_score"
+                    "auxiliary analysis payload requires canonical content_evidence_payload.content_chain_score"
                 )
             if score_source != "content_evidence_payload.content_chain_score":
                 raise RuntimeError(
-                    "formal matrix content payload forbids recovered score source; "
+                    "auxiliary analysis payload forbids recovered score source; "
                     f"score_source={_safe_str(score_source)}"
                 )
             if isinstance(recovery_reason, str) and recovery_reason:
                 raise RuntimeError(
-                    "formal matrix content payload forbids calibration score recovery markers; "
+                    "auxiliary analysis payload forbids calibration score recovery markers; "
                     f"recovery_reason={recovery_reason}"
                 )
         else:
@@ -1854,7 +1854,8 @@ def _write_neg_cache_runtime_config(base_config_path: Path, neg_run_root: Path) 
     """
     功能：为 neg_cache 私有子运行生成受控配置。 
 
-    Build a neg-cache-specific config that preserves the formal matrix path while
+    Build a neg-cache-specific config that preserves the experiment-matrix
+    auxiliary-analysis path while
     disabling attestation-only gate requirements for preview embed/detect.
 
     Args:
@@ -2193,10 +2194,10 @@ def _stage_external_shared_threshold_negatives(
     neg_detect_record_cache: Dict[Tuple[str, int], Optional[Path]],
 ) -> None:
     """
-    功能：为外部只读 shared thresholds 准备 formal evaluate 所需的 neg_staged 目录。
+    功能：为外部只读 shared thresholds 准备 auxiliary-analysis evaluate 所需的 neg_staged 目录。
 
     Stage labelled real-negative detect records beside an externally supplied
-    shared thresholds artifact so formal evaluate can remain pair-free without
+    shared thresholds artifact so auxiliary-analysis evaluate can remain pair-free without
     recomputing thresholds.
 
     Args:
@@ -2400,7 +2401,7 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
             if stage_name == "evaluate" and use_pair_free_formal_evaluate:
                 if formal_evaluate_detect_records_glob is None:
                     if shared_thresholds_path_val is None:
-                        raise RuntimeError("shared thresholds path missing for formal evaluate inputs")
+                        raise RuntimeError("shared thresholds path missing for auxiliary-analysis evaluate inputs")
                     formal_evaluate_detect_records_glob = _prepare_formal_evaluate_detect_records_glob_for_matrix(
                         run_root,
                         grid_item_cfg,
@@ -2707,9 +2708,9 @@ def _prepare_formal_evaluate_detect_records_glob_for_matrix(
     shared_thresholds_path: Path,
 ) -> str:
     """
-    功能：为 formal matrix evaluate 构建 pair-free 输入目录。 
+    功能：为 experiment_matrix 的 auxiliary-analysis evaluate 构建 pair-free 输入目录。 
 
-    Create pair-free evaluate inputs for formal experiment-matrix items by
+    Create pair-free auxiliary-analysis evaluate inputs for experiment-matrix items by
     staging one attacked positive detect record plus the shared real-negative
     records produced by global_calibrate.
 
@@ -2735,7 +2736,7 @@ def _prepare_formal_evaluate_detect_records_glob_for_matrix(
 
     auxiliary_metric_name = _extract_auxiliary_analysis_metric_name_from_grid_item(grid_item_cfg)
     if auxiliary_metric_name is None:
-        raise RuntimeError("formal evaluate inputs require auxiliary analysis metric configuration")
+        raise RuntimeError("auxiliary-analysis evaluate inputs require auxiliary analysis metric configuration")
     expected_source = (
         "content_evidence_payload.lf_channel_score"
         if eval_metrics.is_lf_channel_score_name(auxiliary_metric_name)
@@ -2748,12 +2749,12 @@ def _prepare_formal_evaluate_detect_records_glob_for_matrix(
         source_detect_record_path = run_root / "records" / "detect_record.json"
         positive_payload = _read_optional_json(source_detect_record_path)
     if not isinstance(positive_payload, dict) or not positive_payload:
-        raise RuntimeError("detect record missing or invalid for formal evaluate inputs")
+        raise RuntimeError("detect record missing or invalid for auxiliary-analysis evaluate inputs")
 
     positive_score, positive_score_source = _resolve_auxiliary_analysis_score(positive_payload, auxiliary_metric_name)
     if not isinstance(positive_score, float) or positive_score_source != expected_source:
         raise RuntimeError(
-            "formal evaluate inputs require canonical attacked positive matrix score; "
+            "auxiliary-analysis evaluate inputs require canonical attacked positive score; "
             f"reason={positive_score_source if isinstance(positive_score_source, str) else expected_source + '_missing_or_nonfinite'}"
         )
 
@@ -2774,14 +2775,14 @@ def _prepare_formal_evaluate_detect_records_glob_for_matrix(
     neg_staged_dir = shared_thresholds_path.parent.parent / "neg_staged"
     if not neg_staged_dir.exists() or not neg_staged_dir.is_dir():
         raise RuntimeError(
-            "formal evaluate inputs require global_calibrate neg_staged directory; "
+            "auxiliary-analysis evaluate inputs require global_calibrate neg_staged directory; "
             f"missing={neg_staged_dir}"
         )
 
     neg_paths = sorted(path for path in neg_staged_dir.glob("*.json") if path.is_file())
     if not neg_paths:
         raise RuntimeError(
-            "formal evaluate inputs require at least one staged real negative record; "
+            "auxiliary-analysis evaluate inputs require at least one staged real negative record; "
             f"missing_glob={neg_staged_dir / '*.json'}"
         )
 
@@ -2853,13 +2854,13 @@ def _prepare_formal_evaluate_detect_records_glob_for_matrix(
     if invalid_negatives:
         invalid_negatives_joined = "; ".join(invalid_negatives)
         raise RuntimeError(
-            "formal evaluate inputs require canonical staged real negative scores; "
+            "auxiliary-analysis evaluate inputs require canonical staged real negative scores; "
             f"invalid={invalid_negatives_joined}"
         )
 
     if staged_negative_count <= 0:
         raise RuntimeError(
-            "formal evaluate inputs require valid staged real negative scores; "
+            "auxiliary-analysis evaluate inputs require valid staged real negative scores; "
             f"source_dir={neg_staged_dir}"
         )
 
