@@ -83,6 +83,10 @@ GRID_SUMMARY_REQUIRED_FIELDS = [
     "policy_path",
     "primary_evaluation_scope",
     "primary_metric_name",
+    "primary_summary_basis_scope",
+    "primary_summary_basis_metric_name",
+    "scalar_formal_scope",
+    "scalar_formal_score_name",
     "scope_manifest",
     "system_final_metrics_presence",
 ]
@@ -91,6 +95,10 @@ AGGREGATE_REPORT_REQUIRED_FIELDS = [
     "aggregate_report_version",
     "primary_evaluation_scope",
     "primary_metric_name",
+    "primary_summary_basis_scope",
+    "primary_summary_basis_metric_name",
+    "scalar_formal_scope",
+    "scalar_formal_score_name",
     "scope_manifest",
     "experiment_matrix_digest",
     "experiment_count",
@@ -604,6 +612,62 @@ def _validate_stage_03_primary_scope_semantics(
             evidence={"actual_primary_metric_name": primary_metric_name},
         )
 
+    primary_summary_basis_scope = aggregate_report_obj.get("primary_summary_basis_scope")
+    if primary_summary_basis_scope != SYSTEM_FINAL_SCOPE:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code="stage_03.primary_summary_basis_scope_not_system_final",
+            rule="stage 03 aggregate_report.primary_summary_basis_scope must equal system_final",
+            impact="stage 03 primary summary basis is not closed on the system-level scope",
+            fix="write primary_summary_basis_scope=system_final into aggregate_report and grid_summary",
+            evidence={"actual_primary_summary_basis_scope": primary_summary_basis_scope},
+        )
+
+    primary_summary_basis_metric_name = aggregate_report_obj.get("primary_summary_basis_metric_name")
+    if primary_summary_basis_metric_name != SYSTEM_FINAL_METRIC_NAME:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code="stage_03.primary_summary_basis_metric_not_system_final_metrics",
+            rule="stage 03 aggregate_report.primary_summary_basis_metric_name must equal system_final_metrics",
+            impact="stage 03 primary summary basis metric drifted away from structured system_final metrics",
+            fix="write primary_summary_basis_metric_name=system_final_metrics into aggregate_report and grid_summary",
+            evidence={"actual_primary_summary_basis_metric_name": primary_summary_basis_metric_name},
+        )
+
+    scalar_formal_scope = aggregate_report_obj.get("scalar_formal_scope")
+    scalar_formal_score_name = aggregate_report_obj.get("scalar_formal_score_name")
+    expected_scalar_metric_name = None
+    if scalar_formal_scope == CONTENT_CHAIN_SCOPE:
+        expected_scalar_metric_name = "content_chain_score"
+    elif scalar_formal_scope == LF_CHANNEL_SCOPE:
+        expected_scalar_metric_name = "lf_channel_score"
+    else:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code="stage_03.scalar_formal_scope_invalid",
+            rule="stage 03 aggregate_report.scalar_formal_scope must be an auxiliary scalar scope",
+            impact="stage 03 scalar formal path is not bound to a supported auxiliary scope",
+            fix="set scalar_formal_scope to content_chain or lf_channel and keep it outside the primary system scope",
+            evidence={"actual_scalar_formal_scope": scalar_formal_scope},
+        )
+    if expected_scalar_metric_name is not None and scalar_formal_score_name != expected_scalar_metric_name:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code="stage_03.scalar_formal_score_name_invalid",
+            rule="stage 03 aggregate_report.scalar_formal_score_name must match scalar_formal_scope",
+            impact="stage 03 scalar formal score naming drifted away from its auxiliary scope",
+            fix="synchronize scalar_formal_scope and scalar_formal_score_name in aggregate_report, grid_summary, and scope_manifest",
+            evidence={
+                "scalar_formal_scope": scalar_formal_scope,
+                "scalar_formal_score_name": scalar_formal_score_name,
+                "expected_scalar_formal_score_name": expected_scalar_metric_name,
+            },
+        )
+
     scope_manifest_raw = aggregate_report_obj.get("scope_manifest")
     scope_manifest = cast(Dict[str, Any], scope_manifest_raw) if isinstance(scope_manifest_raw, dict) else {}
     if not scope_manifest:
@@ -646,6 +710,23 @@ def _validate_stage_03_primary_scope_semantics(
             },
         )
 
+    if scope_manifest.get("scalar_formal_scope", scope_manifest.get("scalar_calibration_scope")) != scalar_formal_scope or scope_manifest.get("scalar_formal_score_name") != scalar_formal_score_name:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code="stage_03.scope_manifest_scalar_binding_mismatch",
+            rule="scope_manifest scalar binding must match aggregate_report scalar formal anchors",
+            impact="stage 03 exposes inconsistent auxiliary scalar semantics across artifacts",
+            fix="synchronize scope_manifest scalar_formal_scope / scalar_calibration_scope / scalar_formal_score_name with aggregate_report",
+            evidence={
+                "aggregate_scalar_formal_scope": scalar_formal_scope,
+                "aggregate_scalar_formal_score_name": scalar_formal_score_name,
+                "scope_manifest_scalar_formal_scope": scope_manifest.get("scalar_formal_scope"),
+                "scope_manifest_scalar_calibration_scope": scope_manifest.get("scalar_calibration_scope"),
+                "scope_manifest_scalar_formal_score_name": scope_manifest.get("scalar_formal_score_name"),
+            },
+        )
+
     auxiliary_scopes_raw = scope_manifest.get("auxiliary_scopes")
     auxiliary_scopes = cast(List[str], auxiliary_scopes_raw) if isinstance(auxiliary_scopes_raw, list) else []
     missing_auxiliary_scopes = [scope_name for scope_name in REQUIRED_STAGE_03_AUXILIARY_SCOPES if scope_name not in auxiliary_scopes]
@@ -660,17 +741,33 @@ def _validate_stage_03_primary_scope_semantics(
             evidence={"auxiliary_scopes": auxiliary_scopes, "missing_auxiliary_scopes": missing_auxiliary_scopes},
         )
 
-    if scope_manifest.get("scalar_calibration_scope") != LF_CHANNEL_SCOPE or scope_manifest.get("scalar_formal_score_name") != "lf_channel_score":
+    if scalar_formal_scope not in auxiliary_scopes:
         _append_blocking_reason(
             blocking_reasons,
             source="stage_03",
             reason_code="stage_03.scalar_scope_binding_invalid",
-            rule="stage 03 scalar calibration path must remain bound to lf_channel / lf_channel_score as an auxiliary scope",
-            impact="stage 03 scalar formal path drifted away from the LF auxiliary channel contract",
-            fix="set scope_manifest.scalar_calibration_scope=lf_channel and scalar_formal_score_name=lf_channel_score",
+            rule="stage 03 scalar formal scope must remain an auxiliary scope",
+            impact="stage 03 scalar formal path is no longer isolated from the primary system summary path",
+            fix="ensure scalar_formal_scope is one of the declared auxiliary_scopes",
             evidence={
-                "scalar_calibration_scope": scope_manifest.get("scalar_calibration_scope"),
-                "scalar_formal_score_name": scope_manifest.get("scalar_formal_score_name"),
+                "auxiliary_scopes": auxiliary_scopes,
+                "scalar_formal_scope": scalar_formal_scope,
+            },
+        )
+
+    if primary_summary_basis_scope == scalar_formal_scope or primary_summary_basis_metric_name == scalar_formal_score_name:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code="stage_03.primary_scalar_mixed_state_detected",
+            rule="stage 03 must not collapse primary system summary basis onto the auxiliary scalar formal basis",
+            impact="stage 03 remains in the forbidden mixed state of system_final report semantics plus scalar-formal primary driving semantics",
+            fix="separate primary_summary_basis_* from scalar_formal_* and regenerate stage 03 artifacts",
+            evidence={
+                "primary_summary_basis_scope": primary_summary_basis_scope,
+                "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
+                "scalar_formal_scope": scalar_formal_scope,
+                "scalar_formal_score_name": scalar_formal_score_name,
             },
         )
 
@@ -736,7 +833,16 @@ def _validate_stage_03_primary_scope_semantics(
                 evidence={"missing_rows": missing_auxiliary_rows},
             )
 
-    for field_name in ["primary_evaluation_scope", "primary_metric_name", "scope_manifest", "system_final_metrics_presence"]:
+    for field_name in [
+        "primary_evaluation_scope",
+        "primary_metric_name",
+        "primary_summary_basis_scope",
+        "primary_summary_basis_metric_name",
+        "scalar_formal_scope",
+        "scalar_formal_score_name",
+        "scope_manifest",
+        "system_final_metrics_presence",
+    ]:
         if grid_summary_obj.get(field_name) != aggregate_report_obj.get(field_name):
             _append_blocking_reason(
                 blocking_reasons,
@@ -744,7 +850,7 @@ def _validate_stage_03_primary_scope_semantics(
                 reason_code="stage_03.grid_summary_scope_mismatch",
                 rule="grid_summary must mirror aggregate_report primary scope fields for release signoff",
                 impact="stage 03 package exposes conflicting primary-scope semantics across artifacts",
-                fix="synchronize grid_summary with aggregate_report for primary_evaluation_scope, primary_metric_name, scope_manifest, and system_final_metrics_presence",
+                fix="synchronize grid_summary with aggregate_report for primary, primary-summary-basis, scalar-formal, scope_manifest, and system_final_metrics_presence fields",
                 evidence={
                     "field_name": field_name,
                     "grid_summary_value": grid_summary_obj.get(field_name),

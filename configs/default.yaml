@@ -195,12 +195,17 @@ experiment_matrix:
   config_path: "configs/default.yaml"
   allow_failed_semantics_collection: true
   primary_scope: "system_final"
+  primary_summary_basis_scope: "system_final"
   auxiliary_scopes: ["content_chain", "lf_channel"]
   evaluation_scope: "system_final"
+  scalar_formal_scope: "lf_channel"
+  scalar_formal_score_name: "lf_channel_score"
   formal_score_name: "lf_channel_score"
   # primary_scope 负责 stage 03 的主摘要、主结论与 stage 04 signoff 绑定；
-  # formal_score_name 仅保留为 scalar auxiliary scope 的共享阈值与校准配置，
-  # 当前 formal scalar scope 固定为 lf_channel。
+  # primary_summary_basis_scope 显式声明主摘要锚点仍闭合到 system_final。
+  # scalar_formal_scope / scalar_formal_score_name 仅服务 auxiliary scalar scope 的
+  # formal calibration / threshold / evaluate，不再承担 stage 03 主评估对象语义。
+  # formal_score_name 仅保留为兼容别名，等价于 scalar_formal_score_name。
   # seeds 数量控制正样本规模：论文级 FPR ≤ 1% 需 n_pos ≥ 100，种子数应 ≥ 100。
   # 当前 seeds=[0,1] 为机制验证阶段（仅 2 个 seed）；正式论文运行请扩展为 range(100)。
   # 运行时通过 scripts/run_experiment_matrix.py 自动映射 seeds 为 CLI overrides（seed=0, seed=1, ...），

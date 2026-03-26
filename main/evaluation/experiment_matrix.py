@@ -133,11 +133,19 @@ def build_experiment_grid(base_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     formal_validation_guards = _resolve_formal_validation_guards(matrix_cfg)
     evaluation_scope = _resolve_matrix_primary_scope(matrix_cfg)
     auxiliary_scopes = _resolve_matrix_auxiliary_scopes(matrix_cfg, evaluation_scope)
-    formal_score_name = _resolve_matrix_formal_score_name(matrix_cfg)
+    scalar_formal_score_name = _resolve_matrix_formal_score_name(matrix_cfg)
+    primary_summary_basis_scope = _resolve_matrix_primary_summary_basis_scope(matrix_cfg, evaluation_scope)
+    scalar_formal_scope = _resolve_matrix_scalar_formal_scope(
+        matrix_cfg,
+        auxiliary_scopes,
+        scalar_formal_score_name,
+    )
     scope_manifest = _build_matrix_scope_manifest(
         primary_scope=evaluation_scope,
+        primary_summary_basis_scope=primary_summary_basis_scope,
         auxiliary_scopes=auxiliary_scopes,
-        scalar_formal_score_name=formal_score_name,
+        scalar_formal_scope=scalar_formal_scope,
+        scalar_formal_score_name=scalar_formal_score_name,
     )
 
     batch_root = matrix_cfg.get("batch_root", "outputs/experiment_matrix")
@@ -207,7 +215,11 @@ def build_experiment_grid(base_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
                         "auxiliary_scopes": copy.deepcopy(auxiliary_scopes),
                         "scope_manifest": copy.deepcopy(scope_manifest),
                         "primary_metric_name": _resolve_matrix_primary_metric_name(evaluation_scope),
-                        "formal_score_name": formal_score_name,
+                        "primary_summary_basis_scope": primary_summary_basis_scope,
+                        "primary_summary_basis_metric_name": _resolve_matrix_primary_metric_name(primary_summary_basis_scope),
+                        "scalar_formal_scope": scalar_formal_scope,
+                        "scalar_formal_score_name": scalar_formal_score_name,
+                        "formal_score_name": scalar_formal_score_name,
                         "require_real_negative_cache": formal_validation_guards["require_real_negative_cache"],
                         "require_shared_thresholds": formal_validation_guards["require_shared_thresholds"],
                         "disallow_forced_pair_fallback": formal_validation_guards["disallow_forced_pair_fallback"],
@@ -251,7 +263,12 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
         "auxiliary_scopes": copy.deepcopy(grid_item_cfg.get("auxiliary_scopes", [])) if isinstance(grid_item_cfg.get("auxiliary_scopes"), list) else [],
         "scope_manifest": copy.deepcopy(grid_item_cfg.get("scope_manifest", {})) if isinstance(grid_item_cfg.get("scope_manifest"), dict) else {},
         "primary_metric_name": _safe_str(grid_item_cfg.get("primary_metric_name")),
-        "scalar_formal_score_name": _safe_str(grid_item_cfg.get("formal_score_name")),
+        "primary_summary_basis_scope": _safe_str(grid_item_cfg.get("primary_summary_basis_scope")),
+        "primary_summary_basis_metric_name": _safe_str(grid_item_cfg.get("primary_summary_basis_metric_name")),
+        "scalar_formal_scope": _safe_str(grid_item_cfg.get("scalar_formal_scope")),
+        "scalar_formal_score_name": _safe_str(
+            grid_item_cfg.get("scalar_formal_score_name", grid_item_cfg.get("formal_score_name"))
+        ),
         "status": "failed",
         "failure_reason": "<absent>",
         "cfg_digest": _safe_str(grid_item_cfg.get("cfg_digest")),
@@ -484,35 +501,43 @@ def _resolve_matrix_primary_metric_name(evaluation_scope: str) -> str:
 def _build_matrix_scope_manifest(
     *,
     primary_scope: str,
+    primary_summary_basis_scope: str,
     auxiliary_scopes: List[str],
+    scalar_formal_scope: str,
     scalar_formal_score_name: str,
 ) -> Dict[str, Any]:
     """Build the persisted scope manifest for matrix summary and signoff."""
     if not isinstance(primary_scope, str) or not primary_scope:
         raise TypeError("primary_scope must be non-empty str")
+    if not isinstance(primary_summary_basis_scope, str) or not primary_summary_basis_scope:
+        raise TypeError("primary_summary_basis_scope must be non-empty str")
     if not isinstance(auxiliary_scopes, list):
         raise TypeError("auxiliary_scopes must be list")
+    if not isinstance(scalar_formal_scope, str) or not scalar_formal_scope:
+        raise TypeError("scalar_formal_scope must be non-empty str")
     if not isinstance(scalar_formal_score_name, str) or not scalar_formal_score_name:
         raise TypeError("scalar_formal_score_name must be non-empty str")
 
     auxiliary_metric_names: Dict[str, str] = {}
     for scope_name in auxiliary_scopes:
         auxiliary_metric_names[scope_name] = _resolve_matrix_primary_metric_name(scope_name)
-
-    scalar_calibration_scope = (
-        _LF_CHANNEL_SCOPE
-        if eval_metrics.is_lf_channel_score_name(scalar_formal_score_name)
-        else _CONTENT_CHAIN_SCOPE
-    )
+    if scalar_formal_scope not in auxiliary_metric_names:
+        raise ValueError("scalar_formal_scope must be included in auxiliary_scopes")
+    expected_scalar_metric_name = auxiliary_metric_names[scalar_formal_scope]
+    if scalar_formal_score_name != expected_scalar_metric_name:
+        raise ValueError(
+            "scalar_formal_score_name must match the canonical metric name of scalar_formal_scope"
+        )
 
     return {
         "primary_scope": primary_scope,
         "primary_metric_name": _resolve_matrix_primary_metric_name(primary_scope),
-        "primary_summary_basis_scope": primary_scope,
-        "primary_summary_basis_metric_name": _resolve_matrix_primary_metric_name(primary_scope),
+        "primary_summary_basis_scope": primary_summary_basis_scope,
+        "primary_summary_basis_metric_name": _resolve_matrix_primary_metric_name(primary_summary_basis_scope),
         "auxiliary_scopes": list(auxiliary_scopes),
         "auxiliary_metric_names": auxiliary_metric_names,
-        "scalar_calibration_scope": scalar_calibration_scope,
+        "scalar_formal_scope": scalar_formal_scope,
+        "scalar_calibration_scope": scalar_formal_scope,
         "scalar_formal_score_name": scalar_formal_score_name,
         "system_final_signal_sources": [
             "final_decision.is_watermarked",
@@ -772,6 +797,58 @@ def _resolve_matrix_calibration_score(record_payload: Dict[str, Any]) -> Tuple[O
         if numeric_candidate is not None:
             return numeric_candidate, field_name
     return None, None
+
+
+def _resolve_matrix_primary_summary_basis_scope(matrix_cfg: Dict[str, Any], primary_scope: str) -> str:
+    """Resolve the persisted primary summary basis scope for experiment_matrix."""
+    if not isinstance(matrix_cfg, dict):
+        raise TypeError("matrix_cfg must be dict")
+    if not isinstance(primary_scope, str) or not primary_scope:
+        raise TypeError("primary_scope must be non-empty str")
+
+    basis_scope = matrix_cfg.get("primary_summary_basis_scope", primary_scope)
+    if not isinstance(basis_scope, str) or not basis_scope:
+        raise TypeError("experiment_matrix.primary_summary_basis_scope must be non-empty str")
+    if basis_scope not in _MATRIX_EVALUATION_SCOPES:
+        raise ValueError(f"unsupported experiment_matrix.primary_summary_basis_scope: {basis_scope}")
+    if basis_scope != primary_scope:
+        raise ValueError(
+            "experiment_matrix.primary_summary_basis_scope must match primary_scope for the current detached stage 03 profile"
+        )
+    return basis_scope
+
+
+def _resolve_matrix_scalar_formal_scope(
+    matrix_cfg: Dict[str, Any],
+    auxiliary_scopes: List[str],
+    scalar_formal_score_name: str,
+) -> str:
+    """Resolve the auxiliary scalar scope used for formal calibration/evaluate."""
+    if not isinstance(matrix_cfg, dict):
+        raise TypeError("matrix_cfg must be dict")
+    if not isinstance(auxiliary_scopes, list):
+        raise TypeError("auxiliary_scopes must be list")
+    if not isinstance(scalar_formal_score_name, str) or not scalar_formal_score_name:
+        raise TypeError("scalar_formal_score_name must be non-empty str")
+
+    inferred_scope = (
+        _LF_CHANNEL_SCOPE
+        if eval_metrics.is_lf_channel_score_name(scalar_formal_score_name)
+        else _CONTENT_CHAIN_SCOPE
+    )
+    scope_name = matrix_cfg.get("scalar_formal_scope", inferred_scope)
+    if not isinstance(scope_name, str) or not scope_name:
+        raise TypeError("experiment_matrix.scalar_formal_scope must be non-empty str")
+    if scope_name not in {_CONTENT_CHAIN_SCOPE, _LF_CHANNEL_SCOPE}:
+        raise ValueError(f"unsupported experiment_matrix.scalar_formal_scope: {scope_name}")
+    if scope_name not in auxiliary_scopes:
+        raise ValueError("experiment_matrix.scalar_formal_scope must be included in auxiliary_scopes")
+    expected_metric_name = _resolve_matrix_primary_metric_name(scope_name)
+    if expected_metric_name != scalar_formal_score_name:
+        raise ValueError(
+            "experiment_matrix.scalar_formal_scope and scalar_formal_score_name must resolve to the same auxiliary scalar semantics"
+        )
+    return scope_name
 
 
 def _resolve_formal_matrix_score(
@@ -1145,7 +1222,11 @@ def run_experiment_grid(grid: List[Dict[str, Any]], strict: bool = True) -> Dict
         "failed": sum(1 for item in results if item.get("status") != "ok"),
         "primary_evaluation_scope": aggregate_report.get("primary_evaluation_scope", _SYSTEM_FINAL_SCOPE),
         "primary_metric_name": aggregate_report.get("primary_metric_name", _SYSTEM_FINAL_METRIC_NAME),
+        "primary_summary_basis_scope": aggregate_report.get("primary_summary_basis_scope", _SYSTEM_FINAL_SCOPE),
+        "primary_summary_basis_metric_name": aggregate_report.get("primary_summary_basis_metric_name", _SYSTEM_FINAL_METRIC_NAME),
         "auxiliary_scopes": aggregate_report.get("auxiliary_scopes", []),
+        "scalar_formal_scope": aggregate_report.get("scalar_formal_scope", _LF_CHANNEL_SCOPE),
+        "scalar_formal_score_name": aggregate_report.get("scalar_formal_score_name", eval_metrics.LF_CHANNEL_SCORE_NAME),
         "scope_manifest": aggregate_report.get("scope_manifest", {}),
         "system_final_metrics_presence": aggregate_report.get("system_final_metrics_presence", {}),
         "aggregate_report": aggregate_report,
@@ -1263,6 +1344,16 @@ def build_aggregate_report(
     coverage_manifest = attack_coverage.compute_attack_coverage_manifest()
     primary_evaluation_scope = _safe_str(experiment_results[0].get("evaluation_scope")) if experiment_results else _SYSTEM_FINAL_SCOPE
     primary_metric_name = _safe_str(experiment_results[0].get("primary_metric_name")) if experiment_results else _SYSTEM_FINAL_METRIC_NAME
+    primary_summary_basis_scope = (
+        _safe_str(experiment_results[0].get("primary_summary_basis_scope"))
+        if experiment_results
+        else _SYSTEM_FINAL_SCOPE
+    )
+    primary_summary_basis_metric_name = (
+        _safe_str(experiment_results[0].get("primary_summary_basis_metric_name"))
+        if experiment_results
+        else _SYSTEM_FINAL_METRIC_NAME
+    )
     auxiliary_scopes = (
         list(experiment_results[0].get("auxiliary_scopes", []))
         if experiment_results and isinstance(experiment_results[0].get("auxiliary_scopes"), list)
@@ -1273,10 +1364,14 @@ def build_aggregate_report(
         if experiment_results and isinstance(experiment_results[0].get("scope_manifest"), dict)
         else _build_matrix_scope_manifest(
             primary_scope=primary_evaluation_scope,
+            primary_summary_basis_scope=primary_summary_basis_scope,
             auxiliary_scopes=auxiliary_scopes,
+            scalar_formal_scope=_safe_str(experiment_results[0].get("scalar_formal_scope")) if experiment_results else _LF_CHANNEL_SCOPE,
             scalar_formal_score_name=_safe_str(experiment_results[0].get("scalar_formal_score_name")) if experiment_results else eval_metrics.LF_CHANNEL_SCORE_NAME,
         )
     )
+    scalar_formal_scope = _safe_str(scope_manifest.get("scalar_formal_scope", scope_manifest.get("scalar_calibration_scope")))
+    scalar_formal_score_name = _safe_str(scope_manifest.get("scalar_formal_score_name"))
     rows_with_system_final_metrics = sum(
         1 for row in metrics_matrix if isinstance(row.get(_SYSTEM_FINAL_METRIC_NAME), dict)
     )
@@ -1288,7 +1383,11 @@ def build_aggregate_report(
         "aggregate_report_version": "aggregate_v1",
         "primary_evaluation_scope": primary_evaluation_scope,
         "primary_metric_name": primary_metric_name,
+        "primary_summary_basis_scope": primary_summary_basis_scope,
+        "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
         "auxiliary_scopes": auxiliary_scopes,
+        "scalar_formal_scope": scalar_formal_scope,
+        "scalar_formal_score_name": scalar_formal_score_name,
         "scope_manifest": scope_manifest,
         "experiment_matrix_digest": digests.canonical_sha256(canonical_items),
         "experiment_count": len(experiment_results),
@@ -1329,14 +1428,19 @@ def _resolve_matrix_formal_score_name(matrix_cfg: Dict[str, Any]) -> str:
     if not isinstance(matrix_cfg, dict):
         raise TypeError("matrix_cfg must be dict")
 
-    score_name = matrix_cfg.get("formal_score_name", eval_metrics.LF_CHANNEL_SCORE_NAME)
+    score_name = matrix_cfg.get(
+        "scalar_formal_score_name",
+        matrix_cfg.get("formal_score_name", eval_metrics.LF_CHANNEL_SCORE_NAME),
+    )
     if not isinstance(score_name, str) or not score_name:
-        raise TypeError("experiment_matrix.formal_score_name must be non-empty str")
-    if not eval_metrics.is_lf_channel_score_name(score_name):
-        raise ValueError(
-            "experiment_matrix.formal_score_name must remain lf_channel_score-compatible for the current formal profile"
-        )
-    return eval_metrics.LF_CHANNEL_SCORE_NAME
+        raise TypeError("experiment_matrix scalar formal score name must be non-empty str")
+    if eval_metrics.is_lf_channel_score_name(score_name):
+        return eval_metrics.LF_CHANNEL_SCORE_NAME
+    if eval_metrics.is_content_chain_score_name(score_name):
+        return eval_metrics.CONTENT_CHAIN_SCORE_NAME
+    raise ValueError(
+        "experiment_matrix scalar formal score name must resolve to content_chain_score or lf_channel_score"
+    )
 
 
 def _extract_matrix_formal_score_name_from_grid_item(grid_item_cfg: Dict[str, Any]) -> str:
@@ -1344,14 +1448,19 @@ def _extract_matrix_formal_score_name_from_grid_item(grid_item_cfg: Dict[str, An
     if not isinstance(grid_item_cfg, dict):
         raise TypeError("grid_item_cfg must be dict")
 
-    score_name = grid_item_cfg.get("formal_score_name", eval_metrics.LF_CHANNEL_SCORE_NAME)
+    score_name = grid_item_cfg.get(
+        "scalar_formal_score_name",
+        grid_item_cfg.get("formal_score_name", eval_metrics.LF_CHANNEL_SCORE_NAME),
+    )
     if not isinstance(score_name, str) or not score_name:
-        raise TypeError("grid item formal_score_name must be non-empty str")
-    if not eval_metrics.is_lf_channel_score_name(score_name):
-        raise ValueError(
-            "grid item formal_score_name must remain lf_channel_score-compatible for the current formal profile"
-        )
-    return eval_metrics.LF_CHANNEL_SCORE_NAME
+        raise TypeError("grid item scalar_formal_score_name must be non-empty str")
+    if eval_metrics.is_lf_channel_score_name(score_name):
+        return eval_metrics.LF_CHANNEL_SCORE_NAME
+    if eval_metrics.is_content_chain_score_name(score_name):
+        return eval_metrics.CONTENT_CHAIN_SCORE_NAME
+    raise ValueError(
+        "grid item scalar_formal_score_name must resolve to content_chain_score or lf_channel_score"
+    )
 
 
 def _resolve_model_axis(base_cfg: Dict[str, Any], matrix_cfg: Dict[str, Any]) -> List[str]:
@@ -2976,7 +3085,11 @@ def _write_grid_artifacts(
             "failed": sum(1 for r in results if isinstance(r, dict) and r.get("status") != "ok"),
             "primary_evaluation_scope": aggregate_report.get("primary_evaluation_scope", _SYSTEM_FINAL_SCOPE),
             "primary_metric_name": aggregate_report.get("primary_metric_name", _SYSTEM_FINAL_METRIC_NAME),
+            "primary_summary_basis_scope": aggregate_report.get("primary_summary_basis_scope", _SYSTEM_FINAL_SCOPE),
+            "primary_summary_basis_metric_name": aggregate_report.get("primary_summary_basis_metric_name", _SYSTEM_FINAL_METRIC_NAME),
             "auxiliary_scopes": aggregate_report.get("auxiliary_scopes", []),
+            "scalar_formal_scope": aggregate_report.get("scalar_formal_scope", _LF_CHANNEL_SCOPE),
+            "scalar_formal_score_name": aggregate_report.get("scalar_formal_score_name", eval_metrics.LF_CHANNEL_SCORE_NAME),
             "scope_manifest": aggregate_report.get("scope_manifest", {}),
             "system_final_metrics_presence": aggregate_report.get("system_final_metrics_presence", {}),
             "results": results,

@@ -258,6 +258,10 @@ def _build_stage_03_package(
     stage_01_info: Dict[str, Any],
     *,
     primary_scope: str = "system_final",
+    primary_summary_basis_scope: str = "system_final",
+    primary_summary_basis_metric_name: str = "system_final_metrics",
+    scalar_formal_scope: str = "lf_channel",
+    scalar_formal_score_name: str = "lf_channel_score",
     include_system_final_metrics: bool = True,
     include_auxiliary_scopes: bool = True,
 ) -> Dict[str, Any]:
@@ -296,6 +300,10 @@ def _build_stage_03_package(
         "grid_item_digest": "grid01",
         "evaluation_scope": primary_scope,
         "primary_metric_name": "system_final_metrics",
+        "primary_summary_basis_scope": primary_summary_basis_scope,
+        "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
+        "scalar_formal_scope": scalar_formal_scope,
+        "scalar_formal_score_name": scalar_formal_score_name,
         "cfg_digest": "cfg03",
         "plan_digest": "plan03",
         "thresholds_digest": "thr03",
@@ -312,21 +320,26 @@ def _build_stage_03_package(
     scope_manifest = {
         "primary_scope": primary_scope,
         "primary_metric_name": "system_final_metrics",
-        "primary_summary_basis_scope": primary_scope,
-        "primary_summary_basis_metric_name": "system_final_metrics",
+        "primary_summary_basis_scope": primary_summary_basis_scope,
+        "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
         "auxiliary_scopes": auxiliary_scopes,
         "auxiliary_metric_names": {
             "content_chain": "content_chain_score",
             "lf_channel": "lf_channel_score",
         },
-        "scalar_calibration_scope": "lf_channel",
-        "scalar_formal_score_name": "lf_channel_score",
+        "scalar_formal_scope": scalar_formal_scope,
+        "scalar_calibration_scope": scalar_formal_scope,
+        "scalar_formal_score_name": scalar_formal_score_name,
     }
     metrics_row: Dict[str, Any] = {
         "grid_item_digest": "grid01",
         "status": "ok",
         "evaluation_scope": primary_scope,
         "primary_metric_name": "system_final_metrics",
+        "primary_summary_basis_scope": primary_summary_basis_scope,
+        "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
+        "scalar_formal_scope": scalar_formal_scope,
+        "scalar_formal_score_name": scalar_formal_score_name,
         "auxiliary_scope_metrics": {
             "content_chain": {"metric_name": "content_chain_score", "available": True},
             "lf_channel": {"metric_name": "lf_channel_score", "available": True},
@@ -351,7 +364,11 @@ def _build_stage_03_package(
             "policy_path": "content_np_geo_rescue",
             "primary_evaluation_scope": primary_scope,
             "primary_metric_name": "system_final_metrics",
+            "primary_summary_basis_scope": primary_summary_basis_scope,
+            "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
             "auxiliary_scopes": auxiliary_scopes,
+            "scalar_formal_scope": scalar_formal_scope,
+            "scalar_formal_score_name": scalar_formal_score_name,
             "scope_manifest": scope_manifest,
             "system_final_metrics_presence": {
                 "rows_with_system_final_metrics": 1 if include_system_final_metrics else 0,
@@ -364,7 +381,11 @@ def _build_stage_03_package(
             "aggregate_report_version": "aggregate_v1",
             "primary_evaluation_scope": primary_scope,
             "primary_metric_name": "system_final_metrics",
+            "primary_summary_basis_scope": primary_summary_basis_scope,
+            "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
             "auxiliary_scopes": auxiliary_scopes,
+            "scalar_formal_scope": scalar_formal_scope,
+            "scalar_formal_score_name": scalar_formal_score_name,
             "scope_manifest": scope_manifest,
             "experiment_matrix_digest": "matrix03",
             "experiment_count": 1,
@@ -588,3 +609,47 @@ def test_stage_04_blocks_when_stage_03_lacks_system_final_metrics(tmp_path: Path
     assert signoff_report["decision"] == "BLOCK_FREEZE"
     reason_codes = {item["reason_code"] for item in signoff_report["blocking_reasons"]}
     assert "stage_03.system_final_metrics_missing" in reason_codes or "stage_03.metrics_matrix_system_final_rows_missing" in reason_codes
+
+
+def test_stage_04_blocks_when_stage_03_primary_scalar_state_is_mixed(tmp_path: Path) -> None:
+    """
+    功能：验证 stage 03 若把主摘要语义与 scalar formal 语义混合，则必须 BLOCK_FREEZE。
+
+    Verify that stage 04 blocks freeze when stage 03 collapses the primary
+    summary basis onto auxiliary scalar formal semantics.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    module = _load_stage_04_module()
+    drive_project_root = tmp_path / "drive_project_root"
+    stage_01_info = _build_stage_01_package(tmp_path / "case_mixed_primary_scalar")
+    stage_02_info = _build_stage_02_package(tmp_path / "case_mixed_primary_scalar", stage_01_info)
+    stage_03_info = _build_stage_03_package(
+        tmp_path / "case_mixed_primary_scalar",
+        stage_01_info,
+        primary_summary_basis_scope="lf_channel",
+        primary_summary_basis_metric_name="lf_channel_score",
+        scalar_formal_scope="lf_channel",
+        scalar_formal_score_name="lf_channel_score",
+    )
+
+    summary = module.run_stage_04(
+        drive_project_root=drive_project_root,
+        stage_01_package_path=stage_01_info["package_path"],
+        stage_02_package_path=stage_02_info["package_path"],
+        stage_03_package_path=stage_03_info["package_path"],
+        config_path=DEFAULT_CONFIG_PATH,
+        notebook_name="04_Release_And_Signoff",
+        stage_run_id="stage04_primary_scalar_mixed",
+        require_stage_02=True,
+        require_stage_03=True,
+    )
+
+    signoff_report = json.loads(Path(summary["signoff_report_path"]).read_text(encoding="utf-8"))
+    assert signoff_report["decision"] == "BLOCK_FREEZE"
+    reason_codes = {item["reason_code"] for item in signoff_report["blocking_reasons"]}
+    assert "stage_03.primary_scalar_mixed_state_detected" in reason_codes
