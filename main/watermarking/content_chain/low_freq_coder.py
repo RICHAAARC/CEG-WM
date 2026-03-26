@@ -1041,6 +1041,7 @@ class LowFreqTemplateCodec:
         trace = {
             "status": "ok",
             "lf_score": lf_score,
+            "lf_channel_score": lf_score,
             "raw_correlation": raw_corr,
             "correlation_score": float(correlation_score),
             "codeword_agreement": round(codeword_agreement, 8),

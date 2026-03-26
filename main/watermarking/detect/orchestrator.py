@@ -74,6 +74,81 @@ def _as_dict_payload(value: Any) -> Dict[str, Any] | None:
     return None
 
 
+def _coerce_optional_finite_score(value: Any) -> Optional[float]:
+    """
+    功能：将候选值解析为有限浮点分数。
+
+    Coerce a candidate value into a finite float score.
+
+    Args:
+        value: Candidate score value.
+
+    Returns:
+        Finite float when available; otherwise None.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        numeric_value = float(value)
+        if np.isfinite(numeric_value):
+            return numeric_value
+    return None
+
+
+def _synchronize_content_score_aliases(content_evidence_payload: Dict[str, Any]) -> None:
+    """
+    功能：同步内容链正式分数字段与兼容别名。
+
+    Synchronize canonical content and LF score fields with compatibility aliases.
+
+    Args:
+        content_evidence_payload: Mutable content evidence payload.
+
+    Returns:
+        None.
+    """
+    if not isinstance(content_evidence_payload, dict):
+        raise TypeError("content_evidence_payload must be dict")
+
+    score_parts_node = content_evidence_payload.get("score_parts")
+    score_parts = cast(Dict[str, Any], score_parts_node) if isinstance(score_parts_node, dict) else None
+
+    content_chain_score = (
+        _coerce_optional_finite_score(content_evidence_payload.get(eval_metrics.CONTENT_CHAIN_SCORE_NAME))
+        or _coerce_optional_finite_score(content_evidence_payload.get("score"))
+        or _coerce_optional_finite_score(content_evidence_payload.get("content_score"))
+    )
+    if content_chain_score is not None:
+        content_evidence_payload[eval_metrics.CONTENT_CHAIN_SCORE_NAME] = content_chain_score
+        content_evidence_payload["score"] = content_chain_score
+        content_evidence_payload["content_score"] = content_chain_score
+        if score_parts is not None:
+            score_parts[eval_metrics.CONTENT_CHAIN_SCORE_NAME] = content_chain_score
+            score_parts["content_score"] = content_chain_score
+
+    lf_channel_score = (
+        _coerce_optional_finite_score(content_evidence_payload.get(eval_metrics.LF_CHANNEL_SCORE_NAME))
+        or _coerce_optional_finite_score(content_evidence_payload.get("lf_score"))
+    )
+    if lf_channel_score is not None:
+        content_evidence_payload[eval_metrics.LF_CHANNEL_SCORE_NAME] = lf_channel_score
+        content_evidence_payload["lf_score"] = lf_channel_score
+        if score_parts is not None:
+            score_parts[eval_metrics.LF_CHANNEL_SCORE_NAME] = lf_channel_score
+            score_parts["lf_score"] = lf_channel_score
+
+    lf_correlation_score = (
+        _coerce_optional_finite_score(content_evidence_payload.get(eval_metrics.LF_CORRELATION_SCORE_NAME))
+        or _coerce_optional_finite_score(content_evidence_payload.get("detect_lf_score"))
+    )
+    if lf_correlation_score is not None:
+        content_evidence_payload[eval_metrics.LF_CORRELATION_SCORE_NAME] = lf_correlation_score
+        content_evidence_payload["detect_lf_score"] = lf_correlation_score
+        if score_parts is not None:
+            score_parts[eval_metrics.LF_CORRELATION_SCORE_NAME] = lf_correlation_score
+            score_parts["detect_lf_score"] = lf_correlation_score
+
+
 def _call_content_extractor_extract(
     extractor: Any,
     cfg: Dict[str, Any],
@@ -1309,6 +1384,9 @@ def _build_lf_protocol_control_section(
         "same_seed_control_trace_digest": lf_result.get("same_seed_control_trace_digest"),
         "same_seed_control_trajectory_digest": lf_result.get("same_seed_control_trajectory_digest"),
         "detect_exact_timestep_coeffs_same_seed_control": same_seed_control_coeffs,
+        eval_metrics.LF_CHANNEL_SCORE_NAME: lf_result.get(eval_metrics.LF_CHANNEL_SCORE_NAME),
+        eval_metrics.LF_CORRELATION_SCORE_NAME: lf_result.get(eval_metrics.LF_CORRELATION_SCORE_NAME),
+        "lf_attestation_score": lf_result.get("lf_attestation_score"),
         "cross_seed_protocol_loss_count": None,
         "same_seed_residual_loss_count": None,
         "cross_seed_protocol_loss_ratio": None,
@@ -1781,6 +1859,9 @@ def _build_lf_attestation_trace_artifact(
         "attestation_digest": attestation_digest,
         "event_binding_digest": event_binding_digest,
         "trace_commit": trace_commit,
+        eval_metrics.CONTENT_CHAIN_SCORE_NAME: lf_result.get(eval_metrics.CONTENT_CHAIN_SCORE_NAME),
+        eval_metrics.LF_CHANNEL_SCORE_NAME: lf_result.get(eval_metrics.LF_CHANNEL_SCORE_NAME),
+        eval_metrics.LF_CORRELATION_SCORE_NAME: lf_result.get(eval_metrics.LF_CORRELATION_SCORE_NAME),
         "lf_attestation_score": lf_result.get("lf_attestation_score"),
         "agreement_count": lf_result.get("agreement_count"),
         "n_bits_compared": lf_result.get("n_bits_compared"),
@@ -2781,7 +2862,13 @@ def run_detect_orchestrator(
 
         # 追加 detect 侧分数与一致性状态到 content_evidence
         content_evidence_payload["detect_lf_score"] = detect_lf_score
+        content_evidence_payload[eval_metrics.LF_CORRELATION_SCORE_NAME] = detect_lf_score
         content_evidence_payload["detect_hf_score"] = detect_hf_score
+        score_parts_node = content_evidence_payload.get("score_parts")
+        if isinstance(score_parts_node, dict):
+            score_parts = cast(Dict[str, Any], score_parts_node)
+            score_parts[eval_metrics.LF_CORRELATION_SCORE_NAME] = detect_lf_score
+            score_parts["detect_lf_score"] = detect_lf_score
         content_evidence_payload.update(_build_detect_lf_observability_fields(detect_lf_status))
         # hf_basis is None（detect plan 未提供 HF basis）时，显式写入 HF 缺失原因。
         if hf_basis is None:
@@ -2871,6 +2958,7 @@ def run_detect_orchestrator(
     if isinstance(content_evidence_payload, dict):
         if isinstance(attestation_context.get("event_binding_digest"), str):
             content_evidence_payload["attestation_event_digest"] = attestation_context.get("event_binding_digest")
+        _synchronize_content_score_aliases(content_evidence_payload)
     if isinstance(geometry_evidence_payload, dict):
         if isinstance(attestation_context.get("event_binding_digest"), str):
             geometry_evidence_payload["attestation_event_digest"] = attestation_context.get("event_binding_digest")
@@ -2918,6 +3006,11 @@ def run_detect_orchestrator(
         lf_attestation_features=lf_attestation_features,
         lf_attestation_trace_context=lf_attestation_trace_context,
     )
+    if isinstance(content_evidence_payload, dict) and isinstance(attestation_result, dict):
+        lf_attestation_score = _coerce_optional_finite_score(attestation_result.get("lf_attestation_score"))
+        if lf_attestation_score is not None:
+            content_evidence_payload["lf_attestation_score"] = lf_attestation_score
+        _synchronize_content_score_aliases(content_evidence_payload)
 
     # 删除临时 transient 字段，确保不写入 records
     cfg.pop("__detect_trajectory_latent_cache__", None)
@@ -3110,14 +3203,23 @@ def _bind_scores_if_ok(content_evidence_payload: Dict[str, Any]) -> None:
         score_parts = cast(Dict[str, Any], score_parts_node)
     if status_value != "ok":
         content_evidence_payload["score"] = None
+        content_evidence_payload["content_score"] = None
+        content_evidence_payload[eval_metrics.CONTENT_CHAIN_SCORE_NAME] = None
         content_evidence_payload["lf_score"] = None
+        content_evidence_payload[eval_metrics.LF_CHANNEL_SCORE_NAME] = None
         content_evidence_payload["hf_score"] = None
         content_evidence_payload["detect_lf_score"] = None
+        content_evidence_payload[eval_metrics.LF_CORRELATION_SCORE_NAME] = None
         content_evidence_payload["detect_hf_score"] = None
         if score_parts is not None:
             for numeric_key in [
+                "score",
                 "lf_score",
                 "hf_score",
+                "content_score",
+                eval_metrics.CONTENT_CHAIN_SCORE_NAME,
+                eval_metrics.LF_CHANNEL_SCORE_NAME,
+                eval_metrics.LF_CORRELATION_SCORE_NAME,
                 "content_score",
                 "detect_lf_score",
                 "detect_hf_score",
@@ -3126,7 +3228,16 @@ def _bind_scores_if_ok(content_evidence_payload: Dict[str, Any]) -> None:
                     score_parts[numeric_key] = None
         return
 
-    for field_name in ["score", "lf_score", "hf_score"]:
+    for field_name in [
+        "score",
+        "content_score",
+        eval_metrics.CONTENT_CHAIN_SCORE_NAME,
+        "lf_score",
+        eval_metrics.LF_CHANNEL_SCORE_NAME,
+        "hf_score",
+        "detect_lf_score",
+        eval_metrics.LF_CORRELATION_SCORE_NAME,
+    ]:
         score_value = content_evidence_payload.get(field_name)
         if score_value is None:
             continue
@@ -3138,6 +3249,8 @@ def _bind_scores_if_ok(content_evidence_payload: Dict[str, Any]) -> None:
             content_evidence_payload["hf_score"] = None
             content_evidence_payload["score_parts"] = None
             return
+
+    _synchronize_content_score_aliases(content_evidence_payload)
 
 
 def _build_hf_detect_evidence(
@@ -3666,7 +3779,10 @@ def _bind_raw_scores_to_content_payload(
     hf_trace = cast(Dict[str, Any], hf_node) if isinstance(hf_node, dict) else {}
 
     content_evidence_payload["lf_score"] = lf_score
+    content_evidence_payload[eval_metrics.LF_CHANNEL_SCORE_NAME] = lf_score
     score_parts["lf_detect_trace"] = lf_trace
+    score_parts[eval_metrics.LF_CHANNEL_SCORE_NAME] = lf_score
+    score_parts["lf_score"] = lf_score
     lf_template_status = lf_trace.get("lf_status")
     if isinstance(lf_template_status, str) and lf_template_status:
         score_parts["lf_template_status"] = lf_template_status
@@ -3699,6 +3815,8 @@ def _bind_raw_scores_to_content_payload(
             score_parts["hf_absent_reason"] = hf_trace.get("hf_absent_reason")
         if "hf_failure_reason" in hf_trace:
             score_parts["hf_failure_reason"] = hf_trace.get("hf_failure_reason")
+
+    _synchronize_content_score_aliases(content_evidence_payload)
 
 
 def _populate_detect_mask_digest_from_input_record(
@@ -5839,22 +5957,28 @@ def _extract_score_for_stats(record: Dict[str, Any], score_name: str) -> Optiona
     if not isinstance(score_name, str) or not score_name:
         raise TypeError("score_name must be non-empty str")
 
-    if score_name == "content_score":
+    if eval_metrics.is_content_chain_score_name(score_name):
         content_node = record.get("content_evidence_payload")
         if not isinstance(content_node, dict):
             return None
         content_payload = cast(Dict[str, Any], content_node)
         if content_payload.get("status") != "ok":
             return None
-        score_value = content_payload.get("score")
-    elif score_name == eval_metrics.MATRIX_LF_SCORE_NAME:
+        score_value = content_payload.get(eval_metrics.CONTENT_CHAIN_SCORE_NAME)
+        if not isinstance(score_value, (int, float)):
+            score_value = content_payload.get("score")
+        if not isinstance(score_value, (int, float)):
+            score_value = content_payload.get("content_score")
+    elif eval_metrics.is_lf_channel_score_name(score_name):
         content_node = record.get("content_evidence_payload")
         if not isinstance(content_node, dict):
             return None
         content_payload = cast(Dict[str, Any], content_node)
         if content_payload.get("status") != "ok":
             return None
-        score_value = content_payload.get("lf_score")
+        score_value = content_payload.get(eval_metrics.LF_CHANNEL_SCORE_NAME)
+        if not isinstance(score_value, (int, float)):
+            score_value = content_payload.get("lf_score")
     elif score_name == "content_attestation_score":
         attestation_node = record.get("attestation")
         if not isinstance(attestation_node, dict):
@@ -6438,6 +6562,7 @@ def _adapt_content_evidence_for_fusion(content_evidence: Any) -> Dict[str, Any]:
         result_dict = cast(Dict[str, Any], content_evidence)
         if "content_score" not in result_dict and "score" in result_dict:
             result_dict["content_score"] = result_dict["score"]
+        _synchronize_content_score_aliases(result_dict)
         return result_dict
     
     # 尝试 .as_dict() 方法 
@@ -6448,6 +6573,7 @@ def _adapt_content_evidence_for_fusion(content_evidence: Any) -> Dict[str, Any]:
                 converted_dict = cast(Dict[str, Any], converted)
                 if "content_score" not in converted_dict and "score" in converted_dict:
                     converted_dict["content_score"] = converted_dict["score"]
+                _synchronize_content_score_aliases(converted_dict)
                 return converted_dict
         except Exception:
             # 如果 .as_dict() 失败，继续尝试属性提取 
@@ -6468,6 +6594,7 @@ def _adapt_content_evidence_for_fusion(content_evidence: Any) -> Dict[str, Any]:
     #  ContentEvidence 数据类只 score 字段（两者语义等价） 
     if "content_score" not in adapted and "score" in adapted:
         adapted["content_score"] = adapted["score"]
+    _synchronize_content_score_aliases(adapted)
     
     return adapted if adapted else {"status": "unknown"}
 
@@ -7669,6 +7796,18 @@ def verify_attestation(
     if not k_master:
         raise ValueError("k_master must be non-empty str")
 
+    lf_params = dict(lf_params) if isinstance(lf_params, dict) else {}
+    if isinstance(content_evidence, dict):
+        content_evidence_payload = cast(Dict[str, Any], content_evidence)
+        for field_name, field_value in [
+            (eval_metrics.CONTENT_CHAIN_SCORE_NAME, content_evidence_payload.get(eval_metrics.CONTENT_CHAIN_SCORE_NAME)),
+            (eval_metrics.LF_CHANNEL_SCORE_NAME, content_evidence_payload.get(eval_metrics.LF_CHANNEL_SCORE_NAME)),
+            (eval_metrics.LF_CORRELATION_SCORE_NAME, content_evidence_payload.get(eval_metrics.LF_CORRELATION_SCORE_NAME)),
+        ]:
+            numeric_value = _coerce_optional_finite_score(field_value)
+            if numeric_value is not None:
+                lf_params[field_name] = numeric_value
+
     mismatch_reasons: list[str] = []
     bundle_verification: Optional[Dict[str, Any]] = None
     authenticity_status = "statement_only"
@@ -7835,6 +7974,9 @@ def verify_attestation(
                         "lf_exact_repair_mode",
                         "lf_exact_repair_applied",
                         "lf_exact_repair_summary",
+                        eval_metrics.CONTENT_CHAIN_SCORE_NAME,
+                        eval_metrics.LF_CHANNEL_SCORE_NAME,
+                        eval_metrics.LF_CORRELATION_SCORE_NAME,
                     ]:
                         if field_name in lf_params and field_name not in lf_result:
                             lf_result[field_name] = lf_params.get(field_name)
@@ -8057,6 +8199,9 @@ def verify_attestation(
         "status": image_evidence_status,
         "channel_scores": {"lf": s_lf, "hf": s_hf, "geo": s_geo},
         "channel_scores_raw": {"lf": s_lf, "hf": s_hf_raw, "geo": s_geo},
+        "lf_attestation_score": s_lf,
+        eval_metrics.LF_CHANNEL_SCORE_NAME: lf_params.get(eval_metrics.LF_CHANNEL_SCORE_NAME),
+        eval_metrics.LF_CORRELATION_SCORE_NAME: lf_params.get(eval_metrics.LF_CORRELATION_SCORE_NAME),
         "fusion_score": fusion_score,
         "content_attestation_score": content_attestation_score,
         "content_attestation_score_name": "content_attestation_score",
@@ -8096,6 +8241,9 @@ def verify_attestation(
         "event_attestation_statistics_score": event_attestation_statistics_score,
         "event_attestation_statistics_score_name": "event_attestation_statistics_score",
         "event_attestation_statistics_score_semantics": "legacy_alias_of_event_attestation_score_not_an_independent_statistics_semantics",
+        eval_metrics.LF_CHANNEL_SCORE_NAME: lf_params.get(eval_metrics.LF_CHANNEL_SCORE_NAME),
+        eval_metrics.LF_CORRELATION_SCORE_NAME: lf_params.get(eval_metrics.LF_CORRELATION_SCORE_NAME),
+        "lf_attestation_score": s_lf,
     }
 
     # (7) 构造审计摘要（可复算）。
@@ -8129,6 +8277,10 @@ def verify_attestation(
         "verdict": verdict,
         "fusion_score": fusion_score,
         "content_attestation_score": content_attestation_score,
+        eval_metrics.CONTENT_CHAIN_SCORE_NAME: lf_params.get(eval_metrics.CONTENT_CHAIN_SCORE_NAME),
+        eval_metrics.LF_CHANNEL_SCORE_NAME: lf_params.get(eval_metrics.LF_CHANNEL_SCORE_NAME),
+        eval_metrics.LF_CORRELATION_SCORE_NAME: lf_params.get(eval_metrics.LF_CORRELATION_SCORE_NAME),
+        "lf_attestation_score": s_lf,
         "channel_scores": {"lf": s_lf, "hf": s_hf, "geo": s_geo},
         "channel_scores_raw": {"lf": s_lf, "hf": s_hf_raw, "geo": s_geo},
         "hf_attestation_score": s_hf_raw,

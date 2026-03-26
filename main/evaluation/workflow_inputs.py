@@ -19,10 +19,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 
 from main.core import records_io
+from main.evaluation import metrics as eval_metrics
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-_CONTENT_SCORE_NAME = "content_score"
+_CONTENT_SCORE_NAME = eval_metrics.CONTENT_CHAIN_SCORE_NAME
 _EVENT_ATTESTATION_SCORE_NAME = "event_attestation_score"
 
 
@@ -179,13 +180,13 @@ def _resolve_content_score_source(record: Dict[str, Any]) -> Tuple[float | None,
     evidence_summary = cast(Dict[str, Any], evidence_summary_node) if isinstance(evidence_summary_node, dict) else {}
 
     candidates = [
+        ("content_evidence_payload.content_chain_score", content_payload.get("content_chain_score")),
         ("content_evidence_payload.score", content_payload.get("score")),
-        ("content_evidence_payload.detect_lf_score", content_payload.get("detect_lf_score")),
-        ("content_evidence_payload.detect_hf_score", content_payload.get("detect_hf_score")),
+        ("content_evidence_payload.content_score", content_payload.get("content_score")),
         ("content_evidence_payload.lf_score", content_payload.get("lf_score")),
         ("content_evidence_payload.hf_score", content_payload.get("hf_score")),
+        ("score_parts.content_chain_score", score_parts.get("content_chain_score")),
         ("score_parts.content_score", score_parts.get("content_score")),
-        ("score_parts.detect_lf_score", score_parts.get("detect_lf_score")),
         ("score_parts.hf_detect_trace.hf_score_raw", hf_detect_trace.get("hf_score_raw")),
         ("fusion_result.evidence_summary.content_score", evidence_summary.get("content_score")),
         ("record.score", record.get("score")),
@@ -475,7 +476,7 @@ def ensure_minimal_ground_truth_records(
     source_payload = _read_json_dict(source_path)
 
     score_name = stage_cfg.get("score_name", _CONTENT_SCORE_NAME)
-    if score_name == _CONTENT_SCORE_NAME:
+    if eval_metrics.is_content_chain_score_name(score_name):
         source_score, score_source = _resolve_content_score_source(source_payload)
     elif score_name == _EVENT_ATTESTATION_SCORE_NAME:
         source_score, score_source = _resolve_event_attestation_score_source(source_payload)
@@ -524,8 +525,10 @@ def ensure_minimal_ground_truth_records(
             else {}
         )
         positive_content["status"] = "ok"
-        if score_name == _CONTENT_SCORE_NAME:
+        if eval_metrics.is_content_chain_score_name(score_name):
             positive_content["score"] = float(source_score)
+            positive_content["content_chain_score"] = float(source_score)
+            positive_content["content_score"] = float(source_score)
             if isinstance(score_source, str) and score_source and score_source != "content_evidence_payload.score":
                 positive_content["calibration_score_recovery_reason"] = score_source
         positive_payload["content_evidence_payload"] = positive_content
@@ -552,8 +555,11 @@ def ensure_minimal_ground_truth_records(
         negative_content["status"] = "ok"
         negative_content["calibration_sample_origin"] = "workflow_minimal_ground_truth_negative"
         negative_content["calibration_sample_usage"] = "workflow_minimal_ground_truth_label_balance"
-        if score_name == _CONTENT_SCORE_NAME:
-            negative_content["score"] = float(source_score - 1.0 - pair_index * 1e-6)
+        if eval_metrics.is_content_chain_score_name(score_name):
+            negative_score = float(source_score - 1.0 - pair_index * 1e-6)
+            negative_content["score"] = negative_score
+            negative_content["content_chain_score"] = negative_score
+            negative_content["content_score"] = negative_score
         negative_payload["content_evidence_payload"] = negative_content
         _apply_negative_attestation_semantics(negative_payload)
         if score_name == _EVENT_ATTESTATION_SCORE_NAME:

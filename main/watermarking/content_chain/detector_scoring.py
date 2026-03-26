@@ -378,10 +378,11 @@ def extract_lf_score_from_detect_trajectory(
     plan_digest: Optional[str] = None,
 ) -> Tuple[Optional[float], str]:
     """
-    功能：从 detect 侧 trajectory cache 中取出 z_{t_e}，走 TFSW + LDPC 相关验证路径提取 LF 分数。
+    功能：从 detect 侧 trajectory cache 中取出 z_{t_e}，提取 LF 相关性诊断分数。
 
-    Extract LF score from detect-side trajectory latent via Trajectory Feature Space
-    Watermarking (TFSW) and LDPC whitened Pearson correlation.
+    Extract the LF correlation diagnostic score from detect-side trajectory
+    latent via Trajectory Feature Space Watermarking (TFSW) and LDPC whitened
+    Pearson correlation.
 
     Formal path: phi = extract_trajectory_feature(z_{t_e}, tfs),
     coeffs = phi @ projection_matrix, then correlate with LDPC codeword derived
@@ -397,8 +398,10 @@ def extract_lf_score_from_detect_trajectory(
         plan_digest: Plan digest for LDPC codeword derivation (same as embed side).
 
     Returns:
-        Tuple of (lf_score_or_none, status_str).
-        lf_score in [0, 1]; higher indicates watermark evidence (LDPC correlation).
+        Tuple of (lf_correlation_score_or_none, status_str).
+        The returned score is diagnostic-only and corresponds to the canonical
+        lf_correlation_score field. It must not be used as the formal LF-channel
+        score, which is owned by LowFreqTemplateCodec.detect_score().
     """
     import math as _math
     if not isinstance(cfg, dict):

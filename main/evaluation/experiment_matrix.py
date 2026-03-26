@@ -38,6 +38,15 @@ _FORBIDDEN_ARTIFACT_ANCHOR_FIELDS = {
     "injection_scope_manifest_bound_digest",
 }
 
+_SYSTEM_FINAL_SCOPE = "system_final"
+_CONTENT_CHAIN_SCOPE = "content_chain"
+_LF_CHANNEL_SCOPE = "lf_channel"
+_MATRIX_EVALUATION_SCOPES = {
+    _SYSTEM_FINAL_SCOPE,
+    _CONTENT_CHAIN_SCOPE,
+    _LF_CHANNEL_SCOPE,
+}
+
 
 def _relative_path_from_base(base_path: Path, path_value: Any) -> str:
     """
@@ -120,6 +129,7 @@ def build_experiment_grid(base_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     attack_families, attack_protocol_version, attack_protocol_digest = _resolve_attack_family_axis(base_cfg, matrix_cfg)
     ablation_variants = _resolve_ablation_axis(matrix_cfg)
     formal_validation_guards = _resolve_formal_validation_guards(matrix_cfg)
+    evaluation_scope = _resolve_matrix_primary_scope(matrix_cfg)
     formal_score_name = _resolve_matrix_formal_score_name(matrix_cfg)
 
     batch_root = matrix_cfg.get("batch_root", "outputs/experiment_matrix")
@@ -185,6 +195,8 @@ def build_experiment_grid(base_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
                         "attack_protocol_path": attack_protocol_path,
                         "max_samples": max_samples,
                         "allow_failed_semantics_collection": allow_failed_semantics_collection,
+                        "evaluation_scope": evaluation_scope,
+                        "primary_metric_name": _resolve_matrix_primary_metric_name(evaluation_scope),
                         "formal_score_name": formal_score_name,
                         "require_real_negative_cache": formal_validation_guards["require_real_negative_cache"],
                         "require_shared_thresholds": formal_validation_guards["require_shared_thresholds"],
@@ -225,6 +237,8 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
         "model_id": _safe_str(grid_item_cfg.get("model_id")),
         "seed": grid_item_cfg.get("seed") if isinstance(grid_item_cfg.get("seed"), int) else None,
         "attack_family": _safe_str(grid_item_cfg.get("attack_protocol_family")),
+        "evaluation_scope": _safe_str(grid_item_cfg.get("evaluation_scope")),
+        "primary_metric_name": _safe_str(grid_item_cfg.get("primary_metric_name")),
         "status": "failed",
         "failure_reason": "<absent>",
         "cfg_digest": _safe_str(grid_item_cfg.get("cfg_digest")),
@@ -326,6 +340,7 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
                     "n_rescue_success": metrics_obj.get("n_rescue_success"),
                     "conditional_fpr_estimate": metrics_obj.get("conditional_fpr_estimate"),
                     "conditional_fpr_n": metrics_obj.get("conditional_fpr_n"),
+                    "system_final_metrics": _build_system_final_metrics_for_run(run_root),
                 },
                 "hf_truncation_baseline_comparison": _extract_hf_truncation_baseline_comparison_from_detect_record(run_root),
                 "detect_gate_relaxed": bool(detect_gate_info.get("gate_relaxed", False)),
@@ -379,6 +394,155 @@ def _coerce_finite_float(value: Any) -> Optional[float]:
     return None
 
 
+def _resolve_matrix_primary_scope(matrix_cfg: Dict[str, Any]) -> str:
+    """Resolve the primary evaluation scope for experiment_matrix."""
+    if not isinstance(matrix_cfg, dict):
+        raise TypeError("matrix_cfg must be dict")
+
+    evaluation_scope = matrix_cfg.get("evaluation_scope", _SYSTEM_FINAL_SCOPE)
+    if not isinstance(evaluation_scope, str) or not evaluation_scope:
+        raise TypeError("experiment_matrix.evaluation_scope must be non-empty str")
+    if evaluation_scope not in _MATRIX_EVALUATION_SCOPES:
+        raise ValueError(
+            "experiment_matrix.evaluation_scope must be one of "
+            f"{sorted(_MATRIX_EVALUATION_SCOPES)}"
+        )
+    return evaluation_scope
+
+
+def _extract_matrix_primary_scope_from_grid_item(grid_item_cfg: Dict[str, Any]) -> str:
+    """Extract validated primary evaluation scope from one grid item."""
+    if not isinstance(grid_item_cfg, dict):
+        raise TypeError("grid_item_cfg must be dict")
+
+    evaluation_scope = grid_item_cfg.get("evaluation_scope", _SYSTEM_FINAL_SCOPE)
+    if not isinstance(evaluation_scope, str) or not evaluation_scope:
+        raise TypeError("grid item evaluation_scope must be non-empty str")
+    if evaluation_scope not in _MATRIX_EVALUATION_SCOPES:
+        raise ValueError(f"unsupported grid item evaluation_scope: {evaluation_scope}")
+    return evaluation_scope
+
+
+def _resolve_matrix_primary_metric_name(evaluation_scope: str) -> str:
+    """Resolve the primary metric field name for one evaluation scope."""
+    if evaluation_scope == _SYSTEM_FINAL_SCOPE:
+        return "system_final_metrics"
+    if evaluation_scope == _CONTENT_CHAIN_SCOPE:
+        return eval_metrics.CONTENT_CHAIN_SCORE_NAME
+    if evaluation_scope == _LF_CHANNEL_SCOPE:
+        return eval_metrics.LF_CHANNEL_SCORE_NAME
+    raise ValueError(f"unsupported evaluation_scope: {evaluation_scope}")
+
+
+def _extract_system_final_prediction(record_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract real final-decision outcomes for system-level matrix evaluation."""
+    if not isinstance(record_payload, dict):
+        raise TypeError("record_payload must be dict")
+
+    final_decision_node = record_payload.get("final_decision")
+    final_decision = final_decision_node if isinstance(final_decision_node, dict) else {}
+    attestation_node = record_payload.get("attestation")
+    attestation_payload = attestation_node if isinstance(attestation_node, dict) else {}
+    final_attestation_node = attestation_payload.get("final_event_attested_decision")
+    final_attestation = final_attestation_node if isinstance(final_attestation_node, dict) else {}
+    image_evidence_node = attestation_payload.get("image_evidence_result")
+    image_evidence_result = image_evidence_node if isinstance(image_evidence_node, dict) else {}
+
+    final_decision_positive = final_decision.get("is_watermarked") if isinstance(final_decision.get("is_watermarked"), bool) else False
+    event_attested_positive = (
+        final_attestation.get("is_event_attested")
+        if isinstance(final_attestation.get("is_event_attested"), bool)
+        else False
+    )
+    system_positive = bool(final_decision_positive or event_attested_positive)
+
+    return {
+        "system_positive": system_positive,
+        "final_decision_positive": bool(final_decision_positive),
+        "event_attested_positive": bool(event_attested_positive),
+        "geo_rescue_applied": bool(image_evidence_result.get("geo_rescue_applied", False)),
+    }
+
+
+def _build_system_final_metrics_for_run(run_root: Path) -> Dict[str, Any]:
+    """Build system-level metrics from real final decision fields."""
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+
+    candidate_dirs = [
+        run_root / "artifacts" / "evaluate_inputs" / "formal_evaluate_records",
+        run_root / "artifacts" / "evaluate_inputs" / "labelled_detect_records",
+    ]
+    record_paths: List[Path] = []
+    for candidate_dir in candidate_dirs:
+        if candidate_dir.exists() and candidate_dir.is_dir():
+            record_paths = sorted(path for path in candidate_dir.glob("*.json") if path.is_file())
+            if record_paths:
+                break
+    if not record_paths:
+        detect_record_path = run_root / "records" / "detect_record.json"
+        if detect_record_path.exists() and detect_record_path.is_file():
+            record_paths = [detect_record_path]
+
+    n_total = 0
+    n_positive = 0
+    n_negative = 0
+    system_tp = 0
+    system_fp = 0
+    final_decision_tp = 0
+    final_decision_fp = 0
+    event_attestation_tp = 0
+    event_attestation_fp = 0
+    geo_rescue_applied_count = 0
+
+    for record_path in record_paths:
+        record_payload = _read_optional_json(record_path)
+        if not isinstance(record_payload, dict) or not record_payload:
+            continue
+        label_value = _resolve_ground_truth_label_for_record(record_payload)
+        if label_value is None:
+            continue
+        prediction = _extract_system_final_prediction(record_payload)
+        n_total += 1
+        if label_value:
+            n_positive += 1
+            if prediction["system_positive"]:
+                system_tp += 1
+            if prediction["final_decision_positive"]:
+                final_decision_tp += 1
+            if prediction["event_attested_positive"]:
+                event_attestation_tp += 1
+        else:
+            n_negative += 1
+            if prediction["system_positive"]:
+                system_fp += 1
+            if prediction["final_decision_positive"]:
+                final_decision_fp += 1
+            if prediction["event_attested_positive"]:
+                event_attestation_fp += 1
+        if prediction["geo_rescue_applied"]:
+            geo_rescue_applied_count += 1
+
+    def _safe_rate(numerator: int, denominator: int) -> Optional[float]:
+        if denominator <= 0:
+            return None
+        return float(numerator / denominator)
+
+    return {
+        "scope": _SYSTEM_FINAL_SCOPE,
+        "n_total": n_total,
+        "n_positive": n_positive,
+        "n_negative": n_negative,
+        "system_tpr": _safe_rate(system_tp, n_positive),
+        "system_fpr": _safe_rate(system_fp, n_negative),
+        "final_decision_tpr": _safe_rate(final_decision_tp, n_positive),
+        "final_decision_fpr": _safe_rate(final_decision_fp, n_negative),
+        "event_attestation_tpr": _safe_rate(event_attestation_tp, n_positive),
+        "event_attestation_fpr": _safe_rate(event_attestation_fp, n_negative),
+        "geo_rescue_applied_rate": _safe_rate(geo_rescue_applied_count, n_total),
+    }
+
+
 def _resolve_matrix_calibration_score(record_payload: Dict[str, Any]) -> Tuple[Optional[float], Optional[str]]:
     """Resolve the best available calibration score from a detect record payload."""
     if not isinstance(record_payload, dict):
@@ -398,13 +562,15 @@ def _resolve_matrix_calibration_score(record_payload: Dict[str, Any]) -> Tuple[O
     evidence_summary_payload = fusion_result.get("evidence_summary") if isinstance(fusion_result.get("evidence_summary"), dict) else {}
 
     score_candidates = [
+        ("content_evidence_payload.content_chain_score", content_node.get(eval_metrics.CONTENT_CHAIN_SCORE_NAME)),
         ("content_evidence_payload.score", content_node.get("score")),
-        ("content_evidence_payload.detect_lf_score", content_node.get("detect_lf_score")),
+        ("content_evidence_payload.content_score", content_node.get("content_score")),
+        ("content_evidence_payload.lf_channel_score", content_node.get(eval_metrics.LF_CHANNEL_SCORE_NAME)),
         ("content_evidence_payload.lf_score", content_node.get("lf_score")),
         ("content_evidence_payload.hf_score", content_node.get("hf_score")),
         ("content_evidence_payload.detect_hf_score", content_node.get("detect_hf_score")),
+        ("content_evidence_payload.score_parts.content_chain_score", score_parts.get(eval_metrics.CONTENT_CHAIN_SCORE_NAME)),
         ("content_evidence_payload.score_parts.content_score", score_parts.get("content_score")),
-        ("content_evidence_payload.score_parts.detect_lf_score", score_parts.get("detect_lf_score")),
         ("content_evidence_payload.score_parts.hf_detect_trace.hf_score_raw", hf_trace.get("hf_score_raw")),
         ("content_evidence.score", content_evidence.get("score")),
         ("record.score", record_payload.get("score")),
@@ -435,24 +601,30 @@ def _resolve_formal_matrix_score(
     if status_value != "ok":
         return None, f"content_evidence_payload.status={_safe_str(status_value)}"
 
-    if score_name == eval_metrics.MATRIX_LF_SCORE_NAME:
-        score_value = _coerce_finite_float(content_payload.get("lf_score"))
+    if eval_metrics.is_lf_channel_score_name(score_name):
+        score_value = _coerce_finite_float(content_payload.get(eval_metrics.LF_CHANNEL_SCORE_NAME))
         if score_value is None:
-            return None, "content_evidence_payload.lf_score_missing_or_nonfinite"
-        return score_value, "content_evidence_payload.lf_score"
+            score_value = _coerce_finite_float(content_payload.get("lf_score"))
+        if score_value is None:
+            return None, "content_evidence_payload.lf_channel_score_missing_or_nonfinite"
+        return score_value, "content_evidence_payload.lf_channel_score"
 
-    if score_name != "content_score":
+    if not eval_metrics.is_content_chain_score_name(score_name):
         raise ValueError(f"unsupported matrix formal score_name: {score_name}")
 
     recovery_reason = content_payload.get("calibration_score_recovery_reason")
     if isinstance(recovery_reason, str) and recovery_reason:
         return None, f"recovered_from={recovery_reason}"
 
-    score_value = _coerce_finite_float(content_payload.get("score"))
+    score_value = _coerce_finite_float(content_payload.get(eval_metrics.CONTENT_CHAIN_SCORE_NAME))
     if score_value is None:
-        return None, "content_evidence_payload.score_missing_or_nonfinite"
+        score_value = _coerce_finite_float(content_payload.get("score"))
+    if score_value is None:
+        score_value = _coerce_finite_float(content_payload.get("content_score"))
+    if score_value is None:
+        return None, "content_evidence_payload.content_chain_score_missing_or_nonfinite"
 
-    return score_value, "content_evidence_payload.score"
+    return score_value, "content_evidence_payload.content_chain_score"
 
 
 def _ensure_matrix_calibration_compatible_content_payload(
@@ -491,25 +663,29 @@ def _ensure_matrix_calibration_compatible_content_payload(
                 "formal matrix content payload must preserve status=ok; "
                 f"got_status={_safe_str(existing_status)}"
             )
-        if score_name == eval_metrics.MATRIX_LF_SCORE_NAME:
-            existing_score = _coerce_finite_float(content_node.get("lf_score"))
+        if eval_metrics.is_lf_channel_score_name(score_name):
+            existing_score = _coerce_finite_float(content_node.get(eval_metrics.LF_CHANNEL_SCORE_NAME))
+            if existing_score is None:
+                existing_score = _coerce_finite_float(content_node.get("lf_score"))
             if existing_score is None:
                 raise RuntimeError(
-                    "formal matrix content payload requires canonical content_evidence_payload.lf_score"
+                    "formal matrix content payload requires canonical content_evidence_payload.lf_channel_score"
                 )
-            if score_source != "content_evidence_payload.lf_score":
+            if score_source != "content_evidence_payload.lf_channel_score":
                 raise RuntimeError(
-                    "formal matrix content payload forbids non-canonical matrix_lf_score source; "
+                    "formal matrix content payload forbids non-canonical lf_channel_score source; "
                     f"score_source={_safe_str(score_source)}"
                 )
-        elif score_name == "content_score":
-            existing_score = _coerce_finite_float(content_node.get("score"))
+        elif eval_metrics.is_content_chain_score_name(score_name):
+            existing_score = _coerce_finite_float(content_node.get(eval_metrics.CONTENT_CHAIN_SCORE_NAME))
+            if existing_score is None:
+                existing_score = _coerce_finite_float(content_node.get("score"))
             recovery_reason = content_node.get("calibration_score_recovery_reason")
             if existing_score is None:
                 raise RuntimeError(
-                    "formal matrix content payload requires canonical content_evidence_payload.score"
+                    "formal matrix content payload requires canonical content_evidence_payload.content_chain_score"
                 )
-            if score_source != "content_evidence_payload.score":
+            if score_source != "content_evidence_payload.content_chain_score":
                 raise RuntimeError(
                     "formal matrix content payload forbids recovered score source; "
                     f"score_source={_safe_str(score_source)}"
@@ -527,16 +703,20 @@ def _ensure_matrix_calibration_compatible_content_payload(
     content_node.pop("calibration_score_recovery_reason", None)
     content_node.pop("calibration_sample_origin", None)
 
-    if score_name == eval_metrics.MATRIX_LF_SCORE_NAME:
+    if eval_metrics.is_lf_channel_score_name(score_name):
+        content_node[eval_metrics.LF_CHANNEL_SCORE_NAME] = float(score_value)
         content_node["lf_score"] = float(score_value)
         score_parts_node = content_node.get("score_parts")
         if isinstance(score_parts_node, dict):
+            score_parts_node[eval_metrics.LF_CHANNEL_SCORE_NAME] = float(score_value)
             score_parts_node["lf_score"] = float(score_value)
         return
 
-    if score_name == "content_score":
+    if eval_metrics.is_content_chain_score_name(score_name):
+        content_node[eval_metrics.CONTENT_CHAIN_SCORE_NAME] = float(score_value)
         content_node["score"] = float(score_value)
-        if not require_canonical_matrix_score and isinstance(score_source, str) and score_source != "content_evidence_payload.score":
+        content_node["content_score"] = float(score_value)
+        if not require_canonical_matrix_score and isinstance(score_source, str) and score_source != "content_evidence_payload.content_chain_score":
             content_node["calibration_score_recovery_reason"] = score_source
             if isinstance(recovered_sample_origin, str):
                 content_node["calibration_sample_origin"] = recovered_sample_origin
@@ -840,6 +1020,8 @@ def build_aggregate_report(
         anchor_row = {
             "grid_item_digest": grid_item_digest,
             "status": status_value,
+            "evaluation_scope": _safe_str(item.get("evaluation_scope")),
+            "primary_metric_name": _safe_str(item.get("primary_metric_name")),
             "cfg_digest": _safe_str(item.get("cfg_digest")),
             "plan_digest": _safe_str(item.get("plan_digest")),
             "thresholds_digest": _safe_str(item.get("thresholds_digest")),
@@ -859,11 +1041,14 @@ def build_aggregate_report(
             {
                 "grid_item_digest": grid_item_digest,
                 "status": status_value,
+                "evaluation_scope": _safe_str(item.get("evaluation_scope")),
+                "primary_metric_name": _safe_str(item.get("primary_metric_name")),
                 "tpr_at_fpr": metrics_obj.get("tpr_at_fpr"),
                 "geo_available_rate": metrics_obj.get("geo_available_rate"),
                 "rescue_rate": metrics_obj.get("rescue_rate"),
                 "reject_rate": metrics_obj.get("reject_rate"),
                 "reject_rate_breakdown": metrics_obj.get("reject_rate_breakdown", {}),
+                "system_final_metrics": metrics_obj.get("system_final_metrics"),
             }
         )
 
@@ -882,6 +1067,7 @@ def build_aggregate_report(
 
     report = {
         "aggregate_report_version": "aggregate_v1",
+        "primary_evaluation_scope": _safe_str(experiment_results[0].get("evaluation_scope")) if experiment_results else _SYSTEM_FINAL_SCOPE,
         "experiment_matrix_digest": digests.canonical_sha256(canonical_items),
         "experiment_count": len(experiment_results),
         "success_count": sum(1 for item in experiment_results if item.get("status") == "ok"),
@@ -916,14 +1102,14 @@ def _resolve_matrix_formal_score_name(matrix_cfg: Dict[str, Any]) -> str:
     if not isinstance(matrix_cfg, dict):
         raise TypeError("matrix_cfg must be dict")
 
-    score_name = matrix_cfg.get("formal_score_name", eval_metrics.MATRIX_LF_SCORE_NAME)
+    score_name = matrix_cfg.get("formal_score_name", eval_metrics.LF_CHANNEL_SCORE_NAME)
     if not isinstance(score_name, str) or not score_name:
         raise TypeError("experiment_matrix.formal_score_name must be non-empty str")
-    if score_name != eval_metrics.MATRIX_LF_SCORE_NAME:
+    if not eval_metrics.is_lf_channel_score_name(score_name):
         raise ValueError(
-            "experiment_matrix.formal_score_name must remain matrix_lf_score for the current formal profile"
+            "experiment_matrix.formal_score_name must remain lf_channel_score-compatible for the current formal profile"
         )
-    return score_name
+    return eval_metrics.LF_CHANNEL_SCORE_NAME
 
 
 def _extract_matrix_formal_score_name_from_grid_item(grid_item_cfg: Dict[str, Any]) -> str:
@@ -931,14 +1117,14 @@ def _extract_matrix_formal_score_name_from_grid_item(grid_item_cfg: Dict[str, An
     if not isinstance(grid_item_cfg, dict):
         raise TypeError("grid_item_cfg must be dict")
 
-    score_name = grid_item_cfg.get("formal_score_name", eval_metrics.MATRIX_LF_SCORE_NAME)
+    score_name = grid_item_cfg.get("formal_score_name", eval_metrics.LF_CHANNEL_SCORE_NAME)
     if not isinstance(score_name, str) or not score_name:
         raise TypeError("grid item formal_score_name must be non-empty str")
-    if score_name != eval_metrics.MATRIX_LF_SCORE_NAME:
+    if not eval_metrics.is_lf_channel_score_name(score_name):
         raise ValueError(
-            "grid item formal_score_name must remain matrix_lf_score for the current formal profile"
+            "grid item formal_score_name must remain lf_channel_score-compatible for the current formal profile"
         )
-    return score_name
+    return eval_metrics.LF_CHANNEL_SCORE_NAME
 
 
 def _resolve_model_axis(base_cfg: Dict[str, Any], matrix_cfg: Dict[str, Any]) -> List[str]:
@@ -1103,9 +1289,9 @@ def _assert_formal_validation_prerequisites(
                 else:
                     _, invalid_reason = _resolve_formal_matrix_score(neg_record, formal_score_name)
                     expected_source = (
-                        "content_evidence_payload.lf_score"
-                        if formal_score_name == eval_metrics.MATRIX_LF_SCORE_NAME
-                        else "content_evidence_payload.score"
+                        "content_evidence_payload.lf_channel_score"
+                        if eval_metrics.is_lf_channel_score_name(formal_score_name)
+                        else "content_evidence_payload.content_chain_score"
                     )
                     if invalid_reason != expected_source:
                         invalid_real_negative_keys.append(
@@ -1510,9 +1696,9 @@ def _run_global_calibrate(
             continue
         score_val, score_source = _resolve_formal_matrix_score(neg_record, formal_score_name)
         expected_source = (
-            "content_evidence_payload.lf_score"
-            if formal_score_name == eval_metrics.MATRIX_LF_SCORE_NAME
-            else "content_evidence_payload.score"
+            "content_evidence_payload.lf_channel_score"
+            if eval_metrics.is_lf_channel_score_name(formal_score_name)
+            else "content_evidence_payload.content_chain_score"
         )
         if not isinstance(score_val, float) or score_source != expected_source:
             invalid_negatives.append(
@@ -1653,9 +1839,9 @@ def _stage_external_shared_threshold_negatives(
             continue
         score_val, score_source = _resolve_formal_matrix_score(neg_record, formal_score_name)
         expected_source = (
-            "content_evidence_payload.lf_score"
-            if formal_score_name == eval_metrics.MATRIX_LF_SCORE_NAME
-            else "content_evidence_payload.score"
+            "content_evidence_payload.lf_channel_score"
+            if eval_metrics.is_lf_channel_score_name(formal_score_name)
+            else "content_evidence_payload.content_chain_score"
         )
         if not isinstance(score_val, float) or score_source != expected_source:
             continue
@@ -2144,9 +2330,9 @@ def _prepare_formal_evaluate_detect_records_glob_for_matrix(
 
     formal_score_name = _extract_matrix_formal_score_name_from_grid_item(grid_item_cfg)
     expected_source = (
-        "content_evidence_payload.lf_score"
-        if formal_score_name == eval_metrics.MATRIX_LF_SCORE_NAME
-        else "content_evidence_payload.score"
+        "content_evidence_payload.lf_channel_score"
+        if eval_metrics.is_lf_channel_score_name(formal_score_name)
+        else "content_evidence_payload.content_chain_score"
     )
 
     attack_aware_path = _prepare_detect_record_for_attack_grouping(run_root, grid_item_cfg)
@@ -2655,7 +2841,7 @@ def _build_hf_truncation_baseline_comparison_table(experiment_results: List[Dict
         "comparison_definition": {
             "reference_name": "hf_truncation_baseline",
             "reference_source": "detect_record.hf_truncation_baseline.score",
-            "target_source": "content_evidence_payload.score",
+            "target_source": "content_evidence_payload.content_chain_score",
             "directionality": "positive_delta_means_target_score_higher_than_hf_truncation",
         },
         "rows": rows,

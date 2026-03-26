@@ -9,7 +9,7 @@
 # 合同版本与冻结元信息
 # - 用于记录与审计，不应作为运行期分支逻辑的自由输入。
 # ------------------------------
-contract_version: "v1.16"     # 冻结契约版本号；v1.1→v1.2 formal path 最终闭包收口（2026-03-12）：historical_field_paths 段已从当前 formal contract 文件彻底移除，旧字段信息不再显式保留在任何 formal 文件中；当前 formal contract 只绑定当前正式机制。v1.2→v1.3 从可选字段列表中移除 embed_trace.identity_mode 与 embed_trace.identity_reason（2026-03-12）：生产嵌入实现不再承载 identity baseline。v1.3→v1.4 追加 attestation signed bundle 验签门禁语义（2026-03-13）：onefile/detect 溯源结果若声明 signed bundle，则必须执行内部 trust chain 验证。v1.4→v1.5：追加 geometry coarse registration 与 recovered-domain sync revalidation 细分字段冻结登记。v1.5→v1.6：为 policy_path semantics 新增 geometry_chain_required_but_unavailable fail_reason 的 append-only 冻结登记（2026-03-13）。v1.6→v1.7：追加 negative branch attestation provenance 的 append-only 冻结注册（2026-03-16）。v1.7→v1.8：追加 attestation_source 字段与 statement-only provenance no-bundle 合同说明（2026-03-17）。v1.8→v1.9：追加 exact LF observability 字段与 detect runtime canonical 兼容命名字段（2026-03-19）。v1.9→v1.10：追加 attestation trace artifact 的 append-only 白名单治理（2026-03-21）。v1.10→v1.11：追加 LF 闭环对齐表与 planner 风险报告 artifact 的 append-only 白名单治理（2026-03-21）。v1.11→v1.12：追加 LF retain breakdown 与 GEO rescue diagnostics artifact 的 append-only 白名单治理（2026-03-22）。v1.12→v1.13：追加 LF protocol control 与 GEO scale-control diagnostics 字段治理（2026-03-22）。v1.13→v1.14：追加 LF formal exact object-binding source 字段治理（2026-03-22）。v1.14→v1.15：追加 LF exact repair 与 GEO score rebinding 诊断字段治理（2026-03-22）。v1.15→v1.16：追加 GEO diagnostics 干净别名字段与 LF 分类表达收口（2026-03-23）。
+contract_version: "v1.17"     # 冻结契约版本号；v1.1→v1.2 formal path 最终闭包收口（2026-03-12）：historical_field_paths 段已从当前 formal contract 文件彻底移除，旧字段信息不再显式保留在任何 formal 文件中；当前 formal contract 只绑定当前正式机制。v1.2→v1.3 从可选字段列表中移除 embed_trace.identity_mode 与 embed_trace.identity_reason（2026-03-12）：生产嵌入实现不再承载 identity baseline。v1.3→v1.4 追加 attestation signed bundle 验签门禁语义（2026-03-13）：onefile/detect 溯源结果若声明 signed bundle，则必须执行内部 trust chain 验证。v1.4→v1.5：追加 geometry coarse registration 与 recovered-domain sync revalidation 细分字段冻结登记。v1.5→v1.6：为 policy_path semantics 新增 geometry_chain_required_but_unavailable fail_reason 的 append-only 冻结登记（2026-03-13）。v1.6→v1.7：追加 negative branch attestation provenance 的 append-only 冻结注册（2026-03-16）。v1.7→v1.8：追加 attestation_source 字段与 statement-only provenance no-bundle 合同说明（2026-03-17）。v1.8→v1.9：追加 exact LF observability 字段与 detect runtime canonical 兼容命名字段（2026-03-19）。v1.9→v1.10：追加 attestation trace artifact 的 append-only 白名单治理（2026-03-21）。v1.10→v1.11：追加 LF 闭环对齐表与 planner 风险报告 artifact 的 append-only 白名单治理（2026-03-21）。v1.11→v1.12：追加 LF retain breakdown 与 GEO rescue diagnostics artifact 的 append-only 白名单治理（2026-03-22）。v1.12→v1.13：追加 LF protocol control 与 GEO scale-control diagnostics 字段治理（2026-03-22）。v1.13→v1.14：追加 LF formal exact object-binding source 字段治理（2026-03-22）。v1.14→v1.15：追加 LF exact repair 与 GEO score rebinding 诊断字段治理（2026-03-22）。v1.15→v1.16：追加 GEO diagnostics 干净别名字段与 LF 分类表达收口（2026-03-23）。v1.16→v1.17 (2026-03-26)：追加 content_chain_score、lf_channel_score、lf_correlation_score 与 attestation LF 桥接字段冻结登记。
 frozen_date: "2026-02-04"    # 冻结日期元信息；当前主链路不参与门禁计算，主要用于审计追溯。
 
 # ------------------------------
@@ -145,6 +145,9 @@ artifact_schema:
         - attestation_digest
         - event_binding_digest
         - trace_commit
+        - content_chain_score
+        - lf_channel_score
+        - lf_correlation_score
         - lf_attestation_score
         - agreement_count
         - n_bits_compared
@@ -258,6 +261,9 @@ artifact_schema:
         - same_seed_control_trace_digest
         - same_seed_control_trajectory_digest
         - detect_exact_timestep_coeffs_same_seed_control
+        - lf_channel_score
+        - lf_correlation_score
+        - lf_attestation_score
         - cross_seed_protocol_loss_count
         - same_seed_residual_loss_count
         - cross_seed_protocol_loss_ratio
@@ -738,6 +744,7 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
     # Content 证据（基础状态/分数/门控）
     - content_evidence.status                    # 内容证据状态。
     - content_evidence.score                     # 内容链综合得分。
+    - content_evidence.content_chain_score       # 内容链正式主分数。
     - content_evidence.fail_reason               # 内容链失败原因。
     - score_audit.content_score_used             # 融合时使用的内容得分。
     - score_audit.geometry_gate_used             # 几何门控是否启用/命中。
@@ -761,6 +768,9 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
     - content_evidence.injection_trace_digest    # 注入轨迹摘要。
     - content_evidence.injection_params_digest   # 注入参数摘要。
     - content_evidence.lf_score                  # 低频得分。
+    - content_evidence.lf_channel_score          # LF 通道正式主分数。
+    - content_evidence.lf_correlation_score      # LF 相关性诊断分数。
+    - content_evidence.lf_attestation_score      # detect record 写回的 LF attestation 桥接分数。
     - content_evidence.hf_score                  # 高频得分。
     - content_evidence.injection_status          # 注入状态。
     - content_evidence.injection_absent_reason   # 注入缺失原因。
@@ -843,6 +853,13 @@ records_schema:              # schema.validate_record + freeze_gate 的核心字
     - content_evidence.subspace_primary_path     # 子空间主路径。
     - content_evidence.synthetic_pipeline_runtime     # 合成 pipeline 运行信息。
     - content_evidence.bp_converged              # LDPC BP 收敛标志。
+    - attestation.lf_attestation_score           # attestation 结果顶层 LF 分数。
+    - attestation.image_evidence_result.lf_attestation_score # 图像证据层 LF attestation 分数。
+    - attestation.image_evidence_result.lf_channel_score # 图像证据层 LF 正式主分数桥接字段。
+    - attestation.image_evidence_result.lf_correlation_score # 图像证据层 LF 相关性诊断桥接字段。
+    - attestation.final_event_attested_decision.lf_attestation_score # 最终事件判决层 LF attestation 分数桥接字段。
+    - attestation.final_event_attested_decision.lf_channel_score # 最终事件判决层 LF 正式主分数桥接字段。
+    - attestation.final_event_attested_decision.lf_correlation_score # 最终事件判决层 LF 相关性诊断桥接字段。
     - content_evidence.bp_iteration_count        # LDPC BP 迭代次数。
     - impl_set_capabilities_extended_digest      # impl 能力集摘要（扩展口径，推荐字段）。
 

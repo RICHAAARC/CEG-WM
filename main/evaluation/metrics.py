@@ -13,6 +13,9 @@ from main.evaluation.image_quality import compute_quality_metrics_batch
 
 EVENT_ATTESTATION_SCORE_NAME = "event_attestation_score"
 EVENT_ATTESTATION_SCORE_ALIAS_NAME = "event_attestation_statistics_score"
+CONTENT_CHAIN_SCORE_NAME = "content_chain_score"
+LF_CHANNEL_SCORE_NAME = "lf_channel_score"
+LF_CORRELATION_SCORE_NAME = "lf_correlation_score"
 MATRIX_LF_SCORE_NAME = "matrix_lf_score"
 LEGACY_EVENT_ATTESTATION_ALIAS_RERUN_REASON = (
     "legacy_event_attestation_statistics_score_artifact_requires_rerun"
@@ -95,6 +98,42 @@ def raise_if_legacy_event_attestation_alias_requested(score_name: str, consumer:
         f"canonical_score_name={rerun_guidance['canonical_score_name']}; "
         f"recommended_rerun_profiles={rerun_profiles}"
     )
+
+
+def is_content_chain_score_name(score_name: str) -> bool:
+    """
+    功能：判定是否为内容链正式分数名或其兼容别名。
+
+    Determine whether the requested score name maps to the canonical
+    content-chain score semantics.
+
+    Args:
+        score_name: Candidate score name.
+
+    Returns:
+        True when the score name resolves to content-chain score semantics.
+    """
+    if not isinstance(score_name, str):
+        raise TypeError("score_name must be str")
+    return score_name in {CONTENT_CHAIN_SCORE_NAME, "content_score"}
+
+
+def is_lf_channel_score_name(score_name: str) -> bool:
+    """
+    功能：判定是否为 LF 通道正式分数名或其兼容别名。
+
+    Determine whether the requested score name maps to the canonical LF-channel
+    score semantics.
+
+    Args:
+        score_name: Candidate score name.
+
+    Returns:
+        True when the score name resolves to LF-channel score semantics.
+    """
+    if not isinstance(score_name, str):
+        raise TypeError("score_name must be str")
+    return score_name in {LF_CHANNEL_SCORE_NAME, MATRIX_LF_SCORE_NAME}
 
 
 def canonical_condition_key(family: str, params_version: str) -> str:
@@ -871,20 +910,26 @@ def _extract_score_value_for_metrics(record: Dict[str, Any], score_name: str) ->
     if not isinstance(score_name, str) or not score_name:
         raise TypeError("score_name must be non-empty str")
 
-    if score_name == "content_score":
+    if is_content_chain_score_name(score_name):
         content_payload = record.get("content_evidence_payload")
         if not isinstance(content_payload, dict):
             return None, "missing_content_payload"
         if content_payload.get("status") != "ok":
             return None, "status_not_ok"
-        score_value = content_payload.get("score")
-    elif score_name == MATRIX_LF_SCORE_NAME:
+        score_value = content_payload.get(CONTENT_CHAIN_SCORE_NAME)
+        if not isinstance(score_value, (int, float)):
+            score_value = content_payload.get("score")
+        if not isinstance(score_value, (int, float)):
+            score_value = content_payload.get("content_score")
+    elif is_lf_channel_score_name(score_name):
         content_payload = record.get("content_evidence_payload")
         if not isinstance(content_payload, dict):
             return None, "missing_content_payload"
         if content_payload.get("status") != "ok":
             return None, "status_not_ok"
-        score_value = content_payload.get("lf_score")
+        score_value = content_payload.get(LF_CHANNEL_SCORE_NAME)
+        if not isinstance(score_value, (int, float)):
+            score_value = content_payload.get("lf_score")
     elif score_name == "content_attestation_score":
         attestation_node = record.get("attestation")
         if not isinstance(attestation_node, dict):
