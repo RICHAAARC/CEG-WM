@@ -130,6 +130,53 @@ ALLOWED_STAGE_03_SCOPE_MANIFEST_FIELDS = {
 }
 
 
+def _collect_nested_forbidden_field_paths(
+    payload: Any,
+    forbidden_fields: Sequence[str],
+    path_prefix: str = "",
+) -> List[str]:
+    """
+    功能：递归收集 payload 中的 forbidden field 路径。
+
+    Collect nested forbidden field paths from dict/list payloads.
+
+    Args:
+        payload: Candidate payload.
+        forbidden_fields: Forbidden field names.
+        path_prefix: Current traversal prefix.
+
+    Returns:
+        Nested forbidden field paths.
+    """
+    if not isinstance(forbidden_fields, Sequence):
+        raise TypeError("forbidden_fields must be a sequence")
+
+    collected_paths: List[str] = []
+    if isinstance(payload, dict):
+        for field_name, field_value in payload.items():
+            field_path = f"{path_prefix}.{field_name}" if path_prefix else str(field_name)
+            if field_name in forbidden_fields:
+                collected_paths.append(field_path)
+            collected_paths.extend(
+                _collect_nested_forbidden_field_paths(
+                    field_value,
+                    forbidden_fields,
+                    field_path,
+                )
+            )
+    elif isinstance(payload, list):
+        for idx, item in enumerate(payload):
+            item_path = f"{path_prefix}[{idx}]" if path_prefix else f"[{idx}]"
+            collected_paths.extend(
+                _collect_nested_forbidden_field_paths(
+                    item,
+                    forbidden_fields,
+                    item_path,
+                )
+            )
+    return collected_paths
+
+
 def _parse_bool_arg(value: Any, default: bool) -> bool:
     """
     功能：解析 CLI 布尔参数。 
@@ -747,6 +794,25 @@ def _validate_stage_03_primary_contract_payload(
             },
         )
 
+    nested_forbidden_fields = [
+        field_path
+        for field_path in _collect_nested_forbidden_field_paths(payload, sorted(FORBIDDEN_STAGE_03_PRIMARY_CONTRACT_FIELDS))
+        if "." in field_path or "[" in field_path
+    ]
+    if nested_forbidden_fields:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code=f"stage_03.{payload_label}_internal_scalar_primary_driver_residual",
+            rule="stage 03 payload internals must not retain scalar-formal primary-driver residuals below the top-level contract",
+            impact="stage 03 still leaks scalar-formal primary-driving semantics through nested rows or summaries",
+            fix="remove scalar-formal residual fields from nested rows and keep auxiliary analysis only inside auxiliary_scope_metrics",
+            evidence={
+                "payload_label": payload_label,
+                "nested_forbidden_fields": nested_forbidden_fields,
+            },
+        )
+
 
 def _validate_stage_03_primary_scope_semantics(
     grid_summary: Mapping[str, Any],
@@ -915,6 +981,20 @@ def _validate_stage_03_primary_scope_semantics(
             auxiliary_metrics = cast(Dict[str, Any], auxiliary_metrics_raw) if isinstance(auxiliary_metrics_raw, dict) else {}
             if any(scope_name not in auxiliary_metrics for scope_name in REQUIRED_STAGE_03_AUXILIARY_SCOPES):
                 missing_auxiliary_rows.append(row.get("grid_item_digest"))
+            if row.get("evaluation_scope") != SYSTEM_FINAL_SCOPE or row.get("primary_metric_name") != SYSTEM_FINAL_METRIC_NAME:
+                _append_blocking_reason(
+                    blocking_reasons,
+                    source="stage_03",
+                    reason_code="stage_03.metrics_matrix_primary_binding_invalid",
+                    rule="successful metrics_matrix rows must remain bound to system_final and system_final_metrics",
+                    impact="stage 03 row-level primary evidence still drifts away from the system-level final object",
+                    fix="regenerate metrics_matrix rows so evaluation_scope=system_final and primary_metric_name=system_final_metrics",
+                    evidence={
+                        "grid_item_digest": row.get("grid_item_digest"),
+                        "evaluation_scope": row.get("evaluation_scope"),
+                        "primary_metric_name": row.get("primary_metric_name"),
+                    },
+                )
         if missing_system_final_rows:
             _append_blocking_reason(
                 blocking_reasons,
@@ -941,8 +1021,6 @@ def _validate_stage_03_primary_scope_semantics(
         "primary_metric_name",
         "primary_summary_basis_scope",
         "primary_summary_basis_metric_name",
-        "scalar_formal_scope",
-        "scalar_formal_score_name",
         "scope_manifest",
         "system_final_metrics_presence",
     ]:

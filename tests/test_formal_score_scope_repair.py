@@ -83,24 +83,34 @@ def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fiel
             "content_chain": {"metric_name": "content_chain_score"},
             "lf_channel": {
                 "metric_name": "lf_channel_score",
-                "formal_score_name": "lf_channel_score",
+                "analysis_metric_name": "lf_channel_score",
             },
         },
+        "models": ["sd3"],
+        "seeds": [0],
+        "attack_protocol_families": ["rotate"],
     }
     assert experiment_matrix._resolve_matrix_primary_scope(matrix_cfg) == "system_final"
     assert experiment_matrix._resolve_matrix_auxiliary_scopes(matrix_cfg, "system_final") == ["content_chain", "lf_channel"]
     assert experiment_matrix._resolve_matrix_primary_summary_basis_scope(matrix_cfg, "system_final") == "system_final"
-    assert experiment_matrix._resolve_matrix_formal_score_name(matrix_cfg) == "lf_channel_score"
     auxiliary_scope_configs = experiment_matrix._resolve_matrix_auxiliary_scope_configs(
         matrix_cfg,
         ["content_chain", "lf_channel"],
     )
-    assert experiment_matrix._resolve_matrix_scalar_formal_scope(
-        matrix_cfg,
-        ["content_chain", "lf_channel"],
-        auxiliary_scope_configs,
-        "lf_channel_score",
-    ) == "lf_channel"
+    assert auxiliary_scope_configs["lf_channel"]["analysis_metric_name"] == "lf_channel_score"
+
+    grid = experiment_matrix.build_experiment_grid(
+        {
+            "model_id": "sd3",
+            "seed": 0,
+            "attack_protocol_path": "configs/attack_protocol.yaml",
+            "experiment_matrix": matrix_cfg,
+        }
+    )
+    assert len(grid) == 1
+    assert "scalar_formal_scope" not in grid[0]
+    assert "scalar_formal_score_name" not in grid[0]
+    assert "formal_score_name" not in grid[0]
 
     score_record = {
         "content_evidence_payload": {
@@ -112,6 +122,17 @@ def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fiel
     assert experiment_matrix._resolve_formal_matrix_score(score_record, "lf_channel_score") == (
         0.72,
         "content_evidence_payload.lf_channel_score",
+    )
+    diagnostic_only_record = {
+        "content_evidence_payload": {
+            "status": "ok",
+            "detect_lf_score": 0.91,
+            "lf_correlation_score": 0.91,
+        }
+    }
+    assert experiment_matrix._resolve_formal_matrix_score(diagnostic_only_record, "lf_channel_score") == (
+        None,
+        "content_evidence_payload.lf_channel_score_missing_or_nonfinite",
     )
 
     records_dir = tmp_path / "artifacts" / "evaluate_inputs" / "formal_evaluate_records"

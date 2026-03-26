@@ -203,11 +203,11 @@ experiment_matrix:
       metric_name: "content_chain_score"
     lf_channel:
       metric_name: "lf_channel_score"
-      formal_score_name: "lf_channel_score"
+      analysis_metric_name: "lf_channel_score"
   # primary_scope 负责 stage 03 的主摘要、主结论与 stage 04 signoff 绑定；
   # primary_summary_basis_scope 显式声明主摘要锚点仍闭合到 system_final。
   # auxiliary_scope_configs 仅服务 auxiliary scope 的 formal calibration / threshold /
-  # evaluate，不再承担 stage 03 主评估对象语义。
+  # evaluate，不再承担 stage 03 主评估对象语义；analysis_metric_name 仅表示辅助分析度量。
   # seeds 数量控制正样本规模：论文级 FPR ≤ 1% 需 n_pos ≥ 100，种子数应 ≥ 100。
   # 当前 seeds=[0,1] 为机制验证阶段（仅 2 个 seed）；正式论文运行请扩展为 range(100)。
   # 运行时通过 scripts/run_experiment_matrix.py 自动映射 seeds 为 CLI overrides（seed=0, seed=1, ...），

@@ -134,14 +134,7 @@ def build_experiment_grid(base_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     evaluation_scope = _resolve_matrix_primary_scope(matrix_cfg)
     auxiliary_scopes = _resolve_matrix_auxiliary_scopes(matrix_cfg, evaluation_scope)
     auxiliary_scope_configs = _resolve_matrix_auxiliary_scope_configs(matrix_cfg, auxiliary_scopes)
-    scalar_formal_score_name = _resolve_matrix_formal_score_name(matrix_cfg, auxiliary_scope_configs)
     primary_summary_basis_scope = _resolve_matrix_primary_summary_basis_scope(matrix_cfg, evaluation_scope)
-    scalar_formal_scope = _resolve_matrix_scalar_formal_scope(
-        matrix_cfg,
-        auxiliary_scopes,
-        auxiliary_scope_configs,
-        scalar_formal_score_name,
-    )
     scope_manifest = _build_matrix_scope_manifest(
         primary_scope=evaluation_scope,
         primary_summary_basis_scope=primary_summary_basis_scope,
@@ -218,9 +211,6 @@ def build_experiment_grid(base_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
                         "primary_metric_name": _resolve_matrix_primary_metric_name(evaluation_scope),
                         "primary_summary_basis_scope": primary_summary_basis_scope,
                         "primary_summary_basis_metric_name": _resolve_matrix_primary_metric_name(primary_summary_basis_scope),
-                        "scalar_formal_scope": scalar_formal_scope,
-                        "scalar_formal_score_name": scalar_formal_score_name,
-                        "formal_score_name": scalar_formal_score_name,
                         "require_real_negative_cache": formal_validation_guards["require_real_negative_cache"],
                         "require_shared_thresholds": formal_validation_guards["require_shared_thresholds"],
                         "disallow_forced_pair_fallback": formal_validation_guards["disallow_forced_pair_fallback"],
@@ -266,10 +256,6 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
         "primary_metric_name": _safe_str(grid_item_cfg.get("primary_metric_name")),
         "primary_summary_basis_scope": _safe_str(grid_item_cfg.get("primary_summary_basis_scope")),
         "primary_summary_basis_metric_name": _safe_str(grid_item_cfg.get("primary_summary_basis_metric_name")),
-        "scalar_formal_scope": _safe_str(grid_item_cfg.get("scalar_formal_scope")),
-        "scalar_formal_score_name": _safe_str(
-            grid_item_cfg.get("scalar_formal_score_name", grid_item_cfg.get("formal_score_name"))
-        ),
         "status": "failed",
         "failure_reason": "<absent>",
         "cfg_digest": _safe_str(grid_item_cfg.get("cfg_digest")),
@@ -858,11 +844,11 @@ def _resolve_matrix_auxiliary_scope_configs(
                 raw_scope_config.get("metric_name", canonical_metric_name),
             )
         }
-        raw_formal_score_name = raw_scope_config.get("formal_score_name")
-        if raw_formal_score_name is not None:
-            resolved_scope_config["formal_score_name"] = _normalize_auxiliary_scope_metric_name(
+        raw_analysis_metric_name = raw_scope_config.get("analysis_metric_name", raw_scope_config.get("formal_score_name"))
+        if raw_analysis_metric_name is not None:
+            resolved_scope_config["analysis_metric_name"] = _normalize_auxiliary_scope_metric_name(
                 scope_name,
-                raw_formal_score_name,
+                raw_analysis_metric_name,
             )
         resolved_scope_configs[scope_name] = resolved_scope_config
     return resolved_scope_configs
@@ -874,7 +860,7 @@ def _resolve_matrix_scalar_formal_scope(
     auxiliary_scope_configs: Dict[str, Dict[str, Any]],
     scalar_formal_score_name: str,
 ) -> str:
-    """Resolve the auxiliary scalar scope used for formal calibration/evaluate."""
+    """Resolve the auxiliary analysis scope owning one scalar analysis metric."""
     if not isinstance(matrix_cfg, dict):
         raise TypeError("matrix_cfg must be dict")
     if not isinstance(auxiliary_scopes, list):
@@ -888,11 +874,11 @@ def _resolve_matrix_scalar_formal_scope(
         scope_name
         for scope_name, scope_cfg in auxiliary_scope_configs.items()
         if isinstance(scope_cfg, dict)
-        and scope_cfg.get("formal_score_name") == scalar_formal_score_name
+        and scope_cfg.get("analysis_metric_name") == scalar_formal_score_name
     ]
     if len(configured_scopes) > 1:
         raise ValueError(
-            "experiment_matrix auxiliary_scope_configs may declare at most one formal_score_name owner"
+            "experiment_matrix auxiliary_scope_configs may declare at most one analysis_metric_name owner"
         )
     if configured_scopes:
         scope_name = configured_scopes[0]
@@ -905,9 +891,7 @@ def _resolve_matrix_scalar_formal_scope(
         if eval_metrics.is_lf_channel_score_name(scalar_formal_score_name)
         else _CONTENT_CHAIN_SCOPE
     )
-    scope_name = matrix_cfg.get("scalar_formal_scope", inferred_scope)
-    if not isinstance(scope_name, str) or not scope_name:
-        raise TypeError("experiment_matrix.scalar_formal_scope must be non-empty str")
+    scope_name = inferred_scope
     if scope_name not in {_CONTENT_CHAIN_SCOPE, _LF_CHANNEL_SCOPE}:
         raise ValueError(f"unsupported experiment_matrix.scalar_formal_scope: {scope_name}")
     if scope_name not in auxiliary_scopes:
@@ -1509,13 +1493,13 @@ def _resolve_matrix_formal_score_name(
         raise TypeError("auxiliary_scope_configs must be dict when provided")
 
     configured_score_names = [
-        scope_cfg.get("formal_score_name")
+        scope_cfg.get("analysis_metric_name")
         for scope_cfg in auxiliary_scope_configs.values()
-        if isinstance(scope_cfg, dict) and isinstance(scope_cfg.get("formal_score_name"), str)
+        if isinstance(scope_cfg, dict) and isinstance(scope_cfg.get("analysis_metric_name"), str)
     ]
     if len(configured_score_names) > 1:
         raise ValueError(
-            "experiment_matrix auxiliary_scope_configs may declare at most one formal_score_name"
+            "experiment_matrix auxiliary_scope_configs may declare at most one analysis_metric_name"
         )
     if len(configured_score_names) == 1:
         score_name = configured_score_names[0]
@@ -1542,15 +1526,15 @@ def _extract_matrix_formal_score_name_from_grid_item(grid_item_cfg: Dict[str, An
 
     auxiliary_scope_configs = grid_item_cfg.get("auxiliary_scope_configs")
     configured_score_names = [
-        scope_cfg.get("formal_score_name")
+        scope_cfg.get("analysis_metric_name")
         for scope_cfg in auxiliary_scope_configs.values()
         if isinstance(auxiliary_scope_configs, dict)
         and isinstance(scope_cfg, dict)
-        and isinstance(scope_cfg.get("formal_score_name"), str)
+        and isinstance(scope_cfg.get("analysis_metric_name"), str)
     ]
     if len(configured_score_names) > 1:
         raise ValueError(
-            "grid item auxiliary_scope_configs may declare at most one formal_score_name"
+            "grid item auxiliary_scope_configs may declare at most one analysis_metric_name"
         )
     if len(configured_score_names) == 1:
         score_name = configured_score_names[0]

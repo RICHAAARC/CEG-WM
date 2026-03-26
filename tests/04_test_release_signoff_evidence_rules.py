@@ -263,6 +263,7 @@ def _build_stage_03_package(
     include_system_final_metrics: bool = True,
     include_auxiliary_scopes: bool = True,
     include_legacy_scalar_contract: bool = False,
+    include_internal_scalar_driver_residual: bool = False,
     legacy_scalar_formal_scope: str = "lf_channel",
     legacy_scalar_formal_score_name: str = "lf_channel_score",
 ) -> Dict[str, Any]:
@@ -371,6 +372,34 @@ def _build_stage_03_package(
             "system_fpr": 0.0,
         }
 
+    grid_result_row: Dict[str, Any] = {
+        "grid_item_digest": "grid01",
+        "status": "ok",
+        "evaluation_scope": primary_scope,
+        "auxiliary_scopes": auxiliary_scopes,
+        "scope_manifest": scope_manifest,
+        "primary_metric_name": "system_final_metrics",
+        "primary_summary_basis_scope": primary_summary_basis_scope,
+        "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
+        "cfg_digest": "cfg03",
+        "plan_digest": "plan03",
+        "thresholds_digest": "thr03",
+        "threshold_metadata_digest": "meta03",
+        "ablation_digest": "abl03",
+        "attack_protocol_digest": "attack_digest_03",
+        "attack_protocol_version": "attack_v1",
+        "policy_path": "content_np_geo_rescue",
+        "impl_digest": "impl03",
+        "fusion_rule_version": "fusion_v1",
+        "metrics": {
+            "system_final_metrics": metrics_row.get("system_final_metrics"),
+            "auxiliary_scope_metrics": metrics_row["auxiliary_scope_metrics"],
+        },
+    }
+    if include_internal_scalar_driver_residual:
+        metrics_row["formal_score_name"] = legacy_scalar_formal_score_name
+        grid_result_row["scalar_formal_score_name"] = legacy_scalar_formal_score_name
+
     files = {
         "artifacts/grid_summary.json": {
             "cfg_digest": "cfg03",
@@ -389,6 +418,7 @@ def _build_stage_03_package(
             "auxiliary_scopes": auxiliary_scopes,
             "scope_manifest": scope_manifest,
             "system_final_metrics_presence": system_final_metrics_presence,
+            "results": [grid_result_row],
         },
         "artifacts/grid_manifest.json": {"grid_manifest_digest": "grid_manifest_03"},
         "artifacts/aggregate_report.json": {
@@ -674,3 +704,44 @@ def test_stage_04_blocks_when_stage_03_legacy_scalar_contract_is_still_present(t
     assert signoff_report["decision"] == "BLOCK_FREEZE"
     reason_codes = {item["reason_code"] for item in signoff_report["blocking_reasons"]}
     assert "stage_03.aggregate_report_legacy_scalar_contract_present" in reason_codes
+
+
+def test_stage_04_blocks_when_stage_03_internal_scalar_primary_driver_residual_exists(tmp_path: Path) -> None:
+    """
+    功能：验证 stage 03 若仅在内部结果残留 scalar 主驱动字段，也必须 BLOCK_FREEZE。
+
+    Verify that stage 04 blocks freeze when stage 03 keeps scalar-primary
+    driver residuals inside nested results even if the top-level contract is clean.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    module = _load_stage_04_module()
+    drive_project_root = tmp_path / "drive_project_root"
+    stage_01_info = _build_stage_01_package(tmp_path / "case_internal_scalar_residual")
+    stage_02_info = _build_stage_02_package(tmp_path / "case_internal_scalar_residual", stage_01_info)
+    stage_03_info = _build_stage_03_package(
+        tmp_path / "case_internal_scalar_residual",
+        stage_01_info,
+        include_internal_scalar_driver_residual=True,
+    )
+
+    summary = module.run_stage_04(
+        drive_project_root=drive_project_root,
+        stage_01_package_path=stage_01_info["package_path"],
+        stage_02_package_path=stage_02_info["package_path"],
+        stage_03_package_path=stage_03_info["package_path"],
+        config_path=DEFAULT_CONFIG_PATH,
+        notebook_name="04_Release_And_Signoff",
+        stage_run_id="stage04_internal_scalar_residual",
+        require_stage_02=True,
+        require_stage_03=True,
+    )
+
+    signoff_report = json.loads(Path(summary["signoff_report_path"]).read_text(encoding="utf-8"))
+    assert signoff_report["decision"] == "BLOCK_FREEZE"
+    reason_codes = {item["reason_code"] for item in signoff_report["blocking_reasons"]}
+    assert "stage_03.aggregate_report_internal_scalar_primary_driver_residual" in reason_codes
