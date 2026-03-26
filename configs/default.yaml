@@ -138,8 +138,9 @@ ablation:
 calibration:
   detect_records_glob: null  # detect 记录 glob 路径；为空时由标准 workflow / CLI 基于当前 run_root 自动解析
   score_name: "content_chain_score"  # 默认统计主链；若需切换到事件级 attestation 正式统计链，可改为 "event_attestation_score"
-  minimal_ground_truth_pair_count: null  # 正式 profile 不再固定 100 对闭环规模；若提供 prompt 文件，则由真实 prompt 列表长度决定。
-  minimal_ground_truth_prompts_file: "prompts/paper_small.txt"  # 以真实 paper prompt 列表驱动正式统计输入元数据，不再默认使用 prompts_100 闭环语义。
+  allow_synthetic_minimal_ground_truth: false  # formal 主线默认禁止 synthetic detect-record bridge；仅 legacy 调试路径可显式开启。
+  minimal_ground_truth_pair_count: null
+  minimal_ground_truth_prompts_file: null
   exclude_formal_sidecar_disabled_marker: true
   exclude_synthetic_negative_closure_marker: true
 
@@ -147,8 +148,9 @@ evaluate:
   detect_records_glob: null  # detect 记录 glob 路径；为空时由标准 workflow / CLI 基于当前 run_root 自动解析
   thresholds_path: null      # 阈值工件路径；为空时由标准 workflow / CLI 基于当前 run_root 自动解析
   score_name: "content_chain_score"  # 默认评测主链；若消费 attestation 阈值工件，应与 calibration.score_name 保持一致
-  minimal_ground_truth_pair_count: null  # 正式 profile 不再固定 100 对闭环规模；若提供 prompt 文件，则由真实 prompt 列表长度决定。
-  minimal_ground_truth_prompts_file: "prompts/paper_small.txt"  # 以真实 paper prompt 列表驱动正式统计输入元数据，不再默认使用 prompts_100 闭环语义。
+  allow_synthetic_minimal_ground_truth: false  # formal 主线默认禁止 synthetic detect-record bridge；仅 legacy 调试路径可显式开启。
+  minimal_ground_truth_pair_count: null
+  minimal_ground_truth_prompts_file: null
   exclude_synthetic_negative_closure_marker: true
 
 parallel_attestation_statistics:

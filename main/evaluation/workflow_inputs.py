@@ -274,8 +274,6 @@ def _apply_negative_attestation_semantics(payload: Dict[str, Any]) -> None:
     final_decision["is_event_attested"] = False
     final_decision["event_attestation_score"] = 0.0
     final_decision["event_attestation_score_name"] = _EVENT_ATTESTATION_SCORE_NAME
-    if "event_attestation_statistics_score" in final_decision:
-        final_decision["event_attestation_statistics_score"] = 0.0
     final_decision["authenticity_status"] = "statement_only"
     final_decision["image_evidence_status"] = "absent"
 

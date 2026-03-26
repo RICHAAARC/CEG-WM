@@ -181,6 +181,15 @@ def _ensure_calibration_detect_records_ready(cfg: Any, run_root: Any) -> Dict[st
         raise TypeError("cfg must be dict")
     if not isinstance(run_root, Path):
         raise TypeError("run_root must be Path")
+    calibration_cfg = cfg.get("calibration")
+    stage_cfg: Dict[str, Any] = cast(Dict[str, Any], calibration_cfg) if isinstance(calibration_cfg, dict) else {}
+    if stage_cfg.get("allow_synthetic_minimal_ground_truth") is not True:
+        return {
+            "generated": False,
+            "reason": "synthetic_minimal_ground_truth_disabled",
+            "detect_records_glob": stage_cfg.get("detect_records_glob"),
+            "stage": "calibrate",
+        }
     return ensure_minimal_ground_truth_records(cfg, run_root, "calibrate")
 
 

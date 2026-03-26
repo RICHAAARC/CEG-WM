@@ -5,7 +5,7 @@
 # - 本文件不是实验运行主配置，不直接承载具体模型或设备参数。
 # ==============================================================
 
-policy_path_semantics_version: "v2.5"  # v2.0→v2.1：同步 runtime_whitelist.yaml v2.1；test_mode_identity 重命名为 embed_identity_mode已移出 formal path。v2.1→v2.2：追加 geometry recovery observations 与 recovered consistency 的正式审计语义。v2.2→v2.3：追加 coarse registration、sync_parameter_agreement、recovered-domain sync revalidation 与 negative branch attestation provenance 的诊断路径语义；该 provenance 仅用于 diagnostic/provenance，不能视作 formal attestation payload。v2.3→v2.4：追加 attestation.attestation_source 的正式语义，并冻结 statement_only_provenance_no_bundle 仅可用于 negative branch statement-only provenance（2026-03-17）。v2.4→v2.5 (2026-03-26)：将 content_minimal 的正式内容分数字段切换为 content_evidence.content_chain_score。
+policy_path_semantics_version: "v2.6"  # v2.0→v2.1：同步 runtime_whitelist.yaml v2.1；test_mode_identity 重命名为 embed_identity_mode已移出 formal path。v2.1→v2.2：追加 geometry recovery observations 与 recovered consistency 的正式审计语义。v2.2→v2.3：追加 coarse registration、sync_parameter_agreement、recovered-domain sync revalidation 与 negative branch attestation provenance 的诊断路径语义；该 provenance 仅用于 diagnostic/provenance，不能视作 formal attestation payload。v2.3→v2.4：追加 attestation.attestation_source 的正式语义，并冻结 statement_only_provenance_no_bundle 仅可用于 negative branch statement-only provenance（2026-03-17）。v2.4→v2.5 (2026-03-26)：将 content_minimal 的正式内容分数字段切换为 content_evidence.content_chain_score。v2.5→v2.6 (2026-03-26)：从当前 formal score_audit 命名规则中移除 event_attestation_statistics_score 旧 alias，只保留 canonical event_attestation_score。
 
 # ==============================================================
 # 0) 硬约束：必须满足的执行性规则
@@ -203,12 +203,10 @@ score_audit_naming_rules:
   alternate_single_score_fields:
     - "score_audit.content_attestation_score_used"
     - "score_audit.event_attestation_score_used"
-    - "score_audit.event_attestation_statistics_score_used" # 旧 alias，仅用于历史兼容。
   alternate_multi_score_fields:
     - "score_audit.content_attestation_scores_used"
     - "score_audit.event_attestation_scores_used"
-    - "score_audit.event_attestation_statistics_scores_used" # 旧 alias，仅用于历史兼容。
-  rule: "单一得分使用单数，多个得分列表使用复数；event_attestation_statistics_* 仅作为 event_attestation_* 的历史兼容别名，不表示独立统计语义。"
+  rule: "单一得分使用单数，多个得分列表使用复数；正式 event attestation 统计只允许 canonical event_attestation_score 命名。"
 
 # ------------------------------
 # condition 枚举与判定来源

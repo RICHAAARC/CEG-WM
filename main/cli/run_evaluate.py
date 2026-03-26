@@ -237,6 +237,15 @@ def _ensure_evaluate_detect_records_ready(cfg: Any, run_root: Any) -> Dict[str, 
         raise TypeError("cfg must be dict")
     if not isinstance(run_root, Path):
         raise TypeError("run_root must be Path")
+    evaluate_cfg = cfg.get("evaluate")
+    stage_cfg: Dict[str, Any] = cast(Dict[str, Any], evaluate_cfg) if isinstance(evaluate_cfg, dict) else {}
+    if stage_cfg.get("allow_synthetic_minimal_ground_truth") is not True:
+        return {
+            "generated": False,
+            "reason": "synthetic_minimal_ground_truth_disabled",
+            "detect_records_glob": stage_cfg.get("detect_records_glob"),
+            "stage": "evaluate",
+        }
     return ensure_minimal_ground_truth_records(cfg, run_root, "evaluate")
 
 

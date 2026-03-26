@@ -6008,30 +6008,11 @@ def _extract_score_for_stats(record: Dict[str, Any], score_name: str) -> Optiona
             return None
         score_value = final_decision.get("event_attestation_score")
     elif score_name == "event_attestation_statistics_score":
-        attestation_node = record.get("attestation")
-        if not isinstance(attestation_node, dict):
-            return None
-        attestation_payload = cast(Dict[str, Any], attestation_node)
-        final_decision_node = attestation_payload.get("final_event_attested_decision")
-        if not isinstance(final_decision_node, dict):
-            return None
-        final_decision = cast(Dict[str, Any], final_decision_node)
-        primary_score_name = final_decision.get("event_attestation_score_name")
-        primary_score_value = final_decision.get("event_attestation_score")
-        if (
-            (not isinstance(primary_score_name, str) or not primary_score_name or primary_score_name == "event_attestation_score")
-            and isinstance(primary_score_value, (int, float))
-        ):
-            score_value = primary_score_value
-        else:
-            formal_score_name = final_decision.get("event_attestation_statistics_score_name")
-            if (
-                isinstance(formal_score_name, str)
-                and formal_score_name
-                and formal_score_name != "event_attestation_statistics_score"
-            ):
-                return None
-            score_value = final_decision.get("event_attestation_statistics_score")
+        eval_metrics.raise_if_legacy_event_attestation_alias_requested(
+            score_name,
+            consumer="_extract_score_for_stats",
+        )
+        return None
     else:
         raise ValueError(f"unsupported score_name: {score_name}")
 
@@ -8229,7 +8210,6 @@ def verify_attestation(
         if verdict == "attested"
         else (0.0 if content_attestation_score is not None else None)
     )
-    event_attestation_statistics_score = event_attestation_score
     final_event_attested_decision = {
         "status": verdict,
         "is_event_attested": bool(verdict == "attested"),
@@ -8238,9 +8218,6 @@ def verify_attestation(
         "event_attestation_score": event_attestation_score,
         "event_attestation_score_name": "event_attestation_score",
         "event_attestation_score_semantics": "content_attestation_score_if_event_attested_else_zero_when_content_score_present",
-        "event_attestation_statistics_score": event_attestation_statistics_score,
-        "event_attestation_statistics_score_name": "event_attestation_statistics_score",
-        "event_attestation_statistics_score_semantics": "legacy_alias_of_event_attestation_score_not_an_independent_statistics_semantics",
         eval_metrics.LF_CHANNEL_SCORE_NAME: lf_params.get(eval_metrics.LF_CHANNEL_SCORE_NAME),
         eval_metrics.LF_CORRELATION_SCORE_NAME: lf_params.get(eval_metrics.LF_CORRELATION_SCORE_NAME),
         "lf_attestation_score": s_lf,

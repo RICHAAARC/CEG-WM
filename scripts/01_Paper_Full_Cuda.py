@@ -27,6 +27,7 @@ from scripts.notebook_runtime_common import (
     collect_model_summary,
     collect_python_summary,
     collect_weight_summary,
+    compute_file_sha256,
     copy_prompt_snapshot,
     ensure_directory,
     finalize_stage_package,
@@ -48,6 +49,7 @@ from scripts.workflow_acceptance_common import detect_formal_gpu_preflight
 
 DEFAULT_CONFIG_PATH = Path("configs/default.yaml")
 RUNNER_SCRIPT_PATH = Path("scripts/01_run_paper_full_cuda.py")
+PARALLEL_ATTESTATION_STATS_CONTRACT_RELATIVE_PATH = "artifacts/parallel_attestation_statistics_input_contract.json"
 
 
 def _required_stage_outputs(run_root: Path) -> Dict[str, Path]:
@@ -62,6 +64,98 @@ def _required_stage_outputs(run_root: Path) -> Dict[str, Path]:
         "run_closure": run_root / "artifacts" / "run_closure.json",
         "workflow_summary": run_root / "artifacts" / "workflow_summary.json",
     }
+
+
+def _resolve_detect_record_label(record_payload: Dict[str, Any]) -> bool | None:
+    if not isinstance(record_payload, dict):
+        raise TypeError("record_payload must be dict")
+    for field_name in ["label", "ground_truth", "is_watermarked"]:
+        label_value = record_payload.get(field_name)
+        if isinstance(label_value, bool):
+            return label_value
+    return None
+
+
+def _build_parallel_attestation_statistics_input_contract(
+    run_root: Path,
+    detect_record_path: Path,
+    stage_run_id: str,
+) -> tuple[Path, Dict[str, Any]]:
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(detect_record_path, Path):
+        raise TypeError("detect_record_path must be Path")
+    if not isinstance(stage_run_id, str) or not stage_run_id:
+        raise TypeError("stage_run_id must be non-empty str")
+
+    contract_path = run_root / PARALLEL_ATTESTATION_STATS_CONTRACT_RELATIVE_PATH
+    records: list[Dict[str, Any]] = []
+    positive_count = 0
+    negative_count = 0
+    unknown_count = 0
+    status = "unavailable"
+    reason = "parallel_attestation_statistics_formal_input_unavailable"
+
+    if detect_record_path.exists() and detect_record_path.is_file():
+        detect_record_payload = json.loads(detect_record_path.read_text(encoding="utf-8"))
+        if not isinstance(detect_record_payload, dict):
+            raise ValueError(f"detect record must be JSON object: {detect_record_path}")
+
+        label_value = _resolve_detect_record_label(detect_record_payload)
+        if label_value is True:
+            positive_count += 1
+        elif label_value is False:
+            negative_count += 1
+        else:
+            unknown_count += 1
+
+        attestation_node = detect_record_payload.get("attestation")
+        attestation_payload = attestation_node if isinstance(attestation_node, dict) else {}
+        final_decision_node = attestation_payload.get("final_event_attested_decision")
+        final_decision = final_decision_node if isinstance(final_decision_node, dict) else {}
+        score_name = final_decision.get("event_attestation_score_name")
+        score_available = isinstance(final_decision.get("event_attestation_score"), (int, float))
+
+        records.append(
+            {
+                "package_relative_path": "records/detect_record.json",
+                "path": normalize_path_value(detect_record_path),
+                "sha256": compute_file_sha256(detect_record_path),
+                "label": label_value,
+                "score_name": score_name if isinstance(score_name, str) and score_name else "event_attestation_score",
+                "score_available": score_available,
+            }
+        )
+
+        if positive_count > 0 and negative_count > 0 and unknown_count == 0 and score_available:
+            status = "ready"
+            reason = "ok"
+        elif not score_available:
+            reason = "event_attestation_score_missing_in_detect_record"
+        elif unknown_count > 0:
+            reason = "detect_record_label_missing"
+        else:
+            reason = "parallel_attestation_statistics_requires_label_balanced_detect_records"
+
+    contract_payload: Dict[str, Any] = {
+        "artifact_type": "parallel_attestation_statistics_input_contract",
+        "contract_version": "v1",
+        "stage_name": STAGE_01_NAME,
+        "stage_run_id": stage_run_id,
+        "status": status,
+        "reason": reason,
+        "score_name": "event_attestation_score",
+        "record_count": len(records),
+        "label_summary": {
+            "positive": positive_count,
+            "negative": negative_count,
+            "unknown": unknown_count,
+            "label_balanced": positive_count > 0 and negative_count > 0 and unknown_count == 0,
+        },
+        "records": records,
+    }
+    write_json_atomic(contract_path, contract_payload)
+    return contract_path, contract_payload
 
 
 def _package_stage_outputs(
@@ -79,6 +173,7 @@ def _package_stage_outputs(
         "artifacts/thresholds/thresholds_artifact.json",
         "artifacts/thresholds/threshold_metadata_artifact.json",
         "artifacts/evaluation_report.json",
+        PARALLEL_ATTESTATION_STATS_CONTRACT_RELATIVE_PATH,
         "artifacts/run_closure.json",
         "artifacts/workflow_summary.json",
         "artifacts/stage_manifest.json",
@@ -139,6 +234,12 @@ def run_stage_01(
     if missing_outputs:
         raise FileNotFoundError(f"stage 01 required outputs missing: {missing_outputs}")
 
+    stats_contract_path, stats_contract_payload = _build_parallel_attestation_statistics_input_contract(
+        run_root,
+        outputs["detect_record"],
+        stage_run_id,
+    )
+
     stage_manifest_path = run_root / "artifacts" / "stage_manifest.json"
     stage_manifest: Dict[str, Any] = {
         "stage_name": STAGE_01_NAME,
@@ -161,6 +262,9 @@ def run_stage_01(
             "calibration_record": outputs["calibration_record"],
             "evaluate_record": outputs["evaluate_record"],
         }),
+        "parallel_attestation_statistics_input_contract_path": normalize_path_value(stats_contract_path),
+        "parallel_attestation_statistics_input_contract_package_relative_path": PARALLEL_ATTESTATION_STATS_CONTRACT_RELATIVE_PATH,
+        "parallel_attestation_statistics_input_contract_status": stats_contract_payload["status"],
         "thresholds_path": normalize_path_value(outputs["thresholds_artifact"]),
         "threshold_metadata_artifact_path": normalize_path_value(outputs["threshold_metadata_artifact"]),
         "evaluation_report_path": normalize_path_value(outputs["evaluation_report"]),

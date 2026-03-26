@@ -26,6 +26,7 @@ from scripts.notebook_runtime_common import (
     collect_model_summary,
     collect_python_summary,
     collect_weight_summary,
+    compute_file_sha256,
     copy_stage_manifest_snapshot,
     ensure_directory,
     finalize_stage_package,
@@ -46,6 +47,7 @@ from scripts.workflow_acceptance_common import detect_formal_gpu_preflight
 
 
 DEFAULT_CONFIG_PATH = Path("configs/default.yaml")
+PARALLEL_ATTESTATION_STATS_CONTRACT_RELATIVE_PATH = "artifacts/parallel_attestation_statistics_input_contract.json"
 
 
 def _resolve_source_lineage_paths(extracted_root: Path) -> Dict[str, Path]:
@@ -66,19 +68,141 @@ def _resolve_prompt_snapshot_path(extracted_root: Path) -> str:
     return "<absent>"
 
 
-def _build_runtime_config(cfg_obj: Dict[str, Any], extracted_root: Path, run_root: Path) -> Dict[str, Any]:
+def _load_parallel_attestation_statistics_input_contract(
+    extracted_root: Path,
+    source_stage_manifest: Dict[str, Any],
+) -> tuple[Path, Dict[str, Any]]:
+    if not isinstance(extracted_root, Path):
+        raise TypeError("extracted_root must be Path")
+    if not isinstance(source_stage_manifest, dict):
+        raise TypeError("source_stage_manifest must be dict")
+
+    contract_relative_path = source_stage_manifest.get(
+        "parallel_attestation_statistics_input_contract_package_relative_path"
+    )
+    if not isinstance(contract_relative_path, str) or not contract_relative_path:
+        contract_relative_path = PARALLEL_ATTESTATION_STATS_CONTRACT_RELATIVE_PATH
+
+    contract_path = extracted_root / contract_relative_path
+    if not contract_path.exists() or not contract_path.is_file():
+        raise FileNotFoundError(
+            "stage 02 requires parallel_attestation_statistics_input_contract in source package: "
+            f"{normalize_path_value(contract_path)}"
+        )
+
+    contract_payload = json.loads(contract_path.read_text(encoding="utf-8"))
+    if not isinstance(contract_payload, dict):
+        raise ValueError(f"parallel_attestation_statistics_input_contract must be JSON object: {contract_path}")
+    return contract_path, contract_payload
+
+
+def _stage_contract_bound_detect_records(
+    extracted_root: Path,
+    runtime_state_root: Path,
+    contract_payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    if not isinstance(extracted_root, Path):
+        raise TypeError("extracted_root must be Path")
+    if not isinstance(runtime_state_root, Path):
+        raise TypeError("runtime_state_root must be Path")
+    if not isinstance(contract_payload, dict):
+        raise TypeError("contract_payload must be dict")
+
+    if contract_payload.get("status") != "ready":
+        raise ValueError(
+            "parallel_attestation_statistics_input_contract is not ready: "
+            f"status={contract_payload.get('status')!r}, reason={contract_payload.get('reason')!r}"
+        )
+
+    score_name = contract_payload.get("score_name")
+    if score_name != "event_attestation_score":
+        raise ValueError(
+            "parallel_attestation_statistics_input_contract must declare canonical event_attestation_score: "
+            f"{score_name!r}"
+        )
+
+    label_summary = contract_payload.get("label_summary")
+    if not isinstance(label_summary, dict) or label_summary.get("label_balanced") is not True:
+        raise ValueError("parallel_attestation_statistics_input_contract must be label balanced")
+
+    contract_records = contract_payload.get("records")
+    if not isinstance(contract_records, list) or not contract_records:
+        raise ValueError("parallel_attestation_statistics_input_contract must contain records")
+
+    staged_records_root = ensure_directory(runtime_state_root / "contract_bound_detect_records")
+    staged_record_paths: list[str] = []
+    positive_count = 0
+    negative_count = 0
+
+    for record_index, record_entry in enumerate(contract_records, start=1):
+        if not isinstance(record_entry, dict):
+            raise ValueError("parallel_attestation_statistics_input_contract.records entries must be objects")
+
+        relative_path = record_entry.get("package_relative_path")
+        if not isinstance(relative_path, str) or not relative_path:
+            raise ValueError("parallel_attestation_statistics_input_contract record missing package_relative_path")
+
+        record_label = record_entry.get("label")
+        if not isinstance(record_label, bool):
+            raise ValueError("parallel_attestation_statistics_input_contract record label must be bool")
+
+        source_record_path = extracted_root / relative_path
+        if not source_record_path.exists() or not source_record_path.is_file():
+            raise FileNotFoundError(
+                "parallel_attestation_statistics_input_contract record missing from source package: "
+                f"{normalize_path_value(source_record_path)}"
+            )
+
+        expected_sha256 = record_entry.get("sha256")
+        if isinstance(expected_sha256, str) and expected_sha256:
+            actual_sha256 = compute_file_sha256(source_record_path)
+            if actual_sha256 != expected_sha256:
+                raise ValueError(
+                    "parallel_attestation_statistics_input_contract record digest mismatch: "
+                    f"{normalize_path_value(source_record_path)}"
+                )
+
+        label_tag = "positive" if record_label else "negative"
+        staged_record_path = stage_relative_copy(
+            source_record_path,
+            staged_records_root,
+            f"{record_index:03d}_{label_tag}_{source_record_path.name}",
+        )
+        staged_record_paths.append(normalize_path_value(staged_record_path))
+        if record_label:
+            positive_count += 1
+        else:
+            negative_count += 1
+
+    if positive_count == 0 or negative_count == 0:
+        raise ValueError("parallel_attestation_statistics_input_contract staged records are not label balanced")
+
+    return {
+        "staged_records_root": normalize_path_value(staged_records_root),
+        "detect_records_glob": normalize_path_value(staged_records_root / "*.json"),
+        "record_count": len(staged_record_paths),
+        "positive": positive_count,
+        "negative": negative_count,
+        "records": staged_record_paths,
+        "score_name": score_name,
+    }
+
+
+def _build_runtime_config(cfg_obj: Dict[str, Any], contract_detect_records_glob: str, run_root: Path) -> Dict[str, Any]:
     parallel_cfg = cfg_obj.get("parallel_attestation_statistics")
     parallel_section: Dict[str, Any] = dict(cast(Dict[str, Any], parallel_cfg)) if isinstance(parallel_cfg, dict) else {}
     config_copy = json.loads(json.dumps(cfg_obj))
+    if not isinstance(contract_detect_records_glob, str) or not contract_detect_records_glob:
+        raise TypeError("contract_detect_records_glob must be non-empty str")
 
     calibration_cfg = dict(config_copy.get("calibration")) if isinstance(config_copy.get("calibration"), dict) else {}
     calibration_cfg["score_name"] = parallel_section.get("calibration_score_name", "event_attestation_score")
-    calibration_cfg["detect_records_glob"] = str((extracted_root / "records" / "*detect*.json").resolve())
+    calibration_cfg["detect_records_glob"] = contract_detect_records_glob
     config_copy["calibration"] = calibration_cfg
 
     evaluate_cfg = dict(config_copy.get("evaluate")) if isinstance(config_copy.get("evaluate"), dict) else {}
     evaluate_cfg["score_name"] = parallel_section.get("evaluate_score_name", "event_attestation_score")
-    evaluate_cfg["detect_records_glob"] = str((extracted_root / "records" / "*detect*.json").resolve())
+    evaluate_cfg["detect_records_glob"] = contract_detect_records_glob
     evaluate_cfg["thresholds_path"] = str((run_root / "artifacts" / "thresholds" / "thresholds_artifact.json").resolve())
     config_copy["evaluate"] = evaluate_cfg
     return config_copy
@@ -156,9 +280,19 @@ def run_stage_02(
     if missing_source_lineage:
         raise FileNotFoundError(f"stage 02 source lineage files missing: {missing_source_lineage}")
 
+    source_contract_path, source_contract_payload = _load_parallel_attestation_statistics_input_contract(
+        extracted_root,
+        source_manifest,
+    )
+    contract_bound_records = _stage_contract_bound_detect_records(
+        extracted_root,
+        runtime_state_root,
+        source_contract_payload,
+    )
+
     cfg_obj = load_yaml_mapping(config_path)
     runtime_config_snapshot_path = runtime_state_root / "runtime_metadata" / "runtime_config_snapshot.yaml"
-    runtime_cfg = _build_runtime_config(cfg_obj, extracted_root, run_root)
+    runtime_cfg = _build_runtime_config(cfg_obj, contract_bound_records["detect_records_glob"], run_root)
     write_yaml_mapping(runtime_config_snapshot_path, runtime_cfg)
 
     preflight = detect_formal_gpu_preflight(runtime_config_snapshot_path)
@@ -227,6 +361,10 @@ def run_stage_02(
         "source_package_sha256": str(source_info["source_package_sha256"]),
         "source_package_manifest_path": normalize_path_value(source_package_manifest_copy_path),
         "source_package_manifest_digest": str(source_info["package_manifest_digest"]),
+        "source_parallel_attestation_statistics_input_contract_path": normalize_path_value(source_contract_path),
+        "source_parallel_attestation_statistics_input_contract_status": source_contract_payload.get("status"),
+        "source_parallel_attestation_statistics_input_contract_reason": source_contract_payload.get("reason"),
+        "contract_bound_detect_records": contract_bound_records,
         "source_stage_manifest_path": normalize_path_value(source_stage_manifest_copy_path),
         "source_runtime_config_snapshot_path": normalize_path_value(source_lineage_paths["source_runtime_config_snapshot_path"]),
         "source_prompt_snapshot_path": _resolve_prompt_snapshot_path(extracted_root),

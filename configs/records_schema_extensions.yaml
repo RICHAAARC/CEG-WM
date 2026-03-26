@@ -5,7 +5,7 @@
 # - 本文件不是 workflow 运行配置，不承载模型或推理参数。
 # ==============================================================
 
-version: "v15"  # v3→v4 (2026-03-12)：formal path 最终闭包收口；historical_fields: 段已从当前 formal schema 文件移除，旧字段信息不再显式保留在任何 formal 文件中。当前 formal schema 只表达当前正式机制。v4→v5 (2026-03-13)：追加 attestation 事件绑定、真实性/图像证据双层语义与 event-attested 判决字段。v5→v6 (2026-03-13)：追加 geometry recovery observations、observed correspondences 与 recovered consistency 字段。v6→v7 (2026-03-13)：追加 coarse registration 与 recovered-domain sync revalidation 细分字段。v7→v8 (2026-03-14)：追加 LF canonical evidence summary 字段登记。v8→v9 (2026-03-16)：追加 negative branch attestation provenance 的 append-only 诊断字段登记。v9→v10 (2026-03-17)：追加 attestation_source 字段并冻结 statement-only provenance 的受控 no-bundle 语义。v10→v11 (2026-03-19)：追加 exact LF observability 字段与 detect runtime canonical 兼容命名字段。v11→v12 (2026-03-20)：收口 detect runtime mode 当前正式合同描述。v12→v13 (2026-03-20)：移除 detect runtime 历史旧值名在当前 schema 正文中的残留，正式合同仅保留 real / fallback_identity。v13→v14 (2026-03-26)：追加 content_chain_score、lf_channel_score、lf_correlation_score 及 attestation LF 桥接字段登记。v14→v15 (2026-03-26)：追加 experiment_matrix auxiliary_analysis_runtime_executed 显式证据字段登记。
+version: "v16"  # v3→v4 (2026-03-12)：formal path 最终闭包收口；historical_fields: 段已从当前 formal schema 文件移除，旧字段信息不再显式保留在任何 formal 文件中。当前 formal schema 只表达当前正式机制。v4→v5 (2026-03-13)：追加 attestation 事件绑定、真实性/图像证据双层语义与 event-attested 判决字段。v5→v6 (2026-03-13)：追加 geometry recovery observations、observed correspondences 与 recovered consistency 字段。v6→v7 (2026-03-13)：追加 coarse registration 与 recovered-domain sync revalidation 细分字段。v7→v8 (2026-03-14)：追加 LF canonical evidence summary 字段登记。v8→v9 (2026-03-16)：追加 negative branch attestation provenance 的 append-only 诊断字段登记。v9→v10 (2026-03-17)：追加 attestation_source 字段并冻结 statement-only provenance 的受控 no-bundle 语义。v10→v11 (2026-03-19)：追加 exact LF observability 字段与 detect runtime canonical 兼容命名字段。v11→v12 (2026-03-20)：收口 detect runtime mode 当前正式合同描述。v12→v13 (2026-03-20)：移除 detect runtime 历史旧值名在当前 schema 正文中的残留，正式合同仅保留 real / fallback_identity。v13→v14 (2026-03-26)：追加 content_chain_score、lf_channel_score、lf_correlation_score 及 attestation LF 桥接字段登记。v14→v15 (2026-03-26)：追加 experiment_matrix auxiliary_analysis_runtime_executed 显式证据字段登记。v15→v16 (2026-03-26)：从当前 formal schema 中移除 event_attestation_statistics_score 旧 alias 字段登记，只保留 canonical event_attestation_score。
 append_only: true
 
 type_definitions:
@@ -1266,27 +1266,6 @@ fields:
     required: false
     missing_semantics: "absent_ok"
     description: "事件级 attestation 主正式统计得分的语义定义。"
-
-  - path: "attestation.final_event_attested_decision.event_attestation_statistics_score"
-    layer: "diagnostic"
-    type: "score_float"
-    required: false
-    missing_semantics: "absent_ok"
-    description: "事件级 attestation 旧统计读取端兼容别名，与 event_attestation_score 同值，不表示独立统计语义。"
-
-  - path: "attestation.final_event_attested_decision.event_attestation_statistics_score_name"
-    layer: "diagnostic"
-    type: "reason_string"
-    required: false
-    missing_semantics: "absent_ok"
-    description: "事件级 attestation 兼容别名字段名，仅用于旧读取端兼容。"
-
-  - path: "attestation.final_event_attested_decision.event_attestation_statistics_score_semantics"
-    layer: "diagnostic"
-    type: "reason_string"
-    required: false
-    missing_semantics: "absent_ok"
-    description: "事件级 attestation 兼容别名语义说明，明确该字段只是 event_attestation_score 的历史镜像。"
 
   - path: "negative_branch_source_attestation_provenance"
     layer: "diagnostic"
