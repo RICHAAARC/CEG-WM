@@ -703,6 +703,68 @@ def test_stage_01_source_pool_failure_exposes_nested_log_tails(
     assert "embed_stderr.log" in error_text
 
 
+def test_stage_01_mainline_writes_workflow_summary_for_source_pool_exception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：验证 source pool/build 异常会写出 workflow_summary 并返回非零。
+
+    Verify source-pool or build exceptions are summarized into workflow_summary
+    and converted into a non-zero process-style return code.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    runner = _load_script_module("scripts/01_run_paper_full_cuda.py", "stage_01_mainline_exception_summary")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("policy_path: content_np_geo_rescue\n", encoding="utf-8")
+    run_root = tmp_path / "run_root"
+
+    monkeypatch.setattr(runner, "load_yaml_mapping", lambda _path: {"policy_path": "content_np_geo_rescue"})
+    monkeypatch.setattr(
+        runner,
+        "_resolve_stage_01_source_pool_cfg",
+        lambda _cfg: {
+            "enabled": True,
+            "use_inference_prompt_file": True,
+            "target_prompt_count": 1,
+            "record_usage": "stage_01_direct_source_pool",
+        },
+    )
+    monkeypatch.setattr(
+        runner,
+        "_resolve_stage_01_pooled_threshold_build_cfg",
+        lambda _cfg: {
+            "enabled": True,
+            "build_mode": "source_plus_derived_pairs",
+            "target_pair_count": 1,
+            "build_usage": "stage_01_pooled_thresholds",
+            "record_derivation_kind": "prompt_bound_label_balance",
+        },
+    )
+    monkeypatch.setattr(runner, "_resolve_stage_01_prompt_pool", lambda _cfg: (["prompt 0"], "prompts/paper_small.txt"))
+    monkeypatch.setattr(
+        runner,
+        "_run_source_pool_subrun",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("source pool exploded")),
+    )
+
+    exit_code = runner.run_paper_full_cuda(config_path, run_root, stage_run_id="stage01_failure")
+    workflow_summary_path = run_root / "artifacts" / "workflow_summary.json"
+    workflow_summary = json.loads(workflow_summary_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 1
+    assert workflow_summary["status"] == "failed"
+    assert workflow_summary["exception_type"] == "RuntimeError"
+    assert workflow_summary["exception_message"] == "source pool exploded"
+    assert workflow_summary["source_pool_prompt_count"] == 1
+
+
 def test_stage_02_direct_only_build_uses_source_records_and_writes_build_contract(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

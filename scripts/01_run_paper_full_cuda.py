@@ -661,6 +661,60 @@ def _build_stage_failure_payload(
     return failure_payload
 
 
+def _build_workflow_exception_summary(
+    *,
+    stage_run_id: Optional[str],
+    config_path: Path,
+    run_root: Path,
+    prompt_pool: Sequence[str],
+    source_pool_stage_results: List[Dict[str, Any]],
+    pooled_stage_results: Dict[str, Any],
+    exc: Exception,
+) -> Dict[str, Any]:
+    """
+    功能：构造 stage 01 主链异常摘要并供 stderr 与 workflow_summary 复用。
+
+    Build the workflow summary payload for uncaught stage-01 mainline exceptions.
+
+    Args:
+        stage_run_id: External stage run identifier.
+        config_path: Runtime config path.
+        run_root: Workflow run root.
+        prompt_pool: Prompt pool sequence.
+        source_pool_stage_results: Completed source-pool stage results.
+        pooled_stage_results: Completed pooled stage results.
+        exc: Raised exception.
+
+    Returns:
+        JSON-serializable workflow summary payload.
+    """
+    if not isinstance(config_path, Path):
+        raise TypeError("config_path must be Path")
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(prompt_pool, Sequence):
+        raise TypeError("prompt_pool must be Sequence")
+    if not isinstance(source_pool_stage_results, list):
+        raise TypeError("source_pool_stage_results must be list")
+    if not isinstance(pooled_stage_results, dict):
+        raise TypeError("pooled_stage_results must be dict")
+    if not isinstance(exc, Exception):
+        raise TypeError("exc must be Exception")
+
+    return {
+        "stage_name": "01_Paper_Full_Cuda_mainline",
+        "stage_run_id": stage_run_id,
+        "config_path": normalize_path_value(config_path),
+        "run_root": normalize_path_value(run_root),
+        "status": "failed",
+        "source_pool_prompt_count": len(prompt_pool),
+        "source_pool_stage_results": source_pool_stage_results,
+        "pooled_stage_results": pooled_stage_results,
+        "exception_type": type(exc).__name__,
+        "exception_message": str(exc),
+    }
+
+
 def _run_source_pool_subrun(
     *,
     index: int,
@@ -1140,74 +1194,88 @@ def run_paper_full_cuda(config_path: Path, run_root: Path, stage_run_id: Optiona
     source_pool_stage_results: List[Dict[str, Any]] = []
     representative_embed_record_path: Optional[Path] = None
     representative_detect_record_path: Optional[Path] = None
-
-    for prompt_index, prompt_text in enumerate(prompt_pool):
-        direct_entry = _run_source_pool_subrun(
-            index=prompt_index,
-            prompt_text=prompt_text,
-            prompt_file_path=prompt_file_path,
-            cfg_obj=cfg_obj,
-            run_root=run_root,
-            record_usage=source_pool_cfg["record_usage"],
-        )
-        direct_entries.append(direct_entry)
-        source_pool_stage_results.append(
-            {
-                "prompt_index": prompt_index,
-                "prompt_text": prompt_text,
-                "stage_results": direct_entry["stage_results"],
-                "package_relative_path": direct_entry["package_relative_path"],
-            }
-        )
-        if representative_embed_record_path is None:
-            representative_embed_record_path = run_root / SOURCE_POOL_EMBED_RECORDS_RELATIVE_ROOT / f"{prompt_index:03d}_embed_record.json"
-            representative_detect_record_path = Path(str(direct_entry["path"]))
-
-    if representative_embed_record_path is None or representative_detect_record_path is None:
-        raise RuntimeError("stage 01 source pool did not emit representative embed/detect records")
-
-    copy_file(representative_embed_record_path, run_root / "records" / "embed_record.json")
-    copy_file(representative_detect_record_path, run_root / "records" / "detect_record.json")
-
-    source_contract_payload = _build_stage_01_source_contract(
-        stage_run_id=stage_run_id or "stage_01",
-        direct_entries=direct_entries,
-    )
-    source_contract_path = run_root / SOURCE_CONTRACT_RELATIVE_PATH
-    write_json_atomic(source_contract_path, source_contract_payload)
-
-    pooled_threshold_build_contract_payload = _build_stage_01_pooled_threshold_records(
-        run_root=run_root,
-        stage_run_id=stage_run_id or "stage_01",
-        prompt_file_path=prompt_file_path,
-        direct_entries=direct_entries,
-        build_cfg=build_cfg,
-    )
-    pooled_runtime_cfg = _build_pooled_runtime_config(cfg_obj, pooled_threshold_build_contract_payload, run_root)
-    pooled_runtime_cfg_path = run_root / POOLED_THRESHOLD_RUNTIME_CONFIG_RELATIVE_PATH
-    write_yaml_mapping(pooled_runtime_cfg_path, pooled_runtime_cfg)
-
     pooled_stage_results: Dict[str, Any] = {}
-    for stage_name in ("calibrate", "evaluate"):
-        command = _build_stage_command(stage_name, pooled_runtime_cfg_path, run_root)
-        result = _run_stage(stage_name, command, run_root)
-        pooled_stage_results[stage_name] = result
-        if result.get("return_code") != 0:
-            failed_stage_payload = _build_stage_failure_payload(stage_name, result)
-            summary_payload: Dict[str, Any] = {
-                "stage_name": "01_Paper_Full_Cuda_mainline",
-                "stage_run_id": stage_run_id,
-                "config_path": normalize_path_value(config_path),
-                "run_root": normalize_path_value(run_root),
-                "status": "failed",
-                "source_pool_prompt_count": len(prompt_pool),
-                "source_pool_stage_results": source_pool_stage_results,
-                "pooled_stage_results": pooled_stage_results,
-                "failed_stage": failed_stage_payload,
-            }
-            write_json_atomic(run_root / "artifacts" / "workflow_summary.json", summary_payload)
-            print(json.dumps(summary_payload, ensure_ascii=False, sort_keys=True), file=sys.stderr)
-            return int(result.get("return_code", 1))
+
+    try:
+        for prompt_index, prompt_text in enumerate(prompt_pool):
+            direct_entry = _run_source_pool_subrun(
+                index=prompt_index,
+                prompt_text=prompt_text,
+                prompt_file_path=prompt_file_path,
+                cfg_obj=cfg_obj,
+                run_root=run_root,
+                record_usage=source_pool_cfg["record_usage"],
+            )
+            direct_entries.append(direct_entry)
+            source_pool_stage_results.append(
+                {
+                    "prompt_index": prompt_index,
+                    "prompt_text": prompt_text,
+                    "stage_results": direct_entry["stage_results"],
+                    "package_relative_path": direct_entry["package_relative_path"],
+                }
+            )
+            if representative_embed_record_path is None:
+                representative_embed_record_path = run_root / SOURCE_POOL_EMBED_RECORDS_RELATIVE_ROOT / f"{prompt_index:03d}_embed_record.json"
+                representative_detect_record_path = Path(str(direct_entry["path"]))
+
+        if representative_embed_record_path is None or representative_detect_record_path is None:
+            raise RuntimeError("stage 01 source pool did not emit representative embed/detect records")
+
+        copy_file(representative_embed_record_path, run_root / "records" / "embed_record.json")
+        copy_file(representative_detect_record_path, run_root / "records" / "detect_record.json")
+
+        source_contract_payload = _build_stage_01_source_contract(
+            stage_run_id=stage_run_id or "stage_01",
+            direct_entries=direct_entries,
+        )
+        source_contract_path = run_root / SOURCE_CONTRACT_RELATIVE_PATH
+        write_json_atomic(source_contract_path, source_contract_payload)
+
+        pooled_threshold_build_contract_payload = _build_stage_01_pooled_threshold_records(
+            run_root=run_root,
+            stage_run_id=stage_run_id or "stage_01",
+            prompt_file_path=prompt_file_path,
+            direct_entries=direct_entries,
+            build_cfg=build_cfg,
+        )
+        pooled_runtime_cfg = _build_pooled_runtime_config(cfg_obj, pooled_threshold_build_contract_payload, run_root)
+        pooled_runtime_cfg_path = run_root / POOLED_THRESHOLD_RUNTIME_CONFIG_RELATIVE_PATH
+        write_yaml_mapping(pooled_runtime_cfg_path, pooled_runtime_cfg)
+
+        for stage_name in ("calibrate", "evaluate"):
+            command = _build_stage_command(stage_name, pooled_runtime_cfg_path, run_root)
+            result = _run_stage(stage_name, command, run_root)
+            pooled_stage_results[stage_name] = result
+            if result.get("return_code") != 0:
+                failed_stage_payload = _build_stage_failure_payload(stage_name, result)
+                summary_payload: Dict[str, Any] = {
+                    "stage_name": "01_Paper_Full_Cuda_mainline",
+                    "stage_run_id": stage_run_id,
+                    "config_path": normalize_path_value(config_path),
+                    "run_root": normalize_path_value(run_root),
+                    "status": "failed",
+                    "source_pool_prompt_count": len(prompt_pool),
+                    "source_pool_stage_results": source_pool_stage_results,
+                    "pooled_stage_results": pooled_stage_results,
+                    "failed_stage": failed_stage_payload,
+                }
+                write_json_atomic(run_root / "artifacts" / "workflow_summary.json", summary_payload)
+                print(json.dumps(summary_payload, ensure_ascii=False, sort_keys=True), file=sys.stderr)
+                return int(result.get("return_code", 1))
+    except Exception as exc:
+        summary_payload = _build_workflow_exception_summary(
+            stage_run_id=stage_run_id,
+            config_path=config_path,
+            run_root=run_root,
+            prompt_pool=prompt_pool,
+            source_pool_stage_results=source_pool_stage_results,
+            pooled_stage_results=pooled_stage_results,
+            exc=exc,
+        )
+        write_json_atomic(run_root / "artifacts" / "workflow_summary.json", summary_payload)
+        print(json.dumps(summary_payload, ensure_ascii=False, sort_keys=True), file=sys.stderr)
+        return 1
 
     write_json_atomic(run_root / POOLED_THRESHOLD_BUILD_CONTRACT_RELATIVE_PATH, pooled_threshold_build_contract_payload)
 
