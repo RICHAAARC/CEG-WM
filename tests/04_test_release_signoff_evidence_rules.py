@@ -258,6 +258,7 @@ def _build_stage_03_package(
     stage_01_info: Dict[str, Any],
     *,
     primary_scope: str = "system_final",
+    primary_driver_mode: str = "system_final_only",
     primary_summary_basis_scope: str = "system_final",
     primary_summary_basis_metric_name: str = "system_final_metrics",
     include_system_final_metrics: bool = True,
@@ -325,6 +326,7 @@ def _build_stage_03_package(
         "threshold_metadata_artifact_path": "/drive/runs/03/global_calibrate/artifacts/thresholds/threshold_metadata_artifact.json",
         "primary_evaluation_scope": primary_scope,
         "primary_metric_name": "system_final_metrics",
+        "primary_driver_mode": primary_driver_mode,
         "primary_summary_basis_scope": primary_summary_basis_scope,
         "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
         "auxiliary_scopes": auxiliary_scopes,
@@ -358,6 +360,7 @@ def _build_stage_03_package(
         "status": "ok",
         "evaluation_scope": primary_scope,
         "primary_metric_name": "system_final_metrics",
+        "primary_driver_mode": primary_driver_mode,
         "primary_summary_basis_scope": primary_summary_basis_scope,
         "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
         "auxiliary_scope_metrics": {
@@ -379,6 +382,7 @@ def _build_stage_03_package(
         "auxiliary_scopes": auxiliary_scopes,
         "scope_manifest": scope_manifest,
         "primary_metric_name": "system_final_metrics",
+        "primary_driver_mode": primary_driver_mode,
         "primary_summary_basis_scope": primary_summary_basis_scope,
         "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
         "cfg_digest": "cfg03",
@@ -413,6 +417,7 @@ def _build_stage_03_package(
             "policy_path": "content_np_geo_rescue",
             "primary_evaluation_scope": primary_scope,
             "primary_metric_name": "system_final_metrics",
+            "primary_driver_mode": primary_driver_mode,
             "primary_summary_basis_scope": primary_summary_basis_scope,
             "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
             "auxiliary_scopes": auxiliary_scopes,
@@ -425,6 +430,7 @@ def _build_stage_03_package(
             "aggregate_report_version": "aggregate_v1",
             "primary_evaluation_scope": primary_scope,
             "primary_metric_name": "system_final_metrics",
+            "primary_driver_mode": primary_driver_mode,
             "primary_summary_basis_scope": primary_summary_basis_scope,
             "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
             "auxiliary_scopes": auxiliary_scopes,
@@ -444,6 +450,7 @@ def _build_stage_03_package(
             "stage_run_id": stage_run_id,
             "primary_evaluation_scope": primary_scope,
             "primary_metric_name": "system_final_metrics",
+            "primary_driver_mode": primary_driver_mode,
             "primary_summary_basis_scope": primary_summary_basis_scope,
             "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
             "auxiliary_scopes": auxiliary_scopes,
@@ -622,6 +629,47 @@ def test_stage_04_blocks_when_stage_03_primary_scope_is_not_system_final(tmp_pat
     assert signoff_report["decision"] == "BLOCK_FREEZE"
     reason_codes = {item["reason_code"] for item in signoff_report["blocking_reasons"]}
     assert "stage_03.primary_scope_not_system_final" in reason_codes
+
+
+def test_stage_04_blocks_when_stage_03_primary_driver_mode_is_not_system_final_only(tmp_path: Path) -> None:
+    """
+    功能：验证 stage 03 若主驱动模式不是 system_final_only，则必须 BLOCK_FREEZE。
+
+    Verify that stage 04 blocks freeze when stage 03 primary_driver_mode
+    drifts away from system_final_only.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    module = _load_stage_04_module()
+    drive_project_root = tmp_path / "drive_project_root"
+    stage_01_info = _build_stage_01_package(tmp_path / "case_driver_mode_mismatch")
+    stage_02_info = _build_stage_02_package(tmp_path / "case_driver_mode_mismatch", stage_01_info)
+    stage_03_info = _build_stage_03_package(
+        tmp_path / "case_driver_mode_mismatch",
+        stage_01_info,
+        primary_driver_mode="lf_channel_primary",
+    )
+
+    summary = module.run_stage_04(
+        drive_project_root=drive_project_root,
+        stage_01_package_path=stage_01_info["package_path"],
+        stage_02_package_path=stage_02_info["package_path"],
+        stage_03_package_path=stage_03_info["package_path"],
+        config_path=DEFAULT_CONFIG_PATH,
+        notebook_name="04_Release_And_Signoff",
+        stage_run_id="stage04_driver_mode_mismatch",
+        require_stage_02=True,
+        require_stage_03=True,
+    )
+
+    signoff_report = json.loads(Path(summary["signoff_report_path"]).read_text(encoding="utf-8"))
+    assert signoff_report["decision"] == "BLOCK_FREEZE"
+    reason_codes = {item["reason_code"] for item in signoff_report["blocking_reasons"]}
+    assert "stage_03.primary_driver_mode_not_system_final_only" in reason_codes
 
 
 def test_stage_04_blocks_when_stage_03_lacks_system_final_metrics(tmp_path: Path) -> None:

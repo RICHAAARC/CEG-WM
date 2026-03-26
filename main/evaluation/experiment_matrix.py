@@ -42,6 +42,7 @@ _SYSTEM_FINAL_SCOPE = "system_final"
 _CONTENT_CHAIN_SCOPE = "content_chain"
 _LF_CHANNEL_SCOPE = "lf_channel"
 _SYSTEM_FINAL_METRIC_NAME = "system_final_metrics"
+_SYSTEM_FINAL_PRIMARY_DRIVER_MODE = "system_final_only"
 _MATRIX_EVALUATION_SCOPES = {
     _SYSTEM_FINAL_SCOPE,
     _CONTENT_CHAIN_SCOPE,
@@ -134,6 +135,10 @@ def build_experiment_grid(base_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     evaluation_scope = _resolve_matrix_primary_scope(matrix_cfg)
     auxiliary_scopes = _resolve_matrix_auxiliary_scopes(matrix_cfg, evaluation_scope)
     auxiliary_scope_configs = _resolve_matrix_auxiliary_scope_configs(matrix_cfg, auxiliary_scopes)
+    auxiliary_analysis_metric_name = _resolve_matrix_auxiliary_analysis_metric_name(
+        matrix_cfg,
+        auxiliary_scope_configs,
+    )
     primary_summary_basis_scope = _resolve_matrix_primary_summary_basis_scope(matrix_cfg, evaluation_scope)
     scope_manifest = _build_matrix_scope_manifest(
         primary_scope=evaluation_scope,
@@ -207,8 +212,10 @@ def build_experiment_grid(base_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
                         "evaluation_scope": evaluation_scope,
                         "auxiliary_scopes": copy.deepcopy(auxiliary_scopes),
                         "auxiliary_scope_configs": copy.deepcopy(auxiliary_scope_configs),
+                        "auxiliary_analysis_metric_name": auxiliary_analysis_metric_name,
                         "scope_manifest": copy.deepcopy(scope_manifest),
                         "primary_metric_name": _resolve_matrix_primary_metric_name(evaluation_scope),
+                        "primary_driver_mode": _SYSTEM_FINAL_PRIMARY_DRIVER_MODE,
                         "primary_summary_basis_scope": primary_summary_basis_scope,
                         "primary_summary_basis_metric_name": _resolve_matrix_primary_metric_name(primary_summary_basis_scope),
                         "require_real_negative_cache": formal_validation_guards["require_real_negative_cache"],
@@ -254,6 +261,7 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
         "auxiliary_scopes": copy.deepcopy(grid_item_cfg.get("auxiliary_scopes", [])) if isinstance(grid_item_cfg.get("auxiliary_scopes"), list) else [],
         "scope_manifest": copy.deepcopy(grid_item_cfg.get("scope_manifest", {})) if isinstance(grid_item_cfg.get("scope_manifest"), dict) else {},
         "primary_metric_name": _safe_str(grid_item_cfg.get("primary_metric_name")),
+        "primary_driver_mode": _safe_str(grid_item_cfg.get("primary_driver_mode")) or _SYSTEM_FINAL_PRIMARY_DRIVER_MODE,
         "primary_summary_basis_scope": _safe_str(grid_item_cfg.get("primary_summary_basis_scope")),
         "primary_summary_basis_metric_name": _safe_str(grid_item_cfg.get("primary_summary_basis_metric_name")),
         "status": "failed",
@@ -278,6 +286,14 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
         "detect_gate_relaxed": False,
         "detect_gate_relax_reason": "hard_gate_default",
         "detect_gate_sample_counts": {},
+        "auxiliary_analysis": {
+            "driver_role": "auxiliary_only",
+            "metric_name": _safe_str(grid_item_cfg.get("auxiliary_analysis_metric_name")),
+            "status": "not_run",
+            "failure_reason": "<absent>",
+            "shared_thresholds_used": False,
+            "pair_free_evaluate_used": False,
+        },
         "metrics": {},
     }
 
@@ -286,34 +302,49 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
         "reason": "hard_gate_not_checked",
         "sample_counts": {},
     }
+    auxiliary_analysis_info: Dict[str, Any] = copy.deepcopy(summary["auxiliary_analysis"])
 
     try:
         stage_gate_info = _run_stage_sequence(grid_item_cfg, run_root)
         if isinstance(stage_gate_info, dict):
-            detect_gate_info = stage_gate_info
-        eval_report = _read_evaluation_report_for_run(run_root)
-        _assert_required_run_artifacts(run_root)
+            detect_gate_candidate = stage_gate_info.get("detect_gate_info")
+            if isinstance(detect_gate_candidate, dict):
+                detect_gate_info = detect_gate_candidate
+            auxiliary_analysis_candidate = stage_gate_info.get("auxiliary_analysis")
+            if isinstance(auxiliary_analysis_candidate, dict):
+                auxiliary_analysis_info = auxiliary_analysis_candidate
+        eval_report = _read_optional_evaluation_report_for_run(run_root)
         evaluate_record = _read_optional_json(run_root / "records" / "evaluate_record.json")
+        detect_record = _read_optional_json(run_root / "records" / "detect_record.json")
         run_closure = _read_optional_json(run_root / "artifacts" / "run_closure.json")
 
         metrics_obj = eval_report.get("metrics") if isinstance(eval_report.get("metrics"), dict) else {}
         cfg_digest_value = _first_present_str(
             eval_report.get("cfg_digest"),
             evaluate_record.get("cfg_digest") if isinstance(evaluate_record, dict) else None,
+            detect_record.get("cfg_digest") if isinstance(detect_record, dict) else None,
             grid_item_cfg.get("cfg_digest"),
+        )
+        plan_digest_value = _first_present_str(
+            eval_report.get("plan_digest"),
+            detect_record.get("plan_digest") if isinstance(detect_record, dict) else None,
+            run_closure.get("plan_digest") if isinstance(run_closure, dict) else None,
         )
         thresholds_digest_value = _first_present_str(
             eval_report.get("thresholds_digest"),
             evaluate_record.get("thresholds_digest") if isinstance(evaluate_record, dict) else None,
+            detect_record.get("thresholds_digest") if isinstance(detect_record, dict) else None,
             run_closure.get("thresholds_digest") if isinstance(run_closure, dict) else None,
         )
         thresholds_metadata_digest_value = _first_present_str(
             eval_report.get("threshold_metadata_digest"),
             evaluate_record.get("threshold_metadata_digest") if isinstance(evaluate_record, dict) else None,
+            detect_record.get("threshold_metadata_digest") if isinstance(detect_record, dict) else None,
             run_closure.get("threshold_metadata_digest") if isinstance(run_closure, dict) else None,
         )
         policy_path_value = _first_present_str(
             evaluate_record.get("policy_path") if isinstance(evaluate_record, dict) else None,
+            detect_record.get("policy_path") if isinstance(detect_record, dict) else None,
             run_closure.get("policy_path") if isinstance(run_closure, dict) else None,
             eval_report.get("policy_path"),
             eval_report.get("anchors", {}).get("policy_path") if isinstance(eval_report.get("anchors"), dict) else None,
@@ -321,12 +352,14 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
         impl_digest_value = _first_present_str(
             eval_report.get("impl_digest"),
             evaluate_record.get("impl_digest") if isinstance(evaluate_record, dict) else None,
+            detect_record.get("impl_digest") if isinstance(detect_record, dict) else None,
             run_closure.get("impl_digest") if isinstance(run_closure, dict) else None,
             run_closure.get("impl_identity_digest") if isinstance(run_closure, dict) else None,
         )
         fusion_rule_version_value = _first_present_str(
             eval_report.get("fusion_rule_version"),
             evaluate_record.get("fusion_rule_version") if isinstance(evaluate_record, dict) else None,
+            detect_record.get("fusion_rule_version") if isinstance(detect_record, dict) else None,
             run_closure.get("fusion_rule_version") if isinstance(run_closure, dict) else None,
         )
         summary.update(
@@ -334,16 +367,18 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
                 "status": "ok",
                 "failure_reason": "ok",
                 "cfg_digest": _safe_str(cfg_digest_value),
-                "plan_digest": _safe_str(eval_report.get("plan_digest")),
+                "plan_digest": _safe_str(plan_digest_value),
                 "thresholds_digest": _safe_str(thresholds_digest_value),
                 "threshold_metadata_digest": _safe_str(thresholds_metadata_digest_value),
-                "ablation_digest": _safe_str(eval_report.get("ablation_digest")),
-                "attack_protocol_digest": _safe_str(eval_report.get("attack_protocol_digest")),
-                "attack_protocol_version": _safe_str(eval_report.get("attack_protocol_version")),
+                "ablation_digest": _safe_str(eval_report.get("ablation_digest") or grid_item_cfg.get("ablation_digest")),
+                "attack_protocol_digest": _safe_str(eval_report.get("attack_protocol_digest") or grid_item_cfg.get("attack_protocol_digest")),
+                "attack_protocol_version": _safe_str(eval_report.get("attack_protocol_version") or grid_item_cfg.get("attack_protocol_version")),
                 "attack_coverage_digest": _safe_str(eval_report.get("attack_coverage_digest")),
                 "policy_path": _safe_str(policy_path_value),
                 "impl_digest": _safe_str(impl_digest_value),
                 "fusion_rule_version": _safe_str(fusion_rule_version_value),
+                "primary_driver_mode": _SYSTEM_FINAL_PRIMARY_DRIVER_MODE,
+                "auxiliary_analysis": auxiliary_analysis_info,
                 "metrics": {
                     "tpr_at_fpr": metrics_obj.get("tpr_at_fpr_primary", metrics_obj.get("tpr_at_fpr")),
                     "geo_available_rate": metrics_obj.get("geo_available_rate"),
@@ -374,6 +409,7 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
         summary["detect_gate_relaxed"] = bool(detect_gate_info.get("gate_relaxed", False))
         summary["detect_gate_relax_reason"] = _safe_str(detect_gate_info.get("reason"))
         summary["detect_gate_sample_counts"] = detect_gate_info.get("sample_counts") if isinstance(detect_gate_info.get("sample_counts"), dict) else {}
+        summary["auxiliary_analysis"] = auxiliary_analysis_info
 
     return summary
 
@@ -388,6 +424,24 @@ def _read_optional_json(path: Path) -> Dict[str, Any]:
     if not isinstance(parsed_obj, dict):
         return {}
     return parsed_obj
+
+
+def _read_optional_evaluation_report_for_run(run_root: Path) -> Dict[str, Any]:
+    """Read evaluation report payload when auxiliary analysis produced it."""
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+
+    eval_report_path = run_root / "artifacts" / "eval_report.json"
+    if not eval_report_path.exists() or not eval_report_path.is_file():
+        return {}
+
+    parsed_obj = json.loads(eval_report_path.read_text(encoding="utf-8"))
+    if not isinstance(parsed_obj, dict):
+        return {}
+    eval_report = parsed_obj.get("evaluation_report")
+    if not isinstance(eval_report, dict):
+        return {}
+    return eval_report
 
 
 def _coerce_finite_float(value: Any) -> Optional[float]:
@@ -844,7 +898,7 @@ def _resolve_matrix_auxiliary_scope_configs(
                 raw_scope_config.get("metric_name", canonical_metric_name),
             )
         }
-        raw_analysis_metric_name = raw_scope_config.get("analysis_metric_name", raw_scope_config.get("formal_score_name"))
+        raw_analysis_metric_name = raw_scope_config.get("analysis_metric_name")
         if raw_analysis_metric_name is not None:
             resolved_scope_config["analysis_metric_name"] = _normalize_auxiliary_scope_metric_name(
                 scope_name,
@@ -854,65 +908,15 @@ def _resolve_matrix_auxiliary_scope_configs(
     return resolved_scope_configs
 
 
-def _resolve_matrix_scalar_formal_scope(
-    matrix_cfg: Dict[str, Any],
-    auxiliary_scopes: List[str],
-    auxiliary_scope_configs: Dict[str, Dict[str, Any]],
-    scalar_formal_score_name: str,
-) -> str:
-    """Resolve the auxiliary analysis scope owning one scalar analysis metric."""
-    if not isinstance(matrix_cfg, dict):
-        raise TypeError("matrix_cfg must be dict")
-    if not isinstance(auxiliary_scopes, list):
-        raise TypeError("auxiliary_scopes must be list")
-    if not isinstance(auxiliary_scope_configs, dict):
-        raise TypeError("auxiliary_scope_configs must be dict")
-    if not isinstance(scalar_formal_score_name, str) or not scalar_formal_score_name:
-        raise TypeError("scalar_formal_score_name must be non-empty str")
-
-    configured_scopes = [
-        scope_name
-        for scope_name, scope_cfg in auxiliary_scope_configs.items()
-        if isinstance(scope_cfg, dict)
-        and scope_cfg.get("analysis_metric_name") == scalar_formal_score_name
-    ]
-    if len(configured_scopes) > 1:
-        raise ValueError(
-            "experiment_matrix auxiliary_scope_configs may declare at most one analysis_metric_name owner"
-        )
-    if configured_scopes:
-        scope_name = configured_scopes[0]
-        if scope_name not in auxiliary_scopes:
-            raise ValueError("configured auxiliary scalar formal scope must be included in auxiliary_scopes")
-        return scope_name
-
-    inferred_scope = (
-        _LF_CHANNEL_SCOPE
-        if eval_metrics.is_lf_channel_score_name(scalar_formal_score_name)
-        else _CONTENT_CHAIN_SCOPE
-    )
-    scope_name = inferred_scope
-    if scope_name not in {_CONTENT_CHAIN_SCOPE, _LF_CHANNEL_SCOPE}:
-        raise ValueError(f"unsupported experiment_matrix.scalar_formal_scope: {scope_name}")
-    if scope_name not in auxiliary_scopes:
-        raise ValueError("experiment_matrix.scalar_formal_scope must be included in auxiliary_scopes")
-    expected_metric_name = _resolve_matrix_primary_metric_name(scope_name)
-    if expected_metric_name != scalar_formal_score_name:
-        raise ValueError(
-            "experiment_matrix.scalar_formal_scope and scalar_formal_score_name must resolve to the same auxiliary scalar semantics"
-        )
-    return scope_name
-
-
-def _resolve_formal_matrix_score(
+def _resolve_auxiliary_analysis_score(
     record_payload: Dict[str, Any],
-    score_name: str,
+    metric_name: str,
 ) -> Tuple[Optional[float], Optional[str]]:
-    """Resolve the canonical formal-path score for experiment_matrix."""
+    """Resolve one canonical auxiliary-analysis metric from content evidence."""
     if not isinstance(record_payload, dict):
         raise TypeError("record_payload must be dict")
-    if not isinstance(score_name, str) or not score_name:
-        raise TypeError("score_name must be non-empty str")
+    if not isinstance(metric_name, str) or not metric_name:
+        raise TypeError("metric_name must be non-empty str")
 
     content_payload = record_payload.get("content_evidence_payload")
     if not isinstance(content_payload, dict):
@@ -922,7 +926,7 @@ def _resolve_formal_matrix_score(
     if status_value != "ok":
         return None, f"content_evidence_payload.status={_safe_str(status_value)}"
 
-    if eval_metrics.is_lf_channel_score_name(score_name):
+    if eval_metrics.is_lf_channel_score_name(metric_name):
         score_value = _coerce_finite_float(content_payload.get(eval_metrics.LF_CHANNEL_SCORE_NAME))
         if score_value is None:
             score_value = _coerce_finite_float(content_payload.get("lf_score"))
@@ -930,8 +934,8 @@ def _resolve_formal_matrix_score(
             return None, "content_evidence_payload.lf_channel_score_missing_or_nonfinite"
         return score_value, "content_evidence_payload.lf_channel_score"
 
-    if not eval_metrics.is_content_chain_score_name(score_name):
-        raise ValueError(f"unsupported matrix formal score_name: {score_name}")
+    if not eval_metrics.is_content_chain_score_name(metric_name):
+        raise ValueError(f"unsupported auxiliary analysis metric_name: {metric_name}")
 
     recovery_reason = content_payload.get("calibration_score_recovery_reason")
     if isinstance(recovery_reason, str) and recovery_reason:
@@ -948,43 +952,43 @@ def _resolve_formal_matrix_score(
     return score_value, "content_evidence_payload.content_chain_score"
 
 
-def _ensure_matrix_calibration_compatible_content_payload(
+def _ensure_auxiliary_analysis_compatible_content_payload(
     record_payload: Dict[str, Any],
-    score_name: str,
-    score_value: float,
+    metric_name: str,
+    metric_value: float,
     score_source: Optional[str] = None,
     recovered_sample_origin: Optional[str] = None,
-    require_canonical_matrix_score: bool = False,
+    require_canonical_metric: bool = False,
 ) -> None:
-    """Normalize a record so calibration can consume it as a valid content sample."""
+    """Normalize a record so auxiliary analysis can consume canonical content metrics."""
     if not isinstance(record_payload, dict):
         raise TypeError("record_payload must be dict")
-    if not isinstance(score_name, str) or not score_name:
-        raise TypeError("score_name must be non-empty str")
-    if not isinstance(score_value, (int, float)) or not np.isfinite(float(score_value)):
-        raise TypeError("score_value must be finite numeric")
+    if not isinstance(metric_name, str) or not metric_name:
+        raise TypeError("metric_name must be non-empty str")
+    if not isinstance(metric_value, (int, float)) or not np.isfinite(float(metric_value)):
+        raise TypeError("metric_value must be finite numeric")
     if score_source is not None and (not isinstance(score_source, str) or not score_source):
         raise TypeError("score_source must be non-empty str or None")
     if recovered_sample_origin is not None and (
         not isinstance(recovered_sample_origin, str) or not recovered_sample_origin
     ):
         raise TypeError("recovered_sample_origin must be non-empty str or None")
-    if not isinstance(require_canonical_matrix_score, bool):
-        raise TypeError("require_canonical_matrix_score must be bool")
+    if not isinstance(require_canonical_metric, bool):
+        raise TypeError("require_canonical_metric must be bool")
 
     content_node = record_payload.get("content_evidence_payload")
     if not isinstance(content_node, dict):
         content_node = {}
         record_payload["content_evidence_payload"] = content_node
 
-    if require_canonical_matrix_score:
+    if require_canonical_metric:
         existing_status = content_node.get("status")
         if existing_status != "ok":
             raise RuntimeError(
                 "formal matrix content payload must preserve status=ok; "
                 f"got_status={_safe_str(existing_status)}"
             )
-        if eval_metrics.is_lf_channel_score_name(score_name):
+        if eval_metrics.is_lf_channel_score_name(metric_name):
             existing_score = _coerce_finite_float(content_node.get(eval_metrics.LF_CHANNEL_SCORE_NAME))
             if existing_score is None:
                 existing_score = _coerce_finite_float(content_node.get("lf_score"))
@@ -997,7 +1001,7 @@ def _ensure_matrix_calibration_compatible_content_payload(
                     "formal matrix content payload forbids non-canonical lf_channel_score source; "
                     f"score_source={_safe_str(score_source)}"
                 )
-        elif eval_metrics.is_content_chain_score_name(score_name):
+        elif eval_metrics.is_content_chain_score_name(metric_name):
             existing_score = _coerce_finite_float(content_node.get(eval_metrics.CONTENT_CHAIN_SCORE_NAME))
             if existing_score is None:
                 existing_score = _coerce_finite_float(content_node.get("score"))
@@ -1017,33 +1021,33 @@ def _ensure_matrix_calibration_compatible_content_payload(
                     f"recovery_reason={recovery_reason}"
                 )
         else:
-            raise ValueError(f"unsupported matrix formal score_name: {score_name}")
+            raise ValueError(f"unsupported auxiliary analysis metric_name: {metric_name}")
 
     content_node["status"] = "ok"
     content_node.pop("calibration_sample_is_synthetic_fallback", None)
     content_node.pop("calibration_score_recovery_reason", None)
     content_node.pop("calibration_sample_origin", None)
 
-    if eval_metrics.is_lf_channel_score_name(score_name):
-        content_node[eval_metrics.LF_CHANNEL_SCORE_NAME] = float(score_value)
-        content_node["lf_score"] = float(score_value)
+    if eval_metrics.is_lf_channel_score_name(metric_name):
+        content_node[eval_metrics.LF_CHANNEL_SCORE_NAME] = float(metric_value)
+        content_node["lf_score"] = float(metric_value)
         score_parts_node = content_node.get("score_parts")
         if isinstance(score_parts_node, dict):
-            score_parts_node[eval_metrics.LF_CHANNEL_SCORE_NAME] = float(score_value)
-            score_parts_node["lf_score"] = float(score_value)
+            score_parts_node[eval_metrics.LF_CHANNEL_SCORE_NAME] = float(metric_value)
+            score_parts_node["lf_score"] = float(metric_value)
         return
 
-    if eval_metrics.is_content_chain_score_name(score_name):
-        content_node[eval_metrics.CONTENT_CHAIN_SCORE_NAME] = float(score_value)
-        content_node["score"] = float(score_value)
-        content_node["content_score"] = float(score_value)
-        if not require_canonical_matrix_score and isinstance(score_source, str) and score_source != "content_evidence_payload.content_chain_score":
+    if eval_metrics.is_content_chain_score_name(metric_name):
+        content_node[eval_metrics.CONTENT_CHAIN_SCORE_NAME] = float(metric_value)
+        content_node["score"] = float(metric_value)
+        content_node["content_score"] = float(metric_value)
+        if not require_canonical_metric and isinstance(score_source, str) and score_source != "content_evidence_payload.content_chain_score":
             content_node["calibration_score_recovery_reason"] = score_source
             if isinstance(recovered_sample_origin, str):
                 content_node["calibration_sample_origin"] = recovered_sample_origin
         return
 
-    raise ValueError(f"unsupported matrix formal score_name: {score_name}")
+    raise ValueError(f"unsupported auxiliary analysis metric_name: {metric_name}")
 
 
 def _extract_hf_truncation_baseline_comparison_from_detect_record(run_root: Path) -> Dict[str, Any]:
@@ -1229,12 +1233,6 @@ def run_experiment_grid(grid: List[Dict[str, Any]], strict: bool = True) -> Dict
                 # 全局 calibrate 失败时降级为 per-item calibrate，不中止 grid 执行。
                 shared_thresholds_path = None
 
-    _assert_formal_validation_prerequisites(
-        grid,
-        neg_detect_record_cache=neg_detect_record_cache,
-        shared_thresholds_path=shared_thresholds_path,
-    )
-
     # (3) 主循环：将 neg_detect_record_path 与 shared_thresholds_path 注入各 grid item。
     for item in grid:
         if not isinstance(item, dict):
@@ -1371,6 +1369,7 @@ def build_aggregate_report(
                 "status": status_value,
                 "evaluation_scope": _safe_str(item.get("evaluation_scope")),
                 "primary_metric_name": _safe_str(item.get("primary_metric_name")),
+                "primary_driver_mode": _safe_str(item.get("primary_driver_mode")) or _SYSTEM_FINAL_PRIMARY_DRIVER_MODE,
                 "tpr_at_fpr": metrics_obj.get("tpr_at_fpr"),
                 "geo_available_rate": metrics_obj.get("geo_available_rate"),
                 "rescue_rate": metrics_obj.get("rescue_rate"),
@@ -1378,6 +1377,7 @@ def build_aggregate_report(
                 "reject_rate_breakdown": metrics_obj.get("reject_rate_breakdown", {}),
                 _SYSTEM_FINAL_METRIC_NAME: metrics_obj.get(_SYSTEM_FINAL_METRIC_NAME),
                 "auxiliary_scope_metrics": metrics_obj.get("auxiliary_scope_metrics", {}),
+                "auxiliary_analysis": item.get("auxiliary_analysis", {}),
             }
         )
 
@@ -1393,18 +1393,11 @@ def build_aggregate_report(
     grouped_rows = _build_grouped_rows(experiment_results)
     failure_semantics_distribution = _collect_failure_semantics_distribution(experiment_results)
     coverage_manifest = attack_coverage.compute_attack_coverage_manifest()
-    primary_evaluation_scope = _safe_str(experiment_results[0].get("evaluation_scope")) if experiment_results else _SYSTEM_FINAL_SCOPE
-    primary_metric_name = _safe_str(experiment_results[0].get("primary_metric_name")) if experiment_results else _SYSTEM_FINAL_METRIC_NAME
-    primary_summary_basis_scope = (
-        _safe_str(experiment_results[0].get("primary_summary_basis_scope"))
-        if experiment_results
-        else _SYSTEM_FINAL_SCOPE
-    )
-    primary_summary_basis_metric_name = (
-        _safe_str(experiment_results[0].get("primary_summary_basis_metric_name"))
-        if experiment_results
-        else _SYSTEM_FINAL_METRIC_NAME
-    )
+    primary_evaluation_scope = _SYSTEM_FINAL_SCOPE
+    primary_metric_name = _SYSTEM_FINAL_METRIC_NAME
+    primary_summary_basis_scope = _SYSTEM_FINAL_SCOPE
+    primary_summary_basis_metric_name = _SYSTEM_FINAL_METRIC_NAME
+    primary_driver_mode = _SYSTEM_FINAL_PRIMARY_DRIVER_MODE
     auxiliary_scopes = (
         list(experiment_results[0].get("auxiliary_scopes", []))
         if experiment_results and isinstance(experiment_results[0].get("auxiliary_scopes"), list)
@@ -1435,6 +1428,7 @@ def build_aggregate_report(
         "aggregate_report_version": "aggregate_v1",
         "primary_evaluation_scope": primary_evaluation_scope,
         "primary_metric_name": primary_metric_name,
+        "primary_driver_mode": primary_driver_mode,
         "primary_summary_basis_scope": primary_summary_basis_scope,
         "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
         "auxiliary_scopes": auxiliary_scopes,
@@ -1473,11 +1467,11 @@ def _extract_matrix_cfg(base_cfg: Dict[str, Any]) -> Dict[str, Any]:
     return matrix_cfg
 
 
-def _resolve_matrix_formal_score_name(
+def _resolve_matrix_auxiliary_analysis_metric_name(
     matrix_cfg: Dict[str, Any],
     auxiliary_scope_configs: Optional[Dict[str, Dict[str, Any]]] = None,
-) -> str:
-    """Resolve the matrix-only formal score name."""
+) -> Optional[str]:
+    """Resolve the optional auxiliary-analysis metric configured for stage 03."""
     if not isinstance(matrix_cfg, dict):
         raise TypeError("matrix_cfg must be dict")
 
@@ -1501,56 +1495,34 @@ def _resolve_matrix_formal_score_name(
         raise ValueError(
             "experiment_matrix auxiliary_scope_configs may declare at most one analysis_metric_name"
         )
-    if len(configured_score_names) == 1:
-        score_name = configured_score_names[0]
-    else:
-        score_name = matrix_cfg.get(
-            "scalar_formal_score_name",
-            matrix_cfg.get("formal_score_name", eval_metrics.LF_CHANNEL_SCORE_NAME),
-        )
-    if not isinstance(score_name, str) or not score_name:
-        raise TypeError("experiment_matrix scalar formal score name must be non-empty str")
-    if eval_metrics.is_lf_channel_score_name(score_name):
+    if len(configured_score_names) != 1:
+        return None
+    metric_name = configured_score_names[0]
+    if eval_metrics.is_lf_channel_score_name(metric_name):
         return eval_metrics.LF_CHANNEL_SCORE_NAME
-    if eval_metrics.is_content_chain_score_name(score_name):
+    if eval_metrics.is_content_chain_score_name(metric_name):
         return eval_metrics.CONTENT_CHAIN_SCORE_NAME
     raise ValueError(
-        "experiment_matrix scalar formal score name must resolve to content_chain_score or lf_channel_score"
+        "experiment_matrix analysis_metric_name must resolve to content_chain_score or lf_channel_score"
     )
 
 
-def _extract_matrix_formal_score_name_from_grid_item(grid_item_cfg: Dict[str, Any]) -> str:
-    """Extract validated matrix formal score name from one grid item."""
+def _extract_auxiliary_analysis_metric_name_from_grid_item(grid_item_cfg: Dict[str, Any]) -> Optional[str]:
+    """Extract the optional auxiliary-analysis metric name from one grid item."""
     if not isinstance(grid_item_cfg, dict):
         raise TypeError("grid_item_cfg must be dict")
 
-    auxiliary_scope_configs = grid_item_cfg.get("auxiliary_scope_configs")
-    configured_score_names = [
-        scope_cfg.get("analysis_metric_name")
-        for scope_cfg in auxiliary_scope_configs.values()
-        if isinstance(auxiliary_scope_configs, dict)
-        and isinstance(scope_cfg, dict)
-        and isinstance(scope_cfg.get("analysis_metric_name"), str)
-    ]
-    if len(configured_score_names) > 1:
-        raise ValueError(
-            "grid item auxiliary_scope_configs may declare at most one analysis_metric_name"
-        )
-    if len(configured_score_names) == 1:
-        score_name = configured_score_names[0]
-    else:
-        score_name = grid_item_cfg.get(
-            "scalar_formal_score_name",
-            grid_item_cfg.get("formal_score_name", eval_metrics.LF_CHANNEL_SCORE_NAME),
-        )
-    if not isinstance(score_name, str) or not score_name:
-        raise TypeError("grid item scalar_formal_score_name must be non-empty str")
-    if eval_metrics.is_lf_channel_score_name(score_name):
+    metric_name = grid_item_cfg.get("auxiliary_analysis_metric_name")
+    if metric_name is None:
+        return None
+    if not isinstance(metric_name, str) or not metric_name:
+        raise TypeError("grid item auxiliary_analysis_metric_name must be non-empty str when provided")
+    if eval_metrics.is_lf_channel_score_name(metric_name):
         return eval_metrics.LF_CHANNEL_SCORE_NAME
-    if eval_metrics.is_content_chain_score_name(score_name):
+    if eval_metrics.is_content_chain_score_name(metric_name):
         return eval_metrics.CONTENT_CHAIN_SCORE_NAME
     raise ValueError(
-        "grid item scalar_formal_score_name must resolve to content_chain_score or lf_channel_score"
+        "grid item auxiliary_analysis_metric_name must resolve to content_chain_score or lf_channel_score"
     )
 
 
@@ -1672,12 +1644,12 @@ def _extract_formal_validation_guards_from_grid_item(grid_item_cfg: Dict[str, An
     return resolved
 
 
-def _assert_formal_validation_prerequisites(
+def _assert_auxiliary_analysis_prerequisites(
     grid: List[Dict[str, Any]],
     neg_detect_record_cache: Dict[Tuple[str, int], Optional[Path]],
     shared_thresholds_path: Optional[Path],
 ) -> None:
-    """Fail-fast when explicit formal-validation guards cannot be satisfied."""
+    """Validate auxiliary-analysis prerequisites when that analysis is explicitly required."""
     if not isinstance(grid, list):
         raise TypeError("grid must be list")
     if not isinstance(neg_detect_record_cache, dict):
@@ -1693,7 +1665,9 @@ def _assert_formal_validation_prerequisites(
         if not isinstance(item, dict):
             raise TypeError("grid items must be dict")
         guards = _extract_formal_validation_guards_from_grid_item(item)
-        formal_score_name = _extract_matrix_formal_score_name_from_grid_item(item)
+        auxiliary_metric_name = _extract_auxiliary_analysis_metric_name_from_grid_item(item)
+        if auxiliary_metric_name is None:
+            continue
         model_id = item.get("model_id")
         seed_value = item.get("seed")
         neg_key: Optional[Tuple[str, int]] = None
@@ -1714,10 +1688,10 @@ def _assert_formal_validation_prerequisites(
                         f"reason=detect_record_missing_or_invalid_json, path={neg_path}"
                     )
                 else:
-                    _, invalid_reason = _resolve_formal_matrix_score(neg_record, formal_score_name)
+                    _, invalid_reason = _resolve_auxiliary_analysis_score(neg_record, auxiliary_metric_name)
                     expected_source = (
                         "content_evidence_payload.lf_channel_score"
-                        if eval_metrics.is_lf_channel_score_name(formal_score_name)
+                        if eval_metrics.is_lf_channel_score_name(auxiliary_metric_name)
                         else "content_evidence_payload.content_chain_score"
                     )
                     if invalid_reason != expected_source:
@@ -1730,13 +1704,13 @@ def _assert_formal_validation_prerequisites(
     if missing_real_negative_keys:
         missing_keys_joined = "; ".join(sorted(set(missing_real_negative_keys)))
         raise RuntimeError(
-            "experiment_matrix formal validation requires real negative cache for every guarded item; "
+            "experiment_matrix auxiliary analysis requires real negative cache for every guarded item; "
             f"missing={missing_keys_joined}"
         )
     if invalid_real_negative_keys:
         invalid_keys_joined = "; ".join(sorted(set(invalid_real_negative_keys)))
         raise RuntimeError(
-            "experiment_matrix formal validation requires canonical real negative content scores; "
+            "experiment_matrix auxiliary analysis requires canonical real negative content scores; "
             f"invalid={invalid_keys_joined}"
         )
 
@@ -1747,7 +1721,7 @@ def _assert_formal_validation_prerequisites(
     )
     if require_shared_thresholds and not has_shared_thresholds:
         raise RuntimeError(
-            "experiment_matrix formal validation requires shared thresholds from global calibrate; "
+            "experiment_matrix auxiliary analysis requires shared thresholds from global calibrate; "
             "current run produced no valid thresholds artifact"
         )
 
@@ -2094,7 +2068,9 @@ def _run_global_calibrate(
     if not isinstance(cfg, dict):
         return None
     matrix_cfg = _extract_matrix_cfg(cfg)
-    formal_score_name = _resolve_matrix_formal_score_name(matrix_cfg)
+    auxiliary_metric_name = _resolve_matrix_auxiliary_analysis_metric_name(matrix_cfg)
+    if auxiliary_metric_name is None:
+        return None
 
     # (1) 收集所有有效的 neg detect record path，跳过生成失败的条目。
     valid_neg_paths: List[Path] = [
@@ -2121,10 +2097,10 @@ def _run_global_calibrate(
         if not isinstance(neg_record, dict) or not neg_record:
             invalid_negatives.append(f"path={neg_path}, reason=detect_record_missing_or_invalid_json")
             continue
-        score_val, score_source = _resolve_formal_matrix_score(neg_record, formal_score_name)
+        score_val, score_source = _resolve_auxiliary_analysis_score(neg_record, auxiliary_metric_name)
         expected_source = (
             "content_evidence_payload.lf_channel_score"
-            if eval_metrics.is_lf_channel_score_name(formal_score_name)
+            if eval_metrics.is_lf_channel_score_name(auxiliary_metric_name)
             else "content_evidence_payload.content_chain_score"
         )
         if not isinstance(score_val, float) or score_source != expected_source:
@@ -2139,13 +2115,13 @@ def _run_global_calibrate(
         labeled_neg["calibration_label_resolution"] = "global_calibrate_real_neg"
         labeled_neg["ground_truth_source"] = "real_neg_embed_detect"
         labeled_neg["calibration_sample_usage"] = "real_negative_global_calibrate_null_distribution"
-        _ensure_matrix_calibration_compatible_content_payload(
+        _ensure_auxiliary_analysis_compatible_content_payload(
             labeled_neg,
-            formal_score_name,
+            auxiliary_metric_name,
             score_val,
             score_source=score_source,
             recovered_sample_origin="global_calibrate_real_negative_recovery",
-            require_canonical_matrix_score=True,
+            require_canonical_metric=True,
         )
         staged_path = neg_staged_dir / f"neg_record_{idx:04d}.json"
         records_io.write_artifact_text_unbound(
@@ -2177,7 +2153,7 @@ def _run_global_calibrate(
     # label-balance 前置门禁错误阻断。
     calibration_cfg = copy.deepcopy(cfg.get("calibration")) if isinstance(cfg.get("calibration"), dict) else {}
     calibration_cfg["detect_records_glob"] = neg_glob
-    calibration_cfg["score_name"] = formal_score_name
+    calibration_cfg["score_name"] = auxiliary_metric_name
     cfg["calibration"] = calibration_cfg
 
     calibrate_record = detect_orchestrator.run_calibrate_orchestrator(cfg, object())
@@ -2244,7 +2220,9 @@ def _stage_external_shared_threshold_negatives(
     if not isinstance(cfg, dict):
         raise TypeError("config root must be dict")
     matrix_cfg = _extract_matrix_cfg(cfg)
-    formal_score_name = _resolve_matrix_formal_score_name(matrix_cfg)
+    auxiliary_metric_name = _resolve_matrix_auxiliary_analysis_metric_name(matrix_cfg)
+    if auxiliary_metric_name is None:
+        raise RuntimeError("external shared thresholds require auxiliary analysis metric configuration")
 
     neg_staged_dir = shared_thresholds_path.parent.parent / "neg_staged"
     neg_staged_dir.mkdir(parents=True, exist_ok=True)
@@ -2264,10 +2242,10 @@ def _stage_external_shared_threshold_negatives(
         neg_record = _read_optional_json(neg_path)
         if not isinstance(neg_record, dict) or not neg_record:
             continue
-        score_val, score_source = _resolve_formal_matrix_score(neg_record, formal_score_name)
+        score_val, score_source = _resolve_auxiliary_analysis_score(neg_record, auxiliary_metric_name)
         expected_source = (
             "content_evidence_payload.lf_channel_score"
-            if eval_metrics.is_lf_channel_score_name(formal_score_name)
+            if eval_metrics.is_lf_channel_score_name(auxiliary_metric_name)
             else "content_evidence_payload.content_chain_score"
         )
         if not isinstance(score_val, float) or score_source != expected_source:
@@ -2280,13 +2258,13 @@ def _stage_external_shared_threshold_negatives(
         labeled_neg["calibration_label_resolution"] = "external_shared_threshold_real_neg"
         labeled_neg["ground_truth_source"] = "real_neg_embed_detect"
         labeled_neg["calibration_sample_usage"] = "real_negative_external_shared_threshold_null_distribution"
-        _ensure_matrix_calibration_compatible_content_payload(
+        _ensure_auxiliary_analysis_compatible_content_payload(
             labeled_neg,
-            formal_score_name,
+            auxiliary_metric_name,
             score_val,
             score_source=score_source,
             recovered_sample_origin="external_shared_threshold_real_negative_recovery",
-            require_canonical_matrix_score=True,
+            require_canonical_metric=True,
         )
         staged_path = neg_staged_dir / f"neg_record_{idx:04d}.json"
         records_io.write_artifact_text_unbound(
@@ -2755,10 +2733,12 @@ def _prepare_formal_evaluate_detect_records_glob_for_matrix(
     if not isinstance(shared_thresholds_path, Path):
         raise TypeError("shared_thresholds_path must be Path")
 
-    formal_score_name = _extract_matrix_formal_score_name_from_grid_item(grid_item_cfg)
+    auxiliary_metric_name = _extract_auxiliary_analysis_metric_name_from_grid_item(grid_item_cfg)
+    if auxiliary_metric_name is None:
+        raise RuntimeError("formal evaluate inputs require auxiliary analysis metric configuration")
     expected_source = (
         "content_evidence_payload.lf_channel_score"
-        if eval_metrics.is_lf_channel_score_name(formal_score_name)
+        if eval_metrics.is_lf_channel_score_name(auxiliary_metric_name)
         else "content_evidence_payload.content_chain_score"
     )
 
@@ -2770,7 +2750,7 @@ def _prepare_formal_evaluate_detect_records_glob_for_matrix(
     if not isinstance(positive_payload, dict) or not positive_payload:
         raise RuntimeError("detect record missing or invalid for formal evaluate inputs")
 
-    positive_score, positive_score_source = _resolve_formal_matrix_score(positive_payload, formal_score_name)
+    positive_score, positive_score_source = _resolve_auxiliary_analysis_score(positive_payload, auxiliary_metric_name)
     if not isinstance(positive_score, float) or positive_score_source != expected_source:
         raise RuntimeError(
             "formal evaluate inputs require canonical attacked positive matrix score; "
@@ -2783,12 +2763,12 @@ def _prepare_formal_evaluate_detect_records_glob_for_matrix(
     positive_payload["is_watermarked"] = True
     positive_payload["calibration_label_resolution"] = "matrix_forced_positive"
     positive_payload.pop("calibration_excluded_from_labelled_sampling", None)
-    _ensure_matrix_calibration_compatible_content_payload(
+    _ensure_auxiliary_analysis_compatible_content_payload(
         positive_payload,
-        formal_score_name,
+        auxiliary_metric_name,
         positive_score,
         score_source=positive_score_source,
-        require_canonical_matrix_score=True,
+        require_canonical_metric=True,
     )
 
     neg_staged_dir = shared_thresholds_path.parent.parent / "neg_staged"
@@ -2825,7 +2805,7 @@ def _prepare_formal_evaluate_detect_records_glob_for_matrix(
         if not isinstance(neg_payload, dict) or not neg_payload:
             invalid_negatives.append(f"path={neg_path}, reason=detect_record_missing_or_invalid_json")
             continue
-        neg_score, neg_score_source = _resolve_formal_matrix_score(neg_payload, formal_score_name)
+        neg_score, neg_score_source = _resolve_auxiliary_analysis_score(neg_payload, auxiliary_metric_name)
         if not isinstance(neg_score, float) or neg_score_source != expected_source:
             invalid_negatives.append(
                 f"path={neg_path}, reason={neg_score_source if isinstance(neg_score_source, str) else expected_source + '_missing_or_nonfinite'}"
@@ -2848,12 +2828,12 @@ def _prepare_formal_evaluate_detect_records_glob_for_matrix(
         neg_payload["label"] = False
         neg_payload["ground_truth"] = False
         neg_payload["is_watermarked"] = False
-        _ensure_matrix_calibration_compatible_content_payload(
+        _ensure_auxiliary_analysis_compatible_content_payload(
             neg_payload,
-            formal_score_name,
+            auxiliary_metric_name,
             neg_score,
             score_source=neg_score_source,
-            require_canonical_matrix_score=True,
+            require_canonical_metric=True,
         )
 
         negative_rel_path = (
@@ -2946,17 +2926,19 @@ def _prepare_labelled_detect_records_glob_for_matrix(
     negative_payload.pop("calibration_excluded_from_labelled_sampling", None)
     negative_payload["calibration_sample_usage"] = "synthetic_negative_for_experiment_matrix_label_balance"
 
-    formal_score_name = _extract_matrix_formal_score_name_from_grid_item(grid_item_cfg)
-    base_score, base_score_source = _resolve_formal_matrix_score(base_payload, formal_score_name)
+    auxiliary_metric_name = _extract_auxiliary_analysis_metric_name_from_grid_item(grid_item_cfg)
+    if auxiliary_metric_name is None:
+        raise RuntimeError("matrix labelled sampling requires auxiliary analysis metric configuration")
+    base_score, base_score_source = _resolve_auxiliary_analysis_score(base_payload, auxiliary_metric_name)
     if not isinstance(base_score, float) or not isinstance(base_score_source, str) or not base_score_source:
         raise RuntimeError(
             "matrix labelled sampling requires canonical scalar scope score on the attacked detect record; "
-            f"reason={base_score_source if isinstance(base_score_source, str) else formal_score_name + '_missing_or_nonfinite'}"
+            f"reason={base_score_source if isinstance(base_score_source, str) else auxiliary_metric_name + '_missing_or_nonfinite'}"
         )
 
-    _ensure_matrix_calibration_compatible_content_payload(
+    _ensure_auxiliary_analysis_compatible_content_payload(
         positive_payload,
-        formal_score_name,
+        auxiliary_metric_name,
         base_score,
         score_source=base_score_source,
     )
@@ -2972,7 +2954,7 @@ def _prepare_labelled_detect_records_glob_for_matrix(
         and neg_detect_record_path.is_file()
     ):
         neg_payload_real = _read_optional_json(neg_detect_record_path)
-        neg_score, neg_score_source = _resolve_formal_matrix_score(neg_payload_real, formal_score_name)
+        neg_score, neg_score_source = _resolve_auxiliary_analysis_score(neg_payload_real, auxiliary_metric_name)
     else:
         neg_score_source = None
 
@@ -2995,9 +2977,9 @@ def _prepare_labelled_detect_records_glob_for_matrix(
         negative_payload["is_watermarked"] = False
         negative_payload["calibration_label_resolution"] = "real_negative_payload"
         negative_payload.pop("calibration_excluded_from_labelled_sampling", None)
-        _ensure_matrix_calibration_compatible_content_payload(
+        _ensure_auxiliary_analysis_compatible_content_payload(
             negative_payload,
-            formal_score_name,
+            auxiliary_metric_name,
             neg_score,
             score_source=neg_score_source,
             recovered_sample_origin="real_negative_payload_recovery",
@@ -3011,7 +2993,7 @@ def _prepare_labelled_detect_records_glob_for_matrix(
                 "real negative payload is required for labelled detect records"
             )
         # 降级：neg 生成失败或分数无效，使用合成得分（base_score - 1.0）。
-        _ensure_matrix_calibration_compatible_content_payload(negative_payload, formal_score_name, base_score - 1.0)
+        _ensure_auxiliary_analysis_compatible_content_payload(negative_payload, auxiliary_metric_name, base_score - 1.0)
 
     positive_rel_path = Path("artifacts") / "evaluate_inputs" / "labelled_detect_records" / "detect_record_label_pos.json"
     negative_rel_path = Path("artifacts") / "evaluate_inputs" / "labelled_detect_records" / "detect_record_label_neg.json"

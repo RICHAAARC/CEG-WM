@@ -111,6 +111,7 @@ def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fiel
     assert "scalar_formal_scope" not in grid[0]
     assert "scalar_formal_score_name" not in grid[0]
     assert "formal_score_name" not in grid[0]
+    assert grid[0]["primary_driver_mode"] == "system_final_only"
 
     score_record = {
         "content_evidence_payload": {
@@ -119,7 +120,7 @@ def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fiel
             "lf_score": 0.72,
         }
     }
-    assert experiment_matrix._resolve_formal_matrix_score(score_record, "lf_channel_score") == (
+    assert experiment_matrix._resolve_auxiliary_analysis_score(score_record, "lf_channel_score") == (
         0.72,
         "content_evidence_payload.lf_channel_score",
     )
@@ -130,7 +131,7 @@ def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fiel
             "lf_correlation_score": 0.91,
         }
     }
-    assert experiment_matrix._resolve_formal_matrix_score(diagnostic_only_record, "lf_channel_score") == (
+    assert experiment_matrix._resolve_auxiliary_analysis_score(diagnostic_only_record, "lf_channel_score") == (
         None,
         "content_evidence_payload.lf_channel_score_missing_or_nonfinite",
     )
@@ -177,6 +178,7 @@ def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fiel
                     auxiliary_scopes=["content_chain", "lf_channel"],
                 ),
                 "primary_metric_name": "system_final_metrics",
+                "primary_driver_mode": "system_final_only",
                 "primary_summary_basis_scope": "system_final",
                 "primary_summary_basis_metric_name": "system_final_metrics",
                 "policy_path": "content_np_geo_rescue",
@@ -193,6 +195,7 @@ def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fiel
     )
     assert aggregate_report["primary_evaluation_scope"] == "system_final"
     assert aggregate_report["primary_metric_name"] == "system_final_metrics"
+    assert aggregate_report["primary_driver_mode"] == "system_final_only"
     assert aggregate_report["primary_summary_basis_scope"] == "system_final"
     assert aggregate_report["primary_summary_basis_metric_name"] == "system_final_metrics"
     assert aggregate_report["scope_manifest"]["primary_summary_basis_metric_name"] == "system_final_metrics"
@@ -242,9 +245,11 @@ def test_schema_and_contracts_register_new_formal_fields() -> None:
     assert "primary_evaluation_scope" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "primary_summary_basis_scope" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "primary_summary_basis_metric_name" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
+    assert "primary_driver_mode" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "scope_manifest" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "primary_summary_basis_scope" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "primary_summary_basis_metric_name" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
+    assert "primary_driver_mode" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "scalar_formal_scope" not in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "scalar_formal_score_name" not in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "scalar_formal_scope" not in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]

@@ -58,6 +58,7 @@ CONTENT_CHAIN_SCOPE = "content_chain"
 LF_CHANNEL_SCOPE = "lf_channel"
 SYSTEM_FINAL_METRIC_NAME = "system_final_metrics"
 REQUIRED_STAGE_03_AUXILIARY_SCOPES = [CONTENT_CHAIN_SCOPE, LF_CHANNEL_SCOPE]
+SYSTEM_FINAL_PRIMARY_DRIVER_MODE = "system_final_only"
 
 EVALUATION_REPORT_REQUIRED_FIELDS = [
     "cfg_digest",
@@ -83,6 +84,7 @@ GRID_SUMMARY_REQUIRED_FIELDS = [
     "policy_path",
     "primary_evaluation_scope",
     "primary_metric_name",
+    "primary_driver_mode",
     "primary_summary_basis_scope",
     "primary_summary_basis_metric_name",
     "scope_manifest",
@@ -93,6 +95,7 @@ AGGREGATE_REPORT_REQUIRED_FIELDS = [
     "aggregate_report_version",
     "primary_evaluation_scope",
     "primary_metric_name",
+    "primary_driver_mode",
     "primary_summary_basis_scope",
     "primary_summary_basis_metric_name",
     "scope_manifest",
@@ -700,6 +703,20 @@ def _validate_stage_03_primary_contract_payload(
             },
         )
 
+    if payload.get("primary_driver_mode") != SYSTEM_FINAL_PRIMARY_DRIVER_MODE:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code=f"stage_03.{payload_label}_primary_driver_mode_not_system_final_only",
+            rule="stage 03 primary contract payloads must bind primary_driver_mode to system_final_only",
+            impact="stage 03 primary contract still allows an internal non-system-final driver path",
+            fix="regenerate stage 03 payloads with primary_driver_mode=system_final_only",
+            evidence={
+                "payload_label": payload_label,
+                "actual_primary_driver_mode": payload.get("primary_driver_mode"),
+            },
+        )
+
     if payload.get("primary_summary_basis_scope") != SYSTEM_FINAL_SCOPE:
         _append_blocking_reason(
             blocking_reasons,
@@ -860,6 +877,18 @@ def _validate_stage_03_primary_scope_semantics(
             evidence={"actual_primary_metric_name": primary_metric_name},
         )
 
+    primary_driver_mode = aggregate_report_obj.get("primary_driver_mode")
+    if primary_driver_mode != SYSTEM_FINAL_PRIMARY_DRIVER_MODE:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code="stage_03.primary_driver_mode_not_system_final_only",
+            rule="stage 03 aggregate_report.primary_driver_mode must equal system_final_only",
+            impact="stage 03 primary summary may still be driven by an internal auxiliary scalar path",
+            fix="write primary_driver_mode=system_final_only and keep scalar evidence auxiliary-only",
+            evidence={"actual_primary_driver_mode": primary_driver_mode},
+        )
+
     primary_summary_basis_scope = aggregate_report_obj.get("primary_summary_basis_scope")
     if primary_summary_basis_scope != SYSTEM_FINAL_SCOPE:
         _append_blocking_reason(
@@ -995,6 +1024,19 @@ def _validate_stage_03_primary_scope_semantics(
                         "primary_metric_name": row.get("primary_metric_name"),
                     },
                 )
+            if row.get("primary_driver_mode") != SYSTEM_FINAL_PRIMARY_DRIVER_MODE:
+                _append_blocking_reason(
+                    blocking_reasons,
+                    source="stage_03",
+                    reason_code="stage_03.metrics_matrix_primary_driver_mode_invalid",
+                    rule="successful metrics_matrix rows must keep primary_driver_mode equal to system_final_only",
+                    impact="stage 03 row-level primary evidence still allows an auxiliary scalar driver to leak into the main path",
+                    fix="regenerate metrics_matrix rows so primary_driver_mode=system_final_only on every successful row",
+                    evidence={
+                        "grid_item_digest": row.get("grid_item_digest"),
+                        "primary_driver_mode": row.get("primary_driver_mode"),
+                    },
+                )
         if missing_system_final_rows:
             _append_blocking_reason(
                 blocking_reasons,
@@ -1019,6 +1061,7 @@ def _validate_stage_03_primary_scope_semantics(
     for field_name in [
         "primary_evaluation_scope",
         "primary_metric_name",
+        "primary_driver_mode",
         "primary_summary_basis_scope",
         "primary_summary_basis_metric_name",
         "scope_manifest",
@@ -1031,7 +1074,7 @@ def _validate_stage_03_primary_scope_semantics(
                 reason_code="stage_03.grid_summary_scope_mismatch",
                 rule="grid_summary must mirror aggregate_report primary scope fields for release signoff",
                 impact="stage 03 package exposes conflicting primary-scope semantics across artifacts",
-                fix="synchronize grid_summary with aggregate_report for primary, primary-summary-basis, scalar-formal, scope_manifest, and system_final_metrics_presence fields",
+                fix="synchronize grid_summary with aggregate_report for primary, primary_driver_mode, primary-summary-basis, scope_manifest, and system_final_metrics_presence fields",
                 evidence={
                     "field_name": field_name,
                     "grid_summary_value": grid_summary_obj.get(field_name),
