@@ -126,6 +126,211 @@ def _make_source_contract(records: list[Dict[str, Any]], *, direct_stats_ready: 
     }
 
 
+def _make_stage_01_source_pool_contract(run_root: Path, prompt_count: int) -> Dict[str, Any]:
+    """
+    功能：构造 stage 01 direct source pool contract 测试载荷。
+
+    Build a stage-01 direct source pool contract payload for shell tests.
+
+    Args:
+        run_root: Stage-01 run root.
+        prompt_count: Number of source prompts.
+
+    Returns:
+        Source contract mapping.
+    """
+    records: list[Dict[str, Any]] = []
+    for prompt_index in range(prompt_count):
+        record_path = run_root / "artifacts" / "stage_01_source_pool_detect_records" / f"{prompt_index:03d}_detect_record.json"
+        _write_json(
+            record_path,
+            {
+                "label": True,
+                "ground_truth": True,
+                "is_watermarked": True,
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "content_chain_score": 0.9 - prompt_index * 1e-3,
+                },
+                "attestation": {
+                    "final_event_attested_decision": {
+                        "event_attestation_score": 0.95 - prompt_index * 1e-3,
+                        "event_attestation_score_name": "event_attestation_score",
+                        "is_event_attested": True,
+                    }
+                },
+            },
+        )
+        records.append(
+            {
+                "record_role": "direct_source_record",
+                "usage": "stage_01_direct_source_pool",
+                "package_relative_path": (
+                    f"artifacts/stage_01_source_pool_detect_records/{prompt_index:03d}_detect_record.json"
+                ),
+                "path": str(record_path),
+                "sha256": f"detect_sha_{prompt_index:03d}",
+                "label": True,
+                "prompt_index": prompt_index,
+                "prompt_text": f"prompt {prompt_index}",
+                "prompt_sha256": f"prompt_sha_{prompt_index:03d}",
+                "prompt_file": "prompts/paper_small.txt",
+                "score_name": "event_attestation_score",
+                "score_available": True,
+                "event_attestation_score_available": True,
+                "threshold_score_name": "content_chain_score",
+                "threshold_score_available": True,
+                "content_chain_score_available": True,
+            }
+        )
+
+    return {
+        "artifact_type": "parallel_attestation_statistics_input_contract",
+        "contract_role": "source_contract",
+        "contract_version": "v1",
+        "stage_name": "01_Paper_Full_Cuda",
+        "stage_run_id": "stage01_test",
+        "status": "ok",
+        "reason": "stage_01_direct_source_pool_ready",
+        "score_name": "event_attestation_score",
+        "threshold_score_name": "content_chain_score",
+        "source_records_available": True,
+        "record_count": prompt_count,
+        "label_summary": {
+            "positive": prompt_count,
+            "negative": 0,
+            "unknown": 0,
+            "label_balanced": False,
+        },
+        "score_availability": {
+            "content_chain_score": {
+                "available_record_count": prompt_count,
+                "missing_record_count": 0,
+            },
+            "event_attestation_score": {
+                "available_record_count": prompt_count,
+                "missing_record_count": 0,
+            },
+        },
+        "direct_stats_ready": False,
+        "direct_stats_reason": "parallel_attestation_statistics_requires_label_balanced_detect_records",
+        "records": records,
+    }
+
+
+def _make_stage_01_pooled_threshold_contract(run_root: Path, prompt_count: int) -> Dict[str, Any]:
+    """
+    功能：构造 stage 01 pooled threshold build contract 测试载荷。
+
+    Build a stage-01 pooled threshold build contract payload for shell tests.
+
+    Args:
+        run_root: Stage-01 run root.
+        prompt_count: Number of direct source prompts.
+
+    Returns:
+        Build contract mapping.
+    """
+    records: list[Dict[str, Any]] = []
+    direct_records: list[Dict[str, Any]] = []
+    derived_records: list[Dict[str, Any]] = []
+    pooled_root = run_root / "artifacts" / "stage_01_pooled_threshold_records"
+    for prompt_index in range(prompt_count):
+        direct_path = pooled_root / f"{prompt_index:03d}_direct_positive.json"
+        _write_json(direct_path, {"label": True, "content_evidence_payload": {"status": "ok", "content_chain_score": 0.8}})
+        direct_record = {
+            "record_kind": "direct",
+            "label": True,
+            "usage": "stage_01_pooled_thresholds",
+            "derived_from": None,
+            "derivation_kind": None,
+            "source_package_relative_path": (
+                f"artifacts/stage_01_source_pool_detect_records/{prompt_index:03d}_detect_record.json"
+            ),
+            "staged_path": str(direct_path),
+            "package_relative_path": f"artifacts/stage_01_pooled_threshold_records/{prompt_index:03d}_direct_positive.json",
+            "sha256": f"pooled_direct_sha_{prompt_index:03d}",
+            "prompt_file": "prompts/paper_small.txt",
+            "prompt_index": prompt_index,
+            "prompt_text": f"prompt {prompt_index}",
+        }
+        direct_records.append(direct_record)
+        records.append(direct_record)
+
+    for prompt_index in range(prompt_count):
+        derived_path = pooled_root / f"{prompt_count + prompt_index:03d}_derived_negative.json"
+        _write_json(derived_path, {"label": False, "content_evidence_payload": {"status": "ok", "content_chain_score": -0.2}})
+        derived_record = {
+            "record_kind": "derived",
+            "label": False,
+            "usage": "stage_01_pooled_thresholds",
+            "derived_from": f"artifacts/stage_01_source_pool_detect_records/{prompt_index:03d}_detect_record.json",
+            "derivation_kind": "prompt_bound_label_balance",
+            "source_package_relative_path": (
+                f"artifacts/stage_01_source_pool_detect_records/{prompt_index:03d}_detect_record.json"
+            ),
+            "staged_path": str(derived_path),
+            "package_relative_path": (
+                f"artifacts/stage_01_pooled_threshold_records/{prompt_count + prompt_index:03d}_derived_negative.json"
+            ),
+            "sha256": f"pooled_derived_sha_{prompt_index:03d}",
+            "prompt_file": "prompts/paper_small.txt",
+            "prompt_index": prompt_index,
+            "prompt_text": f"prompt {prompt_index}",
+        }
+        derived_records.append(derived_record)
+        records.append(derived_record)
+
+    thresholds_path = run_root / "artifacts" / "thresholds" / "thresholds_artifact.json"
+    threshold_metadata_path = run_root / "artifacts" / "thresholds" / "threshold_metadata_artifact.json"
+    return {
+        "artifact_type": "stage_01_pooled_threshold_build_contract",
+        "contract_role": "pooled_threshold_build_contract",
+        "contract_version": "v1",
+        "stage_name": "01_Paper_Full_Cuda",
+        "stage_run_id": "stage01_test",
+        "requested_build_mode": "source_plus_derived_pairs",
+        "build_mode": "source_plus_derived_pairs",
+        "score_name": "content_chain_score",
+        "prompt_file": "prompts/paper_small.txt",
+        "prompt_pool_summary": {
+            "prompt_count": prompt_count,
+            "prompt_indices": list(range(prompt_count)),
+        },
+        "staged_records_root": str(pooled_root),
+        "detect_records_glob": str(pooled_root / "*.json"),
+        "direct_record_count": prompt_count,
+        "derived_record_count": prompt_count,
+        "final_record_count": prompt_count * 2,
+        "direct_summary": {"positive": prompt_count, "negative": 0},
+        "derived_summary": {"positive": 0, "negative": prompt_count},
+        "final_positive_count": prompt_count,
+        "final_negative_count": prompt_count,
+        "final_label_balanced": True,
+        "build_configuration": {
+            "target_pair_count": prompt_count,
+            "build_usage": "stage_01_pooled_thresholds",
+            "record_derivation_kind": "prompt_bound_label_balance",
+        },
+        "stats_input_set": {
+            "score_name": "content_chain_score",
+            "detect_records_glob": str(pooled_root / "*.json"),
+            "direct_record_count": prompt_count,
+            "derived_record_count": prompt_count,
+            "final_record_count": prompt_count * 2,
+            "positive_record_count": prompt_count,
+            "negative_record_count": prompt_count,
+            "thresholds_artifact_path": str(thresholds_path),
+            "threshold_metadata_artifact_path": str(threshold_metadata_path),
+        },
+        "records": records,
+        "direct_records": direct_records,
+        "derived_records": derived_records,
+        "thresholds_artifact_path": str(thresholds_path),
+        "threshold_metadata_artifact_path": str(threshold_metadata_path),
+    }
+
+
 def _prepare_stage_02_monkeypatches(
     monkeypatch: pytest.MonkeyPatch,
     stage_02: Any,
@@ -262,6 +467,7 @@ def test_stage_01_writes_source_contract_even_when_direct_stats_not_ready(tmp_pa
     monkeypatch.setattr(stage_01, "collect_weight_summary", lambda _root, _cfg: {"weights": []})
 
     def _fake_run_command_with_logs(**_kwargs: Any) -> Dict[str, Any]:
+        prompt_count = 16
         _write_json(run_root / "records" / "embed_record.json", {"status": "ok"})
         _write_json(run_root / "records" / "detect_record.json", _make_detect_record(True, 0.91))
         _write_json(run_root / "records" / "calibration_record.json", {"status": "ok"})
@@ -271,6 +477,14 @@ def test_stage_01_writes_source_contract_even_when_direct_stats_not_ready(tmp_pa
         _write_json(run_root / "artifacts" / "evaluation_report.json", {"status": "ok"})
         _write_json(run_root / "artifacts" / "run_closure.json", {"status": "ok"})
         _write_json(run_root / "artifacts" / "workflow_summary.json", {"status": "ok"})
+        _write_json(
+            run_root / "artifacts" / "parallel_attestation_statistics_input_contract.json",
+            _make_stage_01_source_pool_contract(run_root, prompt_count),
+        )
+        _write_json(
+            run_root / "artifacts" / "stage_01_pooled_threshold_build_contract.json",
+            _make_stage_01_pooled_threshold_contract(run_root, prompt_count),
+        )
         return {"return_code": 0}
 
     monkeypatch.setattr(stage_01, "run_command_with_logs", _fake_run_command_with_logs)
@@ -294,16 +508,67 @@ def test_stage_01_writes_source_contract_even_when_direct_stats_not_ready(tmp_pa
     assert contract_payload["status"] == "ok"
     assert contract_payload["source_records_available"] is True
     assert contract_payload["direct_stats_ready"] is False
+    assert contract_payload["record_count"] == 16
     assert contract_payload["direct_stats_reason"] == "parallel_attestation_statistics_requires_label_balanced_detect_records"
+
+    pooled_build_contract = json.loads(
+        (run_root / "artifacts" / "stage_01_pooled_threshold_build_contract.json").read_text(encoding="utf-8")
+    )
+    assert pooled_build_contract["build_mode"] == "source_plus_derived_pairs"
+    assert pooled_build_contract["direct_record_count"] == 16
+    assert pooled_build_contract["derived_record_count"] == 16
+    assert pooled_build_contract["final_record_count"] == 32
+    assert pooled_build_contract["final_label_balanced"] is True
 
     stage_manifest = json.loads((run_root / "artifacts" / "stage_manifest.json").read_text(encoding="utf-8"))
     assert stage_manifest["parallel_attestation_statistics_input_contract_status"] == "ok"
     assert stage_manifest["parallel_attestation_statistics_input_contract_source_records_available"] is True
     assert stage_manifest["parallel_attestation_statistics_input_contract_direct_stats_ready"] is False
+    assert stage_manifest["parallel_attestation_statistics_input_contract_record_count"] == 16
     assert stage_manifest["parallel_attestation_statistics_input_contract_package_relative_path"] == (
         "artifacts/parallel_attestation_statistics_input_contract.json"
     )
+    assert stage_manifest["stage_01_pooled_threshold_build_mode"] == "source_plus_derived_pairs"
+    assert stage_manifest["stage_01_pooled_threshold_direct_record_count"] == 16
+    assert stage_manifest["stage_01_pooled_threshold_derived_record_count"] == 16
+    assert stage_manifest["stage_01_pooled_threshold_final_record_count"] == 32
+    assert stage_manifest["stage_01_pooled_threshold_final_label_balanced"] is True
     assert (runtime_state_root / "package_staging" / "artifacts" / "parallel_attestation_statistics_input_contract.json").exists()
+    assert (
+        runtime_state_root / "package_staging" / "artifacts" / "stage_01_source_pool_detect_records" / "015_detect_record.json"
+    ).exists()
+    assert (
+        runtime_state_root / "package_staging" / "artifacts" / "stage_01_pooled_threshold_records" / "031_derived_negative.json"
+    ).exists()
+    assert (
+        runtime_state_root / "package_staging" / "artifacts" / "stage_01_pooled_threshold_build_contract.json"
+    ).exists()
+
+
+def test_default_config_enables_stage_01_pool_and_stage_02_target_pair_count() -> None:
+    """
+    功能：验证默认配置显式启用 stage 01 prompt pool 和 stage 02 的 16 对统计目标。
+
+    Validate that the default config enables the stage-01 prompt pool and sets
+    the stage-02 target pair count to 16.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parents[1]
+    config_payload = yaml.safe_load((repo_root / "configs" / "default.yaml").read_text(encoding="utf-8"))
+
+    assert config_payload["inference_prompt_file"] == "prompts/paper_small.txt"
+    assert config_payload["stage_01_source_pool"]["enabled"] is True
+    assert config_payload["stage_01_source_pool"]["use_inference_prompt_file"] is True
+    assert config_payload["stage_01_source_pool"]["target_prompt_count"] == 16
+    assert config_payload["stage_01_pooled_threshold_build"]["enabled"] is True
+    assert config_payload["stage_01_pooled_threshold_build"]["build_mode"] == "source_plus_derived_pairs"
+    assert config_payload["stage_01_pooled_threshold_build"]["target_pair_count"] == 16
+    assert config_payload["parallel_attestation_statistics"]["target_pair_count"] == 16
 
 
 def test_stage_02_direct_only_build_uses_source_records_and_writes_build_contract(

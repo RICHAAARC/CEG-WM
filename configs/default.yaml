@@ -35,6 +35,19 @@ inference_guidance_scale: 7.0
 inference_height: 512
 inference_width: 512
 
+stage_01_source_pool:
+  enabled: true
+  use_inference_prompt_file: true
+  target_prompt_count: 16
+  record_usage: "stage_01_direct_source_pool"
+
+stage_01_pooled_threshold_build:
+  enabled: true
+  build_mode: "source_plus_derived_pairs"
+  target_pair_count: 16
+  build_usage: "stage_01_pooled_thresholds"
+  record_derivation_kind: "prompt_bound_label_balance"
+
 seed: null  # 随机种子（null 表示自动生成，可通过 CLI override 覆盖）
 allow_threshold_fallback_for_tests: false
 
@@ -160,7 +173,7 @@ parallel_attestation_statistics:
   build_mode: "source_plus_derived_pairs"  # 02 显式 build 默认优先补齐统计输入；若 source 已天然平衡，则 02 会解析为 direct_source_only
   allow_derived_input_build: true  # 仅允许 02 的显式 build phase 生成 derived stats input；不影响 calibrate/evaluate helper gate
   derived_input_prompts_file: "prompts/paper_small.txt"  # paper_small.txt 仅服务 02 的显式 build plan，不再属于 calibration/evaluate synthetic helper
-  target_pair_count: 1  # 目标为至少构造 1 组正负样本对；若 source 直接记录更多，则以 source 计数为准
+  target_pair_count: 16  # 目标为与 paper_small.txt 对齐的 16 组正负样本对；若 source 直接记录更多，则以 source 计数为准
   build_usage: "parallel_attestation_statistics"
   record_derivation_kind: "prompt_bound_label_balance"
 

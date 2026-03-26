@@ -370,6 +370,30 @@ def test_formal_stage_03_skips_auxiliary_runtime_by_default(tmp_path: Path, monk
     assert stage_result["auxiliary_analysis"]["auxiliary_analysis_runtime_executed"] is False
 
 
+def test_default_stage_03_matrix_keeps_16_items() -> None:
+    """
+    功能：验证默认 stage 03 配置仍保持 16 个 matrix items。
+
+    Validate that the default stage-03 configuration still expands to 16
+    experiment-matrix items.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    repo_root = Path(__file__).resolve().parents[1]
+    config_payload = yaml.safe_load((repo_root / "configs" / "default.yaml").read_text(encoding="utf-8"))
+
+    grid = experiment_matrix.build_experiment_grid(config_payload)
+
+    assert config_payload["experiment_matrix"]["primary_scope"] == "system_final"
+    assert config_payload["experiment_matrix"]["primary_summary_basis_scope"] == "system_final"
+    assert config_payload["experiment_matrix"]["seeds"] == [0, 1]
+    assert len(grid) == 16
+
+
 def test_stage_03_script_syncs_auxiliary_runtime_evidence_to_workflow_summary_and_stage_manifest(
     tmp_path: Path,
     monkeypatch,

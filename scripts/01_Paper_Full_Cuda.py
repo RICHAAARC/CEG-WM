@@ -50,6 +50,20 @@ from scripts.workflow_acceptance_common import detect_formal_gpu_preflight
 DEFAULT_CONFIG_PATH = Path("configs/default.yaml")
 RUNNER_SCRIPT_PATH = Path("scripts/01_run_paper_full_cuda.py")
 PARALLEL_ATTESTATION_STATS_CONTRACT_RELATIVE_PATH = "artifacts/parallel_attestation_statistics_input_contract.json"
+STAGE_01_POOLED_THRESHOLD_BUILD_CONTRACT_RELATIVE_PATH = "artifacts/stage_01_pooled_threshold_build_contract.json"
+
+
+def _load_json_object(path_obj: Path, label: str) -> Dict[str, Any]:
+    if not isinstance(path_obj, Path):
+        raise TypeError("path_obj must be Path")
+    if not isinstance(label, str) or not label:
+        raise TypeError("label must be non-empty str")
+    if not path_obj.exists() or not path_obj.is_file():
+        raise FileNotFoundError(f"{label} not found: {normalize_path_value(path_obj)}")
+    payload = json.loads(path_obj.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label} must be JSON object: {normalize_path_value(path_obj)}")
+    return payload
 
 
 def _required_stage_outputs(run_root: Path) -> Dict[str, Path]:
@@ -61,113 +75,11 @@ def _required_stage_outputs(run_root: Path) -> Dict[str, Path]:
         "thresholds_artifact": run_root / "artifacts" / "thresholds" / "thresholds_artifact.json",
         "threshold_metadata_artifact": run_root / "artifacts" / "thresholds" / "threshold_metadata_artifact.json",
         "evaluation_report": run_root / "artifacts" / "evaluation_report.json",
+        "parallel_attestation_statistics_input_contract": run_root / PARALLEL_ATTESTATION_STATS_CONTRACT_RELATIVE_PATH,
+        "stage_01_pooled_threshold_build_contract": run_root / STAGE_01_POOLED_THRESHOLD_BUILD_CONTRACT_RELATIVE_PATH,
         "run_closure": run_root / "artifacts" / "run_closure.json",
         "workflow_summary": run_root / "artifacts" / "workflow_summary.json",
     }
-
-
-def _resolve_detect_record_label(record_payload: Dict[str, Any]) -> bool | None:
-    if not isinstance(record_payload, dict):
-        raise TypeError("record_payload must be dict")
-    for field_name in ["label", "ground_truth", "is_watermarked"]:
-        label_value = record_payload.get(field_name)
-        if isinstance(label_value, bool):
-            return label_value
-    return None
-
-
-def _build_parallel_attestation_statistics_input_contract(
-    run_root: Path,
-    detect_record_path: Path,
-    stage_run_id: str,
-) -> tuple[Path, Dict[str, Any]]:
-    if not isinstance(run_root, Path):
-        raise TypeError("run_root must be Path")
-    if not isinstance(detect_record_path, Path):
-        raise TypeError("detect_record_path must be Path")
-    if not isinstance(stage_run_id, str) or not stage_run_id:
-        raise TypeError("stage_run_id must be non-empty str")
-
-    contract_path = run_root / PARALLEL_ATTESTATION_STATS_CONTRACT_RELATIVE_PATH
-    records: list[Dict[str, Any]] = []
-    positive_count = 0
-    negative_count = 0
-    unknown_count = 0
-    status = "absent"
-    reason = "parallel_attestation_statistics_source_records_absent"
-    source_records_available = False
-    direct_stats_ready = False
-    direct_stats_reason = "parallel_attestation_statistics_source_records_absent"
-
-    if detect_record_path.exists() and detect_record_path.is_file():
-        source_records_available = True
-        status = "ok"
-        reason = "parallel_attestation_statistics_source_records_available"
-        detect_record_payload = json.loads(detect_record_path.read_text(encoding="utf-8"))
-        if not isinstance(detect_record_payload, dict):
-            raise ValueError(f"detect record must be JSON object: {detect_record_path}")
-
-        label_value = _resolve_detect_record_label(detect_record_payload)
-        if label_value is True:
-            positive_count += 1
-        elif label_value is False:
-            negative_count += 1
-        else:
-            unknown_count += 1
-
-        attestation_node = detect_record_payload.get("attestation")
-        attestation_payload = attestation_node if isinstance(attestation_node, dict) else {}
-        final_decision_node = attestation_payload.get("final_event_attested_decision")
-        final_decision = final_decision_node if isinstance(final_decision_node, dict) else {}
-        score_name = final_decision.get("event_attestation_score_name")
-        score_available = isinstance(final_decision.get("event_attestation_score"), (int, float))
-
-        records.append(
-            {
-                "record_role": "direct_source_record",
-                "usage": "parallel_attestation_statistics_source",
-                "package_relative_path": "records/detect_record.json",
-                "path": normalize_path_value(detect_record_path),
-                "sha256": compute_file_sha256(detect_record_path),
-                "label": label_value,
-                "score_name": score_name if isinstance(score_name, str) and score_name else "event_attestation_score",
-                "score_available": score_available,
-            }
-        )
-
-        if positive_count > 0 and negative_count > 0 and unknown_count == 0 and score_available:
-            direct_stats_ready = True
-            direct_stats_reason = "ok"
-        elif not score_available:
-            direct_stats_reason = "event_attestation_score_missing_in_detect_record"
-        elif unknown_count > 0:
-            direct_stats_reason = "detect_record_label_missing"
-        else:
-            direct_stats_reason = "parallel_attestation_statistics_requires_label_balanced_detect_records"
-
-    contract_payload: Dict[str, Any] = {
-        "artifact_type": "parallel_attestation_statistics_input_contract",
-        "contract_role": "source_contract",
-        "contract_version": "v1",
-        "stage_name": STAGE_01_NAME,
-        "stage_run_id": stage_run_id,
-        "status": status,
-        "reason": reason,
-        "score_name": "event_attestation_score",
-        "source_records_available": source_records_available,
-        "record_count": len(records),
-        "label_summary": {
-            "positive": positive_count,
-            "negative": negative_count,
-            "unknown": unknown_count,
-            "label_balanced": positive_count > 0 and negative_count > 0 and unknown_count == 0,
-        },
-        "direct_stats_ready": direct_stats_ready,
-        "direct_stats_reason": direct_stats_reason,
-        "records": records,
-    }
-    write_json_atomic(contract_path, contract_payload)
-    return contract_path, contract_payload
 
 
 def _package_stage_outputs(
@@ -175,6 +87,8 @@ def _package_stage_outputs(
     runtime_state_root: Path,
     stage_manifest_path: Path,
     runtime_config_snapshot_path: Path,
+    source_contract_payload: Dict[str, Any],
+    pooled_threshold_build_contract_payload: Dict[str, Any],
 ) -> Path:
     package_root = ensure_directory(runtime_state_root / "package_staging")
     for relative_path in [
@@ -186,6 +100,7 @@ def _package_stage_outputs(
         "artifacts/thresholds/threshold_metadata_artifact.json",
         "artifacts/evaluation_report.json",
         PARALLEL_ATTESTATION_STATS_CONTRACT_RELATIVE_PATH,
+        STAGE_01_POOLED_THRESHOLD_BUILD_CONTRACT_RELATIVE_PATH,
         "artifacts/run_closure.json",
         "artifacts/workflow_summary.json",
         "artifacts/stage_manifest.json",
@@ -197,6 +112,25 @@ def _package_stage_outputs(
         elif relative_path == "runtime_metadata/runtime_config_snapshot.yaml":
             source_path = runtime_config_snapshot_path
         stage_relative_copy(source_path, package_root, relative_path)
+
+    copied_paths: set[str] = set()
+    for contract_payload in [source_contract_payload, pooled_threshold_build_contract_payload]:
+        contract_records = contract_payload.get("records")
+        if not isinstance(contract_records, list):
+            continue
+        for record_entry in contract_records:
+            if not isinstance(record_entry, dict):
+                raise ValueError("stage 01 contract records must be objects")
+            source_path_value = record_entry.get("staged_path") or record_entry.get("path")
+            package_relative_path = record_entry.get("package_relative_path")
+            if not isinstance(source_path_value, str) or not source_path_value:
+                raise ValueError("stage 01 contract record missing staged_path/path")
+            if not isinstance(package_relative_path, str) or not package_relative_path:
+                raise ValueError("stage 01 contract record missing package_relative_path")
+            if package_relative_path in copied_paths:
+                continue
+            stage_relative_copy(Path(source_path_value), package_root, package_relative_path)
+            copied_paths.add(package_relative_path)
     return package_root
 
 
@@ -231,6 +165,8 @@ def run_stage_01(
         str(runtime_config_snapshot_path),
         "--run-root",
         str(run_root),
+        "--stage-run-id",
+        stage_run_id,
     ]
     runner_result = run_command_with_logs(
         command=runner_command,
@@ -246,10 +182,15 @@ def run_stage_01(
     if missing_outputs:
         raise FileNotFoundError(f"stage 01 required outputs missing: {missing_outputs}")
 
-    stats_contract_path, stats_contract_payload = _build_parallel_attestation_statistics_input_contract(
-        run_root,
-        outputs["detect_record"],
-        stage_run_id,
+    stats_contract_path = outputs["parallel_attestation_statistics_input_contract"]
+    stats_contract_payload = _load_json_object(
+        stats_contract_path,
+        "stage 01 parallel_attestation_statistics_input_contract",
+    )
+    pooled_threshold_build_contract_path = outputs["stage_01_pooled_threshold_build_contract"]
+    pooled_threshold_build_contract_payload = _load_json_object(
+        pooled_threshold_build_contract_path,
+        "stage 01 pooled threshold build contract",
     )
 
     stage_manifest_path = run_root / "artifacts" / "stage_manifest.json"
@@ -283,6 +224,16 @@ def run_stage_01(
         "parallel_attestation_statistics_input_contract_direct_stats_ready": stats_contract_payload["direct_stats_ready"],
         "parallel_attestation_statistics_input_contract_direct_stats_reason": stats_contract_payload["direct_stats_reason"],
         "parallel_attestation_statistics_input_contract_record_count": stats_contract_payload["record_count"],
+        "parallel_attestation_statistics_input_contract_score_availability": stats_contract_payload.get("score_availability", {}),
+        "stage_01_pooled_threshold_build_contract_path": normalize_path_value(pooled_threshold_build_contract_path),
+        "stage_01_pooled_threshold_build_contract_package_relative_path": STAGE_01_POOLED_THRESHOLD_BUILD_CONTRACT_RELATIVE_PATH,
+        "stage_01_pooled_threshold_build_mode": pooled_threshold_build_contract_payload.get("build_mode"),
+        "stage_01_pooled_threshold_requested_build_mode": pooled_threshold_build_contract_payload.get("requested_build_mode"),
+        "stage_01_pooled_threshold_direct_record_count": pooled_threshold_build_contract_payload.get("direct_record_count"),
+        "stage_01_pooled_threshold_derived_record_count": pooled_threshold_build_contract_payload.get("derived_record_count"),
+        "stage_01_pooled_threshold_final_record_count": pooled_threshold_build_contract_payload.get("final_record_count"),
+        "stage_01_pooled_threshold_final_label_balanced": pooled_threshold_build_contract_payload.get("final_label_balanced"),
+        "stage_01_pooled_threshold_stats_input_set": pooled_threshold_build_contract_payload.get("stats_input_set", {}),
         "thresholds_path": normalize_path_value(outputs["thresholds_artifact"]),
         "threshold_metadata_artifact_path": normalize_path_value(outputs["threshold_metadata_artifact"]),
         "evaluation_report_path": normalize_path_value(outputs["evaluation_report"]),
@@ -302,7 +253,14 @@ def run_stage_01(
     }
     write_json_atomic(stage_manifest_path, stage_manifest)
 
-    package_root = _package_stage_outputs(run_root, runtime_state_root, stage_manifest_path, runtime_config_snapshot_path)
+    package_root = _package_stage_outputs(
+        run_root,
+        runtime_state_root,
+        stage_manifest_path,
+        runtime_config_snapshot_path,
+        stats_contract_payload,
+        pooled_threshold_build_contract_payload,
+    )
     package_manifest_path = run_root / "artifacts" / "package_manifest.json"
     package_manifest = finalize_stage_package(
         stage_name=STAGE_01_NAME,
