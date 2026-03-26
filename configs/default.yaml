@@ -67,7 +67,7 @@ watermark:
     message_length: 64
     coding_mode: "pseudogaussian_template_additive"
     decoder: "matched_correlation"  # 保留 formal token；实际检测为 whitened Pearson correlation + soft LLR + sparse LDPC BP decode 的组合路径
-    bp_iterations: 100  # 从 50 提升至 100，改善 LF BP 收敛概率（RUNTIME-02 验证后可进一步调整）
+    bp_iterations: 100  # 从 50 提升至 100，改善 LF BP 收敛概率
   hf:
     enabled: true
     selection: "attestation_conditioned_projection_tail"
@@ -179,7 +179,7 @@ attestation:
   signed_bundle_schema: "gen_attest_bundle_v1"
   signer_certificate_schema: "gen_attest_signer_cert_v1"
   require_signed_bundle_verification: true
-  threshold: 0.65    # attested 判决阈值（方法论定义默认值）
+  threshold: 0.65    # attested 判决阈值
   lf_weight: 0.5     # LF 通道融合权重
   hf_weight: 0.3     # HF 通道融合权重
   geo_weight: 0.2    # GEO 通道融合权重
@@ -194,8 +194,13 @@ detect_runtime:
 experiment_matrix:
   config_path: "configs/default.yaml"
   allow_failed_semantics_collection: true
+  primary_scope: "system_final"
+  auxiliary_scopes: ["content_chain", "lf_channel"]
   evaluation_scope: "system_final"
   formal_score_name: "lf_channel_score"
+  # primary_scope 负责 stage 03 的主摘要、主结论与 stage 04 signoff 绑定；
+  # formal_score_name 仅保留为 scalar auxiliary scope 的共享阈值与校准配置，
+  # 当前 formal scalar scope 固定为 lf_channel。
   # seeds 数量控制正样本规模：论文级 FPR ≤ 1% 需 n_pos ≥ 100，种子数应 ≥ 100。
   # 当前 seeds=[0,1] 为机制验证阶段（仅 2 个 seed）；正式论文运行请扩展为 range(100)。
   # 运行时通过 scripts/run_experiment_matrix.py 自动映射 seeds 为 CLI overrides（seed=0, seed=1, ...），

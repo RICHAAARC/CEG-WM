@@ -191,6 +191,7 @@ def run_stage_03(
     source_package_manifest_copy_path = runtime_state_root / "lineage" / "source_package_manifest.json"
     write_json_atomic(source_package_manifest_copy_path, package_manifest)
     grid_summary_obj = read_json_dict(outputs["grid_summary"])
+    aggregate_report_obj = read_json_dict(outputs["aggregate_report"])
     run_closure_path = run_root / "artifacts" / "run_closure.json"
     if not run_closure_path.exists():
         write_json_atomic(run_closure_path, {
@@ -210,6 +211,12 @@ def run_stage_03(
         "source_package_sha256": str(source_info["source_package_sha256"]),
         "source_thresholds_artifact_path": normalize_path_value(source_lineage_paths["source_thresholds_artifact_path"]),
         "grid_summary_path": normalize_path_value(outputs["grid_summary"]),
+        "aggregate_report_path": normalize_path_value(outputs["aggregate_report"]),
+        "primary_evaluation_scope": aggregate_report_obj.get("primary_evaluation_scope", grid_summary_obj.get("primary_evaluation_scope")),
+        "primary_metric_name": aggregate_report_obj.get("primary_metric_name", grid_summary_obj.get("primary_metric_name")),
+        "auxiliary_scopes": aggregate_report_obj.get("auxiliary_scopes", grid_summary_obj.get("auxiliary_scopes", [])),
+        "scope_manifest": aggregate_report_obj.get("scope_manifest", grid_summary_obj.get("scope_manifest", {})),
+        "system_final_metrics_presence": aggregate_report_obj.get("system_final_metrics_presence", grid_summary_obj.get("system_final_metrics_presence", {})),
         "created_at": utc_now_iso(),
     })
 
@@ -252,6 +259,11 @@ def run_stage_03(
         "weight_summary": collect_weight_summary(REPO_ROOT, runtime_cfg),
         "created_at": utc_now_iso(),
         "runner_result": runner_result,
+        "primary_evaluation_scope": aggregate_report_obj.get("primary_evaluation_scope", grid_summary_obj.get("primary_evaluation_scope")),
+        "primary_metric_name": aggregate_report_obj.get("primary_metric_name", grid_summary_obj.get("primary_metric_name")),
+        "auxiliary_scopes": aggregate_report_obj.get("auxiliary_scopes", grid_summary_obj.get("auxiliary_scopes", [])),
+        "scope_manifest": aggregate_report_obj.get("scope_manifest", grid_summary_obj.get("scope_manifest", {})),
+        "system_final_metrics_presence": aggregate_report_obj.get("system_final_metrics_presence", grid_summary_obj.get("system_final_metrics_presence", {})),
         "grid_summary": grid_summary_obj,
     }
     write_json_atomic(stage_manifest_path, stage_manifest)

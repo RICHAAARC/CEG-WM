@@ -76,10 +76,12 @@ def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fiel
         None.
     """
     matrix_cfg = {
-        "evaluation_scope": "system_final",
+        "primary_scope": "system_final",
+        "auxiliary_scopes": ["content_chain", "lf_channel"],
         "formal_score_name": "lf_channel_score",
     }
     assert experiment_matrix._resolve_matrix_primary_scope(matrix_cfg) == "system_final"
+    assert experiment_matrix._resolve_matrix_auxiliary_scopes(matrix_cfg, "system_final") == ["content_chain", "lf_channel"]
     assert experiment_matrix._resolve_matrix_formal_score_name(matrix_cfg) == "lf_channel_score"
 
     score_record = {
@@ -122,6 +124,38 @@ def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fiel
     assert system_final_metrics["final_decision_tpr"] == 1.0
     assert system_final_metrics["event_attestation_tpr"] == 1.0
 
+    aggregate_report = experiment_matrix.build_aggregate_report(
+        [
+            {
+                "grid_item_digest": "grid01",
+                "status": "ok",
+                "evaluation_scope": "system_final",
+                "auxiliary_scopes": ["content_chain", "lf_channel"],
+                "scope_manifest": experiment_matrix._build_matrix_scope_manifest(
+                    primary_scope="system_final",
+                    auxiliary_scopes=["content_chain", "lf_channel"],
+                    scalar_formal_score_name="lf_channel_score",
+                ),
+                "primary_metric_name": "system_final_metrics",
+                "scalar_formal_score_name": "lf_channel_score",
+                "policy_path": "content_np_geo_rescue",
+                "metrics": {
+                    "system_final_metrics": system_final_metrics,
+                    "auxiliary_scope_metrics": {
+                        "content_chain": {"metric_name": "content_chain_score", "available": True},
+                        "lf_channel": {"metric_name": "lf_channel_score", "available": True},
+                    },
+                },
+            }
+        ],
+        grid_manifest={"grid_manifest_digest": "grid_manifest_01"},
+    )
+    assert aggregate_report["primary_evaluation_scope"] == "system_final"
+    assert aggregate_report["primary_metric_name"] == "system_final_metrics"
+    assert aggregate_report["scope_manifest"]["primary_summary_basis_metric_name"] == "system_final_metrics"
+    assert aggregate_report["scope_manifest"]["scalar_calibration_scope"] == "lf_channel"
+    assert aggregate_report["system_final_metrics_presence"]["ok_rows_with_system_final_metrics"] == 1
+
 
 def test_schema_and_contracts_register_new_formal_fields() -> None:
     """
@@ -144,6 +178,7 @@ def test_schema_and_contracts_register_new_formal_fields() -> None:
     schema_paths = {item["path"] for item in schema_payload["fields"]}
     contract_paths = set(contract_payload["records_schema"]["field_paths_registry"])
     content_minimal = policy_payload["field_catalog"]["catalogs"]["content_minimal"]
+    artifact_contracts = contract_payload["artifact_schema"]["artifact_contracts"]
 
     required_paths = {
         "content_evidence.content_chain_score",
@@ -155,3 +190,7 @@ def test_schema_and_contracts_register_new_formal_fields() -> None:
     assert required_paths.issubset(schema_paths)
     assert required_paths.issubset(contract_paths)
     assert "content_evidence.content_chain_score" in content_minimal
+    assert "experiment_matrix_aggregate_report" in artifact_contracts
+    assert "experiment_matrix_grid_summary" in artifact_contracts
+    assert "primary_evaluation_scope" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
+    assert "scope_manifest" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]

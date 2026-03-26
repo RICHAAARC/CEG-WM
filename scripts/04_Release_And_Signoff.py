@@ -53,6 +53,12 @@ STAGE_04_NAME = "04_Release_And_Signoff"
 ALLOW_FREEZE = "ALLOW_FREEZE"
 BLOCK_FREEZE = "BLOCK_FREEZE"
 
+SYSTEM_FINAL_SCOPE = "system_final"
+CONTENT_CHAIN_SCOPE = "content_chain"
+LF_CHANNEL_SCOPE = "lf_channel"
+SYSTEM_FINAL_METRIC_NAME = "system_final_metrics"
+REQUIRED_STAGE_03_AUXILIARY_SCOPES = [CONTENT_CHAIN_SCOPE, LF_CHANNEL_SCOPE]
+
 EVALUATION_REPORT_REQUIRED_FIELDS = [
     "cfg_digest",
     "plan_digest",
@@ -75,10 +81,17 @@ GRID_SUMMARY_REQUIRED_FIELDS = [
     "impl_digest",
     "fusion_rule_version",
     "policy_path",
+    "primary_evaluation_scope",
+    "primary_metric_name",
+    "scope_manifest",
+    "system_final_metrics_presence",
 ]
 
 AGGREGATE_REPORT_REQUIRED_FIELDS = [
     "aggregate_report_version",
+    "primary_evaluation_scope",
+    "primary_metric_name",
+    "scope_manifest",
     "experiment_matrix_digest",
     "experiment_count",
     "success_count",
@@ -87,6 +100,7 @@ AGGREGATE_REPORT_REQUIRED_FIELDS = [
     "policy_path",
     "anchors",
     "metrics_matrix",
+    "system_final_metrics_presence",
 ]
 
 
@@ -380,6 +394,56 @@ def _require_nonempty_string_fields(
         )
 
 
+def _require_grid_summary_anchor_fields(
+    payload: Mapping[str, Any],
+    *,
+    source: str,
+    reason_code: str,
+    blocking_reasons: List[Dict[str, Any]],
+    rule: str,
+    impact: str,
+    fix: str,
+) -> None:
+    """
+    功能：按字段语义校验 stage 03 grid_summary 的锚点完整性。
+
+    Validate stage 03 grid_summary anchors with field-type awareness.
+
+    Args:
+        payload: Mapping payload to validate.
+        source: Reason source domain.
+        reason_code: Stable reason code.
+        blocking_reasons: Mutable blocking reason list.
+        rule: Audited rule statement.
+        impact: User-facing impact summary.
+        fix: Remediation guidance.
+
+    Returns:
+        None.
+    """
+    missing_fields: List[str] = []
+    dict_fields = {"scope_manifest", "system_final_metrics_presence"}
+    for field_name in GRID_SUMMARY_REQUIRED_FIELDS:
+        field_value = payload.get(field_name)
+        if field_name in dict_fields:
+            if not isinstance(field_value, dict) or not field_value:
+                missing_fields.append(field_name)
+            continue
+        if not isinstance(field_value, str) or not str(field_value).strip() or field_value == "<absent>":
+            missing_fields.append(field_name)
+
+    if missing_fields:
+        _append_blocking_reason(
+            blocking_reasons,
+            source=source,
+            reason_code=reason_code,
+            rule=rule,
+            impact=impact,
+            fix=fix,
+            evidence={"missing_fields": missing_fields},
+        )
+
+
 def _validate_stage_json_payloads(
     stage_key: str,
     stage_label: str,
@@ -456,9 +520,8 @@ def _validate_stage_json_payloads(
 
     grid_summary = parsed_payloads.get("grid_summary")
     if isinstance(grid_summary, dict):
-        _require_nonempty_string_fields(
+        _require_grid_summary_anchor_fields(
             grid_summary,
-            GRID_SUMMARY_REQUIRED_FIELDS,
             source=stage_key,
             reason_code=f"{stage_key}.grid_summary_missing_anchors",
             blocking_reasons=blocking_reasons,
@@ -490,7 +553,204 @@ def _validate_stage_json_payloads(
                 fix="regenerate aggregate_report.json with the expected anchor and summary fields",
                 evidence={"missing_fields": missing_fields, "path": required_files.get("aggregate_report")},
             )
+    if stage_key == "stage_03" and isinstance(grid_summary, dict) and isinstance(aggregate_report, dict):
+        _validate_stage_03_primary_scope_semantics(grid_summary, aggregate_report, blocking_reasons)
     return parsed_payloads
+
+
+def _validate_stage_03_primary_scope_semantics(
+    grid_summary: Mapping[str, Any],
+    aggregate_report: Mapping[str, Any],
+    blocking_reasons: List[Dict[str, Any]],
+) -> None:
+    """
+    功能：校验 stage 03 是否真正以 system_final 作为主评估对象。
+
+    Validate that the stage 03 package binds its primary evaluation semantics
+    to system_final rather than nominally renaming an LF-driven scalar path.
+
+    Args:
+        grid_summary: Parsed stage 03 grid summary.
+        aggregate_report: Parsed stage 03 aggregate report.
+        blocking_reasons: Mutable blocking reason list.
+
+    Returns:
+        None.
+    """
+    grid_summary_obj = dict(grid_summary)
+    aggregate_report_obj = dict(aggregate_report)
+
+    primary_scope = aggregate_report_obj.get("primary_evaluation_scope")
+    if primary_scope != SYSTEM_FINAL_SCOPE:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code="stage_03.primary_scope_not_system_final",
+            rule="stage 03 aggregate_report.primary_evaluation_scope must equal system_final",
+            impact="stage 03 release summary is not bound to the system-level final outcome",
+            fix="re-run stage 03 after binding aggregate_report primary_evaluation_scope to system_final",
+            evidence={"actual_primary_evaluation_scope": primary_scope},
+        )
+
+    primary_metric_name = aggregate_report_obj.get("primary_metric_name")
+    if primary_metric_name != SYSTEM_FINAL_METRIC_NAME:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code="stage_03.primary_metric_not_system_final_metrics",
+            rule="stage 03 aggregate_report.primary_metric_name must equal system_final_metrics",
+            impact="stage 03 primary summary is not anchored to structured system-final metrics",
+            fix="write primary_metric_name=system_final_metrics and bind summary generation to that structure",
+            evidence={"actual_primary_metric_name": primary_metric_name},
+        )
+
+    scope_manifest_raw = aggregate_report_obj.get("scope_manifest")
+    scope_manifest = cast(Dict[str, Any], scope_manifest_raw) if isinstance(scope_manifest_raw, dict) else {}
+    if not scope_manifest:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code="stage_03.scope_manifest_missing",
+            rule="stage 03 aggregate_report must publish scope_manifest for release signoff",
+            impact="stage 04 cannot verify the relationship between primary system scope and auxiliary scalar scopes",
+            fix="write aggregate_report.scope_manifest with primary, auxiliary, and scalar calibration bindings",
+            evidence={"scope_manifest": scope_manifest},
+        )
+        return
+
+    if scope_manifest.get("primary_scope") != SYSTEM_FINAL_SCOPE or scope_manifest.get("primary_summary_basis_scope") != SYSTEM_FINAL_SCOPE:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code="stage_03.scope_manifest_primary_binding_invalid",
+            rule="scope_manifest must bind both primary_scope and primary_summary_basis_scope to system_final",
+            impact="stage 03 remains in a nominal system_final but non-system summary state",
+            fix="set scope_manifest.primary_scope and primary_summary_basis_scope to system_final",
+            evidence={
+                "primary_scope": scope_manifest.get("primary_scope"),
+                "primary_summary_basis_scope": scope_manifest.get("primary_summary_basis_scope"),
+            },
+        )
+
+    if scope_manifest.get("primary_metric_name") != SYSTEM_FINAL_METRIC_NAME or scope_manifest.get("primary_summary_basis_metric_name") != SYSTEM_FINAL_METRIC_NAME:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code="stage_03.scope_manifest_primary_metric_binding_invalid",
+            rule="scope_manifest must bind both primary_metric_name and primary_summary_basis_metric_name to system_final_metrics",
+            impact="stage 03 primary summary is not semantically closed on system_final_metrics",
+            fix="set scope_manifest primary metric bindings to system_final_metrics",
+            evidence={
+                "primary_metric_name": scope_manifest.get("primary_metric_name"),
+                "primary_summary_basis_metric_name": scope_manifest.get("primary_summary_basis_metric_name"),
+            },
+        )
+
+    auxiliary_scopes_raw = scope_manifest.get("auxiliary_scopes")
+    auxiliary_scopes = cast(List[str], auxiliary_scopes_raw) if isinstance(auxiliary_scopes_raw, list) else []
+    missing_auxiliary_scopes = [scope_name for scope_name in REQUIRED_STAGE_03_AUXILIARY_SCOPES if scope_name not in auxiliary_scopes]
+    if missing_auxiliary_scopes:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code="stage_03.auxiliary_scopes_incomplete",
+            rule="stage 03 scope_manifest.auxiliary_scopes must include content_chain and lf_channel",
+            impact="stage 03 no longer exposes the required auxiliary mechanism scopes for analysis",
+            fix="write both content_chain and lf_channel into scope_manifest.auxiliary_scopes",
+            evidence={"auxiliary_scopes": auxiliary_scopes, "missing_auxiliary_scopes": missing_auxiliary_scopes},
+        )
+
+    if scope_manifest.get("scalar_calibration_scope") != LF_CHANNEL_SCOPE or scope_manifest.get("scalar_formal_score_name") != "lf_channel_score":
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code="stage_03.scalar_scope_binding_invalid",
+            rule="stage 03 scalar calibration path must remain bound to lf_channel / lf_channel_score as an auxiliary scope",
+            impact="stage 03 scalar formal path drifted away from the LF auxiliary channel contract",
+            fix="set scope_manifest.scalar_calibration_scope=lf_channel and scalar_formal_score_name=lf_channel_score",
+            evidence={
+                "scalar_calibration_scope": scope_manifest.get("scalar_calibration_scope"),
+                "scalar_formal_score_name": scope_manifest.get("scalar_formal_score_name"),
+            },
+        )
+
+    presence_raw = aggregate_report_obj.get("system_final_metrics_presence")
+    presence = cast(Dict[str, Any], presence_raw) if isinstance(presence_raw, dict) else {}
+    success_count = aggregate_report_obj.get("success_count") if isinstance(aggregate_report_obj.get("success_count"), int) else None
+    ok_rows_with_system_final_metrics = presence.get("ok_rows_with_system_final_metrics") if isinstance(presence.get("ok_rows_with_system_final_metrics"), int) else None
+    if ok_rows_with_system_final_metrics is None or success_count is None or ok_rows_with_system_final_metrics < success_count:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code="stage_03.system_final_metrics_missing",
+            rule="every successful stage 03 matrix row must carry system_final_metrics",
+            impact="stage 03 package cannot prove that the primary summary actually came from system-final outputs",
+            fix="ensure every successful row writes a dict-valued system_final_metrics entry and refresh system_final_metrics_presence",
+            evidence={
+                "system_final_metrics_presence": presence,
+                "success_count": success_count,
+            },
+        )
+
+    metrics_rows_raw = aggregate_report_obj.get("metrics_matrix")
+    metrics_rows = cast(List[Dict[str, Any]], metrics_rows_raw) if isinstance(metrics_rows_raw, list) else []
+    ok_rows: List[Dict[str, Any]] = [row for row in metrics_rows if row.get("status") == "ok"]
+    if not ok_rows:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code="stage_03.metrics_matrix_missing_ok_rows",
+            rule="stage 03 metrics_matrix must contain successful rows for signoff review",
+            impact="stage 04 cannot verify system_final and auxiliary scope semantics without successful rows",
+            fix="re-run stage 03 so metrics_matrix contains successful rows",
+            evidence={"metrics_matrix_length": len(metrics_rows)},
+        )
+    else:
+        missing_auxiliary_rows: List[Any] = []
+        missing_system_final_rows: List[Any] = []
+        for row in ok_rows:
+            if not isinstance(row.get(SYSTEM_FINAL_METRIC_NAME), dict):
+                missing_system_final_rows.append(row.get("grid_item_digest"))
+            auxiliary_metrics_raw = row.get("auxiliary_scope_metrics")
+            auxiliary_metrics = cast(Dict[str, Any], auxiliary_metrics_raw) if isinstance(auxiliary_metrics_raw, dict) else {}
+            if any(scope_name not in auxiliary_metrics for scope_name in REQUIRED_STAGE_03_AUXILIARY_SCOPES):
+                missing_auxiliary_rows.append(row.get("grid_item_digest"))
+        if missing_system_final_rows:
+            _append_blocking_reason(
+                blocking_reasons,
+                source="stage_03",
+                reason_code="stage_03.metrics_matrix_system_final_rows_missing",
+                rule="successful metrics_matrix rows must expose dict-valued system_final_metrics",
+                impact="stage 03 remains in a nominal system_final state without row-level primary evidence",
+                fix="write dict-valued system_final_metrics for each successful metrics_matrix row",
+                evidence={"missing_rows": missing_system_final_rows},
+            )
+        if missing_auxiliary_rows:
+            _append_blocking_reason(
+                blocking_reasons,
+                source="stage_03",
+                reason_code="stage_03.metrics_matrix_auxiliary_rows_missing",
+                rule="successful metrics_matrix rows must expose content_chain and lf_channel auxiliary metrics",
+                impact="stage 03 auxiliary mechanism outputs are incomplete for signoff review",
+                fix="write auxiliary_scope_metrics entries for content_chain and lf_channel on each successful row",
+                evidence={"missing_rows": missing_auxiliary_rows},
+            )
+
+    for field_name in ["primary_evaluation_scope", "primary_metric_name", "scope_manifest", "system_final_metrics_presence"]:
+        if grid_summary_obj.get(field_name) != aggregate_report_obj.get(field_name):
+            _append_blocking_reason(
+                blocking_reasons,
+                source="stage_03",
+                reason_code="stage_03.grid_summary_scope_mismatch",
+                rule="grid_summary must mirror aggregate_report primary scope fields for release signoff",
+                impact="stage 03 package exposes conflicting primary-scope semantics across artifacts",
+                fix="synchronize grid_summary with aggregate_report for primary_evaluation_scope, primary_metric_name, scope_manifest, and system_final_metrics_presence",
+                evidence={
+                    "field_name": field_name,
+                    "grid_summary_value": grid_summary_obj.get(field_name),
+                    "aggregate_report_value": aggregate_report_obj.get(field_name),
+                },
+            )
 
 
 def _prepare_stage_package_input(

@@ -41,11 +41,13 @@ _FORBIDDEN_ARTIFACT_ANCHOR_FIELDS = {
 _SYSTEM_FINAL_SCOPE = "system_final"
 _CONTENT_CHAIN_SCOPE = "content_chain"
 _LF_CHANNEL_SCOPE = "lf_channel"
+_SYSTEM_FINAL_METRIC_NAME = "system_final_metrics"
 _MATRIX_EVALUATION_SCOPES = {
     _SYSTEM_FINAL_SCOPE,
     _CONTENT_CHAIN_SCOPE,
     _LF_CHANNEL_SCOPE,
 }
+_DEFAULT_AUXILIARY_SCOPES = [_CONTENT_CHAIN_SCOPE, _LF_CHANNEL_SCOPE]
 
 
 def _relative_path_from_base(base_path: Path, path_value: Any) -> str:
@@ -130,7 +132,13 @@ def build_experiment_grid(base_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     ablation_variants = _resolve_ablation_axis(matrix_cfg)
     formal_validation_guards = _resolve_formal_validation_guards(matrix_cfg)
     evaluation_scope = _resolve_matrix_primary_scope(matrix_cfg)
+    auxiliary_scopes = _resolve_matrix_auxiliary_scopes(matrix_cfg, evaluation_scope)
     formal_score_name = _resolve_matrix_formal_score_name(matrix_cfg)
+    scope_manifest = _build_matrix_scope_manifest(
+        primary_scope=evaluation_scope,
+        auxiliary_scopes=auxiliary_scopes,
+        scalar_formal_score_name=formal_score_name,
+    )
 
     batch_root = matrix_cfg.get("batch_root", "outputs/experiment_matrix")
     if not isinstance(batch_root, str) or not batch_root:
@@ -196,6 +204,8 @@ def build_experiment_grid(base_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
                         "max_samples": max_samples,
                         "allow_failed_semantics_collection": allow_failed_semantics_collection,
                         "evaluation_scope": evaluation_scope,
+                        "auxiliary_scopes": copy.deepcopy(auxiliary_scopes),
+                        "scope_manifest": copy.deepcopy(scope_manifest),
                         "primary_metric_name": _resolve_matrix_primary_metric_name(evaluation_scope),
                         "formal_score_name": formal_score_name,
                         "require_real_negative_cache": formal_validation_guards["require_real_negative_cache"],
@@ -238,7 +248,10 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
         "seed": grid_item_cfg.get("seed") if isinstance(grid_item_cfg.get("seed"), int) else None,
         "attack_family": _safe_str(grid_item_cfg.get("attack_protocol_family")),
         "evaluation_scope": _safe_str(grid_item_cfg.get("evaluation_scope")),
+        "auxiliary_scopes": copy.deepcopy(grid_item_cfg.get("auxiliary_scopes", [])) if isinstance(grid_item_cfg.get("auxiliary_scopes"), list) else [],
+        "scope_manifest": copy.deepcopy(grid_item_cfg.get("scope_manifest", {})) if isinstance(grid_item_cfg.get("scope_manifest"), dict) else {},
         "primary_metric_name": _safe_str(grid_item_cfg.get("primary_metric_name")),
+        "scalar_formal_score_name": _safe_str(grid_item_cfg.get("formal_score_name")),
         "status": "failed",
         "failure_reason": "<absent>",
         "cfg_digest": _safe_str(grid_item_cfg.get("cfg_digest")),
@@ -340,7 +353,8 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
                     "n_rescue_success": metrics_obj.get("n_rescue_success"),
                     "conditional_fpr_estimate": metrics_obj.get("conditional_fpr_estimate"),
                     "conditional_fpr_n": metrics_obj.get("conditional_fpr_n"),
-                    "system_final_metrics": _build_system_final_metrics_for_run(run_root),
+                    _SYSTEM_FINAL_METRIC_NAME: _build_system_final_metrics_for_run(run_root),
+                    "auxiliary_scope_metrics": _build_auxiliary_scope_metrics_for_run(run_root),
                 },
                 "hf_truncation_baseline_comparison": _extract_hf_truncation_baseline_comparison_from_detect_record(run_root),
                 "detect_gate_relaxed": bool(detect_gate_info.get("gate_relaxed", False)),
@@ -399,15 +413,48 @@ def _resolve_matrix_primary_scope(matrix_cfg: Dict[str, Any]) -> str:
     if not isinstance(matrix_cfg, dict):
         raise TypeError("matrix_cfg must be dict")
 
-    evaluation_scope = matrix_cfg.get("evaluation_scope", _SYSTEM_FINAL_SCOPE)
+    evaluation_scope = matrix_cfg.get("primary_scope", matrix_cfg.get("evaluation_scope", _SYSTEM_FINAL_SCOPE))
     if not isinstance(evaluation_scope, str) or not evaluation_scope:
-        raise TypeError("experiment_matrix.evaluation_scope must be non-empty str")
+        raise TypeError("experiment_matrix.primary_scope must be non-empty str")
     if evaluation_scope not in _MATRIX_EVALUATION_SCOPES:
         raise ValueError(
-            "experiment_matrix.evaluation_scope must be one of "
+            "experiment_matrix.primary_scope must be one of "
             f"{sorted(_MATRIX_EVALUATION_SCOPES)}"
         )
     return evaluation_scope
+
+
+def _resolve_matrix_auxiliary_scopes(matrix_cfg: Dict[str, Any], primary_scope: str) -> List[str]:
+    """Resolve the auxiliary evaluation scopes for experiment_matrix."""
+    if not isinstance(matrix_cfg, dict):
+        raise TypeError("matrix_cfg must be dict")
+    if not isinstance(primary_scope, str) or not primary_scope:
+        raise TypeError("primary_scope must be non-empty str")
+
+    configured_scopes = matrix_cfg.get("auxiliary_scopes")
+    if configured_scopes is None:
+        resolved_scopes = list(_DEFAULT_AUXILIARY_SCOPES if primary_scope == _SYSTEM_FINAL_SCOPE else [])
+    else:
+        if not isinstance(configured_scopes, list):
+            raise TypeError("experiment_matrix.auxiliary_scopes must be list when provided")
+        resolved_scopes = []
+        for scope_name in configured_scopes:
+            if not isinstance(scope_name, str) or not scope_name:
+                raise TypeError("experiment_matrix.auxiliary_scopes entries must be non-empty str")
+            if scope_name not in _MATRIX_EVALUATION_SCOPES:
+                raise ValueError(f"unsupported experiment_matrix auxiliary scope: {scope_name}")
+            if scope_name == primary_scope or scope_name in resolved_scopes:
+                continue
+            resolved_scopes.append(scope_name)
+
+    if primary_scope == _SYSTEM_FINAL_SCOPE:
+        missing_required = [scope_name for scope_name in _DEFAULT_AUXILIARY_SCOPES if scope_name not in resolved_scopes]
+        if missing_required:
+            raise ValueError(
+                "experiment_matrix auxiliary scopes for system_final must include content_chain and lf_channel; "
+                f"missing={missing_required}"
+            )
+    return resolved_scopes
 
 
 def _extract_matrix_primary_scope_from_grid_item(grid_item_cfg: Dict[str, Any]) -> str:
@@ -426,12 +473,53 @@ def _extract_matrix_primary_scope_from_grid_item(grid_item_cfg: Dict[str, Any]) 
 def _resolve_matrix_primary_metric_name(evaluation_scope: str) -> str:
     """Resolve the primary metric field name for one evaluation scope."""
     if evaluation_scope == _SYSTEM_FINAL_SCOPE:
-        return "system_final_metrics"
+        return _SYSTEM_FINAL_METRIC_NAME
     if evaluation_scope == _CONTENT_CHAIN_SCOPE:
         return eval_metrics.CONTENT_CHAIN_SCORE_NAME
     if evaluation_scope == _LF_CHANNEL_SCOPE:
         return eval_metrics.LF_CHANNEL_SCORE_NAME
     raise ValueError(f"unsupported evaluation_scope: {evaluation_scope}")
+
+
+def _build_matrix_scope_manifest(
+    *,
+    primary_scope: str,
+    auxiliary_scopes: List[str],
+    scalar_formal_score_name: str,
+) -> Dict[str, Any]:
+    """Build the persisted scope manifest for matrix summary and signoff."""
+    if not isinstance(primary_scope, str) or not primary_scope:
+        raise TypeError("primary_scope must be non-empty str")
+    if not isinstance(auxiliary_scopes, list):
+        raise TypeError("auxiliary_scopes must be list")
+    if not isinstance(scalar_formal_score_name, str) or not scalar_formal_score_name:
+        raise TypeError("scalar_formal_score_name must be non-empty str")
+
+    auxiliary_metric_names: Dict[str, str] = {}
+    for scope_name in auxiliary_scopes:
+        auxiliary_metric_names[scope_name] = _resolve_matrix_primary_metric_name(scope_name)
+
+    scalar_calibration_scope = (
+        _LF_CHANNEL_SCOPE
+        if eval_metrics.is_lf_channel_score_name(scalar_formal_score_name)
+        else _CONTENT_CHAIN_SCOPE
+    )
+
+    return {
+        "primary_scope": primary_scope,
+        "primary_metric_name": _resolve_matrix_primary_metric_name(primary_scope),
+        "primary_summary_basis_scope": primary_scope,
+        "primary_summary_basis_metric_name": _resolve_matrix_primary_metric_name(primary_scope),
+        "auxiliary_scopes": list(auxiliary_scopes),
+        "auxiliary_metric_names": auxiliary_metric_names,
+        "scalar_calibration_scope": scalar_calibration_scope,
+        "scalar_formal_score_name": scalar_formal_score_name,
+        "system_final_signal_sources": [
+            "final_decision.is_watermarked",
+            "attestation.image_evidence_result.geo_rescue_applied",
+            "attestation.final_event_attested_decision.is_event_attested",
+        ],
+    }
 
 
 def _extract_system_final_prediction(record_payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -493,7 +581,15 @@ def _build_system_final_metrics_for_run(run_root: Path) -> Dict[str, Any]:
     final_decision_fp = 0
     event_attestation_tp = 0
     event_attestation_fp = 0
+    final_decision_available_count = 0
+    content_chain_available_count = 0
+    image_evidence_ok_count = 0
+    event_attestation_available_count = 0
+    geo_rescue_eligible_count = 0
     geo_rescue_applied_count = 0
+    final_decision_status_counts: Dict[str, int] = {}
+    event_attestation_status_counts: Dict[str, int] = {}
+    geo_not_used_reason_counts: Dict[str, int] = {}
 
     for record_path in record_paths:
         record_payload = _read_optional_json(record_path)
@@ -503,7 +599,36 @@ def _build_system_final_metrics_for_run(run_root: Path) -> Dict[str, Any]:
         if label_value is None:
             continue
         prediction = _extract_system_final_prediction(record_payload)
+        final_decision_node = record_payload.get("final_decision")
+        final_decision_payload = final_decision_node if isinstance(final_decision_node, dict) else {}
+        content_node = record_payload.get("content_evidence_payload")
+        content_payload = content_node if isinstance(content_node, dict) else {}
+        attestation_node = record_payload.get("attestation")
+        attestation_payload = attestation_node if isinstance(attestation_node, dict) else {}
+        image_evidence_node = attestation_payload.get("image_evidence_result")
+        image_evidence_payload = image_evidence_node if isinstance(image_evidence_node, dict) else {}
+        final_attestation_node = attestation_payload.get("final_event_attested_decision")
+        final_attestation_payload = final_attestation_node if isinstance(final_attestation_node, dict) else {}
         n_total += 1
+        if final_decision_payload:
+            final_decision_available_count += 1
+        if content_payload.get("status") == "ok":
+            content_chain_available_count += 1
+        if image_evidence_payload.get("status") == "ok":
+            image_evidence_ok_count += 1
+        if final_attestation_payload:
+            event_attestation_available_count += 1
+        if bool(image_evidence_payload.get("geo_rescue_eligible", False)):
+            geo_rescue_eligible_count += 1
+        decision_status = final_decision_payload.get("decision_status")
+        if isinstance(decision_status, str) and decision_status:
+            final_decision_status_counts[decision_status] = final_decision_status_counts.get(decision_status, 0) + 1
+        attestation_status = final_attestation_payload.get("status")
+        if isinstance(attestation_status, str) and attestation_status:
+            event_attestation_status_counts[attestation_status] = event_attestation_status_counts.get(attestation_status, 0) + 1
+        geo_not_used_reason = image_evidence_payload.get("geo_not_used_reason")
+        if isinstance(geo_not_used_reason, str) and geo_not_used_reason:
+            geo_not_used_reason_counts[geo_not_used_reason] = geo_not_used_reason_counts.get(geo_not_used_reason, 0) + 1
         if label_value:
             n_positive += 1
             if prediction["system_positive"]:
@@ -533,6 +658,11 @@ def _build_system_final_metrics_for_run(run_root: Path) -> Dict[str, Any]:
         "n_total": n_total,
         "n_positive": n_positive,
         "n_negative": n_negative,
+        "final_decision_available_rate": _safe_rate(final_decision_available_count, n_total),
+        "content_chain_available_rate": _safe_rate(content_chain_available_count, n_total),
+        "image_evidence_ok_rate": _safe_rate(image_evidence_ok_count, n_total),
+        "event_attestation_available_rate": _safe_rate(event_attestation_available_count, n_total),
+        "geo_rescue_eligible_rate": _safe_rate(geo_rescue_eligible_count, n_total),
         "system_tpr": _safe_rate(system_tp, n_positive),
         "system_fpr": _safe_rate(system_fp, n_negative),
         "final_decision_tpr": _safe_rate(final_decision_tp, n_positive),
@@ -540,6 +670,67 @@ def _build_system_final_metrics_for_run(run_root: Path) -> Dict[str, Any]:
         "event_attestation_tpr": _safe_rate(event_attestation_tp, n_positive),
         "event_attestation_fpr": _safe_rate(event_attestation_fp, n_negative),
         "geo_rescue_applied_rate": _safe_rate(geo_rescue_applied_count, n_total),
+        "final_decision_status_counts": final_decision_status_counts,
+        "event_attestation_status_counts": event_attestation_status_counts,
+        "geo_not_used_reason_counts": geo_not_used_reason_counts,
+    }
+
+
+def _build_auxiliary_scope_metrics_for_run(run_root: Path) -> Dict[str, Any]:
+    """Build auxiliary scalar scope observations from the attacked detect record."""
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+
+    detect_record = _read_optional_json(run_root / "records" / "detect_record.json")
+    content_node = detect_record.get("content_evidence_payload") if isinstance(detect_record, dict) else {}
+    content_payload = content_node if isinstance(content_node, dict) else {}
+
+    content_chain_score = _coerce_finite_float(content_payload.get(eval_metrics.CONTENT_CHAIN_SCORE_NAME))
+    content_chain_source = f"content_evidence_payload.{eval_metrics.CONTENT_CHAIN_SCORE_NAME}"
+    if content_chain_score is None:
+        content_chain_score = _coerce_finite_float(content_payload.get("score"))
+        if content_chain_score is not None:
+            content_chain_source = "content_evidence_payload.score"
+    if content_chain_score is None:
+        content_chain_score = _coerce_finite_float(content_payload.get("content_score"))
+        if content_chain_score is not None:
+            content_chain_source = "content_evidence_payload.content_score"
+
+    lf_channel_score = _coerce_finite_float(content_payload.get(eval_metrics.LF_CHANNEL_SCORE_NAME))
+    lf_channel_source = f"content_evidence_payload.{eval_metrics.LF_CHANNEL_SCORE_NAME}"
+    if lf_channel_score is None:
+        lf_channel_score = _coerce_finite_float(content_payload.get("lf_score"))
+        if lf_channel_score is not None:
+            lf_channel_source = "content_evidence_payload.lf_score"
+
+    lf_correlation_score = _coerce_finite_float(content_payload.get(eval_metrics.LF_CORRELATION_SCORE_NAME))
+    lf_correlation_source = f"content_evidence_payload.{eval_metrics.LF_CORRELATION_SCORE_NAME}"
+    if lf_correlation_score is None:
+        lf_correlation_score = _coerce_finite_float(content_payload.get("detect_lf_score"))
+        if lf_correlation_score is not None:
+            lf_correlation_source = "content_evidence_payload.detect_lf_score"
+
+    status_value = _safe_str(content_payload.get("status"))
+    return {
+        _CONTENT_CHAIN_SCOPE: {
+            "scope": _CONTENT_CHAIN_SCOPE,
+            "metric_name": eval_metrics.CONTENT_CHAIN_SCORE_NAME,
+            "status": status_value,
+            "score": content_chain_score,
+            "score_source": content_chain_source if content_chain_score is not None else "<absent>",
+            "available": content_chain_score is not None and status_value == "ok",
+        },
+        _LF_CHANNEL_SCOPE: {
+            "scope": _LF_CHANNEL_SCOPE,
+            "metric_name": eval_metrics.LF_CHANNEL_SCORE_NAME,
+            "status": status_value,
+            "score": lf_channel_score,
+            "score_source": lf_channel_source if lf_channel_score is not None else "<absent>",
+            "diagnostic_metric_name": eval_metrics.LF_CORRELATION_SCORE_NAME,
+            "diagnostic_score": lf_correlation_score,
+            "diagnostic_score_source": lf_correlation_source if lf_correlation_score is not None else "<absent>",
+            "available": lf_channel_score is not None and status_value == "ok",
+        },
     }
 
 
@@ -563,9 +754,9 @@ def _resolve_matrix_calibration_score(record_payload: Dict[str, Any]) -> Tuple[O
 
     score_candidates = [
         ("content_evidence_payload.content_chain_score", content_node.get(eval_metrics.CONTENT_CHAIN_SCORE_NAME)),
+        ("content_evidence_payload.lf_channel_score", content_node.get(eval_metrics.LF_CHANNEL_SCORE_NAME)),
         ("content_evidence_payload.score", content_node.get("score")),
         ("content_evidence_payload.content_score", content_node.get("content_score")),
-        ("content_evidence_payload.lf_channel_score", content_node.get(eval_metrics.LF_CHANNEL_SCORE_NAME)),
         ("content_evidence_payload.lf_score", content_node.get("lf_score")),
         ("content_evidence_payload.hf_score", content_node.get("hf_score")),
         ("content_evidence_payload.detect_hf_score", content_node.get("detect_hf_score")),
@@ -952,6 +1143,11 @@ def run_experiment_grid(grid: List[Dict[str, Any]], strict: bool = True) -> Dict
         "executed": len(results),
         "succeeded": sum(1 for item in results if item.get("status") == "ok"),
         "failed": sum(1 for item in results if item.get("status") != "ok"),
+        "primary_evaluation_scope": aggregate_report.get("primary_evaluation_scope", _SYSTEM_FINAL_SCOPE),
+        "primary_metric_name": aggregate_report.get("primary_metric_name", _SYSTEM_FINAL_METRIC_NAME),
+        "auxiliary_scopes": aggregate_report.get("auxiliary_scopes", []),
+        "scope_manifest": aggregate_report.get("scope_manifest", {}),
+        "system_final_metrics_presence": aggregate_report.get("system_final_metrics_presence", {}),
         "aggregate_report": aggregate_report,
         "grid_manifest": grid_manifest,
         "results": results,
@@ -1048,7 +1244,8 @@ def build_aggregate_report(
                 "rescue_rate": metrics_obj.get("rescue_rate"),
                 "reject_rate": metrics_obj.get("reject_rate"),
                 "reject_rate_breakdown": metrics_obj.get("reject_rate_breakdown", {}),
-                "system_final_metrics": metrics_obj.get("system_final_metrics"),
+                _SYSTEM_FINAL_METRIC_NAME: metrics_obj.get(_SYSTEM_FINAL_METRIC_NAME),
+                "auxiliary_scope_metrics": metrics_obj.get("auxiliary_scope_metrics", {}),
             }
         )
 
@@ -1064,10 +1261,35 @@ def build_aggregate_report(
     grouped_rows = _build_grouped_rows(experiment_results)
     failure_semantics_distribution = _collect_failure_semantics_distribution(experiment_results)
     coverage_manifest = attack_coverage.compute_attack_coverage_manifest()
+    primary_evaluation_scope = _safe_str(experiment_results[0].get("evaluation_scope")) if experiment_results else _SYSTEM_FINAL_SCOPE
+    primary_metric_name = _safe_str(experiment_results[0].get("primary_metric_name")) if experiment_results else _SYSTEM_FINAL_METRIC_NAME
+    auxiliary_scopes = (
+        list(experiment_results[0].get("auxiliary_scopes", []))
+        if experiment_results and isinstance(experiment_results[0].get("auxiliary_scopes"), list)
+        else list(_DEFAULT_AUXILIARY_SCOPES if primary_evaluation_scope == _SYSTEM_FINAL_SCOPE else [])
+    )
+    scope_manifest = (
+        copy.deepcopy(experiment_results[0].get("scope_manifest"))
+        if experiment_results and isinstance(experiment_results[0].get("scope_manifest"), dict)
+        else _build_matrix_scope_manifest(
+            primary_scope=primary_evaluation_scope,
+            auxiliary_scopes=auxiliary_scopes,
+            scalar_formal_score_name=_safe_str(experiment_results[0].get("scalar_formal_score_name")) if experiment_results else eval_metrics.LF_CHANNEL_SCORE_NAME,
+        )
+    )
+    rows_with_system_final_metrics = sum(
+        1 for row in metrics_matrix if isinstance(row.get(_SYSTEM_FINAL_METRIC_NAME), dict)
+    )
+    ok_rows_with_system_final_metrics = sum(
+        1 for row in metrics_matrix if row.get("status") == "ok" and isinstance(row.get(_SYSTEM_FINAL_METRIC_NAME), dict)
+    )
 
     report = {
         "aggregate_report_version": "aggregate_v1",
-        "primary_evaluation_scope": _safe_str(experiment_results[0].get("evaluation_scope")) if experiment_results else _SYSTEM_FINAL_SCOPE,
+        "primary_evaluation_scope": primary_evaluation_scope,
+        "primary_metric_name": primary_metric_name,
+        "auxiliary_scopes": auxiliary_scopes,
+        "scope_manifest": scope_manifest,
         "experiment_matrix_digest": digests.canonical_sha256(canonical_items),
         "experiment_count": len(experiment_results),
         "success_count": sum(1 for item in experiment_results if item.get("status") == "ok"),
@@ -1078,6 +1300,11 @@ def build_aggregate_report(
         "attack_coverage_manifest": coverage_manifest,
         "anchors": anchor_rows,
         "metrics_matrix": metrics_matrix,
+        "system_final_metrics_presence": {
+            "rows_with_system_final_metrics": rows_with_system_final_metrics,
+            "ok_rows_with_system_final_metrics": ok_rows_with_system_final_metrics,
+            "rows_total": len(metrics_matrix),
+        },
         "grouped_metrics": grouped_rows,
         "failure_semantics_distribution": failure_semantics_distribution,
         "failures": failures,
@@ -2519,11 +2746,20 @@ def _prepare_labelled_detect_records_glob_for_matrix(
     negative_payload.pop("calibration_excluded_from_labelled_sampling", None)
     negative_payload["calibration_sample_usage"] = "synthetic_negative_for_experiment_matrix_label_balance"
 
-    base_score, _ = _resolve_matrix_calibration_score(base_payload)
-    if not isinstance(base_score, float):
-        base_score = 0.25
+    formal_score_name = _extract_matrix_formal_score_name_from_grid_item(grid_item_cfg)
+    base_score, base_score_source = _resolve_formal_matrix_score(base_payload, formal_score_name)
+    if not isinstance(base_score, float) or not isinstance(base_score_source, str) or not base_score_source:
+        raise RuntimeError(
+            "matrix labelled sampling requires canonical scalar scope score on the attacked detect record; "
+            f"reason={base_score_source if isinstance(base_score_source, str) else formal_score_name + '_missing_or_nonfinite'}"
+        )
 
-    _ensure_matrix_calibration_compatible_content_payload(positive_payload, "content_score", base_score)
+    _ensure_matrix_calibration_compatible_content_payload(
+        positive_payload,
+        formal_score_name,
+        base_score,
+        score_source=base_score_source,
+    )
 
     # 优先使用预生成的真实负样本分数（干净图像经 identity embed + detect 产出）。
     # 真实分数保证 FPR 校准在真实负样本分布上进行，满足论文级严谨要求。
@@ -2536,7 +2772,7 @@ def _prepare_labelled_detect_records_glob_for_matrix(
         and neg_detect_record_path.is_file()
     ):
         neg_payload_real = _read_optional_json(neg_detect_record_path)
-        neg_score, neg_score_source = _resolve_matrix_calibration_score(neg_payload_real)
+        neg_score, neg_score_source = _resolve_formal_matrix_score(neg_payload_real, formal_score_name)
     else:
         neg_score_source = None
 
@@ -2561,7 +2797,7 @@ def _prepare_labelled_detect_records_glob_for_matrix(
         negative_payload.pop("calibration_excluded_from_labelled_sampling", None)
         _ensure_matrix_calibration_compatible_content_payload(
             negative_payload,
-            "content_score",
+            formal_score_name,
             neg_score,
             score_source=neg_score_source,
             recovered_sample_origin="real_negative_payload_recovery",
@@ -2575,7 +2811,7 @@ def _prepare_labelled_detect_records_glob_for_matrix(
                 "real negative payload is required for labelled detect records"
             )
         # 降级：neg 生成失败或分数无效，使用合成得分（base_score - 1.0）。
-        _ensure_matrix_calibration_compatible_content_payload(negative_payload, "content_score", base_score - 1.0)
+        _ensure_matrix_calibration_compatible_content_payload(negative_payload, formal_score_name, base_score - 1.0)
 
     positive_rel_path = Path("artifacts") / "evaluate_inputs" / "labelled_detect_records" / "detect_record_label_pos.json"
     negative_rel_path = Path("artifacts") / "evaluate_inputs" / "labelled_detect_records" / "detect_record_label_neg.json"
@@ -2738,6 +2974,11 @@ def _write_grid_artifacts(
             "executed": len(results),
             "succeeded": sum(1 for r in results if isinstance(r, dict) and r.get("status") == "ok"),
             "failed": sum(1 for r in results if isinstance(r, dict) and r.get("status") != "ok"),
+            "primary_evaluation_scope": aggregate_report.get("primary_evaluation_scope", _SYSTEM_FINAL_SCOPE),
+            "primary_metric_name": aggregate_report.get("primary_metric_name", _SYSTEM_FINAL_METRIC_NAME),
+            "auxiliary_scopes": aggregate_report.get("auxiliary_scopes", []),
+            "scope_manifest": aggregate_report.get("scope_manifest", {}),
+            "system_final_metrics_presence": aggregate_report.get("system_final_metrics_presence", {}),
             "results": results,
             **anchors_obj,  # append-only: 补齐锚点字段全集
         },

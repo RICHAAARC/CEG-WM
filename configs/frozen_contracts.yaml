@@ -9,7 +9,7 @@
 # 合同版本与冻结元信息
 # - 用于记录与审计，不应作为运行期分支逻辑的自由输入。
 # ------------------------------
-contract_version: "v1.17"     # 冻结契约版本号；v1.1→v1.2 formal path 最终闭包收口（2026-03-12）：historical_field_paths 段已从当前 formal contract 文件彻底移除，旧字段信息不再显式保留在任何 formal 文件中；当前 formal contract 只绑定当前正式机制。v1.2→v1.3 从可选字段列表中移除 embed_trace.identity_mode 与 embed_trace.identity_reason（2026-03-12）：生产嵌入实现不再承载 identity baseline。v1.3→v1.4 追加 attestation signed bundle 验签门禁语义（2026-03-13）：onefile/detect 溯源结果若声明 signed bundle，则必须执行内部 trust chain 验证。v1.4→v1.5：追加 geometry coarse registration 与 recovered-domain sync revalidation 细分字段冻结登记。v1.5→v1.6：为 policy_path semantics 新增 geometry_chain_required_but_unavailable fail_reason 的 append-only 冻结登记（2026-03-13）。v1.6→v1.7：追加 negative branch attestation provenance 的 append-only 冻结注册（2026-03-16）。v1.7→v1.8：追加 attestation_source 字段与 statement-only provenance no-bundle 合同说明（2026-03-17）。v1.8→v1.9：追加 exact LF observability 字段与 detect runtime canonical 兼容命名字段（2026-03-19）。v1.9→v1.10：追加 attestation trace artifact 的 append-only 白名单治理（2026-03-21）。v1.10→v1.11：追加 LF 闭环对齐表与 planner 风险报告 artifact 的 append-only 白名单治理（2026-03-21）。v1.11→v1.12：追加 LF retain breakdown 与 GEO rescue diagnostics artifact 的 append-only 白名单治理（2026-03-22）。v1.12→v1.13：追加 LF protocol control 与 GEO scale-control diagnostics 字段治理（2026-03-22）。v1.13→v1.14：追加 LF formal exact object-binding source 字段治理（2026-03-22）。v1.14→v1.15：追加 LF exact repair 与 GEO score rebinding 诊断字段治理（2026-03-22）。v1.15→v1.16：追加 GEO diagnostics 干净别名字段与 LF 分类表达收口（2026-03-23）。v1.16→v1.17 (2026-03-26)：追加 content_chain_score、lf_channel_score、lf_correlation_score 与 attestation LF 桥接字段冻结登记。
+contract_version: "v1.18"     # 冻结契约版本号；v1.1→v1.2 formal path 最终闭包收口（2026-03-12）：historical_field_paths 段已从当前 formal contract 文件彻底移除，旧字段信息不再显式保留在任何 formal 文件中；当前 formal contract 只绑定当前正式机制。v1.2→v1.3 从可选字段列表中移除 embed_trace.identity_mode 与 embed_trace.identity_reason（2026-03-12）：生产嵌入实现不再承载 identity baseline。v1.3→v1.4 追加 attestation signed bundle 验签门禁语义（2026-03-13）：onefile/detect 溯源结果若声明 signed bundle，则必须执行内部 trust chain 验证。v1.4→v1.5：追加 geometry coarse registration 与 recovered-domain sync revalidation 细分字段冻结登记。v1.5→v1.6：为 policy_path semantics 新增 geometry_chain_required_but_unavailable fail_reason 的 append-only 冻结登记（2026-03-13）。v1.6→v1.7：追加 negative branch attestation provenance 的 append-only 冻结注册（2026-03-16）。v1.7→v1.8：追加 attestation_source 字段与 statement-only provenance no-bundle 合同说明（2026-03-17）。v1.8→v1.9：追加 exact LF observability 字段与 detect runtime canonical 兼容命名字段（2026-03-19）。v1.9→v1.10：追加 attestation trace artifact 的 append-only 白名单治理（2026-03-21）。v1.10→v1.11：追加 LF 闭环对齐表与 planner 风险报告 artifact 的 append-only 白名单治理（2026-03-21）。v1.11→v1.12：追加 LF retain breakdown 与 GEO rescue diagnostics artifact 的 append-only 白名单治理（2026-03-22）。v1.12→v1.13：追加 LF protocol control 与 GEO scale-control diagnostics 字段治理（2026-03-22）。v1.13→v1.14：追加 LF formal exact object-binding source 字段治理（2026-03-22）。v1.14→v1.15：追加 LF exact repair 与 GEO score rebinding 诊断字段治理（2026-03-22）。v1.15→v1.16：追加 GEO diagnostics 干净别名字段与 LF 分类表达收口（2026-03-23）。v1.16→v1.17 (2026-03-26)：追加 content_chain_score、lf_channel_score、lf_correlation_score 与 attestation LF 桥接字段冻结登记。v1.17→v1.18 (2026-03-26)：追加 stage 03 aggregate_report/grid_summary 的 system_final 主评估 artifact 合同登记。
 frozen_date: "2026-02-04"    # 冻结日期元信息；当前主链路不参与门禁计算，主要用于审计追溯。
 
 # ------------------------------
@@ -358,6 +358,53 @@ artifact_schema:
         - high_confidence_mismatch_dimensions
         - routing_pattern_summary
         - host_baseline_risk_summary
+    experiment_matrix_aggregate_report:
+      relative_path: "aggregate_report.json"
+      description: "Stage 03 aggregate report artifact written by experiment_matrix with system_final as the primary evaluation scope."
+      allowed_top_level_fields:
+        - aggregate_report_version
+        - primary_evaluation_scope
+        - primary_metric_name
+        - auxiliary_scopes
+        - scope_manifest
+        - experiment_matrix_digest
+        - experiment_count
+        - success_count
+        - failure_count
+        - grid_manifest_digest
+        - attack_coverage_digest
+        - policy_path
+        - attack_coverage_manifest
+        - anchors
+        - metrics_matrix
+        - system_final_metrics_presence
+        - grouped_metrics
+        - failure_semantics_distribution
+        - failures
+    experiment_matrix_grid_summary:
+      relative_path: "grid_summary.json"
+      description: "Stage 03 grid summary artifact written by experiment_matrix and consumed by stage 04 signoff."
+      allowed_top_level_fields:
+        - strict
+        - total
+        - executed
+        - succeeded
+        - failed
+        - primary_evaluation_scope
+        - primary_metric_name
+        - auxiliary_scopes
+        - scope_manifest
+        - system_final_metrics_presence
+        - results
+        - cfg_digest
+        - thresholds_digest
+        - threshold_metadata_digest
+        - attack_protocol_version
+        - attack_protocol_digest
+        - attack_coverage_digest
+        - impl_digest
+        - fusion_rule_version
+        - policy_path
 
 # ==============================================================
 # I/O Entry Points & Write Exceptions
