@@ -85,8 +85,6 @@ GRID_SUMMARY_REQUIRED_FIELDS = [
     "primary_metric_name",
     "primary_summary_basis_scope",
     "primary_summary_basis_metric_name",
-    "scalar_formal_scope",
-    "scalar_formal_score_name",
     "scope_manifest",
     "system_final_metrics_presence",
 ]
@@ -97,8 +95,6 @@ AGGREGATE_REPORT_REQUIRED_FIELDS = [
     "primary_metric_name",
     "primary_summary_basis_scope",
     "primary_summary_basis_metric_name",
-    "scalar_formal_scope",
-    "scalar_formal_score_name",
     "scope_manifest",
     "experiment_matrix_digest",
     "experiment_count",
@@ -110,6 +106,28 @@ AGGREGATE_REPORT_REQUIRED_FIELDS = [
     "metrics_matrix",
     "system_final_metrics_presence",
 ]
+
+FORBIDDEN_STAGE_03_PRIMARY_CONTRACT_FIELDS = {
+    "scalar_formal_scope",
+    "scalar_formal_score_name",
+    "formal_score_name",
+}
+
+FORBIDDEN_STAGE_03_SCOPE_MANIFEST_FIELDS = {
+    "auxiliary_metric_names",
+    "scalar_formal_scope",
+    "scalar_calibration_scope",
+    "scalar_formal_score_name",
+    "system_final_signal_sources",
+}
+
+ALLOWED_STAGE_03_SCOPE_MANIFEST_FIELDS = {
+    "primary_scope",
+    "primary_metric_name",
+    "primary_summary_basis_scope",
+    "primary_summary_basis_metric_name",
+    "auxiliary_scopes",
+}
 
 
 def _parse_bool_arg(value: Any, default: bool) -> bool:
@@ -479,7 +497,7 @@ def _validate_stage_json_payloads(
     elif stage_key == "stage_02":
         json_labels = ["evaluation_report"]
     elif stage_key == "stage_03":
-        json_labels = ["grid_summary", "aggregate_report"]
+        json_labels = ["grid_summary", "aggregate_report", "workflow_summary", "stage_manifest"]
 
     for label in json_labels:
         raw_path = required_files.get(label)
@@ -561,9 +579,173 @@ def _validate_stage_json_payloads(
                 fix="regenerate aggregate_report.json with the expected anchor and summary fields",
                 evidence={"missing_fields": missing_fields, "path": required_files.get("aggregate_report")},
             )
+    if stage_key == "stage_03":
+        for payload_label in ("grid_summary", "aggregate_report", "workflow_summary", "stage_manifest"):
+            payload = parsed_payloads.get(payload_label)
+            if isinstance(payload, dict):
+                _validate_stage_03_primary_contract_payload(payload_label, payload, blocking_reasons)
     if stage_key == "stage_03" and isinstance(grid_summary, dict) and isinstance(aggregate_report, dict):
         _validate_stage_03_primary_scope_semantics(grid_summary, aggregate_report, blocking_reasons)
     return parsed_payloads
+
+
+def _validate_stage_03_primary_contract_payload(
+    payload_label: str,
+    payload: Mapping[str, Any],
+    blocking_reasons: List[Dict[str, Any]],
+) -> None:
+    """
+    功能：校验 stage 03 各主合同工件不再暴露 legacy scalar formal 顶层结构。
+
+    Validate that stage 03 contract payloads stay purely system_final-driven and
+    do not expose legacy scalar-formal top-level contract fields.
+
+    Args:
+        payload_label: Stage 03 payload label.
+        payload: Parsed JSON payload.
+        blocking_reasons: Mutable blocking reason list.
+
+    Returns:
+        None.
+    """
+    forbidden_top_level_fields = sorted(
+        field_name for field_name in FORBIDDEN_STAGE_03_PRIMARY_CONTRACT_FIELDS if field_name in payload
+    )
+    if forbidden_top_level_fields:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code=f"stage_03.{payload_label}_legacy_scalar_contract_present",
+            rule="stage 03 primary contract payloads must not expose legacy scalar formal top-level fields",
+            impact="stage 03 still publishes scalar formal anchors as part of the primary release contract",
+            fix="remove scalar_formal_scope / scalar_formal_score_name from stage 03 top-level payloads and keep scalar analysis internal",
+            evidence={
+                "payload_label": payload_label,
+                "forbidden_top_level_fields": forbidden_top_level_fields,
+            },
+        )
+
+    if payload.get("primary_evaluation_scope") != SYSTEM_FINAL_SCOPE:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code=f"stage_03.{payload_label}_primary_scope_not_system_final",
+            rule="stage 03 primary contract payloads must bind primary_evaluation_scope to system_final",
+            impact="stage 03 primary contract is not anchored to the system-level final outcome",
+            fix="regenerate stage 03 payloads with primary_evaluation_scope=system_final",
+            evidence={
+                "payload_label": payload_label,
+                "actual_primary_evaluation_scope": payload.get("primary_evaluation_scope"),
+            },
+        )
+
+    if payload.get("primary_metric_name") != SYSTEM_FINAL_METRIC_NAME:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code=f"stage_03.{payload_label}_primary_metric_not_system_final_metrics",
+            rule="stage 03 primary contract payloads must bind primary_metric_name to system_final_metrics",
+            impact="stage 03 primary contract no longer uses structured system_final metrics",
+            fix="regenerate stage 03 payloads with primary_metric_name=system_final_metrics",
+            evidence={
+                "payload_label": payload_label,
+                "actual_primary_metric_name": payload.get("primary_metric_name"),
+            },
+        )
+
+    if payload.get("primary_summary_basis_scope") != SYSTEM_FINAL_SCOPE:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code=f"stage_03.{payload_label}_primary_summary_basis_scope_not_system_final",
+            rule="stage 03 primary contract payloads must bind primary_summary_basis_scope to system_final",
+            impact="stage 03 primary summary basis is not closed on the system-level scope",
+            fix="regenerate stage 03 payloads with primary_summary_basis_scope=system_final",
+            evidence={
+                "payload_label": payload_label,
+                "actual_primary_summary_basis_scope": payload.get("primary_summary_basis_scope"),
+            },
+        )
+
+    if payload.get("primary_summary_basis_metric_name") != SYSTEM_FINAL_METRIC_NAME:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code=f"stage_03.{payload_label}_primary_summary_basis_metric_not_system_final_metrics",
+            rule="stage 03 primary contract payloads must bind primary_summary_basis_metric_name to system_final_metrics",
+            impact="stage 03 primary summary basis metric drifted away from system_final metrics",
+            fix="regenerate stage 03 payloads with primary_summary_basis_metric_name=system_final_metrics",
+            evidence={
+                "payload_label": payload_label,
+                "actual_primary_summary_basis_metric_name": payload.get("primary_summary_basis_metric_name"),
+            },
+        )
+
+    auxiliary_scopes_raw = payload.get("auxiliary_scopes")
+    auxiliary_scopes = cast(List[str], auxiliary_scopes_raw) if isinstance(auxiliary_scopes_raw, list) else []
+    missing_auxiliary_scopes = [scope_name for scope_name in REQUIRED_STAGE_03_AUXILIARY_SCOPES if scope_name not in auxiliary_scopes]
+    if missing_auxiliary_scopes:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code=f"stage_03.{payload_label}_auxiliary_scopes_incomplete",
+            rule="stage 03 primary contract payloads must expose content_chain and lf_channel as auxiliary scopes",
+            impact="stage 03 no longer carries the required auxiliary analysis scopes",
+            fix="regenerate stage 03 payloads with auxiliary_scopes including content_chain and lf_channel",
+            evidence={
+                "payload_label": payload_label,
+                "auxiliary_scopes": auxiliary_scopes,
+                "missing_auxiliary_scopes": missing_auxiliary_scopes,
+            },
+        )
+
+    scope_manifest_raw = payload.get("scope_manifest")
+    scope_manifest = cast(Dict[str, Any], scope_manifest_raw) if isinstance(scope_manifest_raw, dict) else {}
+    if not scope_manifest:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code=f"stage_03.{payload_label}_scope_manifest_missing",
+            rule="stage 03 primary contract payloads must publish scope_manifest",
+            impact="stage 04 cannot verify the closed primary scope contract",
+            fix="regenerate stage 03 payloads with a non-empty scope_manifest",
+            evidence={"payload_label": payload_label},
+        )
+        return
+
+    forbidden_scope_manifest_fields = sorted(
+        field_name for field_name in FORBIDDEN_STAGE_03_SCOPE_MANIFEST_FIELDS if field_name in scope_manifest
+    )
+    if forbidden_scope_manifest_fields:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code=f"stage_03.{payload_label}_scope_manifest_forbidden_fields_present",
+            rule="stage 03 scope_manifest must stay limited to the primary system contract and auxiliary scope list",
+            impact="stage 03 scope_manifest still publishes legacy scalar-formal contract details",
+            fix="remove scalar-formal and auxiliary metric detail fields from scope_manifest",
+            evidence={
+                "payload_label": payload_label,
+                "forbidden_scope_manifest_fields": forbidden_scope_manifest_fields,
+            },
+        )
+
+    unexpected_scope_manifest_fields = sorted(
+        field_name for field_name in scope_manifest.keys() if field_name not in ALLOWED_STAGE_03_SCOPE_MANIFEST_FIELDS
+    )
+    if unexpected_scope_manifest_fields:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code=f"stage_03.{payload_label}_scope_manifest_unexpected_fields_present",
+            rule="stage 03 scope_manifest must only expose primary system bindings and auxiliary_scopes",
+            impact="stage 03 scope_manifest contract is not minimal and may hide mixed-state semantics",
+            fix="restrict scope_manifest to primary_scope, primary_metric_name, primary_summary_basis_scope, primary_summary_basis_metric_name, and auxiliary_scopes",
+            evidence={
+                "payload_label": payload_label,
+                "unexpected_scope_manifest_fields": unexpected_scope_manifest_fields,
+            },
+        )
 
 
 def _validate_stage_03_primary_scope_semantics(
@@ -636,38 +818,6 @@ def _validate_stage_03_primary_scope_semantics(
             evidence={"actual_primary_summary_basis_metric_name": primary_summary_basis_metric_name},
         )
 
-    scalar_formal_scope = aggregate_report_obj.get("scalar_formal_scope")
-    scalar_formal_score_name = aggregate_report_obj.get("scalar_formal_score_name")
-    expected_scalar_metric_name = None
-    if scalar_formal_scope == CONTENT_CHAIN_SCOPE:
-        expected_scalar_metric_name = "content_chain_score"
-    elif scalar_formal_scope == LF_CHANNEL_SCOPE:
-        expected_scalar_metric_name = "lf_channel_score"
-    else:
-        _append_blocking_reason(
-            blocking_reasons,
-            source="stage_03",
-            reason_code="stage_03.scalar_formal_scope_invalid",
-            rule="stage 03 aggregate_report.scalar_formal_scope must be an auxiliary scalar scope",
-            impact="stage 03 scalar formal path is not bound to a supported auxiliary scope",
-            fix="set scalar_formal_scope to content_chain or lf_channel and keep it outside the primary system scope",
-            evidence={"actual_scalar_formal_scope": scalar_formal_scope},
-        )
-    if expected_scalar_metric_name is not None and scalar_formal_score_name != expected_scalar_metric_name:
-        _append_blocking_reason(
-            blocking_reasons,
-            source="stage_03",
-            reason_code="stage_03.scalar_formal_score_name_invalid",
-            rule="stage 03 aggregate_report.scalar_formal_score_name must match scalar_formal_scope",
-            impact="stage 03 scalar formal score naming drifted away from its auxiliary scope",
-            fix="synchronize scalar_formal_scope and scalar_formal_score_name in aggregate_report, grid_summary, and scope_manifest",
-            evidence={
-                "scalar_formal_scope": scalar_formal_scope,
-                "scalar_formal_score_name": scalar_formal_score_name,
-                "expected_scalar_formal_score_name": expected_scalar_metric_name,
-            },
-        )
-
     scope_manifest_raw = aggregate_report_obj.get("scope_manifest")
     scope_manifest = cast(Dict[str, Any], scope_manifest_raw) if isinstance(scope_manifest_raw, dict) else {}
     if not scope_manifest:
@@ -677,7 +827,7 @@ def _validate_stage_03_primary_scope_semantics(
             reason_code="stage_03.scope_manifest_missing",
             rule="stage 03 aggregate_report must publish scope_manifest for release signoff",
             impact="stage 04 cannot verify the relationship between primary system scope and auxiliary scalar scopes",
-            fix="write aggregate_report.scope_manifest with primary, auxiliary, and scalar calibration bindings",
+            fix="write aggregate_report.scope_manifest with primary system bindings and auxiliary scope list",
             evidence={"scope_manifest": scope_manifest},
         )
         return
@@ -710,23 +860,6 @@ def _validate_stage_03_primary_scope_semantics(
             },
         )
 
-    if scope_manifest.get("scalar_formal_scope", scope_manifest.get("scalar_calibration_scope")) != scalar_formal_scope or scope_manifest.get("scalar_formal_score_name") != scalar_formal_score_name:
-        _append_blocking_reason(
-            blocking_reasons,
-            source="stage_03",
-            reason_code="stage_03.scope_manifest_scalar_binding_mismatch",
-            rule="scope_manifest scalar binding must match aggregate_report scalar formal anchors",
-            impact="stage 03 exposes inconsistent auxiliary scalar semantics across artifacts",
-            fix="synchronize scope_manifest scalar_formal_scope / scalar_calibration_scope / scalar_formal_score_name with aggregate_report",
-            evidence={
-                "aggregate_scalar_formal_scope": scalar_formal_scope,
-                "aggregate_scalar_formal_score_name": scalar_formal_score_name,
-                "scope_manifest_scalar_formal_scope": scope_manifest.get("scalar_formal_scope"),
-                "scope_manifest_scalar_calibration_scope": scope_manifest.get("scalar_calibration_scope"),
-                "scope_manifest_scalar_formal_score_name": scope_manifest.get("scalar_formal_score_name"),
-            },
-        )
-
     auxiliary_scopes_raw = scope_manifest.get("auxiliary_scopes")
     auxiliary_scopes = cast(List[str], auxiliary_scopes_raw) if isinstance(auxiliary_scopes_raw, list) else []
     missing_auxiliary_scopes = [scope_name for scope_name in REQUIRED_STAGE_03_AUXILIARY_SCOPES if scope_name not in auxiliary_scopes]
@@ -739,36 +872,6 @@ def _validate_stage_03_primary_scope_semantics(
             impact="stage 03 no longer exposes the required auxiliary mechanism scopes for analysis",
             fix="write both content_chain and lf_channel into scope_manifest.auxiliary_scopes",
             evidence={"auxiliary_scopes": auxiliary_scopes, "missing_auxiliary_scopes": missing_auxiliary_scopes},
-        )
-
-    if scalar_formal_scope not in auxiliary_scopes:
-        _append_blocking_reason(
-            blocking_reasons,
-            source="stage_03",
-            reason_code="stage_03.scalar_scope_binding_invalid",
-            rule="stage 03 scalar formal scope must remain an auxiliary scope",
-            impact="stage 03 scalar formal path is no longer isolated from the primary system summary path",
-            fix="ensure scalar_formal_scope is one of the declared auxiliary_scopes",
-            evidence={
-                "auxiliary_scopes": auxiliary_scopes,
-                "scalar_formal_scope": scalar_formal_scope,
-            },
-        )
-
-    if primary_summary_basis_scope == scalar_formal_scope or primary_summary_basis_metric_name == scalar_formal_score_name:
-        _append_blocking_reason(
-            blocking_reasons,
-            source="stage_03",
-            reason_code="stage_03.primary_scalar_mixed_state_detected",
-            rule="stage 03 must not collapse primary system summary basis onto the auxiliary scalar formal basis",
-            impact="stage 03 remains in the forbidden mixed state of system_final report semantics plus scalar-formal primary driving semantics",
-            fix="separate primary_summary_basis_* from scalar_formal_* and regenerate stage 03 artifacts",
-            evidence={
-                "primary_summary_basis_scope": primary_summary_basis_scope,
-                "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
-                "scalar_formal_scope": scalar_formal_scope,
-                "scalar_formal_score_name": scalar_formal_score_name,
-            },
         )
 
     presence_raw = aggregate_report_obj.get("system_final_metrics_presence")

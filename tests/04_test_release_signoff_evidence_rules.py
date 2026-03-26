@@ -260,10 +260,11 @@ def _build_stage_03_package(
     primary_scope: str = "system_final",
     primary_summary_basis_scope: str = "system_final",
     primary_summary_basis_metric_name: str = "system_final_metrics",
-    scalar_formal_scope: str = "lf_channel",
-    scalar_formal_score_name: str = "lf_channel_score",
     include_system_final_metrics: bool = True,
     include_auxiliary_scopes: bool = True,
+    include_legacy_scalar_contract: bool = False,
+    legacy_scalar_formal_scope: str = "lf_channel",
+    legacy_scalar_formal_score_name: str = "lf_channel_score",
 ) -> Dict[str, Any]:
     """
     功能：构造最小 stage 03 package。 
@@ -278,6 +279,32 @@ def _build_stage_03_package(
         Stage 03 package metadata mapping.
     """
     stage_run_id = "stage03_run"
+    auxiliary_scopes = ["content_chain", "lf_channel"] if include_auxiliary_scopes else ["lf_channel"]
+    system_final_metrics_presence = {
+        "rows_with_system_final_metrics": 1 if include_system_final_metrics else 0,
+        "ok_rows_with_system_final_metrics": 1 if include_system_final_metrics else 0,
+        "rows_total": 1,
+    }
+    scope_manifest: Dict[str, Any] = {
+        "primary_scope": primary_scope,
+        "primary_metric_name": "system_final_metrics",
+        "primary_summary_basis_scope": primary_summary_basis_scope,
+        "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
+        "auxiliary_scopes": auxiliary_scopes,
+    }
+    if include_legacy_scalar_contract:
+        scope_manifest.update(
+            {
+                "auxiliary_metric_names": {
+                    "content_chain": "content_chain_score",
+                    "lf_channel": "lf_channel_score",
+                },
+                "scalar_formal_scope": legacy_scalar_formal_scope,
+                "scalar_calibration_scope": legacy_scalar_formal_scope,
+                "scalar_formal_score_name": legacy_scalar_formal_score_name,
+            }
+        )
+
     stage_manifest = {
         "stage_name": "03_Experiment_Matrix_Full",
         "stage_run_id": stage_run_id,
@@ -295,15 +322,24 @@ def _build_stage_03_package(
         "workflow_summary_path": "/drive/runs/03/artifacts/workflow_summary.json",
         "thresholds_path": "/drive/runs/03/global_calibrate/artifacts/thresholds/thresholds_artifact.json",
         "threshold_metadata_artifact_path": "/drive/runs/03/global_calibrate/artifacts/thresholds/threshold_metadata_artifact.json",
+        "primary_evaluation_scope": primary_scope,
+        "primary_metric_name": "system_final_metrics",
+        "primary_summary_basis_scope": primary_summary_basis_scope,
+        "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
+        "auxiliary_scopes": auxiliary_scopes,
+        "scope_manifest": scope_manifest,
+        "system_final_metrics_presence": system_final_metrics_presence,
     }
+    if include_legacy_scalar_contract:
+        stage_manifest["scalar_formal_scope"] = legacy_scalar_formal_scope
+        stage_manifest["scalar_formal_score_name"] = legacy_scalar_formal_score_name
+
     anchor_row = {
         "grid_item_digest": "grid01",
         "evaluation_scope": primary_scope,
         "primary_metric_name": "system_final_metrics",
         "primary_summary_basis_scope": primary_summary_basis_scope,
         "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
-        "scalar_formal_scope": scalar_formal_scope,
-        "scalar_formal_score_name": scalar_formal_score_name,
         "cfg_digest": "cfg03",
         "plan_digest": "plan03",
         "thresholds_digest": "thr03",
@@ -316,21 +352,6 @@ def _build_stage_03_package(
         "policy_path": "content_np_geo_rescue",
         "status": "ok",
     }
-    auxiliary_scopes = ["content_chain", "lf_channel"] if include_auxiliary_scopes else ["lf_channel"]
-    scope_manifest = {
-        "primary_scope": primary_scope,
-        "primary_metric_name": "system_final_metrics",
-        "primary_summary_basis_scope": primary_summary_basis_scope,
-        "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
-        "auxiliary_scopes": auxiliary_scopes,
-        "auxiliary_metric_names": {
-            "content_chain": "content_chain_score",
-            "lf_channel": "lf_channel_score",
-        },
-        "scalar_formal_scope": scalar_formal_scope,
-        "scalar_calibration_scope": scalar_formal_scope,
-        "scalar_formal_score_name": scalar_formal_score_name,
-    }
     metrics_row: Dict[str, Any] = {
         "grid_item_digest": "grid01",
         "status": "ok",
@@ -338,8 +359,6 @@ def _build_stage_03_package(
         "primary_metric_name": "system_final_metrics",
         "primary_summary_basis_scope": primary_summary_basis_scope,
         "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
-        "scalar_formal_scope": scalar_formal_scope,
-        "scalar_formal_score_name": scalar_formal_score_name,
         "auxiliary_scope_metrics": {
             "content_chain": {"metric_name": "content_chain_score", "available": True},
             "lf_channel": {"metric_name": "lf_channel_score", "available": True},
@@ -351,6 +370,7 @@ def _build_stage_03_package(
             "system_tpr": 1.0,
             "system_fpr": 0.0,
         }
+
     files = {
         "artifacts/grid_summary.json": {
             "cfg_digest": "cfg03",
@@ -367,14 +387,8 @@ def _build_stage_03_package(
             "primary_summary_basis_scope": primary_summary_basis_scope,
             "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
             "auxiliary_scopes": auxiliary_scopes,
-            "scalar_formal_scope": scalar_formal_scope,
-            "scalar_formal_score_name": scalar_formal_score_name,
             "scope_manifest": scope_manifest,
-            "system_final_metrics_presence": {
-                "rows_with_system_final_metrics": 1 if include_system_final_metrics else 0,
-                "ok_rows_with_system_final_metrics": 1 if include_system_final_metrics else 0,
-                "rows_total": 1,
-            },
+            "system_final_metrics_presence": system_final_metrics_presence,
         },
         "artifacts/grid_manifest.json": {"grid_manifest_digest": "grid_manifest_03"},
         "artifacts/aggregate_report.json": {
@@ -384,8 +398,6 @@ def _build_stage_03_package(
             "primary_summary_basis_scope": primary_summary_basis_scope,
             "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
             "auxiliary_scopes": auxiliary_scopes,
-            "scalar_formal_scope": scalar_formal_scope,
-            "scalar_formal_score_name": scalar_formal_score_name,
             "scope_manifest": scope_manifest,
             "experiment_matrix_digest": "matrix03",
             "experiment_count": 1,
@@ -395,13 +407,19 @@ def _build_stage_03_package(
             "policy_path": "content_np_geo_rescue",
             "anchors": [anchor_row],
             "metrics_matrix": [metrics_row],
-            "system_final_metrics_presence": {
-                "rows_with_system_final_metrics": 1 if include_system_final_metrics else 0,
-                "ok_rows_with_system_final_metrics": 1 if include_system_final_metrics else 0,
-                "rows_total": 1,
-            },
+            "system_final_metrics_presence": system_final_metrics_presence,
         },
-        "artifacts/workflow_summary.json": {"stage_name": "03_Experiment_Matrix_Full", "stage_run_id": stage_run_id},
+        "artifacts/workflow_summary.json": {
+            "stage_name": "03_Experiment_Matrix_Full",
+            "stage_run_id": stage_run_id,
+            "primary_evaluation_scope": primary_scope,
+            "primary_metric_name": "system_final_metrics",
+            "primary_summary_basis_scope": primary_summary_basis_scope,
+            "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
+            "auxiliary_scopes": auxiliary_scopes,
+            "scope_manifest": scope_manifest,
+            "system_final_metrics_presence": system_final_metrics_presence,
+        },
         "artifacts/run_closure.json": {"status": {"ok": True, "reason": "ok"}},
         "lineage/source_stage_manifest.json": stage_01_info["stage_manifest"],
         "lineage/source_package_manifest.json": stage_01_info["package_manifest"],
@@ -409,6 +427,12 @@ def _build_stage_03_package(
         "global_calibrate/artifacts/thresholds/threshold_metadata_artifact.json": {"threshold_metadata_digest": "meta03"},
         "runtime_metadata/runtime_config_snapshot.yaml": "experiment_matrix:\n  allow_failed_semantics_collection: true\n",
     }
+    if include_legacy_scalar_contract:
+        for payload_name in ("artifacts/grid_summary.json", "artifacts/aggregate_report.json", "artifacts/workflow_summary.json"):
+            payload = files[payload_name]
+            payload["scalar_formal_scope"] = legacy_scalar_formal_scope
+            payload["scalar_formal_score_name"] = legacy_scalar_formal_score_name
+
     package_path, package_manifest = _create_stage_package(
         base_dir,
         stage_name="03_Experiment_Matrix_Full",
@@ -611,12 +635,12 @@ def test_stage_04_blocks_when_stage_03_lacks_system_final_metrics(tmp_path: Path
     assert "stage_03.system_final_metrics_missing" in reason_codes or "stage_03.metrics_matrix_system_final_rows_missing" in reason_codes
 
 
-def test_stage_04_blocks_when_stage_03_primary_scalar_state_is_mixed(tmp_path: Path) -> None:
+def test_stage_04_blocks_when_stage_03_legacy_scalar_contract_is_still_present(tmp_path: Path) -> None:
     """
-    功能：验证 stage 03 若把主摘要语义与 scalar formal 语义混合，则必须 BLOCK_FREEZE。
+    功能：验证 stage 03 若仍输出 legacy scalar formal 顶层合同，则必须 BLOCK_FREEZE。
 
-    Verify that stage 04 blocks freeze when stage 03 collapses the primary
-    summary basis onto auxiliary scalar formal semantics.
+    Verify that stage 04 blocks freeze when stage 03 still exposes legacy
+    scalar-formal top-level contract fields.
 
     Args:
         tmp_path: Pytest temporary directory.
@@ -631,10 +655,7 @@ def test_stage_04_blocks_when_stage_03_primary_scalar_state_is_mixed(tmp_path: P
     stage_03_info = _build_stage_03_package(
         tmp_path / "case_mixed_primary_scalar",
         stage_01_info,
-        primary_summary_basis_scope="lf_channel",
-        primary_summary_basis_metric_name="lf_channel_score",
-        scalar_formal_scope="lf_channel",
-        scalar_formal_score_name="lf_channel_score",
+        include_legacy_scalar_contract=True,
     )
 
     summary = module.run_stage_04(
@@ -652,4 +673,4 @@ def test_stage_04_blocks_when_stage_03_primary_scalar_state_is_mixed(tmp_path: P
     signoff_report = json.loads(Path(summary["signoff_report_path"]).read_text(encoding="utf-8"))
     assert signoff_report["decision"] == "BLOCK_FREEZE"
     reason_codes = {item["reason_code"] for item in signoff_report["blocking_reasons"]}
-    assert "stage_03.primary_scalar_mixed_state_detected" in reason_codes
+    assert "stage_03.aggregate_report_legacy_scalar_contract_present" in reason_codes
