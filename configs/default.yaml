@@ -1,4 +1,4 @@
-﻿# ============================================================== 
+# ============================================================== 
 # 配置角色：通用默认基线配置
 # - 本文件用于 paper 语义下的完整机制运行：subspace、LF、HF、geometry
 #   detection 与事件级 attestation 全部启用。
@@ -157,6 +157,12 @@ parallel_attestation_statistics:
   enabled: true  # 独立专项流程参数来源；01_run_paper_full_cuda 主脚本不自动执行该统计链
   calibration_score_name: "event_attestation_score"
   evaluate_score_name: "event_attestation_score"
+  build_mode: "source_plus_derived_pairs"  # 02 显式 build 默认优先补齐统计输入；若 source 已天然平衡，则 02 会解析为 direct_source_only
+  allow_derived_input_build: true  # 仅允许 02 的显式 build phase 生成 derived stats input；不影响 calibrate/evaluate helper gate
+  derived_input_prompts_file: "prompts/paper_small.txt"  # paper_small.txt 仅服务 02 的显式 build plan，不再属于 calibration/evaluate synthetic helper
+  target_pair_count: 1  # 目标为至少构造 1 组正负样本对；若 source 直接记录更多，则以 source 计数为准
+  build_usage: "parallel_attestation_statistics"
+  record_derivation_kind: "prompt_bound_label_balance"
 
 impl:
   content_extractor_id: "unified_content_extractor"

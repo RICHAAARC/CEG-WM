@@ -93,10 +93,16 @@ def _build_parallel_attestation_statistics_input_contract(
     positive_count = 0
     negative_count = 0
     unknown_count = 0
-    status = "unavailable"
-    reason = "parallel_attestation_statistics_formal_input_unavailable"
+    status = "absent"
+    reason = "parallel_attestation_statistics_source_records_absent"
+    source_records_available = False
+    direct_stats_ready = False
+    direct_stats_reason = "parallel_attestation_statistics_source_records_absent"
 
     if detect_record_path.exists() and detect_record_path.is_file():
+        source_records_available = True
+        status = "ok"
+        reason = "parallel_attestation_statistics_source_records_available"
         detect_record_payload = json.loads(detect_record_path.read_text(encoding="utf-8"))
         if not isinstance(detect_record_payload, dict):
             raise ValueError(f"detect record must be JSON object: {detect_record_path}")
@@ -118,6 +124,8 @@ def _build_parallel_attestation_statistics_input_contract(
 
         records.append(
             {
+                "record_role": "direct_source_record",
+                "usage": "parallel_attestation_statistics_source",
                 "package_relative_path": "records/detect_record.json",
                 "path": normalize_path_value(detect_record_path),
                 "sha256": compute_file_sha256(detect_record_path),
@@ -128,23 +136,25 @@ def _build_parallel_attestation_statistics_input_contract(
         )
 
         if positive_count > 0 and negative_count > 0 and unknown_count == 0 and score_available:
-            status = "ready"
-            reason = "ok"
+            direct_stats_ready = True
+            direct_stats_reason = "ok"
         elif not score_available:
-            reason = "event_attestation_score_missing_in_detect_record"
+            direct_stats_reason = "event_attestation_score_missing_in_detect_record"
         elif unknown_count > 0:
-            reason = "detect_record_label_missing"
+            direct_stats_reason = "detect_record_label_missing"
         else:
-            reason = "parallel_attestation_statistics_requires_label_balanced_detect_records"
+            direct_stats_reason = "parallel_attestation_statistics_requires_label_balanced_detect_records"
 
     contract_payload: Dict[str, Any] = {
         "artifact_type": "parallel_attestation_statistics_input_contract",
+        "contract_role": "source_contract",
         "contract_version": "v1",
         "stage_name": STAGE_01_NAME,
         "stage_run_id": stage_run_id,
         "status": status,
         "reason": reason,
         "score_name": "event_attestation_score",
+        "source_records_available": source_records_available,
         "record_count": len(records),
         "label_summary": {
             "positive": positive_count,
@@ -152,6 +162,8 @@ def _build_parallel_attestation_statistics_input_contract(
             "unknown": unknown_count,
             "label_balanced": positive_count > 0 and negative_count > 0 and unknown_count == 0,
         },
+        "direct_stats_ready": direct_stats_ready,
+        "direct_stats_reason": direct_stats_reason,
         "records": records,
     }
     write_json_atomic(contract_path, contract_payload)
@@ -264,7 +276,13 @@ def run_stage_01(
         }),
         "parallel_attestation_statistics_input_contract_path": normalize_path_value(stats_contract_path),
         "parallel_attestation_statistics_input_contract_package_relative_path": PARALLEL_ATTESTATION_STATS_CONTRACT_RELATIVE_PATH,
+        "parallel_attestation_statistics_input_contract_role": stats_contract_payload["contract_role"],
         "parallel_attestation_statistics_input_contract_status": stats_contract_payload["status"],
+        "parallel_attestation_statistics_input_contract_reason": stats_contract_payload["reason"],
+        "parallel_attestation_statistics_input_contract_source_records_available": stats_contract_payload["source_records_available"],
+        "parallel_attestation_statistics_input_contract_direct_stats_ready": stats_contract_payload["direct_stats_ready"],
+        "parallel_attestation_statistics_input_contract_direct_stats_reason": stats_contract_payload["direct_stats_reason"],
+        "parallel_attestation_statistics_input_contract_record_count": stats_contract_payload["record_count"],
         "thresholds_path": normalize_path_value(outputs["thresholds_artifact"]),
         "threshold_metadata_artifact_path": normalize_path_value(outputs["threshold_metadata_artifact"]),
         "evaluation_report_path": normalize_path_value(outputs["evaluation_report"]),
