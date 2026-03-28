@@ -50,6 +50,11 @@ EVENT_ATTESTATION_SCORE_NAME = "event_attestation_score"
 CONTENT_CHAIN_SCORE_NAME = "content_chain_score"
 SOURCE_PLUS_DERIVED_PAIRS_MODE = "source_plus_derived_pairs"
 DIRECT_SOURCE_ONLY_MODE = "direct_source_only"
+REQUIRED_ATTESTATION_EVIDENCE_KEYS = (
+    "attestation_statement",
+    "attestation_bundle",
+    "attestation_result",
+)
 
 
 def _resolve_repo_path(path_value: str) -> Path:
@@ -218,6 +223,247 @@ def _all_required_present(artifact_summary: Dict[str, Dict[str, Any]]) -> bool:
         True when all required artifacts exist.
     """
     return all(bool(item.get("exists", False)) for item in artifact_summary.values())
+
+
+def _build_representative_root_summary(canonical_source_pool_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：生成 representative root records 的摘要视图说明。
+
+    Build the representative-root summary used by attestation post-check
+    reporting.
+
+    Args:
+        canonical_source_pool_payload: Canonical source-pool manifest payload.
+
+    Returns:
+        Summary-view metadata that is explicitly non-authoritative.
+    """
+    if not isinstance(canonical_source_pool_payload, dict):
+        raise TypeError("canonical_source_pool_payload must be dict")
+
+    representative_root_records = (
+        cast(Dict[str, Any], canonical_source_pool_payload.get("representative_root_records"))
+        if isinstance(canonical_source_pool_payload.get("representative_root_records"), dict)
+        else {}
+    )
+    return {
+        "view_role": representative_root_records.get("view_role"),
+        "source_prompt_index": representative_root_records.get("source_prompt_index"),
+        "source_prompt_sha256": representative_root_records.get("source_prompt_sha256"),
+        "source_entry_package_relative_path": representative_root_records.get("source_entry_package_relative_path"),
+        "root_embed_record_package_relative_path": representative_root_records.get(
+            "root_embed_record_package_relative_path"
+        ),
+        "root_detect_record_package_relative_path": representative_root_records.get(
+            "root_detect_record_package_relative_path"
+        ),
+        "resolution_role": "representative_summary_view_only",
+        "resolution_authority": "canonical_source_entries",
+    }
+
+
+def _resolve_required_canonical_artifact_check(
+    *,
+    run_root: Path,
+    artifact_key: str,
+    artifact_view: Any,
+) -> Dict[str, Any]:
+    """
+    功能：核查 canonical source entry 中单个必需证据节点。
+
+    Validate one required attestation-evidence node inside a canonical source
+    entry.
+
+    Args:
+        run_root: Stage-01 run root.
+        artifact_key: Required artifact key name.
+        artifact_view: Artifact-view payload from the canonical source entry.
+
+    Returns:
+        Structured check result with path resolution and missing reasons.
+    """
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if artifact_key not in REQUIRED_ATTESTATION_EVIDENCE_KEYS:
+        raise ValueError(f"unsupported artifact_key: {artifact_key}")
+
+    exists_flag: Any = None
+    path_value: Optional[str] = None
+    package_relative_path: Optional[str] = None
+    resolved_package_path: Optional[str] = None
+    path_exists = False
+    package_relative_path_exists = False
+    missing_reasons: List[str] = []
+
+    if not isinstance(artifact_view, dict):
+        missing_reasons.append(f"{artifact_key}_node_missing")
+    else:
+        exists_flag = artifact_view.get("exists")
+        if exists_flag is not True:
+            missing_reasons.append(f"{artifact_key}.exists_not_true")
+
+        raw_path_value = artifact_view.get("path")
+        if not isinstance(raw_path_value, str) or not raw_path_value:
+            missing_reasons.append(f"{artifact_key}.path_missing")
+        else:
+            path_obj = Path(raw_path_value.strip()).expanduser()
+            if not path_obj.is_absolute():
+                path_obj = (REPO_ROOT / path_obj).resolve()
+            else:
+                path_obj = path_obj.resolve()
+            path_value = normalize_path_value(path_obj)
+            path_exists = bool(path_obj.exists() and path_obj.is_file())
+            if not path_exists:
+                missing_reasons.append(f"{artifact_key}.path_not_found")
+
+        raw_package_relative_path = artifact_view.get("package_relative_path")
+        if not isinstance(raw_package_relative_path, str) or not raw_package_relative_path:
+            missing_reasons.append(f"{artifact_key}.package_relative_path_missing")
+        else:
+            package_relative_path = raw_package_relative_path
+            package_path_obj = run_root / package_relative_path
+            resolved_package_path = normalize_path_value(package_path_obj)
+            package_relative_path_exists = bool(package_path_obj.exists() and package_path_obj.is_file())
+            if not package_relative_path_exists:
+                missing_reasons.append(f"{artifact_key}.package_relative_path_not_found")
+
+    return {
+        "artifact_key": artifact_key,
+        "required": True,
+        "status": "ok" if not missing_reasons else "missing",
+        "exists_flag": exists_flag,
+        "path": path_value,
+        "path_exists": path_exists,
+        "package_relative_path": package_relative_path,
+        "resolved_package_path": resolved_package_path,
+        "package_relative_path_exists": package_relative_path_exists,
+        "missing_reasons": missing_reasons,
+    }
+
+
+def _resolve_stage_01_attestation_evidence(
+    *,
+    run_root: Path,
+    canonical_source_pool_payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    功能：以 canonical source entries 为权威执行正式 attestation 后置核验。
+
+    Resolve the formal attestation-evidence post-check using canonical source
+    entries as the authoritative source.
+
+    Args:
+        run_root: Stage-01 run root.
+        canonical_source_pool_payload: Canonical source-pool manifest payload.
+
+    Returns:
+        Structured attestation-evidence resolution summary.
+    """
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(canonical_source_pool_payload, dict):
+        raise TypeError("canonical_source_pool_payload must be dict")
+
+    representative_root_summary = _build_representative_root_summary(canonical_source_pool_payload)
+    manifest_entries_node = canonical_source_pool_payload.get("entries")
+    resolution: Dict[str, Any] = {
+        "resolution_basis": "canonical_source_entries",
+        "required_artifact_keys": list(REQUIRED_ATTESTATION_EVIDENCE_KEYS),
+        "overall_status": "missing_evidence",
+        "required_entry_count": 0,
+        "checked_entry_count": 0,
+        "failing_entry_count": 0,
+        "missing_evidence_count": 0,
+        "failing_prompt_indices": [],
+        "failing_source_entry_paths": [],
+        "representative_root_summary": representative_root_summary,
+        "summary_reason": "canonical_source_pool_entries_missing",
+        "failure_reason": "failed_attestation_evidence",
+        "failing_entries": [],
+    }
+    if not isinstance(manifest_entries_node, list) or len(manifest_entries_node) <= 0:
+        return resolution
+
+    manifest_entries = cast(List[Any], manifest_entries_node)
+    resolution["required_entry_count"] = len(manifest_entries)
+    failing_entries: List[Dict[str, Any]] = []
+
+    for manifest_entry in manifest_entries:
+        resolution["checked_entry_count"] = int(resolution["checked_entry_count"]) + 1
+        prompt_index = manifest_entry.get("prompt_index") if isinstance(manifest_entry, dict) else None
+        source_entry_package_relative_path = (
+            manifest_entry.get("source_entry_package_relative_path") if isinstance(manifest_entry, dict) else None
+        )
+        entry_resolution_issues: List[str] = []
+        source_entry_path: Optional[str] = None
+        source_entry_payload: Optional[Dict[str, Any]] = None
+
+        if not isinstance(manifest_entry, dict):
+            entry_resolution_issues.append("manifest_entry_not_object")
+        if not isinstance(source_entry_package_relative_path, str) or not source_entry_package_relative_path:
+            entry_resolution_issues.append("source_entry_package_relative_path_missing")
+        else:
+            source_entry_path_obj = run_root / source_entry_package_relative_path
+            source_entry_path = normalize_path_value(source_entry_path_obj)
+            if not source_entry_path_obj.exists() or not source_entry_path_obj.is_file():
+                entry_resolution_issues.append("source_entry_file_not_found")
+            else:
+                source_entry_payload = _load_json_dict(source_entry_path_obj, "canonical source entry")
+
+        artifact_checks = [
+            _resolve_required_canonical_artifact_check(
+                run_root=run_root,
+                artifact_key=artifact_key,
+                artifact_view=(
+                    source_entry_payload.get(artifact_key)
+                    if isinstance(source_entry_payload, dict)
+                    else None
+                ),
+            )
+            for artifact_key in REQUIRED_ATTESTATION_EVIDENCE_KEYS
+        ]
+        missing_artifact_keys = [
+            artifact_check["artifact_key"]
+            for artifact_check in artifact_checks
+            if artifact_check["status"] != "ok"
+        ]
+        resolution["missing_evidence_count"] = int(resolution["missing_evidence_count"]) + len(missing_artifact_keys)
+
+        if entry_resolution_issues or missing_artifact_keys:
+            failing_entries.append(
+                {
+                    "prompt_index": prompt_index,
+                    "source_entry_package_relative_path": source_entry_package_relative_path,
+                    "source_entry_path": source_entry_path,
+                    "status": "missing_evidence",
+                    "entry_resolution_issues": entry_resolution_issues,
+                    "missing_artifact_keys": missing_artifact_keys,
+                    "artifact_checks": artifact_checks,
+                }
+            )
+
+    resolution["failing_entries"] = failing_entries
+    resolution["failing_entry_count"] = len(failing_entries)
+    resolution["failing_prompt_indices"] = [
+        failing_entry["prompt_index"]
+        for failing_entry in failing_entries
+        if isinstance(failing_entry.get("prompt_index"), int)
+    ]
+    resolution["failing_source_entry_paths"] = [
+        cast(str, failing_entry.get("source_entry_path") or failing_entry.get("source_entry_package_relative_path"))
+        for failing_entry in failing_entries
+        if isinstance(failing_entry.get("source_entry_path") or failing_entry.get("source_entry_package_relative_path"), str)
+    ]
+    if not failing_entries:
+        resolution["overall_status"] = "ok"
+        resolution["summary_reason"] = "ok"
+        resolution["failure_reason"] = None
+        return resolution
+
+    resolution["overall_status"] = "missing_evidence"
+    resolution["summary_reason"] = "missing_required_canonical_attestation_evidence"
+    resolution["failure_reason"] = "failed_attestation_evidence"
+    return resolution
 
 
 def _load_json_dict(path_obj: Path, label: str) -> Dict[str, Any]:
@@ -1744,13 +1990,32 @@ def run_paper_full_cuda(config_path: Path, run_root: Path, stage_run_id: Optiona
         "pooled_stage_results": pooled_stage_results,
         "required_artifacts": {},
         "required_artifacts_ok": False,
+        "attestation_evidence_resolution": {},
+        "attestation_evidence_ok": False,
+        "summary_reason": "pending_post_checks",
+        "failure_reason": None,
     }
     write_json_atomic(workflow_summary_path, workflow_summary)
 
     artifact_summary = _artifact_presence(_required_artifacts(run_root))
+    attestation_evidence_resolution = _resolve_stage_01_attestation_evidence(
+        run_root=run_root,
+        canonical_source_pool_payload=canonical_source_pool_payload,
+    )
     workflow_summary["required_artifacts"] = artifact_summary
     workflow_summary["required_artifacts_ok"] = _all_required_present(artifact_summary)
-    workflow_summary["status"] = "ok" if workflow_summary["required_artifacts_ok"] else "failed"
+    workflow_summary["attestation_evidence_resolution"] = attestation_evidence_resolution
+    workflow_summary["attestation_evidence_ok"] = attestation_evidence_resolution["overall_status"] == "ok"
+
+    failure_reasons: List[str] = []
+    if not workflow_summary["required_artifacts_ok"]:
+        failure_reasons.append("required_artifacts_missing")
+    if not workflow_summary["attestation_evidence_ok"]:
+        failure_reasons.append(cast(str, attestation_evidence_resolution.get("failure_reason") or "failed_attestation_evidence"))
+
+    workflow_summary["summary_reason"] = "ok" if not failure_reasons else "+".join(failure_reasons)
+    workflow_summary["failure_reason"] = None if not failure_reasons else "+".join(failure_reasons)
+    workflow_summary["status"] = "ok" if not failure_reasons else "failed"
     write_json_atomic(workflow_summary_path, workflow_summary)
     return 0 if workflow_summary["status"] == "ok" else 1
 

@@ -14,7 +14,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, cast
 
 from scripts.notebook_runtime_common import (
     REPO_ROOT,
@@ -82,6 +82,80 @@ def _required_stage_outputs(run_root: Path) -> Dict[str, Path]:
         "stage_01_pooled_threshold_build_contract": run_root / STAGE_01_POOLED_THRESHOLD_BUILD_CONTRACT_RELATIVE_PATH,
         "run_closure": run_root / "artifacts" / "run_closure.json",
         "workflow_summary": run_root / "artifacts" / "workflow_summary.json",
+    }
+
+
+def _resolve_attestation_evidence_manifest_fields(
+    workflow_summary_payload: Dict[str, Any],
+    canonical_source_pool_payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    功能：为 stage_manifest 解析 attestation evidence 摘要字段。
+
+    Resolve stage-manifest fields derived from the mainline attestation
+    post-check summary.
+
+    Args:
+        workflow_summary_payload: Mainline workflow summary payload.
+        canonical_source_pool_payload: Canonical source-pool manifest payload.
+
+    Returns:
+        Stage-manifest fields with legacy fallback semantics.
+    """
+    if not isinstance(workflow_summary_payload, dict):
+        raise TypeError("workflow_summary_payload must be dict")
+    if not isinstance(canonical_source_pool_payload, dict):
+        raise TypeError("canonical_source_pool_payload must be dict")
+
+    representative_root_records = (
+        cast(Dict[str, Any], canonical_source_pool_payload.get("representative_root_records"))
+        if isinstance(canonical_source_pool_payload.get("representative_root_records"), dict)
+        else {}
+    )
+    attestation_resolution = workflow_summary_payload.get("attestation_evidence_resolution")
+    if not isinstance(attestation_resolution, dict):
+        return {
+            "attestation_evidence_status": "legacy_unavailable",
+            "attestation_evidence_required_entry_count": canonical_source_pool_payload.get("entry_count"),
+            "attestation_evidence_checked_entry_count": 0,
+            "attestation_evidence_missing_count": 0,
+            "attestation_evidence_failing_prompt_indices": [],
+            "attestation_evidence_failing_source_entry_paths": [],
+            "attestation_evidence_summary_reason": "workflow_summary_attestation_resolution_missing",
+            "attestation_evidence_failure_reason": None,
+            "attestation_evidence_representative_root_summary": {
+                "view_role": representative_root_records.get("view_role"),
+                "source_prompt_index": representative_root_records.get("source_prompt_index"),
+                "source_entry_package_relative_path": representative_root_records.get(
+                    "source_entry_package_relative_path"
+                ),
+                "resolution_role": "representative_summary_view_only",
+            },
+        }
+
+    return {
+        "attestation_evidence_status": attestation_resolution.get("overall_status"),
+        "attestation_evidence_required_entry_count": attestation_resolution.get("required_entry_count"),
+        "attestation_evidence_checked_entry_count": attestation_resolution.get("checked_entry_count"),
+        "attestation_evidence_missing_count": attestation_resolution.get("missing_evidence_count"),
+        "attestation_evidence_failing_prompt_indices": attestation_resolution.get("failing_prompt_indices", []),
+        "attestation_evidence_failing_source_entry_paths": attestation_resolution.get(
+            "failing_source_entry_paths",
+            [],
+        ),
+        "attestation_evidence_summary_reason": attestation_resolution.get("summary_reason"),
+        "attestation_evidence_failure_reason": attestation_resolution.get("failure_reason"),
+        "attestation_evidence_representative_root_summary": attestation_resolution.get(
+            "representative_root_summary",
+            {
+                "view_role": representative_root_records.get("view_role"),
+                "source_prompt_index": representative_root_records.get("source_prompt_index"),
+                "source_entry_package_relative_path": representative_root_records.get(
+                    "source_entry_package_relative_path"
+                ),
+                "resolution_role": "representative_summary_view_only",
+            },
+        ),
     }
 
 
@@ -337,9 +411,17 @@ def run_stage_01(
         pooled_threshold_build_contract_path,
         "stage 01 pooled threshold build contract",
     )
+    workflow_summary_payload = _load_json_object(
+        outputs["workflow_summary"],
+        "stage 01 workflow summary",
+    )
     representative_root_records = canonical_source_pool_payload.get("representative_root_records", {})
     if not isinstance(representative_root_records, dict):
         representative_root_records = {}
+    attestation_evidence_fields = _resolve_attestation_evidence_manifest_fields(
+        workflow_summary_payload,
+        canonical_source_pool_payload,
+    )
 
     stage_manifest_path = run_root / "artifacts" / "stage_manifest.json"
     stage_manifest: Dict[str, Any] = {
@@ -412,6 +494,9 @@ def run_stage_01(
         "evaluation_report_path": normalize_path_value(outputs["evaluation_report"]),
         "run_closure_path": normalize_path_value(outputs["run_closure"]),
         "workflow_summary_path": normalize_path_value(outputs["workflow_summary"]),
+        "workflow_summary_status": workflow_summary_payload.get("status"),
+        "workflow_summary_summary_reason": workflow_summary_payload.get("summary_reason"),
+        "workflow_summary_failure_reason": workflow_summary_payload.get("failure_reason"),
         "prompt_file_path": prompt_snapshot.get("source_path"),
         "prompt_snapshot": prompt_snapshot,
         "notebook_name": notebook_name,
@@ -424,6 +509,7 @@ def run_stage_01(
         "created_at": utc_now_iso(),
         "runner_result": runner_result,
     }
+    stage_manifest.update(attestation_evidence_fields)
     write_json_atomic(stage_manifest_path, stage_manifest)
 
     package_root = _package_stage_outputs(

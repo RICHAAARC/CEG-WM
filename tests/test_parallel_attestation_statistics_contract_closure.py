@@ -563,6 +563,141 @@ def _make_stage_01_pooled_threshold_contract(run_root: Path, prompt_count: int) 
     }
 
 
+def _prepare_stage_01_mainline_config_monkeypatches(
+    monkeypatch: pytest.MonkeyPatch,
+    runner: Any,
+    *,
+    prompt_count: int,
+) -> None:
+    """
+    功能：统一设置 stage 01 mainline 测试配置 monkeypatch。
+
+    Apply the common stage-01 mainline configuration monkeypatches used by the
+    attestation post-check tests.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        runner: Loaded stage-01 mainline module.
+        prompt_count: Number of prompt-pool entries.
+
+    Returns:
+        None.
+    """
+    prompt_pool = [f"prompt {prompt_index}" for prompt_index in range(prompt_count)]
+    monkeypatch.setattr(
+        runner,
+        "load_yaml_mapping",
+        lambda _path: {
+            "policy_path": "content_np_geo_rescue",
+            "attestation": {"enabled": True},
+            "embed": {
+                "preview_generation": {
+                    "enabled": True,
+                    "artifact_rel_path": "preview/preview.png",
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(
+        runner,
+        "_resolve_stage_01_source_pool_cfg",
+        lambda _cfg: {
+            "enabled": True,
+            "use_inference_prompt_file": True,
+            "target_prompt_count": prompt_count,
+            "record_usage": "stage_01_direct_source_pool",
+        },
+    )
+    monkeypatch.setattr(
+        runner,
+        "_resolve_stage_01_pooled_threshold_build_cfg",
+        lambda _cfg: {
+            "enabled": True,
+            "build_mode": "source_plus_derived_pairs",
+            "target_pair_count": prompt_count,
+            "build_usage": "stage_01_pooled_thresholds",
+            "record_derivation_kind": "prompt_bound_label_balance",
+        },
+    )
+    monkeypatch.setattr(
+        runner,
+        "_resolve_stage_01_prompt_pool",
+        lambda _cfg: (prompt_pool, "prompts/paper_small.txt"),
+    )
+
+
+def _make_stage_01_mainline_run_stage(run_root: Path, attestation_prompt_indices: list[int]) -> Any:
+    """
+    功能：构造 stage 01 mainline 测试用的假 stage 执行器。
+
+    Build the fake stage executor used by stage-01 mainline tests.
+
+    Args:
+        run_root: Stage-01 run root.
+        attestation_prompt_indices: Prompt indices that emit attestation files.
+
+    Returns:
+        Callable-compatible fake _run_stage implementation.
+    """
+    attestation_index_set = set(attestation_prompt_indices)
+
+    def _fake_run_stage(stage_name: str, _command: Any, stage_run_root: Path) -> Dict[str, Any]:
+        if stage_name == "embed":
+            prompt_index = int(stage_run_root.name.split("_")[-1])
+            _write_json(stage_run_root / "records" / "embed_record.json", {"status": "ok"})
+            if prompt_index == 0:
+                _write_bytes(stage_run_root / "artifacts" / "preview" / "preview.png", b"preview")
+        elif stage_name == "detect":
+            prompt_index = int(stage_run_root.name.split("_")[-1])
+            _write_json(
+                stage_run_root / "records" / "detect_record.json",
+                {
+                    "label": True,
+                    "ground_truth": True,
+                    "is_watermarked": True,
+                    "content_evidence_payload": {
+                        "status": "ok",
+                        "content_chain_score": 0.9 - prompt_index * 1e-3,
+                    },
+                    "attestation": {
+                        "final_event_attested_decision": {
+                            "event_attestation_score": 0.95 - prompt_index * 1e-3,
+                            "event_attestation_score_name": "event_attestation_score",
+                            "is_event_attested": True,
+                        }
+                    },
+                },
+            )
+            if prompt_index in attestation_index_set:
+                _write_json(stage_run_root / "artifacts" / "attestation" / "attestation_statement.json", {"status": "ok"})
+                _write_json(stage_run_root / "artifacts" / "attestation" / "attestation_bundle.json", {"status": "ok"})
+                _write_json(
+                    stage_run_root / "artifacts" / "attestation" / "attestation_result.json",
+                    {
+                        "status": "ok",
+                        "final_event_attested_decision": {
+                            "event_attestation_score": 0.95 - prompt_index * 1e-3,
+                        },
+                    },
+                )
+        elif stage_name == "calibrate":
+            _write_json(run_root / "records" / "calibration_record.json", {"status": "ok"})
+            _write_json(run_root / "artifacts" / "thresholds" / "thresholds_artifact.json", {"threshold": 0.5})
+            _write_json(
+                run_root / "artifacts" / "thresholds" / "threshold_metadata_artifact.json",
+                {"meta": True},
+            )
+        elif stage_name == "evaluate":
+            _write_json(run_root / "records" / "evaluate_record.json", {"status": "ok"})
+            _write_json(run_root / "artifacts" / "evaluation_report.json", {"status": "ok"})
+            _write_json(run_root / "artifacts" / "run_closure.json", {"status": "ok"})
+        else:
+            raise AssertionError(f"unexpected stage_name: {stage_name}")
+        return {"return_code": 0, "stage_name": stage_name}
+
+    return _fake_run_stage
+
+
 def _prepare_stage_02_monkeypatches(
     monkeypatch: pytest.MonkeyPatch,
     stage_02: Any,
@@ -797,6 +932,14 @@ def test_stage_01_writes_source_contract_even_when_direct_stats_not_ready(tmp_pa
     assert stage_manifest["stage_01_pooled_threshold_derived_record_count"] == 16
     assert stage_manifest["stage_01_pooled_threshold_final_record_count"] == 32
     assert stage_manifest["stage_01_pooled_threshold_final_label_balanced"] is True
+    assert stage_manifest["attestation_evidence_status"] == "legacy_unavailable"
+    assert stage_manifest["attestation_evidence_required_entry_count"] == 16
+    assert stage_manifest["attestation_evidence_checked_entry_count"] == 0
+    assert stage_manifest["attestation_evidence_missing_count"] == 0
+    assert stage_manifest["attestation_evidence_summary_reason"] == "workflow_summary_attestation_resolution_missing"
+    assert stage_manifest["attestation_evidence_representative_root_summary"]["resolution_role"] == (
+        "representative_summary_view_only"
+    )
     assert (runtime_state_root / "package_staging" / "artifacts" / "parallel_attestation_statistics_input_contract.json").exists()
     assert (runtime_state_root / "package_staging" / CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH).exists()
     assert (
@@ -1067,102 +1210,8 @@ def test_stage_01_mainline_promotes_canonical_source_pool_and_keeps_compatibilit
     config_path.write_text("policy_path: content_np_geo_rescue\n", encoding="utf-8")
     run_root = tmp_path / "run_root"
 
-    monkeypatch.setattr(
-        runner,
-        "load_yaml_mapping",
-        lambda _path: {
-            "policy_path": "content_np_geo_rescue",
-            "attestation": {"enabled": True},
-            "embed": {
-                "preview_generation": {
-                    "enabled": True,
-                    "artifact_rel_path": "preview/preview.png",
-                }
-            },
-        },
-    )
-    monkeypatch.setattr(
-        runner,
-        "_resolve_stage_01_source_pool_cfg",
-        lambda _cfg: {
-            "enabled": True,
-            "use_inference_prompt_file": True,
-            "target_prompt_count": 2,
-            "record_usage": "stage_01_direct_source_pool",
-        },
-    )
-    monkeypatch.setattr(
-        runner,
-        "_resolve_stage_01_pooled_threshold_build_cfg",
-        lambda _cfg: {
-            "enabled": True,
-            "build_mode": "source_plus_derived_pairs",
-            "target_pair_count": 2,
-            "build_usage": "stage_01_pooled_thresholds",
-            "record_derivation_kind": "prompt_bound_label_balance",
-        },
-    )
-    monkeypatch.setattr(
-        runner,
-        "_resolve_stage_01_prompt_pool",
-        lambda _cfg: (["prompt 0", "prompt 1"], "prompts/paper_small.txt"),
-    )
-
-    def _fake_run_stage(stage_name: str, _command: Any, stage_run_root: Path) -> Dict[str, Any]:
-        if stage_name == "embed":
-            prompt_index = int(stage_run_root.name.split("_")[-1])
-            _write_json(stage_run_root / "records" / "embed_record.json", {"status": "ok"})
-            if prompt_index == 0:
-                _write_bytes(stage_run_root / "artifacts" / "preview" / "preview.png", b"preview")
-        elif stage_name == "detect":
-            prompt_index = int(stage_run_root.name.split("_")[-1])
-            _write_json(
-                stage_run_root / "records" / "detect_record.json",
-                {
-                    "label": True,
-                    "ground_truth": True,
-                    "is_watermarked": True,
-                    "content_evidence_payload": {
-                        "status": "ok",
-                        "content_chain_score": 0.9 - prompt_index * 1e-3,
-                    },
-                    "attestation": {
-                        "final_event_attested_decision": {
-                            "event_attestation_score": 0.95 - prompt_index * 1e-3,
-                            "event_attestation_score_name": "event_attestation_score",
-                            "is_event_attested": True,
-                        }
-                    },
-                },
-            )
-            if prompt_index == 0:
-                _write_json(stage_run_root / "artifacts" / "attestation" / "attestation_statement.json", {"status": "ok"})
-                _write_json(stage_run_root / "artifacts" / "attestation" / "attestation_bundle.json", {"status": "ok"})
-                _write_json(
-                    stage_run_root / "artifacts" / "attestation" / "attestation_result.json",
-                    {
-                        "status": "ok",
-                        "final_event_attested_decision": {
-                            "event_attestation_score": 0.95 - prompt_index * 1e-3,
-                        },
-                    },
-                )
-        elif stage_name == "calibrate":
-            _write_json(run_root / "records" / "calibration_record.json", {"status": "ok"})
-            _write_json(run_root / "artifacts" / "thresholds" / "thresholds_artifact.json", {"threshold": 0.5})
-            _write_json(
-                run_root / "artifacts" / "thresholds" / "threshold_metadata_artifact.json",
-                {"meta": True},
-            )
-        elif stage_name == "evaluate":
-            _write_json(run_root / "records" / "evaluate_record.json", {"status": "ok"})
-            _write_json(run_root / "artifacts" / "evaluation_report.json", {"status": "ok"})
-            _write_json(run_root / "artifacts" / "run_closure.json", {"status": "ok"})
-        else:
-            raise AssertionError(f"unexpected stage_name: {stage_name}")
-        return {"return_code": 0, "stage_name": stage_name}
-
-    monkeypatch.setattr(runner, "_run_stage", _fake_run_stage)
+    _prepare_stage_01_mainline_config_monkeypatches(monkeypatch, runner, prompt_count=2)
+    monkeypatch.setattr(runner, "_run_stage", _make_stage_01_mainline_run_stage(run_root, [0, 1]))
 
     exit_code = runner.run_paper_full_cuda(config_path, run_root, stage_run_id="stage01_success")
 
@@ -1195,12 +1244,163 @@ def test_stage_01_mainline_promotes_canonical_source_pool_and_keeps_compatibilit
     assert canonical_entry_0["attestation_bundle"]["exists"] is True
     assert canonical_entry_0["attestation_result"]["exists"] is True
     assert canonical_entry_0["source_image"]["exists"] is True
-    assert canonical_entry_1["attestation_statement"]["exists"] is False
-    assert canonical_entry_1["attestation_statement"]["missing_reason"] == "attestation_statement_not_emitted"
+    assert canonical_entry_1["attestation_statement"]["exists"] is True
+    assert canonical_entry_1["attestation_bundle"]["exists"] is True
+    assert canonical_entry_1["attestation_result"]["exists"] is True
     assert canonical_entry_1["source_image"]["exists"] is False
     assert canonical_entry_1["source_image"]["missing_reason"] == "source_image_not_emitted"
+    assert workflow_summary["status"] == "ok"
+    assert workflow_summary["required_artifacts_ok"] is True
+    assert workflow_summary["attestation_evidence_ok"] is True
+    assert workflow_summary["summary_reason"] == "ok"
+    assert workflow_summary["failure_reason"] is None
     assert workflow_summary["canonical_source_pool_entry_count"] == 2
     assert workflow_summary["representative_root_records"]["view_role"] == "representative_summary_view"
+    assert workflow_summary["attestation_evidence_resolution"]["overall_status"] == "ok"
+    assert workflow_summary["attestation_evidence_resolution"]["required_entry_count"] == 2
+    assert workflow_summary["attestation_evidence_resolution"]["checked_entry_count"] == 2
+    assert workflow_summary["attestation_evidence_resolution"]["missing_evidence_count"] == 0
+    assert workflow_summary["attestation_evidence_resolution"]["failing_prompt_indices"] == []
+    assert workflow_summary["attestation_evidence_resolution"]["failing_source_entry_paths"] == []
+    assert workflow_summary["attestation_evidence_resolution"]["representative_root_summary"]["resolution_role"] == (
+        "representative_summary_view_only"
+    )
+
+
+def test_stage_01_mainline_fails_when_required_canonical_attestation_exists_flag_is_false(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：验证 canonical source entry 若将必需证据标成 exists=false，stage 01 必须失败。
+
+    Verify stage-01 success is blocked when a canonical source entry marks one
+    required attestation artifact as exists=false.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    runner = _load_script_module("scripts/01_run_paper_full_cuda.py", "stage_01_attestation_exists_false")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("policy_path: content_np_geo_rescue\n", encoding="utf-8")
+    run_root = tmp_path / "run_root"
+
+    _prepare_stage_01_mainline_config_monkeypatches(monkeypatch, runner, prompt_count=2)
+    monkeypatch.setattr(runner, "_run_stage", _make_stage_01_mainline_run_stage(run_root, [0, 1]))
+
+    original_build = runner._build_stage_01_canonical_source_pool
+
+    def _tamper_canonical_source_pool(**kwargs: Any) -> Dict[str, Any]:
+        manifest_payload = original_build(**kwargs)
+        entry_path = run_root / CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT / "001_source_entry.json"
+        entry_payload = json.loads(entry_path.read_text(encoding="utf-8"))
+        tampered_bundle = dict(entry_payload["attestation_bundle"])
+        tampered_bundle["exists"] = False
+        entry_payload["attestation_bundle"] = tampered_bundle
+        _write_json(entry_path, entry_payload)
+        manifest_payload["entries"][1]["attestation_bundle"] = tampered_bundle
+        _write_json(run_root / CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH, manifest_payload)
+        return manifest_payload
+
+    monkeypatch.setattr(runner, "_build_stage_01_canonical_source_pool", _tamper_canonical_source_pool)
+
+    exit_code = runner.run_paper_full_cuda(config_path, run_root, stage_run_id="stage01_exists_false")
+    workflow_summary = json.loads((run_root / "artifacts" / "workflow_summary.json").read_text(encoding="utf-8"))
+    attestation_resolution = workflow_summary["attestation_evidence_resolution"]
+    bundle_check = next(
+        artifact_check
+        for artifact_check in attestation_resolution["failing_entries"][0]["artifact_checks"]
+        if artifact_check["artifact_key"] == "attestation_bundle"
+    )
+
+    assert exit_code == 1
+    assert workflow_summary["status"] == "failed"
+    assert workflow_summary["required_artifacts_ok"] is True
+    assert workflow_summary["attestation_evidence_ok"] is False
+    assert workflow_summary["summary_reason"] == "failed_attestation_evidence"
+    assert workflow_summary["failure_reason"] == "failed_attestation_evidence"
+    assert attestation_resolution["overall_status"] == "missing_evidence"
+    assert attestation_resolution["required_entry_count"] == 2
+    assert attestation_resolution["checked_entry_count"] == 2
+    assert attestation_resolution["missing_evidence_count"] == 1
+    assert attestation_resolution["failing_prompt_indices"] == [1]
+    assert attestation_resolution["failing_entries"][0]["missing_artifact_keys"] == ["attestation_bundle"]
+    assert "attestation_bundle.exists_not_true" in bundle_check["missing_reasons"]
+
+
+def test_stage_01_mainline_representative_root_cannot_mask_non_root_attestation_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：验证 representative root 仅是摘要视图，不能掩盖其他 canonical entry 的证据缺失。
+
+    Verify representative-root records remain a summary view and cannot mask a
+    missing attestation artifact in another canonical source entry.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    runner = _load_script_module("scripts/01_run_paper_full_cuda.py", "stage_01_representative_root_masking")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("policy_path: content_np_geo_rescue\n", encoding="utf-8")
+    run_root = tmp_path / "run_root"
+
+    _prepare_stage_01_mainline_config_monkeypatches(monkeypatch, runner, prompt_count=2)
+    monkeypatch.setattr(runner, "_run_stage", _make_stage_01_mainline_run_stage(run_root, [0, 1]))
+
+    original_build = runner._build_stage_01_canonical_source_pool
+    missing_package_relative_path = (
+        f"{CANONICAL_SOURCE_POOL_ATTESTATION_RELATIVE_ROOT}/prompt_001/attestation_result_missing.json"
+    )
+
+    def _tamper_canonical_source_pool(**kwargs: Any) -> Dict[str, Any]:
+        manifest_payload = original_build(**kwargs)
+        entry_path = run_root / CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT / "001_source_entry.json"
+        entry_payload = json.loads(entry_path.read_text(encoding="utf-8"))
+        tampered_result = dict(entry_payload["attestation_result"])
+        tampered_result["package_relative_path"] = missing_package_relative_path
+        entry_payload["attestation_result"] = tampered_result
+        _write_json(entry_path, entry_payload)
+        manifest_payload["entries"][1]["attestation_result"] = tampered_result
+        _write_json(run_root / CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH, manifest_payload)
+        return manifest_payload
+
+    monkeypatch.setattr(runner, "_build_stage_01_canonical_source_pool", _tamper_canonical_source_pool)
+
+    exit_code = runner.run_paper_full_cuda(config_path, run_root, stage_run_id="stage01_rep_root_mask")
+    workflow_summary = json.loads((run_root / "artifacts" / "workflow_summary.json").read_text(encoding="utf-8"))
+    attestation_resolution = workflow_summary["attestation_evidence_resolution"]
+    result_check = next(
+        artifact_check
+        for artifact_check in attestation_resolution["failing_entries"][0]["artifact_checks"]
+        if artifact_check["artifact_key"] == "attestation_result"
+    )
+
+    assert exit_code == 1
+    assert workflow_summary["status"] == "failed"
+    assert workflow_summary["required_artifacts_ok"] is True
+    assert workflow_summary["failure_reason"] == "failed_attestation_evidence"
+    assert workflow_summary["representative_root_records"]["source_prompt_index"] == 0
+    assert attestation_resolution["representative_root_summary"]["source_prompt_index"] == 0
+    assert attestation_resolution["representative_root_summary"]["resolution_role"] == (
+        "representative_summary_view_only"
+    )
+    assert attestation_resolution["failing_prompt_indices"] == [1]
+    assert attestation_resolution["failing_source_entry_paths"] == [
+        (run_root / CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT / "001_source_entry.json").resolve().as_posix()
+    ]
+    assert attestation_resolution["missing_evidence_count"] == 1
+    assert attestation_resolution["failing_entries"][0]["missing_artifact_keys"] == ["attestation_result"]
+    assert "attestation_result.package_relative_path_not_found" in result_check["missing_reasons"]
 
 
 def test_stage_02_direct_only_build_uses_source_records_and_writes_build_contract(
