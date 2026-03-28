@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict
@@ -18,6 +19,14 @@ from main.cli import run_calibrate as run_calibrate_cli
 from main.cli import run_evaluate as run_evaluate_cli
 from main.evaluation import metrics as eval_metrics
 from main.watermarking.detect import orchestrator as detect_orchestrator
+from scripts.notebook_runtime_common import (
+    build_failure_diagnostics_filename,
+    compute_file_sha256,
+    discover_stage_packages,
+    finalize_stage_package,
+    prepare_source_package,
+    resolve_export_package_manifest_path,
+)
 
 
 CANONICAL_SOURCE_POOL_RELATIVE_ROOT = "artifacts/stage_01_canonical_source_pool"
@@ -82,6 +91,118 @@ def _write_bytes(path_obj: Path, payload: bytes) -> None:
     """
     path_obj.parent.mkdir(parents=True, exist_ok=True)
     path_obj.write_bytes(payload)
+
+
+def _strip_discovery_metadata_from_formal_package(package_path: Path, external_manifest_path: Path) -> None:
+    """
+    功能：把 formal package 改写为 legacy manifest 形态。 
+
+    Rewrite a formal package so its manifests omit the new discovery metadata,
+    simulating a legacy package.
+
+    Args:
+        package_path: Formal package ZIP path.
+        external_manifest_path: External manifest path discovered beside the ZIP.
+
+    Returns:
+        None.
+    """
+    external_manifest = json.loads(external_manifest_path.read_text(encoding="utf-8"))
+    external_manifest.pop("package_role", None)
+    external_manifest.pop("package_discovery_scope", None)
+    _write_json(external_manifest_path, external_manifest)
+
+    with zipfile.ZipFile(package_path, "r") as archive:
+        archived_entries = {name: archive.read(name) for name in archive.namelist()}
+
+    internal_manifest = json.loads(archived_entries["artifacts/package_manifest.json"].decode("utf-8"))
+    internal_manifest.pop("package_role", None)
+    internal_manifest.pop("package_discovery_scope", None)
+    archived_entries["artifacts/package_manifest.json"] = json.dumps(
+        internal_manifest,
+        ensure_ascii=False,
+        indent=2,
+    ).encode("utf-8")
+
+    with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, content in archived_entries.items():
+            archive.writestr(name, content)
+
+
+def _create_failure_diagnostics_package(export_stage_root: Path, stage_run_id: str) -> Path:
+    """
+    功能：构造一个最小 failure diagnostics ZIP。 
+
+    Create a minimal failure-diagnostics ZIP with an excluded external manifest.
+
+    Args:
+        export_stage_root: Stage export root used by discover_stage_packages.
+        stage_run_id: Diagnostics stage run identifier.
+
+    Returns:
+        Diagnostics package ZIP path.
+    """
+    diagnostics_dir = export_stage_root / stage_run_id
+    diagnostics_dir.mkdir(parents=True, exist_ok=True)
+    package_path = diagnostics_dir / build_failure_diagnostics_filename("01_Paper_Full_Cuda", stage_run_id)
+    with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "failure_diagnostics_summary.json",
+            json.dumps(
+                {
+                    "stage_name": "01_Paper_Full_Cuda",
+                    "stage_run_id": stage_run_id,
+                    "stage_status": "failed",
+                    "failure_reason": "stage_01_mainline_failed",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+        archive.writestr(
+            "failure_diagnostics_index.json",
+            json.dumps({"files": []}, ensure_ascii=False, indent=2),
+        )
+        archive.writestr(
+            "failure_diagnostics_manifest.json",
+            json.dumps(
+                {
+                    "artifact_type": "failure_diagnostics_manifest",
+                    "stage_name": "01_Paper_Full_Cuda",
+                    "stage_run_id": stage_run_id,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+        archive.writestr(
+            "artifacts/stage_manifest.json",
+            json.dumps(
+                {
+                    "stage_name": "01_Paper_Full_Cuda",
+                    "stage_run_id": stage_run_id,
+                    "stage_status": "failed",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+
+    external_manifest_path = resolve_export_package_manifest_path(package_path.parent)
+    _write_json(
+        external_manifest_path,
+        {
+            "stage_name": "01_Paper_Full_Cuda",
+            "stage_run_id": stage_run_id,
+            "package_filename": package_path.name,
+            "package_path": package_path.as_posix(),
+            "package_sha256": compute_file_sha256(package_path),
+            "package_role": "failure_diagnostics_package",
+            "package_discovery_scope": "excluded_from_formal_discovery",
+            "package_created_at": "2025-01-01T00:00:00+00:00",
+        },
+    )
+    return package_path
 
 
 def _normalize_path_string(path_obj: Path) -> str:
@@ -940,8 +1061,24 @@ def test_stage_01_writes_source_contract_even_when_direct_stats_not_ready(tmp_pa
     assert stage_manifest["attestation_evidence_representative_root_summary"]["resolution_role"] == (
         "representative_summary_view_only"
     )
+    assert stage_manifest["formal_package_status"] == "generated"
+    assert stage_manifest["formal_package_role"] == "formal_stage_package"
+    assert stage_manifest["formal_package_discovery_scope"] == "discoverable_formal_only"
+    assert stage_manifest["diagnostics_status"] == "not_generated"
+    assert stage_manifest["diagnostics_generation_reason"] == "stage_completed_without_failure"
+    assert stage_manifest["diagnostics_summary_path"] == "<absent>"
+    assert stage_manifest["diagnostics_package_path"] == "<absent>"
     assert (runtime_state_root / "package_staging" / "artifacts" / "parallel_attestation_statistics_input_contract.json").exists()
     assert (runtime_state_root / "package_staging" / CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH).exists()
+
+    stage_summary = json.loads((runtime_state_root / "stage_summary.json").read_text(encoding="utf-8"))
+    assert stage_summary["status"] == "ok"
+    assert stage_summary["formal_package_status"] == "generated"
+    assert stage_summary["diagnostics_status"] == "not_generated"
+    assert stage_summary["diagnostics_generation_reason"] == "stage_completed_without_failure"
+    assert stage_summary["diagnostics_summary_path"] == "<absent>"
+    assert stage_summary["diagnostics_package_path"] == "<absent>"
+    assert stage_summary["diagnostics_manifest_path"] == "<absent>"
     assert (
         runtime_state_root / "package_staging" / CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT / "015_source_entry.json"
     ).exists()
@@ -1015,11 +1152,15 @@ def test_stage_01_runner_failure_exposes_log_tails(
     drive_root = tmp_path / "drive"
     config_path = tmp_path / "config.yaml"
     config_path.write_text("policy_path: content_np_geo_rescue\n", encoding="utf-8")
+    secret_plaintext = "TOP_SECRET_PROMPT_PAYLOAD"
 
     run_root = drive_root / "runs" / "stage_01"
     log_root = drive_root / "logs" / "stage_01"
     runtime_state_root = drive_root / "runtime_state" / "stage_01"
     export_root = drive_root / "exports" / "stage_01"
+    prompt_snapshot_path = runtime_state_root / "runtime_metadata" / "prompt_snapshot" / "prompt.txt"
+    prompt_snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    prompt_snapshot_path.write_text(secret_plaintext, encoding="utf-8")
 
     monkeypatch.setattr(
         stage_01,
@@ -1037,10 +1178,16 @@ def test_stage_01_runner_failure_exposes_log_tails(
         stage_01,
         "copy_prompt_snapshot",
         lambda *_args, **_kwargs: {
-            "snapshot_path": str(runtime_state_root / "runtime_metadata" / "prompt_snapshot" / "prompt.txt"),
+            "snapshot_path": str(prompt_snapshot_path),
             "source_path": "prompts/paper_small.txt",
         },
     )
+    monkeypatch.setattr(stage_01, "collect_git_summary", lambda _root: {"commit": "test"})
+    monkeypatch.setattr(stage_01, "collect_python_summary", lambda: {"version": "3.11"})
+    monkeypatch.setattr(stage_01, "collect_cuda_summary", lambda: {"available": False})
+    monkeypatch.setattr(stage_01, "collect_attestation_env_summary", lambda _cfg: {"enabled": True})
+    monkeypatch.setattr(stage_01, "collect_model_summary", lambda _cfg: {"model": "test"})
+    monkeypatch.setattr(stage_01, "collect_weight_summary", lambda _root, _cfg: {"weights": []})
 
     def _fake_run_command_with_logs(**kwargs: Any) -> Dict[str, Any]:
         stdout_log_path = Path(kwargs["stdout_log_path"])
@@ -1049,6 +1196,43 @@ def test_stage_01_runner_failure_exposes_log_tails(
         stderr_log_path.parent.mkdir(parents=True, exist_ok=True)
         stdout_log_path.write_text("mainline stdout\n", encoding="utf-8")
         stderr_log_path.write_text("nested failure detail\n", encoding="utf-8")
+        _write_json(
+            run_root / "artifacts" / "workflow_summary.json",
+            {
+                "status": "failed",
+                "summary_reason": "attestation_evidence_missing_required_artifacts",
+                "failure_reason": "attestation_evidence_missing_required_artifacts",
+                "required_artifacts": {"workflow_summary": True},
+                "attestation_evidence_resolution": {
+                    "overall_status": "failed",
+                    "required_entry_count": 1,
+                    "checked_entry_count": 0,
+                    "missing_evidence_count": 1,
+                    "failing_prompt_indices": [0],
+                    "failing_source_entry_paths": [
+                        f"{CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT}/000_source_entry.json"
+                    ],
+                },
+            },
+        )
+        _write_json(
+            run_root / CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH,
+            {
+                "entry_count": 1,
+                "prompt_count": 1,
+                "entries_package_relative_root": CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT,
+                "representative_root_records": {
+                    "view_role": "representative_summary_view",
+                    "source_prompt_index": 0,
+                    "source_entry_package_relative_path": (
+                        f"{CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT}/000_source_entry.json"
+                    ),
+                },
+            },
+        )
+        nested_log_path = run_root / "logs" / "source_pool_failure.log"
+        nested_log_path.parent.mkdir(parents=True, exist_ok=True)
+        nested_log_path.write_text("source pool failed before artifacts closed\n", encoding="utf-8")
         return {
             "return_code": 1,
             "stdout_log_path": str(stdout_log_path),
@@ -1070,6 +1254,127 @@ def test_stage_01_runner_failure_exposes_log_tails(
     assert "stage 01 mainline failed" in error_text
     assert "nested failure detail" in error_text
     assert "01_mainline_stderr.log" in error_text
+
+    stage_summary = json.loads((runtime_state_root / "stage_summary.json").read_text(encoding="utf-8"))
+    stage_manifest = json.loads((run_root / "artifacts" / "stage_manifest.json").read_text(encoding="utf-8"))
+    diagnostics_root = runtime_state_root / "failure_diagnostics"
+    diagnostics_summary_path = diagnostics_root / "failure_diagnostics_summary.json"
+    diagnostics_manifest_path = diagnostics_root / "failure_diagnostics_manifest.json"
+    diagnostics_index_path = diagnostics_root / "failure_diagnostics_index.json"
+    diagnostics_package_path = diagnostics_root / build_failure_diagnostics_filename(
+        "01_Paper_Full_Cuda",
+        "stage01_failure",
+    )
+
+    assert stage_summary["status"] == "failed"
+    assert stage_summary["formal_package_status"] == "not_generated"
+    assert stage_summary["diagnostics_status"] == "generated"
+    assert stage_summary["diagnostics_generation_reason"] == "attestation_evidence_missing_required_artifacts"
+    assert stage_summary["diagnostics_summary_path"] == diagnostics_summary_path.as_posix()
+    assert stage_summary["diagnostics_package_path"] == diagnostics_package_path.as_posix()
+    assert stage_summary["diagnostics_manifest_path"] == diagnostics_manifest_path.as_posix()
+    assert stage_manifest["stage_status"] == "failed"
+    assert stage_manifest["formal_package_role"] == "formal_stage_package"
+    assert stage_manifest["diagnostics_status"] == "generated"
+    assert stage_manifest["diagnostics_package_path"] == diagnostics_package_path.as_posix()
+
+    diagnostics_summary = json.loads(diagnostics_summary_path.read_text(encoding="utf-8"))
+    diagnostics_manifest = json.loads(diagnostics_manifest_path.read_text(encoding="utf-8"))
+    assert diagnostics_index_path.exists()
+    assert diagnostics_package_path.exists()
+    assert diagnostics_summary["stage_name"] == "01_Paper_Full_Cuda"
+    assert diagnostics_summary["stage_run_id"] == "stage01_failure"
+    assert diagnostics_summary["stage_status"] == "failed"
+    assert diagnostics_summary["failure_reason"] == "attestation_evidence_missing_required_artifacts"
+    assert diagnostics_summary["workflow_summary_path"] == (run_root / "artifacts" / "workflow_summary.json").as_posix()
+    assert diagnostics_summary["stage_manifest_path"] == (run_root / "artifacts" / "stage_manifest.json").as_posix()
+    assert diagnostics_summary["log_root"] == log_root.as_posix()
+    assert diagnostics_summary["command_stderr_tail"][-1] == "nested failure detail"
+    assert diagnostics_summary["preflight_ok"] is True
+    assert diagnostics_summary["attestation_evidence_resolution"]["overall_status"] == "failed"
+    assert "embed_record" in diagnostics_summary["missing_required_artifacts"]
+    assert diagnostics_summary["canonical_source_pool_summary"]["entry_count"] == 1
+    assert diagnostics_manifest["package_role"] == "failure_diagnostics_package"
+    assert diagnostics_manifest["package_discovery_scope"] == "excluded_from_formal_discovery"
+    assert diagnostics_manifest["diagnostics_package_path"] == diagnostics_package_path.as_posix()
+    assert diagnostics_manifest["diagnostics_package_filename"].endswith("failure_diagnostics.zip")
+
+    diagnostics_summary_text = diagnostics_summary_path.read_text(encoding="utf-8")
+    diagnostics_manifest_text = diagnostics_manifest_path.read_text(encoding="utf-8")
+    assert secret_plaintext not in diagnostics_summary_text
+    assert secret_plaintext not in diagnostics_manifest_text
+
+    with zipfile.ZipFile(diagnostics_package_path, "r") as archive:
+        archived_names = set(archive.namelist())
+        assert "failure_diagnostics_summary.json" in archived_names
+        assert "failure_diagnostics_manifest.json" in archived_names
+        assert "failure_diagnostics_index.json" in archived_names
+        assert "artifacts/stage_manifest.json" in archived_names
+        assert "artifacts/workflow_summary.json" in archived_names
+        assert "artifacts/package_manifest.json" not in archived_names
+        assert "artifacts/package_index.json" not in archived_names
+        for archived_name in archived_names:
+            if archived_name.endswith("/"):
+                continue
+            assert secret_plaintext not in archive.read(archived_name).decode("utf-8", errors="ignore")
+
+
+def test_discover_stage_packages_excludes_failure_diagnostics_and_accepts_legacy_formal_packages(
+    tmp_path: Path,
+) -> None:
+    """
+    功能：验证 diagnostics package 不会进入 formal discovery，且 legacy formal package 仍可发现。 
+
+    Verify failure-diagnostics ZIPs are excluded from formal discovery while
+    legacy formal packages without the new metadata remain discoverable.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+
+    Returns:
+        None.
+    """
+    export_stage_root = tmp_path / "exports" / "stage_01"
+    run_root = tmp_path / "runs" / "stage_01"
+    package_root = tmp_path / "package_root" / "stage_01"
+    package_root.mkdir(parents=True, exist_ok=True)
+    _write_json(
+        package_root / "artifacts" / "stage_manifest.json",
+        {
+            "stage_name": "01_Paper_Full_Cuda",
+            "stage_run_id": "legacy_formal_run",
+            "stage_status": "ok",
+            "workflow_summary_path": "/drive/runs/01/artifacts/workflow_summary.json",
+        },
+    )
+    _write_json(package_root / "artifacts" / "workflow_summary.json", {"status": "ok"})
+
+    formal_package_manifest_path = run_root / "artifacts" / "package_manifest.json"
+    formal_package = finalize_stage_package(
+        stage_name="01_Paper_Full_Cuda",
+        stage_run_id="legacy_formal_run",
+        package_root=package_root,
+        export_root=export_stage_root,
+        source_stage_run_id=None,
+        source_stage_package_path=None,
+        package_manifest_path=formal_package_manifest_path,
+    )
+    formal_package_path = Path(str(formal_package["package_path"]))
+    external_manifest_path = resolve_export_package_manifest_path(formal_package_path.parent)
+    _strip_discovery_metadata_from_formal_package(formal_package_path, external_manifest_path)
+
+    diagnostics_package_path = _create_failure_diagnostics_package(export_stage_root, "failed_run")
+    discovered_packages = discover_stage_packages(export_stage_root)
+
+    assert len(discovered_packages) == 1
+    assert discovered_packages[0]["package_path"] == formal_package_path.as_posix()
+    assert discovered_packages[0]["package_role"] == "formal_stage_package"
+    assert discovered_packages[0]["package_discovery_scope"] == "discoverable_formal_only"
+
+    with pytest.raises(ValueError) as exc_info:
+        prepare_source_package(diagnostics_package_path, tmp_path / "runtime_state")
+
+    assert "discoverable formal stage package" in str(exc_info.value)
 
 
 def test_stage_01_source_pool_failure_exposes_nested_log_tails(

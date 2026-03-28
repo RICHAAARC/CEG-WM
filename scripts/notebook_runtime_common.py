@@ -32,6 +32,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 STAGE_01_NAME = "01_Paper_Full_Cuda"
 STAGE_02_NAME = "02_Parallel_Attestation_Statistics"
 STAGE_03_NAME = "03_Experiment_Matrix_Full"
+FORMAL_STAGE_PACKAGE_ROLE = "formal_stage_package"
+FAILURE_DIAGNOSTICS_PACKAGE_ROLE = "failure_diagnostics_package"
+FORMAL_PACKAGE_DISCOVERY_SCOPE = "discoverable_formal_only"
+EXCLUDED_PACKAGE_DISCOVERY_SCOPE = "excluded_from_formal_discovery"
 ATTESTATION_ENV_FILE_NAME = "attestation_env.json"
 ATTESTATION_ENV_INFO_FILE_NAME = "attestation_env_info.json"
 ATTESTATION_ENV_VAR_LENGTHS = {
@@ -893,6 +897,61 @@ def build_stage_package_filename(
     return f"{stage_name}__{stage_run_id}.zip"
 
 
+def build_failure_diagnostics_filename(stage_name: str, stage_run_id: str) -> str:
+    """
+    功能：构造 failure diagnostics ZIP 文件名。
+
+    Build the ZIP filename used by one failure-diagnostics package.
+
+    Args:
+        stage_name: Stable stage name.
+        stage_run_id: Current stage run identifier.
+
+    Returns:
+        Failure-diagnostics ZIP file name.
+    """
+    if not isinstance(stage_name, str) or not stage_name:
+        raise TypeError("stage_name must be non-empty str")
+    if not isinstance(stage_run_id, str) or not stage_run_id:
+        raise TypeError("stage_run_id must be non-empty str")
+    return f"{stage_name}__{stage_run_id}__failure_diagnostics.zip"
+
+
+def _is_discoverable_formal_package_manifest(package_manifest: Mapping[str, Any]) -> bool:
+    """
+    功能：判断 manifest 是否属于可发现的正式 stage package。
+
+    Determine whether a manifest belongs to a discoverable formal stage
+    package.
+
+    Args:
+        package_manifest: Candidate package manifest mapping.
+
+    Returns:
+        True when the manifest represents a discoverable formal package.
+    """
+    if not isinstance(package_manifest, Mapping) or not package_manifest:
+        return False
+
+    stage_name = package_manifest.get("stage_name")
+    stage_run_id = package_manifest.get("stage_run_id")
+    package_filename = package_manifest.get("package_filename")
+    if not isinstance(stage_name, str) or not stage_name:
+        return False
+    if not isinstance(stage_run_id, str) or not stage_run_id:
+        return False
+    if not isinstance(package_filename, str) or not package_filename.endswith(".zip"):
+        return False
+
+    package_role = package_manifest.get("package_role")
+    if package_role not in {None, FORMAL_STAGE_PACKAGE_ROLE}:
+        return False
+    package_discovery_scope = package_manifest.get("package_discovery_scope")
+    if package_discovery_scope not in {None, FORMAL_PACKAGE_DISCOVERY_SCOPE}:
+        return False
+    return True
+
+
 def run_command_with_logs(
     command: Sequence[str],
     cwd: Path,
@@ -1417,6 +1476,8 @@ def discover_stage_packages(export_stage_root: Path) -> List[Dict[str, Any]]:
         internal_manifest = read_json_from_zip(zip_path, "artifacts/package_manifest.json")
         stage_manifest = read_json_from_zip(zip_path, "artifacts/stage_manifest.json")
         manifest_for_sort = external_manifest if external_manifest else internal_manifest
+        if not _is_discoverable_formal_package_manifest(manifest_for_sort):
+            continue
         package_created_at = manifest_for_sort.get("package_created_at") if isinstance(manifest_for_sort, dict) else None
         stage_run_id = manifest_for_sort.get("stage_run_id") if isinstance(manifest_for_sort, dict) else None
         validation_error = None
@@ -1438,6 +1499,11 @@ def discover_stage_packages(export_stage_root: Path) -> List[Dict[str, Any]]:
                 "external_manifest": external_manifest,
                 "internal_manifest": internal_manifest,
                 "stage_manifest": stage_manifest,
+                "package_role": manifest_for_sort.get("package_role", FORMAL_STAGE_PACKAGE_ROLE),
+                "package_discovery_scope": manifest_for_sort.get(
+                    "package_discovery_scope",
+                    FORMAL_PACKAGE_DISCOVERY_SCOPE,
+                ),
                 "validation": validation_summary,
                 "validation_error": validation_error,
                 "mtime": datetime.fromtimestamp(zip_path.stat().st_mtime, timezone.utc).isoformat(),
@@ -1611,6 +1677,8 @@ def finalize_stage_package(
     source_stage_run_id: Optional[str],
     source_stage_package_path: Optional[str],
     package_manifest_path: Path,
+    package_role: str = FORMAL_STAGE_PACKAGE_ROLE,
+    package_discovery_scope: str = FORMAL_PACKAGE_DISCOVERY_SCOPE,
 ) -> Dict[str, Any]:
     """
     功能：写出 package index、压缩包与 package_manifest。
@@ -1629,6 +1697,11 @@ def finalize_stage_package(
     Returns:
         Package manifest mapping.
     """
+    if not isinstance(package_role, str) or not package_role:
+        raise TypeError("package_role must be non-empty str")
+    if not isinstance(package_discovery_scope, str) or not package_discovery_scope:
+        raise TypeError("package_discovery_scope must be non-empty str")
+
     package_index_path = package_root / "artifacts" / "package_index.json"
     package_manifest_internal_path = package_root / "artifacts" / "package_manifest.json"
     package_index = build_package_index(package_root.rglob("*"), package_root)
@@ -1647,6 +1720,8 @@ def finalize_stage_package(
         "package_created_at": utc_now_iso(),
         "package_contents_index_path": "artifacts/package_index.json",
         "package_manifest_scope": "internal_copy",
+        "package_role": package_role,
+        "package_discovery_scope": package_discovery_scope,
     }
     write_json_atomic(package_manifest_internal_path, internal_manifest)
 
@@ -1662,6 +1737,8 @@ def finalize_stage_package(
         "stage_run_id": stage_run_id,
         "source_stage_run_id": source_stage_run_id,
         "source_stage_package_path": source_stage_package_path,
+        "package_role": package_role,
+        "package_discovery_scope": package_discovery_scope,
         "package_manifest_digest": "<pending>",
     }
     package_manifest["package_manifest_digest"] = compute_mapping_sha256(package_manifest)
@@ -1714,6 +1791,11 @@ def prepare_source_package(source_package_path: Path, runtime_state_root: Path) 
         copy_file(external_manifest_source_path, local_external_manifest_path)
         external_package_manifest = read_json_dict(local_external_manifest_path)
         validate_package_manifest_binding(local_package_path, external_package_manifest, required_sha_match=True)
+        if not _is_discoverable_formal_package_manifest(external_package_manifest):
+            raise ValueError(
+                "source package must be a discoverable formal stage package: "
+                f"path={normalize_path_value(source_package_path)}"
+            )
     extracted_root = package_root / "extracted"
     members = extract_zip_archive(local_package_path, extracted_root)
     stage_manifest = read_stage_manifest_from_package(extracted_root)
@@ -1722,6 +1804,11 @@ def prepare_source_package(source_package_path: Path, runtime_state_root: Path) 
         raise FileNotFoundError("package_manifest.json missing in extracted package")
     package_index = read_json_dict(extracted_root / "artifacts" / "package_index.json")
     package_manifest_for_lineage = external_package_manifest if external_package_manifest else internal_package_manifest
+    if not _is_discoverable_formal_package_manifest(package_manifest_for_lineage):
+        raise ValueError(
+            "source package must be a discoverable formal stage package: "
+            f"path={normalize_path_value(source_package_path)}"
+        )
     if package_manifest_for_lineage.get("stage_name") not in {None, stage_manifest.get("stage_name")}:
         raise ValueError("source package manifest stage_name does not match source stage_manifest")
     if package_manifest_for_lineage.get("stage_run_id") not in {None, stage_manifest.get("stage_run_id")}:
