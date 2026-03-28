@@ -20,6 +20,11 @@ from main.evaluation import metrics as eval_metrics
 from main.watermarking.detect import orchestrator as detect_orchestrator
 
 
+CANONICAL_SOURCE_POOL_RELATIVE_ROOT = "artifacts/stage_01_canonical_source_pool"
+CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH = f"{CANONICAL_SOURCE_POOL_RELATIVE_ROOT}/source_pool_manifest.json"
+CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT = f"{CANONICAL_SOURCE_POOL_RELATIVE_ROOT}/entries"
+
+
 def _load_script_module(relative_path: str, module_name: str) -> object:
     """
     功能：按路径加载 stage 脚本模块。
@@ -140,8 +145,13 @@ def _make_stage_01_source_pool_contract(run_root: Path, prompt_count: int) -> Di
         Source contract mapping.
     """
     records: list[Dict[str, Any]] = []
+    canonical_entries: list[Dict[str, Any]] = []
     for prompt_index in range(prompt_count):
         record_path = run_root / "artifacts" / "stage_01_source_pool_detect_records" / f"{prompt_index:03d}_detect_record.json"
+        embed_record_path = run_root / "artifacts" / "stage_01_source_pool_embed_records" / f"{prompt_index:03d}_embed_record.json"
+        runtime_config_path = run_root / "artifacts" / "stage_01_source_pool_runtime_configs" / f"prompt_{prompt_index:03d}.yaml"
+        entry_package_relative_path = f"{CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT}/{prompt_index:03d}_source_entry.json"
+        entry_path = run_root / entry_package_relative_path
         _write_json(
             record_path,
             {
@@ -161,6 +171,56 @@ def _make_stage_01_source_pool_contract(run_root: Path, prompt_count: int) -> Di
                 },
             },
         )
+        _write_json(embed_record_path, {"status": "ok", "prompt_index": prompt_index})
+        runtime_config_path.parent.mkdir(parents=True, exist_ok=True)
+        runtime_config_path.write_text(f"prompt_index: {prompt_index}\n", encoding="utf-8")
+        _write_json(
+            entry_path,
+            {
+                "artifact_type": "stage_01_canonical_source_entry",
+                "entry_role": "canonical_source_entry",
+                "path": str(entry_path),
+                "source_entry_package_relative_path": entry_package_relative_path,
+                "prompt_index": prompt_index,
+                "prompt_text": f"prompt {prompt_index}",
+                "prompt_sha256": f"prompt_sha_{prompt_index:03d}",
+                "prompt_file": "prompts/paper_small.txt",
+                "detect_record_path": str(record_path),
+                "detect_record_package_relative_path": (
+                    f"artifacts/stage_01_source_pool_detect_records/{prompt_index:03d}_detect_record.json"
+                ),
+                "embed_record_path": str(embed_record_path),
+                "embed_record_package_relative_path": (
+                    f"artifacts/stage_01_source_pool_embed_records/{prompt_index:03d}_embed_record.json"
+                ),
+                "runtime_config_path": str(runtime_config_path),
+                "runtime_config_package_relative_path": (
+                    f"artifacts/stage_01_source_pool_runtime_configs/prompt_{prompt_index:03d}.yaml"
+                ),
+                "representative_root_records_alias": prompt_index == 0,
+            },
+        )
+        canonical_entries.append(
+            {
+                "prompt_index": prompt_index,
+                "prompt_text": f"prompt {prompt_index}",
+                "prompt_sha256": f"prompt_sha_{prompt_index:03d}",
+                "source_entry_package_relative_path": entry_package_relative_path,
+                "detect_record_path": str(record_path),
+                "detect_record_package_relative_path": (
+                    f"artifacts/stage_01_source_pool_detect_records/{prompt_index:03d}_detect_record.json"
+                ),
+                "embed_record_path": str(embed_record_path),
+                "embed_record_package_relative_path": (
+                    f"artifacts/stage_01_source_pool_embed_records/{prompt_index:03d}_embed_record.json"
+                ),
+                "runtime_config_path": str(runtime_config_path),
+                "runtime_config_package_relative_path": (
+                    f"artifacts/stage_01_source_pool_runtime_configs/prompt_{prompt_index:03d}.yaml"
+                ),
+                "representative_root_records_alias": prompt_index == 0,
+            }
+        )
         records.append(
             {
                 "record_role": "direct_source_record",
@@ -175,6 +235,13 @@ def _make_stage_01_source_pool_contract(run_root: Path, prompt_count: int) -> Di
                 "prompt_text": f"prompt {prompt_index}",
                 "prompt_sha256": f"prompt_sha_{prompt_index:03d}",
                 "prompt_file": "prompts/paper_small.txt",
+                "canonical_source_entry_package_relative_path": entry_package_relative_path,
+                "embed_record_package_relative_path": (
+                    f"artifacts/stage_01_source_pool_embed_records/{prompt_index:03d}_embed_record.json"
+                ),
+                "runtime_config_package_relative_path": (
+                    f"artifacts/stage_01_source_pool_runtime_configs/prompt_{prompt_index:03d}.yaml"
+                ),
                 "score_name": "event_attestation_score",
                 "score_available": True,
                 "event_attestation_score_available": True,
@@ -184,6 +251,37 @@ def _make_stage_01_source_pool_contract(run_root: Path, prompt_count: int) -> Di
             }
         )
 
+    manifest_path = run_root / CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH
+    _write_json(
+        manifest_path,
+        {
+            "artifact_type": "stage_01_canonical_source_pool",
+            "artifact_role": "canonical_source_pool_root",
+            "artifact_version": "v1",
+            "stage_name": "01_Paper_Full_Cuda",
+            "stage_run_id": "stage01_test",
+            "prompt_file": "prompts/paper_small.txt",
+            "canonical_source_pool_root_path": str(run_root / CANONICAL_SOURCE_POOL_RELATIVE_ROOT),
+            "canonical_source_pool_root_package_relative_path": CANONICAL_SOURCE_POOL_RELATIVE_ROOT,
+            "manifest_path": str(manifest_path),
+            "manifest_package_relative_path": CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH,
+            "entries_root_path": str(run_root / CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT),
+            "entries_package_relative_root": CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT,
+            "entry_count": prompt_count,
+            "entries": canonical_entries,
+            "representative_root_records": {
+                "view_role": "representative_summary_view",
+                "root_embed_record_package_relative_path": "records/embed_record.json",
+                "root_detect_record_package_relative_path": "records/detect_record.json",
+                "source_prompt_index": 0,
+                "source_prompt_sha256": "prompt_sha_000",
+                "source_entry_package_relative_path": f"{CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT}/000_source_entry.json",
+                "source_embed_record_package_relative_path": "artifacts/stage_01_source_pool_embed_records/000_embed_record.json",
+                "source_detect_record_package_relative_path": "artifacts/stage_01_source_pool_detect_records/000_detect_record.json",
+            },
+        },
+    )
+
     return {
         "artifact_type": "parallel_attestation_statistics_input_contract",
         "contract_role": "source_contract",
@@ -192,6 +290,20 @@ def _make_stage_01_source_pool_contract(run_root: Path, prompt_count: int) -> Di
         "stage_run_id": "stage01_test",
         "status": "ok",
         "reason": "stage_01_direct_source_pool_ready",
+        "source_authority": "canonical_source_pool",
+        "contract_view_role": "stage_02_compatibility_view",
+        "canonical_source_pool_manifest_package_relative_path": CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH,
+        "canonical_source_pool_entries_package_relative_root": CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT,
+        "representative_root_records": {
+            "view_role": "representative_summary_view",
+            "root_embed_record_package_relative_path": "records/embed_record.json",
+            "root_detect_record_package_relative_path": "records/detect_record.json",
+            "source_prompt_index": 0,
+            "source_prompt_sha256": "prompt_sha_000",
+            "source_entry_package_relative_path": f"{CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT}/000_source_entry.json",
+            "source_embed_record_package_relative_path": "artifacts/stage_01_source_pool_embed_records/000_embed_record.json",
+            "source_detect_record_package_relative_path": "artifacts/stage_01_source_pool_detect_records/000_detect_record.json",
+        },
         "score_name": "event_attestation_score",
         "threshold_score_name": "content_chain_score",
         "source_records_available": True,
@@ -247,6 +359,9 @@ def _make_stage_01_pooled_threshold_contract(run_root: Path, prompt_count: int) 
             "source_package_relative_path": (
                 f"artifacts/stage_01_source_pool_detect_records/{prompt_index:03d}_detect_record.json"
             ),
+            "source_entry_package_relative_path": (
+                f"{CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT}/{prompt_index:03d}_source_entry.json"
+            ),
             "staged_path": str(direct_path),
             "package_relative_path": f"artifacts/stage_01_pooled_threshold_records/{prompt_index:03d}_direct_positive.json",
             "sha256": f"pooled_direct_sha_{prompt_index:03d}",
@@ -268,6 +383,9 @@ def _make_stage_01_pooled_threshold_contract(run_root: Path, prompt_count: int) 
             "derivation_kind": "prompt_bound_label_balance",
             "source_package_relative_path": (
                 f"artifacts/stage_01_source_pool_detect_records/{prompt_index:03d}_detect_record.json"
+            ),
+            "source_entry_package_relative_path": (
+                f"{CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT}/{prompt_index:03d}_source_entry.json"
             ),
             "staged_path": str(derived_path),
             "package_relative_path": (
@@ -291,6 +409,8 @@ def _make_stage_01_pooled_threshold_contract(run_root: Path, prompt_count: int) 
         "stage_run_id": "stage01_test",
         "requested_build_mode": "source_plus_derived_pairs",
         "build_mode": "source_plus_derived_pairs",
+        "source_authority": "canonical_source_pool",
+        "canonical_source_pool_manifest_package_relative_path": CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH,
         "score_name": "content_chain_score",
         "prompt_file": "prompts/paper_small.txt",
         "prompt_pool_summary": {
@@ -506,10 +626,25 @@ def test_stage_01_writes_source_contract_even_when_direct_stats_not_ready(tmp_pa
     assert contract_payload["artifact_type"] == "parallel_attestation_statistics_input_contract"
     assert contract_payload["contract_role"] == "source_contract"
     assert contract_payload["status"] == "ok"
+    assert contract_payload["source_authority"] == "canonical_source_pool"
+    assert contract_payload["contract_view_role"] == "stage_02_compatibility_view"
+    assert contract_payload["canonical_source_pool_manifest_package_relative_path"] == (
+        CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH
+    )
     assert contract_payload["source_records_available"] is True
     assert contract_payload["direct_stats_ready"] is False
     assert contract_payload["record_count"] == 16
     assert contract_payload["direct_stats_reason"] == "parallel_attestation_statistics_requires_label_balanced_detect_records"
+    assert contract_payload["records"][0]["canonical_source_entry_package_relative_path"] == (
+        f"{CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT}/000_source_entry.json"
+    )
+
+    canonical_manifest = json.loads(
+        (run_root / CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH).read_text(encoding="utf-8")
+    )
+    assert canonical_manifest["artifact_role"] == "canonical_source_pool_root"
+    assert canonical_manifest["entry_count"] == 16
+    assert canonical_manifest["representative_root_records"]["view_role"] == "representative_summary_view"
 
     pooled_build_contract = json.loads(
         (run_root / "artifacts" / "stage_01_pooled_threshold_build_contract.json").read_text(encoding="utf-8")
@@ -528,14 +663,29 @@ def test_stage_01_writes_source_contract_even_when_direct_stats_not_ready(tmp_pa
     assert stage_manifest["parallel_attestation_statistics_input_contract_package_relative_path"] == (
         "artifacts/parallel_attestation_statistics_input_contract.json"
     )
+    assert stage_manifest["stage_01_canonical_source_pool_manifest_package_relative_path"] == (
+        CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH
+    )
+    assert stage_manifest["stage_01_canonical_source_pool_entry_count"] == 16
+    assert stage_manifest["stage_01_representative_root_records"]["view_role"] == "representative_summary_view"
     assert stage_manifest["stage_01_pooled_threshold_build_mode"] == "source_plus_derived_pairs"
     assert stage_manifest["stage_01_pooled_threshold_direct_record_count"] == 16
     assert stage_manifest["stage_01_pooled_threshold_derived_record_count"] == 16
     assert stage_manifest["stage_01_pooled_threshold_final_record_count"] == 32
     assert stage_manifest["stage_01_pooled_threshold_final_label_balanced"] is True
     assert (runtime_state_root / "package_staging" / "artifacts" / "parallel_attestation_statistics_input_contract.json").exists()
+    assert (runtime_state_root / "package_staging" / CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH).exists()
+    assert (
+        runtime_state_root / "package_staging" / CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT / "015_source_entry.json"
+    ).exists()
     assert (
         runtime_state_root / "package_staging" / "artifacts" / "stage_01_source_pool_detect_records" / "015_detect_record.json"
+    ).exists()
+    assert (
+        runtime_state_root / "package_staging" / "artifacts" / "stage_01_source_pool_embed_records" / "015_embed_record.json"
+    ).exists()
+    assert (
+        runtime_state_root / "package_staging" / "artifacts" / "stage_01_source_pool_runtime_configs" / "prompt_015.yaml"
     ).exists()
     assert (
         runtime_state_root / "package_staging" / "artifacts" / "stage_01_pooled_threshold_records" / "031_derived_negative.json"
@@ -763,6 +913,121 @@ def test_stage_01_mainline_writes_workflow_summary_for_source_pool_exception(
     assert workflow_summary["exception_type"] == "RuntimeError"
     assert workflow_summary["exception_message"] == "source pool exploded"
     assert workflow_summary["source_pool_prompt_count"] == 1
+
+
+def test_stage_01_mainline_promotes_canonical_source_pool_and_keeps_compatibility_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：验证 stage 01 mainline 以 canonical source pool 为权威，并保留兼容 contract。
+
+    Validate that the stage-01 mainline emits a canonical source-pool root
+    while preserving the compatibility contract consumed by later stages.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    runner = _load_script_module("scripts/01_run_paper_full_cuda.py", "stage_01_canonical_source_pool_success")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("policy_path: content_np_geo_rescue\n", encoding="utf-8")
+    run_root = tmp_path / "run_root"
+
+    monkeypatch.setattr(runner, "load_yaml_mapping", lambda _path: {"policy_path": "content_np_geo_rescue"})
+    monkeypatch.setattr(
+        runner,
+        "_resolve_stage_01_source_pool_cfg",
+        lambda _cfg: {
+            "enabled": True,
+            "use_inference_prompt_file": True,
+            "target_prompt_count": 2,
+            "record_usage": "stage_01_direct_source_pool",
+        },
+    )
+    monkeypatch.setattr(
+        runner,
+        "_resolve_stage_01_pooled_threshold_build_cfg",
+        lambda _cfg: {
+            "enabled": True,
+            "build_mode": "source_plus_derived_pairs",
+            "target_pair_count": 2,
+            "build_usage": "stage_01_pooled_thresholds",
+            "record_derivation_kind": "prompt_bound_label_balance",
+        },
+    )
+    monkeypatch.setattr(
+        runner,
+        "_resolve_stage_01_prompt_pool",
+        lambda _cfg: (["prompt 0", "prompt 1"], "prompts/paper_small.txt"),
+    )
+
+    def _fake_run_stage(stage_name: str, _command: Any, stage_run_root: Path) -> Dict[str, Any]:
+        if stage_name == "embed":
+            _write_json(stage_run_root / "records" / "embed_record.json", {"status": "ok"})
+        elif stage_name == "detect":
+            prompt_index = int(stage_run_root.name.split("_")[-1])
+            _write_json(
+                stage_run_root / "records" / "detect_record.json",
+                {
+                    "label": True,
+                    "ground_truth": True,
+                    "is_watermarked": True,
+                    "content_evidence_payload": {
+                        "status": "ok",
+                        "content_chain_score": 0.9 - prompt_index * 1e-3,
+                    },
+                    "attestation": {
+                        "final_event_attested_decision": {
+                            "event_attestation_score": 0.95 - prompt_index * 1e-3,
+                            "event_attestation_score_name": "event_attestation_score",
+                            "is_event_attested": True,
+                        }
+                    },
+                },
+            )
+        elif stage_name == "calibrate":
+            _write_json(run_root / "records" / "calibration_record.json", {"status": "ok"})
+            _write_json(run_root / "artifacts" / "thresholds" / "thresholds_artifact.json", {"threshold": 0.5})
+            _write_json(
+                run_root / "artifacts" / "thresholds" / "threshold_metadata_artifact.json",
+                {"meta": True},
+            )
+        elif stage_name == "evaluate":
+            _write_json(run_root / "records" / "evaluate_record.json", {"status": "ok"})
+            _write_json(run_root / "artifacts" / "evaluation_report.json", {"status": "ok"})
+            _write_json(run_root / "artifacts" / "run_closure.json", {"status": "ok"})
+        else:
+            raise AssertionError(f"unexpected stage_name: {stage_name}")
+        return {"return_code": 0, "stage_name": stage_name}
+
+    monkeypatch.setattr(runner, "_run_stage", _fake_run_stage)
+
+    exit_code = runner.run_paper_full_cuda(config_path, run_root, stage_run_id="stage01_success")
+
+    canonical_manifest = json.loads(
+        (run_root / CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH).read_text(encoding="utf-8")
+    )
+    source_contract = json.loads(
+        (run_root / "artifacts" / "parallel_attestation_statistics_input_contract.json").read_text(encoding="utf-8")
+    )
+    workflow_summary = json.loads((run_root / "artifacts" / "workflow_summary.json").read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert canonical_manifest["artifact_role"] == "canonical_source_pool_root"
+    assert canonical_manifest["entry_count"] == 2
+    assert canonical_manifest["representative_root_records"]["view_role"] == "representative_summary_view"
+    assert source_contract["source_authority"] == "canonical_source_pool"
+    assert source_contract["contract_view_role"] == "stage_02_compatibility_view"
+    assert source_contract["canonical_source_pool_manifest_package_relative_path"] == CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH
+    assert source_contract["records"][0]["canonical_source_entry_package_relative_path"] == (
+        f"{CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT}/000_source_entry.json"
+    )
+    assert workflow_summary["canonical_source_pool_entry_count"] == 2
+    assert workflow_summary["representative_root_records"]["view_role"] == "representative_summary_view"
 
 
 def test_stage_02_direct_only_build_uses_source_records_and_writes_build_contract(

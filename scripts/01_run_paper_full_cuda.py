@@ -36,6 +36,9 @@ DEFAULT_CONFIG_PATH = Path("configs/default.yaml")
 DEFAULT_RUN_ROOT = Path("outputs/colab_run_paper_full_cuda")
 SOURCE_CONTRACT_RELATIVE_PATH = "artifacts/parallel_attestation_statistics_input_contract.json"
 POOLED_THRESHOLD_BUILD_CONTRACT_RELATIVE_PATH = "artifacts/stage_01_pooled_threshold_build_contract.json"
+CANONICAL_SOURCE_POOL_RELATIVE_ROOT = "artifacts/stage_01_canonical_source_pool"
+CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH = f"{CANONICAL_SOURCE_POOL_RELATIVE_ROOT}/source_pool_manifest.json"
+CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT = f"{CANONICAL_SOURCE_POOL_RELATIVE_ROOT}/entries"
 SOURCE_POOL_DETECT_RECORDS_RELATIVE_ROOT = "artifacts/stage_01_source_pool_detect_records"
 SOURCE_POOL_EMBED_RECORDS_RELATIVE_ROOT = "artifacts/stage_01_source_pool_embed_records"
 POOLED_THRESHOLD_RECORDS_RELATIVE_ROOT = "artifacts/stage_01_pooled_threshold_records"
@@ -173,6 +176,7 @@ def _required_artifacts(run_root: Path) -> Dict[str, Path]:
         "evaluation_report": run_root / "artifacts" / "evaluation_report.json",
         "run_closure": run_root / "artifacts" / "run_closure.json",
         "workflow_summary": run_root / "artifacts" / "workflow_summary.json",
+        "canonical_source_pool_manifest": run_root / CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH,
         "source_contract": run_root / SOURCE_CONTRACT_RELATIVE_PATH,
         "pooled_threshold_build_contract": run_root / POOLED_THRESHOLD_BUILD_CONTRACT_RELATIVE_PATH,
     }
@@ -715,6 +719,23 @@ def _build_workflow_exception_summary(
     }
 
 
+def _build_canonical_source_entry_package_relative_path(index: int) -> str:
+    """
+    功能：构造 canonical source entry 的包内相对路径。
+
+    Build the package-relative path for one canonical source entry file.
+
+    Args:
+        index: Prompt index.
+
+    Returns:
+        Package-relative JSON path.
+    """
+    if index < 0:
+        raise TypeError("index must be non-negative int")
+    return f"{CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT}/{index:03d}_source_entry.json"
+
+
 def _run_source_pool_subrun(
     *,
     index: int,
@@ -803,6 +824,15 @@ def _run_source_pool_subrun(
         "prompt_file": prompt_file_path,
         "package_relative_path": f"{SOURCE_POOL_DETECT_RECORDS_RELATIVE_ROOT}/{index:03d}_detect_record.json",
         "path": normalize_path_value(staged_detect_record_path),
+        "embed_record_path": normalize_path_value(staged_embed_record_path),
+        "embed_record_package_relative_path": (
+            f"{SOURCE_POOL_EMBED_RECORDS_RELATIVE_ROOT}/{index:03d}_embed_record.json"
+        ),
+        "runtime_config_path": normalize_path_value(runtime_cfg_path),
+        "runtime_config_package_relative_path": (
+            f"{SOURCE_POOL_RUNTIME_CONFIG_RELATIVE_ROOT}/prompt_{index:03d}.yaml"
+        ),
+        "prompt_run_root": normalize_path_value(prompt_run_root),
         "sha256": compute_file_sha256(staged_detect_record_path),
         "label": True,
         "content_chain_score_available": isinstance(content_chain_score, float),
@@ -814,10 +844,126 @@ def _run_source_pool_subrun(
     }
 
 
+def _build_stage_01_canonical_source_pool(
+    *,
+    run_root: Path,
+    stage_run_id: str,
+    prompt_file_path: str,
+    direct_entries: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    功能：写出 stage 01 canonical source pool 根清单与逐 prompt entry 视图。
+
+    Emit the canonical source-pool root manifest and per-prompt source-entry
+    views for stage 01.
+
+    Args:
+        run_root: Stage-01 run root.
+        stage_run_id: Stage run identifier.
+        prompt_file_path: Normalized prompt file path.
+        direct_entries: Direct source record entries.
+
+    Returns:
+        Canonical source-pool manifest payload.
+    """
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not stage_run_id:
+        raise TypeError("stage_run_id must be non-empty str")
+    if not prompt_file_path:
+        raise TypeError("prompt_file_path must be non-empty str")
+    if not direct_entries:
+        raise ValueError("direct_entries must be non-empty list")
+
+    canonical_root = ensure_directory(run_root / CANONICAL_SOURCE_POOL_RELATIVE_ROOT)
+    entries_root = ensure_directory(run_root / CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT)
+    representative_entry = direct_entries[0]
+    manifest_entries: List[Dict[str, Any]] = []
+
+    for entry in direct_entries:
+        entry_package_relative_path = _build_canonical_source_entry_package_relative_path(entry["prompt_index"])
+        entry_path = run_root / entry_package_relative_path
+        entry_payload: Dict[str, Any] = {
+            "artifact_type": "stage_01_canonical_source_entry",
+            "entry_role": "canonical_source_entry",
+            "stage_name": "01_Paper_Full_Cuda",
+            "stage_run_id": stage_run_id,
+            "path": normalize_path_value(entry_path),
+            "source_entry_package_relative_path": entry_package_relative_path,
+            "prompt_index": entry["prompt_index"],
+            "prompt_text": entry["prompt_text"],
+            "prompt_sha256": entry["prompt_sha256"],
+            "prompt_file": entry["prompt_file"],
+            "record_usage": entry["record_usage"],
+            "label": entry["label"],
+            "content_chain_score_available": entry["content_chain_score_available"],
+            "event_attestation_score_available": entry["event_attestation_score_available"],
+            "prompt_run_root": entry["prompt_run_root"],
+            "runtime_config_path": entry["runtime_config_path"],
+            "runtime_config_package_relative_path": entry["runtime_config_package_relative_path"],
+            "embed_record_path": entry["embed_record_path"],
+            "embed_record_package_relative_path": entry["embed_record_package_relative_path"],
+            "detect_record_path": entry["path"],
+            "detect_record_package_relative_path": entry["package_relative_path"],
+            "detect_record_sha256": entry["sha256"],
+            "representative_root_records_alias": entry["prompt_index"] == representative_entry["prompt_index"],
+        }
+        write_json_atomic(entry_path, entry_payload)
+        entry["source_entry_path"] = normalize_path_value(entry_path)
+        entry["source_entry_package_relative_path"] = entry_package_relative_path
+        manifest_entries.append(
+            {
+                "prompt_index": entry_payload["prompt_index"],
+                "prompt_text": entry_payload["prompt_text"],
+                "prompt_sha256": entry_payload["prompt_sha256"],
+                "source_entry_package_relative_path": entry_payload["source_entry_package_relative_path"],
+                "detect_record_path": entry_payload["detect_record_path"],
+                "detect_record_package_relative_path": entry_payload["detect_record_package_relative_path"],
+                "embed_record_path": entry_payload["embed_record_path"],
+                "embed_record_package_relative_path": entry_payload["embed_record_package_relative_path"],
+                "runtime_config_path": entry_payload["runtime_config_path"],
+                "runtime_config_package_relative_path": entry_payload["runtime_config_package_relative_path"],
+                "representative_root_records_alias": entry_payload["representative_root_records_alias"],
+            }
+        )
+
+    representative_root_records = {
+        "view_role": "representative_summary_view",
+        "root_embed_record_package_relative_path": "records/embed_record.json",
+        "root_detect_record_package_relative_path": "records/detect_record.json",
+        "source_prompt_index": representative_entry["prompt_index"],
+        "source_prompt_sha256": representative_entry["prompt_sha256"],
+        "source_entry_package_relative_path": representative_entry["source_entry_package_relative_path"],
+        "source_embed_record_package_relative_path": representative_entry["embed_record_package_relative_path"],
+        "source_detect_record_package_relative_path": representative_entry["package_relative_path"],
+    }
+    manifest_path = run_root / CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH
+    manifest_payload: Dict[str, Any] = {
+        "artifact_type": "stage_01_canonical_source_pool",
+        "artifact_role": "canonical_source_pool_root",
+        "artifact_version": "v1",
+        "stage_name": "01_Paper_Full_Cuda",
+        "stage_run_id": stage_run_id,
+        "prompt_file": prompt_file_path,
+        "canonical_source_pool_root_path": normalize_path_value(canonical_root),
+        "canonical_source_pool_root_package_relative_path": CANONICAL_SOURCE_POOL_RELATIVE_ROOT,
+        "manifest_path": normalize_path_value(manifest_path),
+        "manifest_package_relative_path": CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH,
+        "entries_root_path": normalize_path_value(entries_root),
+        "entries_package_relative_root": CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT,
+        "entry_count": len(manifest_entries),
+        "entries": manifest_entries,
+        "representative_root_records": representative_root_records,
+    }
+    write_json_atomic(manifest_path, manifest_payload)
+    return manifest_payload
+
+
 def _build_stage_01_source_contract(
     *,
     stage_run_id: str,
     direct_entries: List[Dict[str, Any]],
+    canonical_source_pool_payload: Dict[str, Any],
 ) -> Dict[str, Any]:
     """
     功能：构造 stage 01 direct source contract。
@@ -828,6 +974,7 @@ def _build_stage_01_source_contract(
     Args:
         stage_run_id: Stage run identifier.
         direct_entries: Direct source record entries.
+        canonical_source_pool_payload: Canonical source-pool manifest payload.
 
     Returns:
         Source contract payload.
@@ -836,6 +983,8 @@ def _build_stage_01_source_contract(
         raise TypeError("stage_run_id must be non-empty str")
     if not direct_entries:
         raise ValueError("direct_entries must be non-empty list")
+    if not isinstance(canonical_source_pool_payload, dict):
+        raise TypeError("canonical_source_pool_payload must be dict")
 
     positive_count = sum(1 for entry in direct_entries if entry.get("label") is True)
     negative_count = sum(1 for entry in direct_entries if entry.get("label") is False)
@@ -862,6 +1011,15 @@ def _build_stage_01_source_contract(
         "stage_run_id": stage_run_id,
         "status": "ok",
         "reason": "stage_01_direct_source_pool_ready",
+        "source_authority": "canonical_source_pool",
+        "contract_view_role": "stage_02_compatibility_view",
+        "canonical_source_pool_manifest_package_relative_path": canonical_source_pool_payload[
+            "manifest_package_relative_path"
+        ],
+        "canonical_source_pool_entries_package_relative_root": canonical_source_pool_payload[
+            "entries_package_relative_root"
+        ],
+        "representative_root_records": canonical_source_pool_payload["representative_root_records"],
         "score_name": EVENT_ATTESTATION_SCORE_NAME,
         "threshold_score_name": CONTENT_CHAIN_SCORE_NAME,
         "source_records_available": True,
@@ -896,6 +1054,9 @@ def _build_stage_01_source_contract(
                 "prompt_text": entry["prompt_text"],
                 "prompt_sha256": entry["prompt_sha256"],
                 "prompt_file": entry["prompt_file"],
+                "canonical_source_entry_package_relative_path": entry["source_entry_package_relative_path"],
+                "embed_record_package_relative_path": entry["embed_record_package_relative_path"],
+                "runtime_config_package_relative_path": entry["runtime_config_package_relative_path"],
                 "score_name": EVENT_ATTESTATION_SCORE_NAME,
                 "score_available": entry["event_attestation_score_available"],
                 "threshold_score_name": CONTENT_CHAIN_SCORE_NAME,
@@ -913,6 +1074,7 @@ def _build_stage_01_pooled_threshold_records(
     prompt_file_path: str,
     direct_entries: List[Dict[str, Any]],
     build_cfg: Dict[str, Any],
+    canonical_source_pool_payload: Dict[str, Any],
 ) -> Dict[str, Any]:
     """
     功能：构造 stage 01 pooled threshold records 与 build contract 负载。
@@ -926,6 +1088,7 @@ def _build_stage_01_pooled_threshold_records(
         prompt_file_path: Normalized prompt file path.
         direct_entries: Direct source record entries.
         build_cfg: Normalized pooled-threshold build config.
+        canonical_source_pool_payload: Canonical source-pool manifest payload.
 
     Returns:
         Build contract payload.
@@ -936,6 +1099,8 @@ def _build_stage_01_pooled_threshold_records(
         raise TypeError("prompt_file_path must be non-empty str")
     if not direct_entries:
         raise ValueError("direct_entries must be non-empty list")
+    if not isinstance(canonical_source_pool_payload, dict):
+        raise TypeError("canonical_source_pool_payload must be dict")
     direct_positive_count = sum(1 for entry in direct_entries if entry.get("label") is True)
     direct_negative_count = sum(1 for entry in direct_entries if entry.get("label") is False)
     desired_pair_count = max(build_cfg["target_pair_count"], direct_positive_count, direct_negative_count)
@@ -989,6 +1154,7 @@ def _build_stage_01_pooled_threshold_records(
                 "derived_from": None,
                 "derivation_kind": None,
                 "source_package_relative_path": entry["package_relative_path"],
+                "source_entry_package_relative_path": entry["source_entry_package_relative_path"],
                 "staged_path": normalize_path_value(staged_path),
                 "package_relative_path": f"{POOLED_THRESHOLD_RECORDS_RELATIVE_ROOT}/{staged_file_name}",
                 "sha256": compute_file_sha256(staged_path),
@@ -1052,6 +1218,7 @@ def _build_stage_01_pooled_threshold_records(
                 "derived_from": source_entry["package_relative_path"],
                 "derivation_kind": build_cfg["record_derivation_kind"],
                 "source_package_relative_path": source_entry["package_relative_path"],
+                "source_entry_package_relative_path": source_entry["source_entry_package_relative_path"],
                 "staged_path": normalize_path_value(staged_path),
                 "package_relative_path": f"{POOLED_THRESHOLD_RECORDS_RELATIVE_ROOT}/{staged_file_name}",
                 "sha256": compute_file_sha256(staged_path),
@@ -1080,6 +1247,10 @@ def _build_stage_01_pooled_threshold_records(
         "stage_run_id": stage_run_id,
         "requested_build_mode": requested_build_mode,
         "build_mode": resolved_build_mode,
+        "source_authority": "canonical_source_pool",
+        "canonical_source_pool_manifest_package_relative_path": canonical_source_pool_payload[
+            "manifest_package_relative_path"
+        ],
         "score_name": CONTENT_CHAIN_SCORE_NAME,
         "prompt_file": prompt_file_path,
         "prompt_pool_summary": {
@@ -1225,9 +1396,17 @@ def run_paper_full_cuda(config_path: Path, run_root: Path, stage_run_id: Optiona
         copy_file(representative_embed_record_path, run_root / "records" / "embed_record.json")
         copy_file(representative_detect_record_path, run_root / "records" / "detect_record.json")
 
+        canonical_source_pool_payload = _build_stage_01_canonical_source_pool(
+            run_root=run_root,
+            stage_run_id=stage_run_id or "stage_01",
+            prompt_file_path=prompt_file_path,
+            direct_entries=direct_entries,
+        )
+
         source_contract_payload = _build_stage_01_source_contract(
             stage_run_id=stage_run_id or "stage_01",
             direct_entries=direct_entries,
+            canonical_source_pool_payload=canonical_source_pool_payload,
         )
         source_contract_path = run_root / SOURCE_CONTRACT_RELATIVE_PATH
         write_json_atomic(source_contract_path, source_contract_payload)
@@ -1238,6 +1417,7 @@ def run_paper_full_cuda(config_path: Path, run_root: Path, stage_run_id: Optiona
             prompt_file_path=prompt_file_path,
             direct_entries=direct_entries,
             build_cfg=build_cfg,
+            canonical_source_pool_payload=canonical_source_pool_payload,
         )
         pooled_runtime_cfg = _build_pooled_runtime_config(cfg_obj, pooled_threshold_build_contract_payload, run_root)
         pooled_runtime_cfg_path = run_root / POOLED_THRESHOLD_RUNTIME_CONFIG_RELATIVE_PATH
@@ -1279,7 +1459,6 @@ def run_paper_full_cuda(config_path: Path, run_root: Path, stage_run_id: Optiona
 
     write_json_atomic(run_root / POOLED_THRESHOLD_BUILD_CONTRACT_RELATIVE_PATH, pooled_threshold_build_contract_payload)
 
-    artifact_summary = _artifact_presence(_required_artifacts(run_root))
     parallel_attestation_statistics_cfg = cast(
         Dict[str, Any],
         cfg_obj.get("parallel_attestation_statistics")
@@ -1287,14 +1466,21 @@ def run_paper_full_cuda(config_path: Path, run_root: Path, stage_run_id: Optiona
         else {},
     )
 
+    workflow_summary_path = run_root / "artifacts" / "workflow_summary.json"
     workflow_summary: Dict[str, Any] = {
         "stage_name": "01_Paper_Full_Cuda_mainline",
         "stage_run_id": stage_run_id,
         "config_path": normalize_path_value(config_path),
         "run_root": normalize_path_value(run_root),
-        "status": "ok" if _all_required_present(artifact_summary) else "failed",
+        "status": "pending",
         "source_pool_prompt_count": len(prompt_pool),
         "source_pool_prompt_file": prompt_file_path,
+        "canonical_source_pool_manifest_path": normalize_path_value(
+            run_root / CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH
+        ),
+        "canonical_source_pool_manifest_package_relative_path": CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH,
+        "canonical_source_pool_entry_count": canonical_source_pool_payload["entry_count"],
+        "representative_root_records": canonical_source_pool_payload["representative_root_records"],
         "direct_source_record_count": source_contract_payload["record_count"],
         "pooled_threshold_record_count": pooled_threshold_build_contract_payload["final_record_count"],
         "pooled_threshold_build_mode": pooled_threshold_build_contract_payload["build_mode"],
@@ -1309,10 +1495,16 @@ def run_paper_full_cuda(config_path: Path, run_root: Path, stage_run_id: Optiona
         },
         "source_pool_stage_results": source_pool_stage_results,
         "pooled_stage_results": pooled_stage_results,
-        "required_artifacts": artifact_summary,
-        "required_artifacts_ok": _all_required_present(artifact_summary),
+        "required_artifacts": {},
+        "required_artifacts_ok": False,
     }
-    write_json_atomic(run_root / "artifacts" / "workflow_summary.json", workflow_summary)
+    write_json_atomic(workflow_summary_path, workflow_summary)
+
+    artifact_summary = _artifact_presence(_required_artifacts(run_root))
+    workflow_summary["required_artifacts"] = artifact_summary
+    workflow_summary["required_artifacts_ok"] = _all_required_present(artifact_summary)
+    workflow_summary["status"] = "ok" if workflow_summary["required_artifacts_ok"] else "failed"
+    write_json_atomic(workflow_summary_path, workflow_summary)
     return 0 if workflow_summary["status"] == "ok" else 1
 
 

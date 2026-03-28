@@ -52,6 +52,7 @@ DEFAULT_CONFIG_PATH = Path("configs/default.yaml")
 RUNNER_SCRIPT_PATH = Path("scripts/01_run_paper_full_cuda.py")
 PARALLEL_ATTESTATION_STATS_CONTRACT_RELATIVE_PATH = "artifacts/parallel_attestation_statistics_input_contract.json"
 STAGE_01_POOLED_THRESHOLD_BUILD_CONTRACT_RELATIVE_PATH = "artifacts/stage_01_pooled_threshold_build_contract.json"
+CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH = "artifacts/stage_01_canonical_source_pool/source_pool_manifest.json"
 
 
 def _load_json_object(path_obj: Path, label: str) -> Dict[str, Any]:
@@ -76,6 +77,7 @@ def _required_stage_outputs(run_root: Path) -> Dict[str, Path]:
         "thresholds_artifact": run_root / "artifacts" / "thresholds" / "thresholds_artifact.json",
         "threshold_metadata_artifact": run_root / "artifacts" / "thresholds" / "threshold_metadata_artifact.json",
         "evaluation_report": run_root / "artifacts" / "evaluation_report.json",
+        "canonical_source_pool_manifest": run_root / CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH,
         "parallel_attestation_statistics_input_contract": run_root / PARALLEL_ATTESTATION_STATS_CONTRACT_RELATIVE_PATH,
         "stage_01_pooled_threshold_build_contract": run_root / STAGE_01_POOLED_THRESHOLD_BUILD_CONTRACT_RELATIVE_PATH,
         "run_closure": run_root / "artifacts" / "run_closure.json",
@@ -88,11 +90,12 @@ def _package_stage_outputs(
     runtime_state_root: Path,
     stage_manifest_path: Path,
     runtime_config_snapshot_path: Path,
+    canonical_source_pool_payload: Dict[str, Any],
     source_contract_payload: Dict[str, Any],
     pooled_threshold_build_contract_payload: Dict[str, Any],
 ) -> Path:
     package_root = ensure_directory(runtime_state_root / "package_staging")
-    for relative_path in [
+    static_relative_paths = [
         "records/embed_record.json",
         "records/detect_record.json",
         "records/calibration_record.json",
@@ -100,13 +103,15 @@ def _package_stage_outputs(
         "artifacts/thresholds/thresholds_artifact.json",
         "artifacts/thresholds/threshold_metadata_artifact.json",
         "artifacts/evaluation_report.json",
+        CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH,
         PARALLEL_ATTESTATION_STATS_CONTRACT_RELATIVE_PATH,
         STAGE_01_POOLED_THRESHOLD_BUILD_CONTRACT_RELATIVE_PATH,
         "artifacts/run_closure.json",
         "artifacts/workflow_summary.json",
         "artifacts/stage_manifest.json",
         "runtime_metadata/runtime_config_snapshot.yaml",
-    ]:
+    ]
+    for relative_path in static_relative_paths:
         source_path = run_root / relative_path
         if relative_path == "artifacts/stage_manifest.json":
             source_path = stage_manifest_path
@@ -114,7 +119,18 @@ def _package_stage_outputs(
             source_path = runtime_config_snapshot_path
         stage_relative_copy(source_path, package_root, relative_path)
 
-    copied_paths: set[str] = set()
+    copied_paths: set[str] = set(static_relative_paths)
+
+    def _copy_dynamic_package_path(source_path_value: Any, package_relative_path: Any, label: str) -> None:
+        if not isinstance(source_path_value, str) or not source_path_value:
+            raise ValueError(f"{label} missing source path")
+        if not isinstance(package_relative_path, str) or not package_relative_path:
+            raise ValueError(f"{label} missing package_relative_path")
+        if package_relative_path in copied_paths:
+            return
+        stage_relative_copy(Path(source_path_value), package_root, package_relative_path)
+        copied_paths.add(package_relative_path)
+
     for contract_payload in [source_contract_payload, pooled_threshold_build_contract_payload]:
         contract_records = contract_payload.get("records")
         if not isinstance(contract_records, list):
@@ -122,16 +138,32 @@ def _package_stage_outputs(
         for record_entry in contract_records:
             if not isinstance(record_entry, dict):
                 raise ValueError("stage 01 contract records must be objects")
-            source_path_value = record_entry.get("staged_path") or record_entry.get("path")
-            package_relative_path = record_entry.get("package_relative_path")
-            if not isinstance(source_path_value, str) or not source_path_value:
-                raise ValueError("stage 01 contract record missing staged_path/path")
-            if not isinstance(package_relative_path, str) or not package_relative_path:
-                raise ValueError("stage 01 contract record missing package_relative_path")
-            if package_relative_path in copied_paths:
-                continue
-            stage_relative_copy(Path(source_path_value), package_root, package_relative_path)
-            copied_paths.add(package_relative_path)
+            _copy_dynamic_package_path(
+                record_entry.get("staged_path") or record_entry.get("path"),
+                record_entry.get("package_relative_path"),
+                "stage 01 contract record",
+            )
+
+    canonical_entries = canonical_source_pool_payload.get("entries")
+    if not isinstance(canonical_entries, list):
+        raise ValueError("canonical source pool entries must be list")
+    for canonical_entry in canonical_entries:
+        if not isinstance(canonical_entry, dict):
+            raise ValueError("canonical source pool entry must be object")
+        entry_package_relative_path = canonical_entry.get("source_entry_package_relative_path")
+        if not isinstance(entry_package_relative_path, str) or not entry_package_relative_path:
+            raise ValueError("canonical source entry missing source_entry_package_relative_path")
+        _copy_dynamic_package_path(
+            (run_root / entry_package_relative_path).as_posix(),
+            entry_package_relative_path,
+            "canonical source entry",
+        )
+        for label, source_key, package_key in [
+            ("canonical source embed record", "embed_record_path", "embed_record_package_relative_path"),
+            ("canonical source detect record", "detect_record_path", "detect_record_package_relative_path"),
+            ("canonical source runtime config", "runtime_config_path", "runtime_config_package_relative_path"),
+        ]:
+            _copy_dynamic_package_path(canonical_entry.get(source_key), canonical_entry.get(package_key), label)
     return package_root
 
 
@@ -272,6 +304,11 @@ def run_stage_01(
         stats_contract_path,
         "stage 01 parallel_attestation_statistics_input_contract",
     )
+    canonical_source_pool_manifest_path = outputs["canonical_source_pool_manifest"]
+    canonical_source_pool_payload = _load_json_object(
+        canonical_source_pool_manifest_path,
+        "stage 01 canonical source pool manifest",
+    )
     pooled_threshold_build_contract_path = outputs["stage_01_pooled_threshold_build_contract"]
     pooled_threshold_build_contract_payload = _load_json_object(
         pooled_threshold_build_contract_path,
@@ -300,6 +337,22 @@ def run_stage_01(
             "calibration_record": outputs["calibration_record"],
             "evaluate_record": outputs["evaluate_record"],
         }),
+        "stage_01_canonical_source_pool_manifest_path": normalize_path_value(canonical_source_pool_manifest_path),
+        "stage_01_canonical_source_pool_manifest_package_relative_path": canonical_source_pool_payload.get(
+            "manifest_package_relative_path"
+        ),
+        "stage_01_canonical_source_pool_root_package_relative_path": canonical_source_pool_payload.get(
+            "canonical_source_pool_root_package_relative_path"
+        ),
+        "stage_01_canonical_source_pool_entries_package_relative_root": canonical_source_pool_payload.get(
+            "entries_package_relative_root"
+        ),
+        "stage_01_canonical_source_pool_entry_count": canonical_source_pool_payload.get("entry_count"),
+        "stage_01_canonical_source_pool_prompt_file": canonical_source_pool_payload.get("prompt_file"),
+        "stage_01_representative_root_records": canonical_source_pool_payload.get(
+            "representative_root_records",
+            {},
+        ),
         "parallel_attestation_statistics_input_contract_path": normalize_path_value(stats_contract_path),
         "parallel_attestation_statistics_input_contract_package_relative_path": PARALLEL_ATTESTATION_STATS_CONTRACT_RELATIVE_PATH,
         "parallel_attestation_statistics_input_contract_role": stats_contract_payload["contract_role"],
@@ -343,6 +396,7 @@ def run_stage_01(
         runtime_state_root,
         stage_manifest_path,
         runtime_config_snapshot_path,
+        canonical_source_pool_payload,
         stats_contract_payload,
         pooled_threshold_build_contract_payload,
     )
@@ -366,6 +420,8 @@ def run_stage_01(
         "export_root": normalize_path_value(export_root),
         "stage_manifest_path": normalize_path_value(stage_manifest_path),
         "package_manifest_path": normalize_path_value(package_manifest_path),
+        "canonical_source_pool_manifest_path": normalize_path_value(canonical_source_pool_manifest_path),
+        "canonical_source_pool_entry_count": canonical_source_pool_payload.get("entry_count"),
         "package_filename": build_stage_package_filename(STAGE_01_NAME, stage_run_id),
         "package_path": package_manifest["package_path"],
         "package_sha256": package_manifest["package_sha256"],
