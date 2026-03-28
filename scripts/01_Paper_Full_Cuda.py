@@ -131,6 +131,22 @@ def _package_stage_outputs(
         stage_relative_copy(Path(source_path_value), package_root, package_relative_path)
         copied_paths.add(package_relative_path)
 
+    def _copy_optional_artifact_view(artifact_view: Any, label: str) -> None:
+        if artifact_view is None:
+            return
+        if not isinstance(artifact_view, dict):
+            raise ValueError(f"{label} view must be object")
+        exists_value = artifact_view.get("exists")
+        if not isinstance(exists_value, bool):
+            raise ValueError(f"{label} view missing exists flag")
+        if not exists_value:
+            return
+        _copy_dynamic_package_path(
+            artifact_view.get("path"),
+            artifact_view.get("package_relative_path"),
+            label,
+        )
+
     for contract_payload in [source_contract_payload, pooled_threshold_build_contract_payload]:
         contract_records = contract_payload.get("records")
         if not isinstance(contract_records, list):
@@ -164,6 +180,13 @@ def _package_stage_outputs(
             ("canonical source runtime config", "runtime_config_path", "runtime_config_package_relative_path"),
         ]:
             _copy_dynamic_package_path(canonical_entry.get(source_key), canonical_entry.get(package_key), label)
+        for label, artifact_key in [
+            ("canonical source attestation statement", "attestation_statement"),
+            ("canonical source attestation bundle", "attestation_bundle"),
+            ("canonical source attestation result", "attestation_result"),
+            ("canonical source image", "source_image"),
+        ]:
+            _copy_optional_artifact_view(canonical_entry.get(artifact_key), label)
     return package_root
 
 
@@ -314,6 +337,9 @@ def run_stage_01(
         pooled_threshold_build_contract_path,
         "stage 01 pooled threshold build contract",
     )
+    representative_root_records = canonical_source_pool_payload.get("representative_root_records", {})
+    if not isinstance(representative_root_records, dict):
+        representative_root_records = {}
 
     stage_manifest_path = run_root / "artifacts" / "stage_manifest.json"
     stage_manifest: Dict[str, Any] = {
@@ -341,17 +367,26 @@ def run_stage_01(
         "stage_01_canonical_source_pool_manifest_package_relative_path": canonical_source_pool_payload.get(
             "manifest_package_relative_path"
         ),
+        "stage_01_canonical_source_pool_root_path": canonical_source_pool_payload.get(
+            "canonical_source_pool_root_path"
+        ),
         "stage_01_canonical_source_pool_root_package_relative_path": canonical_source_pool_payload.get(
             "canonical_source_pool_root_package_relative_path"
         ),
         "stage_01_canonical_source_pool_entries_package_relative_root": canonical_source_pool_payload.get(
             "entries_package_relative_root"
         ),
+        "stage_01_canonical_source_pool_prompt_count": canonical_source_pool_payload.get(
+            "prompt_count",
+            canonical_source_pool_payload.get("entry_count"),
+        ),
         "stage_01_canonical_source_pool_entry_count": canonical_source_pool_payload.get("entry_count"),
         "stage_01_canonical_source_pool_prompt_file": canonical_source_pool_payload.get("prompt_file"),
-        "stage_01_representative_root_records": canonical_source_pool_payload.get(
-            "representative_root_records",
-            {},
+        "stage_01_canonical_source_pool_prompt_file_path": canonical_source_pool_payload.get("prompt_file"),
+        "stage_01_representative_root_records": representative_root_records,
+        "stage_01_representative_root_prompt_index": representative_root_records.get("source_prompt_index"),
+        "stage_01_representative_root_source_entry_package_relative_path": representative_root_records.get(
+            "source_entry_package_relative_path"
         ),
         "parallel_attestation_statistics_input_contract_path": normalize_path_value(stats_contract_path),
         "parallel_attestation_statistics_input_contract_package_relative_path": PARALLEL_ATTESTATION_STATS_CONTRACT_RELATIVE_PATH,

@@ -23,6 +23,8 @@ from main.watermarking.detect import orchestrator as detect_orchestrator
 CANONICAL_SOURCE_POOL_RELATIVE_ROOT = "artifacts/stage_01_canonical_source_pool"
 CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH = f"{CANONICAL_SOURCE_POOL_RELATIVE_ROOT}/source_pool_manifest.json"
 CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT = f"{CANONICAL_SOURCE_POOL_RELATIVE_ROOT}/entries"
+CANONICAL_SOURCE_POOL_ATTESTATION_RELATIVE_ROOT = f"{CANONICAL_SOURCE_POOL_RELATIVE_ROOT}/attestation"
+CANONICAL_SOURCE_POOL_SOURCE_IMAGES_RELATIVE_ROOT = f"{CANONICAL_SOURCE_POOL_RELATIVE_ROOT}/source_images"
 
 
 def _load_script_module(relative_path: str, module_name: str) -> object:
@@ -63,6 +65,38 @@ def _write_json(path_obj: Path, payload: Dict[str, Any]) -> None:
     """
     path_obj.parent.mkdir(parents=True, exist_ok=True)
     path_obj.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _write_bytes(path_obj: Path, payload: bytes) -> None:
+    """
+    功能：写入二进制测试工件。
+
+    Write a binary payload for tests.
+
+    Args:
+        path_obj: Destination path.
+        payload: Binary payload.
+
+    Returns:
+        None.
+    """
+    path_obj.parent.mkdir(parents=True, exist_ok=True)
+    path_obj.write_bytes(payload)
+
+
+def _normalize_path_string(path_obj: Path) -> str:
+    """
+    功能：统一测试中的路径字符串格式。
+
+    Normalize a path string for cross-platform assertions in tests.
+
+    Args:
+        path_obj: Path to normalize.
+
+    Returns:
+        Forward-slash path string.
+    """
+    return path_obj.as_posix()
 
 
 def _make_detect_record(label: bool, score: float) -> Dict[str, Any]:
@@ -152,6 +186,22 @@ def _make_stage_01_source_pool_contract(run_root: Path, prompt_count: int) -> Di
         runtime_config_path = run_root / "artifacts" / "stage_01_source_pool_runtime_configs" / f"prompt_{prompt_index:03d}.yaml"
         entry_package_relative_path = f"{CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT}/{prompt_index:03d}_source_entry.json"
         entry_path = run_root / entry_package_relative_path
+        attestation_statement_package_relative_path = (
+            f"{CANONICAL_SOURCE_POOL_ATTESTATION_RELATIVE_ROOT}/prompt_{prompt_index:03d}/attestation_statement.json"
+        )
+        attestation_bundle_package_relative_path = (
+            f"{CANONICAL_SOURCE_POOL_ATTESTATION_RELATIVE_ROOT}/prompt_{prompt_index:03d}/attestation_bundle.json"
+        )
+        attestation_result_package_relative_path = (
+            f"{CANONICAL_SOURCE_POOL_ATTESTATION_RELATIVE_ROOT}/prompt_{prompt_index:03d}/attestation_result.json"
+        )
+        source_image_package_relative_path = (
+            f"{CANONICAL_SOURCE_POOL_SOURCE_IMAGES_RELATIVE_ROOT}/prompt_{prompt_index:03d}/preview.png"
+        )
+        attestation_statement_path = run_root / attestation_statement_package_relative_path
+        attestation_bundle_path = run_root / attestation_bundle_package_relative_path
+        attestation_result_path = run_root / attestation_result_package_relative_path
+        source_image_path = run_root / source_image_package_relative_path
         _write_json(
             record_path,
             {
@@ -174,29 +224,66 @@ def _make_stage_01_source_pool_contract(run_root: Path, prompt_count: int) -> Di
         _write_json(embed_record_path, {"status": "ok", "prompt_index": prompt_index})
         runtime_config_path.parent.mkdir(parents=True, exist_ok=True)
         runtime_config_path.write_text(f"prompt_index: {prompt_index}\n", encoding="utf-8")
+        _write_json(attestation_statement_path, {"status": "ok", "prompt_index": prompt_index})
+        _write_json(attestation_bundle_path, {"status": "ok", "prompt_index": prompt_index})
+        _write_json(
+            attestation_result_path,
+            {
+                "status": "ok",
+                "prompt_index": prompt_index,
+                "final_event_attested_decision": {
+                    "event_attestation_score": 0.95 - prompt_index * 1e-3,
+                },
+            },
+        )
+        _write_bytes(source_image_path, b"preview")
         _write_json(
             entry_path,
             {
                 "artifact_type": "stage_01_canonical_source_entry",
                 "entry_role": "canonical_source_entry",
-                "path": str(entry_path),
+                "path": _normalize_path_string(entry_path),
                 "source_entry_package_relative_path": entry_package_relative_path,
                 "prompt_index": prompt_index,
                 "prompt_text": f"prompt {prompt_index}",
                 "prompt_sha256": f"prompt_sha_{prompt_index:03d}",
                 "prompt_file": "prompts/paper_small.txt",
-                "detect_record_path": str(record_path),
+                "detect_record_path": _normalize_path_string(record_path),
                 "detect_record_package_relative_path": (
                     f"artifacts/stage_01_source_pool_detect_records/{prompt_index:03d}_detect_record.json"
                 ),
-                "embed_record_path": str(embed_record_path),
+                "embed_record_path": _normalize_path_string(embed_record_path),
                 "embed_record_package_relative_path": (
                     f"artifacts/stage_01_source_pool_embed_records/{prompt_index:03d}_embed_record.json"
                 ),
-                "runtime_config_path": str(runtime_config_path),
+                "runtime_config_path": _normalize_path_string(runtime_config_path),
                 "runtime_config_package_relative_path": (
                     f"artifacts/stage_01_source_pool_runtime_configs/prompt_{prompt_index:03d}.yaml"
                 ),
+                "attestation_statement": {
+                    "exists": True,
+                    "path": _normalize_path_string(attestation_statement_path),
+                    "package_relative_path": attestation_statement_package_relative_path,
+                    "missing_reason": None,
+                },
+                "attestation_bundle": {
+                    "exists": True,
+                    "path": _normalize_path_string(attestation_bundle_path),
+                    "package_relative_path": attestation_bundle_package_relative_path,
+                    "missing_reason": None,
+                },
+                "attestation_result": {
+                    "exists": True,
+                    "path": _normalize_path_string(attestation_result_path),
+                    "package_relative_path": attestation_result_package_relative_path,
+                    "missing_reason": None,
+                },
+                "source_image": {
+                    "exists": True,
+                    "path": _normalize_path_string(source_image_path),
+                    "package_relative_path": source_image_package_relative_path,
+                    "missing_reason": None,
+                },
                 "representative_root_records_alias": prompt_index == 0,
             },
         )
@@ -206,18 +293,42 @@ def _make_stage_01_source_pool_contract(run_root: Path, prompt_count: int) -> Di
                 "prompt_text": f"prompt {prompt_index}",
                 "prompt_sha256": f"prompt_sha_{prompt_index:03d}",
                 "source_entry_package_relative_path": entry_package_relative_path,
-                "detect_record_path": str(record_path),
+                "detect_record_path": _normalize_path_string(record_path),
                 "detect_record_package_relative_path": (
                     f"artifacts/stage_01_source_pool_detect_records/{prompt_index:03d}_detect_record.json"
                 ),
-                "embed_record_path": str(embed_record_path),
+                "embed_record_path": _normalize_path_string(embed_record_path),
                 "embed_record_package_relative_path": (
                     f"artifacts/stage_01_source_pool_embed_records/{prompt_index:03d}_embed_record.json"
                 ),
-                "runtime_config_path": str(runtime_config_path),
+                "runtime_config_path": _normalize_path_string(runtime_config_path),
                 "runtime_config_package_relative_path": (
                     f"artifacts/stage_01_source_pool_runtime_configs/prompt_{prompt_index:03d}.yaml"
                 ),
+                "attestation_statement": {
+                    "exists": True,
+                    "path": _normalize_path_string(attestation_statement_path),
+                    "package_relative_path": attestation_statement_package_relative_path,
+                    "missing_reason": None,
+                },
+                "attestation_bundle": {
+                    "exists": True,
+                    "path": _normalize_path_string(attestation_bundle_path),
+                    "package_relative_path": attestation_bundle_package_relative_path,
+                    "missing_reason": None,
+                },
+                "attestation_result": {
+                    "exists": True,
+                    "path": _normalize_path_string(attestation_result_path),
+                    "package_relative_path": attestation_result_package_relative_path,
+                    "missing_reason": None,
+                },
+                "source_image": {
+                    "exists": True,
+                    "path": _normalize_path_string(source_image_path),
+                    "package_relative_path": source_image_package_relative_path,
+                    "missing_reason": None,
+                },
                 "representative_root_records_alias": prompt_index == 0,
             }
         )
@@ -261,12 +372,13 @@ def _make_stage_01_source_pool_contract(run_root: Path, prompt_count: int) -> Di
             "stage_name": "01_Paper_Full_Cuda",
             "stage_run_id": "stage01_test",
             "prompt_file": "prompts/paper_small.txt",
-            "canonical_source_pool_root_path": str(run_root / CANONICAL_SOURCE_POOL_RELATIVE_ROOT),
+            "canonical_source_pool_root_path": _normalize_path_string(run_root / CANONICAL_SOURCE_POOL_RELATIVE_ROOT),
             "canonical_source_pool_root_package_relative_path": CANONICAL_SOURCE_POOL_RELATIVE_ROOT,
-            "manifest_path": str(manifest_path),
+            "manifest_path": _normalize_path_string(manifest_path),
             "manifest_package_relative_path": CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH,
-            "entries_root_path": str(run_root / CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT),
+            "entries_root_path": _normalize_path_string(run_root / CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT),
             "entries_package_relative_root": CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT,
+            "prompt_count": prompt_count,
             "entry_count": prompt_count,
             "entries": canonical_entries,
             "representative_root_records": {
@@ -643,7 +755,10 @@ def test_stage_01_writes_source_contract_even_when_direct_stats_not_ready(tmp_pa
         (run_root / CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH).read_text(encoding="utf-8")
     )
     assert canonical_manifest["artifact_role"] == "canonical_source_pool_root"
+    assert canonical_manifest["prompt_count"] == 16
     assert canonical_manifest["entry_count"] == 16
+    assert canonical_manifest["entries"][0]["attestation_statement"]["exists"] is True
+    assert canonical_manifest["entries"][0]["source_image"]["exists"] is True
     assert canonical_manifest["representative_root_records"]["view_role"] == "representative_summary_view"
 
     pooled_build_contract = json.loads(
@@ -666,8 +781,17 @@ def test_stage_01_writes_source_contract_even_when_direct_stats_not_ready(tmp_pa
     assert stage_manifest["stage_01_canonical_source_pool_manifest_package_relative_path"] == (
         CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH
     )
+    assert stage_manifest["stage_01_canonical_source_pool_root_path"] == (
+        run_root / CANONICAL_SOURCE_POOL_RELATIVE_ROOT
+    ).as_posix()
+    assert stage_manifest["stage_01_canonical_source_pool_prompt_count"] == 16
     assert stage_manifest["stage_01_canonical_source_pool_entry_count"] == 16
     assert stage_manifest["stage_01_representative_root_records"]["view_role"] == "representative_summary_view"
+    assert stage_manifest["stage_01_canonical_source_pool_prompt_file_path"] == "prompts/paper_small.txt"
+    assert stage_manifest["stage_01_representative_root_prompt_index"] == 0
+    assert stage_manifest["stage_01_representative_root_source_entry_package_relative_path"] == (
+        f"{CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT}/000_source_entry.json"
+    )
     assert stage_manifest["stage_01_pooled_threshold_build_mode"] == "source_plus_derived_pairs"
     assert stage_manifest["stage_01_pooled_threshold_direct_record_count"] == 16
     assert stage_manifest["stage_01_pooled_threshold_derived_record_count"] == 16
@@ -686,6 +810,12 @@ def test_stage_01_writes_source_contract_even_when_direct_stats_not_ready(tmp_pa
     ).exists()
     assert (
         runtime_state_root / "package_staging" / "artifacts" / "stage_01_source_pool_runtime_configs" / "prompt_015.yaml"
+    ).exists()
+    assert (
+        runtime_state_root / "package_staging" / CANONICAL_SOURCE_POOL_ATTESTATION_RELATIVE_ROOT / "prompt_015" / "attestation_result.json"
+    ).exists()
+    assert (
+        runtime_state_root / "package_staging" / CANONICAL_SOURCE_POOL_SOURCE_IMAGES_RELATIVE_ROOT / "prompt_015" / "preview.png"
     ).exists()
     assert (
         runtime_state_root / "package_staging" / "artifacts" / "stage_01_pooled_threshold_records" / "031_derived_negative.json"
@@ -937,7 +1067,20 @@ def test_stage_01_mainline_promotes_canonical_source_pool_and_keeps_compatibilit
     config_path.write_text("policy_path: content_np_geo_rescue\n", encoding="utf-8")
     run_root = tmp_path / "run_root"
 
-    monkeypatch.setattr(runner, "load_yaml_mapping", lambda _path: {"policy_path": "content_np_geo_rescue"})
+    monkeypatch.setattr(
+        runner,
+        "load_yaml_mapping",
+        lambda _path: {
+            "policy_path": "content_np_geo_rescue",
+            "attestation": {"enabled": True},
+            "embed": {
+                "preview_generation": {
+                    "enabled": True,
+                    "artifact_rel_path": "preview/preview.png",
+                }
+            },
+        },
+    )
     monkeypatch.setattr(
         runner,
         "_resolve_stage_01_source_pool_cfg",
@@ -967,7 +1110,10 @@ def test_stage_01_mainline_promotes_canonical_source_pool_and_keeps_compatibilit
 
     def _fake_run_stage(stage_name: str, _command: Any, stage_run_root: Path) -> Dict[str, Any]:
         if stage_name == "embed":
+            prompt_index = int(stage_run_root.name.split("_")[-1])
             _write_json(stage_run_root / "records" / "embed_record.json", {"status": "ok"})
+            if prompt_index == 0:
+                _write_bytes(stage_run_root / "artifacts" / "preview" / "preview.png", b"preview")
         elif stage_name == "detect":
             prompt_index = int(stage_run_root.name.split("_")[-1])
             _write_json(
@@ -989,6 +1135,18 @@ def test_stage_01_mainline_promotes_canonical_source_pool_and_keeps_compatibilit
                     },
                 },
             )
+            if prompt_index == 0:
+                _write_json(stage_run_root / "artifacts" / "attestation" / "attestation_statement.json", {"status": "ok"})
+                _write_json(stage_run_root / "artifacts" / "attestation" / "attestation_bundle.json", {"status": "ok"})
+                _write_json(
+                    stage_run_root / "artifacts" / "attestation" / "attestation_result.json",
+                    {
+                        "status": "ok",
+                        "final_event_attested_decision": {
+                            "event_attestation_score": 0.95 - prompt_index * 1e-3,
+                        },
+                    },
+                )
         elif stage_name == "calibrate":
             _write_json(run_root / "records" / "calibration_record.json", {"status": "ok"})
             _write_json(run_root / "artifacts" / "thresholds" / "thresholds_artifact.json", {"threshold": 0.5})
@@ -1015,9 +1173,16 @@ def test_stage_01_mainline_promotes_canonical_source_pool_and_keeps_compatibilit
         (run_root / "artifacts" / "parallel_attestation_statistics_input_contract.json").read_text(encoding="utf-8")
     )
     workflow_summary = json.loads((run_root / "artifacts" / "workflow_summary.json").read_text(encoding="utf-8"))
+    canonical_entry_0 = json.loads(
+        (run_root / CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT / "000_source_entry.json").read_text(encoding="utf-8")
+    )
+    canonical_entry_1 = json.loads(
+        (run_root / CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT / "001_source_entry.json").read_text(encoding="utf-8")
+    )
 
     assert exit_code == 0
     assert canonical_manifest["artifact_role"] == "canonical_source_pool_root"
+    assert canonical_manifest["prompt_count"] == 2
     assert canonical_manifest["entry_count"] == 2
     assert canonical_manifest["representative_root_records"]["view_role"] == "representative_summary_view"
     assert source_contract["source_authority"] == "canonical_source_pool"
@@ -1026,6 +1191,14 @@ def test_stage_01_mainline_promotes_canonical_source_pool_and_keeps_compatibilit
     assert source_contract["records"][0]["canonical_source_entry_package_relative_path"] == (
         f"{CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT}/000_source_entry.json"
     )
+    assert canonical_entry_0["attestation_statement"]["exists"] is True
+    assert canonical_entry_0["attestation_bundle"]["exists"] is True
+    assert canonical_entry_0["attestation_result"]["exists"] is True
+    assert canonical_entry_0["source_image"]["exists"] is True
+    assert canonical_entry_1["attestation_statement"]["exists"] is False
+    assert canonical_entry_1["attestation_statement"]["missing_reason"] == "attestation_statement_not_emitted"
+    assert canonical_entry_1["source_image"]["exists"] is False
+    assert canonical_entry_1["source_image"]["missing_reason"] == "source_image_not_emitted"
     assert workflow_summary["canonical_source_pool_entry_count"] == 2
     assert workflow_summary["representative_root_records"]["view_role"] == "representative_summary_view"
 

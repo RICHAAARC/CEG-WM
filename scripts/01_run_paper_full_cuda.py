@@ -39,6 +39,8 @@ POOLED_THRESHOLD_BUILD_CONTRACT_RELATIVE_PATH = "artifacts/stage_01_pooled_thres
 CANONICAL_SOURCE_POOL_RELATIVE_ROOT = "artifacts/stage_01_canonical_source_pool"
 CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH = f"{CANONICAL_SOURCE_POOL_RELATIVE_ROOT}/source_pool_manifest.json"
 CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT = f"{CANONICAL_SOURCE_POOL_RELATIVE_ROOT}/entries"
+CANONICAL_SOURCE_POOL_ATTESTATION_RELATIVE_ROOT = f"{CANONICAL_SOURCE_POOL_RELATIVE_ROOT}/attestation"
+CANONICAL_SOURCE_POOL_SOURCE_IMAGES_RELATIVE_ROOT = f"{CANONICAL_SOURCE_POOL_RELATIVE_ROOT}/source_images"
 SOURCE_POOL_DETECT_RECORDS_RELATIVE_ROOT = "artifacts/stage_01_source_pool_detect_records"
 SOURCE_POOL_EMBED_RECORDS_RELATIVE_ROOT = "artifacts/stage_01_source_pool_embed_records"
 POOLED_THRESHOLD_RECORDS_RELATIVE_ROOT = "artifacts/stage_01_pooled_threshold_records"
@@ -736,6 +738,226 @@ def _build_canonical_source_entry_package_relative_path(index: int) -> str:
     return f"{CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT}/{index:03d}_source_entry.json"
 
 
+def _build_prompt_scoped_package_relative_path(relative_root: str, index: int, file_name: str) -> str:
+    """
+    功能：为单条 prompt 构造 canonical source artifact 包内路径。
+
+    Build the package-relative path for one prompt-scoped canonical source
+    artifact.
+
+    Args:
+        relative_root: Root package-relative directory.
+        index: Prompt index.
+        file_name: Artifact file name.
+
+    Returns:
+        Prompt-scoped package-relative path.
+    """
+    if not isinstance(relative_root, str) or not relative_root:
+        raise TypeError("relative_root must be non-empty str")
+    if index < 0:
+        raise TypeError("index must be non-negative int")
+    if not isinstance(file_name, str) or not file_name:
+        raise TypeError("file_name must be non-empty str")
+    return f"{relative_root}/prompt_{index:03d}/{file_name}"
+
+
+def _build_optional_canonical_artifact_view(
+    *,
+    run_root: Path,
+    source_path: Optional[Path],
+    package_relative_path: Optional[str],
+    missing_reason: str,
+) -> Dict[str, Any]:
+    """
+    功能：构造 optional canonical source artifact 的显式视图。
+
+    Build an explicit artifact view for an optional canonical source artifact.
+
+    Args:
+        run_root: Stage-01 run root.
+        source_path: Source artifact path when discoverable.
+        package_relative_path: Canonical package-relative target path.
+        missing_reason: Stable missing-state reason.
+
+    Returns:
+        Artifact view carrying existence, path, and package-relative metadata.
+    """
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if source_path is not None and not isinstance(source_path, Path):
+        raise TypeError("source_path must be Path or None")
+    if package_relative_path is not None and (
+        not isinstance(package_relative_path, str) or not package_relative_path
+    ):
+        raise TypeError("package_relative_path must be non-empty str or None")
+    if not isinstance(missing_reason, str) or not missing_reason:
+        raise TypeError("missing_reason must be non-empty str")
+
+    staged_path: Optional[Path] = None
+    if isinstance(package_relative_path, str):
+        staged_path = run_root / package_relative_path
+
+    if isinstance(source_path, Path) and source_path.exists() and source_path.is_file():
+        if staged_path is None:
+            raise ValueError("package_relative_path is required when source artifact exists")
+        copy_file(source_path, staged_path)
+        return {
+            "exists": True,
+            "path": normalize_path_value(staged_path),
+            "package_relative_path": package_relative_path,
+            "missing_reason": None,
+        }
+
+    return {
+        "exists": False,
+        "path": normalize_path_value(staged_path) if isinstance(staged_path, Path) else None,
+        "package_relative_path": package_relative_path,
+        "missing_reason": missing_reason,
+    }
+
+
+def _resolve_source_pool_attestation_views(
+    *,
+    cfg_obj: Dict[str, Any],
+    run_root: Path,
+    prompt_run_root: Path,
+    prompt_index: int,
+) -> Dict[str, Dict[str, Any]]:
+    """
+    功能：解析 source pool prompt 子运行的 attestation artifact 视图。
+
+    Resolve prompt-scoped attestation artifact views for the stage-01 source
+    pool.
+
+    Args:
+        cfg_obj: Base runtime config mapping.
+        run_root: Stage-01 run root.
+        prompt_run_root: Prompt-bound subrun root.
+        prompt_index: Prompt index.
+
+    Returns:
+        Mapping from canonical attestation artifact name to artifact view.
+    """
+    if not isinstance(cfg_obj, dict):
+        raise TypeError("cfg_obj must be dict")
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(prompt_run_root, Path):
+        raise TypeError("prompt_run_root must be Path")
+    if prompt_index < 0:
+        raise TypeError("prompt_index must be non-negative int")
+
+    attestation_cfg = cfg_obj.get("attestation")
+    attestation_enabled = (
+        isinstance(attestation_cfg, dict)
+        and isinstance(attestation_cfg.get("enabled"), bool)
+        and attestation_cfg.get("enabled") is True
+    )
+    attestation_dir = prompt_run_root / "artifacts" / "attestation"
+    artifact_specs = {
+        "attestation_statement": ("attestation_statement.json", "attestation_statement_not_emitted"),
+        "attestation_bundle": ("attestation_bundle.json", "attestation_bundle_not_emitted"),
+        "attestation_result": ("attestation_result.json", "attestation_result_not_emitted"),
+    }
+
+    artifact_views: Dict[str, Dict[str, Any]] = {}
+    for artifact_key, (file_name, missing_reason) in artifact_specs.items():
+        package_relative_path = _build_prompt_scoped_package_relative_path(
+            CANONICAL_SOURCE_POOL_ATTESTATION_RELATIVE_ROOT,
+            prompt_index,
+            file_name,
+        )
+        artifact_views[artifact_key] = _build_optional_canonical_artifact_view(
+            run_root=run_root,
+            source_path=(attestation_dir / file_name) if attestation_enabled else None,
+            package_relative_path=package_relative_path,
+            missing_reason="attestation_disabled" if not attestation_enabled else missing_reason,
+        )
+    return artifact_views
+
+
+def _resolve_source_pool_source_image_view(
+    *,
+    cfg_obj: Dict[str, Any],
+    run_root: Path,
+    prompt_run_root: Path,
+    prompt_index: int,
+) -> Dict[str, Any]:
+    """
+    功能：解析 source pool prompt 子运行的 source image 视图。
+
+    Resolve the source-image view for one prompt-bound source-pool subrun.
+
+    Args:
+        cfg_obj: Base runtime config mapping.
+        run_root: Stage-01 run root.
+        prompt_run_root: Prompt-bound subrun root.
+        prompt_index: Prompt index.
+
+    Returns:
+        Source-image artifact view with explicit missing-state semantics.
+    """
+    if not isinstance(cfg_obj, dict):
+        raise TypeError("cfg_obj must be dict")
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(prompt_run_root, Path):
+        raise TypeError("prompt_run_root must be Path")
+    if prompt_index < 0:
+        raise TypeError("prompt_index must be non-negative int")
+
+    embed_cfg = cfg_obj.get("embed")
+    if not isinstance(embed_cfg, dict):
+        return _build_optional_canonical_artifact_view(
+            run_root=run_root,
+            source_path=None,
+            package_relative_path=None,
+            missing_reason="preview_generation_config_missing",
+        )
+    preview_cfg = embed_cfg.get("preview_generation")
+    if not isinstance(preview_cfg, dict):
+        return _build_optional_canonical_artifact_view(
+            run_root=run_root,
+            source_path=None,
+            package_relative_path=None,
+            missing_reason="preview_generation_config_missing",
+        )
+
+    preview_enabled = (
+        isinstance(preview_cfg.get("enabled"), bool) and preview_cfg.get("enabled") is True
+    )
+    if not preview_enabled:
+        return _build_optional_canonical_artifact_view(
+            run_root=run_root,
+            source_path=None,
+            package_relative_path=None,
+            missing_reason="preview_generation_disabled",
+        )
+
+    artifact_rel_path = preview_cfg.get("artifact_rel_path")
+    if not isinstance(artifact_rel_path, str) or not artifact_rel_path.strip():
+        return _build_optional_canonical_artifact_view(
+            run_root=run_root,
+            source_path=None,
+            package_relative_path=None,
+            missing_reason="preview_generation_artifact_rel_path_missing",
+        )
+
+    preview_rel_path = Path(artifact_rel_path.strip().replace("\\", "/"))
+    package_relative_path = _build_prompt_scoped_package_relative_path(
+        CANONICAL_SOURCE_POOL_SOURCE_IMAGES_RELATIVE_ROOT,
+        prompt_index,
+        preview_rel_path.name,
+    )
+    return _build_optional_canonical_artifact_view(
+        run_root=run_root,
+        source_path=prompt_run_root / "artifacts" / preview_rel_path,
+        package_relative_path=package_relative_path,
+        missing_reason="source_image_not_emitted",
+    )
+
+
 def _run_source_pool_subrun(
     *,
     index: int,
@@ -815,6 +1037,18 @@ def _run_source_pool_subrun(
 
     content_chain_score = _resolve_content_chain_score(direct_detect_payload)
     event_attestation_score = _resolve_event_attestation_score(direct_detect_payload)
+    attestation_views = _resolve_source_pool_attestation_views(
+        cfg_obj=cfg_obj,
+        run_root=run_root,
+        prompt_run_root=prompt_run_root,
+        prompt_index=index,
+    )
+    source_image_view = _resolve_source_pool_source_image_view(
+        cfg_obj=cfg_obj,
+        run_root=run_root,
+        prompt_run_root=prompt_run_root,
+        prompt_index=index,
+    )
     return {
         "record_kind": "direct",
         "record_usage": record_usage,
@@ -837,6 +1071,10 @@ def _run_source_pool_subrun(
         "label": True,
         "content_chain_score_available": isinstance(content_chain_score, float),
         "event_attestation_score_available": isinstance(event_attestation_score, float),
+        "attestation_statement": attestation_views["attestation_statement"],
+        "attestation_bundle": attestation_views["attestation_bundle"],
+        "attestation_result": attestation_views["attestation_result"],
+        "source_image": source_image_view,
         "payload": direct_detect_payload,
         "source_embed_record_path": normalize_path_value(source_embed_record_path),
         "source_detect_record_path": normalize_path_value(source_detect_record_path),
@@ -906,6 +1144,10 @@ def _build_stage_01_canonical_source_pool(
             "detect_record_path": entry["path"],
             "detect_record_package_relative_path": entry["package_relative_path"],
             "detect_record_sha256": entry["sha256"],
+            "attestation_statement": entry["attestation_statement"],
+            "attestation_bundle": entry["attestation_bundle"],
+            "attestation_result": entry["attestation_result"],
+            "source_image": entry["source_image"],
             "representative_root_records_alias": entry["prompt_index"] == representative_entry["prompt_index"],
         }
         write_json_atomic(entry_path, entry_payload)
@@ -923,6 +1165,10 @@ def _build_stage_01_canonical_source_pool(
                 "embed_record_package_relative_path": entry_payload["embed_record_package_relative_path"],
                 "runtime_config_path": entry_payload["runtime_config_path"],
                 "runtime_config_package_relative_path": entry_payload["runtime_config_package_relative_path"],
+                "attestation_statement": entry_payload["attestation_statement"],
+                "attestation_bundle": entry_payload["attestation_bundle"],
+                "attestation_result": entry_payload["attestation_result"],
+                "source_image": entry_payload["source_image"],
                 "representative_root_records_alias": entry_payload["representative_root_records_alias"],
             }
         )
@@ -951,6 +1197,7 @@ def _build_stage_01_canonical_source_pool(
         "manifest_package_relative_path": CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH,
         "entries_root_path": normalize_path_value(entries_root),
         "entries_package_relative_root": CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT,
+        "prompt_count": len(manifest_entries),
         "entry_count": len(manifest_entries),
         "entries": manifest_entries,
         "representative_root_records": representative_root_records,
