@@ -31,6 +31,7 @@ from scripts.notebook_runtime_common import (
     collect_weight_summary,
     compute_file_sha256,
     copy_stage_manifest_snapshot,
+    ensure_attestation_env_bootstrap,
     ensure_directory,
     finalize_stage_package,
     load_yaml_mapping,
@@ -46,7 +47,7 @@ from scripts.notebook_runtime_common import (
     write_json_atomic,
     write_yaml_mapping,
 )
-from scripts.workflow_acceptance_common import detect_formal_gpu_preflight
+from scripts.workflow_acceptance_common import detect_stage_02_preflight
 
 
 DEFAULT_CONFIG_PATH = Path("configs/default.yaml")
@@ -672,6 +673,12 @@ def run_stage_02(
     )
 
     cfg_obj = load_yaml_mapping(config_path)
+    ensure_attestation_env_bootstrap(
+        cfg_obj,
+        drive_project_root,
+        allow_generate=False,
+        allow_missing=True,
+    )
     build_cfg = _resolve_parallel_attestation_statistics_build_config(cfg_obj)
     build_contract_path, build_contract_payload = _build_parallel_attestation_statistics_inputs(
         extracted_root=extracted_root,
@@ -689,7 +696,11 @@ def run_stage_02(
     runtime_cfg = _build_runtime_config(cfg_obj, build_contract_payload, run_root)
     write_yaml_mapping(runtime_config_snapshot_path, runtime_cfg)
 
-    preflight = detect_formal_gpu_preflight(runtime_config_snapshot_path)
+    preflight = detect_stage_02_preflight(
+        runtime_config_snapshot_path,
+        source_package_path,
+        source_contract_path,
+    )
     if not bool(preflight.get("ok", False)):
         raise RuntimeError(f"formal GPU preflight failed: {json.dumps(preflight, ensure_ascii=False, sort_keys=True)}")
 

@@ -45,6 +45,7 @@ from scripts.notebook_runtime_common import (
     write_json_atomic,
     write_yaml_mapping,
 )
+from scripts.workflow_acceptance_common import detect_stage_04_preflight
 
 
 DEFAULT_CONFIG_PATH = Path("configs/default.yaml")
@@ -1657,6 +1658,13 @@ def run_stage_04(
             blocking_reasons=blocking_reasons,
         ),
     }
+
+    preflight = detect_stage_04_preflight(
+        config_path,
+        stage_inputs,
+        require_stage_02=require_stage_02,
+        require_stage_03=require_stage_03,
+    )
 
     lineage_paths = _persist_lineage_snapshots(runtime_state_root, stage_inputs)
     required_files: Dict[str, Dict[str, str]] = {}

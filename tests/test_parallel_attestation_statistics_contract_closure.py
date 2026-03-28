@@ -376,7 +376,7 @@ def _prepare_stage_02_monkeypatches(
         },
     )
     monkeypatch.setattr(stage_02, "load_yaml_mapping", lambda _path: config_payload)
-    monkeypatch.setattr(stage_02, "detect_formal_gpu_preflight", lambda _path: {"ok": True})
+    monkeypatch.setattr(stage_02, "detect_stage_02_preflight", lambda *_args: {"ok": True})
     monkeypatch.setattr(
         stage_02,
         "prepare_source_package",
@@ -450,7 +450,7 @@ def test_stage_01_writes_source_contract_even_when_direct_stats_not_ready(tmp_pa
         },
     )
     monkeypatch.setattr(stage_01, "load_yaml_mapping", lambda _path: {"attestation": {}})
-    monkeypatch.setattr(stage_01, "detect_formal_gpu_preflight", lambda _path: {"ok": True})
+    monkeypatch.setattr(stage_01, "detect_stage_01_preflight", lambda _path: {"ok": True})
     monkeypatch.setattr(
         stage_01,
         "copy_prompt_snapshot",
@@ -609,7 +609,7 @@ def test_stage_01_runner_failure_exposes_log_tails(
         },
     )
     monkeypatch.setattr(stage_01, "load_yaml_mapping", lambda _path: {"attestation": {}})
-    monkeypatch.setattr(stage_01, "detect_formal_gpu_preflight", lambda _path: {"ok": True})
+    monkeypatch.setattr(stage_01, "detect_stage_01_preflight", lambda _path: {"ok": True})
     monkeypatch.setattr(
         stage_01,
         "copy_prompt_snapshot",

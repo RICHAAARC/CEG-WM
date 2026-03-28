@@ -15,6 +15,7 @@ import json
 import os
 import platform
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -31,6 +32,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 STAGE_01_NAME = "01_Paper_Full_Cuda"
 STAGE_02_NAME = "02_Parallel_Attestation_Statistics"
 STAGE_03_NAME = "03_Experiment_Matrix_Full"
+ATTESTATION_ENV_FILE_NAME = "attestation_env.json"
+ATTESTATION_ENV_INFO_FILE_NAME = "attestation_env_info.json"
+ATTESTATION_ENV_VAR_LENGTHS = {
+    "k_master_env_var": 64,
+    "k_prompt_env_var": 32,
+    "k_seed_env_var": 32,
+}
 
 
 def utc_now_iso() -> str:
@@ -176,6 +184,381 @@ def resolve_repo_path(path_value: str, repo_root: Path = REPO_ROOT) -> Path:
     if candidate.is_absolute():
         return candidate.resolve()
     return (repo_root / candidate).resolve()
+
+
+def resolve_attestation_env_var_names(cfg_obj: Mapping[str, Any]) -> Dict[str, str]:
+    """
+    功能：解析 attestation 配置中的环境变量名。 
+
+    Resolve attestation environment-variable names from the runtime config.
+
+    Args:
+        cfg_obj: Runtime configuration mapping.
+
+    Returns:
+        Mapping from attestation config keys to environment-variable names.
+    """
+    attestation_node = cfg_obj.get("attestation")
+    attestation_cfg = cast(Dict[str, Any], attestation_node) if isinstance(attestation_node, dict) else {}
+    env_names: Dict[str, str] = {}
+    for config_key in ATTESTATION_ENV_VAR_LENGTHS:
+        raw_value = attestation_cfg.get(config_key)
+        if isinstance(raw_value, str) and raw_value.strip():
+            env_names[config_key] = raw_value.strip()
+    return env_names
+
+
+def _resolve_attestation_env_specs(
+    cfg_obj: Mapping[str, Any],
+    *,
+    require_complete: bool,
+) -> List[Dict[str, Any]]:
+    """
+    功能：解析 attestation secret 的规范集合。 
+
+    Resolve the attestation secret specifications from the runtime config.
+
+    Args:
+        cfg_obj: Runtime configuration mapping.
+        require_complete: Whether all configured attestation env vars must exist.
+
+    Returns:
+        Ordered attestation secret specification list.
+
+    Raises:
+        ValueError: If attestation is enabled and required env-var names are absent.
+    """
+    attestation_node = cfg_obj.get("attestation")
+    attestation_cfg = cast(Dict[str, Any], attestation_node) if isinstance(attestation_node, dict) else {}
+    attestation_enabled = bool(attestation_cfg.get("enabled", False))
+    env_var_names = resolve_attestation_env_var_names(cfg_obj)
+    specs: List[Dict[str, Any]] = []
+    missing_config_keys: List[str] = []
+    for config_key, hex_length in ATTESTATION_ENV_VAR_LENGTHS.items():
+        env_name = env_var_names.get(config_key)
+        if env_name is None:
+            missing_config_keys.append(config_key)
+            continue
+        specs.append(
+            {
+                "config_key": config_key,
+                "env_name": env_name,
+                "hex_length": hex_length,
+            }
+        )
+    if attestation_enabled and require_complete and missing_config_keys:
+        raise ValueError(
+            "attestation.enabled requires env-var bindings for all secret roles: "
+            f"missing={missing_config_keys}"
+        )
+    return specs
+
+
+def validate_attestation_hex_secret(secret_value: str, expected_hex_length: int, label: str) -> str:
+    """
+    功能：校验 attestation secret 的十六进制格式与长度。 
+
+    Validate the format and length of one attestation secret.
+
+    Args:
+        secret_value: Candidate secret string.
+        expected_hex_length: Required hexadecimal length.
+        label: Human-readable label used in error reporting.
+
+    Returns:
+        Canonical lowercase secret string.
+
+    Raises:
+        ValueError: If the secret is not valid lowercase/uppercase hexadecimal with the required length.
+    """
+    if not secret_value.strip():
+        raise ValueError(f"{label} must be non-empty hex string")
+    if expected_hex_length <= 0:
+        raise TypeError("expected_hex_length must be positive int")
+    if not label:
+        raise TypeError("label must be non-empty str")
+
+    normalized_secret = secret_value.strip().lower()
+    if len(normalized_secret) != expected_hex_length:
+        raise ValueError(
+            f"{label} must be exactly {expected_hex_length} hex chars: actual={len(normalized_secret)}"
+        )
+    if re.fullmatch(r"[0-9a-f]+", normalized_secret) is None:
+        raise ValueError(f"{label} must contain only hexadecimal characters")
+    return normalized_secret
+
+
+def _mask_attestation_secret(secret_value: str) -> str:
+    """
+    功能：构造不泄漏真实值的 masked secret。 
+
+    Build a masked representation for one attestation secret.
+
+    Args:
+        secret_value: Canonical secret string.
+
+    Returns:
+        Masked secret string.
+    """
+    if not secret_value:
+        raise TypeError("secret_value must be non-empty str")
+    if len(secret_value) <= 8:
+        return "*" * len(secret_value)
+    return f"{secret_value[:4]}...{secret_value[-4:]}"
+
+
+def generate_attestation_session_env(cfg_obj: Mapping[str, Any]) -> Dict[str, str]:
+    """
+    功能：生成本次会话使用的临时 attestation secrets。 
+
+    Generate session-scoped attestation secrets for the configured env vars.
+
+    Args:
+        cfg_obj: Runtime configuration mapping.
+
+    Returns:
+        Mapping from env-var name to generated secret value.
+    """
+    specs = _resolve_attestation_env_specs(cfg_obj, require_complete=True)
+    generated_payload: Dict[str, str] = {}
+    for spec in specs:
+        env_name = str(spec["env_name"])
+        hex_length = int(spec["hex_length"])
+        generated_payload[env_name] = secrets.token_hex(hex_length // 2)
+    return generated_payload
+
+
+def _resolve_attestation_secret_paths(drive_project_root: Path) -> Dict[str, Path]:
+    """
+    功能：解析 attestation secret 与 masked info 的固定路径。 
+
+    Resolve the canonical attestation secret and info paths under the Drive project root.
+
+    Args:
+        drive_project_root: Google Drive project root.
+
+    Returns:
+        Mapping with secrets_root, attestation_env_path, and attestation_env_info_path.
+    """
+    secrets_root = drive_project_root / "secrets"
+    return {
+        "secrets_root": secrets_root,
+        "attestation_env_path": secrets_root / ATTESTATION_ENV_FILE_NAME,
+        "attestation_env_info_path": secrets_root / ATTESTATION_ENV_INFO_FILE_NAME,
+    }
+
+
+def write_attestation_env_file(attestation_env_path: Path, env_payload: Mapping[str, Any]) -> Path:
+    """
+    功能：写出真实 attestation_env.json。 
+
+    Persist the real attestation secret mapping to the canonical JSON file.
+
+    Args:
+        attestation_env_path: Destination JSON path.
+        env_payload: Env-var to secret mapping.
+
+    Returns:
+        Written JSON path.
+    """
+    normalized_payload: Dict[str, str] = {}
+    for env_name, secret_value in env_payload.items():
+        if not isinstance(env_name, str) or not env_name:
+            raise ValueError("attestation env payload keys must be non-empty str")
+        if not isinstance(secret_value, str) or not secret_value:
+            raise ValueError(f"attestation env payload value must be non-empty str: {env_name}")
+        normalized_payload[env_name] = secret_value
+
+    write_json_atomic(attestation_env_path, normalized_payload)
+    return attestation_env_path
+
+
+def write_masked_attestation_env_info(
+    attestation_env_info_path: Path,
+    cfg_obj: Mapping[str, Any],
+    env_payload: Mapping[str, Any],
+    *,
+    status: str,
+    reused_existing: bool,
+    generated: bool,
+    attestation_env_path: Optional[Path] = None,
+) -> Path:
+    """
+    功能：写出不包含真实 secret 的 masked info 文件。 
+
+    Persist the masked attestation info payload without leaking the real secret values.
+
+    Args:
+        attestation_env_info_path: Destination JSON path.
+        cfg_obj: Runtime configuration mapping.
+        env_payload: Valid env-var to secret mapping.
+        status: Bootstrap status token.
+        reused_existing: Whether the secret file was reused.
+        generated: Whether the secret file was generated in the current session.
+        attestation_env_path: Optional real secret-file path.
+
+    Returns:
+        Written info JSON path.
+    """
+    if not status:
+        raise TypeError("status must be non-empty str")
+
+    required_env_vars = [spec["env_name"] for spec in _resolve_attestation_env_specs(cfg_obj, require_complete=True)]
+    masked_values: Dict[str, str] = {}
+    for env_name in required_env_vars:
+        secret_value = env_payload.get(env_name)
+        if not isinstance(secret_value, str) or not secret_value:
+            raise ValueError(f"masked attestation info requires non-empty secret for {env_name}")
+        masked_values[str(env_name)] = _mask_attestation_secret(secret_value)
+
+    attestation_node = cfg_obj.get("attestation")
+    attestation_cfg = cast(Dict[str, Any], attestation_node) if isinstance(attestation_node, dict) else {}
+    info_payload: Dict[str, Any] = {
+        "enabled": bool(attestation_cfg.get("enabled", False)),
+        "status": status,
+        "generated": generated,
+        "reused_existing": reused_existing,
+        "attestation_env_path": normalize_path_value(attestation_env_path),
+        "required_env_vars": required_env_vars,
+        "masked_values": masked_values,
+    }
+    write_json_atomic(attestation_env_info_path, info_payload)
+    return attestation_env_info_path
+
+
+def restore_attestation_env_from_file(cfg_obj: Mapping[str, Any], attestation_env_path: Path) -> Dict[str, str]:
+    """
+    功能：从 secrets 文件恢复并注入 attestation 环境变量。 
+
+    Restore attestation secrets from the canonical JSON file and inject them into os.environ.
+
+    Args:
+        cfg_obj: Runtime configuration mapping.
+        attestation_env_path: Canonical secret-file path.
+
+    Returns:
+        Validated env-var to secret mapping.
+
+    Raises:
+        FileNotFoundError: If the secret file is missing.
+        ValueError: If the secret file is malformed or fails validation.
+    """
+    if not attestation_env_path.exists() or not attestation_env_path.is_file():
+        raise FileNotFoundError(f"attestation secret file not found: {normalize_path_value(attestation_env_path)}")
+
+    payload = json.loads(attestation_env_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("attestation secret file must have a JSON object root")
+    payload_obj = cast(Dict[str, Any], payload)
+
+    restored_payload: Dict[str, str] = {}
+    for spec in _resolve_attestation_env_specs(cfg_obj, require_complete=True):
+        env_name = str(spec["env_name"])
+        secret_value = payload_obj.get(env_name)
+        validated_secret = validate_attestation_hex_secret(
+            str(secret_value) if isinstance(secret_value, str) else "",
+            int(spec["hex_length"]),
+            env_name,
+        )
+        restored_payload[env_name] = validated_secret
+        os.environ[env_name] = validated_secret
+    return restored_payload
+
+
+def ensure_attestation_env_bootstrap(
+    cfg_obj: Mapping[str, Any],
+    drive_project_root: Path,
+    *,
+    allow_generate: bool,
+    allow_missing: bool = False,
+) -> Dict[str, Any]:
+    """
+    功能：复用或引导 attestation secret，并返回 masked summary。 
+
+    Reuse or bootstrap attestation secrets, inject them into os.environ, and return a masked summary.
+
+    Args:
+        cfg_obj: Runtime configuration mapping.
+        drive_project_root: Google Drive project root.
+        allow_generate: Whether missing secrets may be generated for the current session.
+        allow_missing: Whether a missing secret file should return a non-blocking summary.
+
+    Returns:
+        Masked attestation environment summary suitable for notebooks and stage wrappers.
+
+    Raises:
+        FileNotFoundError: If secrets are missing and generation is not allowed.
+        ValueError: If the existing secret file is malformed.
+    """
+    attestation_node = cfg_obj.get("attestation")
+    attestation_cfg = cast(Dict[str, Any], attestation_node) if isinstance(attestation_node, dict) else {}
+    attestation_enabled = bool(attestation_cfg.get("enabled", False))
+    env_names = resolve_attestation_env_var_names(cfg_obj)
+    path_mapping = _resolve_attestation_secret_paths(drive_project_root)
+    attestation_env_path = path_mapping["attestation_env_path"]
+    attestation_env_info_path = path_mapping["attestation_env_info_path"]
+
+    summary: Dict[str, Any] = {
+        "enabled": attestation_enabled,
+        "status": "disabled" if not attestation_enabled else "pending",
+        "generated": False,
+        "reused_existing": False,
+        "required_env_vars": list(env_names.values()),
+        "present_env_vars": [],
+        "missing_env_vars": list(env_names.values()),
+        "masked_values": {},
+        "attestation_env_path": normalize_path_value(attestation_env_path),
+        "attestation_env_info_path": normalize_path_value(attestation_env_info_path),
+    }
+    if not attestation_enabled:
+        return summary
+
+    env_payload: Dict[str, str]
+    if attestation_env_path.exists():
+        env_payload = restore_attestation_env_from_file(cfg_obj, attestation_env_path)
+        summary["status"] = "reused"
+        summary["reused_existing"] = True
+    elif allow_generate:
+        env_payload = generate_attestation_session_env(cfg_obj)
+        ensure_directory(path_mapping["secrets_root"])
+        write_attestation_env_file(attestation_env_path, env_payload)
+        for env_name, secret_value in env_payload.items():
+            os.environ[env_name] = secret_value
+        summary["status"] = "generated"
+        summary["generated"] = True
+    elif allow_missing:
+        summary["status"] = "missing"
+        return summary
+    else:
+        raise FileNotFoundError(
+            f"attestation secret file not found: {normalize_path_value(attestation_env_path)}"
+        )
+
+    write_masked_attestation_env_info(
+        attestation_env_info_path,
+        cfg_obj,
+        env_payload,
+        status=str(summary["status"]),
+        reused_existing=bool(summary["reused_existing"]),
+        generated=bool(summary["generated"]),
+        attestation_env_path=attestation_env_path,
+    )
+
+    final_summary = collect_attestation_env_summary(cfg_obj)
+    final_summary.update(
+        {
+            "status": summary["status"],
+            "generated": summary["generated"],
+            "reused_existing": summary["reused_existing"],
+            "masked_values": {
+                env_name: _mask_attestation_secret(secret_value)
+                for env_name, secret_value in env_payload.items()
+            },
+            "attestation_env_path": normalize_path_value(attestation_env_path),
+            "attestation_env_info_path": normalize_path_value(attestation_env_info_path),
+        }
+    )
+    return final_summary
 
 
 def write_json_atomic(path_obj: Path, payload: Mapping[str, Any]) -> None:
@@ -670,11 +1053,7 @@ def collect_attestation_env_summary(cfg_obj: Mapping[str, Any]) -> Dict[str, Any
         raise TypeError("cfg_obj must be Mapping")
     attestation_node = cfg_obj.get("attestation")
     attestation_cfg = cast(Dict[str, Any], attestation_node) if isinstance(attestation_node, dict) else {}
-    env_names: List[str] = []
-    for key_name in ("k_master_env_var", "k_prompt_env_var", "k_seed_env_var"):
-        value = attestation_cfg.get(key_name)
-        if isinstance(value, str) and value:
-            env_names.append(value)
+    env_names = list(resolve_attestation_env_var_names(cfg_obj).values())
     return {
         "enabled": bool(attestation_cfg.get("enabled", False)),
         "required_env_vars": env_names,

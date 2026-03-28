@@ -29,6 +29,7 @@ from scripts.notebook_runtime_common import (
     collect_weight_summary,
     compute_file_sha256,
     copy_prompt_snapshot,
+    ensure_attestation_env_bootstrap,
     ensure_directory,
     finalize_stage_package,
     load_yaml_mapping,
@@ -44,7 +45,7 @@ from scripts.notebook_runtime_common import (
     write_json_atomic,
     write_yaml_mapping,
 )
-from scripts.workflow_acceptance_common import detect_formal_gpu_preflight
+from scripts.workflow_acceptance_common import detect_stage_01_preflight
 
 
 DEFAULT_CONFIG_PATH = Path("configs/default.yaml")
@@ -223,7 +224,13 @@ def run_stage_01(
     write_yaml_mapping(runtime_config_snapshot_path, cfg_obj)
     prompt_snapshot = copy_prompt_snapshot(REPO_ROOT, cfg_obj, runtime_state_root / "runtime_metadata" / "prompt_snapshot")
 
-    preflight = detect_formal_gpu_preflight(runtime_config_snapshot_path)
+    ensure_attestation_env_bootstrap(
+        cfg_obj,
+        drive_project_root,
+        allow_generate=False,
+        allow_missing=True,
+    )
+    preflight = detect_stage_01_preflight(runtime_config_snapshot_path)
     if not bool(preflight.get("ok", False)):
         raise RuntimeError(f"formal GPU preflight failed: {json.dumps(preflight, ensure_ascii=False, sort_keys=True)}")
 
