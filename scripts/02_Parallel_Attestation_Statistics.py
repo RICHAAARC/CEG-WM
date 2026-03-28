@@ -702,7 +702,7 @@ def run_stage_02(
         source_contract_path,
     )
     if not bool(preflight.get("ok", False)):
-        raise RuntimeError(f"formal GPU preflight failed: {json.dumps(preflight, ensure_ascii=False, sort_keys=True)}")
+        raise RuntimeError(f"stage 02 preflight failed: {json.dumps(preflight, ensure_ascii=False, sort_keys=True)}")
 
     stage_results: Dict[str, Any] = {}
     for stage_name in ("calibrate", "evaluate"):

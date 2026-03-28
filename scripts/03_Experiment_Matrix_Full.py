@@ -170,7 +170,7 @@ def run_stage_03(
         source_lineage_paths["source_thresholds_artifact_path"],
     )
     if not bool(preflight.get("ok", False)):
-        raise RuntimeError(f"formal GPU preflight failed: {json.dumps(preflight, ensure_ascii=False, sort_keys=True)}")
+        raise RuntimeError(f"stage 03 preflight failed: {json.dumps(preflight, ensure_ascii=False, sort_keys=True)}")
 
     command = [
         sys.executable,
