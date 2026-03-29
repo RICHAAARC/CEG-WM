@@ -31,6 +31,7 @@ TRAJECTORY_TAP_VERSION = "v1"
 DEFAULT_STATS_PRECISION_DIGITS = 6
 DEFAULT_TENSOR_TYPES = ["latent"]
 DEFAULT_MODULE_PATHS = ["transformer"]
+MAX_CAPTURE_FAILURE_EXAMPLES = 4
 
 ALLOWED_ABSENT_REASONS = {
     "tap_disabled",
@@ -60,6 +61,23 @@ class LatentTrajectoryCache:
     def __init__(self) -> None:
         # {step_index: numpy_array}，仅内存存储。
         self._cache: Dict[int, Any] = {}
+        self._capture_attempt_count = 0
+        self._capture_success_count = 0
+        self._capture_failure_count = 0
+        self._failure_examples: List[Dict[str, Any]] = []
+
+    def _record_capture_failure(self, step_index: int, latent: Any, exc: BaseException) -> None:
+        self._capture_failure_count += 1
+        if len(self._failure_examples) >= MAX_CAPTURE_FAILURE_EXAMPLES:
+            return
+        self._failure_examples.append(
+            {
+                "step_index": int(step_index),
+                "latent_type": type(latent).__name__,
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
+            }
+        )
 
     def capture(self, step_index: int, latent: Any) -> None:
         """
@@ -78,19 +96,49 @@ class LatentTrajectoryCache:
             return
         if latent is None:
             return
+        self._capture_attempt_count += 1
         try:
-            # 优先转换为 numpy，避免持有 torch tensor 引用导致的内存占用。
-            if hasattr(latent, "detach"):
-                arr = latent.detach().cpu()
-            else:
-                arr = latent
-            if hasattr(arr, "numpy"):
+            # 与 trajectory summary 保持一致的张量转 numpy 路径，避免 callback 已运行但 cache 无声丢失。
+            arr = latent
+            if hasattr(arr, "detach") and callable(arr.detach):
+                arr = arr.detach()
+            if hasattr(arr, "float") and callable(arr.float):
+                arr = arr.float()
+            if hasattr(arr, "cpu") and callable(arr.cpu):
+                arr = arr.cpu()
+            if hasattr(arr, "numpy") and callable(arr.numpy):
                 arr = arr.numpy()
-            import numpy as _np
-            self._cache[step_index] = _np.array(arr, dtype=_np.float32, copy=True)
-        except Exception:
-            # 张量转换失败时静默跳过，不阻断推理流程。
-            pass
+            else:
+                arr = np.asarray(arr)
+            latent_array = np.asarray(arr, dtype=np.float32)
+            if latent_array.size == 0:
+                raise ValueError("latent_array_empty")
+            self._cache[step_index] = np.array(latent_array, dtype=np.float32, copy=True)
+            self._capture_success_count += 1
+        except Exception as exc:
+            self._record_capture_failure(step_index, latent, exc)
+
+    def capture_diagnostics(self) -> Dict[str, Any]:
+        """
+        功能：返回 trajectory latent cache 的结构化捕获诊断。 
+
+        Return structured capture diagnostics for the in-memory latent cache.
+
+        Args:
+            None.
+
+        Returns:
+            Diagnostic mapping with attempt/success/failure counters.
+        """
+        return {
+            "capture_attempt_count": int(self._capture_attempt_count),
+            "capture_success_count": int(self._capture_success_count),
+            "capture_failure_count": int(self._capture_failure_count),
+            "failure_examples": [dict(item) for item in self._failure_examples],
+            "available_steps": self.available_steps(),
+            "step_count": len(self._cache),
+            "is_empty": self.is_empty(),
+        }
 
     def get(self, step_index: int) -> Optional[Any]:
         """
@@ -317,6 +365,98 @@ def build_trajectory_evidence(
         return _build_absent_evidence("tap_exception")
 
 
+def _build_trajectory_cache_capture_meta(
+    latent_capture_cache: Optional["LatentTrajectoryCache"],
+    *,
+    supports_callback: bool,
+    callback_invocation_count: int,
+    callback_latent_present_count: int,
+    tap_captured_step_count: int,
+    required_cache_steps: Optional[List[int]] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    功能：构造 runtime trajectory cache 的结构化捕获状态。 
+
+    Build structured runtime capture state for the latent cache.
+
+    Args:
+        latent_capture_cache: In-memory cache object or None.
+        supports_callback: Whether the pipeline supports callback-based tapping.
+        callback_invocation_count: Number of callback invocations observed.
+        callback_latent_present_count: Number of callback invocations with latents.
+        tap_captured_step_count: Number of tap summary steps captured.
+        required_cache_steps: Exact planner-required step indices.
+
+    Returns:
+        Structured capture metadata mapping, or None when cache was not requested.
+    """
+    if latent_capture_cache is None:
+        return None
+
+    diagnostics = latent_capture_cache.capture_diagnostics()
+    available_steps = diagnostics.get("available_steps")
+    if not isinstance(available_steps, list):
+        available_steps = []
+    normalized_available_steps = [int(value) for value in available_steps if isinstance(value, int)]
+
+    normalized_required_steps: List[int] = []
+    if isinstance(required_cache_steps, list):
+        normalized_required_steps = sorted(
+            {
+                int(value)
+                for value in required_cache_steps
+                if isinstance(value, int) and int(value) >= 0
+            }
+        )
+
+    missing_required_steps = [
+        step_index
+        for step_index in normalized_required_steps
+        if step_index not in normalized_available_steps
+    ]
+    capture_success_count = diagnostics.get("capture_success_count")
+    capture_failure_count = diagnostics.get("capture_failure_count")
+    capture_attempt_count = diagnostics.get("capture_attempt_count")
+    failure_examples = diagnostics.get("failure_examples")
+
+    if not isinstance(capture_success_count, int):
+        capture_success_count = len(normalized_available_steps)
+    if not isinstance(capture_failure_count, int):
+        capture_failure_count = 0
+    if not isinstance(capture_attempt_count, int):
+        capture_attempt_count = int(capture_success_count) + int(capture_failure_count)
+    if not isinstance(failure_examples, list):
+        failure_examples = []
+
+    if not supports_callback:
+        capture_status = "unsupported_pipeline"
+    elif callback_invocation_count <= 0:
+        capture_status = "callback_not_observed"
+    elif callback_latent_present_count <= 0:
+        capture_status = "callback_invoked_without_latents"
+    elif capture_success_count <= 0:
+        capture_status = "all_failed"
+    elif missing_required_steps:
+        capture_status = "partial"
+    else:
+        capture_status = "complete"
+
+    return {
+        "trajectory_cache_capture_status": capture_status,
+        "trajectory_cache_step_count": len(normalized_available_steps),
+        "trajectory_cache_capture_attempt_count": int(capture_attempt_count),
+        "trajectory_cache_capture_success_count": int(capture_success_count),
+        "trajectory_cache_capture_failure_count": int(capture_failure_count),
+        "trajectory_cache_capture_failure_examples": [dict(item) for item in failure_examples if isinstance(item, dict)],
+        "trajectory_cache_available_steps": normalized_available_steps,
+        "trajectory_cache_required_step_count": len(normalized_required_steps),
+        "trajectory_cache_missing_required_steps": missing_required_steps,
+        "trajectory_cache_callback_invocation_count": int(callback_invocation_count),
+        "trajectory_cache_callback_latent_present_count": int(callback_latent_present_count),
+        "trajectory_cache_tap_captured_step_count": int(tap_captured_step_count),
+    }
+
+
 def tap_from_pipeline(
     cfg: Dict[str, Any],
     pipeline_obj: Any,
@@ -392,18 +532,32 @@ def tap_from_pipeline(
         return {
             "output": output,
             "trajectory_evidence": absent,
-            "tap_status": "unsupported"
+            "tap_status": "unsupported",
+            "trajectory_cache_capture_meta": _build_trajectory_cache_capture_meta(
+                latent_capture_cache,
+                supports_callback=False,
+                callback_invocation_count=0,
+                callback_latent_present_count=0,
+                tap_captured_step_count=0,
+                required_cache_steps=sorted(set(spec.scheduler_steps)),
+            ),
         }
 
     captured: Dict[int, Dict[str, Any]] = {}
+    callback_invocation_count = 0
+    callback_latent_present_count = 0
+    required_cache_steps = sorted(set(spec.scheduler_steps))
 
     def _step_callback(_pipe: Any, step_index: int, timestep: Any, callback_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        nonlocal callback_invocation_count, callback_latent_present_count
+        callback_invocation_count += 1
         if not isinstance(callback_kwargs, dict):
             return callback_kwargs
 
         latents = callback_kwargs.get("latents")
         if latents is None:
             return callback_kwargs
+        callback_latent_present_count += 1
 
         if not isinstance(step_index, int) or step_index < 0:
             return callback_kwargs
@@ -475,7 +629,15 @@ def tap_from_pipeline(
     return {
         "output": output,
         "trajectory_evidence": evidence,
-        "tap_status": "ok" if evidence.get("status") == "ok" else "absent"
+        "tap_status": "ok" if evidence.get("status") == "ok" else "absent",
+        "trajectory_cache_capture_meta": _build_trajectory_cache_capture_meta(
+            latent_capture_cache,
+            supports_callback=True,
+            callback_invocation_count=callback_invocation_count,
+            callback_latent_present_count=callback_latent_present_count,
+            tap_captured_step_count=len(captured),
+            required_cache_steps=required_cache_steps,
+        ),
     }
 
 

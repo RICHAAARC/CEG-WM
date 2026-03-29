@@ -25,6 +25,47 @@ INFERENCE_STATUS_FAILED = "failed"
 INFERENCE_STATUS_DISABLED = "disabled"
 
 
+def _bind_trajectory_cache_capture_meta(
+    inference_runtime_meta: Dict[str, Any],
+    trajectory_cache_capture_meta: Any,
+) -> Dict[str, Any] | None:
+    """
+    功能：将 trajectory cache 捕获诊断写入 inference_runtime_meta。 
+
+    Bind trajectory-cache capture diagnostics into inference runtime metadata.
+
+    Args:
+        inference_runtime_meta: Mutable inference runtime metadata mapping.
+        trajectory_cache_capture_meta: Candidate capture metadata payload.
+
+    Returns:
+        Normalized capture metadata mapping or None.
+    """
+    if not isinstance(inference_runtime_meta, dict):
+        return None
+    if not isinstance(trajectory_cache_capture_meta, dict):
+        return None
+
+    normalized_meta = dict(cast(Dict[str, Any], trajectory_cache_capture_meta))
+    inference_runtime_meta["trajectory_cache_capture"] = normalized_meta
+    for field_name in [
+        "trajectory_cache_capture_status",
+        "trajectory_cache_step_count",
+        "trajectory_cache_capture_attempt_count",
+        "trajectory_cache_capture_success_count",
+        "trajectory_cache_capture_failure_count",
+        "trajectory_cache_capture_failure_examples",
+        "trajectory_cache_available_steps",
+        "trajectory_cache_required_step_count",
+        "trajectory_cache_missing_required_steps",
+        "trajectory_cache_callback_invocation_count",
+        "trajectory_cache_callback_latent_present_count",
+        "trajectory_cache_tap_captured_step_count",
+    ]:
+        inference_runtime_meta[field_name] = normalized_meta.get(field_name)
+    return normalized_meta
+
+
 def run_sd3_inference(
     cfg: Dict[str, Any],
     pipeline_obj: Any,
@@ -104,6 +145,7 @@ def run_sd3_inference(
     runtime_attention_source = "<absent>"
     attention_capture_hook = None
     output_image = None  # SD 推理输出图像（PIL Image），供调用方保存到磁盘
+    trajectory_cache_capture_meta: Dict[str, Any] | None = None
 
     # (1) 检查 pipeline_obj 是否可用
     if pipeline_obj is None:
@@ -382,6 +424,10 @@ def run_sd3_inference(
         output = tap_call_result.get("output")
         trajectory_evidence = tap_call_result.get("trajectory_evidence")
         tap_status = tap_call_result.get("tap_status")
+        trajectory_cache_capture_meta = _bind_trajectory_cache_capture_meta(
+            inference_runtime_meta,
+            tap_call_result.get("trajectory_cache_capture_meta"),
+        )
         runtime_self_attention_maps, runtime_attention_source = _extract_runtime_self_attention_maps(
             pipeline_obj,
             output,
@@ -458,6 +504,7 @@ def run_sd3_inference(
         ),
         "final_latents": latent_sync_storage.get("final_latents") if latent_sync_storage is not None else None,
         "runtime_self_attention_maps": runtime_self_attention_maps,
+        "trajectory_cache_capture_meta": trajectory_cache_capture_meta,
         "output_image": output_image,  # SD 推理输出图像（PIL Image 或 None）
     }
 

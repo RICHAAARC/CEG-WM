@@ -17,6 +17,7 @@ import pytest
 
 from main.cli import run_embed as run_embed_module
 from main.core import digests
+from main.diffusion.sd3.trajectory_tap import LatentTrajectoryCache
 from main.watermarking.content_chain.subspace.planner_interface import SubspacePlanEvidence
 from main.watermarking.content_chain.subspace.subspace_planner_impl import (
     SUBSPACE_PLANNER_ID,
@@ -175,11 +176,50 @@ def _build_planner_failure_context() -> Dict[str, Any]:
     }
 
 
+def _build_runtime_capture_meta(
+    status: str,
+    *,
+    step_count: int,
+    failure_count: int,
+    callback_invocation_count: int,
+    callback_latent_present_count: int,
+    available_steps: list[int] | None = None,
+    missing_required_steps: list[int] | None = None,
+    failure_examples: list[Dict[str, Any]] | None = None,
+    attempt_count: int | None = None,
+    success_count: int | None = None,
+    required_step_count: int | None = None,
+    tap_captured_step_count: int | None = None,
+) -> Dict[str, Any]:
+    normalized_available_steps = list(available_steps or [])
+    normalized_missing_required_steps = list(missing_required_steps or [])
+    normalized_failure_examples = [dict(item) for item in (failure_examples or [])]
+    resolved_success_count = success_count if isinstance(success_count, int) else step_count
+    resolved_attempt_count = attempt_count if isinstance(attempt_count, int) else resolved_success_count + failure_count
+    resolved_required_step_count = required_step_count if isinstance(required_step_count, int) else len(normalized_available_steps) + len(normalized_missing_required_steps)
+    resolved_tap_captured_step_count = tap_captured_step_count if isinstance(tap_captured_step_count, int) else callback_latent_present_count
+    return {
+        "trajectory_cache_capture_status": status,
+        "trajectory_cache_step_count": step_count,
+        "trajectory_cache_capture_attempt_count": resolved_attempt_count,
+        "trajectory_cache_capture_success_count": resolved_success_count,
+        "trajectory_cache_capture_failure_count": failure_count,
+        "trajectory_cache_capture_failure_examples": normalized_failure_examples,
+        "trajectory_cache_available_steps": normalized_available_steps,
+        "trajectory_cache_required_step_count": resolved_required_step_count,
+        "trajectory_cache_missing_required_steps": normalized_missing_required_steps,
+        "trajectory_cache_callback_invocation_count": callback_invocation_count,
+        "trajectory_cache_callback_latent_present_count": callback_latent_present_count,
+        "trajectory_cache_tap_captured_step_count": resolved_tap_captured_step_count,
+    }
+
+
 def _prepare_statement_only_failure_env(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     planner_result: SubspacePlanEvidence,
+    runtime_capture_callable: Any | None = None,
 ) -> Dict[str, Any]:
     run_root = tmp_path / "run"
     records_dir = run_root / "records"
@@ -263,15 +303,30 @@ def _prepare_statement_only_failure_env(
         )
 
     def _fake_runtime_capture(*args: Any, **kwargs: Any) -> Dict[str, Any]:
-        _ = args
-        _ = kwargs
         captured["runtime_capture_calls"] += 1
+        if callable(runtime_capture_callable):
+            return cast(Dict[str, Any], runtime_capture_callable(*args, **kwargs))
         return {
             "inference_status": "ok",
             "inference_error": None,
             "inference_runtime_meta": {"latency_ms": 1.0},
             "trajectory_evidence": {"status": "ok"},
             "injection_evidence": {},
+            "trajectory_cache_capture_meta": _build_runtime_capture_meta(
+                "all_failed",
+                step_count=0,
+                failure_count=28,
+                callback_invocation_count=28,
+                callback_latent_present_count=28,
+                failure_examples=[
+                    {
+                        "step_index": 0,
+                        "latent_type": "Tensor",
+                        "exception_type": "RuntimeError",
+                        "exception_message": "synthetic capture conversion failure",
+                    }
+                ],
+            ),
             "output_image": Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8)),
         }
 
@@ -487,11 +542,15 @@ def test_run_embed_statement_only_failure_persists_runtime_finalization_diagnost
 
     assert runtime_finalization["runtime_finalization_status"] == "failed"
     assert runtime_finalization["runtime_finalization_reason"] == "invalid_subspace_params"
-    assert runtime_finalization["planner_failure_stage"] == "routed_decomposition_matrix_build"
-    assert runtime_finalization["planner_failure_detail_code"] == "routed_matrix_shape_mismatch"
-    assert runtime_finalization["planner_failure_detail_message"] == "synthetic routed matrix mismatch"
-    assert runtime_finalization["planner_diagnostic_context"]["lf_route_count"] == 5
-    assert runtime_finalization["planner_diagnostic_context"]["jvp_matrix_shape"] == [4, 8]
+    assert runtime_finalization["runtime_capture_inference_status"] == "ok"
+    assert runtime_finalization["trajectory_cache_capture_status"] == "all_failed"
+    assert runtime_finalization["trajectory_cache_step_count"] == 0
+    assert runtime_finalization["trajectory_cache_capture_failure_count"] == 28
+    assert runtime_finalization["trajectory_cache_capture_failure_examples"][0]["exception_message"] == "synthetic capture conversion failure"
+    assert runtime_finalization["planner_failure_stage"] == "runtime_capture_cache_validation"
+    assert runtime_finalization["planner_failure_detail_code"] == "trajectory_cache_capture_all_failed"
+    assert runtime_finalization["planner_failure_detail_message"] == "trajectory_cache_absent_or_empty_cannot_build_basis"
+    assert runtime_finalization["planner_diagnostic_context"]["trajectory_cache_capture"]["trajectory_cache_capture_status"] == "all_failed"
 
 
 def test_run_embed_statement_only_failure_keeps_formal_gate_and_stops_before_orchestrator(
@@ -531,4 +590,120 @@ def test_run_embed_statement_only_failure_keeps_formal_gate_and_stops_before_orc
     assert env["orchestrator_called"] is False
     assert env["runtime_capture_calls"] == 1
     fake_impl_set = cast(_FakeImplSet, env["fake_impl_set"])
+    assert len(fake_impl_set.subspace_planner.calls) == 0
+
+
+def test_run_embed_statement_only_success_binds_runtime_cache_into_planner_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：当 runtime trajectory cache 有真实 step 写入时，statement_only finalization 必须把 cache 绑定进 cfg 和 planner 输入。
+    """
+    planner_result = SubspacePlanEvidence(
+        status="ok",
+        plan={"planner_params": {"rank": 4}},
+        basis_digest="basis_digest_anchor",
+        plan_digest="plan_digest_anchor",
+        audit={
+            "impl_identity": "subspace_planner",
+            "impl_version": "v1",
+            "impl_digest": "impl_digest_anchor",
+            "trace_digest": "trace_digest_anchor",
+        },
+        plan_stats={"rank": 4},
+        plan_failure_reason=None,
+        planner_failure_stage=None,
+        planner_failure_detail_code=None,
+        planner_failure_detail_message=None,
+        planner_diagnostic_context=None,
+    )
+
+    def _runtime_capture_then_stop(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+        _ = args
+        cache = kwargs.get("trajectory_latent_cache")
+        if isinstance(cache, LatentTrajectoryCache):
+            cache.capture(0, np.zeros((1, 4, 8, 8), dtype=np.float32))
+            cache.capture(1, np.ones((1, 4, 8, 8), dtype=np.float32))
+            cache.capture(2, np.full((1, 4, 8, 8), 2.0, dtype=np.float32))
+        if env["runtime_capture_calls"] == 1:
+            return {
+                "inference_status": "ok",
+                "inference_error": None,
+                "inference_runtime_meta": {"latency_ms": 1.0},
+                "trajectory_evidence": {"status": "ok"},
+                "injection_evidence": {},
+                "trajectory_cache_capture_meta": _build_runtime_capture_meta(
+                    "complete",
+                    step_count=3,
+                    failure_count=0,
+                    callback_invocation_count=3,
+                    callback_latent_present_count=3,
+                    available_steps=[0, 1, 2],
+                    required_step_count=3,
+                ),
+                "output_image": Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8)),
+            }
+        raise RuntimeError("stop_after_planner")
+
+    env = _prepare_statement_only_failure_env(
+        monkeypatch,
+        tmp_path,
+        planner_result=planner_result,
+        runtime_capture_callable=_runtime_capture_then_stop,
+    )
+    monkeypatch.setattr(
+        run_embed_module.embed_orchestrator,
+        "build_runtime_jvp_operator_from_cache",
+        cast(Any, lambda cfg, cache: None),
+    )
+
+    with pytest.raises(RuntimeError, match="stop_after_planner"):
+        run_embed_module.run_embed(
+            output_dir=str(tmp_path / "out"),
+            config_path="configs/default.yaml",
+            overrides=None,
+            input_image_path=None,
+        )
+
+    fake_impl_set = cast(_FakeImplSet, env["fake_impl_set"])
     assert len(fake_impl_set.subspace_planner.calls) == 1
+    planner_call = fake_impl_set.subspace_planner.calls[0]
+    cfg_snapshot = cast(Dict[str, Any], planner_call["cfg"])
+    bound_cache = cfg_snapshot.get("__embed_trajectory_latent_cache__")
+    assert isinstance(bound_cache, LatentTrajectoryCache)
+    assert bound_cache.available_steps() == [0, 1, 2]
+    planner_inputs = cast(Dict[str, Any], planner_call["inputs"])
+    runtime_cache_input = planner_inputs.get("trajectory_latent_cache")
+    assert isinstance(runtime_cache_input, LatentTrajectoryCache)
+    assert runtime_cache_input.available_steps() == [0, 1, 2]
+
+
+def test_latent_trajectory_cache_capture_reports_single_step_failure() -> None:
+    """
+    功能：单步 latent 转换失败时，LatentTrajectoryCache 必须保留失败计数与失败样例。
+    """
+
+    class _BrokenLatent:
+        def detach(self) -> "_BrokenLatent":
+            return self
+
+        def float(self) -> "_BrokenLatent":
+            return self
+
+        def cpu(self) -> "_BrokenLatent":
+            return self
+
+        def numpy(self) -> Any:
+            raise RuntimeError("broken_numpy_conversion")
+
+    cache = LatentTrajectoryCache()
+    cache.capture(0, _BrokenLatent())
+
+    diagnostics = cache.capture_diagnostics()
+    assert diagnostics["capture_attempt_count"] == 1
+    assert diagnostics["capture_success_count"] == 0
+    assert diagnostics["capture_failure_count"] == 1
+    assert diagnostics["available_steps"] == []
+    assert diagnostics["failure_examples"][0]["step_index"] == 0
+    assert diagnostics["failure_examples"][0]["exception_message"] == "broken_numpy_conversion"

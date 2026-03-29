@@ -644,6 +644,191 @@ def _extract_subspace_failure_diagnostics(subspace_result: Any) -> Dict[str, Any
     }
 
 
+def _extract_runtime_capture_diagnostics(
+    runtime_capture_result: Any,
+    runtime_capture_cache: Any,
+) -> Dict[str, Any]:
+    """
+    功能：提取 runtime trajectory cache 的结构化捕获诊断。 
+
+    Extract structured trajectory-cache capture diagnostics from the runtime
+    inference result.
+
+    Args:
+        runtime_capture_result: Runtime inference result mapping.
+        runtime_capture_cache: In-memory trajectory cache object.
+
+    Returns:
+        Mapping with normalized capture diagnostics.
+    """
+    capture_payload: Dict[str, Any] | None = None
+    inference_runtime_meta: Dict[str, Any] | None = None
+    if isinstance(runtime_capture_result, dict):
+        runtime_capture_result_mapping = cast(Dict[str, Any], runtime_capture_result)
+        inference_runtime_meta_candidate = runtime_capture_result_mapping.get("inference_runtime_meta")
+        if isinstance(inference_runtime_meta_candidate, dict):
+            inference_runtime_meta = dict(cast(Dict[str, Any], inference_runtime_meta_candidate))
+        capture_node = runtime_capture_result_mapping.get("trajectory_cache_capture_meta")
+        if isinstance(capture_node, dict):
+            capture_payload = dict(cast(Dict[str, Any], capture_node))
+    if capture_payload is None and isinstance(inference_runtime_meta, dict):
+        capture_node = inference_runtime_meta.get("trajectory_cache_capture")
+        if isinstance(capture_node, dict):
+            capture_payload = dict(cast(Dict[str, Any], capture_node))
+
+    cache_diagnostics = None
+    if runtime_capture_cache is not None and hasattr(runtime_capture_cache, "capture_diagnostics"):
+        cache_diagnostics_candidate = runtime_capture_cache.capture_diagnostics()
+        if isinstance(cache_diagnostics_candidate, dict):
+            cache_diagnostics = dict(cast(Dict[str, Any], cache_diagnostics_candidate))
+
+    available_steps: list[Any] = []
+    if isinstance(capture_payload, dict):
+        available_steps_candidate = capture_payload.get("trajectory_cache_available_steps")
+        if isinstance(available_steps_candidate, list):
+            available_steps = cast(list[Any], available_steps_candidate)
+    elif isinstance(cache_diagnostics, dict):
+        available_steps_candidate = cache_diagnostics.get("available_steps")
+        if isinstance(available_steps_candidate, list):
+            available_steps = cast(list[Any], available_steps_candidate)
+
+    failure_examples: list[Any] = []
+    if isinstance(capture_payload, dict):
+        failure_examples_candidate = capture_payload.get("trajectory_cache_capture_failure_examples")
+        if isinstance(failure_examples_candidate, list):
+            failure_examples = cast(list[Any], failure_examples_candidate)
+    elif isinstance(cache_diagnostics, dict):
+        failure_examples_candidate = cache_diagnostics.get("failure_examples")
+        if isinstance(failure_examples_candidate, list):
+            failure_examples = cast(list[Any], failure_examples_candidate)
+
+    missing_required_steps: list[Any] = []
+    if isinstance(capture_payload, dict):
+        missing_required_steps_candidate = capture_payload.get("trajectory_cache_missing_required_steps")
+        if isinstance(missing_required_steps_candidate, list):
+            missing_required_steps = cast(list[Any], missing_required_steps_candidate)
+
+    normalized_available_steps = [int(value) for value in available_steps if isinstance(value, int)]
+    normalized_failure_examples = [
+        dict(cast(Dict[str, Any], item))
+        for item in failure_examples
+        if isinstance(item, dict)
+    ]
+    normalized_missing_required_steps = [int(value) for value in missing_required_steps if isinstance(value, int)]
+
+    capture_attempt_count = capture_payload.get("trajectory_cache_capture_attempt_count") if isinstance(capture_payload, dict) else None
+    if not isinstance(capture_attempt_count, int) and isinstance(cache_diagnostics, dict):
+        capture_attempt_count = cache_diagnostics.get("capture_attempt_count")
+
+    capture_success_count = capture_payload.get("trajectory_cache_capture_success_count") if isinstance(capture_payload, dict) else None
+    if not isinstance(capture_success_count, int) and isinstance(cache_diagnostics, dict):
+        capture_success_count = cache_diagnostics.get("capture_success_count")
+
+    capture_failure_count = capture_payload.get("trajectory_cache_capture_failure_count") if isinstance(capture_payload, dict) else None
+    if not isinstance(capture_failure_count, int) and isinstance(cache_diagnostics, dict):
+        capture_failure_count = cache_diagnostics.get("capture_failure_count")
+
+    return {
+        "trajectory_cache_capture_status": capture_payload.get("trajectory_cache_capture_status") if isinstance(capture_payload, dict) else None,
+        "trajectory_cache_step_count": capture_payload.get("trajectory_cache_step_count") if isinstance(capture_payload, dict) else len(normalized_available_steps),
+        "trajectory_cache_capture_attempt_count": capture_attempt_count,
+        "trajectory_cache_capture_success_count": capture_success_count,
+        "trajectory_cache_capture_failure_count": capture_failure_count,
+        "trajectory_cache_capture_failure_examples": normalized_failure_examples,
+        "trajectory_cache_available_steps": normalized_available_steps,
+        "trajectory_cache_required_step_count": capture_payload.get("trajectory_cache_required_step_count") if isinstance(capture_payload, dict) else None,
+        "trajectory_cache_missing_required_steps": normalized_missing_required_steps,
+        "trajectory_cache_callback_invocation_count": capture_payload.get("trajectory_cache_callback_invocation_count") if isinstance(capture_payload, dict) else None,
+        "trajectory_cache_callback_latent_present_count": capture_payload.get("trajectory_cache_callback_latent_present_count") if isinstance(capture_payload, dict) else None,
+        "trajectory_cache_tap_captured_step_count": capture_payload.get("trajectory_cache_tap_captured_step_count") if isinstance(capture_payload, dict) else None,
+        "trajectory_cache_capture": capture_payload,
+    }
+
+
+def _is_runtime_capture_cache_usable(
+    runtime_capture_diagnostics: Dict[str, Any],
+    runtime_capture_cache: Any,
+) -> bool:
+    """
+    功能：判定 statement_only finalization 是否具备 exact-only trajectory cache。 
+
+    Determine whether the runtime capture cache is usable for the exact-only
+    statement_only finalization path.
+
+    Args:
+        runtime_capture_diagnostics: Structured capture diagnostics.
+        runtime_capture_cache: In-memory trajectory cache object.
+
+    Returns:
+        True when the cache is usable for planner handoff.
+    """
+    capture_status = runtime_capture_diagnostics.get("trajectory_cache_capture_status")
+    if isinstance(capture_status, str) and capture_status:
+        return capture_status == "complete"
+    return bool(runtime_capture_cache is not None and hasattr(runtime_capture_cache, "is_empty") and not runtime_capture_cache.is_empty())
+
+
+def _build_runtime_capture_precheck_failure(
+    runtime_capture_diagnostics: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    功能：构造 statement_only runtime cache 前置校验失败诊断。 
+
+    Build planner-style diagnostics for statement_only runtime cache precheck
+    failures before planner invocation.
+
+    Args:
+        runtime_capture_diagnostics: Structured capture diagnostics.
+
+    Returns:
+        Mapping with planner_failure_* fields.
+    """
+    capture_status = runtime_capture_diagnostics.get("trajectory_cache_capture_status")
+    available_steps = runtime_capture_diagnostics.get("trajectory_cache_available_steps")
+    missing_required_steps = runtime_capture_diagnostics.get("trajectory_cache_missing_required_steps")
+    if not isinstance(available_steps, list):
+        available_steps = []
+    if not isinstance(missing_required_steps, list):
+        missing_required_steps = []
+
+    planner_failure_detail_code = "trajectory_cache_absent_or_empty"
+    planner_failure_detail_message = "trajectory_cache_absent_or_empty_cannot_build_basis"
+    if missing_required_steps:
+        planner_failure_detail_code = "trajectory_cache_missing_required_steps"
+        planner_failure_detail_message = (
+            "trajectory_cache_missing_required_steps_cannot_build_basis:"
+            f"{missing_required_steps[:8]}"
+        )
+    elif capture_status == "callback_not_observed":
+        planner_failure_detail_code = "trajectory_callback_not_observed"
+    elif capture_status == "callback_invoked_without_latents":
+        planner_failure_detail_code = "trajectory_callback_invoked_without_latents"
+    elif capture_status == "all_failed":
+        planner_failure_detail_code = "trajectory_cache_capture_all_failed"
+    elif capture_status == "unsupported_pipeline":
+        planner_failure_detail_code = "trajectory_callback_unsupported"
+    elif available_steps:
+        planner_failure_detail_code = "trajectory_cache_incomplete"
+
+    planner_context_capture = runtime_capture_diagnostics.get("trajectory_cache_capture")
+    if not isinstance(planner_context_capture, dict):
+        planner_context_capture = None
+    planner_context: Dict[str, Any] = {
+        "diagnostic_source": "statement_only_runtime_capture_precheck",
+        "trajectory_cache_capture": dict(cast(Dict[str, Any], planner_context_capture)) if isinstance(planner_context_capture, dict) else {
+            key_name: value
+            for key_name, value in runtime_capture_diagnostics.items()
+            if key_name != "trajectory_cache_capture"
+        },
+    }
+    return {
+        "planner_failure_stage": "runtime_capture_cache_validation",
+        "planner_failure_detail_code": planner_failure_detail_code,
+        "planner_failure_detail_message": planner_failure_detail_message,
+        "planner_diagnostic_context": planner_context,
+    }
+
+
 def _build_runtime_finalization_status_details(run_meta: Dict[str, Any]) -> Dict[str, Any] | None:
     """
     功能：从 formal_two_stage 提取可进入 run_closure 的 runtime finalization 细节。 
@@ -671,6 +856,19 @@ def _build_runtime_finalization_status_details(run_meta: Dict[str, Any]) -> Dict
         "runtime_executable_plan_status": runtime_executable_plan_status,
         "runtime_executable_plan_reason": formal_two_stage_mapping.get("runtime_executable_plan_reason"),
         "runtime_capture_inference_status": formal_two_stage_mapping.get("runtime_capture_inference_status"),
+        "trajectory_cache_capture_status": formal_two_stage_mapping.get("trajectory_cache_capture_status"),
+        "trajectory_cache_step_count": formal_two_stage_mapping.get("trajectory_cache_step_count"),
+        "trajectory_cache_capture_attempt_count": formal_two_stage_mapping.get("trajectory_cache_capture_attempt_count"),
+        "trajectory_cache_capture_success_count": formal_two_stage_mapping.get("trajectory_cache_capture_success_count"),
+        "trajectory_cache_capture_failure_count": formal_two_stage_mapping.get("trajectory_cache_capture_failure_count"),
+        "trajectory_cache_capture_failure_examples": formal_two_stage_mapping.get("trajectory_cache_capture_failure_examples"),
+        "trajectory_cache_available_steps": formal_two_stage_mapping.get("trajectory_cache_available_steps"),
+        "trajectory_cache_required_step_count": formal_two_stage_mapping.get("trajectory_cache_required_step_count"),
+        "trajectory_cache_missing_required_steps": formal_two_stage_mapping.get("trajectory_cache_missing_required_steps"),
+        "trajectory_cache_callback_invocation_count": formal_two_stage_mapping.get("trajectory_cache_callback_invocation_count"),
+        "trajectory_cache_callback_latent_present_count": formal_two_stage_mapping.get("trajectory_cache_callback_latent_present_count"),
+        "trajectory_cache_tap_captured_step_count": formal_two_stage_mapping.get("trajectory_cache_tap_captured_step_count"),
+        "trajectory_cache_capture": formal_two_stage_mapping.get("trajectory_cache_capture"),
         "planner_failure_stage": formal_two_stage_mapping.get("planner_failure_stage"),
         "planner_failure_detail_code": formal_two_stage_mapping.get("planner_failure_detail_code"),
         "planner_failure_detail_message": formal_two_stage_mapping.get("planner_failure_detail_message"),
@@ -1239,10 +1437,54 @@ def run_embed(
                     if isinstance(runtime_capture_status_value, str) and runtime_capture_status_value
                     else infer_runtime.INFERENCE_STATUS_FAILED
                 )
+                runtime_capture_diagnostics = _extract_runtime_capture_diagnostics(
+                    runtime_capture_result,
+                    runtime_capture_cache,
+                )
+                runtime_capture_cache_usable = _is_runtime_capture_cache_usable(
+                    runtime_capture_diagnostics,
+                    runtime_capture_cache,
+                )
                 if pipeline_obj is not None:
                     cfg["__embed_pipeline_obj__"] = pipeline_obj
-                if not runtime_capture_cache.is_empty():
+                if runtime_capture_cache_usable:
                     cfg["__embed_trajectory_latent_cache__"] = runtime_capture_cache
+                else:
+                    cfg.pop("__embed_trajectory_latent_cache__", None)
+                    runtime_finalization_reason = "invalid_subspace_params"
+                    runtime_capture_precheck_failure = _build_runtime_capture_precheck_failure(
+                        runtime_capture_diagnostics,
+                    )
+                    runtime_finalization_meta = {
+                        "status": "failed",
+                        "reason": runtime_finalization_reason,
+                        "runtime_finalization_status": "failed",
+                        "runtime_finalization_reason": runtime_finalization_reason,
+                        "capture_inference_status": runtime_capture_status,
+                        "trajectory_cache_bound": False,
+                        "final_plan_digest": None,
+                        "final_basis_digest": None,
+                        **runtime_capture_diagnostics,
+                        **runtime_capture_precheck_failure,
+                    }
+                    run_meta["formal_two_stage"] = {
+                        "scaffold_status": "ok",
+                        "scaffold_reason": None,
+                        "formal_scaffold": formal_scaffold,
+                        "runtime_executable_plan_status": "failed",
+                        "runtime_executable_plan_reason": runtime_finalization_reason,
+                        "runtime_finalization_status": "failed",
+                        "runtime_finalization_reason": runtime_finalization_reason,
+                        "runtime_capture_inference_status": runtime_capture_status,
+                        "final_plan_digest": None,
+                        "final_basis_digest": None,
+                        **runtime_capture_diagnostics,
+                        **runtime_capture_precheck_failure,
+                    }
+                    raise ValueError(
+                        "runtime executable formal plan unavailable: statement_only runtime finalization failed; "
+                        f"reason={runtime_finalization_reason}"
+                    )
                 planner_inputs_runtime = _build_planner_inputs_for_runtime(
                     cfg,
                     runtime_capture_result.get("trajectory_evidence") if isinstance(runtime_capture_result.get("trajectory_evidence"), dict) else None,
@@ -1268,9 +1510,10 @@ def run_embed(
                         "runtime_finalization_status": "failed",
                         "runtime_finalization_reason": runtime_finalization_reason,
                         "capture_inference_status": runtime_capture_status,
-                        "trajectory_cache_bound": not runtime_capture_cache.is_empty(),
+                        "trajectory_cache_bound": runtime_capture_cache_usable,
                         "final_plan_digest": plan_digest_precomputed,
                         "final_basis_digest": basis_digest_precomputed,
+                        **runtime_capture_diagnostics,
                         **planner_failure_diagnostics,
                     }
                     run_meta["formal_two_stage"] = {
@@ -1284,6 +1527,7 @@ def run_embed(
                         "runtime_capture_inference_status": runtime_capture_status,
                         "final_plan_digest": plan_digest_precomputed,
                         "final_basis_digest": basis_digest_precomputed,
+                        **runtime_capture_diagnostics,
                         **planner_failure_diagnostics,
                     }
                     raise ValueError(
@@ -1296,9 +1540,10 @@ def run_embed(
                     "runtime_finalization_status": "ok",
                     "runtime_finalization_reason": None,
                     "capture_inference_status": runtime_capture_status,
-                    "trajectory_cache_bound": not runtime_capture_cache.is_empty(),
+                    "trajectory_cache_bound": runtime_capture_cache_usable,
                     "final_plan_digest": plan_digest_precomputed,
                     "final_basis_digest": basis_digest_precomputed,
+                    **runtime_capture_diagnostics,
                     "planner_failure_stage": None,
                     "planner_failure_detail_code": None,
                     "planner_failure_detail_message": None,
@@ -1315,6 +1560,7 @@ def run_embed(
                     "runtime_capture_inference_status": runtime_capture_status,
                     "final_plan_digest": plan_digest_precomputed,
                     "final_basis_digest": basis_digest_precomputed,
+                    **runtime_capture_diagnostics,
                     "planner_failure_stage": None,
                     "planner_failure_detail_code": None,
                     "planner_failure_detail_message": None,
