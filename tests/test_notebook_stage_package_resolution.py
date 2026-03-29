@@ -11,10 +11,13 @@ Module type: General module
 from __future__ import annotations
 
 import json
+import shutil
 import time
 import zipfile
 from pathlib import Path
 from typing import Any, Dict
+
+import pytest
 
 from scripts.notebook_runtime_common import (
     build_failure_diagnostics_filename,
@@ -28,6 +31,7 @@ from scripts.notebook_runtime_common import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK_01_PATH = REPO_ROOT / "notebook" / "00_main" / "01_Paper_Full_Cuda.ipynb"
+NOTEBOOK_02_PATH = REPO_ROOT / "notebook" / "00_main" / "02_Parallel_Attestation_Statistics.ipynb"
 NOTEBOOK_03_PATH = REPO_ROOT / "notebook" / "00_main" / "03_Experiment_Matrix_Full.ipynb"
 NOTEBOOK_04_PATH = REPO_ROOT / "notebook" / "00_main" / "04_Release_And_Signoff.ipynb"
 
@@ -82,7 +86,13 @@ def _find_code_cell_source(notebook_path: Path, marker: str) -> str:
     raise AssertionError(f"code cell marker not found: {marker}")
 
 
-def _create_formal_stage_package(base_dir: Path, *, stage_name: str, stage_run_id: str) -> Path:
+def _create_formal_stage_package(
+    base_dir: Path,
+    *,
+    stage_name: str,
+    stage_run_id: str,
+    extra_files: Dict[str, Any] | None = None,
+) -> Path:
     """
     功能：构造最小可发现 formal stage package。 
 
@@ -92,6 +102,7 @@ def _create_formal_stage_package(base_dir: Path, *, stage_name: str, stage_run_i
         base_dir: Base test directory.
         stage_name: Stage name.
         stage_run_id: Stage run identifier.
+        extra_files: Optional extra packaged files keyed by relative path.
 
     Returns:
         Formal package ZIP path.
@@ -120,6 +131,15 @@ def _create_formal_stage_package(base_dir: Path, *, stage_name: str, stage_run_i
             "status": "ok",
         },
     )
+    for relative_path, payload in (extra_files or {}).items():
+        target_path = package_root / relative_path
+        if isinstance(payload, dict):
+            write_json_atomic(target_path, payload)
+        elif isinstance(payload, str):
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text(payload, encoding="utf-8")
+        else:
+            raise TypeError("extra_files payload must be dict or str")
 
     package_manifest = finalize_stage_package(
         stage_name=stage_name,
@@ -244,6 +264,104 @@ def _execute_stage_04_precheck_cell(
     return namespace
 
 
+def _execute_stage_02_precheck_cell(
+    tmp_path: Path,
+    *,
+    drive_project_root: Path,
+    source_package_path: str | None,
+) -> Dict[str, Any]:
+    """
+    功能：在测试命名空间中执行 stage 02 的 precheck code cell。
+
+    Execute the stage-02 notebook precheck code cell inside a test namespace.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        drive_project_root: Fake drive project root.
+        source_package_path: Optional manual stage-01 package path.
+
+    Returns:
+        Execution namespace populated by the cell.
+    """
+    config_path = tmp_path / "default.yaml"
+    script_path = tmp_path / "02_Parallel_Attestation_Statistics.py"
+    config_path.write_text("policy_path: content_np_geo_rescue\n", encoding="utf-8")
+    script_path.write_text("pass\n", encoding="utf-8")
+
+    precheck_source = _find_code_cell_source(NOTEBOOK_02_PATH, "PRECHECK_RESULTS = []")
+    namespace: Dict[str, Any] = {
+        "__builtins__": __builtins__,
+        "Path": Path,
+        "json": json,
+        "shutil": shutil,
+        "CONFIG_PATH": config_path,
+        "SCRIPT_PATH": script_path,
+        "DRIVE_PROJECT_ROOT": drive_project_root,
+        "SOURCE_PACKAGE_PATH": source_package_path,
+        "REPO_ROOT": tmp_path,
+        "print_json": lambda *_args, **_kwargs: None,
+    }
+    exec(precheck_source, namespace)
+    return namespace
+
+
+def _execute_stage_03_precheck_cell(
+    tmp_path: Path,
+    *,
+    drive_project_root: Path,
+    source_package_path: str | None,
+) -> Dict[str, Any]:
+    """
+    功能：在测试命名空间中执行 stage 03 的 precheck code cell。
+
+    Execute the stage-03 notebook precheck code cell inside a test namespace.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        drive_project_root: Fake drive project root.
+        source_package_path: Optional manual stage-01 package path.
+
+    Returns:
+        Execution namespace populated by the cell.
+    """
+    config_path = tmp_path / "default.yaml"
+    script_path = tmp_path / "03_Experiment_Matrix_Full.py"
+    config_path.write_text("policy_path: content_np_geo_rescue\n", encoding="utf-8")
+    script_path.write_text("pass\n", encoding="utf-8")
+
+    fake_model_info = type("FakeModelInfo", (), {"id": "test-model"})
+    fake_hf_api = type("FakeHfApi", (), {"model_info": lambda self, _repo_id: fake_model_info()})
+    precheck_source = _find_code_cell_source(NOTEBOOK_03_PATH, "PRECHECK_RESULTS = []")
+    fake_nvidia_smi = tmp_path / "nvidia-smi"
+    fake_nvidia_smi.write_text("", encoding="utf-8")
+    import scripts.workflow_acceptance_common as workflow_acceptance_common
+
+    original_which = workflow_acceptance_common.shutil.which
+    workflow_acceptance_common.shutil.which = lambda _command: str(fake_nvidia_smi)
+    namespace: Dict[str, Any] = {
+        "__builtins__": __builtins__,
+        "Path": Path,
+        "json": json,
+        "shutil": shutil,
+        "CONFIG_PATH": config_path,
+        "SCRIPT_PATH": script_path,
+        "DRIVE_PROJECT_ROOT": drive_project_root,
+        "SOURCE_PACKAGE_PATH": source_package_path,
+        "REPO_ROOT": tmp_path,
+        "HfApi": fake_hf_api,
+        "MODEL_IDENTITY": {"model_id": "test-model"},
+        "WEIGHT_PATH": tmp_path / "weights" / "ckpt_base.pth",
+        "PERSISTENT_WEIGHT_PATH": tmp_path / "cache" / "ckpt_base.pth",
+        "is_valid_weight_file": lambda _path_obj: True,
+        "print_json": lambda *_args, **_kwargs: None,
+    }
+    try:
+        exec(precheck_source, namespace)
+    finally:
+        workflow_acceptance_common.shutil.which = original_which
+    return namespace
+
+
 def _execute_stage_01_validation_cell(tmp_path: Path, *, include_root_records: bool) -> Dict[str, Any]:
     """
     功能：在测试命名空间中执行 stage 01 的 validation code cell。
@@ -364,6 +482,18 @@ def _execute_stage_01_validation_cell(tmp_path: Path, *, include_root_records: b
         "stage_manifest_path": stage_manifest_path.as_posix(),
         "package_manifest_path": package_manifest_path.as_posix(),
         "audit_status": "passed",
+        "run_root": run_root.as_posix(),
+        "log_root": (tmp_path / "logs").as_posix(),
+        "runtime_state_root": (tmp_path / "runtime_state").as_posix(),
+        "export_root": export_root.as_posix(),
+    }
+    audit_summary = {
+        "overall_status": "passed",
+        "definition_status": "passed",
+        "strong_compatibility_status": "passed",
+        "stage_02_ready": True,
+        "stage_03_ready": True,
+        "stage_04_ready": True,
     }
     namespace: Dict[str, Any] = {
         "__builtins__": __builtins__,
@@ -371,12 +501,36 @@ def _execute_stage_01_validation_cell(tmp_path: Path, *, include_root_records: b
         "STAGE_SUMMARY": stage_summary,
         "STAGE_MANIFEST": stage_manifest,
         "PACKAGE_MANIFEST": package_manifest,
+        "AUDIT_SUMMARY": audit_summary,
         "AUDIT_SUMMARY_PATH": audit_summary_path,
         "NOTEBOOK_NAME": "01_Paper_Full_Cuda",
         "STAGE_RUN_ID": "stage01_notebook_validation",
         "print_json": lambda *_args, **_kwargs: None,
     }
     exec(validation_source, namespace)
+    return namespace
+
+
+def _execute_stage_01_diagnostics_cell(tmp_path: Path, *, include_root_records: bool) -> Dict[str, Any]:
+    """
+    功能：在测试命名空间中执行 stage 01 的 diagnostics code cell。
+
+    Execute the stage-01 notebook diagnostics code cell after the validation
+    cell has populated the expected namespace.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        include_root_records: Whether representative root records exist.
+
+    Returns:
+        Execution namespace populated by the diagnostics cell.
+    """
+    namespace = _execute_stage_01_validation_cell(tmp_path, include_root_records=include_root_records)
+    log_root = Path(str(namespace["STAGE_SUMMARY"]["log_root"]))
+    log_root.mkdir(parents=True, exist_ok=True)
+    (log_root / "stage_01.log").write_text("stage 01 ok\n", encoding="utf-8")
+    diagnostics_source = _find_code_cell_source(NOTEBOOK_01_PATH, 'DIAGNOSTIC_RESULT = {')
+    exec(diagnostics_source, namespace)
     return namespace
 
 
@@ -434,6 +588,276 @@ def test_stage_01_validation_reports_optional_root_records_when_present(tmp_path
     assert namespace["OPTIONAL_COMPATIBILITY_STATUS"]["detect_record"]["exists"] is True
     assert namespace["VALIDATION_RESULT"]["optional_compatibility_views"]["embed_record"]["exists"] is True
     assert namespace["VALIDATION_RESULT"]["optional_compatibility_views"]["detect_record"]["exists"] is True
+
+
+def test_stage_01_diagnostics_uses_current_validation_fields(tmp_path: Path) -> None:
+    """
+    功能：验证 stage 01 diagnostics cell 使用当前 validation 字段。
+
+    Verify the stage-01 diagnostics cell consumes the current validation
+    fields and no longer references the removed missing_files key.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    diagnostics_source = _find_code_cell_source(NOTEBOOK_01_PATH, 'DIAGNOSTIC_RESULT = {')
+    namespace = _execute_stage_01_diagnostics_cell(tmp_path, include_root_records=False)
+
+    assert 'VALIDATION_RESULT["missing_files"]' not in diagnostics_source
+    assert 'VALIDATION_RESULT.get("missing_required_formal_files", [])' in diagnostics_source
+    assert 'VALIDATION_RESULT.get("missing_optional_compatibility_files", [])' in diagnostics_source
+    assert namespace["DIAGNOSTIC_RESULT"]["missing_required_formal_files"] == []
+    assert set(namespace["DIAGNOSTIC_RESULT"]["missing_optional_compatibility_files"]) == {
+        "embed_record",
+        "detect_record",
+    }
+    assert namespace["DIAGNOSTIC_RESULT"]["status"] == "optional_compatibility_missing"
+
+
+def test_stage_02_precheck_persists_resolved_source_package(tmp_path: Path) -> None:
+    """
+    功能：验证 stage 02 precheck 会固化解析后的 source package。
+
+    Verify the stage-02 notebook precheck persists the resolved source package
+    path and resolution metadata for later execution.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    drive_project_root = tmp_path / "drive_project_root"
+    stage_01_package_path = _create_formal_stage_package(
+        drive_project_root,
+        stage_name="01_Paper_Full_Cuda",
+        stage_run_id="stage01_for_stage02_auto",
+        extra_files={
+            "artifacts/parallel_attestation_statistics_input_contract.json": {
+                "contract_role": "source_contract",
+                "source_authority": "canonical_source_pool",
+            }
+        },
+    )
+
+    namespace = _execute_stage_02_precheck_cell(
+        tmp_path,
+        drive_project_root=drive_project_root,
+        source_package_path=None,
+    )
+
+    assert namespace["RESOLVED_SOURCE_PACKAGE_PATH"] == stage_01_package_path
+    assert namespace["RESOLVED_SOURCE_PACKAGE_SOURCE"] == "auto_discovered"
+    assert namespace["PRECHECK_SOURCE_PACKAGE_SUMMARY"]["requested_package_input"] == "<absent>"
+    assert Path(str(namespace["PRECHECK_SOURCE_PACKAGE_SUMMARY"]["resolved_package_path"])) == stage_01_package_path
+    assert namespace["PRECHECK_SOURCE_PACKAGE_SUMMARY"]["resolution_source"] == "auto_discovered"
+
+
+def test_stage_02_precheck_prefers_manual_source_package(tmp_path: Path) -> None:
+    """
+    功能：验证 stage 02 precheck 保持手工输入优先。
+
+    Verify the stage-02 notebook precheck keeps manual source package input as
+    the winning resolution when both manual and auto-discovered packages exist.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    drive_project_root = tmp_path / "drive_project_root"
+    manual_package_path = _create_formal_stage_package(
+        drive_project_root,
+        stage_name="01_Paper_Full_Cuda",
+        stage_run_id="stage01_for_stage02_manual",
+        extra_files={
+            "artifacts/parallel_attestation_statistics_input_contract.json": {
+                "contract_role": "source_contract",
+                "source_authority": "canonical_source_pool",
+            }
+        },
+    )
+    time.sleep(0.02)
+    _create_formal_stage_package(
+        drive_project_root,
+        stage_name="01_Paper_Full_Cuda",
+        stage_run_id="stage01_for_stage02_latest_auto",
+        extra_files={
+            "artifacts/parallel_attestation_statistics_input_contract.json": {
+                "contract_role": "source_contract",
+                "source_authority": "canonical_source_pool",
+            }
+        },
+    )
+
+    namespace = _execute_stage_02_precheck_cell(
+        tmp_path,
+        drive_project_root=drive_project_root,
+        source_package_path=str(manual_package_path),
+    )
+
+    assert namespace["RESOLVED_SOURCE_PACKAGE_PATH"] == manual_package_path
+    assert namespace["RESOLVED_SOURCE_PACKAGE_SOURCE"] == "manual"
+    assert Path(str(namespace["PRECHECK_SOURCE_PACKAGE_SUMMARY"]["requested_package_input"])) == manual_package_path
+    assert Path(str(namespace["PRECHECK_SOURCE_PACKAGE_SUMMARY"]["resolved_package_path"])) == manual_package_path
+    assert namespace["PRECHECK_SOURCE_PACKAGE_SUMMARY"]["resolution_source"] == "manual"
+
+
+def test_stage_02_execute_cell_uses_resolved_source_package_path() -> None:
+    """
+    功能：验证 stage 02 execute cell 复用 precheck 已解析路径。
+
+    Verify the stage-02 notebook execute cell uses the resolved source package
+    variables and does not rediscover the package.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    execute_source = _find_code_cell_source(NOTEBOOK_02_PATH, "STAGE_RUN_ID = make_stage_run_id(NOTEBOOK_NAME)")
+
+    assert "RESOLVED_SOURCE_PACKAGE_PATH" in execute_source
+    assert "RESOLVED_SOURCE_PACKAGE_SOURCE" in execute_source
+    assert "PRECHECK_SOURCE_PACKAGE_RESOLUTION" in execute_source
+    assert "discover_stage_packages" not in execute_source
+    assert "select_latest_stage_package" not in execute_source
+    assert "resolve_stage_package_input_or_discover" not in execute_source
+
+
+def test_stage_03_precheck_persists_resolved_source_package(tmp_path: Path) -> None:
+    """
+    功能：验证 stage 03 precheck 会固化解析后的 source package。
+
+    Verify the stage-03 notebook precheck persists the resolved source package
+    path and resolution metadata for later execution.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    drive_project_root = tmp_path / "drive_project_root"
+    stage_01_package_path = _create_formal_stage_package(
+        drive_project_root,
+        stage_name="01_Paper_Full_Cuda",
+        stage_run_id="stage01_for_stage03_auto",
+        extra_files={
+            "artifacts/thresholds/thresholds_artifact.json": {"threshold": 0.5}
+        },
+    )
+
+    namespace = _execute_stage_03_precheck_cell(
+        tmp_path,
+        drive_project_root=drive_project_root,
+        source_package_path=None,
+    )
+
+    assert namespace["RESOLVED_SOURCE_PACKAGE_PATH"] == stage_01_package_path
+    assert namespace["RESOLVED_SOURCE_PACKAGE_SOURCE"] == "auto_discovered"
+    assert namespace["PRECHECK_SOURCE_PACKAGE_SUMMARY"]["requested_package_input"] == "<absent>"
+    assert Path(str(namespace["PRECHECK_SOURCE_PACKAGE_SUMMARY"]["resolved_package_path"])) == stage_01_package_path
+    assert namespace["PRECHECK_SOURCE_PACKAGE_SUMMARY"]["resolution_source"] == "auto_discovered"
+
+
+def test_stage_03_precheck_prefers_manual_source_package(tmp_path: Path) -> None:
+    """
+    功能：验证 stage 03 precheck 保持手工输入优先。
+
+    Verify the stage-03 notebook precheck keeps manual source package input as
+    the winning resolution when both manual and auto-discovered packages exist.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    drive_project_root = tmp_path / "drive_project_root"
+    manual_package_path = _create_formal_stage_package(
+        drive_project_root,
+        stage_name="01_Paper_Full_Cuda",
+        stage_run_id="stage01_for_stage03_manual",
+        extra_files={
+            "artifacts/thresholds/thresholds_artifact.json": {"threshold": 0.5}
+        },
+    )
+    time.sleep(0.02)
+    _create_formal_stage_package(
+        drive_project_root,
+        stage_name="01_Paper_Full_Cuda",
+        stage_run_id="stage01_for_stage03_latest_auto",
+        extra_files={
+            "artifacts/thresholds/thresholds_artifact.json": {"threshold": 0.7}
+        },
+    )
+
+    namespace = _execute_stage_03_precheck_cell(
+        tmp_path,
+        drive_project_root=drive_project_root,
+        source_package_path=str(manual_package_path),
+    )
+
+    assert namespace["RESOLVED_SOURCE_PACKAGE_PATH"] == manual_package_path
+    assert namespace["RESOLVED_SOURCE_PACKAGE_SOURCE"] == "manual"
+    assert Path(str(namespace["PRECHECK_SOURCE_PACKAGE_SUMMARY"]["requested_package_input"])) == manual_package_path
+    assert Path(str(namespace["PRECHECK_SOURCE_PACKAGE_SUMMARY"]["resolved_package_path"])) == manual_package_path
+    assert namespace["PRECHECK_SOURCE_PACKAGE_SUMMARY"]["resolution_source"] == "manual"
+
+
+def test_stage_03_precheck_rejects_diagnostics_package_as_formal_input(tmp_path: Path) -> None:
+    """
+    功能：验证 stage 03 precheck 不会把 diagnostics package 当成 formal 输入。
+
+    Verify the stage-03 notebook precheck does not resolve a diagnostics
+    package as a valid formal source package.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    drive_project_root = tmp_path / "drive_project_root"
+    _create_failure_diagnostics_package(
+        drive_project_root,
+        stage_name="01_Paper_Full_Cuda",
+        stage_run_id="stage01_diagnostics_only_for_stage03",
+    )
+
+    with pytest.raises(RuntimeError):
+        _execute_stage_03_precheck_cell(
+            tmp_path,
+            drive_project_root=drive_project_root,
+            source_package_path=None,
+        )
+
+
+def test_stage_03_execute_cell_uses_resolved_source_package_path() -> None:
+    """
+    功能：验证 stage 03 execute cell 复用 precheck 已解析路径。
+
+    Verify the stage-03 notebook execute cell uses the resolved source package
+    variables and does not rediscover the package.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    execute_source = _find_code_cell_source(NOTEBOOK_03_PATH, "STAGE_RUN_ID = make_stage_run_id(NOTEBOOK_NAME)")
+
+    assert "RESOLVED_SOURCE_PACKAGE_PATH" in execute_source
+    assert "RESOLVED_SOURCE_PACKAGE_SOURCE" in execute_source
+    assert "PRECHECK_SOURCE_PACKAGE_RESOLUTION" in execute_source
+    assert "resolve_stage_package_input_or_discover" not in execute_source
 
 
 def test_stage_03_notebook_defines_source_package_path_as_none() -> None:
