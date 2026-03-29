@@ -1,10 +1,10 @@
 """
-文件目的：验证 00_main notebook 的 stage package 解析与最小运行合同。
+文件目的：验证 00_main notebook 的最小运行合同与 stage package 解析。
 Module type: General module
 
 职责边界：
-1. 仅覆盖 03 notebook 的 SOURCE_PACKAGE_PATH 初始化，以及 04 notebook 的手工优先 / 缺省自动发现闭环。
-2. 通过直接解析 notebook JSON 与执行 precheck cell，验证 notebook 层语义，不修改 scripts/04_Release_And_Signoff.py 的 formal contract。
+1. 覆盖 01 notebook 的 validation contract，以及 03 / 04 notebook 的 package 解析与执行绑定。
+2. 通过直接解析 notebook JSON 与执行关键 code cell，验证 notebook 层语义，不修改 scripts 层 formal contract。
 3. 不重跑主链，不触发真实 Colab 或 Google Drive 依赖。
 """
 
@@ -27,6 +27,7 @@ from scripts.notebook_runtime_common import (
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+NOTEBOOK_01_PATH = REPO_ROOT / "notebook" / "00_main" / "01_Paper_Full_Cuda.ipynb"
 NOTEBOOK_03_PATH = REPO_ROOT / "notebook" / "00_main" / "03_Experiment_Matrix_Full.ipynb"
 NOTEBOOK_04_PATH = REPO_ROOT / "notebook" / "00_main" / "04_Release_And_Signoff.ipynb"
 
@@ -241,6 +242,198 @@ def _execute_stage_04_precheck_cell(
     }
     exec(precheck_source, namespace)
     return namespace
+
+
+def _execute_stage_01_validation_cell(tmp_path: Path, *, include_root_records: bool) -> Dict[str, Any]:
+    """
+    功能：在测试命名空间中执行 stage 01 的 validation code cell。
+
+    Execute the stage-01 notebook validation code cell inside a minimal test
+    namespace.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        include_root_records: Whether representative root records exist.
+
+    Returns:
+        Execution namespace populated by the cell.
+    """
+    validation_source = _find_code_cell_source(NOTEBOOK_01_PATH, 'required_formal_files_check')
+    run_root = tmp_path / "run_root"
+    export_root = tmp_path / "exports"
+    package_path = export_root / "01_Paper_Full_Cuda__stage01_notebook_validation.zip"
+    package_path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "artifacts/stage_manifest.json",
+            json.dumps({"stage_name": "01_Paper_Full_Cuda"}, ensure_ascii=False, indent=2),
+        )
+
+    stage_manifest_path = run_root / "artifacts" / "stage_manifest.json"
+    package_manifest_path = export_root / "package_manifest.json"
+    audit_summary_path = run_root / "artifacts" / "stage_01_audit_summary.json"
+    calibration_record_path = run_root / "records" / "calibration_record.json"
+    evaluate_record_path = run_root / "records" / "evaluate_record.json"
+    embed_record_path = run_root / "records" / "embed_record.json"
+    detect_record_path = run_root / "records" / "detect_record.json"
+    thresholds_artifact_path = run_root / "artifacts" / "thresholds" / "thresholds_artifact.json"
+    threshold_metadata_artifact_path = run_root / "artifacts" / "thresholds" / "threshold_metadata_artifact.json"
+    canonical_source_pool_manifest_path = (
+        run_root / "artifacts" / "stage_01_canonical_source_pool" / "source_pool_manifest.json"
+    )
+    source_contract_path = run_root / "artifacts" / "parallel_attestation_statistics_input_contract.json"
+    pooled_threshold_build_contract_path = run_root / "artifacts" / "stage_01_pooled_threshold_build_contract.json"
+    evaluation_report_path = run_root / "artifacts" / "evaluation_report.json"
+    run_closure_path = run_root / "artifacts" / "run_closure.json"
+    workflow_summary_path = run_root / "artifacts" / "workflow_summary.json"
+    runtime_config_snapshot_path = run_root / "runtime_metadata" / "runtime_config_snapshot.yaml"
+    prompt_snapshot_path = run_root / "runtime_metadata" / "prompt_snapshot" / "prompt.txt"
+
+    for output_path, payload in [
+        (audit_summary_path, {"overall_status": "passed"}),
+        (calibration_record_path, {"record_type": "calibration"}),
+        (evaluate_record_path, {"record_type": "evaluate"}),
+        (thresholds_artifact_path, {"threshold": 0.5}),
+        (threshold_metadata_artifact_path, {"threshold_metadata": True}),
+        (
+            canonical_source_pool_manifest_path,
+            {
+                "artifact_role": "canonical_source_pool_root",
+                "source_truth": "canonical_source_pool",
+                "root_contract_mode": "compatibility_view",
+                "root_records_required": False,
+            },
+        ),
+        (source_contract_path, {"contract_role": "source_contract", "source_authority": "canonical_source_pool"}),
+        (pooled_threshold_build_contract_path, {"contract_role": "pooled_threshold_build_contract"}),
+        (evaluation_report_path, {"status": "ok"}),
+        (run_closure_path, {"status": {"ok": True, "reason": "ok"}}),
+        (
+            workflow_summary_path,
+            {
+                "stage_name": "01_Paper_Full_Cuda",
+                "stage_run_id": "stage01_notebook_validation",
+                "status": "ok",
+            },
+        ),
+    ]:
+        write_json_atomic(output_path, payload)
+
+    runtime_config_snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_config_snapshot_path.write_text("policy_path: content_np_geo_rescue\n", encoding="utf-8")
+    prompt_snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    prompt_snapshot_path.write_text("prompt 0\n", encoding="utf-8")
+    if include_root_records:
+        write_json_atomic(embed_record_path, {"record_type": "embed"})
+        write_json_atomic(detect_record_path, {"record_type": "detect"})
+
+    stage_manifest = {
+        "stage_name": "01_Paper_Full_Cuda",
+        "stage_run_id": "stage01_notebook_validation",
+        "config_source_path": "/content/ceg_wm_workspace/configs/default.yaml",
+        "thresholds_path": thresholds_artifact_path.as_posix(),
+        "threshold_metadata_artifact_path": threshold_metadata_artifact_path.as_posix(),
+        "evaluation_report_path": evaluation_report_path.as_posix(),
+        "run_closure_path": run_closure_path.as_posix(),
+        "workflow_summary_path": workflow_summary_path.as_posix(),
+        "runtime_config_snapshot_path": runtime_config_snapshot_path.as_posix(),
+        "prompt_snapshot_path": prompt_snapshot_path.as_posix(),
+        "stage_01_canonical_source_pool_manifest_path": canonical_source_pool_manifest_path.as_posix(),
+        "parallel_attestation_statistics_input_contract_path": source_contract_path.as_posix(),
+        "stage_01_pooled_threshold_build_contract_path": pooled_threshold_build_contract_path.as_posix(),
+        "stage_01_source_truth": "canonical_source_pool",
+        "records": {
+            "embed_record": {"path": embed_record_path.as_posix()},
+            "detect_record": {"path": detect_record_path.as_posix()},
+            "calibration_record": {"path": calibration_record_path.as_posix()},
+            "evaluate_record": {"path": evaluate_record_path.as_posix()},
+        },
+    }
+    write_json_atomic(stage_manifest_path, stage_manifest)
+
+    package_manifest = {
+        "stage_name": "01_Paper_Full_Cuda",
+        "package_sha256": compute_file_sha256(package_path),
+    }
+    write_json_atomic(package_manifest_path, package_manifest)
+
+    stage_summary = {
+        "stage_name": "01_Paper_Full_Cuda",
+        "stage_run_id": "stage01_notebook_validation",
+        "package_path": package_path.as_posix(),
+        "stage_manifest_path": stage_manifest_path.as_posix(),
+        "package_manifest_path": package_manifest_path.as_posix(),
+        "audit_status": "passed",
+    }
+    namespace: Dict[str, Any] = {
+        "__builtins__": __builtins__,
+        "Path": Path,
+        "STAGE_SUMMARY": stage_summary,
+        "STAGE_MANIFEST": stage_manifest,
+        "PACKAGE_MANIFEST": package_manifest,
+        "AUDIT_SUMMARY_PATH": audit_summary_path,
+        "NOTEBOOK_NAME": "01_Paper_Full_Cuda",
+        "STAGE_RUN_ID": "stage01_notebook_validation",
+        "print_json": lambda *_args, **_kwargs: None,
+    }
+    exec(validation_source, namespace)
+    return namespace
+
+
+def test_stage_01_validation_moves_root_records_to_optional_compatibility_views(tmp_path: Path) -> None:
+    """
+    功能：验证 stage 01 notebook 将 root records 视为 optional compatibility views。
+
+    Verify the stage-01 notebook validation cell treats representative root
+    records as optional compatibility views instead of required formal files.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    validation_source = _find_code_cell_source(NOTEBOOK_01_PATH, 'required_formal_files_check')
+    namespace = _execute_stage_01_validation_cell(tmp_path, include_root_records=False)
+
+    assert 'REQUIRED_FORMAL_FILES = {' in validation_source
+    assert 'OPTIONAL_COMPATIBILITY_FILES = {' in validation_source
+    assert 'required_formal_files_check' in validation_source
+    assert 'optional_compatibility_views_check' in validation_source
+    assert "embed_record" not in namespace["REQUIRED_FORMAL_FILES"]
+    assert "detect_record" not in namespace["REQUIRED_FORMAL_FILES"]
+    assert set(namespace["OPTIONAL_COMPATIBILITY_FILES"]) == {"embed_record", "detect_record"}
+    assert namespace["MISSING_REQUIRED_FORMAL_FILES"] == []
+    assert set(namespace["MISSING_OPTIONAL_COMPATIBILITY_FILES"]) == {"embed_record", "detect_record"}
+    assert namespace["VALIDATION_RESULT"]["status"] == "ok"
+    assert namespace["VALIDATION_RESULT"]["source_truth"] == "canonical_source_pool"
+    assert set(namespace["VALIDATION_RESULT"]["missing_optional_compatibility_files"]) == {
+        "embed_record",
+        "detect_record",
+    }
+
+
+def test_stage_01_validation_reports_optional_root_records_when_present(tmp_path: Path) -> None:
+    """
+    功能：验证 stage 01 notebook 会报告已导出的 optional compatibility views。
+
+    Verify the stage-01 notebook validation cell reports representative root
+    records as present when the optional compatibility views are exported.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    namespace = _execute_stage_01_validation_cell(tmp_path, include_root_records=True)
+
+    assert namespace["MISSING_REQUIRED_FORMAL_FILES"] == []
+    assert namespace["MISSING_OPTIONAL_COMPATIBILITY_FILES"] == []
+    assert namespace["OPTIONAL_COMPATIBILITY_STATUS"]["embed_record"]["exists"] is True
+    assert namespace["OPTIONAL_COMPATIBILITY_STATUS"]["detect_record"]["exists"] is True
+    assert namespace["VALIDATION_RESULT"]["optional_compatibility_views"]["embed_record"]["exists"] is True
+    assert namespace["VALIDATION_RESULT"]["optional_compatibility_views"]["detect_record"]["exists"] is True
 
 
 def test_stage_03_notebook_defines_source_package_path_as_none() -> None:
