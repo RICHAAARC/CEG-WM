@@ -190,6 +190,76 @@ def resolve_repo_path(path_value: str, repo_root: Path = REPO_ROOT) -> Path:
     return (repo_root / candidate).resolve()
 
 
+def _normalize_pythonpath_entry(path_text: str) -> str:
+    """
+    功能：规范化 PYTHONPATH 条目以便稳定比较。
+
+    Normalize one PYTHONPATH entry into a stable comparison token.
+
+    Args:
+        path_text: Raw PYTHONPATH entry text.
+
+    Returns:
+        Normalized token suitable for equality checks.
+    """
+    if not isinstance(path_text, str) or not path_text.strip():
+        raise TypeError("path_text must be non-empty str")
+
+    expanded_path = os.path.expanduser(path_text.strip())
+    normalized_path = os.path.normpath(expanded_path)
+    if os.path.isabs(normalized_path):
+        return os.path.normcase(str(Path(normalized_path).resolve()))
+    return os.path.normcase(normalized_path)
+
+
+def build_repo_import_subprocess_env(
+    base_env: Optional[Mapping[str, str]] = None,
+    repo_root: Path = REPO_ROOT,
+) -> Dict[str, str]:
+    """
+    功能：构造带仓库根目录导入上下文的子进程环境。
+
+    Build a subprocess environment that preserves the source environment while
+    ensuring the repository root is available on PYTHONPATH.
+
+    Args:
+        base_env: Optional source environment mapping. When omitted, os.environ
+            is copied.
+        repo_root: Repository root path that must be importable by child
+            processes.
+
+    Returns:
+        Environment mapping suitable for subprocess.run.
+
+    Raises:
+        TypeError: If base_env is not a mapping or repo_root is not Path.
+    """
+    if base_env is not None and not isinstance(base_env, Mapping):
+        raise TypeError("base_env must be Mapping[str, str] or None")
+    if not isinstance(repo_root, Path):
+        raise TypeError("repo_root must be Path")
+
+    source_env = os.environ if base_env is None else base_env
+    env_mapping = {str(key): str(value) for key, value in source_env.items()}
+
+    repo_root_text = str(repo_root.resolve())
+    repo_root_token = _normalize_pythonpath_entry(repo_root_text)
+    existing_pythonpath = str(env_mapping.get("PYTHONPATH", "")).strip()
+    retained_entries: List[str] = []
+
+    if existing_pythonpath:
+        for entry_text in existing_pythonpath.split(os.pathsep):
+            normalized_entry = entry_text.strip()
+            if not normalized_entry:
+                continue
+            if _normalize_pythonpath_entry(normalized_entry) == repo_root_token:
+                continue
+            retained_entries.append(normalized_entry)
+
+    env_mapping["PYTHONPATH"] = os.pathsep.join([repo_root_text, *retained_entries])
+    return env_mapping
+
+
 def resolve_attestation_env_var_names(cfg_obj: Mapping[str, Any]) -> Dict[str, str]:
     """
     功能：解析 attestation 配置中的环境变量名。 

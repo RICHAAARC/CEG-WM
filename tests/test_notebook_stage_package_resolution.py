@@ -11,7 +11,10 @@ Module type: General module
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import shutil
+import sys
 import time
 import zipfile
 from pathlib import Path
@@ -20,6 +23,7 @@ from typing import Any, Dict
 import pytest
 
 from scripts.notebook_runtime_common import (
+    build_repo_import_subprocess_env,
     build_failure_diagnostics_filename,
     compute_file_sha256,
     finalize_stage_package,
@@ -84,6 +88,29 @@ def _find_code_cell_source(notebook_path: Path, marker: str) -> str:
         if marker in source_text:
             return source_text
     raise AssertionError(f"code cell marker not found: {marker}")
+
+
+def _assert_execute_source_uses_repo_import_context(execute_source: str) -> None:
+    """
+    功能：断言 notebook execute cell 显式补齐 repo import context。
+
+    Assert one notebook execute cell constructs a subprocess environment that
+    preserves the current environment while prepending the repository root to
+    PYTHONPATH.
+
+    Args:
+        execute_source: Joined notebook code-cell source.
+
+    Returns:
+        None.
+    """
+    if not isinstance(execute_source, str) or not execute_source:
+        raise TypeError("execute_source must be non-empty str")
+
+    assert "build_repo_import_subprocess_env" in execute_source
+    assert "NOTEBOOK_SUBPROCESS_ENV = build_repo_import_subprocess_env(repo_root=REPO_ROOT)" in execute_source
+    assert "env=NOTEBOOK_SUBPROCESS_ENV" in execute_source
+    assert "env=os.environ.copy()" not in execute_source
 
 
 def _create_formal_stage_package(
@@ -262,6 +289,62 @@ def _execute_stage_04_precheck_cell(
     }
     exec(precheck_source, namespace)
     return namespace
+
+
+def test_build_repo_import_subprocess_env_preserves_existing_entries() -> None:
+    """
+    功能：验证 repo import helper 保留原环境并前置仓库根目录。
+
+    Verify the shared notebook subprocess helper preserves existing environment
+    entries while prepending the repository root to PYTHONPATH.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    existing_pythonpath = os.pathsep.join(["/tmp/site-packages", "/tmp/custom"]) 
+    source_env = {
+        "PATH": "test_path_value",
+        "CUSTOM_FLAG": "enabled",
+        "PYTHONPATH": existing_pythonpath,
+    }
+
+    env_mapping = build_repo_import_subprocess_env(base_env=source_env, repo_root=REPO_ROOT)
+    pythonpath_entries = env_mapping["PYTHONPATH"].split(os.pathsep)
+
+    assert env_mapping["PATH"] == "test_path_value"
+    assert env_mapping["CUSTOM_FLAG"] == "enabled"
+    assert pythonpath_entries[0] == str(REPO_ROOT.resolve())
+    assert pythonpath_entries[1:] == ["/tmp/site-packages", "/tmp/custom"]
+    assert source_env["PYTHONPATH"] == existing_pythonpath
+
+
+def test_build_repo_import_subprocess_env_deduplicates_repo_root() -> None:
+    """
+    功能：验证 repo import helper 不会重复追加仓库根目录。
+
+    Verify the shared notebook subprocess helper keeps exactly one repository
+    root entry even when the incoming PYTHONPATH already contains duplicates.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    repo_root_text = str(REPO_ROOT.resolve())
+    source_env = {
+        "PYTHONPATH": os.pathsep.join([repo_root_text, ".", repo_root_text, "relative/module/path"]),
+    }
+
+    env_mapping = build_repo_import_subprocess_env(base_env=source_env, repo_root=REPO_ROOT)
+    pythonpath_entries = env_mapping["PYTHONPATH"].split(os.pathsep)
+
+    assert pythonpath_entries[0] == repo_root_text
+    assert pythonpath_entries.count(repo_root_text) == 1
+    assert pythonpath_entries[1:] == [".", "relative/module/path"]
 
 
 def _execute_stage_02_precheck_cell(
@@ -567,6 +650,25 @@ def test_stage_01_validation_moves_root_records_to_optional_compatibility_views(
     }
 
 
+def test_stage_01_execute_cell_uses_repo_import_subprocess_env() -> None:
+    """
+    功能：验证 stage 01 execute cell 显式补齐 repo import context。
+
+    Verify the stage-01 notebook execute cell passes an explicit subprocess
+    environment that includes the repository import context.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    execute_source = _find_code_cell_source(NOTEBOOK_01_PATH, "STAGE_RUN_ID = make_stage_run_id(NOTEBOOK_NAME)")
+
+    _assert_execute_source_uses_repo_import_context(execute_source)
+    assert "command_result = subprocess.run(" in execute_source
+
+
 def test_stage_01_validation_reports_optional_root_records_when_present(tmp_path: Path) -> None:
     """
     功能：验证 stage 01 notebook 会报告已导出的 optional compatibility views。
@@ -728,6 +830,7 @@ def test_stage_02_execute_cell_uses_resolved_source_package_path() -> None:
     assert "discover_stage_packages" not in execute_source
     assert "select_latest_stage_package" not in execute_source
     assert "resolve_stage_package_input_or_discover" not in execute_source
+    _assert_execute_source_uses_repo_import_context(execute_source)
 
 
 def test_stage_03_precheck_persists_resolved_source_package(tmp_path: Path) -> None:
@@ -858,6 +961,7 @@ def test_stage_03_execute_cell_uses_resolved_source_package_path() -> None:
     assert "RESOLVED_SOURCE_PACKAGE_SOURCE" in execute_source
     assert "PRECHECK_SOURCE_PACKAGE_RESOLUTION" in execute_source
     assert "resolve_stage_package_input_or_discover" not in execute_source
+    _assert_execute_source_uses_repo_import_context(execute_source)
 
 
 def test_stage_03_notebook_defines_source_package_path_as_none() -> None:
@@ -1101,3 +1205,45 @@ def test_stage_04_execute_cell_uses_resolved_package_paths() -> None:
     assert "str(Path(STAGE_01_PACKAGE_PATH))" not in execute_source
     assert "if RESOLVED_STAGE_02_PACKAGE_PATH is not None:" in execute_source
     assert "if RESOLVED_STAGE_03_PACKAGE_PATH is not None:" in execute_source
+    _assert_execute_source_uses_repo_import_context(execute_source)
+
+
+@pytest.mark.parametrize(
+    "script_name",
+    [
+        "01_Paper_Full_Cuda.py",
+        "02_Parallel_Attestation_Statistics.py",
+        "03_Experiment_Matrix_Full.py",
+        "04_Release_And_Signoff.py",
+    ],
+)
+def test_stage_scripts_help_accept_repo_pythonpath(script_name: str) -> None:
+    """
+    功能：验证 stage 脚本在补齐 repo PYTHONPATH 后可完成入口解析。
+
+    Verify each stage script can complete top-level imports and argparse help
+    rendering when the repository root is explicitly injected into PYTHONPATH.
+
+    Args:
+        script_name: Stage script filename.
+
+    Returns:
+        None.
+    """
+    script_path = REPO_ROOT / "scripts" / script_name
+    env_mapping = build_repo_import_subprocess_env(repo_root=REPO_ROOT)
+    result = subprocess.run(
+        [sys.executable, str(script_path), "--help"],
+        cwd=str(REPO_ROOT),
+        env=env_mapping,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    combined_output = f"{result.stdout}\n{result.stderr}"
+
+    assert result.returncode == 0
+    assert "usage:" in combined_output.lower()
+    assert "ModuleNotFoundError: No module named 'scripts'" not in combined_output
