@@ -19,6 +19,8 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 
+from main.cli.run_common import build_seed_audit
+from main.diffusion.sd3 import infer_runtime, pipeline_factory
 from scripts.notebook_runtime_common import (
     REPO_ROOT,
     compute_file_sha256,
@@ -41,6 +43,9 @@ CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH = f"{CANONICAL_SOURCE_POOL_RELATIVE
 CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT = f"{CANONICAL_SOURCE_POOL_RELATIVE_ROOT}/entries"
 CANONICAL_SOURCE_POOL_ATTESTATION_RELATIVE_ROOT = f"{CANONICAL_SOURCE_POOL_RELATIVE_ROOT}/attestation"
 CANONICAL_SOURCE_POOL_SOURCE_IMAGES_RELATIVE_ROOT = f"{CANONICAL_SOURCE_POOL_RELATIVE_ROOT}/source_images"
+CANONICAL_SOURCE_POOL_PREVIEW_RECORDS_RELATIVE_ROOT = (
+    f"{CANONICAL_SOURCE_POOL_RELATIVE_ROOT}/preview_generation_records"
+)
 SOURCE_POOL_DETECT_RECORDS_RELATIVE_ROOT = "artifacts/stage_01_source_pool_detect_records"
 SOURCE_POOL_EMBED_RECORDS_RELATIVE_ROOT = "artifacts/stage_01_source_pool_embed_records"
 POOLED_THRESHOLD_RECORDS_RELATIVE_ROOT = "artifacts/stage_01_pooled_threshold_records"
@@ -50,6 +55,7 @@ EVENT_ATTESTATION_SCORE_NAME = "event_attestation_score"
 CONTENT_CHAIN_SCORE_NAME = "content_chain_score"
 SOURCE_PLUS_DERIVED_PAIRS_MODE = "source_plus_derived_pairs"
 DIRECT_SOURCE_ONLY_MODE = "direct_source_only"
+PREVIEW_GENERATION_RECORD_FILE_NAME = "preview_generation_record.json"
 REQUIRED_ATTESTATION_EVIDENCE_KEYS = (
     "attestation_statement",
     "attestation_bundle",
@@ -826,6 +832,361 @@ def _build_prompt_runtime_cfg(
     return cfg_copy
 
 
+def _resolve_source_pool_preview_generation_cfg(cfg_obj: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：解析 source-pool prompt 子运行所需的 preview_generation 配置。
+
+    Resolve the preview-generation config required by one source-pool prompt
+    subrun.
+
+    Args:
+        cfg_obj: Prompt-bound runtime config mapping.
+
+    Returns:
+        Canonical preview-generation config mapping.
+    """
+    if not isinstance(cfg_obj, dict):
+        raise TypeError("cfg_obj must be dict")
+
+    embed_cfg = cfg_obj.get("embed")
+    if not isinstance(embed_cfg, dict):
+        raise ValueError("source-pool preview requires cfg.embed mapping")
+
+    preview_cfg = embed_cfg.get("preview_generation")
+    if not isinstance(preview_cfg, dict):
+        raise ValueError("source-pool preview requires embed.preview_generation mapping")
+
+    if preview_cfg.get("enabled") is not True:
+        raise ValueError("source-pool preview requires embed.preview_generation.enabled=true")
+
+    artifact_rel_path = preview_cfg.get("artifact_rel_path")
+    if not isinstance(artifact_rel_path, str) or not artifact_rel_path.strip():
+        raise ValueError(
+            "source-pool preview requires non-empty embed.preview_generation.artifact_rel_path"
+        )
+
+    return {"artifact_rel_path": artifact_rel_path.strip().replace("\\", "/")}
+
+
+def _resolve_source_pool_preview_generation_record_rel_path(artifact_rel_path: str) -> str:
+    """
+    功能：从 preview artifact 相对路径派生 preview record 相对路径。
+
+    Derive the preview-generation record path from the configured preview
+    artifact relative path.
+
+    Args:
+        artifact_rel_path: Artifact path relative to prompt_run_root/artifacts.
+
+    Returns:
+        Record path relative to prompt_run_root/artifacts.
+    """
+    if not isinstance(artifact_rel_path, str) or not artifact_rel_path:
+        raise TypeError("artifact_rel_path must be non-empty str")
+
+    preview_rel_path = Path(artifact_rel_path)
+    preview_parent = preview_rel_path.parent.as_posix()
+    if preview_parent in {"", "."}:
+        return PREVIEW_GENERATION_RECORD_FILE_NAME
+    return f"{preview_parent}/{PREVIEW_GENERATION_RECORD_FILE_NAME}"
+
+
+def _resolve_source_pool_existing_input_image_path(cfg_obj: Dict[str, Any]) -> Optional[str]:
+    """
+    功能：解析 source-pool prompt 配置中的显式 embed 输入图路径。
+
+    Resolve an explicit embed input image path from one prompt-bound runtime
+    config.
+
+    Args:
+        cfg_obj: Prompt-bound runtime config mapping.
+
+    Returns:
+        Input image path string when configured; otherwise None.
+    """
+    if not isinstance(cfg_obj, dict):
+        raise TypeError("cfg_obj must be dict")
+
+    candidates = [cfg_obj.get("input_image_path")]
+    embed_cfg = cfg_obj.get("embed")
+    if isinstance(embed_cfg, dict):
+        candidates.append(embed_cfg.get("input_image_path"))
+
+    for value in candidates:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _inject_source_pool_input_image_path(
+    cfg_obj: Dict[str, Any],
+    *,
+    input_image_path: str,
+    preview_record_path: str,
+    preview_record_rel_path: str,
+    artifact_rel_path: str,
+    creation_mode: str,
+) -> Dict[str, Any]:
+    """
+    功能：向 source-pool prompt runtime config 注入正式输入图与 preview 追踪字段。
+
+    Inject the authoritative input image path and preview lineage references
+    into the prompt-bound runtime config.
+
+    Args:
+        cfg_obj: Prompt-bound runtime config mapping.
+        input_image_path: Persisted authoritative input image path.
+        preview_record_path: Preview-generation record path.
+        preview_record_rel_path: Preview-generation record path relative to artifacts.
+        artifact_rel_path: Preview artifact path relative to artifacts.
+        creation_mode: Preview creation mode token.
+
+    Returns:
+        Updated runtime config mapping.
+    """
+    if not isinstance(cfg_obj, dict):
+        raise TypeError("cfg_obj must be dict")
+    if not isinstance(input_image_path, str) or not input_image_path:
+        raise TypeError("input_image_path must be non-empty str")
+    if not isinstance(preview_record_path, str) or not preview_record_path:
+        raise TypeError("preview_record_path must be non-empty str")
+    if not isinstance(preview_record_rel_path, str) or not preview_record_rel_path:
+        raise TypeError("preview_record_rel_path must be non-empty str")
+    if not isinstance(artifact_rel_path, str) or not artifact_rel_path:
+        raise TypeError("artifact_rel_path must be non-empty str")
+    if not isinstance(creation_mode, str) or not creation_mode:
+        raise TypeError("creation_mode must be non-empty str")
+
+    cfg_copy = json.loads(json.dumps(cfg_obj))
+    embed_cfg = dict(cfg_copy.get("embed")) if isinstance(cfg_copy.get("embed"), dict) else {}
+    embed_cfg["input_image_path"] = input_image_path
+    cfg_copy["embed"] = embed_cfg
+    cfg_copy["stage_01_source_pool_preview"] = {
+        "input_image_path": input_image_path,
+        "preview_generation_record_path": preview_record_path,
+        "preview_generation_record_rel_path": preview_record_rel_path,
+        "requested_artifact_rel_path": artifact_rel_path,
+        "creation_mode": creation_mode,
+    }
+    return cfg_copy
+
+
+def _persist_source_pool_preview_artifact(
+    *,
+    source_path: Path,
+    target_path: Path,
+) -> None:
+    """
+    功能：将 source-pool 的正式输入图复制到受控 preview artifact 位置。
+
+    Copy an existing authoritative input image into the prompt-scoped preview
+    artifact path.
+
+    Args:
+        source_path: Existing source image path.
+        target_path: Target artifact path under prompt_run_root/artifacts.
+
+    Returns:
+        None.
+    """
+    if not isinstance(source_path, Path):
+        raise TypeError("source_path must be Path")
+    if not isinstance(target_path, Path):
+        raise TypeError("target_path must be Path")
+    if not source_path.exists() or not source_path.is_file():
+        raise FileNotFoundError(f"source_path not found: {source_path}")
+
+    ensure_directory(target_path.parent)
+    if source_path.resolve() != target_path.resolve():
+        copy_file(source_path, target_path)
+
+
+def _prepare_source_pool_preview_artifact(
+    *,
+    cfg_obj: Dict[str, Any],
+    prompt_run_root: Path,
+    prompt_text: str,
+    prompt_index: int,
+    prompt_file_path: str,
+) -> Dict[str, Any]:
+    """
+    功能：为 source-pool prompt 子运行显式准备正式 preview 输入图工件。
+
+    Prepare the authoritative prompt-conditioned preview artifact consumed by
+    the stage-01 source-pool embed subrun.
+
+    Args:
+        cfg_obj: Prompt-bound runtime config mapping.
+        prompt_run_root: Prompt-bound subrun root.
+        prompt_text: Prompt text.
+        prompt_index: Prompt index.
+        prompt_file_path: Normalized prompt file path.
+
+    Returns:
+        Mapping carrying the updated runtime config and preview-generation
+        record payload.
+    """
+    if not isinstance(cfg_obj, dict):
+        raise TypeError("cfg_obj must be dict")
+    if not isinstance(prompt_run_root, Path):
+        raise TypeError("prompt_run_root must be Path")
+    if not isinstance(prompt_text, str) or not prompt_text:
+        raise TypeError("prompt_text must be non-empty str")
+    if prompt_index < 0:
+        raise TypeError("prompt_index must be non-negative int")
+    if not isinstance(prompt_file_path, str) or not prompt_file_path:
+        raise TypeError("prompt_file_path must be non-empty str")
+
+    preview_cfg = _resolve_source_pool_preview_generation_cfg(cfg_obj)
+    artifact_rel_path = preview_cfg["artifact_rel_path"]
+    record_rel_path = _resolve_source_pool_preview_generation_record_rel_path(artifact_rel_path)
+    artifact_path = prompt_run_root / "artifacts" / Path(artifact_rel_path)
+    record_path = prompt_run_root / "artifacts" / Path(record_rel_path)
+    _, seed_digest, seed_value, seed_rule_id = build_seed_audit(cfg_obj, "embed")
+
+    preview_record: Dict[str, Any] = {
+        "artifact_type": "stage_01_source_pool_preview_generation_record",
+        "stage_name": "01_Paper_Full_Cuda",
+        "prompt_index": prompt_index,
+        "prompt_text": prompt_text,
+        "prompt_file": prompt_file_path,
+        "prompt_sha256": _build_prompt_sha256(prompt_text),
+        "status": "failed",
+        "reason": None,
+        "exception_type": None,
+        "exception_message": None,
+        "pipeline_status": "not_required",
+        "pipeline_error": None,
+        "inference_status": "not_required",
+        "inference_error": None,
+        "inference_runtime_meta": None,
+        "output_image_present": False,
+        "requested_artifact_rel_path": artifact_rel_path,
+        "requested_artifact_path": normalize_path_value(artifact_path),
+        "persisted_artifact_path": None,
+        "persisted_artifact_sha256": None,
+        "record_path": normalize_path_value(record_path),
+        "record_rel_path": record_rel_path,
+        "seed": seed_value,
+        "seed_digest": seed_digest,
+        "seed_rule_id": seed_rule_id,
+        "prompt": prompt_text,
+        "device": cfg_obj.get("device", "cpu"),
+        "model_id": cfg_obj.get("model_id"),
+        "inference_args": {
+            "num_inference_steps": cfg_obj.get("inference_num_steps"),
+            "guidance_scale": cfg_obj.get("inference_guidance_scale"),
+            "height": cfg_obj.get("inference_height"),
+            "width": cfg_obj.get("inference_width"),
+        },
+        "creation_mode": "prompt_conditioned_preview",
+    }
+
+    existing_input_path = _resolve_source_pool_existing_input_image_path(cfg_obj)
+    if isinstance(existing_input_path, str) and existing_input_path:
+        resolved_existing_input = Path(existing_input_path).expanduser()
+        if not resolved_existing_input.is_absolute():
+            resolved_existing_input = (REPO_ROOT / resolved_existing_input).resolve()
+        else:
+            resolved_existing_input = resolved_existing_input.resolve()
+        if not resolved_existing_input.exists() or not resolved_existing_input.is_file():
+            raise FileNotFoundError(
+                "stage 01 source pool preconfigured input image not found: "
+                f"{resolved_existing_input}"
+            )
+
+        _persist_source_pool_preview_artifact(
+            source_path=resolved_existing_input,
+            target_path=artifact_path,
+        )
+        preview_record["status"] = "ok"
+        preview_record["reason"] = None
+        preview_record["output_image_present"] = True
+        preview_record["persisted_artifact_path"] = normalize_path_value(artifact_path)
+        preview_record["persisted_artifact_sha256"] = compute_file_sha256(artifact_path)
+        preview_record["creation_mode"] = "preconfigured_input_image"
+        preview_record["source_input_image_path"] = normalize_path_value(resolved_existing_input)
+        write_json_atomic(record_path, preview_record)
+        return {
+            "runtime_cfg": _inject_source_pool_input_image_path(
+                cfg_obj,
+                input_image_path=normalize_path_value(artifact_path),
+                preview_record_path=normalize_path_value(record_path),
+                preview_record_rel_path=record_rel_path,
+                artifact_rel_path=artifact_rel_path,
+                creation_mode=cast(str, preview_record["creation_mode"]),
+            ),
+            "preview_record": preview_record,
+        }
+
+    pipeline_result = pipeline_factory.build_pipeline_shell(cfg_obj)
+    preview_record["pipeline_status"] = pipeline_result.get("pipeline_status")
+    preview_record["pipeline_error"] = pipeline_result.get("pipeline_error")
+    preview_pipeline_obj = pipeline_result.get("pipeline_obj")
+    preview_device = cfg_obj.get("device", "cpu")
+
+    try:
+        infer_result = infer_runtime.run_sd3_inference(
+            cfg_obj,
+            preview_pipeline_obj,
+            preview_device,
+            seed_value,
+            injection_context=None,
+            injection_modifier=None,
+            capture_final_latents=False,
+        )
+        preview_status = infer_result.get("inference_status")
+        if not isinstance(preview_status, str) or not preview_status:
+            preview_status = infer_result.get("status")
+        if not isinstance(preview_status, str) or not preview_status:
+            preview_status = infer_runtime.INFERENCE_STATUS_FAILED
+
+        preview_record["inference_status"] = preview_status
+        preview_record["inference_error"] = infer_result.get("inference_error")
+        preview_record["inference_runtime_meta"] = infer_result.get("inference_runtime_meta")
+
+        preview_image = infer_result.get("output_image")
+        preview_record["output_image_present"] = preview_image is not None
+        if preview_status == infer_runtime.INFERENCE_STATUS_OK and preview_image is not None:
+            ensure_directory(artifact_path.parent)
+            preview_image.save(artifact_path)
+            preview_record["status"] = "ok"
+            preview_record["persisted_artifact_path"] = normalize_path_value(artifact_path)
+            preview_record["persisted_artifact_sha256"] = compute_file_sha256(artifact_path)
+        elif preview_status == infer_runtime.INFERENCE_STATUS_OK:
+            preview_record["reason"] = "preview_inference_no_output_image"
+        else:
+            inference_error = infer_result.get("inference_error")
+            if isinstance(inference_error, str) and inference_error:
+                preview_record["reason"] = inference_error
+            else:
+                preview_record["reason"] = f"preview_inference_status={preview_status}"
+    except Exception as exc:
+        preview_record["reason"] = "source_pool_preview_generation_exception"
+        preview_record["exception_type"] = type(exc).__name__
+        preview_record["exception_message"] = str(exc)
+
+    write_json_atomic(record_path, preview_record)
+    if preview_record["status"] != "ok":
+        raise RuntimeError(
+            "stage 01 source pool preview generation failed: "
+            f"{json.dumps(preview_record, ensure_ascii=False, sort_keys=True)}"
+        )
+
+    persisted_artifact_path = cast(str, preview_record["persisted_artifact_path"])
+    return {
+        "runtime_cfg": _inject_source_pool_input_image_path(
+            cfg_obj,
+            input_image_path=persisted_artifact_path,
+            preview_record_path=normalize_path_value(record_path),
+            preview_record_rel_path=record_rel_path,
+            artifact_rel_path=artifact_rel_path,
+            creation_mode=cast(str, preview_record["creation_mode"]),
+        ),
+        "preview_record": preview_record,
+    }
+
+
 def _run_stage(stage_name: str, command: Sequence[str], run_root: Path) -> Dict[str, Any]:
     """
     功能：执行一个 workflow stage 并写日志。
@@ -1205,6 +1566,54 @@ def _resolve_source_pool_source_image_view(
     )
 
 
+def _resolve_source_pool_preview_generation_record_view(
+    *,
+    cfg_obj: Dict[str, Any],
+    run_root: Path,
+    prompt_run_root: Path,
+    prompt_index: int,
+) -> Dict[str, Any]:
+    """
+    功能：解析 source-pool prompt 子运行的 preview-generation record 视图。
+
+    Resolve the prompt-scoped preview-generation record view for one
+    source-pool subrun.
+
+    Args:
+        cfg_obj: Prompt-bound runtime config mapping.
+        run_root: Stage-01 run root.
+        prompt_run_root: Prompt-bound subrun root.
+        prompt_index: Prompt index.
+
+    Returns:
+        Preview-generation record artifact view.
+    """
+    if not isinstance(cfg_obj, dict):
+        raise TypeError("cfg_obj must be dict")
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(prompt_run_root, Path):
+        raise TypeError("prompt_run_root must be Path")
+    if prompt_index < 0:
+        raise TypeError("prompt_index must be non-negative int")
+
+    preview_cfg = _resolve_source_pool_preview_generation_cfg(cfg_obj)
+    record_rel_path = _resolve_source_pool_preview_generation_record_rel_path(
+        preview_cfg["artifact_rel_path"]
+    )
+    package_relative_path = _build_prompt_scoped_package_relative_path(
+        CANONICAL_SOURCE_POOL_PREVIEW_RECORDS_RELATIVE_ROOT,
+        prompt_index,
+        PREVIEW_GENERATION_RECORD_FILE_NAME,
+    )
+    return _build_optional_canonical_artifact_view(
+        run_root=run_root,
+        source_path=prompt_run_root / "artifacts" / Path(record_rel_path),
+        package_relative_path=package_relative_path,
+        missing_reason="preview_generation_record_not_emitted",
+    )
+
+
 def _run_source_pool_subrun(
     *,
     index: int,
@@ -1239,10 +1648,20 @@ def _run_source_pool_subrun(
         prompt_index=index,
         prompt_file_path=prompt_file_path,
     )
+    preview_precompute_result = _prepare_source_pool_preview_artifact(
+        cfg_obj=runtime_cfg,
+        prompt_run_root=prompt_run_root,
+        prompt_text=prompt_text,
+        prompt_index=index,
+        prompt_file_path=prompt_file_path,
+    )
+    runtime_cfg = cast(Dict[str, Any], preview_precompute_result["runtime_cfg"])
     runtime_cfg_path = run_root / SOURCE_POOL_RUNTIME_CONFIG_RELATIVE_ROOT / f"prompt_{index:03d}.yaml"
     write_yaml_mapping(runtime_cfg_path, runtime_cfg)
 
-    stage_results: Dict[str, Any] = {}
+    stage_results: Dict[str, Any] = {
+        "preview_precompute": preview_precompute_result["preview_record"],
+    }
     for stage_name in ("embed", "detect"):
         command = _build_stage_command(stage_name, runtime_cfg_path, prompt_run_root)
         result = _run_stage(stage_name, command, prompt_run_root)
@@ -1291,7 +1710,13 @@ def _run_source_pool_subrun(
         prompt_index=index,
     )
     source_image_view = _resolve_source_pool_source_image_view(
-        cfg_obj=cfg_obj,
+        cfg_obj=runtime_cfg,
+        run_root=run_root,
+        prompt_run_root=prompt_run_root,
+        prompt_index=index,
+    )
+    preview_generation_record_view = _resolve_source_pool_preview_generation_record_view(
+        cfg_obj=runtime_cfg,
         run_root=run_root,
         prompt_run_root=prompt_run_root,
         prompt_index=index,
@@ -1322,6 +1747,7 @@ def _run_source_pool_subrun(
         "attestation_bundle": attestation_views["attestation_bundle"],
         "attestation_result": attestation_views["attestation_result"],
         "source_image": source_image_view,
+        "preview_generation_record": preview_generation_record_view,
         "payload": direct_detect_payload,
         "source_embed_record_path": normalize_path_value(source_embed_record_path),
         "source_detect_record_path": normalize_path_value(source_detect_record_path),
@@ -1395,6 +1821,7 @@ def _build_stage_01_canonical_source_pool(
             "attestation_bundle": entry["attestation_bundle"],
             "attestation_result": entry["attestation_result"],
             "source_image": entry["source_image"],
+            "preview_generation_record": entry["preview_generation_record"],
             "representative_root_records_alias": entry["prompt_index"] == representative_entry["prompt_index"],
         }
         write_json_atomic(entry_path, entry_payload)
@@ -1416,6 +1843,7 @@ def _build_stage_01_canonical_source_pool(
                 "attestation_bundle": entry_payload["attestation_bundle"],
                 "attestation_result": entry_payload["attestation_result"],
                 "source_image": entry_payload["source_image"],
+                "preview_generation_record": entry_payload["preview_generation_record"],
                 "representative_root_records_alias": entry_payload["representative_root_records_alias"],
             }
         )

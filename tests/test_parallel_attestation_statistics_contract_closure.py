@@ -38,6 +38,7 @@ CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH = f"{CANONICAL_SOURCE_POOL_RELATIVE
 CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT = f"{CANONICAL_SOURCE_POOL_RELATIVE_ROOT}/entries"
 CANONICAL_SOURCE_POOL_ATTESTATION_RELATIVE_ROOT = f"{CANONICAL_SOURCE_POOL_RELATIVE_ROOT}/attestation"
 CANONICAL_SOURCE_POOL_SOURCE_IMAGES_RELATIVE_ROOT = f"{CANONICAL_SOURCE_POOL_RELATIVE_ROOT}/source_images"
+CANONICAL_SOURCE_POOL_PREVIEW_RECORDS_RELATIVE_ROOT = f"{CANONICAL_SOURCE_POOL_RELATIVE_ROOT}/preview_generation_records"
 
 
 def _load_script_module(relative_path: str, module_name: str) -> object:
@@ -323,10 +324,14 @@ def _make_stage_01_source_pool_contract(run_root: Path, prompt_count: int) -> Di
         source_image_package_relative_path = (
             f"{CANONICAL_SOURCE_POOL_SOURCE_IMAGES_RELATIVE_ROOT}/prompt_{prompt_index:03d}/preview.png"
         )
+        preview_record_package_relative_path = (
+            f"{CANONICAL_SOURCE_POOL_PREVIEW_RECORDS_RELATIVE_ROOT}/prompt_{prompt_index:03d}/preview_generation_record.json"
+        )
         attestation_statement_path = run_root / attestation_statement_package_relative_path
         attestation_bundle_path = run_root / attestation_bundle_package_relative_path
         attestation_result_path = run_root / attestation_result_package_relative_path
         source_image_path = run_root / source_image_package_relative_path
+        preview_record_path = run_root / preview_record_package_relative_path
         _write_json(
             record_path,
             {
@@ -362,6 +367,14 @@ def _make_stage_01_source_pool_contract(run_root: Path, prompt_count: int) -> Di
             },
         )
         _write_bytes(source_image_path, b"preview")
+        _write_json(
+            preview_record_path,
+            {
+                "status": "ok",
+                "prompt_index": prompt_index,
+                "creation_mode": "prompt_conditioned_preview",
+            },
+        )
         _write_json(
             entry_path,
             {
@@ -409,6 +422,12 @@ def _make_stage_01_source_pool_contract(run_root: Path, prompt_count: int) -> Di
                     "package_relative_path": source_image_package_relative_path,
                     "missing_reason": None,
                 },
+                "preview_generation_record": {
+                    "exists": True,
+                    "path": _normalize_path_string(preview_record_path),
+                    "package_relative_path": preview_record_package_relative_path,
+                    "missing_reason": None,
+                },
                 "representative_root_records_alias": prompt_index == 0,
             },
         )
@@ -452,6 +471,12 @@ def _make_stage_01_source_pool_contract(run_root: Path, prompt_count: int) -> Di
                     "exists": True,
                     "path": _normalize_path_string(source_image_path),
                     "package_relative_path": source_image_package_relative_path,
+                    "missing_reason": None,
+                },
+                "preview_generation_record": {
+                    "exists": True,
+                    "path": _normalize_path_string(preview_record_path),
+                    "package_relative_path": preview_record_package_relative_path,
                     "missing_reason": None,
                 },
                 "representative_root_records_alias": prompt_index == 0,
@@ -755,6 +780,49 @@ def _prepare_stage_01_mainline_config_monkeypatches(
         "_resolve_stage_01_prompt_pool",
         lambda _cfg: (prompt_pool, "prompts/paper_small.txt"),
     )
+
+    def _fake_prepare_source_pool_preview_artifact(
+        *,
+        cfg_obj: Dict[str, Any],
+        prompt_run_root: Path,
+        prompt_text: str,
+        prompt_index: int,
+        prompt_file_path: str,
+    ) -> Dict[str, Any]:
+        preview_artifact_path = prompt_run_root / "artifacts" / "preview" / "preview.png"
+        preview_record_path = prompt_run_root / "artifacts" / "preview" / "preview_generation_record.json"
+        _write_bytes(preview_artifact_path, f"preview-{prompt_index}".encode("utf-8"))
+        preview_record_payload = {
+            "artifact_type": "stage_01_source_pool_preview_generation_record",
+            "status": "ok",
+            "reason": None,
+            "prompt_index": prompt_index,
+            "prompt_text": prompt_text,
+            "prompt_file": prompt_file_path,
+            "creation_mode": "prompt_conditioned_preview",
+            "requested_artifact_rel_path": "preview/preview.png",
+            "requested_artifact_path": _normalize_path_string(preview_artifact_path),
+            "persisted_artifact_path": _normalize_path_string(preview_artifact_path),
+            "persisted_artifact_sha256": compute_file_sha256(preview_artifact_path),
+            "record_path": _normalize_path_string(preview_record_path),
+            "record_rel_path": "preview/preview_generation_record.json",
+            "output_image_present": True,
+        }
+        _write_json(preview_record_path, preview_record_payload)
+        runtime_cfg = runner._inject_source_pool_input_image_path(
+            cfg_obj,
+            input_image_path=_normalize_path_string(preview_artifact_path),
+            preview_record_path=_normalize_path_string(preview_record_path),
+            preview_record_rel_path="preview/preview_generation_record.json",
+            artifact_rel_path="preview/preview.png",
+            creation_mode="prompt_conditioned_preview",
+        )
+        return {
+            "runtime_cfg": runtime_cfg,
+            "preview_record": preview_record_payload,
+        }
+
+    monkeypatch.setattr(runner, "_prepare_source_pool_preview_artifact", _fake_prepare_source_pool_preview_artifact)
 
 
 def _make_stage_01_mainline_run_stage(run_root: Path, attestation_prompt_indices: list[int]) -> Any:
@@ -1661,6 +1729,28 @@ def test_stage_01_source_pool_failure_exposes_nested_log_tails(
         }
 
     monkeypatch.setattr(runner, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        runner,
+        "_prepare_source_pool_preview_artifact",
+        lambda **kwargs: {
+            "runtime_cfg": runner._inject_source_pool_input_image_path(
+                kwargs["cfg_obj"],
+                input_image_path=_normalize_path_string(
+                    kwargs["prompt_run_root"] / "artifacts" / "preview" / "preview.png"
+                ),
+                preview_record_path=_normalize_path_string(
+                    kwargs["prompt_run_root"] / "artifacts" / "preview" / "preview_generation_record.json"
+                ),
+                preview_record_rel_path="preview/preview_generation_record.json",
+                artifact_rel_path="preview/preview.png",
+                creation_mode="prompt_conditioned_preview",
+            ),
+            "preview_record": {
+                "status": "ok",
+                "creation_mode": "prompt_conditioned_preview",
+            },
+        },
+    )
 
     with pytest.raises(RuntimeError) as exc_info:
         runner._run_source_pool_subrun(
@@ -1780,6 +1870,12 @@ def test_stage_01_mainline_promotes_canonical_source_pool_and_keeps_compatibilit
     canonical_entry_1 = json.loads(
         (run_root / CANONICAL_SOURCE_POOL_ENTRIES_RELATIVE_ROOT / "001_source_entry.json").read_text(encoding="utf-8")
     )
+    runtime_cfg_0 = yaml.safe_load(
+        (run_root / "artifacts" / "stage_01_source_pool_runtime_configs" / "prompt_000.yaml").read_text(encoding="utf-8")
+    )
+    runtime_cfg_1 = yaml.safe_load(
+        (run_root / "artifacts" / "stage_01_source_pool_runtime_configs" / "prompt_001.yaml").read_text(encoding="utf-8")
+    )
 
     assert exit_code == 0
     assert canonical_manifest["artifact_role"] == "canonical_source_pool_root"
@@ -1796,11 +1892,20 @@ def test_stage_01_mainline_promotes_canonical_source_pool_and_keeps_compatibilit
     assert canonical_entry_0["attestation_bundle"]["exists"] is True
     assert canonical_entry_0["attestation_result"]["exists"] is True
     assert canonical_entry_0["source_image"]["exists"] is True
+    assert canonical_entry_0["preview_generation_record"]["exists"] is True
     assert canonical_entry_1["attestation_statement"]["exists"] is True
     assert canonical_entry_1["attestation_bundle"]["exists"] is True
     assert canonical_entry_1["attestation_result"]["exists"] is True
-    assert canonical_entry_1["source_image"]["exists"] is False
-    assert canonical_entry_1["source_image"]["missing_reason"] == "source_image_not_emitted"
+    assert canonical_entry_1["source_image"]["exists"] is True
+    assert canonical_entry_1["preview_generation_record"]["exists"] is True
+    assert runtime_cfg_0["embed"]["input_image_path"].endswith("source_pool/prompt_000/artifacts/preview/preview.png")
+    assert runtime_cfg_1["embed"]["input_image_path"].endswith("source_pool/prompt_001/artifacts/preview/preview.png")
+    assert runtime_cfg_0["stage_01_source_pool_preview"]["preview_generation_record_rel_path"] == (
+        "preview/preview_generation_record.json"
+    )
+    assert runtime_cfg_1["stage_01_source_pool_preview"]["preview_generation_record_rel_path"] == (
+        "preview/preview_generation_record.json"
+    )
     assert workflow_summary["status"] == "ok"
     assert workflow_summary["required_artifacts_ok"] is True
     assert workflow_summary["attestation_evidence_ok"] is True

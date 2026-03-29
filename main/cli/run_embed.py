@@ -78,6 +78,7 @@ _build_planner_inputs_for_runtime = cast(
 
 
 EMBED_CONTENT_RUNTIME_PHASE_PRECOMPUTE = "embed_precompute"
+PREVIEW_GENERATION_RECORD_FILE_NAME = "preview_generation_record.json"
 
 
 def _resolve_embed_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -113,6 +114,222 @@ def _resolve_preview_generation_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
     return cast(Dict[str, Any], preview_node) if isinstance(preview_node, dict) else {}
 
 
+def _normalize_preview_generation_artifact_rel_path(cfg: Dict[str, Any]) -> str | None:
+    """
+    功能：规范化 preview artifact 的相对路径。 
+
+    Normalize the configured preview artifact relative path.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Artifact path relative to artifacts/, or None when absent.
+    """
+    preview_cfg = _resolve_preview_generation_cfg(cfg)
+    artifact_rel_path = preview_cfg.get("artifact_rel_path")
+    if not isinstance(artifact_rel_path, str):
+        return None
+    normalized_artifact_rel_path = artifact_rel_path.strip().replace("\\", "/")
+    if not normalized_artifact_rel_path:
+        return None
+    return normalized_artifact_rel_path
+
+
+def _resolve_preview_generation_record_rel_path(artifact_rel_path: str | None) -> str:
+    """
+    功能：从 preview artifact 相对路径派生 preview record 相对路径。 
+
+    Derive the preview-generation record relative path from the configured
+    preview artifact path.
+
+    Args:
+        artifact_rel_path: Artifact path relative to artifacts/, or None.
+
+    Returns:
+        Record path relative to artifacts/.
+    """
+    if artifact_rel_path is None:
+        return PREVIEW_GENERATION_RECORD_FILE_NAME
+    preview_rel_path = Path(artifact_rel_path)
+    preview_parent = preview_rel_path.parent.as_posix()
+    if preview_parent in {"", "."}:
+        return PREVIEW_GENERATION_RECORD_FILE_NAME
+    return f"{preview_parent}/{PREVIEW_GENERATION_RECORD_FILE_NAME}"
+
+
+def _write_preview_generation_record(
+    *,
+    run_root: Path,
+    artifacts_dir: Path,
+    record_path: Path,
+    payload: Dict[str, Any],
+) -> None:
+    """
+    功能：写出 preview_generation 结构化记录工件。 
+
+    Persist the structured preview-generation record artifact.
+
+    Args:
+        run_root: Run root directory.
+        artifacts_dir: Artifacts directory.
+        record_path: Target preview-generation record path.
+        payload: Structured record payload.
+
+    Returns:
+        None.
+    """
+    record_path.parent.mkdir(parents=True, exist_ok=True)
+    path_policy.validate_output_target(record_path, "artifact", run_root)
+    records_io.write_artifact_json_unbound(
+        run_root,
+        artifacts_dir,
+        str(record_path),
+        payload,
+    )
+
+
+def _build_preview_generation_meta(
+    *,
+    cfg: Dict[str, Any],
+    run_root: Path,
+    artifacts_dir: Path,
+    pipeline_result: Dict[str, Any],
+    seed_value: int | None,
+) -> Dict[str, Any]:
+    """
+    功能：执行并持久化 preview_generation 的正式工件与结构化元数据。 
+
+    Execute preview generation, persist the authoritative preview artifact, and
+    return structured observability metadata.
+
+    Args:
+        cfg: Mutable configuration mapping.
+        run_root: Run root directory.
+        artifacts_dir: Artifacts directory.
+        pipeline_result: Pipeline build result mapping.
+        seed_value: Effective runtime seed.
+
+    Returns:
+        Structured preview-generation metadata mapping.
+    """
+    preview_cfg = _resolve_preview_generation_cfg(cfg)
+    preview_enabled = bool(preview_cfg.get("enabled", False))
+    artifact_rel_path = _normalize_preview_generation_artifact_rel_path(cfg)
+    record_rel_path = _resolve_preview_generation_record_rel_path(artifact_rel_path)
+    preview_artifact_path = artifacts_dir / Path(artifact_rel_path) if artifact_rel_path is not None else None
+    preview_record_path = artifacts_dir / Path(record_rel_path)
+    preview_device = cfg.get("device", "cpu")
+
+    preview_meta: Dict[str, Any] = {
+        "enabled": preview_enabled,
+        "status": "skipped",
+        "reason": None,
+        "exception_type": None,
+        "exception_message": None,
+        "pipeline_status": pipeline_result.get("pipeline_status"),
+        "pipeline_error": pipeline_result.get("pipeline_error"),
+        "inference_status": None,
+        "inference_error": None,
+        "inference_runtime_meta": None,
+        "output_image_present": False,
+        "requested_artifact_rel_path": artifact_rel_path,
+        "requested_artifact_path": str(preview_artifact_path) if preview_artifact_path is not None else None,
+        "persisted_artifact_path": None,
+        "persisted_artifact_rel_path": None,
+        "persisted_artifact_sha256": None,
+        "record_path": str(preview_record_path),
+        "record_rel_path": record_rel_path,
+        "seed": seed_value,
+        "prompt": cfg.get("inference_prompt"),
+        "device": preview_device,
+        "creation_mode": "prompt_conditioned_preview",
+    }
+
+    if not preview_enabled:
+        preview_meta["reason"] = "preview_generation_disabled"
+        return preview_meta
+
+    existing_input_image_path = cfg.get("__embed_input_image_path__")
+    if isinstance(existing_input_image_path, str) and existing_input_image_path.strip():
+        preview_meta["reason"] = "input_image_already_available"
+        preview_meta["persisted_artifact_path"] = existing_input_image_path.strip()
+        return preview_meta
+
+    if preview_artifact_path is None:
+        preview_meta["status"] = "failed"
+        preview_meta["reason"] = "preview_generation_artifact_rel_path_missing"
+        _write_preview_generation_record(
+            run_root=run_root,
+            artifacts_dir=artifacts_dir,
+            record_path=preview_record_path,
+            payload=preview_meta,
+        )
+        return preview_meta
+
+    preview_pipeline_obj = pipeline_result.get("pipeline_obj")
+    try:
+        preview_infer_result = infer_runtime.run_sd3_inference(
+            cfg,
+            preview_pipeline_obj,
+            preview_device,
+            seed_value,
+            injection_context=None,
+            injection_modifier=None,
+            capture_final_latents=False,
+        )
+        preview_status = preview_infer_result.get("inference_status")
+        if not isinstance(preview_status, str) or not preview_status:
+            preview_status = preview_infer_result.get("status")
+        if not isinstance(preview_status, str) or not preview_status:
+            preview_status = infer_runtime.INFERENCE_STATUS_FAILED
+
+        preview_meta["inference_status"] = preview_status
+        preview_meta["inference_error"] = preview_infer_result.get("inference_error")
+        preview_meta["inference_runtime_meta"] = preview_infer_result.get("inference_runtime_meta")
+
+        preview_image = preview_infer_result.get("output_image")
+        preview_meta["output_image_present"] = preview_image is not None
+        if preview_status == infer_runtime.INFERENCE_STATUS_OK and preview_image is not None:
+            preview_artifact_path.parent.mkdir(parents=True, exist_ok=True)
+            path_policy.validate_output_target(preview_artifact_path, "artifact", run_root)
+            preview_image.save(str(preview_artifact_path), format="PNG")
+            preview_meta["status"] = "ok"
+            preview_meta["persisted_artifact_path"] = str(preview_artifact_path)
+            preview_meta["persisted_artifact_rel_path"] = artifact_rel_path
+            preview_meta["persisted_artifact_sha256"] = digests.file_sha256(preview_artifact_path)
+            cfg["__embed_input_image_path__"] = str(preview_artifact_path)
+            print(f"[Preview Generation] 预览图已生成，路径：{preview_artifact_path}")
+        elif preview_status == infer_runtime.INFERENCE_STATUS_OK:
+            preview_meta["status"] = "failed"
+            preview_meta["reason"] = "preview_inference_no_output_image"
+            print("[Preview Generation] 推理成功但无 output_image，跳过。")
+        else:
+            preview_meta["status"] = "failed"
+            inference_error = preview_infer_result.get("inference_error")
+            if isinstance(inference_error, str) and inference_error:
+                preview_meta["reason"] = inference_error
+            else:
+                preview_meta["reason"] = f"preview_inference_status={preview_status}"
+            print(f"[Preview Generation] 推理状态非 ok（{preview_status}），跳过。")
+    except Exception as exc:
+        preview_meta["status"] = "failed"
+        preview_meta["reason"] = "preview_generation_exception"
+        preview_meta["exception_type"] = type(exc).__name__
+        preview_meta["exception_message"] = str(exc)
+        print(f"[Preview Generation] 推理异常：{exc}，跳过。")
+
+    _write_preview_generation_record(
+        run_root=run_root,
+        artifacts_dir=artifacts_dir,
+        record_path=preview_record_path,
+        payload=preview_meta,
+    )
+    if preview_meta["status"] != "ok":
+        cfg.pop("__embed_input_image_path__", None)
+    return preview_meta
+
+
 def _validate_real_pipeline_identity_fields(cfg: Dict[str, Any], config_path: str) -> None:
     """
     功能：在 embed 入口前置校验 real SD3 pipeline 所需身份字段。
@@ -131,16 +348,19 @@ def _validate_real_pipeline_identity_fields(cfg: Dict[str, Any], config_path: st
         TypeError: If inputs are invalid.
         ValueError: If the real pipeline requires explicit identity fields that are absent or invalid.
     """
-    if not isinstance(cfg, dict):
+    cfg_obj: Any = cfg
+    if not isinstance(cfg_obj, dict):
         raise TypeError("cfg must be dict")
-    if not isinstance(config_path, str) or not config_path:
+    cfg_mapping = cast(Dict[str, Any], cfg_obj)
+    config_path_value: Any = config_path
+    if not isinstance(config_path_value, str) or not config_path_value:
         raise TypeError("config_path must be non-empty str")
 
-    pipeline_impl_id = cfg.get("pipeline_impl_id")
+    pipeline_impl_id = cfg_mapping.get("pipeline_impl_id")
     if pipeline_impl_id is None:
-        pipeline_node = cfg.get("pipeline")
+        pipeline_node = cfg_mapping.get("pipeline")
         if isinstance(pipeline_node, dict):
-            pipeline_impl_id = pipeline_node.get("pipeline_impl_id")
+            pipeline_impl_id = cast(Dict[str, Any], pipeline_node).get("pipeline_impl_id")
     if pipeline_impl_id != pipeline_registry.SD3_DIFFUSERS_REAL_ID:
         return
 
@@ -737,6 +957,23 @@ def run_embed(
             run_meta["seed_value"] = seed_value
             run_meta["cfg"] = cfg
 
+            allow_nonempty_run_root = cfg.get("allow_nonempty_run_root", False)
+            allow_nonempty_run_root_reason = cfg.get("allow_nonempty_run_root_reason")
+            override_applied_for_layout = cfg.get("override_applied")
+            layout = path_policy.ensure_output_layout(
+                run_root,
+                allow_nonempty_run_root=bool(allow_nonempty_run_root),
+                allow_nonempty_run_root_reason=allow_nonempty_run_root_reason,
+                override_applied=override_applied_for_layout,
+            )
+            layout_initialized = True
+            path_policy.anchor_requirements(run_root)
+            records_dir = layout["records_dir"]
+            artifacts_dir = layout["artifacts_dir"]
+            logs_dir = layout["logs_dir"]
+            cfg["__run_root_dir__"] = str(run_root.resolve())
+            cfg["__artifacts_dir__"] = str(artifacts_dir.resolve())
+
             determinism_controls = build_determinism_controls(cfg)
             if determinism_controls is not None:
                 run_meta["determinism_controls"] = determinism_controls
@@ -782,63 +1019,13 @@ def run_embed(
                 if isinstance(default_input, str) and default_input.strip():
                     cfg["__embed_input_image_path__"] = default_input.strip()
 
-            # Preview Generation：若主链输入图仍为 None，且配置启用了 preview_generation，
-            # 则先执行一次无注入 SD3 推理，将生成图作为语义掩码的输入，消除对外部图像的依赖。
-            # preview 推理失败时不中断流程，失败语义传播至内容链（injection_mode 降级）。
-            _embed_cfg_pg = _resolve_preview_generation_cfg(cfg)
-            if _embed_cfg_pg.get("enabled", False) and cfg.get("__embed_input_image_path__") is None:
-                preview_pipeline_obj = pipeline_result.get("pipeline_obj")
-                preview_device = cfg.get("device", "cpu")
-                preview_seed = seed_value
-                _pg_status = "failed"
-                _pg_reason = None
-                _preview_tmp_path = None
-                try:
-                    import tempfile
-                    _preview_infer_result = infer_runtime.run_sd3_inference(
-                        cfg,
-                        preview_pipeline_obj,
-                        preview_device,
-                        preview_seed,
-                        injection_context=None,
-                        injection_modifier=None,
-                        capture_final_latents=False
-                    )
-                    _preview_status = _preview_infer_result.get("inference_status")
-                    if not isinstance(_preview_status, str) or not _preview_status:
-                        _preview_status = _preview_infer_result.get("status")
-                    if _preview_status == "ok":
-                        _preview_image = _preview_infer_result.get("output_image")
-                        if _preview_image is not None:
-                            _tmp_fd, _preview_tmp_path = tempfile.mkstemp(suffix=".png", prefix="ceg_wm_preview_")
-                            import os as _os
-                            _os.close(_tmp_fd)
-                            _preview_image.save(_preview_tmp_path)
-                            cfg["__embed_input_image_path__"] = _preview_tmp_path
-                            _pg_status = "ok"
-                            print(f"[Preview Generation] 预览图已生成，路径：{_preview_tmp_path}")
-                        else:
-                            _pg_reason = "preview_inference_no_output_image"
-                            print(f"[Preview Generation] 推理成功但无 output_image，跳过。")
-                    else:
-                        _pg_reason = f"preview_inference_status={_preview_status}"
-                        print(f"[Preview Generation] 推理状态非 ok（{_preview_status}），跳过。")
-                except Exception as _pg_exc:
-                    _pg_reason = str(_pg_exc)
-                    print(f"[Preview Generation] 推理异常：{_pg_exc}，跳过。")
-                run_meta["preview_generation"] = {
-                    "enabled": True,
-                    "status": _pg_status,
-                    "reason": _pg_reason,
-                    "seed": preview_seed,
-                    "tmp_path": _preview_tmp_path,
-                }
-                if _pg_status != "ok":
-                    # preview 失败时保持 __embed_input_image_path__ 为 None，
-                    # 内容链将以 status="failed" 返回，injection_mode 降级为 latent_direct_fallback。
-                    cfg.pop("__embed_input_image_path__", None)
-            elif not _embed_cfg_pg.get("enabled", False):
-                run_meta["preview_generation"] = {"enabled": False, "status": "skipped", "reason": None, "seed": None, "tmp_path": None}
+            run_meta["preview_generation"] = _build_preview_generation_meta(
+                cfg=cfg,
+                run_root=run_root,
+                artifacts_dir=artifacts_dir,
+                pipeline_result=pipeline_result,
+                seed_value=seed_value,
+            )
 
             # 预先计算 content 与 subspace 计划，用于注入上下文。
             content_inputs_pre = _build_content_inputs_for_embed(cfg)
@@ -1186,35 +1373,6 @@ def run_embed(
             run_meta["inference_error"] = inference_error
             run_meta["inference_runtime_meta"] = inference_runtime_meta
             run_meta["trajectory_evidence"] = trajectory_evidence
-            
-            # 提取 run_root 复用参数。
-            allow_nonempty_run_root = cfg.get("allow_nonempty_run_root", False)
-            allow_nonempty_run_root_reason = cfg.get("allow_nonempty_run_root_reason")
-            override_applied_for_layout = cfg.get("override_applied")
-            
-            # 创建输出布局。
-            layout = path_policy.ensure_output_layout(
-                run_root,
-                allow_nonempty_run_root=bool(allow_nonempty_run_root),
-                allow_nonempty_run_root_reason=allow_nonempty_run_root_reason,
-                override_applied=override_applied_for_layout
-            )
-            layout_initialized = True
-            # 锚定依赖环境到 requirements.txt。
-            path_policy.anchor_requirements(run_root)
-            records_dir = layout["records_dir"]
-            artifacts_dir = layout["artifacts_dir"]
-            logs_dir = layout["logs_dir"]
-
-            cfg["__run_root_dir__"] = str(run_root.resolve())
-            cfg["__artifacts_dir__"] = str(artifacts_dir.resolve())
-            if validated_input_image_path is not None:
-                cfg["__embed_input_image_path__"] = validated_input_image_path
-            else:
-                embed_cfg = _resolve_embed_cfg(cfg)
-                default_input = embed_cfg.get("input_image_path")
-                if isinstance(default_input, str) and default_input.strip():
-                    cfg["__embed_input_image_path__"] = default_input.strip()
             
             # 写入 cfg_audit 工件到 artifacts/cfg_audit/cfg_audit.json。
             cfg_audit_dir = artifacts_dir / "cfg_audit"
