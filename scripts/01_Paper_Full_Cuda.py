@@ -25,6 +25,7 @@ from scripts.notebook_runtime_common import (
     FORMAL_STAGE_PACKAGE_ROLE,
     REPO_ROOT,
     STAGE_01_NAME,
+    apply_notebook_model_snapshot_binding,
     build_failure_diagnostics_filename,
     build_package_index,
     build_stage_package_filename,
@@ -957,7 +958,7 @@ def run_stage_01(
     for protected_path in (run_root, log_root, runtime_state_root, export_root):
         validate_path_within_base(drive_project_root, protected_path, "stage path")
 
-    cfg_obj = load_yaml_mapping(config_path)
+    cfg_obj = apply_notebook_model_snapshot_binding(load_yaml_mapping(config_path))
     runtime_config_snapshot_path = runtime_state_root / "runtime_metadata" / "runtime_config_snapshot.yaml"
     write_yaml_mapping(runtime_config_snapshot_path, cfg_obj)
     prompt_snapshot = copy_prompt_snapshot(REPO_ROOT, cfg_obj, runtime_state_root / "runtime_metadata" / "prompt_snapshot")

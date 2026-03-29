@@ -9,6 +9,7 @@ SD3 pipeline 加载器
 from __future__ import annotations
 
 import importlib.util
+from pathlib import Path
 from typing import Any, Dict, Tuple
 
 
@@ -52,7 +53,8 @@ def build_sd3_pipeline_from_pretrained(
     model_id: str,
     revision: str | None,
     model_source: str | None,
-    extra_kwargs: Dict[str, Any] | None = None
+    extra_kwargs: Dict[str, Any] | None = None,
+    local_snapshot_path: str | None = None,
 ) -> Tuple[Any | None, Dict[str, Any], str | None]:
     """
     功能：构造 SD3 pipeline（受控包装）。
@@ -64,6 +66,7 @@ def build_sd3_pipeline_from_pretrained(
         revision: Optional revision string.
         model_source: Optional model source indicator.
         extra_kwargs: Optional extra kwargs for future extension.
+        local_snapshot_path: Optional notebook-bound local snapshot directory.
 
     Returns:
         Tuple of (pipeline_or_none, build_meta, error_or_none).
@@ -80,6 +83,17 @@ def build_sd3_pipeline_from_pretrained(
     if extra_kwargs is not None and not isinstance(extra_kwargs, dict):
         # extra_kwargs 输入不合法，必须 fail-fast。
         return None, {"status": "invalid_input"}, "extra_kwargs must be dict or None"
+    if local_snapshot_path is not None and (
+        not isinstance(local_snapshot_path, str) or not local_snapshot_path.strip()
+    ):
+        return None, {"status": "invalid_input"}, "local_snapshot_path must be non-empty str or None"
+
+    resolved_local_snapshot_path, local_snapshot_status, local_snapshot_error = _resolve_local_snapshot_path(
+        local_snapshot_path
+    )
+    local_snapshot_meta_path = resolved_local_snapshot_path
+    if local_snapshot_status == "invalid":
+        resolved_local_snapshot_path = None
 
     available, meta = try_import_diffusers()
     build_meta = {
@@ -91,7 +105,21 @@ def build_sd3_pipeline_from_pretrained(
         "model_id": model_id,
         "revision": revision or "<absent>",
         "model_source": model_source or "<absent>",
-        "extra_kwargs": extra_kwargs or {}
+        "requested_model_id": model_id,
+        "requested_revision": revision or "<absent>",
+        "requested_model_source": model_source or "<absent>",
+        "resolved_model_id": model_id,
+        "resolved_model_source": model_source or "<absent>",
+        "model_source_resolution": "requested_model_source",
+        "local_snapshot_requested": local_snapshot_path is not None,
+        "local_snapshot_path": (
+            local_snapshot_meta_path
+            if local_snapshot_meta_path is not None
+            else (local_snapshot_path.strip() if isinstance(local_snapshot_path, str) and local_snapshot_path.strip() else "<absent>")
+        ),
+        "local_snapshot_status": local_snapshot_status,
+        "local_snapshot_error": local_snapshot_error or "<absent>",
+        "extra_kwargs": extra_kwargs or {},
     }
     if not available:
         return None, build_meta, meta.get("import_error")
@@ -104,17 +132,24 @@ def build_sd3_pipeline_from_pretrained(
     except Exception as exc:
         return None, build_meta, f"{type(exc).__name__}: {exc}"
 
-    # 根据 model_source 决定是否允许从 HF Hub 下载
+    # notebook 显式绑定的本地 snapshot 优先于默认 HF source；若绑定无效，则保留原始 source 并记录回退轨迹。
+    load_target = model_id
     local_files_only = True  # 默认只使用本地缓存
-    if model_source in ("hf", "hf_hub"):
-        # 允许从 HuggingFace Hub 下载模型
-        local_files_only = False
-    elif model_source in ("local", "local_path"):
-        # 仅使用本地文件，不联网下载
+    if resolved_local_snapshot_path is not None:
+        load_target = resolved_local_snapshot_path
         local_files_only = True
-    elif model_source is not None:
-        # 不支持的 model_source 值
-        return None, build_meta, f"model_source not allowed: {model_source}"
+        build_meta["resolved_model_id"] = resolved_local_snapshot_path
+        build_meta["resolved_model_source"] = "local_path"
+        build_meta["model_source_resolution"] = "local_snapshot_priority"
+    else:
+        if model_source in ("hf", "hf_hub"):
+            local_files_only = False
+        elif model_source in ("local", "local_path"):
+            local_files_only = True
+        elif model_source is not None:
+            return None, build_meta, f"model_source not allowed: {model_source}"
+        if local_snapshot_status == "invalid":
+            build_meta["model_source_resolution"] = "fallback_to_requested_model_source"
 
     # 从 extra_kwargs 中提取设备和精度配置
     device = None
@@ -154,7 +189,7 @@ def build_sd3_pipeline_from_pretrained(
                 build_kwargs[key] = value
 
     try:
-        pipeline = diffusers.DiffusionPipeline.from_pretrained(model_id, **build_kwargs)
+        pipeline = diffusers.DiffusionPipeline.from_pretrained(load_target, **build_kwargs)
         
         # 如果指定了设备，将 pipeline 移动到该设备
         if device is not None and hasattr(pipeline, "to"):
@@ -171,6 +206,7 @@ def build_sd3_pipeline_from_pretrained(
         
         build_meta["status"] = "built"
         build_meta["local_files_only"] = local_files_only
+        build_meta["load_target"] = load_target
         
         # 构造可序列化的 build_kwargs 副本（排除 torch.dtype 对象）
         serializable_kwargs = {}
@@ -188,6 +224,7 @@ def build_sd3_pipeline_from_pretrained(
     except Exception as exc:
         build_meta["status"] = "failed"
         build_meta["local_files_only"] = local_files_only
+        build_meta["load_target"] = load_target
         
         # 构造可序列化的 build_kwargs 副本
         serializable_kwargs = {}
@@ -198,10 +235,32 @@ def build_sd3_pipeline_from_pretrained(
                 serializable_kwargs[key] = value
         build_meta["build_kwargs"] = serializable_kwargs
         
-        # 支持 "hf" 和 "hf_hub" 两种标识
-        if model_source in ("hf", "hf_hub"):
+        if build_meta.get("resolved_model_source") in ("hf", "hf_hub"):
             return None, build_meta, "hf_hub_local_cache_missing_or_unavailable"
         return None, build_meta, f"{type(exc).__name__}: {exc}"
+
+
+def _resolve_local_snapshot_path(local_snapshot_path: str | None) -> Tuple[str | None, str, str | None]:
+    """
+    功能：解析可选的本地 snapshot 目录。 
+
+    Resolve the optional local snapshot directory forwarded by notebook
+    bootstrap.
+
+    Args:
+        local_snapshot_path: Optional raw snapshot directory path.
+
+    Returns:
+        Tuple of (resolved_path_or_none, status, error_or_none).
+    """
+    if local_snapshot_path is None:
+        return None, "absent", None
+
+    snapshot_path_obj = Path(local_snapshot_path.strip()).expanduser().resolve()
+    snapshot_path_text = snapshot_path_obj.as_posix()
+    if not snapshot_path_obj.exists() or not snapshot_path_obj.is_dir():
+        return snapshot_path_text, "invalid", "local_snapshot_path_missing_or_not_directory"
+    return snapshot_path_text, "bound", None
 
 
 def _try_import_version(module_name: str) -> str:

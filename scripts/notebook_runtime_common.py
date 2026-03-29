@@ -38,6 +38,8 @@ FORMAL_PACKAGE_DISCOVERY_SCOPE = "discoverable_formal_only"
 EXCLUDED_PACKAGE_DISCOVERY_SCOPE = "excluded_from_formal_discovery"
 ATTESTATION_ENV_FILE_NAME = "attestation_env.json"
 ATTESTATION_ENV_INFO_FILE_NAME = "attestation_env_info.json"
+NOTEBOOK_MODEL_SNAPSHOT_ENV_VAR = "CEG_WM_MODEL_SNAPSHOT_PATH"
+NOTEBOOK_MODEL_SNAPSHOT_BINDING_SOURCE = "notebook_snapshot_download"
 ATTESTATION_ENV_VAR_LENGTHS = {
     "k_master_env_var": 64,
     "k_prompt_env_var": 32,
@@ -258,6 +260,116 @@ def build_repo_import_subprocess_env(
 
     env_mapping["PYTHONPATH"] = os.pathsep.join([repo_root_text, *retained_entries])
     return env_mapping
+
+
+def _normalize_model_snapshot_path(path_value: str) -> str:
+    """
+    功能：规范化 notebook 传入的模型快照目录路径。
+
+    Normalize the model snapshot directory path forwarded by the notebook.
+
+    Args:
+        path_value: Raw snapshot path string.
+
+    Returns:
+        Normalized absolute path string.
+    """
+    if not isinstance(path_value, str) or not path_value.strip():
+        raise TypeError("path_value must be non-empty str")
+
+    snapshot_path = Path(path_value.strip()).expanduser()
+    if not snapshot_path.is_absolute():
+        snapshot_path = (REPO_ROOT / snapshot_path).resolve()
+    else:
+        snapshot_path = snapshot_path.resolve()
+    return normalize_path_value(snapshot_path)
+
+
+def resolve_notebook_model_snapshot_binding(
+    cfg_obj: Mapping[str, Any],
+    env_mapping: Optional[Mapping[str, str]] = None,
+) -> Dict[str, Any]:
+    """
+    功能：解析 notebook bootstrap 提供的模型快照绑定信息。
+
+    Resolve the model snapshot binding forwarded from the notebook bootstrap
+    stage.
+
+    Args:
+        cfg_obj: Runtime configuration mapping.
+        env_mapping: Optional environment mapping. When omitted, os.environ is
+            consulted.
+
+    Returns:
+        Structured model snapshot binding summary.
+    """
+    if not isinstance(cfg_obj, Mapping):
+        raise TypeError("cfg_obj must be Mapping")
+    if env_mapping is not None and not isinstance(env_mapping, Mapping):
+        raise TypeError("env_mapping must be Mapping[str, str] or None")
+
+    model_identity = resolve_model_identity(cfg_obj)
+    source_env = os.environ if env_mapping is None else env_mapping
+    raw_snapshot_path = source_env.get(NOTEBOOK_MODEL_SNAPSHOT_ENV_VAR)
+    binding_summary: Dict[str, Any] = {
+        "binding_source": NOTEBOOK_MODEL_SNAPSHOT_BINDING_SOURCE,
+        "binding_env_var": NOTEBOOK_MODEL_SNAPSHOT_ENV_VAR,
+        "binding_status": "absent",
+        "binding_reason": "model_snapshot_env_var_absent",
+        "model_snapshot_path": "<absent>",
+        "requested_model_id": model_identity["model_id"],
+        "requested_model_source": (
+            cfg_obj.get("model_source")
+            if isinstance(cfg_obj.get("model_source"), str) and str(cfg_obj.get("model_source")).strip()
+            else "<absent>"
+        ),
+        "requested_hf_revision": model_identity["revision"],
+    }
+    if not isinstance(raw_snapshot_path, str) or not raw_snapshot_path.strip():
+        return binding_summary
+
+    normalized_snapshot_path = _normalize_model_snapshot_path(raw_snapshot_path)
+    binding_summary["model_snapshot_path"] = normalized_snapshot_path
+    snapshot_path_obj = Path(normalized_snapshot_path)
+    if snapshot_path_obj.exists() and snapshot_path_obj.is_dir():
+        binding_summary["binding_status"] = "bound"
+        binding_summary["binding_reason"] = "model_snapshot_env_var_bound_to_runtime_config"
+        return binding_summary
+
+    binding_summary["binding_status"] = "invalid"
+    binding_summary["binding_reason"] = "model_snapshot_env_var_path_missing_or_not_directory"
+    return binding_summary
+
+
+def apply_notebook_model_snapshot_binding(
+    cfg_obj: Mapping[str, Any],
+    env_mapping: Optional[Mapping[str, str]] = None,
+) -> Dict[str, Any]:
+    """
+    功能：把 notebook 模型快照绑定固化到运行时配置副本。
+
+    Apply the notebook-provided model snapshot binding to a runtime config
+    copy.
+
+    Args:
+        cfg_obj: Runtime configuration mapping.
+        env_mapping: Optional environment mapping. When omitted, os.environ is
+            consulted.
+
+    Returns:
+        Runtime configuration copy with optional model snapshot binding fields.
+    """
+    if not isinstance(cfg_obj, Mapping):
+        raise TypeError("cfg_obj must be Mapping")
+
+    cfg_copy = dict(cfg_obj)
+    binding_summary = resolve_notebook_model_snapshot_binding(cfg_obj, env_mapping)
+    if binding_summary["binding_status"] not in {"bound", "invalid"}:
+        return cfg_copy
+
+    cfg_copy["model_snapshot_path"] = binding_summary["model_snapshot_path"]
+    cfg_copy["model_source_binding"] = binding_summary
+    return cfg_copy
 
 
 def resolve_attestation_env_var_names(cfg_obj: Mapping[str, Any]) -> Dict[str, str]:
@@ -1297,10 +1409,19 @@ def collect_model_summary(cfg_obj: Mapping[str, Any]) -> Dict[str, Any]:
         "model_id": model_identity["model_id"],
         "model_source": cfg_obj.get("model_source"),
         "hf_revision": model_identity["revision"],
+        "model_snapshot_path": (
+            cfg_obj.get("model_snapshot_path")
+            if isinstance(cfg_obj.get("model_snapshot_path"), str) and str(cfg_obj.get("model_snapshot_path")).strip()
+            else "<absent>"
+        ),
         "hf_home": os.environ.get("HF_HOME", "<absent>"),
         "huggingface_hub_cache": os.environ.get("HUGGINGFACE_HUB_CACHE", "<absent>"),
         "cache_scan_status": "not_attempted",
     }
+    model_source_binding = cfg_obj.get("model_source_binding")
+    if isinstance(model_source_binding, Mapping):
+        summary["model_source_binding_status"] = model_source_binding.get("binding_status", "<absent>")
+        summary["model_source_binding_reason"] = model_source_binding.get("binding_reason", "<absent>")
     try:
         from huggingface_hub import scan_cache_dir
 

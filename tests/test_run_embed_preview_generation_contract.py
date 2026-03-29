@@ -8,6 +8,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import json
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 from typing import Any, Dict, Iterator, cast
 
@@ -16,6 +17,7 @@ from PIL import Image
 import pytest
 
 from main.cli import run_embed as run_embed_module
+from main.diffusion.sd3 import diffusers_loader, pipeline_factory
 
 
 build_statement_only_formal_scaffold = run_embed_module._build_statement_only_formal_scaffold  # pyright: ignore[reportPrivateUsage]
@@ -215,7 +217,10 @@ def _prepare_run_embed_preview_monkeypatches(
             "pipeline_provenance_canon_sha256": "<absent>",
             "pipeline_status": "built",
             "pipeline_error": None,
-            "pipeline_runtime_meta": {},
+            "pipeline_runtime_meta": {
+                "model_source_resolution": "fallback_to_requested_model_source",
+                "local_snapshot_status": "absent",
+            },
             "env_fingerprint_canon_sha256": "<absent>",
             "diffusers_version": "<absent>",
             "transformers_version": "<absent>",
@@ -326,6 +331,8 @@ def test_run_embed_preview_generation_persists_formal_artifact_before_content_pr
     assert preview_record["persisted_artifact_path"] == str(preview_artifact_path)
     assert preview_record["record_rel_path"] == "preview/preview_generation_record.json"
     assert preview_record["output_image_present"] is True
+    assert preview_record["pipeline_runtime_meta"]["model_source_resolution"] == "fallback_to_requested_model_source"
+    assert preview_record["pipeline_runtime_meta"]["local_snapshot_status"] == "absent"
     assert preview_record["seed"] == 7
 
 
@@ -384,6 +391,7 @@ def test_run_embed_preview_generation_failure_writes_structured_observability_re
     assert preview_record["persisted_artifact_rel_path"] is None
     assert preview_record["output_image_present"] is False
     assert preview_record["record_rel_path"] == "preview/preview_generation_record.json"
+    assert preview_record["pipeline_runtime_meta"]["model_source_resolution"] == "fallback_to_requested_model_source"
 
 
 def test_build_statement_only_formal_scaffold_requires_mask_digest() -> None:
@@ -407,3 +415,237 @@ def test_build_statement_only_formal_scaffold_requires_mask_digest() -> None:
 
     assert scaffold is None
     assert failure_reason == "scaffold_mask_digest_absent"
+
+
+def test_build_sd3_pipeline_from_pretrained_prefers_bound_local_snapshot(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """
+    功能：验证 loader 在 notebook 绑定的本地 snapshot 有效时优先使用本地目录。
+
+    Verify the SD3 loader prefers the bound local snapshot directory when the
+    notebook-provided path is valid.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary pytest directory.
+
+    Returns:
+        None.
+    """
+    snapshot_dir = tmp_path / "snapshot"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    captured: Dict[str, Any] = {}
+
+    class FakePipeline:
+        def to(self, device: str) -> "FakePipeline":
+            captured["device"] = device
+            return self
+
+    class FakeDiffusionPipeline:
+        @staticmethod
+        def from_pretrained(model_ref: str, **build_kwargs: Any) -> FakePipeline:
+            captured["model_ref"] = model_ref
+            captured["build_kwargs"] = build_kwargs
+            return FakePipeline()
+
+    fake_diffusers = SimpleNamespace(DiffusionPipeline=FakeDiffusionPipeline)
+    monkeypatch.setattr(
+        diffusers_loader,
+        "try_import_diffusers",
+        lambda: (
+            True,
+            {
+                "diffusers_version": "0.test",
+                "transformers_version": "0.test",
+                "safetensors_version": "0.test",
+            },
+        ),
+    )
+    monkeypatch.setattr(diffusers_loader.importlib.util, "find_spec", lambda _name: object())
+    monkeypatch.setitem(sys.modules, "diffusers", fake_diffusers)
+
+    pipeline_obj, build_meta, error = diffusers_loader.build_sd3_pipeline_from_pretrained(
+        model_id="stabilityai/stable-diffusion-3.5-medium",
+        revision="main",
+        model_source="hf",
+        extra_kwargs={"device": "cpu"},
+        local_snapshot_path=snapshot_dir.as_posix(),
+    )
+
+    assert error is None
+    assert pipeline_obj is not None
+    assert captured["model_ref"] == snapshot_dir.as_posix()
+    assert captured["build_kwargs"]["local_files_only"] is True
+    assert build_meta["resolved_model_id"] == snapshot_dir.as_posix()
+    assert build_meta["resolved_model_source"] == "local_path"
+    assert build_meta["model_source_resolution"] == "local_snapshot_priority"
+    assert build_meta["local_snapshot_status"] == "bound"
+    assert build_meta["requested_model_source"] == "hf"
+
+
+def test_build_sd3_pipeline_from_pretrained_records_invalid_local_snapshot_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：验证 loader 在本地 snapshot 无效时回退到请求 source，并保留可观测元数据。
+
+    Verify the SD3 loader falls back to the requested source when the bound
+    local snapshot path is invalid and records the fallback metadata.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary pytest directory.
+
+    Returns:
+        None.
+    """
+    invalid_snapshot_dir = tmp_path / "missing_snapshot"
+    captured: Dict[str, Any] = {}
+
+    class FakePipeline:
+        def to(self, device: str) -> "FakePipeline":
+            captured["device"] = device
+            return self
+
+    class FakeDiffusionPipeline:
+        @staticmethod
+        def from_pretrained(model_ref: str, **build_kwargs: Any) -> FakePipeline:
+            captured["model_ref"] = model_ref
+            captured["build_kwargs"] = build_kwargs
+            return FakePipeline()
+
+    fake_diffusers = SimpleNamespace(DiffusionPipeline=FakeDiffusionPipeline)
+    monkeypatch.setattr(
+        diffusers_loader,
+        "try_import_diffusers",
+        lambda: (
+            True,
+            {
+                "diffusers_version": "0.test",
+                "transformers_version": "0.test",
+                "safetensors_version": "0.test",
+            },
+        ),
+    )
+    monkeypatch.setattr(diffusers_loader.importlib.util, "find_spec", lambda _name: object())
+    monkeypatch.setitem(sys.modules, "diffusers", fake_diffusers)
+
+    pipeline_obj, build_meta, error = diffusers_loader.build_sd3_pipeline_from_pretrained(
+        model_id="stabilityai/stable-diffusion-3.5-medium",
+        revision="main",
+        model_source="hf",
+        extra_kwargs={"device": "cpu"},
+        local_snapshot_path=invalid_snapshot_dir.as_posix(),
+    )
+
+    assert error is None
+    assert pipeline_obj is not None
+    assert captured["model_ref"] == "stabilityai/stable-diffusion-3.5-medium"
+    assert captured["build_kwargs"]["local_files_only"] is False
+    assert build_meta["resolved_model_id"] == "stabilityai/stable-diffusion-3.5-medium"
+    assert build_meta["resolved_model_source"] == "hf"
+    assert build_meta["model_source_resolution"] == "fallback_to_requested_model_source"
+    assert build_meta["local_snapshot_status"] == "invalid"
+    assert build_meta["local_snapshot_error"] == "local_snapshot_path_missing_or_not_directory"
+
+
+def test_build_pipeline_shell_exposes_local_snapshot_resolution_in_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：验证 pipeline factory 会把 local snapshot 解析结果写入 runtime meta 与 provenance。
+
+    Verify the pipeline factory threads the local snapshot resolution into both
+    runtime metadata and pipeline provenance.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary pytest directory.
+
+    Returns:
+        None.
+    """
+    snapshot_dir = tmp_path / "snapshot"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    captured: Dict[str, Any] = {}
+
+    monkeypatch.setattr(
+        pipeline_factory,
+        "preflight_pipeline_build",
+        lambda _cfg: (True, None, None),
+    )
+    monkeypatch.setattr(
+        pipeline_factory.diffusers_loader,
+        "try_import_diffusers",
+        lambda: (
+            True,
+            {
+                "diffusers_version": "0.test",
+                "transformers_version": "0.test",
+                "safetensors_version": "0.test",
+            },
+        ),
+    )
+
+    def _fake_build_sd3_pipeline_from_pretrained(**kwargs: Any) -> tuple[Any, Dict[str, Any], str | None]:
+        captured.update(kwargs)
+        return object(), {
+            "status": "built",
+            "local_files_only": True,
+            "resolved_model_id": snapshot_dir.as_posix(),
+            "resolved_model_source": "local_path",
+            "model_source_resolution": "local_snapshot_priority",
+            "local_snapshot_path": snapshot_dir.as_posix(),
+            "local_snapshot_status": "bound",
+            "local_snapshot_error": "<absent>",
+        }, None
+
+    monkeypatch.setattr(
+        pipeline_factory.diffusers_loader,
+        "build_sd3_pipeline_from_pretrained",
+        _fake_build_sd3_pipeline_from_pretrained,
+    )
+    monkeypatch.setattr(
+        pipeline_factory.weights_snapshot,
+        "compute_weights_snapshot_sha256",
+        lambda **_kwargs: ("weights_digest", {"snapshot_status": "built"}, None),
+    )
+    monkeypatch.setattr(
+        pipeline_factory.env_fingerprint,
+        "build_env_fingerprint",
+        lambda: {"env": "ok"},
+    )
+    monkeypatch.setattr(
+        pipeline_factory.env_fingerprint,
+        "compute_env_fingerprint_canon_sha256",
+        lambda _env: "env_digest",
+    )
+
+    result = pipeline_factory.build_pipeline_shell(
+        {
+            "pipeline_impl_id": pipeline_factory.pipeline_registry.SD3_DIFFUSERS_REAL_ID,
+            "paper_faithfulness": {"enabled": True},
+            "model_id": "stabilityai/stable-diffusion-3.5-medium",
+            "model_source": "hf",
+            "hf_revision": "main",
+            "model_snapshot_path": snapshot_dir.as_posix(),
+            "device": "cpu",
+            "model": {"dtype": "float32"},
+            "model_source_binding": {
+                "binding_status": "bound",
+                "binding_reason": "model_snapshot_env_var_bound_to_runtime_config",
+            },
+        }
+    )
+
+    assert captured["local_snapshot_path"] == snapshot_dir.as_posix()
+    assert result["pipeline_status"] == "built"
+    assert result["pipeline_runtime_meta"]["model_source_resolution"] == "local_snapshot_priority"
+    assert result["pipeline_runtime_meta"]["local_snapshot_status"] == "bound"
+    assert result["pipeline_runtime_meta"]["model_source_binding"]["binding_status"] == "bound"
+    assert result["pipeline_provenance"]["model_source"] == "hf"
+    assert result["pipeline_provenance"]["resolved_model_source"] == "local_path"
+    assert result["pipeline_provenance"]["resolved_model_id"] == snapshot_dir.as_posix()
+    assert result["pipeline_provenance"]["model_source_resolution"] == "local_snapshot_priority"
+    assert result["pipeline_provenance"]["local_snapshot_status"] == "bound"

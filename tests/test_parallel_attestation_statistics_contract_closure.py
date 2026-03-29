@@ -1219,6 +1219,142 @@ def test_stage_01_writes_source_contract_even_when_direct_stats_not_ready(tmp_pa
     ).exists()
 
 
+def test_stage_01_runtime_snapshot_binds_notebook_model_snapshot_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：验证 stage 01 wrapper 会把 notebook 传入的模型快照环境变量固化到 runtime config snapshot。
+
+    Validate that the stage-01 wrapper persists the notebook-provided model
+    snapshot binding into runtime_config_snapshot.yaml.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    stage_01 = _load_script_module("scripts/01_Paper_Full_Cuda.py", "stage_01_model_snapshot_binding")
+    drive_root = tmp_path / "drive"
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("policy_path: content_np_geo_rescue\n", encoding="utf-8")
+    snapshot_dir = tmp_path / "model_snapshot"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("CEG_WM_MODEL_SNAPSHOT_PATH", snapshot_dir.as_posix())
+
+    run_root = drive_root / "runs" / "stage_01"
+    log_root = drive_root / "logs" / "stage_01"
+    runtime_state_root = drive_root / "runtime_state" / "stage_01"
+    export_root = drive_root / "exports" / "stage_01"
+
+    monkeypatch.setattr(
+        stage_01,
+        "resolve_stage_roots",
+        lambda *_args, **_kwargs: {
+            "run_root": run_root,
+            "log_root": log_root,
+            "runtime_state_root": runtime_state_root,
+            "export_root": export_root,
+        },
+    )
+    monkeypatch.setattr(
+        stage_01,
+        "load_yaml_mapping",
+        lambda _path: {
+            "policy_path": "content_np_geo_rescue",
+            "model_id": "stabilityai/stable-diffusion-3.5-medium",
+            "model_source": "hf",
+            "hf_revision": "main",
+            "attestation": {},
+        },
+    )
+    monkeypatch.setattr(stage_01, "detect_stage_01_preflight", lambda _path: {"ok": True})
+    monkeypatch.setattr(
+        stage_01,
+        "copy_prompt_snapshot",
+        lambda *_args, **_kwargs: {
+            "snapshot_path": str(runtime_state_root / "runtime_metadata" / "prompt_snapshot" / "prompt.txt"),
+            "source_path": "prompts/paper_small.txt",
+        },
+    )
+    monkeypatch.setattr(stage_01, "collect_git_summary", lambda _root: {"commit": "test"})
+    monkeypatch.setattr(stage_01, "collect_python_summary", lambda: {"version": "3.11"})
+    monkeypatch.setattr(stage_01, "collect_cuda_summary", lambda: {"available": False})
+    monkeypatch.setattr(stage_01, "collect_attestation_env_summary", lambda _cfg: {"enabled": True})
+    monkeypatch.setattr(stage_01, "collect_model_summary", lambda _cfg: {"model": "test"})
+    monkeypatch.setattr(stage_01, "collect_weight_summary", lambda _root, _cfg: {"weights": []})
+
+    def _fake_run_command_with_logs(**_kwargs: Any) -> Dict[str, Any]:
+        prompt_count = 1
+        _write_json(run_root / "records" / "embed_record.json", {"status": "ok"})
+        _write_json(run_root / "records" / "detect_record.json", _make_detect_record(True, 0.91))
+        _write_json(run_root / "records" / "calibration_record.json", {"status": "ok"})
+        _write_json(run_root / "records" / "evaluate_record.json", {"status": "ok"})
+        _write_json(run_root / "artifacts" / "thresholds" / "thresholds_artifact.json", {"threshold": 0.5})
+        _write_json(run_root / "artifacts" / "thresholds" / "threshold_metadata_artifact.json", {"meta": True})
+        _write_json(run_root / "artifacts" / "evaluation_report.json", {"status": "ok"})
+        _write_json(run_root / "artifacts" / "run_closure.json", {"status": "ok"})
+        _write_json(run_root / "artifacts" / "workflow_summary.json", {"status": "ok"})
+        _write_json(
+            run_root / "artifacts" / "parallel_attestation_statistics_input_contract.json",
+            _make_stage_01_source_pool_contract(run_root, prompt_count),
+        )
+        _write_json(
+            run_root / "artifacts" / "stage_01_pooled_threshold_build_contract.json",
+            _make_stage_01_pooled_threshold_contract(run_root, prompt_count),
+        )
+        return {"return_code": 0}
+
+    monkeypatch.setattr(stage_01, "run_command_with_logs", _fake_run_command_with_logs)
+    monkeypatch.setattr(
+        stage_01,
+        "finalize_stage_package",
+        lambda **_kwargs: {"package_path": str(export_root / "stage_01.zip"), "package_sha256": "sha256"},
+    )
+    monkeypatch.setattr(
+        stage_01,
+        "_run_stage_01_output_audit",
+        lambda **_kwargs: {
+            "audit_summary_path": run_root / "artifacts" / "stage_01_audit_summary.json",
+            "audit_summary": {
+                "overall_status": "passed",
+                "blocking_reasons": [],
+                "warnings": [],
+                "stage_02_ready": True,
+                "stage_03_ready": True,
+                "stage_04_ready": True,
+                "representative_root_status": "passed",
+                "representative_root_present": True,
+                "representative_root_contract_mode": "compatibility_view",
+            },
+        },
+    )
+
+    stage_01.run_stage_01(
+        drive_project_root=drive_root,
+        config_path=config_path,
+        notebook_name="01_Paper_Full_Cuda",
+        stage_run_id="stage01_model_snapshot_binding",
+    )
+
+    runtime_cfg = yaml.safe_load(
+        (runtime_state_root / "runtime_metadata" / "runtime_config_snapshot.yaml").read_text(encoding="utf-8")
+    )
+
+    assert runtime_cfg["model_snapshot_path"] == snapshot_dir.as_posix()
+    assert runtime_cfg["model_source_binding"]["binding_status"] == "bound"
+    assert runtime_cfg["model_source_binding"]["binding_reason"] == (
+        "model_snapshot_env_var_bound_to_runtime_config"
+    )
+    assert runtime_cfg["model_source_binding"]["requested_model_id"] == (
+        "stabilityai/stable-diffusion-3.5-medium"
+    )
+    assert runtime_cfg["model_source_binding"]["requested_model_source"] == "hf"
+    assert runtime_cfg["model_source_binding"]["requested_hf_revision"] == "main"
+
+
 def test_stage_01_formal_success_allows_missing_representative_root_records(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1922,6 +2058,157 @@ def test_stage_01_mainline_promotes_canonical_source_pool_and_keeps_compatibilit
     assert workflow_summary["attestation_evidence_resolution"]["representative_root_summary"]["resolution_role"] == (
         "representative_summary_view_only"
     )
+
+
+def test_stage_01_mainline_prompt_runtime_cfg_inherits_model_snapshot_binding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：验证 stage 01 source-pool prompt runtime config 继承模型快照绑定。
+
+    Validate that per-prompt stage-01 source-pool runtime configs inherit the
+    bound model snapshot fields from the runtime snapshot.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    runner = _load_script_module("scripts/01_run_paper_full_cuda.py", "stage_01_prompt_cfg_model_snapshot")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("policy_path: content_np_geo_rescue\n", encoding="utf-8")
+    run_root = tmp_path / "run_root"
+    snapshot_dir = tmp_path / "model_snapshot"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+    _prepare_stage_01_mainline_config_monkeypatches(monkeypatch, runner, prompt_count=2)
+    monkeypatch.setattr(
+        runner,
+        "load_yaml_mapping",
+        lambda _path: {
+            "policy_path": "content_np_geo_rescue",
+            "attestation": {"enabled": True},
+            "embed": {
+                "preview_generation": {
+                    "enabled": True,
+                    "artifact_rel_path": "preview/preview.png",
+                }
+            },
+            "model_id": "stabilityai/stable-diffusion-3.5-medium",
+            "model_source": "hf",
+            "hf_revision": "main",
+            "model_snapshot_path": snapshot_dir.as_posix(),
+            "model_source_binding": {
+                "binding_source": "notebook_snapshot_download",
+                "binding_env_var": "CEG_WM_MODEL_SNAPSHOT_PATH",
+                "binding_status": "bound",
+                "binding_reason": "model_snapshot_env_var_bound_to_runtime_config",
+                "model_snapshot_path": snapshot_dir.as_posix(),
+                "requested_model_id": "stabilityai/stable-diffusion-3.5-medium",
+                "requested_model_source": "hf",
+                "requested_hf_revision": "main",
+            },
+        },
+    )
+    monkeypatch.setattr(runner, "_run_stage", _make_stage_01_mainline_run_stage(run_root, [0, 1]))
+
+    exit_code = runner.run_paper_full_cuda(config_path, run_root, stage_run_id="stage01_prompt_cfg_binding")
+    runtime_cfg_0 = yaml.safe_load(
+        (run_root / "artifacts" / "stage_01_source_pool_runtime_configs" / "prompt_000.yaml").read_text(encoding="utf-8")
+    )
+    runtime_cfg_1 = yaml.safe_load(
+        (run_root / "artifacts" / "stage_01_source_pool_runtime_configs" / "prompt_001.yaml").read_text(encoding="utf-8")
+    )
+
+    assert exit_code == 0
+    assert runtime_cfg_0["model_snapshot_path"] == snapshot_dir.as_posix()
+    assert runtime_cfg_1["model_snapshot_path"] == snapshot_dir.as_posix()
+    assert runtime_cfg_0["model_source_binding"]["binding_status"] == "bound"
+    assert runtime_cfg_1["model_source_binding"]["requested_model_source"] == "hf"
+
+
+def test_source_pool_preview_artifact_records_pipeline_resolution_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：验证 stage 01 source-pool preview record 会记录 pipeline 来源解析摘要。
+
+    Validate that the stage-01 source-pool preview-generation record captures
+    pipeline source-resolution metadata and provenance digests.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    runner = _load_script_module("scripts/01_run_paper_full_cuda.py", "stage_01_preview_resolution_metadata")
+
+    class FakePreviewImage:
+        """Minimal preview image used by the source-pool preview test."""
+
+        def save(self, path_value: str | Path) -> None:
+            Path(path_value).write_bytes(b"preview")
+
+    monkeypatch.setattr(runner, "build_seed_audit", lambda *_args, **_kwargs: ({}, "seed_digest", 7, "seed_rule"))
+    monkeypatch.setattr(
+        runner.pipeline_factory,
+        "build_pipeline_shell",
+        lambda _cfg: {
+            "pipeline_obj": object(),
+            "pipeline_status": "built",
+            "pipeline_error": None,
+            "pipeline_runtime_meta": {
+                "model_source_resolution": "local_snapshot_priority",
+                "local_snapshot_status": "bound",
+                "resolved_model_source": "local_path",
+            },
+            "pipeline_provenance_canon_sha256": "pipeline_digest_anchor",
+            "model_provenance_canon_sha256": "model_digest_anchor",
+        },
+    )
+    monkeypatch.setattr(
+        runner.infer_runtime,
+        "run_sd3_inference",
+        lambda *_args, **_kwargs: {
+            "inference_status": runner.infer_runtime.INFERENCE_STATUS_OK,
+            "inference_error": None,
+            "inference_runtime_meta": {"latency_ms": 1.0},
+            "output_image": FakePreviewImage(),
+        },
+    )
+
+    preview_result = runner._prepare_source_pool_preview_artifact(
+        cfg_obj={
+            "policy_path": "content_np_geo_rescue",
+            "model_id": "stabilityai/stable-diffusion-3.5-medium",
+            "model_source": "hf",
+            "hf_revision": "main",
+            "device": "cpu",
+            "embed": {
+                "preview_generation": {
+                    "enabled": True,
+                    "artifact_rel_path": "preview/preview.png",
+                }
+            },
+        },
+        prompt_run_root=tmp_path / "prompt_run_root",
+        prompt_text="prompt 0",
+        prompt_index=0,
+        prompt_file_path="prompts/paper_small.txt",
+    )
+    preview_record = preview_result["preview_record"]
+
+    assert preview_record["status"] == "ok"
+    assert preview_record["pipeline_runtime_meta"]["model_source_resolution"] == "local_snapshot_priority"
+    assert preview_record["pipeline_runtime_meta"]["local_snapshot_status"] == "bound"
+    assert preview_record["pipeline_provenance_canon_sha256"] == "pipeline_digest_anchor"
+    assert preview_record["model_provenance_canon_sha256"] == "model_digest_anchor"
 
 
 def test_stage_01_mainline_fails_when_required_canonical_attestation_exists_flag_is_false(

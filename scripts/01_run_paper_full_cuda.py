@@ -1057,6 +1057,9 @@ def _prepare_source_pool_preview_artifact(
         "exception_message": None,
         "pipeline_status": "not_required",
         "pipeline_error": None,
+        "pipeline_runtime_meta": None,
+        "pipeline_provenance_canon_sha256": None,
+        "model_provenance_canon_sha256": None,
         "inference_status": "not_required",
         "inference_error": None,
         "inference_runtime_meta": None,
@@ -1122,6 +1125,9 @@ def _prepare_source_pool_preview_artifact(
     pipeline_result = pipeline_factory.build_pipeline_shell(cfg_obj)
     preview_record["pipeline_status"] = pipeline_result.get("pipeline_status")
     preview_record["pipeline_error"] = pipeline_result.get("pipeline_error")
+    preview_record["pipeline_runtime_meta"] = pipeline_result.get("pipeline_runtime_meta")
+    preview_record["pipeline_provenance_canon_sha256"] = pipeline_result.get("pipeline_provenance_canon_sha256")
+    preview_record["model_provenance_canon_sha256"] = pipeline_result.get("model_provenance_canon_sha256")
     preview_pipeline_obj = pipeline_result.get("pipeline_obj")
     preview_device = cfg_obj.get("device", "cpu")
 

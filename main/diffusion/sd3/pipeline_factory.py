@@ -318,6 +318,7 @@ def build_pipeline_shell(cfg: Dict[str, Any]) -> Dict[str, Any]:
                 model_id = cfg.get("model_id")
                 model_source = cfg.get("model_source")
                 hf_revision = cfg.get("hf_revision")
+                model_snapshot_path = cfg.get("model_snapshot_path")
                 
                 # 获取设备和精度配置
                 device = cfg.get("device", "cpu")
@@ -344,9 +345,19 @@ def build_pipeline_shell(cfg: Dict[str, Any]) -> Dict[str, Any]:
                         model_id=model_id,
                         revision=hf_revision,
                         model_source=model_source,
-                        extra_kwargs=extra_kwargs
+                        extra_kwargs=extra_kwargs,
+                        local_snapshot_path=(
+                            model_snapshot_path.strip()
+                            if isinstance(model_snapshot_path, str) and model_snapshot_path.strip()
+                            else None
+                        ),
                     )
                     pipeline_runtime_meta = build_meta if isinstance(build_meta, dict) else {}
+                    model_source_binding = cfg.get("model_source_binding")
+                    if isinstance(model_source_binding, dict):
+                        pipeline_runtime_meta["model_source_binding"] = json.loads(
+                            json.dumps(model_source_binding)
+                        )
                     pipeline_runtime_meta.setdefault("synthetic_pipeline", False)
                     _attach_resolved_revision(pipeline_obj, pipeline_runtime_meta)
                     pipeline_error = error or "<absent>"
@@ -399,6 +410,19 @@ def build_pipeline_shell(cfg: Dict[str, Any]) -> Dict[str, Any]:
         resolved_revision = pipeline_runtime_meta.get("resolved_revision")
         if isinstance(resolved_revision, str) and resolved_revision:
             cfg_for_provenance.setdefault("resolved_revision", resolved_revision)
+        for field_name in [
+            "resolved_model_id",
+            "resolved_model_source",
+            "model_source_resolution",
+            "local_snapshot_status",
+            "local_snapshot_error",
+        ]:
+            field_value = pipeline_runtime_meta.get(field_name)
+            if isinstance(field_value, str) and field_value:
+                cfg_for_provenance.setdefault(field_name, field_value)
+        local_snapshot_path = pipeline_runtime_meta.get("local_snapshot_path")
+        if isinstance(local_snapshot_path, str) and local_snapshot_path:
+            cfg_for_provenance["model_snapshot_path"] = local_snapshot_path
 
     provenance = build_pipeline_provenance(cfg_for_provenance, pipeline_impl_id, pipeline_meta)
     provenance_digest = compute_pipeline_provenance_canon_sha256(provenance)
@@ -577,7 +601,12 @@ def _build_model_provenance(provenance: Dict[str, Any]) -> Dict[str, Any]:
     """
     return {
         "model_id": provenance.get("model_id", "<absent>"),
+        "resolved_model_id": provenance.get("resolved_model_id", "<absent>"),
         "model_source": provenance.get("model_source", "<absent>"),
+        "resolved_model_source": provenance.get("resolved_model_source", "<absent>"),
+        "model_snapshot_path": provenance.get("model_snapshot_path", "<absent>"),
+        "model_source_resolution": provenance.get("model_source_resolution", "<absent>"),
+        "local_snapshot_status": provenance.get("local_snapshot_status", "<absent>"),
         "hf_revision": provenance.get("hf_revision", "<absent>"),
         "model_revision": provenance.get("model_revision", "<absent>"),
         "model_weights_sha256": provenance.get("model_weights_sha256", "<absent>")
@@ -662,15 +691,28 @@ def _compute_weights_snapshot(
         # runtime_meta 类型不合法，必须 fail-fast。
         raise TypeError("runtime_meta must be dict")
 
+    snapshot_model_id = model_id
+    snapshot_model_source = model_source
+    resolved_model_id = runtime_meta.get("resolved_model_id")
+    resolved_model_source = runtime_meta.get("resolved_model_source")
+    if isinstance(resolved_model_id, str) and resolved_model_id and isinstance(resolved_model_source, str) and resolved_model_source:
+        snapshot_model_id = resolved_model_id
+        snapshot_model_source = resolved_model_source
+
     local_files_only = runtime_meta.get("local_files_only")
     if not isinstance(local_files_only, bool):
         local_files_only = None
 
     cache_dir = _resolve_cache_dir(cfg, runtime_meta)
 
+    runtime_meta["weights_snapshot_requested_model_id"] = model_id
+    runtime_meta["weights_snapshot_requested_model_source"] = model_source
+    runtime_meta["weights_snapshot_resolved_model_id"] = snapshot_model_id
+    runtime_meta["weights_snapshot_resolved_model_source"] = snapshot_model_source
+
     return weights_snapshot.compute_weights_snapshot_sha256(
-        model_id=model_id,
-        model_source=model_source,
+        model_id=snapshot_model_id,
+        model_source=snapshot_model_source,
         hf_revision=hf_revision,
         local_files_only=local_files_only,
         cache_dir=cache_dir

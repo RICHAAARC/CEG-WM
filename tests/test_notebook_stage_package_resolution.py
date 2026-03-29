@@ -666,6 +666,7 @@ def test_stage_01_execute_cell_uses_repo_import_subprocess_env() -> None:
     execute_source = _find_code_cell_source(NOTEBOOK_01_PATH, "STAGE_RUN_ID = make_stage_run_id(NOTEBOOK_NAME)")
 
     _assert_execute_source_uses_repo_import_context(execute_source)
+    assert 'NOTEBOOK_SUBPROCESS_ENV["CEG_WM_MODEL_SNAPSHOT_PATH"] = str(MODEL_SNAPSHOT_PATH)' in execute_source
     assert "command_result = subprocess.run(" in execute_source
 
 
