@@ -1699,6 +1699,296 @@ def select_latest_stage_package(candidates: Sequence[Mapping[str, Any]]) -> Dict
     raise FileNotFoundError("no valid stage package candidate passed manifest binding checks")
 
 
+def _normalize_optional_package_input(package_path_input: Any) -> Path | None:
+    """
+    功能：把 notebook 中的可空 package 输入规范化为 Path。 
+
+    Normalize one optional notebook package input into a Path or None.
+
+    Args:
+        package_path_input: Optional stage package input from notebook cells.
+
+    Returns:
+        Normalized Path when a non-empty input is provided, else None.
+    """
+    if package_path_input is None:
+        return None
+    if isinstance(package_path_input, Path):
+        return package_path_input.expanduser()
+    if isinstance(package_path_input, str):
+        normalized = package_path_input.strip()
+        if not normalized:
+            return None
+        return Path(normalized).expanduser()
+    raise TypeError("package_path_input must be Path, str, or None")
+
+
+def inspect_stage_package_input(
+    package_path: Path | None,
+    *,
+    expected_stage_name: str,
+) -> Dict[str, Any]:
+    """
+    功能：检查单个 stage package 是否满足 notebook 发现条件。 
+
+    Inspect one stage package against the notebook discovery contract.
+
+    Args:
+        package_path: Candidate stage package path.
+        expected_stage_name: Expected stage name bound to the notebook stage.
+
+    Returns:
+        Inspection summary describing existence, formal-package policy, stage
+        name binding, manifest parseability, and package-index availability.
+    """
+    if package_path is not None and not isinstance(package_path, Path):
+        raise TypeError("package_path must be Path or None")
+    if not isinstance(expected_stage_name, str) or not expected_stage_name:
+        raise TypeError("expected_stage_name must be non-empty str")
+
+    summary: Dict[str, Any] = {
+        "input_path": normalize_path_value(package_path) if isinstance(package_path, Path) else "<absent>",
+        "package_exists": False,
+        "package_policy_source": "absent",
+        "package_role": "<absent>",
+        "package_discovery_scope": "<absent>",
+        "diagnostics_like": False,
+        "explicit_non_formal": False,
+        "formal_package_eligible": False,
+        "manifest_parseable": False,
+        "package_index_parseable": False,
+        "stage_manifest_stage_name": "<absent>",
+        "manifest_stage_name": "<absent>",
+        "stage_name_matches": False,
+        "validation": {},
+        "validation_error": None,
+        "formal_package_valid": False,
+    }
+    if package_path is None:
+        return summary
+    if not package_path.exists() or not package_path.is_file():
+        summary["validation_error"] = f"package file missing: {normalize_path_value(package_path)}"
+        return summary
+
+    summary["package_exists"] = True
+    package_policy_probe = probe_stage_package_policy(package_path)
+    external_manifest = cast(Dict[str, Any], package_policy_probe.get("external_manifest", {}))
+    internal_manifest = cast(Dict[str, Any], package_policy_probe.get("internal_manifest", {}))
+    stage_manifest = cast(Dict[str, Any], package_policy_probe.get("stage_manifest", {}))
+    manifest_for_policy = cast(Dict[str, Any], package_policy_probe.get("manifest_for_policy", {}))
+    package_index = read_json_from_zip(package_path, "artifacts/package_index.json")
+    discovered_stage_name = stage_manifest.get("stage_name") or manifest_for_policy.get("stage_name")
+
+    summary.update(
+        {
+            "package_policy_source": package_policy_probe.get("package_policy_source", "absent"),
+            "package_role": package_policy_probe.get("package_role") or FORMAL_STAGE_PACKAGE_ROLE,
+            "package_discovery_scope": package_policy_probe.get("package_discovery_scope") or FORMAL_PACKAGE_DISCOVERY_SCOPE,
+            "diagnostics_like": bool(package_policy_probe.get("diagnostics_like", False)),
+            "explicit_non_formal": bool(package_policy_probe.get("explicit_non_formal", False)),
+            "formal_package_eligible": bool(package_policy_probe.get("formal_package_eligible", False)),
+            "manifest_parseable": bool(stage_manifest) and bool(manifest_for_policy),
+            "package_index_parseable": bool(package_index),
+            "stage_manifest_stage_name": stage_manifest.get("stage_name", "<absent>"),
+            "manifest_stage_name": manifest_for_policy.get("stage_name", "<absent>"),
+            "stage_name_matches": discovered_stage_name == expected_stage_name,
+        }
+    )
+
+    try:
+        if external_manifest:
+            summary["validation"] = validate_package_manifest_binding(
+                package_path,
+                external_manifest,
+                required_sha_match=True,
+            )
+        elif internal_manifest:
+            summary["validation"] = validate_package_manifest_binding(
+                package_path,
+                internal_manifest,
+                required_sha_match=False,
+            )
+        else:
+            summary["validation_error"] = "package manifest missing"
+    except Exception as exc:
+        # 中文注释：这里保留原始异常文本，方便 notebook precheck 直接显示失败原因。
+        summary["validation_error"] = f"{type(exc).__name__}: {exc}"
+
+    summary["formal_package_valid"] = bool(
+        summary["package_exists"]
+        and summary["formal_package_eligible"]
+        and not summary["explicit_non_formal"]
+        and summary["manifest_parseable"]
+        and summary["package_index_parseable"]
+        and summary["stage_name_matches"]
+        and summary["validation_error"] is None
+    )
+    return summary
+
+
+def discover_latest_formal_stage_package(
+    export_stage_root: Path,
+    *,
+    expected_stage_name: str,
+) -> Dict[str, Any]:
+    """
+    功能：在指定 exports 根目录中发现最新合法 formal stage package。 
+
+    Discover the latest valid formal stage package under one stage-specific
+    export root.
+
+    Args:
+        export_stage_root: Stage-specific export root directory.
+        expected_stage_name: Expected stage name for the discovered package.
+
+    Returns:
+        Discovery summary carrying inspected candidates, the selected package,
+        and one stable discovery error when no legal package is available.
+    """
+    if not isinstance(export_stage_root, Path):
+        raise TypeError("export_stage_root must be Path")
+    if not isinstance(expected_stage_name, str) or not expected_stage_name:
+        raise TypeError("expected_stage_name must be non-empty str")
+
+    discovered_candidates = discover_stage_packages(export_stage_root)
+    inspected_candidates: List[Dict[str, Any]] = []
+    for candidate in discovered_candidates:
+        package_path_value = candidate.get("package_path")
+        if not isinstance(package_path_value, str) or not package_path_value:
+            continue
+        inspected_candidate = dict(candidate)
+        inspected_candidate.update(
+            inspect_stage_package_input(
+                Path(package_path_value),
+                expected_stage_name=expected_stage_name,
+            )
+        )
+        inspected_candidates.append(inspected_candidate)
+
+    valid_candidates = [
+        candidate
+        for candidate in inspected_candidates
+        if bool(candidate.get("formal_package_valid", False))
+    ]
+
+    selected_candidate: Dict[str, Any] = {}
+    discovery_error: str | None = None
+    if valid_candidates:
+        try:
+            selected_candidate = select_latest_stage_package(valid_candidates)
+        except Exception as exc:
+            # 中文注释：这里不向上抛出，交给 notebook precheck 决定 required/optional 的阻断语义。
+            discovery_error = f"{type(exc).__name__}: {exc}"
+    else:
+        discovery_error = (
+            "no valid formal stage package discovered under "
+            f"{normalize_path_value(export_stage_root)}"
+        )
+
+    selected_package_path = selected_candidate.get("package_path", "<absent>")
+    return {
+        "export_stage_root": normalize_path_value(export_stage_root),
+        "expected_stage_name": expected_stage_name,
+        "candidates": inspected_candidates,
+        "candidate_count": len(inspected_candidates),
+        "selected_candidate": selected_candidate,
+        "selected_package_path": selected_package_path,
+        "selected_package_valid": bool(selected_candidate),
+        "selection_reason": selected_candidate.get("selection_reason", "<absent>"),
+        "discovery_error": discovery_error,
+    }
+
+
+def resolve_stage_package_input_or_discover(
+    package_path_input: Any,
+    export_stage_root: Path,
+    *,
+    expected_stage_name: str,
+) -> Dict[str, Any]:
+    """
+    功能：按“手工优先，否则自动发现”解析 stage package 输入。 
+
+    Resolve one notebook stage-package input using the stable policy of manual
+    override first and automatic discovery otherwise.
+
+    Args:
+        package_path_input: Optional manual stage package input.
+        export_stage_root: Stage-specific export root directory.
+        expected_stage_name: Expected stage name for validation.
+
+    Returns:
+        Resolution summary carrying the selected path, whether manual input won,
+        inspected discovery candidates, and one reusable validation result.
+    """
+    manual_package_path = _normalize_optional_package_input(package_path_input)
+    resolution: Dict[str, Any] = {
+        "manual_input_provided": manual_package_path is not None,
+        "manual_input_used": manual_package_path is not None,
+        "manual_input_path": normalize_path_value(manual_package_path) if manual_package_path is not None else "<absent>",
+        "export_stage_root": normalize_path_value(export_stage_root),
+        "expected_stage_name": expected_stage_name,
+        "candidates": [],
+        "selected_candidate": {},
+        "selected_package_path": "<absent>",
+        "selected_package_valid": False,
+        "selection_reason": "<absent>",
+        "auto_discovered_package_path": "<absent>",
+        "resolution_error": None,
+    }
+
+    if manual_package_path is not None:
+        inspection = inspect_stage_package_input(
+            manual_package_path,
+            expected_stage_name=expected_stage_name,
+        )
+        resolution.update(inspection)
+        resolution.update(
+            {
+                "selected_candidate": {
+                    "package_path": inspection["input_path"],
+                    "selection_reason": "manual package path override",
+                },
+                "selected_package_path": inspection["input_path"],
+                "selected_package_valid": bool(inspection.get("formal_package_valid", False)),
+                "selection_reason": "manual package path override",
+                "auto_discovered_package_path": "<skipped_manual_override>",
+                "resolution_error": (
+                    None
+                    if bool(inspection.get("formal_package_valid", False))
+                    else inspection.get("validation_error") or "manual package failed formal stage-package validation"
+                ),
+            }
+        )
+        return resolution
+
+    discovery = discover_latest_formal_stage_package(
+        export_stage_root,
+        expected_stage_name=expected_stage_name,
+    )
+    resolution.update(
+        {
+            "manual_input_used": False,
+            "candidates": discovery["candidates"],
+            "selected_candidate": discovery["selected_candidate"],
+            "selected_package_path": discovery["selected_package_path"],
+            "selected_package_valid": bool(discovery.get("selected_package_valid", False)),
+            "selection_reason": discovery.get("selection_reason", "<absent>"),
+            "auto_discovered_package_path": discovery.get("selected_package_path", "<absent>"),
+            "resolution_error": discovery.get("discovery_error"),
+        }
+    )
+    if isinstance(discovery.get("selected_package_path"), str) and discovery["selected_package_path"] != "<absent>":
+        resolution.update(
+            inspect_stage_package_input(
+                Path(str(discovery["selected_package_path"])),
+                expected_stage_name=expected_stage_name,
+            )
+        )
+        resolution["selected_package_path"] = discovery["selected_package_path"]
+        resolution["selected_package_valid"] = bool(resolution.get("formal_package_valid", False))
+    return resolution
+
+
 def tail_text_file(path_obj: Path, max_lines: int = 20) -> List[str]:
     """
     功能：返回文本文件尾部若干行。
