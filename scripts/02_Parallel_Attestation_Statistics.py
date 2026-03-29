@@ -37,8 +37,12 @@ from scripts.notebook_runtime_common import (
     load_yaml_mapping,
     make_stage_run_id,
     normalize_path_value,
+    persist_source_package_lineage,
     prepare_source_package,
+    read_required_json_dict,
     resolve_repo_path,
+    resolve_source_lineage_paths,
+    resolve_source_prompt_snapshot_path,
     resolve_stage_roots,
     run_command_with_logs,
     stage_relative_copy,
@@ -57,39 +61,6 @@ PARALLEL_ATTESTATION_STATS_STAGED_RECORDS_RELATIVE_ROOT = "artifacts/parallel_at
 EVENT_ATTESTATION_SCORE_NAME = "event_attestation_score"
 DIRECT_SOURCE_ONLY_MODE = "direct_source_only"
 SOURCE_PLUS_DERIVED_PAIRS_MODE = "source_plus_derived_pairs"
-
-
-def _resolve_source_lineage_paths(extracted_root: Path) -> Dict[str, Path]:
-    return {
-        "source_stage_manifest_path": extracted_root / "artifacts" / "stage_manifest.json",
-        "source_package_manifest_path": extracted_root / "artifacts" / "package_manifest.json",
-        "source_runtime_config_snapshot_path": extracted_root / "runtime_metadata" / "runtime_config_snapshot.yaml",
-        "source_thresholds_artifact_path": extracted_root / "artifacts" / "thresholds" / "thresholds_artifact.json",
-    }
-
-
-def _resolve_prompt_snapshot_path(extracted_root: Path) -> str:
-    prompt_root = extracted_root / "runtime_metadata" / "prompt_snapshot"
-    if prompt_root.exists() and prompt_root.is_dir():
-        for prompt_path in sorted(prompt_root.rglob("*")):
-            if prompt_path.is_file():
-                return normalize_path_value(prompt_path)
-    return "<absent>"
-
-
-def _load_json_object(path_obj: Path, label: str) -> Dict[str, Any]:
-    if not isinstance(path_obj, Path):
-        raise TypeError("path_obj must be Path")
-    if not isinstance(label, str) or not label:
-        raise TypeError("label must be non-empty str")
-    if not path_obj.exists() or not path_obj.is_file():
-        raise FileNotFoundError(f"{label} not found: {normalize_path_value(path_obj)}")
-    payload = json.loads(path_obj.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError(f"{label} must be JSON object: {normalize_path_value(path_obj)}")
-    return cast(Dict[str, Any], payload)
-
-
 def _resolve_detect_record_label(record_payload: Dict[str, Any]) -> bool | None:
     if not isinstance(record_payload, dict):
         raise TypeError("record_payload must be dict")
@@ -212,7 +183,7 @@ def _load_parallel_attestation_statistics_source_contract(
         contract_relative_path = PARALLEL_ATTESTATION_STATS_SOURCE_CONTRACT_RELATIVE_PATH
 
     contract_path = extracted_root / contract_relative_path
-    contract_payload = _load_json_object(contract_path, "parallel_attestation_statistics_input_contract")
+    contract_payload = read_required_json_dict(contract_path, "parallel_attestation_statistics_input_contract")
     artifact_type = contract_payload.get("artifact_type")
     if artifact_type != "parallel_attestation_statistics_input_contract":
         raise ValueError(
@@ -295,7 +266,7 @@ def _stage_direct_source_records(
             raise ValueError("parallel_attestation_statistics_input_contract record missing package_relative_path")
 
         source_record_path = extracted_root / relative_path
-        source_record_payload = _load_json_object(source_record_path, "source detect record")
+        source_record_payload = read_required_json_dict(source_record_path, "source detect record")
         source_label = _resolve_detect_record_label(source_record_payload)
         if not isinstance(source_label, bool):
             raise ValueError(
@@ -659,7 +630,7 @@ def run_stage_02(
     if source_manifest.get("stage_name") != "01_Paper_Full_Cuda":
         raise ValueError("stage 02 requires a source package produced by 01_Paper_Full_Cuda")
     extracted_root = Path(str(source_info["extracted_root"]))
-    source_lineage_paths = _resolve_source_lineage_paths(extracted_root)
+    source_lineage_paths = resolve_source_lineage_paths(extracted_root)
     missing_source_lineage = [
         label for label, path_obj in source_lineage_paths.items()
         if label != "source_package_manifest_path" and not path_obj.exists()
@@ -723,10 +694,9 @@ def run_stage_02(
     if missing_outputs:
         raise FileNotFoundError(f"stage 02 required outputs missing: {missing_outputs}")
 
-    source_stage_manifest_copy_path = runtime_state_root / "lineage" / "source_stage_manifest.json"
-    copy_stage_manifest_snapshot(source_manifest, source_stage_manifest_copy_path)
-    source_package_manifest_copy_path = runtime_state_root / "lineage" / "source_package_manifest.json"
-    write_json_atomic(source_package_manifest_copy_path, cast(Dict[str, Any], source_info["package_manifest"]))
+    source_lineage_snapshot_paths = persist_source_package_lineage(runtime_state_root, source_info)
+    source_stage_manifest_copy_path = source_lineage_snapshot_paths["source_stage_manifest_copy_path"]
+    source_package_manifest_copy_path = source_lineage_snapshot_paths["source_package_manifest_copy_path"]
 
     source_contract_summary = cast(Dict[str, Any], build_contract_payload["source_contract_summary"])
     build_contract_summary = {
@@ -806,7 +776,7 @@ def run_stage_02(
         "parallel_attestation_statistics_detect_records_glob": build_contract_payload["detect_records_glob"],
         "source_stage_manifest_path": normalize_path_value(source_stage_manifest_copy_path),
         "source_runtime_config_snapshot_path": normalize_path_value(source_lineage_paths["source_runtime_config_snapshot_path"]),
-        "source_prompt_snapshot_path": _resolve_prompt_snapshot_path(extracted_root),
+        "source_prompt_snapshot_path": resolve_source_prompt_snapshot_path(extracted_root),
         "source_thresholds_artifact_path": normalize_path_value(source_lineage_paths["source_thresholds_artifact_path"]),
         "source_stage_manifest_copy_path": normalize_path_value(source_stage_manifest_copy_path),
         "notebook_name": notebook_name,

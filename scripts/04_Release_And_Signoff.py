@@ -18,8 +18,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, cast
 
 from scripts.notebook_runtime_common import (
-    EXCLUDED_PACKAGE_DISCOVERY_SCOPE,
-    FAILURE_DIAGNOSTICS_PACKAGE_ROLE,
     FORMAL_PACKAGE_DISCOVERY_SCOPE,
     FORMAL_STAGE_PACKAGE_ROLE,
     REPO_ROOT,
@@ -35,13 +33,12 @@ from scripts.notebook_runtime_common import (
     copy_stage_manifest_snapshot,
     ensure_directory,
     finalize_stage_package,
-    find_external_package_manifest,
     load_yaml_mapping,
     make_stage_run_id,
     normalize_path_value,
     prepare_source_package,
+    probe_stage_package_policy,
     read_json_dict,
-    read_json_from_zip,
     resolve_repo_path,
     resolve_stage_roots,
     stage_relative_copy,
@@ -71,10 +68,6 @@ FORMAL_SIGNOFF_PASS_STATUS = "passed"
 FORMAL_SIGNOFF_BLOCK_STATUS = "blocked"
 FORMAL_SUCCESS_STATUS_TOKENS = {"ok", "success", "passed"}
 FORMAL_PACKAGE_SUCCESS_STATUS_TOKENS = {"generated", "ok", "success", "passed"}
-DIAGNOSTICS_PACKAGE_ROLE_TOKENS = {
-    FAILURE_DIAGNOSTICS_PACKAGE_ROLE,
-    "failed_diagnostics_package",
-}
 
 EVALUATION_REPORT_REQUIRED_FIELDS = [
     "cfg_digest",
@@ -336,70 +329,6 @@ def _status_matches(value: Any, allowed_tokens: Sequence[str]) -> bool:
     if not isinstance(allowed_tokens, Sequence):
         raise TypeError("allowed_tokens must be Sequence")
     return _normalize_status_token(value) in {_normalize_status_token(token) for token in allowed_tokens}
-
-
-def _probe_input_package_policy(package_path: Path) -> Dict[str, Any]:
-    """
-    功能：探测输入 ZIP 的 formal package policy 元数据。 
-
-    Probe the available package-manifest metadata before stage-04 decides
-    whether the input may enter the formal signoff gate.
-
-    Args:
-        package_path: Candidate package ZIP path.
-
-    Returns:
-        Package-policy probe summary.
-    """
-    if not isinstance(package_path, Path):
-        raise TypeError("package_path must be Path")
-
-    external_manifest_path = find_external_package_manifest(package_path)
-    external_manifest = read_json_dict(external_manifest_path) if isinstance(external_manifest_path, Path) else {}
-    internal_manifest = read_json_from_zip(package_path, "artifacts/package_manifest.json")
-    manifest_for_policy = external_manifest if external_manifest else internal_manifest
-    package_role_raw = manifest_for_policy.get("package_role")
-    package_discovery_scope_raw = manifest_for_policy.get("package_discovery_scope")
-    package_role = package_role_raw.strip() if isinstance(package_role_raw, str) and package_role_raw.strip() else None
-    package_discovery_scope = (
-        package_discovery_scope_raw.strip()
-        if isinstance(package_discovery_scope_raw, str) and package_discovery_scope_raw.strip()
-        else None
-    )
-    diagnostics_like = (
-        package_role in DIAGNOSTICS_PACKAGE_ROLE_TOKENS
-        or "diagnostic" in _normalize_status_token(package_role)
-        or package_discovery_scope == EXCLUDED_PACKAGE_DISCOVERY_SCOPE
-    )
-    formal_role_compatible = package_role in {None, FORMAL_STAGE_PACKAGE_ROLE}
-    discovery_scope_compatible = package_discovery_scope in {None, FORMAL_PACKAGE_DISCOVERY_SCOPE}
-    explicit_non_formal = not (formal_role_compatible and discovery_scope_compatible) and (
-        package_role is not None or package_discovery_scope is not None
-    )
-    diagnostics_reference_paths: List[str] = []
-    diagnostics_manifest_path = manifest_for_policy.get("diagnostics_manifest_path")
-    diagnostics_summary_path = manifest_for_policy.get("diagnostics_summary_path")
-    diagnostics_package_path = manifest_for_policy.get("diagnostics_package_path")
-    for candidate_path in [diagnostics_manifest_path, diagnostics_summary_path, diagnostics_package_path]:
-        if isinstance(candidate_path, str) and candidate_path.strip() and candidate_path not in diagnostics_reference_paths:
-            diagnostics_reference_paths.append(candidate_path)
-    if isinstance(external_manifest_path, Path):
-        diagnostics_reference_paths.append(normalize_path_value(external_manifest_path))
-    return {
-        "external_manifest_path": normalize_path_value(external_manifest_path) if isinstance(external_manifest_path, Path) else "<absent>",
-        "external_manifest": external_manifest,
-        "internal_manifest": internal_manifest,
-        "package_policy_source": "external_manifest" if external_manifest else "internal_manifest" if internal_manifest else "absent",
-        "manifest_for_policy": manifest_for_policy,
-        "package_role": package_role,
-        "package_discovery_scope": package_discovery_scope,
-        "diagnostics_like": diagnostics_like,
-        "formal_role_compatible": formal_role_compatible,
-        "formal_discovery_scope_compatible": discovery_scope_compatible,
-        "formal_package_eligible": formal_role_compatible and discovery_scope_compatible,
-        "explicit_non_formal": explicit_non_formal,
-        "diagnostics_reference_paths": diagnostics_reference_paths,
-    }
 
 
 def _resolve_signoff_statuses(decision: str) -> Dict[str, str]:
@@ -1699,7 +1628,7 @@ def _prepare_stage_package_input(
             )
         return info
 
-    package_policy_probe = _probe_input_package_policy(package_path)
+    package_policy_probe = probe_stage_package_policy(package_path)
     info.update(
         {
             "package_policy_source": package_policy_probe.get("package_policy_source", "absent"),

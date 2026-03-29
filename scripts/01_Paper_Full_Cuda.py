@@ -43,6 +43,7 @@ from scripts.notebook_runtime_common import (
     load_yaml_mapping,
     make_stage_run_id,
     normalize_path_value,
+    read_required_json_dict,
     relative_path_under_base,
     resolve_repo_path,
     resolve_stage_roots,
@@ -66,21 +67,6 @@ FAILURE_DIAGNOSTICS_MANIFEST_FILE_NAME = "failure_diagnostics_manifest.json"
 FAILURE_DIAGNOSTICS_INDEX_FILE_NAME = "failure_diagnostics_index.json"
 MAX_FAILURE_DIAGNOSTIC_LOG_COUNT = 20
 MAX_FAILURE_DIAGNOSTIC_LOG_TAIL_LINES = 40
-
-
-def _load_json_object(path_obj: Path, label: str) -> Dict[str, Any]:
-    if not isinstance(path_obj, Path):
-        raise TypeError("path_obj must be Path")
-    if not isinstance(label, str) or not label:
-        raise TypeError("label must be non-empty str")
-    if not path_obj.exists() or not path_obj.is_file():
-        raise FileNotFoundError(f"{label} not found: {normalize_path_value(path_obj)}")
-    payload = json.loads(path_obj.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError(f"{label} must be JSON object: {normalize_path_value(path_obj)}")
-    return payload
-
-
 def _load_optional_json_object(path_obj: Path) -> Dict[str, Any]:
     """
     功能：按容错方式读取可选 JSON 对象文件。
@@ -931,21 +917,21 @@ def run_stage_01(
             raise FileNotFoundError(f"stage 01 required outputs missing: {missing_outputs}")
 
         stats_contract_path = outputs["parallel_attestation_statistics_input_contract"]
-        stats_contract_payload = _load_json_object(
+        stats_contract_payload = read_required_json_dict(
             stats_contract_path,
             "stage 01 parallel_attestation_statistics_input_contract",
         )
         canonical_source_pool_manifest_path = outputs["canonical_source_pool_manifest"]
-        canonical_source_pool_payload = _load_json_object(
+        canonical_source_pool_payload = read_required_json_dict(
             canonical_source_pool_manifest_path,
             "stage 01 canonical source pool manifest",
         )
         pooled_threshold_build_contract_path = outputs["stage_01_pooled_threshold_build_contract"]
-        pooled_threshold_build_contract_payload = _load_json_object(
+        pooled_threshold_build_contract_payload = read_required_json_dict(
             pooled_threshold_build_contract_path,
             "stage 01 pooled threshold build contract",
         )
-        workflow_summary_payload = _load_json_object(
+        workflow_summary_payload = read_required_json_dict(
             outputs["workflow_summary"],
             "stage 01 workflow summary",
         )

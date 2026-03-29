@@ -630,6 +630,33 @@ def read_json_dict(path_obj: Path) -> Dict[str, Any]:
     return cast(Dict[str, Any], payload) if isinstance(payload, dict) else {}
 
 
+def read_required_json_dict(path_obj: Path, label: str) -> Dict[str, Any]:
+    """
+    功能：严格读取必需 JSON 对象文件。
+
+    Read one required JSON file and require its root node to be a mapping.
+
+    Args:
+        path_obj: JSON file path.
+        label: Human-readable label used in error reporting.
+
+    Returns:
+        Parsed JSON mapping.
+
+    Raises:
+        FileNotFoundError: If the file is missing.
+        ValueError: If the JSON root is not a mapping.
+    """
+    if not label:
+        raise TypeError("label must be non-empty str")
+    if not path_obj.exists() or not path_obj.is_file():
+        raise FileNotFoundError(f"{label} not found: {normalize_path_value(path_obj)}")
+    payload = json.loads(path_obj.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label} must be JSON object: {normalize_path_value(path_obj)}")
+    return cast(Dict[str, Any], payload)
+
+
 def load_yaml_mapping(path_obj: Path) -> Dict[str, Any]:
     """
     功能：读取 YAML 映射配置。
@@ -868,6 +895,48 @@ def resolve_stage_roots(drive_project_root: Path, stage_name: str, stage_run_id:
     }
 
 
+def resolve_source_lineage_paths(extracted_root: Path) -> Dict[str, Path]:
+    """
+    功能：解析解压 source package 中的标准 lineage 路径。
+
+    Resolve the canonical source-lineage paths inside one extracted source
+    package.
+
+    Args:
+        extracted_root: Extracted source-package root.
+
+    Returns:
+        Mapping of canonical source-lineage paths.
+    """
+    return {
+        "source_stage_manifest_path": extracted_root / "artifacts" / "stage_manifest.json",
+        "source_package_manifest_path": extracted_root / "artifacts" / "package_manifest.json",
+        "source_runtime_config_snapshot_path": extracted_root / "runtime_metadata" / "runtime_config_snapshot.yaml",
+        "source_thresholds_artifact_path": extracted_root / "artifacts" / "thresholds" / "thresholds_artifact.json",
+    }
+
+
+def resolve_source_prompt_snapshot_path(extracted_root: Path) -> str:
+    """
+    功能：解析 source package 中首个 prompt snapshot 文件。
+
+    Resolve the first available prompt-snapshot file path under one extracted
+    source package.
+
+    Args:
+        extracted_root: Extracted source-package root.
+
+    Returns:
+        Normalized prompt-snapshot path, or "<absent>" when unavailable.
+    """
+    prompt_root = extracted_root / "runtime_metadata" / "prompt_snapshot"
+    if prompt_root.exists() and prompt_root.is_dir():
+        for prompt_path in sorted(prompt_root.rglob("*")):
+            if prompt_path.is_file():
+                return normalize_path_value(prompt_path)
+    return "<absent>"
+
+
 def build_stage_package_filename(
     stage_name: str,
     stage_run_id: str,
@@ -917,7 +986,7 @@ def build_failure_diagnostics_filename(stage_name: str, stage_run_id: str) -> st
     return f"{stage_name}__{stage_run_id}__failure_diagnostics.zip"
 
 
-def _is_discoverable_formal_package_manifest(package_manifest: Mapping[str, Any]) -> bool:
+def is_discoverable_formal_package_manifest(package_manifest: Any) -> bool:
     """
     功能：判断 manifest 是否属于可发现的正式 stage package。
 
@@ -933,9 +1002,11 @@ def _is_discoverable_formal_package_manifest(package_manifest: Mapping[str, Any]
     if not isinstance(package_manifest, Mapping) or not package_manifest:
         return False
 
-    stage_name = package_manifest.get("stage_name")
-    stage_run_id = package_manifest.get("stage_run_id")
-    package_filename = package_manifest.get("package_filename")
+    manifest_obj = cast(Mapping[str, Any], package_manifest)
+
+    stage_name = manifest_obj.get("stage_name")
+    stage_run_id = manifest_obj.get("stage_run_id")
+    package_filename = manifest_obj.get("package_filename")
     if not isinstance(stage_name, str) or not stage_name:
         return False
     if not isinstance(stage_run_id, str) or not stage_run_id:
@@ -943,13 +1014,29 @@ def _is_discoverable_formal_package_manifest(package_manifest: Mapping[str, Any]
     if not isinstance(package_filename, str) or not package_filename.endswith(".zip"):
         return False
 
-    package_role = package_manifest.get("package_role")
+    package_role = manifest_obj.get("package_role")
     if package_role not in {None, FORMAL_STAGE_PACKAGE_ROLE}:
         return False
-    package_discovery_scope = package_manifest.get("package_discovery_scope")
+    package_discovery_scope = manifest_obj.get("package_discovery_scope")
     if package_discovery_scope not in {None, FORMAL_PACKAGE_DISCOVERY_SCOPE}:
         return False
     return True
+
+
+def _is_discoverable_formal_package_manifest(package_manifest: Mapping[str, Any]) -> bool:
+    """
+    功能：兼容内部旧调用的正式 package 判定包装。
+
+    Preserve the legacy private helper name for internal callers while routing
+    to the shared public helper.
+
+    Args:
+        package_manifest: Candidate package manifest mapping.
+
+    Returns:
+        True when the manifest represents a discoverable formal package.
+    """
+    return is_discoverable_formal_package_manifest(package_manifest)
 
 
 def run_command_with_logs(
@@ -1404,6 +1491,71 @@ def find_external_package_manifest(source_package_path: Path) -> Path | None:
     return None
 
 
+def probe_stage_package_policy(package_path: Path) -> Dict[str, Any]:
+    """
+    功能：探测 stage package 的 formal policy 元数据。
+
+    Probe one stage package for external/internal manifest metadata and formal
+    package eligibility.
+
+    Args:
+        package_path: Stage package ZIP path.
+
+    Returns:
+        Package-policy probe summary.
+    """
+    external_manifest_path = find_external_package_manifest(package_path)
+    external_manifest = read_json_dict(external_manifest_path) if isinstance(external_manifest_path, Path) else {}
+    internal_manifest = read_json_from_zip(package_path, "artifacts/package_manifest.json")
+    stage_manifest = read_json_from_zip(package_path, "artifacts/stage_manifest.json")
+    manifest_for_policy = external_manifest if external_manifest else internal_manifest
+    package_role_raw = manifest_for_policy.get("package_role")
+    package_discovery_scope_raw = manifest_for_policy.get("package_discovery_scope")
+    package_role = package_role_raw.strip() if isinstance(package_role_raw, str) and package_role_raw.strip() else None
+    package_discovery_scope = (
+        package_discovery_scope_raw.strip()
+        if isinstance(package_discovery_scope_raw, str) and package_discovery_scope_raw.strip()
+        else None
+    )
+    diagnostics_like = (
+        package_role in {FAILURE_DIAGNOSTICS_PACKAGE_ROLE, "failed_diagnostics_package"}
+        or (isinstance(package_role, str) and "diagnostic" in package_role.lower())
+        or package_discovery_scope == EXCLUDED_PACKAGE_DISCOVERY_SCOPE
+    )
+    formal_role_compatible = package_role in {None, FORMAL_STAGE_PACKAGE_ROLE}
+    formal_discovery_scope_compatible = package_discovery_scope in {None, FORMAL_PACKAGE_DISCOVERY_SCOPE}
+    explicit_non_formal = not (formal_role_compatible and formal_discovery_scope_compatible) and (
+        package_role is not None or package_discovery_scope is not None
+    )
+    diagnostics_reference_paths: List[str] = []
+    for candidate_path in [
+        manifest_for_policy.get("diagnostics_manifest_path"),
+        manifest_for_policy.get("diagnostics_summary_path"),
+        manifest_for_policy.get("diagnostics_package_path"),
+    ]:
+        if isinstance(candidate_path, str) and candidate_path.strip() and candidate_path not in diagnostics_reference_paths:
+            diagnostics_reference_paths.append(candidate_path)
+    if isinstance(external_manifest_path, Path):
+        diagnostics_reference_paths.append(normalize_path_value(external_manifest_path))
+
+    return {
+        "external_manifest_path": normalize_path_value(external_manifest_path) if isinstance(external_manifest_path, Path) else "<absent>",
+        "external_manifest": external_manifest,
+        "internal_manifest": internal_manifest,
+        "stage_manifest": stage_manifest,
+        "manifest_for_policy": manifest_for_policy,
+        "package_policy_source": "external_manifest" if external_manifest else "internal_manifest" if internal_manifest else "absent",
+        "package_role": package_role,
+        "package_discovery_scope": package_discovery_scope,
+        "diagnostics_like": diagnostics_like,
+        "formal_role_compatible": formal_role_compatible,
+        "formal_discovery_scope_compatible": formal_discovery_scope_compatible,
+        "formal_package_eligible": is_discoverable_formal_package_manifest(manifest_for_policy),
+        "explicit_non_formal": explicit_non_formal,
+        "diagnostics_reference_paths": diagnostics_reference_paths,
+    }
+
+
 def validate_package_manifest_binding(
     package_path: Path,
     package_manifest: Mapping[str, Any],
@@ -1471,12 +1623,12 @@ def discover_stage_packages(export_stage_root: Path) -> List[Dict[str, Any]]:
     for zip_path in sorted(export_stage_root.rglob("*.zip")):
         if not zip_path.is_file():
             continue
-        external_manifest_path = find_external_package_manifest(zip_path)
-        external_manifest = read_json_dict(external_manifest_path) if isinstance(external_manifest_path, Path) else {}
-        internal_manifest = read_json_from_zip(zip_path, "artifacts/package_manifest.json")
-        stage_manifest = read_json_from_zip(zip_path, "artifacts/stage_manifest.json")
-        manifest_for_sort = external_manifest if external_manifest else internal_manifest
-        if not _is_discoverable_formal_package_manifest(manifest_for_sort):
+        package_policy_probe = probe_stage_package_policy(zip_path)
+        external_manifest = cast(Dict[str, Any], package_policy_probe.get("external_manifest", {}))
+        internal_manifest = cast(Dict[str, Any], package_policy_probe.get("internal_manifest", {}))
+        stage_manifest = cast(Dict[str, Any], package_policy_probe.get("stage_manifest", {}))
+        manifest_for_sort = cast(Dict[str, Any], package_policy_probe.get("manifest_for_policy", {}))
+        if not bool(package_policy_probe.get("formal_package_eligible", False)):
             continue
         package_created_at = manifest_for_sort.get("package_created_at") if isinstance(manifest_for_sort, dict) else None
         stage_run_id = manifest_for_sort.get("stage_run_id") if isinstance(manifest_for_sort, dict) else None
@@ -1495,15 +1647,12 @@ def discover_stage_packages(export_stage_root: Path) -> List[Dict[str, Any]]:
                 "package_filename": zip_path.name,
                 "package_created_at": package_created_at or utc_now_iso(),
                 "stage_run_id": stage_run_id or stage_manifest.get("stage_run_id") or "<absent>",
-                "external_manifest_path": normalize_path_value(external_manifest_path) if external_manifest_path else "<absent>",
+                "external_manifest_path": package_policy_probe.get("external_manifest_path", "<absent>"),
                 "external_manifest": external_manifest,
                 "internal_manifest": internal_manifest,
                 "stage_manifest": stage_manifest,
-                "package_role": manifest_for_sort.get("package_role", FORMAL_STAGE_PACKAGE_ROLE),
-                "package_discovery_scope": manifest_for_sort.get(
-                    "package_discovery_scope",
-                    FORMAL_PACKAGE_DISCOVERY_SCOPE,
-                ),
+                "package_role": package_policy_probe.get("package_role") or FORMAL_STAGE_PACKAGE_ROLE,
+                "package_discovery_scope": package_policy_probe.get("package_discovery_scope") or FORMAL_PACKAGE_DISCOVERY_SCOPE,
                 "validation": validation_summary,
                 "validation_error": validation_error,
                 "mtime": datetime.fromtimestamp(zip_path.stat().st_mtime, timezone.utc).isoformat(),
@@ -1843,3 +1992,38 @@ def copy_stage_manifest_snapshot(stage_manifest: Mapping[str, Any], destination_
     """
     write_json_atomic(destination_path, dict(stage_manifest))
     return destination_path
+
+
+def persist_source_package_lineage(
+    runtime_state_root: Path,
+    source_info: Mapping[str, Any],
+) -> Dict[str, Path]:
+    """
+    功能：把 source package lineage 快照写入 runtime_state。
+
+    Persist the canonical source stage/package manifest snapshots under one
+    runtime-state lineage directory.
+
+    Args:
+        runtime_state_root: Stage runtime-state root.
+        source_info: Prepared source-package summary mapping.
+
+    Returns:
+        Mapping containing the copied stage and package manifest paths.
+    """
+    stage_manifest = source_info.get("stage_manifest")
+    package_manifest = source_info.get("package_manifest")
+    if not isinstance(stage_manifest, Mapping):
+        raise TypeError("source_info.stage_manifest must be Mapping")
+    if not isinstance(package_manifest, Mapping):
+        raise TypeError("source_info.package_manifest must be Mapping")
+
+    lineage_root = ensure_directory(runtime_state_root / "lineage")
+    source_stage_manifest_copy_path = lineage_root / "source_stage_manifest.json"
+    source_package_manifest_copy_path = lineage_root / "source_package_manifest.json"
+    copy_stage_manifest_snapshot(stage_manifest, source_stage_manifest_copy_path)
+    write_json_atomic(source_package_manifest_copy_path, dict(package_manifest))
+    return {
+        "source_stage_manifest_copy_path": source_stage_manifest_copy_path,
+        "source_package_manifest_copy_path": source_package_manifest_copy_path,
+    }

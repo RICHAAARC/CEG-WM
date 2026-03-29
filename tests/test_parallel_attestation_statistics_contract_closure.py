@@ -24,8 +24,12 @@ from scripts.notebook_runtime_common import (
     compute_file_sha256,
     discover_stage_packages,
     finalize_stage_package,
+    persist_source_package_lineage,
+    probe_stage_package_policy,
     prepare_source_package,
     resolve_export_package_manifest_path,
+    resolve_source_lineage_paths,
+    resolve_source_prompt_snapshot_path,
 )
 
 
@@ -1364,8 +1368,15 @@ def test_discover_stage_packages_excludes_failure_diagnostics_and_accepts_legacy
     _strip_discovery_metadata_from_formal_package(formal_package_path, external_manifest_path)
 
     diagnostics_package_path = _create_failure_diagnostics_package(export_stage_root, "failed_run")
+    formal_policy_probe = probe_stage_package_policy(formal_package_path)
+    diagnostics_policy_probe = probe_stage_package_policy(diagnostics_package_path)
     discovered_packages = discover_stage_packages(export_stage_root)
 
+    assert formal_policy_probe["formal_package_eligible"] is True
+    assert formal_policy_probe["explicit_non_formal"] is False
+    assert diagnostics_policy_probe["formal_package_eligible"] is False
+    assert diagnostics_policy_probe["diagnostics_like"] is True
+    assert diagnostics_policy_probe["explicit_non_formal"] is True
     assert len(discovered_packages) == 1
     assert discovered_packages[0]["package_path"] == formal_package_path.as_posix()
     assert discovered_packages[0]["package_role"] == "formal_stage_package"
@@ -1375,6 +1386,69 @@ def test_discover_stage_packages_excludes_failure_diagnostics_and_accepts_legacy
         prepare_source_package(diagnostics_package_path, tmp_path / "runtime_state")
 
     assert "discoverable formal stage package" in str(exc_info.value)
+
+
+def test_shared_source_lineage_helpers_preserve_contract_paths_and_snapshots(tmp_path: Path) -> None:
+    """
+    功能：验证共享 lineage helper 保持既有路径合同与快照写出语义。
+
+    Verify the shared source-lineage helpers preserve the established path
+    contract and lineage snapshot persistence semantics.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+
+    Returns:
+        None.
+    """
+    extracted_root = tmp_path / "source_extracted"
+    _write_json(
+        extracted_root / "artifacts" / "stage_manifest.json",
+        {"stage_name": "01_Paper_Full_Cuda", "stage_run_id": "stage01_run"},
+    )
+    _write_json(
+        extracted_root / "artifacts" / "package_manifest.json",
+        {
+            "stage_name": "01_Paper_Full_Cuda",
+            "stage_run_id": "stage01_run",
+            "package_filename": "source_stage01.zip",
+        },
+    )
+    _write_json(
+        extracted_root / "artifacts" / "thresholds" / "thresholds_artifact.json",
+        {"thresholds_digest": "thr01"},
+    )
+    runtime_config_snapshot_path = extracted_root / "runtime_metadata" / "runtime_config_snapshot.yaml"
+    runtime_config_snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_config_snapshot_path.write_text("policy_path: content_np_geo_rescue\n", encoding="utf-8")
+    prompt_snapshot_path = extracted_root / "runtime_metadata" / "prompt_snapshot" / "prompt.txt"
+    prompt_snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    prompt_snapshot_path.write_text("prompt text\n", encoding="utf-8")
+
+    lineage_paths = resolve_source_lineage_paths(extracted_root)
+    assert lineage_paths["source_stage_manifest_path"] == extracted_root / "artifacts" / "stage_manifest.json"
+    assert lineage_paths["source_package_manifest_path"] == extracted_root / "artifacts" / "package_manifest.json"
+    assert lineage_paths["source_runtime_config_snapshot_path"] == runtime_config_snapshot_path
+    assert lineage_paths["source_thresholds_artifact_path"] == extracted_root / "artifacts" / "thresholds" / "thresholds_artifact.json"
+    assert resolve_source_prompt_snapshot_path(extracted_root) == prompt_snapshot_path.as_posix()
+
+    runtime_state_root = tmp_path / "runtime_state"
+    persisted_paths = persist_source_package_lineage(
+        runtime_state_root,
+        {
+            "stage_manifest": {"stage_name": "01_Paper_Full_Cuda", "stage_run_id": "stage01_run"},
+            "package_manifest": {
+                "stage_name": "01_Paper_Full_Cuda",
+                "stage_run_id": "stage01_run",
+                "package_filename": "source_stage01.zip",
+            },
+        },
+    )
+
+    assert persisted_paths["source_stage_manifest_copy_path"] == runtime_state_root / "lineage" / "source_stage_manifest.json"
+    assert persisted_paths["source_package_manifest_copy_path"] == runtime_state_root / "lineage" / "source_package_manifest.json"
+    assert json.loads(persisted_paths["source_stage_manifest_copy_path"].read_text(encoding="utf-8"))["stage_run_id"] == "stage01_run"
+    assert json.loads(persisted_paths["source_package_manifest_copy_path"].read_text(encoding="utf-8"))["package_filename"] == "source_stage01.zip"
 
 
 def test_stage_01_source_pool_failure_exposes_nested_log_tails(

@@ -34,9 +34,12 @@ from scripts.notebook_runtime_common import (
     load_yaml_mapping,
     make_stage_run_id,
     normalize_path_value,
+    persist_source_package_lineage,
     prepare_source_package,
     read_json_dict,
     resolve_repo_path,
+    resolve_source_lineage_paths,
+    resolve_source_prompt_snapshot_path,
     resolve_stage_roots,
     run_command_with_logs,
     stage_relative_copy,
@@ -50,26 +53,6 @@ from scripts.workflow_acceptance_common import detect_stage_03_preflight
 
 DEFAULT_CONFIG_PATH = Path("configs/default.yaml")
 _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD = "auxiliary_analysis_runtime_executed"
-
-
-def _resolve_source_lineage_paths(extracted_root: Path) -> Dict[str, Path]:
-    return {
-        "source_stage_manifest_path": extracted_root / "artifacts" / "stage_manifest.json",
-        "source_package_manifest_path": extracted_root / "artifacts" / "package_manifest.json",
-        "source_runtime_config_snapshot_path": extracted_root / "runtime_metadata" / "runtime_config_snapshot.yaml",
-        "source_thresholds_artifact_path": extracted_root / "artifacts" / "thresholds" / "thresholds_artifact.json",
-    }
-
-
-def _resolve_prompt_snapshot_path(extracted_root: Path) -> str:
-    prompt_root = extracted_root / "runtime_metadata" / "prompt_snapshot"
-    if prompt_root.exists() and prompt_root.is_dir():
-        for prompt_path in sorted(prompt_root.rglob("*")):
-            if prompt_path.is_file():
-                return normalize_path_value(prompt_path)
-    return "<absent>"
-
-
 def _copy_readonly_thresholds(extracted_root: Path, run_root: Path) -> Dict[str, Path]:
     thresholds_root = ensure_directory(run_root / "global_calibrate" / "artifacts" / "thresholds")
     source_thresholds_path = extracted_root / "artifacts" / "thresholds" / "thresholds_artifact.json"
@@ -139,7 +122,7 @@ def run_stage_03(
     if source_manifest.get("stage_name") != "01_Paper_Full_Cuda":
         raise ValueError("stage 03 requires a source package produced by 01_Paper_Full_Cuda")
     extracted_root = Path(str(source_info["extracted_root"]))
-    source_lineage_paths = _resolve_source_lineage_paths(extracted_root)
+    source_lineage_paths = resolve_source_lineage_paths(extracted_root)
     missing_source_lineage = [
         label for label, path_obj in source_lineage_paths.items()
         if label != "source_package_manifest_path" and not path_obj.exists()
@@ -198,10 +181,9 @@ def run_stage_03(
     if missing_outputs:
         raise FileNotFoundError(f"stage 03 required outputs missing: {missing_outputs}")
 
-    source_stage_manifest_copy_path = runtime_state_root / "lineage" / "source_stage_manifest.json"
-    copy_stage_manifest_snapshot(source_manifest, source_stage_manifest_copy_path)
-    source_package_manifest_copy_path = runtime_state_root / "lineage" / "source_package_manifest.json"
-    write_json_atomic(source_package_manifest_copy_path, package_manifest)
+    source_lineage_snapshot_paths = persist_source_package_lineage(runtime_state_root, source_info)
+    source_stage_manifest_copy_path = source_lineage_snapshot_paths["source_stage_manifest_copy_path"]
+    source_package_manifest_copy_path = source_lineage_snapshot_paths["source_package_manifest_copy_path"]
     grid_summary_obj = read_json_dict(outputs["grid_summary"])
     aggregate_report_obj = read_json_dict(outputs["aggregate_report"])
     auxiliary_analysis_runtime_executed = bool(
@@ -269,7 +251,7 @@ def run_stage_03(
         "source_package_manifest_digest": str(source_info["package_manifest_digest"]),
         "source_stage_manifest_path": normalize_path_value(source_stage_manifest_copy_path),
         "source_runtime_config_snapshot_path": normalize_path_value(source_lineage_paths["source_runtime_config_snapshot_path"]),
-        "source_prompt_snapshot_path": _resolve_prompt_snapshot_path(extracted_root),
+        "source_prompt_snapshot_path": resolve_source_prompt_snapshot_path(extracted_root),
         "source_thresholds_artifact_path": normalize_path_value(source_lineage_paths["source_thresholds_artifact_path"]),
         "source_stage_manifest_copy_path": normalize_path_value(source_stage_manifest_copy_path),
         "readonly_shared_thresholds_path": normalize_path_value(readonly_thresholds["thresholds_artifact"]),

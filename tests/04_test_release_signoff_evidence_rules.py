@@ -768,10 +768,20 @@ def test_stage_04_allows_freeze_when_all_required_stages_align(tmp_path: Path) -
     assert signoff_report["blocking_reasons"] == []
     assert signoff_report["formal_input_summary"]["rejected_inputs"] == []
     assert len(signoff_report["formal_input_summary"]["accepted_formal_inputs"]) == 3
+    assert [item["stage_key"] for item in signoff_report["formal_input_summary"]["required_inputs"]] == [
+        "stage_01",
+        "stage_02",
+        "stage_03",
+    ]
     assert signoff_report["checked_packages_summary"]["stage_01"]["package_role"] == "formal_stage_package"
+    assert signoff_report["checked_packages_summary"]["stage_02"]["input_status"] == "prepared"
+    assert signoff_report["checked_packages_summary"]["stage_03"]["input_status"] == "prepared"
     assert signoff_report["checked_packages_summary"]["stage_01"]["formal_gate_summary"]["canonical_source_pool_status"] == "passed"
     assert signoff_report["checked_packages_summary"]["stage_01"]["formal_gate_summary"]["attestation_evidence_status"] == "ok"
     assert signoff_report["lineage_resolution_summary"]["lineage_match_status"] == "passed"
+    assert signoff_report["lineage_resolution_summary"]["stage_01_identity_summary"]["stage_name"] == "01_Paper_Full_Cuda"
+    assert signoff_report["lineage_resolution_summary"]["stage_01_identity_summary"]["stage_run_id"] == "stage01_run"
+    assert signoff_report["lineage_resolution_summary"]["stage_01_identity_summary"]["package_role"] == "formal_stage_package"
     assert Path(summary["package_path"]).exists()
     assert release_manifest["decision"] == "ALLOW_FREEZE"
     assert release_manifest["signoff_status"] == "passed"
