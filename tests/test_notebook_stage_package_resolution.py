@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 import pytest
+import yaml
 
 from scripts.notebook_runtime_common import (
     build_repo_import_subprocess_env,
@@ -445,6 +446,117 @@ def _execute_stage_03_precheck_cell(
     return namespace
 
 
+def _write_stage_01_precheck_config(config_path: Path) -> Path:
+    """
+    功能：写出 stage 01 precheck 所需的最小配置。 
+
+    Write the minimal config consumed by the stage-01 notebook precheck tests.
+
+    Args:
+        config_path: Destination config path.
+
+    Returns:
+        Written config path.
+    """
+    cfg_obj = {
+        "policy_path": "content_np_geo_rescue",
+        "model_id": "stabilityai/stable-diffusion-3.5-medium",
+        "model_source": "hf",
+        "hf_revision": "main",
+        "inference_prompt_file": "prompts/paper_small.txt",
+        "attestation": {
+            "enabled": True,
+            "k_master_env_var": "CEG_WM_K_MASTER",
+            "k_prompt_env_var": "CEG_WM_K_PROMPT",
+            "k_seed_env_var": "CEG_WM_K_SEED",
+        },
+        "stage_01_source_pool": {
+            "enabled": True,
+            "use_inference_prompt_file": True,
+        },
+        "stage_01_pooled_threshold_build": {
+            "enabled": True,
+            "target_pair_count": 16,
+        },
+    }
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(yaml.safe_dump(cfg_obj, sort_keys=False), encoding="utf-8")
+    return config_path
+
+
+def _execute_stage_01_precheck_cell(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    model_snapshot_path: Path,
+    allow_failure: bool = False,
+) -> Dict[str, Any]:
+    """
+    功能：在测试命名空间中执行 stage 01 的 precheck code cell。 
+
+    Execute the stage-01 notebook precheck code cell inside a test namespace.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+        model_snapshot_path: Notebook-visible model snapshot path.
+        allow_failure: Whether RuntimeError raised by notebook hard-fail should
+            be captured instead of re-raised.
+
+    Returns:
+        Execution namespace populated by the cell.
+    """
+    config_path = _write_stage_01_precheck_config(tmp_path / "default.yaml")
+    script_path = tmp_path / "01_Paper_Full_Cuda.py"
+    script_path.write_text("pass\n", encoding="utf-8")
+    prompt_source_path = tmp_path / "prompts" / "paper_small.txt"
+    prompt_source_path.parent.mkdir(parents=True, exist_ok=True)
+    prompt_source_path.write_text("prompt 0\n", encoding="utf-8")
+    drive_project_root = tmp_path / "drive_project_root"
+    drive_project_root.mkdir(parents=True, exist_ok=True)
+
+    precheck_source = _find_code_cell_source(NOTEBOOK_01_PATH, "PRECHECK_RESULTS = []")
+    fake_model_info = type("FakeModelInfo", (), {"id": "stabilityai/stable-diffusion-3.5-medium"})
+    fake_hf_api = type("FakeHfApi", (), {"model_info": lambda self, _repo_id: fake_model_info()})
+    fake_nvidia_smi = tmp_path / "nvidia-smi"
+    fake_nvidia_smi.write_text("", encoding="utf-8")
+    import scripts.workflow_acceptance_common as workflow_acceptance_common
+
+    monkeypatch.setattr(workflow_acceptance_common.shutil, "which", lambda _command: str(fake_nvidia_smi))
+    monkeypatch.setenv("CEG_WM_K_MASTER", "a" * 64)
+    monkeypatch.setenv("CEG_WM_K_PROMPT", "b" * 32)
+    monkeypatch.setenv("CEG_WM_K_SEED", "c" * 32)
+
+    captured_json: Dict[str, Any] = {}
+    namespace: Dict[str, Any] = {
+        "__builtins__": __builtins__,
+        "json": json,
+        "os": os,
+        "shutil": shutil,
+        "CONFIG_PATH": config_path,
+        "SCRIPT_PATH": script_path,
+        "PROMPT_SOURCE_PATH": prompt_source_path,
+        "DRIVE_PROJECT_ROOT": drive_project_root,
+        "NOTEBOOK_NAME": "01_Paper_Full_Cuda",
+        "REPO_ROOT": tmp_path,
+        "MODEL_SNAPSHOT_PATH": model_snapshot_path.as_posix(),
+        "HfApi": fake_hf_api,
+        "MODEL_IDENTITY": {"model_id": "stabilityai/stable-diffusion-3.5-medium"},
+        "WEIGHT_PATH": tmp_path / "weights" / "ckpt_base.pth",
+        "PERSISTENT_WEIGHT_PATH": tmp_path / "cache" / "ckpt_base.pth",
+        "is_valid_weight_file": lambda _path_obj: True,
+        "print_json": lambda name, payload: captured_json.__setitem__(str(name), payload),
+    }
+    try:
+        exec(precheck_source, namespace)
+    except RuntimeError as exc:
+        namespace["execution_error"] = exc
+        if not allow_failure:
+            raise
+    namespace["captured_json"] = captured_json
+    return namespace
+
+
 def _execute_stage_01_validation_cell(tmp_path: Path, *, include_root_records: bool) -> Dict[str, Any]:
     """
     功能：在测试命名空间中执行 stage 01 的 validation code cell。
@@ -648,6 +760,122 @@ def test_stage_01_validation_moves_root_records_to_optional_compatibility_views(
         "embed_record",
         "detect_record",
     }
+
+
+def test_stage_01_precheck_uses_bound_config_view_and_persists_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：验证 stage 01 precheck 先固化 bound config 再执行 formal preflight。 
+
+    Verify the stage-01 notebook precheck persists a bound config artifact and
+    runs detect_stage_01_preflight against that bound view instead of the raw
+    config path.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    precheck_source = _find_code_cell_source(NOTEBOOK_01_PATH, "PRECHECK_RESULTS = []")
+    snapshot_dir = tmp_path / "model_snapshot"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    namespace = _execute_stage_01_precheck_cell(tmp_path, monkeypatch, model_snapshot_path=snapshot_dir)
+
+    bound_config_path = Path(str(namespace["PRECHECK_BOUND_CONFIG_PATH"]))
+    bound_cfg = yaml.safe_load(bound_config_path.read_text(encoding="utf-8"))
+    environment_precheck = namespace["captured_json"]["environment_precheck"]
+
+    assert "detect_stage_01_preflight(CONFIG_PATH)" not in precheck_source
+    assert "apply_notebook_model_snapshot_binding" in precheck_source
+    assert "write_yaml_mapping(PRECHECK_BOUND_CONFIG_PATH, PRECHECK_BOUND_CFG)" in precheck_source
+    assert "STAGE_01_PREFLIGHT = detect_stage_01_preflight(PRECHECK_BOUND_CONFIG_PATH)" in precheck_source
+    assert namespace["STAGE_01_PREFLIGHT"]["cfg_path"] == bound_config_path.resolve().as_posix()
+    assert bound_cfg["model_snapshot_path"] == snapshot_dir.resolve().as_posix()
+    assert bound_cfg["model_source_binding"]["binding_status"] == "bound"
+    assert environment_precheck["config_path"] == str(namespace["CONFIG_PATH"])
+    assert environment_precheck["precheck_bound_config_path"] == str(bound_config_path)
+    assert environment_precheck["model_snapshot_path"] == snapshot_dir.as_posix()
+    assert environment_precheck["notebook_model_snapshot_binding_applied"] is True
+    assert environment_precheck["precheck_bound_config"]["model_snapshot_path"] == snapshot_dir.resolve().as_posix()
+    assert environment_precheck["precheck_bound_config"]["model_source_binding"]["binding_status"] == "bound"
+    assert namespace["hard_fail"] == []
+
+
+def test_stage_01_precheck_binding_semantics_match_execute_stage_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：验证 stage 01 precheck 与 execute 共享同一模型绑定语义。 
+
+    Verify the stage-01 notebook precheck uses the same model snapshot binding
+    contract as the execute cell instead of checking an unbound raw config.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    precheck_source = _find_code_cell_source(NOTEBOOK_01_PATH, "PRECHECK_RESULTS = []")
+    execute_source = _find_code_cell_source(NOTEBOOK_01_PATH, "STAGE_RUN_ID = make_stage_run_id(NOTEBOOK_NAME)")
+    snapshot_dir = tmp_path / "model_snapshot"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    namespace = _execute_stage_01_precheck_cell(tmp_path, monkeypatch, model_snapshot_path=snapshot_dir)
+    bound_cfg = yaml.safe_load(Path(str(namespace["PRECHECK_BOUND_CONFIG_PATH"])).read_text(encoding="utf-8"))
+
+    assert 'PRECHECK_BINDING_ENV["CEG_WM_MODEL_SNAPSHOT_PATH"] = str(MODEL_SNAPSHOT_PATH)' in precheck_source
+    assert 'NOTEBOOK_SUBPROCESS_ENV["CEG_WM_MODEL_SNAPSHOT_PATH"] = str(MODEL_SNAPSHOT_PATH)' in execute_source
+    assert bound_cfg["model_source_binding"]["binding_env_var"] == "CEG_WM_MODEL_SNAPSHOT_PATH"
+    assert bound_cfg["model_source_binding"]["binding_source"] == "notebook_snapshot_download"
+    assert namespace["STAGE_01_PREFLIGHT"]["model_source_binding_present"] is True
+    assert namespace["STAGE_01_PREFLIGHT"]["model_source_binding_status"] == "bound"
+
+
+def test_stage_01_precheck_hard_fails_when_model_snapshot_path_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：验证 stage 01 precheck 在 notebook snapshot 缺失时仍然正式失败。 
+
+    Verify the stage-01 notebook precheck still hard-fails when
+    MODEL_SNAPSHOT_PATH points to a missing directory.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    missing_snapshot_path = tmp_path / "missing_model_snapshot"
+    namespace = _execute_stage_01_precheck_cell(
+        tmp_path,
+        monkeypatch,
+        model_snapshot_path=missing_snapshot_path,
+        allow_failure=True,
+    )
+    environment_precheck = namespace["captured_json"]["environment_precheck"]
+
+    assert isinstance(namespace.get("execution_error"), RuntimeError)
+    assert namespace["STAGE_01_PREFLIGHT"]["ok"] is False
+    assert namespace["STAGE_01_PREFLIGHT"]["model_source_binding_present"] is True
+    assert namespace["STAGE_01_PREFLIGHT"]["model_source_binding_status"] == "invalid"
+    assert "stage_01_model_source_binding_not_bound" in namespace["STAGE_01_PREFLIGHT"]["failed_checks"]
+    assert "stage_01_model_snapshot_path_missing_or_not_directory" in namespace["STAGE_01_PREFLIGHT"]["failed_checks"]
+    assert environment_precheck["notebook_model_snapshot_binding_applied"] is True
+    assert namespace["hard_fail"] == [
+        {
+            "name": "stage 01 preflight",
+            "detail": json.dumps(namespace["STAGE_01_PREFLIGHT"], ensure_ascii=False, sort_keys=True),
+        }
+    ]
 
 
 def test_stage_01_execute_cell_uses_repo_import_subprocess_env() -> None:
