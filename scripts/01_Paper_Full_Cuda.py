@@ -11,6 +11,7 @@ Module type: General module
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import shutil
 import sys
@@ -59,14 +60,22 @@ from scripts.workflow_acceptance_common import detect_stage_01_preflight
 
 DEFAULT_CONFIG_PATH = Path("configs/default.yaml")
 RUNNER_SCRIPT_PATH = Path("scripts/01_run_paper_full_cuda.py")
+AUDIT_SCRIPT_PATH = Path("scripts/01_audit_outputs.py")
+STAGE_01_AUDIT_SUMMARY_RELATIVE_PATH = "artifacts/stage_01_audit_summary.json"
 PARALLEL_ATTESTATION_STATS_CONTRACT_RELATIVE_PATH = "artifacts/parallel_attestation_statistics_input_contract.json"
 STAGE_01_POOLED_THRESHOLD_BUILD_CONTRACT_RELATIVE_PATH = "artifacts/stage_01_pooled_threshold_build_contract.json"
 CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH = "artifacts/stage_01_canonical_source_pool/source_pool_manifest.json"
 FAILURE_DIAGNOSTICS_SUMMARY_FILE_NAME = "failure_diagnostics_summary.json"
 FAILURE_DIAGNOSTICS_MANIFEST_FILE_NAME = "failure_diagnostics_manifest.json"
 FAILURE_DIAGNOSTICS_INDEX_FILE_NAME = "failure_diagnostics_index.json"
+STAGE_01_ROOT_CONTRACT_MODE = "strong_compatibility"
+STAGE_01_SOURCE_TRUTH = "canonical_source_pool"
+STAGE_01_REPRESENTATIVE_ROOT_ROLE = "representative_summary_view"
+AUDIT_PASS_STATUS = "passed"
 MAX_FAILURE_DIAGNOSTIC_LOG_COUNT = 20
 MAX_FAILURE_DIAGNOSTIC_LOG_TAIL_LINES = 40
+
+
 def _load_optional_json_object(path_obj: Path) -> Dict[str, Any]:
     """
     功能：按容错方式读取可选 JSON 对象文件。
@@ -91,7 +100,81 @@ def _load_optional_json_object(path_obj: Path) -> Dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _load_stage_01_audit_module() -> Any:
+    """
+    功能：按文件路径加载 stage 01 audit 脚本模块。
+
+    Load the stage-01 audit script module from its filesystem path.
+
+    Args:
+        None.
+
+    Returns:
+        Loaded audit module object.
+
+    Raises:
+        RuntimeError: If the module spec cannot be created or executed.
+    """
+    script_path = (REPO_ROOT / AUDIT_SCRIPT_PATH).resolve()
+    spec = importlib.util.spec_from_file_location("stage_01_audit_outputs", script_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"failed to load audit module spec: {script_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _run_stage_01_output_audit(
+    *,
+    run_root: Path,
+    stage_manifest_path: Path,
+    workflow_summary_path: Path,
+    package_manifest_path: Path,
+) -> Dict[str, Any]:
+    """
+    功能：执行 stage 01 wrapper-level outputs audit。
+
+    Execute the stage-01 wrapper-level outputs audit and persist the structured
+    summary JSON.
+
+    Args:
+        run_root: Stage run root.
+        stage_manifest_path: Stage manifest path.
+        workflow_summary_path: Workflow summary path.
+        package_manifest_path: External package manifest path.
+
+    Returns:
+        Mapping with audit_summary_path and audit_summary.
+
+    Raises:
+        RuntimeError: If the audit module does not expose the expected callable
+            or returns a non-mapping payload.
+    """
+    audit_module = _load_stage_01_audit_module()
+    audit_runner = getattr(audit_module, "run_stage_01_output_audit", None)
+    if not callable(audit_runner):
+        raise RuntimeError("stage 01 audit module does not expose run_stage_01_output_audit")
+
+    audit_summary_path = run_root / STAGE_01_AUDIT_SUMMARY_RELATIVE_PATH
+    audit_summary = audit_runner(
+        run_root=run_root,
+        stage_manifest_path=stage_manifest_path,
+        workflow_summary_path=workflow_summary_path,
+        package_manifest_path=package_manifest_path,
+        output_path=audit_summary_path,
+    )
+    if not isinstance(audit_summary, dict):
+        raise RuntimeError("stage 01 audit summary must be a dict")
+    return {
+        "audit_summary_path": audit_summary_path,
+        "audit_summary": audit_summary,
+    }
+
+
 def _required_stage_outputs(run_root: Path) -> Dict[str, Path]:
+    # canonical source pool is the authoritative source truth. the root
+    # embed/detect records remain required strong-compatibility exports for the
+    # current formal workflow and downstream package consumers.
     return {
         "embed_record": run_root / "records" / "embed_record.json",
         "detect_record": run_root / "records" / "detect_record.json",
@@ -774,7 +857,14 @@ def _build_failure_stage_manifest(
         "stage_01_canonical_source_pool_manifest_path": normalize_path_value(run_root / CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH),
         "stage_01_canonical_source_pool_manifest_package_relative_path": canonical_source_pool_payload.get("manifest_package_relative_path"),
         "stage_01_canonical_source_pool_entry_count": canonical_source_pool_payload.get("entry_count"),
+        "stage_01_root_contract_mode": STAGE_01_ROOT_CONTRACT_MODE,
+        "stage_01_root_records_required": True,
+        "stage_01_source_truth": STAGE_01_SOURCE_TRUTH,
         "stage_01_representative_root_records": representative_root_records,
+        "stage_01_representative_root_role": representative_root_records.get(
+            "view_role",
+            STAGE_01_REPRESENTATIVE_ROOT_ROLE,
+        ),
         "stage_01_representative_root_prompt_index": representative_root_records.get("source_prompt_index"),
         "stage_01_representative_root_source_entry_package_relative_path": representative_root_records.get(
             "source_entry_package_relative_path"
@@ -943,6 +1033,9 @@ def run_stage_01(
             canonical_source_pool_payload,
         )
 
+        # canonical source pool remains the only source truth. representative
+        # root records stay required as intentional strong-compatibility outputs
+        # for the current formal workflow and downstream stages.
         stage_manifest: Dict[str, Any] = {
             "stage_name": STAGE_01_NAME,
             "stage_run_id": stage_run_id,
@@ -985,7 +1078,14 @@ def run_stage_01(
             "stage_01_canonical_source_pool_entry_count": canonical_source_pool_payload.get("entry_count"),
             "stage_01_canonical_source_pool_prompt_file": canonical_source_pool_payload.get("prompt_file"),
             "stage_01_canonical_source_pool_prompt_file_path": canonical_source_pool_payload.get("prompt_file"),
+            "stage_01_root_contract_mode": STAGE_01_ROOT_CONTRACT_MODE,
+            "stage_01_root_records_required": True,
+            "stage_01_source_truth": STAGE_01_SOURCE_TRUTH,
             "stage_01_representative_root_records": representative_root_records,
+            "stage_01_representative_root_role": representative_root_records.get(
+                "view_role",
+                STAGE_01_REPRESENTATIVE_ROOT_ROLE,
+            ),
             "stage_01_representative_root_prompt_index": representative_root_records.get("source_prompt_index"),
             "stage_01_representative_root_source_entry_package_relative_path": representative_root_records.get(
                 "source_entry_package_relative_path"
@@ -1059,6 +1159,24 @@ def run_stage_01(
             package_manifest_path=package_manifest_path,
         )
 
+        audit_result = _run_stage_01_output_audit(
+            run_root=run_root,
+            stage_manifest_path=stage_manifest_path,
+            workflow_summary_path=workflow_summary_path,
+            package_manifest_path=package_manifest_path,
+        )
+        audit_summary_path = Path(str(audit_result["audit_summary_path"]))
+        audit_summary = cast(Dict[str, Any], audit_result["audit_summary"])
+        audit_status = str(audit_summary.get("overall_status", "blocked"))
+        audit_blocking_reasons_raw = audit_summary.get("blocking_reasons", [])
+        audit_blocking_reasons = (
+            list(audit_blocking_reasons_raw)
+            if isinstance(audit_blocking_reasons_raw, list)
+            else []
+        )
+        audit_warnings_raw = audit_summary.get("warnings", [])
+        audit_warnings = list(audit_warnings_raw) if isinstance(audit_warnings_raw, list) else []
+
         summary: Dict[str, Any] = {
             "stage_name": STAGE_01_NAME,
             "stage_run_id": stage_run_id,
@@ -1079,7 +1197,12 @@ def run_stage_01(
             "diagnostics_summary_path": "<absent>",
             "diagnostics_package_path": "<absent>",
             "diagnostics_manifest_path": "<absent>",
-            "status": "ok",
+            "audit_status": audit_status,
+            "audit_summary_path": normalize_path_value(audit_summary_path),
+            "audit_blocking_reasons": audit_blocking_reasons,
+            "audit_warnings": audit_warnings,
+            "failure_reason": None if audit_status == AUDIT_PASS_STATUS else "stage_01_output_audit_failed",
+            "status": "ok" if audit_status == AUDIT_PASS_STATUS else "failed",
         }
         write_json_atomic(runtime_state_root / "stage_summary.json", summary)
         return summary
@@ -1108,6 +1231,14 @@ def run_stage_01(
             "diagnostics_manifest_path": normalize_path_value(diagnostics_paths["manifest_path"]),
         }
         formal_package_fields = _resolve_formal_package_summary(package_manifest_payload)
+        audit_summary_path = run_root / STAGE_01_AUDIT_SUMMARY_RELATIVE_PATH
+        audit_summary_payload = _load_optional_json_object(audit_summary_path)
+        audit_blocking_reasons_raw = audit_summary_payload.get("blocking_reasons", [])
+        audit_blocking_reasons = (
+            list(audit_blocking_reasons_raw)
+            if isinstance(audit_blocking_reasons_raw, list)
+            else []
+        )
 
         failure_stage_manifest = _build_failure_stage_manifest(
             config_path=config_path,
@@ -1176,6 +1307,9 @@ def run_stage_01(
             "diagnostics_summary_path": diagnostics_fields["diagnostics_summary_path"],
             "diagnostics_package_path": diagnostics_fields["diagnostics_package_path"],
             "diagnostics_manifest_path": diagnostics_fields["diagnostics_manifest_path"],
+            "audit_status": str(audit_summary_payload.get("overall_status", "<absent>")) if audit_summary_payload else "<absent>",
+            "audit_summary_path": normalize_path_value(audit_summary_path) if audit_summary_path.exists() else "<absent>",
+            "audit_blocking_reasons": audit_blocking_reasons,
             "failure_reason": failure_reason,
             "status": "failed",
         }
@@ -1198,7 +1332,7 @@ def main() -> int:
         stage_run_id=args.stage_run_id or make_stage_run_id(STAGE_01_NAME),
     )
     print(json.dumps(summary, indent=2, ensure_ascii=False, sort_keys=True))
-    return 0
+    return 0 if summary.get("status") == "ok" else 1
 
 
 if __name__ == "__main__":

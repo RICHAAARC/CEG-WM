@@ -495,6 +495,10 @@ def _make_stage_01_source_pool_contract(run_root: Path, prompt_count: int) -> Di
             "artifact_role": "canonical_source_pool_root",
             "stage_name": "01_Paper_Full_Cuda",
             "stage_run_id": "stage01_test",
+            "source_truth": "canonical_source_pool",
+            "root_contract_mode": "strong_compatibility",
+            "root_records_required": True,
+            "representative_root_role": "representative_summary_view",
             "prompt_file": "prompts/paper_small.txt",
             "canonical_source_pool_root_path": _normalize_path_string(run_root / CANONICAL_SOURCE_POOL_RELATIVE_ROOT),
             "canonical_source_pool_root_package_relative_path": CANONICAL_SOURCE_POOL_RELATIVE_ROOT,
@@ -507,6 +511,9 @@ def _make_stage_01_source_pool_contract(run_root: Path, prompt_count: int) -> Di
             "entries": canonical_entries,
             "representative_root_records": {
                 "view_role": "representative_summary_view",
+                "contract_mode": "strong_compatibility",
+                "source_truth": "canonical_source_pool",
+                "root_records_required": True,
                 "root_embed_record_package_relative_path": "records/embed_record.json",
                 "root_detect_record_package_relative_path": "records/detect_record.json",
                 "source_prompt_index": 0,
@@ -984,6 +991,21 @@ def test_stage_01_writes_source_contract_even_when_direct_stats_not_ready(tmp_pa
         "finalize_stage_package",
         lambda **_kwargs: {"package_path": str(export_root / "stage_01.zip"), "package_sha256": "sha256"},
     )
+    monkeypatch.setattr(
+        stage_01,
+        "_run_stage_01_output_audit",
+        lambda **_kwargs: {
+            "audit_summary_path": run_root / "artifacts" / "stage_01_audit_summary.json",
+            "audit_summary": {
+                "overall_status": "passed",
+                "blocking_reasons": [],
+                "warnings": [],
+                "stage_02_ready": True,
+                "stage_03_ready": True,
+                "stage_04_ready": True,
+            },
+        },
+    )
 
     stage_01.run_stage_01(
         drive_project_root=drive_root,
@@ -1016,9 +1038,16 @@ def test_stage_01_writes_source_contract_even_when_direct_stats_not_ready(tmp_pa
     assert canonical_manifest["artifact_role"] == "canonical_source_pool_root"
     assert canonical_manifest["prompt_count"] == 16
     assert canonical_manifest["entry_count"] == 16
+    assert canonical_manifest["source_truth"] == "canonical_source_pool"
+    assert canonical_manifest["root_contract_mode"] == "strong_compatibility"
+    assert canonical_manifest["root_records_required"] is True
+    assert canonical_manifest["representative_root_role"] == "representative_summary_view"
     assert canonical_manifest["entries"][0]["attestation_statement"]["exists"] is True
     assert canonical_manifest["entries"][0]["source_image"]["exists"] is True
     assert canonical_manifest["representative_root_records"]["view_role"] == "representative_summary_view"
+    assert canonical_manifest["representative_root_records"]["contract_mode"] == "strong_compatibility"
+    assert canonical_manifest["representative_root_records"]["source_truth"] == "canonical_source_pool"
+    assert canonical_manifest["representative_root_records"]["root_records_required"] is True
 
     pooled_build_contract = json.loads(
         (run_root / "artifacts" / "stage_01_pooled_threshold_build_contract.json").read_text(encoding="utf-8")
@@ -1045,6 +1074,10 @@ def test_stage_01_writes_source_contract_even_when_direct_stats_not_ready(tmp_pa
     ).as_posix()
     assert stage_manifest["stage_01_canonical_source_pool_prompt_count"] == 16
     assert stage_manifest["stage_01_canonical_source_pool_entry_count"] == 16
+    assert stage_manifest["stage_01_root_contract_mode"] == "strong_compatibility"
+    assert stage_manifest["stage_01_root_records_required"] is True
+    assert stage_manifest["stage_01_source_truth"] == "canonical_source_pool"
+    assert stage_manifest["stage_01_representative_root_role"] == "representative_summary_view"
     assert stage_manifest["stage_01_representative_root_records"]["view_role"] == "representative_summary_view"
     assert stage_manifest["stage_01_canonical_source_pool_prompt_file_path"] == "prompts/paper_small.txt"
     assert stage_manifest["stage_01_representative_root_prompt_index"] == 0
@@ -1053,6 +1086,10 @@ def test_stage_01_writes_source_contract_even_when_direct_stats_not_ready(tmp_pa
     )
     assert stage_manifest["stage_01_pooled_threshold_build_mode"] == "source_plus_derived_pairs"
     assert stage_manifest["stage_01_pooled_threshold_direct_record_count"] == 16
+
+    stage_summary = json.loads((runtime_state_root / "stage_summary.json").read_text(encoding="utf-8"))
+    assert stage_summary["audit_status"] == "passed"
+    assert stage_summary["audit_blocking_reasons"] == []
     assert stage_manifest["stage_01_pooled_threshold_derived_record_count"] == 16
     assert stage_manifest["stage_01_pooled_threshold_final_record_count"] == 32
     assert stage_manifest["stage_01_pooled_threshold_final_label_balanced"] is True

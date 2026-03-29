@@ -171,7 +171,10 @@ def _required_artifacts(run_root: Path) -> Dict[str, Path]:
         run_root: Workflow run root.
 
     Returns:
-        Mapping of required output labels to paths.
+        Mapping of required output labels to paths. records/embed_record.json
+        and records/detect_record.json remain required strong-compatibility
+        exports even though the canonical source pool is the authoritative
+        source truth.
     """
     return {
         "embed_record": run_root / "records" / "embed_record.json",
@@ -236,7 +239,9 @@ def _build_representative_root_summary(canonical_source_pool_payload: Dict[str, 
         canonical_source_pool_payload: Canonical source-pool manifest payload.
 
     Returns:
-        Summary-view metadata that is explicitly non-authoritative.
+        Summary-view metadata that is explicitly non-authoritative while still
+        remaining a required strong-compatibility export in the current formal
+        workflow.
     """
     if not isinstance(canonical_source_pool_payload, dict):
         raise TypeError("canonical_source_pool_payload must be dict")
@@ -1419,8 +1424,14 @@ def _build_stage_01_canonical_source_pool(
             }
         )
 
+    # canonical source entries are the only source truth. representative root
+    # records remain an intentional strong-compatibility export for the current
+    # formal workflow and downstream stage contracts.
     representative_root_records = {
         "view_role": "representative_summary_view",
+        "contract_mode": "strong_compatibility",
+        "source_truth": "canonical_source_pool",
+        "root_records_required": True,
         "root_embed_record_package_relative_path": "records/embed_record.json",
         "root_detect_record_package_relative_path": "records/detect_record.json",
         "source_prompt_index": representative_entry["prompt_index"],
@@ -1435,6 +1446,10 @@ def _build_stage_01_canonical_source_pool(
         "artifact_role": "canonical_source_pool_root",
         "stage_name": "01_Paper_Full_Cuda",
         "stage_run_id": stage_run_id,
+        "source_truth": "canonical_source_pool",
+        "root_contract_mode": "strong_compatibility",
+        "root_records_required": True,
+        "representative_root_role": "representative_summary_view",
         "prompt_file": prompt_file_path,
         "canonical_source_pool_root_path": normalize_path_value(canonical_root),
         "canonical_source_pool_root_package_relative_path": CANONICAL_SOURCE_POOL_RELATIVE_ROOT,
@@ -1885,6 +1900,9 @@ def run_paper_full_cuda(config_path: Path, run_root: Path, stage_run_id: Optiona
         if representative_embed_record_path is None or representative_detect_record_path is None:
             raise RuntimeError("stage 01 source pool did not emit representative embed/detect records")
 
+        # canonical source pool remains the authoritative source truth. the
+        # root embed/detect records are intentionally preserved as required
+        # strong-compatibility exports for the current formal workflow.
         copy_file(representative_embed_record_path, run_root / "records" / "embed_record.json")
         copy_file(representative_detect_record_path, run_root / "records" / "detect_record.json")
 
