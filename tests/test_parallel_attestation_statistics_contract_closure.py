@@ -496,8 +496,8 @@ def _make_stage_01_source_pool_contract(run_root: Path, prompt_count: int) -> Di
             "stage_name": "01_Paper_Full_Cuda",
             "stage_run_id": "stage01_test",
             "source_truth": "canonical_source_pool",
-            "root_contract_mode": "strong_compatibility",
-            "root_records_required": True,
+            "root_contract_mode": "compatibility_view",
+            "root_records_required": False,
             "representative_root_role": "representative_summary_view",
             "prompt_file": "prompts/paper_small.txt",
             "canonical_source_pool_root_path": _normalize_path_string(run_root / CANONICAL_SOURCE_POOL_RELATIVE_ROOT),
@@ -511,9 +511,9 @@ def _make_stage_01_source_pool_contract(run_root: Path, prompt_count: int) -> Di
             "entries": canonical_entries,
             "representative_root_records": {
                 "view_role": "representative_summary_view",
-                "contract_mode": "strong_compatibility",
+                "contract_mode": "compatibility_view",
                 "source_truth": "canonical_source_pool",
-                "root_records_required": True,
+                "root_records_required": False,
                 "root_embed_record_package_relative_path": "records/embed_record.json",
                 "root_detect_record_package_relative_path": "records/detect_record.json",
                 "source_prompt_index": 0,
@@ -1003,6 +1003,9 @@ def test_stage_01_writes_source_contract_even_when_direct_stats_not_ready(tmp_pa
                 "stage_02_ready": True,
                 "stage_03_ready": True,
                 "stage_04_ready": True,
+                "representative_root_status": "passed",
+                "representative_root_present": True,
+                "representative_root_contract_mode": "compatibility_view",
             },
         },
     )
@@ -1039,15 +1042,15 @@ def test_stage_01_writes_source_contract_even_when_direct_stats_not_ready(tmp_pa
     assert canonical_manifest["prompt_count"] == 16
     assert canonical_manifest["entry_count"] == 16
     assert canonical_manifest["source_truth"] == "canonical_source_pool"
-    assert canonical_manifest["root_contract_mode"] == "strong_compatibility"
-    assert canonical_manifest["root_records_required"] is True
+    assert canonical_manifest["root_contract_mode"] == "compatibility_view"
+    assert canonical_manifest["root_records_required"] is False
     assert canonical_manifest["representative_root_role"] == "representative_summary_view"
     assert canonical_manifest["entries"][0]["attestation_statement"]["exists"] is True
     assert canonical_manifest["entries"][0]["source_image"]["exists"] is True
     assert canonical_manifest["representative_root_records"]["view_role"] == "representative_summary_view"
-    assert canonical_manifest["representative_root_records"]["contract_mode"] == "strong_compatibility"
+    assert canonical_manifest["representative_root_records"]["contract_mode"] == "compatibility_view"
     assert canonical_manifest["representative_root_records"]["source_truth"] == "canonical_source_pool"
-    assert canonical_manifest["representative_root_records"]["root_records_required"] is True
+    assert canonical_manifest["representative_root_records"]["root_records_required"] is False
 
     pooled_build_contract = json.loads(
         (run_root / "artifacts" / "stage_01_pooled_threshold_build_contract.json").read_text(encoding="utf-8")
@@ -1074,8 +1077,8 @@ def test_stage_01_writes_source_contract_even_when_direct_stats_not_ready(tmp_pa
     ).as_posix()
     assert stage_manifest["stage_01_canonical_source_pool_prompt_count"] == 16
     assert stage_manifest["stage_01_canonical_source_pool_entry_count"] == 16
-    assert stage_manifest["stage_01_root_contract_mode"] == "strong_compatibility"
-    assert stage_manifest["stage_01_root_records_required"] is True
+    assert stage_manifest["stage_01_root_contract_mode"] == "compatibility_view"
+    assert stage_manifest["stage_01_root_records_required"] is False
     assert stage_manifest["stage_01_source_truth"] == "canonical_source_pool"
     assert stage_manifest["stage_01_representative_root_role"] == "representative_summary_view"
     assert stage_manifest["stage_01_representative_root_records"]["view_role"] == "representative_summary_view"
@@ -1090,6 +1093,9 @@ def test_stage_01_writes_source_contract_even_when_direct_stats_not_ready(tmp_pa
     stage_summary = json.loads((runtime_state_root / "stage_summary.json").read_text(encoding="utf-8"))
     assert stage_summary["audit_status"] == "passed"
     assert stage_summary["audit_blocking_reasons"] == []
+    assert stage_summary["representative_root_status"] == "passed"
+    assert stage_summary["representative_root_present"] is True
+    assert stage_summary["representative_root_contract_mode"] == "compatibility_view"
     assert stage_manifest["stage_01_pooled_threshold_derived_record_count"] == 16
     assert stage_manifest["stage_01_pooled_threshold_final_record_count"] == 32
     assert stage_manifest["stage_01_pooled_threshold_final_label_balanced"] is True
@@ -1143,6 +1149,136 @@ def test_stage_01_writes_source_contract_even_when_direct_stats_not_ready(tmp_pa
     assert (
         runtime_state_root / "package_staging" / "artifacts" / "stage_01_pooled_threshold_build_contract.json"
     ).exists()
+
+
+def test_stage_01_formal_success_allows_missing_representative_root_records(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：验证 representative root records 缺失时 stage 01 formal success 仍然成立。
+
+    Validate that stage 01 formal success remains valid when representative
+    root record files are absent but the canonical source pool remains
+    complete.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    stage_01 = _load_script_module("scripts/01_Paper_Full_Cuda.py", "stage_01_optional_root_records")
+    drive_root = tmp_path / "drive"
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("policy_path: content_np_geo_rescue\n", encoding="utf-8")
+
+    run_root = drive_root / "runs" / "stage_01"
+    log_root = drive_root / "logs" / "stage_01"
+    runtime_state_root = drive_root / "runtime_state" / "stage_01"
+    export_root = drive_root / "exports" / "stage_01"
+
+    monkeypatch.setattr(
+        stage_01,
+        "resolve_stage_roots",
+        lambda *_args, **_kwargs: {
+            "run_root": run_root,
+            "log_root": log_root,
+            "runtime_state_root": runtime_state_root,
+            "export_root": export_root,
+        },
+    )
+    monkeypatch.setattr(stage_01, "load_yaml_mapping", lambda _path: {"attestation": {}})
+    monkeypatch.setattr(stage_01, "detect_stage_01_preflight", lambda _path: {"ok": True})
+    monkeypatch.setattr(
+        stage_01,
+        "copy_prompt_snapshot",
+        lambda *_args, **_kwargs: {
+            "snapshot_path": str(runtime_state_root / "runtime_metadata" / "prompt_snapshot" / "prompt.txt"),
+            "source_path": "prompts/paper_small.txt",
+        },
+    )
+    monkeypatch.setattr(stage_01, "collect_git_summary", lambda _root: {"commit": "test"})
+    monkeypatch.setattr(stage_01, "collect_python_summary", lambda: {"version": "3.11"})
+    monkeypatch.setattr(stage_01, "collect_cuda_summary", lambda: {"available": False})
+    monkeypatch.setattr(stage_01, "collect_attestation_env_summary", lambda _cfg: {"enabled": True})
+    monkeypatch.setattr(stage_01, "collect_model_summary", lambda _cfg: {"model": "test"})
+    monkeypatch.setattr(stage_01, "collect_weight_summary", lambda _root, _cfg: {"weights": []})
+
+    def _fake_run_command_with_logs(**_kwargs: Any) -> Dict[str, Any]:
+        prompt_count = 2
+        _write_json(run_root / "records" / "calibration_record.json", {"status": "ok"})
+        _write_json(run_root / "records" / "evaluate_record.json", {"status": "ok"})
+        _write_json(run_root / "artifacts" / "thresholds" / "thresholds_artifact.json", {"threshold": 0.5})
+        _write_json(run_root / "artifacts" / "thresholds" / "threshold_metadata_artifact.json", {"meta": True})
+        _write_json(run_root / "artifacts" / "evaluation_report.json", {"status": "ok"})
+        _write_json(run_root / "artifacts" / "run_closure.json", {"status": "ok"})
+        _write_json(
+            run_root / "artifacts" / "workflow_summary.json",
+            {
+                "status": "ok",
+                "attestation_evidence_resolution": {"overall_status": "ok"},
+            },
+        )
+        _write_json(
+            run_root / "artifacts" / "parallel_attestation_statistics_input_contract.json",
+            _make_stage_01_source_pool_contract(run_root, prompt_count),
+        )
+        _write_json(
+            run_root / "artifacts" / "stage_01_pooled_threshold_build_contract.json",
+            _make_stage_01_pooled_threshold_contract(run_root, prompt_count),
+        )
+        return {"return_code": 0}
+
+    monkeypatch.setattr(stage_01, "run_command_with_logs", _fake_run_command_with_logs)
+    monkeypatch.setattr(
+        stage_01,
+        "finalize_stage_package",
+        lambda **_kwargs: {"package_path": str(export_root / "stage_01.zip"), "package_sha256": "sha256"},
+    )
+    monkeypatch.setattr(
+        stage_01,
+        "_run_stage_01_output_audit",
+        lambda **_kwargs: {
+            "audit_summary_path": run_root / "artifacts" / "stage_01_audit_summary.json",
+            "audit_summary": {
+                "overall_status": "passed",
+                "blocking_reasons": ["representative_root_optional.embed_record_missing_on_disk"],
+                "warnings": [],
+                "stage_02_ready": True,
+                "stage_03_ready": True,
+                "stage_04_ready": True,
+                "representative_root_status": "optional_missing",
+                "representative_root_present": False,
+                "representative_root_contract_mode": "compatibility_view",
+            },
+        },
+    )
+
+    summary = stage_01.run_stage_01(
+        drive_project_root=drive_root,
+        config_path=config_path,
+        notebook_name="01_Paper_Full_Cuda",
+        stage_run_id="stage01_optional_root",
+    )
+
+    stage_manifest = json.loads((run_root / "artifacts" / "stage_manifest.json").read_text(encoding="utf-8"))
+    stage_summary = json.loads((runtime_state_root / "stage_summary.json").read_text(encoding="utf-8"))
+
+    assert summary["status"] == "ok"
+    assert stage_manifest["stage_status"] == "ok"
+    assert stage_manifest["stage_01_root_contract_mode"] == "compatibility_view"
+    assert stage_manifest["stage_01_root_records_required"] is False
+    assert stage_manifest["stage_01_representative_root_present"] is False
+    assert stage_manifest["records"]["embed_record"]["exists"] is False
+    assert stage_manifest["records"]["detect_record"]["exists"] is False
+    assert stage_summary["status"] == "ok"
+    assert stage_summary["representative_root_status"] == "optional_missing"
+    assert stage_summary["representative_root_present"] is False
+    assert stage_summary["representative_root_contract_mode"] == "compatibility_view"
+    assert not (runtime_state_root / "package_staging" / "records" / "embed_record.json").exists()
+    assert not (runtime_state_root / "package_staging" / "records" / "detect_record.json").exists()
 
 
 def test_default_config_enables_stage_01_pool_and_stage_02_target_pair_count() -> None:
@@ -1332,7 +1468,8 @@ def test_stage_01_runner_failure_exposes_log_tails(
     assert diagnostics_summary["command_stderr_tail"][-1] == "nested failure detail"
     assert diagnostics_summary["preflight_ok"] is True
     assert diagnostics_summary["attestation_evidence_resolution"]["overall_status"] == "failed"
-    assert "embed_record" in diagnostics_summary["missing_required_artifacts"]
+    assert "embed_record" not in diagnostics_summary["missing_required_artifacts"]
+    assert "calibration_record" in diagnostics_summary["missing_required_artifacts"]
     assert diagnostics_summary["canonical_source_pool_summary"]["entry_count"] == 1
     assert diagnostics_manifest["package_role"] == "failure_diagnostics_package"
     assert diagnostics_manifest["package_discovery_scope"] == "excluded_from_formal_discovery"
@@ -1901,6 +2038,12 @@ def test_stage_02_direct_only_build_uses_source_records_and_writes_build_contrac
                 "evaluate_score_name": "event_attestation_score",
             }
         },
+    )
+    monkeypatch.setattr(
+        stage_02,
+        "ensure_attestation_env_bootstrap",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("stage 02 must not bootstrap attestation env")),
+        raising=False,
     )
 
     stage_02.run_stage_02(

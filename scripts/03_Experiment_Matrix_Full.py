@@ -28,7 +28,6 @@ from scripts.notebook_runtime_common import (
     collect_weight_summary,
     copy_file,
     copy_stage_manifest_snapshot,
-    ensure_attestation_env_bootstrap,
     ensure_directory,
     finalize_stage_package,
     load_yaml_mapping,
@@ -137,12 +136,6 @@ def run_stage_03(
 
     readonly_thresholds = _copy_readonly_thresholds(extracted_root, run_root)
     cfg_obj = load_yaml_mapping(config_path)
-    ensure_attestation_env_bootstrap(
-        cfg_obj,
-        drive_project_root,
-        allow_generate=False,
-        allow_missing=True,
-    )
     runtime_config_snapshot_path = runtime_state_root / "runtime_metadata" / "runtime_config_snapshot.yaml"
     runtime_cfg = _build_runtime_config(cfg_obj, run_root, readonly_thresholds["thresholds_artifact"])
     write_yaml_mapping(runtime_config_snapshot_path, runtime_cfg)

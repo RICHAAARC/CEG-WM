@@ -4,7 +4,7 @@ Module type: General module
 
 职责边界：
 1. 只读取 stage 01 已落盘的 formal outputs，不重跑 main/ watermark 机制。
-2. 显式接受 canonical source pool 为 source truth，同时保留 representative root records 的 strong compatibility contract。
+2. 显式接受 canonical source pool 为 source truth，同时将 representative root records 作为 compatibility 或 convenience view 处理。
 3. 以结构化 JSON 输出 stage 01 定义状态、strong compatibility 状态与 02/03/04 readiness。
 """
 
@@ -33,10 +33,11 @@ from scripts.notebook_runtime_common import (  # noqa: E402
 
 STAGE_NAME = "01_Paper_Full_Cuda"
 SOURCE_TRUTH = "canonical_source_pool"
-ROOT_CONTRACT_MODE = "strong_compatibility"
+ROOT_CONTRACT_MODE = "compatibility_view"
 REPRESENTATIVE_ROOT_ROLE = "representative_summary_view"
 PASS_STATUS = "passed"
 BLOCK_STATUS = "blocked"
+OPTIONAL_MISSING_STATUS = "optional_missing"
 SUCCESS_STATUS_TOKENS = {"ok", "success", "passed"}
 FORMAL_PACKAGE_SUCCESS_STATUS_TOKENS = {"generated", "ok", "success", "passed"}
 CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH = "artifacts/stage_01_canonical_source_pool/source_pool_manifest.json"
@@ -57,7 +58,6 @@ STAGE_04_REQUIRED_STAGE_01_FIELDS = (
     "formal_package_status",
     "attestation_evidence_status",
     "stage_01_canonical_source_pool_manifest_package_relative_path",
-    "stage_01_representative_root_records",
 )
 
 
@@ -522,12 +522,13 @@ def _check_strong_compatibility(
     package_members: Sequence[str],
     blocking_reasons: List[str],
     checked_paths: Dict[str, Dict[str, Any]],
-) -> Tuple[str, str]:
+) -> Tuple[str, str, bool]:
     """
-    功能：校验 representative root records 的 strong compatibility contract。 
+    功能：校验 representative root records 的 compatibility view contract。 
 
-    Validate the current strong-compatibility contract: canonical source pool is
-    source truth, while representative root records remain required outputs.
+    Validate the representative-root compatibility-view contract. The legacy
+    strong_compatibility status name is retained for backward-compatible audit
+    reporting, but root record files are optional compatibility outputs.
 
     Args:
         run_root: Stage run root.
@@ -538,11 +539,12 @@ def _check_strong_compatibility(
         checked_paths: Mutable checked-path mapping.
 
     Returns:
-        Tuple of strong-compatibility status and representative-root status.
+        Tuple of contract status, representative-root status, and whether the
+        representative root files are physically present.
     """
     expected_stage_fields = {
         "stage_01_root_contract_mode": ROOT_CONTRACT_MODE,
-        "stage_01_root_records_required": True,
+        "stage_01_root_records_required": False,
         "stage_01_source_truth": SOURCE_TRUTH,
         "stage_01_representative_root_role": REPRESENTATIVE_ROOT_ROLE,
     }
@@ -553,7 +555,7 @@ def _check_strong_compatibility(
     expected_manifest_fields = {
         "source_truth": SOURCE_TRUTH,
         "root_contract_mode": ROOT_CONTRACT_MODE,
-        "root_records_required": True,
+        "root_records_required": False,
         "representative_root_role": REPRESENTATIVE_ROOT_ROLE,
     }
     for field_name, expected_value in expected_manifest_fields.items():
@@ -566,29 +568,33 @@ def _check_strong_compatibility(
         "view_role": REPRESENTATIVE_ROOT_ROLE,
         "contract_mode": ROOT_CONTRACT_MODE,
         "source_truth": SOURCE_TRUTH,
-        "root_records_required": True,
+        "root_records_required": False,
     }
     for field_name, expected_value in expected_representative_fields.items():
         if representative_root_payload.get(field_name) != expected_value:
             _append_unique(blocking_reasons, f"strong_compatibility.representative_root_{field_name}_invalid")
 
+    representative_root_present = True
     for label, relative_path in ROOT_RECORD_RELATIVE_PATHS.items():
         root_path = run_root / relative_path
         exists_on_disk = root_path.exists() and root_path.is_file()
         _record_checked_path(checked_paths, f"root::{label}", root_path, exists=exists_on_disk)
         if not exists_on_disk:
-            _append_unique(blocking_reasons, f"strong_compatibility.{label}_missing_on_disk")
+            _append_unique(blocking_reasons, f"representative_root_optional.{label}_missing_on_disk")
+            representative_root_present = False
         if not _package_has_path(package_members, relative_path, checked_paths, f"package::root::{label}"):
-            _append_unique(blocking_reasons, f"strong_compatibility.{label}_not_packaged")
+            _append_unique(blocking_reasons, f"representative_root_optional.{label}_not_packaged")
+            representative_root_present = False
 
-    representative_root_status = PASS_STATUS
+    representative_root_status = PASS_STATUS if representative_root_present else OPTIONAL_MISSING_STATUS
     strong_compatibility_status = PASS_STATUS
     for reason_code in blocking_reasons:
         if reason_code.startswith("strong_compatibility."):
-            representative_root_status = BLOCK_STATUS
             strong_compatibility_status = BLOCK_STATUS
             break
-    return strong_compatibility_status, representative_root_status
+    if strong_compatibility_status != PASS_STATUS:
+        representative_root_status = BLOCK_STATUS
+    return strong_compatibility_status, representative_root_status, representative_root_present
 
 
 def _check_stage_02_readiness(
@@ -738,7 +744,6 @@ def _check_stage_04_readiness(
     package_policy_probe: Mapping[str, Any],
     attestation_evidence_status: str,
     canonical_source_pool_status: str,
-    representative_root_status: str,
     blocking_reasons: List[str],
 ) -> bool:
     """
@@ -752,7 +757,6 @@ def _check_stage_04_readiness(
         package_policy_probe: Formal package policy probe payload.
         attestation_evidence_status: Resolved attestation-evidence status token.
         canonical_source_pool_status: Canonical source-pool audit status.
-        representative_root_status: Representative-root audit status.
         blocking_reasons: Mutable blocking-reason list.
 
     Returns:
@@ -764,13 +768,7 @@ def _check_stage_04_readiness(
         _append_unique(blocking_reasons, "stage_04.attestation_evidence_status_not_success")
     if canonical_source_pool_status != PASS_STATUS:
         _append_unique(blocking_reasons, "stage_04.canonical_source_pool_not_ready")
-    if representative_root_status != PASS_STATUS:
-        _append_unique(blocking_reasons, "stage_04.representative_root_not_ready")
     for field_name in STAGE_04_REQUIRED_STAGE_01_FIELDS:
-        if field_name == "stage_01_representative_root_records":
-            if not isinstance(stage_manifest.get(field_name), dict) or not stage_manifest.get(field_name):
-                _append_unique(blocking_reasons, f"stage_04.{field_name}_missing")
-            continue
         if not stage_manifest.get(field_name):
             _append_unique(blocking_reasons, f"stage_04.{field_name}_missing")
 
@@ -876,7 +874,7 @@ def run_stage_01_output_audit(
         warnings,
         checked_paths,
     )
-    strong_compatibility_status, representative_root_status = _check_strong_compatibility(
+    strong_compatibility_status, representative_root_status, representative_root_present = _check_strong_compatibility(
         run_root,
         stage_manifest,
         canonical_source_pool_manifest,
@@ -906,7 +904,6 @@ def run_stage_01_output_audit(
         package_policy_probe,
         attestation_evidence_status,
         canonical_source_pool_status,
-        representative_root_status,
         blocking_reasons,
     )
 
@@ -926,16 +923,19 @@ def run_stage_01_output_audit(
         "stage_run_id": str(stage_manifest.get("stage_run_id", workflow_summary.get("stage_run_id", "<absent>"))),
         "source_truth": SOURCE_TRUTH,
         "root_contract_mode": ROOT_CONTRACT_MODE,
-        "root_records_required": True,
+        "root_records_required": False,
         "overall_status": overall_status,
         "definition_status": definition_status,
         "strong_compatibility_status": strong_compatibility_status,
+        "representative_root_contract_status": strong_compatibility_status,
+        "representative_root_contract_mode": ROOT_CONTRACT_MODE,
         "stage_02_ready": stage_02_ready,
         "stage_03_ready": stage_03_ready,
         "stage_04_ready": stage_04_ready,
         "canonical_source_pool_status": canonical_source_pool_status,
         "attestation_evidence_status": attestation_evidence_status,
         "representative_root_status": representative_root_status,
+        "representative_root_present": representative_root_present,
         "formal_package_policy_status": formal_package_policy_status,
         "blocking_reasons": blocking_reasons,
         "warnings": warnings,

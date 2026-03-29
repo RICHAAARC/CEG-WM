@@ -525,6 +525,12 @@ def test_stage_03_script_syncs_auxiliary_runtime_evidence_to_workflow_summary_an
     monkeypatch.setattr(stage_03_module, "collect_model_summary", lambda cfg: {})
     monkeypatch.setattr(stage_03_module, "collect_weight_summary", lambda repo_root, cfg: {})
     monkeypatch.setattr(stage_03_module, "collect_file_index", lambda root, mapping: {})
+    monkeypatch.setattr(
+        stage_03_module,
+        "ensure_attestation_env_bootstrap",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("stage 03 must not bootstrap attestation env")),
+        raising=False,
+    )
     monkeypatch.setattr(stage_03_module, "finalize_stage_package", lambda **kwargs: {"package_path": "package.zip", "package_sha256": "sha256_pkg"})
 
     summary = stage_03_module.run_stage_03(

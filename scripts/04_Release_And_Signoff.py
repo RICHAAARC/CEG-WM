@@ -421,8 +421,6 @@ def _collect_required_stage_files(
     """
     if stage_key == "stage_01":
         required_map = {
-            "embed_record": ["records/embed_record.json"],
-            "detect_record": ["records/detect_record.json"],
             "calibration_record": ["records/calibration_record.json"],
             "evaluate_record": ["records/evaluate_record.json"],
             "thresholds_artifact": ["artifacts/thresholds/thresholds_artifact.json"],
@@ -762,6 +760,7 @@ def _validate_stage_01_formal_closure(
     workflow_summary = cast(Dict[str, Any], stage_01_payloads.get("workflow_summary", {}))
     canonical_source_pool_manifest = cast(Dict[str, Any], stage_01_payloads.get("canonical_source_pool_manifest", {}))
     stage_01_files = required_files.get("stage_01", {})
+    extracted_root = cast(Optional[Path], stage_01_info.get("extracted_root"))
 
     representative_root_records_raw = stage_manifest.get("stage_01_representative_root_records")
     if not isinstance(representative_root_records_raw, dict) or not representative_root_records_raw:
@@ -783,8 +782,18 @@ def _validate_stage_01_formal_closure(
     )
     canonical_source_pool_manifest_path = stage_01_files.get("canonical_source_pool_manifest")
     canonical_source_pool_present = bool(canonical_source_pool_manifest)
-    representative_root_present = bool(representative_root_records)
+    representative_root_present = bool(
+        isinstance(extracted_root, Path)
+        and all(
+            (extracted_root / relative_path).exists() and (extracted_root / relative_path).is_file()
+            for relative_path in ["records/embed_record.json", "records/detect_record.json"]
+        )
+    )
     representative_root_view_role = representative_root_records.get("view_role")
+    representative_root_contract_mode = stage_manifest.get(
+        "stage_01_root_contract_mode",
+        canonical_source_pool_manifest.get("root_contract_mode"),
+    )
 
     if not _status_matches(formal_stage_status, sorted(FORMAL_SUCCESS_STATUS_TOKENS)):
         _append_blocking_reason(
@@ -857,20 +866,6 @@ def _validate_stage_01_formal_closure(
             },
         )
 
-    if not representative_root_present or not isinstance(representative_root_view_role, str) or not representative_root_view_role.strip():
-        _append_blocking_reason(
-            blocking_reasons,
-            source="stage_01",
-            reason_code="stage_01.representative_root_view_missing",
-            rule="stage 01 formal package must publish representative_root_records as a summary view in addition to the canonical source pool",
-            impact="stage 04 loses the representative root pointer needed for audit navigation",
-            fix="re-export stage 01 and ensure representative_root_records is preserved in stage_manifest or canonical source pool manifest",
-            evidence={
-                "representative_root_records": representative_root_records,
-                "canonical_source_pool_present": canonical_source_pool_present,
-            },
-        )
-
     return {
         "status": FORMAL_SIGNOFF_PASS_STATUS if len([reason for reason in blocking_reasons if reason.get("source") == "stage_01"]) == 0 else FORMAL_SIGNOFF_BLOCK_STATUS,
         "formal_stage_status": formal_stage_status,
@@ -880,7 +875,11 @@ def _validate_stage_01_formal_closure(
         "canonical_source_pool_status": FORMAL_SIGNOFF_PASS_STATUS if canonical_source_pool_present else FORMAL_SIGNOFF_BLOCK_STATUS,
         "canonical_source_pool_manifest_path": canonical_source_pool_manifest_path or "<absent>",
         "canonical_source_pool_entry_count": canonical_source_pool_manifest.get("entry_count"),
-        "representative_root_view_status": FORMAL_SIGNOFF_PASS_STATUS if representative_root_present else FORMAL_SIGNOFF_BLOCK_STATUS,
+        "representative_root_view_status": FORMAL_SIGNOFF_PASS_STATUS if representative_root_present else "optional_missing",
+        "representative_root_present": representative_root_present,
+        "representative_root_contract_mode": representative_root_contract_mode,
+        "representative_root_required": False,
+        "representative_root_view_role": representative_root_view_role if isinstance(representative_root_view_role, str) and representative_root_view_role.strip() else "<absent>",
         "representative_root_records": representative_root_records,
     }
 

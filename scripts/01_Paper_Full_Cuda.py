@@ -68,7 +68,7 @@ CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH = "artifacts/stage_01_canonical_sou
 FAILURE_DIAGNOSTICS_SUMMARY_FILE_NAME = "failure_diagnostics_summary.json"
 FAILURE_DIAGNOSTICS_MANIFEST_FILE_NAME = "failure_diagnostics_manifest.json"
 FAILURE_DIAGNOSTICS_INDEX_FILE_NAME = "failure_diagnostics_index.json"
-STAGE_01_ROOT_CONTRACT_MODE = "strong_compatibility"
+STAGE_01_ROOT_CONTRACT_MODE = "compatibility_view"
 STAGE_01_SOURCE_TRUTH = "canonical_source_pool"
 STAGE_01_REPRESENTATIVE_ROOT_ROLE = "representative_summary_view"
 AUDIT_PASS_STATUS = "passed"
@@ -173,11 +173,9 @@ def _run_stage_01_output_audit(
 
 def _required_stage_outputs(run_root: Path) -> Dict[str, Path]:
     # canonical source pool is the authoritative source truth. the root
-    # embed/detect records remain required strong-compatibility exports for the
-    # current formal workflow and downstream package consumers.
+    # embed/detect records remain optional compatibility views and must not be
+    # treated as formal hard dependencies.
     return {
-        "embed_record": run_root / "records" / "embed_record.json",
-        "detect_record": run_root / "records" / "detect_record.json",
         "calibration_record": run_root / "records" / "calibration_record.json",
         "evaluate_record": run_root / "records" / "evaluate_record.json",
         "thresholds_artifact": run_root / "artifacts" / "thresholds" / "thresholds_artifact.json",
@@ -276,8 +274,6 @@ def _package_stage_outputs(
 ) -> Path:
     package_root = ensure_directory(runtime_state_root / "package_staging")
     static_relative_paths = [
-        "records/embed_record.json",
-        "records/detect_record.json",
         "records/calibration_record.json",
         "records/evaluate_record.json",
         "artifacts/thresholds/thresholds_artifact.json",
@@ -300,6 +296,11 @@ def _package_stage_outputs(
         stage_relative_copy(source_path, package_root, relative_path)
 
     copied_paths: set[str] = set(static_relative_paths)
+    for relative_path in ["records/embed_record.json", "records/detect_record.json"]:
+        source_path = run_root / relative_path
+        if source_path.exists() and source_path.is_file():
+            stage_relative_copy(source_path, package_root, relative_path)
+            copied_paths.add(relative_path)
 
     def _copy_dynamic_package_path(source_path_value: Any, package_relative_path: Any, label: str) -> None:
         if not isinstance(source_path_value, str) or not source_path_value:
@@ -858,12 +859,16 @@ def _build_failure_stage_manifest(
         "stage_01_canonical_source_pool_manifest_package_relative_path": canonical_source_pool_payload.get("manifest_package_relative_path"),
         "stage_01_canonical_source_pool_entry_count": canonical_source_pool_payload.get("entry_count"),
         "stage_01_root_contract_mode": STAGE_01_ROOT_CONTRACT_MODE,
-        "stage_01_root_records_required": True,
+        "stage_01_root_records_required": False,
         "stage_01_source_truth": STAGE_01_SOURCE_TRUTH,
         "stage_01_representative_root_records": representative_root_records,
         "stage_01_representative_root_role": representative_root_records.get(
             "view_role",
             STAGE_01_REPRESENTATIVE_ROOT_ROLE,
+        ),
+        "stage_01_representative_root_present": all(
+            (run_root / relative_path).exists() and (run_root / relative_path).is_file()
+            for relative_path in ["records/embed_record.json", "records/detect_record.json"]
         ),
         "stage_01_representative_root_prompt_index": representative_root_records.get("source_prompt_index"),
         "stage_01_representative_root_source_entry_package_relative_path": representative_root_records.get(
@@ -1028,14 +1033,18 @@ def run_stage_01(
         representative_root_records = canonical_source_pool_payload.get("representative_root_records", {})
         if not isinstance(representative_root_records, dict):
             representative_root_records = {}
+        representative_root_present = all(
+            (run_root / relative_path).exists() and (run_root / relative_path).is_file()
+            for relative_path in ["records/embed_record.json", "records/detect_record.json"]
+        )
         attestation_evidence_fields = _resolve_attestation_evidence_manifest_fields(
             workflow_summary_payload,
             canonical_source_pool_payload,
         )
 
         # canonical source pool remains the only source truth. representative
-        # root records stay required as intentional strong-compatibility outputs
-        # for the current formal workflow and downstream stages.
+        # root records stay visible as compatibility views but must not gate the
+        # formal success path.
         stage_manifest: Dict[str, Any] = {
             "stage_name": STAGE_01_NAME,
             "stage_run_id": stage_run_id,
@@ -1053,8 +1062,8 @@ def run_stage_01(
             "export_root": normalize_path_value(export_root),
             "exports_root": normalize_path_value(export_root),
             "records": collect_file_index(run_root, {
-                "embed_record": outputs["embed_record"],
-                "detect_record": outputs["detect_record"],
+                "embed_record": run_root / "records" / "embed_record.json",
+                "detect_record": run_root / "records" / "detect_record.json",
                 "calibration_record": outputs["calibration_record"],
                 "evaluate_record": outputs["evaluate_record"],
             }),
@@ -1079,13 +1088,14 @@ def run_stage_01(
             "stage_01_canonical_source_pool_prompt_file": canonical_source_pool_payload.get("prompt_file"),
             "stage_01_canonical_source_pool_prompt_file_path": canonical_source_pool_payload.get("prompt_file"),
             "stage_01_root_contract_mode": STAGE_01_ROOT_CONTRACT_MODE,
-            "stage_01_root_records_required": True,
+            "stage_01_root_records_required": False,
             "stage_01_source_truth": STAGE_01_SOURCE_TRUTH,
             "stage_01_representative_root_records": representative_root_records,
             "stage_01_representative_root_role": representative_root_records.get(
                 "view_role",
                 STAGE_01_REPRESENTATIVE_ROOT_ROLE,
             ),
+            "stage_01_representative_root_present": representative_root_present,
             "stage_01_representative_root_prompt_index": representative_root_records.get("source_prompt_index"),
             "stage_01_representative_root_source_entry_package_relative_path": representative_root_records.get(
                 "source_entry_package_relative_path"
@@ -1201,6 +1211,13 @@ def run_stage_01(
             "audit_summary_path": normalize_path_value(audit_summary_path),
             "audit_blocking_reasons": audit_blocking_reasons,
             "audit_warnings": audit_warnings,
+            "representative_root_status": str(
+                audit_summary.get("representative_root_status", "<absent>")
+            ),
+            "representative_root_present": bool(audit_summary.get("representative_root_present", False)),
+            "representative_root_contract_mode": str(
+                audit_summary.get("representative_root_contract_mode", STAGE_01_ROOT_CONTRACT_MODE)
+            ),
             "failure_reason": None if audit_status == AUDIT_PASS_STATUS else "stage_01_output_audit_failed",
             "status": "ok" if audit_status == AUDIT_PASS_STATUS else "failed",
         }
@@ -1310,6 +1327,15 @@ def run_stage_01(
             "audit_status": str(audit_summary_payload.get("overall_status", "<absent>")) if audit_summary_payload else "<absent>",
             "audit_summary_path": normalize_path_value(audit_summary_path) if audit_summary_path.exists() else "<absent>",
             "audit_blocking_reasons": audit_blocking_reasons,
+            "representative_root_status": str(
+                audit_summary_payload.get("representative_root_status", "<absent>")
+            ) if audit_summary_payload else "<absent>",
+            "representative_root_present": bool(
+                audit_summary_payload.get("representative_root_present", False)
+            ) if audit_summary_payload else False,
+            "representative_root_contract_mode": str(
+                audit_summary_payload.get("representative_root_contract_mode", STAGE_01_ROOT_CONTRACT_MODE)
+            ) if audit_summary_payload else STAGE_01_ROOT_CONTRACT_MODE,
             "failure_reason": failure_reason,
             "status": "failed",
         }

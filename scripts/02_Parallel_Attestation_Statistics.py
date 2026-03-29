@@ -31,7 +31,6 @@ from scripts.notebook_runtime_common import (
     collect_weight_summary,
     compute_file_sha256,
     copy_stage_manifest_snapshot,
-    ensure_attestation_env_bootstrap,
     ensure_directory,
     finalize_stage_package,
     load_yaml_mapping,
@@ -644,12 +643,6 @@ def run_stage_02(
     )
 
     cfg_obj = load_yaml_mapping(config_path)
-    ensure_attestation_env_bootstrap(
-        cfg_obj,
-        drive_project_root,
-        allow_generate=False,
-        allow_missing=True,
-    )
     build_cfg = _resolve_parallel_attestation_statistics_build_config(cfg_obj)
     build_contract_path, build_contract_payload = _build_parallel_attestation_statistics_inputs(
         extracted_root=extracted_root,

@@ -195,6 +195,7 @@ def _build_stage_01_package(
     workflow_status: str = "ok",
     attestation_evidence_status: str = "ok",
     formal_package_status: str = "generated",
+    include_root_records: bool = True,
 ) -> Dict[str, Any]:
     """
     功能：构造最小 stage 01 package。 
@@ -213,6 +214,9 @@ def _build_stage_01_package(
     canonical_source_pool_manifest_path = "/drive/runs/01/artifacts/stage_01_canonical_source_pool/source_pool_manifest.json"
     representative_root_records = {
         "view_role": "representative_summary_view",
+        "contract_mode": "compatibility_view",
+        "source_truth": "canonical_source_pool",
+        "root_records_required": False,
         "source_prompt_index": 0,
         "source_entry_package_relative_path": "artifacts/stage_01_canonical_source_pool/entries/000_source_entry.json",
     }
@@ -254,11 +258,12 @@ def _build_stage_01_package(
             "artifacts/stage_01_canonical_source_pool/source_pool_manifest.json"
         ),
         "stage_01_canonical_source_pool_entry_count": 1,
+        "stage_01_root_contract_mode": "compatibility_view",
+        "stage_01_root_records_required": False,
+        "stage_01_source_truth": "canonical_source_pool",
         "stage_01_representative_root_records": representative_root_records,
     }
     files = {
-        "records/embed_record.json": {"record_type": "embed"},
-        "records/detect_record.json": {"record_type": "detect"},
         "records/calibration_record.json": {"record_type": "calibration"},
         "records/evaluate_record.json": {"record_type": "evaluate"},
         "artifacts/thresholds/thresholds_artifact.json": {"threshold_value": 0.5, "thresholds_digest": "thr01"},
@@ -293,6 +298,10 @@ def _build_stage_01_package(
         },
         "artifacts/stage_01_canonical_source_pool/source_pool_manifest.json": {
             "artifact_role": "canonical_source_pool_root",
+            "source_truth": "canonical_source_pool",
+            "root_contract_mode": "compatibility_view",
+            "root_records_required": False,
+            "representative_root_role": "representative_summary_view",
             "prompt_count": 1,
             "entry_count": 1,
             "entries_package_relative_root": "artifacts/stage_01_canonical_source_pool/entries",
@@ -300,6 +309,9 @@ def _build_stage_01_package(
         },
         "runtime_metadata/runtime_config_snapshot.yaml": "policy_path: content_np_geo_rescue\n",
     }
+    if include_root_records:
+        files["records/embed_record.json"] = {"record_type": "embed"}
+        files["records/detect_record.json"] = {"record_type": "detect"}
     package_path, package_manifest = _create_stage_package(
         base_dir,
         stage_name="01_Paper_Full_Cuda",
@@ -788,6 +800,51 @@ def test_stage_04_allows_freeze_when_all_required_stages_align(tmp_path: Path) -
     assert summary["signoff_status"] == "passed"
     assert summary["release_status"] == "passed"
     assert summary["paper_closure_status"] == "passed"
+
+
+def test_stage_04_does_not_require_representative_root_records(tmp_path: Path) -> None:
+    """
+    功能：验证 stage 04 不再把 representative root records 当作 formal hard dependency。
+
+    Verify that stage 04 no longer treats representative root record files as a
+    formal hard dependency when the canonical source pool, attestation status,
+    and lineage remain complete.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+
+    Returns:
+        None.
+    """
+    module = _load_stage_04_module()
+    drive_project_root = tmp_path / "drive_project_root"
+    stage_01_info = _build_stage_01_package(
+        tmp_path / "case_optional_root",
+        include_root_records=False,
+    )
+
+    summary = module.run_stage_04(
+        drive_project_root=drive_project_root,
+        stage_01_package_path=stage_01_info["package_path"],
+        stage_02_package_path=None,
+        stage_03_package_path=None,
+        config_path=DEFAULT_CONFIG_PATH,
+        notebook_name="04_Release_And_Signoff",
+        stage_run_id="stage04_optional_root",
+        require_stage_02=False,
+        require_stage_03=False,
+    )
+
+    signoff_report = json.loads(Path(summary["signoff_report_path"]).read_text(encoding="utf-8"))
+    stage_01_summary = signoff_report["checked_packages_summary"]["stage_01"]["formal_gate_summary"]
+
+    assert signoff_report["decision"] == "ALLOW_FREEZE"
+    assert stage_01_summary["status"] == "passed"
+    assert stage_01_summary["canonical_source_pool_status"] == "passed"
+    assert stage_01_summary["attestation_evidence_status"] == "ok"
+    assert stage_01_summary["representative_root_view_status"] == "optional_missing"
+    assert stage_01_summary["representative_root_present"] is False
+    assert stage_01_summary["representative_root_contract_mode"] == "compatibility_view"
 
 
 def test_stage_04_rejects_diagnostics_package_as_formal_input(tmp_path: Path) -> None:

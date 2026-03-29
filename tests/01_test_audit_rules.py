@@ -123,9 +123,9 @@ def _build_stage_01_audit_fixture(
 
     representative_root_records = {
         "view_role": "representative_summary_view",
-        "contract_mode": "strong_compatibility",
+        "contract_mode": "compatibility_view",
         "source_truth": "canonical_source_pool",
-        "root_records_required": True,
+        "root_records_required": False,
         "root_embed_record_package_relative_path": "records/embed_record.json",
         "root_detect_record_package_relative_path": "records/detect_record.json",
         "source_prompt_index": 0,
@@ -180,8 +180,8 @@ def _build_stage_01_audit_fixture(
         "stage_01_canonical_source_pool_manifest_path": (run_root / CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH).as_posix(),
         "stage_01_canonical_source_pool_manifest_package_relative_path": CANONICAL_SOURCE_POOL_MANIFEST_RELATIVE_PATH,
         "stage_01_canonical_source_pool_entry_count": 1,
-        "stage_01_root_contract_mode": "strong_compatibility",
-        "stage_01_root_records_required": True,
+        "stage_01_root_contract_mode": "compatibility_view",
+        "stage_01_root_records_required": False,
         "stage_01_source_truth": "canonical_source_pool",
         "stage_01_representative_root_role": "representative_summary_view",
         "stage_01_representative_root_records": representative_root_records,
@@ -203,7 +203,7 @@ def _build_stage_01_audit_fixture(
         "canonical_source_pool_entry_count": 1,
         "representative_root_records": representative_root_records,
         "attestation_evidence_resolution": attestation_resolution,
-        "required_artifacts_ok": include_root_records and include_stage_02_contract,
+        "required_artifacts_ok": include_stage_02_contract,
     }
     canonical_source_entry = {
         "artifact_type": "stage_01_canonical_source_entry",
@@ -254,8 +254,8 @@ def _build_stage_01_audit_fixture(
         "stage_name": "01_Paper_Full_Cuda",
         "stage_run_id": stage_run_id,
         "source_truth": "canonical_source_pool",
-        "root_contract_mode": "strong_compatibility",
-        "root_records_required": True,
+        "root_contract_mode": "compatibility_view",
+        "root_records_required": False,
         "representative_root_role": "representative_summary_view",
         "prompt_file": "prompts/paper_small.txt",
         "canonical_source_pool_root_path": (run_root / "artifacts" / "stage_01_canonical_source_pool").as_posix(),
@@ -387,11 +387,11 @@ def _build_stage_01_audit_fixture(
     }
 
 
-def test_strong_compatibility_contract_passes(tmp_path: Path) -> None:
+def test_compatibility_view_contract_passes(tmp_path: Path) -> None:
     """
-    功能：验证 strong_compatibility contract 正常满足时 audit 通过。 
+    功能：验证 compatibility view contract 正常满足时 audit 通过。 
 
-    Verify that the audit passes when the strong-compatibility contract and
+    Verify that the audit passes when the compatibility-view contract and
     downstream readiness checks all succeed.
 
     Args:
@@ -414,21 +414,24 @@ def test_strong_compatibility_contract_passes(tmp_path: Path) -> None:
     assert summary["overall_status"] == "passed"
     assert summary["definition_status"] == "passed"
     assert summary["strong_compatibility_status"] == "passed"
+    assert summary["representative_root_contract_status"] == "passed"
+    assert summary["representative_root_contract_mode"] == "compatibility_view"
     assert summary["stage_02_ready"] is True
     assert summary["stage_03_ready"] is True
     assert summary["stage_04_ready"] is True
     assert summary["formal_package_policy_status"] == "passed"
     assert summary["canonical_source_pool_status"] == "passed"
     assert summary["representative_root_status"] == "passed"
+    assert summary["representative_root_present"] is True
     assert summary["blocking_reasons"] == []
 
 
-def test_root_records_missing_hard_fail_even_when_canonical_source_pool_exists(tmp_path: Path) -> None:
+def test_root_records_missing_is_optional_when_canonical_source_pool_exists(tmp_path: Path) -> None:
     """
-    功能：验证 root records 缺失时必须 hard fail。 
+    功能：验证 root records 缺失时仅记为 optional compatibility view。 
 
-    Verify that missing root records cause a hard failure even when the
-    canonical source pool remains complete.
+    Verify that missing root records remain an optional compatibility view even
+    when the canonical source pool remains complete.
 
     Args:
         tmp_path: Pytest temporary directory.
@@ -447,9 +450,14 @@ def test_root_records_missing_hard_fail_even_when_canonical_source_pool_exists(t
         output_path=fixture["audit_output_path"],
     )
 
-    assert summary["overall_status"] == "blocked"
-    assert summary["strong_compatibility_status"] == "blocked"
-    assert any(reason.startswith("strong_compatibility.") for reason in summary["blocking_reasons"])
+    assert summary["overall_status"] == "passed"
+    assert summary["strong_compatibility_status"] == "passed"
+    assert summary["representative_root_contract_status"] == "passed"
+    assert summary["representative_root_contract_mode"] == "compatibility_view"
+    assert summary["representative_root_status"] == "optional_missing"
+    assert summary["representative_root_present"] is False
+    assert summary["stage_04_ready"] is True
+    assert any(reason.startswith("representative_root_optional.") for reason in summary["blocking_reasons"])
 
 
 def test_stage_02_contract_missing_blocks_readiness(tmp_path: Path) -> None:
