@@ -45,6 +45,10 @@ class SubspacePlanEvidence:
     audit: Optional[Dict[str, Any]] = None
     plan_stats: Optional[Dict[str, Any]] = None
     plan_failure_reason: Optional[str] = None
+    planner_failure_stage: Optional[str] = None
+    planner_failure_detail_code: Optional[str] = None
+    planner_failure_detail_message: Optional[str] = None
+    planner_diagnostic_context: Optional[Dict[str, Any]] = None
     
     def __post_init__(self) -> None:
         # 校验 status 值。
@@ -109,7 +113,11 @@ class SubspacePlanEvidence:
             "plan_digest": self.plan_digest,
             "audit": self.audit,
             "plan_stats": self.plan_stats,
-            "plan_failure_reason": self.plan_failure_reason
+            "plan_failure_reason": self.plan_failure_reason,
+            "planner_failure_stage": self.planner_failure_stage,
+            "planner_failure_detail_code": self.planner_failure_detail_code,
+            "planner_failure_detail_message": self.planner_failure_detail_message,
+            "planner_diagnostic_context": self.planner_diagnostic_context,
         }
 
 

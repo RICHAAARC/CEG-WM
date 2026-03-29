@@ -39,6 +39,67 @@ ALLOWED_PLANNER_FAILURE_REASONS = {
     "unknown"
 }
 
+PLANNER_DIAGNOSTIC_VERSION = "v1"
+
+
+def _safe_list_preview(values: Any, limit: int = 8) -> List[int]:
+    preview: List[int] = []
+    if not isinstance(values, list):
+        return preview
+    for item in values[:limit]:
+        if isinstance(item, int):
+            preview.append(int(item))
+    return preview
+
+
+def _safe_matrix_summary(matrix: Any) -> Dict[str, Any]:
+    if matrix is None:
+        return {
+            "present": False,
+            "shape": None,
+            "empty": None,
+            "has_nonfinite": None,
+            "rank_2": None,
+        }
+
+    try:
+        matrix_np = np.asarray(matrix, dtype=np.float64)
+    except Exception as exc:
+        return {
+            "present": True,
+            "shape": None,
+            "empty": None,
+            "has_nonfinite": None,
+            "rank_2": None,
+            "conversion_error": f"{type(exc).__name__}: {exc}",
+        }
+
+    has_nonfinite = False
+    if matrix_np.size > 0:
+        try:
+            has_nonfinite = bool(not np.isfinite(matrix_np).all())
+        except Exception:
+            has_nonfinite = False
+
+    summary: Dict[str, Any] = {
+        "present": True,
+        "shape": [int(value) for value in matrix_np.shape],
+        "empty": bool(matrix_np.size == 0),
+        "has_nonfinite": has_nonfinite,
+        "rank_2": bool(matrix_np.ndim == 2),
+    }
+    if matrix_np.ndim >= 1:
+        summary["row_count"] = int(matrix_np.shape[0])
+    if matrix_np.ndim >= 2:
+        summary["col_count"] = int(matrix_np.shape[1])
+    return summary
+
+
+def _safe_dict_copy(value: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(value, dict):
+        return None
+    return dict(value)
+
 
 def _stable_svd(matrix: Any) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     matrix_np = np.asarray(matrix, dtype=np.float64)
@@ -704,6 +765,218 @@ class SubspacePlannerImpl:
         self.impl_version = impl_version
         self.impl_digest = impl_digest
 
+    def _build_planner_diagnostic_context(
+        self,
+        mask_digest: Optional[str],
+        inputs: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        mask_summary = inputs.get("mask_summary") if isinstance(inputs, dict) and isinstance(inputs.get("mask_summary"), dict) else {}
+        trace_signature = inputs.get("trace_signature") if isinstance(inputs, dict) and isinstance(inputs.get("trace_signature"), dict) else {}
+        routing_digest = inputs.get("routing_digest") if isinstance(inputs, dict) and isinstance(inputs.get("routing_digest"), str) else None
+        mask_summary_digest = digests.canonical_sha256(mask_summary) if mask_summary else None
+        trajectory_step_count = None
+        if isinstance(trace_signature.get("num_inference_steps"), int):
+            trajectory_step_count = int(trace_signature["num_inference_steps"])
+
+        return {
+            "diagnostic_version": PLANNER_DIAGNOSTIC_VERSION,
+            "mask_digest": mask_digest,
+            "mask_summary_digest": mask_summary_digest,
+            "routing_digest": routing_digest,
+            "rank": None,
+            "feature_dim": None,
+            "sample_count": None,
+            "jvp_probe_count": None,
+            "trajectory_step_count": trajectory_step_count,
+            "lf_route_count": None,
+            "hf_route_count": None,
+            "projection_matrix_shape": None,
+            "trajectory_feature_matrix_shape": None,
+            "jvp_matrix_shape": None,
+            "has_nonfinite": False,
+            "has_empty_partition": False,
+            "has_empty_matrix": False,
+            "has_dimension_mismatch": False,
+            "input_summary": {
+                "trace_signature": {
+                    "num_inference_steps": trace_signature.get("num_inference_steps"),
+                    "guidance_scale": trace_signature.get("guidance_scale"),
+                    "height": trace_signature.get("height"),
+                    "width": trace_signature.get("width"),
+                },
+                "routing_digest": routing_digest,
+                "mask_summary_keys": sorted(mask_summary.keys()),
+            },
+            "stages": [],
+        }
+
+    def _bind_planner_param_snapshot(
+        self,
+        planner_diagnostic_context: Optional[Dict[str, Any]],
+        planner_params: _PlannerParams,
+    ) -> None:
+        if not isinstance(planner_diagnostic_context, dict):
+            return
+        planner_diagnostic_context["rank"] = int(planner_params.rank)
+        planner_diagnostic_context["feature_dim"] = int(planner_params.feature_dim)
+        planner_diagnostic_context["sample_count"] = int(planner_params.sample_count)
+        planner_diagnostic_context["jvp_probe_count"] = int(planner_params.jacobian_probe_count)
+        if not isinstance(planner_diagnostic_context.get("trajectory_step_count"), int):
+            planner_diagnostic_context["trajectory_step_count"] = int(planner_params.num_inference_steps)
+
+    def _update_planner_diagnostic_snapshot(
+        self,
+        planner_diagnostic_context: Optional[Dict[str, Any]],
+        stage_payload: Dict[str, Any],
+    ) -> None:
+        if not isinstance(planner_diagnostic_context, dict):
+            return
+        for field_name in [
+            "rank",
+            "feature_dim",
+            "sample_count",
+            "jvp_probe_count",
+            "trajectory_step_count",
+            "lf_route_count",
+            "hf_route_count",
+            "mask_summary_digest",
+            "routing_digest",
+            "projection_matrix_shape",
+            "trajectory_feature_matrix_shape",
+            "jvp_matrix_shape",
+        ]:
+            if field_name in stage_payload and stage_payload[field_name] is not None:
+                planner_diagnostic_context[field_name] = stage_payload[field_name]
+
+        flag_fields = {
+            "has_nonfinite": [
+                "trajectory_feature_matrix_has_nonfinite",
+                "jvp_matrix_has_nonfinite",
+                "lf_routed_matrix_has_nonfinite",
+                "hf_routed_matrix_has_nonfinite",
+                "lf_projection_matrix_has_nonfinite",
+                "hf_projection_matrix_has_nonfinite",
+            ],
+            "has_empty_partition": [
+                "lf_route_empty",
+                "hf_route_empty",
+            ],
+            "has_empty_matrix": [
+                "trajectory_feature_matrix_empty",
+                "jvp_matrix_empty",
+                "lf_routed_matrix_empty",
+                "hf_routed_matrix_empty",
+                "lf_projection_matrix_empty",
+                "hf_projection_matrix_empty",
+            ],
+            "has_dimension_mismatch": [
+                "trajectory_jvp_feature_dim_mismatch",
+            ],
+        }
+        for aggregate_field, source_fields in flag_fields.items():
+            current_value = bool(planner_diagnostic_context.get(aggregate_field, False))
+            new_value = any(bool(stage_payload.get(field_name, False)) for field_name in source_fields)
+            planner_diagnostic_context[aggregate_field] = bool(current_value or new_value)
+
+    def _append_planner_stage_entry(
+        self,
+        planner_diagnostic_context: Optional[Dict[str, Any]],
+        stage_name: str,
+        ok: bool,
+        stage_payload: Optional[Dict[str, Any]] = None,
+        exc: Optional[BaseException] = None,
+        failure_reason_code: Optional[str] = None,
+    ) -> None:
+        if not isinstance(planner_diagnostic_context, dict):
+            return
+        payload = dict(stage_payload) if isinstance(stage_payload, dict) else {}
+        stage_entry: Dict[str, Any] = {
+            "stage_name": stage_name,
+            "ok": bool(ok),
+            "exception_type": type(exc).__name__ if exc is not None else None,
+            "exception_message": str(exc) if exc is not None else None,
+            "failure_reason_code": failure_reason_code,
+        }
+        stage_entry.update(payload)
+        stages = planner_diagnostic_context.setdefault("stages", [])
+        if isinstance(stages, list):
+            stages.append(stage_entry)
+        self._update_planner_diagnostic_snapshot(planner_diagnostic_context, stage_entry)
+        if not ok:
+            planner_diagnostic_context["planner_failure_stage"] = stage_name
+            planner_diagnostic_context["planner_failure_detail_code"] = failure_reason_code
+            planner_diagnostic_context["planner_failure_detail_message"] = stage_entry.get("exception_message")
+
+    def _derive_planner_failure_detail_code(
+        self,
+        stage_name: str,
+        exc: BaseException,
+        stage_payload: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        payload = stage_payload if isinstance(stage_payload, dict) else {}
+        message = str(exc).lower()
+
+        if "planner inputs missing" in message:
+            return "planner_input_absent"
+        if "requires jvp_operator with runtime-validated outputs" in message:
+            return "runtime_jvp_operator_invalid"
+        if "requires jvp_operator" in message:
+            return "runtime_jvp_operator_required"
+
+        if stage_name == "routed_feature_selection_partition_build":
+            if bool(payload.get("lf_route_empty", False)):
+                return "lf_route_empty"
+            if bool(payload.get("hf_route_empty", False)):
+                return "hf_route_empty"
+            if bool(payload.get("trajectory_feature_matrix_empty", False)):
+                return "empty_conditioned_feature_matrix"
+            if bool(payload.get("trajectory_feature_matrix_has_nonfinite", False)):
+                return "nonfinite_conditioned_feature_matrix"
+            return "route_partition_build_failed"
+
+        if stage_name == "runtime_jvp_matrix_estimation":
+            if bool(payload.get("trajectory_jvp_feature_dim_mismatch", False)):
+                return "runtime_jvp_shape_mismatch"
+            if bool(payload.get("jvp_matrix_empty", False)):
+                return "runtime_jvp_operator_invalid"
+            if bool(payload.get("jvp_matrix_has_nonfinite", False)):
+                return "runtime_jvp_nonfinite"
+            return "runtime_jvp_estimation_failed"
+
+        if stage_name == "routed_decomposition_matrix_build":
+            if bool(payload.get("trajectory_jvp_feature_dim_mismatch", False)):
+                return "routed_matrix_shape_mismatch"
+            if bool(payload.get("trajectory_feature_matrix_has_nonfinite", False)) or bool(payload.get("jvp_matrix_has_nonfinite", False)):
+                return "nonfinite_decomposition_input"
+            if bool(payload.get("trajectory_feature_matrix_empty", False)) or bool(payload.get("jvp_matrix_empty", False)):
+                return "empty_conditioned_feature_matrix"
+            return "routed_decomposition_matrix_build_failed"
+
+        if stage_name == "partition_projection_matrix_build":
+            if bool(payload.get("lf_routed_matrix_has_nonfinite", False)) or bool(payload.get("hf_routed_matrix_has_nonfinite", False)):
+                return "nonfinite_decomposition_input"
+            if bool(payload.get("lf_routed_matrix_empty", False)) or bool(payload.get("hf_routed_matrix_empty", False)):
+                return "empty_conditioned_feature_matrix"
+            if "rank" in message:
+                return "rank_computation_failed"
+            return "partition_projection_invalid"
+
+        if stage_name == "runtime_executable_plan_payload_build":
+            if "rank" in message:
+                return "rank_computation_failed"
+            return "runtime_plan_payload_build_failed"
+
+        if stage_name == "final_digest_basis_finalization":
+            if "rank" in message:
+                return "rank_computation_failed"
+            return "final_digest_basis_finalization_failed"
+
+        if "rank" in message:
+            return "rank_computation_failed"
+        if "nonfinite" in message:
+            return "nonfinite_decomposition_input"
+        return "invalid_subspace_params_detail"
+
     def plan(
         self,
         cfg: Dict[str, Any],
@@ -756,6 +1029,7 @@ class SubspacePlannerImpl:
             "impl_digest": self.impl_digest,
             "trace_digest": trace_digest
         }
+        planner_diagnostic_context = self._build_planner_diagnostic_context(mask_digest, inputs)
 
         if not enabled:
             return SubspacePlanEvidence(
@@ -792,73 +1066,149 @@ class SubspacePlannerImpl:
 
         try:
             planner_params = self._parse_planner_params(cfg)
+            self._bind_planner_param_snapshot(planner_diagnostic_context, planner_params)
             routing_digest_ref = self._extract_routing_digest_ref(inputs)
+            planner_diagnostic_context["routing_digest"] = routing_digest_ref
             basis_summary = self._estimate_low_dim_subspace(
                 cfg=cfg,
                 inputs=inputs,
                 planner_params=planner_params,
                 mask_digest=mask_digest,
                 routing_digest_ref=routing_digest_ref,
+                planner_diagnostic_context=planner_diagnostic_context,
             )
-            basis_digest = self._derive_basis_digest(basis_summary["basis_digest_payload"])
-            plan_origin = "planner_v1_band_spec"
-            band_spec, band_spec_digest, band_metrics = self.build_subspace_plan(
-                cfg=cfg,
-                inputs=inputs,
-                planner_params=planner_params,
-                basis_summary=basis_summary,
-                routing_digest_ref=routing_digest_ref,
-            )
-            hf_region_index_spec = basis_summary.get("hf_region_index_spec", {})
-            lf_region_index_spec = basis_summary.get("lf_region_index_spec", {})
-            region_index_digest = basis_summary.get("region_index_digest")
-            lf_basis = self._build_executable_basis_payload(
-                basis_matrix=basis_summary.get("lf_projection_matrix"),
-                planner_params=planner_params,
-                basis_digest=basis_digest,
-                channel="lf",
-            )
-            hf_basis = self._build_executable_basis_payload(
-                basis_matrix=basis_summary.get("hf_projection_matrix"),
-                planner_params=planner_params,
-                basis_digest=basis_digest,
-                channel="hf",
-            )
-            
-            # 推断特征域标签
-            feature_source_tag = self._infer_feature_source(inputs)
-            normalization_tag = "centering_with_jacobian_probes"
-            high_freq_subspace_spec = self._build_high_freq_subspace_spec(
-                basis_summary=basis_summary
-            )
-            route_basis_bridge = basis_summary.get("route_basis_bridge", {})
-            
-            plan_payload = self._build_plan_payload_for_digest(
-                cfg=cfg,
-                cfg_digest=cfg_digest,
-                mask_digest=mask_digest,
-                planner_params=planner_params,
-                basis_summary=basis_summary,
-                basis_digest=basis_digest,
-                hf_region_index_spec=hf_region_index_spec,
-                lf_region_index_spec=lf_region_index_spec,
-                region_index_digest=region_index_digest,
-                lf_basis=lf_basis,
-                hf_basis=hf_basis,
-                route_basis_bridge=route_basis_bridge,
-                high_freq_subspace_spec=high_freq_subspace_spec,
-                subspace_conditioning=basis_summary.get("subspace_conditioning"),
-                feature_source_tag=feature_source_tag,
-                normalization_tag=normalization_tag,
-                inputs=inputs
-            )
-            plan_digest = self._derive_plan_digest(plan_payload)
-            
-            # 构造 detection_domain_spec
-            detection_domain_spec = self._build_detection_input_domain_spec(
-                planner_params=planner_params,
-                cfg=cfg
-            )
+            try:
+                basis_digest = self._derive_basis_digest(basis_summary["basis_digest_payload"])
+                plan_origin = "planner_v1_band_spec"
+                band_spec, band_spec_digest, band_metrics = self.build_subspace_plan(
+                    cfg=cfg,
+                    inputs=inputs,
+                    planner_params=planner_params,
+                    basis_summary=basis_summary,
+                    routing_digest_ref=routing_digest_ref,
+                )
+                hf_region_index_spec = basis_summary.get("hf_region_index_spec", {})
+                lf_region_index_spec = basis_summary.get("lf_region_index_spec", {})
+                region_index_digest = basis_summary.get("region_index_digest")
+                lf_basis = self._build_executable_basis_payload(
+                    basis_matrix=basis_summary.get("lf_projection_matrix"),
+                    planner_params=planner_params,
+                    basis_digest=basis_digest,
+                    channel="lf",
+                )
+                hf_basis = self._build_executable_basis_payload(
+                    basis_matrix=basis_summary.get("hf_projection_matrix"),
+                    planner_params=planner_params,
+                    basis_digest=basis_digest,
+                    channel="hf",
+                )
+
+                feature_source_tag = self._infer_feature_source(inputs)
+                normalization_tag = "centering_with_jacobian_probes"
+                high_freq_subspace_spec = self._build_high_freq_subspace_spec(
+                    basis_summary=basis_summary
+                )
+                route_basis_bridge = basis_summary.get("route_basis_bridge", {})
+
+                plan_payload = self._build_plan_payload_for_digest(
+                    cfg=cfg,
+                    cfg_digest=cfg_digest,
+                    mask_digest=mask_digest,
+                    planner_params=planner_params,
+                    basis_summary=basis_summary,
+                    basis_digest=basis_digest,
+                    hf_region_index_spec=hf_region_index_spec,
+                    lf_region_index_spec=lf_region_index_spec,
+                    region_index_digest=region_index_digest,
+                    lf_basis=lf_basis,
+                    hf_basis=hf_basis,
+                    route_basis_bridge=route_basis_bridge,
+                    high_freq_subspace_spec=high_freq_subspace_spec,
+                    subspace_conditioning=basis_summary.get("subspace_conditioning"),
+                    feature_source_tag=feature_source_tag,
+                    normalization_tag=normalization_tag,
+                    inputs=inputs
+                )
+                payload_stage_summary = {
+                    "projection_matrix_shape": {
+                        "lf": _safe_matrix_summary(basis_summary.get("lf_projection_matrix")).get("shape"),
+                        "hf": _safe_matrix_summary(basis_summary.get("hf_projection_matrix")).get("shape"),
+                    },
+                    "lf_route_count": len(list(basis_summary.get("lf_feature_cols", []))),
+                    "hf_route_count": len(list(basis_summary.get("hf_feature_cols", []))),
+                    "routing_digest": route_basis_bridge.get("feature_routing_digest") if isinstance(route_basis_bridge, dict) else routing_digest_ref,
+                    "plan_payload_keys": sorted(plan_payload.keys()),
+                }
+                self._append_planner_stage_entry(
+                    planner_diagnostic_context,
+                    stage_name="runtime_executable_plan_payload_build",
+                    ok=True,
+                    stage_payload=payload_stage_summary,
+                )
+            except Exception as exc:
+                payload_stage_summary = {
+                    "projection_matrix_shape": {
+                        "lf": _safe_matrix_summary(basis_summary.get("lf_projection_matrix")).get("shape"),
+                        "hf": _safe_matrix_summary(basis_summary.get("hf_projection_matrix")).get("shape"),
+                    },
+                    "lf_route_count": len(list(basis_summary.get("lf_feature_cols", []))),
+                    "hf_route_count": len(list(basis_summary.get("hf_feature_cols", []))),
+                    "routing_digest": routing_digest_ref,
+                }
+                self._append_planner_stage_entry(
+                    planner_diagnostic_context,
+                    stage_name="runtime_executable_plan_payload_build",
+                    ok=False,
+                    stage_payload=payload_stage_summary,
+                    exc=exc,
+                    failure_reason_code=self._derive_planner_failure_detail_code(
+                        "runtime_executable_plan_payload_build",
+                        exc,
+                        payload_stage_summary,
+                    ),
+                )
+                raise
+
+            try:
+                plan_digest = self._derive_plan_digest(plan_payload)
+
+                detection_domain_spec = self._build_detection_input_domain_spec(
+                    planner_params=planner_params,
+                    cfg=cfg
+                )
+
+                final_stage_summary = {
+                    "basis_digest_present": bool(isinstance(basis_digest, str) and basis_digest),
+                    "plan_digest_present": bool(isinstance(plan_digest, str) and plan_digest),
+                    "projection_matrix_shape": {
+                        "lf": lf_basis.get("basis_shape"),
+                        "hf": hf_basis.get("basis_shape"),
+                    },
+                }
+                self._append_planner_stage_entry(
+                    planner_diagnostic_context,
+                    stage_name="final_digest_basis_finalization",
+                    ok=True,
+                    stage_payload=final_stage_summary,
+                )
+            except Exception as exc:
+                final_stage_summary = {
+                    "basis_digest_present": bool(isinstance(locals().get("basis_digest"), str) and locals().get("basis_digest")),
+                    "plan_digest_present": bool(isinstance(locals().get("plan_digest"), str) and locals().get("plan_digest")),
+                }
+                self._append_planner_stage_entry(
+                    planner_diagnostic_context,
+                    stage_name="final_digest_basis_finalization",
+                    ok=False,
+                    stage_payload=final_stage_summary,
+                    exc=exc,
+                    failure_reason_code=self._derive_planner_failure_detail_code(
+                        "final_digest_basis_finalization",
+                        exc,
+                        final_stage_summary,
+                    ),
+                )
+                raise
 
             plan = {
                 "plan_version": "v3",
@@ -938,10 +1288,18 @@ class SubspacePlannerImpl:
                 plan_digest=plan_digest,
                 audit=audit,
                 plan_stats=plan_stats,
-                plan_failure_reason=None
+                plan_failure_reason=None,
+                planner_failure_stage=None,
+                planner_failure_detail_code=None,
+                planner_failure_detail_message=None,
+                planner_diagnostic_context=None,
             )
         except ValueError as exc:
             message = str(exc).lower()
+            planner_failure_stage = planner_diagnostic_context.get("planner_failure_stage")
+            planner_failure_detail_code = planner_diagnostic_context.get("planner_failure_detail_code")
+            planner_failure_detail_message = planner_diagnostic_context.get("planner_failure_detail_message") or str(exc)
+            planner_diagnostic_payload = _safe_dict_copy(planner_diagnostic_context)
             if "planner inputs missing" in message or "trajectory source" in message:
                 return SubspacePlanEvidence(
                     status="absent",
@@ -950,7 +1308,11 @@ class SubspacePlannerImpl:
                     plan_digest=None,
                     audit=audit,
                     plan_stats=None,
-                    plan_failure_reason="planner_input_absent"
+                    plan_failure_reason="planner_input_absent",
+                    planner_failure_stage=planner_failure_stage,
+                    planner_failure_detail_code=planner_failure_detail_code or "planner_input_absent",
+                    planner_failure_detail_message=planner_failure_detail_message,
+                    planner_diagnostic_context=planner_diagnostic_payload,
                 )
             reason = "invalid_subspace_params"
             if "requires jvp_operator with runtime-validated outputs" in message:
@@ -966,9 +1328,20 @@ class SubspacePlannerImpl:
                 plan_digest=None,
                 audit=audit,
                 plan_stats=None,
-                plan_failure_reason=reason
+                plan_failure_reason=reason,
+                planner_failure_stage=planner_failure_stage,
+                planner_failure_detail_code=planner_failure_detail_code or self._derive_planner_failure_detail_code(
+                    planner_failure_stage or "plan",
+                    exc,
+                    planner_diagnostic_payload,
+                ),
+                planner_failure_detail_message=planner_failure_detail_message,
+                planner_diagnostic_context=planner_diagnostic_payload,
             )
-        except Exception:
+        except Exception as exc:
+            planner_failure_stage = planner_diagnostic_context.get("planner_failure_stage")
+            planner_failure_detail_code = planner_diagnostic_context.get("planner_failure_detail_code")
+            planner_failure_detail_message = planner_diagnostic_context.get("planner_failure_detail_message") or str(exc)
             return SubspacePlanEvidence(
                 status="failed",
                 plan=None,
@@ -976,7 +1349,11 @@ class SubspacePlannerImpl:
                 plan_digest=None,
                 audit=audit,
                 plan_stats=None,
-                plan_failure_reason="decomposition_failed"
+                plan_failure_reason="decomposition_failed",
+                planner_failure_stage=planner_failure_stage,
+                planner_failure_detail_code=planner_failure_detail_code or "decomposition_failed",
+                planner_failure_detail_message=planner_failure_detail_message,
+                planner_diagnostic_context=_safe_dict_copy(planner_diagnostic_context),
             )
 
     def _estimate_low_dim_subspace(
@@ -986,6 +1363,7 @@ class SubspacePlannerImpl:
         planner_params: _PlannerParams,
         mask_digest: str,
         routing_digest_ref: str,
+        planner_diagnostic_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         功能：估计低维子空间并提取摘要（集成可验证采样和真实 JVP）。
@@ -1016,48 +1394,180 @@ class SubspacePlannerImpl:
         )
         feature_matrix = self._align_feature_matrix(trajectory_samples, planner_params)
         mask_summary = inputs.get("mask_summary") if isinstance(inputs.get("mask_summary"), dict) else {}
-        feature_routing = self._build_feature_routing_from_mask(
-            mask_summary=mask_summary,
-            planner_params=planner_params,
-            mask_digest=mask_digest,
-            routing_digest_ref=routing_digest_ref,
-        )
-        subspace_conditioning = self.build_subspace_conditioning(
-            mask_summary=mask_summary,
-            planner_params=planner_params,
-            mask_digest=mask_digest,
-            hf_region_index_spec=feature_routing.get("hf_region_index_spec"),
-        )
-        feature_matrix = self._apply_mask_conditioning_to_feature_matrix(
-            feature_matrix=feature_matrix,
-            conditioning=subspace_conditioning,
-        )
-        
-        if feature_matrix.shape[0] < 2 or feature_matrix.shape[1] < 2:
-            raise ValueError("feature matrix must be at least 2x2")
+
+        route_stage_summary: Dict[str, Any] = {
+            "rank": int(planner_params.rank),
+            "feature_dim": int(planner_params.feature_dim),
+            "sample_count": int(planner_params.sample_count),
+            "jvp_probe_count": int(planner_params.jacobian_probe_count),
+            "trajectory_step_count": int(planner_params.num_inference_steps),
+            "mask_summary_digest": digests.canonical_sha256(mask_summary) if mask_summary else None,
+            "routing_digest": routing_digest_ref,
+        }
+        try:
+            feature_routing = self._build_feature_routing_from_mask(
+                mask_summary=mask_summary,
+                planner_params=planner_params,
+                mask_digest=mask_digest,
+                routing_digest_ref=routing_digest_ref,
+            )
+            subspace_conditioning = self.build_subspace_conditioning(
+                mask_summary=mask_summary,
+                planner_params=planner_params,
+                mask_digest=mask_digest,
+                hf_region_index_spec=feature_routing.get("hf_region_index_spec"),
+            )
+            feature_matrix = self._apply_mask_conditioning_to_feature_matrix(
+                feature_matrix=feature_matrix,
+                conditioning=subspace_conditioning,
+            )
+            feature_matrix_summary = _safe_matrix_summary(feature_matrix)
+            route_stage_summary.update(
+                {
+                    "trajectory_feature_matrix_shape": feature_matrix_summary.get("shape"),
+                    "trajectory_feature_matrix_empty": bool(feature_matrix_summary.get("empty", False)),
+                    "trajectory_feature_matrix_has_nonfinite": bool(feature_matrix_summary.get("has_nonfinite", False)),
+                    "lf_route_count": len(list(feature_routing.get("lf_feature_cols", []))),
+                    "hf_route_count": len(list(feature_routing.get("hf_feature_cols", []))),
+                    "lf_route_empty": len(list(feature_routing.get("lf_feature_cols", []))) == 0,
+                    "hf_route_empty": len(list(feature_routing.get("hf_feature_cols", []))) == 0,
+                    "lf_route_preview": _safe_list_preview(list(feature_routing.get("lf_feature_cols", []))),
+                    "hf_route_preview": _safe_list_preview(list(feature_routing.get("hf_feature_cols", []))),
+                    "route_rebalance_policy": feature_routing.get("route_rebalance_policy"),
+                    "feature_routing_digest": feature_routing.get("feature_routing_digest"),
+                    "region_index_digest": feature_routing.get("region_index_digest"),
+                }
+            )
+            if feature_matrix.shape[0] < 2 or feature_matrix.shape[1] < 2:
+                raise ValueError("feature matrix must be at least 2x2")
+            self._append_planner_stage_entry(
+                planner_diagnostic_context,
+                stage_name="routed_feature_selection_partition_build",
+                ok=True,
+                stage_payload=route_stage_summary,
+            )
+        except Exception as exc:
+            feature_matrix_summary = _safe_matrix_summary(feature_matrix)
+            route_stage_summary.update(
+                {
+                    "trajectory_feature_matrix_shape": feature_matrix_summary.get("shape"),
+                    "trajectory_feature_matrix_empty": bool(feature_matrix_summary.get("empty", False)),
+                    "trajectory_feature_matrix_has_nonfinite": bool(feature_matrix_summary.get("has_nonfinite", False)),
+                }
+            )
+            self._append_planner_stage_entry(
+                planner_diagnostic_context,
+                stage_name="routed_feature_selection_partition_build",
+                ok=False,
+                stage_payload=route_stage_summary,
+                exc=exc,
+                failure_reason_code=self._derive_planner_failure_detail_code(
+                    "routed_feature_selection_partition_build",
+                    exc,
+                    route_stage_summary,
+                ),
+            )
+            raise
 
         # 步骤 2：中心化
         centered = feature_matrix - np.mean(feature_matrix, axis=0, keepdims=True)
         
         # 步骤 3：估算真实 runtime-operator 或非 paper 的 transition-fit JVP
-        jvp_samples, jvp_anchor = self._estimate_jvp_matrix(
-            cfg=cfg,
-            inputs=inputs,
-            centered_matrix=centered,
-            planner_params=planner_params
-        )
-        
+        jvp_stage_summary: Dict[str, Any] = {
+            "trajectory_feature_matrix_shape": [int(value) for value in centered.shape],
+        }
+        try:
+            jvp_samples, jvp_anchor = self._estimate_jvp_matrix(
+                cfg=cfg,
+                inputs=inputs,
+                centered_matrix=centered,
+                planner_params=planner_params
+            )
+            jvp_summary = _safe_matrix_summary(jvp_samples)
+            jvp_stage_summary.update(
+                {
+                    "jvp_matrix_shape": jvp_summary.get("shape"),
+                    "jvp_matrix_empty": bool(jvp_summary.get("empty", False)),
+                    "jvp_matrix_has_nonfinite": bool(jvp_summary.get("has_nonfinite", False)),
+                    "trajectory_jvp_feature_dim_mismatch": bool(
+                        isinstance(jvp_summary.get("shape"), list)
+                        and len(jvp_summary["shape"]) == 2
+                        and jvp_summary["shape"][1] != centered.shape[1]
+                    ),
+                    "jvp_source": jvp_anchor.get("jvp_source") if isinstance(jvp_anchor, dict) else None,
+                }
+            )
+            self._append_planner_stage_entry(
+                planner_diagnostic_context,
+                stage_name="runtime_jvp_matrix_estimation",
+                ok=True,
+                stage_payload=jvp_stage_summary,
+            )
+        except Exception as exc:
+            self._append_planner_stage_entry(
+                planner_diagnostic_context,
+                stage_name="runtime_jvp_matrix_estimation",
+                ok=False,
+                stage_payload=jvp_stage_summary,
+                exc=exc,
+                failure_reason_code=self._derive_planner_failure_detail_code(
+                    "runtime_jvp_matrix_estimation",
+                    exc,
+                    jvp_stage_summary,
+                ),
+            )
+            raise
+
         # 步骤 4：先构建 routed decomposition matrices，再分别估计 LF/HF basis。
-        routed_matrices = self._build_routed_decomposition_matrices(
-            trajectory_matrix=centered,
-            jvp_matrix=jvp_samples,
-            feature_routing=feature_routing,
-        )
+        decomposition_stage_summary: Dict[str, Any] = {
+            "trajectory_feature_matrix_shape": [int(value) for value in centered.shape],
+            "jvp_matrix_shape": [int(value) for value in jvp_samples.shape],
+            "trajectory_feature_matrix_empty": bool(centered.size == 0),
+            "jvp_matrix_empty": bool(jvp_samples.size == 0),
+            "trajectory_feature_matrix_has_nonfinite": bool(not np.isfinite(centered).all()) if centered.size > 0 else False,
+            "jvp_matrix_has_nonfinite": bool(not np.isfinite(jvp_samples).all()) if jvp_samples.size > 0 else False,
+            "trajectory_jvp_feature_dim_mismatch": bool(centered.shape[1] != jvp_samples.shape[1]) if jvp_samples.ndim == 2 else True,
+        }
+        try:
+            routed_matrices = self._build_routed_decomposition_matrices(
+                trajectory_matrix=centered,
+                jvp_matrix=jvp_samples,
+                feature_routing=feature_routing,
+            )
+            decomposition_stage_summary.update(
+                {
+                    "lf_routed_matrix_shape": _safe_matrix_summary(routed_matrices.get("lf_decomposition_matrix")).get("shape"),
+                    "hf_routed_matrix_shape": _safe_matrix_summary(routed_matrices.get("hf_decomposition_matrix")).get("shape"),
+                    "lf_route_count": len(list(feature_routing.get("lf_feature_cols", []))),
+                    "hf_route_count": len(list(feature_routing.get("hf_feature_cols", []))),
+                }
+            )
+            self._append_planner_stage_entry(
+                planner_diagnostic_context,
+                stage_name="routed_decomposition_matrix_build",
+                ok=True,
+                stage_payload=decomposition_stage_summary,
+            )
+        except Exception as exc:
+            self._append_planner_stage_entry(
+                planner_diagnostic_context,
+                stage_name="routed_decomposition_matrix_build",
+                ok=False,
+                stage_payload=decomposition_stage_summary,
+                exc=exc,
+                failure_reason_code=self._derive_planner_failure_detail_code(
+                    "routed_decomposition_matrix_build",
+                    exc,
+                    decomposition_stage_summary,
+                ),
+            )
+            raise
         routed_subspaces = self._estimate_routed_dual_subspaces(
             routed_matrices=routed_matrices,
             feature_routing=feature_routing,
             feature_dim=feature_matrix.shape[1],
             requested_rank=planner_params.rank,
+            planner_diagnostic_context=planner_diagnostic_context,
         )
         route_basis_bridge = _build_route_basis_bridge(
             feature_routing=feature_routing,
@@ -1524,6 +2034,7 @@ class SubspacePlannerImpl:
         feature_routing: Dict[str, Any],
         feature_dim: int,
         requested_rank: int,
+        planner_diagnostic_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         功能：在 LF/HF routed decomposition matrices 上分别估计 dual subspaces。
@@ -1539,6 +2050,18 @@ class SubspacePlannerImpl:
         Returns:
             Dual-subspace estimation mapping.
         """
+        partition_stage_summary: Dict[str, Any] = {
+            "feature_dim": int(feature_dim),
+            "rank": int(requested_rank),
+            "lf_route_count": len(list(feature_routing.get("lf_feature_cols", []))),
+            "hf_route_count": len(list(feature_routing.get("hf_feature_cols", []))),
+            "lf_routed_matrix_shape": _safe_matrix_summary(routed_matrices.get("lf_decomposition_matrix")).get("shape"),
+            "hf_routed_matrix_shape": _safe_matrix_summary(routed_matrices.get("hf_decomposition_matrix")).get("shape"),
+            "lf_routed_matrix_empty": bool(_safe_matrix_summary(routed_matrices.get("lf_decomposition_matrix")).get("empty", False)),
+            "hf_routed_matrix_empty": bool(_safe_matrix_summary(routed_matrices.get("hf_decomposition_matrix")).get("empty", False)),
+            "lf_routed_matrix_has_nonfinite": bool(_safe_matrix_summary(routed_matrices.get("lf_decomposition_matrix")).get("has_nonfinite", False)),
+            "hf_routed_matrix_has_nonfinite": bool(_safe_matrix_summary(routed_matrices.get("hf_decomposition_matrix")).get("has_nonfinite", False)),
+        }
         try:
             lf_projection_matrix, lf_basis_rank = _build_partition_projection_matrix(
                 routed_matrices.get("lf_decomposition_matrix"),
@@ -1552,8 +2075,51 @@ class SubspacePlannerImpl:
                 feature_dim,
                 requested_rank,
             )
+            partition_stage_summary.update(
+                {
+                    "projection_matrix_shape": {
+                        "lf": _safe_matrix_summary(lf_projection_matrix).get("shape"),
+                        "hf": _safe_matrix_summary(hf_projection_matrix).get("shape"),
+                    },
+                    "lf_projection_matrix_empty": bool(_safe_matrix_summary(lf_projection_matrix).get("empty", False)),
+                    "hf_projection_matrix_empty": bool(_safe_matrix_summary(hf_projection_matrix).get("empty", False)),
+                    "lf_projection_matrix_has_nonfinite": bool(_safe_matrix_summary(lf_projection_matrix).get("has_nonfinite", False)),
+                    "hf_projection_matrix_has_nonfinite": bool(_safe_matrix_summary(hf_projection_matrix).get("has_nonfinite", False)),
+                    "lf_basis_rank": int(lf_basis_rank),
+                    "hf_basis_rank": int(hf_basis_rank),
+                }
+            )
+            self._append_planner_stage_entry(
+                planner_diagnostic_context,
+                stage_name="partition_projection_matrix_build",
+                ok=True,
+                stage_payload=partition_stage_summary,
+            )
         except Exception as exc:
+            self._append_planner_stage_entry(
+                planner_diagnostic_context,
+                stage_name="partition_projection_matrix_build",
+                ok=False,
+                stage_payload=partition_stage_summary,
+                exc=exc,
+                failure_reason_code=self._derive_planner_failure_detail_code(
+                    "partition_projection_matrix_build",
+                    exc,
+                    partition_stage_summary,
+                ),
+            )
             raise RuntimeError("route partition svd failed") from exc
+
+        self._append_planner_stage_entry(
+            planner_diagnostic_context,
+            stage_name="routed_dual_subspace_estimation",
+            ok=True,
+            stage_payload={
+                "projection_matrix_shape": partition_stage_summary.get("projection_matrix_shape"),
+                "lf_basis_rank": int(lf_basis_rank),
+                "hf_basis_rank": int(hf_basis_rank),
+            },
+        )
 
         return {
             "lf_projection_matrix": lf_projection_matrix,

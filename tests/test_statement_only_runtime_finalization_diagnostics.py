@@ -1,0 +1,534 @@
+"""
+文件目的：验证 statement_only runtime finalization 的 planner 诊断透出与 formal failure artifact。
+Module type: General module
+"""
+
+from __future__ import annotations
+
+from contextlib import contextmanager
+import json
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, Dict, Iterator, cast
+
+import numpy as np
+from PIL import Image
+import pytest
+
+from main.cli import run_embed as run_embed_module
+from main.core import digests
+from main.watermarking.content_chain.subspace.planner_interface import SubspacePlanEvidence
+from main.watermarking.content_chain.subspace.subspace_planner_impl import (
+    SUBSPACE_PLANNER_ID,
+    SUBSPACE_PLANNER_VERSION,
+    SubspacePlannerImpl,
+)
+
+
+class _FakeContentExtractor:
+    impl_version = "v1"
+
+    def extract(
+        self,
+        cfg: Dict[str, Any],
+        inputs: Dict[str, Any] | None = None,
+        cfg_digest: str | None = None,
+    ) -> Dict[str, Any]:
+        _ = cfg
+        _ = inputs
+        _ = cfg_digest
+        return {
+            "status": "ok",
+            "mask_digest": "mask_digest_anchor",
+            "mask_stats": {
+                "area_ratio": 0.25,
+                "routing_digest": "routing_digest_anchor",
+                "downsample_grid_true_indices": [0, 1, 2],
+            },
+        }
+
+
+class _FakeSubspacePlanner:
+    def __init__(self, planner_result: SubspacePlanEvidence) -> None:
+        self._planner_result = planner_result
+        self.calls: list[Dict[str, Any]] = []
+
+    def plan(
+        self,
+        cfg: Dict[str, Any],
+        mask_digest: str | None = None,
+        cfg_digest: str | None = None,
+        inputs: Dict[str, Any] | None = None,
+    ) -> SubspacePlanEvidence:
+        self.calls.append(
+            {
+                "cfg": dict(cfg),
+                "mask_digest": mask_digest,
+                "cfg_digest": cfg_digest,
+                "inputs": dict(inputs) if isinstance(inputs, dict) else inputs,
+            }
+        )
+        return self._planner_result
+
+
+class _FakeImplSet:
+    def __init__(self, planner_result: SubspacePlanEvidence) -> None:
+        self.content_extractor = _FakeContentExtractor()
+        self.subspace_planner = _FakeSubspacePlanner(planner_result)
+
+
+class _FakeImplIdentity:
+    content_extractor_id = "unified_content_extractor"
+
+    def as_dict(self) -> Dict[str, str]:
+        return {"content_extractor_id": self.content_extractor_id}
+
+
+def _build_planner_cfg() -> Dict[str, Any]:
+    return {
+        "paper_faithfulness": {"enabled": False},
+        "watermark": {
+            "subspace": {
+                "enabled": True,
+                "rank": 4,
+                "sample_count": 4,
+                "feature_dim": 8,
+                "seed": 7,
+                "jacobian_probe_count": 2,
+                "jacobian_eps": 1e-3,
+                "timestep_start": 0,
+                "timestep_end": 3,
+                "trajectory_step_stride": 1,
+                "spectrum_topk": 4,
+                "num_inference_steps": 28,
+            }
+        },
+        "inference_num_steps": 28,
+        "inference_guidance_scale": 7.0,
+        "inference_height": 512,
+        "inference_width": 512,
+    }
+
+
+def _build_planner_inputs() -> Dict[str, Any]:
+    feature_samples = np.arange(32, dtype=np.float64).reshape(4, 8)
+    return {
+        "trace_signature": {
+            "num_inference_steps": 28,
+            "guidance_scale": 7.0,
+            "height": 512,
+            "width": 512,
+        },
+        "mask_summary": {
+            "area_ratio": 0.25,
+            "routing_digest": "routing_digest_anchor",
+            "downsample_grid_true_indices": [0, 1, 2],
+        },
+        "routing_digest": "routing_digest_anchor",
+        "feature_samples": feature_samples,
+    }
+
+
+def _build_planner_failure_context() -> Dict[str, Any]:
+    return {
+        "diagnostic_version": "v1",
+        "rank": 4,
+        "feature_dim": 8,
+        "sample_count": 4,
+        "jvp_probe_count": 2,
+        "trajectory_step_count": 28,
+        "lf_route_count": 5,
+        "hf_route_count": 3,
+        "mask_summary_digest": "mask_summary_digest_anchor",
+        "routing_digest": "routing_digest_anchor",
+        "projection_matrix_shape": None,
+        "trajectory_feature_matrix_shape": [4, 8],
+        "jvp_matrix_shape": [4, 8],
+        "has_nonfinite": False,
+        "has_empty_partition": False,
+        "has_empty_matrix": False,
+        "has_dimension_mismatch": True,
+        "stages": [
+            {
+                "stage_name": "routed_feature_selection_partition_build",
+                "ok": True,
+                "failure_reason_code": None,
+                "exception_type": None,
+                "exception_message": None,
+                "lf_route_count": 5,
+                "hf_route_count": 3,
+                "trajectory_feature_matrix_shape": [4, 8],
+            },
+            {
+                "stage_name": "routed_decomposition_matrix_build",
+                "ok": False,
+                "failure_reason_code": "routed_matrix_shape_mismatch",
+                "exception_type": "ValueError",
+                "exception_message": "synthetic routed matrix mismatch",
+                "lf_route_count": 5,
+                "hf_route_count": 3,
+                "trajectory_feature_matrix_shape": [4, 8],
+                "jvp_matrix_shape": [4, 8],
+                "trajectory_jvp_feature_dim_mismatch": True,
+            },
+        ],
+    }
+
+
+def _prepare_statement_only_failure_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    planner_result: SubspacePlanEvidence,
+) -> Dict[str, Any]:
+    run_root = tmp_path / "run"
+    records_dir = run_root / "records"
+    artifacts_dir = run_root / "artifacts"
+    logs_dir = run_root / "logs"
+    captured: Dict[str, Any] = {"orchestrator_called": False, "runtime_capture_calls": 0}
+    fake_impl_set = _FakeImplSet(planner_result)
+
+    @contextmanager
+    def _bound_fact_sources(*args: Any, **kwargs: Any) -> Iterator[None]:
+        _ = args
+        _ = kwargs
+        yield
+
+    def _ensure_output_layout(path: Path, **kwargs: Any) -> Dict[str, Path]:
+        _ = kwargs
+        records_dir.mkdir(parents=True, exist_ok=True)
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "run_root": path,
+            "records_dir": records_dir,
+            "artifacts_dir": artifacts_dir,
+            "logs_dir": logs_dir,
+        }
+
+    def _fake_finalize_run(
+        run_root_path: Path,
+        records_dir_path: Path,
+        artifacts_dir_path: Path,
+        run_meta: Dict[str, Any],
+    ) -> Path:
+        _ = run_root_path
+        _ = records_dir_path
+        closure_payload: Dict[str, Any] = {
+            "formal_two_stage": run_meta.get("formal_two_stage"),
+            "status": {"details": run_meta.get("status_details")},
+        }
+        closure_path = artifacts_dir_path / "run_closure.json"
+        closure_path.write_text(json.dumps(closure_payload, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+        captured["run_closure_path"] = closure_path
+        captured["formal_two_stage"] = run_meta.get("formal_two_stage")
+        captured["status_details"] = run_meta.get("status_details")
+        return closure_path
+
+    def _load_and_validate_config(*args: Any, **kwargs: Any) -> tuple[Dict[str, Any], str, Dict[str, str]]:
+        _ = args
+        _ = kwargs
+        return (
+            {
+                "policy_path": "content_np_geo_rescue",
+                "paper_faithfulness": {"enabled": True},
+                "attestation": {"enabled": True, "use_trajectory_mix": False},
+                "detect": {"content": {"enabled": True}},
+                "watermark": {
+                    "hf": {"enabled": False},
+                    "lf": {"enabled": True, "strength": 0.5},
+                    "subspace": {
+                        "enabled": True,
+                        "rank": 4,
+                        "sample_count": 4,
+                        "feature_dim": 8,
+                        "jacobian_probe_count": 2,
+                        "jacobian_eps": 1e-3,
+                    },
+                },
+                "inference_enabled": True,
+                "inference_prompt": "statement only prompt",
+                "inference_num_steps": 28,
+                "inference_guidance_scale": 7.0,
+                "inference_height": 512,
+                "inference_width": 512,
+                "device": "cpu",
+                "embed": {"preview_generation": {"enabled": False}},
+            },
+            "cfg_digest_anchor",
+            {
+                "cfg_pruned_for_digest_canon_sha256": "cfg_pruned_anchor",
+                "cfg_audit_canon_sha256": "cfg_audit_anchor",
+            },
+        )
+
+    def _fake_runtime_capture(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+        _ = args
+        _ = kwargs
+        captured["runtime_capture_calls"] += 1
+        return {
+            "inference_status": "ok",
+            "inference_error": None,
+            "inference_runtime_meta": {"latency_ms": 1.0},
+            "trajectory_evidence": {"status": "ok"},
+            "injection_evidence": {},
+            "output_image": Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8)),
+        }
+
+    def _fake_orchestrator(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+        _ = args
+        _ = kwargs
+        captured["orchestrator_called"] = True
+        return {}
+
+    def _derive_run_root(_output_dir: Any) -> Path:
+        return run_root
+
+    def _anchor_requirements(*args: Any) -> None:
+        _ = args
+
+    def _load_frozen_contracts(*args: Any) -> Dict[str, str]:
+        _ = args
+        return {"contracts": "ok"}
+
+    def _load_runtime_whitelist(*args: Any) -> Dict[str, str]:
+        _ = args
+        return {"whitelist": "ok"}
+
+    def _load_policy_path_semantics(*args: Any) -> Dict[str, str]:
+        _ = args
+        return {"semantics": "ok"}
+
+    def _bind_freeze_anchors_to_run_meta(*args: Any, **kwargs: Any) -> None:
+        _ = args
+        _ = kwargs
+
+    def _build_fact_sources_snapshot(*args: Any, **kwargs: Any) -> Dict[str, str]:
+        _ = args
+        _ = kwargs
+        return {"snapshot": "ok"}
+
+    def _assert_consistent_with_semantics(*args: Any, **kwargs: Any) -> None:
+        _ = args
+        _ = kwargs
+
+    def _get_bound_fact_sources() -> Dict[str, str]:
+        return {"snapshot": "ok"}
+
+    def _get_contract_interpretation(*args: Any) -> SimpleNamespace:
+        _ = args
+        return SimpleNamespace()
+
+    def _build_seed_audit(*args: Any, **kwargs: Any) -> tuple[Dict[str, Any], str, int, str]:
+        _ = args
+        _ = kwargs
+        return ({}, "seed_digest", 7, "seed_rule")
+
+    def _build_determinism_controls(*args: Any) -> None:
+        _ = args
+
+    def _normalize_nondeterminism_notes(*args: Any) -> None:
+        _ = args
+
+    def _build_pipeline_shell(*args: Any) -> Dict[str, Any]:
+        _ = args
+        return {
+            "pipeline_obj": object(),
+            "pipeline_provenance_canon_sha256": "pipeline_digest_anchor",
+            "pipeline_status": "built",
+            "pipeline_error": None,
+            "pipeline_runtime_meta": {},
+            "env_fingerprint_canon_sha256": "env_digest_anchor",
+            "diffusers_version": "<absent>",
+            "transformers_version": "<absent>",
+            "safetensors_version": "<absent>",
+            "model_provenance_canon_sha256": "model_digest_anchor",
+        }
+
+    def _build_runtime_impl_set_from_cfg(*args: Any) -> tuple[_FakeImplIdentity, _FakeImplSet, str]:
+        _ = args
+        return (_FakeImplIdentity(), fake_impl_set, "impl_cap_digest_anchor")
+
+    def _compute_impl_identity_digest(*args: Any) -> str:
+        _ = args
+        return "impl_identity_digest_anchor"
+
+    monkeypatch.setattr(run_embed_module.path_policy, "derive_run_root", _derive_run_root)
+    monkeypatch.setattr(run_embed_module.path_policy, "ensure_output_layout", _ensure_output_layout)
+    monkeypatch.setattr(run_embed_module.path_policy, "anchor_requirements", _anchor_requirements)
+    monkeypatch.setattr(run_embed_module.status, "finalize_run", _fake_finalize_run)
+    monkeypatch.setattr(run_embed_module, "load_frozen_contracts", _load_frozen_contracts)
+    monkeypatch.setattr(run_embed_module, "load_runtime_whitelist", _load_runtime_whitelist)
+    monkeypatch.setattr(run_embed_module, "load_policy_path_semantics", _load_policy_path_semantics)
+    monkeypatch.setattr(run_embed_module.config_loader, "load_injection_scope_manifest", cast(Any, lambda: {"manifest": "ok"}))
+    monkeypatch.setattr(run_embed_module.status, "bind_freeze_anchors_to_run_meta", _bind_freeze_anchors_to_run_meta)
+    monkeypatch.setattr(run_embed_module.records_io, "build_fact_sources_snapshot", _build_fact_sources_snapshot)
+    monkeypatch.setattr(run_embed_module, "assert_consistent_with_semantics", _assert_consistent_with_semantics)
+    monkeypatch.setattr(run_embed_module.records_io, "bound_fact_sources", _bound_fact_sources)
+    monkeypatch.setattr(run_embed_module.records_io, "get_bound_fact_sources", _get_bound_fact_sources)
+    monkeypatch.setattr(run_embed_module, "get_contract_interpretation", _get_contract_interpretation)
+    monkeypatch.setattr(run_embed_module.config_loader, "load_and_validate_config", _load_and_validate_config)
+    monkeypatch.setattr(run_embed_module, "build_seed_audit", _build_seed_audit)
+    monkeypatch.setattr(run_embed_module, "build_determinism_controls", _build_determinism_controls)
+    monkeypatch.setattr(run_embed_module, "normalize_nondeterminism_notes", _normalize_nondeterminism_notes)
+    monkeypatch.setattr(run_embed_module.pipeline_factory, "build_pipeline_shell", _build_pipeline_shell)
+    monkeypatch.setattr(run_embed_module.runtime_resolver, "build_runtime_impl_set_from_cfg", _build_runtime_impl_set_from_cfg)
+    monkeypatch.setattr(run_embed_module.runtime_resolver, "compute_impl_identity_digest", _compute_impl_identity_digest)
+    monkeypatch.setattr(run_embed_module.infer_runtime, "run_sd3_inference", _fake_runtime_capture)
+    monkeypatch.setattr(run_embed_module, "run_embed_orchestrator", _fake_orchestrator)
+
+    captured["fake_impl_set"] = fake_impl_set
+    return captured
+
+
+def test_planner_failure_exposes_stage_and_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    功能：planner 返回 invalid_subspace_params 时必须同时透出阶段、detail message 与诊断上下文。
+    """
+    planner = SubspacePlannerImpl(
+        impl_id=SUBSPACE_PLANNER_ID,
+        impl_version=SUBSPACE_PLANNER_VERSION,
+        impl_digest=digests.canonical_sha256({"impl": "planner"}),
+    )
+
+    def _raise_routed_decomposition_failure(*args: Any, **kwargs: Any) -> Any:
+        _ = args
+        _ = kwargs
+        raise ValueError("synthetic routed decomposition failure")
+
+    monkeypatch.setattr(planner, "_build_routed_decomposition_matrices", _raise_routed_decomposition_failure)
+
+    result = planner.plan(
+        _build_planner_cfg(),
+        mask_digest="mask_digest_anchor",
+        cfg_digest="cfg_digest_anchor",
+        inputs=_build_planner_inputs(),
+    )
+
+    assert result.status == "failed"
+    assert result.plan_failure_reason == "invalid_subspace_params"
+    assert result.planner_failure_stage == "routed_decomposition_matrix_build"
+    assert result.planner_failure_detail_message == "synthetic routed decomposition failure"
+    assert isinstance(result.planner_diagnostic_context, dict)
+
+
+def test_planner_failure_context_contains_shape_and_route_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    功能：planner 失败诊断上下文必须包含 shape、route 与 rank 快照。
+    """
+    planner = SubspacePlannerImpl(
+        impl_id=SUBSPACE_PLANNER_ID,
+        impl_version=SUBSPACE_PLANNER_VERSION,
+        impl_digest=digests.canonical_sha256({"impl": "planner"}),
+    )
+
+    def _raise_routed_decomposition_failure(*args: Any, **kwargs: Any) -> Any:
+        _ = args
+        _ = kwargs
+        raise ValueError("synthetic routed decomposition failure")
+
+    monkeypatch.setattr(planner, "_build_routed_decomposition_matrices", _raise_routed_decomposition_failure)
+
+    result = planner.plan(
+        _build_planner_cfg(),
+        mask_digest="mask_digest_anchor",
+        cfg_digest="cfg_digest_anchor",
+        inputs=_build_planner_inputs(),
+    )
+
+    context = cast(Dict[str, Any], result.planner_diagnostic_context)
+    assert context["lf_route_count"] is not None
+    assert context["hf_route_count"] is not None
+    assert context["trajectory_feature_matrix_shape"] == [4, 8]
+    assert context["jvp_matrix_shape"] is not None
+    assert context["rank"] == 4
+
+
+def test_run_embed_statement_only_failure_persists_runtime_finalization_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：statement_only runtime finalization 失败时必须把 planner 诊断写入 formal artifact 视图。
+    """
+    planner_result = SubspacePlanEvidence(
+        status="failed",
+        plan=None,
+        basis_digest=None,
+        plan_digest=None,
+        audit=None,
+        plan_stats=None,
+        plan_failure_reason="invalid_subspace_params",
+        planner_failure_stage="routed_decomposition_matrix_build",
+        planner_failure_detail_code="routed_matrix_shape_mismatch",
+        planner_failure_detail_message="synthetic routed matrix mismatch",
+        planner_diagnostic_context=_build_planner_failure_context(),
+    )
+    env = _prepare_statement_only_failure_env(
+        monkeypatch,
+        tmp_path,
+        planner_result=planner_result,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="runtime executable formal plan unavailable: statement_only runtime finalization failed; reason=invalid_subspace_params",
+    ):
+        run_embed_module.run_embed(
+            output_dir=str(tmp_path / "out"),
+            config_path="configs/default.yaml",
+            overrides=None,
+            input_image_path=None,
+        )
+
+    run_closure_path = cast(Path, env["run_closure_path"])
+    run_closure = json.loads(run_closure_path.read_text(encoding="utf-8"))
+    runtime_finalization = run_closure["status"]["details"]["runtime_finalization"]
+
+    assert runtime_finalization["runtime_finalization_status"] == "failed"
+    assert runtime_finalization["runtime_finalization_reason"] == "invalid_subspace_params"
+    assert runtime_finalization["planner_failure_stage"] == "routed_decomposition_matrix_build"
+    assert runtime_finalization["planner_failure_detail_code"] == "routed_matrix_shape_mismatch"
+    assert runtime_finalization["planner_failure_detail_message"] == "synthetic routed matrix mismatch"
+    assert runtime_finalization["planner_diagnostic_context"]["lf_route_count"] == 5
+    assert runtime_finalization["planner_diagnostic_context"]["jvp_matrix_shape"] == [4, 8]
+
+
+def test_run_embed_statement_only_failure_keeps_formal_gate_and_stops_before_orchestrator(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：runtime finalization 失败时主流程必须继续失败，且不能放松 formal gate 进入 orchestrator。
+    """
+    planner_result = SubspacePlanEvidence(
+        status="failed",
+        plan=None,
+        basis_digest=None,
+        plan_digest=None,
+        audit=None,
+        plan_stats=None,
+        plan_failure_reason="invalid_subspace_params",
+        planner_failure_stage="routed_decomposition_matrix_build",
+        planner_failure_detail_code="routed_matrix_shape_mismatch",
+        planner_failure_detail_message="synthetic routed matrix mismatch",
+        planner_diagnostic_context=_build_planner_failure_context(),
+    )
+    env = _prepare_statement_only_failure_env(
+        monkeypatch,
+        tmp_path,
+        planner_result=planner_result,
+    )
+
+    with pytest.raises(ValueError):
+        run_embed_module.run_embed(
+            output_dir=str(tmp_path / "out"),
+            config_path="configs/default.yaml",
+            overrides=None,
+            input_image_path=None,
+        )
+
+    assert env["orchestrator_called"] is False
+    assert env["runtime_capture_calls"] == 1
+    fake_impl_set = cast(_FakeImplSet, env["fake_impl_set"])
+    assert len(fake_impl_set.subspace_planner.calls) == 1

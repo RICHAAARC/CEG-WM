@@ -613,6 +613,96 @@ def _extract_subspace_plan_payload(subspace_result: Any) -> Dict[str, Any] | Non
     return None
 
 
+def _extract_subspace_failure_diagnostics(subspace_result: Any) -> Dict[str, Any]:
+    """
+    功能：提取 planner 失败诊断字段。 
+
+    Extract structured planner failure diagnostics from a subspace result.
+
+    Args:
+        subspace_result: Planner result object or mapping.
+
+    Returns:
+        Mapping with planner failure stage/detail/context fields.
+    """
+    payload = _as_dict_payload(subspace_result)
+
+    def _resolve_value(field_name: str) -> Any:
+        if isinstance(payload, dict) and field_name in payload:
+            return payload.get(field_name)
+        return getattr(subspace_result, field_name, None)
+
+    planner_diagnostic_context = _resolve_value("planner_diagnostic_context")
+    if not isinstance(planner_diagnostic_context, dict):
+        planner_diagnostic_context = None
+
+    return {
+        "planner_failure_stage": _resolve_value("planner_failure_stage"),
+        "planner_failure_detail_code": _resolve_value("planner_failure_detail_code"),
+        "planner_failure_detail_message": _resolve_value("planner_failure_detail_message"),
+        "planner_diagnostic_context": dict(cast(Dict[str, Any], planner_diagnostic_context)) if isinstance(planner_diagnostic_context, dict) else None,
+    }
+
+
+def _build_runtime_finalization_status_details(run_meta: Dict[str, Any]) -> Dict[str, Any] | None:
+    """
+    功能：从 formal_two_stage 提取可进入 run_closure 的 runtime finalization 细节。 
+
+    Build the runtime-finalization detail block persisted through run_closure.
+
+    Args:
+        run_meta: Mutable run metadata mapping.
+
+    Returns:
+        Structured detail mapping or None.
+    """
+    formal_two_stage = run_meta.get("formal_two_stage")
+    if not isinstance(formal_two_stage, dict):
+        return None
+    formal_two_stage_mapping = cast(Dict[str, Any], formal_two_stage)
+    runtime_finalization_status = formal_two_stage_mapping.get("runtime_finalization_status")
+    runtime_executable_plan_status = formal_two_stage_mapping.get("runtime_executable_plan_status")
+    if runtime_finalization_status is None and runtime_executable_plan_status is None:
+        return None
+
+    return {
+        "runtime_finalization_status": runtime_finalization_status,
+        "runtime_finalization_reason": formal_two_stage_mapping.get("runtime_finalization_reason"),
+        "runtime_executable_plan_status": runtime_executable_plan_status,
+        "runtime_executable_plan_reason": formal_two_stage_mapping.get("runtime_executable_plan_reason"),
+        "runtime_capture_inference_status": formal_two_stage_mapping.get("runtime_capture_inference_status"),
+        "planner_failure_stage": formal_two_stage_mapping.get("planner_failure_stage"),
+        "planner_failure_detail_code": formal_two_stage_mapping.get("planner_failure_detail_code"),
+        "planner_failure_detail_message": formal_two_stage_mapping.get("planner_failure_detail_message"),
+        "planner_diagnostic_context": formal_two_stage_mapping.get("planner_diagnostic_context"),
+    }
+
+
+def _merge_runtime_finalization_status_details(run_meta: Dict[str, Any]) -> None:
+    """
+    功能：将 runtime finalization 诊断并入 run_meta.status_details。 
+
+    Merge runtime-finalization diagnostics into run_meta.status_details so the
+    failure path is persisted into run_closure.
+
+    Args:
+        run_meta: Mutable run metadata mapping.
+
+    Returns:
+        None.
+    """
+    runtime_finalization_details = _build_runtime_finalization_status_details(run_meta)
+    if not isinstance(runtime_finalization_details, dict):
+        return
+    existing_status_details = run_meta.get("status_details")
+    if not isinstance(existing_status_details, dict):
+        run_meta["status_details"] = {"runtime_finalization": runtime_finalization_details}
+        return
+    merged_status_details = dict(cast(Dict[str, Any], existing_status_details))
+    merged_status_details["runtime_finalization"] = runtime_finalization_details
+    run_meta["status_details"] = merged_status_details
+
+
 def _bind_embed_plan_digest_consistency(
     record: Dict[str, Any],
     content_evidence: Dict[str, Any],
@@ -1166,6 +1256,7 @@ def run_embed(
                 )
                 plan_payload = _extract_subspace_plan_payload(subspace_result_runtime_finalized)
                 plan_digest_precomputed, basis_digest_precomputed = _extract_subspace_result_digests(subspace_result_runtime_finalized)
+                planner_failure_diagnostics = _extract_subspace_failure_diagnostics(subspace_result_runtime_finalized)
                 if not isinstance(plan_payload, dict) or plan_digest_precomputed is None or basis_digest_precomputed is None:
                     runtime_finalization_reason = _resolve_runtime_executable_plan_failure_reason(
                         subspace_result_runtime_finalized,
@@ -1174,10 +1265,13 @@ def run_embed(
                     runtime_finalization_meta = {
                         "status": "failed",
                         "reason": runtime_finalization_reason,
+                        "runtime_finalization_status": "failed",
+                        "runtime_finalization_reason": runtime_finalization_reason,
                         "capture_inference_status": runtime_capture_status,
                         "trajectory_cache_bound": not runtime_capture_cache.is_empty(),
                         "final_plan_digest": plan_digest_precomputed,
                         "final_basis_digest": basis_digest_precomputed,
+                        **planner_failure_diagnostics,
                     }
                     run_meta["formal_two_stage"] = {
                         "scaffold_status": "ok",
@@ -1185,9 +1279,12 @@ def run_embed(
                         "formal_scaffold": formal_scaffold,
                         "runtime_executable_plan_status": "failed",
                         "runtime_executable_plan_reason": runtime_finalization_reason,
+                        "runtime_finalization_status": "failed",
+                        "runtime_finalization_reason": runtime_finalization_reason,
                         "runtime_capture_inference_status": runtime_capture_status,
                         "final_plan_digest": plan_digest_precomputed,
                         "final_basis_digest": basis_digest_precomputed,
+                        **planner_failure_diagnostics,
                     }
                     raise ValueError(
                         "runtime executable formal plan unavailable: statement_only runtime finalization failed; "
@@ -1196,10 +1293,16 @@ def run_embed(
                 runtime_finalization_meta = {
                     "status": "ok",
                     "reason": None,
+                    "runtime_finalization_status": "ok",
+                    "runtime_finalization_reason": None,
                     "capture_inference_status": runtime_capture_status,
                     "trajectory_cache_bound": not runtime_capture_cache.is_empty(),
                     "final_plan_digest": plan_digest_precomputed,
                     "final_basis_digest": basis_digest_precomputed,
+                    "planner_failure_stage": None,
+                    "planner_failure_detail_code": None,
+                    "planner_failure_detail_message": None,
+                    "planner_diagnostic_context": None,
                 }
                 run_meta["formal_two_stage"] = {
                     "scaffold_status": "ok",
@@ -1207,9 +1310,15 @@ def run_embed(
                     "formal_scaffold": formal_scaffold,
                     "runtime_executable_plan_status": "ok",
                     "runtime_executable_plan_reason": None,
+                    "runtime_finalization_status": "ok",
+                    "runtime_finalization_reason": None,
                     "runtime_capture_inference_status": runtime_capture_status,
                     "final_plan_digest": plan_digest_precomputed,
                     "final_basis_digest": basis_digest_precomputed,
+                    "planner_failure_stage": None,
+                    "planner_failure_detail_code": None,
+                    "planner_failure_detail_message": None,
+                    "planner_diagnostic_context": None,
                 }
 
             if isinstance(plan_payload, dict) and isinstance(plan_digest_precomputed, str) and plan_digest_precomputed:
@@ -1521,7 +1630,13 @@ def run_embed(
                     content_audit["formal_scaffold_digest"] = formal_scaffold.get("formal_scaffold_digest")
                 content_audit["runtime_executable_plan_status"] = runtime_finalization_meta.get("status")
                 content_audit["runtime_executable_plan_reason"] = runtime_finalization_meta.get("reason")
+                content_audit["runtime_finalization_status"] = runtime_finalization_meta.get("runtime_finalization_status")
+                content_audit["runtime_finalization_reason"] = runtime_finalization_meta.get("runtime_finalization_reason")
                 content_audit["runtime_capture_inference_status"] = runtime_finalization_meta.get("capture_inference_status")
+                content_audit["planner_failure_stage"] = runtime_finalization_meta.get("planner_failure_stage")
+                content_audit["planner_failure_detail_code"] = runtime_finalization_meta.get("planner_failure_detail_code")
+                content_audit["planner_failure_detail_message"] = runtime_finalization_meta.get("planner_failure_detail_message")
+                content_audit["planner_diagnostic_context"] = runtime_finalization_meta.get("planner_diagnostic_context")
             
             # 写入 pipeline_fingerprint 和 pipeline_fingerprint_digest
             content_evidence["pipeline_fingerprint"] = pipeline_fingerprint
@@ -1715,6 +1830,7 @@ def run_embed(
     except Exception as exc:
         if run_meta.get("status_ok", True):
             set_failure_status(run_meta, RunFailureReason.RUNTIME_ERROR, exc)
+            _merge_runtime_finalization_status_details(run_meta)
         error = exc
     finally:
         # Fallback: 若布局未成功初始化，则强制创建默认布局。
