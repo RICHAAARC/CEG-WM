@@ -12,10 +12,18 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import zipfile
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
-from scripts.notebook_runtime_common import compute_mapping_sha256, finalize_stage_package, write_json_atomic
+from scripts.notebook_runtime_common import (
+    build_failure_diagnostics_filename,
+    compute_file_sha256,
+    compute_mapping_sha256,
+    finalize_stage_package,
+    resolve_export_package_manifest_path,
+    write_json_atomic,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -115,7 +123,79 @@ def _create_stage_package(
     return Path(str(package_manifest["package_path"])), package_manifest
 
 
-def _build_stage_01_package(base_dir: Path) -> Dict[str, Any]:
+def _build_failure_diagnostics_package(
+    base_dir: Path,
+    *,
+    stage_name: str,
+    stage_run_id: str,
+) -> Path:
+    """
+    功能：构造最小 diagnostics package。 
+
+    Build a minimal failure-diagnostics package that must be rejected by the
+    stage-04 formal input gate.
+
+    Args:
+        base_dir: Base temporary directory.
+        stage_name: Diagnostics stage name.
+        stage_run_id: Diagnostics stage run identifier.
+
+    Returns:
+        Diagnostics ZIP path.
+    """
+    export_root = base_dir / "exports" / stage_name / stage_run_id
+    export_root.mkdir(parents=True, exist_ok=True)
+    package_path = export_root / build_failure_diagnostics_filename(stage_name, stage_run_id)
+    with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "failure_diagnostics_summary.json",
+            json.dumps(
+                {
+                    "stage_name": stage_name,
+                    "stage_run_id": stage_run_id,
+                    "stage_status": "failed",
+                    "failure_reason": "stage_failed_for_test",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+        archive.writestr(
+            "artifacts/stage_manifest.json",
+            json.dumps(
+                {
+                    "stage_name": stage_name,
+                    "stage_run_id": stage_run_id,
+                    "stage_status": "failed",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+    write_json_atomic(
+        resolve_export_package_manifest_path(export_root),
+        {
+            "stage_name": stage_name,
+            "stage_run_id": stage_run_id,
+            "package_filename": package_path.name,
+            "package_path": package_path.as_posix(),
+            "package_sha256": compute_file_sha256(package_path),
+            "package_role": "failure_diagnostics_package",
+            "package_discovery_scope": "excluded_from_formal_discovery",
+            "diagnostics_summary_path": (export_root / "failure_diagnostics_summary.json").as_posix(),
+            "diagnostics_package_path": package_path.as_posix(),
+        },
+    )
+    return package_path
+
+
+def _build_stage_01_package(
+    base_dir: Path,
+    *,
+    workflow_status: str = "ok",
+    attestation_evidence_status: str = "ok",
+    formal_package_status: str = "generated",
+) -> Dict[str, Any]:
     """
     功能：构造最小 stage 01 package。 
 
@@ -130,15 +210,51 @@ def _build_stage_01_package(base_dir: Path) -> Dict[str, Any]:
     stage_run_id = "stage01_run"
     runtime_config_path = "/drive/runtime_state/01/runtime_metadata/runtime_config_snapshot.yaml"
     thresholds_path = "/drive/runs/01/artifacts/thresholds/thresholds_artifact.json"
+    canonical_source_pool_manifest_path = "/drive/runs/01/artifacts/stage_01_canonical_source_pool/source_pool_manifest.json"
+    representative_root_records = {
+        "view_role": "representative_summary_view",
+        "source_prompt_index": 0,
+        "source_entry_package_relative_path": "artifacts/stage_01_canonical_source_pool/entries/000_source_entry.json",
+    }
+    attestation_resolution = {
+        "overall_status": attestation_evidence_status,
+        "required_entry_count": 1,
+        "checked_entry_count": 1 if attestation_evidence_status == "ok" else 0,
+        "missing_evidence_count": 0 if attestation_evidence_status == "ok" else 1,
+        "failing_prompt_indices": [] if attestation_evidence_status == "ok" else [0],
+        "failing_source_entry_paths": [] if attestation_evidence_status == "ok" else [
+            "artifacts/stage_01_canonical_source_pool/entries/000_source_entry.json"
+        ],
+        "summary_reason": "ok" if attestation_evidence_status == "ok" else "attestation_evidence_failed",
+        "failure_reason": None if attestation_evidence_status == "ok" else "attestation_evidence_failed",
+        "representative_root_summary": {
+            **representative_root_records,
+            "resolution_role": "representative_summary_view_only",
+        },
+    }
     stage_manifest = {
         "stage_name": "01_Paper_Full_Cuda",
         "stage_run_id": stage_run_id,
+        "stage_status": workflow_status,
+        "formal_package_status": formal_package_status,
+        "formal_package_role": "formal_stage_package",
+        "formal_package_discovery_scope": "discoverable_formal_only",
         "runtime_config_snapshot_path": runtime_config_path,
         "thresholds_path": thresholds_path,
         "threshold_metadata_artifact_path": "/drive/runs/01/artifacts/thresholds/threshold_metadata_artifact.json",
         "evaluation_report_path": "/drive/runs/01/artifacts/evaluation_report.json",
         "run_closure_path": "/drive/runs/01/artifacts/run_closure.json",
         "workflow_summary_path": "/drive/runs/01/artifacts/workflow_summary.json",
+        "workflow_summary_status": workflow_status,
+        "attestation_evidence_status": attestation_evidence_status,
+        "attestation_evidence_summary_reason": attestation_resolution["summary_reason"],
+        "attestation_evidence_failure_reason": attestation_resolution["failure_reason"],
+        "stage_01_canonical_source_pool_manifest_path": canonical_source_pool_manifest_path,
+        "stage_01_canonical_source_pool_manifest_package_relative_path": (
+            "artifacts/stage_01_canonical_source_pool/source_pool_manifest.json"
+        ),
+        "stage_01_canonical_source_pool_entry_count": 1,
+        "stage_01_representative_root_records": representative_root_records,
     }
     files = {
         "records/embed_record.json": {"record_type": "embed"},
@@ -159,8 +275,29 @@ def _build_stage_01_package(base_dir: Path) -> Dict[str, Any]:
             "policy_path": "content_np_geo_rescue",
             "ablation_digest": "abl01",
         },
-        "artifacts/run_closure.json": {"status": {"ok": True, "reason": "ok"}},
-        "artifacts/workflow_summary.json": {"stage_name": "01_Paper_Full_Cuda", "stage_run_id": stage_run_id},
+        "artifacts/run_closure.json": {
+            "status": {
+                "ok": workflow_status == "ok",
+                "reason": "ok" if workflow_status == "ok" else "failed",
+            }
+        },
+        "artifacts/workflow_summary.json": {
+            "stage_name": "01_Paper_Full_Cuda",
+            "stage_run_id": stage_run_id,
+            "status": workflow_status,
+            "summary_reason": "ok" if workflow_status == "ok" else "stage_01_formal_failed",
+            "failure_reason": None if workflow_status == "ok" else "stage_01_formal_failed",
+            "canonical_source_pool_entry_count": 1,
+            "representative_root_records": representative_root_records,
+            "attestation_evidence_resolution": attestation_resolution,
+        },
+        "artifacts/stage_01_canonical_source_pool/source_pool_manifest.json": {
+            "artifact_role": "canonical_source_pool_root",
+            "prompt_count": 1,
+            "entry_count": 1,
+            "entries_package_relative_root": "artifacts/stage_01_canonical_source_pool/entries",
+            "representative_root_records": representative_root_records,
+        },
         "runtime_metadata/runtime_config_snapshot.yaml": "policy_path: content_np_geo_rescue\n",
     }
     package_path, package_manifest = _create_stage_package(
@@ -201,6 +338,7 @@ def _build_stage_02_package(base_dir: Path, stage_01_info: Dict[str, Any], *, mi
     stage_manifest = {
         "stage_name": "02_Parallel_Attestation_Statistics",
         "stage_run_id": stage_run_id,
+        "stage_status": "ok",
         "source_stage_name": "01_Paper_Full_Cuda",
         "source_stage_run_id": source_stage_run_id,
         "source_package_sha256": source_package_sha256,
@@ -231,7 +369,11 @@ def _build_stage_02_package(base_dir: Path, stage_01_info: Dict[str, Any], *, mi
             "policy_path": "content_np_geo_rescue",
         },
         "artifacts/run_closure.json": {"status": {"ok": True, "reason": "ok"}},
-        "artifacts/workflow_summary.json": {"stage_name": "02_Parallel_Attestation_Statistics", "stage_run_id": stage_run_id},
+        "artifacts/workflow_summary.json": {
+            "stage_name": "02_Parallel_Attestation_Statistics",
+            "stage_run_id": stage_run_id,
+            "status": "ok",
+        },
         "lineage/source_stage_manifest.json": stage_01_info["stage_manifest"],
         "lineage/source_package_manifest.json": stage_01_info["package_manifest"],
         "runtime_metadata/runtime_config_snapshot.yaml": "parallel_attestation_statistics:\n  enabled: true\n",
@@ -257,6 +399,7 @@ def _build_stage_03_package(
     base_dir: Path,
     stage_01_info: Dict[str, Any],
     *,
+    mismatch_lineage: bool = False,
     primary_scope: str = "system_final",
     primary_driver_mode: str = "system_final_only",
     primary_status_source: str = "system_final_metrics",
@@ -283,6 +426,17 @@ def _build_stage_03_package(
         Stage 03 package metadata mapping.
     """
     stage_run_id = "stage03_run"
+    source_stage_run_id = "wrong_stage01_run" if mismatch_lineage else stage_01_info["stage_run_id"]
+    source_package_sha256 = "wrong_sha" if mismatch_lineage else stage_01_info["package_manifest"]["package_sha256"]
+    source_package_manifest_digest = (
+        "wrong_digest" if mismatch_lineage else compute_mapping_sha256(stage_01_info["package_manifest"])
+    )
+    lineage_stage_manifest = dict(stage_01_info["stage_manifest"])
+    lineage_package_manifest = dict(stage_01_info["package_manifest"])
+    if mismatch_lineage:
+        lineage_stage_manifest["stage_run_id"] = source_stage_run_id
+        lineage_package_manifest["stage_run_id"] = source_stage_run_id
+        lineage_package_manifest["package_sha256"] = source_package_sha256
     auxiliary_scopes = ["content_chain", "lf_channel"] if include_auxiliary_scopes else ["lf_channel"]
     system_final_metrics_presence = {
         "rows_with_system_final_metrics": 1 if include_system_final_metrics else 0,
@@ -312,10 +466,11 @@ def _build_stage_03_package(
     stage_manifest = {
         "stage_name": "03_Experiment_Matrix_Full",
         "stage_run_id": stage_run_id,
+        "stage_status": "ok",
         "source_stage_name": "01_Paper_Full_Cuda",
-        "source_stage_run_id": stage_01_info["stage_run_id"],
-        "source_package_sha256": stage_01_info["package_manifest"]["package_sha256"],
-        "source_package_manifest_digest": compute_mapping_sha256(stage_01_info["package_manifest"]),
+        "source_stage_run_id": source_stage_run_id,
+        "source_package_sha256": source_package_sha256,
+        "source_package_manifest_digest": source_package_manifest_digest,
         "source_stage_manifest_path": "/drive/runtime_state/03/lineage/source_stage_manifest.json",
         "source_package_manifest_path": "/drive/runtime_state/03/lineage/source_package_manifest.json",
         "source_stage_manifest_copy_path": "/drive/runtime_state/03/lineage/source_stage_manifest.json",
@@ -460,6 +615,7 @@ def _build_stage_03_package(
         "artifacts/workflow_summary.json": {
             "stage_name": "03_Experiment_Matrix_Full",
             "stage_run_id": stage_run_id,
+            "status": "ok",
             "primary_evaluation_scope": primary_scope,
             "primary_metric_name": "system_final_metrics",
             "primary_driver_mode": primary_driver_mode,
@@ -472,8 +628,8 @@ def _build_stage_03_package(
             "system_final_metrics_presence": system_final_metrics_presence,
         },
         "artifacts/run_closure.json": {"status": {"ok": True, "reason": "ok"}},
-        "lineage/source_stage_manifest.json": stage_01_info["stage_manifest"],
-        "lineage/source_package_manifest.json": stage_01_info["package_manifest"],
+        "lineage/source_stage_manifest.json": lineage_stage_manifest,
+        "lineage/source_package_manifest.json": lineage_package_manifest,
         "global_calibrate/artifacts/thresholds/thresholds_artifact.json": {"threshold_value": 0.7, "thresholds_digest": "thr03"},
         "global_calibrate/artifacts/thresholds/threshold_metadata_artifact.json": {"threshold_metadata_digest": "meta03"},
         "runtime_metadata/runtime_config_snapshot.yaml": "experiment_matrix:\n  allow_failed_semantics_collection: true\n",
@@ -566,8 +722,11 @@ def test_stage_04_blocks_on_stage_02_lineage_mismatch(tmp_path: Path) -> None:
 
     signoff_report = json.loads(Path(summary["signoff_report_path"]).read_text(encoding="utf-8"))
     assert signoff_report["decision"] == "BLOCK_FREEZE"
+    assert signoff_report["paper_closure_status"] == "blocked"
     reason_codes = {item["reason_code"] for item in signoff_report["blocking_reasons"]}
     assert "stage_02.lineage_mismatch" in reason_codes
+    assert signoff_report["lineage_resolution_summary"]["lineage_match_status"] == "blocked"
+    assert signoff_report["lineage_resolution_summary"]["stage_02_lineage_status"]["status"] == "blocked"
 
 
 def test_stage_04_allows_freeze_when_all_required_stages_align(tmp_path: Path) -> None:
@@ -603,9 +762,181 @@ def test_stage_04_allows_freeze_when_all_required_stages_align(tmp_path: Path) -
     signoff_report = json.loads(Path(summary["signoff_report_path"]).read_text(encoding="utf-8"))
     release_manifest = json.loads(Path(summary["release_manifest_path"]).read_text(encoding="utf-8"))
     assert signoff_report["decision"] == "ALLOW_FREEZE"
+    assert signoff_report["signoff_status"] == "passed"
+    assert signoff_report["release_status"] == "passed"
+    assert signoff_report["paper_closure_status"] == "passed"
     assert signoff_report["blocking_reasons"] == []
+    assert signoff_report["formal_input_summary"]["rejected_inputs"] == []
+    assert len(signoff_report["formal_input_summary"]["accepted_formal_inputs"]) == 3
+    assert signoff_report["checked_packages_summary"]["stage_01"]["package_role"] == "formal_stage_package"
+    assert signoff_report["checked_packages_summary"]["stage_01"]["formal_gate_summary"]["canonical_source_pool_status"] == "passed"
+    assert signoff_report["checked_packages_summary"]["stage_01"]["formal_gate_summary"]["attestation_evidence_status"] == "ok"
+    assert signoff_report["lineage_resolution_summary"]["lineage_match_status"] == "passed"
     assert Path(summary["package_path"]).exists()
     assert release_manifest["decision"] == "ALLOW_FREEZE"
+    assert release_manifest["signoff_status"] == "passed"
+    assert summary["signoff_status"] == "passed"
+    assert summary["release_status"] == "passed"
+    assert summary["paper_closure_status"] == "passed"
+
+
+def test_stage_04_rejects_diagnostics_package_as_formal_input(tmp_path: Path) -> None:
+    """
+    功能：验证 diagnostics package 不得冒充 formal stage 04 输入。 
+
+    Verify that a diagnostics ZIP cannot pass the stage-04 formal input gate.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    module = _load_stage_04_module()
+    drive_project_root = tmp_path / "drive_project_root"
+    stage_01_info = _build_stage_01_package(tmp_path / "case_diagnostics_reject")
+    diagnostics_package_path = _build_failure_diagnostics_package(
+        tmp_path / "case_diagnostics_reject",
+        stage_name="02_Parallel_Attestation_Statistics",
+        stage_run_id="stage02_diag",
+    )
+
+    summary = module.run_stage_04(
+        drive_project_root=drive_project_root,
+        stage_01_package_path=stage_01_info["package_path"],
+        stage_02_package_path=diagnostics_package_path,
+        stage_03_package_path=None,
+        config_path=DEFAULT_CONFIG_PATH,
+        notebook_name="04_Release_And_Signoff",
+        stage_run_id="stage04_diagnostics_reject",
+        require_stage_02=True,
+        require_stage_03=False,
+    )
+
+    signoff_report = json.loads(Path(summary["signoff_report_path"]).read_text(encoding="utf-8"))
+    assert signoff_report["signoff_status"] == "blocked"
+    reason_codes = {item["reason_code"] for item in signoff_report["block_reasons"]}
+    assert "stage_02.diagnostics_package_rejected" in reason_codes
+    rejected_inputs = signoff_report["formal_input_summary"]["rejected_inputs"]
+    assert any(item["stage_key"] == "stage_02" for item in rejected_inputs)
+    assert signoff_report["checked_packages_summary"]["stage_02"]["package_role"] == "failure_diagnostics_package"
+    assert signoff_report["checked_packages_summary"]["stage_02"]["input_status"] == "rejected_non_formal"
+
+
+def test_stage_04_blocks_when_stage_01_formal_status_is_failed(tmp_path: Path) -> None:
+    """
+    功能：验证 stage 01 formal package status 失败时必须阻断。 
+
+    Verify that stage 04 blocks when stage 01 advertises a failed formal-package status.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    module = _load_stage_04_module()
+    drive_project_root = tmp_path / "drive_project_root"
+    stage_01_info = _build_stage_01_package(
+        tmp_path / "case_stage01_formal_failed",
+        formal_package_status="failed",
+    )
+
+    summary = module.run_stage_04(
+        drive_project_root=drive_project_root,
+        stage_01_package_path=stage_01_info["package_path"],
+        stage_02_package_path=None,
+        stage_03_package_path=None,
+        config_path=DEFAULT_CONFIG_PATH,
+        notebook_name="04_Release_And_Signoff",
+        stage_run_id="stage04_stage01_formal_failed",
+        require_stage_02=False,
+        require_stage_03=False,
+    )
+
+    signoff_report = json.loads(Path(summary["signoff_report_path"]).read_text(encoding="utf-8"))
+    assert signoff_report["paper_closure_status"] == "blocked"
+    reason_codes = {item["reason_code"] for item in signoff_report["block_reasons"]}
+    assert "stage_01.formal_package_status_not_success" in reason_codes
+
+
+def test_stage_04_blocks_when_stage_01_attestation_evidence_status_is_failed(tmp_path: Path) -> None:
+    """
+    功能：验证 stage 01 attestation evidence 失败时必须阻断。 
+
+    Verify that stage 04 blocks when stage 01 attestation evidence is not successful.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    module = _load_stage_04_module()
+    drive_project_root = tmp_path / "drive_project_root"
+    stage_01_info = _build_stage_01_package(
+        tmp_path / "case_stage01_attestation_failed",
+        attestation_evidence_status="failed",
+    )
+
+    summary = module.run_stage_04(
+        drive_project_root=drive_project_root,
+        stage_01_package_path=stage_01_info["package_path"],
+        stage_02_package_path=None,
+        stage_03_package_path=None,
+        config_path=DEFAULT_CONFIG_PATH,
+        notebook_name="04_Release_And_Signoff",
+        stage_run_id="stage04_stage01_attestation_failed",
+        require_stage_02=False,
+        require_stage_03=False,
+    )
+
+    signoff_report = json.loads(Path(summary["signoff_report_path"]).read_text(encoding="utf-8"))
+    assert signoff_report["signoff_status"] == "blocked"
+    reason_codes = {item["reason_code"] for item in signoff_report["block_reasons"]}
+    assert "stage_01.attestation_evidence_status_not_success" in reason_codes
+
+
+def test_stage_04_blocks_when_stage_03_lineage_mismatch_breaks_closure(tmp_path: Path) -> None:
+    """
+    功能：验证 stage 03 指向错误 stage 01 来源时必须阻断闭环。 
+
+    Verify that stage 04 blocks when stage 03 points to the wrong stage-01 source package.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    module = _load_stage_04_module()
+    drive_project_root = tmp_path / "drive_project_root"
+    stage_01_info = _build_stage_01_package(tmp_path / "case_stage03_lineage_mismatch")
+    stage_02_info = _build_stage_02_package(tmp_path / "case_stage03_lineage_mismatch", stage_01_info)
+    stage_03_info = _build_stage_03_package(
+        tmp_path / "case_stage03_lineage_mismatch",
+        stage_01_info,
+        mismatch_lineage=True,
+    )
+
+    summary = module.run_stage_04(
+        drive_project_root=drive_project_root,
+        stage_01_package_path=stage_01_info["package_path"],
+        stage_02_package_path=stage_02_info["package_path"],
+        stage_03_package_path=stage_03_info["package_path"],
+        config_path=DEFAULT_CONFIG_PATH,
+        notebook_name="04_Release_And_Signoff",
+        stage_run_id="stage04_stage03_lineage_mismatch",
+        require_stage_02=True,
+        require_stage_03=True,
+    )
+
+    signoff_report = json.loads(Path(summary["signoff_report_path"]).read_text(encoding="utf-8"))
+    assert signoff_report["signoff_status"] == "blocked"
+    assert signoff_report["lineage_resolution_summary"]["lineage_match_status"] == "blocked"
+    assert signoff_report["lineage_resolution_summary"]["stage_03_lineage_status"]["status"] == "blocked"
+    reason_codes = {item["reason_code"] for item in signoff_report["block_reasons"]}
+    assert "stage_03.lineage_mismatch" in reason_codes
 
 
 def test_stage_04_blocks_when_stage_03_primary_scope_is_not_system_final(tmp_path: Path) -> None:

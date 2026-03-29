@@ -18,6 +18,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, cast
 
 from scripts.notebook_runtime_common import (
+    EXCLUDED_PACKAGE_DISCOVERY_SCOPE,
+    FAILURE_DIAGNOSTICS_PACKAGE_ROLE,
+    FORMAL_PACKAGE_DISCOVERY_SCOPE,
+    FORMAL_STAGE_PACKAGE_ROLE,
     REPO_ROOT,
     STAGE_01_NAME,
     STAGE_02_NAME,
@@ -31,11 +35,13 @@ from scripts.notebook_runtime_common import (
     copy_stage_manifest_snapshot,
     ensure_directory,
     finalize_stage_package,
+    find_external_package_manifest,
     load_yaml_mapping,
     make_stage_run_id,
     normalize_path_value,
     prepare_source_package,
     read_json_dict,
+    read_json_from_zip,
     resolve_repo_path,
     resolve_stage_roots,
     stage_relative_copy,
@@ -61,6 +67,14 @@ SYSTEM_FINAL_METRIC_NAME = "system_final_metrics"
 _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD = "auxiliary_analysis_runtime_executed"
 REQUIRED_STAGE_03_AUXILIARY_SCOPES = [CONTENT_CHAIN_SCOPE, LF_CHANNEL_SCOPE]
 SYSTEM_FINAL_PRIMARY_DRIVER_MODE = "system_final_only"
+FORMAL_SIGNOFF_PASS_STATUS = "passed"
+FORMAL_SIGNOFF_BLOCK_STATUS = "blocked"
+FORMAL_SUCCESS_STATUS_TOKENS = {"ok", "success", "passed"}
+FORMAL_PACKAGE_SUCCESS_STATUS_TOKENS = {"generated", "ok", "success", "passed"}
+DIAGNOSTICS_PACKAGE_ROLE_TOKENS = {
+    FAILURE_DIAGNOSTICS_PACKAGE_ROLE,
+    "failed_diagnostics_package",
+}
 
 EVALUATION_REPORT_REQUIRED_FIELDS = [
     "cfg_digest",
@@ -289,6 +303,128 @@ def _append_blocking_reason(
     )
 
 
+def _normalize_status_token(value: Any) -> str:
+    """
+    功能：规范化状态字符串。 
+
+    Normalize a status-like value into a lowercase token.
+
+    Args:
+        value: Candidate status value.
+
+    Returns:
+        Normalized lowercase token, or an empty string when unavailable.
+    """
+    if not isinstance(value, str):
+        return ""
+    return value.strip().lower()
+
+
+def _status_matches(value: Any, allowed_tokens: Sequence[str]) -> bool:
+    """
+    功能：判断状态是否落在允许集合。 
+
+    Determine whether a status-like value belongs to one allowed token set.
+
+    Args:
+        value: Candidate status value.
+        allowed_tokens: Accepted status tokens.
+
+    Returns:
+        True when the normalized status is allowed.
+    """
+    if not isinstance(allowed_tokens, Sequence):
+        raise TypeError("allowed_tokens must be Sequence")
+    return _normalize_status_token(value) in {_normalize_status_token(token) for token in allowed_tokens}
+
+
+def _probe_input_package_policy(package_path: Path) -> Dict[str, Any]:
+    """
+    功能：探测输入 ZIP 的 formal package policy 元数据。 
+
+    Probe the available package-manifest metadata before stage-04 decides
+    whether the input may enter the formal signoff gate.
+
+    Args:
+        package_path: Candidate package ZIP path.
+
+    Returns:
+        Package-policy probe summary.
+    """
+    if not isinstance(package_path, Path):
+        raise TypeError("package_path must be Path")
+
+    external_manifest_path = find_external_package_manifest(package_path)
+    external_manifest = read_json_dict(external_manifest_path) if isinstance(external_manifest_path, Path) else {}
+    internal_manifest = read_json_from_zip(package_path, "artifacts/package_manifest.json")
+    manifest_for_policy = external_manifest if external_manifest else internal_manifest
+    package_role_raw = manifest_for_policy.get("package_role")
+    package_discovery_scope_raw = manifest_for_policy.get("package_discovery_scope")
+    package_role = package_role_raw.strip() if isinstance(package_role_raw, str) and package_role_raw.strip() else None
+    package_discovery_scope = (
+        package_discovery_scope_raw.strip()
+        if isinstance(package_discovery_scope_raw, str) and package_discovery_scope_raw.strip()
+        else None
+    )
+    diagnostics_like = (
+        package_role in DIAGNOSTICS_PACKAGE_ROLE_TOKENS
+        or "diagnostic" in _normalize_status_token(package_role)
+        or package_discovery_scope == EXCLUDED_PACKAGE_DISCOVERY_SCOPE
+    )
+    formal_role_compatible = package_role in {None, FORMAL_STAGE_PACKAGE_ROLE}
+    discovery_scope_compatible = package_discovery_scope in {None, FORMAL_PACKAGE_DISCOVERY_SCOPE}
+    explicit_non_formal = not (formal_role_compatible and discovery_scope_compatible) and (
+        package_role is not None or package_discovery_scope is not None
+    )
+    diagnostics_reference_paths: List[str] = []
+    diagnostics_manifest_path = manifest_for_policy.get("diagnostics_manifest_path")
+    diagnostics_summary_path = manifest_for_policy.get("diagnostics_summary_path")
+    diagnostics_package_path = manifest_for_policy.get("diagnostics_package_path")
+    for candidate_path in [diagnostics_manifest_path, diagnostics_summary_path, diagnostics_package_path]:
+        if isinstance(candidate_path, str) and candidate_path.strip() and candidate_path not in diagnostics_reference_paths:
+            diagnostics_reference_paths.append(candidate_path)
+    if isinstance(external_manifest_path, Path):
+        diagnostics_reference_paths.append(normalize_path_value(external_manifest_path))
+    return {
+        "external_manifest_path": normalize_path_value(external_manifest_path) if isinstance(external_manifest_path, Path) else "<absent>",
+        "external_manifest": external_manifest,
+        "internal_manifest": internal_manifest,
+        "package_policy_source": "external_manifest" if external_manifest else "internal_manifest" if internal_manifest else "absent",
+        "manifest_for_policy": manifest_for_policy,
+        "package_role": package_role,
+        "package_discovery_scope": package_discovery_scope,
+        "diagnostics_like": diagnostics_like,
+        "formal_role_compatible": formal_role_compatible,
+        "formal_discovery_scope_compatible": discovery_scope_compatible,
+        "formal_package_eligible": formal_role_compatible and discovery_scope_compatible,
+        "explicit_non_formal": explicit_non_formal,
+        "diagnostics_reference_paths": diagnostics_reference_paths,
+    }
+
+
+def _resolve_signoff_statuses(decision: str) -> Dict[str, str]:
+    """
+    功能：把 freeze decision 映射为正式 signoff 结论。 
+
+    Resolve the formal signoff, release, and paper-closure statuses from one
+    freeze decision token.
+
+    Args:
+        decision: Freeze decision token.
+
+    Returns:
+        Mapping with signoff_status, release_status, and paper_closure_status.
+    """
+    if not isinstance(decision, str) or not decision:
+        raise TypeError("decision must be non-empty str")
+    status_value = FORMAL_SIGNOFF_PASS_STATUS if decision == ALLOW_FREEZE else FORMAL_SIGNOFF_BLOCK_STATUS
+    return {
+        "signoff_status": status_value,
+        "release_status": status_value,
+        "paper_closure_status": status_value,
+    }
+
+
 def _read_required_json(path_obj: Path) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """
     功能：读取必需 JSON 文件并保留错误语义。 
@@ -363,6 +499,7 @@ def _collect_required_stage_files(
             "thresholds_artifact": ["artifacts/thresholds/thresholds_artifact.json"],
             "threshold_metadata_artifact": ["artifacts/thresholds/threshold_metadata_artifact.json"],
             "evaluation_report": ["artifacts/evaluation_report.json"],
+            "canonical_source_pool_manifest": ["artifacts/stage_01_canonical_source_pool/source_pool_manifest.json"],
             "run_closure": ["artifacts/run_closure.json"],
             "workflow_summary": ["artifacts/workflow_summary.json"],
             "stage_manifest": ["artifacts/stage_manifest.json"],
@@ -552,7 +689,13 @@ def _validate_stage_json_payloads(
     parsed_payloads: Dict[str, Dict[str, Any]] = {}
     json_labels: List[str] = []
     if stage_key == "stage_01":
-        json_labels = ["run_closure", "evaluation_report"]
+        json_labels = [
+            "run_closure",
+            "evaluation_report",
+            "workflow_summary",
+            "stage_manifest",
+            "canonical_source_pool_manifest",
+        ]
     elif stage_key == "stage_02":
         json_labels = ["evaluation_report"]
     elif stage_key == "stage_03":
@@ -649,6 +792,317 @@ def _validate_stage_json_payloads(
     if stage_key == "stage_03" and isinstance(grid_summary, dict) and isinstance(aggregate_report, dict):
         _validate_stage_03_primary_scope_semantics(grid_summary, aggregate_report, blocking_reasons)
     return parsed_payloads
+
+
+def _validate_stage_01_formal_closure(
+    stage_inputs: Mapping[str, Dict[str, Any]],
+    required_files: Mapping[str, Dict[str, str]],
+    parsed_payloads: Mapping[str, Dict[str, Dict[str, Any]]],
+    blocking_reasons: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    功能：校验 stage 01 是否满足 formal paper closure 基础条件。 
+
+    Validate that the provided stage-01 package satisfies the formal closure
+    prerequisites required by stage 04.
+
+    Args:
+        stage_inputs: Stage input mapping.
+        required_files: Required file mapping by stage key.
+        parsed_payloads: Parsed JSON payload mapping by stage key.
+        blocking_reasons: Mutable blocking reason list.
+
+    Returns:
+        Stage-01 formal closure summary.
+    """
+    stage_01_info = stage_inputs.get("stage_01", {})
+    if stage_01_info.get("status") != "prepared":
+        return {
+            "status": "unavailable",
+            "formal_stage_status": "<absent>",
+            "workflow_summary_status": "<absent>",
+            "formal_package_status": "<absent>",
+            "attestation_evidence_status": "<absent>",
+            "canonical_source_pool_status": "unavailable",
+            "representative_root_view_status": "unavailable",
+        }
+
+    stage_manifest = cast(Dict[str, Any], stage_01_info.get("stage_manifest", {}))
+    package_manifest = cast(Dict[str, Any], stage_01_info.get("package_manifest", {}))
+    stage_01_payloads = parsed_payloads.get("stage_01", {})
+    workflow_summary = cast(Dict[str, Any], stage_01_payloads.get("workflow_summary", {}))
+    canonical_source_pool_manifest = cast(Dict[str, Any], stage_01_payloads.get("canonical_source_pool_manifest", {}))
+    stage_01_files = required_files.get("stage_01", {})
+
+    representative_root_records_raw = stage_manifest.get("stage_01_representative_root_records")
+    if not isinstance(representative_root_records_raw, dict) or not representative_root_records_raw:
+        representative_root_records_raw = canonical_source_pool_manifest.get("representative_root_records")
+    representative_root_records = (
+        cast(Dict[str, Any], representative_root_records_raw)
+        if isinstance(representative_root_records_raw, dict)
+        else {}
+    )
+
+    formal_stage_status = stage_manifest.get("stage_status")
+    workflow_summary_status = workflow_summary.get("status", stage_manifest.get("workflow_summary_status"))
+    formal_package_status = stage_manifest.get("formal_package_status", "generated")
+    attestation_evidence_status = stage_manifest.get(
+        "attestation_evidence_status",
+        workflow_summary.get("attestation_evidence_resolution", {}).get("overall_status")
+        if isinstance(workflow_summary.get("attestation_evidence_resolution"), dict)
+        else None,
+    )
+    canonical_source_pool_manifest_path = stage_01_files.get("canonical_source_pool_manifest")
+    canonical_source_pool_present = bool(canonical_source_pool_manifest)
+    representative_root_present = bool(representative_root_records)
+    representative_root_view_role = representative_root_records.get("view_role")
+
+    if not _status_matches(formal_stage_status, sorted(FORMAL_SUCCESS_STATUS_TOKENS)):
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_01",
+            reason_code="stage_01.formal_stage_status_not_success",
+            rule="stage 01 formal package must expose a successful stage_status before release signoff may pass",
+            impact="paper closure cannot trust a failed or incomplete stage 01 formal run",
+            fix="re-run stage 01 until stage_manifest.stage_status is a success token and re-export the formal package",
+            evidence={
+                "actual_stage_status": formal_stage_status,
+                "stage_run_id": stage_manifest.get("stage_run_id"),
+            },
+        )
+
+    if not _status_matches(workflow_summary_status, sorted(FORMAL_SUCCESS_STATUS_TOKENS)):
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_01",
+            reason_code="stage_01.workflow_summary_status_not_success",
+            rule="stage 01 workflow_summary.status must remain in a success state for formal signoff",
+            impact="paper closure cannot rely on a failed stage 01 workflow summary",
+            fix="re-run stage 01 until artifacts/workflow_summary.json reports a success status",
+            evidence={
+                "actual_workflow_summary_status": workflow_summary_status,
+                "workflow_summary_path": stage_01_files.get("workflow_summary", "<absent>"),
+            },
+        )
+
+    if not _status_matches(formal_package_status, sorted(FORMAL_PACKAGE_SUCCESS_STATUS_TOKENS)):
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_01",
+            reason_code="stage_01.formal_package_status_not_success",
+            rule="stage 01 formal package must expose a successful formal_package_status when the field is present",
+            impact="stage 01 package cannot be treated as the formal paper-closure source of truth",
+            fix="export stage 01 from a successful formal run so formal_package_status is generated/ok/success/passed",
+            evidence={
+                "actual_formal_package_status": formal_package_status,
+                "package_role": package_manifest.get("package_role"),
+            },
+        )
+
+    if not _status_matches(attestation_evidence_status, sorted(FORMAL_SUCCESS_STATUS_TOKENS)):
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_01",
+            reason_code="stage_01.attestation_evidence_status_not_success",
+            rule="stage 01 attestation evidence resolution must be successful before formal signoff may pass",
+            impact="paper closure cannot accept stage 01 when attestation evidence is missing or failed",
+            fix="re-run stage 01 until attestation_evidence_status is ok/success/passed and the canonical source pool evidence is complete",
+            evidence={
+                "actual_attestation_evidence_status": attestation_evidence_status,
+                "attestation_evidence_summary_reason": stage_manifest.get("attestation_evidence_summary_reason"),
+                "attestation_evidence_failure_reason": stage_manifest.get("attestation_evidence_failure_reason"),
+            },
+        )
+
+    if not canonical_source_pool_present:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_01",
+            reason_code="stage_01.canonical_source_pool_missing",
+            rule="stage 01 formal package must include the canonical source pool manifest as paper-closure evidence",
+            impact="stage 04 cannot verify the authoritative source pool used by stage 01",
+            fix="re-export stage 01 and ensure artifacts/stage_01_canonical_source_pool/source_pool_manifest.json is packaged",
+            evidence={
+                "canonical_source_pool_manifest_path": canonical_source_pool_manifest_path or "<absent>",
+                "stage_manifest_field": stage_manifest.get("stage_01_canonical_source_pool_manifest_package_relative_path"),
+            },
+        )
+
+    if not representative_root_present or not isinstance(representative_root_view_role, str) or not representative_root_view_role.strip():
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_01",
+            reason_code="stage_01.representative_root_view_missing",
+            rule="stage 01 formal package must publish representative_root_records as a summary view in addition to the canonical source pool",
+            impact="stage 04 loses the representative root pointer needed for audit navigation",
+            fix="re-export stage 01 and ensure representative_root_records is preserved in stage_manifest or canonical source pool manifest",
+            evidence={
+                "representative_root_records": representative_root_records,
+                "canonical_source_pool_present": canonical_source_pool_present,
+            },
+        )
+
+    return {
+        "status": FORMAL_SIGNOFF_PASS_STATUS if len([reason for reason in blocking_reasons if reason.get("source") == "stage_01"]) == 0 else FORMAL_SIGNOFF_BLOCK_STATUS,
+        "formal_stage_status": formal_stage_status,
+        "workflow_summary_status": workflow_summary_status,
+        "formal_package_status": formal_package_status,
+        "attestation_evidence_status": attestation_evidence_status,
+        "canonical_source_pool_status": FORMAL_SIGNOFF_PASS_STATUS if canonical_source_pool_present else FORMAL_SIGNOFF_BLOCK_STATUS,
+        "canonical_source_pool_manifest_path": canonical_source_pool_manifest_path or "<absent>",
+        "canonical_source_pool_entry_count": canonical_source_pool_manifest.get("entry_count"),
+        "representative_root_view_status": FORMAL_SIGNOFF_PASS_STATUS if representative_root_present else FORMAL_SIGNOFF_BLOCK_STATUS,
+        "representative_root_records": representative_root_records,
+    }
+
+
+def _build_stage_identity_summary(stage_info: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    功能：构造一个 stage package 的身份摘要。 
+
+    Build the identity summary used by stage-04 lineage reporting.
+
+    Args:
+        stage_info: Prepared stage input mapping.
+
+    Returns:
+        Stage identity summary.
+    """
+    stage_manifest = cast(Dict[str, Any], stage_info.get("stage_manifest", {})) if isinstance(stage_info, Mapping) else {}
+    package_manifest = cast(Dict[str, Any], stage_info.get("package_manifest", {})) if isinstance(stage_info, Mapping) else {}
+    return {
+        "stage_name": stage_manifest.get("stage_name", package_manifest.get("stage_name", "<absent>")),
+        "stage_run_id": stage_manifest.get("stage_run_id", package_manifest.get("stage_run_id", "<absent>")),
+        "package_sha256": stage_info.get("package_sha256", package_manifest.get("package_sha256", "<absent>")),
+        "package_manifest_digest": stage_info.get("package_manifest_digest", "<absent>"),
+        "package_role": stage_info.get("package_role", package_manifest.get("package_role", FORMAL_STAGE_PACKAGE_ROLE)),
+        "package_discovery_scope": stage_info.get(
+            "package_discovery_scope",
+            package_manifest.get("package_discovery_scope", FORMAL_PACKAGE_DISCOVERY_SCOPE),
+        ),
+    }
+
+
+def _build_checked_packages_summary(
+    stage_inputs: Mapping[str, Dict[str, Any]],
+    parsed_payloads: Mapping[str, Dict[str, Dict[str, Any]]],
+    stage_01_formal_summary: Mapping[str, Any],
+) -> Dict[str, Dict[str, Any]]:
+    """
+    功能：汇总进入 stage 04 检查过的 package。 
+
+    Build the checked-packages summary required by the formal signoff gate.
+
+    Args:
+        stage_inputs: Stage input mapping.
+        parsed_payloads: Parsed JSON payload mapping.
+        stage_01_formal_summary: Stage-01 formal closure summary.
+
+    Returns:
+        Checked package summary mapping.
+    """
+    checked: Dict[str, Dict[str, Any]] = {}
+    for stage_key in ("stage_01", "stage_02", "stage_03"):
+        info = stage_inputs.get(stage_key, {})
+        stage_manifest = cast(Dict[str, Any], info.get("stage_manifest", {}))
+        package_manifest = cast(Dict[str, Any], info.get("package_manifest", {}))
+        workflow_summary = cast(Dict[str, Any], parsed_payloads.get(stage_key, {}).get("workflow_summary", {}))
+        package_role = info.get("package_role", package_manifest.get("package_role", FORMAL_STAGE_PACKAGE_ROLE))
+        package_discovery_scope = info.get(
+            "package_discovery_scope",
+            package_manifest.get("package_discovery_scope", FORMAL_PACKAGE_DISCOVERY_SCOPE),
+        )
+        checked_entry: Dict[str, Any] = {
+            "expected_stage_name": info.get("expected_stage_name", "<absent>"),
+            "required": bool(info.get("required", False)),
+            "provided": bool(info.get("provided", False)),
+            "input_path": info.get("input_path", "<absent>"),
+            "input_status": info.get("status", "not_provided"),
+            "formal_input_status": FORMAL_SIGNOFF_PASS_STATUS if info.get("status") == "prepared" else FORMAL_SIGNOFF_BLOCK_STATUS,
+            "stage_name": stage_manifest.get("stage_name", package_manifest.get("stage_name", "<absent>")),
+            "stage_run_id": stage_manifest.get("stage_run_id", package_manifest.get("stage_run_id", "<absent>")),
+            "stage_status": stage_manifest.get("stage_status", "<absent>"),
+            "workflow_summary_status": workflow_summary.get("status", stage_manifest.get("workflow_summary_status", "<absent>")),
+            "package_role": package_role,
+            "package_discovery_scope": package_discovery_scope,
+            "package_sha256": info.get("package_sha256", package_manifest.get("package_sha256", "<absent>")),
+            "package_manifest_digest": info.get("package_manifest_digest", "<absent>"),
+            "rejection_reason_codes": list(cast(List[str], info.get("rejection_reason_codes", []))),
+            "diagnostics_reference_paths": list(cast(List[str], info.get("diagnostics_reference_paths", []))),
+        }
+        if stage_key == "stage_01":
+            checked_entry["formal_gate_summary"] = dict(stage_01_formal_summary)
+            checked_entry["attestation_evidence_status"] = stage_01_formal_summary.get("attestation_evidence_status", "<absent>")
+        checked[stage_key] = checked_entry
+    return checked
+
+
+def _build_formal_input_summary(
+    checked_packages_summary: Mapping[str, Dict[str, Any]],
+    *,
+    require_stage_02: bool,
+    require_stage_03: bool,
+) -> Dict[str, Any]:
+    """
+    功能：生成 formal input 分类摘要。 
+
+    Build the stage-04 formal-input summary with required, optional, accepted,
+    rejected, and missing categories.
+
+    Args:
+        checked_packages_summary: Checked package summary mapping.
+        require_stage_02: Whether stage 02 is mandatory.
+        require_stage_03: Whether stage 03 is mandatory.
+
+    Returns:
+        Formal-input summary mapping.
+    """
+    requirement_by_stage = {
+        "stage_01": True,
+        "stage_02": require_stage_02,
+        "stage_03": require_stage_03,
+    }
+    required_inputs: List[Dict[str, Any]] = []
+    optional_inputs: List[Dict[str, Any]] = []
+    accepted_formal_inputs: List[Dict[str, Any]] = []
+    rejected_inputs: List[Dict[str, Any]] = []
+    missing_required_inputs: List[Dict[str, Any]] = []
+
+    for stage_key in ("stage_01", "stage_02", "stage_03"):
+        entry = dict(checked_packages_summary.get(stage_key, {}))
+        if not entry:
+            continue
+        summary_entry = {
+            "stage_key": stage_key,
+            "stage_name": entry.get("stage_name", entry.get("expected_stage_name", "<absent>")),
+            "required": requirement_by_stage[stage_key],
+            "provided": entry.get("provided", False),
+            "input_path": entry.get("input_path", "<absent>"),
+            "input_status": entry.get("input_status", "not_provided"),
+            "package_role": entry.get("package_role", "<absent>"),
+            "package_discovery_scope": entry.get("package_discovery_scope", "<absent>"),
+            "stage_run_id": entry.get("stage_run_id", "<absent>"),
+            "rejection_reason_codes": entry.get("rejection_reason_codes", []),
+        }
+        if requirement_by_stage[stage_key]:
+            required_inputs.append(summary_entry)
+        else:
+            optional_inputs.append(summary_entry)
+
+        if entry.get("input_status") == "prepared":
+            accepted_formal_inputs.append(summary_entry)
+        elif entry.get("provided"):
+            rejected_inputs.append(summary_entry)
+        elif requirement_by_stage[stage_key]:
+            missing_required_inputs.append(summary_entry)
+
+    return {
+        "required_inputs": required_inputs,
+        "optional_inputs": optional_inputs,
+        "accepted_formal_inputs": accepted_formal_inputs,
+        "rejected_inputs": rejected_inputs,
+        "missing_required_inputs": missing_required_inputs,
+    }
 
 
 def _validate_stage_03_primary_contract_payload(
@@ -1245,10 +1699,52 @@ def _prepare_stage_package_input(
             )
         return info
 
+    package_policy_probe = _probe_input_package_policy(package_path)
+    info.update(
+        {
+            "package_policy_source": package_policy_probe.get("package_policy_source", "absent"),
+            "package_role": package_policy_probe.get("package_role", FORMAL_STAGE_PACKAGE_ROLE),
+            "package_discovery_scope": package_policy_probe.get(
+                "package_discovery_scope",
+                FORMAL_PACKAGE_DISCOVERY_SCOPE,
+            ),
+            "diagnostics_reference_paths": list(
+                cast(List[str], package_policy_probe.get("diagnostics_reference_paths", []))
+            ),
+            "rejection_reason_codes": [],
+        }
+    )
+    if bool(package_policy_probe.get("explicit_non_formal", False)):
+        diagnostics_like = bool(package_policy_probe.get("diagnostics_like", False))
+        reason_code = (
+            f"{stage_key}.diagnostics_package_rejected"
+            if diagnostics_like
+            else f"{stage_key}.non_formal_package_rejected"
+        )
+        info["status"] = "rejected_non_formal"
+        info["rejection_reason_codes"] = [reason_code]
+        _append_blocking_reason(
+            blocking_reasons,
+            source=stage_key,
+            reason_code=reason_code,
+            rule="stage 04 formal signoff only accepts discoverable formal stage packages as inputs",
+            impact=f"{stage_name} cannot enter the formal signoff gate because the provided ZIP is non-formal or excluded from formal discovery",
+            fix="provide the formal stage package ZIP rather than a diagnostics or excluded package",
+            evidence={
+                "input_path": normalize_path_value(package_path),
+                "package_role": package_policy_probe.get("package_role"),
+                "package_discovery_scope": package_policy_probe.get("package_discovery_scope"),
+                "package_policy_source": package_policy_probe.get("package_policy_source"),
+                "diagnostics_reference_paths": package_policy_probe.get("diagnostics_reference_paths", []),
+            },
+        )
+        return info
+
     try:
         source_info = prepare_source_package(package_path, runtime_state_root / stage_key)
     except Exception as exc:
         info["status"] = "prepare_failed"
+        info["rejection_reason_codes"] = [f"{stage_key}.package_prepare_failed"]
         _append_blocking_reason(
             blocking_reasons,
             source=stage_key,
@@ -1274,6 +1770,11 @@ def _prepare_stage_package_input(
             "extracted_root": extracted_root,
             "stage_manifest": stage_manifest,
             "package_manifest": package_manifest,
+            "package_role": package_manifest.get("package_role", info.get("package_role", FORMAL_STAGE_PACKAGE_ROLE)),
+            "package_discovery_scope": package_manifest.get(
+                "package_discovery_scope",
+                info.get("package_discovery_scope", FORMAL_PACKAGE_DISCOVERY_SCOPE),
+            ),
             "package_sha256": str(source_info["source_package_sha256"]),
             "package_manifest_digest": str(source_info["package_manifest_digest"]),
         }
@@ -1348,19 +1849,64 @@ def _validate_stage_lineage(
     Returns:
         Lineage summary mapping.
     """
-    lineage_summary: Dict[str, Any] = {}
+    lineage_summary: Dict[str, Any] = {
+        "stage_01_identity_summary": {},
+        "stage_02_lineage_status": {
+            "status": "not_provided",
+            "required": bool(stage_inputs.get("stage_02", {}).get("required", False)),
+            "provided": bool(stage_inputs.get("stage_02", {}).get("provided", False)),
+            "failed_checks": [],
+        },
+        "stage_03_lineage_status": {
+            "status": "not_provided",
+            "required": bool(stage_inputs.get("stage_03", {}).get("required", False)),
+            "provided": bool(stage_inputs.get("stage_03", {}).get("provided", False)),
+            "failed_checks": [],
+        },
+        "lineage_match_status": FORMAL_SIGNOFF_PASS_STATUS,
+        "lineage_block_reasons": [],
+    }
     stage_01_info = stage_inputs.get("stage_01")
     if not isinstance(stage_01_info, dict) or stage_01_info.get("status") != "prepared":
+        lineage_summary["lineage_match_status"] = FORMAL_SIGNOFF_BLOCK_STATUS
         return lineage_summary
 
     stage_01_manifest = cast(Dict[str, Any], stage_01_info["stage_manifest"])
     stage_01_package_manifest = cast(Dict[str, Any], stage_01_info["package_manifest"])
     stage_01_manifest_digest = compute_mapping_sha256(stage_01_manifest)
     stage_01_package_digest = compute_mapping_sha256(stage_01_package_manifest)
+    lineage_summary["stage_01_identity_summary"] = _build_stage_identity_summary(stage_01_info)
+
+    lineage_block_reasons = cast(List[Dict[str, Any]], lineage_summary["lineage_block_reasons"])
 
     for stage_key in ("stage_02", "stage_03"):
         current_info = stage_inputs.get(stage_key)
-        if not isinstance(current_info, dict) or current_info.get("status") != "prepared":
+        current_summary_key = f"{stage_key}_lineage_status"
+        current_summary = cast(Dict[str, Any], lineage_summary[current_summary_key])
+        if not isinstance(current_info, dict):
+            continue
+        current_summary.update(
+            {
+                "required": bool(current_info.get("required", False)),
+                "provided": bool(current_info.get("provided", False)),
+                "input_status": current_info.get("status", "not_provided"),
+            }
+        )
+        if not bool(current_info.get("provided", False)):
+            current_summary["status"] = "not_provided"
+            continue
+        if current_info.get("status") != "prepared":
+            current_summary["status"] = FORMAL_SIGNOFF_BLOCK_STATUS
+            current_summary["failed_checks"] = list(cast(List[str], current_info.get("rejection_reason_codes", []))) or [
+                "input_not_prepared"
+            ]
+            lineage_block_reasons.append(
+                {
+                    "stage_key": stage_key,
+                    "reason_code": f"{stage_key}.lineage_not_resolved",
+                    "failed_checks": current_summary["failed_checks"],
+                }
+            )
             continue
         current_manifest = cast(Dict[str, Any], current_info["stage_manifest"])
         current_files = required_files.get(stage_key, {})
@@ -1387,6 +1933,13 @@ def _validate_stage_lineage(
             "source_thresholds_artifact_path",
             "source_stage_manifest_copy_path",
         ]
+        missing_lineage_fields = [
+            field_name
+            for field_name in required_lineage_fields
+            if not isinstance(current_manifest.get(field_name), str)
+            or not str(current_manifest.get(field_name)).strip()
+            or current_manifest.get(field_name) == "<absent>"
+        ]
         _require_nonempty_string_fields(
             current_manifest,
             required_lineage_fields,
@@ -1397,8 +1950,12 @@ def _validate_stage_lineage(
             impact=f"{stage_key} lineage cannot be verified",
             fix="re-export the downstream stage package with all lineage fields populated",
         )
+        failed_checks: List[str] = []
+        if missing_lineage_fields:
+            failed_checks.append("lineage_fields_missing")
 
         if source_stage_manifest_error is not None or source_stage_manifest_copy is None:
+            failed_checks.append("lineage_stage_manifest_invalid")
             _append_blocking_reason(
                 blocking_reasons,
                 source=stage_key,
@@ -1409,6 +1966,7 @@ def _validate_stage_lineage(
                 evidence={"path": source_stage_manifest_copy_path, "error": source_stage_manifest_error},
             )
         if source_package_manifest_error is not None or source_package_manifest_copy is None:
+            failed_checks.append("lineage_package_manifest_invalid")
             _append_blocking_reason(
                 blocking_reasons,
                 source=stage_key,
@@ -1428,8 +1986,9 @@ def _validate_stage_lineage(
             "lineage_stage_manifest_digest": isinstance(source_stage_manifest_copy, dict) and compute_mapping_sha256(source_stage_manifest_copy) == stage_01_manifest_digest,
             "lineage_package_manifest_digest": isinstance(source_package_manifest_copy, dict) and compute_mapping_sha256(source_package_manifest_copy) == stage_01_package_digest,
         }
-        failed_checks = [name for name, status_value in comparisons.items() if not status_value]
-        if failed_checks:
+        comparison_failures = [name for name, status_value in comparisons.items() if not status_value]
+        failed_checks.extend(comparison_failures)
+        if comparison_failures:
             _append_blocking_reason(
                 blocking_reasons,
                 source=stage_key,
@@ -1447,7 +2006,35 @@ def _validate_stage_lineage(
                     "actual_package_manifest_digest": current_manifest.get("source_package_manifest_digest"),
                 },
             )
-        lineage_summary[stage_key] = comparisons
+        current_summary.update(
+            {
+                "status": FORMAL_SIGNOFF_PASS_STATUS if not failed_checks else FORMAL_SIGNOFF_BLOCK_STATUS,
+                "source_stage_run_id": current_manifest.get("source_stage_run_id"),
+                "expected_stage_run_id": stage_01_manifest.get("stage_run_id"),
+                "source_package_sha256": current_manifest.get("source_package_sha256"),
+                "expected_package_sha256": stage_01_info.get("package_sha256"),
+                "source_package_manifest_digest": current_manifest.get("source_package_manifest_digest"),
+                "expected_package_manifest_digest": stage_01_package_digest,
+                "comparisons": comparisons,
+                "failed_checks": failed_checks,
+                "lineage_snapshot_paths": {
+                    "source_stage_manifest": source_stage_manifest_copy_path or "<absent>",
+                    "source_package_manifest": source_package_manifest_copy_path or "<absent>",
+                },
+            }
+        )
+        if failed_checks:
+            lineage_block_reasons.append(
+                {
+                    "stage_key": stage_key,
+                    "reason_code": f"{stage_key}.lineage_blocked",
+                    "failed_checks": failed_checks,
+                }
+            )
+
+    lineage_summary["lineage_match_status"] = (
+        FORMAL_SIGNOFF_PASS_STATUS if len(lineage_block_reasons) == 0 else FORMAL_SIGNOFF_BLOCK_STATUS
+    )
     return lineage_summary
 
 
@@ -1465,10 +2052,13 @@ def _compute_signoff_decision(blocking_reasons: Sequence[Mapping[str, Any]]) -> 
     """
     reason_list = [dict(item) for item in blocking_reasons]
     decision = ALLOW_FREEZE if len(reason_list) == 0 else BLOCK_FREEZE
+    signoff_statuses = _resolve_signoff_statuses(decision)
     return {
         "decision": decision,
         "blocking_reasons": reason_list,
+        "block_reasons": reason_list,
         "blocking_reason_count": len(reason_list),
+        **signoff_statuses,
     }
 
 
@@ -1476,6 +2066,9 @@ def _build_release_manifest(
     *,
     stage_inputs: Mapping[str, Dict[str, Any]],
     decision_summary: Mapping[str, Any],
+    checked_packages_summary: Mapping[str, Dict[str, Any]],
+    formal_input_summary: Mapping[str, Any],
+    lineage_resolution_summary: Mapping[str, Any],
     config_path: Path,
     stage_run_id: str,
     required_stage_02: bool,
@@ -1524,6 +2117,13 @@ def _build_release_manifest(
         "required_stage_03": required_stage_03,
         "consumed_stage_packages": consumed_packages,
         "decision": decision_summary.get("decision"),
+        "signoff_status": decision_summary.get("signoff_status"),
+        "release_status": decision_summary.get("release_status"),
+        "paper_closure_status": decision_summary.get("paper_closure_status"),
+        "block_reasons": list(cast(List[Dict[str, Any]], decision_summary.get("block_reasons", []))),
+        "checked_packages_summary": dict(checked_packages_summary),
+        "formal_input_summary": dict(formal_input_summary),
+        "lineage_resolution_summary": dict(lineage_resolution_summary),
         "blocking_reason_count": decision_summary.get("blocking_reason_count"),
         "created_at": utc_now_iso(),
     }
@@ -1686,8 +2286,24 @@ def run_stage_04(
             blocking_reasons,
         )
 
+    stage_01_formal_summary = _validate_stage_01_formal_closure(
+        stage_inputs,
+        required_files,
+        parsed_payloads,
+        blocking_reasons,
+    )
     lineage_summary = _validate_stage_lineage(stage_inputs, required_files, blocking_reasons)
     decision_summary = _compute_signoff_decision(blocking_reasons)
+    checked_packages_summary = _build_checked_packages_summary(
+        stage_inputs,
+        parsed_payloads,
+        stage_01_formal_summary,
+    )
+    formal_input_summary = _build_formal_input_summary(
+        checked_packages_summary,
+        require_stage_02=require_stage_02,
+        require_stage_03=require_stage_03,
+    )
 
     signoff_report_path = run_root / "artifacts" / "signoff" / "signoff_report.json"
     release_manifest_path = run_root / "artifacts" / "release" / "release_manifest.json"
@@ -1698,6 +2314,9 @@ def run_stage_04(
     release_manifest = _build_release_manifest(
         stage_inputs=stage_inputs,
         decision_summary=decision_summary,
+        checked_packages_summary=checked_packages_summary,
+        formal_input_summary=formal_input_summary,
+        lineage_resolution_summary=lineage_summary,
         config_path=config_path,
         stage_run_id=stage_run_id,
         required_stage_02=require_stage_02,
@@ -1710,10 +2329,16 @@ def run_stage_04(
         "stage_name": STAGE_04_NAME,
         "stage_run_id": stage_run_id,
         "decision": decision_summary["decision"],
+        "signoff_status": decision_summary["signoff_status"],
+        "release_status": decision_summary["release_status"],
+        "paper_closure_status": decision_summary["paper_closure_status"],
         "blocking_reason_count": decision_summary["blocking_reason_count"],
         "blocking_reasons": decision_summary["blocking_reasons"],
+        "block_reasons": decision_summary["block_reasons"],
         "required_stage_02": require_stage_02,
         "required_stage_03": require_stage_03,
+        "checked_packages_summary": checked_packages_summary,
+        "formal_input_summary": formal_input_summary,
         "stage_inputs": {
             stage_key: {
                 "status": info.get("status"),
@@ -1728,6 +2353,8 @@ def run_stage_04(
             for stage_key, info in stage_inputs.items()
         },
         "lineage_summary": lineage_summary,
+        "lineage_resolution_summary": lineage_summary,
+        "stage_01_formal_summary": stage_01_formal_summary,
         "json_anchor_summary": {
             stage_key: {
                 label: summarize_manifest_fields(payload, [
@@ -1758,12 +2385,20 @@ def run_stage_04(
         "stage_run_id": stage_run_id,
         "notebook_name": notebook_name,
         "decision": decision_summary["decision"],
+        "signoff_status": decision_summary["signoff_status"],
+        "release_status": decision_summary["release_status"],
+        "paper_closure_status": decision_summary["paper_closure_status"],
+        "block_reasons": decision_summary["block_reasons"],
         "blocking_reason_count": decision_summary["blocking_reason_count"],
         "signoff_report_path": normalize_path_value(signoff_report_path),
         "release_manifest_path": normalize_path_value(release_manifest_path),
         "required_stage_02": require_stage_02,
         "required_stage_03": require_stage_03,
         "consumed_stage_packages": release_manifest["consumed_stage_packages"],
+        "checked_packages_summary": checked_packages_summary,
+        "formal_input_summary": formal_input_summary,
+        "lineage_resolution_summary": lineage_summary,
+        "stage_01_formal_summary": stage_01_formal_summary,
         "created_at": utc_now_iso(),
     }
     write_json_atomic(workflow_summary_path, workflow_summary)
@@ -1772,6 +2407,9 @@ def run_stage_04(
         "stage_name": STAGE_04_NAME,
         "stage_run_id": stage_run_id,
         "decision": decision_summary["decision"],
+        "signoff_status": decision_summary["signoff_status"],
+        "release_status": decision_summary["release_status"],
+        "paper_closure_status": decision_summary["paper_closure_status"],
         "blocking_reason_count": decision_summary["blocking_reason_count"],
         "status": {
             "ok": decision_summary["decision"] == ALLOW_FREEZE,
@@ -1809,6 +2447,14 @@ def run_stage_04(
         "required_stage_02": require_stage_02,
         "required_stage_03": require_stage_03,
         "consumed_stage_packages": release_manifest["consumed_stage_packages"],
+        "signoff_status": decision_summary["signoff_status"],
+        "release_status": decision_summary["release_status"],
+        "paper_closure_status": decision_summary["paper_closure_status"],
+        "block_reasons": decision_summary["block_reasons"],
+        "checked_packages_summary": checked_packages_summary,
+        "formal_input_summary": formal_input_summary,
+        "lineage_resolution_summary": lineage_summary,
+        "stage_01_formal_summary": stage_01_formal_summary,
         "lineage_snapshot_paths": lineage_paths,
         "git": collect_git_summary(REPO_ROOT),
         "python": collect_python_summary(),
@@ -1841,6 +2487,10 @@ def run_stage_04(
         "stage_name": STAGE_04_NAME,
         "stage_run_id": stage_run_id,
         "decision": decision_summary["decision"],
+        "signoff_status": decision_summary["signoff_status"],
+        "release_status": decision_summary["release_status"],
+        "paper_closure_status": decision_summary["paper_closure_status"],
+        "block_reasons": decision_summary["block_reasons"],
         "blocking_reason_count": decision_summary["blocking_reason_count"],
         "run_root": normalize_path_value(run_root),
         "log_root": normalize_path_value(log_root),
