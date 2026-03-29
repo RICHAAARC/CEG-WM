@@ -493,7 +493,6 @@ def _make_stage_01_source_pool_contract(run_root: Path, prompt_count: int) -> Di
         {
             "artifact_type": "stage_01_canonical_source_pool",
             "artifact_role": "canonical_source_pool_root",
-            "artifact_version": "v1",
             "stage_name": "01_Paper_Full_Cuda",
             "stage_run_id": "stage01_test",
             "prompt_file": "prompts/paper_small.txt",

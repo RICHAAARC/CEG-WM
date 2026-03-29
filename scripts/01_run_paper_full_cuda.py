@@ -1433,7 +1433,6 @@ def _build_stage_01_canonical_source_pool(
     manifest_payload: Dict[str, Any] = {
         "artifact_type": "stage_01_canonical_source_pool",
         "artifact_role": "canonical_source_pool_root",
-        "artifact_version": "v1",
         "stage_name": "01_Paper_Full_Cuda",
         "stage_run_id": stage_run_id,
         "prompt_file": prompt_file_path,

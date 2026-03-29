@@ -891,7 +891,7 @@ def run_stage_01(
 
     try:
         if not bool(preflight.get("ok", False)):
-            raise RuntimeError(f"formal GPU preflight failed: {json.dumps(preflight, ensure_ascii=False, sort_keys=True)}")
+            raise RuntimeError(f"stage 01 preflight failed: {json.dumps(preflight, ensure_ascii=False, sort_keys=True)}")
 
         runner_result = run_command_with_logs(
             command=runner_command,
