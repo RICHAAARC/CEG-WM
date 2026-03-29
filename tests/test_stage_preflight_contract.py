@@ -8,28 +8,20 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 import scripts.workflow_acceptance_common as workflow_acceptance_common
 
 
-MINIMAL_CONFIG_TEMPLATE = """
-policy_path: content_np_geo_rescue
-inference_prompt_file: prompts/paper_small.txt
-attestation:
-  enabled: {attestation_enabled}
-  k_master_env_var: CEG_WM_K_MASTER
-  k_prompt_env_var: CEG_WM_K_PROMPT
-  k_seed_env_var: CEG_WM_K_SEED
-stage_01_source_pool:
-  enabled: true
-  use_inference_prompt_file: true
-stage_01_pooled_threshold_build:
-  enabled: true
-  target_pair_count: 16
-""".strip()
-
-
-def _write_config(path_obj: Path, *, attestation_enabled: bool = True) -> Path:
+def _write_config(
+    path_obj: Path,
+    *,
+    attestation_enabled: bool = True,
+    model_snapshot_path: Path | None = None,
+    binding_status: str = "bound",
+    binding_reason: str | None = None,
+    binding_snapshot_path: str | None = None,
+) -> Path:
     """
     功能：写出最小 preflight 测试配置。 
 
@@ -38,16 +30,126 @@ def _write_config(path_obj: Path, *, attestation_enabled: bool = True) -> Path:
     Args:
         path_obj: Destination config path.
         attestation_enabled: Whether attestation is enabled in the test config.
+        model_snapshot_path: Optional runtime-bound model snapshot path.
+        binding_status: Binding status written into model_source_binding.
+        binding_reason: Optional binding reason override.
+        binding_snapshot_path: Optional snapshot path stored inside
+            model_source_binding.
 
     Returns:
         Written config path.
     """
+    if model_snapshot_path is not None and not isinstance(model_snapshot_path, Path):
+        raise TypeError("model_snapshot_path must be Path or None")
+    if not isinstance(binding_status, str) or not binding_status:
+        raise TypeError("binding_status must be non-empty str")
+    if binding_reason is not None and (not isinstance(binding_reason, str) or not binding_reason):
+        raise TypeError("binding_reason must be non-empty str or None")
+    if binding_snapshot_path is not None and (
+        not isinstance(binding_snapshot_path, str) or not binding_snapshot_path
+    ):
+        raise TypeError("binding_snapshot_path must be non-empty str or None")
+
+    cfg_obj = {
+        "policy_path": "content_np_geo_rescue",
+        "inference_prompt_file": "prompts/paper_small.txt",
+        "attestation": {
+            "enabled": attestation_enabled,
+            "k_master_env_var": "CEG_WM_K_MASTER",
+            "k_prompt_env_var": "CEG_WM_K_PROMPT",
+            "k_seed_env_var": "CEG_WM_K_SEED",
+        },
+        "stage_01_source_pool": {
+            "enabled": True,
+            "use_inference_prompt_file": True,
+        },
+        "stage_01_pooled_threshold_build": {
+            "enabled": True,
+            "target_pair_count": 16,
+        },
+    }
+    if model_snapshot_path is not None:
+        snapshot_path_text = model_snapshot_path.as_posix()
+        resolved_binding_reason = binding_reason or (
+            "model_snapshot_env_var_bound_to_runtime_config"
+            if binding_status == "bound"
+            else "model_snapshot_env_var_path_missing_or_not_directory"
+        )
+        cfg_obj.update(
+            {
+                "model_id": "stabilityai/stable-diffusion-3.5-medium",
+                "model_source": "hf",
+                "hf_revision": "main",
+                "model_snapshot_path": snapshot_path_text,
+                "model_source_binding": {
+                    "binding_source": "notebook_snapshot_download",
+                    "binding_env_var": "CEG_WM_MODEL_SNAPSHOT_PATH",
+                    "binding_status": binding_status,
+                    "binding_reason": resolved_binding_reason,
+                    "model_snapshot_path": binding_snapshot_path or snapshot_path_text,
+                    "requested_model_id": "stabilityai/stable-diffusion-3.5-medium",
+                    "requested_model_source": "hf",
+                    "requested_hf_revision": "main",
+                },
+            }
+        )
+
     path_obj.parent.mkdir(parents=True, exist_ok=True)
-    path_obj.write_text(
-        MINIMAL_CONFIG_TEMPLATE.format(attestation_enabled=str(attestation_enabled).lower()),
-        encoding="utf-8",
-    )
+    path_obj.write_text(yaml.safe_dump(cfg_obj, sort_keys=False), encoding="utf-8")
     return path_obj
+
+
+def _set_attestation_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    功能：为 preflight 测试补齐最小 attestation env。 
+
+    Set the minimum attestation environment variables required by stage-01
+    preflight tests.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    monkeypatch.setenv("CEG_WM_K_MASTER", "a" * 64)
+    monkeypatch.setenv("CEG_WM_K_PROMPT", "b" * 32)
+    monkeypatch.setenv("CEG_WM_K_SEED", "c" * 32)
+
+
+def test_detect_stage_01_preflight_passes_with_bound_model_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：stage 01 在模型绑定有效时必须通过 formal preflight。 
+
+    Verify stage-01 preflight passes when the notebook-bound model snapshot is
+    present, directory-backed, and internally consistent.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    snapshot_dir = tmp_path / "model_snapshot"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    config_path = _write_config(tmp_path / "stage_01_bound.yaml", model_snapshot_path=snapshot_dir)
+    monkeypatch.setattr(workflow_acceptance_common.shutil, "which", lambda _command: "/usr/bin/nvidia-smi")
+    _set_attestation_env_vars(monkeypatch)
+
+    preflight = workflow_acceptance_common.detect_stage_01_preflight(config_path)
+
+    assert preflight["ok"] is True
+    assert preflight["model_source_binding_present"] is True
+    assert preflight["model_source_binding_status"] == "bound"
+    assert preflight["model_snapshot_path"] == snapshot_dir.as_posix()
+    assert preflight["model_snapshot_path_exists"] is True
+    assert preflight["model_snapshot_path_is_directory"] is True
+    assert preflight["model_source_binding_path_matches_snapshot_path"] is True
+    assert preflight["failed_checks"] == []
 
 
 def test_detect_stage_01_preflight_fails_when_attestation_env_missing(
@@ -67,7 +169,9 @@ def test_detect_stage_01_preflight_fails_when_attestation_env_missing(
     Returns:
         None.
     """
-    config_path = _write_config(tmp_path / "stage_01.yaml")
+    snapshot_dir = tmp_path / "model_snapshot"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    config_path = _write_config(tmp_path / "stage_01.yaml", model_snapshot_path=snapshot_dir)
     monkeypatch.setattr(workflow_acceptance_common.shutil, "which", lambda _command: "/usr/bin/nvidia-smi")
     for env_name in ["CEG_WM_K_MASTER", "CEG_WM_K_PROMPT", "CEG_WM_K_SEED"]:
         monkeypatch.delenv(env_name, raising=False)
@@ -82,6 +186,152 @@ def test_detect_stage_01_preflight_fails_when_attestation_env_missing(
         "CEG_WM_K_SEED",
     ]
     assert "missing_attestation_env_vars" in preflight["failed_checks"]
+    assert "stage_01_model_source_binding_missing" not in preflight["failed_checks"]
+    assert "stage_01_model_snapshot_path_missing_or_not_directory" not in preflight["failed_checks"]
+
+
+def test_detect_stage_01_preflight_fails_when_model_source_binding_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：stage 01 在模型来源绑定缺失时必须阻断。 
+
+    Verify stage-01 preflight hard-fails when the runtime config snapshot does
+    not carry the notebook model-source binding fields.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    config_path = _write_config(tmp_path / "stage_01_missing_binding.yaml")
+    monkeypatch.setattr(workflow_acceptance_common.shutil, "which", lambda _command: "/usr/bin/nvidia-smi")
+    _set_attestation_env_vars(monkeypatch)
+
+    preflight = workflow_acceptance_common.detect_stage_01_preflight(config_path)
+
+    assert preflight["ok"] is False
+    assert preflight["model_source_binding_present"] is False
+    assert preflight["model_source_binding_status"] == "<absent>"
+    assert "stage_01_model_source_binding_missing" in preflight["failed_checks"]
+    assert "stage_01_model_snapshot_path_missing_or_not_directory" in preflight["failed_checks"]
+
+
+def test_detect_stage_01_preflight_fails_when_model_source_binding_not_bound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：stage 01 在模型来源绑定状态非 bound 时必须阻断。 
+
+    Verify stage-01 preflight hard-fails when model_source_binding exists but
+    does not declare a bound runtime snapshot.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    snapshot_dir = tmp_path / "model_snapshot"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    config_path = _write_config(
+        tmp_path / "stage_01_invalid_binding.yaml",
+        model_snapshot_path=snapshot_dir,
+        binding_status="invalid",
+        binding_reason="model_snapshot_env_var_path_missing_or_not_directory",
+    )
+    monkeypatch.setattr(workflow_acceptance_common.shutil, "which", lambda _command: "/usr/bin/nvidia-smi")
+    _set_attestation_env_vars(monkeypatch)
+
+    preflight = workflow_acceptance_common.detect_stage_01_preflight(config_path)
+
+    assert preflight["ok"] is False
+    assert preflight["model_source_binding_status"] == "invalid"
+    assert preflight["model_snapshot_path_exists"] is True
+    assert preflight["model_snapshot_path_is_directory"] is True
+    assert "stage_01_model_source_binding_not_bound" in preflight["failed_checks"]
+    assert "stage_01_model_snapshot_path_missing_or_not_directory" not in preflight["failed_checks"]
+
+
+@pytest.mark.parametrize("path_kind", ["missing", "file"])
+def test_detect_stage_01_preflight_fails_when_model_snapshot_path_is_not_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    path_kind: str,
+) -> None:
+    """
+    功能：stage 01 在模型快照路径不存在或非目录时必须阻断。 
+
+    Verify stage-01 preflight hard-fails when the bound model snapshot path is
+    absent or resolves to a file instead of a directory.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+        path_kind: Whether the configured path is absent or file-backed.
+
+    Returns:
+        None.
+    """
+    snapshot_path = tmp_path / f"snapshot_{path_kind}"
+    if path_kind == "file":
+        snapshot_path.write_text("not a directory", encoding="utf-8")
+    config_path = _write_config(
+        tmp_path / f"stage_01_snapshot_{path_kind}.yaml",
+        model_snapshot_path=snapshot_path,
+    )
+    monkeypatch.setattr(workflow_acceptance_common.shutil, "which", lambda _command: "/usr/bin/nvidia-smi")
+    _set_attestation_env_vars(monkeypatch)
+
+    preflight = workflow_acceptance_common.detect_stage_01_preflight(config_path)
+
+    assert preflight["ok"] is False
+    assert preflight["model_source_binding_status"] == "bound"
+    assert preflight["model_snapshot_path_is_directory"] is False
+    assert "stage_01_model_snapshot_path_missing_or_not_directory" in preflight["failed_checks"]
+
+
+def test_detect_stage_01_preflight_fails_when_binding_path_mismatches_runtime_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：stage 01 在绑定路径与运行时快照路径不一致时必须阻断。 
+
+    Verify stage-01 preflight hard-fails when model_source_binding points to a
+    different snapshot directory than the top-level runtime config field.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    snapshot_dir = tmp_path / "model_snapshot"
+    binding_snapshot_dir = tmp_path / "binding_snapshot"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    binding_snapshot_dir.mkdir(parents=True, exist_ok=True)
+    config_path = _write_config(
+        tmp_path / "stage_01_binding_mismatch.yaml",
+        model_snapshot_path=snapshot_dir,
+        binding_snapshot_path=binding_snapshot_dir.as_posix(),
+    )
+    monkeypatch.setattr(workflow_acceptance_common.shutil, "which", lambda _command: "/usr/bin/nvidia-smi")
+    _set_attestation_env_vars(monkeypatch)
+
+    preflight = workflow_acceptance_common.detect_stage_01_preflight(config_path)
+
+    assert preflight["ok"] is False
+    assert preflight["model_snapshot_path_exists"] is True
+    assert preflight["model_snapshot_path_is_directory"] is True
+    assert preflight["model_source_binding_path_matches_snapshot_path"] is False
+    assert "stage_01_model_source_binding_path_mismatch" in preflight["failed_checks"]
 
 
 def test_detect_stage_02_preflight_does_not_require_attestation_env(

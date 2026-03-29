@@ -118,11 +118,75 @@ def _build_missing_path_check(path_obj: Optional[Path], label: str) -> Dict[str,
     }
 
 
+def _collect_stage_01_model_binding_summary(cfg_obj: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    功能：收集 stage 01 模型快照绑定门禁摘要。
+
+    Collect the lightweight stage-01 model snapshot binding summary used by the
+    formal preflight gate.
+
+    Args:
+        cfg_obj: Runtime configuration mapping.
+
+    Returns:
+        Model-binding summary with path existence and consistency signals.
+    """
+    if not isinstance(cfg_obj, Mapping):
+        raise TypeError("cfg_obj must be Mapping")
+
+    model_source_binding = cfg_obj.get("model_source_binding")
+    binding_mapping = model_source_binding if isinstance(model_source_binding, Mapping) else None
+
+    model_snapshot_path = normalize_path_value(cfg_obj.get("model_snapshot_path"))
+    binding_snapshot_path = normalize_path_value(
+        binding_mapping.get("model_snapshot_path") if binding_mapping is not None else None
+    )
+    snapshot_path_exists = False
+    snapshot_path_is_directory = False
+    if model_snapshot_path != "<absent>":
+        snapshot_path_obj = Path(model_snapshot_path)
+        snapshot_path_exists = snapshot_path_obj.exists()
+        snapshot_path_is_directory = snapshot_path_obj.is_dir()
+
+    binding_status = "<absent>"
+    binding_reason = "<absent>"
+    binding_source = "<absent>"
+    if binding_mapping is not None:
+        raw_status = binding_mapping.get("binding_status")
+        raw_reason = binding_mapping.get("binding_reason")
+        raw_source = binding_mapping.get("binding_source")
+        if isinstance(raw_status, str) and raw_status.strip():
+            binding_status = raw_status.strip()
+        if isinstance(raw_reason, str) and raw_reason.strip():
+            binding_reason = raw_reason.strip()
+        if isinstance(raw_source, str) and raw_source.strip():
+            binding_source = raw_source.strip()
+
+    return {
+        "model_source_binding_required": True,
+        "model_source_binding_present": binding_mapping is not None,
+        "model_source_binding_status": binding_status,
+        "model_source_binding_reason": binding_reason,
+        "model_source_binding_source": binding_source,
+        "model_source_binding_snapshot_path": binding_snapshot_path,
+        "model_snapshot_path": model_snapshot_path,
+        "model_snapshot_path_exists": snapshot_path_exists,
+        "model_snapshot_path_is_directory": snapshot_path_is_directory,
+        "model_source_binding_path_matches_snapshot_path": (
+            binding_mapping is not None
+            and model_snapshot_path != "<absent>"
+            and binding_snapshot_path != "<absent>"
+            and model_snapshot_path == binding_snapshot_path
+        ),
+    }
+
+
 def detect_stage_01_preflight(cfg_path: Path) -> Dict[str, Any]:
     """
     功能：执行 stage 01 的 formal preflight。 
 
-    Execute stage-01 preflight checks for GPU, attestation env, and required config gates.
+    Execute stage-01 preflight checks for GPU, attestation env, model snapshot
+    binding, and required config gates.
 
     Args:
         cfg_path: Runtime config path.
@@ -142,6 +206,16 @@ def detect_stage_01_preflight(cfg_path: Path) -> Dict[str, Any]:
         "required_attestation_env_vars": [],
         "missing_attestation_env_vars": [],
         "attestation_env_var_bindings_complete": True,
+        "model_source_binding_required": True,
+        "model_source_binding_present": False,
+        "model_source_binding_status": "<absent>",
+        "model_source_binding_reason": "<absent>",
+        "model_source_binding_source": "<absent>",
+        "model_source_binding_snapshot_path": "<absent>",
+        "model_snapshot_path": "<absent>",
+        "model_snapshot_path_exists": False,
+        "model_snapshot_path_is_directory": False,
+        "model_source_binding_path_matches_snapshot_path": False,
         "stage_01_source_pool_enabled": False,
         "stage_01_source_pool_prompt_file_bound": False,
         "stage_01_pooled_threshold_build_enabled": False,
@@ -175,6 +249,7 @@ def detect_stage_01_preflight(cfg_path: Path) -> Dict[str, Any]:
     result["missing_attestation_env_vars"] = attestation_summary["missing_env_vars"]
     result["attestation_env_var_bindings_complete"] = len(missing_env_var_bindings) == 0
     result["missing_attestation_env_var_bindings"] = missing_env_var_bindings
+    result.update(_collect_stage_01_model_binding_summary(cfg_obj))
     result["stage_01_source_pool_enabled"] = source_pool_cfg.get("enabled") is True
     result["stage_01_source_pool_prompt_file_bound"] = (
         source_pool_cfg.get("use_inference_prompt_file") is True
@@ -193,6 +268,19 @@ def detect_stage_01_preflight(cfg_path: Path) -> Dict[str, Any]:
         failed_checks.append("attestation_env_var_bindings_incomplete")
     if bool(result["attestation_env_required"]) and result["missing_attestation_env_vars"]:
         failed_checks.append("missing_attestation_env_vars")
+    if not bool(result["model_source_binding_present"]):
+        failed_checks.append("stage_01_model_source_binding_missing")
+    elif result["model_source_binding_status"] != "bound":
+        failed_checks.append("stage_01_model_source_binding_not_bound")
+    if not bool(result["model_snapshot_path_exists"]) or not bool(result["model_snapshot_path_is_directory"]):
+        failed_checks.append("stage_01_model_snapshot_path_missing_or_not_directory")
+    if (
+        bool(result["model_source_binding_present"])
+        and bool(result["model_snapshot_path_exists"])
+        and bool(result["model_snapshot_path_is_directory"])
+        and not bool(result["model_source_binding_path_matches_snapshot_path"])
+    ):
+        failed_checks.append("stage_01_model_source_binding_path_mismatch")
     if not bool(result["stage_01_source_pool_enabled"]):
         failed_checks.append("stage_01_source_pool_disabled")
     if not bool(result["stage_01_source_pool_prompt_file_bound"]):
