@@ -238,6 +238,15 @@ def assert_consistent_with_semantics(
     Raises:
         WhitelistSemanticsMismatchError: If consistency check fails.
     """
+    whitelist_version = whitelist.whitelist_version
+    semantics_version = semantics.policy_path_semantics_version
+    if whitelist_version != semantics_version:
+        raise WhitelistSemanticsMismatchError(
+            "policy_path_semantics and runtime_whitelist versions must match: "
+            f"semantics.policy_path_semantics_version={semantics_version} "
+            f"!= whitelist.whitelist_version={whitelist_version}"
+        )
+
     # 提取 whitelist 中的 policy_path.allowed。
     policy_path_config = whitelist.data.get("policy_path", {})
     allowed_policy_paths = policy_path_config.get("allowed", [])

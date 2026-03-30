@@ -152,6 +152,47 @@ def test_detect_stage_01_preflight_passes_with_bound_model_snapshot(
     assert preflight["failed_checks"] == []
 
 
+def test_detect_stage_01_preflight_fails_when_whitelist_semantics_versions_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：stage 01 在正式 whitelist 与 semantics 版本不一致时必须提前失败。
+
+    Verify stage-01 preflight fails early when the authoritative runtime
+    whitelist version does not match the policy semantics version.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    snapshot_dir = tmp_path / "model_snapshot"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    config_path = _write_config(tmp_path / "stage_01_version_mismatch.yaml", model_snapshot_path=snapshot_dir)
+    monkeypatch.setattr(workflow_acceptance_common.shutil, "which", lambda _command: "/usr/bin/nvidia-smi")
+    _set_attestation_env_vars(monkeypatch)
+    monkeypatch.setattr(
+        workflow_acceptance_common,
+        "_collect_authoritative_policy_binding_summary",
+        lambda: {
+            "runtime_whitelist_version": "v2.4",
+            "policy_path_semantics_version": "v2.6",
+            "whitelist_semantics_versions_match": False,
+        },
+    )
+
+    preflight = workflow_acceptance_common.detect_stage_01_preflight(config_path)
+
+    assert preflight["ok"] is False
+    assert preflight["runtime_whitelist_version"] == "v2.4"
+    assert preflight["policy_path_semantics_version"] == "v2.6"
+    assert preflight["whitelist_semantics_versions_match"] is False
+    assert "policy_semantics_whitelist_version_mismatch" in preflight["failed_checks"]
+
+
 def test_detect_stage_01_preflight_fails_when_attestation_env_missing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

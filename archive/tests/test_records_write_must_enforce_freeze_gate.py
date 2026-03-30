@@ -7,9 +7,11 @@ Test that records write operations must go through freeze_gate
 and cannot bypass the gate enforcement.
 """
 
-import pytest
 import json
+from dataclasses import replace
 from types import SimpleNamespace
+
+import pytest
 
 
 def _load_fact_sources():
@@ -247,6 +249,27 @@ def test_freeze_gate_assert_prewrite_blocks_invalid_record(mock_interpretation):
     
     error_msg = str(exc_info.value).lower()
     assert any(keyword in error_msg for keyword in ["contract", "required", "missing"])
+
+
+def test_freeze_gate_assert_prewrite_rejects_whitelist_semantics_version_mismatch() -> None:
+    """
+    功能：版本强绑定不一致时 freeze_gate 仍必须拒绝写盘。
+
+    Verify freeze_gate.assert_prewrite retains the late defensive rejection
+    when runtime_whitelist and policy_path_semantics versions diverge.
+
+    Returns:
+        None.
+    """
+    from main.policy import freeze_gate
+    from main.core.errors import GateEnforcementError
+
+    contracts, whitelist, semantics, _ = _load_fact_sources()
+    mismatched_whitelist = replace(whitelist, whitelist_version="v2.4")
+
+    with pytest.raises(GateEnforcementError, match="versions must match"):
+        freeze_gate.assert_prewrite({}, contracts, mismatched_whitelist, semantics)
+
 
 
 def test_attestation_bundle_gate_is_registered_in_main_dispatch(monkeypatch) -> None:

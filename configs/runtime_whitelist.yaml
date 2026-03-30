@@ -8,13 +8,15 @@
 # ------------------------------
 # 白名单版本：用于 records 记录与审计。
 # ------------------------------
-whitelist_version: "v2.4"    # 运行期白名单版本号：任意一次运行必须记录到 records 中，且不可由 CLI 任意指定。
+whitelist_version: "v2.6"    # 运行期白名单版本号：任意一次运行必须记录到 records 中，且不可由 CLI 任意指定。
                              # v1.0→v1.1：追加 detect_calibration_artifact_path override（P1-A，2026-03-10）。
                              # v1.1→v2.0：论文正式路径收口（2026-03-11）；移除全部旧 v1 paper-impl；仅保留 v2/v3 正式实现族与测试支架基线。
                              # v2.0→v2.1：同步 policy_path_semantics_version v2.1（2026-03-11）。
                              # v2.1→v2.2：从 formal whitelist 彻底移除 embed_identity_mode override（2026-03-12）。
                              # v2.2→v2.3：同步 policy_path_semantics_version v2.3，覆盖 coarse registration 与 recovered-domain sync revalidation 的正式语义收口（2026-03-13）。
                              # v2.3→v2.4：同步 policy_path_semantics_version v2.4，绑定 statement-only provenance 的 attestation_source 正式语义（2026-03-17）。
+                             # v2.4→v2.5：同步 policy_path_semantics_version v2.5，绑定 content_minimal 的正式内容分数字段切换为 content_evidence.content_chain_score（2026-03-26）。
+                             # v2.5→v2.6：同步 policy_path_semantics_version v2.6，移除 event_attestation_statistics_score 旧 alias，仅保留 canonical event_attestation_score（2026-03-26）。
 
 # ==============================================================
 # policy_path 允许集合

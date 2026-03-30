@@ -25,6 +25,11 @@ from scripts.notebook_runtime_common import (
 )
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_RUNTIME_WHITELIST_CONFIG_PATH = _REPO_ROOT / "configs" / "runtime_whitelist.yaml"
+_POLICY_PATH_SEMANTICS_CONFIG_PATH = _REPO_ROOT / "configs" / "policy_path_semantics.yaml"
+
+
 def build_path_views(run_root: Path, raw_paths: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
     """
     功能：构建绝对与相对路径视图。
@@ -118,6 +123,47 @@ def _build_missing_path_check(path_obj: Optional[Path], label: str) -> Dict[str,
     }
 
 
+def _collect_authoritative_policy_binding_summary() -> Dict[str, Any]:
+    """
+    功能：收集正式 whitelist 与 semantics 的版本绑定摘要。
+
+    Collect the authoritative runtime-whitelist and policy-semantics version
+    binding summary for notebook-stage preflight.
+
+    Args:
+        None.
+
+    Returns:
+        Mapping with authoritative version strings and version-match status.
+    """
+    whitelist_obj, whitelist_error = _load_config_mapping(_RUNTIME_WHITELIST_CONFIG_PATH)
+    semantics_obj, semantics_error = _load_config_mapping(_POLICY_PATH_SEMANTICS_CONFIG_PATH)
+
+    runtime_whitelist_version = "<absent>"
+    raw_whitelist_version = whitelist_obj.get("whitelist_version") if isinstance(whitelist_obj, Mapping) else None
+    if isinstance(raw_whitelist_version, str) and raw_whitelist_version.strip():
+        runtime_whitelist_version = raw_whitelist_version.strip()
+
+    policy_path_semantics_version = "<absent>"
+    raw_semantics_version = (
+        semantics_obj.get("policy_path_semantics_version") if isinstance(semantics_obj, Mapping) else None
+    )
+    if isinstance(raw_semantics_version, str) and raw_semantics_version.strip():
+        policy_path_semantics_version = raw_semantics_version.strip()
+
+    return {
+        "runtime_whitelist_version": runtime_whitelist_version,
+        "policy_path_semantics_version": policy_path_semantics_version,
+        "whitelist_semantics_versions_match": (
+            whitelist_error is None
+            and semantics_error is None
+            and runtime_whitelist_version != "<absent>"
+            and policy_path_semantics_version != "<absent>"
+            and runtime_whitelist_version == policy_path_semantics_version
+        ),
+    }
+
+
 def _collect_stage_01_model_binding_summary(cfg_obj: Mapping[str, Any]) -> Dict[str, Any]:
     """
     功能：收集 stage 01 模型快照绑定门禁摘要。
@@ -185,8 +231,9 @@ def detect_stage_01_preflight(cfg_path: Path) -> Dict[str, Any]:
     """
     功能：执行 stage 01 的 formal preflight。 
 
-    Execute stage-01 preflight checks for GPU, attestation env, model snapshot
-    binding, and required config gates.
+    Execute stage-01 preflight checks for GPU, attestation env, authoritative
+    whitelist-semantics version binding, model snapshot binding, and required
+    config gates.
 
     Args:
         cfg_path: Runtime config path.
@@ -196,12 +243,14 @@ def detect_stage_01_preflight(cfg_path: Path) -> Dict[str, Any]:
     """
     cfg_obj, config_error = _load_config_mapping(cfg_path)
     gpu_summary = _collect_gpu_tool_summary()
+    policy_binding_summary = _collect_authoritative_policy_binding_summary()
     result: Dict[str, Any] = {
         "stage_name": "01_Paper_Full_Cuda",
         "cfg_path": normalize_path_value(cfg_path),
         "config_error": config_error,
         "gpu_required": True,
         **gpu_summary,
+        **policy_binding_summary,
         "attestation_env_required": False,
         "required_attestation_env_vars": [],
         "missing_attestation_env_vars": [],
@@ -224,6 +273,8 @@ def detect_stage_01_preflight(cfg_path: Path) -> Dict[str, Any]:
         "ok": False,
     }
     failed_checks = cast(List[str], result["failed_checks"])
+    if not bool(result["whitelist_semantics_versions_match"]):
+        failed_checks.append("policy_semantics_whitelist_version_mismatch")
     if config_error is not None or cfg_obj is None:
         failed_checks.append("config_invalid")
         result["ok"] = False
