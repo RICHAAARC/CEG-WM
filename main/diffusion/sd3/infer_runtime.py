@@ -23,6 +23,8 @@ from main.core import digests
 INFERENCE_STATUS_OK = "ok"
 INFERENCE_STATUS_FAILED = "failed"
 INFERENCE_STATUS_DISABLED = "disabled"
+CUDA_MEMORY_PROFILE_SAMPLE_SCOPE = "single_worker_process_local"
+_BYTES_PER_MIB = 1024.0 * 1024.0
 TRAJECTORY_CACHE_CAPTURE_META_FIELDS = [
     "trajectory_cache_capture_status",
     "trajectory_cache_step_count",
@@ -321,6 +323,310 @@ def _resolve_pipeline_device_label(pipeline_obj: Any) -> str | None:
     return None
 
 
+def _normalize_runtime_phase_label(runtime_phase_label: str | None) -> str | None:
+    """
+    功能：归一化运行时观测阶段标签。
+
+    Normalize the optional observability phase label.
+
+    Args:
+        runtime_phase_label: Optional runtime phase label.
+
+    Returns:
+        Normalized phase label, or None when unavailable.
+    """
+    if runtime_phase_label is None:
+        return None
+    if not isinstance(runtime_phase_label, str):
+        raise TypeError("runtime_phase_label must be str or None")
+
+    normalized_label = runtime_phase_label.strip()
+    if not normalized_label:
+        return None
+    return normalized_label
+
+
+def _coerce_optional_int_bytes(value: Any) -> int | None:
+    """
+    功能：将候选显存统计值规范化为 bytes 整数。
+
+    Normalize a candidate CUDA memory statistic into an integer byte count.
+
+    Args:
+        value: Candidate statistic value.
+
+    Returns:
+        Integer byte count, or None when unavailable.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float) and float(value).is_integer():
+        return int(value)
+    return None
+
+
+def _bytes_to_mib(value: Any) -> float | None:
+    """
+    功能：将 bytes 统计值转换为 MiB。
+
+    Convert a byte count into MiB for lightweight observability.
+
+    Args:
+        value: Candidate byte count.
+
+    Returns:
+        MiB value, or None when unavailable.
+    """
+    normalized_value = _coerce_optional_int_bytes(value)
+    if normalized_value is None:
+        return None
+    return round(float(normalized_value) / _BYTES_PER_MIB, 6)
+
+
+def _build_cuda_memory_profile_base(
+    *,
+    phase_label: str | None,
+    device_label: str | None,
+) -> Dict[str, Any]:
+    """
+    功能：构造 CUDA 显存 profile 的公共锚点字段。
+
+    Build the shared anchor fields for CUDA memory profile payloads.
+
+    Args:
+        phase_label: Optional runtime phase label.
+        device_label: Normalized runtime device label.
+
+    Returns:
+        Base CUDA memory profile mapping.
+    """
+    return {
+        "phase_label": phase_label,
+        "device": device_label or "<absent>",
+        "sample_scope": CUDA_MEMORY_PROFILE_SAMPLE_SCOPE,
+    }
+
+
+def _build_absent_cuda_memory_profile(
+    *,
+    phase_label: str | None,
+    device_label: str | None,
+    reason: str,
+) -> Dict[str, Any]:
+    """
+    功能：构造 absent 状态的 CUDA 显存 profile。
+
+    Build the structured absent-state CUDA memory profile.
+
+    Args:
+        phase_label: Optional runtime phase label.
+        device_label: Normalized runtime device label.
+        reason: Structured absent reason token.
+
+    Returns:
+        Absent-state CUDA memory profile mapping.
+    """
+    profile = _build_cuda_memory_profile_base(
+        phase_label=phase_label,
+        device_label=device_label,
+    )
+    profile["status"] = "absent"
+    profile["reason"] = reason
+    return profile
+
+
+def _build_failed_cuda_memory_profile(
+    *,
+    phase_label: str | None,
+    device_label: str | None,
+    reason: str,
+    exc: Exception,
+) -> Dict[str, Any]:
+    """
+    功能：构造 failed 状态的 CUDA 显存 profile。
+
+    Build the structured failed-state CUDA memory profile.
+
+    Args:
+        phase_label: Optional runtime phase label.
+        device_label: Normalized runtime device label.
+        reason: Structured failure reason token.
+        exc: Exception raised during sampling.
+
+    Returns:
+        Failed-state CUDA memory profile mapping.
+    """
+    profile = _build_cuda_memory_profile_base(
+        phase_label=phase_label,
+        device_label=device_label,
+    )
+    profile["status"] = "failed"
+    profile["reason"] = reason
+    profile["exception_type"] = type(exc).__name__
+    profile["exception_message"] = str(exc)
+    return profile
+
+
+def _call_cuda_stat(stat_fn: Any, device_obj: Any) -> int | None:
+    """
+    功能：安全读取单个 CUDA 显存统计值。
+
+    Safely read a single CUDA memory statistic.
+
+    Args:
+        stat_fn: Candidate CUDA statistic callable.
+        device_obj: CUDA device object.
+
+    Returns:
+        Integer byte count, or None when unavailable.
+    """
+    if not callable(stat_fn):
+        return None
+
+    try:
+        return _coerce_optional_int_bytes(stat_fn(device_obj))
+    except TypeError:
+        try:
+            return _coerce_optional_int_bytes(stat_fn())
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+
+def _call_cuda_mem_get_info(mem_get_info_fn: Any, device_obj: Any) -> tuple[int | None, int | None]:
+    """
+    功能：安全读取 CUDA mem_get_info 摘要。
+
+    Safely read CUDA free and total memory statistics.
+
+    Args:
+        mem_get_info_fn: Candidate mem_get_info callable.
+        device_obj: CUDA device object.
+
+    Returns:
+        Tuple of free bytes and total bytes.
+    """
+    if not callable(mem_get_info_fn):
+        return None, None
+
+    try:
+        free_bytes, total_bytes = mem_get_info_fn(device_obj)
+    except TypeError:
+        try:
+            free_bytes, total_bytes = mem_get_info_fn()
+        except Exception:
+            return None, None
+    except Exception:
+        return None, None
+
+    return _coerce_optional_int_bytes(free_bytes), _coerce_optional_int_bytes(total_bytes)
+
+
+def _capture_cuda_memory_snapshot(torch_module: Any, device_obj: Any) -> Dict[str, int | None]:
+    """
+    功能：采样当前 CUDA 显存快照。
+
+    Capture a lightweight CUDA memory snapshot for the active device.
+
+    Args:
+        torch_module: Imported torch module.
+        device_obj: CUDA device object.
+
+    Returns:
+        Snapshot mapping with allocated, reserved, and optional mem_get_info fields.
+
+    Raises:
+        RuntimeError: If required CUDA statistics are unavailable.
+    """
+    cuda_module = getattr(torch_module, "cuda", None)
+    if cuda_module is None:
+        raise RuntimeError("torch.cuda unavailable")
+
+    allocated_bytes = _call_cuda_stat(getattr(cuda_module, "memory_allocated", None), device_obj)
+    reserved_bytes = _call_cuda_stat(getattr(cuda_module, "memory_reserved", None), device_obj)
+    free_bytes, total_bytes = _call_cuda_mem_get_info(getattr(cuda_module, "mem_get_info", None), device_obj)
+
+    if allocated_bytes is None or reserved_bytes is None:
+        raise RuntimeError("cuda_memory_snapshot_unavailable")
+
+    return {
+        "memory_allocated_bytes": allocated_bytes,
+        "memory_reserved_bytes": reserved_bytes,
+        "mem_get_info_free_bytes": free_bytes,
+        "mem_get_info_total_bytes": total_bytes,
+    }
+
+
+def _build_cuda_memory_profile_success(
+    *,
+    phase_label: str | None,
+    device_label: str | None,
+    before_snapshot: Dict[str, int | None],
+    after_snapshot: Dict[str, int | None],
+    peak_memory_allocated_bytes: int | None,
+    peak_memory_reserved_bytes: int | None,
+) -> Dict[str, Any]:
+    """
+    功能：构造成功状态的 CUDA 显存 profile。
+
+    Build the structured success-state CUDA memory profile.
+
+    Args:
+        phase_label: Optional runtime phase label.
+        device_label: Normalized runtime device label.
+        before_snapshot: Snapshot captured before inference.
+        after_snapshot: Snapshot captured after inference.
+        peak_memory_allocated_bytes: Peak allocated memory in bytes.
+        peak_memory_reserved_bytes: Peak reserved memory in bytes.
+
+    Returns:
+        Success-state CUDA memory profile mapping.
+    """
+    memory_allocated_before_bytes = before_snapshot.get("memory_allocated_bytes")
+    memory_reserved_before_bytes = before_snapshot.get("memory_reserved_bytes")
+    memory_allocated_after_bytes = after_snapshot.get("memory_allocated_bytes")
+    memory_reserved_after_bytes = after_snapshot.get("memory_reserved_bytes")
+
+    allocated_delta_from_before_bytes = None
+    if memory_allocated_before_bytes is not None and memory_allocated_after_bytes is not None:
+        allocated_delta_from_before_bytes = memory_allocated_after_bytes - memory_allocated_before_bytes
+
+    reserved_delta_from_before_bytes = None
+    if memory_reserved_before_bytes is not None and memory_reserved_after_bytes is not None:
+        reserved_delta_from_before_bytes = memory_reserved_after_bytes - memory_reserved_before_bytes
+
+    total_bytes = after_snapshot.get("mem_get_info_total_bytes")
+    if total_bytes is None:
+        total_bytes = before_snapshot.get("mem_get_info_total_bytes")
+
+    profile = _build_cuda_memory_profile_base(
+        phase_label=phase_label,
+        device_label=device_label,
+    )
+    profile.update(
+        {
+            "status": "ok",
+            "memory_allocated_before_bytes": memory_allocated_before_bytes,
+            "memory_reserved_before_bytes": memory_reserved_before_bytes,
+            "mem_get_info_free_before_bytes": before_snapshot.get("mem_get_info_free_bytes"),
+            "peak_memory_allocated_bytes": peak_memory_allocated_bytes,
+            "peak_memory_reserved_bytes": peak_memory_reserved_bytes,
+            "memory_allocated_after_bytes": memory_allocated_after_bytes,
+            "memory_reserved_after_bytes": memory_reserved_after_bytes,
+            "mem_get_info_free_after_bytes": after_snapshot.get("mem_get_info_free_bytes"),
+            "mem_get_info_total_bytes": total_bytes,
+            "peak_memory_allocated_mib": _bytes_to_mib(peak_memory_allocated_bytes),
+            "peak_memory_reserved_mib": _bytes_to_mib(peak_memory_reserved_bytes),
+            "allocated_delta_from_before_bytes": allocated_delta_from_before_bytes,
+            "reserved_delta_from_before_bytes": reserved_delta_from_before_bytes,
+        }
+    )
+    return profile
+
+
 def _should_move_pipeline_to_device(
     pipeline_obj: Any,
     actual_device: str,
@@ -414,6 +720,7 @@ def run_sd3_inference(
     device: str | None,
     seed: int | None,
     *,
+    runtime_phase_label: str | None = None,
     injection_context: Optional[InjectionContext] = None,
     injection_modifier: Optional[LatentModifier] = None,
     capture_final_latents: bool = False,
@@ -430,6 +737,7 @@ def run_sd3_inference(
         pipeline_obj: Pipeline object (may be None if unbuilt).
         device: Device string ("cpu", "cuda", etc.) or None.
         seed: Random seed integer or None.
+        runtime_phase_label: Optional observability-only runtime phase label.
         capture_final_latents: Optional bool to capture final latents from inference (for embed-side latent sync).
         capture_attention: Optional bool to register attention capture hooks.
         trajectory_latent_cache: Optional LatentTrajectoryCache for per-step latent tensor storage.
@@ -456,6 +764,8 @@ def run_sd3_inference(
     if not isinstance(capture_attention, bool):
         # capture_attention 类型不合法，必须 fail-fast。
         raise TypeError("capture_attention must be bool")
+
+    normalized_runtime_phase_label = _normalize_runtime_phase_label(runtime_phase_label)
 
     inference_enabled = cfg.get("inference_enabled", False)
     latent_sync_storage = {"final_latents": None} if capture_final_latents else None
@@ -488,6 +798,12 @@ def run_sd3_inference(
     attention_capture_hook = None
     output_image = None  # SD 推理输出图像（PIL Image），供调用方保存到磁盘
     trajectory_cache_capture_meta: Dict[str, Any] | None = None
+    requested_device_label = _normalize_runtime_device_label(device)
+    inference_runtime_meta["cuda_memory_profile"] = _build_absent_cuda_memory_profile(
+        phase_label=normalized_runtime_phase_label,
+        device_label=requested_device_label,
+        reason="cuda_not_active",
+    )
 
     # (1) 检查 pipeline_obj 是否可用
     if pipeline_obj is None:
@@ -585,6 +901,7 @@ def run_sd3_inference(
     # (3) 尝试执行推理
     try:
         synthetic_pipeline = bool(getattr(pipeline_obj, "is_synthetic_pipeline", False))
+        torch_module: Any = None
         # 检查 pipeline_obj 是否有 __call__ 方法
         if not callable(pipeline_obj):
             inference_status = INFERENCE_STATUS_FAILED
@@ -605,11 +922,11 @@ def run_sd3_inference(
         # 确保 pipeline 在正确的设备上
         device_setup_failed = False
         try:
-            import torch
+            import torch as torch_module
             if pipeline_obj is not None and hasattr(pipeline_obj, "to"):
                 # 验证设备参数
                 actual_device = device if device else "cpu"
-                if actual_device == "cuda" and not torch.cuda.is_available():
+                if actual_device == "cuda" and not torch_module.cuda.is_available():
                     actual_device = "cpu"
                     inference_runtime_meta["device_fallback"] = "cuda_unavailable"
                 should_move_pipeline, pipeline_device_before_move, normalized_target_device = _should_move_pipeline_to_device(
@@ -685,6 +1002,54 @@ def run_sd3_inference(
                 injection_context,
                 injection_modifier
             )
+
+            confirmed_device_label = _normalize_runtime_device_label(
+                inference_runtime_meta.get("device_confirmed")
+            )
+            if confirmed_device_label is None:
+                confirmed_device_label = requested_device_label
+
+            cuda_sampling_device_obj = None
+            cuda_sampling_before_snapshot: Dict[str, int | None] | None = None
+            try:
+                if torch_module is None:
+                    import torch as torch_module
+                if not torch_module.cuda.is_available():
+                    inference_runtime_meta["cuda_memory_profile"] = _build_absent_cuda_memory_profile(
+                        phase_label=normalized_runtime_phase_label,
+                        device_label=confirmed_device_label,
+                        reason="cuda_not_available",
+                    )
+                elif confirmed_device_label is None or not confirmed_device_label.startswith("cuda"):
+                    inference_runtime_meta["cuda_memory_profile"] = _build_absent_cuda_memory_profile(
+                        phase_label=normalized_runtime_phase_label,
+                        device_label=confirmed_device_label,
+                        reason="cuda_not_active",
+                    )
+                else:
+                    cuda_sampling_device_obj = torch_module.device(confirmed_device_label)
+                    cuda_sampling_before_snapshot = _capture_cuda_memory_snapshot(
+                        torch_module,
+                        cuda_sampling_device_obj,
+                    )
+                    reset_peak_memory_stats = getattr(torch_module.cuda, "reset_peak_memory_stats", None)
+                    if not callable(reset_peak_memory_stats):
+                        raise RuntimeError("cuda_reset_peak_memory_stats_unavailable")
+                    reset_peak_memory_stats(cuda_sampling_device_obj)
+            except ImportError:
+                inference_runtime_meta["cuda_memory_profile"] = _build_absent_cuda_memory_profile(
+                    phase_label=normalized_runtime_phase_label,
+                    device_label=confirmed_device_label,
+                    reason="torch_unavailable",
+                )
+            except Exception as cuda_profile_exc:
+                # 显存采样失败不能阻断主推理链。
+                inference_runtime_meta["cuda_memory_profile"] = _build_failed_cuda_memory_profile(
+                    phase_label=normalized_runtime_phase_label,
+                    device_label=confirmed_device_label,
+                    reason="cuda_memory_profile_sampling_failed",
+                    exc=cuda_profile_exc,
+                )
 
             if capture_attention:
                 try:
@@ -762,15 +1127,49 @@ def run_sd3_inference(
                 inference_runtime_meta["device_alignment_warning"] = str(device_align_exc)
 
             # 执行推理并在支持时采样真实 trajectory 摘要。
-            tap_call_result = trajectory_tap.tap_from_pipeline(
-                cfg,
-                pipeline_obj,
-                infer_kwargs,
-                inference_runtime_meta,
-                seed=seed,
-                device=device,
-                latent_capture_cache=trajectory_latent_cache
-            )
+            try:
+                tap_call_result = trajectory_tap.tap_from_pipeline(
+                    cfg,
+                    pipeline_obj,
+                    infer_kwargs,
+                    inference_runtime_meta,
+                    seed=seed,
+                    device=device,
+                    latent_capture_cache=trajectory_latent_cache
+                )
+            finally:
+                if cuda_sampling_device_obj is not None and isinstance(cuda_sampling_before_snapshot, dict):
+                    try:
+                        cuda_sampling_after_snapshot = _capture_cuda_memory_snapshot(
+                            torch_module,
+                            cuda_sampling_device_obj,
+                        )
+                        peak_memory_allocated_bytes = _call_cuda_stat(
+                            getattr(torch_module.cuda, "max_memory_allocated", None),
+                            cuda_sampling_device_obj,
+                        )
+                        peak_memory_reserved_bytes = _call_cuda_stat(
+                            getattr(torch_module.cuda, "max_memory_reserved", None),
+                            cuda_sampling_device_obj,
+                        )
+                        if peak_memory_allocated_bytes is None or peak_memory_reserved_bytes is None:
+                            raise RuntimeError("cuda_peak_memory_stats_unavailable")
+                        inference_runtime_meta["cuda_memory_profile"] = _build_cuda_memory_profile_success(
+                            phase_label=normalized_runtime_phase_label,
+                            device_label=confirmed_device_label,
+                            before_snapshot=cuda_sampling_before_snapshot,
+                            after_snapshot=cuda_sampling_after_snapshot,
+                            peak_memory_allocated_bytes=peak_memory_allocated_bytes,
+                            peak_memory_reserved_bytes=peak_memory_reserved_bytes,
+                        )
+                    except Exception as cuda_profile_exc:
+                        # 显存采样收口失败不能阻断主推理链。
+                        inference_runtime_meta["cuda_memory_profile"] = _build_failed_cuda_memory_profile(
+                            phase_label=normalized_runtime_phase_label,
+                            device_label=confirmed_device_label,
+                            reason="cuda_memory_profile_sampling_failed",
+                            exc=cuda_profile_exc,
+                        )
             output = tap_call_result.get("output")
             trajectory_evidence_value = tap_call_result.get("trajectory_evidence")
             if isinstance(trajectory_evidence_value, dict):

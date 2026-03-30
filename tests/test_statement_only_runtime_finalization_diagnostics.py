@@ -1042,7 +1042,16 @@ def test_run_embed_statement_only_failure_reports_tap_observed_meta_missing_with
         return {
             "inference_status": "ok",
             "inference_error": None,
-            "inference_runtime_meta": {"latency_ms": 1.0},
+            "inference_runtime_meta": {
+                "latency_ms": 1.0,
+                "cuda_memory_profile": {
+                    "status": "absent",
+                    "reason": "cuda_not_active",
+                    "phase_label": "statement_only_runtime_capture",
+                    "sample_scope": "single_worker_process_local",
+                    "device": "cpu",
+                },
+            },
             "trajectory_evidence": _build_trajectory_evidence(28),
             "injection_evidence": {},
             "trajectory_cache_capture_meta": None,
@@ -1070,6 +1079,13 @@ def test_run_embed_statement_only_failure_reports_tap_observed_meta_missing_with
 
     assert runtime_finalization["runtime_capture_inference_status"] == "ok"
     assert runtime_finalization["runtime_capture_inference_error"] is None
+    assert runtime_finalization["runtime_capture_cuda_memory_profile"] == {
+        "status": "absent",
+        "reason": "cuda_not_active",
+        "phase_label": "statement_only_runtime_capture",
+        "sample_scope": "single_worker_process_local",
+        "device": "cpu",
+    }
     assert runtime_finalization["trajectory_cache_capture_status"] == "tap_steps_observed_but_cache_meta_missing"
     assert runtime_finalization["planner_failure_detail_code"] == "trajectory_cache_capture_meta_missing_after_tap"
     assert runtime_finalization["planner_failure_detail_message"] == "trajectory_cache_capture_meta_missing_after_tap_cannot_build_basis"

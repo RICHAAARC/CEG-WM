@@ -304,6 +304,13 @@ def test_run_embed_preview_generation_persists_formal_artifact_before_content_pr
             "inference_error": None,
             "inference_runtime_meta": {
                 "latency_ms": 1.0,
+                "cuda_memory_profile": {
+                    "status": "absent",
+                    "reason": "cuda_not_active",
+                    "phase_label": "preview_generation",
+                    "sample_scope": "single_worker_process_local",
+                    "device": "cpu",
+                },
                 "nested_runtime": {
                     "preview_token": "kept",
                     "preview_tensor": np.ones((1, 4, 8, 8), dtype=np.float32),
@@ -340,8 +347,16 @@ def test_run_embed_preview_generation_persists_formal_artifact_before_content_pr
     assert preview_record["output_image_present"] is True
     assert preview_record["inference_runtime_meta"] == {
         "latency_ms": 1.0,
+        "cuda_memory_profile": {
+            "status": "absent",
+            "reason": "cuda_not_active",
+            "phase_label": "preview_generation",
+            "sample_scope": "single_worker_process_local",
+            "device": "cpu",
+        },
         "nested_runtime": {"preview_token": "kept"},
     }
+    assert preview_record["inference_runtime_meta"]["cuda_memory_profile"]["status"] == "absent"
     assert preview_record["pipeline_runtime_meta"]["model_source_resolution"] == "fallback_to_requested_model_source"
     assert preview_record["pipeline_runtime_meta"]["local_snapshot_status"] == "absent"
     assert preview_record["seed"] == 7

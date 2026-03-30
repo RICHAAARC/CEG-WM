@@ -79,6 +79,9 @@ _build_planner_inputs_for_runtime = cast(
 
 
 EMBED_CONTENT_RUNTIME_PHASE_PRECOMPUTE = "embed_precompute"
+PREVIEW_GENERATION_RUNTIME_PHASE_LABEL = "preview_generation"
+STATEMENT_ONLY_RUNTIME_CAPTURE_PHASE_LABEL = "statement_only_runtime_capture"
+EMBED_WATERMARKED_INFERENCE_PHASE_LABEL = "embed_watermarked_inference"
 PREVIEW_GENERATION_RECORD_FILE_NAME = "preview_generation_record.json"
 _PREVIEW_META_OMIT = object()
 
@@ -361,6 +364,7 @@ def _build_preview_generation_meta(
             preview_pipeline_obj,
             preview_device,
             seed_value,
+            runtime_phase_label=PREVIEW_GENERATION_RUNTIME_PHASE_LABEL,
             injection_context=None,
             injection_modifier=None,
             capture_final_latents=False,
@@ -1263,6 +1267,7 @@ def _build_runtime_finalization_status_details(run_meta: Dict[str, Any]) -> Dict
         "runtime_executable_plan_reason": formal_two_stage_mapping.get("runtime_executable_plan_reason"),
         "runtime_capture_inference_status": formal_two_stage_mapping.get("runtime_capture_inference_status"),
         "runtime_capture_inference_error": formal_two_stage_mapping.get("runtime_capture_inference_error"),
+        "runtime_capture_cuda_memory_profile": formal_two_stage_mapping.get("runtime_capture_cuda_memory_profile"),
         "trajectory_cache_capture_status": formal_two_stage_mapping.get("trajectory_cache_capture_status"),
         "trajectory_cache_step_count": formal_two_stage_mapping.get("trajectory_cache_step_count"),
         "trajectory_cache_capture_attempt_count": formal_two_stage_mapping.get("trajectory_cache_capture_attempt_count"),
@@ -1794,6 +1799,7 @@ def run_embed(
                     "runtime_executable_plan_reason": None,
                     "runtime_capture_inference_status": None,
                     "runtime_capture_inference_error": None,
+                    "runtime_capture_cuda_memory_profile": None,
                     "final_plan_digest": None,
                     "final_basis_digest": None,
                 }
@@ -1844,6 +1850,7 @@ def run_embed(
                     pipeline_obj,
                     device,
                     seed_value,
+                    runtime_phase_label=STATEMENT_ONLY_RUNTIME_CAPTURE_PHASE_LABEL,
                     injection_context=None,
                     injection_modifier=None,
                     capture_final_latents=False,
@@ -1861,6 +1868,13 @@ def run_embed(
                     if isinstance(runtime_capture_error_value, str) and runtime_capture_error_value
                     else None
                 )
+                runtime_capture_runtime_meta = runtime_capture_result.get("inference_runtime_meta")
+                runtime_capture_cuda_memory_profile = None
+                if isinstance(runtime_capture_runtime_meta, dict):
+                    runtime_capture_runtime_meta_mapping = cast(Dict[str, Any], runtime_capture_runtime_meta)
+                    nested_cuda_memory_profile = runtime_capture_runtime_meta_mapping.get("cuda_memory_profile")
+                    if isinstance(nested_cuda_memory_profile, dict):
+                        runtime_capture_cuda_memory_profile = dict(cast(Dict[str, Any], nested_cuda_memory_profile))
                 runtime_capture_diagnostics = _extract_runtime_capture_diagnostics(
                     runtime_capture_result,
                     runtime_capture_cache,
@@ -1886,6 +1900,7 @@ def run_embed(
                         "runtime_finalization_reason": runtime_finalization_reason,
                         "capture_inference_status": runtime_capture_status,
                         "capture_inference_error": runtime_capture_error,
+                        "runtime_capture_cuda_memory_profile": runtime_capture_cuda_memory_profile,
                         "trajectory_cache_bound": False,
                         "final_plan_digest": None,
                         "final_basis_digest": None,
@@ -1902,6 +1917,7 @@ def run_embed(
                         "runtime_finalization_reason": runtime_finalization_reason,
                         "runtime_capture_inference_status": runtime_capture_status,
                         "runtime_capture_inference_error": runtime_capture_error,
+                        "runtime_capture_cuda_memory_profile": runtime_capture_cuda_memory_profile,
                         "final_plan_digest": None,
                         "final_basis_digest": None,
                         **runtime_capture_diagnostics,
@@ -1937,6 +1953,7 @@ def run_embed(
                         "runtime_finalization_reason": runtime_finalization_reason,
                         "capture_inference_status": runtime_capture_status,
                         "capture_inference_error": runtime_capture_error,
+                        "runtime_capture_cuda_memory_profile": runtime_capture_cuda_memory_profile,
                         "trajectory_cache_bound": runtime_capture_cache_usable,
                         "final_plan_digest": plan_digest_precomputed,
                         "final_basis_digest": basis_digest_precomputed,
@@ -1953,6 +1970,7 @@ def run_embed(
                         "runtime_finalization_reason": runtime_finalization_reason,
                         "runtime_capture_inference_status": runtime_capture_status,
                         "runtime_capture_inference_error": runtime_capture_error,
+                        "runtime_capture_cuda_memory_profile": runtime_capture_cuda_memory_profile,
                         "final_plan_digest": plan_digest_precomputed,
                         "final_basis_digest": basis_digest_precomputed,
                         **runtime_capture_diagnostics,
@@ -1969,6 +1987,7 @@ def run_embed(
                     "runtime_finalization_reason": None,
                     "capture_inference_status": runtime_capture_status,
                     "capture_inference_error": runtime_capture_error,
+                    "runtime_capture_cuda_memory_profile": runtime_capture_cuda_memory_profile,
                     "trajectory_cache_bound": runtime_capture_cache_usable,
                     "final_plan_digest": plan_digest_precomputed,
                     "final_basis_digest": basis_digest_precomputed,
@@ -1988,6 +2007,7 @@ def run_embed(
                     "runtime_finalization_reason": None,
                     "runtime_capture_inference_status": runtime_capture_status,
                     "runtime_capture_inference_error": runtime_capture_error,
+                    "runtime_capture_cuda_memory_profile": runtime_capture_cuda_memory_profile,
                     "final_plan_digest": plan_digest_precomputed,
                     "final_basis_digest": basis_digest_precomputed,
                     **runtime_capture_diagnostics,
@@ -2084,6 +2104,7 @@ def run_embed(
                 pipeline_obj,
                 device,
                 seed,
+                runtime_phase_label=EMBED_WATERMARKED_INFERENCE_PHASE_LABEL,
                 injection_context=injection_context,
                 injection_modifier=injection_modifier,
                 capture_final_latents=enable_latent_sync,
