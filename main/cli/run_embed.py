@@ -9,6 +9,7 @@
 
 import sys
 import argparse
+import gc
 from pathlib import Path
 import uuid
 from typing import Any, Callable, Dict, cast
@@ -271,6 +272,8 @@ def _build_preview_generation_meta(
         return preview_meta
 
     preview_pipeline_obj = pipeline_result.get("pipeline_obj")
+    preview_infer_result: Dict[str, Any] | None = None
+    preview_image: Any = None
     try:
         preview_infer_result = infer_runtime.run_sd3_inference(
             cfg,
@@ -330,7 +333,56 @@ def _build_preview_generation_meta(
     )
     if preview_meta["status"] != "ok":
         cfg.pop("__embed_input_image_path__", None)
+    preview_image = None
+    preview_infer_result = None
+    preview_pipeline_obj = None
     return preview_meta
+
+
+def _release_preview_generation_runtime_pressure(
+    cfg: Dict[str, Any],
+    preview_generation_meta: Dict[str, Any] | None,
+    *,
+    statement_only_formal_path: bool,
+) -> None:
+    """
+    功能：在 preview generation 与 statement_only second-pass 之间执行最小显存整理。 
+
+    Apply minimal runtime-pressure cleanup between preview generation and the
+    statement-only second pass.
+
+    Args:
+        cfg: Configuration mapping.
+        preview_generation_meta: Structured preview-generation metadata.
+        statement_only_formal_path: Whether the current run requires the
+            statement-only second pass.
+
+    Returns:
+        None.
+    """
+    if not isinstance(cfg, dict):
+        return
+    if not statement_only_formal_path:
+        return
+    if not isinstance(preview_generation_meta, dict):
+        return
+
+    inference_status = preview_generation_meta.get("inference_status")
+    if not isinstance(inference_status, str) or not inference_status:
+        return
+
+    runtime_device = cfg.get("device")
+    if not isinstance(runtime_device, str) or not runtime_device.lower().startswith("cuda"):
+        return
+
+    gc.collect()
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        return
 
 
 def _validate_real_pipeline_identity_fields(cfg: Dict[str, Any], config_path: str) -> None:
@@ -1524,12 +1576,20 @@ def run_embed(
                 if isinstance(default_input, str) and default_input.strip():
                     cfg["__embed_input_image_path__"] = default_input.strip()
 
-            run_meta["preview_generation"] = _build_preview_generation_meta(
+            statement_only_formal_path = _requires_statement_only_formal_precompute(cfg)
+
+            preview_generation_meta = _build_preview_generation_meta(
                 cfg=cfg,
                 run_root=run_root,
                 artifacts_dir=artifacts_dir,
                 pipeline_result=pipeline_result,
                 seed_value=seed_value,
+            )
+            run_meta["preview_generation"] = preview_generation_meta
+            _release_preview_generation_runtime_pressure(
+                cfg,
+                preview_generation_meta,
+                statement_only_formal_path=statement_only_formal_path,
             )
 
             # 预先计算 content 与 subspace 计划，用于注入上下文。
@@ -1552,7 +1612,6 @@ def run_embed(
             elif hasattr(content_result_pre, "mask_digest"):
                 mask_digest = content_result_pre.mask_digest
 
-            statement_only_formal_path = _requires_statement_only_formal_precompute(cfg)
             plan_payload: Any = None
             plan_digest_precomputed = None
             basis_digest_precomputed = None

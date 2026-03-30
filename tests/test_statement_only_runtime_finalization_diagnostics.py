@@ -258,6 +258,8 @@ def _prepare_statement_only_failure_env(
     *,
     planner_result: SubspacePlanEvidence,
     runtime_capture_callable: Any | None = None,
+    preview_generation_enabled: bool = False,
+    runtime_device: str = "cpu",
 ) -> Dict[str, Any]:
     run_root = tmp_path / "run"
     records_dir = run_root / "records"
@@ -301,6 +303,7 @@ def _prepare_statement_only_failure_env(
         captured["run_closure_path"] = closure_path
         captured["formal_two_stage"] = run_meta.get("formal_two_stage")
         captured["status_details"] = run_meta.get("status_details")
+        captured["preview_generation"] = run_meta.get("preview_generation")
         return closure_path
 
     def _load_and_validate_config(*args: Any, **kwargs: Any) -> tuple[Dict[str, Any], str, Dict[str, str]]:
@@ -330,8 +333,13 @@ def _prepare_statement_only_failure_env(
                 "inference_guidance_scale": 7.0,
                 "inference_height": 512,
                 "inference_width": 512,
-                "device": "cpu",
-                "embed": {"preview_generation": {"enabled": False}},
+                "device": runtime_device,
+                "embed": {
+                    "preview_generation": {
+                        "enabled": preview_generation_enabled,
+                        "artifact_rel_path": "preview/preview.png",
+                    }
+                },
             },
             "cfg_digest_anchor",
             {
@@ -860,6 +868,117 @@ def test_run_embed_statement_only_failure_persists_device_setup_error_before_tap
     assert runtime_finalization["planner_failure_detail_code"] == "trajectory_cache_capture_meta_unreconstructable_after_runtime_failure"
     assert runtime_finalization["planner_failure_detail_message"] == "trajectory_cache_capture_meta_unreconstructable_after_runtime_failure_cannot_build_basis"
     assert runtime_finalization["planner_failure_detail_code"] != "trajectory_cache_write_not_observed_after_tap"
+
+
+def test_run_embed_preview_generation_cleanup_preserves_statement_only_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：preview generation 结束后的最小清理不得破坏 preview 正式产物与 statement_only 成功路径。
+    """
+    try:
+        import torch
+    except ImportError:
+        pytest.skip("torch unavailable")
+
+    planner_result = SubspacePlanEvidence(
+        status="ok",
+        plan={"planner_params": {"rank": 4}},
+        basis_digest="basis_digest_anchor",
+        plan_digest="plan_digest_anchor",
+        audit={
+            "impl_identity": "subspace_planner",
+            "impl_version": "v1",
+            "impl_digest": "impl_digest_anchor",
+            "trace_digest": "trace_digest_anchor",
+        },
+        plan_stats={"rank": 4},
+        plan_failure_reason=None,
+        planner_failure_stage=None,
+        planner_failure_detail_code=None,
+        planner_failure_detail_message=None,
+        planner_diagnostic_context=None,
+    )
+
+    env = _prepare_statement_only_failure_env(
+        monkeypatch,
+        tmp_path,
+        planner_result=planner_result,
+        preview_generation_enabled=True,
+        runtime_device="cuda",
+    )
+    gc_collect_calls: list[str] = []
+    empty_cache_calls: list[str] = []
+    inference_call_count = 0
+
+    def _runtime_capture_with_preview(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+        nonlocal inference_call_count
+        _ = args
+        inference_call_count += 1
+        call_index = inference_call_count
+        cache = kwargs.get("trajectory_latent_cache")
+        if call_index == 1:
+            return {
+                "inference_status": "ok",
+                "inference_error": None,
+                "inference_runtime_meta": {"latency_ms": 1.0},
+                "trajectory_evidence": _build_trajectory_evidence(28),
+                "injection_evidence": {},
+                "trajectory_cache_capture_meta": None,
+                "output_image": Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8)),
+            }
+        if isinstance(cache, LatentTrajectoryCache):
+            cache.capture(0, np.zeros((1, 4, 8, 8), dtype=np.float32))
+            cache.capture(1, np.ones((1, 4, 8, 8), dtype=np.float32))
+            cache.capture(2, np.full((1, 4, 8, 8), 2.0, dtype=np.float32))
+        if call_index == 2:
+            return {
+                "inference_status": "ok",
+                "inference_error": None,
+                "inference_runtime_meta": {"latency_ms": 1.0},
+                "trajectory_evidence": {"status": "ok"},
+                "injection_evidence": {},
+                "trajectory_cache_capture_meta": _build_runtime_capture_meta(
+                    "complete",
+                    step_count=3,
+                    failure_count=0,
+                    callback_invocation_count=3,
+                    callback_latent_present_count=3,
+                    available_steps=[0, 1, 2],
+                    required_step_count=3,
+                ),
+                "output_image": Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8)),
+            }
+        raise RuntimeError("stop_after_planner")
+
+    monkeypatch.setattr(run_embed_module.gc, "collect", cast(Any, lambda: gc_collect_calls.append("collect") or 0))
+    monkeypatch.setattr(torch.cuda, "is_available", cast(Any, lambda: True))
+    monkeypatch.setattr(torch.cuda, "empty_cache", cast(Any, lambda: empty_cache_calls.append("empty_cache")))
+    monkeypatch.setattr(run_embed_module.embed_orchestrator, "build_runtime_jvp_operator_from_cache", cast(Any, lambda cfg, cache: None))
+    monkeypatch.setattr(run_embed_module.infer_runtime, "run_sd3_inference", _runtime_capture_with_preview)
+
+    with pytest.raises(RuntimeError, match="stop_after_planner"):
+        run_embed_module.run_embed(
+            output_dir=str(tmp_path / "out"),
+            config_path="configs/default.yaml",
+            overrides=None,
+            input_image_path=None,
+        )
+
+    preview_generation = cast(Dict[str, Any], env["preview_generation"])
+    assert preview_generation["status"] == "ok"
+    assert preview_generation["persisted_artifact_rel_path"] == "preview/preview.png"
+    assert gc_collect_calls == ["collect"]
+    assert empty_cache_calls == ["empty_cache"]
+
+    fake_impl_set = cast(_FakeImplSet, env["fake_impl_set"])
+    assert len(fake_impl_set.subspace_planner.calls) == 1
+    planner_call = fake_impl_set.subspace_planner.calls[0]
+    cfg_snapshot = cast(Dict[str, Any], planner_call["cfg"])
+    bound_cache = cfg_snapshot.get("__embed_trajectory_latent_cache__")
+    assert isinstance(bound_cache, LatentTrajectoryCache)
+    assert bound_cache.available_steps() == [0, 1, 2]
 
 
 def test_run_embed_statement_only_failure_reports_tap_observed_meta_missing_without_runtime_error(
