@@ -325,18 +325,58 @@ def _build_preview_generation_meta(
         preview_meta["exception_message"] = str(exc)
         print(f"[Preview Generation] 推理异常：{exc}，跳过。")
 
-    _write_preview_generation_record(
-        run_root=run_root,
-        artifacts_dir=artifacts_dir,
-        record_path=preview_record_path,
-        payload=preview_meta,
-    )
-    if preview_meta["status"] != "ok":
-        cfg.pop("__embed_input_image_path__", None)
-    preview_image = None
-    preview_infer_result = None
-    preview_pipeline_obj = None
+    try:
+        _write_preview_generation_record(
+            run_root=run_root,
+            artifacts_dir=artifacts_dir,
+            record_path=preview_record_path,
+            payload=preview_meta,
+        )
+        if preview_meta["status"] != "ok":
+            cfg.pop("__embed_input_image_path__", None)
+    finally:
+        _release_preview_generation_transients(
+            preview_infer_result=preview_infer_result,
+            preview_image=preview_image,
+        )
+        preview_image = None
+        preview_infer_result = None
+        preview_pipeline_obj = None
     return preview_meta
+
+
+def _release_preview_generation_transients(
+    *,
+    preview_infer_result: Dict[str, Any] | None,
+    preview_image: Any,
+) -> None:
+    """
+    功能：释放 preview generation 已完成使命的局部对象。 
+
+    Release preview-only transient objects after the authoritative preview
+    artifact and structured record have been persisted.
+
+    Args:
+        preview_infer_result: Preview inference result mapping.
+        preview_image: Preview image object.
+
+    Returns:
+        None.
+    """
+    image_to_close = preview_image
+    if image_to_close is None and isinstance(preview_infer_result, dict):
+        image_to_close = preview_infer_result.get("output_image")
+
+    if image_to_close is not None:
+        close_method = getattr(image_to_close, "close", None)
+        if callable(close_method):
+            try:
+                close_method()
+            except Exception:
+                pass
+
+    if isinstance(preview_infer_result, dict):
+        preview_infer_result.clear()
 
 
 def _release_preview_generation_runtime_pressure(

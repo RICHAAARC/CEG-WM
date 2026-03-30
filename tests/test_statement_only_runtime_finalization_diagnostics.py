@@ -106,6 +106,19 @@ class _FakePipelineWithDevice:
         return SimpleNamespace(images=[Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8))])
 
 
+class _TrackedPreviewImage:
+    def __init__(self) -> None:
+        self.closed = False
+        self.save_calls: list[Dict[str, Any]] = []
+
+    def save(self, path: str, format: str | None = None) -> None:
+        self.save_calls.append({"path": path, "format": format})
+        Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8)).save(path, format=format)
+
+    def close(self) -> None:
+        self.closed = True
+
+
 def _build_planner_cfg() -> Dict[str, Any]:
     return {
         "paper_faithfulness": {"enabled": False},
@@ -658,7 +671,7 @@ def test_run_embed_statement_only_failure_reports_tap_observed_without_capture_m
     tmp_path: Path,
 ) -> None:
     """
-    功能：当 runtime capture 失败且 meta 无法 reconstruction 时，formal failure 必须保留异常文本与精细失败编码。
+    功能：当 second-pass runtime OOM 且 meta 无法 reconstruction 时，formal failure 必须保留异常文本与精细失败编码。
     """
     planner_result = SubspacePlanEvidence(
         status="failed",
@@ -679,7 +692,7 @@ def test_run_embed_statement_only_failure_reports_tap_observed_without_capture_m
         _ = kwargs
         return {
             "inference_status": "failed",
-            "inference_error": "synthetic_post_tap_failure",
+            "inference_error": "RuntimeError: CUDA error: out of memory",
             "inference_runtime_meta": {"latency_ms": 1.0},
             "trajectory_evidence": _build_trajectory_evidence(28),
             "injection_evidence": {},
@@ -710,14 +723,14 @@ def test_run_embed_statement_only_failure_reports_tap_observed_without_capture_m
     runtime_finalization = run_closure["status"]["details"]["runtime_finalization"]
 
     assert runtime_finalization["runtime_capture_inference_status"] == "failed"
-    assert runtime_finalization["runtime_capture_inference_error"] == "synthetic_post_tap_failure"
+    assert runtime_finalization["runtime_capture_inference_error"] == "RuntimeError: CUDA error: out of memory"
     assert runtime_finalization["trajectory_cache_capture_status"] == "tap_steps_observed_but_cache_meta_missing"
     assert runtime_finalization["trajectory_cache_tap_captured_step_count"] == 28
     assert runtime_finalization["trajectory_cache_step_count"] == 0
     assert runtime_finalization["planner_failure_stage"] == "runtime_capture_cache_validation"
     assert runtime_finalization["planner_failure_detail_code"] == "trajectory_cache_capture_meta_unreconstructable_after_runtime_failure"
     assert runtime_finalization["planner_failure_detail_message"] == "trajectory_cache_capture_meta_unreconstructable_after_runtime_failure_cannot_build_basis"
-    assert runtime_finalization["trajectory_cache_capture_error_message"] == "synthetic_post_tap_failure"
+    assert runtime_finalization["trajectory_cache_capture_error_message"] == "RuntimeError: CUDA error: out of memory"
 
 
 def test_run_sd3_inference_skips_redundant_pipeline_device_move(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -911,23 +924,29 @@ def test_run_embed_preview_generation_cleanup_preserves_statement_only_path(
     gc_collect_calls: list[str] = []
     empty_cache_calls: list[str] = []
     inference_call_count = 0
+    preview_runtime_result: Dict[str, Any] | None = None
+    preview_output_image: _TrackedPreviewImage | None = None
 
     def _runtime_capture_with_preview(*args: Any, **kwargs: Any) -> Dict[str, Any]:
-        nonlocal inference_call_count
+        nonlocal inference_call_count, preview_runtime_result, preview_output_image
         _ = args
         inference_call_count += 1
         call_index = inference_call_count
         cache = kwargs.get("trajectory_latent_cache")
         if call_index == 1:
-            return {
+            preview_output_image = _TrackedPreviewImage()
+            preview_runtime_result = {
                 "inference_status": "ok",
                 "inference_error": None,
                 "inference_runtime_meta": {"latency_ms": 1.0},
                 "trajectory_evidence": _build_trajectory_evidence(28),
-                "injection_evidence": {},
+                "injection_evidence": {"preview_only": True},
                 "trajectory_cache_capture_meta": None,
-                "output_image": Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8)),
+                "runtime_self_attention_maps": np.ones((1, 2, 2), dtype=np.float32),
+                "final_latents": np.ones((1, 4, 8, 8), dtype=np.float32),
+                "output_image": preview_output_image,
             }
+            return preview_runtime_result
         if isinstance(cache, LatentTrajectoryCache):
             cache.capture(0, np.zeros((1, 4, 8, 8), dtype=np.float32))
             cache.capture(1, np.ones((1, 4, 8, 8), dtype=np.float32))
@@ -969,6 +988,10 @@ def test_run_embed_preview_generation_cleanup_preserves_statement_only_path(
     preview_generation = cast(Dict[str, Any], env["preview_generation"])
     assert preview_generation["status"] == "ok"
     assert preview_generation["persisted_artifact_rel_path"] == "preview/preview.png"
+    assert isinstance(preview_runtime_result, dict)
+    assert preview_runtime_result == {}
+    assert isinstance(preview_output_image, _TrackedPreviewImage)
+    assert preview_output_image.closed is True
     assert gc_collect_calls == ["collect"]
     assert empty_cache_calls == ["empty_cache"]
 
