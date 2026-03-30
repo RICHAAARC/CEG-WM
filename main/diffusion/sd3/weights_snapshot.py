@@ -15,6 +15,77 @@ from typing import Any, Dict, List, Tuple
 from main.core import digests
 
 
+def resolve_effective_weights_snapshot_inputs(
+    *,
+    model_id: str | None,
+    model_source: str | None,
+    resolved_model_id: str | None = None,
+    resolved_model_source: str | None = None,
+    model_snapshot_path: str | None = None,
+    hf_revision: str | None = None,
+    local_files_only: bool | None = None,
+    cache_dir: str | None = None,
+) -> Dict[str, Any]:
+    """
+    功能：解析权重快照摘要计算所使用的 effective 输入。
+
+    Resolve the effective inputs used by weights snapshot digest computation.
+
+    Priority order:
+        1. Use resolved_model_id and resolved_model_source when both are present.
+        2. Otherwise, when model_snapshot_path is a valid local directory, use
+           it as effective_model_id with effective_model_source="local_path".
+        3. Otherwise, fall back to the raw requested model_id and model_source.
+
+    Args:
+        model_id: Raw requested model identifier.
+        model_source: Raw requested model source.
+        resolved_model_id: Resolved model identifier from runtime/build metadata.
+        resolved_model_source: Resolved model source from runtime/build metadata.
+        model_snapshot_path: Bound local snapshot directory when available.
+        hf_revision: Requested HF revision.
+        local_files_only: Local-only resolution flag.
+        cache_dir: Optional HF cache directory.
+
+    Returns:
+        Structured mapping containing requested, resolved, and effective inputs.
+    """
+    requested_model_id = _normalize_optional_text(model_id)
+    requested_model_source = _normalize_optional_text(model_source)
+    normalized_resolved_model_id = _normalize_optional_text(resolved_model_id)
+    normalized_resolved_model_source = _normalize_optional_text(resolved_model_source)
+    normalized_model_snapshot_path = _normalize_valid_local_snapshot_path(model_snapshot_path)
+    normalized_hf_revision = _normalize_revision(hf_revision)
+    normalized_cache_dir = _normalize_optional_text(cache_dir)
+
+    effective_model_id = requested_model_id
+    effective_model_source = requested_model_source
+    effective_resolution = "requested_fallback"
+
+    if normalized_resolved_model_id is not None and normalized_resolved_model_source is not None:
+        effective_model_id = normalized_resolved_model_id
+        effective_model_source = normalized_resolved_model_source
+        effective_resolution = "resolved_binding_priority"
+    elif normalized_model_snapshot_path is not None:
+        effective_model_id = normalized_model_snapshot_path
+        effective_model_source = "local_path"
+        effective_resolution = "model_snapshot_path_priority"
+
+    return {
+        "requested_model_id": requested_model_id,
+        "requested_model_source": requested_model_source,
+        "resolved_model_id": normalized_resolved_model_id,
+        "resolved_model_source": normalized_resolved_model_source,
+        "model_snapshot_path": normalized_model_snapshot_path,
+        "effective_model_id": effective_model_id,
+        "effective_model_source": effective_model_source,
+        "effective_hf_revision": normalized_hf_revision,
+        "effective_local_files_only": local_files_only if isinstance(local_files_only, bool) else None,
+        "effective_cache_dir": normalized_cache_dir,
+        "effective_resolution": effective_resolution,
+    }
+
+
 def compute_weights_snapshot_sha256(
     model_id: str,
     model_source: str | None,
@@ -133,6 +204,52 @@ def _init_snapshot_meta(
             "local_files_only_enforced": True  # 当前版本强制离线模式
         }
     }
+
+
+def _normalize_optional_text(value: Any) -> str | None:
+    """
+    功能：规范化可选文本字段。
+
+    Normalize an optional textual field.
+
+    Args:
+        value: Candidate textual value.
+
+    Returns:
+        Stripped text, or None when unavailable.
+    """
+    if not isinstance(value, str):
+        return None
+    normalized_value = value.strip()
+    if not normalized_value or normalized_value == "<absent>":
+        return None
+    return normalized_value
+
+
+def _normalize_valid_local_snapshot_path(model_snapshot_path: Any) -> str | None:
+    """
+    功能：规范化并校验本地 snapshot 路径。
+
+    Normalize and validate a local snapshot directory path.
+
+    Args:
+        model_snapshot_path: Candidate local snapshot path.
+
+    Returns:
+        Resolved local directory path in POSIX form, or None when invalid.
+    """
+    normalized_path = _normalize_optional_text(model_snapshot_path)
+    if normalized_path is None:
+        return None
+
+    try:
+        path_obj = Path(normalized_path).expanduser().resolve()
+    except Exception:
+        return None
+
+    if not path_obj.exists() or not path_obj.is_dir():
+        return None
+    return path_obj.as_posix()
 
 
 def _normalize_revision(hf_revision: Any) -> str | None:

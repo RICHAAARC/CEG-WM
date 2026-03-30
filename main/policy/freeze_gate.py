@@ -381,16 +381,66 @@ def _enforce_pipeline_realization_requirements(
             if isinstance(build_kwargs, dict):
                 cache_dir = build_kwargs.get("cache_dir") if isinstance(build_kwargs.get("cache_dir"), str) else None
 
-        recomputed, snapshot_meta, snapshot_error = weights_snapshot.compute_weights_snapshot_sha256(
+        resolved_model_id = None
+        resolved_model_source = None
+        model_snapshot_path = pipeline_provenance.get("model_snapshot_path") if isinstance(pipeline_provenance.get("model_snapshot_path"), str) else None
+        if isinstance(runtime_meta, dict):
+            runtime_resolved_model_id = runtime_meta.get("resolved_model_id")
+            runtime_resolved_model_source = runtime_meta.get("resolved_model_source")
+            if isinstance(runtime_resolved_model_id, str) and runtime_resolved_model_id and runtime_resolved_model_id != "<absent>":
+                resolved_model_id = runtime_resolved_model_id
+            if isinstance(runtime_resolved_model_source, str) and runtime_resolved_model_source and runtime_resolved_model_source != "<absent>":
+                resolved_model_source = runtime_resolved_model_source
+
+            runtime_local_files_only = runtime_meta.get("local_files_only")
+            if isinstance(runtime_local_files_only, bool):
+                local_files_only = runtime_local_files_only
+
+            runtime_local_snapshot_path = runtime_meta.get("local_snapshot_path")
+            if (
+                (not isinstance(model_snapshot_path, str) or not model_snapshot_path or model_snapshot_path == "<absent>")
+                and isinstance(runtime_local_snapshot_path, str)
+                and runtime_local_snapshot_path
+                and runtime_local_snapshot_path != "<absent>"
+            ):
+                model_snapshot_path = runtime_local_snapshot_path
+
+        if resolved_model_id is None:
+            provenance_resolved_model_id = pipeline_provenance.get("resolved_model_id")
+            if isinstance(provenance_resolved_model_id, str) and provenance_resolved_model_id and provenance_resolved_model_id != "<absent>":
+                resolved_model_id = provenance_resolved_model_id
+        if resolved_model_source is None:
+            provenance_resolved_model_source = pipeline_provenance.get("resolved_model_source")
+            if isinstance(provenance_resolved_model_source, str) and provenance_resolved_model_source and provenance_resolved_model_source != "<absent>":
+                resolved_model_source = provenance_resolved_model_source
+
+        effective_snapshot_inputs = weights_snapshot.resolve_effective_weights_snapshot_inputs(
             model_id=model_id,
             model_source=model_source,
-            hf_revision=hf_revision,
+            resolved_model_id=resolved_model_id,
+            resolved_model_source=resolved_model_source,
+            model_snapshot_path=model_snapshot_path,
+            hf_revision=hf_revision if isinstance(hf_revision, str) else None,
             local_files_only=local_files_only,
-            cache_dir=cache_dir
+            cache_dir=cache_dir,
+        )
+        effective_model_id = cast(str | None, effective_snapshot_inputs.get("effective_model_id"))
+        effective_model_source = cast(str | None, effective_snapshot_inputs.get("effective_model_source"))
+        recompute_context = (
+            f"requested_model_source={model_source}, requested_model_id={model_id}, "
+            f"effective_model_source={effective_model_source}, effective_model_id={effective_model_id}"
+        )
+
+        recomputed, snapshot_meta, snapshot_error = weights_snapshot.compute_weights_snapshot_sha256(
+            model_id=effective_model_id,
+            model_source=effective_model_source,
+            hf_revision=cast(str | None, effective_snapshot_inputs.get("effective_hf_revision")),
+            local_files_only=cast(bool | None, effective_snapshot_inputs.get("effective_local_files_only")),
+            cache_dir=cast(str | None, effective_snapshot_inputs.get("effective_cache_dir"))
         )
         if snapshot_error is not None:
             raise GateEnforcementError(
-                "weights_snapshot_sha256 recompute failed",
+                f"weights_snapshot_sha256 recompute failed: {recompute_context}",
                 gate_name="pipeline_realization.weights_snapshot_sha256.recompute",
                 field_path="pipeline_runtime_meta.weights_snapshot_sha256",
                 expected=weights_snapshot_sha256,
@@ -398,11 +448,11 @@ def _enforce_pipeline_realization_requirements(
             )
         if recomputed != weights_snapshot_sha256:
             raise GateEnforcementError(
-                "weights_snapshot_sha256 recompute mismatch",
+                f"weights_snapshot_sha256 recompute mismatch: {recompute_context}",
                 gate_name="pipeline_realization.weights_snapshot_sha256.recompute",
                 field_path="pipeline_runtime_meta.weights_snapshot_sha256",
-                expected=recomputed,
-                actual=weights_snapshot_sha256
+                expected=weights_snapshot_sha256,
+                actual=recomputed
             )
 
     # (7.7) Real Dataflow Smoke: inference 策略断言

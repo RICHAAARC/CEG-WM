@@ -9,6 +9,7 @@ and cannot bypass the gate enforcement.
 
 import json
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -269,6 +270,194 @@ def test_freeze_gate_assert_prewrite_rejects_whitelist_semantics_version_mismatc
 
     with pytest.raises(GateEnforcementError, match="versions must match"):
         freeze_gate.assert_prewrite({}, contracts, mismatched_whitelist, semantics)
+
+
+def _patch_assert_prewrite_to_pipeline_realization_only(monkeypatch: pytest.MonkeyPatch, freeze_gate_module) -> None:
+    """
+    功能：将 assert_prewrite 收口到 pipeline_realization 门禁回归测试所需的最小路径。
+
+    Reduce assert_prewrite to the minimal execution path required by the
+    pipeline realization regression tests.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        freeze_gate_module: Imported freeze_gate module.
+
+    Returns:
+        None.
+    """
+    monkeypatch.setattr(freeze_gate_module, "_enforce_policy_semantics_whitelist_version_binding", lambda *args, **kwargs: None)
+    monkeypatch.setattr(freeze_gate_module.schema, "validate_record", lambda *args, **kwargs: None)
+    monkeypatch.setattr(freeze_gate_module, "_enforce_schema_version_consistency", lambda *args, **kwargs: None)
+    monkeypatch.setattr(freeze_gate_module, "_enforce_records_schema_extensions_binding", lambda *args, **kwargs: None)
+    monkeypatch.setattr(freeze_gate_module, "enforce_must_enforce_rules", lambda *args, **kwargs: None)
+    monkeypatch.setattr(freeze_gate_module, "_enforce_pipeline_shell_binding", lambda *args, **kwargs: None)
+    monkeypatch.setattr(freeze_gate_module, "enforce_gate_requirements", lambda *args, **kwargs: None)
+    monkeypatch.setattr(freeze_gate_module, "enforce_gate_policies", lambda *args, **kwargs: None)
+    monkeypatch.setattr(freeze_gate_module, "enforce_recommended_requirements", lambda *args, **kwargs: {})
+    monkeypatch.setattr(freeze_gate_module, "_validate_statistical_fields", lambda *args, **kwargs: None)
+    monkeypatch.setattr(freeze_gate_module, "_validate_semantic_driven_execution", lambda *args, **kwargs: None)
+    monkeypatch.setattr(freeze_gate_module, "_check_field_override_conflict", lambda *args, **kwargs: None)
+
+
+def _build_pipeline_realization_record(snapshot_dir: Path, digest_value: str) -> dict:
+    """
+    功能：构造 pipeline_realization late gate 回归测试使用的最小记录。
+
+    Build the minimal record required by pipeline realization late-gate tests.
+
+    Args:
+        snapshot_dir: Bound local snapshot directory.
+        digest_value: Expected weights snapshot digest.
+
+    Returns:
+        Minimal record mapping.
+    """
+    from main.registries import pipeline_registry
+
+    snapshot_path = snapshot_dir.as_posix()
+    return {
+        "operation": "embed",
+        "pipeline_impl_id": pipeline_registry.SD3_DIFFUSERS_REAL_ID,
+        "pipeline_provenance": {
+            "model_id": "stabilityai/stable-diffusion-3.5-medium",
+            "model_source": "hf",
+            "resolved_model_id": snapshot_path,
+            "resolved_model_source": "local_path",
+            "model_snapshot_path": snapshot_path,
+            "hf_revision": "main",
+            "local_files_only": True,
+            "model_weights_sha256": digest_value,
+            "weights_snapshot_sha256": digest_value,
+        },
+        "pipeline_runtime_meta": {
+            "weights_snapshot_sha256": digest_value,
+            "resolved_model_id": snapshot_path,
+            "resolved_model_source": "local_path",
+            "local_snapshot_path": snapshot_path,
+            "local_files_only": True,
+            "build_kwargs": {},
+        },
+        "env_fingerprint_canon_sha256": "env_fingerprint_anchor",
+    }
+
+
+def test_assert_prewrite_pipeline_realization_reuses_resolved_local_snapshot_binding(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：late gate 复算必须复用 resolved local snapshot，而不是退回 raw HF 请求。
+
+    Verify assert_prewrite reuses the resolved local snapshot binding during
+    weights_snapshot recompute and no longer falls back to the raw HF request.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    from main.policy import freeze_gate
+
+    contracts, whitelist, semantics, _ = _load_fact_sources()
+    snapshot_dir = tmp_path / "snapshots" / "0123456789abcdef"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    expected_digest = "resolved_local_snapshot_digest"
+    record = _build_pipeline_realization_record(snapshot_dir, expected_digest)
+    captured_inputs = {}
+
+    def _fake_compute_weights_snapshot_sha256(
+        model_id: str,
+        model_source: str | None,
+        hf_revision: str | None,
+        local_files_only: bool | None,
+        cache_dir: str | None = None,
+    ):
+        captured_inputs.update(
+            {
+                "model_id": model_id,
+                "model_source": model_source,
+                "hf_revision": hf_revision,
+                "local_files_only": local_files_only,
+                "cache_dir": cache_dir,
+            }
+        )
+        if model_id == snapshot_dir.as_posix() and model_source == "local_path":
+            return expected_digest, {"snapshot_status": "built"}, None
+        return "<absent>", {"snapshot_status": "failed"}, "unexpected_effective_inputs"
+
+    _patch_assert_prewrite_to_pipeline_realization_only(monkeypatch, freeze_gate)
+    monkeypatch.setattr(
+        freeze_gate.weights_snapshot,
+        "compute_weights_snapshot_sha256",
+        _fake_compute_weights_snapshot_sha256,
+    )
+
+    freeze_gate.assert_prewrite(record, contracts, whitelist, semantics)
+
+    assert captured_inputs["model_id"] == snapshot_dir.as_posix()
+    assert captured_inputs["model_source"] == "local_path"
+    assert captured_inputs["local_files_only"] is True
+
+
+def test_assert_prewrite_pipeline_realization_still_rejects_digest_mismatch_with_resolved_local_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：即使复用了 resolved local snapshot，digest 不一致时 late gate 仍必须失败。
+
+    Verify assert_prewrite still rejects recompute mismatches after switching to
+    the resolved local snapshot input path.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    from main.policy import freeze_gate
+    from main.core.errors import GateEnforcementError
+
+    contracts, whitelist, semantics, _ = _load_fact_sources()
+    snapshot_dir = tmp_path / "snapshots" / "fedcba9876543210"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    record = _build_pipeline_realization_record(snapshot_dir, "expected_digest")
+    captured_inputs = {}
+
+    def _fake_compute_weights_snapshot_sha256(
+        model_id: str,
+        model_source: str | None,
+        hf_revision: str | None,
+        local_files_only: bool | None,
+        cache_dir: str | None = None,
+    ):
+        captured_inputs.update(
+            {
+                "model_id": model_id,
+                "model_source": model_source,
+                "hf_revision": hf_revision,
+                "local_files_only": local_files_only,
+                "cache_dir": cache_dir,
+            }
+        )
+        return "different_digest", {"snapshot_status": "built"}, None
+
+    _patch_assert_prewrite_to_pipeline_realization_only(monkeypatch, freeze_gate)
+    monkeypatch.setattr(
+        freeze_gate.weights_snapshot,
+        "compute_weights_snapshot_sha256",
+        _fake_compute_weights_snapshot_sha256,
+    )
+
+    with pytest.raises(GateEnforcementError, match="recompute mismatch"):
+        freeze_gate.assert_prewrite(record, contracts, whitelist, semantics)
+
+    assert captured_inputs["model_id"] == snapshot_dir.as_posix()
+    assert captured_inputs["model_source"] == "local_path"
 
 
 

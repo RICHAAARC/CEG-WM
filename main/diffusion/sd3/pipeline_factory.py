@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, cast
 
 import numpy as np
 from PIL import Image
@@ -691,31 +691,35 @@ def _compute_weights_snapshot(
         # runtime_meta 类型不合法，必须 fail-fast。
         raise TypeError("runtime_meta must be dict")
 
-    snapshot_model_id = model_id
-    snapshot_model_source = model_source
-    resolved_model_id = runtime_meta.get("resolved_model_id")
-    resolved_model_source = runtime_meta.get("resolved_model_source")
-    if isinstance(resolved_model_id, str) and resolved_model_id and isinstance(resolved_model_source, str) and resolved_model_source:
-        snapshot_model_id = resolved_model_id
-        snapshot_model_source = resolved_model_source
-
     local_files_only = runtime_meta.get("local_files_only")
     if not isinstance(local_files_only, bool):
         local_files_only = None
 
     cache_dir = _resolve_cache_dir(cfg, runtime_meta)
+    effective_snapshot_inputs = weights_snapshot.resolve_effective_weights_snapshot_inputs(
+        model_id=model_id,
+        model_source=model_source,
+        resolved_model_id=runtime_meta.get("resolved_model_id") if isinstance(runtime_meta.get("resolved_model_id"), str) else None,
+        resolved_model_source=runtime_meta.get("resolved_model_source") if isinstance(runtime_meta.get("resolved_model_source"), str) else None,
+        model_snapshot_path=runtime_meta.get("local_snapshot_path") if isinstance(runtime_meta.get("local_snapshot_path"), str) else None,
+        hf_revision=hf_revision,
+        local_files_only=local_files_only,
+        cache_dir=cache_dir,
+    )
+    effective_model_id = cast(str, effective_snapshot_inputs.get("effective_model_id"))
+    effective_model_source = cast(str, effective_snapshot_inputs.get("effective_model_source"))
 
     runtime_meta["weights_snapshot_requested_model_id"] = model_id
     runtime_meta["weights_snapshot_requested_model_source"] = model_source
-    runtime_meta["weights_snapshot_resolved_model_id"] = snapshot_model_id
-    runtime_meta["weights_snapshot_resolved_model_source"] = snapshot_model_source
+    runtime_meta["weights_snapshot_resolved_model_id"] = effective_model_id
+    runtime_meta["weights_snapshot_resolved_model_source"] = effective_model_source
 
     return weights_snapshot.compute_weights_snapshot_sha256(
-        model_id=snapshot_model_id,
-        model_source=snapshot_model_source,
-        hf_revision=hf_revision,
-        local_files_only=local_files_only,
-        cache_dir=cache_dir
+        model_id=effective_model_id,
+        model_source=effective_model_source,
+        hf_revision=cast(str | None, effective_snapshot_inputs.get("effective_hf_revision")),
+        local_files_only=cast(bool | None, effective_snapshot_inputs.get("effective_local_files_only")),
+        cache_dir=cast(str | None, effective_snapshot_inputs.get("effective_cache_dir"))
     )
 
 
