@@ -17,6 +17,7 @@ import pytest
 
 from main.cli import run_embed as run_embed_module
 from main.core import digests
+from main.diffusion.sd3 import infer_runtime as infer_runtime_module
 from main.diffusion.sd3 import trajectory_tap as trajectory_tap_module
 from main.diffusion.sd3.trajectory_tap import LatentTrajectoryCache
 from main.watermarking.content_chain.subspace.planner_interface import SubspacePlanEvidence
@@ -84,6 +85,25 @@ class _FakeImplIdentity:
 
     def as_dict(self) -> Dict[str, str]:
         return {"content_extractor_id": self.content_extractor_id}
+
+
+class _FakePipelineWithDevice:
+    def __init__(self, device_label: str, *, raise_on_move: str | None = None) -> None:
+        self.device = device_label
+        self.raise_on_move = raise_on_move
+        self.to_calls: list[str] = []
+
+    def to(self, device: Any) -> "_FakePipelineWithDevice":
+        normalized_device = str(device)
+        self.to_calls.append(normalized_device)
+        if isinstance(self.raise_on_move, str) and self.raise_on_move:
+            raise RuntimeError(self.raise_on_move)
+        self.device = normalized_device
+        return self
+
+    def __call__(self, **kwargs: Any) -> SimpleNamespace:
+        _ = kwargs
+        return SimpleNamespace(images=[Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8))])
 
 
 def _build_planner_cfg() -> Dict[str, Any]:
@@ -692,6 +712,156 @@ def test_run_embed_statement_only_failure_reports_tap_observed_without_capture_m
     assert runtime_finalization["trajectory_cache_capture_error_message"] == "synthetic_post_tap_failure"
 
 
+def test_run_sd3_inference_skips_redundant_pipeline_device_move(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    功能：当 pipeline 已经位于目标设备时，不得再次执行重复 device move。
+    """
+    try:
+        import torch
+    except ImportError:
+        pytest.skip("torch unavailable")
+
+    fake_pipeline = _FakePipelineWithDevice("cuda:0")
+
+    def _fake_tap_from_pipeline(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+        _ = args
+        _ = kwargs
+        return {
+            "output": SimpleNamespace(images=[Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8))]),
+            "trajectory_evidence": {"status": "ok", "trajectory_metrics": {"steps": []}},
+            "tap_status": "ok",
+            "trajectory_cache_capture_meta": None,
+        }
+
+    monkeypatch.setattr(torch.cuda, "is_available", cast(Any, lambda: True))
+    monkeypatch.setattr(infer_runtime_module.trajectory_tap, "tap_from_pipeline", _fake_tap_from_pipeline)
+
+    result = infer_runtime_module.run_sd3_inference(
+        {
+            "inference_enabled": True,
+            "inference_prompt": "prompt",
+            "inference_num_steps": 4,
+            "inference_guidance_scale": 7.0,
+            "inference_height": 64,
+            "inference_width": 64,
+        },
+        fake_pipeline,
+        "cuda",
+        None,
+    )
+
+    assert result["inference_status"] == "ok"
+    assert fake_pipeline.to_calls == []
+    assert result["inference_runtime_meta"]["pipeline_device_move_status"] == "skipped_already_on_target"
+    assert result["inference_runtime_meta"]["pipeline_device_before_move"] == "cuda:0"
+    assert result["inference_runtime_meta"]["pipeline_device_target"] == "cuda"
+
+
+def test_run_sd3_inference_device_setup_error_returns_structured_capture_meta(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    功能：device setup 阶段失败时，必须返回结构化 capture 诊断而不是空壳结果。
+    """
+    try:
+        import torch
+    except ImportError:
+        pytest.skip("torch unavailable")
+
+    fake_pipeline = _FakePipelineWithDevice("cpu", raise_on_move="CUDA out of memory")
+    monkeypatch.setattr(torch.cuda, "is_available", cast(Any, lambda: True))
+
+    result = infer_runtime_module.run_sd3_inference(
+        {
+            "inference_enabled": True,
+            "inference_prompt": "prompt",
+            "inference_num_steps": 4,
+            "inference_guidance_scale": 7.0,
+            "inference_height": 64,
+            "inference_width": 64,
+        },
+        fake_pipeline,
+        "cuda",
+        None,
+        trajectory_latent_cache=LatentTrajectoryCache(),
+    )
+
+    capture_meta = cast(Dict[str, Any], result["trajectory_cache_capture_meta"])
+    assert result["inference_status"] == "failed"
+    assert result["inference_error"] == "device_setup_error: CUDA out of memory"
+    assert result["inference_runtime_meta"]["pipeline_device_move_status"] == "failed"
+    assert capture_meta["trajectory_cache_capture_detail_code"] == "trajectory_cache_capture_meta_unreconstructable_after_runtime_failure"
+    assert capture_meta["trajectory_cache_capture_error_message"] == "device_setup_error: CUDA out of memory"
+    assert capture_meta["trajectory_cache_tap_captured_step_count"] == 0
+    assert capture_meta["trajectory_cache_capture_status"] is None
+
+
+def test_run_embed_statement_only_failure_persists_device_setup_error_before_tap(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：当 second-pass 在 device setup 阶段失败时，formal artifact 必须保留精确异常且区别于 write_not_observed。
+    """
+    planner_result = SubspacePlanEvidence(
+        status="failed",
+        plan=None,
+        basis_digest=None,
+        plan_digest=None,
+        audit=None,
+        plan_stats=None,
+        plan_failure_reason="invalid_subspace_params",
+        planner_failure_stage="routed_decomposition_matrix_build",
+        planner_failure_detail_code="routed_matrix_shape_mismatch",
+        planner_failure_detail_message="synthetic routed matrix mismatch",
+        planner_diagnostic_context=_build_planner_failure_context(),
+    )
+
+    def _runtime_capture_device_setup_error(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+        _ = args
+        _ = kwargs
+        return {
+            "inference_status": "failed",
+            "inference_error": "device_setup_error: CUDA out of memory",
+            "inference_runtime_meta": {
+                "device": "cuda",
+                "inference_status": "failed",
+                "inference_error": "device_setup_error: CUDA out of memory",
+                "pipeline_device_move_status": "failed",
+            },
+            "trajectory_evidence": {
+                "status": "absent",
+                "trajectory_absent_reason": "inference_failed",
+            },
+            "injection_evidence": {},
+            "trajectory_cache_capture_meta": None,
+        }
+
+    env = _prepare_statement_only_failure_env(
+        monkeypatch,
+        tmp_path,
+        planner_result=planner_result,
+        runtime_capture_callable=_runtime_capture_device_setup_error,
+    )
+
+    with pytest.raises(ValueError):
+        run_embed_module.run_embed(
+            output_dir=str(tmp_path / "out"),
+            config_path="configs/default.yaml",
+            overrides=None,
+            input_image_path=None,
+        )
+
+    run_closure_path = cast(Path, env["run_closure_path"])
+    run_closure = json.loads(run_closure_path.read_text(encoding="utf-8"))
+    runtime_finalization = run_closure["status"]["details"]["runtime_finalization"]
+
+    assert runtime_finalization["runtime_capture_inference_status"] == "failed"
+    assert runtime_finalization["runtime_capture_inference_error"] == "device_setup_error: CUDA out of memory"
+    assert runtime_finalization["trajectory_cache_tap_captured_step_count"] == 0
+    assert runtime_finalization["planner_failure_detail_code"] == "trajectory_cache_capture_meta_unreconstructable_after_runtime_failure"
+    assert runtime_finalization["planner_failure_detail_message"] == "trajectory_cache_capture_meta_unreconstructable_after_runtime_failure_cannot_build_basis"
+    assert runtime_finalization["planner_failure_detail_code"] != "trajectory_cache_write_not_observed_after_tap"
+
+
 def test_run_embed_statement_only_failure_reports_tap_observed_meta_missing_without_runtime_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1064,6 +1234,13 @@ def test_runtime_capture_precheck_failure_codes_remain_distinguishable() -> None
             "trajectory_cache_available_steps": [],
             "trajectory_cache_missing_required_steps": [],
         },
+        "meta_unreconstructable_after_runtime_failure": {
+            "trajectory_cache_capture_status": None,
+            "trajectory_cache_capture_detail_code": "trajectory_cache_capture_meta_unreconstructable_after_runtime_failure",
+            "trajectory_cache_available_steps": [],
+            "trajectory_cache_missing_required_steps": [],
+            "trajectory_cache_tap_captured_step_count": 0,
+        },
     }
 
     detail_codes = {
@@ -1077,6 +1254,7 @@ def test_runtime_capture_precheck_failure_codes_remain_distinguishable() -> None
     assert detail_codes["partial"] == "trajectory_cache_partial_missing_required_steps"
     assert detail_codes["meta_missing"] == "trajectory_cache_capture_meta_missing_after_tap"
     assert detail_codes["write_not_observed"] == "trajectory_cache_write_not_observed_after_tap"
+    assert detail_codes["meta_unreconstructable_after_runtime_failure"] == "trajectory_cache_capture_meta_unreconstructable_after_runtime_failure"
     assert len(set(detail_codes.values())) == len(detail_codes)
 
 

@@ -260,6 +260,101 @@ def _finalize_trajectory_cache_capture_meta(
     return None
 
 
+def _normalize_runtime_device_label(device_value: Any) -> str | None:
+    """
+    功能：将设备标识归一化为稳定字符串。 
+
+    Normalize a runtime device identifier into a stable string.
+
+    Args:
+        device_value: Candidate device identifier.
+
+    Returns:
+        Normalized device label, or None when unavailable.
+    """
+    if device_value is None:
+        return None
+
+    normalized_text = str(device_value).strip()
+    if not normalized_text:
+        return None
+
+    try:
+        import torch
+
+        return str(torch.device(normalized_text))
+    except Exception:
+        return normalized_text
+
+
+def _resolve_pipeline_device_label(pipeline_obj: Any) -> str | None:
+    """
+    功能：解析 pipeline 当前所在设备。 
+
+    Resolve the current runtime device label for a pipeline object.
+
+    Args:
+        pipeline_obj: Candidate pipeline object.
+
+    Returns:
+        Normalized current device label, or None when it cannot be resolved.
+    """
+    if pipeline_obj is None:
+        return None
+
+    pipeline_device = getattr(pipeline_obj, "device", None)
+    normalized_pipeline_device = _normalize_runtime_device_label(pipeline_device)
+    if normalized_pipeline_device is not None:
+        return normalized_pipeline_device
+
+    for module_name in ["transformer", "vae"]:
+        module_obj = getattr(pipeline_obj, module_name, None)
+        if module_obj is None or not hasattr(module_obj, "parameters"):
+            continue
+        try:
+            first_param = next(module_obj.parameters())
+        except Exception:
+            continue
+        normalized_param_device = _normalize_runtime_device_label(getattr(first_param, "device", None))
+        if normalized_param_device is not None:
+            return normalized_param_device
+    return None
+
+
+def _should_move_pipeline_to_device(
+    pipeline_obj: Any,
+    actual_device: str,
+) -> tuple[bool, str | None, str | None]:
+    """
+    功能：判断是否需要执行 pipeline device move。 
+
+    Determine whether the pipeline needs a device move before inference.
+
+    Args:
+        pipeline_obj: Candidate pipeline object.
+        actual_device: Target runtime device label.
+
+    Returns:
+        Tuple of (should_move, current_device_label, normalized_target_device).
+    """
+    normalized_target_device = _normalize_runtime_device_label(actual_device)
+    current_device_label = _resolve_pipeline_device_label(pipeline_obj)
+    if normalized_target_device is None:
+        return True, current_device_label, None
+    if current_device_label is None:
+        return True, None, normalized_target_device
+
+    if current_device_label == normalized_target_device:
+        return False, current_device_label, normalized_target_device
+
+    current_device_parts = current_device_label.split(":", 1)
+    target_device_parts = normalized_target_device.split(":", 1)
+    if len(target_device_parts) == 1 and current_device_parts[0] == target_device_parts[0]:
+        return False, current_device_label, normalized_target_device
+
+    return True, current_device_label, normalized_target_device
+
+
 def run_sd3_inference(
     cfg: Dict[str, Any],
     pipeline_obj: Any,
@@ -455,6 +550,7 @@ def run_sd3_inference(
             }
 
         # 确保 pipeline 在正确的设备上
+        device_setup_failed = False
         try:
             import torch
             if pipeline_obj is not None and hasattr(pipeline_obj, "to"):
@@ -463,8 +559,17 @@ def run_sd3_inference(
                 if actual_device == "cuda" and not torch.cuda.is_available():
                     actual_device = "cpu"
                     inference_runtime_meta["device_fallback"] = "cuda_unavailable"
-                # 转移 pipeline 到指定设备
-                pipeline_obj = pipeline_obj.to(actual_device)
+                should_move_pipeline, pipeline_device_before_move, normalized_target_device = _should_move_pipeline_to_device(
+                    pipeline_obj,
+                    actual_device,
+                )
+                inference_runtime_meta["pipeline_device_before_move"] = pipeline_device_before_move or "<unknown>"
+                inference_runtime_meta["pipeline_device_target"] = normalized_target_device or str(actual_device)
+                if should_move_pipeline:
+                    pipeline_obj = pipeline_obj.to(actual_device)
+                    inference_runtime_meta["pipeline_device_move_status"] = "performed"
+                else:
+                    inference_runtime_meta["pipeline_device_move_status"] = "skipped_already_on_target"
                 inference_runtime_meta["device_confirmed"] = actual_device
         except Exception as device_setup_exc:
             if synthetic_pipeline:
@@ -472,194 +577,192 @@ def run_sd3_inference(
             else:
                 inference_status = INFERENCE_STATUS_FAILED
                 inference_error = f"device_setup_error: {device_setup_exc}"
-                return {
-                    "inference_status": inference_status,
-                    "inference_error": inference_error,
-                    "inference_runtime_meta": inference_runtime_meta
-                }
+                inference_runtime_meta["pipeline_device_move_status"] = "failed"
+                device_setup_failed = True
 
-        # 构造推理参数
-        infer_kwargs = {
-            "prompt": prompt,
-            "num_inference_steps": num_inference_steps,
-            "guidance_scale": guidance_scale,
-            "height": height,
-            "width": width
-        }
-        if seed is not None:
-            try:
-                import torch
-                # 确保 generator 在与 pipeline 一致的设备上
-                generator_device = device if device else "cpu"
-                if generator_device == "cuda" and not torch.cuda.is_available():
-                    generator_device = "cpu"
-                generator = torch.Generator(device=generator_device)
-                generator.manual_seed(seed)
-                infer_kwargs["generator"] = generator
-            except Exception as seed_setup_exc:
-                if synthetic_pipeline:
-                    infer_kwargs["seed"] = seed
-                    inference_runtime_meta["seed_setup_warning"] = str(seed_setup_exc)
-                else:
-                    raise
+        if not device_setup_failed:
+            # 构造推理参数
+            infer_kwargs = {
+                "prompt": prompt,
+                "num_inference_steps": num_inference_steps,
+                "guidance_scale": guidance_scale,
+                "height": height,
+                "width": width
+            }
+            if seed is not None:
+                try:
+                    import torch
+                    # 确保 generator 在与 pipeline 一致的设备上
+                    generator_device = device if device else "cpu"
+                    if generator_device == "cuda" and not torch.cuda.is_available():
+                        generator_device = "cpu"
+                    generator = torch.Generator(device=generator_device)
+                    generator.manual_seed(seed)
+                    infer_kwargs["generator"] = generator
+                except Exception as seed_setup_exc:
+                    if synthetic_pipeline:
+                        infer_kwargs["seed"] = seed
+                        inference_runtime_meta["seed_setup_warning"] = str(seed_setup_exc)
+                    else:
+                        raise
 
-        def _capture_latents_callback(
-            _pipe: Any,
-            step_index: int,
-            timestep: Any,
-            callback_kwargs: Dict[str, Any]
-        ) -> Dict[str, Any]:
-            """
-            功能：捕获推理过程中的最后一次 latents。
-
-            Capture the latest latents during inference for embed-side latent sync.
-            """
-            if not isinstance(callback_kwargs, dict):
-                return callback_kwargs
-            latents = callback_kwargs.get("latents")
-            if latents is None:
-                return callback_kwargs
-            if latent_sync_storage is not None:
-                latent_sync_storage["final_latents"] = latents
-            return callback_kwargs
-
-        # 构造注入回调（闭包捕获 InjectionContext）。
-        injection_callback, injection_evidence = _prepare_injection_callback(
-            cfg,
-            injection_context,
-            injection_modifier
-        )
-
-        if capture_attention:
-            try:
-                attention_capture_hook = register_attention_hooks(pipeline_obj, cfg)
-                inference_runtime_meta["attention_capture_enabled"] = True
-            except Exception as attention_register_exc:
-                inference_runtime_meta["attention_capture_enabled"] = False
-                inference_runtime_meta["attention_capture_warning"] = f"register_failed: {attention_register_exc}"
-
-        capture_callback = _capture_latents_callback if capture_final_latents else None
-        callback_to_use = injection_callback
-        if injection_callback is not None and capture_callback is not None:
-            def _combined_callback(
+            def _capture_latents_callback(
                 _pipe: Any,
                 step_index: int,
                 timestep: Any,
                 callback_kwargs: Dict[str, Any]
             ) -> Dict[str, Any]:
-                callback_kwargs = injection_callback(_pipe, step_index, timestep, callback_kwargs)
-                callback_kwargs = capture_callback(_pipe, step_index, timestep, callback_kwargs)
+                """
+                功能：捕获推理过程中的最后一次 latents。
+
+                Capture the latest latents during inference for embed-side latent sync.
+                """
+                if not isinstance(callback_kwargs, dict):
+                    return callback_kwargs
+                latents = callback_kwargs.get("latents")
+                if latents is None:
+                    return callback_kwargs
+                if latent_sync_storage is not None:
+                    latent_sync_storage["final_latents"] = latents
                 return callback_kwargs
-            callback_to_use = _combined_callback
-        elif injection_callback is None:
-            callback_to_use = capture_callback
 
-        if callback_to_use is not None and attention_capture_hook is not None:
-            original_callback = callback_to_use
-
-            def _callback_with_attention_step(
-                _pipe: Any,
-                step_index: int,
-                timestep: Any,
-                callback_kwargs: Dict[str, Any]
-            ) -> Dict[str, Any]:
-                updated = original_callback(_pipe, step_index, timestep, callback_kwargs)
-                attention_capture_hook.advance_step()
-                return updated
-
-            callback_to_use = _callback_with_attention_step
-
-        if callback_to_use is not None:
-            infer_kwargs["callback_on_step_end"] = callback_to_use
-            infer_kwargs["callback_on_step_end_tensor_inputs"] = ["latents"]
-
-        # 【关键】确保所有 text_encoder 的输出也在与 pipeline 相同的设备上
-        # 避免 "index is on cuda:0, different from other tensors on cpu" 的 CUDA 不匹配错误
-        try:
-            if hasattr(pipeline_obj, 'device') and pipeline_obj.device is not None:
-                confirmed_device = pipeline_obj.device
-                inference_runtime_meta["pipeline_confirmed_device"] = str(confirmed_device)
-                
-                # 检查 decoder（VAE）是否与 pipeline 在同一设备
-                if hasattr(pipeline_obj, 'vae') and pipeline_obj.vae is not None:
-                    try:
-                        vae_device = next(pipeline_obj.vae.parameters()).device
-                        if vae_device != confirmed_device:
-                            inference_runtime_meta["device_mismatch_detected"] = f"vae on {vae_device}, pipeline on {confirmed_device}"
-                            pipeline_obj.vae = pipeline_obj.vae.to(confirmed_device)
-                    except (StopIteration, RuntimeError):
-                        pass
-
-                # 检查所有 text_encoders
-                if hasattr(pipeline_obj, 'text_encoders') and pipeline_obj.text_encoders:
-                    for i, encoder in enumerate(pipeline_obj.text_encoders):
-                        if encoder is not None:
-                            try:
-                                enc_device = next(encoder.parameters()).device
-                                if enc_device != confirmed_device:
-                                    inference_runtime_meta[f"encoder_{i}_misaligned"] = str(enc_device)
-                                    pipeline_obj.text_encoders[i] = encoder.to(confirmed_device)
-                            except (StopIteration, RuntimeError):
-                                pass
-        except Exception as device_align_exc:
-            # 设备对齐警告但不中断
-            inference_runtime_meta["device_alignment_warning"] = str(device_align_exc)
-
-        # 执行推理并在支持时采样真实 trajectory 摘要。
-        tap_call_result = trajectory_tap.tap_from_pipeline(
-            cfg,
-            pipeline_obj,
-            infer_kwargs,
-            inference_runtime_meta,
-            seed=seed,
-            device=device,
-            latent_capture_cache=trajectory_latent_cache
-        )
-        output = tap_call_result.get("output")
-        trajectory_evidence = tap_call_result.get("trajectory_evidence")
-        tap_status = tap_call_result.get("tap_status")
-        trajectory_cache_capture_meta = cast(
-            Dict[str, Any] | None,
-            tap_call_result.get("trajectory_cache_capture_meta"),
-        )
-        runtime_self_attention_maps, runtime_attention_source = _extract_runtime_self_attention_maps(
-            pipeline_obj,
-            output,
-        )
-        if runtime_self_attention_maps is None and attention_capture_hook is not None:
-            captured_maps = attention_capture_hook.collect()
-            if captured_maps is not None:
-                runtime_self_attention_maps = captured_maps
-                runtime_attention_source = "hook_capture"
-        if runtime_self_attention_maps is None:
-            inference_runtime_meta["runtime_self_attention_status"] = "absent"
-            inference_runtime_meta["runtime_self_attention_source"] = "<absent>"
-        else:
-            inference_runtime_meta["runtime_self_attention_status"] = "ok"
-            inference_runtime_meta["runtime_self_attention_source"] = runtime_attention_source
-
-        # 更新注入证据状态（处理不支持 callback 的降级路径）。
-        if injection_context is not None:
-            injection_evidence = _finalize_injection_evidence(
+            # 构造注入回调（闭包捕获 InjectionContext）。
+            injection_callback, injection_evidence = _prepare_injection_callback(
+                cfg,
                 injection_context,
-                injection_evidence,
-                tap_status
+                injection_modifier
             )
 
-        # 提取输出摘要，并保存输出图像对象供调用方持久化。
-        output_image = None
-        if hasattr(output, "images") and output.images is not None and len(output.images) > 0:
-            inference_runtime_meta["output_image_count"] = len(output.images)
-            first_image = output.images[0]
-            output_image = first_image
-            if hasattr(first_image, "size"):
-                inference_runtime_meta["output_image_size"] = list(first_image.size)
-            if hasattr(first_image, "mode"):
-                inference_runtime_meta["output_image_mode"] = first_image.mode
-        else:
-            inference_runtime_meta["output_image_count"] = 0
+            if capture_attention:
+                try:
+                    attention_capture_hook = register_attention_hooks(pipeline_obj, cfg)
+                    inference_runtime_meta["attention_capture_enabled"] = True
+                except Exception as attention_register_exc:
+                    inference_runtime_meta["attention_capture_enabled"] = False
+                    inference_runtime_meta["attention_capture_warning"] = f"register_failed: {attention_register_exc}"
 
-        inference_status = INFERENCE_STATUS_OK
+            capture_callback = _capture_latents_callback if capture_final_latents else None
+            callback_to_use = injection_callback
+            if injection_callback is not None and capture_callback is not None:
+                def _combined_callback(
+                    _pipe: Any,
+                    step_index: int,
+                    timestep: Any,
+                    callback_kwargs: Dict[str, Any]
+                ) -> Dict[str, Any]:
+                    callback_kwargs = injection_callback(_pipe, step_index, timestep, callback_kwargs)
+                    callback_kwargs = capture_callback(_pipe, step_index, timestep, callback_kwargs)
+                    return callback_kwargs
+                callback_to_use = _combined_callback
+            elif injection_callback is None:
+                callback_to_use = capture_callback
+
+            if callback_to_use is not None and attention_capture_hook is not None:
+                original_callback = callback_to_use
+
+                def _callback_with_attention_step(
+                    _pipe: Any,
+                    step_index: int,
+                    timestep: Any,
+                    callback_kwargs: Dict[str, Any]
+                ) -> Dict[str, Any]:
+                    updated = original_callback(_pipe, step_index, timestep, callback_kwargs)
+                    attention_capture_hook.advance_step()
+                    return updated
+
+                callback_to_use = _callback_with_attention_step
+
+            if callback_to_use is not None:
+                infer_kwargs["callback_on_step_end"] = callback_to_use
+                infer_kwargs["callback_on_step_end_tensor_inputs"] = ["latents"]
+
+            # 【关键】确保所有 text_encoder 的输出也在与 pipeline 相同的设备上
+            # 避免 "index is on cuda:0, different from other tensors on cpu" 的 CUDA 不匹配错误
+            try:
+                if hasattr(pipeline_obj, 'device') and pipeline_obj.device is not None:
+                    confirmed_device = pipeline_obj.device
+                    inference_runtime_meta["pipeline_confirmed_device"] = str(confirmed_device)
+                    
+                    # 检查 decoder（VAE）是否与 pipeline 在同一设备
+                    if hasattr(pipeline_obj, 'vae') and pipeline_obj.vae is not None:
+                        try:
+                            vae_device = next(pipeline_obj.vae.parameters()).device
+                            if vae_device != confirmed_device:
+                                inference_runtime_meta["device_mismatch_detected"] = f"vae on {vae_device}, pipeline on {confirmed_device}"
+                                pipeline_obj.vae = pipeline_obj.vae.to(confirmed_device)
+                        except (StopIteration, RuntimeError):
+                            pass
+
+                    # 检查所有 text_encoders
+                    if hasattr(pipeline_obj, 'text_encoders') and pipeline_obj.text_encoders:
+                        for i, encoder in enumerate(pipeline_obj.text_encoders):
+                            if encoder is not None:
+                                try:
+                                    enc_device = next(encoder.parameters()).device
+                                    if enc_device != confirmed_device:
+                                        inference_runtime_meta[f"encoder_{i}_misaligned"] = str(enc_device)
+                                        pipeline_obj.text_encoders[i] = encoder.to(confirmed_device)
+                                except (StopIteration, RuntimeError):
+                                    pass
+            except Exception as device_align_exc:
+                # 设备对齐警告但不中断
+                inference_runtime_meta["device_alignment_warning"] = str(device_align_exc)
+
+            # 执行推理并在支持时采样真实 trajectory 摘要。
+            tap_call_result = trajectory_tap.tap_from_pipeline(
+                cfg,
+                pipeline_obj,
+                infer_kwargs,
+                inference_runtime_meta,
+                seed=seed,
+                device=device,
+                latent_capture_cache=trajectory_latent_cache
+            )
+            output = tap_call_result.get("output")
+            trajectory_evidence = tap_call_result.get("trajectory_evidence")
+            tap_status = tap_call_result.get("tap_status")
+            trajectory_cache_capture_meta = cast(
+                Dict[str, Any] | None,
+                tap_call_result.get("trajectory_cache_capture_meta"),
+            )
+            runtime_self_attention_maps, runtime_attention_source = _extract_runtime_self_attention_maps(
+                pipeline_obj,
+                output,
+            )
+            if runtime_self_attention_maps is None and attention_capture_hook is not None:
+                captured_maps = attention_capture_hook.collect()
+                if captured_maps is not None:
+                    runtime_self_attention_maps = captured_maps
+                    runtime_attention_source = "hook_capture"
+            if runtime_self_attention_maps is None:
+                inference_runtime_meta["runtime_self_attention_status"] = "absent"
+                inference_runtime_meta["runtime_self_attention_source"] = "<absent>"
+            else:
+                inference_runtime_meta["runtime_self_attention_status"] = "ok"
+                inference_runtime_meta["runtime_self_attention_source"] = runtime_attention_source
+
+            # 更新注入证据状态（处理不支持 callback 的降级路径）。
+            if injection_context is not None:
+                injection_evidence = _finalize_injection_evidence(
+                    injection_context,
+                    injection_evidence,
+                    tap_status
+                )
+
+            # 提取输出摘要，并保存输出图像对象供调用方持久化。
+            output_image = None
+            if hasattr(output, "images") and output.images is not None and len(output.images) > 0:
+                inference_runtime_meta["output_image_count"] = len(output.images)
+                first_image = output.images[0]
+                output_image = first_image
+                if hasattr(first_image, "size"):
+                    inference_runtime_meta["output_image_size"] = list(first_image.size)
+                if hasattr(first_image, "mode"):
+                    inference_runtime_meta["output_image_mode"] = first_image.mode
+            else:
+                inference_runtime_meta["output_image_count"] = 0
+
+            inference_status = INFERENCE_STATUS_OK
 
     except ImportError as exc:
         # torch 不可用
