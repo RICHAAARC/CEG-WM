@@ -938,7 +938,14 @@ def test_run_embed_preview_generation_cleanup_preserves_statement_only_path(
             preview_runtime_result = {
                 "inference_status": "ok",
                 "inference_error": None,
-                "inference_runtime_meta": {"latency_ms": 1.0},
+                "inference_runtime_meta": {
+                    "latency_ms": 1.0,
+                    "nested_runtime": {
+                        "planner_seed": 7,
+                        "preview_tensor": np.ones((1, 4, 8, 8), dtype=np.float32),
+                    },
+                    "preview_tensor": np.ones((1, 4, 8, 8), dtype=np.float32),
+                },
                 "trajectory_evidence": _build_trajectory_evidence(28),
                 "injection_evidence": {"preview_only": True},
                 "trajectory_cache_capture_meta": None,
@@ -988,6 +995,10 @@ def test_run_embed_preview_generation_cleanup_preserves_statement_only_path(
     preview_generation = cast(Dict[str, Any], env["preview_generation"])
     assert preview_generation["status"] == "ok"
     assert preview_generation["persisted_artifact_rel_path"] == "preview/preview.png"
+    preview_runtime_meta = cast(Dict[str, Any], preview_generation["inference_runtime_meta"])
+    assert preview_runtime_meta["latency_ms"] == 1.0
+    assert "preview_tensor" not in preview_runtime_meta
+    assert preview_runtime_meta["nested_runtime"] == {"planner_seed": 7}
     assert isinstance(preview_runtime_result, dict)
     assert preview_runtime_result == {}
     assert isinstance(preview_output_image, _TrackedPreviewImage)

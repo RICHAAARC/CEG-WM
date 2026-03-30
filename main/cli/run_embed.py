@@ -80,6 +80,87 @@ _build_planner_inputs_for_runtime = cast(
 
 EMBED_CONTENT_RUNTIME_PHASE_PRECOMPUTE = "embed_precompute"
 PREVIEW_GENERATION_RECORD_FILE_NAME = "preview_generation_record.json"
+_PREVIEW_META_OMIT = object()
+
+
+def _clone_preview_meta_value(value: Any) -> Any:
+    """
+    功能：递归复制 preview meta 可保留的轻量值。 
+
+    Recursively clone lightweight preview-metadata values while dropping
+    preview-only heavy objects.
+
+    Args:
+        value: Candidate metadata value.
+
+    Returns:
+        Cloned lightweight value, or an internal omit sentinel.
+    """
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        cloned_mapping: Dict[str, Any] = {}
+        for key, nested_value in value.items():
+            if not isinstance(key, str):
+                continue
+            cloned_value = _clone_preview_meta_value(nested_value)
+            if cloned_value is _PREVIEW_META_OMIT:
+                continue
+            cloned_mapping[key] = cloned_value
+        return cloned_mapping
+    if isinstance(value, (list, tuple)):
+        cloned_items = []
+        for item in value:
+            cloned_item = _clone_preview_meta_value(item)
+            if cloned_item is _PREVIEW_META_OMIT:
+                continue
+            cloned_items.append(cloned_item)
+        return cloned_items
+    return _PREVIEW_META_OMIT
+
+
+def _clone_preview_meta_mapping(mapping: Any) -> Dict[str, Any] | None:
+    """
+    功能：将 preview meta 子映射复制为轻量副本。 
+
+    Clone a preview-metadata mapping into a lightweight detached copy.
+
+    Args:
+        mapping: Candidate metadata mapping.
+
+    Returns:
+        Detached lightweight mapping, or None when unavailable.
+    """
+    if not isinstance(mapping, dict):
+        return None
+    cloned_mapping = _clone_preview_meta_value(mapping)
+    if not isinstance(cloned_mapping, dict):
+        return None
+    return cast(Dict[str, Any], cloned_mapping)
+
+
+def _shrink_preview_generation_meta_payloads(preview_generation_meta: Dict[str, Any]) -> None:
+    """
+    功能：收紧 preview generation meta 中的运行期子载荷。 
+
+    Shrink preview-generation runtime payloads to detached lightweight copies.
+
+    Args:
+        preview_generation_meta: Mutable preview-generation metadata mapping.
+
+    Returns:
+        None.
+    """
+    if not isinstance(preview_generation_meta, dict):
+        return
+    preview_generation_meta["pipeline_runtime_meta"] = _clone_preview_meta_mapping(
+        preview_generation_meta.get("pipeline_runtime_meta")
+    )
+    preview_generation_meta["inference_runtime_meta"] = _clone_preview_meta_mapping(
+        preview_generation_meta.get("inference_runtime_meta")
+    )
 
 
 def _resolve_embed_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -230,7 +311,7 @@ def _build_preview_generation_meta(
         "exception_message": None,
         "pipeline_status": pipeline_result.get("pipeline_status"),
         "pipeline_error": pipeline_result.get("pipeline_error"),
-        "pipeline_runtime_meta": pipeline_result.get("pipeline_runtime_meta"),
+        "pipeline_runtime_meta": _clone_preview_meta_mapping(pipeline_result.get("pipeline_runtime_meta")),
         "pipeline_provenance_canon_sha256": pipeline_result.get("pipeline_provenance_canon_sha256"),
         "model_provenance_canon_sha256": pipeline_result.get("model_provenance_canon_sha256"),
         "inference_status": None,
@@ -292,7 +373,9 @@ def _build_preview_generation_meta(
 
         preview_meta["inference_status"] = preview_status
         preview_meta["inference_error"] = preview_infer_result.get("inference_error")
-        preview_meta["inference_runtime_meta"] = preview_infer_result.get("inference_runtime_meta")
+        preview_meta["inference_runtime_meta"] = _clone_preview_meta_mapping(
+            preview_infer_result.get("inference_runtime_meta")
+        )
 
         preview_image = preview_infer_result.get("output_image")
         preview_meta["output_image_present"] = preview_image is not None
@@ -326,6 +409,7 @@ def _build_preview_generation_meta(
         print(f"[Preview Generation] 推理异常：{exc}，跳过。")
 
     try:
+        _shrink_preview_generation_meta_payloads(preview_meta)
         _write_preview_generation_record(
             run_root=run_root,
             artifacts_dir=artifacts_dir,
@@ -376,6 +460,25 @@ def _release_preview_generation_transients(
                 pass
 
     if isinstance(preview_infer_result, dict):
+        runtime_meta = preview_infer_result.get("inference_runtime_meta")
+        if isinstance(runtime_meta, dict):
+            runtime_meta.clear()
+        trajectory_evidence = preview_infer_result.get("trajectory_evidence")
+        if isinstance(trajectory_evidence, dict):
+            trajectory_evidence.clear()
+        injection_evidence = preview_infer_result.get("injection_evidence")
+        if isinstance(injection_evidence, dict):
+            injection_evidence.clear()
+        trajectory_cache_capture_meta = preview_infer_result.get("trajectory_cache_capture_meta")
+        if isinstance(trajectory_cache_capture_meta, dict):
+            trajectory_cache_capture_meta.clear()
+        preview_infer_result.pop("output_image", None)
+        preview_infer_result.pop("final_latents", None)
+        preview_infer_result.pop("runtime_self_attention_maps", None)
+        preview_infer_result.pop("trajectory_evidence", None)
+        preview_infer_result.pop("injection_evidence", None)
+        preview_infer_result.pop("trajectory_cache_capture_meta", None)
+        preview_infer_result.pop("inference_runtime_meta", None)
         preview_infer_result.clear()
 
 
@@ -415,6 +518,7 @@ def _release_preview_generation_runtime_pressure(
     if not isinstance(runtime_device, str) or not runtime_device.lower().startswith("cuda"):
         return
 
+    _shrink_preview_generation_meta_payloads(preview_generation_meta)
     gc.collect()
     try:
         import torch

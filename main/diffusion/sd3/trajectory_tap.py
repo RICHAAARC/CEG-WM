@@ -605,6 +605,7 @@ def tap_from_pipeline(
     callback_invocation_count = 0
     callback_latent_present_count = 0
     required_cache_steps = sorted(set(spec.scheduler_steps))
+    ordered_steps: List[Dict[str, Any]] = []
 
     def _step_callback(_pipe: Any, step_index: int, timestep: Any, callback_kwargs: Dict[str, Any]) -> Dict[str, Any]:
         nonlocal callback_invocation_count, callback_latent_present_count
@@ -662,41 +663,48 @@ def tap_from_pipeline(
         tensor_inputs.append("latents")
     callback_kwargs["callback_on_step_end_tensor_inputs"] = tensor_inputs
 
-    output = pipeline_obj(**callback_kwargs)
-    ordered_steps = _materialize_tap_steps(spec.scheduler_steps, captured)
+    try:
+        output = pipeline_obj(**callback_kwargs)
+        ordered_steps = _materialize_tap_steps(spec.scheduler_steps, captured)
 
-    print(f"[Trajectory-TAP] Tap collection results:")
-    print(f"  - Captured steps count: {len(captured)}")
-    print(f"  - Ordered steps count: {len(ordered_steps) if ordered_steps else 0}")
-    print(f"  - Expected scheduler steps: {len(spec.scheduler_steps) if spec.scheduler_steps else 0}")
-    if not ordered_steps:
-        print(f"  - [WARN] No steps collected! Will return absent evidence")
+        print(f"[Trajectory-TAP] Tap collection results:")
+        print(f"  - Captured steps count: {len(captured)}")
+        print(f"  - Ordered steps count: {len(ordered_steps) if ordered_steps else 0}")
+        print(f"  - Expected scheduler steps: {len(spec.scheduler_steps) if spec.scheduler_steps else 0}")
+        if not ordered_steps:
+            print(f"  - [WARN] No steps collected! Will return absent evidence")
 
-    evidence = build_trajectory_evidence(
-        cfg,
-        "ok",
-        inference_runtime_meta,
-        seed=seed,
-        device=device,
-        tap_steps=ordered_steps,
-        trajectory_spec=spec
-    )
+        evidence = build_trajectory_evidence(
+            cfg,
+            "ok",
+            inference_runtime_meta,
+            seed=seed,
+            device=device,
+            tap_steps=ordered_steps,
+            trajectory_spec=spec
+        )
 
-    print(f"[Trajectory-TAP] Evidence build result: status={evidence.get('status')}, digest={evidence.get('trajectory_digest', '<absent>')[:16] if evidence.get('trajectory_digest') else '<None>'}")
+        print(f"[Trajectory-TAP] Evidence build result: status={evidence.get('status')}, digest={evidence.get('trajectory_digest', '<absent>')[:16] if evidence.get('trajectory_digest') else '<None>'}")
 
-    return {
-        "output": output,
-        "trajectory_evidence": evidence,
-        "tap_status": "ok" if evidence.get("status") == "ok" else "absent",
-        "trajectory_cache_capture_meta": _build_trajectory_cache_capture_meta(
-            latent_capture_cache,
-            supports_callback=True,
-            callback_invocation_count=callback_invocation_count,
-            callback_latent_present_count=callback_latent_present_count,
-            tap_captured_step_count=len(captured),
-            required_cache_steps=required_cache_steps,
-        ),
-    }
+        return {
+            "output": output,
+            "trajectory_evidence": evidence,
+            "tap_status": "ok" if evidence.get("status") == "ok" else "absent",
+            "trajectory_cache_capture_meta": _build_trajectory_cache_capture_meta(
+                latent_capture_cache,
+                supports_callback=True,
+                callback_invocation_count=callback_invocation_count,
+                callback_latent_present_count=callback_latent_present_count,
+                tap_captured_step_count=len(captured),
+                required_cache_steps=required_cache_steps,
+            ),
+        }
+    finally:
+        callback_kwargs.pop("callback_on_step_end", None)
+        callback_kwargs.pop("callback_on_step_end_tensor_inputs", None)
+        callback_kwargs.clear()
+        captured.clear()
+        ordered_steps.clear()
 
 
 def _resolve_tap_enabled(cfg: Dict[str, Any]) -> bool:

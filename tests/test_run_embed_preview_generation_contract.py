@@ -302,7 +302,14 @@ def test_run_embed_preview_generation_persists_formal_artifact_before_content_pr
         inference_result={
             "inference_status": "ok",
             "inference_error": None,
-            "inference_runtime_meta": {"latency_ms": 1.0},
+            "inference_runtime_meta": {
+                "latency_ms": 1.0,
+                "nested_runtime": {
+                    "preview_token": "kept",
+                    "preview_tensor": np.ones((1, 4, 8, 8), dtype=np.float32),
+                },
+                "preview_tensor": np.ones((1, 4, 8, 8), dtype=np.float32),
+            },
             "trajectory_evidence": {},
             "injection_evidence": {},
             "output_image": Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8)),
@@ -331,6 +338,10 @@ def test_run_embed_preview_generation_persists_formal_artifact_before_content_pr
     assert preview_record["persisted_artifact_path"] == str(preview_artifact_path)
     assert preview_record["record_rel_path"] == "preview/preview_generation_record.json"
     assert preview_record["output_image_present"] is True
+    assert preview_record["inference_runtime_meta"] == {
+        "latency_ms": 1.0,
+        "nested_runtime": {"preview_token": "kept"},
+    }
     assert preview_record["pipeline_runtime_meta"]["model_source_resolution"] == "fallback_to_requested_model_source"
     assert preview_record["pipeline_runtime_meta"]["local_snapshot_status"] == "absent"
     assert preview_record["seed"] == 7

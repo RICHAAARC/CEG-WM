@@ -355,6 +355,59 @@ def _should_move_pipeline_to_device(
     return True, current_device_label, normalized_target_device
 
 
+def _close_image_if_possible(image_obj: Any) -> None:
+    """
+    功能：尝试关闭图像对象。 
+
+    Attempt to close an image-like object when a close method is available.
+
+    Args:
+        image_obj: Candidate image object.
+
+    Returns:
+        None.
+    """
+    if image_obj is None:
+        return
+    close_method = getattr(image_obj, "close", None)
+    if not callable(close_method):
+        return
+    try:
+        close_method()
+    except Exception:
+        return
+
+
+def _release_pipeline_output_container(output: Any, retained_output_image: Any) -> None:
+    """
+    功能：释放 pipeline 输出容器中不再需要的图像引用。 
+
+    Release image references from the pipeline output container after the
+    retained preview/output image has been extracted.
+
+    Args:
+        output: Pipeline output object.
+        retained_output_image: Image object retained by the caller.
+
+    Returns:
+        None.
+    """
+    if output is None:
+        return
+
+    output_images = getattr(output, "images", None)
+    if isinstance(output_images, (list, tuple)):
+        for candidate_image in list(output_images):
+            if candidate_image is retained_output_image:
+                continue
+            _close_image_if_possible(candidate_image)
+        try:
+            retained_images = [] if retained_output_image is None else [retained_output_image]
+            setattr(output, "images", retained_images)
+        except Exception:
+            return
+
+
 def run_sd3_inference(
     cfg: Dict[str, Any],
     pipeline_obj: Any,
@@ -719,12 +772,22 @@ def run_sd3_inference(
                 latent_capture_cache=trajectory_latent_cache
             )
             output = tap_call_result.get("output")
-            trajectory_evidence = tap_call_result.get("trajectory_evidence")
+            trajectory_evidence_value = tap_call_result.get("trajectory_evidence")
+            if isinstance(trajectory_evidence_value, dict):
+                trajectory_evidence = dict(cast(Dict[str, Any], trajectory_evidence_value))
+            else:
+                trajectory_evidence = trajectory_evidence_value
             tap_status = tap_call_result.get("tap_status")
-            trajectory_cache_capture_meta = cast(
-                Dict[str, Any] | None,
-                tap_call_result.get("trajectory_cache_capture_meta"),
+            trajectory_cache_capture_meta_value = tap_call_result.get("trajectory_cache_capture_meta")
+            trajectory_cache_capture_meta = (
+                dict(cast(Dict[str, Any], trajectory_cache_capture_meta_value))
+                if isinstance(trajectory_cache_capture_meta_value, dict)
+                else None
             )
+            tap_call_result.clear()
+            callback_to_use = None
+            capture_callback = None
+            injection_callback = None
             runtime_self_attention_maps, runtime_attention_source = _extract_runtime_self_attention_maps(
                 pipeline_obj,
                 output,
@@ -761,6 +824,9 @@ def run_sd3_inference(
                     inference_runtime_meta["output_image_mode"] = first_image.mode
             else:
                 inference_runtime_meta["output_image_count"] = 0
+
+            _release_pipeline_output_container(output, output_image)
+            output = None
 
             inference_status = INFERENCE_STATUS_OK
 
