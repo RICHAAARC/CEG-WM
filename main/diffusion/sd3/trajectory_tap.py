@@ -32,6 +32,13 @@ DEFAULT_STATS_PRECISION_DIGITS = 6
 DEFAULT_TENSOR_TYPES = ["latent"]
 DEFAULT_MODULE_PATHS = ["transformer"]
 MAX_CAPTURE_FAILURE_EXAMPLES = 4
+CAPTURE_STATUS_UNSUPPORTED_PIPELINE = "unsupported_pipeline"
+CAPTURE_STATUS_CALLBACK_NOT_OBSERVED = "callback_not_observed"
+CAPTURE_STATUS_CALLBACK_WITHOUT_LATENTS = "callback_invoked_without_latents"
+CAPTURE_STATUS_TAP_OBSERVED_CACHE_WRITE_NOT_OBSERVED = "tap_steps_observed_but_cache_write_not_observed"
+CAPTURE_STATUS_ALL_FAILED = "all_failed"
+CAPTURE_STATUS_PARTIAL = "partial"
+CAPTURE_STATUS_COMPLETE = "complete"
 
 ALLOWED_ABSENT_REASONS = {
     "tap_disabled",
@@ -428,18 +435,30 @@ def _build_trajectory_cache_capture_meta(
     if not isinstance(failure_examples, list):
         failure_examples = []
 
+    tap_observed_without_cache_write = (
+        tap_captured_step_count > 0
+        and callback_invocation_count > 0
+        and callback_latent_present_count > 0
+        and int(capture_attempt_count) <= 0
+        and int(capture_success_count) <= 0
+        and int(capture_failure_count) <= 0
+        and not normalized_available_steps
+    )
+
     if not supports_callback:
-        capture_status = "unsupported_pipeline"
+        capture_status = CAPTURE_STATUS_UNSUPPORTED_PIPELINE
     elif callback_invocation_count <= 0:
-        capture_status = "callback_not_observed"
+        capture_status = CAPTURE_STATUS_CALLBACK_NOT_OBSERVED
     elif callback_latent_present_count <= 0:
-        capture_status = "callback_invoked_without_latents"
+        capture_status = CAPTURE_STATUS_CALLBACK_WITHOUT_LATENTS
+    elif tap_observed_without_cache_write:
+        capture_status = CAPTURE_STATUS_TAP_OBSERVED_CACHE_WRITE_NOT_OBSERVED
     elif capture_success_count <= 0:
-        capture_status = "all_failed"
+        capture_status = CAPTURE_STATUS_ALL_FAILED
     elif missing_required_steps:
-        capture_status = "partial"
+        capture_status = CAPTURE_STATUS_PARTIAL
     else:
-        capture_status = "complete"
+        capture_status = CAPTURE_STATUS_COMPLETE
 
     return {
         "trajectory_cache_capture_status": capture_status,

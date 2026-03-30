@@ -661,8 +661,59 @@ def _extract_runtime_capture_diagnostics(
     Returns:
         Mapping with normalized capture diagnostics.
     """
+    def _reconstruct_capture_payload(payload_source: Any) -> Dict[str, Any] | None:
+        if not isinstance(payload_source, dict):
+            return None
+        payload_mapping = cast(Dict[str, Any], payload_source)
+        nested_payload = payload_mapping.get("trajectory_cache_capture")
+        if isinstance(nested_payload, dict):
+            return dict(cast(Dict[str, Any], nested_payload))
+        reconstructed_payload = {
+            field_name: payload_mapping.get(field_name)
+            for field_name in [
+                "trajectory_cache_capture_status",
+                "trajectory_cache_step_count",
+                "trajectory_cache_capture_attempt_count",
+                "trajectory_cache_capture_success_count",
+                "trajectory_cache_capture_failure_count",
+                "trajectory_cache_capture_failure_examples",
+                "trajectory_cache_available_steps",
+                "trajectory_cache_required_step_count",
+                "trajectory_cache_missing_required_steps",
+                "trajectory_cache_callback_invocation_count",
+                "trajectory_cache_callback_latent_present_count",
+                "trajectory_cache_tap_captured_step_count",
+            ]
+            if field_name in payload_mapping
+        }
+        if not reconstructed_payload:
+            return None
+        if all(value is None for value in reconstructed_payload.values()):
+            return None
+        return reconstructed_payload
+
+    def _extract_tap_captured_step_count(payload_source: Any) -> int | None:
+        if not isinstance(payload_source, dict):
+            return None
+        payload_mapping = cast(Dict[str, Any], payload_source)
+        trajectory_evidence = payload_mapping.get("trajectory_evidence")
+        if not isinstance(trajectory_evidence, dict):
+            return None
+        trajectory_metrics = trajectory_evidence.get("trajectory_metrics")
+        if isinstance(trajectory_metrics, dict):
+            steps_candidate = trajectory_metrics.get("steps")
+            if isinstance(steps_candidate, list):
+                return len(steps_candidate)
+        trajectory_stats = trajectory_evidence.get("trajectory_stats")
+        if isinstance(trajectory_stats, dict):
+            steps_candidate = trajectory_stats.get("steps")
+            if isinstance(steps_candidate, list):
+                return len(steps_candidate)
+        return None
+
     capture_payload: Dict[str, Any] | None = None
     inference_runtime_meta: Dict[str, Any] | None = None
+    tap_captured_step_count_from_evidence: int | None = None
     if isinstance(runtime_capture_result, dict):
         runtime_capture_result_mapping = cast(Dict[str, Any], runtime_capture_result)
         inference_runtime_meta_candidate = runtime_capture_result_mapping.get("inference_runtime_meta")
@@ -671,10 +722,11 @@ def _extract_runtime_capture_diagnostics(
         capture_node = runtime_capture_result_mapping.get("trajectory_cache_capture_meta")
         if isinstance(capture_node, dict):
             capture_payload = dict(cast(Dict[str, Any], capture_node))
+        if capture_payload is None:
+            capture_payload = _reconstruct_capture_payload(runtime_capture_result_mapping)
+        tap_captured_step_count_from_evidence = _extract_tap_captured_step_count(runtime_capture_result_mapping)
     if capture_payload is None and isinstance(inference_runtime_meta, dict):
-        capture_node = inference_runtime_meta.get("trajectory_cache_capture")
-        if isinstance(capture_node, dict):
-            capture_payload = dict(cast(Dict[str, Any], capture_node))
+        capture_payload = _reconstruct_capture_payload(inference_runtime_meta)
 
     cache_diagnostics = None
     if runtime_capture_cache is not None and hasattr(runtime_capture_cache, "capture_diagnostics"):
@@ -728,6 +780,51 @@ def _extract_runtime_capture_diagnostics(
     if not isinstance(capture_failure_count, int) and isinstance(cache_diagnostics, dict):
         capture_failure_count = cache_diagnostics.get("capture_failure_count")
 
+    callback_invocation_count = capture_payload.get("trajectory_cache_callback_invocation_count") if isinstance(capture_payload, dict) else None
+    callback_latent_present_count = capture_payload.get("trajectory_cache_callback_latent_present_count") if isinstance(capture_payload, dict) else None
+    tap_captured_step_count = capture_payload.get("trajectory_cache_tap_captured_step_count") if isinstance(capture_payload, dict) else None
+    if not isinstance(tap_captured_step_count, int):
+        tap_captured_step_count = tap_captured_step_count_from_evidence
+    if not isinstance(tap_captured_step_count, int):
+        tap_captured_step_count = len(normalized_available_steps)
+
+    if capture_payload is None and tap_captured_step_count > 0:
+        capture_payload = {
+            "trajectory_cache_capture_status": "tap_steps_observed_but_cache_meta_missing",
+            "trajectory_cache_step_count": len(normalized_available_steps),
+            "trajectory_cache_capture_attempt_count": capture_attempt_count if isinstance(capture_attempt_count, int) else 0,
+            "trajectory_cache_capture_success_count": capture_success_count if isinstance(capture_success_count, int) else len(normalized_available_steps),
+            "trajectory_cache_capture_failure_count": capture_failure_count if isinstance(capture_failure_count, int) else 0,
+            "trajectory_cache_capture_failure_examples": normalized_failure_examples,
+            "trajectory_cache_available_steps": normalized_available_steps,
+            "trajectory_cache_required_step_count": None,
+            "trajectory_cache_missing_required_steps": normalized_missing_required_steps,
+            "trajectory_cache_callback_invocation_count": None,
+            "trajectory_cache_callback_latent_present_count": None,
+            "trajectory_cache_tap_captured_step_count": int(tap_captured_step_count),
+        }
+    elif isinstance(capture_payload, dict):
+        capture_status = capture_payload.get("trajectory_cache_capture_status")
+        if (
+            tap_captured_step_count > 0
+            and isinstance(callback_invocation_count, int)
+            and callback_invocation_count > 0
+            and isinstance(callback_latent_present_count, int)
+            and callback_latent_present_count > 0
+            and isinstance(capture_attempt_count, int)
+            and capture_attempt_count <= 0
+            and isinstance(capture_success_count, int)
+            and capture_success_count <= 0
+            and isinstance(capture_failure_count, int)
+            and capture_failure_count <= 0
+            and not normalized_available_steps
+        ):
+            capture_payload = dict(capture_payload)
+            capture_payload["trajectory_cache_capture_status"] = "tap_steps_observed_but_cache_write_not_observed"
+        elif not isinstance(capture_status, str) and tap_captured_step_count > 0 and not normalized_available_steps:
+            capture_payload = dict(capture_payload)
+            capture_payload["trajectory_cache_capture_status"] = "tap_steps_observed_but_cache_meta_missing"
+
     return {
         "trajectory_cache_capture_status": capture_payload.get("trajectory_cache_capture_status") if isinstance(capture_payload, dict) else None,
         "trajectory_cache_step_count": capture_payload.get("trajectory_cache_step_count") if isinstance(capture_payload, dict) else len(normalized_available_steps),
@@ -740,7 +837,7 @@ def _extract_runtime_capture_diagnostics(
         "trajectory_cache_missing_required_steps": normalized_missing_required_steps,
         "trajectory_cache_callback_invocation_count": capture_payload.get("trajectory_cache_callback_invocation_count") if isinstance(capture_payload, dict) else None,
         "trajectory_cache_callback_latent_present_count": capture_payload.get("trajectory_cache_callback_latent_present_count") if isinstance(capture_payload, dict) else None,
-        "trajectory_cache_tap_captured_step_count": capture_payload.get("trajectory_cache_tap_captured_step_count") if isinstance(capture_payload, dict) else None,
+        "trajectory_cache_tap_captured_step_count": capture_payload.get("trajectory_cache_tap_captured_step_count") if isinstance(capture_payload, dict) else tap_captured_step_count,
         "trajectory_cache_capture": capture_payload,
     }
 
@@ -793,7 +890,19 @@ def _build_runtime_capture_precheck_failure(
 
     planner_failure_detail_code = "trajectory_cache_absent_or_empty"
     planner_failure_detail_message = "trajectory_cache_absent_or_empty_cannot_build_basis"
-    if missing_required_steps:
+    if capture_status == "tap_steps_observed_but_cache_write_not_observed":
+        planner_failure_detail_code = "trajectory_cache_write_not_observed_after_tap"
+        planner_failure_detail_message = "trajectory_cache_write_not_observed_after_tap_cannot_build_basis"
+    elif capture_status == "tap_steps_observed_but_cache_meta_missing":
+        planner_failure_detail_code = "trajectory_cache_capture_meta_missing_after_tap"
+        planner_failure_detail_message = "trajectory_cache_capture_meta_missing_after_tap_cannot_build_basis"
+    elif missing_required_steps and available_steps:
+        planner_failure_detail_code = "trajectory_cache_partial_missing_required_steps"
+        planner_failure_detail_message = (
+            "trajectory_cache_partial_missing_required_steps_cannot_build_basis:"
+            f"{missing_required_steps[:8]}"
+        )
+    elif missing_required_steps:
         planner_failure_detail_code = "trajectory_cache_missing_required_steps"
         planner_failure_detail_message = (
             "trajectory_cache_missing_required_steps_cannot_build_basis:"
@@ -801,14 +910,19 @@ def _build_runtime_capture_precheck_failure(
         )
     elif capture_status == "callback_not_observed":
         planner_failure_detail_code = "trajectory_callback_not_observed"
+        planner_failure_detail_message = "trajectory_callback_not_observed_cannot_build_basis"
     elif capture_status == "callback_invoked_without_latents":
         planner_failure_detail_code = "trajectory_callback_invoked_without_latents"
+        planner_failure_detail_message = "trajectory_callback_invoked_without_latents_cannot_build_basis"
     elif capture_status == "all_failed":
         planner_failure_detail_code = "trajectory_cache_capture_all_failed"
+        planner_failure_detail_message = "trajectory_cache_capture_all_failed_cannot_build_basis"
     elif capture_status == "unsupported_pipeline":
         planner_failure_detail_code = "trajectory_callback_unsupported"
+        planner_failure_detail_message = "trajectory_callback_unsupported_cannot_build_basis"
     elif available_steps:
         planner_failure_detail_code = "trajectory_cache_incomplete"
+        planner_failure_detail_message = "trajectory_cache_incomplete_cannot_build_basis"
 
     planner_context_capture = runtime_capture_diagnostics.get("trajectory_cache_capture")
     if not isinstance(planner_context_capture, dict):

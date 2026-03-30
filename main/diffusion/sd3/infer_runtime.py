@@ -23,6 +23,20 @@ from main.core import digests
 INFERENCE_STATUS_OK = "ok"
 INFERENCE_STATUS_FAILED = "failed"
 INFERENCE_STATUS_DISABLED = "disabled"
+TRAJECTORY_CACHE_CAPTURE_META_FIELDS = [
+    "trajectory_cache_capture_status",
+    "trajectory_cache_step_count",
+    "trajectory_cache_capture_attempt_count",
+    "trajectory_cache_capture_success_count",
+    "trajectory_cache_capture_failure_count",
+    "trajectory_cache_capture_failure_examples",
+    "trajectory_cache_available_steps",
+    "trajectory_cache_required_step_count",
+    "trajectory_cache_missing_required_steps",
+    "trajectory_cache_callback_invocation_count",
+    "trajectory_cache_callback_latent_present_count",
+    "trajectory_cache_tap_captured_step_count",
+]
 
 
 def _bind_trajectory_cache_capture_meta(
@@ -48,22 +62,43 @@ def _bind_trajectory_cache_capture_meta(
 
     normalized_meta = dict(cast(Dict[str, Any], trajectory_cache_capture_meta))
     inference_runtime_meta["trajectory_cache_capture"] = normalized_meta
-    for field_name in [
-        "trajectory_cache_capture_status",
-        "trajectory_cache_step_count",
-        "trajectory_cache_capture_attempt_count",
-        "trajectory_cache_capture_success_count",
-        "trajectory_cache_capture_failure_count",
-        "trajectory_cache_capture_failure_examples",
-        "trajectory_cache_available_steps",
-        "trajectory_cache_required_step_count",
-        "trajectory_cache_missing_required_steps",
-        "trajectory_cache_callback_invocation_count",
-        "trajectory_cache_callback_latent_present_count",
-        "trajectory_cache_tap_captured_step_count",
-    ]:
+    for field_name in TRAJECTORY_CACHE_CAPTURE_META_FIELDS:
         inference_runtime_meta[field_name] = normalized_meta.get(field_name)
     return normalized_meta
+
+
+def _reconstruct_trajectory_cache_capture_meta(
+    inference_runtime_meta: Dict[str, Any] | None,
+) -> Dict[str, Any] | None:
+    """
+    功能：从 inference_runtime_meta 恢复已绑定的 trajectory cache 捕获元数据。
+
+    Reconstruct previously bound trajectory-cache capture metadata from
+    inference_runtime_meta.
+
+    Args:
+        inference_runtime_meta: Inference runtime metadata mapping.
+
+    Returns:
+        Normalized capture metadata mapping, or None when absent.
+    """
+    if not isinstance(inference_runtime_meta, dict):
+        return None
+
+    nested_capture_meta = inference_runtime_meta.get("trajectory_cache_capture")
+    if isinstance(nested_capture_meta, dict):
+        return dict(cast(Dict[str, Any], nested_capture_meta))
+
+    reconstructed_meta = {
+        field_name: inference_runtime_meta.get(field_name)
+        for field_name in TRAJECTORY_CACHE_CAPTURE_META_FIELDS
+        if field_name in inference_runtime_meta
+    }
+    if not reconstructed_meta:
+        return None
+    if all(value is None for value in reconstructed_meta.values()):
+        return None
+    return reconstructed_meta
 
 
 def run_sd3_inference(
@@ -486,6 +521,14 @@ def run_sd3_inference(
 
     if attention_capture_hook is not None:
         remove_attention_hooks(attention_capture_hook)
+
+    if trajectory_cache_capture_meta is None:
+        reconstructed_capture_meta = _reconstruct_trajectory_cache_capture_meta(inference_runtime_meta)
+        if isinstance(reconstructed_capture_meta, dict):
+            trajectory_cache_capture_meta = _bind_trajectory_cache_capture_meta(
+                inference_runtime_meta,
+                reconstructed_capture_meta,
+            )
 
     return {
         "inference_status": inference_status,

@@ -17,6 +17,7 @@ import pytest
 
 from main.cli import run_embed as run_embed_module
 from main.core import digests
+from main.diffusion.sd3 import trajectory_tap as trajectory_tap_module
 from main.diffusion.sd3.trajectory_tap import LatentTrajectoryCache
 from main.watermarking.content_chain.subspace.planner_interface import SubspacePlanEvidence
 from main.watermarking.content_chain.subspace.subspace_planner_impl import (
@@ -211,6 +212,23 @@ def _build_runtime_capture_meta(
         "trajectory_cache_callback_invocation_count": callback_invocation_count,
         "trajectory_cache_callback_latent_present_count": callback_latent_present_count,
         "trajectory_cache_tap_captured_step_count": resolved_tap_captured_step_count,
+    }
+
+
+def _build_trajectory_evidence(step_count: int) -> Dict[str, Any]:
+    return {
+        "status": "ok",
+        "trajectory_metrics": {
+            "steps": [
+                {
+                    "step_index": step_index,
+                    "scheduler_step": step_index,
+                    "scheduler_timestep": step_index,
+                    "stats": {"mean": 0.0, "std": 1.0},
+                }
+                for step_index in range(step_count)
+            ]
+        },
     }
 
 
@@ -549,8 +567,204 @@ def test_run_embed_statement_only_failure_persists_runtime_finalization_diagnost
     assert runtime_finalization["trajectory_cache_capture_failure_examples"][0]["exception_message"] == "synthetic capture conversion failure"
     assert runtime_finalization["planner_failure_stage"] == "runtime_capture_cache_validation"
     assert runtime_finalization["planner_failure_detail_code"] == "trajectory_cache_capture_all_failed"
-    assert runtime_finalization["planner_failure_detail_message"] == "trajectory_cache_absent_or_empty_cannot_build_basis"
+    assert runtime_finalization["planner_failure_detail_message"] == "trajectory_cache_capture_all_failed_cannot_build_basis"
     assert runtime_finalization["planner_diagnostic_context"]["trajectory_cache_capture"]["trajectory_cache_capture_status"] == "all_failed"
+
+
+def test_trajectory_cache_capture_meta_reports_tap_observed_without_cache_write() -> None:
+    """
+    功能：当 tap 已观测到 step 但 cache 诊断仍为空壳时，必须返回显式不一致状态。
+    """
+    cache = LatentTrajectoryCache()
+
+    capture_meta = trajectory_tap_module._build_trajectory_cache_capture_meta(
+        cache,
+        supports_callback=True,
+        callback_invocation_count=28,
+        callback_latent_present_count=28,
+        tap_captured_step_count=28,
+        required_cache_steps=list(range(28)),
+    )
+
+    assert isinstance(capture_meta, dict)
+    assert capture_meta["trajectory_cache_capture_status"] == "tap_steps_observed_but_cache_write_not_observed"
+    assert capture_meta["trajectory_cache_capture_attempt_count"] == 0
+    assert capture_meta["trajectory_cache_capture_success_count"] == 0
+    assert capture_meta["trajectory_cache_capture_failure_count"] == 0
+    assert capture_meta["trajectory_cache_available_steps"] == []
+    assert capture_meta["trajectory_cache_tap_captured_step_count"] == 28
+
+
+def test_trajectory_cache_capture_meta_distinguishes_missing_latents_from_missing_callback() -> None:
+    """
+    功能：callback 已调用但 latents 缺失时，状态必须区别于完全未观察到 callback。
+    """
+    cache = LatentTrajectoryCache()
+
+    callback_absent_meta = trajectory_tap_module._build_trajectory_cache_capture_meta(
+        cache,
+        supports_callback=True,
+        callback_invocation_count=0,
+        callback_latent_present_count=0,
+        tap_captured_step_count=0,
+        required_cache_steps=[0],
+    )
+    missing_latents_meta = trajectory_tap_module._build_trajectory_cache_capture_meta(
+        cache,
+        supports_callback=True,
+        callback_invocation_count=3,
+        callback_latent_present_count=0,
+        tap_captured_step_count=0,
+        required_cache_steps=[0],
+    )
+
+    assert isinstance(callback_absent_meta, dict)
+    assert isinstance(missing_latents_meta, dict)
+    assert callback_absent_meta["trajectory_cache_capture_status"] == "callback_not_observed"
+    assert missing_latents_meta["trajectory_cache_capture_status"] == "callback_invoked_without_latents"
+    assert callback_absent_meta["trajectory_cache_capture_status"] != missing_latents_meta["trajectory_cache_capture_status"]
+
+
+def test_run_embed_statement_only_failure_reports_tap_observed_without_capture_meta(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：当 tap 已捕获 step 但 capture meta 缺失时，formal failure 必须保留显式结构化诊断。
+    """
+    planner_result = SubspacePlanEvidence(
+        status="failed",
+        plan=None,
+        basis_digest=None,
+        plan_digest=None,
+        audit=None,
+        plan_stats=None,
+        plan_failure_reason="invalid_subspace_params",
+        planner_failure_stage="routed_decomposition_matrix_build",
+        planner_failure_detail_code="routed_matrix_shape_mismatch",
+        planner_failure_detail_message="synthetic routed matrix mismatch",
+        planner_diagnostic_context=_build_planner_failure_context(),
+    )
+
+    def _runtime_capture_missing_meta(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+        _ = args
+        _ = kwargs
+        return {
+            "inference_status": "failed",
+            "inference_error": "synthetic_post_tap_failure",
+            "inference_runtime_meta": {"latency_ms": 1.0},
+            "trajectory_evidence": _build_trajectory_evidence(28),
+            "injection_evidence": {},
+            "trajectory_cache_capture_meta": None,
+            "output_image": Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8)),
+        }
+
+    env = _prepare_statement_only_failure_env(
+        monkeypatch,
+        tmp_path,
+        planner_result=planner_result,
+        runtime_capture_callable=_runtime_capture_missing_meta,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="runtime executable formal plan unavailable: statement_only runtime finalization failed; reason=invalid_subspace_params",
+    ):
+        run_embed_module.run_embed(
+            output_dir=str(tmp_path / "out"),
+            config_path="configs/default.yaml",
+            overrides=None,
+            input_image_path=None,
+        )
+
+    run_closure_path = cast(Path, env["run_closure_path"])
+    run_closure = json.loads(run_closure_path.read_text(encoding="utf-8"))
+    runtime_finalization = run_closure["status"]["details"]["runtime_finalization"]
+
+    assert runtime_finalization["runtime_capture_inference_status"] == "failed"
+    assert runtime_finalization["trajectory_cache_capture_status"] == "tap_steps_observed_but_cache_meta_missing"
+    assert runtime_finalization["trajectory_cache_tap_captured_step_count"] == 28
+    assert runtime_finalization["trajectory_cache_step_count"] == 0
+    assert runtime_finalization["planner_failure_stage"] == "runtime_capture_cache_validation"
+    assert runtime_finalization["planner_failure_detail_code"] == "trajectory_cache_capture_meta_missing_after_tap"
+    assert runtime_finalization["planner_failure_detail_message"] == "trajectory_cache_capture_meta_missing_after_tap_cannot_build_basis"
+
+
+def test_run_embed_statement_only_failure_distinguishes_partial_cache_from_empty_cache(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：当仅有部分 available_steps 时，precheck detail 必须区别于空 cache。
+    """
+    planner_result = SubspacePlanEvidence(
+        status="failed",
+        plan=None,
+        basis_digest=None,
+        plan_digest=None,
+        audit=None,
+        plan_stats=None,
+        plan_failure_reason="invalid_subspace_params",
+        planner_failure_stage="routed_decomposition_matrix_build",
+        planner_failure_detail_code="routed_matrix_shape_mismatch",
+        planner_failure_detail_message="synthetic routed matrix mismatch",
+        planner_diagnostic_context=_build_planner_failure_context(),
+    )
+
+    def _runtime_capture_partial_cache(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+        _ = args
+        cache = kwargs.get("trajectory_latent_cache")
+        if isinstance(cache, LatentTrajectoryCache):
+            cache.capture(0, np.zeros((1, 4, 8, 8), dtype=np.float32))
+            cache.capture(1, np.ones((1, 4, 8, 8), dtype=np.float32))
+        return {
+            "inference_status": "ok",
+            "inference_error": None,
+            "inference_runtime_meta": {"latency_ms": 1.0},
+            "trajectory_evidence": _build_trajectory_evidence(4),
+            "injection_evidence": {},
+            "trajectory_cache_capture_meta": _build_runtime_capture_meta(
+                "partial",
+                step_count=2,
+                failure_count=0,
+                callback_invocation_count=4,
+                callback_latent_present_count=4,
+                available_steps=[0, 1],
+                missing_required_steps=[2, 3],
+                required_step_count=4,
+                tap_captured_step_count=4,
+                attempt_count=2,
+                success_count=2,
+            ),
+            "output_image": Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8)),
+        }
+
+    env = _prepare_statement_only_failure_env(
+        monkeypatch,
+        tmp_path,
+        planner_result=planner_result,
+        runtime_capture_callable=_runtime_capture_partial_cache,
+    )
+
+    with pytest.raises(ValueError):
+        run_embed_module.run_embed(
+            output_dir=str(tmp_path / "out"),
+            config_path="configs/default.yaml",
+            overrides=None,
+            input_image_path=None,
+        )
+
+    run_closure_path = cast(Path, env["run_closure_path"])
+    run_closure = json.loads(run_closure_path.read_text(encoding="utf-8"))
+    runtime_finalization = run_closure["status"]["details"]["runtime_finalization"]
+
+    assert runtime_finalization["trajectory_cache_capture_status"] == "partial"
+    assert runtime_finalization["trajectory_cache_available_steps"] == [0, 1]
+    assert runtime_finalization["trajectory_cache_missing_required_steps"] == [2, 3]
+    assert runtime_finalization["planner_failure_detail_code"] == "trajectory_cache_partial_missing_required_steps"
+    assert runtime_finalization["planner_failure_detail_message"] == (
+        "trajectory_cache_partial_missing_required_steps_cannot_build_basis:[2, 3]"
+    )
 
 
 def test_run_embed_statement_only_failure_keeps_formal_gate_and_stops_before_orchestrator(
