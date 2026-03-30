@@ -683,6 +683,9 @@ def _extract_runtime_capture_diagnostics(
                 "trajectory_cache_callback_invocation_count",
                 "trajectory_cache_callback_latent_present_count",
                 "trajectory_cache_tap_captured_step_count",
+                "trajectory_cache_capture_detail_code",
+                "trajectory_cache_capture_detail_message",
+                "trajectory_cache_capture_error_message",
             ]
             if field_name in payload_mapping
         }
@@ -714,8 +717,16 @@ def _extract_runtime_capture_diagnostics(
     capture_payload: Dict[str, Any] | None = None
     inference_runtime_meta: Dict[str, Any] | None = None
     tap_captured_step_count_from_evidence: int | None = None
+    runtime_capture_inference_status: str | None = None
+    runtime_capture_inference_error: str | None = None
     if isinstance(runtime_capture_result, dict):
         runtime_capture_result_mapping = cast(Dict[str, Any], runtime_capture_result)
+        runtime_capture_inference_status_candidate = runtime_capture_result_mapping.get("inference_status")
+        if isinstance(runtime_capture_inference_status_candidate, str) and runtime_capture_inference_status_candidate:
+            runtime_capture_inference_status = runtime_capture_inference_status_candidate
+        runtime_capture_inference_error_candidate = runtime_capture_result_mapping.get("inference_error")
+        if isinstance(runtime_capture_inference_error_candidate, str) and runtime_capture_inference_error_candidate:
+            runtime_capture_inference_error = runtime_capture_inference_error_candidate
         inference_runtime_meta_candidate = runtime_capture_result_mapping.get("inference_runtime_meta")
         if isinstance(inference_runtime_meta_candidate, dict):
             inference_runtime_meta = dict(cast(Dict[str, Any], inference_runtime_meta_candidate))
@@ -727,6 +738,14 @@ def _extract_runtime_capture_diagnostics(
         tap_captured_step_count_from_evidence = _extract_tap_captured_step_count(runtime_capture_result_mapping)
     if capture_payload is None and isinstance(inference_runtime_meta, dict):
         capture_payload = _reconstruct_capture_payload(inference_runtime_meta)
+        if runtime_capture_inference_status is None:
+            inference_status_candidate = inference_runtime_meta.get("inference_status")
+            if isinstance(inference_status_candidate, str) and inference_status_candidate:
+                runtime_capture_inference_status = inference_status_candidate
+        if runtime_capture_inference_error is None:
+            inference_error_candidate = inference_runtime_meta.get("inference_error")
+            if isinstance(inference_error_candidate, str) and inference_error_candidate:
+                runtime_capture_inference_error = inference_error_candidate
 
     cache_diagnostics = None
     if runtime_capture_cache is not None and hasattr(runtime_capture_cache, "capture_diagnostics"):
@@ -768,6 +787,13 @@ def _extract_runtime_capture_diagnostics(
     ]
     normalized_missing_required_steps = [int(value) for value in missing_required_steps if isinstance(value, int)]
 
+    capture_error_message = None
+    if normalized_failure_examples:
+        first_failure_example = normalized_failure_examples[0]
+        exception_message = first_failure_example.get("exception_message")
+        if isinstance(exception_message, str) and exception_message:
+            capture_error_message = exception_message
+
     capture_attempt_count = capture_payload.get("trajectory_cache_capture_attempt_count") if isinstance(capture_payload, dict) else None
     if not isinstance(capture_attempt_count, int) and isinstance(cache_diagnostics, dict):
         capture_attempt_count = cache_diagnostics.get("capture_attempt_count")
@@ -788,7 +814,50 @@ def _extract_runtime_capture_diagnostics(
     if not isinstance(tap_captured_step_count, int):
         tap_captured_step_count = len(normalized_available_steps)
 
-    if capture_payload is None and tap_captured_step_count > 0:
+    if (
+        capture_payload is None
+        and isinstance(capture_failure_count, int)
+        and capture_failure_count > 0
+        and isinstance(capture_success_count, int)
+        and capture_success_count <= 0
+    ):
+        capture_payload = {
+            "trajectory_cache_capture_status": "all_failed",
+            "trajectory_cache_step_count": len(normalized_available_steps),
+            "trajectory_cache_capture_attempt_count": capture_attempt_count,
+            "trajectory_cache_capture_success_count": capture_success_count,
+            "trajectory_cache_capture_failure_count": capture_failure_count,
+            "trajectory_cache_capture_failure_examples": normalized_failure_examples,
+            "trajectory_cache_available_steps": normalized_available_steps,
+            "trajectory_cache_required_step_count": None,
+            "trajectory_cache_missing_required_steps": normalized_missing_required_steps,
+            "trajectory_cache_callback_invocation_count": None,
+            "trajectory_cache_callback_latent_present_count": None,
+            "trajectory_cache_tap_captured_step_count": int(tap_captured_step_count),
+            "trajectory_cache_capture_detail_code": "trajectory_cache_capture_all_failed",
+            "trajectory_cache_capture_detail_message": capture_error_message or "trajectory_cache_capture_all_failed",
+            "trajectory_cache_capture_error_message": capture_error_message,
+        }
+
+    if capture_payload is None and isinstance(runtime_capture_inference_status, str) and runtime_capture_inference_status != infer_runtime.INFERENCE_STATUS_OK:
+        capture_payload = {
+            "trajectory_cache_capture_status": "tap_steps_observed_but_cache_meta_missing" if tap_captured_step_count > 0 else None,
+            "trajectory_cache_step_count": len(normalized_available_steps),
+            "trajectory_cache_capture_attempt_count": capture_attempt_count,
+            "trajectory_cache_capture_success_count": capture_success_count,
+            "trajectory_cache_capture_failure_count": capture_failure_count,
+            "trajectory_cache_capture_failure_examples": normalized_failure_examples,
+            "trajectory_cache_available_steps": normalized_available_steps,
+            "trajectory_cache_required_step_count": None,
+            "trajectory_cache_missing_required_steps": normalized_missing_required_steps,
+            "trajectory_cache_callback_invocation_count": None,
+            "trajectory_cache_callback_latent_present_count": None,
+            "trajectory_cache_tap_captured_step_count": int(tap_captured_step_count),
+            "trajectory_cache_capture_detail_code": "trajectory_cache_capture_meta_unreconstructable_after_runtime_failure",
+            "trajectory_cache_capture_detail_message": "trajectory_cache_capture_meta_unreconstructable_after_runtime_failure",
+            "trajectory_cache_capture_error_message": runtime_capture_inference_error or capture_error_message,
+        }
+    elif capture_payload is None and tap_captured_step_count > 0:
         capture_payload = {
             "trajectory_cache_capture_status": "tap_steps_observed_but_cache_meta_missing",
             "trajectory_cache_step_count": len(normalized_available_steps),
@@ -802,8 +871,12 @@ def _extract_runtime_capture_diagnostics(
             "trajectory_cache_callback_invocation_count": None,
             "trajectory_cache_callback_latent_present_count": None,
             "trajectory_cache_tap_captured_step_count": int(tap_captured_step_count),
+            "trajectory_cache_capture_detail_code": "trajectory_cache_capture_meta_missing_after_tap",
+            "trajectory_cache_capture_detail_message": "trajectory_cache_capture_meta_missing_after_tap",
+            "trajectory_cache_capture_error_message": runtime_capture_inference_error or capture_error_message,
         }
     elif isinstance(capture_payload, dict):
+        capture_payload = dict(capture_payload)
         capture_status = capture_payload.get("trajectory_cache_capture_status")
         if (
             tap_captured_step_count > 0
@@ -819,13 +892,29 @@ def _extract_runtime_capture_diagnostics(
             and capture_failure_count <= 0
             and not normalized_available_steps
         ):
-            capture_payload = dict(capture_payload)
             capture_payload["trajectory_cache_capture_status"] = "tap_steps_observed_but_cache_write_not_observed"
         elif not isinstance(capture_status, str) and tap_captured_step_count > 0 and not normalized_available_steps:
-            capture_payload = dict(capture_payload)
             capture_payload["trajectory_cache_capture_status"] = "tap_steps_observed_but_cache_meta_missing"
 
+        capture_status = capture_payload.get("trajectory_cache_capture_status")
+        capture_detail_code = capture_payload.get("trajectory_cache_capture_detail_code")
+        if not isinstance(capture_detail_code, str) or not capture_detail_code:
+            if capture_status == "tap_steps_observed_but_cache_write_not_observed":
+                capture_payload["trajectory_cache_capture_detail_code"] = "trajectory_cache_write_not_observed_after_tap"
+                capture_payload["trajectory_cache_capture_detail_message"] = "trajectory_cache_write_not_observed_after_tap"
+            elif capture_status == "tap_steps_observed_but_cache_meta_missing":
+                capture_payload["trajectory_cache_capture_detail_code"] = "trajectory_cache_capture_meta_missing_after_tap"
+                capture_payload["trajectory_cache_capture_detail_message"] = "trajectory_cache_capture_meta_missing_after_tap"
+            elif capture_status == "all_failed":
+                capture_payload["trajectory_cache_capture_detail_code"] = "trajectory_cache_capture_all_failed"
+                capture_payload["trajectory_cache_capture_detail_message"] = capture_error_message or "trajectory_cache_capture_all_failed"
+
+        if runtime_capture_inference_error and not capture_payload.get("trajectory_cache_capture_error_message"):
+            capture_payload["trajectory_cache_capture_error_message"] = runtime_capture_inference_error
+
     return {
+        "runtime_capture_inference_status": runtime_capture_inference_status,
+        "runtime_capture_inference_error": runtime_capture_inference_error,
         "trajectory_cache_capture_status": capture_payload.get("trajectory_cache_capture_status") if isinstance(capture_payload, dict) else None,
         "trajectory_cache_step_count": capture_payload.get("trajectory_cache_step_count") if isinstance(capture_payload, dict) else len(normalized_available_steps),
         "trajectory_cache_capture_attempt_count": capture_attempt_count,
@@ -838,6 +927,9 @@ def _extract_runtime_capture_diagnostics(
         "trajectory_cache_callback_invocation_count": capture_payload.get("trajectory_cache_callback_invocation_count") if isinstance(capture_payload, dict) else None,
         "trajectory_cache_callback_latent_present_count": capture_payload.get("trajectory_cache_callback_latent_present_count") if isinstance(capture_payload, dict) else None,
         "trajectory_cache_tap_captured_step_count": capture_payload.get("trajectory_cache_tap_captured_step_count") if isinstance(capture_payload, dict) else tap_captured_step_count,
+        "trajectory_cache_capture_detail_code": capture_payload.get("trajectory_cache_capture_detail_code") if isinstance(capture_payload, dict) else None,
+        "trajectory_cache_capture_detail_message": capture_payload.get("trajectory_cache_capture_detail_message") if isinstance(capture_payload, dict) else None,
+        "trajectory_cache_capture_error_message": capture_payload.get("trajectory_cache_capture_error_message") if isinstance(capture_payload, dict) else runtime_capture_inference_error,
         "trajectory_cache_capture": capture_payload,
     }
 
@@ -881,6 +973,7 @@ def _build_runtime_capture_precheck_failure(
         Mapping with planner_failure_* fields.
     """
     capture_status = runtime_capture_diagnostics.get("trajectory_cache_capture_status")
+    capture_detail_code = runtime_capture_diagnostics.get("trajectory_cache_capture_detail_code")
     available_steps = runtime_capture_diagnostics.get("trajectory_cache_available_steps")
     missing_required_steps = runtime_capture_diagnostics.get("trajectory_cache_missing_required_steps")
     if not isinstance(available_steps, list):
@@ -890,7 +983,10 @@ def _build_runtime_capture_precheck_failure(
 
     planner_failure_detail_code = "trajectory_cache_absent_or_empty"
     planner_failure_detail_message = "trajectory_cache_absent_or_empty_cannot_build_basis"
-    if capture_status == "tap_steps_observed_but_cache_write_not_observed":
+    if capture_detail_code == "trajectory_cache_capture_meta_unreconstructable_after_runtime_failure":
+        planner_failure_detail_code = "trajectory_cache_capture_meta_unreconstructable_after_runtime_failure"
+        planner_failure_detail_message = "trajectory_cache_capture_meta_unreconstructable_after_runtime_failure_cannot_build_basis"
+    elif capture_status == "tap_steps_observed_but_cache_write_not_observed":
         planner_failure_detail_code = "trajectory_cache_write_not_observed_after_tap"
         planner_failure_detail_message = "trajectory_cache_write_not_observed_after_tap_cannot_build_basis"
     elif capture_status == "tap_steps_observed_but_cache_meta_missing":
@@ -970,6 +1066,7 @@ def _build_runtime_finalization_status_details(run_meta: Dict[str, Any]) -> Dict
         "runtime_executable_plan_status": runtime_executable_plan_status,
         "runtime_executable_plan_reason": formal_two_stage_mapping.get("runtime_executable_plan_reason"),
         "runtime_capture_inference_status": formal_two_stage_mapping.get("runtime_capture_inference_status"),
+        "runtime_capture_inference_error": formal_two_stage_mapping.get("runtime_capture_inference_error"),
         "trajectory_cache_capture_status": formal_two_stage_mapping.get("trajectory_cache_capture_status"),
         "trajectory_cache_step_count": formal_two_stage_mapping.get("trajectory_cache_step_count"),
         "trajectory_cache_capture_attempt_count": formal_two_stage_mapping.get("trajectory_cache_capture_attempt_count"),
@@ -982,6 +1079,9 @@ def _build_runtime_finalization_status_details(run_meta: Dict[str, Any]) -> Dict
         "trajectory_cache_callback_invocation_count": formal_two_stage_mapping.get("trajectory_cache_callback_invocation_count"),
         "trajectory_cache_callback_latent_present_count": formal_two_stage_mapping.get("trajectory_cache_callback_latent_present_count"),
         "trajectory_cache_tap_captured_step_count": formal_two_stage_mapping.get("trajectory_cache_tap_captured_step_count"),
+        "trajectory_cache_capture_detail_code": formal_two_stage_mapping.get("trajectory_cache_capture_detail_code"),
+        "trajectory_cache_capture_detail_message": formal_two_stage_mapping.get("trajectory_cache_capture_detail_message"),
+        "trajectory_cache_capture_error_message": formal_two_stage_mapping.get("trajectory_cache_capture_error_message"),
         "trajectory_cache_capture": formal_two_stage_mapping.get("trajectory_cache_capture"),
         "planner_failure_stage": formal_two_stage_mapping.get("planner_failure_stage"),
         "planner_failure_detail_code": formal_two_stage_mapping.get("planner_failure_detail_code"),
@@ -1490,6 +1590,7 @@ def run_embed(
                     "runtime_executable_plan_status": "pending",
                     "runtime_executable_plan_reason": None,
                     "runtime_capture_inference_status": None,
+                    "runtime_capture_inference_error": None,
                     "final_plan_digest": None,
                     "final_basis_digest": None,
                 }
@@ -1551,6 +1652,12 @@ def run_embed(
                     if isinstance(runtime_capture_status_value, str) and runtime_capture_status_value
                     else infer_runtime.INFERENCE_STATUS_FAILED
                 )
+                runtime_capture_error_value = runtime_capture_result.get("inference_error")
+                runtime_capture_error = (
+                    runtime_capture_error_value
+                    if isinstance(runtime_capture_error_value, str) and runtime_capture_error_value
+                    else None
+                )
                 runtime_capture_diagnostics = _extract_runtime_capture_diagnostics(
                     runtime_capture_result,
                     runtime_capture_cache,
@@ -1575,6 +1682,7 @@ def run_embed(
                         "runtime_finalization_status": "failed",
                         "runtime_finalization_reason": runtime_finalization_reason,
                         "capture_inference_status": runtime_capture_status,
+                        "capture_inference_error": runtime_capture_error,
                         "trajectory_cache_bound": False,
                         "final_plan_digest": None,
                         "final_basis_digest": None,
@@ -1590,6 +1698,7 @@ def run_embed(
                         "runtime_finalization_status": "failed",
                         "runtime_finalization_reason": runtime_finalization_reason,
                         "runtime_capture_inference_status": runtime_capture_status,
+                        "runtime_capture_inference_error": runtime_capture_error,
                         "final_plan_digest": None,
                         "final_basis_digest": None,
                         **runtime_capture_diagnostics,
@@ -1624,6 +1733,7 @@ def run_embed(
                         "runtime_finalization_status": "failed",
                         "runtime_finalization_reason": runtime_finalization_reason,
                         "capture_inference_status": runtime_capture_status,
+                        "capture_inference_error": runtime_capture_error,
                         "trajectory_cache_bound": runtime_capture_cache_usable,
                         "final_plan_digest": plan_digest_precomputed,
                         "final_basis_digest": basis_digest_precomputed,
@@ -1639,6 +1749,7 @@ def run_embed(
                         "runtime_finalization_status": "failed",
                         "runtime_finalization_reason": runtime_finalization_reason,
                         "runtime_capture_inference_status": runtime_capture_status,
+                        "runtime_capture_inference_error": runtime_capture_error,
                         "final_plan_digest": plan_digest_precomputed,
                         "final_basis_digest": basis_digest_precomputed,
                         **runtime_capture_diagnostics,
@@ -1654,6 +1765,7 @@ def run_embed(
                     "runtime_finalization_status": "ok",
                     "runtime_finalization_reason": None,
                     "capture_inference_status": runtime_capture_status,
+                    "capture_inference_error": runtime_capture_error,
                     "trajectory_cache_bound": runtime_capture_cache_usable,
                     "final_plan_digest": plan_digest_precomputed,
                     "final_basis_digest": basis_digest_precomputed,
@@ -1672,6 +1784,7 @@ def run_embed(
                     "runtime_finalization_status": "ok",
                     "runtime_finalization_reason": None,
                     "runtime_capture_inference_status": runtime_capture_status,
+                    "runtime_capture_inference_error": runtime_capture_error,
                     "final_plan_digest": plan_digest_precomputed,
                     "final_basis_digest": basis_digest_precomputed,
                     **runtime_capture_diagnostics,
@@ -1993,6 +2106,7 @@ def run_embed(
                 content_audit["runtime_finalization_status"] = runtime_finalization_meta.get("runtime_finalization_status")
                 content_audit["runtime_finalization_reason"] = runtime_finalization_meta.get("runtime_finalization_reason")
                 content_audit["runtime_capture_inference_status"] = runtime_finalization_meta.get("capture_inference_status")
+                content_audit["runtime_capture_inference_error"] = runtime_finalization_meta.get("capture_inference_error")
                 content_audit["planner_failure_stage"] = runtime_finalization_meta.get("planner_failure_stage")
                 content_audit["planner_failure_detail_code"] = runtime_finalization_meta.get("planner_failure_detail_code")
                 content_audit["planner_failure_detail_message"] = runtime_finalization_meta.get("planner_failure_detail_message")

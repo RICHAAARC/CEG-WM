@@ -36,6 +36,9 @@ TRAJECTORY_CACHE_CAPTURE_META_FIELDS = [
     "trajectory_cache_callback_invocation_count",
     "trajectory_cache_callback_latent_present_count",
     "trajectory_cache_tap_captured_step_count",
+    "trajectory_cache_capture_detail_code",
+    "trajectory_cache_capture_detail_message",
+    "trajectory_cache_capture_error_message",
 ]
 
 
@@ -99,6 +102,162 @@ def _reconstruct_trajectory_cache_capture_meta(
     if all(value is None for value in reconstructed_meta.values()):
         return None
     return reconstructed_meta
+
+
+def _extract_tap_captured_step_count(trajectory_evidence: Any) -> int:
+    """
+    功能：从 trajectory evidence 提取已观测 step 数。 
+
+    Extract the observed tap step count from trajectory evidence.
+
+    Args:
+        trajectory_evidence: Trajectory evidence mapping.
+
+    Returns:
+        Observed tap step count.
+    """
+    if not isinstance(trajectory_evidence, dict):
+        return 0
+
+    for field_name in ["trajectory_metrics", "trajectory_stats"]:
+        metrics_node = trajectory_evidence.get(field_name)
+        if not isinstance(metrics_node, dict):
+            continue
+        steps = metrics_node.get("steps")
+        if isinstance(steps, list):
+            return len(steps)
+    return 0
+
+
+def _annotate_trajectory_cache_capture_meta(
+    trajectory_cache_capture_meta: Dict[str, Any] | None,
+    *,
+    inference_error: str | None,
+) -> Dict[str, Any] | None:
+    """
+    功能：为 capture meta 补齐异常文本。 
+
+    Add inference-level error text to capture metadata when available.
+
+    Args:
+        trajectory_cache_capture_meta: Candidate capture metadata mapping.
+        inference_error: Structured inference error text.
+
+    Returns:
+        Normalized capture metadata mapping or None.
+    """
+    if not isinstance(trajectory_cache_capture_meta, dict):
+        return None
+
+    normalized_meta = dict(cast(Dict[str, Any], trajectory_cache_capture_meta))
+    if isinstance(inference_error, str) and inference_error and not normalized_meta.get("trajectory_cache_capture_error_message"):
+        normalized_meta["trajectory_cache_capture_error_message"] = inference_error
+    return normalized_meta
+
+
+def _build_missing_trajectory_cache_capture_meta(
+    *,
+    inference_status: str,
+    inference_error: str | None,
+    trajectory_evidence: Any,
+) -> Dict[str, Any] | None:
+    """
+    功能：为缺失且无法重建的 capture meta 构造结构化失败节点。 
+
+    Build a structured failure node when capture metadata is absent and cannot
+    be reconstructed from runtime metadata.
+
+    Args:
+        inference_status: Final inference status string.
+        inference_error: Structured inference error text.
+        trajectory_evidence: Trajectory evidence mapping.
+
+    Returns:
+        Structured capture metadata mapping or None.
+    """
+    tap_captured_step_count = _extract_tap_captured_step_count(trajectory_evidence)
+    if tap_captured_step_count <= 0 and inference_status == INFERENCE_STATUS_OK:
+        return None
+
+    if inference_status != INFERENCE_STATUS_OK:
+        capture_detail_code = "trajectory_cache_capture_meta_unreconstructable_after_runtime_failure"
+        capture_detail_message = "trajectory_cache_capture_meta_unreconstructable_after_runtime_failure"
+    elif tap_captured_step_count > 0:
+        capture_detail_code = "trajectory_cache_capture_meta_missing_after_tap"
+        capture_detail_message = "trajectory_cache_capture_meta_missing_after_tap"
+    else:
+        return None
+
+    capture_status = None
+    if tap_captured_step_count > 0:
+        capture_status = "tap_steps_observed_but_cache_meta_missing"
+
+    return {
+        "trajectory_cache_capture_status": capture_status,
+        "trajectory_cache_step_count": 0,
+        "trajectory_cache_capture_attempt_count": None,
+        "trajectory_cache_capture_success_count": None,
+        "trajectory_cache_capture_failure_count": None,
+        "trajectory_cache_capture_failure_examples": [],
+        "trajectory_cache_available_steps": [],
+        "trajectory_cache_required_step_count": None,
+        "trajectory_cache_missing_required_steps": [],
+        "trajectory_cache_callback_invocation_count": None,
+        "trajectory_cache_callback_latent_present_count": None,
+        "trajectory_cache_tap_captured_step_count": int(tap_captured_step_count),
+        "trajectory_cache_capture_detail_code": capture_detail_code,
+        "trajectory_cache_capture_detail_message": capture_detail_message,
+        "trajectory_cache_capture_error_message": inference_error,
+    }
+
+
+def _finalize_trajectory_cache_capture_meta(
+    inference_runtime_meta: Dict[str, Any],
+    trajectory_cache_capture_meta: Dict[str, Any] | None,
+    *,
+    trajectory_evidence: Any,
+    inference_status: str,
+    inference_error: str | None,
+) -> Dict[str, Any] | None:
+    """
+    功能：收口 trajectory cache capture meta 的绑定、重建与兜底诊断。 
+
+    Finalize trajectory-cache capture metadata by binding the reported payload,
+    reconstructing it from runtime meta, or synthesizing a structured failure
+    node when neither source is available.
+
+    Args:
+        inference_runtime_meta: Mutable inference runtime metadata mapping.
+        trajectory_cache_capture_meta: Candidate capture metadata mapping.
+        trajectory_evidence: Trajectory evidence mapping.
+        inference_status: Final inference status string.
+        inference_error: Structured inference error text.
+
+    Returns:
+        Bound capture metadata mapping or None.
+    """
+    normalized_meta = _annotate_trajectory_cache_capture_meta(
+        trajectory_cache_capture_meta,
+        inference_error=inference_error,
+    )
+    if isinstance(normalized_meta, dict):
+        return _bind_trajectory_cache_capture_meta(inference_runtime_meta, normalized_meta)
+
+    reconstructed_meta = _annotate_trajectory_cache_capture_meta(
+        _reconstruct_trajectory_cache_capture_meta(inference_runtime_meta),
+        inference_error=inference_error,
+    )
+    if isinstance(reconstructed_meta, dict):
+        return _bind_trajectory_cache_capture_meta(inference_runtime_meta, reconstructed_meta)
+
+    synthesized_meta = _build_missing_trajectory_cache_capture_meta(
+        inference_status=inference_status,
+        inference_error=inference_error,
+        trajectory_evidence=trajectory_evidence,
+    )
+    if isinstance(synthesized_meta, dict):
+        return _bind_trajectory_cache_capture_meta(inference_runtime_meta, synthesized_meta)
+    return None
 
 
 def run_sd3_inference(
@@ -459,8 +618,8 @@ def run_sd3_inference(
         output = tap_call_result.get("output")
         trajectory_evidence = tap_call_result.get("trajectory_evidence")
         tap_status = tap_call_result.get("tap_status")
-        trajectory_cache_capture_meta = _bind_trajectory_cache_capture_meta(
-            inference_runtime_meta,
+        trajectory_cache_capture_meta = cast(
+            Dict[str, Any] | None,
             tap_call_result.get("trajectory_cache_capture_meta"),
         )
         runtime_self_attention_maps, runtime_attention_source = _extract_runtime_self_attention_maps(
@@ -522,13 +681,15 @@ def run_sd3_inference(
     if attention_capture_hook is not None:
         remove_attention_hooks(attention_capture_hook)
 
-    if trajectory_cache_capture_meta is None:
-        reconstructed_capture_meta = _reconstruct_trajectory_cache_capture_meta(inference_runtime_meta)
-        if isinstance(reconstructed_capture_meta, dict):
-            trajectory_cache_capture_meta = _bind_trajectory_cache_capture_meta(
-                inference_runtime_meta,
-                reconstructed_capture_meta,
-            )
+    inference_runtime_meta["inference_status"] = inference_status
+    inference_runtime_meta["inference_error"] = inference_error
+    trajectory_cache_capture_meta = _finalize_trajectory_cache_capture_meta(
+        inference_runtime_meta,
+        trajectory_cache_capture_meta,
+        trajectory_evidence=trajectory_evidence,
+        inference_status=inference_status,
+        inference_error=inference_error,
+    )
 
     return {
         "inference_status": inference_status,

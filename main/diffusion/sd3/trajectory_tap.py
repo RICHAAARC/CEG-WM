@@ -435,6 +435,14 @@ def _build_trajectory_cache_capture_meta(
     if not isinstance(failure_examples, list):
         failure_examples = []
 
+    capture_error_message = None
+    if failure_examples:
+        first_failure_example = failure_examples[0]
+        if isinstance(first_failure_example, dict):
+            exception_message = first_failure_example.get("exception_message")
+            if isinstance(exception_message, str) and exception_message:
+                capture_error_message = exception_message
+
     tap_observed_without_cache_write = (
         tap_captured_step_count > 0
         and callback_invocation_count > 0
@@ -460,6 +468,34 @@ def _build_trajectory_cache_capture_meta(
     else:
         capture_status = CAPTURE_STATUS_COMPLETE
 
+    capture_detail_code = None
+    capture_detail_message = None
+    if capture_status == CAPTURE_STATUS_UNSUPPORTED_PIPELINE:
+        capture_detail_code = "trajectory_callback_unsupported"
+        capture_detail_message = "trajectory_callback_unsupported"
+    elif capture_status == CAPTURE_STATUS_CALLBACK_NOT_OBSERVED:
+        capture_detail_code = "trajectory_callback_not_observed"
+        capture_detail_message = "trajectory_callback_not_observed"
+    elif capture_status == CAPTURE_STATUS_CALLBACK_WITHOUT_LATENTS:
+        capture_detail_code = "trajectory_callback_invoked_without_latents"
+        capture_detail_message = "trajectory_callback_invoked_without_latents"
+    elif capture_status == CAPTURE_STATUS_TAP_OBSERVED_CACHE_WRITE_NOT_OBSERVED:
+        capture_detail_code = "trajectory_cache_write_not_observed_after_tap"
+        capture_detail_message = "trajectory_cache_write_not_observed_after_tap"
+    elif capture_status == CAPTURE_STATUS_ALL_FAILED:
+        capture_detail_code = "trajectory_cache_capture_all_failed"
+        capture_detail_message = capture_error_message or "trajectory_cache_capture_all_failed"
+    elif capture_status == CAPTURE_STATUS_PARTIAL:
+        if missing_required_steps:
+            capture_detail_code = "trajectory_cache_partial_missing_required_steps"
+            capture_detail_message = (
+                "trajectory_cache_partial_missing_required_steps:"
+                f"{missing_required_steps[:8]}"
+            )
+        else:
+            capture_detail_code = "trajectory_cache_incomplete"
+            capture_detail_message = "trajectory_cache_incomplete"
+
     return {
         "trajectory_cache_capture_status": capture_status,
         "trajectory_cache_step_count": len(normalized_available_steps),
@@ -473,6 +509,9 @@ def _build_trajectory_cache_capture_meta(
         "trajectory_cache_callback_invocation_count": int(callback_invocation_count),
         "trajectory_cache_callback_latent_present_count": int(callback_latent_present_count),
         "trajectory_cache_tap_captured_step_count": int(tap_captured_step_count),
+        "trajectory_cache_capture_detail_code": capture_detail_code,
+        "trajectory_cache_capture_detail_message": capture_detail_message,
+        "trajectory_cache_capture_error_message": capture_error_message,
     }
 
 
