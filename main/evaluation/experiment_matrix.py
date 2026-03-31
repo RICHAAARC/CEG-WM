@@ -1,4 +1,4 @@
-﻿"""
+"""
 File purpose: 论文级实验矩阵调度与汇总。
 Module type: Core innovation module
 
