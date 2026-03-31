@@ -1,4 +1,4 @@
-﻿"""
+"""
 Paper Alignment Evaluator
 
 功能：

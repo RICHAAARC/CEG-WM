@@ -302,6 +302,7 @@ def _package_outputs(run_root: Path, runtime_state_root: Path, stage_manifest_pa
         "artifacts/grid_summary.json": run_root / "artifacts" / "grid_summary.json",
         "artifacts/grid_manifest.json": run_root / "artifacts" / "grid_manifest.json",
         "artifacts/aggregate_report.json": run_root / "artifacts" / "aggregate_report.json",
+        "artifacts/gpu_memory_profile_breakdown.json": run_root / "artifacts" / "gpu_memory_profile_breakdown.json",
         "artifacts/run_closure.json": run_root / "artifacts" / "run_closure.json",
         "artifacts/workflow_summary.json": run_root / "artifacts" / "workflow_summary.json",
         "global_calibrate/artifacts/thresholds/thresholds_artifact.json": run_root / "global_calibrate" / "artifacts" / "thresholds" / "thresholds_artifact.json",
@@ -395,6 +396,7 @@ def run_stage_03(
         "grid_summary": run_root / "artifacts" / "grid_summary.json",
         "grid_manifest": run_root / "artifacts" / "grid_manifest.json",
         "aggregate_report": run_root / "artifacts" / "aggregate_report.json",
+        "gpu_memory_profile_breakdown": run_root / "artifacts" / "gpu_memory_profile_breakdown.json",
     }
     missing_outputs = [label for label, path_obj in outputs.items() if not path_obj.exists()]
     if missing_outputs:
@@ -405,6 +407,13 @@ def run_stage_03(
     source_package_manifest_copy_path = source_lineage_snapshot_paths["source_package_manifest_copy_path"]
     grid_summary_obj = read_json_dict(outputs["grid_summary"])
     aggregate_report_obj = read_json_dict(outputs["aggregate_report"])
+    gpu_memory_summary_obj = (
+        cast(Dict[str, Any], aggregate_report_obj["gpu_memory_summary"])
+        if isinstance(aggregate_report_obj.get("gpu_memory_summary"), dict)
+        else cast(Dict[str, Any], grid_summary_obj["gpu_memory_summary"])
+        if isinstance(grid_summary_obj.get("gpu_memory_summary"), dict)
+        else {}
+    )
     auxiliary_analysis_runtime_executed = bool(
         aggregate_report_obj.get(
             _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD,
@@ -439,6 +448,8 @@ def run_stage_03(
         "primary_summary_basis_metric_name": aggregate_report_obj.get("primary_summary_basis_metric_name", grid_summary_obj.get("primary_summary_basis_metric_name")),
         "auxiliary_scopes": aggregate_report_obj.get("auxiliary_scopes", grid_summary_obj.get("auxiliary_scopes", [])),
         _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD: auxiliary_analysis_runtime_executed,
+        "gpu_memory_summary": gpu_memory_summary_obj,
+        "gpu_memory_profile_breakdown_path": normalize_path_value(outputs["gpu_memory_profile_breakdown"]),
         "scope_manifest": aggregate_report_obj.get("scope_manifest", grid_summary_obj.get("scope_manifest", {})),
         "system_final_metrics_presence": aggregate_report_obj.get("system_final_metrics_presence", grid_summary_obj.get("system_final_metrics_presence", {})),
         "created_at": utc_now_iso(),
@@ -491,6 +502,8 @@ def run_stage_03(
         "primary_summary_basis_metric_name": aggregate_report_obj.get("primary_summary_basis_metric_name", grid_summary_obj.get("primary_summary_basis_metric_name")),
         "auxiliary_scopes": aggregate_report_obj.get("auxiliary_scopes", grid_summary_obj.get("auxiliary_scopes", [])),
         _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD: auxiliary_analysis_runtime_executed,
+        "gpu_memory_summary": gpu_memory_summary_obj,
+        "gpu_memory_profile_breakdown_path": normalize_path_value(outputs["gpu_memory_profile_breakdown"]),
         "scope_manifest": aggregate_report_obj.get("scope_manifest", grid_summary_obj.get("scope_manifest", {})),
         "system_final_metrics_presence": aggregate_report_obj.get("system_final_metrics_presence", grid_summary_obj.get("system_final_metrics_presence", {})),
         "grid_summary": grid_summary_obj,

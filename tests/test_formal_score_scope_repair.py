@@ -283,12 +283,14 @@ def test_schema_and_contracts_register_new_formal_fields() -> None:
     assert "primary_driver_mode" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "primary_status_source" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "auxiliary_analysis_runtime_executed" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
+    assert "gpu_memory_summary" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "scope_manifest" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "primary_summary_basis_scope" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "primary_summary_basis_metric_name" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "primary_driver_mode" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "primary_status_source" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "auxiliary_analysis_runtime_executed" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
+    assert "gpu_memory_summary" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "scalar_formal_scope" not in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "scalar_formal_score_name" not in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "scalar_formal_scope" not in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
@@ -460,6 +462,39 @@ def test_stage_03_script_syncs_auxiliary_runtime_evidence_to_workflow_summary_an
         run_root = stage_roots["run_root"]
         artifacts_dir = run_root / "artifacts"
         artifacts_dir.mkdir(parents=True, exist_ok=True)
+        gpu_memory_summary = {
+            "status": "ok",
+            "reason": "ok",
+            "scanned_run_count": 2,
+            "profiled_run_count": 2,
+            "runs_without_profiles_count": 0,
+            "experiment_item_run_count": 1,
+            "neg_cache_run_count": 1,
+            "entry_count": 4,
+            "ok_profile_count": 4,
+            "absent_profile_count": 0,
+            "failed_profile_count": 0,
+            "status_counts": {"ok": 4},
+            "profile_role_counts": {
+                "preview_generation": 1,
+                "embed_watermarked_inference": 1,
+                "statement_only_runtime_capture": 1,
+                "detect_main_inference": 1,
+            },
+            "phase_label_counts": {
+                "preview_generation": 1,
+                "embed_watermarked_inference": 1,
+                "statement_only_runtime_capture": 1,
+                "detect_main_inference": 1,
+            },
+            "device_counts": {"cuda": 4},
+            "peak_memory_allocated_bytes_max": 2048,
+            "peak_memory_reserved_bytes_max": 3072,
+            "peak_memory_allocated_mib_max": round(2048 / (1024.0 * 1024.0), 6),
+            "peak_memory_reserved_mib_max": round(3072 / (1024.0 * 1024.0), 6),
+            "peak_memory_allocated_max_entry": {"profile_role": "detect_main_inference"},
+            "peak_memory_reserved_max_entry": {"profile_role": "detect_main_inference"},
+        }
         stage_03_module.write_json_atomic(
             artifacts_dir / "grid_summary.json",
             {
@@ -471,6 +506,7 @@ def test_stage_03_script_syncs_auxiliary_runtime_evidence_to_workflow_summary_an
                 "primary_summary_basis_metric_name": "system_final_metrics",
                 "auxiliary_scopes": ["content_chain", "lf_channel"],
                 "auxiliary_analysis_runtime_executed": False,
+                "gpu_memory_summary": gpu_memory_summary,
                 "scope_manifest": {
                     "primary_scope": "system_final",
                     "primary_metric_name": "system_final_metrics",
@@ -497,6 +533,7 @@ def test_stage_03_script_syncs_auxiliary_runtime_evidence_to_workflow_summary_an
                 "primary_summary_basis_metric_name": "system_final_metrics",
                 "auxiliary_scopes": ["content_chain", "lf_channel"],
                 "auxiliary_analysis_runtime_executed": False,
+                "gpu_memory_summary": gpu_memory_summary,
                 "scope_manifest": {
                     "primary_scope": "system_final",
                     "primary_metric_name": "system_final_metrics",
@@ -509,6 +546,15 @@ def test_stage_03_script_syncs_auxiliary_runtime_evidence_to_workflow_summary_an
                     "ok_rows_with_system_final_metrics": 1,
                     "rows_total": 1,
                 },
+            },
+        )
+        stage_03_module.write_json_atomic(
+            artifacts_dir / "gpu_memory_profile_breakdown.json",
+            {
+                "artifact_version": "stage_03_gpu_memory_profile_breakdown_v1",
+                "gpu_memory_summary": gpu_memory_summary,
+                "runs": [{"run_kind": "experiment_item", "run_root": (run_root / "experiments" / "item_0000").as_posix(), "profile_count": 4}],
+                "entries": [{"profile_role": "detect_main_inference", "phase_label": "detect_main_inference", "status": "ok"}],
             },
         )
         return {"return_code": 0}
@@ -547,3 +593,8 @@ def test_stage_03_script_syncs_auxiliary_runtime_evidence_to_workflow_summary_an
     assert summary["status"] == "ok"
     assert workflow_summary["auxiliary_analysis_runtime_executed"] is False
     assert stage_manifest["auxiliary_analysis_runtime_executed"] is False
+    assert workflow_summary["gpu_memory_summary"]["status"] == "ok"
+    assert workflow_summary["gpu_memory_summary"]["peak_memory_allocated_bytes_max"] == 2048
+    assert stage_manifest["gpu_memory_summary"]["peak_memory_reserved_bytes_max"] == 3072
+    assert workflow_summary["gpu_memory_profile_breakdown_path"].endswith("gpu_memory_profile_breakdown.json")
+    assert stage_manifest["gpu_memory_profile_breakdown_path"].endswith("gpu_memory_profile_breakdown.json")

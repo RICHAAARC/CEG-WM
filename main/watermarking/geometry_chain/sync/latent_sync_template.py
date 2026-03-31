@@ -1,4 +1,4 @@
-﻿"""
+"""
 File purpose: 基于 SD3 latent 频域摘要生成同步模板证据。
 Module type: General module
 """

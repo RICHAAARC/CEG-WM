@@ -1,4 +1,4 @@
-﻿"""
+"""
 Injection Site Binder
 
 功能：

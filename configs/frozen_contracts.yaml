@@ -371,6 +371,7 @@ artifact_schema:
         - primary_summary_basis_metric_name
         - auxiliary_scopes
         - auxiliary_analysis_runtime_executed
+        - gpu_memory_summary
         - scope_manifest
         - experiment_matrix_digest
         - experiment_count
@@ -403,6 +404,7 @@ artifact_schema:
         - primary_summary_basis_metric_name
         - auxiliary_scopes
         - auxiliary_analysis_runtime_executed
+        - gpu_memory_summary
         - scope_manifest
         - system_final_metrics_presence
         - results

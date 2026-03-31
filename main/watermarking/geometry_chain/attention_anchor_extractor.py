@@ -1,4 +1,4 @@
-﻿"""
+"""
 File purpose: 基于 SD3 Transformer token 关系生成几何锚点摘要与稳定性指标。
 Module type: General module
 """

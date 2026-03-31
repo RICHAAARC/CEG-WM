@@ -50,6 +50,9 @@ _MATRIX_EVALUATION_SCOPES = {
     _LF_CHANNEL_SCOPE,
 }
 _DEFAULT_AUXILIARY_SCOPES = [_CONTENT_CHAIN_SCOPE, _LF_CHANNEL_SCOPE]
+_BYTES_PER_MIB = 1024.0 * 1024.0
+_PREVIEW_GENERATION_RECORD_FILE_NAME = "preview_generation_record.json"
+_GPU_MEMORY_PROFILE_BREAKDOWN_ARTIFACT_NAME = "gpu_memory_profile_breakdown.json"
 
 
 def _relative_path_from_base(base_path: Path, path_value: Any) -> str:
@@ -481,6 +484,424 @@ def _coerce_finite_float(value: Any) -> Optional[float]:
         if np.isfinite(value_float):
             return value_float
     return None
+
+
+def _coerce_optional_nonnegative_int(value: Any) -> Optional[int]:
+    """Return a non-negative integer when the candidate is int-like."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float) and float(value).is_integer():
+        normalized_value = int(value)
+        return normalized_value if normalized_value >= 0 else None
+    return None
+
+
+def _bytes_to_mib_from_int(value: Any) -> Optional[float]:
+    """Convert one optional byte count into MiB."""
+    normalized_value = _coerce_optional_nonnegative_int(value)
+    if normalized_value is None:
+        return None
+    return round(float(normalized_value) / _BYTES_PER_MIB, 6)
+
+
+def _extract_nested_value(payload: Dict[str, Any], field_path: str) -> Any:
+    """Resolve one dotted nested field path from a mapping payload."""
+    if not isinstance(payload, dict):
+        raise TypeError("payload must be dict")
+    if not isinstance(field_path, str) or not field_path:
+        raise TypeError("field_path must be non-empty str")
+
+    current_value: Any = payload
+    for segment in field_path.split("."):
+        if not isinstance(current_value, dict):
+            return None
+        current_value = current_value.get(segment)
+    return current_value
+
+
+def _build_stage_03_gpu_memory_entry(
+    *,
+    batch_root: Path,
+    run_root: Path,
+    run_kind: str,
+    source_artifact_path: Path,
+    source_field_path: str,
+    profile_role: str,
+    profile_payload: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Build one normalized stage-03 GPU memory observability entry."""
+    if not isinstance(batch_root, Path):
+        raise TypeError("batch_root must be Path")
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(run_kind, str) or not run_kind:
+        raise TypeError("run_kind must be non-empty str")
+    if not isinstance(source_artifact_path, Path):
+        raise TypeError("source_artifact_path must be Path")
+    if not isinstance(source_field_path, str) or not source_field_path:
+        raise TypeError("source_field_path must be non-empty str")
+    if not isinstance(profile_role, str) or not profile_role:
+        raise TypeError("profile_role must be non-empty str")
+    if not isinstance(profile_payload, dict) or not profile_payload:
+        return None
+
+    peak_memory_allocated_bytes = _coerce_optional_nonnegative_int(profile_payload.get("peak_memory_allocated_bytes"))
+    peak_memory_reserved_bytes = _coerce_optional_nonnegative_int(profile_payload.get("peak_memory_reserved_bytes"))
+    status_value = _safe_str(profile_payload.get("status"))
+    phase_label = _safe_str(profile_payload.get("phase_label"))
+    device_value = _safe_str(profile_payload.get("device"))
+    sample_scope = _safe_str(profile_payload.get("sample_scope"))
+    reason_value = _safe_str(profile_payload.get("reason"))
+
+    return {
+        "run_kind": run_kind,
+        "run_root": run_root.as_posix(),
+        "run_root_relative": _relative_path_from_base(batch_root, run_root.as_posix()),
+        "source_artifact_path": source_artifact_path.as_posix(),
+        "source_artifact_relative": _relative_path_from_base(batch_root, source_artifact_path.as_posix()),
+        "source_field_path": source_field_path,
+        "source_artifact_name": source_artifact_path.name,
+        "profile_role": profile_role,
+        "phase_label": phase_label,
+        "status": status_value,
+        "reason": reason_value,
+        "device": device_value,
+        "sample_scope": sample_scope,
+        "peak_memory_allocated_bytes": peak_memory_allocated_bytes,
+        "peak_memory_reserved_bytes": peak_memory_reserved_bytes,
+        "peak_memory_allocated_mib": _bytes_to_mib_from_int(peak_memory_allocated_bytes),
+        "peak_memory_reserved_mib": _bytes_to_mib_from_int(peak_memory_reserved_bytes),
+        "exception_type": _safe_str(profile_payload.get("exception_type")),
+        "exception_message": _safe_str(profile_payload.get("exception_message")),
+        "profile_payload": copy.deepcopy(profile_payload),
+    }
+
+
+def _find_preview_generation_record_paths(run_root: Path) -> List[Path]:
+    """Find preview-generation record artifacts under one run root."""
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+
+    artifacts_root = run_root / "artifacts"
+    if not artifacts_root.exists() or not artifacts_root.is_dir():
+        return []
+
+    return sorted(
+        (
+            path_obj
+            for path_obj in artifacts_root.rglob(_PREVIEW_GENERATION_RECORD_FILE_NAME)
+            if path_obj.is_file()
+        ),
+        key=lambda path_obj: path_obj.as_posix(),
+    )
+
+
+def _collect_stage_03_gpu_memory_entries_from_run_root(
+    *,
+    batch_root: Path,
+    run_root: Path,
+    run_kind: str,
+) -> List[Dict[str, Any]]:
+    """Collect normalized GPU memory entries from one child run root."""
+    if not isinstance(batch_root, Path):
+        raise TypeError("batch_root must be Path")
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(run_kind, str) or not run_kind:
+        raise TypeError("run_kind must be non-empty str")
+
+    entries: List[Dict[str, Any]] = []
+    source_specs = [
+        {
+            "artifact_path": run_root / "records" / "embed_record.json",
+            "field_path": "inference_runtime_meta.cuda_memory_profile",
+            "profile_role": "embed_watermarked_inference",
+        },
+        {
+            "artifact_path": run_root / "records" / "embed_record.json",
+            "field_path": "content_evidence.audit.runtime_capture_cuda_memory_profile",
+            "profile_role": "statement_only_runtime_capture",
+        },
+        {
+            "artifact_path": run_root / "records" / "detect_record.json",
+            "field_path": "inference_runtime_meta.cuda_memory_profile",
+            "profile_role": "detect_main_inference",
+        },
+    ]
+    for source_spec in source_specs:
+        artifact_path = cast(Path, source_spec["artifact_path"])
+        payload = _read_optional_json(artifact_path)
+        nested_profile = _extract_nested_value(payload, cast(str, source_spec["field_path"]))
+        if not isinstance(nested_profile, dict):
+            continue
+        normalized_entry = _build_stage_03_gpu_memory_entry(
+            batch_root=batch_root,
+            run_root=run_root,
+            run_kind=run_kind,
+            source_artifact_path=artifact_path,
+            source_field_path=cast(str, source_spec["field_path"]),
+            profile_role=cast(str, source_spec["profile_role"]),
+            profile_payload=cast(Dict[str, Any], nested_profile),
+        )
+        if isinstance(normalized_entry, dict):
+            entries.append(normalized_entry)
+
+    for preview_record_path in _find_preview_generation_record_paths(run_root):
+        preview_payload = _read_optional_json(preview_record_path)
+        preview_profile = _extract_nested_value(preview_payload, "inference_runtime_meta.cuda_memory_profile")
+        if not isinstance(preview_profile, dict):
+            continue
+        normalized_entry = _build_stage_03_gpu_memory_entry(
+            batch_root=batch_root,
+            run_root=run_root,
+            run_kind=run_kind,
+            source_artifact_path=preview_record_path,
+            source_field_path="inference_runtime_meta.cuda_memory_profile",
+            profile_role="preview_generation",
+            profile_payload=cast(Dict[str, Any], preview_profile),
+        )
+        if isinstance(normalized_entry, dict):
+            entries.append(normalized_entry)
+
+    return sorted(
+        entries,
+        key=lambda item: (
+            _safe_str(item.get("run_root_relative")),
+            _safe_str(item.get("profile_role")),
+            _safe_str(item.get("source_artifact_relative")),
+            _safe_str(item.get("phase_label")),
+        ),
+    )
+
+
+def _build_stage_03_gpu_memory_max_entry(entry: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Build one lightweight max-entry view for the stage-03 GPU summary."""
+    if not isinstance(entry, dict):
+        return None
+
+    return {
+        "run_kind": _safe_str(entry.get("run_kind")),
+        "run_root": _safe_str(entry.get("run_root")),
+        "run_root_relative": _safe_str(entry.get("run_root_relative")),
+        "source_artifact_path": _safe_str(entry.get("source_artifact_path")),
+        "source_artifact_relative": _safe_str(entry.get("source_artifact_relative")),
+        "source_field_path": _safe_str(entry.get("source_field_path")),
+        "profile_role": _safe_str(entry.get("profile_role")),
+        "phase_label": _safe_str(entry.get("phase_label")),
+        "status": _safe_str(entry.get("status")),
+        "device": _safe_str(entry.get("device")),
+        "peak_memory_allocated_bytes": entry.get("peak_memory_allocated_bytes"),
+        "peak_memory_reserved_bytes": entry.get("peak_memory_reserved_bytes"),
+        "peak_memory_allocated_mib": entry.get("peak_memory_allocated_mib"),
+        "peak_memory_reserved_mib": entry.get("peak_memory_reserved_mib"),
+    }
+
+
+def _build_stage_03_gpu_memory_summary(
+    entries: List[Dict[str, Any]],
+    scanned_runs: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Build the stage-level GPU peak summary from child-run profile entries."""
+    if not isinstance(entries, list):
+        raise TypeError("entries must be list")
+    if not isinstance(scanned_runs, list):
+        raise TypeError("scanned_runs must be list")
+
+    status_counts: Dict[str, int] = {}
+    profile_role_counts: Dict[str, int] = {}
+    phase_label_counts: Dict[str, int] = {}
+    device_counts: Dict[str, int] = {}
+    peak_memory_allocated_max_entry: Optional[Dict[str, Any]] = None
+    peak_memory_reserved_max_entry: Optional[Dict[str, Any]] = None
+    profiled_run_roots = {
+        _safe_str(item.get("run_root"))
+        for item in entries
+        if isinstance(item, dict) and _safe_str(item.get("run_root")) != "<absent>"
+    }
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        status_value = _safe_str(entry.get("status"))
+        profile_role = _safe_str(entry.get("profile_role"))
+        phase_label = _safe_str(entry.get("phase_label"))
+        device_value = _safe_str(entry.get("device"))
+        status_counts[status_value] = status_counts.get(status_value, 0) + 1
+        profile_role_counts[profile_role] = profile_role_counts.get(profile_role, 0) + 1
+        phase_label_counts[phase_label] = phase_label_counts.get(phase_label, 0) + 1
+        device_counts[device_value] = device_counts.get(device_value, 0) + 1
+
+        peak_memory_allocated_bytes = _coerce_optional_nonnegative_int(entry.get("peak_memory_allocated_bytes"))
+        peak_memory_reserved_bytes = _coerce_optional_nonnegative_int(entry.get("peak_memory_reserved_bytes"))
+        if peak_memory_allocated_bytes is not None and (
+            peak_memory_allocated_max_entry is None
+            or peak_memory_allocated_bytes > cast(int, peak_memory_allocated_max_entry["peak_memory_allocated_bytes"])
+        ):
+            peak_memory_allocated_max_entry = entry
+        if peak_memory_reserved_bytes is not None and (
+            peak_memory_reserved_max_entry is None
+            or peak_memory_reserved_bytes > cast(int, peak_memory_reserved_max_entry["peak_memory_reserved_bytes"])
+        ):
+            peak_memory_reserved_max_entry = entry
+
+    experiment_item_run_count = sum(
+        1
+        for run_item in scanned_runs
+        if isinstance(run_item, dict) and run_item.get("run_kind") == "experiment_item"
+    )
+    neg_cache_run_count = sum(
+        1
+        for run_item in scanned_runs
+        if isinstance(run_item, dict) and run_item.get("run_kind") == "neg_cache"
+    )
+    if not entries:
+        status_value = "absent"
+        reason_value = "no_child_run_cuda_memory_profiles_found"
+    elif peak_memory_allocated_max_entry is None and peak_memory_reserved_max_entry is None:
+        status_value = "observed_without_peak_values"
+        reason_value = "no_ok_child_run_cuda_peak_metrics_found"
+    else:
+        status_value = "ok"
+        reason_value = "ok"
+
+    return {
+        "status": status_value,
+        "reason": reason_value,
+        "scanned_run_count": len(scanned_runs),
+        "profiled_run_count": len(profiled_run_roots),
+        "runs_without_profiles_count": max(len(scanned_runs) - len(profiled_run_roots), 0),
+        "experiment_item_run_count": experiment_item_run_count,
+        "neg_cache_run_count": neg_cache_run_count,
+        "entry_count": len(entries),
+        "ok_profile_count": status_counts.get("ok", 0),
+        "absent_profile_count": status_counts.get("absent", 0),
+        "failed_profile_count": status_counts.get("failed", 0),
+        "status_counts": status_counts,
+        "profile_role_counts": profile_role_counts,
+        "phase_label_counts": phase_label_counts,
+        "device_counts": device_counts,
+        "peak_memory_allocated_bytes_max": (
+            peak_memory_allocated_max_entry.get("peak_memory_allocated_bytes")
+            if isinstance(peak_memory_allocated_max_entry, dict)
+            else None
+        ),
+        "peak_memory_reserved_bytes_max": (
+            peak_memory_reserved_max_entry.get("peak_memory_reserved_bytes")
+            if isinstance(peak_memory_reserved_max_entry, dict)
+            else None
+        ),
+        "peak_memory_allocated_mib_max": (
+            peak_memory_allocated_max_entry.get("peak_memory_allocated_mib")
+            if isinstance(peak_memory_allocated_max_entry, dict)
+            else None
+        ),
+        "peak_memory_reserved_mib_max": (
+            peak_memory_reserved_max_entry.get("peak_memory_reserved_mib")
+            if isinstance(peak_memory_reserved_max_entry, dict)
+            else None
+        ),
+        "peak_memory_allocated_max_entry": _build_stage_03_gpu_memory_max_entry(peak_memory_allocated_max_entry),
+        "peak_memory_reserved_max_entry": _build_stage_03_gpu_memory_max_entry(peak_memory_reserved_max_entry),
+    }
+
+
+def _build_stage_03_gpu_memory_observability(
+    *,
+    batch_root: Path,
+    experiment_results: List[Dict[str, Any]],
+    neg_detect_record_cache: Dict[Tuple[str, int], Optional[Path]],
+) -> Dict[str, Any]:
+    """Collect the stage-03 GPU memory summary and per-run breakdown artifact."""
+    if not isinstance(batch_root, Path):
+        raise TypeError("batch_root must be Path")
+    if not isinstance(experiment_results, list):
+        raise TypeError("experiment_results must be list")
+    if not isinstance(neg_detect_record_cache, dict):
+        raise TypeError("neg_detect_record_cache must be dict")
+
+    entries: List[Dict[str, Any]] = []
+    scanned_runs: List[Dict[str, Any]] = []
+    seen_run_roots = set()
+
+    def _append_run_root(run_root: Path, run_kind: str) -> None:
+        if not isinstance(run_root, Path):
+            raise TypeError("run_root must be Path")
+        if not isinstance(run_kind, str) or not run_kind:
+            raise TypeError("run_kind must be non-empty str")
+
+        run_root_key = run_root.resolve().as_posix() if run_root.exists() else run_root.as_posix()
+        if run_root_key in seen_run_roots:
+            return
+        seen_run_roots.add(run_root_key)
+        scanned_runs.append(
+            {
+                "run_kind": run_kind,
+                "run_root": run_root.as_posix(),
+                "run_root_relative": _relative_path_from_base(batch_root, run_root.as_posix()),
+            }
+        )
+        entries.extend(
+            _collect_stage_03_gpu_memory_entries_from_run_root(
+                batch_root=batch_root,
+                run_root=run_root,
+                run_kind=run_kind,
+            )
+        )
+
+    for item in experiment_results:
+        if not isinstance(item, dict):
+            continue
+        run_root_value = item.get("run_root")
+        if not isinstance(run_root_value, str) or not run_root_value:
+            continue
+        _append_run_root(Path(run_root_value), "experiment_item")
+
+    for detect_record_path in neg_detect_record_cache.values():
+        if detect_record_path is None:
+            continue
+        if not isinstance(detect_record_path, Path):
+            continue
+        _append_run_root(detect_record_path.parent.parent, "neg_cache")
+
+    entries = sorted(
+        entries,
+        key=lambda item: (
+            _safe_str(item.get("run_kind")),
+            _safe_str(item.get("run_root_relative")),
+            _safe_str(item.get("profile_role")),
+            _safe_str(item.get("source_artifact_relative")),
+            _safe_str(item.get("phase_label")),
+        ),
+    )
+    scanned_runs = sorted(
+        scanned_runs,
+        key=lambda item: (
+            _safe_str(item.get("run_kind")),
+            _safe_str(item.get("run_root_relative")),
+        ),
+    )
+    run_profile_counts: Dict[str, int] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        run_root_value = _safe_str(entry.get("run_root"))
+        run_profile_counts[run_root_value] = run_profile_counts.get(run_root_value, 0) + 1
+    for run_item in scanned_runs:
+        run_root_value = _safe_str(run_item.get("run_root"))
+        run_item["profile_count"] = run_profile_counts.get(run_root_value, 0)
+
+    gpu_memory_summary = _build_stage_03_gpu_memory_summary(entries, scanned_runs)
+    return {
+        "gpu_memory_summary": gpu_memory_summary,
+        "gpu_memory_profile_breakdown": {
+            "artifact_version": "stage_03_gpu_memory_profile_breakdown_v1",
+            "gpu_memory_summary": copy.deepcopy(gpu_memory_summary),
+            "runs": scanned_runs,
+            "entries": entries,
+        },
+    }
 
 
 def _resolve_matrix_primary_scope(matrix_cfg: Dict[str, Any]) -> str:
@@ -1292,9 +1713,26 @@ def run_experiment_grid(grid: List[Dict[str, Any]], strict: bool = True) -> Dict
             if strict:
                 break
 
+    batch_root_path = Path("outputs/experiment_matrix")
+    if grid:
+        batch_root_value = grid[0].get("batch_root", "outputs/experiment_matrix")
+        batch_root_path = Path(str(batch_root_value))
+    gpu_memory_observability = _build_stage_03_gpu_memory_observability(
+        batch_root=batch_root_path,
+        experiment_results=results,
+        neg_detect_record_cache=neg_detect_record_cache,
+    )
     grid_manifest = _build_grid_manifest(grid)
     aggregate_report = build_aggregate_report(results, grid_manifest=grid_manifest)
-    summary_paths = _write_grid_artifacts(grid, aggregate_report, results, strict)
+    aggregate_report["gpu_memory_summary"] = copy.deepcopy(gpu_memory_observability["gpu_memory_summary"])
+    summary_paths = _write_grid_artifacts(
+        grid,
+        aggregate_report,
+        results,
+        strict,
+        gpu_memory_summary=cast(Dict[str, Any], gpu_memory_observability["gpu_memory_summary"]),
+        gpu_memory_profile_breakdown=cast(Dict[str, Any], gpu_memory_observability["gpu_memory_profile_breakdown"]),
+    )
     if len(grid) > 0:
         batch_root_value = grid[0].get("batch_root", "outputs/experiment_matrix")
         _annotate_result_relative_paths(results, Path(str(batch_root_value)))
@@ -1319,6 +1757,7 @@ def run_experiment_grid(grid: List[Dict[str, Any]], strict: bool = True) -> Dict
             _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD,
             False,
         ),
+        "gpu_memory_summary": copy.deepcopy(gpu_memory_observability["gpu_memory_summary"]),
         "scope_manifest": aggregate_report.get("scope_manifest", {}),
         "system_final_metrics_presence": aggregate_report.get("system_final_metrics_presence", {}),
         "aggregate_report": aggregate_report,
@@ -3394,6 +3833,8 @@ def _write_grid_artifacts(
     aggregate_report: Dict[str, Any],
     results: List[Dict[str, Any]],
     strict: bool,
+    gpu_memory_summary: Optional[Dict[str, Any]] = None,
+    gpu_memory_profile_breakdown: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
     """Write aggregate report and grid summary using controlled artifact writer."""
     if not grid:
@@ -3418,8 +3859,17 @@ def _write_grid_artifacts(
     attack_coverage_manifest_path = artifacts_dir / "attack_coverage_manifest.json"
     hf_truncation_baseline_comparison_table_path = artifacts_dir / "hf_truncation_baseline_comparison_table.json"
     hf_truncation_baseline_comparison_table_csv_path = artifacts_dir / "hf_truncation_baseline_comparison_table.csv"
+    gpu_memory_profile_breakdown_path = artifacts_dir / _GPU_MEMORY_PROFILE_BREAKDOWN_ARTIFACT_NAME
 
     grid_manifest = _build_grid_manifest(grid)
+    if isinstance(gpu_memory_summary, dict):
+        resolved_gpu_memory_summary = copy.deepcopy(gpu_memory_summary)
+    else:
+        aggregate_report_gpu_summary = aggregate_report.get("gpu_memory_summary")
+        if isinstance(aggregate_report_gpu_summary, dict):
+            resolved_gpu_memory_summary = copy.deepcopy(cast(Dict[str, Any], aggregate_report_gpu_summary))
+        else:
+            resolved_gpu_memory_summary = _build_stage_03_gpu_memory_summary([], [])
 
     # 提取锚点字段（append-only，只读已有工件）
     anchors_obj = _extract_anchors_from_results(aggregate_report, results)
@@ -3451,6 +3901,7 @@ def _write_grid_artifacts(
                 _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD,
                 False,
             ),
+            "gpu_memory_summary": resolved_gpu_memory_summary,
             "scope_manifest": aggregate_report.get("scope_manifest", {}),
             "system_final_metrics_presence": aggregate_report.get("system_final_metrics_presence", {}),
             "results": results,
@@ -3493,8 +3944,15 @@ def _write_grid_artifacts(
         path=str(hf_truncation_baseline_comparison_table_csv_path),
         content=_build_hf_truncation_baseline_comparison_csv(hf_truncation_baseline_comparison_table),
     )
+    if isinstance(gpu_memory_profile_breakdown, dict):
+        records_io.write_artifact_json_unbound(
+            run_root=batch_root,
+            artifacts_dir=artifacts_dir,
+            path=str(gpu_memory_profile_breakdown_path),
+            obj=gpu_memory_profile_breakdown,
+        )
 
-    return {
+    summary_paths = {
         "batch_root": str(batch_root),
         "aggregate_report_path": str(aggregate_report_path),
         "grid_summary_path": str(grid_summary_path),
@@ -3503,6 +3961,9 @@ def _write_grid_artifacts(
         "hf_truncation_baseline_comparison_table_path": str(hf_truncation_baseline_comparison_table_path),
         "hf_truncation_baseline_comparison_table_csv_path": str(hf_truncation_baseline_comparison_table_csv_path),
     }
+    if isinstance(gpu_memory_profile_breakdown, dict):
+        summary_paths["gpu_memory_profile_breakdown_path"] = str(gpu_memory_profile_breakdown_path)
+    return summary_paths
 
 
 def _build_hf_truncation_baseline_comparison_table(experiment_results: List[Dict[str, Any]]) -> Dict[str, Any]:
