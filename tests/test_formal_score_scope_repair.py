@@ -516,7 +516,7 @@ def test_stage_03_script_syncs_auxiliary_runtime_evidence_to_workflow_summary_an
     monkeypatch.setattr(stage_03_module, "prepare_source_package", _fake_prepare_source_package)
     monkeypatch.setattr(stage_03_module, "resolve_stage_roots", lambda *args, **kwargs: stage_roots)
     monkeypatch.setattr(stage_03_module, "load_yaml_mapping", lambda path: {"experiment_matrix": {}})
-    monkeypatch.setattr(stage_03_module, "detect_stage_03_preflight", lambda *_args: {"ok": True})
+    monkeypatch.setattr(stage_03_module, "detect_stage_03_preflight", lambda *_args, **_kwargs: {"ok": True})
     monkeypatch.setattr(stage_03_module, "run_command_with_logs", _fake_run_command_with_logs)
     monkeypatch.setattr(stage_03_module, "collect_git_summary", lambda path: {})
     monkeypatch.setattr(stage_03_module, "collect_python_summary", lambda: {})

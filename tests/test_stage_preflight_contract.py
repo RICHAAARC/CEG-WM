@@ -417,6 +417,93 @@ def test_detect_stage_02_preflight_does_not_require_attestation_env(
     assert "missing_attestation_env_vars" not in preflight["failed_checks"]
 
 
+def test_detect_stage_03_preflight_fails_when_model_snapshot_binding_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：stage 03 在 runtime config 缺少有效模型绑定时必须 fail-fast。
+
+    Verify stage-03 preflight hard-fails when the runtime config lacks a valid
+    model snapshot binding.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    config_path = _write_config(tmp_path / "stage_03_missing_binding.yaml", attestation_enabled=False)
+    source_package_path = tmp_path / "stage_01_source.zip"
+    source_thresholds_artifact_path = tmp_path / "thresholds_artifact.json"
+    source_package_path.write_text("zip placeholder", encoding="utf-8")
+    source_thresholds_artifact_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(workflow_acceptance_common.shutil, "which", lambda _command: "/usr/bin/nvidia-smi")
+
+    preflight = workflow_acceptance_common.detect_stage_03_preflight(
+        config_path,
+        source_package_path,
+        source_thresholds_artifact_path,
+        require_model_binding=True,
+    )
+
+    assert preflight["ok"] is False
+    assert preflight["model_source_binding_required"] is True
+    assert preflight["model_source_binding_present"] is False
+    assert preflight["model_source_binding_status"] == "<absent>"
+    assert "stage_03_model_source_binding_missing" in preflight["failed_checks"]
+    assert "stage_03_model_snapshot_path_missing_or_not_directory" in preflight["failed_checks"]
+
+
+def test_detect_stage_03_preflight_passes_with_bound_model_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：stage 03 在 runtime config 含有效模型绑定时必须通过 preflight。
+
+    Verify stage-03 preflight passes when the runtime config carries a valid
+    bound model snapshot directory.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    snapshot_dir = tmp_path / "stage_03_snapshot"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    config_path = _write_config(
+        tmp_path / "stage_03_bound_binding.yaml",
+        attestation_enabled=False,
+        model_snapshot_path=snapshot_dir,
+    )
+    source_package_path = tmp_path / "stage_01_source.zip"
+    source_thresholds_artifact_path = tmp_path / "thresholds_artifact.json"
+    source_package_path.write_text("zip placeholder", encoding="utf-8")
+    source_thresholds_artifact_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(workflow_acceptance_common.shutil, "which", lambda _command: "/usr/bin/nvidia-smi")
+
+    preflight = workflow_acceptance_common.detect_stage_03_preflight(
+        config_path,
+        source_package_path,
+        source_thresholds_artifact_path,
+        require_model_binding=True,
+    )
+
+    assert preflight["ok"] is True
+    assert preflight["model_source_binding_required"] is True
+    assert preflight["model_source_binding_present"] is True
+    assert preflight["model_source_binding_status"] == "bound"
+    assert preflight["model_snapshot_path"] == snapshot_dir.as_posix()
+    assert preflight["model_snapshot_path_exists"] is True
+    assert preflight["model_snapshot_path_is_directory"] is True
+    assert preflight["model_source_binding_path_matches_snapshot_path"] is True
+    assert preflight["failed_checks"] == []
+
+
 def test_detect_stage_04_preflight_does_not_require_gpu(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

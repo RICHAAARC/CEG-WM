@@ -401,16 +401,21 @@ def detect_stage_03_preflight(
     cfg_path: Path,
     source_package_path: Path,
     source_thresholds_artifact_path: Path,
+    *,
+    require_model_binding: bool = False,
 ) -> Dict[str, Any]:
     """
     功能：执行 stage 03 的 experiment-matrix preflight。 
 
-    Execute stage-03 preflight checks for GPU availability and required stage-01 source artifacts.
+    Execute stage-03 preflight checks for GPU availability, required stage-01
+    source artifacts, and optional runtime model snapshot binding gates.
 
     Args:
         cfg_path: Runtime config path.
         source_package_path: Source stage-01 package path.
         source_thresholds_artifact_path: Source thresholds artifact path.
+        require_model_binding: Whether model snapshot binding is mandatory for
+            this stage-03 entrypoint.
 
     Returns:
         Stage-03 preflight status mapping.
@@ -424,16 +429,7 @@ def detect_stage_03_preflight(
         "missing_env_vars": [],
     }
     failed_checks: List[str] = []
-    if config_error is not None or cfg_obj is None:
-        failed_checks.append("config_invalid")
-    if not bool(gpu_summary["gpu_tool_available"]):
-        failed_checks.append("gpu_tool_unavailable")
-    if not bool(source_package_check["exists"]):
-        failed_checks.append("source_package_missing")
-    if not bool(thresholds_check["exists"]):
-        failed_checks.append("source_thresholds_artifact_missing")
-
-    return {
+    result: Dict[str, Any] = {
         "stage_name": "03_Experiment_Matrix_Full",
         "cfg_path": normalize_path_value(cfg_path),
         "config_error": config_error,
@@ -446,9 +442,48 @@ def detect_stage_03_preflight(
         "source_package_exists": source_package_check["exists"],
         "source_thresholds_artifact_path": thresholds_check["path"],
         "source_thresholds_artifact_exists": thresholds_check["exists"],
+        "model_source_binding_required": bool(require_model_binding),
+        "model_source_binding_present": False,
+        "model_source_binding_status": "<absent>",
+        "model_source_binding_reason": "<absent>",
+        "model_source_binding_source": "<absent>",
+        "model_source_binding_snapshot_path": "<absent>",
+        "model_snapshot_path": "<absent>",
+        "model_snapshot_path_exists": False,
+        "model_snapshot_path_is_directory": False,
+        "model_source_binding_path_matches_snapshot_path": False,
         "failed_checks": failed_checks,
-        "ok": len(failed_checks) == 0,
+        "ok": False,
     }
+    if config_error is not None or cfg_obj is None:
+        failed_checks.append("config_invalid")
+        result["ok"] = False
+        return result
+
+    result.update(_collect_stage_01_model_binding_summary(cfg_obj))
+    if not bool(gpu_summary["gpu_tool_available"]):
+        failed_checks.append("gpu_tool_unavailable")
+    if not bool(source_package_check["exists"]):
+        failed_checks.append("source_package_missing")
+    if not bool(thresholds_check["exists"]):
+        failed_checks.append("source_thresholds_artifact_missing")
+    if bool(require_model_binding):
+        if not bool(result["model_source_binding_present"]) or result["model_source_binding_status"] in {"<absent>", "absent"}:
+            failed_checks.append("stage_03_model_source_binding_missing")
+        elif result["model_source_binding_status"] != "bound":
+            failed_checks.append("stage_03_model_source_binding_not_bound")
+        if not bool(result["model_snapshot_path_exists"]) or not bool(result["model_snapshot_path_is_directory"]):
+            failed_checks.append("stage_03_model_snapshot_path_missing_or_not_directory")
+        if (
+            result["model_source_binding_status"] == "bound"
+            and bool(result["model_snapshot_path_exists"])
+            and bool(result["model_snapshot_path_is_directory"])
+            and not bool(result["model_source_binding_path_matches_snapshot_path"])
+        ):
+            failed_checks.append("stage_03_model_source_binding_path_mismatch")
+
+    result["ok"] = len(failed_checks) == 0
+    return result
 
 
 def detect_stage_04_preflight(

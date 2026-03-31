@@ -1190,6 +1190,7 @@ def test_stage_03_execute_cell_uses_resolved_source_package_path() -> None:
     assert "RESOLVED_SOURCE_PACKAGE_SOURCE" in execute_source
     assert "PRECHECK_SOURCE_PACKAGE_RESOLUTION" in execute_source
     assert "resolve_stage_package_input_or_discover" not in execute_source
+    assert 'NOTEBOOK_SUBPROCESS_ENV["CEG_WM_MODEL_SNAPSHOT_PATH"] = str(MODEL_SNAPSHOT_PATH)' in execute_source
     _assert_execute_source_uses_repo_import_context(execute_source)
 
 
