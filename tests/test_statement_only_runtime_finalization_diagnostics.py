@@ -703,7 +703,13 @@ def test_run_embed_statement_only_success_persists_runtime_finalization_diagnost
     monkeypatch.setattr(run_embed_module.path_policy, "validate_output_target", cast(Any, lambda *args, **kwargs: None))
     monkeypatch.setattr(run_embed_module.schema, "ensure_required_fields", cast(Any, lambda *args, **kwargs: None))
     monkeypatch.setattr(run_embed_module.schema, "validate_record", cast(Any, lambda *args, **kwargs: None))
-    monkeypatch.setattr(run_embed_module.records_io, "write_json", cast(Any, lambda *args, **kwargs: None))
+
+    def _write_json(path_value: str, payload: Dict[str, Any]) -> None:
+        path_obj = Path(path_value)
+        path_obj.parent.mkdir(parents=True, exist_ok=True)
+        path_obj.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+
+    monkeypatch.setattr(run_embed_module.records_io, "write_json", cast(Any, _write_json))
     monkeypatch.setattr(run_embed_module.records_io, "write_artifact_json", cast(Any, lambda *args, **kwargs: None))
     monkeypatch.setattr(run_embed_module, "bind_contract_to_record", cast(Any, lambda *args, **kwargs: None))
     monkeypatch.setattr(run_embed_module, "bind_whitelist_to_record", cast(Any, lambda *args, **kwargs: None))
@@ -733,6 +739,8 @@ def test_run_embed_statement_only_success_persists_runtime_finalization_diagnost
 
     run_closure_path = cast(Path, env["run_closure_path"])
     run_closure = json.loads(run_closure_path.read_text(encoding="utf-8"))
+    embed_record_path = tmp_path / "run" / "records" / "embed_record.json"
+    embed_record = json.loads(embed_record_path.read_text(encoding="utf-8"))
     status_details = run_closure["status"]["details"]
 
     assert status_details is not None
@@ -747,6 +755,16 @@ def test_run_embed_statement_only_success_persists_runtime_finalization_diagnost
         "device": "cpu",
     }
     assert runtime_finalization["runtime_capture_cuda_memory_profile"]["phase_label"] == "statement_only_runtime_capture"
+    assert embed_record["content_evidence"]["audit"]["runtime_capture_cuda_memory_profile"] == {
+        "status": "absent",
+        "reason": "cuda_not_active",
+        "phase_label": "statement_only_runtime_capture",
+        "sample_scope": "single_worker_process_local",
+        "device": "cpu",
+    }
+    assert embed_record["content_evidence"]["audit"]["runtime_capture_cuda_memory_profile"]["phase_label"] == (
+        "statement_only_runtime_capture"
+    )
 
 
 def test_trajectory_cache_capture_meta_reports_tap_observed_without_cache_write() -> None:

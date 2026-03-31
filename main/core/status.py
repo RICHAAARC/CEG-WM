@@ -565,6 +565,143 @@ def _ensure_artifact_audit_marker_local(obj: Dict[str, Any]) -> None:
         }
 
 
+def _normalize_run_closure_command_name(command_value: Any) -> str | None:
+    """
+    功能：规范化 run_closure 命令名。
+
+    Normalize the command name used by command-scoped run_closure history.
+
+    Args:
+        command_value: Candidate command value.
+
+    Returns:
+        Normalized command name, or None when unavailable.
+    """
+    if not isinstance(command_value, str):
+        return None
+    normalized_command = command_value.strip()
+    if not normalized_command:
+        return None
+    return normalized_command
+
+
+def _clone_run_closure_mapping(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：深拷贝 run_closure 负载。
+
+    Clone a run_closure payload into a JSON-safe detached mapping.
+
+    Args:
+        payload: Run closure payload mapping.
+
+    Returns:
+        Detached payload mapping.
+
+    Raises:
+        TypeError: If the cloned payload is not a dict.
+    """
+    cloned_payload = json.loads(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    if not isinstance(cloned_payload, dict):
+        # 克隆结果必须仍为 dict。
+        raise TypeError("cloned run_closure payload must be dict")
+    return cast(Dict[str, Any], cloned_payload)
+
+
+def _build_command_closure_view(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：构造不含 command_closures 的命令级 run_closure 视图。
+
+    Build a detached command-scoped run_closure view without nested history.
+
+    Args:
+        payload: Run closure payload mapping.
+
+    Returns:
+        Command-scoped payload mapping.
+    """
+    view_payload = _clone_run_closure_mapping(payload)
+    view_payload.pop("command_closures", None)
+    return view_payload
+
+
+def _extract_valid_command_closure_view(payload_obj: Any) -> tuple[str, Dict[str, Any]] | None:
+    """
+    功能：提取并校验可保留的命令级 closure 视图。
+
+    Extract a command-scoped run_closure view when the payload is valid.
+
+    Args:
+        payload_obj: Candidate run_closure payload object.
+
+    Returns:
+        Tuple of command name and detached payload view, or None.
+    """
+    if not isinstance(payload_obj, dict):
+        return None
+    payload_mapping = cast(Dict[str, Any], payload_obj)
+    command_name = _normalize_run_closure_command_name(payload_mapping.get("command"))
+    if command_name is None:
+        return None
+    try:
+        command_view = _build_command_closure_view(payload_mapping)
+        validate_run_closure(command_view)
+    except Exception:
+        # 历史 closure 非法时忽略，避免放大旧坏数据。
+        return None
+    return command_name, command_view
+
+
+def _merge_command_closure_history(run_closure_path: Path, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：将当前 closure 并入 canonical run_closure 的命令级保留面。
+
+    Merge the current closure into the canonical run_closure command history.
+
+    Args:
+        run_closure_path: Canonical run_closure output path.
+        payload: Current run_closure payload.
+
+    Returns:
+        Payload augmented with command_closures history.
+    """
+    current_command = _normalize_run_closure_command_name(payload.get("command"))
+    if current_command is None:
+        return payload
+
+    merged_payload = _build_command_closure_view(payload)
+    command_closures: Dict[str, Dict[str, Any]] = {}
+
+    if run_closure_path.exists() and run_closure_path.is_file():
+        try:
+            existing_payload_obj = json.loads(run_closure_path.read_text(encoding="utf-8"))
+        except Exception:
+            existing_payload_obj = None
+
+        if isinstance(existing_payload_obj, dict):
+            existing_payload = cast(Dict[str, Any], existing_payload_obj)
+            existing_command_closures = existing_payload.get("command_closures")
+            if isinstance(existing_command_closures, dict):
+                existing_command_closures_mapping = cast(Dict[str, Any], existing_command_closures)
+                for command_key, closure_payload in existing_command_closures_mapping.items():
+                    normalized_command = _normalize_run_closure_command_name(command_key)
+                    if normalized_command is None:
+                        continue
+                    extracted_view = _extract_valid_command_closure_view(closure_payload)
+                    if extracted_view is None:
+                        continue
+                    _, command_view = extracted_view
+                    command_closures[normalized_command] = command_view
+
+            extracted_existing_top_level = _extract_valid_command_closure_view(existing_payload)
+            if extracted_existing_top_level is not None:
+                existing_command, existing_command_view = extracted_existing_top_level
+                command_closures[existing_command] = existing_command_view
+
+    command_closures[current_command] = _build_command_closure_view(payload)
+    merged_payload["command_closures"] = command_closures
+    return merged_payload
+
+
 def finalize_run(
     run_root: Path,
     records_dir: Path,
@@ -1311,6 +1448,7 @@ def finalize_run(
 
     run_closure_path = artifacts_dir / RUN_CLOSURE_NAME
     path_policy.validate_output_target(run_closure_path, "artifact", run_root)
+    payload = _merge_command_closure_history(run_closure_path, payload)
     validate_run_closure(payload)
     
     # 受控写盘：禁止 unbound 回退。

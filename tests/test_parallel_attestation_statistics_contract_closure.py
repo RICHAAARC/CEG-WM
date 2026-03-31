@@ -2155,6 +2155,26 @@ def test_source_pool_preview_artifact_records_pipeline_resolution_metadata(
         def save(self, path_value: str | Path) -> None:
             Path(path_value).write_bytes(b"preview")
 
+    captured_inference_kwargs: Dict[str, Any] = {}
+
+    def _fake_run_sd3_inference(*_args: Any, **kwargs: Any) -> Dict[str, Any]:
+        captured_inference_kwargs.update(kwargs)
+        return {
+            "inference_status": runner.infer_runtime.INFERENCE_STATUS_OK,
+            "inference_error": None,
+            "inference_runtime_meta": {
+                "latency_ms": 1.0,
+                "cuda_memory_profile": {
+                    "status": "absent",
+                    "reason": "cuda_not_active",
+                    "phase_label": kwargs.get("runtime_phase_label"),
+                    "sample_scope": "single_worker_process_local",
+                    "device": "cpu",
+                },
+            },
+            "output_image": FakePreviewImage(),
+        }
+
     monkeypatch.setattr(runner, "build_seed_audit", lambda *_args, **_kwargs: ({}, "seed_digest", 7, "seed_rule"))
     monkeypatch.setattr(
         runner.pipeline_factory,
@@ -2175,14 +2195,10 @@ def test_source_pool_preview_artifact_records_pipeline_resolution_metadata(
     monkeypatch.setattr(
         runner.infer_runtime,
         "run_sd3_inference",
-        lambda *_args, **_kwargs: {
-            "inference_status": runner.infer_runtime.INFERENCE_STATUS_OK,
-            "inference_error": None,
-            "inference_runtime_meta": {"latency_ms": 1.0},
-            "output_image": FakePreviewImage(),
-        },
+        _fake_run_sd3_inference,
     )
 
+    prompt_run_root = tmp_path / "prompt_run_root"
     preview_result = runner._prepare_source_pool_preview_artifact(
         cfg_obj={
             "policy_path": "content_np_geo_rescue",
@@ -2197,18 +2213,27 @@ def test_source_pool_preview_artifact_records_pipeline_resolution_metadata(
                 }
             },
         },
-        prompt_run_root=tmp_path / "prompt_run_root",
+        prompt_run_root=prompt_run_root,
         prompt_text="prompt 0",
         prompt_index=0,
         prompt_file_path="prompts/paper_small.txt",
     )
     preview_record = preview_result["preview_record"]
+    preview_record_path = prompt_run_root / "artifacts" / "preview" / "preview_generation_record.json"
+    persisted_preview_record = json.loads(preview_record_path.read_text(encoding="utf-8"))
 
     assert preview_record["status"] == "ok"
+    assert captured_inference_kwargs["runtime_phase_label"] == "preview_generation"
     assert preview_record["pipeline_runtime_meta"]["model_source_resolution"] == "local_snapshot_priority"
     assert preview_record["pipeline_runtime_meta"]["local_snapshot_status"] == "bound"
     assert preview_record["pipeline_provenance_canon_sha256"] == "pipeline_digest_anchor"
     assert preview_record["model_provenance_canon_sha256"] == "model_digest_anchor"
+    assert preview_record["artifact_type"] == "stage_01_source_pool_preview_generation_record"
+    assert preview_record["record_rel_path"] == "preview/preview_generation_record.json"
+    assert preview_record["record_path"] == preview_record_path.as_posix()
+    assert persisted_preview_record["artifact_type"] == "stage_01_source_pool_preview_generation_record"
+    assert persisted_preview_record["record_rel_path"] == "preview/preview_generation_record.json"
+    assert persisted_preview_record["inference_runtime_meta"]["cuda_memory_profile"]["phase_label"] == "preview_generation"
 
 
 def test_stage_01_mainline_fails_when_required_canonical_attestation_exists_flag_is_false(

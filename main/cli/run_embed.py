@@ -2331,6 +2331,11 @@ def run_embed(
                 content_audit["runtime_finalization_reason"] = runtime_finalization_meta.get("runtime_finalization_reason")
                 content_audit["runtime_capture_inference_status"] = runtime_finalization_meta.get("capture_inference_status")
                 content_audit["runtime_capture_inference_error"] = runtime_finalization_meta.get("capture_inference_error")
+                runtime_capture_cuda_memory_profile = runtime_finalization_meta.get("runtime_capture_cuda_memory_profile")
+                if isinstance(runtime_capture_cuda_memory_profile, dict):
+                    content_audit["runtime_capture_cuda_memory_profile"] = dict(
+                        cast(Dict[str, Any], runtime_capture_cuda_memory_profile)
+                    )
                 content_audit["planner_failure_stage"] = runtime_finalization_meta.get("planner_failure_stage")
                 content_audit["planner_failure_detail_code"] = runtime_finalization_meta.get("planner_failure_detail_code")
                 content_audit["planner_failure_detail_message"] = runtime_finalization_meta.get("planner_failure_detail_message")

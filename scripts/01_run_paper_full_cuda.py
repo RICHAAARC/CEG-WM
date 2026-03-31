@@ -1137,6 +1137,7 @@ def _prepare_source_pool_preview_artifact(
             preview_pipeline_obj,
             preview_device,
             seed_value,
+            runtime_phase_label="preview_generation",
             injection_context=None,
             injection_modifier=None,
             capture_final_latents=False,
