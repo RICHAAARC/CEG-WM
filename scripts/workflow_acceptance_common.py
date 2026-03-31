@@ -403,6 +403,7 @@ def detect_stage_03_preflight(
     source_thresholds_artifact_path: Path,
     *,
     require_model_binding: bool = False,
+    require_authoritative_config_path: bool = False,
 ) -> Dict[str, Any]:
     """
     功能：执行 stage 03 的 experiment-matrix preflight。 
@@ -416,6 +417,8 @@ def detect_stage_03_preflight(
         source_thresholds_artifact_path: Source thresholds artifact path.
         require_model_binding: Whether model snapshot binding is mandatory for
             this stage-03 entrypoint.
+        require_authoritative_config_path: Whether experiment_matrix.config_path
+            must point back to the current runtime config snapshot.
 
     Returns:
         Stage-03 preflight status mapping.
@@ -452,6 +455,9 @@ def detect_stage_03_preflight(
         "model_snapshot_path_exists": False,
         "model_snapshot_path_is_directory": False,
         "model_source_binding_path_matches_snapshot_path": False,
+        "experiment_matrix_config_path_required": bool(require_authoritative_config_path),
+        "experiment_matrix_config_path": "<absent>",
+        "experiment_matrix_config_path_matches_runtime_snapshot": False,
         "failed_checks": failed_checks,
         "ok": False,
     }
@@ -461,6 +467,14 @@ def detect_stage_03_preflight(
         return result
 
     result.update(_collect_stage_01_model_binding_summary(cfg_obj))
+    experiment_cfg = cfg_obj.get("experiment_matrix") if isinstance(cfg_obj.get("experiment_matrix"), dict) else {}
+    raw_experiment_config_path = experiment_cfg.get("config_path")
+    if isinstance(raw_experiment_config_path, str) and raw_experiment_config_path.strip():
+        result["experiment_matrix_config_path"] = normalize_path_value(raw_experiment_config_path)
+    result["experiment_matrix_config_path_matches_runtime_snapshot"] = (
+        result["experiment_matrix_config_path"] != "<absent>"
+        and result["experiment_matrix_config_path"] == normalize_path_value(cfg_path)
+    )
     if not bool(gpu_summary["gpu_tool_available"]):
         failed_checks.append("gpu_tool_unavailable")
     if not bool(source_package_check["exists"]):
@@ -481,6 +495,11 @@ def detect_stage_03_preflight(
             and not bool(result["model_source_binding_path_matches_snapshot_path"])
         ):
             failed_checks.append("stage_03_model_source_binding_path_mismatch")
+    if bool(require_authoritative_config_path):
+        if result["experiment_matrix_config_path"] == "<absent>":
+            failed_checks.append("stage_03_experiment_matrix_config_path_missing")
+        elif not bool(result["experiment_matrix_config_path_matches_runtime_snapshot"]):
+            failed_checks.append("stage_03_experiment_matrix_config_path_mismatch")
 
     result["ok"] = len(failed_checks) == 0
     return result

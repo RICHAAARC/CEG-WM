@@ -21,6 +21,7 @@ def _write_config(
     binding_status: str = "bound",
     binding_reason: str | None = None,
     binding_snapshot_path: str | None = None,
+    experiment_matrix_config_path: str | None = None,
 ) -> Path:
     """
     功能：写出最小 preflight 测试配置。 
@@ -49,6 +50,10 @@ def _write_config(
         not isinstance(binding_snapshot_path, str) or not binding_snapshot_path
     ):
         raise TypeError("binding_snapshot_path must be non-empty str or None")
+    if experiment_matrix_config_path is not None and (
+        not isinstance(experiment_matrix_config_path, str) or not experiment_matrix_config_path
+    ):
+        raise TypeError("experiment_matrix_config_path must be non-empty str or None")
 
     cfg_obj = {
         "policy_path": "content_np_geo_rescue",
@@ -68,6 +73,10 @@ def _write_config(
             "target_pair_count": 16,
         },
     }
+    if experiment_matrix_config_path is not None:
+        cfg_obj["experiment_matrix"] = {
+            "config_path": experiment_matrix_config_path,
+        }
     if model_snapshot_path is not None:
         snapshot_path_text = model_snapshot_path.as_posix()
         resolved_binding_reason = binding_reason or (
@@ -446,6 +455,7 @@ def test_detect_stage_03_preflight_fails_when_model_snapshot_binding_missing(
         source_package_path,
         source_thresholds_artifact_path,
         require_model_binding=True,
+        require_authoritative_config_path=True,
     )
 
     assert preflight["ok"] is False
@@ -454,6 +464,7 @@ def test_detect_stage_03_preflight_fails_when_model_snapshot_binding_missing(
     assert preflight["model_source_binding_status"] == "<absent>"
     assert "stage_03_model_source_binding_missing" in preflight["failed_checks"]
     assert "stage_03_model_snapshot_path_missing_or_not_directory" in preflight["failed_checks"]
+    assert "stage_03_experiment_matrix_config_path_missing" in preflight["failed_checks"]
 
 
 def test_detect_stage_03_preflight_passes_with_bound_model_snapshot(
@@ -479,6 +490,7 @@ def test_detect_stage_03_preflight_passes_with_bound_model_snapshot(
         tmp_path / "stage_03_bound_binding.yaml",
         attestation_enabled=False,
         model_snapshot_path=snapshot_dir,
+        experiment_matrix_config_path=(tmp_path / "stage_03_bound_binding.yaml").as_posix(),
     )
     source_package_path = tmp_path / "stage_01_source.zip"
     source_thresholds_artifact_path = tmp_path / "thresholds_artifact.json"
@@ -491,6 +503,7 @@ def test_detect_stage_03_preflight_passes_with_bound_model_snapshot(
         source_package_path,
         source_thresholds_artifact_path,
         require_model_binding=True,
+        require_authoritative_config_path=True,
     )
 
     assert preflight["ok"] is True
@@ -501,7 +514,55 @@ def test_detect_stage_03_preflight_passes_with_bound_model_snapshot(
     assert preflight["model_snapshot_path_exists"] is True
     assert preflight["model_snapshot_path_is_directory"] is True
     assert preflight["model_source_binding_path_matches_snapshot_path"] is True
+    assert preflight["experiment_matrix_config_path"] == config_path.resolve().as_posix()
+    assert preflight["experiment_matrix_config_path_matches_runtime_snapshot"] is True
     assert preflight["failed_checks"] == []
+
+
+def test_detect_stage_03_preflight_fails_when_experiment_matrix_config_path_mismatches_runtime_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：stage 03 在 experiment_matrix.config_path 未指向当前 runtime snapshot 时必须 fail-fast。
+
+    Verify stage-03 preflight hard-fails when experiment_matrix.config_path
+    points to a non-authoritative config path such as configs/default.yaml.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    snapshot_dir = tmp_path / "stage_03_snapshot"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    config_path = _write_config(
+        tmp_path / "stage_03_mismatched_matrix_config.yaml",
+        attestation_enabled=False,
+        model_snapshot_path=snapshot_dir,
+        experiment_matrix_config_path="configs/default.yaml",
+    )
+    source_package_path = tmp_path / "stage_01_source.zip"
+    source_thresholds_artifact_path = tmp_path / "thresholds_artifact.json"
+    source_package_path.write_text("zip placeholder", encoding="utf-8")
+    source_thresholds_artifact_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(workflow_acceptance_common.shutil, "which", lambda _command: "/usr/bin/nvidia-smi")
+
+    preflight = workflow_acceptance_common.detect_stage_03_preflight(
+        config_path,
+        source_package_path,
+        source_thresholds_artifact_path,
+        require_model_binding=True,
+        require_authoritative_config_path=True,
+    )
+
+    assert preflight["ok"] is False
+    assert preflight["model_source_binding_status"] == "bound"
+    assert preflight["experiment_matrix_config_path"].endswith("configs/default.yaml")
+    assert preflight["experiment_matrix_config_path_matches_runtime_snapshot"] is False
+    assert "stage_03_experiment_matrix_config_path_mismatch" in preflight["failed_checks"]
 
 
 def test_detect_stage_04_preflight_does_not_require_gpu(

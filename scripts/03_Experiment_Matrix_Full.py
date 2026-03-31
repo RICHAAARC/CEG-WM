@@ -280,10 +280,15 @@ def _resolve_stage_03_runtime_config(
     return _inherit_source_runtime_model_binding(notebook_bound_cfg, source_runtime_config_snapshot_path)
 
 
-def _build_runtime_config(cfg_obj: Dict[str, Any], run_root: Path, readonly_thresholds_path: Path) -> Dict[str, Any]:
+def _build_runtime_config(
+    cfg_obj: Dict[str, Any],
+    run_root: Path,
+    readonly_thresholds_path: Path,
+    runtime_config_snapshot_path: Path,
+) -> Dict[str, Any]:
     config_copy = _normalize_stage_03_model_binding(cfg_obj)
     experiment_cfg = dict(config_copy.get("experiment_matrix")) if isinstance(config_copy.get("experiment_matrix"), dict) else {}
-    experiment_cfg["config_path"] = str(DEFAULT_CONFIG_PATH.as_posix())
+    experiment_cfg["config_path"] = str(runtime_config_snapshot_path.resolve())
     experiment_cfg["batch_root"] = str(run_root.resolve())
     experiment_cfg["external_shared_thresholds_path"] = str(readonly_thresholds_path.resolve())
     config_copy["experiment_matrix"] = experiment_cfg
@@ -351,7 +356,12 @@ def run_stage_03(
         cfg_obj,
         source_lineage_paths["source_runtime_config_snapshot_path"],
     )
-    runtime_cfg = _build_runtime_config(runtime_cfg, run_root, readonly_thresholds["thresholds_artifact"])
+    runtime_cfg = _build_runtime_config(
+        runtime_cfg,
+        run_root,
+        readonly_thresholds["thresholds_artifact"],
+        runtime_config_snapshot_path,
+    )
     write_yaml_mapping(runtime_config_snapshot_path, runtime_cfg)
 
     preflight = detect_stage_03_preflight(
@@ -359,6 +369,7 @@ def run_stage_03(
         source_package_path,
         source_lineage_paths["source_thresholds_artifact_path"],
         require_model_binding=True,
+        require_authoritative_config_path=True,
     )
     if not bool(preflight.get("ok", False)):
         raise RuntimeError(f"stage 03 preflight failed: {json.dumps(preflight, ensure_ascii=False, sort_keys=True)}")

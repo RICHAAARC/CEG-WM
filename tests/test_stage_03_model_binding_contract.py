@@ -132,10 +132,12 @@ def test_stage_03_runtime_config_prefers_notebook_model_snapshot_binding(
         _base_stage_03_cfg(),
         source_runtime_config_path,
     )
+    runtime_config_snapshot_path = tmp_path / "runtime_metadata" / "runtime_config_snapshot.yaml"
     runtime_cfg = stage_03_module._build_runtime_config(
         resolved_cfg,
         tmp_path / "run_root",
         tmp_path / "readonly_thresholds.json",
+        runtime_config_snapshot_path,
     )
 
     assert runtime_cfg["model_snapshot_path"] == notebook_snapshot_dir.resolve().as_posix()
@@ -143,6 +145,7 @@ def test_stage_03_runtime_config_prefers_notebook_model_snapshot_binding(
     assert runtime_cfg["model_source_binding"]["binding_source"] == "notebook_snapshot_download"
     assert runtime_cfg["model_source_binding"]["binding_env_var"] == "CEG_WM_MODEL_SNAPSHOT_PATH"
     assert runtime_cfg["model_source_binding"]["model_snapshot_path"] == notebook_snapshot_dir.resolve().as_posix()
+    assert runtime_cfg["experiment_matrix"]["config_path"] == str(runtime_config_snapshot_path.resolve())
 
 
 def test_stage_03_runtime_config_falls_back_to_source_runtime_snapshot_when_notebook_binding_absent(
@@ -176,13 +179,16 @@ def test_stage_03_runtime_config_falls_back_to_source_runtime_snapshot_when_note
         _base_stage_03_cfg(),
         source_runtime_config_path,
     )
+    runtime_config_snapshot_path = tmp_path / "runtime_metadata" / "runtime_config_snapshot.yaml"
     runtime_cfg = stage_03_module._build_runtime_config(
         resolved_cfg,
         tmp_path / "run_root",
         tmp_path / "readonly_thresholds.json",
+        runtime_config_snapshot_path,
     )
 
     assert runtime_cfg["model_snapshot_path"] == source_snapshot_dir.as_posix()
     assert runtime_cfg["model_source_binding"]["binding_status"] == "bound"
     assert runtime_cfg["model_source_binding"]["binding_source"] == "source_stage_runtime_config_snapshot"
     assert runtime_cfg["model_source_binding"]["model_snapshot_path"] == source_snapshot_dir.as_posix()
+    assert runtime_cfg["experiment_matrix"]["config_path"] == str(runtime_config_snapshot_path.resolve())
