@@ -113,7 +113,7 @@ def test_parallel_notebook_does_not_pollute_single_route_notebook() -> None:
     single_constants = _find_code_cell_source(NOTEBOOK_SINGLE_PATH, 'NOTEBOOK_NAME = "01_Paper_Full_Cuda"')
     parallel_constants = _find_code_cell_source(NOTEBOOK_PARALLEL_PATH, 'NOTEBOOK_NAME = "01_Paper_Full_Cuda_Parallel"')
 
-    assert 'DRIVE_PROJECT_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "CEG_WM_Outputs_project_root"' in single_constants
+    assert 'DRIVE_PROJECT_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "CEG_WM_Outputs"' in single_constants
     assert 'SCRIPT_PATH = REPO_ROOT / "scripts" / "01_Paper_Full_Cuda.py"' in single_constants
     assert "PARALLEL_WORKER_COUNT" not in single_constants
     assert 'DRIVE_PROJECT_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "CEG_WM_Outputs_Parallel"' in parallel_constants
