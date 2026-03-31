@@ -84,6 +84,10 @@ _resolve_detect_image_path_with_source = cast(
 )
 
 
+DETECT_MAIN_INFERENCE_PHASE_LABEL = "detect_main_inference"
+DETECT_SAME_SEED_CONTROL_INFERENCE_PHASE_LABEL = "detect_same_seed_control_inference"
+
+
 def _resolve_detect_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
     功能：解析 detect 配置节点为字典映射。
@@ -593,6 +597,7 @@ def _build_lf_protocol_control_context(
         pipeline_obj,
         device,
         int(embed_seed),
+        runtime_phase_label=DETECT_SAME_SEED_CONTROL_INFERENCE_PHASE_LABEL,
         injection_context=injection_context,
         injection_modifier=injection_modifier,
         capture_final_latents=False,
@@ -1456,6 +1461,7 @@ def run_detect(
                 pipeline_obj,
                 device,
                 seed,
+                runtime_phase_label=DETECT_MAIN_INFERENCE_PHASE_LABEL,
                 injection_context=injection_context,
                 injection_modifier=injection_modifier,
                 capture_final_latents=False,

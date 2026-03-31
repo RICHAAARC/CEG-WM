@@ -612,6 +612,143 @@ def test_run_embed_statement_only_failure_persists_runtime_finalization_diagnost
     assert runtime_finalization["planner_diagnostic_context"]["trajectory_cache_capture"]["trajectory_cache_capture_status"] == "all_failed"
 
 
+def test_run_embed_statement_only_success_persists_runtime_finalization_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：statement_only runtime finalization 成功时也必须把 runtime_capture 诊断写入 run_closure。
+    """
+    planner_result = SubspacePlanEvidence(
+        status="ok",
+        plan={"plan_status": "ok", "rank": 4},
+        basis_digest="basis_digest_anchor",
+        plan_digest="plan_digest_anchor",
+        audit={
+            "impl_identity": "planner_identity_anchor",
+            "impl_version": "v1",
+            "impl_digest": "planner_digest_anchor",
+            "trace_digest": "trace_digest_anchor",
+        },
+        plan_stats=None,
+        plan_failure_reason=None,
+        planner_failure_stage=None,
+        planner_failure_detail_code=None,
+        planner_failure_detail_message=None,
+        planner_diagnostic_context=None,
+    )
+
+    def _fake_inference(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+        _ = args
+        runtime_phase_label = kwargs.get("runtime_phase_label")
+        if runtime_phase_label == run_embed_module.STATEMENT_ONLY_RUNTIME_CAPTURE_PHASE_LABEL:
+            return {
+                "inference_status": "ok",
+                "inference_error": None,
+                "inference_runtime_meta": {
+                    "latency_ms": 1.0,
+                    "cuda_memory_profile": {
+                        "status": "absent",
+                        "reason": "cuda_not_active",
+                        "phase_label": "statement_only_runtime_capture",
+                        "sample_scope": "single_worker_process_local",
+                        "device": "cpu",
+                    },
+                },
+                "trajectory_evidence": _build_trajectory_evidence(3),
+                "injection_evidence": {},
+                "trajectory_cache_capture_meta": _build_runtime_capture_meta(
+                    "complete",
+                    step_count=3,
+                    failure_count=0,
+                    callback_invocation_count=3,
+                    callback_latent_present_count=3,
+                    available_steps=[0, 1, 2],
+                    missing_required_steps=[],
+                    attempt_count=3,
+                    success_count=3,
+                    required_step_count=3,
+                    tap_captured_step_count=3,
+                ),
+                "output_image": Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8)),
+            }
+        if runtime_phase_label == run_embed_module.EMBED_WATERMARKED_INFERENCE_PHASE_LABEL:
+            return {
+                "inference_status": "ok",
+                "inference_error": None,
+                "inference_runtime_meta": {
+                    "latency_ms": 2.0,
+                    "cuda_memory_profile": {
+                        "status": "absent",
+                        "reason": "cuda_not_active",
+                        "phase_label": "embed_watermarked_inference",
+                        "sample_scope": "single_worker_process_local",
+                        "device": "cpu",
+                    },
+                },
+                "trajectory_evidence": _build_trajectory_evidence(0),
+                "injection_evidence": {},
+                "output_image": None,
+            }
+        raise AssertionError(f"unexpected runtime_phase_label: {runtime_phase_label}")
+
+    env = _prepare_statement_only_failure_env(
+        monkeypatch,
+        tmp_path,
+        planner_result=planner_result,
+        runtime_capture_callable=_fake_inference,
+    )
+
+    monkeypatch.setattr(run_embed_module, "build_injection_context_from_plan", cast(Any, lambda *args, **kwargs: object()))
+    monkeypatch.setattr(run_embed_module.path_policy, "validate_output_target", cast(Any, lambda *args, **kwargs: None))
+    monkeypatch.setattr(run_embed_module.schema, "ensure_required_fields", cast(Any, lambda *args, **kwargs: None))
+    monkeypatch.setattr(run_embed_module.schema, "validate_record", cast(Any, lambda *args, **kwargs: None))
+    monkeypatch.setattr(run_embed_module.records_io, "write_json", cast(Any, lambda *args, **kwargs: None))
+    monkeypatch.setattr(run_embed_module.records_io, "write_artifact_json", cast(Any, lambda *args, **kwargs: None))
+    monkeypatch.setattr(run_embed_module, "bind_contract_to_record", cast(Any, lambda *args, **kwargs: None))
+    monkeypatch.setattr(run_embed_module, "bind_whitelist_to_record", cast(Any, lambda *args, **kwargs: None))
+    monkeypatch.setattr(run_embed_module, "bind_semantics_to_record", cast(Any, lambda *args, **kwargs: None))
+    monkeypatch.setattr(run_embed_module, "bind_impl_identity_fields", cast(Any, lambda *args, **kwargs: None))
+    monkeypatch.setattr(run_embed_module, "_write_embed_attestation_artifacts", cast(Any, lambda *args, **kwargs: None))
+    monkeypatch.setattr(
+        run_embed_module,
+        "run_embed_orchestrator",
+        cast(
+            Any,
+            lambda *args, **kwargs: {
+                "content_evidence": {},
+                "watermarked_path": "<absent>",
+                "thresholds_rule_id": "threshold_rule_anchor",
+                "thresholds_rule_version": "v1",
+            },
+        ),
+    )
+
+    run_embed_module.run_embed(
+        output_dir=str(tmp_path / "out"),
+        config_path="configs/default.yaml",
+        overrides=None,
+        input_image_path=None,
+    )
+
+    run_closure_path = cast(Path, env["run_closure_path"])
+    run_closure = json.loads(run_closure_path.read_text(encoding="utf-8"))
+    status_details = run_closure["status"]["details"]
+
+    assert status_details is not None
+    runtime_finalization = status_details["runtime_finalization"]
+    assert runtime_finalization["runtime_finalization_status"] == "ok"
+    assert runtime_finalization["runtime_executable_plan_status"] == "ok"
+    assert runtime_finalization["runtime_capture_cuda_memory_profile"] == {
+        "status": "absent",
+        "reason": "cuda_not_active",
+        "phase_label": "statement_only_runtime_capture",
+        "sample_scope": "single_worker_process_local",
+        "device": "cpu",
+    }
+    assert runtime_finalization["runtime_capture_cuda_memory_profile"]["phase_label"] == "statement_only_runtime_capture"
+
+
 def test_trajectory_cache_capture_meta_reports_tap_observed_without_cache_write() -> None:
     """
     功能：当 tap 已观测到 step 但 cache 诊断仍为空壳时，必须返回显式不一致状态。

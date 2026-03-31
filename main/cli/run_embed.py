@@ -2546,6 +2546,8 @@ def run_embed(
             except Exception:
                 pass
         # 绑定闭包最小合同字段，并产出 run_closure.json。
+        if error is None and isinstance(run_meta.get("formal_two_stage"), dict):
+            _merge_runtime_finalization_status_details(run_meta)
         run_meta["ended_at"] = time_utils.now_utc_iso_z()
         try:
             status.finalize_run(run_root, records_dir, artifacts_dir, run_meta)
