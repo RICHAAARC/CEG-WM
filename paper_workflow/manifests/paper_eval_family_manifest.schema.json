@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "paper_eval_family_manifest",
+  "type": "object",
+  "required": [
+    "artifact_type",
+    "schema_version",
+    "family_id",
+    "family_root",
+    "sample_roles",
+    "event_identity",
+    "source_parameters",
+    "paths"
+  ],
+  "properties": {
+    "artifact_type": {
+      "const": "paper_eval_family_manifest"
+    },
+    "schema_version": {
+      "type": "string"
+    },
+    "family_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "family_root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sample_roles": {
+      "type": "object",
+      "required": ["active", "reserved"],
+      "properties": {
+        "active": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "reserved": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "event_identity": {
+      "type": "object",
+      "required": ["unit_definition", "event_id_fields", "event_id_digest"]
+    },
+    "source_parameters": {
+      "type": "object",
+      "required": ["prompt_file", "seed_list", "source_shard_count"]
+    },
+    "paths": {
+      "type": "object",
+      "required": [
+        "paper_eval_family_manifest",
+        "source_event_grid",
+        "source_shard_plan",
+        "prompt_snapshot",
+        "method_identity_snapshot",
+        "config_snapshot"
+      ]
+    }
+  }
+}

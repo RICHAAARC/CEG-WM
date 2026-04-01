@@ -1,0 +1,9 @@
+schema_version: "pw_stage_01_v1"
+sample_role: "positive_source"
+record_usage: "paper_workflow_positive_source"
+stages:
+  - "embed"
+  - "detect"
+allow_merge: false
+allow_global_thresholds: false
+allow_attack: false

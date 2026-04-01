@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "paper_workflow_source_shard_manifest",
+  "type": "object",
+  "required": [
+    "artifact_type",
+    "schema_version",
+    "family_id",
+    "sample_role",
+    "shard_index",
+    "source_shard_count",
+    "status",
+    "assigned_event_ids",
+    "events"
+  ],
+  "properties": {
+    "artifact_type": {
+      "const": "paper_workflow_source_shard_manifest"
+    },
+    "schema_version": {
+      "type": "string"
+    },
+    "family_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sample_role": {
+      "type": "string",
+      "const": "positive_source"
+    },
+    "shard_index": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "source_shard_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": ["running", "completed", "failed"]
+    },
+    "assigned_event_ids": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "event_id",
+          "sample_role",
+          "source_prompt_index",
+          "event_index",
+          "prompt_text",
+          "prompt_sha256",
+          "seed",
+          "runtime_config_path",
+          "detect_record_path",
+          "sha256",
+          "stage_results"
+        ]
+      }
+    }
+  }
+}

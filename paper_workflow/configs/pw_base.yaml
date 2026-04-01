@@ -1,0 +1,29 @@
+schema_version: "pw_stage_01_v1"
+source_truth_stage: "01_Paper_Full_Cuda_Parallel"
+default_config_path: "configs/default.yaml"
+family_root_relative: "paper_workflow/families"
+sample_roles:
+  active:
+    - "positive_source"
+  reserved:
+    - "clean_negative"
+    - "attacked_positive"
+event_identity:
+  unit_definition: "sample_event = (prompt_index, prompt_text, seed, sample_role)"
+  id_fields:
+    - "family_id"
+    - "sample_role"
+    - "prompt_index"
+    - "prompt_sha256"
+    - "seed"
+  id_digest: "sha256"
+source_shards:
+  default_count: 2
+source_alignment_reference_files:
+  - "scripts/01_Paper_Full_Cuda_Parallel.py"
+  - "scripts/01_run_paper_full_cuda_parallel.py"
+  - "scripts/01_run_paper_full_cuda_parallel_worker.py"
+  - "scripts/01_run_paper_full_cuda.py"
+  - "scripts/notebook_runtime_common.py"
+  - "notebook/00_main/01_Paper_Full_Cuda_Parallel.ipynb"
+  - "configs/default.yaml"
