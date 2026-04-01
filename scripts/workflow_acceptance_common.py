@@ -408,8 +408,9 @@ def detect_stage_03_preflight(
     """
     功能：执行 stage 03 的 experiment-matrix preflight。 
 
-    Execute stage-03 preflight checks for GPU availability, required stage-01
-    source artifacts, and optional runtime model snapshot binding gates.
+    Execute stage-03 preflight checks for GPU availability, attestation
+    environment readiness, required stage-01 source artifacts, and optional
+    runtime model snapshot binding gates.
 
     Args:
         cfg_path: Runtime config path.
@@ -441,6 +442,8 @@ def detect_stage_03_preflight(
         "attestation_env_required": False,
         "required_attestation_env_vars": attestation_summary.get("required_env_vars", []),
         "missing_attestation_env_vars": attestation_summary.get("missing_env_vars", []),
+        "attestation_env_var_bindings_complete": True,
+        "missing_attestation_env_var_bindings": [],
         "source_package_path": source_package_check["path"],
         "source_package_exists": source_package_check["exists"],
         "source_thresholds_artifact_path": thresholds_check["path"],
@@ -466,6 +469,18 @@ def detect_stage_03_preflight(
         result["ok"] = False
         return result
 
+    env_var_names = resolve_attestation_env_var_names(cfg_obj)
+    missing_env_var_bindings = [
+        config_key
+        for config_key in ("k_master_env_var", "k_prompt_env_var", "k_seed_env_var")
+        if config_key not in env_var_names
+    ]
+    attestation_cfg = cfg_obj.get("attestation") if isinstance(cfg_obj.get("attestation"), dict) else {}
+    result["attestation_env_required"] = bool(attestation_cfg.get("enabled", False))
+    result["required_attestation_env_vars"] = attestation_summary.get("required_env_vars", [])
+    result["missing_attestation_env_vars"] = attestation_summary.get("missing_env_vars", [])
+    result["attestation_env_var_bindings_complete"] = len(missing_env_var_bindings) == 0
+    result["missing_attestation_env_var_bindings"] = missing_env_var_bindings
     result.update(_collect_stage_01_model_binding_summary(cfg_obj))
     experiment_cfg = cfg_obj.get("experiment_matrix") if isinstance(cfg_obj.get("experiment_matrix"), dict) else {}
     raw_experiment_config_path = experiment_cfg.get("config_path")
@@ -481,6 +496,10 @@ def detect_stage_03_preflight(
         failed_checks.append("source_package_missing")
     if not bool(thresholds_check["exists"]):
         failed_checks.append("source_thresholds_artifact_missing")
+    if bool(result["attestation_env_required"]) and not bool(result["attestation_env_var_bindings_complete"]):
+        failed_checks.append("attestation_env_var_bindings_incomplete")
+    if bool(result["attestation_env_required"]) and result["missing_attestation_env_vars"]:
+        failed_checks.append("missing_attestation_env_vars")
     if bool(require_model_binding):
         if not bool(result["model_source_binding_present"]) or result["model_source_binding_status"] in {"<absent>", "absent"}:
             failed_checks.append("stage_03_model_source_binding_missing")

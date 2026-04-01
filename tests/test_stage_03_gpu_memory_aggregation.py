@@ -502,6 +502,11 @@ def test_stage_03_script_syncs_gpu_memory_summary_and_packages_breakdown(
     monkeypatch.setattr(stage_03_module, "collect_model_summary", lambda _cfg: {})
     monkeypatch.setattr(stage_03_module, "collect_weight_summary", lambda _repo_root, _cfg: {})
     monkeypatch.setattr(stage_03_module, "collect_file_index", lambda _root, _mapping: {})
+    monkeypatch.setattr(
+        stage_03_module,
+        "ensure_attestation_env_bootstrap",
+        lambda *_args, **_kwargs: {"status": "disabled", "required_env_vars": [], "missing_env_vars": []},
+    )
 
     summary = stage_03_module.run_stage_03(
         drive_project_root=drive_project_root,

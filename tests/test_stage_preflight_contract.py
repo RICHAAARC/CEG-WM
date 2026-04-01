@@ -467,6 +467,60 @@ def test_detect_stage_03_preflight_fails_when_model_snapshot_binding_missing(
     assert "stage_03_experiment_matrix_config_path_missing" in preflight["failed_checks"]
 
 
+def test_detect_stage_03_preflight_fails_when_attestation_env_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：stage 03 在 attestation 开启且环境变量缺失时必须 fail-fast。
+
+    Verify stage-03 preflight hard-fails when attestation is enabled but the
+    required secret environment variables are absent.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    snapshot_dir = tmp_path / "stage_03_snapshot"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    config_path = _write_config(
+        tmp_path / "stage_03_missing_attestation_env.yaml",
+        attestation_enabled=True,
+        model_snapshot_path=snapshot_dir,
+        experiment_matrix_config_path=(tmp_path / "stage_03_missing_attestation_env.yaml").as_posix(),
+    )
+    source_package_path = tmp_path / "stage_01_source.zip"
+    source_thresholds_artifact_path = tmp_path / "thresholds_artifact.json"
+    source_package_path.write_text("zip placeholder", encoding="utf-8")
+    source_thresholds_artifact_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(workflow_acceptance_common.shutil, "which", lambda _command: "/usr/bin/nvidia-smi")
+    monkeypatch.delenv("CEG_WM_K_MASTER", raising=False)
+    monkeypatch.delenv("CEG_WM_K_PROMPT", raising=False)
+    monkeypatch.delenv("CEG_WM_K_SEED", raising=False)
+
+    preflight = workflow_acceptance_common.detect_stage_03_preflight(
+        config_path,
+        source_package_path,
+        source_thresholds_artifact_path,
+        require_model_binding=True,
+        require_authoritative_config_path=True,
+    )
+
+    assert preflight["ok"] is False
+    assert preflight["attestation_env_required"] is True
+    assert preflight["attestation_env_var_bindings_complete"] is True
+    assert preflight["missing_attestation_env_vars"] == [
+        "CEG_WM_K_MASTER",
+        "CEG_WM_K_PROMPT",
+        "CEG_WM_K_SEED",
+    ]
+    assert "missing_attestation_env_vars" in preflight["failed_checks"]
+    assert "attestation_env_var_bindings_incomplete" not in preflight["failed_checks"]
+
+
 def test_detect_stage_03_preflight_passes_with_bound_model_snapshot(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

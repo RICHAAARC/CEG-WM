@@ -29,6 +29,7 @@ from scripts.notebook_runtime_common import (
     collect_weight_summary,
     copy_file,
     copy_stage_manifest_snapshot,
+    ensure_attestation_env_bootstrap,
     ensure_directory,
     finalize_stage_package,
     load_yaml_mapping,
@@ -362,6 +363,12 @@ def run_stage_03(
         run_root,
         readonly_thresholds["thresholds_artifact"],
         runtime_config_snapshot_path,
+    )
+    ensure_attestation_env_bootstrap(
+        runtime_cfg,
+        drive_project_root,
+        allow_generate=False,
+        allow_missing=True,
     )
     write_yaml_mapping(runtime_config_snapshot_path, runtime_cfg)
 

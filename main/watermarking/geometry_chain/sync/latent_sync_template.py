@@ -191,6 +191,24 @@ def _resolve_geo_score_repair_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
     return {"enabled": enabled, "mode": mode}
 
 
+def _normalize_random_state_seed(seed: int) -> int:
+    """
+    功能：将 RandomState 种子归一化到 numpy 合法范围。
+
+    Normalize one RandomState seed into numpy's accepted uint32 range.
+
+    Args:
+        seed: Candidate integer seed.
+
+    Returns:
+        Normalized seed in the inclusive range [0, 2**32 - 1].
+    """
+    if not isinstance(seed, int):
+        raise TypeError("seed must be int")
+
+    return int(seed) % (2 ** 32)
+
+
 class LatentSyncTemplate:
     """
     功能：提取几何同步模板摘要与质量指标。
@@ -283,7 +301,8 @@ class LatentSyncTemplate:
 
         latents_np = _to_numpy_latents(latents)
         sync_strength = self._resolve_sync_strength(cfg)
-        template = self._build_sync_template(latents_np.shape, cfg, seed)
+        normalized_seed = _normalize_random_state_seed(seed)
+        template = self._build_sync_template(latents_np.shape, cfg, normalized_seed)
 
         modified = latents_np.copy().astype(np.float32)
         for batch_index in range(modified.shape[0]):
@@ -294,7 +313,7 @@ class LatentSyncTemplate:
 
         template_digest = digests.canonical_sha256({
             "shape": list(template.shape),
-            "seed": int(seed),
+            "seed": int(normalized_seed),
             "fft_bins": self._resolve_fft_bins(cfg),
             "attestation_event_digest": _resolve_attestation_event_digest(cfg),
             "geo_anchor_seed": _resolve_geo_anchor_seed(cfg),
@@ -339,7 +358,8 @@ class LatentSyncTemplate:
 
         height = int(shape[-2])
         width = int(shape[-1])
-        rng = np.random.RandomState(seed)
+        normalized_seed = _normalize_random_state_seed(seed)
+        rng = np.random.RandomState(normalized_seed)
         fft_bins = self._resolve_fft_bins(cfg)
         template = np.zeros((height, width), dtype=np.complex64)
         for _ in range(fft_bins):
@@ -485,11 +505,12 @@ class LatentSyncTemplate:
                 pass
         if base_seed is None:
             base_seed = 42
+        normalized_base_seed = _normalize_random_state_seed(int(base_seed))
 
         attestation_event_digest = _resolve_attestation_event_digest(cfg)
         geo_anchor_seed = _resolve_geo_anchor_seed(cfg)
         if attestation_event_digest is None and geo_anchor_seed is None:
-            return base_seed
+            return normalized_base_seed
 
         seed_binding_payload = {
             "seed_binding_version": "latent_sync_attestation_seed_v1",
@@ -520,14 +541,15 @@ class LatentSyncTemplate:
         if not isinstance(seed, int):
             raise TypeError("seed must be int")
 
-        template = self._build_sync_template(latents_np.shape, cfg, seed)
+        normalized_seed = _normalize_random_state_seed(seed)
+        template = self._build_sync_template(latents_np.shape, cfg, normalized_seed)
         support_mask = np.abs(template) > 1e-8
         support_indices = np.argwhere(support_mask)
         if support_indices.size == 0:
             template_digest = digests.canonical_sha256(
                 {
                     "shape": list(template.shape),
-                    "seed": int(seed),
+                    "seed": int(normalized_seed),
                     "fft_bins": self._resolve_fft_bins(cfg),
                     "attestation_event_digest": _resolve_attestation_event_digest(cfg),
                     "geo_anchor_seed": _resolve_geo_anchor_seed(cfg),
@@ -538,7 +560,7 @@ class LatentSyncTemplate:
                 "template_match_p95": 0.0,
                 "template_match_detected": False,
                 "template_match_threshold": 0.0,
-                "template_seed": int(seed),
+                "template_seed": int(normalized_seed),
                 "template_digest": template_digest,
             }
 
@@ -548,7 +570,7 @@ class LatentSyncTemplate:
             template_digest = digests.canonical_sha256(
                 {
                     "shape": list(template.shape),
-                    "seed": int(seed),
+                    "seed": int(normalized_seed),
                     "fft_bins": self._resolve_fft_bins(cfg),
                     "attestation_event_digest": _resolve_attestation_event_digest(cfg),
                     "geo_anchor_seed": _resolve_geo_anchor_seed(cfg),
@@ -559,7 +581,7 @@ class LatentSyncTemplate:
                 "template_match_p95": 0.0,
                 "template_match_detected": False,
                 "template_match_threshold": 0.0,
-                "template_seed": int(seed),
+                "template_seed": int(normalized_seed),
                 "template_digest": template_digest,
             }
 
@@ -607,7 +629,7 @@ class LatentSyncTemplate:
         template_digest = digests.canonical_sha256(
             {
                 "shape": list(template.shape),
-                "seed": int(seed),
+                "seed": int(normalized_seed),
                 "fft_bins": self._resolve_fft_bins(cfg),
                 "attestation_event_digest": _resolve_attestation_event_digest(cfg),
                 "geo_anchor_seed": _resolve_geo_anchor_seed(cfg),
@@ -619,7 +641,7 @@ class LatentSyncTemplate:
             "template_match_p95": round(match_p95, 8),
             "template_match_detected": bool(match_score >= threshold),
             "template_match_threshold": round(threshold, 8),
-            "template_seed": int(seed),
+            "template_seed": int(normalized_seed),
             "template_digest": template_digest,
         }
 

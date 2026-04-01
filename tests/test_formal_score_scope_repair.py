@@ -559,6 +559,25 @@ def test_stage_03_script_syncs_auxiliary_runtime_evidence_to_workflow_summary_an
         )
         return {"return_code": 0}
 
+    bootstrap_calls = []
+
+    def _fake_ensure_attestation_env_bootstrap(
+        cfg_obj: dict,
+        drive_root: Path,
+        *,
+        allow_generate: bool,
+        allow_missing: bool = False,
+    ) -> dict:
+        bootstrap_calls.append(
+            {
+                "drive_project_root": drive_root.as_posix(),
+                "allow_generate": allow_generate,
+                "allow_missing": allow_missing,
+                "attestation_enabled": bool((cfg_obj.get("attestation") or {}).get("enabled", False)) if isinstance(cfg_obj, dict) else False,
+            }
+        )
+        return {"status": "disabled", "required_env_vars": [], "missing_env_vars": []}
+
     monkeypatch.setattr(stage_03_module, "prepare_source_package", _fake_prepare_source_package)
     monkeypatch.setattr(stage_03_module, "resolve_stage_roots", lambda *args, **kwargs: stage_roots)
     monkeypatch.setattr(stage_03_module, "load_yaml_mapping", lambda path: {"experiment_matrix": {}})
@@ -574,8 +593,7 @@ def test_stage_03_script_syncs_auxiliary_runtime_evidence_to_workflow_summary_an
     monkeypatch.setattr(
         stage_03_module,
         "ensure_attestation_env_bootstrap",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("stage 03 must not bootstrap attestation env")),
-        raising=False,
+        _fake_ensure_attestation_env_bootstrap,
     )
     monkeypatch.setattr(stage_03_module, "finalize_stage_package", lambda **kwargs: {"package_path": "package.zip", "package_sha256": "sha256_pkg"})
 
@@ -598,3 +616,11 @@ def test_stage_03_script_syncs_auxiliary_runtime_evidence_to_workflow_summary_an
     assert stage_manifest["gpu_memory_summary"]["peak_memory_reserved_bytes_max"] == 3072
     assert workflow_summary["gpu_memory_profile_breakdown_path"].endswith("gpu_memory_profile_breakdown.json")
     assert stage_manifest["gpu_memory_profile_breakdown_path"].endswith("gpu_memory_profile_breakdown.json")
+    assert bootstrap_calls == [
+        {
+            "drive_project_root": drive_project_root.as_posix(),
+            "allow_generate": False,
+            "allow_missing": True,
+            "attestation_enabled": False,
+        }
+    ]
