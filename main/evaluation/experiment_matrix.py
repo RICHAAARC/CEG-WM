@@ -2496,43 +2496,14 @@ def _extract_preview_image_path_from_embed_stdout(stdout_text: str) -> Optional[
 
 
 def _build_neg_preview_detect_binding(embed_record: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract the minimal plan-bound detect binding from one neg-cache embed record."""
+    """Return an empty detect binding so clean negatives re-enter detect unbound."""
     if not isinstance(embed_record, dict):
         raise TypeError("embed_record must be dict")
-
-    plan_digest = embed_record.get("plan_digest")
-    if not isinstance(plan_digest, str) or not plan_digest:
-        raise ValueError("neg_cache embed_record.plan_digest must be non-empty str")
-
-    binding_payload: Dict[str, Any] = {
-        "plan_digest": plan_digest,
-    }
-
-    basis_digest = embed_record.get("basis_digest")
-    if isinstance(basis_digest, str) and basis_digest:
-        binding_payload["basis_digest"] = basis_digest
-
-    planner_impl_identity = embed_record.get("subspace_planner_impl_identity")
-    if isinstance(planner_impl_identity, dict) and planner_impl_identity:
-        binding_payload["subspace_planner_impl_identity"] = copy.deepcopy(planner_impl_identity)
-
-    subspace_plan = embed_record.get("subspace_plan")
-    if isinstance(subspace_plan, dict) and subspace_plan:
-        binding_payload["subspace_plan"] = copy.deepcopy(subspace_plan)
-
-    content_evidence = embed_record.get("content_evidence")
-    if isinstance(content_evidence, dict):
-        trajectory_evidence = content_evidence.get("trajectory_evidence")
-        if isinstance(trajectory_evidence, dict) and trajectory_evidence:
-            binding_payload["content_evidence"] = {
-                "trajectory_evidence": copy.deepcopy(trajectory_evidence),
-            }
-
-    return binding_payload
+    return {}
 
 
 def _write_neg_preview_input_record(run_root: Path, preview_image_path: Path, embed_record_path: Path) -> Path:
-    """Write a plan-bound clean-negative input record for neg-cache detect."""
+    """Write a clean-negative image-only input record for neg-cache detect."""
     if not isinstance(run_root, Path):
         raise TypeError("run_root must be Path")
     if not isinstance(preview_image_path, Path):
@@ -2557,7 +2528,8 @@ def _write_neg_preview_input_record(run_root: Path, preview_image_path: Path, em
             "input_image_path": str(preview_image_path),
         },
     }
-    input_record_payload.update(binding_payload)
+    if binding_payload:
+        raise RuntimeError("neg_preview detect input must remain image-only and unbound")
     records_io.write_artifact_json_unbound(
         run_root=run_root,
         artifacts_dir=artifacts_dir,
@@ -2861,8 +2833,8 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
     labelled_detect_records_glob: Optional[str] = None
 
     # 从 grid_item_cfg 读取由 run_experiment_grid 预注入的共享阈值路径与真实负样本路径。
-    # shared_thresholds_path 存在时：跳过 per-item calibrate，evaluate 使用全局阈值。
-    # 降级条件：shared_thresholds_path 缺失或文件不存在时，回落 per-item calibrate 路径。
+    # shared_thresholds_path 存在时：detect 与 evaluate 均消费 canonical shared thresholds。
+    # 仅在未提供 shared thresholds 且当前路径允许测试 fallback 时，detect 才可保留 test-only fallback。
     shared_thresholds_path_str = grid_item_cfg.get("shared_thresholds_path")
     shared_thresholds_path_val: Optional[Path] = (
         Path(shared_thresholds_path_str)
@@ -2881,6 +2853,7 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
         Path(neg_path_str) if isinstance(neg_path_str, str) and neg_path_str else None
     )
     for stage_name in ["embed", "detect"]:
+        detect_thresholds_path: Optional[Path] = None
         stage_overrides = [
             "allow_nonempty_run_root=true",
             'allow_nonempty_run_root_reason="experiment_grid"',
@@ -2892,12 +2865,20 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
         if isinstance(max_samples, int):
             stage_overrides.append(f"max_samples={max_samples}")
 
-        # detect 阶段必须启用 content 检测（experiment_matrix 需要生成检测分数）
-        # detect 阶段的阈值回退是架构必要性：校准工件在 calibrate 阶段才产出，
-        # detect 阶段产出的阈值仅用于中间评分记录，不进入最终判决。
+        # detect 阶段必须启用 content 检测（experiment_matrix 需要生成检测分数）。
+        # 一旦全局 shared thresholds 已就绪，primary detect 必须显式注入 canonical thresholds，
+        # 禁止继续写入 test-only fallback threshold_source。
         if stage_name == "detect":
             stage_overrides.append("enable_content_detect=true")
-            stage_overrides.append("allow_threshold_fallback_for_tests=true")
+            if use_shared_thresholds:
+                detect_thresholds_path = shared_thresholds_path_val
+            elif formal_validation_guards["require_shared_thresholds"]:
+                raise RuntimeError(
+                    "experiment_matrix detect requires shared thresholds in formal mode; "
+                    f"shared_thresholds_path={shared_thresholds_path_val}"
+                )
+            else:
+                stage_overrides.append("allow_threshold_fallback_for_tests=true")
         if stage_name == "embed":
             stage_overrides.append("disable_content_detect=false")
 
@@ -2913,6 +2894,7 @@ def _run_stage_sequence(grid_item_cfg: Dict[str, Any], run_root: Path) -> Dict[s
             run_root=run_root,
             config_path=Path(config_path),
             stage_overrides=stage_overrides,
+            thresholds_path=detect_thresholds_path,
         )
 
         if stage_name == "detect":
@@ -3757,6 +3739,7 @@ def _run_stage_command(
     config_path: Path,
     stage_overrides: List[str],
     input_record_path: Optional[Path] = None,
+    thresholds_path: Optional[Path] = None,
 ) -> None:
     """Execute one CLI stage command with fail-fast diagnostics."""
     if stage_name not in {"embed", "detect", "calibrate", "evaluate"}:
@@ -3769,6 +3752,8 @@ def _run_stage_command(
         raise TypeError("stage_overrides must be list")
     if input_record_path is not None and not isinstance(input_record_path, Path):
         raise TypeError("input_record_path must be Path or None")
+    if thresholds_path is not None and not isinstance(thresholds_path, Path):
+        raise TypeError("thresholds_path must be Path or None")
 
     command = [
         sys.executable,
@@ -3782,6 +3767,10 @@ def _run_stage_command(
     if stage_name == "detect":
         detect_input_path = input_record_path or (run_root / "records" / "embed_record.json")
         command.extend(["--input", str(detect_input_path)])
+        if thresholds_path is not None:
+            if not thresholds_path.exists() or not thresholds_path.is_file():
+                raise FileNotFoundError(f"detect thresholds_path missing: {thresholds_path}")
+            command.extend(["--thresholds-path", str(thresholds_path.resolve())])
     for item in stage_overrides:
         if not isinstance(item, str) or not item:
             raise ValueError("stage_overrides entries must be non-empty str")
