@@ -12,7 +12,12 @@ from typing import Any, Dict, List, cast
 from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
 import paper_workflow.scripts.pw01_run_source_event_shard as pw01_module
 from paper_workflow.scripts.pw_common import read_jsonl
-from scripts.notebook_runtime_common import ensure_directory
+from scripts.notebook_runtime_common import (
+    apply_notebook_model_snapshot_binding,
+    ensure_directory,
+    load_yaml_mapping,
+    write_yaml_mapping,
+)
 
 
 def _build_pw00_family(tmp_path: Path, family_id: str) -> Dict[str, Any]:
@@ -35,6 +40,31 @@ def _build_pw00_family(tmp_path: Path, family_id: str) -> Dict[str, Any]:
         seed_list=[3, 9],
         source_shard_count=2,
     )
+
+
+def _write_bound_config_snapshot(drive_project_root: Path, *, marker: str) -> Path:
+    """
+    Build a notebook-style bound config snapshot for PW01 path tests.
+
+    Args:
+        drive_project_root: Drive project root.
+        marker: Stable marker stored in the bound config.
+
+    Returns:
+        Bound config snapshot path.
+    """
+    snapshot_dir = drive_project_root / "runtime_state" / f"{marker}_model_snapshot"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+    bound_cfg = apply_notebook_model_snapshot_binding(
+        load_yaml_mapping((pw01_module.REPO_ROOT / "configs" / "default.yaml").resolve()),
+        env_mapping={"CEG_WM_MODEL_SNAPSHOT_PATH": snapshot_dir.as_posix()},
+    )
+    bound_cfg["test_config_origin"] = marker
+
+    bound_config_path = drive_project_root / "runtime_state" / f"{marker}_bound_config.yaml"
+    write_yaml_mapping(bound_config_path, bound_cfg)
+    return bound_config_path
 
 
 def _load_shard_assigned_events(summary: Dict[str, Any], shard_index: int) -> List[Dict[str, Any]]:
@@ -75,6 +105,7 @@ def test_pw01_parallel_worker_paths_are_isolated_between_shards(tmp_path: Path) 
         None.
     """
     summary = _build_pw00_family(tmp_path, family_id="family_parallel_isolation")
+    bound_config_path = _write_bound_config_snapshot(tmp_path / "drive", marker="family_parallel_isolation")
     family_manifest = json.loads(
         Path(str(summary["paper_eval_family_manifest_path"])).read_text(encoding="utf-8")
     )
@@ -92,6 +123,7 @@ def test_pw01_parallel_worker_paths_are_isolated_between_shards(tmp_path: Path) 
         stage_01_worker_count=2,
         shard_root=shard_00_root,
         default_config_path=default_config_path,
+        bound_config_path=bound_config_path,
         assigned_events=_load_shard_assigned_events(summary, 0),
     )
     shard_01_plans = pw01_module._prepare_local_worker_plans(
@@ -102,6 +134,7 @@ def test_pw01_parallel_worker_paths_are_isolated_between_shards(tmp_path: Path) 
         stage_01_worker_count=2,
         shard_root=shard_01_root,
         default_config_path=default_config_path,
+        bound_config_path=bound_config_path,
         assigned_events=_load_shard_assigned_events(summary, 1),
     )
 
@@ -124,3 +157,5 @@ def test_pw01_parallel_worker_paths_are_isolated_between_shards(tmp_path: Path) 
     assert shard_00_root != shard_01_root
     assert {plan["local_worker_index"] for plan in shard_00_plans} == {0, 1}
     assert {plan["local_worker_index"] for plan in shard_01_plans} == {0, 1}
+    assert all(Path(str(plan["bound_config_path"])).resolve() == bound_config_path.resolve() for plan in shard_00_plans)
+    assert all(Path(str(plan["bound_config_path"])).resolve() == bound_config_path.resolve() for plan in shard_01_plans)

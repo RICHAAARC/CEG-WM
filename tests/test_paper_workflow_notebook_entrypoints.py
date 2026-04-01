@@ -98,7 +98,33 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     assert '"--shard-count"' in pw01_execute
     assert '"--stage-01-worker-count"' in pw01_execute
     assert 'str(STAGE_01_WORKER_COUNT)' in pw01_execute
+    assert '"--bound-config-path"' in pw01_execute
+    assert 'str(PW01_BOUND_CONFIG_PATH)' in pw01_execute
     assert '"--force-rerun"' in pw01_execute
+
+
+def test_pw01_notebook_passes_precheck_bound_config_to_execute_and_parallel_plan() -> None:
+    """
+    Verify PW01 notebook promotes the precheck-bound config into the execute
+    command and the parallel extension example.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    pw01_precheck = _find_code_cell_source(NOTEBOOK_PW01_PATH, "PRECHECK_RESULTS = []")
+    pw01_execute = _find_code_cell_source(NOTEBOOK_PW01_PATH, "COMMAND = [")
+    pw01_parallel_plan = _find_code_cell_source(NOTEBOOK_PW01_PATH, "parallel_plan = []")
+
+    assert "PW01_BOUND_CONFIG_PATH = PRECHECK_BOUND_CONFIG_PATH" in pw01_precheck
+    assert "write_yaml_mapping(PW01_BOUND_CONFIG_PATH, PRECHECK_BOUND_CFG)" in pw01_precheck
+    assert "STAGE_01_PREFLIGHT = detect_stage_01_preflight(PW01_BOUND_CONFIG_PATH)" in pw01_precheck
+    assert '"--bound-config-path"' in pw01_execute
+    assert 'str(PW01_BOUND_CONFIG_PATH)' in pw01_execute
+    assert '"--bound-config-path"' in pw01_parallel_plan
+    assert 'str(PW01_BOUND_CONFIG_PATH)' in pw01_parallel_plan
 
 
 def test_pw01_notebook_wraps_command_with_gpu_peak_monitor_and_reads_shard_manifest_contract() -> None:

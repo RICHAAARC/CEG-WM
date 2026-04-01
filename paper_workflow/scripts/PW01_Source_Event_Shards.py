@@ -34,6 +34,11 @@ def main() -> int:
         type=int,
         help="Shard-local stage-01 worker count. Only 1 or 2 is allowed.",
     )
+    parser.add_argument(
+        "--bound-config-path",
+        required=True,
+        help="Notebook-bound runtime config snapshot path.",
+    )
     parser.add_argument("--force-rerun", action="store_true", help="Clear completed shard root before rerun.")
     args = parser.parse_args()
 
@@ -43,6 +48,7 @@ def main() -> int:
         shard_index=int(args.shard_index),
         shard_count=int(args.shard_count),
         stage_01_worker_count=int(args.stage_01_worker_count),
+        bound_config_path=Path(args.bound_config_path),
         force_rerun=bool(args.force_rerun),
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))

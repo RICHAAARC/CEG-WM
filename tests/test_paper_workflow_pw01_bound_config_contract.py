@@ -1,0 +1,567 @@
+"""
+File purpose: Validate PW01 bound config source selection and runtime binding preservation.
+Module type: General module
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any, Dict, List, cast
+
+import pytest
+
+from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
+import paper_workflow.scripts.pw01_run_source_event_shard as pw01_module
+from paper_workflow.scripts.pw_common import read_jsonl
+from scripts.notebook_runtime_common import (
+    apply_notebook_model_snapshot_binding,
+    ensure_directory,
+    load_yaml_mapping,
+    write_json_atomic,
+    write_yaml_mapping,
+)
+
+
+def _build_pw00_family(tmp_path: Path, family_id: str) -> Dict[str, Any]:
+    """
+    Build a minimal PW00 family fixture for PW01 bound-config tests.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        family_id: Fixture family identifier.
+
+    Returns:
+        PW00 summary payload.
+    """
+    prompt_file = tmp_path / "pw01_bound_prompts.txt"
+    prompt_file.write_text("prompt one\nprompt two\n", encoding="utf-8")
+    return run_pw00_build_family_manifest(
+        drive_project_root=tmp_path / "drive",
+        family_id=family_id,
+        prompt_file=str(prompt_file),
+        seed_list=[3, 9],
+        source_shard_count=2,
+    )
+
+
+def _write_bound_config_snapshot(
+    drive_project_root: Path,
+    *,
+    marker: str,
+) -> tuple[Path, Path]:
+    """
+    Build a notebook-style bound config snapshot and its model snapshot root.
+
+    Args:
+        drive_project_root: Drive project root.
+        marker: Stable marker stored in the config.
+
+    Returns:
+        Tuple of bound config path and model snapshot directory.
+    """
+    snapshot_dir = drive_project_root / "runtime_state" / f"{marker}_model_snapshot"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+    bound_cfg = apply_notebook_model_snapshot_binding(
+        load_yaml_mapping((pw01_module.REPO_ROOT / "configs" / "default.yaml").resolve()),
+        env_mapping={"CEG_WM_MODEL_SNAPSHOT_PATH": snapshot_dir.as_posix()},
+    )
+    bound_cfg["test_config_origin"] = marker
+
+    bound_config_path = drive_project_root / "runtime_state" / f"{marker}_bound_config.yaml"
+    write_yaml_mapping(bound_config_path, bound_cfg)
+    return bound_config_path, snapshot_dir
+
+
+def _write_unbound_default_config(tmp_path: Path, *, marker: str) -> Path:
+    """
+    Build a contrasting unbound default config for lineage checks.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        marker: Stable marker stored in the config.
+
+    Returns:
+        Unbound default config path.
+    """
+    config_path = tmp_path / f"{marker}_default_config.yaml"
+    cfg_obj = load_yaml_mapping((pw01_module.REPO_ROOT / "configs" / "default.yaml").resolve())
+    cfg_obj["test_config_origin"] = marker
+    cfg_obj.pop("model_snapshot_path", None)
+    cfg_obj.pop("model_source_binding", None)
+    write_yaml_mapping(config_path, cfg_obj)
+    return config_path
+
+
+def _load_shard_assigned_events(summary: Dict[str, Any], shard_index: int) -> List[Dict[str, Any]]:
+    """
+    Load the ordered assigned events for one shard from PW00 outputs.
+
+    Args:
+        summary: PW00 summary payload.
+        shard_index: Shard index.
+
+    Returns:
+        Ordered assigned event payloads.
+    """
+    shard_plan = json.loads(Path(str(summary["source_shard_plan_path"])).read_text(encoding="utf-8"))
+    shard_assignment = pw01_module.resolve_positive_shard_assignment(
+        shard_plan,
+        shard_index=shard_index,
+        shard_count=2,
+    )
+    event_lookup = {
+        row["event_id"]: row
+        for row in read_jsonl(Path(str(summary["source_event_grid_path"])))
+    }
+    return [
+        cast(Dict[str, Any], event_lookup[event_id])
+        for event_id in cast(List[str], shard_assignment["assigned_event_ids"])
+    ]
+
+
+def _patch_pw01_base_runner(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    expected_snapshot_path: Path,
+) -> Dict[str, Any]:
+    """
+    Patch PW01 base-runner calls with lightweight stubs and capture runtime cfgs.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        expected_snapshot_path: Expected notebook-bound model snapshot path.
+
+    Returns:
+        Mutable capture mapping.
+    """
+    captures: Dict[str, Any] = {"preview_cfgs": []}
+
+    def fake_build_stage_command(stage_name: str, config_path: Path, run_root: Path) -> list[str]:
+        return [stage_name, str(config_path), str(run_root)]
+
+    def fake_prepare_source_pool_preview_artifact(
+        *,
+        cfg_obj: Dict[str, Any],
+        prompt_run_root: Path,
+        prompt_text: str,
+        prompt_index: int,
+        prompt_file_path: str,
+    ) -> Dict[str, Any]:
+        captures["preview_cfgs"].append(dict(cfg_obj))
+        assert cfg_obj["model_snapshot_path"] == expected_snapshot_path.resolve().as_posix()
+        assert cfg_obj["model_source_binding"]["binding_status"] == "bound"
+
+        preview_image_path = prompt_run_root / "artifacts" / "preview" / "preview.png"
+        ensure_directory(preview_image_path.parent)
+        preview_image_path.write_bytes(b"preview")
+
+        preview_record_path = prompt_run_root / "artifacts" / "preview_generation_record.json"
+        preview_record: Dict[str, Any] = {
+            "status": "ok",
+            "prompt_text": prompt_text,
+            "prompt_index": prompt_index,
+            "prompt_file": prompt_file_path,
+            "persisted_artifact_path": preview_image_path.as_posix(),
+        }
+        write_json_atomic(preview_record_path, preview_record)
+
+        runtime_cfg: Dict[str, Any] = dict(cfg_obj)
+        embed_node = runtime_cfg.get("embed")
+        embed_cfg: Dict[str, Any]
+        if isinstance(embed_node, dict):
+            embed_cfg = cast(Dict[str, Any], embed_node.copy())
+        else:
+            embed_cfg = {}
+        embed_cfg["input_image_path"] = preview_image_path.as_posix()
+        runtime_cfg["embed"] = embed_cfg
+        return {
+            "runtime_cfg": runtime_cfg,
+            "preview_record": preview_record,
+        }
+
+    def fake_run_stage(stage_name: str, command: list[str], run_root: Path) -> Dict[str, Any]:
+        records_root = ensure_directory(run_root / "records")
+        logs_root = ensure_directory(run_root / "logs")
+        (logs_root / f"{stage_name}_stdout.log").write_text("ok\n", encoding="utf-8")
+        (logs_root / f"{stage_name}_stderr.log").write_text("\n", encoding="utf-8")
+
+        if stage_name == "embed":
+            write_json_atomic(records_root / "embed_record.json", {"record_type": "embed"})
+        elif stage_name == "detect":
+            write_json_atomic(
+                records_root / "detect_record.json",
+                {
+                    "record_type": "detect",
+                    "content_evidence_payload": {
+                        "status": "ok",
+                        "score": 0.75,
+                        "content_chain_score": 0.75,
+                    },
+                    "attestation": {
+                        "final_event_attested_decision": {
+                            "event_attestation_score_name": "event_attestation_score",
+                            "event_attestation_score": 0.61,
+                        }
+                    },
+                },
+            )
+        else:
+            raise ValueError(f"unsupported stage: {stage_name}")
+
+        return {
+            "return_code": 0,
+            "command": command,
+            "stdout_log_path": (logs_root / f"{stage_name}_stdout.log").as_posix(),
+            "stderr_log_path": (logs_root / f"{stage_name}_stderr.log").as_posix(),
+            "status": "ok",
+        }
+
+    def fake_resolve_source_pool_attestation_views(
+        *,
+        cfg_obj: Dict[str, Any],
+        run_root: Path,
+        prompt_run_root: Path,
+        prompt_index: int,
+    ) -> Dict[str, Any]:
+        artifact_root = ensure_directory(run_root / "artifacts" / "mock_attestation" / f"event_{prompt_index:06d}")
+        statement_path = artifact_root / "attestation_statement.json"
+        bundle_path = artifact_root / "attestation_bundle.json"
+        result_path = artifact_root / "attestation_result.json"
+        write_json_atomic(statement_path, {"status": "ok"})
+        write_json_atomic(bundle_path, {"status": "ok"})
+        write_json_atomic(result_path, {"status": "ok"})
+        return {
+            "attestation_statement": {
+                "exists": True,
+                "path": statement_path.as_posix(),
+                "package_relative_path": statement_path.relative_to(run_root).as_posix(),
+                "missing_reason": None,
+            },
+            "attestation_bundle": {
+                "exists": True,
+                "path": bundle_path.as_posix(),
+                "package_relative_path": bundle_path.relative_to(run_root).as_posix(),
+                "missing_reason": None,
+            },
+            "attestation_result": {
+                "exists": True,
+                "path": result_path.as_posix(),
+                "package_relative_path": result_path.relative_to(run_root).as_posix(),
+                "missing_reason": None,
+            },
+        }
+
+    def fake_resolve_source_pool_source_image_view(
+        *,
+        cfg_obj: Dict[str, Any],
+        run_root: Path,
+        prompt_run_root: Path,
+        prompt_index: int,
+    ) -> Dict[str, Any]:
+        source_image_path = run_root / "artifacts" / "mock_source_images" / f"event_{prompt_index:06d}.png"
+        ensure_directory(source_image_path.parent)
+        source_image_path.write_bytes(b"img")
+        return {
+            "exists": True,
+            "path": source_image_path.as_posix(),
+            "package_relative_path": source_image_path.relative_to(run_root).as_posix(),
+            "missing_reason": None,
+        }
+
+    def fake_resolve_source_pool_preview_generation_record_view(
+        *,
+        cfg_obj: Dict[str, Any],
+        run_root: Path,
+        prompt_run_root: Path,
+        prompt_index: int,
+    ) -> Dict[str, Any]:
+        record_path = run_root / "artifacts" / "mock_preview_records" / f"event_{prompt_index:06d}.json"
+        ensure_directory(record_path.parent)
+        write_json_atomic(record_path, {"status": "ok"})
+        return {
+            "exists": True,
+            "path": record_path.as_posix(),
+            "package_relative_path": record_path.relative_to(run_root).as_posix(),
+            "missing_reason": None,
+        }
+
+    def fake_normalize_direct_detect_payload(
+        payload: Dict[str, Any],
+        *,
+        prompt_text: str,
+        prompt_index: int,
+        prompt_file_path: str,
+        record_usage: str,
+    ) -> Dict[str, Any]:
+        payload = dict(payload)
+        payload["label"] = True
+        payload["prompt_text"] = prompt_text
+        payload["prompt_index"] = prompt_index
+        payload["prompt_file"] = prompt_file_path
+        payload["record_usage"] = record_usage
+        return payload
+
+    monkeypatch.setattr(pw01_module.BASE_RUNNER_MODULE, "_build_stage_command", fake_build_stage_command)
+    monkeypatch.setattr(
+        pw01_module.BASE_RUNNER_MODULE,
+        "_prepare_source_pool_preview_artifact",
+        fake_prepare_source_pool_preview_artifact,
+    )
+    monkeypatch.setattr(pw01_module.BASE_RUNNER_MODULE, "_run_stage", fake_run_stage)
+    monkeypatch.setattr(
+        pw01_module.BASE_RUNNER_MODULE,
+        "_resolve_source_pool_attestation_views",
+        fake_resolve_source_pool_attestation_views,
+    )
+    monkeypatch.setattr(
+        pw01_module.BASE_RUNNER_MODULE,
+        "_resolve_source_pool_source_image_view",
+        fake_resolve_source_pool_source_image_view,
+    )
+    monkeypatch.setattr(
+        pw01_module.BASE_RUNNER_MODULE,
+        "_resolve_source_pool_preview_generation_record_view",
+        fake_resolve_source_pool_preview_generation_record_view,
+    )
+    monkeypatch.setattr(
+        pw01_module.BASE_RUNNER_MODULE,
+        "_normalize_direct_detect_payload",
+        fake_normalize_direct_detect_payload,
+    )
+    return captures
+
+
+def _rewrite_family_default_config(summary: Dict[str, Any], default_config_path: Path) -> None:
+    """
+    Rewrite the family manifest default_config_path for lineage assertions.
+
+    Args:
+        summary: PW00 summary payload.
+        default_config_path: Replacement default config path.
+
+    Returns:
+        None.
+    """
+    family_manifest_path = Path(str(summary["paper_eval_family_manifest_path"]))
+    family_manifest = json.loads(family_manifest_path.read_text(encoding="utf-8"))
+    family_manifest["default_config_path"] = default_config_path.resolve().as_posix()
+    family_manifest_path.write_text(json.dumps(family_manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def test_pw01_requires_bound_config_path_when_family_exists(tmp_path: Path) -> None:
+    """
+    Reject notebook-driven PW01 runs that do not provide a bound config path.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    _build_pw00_family(tmp_path, family_id="family_missing_bound_config")
+
+    with pytest.raises(ValueError, match="bound_config_path"):
+        pw01_module.run_pw01_source_event_shard(
+            drive_project_root=tmp_path / "drive",
+            family_id="family_missing_bound_config",
+            shard_index=0,
+            shard_count=2,
+        )
+
+
+def test_pw01_uses_bound_config_path_as_runtime_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Prefer the notebook-bound config snapshot over the family default config.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    summary = _build_pw00_family(tmp_path, family_id="family_bound_source")
+    fallback_default_config = _write_unbound_default_config(tmp_path, marker="family_default")
+    _rewrite_family_default_config(summary, fallback_default_config)
+    bound_config_path, snapshot_dir = _write_bound_config_snapshot(
+        tmp_path / "drive",
+        marker="bound_source",
+    )
+    captures = _patch_pw01_base_runner(monkeypatch, expected_snapshot_path=snapshot_dir)
+
+    pw01_summary = pw01_module.run_pw01_source_event_shard(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_bound_source",
+        shard_index=0,
+        shard_count=2,
+        bound_config_path=bound_config_path,
+    )
+
+    shard_root = Path(str(pw01_summary["shard_root"]))
+    shard_manifest = json.loads((shard_root / "shard_manifest.json").read_text(encoding="utf-8"))
+    event_runtime_cfg = load_yaml_mapping(shard_root / "events" / "event_000000" / "runtime_config.yaml")
+
+    assert shard_manifest["default_config_path"] == fallback_default_config.resolve().as_posix()
+    assert shard_manifest["bound_config_path"] == bound_config_path.resolve().as_posix()
+    assert event_runtime_cfg["test_config_origin"] == "bound_source"
+    assert event_runtime_cfg["model_snapshot_path"] == snapshot_dir.resolve().as_posix()
+    assert len(captures["preview_cfgs"]) == 2
+
+
+def test_pw01_worker_plan_persists_and_worker_loads_bound_config_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Persist bound_config_path into worker plans and load it in worker execution.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    summary = _build_pw00_family(tmp_path, family_id="family_worker_bound_config")
+    family_manifest = json.loads(Path(str(summary["paper_eval_family_manifest_path"])).read_text(encoding="utf-8"))
+    default_config_path = pw01_module._resolve_default_config_path(family_manifest)
+    bound_config_path, snapshot_dir = _write_bound_config_snapshot(
+        tmp_path / "drive",
+        marker="worker_bound",
+    )
+    _patch_pw01_base_runner(monkeypatch, expected_snapshot_path=snapshot_dir)
+
+    family_root = Path(str(summary["family_root"]))
+    shard_root = ensure_directory(pw01_module._build_shard_root(family_root, 0))
+    worker_plans = pw01_module._prepare_local_worker_plans(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_worker_bound_config",
+        shard_index=0,
+        shard_count=2,
+        stage_01_worker_count=1,
+        shard_root=shard_root,
+        default_config_path=default_config_path,
+        bound_config_path=bound_config_path,
+        assigned_events=_load_shard_assigned_events(summary, 0),
+    )
+
+    worker_plan_path = Path(str(worker_plans[0]["worker_plan_path"]))
+    worker_plan = json.loads(worker_plan_path.read_text(encoding="utf-8"))
+    assert worker_plan["bound_config_path"] == bound_config_path.resolve().as_posix()
+
+    worker_result = pw01_module.run_pw01_source_event_shard_worker(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_worker_bound_config",
+        shard_index=0,
+        stage_01_worker_count=1,
+        local_worker_index=0,
+        worker_plan_path=worker_plan_path,
+    )
+
+    first_event = cast(Dict[str, Any], worker_result["events"][0])
+    runtime_cfg = load_yaml_mapping(Path(str(first_event["runtime_config_path"])))
+    assert runtime_cfg["test_config_origin"] == "worker_bound"
+    assert runtime_cfg["model_snapshot_path"] == snapshot_dir.resolve().as_posix()
+
+
+def test_run_positive_source_event_preserves_model_snapshot_binding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Preserve model_snapshot_path and model_source_binding in event runtime cfg.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    bound_config_path, snapshot_dir = _write_bound_config_snapshot(tmp_path / "drive", marker="event_bound")
+    bound_cfg_obj = load_yaml_mapping(bound_config_path)
+    _patch_pw01_base_runner(monkeypatch, expected_snapshot_path=snapshot_dir)
+    monkeypatch.delenv("CEG_WM_MODEL_SNAPSHOT_PATH", raising=False)
+
+    event_manifest = pw01_module._run_positive_source_event(
+        event={
+            "event_id": "evt_bound_0000",
+            "event_index": 0,
+            "sample_role": "positive_source",
+            "source_prompt_index": 0,
+            "prompt_text": "prompt one",
+            "prompt_sha256": "sha256-prompt-one",
+            "seed": 3,
+            "prompt_file": "prompts/paper_small.txt",
+        },
+        shard_root=ensure_directory(tmp_path / "drive" / "paper_workflow" / "families" / "family_event_bound" / "source_shards" / "positive" / "shard_0000"),
+        default_cfg_obj=bound_cfg_obj,
+        bound_config_path=bound_config_path,
+    )
+
+    runtime_cfg = load_yaml_mapping(Path(str(event_manifest["runtime_config_path"])))
+    assert runtime_cfg["model_snapshot_path"] == snapshot_dir.resolve().as_posix()
+    assert runtime_cfg["model_source_binding"]["binding_status"] == "bound"
+    assert runtime_cfg["test_config_origin"] == "event_bound"
+
+
+def test_run_positive_source_event_fails_before_preview_when_model_snapshot_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Fail before preview when the runtime cfg loses a valid model snapshot path.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    preview_called = {"value": False}
+
+    def fail_if_called(**kwargs: Any) -> Dict[str, Any]:
+        preview_called["value"] = True
+        raise AssertionError("preview should not run when model_snapshot_path is invalid")
+
+    monkeypatch.setattr(
+        pw01_module.BASE_RUNNER_MODULE,
+        "_prepare_source_pool_preview_artifact",
+        fail_if_called,
+    )
+
+    missing_snapshot_dir = tmp_path / "drive" / "runtime_state" / "missing_snapshot"
+    broken_cfg = load_yaml_mapping((pw01_module.REPO_ROOT / "configs" / "default.yaml").resolve())
+    broken_cfg["model_snapshot_path"] = missing_snapshot_dir.as_posix()
+    broken_cfg["model_source_binding"] = {
+        "binding_status": "bound",
+        "binding_source": "notebook_snapshot_download",
+        "model_snapshot_path": missing_snapshot_dir.as_posix(),
+    }
+    broken_bound_config_path = tmp_path / "drive" / "runtime_state" / "broken_bound_config.yaml"
+    write_yaml_mapping(broken_bound_config_path, broken_cfg)
+
+    with pytest.raises(RuntimeError, match="PW01 bound config missing valid model_snapshot_path before preview_precompute"):
+        pw01_module._run_positive_source_event(
+            event={
+                "event_id": "evt_missing_snapshot_0000",
+                "event_index": 0,
+                "sample_role": "positive_source",
+                "source_prompt_index": 0,
+                "prompt_text": "prompt one",
+                "prompt_sha256": "sha256-prompt-one",
+                "seed": 3,
+                "prompt_file": "prompts/paper_small.txt",
+            },
+            shard_root=ensure_directory(tmp_path / "drive" / "paper_workflow" / "families" / "family_missing_snapshot" / "source_shards" / "positive" / "shard_0000"),
+            default_cfg_obj=broken_cfg,
+            bound_config_path=broken_bound_config_path,
+        )
+
+    assert preview_called["value"] is False

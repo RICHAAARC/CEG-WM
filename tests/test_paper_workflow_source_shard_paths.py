@@ -13,7 +13,13 @@ import pytest
 
 from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
 import paper_workflow.scripts.pw01_run_source_event_shard as pw01_module
-from scripts.notebook_runtime_common import ensure_directory, write_json_atomic
+from scripts.notebook_runtime_common import (
+    apply_notebook_model_snapshot_binding,
+    ensure_directory,
+    load_yaml_mapping,
+    write_json_atomic,
+    write_yaml_mapping,
+)
 
 
 def _build_pw00_family(tmp_path: Path, family_id: str = "family_pw01_fixture") -> Dict[str, Any]:
@@ -36,6 +42,31 @@ def _build_pw00_family(tmp_path: Path, family_id: str = "family_pw01_fixture") -
         seed_list=[3, 9],
         source_shard_count=2,
     )
+
+
+def _write_bound_config_snapshot(drive_project_root: Path, *, marker: str) -> Path:
+    """
+    Build a notebook-style bound config snapshot for PW01 tests.
+
+    Args:
+        drive_project_root: Drive project root.
+        marker: Stable marker stored in the bound config.
+
+    Returns:
+        Bound config snapshot path.
+    """
+    snapshot_dir = drive_project_root / "runtime_state" / f"{marker}_model_snapshot"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+    bound_cfg = apply_notebook_model_snapshot_binding(
+        load_yaml_mapping((pw01_module.REPO_ROOT / "configs" / "default.yaml").resolve()),
+        env_mapping={"CEG_WM_MODEL_SNAPSHOT_PATH": snapshot_dir.as_posix()},
+    )
+    bound_cfg["test_config_origin"] = marker
+
+    bound_config_path = drive_project_root / "runtime_state" / f"{marker}_bound_config.yaml"
+    write_yaml_mapping(bound_config_path, bound_cfg)
+    return bound_config_path
 
 
 def _patch_pw01_base_runner(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -251,6 +282,7 @@ def test_pw01_writes_only_current_shard_directory(tmp_path: Path, monkeypatch: p
         None.
     """
     summary = _build_pw00_family(tmp_path, family_id="family_isolation")
+    bound_config_path = _write_bound_config_snapshot(tmp_path / "drive", marker="family_isolation")
     _patch_pw01_base_runner(monkeypatch)
 
     family_root = Path(str(summary["family_root"]))
@@ -261,6 +293,7 @@ def test_pw01_writes_only_current_shard_directory(tmp_path: Path, monkeypatch: p
         family_id="family_isolation",
         shard_index=0,
         shard_count=2,
+        bound_config_path=bound_config_path,
     )
 
     shard_root = Path(str(pw01_summary["shard_root"])).resolve()
@@ -296,6 +329,7 @@ def test_pw01_completed_shard_rerun_protection_and_force_cleanup(
         None.
     """
     _build_pw00_family(tmp_path, family_id="family_rerun")
+    bound_config_path = _write_bound_config_snapshot(tmp_path / "drive", marker="family_rerun")
     _patch_pw01_base_runner(monkeypatch)
 
     first_summary = pw01_module.run_pw01_source_event_shard(
@@ -303,6 +337,7 @@ def test_pw01_completed_shard_rerun_protection_and_force_cleanup(
         family_id="family_rerun",
         shard_index=0,
         shard_count=2,
+        bound_config_path=bound_config_path,
     )
     shard_root = Path(str(first_summary["shard_root"]))
 
@@ -312,6 +347,7 @@ def test_pw01_completed_shard_rerun_protection_and_force_cleanup(
             family_id="family_rerun",
             shard_index=0,
             shard_count=2,
+            bound_config_path=bound_config_path,
             force_rerun=False,
         )
 
@@ -323,6 +359,7 @@ def test_pw01_completed_shard_rerun_protection_and_force_cleanup(
         family_id="family_rerun",
         shard_index=0,
         shard_count=2,
+        bound_config_path=bound_config_path,
         force_rerun=True,
     )
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import os
 import subprocess
 import shutil
 import sys
@@ -18,6 +19,7 @@ from typing import Any, Dict, List, Mapping, Sequence, Tuple, cast
 
 from scripts.notebook_runtime_common import (
     REPO_ROOT,
+    apply_notebook_model_snapshot_binding,
     build_repo_import_subprocess_env,
     compute_file_sha256,
     copy_file,
@@ -190,6 +192,145 @@ def _resolve_default_config_path(family_manifest: Mapping[str, Any]) -> Path:
     if isinstance(configured_path, str) and configured_path.strip():
         return Path(configured_path).expanduser().resolve()
     return (REPO_ROOT / DEFAULT_CONFIG_RELATIVE_PATH).resolve()
+
+
+def _resolve_required_bound_config_path(bound_config_path: Path | None) -> Path:
+    """
+    Resolve one required notebook-bound config snapshot path.
+
+    Args:
+        bound_config_path: Candidate bound config path.
+
+    Returns:
+        Resolved bound config path.
+
+    Raises:
+        ValueError: If the bound config path is absent.
+        FileNotFoundError: If the bound config path does not exist.
+    """
+    if bound_config_path is None:
+        raise ValueError("PW01 requires bound_config_path produced by notebook precheck")
+    if not isinstance(bound_config_path, Path):
+        raise TypeError("bound_config_path must be Path or None")
+
+    resolved_path = bound_config_path.expanduser().resolve()
+    if not resolved_path.exists() or not resolved_path.is_file():
+        raise FileNotFoundError(f"PW01 bound_config_path not found: {normalize_path_value(resolved_path)}")
+    return resolved_path
+
+
+def _build_bound_config_context(
+    *,
+    bound_config_path: Path,
+    runtime_cfg_path: Path | None,
+    event_id: str | None,
+) -> str:
+    """
+    Build one stable diagnostic context for bound-config failures.
+
+    Args:
+        bound_config_path: Bound config source path.
+        runtime_cfg_path: Event runtime config path when available.
+        event_id: Event identifier when available.
+
+    Returns:
+        Joined diagnostic context string.
+    """
+    details = [f"bound_config_path={normalize_path_value(bound_config_path)}"]
+    details.append(
+        f"runtime_cfg_path={normalize_path_value(runtime_cfg_path) if runtime_cfg_path is not None else '<absent>'}"
+    )
+    details.append(f"event_id={event_id if isinstance(event_id, str) and event_id else '<absent>'}")
+    return ", ".join(details)
+
+
+def _validate_bound_runtime_cfg(
+    cfg_obj: Mapping[str, Any],
+    *,
+    bound_config_path: Path,
+    runtime_cfg_path: Path | None,
+    event_id: str | None,
+    stage_label: str,
+) -> None:
+    """
+    Validate that one PW01 runtime config keeps the notebook binding.
+
+    Args:
+        cfg_obj: Runtime config mapping.
+        bound_config_path: Bound config source path.
+        runtime_cfg_path: Event runtime config path when available.
+        event_id: Event identifier when available.
+        stage_label: Stage label used in the error message.
+
+    Returns:
+        None.
+
+    Raises:
+        RuntimeError: If the model snapshot binding is incomplete.
+    """
+    if not isinstance(cfg_obj, Mapping):
+        raise TypeError("cfg_obj must be Mapping")
+    if not isinstance(bound_config_path, Path):
+        raise TypeError("bound_config_path must be Path")
+    if not isinstance(stage_label, str) or not stage_label.strip():
+        raise TypeError("stage_label must be non-empty str")
+
+    diagnostic_context = _build_bound_config_context(
+        bound_config_path=bound_config_path,
+        runtime_cfg_path=runtime_cfg_path,
+        event_id=event_id,
+    )
+    model_snapshot_path_value = cfg_obj.get("model_snapshot_path")
+    if not isinstance(model_snapshot_path_value, str) or not model_snapshot_path_value.strip():
+        raise RuntimeError(
+            f"PW01 bound config missing valid model_snapshot_path before {stage_label}: {diagnostic_context}"
+        )
+
+    normalized_snapshot_path = normalize_path_value(model_snapshot_path_value)
+    if normalized_snapshot_path == "<absent>":
+        raise RuntimeError(
+            f"PW01 bound config missing valid model_snapshot_path before {stage_label}: {diagnostic_context}"
+        )
+    snapshot_path = Path(normalized_snapshot_path)
+    if not snapshot_path.exists() or not snapshot_path.is_dir():
+        raise RuntimeError(
+            f"PW01 bound config missing valid model_snapshot_path before {stage_label}: "
+            f"{diagnostic_context}, model_snapshot_path={normalized_snapshot_path}"
+        )
+
+    model_source_binding = cfg_obj.get("model_source_binding")
+    if not isinstance(model_source_binding, Mapping):
+        raise RuntimeError(
+            f"PW01 bound config missing valid model_source_binding before {stage_label}: "
+            f"{diagnostic_context}, model_snapshot_path={normalized_snapshot_path}"
+        )
+
+
+def _load_required_bound_config(
+    bound_config_path: Path | None,
+    *,
+    stage_label: str,
+) -> Tuple[Path, Dict[str, Any]]:
+    """
+    Load one required notebook-bound config snapshot.
+
+    Args:
+        bound_config_path: Candidate bound config path.
+        stage_label: Stage label used in validation errors.
+
+    Returns:
+        Tuple of resolved bound config path and parsed config mapping.
+    """
+    resolved_bound_config_path = _resolve_required_bound_config_path(bound_config_path)
+    bound_cfg_obj = load_yaml_mapping(resolved_bound_config_path)
+    _validate_bound_runtime_cfg(
+        bound_cfg_obj,
+        bound_config_path=resolved_bound_config_path,
+        runtime_cfg_path=None,
+        event_id=None,
+        stage_label=stage_label,
+    )
+    return resolved_bound_config_path, bound_cfg_obj
 
 
 def _load_event_lookup(source_event_grid_path: Path) -> Dict[str, Dict[str, Any]]:
@@ -440,6 +581,7 @@ def _write_worker_plan(
     shard_count: int,
     stage_01_worker_count: int,
     default_config_path: Path,
+    bound_config_path: Path,
     shard_root: Path,
     assignment: Mapping[str, Any],
 ) -> Path:
@@ -467,6 +609,8 @@ def _write_worker_plan(
         raise TypeError("shard_count must be positive int")
     if not isinstance(default_config_path, Path):
         raise TypeError("default_config_path must be Path")
+    if not isinstance(bound_config_path, Path):
+        raise TypeError("bound_config_path must be Path")
     if not isinstance(shard_root, Path):
         raise TypeError("shard_root must be Path")
 
@@ -489,6 +633,7 @@ def _write_worker_plan(
             "stage_01_worker_count": stage_01_worker_count,
             "local_worker_index": local_worker_index,
             "default_config_path": normalize_path_value(default_config_path),
+            "bound_config_path": normalize_path_value(bound_config_path),
             "shard_root": normalize_path_value(shard_root),
             "worker_root": normalize_path_value(worker_root),
             "local_event_ordinals": list(cast(List[int], assignment.get("local_event_ordinals", []))),
@@ -560,6 +705,7 @@ def _prepare_local_worker_plans(
     stage_01_worker_count: int,
     shard_root: Path,
     default_config_path: Path,
+    bound_config_path: Path,
     assigned_events: Sequence[Mapping[str, Any]],
 ) -> List[Dict[str, Any]]:
     """
@@ -594,6 +740,7 @@ def _prepare_local_worker_plans(
             shard_count=shard_count,
             stage_01_worker_count=stage_01_worker_count,
             default_config_path=default_config_path,
+            bound_config_path=bound_config_path,
             shard_root=shard_root,
             assignment=assignment,
         )
@@ -607,6 +754,7 @@ def _prepare_local_worker_plans(
                 "worker_result_path": normalize_path_value(worker_result_path),
                 "stdout_log_path": normalize_path_value(stdout_log_path),
                 "stderr_log_path": normalize_path_value(stderr_log_path),
+                "bound_config_path": normalize_path_value(bound_config_path),
                 "assigned_event_ids": list(cast(List[str], assignment["assigned_event_ids"])),
                 "assigned_event_indices": list(cast(List[int], assignment["assigned_event_indices"])),
                 "local_event_ordinals": list(cast(List[int], assignment["local_event_ordinals"])),
@@ -842,6 +990,7 @@ def _build_worker_state_rows(
                 "worker_result_path": plan.get("worker_result_path"),
                 "stdout_log_path": plan.get("stdout_log_path"),
                 "stderr_log_path": plan.get("stderr_log_path"),
+                "bound_config_path": plan.get("bound_config_path"),
                 "command": plan.get("command"),
                 "assigned_event_ids": plan.get("assigned_event_ids", []),
                 "assigned_event_indices": plan.get("assigned_event_indices", []),
@@ -974,6 +1123,7 @@ def _run_positive_source_event(
     event: Mapping[str, Any],
     shard_root: Path,
     default_cfg_obj: Mapping[str, Any],
+    bound_config_path: Path,
 ) -> Dict[str, Any]:
     """
     Execute one positive_source event in event-bound mode.
@@ -982,6 +1132,7 @@ def _run_positive_source_event(
         event: Event payload from source_event_grid.
         shard_root: Shard root path.
         default_cfg_obj: Parsed default config mapping.
+        bound_config_path: Bound config source path.
 
     Returns:
         Event manifest payload.
@@ -1013,6 +1164,8 @@ def _run_positive_source_event(
         raise ValueError("seed must be int")
     if not isinstance(prompt_file, str) or not prompt_file:
         raise ValueError("prompt_file must be non-empty str")
+    if not isinstance(bound_config_path, Path):
+        raise TypeError("bound_config_path must be Path")
 
     event_root = ensure_directory(shard_root / "events" / f"event_{event_index:06d}")
     prompt_run_root = ensure_directory(event_root / "run")
@@ -1031,6 +1184,14 @@ def _run_positive_source_event(
 
     runtime_cfg_path = event_root / "runtime_config.yaml"
     validate_path_within_base(shard_root, runtime_cfg_path, "event runtime config")
+    runtime_cfg = apply_notebook_model_snapshot_binding(runtime_cfg, env_mapping=os.environ)
+    _validate_bound_runtime_cfg(
+        runtime_cfg,
+        bound_config_path=bound_config_path,
+        runtime_cfg_path=runtime_cfg_path,
+        event_id=event_id,
+        stage_label="preview_precompute",
+    )
     write_yaml_mapping(runtime_cfg_path, runtime_cfg)
 
     preview_precompute = BASE_RUNNER_MODULE._prepare_source_pool_preview_artifact(
@@ -1044,6 +1205,13 @@ def _run_positive_source_event(
     if not isinstance(preview_runtime_cfg_node, dict):
         raise ValueError("preview precompute result missing runtime_cfg")
     preview_runtime_cfg = cast(Dict[str, Any], preview_runtime_cfg_node)
+    _validate_bound_runtime_cfg(
+        preview_runtime_cfg,
+        bound_config_path=bound_config_path,
+        runtime_cfg_path=runtime_cfg_path,
+        event_id=event_id,
+        stage_label="embed_detect_execution",
+    )
     write_yaml_mapping(runtime_cfg_path, preview_runtime_cfg)
 
     stage_results: Dict[str, Any] = {
@@ -1201,7 +1369,14 @@ def run_pw01_source_event_shard_worker(
     if not isinstance(default_config_path_value, str) or not default_config_path_value:
         raise ValueError("worker plan missing default_config_path")
     default_config_path = Path(default_config_path_value).expanduser().resolve()
-    default_cfg_obj = load_yaml_mapping(default_config_path)
+
+    bound_config_path_value = worker_plan.get("bound_config_path")
+    if not isinstance(bound_config_path_value, str) or not bound_config_path_value:
+        raise ValueError("worker plan missing bound_config_path")
+    bound_config_path, default_cfg_obj = _load_required_bound_config(
+        Path(bound_config_path_value),
+        stage_label="worker_execution",
+    )
 
     shard_root_value = worker_plan.get("shard_root")
     if not isinstance(shard_root_value, str) or not shard_root_value:
@@ -1255,6 +1430,7 @@ def run_pw01_source_event_shard_worker(
                     event=event,
                     shard_root=shard_root,
                     default_cfg_obj=default_cfg_obj,
+                    bound_config_path=bound_config_path,
                 )
             )
 
@@ -1302,6 +1478,7 @@ def run_pw01_source_event_shard(
     shard_index: int,
     shard_count: int,
     stage_01_worker_count: int = DEFAULT_STAGE_01_WORKER_COUNT,
+    bound_config_path: Path | None = None,
     force_rerun: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -1312,6 +1489,8 @@ def run_pw01_source_event_shard(
         family_id: Family identifier.
         shard_index: Positive shard index.
         shard_count: Positive shard count.
+        stage_01_worker_count: Total shard-local worker count.
+        bound_config_path: Notebook-bound config snapshot path.
         force_rerun: Whether to clear completed shard and rerun.
 
     Returns:
@@ -1364,7 +1543,10 @@ def run_pw01_source_event_shard(
         assigned_events.append(event_lookup[event_id])
 
     default_config_path = _resolve_default_config_path(family_manifest)
-    default_cfg_obj = load_yaml_mapping(default_config_path)
+    resolved_bound_config_path, default_cfg_obj = _load_required_bound_config(
+        bound_config_path,
+        stage_label="shard_execution",
+    )
 
     shard_root = _build_shard_root(family_root, shard_index)
     shard_manifest_path = shard_root / "shard_manifest.json"
@@ -1406,6 +1588,7 @@ def run_pw01_source_event_shard(
         "source_shard_plan_path": normalize_path_value(shard_plan_path),
         "source_event_grid_path": normalize_path_value(source_event_grid_path),
         "default_config_path": normalize_path_value(default_config_path),
+        "bound_config_path": normalize_path_value(resolved_bound_config_path),
         "shard_root": normalize_path_value(shard_root),
         "assigned_event_ids": assigned_event_ids,
         "event_count": len(assigned_event_ids),
@@ -1428,6 +1611,7 @@ def run_pw01_source_event_shard(
                         event=event,
                         shard_root=shard_root,
                         default_cfg_obj=default_cfg_obj,
+                        bound_config_path=resolved_bound_config_path,
                     )
                 )
         else:
@@ -1439,6 +1623,7 @@ def run_pw01_source_event_shard(
                 stage_01_worker_count=stage_01_worker_count,
                 shard_root=shard_root,
                 default_config_path=default_config_path,
+                bound_config_path=resolved_bound_config_path,
                 assigned_events=assigned_events,
             )
             running_manifest["workers"] = _build_worker_state_rows(
@@ -1483,6 +1668,7 @@ def run_pw01_source_event_shard(
             "event_count": len(executed_events),
             "shard_root": normalize_path_value(shard_root),
             "shard_manifest_path": normalize_path_value(shard_manifest_path),
+            "bound_config_path": normalize_path_value(resolved_bound_config_path),
         }
     except Exception as exc:
         failed_manifest = dict(running_manifest)
