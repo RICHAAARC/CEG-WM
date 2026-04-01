@@ -101,10 +101,10 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     assert '"--force-rerun"' in pw01_execute
 
 
-def test_pw01_notebook_wraps_command_with_gpu_peak_monitor_and_preserves_stdout_json_contract() -> None:
+def test_pw01_notebook_wraps_command_with_gpu_peak_monitor_and_reads_shard_manifest_contract() -> None:
     """
     Verify that the PW01 notebook routes the shard command through the GPU
-    peak wrapper without changing the downstream stdout JSON parsing contract.
+    peak wrapper and reads the formal shard manifest artifact after success.
 
     Args:
         None.
@@ -115,12 +115,18 @@ def test_pw01_notebook_wraps_command_with_gpu_peak_monitor_and_preserves_stdout_
     pw01_execute = _find_code_cell_source(NOTEBOOK_PW01_PATH, "COMMAND = [")
 
     assert 'GPU_PEAK_SCRIPT_PATH = REPO_ROOT / "scripts" / "gpu_session_peak.py"' in pw01_execute
-    assert 'GPU_PEAK_SUMMARY_PATH = (' in pw01_execute
+    assert 'GPU_PEAK_SUMMARY_PATH = SHARD_ROOT / "artifacts" / "gpu_session_peak.json"' in pw01_execute
     assert 'MONITORED_COMMAND = [' in pw01_execute
     assert 'PW01_RESULT = subprocess.run(' in pw01_execute
     assert 'MONITORED_COMMAND,' in pw01_execute
-    assert 'pw01_stdout_text = PW01_RESULT.stdout.strip()' in pw01_execute
-    assert 'PW01_SUMMARY = json.loads(pw01_stdout_text)' in pw01_execute
+    assert 'SHARD_ROOT = FAMILY_ROOT / "source_shards" / "positive"' in pw01_execute
+    assert 'f"shard_{SHARD_INDEX:04d}"' in pw01_execute
+    assert 'PW01_SHARD_MANIFEST_PATH = SHARD_ROOT / "shard_manifest.json"' in pw01_execute
+    assert 'if not PW01_SHARD_MANIFEST_PATH.exists():' in pw01_execute
+    assert 'PW01_SUMMARY = json.loads(PW01_SHARD_MANIFEST_PATH.read_text(encoding="utf-8"))' in pw01_execute
+    assert 'shard_manifest_path={PW01_SHARD_MANIFEST_PATH} stdout={PW01_RESULT.stdout} stderr={PW01_RESULT.stderr}' in pw01_execute
+    assert 'pw01_stdout_text = PW01_RESULT.stdout.strip()' not in pw01_execute
+    assert 'PW01_SUMMARY = json.loads(pw01_stdout_text)' not in pw01_execute
     assert 'GPU_PEAK_SUMMARY = json.loads(GPU_PEAK_SUMMARY_PATH.read_text(encoding="utf-8"))' in pw01_execute
     assert 'print_json("gpu_session_peak_summary", GPU_PEAK_NOTEBOOK_SUMMARY)' in pw01_execute
 
