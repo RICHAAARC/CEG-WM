@@ -898,6 +898,32 @@ def test_stage_01_execute_cell_uses_repo_import_subprocess_env() -> None:
     assert "command_result = subprocess.run(" in execute_source
 
 
+def test_stage_01_execute_cell_wraps_command_with_gpu_peak_monitor() -> None:
+    """
+    功能：验证 stage 01 execute cell 通过 GPU peak wrapper 运行顶层命令。
+
+    Verify the stage-01 notebook execute cell wraps the stage command with the
+    GPU session peak monitor and reads the emitted JSON summary.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    execute_source = _find_code_cell_source(NOTEBOOK_01_PATH, "STAGE_RUN_ID = make_stage_run_id(NOTEBOOK_NAME)")
+
+    assert 'GPU_PEAK_SCRIPT_PATH = REPO_ROOT / "scripts" / "gpu_session_peak.py"' in execute_source
+    assert 'GPU_PEAK_SUMMARY_PATH = DRIVE_PROJECT_ROOT / "runtime_state" / NOTEBOOK_NAME / STAGE_RUN_ID / "gpu_session_peak.json"' in execute_source
+    assert "MONITORED_COMMAND = [" in execute_source
+    assert '"--sample-interval-ms"' in execute_source
+    assert '"200"' in execute_source
+    assert 'command_result = subprocess.run(' in execute_source
+    assert 'MONITORED_COMMAND,' in execute_source
+    assert 'GPU_PEAK_SUMMARY = load_json(GPU_PEAK_SUMMARY_PATH)' in execute_source
+    assert 'print_json("gpu_session_peak_summary", GPU_PEAK_NOTEBOOK_SUMMARY)' in execute_source
+
+
 def test_stage_01_validation_reports_optional_root_records_when_present(tmp_path: Path) -> None:
     """
     功能：验证 stage 01 notebook 会报告已导出的 optional compatibility views。
@@ -1192,6 +1218,29 @@ def test_stage_03_execute_cell_uses_resolved_source_package_path() -> None:
     assert "resolve_stage_package_input_or_discover" not in execute_source
     assert 'NOTEBOOK_SUBPROCESS_ENV["CEG_WM_MODEL_SNAPSHOT_PATH"] = str(MODEL_SNAPSHOT_PATH)' in execute_source
     _assert_execute_source_uses_repo_import_context(execute_source)
+
+
+def test_stage_03_execute_cell_wraps_command_with_gpu_peak_monitor() -> None:
+    """
+    功能：验证 stage 03 execute cell 通过 GPU peak wrapper 调用 run_checked。
+
+    Verify the stage-03 notebook execute cell routes the top-level command
+    through the GPU session peak wrapper before invoking run_checked.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    execute_source = _find_code_cell_source(NOTEBOOK_03_PATH, "STAGE_RUN_ID = make_stage_run_id(NOTEBOOK_NAME)")
+
+    assert 'GPU_PEAK_SCRIPT_PATH = REPO_ROOT / "scripts" / "gpu_session_peak.py"' in execute_source
+    assert 'GPU_PEAK_SUMMARY_PATH = DRIVE_PROJECT_ROOT / "runtime_state" / NOTEBOOK_NAME / STAGE_RUN_ID / "gpu_session_peak.json"' in execute_source
+    assert "MONITORED_COMMAND = [" in execute_source
+    assert 'run_checked(MONITORED_COMMAND, cwd=REPO_ROOT, env=NOTEBOOK_SUBPROCESS_ENV)' in execute_source
+    assert 'GPU_PEAK_SUMMARY = load_json(GPU_PEAK_SUMMARY_PATH)' in execute_source
+    assert 'print_json("gpu_session_peak_summary", GPU_PEAK_NOTEBOOK_SUMMARY)' in execute_source
 
 
 def test_stage_03_notebook_defines_source_package_path_as_none() -> None:

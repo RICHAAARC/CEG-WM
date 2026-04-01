@@ -97,6 +97,31 @@ def test_parallel_notebook_binds_parallel_stage_paths_and_worker_count() -> None
     assert 'str(PARALLEL_WORKER_COUNT)' in execute_source
 
 
+def test_parallel_notebook_wraps_command_with_gpu_peak_monitor() -> None:
+    """
+    功能：验证并行 stage 01 notebook 通过 GPU peak wrapper 调用顶层命令。
+
+    Verify that the parallel stage-01 notebook wraps the stage command with
+    the GPU session peak monitor while preserving the worker-count binding.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    execute_source = _find_code_cell_source(NOTEBOOK_PARALLEL_PATH, "STAGE_RUN_ID = make_stage_run_id(NOTEBOOK_NAME)")
+
+    assert 'GPU_PEAK_SCRIPT_PATH = REPO_ROOT / "scripts" / "gpu_session_peak.py"' in execute_source
+    assert 'GPU_PEAK_SUMMARY_PATH = DRIVE_PROJECT_ROOT / "runtime_state" / NOTEBOOK_NAME / STAGE_RUN_ID / "gpu_session_peak.json"' in execute_source
+    assert "MONITORED_COMMAND = [" in execute_source
+    assert 'command_result = subprocess.run(' in execute_source
+    assert 'MONITORED_COMMAND,' in execute_source
+    assert '"--worker-count"' in execute_source
+    assert 'str(PARALLEL_WORKER_COUNT)' in execute_source
+    assert 'GPU_PEAK_SUMMARY = load_json(GPU_PEAK_SUMMARY_PATH)' in execute_source
+
+
 def test_parallel_notebook_does_not_pollute_single_route_notebook() -> None:
     """
     功能：验证新增并行 notebook 不改写原始单路线绑定。 
