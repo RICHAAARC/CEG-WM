@@ -1,5 +1,5 @@
 """
-File purpose: CLI entrypoint for PW01 positive source event shards.
+File purpose: Execute one shard-local PW01 worker plan.
 Module type: General module
 """
 
@@ -10,12 +10,12 @@ import json
 import sys
 from pathlib import Path
 
-from paper_workflow.scripts.pw01_run_source_event_shard import run_pw01_source_event_shard
+from paper_workflow.scripts.pw01_run_source_event_shard import run_pw01_source_event_shard_worker
 
 
 def main() -> int:
     """
-    Execute PW01 shard runner entrypoint.
+    Execute the PW01 shard-local worker entrypoint.
 
     Args:
         None.
@@ -23,30 +23,30 @@ def main() -> int:
     Returns:
         Process-style exit code.
     """
-    parser = argparse.ArgumentParser(description="Run one PW01 positive_source shard.")
-    parser.add_argument("--drive-project-root", required=True, help="Google Drive project root path.")
+    parser = argparse.ArgumentParser(description="Run one PW01 shard-local worker plan.")
+    parser.add_argument("--drive-project-root", required=True, help="Drive project root path.")
     parser.add_argument("--family-id", required=True, help="Paper workflow family identifier.")
     parser.add_argument("--shard-index", required=True, type=int, help="Zero-based shard index.")
-    parser.add_argument("--shard-count", required=True, type=int, help="Total shard count.")
     parser.add_argument(
         "--stage-01-worker-count",
-        default=1,
+        required=True,
         type=int,
         help="Shard-local stage-01 worker count. Only 1 or 2 is allowed.",
     )
-    parser.add_argument("--force-rerun", action="store_true", help="Clear completed shard root before rerun.")
+    parser.add_argument("--local-worker-index", required=True, type=int, help="Zero-based local worker index.")
+    parser.add_argument("--worker-plan-path", required=True, help="Worker plan JSON path.")
     args = parser.parse_args()
 
-    summary = run_pw01_source_event_shard(
+    summary = run_pw01_source_event_shard_worker(
         drive_project_root=Path(args.drive_project_root),
         family_id=str(args.family_id),
         shard_index=int(args.shard_index),
-        shard_count=int(args.shard_count),
         stage_01_worker_count=int(args.stage_01_worker_count),
-        force_rerun=bool(args.force_rerun),
+        local_worker_index=int(args.local_worker_index),
+        worker_plan_path=Path(args.worker_plan_path),
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
-    return 0
+    return 0 if summary.get("status") == "completed" else 1
 
 
 if __name__ == "__main__":

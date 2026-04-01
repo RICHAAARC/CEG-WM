@@ -91,10 +91,13 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     assert '"--source-shard-count"' in pw00_execute
 
     assert '"PW01_Source_Event_Shards.py"' in pw01_constants
+    assert 'STAGE_01_WORKER_COUNT = 2' in pw01_constants
     assert '"--drive-project-root"' in pw01_execute
     assert '"--family-id"' in pw01_execute
     assert '"--shard-index"' in pw01_execute
     assert '"--shard-count"' in pw01_execute
+    assert '"--stage-01-worker-count"' in pw01_execute
+    assert 'str(STAGE_01_WORKER_COUNT)' in pw01_execute
     assert '"--force-rerun"' in pw01_execute
 
 

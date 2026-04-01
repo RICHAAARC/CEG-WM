@@ -8,14 +8,17 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import subprocess
 import shutil
+import sys
 import traceback
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Dict, List, Mapping, cast
+from typing import Any, Dict, List, Mapping, Sequence, Tuple, cast
 
 from scripts.notebook_runtime_common import (
     REPO_ROOT,
+    build_repo_import_subprocess_env,
     compute_file_sha256,
     copy_file,
     ensure_directory,
@@ -37,7 +40,9 @@ from paper_workflow.scripts.pw_common import (
 )
 
 BASE_RUNNER_SCRIPT_PATH = Path("scripts/01_run_paper_full_cuda.py")
+WORKER_SCRIPT_PATH = Path("paper_workflow/scripts/pw01_run_source_event_shard_worker.py")
 EVENT_RECORD_USAGE = "paper_workflow_positive_source"
+DEFAULT_STAGE_01_WORKER_COUNT = 1
 
 
 def _load_base_runner_module() -> ModuleType:
@@ -209,6 +214,142 @@ def _load_event_lookup(source_event_grid_path: Path) -> Dict[str, Dict[str, Any]
     return event_lookup
 
 
+def _validate_stage_01_worker_count(stage_01_worker_count: int) -> None:
+    """
+    Validate the shard-local stage-01 worker count.
+
+    Args:
+        stage_01_worker_count: Requested worker count.
+
+    Returns:
+        None.
+
+    Raises:
+        ValueError: If the worker count is not 1 or 2.
+    """
+    if not isinstance(stage_01_worker_count, int) or isinstance(stage_01_worker_count, bool):
+        raise ValueError("stage_01_worker_count must be 1 or 2")
+    if stage_01_worker_count not in {1, 2}:
+        raise ValueError("stage_01_worker_count must be 1 or 2")
+
+
+def _validate_local_worker_index(local_worker_index: int, stage_01_worker_count: int) -> None:
+    """
+    Validate the local worker index against the shard-local worker count.
+
+    Args:
+        local_worker_index: Local worker index.
+        stage_01_worker_count: Total shard-local worker count.
+
+    Returns:
+        None.
+
+    Raises:
+        ValueError: If the worker index is outside the allowed range.
+    """
+    _validate_stage_01_worker_count(stage_01_worker_count)
+    if not isinstance(local_worker_index, int) or isinstance(local_worker_index, bool):
+        raise ValueError("local_worker_index must satisfy 0 <= local_worker_index < stage_01_worker_count")
+    if local_worker_index < 0 or local_worker_index >= stage_01_worker_count:
+        raise ValueError("local_worker_index must satisfy 0 <= local_worker_index < stage_01_worker_count")
+
+
+def _resolve_source_prompt_index(event: Mapping[str, Any]) -> int:
+    """
+    Resolve the source prompt index from one event payload.
+
+    Args:
+        event: Event payload.
+
+    Returns:
+        Source prompt index.
+
+    Raises:
+        ValueError: If the source prompt index is missing or invalid.
+    """
+    source_prompt_index = event.get("source_prompt_index")
+    if source_prompt_index is None:
+        source_prompt_index = event.get("prompt_index")
+    if not isinstance(source_prompt_index, int) or source_prompt_index < 0:
+        raise ValueError("source_prompt_index must be non-negative int")
+    return int(source_prompt_index)
+
+
+def _build_local_worker_assignments(
+    *,
+    assigned_events: Sequence[Mapping[str, Any]],
+    stage_01_worker_count: int,
+) -> List[Dict[str, Any]]:
+    """
+    Build stable shard-local worker assignments from ordered assigned events.
+
+    Args:
+        assigned_events: Ordered shard-assigned events.
+        stage_01_worker_count: Requested shard-local worker count.
+
+    Returns:
+        Ordered worker-assignment payloads.
+    """
+    _validate_stage_01_worker_count(stage_01_worker_count)
+
+    assignments: List[Dict[str, Any]] = [
+        {
+            "local_worker_index": local_worker_index,
+            "local_event_ordinals": [],
+            "assigned_event_ids": [],
+            "assigned_event_indices": [],
+            "assigned_events": [],
+        }
+        for local_worker_index in range(stage_01_worker_count)
+    ]
+
+    for local_event_ordinal, event in enumerate(assigned_events):
+        event_id = event.get("event_id")
+        event_index = event.get("event_index")
+        sample_role = event.get("sample_role")
+        prompt_text = event.get("prompt_text")
+        prompt_sha256 = event.get("prompt_sha256")
+        seed = event.get("seed")
+        prompt_file = event.get("prompt_file")
+        source_prompt_index = _resolve_source_prompt_index(event)
+
+        if not isinstance(event_id, str) or not event_id:
+            raise ValueError("event_id must be non-empty str")
+        if not isinstance(event_index, int) or event_index < 0:
+            raise ValueError("event_index must be non-negative int")
+        if sample_role != ACTIVE_SAMPLE_ROLE:
+            raise ValueError(f"PW01 only supports positive_source, got: {sample_role}")
+        if not isinstance(prompt_text, str) or not prompt_text:
+            raise ValueError("prompt_text must be non-empty str")
+        if not isinstance(prompt_sha256, str) or not prompt_sha256:
+            raise ValueError("prompt_sha256 must be non-empty str")
+        if not isinstance(seed, int):
+            raise ValueError("seed must be int")
+        if not isinstance(prompt_file, str) or not prompt_file:
+            raise ValueError("prompt_file must be non-empty str")
+
+        local_worker_index = local_event_ordinal % stage_01_worker_count
+        assignment = assignments[local_worker_index]
+        assignment["local_event_ordinals"].append(local_event_ordinal)
+        assignment["assigned_event_ids"].append(event_id)
+        assignment["assigned_event_indices"].append(event_index)
+        assignment["assigned_events"].append(
+            {
+                "event_id": event_id,
+                "event_index": event_index,
+                "sample_role": ACTIVE_SAMPLE_ROLE,
+                "source_prompt_index": source_prompt_index,
+                "prompt_text": prompt_text,
+                "prompt_sha256": prompt_sha256,
+                "seed": seed,
+                "prompt_file": prompt_file,
+                "local_event_ordinal": local_event_ordinal,
+            }
+        )
+
+    return assignments
+
+
 def _build_shard_root(family_root: Path, shard_index: int) -> Path:
     """
     Build shard root path for one positive shard index.
@@ -223,6 +364,609 @@ def _build_shard_root(family_root: Path, shard_index: int) -> Path:
     shard_root = family_root / "source_shards" / "positive" / f"shard_{shard_index:04d}"
     validate_path_within_base(family_root, shard_root, "source shard root")
     return shard_root
+
+
+def _build_worker_root(shard_root: Path, local_worker_index: int) -> Path:
+    """
+    Build the isolated worker root under one shard root.
+
+    Args:
+        shard_root: Shard root path.
+        local_worker_index: Local worker index.
+
+    Returns:
+        Worker root path.
+    """
+    if not isinstance(shard_root, Path):
+        raise TypeError("shard_root must be Path")
+    if local_worker_index < 0:
+        raise ValueError("local_worker_index must be non-negative int")
+
+    worker_root = shard_root / "workers" / f"worker_{local_worker_index:02d}"
+    validate_path_within_base(shard_root, worker_root, "worker root")
+    return worker_root
+
+
+def _build_worker_plan_path(worker_root: Path) -> Path:
+    """
+    Build the worker plan path under one worker root.
+
+    Args:
+        worker_root: Worker root path.
+
+    Returns:
+        Worker plan JSON path.
+    """
+    if not isinstance(worker_root, Path):
+        raise TypeError("worker_root must be Path")
+    return worker_root / "worker_plan.json"
+
+
+def _build_worker_result_path(worker_root: Path) -> Path:
+    """
+    Build the worker result path under one worker root.
+
+    Args:
+        worker_root: Worker root path.
+
+    Returns:
+        Worker result JSON path.
+    """
+    if not isinstance(worker_root, Path):
+        raise TypeError("worker_root must be Path")
+    return worker_root / "worker_result.json"
+
+
+def _build_worker_log_paths(worker_root: Path) -> Tuple[Path, Path]:
+    """
+    Build stdout and stderr log paths for one worker.
+
+    Args:
+        worker_root: Worker root path.
+
+    Returns:
+        Tuple of stdout and stderr log paths.
+    """
+    if not isinstance(worker_root, Path):
+        raise TypeError("worker_root must be Path")
+    return worker_root / "stdout.log", worker_root / "stderr.log"
+
+
+def _write_worker_plan(
+    *,
+    worker_root: Path,
+    family_id: str,
+    shard_index: int,
+    shard_count: int,
+    stage_01_worker_count: int,
+    default_config_path: Path,
+    shard_root: Path,
+    assignment: Mapping[str, Any],
+) -> Path:
+    """
+    Write one shard-local worker plan.
+
+    Args:
+        worker_root: Worker root path.
+        family_id: Family identifier.
+        shard_index: Shard index.
+        shard_count: Total shard count.
+        stage_01_worker_count: Total shard-local worker count.
+        default_config_path: Default config path.
+        shard_root: Shard root path.
+        assignment: Worker assignment payload.
+
+    Returns:
+        Worker plan path.
+    """
+    if not family_id.strip():
+        raise TypeError("family_id must be non-empty str")
+    if shard_index < 0:
+        raise TypeError("shard_index must be non-negative int")
+    if shard_count <= 0:
+        raise TypeError("shard_count must be positive int")
+    if not isinstance(default_config_path, Path):
+        raise TypeError("default_config_path must be Path")
+    if not isinstance(shard_root, Path):
+        raise TypeError("shard_root must be Path")
+
+    local_worker_index = assignment.get("local_worker_index")
+    if not isinstance(local_worker_index, int):
+        raise ValueError("worker assignment missing local_worker_index")
+    _validate_local_worker_index(local_worker_index, stage_01_worker_count)
+
+    plan_path = _build_worker_plan_path(worker_root)
+    validate_path_within_base(shard_root, plan_path, "worker plan path")
+    write_json_atomic(
+        plan_path,
+        {
+            "artifact_type": "paper_workflow_source_shard_worker_plan",
+            "schema_version": "pw_stage_01_v1",
+            "family_id": family_id,
+            "sample_role": ACTIVE_SAMPLE_ROLE,
+            "shard_index": shard_index,
+            "source_shard_count": shard_count,
+            "stage_01_worker_count": stage_01_worker_count,
+            "local_worker_index": local_worker_index,
+            "default_config_path": normalize_path_value(default_config_path),
+            "shard_root": normalize_path_value(shard_root),
+            "worker_root": normalize_path_value(worker_root),
+            "local_event_ordinals": list(cast(List[int], assignment.get("local_event_ordinals", []))),
+            "assigned_event_ids": list(cast(List[str], assignment.get("assigned_event_ids", []))),
+            "assigned_event_indices": list(cast(List[int], assignment.get("assigned_event_indices", []))),
+            "assigned_events": list(cast(List[Dict[str, Any]], assignment.get("assigned_events", []))),
+        },
+    )
+    return plan_path
+
+
+def _build_worker_command(
+    *,
+    drive_project_root: Path,
+    family_id: str,
+    shard_index: int,
+    stage_01_worker_count: int,
+    local_worker_index: int,
+    worker_plan_path: Path,
+) -> List[str]:
+    """
+    Build the subprocess command for one shard-local worker.
+
+    Args:
+        drive_project_root: Drive project root path.
+        family_id: Family identifier.
+        shard_index: Shard index.
+        stage_01_worker_count: Total shard-local worker count.
+        local_worker_index: Local worker index.
+        worker_plan_path: Worker plan path.
+
+    Returns:
+        Command token list.
+    """
+    if not isinstance(drive_project_root, Path):
+        raise TypeError("drive_project_root must be Path")
+    if not isinstance(worker_plan_path, Path):
+        raise TypeError("worker_plan_path must be Path")
+    if not family_id.strip():
+        raise TypeError("family_id must be non-empty str")
+    if shard_index < 0:
+        raise TypeError("shard_index must be non-negative int")
+    _validate_local_worker_index(local_worker_index, stage_01_worker_count)
+
+    return [
+        sys.executable,
+        str((REPO_ROOT / WORKER_SCRIPT_PATH).resolve()),
+        "--drive-project-root",
+        str(drive_project_root),
+        "--family-id",
+        family_id,
+        "--shard-index",
+        str(shard_index),
+        "--stage-01-worker-count",
+        str(stage_01_worker_count),
+        "--local-worker-index",
+        str(local_worker_index),
+        "--worker-plan-path",
+        str(worker_plan_path),
+    ]
+
+
+def _prepare_local_worker_plans(
+    *,
+    drive_project_root: Path,
+    family_id: str,
+    shard_index: int,
+    shard_count: int,
+    stage_01_worker_count: int,
+    shard_root: Path,
+    default_config_path: Path,
+    assigned_events: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    Prepare shard-local worker plans and their fixed output paths.
+
+    Args:
+        drive_project_root: Drive project root path.
+        family_id: Family identifier.
+        shard_index: Shard index.
+        shard_count: Total shard count.
+        stage_01_worker_count: Total shard-local worker count.
+        shard_root: Shard root path.
+        default_config_path: Default config path.
+        assigned_events: Ordered shard-assigned events.
+
+    Returns:
+        Ordered worker-plan summaries.
+    """
+    _validate_stage_01_worker_count(stage_01_worker_count)
+
+    worker_plans: List[Dict[str, Any]] = []
+    for assignment in _build_local_worker_assignments(
+        assigned_events=assigned_events,
+        stage_01_worker_count=stage_01_worker_count,
+    ):
+        local_worker_index = int(assignment["local_worker_index"])
+        worker_root = ensure_directory(_build_worker_root(shard_root, local_worker_index))
+        worker_plan_path = _write_worker_plan(
+            worker_root=worker_root,
+            family_id=family_id,
+            shard_index=shard_index,
+            shard_count=shard_count,
+            stage_01_worker_count=stage_01_worker_count,
+            default_config_path=default_config_path,
+            shard_root=shard_root,
+            assignment=assignment,
+        )
+        worker_result_path = _build_worker_result_path(worker_root)
+        stdout_log_path, stderr_log_path = _build_worker_log_paths(worker_root)
+        worker_plans.append(
+            {
+                "local_worker_index": local_worker_index,
+                "worker_root": normalize_path_value(worker_root),
+                "worker_plan_path": normalize_path_value(worker_plan_path),
+                "worker_result_path": normalize_path_value(worker_result_path),
+                "stdout_log_path": normalize_path_value(stdout_log_path),
+                "stderr_log_path": normalize_path_value(stderr_log_path),
+                "assigned_event_ids": list(cast(List[str], assignment["assigned_event_ids"])),
+                "assigned_event_indices": list(cast(List[int], assignment["assigned_event_indices"])),
+                "local_event_ordinals": list(cast(List[int], assignment["local_event_ordinals"])),
+                "command": _build_worker_command(
+                    drive_project_root=drive_project_root,
+                    family_id=family_id,
+                    shard_index=shard_index,
+                    stage_01_worker_count=stage_01_worker_count,
+                    local_worker_index=local_worker_index,
+                    worker_plan_path=worker_plan_path,
+                ),
+            }
+        )
+    return worker_plans
+
+
+def _run_local_worker_plans(worker_plans: Sequence[Mapping[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Execute shard-local worker plans in subprocesses and collect their results.
+
+    Args:
+        worker_plans: Worker-plan summaries.
+
+    Returns:
+        Tuple of worker execution summaries and parsed worker results.
+    """
+    env_mapping = build_repo_import_subprocess_env(repo_root=REPO_ROOT)
+    launches: List[Dict[str, Any]] = []
+    for worker_plan in worker_plans:
+        worker_root = Path(str(worker_plan["worker_root"]))
+        stdout_log_path = Path(str(worker_plan["stdout_log_path"]))
+        stderr_log_path = Path(str(worker_plan["stderr_log_path"]))
+        ensure_directory(worker_root)
+        stdout_handle = stdout_log_path.open("w", encoding="utf-8")
+        stderr_handle = stderr_log_path.open("w", encoding="utf-8")
+        try:
+            process = subprocess.Popen(
+                list(cast(Sequence[str], worker_plan["command"])),
+                cwd=str(REPO_ROOT),
+                env=env_mapping,
+                stdout=stdout_handle,
+                stderr=stderr_handle,
+                text=True,
+            )
+        except Exception:
+            stdout_handle.close()
+            stderr_handle.close()
+            raise
+
+        launches.append(
+            {
+                "local_worker_index": int(worker_plan["local_worker_index"]),
+                "worker_root": worker_root,
+                "worker_plan_path": Path(str(worker_plan["worker_plan_path"])),
+                "worker_result_path": Path(str(worker_plan["worker_result_path"])),
+                "stdout_log_path": stdout_log_path,
+                "stderr_log_path": stderr_log_path,
+                "command": list(cast(Sequence[str], worker_plan["command"])),
+                "assigned_event_ids": list(cast(Sequence[str], worker_plan["assigned_event_ids"])),
+                "process": process,
+                "stdout_handle": stdout_handle,
+                "stderr_handle": stderr_handle,
+            }
+        )
+
+    worker_executions: List[Dict[str, Any]] = []
+    worker_results: List[Dict[str, Any]] = []
+    for launch in launches:
+        process = cast(subprocess.Popen[str], launch["process"])
+        return_code = int(process.wait())
+        cast(Any, launch["stdout_handle"]).close()
+        cast(Any, launch["stderr_handle"]).close()
+
+        worker_result_path = cast(Path, launch["worker_result_path"])
+        result_exists = worker_result_path.exists() and worker_result_path.is_file()
+        execution_summary = {
+            "local_worker_index": int(launch["local_worker_index"]),
+            "worker_root": normalize_path_value(cast(Path, launch["worker_root"])),
+            "worker_plan_path": normalize_path_value(cast(Path, launch["worker_plan_path"])),
+            "worker_result_path": normalize_path_value(worker_result_path),
+            "stdout_log_path": normalize_path_value(cast(Path, launch["stdout_log_path"])),
+            "stderr_log_path": normalize_path_value(cast(Path, launch["stderr_log_path"])),
+            "command": list(cast(List[str], launch["command"])),
+            "assigned_event_ids": list(cast(List[str], launch["assigned_event_ids"])),
+            "return_code": return_code,
+            "result_exists": result_exists,
+        }
+        worker_executions.append(execution_summary)
+        if result_exists:
+            worker_results.append(
+                _load_required_json_dict(
+                    worker_result_path,
+                    f"PW01 worker result {execution_summary['local_worker_index']}",
+                )
+            )
+
+    return worker_executions, worker_results
+
+
+def _collect_partial_worker_events(worker_results: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Collect partial worker-completed events in stable event-index order.
+
+    Args:
+        worker_results: Worker result payloads.
+
+    Returns:
+        Partial event manifest payloads.
+    """
+    partial_events: List[Dict[str, Any]] = []
+    for worker_result in worker_results:
+        events_node = worker_result.get("events")
+        if not isinstance(events_node, list):
+            continue
+        for event_node in cast(List[object], events_node):
+            if isinstance(event_node, dict):
+                partial_events.append(cast(Dict[str, Any], event_node))
+    partial_events.sort(key=lambda item: int(item.get("event_index", -1)))
+    return partial_events
+
+
+def _merge_completed_worker_events(
+    *,
+    worker_results: Sequence[Mapping[str, Any]],
+    assigned_event_ids: Sequence[str],
+) -> List[Dict[str, Any]]:
+    """
+    Merge worker-completed events and validate non-overlap plus full coverage.
+
+    Args:
+        worker_results: Worker result payloads.
+        assigned_event_ids: Ordered shard-assigned event ids.
+
+    Returns:
+        Ordered event manifest payloads.
+
+    Raises:
+        ValueError: If assignments overlap or coverage is incomplete.
+    """
+    expected_event_ids = [str(event_id) for event_id in assigned_event_ids]
+    expected_event_id_set = set(expected_event_ids)
+    assigned_by_worker: set[str] = set()
+    completed_by_worker: set[str] = set()
+    event_payload_by_id: Dict[str, Dict[str, Any]] = {}
+
+    for worker_result in sorted(worker_results, key=lambda item: int(item.get("local_worker_index", -1))):
+        worker_status = worker_result.get("status")
+        if worker_status != "completed":
+            raise ValueError(f"worker_result status must be completed, got: {worker_status}")
+
+        assigned_ids_node = worker_result.get("assigned_event_ids")
+        if not isinstance(assigned_ids_node, list):
+            raise ValueError("worker_result assigned_event_ids must be list")
+        for event_id in cast(List[object], assigned_ids_node):
+            if not isinstance(event_id, str) or not event_id:
+                raise ValueError("worker_result assigned_event_ids must contain non-empty str")
+            if event_id in assigned_by_worker:
+                raise ValueError(f"worker assigned events overlap: {event_id}")
+            assigned_by_worker.add(event_id)
+
+        events_node = worker_result.get("events")
+        if not isinstance(events_node, list):
+            raise ValueError("worker_result events must be list")
+        for event_node in cast(List[object], events_node):
+            if not isinstance(event_node, dict):
+                raise ValueError("worker_result events must contain objects")
+            event_payload = cast(Dict[str, Any], event_node)
+            event_id = event_payload.get("event_id")
+            if not isinstance(event_id, str) or not event_id:
+                raise ValueError("worker_result event missing event_id")
+            if event_id not in assigned_by_worker:
+                raise ValueError(f"worker completed unassigned event: {event_id}")
+            if event_id in completed_by_worker:
+                raise ValueError(f"worker completed events overlap: {event_id}")
+            completed_by_worker.add(event_id)
+            event_payload_by_id[event_id] = event_payload
+
+    if assigned_by_worker != expected_event_id_set:
+        raise ValueError(
+            "worker assigned events coverage mismatch: "
+            f"expected={sorted(expected_event_id_set)} actual={sorted(assigned_by_worker)}"
+        )
+    if completed_by_worker != expected_event_id_set:
+        raise ValueError(
+            "worker completed events coverage mismatch: "
+            f"expected={sorted(expected_event_id_set)} actual={sorted(completed_by_worker)}"
+        )
+
+    return [event_payload_by_id[event_id] for event_id in expected_event_ids]
+
+
+def _build_worker_state_rows(
+    *,
+    worker_plans: Sequence[Mapping[str, Any]],
+    worker_executions: Sequence[Mapping[str, Any]],
+    worker_results: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    Build manifest-friendly worker state rows.
+
+    Args:
+        worker_plans: Worker-plan summaries.
+        worker_executions: Worker execution summaries.
+        worker_results: Parsed worker result payloads.
+
+    Returns:
+        Ordered worker-state rows.
+    """
+    plan_by_index = {
+        int(plan["local_worker_index"]): cast(Dict[str, Any], dict(plan))
+        for plan in worker_plans
+    }
+    execution_by_index = {
+        int(execution["local_worker_index"]): cast(Dict[str, Any], dict(execution))
+        for execution in worker_executions
+    }
+    result_by_index = {
+        int(result["local_worker_index"]): cast(Dict[str, Any], dict(result))
+        for result in worker_results
+        if isinstance(result.get("local_worker_index"), int)
+    }
+
+    rows: List[Dict[str, Any]] = []
+    for local_worker_index in sorted(plan_by_index):
+        plan = plan_by_index[local_worker_index]
+        execution = execution_by_index.get(local_worker_index, {})
+        result = result_by_index.get(local_worker_index, {})
+        rows.append(
+            {
+                "local_worker_index": local_worker_index,
+                "worker_root": plan.get("worker_root"),
+                "worker_plan_path": plan.get("worker_plan_path"),
+                "worker_result_path": plan.get("worker_result_path"),
+                "stdout_log_path": plan.get("stdout_log_path"),
+                "stderr_log_path": plan.get("stderr_log_path"),
+                "command": plan.get("command"),
+                "assigned_event_ids": plan.get("assigned_event_ids", []),
+                "assigned_event_indices": plan.get("assigned_event_indices", []),
+                "local_event_ordinals": plan.get("local_event_ordinals", []),
+                "return_code": execution.get("return_code"),
+                "result_exists": execution.get("result_exists", False),
+                "status": result.get("status", "not_started"),
+                "completed_event_ids": result.get("completed_event_ids", []),
+                "failure_reason": result.get("failure_reason"),
+                "exception_type": result.get("exception_type"),
+                "exception_message": result.get("exception_message"),
+            }
+        )
+    return rows
+
+
+def _build_worker_execution_failure_payload(worker_executions: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+    """
+    Build a stable failure payload for shard-local worker execution failures.
+
+    Args:
+        worker_executions: Worker execution summaries.
+
+    Returns:
+        Failure payload mapping.
+    """
+    failed_workers = [
+        dict(worker_execution)
+        for worker_execution in worker_executions
+        if int(worker_execution.get("return_code", 1)) != 0 or not bool(worker_execution.get("result_exists", False))
+    ]
+    return {
+        "stage_name": "PW01_Source_Event_Shards",
+        "status": "failed",
+        "failure_reason": "pw01_worker_execution_failed",
+        "worker_count": len(worker_executions),
+        "failed_worker_count": len(failed_workers),
+        "worker_executions": [dict(worker_execution) for worker_execution in worker_executions],
+    }
+
+
+def _build_worker_result_payload(
+    *,
+    family_id: str,
+    shard_index: int,
+    shard_count: int,
+    stage_01_worker_count: int,
+    local_worker_index: int,
+    worker_root: Path,
+    worker_plan_path: Path,
+    assigned_event_ids: Sequence[str],
+    assigned_event_indices: Sequence[int],
+    events: Sequence[Mapping[str, Any]],
+    status: str,
+    failure_reason: str | None = None,
+    exception_type: str | None = None,
+    exception_message: str | None = None,
+) -> Dict[str, Any]:
+    """
+    Build the structured worker result payload.
+
+    Args:
+        family_id: Family identifier.
+        shard_index: Shard index.
+        shard_count: Total shard count.
+        stage_01_worker_count: Total shard-local worker count.
+        local_worker_index: Local worker index.
+        worker_root: Worker root path.
+        worker_plan_path: Worker plan path.
+        assigned_event_ids: Assigned event ids.
+        assigned_event_indices: Assigned event indices.
+        events: Event manifest payloads completed by this worker.
+        status: Worker status.
+        failure_reason: Optional failure reason.
+        exception_type: Optional exception type.
+        exception_message: Optional exception message.
+
+    Returns:
+        Worker result payload.
+    """
+    if not family_id.strip():
+        raise TypeError("family_id must be non-empty str")
+    if shard_index < 0:
+        raise TypeError("shard_index must be non-negative int")
+    if shard_count <= 0:
+        raise TypeError("shard_count must be positive int")
+    _validate_local_worker_index(local_worker_index, stage_01_worker_count)
+    if not isinstance(worker_root, Path):
+        raise TypeError("worker_root must be Path")
+    if not isinstance(worker_plan_path, Path):
+        raise TypeError("worker_plan_path must be Path")
+    if status not in {"completed", "failed"}:
+        raise ValueError("worker status must be 'completed' or 'failed'")
+
+    completed_event_ids: List[str] = []
+    for event in events:
+        event_id = event.get("event_id")
+        if not isinstance(event_id, str) or not event_id:
+            raise ValueError("worker event manifest missing event_id")
+        completed_event_ids.append(event_id)
+
+    return {
+        "artifact_type": "paper_workflow_source_shard_worker_result",
+        "schema_version": "pw_stage_01_v1",
+        "stage_name": "PW01_Source_Event_Shards",
+        "family_id": family_id,
+        "sample_role": ACTIVE_SAMPLE_ROLE,
+        "shard_index": shard_index,
+        "source_shard_count": shard_count,
+        "stage_01_worker_count": stage_01_worker_count,
+        "local_worker_index": local_worker_index,
+        "worker_root": normalize_path_value(worker_root),
+        "worker_plan_path": normalize_path_value(worker_plan_path),
+        "worker_result_path": normalize_path_value(_build_worker_result_path(worker_root)),
+        "status": status,
+        "assigned_event_ids": [str(event_id) for event_id in assigned_event_ids],
+        "assigned_event_indices": [int(event_index) for event_index in assigned_event_indices],
+        "assigned_event_count": len(assigned_event_ids),
+        "completed_event_ids": completed_event_ids,
+        "completed_event_count": len(completed_event_ids),
+        "events": [dict(event) for event in events],
+        "failure_reason": failure_reason,
+        "exception_type": exception_type,
+        "exception_message": exception_message,
+    }
 
 
 def _run_positive_source_event(
@@ -245,7 +989,9 @@ def _run_positive_source_event(
     event_id = event.get("event_id")
     sample_role = event.get("sample_role")
     event_index = event.get("event_index")
-    source_prompt_index = event.get("prompt_index")
+    source_prompt_index = event.get("source_prompt_index")
+    if source_prompt_index is None:
+        source_prompt_index = event.get("prompt_index")
     prompt_text = event.get("prompt_text")
     prompt_sha256 = event.get("prompt_sha256")
     seed = event.get("seed")
@@ -395,12 +1141,167 @@ def _run_positive_source_event(
     return event_manifest_payload
 
 
+def run_pw01_source_event_shard_worker(
+    *,
+    drive_project_root: Path,
+    family_id: str,
+    shard_index: int,
+    stage_01_worker_count: int,
+    local_worker_index: int,
+    worker_plan_path: Path,
+) -> Dict[str, Any]:
+    """
+    Execute one shard-local PW01 worker from a persisted worker plan.
+
+    Args:
+        drive_project_root: Drive project root path.
+        family_id: Family identifier.
+        shard_index: Shard index.
+        stage_01_worker_count: Total shard-local worker count.
+        local_worker_index: Local worker index.
+        worker_plan_path: Worker plan JSON path.
+
+    Returns:
+        Worker result payload.
+    """
+    if not isinstance(drive_project_root, Path):
+        raise TypeError("drive_project_root must be Path")
+    if not family_id.strip():
+        raise TypeError("family_id must be non-empty str")
+    if shard_index < 0:
+        raise TypeError("shard_index must be non-negative int")
+    _validate_local_worker_index(local_worker_index, stage_01_worker_count)
+    if not isinstance(worker_plan_path, Path):
+        raise TypeError("worker_plan_path must be Path")
+
+    normalized_drive_root = drive_project_root.expanduser().resolve()
+    family_root = build_family_root(normalized_drive_root, family_id)
+    worker_plan = _load_required_json_dict(worker_plan_path, "PW01 worker plan")
+
+    plan_family_id = worker_plan.get("family_id")
+    if plan_family_id != family_id:
+        raise ValueError(f"worker plan family_id mismatch: expected={family_id}, actual={plan_family_id}")
+    plan_shard_index = worker_plan.get("shard_index")
+    if not isinstance(plan_shard_index, int) or int(plan_shard_index) != shard_index:
+        raise ValueError(f"worker plan shard_index mismatch: expected={shard_index}, actual={plan_shard_index}")
+    plan_stage_01_worker_count = worker_plan.get("stage_01_worker_count")
+    if not isinstance(plan_stage_01_worker_count, int) or int(plan_stage_01_worker_count) != stage_01_worker_count:
+        raise ValueError(
+            "worker plan stage_01_worker_count mismatch: "
+            f"expected={stage_01_worker_count}, actual={plan_stage_01_worker_count}"
+        )
+    plan_local_worker_index = worker_plan.get("local_worker_index")
+    if not isinstance(plan_local_worker_index, int) or int(plan_local_worker_index) != local_worker_index:
+        raise ValueError(
+            "worker plan local_worker_index mismatch: "
+            f"expected={local_worker_index}, actual={plan_local_worker_index}"
+        )
+
+    default_config_path_value = worker_plan.get("default_config_path")
+    if not isinstance(default_config_path_value, str) or not default_config_path_value:
+        raise ValueError("worker plan missing default_config_path")
+    default_config_path = Path(default_config_path_value).expanduser().resolve()
+    default_cfg_obj = load_yaml_mapping(default_config_path)
+
+    shard_root_value = worker_plan.get("shard_root")
+    if not isinstance(shard_root_value, str) or not shard_root_value:
+        raise ValueError("worker plan missing shard_root")
+    shard_root = Path(shard_root_value).expanduser().resolve()
+    validate_path_within_base(family_root, shard_root, "worker shard root")
+
+    worker_root = _build_worker_root(shard_root, local_worker_index)
+    ensure_directory(worker_root)
+    worker_result_path = _build_worker_result_path(worker_root)
+    validate_path_within_base(shard_root, worker_result_path, "worker result path")
+
+    plan_assigned_event_ids = worker_plan.get("assigned_event_ids")
+    if not isinstance(plan_assigned_event_ids, list):
+        raise ValueError("worker plan assigned_event_ids must be list")
+    assigned_event_ids = [
+        str(event_id)
+        for event_id in cast(List[object], plan_assigned_event_ids)
+        if isinstance(event_id, str) and event_id
+    ]
+    if len(assigned_event_ids) != len(plan_assigned_event_ids):
+        raise ValueError("worker plan assigned_event_ids must contain non-empty str")
+
+    plan_assigned_event_indices = worker_plan.get("assigned_event_indices")
+    if not isinstance(plan_assigned_event_indices, list):
+        raise ValueError("worker plan assigned_event_indices must be list")
+    assigned_event_indices = [
+        int(event_index)
+        for event_index in cast(List[object], plan_assigned_event_indices)
+        if isinstance(event_index, int) and event_index >= 0
+    ]
+    if len(assigned_event_indices) != len(plan_assigned_event_indices):
+        raise ValueError("worker plan assigned_event_indices must contain non-negative int")
+
+    assigned_events_node = worker_plan.get("assigned_events")
+    if not isinstance(assigned_events_node, list):
+        raise ValueError("worker plan assigned_events must be list")
+    assigned_events = [
+        cast(Dict[str, Any], event_node)
+        for event_node in cast(List[object], assigned_events_node)
+        if isinstance(event_node, dict)
+    ]
+    if len(assigned_events) != len(assigned_events_node):
+        raise ValueError("worker plan assigned_events must contain objects")
+
+    executed_events: List[Dict[str, Any]] = []
+    try:
+        for event in assigned_events:
+            executed_events.append(
+                _run_positive_source_event(
+                    event=event,
+                    shard_root=shard_root,
+                    default_cfg_obj=default_cfg_obj,
+                )
+            )
+
+        worker_result = _build_worker_result_payload(
+            family_id=family_id,
+            shard_index=shard_index,
+            shard_count=int(worker_plan.get("source_shard_count", 0)),
+            stage_01_worker_count=stage_01_worker_count,
+            local_worker_index=local_worker_index,
+            worker_root=worker_root,
+            worker_plan_path=worker_plan_path,
+            assigned_event_ids=assigned_event_ids,
+            assigned_event_indices=assigned_event_indices,
+            events=executed_events,
+            status="completed",
+        )
+        write_json_atomic(worker_result_path, worker_result)
+        return worker_result
+    except Exception as exc:
+        worker_result = _build_worker_result_payload(
+            family_id=family_id,
+            shard_index=shard_index,
+            shard_count=int(worker_plan.get("source_shard_count", 0)),
+            stage_01_worker_count=stage_01_worker_count,
+            local_worker_index=local_worker_index,
+            worker_root=worker_root,
+            worker_plan_path=worker_plan_path,
+            assigned_event_ids=assigned_event_ids,
+            assigned_event_indices=assigned_event_indices,
+            events=executed_events,
+            status="failed",
+            failure_reason="pw01_worker_event_execution_failed",
+            exception_type=type(exc).__name__,
+            exception_message=str(exc),
+        )
+        worker_result["traceback"] = traceback.format_exc()
+        write_json_atomic(worker_result_path, worker_result)
+        return worker_result
+
+
 def run_pw01_source_event_shard(
     *,
     drive_project_root: Path,
     family_id: str,
     shard_index: int,
     shard_count: int,
+    stage_01_worker_count: int = DEFAULT_STAGE_01_WORKER_COUNT,
     force_rerun: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -422,6 +1323,7 @@ def run_pw01_source_event_shard(
         raise TypeError("shard_index must be non-negative int")
     if shard_count <= 0:
         raise TypeError("shard_count must be positive int")
+    _validate_stage_01_worker_count(stage_01_worker_count)
 
     normalized_drive_root = drive_project_root.expanduser().resolve()
     family_root = build_family_root(normalized_drive_root, family_id)
@@ -495,6 +1397,8 @@ def run_pw01_source_event_shard(
         "sample_role": ACTIVE_SAMPLE_ROLE,
         "shard_index": shard_index,
         "source_shard_count": shard_count,
+        "stage_01_worker_count": stage_01_worker_count,
+        "worker_execution_mode": "single_process" if stage_01_worker_count == 1 else "shard_local_subprocess_parallel",
         "status": "running",
         "created_at": utc_now_iso(),
         "force_rerun": bool(force_rerun),
@@ -505,6 +1409,7 @@ def run_pw01_source_event_shard(
         "shard_root": normalize_path_value(shard_root),
         "assigned_event_ids": assigned_event_ids,
         "event_count": len(assigned_event_ids),
+        "workers": [],
         "events": [],
         "failure_reason": None,
         "traceback": None,
@@ -512,19 +1417,58 @@ def run_pw01_source_event_shard(
     write_json_atomic(shard_manifest_path, running_manifest)
 
     executed_events: List[Dict[str, Any]] = []
+    worker_plans: List[Dict[str, Any]] = []
+    worker_executions: List[Dict[str, Any]] = []
+    worker_results: List[Dict[str, Any]] = []
     try:
-        for event in assigned_events:
-            executed_events.append(
-                _run_positive_source_event(
-                    event=event,
-                    shard_root=shard_root,
-                    default_cfg_obj=default_cfg_obj,
+        if stage_01_worker_count == 1:
+            for event in assigned_events:
+                executed_events.append(
+                    _run_positive_source_event(
+                        event=event,
+                        shard_root=shard_root,
+                        default_cfg_obj=default_cfg_obj,
+                    )
                 )
+        else:
+            worker_plans = _prepare_local_worker_plans(
+                drive_project_root=normalized_drive_root,
+                family_id=family_id,
+                shard_index=shard_index,
+                shard_count=shard_count,
+                stage_01_worker_count=stage_01_worker_count,
+                shard_root=shard_root,
+                default_config_path=default_config_path,
+                assigned_events=assigned_events,
+            )
+            running_manifest["workers"] = _build_worker_state_rows(
+                worker_plans=worker_plans,
+                worker_executions=[],
+                worker_results=[],
+            )
+            write_json_atomic(shard_manifest_path, running_manifest)
+
+            worker_executions, worker_results = _run_local_worker_plans(worker_plans)
+            if len(worker_results) != stage_01_worker_count or any(
+                worker_result.get("status") != "completed" for worker_result in worker_results
+            ):
+                raise RuntimeError(
+                    "PW01 shard-local worker execution failed: "
+                    f"{json.dumps(_build_worker_execution_failure_payload(worker_executions), ensure_ascii=False, sort_keys=True)}"
+                )
+            executed_events = _merge_completed_worker_events(
+                worker_results=worker_results,
+                assigned_event_ids=assigned_event_ids,
             )
 
         completed_manifest = dict(running_manifest)
         completed_manifest["status"] = "completed"
         completed_manifest["completed_at"] = utc_now_iso()
+        completed_manifest["workers"] = _build_worker_state_rows(
+            worker_plans=worker_plans,
+            worker_executions=worker_executions,
+            worker_results=worker_results,
+        )
         completed_manifest["events"] = executed_events
         write_json_atomic(shard_manifest_path, completed_manifest)
 
@@ -535,6 +1479,7 @@ def run_pw01_source_event_shard(
             "sample_role": ACTIVE_SAMPLE_ROLE,
             "shard_index": shard_index,
             "source_shard_count": shard_count,
+            "stage_01_worker_count": stage_01_worker_count,
             "event_count": len(executed_events),
             "shard_root": normalize_path_value(shard_root),
             "shard_manifest_path": normalize_path_value(shard_manifest_path),
@@ -543,7 +1488,12 @@ def run_pw01_source_event_shard(
         failed_manifest = dict(running_manifest)
         failed_manifest["status"] = "failed"
         failed_manifest["failed_at"] = utc_now_iso()
-        failed_manifest["events"] = executed_events
+        failed_manifest["workers"] = _build_worker_state_rows(
+            worker_plans=worker_plans,
+            worker_executions=worker_executions,
+            worker_results=worker_results,
+        )
+        failed_manifest["events"] = executed_events or _collect_partial_worker_events(worker_results)
         failed_manifest["failure_reason"] = str(exc)
         failed_manifest["traceback"] = traceback.format_exc()
         write_json_atomic(shard_manifest_path, failed_manifest)
