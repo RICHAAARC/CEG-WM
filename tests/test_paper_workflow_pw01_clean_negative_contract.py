@@ -69,7 +69,7 @@ def _write_bound_config_snapshot(drive_project_root: Path, *, marker: str) -> Pa
     return bound_config_path
 
 
-def _patch_clean_negative_runner(monkeypatch: pytest.MonkeyPatch) -> None:
+def _patch_clean_negative_runner(monkeypatch: pytest.MonkeyPatch) -> Dict[str, Any]:
     """
     Patch PW01 clean_negative runtime calls to lightweight stubs.
 
@@ -77,8 +77,13 @@ def _patch_clean_negative_runner(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch: Pytest monkeypatch fixture.
 
     Returns:
-        None.
+        Captured stage input payloads.
     """
+
+    captures: Dict[str, Any] = {
+        "detect_probe_inputs": [],
+        "detect_inputs": [],
+    }
 
     def fake_build_stage_command(stage_name: str, config_path: Path, run_root: Path) -> list[str]:
         return [stage_name, str(config_path), str(run_root)]
@@ -125,6 +130,7 @@ def _patch_clean_negative_runner(monkeypatch: pytest.MonkeyPatch) -> None:
         (logs_root / f"{stage_name}_stderr.log").write_text("\n", encoding="utf-8")
 
         if stage_name == "detect_probe":
+            captures["detect_probe_inputs"].append(_read_detect_input_record(command))
             write_json_atomic(
                 records_root / "detect_record.json",
                 {
@@ -147,6 +153,7 @@ def _patch_clean_negative_runner(monkeypatch: pytest.MonkeyPatch) -> None:
             )
         elif stage_name == "detect":
             detect_input_record = _read_detect_input_record(command)
+            captures["detect_inputs"].append(dict(detect_input_record))
             expected_plan_digest = detect_input_record.get("plan_digest")
             expected_basis_digest = detect_input_record.get("basis_digest")
             has_expected_plan = isinstance(expected_plan_digest, str) and bool(expected_plan_digest)
@@ -297,6 +304,8 @@ def _patch_clean_negative_runner(monkeypatch: pytest.MonkeyPatch) -> None:
         },
     )
 
+    return captures
+
 
 def test_pw01_clean_negative_writes_statement_only_provenance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """
@@ -426,3 +435,71 @@ def test_pw01_clean_negative_final_detect_consumes_probe_plan_anchors(
     assert detect_record["content_evidence_payload"].get("content_failure_reason") is None
     assert detect_input_record["plan_digest"] == staged_embed_record["plan_digest"]
     assert detect_input_record["basis_digest"] == staged_embed_record["basis_digest"]
+    assert detect_input_record["plan_input_digest"] == staged_embed_record["plan_input_digest"]
+    assert detect_input_record["plan_input_schema_version"] == staged_embed_record["plan_input_schema_version"]
+    assert detect_input_record["subspace_planner_impl_identity"] == staged_embed_record["subspace_planner_impl_identity"]
+    assert detect_input_record["subspace_plan"] == staged_embed_record["subspace_plan"]
+
+
+def test_pw01_clean_negative_probe_and_final_detect_inputs_freeze_context_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Freeze the current clean_negative boundary between probe and final detect inputs.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+
+    Notes:
+        The current architecture intentionally keeps probe detect and final detect
+        in different attestation-conditioned input layers. This test freezes that
+        asymmetry as a design boundary and simultaneously asserts that the final
+        detect planner truth is still the probe-derived planner bundle, not a
+        second detect-side canonical planner object.
+    """
+    _build_pw00_family(tmp_path, family_id="family_clean_negative_context_boundary")
+    bound_config_path = _write_bound_config_snapshot(
+        tmp_path / "drive",
+        marker="family_clean_negative_context_boundary",
+    )
+    captures = _patch_clean_negative_runner(monkeypatch)
+
+    summary = pw01_module.run_pw01_source_event_shard(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_clean_negative_context_boundary",
+        sample_role="clean_negative",
+        shard_index=0,
+        shard_count=2,
+        bound_config_path=bound_config_path,
+    )
+
+    shard_root = Path(str(summary["shard_root"]))
+    shard_manifest = json.loads((shard_root / "shard_manifest.json").read_text(encoding="utf-8"))
+    first_event = cast(Dict[str, Any], shard_manifest["events"][0])
+    staged_embed_record = json.loads(Path(str(first_event["embed_record_path"])).read_text(encoding="utf-8"))
+
+    event_count = len(cast(list[Dict[str, Any]], shard_manifest["events"]))
+
+    assert len(captures["detect_probe_inputs"]) == event_count
+    assert len(captures["detect_inputs"]) == event_count
+
+    probe_input_record = cast(Dict[str, Any], captures["detect_probe_inputs"][0])
+    final_input_record = cast(Dict[str, Any], captures["detect_inputs"][0])
+
+    assert "negative_branch_source_attestation_provenance" not in probe_input_record
+    assert "plan_digest" not in probe_input_record
+    assert "basis_digest" not in probe_input_record
+    assert "subspace_plan" not in probe_input_record
+
+    assert final_input_record["negative_branch_source_attestation_provenance"]["statement"]["plan_digest"] == "plan-probe"
+    assert final_input_record["plan_digest"] == "plan-probe"
+    assert final_input_record["basis_digest"] == "basis-probe"
+    assert final_input_record["plan_input_digest"] == "plan-input-probe"
+    assert final_input_record["plan_input_schema_version"] == "v2"
+    assert final_input_record["subspace_planner_impl_identity"] == staged_embed_record["subspace_planner_impl_identity"]
+    assert final_input_record["subspace_plan"] == staged_embed_record["subspace_plan"]
