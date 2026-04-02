@@ -1,5 +1,5 @@
 """
-File purpose: CLI entrypoint for PW01 positive source event shards.
+File purpose: CLI entrypoint for PW01 source event shards.
 Module type: General module
 """
 
@@ -23,9 +23,14 @@ def main() -> int:
     Returns:
         Process-style exit code.
     """
-    parser = argparse.ArgumentParser(description="Run one PW01 positive_source shard.")
+    parser = argparse.ArgumentParser(description="Run one PW01 source-role shard.")
     parser.add_argument("--drive-project-root", required=True, help="Google Drive project root path.")
     parser.add_argument("--family-id", required=True, help="Paper workflow family identifier.")
+    parser.add_argument(
+        "--sample-role",
+        default="positive_source",
+        help="Source sample role for this shard. Supported values: positive_source, clean_negative.",
+    )
     parser.add_argument("--shard-index", required=True, type=int, help="Zero-based shard index.")
     parser.add_argument("--shard-count", required=True, type=int, help="Total shard count.")
     parser.add_argument(
@@ -45,6 +50,7 @@ def main() -> int:
     summary = run_pw01_source_event_shard(
         drive_project_root=Path(args.drive_project_root),
         family_id=str(args.family_id),
+        sample_role=str(args.sample_role),
         shard_index=int(args.shard_index),
         shard_count=int(args.shard_count),
         stage_01_worker_count=int(args.stage_01_worker_count),

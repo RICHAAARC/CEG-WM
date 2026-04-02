@@ -67,7 +67,7 @@ def _write_bound_config_snapshot(drive_project_root: Path, *, marker: str) -> Pa
     return bound_config_path
 
 
-def _load_shard_assigned_events(summary: Dict[str, Any], shard_index: int) -> List[Dict[str, Any]]:
+def _load_shard_assigned_events(summary: Dict[str, Any], shard_index: int, sample_role: str) -> List[Dict[str, Any]]:
     """
     Load the ordered assigned events for one shard from the PW00 fixture outputs.
 
@@ -79,8 +79,9 @@ def _load_shard_assigned_events(summary: Dict[str, Any], shard_index: int) -> Li
         Ordered shard-assigned events.
     """
     shard_plan = json.loads(Path(str(summary["source_shard_plan_path"])).read_text(encoding="utf-8"))
-    shard_assignment = pw01_module.resolve_positive_shard_assignment(
+    shard_assignment = pw01_module.resolve_source_shard_assignment(
         shard_plan,
+        sample_role=sample_role,
         shard_index=shard_index,
         shard_count=2,
     )
@@ -118,24 +119,26 @@ def test_pw01_parallel_worker_paths_are_isolated_between_shards(tmp_path: Path) 
     shard_00_plans = pw01_module._prepare_local_worker_plans(
         drive_project_root=tmp_path / "drive",
         family_id="family_parallel_isolation",
+        sample_role="positive_source",
         shard_index=0,
         shard_count=2,
         stage_01_worker_count=2,
         shard_root=shard_00_root,
         default_config_path=default_config_path,
         bound_config_path=bound_config_path,
-        assigned_events=_load_shard_assigned_events(summary, 0),
+        assigned_events=_load_shard_assigned_events(summary, 0, "positive_source"),
     )
     shard_01_plans = pw01_module._prepare_local_worker_plans(
         drive_project_root=tmp_path / "drive",
         family_id="family_parallel_isolation",
+        sample_role="positive_source",
         shard_index=1,
         shard_count=2,
         stage_01_worker_count=2,
         shard_root=shard_01_root,
         default_config_path=default_config_path,
         bound_config_path=bound_config_path,
-        assigned_events=_load_shard_assigned_events(summary, 1),
+        assigned_events=_load_shard_assigned_events(summary, 1, "positive_source"),
     )
 
     observed_paths = set()
@@ -159,3 +162,60 @@ def test_pw01_parallel_worker_paths_are_isolated_between_shards(tmp_path: Path) 
     assert {plan["local_worker_index"] for plan in shard_01_plans} == {0, 1}
     assert all(Path(str(plan["bound_config_path"])).resolve() == bound_config_path.resolve() for plan in shard_00_plans)
     assert all(Path(str(plan["bound_config_path"])).resolve() == bound_config_path.resolve() for plan in shard_01_plans)
+
+
+def test_pw01_parallel_worker_paths_are_isolated_between_negative_shards(tmp_path: Path) -> None:
+    """
+    Keep clean_negative worker plans isolated across concurrent negative shards.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    summary = _build_pw00_family(tmp_path, family_id="family_parallel_negative")
+    bound_config_path = _write_bound_config_snapshot(tmp_path / "drive", marker="family_parallel_negative")
+    family_manifest = json.loads(
+        Path(str(summary["paper_eval_family_manifest_path"])).read_text(encoding="utf-8")
+    )
+    default_config_path = pw01_module._resolve_default_config_path(family_manifest)
+    family_root = Path(str(summary["family_root"]))
+
+    shard_00_root = ensure_directory(pw01_module._build_role_shard_root(family_root, "clean_negative", 0))
+    shard_01_root = ensure_directory(pw01_module._build_role_shard_root(family_root, "clean_negative", 1))
+
+    shard_00_plans = pw01_module._prepare_local_worker_plans(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_parallel_negative",
+        sample_role="clean_negative",
+        shard_index=0,
+        shard_count=2,
+        stage_01_worker_count=2,
+        shard_root=shard_00_root,
+        default_config_path=default_config_path,
+        bound_config_path=bound_config_path,
+        assigned_events=_load_shard_assigned_events(summary, 0, "clean_negative"),
+    )
+    shard_01_plans = pw01_module._prepare_local_worker_plans(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_parallel_negative",
+        sample_role="clean_negative",
+        shard_index=1,
+        shard_count=2,
+        stage_01_worker_count=2,
+        shard_root=shard_01_root,
+        default_config_path=default_config_path,
+        bound_config_path=bound_config_path,
+        assigned_events=_load_shard_assigned_events(summary, 1, "clean_negative"),
+    )
+
+    assert shard_00_root != shard_01_root
+    assert all(
+        Path(str(plan["worker_root"])).resolve().is_relative_to(shard_00_root.resolve())
+        for plan in shard_00_plans
+    )
+    assert all(
+        Path(str(plan["worker_root"])).resolve().is_relative_to(shard_01_root.resolve())
+        for plan in shard_01_plans
+    )

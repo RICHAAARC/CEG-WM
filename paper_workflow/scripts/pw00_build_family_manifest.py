@@ -19,14 +19,17 @@ from scripts.notebook_runtime_common import (
 
 from paper_workflow.scripts.pw_common import (
     ACTIVE_SAMPLE_ROLE,
+    ACTIVE_SOURCE_SAMPLE_ROLES,
+    CLEAN_NEGATIVE_SAMPLE_ROLE,
     DEFAULT_CONFIG_RELATIVE_PATH,
     DEFAULT_PW_BASE_CONFIG_RELATIVE_PATH,
     RESERVED_SAMPLE_ROLES,
     SOURCE_TRUTH_STAGE,
     build_family_root,
     build_method_identity_snapshot,
-    build_positive_source_event_grid,
+    build_source_event_grid,
     build_source_shard_plan,
+    build_source_split_plan,
     ensure_family_layout,
     load_default_config_snapshot,
     load_prompt_lines,
@@ -122,16 +125,38 @@ def run_pw00_build_family_manifest(
     prompt_path, prompt_lines = load_prompt_lines(prompt_file)
     prompt_file_normalized = normalize_path_value(prompt_path)
 
-    event_grid = build_positive_source_event_grid(
+    calibration_fraction_raw = pw_base_cfg.get("calibration_fraction")
+    if not isinstance(calibration_fraction_raw, (int, float)) or isinstance(calibration_fraction_raw, bool):
+        raise TypeError("paper_workflow/configs/pw_base.yaml calibration_fraction must be numeric")
+    calibration_fraction = float(calibration_fraction_raw)
+
+    event_grid = build_source_event_grid(
         family_id=family_id,
         prompt_lines=prompt_lines,
         seeds=normalized_seeds,
         prompt_file=prompt_file_normalized,
+        sample_roles=ACTIVE_SOURCE_SAMPLE_ROLES,
     )
     source_shard_plan = build_source_shard_plan(
         family_id=family_id,
         source_shard_count=source_shard_count,
         events=event_grid,
+    )
+    source_split_plan = build_source_split_plan(
+        family_id=family_id,
+        events=event_grid,
+        calibration_fraction=calibration_fraction,
+    )
+
+    positive_source_event_count = sum(
+        1
+        for event in event_grid
+        if str(event.get("sample_role")) == ACTIVE_SAMPLE_ROLE
+    )
+    clean_negative_event_count = sum(
+        1
+        for event in event_grid
+        if str(event.get("sample_role")) == CLEAN_NEGATIVE_SAMPLE_ROLE
     )
 
     default_cfg_path = (REPO_ROOT / DEFAULT_CONFIG_RELATIVE_PATH).resolve()
@@ -154,16 +179,16 @@ def run_pw00_build_family_manifest(
         "family_root_relative": "paper_workflow/families",
         "source_truth_stage": SOURCE_TRUTH_STAGE,
         "stage_boundary": {
-            "implemented": ["PW00", "PW01"],
+            "implemented": ["PW00", "PW01", "PW02"],
             "excluded": [
-                "PW02_Source_Merge_And_Global_Thresholds",
-                "clean_negative_source_shards",
+                "PW03",
+                "PW04",
+                "PW05",
                 "attack_event_shards",
-                "release_signoff",
             ],
         },
         "sample_roles": {
-            "active": [ACTIVE_SAMPLE_ROLE],
+            "active": list(ACTIVE_SOURCE_SAMPLE_ROLES),
             "reserved": list(RESERVED_SAMPLE_ROLES),
         },
         "event_identity": {
@@ -183,19 +208,25 @@ def run_pw00_build_family_manifest(
             "seed_list": list(normalized_seeds),
             "seed_count": len(normalized_seeds),
             "source_shard_count": source_shard_count,
+            "calibration_fraction": calibration_fraction,
         },
         "counts": {
-            "positive_source_event_count": len(event_grid),
+            "positive_source_event_count": positive_source_event_count,
+            "clean_negative_event_count": clean_negative_event_count,
+            "calibration_event_count": len(source_split_plan["calib_pos_event_ids"]) + len(source_split_plan["calib_neg_event_ids"]),
+            "evaluate_event_count": len(source_split_plan["eval_pos_event_ids"]) + len(source_split_plan["eval_neg_event_ids"]),
             "total_event_count": len(event_grid),
         },
         "paths": {
             "paper_eval_family_manifest": normalize_path_value(layout["family_manifest_path"]),
             "source_event_grid": normalize_path_value(layout["source_event_grid_path"]),
             "source_shard_plan": normalize_path_value(layout["source_shard_plan_path"]),
+            "source_split_plan": normalize_path_value(layout["source_split_plan_path"]),
             "prompt_snapshot": normalize_path_value(layout["prompt_snapshot_path"]),
             "method_identity_snapshot": normalize_path_value(layout["method_identity_snapshot_path"]),
             "config_snapshot": normalize_path_value(layout["config_snapshot_path"]),
         },
+        "source_split": source_split_plan,
         "default_config_path": normalize_path_value(default_cfg_path),
         "pw_base_config_path": normalize_path_value((REPO_ROOT / DEFAULT_PW_BASE_CONFIG_RELATIVE_PATH).resolve()),
     }
@@ -205,6 +236,7 @@ def run_pw00_build_family_manifest(
     write_yaml_mapping(layout["config_snapshot_path"], config_snapshot)
     write_jsonl(layout["source_event_grid_path"], event_grid)
     write_json_atomic(layout["source_shard_plan_path"], source_shard_plan)
+    write_json_atomic(layout["source_split_plan_path"], source_split_plan)
     write_json_atomic(layout["family_manifest_path"], family_manifest)
 
     summary_path = layout["runtime_state_root"] / "pw00_summary.json"
@@ -217,6 +249,7 @@ def run_pw00_build_family_manifest(
         "paper_eval_family_manifest_path": normalize_path_value(layout["family_manifest_path"]),
         "source_event_grid_path": normalize_path_value(layout["source_event_grid_path"]),
         "source_shard_plan_path": normalize_path_value(layout["source_shard_plan_path"]),
+        "source_split_plan_path": normalize_path_value(layout["source_split_plan_path"]),
         "event_count": len(event_grid),
         "source_shard_count": source_shard_count,
     }

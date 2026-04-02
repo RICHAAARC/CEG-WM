@@ -20,6 +20,7 @@ from scripts.notebook_runtime_common import REPO_ROOT, build_repo_import_subproc
 
 NOTEBOOK_PW00_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW00_Paper_Eval_Family_Manifest.ipynb"
 NOTEBOOK_PW01_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW01_Source_Event_Shards.ipynb"
+NOTEBOOK_PW02_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW02_Source_Merge_And_Global_Thresholds.ipynb"
 
 
 def _load_notebook(notebook_path: Path) -> Dict[str, Any]:
@@ -82,6 +83,8 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     pw00_execute = _find_code_cell_source(NOTEBOOK_PW00_PATH, "COMMAND = [")
     pw01_constants = _find_code_cell_source(NOTEBOOK_PW01_PATH, "SCRIPT_PATH = REPO_ROOT")
     pw01_execute = _find_code_cell_source(NOTEBOOK_PW01_PATH, "COMMAND = [")
+    pw02_constants = _find_code_cell_source(NOTEBOOK_PW02_PATH, "SCRIPT_PATH = REPO_ROOT")
+    pw02_execute = _find_code_cell_source(NOTEBOOK_PW02_PATH, "COMMAND = [")
 
     assert '"PW00_Paper_Eval_Family_Manifest.py"' in pw00_constants
     assert '"--drive-project-root"' in pw00_execute
@@ -91,9 +94,12 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     assert '"--source-shard-count"' in pw00_execute
 
     assert '"PW01_Source_Event_Shards.py"' in pw01_constants
+    assert 'SAMPLE_ROLE = "positive_source"' in pw01_constants
     assert 'STAGE_01_WORKER_COUNT = 2' in pw01_constants
     assert '"--drive-project-root"' in pw01_execute
     assert '"--family-id"' in pw01_execute
+    assert '"--sample-role"' in pw01_execute
+    assert 'SAMPLE_ROLE' in pw01_execute
     assert '"--shard-index"' in pw01_execute
     assert '"--shard-count"' in pw01_execute
     assert '"--stage-01-worker-count"' in pw01_execute
@@ -101,6 +107,10 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     assert '"--bound-config-path"' in pw01_execute
     assert 'str(PW01_BOUND_CONFIG_PATH)' in pw01_execute
     assert '"--force-rerun"' in pw01_execute
+
+    assert '"PW02_Source_Merge_And_Global_Thresholds.py"' in pw02_constants
+    assert '"--drive-project-root"' in pw02_execute
+    assert '"--family-id"' in pw02_execute
 
 
 def test_pw01_notebook_passes_precheck_bound_config_to_execute_and_parallel_plan() -> None:
@@ -121,10 +131,14 @@ def test_pw01_notebook_passes_precheck_bound_config_to_execute_and_parallel_plan
     assert "PW01_BOUND_CONFIG_PATH = PRECHECK_BOUND_CONFIG_PATH" in pw01_precheck
     assert "write_yaml_mapping(PW01_BOUND_CONFIG_PATH, PRECHECK_BOUND_CFG)" in pw01_precheck
     assert "STAGE_01_PREFLIGHT = detect_stage_01_preflight(PW01_BOUND_CONFIG_PATH)" in pw01_precheck
+    assert '"sample_role 合法"' in pw01_precheck
+    assert 'SAMPLE_ROLE in manifest_sample_roles' in pw01_precheck
     assert '"--bound-config-path"' in pw01_execute
     assert 'str(PW01_BOUND_CONFIG_PATH)' in pw01_execute
     assert '"--bound-config-path"' in pw01_parallel_plan
     assert 'str(PW01_BOUND_CONFIG_PATH)' in pw01_parallel_plan
+    assert '"--sample-role"' in pw01_parallel_plan
+    assert 'SAMPLE_ROLE' in pw01_parallel_plan
 
 
 def test_pw01_notebook_wraps_command_with_gpu_peak_monitor_and_reads_shard_manifest_contract() -> None:
@@ -145,7 +159,7 @@ def test_pw01_notebook_wraps_command_with_gpu_peak_monitor_and_reads_shard_manif
     assert 'MONITORED_COMMAND = [' in pw01_execute
     assert 'PW01_RESULT = subprocess.run(' in pw01_execute
     assert 'MONITORED_COMMAND,' in pw01_execute
-    assert 'SHARD_ROOT = FAMILY_ROOT / "source_shards" / "positive"' in pw01_execute
+    assert 'SHARD_ROOT = FAMILY_ROOT / "source_shards" / SAMPLE_ROLE_DIRNAME' in pw01_execute
     assert 'f"shard_{SHARD_INDEX:04d}"' in pw01_execute
     assert 'PW01_SHARD_MANIFEST_PATH = SHARD_ROOT / "shard_manifest.json"' in pw01_execute
     assert 'if not PW01_SHARD_MANIFEST_PATH.exists():' in pw01_execute
@@ -157,11 +171,35 @@ def test_pw01_notebook_wraps_command_with_gpu_peak_monitor_and_reads_shard_manif
     assert 'print_json("gpu_session_peak_summary", GPU_PEAK_NOTEBOOK_SUMMARY)' in pw01_execute
 
 
+def test_pw02_notebook_reads_summary_from_runtime_state() -> None:
+    """
+    Verify PW02 notebook binds the expected script and reads the runtime summary.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    pw02_execute = _find_code_cell_source(NOTEBOOK_PW02_PATH, "COMMAND = [")
+
+    assert 'PW02_SUMMARY_PATH = FAMILY_ROOT / "runtime_state" / "pw02_summary.json"' in _find_code_cell_source(
+        NOTEBOOK_PW02_PATH,
+        "PW02_SUMMARY_PATH = FAMILY_ROOT",
+    )
+    assert '"--drive-project-root"' in pw02_execute
+    assert '"--family-id"' in pw02_execute
+    assert 'PW02_RESULT = subprocess.run(' in pw02_execute
+    assert 'if not PW02_SUMMARY_PATH.exists():' in pw02_execute
+    assert 'PW02_SUMMARY = json.loads(PW02_SUMMARY_PATH.read_text(encoding="utf-8"))' in pw02_execute
+
+
 @pytest.mark.parametrize(
     "script_relative_path",
     [
         "paper_workflow/scripts/PW00_Paper_Eval_Family_Manifest.py",
         "paper_workflow/scripts/PW01_Source_Event_Shards.py",
+        "paper_workflow/scripts/PW02_Source_Merge_And_Global_Thresholds.py",
     ],
 )
 def test_paper_workflow_script_help_entrypoints(script_relative_path: str) -> None:

@@ -1,5 +1,5 @@
 """
-File purpose: Execute one PW01 positive_source event shard in isolation.
+File purpose: Execute one PW01 source event shard in isolation.
 Module type: General module
 """
 
@@ -35,15 +35,21 @@ from scripts.notebook_runtime_common import (
 
 from paper_workflow.scripts.pw_common import (
     ACTIVE_SAMPLE_ROLE,
+    CLEAN_NEGATIVE_SAMPLE_ROLE,
     DEFAULT_CONFIG_RELATIVE_PATH,
+    build_source_shard_root,
     build_family_root,
     read_jsonl,
     resolve_family_layout_paths,
+    validate_source_sample_role,
 )
 
 BASE_RUNNER_SCRIPT_PATH = Path("scripts/01_run_paper_full_cuda.py")
 WORKER_SCRIPT_PATH = Path("paper_workflow/scripts/pw01_run_source_event_shard_worker.py")
-EVENT_RECORD_USAGE = "paper_workflow_positive_source"
+EVENT_RECORD_USAGE_BY_SAMPLE_ROLE = {
+    ACTIVE_SAMPLE_ROLE: "paper_workflow_positive_source",
+    CLEAN_NEGATIVE_SAMPLE_ROLE: "paper_workflow_clean_negative",
+}
 DEFAULT_STAGE_01_WORKER_COUNT = 1
 
 
@@ -115,6 +121,72 @@ def _resolve_manifest_shard_count(family_manifest: Mapping[str, Any]) -> int:
     return int(shard_count_value)
 
 
+def resolve_source_shard_assignment(
+    shard_plan: Mapping[str, Any],
+    *,
+    sample_role: str,
+    shard_index: int,
+    shard_count: int,
+) -> Dict[str, Any]:
+    """
+    Resolve one source-role shard assignment.
+
+    Args:
+        shard_plan: Source shard plan payload.
+        sample_role: Supported source sample role.
+        shard_index: Shard index.
+        shard_count: Expected shard count.
+
+    Returns:
+        Selected shard assignment row.
+
+    Raises:
+        ValueError: If shard count or shard index is inconsistent.
+    """
+    if shard_index < 0:
+        raise ValueError("shard_index must be non-negative int")
+    if shard_count <= 0:
+        raise ValueError("shard_count must be positive int")
+    normalized_sample_role = validate_source_sample_role(sample_role)
+
+    plan_shard_count = shard_plan.get("source_shard_count")
+    if not isinstance(plan_shard_count, int) or plan_shard_count <= 0:
+        raise ValueError("source shard plan missing source_shard_count")
+    if int(plan_shard_count) != shard_count:
+        raise ValueError(
+            f"shard_count mismatch with source shard plan: expected={plan_shard_count}, actual={shard_count}"
+        )
+
+    sample_role_plans_node = shard_plan.get("sample_role_plans")
+    if not isinstance(sample_role_plans_node, Mapping):
+        raise ValueError("source shard plan missing sample_role_plans")
+    sample_role_plans = cast(Dict[str, Any], sample_role_plans_node)
+    role_plan_node = sample_role_plans.get(normalized_sample_role)
+    if not isinstance(role_plan_node, Mapping):
+        raise ValueError(f"source shard plan missing {normalized_sample_role} plan")
+    role_plan = cast(Dict[str, Any], role_plan_node)
+
+    shards_node = role_plan.get("shards")
+    if not isinstance(shards_node, list):
+        raise ValueError(f"source shard plan {normalized_sample_role}.shards must be list")
+
+    for shard_row_node in cast(List[object], shards_node):
+        shard_row = cast(Dict[str, Any], shard_row_node) if isinstance(shard_row_node, dict) else None
+        if shard_row is None:
+            continue
+        row_index = shard_row.get("shard_index")
+        if isinstance(row_index, int) and int(row_index) == shard_index:
+            assigned_event_ids = shard_row.get("assigned_event_ids")
+            if not isinstance(assigned_event_ids, list):
+                raise ValueError("assigned_event_ids must be list")
+            assigned_event_indices = shard_row.get("assigned_event_indices")
+            if not isinstance(assigned_event_indices, list):
+                raise ValueError("assigned_event_indices must be list")
+            return shard_row
+
+    raise ValueError(f"shard_index not found in {normalized_sample_role} shard plan: {shard_index}")
+
+
 def resolve_positive_shard_assignment(
     shard_plan: Mapping[str, Any],
     *,
@@ -131,51 +203,13 @@ def resolve_positive_shard_assignment(
 
     Returns:
         Selected shard assignment row.
-
-    Raises:
-        ValueError: If shard count or shard index is inconsistent.
     """
-    if shard_index < 0:
-        raise ValueError("shard_index must be non-negative int")
-    if shard_count <= 0:
-        raise ValueError("shard_count must be positive int")
-
-    plan_shard_count = shard_plan.get("source_shard_count")
-    if not isinstance(plan_shard_count, int) or plan_shard_count <= 0:
-        raise ValueError("source shard plan missing source_shard_count")
-    if int(plan_shard_count) != shard_count:
-        raise ValueError(
-            f"shard_count mismatch with source shard plan: expected={plan_shard_count}, actual={shard_count}"
-        )
-
-    sample_role_plans_node = shard_plan.get("sample_role_plans")
-    if not isinstance(sample_role_plans_node, Mapping):
-        raise ValueError("source shard plan missing sample_role_plans")
-    sample_role_plans = cast(Dict[str, Any], sample_role_plans_node)
-    positive_plan_node = sample_role_plans.get(ACTIVE_SAMPLE_ROLE)
-    if not isinstance(positive_plan_node, Mapping):
-        raise ValueError("source shard plan missing positive_source plan")
-    positive_plan = cast(Dict[str, Any], positive_plan_node)
-
-    shards_node = positive_plan.get("shards")
-    if not isinstance(shards_node, list):
-        raise ValueError("source shard plan positive_source.shards must be list")
-
-    for shard_row_node in cast(List[object], shards_node):
-        shard_row = cast(Dict[str, Any], shard_row_node) if isinstance(shard_row_node, dict) else None
-        if shard_row is None:
-            continue
-        row_index = shard_row.get("shard_index")
-        if isinstance(row_index, int) and int(row_index) == shard_index:
-            assigned_event_ids = shard_row.get("assigned_event_ids")
-            if not isinstance(assigned_event_ids, list):
-                raise ValueError("assigned_event_ids must be list")
-            assigned_event_indices = shard_row.get("assigned_event_indices")
-            if not isinstance(assigned_event_indices, list):
-                raise ValueError("assigned_event_indices must be list")
-            return shard_row
-
-    raise ValueError(f"shard_index not found in positive_source shard plan: {shard_index}")
+    return resolve_source_shard_assignment(
+        shard_plan,
+        sample_role=ACTIVE_SAMPLE_ROLE,
+        shard_index=shard_index,
+        shard_count=shard_count,
+    )
 
 
 def _resolve_default_config_path(family_manifest: Mapping[str, Any]) -> Path:
@@ -419,6 +453,7 @@ def _resolve_source_prompt_index(event: Mapping[str, Any]) -> int:
 def _build_local_worker_assignments(
     *,
     assigned_events: Sequence[Mapping[str, Any]],
+    sample_role: str,
     stage_01_worker_count: int,
 ) -> List[Dict[str, Any]]:
     """
@@ -432,6 +467,7 @@ def _build_local_worker_assignments(
         Ordered worker-assignment payloads.
     """
     _validate_stage_01_worker_count(stage_01_worker_count)
+    normalized_sample_role = validate_source_sample_role(sample_role)
 
     assignments: List[Dict[str, Any]] = [
         {
@@ -458,8 +494,10 @@ def _build_local_worker_assignments(
             raise ValueError("event_id must be non-empty str")
         if not isinstance(event_index, int) or event_index < 0:
             raise ValueError("event_index must be non-negative int")
-        if sample_role != ACTIVE_SAMPLE_ROLE:
-            raise ValueError(f"PW01 only supports positive_source, got: {sample_role}")
+        if sample_role != normalized_sample_role:
+            raise ValueError(
+                f"assigned event sample_role mismatch: expected={normalized_sample_role}, actual={sample_role}"
+            )
         if not isinstance(prompt_text, str) or not prompt_text:
             raise ValueError("prompt_text must be non-empty str")
         if not isinstance(prompt_sha256, str) or not prompt_sha256:
@@ -478,7 +516,7 @@ def _build_local_worker_assignments(
             {
                 "event_id": event_id,
                 "event_index": event_index,
-                "sample_role": ACTIVE_SAMPLE_ROLE,
+                "sample_role": normalized_sample_role,
                 "source_prompt_index": source_prompt_index,
                 "prompt_text": prompt_text,
                 "prompt_sha256": prompt_sha256,
@@ -489,6 +527,21 @@ def _build_local_worker_assignments(
         )
 
     return assignments
+
+
+def _build_role_shard_root(family_root: Path, sample_role: str, shard_index: int) -> Path:
+    """
+    Build shard root path for one source role and shard index.
+
+    Args:
+        family_root: Family root path.
+        sample_role: Supported source sample role.
+        shard_index: Shard index.
+
+    Returns:
+        Shard root path.
+    """
+    return build_source_shard_root(family_root, sample_role, shard_index)
 
 
 def _build_shard_root(family_root: Path, shard_index: int) -> Path:
@@ -502,9 +555,7 @@ def _build_shard_root(family_root: Path, shard_index: int) -> Path:
     Returns:
         Shard root path.
     """
-    shard_root = family_root / "source_shards" / "positive" / f"shard_{shard_index:04d}"
-    validate_path_within_base(family_root, shard_root, "source shard root")
-    return shard_root
+    return _build_role_shard_root(family_root, ACTIVE_SAMPLE_ROLE, shard_index)
 
 
 def _build_worker_root(shard_root: Path, local_worker_index: int) -> Path:
@@ -577,6 +628,7 @@ def _write_worker_plan(
     *,
     worker_root: Path,
     family_id: str,
+    sample_role: str,
     shard_index: int,
     shard_count: int,
     stage_01_worker_count: int,
@@ -603,6 +655,7 @@ def _write_worker_plan(
     """
     if not family_id.strip():
         raise TypeError("family_id must be non-empty str")
+    normalized_sample_role = validate_source_sample_role(sample_role)
     if shard_index < 0:
         raise TypeError("shard_index must be non-negative int")
     if shard_count <= 0:
@@ -627,7 +680,7 @@ def _write_worker_plan(
             "artifact_type": "paper_workflow_source_shard_worker_plan",
             "schema_version": "pw_stage_01_v1",
             "family_id": family_id,
-            "sample_role": ACTIVE_SAMPLE_ROLE,
+            "sample_role": normalized_sample_role,
             "shard_index": shard_index,
             "source_shard_count": shard_count,
             "stage_01_worker_count": stage_01_worker_count,
@@ -700,6 +753,7 @@ def _prepare_local_worker_plans(
     *,
     drive_project_root: Path,
     family_id: str,
+    sample_role: str,
     shard_index: int,
     shard_count: int,
     stage_01_worker_count: int,
@@ -729,6 +783,7 @@ def _prepare_local_worker_plans(
     worker_plans: List[Dict[str, Any]] = []
     for assignment in _build_local_worker_assignments(
         assigned_events=assigned_events,
+        sample_role=sample_role,
         stage_01_worker_count=stage_01_worker_count,
     ):
         local_worker_index = int(assignment["local_worker_index"])
@@ -736,6 +791,7 @@ def _prepare_local_worker_plans(
         worker_plan_path = _write_worker_plan(
             worker_root=worker_root,
             family_id=family_id,
+            sample_role=sample_role,
             shard_index=shard_index,
             shard_count=shard_count,
             stage_01_worker_count=stage_01_worker_count,
@@ -1035,6 +1091,7 @@ def _build_worker_execution_failure_payload(worker_executions: Sequence[Mapping[
 def _build_worker_result_payload(
     *,
     family_id: str,
+    sample_role: str,
     shard_index: int,
     shard_count: int,
     stage_01_worker_count: int,
@@ -1073,6 +1130,7 @@ def _build_worker_result_payload(
     """
     if not family_id.strip():
         raise TypeError("family_id must be non-empty str")
+    normalized_sample_role = validate_source_sample_role(sample_role)
     if shard_index < 0:
         raise TypeError("shard_index must be non-negative int")
     if shard_count <= 0:
@@ -1097,7 +1155,7 @@ def _build_worker_result_payload(
         "schema_version": "pw_stage_01_v1",
         "stage_name": "PW01_Source_Event_Shards",
         "family_id": family_id,
-        "sample_role": ACTIVE_SAMPLE_ROLE,
+        "sample_role": normalized_sample_role,
         "shard_index": shard_index,
         "source_shard_count": shard_count,
         "stage_01_worker_count": stage_01_worker_count,
@@ -1116,6 +1174,476 @@ def _build_worker_result_payload(
         "exception_type": exception_type,
         "exception_message": exception_message,
     }
+
+
+def _resolve_event_record_usage(sample_role: str) -> str:
+    """
+    Resolve detect payload usage token for one source role.
+
+    Args:
+        sample_role: Supported source sample role.
+
+    Returns:
+        Detect payload record usage token.
+    """
+    normalized_sample_role = validate_source_sample_role(sample_role)
+    return EVENT_RECORD_USAGE_BY_SAMPLE_ROLE[normalized_sample_role]
+
+
+def _extract_detect_probe_plan_anchors(detect_payload_obj: Mapping[str, Any]) -> Dict[str, str]:
+    """
+    Extract plan and basis digests from one detect probe record.
+
+    Args:
+        detect_payload_obj: Detect record payload.
+
+    Returns:
+        Mapping with plan_digest and basis_digest.
+
+    Raises:
+        ValueError: If required plan anchors are absent.
+    """
+    if not isinstance(detect_payload_obj, Mapping):
+        raise TypeError("detect_payload_obj must be Mapping")
+
+    content_evidence_node = detect_payload_obj.get("content_evidence_payload")
+    content_evidence_payload = (
+        cast(Dict[str, Any], content_evidence_node)
+        if isinstance(content_evidence_node, dict)
+        else {}
+    )
+
+    plan_digest = detect_payload_obj.get("plan_digest")
+    if not isinstance(plan_digest, str) or not plan_digest:
+        plan_digest = content_evidence_payload.get("plan_digest")
+    basis_digest = detect_payload_obj.get("basis_digest")
+    if not isinstance(basis_digest, str) or not basis_digest:
+        basis_digest = content_evidence_payload.get("basis_digest")
+
+    if not isinstance(plan_digest, str) or not plan_digest:
+        raise ValueError("detect probe record missing plan_digest")
+    if not isinstance(basis_digest, str) or not basis_digest:
+        raise ValueError("detect probe record missing basis_digest")
+
+    return {
+        "plan_digest": plan_digest,
+        "basis_digest": basis_digest,
+    }
+
+
+def _build_clean_negative_input_record(
+    *,
+    preview_image_path: Path,
+    event_id: str,
+    prompt_text: str,
+    prompt_sha256: str,
+    seed: int,
+    plan_digest: str | None = None,
+    basis_digest: str | None = None,
+    provenance_payload: Mapping[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """
+    Build the synthetic negative input record consumed by detect.
+
+    Args:
+        preview_image_path: Clean preview artifact path.
+        event_id: Event identifier.
+        prompt_text: Prompt text.
+        prompt_sha256: Prompt SHA256.
+        seed: Event seed.
+        plan_digest: Optional plan digest copied from detect probe.
+        basis_digest: Optional basis digest copied from detect probe.
+        provenance_payload: Optional statement-only provenance payload.
+
+    Returns:
+        Synthetic negative input record.
+    """
+    if not isinstance(preview_image_path, Path):
+        raise TypeError("preview_image_path must be Path")
+    if not preview_image_path.exists() or not preview_image_path.is_file():
+        raise FileNotFoundError(f"clean negative preview image not found: {normalize_path_value(preview_image_path)}")
+    if not isinstance(event_id, str) or not event_id:
+        raise TypeError("event_id must be non-empty str")
+    if not isinstance(prompt_text, str) or not prompt_text:
+        raise TypeError("prompt_text must be non-empty str")
+    if not isinstance(prompt_sha256, str) or not prompt_sha256:
+        raise TypeError("prompt_sha256 must be non-empty str")
+    if not isinstance(seed, int):
+        raise TypeError("seed must be int")
+
+    normalized_preview_path = normalize_path_value(preview_image_path)
+    record_payload: Dict[str, Any] = {
+        "operation": "embed",
+        "embed_mode": "explicit_negative_no_watermark",
+        "watermarked_path": normalized_preview_path,
+        "image_path": normalized_preview_path,
+        "artifact_sha256": compute_file_sha256(preview_image_path),
+        "watermarked_artifact_sha256": compute_file_sha256(preview_image_path),
+        "is_watermarked": False,
+        "negative_branch_note": "paper workflow clean_negative source uses preview artifact without watermark embed",
+        "event_id": event_id,
+        "prompt": prompt_text,
+        "prompt_text": prompt_text,
+        "prompt_sha256": prompt_sha256,
+        "seed": seed,
+    }
+    if isinstance(plan_digest, str) and plan_digest:
+        record_payload["plan_digest"] = plan_digest
+    if isinstance(basis_digest, str) and basis_digest:
+        record_payload["basis_digest"] = basis_digest
+    if isinstance(provenance_payload, Mapping):
+        record_payload["negative_branch_source_attestation_provenance"] = dict(provenance_payload)
+    return record_payload
+
+
+def _build_negative_branch_attestation_provenance(
+    *,
+    runtime_cfg: Mapping[str, Any],
+    prompt_text: str,
+    seed: int,
+    plan_digest: str,
+) -> Dict[str, Any]:
+    """
+    Build statement-only negative provenance from runtime config and probe anchors.
+
+    Args:
+        runtime_cfg: Bound runtime config mapping.
+        prompt_text: Prompt text.
+        seed: Event seed.
+        plan_digest: Detect-probe plan digest.
+
+    Returns:
+        Statement-only provenance payload.
+
+    Raises:
+        RuntimeError: If attestation commitment keys are unavailable.
+    """
+    if not isinstance(runtime_cfg, Mapping):
+        raise TypeError("runtime_cfg must be Mapping")
+    if not isinstance(prompt_text, str) or not prompt_text:
+        raise TypeError("prompt_text must be non-empty str")
+    if not isinstance(seed, int):
+        raise TypeError("seed must be int")
+    if not isinstance(plan_digest, str) or not plan_digest:
+        raise TypeError("plan_digest must be non-empty str")
+
+    from main.watermarking.provenance.commitments import (
+        compute_prompt_commit,
+        compute_seed_commit,
+    )
+    from main.watermarking.provenance.attestation_statement import (
+        build_attestation_statement,
+        compute_attestation_digest,
+    )
+
+    model_id = runtime_cfg.get("model_id")
+    if not isinstance(model_id, str) or not model_id:
+        raise RuntimeError("clean_negative runtime_cfg missing model_id")
+
+    attestation_node = runtime_cfg.get("attestation")
+    attestation_cfg = cast(Dict[str, Any], attestation_node) if isinstance(attestation_node, dict) else {}
+    k_prompt_env_var = attestation_cfg.get("k_prompt_env_var")
+    k_seed_env_var = attestation_cfg.get("k_seed_env_var")
+    if not isinstance(k_prompt_env_var, str) or not k_prompt_env_var:
+        raise RuntimeError("clean_negative attestation.k_prompt_env_var missing")
+    if not isinstance(k_seed_env_var, str) or not k_seed_env_var:
+        raise RuntimeError("clean_negative attestation.k_seed_env_var missing")
+
+    k_prompt = os.environ.get(k_prompt_env_var)
+    k_seed = os.environ.get(k_seed_env_var)
+    if not isinstance(k_prompt, str) or not k_prompt:
+        raise RuntimeError(f"clean_negative missing attestation prompt key env var: {k_prompt_env_var}")
+    if not isinstance(k_seed, str) or not k_seed:
+        raise RuntimeError(f"clean_negative missing attestation seed key env var: {k_seed_env_var}")
+
+    statement = build_attestation_statement(
+        model_id=model_id,
+        prompt_commit=compute_prompt_commit(k_prompt, prompt_text),
+        seed_commit=compute_seed_commit(k_seed, seed),
+        plan_digest=plan_digest,
+    )
+    return {
+        "statement": statement.as_dict(),
+        "attestation_digest": compute_attestation_digest(statement),
+    }
+
+
+def _run_clean_negative_event(
+    *,
+    event: Mapping[str, Any],
+    shard_root: Path,
+    default_cfg_obj: Mapping[str, Any],
+    bound_config_path: Path,
+) -> Dict[str, Any]:
+    """
+    Execute one clean_negative event with statement-only provenance.
+
+    Args:
+        event: Event payload from source_event_grid.
+        shard_root: Shard root path.
+        default_cfg_obj: Parsed default config mapping.
+        bound_config_path: Bound config source path.
+
+    Returns:
+        Event manifest payload.
+    """
+    event_id = event.get("event_id")
+    sample_role = event.get("sample_role")
+    event_index = event.get("event_index")
+    source_prompt_index = event.get("source_prompt_index")
+    if source_prompt_index is None:
+        source_prompt_index = event.get("prompt_index")
+    prompt_text = event.get("prompt_text")
+    prompt_sha256 = event.get("prompt_sha256")
+    seed = event.get("seed")
+    prompt_file = event.get("prompt_file")
+
+    if not isinstance(event_id, str) or not event_id:
+        raise ValueError("event_id must be non-empty str")
+    if sample_role != CLEAN_NEGATIVE_SAMPLE_ROLE:
+        raise ValueError(f"PW01 clean negative executor requires clean_negative, got: {sample_role}")
+    if not isinstance(event_index, int) or event_index < 0:
+        raise ValueError("event_index must be non-negative int")
+    if not isinstance(source_prompt_index, int) or source_prompt_index < 0:
+        raise ValueError("prompt_index must be non-negative int")
+    if not isinstance(prompt_text, str) or not prompt_text:
+        raise ValueError("prompt_text must be non-empty str")
+    if not isinstance(prompt_sha256, str) or not prompt_sha256:
+        raise ValueError("prompt_sha256 must be non-empty str")
+    if not isinstance(seed, int):
+        raise ValueError("seed must be int")
+    if not isinstance(prompt_file, str) or not prompt_file:
+        raise ValueError("prompt_file must be non-empty str")
+    if not isinstance(bound_config_path, Path):
+        raise TypeError("bound_config_path must be Path")
+
+    event_root = ensure_directory(shard_root / "events" / f"event_{event_index:06d}")
+    prompt_run_root = ensure_directory(event_root / "run")
+    validate_path_within_base(shard_root, event_root, "event root")
+    validate_path_within_base(shard_root, prompt_run_root, "event run root")
+
+    runtime_cfg = copy.deepcopy(dict(default_cfg_obj))
+    runtime_cfg["inference_prompt"] = prompt_text
+    runtime_cfg["seed"] = seed
+    runtime_cfg["paper_workflow_event"] = {
+        "event_id": event_id,
+        "event_index": event_index,
+        "source_prompt_index": source_prompt_index,
+        "sample_role": CLEAN_NEGATIVE_SAMPLE_ROLE,
+    }
+
+    runtime_cfg_path = event_root / "runtime_config.yaml"
+    validate_path_within_base(shard_root, runtime_cfg_path, "event runtime config")
+    runtime_cfg = apply_notebook_model_snapshot_binding(runtime_cfg, env_mapping=os.environ)
+    _validate_bound_runtime_cfg(
+        runtime_cfg,
+        bound_config_path=bound_config_path,
+        runtime_cfg_path=runtime_cfg_path,
+        event_id=event_id,
+        stage_label="preview_precompute",
+    )
+    write_yaml_mapping(runtime_cfg_path, runtime_cfg)
+
+    preview_precompute = BASE_RUNNER_MODULE._prepare_source_pool_preview_artifact(
+        cfg_obj=runtime_cfg,
+        prompt_run_root=prompt_run_root,
+        prompt_text=prompt_text,
+        prompt_index=source_prompt_index,
+        prompt_file_path=prompt_file,
+    )
+    preview_runtime_cfg_node = preview_precompute.get("runtime_cfg")
+    if not isinstance(preview_runtime_cfg_node, dict):
+        raise ValueError("preview precompute result missing runtime_cfg")
+    preview_runtime_cfg = cast(Dict[str, Any], preview_runtime_cfg_node)
+    _validate_bound_runtime_cfg(
+        preview_runtime_cfg,
+        bound_config_path=bound_config_path,
+        runtime_cfg_path=runtime_cfg_path,
+        event_id=event_id,
+        stage_label="clean_negative_detect",
+    )
+    write_yaml_mapping(runtime_cfg_path, preview_runtime_cfg)
+
+    preview_record_node = preview_precompute.get("preview_record")
+    preview_record = cast(Dict[str, Any], preview_record_node) if isinstance(preview_record_node, dict) else {}
+    preview_image_path_value = preview_record.get("persisted_artifact_path")
+    if not isinstance(preview_image_path_value, str) or not preview_image_path_value:
+        raise ValueError("clean_negative preview record missing persisted_artifact_path")
+    preview_image_path = Path(preview_image_path_value).expanduser().resolve()
+    if not preview_image_path.exists() or not preview_image_path.is_file():
+        raise FileNotFoundError(f"clean_negative preview image missing: {normalize_path_value(preview_image_path)}")
+
+    synthetic_input_record_path = prompt_run_root / "records" / "embed_record.json"
+    ensure_directory(synthetic_input_record_path.parent)
+    probe_input_record = _build_clean_negative_input_record(
+        preview_image_path=preview_image_path,
+        event_id=event_id,
+        prompt_text=prompt_text,
+        prompt_sha256=prompt_sha256,
+        seed=seed,
+    )
+    write_json_atomic(synthetic_input_record_path, probe_input_record)
+
+    stage_results: Dict[str, Any] = {
+        "preview_precompute": preview_record,
+    }
+
+    detect_probe_command = BASE_RUNNER_MODULE._build_stage_command("detect", runtime_cfg_path, prompt_run_root)
+    detect_probe_result = BASE_RUNNER_MODULE._run_stage("detect_probe", detect_probe_command, prompt_run_root)
+    stage_results["detect_probe"] = detect_probe_result
+    if int(detect_probe_result.get("return_code", 1)) != 0:
+        raise RuntimeError(
+            f"PW01 clean_negative detect probe failed: event_id={event_id}, "
+            f"payload={json.dumps(detect_probe_result, ensure_ascii=False, sort_keys=True)}"
+        )
+
+    probe_detect_record_path = prompt_run_root / "records" / "detect_record.json"
+    if not probe_detect_record_path.exists() or not probe_detect_record_path.is_file():
+        raise FileNotFoundError(f"clean_negative detect probe record missing: {normalize_path_value(probe_detect_record_path)}")
+    probe_detect_payload = _load_required_json_dict(probe_detect_record_path, "clean_negative detect probe record")
+    probe_plan_anchors = _extract_detect_probe_plan_anchors(probe_detect_payload)
+    stage_results["detect_probe_plan_anchors"] = dict(probe_plan_anchors)
+
+    staged_probe_detect_record_path = shard_root / "records" / f"event_{event_index:06d}_detect_probe_record.json"
+    validate_path_within_base(shard_root, staged_probe_detect_record_path, "staged detect probe record")
+    write_json_atomic(staged_probe_detect_record_path, probe_detect_payload)
+
+    provenance_payload = _build_negative_branch_attestation_provenance(
+        runtime_cfg=preview_runtime_cfg,
+        prompt_text=prompt_text,
+        seed=seed,
+        plan_digest=probe_plan_anchors["plan_digest"],
+    )
+    final_input_record = _build_clean_negative_input_record(
+        preview_image_path=preview_image_path,
+        event_id=event_id,
+        prompt_text=prompt_text,
+        prompt_sha256=prompt_sha256,
+        seed=seed,
+        plan_digest=probe_plan_anchors["plan_digest"],
+        basis_digest=probe_plan_anchors["basis_digest"],
+        provenance_payload=provenance_payload,
+    )
+    write_json_atomic(synthetic_input_record_path, final_input_record)
+
+    detect_result = BASE_RUNNER_MODULE._run_stage("detect", detect_probe_command, prompt_run_root)
+    stage_results["detect"] = detect_result
+    if int(detect_result.get("return_code", 1)) != 0:
+        raise RuntimeError(
+            f"PW01 clean_negative detect failed: event_id={event_id}, "
+            f"payload={json.dumps(detect_result, ensure_ascii=False, sort_keys=True)}"
+        )
+
+    source_detect_record_path = prompt_run_root / "records" / "detect_record.json"
+    if not source_detect_record_path.exists() or not source_detect_record_path.is_file():
+        raise FileNotFoundError(f"clean_negative detect record missing: {normalize_path_value(source_detect_record_path)}")
+
+    staged_embed_record_path = shard_root / "records" / f"event_{event_index:06d}_embed_record.json"
+    staged_detect_record_path = shard_root / "records" / f"event_{event_index:06d}_detect_record.json"
+    validate_path_within_base(shard_root, staged_embed_record_path, "staged embed record")
+    validate_path_within_base(shard_root, staged_detect_record_path, "staged detect record")
+    copy_file(synthetic_input_record_path, staged_embed_record_path)
+
+    detect_payload_obj = _load_required_json_dict(source_detect_record_path, "clean_negative detect record")
+    normalize_fn = getattr(BASE_RUNNER_MODULE, "_normalize_direct_detect_payload", None)
+    if callable(normalize_fn):
+        normalized_payload = normalize_fn(
+            detect_payload_obj,
+            prompt_text=prompt_text,
+            prompt_index=source_prompt_index,
+            prompt_file_path=prompt_file,
+            record_usage=_resolve_event_record_usage(CLEAN_NEGATIVE_SAMPLE_ROLE),
+        )
+        if not isinstance(normalized_payload, dict):
+            raise ValueError("normalized detect payload must be JSON object")
+        detect_payload_obj = cast(Dict[str, Any], normalized_payload)
+    write_json_atomic(staged_detect_record_path, detect_payload_obj)
+
+    source_image_view = BASE_RUNNER_MODULE._resolve_source_pool_source_image_view(
+        cfg_obj=preview_runtime_cfg,
+        run_root=shard_root,
+        prompt_run_root=prompt_run_root,
+        prompt_index=event_index,
+    )
+    preview_generation_record_view = BASE_RUNNER_MODULE._resolve_source_pool_preview_generation_record_view(
+        cfg_obj=preview_runtime_cfg,
+        run_root=shard_root,
+        prompt_run_root=prompt_run_root,
+        prompt_index=event_index,
+    )
+
+    shard_relative_runtime_cfg = runtime_cfg_path.relative_to(shard_root).as_posix()
+    shard_relative_embed_record = staged_embed_record_path.relative_to(shard_root).as_posix()
+    shard_relative_detect_record = staged_detect_record_path.relative_to(shard_root).as_posix()
+
+    event_manifest_payload: Dict[str, Any] = {
+        "artifact_type": "paper_workflow_source_event",
+        "event_id": event_id,
+        "sample_role": CLEAN_NEGATIVE_SAMPLE_ROLE,
+        "source_prompt_index": source_prompt_index,
+        "event_index": event_index,
+        "prompt_text": prompt_text,
+        "prompt_sha256": prompt_sha256,
+        "seed": seed,
+        "runtime_config_path": normalize_path_value(runtime_cfg_path),
+        "runtime_config_package_relative_path": shard_relative_runtime_cfg,
+        "embed_record_path": normalize_path_value(staged_embed_record_path),
+        "embed_record_package_relative_path": shard_relative_embed_record,
+        "detect_record_path": normalize_path_value(staged_detect_record_path),
+        "detect_record_package_relative_path": shard_relative_detect_record,
+        "source_image": source_image_view,
+        "preview_generation_record": preview_generation_record_view,
+        "attestation_statement": None,
+        "attestation_bundle": None,
+        "attestation_result": None,
+        "negative_branch_source_attestation_provenance": provenance_payload,
+        "detect_probe_record_path": normalize_path_value(staged_probe_detect_record_path),
+        "sha256": compute_file_sha256(staged_detect_record_path),
+        "stage_results": stage_results,
+    }
+
+    event_manifest_path = event_root / "event_manifest.json"
+    validate_path_within_base(shard_root, event_manifest_path, "event manifest path")
+    write_json_atomic(event_manifest_path, event_manifest_payload)
+    event_manifest_payload["event_manifest_path"] = normalize_path_value(event_manifest_path)
+    return event_manifest_payload
+
+
+def _run_source_event_by_role(
+    *,
+    event: Mapping[str, Any],
+    shard_root: Path,
+    default_cfg_obj: Mapping[str, Any],
+    bound_config_path: Path,
+) -> Dict[str, Any]:
+    """
+    Dispatch one PW01 event to the role-specific executor.
+
+    Args:
+        event: Event payload from source_event_grid.
+        shard_root: Shard root path.
+        default_cfg_obj: Parsed default config mapping.
+        bound_config_path: Bound config source path.
+
+    Returns:
+        Event manifest payload.
+    """
+    sample_role = validate_source_sample_role(str(event.get("sample_role")))
+    if sample_role == ACTIVE_SAMPLE_ROLE:
+        return _run_positive_source_event(
+            event=event,
+            shard_root=shard_root,
+            default_cfg_obj=default_cfg_obj,
+            bound_config_path=bound_config_path,
+        )
+    if sample_role == CLEAN_NEGATIVE_SAMPLE_ROLE:
+        return _run_clean_negative_event(
+            event=event,
+            shard_root=shard_root,
+            default_cfg_obj=default_cfg_obj,
+            bound_config_path=bound_config_path,
+        )
+    raise ValueError(f"unsupported PW01 sample_role: {sample_role}")
 
 
 def _run_positive_source_event(
@@ -1248,7 +1776,7 @@ def _run_positive_source_event(
             prompt_text=prompt_text,
             prompt_index=source_prompt_index,
             prompt_file_path=prompt_file,
-            record_usage=EVENT_RECORD_USAGE,
+            record_usage=_resolve_event_record_usage(ACTIVE_SAMPLE_ROLE),
         )
         if not isinstance(normalized_payload, dict):
             raise ValueError("normalized detect payload must be JSON object")
@@ -1364,6 +1892,7 @@ def run_pw01_source_event_shard_worker(
             "worker plan local_worker_index mismatch: "
             f"expected={local_worker_index}, actual={plan_local_worker_index}"
         )
+    plan_sample_role = validate_source_sample_role(str(worker_plan.get("sample_role")))
 
     default_config_path_value = worker_plan.get("default_config_path")
     if not isinstance(default_config_path_value, str) or not default_config_path_value:
@@ -1426,7 +1955,7 @@ def run_pw01_source_event_shard_worker(
     try:
         for event in assigned_events:
             executed_events.append(
-                _run_positive_source_event(
+                _run_source_event_by_role(
                     event=event,
                     shard_root=shard_root,
                     default_cfg_obj=default_cfg_obj,
@@ -1436,6 +1965,7 @@ def run_pw01_source_event_shard_worker(
 
         worker_result = _build_worker_result_payload(
             family_id=family_id,
+            sample_role=plan_sample_role,
             shard_index=shard_index,
             shard_count=int(worker_plan.get("source_shard_count", 0)),
             stage_01_worker_count=stage_01_worker_count,
@@ -1452,6 +1982,7 @@ def run_pw01_source_event_shard_worker(
     except Exception as exc:
         worker_result = _build_worker_result_payload(
             family_id=family_id,
+            sample_role=plan_sample_role,
             shard_index=shard_index,
             shard_count=int(worker_plan.get("source_shard_count", 0)),
             stage_01_worker_count=stage_01_worker_count,
@@ -1477,18 +2008,20 @@ def run_pw01_source_event_shard(
     family_id: str,
     shard_index: int,
     shard_count: int,
+    sample_role: str = ACTIVE_SAMPLE_ROLE,
     stage_01_worker_count: int = DEFAULT_STAGE_01_WORKER_COUNT,
     bound_config_path: Path | None = None,
     force_rerun: bool = False,
 ) -> Dict[str, Any]:
     """
-    Execute one isolated PW01 positive_source shard.
+    Execute one isolated PW01 source-role shard.
 
     Args:
         drive_project_root: Drive project root path.
         family_id: Family identifier.
-        shard_index: Positive shard index.
-        shard_count: Positive shard count.
+        shard_index: Source shard index.
+        shard_count: Source shard count.
+        sample_role: Source sample role for the shard.
         stage_01_worker_count: Total shard-local worker count.
         bound_config_path: Notebook-bound config snapshot path.
         force_rerun: Whether to clear completed shard and rerun.
@@ -1502,6 +2035,7 @@ def run_pw01_source_event_shard(
         raise TypeError("shard_index must be non-negative int")
     if shard_count <= 0:
         raise TypeError("shard_count must be positive int")
+    normalized_sample_role = validate_source_sample_role(sample_role)
     _validate_stage_01_worker_count(stage_01_worker_count)
 
     normalized_drive_root = drive_project_root.expanduser().resolve()
@@ -1520,8 +2054,9 @@ def run_pw01_source_event_shard(
             f"shard_count mismatch with family manifest: expected={manifest_shard_count}, actual={shard_count}"
         )
 
-    shard_assignment = resolve_positive_shard_assignment(
+    shard_assignment = resolve_source_shard_assignment(
         source_shard_plan,
+        sample_role=normalized_sample_role,
         shard_index=shard_index,
         shard_count=shard_count,
     )
@@ -1548,7 +2083,7 @@ def run_pw01_source_event_shard(
         stage_label="shard_execution",
     )
 
-    shard_root = _build_shard_root(family_root, shard_index)
+    shard_root = _build_role_shard_root(family_root, normalized_sample_role, shard_index)
     shard_manifest_path = shard_root / "shard_manifest.json"
 
     if shard_root.exists():
@@ -1576,7 +2111,7 @@ def run_pw01_source_event_shard(
         "artifact_type": "paper_workflow_source_shard_manifest",
         "schema_version": "pw_stage_01_v1",
         "family_id": family_id,
-        "sample_role": ACTIVE_SAMPLE_ROLE,
+        "sample_role": normalized_sample_role,
         "shard_index": shard_index,
         "source_shard_count": shard_count,
         "stage_01_worker_count": stage_01_worker_count,
@@ -1607,7 +2142,7 @@ def run_pw01_source_event_shard(
         if stage_01_worker_count == 1:
             for event in assigned_events:
                 executed_events.append(
-                    _run_positive_source_event(
+                    _run_source_event_by_role(
                         event=event,
                         shard_root=shard_root,
                         default_cfg_obj=default_cfg_obj,
@@ -1618,6 +2153,7 @@ def run_pw01_source_event_shard(
             worker_plans = _prepare_local_worker_plans(
                 drive_project_root=normalized_drive_root,
                 family_id=family_id,
+                sample_role=normalized_sample_role,
                 shard_index=shard_index,
                 shard_count=shard_count,
                 stage_01_worker_count=stage_01_worker_count,
@@ -1661,7 +2197,7 @@ def run_pw01_source_event_shard(
             "status": "ok",
             "stage_name": "PW01_Source_Event_Shards",
             "family_id": family_id,
-            "sample_role": ACTIVE_SAMPLE_ROLE,
+            "sample_role": normalized_sample_role,
             "shard_index": shard_index,
             "source_shard_count": shard_count,
             "stage_01_worker_count": stage_01_worker_count,

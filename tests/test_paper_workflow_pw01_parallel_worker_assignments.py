@@ -78,6 +78,7 @@ def test_pw01_local_worker_assignments_use_local_event_ordinal() -> None:
             _make_event(event_id="evt_006", event_index=6, source_prompt_index=0, seed=9),
             _make_event(event_id="evt_008", event_index=8, source_prompt_index=1, seed=3),
         ],
+        sample_role="positive_source",
         stage_01_worker_count=2,
     )
 
@@ -148,6 +149,7 @@ def test_pw01_merge_worker_results_restores_assigned_event_order(tmp_path: Path)
     worker_root_01 = tmp_path / "worker_01"
     worker_result_00 = pw01_module._build_worker_result_payload(
         family_id="family_merge",
+        sample_role="positive_source",
         shard_index=0,
         shard_count=2,
         stage_01_worker_count=2,
@@ -161,6 +163,7 @@ def test_pw01_merge_worker_results_restores_assigned_event_order(tmp_path: Path)
     )
     worker_result_01 = pw01_module._build_worker_result_payload(
         family_id="family_merge",
+        sample_role="positive_source",
         shard_index=0,
         shard_count=2,
         stage_01_worker_count=2,
@@ -195,6 +198,7 @@ def test_pw01_merge_rejects_overlapping_completed_events(tmp_path: Path) -> None
     worker_root_01 = tmp_path / "worker_01"
     worker_result_00 = pw01_module._build_worker_result_payload(
         family_id="family_overlap",
+        sample_role="positive_source",
         shard_index=0,
         shard_count=2,
         stage_01_worker_count=2,
@@ -208,6 +212,7 @@ def test_pw01_merge_rejects_overlapping_completed_events(tmp_path: Path) -> None
     )
     worker_result_01 = pw01_module._build_worker_result_payload(
         family_id="family_overlap",
+        sample_role="positive_source",
         shard_index=0,
         shard_count=2,
         stage_01_worker_count=2,
@@ -225,3 +230,25 @@ def test_pw01_merge_rejects_overlapping_completed_events(tmp_path: Path) -> None
             worker_results=[worker_result_00, worker_result_01],
             assigned_event_ids=["evt_a"],
         )
+
+
+def test_pw01_local_worker_assignments_support_clean_negative_role() -> None:
+    """
+    Verify shard-local worker assignment preserves clean_negative sample_role.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    negative_event = _make_event(event_id="evt_neg", event_index=4, source_prompt_index=0, seed=5)
+    negative_event["sample_role"] = "clean_negative"
+
+    assignments = pw01_module._build_local_worker_assignments(
+        assigned_events=[negative_event],
+        sample_role="clean_negative",
+        stage_01_worker_count=1,
+    )
+
+    assert assignments[0]["assigned_events"][0]["sample_role"] == "clean_negative"

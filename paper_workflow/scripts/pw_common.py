@@ -24,7 +24,14 @@ PAPER_WORKFLOW_ROOT_RELATIVE = "paper_workflow/families"
 DEFAULT_CONFIG_RELATIVE_PATH = "configs/default.yaml"
 DEFAULT_PW_BASE_CONFIG_RELATIVE_PATH = "paper_workflow/configs/pw_base.yaml"
 ACTIVE_SAMPLE_ROLE = "positive_source"
-RESERVED_SAMPLE_ROLES = ["clean_negative", "attacked_positive"]
+CLEAN_NEGATIVE_SAMPLE_ROLE = "clean_negative"
+ATTACKED_POSITIVE_SAMPLE_ROLE = "attacked_positive"
+ACTIVE_SOURCE_SAMPLE_ROLES = [ACTIVE_SAMPLE_ROLE, CLEAN_NEGATIVE_SAMPLE_ROLE]
+RESERVED_SAMPLE_ROLES = [ATTACKED_POSITIVE_SAMPLE_ROLE]
+SAMPLE_ROLE_DIRECTORY_NAMES = {
+    ACTIVE_SAMPLE_ROLE: "positive",
+    CLEAN_NEGATIVE_SAMPLE_ROLE: "negative",
+}
 SOURCE_TRUTH_STAGE = "01_Paper_Full_Cuda_Parallel"
 
 
@@ -88,12 +95,14 @@ def resolve_family_layout_paths(family_root: Path) -> Dict[str, Path]:
     snapshots_root = family_root / "snapshots"
     source_shards_root = family_root / "source_shards"
     positive_shards_root = source_shards_root / "positive"
+    negative_shards_root = source_shards_root / "negative"
     return {
         "family_root": family_root,
         "manifests_root": manifests_root,
         "snapshots_root": snapshots_root,
         "source_shards_root": source_shards_root,
         "positive_shards_root": positive_shards_root,
+        "negative_shards_root": negative_shards_root,
         "runs_root": family_root / "runs",
         "logs_root": family_root / "logs",
         "runtime_state_root": family_root / "runtime_state",
@@ -101,6 +110,7 @@ def resolve_family_layout_paths(family_root: Path) -> Dict[str, Path]:
         "family_manifest_path": manifests_root / "paper_eval_family_manifest.json",
         "source_event_grid_path": manifests_root / "source_event_grid.jsonl",
         "source_shard_plan_path": manifests_root / "source_shard_plan.json",
+        "source_split_plan_path": manifests_root / "source_split_plan.json",
         "prompt_snapshot_path": snapshots_root / "prompt_snapshot.txt",
         "method_identity_snapshot_path": snapshots_root / "method_identity_snapshot.json",
         "config_snapshot_path": snapshots_root / "config_snapshot.yaml",
@@ -123,6 +133,7 @@ def ensure_family_layout(family_root: Path) -> Dict[str, Path]:
         "manifests_root",
         "snapshots_root",
         "positive_shards_root",
+        "negative_shards_root",
         "runs_root",
         "logs_root",
         "runtime_state_root",
@@ -130,6 +141,65 @@ def ensure_family_layout(family_root: Path) -> Dict[str, Path]:
     ]:
         ensure_directory(layout[key_name])
     return layout
+
+
+def validate_source_sample_role(sample_role: str) -> str:
+    """
+    Validate one supported source sample role.
+
+    Args:
+        sample_role: Candidate source sample role.
+
+    Returns:
+        Normalized sample role.
+
+    Raises:
+        ValueError: If the role is not supported by PW00/PW01/PW02 source flow.
+    """
+    if not isinstance(sample_role, str) or not sample_role.strip():
+        raise TypeError("sample_role must be non-empty str")
+
+    normalized_role = sample_role.strip()
+    if normalized_role not in ACTIVE_SOURCE_SAMPLE_ROLES:
+        raise ValueError(f"unsupported sample_role: {normalized_role}")
+    return normalized_role
+
+
+def resolve_sample_role_directory_name(sample_role: str) -> str:
+    """
+    Resolve the directory token used by one source sample role.
+
+    Args:
+        sample_role: Supported source sample role.
+
+    Returns:
+        Directory token under source_shards/.
+    """
+    normalized_role = validate_source_sample_role(sample_role)
+    return SAMPLE_ROLE_DIRECTORY_NAMES[normalized_role]
+
+
+def build_source_shard_root(family_root: Path, sample_role: str, shard_index: int) -> Path:
+    """
+    Build one role-aware source shard root path.
+
+    Args:
+        family_root: Family root path.
+        sample_role: Supported source sample role.
+        shard_index: Zero-based shard index.
+
+    Returns:
+        Role-aware shard root path.
+    """
+    if not isinstance(family_root, Path):
+        raise TypeError("family_root must be Path")
+    if not isinstance(shard_index, int) or isinstance(shard_index, bool) or shard_index < 0:
+        raise TypeError("shard_index must be non-negative int")
+
+    role_directory_name = resolve_sample_role_directory_name(sample_role)
+    shard_root = family_root / "source_shards" / role_directory_name / f"shard_{shard_index:04d}"
+    validate_path_within_base(family_root, shard_root, "paper workflow source shard root")
+    return shard_root
 
 
 def parse_seed_list(seed_list_value: object) -> List[int]:
@@ -280,6 +350,77 @@ def _build_prompt_sha256(prompt_text: str) -> str:
     return hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()
 
 
+def build_source_event_grid(
+    *,
+    family_id: str,
+    prompt_lines: Sequence[str],
+    seeds: Sequence[int],
+    prompt_file: str,
+    sample_roles: Sequence[str],
+) -> List[Dict[str, Any]]:
+    """
+    Build deterministic multi-role source event grid.
+
+    Args:
+        family_id: Family identifier.
+        prompt_lines: Prompt text sequence.
+        seeds: Seed sequence.
+        prompt_file: Prompt file path string.
+        sample_roles: Ordered active source sample roles.
+
+    Returns:
+        Ordered event list across all requested source roles.
+    """
+    if not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not prompt_file:
+        raise TypeError("prompt_file must be non-empty str")
+    if not prompt_lines:
+        raise ValueError("prompt_lines must be non-empty sequence")
+    if not seeds:
+        raise ValueError("seeds must be non-empty sequence")
+    if not sample_roles:
+        raise ValueError("sample_roles must be non-empty sequence")
+
+    normalized_roles: List[str] = []
+    for raw_role in sample_roles:
+        normalized_role = validate_source_sample_role(str(raw_role))
+        if normalized_role not in normalized_roles:
+            normalized_roles.append(normalized_role)
+
+    events: List[Dict[str, Any]] = []
+    event_index = 0
+    for sample_role in normalized_roles:
+        for prompt_index, prompt_text_value in enumerate(prompt_lines):
+            prompt_text = str(prompt_text_value).strip()
+            if not prompt_text:
+                raise ValueError(f"prompt_lines contains empty prompt at index {prompt_index}")
+            prompt_sha256 = _build_prompt_sha256(prompt_text)
+            for seed_value in seeds:
+                event_id = build_event_id(
+                    family_id=family_id,
+                    sample_role=sample_role,
+                    prompt_index=prompt_index,
+                    prompt_sha256=prompt_sha256,
+                    seed=int(seed_value),
+                )
+                events.append(
+                    {
+                        "event_id": event_id,
+                        "event_index": event_index,
+                        "sample_role": sample_role,
+                        "prompt_index": prompt_index,
+                        "source_prompt_index": prompt_index,
+                        "prompt_text": prompt_text,
+                        "prompt_sha256": prompt_sha256,
+                        "seed": int(seed_value),
+                        "prompt_file": prompt_file,
+                    }
+                )
+                event_index += 1
+    return events
+
+
 def build_positive_source_event_grid(
     *,
     family_id: str,
@@ -299,44 +440,94 @@ def build_positive_source_event_grid(
     Returns:
         Ordered event list.
     """
+    return build_source_event_grid(
+        family_id=family_id,
+        prompt_lines=prompt_lines,
+        seeds=seeds,
+        prompt_file=prompt_file,
+        sample_roles=[ACTIVE_SAMPLE_ROLE],
+    )
+
+
+def build_source_split_plan(
+    *,
+    family_id: str,
+    events: Sequence[Mapping[str, Any]],
+    calibration_fraction: float,
+) -> Dict[str, Any]:
+    """
+    Build deterministic calibration/evaluate split plan for source roles.
+
+    Args:
+        family_id: Family identifier.
+        events: Full source event grid.
+        calibration_fraction: Fraction assigned to calibration within each role.
+
+    Returns:
+        Split-plan payload with role-specific and flattened event-id lists.
+    """
     if not family_id:
         raise TypeError("family_id must be non-empty str")
-    if not prompt_file:
-        raise TypeError("prompt_file must be non-empty str")
-    if not prompt_lines:
-        raise ValueError("prompt_lines must be non-empty sequence")
-    if not seeds:
-        raise ValueError("seeds must be non-empty sequence")
+    if not isinstance(calibration_fraction, (int, float)):
+        raise TypeError("calibration_fraction must be float")
 
-    events: List[Dict[str, Any]] = []
-    event_index = 0
-    for prompt_index, prompt_text_value in enumerate(prompt_lines):
-        prompt_text = str(prompt_text_value).strip()
-        if not prompt_text:
-            raise ValueError(f"prompt_lines contains empty prompt at index {prompt_index}")
-        prompt_sha256 = _build_prompt_sha256(prompt_text)
-        for seed_value in seeds:
-            event_id = build_event_id(
-                family_id=family_id,
-                sample_role=ACTIVE_SAMPLE_ROLE,
-                prompt_index=prompt_index,
-                prompt_sha256=prompt_sha256,
-                seed=int(seed_value),
+    calibration_fraction_value = float(calibration_fraction)
+    if not 0.0 < calibration_fraction_value < 1.0:
+        raise ValueError("calibration_fraction must satisfy 0 < calibration_fraction < 1")
+
+    events_by_role: Dict[str, List[Dict[str, Any]]] = {
+        sample_role: []
+        for sample_role in ACTIVE_SOURCE_SAMPLE_ROLES
+    }
+    for event_node in events:
+        if not isinstance(event_node, Mapping):
+            raise TypeError("events must contain mappings")
+        event = dict(cast(Mapping[str, Any], event_node))
+        sample_role = validate_source_sample_role(str(event.get("sample_role")))
+        event_index = event.get("event_index")
+        event_id = event.get("event_id")
+        if not isinstance(event_index, int) or event_index < 0:
+            raise ValueError("event_index must be non-negative int")
+        if not isinstance(event_id, str) or not event_id:
+            raise ValueError("event_id must be non-empty str")
+        events_by_role[sample_role].append(event)
+
+    split_roles: Dict[str, Dict[str, Any]] = {}
+    for sample_role in ACTIVE_SOURCE_SAMPLE_ROLES:
+        ordered_events = sorted(events_by_role[sample_role], key=lambda item: int(item["event_index"]))
+        if not ordered_events:
+            raise ValueError(f"source split requires non-empty events for role: {sample_role}")
+
+        calibration_count = int(len(ordered_events) * calibration_fraction_value)
+        if calibration_count <= 0 or calibration_count >= len(ordered_events):
+            raise ValueError(
+                "source split requires non-empty calibration and evaluate partitions: "
+                f"sample_role={sample_role}, event_count={len(ordered_events)}, calibration_fraction={calibration_fraction_value}"
             )
-            events.append(
-                {
-                    "event_id": event_id,
-                    "event_index": event_index,
-                    "sample_role": ACTIVE_SAMPLE_ROLE,
-                    "prompt_index": prompt_index,
-                    "prompt_text": prompt_text,
-                    "prompt_sha256": prompt_sha256,
-                    "seed": int(seed_value),
-                    "prompt_file": prompt_file,
-                }
-            )
-            event_index += 1
-    return events
+
+        calibration_events = ordered_events[:calibration_count]
+        evaluate_events = ordered_events[calibration_count:]
+        split_roles[sample_role] = {
+            "event_count": len(ordered_events),
+            "calibration_event_count": len(calibration_events),
+            "evaluate_event_count": len(evaluate_events),
+            "calibration_event_ids": [str(event["event_id"]) for event in calibration_events],
+            "evaluate_event_ids": [str(event["event_id"]) for event in evaluate_events],
+        }
+
+    return {
+        "artifact_type": "paper_workflow_source_split_plan",
+        "schema_version": "pw_stage_02_v1",
+        "family_id": family_id,
+        "calibration_fraction": calibration_fraction_value,
+        "sample_roles_active": list(ACTIVE_SOURCE_SAMPLE_ROLES),
+        "sample_roles_reserved": list(RESERVED_SAMPLE_ROLES),
+        "roles": split_roles,
+        "calib_pos_event_ids": list(split_roles[ACTIVE_SAMPLE_ROLE]["calibration_event_ids"]),
+        "calib_neg_event_ids": list(split_roles[CLEAN_NEGATIVE_SAMPLE_ROLE]["calibration_event_ids"]),
+        "eval_pos_event_ids": list(split_roles[ACTIVE_SAMPLE_ROLE]["evaluate_event_ids"]),
+        "eval_neg_event_ids": list(split_roles[CLEAN_NEGATIVE_SAMPLE_ROLE]["evaluate_event_ids"]),
+    }
 
 
 def build_source_shard_plan(
@@ -361,49 +552,59 @@ def build_source_shard_plan(
     if source_shard_count <= 0:
         raise TypeError("source_shard_count must be positive int")
 
-    shard_rows: List[Dict[str, Any]] = [
-        {
-            "shard_index": shard_index,
-            "sample_role": ACTIVE_SAMPLE_ROLE,
-            "assigned_event_ids": [],
-            "assigned_event_indices": [],
-        }
-        for shard_index in range(source_shard_count)
-    ]
-
-    for event in events:
+    role_events: Dict[str, List[Dict[str, Any]]] = {
+        sample_role: []
+        for sample_role in ACTIVE_SOURCE_SAMPLE_ROLES
+    }
+    for event_node in events:
+        if not isinstance(event_node, Mapping):
+            raise TypeError("events must contain mappings")
+        event = dict(cast(Mapping[str, Any], event_node))
+        sample_role = validate_source_sample_role(str(event.get("sample_role")))
         event_id = event.get("event_id")
         event_index = event.get("event_index")
         if not isinstance(event_id, str) or not event_id:
             raise ValueError("event_id must be non-empty str")
         if not isinstance(event_index, int) or event_index < 0:
             raise ValueError("event_index must be non-negative int")
-        shard_index = event_index % source_shard_count
-        shard_rows[shard_index]["assigned_event_ids"].append(event_id)
-        shard_rows[shard_index]["assigned_event_indices"].append(event_index)
+        role_events[sample_role].append(event)
+
+    sample_role_plans: Dict[str, Dict[str, Any]] = {}
+    for sample_role in ACTIVE_SOURCE_SAMPLE_ROLES:
+        ordered_role_events = sorted(role_events[sample_role], key=lambda item: int(item["event_index"]))
+        shard_rows: List[Dict[str, Any]] = [
+            {
+                "shard_index": shard_index,
+                "sample_role": sample_role,
+                "assigned_event_ids": [],
+                "assigned_event_indices": [],
+            }
+            for shard_index in range(source_shard_count)
+        ]
+        for role_event_ordinal, event in enumerate(ordered_role_events):
+            shard_index = role_event_ordinal % source_shard_count
+            shard_rows[shard_index]["assigned_event_ids"].append(str(event["event_id"]))
+            shard_rows[shard_index]["assigned_event_indices"].append(int(event["event_index"]))
+        sample_role_plans[sample_role] = {
+            "event_count": len(ordered_role_events),
+            "shards": shard_rows,
+        }
 
     return {
         "artifact_type": "paper_workflow_source_shard_plan",
         "schema_version": "pw_stage_01_v1",
         "family_id": family_id,
         "source_shard_count": source_shard_count,
-        "sample_roles_active": [ACTIVE_SAMPLE_ROLE],
+        "sample_roles_active": list(ACTIVE_SOURCE_SAMPLE_ROLES),
         "sample_roles_reserved": list(RESERVED_SAMPLE_ROLES),
         "sample_role_plans": {
-            ACTIVE_SAMPLE_ROLE: {
-                "event_count": len(events),
-                "shards": shard_rows,
-            },
-            "clean_negative": {
-                "event_count": 0,
-                "shards": [],
-            },
-            "attacked_positive": {
+            **sample_role_plans,
+            ATTACKED_POSITIVE_SAMPLE_ROLE: {
                 "event_count": 0,
                 "shards": [],
             },
         },
-        "shards": shard_rows,
+        "shards": list(sample_role_plans[ACTIVE_SAMPLE_ROLE]["shards"]),
     }
 
 

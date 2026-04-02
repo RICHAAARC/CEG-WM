@@ -1,0 +1,233 @@
+"""
+File purpose: Validate PW02 source merge and global-threshold workflow closure.
+Module type: General module
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any, Dict, List, cast
+
+import paper_workflow.scripts.pw02_merge_source_event_shards as pw02_module
+from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
+from paper_workflow.scripts.pw_common import build_source_shard_root, read_jsonl
+from scripts.notebook_runtime_common import ensure_directory, write_json_atomic
+
+
+def _build_pw00_family(tmp_path: Path, family_id: str) -> Dict[str, Any]:
+    """
+    Build a PW00 fixture family for PW02 tests.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        family_id: Fixture family identifier.
+
+    Returns:
+        PW00 summary payload.
+    """
+    prompt_file = tmp_path / "pw02_prompts.txt"
+    prompt_file.write_text("prompt one\nprompt two\n", encoding="utf-8")
+    return run_pw00_build_family_manifest(
+        drive_project_root=tmp_path / "drive",
+        family_id=family_id,
+        prompt_file=str(prompt_file),
+        seed_list=[3, 9],
+        source_shard_count=2,
+    )
+
+
+def _materialize_completed_pw01_shards(summary: Dict[str, Any]) -> None:
+    """
+    Create completed PW01 shard manifests and detect records for both roles.
+
+    Args:
+        summary: PW00 summary payload.
+
+    Returns:
+        None.
+    """
+    family_root = Path(str(summary["family_root"]))
+    shard_plan = json.loads(Path(str(summary["source_shard_plan_path"])).read_text(encoding="utf-8"))
+    event_lookup = {
+        row["event_id"]: row
+        for row in read_jsonl(Path(str(summary["source_event_grid_path"])))
+    }
+
+    for sample_role in ["positive_source", "clean_negative"]:
+        role_plan = cast(Dict[str, Any], shard_plan["sample_role_plans"][sample_role])
+        for shard_row in cast(List[Dict[str, Any]], role_plan["shards"]):
+            shard_index = int(shard_row["shard_index"])
+            shard_root = ensure_directory(build_source_shard_root(family_root, sample_role, shard_index))
+            ensure_directory(shard_root / "records")
+            events: List[Dict[str, Any]] = []
+            for event_id in cast(List[str], shard_row["assigned_event_ids"]):
+                event = cast(Dict[str, Any], event_lookup[event_id])
+                event_index = int(event["event_index"])
+                detect_record_path = shard_root / "records" / f"event_{event_index:06d}_detect_record.json"
+                if sample_role == "positive_source":
+                    detect_payload = {
+                        "content_evidence_payload": {
+                            "status": "ok",
+                            "score": 0.91,
+                            "content_chain_score": 0.91,
+                            "plan_digest": f"plan-{event_id}",
+                            "basis_digest": f"basis-{event_id}",
+                        },
+                        "final_decision": {
+                            "is_watermarked": True,
+                        },
+                        "attestation": {
+                            "final_event_attested_decision": {
+                                "status": "ok",
+                                "is_event_attested": True,
+                                "event_attestation_score_name": "event_attestation_score",
+                                "event_attestation_score": 0.81,
+                            }
+                        },
+                    }
+                else:
+                    detect_payload = {
+                        "content_evidence_payload": {
+                            "status": "ok",
+                            "score": 0.11,
+                            "content_chain_score": 0.11,
+                            "plan_digest": f"plan-{event_id}",
+                            "basis_digest": f"basis-{event_id}",
+                        },
+                        "final_decision": {
+                            "is_watermarked": False,
+                        },
+                        "attestation": {
+                            "final_event_attested_decision": {
+                                "status": "absent",
+                                "is_event_attested": False,
+                                "event_attestation_score_name": "event_attestation_score",
+                                "event_attestation_score": 0.0,
+                            }
+                        },
+                    }
+                write_json_atomic(detect_record_path, detect_payload)
+                events.append(
+                    {
+                        "event_id": event_id,
+                        "sample_role": sample_role,
+                        "event_index": event_index,
+                        "detect_record_path": detect_record_path.as_posix(),
+                    }
+                )
+
+            shard_manifest_path = shard_root / "shard_manifest.json"
+            write_json_atomic(
+                shard_manifest_path,
+                {
+                    "status": "completed",
+                    "sample_role": sample_role,
+                    "events": events,
+                },
+            )
+
+
+def _patch_pw02_python_stage_runner(monkeypatch: Any) -> None:
+    """
+    Patch PW02 Python stage execution to lightweight artifact-writing stubs.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+
+    def fake_run_python_stage_command(
+        *,
+        module_name: str,
+        output_dir: Path,
+        config_path: Path,
+        log_prefix: str,
+    ) -> Dict[str, Any]:
+        ensure_directory(output_dir / "logs")
+        if module_name == "main.cli.run_calibrate":
+            thresholds_path = output_dir / "artifacts" / "thresholds" / "thresholds_artifact.json"
+            ensure_directory(thresholds_path.parent)
+            write_json_atomic(
+                thresholds_path,
+                {
+                    "status": "ok",
+                    "score_name": cast(Dict[str, Any], pw02_module.load_yaml_mapping(config_path))["calibration"]["score_name"],
+                    "target_fpr": 0.01,
+                },
+            )
+            write_json_atomic(output_dir / "records" / "calibration_record.json", {"status": "ok"})
+        elif module_name == "main.cli.run_evaluate":
+            write_json_atomic(output_dir / "records" / "evaluate_record.json", {"status": "ok"})
+            write_json_atomic(output_dir / "artifacts" / "evaluation_report.json", {"status": "ok"})
+        else:
+            raise ValueError(f"unsupported module_name: {module_name}")
+
+        return {
+            "return_code": 0,
+            "status": "ok",
+            "stdout_log_path": (output_dir / "logs" / f"{log_prefix}_stdout.log").as_posix(),
+            "stderr_log_path": (output_dir / "logs" / f"{log_prefix}_stderr.log").as_posix(),
+            "command": [module_name, str(config_path), str(output_dir)],
+        }
+
+    monkeypatch.setattr(pw02_module, "_run_python_stage_command", fake_run_python_stage_command)
+
+
+def test_pw02_merges_dual_role_shards_and_builds_score_runs(tmp_path: Path, monkeypatch: Any) -> None:
+    """
+    Verify PW02 merges completed PW01 shards and emits both score workflows.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    summary = _build_pw00_family(tmp_path, family_id="family_pw02_merge")
+    _materialize_completed_pw01_shards(summary)
+    _patch_pw02_python_stage_runner(monkeypatch)
+
+    pw02_summary = pw02_module.run_pw02_merge_source_event_shards(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_pw02_merge",
+    )
+
+    assert pw02_summary["status"] == "ok"
+    assert pw02_summary["split_counts"] == {"calibration": 4, "evaluate": 4}
+    assert set(pw02_summary["score_runs"]) == {
+        pw02_module.CONTENT_SCORE_NAME,
+        pw02_module.EVENT_ATTESTATION_SCORE_NAME,
+    }
+
+    content_run = cast(Dict[str, Any], pw02_summary["score_runs"][pw02_module.CONTENT_SCORE_NAME])
+    attestation_run = cast(Dict[str, Any], pw02_summary["score_runs"][pw02_module.EVENT_ATTESTATION_SCORE_NAME])
+    assert content_run["calibration_inputs"]["record_count"] == 4
+    assert content_run["evaluate_inputs"]["record_count"] == 4
+    assert attestation_run["calibration_inputs"]["record_count"] == 4
+    assert attestation_run["evaluate_inputs"]["record_count"] == 4
+
+    attestation_negative_record_path = Path(
+        str(
+            next(
+                record["record_path"]
+                for record in attestation_run["evaluate_inputs"]["records"]
+                if record["sample_role"] == "clean_negative"
+            )
+        )
+    )
+    attestation_negative_record = json.loads(attestation_negative_record_path.read_text(encoding="utf-8"))
+    assert attestation_negative_record["label"] is False
+    assert attestation_negative_record["calibration_label_resolution"] == "paper_workflow_clean_negative"
+    assert (
+        attestation_negative_record["attestation"]["final_event_attested_decision"]["event_attestation_score"]
+        == 0.0
+    )
+
+    system_final_metrics = cast(Dict[str, Any], pw02_summary["system_final_metrics"])
+    assert system_final_metrics["n_total"] == 4
+    assert system_final_metrics["n_positive"] == 2
+    assert system_final_metrics["n_negative"] == 2

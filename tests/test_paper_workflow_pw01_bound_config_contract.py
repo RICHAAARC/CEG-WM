@@ -441,6 +441,7 @@ def test_pw01_worker_plan_persists_and_worker_loads_bound_config_path(
     worker_plans = pw01_module._prepare_local_worker_plans(
         drive_project_root=tmp_path / "drive",
         family_id="family_worker_bound_config",
+        sample_role="positive_source",
         shard_index=0,
         shard_count=2,
         stage_01_worker_count=1,
