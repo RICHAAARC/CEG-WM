@@ -120,6 +120,15 @@ def _patch_clean_negative_runner(monkeypatch: pytest.MonkeyPatch) -> None:
                 records_root / "detect_record.json",
                 {
                     "record_type": "detect_probe",
+                    "plan_input_digest": "plan-input-probe",
+                    "plan_input_schema_version": "v2",
+                    "subspace_planner_impl_identity": {
+                        "impl_id": "planner_impl",
+                    },
+                    "subspace_plan": {
+                        "rank": 2,
+                        "planner_input_digest": "plan-input-probe",
+                    },
                     "content_evidence_payload": {
                         "status": "absent",
                         "plan_digest": "plan-probe",
@@ -132,6 +141,21 @@ def _patch_clean_negative_runner(monkeypatch: pytest.MonkeyPatch) -> None:
                 records_root / "detect_record.json",
                 {
                     "record_type": "detect",
+                    "contract_bound_digest": "contract-bound",
+                    "whitelist_bound_digest": "whitelist-bound",
+                    "policy_path_semantics_bound_digest": "semantics-bound",
+                    "contract_version": "contracts-v1",
+                    "contract_digest": "contract-digest",
+                    "contract_file_sha256": "contract-file-sha",
+                    "contract_canon_sha256": "contract-canon-sha",
+                    "whitelist_version": "whitelist-v1",
+                    "whitelist_digest": "whitelist-digest",
+                    "whitelist_file_sha256": "whitelist-file-sha",
+                    "whitelist_canon_sha256": "whitelist-canon-sha",
+                    "policy_path_semantics_version": "semantics-v1",
+                    "policy_path_semantics_digest": "semantics-digest",
+                    "policy_path_semantics_file_sha256": "semantics-file-sha",
+                    "policy_path_semantics_canon_sha256": "semantics-canon-sha",
                     "content_evidence_payload": {
                         "status": "ok",
                         "score": 0.12,
@@ -291,6 +315,37 @@ def test_pw01_clean_negative_writes_statement_only_provenance(tmp_path: Path, mo
     assert first_event["stage_results"]["detect_probe"]["status"] == "ok"
     assert first_event["stage_results"]["detect"]["status"] == "ok"
 
+    runtime_config_path = Path(str(first_event["runtime_config_path"]))
+    prompt_run_root = runtime_config_path.parent / "run"
+    detect_input_record_path = prompt_run_root / "artifacts" / "neg_preview_input" / "detect_input_record.json"
+    assert detect_input_record_path.exists()
+    assert not (prompt_run_root / "records" / "embed_record.json").exists()
+
+    detect_input_record = json.loads(detect_input_record_path.read_text(encoding="utf-8"))
+    assert detect_input_record["operation"] == "embed_preview_input"
+    assert detect_input_record["negative_branch_source_attestation_provenance"]["statement"]["plan_digest"] == "plan-probe"
+    assert "plan_digest" not in detect_input_record
+    assert "basis_digest" not in detect_input_record
+    assert "subspace_planner_impl_identity" not in detect_input_record
+    assert "subspace_plan" not in detect_input_record
+
+    detect_probe_command = cast(Dict[str, Any], first_event["stage_results"]["detect_probe"])["command"]
+    detect_command = cast(Dict[str, Any], first_event["stage_results"]["detect"])["command"]
+    assert "--input" in detect_probe_command
+    assert detect_probe_command[detect_probe_command.index("--input") + 1] == str(detect_input_record_path)
+    assert "--input" in detect_command
+    assert detect_command[detect_command.index("--input") + 1] == str(detect_input_record_path)
+
     staged_embed_record = json.loads(Path(str(first_event["embed_record_path"])).read_text(encoding="utf-8"))
     assert staged_embed_record["negative_branch_source_attestation_provenance"]["statement"]["plan_digest"] == "plan-probe"
     assert staged_embed_record["basis_digest"] == "basis-probe"
+    assert staged_embed_record["plan_input_digest"] == "plan-input-probe"
+    assert staged_embed_record["plan_input_schema_version"] == "v2"
+    assert staged_embed_record["subspace_planner_impl_identity"]["impl_id"] == "planner_impl"
+    assert staged_embed_record["subspace_plan"]["planner_input_digest"] == "plan-input-probe"
+    assert staged_embed_record["contract_bound_digest"] == "contract-bound"
+    assert staged_embed_record["whitelist_bound_digest"] == "whitelist-bound"
+    assert staged_embed_record["policy_path_semantics_bound_digest"] == "semantics-bound"
+    assert "content_evidence" not in staged_embed_record
+    assert "embed_trace" not in staged_embed_record
+    assert "injection_evidence" not in staged_embed_record

@@ -20,6 +20,7 @@ from main.core import digests
 from main.diffusion.sd3 import infer_runtime as infer_runtime_module
 from main.diffusion.sd3 import trajectory_tap as trajectory_tap_module
 from main.diffusion.sd3.trajectory_tap import LatentTrajectoryCache
+from main.watermarking.content_chain.subspace import subspace_planner_impl as subspace_planner_module
 from main.watermarking.content_chain.subspace.planner_interface import SubspacePlanEvidence
 from main.watermarking.content_chain.subspace.subspace_planner_impl import (
     SUBSPACE_PLANNER_ID,
@@ -556,6 +557,59 @@ def test_planner_failure_context_contains_shape_and_route_snapshot(monkeypatch: 
     assert context["trajectory_feature_matrix_shape"] == [4, 8]
     assert context["jvp_matrix_shape"] is not None
     assert context["rank"] == 4
+
+
+def test_partition_projection_matrix_canonicalizes_sign_flipped_vh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    功能：partition projection matrix 必须对等价 SVD 符号翻转给出同一 canonical basis。
+    """
+    base_vh = np.asarray(
+        [
+            [0.3, -0.4, 0.5],
+            [0.1, 0.9, -0.2],
+        ],
+        dtype=np.float64,
+    )
+    flipped_vh = np.asarray(
+        [
+            [-0.3, 0.4, -0.5],
+            [0.1, 0.9, -0.2],
+        ],
+        dtype=np.float64,
+    )
+
+    monkeypatch.setattr(
+        subspace_planner_module,
+        "_stable_svd",
+        lambda _matrix: (np.zeros((3, 2), dtype=np.float64), np.asarray([2.0, 1.0], dtype=np.float64), base_vh),
+    )
+    projection_matrix_a, rank_a = subspace_planner_module._build_partition_projection_matrix(
+        np.zeros((4, 3), dtype=np.float64),
+        [0, 2, 4],
+        5,
+        2,
+    )
+
+    monkeypatch.setattr(
+        subspace_planner_module,
+        "_stable_svd",
+        lambda _matrix: (np.zeros((3, 2), dtype=np.float64), np.asarray([2.0, 1.0], dtype=np.float64), flipped_vh),
+    )
+    projection_matrix_b, rank_b = subspace_planner_module._build_partition_projection_matrix(
+        np.zeros((4, 3), dtype=np.float64),
+        [0, 2, 4],
+        5,
+        2,
+    )
+
+    assert rank_a == 2
+    assert rank_b == 2
+    assert np.allclose(projection_matrix_a, projection_matrix_b)
+    assert digests.canonical_sha256(np.round(projection_matrix_a, 8).tolist()) == digests.canonical_sha256(
+        np.round(projection_matrix_b, 8).tolist()
+    )
 
 
 def test_run_embed_statement_only_failure_persists_runtime_finalization_diagnostics(

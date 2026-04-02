@@ -464,6 +464,23 @@ def _normalize_routed_feature_partition(
     return normalized_hf_cols, normalized_lf_cols, rebalance_policy
 
 
+def _canonicalize_basis_columns(matrix: Any) -> np.ndarray:
+    matrix_np = np.asarray(matrix, dtype=np.float64)
+    if matrix_np.ndim != 2:
+        raise ValueError("basis matrix must be rank-2")
+
+    canonical_matrix = np.array(matrix_np, dtype=np.float64, copy=True)
+    for column_index in range(canonical_matrix.shape[1]):
+        column_vector = canonical_matrix[:, column_index]
+        if column_vector.size <= 0:
+            continue
+        pivot_index = int(np.argmax(np.abs(column_vector)))
+        pivot_value = float(column_vector[pivot_index])
+        if pivot_value < 0.0:
+            canonical_matrix[:, column_index] *= -1.0
+    return canonical_matrix
+
+
 def _build_partition_projection_matrix(
     routed_matrix: Any,
     feature_cols: List[int],
@@ -485,7 +502,7 @@ def _build_partition_projection_matrix(
     if effective_partition_rank <= 0:
         raise ValueError("partition rank must remain positive after clipping")
 
-    local_projection_matrix = vh_partition[:effective_partition_rank, :].T
+    local_projection_matrix = _canonicalize_basis_columns(vh_partition[:effective_partition_rank, :].T)
     projection_matrix = np.zeros((feature_dim, effective_partition_rank), dtype=np.float64)
     projection_matrix[np.asarray(feature_cols, dtype=np.int64), :] = local_projection_matrix
     return projection_matrix, effective_partition_rank

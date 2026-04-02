@@ -52,6 +52,33 @@ EVENT_RECORD_USAGE_BY_SAMPLE_ROLE = {
 }
 DEFAULT_STAGE_01_WORKER_COUNT = 1
 
+_CLEAN_NEGATIVE_FREEZE_ANCHOR_FIELDS = (
+    "contract_version",
+    "contract_digest",
+    "contract_file_sha256",
+    "contract_canon_sha256",
+    "contract_bound_digest",
+    "whitelist_version",
+    "whitelist_digest",
+    "whitelist_file_sha256",
+    "whitelist_canon_sha256",
+    "whitelist_bound_digest",
+    "policy_path_semantics_version",
+    "policy_path_semantics_digest",
+    "policy_path_semantics_file_sha256",
+    "policy_path_semantics_canon_sha256",
+    "policy_path_semantics_bound_digest",
+)
+_CLEAN_NEGATIVE_OPTIONAL_FORMAL_SCALAR_FIELDS = (
+    "cfg_digest",
+    "plan_input_digest",
+    "plan_input_schema_version",
+)
+_CLEAN_NEGATIVE_OPTIONAL_FORMAL_MAPPING_FIELDS = (
+    "subspace_planner_impl_identity",
+    "subspace_plan",
+)
+
 
 def _load_base_runner_module() -> ModuleType:
     """
@@ -1231,6 +1258,43 @@ def _extract_detect_probe_plan_anchors(detect_payload_obj: Mapping[str, Any]) ->
     }
 
 
+def _build_clean_negative_detect_command(
+    *,
+    config_path: Path,
+    run_root: Path,
+    input_record_path: Path,
+) -> List[str]:
+    """
+    Build one detect command with an explicit clean-negative input record.
+
+    Args:
+        config_path: Runtime config path.
+        run_root: Prompt-local run root.
+        input_record_path: Explicit detect input record path.
+
+    Returns:
+        Detect command token list.
+    """
+    if not isinstance(config_path, Path):
+        raise TypeError("config_path must be Path")
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(input_record_path, Path):
+        raise TypeError("input_record_path must be Path")
+
+    command = list(BASE_RUNNER_MODULE._build_stage_command("detect", config_path, run_root))
+    input_token = str(input_record_path)
+    if "--input" in command:
+        input_index = command.index("--input")
+        if input_index + 1 < len(command):
+            command[input_index + 1] = input_token
+        else:
+            command.append(input_token)
+    else:
+        command.extend(["--input", input_token])
+    return [str(item) for item in command]
+
+
 def _build_clean_negative_input_record(
     *,
     preview_image_path: Path,
@@ -1238,12 +1302,10 @@ def _build_clean_negative_input_record(
     prompt_text: str,
     prompt_sha256: str,
     seed: int,
-    plan_digest: str | None = None,
-    basis_digest: str | None = None,
     provenance_payload: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """
-    Build the synthetic negative input record consumed by detect.
+    Build the clean-negative detect input record consumed by detect.
 
     Args:
         preview_image_path: Clean preview artifact path.
@@ -1251,12 +1313,10 @@ def _build_clean_negative_input_record(
         prompt_text: Prompt text.
         prompt_sha256: Prompt SHA256.
         seed: Event seed.
-        plan_digest: Optional plan digest copied from detect probe.
-        basis_digest: Optional basis digest copied from detect probe.
         provenance_payload: Optional statement-only provenance payload.
 
     Returns:
-        Synthetic negative input record.
+        Clean-negative detect input record.
     """
     if not isinstance(preview_image_path, Path):
         raise TypeError("preview_image_path must be Path")
@@ -1272,13 +1332,13 @@ def _build_clean_negative_input_record(
         raise TypeError("seed must be int")
 
     normalized_preview_path = normalize_path_value(preview_image_path)
+    artifact_sha256 = compute_file_sha256(preview_image_path)
     record_payload: Dict[str, Any] = {
-        "operation": "embed",
-        "embed_mode": "explicit_negative_no_watermark",
+        "operation": "embed_preview_input",
         "watermarked_path": normalized_preview_path,
         "image_path": normalized_preview_path,
-        "artifact_sha256": compute_file_sha256(preview_image_path),
-        "watermarked_artifact_sha256": compute_file_sha256(preview_image_path),
+        "artifact_sha256": artifact_sha256,
+        "watermarked_artifact_sha256": artifact_sha256,
         "is_watermarked": False,
         "negative_branch_note": "paper workflow clean_negative source uses preview artifact without watermark embed",
         "event_id": event_id,
@@ -1286,14 +1346,131 @@ def _build_clean_negative_input_record(
         "prompt_text": prompt_text,
         "prompt_sha256": prompt_sha256,
         "seed": seed,
+        "inputs": {
+            "input_image_path": normalized_preview_path,
+        },
     }
-    if isinstance(plan_digest, str) and plan_digest:
-        record_payload["plan_digest"] = plan_digest
-    if isinstance(basis_digest, str) and basis_digest:
-        record_payload["basis_digest"] = basis_digest
     if isinstance(provenance_payload, Mapping):
         record_payload["negative_branch_source_attestation_provenance"] = dict(provenance_payload)
     return record_payload
+
+
+def _copy_clean_negative_freeze_anchor_fields(
+    target_record: Dict[str, Any],
+    source_record: Mapping[str, Any],
+) -> None:
+    """
+    Copy the actual freeze-anchor fields from one bound detect record.
+
+    Args:
+        target_record: Mutable staged embed record.
+        source_record: Bound detect record payload.
+
+    Returns:
+        None.
+    """
+    if not isinstance(target_record, dict):
+        raise TypeError("target_record must be dict")
+    if not isinstance(source_record, Mapping):
+        raise TypeError("source_record must be Mapping")
+
+    for field_name in _CLEAN_NEGATIVE_FREEZE_ANCHOR_FIELDS:
+        field_value = source_record.get(field_name)
+        if isinstance(field_value, str) and field_value:
+            target_record[field_name] = field_value
+
+
+def _build_clean_negative_staged_embed_record(
+    *,
+    preview_image_path: Path,
+    event_id: str,
+    prompt_text: str,
+    prompt_sha256: str,
+    seed: int,
+    probe_plan_anchors: Mapping[str, Any],
+    probe_detect_payload: Mapping[str, Any],
+    bound_detect_payload: Mapping[str, Any],
+    provenance_payload: Mapping[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """
+    Build the staged clean-negative embed record without reusing the detect input file.
+
+    Args:
+        preview_image_path: Clean preview artifact path.
+        event_id: Event identifier.
+        prompt_text: Prompt text.
+        prompt_sha256: Prompt SHA256.
+        seed: Event seed.
+        probe_plan_anchors: Probe-derived plan anchor mapping.
+        probe_detect_payload: Probe detect record payload.
+        bound_detect_payload: Final detect record payload carrying freeze anchors.
+        provenance_payload: Optional statement-only provenance payload.
+
+    Returns:
+        Staged clean-negative embed record payload.
+    """
+    if not isinstance(preview_image_path, Path):
+        raise TypeError("preview_image_path must be Path")
+    if not preview_image_path.exists() or not preview_image_path.is_file():
+        raise FileNotFoundError(f"clean negative preview image not found: {normalize_path_value(preview_image_path)}")
+    if not isinstance(event_id, str) or not event_id:
+        raise TypeError("event_id must be non-empty str")
+    if not isinstance(prompt_text, str) or not prompt_text:
+        raise TypeError("prompt_text must be non-empty str")
+    if not isinstance(prompt_sha256, str) or not prompt_sha256:
+        raise TypeError("prompt_sha256 must be non-empty str")
+    if not isinstance(seed, int):
+        raise TypeError("seed must be int")
+    if not isinstance(probe_plan_anchors, Mapping):
+        raise TypeError("probe_plan_anchors must be Mapping")
+    if not isinstance(probe_detect_payload, Mapping):
+        raise TypeError("probe_detect_payload must be Mapping")
+    if not isinstance(bound_detect_payload, Mapping):
+        raise TypeError("bound_detect_payload must be Mapping")
+
+    normalized_preview_path = normalize_path_value(preview_image_path)
+    artifact_sha256 = compute_file_sha256(preview_image_path)
+    staged_record: Dict[str, Any] = {
+        "operation": "embed",
+        "embed_mode": "explicit_negative_no_watermark",
+        "watermarked_path": normalized_preview_path,
+        "image_path": normalized_preview_path,
+        "artifact_sha256": artifact_sha256,
+        "watermarked_artifact_sha256": artifact_sha256,
+        "is_watermarked": False,
+        "negative_branch_note": "paper workflow clean_negative source uses preview artifact without watermark embed",
+        "event_id": event_id,
+        "prompt": prompt_text,
+        "prompt_text": prompt_text,
+        "prompt_sha256": prompt_sha256,
+        "seed": seed,
+        "plan_digest": probe_plan_anchors.get("plan_digest"),
+        "basis_digest": probe_plan_anchors.get("basis_digest"),
+    }
+    if isinstance(provenance_payload, Mapping):
+        staged_record["negative_branch_source_attestation_provenance"] = dict(provenance_payload)
+
+    content_evidence_node = probe_detect_payload.get("content_evidence_payload")
+    content_evidence_payload = (
+        cast(Dict[str, Any], content_evidence_node)
+        if isinstance(content_evidence_node, dict)
+        else {}
+    )
+    for field_name in _CLEAN_NEGATIVE_OPTIONAL_FORMAL_SCALAR_FIELDS:
+        field_value = probe_detect_payload.get(field_name)
+        if not isinstance(field_value, str) or not field_value:
+            field_value = content_evidence_payload.get(field_name)
+        if isinstance(field_value, str) and field_value:
+            staged_record[field_name] = field_value
+    for field_name in _CLEAN_NEGATIVE_OPTIONAL_FORMAL_MAPPING_FIELDS:
+        field_value = probe_detect_payload.get(field_name)
+        if not isinstance(field_value, dict) or not field_value:
+            field_value = content_evidence_payload.get(field_name)
+        if isinstance(field_value, dict) and field_value:
+            staged_record[field_name] = copy.deepcopy(cast(Dict[str, Any], field_value))
+
+    _copy_clean_negative_freeze_anchor_fields(staged_record, bound_detect_payload)
+    return staged_record
 
 
 def _build_negative_branch_attestation_provenance(
@@ -1473,8 +1650,8 @@ def _run_clean_negative_event(
     if not preview_image_path.exists() or not preview_image_path.is_file():
         raise FileNotFoundError(f"clean_negative preview image missing: {normalize_path_value(preview_image_path)}")
 
-    synthetic_input_record_path = prompt_run_root / "records" / "embed_record.json"
-    ensure_directory(synthetic_input_record_path.parent)
+    detect_input_record_path = prompt_run_root / "artifacts" / "neg_preview_input" / "detect_input_record.json"
+    ensure_directory(detect_input_record_path.parent)
     probe_input_record = _build_clean_negative_input_record(
         preview_image_path=preview_image_path,
         event_id=event_id,
@@ -1482,13 +1659,17 @@ def _run_clean_negative_event(
         prompt_sha256=prompt_sha256,
         seed=seed,
     )
-    write_json_atomic(synthetic_input_record_path, probe_input_record)
+    write_json_atomic(detect_input_record_path, probe_input_record)
 
     stage_results: Dict[str, Any] = {
         "preview_precompute": preview_record,
     }
 
-    detect_probe_command = BASE_RUNNER_MODULE._build_stage_command("detect", runtime_cfg_path, prompt_run_root)
+    detect_probe_command = _build_clean_negative_detect_command(
+        config_path=runtime_cfg_path,
+        run_root=prompt_run_root,
+        input_record_path=detect_input_record_path,
+    )
     detect_probe_result = BASE_RUNNER_MODULE._run_stage("detect_probe", detect_probe_command, prompt_run_root)
     stage_results["detect_probe"] = detect_probe_result
     if int(detect_probe_result.get("return_code", 1)) != 0:
@@ -1520,13 +1701,16 @@ def _run_clean_negative_event(
         prompt_text=prompt_text,
         prompt_sha256=prompt_sha256,
         seed=seed,
-        plan_digest=probe_plan_anchors["plan_digest"],
-        basis_digest=probe_plan_anchors["basis_digest"],
         provenance_payload=provenance_payload,
     )
-    write_json_atomic(synthetic_input_record_path, final_input_record)
+    write_json_atomic(detect_input_record_path, final_input_record)
 
-    detect_result = BASE_RUNNER_MODULE._run_stage("detect", detect_probe_command, prompt_run_root)
+    detect_command = _build_clean_negative_detect_command(
+        config_path=runtime_cfg_path,
+        run_root=prompt_run_root,
+        input_record_path=detect_input_record_path,
+    )
+    detect_result = BASE_RUNNER_MODULE._run_stage("detect", detect_command, prompt_run_root)
     stage_results["detect"] = detect_result
     if int(detect_result.get("return_code", 1)) != 0:
         raise RuntimeError(
@@ -1542,9 +1726,21 @@ def _run_clean_negative_event(
     staged_detect_record_path = shard_root / "records" / f"event_{event_index:06d}_detect_record.json"
     validate_path_within_base(shard_root, staged_embed_record_path, "staged embed record")
     validate_path_within_base(shard_root, staged_detect_record_path, "staged detect record")
-    copy_file(synthetic_input_record_path, staged_embed_record_path)
 
     detect_payload_obj = _load_required_json_dict(source_detect_record_path, "clean_negative detect record")
+    staged_embed_record_payload = _build_clean_negative_staged_embed_record(
+        preview_image_path=preview_image_path,
+        event_id=event_id,
+        prompt_text=prompt_text,
+        prompt_sha256=prompt_sha256,
+        seed=seed,
+        probe_plan_anchors=probe_plan_anchors,
+        probe_detect_payload=probe_detect_payload,
+        bound_detect_payload=detect_payload_obj,
+        provenance_payload=provenance_payload,
+    )
+    write_json_atomic(staged_embed_record_path, staged_embed_record_payload)
+
     normalize_fn = getattr(BASE_RUNNER_MODULE, "_normalize_direct_detect_payload", None)
     if callable(normalize_fn):
         normalized_payload = normalize_fn(
