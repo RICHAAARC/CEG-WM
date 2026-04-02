@@ -39,6 +39,56 @@ def _load_notebook(notebook_path: Path) -> Dict[str, Any]:
     return cast(Dict[str, Any], notebook_payload)
 
 
+def _find_cell_sources(notebook_path: Path, marker: str, cell_type: str) -> List[str]:
+    """
+    Find notebook cell sources by marker text and cell type.
+
+    Args:
+        notebook_path: Notebook path.
+        marker: Marker text.
+        cell_type: Notebook cell type.
+
+    Returns:
+        Matching cell source texts.
+    """
+    if cell_type not in {"code", "markdown"}:
+        raise ValueError(f"unsupported cell_type: {cell_type}")
+
+    notebook_payload = _load_notebook(notebook_path)
+    cells = notebook_payload.get("cells")
+    if not isinstance(cells, list):
+        raise AssertionError(f"cells must be list: {notebook_path}")
+
+    matches: List[str] = []
+    for cell_node in cast(List[object], cells):
+        cell = cast(Dict[str, Any], cell_node) if isinstance(cell_node, dict) else None
+        if cell is None:
+            continue
+        if cell.get("cell_type") != cell_type:
+            continue
+        source_node = cell.get("source")
+        if not isinstance(source_node, list):
+            continue
+        source_text = "\n".join(str(line) for line in cast(List[object], source_node))
+        if marker in source_text:
+            matches.append(source_text)
+    return matches
+
+
+def _find_code_cell_sources(notebook_path: Path, marker: str) -> List[str]:
+    """
+    Find all matching code cell source texts.
+
+    Args:
+        notebook_path: Notebook path.
+        marker: Marker text.
+
+    Returns:
+        Matching code cell source texts.
+    """
+    return _find_cell_sources(notebook_path, marker, "code")
+
+
 def _find_code_cell_source(notebook_path: Path, marker: str) -> str:
     """
     Find one code cell by marker text.
@@ -50,11 +100,28 @@ def _find_code_cell_source(notebook_path: Path, marker: str) -> str:
     Returns:
         Joined code source text.
     """
+    for source_text in _find_code_cell_sources(notebook_path, marker):
+        return source_text
+    raise AssertionError(f"code cell marker not found: {marker}")
+
+
+def _find_code_cell_index(notebook_path: Path, marker: str) -> int:
+    """
+    Find the index of one matching code cell.
+
+    Args:
+        notebook_path: Notebook path.
+        marker: Marker text.
+
+    Returns:
+        Zero-based notebook cell index.
+    """
     notebook_payload = _load_notebook(notebook_path)
     cells = notebook_payload.get("cells")
     if not isinstance(cells, list):
         raise AssertionError(f"cells must be list: {notebook_path}")
-    for cell_node in cast(List[object], cells):
+
+    for index, cell_node in enumerate(cast(List[object], cells)):
         cell = cast(Dict[str, Any], cell_node) if isinstance(cell_node, dict) else None
         if cell is None:
             continue
@@ -65,8 +132,24 @@ def _find_code_cell_source(notebook_path: Path, marker: str) -> str:
             continue
         source_text = "\n".join(str(line) for line in cast(List[object], source_node))
         if marker in source_text:
-            return source_text
+            return index
     raise AssertionError(f"code cell marker not found: {marker}")
+
+
+def _find_markdown_cell_source(notebook_path: Path, marker: str) -> str:
+    """
+    Find one markdown cell by marker text.
+
+    Args:
+        notebook_path: Notebook path.
+        marker: Marker text.
+
+    Returns:
+        Joined markdown source text.
+    """
+    for source_text in _find_cell_sources(notebook_path, marker, "markdown"):
+        return source_text
+    raise AssertionError(f"markdown cell marker not found: {marker}")
 
 
 def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
@@ -139,6 +222,49 @@ def test_pw01_notebook_passes_precheck_bound_config_to_execute_and_parallel_plan
     assert 'str(PW01_BOUND_CONFIG_PATH)' in pw01_parallel_plan
     assert '"--sample-role"' in pw01_parallel_plan
     assert 'SAMPLE_ROLE' in pw01_parallel_plan
+
+
+def test_pw01_notebook_restores_bootstrap_before_single_formal_precheck() -> None:
+    """
+    Verify PW01 notebook restores the bootstrap cell before one formal precheck.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    pw01_intro = _find_markdown_cell_source(NOTEBOOK_PW01_PATH, "用途：")
+    pw01_parallel_markdown = _find_markdown_cell_source(NOTEBOOK_PW01_PATH, "扩展规则：")
+    pw01_bootstrap = _find_code_cell_source(NOTEBOOK_PW01_PATH, "MODEL_SNAPSHOT_PATH = snapshot_download(")
+    pw01_precheck = _find_code_cell_source(NOTEBOOK_PW01_PATH, "PRECHECK_RESULTS = []")
+
+    assert "sample_role 可取 positive_source 或 clean_negative" in pw01_intro
+    assert "source_shards/positive/shard_xxxx 或 source_shards/negative/shard_xxxx" in pw01_parallel_markdown
+
+    assert 'from huggingface_hub import HfApi, snapshot_download' in pw01_bootstrap
+    assert 'os.environ["HUGGINGFACE_HUB_CACHE"] = str(HF_HUB_CACHE)' in pw01_bootstrap
+    assert 'MODEL_SNAPSHOT_PATH = snapshot_download(' in pw01_bootstrap
+    assert 'MODEL_DOWNLOAD_SUMMARY = build_directory_digest_summary(Path(MODEL_SNAPSHOT_PATH))' in pw01_bootstrap
+    assert 'WEIGHT_DOWNLOAD_SUMMARY = collect_weight_summary(REPO_ROOT, CFG_OBJ)' in pw01_bootstrap
+    assert 'ATTESTATION_BOOTSTRAP = ensure_attestation_env_bootstrap(' in pw01_bootstrap
+    assert 'print_json("attestation_env_bootstrap", ATTESTATION_BOOTSTRAP)' in pw01_bootstrap
+    assert 'run_checked(["nvidia-smi"])' in pw01_bootstrap
+
+    assert len(_find_code_cell_sources(NOTEBOOK_PW01_PATH, "PRECHECK_RESULTS = []")) == 1
+    assert _find_code_cell_index(
+        NOTEBOOK_PW01_PATH,
+        "MODEL_SNAPSHOT_PATH = snapshot_download(",
+    ) < _find_code_cell_index(
+        NOTEBOOK_PW01_PATH,
+        "PRECHECK_RESULTS = []",
+    )
+    assert 'SOURCE_SPLIT_PLAN_PATH = FAMILY_ROOT / "manifests" / "source_split_plan.json"' in pw01_precheck
+    assert 'SAMPLE_ROLE in manifest_sample_roles' in pw01_precheck
+    assert 'Path(str(MODEL_SNAPSHOT_PATH)).exists() and Path(str(MODEL_SNAPSHOT_PATH)).is_dir()' in pw01_precheck
+    assert 'Path(str(ATTESTATION_BOOTSTRAP.get("attestation_env_path", ""))).exists()' in pw01_precheck
+    assert 'Path(str(ATTESTATION_BOOTSTRAP.get("attestation_env_info_path", ""))).exists()' in pw01_precheck
+    assert 'nvidia_smi_result = subprocess.run(' in pw01_precheck
 
 
 def test_pw01_notebook_wraps_command_with_gpu_peak_monitor_and_reads_shard_manifest_contract() -> None:
