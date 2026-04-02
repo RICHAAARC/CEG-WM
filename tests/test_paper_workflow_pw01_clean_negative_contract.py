@@ -109,6 +109,15 @@ def _patch_clean_negative_runner(monkeypatch: pytest.MonkeyPatch) -> None:
             "preview_record": preview_record,
         }
 
+    def _read_detect_input_record(command: list[str]) -> Dict[str, Any]:
+        if "--input" not in command:
+            raise ValueError("detect command missing --input")
+        input_index = command.index("--input")
+        if input_index + 1 >= len(command):
+            raise ValueError("detect command missing input record path")
+        input_record_path = Path(command[input_index + 1])
+        return cast(Dict[str, Any], json.loads(input_record_path.read_text(encoding="utf-8")))
+
     def fake_run_stage(stage_name: str, command: list[str], run_root: Path) -> Dict[str, Any]:
         records_root = ensure_directory(run_root / "records")
         logs_root = ensure_directory(run_root / "logs")
@@ -137,10 +146,21 @@ def _patch_clean_negative_runner(monkeypatch: pytest.MonkeyPatch) -> None:
                 },
             )
         elif stage_name == "detect":
+            detect_input_record = _read_detect_input_record(command)
+            expected_plan_digest = detect_input_record.get("plan_digest")
+            expected_basis_digest = detect_input_record.get("basis_digest")
+            has_expected_plan = isinstance(expected_plan_digest, str) and bool(expected_plan_digest)
+            content_status = "ok" if has_expected_plan else "absent"
+            content_score = 0.12 if has_expected_plan else None
+            content_failure_reason = None if has_expected_plan else "detector_no_plan_expected"
             write_json_atomic(
                 records_root / "detect_record.json",
                 {
                     "record_type": "detect",
+                    "plan_digest_expected": expected_plan_digest if has_expected_plan else None,
+                    "plan_digest_observed": "plan-probe",
+                    "plan_digest_status": "ok" if has_expected_plan else "absent",
+                    "plan_digest_validation_status": "ok" if has_expected_plan else "absent",
                     "contract_bound_digest": "contract-bound",
                     "whitelist_bound_digest": "whitelist-bound",
                     "policy_path_semantics_bound_digest": "semantics-bound",
@@ -157,14 +177,16 @@ def _patch_clean_negative_runner(monkeypatch: pytest.MonkeyPatch) -> None:
                     "policy_path_semantics_file_sha256": "semantics-file-sha",
                     "policy_path_semantics_canon_sha256": "semantics-canon-sha",
                     "content_evidence_payload": {
-                        "status": "ok",
-                        "score": 0.12,
-                        "content_chain_score": 0.12,
+                        "status": content_status,
+                        "score": content_score,
+                        "content_chain_score": content_score,
                         "plan_digest": "plan-probe",
-                        "basis_digest": "basis-probe",
+                        "basis_digest": expected_basis_digest if isinstance(expected_basis_digest, str) and expected_basis_digest else "basis-probe",
+                        "content_failure_reason": content_failure_reason,
                     },
                     "final_decision": {
                         "is_watermarked": False,
+                        "decision_status": "ok" if has_expected_plan else "error",
                     },
                     "attestation": {
                         "final_event_attested_decision": {
@@ -324,10 +346,12 @@ def test_pw01_clean_negative_writes_statement_only_provenance(tmp_path: Path, mo
     detect_input_record = json.loads(detect_input_record_path.read_text(encoding="utf-8"))
     assert detect_input_record["operation"] == "embed_preview_input"
     assert detect_input_record["negative_branch_source_attestation_provenance"]["statement"]["plan_digest"] == "plan-probe"
-    assert "plan_digest" not in detect_input_record
-    assert "basis_digest" not in detect_input_record
-    assert "subspace_planner_impl_identity" not in detect_input_record
-    assert "subspace_plan" not in detect_input_record
+    assert detect_input_record["plan_digest"] == "plan-probe"
+    assert detect_input_record["basis_digest"] == "basis-probe"
+    assert detect_input_record["plan_input_digest"] == "plan-input-probe"
+    assert detect_input_record["plan_input_schema_version"] == "v2"
+    assert detect_input_record["subspace_planner_impl_identity"]["impl_id"] == "planner_impl"
+    assert detect_input_record["subspace_plan"]["planner_input_digest"] == "plan-input-probe"
 
     detect_probe_command = cast(Dict[str, Any], first_event["stage_results"]["detect_probe"])["command"]
     detect_command = cast(Dict[str, Any], first_event["stage_results"]["detect"])["command"]
@@ -349,3 +373,56 @@ def test_pw01_clean_negative_writes_statement_only_provenance(tmp_path: Path, mo
     assert "content_evidence" not in staged_embed_record
     assert "embed_trace" not in staged_embed_record
     assert "injection_evidence" not in staged_embed_record
+
+
+def test_pw01_clean_negative_final_detect_consumes_probe_plan_anchors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify final detect consumes the probe-derived planner anchors for clean_negative.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    _build_pw00_family(tmp_path, family_id="family_clean_negative_regression")
+    bound_config_path = _write_bound_config_snapshot(
+        tmp_path / "drive",
+        marker="family_clean_negative_regression",
+    )
+    _patch_clean_negative_runner(monkeypatch)
+
+    summary = pw01_module.run_pw01_source_event_shard(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_clean_negative_regression",
+        sample_role="clean_negative",
+        shard_index=0,
+        shard_count=2,
+        bound_config_path=bound_config_path,
+    )
+
+    shard_root = Path(str(summary["shard_root"]))
+    shard_manifest = json.loads((shard_root / "shard_manifest.json").read_text(encoding="utf-8"))
+    first_event = cast(Dict[str, Any], shard_manifest["events"][0])
+    detect_record = json.loads(Path(str(first_event["detect_record_path"])).read_text(encoding="utf-8"))
+    detect_input_record_path = (
+        Path(str(first_event["runtime_config_path"])).parent
+        / "run"
+        / "artifacts"
+        / "neg_preview_input"
+        / "detect_input_record.json"
+    )
+    detect_input_record = json.loads(detect_input_record_path.read_text(encoding="utf-8"))
+    staged_embed_record = json.loads(Path(str(first_event["embed_record_path"])).read_text(encoding="utf-8"))
+
+    assert detect_record["plan_digest_expected"] == "plan-probe"
+    assert detect_record["plan_digest_status"] == "ok"
+    assert detect_record["plan_digest_validation_status"] == "ok"
+    assert detect_record["content_evidence_payload"]["status"] == "ok"
+    assert detect_record["content_evidence_payload"].get("content_failure_reason") is None
+    assert detect_input_record["plan_digest"] == staged_embed_record["plan_digest"]
+    assert detect_input_record["basis_digest"] == staged_embed_record["basis_digest"]

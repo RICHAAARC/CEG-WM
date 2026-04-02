@@ -1303,6 +1303,8 @@ def _build_clean_negative_input_record(
     prompt_sha256: str,
     seed: int,
     provenance_payload: Mapping[str, Any] | None = None,
+    probe_plan_anchors: Mapping[str, Any] | None = None,
+    probe_detect_payload: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """
     Build the clean-negative detect input record consumed by detect.
@@ -1314,6 +1316,8 @@ def _build_clean_negative_input_record(
         prompt_sha256: Prompt SHA256.
         seed: Event seed.
         provenance_payload: Optional statement-only provenance payload.
+        probe_plan_anchors: Optional probe-derived plan anchor mapping.
+        probe_detect_payload: Optional detect probe payload carrying planner fields.
 
     Returns:
         Clean-negative detect input record.
@@ -1352,7 +1356,69 @@ def _build_clean_negative_input_record(
     }
     if isinstance(provenance_payload, Mapping):
         record_payload["negative_branch_source_attestation_provenance"] = dict(provenance_payload)
+    _copy_clean_negative_probe_formal_fields(
+        record_payload,
+        probe_plan_anchors=probe_plan_anchors,
+        probe_detect_payload=probe_detect_payload,
+    )
     return record_payload
+
+
+def _copy_clean_negative_probe_formal_fields(
+    target_record: Dict[str, Any],
+    *,
+    probe_plan_anchors: Mapping[str, Any] | None = None,
+    probe_detect_payload: Mapping[str, Any] | None = None,
+) -> None:
+    """
+    Copy probe-derived planner anchors and formal planner fields into one record.
+
+    Args:
+        target_record: Mutable target record.
+        probe_plan_anchors: Optional probe-derived plan anchor mapping.
+        probe_detect_payload: Optional probe detect payload.
+
+    Returns:
+        None.
+    """
+    if not isinstance(target_record, dict):
+        raise TypeError("target_record must be dict")
+    if probe_plan_anchors is not None and not isinstance(probe_plan_anchors, Mapping):
+        raise TypeError("probe_plan_anchors must be Mapping or None")
+    if probe_detect_payload is not None and not isinstance(probe_detect_payload, Mapping):
+        raise TypeError("probe_detect_payload must be Mapping or None")
+
+    if isinstance(probe_plan_anchors, Mapping):
+        plan_digest = probe_plan_anchors.get("plan_digest")
+        basis_digest = probe_plan_anchors.get("basis_digest")
+        if not isinstance(plan_digest, str) or not plan_digest:
+            raise ValueError("probe_plan_anchors missing plan_digest")
+        if not isinstance(basis_digest, str) or not basis_digest:
+            raise ValueError("probe_plan_anchors missing basis_digest")
+        target_record["plan_digest"] = plan_digest
+        target_record["basis_digest"] = basis_digest
+
+    if not isinstance(probe_detect_payload, Mapping):
+        return
+
+    content_evidence_node = probe_detect_payload.get("content_evidence_payload")
+    content_evidence_payload = (
+        cast(Dict[str, Any], content_evidence_node)
+        if isinstance(content_evidence_node, dict)
+        else {}
+    )
+    for field_name in _CLEAN_NEGATIVE_OPTIONAL_FORMAL_SCALAR_FIELDS:
+        field_value = probe_detect_payload.get(field_name)
+        if not isinstance(field_value, str) or not field_value:
+            field_value = content_evidence_payload.get(field_name)
+        if isinstance(field_value, str) and field_value:
+            target_record[field_name] = field_value
+    for field_name in _CLEAN_NEGATIVE_OPTIONAL_FORMAL_MAPPING_FIELDS:
+        field_value = probe_detect_payload.get(field_name)
+        if not isinstance(field_value, dict) or not field_value:
+            field_value = content_evidence_payload.get(field_name)
+        if isinstance(field_value, dict) and field_value:
+            target_record[field_name] = copy.deepcopy(cast(Dict[str, Any], field_value))
 
 
 def _copy_clean_negative_freeze_anchor_fields(
@@ -1444,30 +1510,15 @@ def _build_clean_negative_staged_embed_record(
         "prompt_text": prompt_text,
         "prompt_sha256": prompt_sha256,
         "seed": seed,
-        "plan_digest": probe_plan_anchors.get("plan_digest"),
-        "basis_digest": probe_plan_anchors.get("basis_digest"),
     }
     if isinstance(provenance_payload, Mapping):
         staged_record["negative_branch_source_attestation_provenance"] = dict(provenance_payload)
 
-    content_evidence_node = probe_detect_payload.get("content_evidence_payload")
-    content_evidence_payload = (
-        cast(Dict[str, Any], content_evidence_node)
-        if isinstance(content_evidence_node, dict)
-        else {}
+    _copy_clean_negative_probe_formal_fields(
+        staged_record,
+        probe_plan_anchors=probe_plan_anchors,
+        probe_detect_payload=probe_detect_payload,
     )
-    for field_name in _CLEAN_NEGATIVE_OPTIONAL_FORMAL_SCALAR_FIELDS:
-        field_value = probe_detect_payload.get(field_name)
-        if not isinstance(field_value, str) or not field_value:
-            field_value = content_evidence_payload.get(field_name)
-        if isinstance(field_value, str) and field_value:
-            staged_record[field_name] = field_value
-    for field_name in _CLEAN_NEGATIVE_OPTIONAL_FORMAL_MAPPING_FIELDS:
-        field_value = probe_detect_payload.get(field_name)
-        if not isinstance(field_value, dict) or not field_value:
-            field_value = content_evidence_payload.get(field_name)
-        if isinstance(field_value, dict) and field_value:
-            staged_record[field_name] = copy.deepcopy(cast(Dict[str, Any], field_value))
 
     _copy_clean_negative_freeze_anchor_fields(staged_record, bound_detect_payload)
     return staged_record
@@ -1702,6 +1753,8 @@ def _run_clean_negative_event(
         prompt_sha256=prompt_sha256,
         seed=seed,
         provenance_payload=provenance_payload,
+        probe_plan_anchors=probe_plan_anchors,
+        probe_detect_payload=probe_detect_payload,
     )
     write_json_atomic(detect_input_record_path, final_input_record)
 
