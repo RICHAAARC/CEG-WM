@@ -38,6 +38,31 @@ from paper_workflow.scripts.pw_common import (
 
 CONTENT_SCORE_NAME = eval_metrics.CONTENT_CHAIN_SCORE_NAME
 EVENT_ATTESTATION_SCORE_NAME = "event_attestation_score"
+POOL_MANIFEST_FILE_NAMES = {
+    ACTIVE_SAMPLE_ROLE: "positive_source_pool_manifest.json",
+    CLEAN_NEGATIVE_SAMPLE_ROLE: "clean_negative_pool_manifest.json",
+}
+FINALIZE_MANIFEST_FILE_NAME = "paper_source_finalize_manifest.json"
+SYSTEM_FINAL_METRICS_FILE_NAME = "system_final_metrics.json"
+
+
+def _resolve_top_level_score_directory_name(score_name: str) -> str:
+    """
+    Resolve the PW02 top-level export directory name for one score.
+
+    Args:
+        score_name: Canonical score name.
+
+    Returns:
+        Stable export directory token.
+    """
+    if not isinstance(score_name, str) or not score_name:
+        raise TypeError("score_name must be non-empty str")
+    if eval_metrics.is_content_chain_score_name(score_name):
+        return "content"
+    if score_name == EVENT_ATTESTATION_SCORE_NAME:
+        return "attestation"
+    raise ValueError(f"unsupported score_name: {score_name}")
 
 
 def _load_required_json_dict(path_obj: Path, label: str) -> Dict[str, Any]:
@@ -164,7 +189,7 @@ def _collect_completed_events_for_role(
         for event_node in cast(List[object], events_node):
             if not isinstance(event_node, dict):
                 raise ValueError("PW01 shard manifest events must contain objects")
-            event_payload = cast(Dict[str, Any], event_node)
+            event_payload = dict(cast(Dict[str, Any], event_node))
             event_id = event_payload.get("event_id")
             if not isinstance(event_id, str) or not event_id:
                 raise ValueError("PW01 shard event missing event_id")
@@ -174,8 +199,432 @@ def _collect_completed_events_for_role(
                 raise ValueError(
                     f"PW01 shard event sample_role mismatch: expected={normalized_sample_role}, actual={event_payload.get('sample_role')}"
                 )
+            event_payload["source_shard_index"] = shard_index
+            event_payload["source_shard_root"] = normalize_path_value(shard_root)
+            event_payload["source_shard_manifest_path"] = normalize_path_value(shard_manifest_path)
             event_lookup[event_id] = event_payload
     return event_lookup
+
+
+def _build_source_pool_manifest_payload(
+    *,
+    family_id: str,
+    sample_role: str,
+    event_lookup: Mapping[str, Dict[str, Any]],
+    family_manifest_path: Path,
+    source_shard_plan_path: Path,
+    source_split_plan_path: Path,
+    stage_root: Path,
+) -> Dict[str, Any]:
+    """
+    Build one top-level PW02 source-pool manifest payload.
+
+    Args:
+        family_id: Family identifier.
+        sample_role: Supported source sample role.
+        event_lookup: Event lookup keyed by event_id.
+        family_manifest_path: Family manifest path.
+        source_shard_plan_path: Source shard plan path.
+        source_split_plan_path: Source split plan path.
+        stage_root: PW02 stage root.
+
+    Returns:
+        Source-pool manifest payload.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    normalized_sample_role = validate_source_sample_role(sample_role)
+    if not isinstance(event_lookup, Mapping):
+        raise TypeError("event_lookup must be Mapping")
+
+    ordered_events = sorted(
+        (dict(event_payload) for event_payload in event_lookup.values()),
+        key=lambda item: int(item.get("event_index", -1)),
+    )
+
+    shard_rows: Dict[int, Dict[str, Any]] = {}
+    manifest_events: List[Dict[str, Any]] = []
+    for event_payload in ordered_events:
+        event_id = event_payload.get("event_id")
+        event_index = event_payload.get("event_index")
+        detect_record_path = event_payload.get("detect_record_path")
+        source_shard_index = event_payload.get("source_shard_index")
+        source_shard_root = event_payload.get("source_shard_root")
+        source_shard_manifest_path = event_payload.get("source_shard_manifest_path")
+        if not isinstance(event_id, str) or not event_id:
+            raise ValueError("source pool event missing event_id")
+        if not isinstance(event_index, int) or event_index < 0:
+            raise ValueError(f"source pool event missing event_index: {event_id}")
+        if not isinstance(detect_record_path, str) or not detect_record_path:
+            raise ValueError(f"source pool event missing detect_record_path: {event_id}")
+        if not isinstance(source_shard_index, int) or source_shard_index < 0:
+            raise ValueError(f"source pool event missing source_shard_index: {event_id}")
+        if not isinstance(source_shard_root, str) or not source_shard_root:
+            raise ValueError(f"source pool event missing source_shard_root: {event_id}")
+        if not isinstance(source_shard_manifest_path, str) or not source_shard_manifest_path:
+            raise ValueError(f"source pool event missing source_shard_manifest_path: {event_id}")
+
+        manifest_events.append(
+            {
+                "event_id": event_id,
+                "event_index": event_index,
+                "sample_role": normalized_sample_role,
+                "detect_record_path": detect_record_path,
+                "source_shard_index": source_shard_index,
+                "source_shard_root": source_shard_root,
+                "source_shard_manifest_path": source_shard_manifest_path,
+            }
+        )
+
+        shard_row = shard_rows.get(source_shard_index)
+        if shard_row is None:
+            shard_row = {
+                "sample_role": normalized_sample_role,
+                "shard_index": source_shard_index,
+                "shard_root": source_shard_root,
+                "shard_manifest_path": source_shard_manifest_path,
+                "event_count": 0,
+                "event_ids": [],
+            }
+            shard_rows[source_shard_index] = shard_row
+        shard_row["event_count"] = int(shard_row["event_count"]) + 1
+        cast(List[str], shard_row["event_ids"]).append(event_id)
+
+    ordered_shards = [shard_rows[index] for index in sorted(shard_rows)]
+    return {
+        "artifact_type": "paper_workflow_pw02_source_pool_manifest",
+        "schema_version": "pw_stage_02_v1",
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "source_role": normalized_sample_role,
+        "event_count": len(manifest_events),
+        "event_ids": [event_payload["event_id"] for event_payload in manifest_events],
+        "events": manifest_events,
+        "source_shard_count": len(ordered_shards),
+        "source_shards": ordered_shards,
+        "source_shard_manifest_paths": [
+            str(shard_row["shard_manifest_path"])
+            for shard_row in ordered_shards
+        ],
+        "key_paths": {
+            "family_manifest_path": normalize_path_value(family_manifest_path),
+            "source_shard_plan_path": normalize_path_value(source_shard_plan_path),
+            "source_split_plan_path": normalize_path_value(source_split_plan_path),
+            "pw02_stage_root": normalize_path_value(stage_root),
+        },
+    }
+
+
+def _write_source_pool_manifest(
+    *,
+    stage_root: Path,
+    family_id: str,
+    sample_role: str,
+    event_lookup: Mapping[str, Dict[str, Any]],
+    family_manifest_path: Path,
+    source_shard_plan_path: Path,
+    source_split_plan_path: Path,
+) -> Dict[str, Any]:
+    """
+    Write one top-level PW02 source-pool manifest.
+
+    Args:
+        stage_root: PW02 stage root.
+        family_id: Family identifier.
+        sample_role: Supported source sample role.
+        event_lookup: Event lookup keyed by event_id.
+        family_manifest_path: Family manifest path.
+        source_shard_plan_path: Source shard plan path.
+        source_split_plan_path: Source split plan path.
+
+    Returns:
+        Manifest summary with output path and payload.
+    """
+    if not isinstance(stage_root, Path):
+        raise TypeError("stage_root must be Path")
+    normalized_sample_role = validate_source_sample_role(sample_role)
+    manifest_path = stage_root / POOL_MANIFEST_FILE_NAMES[normalized_sample_role]
+    payload = _build_source_pool_manifest_payload(
+        family_id=family_id,
+        sample_role=normalized_sample_role,
+        event_lookup=event_lookup,
+        family_manifest_path=family_manifest_path,
+        source_shard_plan_path=source_shard_plan_path,
+        source_split_plan_path=source_split_plan_path,
+        stage_root=stage_root,
+    )
+    write_json_atomic(manifest_path, payload)
+    return {
+        "source_role": normalized_sample_role,
+        "path": normalize_path_value(manifest_path),
+        "payload": payload,
+    }
+
+
+def _build_threshold_export(
+    *,
+    family_id: str,
+    stage_root: Path,
+    score_name: str,
+    score_run: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """
+    Build one top-level threshold export from the real calibrate outputs.
+
+    Args:
+        family_id: Family identifier.
+        stage_root: PW02 stage root.
+        score_name: Canonical score name.
+        score_run: Score-run summary.
+
+    Returns:
+        Threshold export summary with path and payload.
+    """
+    if not isinstance(stage_root, Path):
+        raise TypeError("stage_root must be Path")
+    thresholds_artifact_path = Path(str(score_run.get("thresholds_artifact_path", ""))).expanduser().resolve()
+    calibration_record_path = Path(str(score_run.get("calibration_record_path", ""))).expanduser().resolve()
+    thresholds_artifact = _load_required_json_dict(thresholds_artifact_path, f"PW02 thresholds artifact {score_name}")
+    calibration_record = _load_required_json_dict(calibration_record_path, f"PW02 calibration record {score_name}")
+    export_path = stage_root / "thresholds" / _resolve_top_level_score_directory_name(score_name) / "thresholds.json"
+    ensure_directory(export_path.parent)
+    payload: Dict[str, Any] = {
+        "artifact_type": "paper_workflow_pw02_threshold_export",
+        "schema_version": "pw_stage_02_v1",
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "score_name": score_name,
+        "source_calibrate_run_root": str(score_run.get("calibrate_run_root")),
+        "source_thresholds_artifact_path": normalize_path_value(thresholds_artifact_path),
+        "source_calibration_record_path": normalize_path_value(calibration_record_path),
+        "thresholds_artifact": thresholds_artifact,
+        "calibration_record_status": calibration_record.get("status", "<absent>"),
+    }
+    write_json_atomic(export_path, payload)
+    return {
+        "score_name": score_name,
+        "path": normalize_path_value(export_path),
+        "payload": payload,
+    }
+
+
+def _count_records_by_role(records_summary: Mapping[str, Any]) -> Dict[str, int]:
+    """
+    Count prepared records by sample role.
+
+    Args:
+        records_summary: Score-run records summary.
+
+    Returns:
+        Sample-role counts.
+    """
+    counts = {
+        ACTIVE_SAMPLE_ROLE: 0,
+        CLEAN_NEGATIVE_SAMPLE_ROLE: 0,
+    }
+    records_node = records_summary.get("records")
+    if not isinstance(records_node, list):
+        return counts
+    for record_node in cast(List[object], records_node):
+        if not isinstance(record_node, Mapping):
+            continue
+        sample_role = record_node.get("sample_role")
+        if isinstance(sample_role, str) and sample_role in counts:
+            counts[sample_role] += 1
+    return counts
+
+
+def _build_clean_evaluate_export(
+    *,
+    family_id: str,
+    stage_root: Path,
+    score_name: str,
+    score_run: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """
+    Build one top-level clean-evaluate export from the real evaluate outputs.
+
+    Args:
+        family_id: Family identifier.
+        stage_root: PW02 stage root.
+        score_name: Canonical score name.
+        score_run: Score-run summary.
+
+    Returns:
+        Evaluate export summary with path and payload.
+    """
+    if not isinstance(stage_root, Path):
+        raise TypeError("stage_root must be Path")
+    evaluate_record_path = Path(str(score_run.get("evaluate_record_path", ""))).expanduser().resolve()
+    evaluate_record = _load_required_json_dict(evaluate_record_path, f"PW02 evaluate record {score_name}")
+    export_path = stage_root / "evaluate" / "clean" / _resolve_top_level_score_directory_name(score_name) / "evaluate_record.json"
+    ensure_directory(export_path.parent)
+    evaluate_inputs = cast(Mapping[str, Any], score_run.get("evaluate_inputs", {}))
+    payload: Dict[str, Any] = {
+        "artifact_type": "paper_workflow_pw02_clean_evaluate_export",
+        "schema_version": "pw_stage_02_v1",
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "score_name": score_name,
+        "evaluation_scope": "positive_source_vs_clean_negative",
+        "positive_source_role": ACTIVE_SAMPLE_ROLE,
+        "negative_source_role": CLEAN_NEGATIVE_SAMPLE_ROLE,
+        "source_evaluate_run_root": str(score_run.get("evaluate_run_root")),
+        "source_evaluate_record_path": normalize_path_value(evaluate_record_path),
+        "source_evaluation_report_path": str(score_run.get("evaluation_report_path")),
+        "source_evaluate_inputs_glob": evaluate_inputs.get("records_glob"),
+        "evaluate_input_counts": _count_records_by_role(evaluate_inputs),
+        "evaluate_record": evaluate_record,
+    }
+    write_json_atomic(export_path, payload)
+    return {
+        "score_name": score_name,
+        "path": normalize_path_value(export_path),
+        "payload": payload,
+    }
+
+
+def _build_system_final_metrics_export(
+    *,
+    family_id: str,
+    stage_root: Path,
+    content_score_run: Mapping[str, Any],
+    system_final_metrics: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """
+    Build the honest PW02 system_final derived-metrics export.
+
+    Args:
+        family_id: Family identifier.
+        stage_root: PW02 stage root.
+        content_score_run: Content score-run summary.
+        system_final_metrics: Derived system-final metrics.
+
+    Returns:
+        System-final export summary with path and payload.
+    """
+    export_path = stage_root / SYSTEM_FINAL_METRICS_FILE_NAME
+    evaluate_inputs = cast(Mapping[str, Any], content_score_run.get("evaluate_inputs", {}))
+    payload: Dict[str, Any] = {
+        "artifact_type": "paper_workflow_pw02_system_final_metrics",
+        "schema_version": "pw_stage_02_v1",
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "scope": "system_final",
+        "source_kind": "derived_metrics_from_content_evaluate_inputs",
+        "is_formal_evaluate_record": False,
+        "source_score_name": CONTENT_SCORE_NAME,
+        "source_evaluate_run_root": str(content_score_run.get("evaluate_run_root")),
+        "source_evaluate_record_path": str(content_score_run.get("evaluate_record_path")),
+        "source_evaluate_inputs_glob": evaluate_inputs.get("records_glob"),
+        "metrics": dict(system_final_metrics),
+        "notes": "Derived via main.evaluation.experiment_matrix._build_system_final_metrics_for_run over content evaluate inputs; this is not an independent formal evaluate record.",
+    }
+    write_json_atomic(export_path, payload)
+    return {
+        "path": normalize_path_value(export_path),
+        "payload": payload,
+    }
+
+
+def _build_finalize_manifest_payload(
+    *,
+    family_id: str,
+    family_root: Path,
+    stage_root: Path,
+    summary_path: Path,
+    family_manifest_path: Path,
+    source_shard_plan_path: Path,
+    source_split_plan_path: Path,
+    source_merge_manifest_path: Path,
+    positive_pool_manifest: Mapping[str, Any],
+    clean_negative_pool_manifest: Mapping[str, Any],
+    threshold_exports: Mapping[str, Dict[str, Any]],
+    clean_evaluate_exports: Mapping[str, Dict[str, Any]],
+    system_final_export: Mapping[str, Any],
+    score_runs: Mapping[str, Dict[str, Any]],
+    split_counts: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """
+    Build the top-level PW02 finalize manifest payload.
+
+    Args:
+        family_id: Family identifier.
+        family_root: Family root path.
+        stage_root: PW02 stage root.
+        summary_path: PW02 summary path.
+        family_manifest_path: Family manifest path.
+        source_shard_plan_path: Source shard plan path.
+        source_split_plan_path: Source split plan path.
+        source_merge_manifest_path: Source merge manifest path.
+        positive_pool_manifest: Positive pool manifest summary.
+        clean_negative_pool_manifest: Negative pool manifest summary.
+        threshold_exports: Threshold export summaries keyed by score directory name.
+        clean_evaluate_exports: Evaluate export summaries keyed by score directory name.
+        system_final_export: System-final export summary.
+        score_runs: Score-run summaries keyed by score name.
+        split_counts: Split count summary.
+
+    Returns:
+        Finalize-manifest payload.
+    """
+    return {
+        "artifact_type": "paper_workflow_pw02_finalize_manifest",
+        "schema_version": "pw_stage_02_v1",
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "family_root": normalize_path_value(family_root),
+        "pw02_stage_root": normalize_path_value(stage_root),
+        "pw02_summary_path": normalize_path_value(summary_path),
+        "family_manifest_path": normalize_path_value(family_manifest_path),
+        "source_shard_plan_path": normalize_path_value(source_shard_plan_path),
+        "source_split_plan_path": normalize_path_value(source_split_plan_path),
+        "source_merge_manifest_path": normalize_path_value(source_merge_manifest_path),
+        "split_counts": dict(split_counts),
+        "source_pools": {
+            ACTIVE_SAMPLE_ROLE: {
+                "manifest_path": str(positive_pool_manifest.get("path")),
+                "event_count": cast(Mapping[str, Any], positive_pool_manifest.get("payload", {})).get("event_count"),
+            },
+            CLEAN_NEGATIVE_SAMPLE_ROLE: {
+                "manifest_path": str(clean_negative_pool_manifest.get("path")),
+                "event_count": cast(Mapping[str, Any], clean_negative_pool_manifest.get("payload", {})).get("event_count"),
+            },
+        },
+        "threshold_exports": {
+            score_key: {
+                "score_name": export_summary.get("score_name"),
+                "path": export_summary.get("path"),
+                "source_thresholds_artifact_path": cast(Mapping[str, Any], export_summary.get("payload", {})).get("source_thresholds_artifact_path"),
+            }
+            for score_key, export_summary in threshold_exports.items()
+        },
+        "clean_evaluate_exports": {
+            score_key: {
+                "score_name": export_summary.get("score_name"),
+                "path": export_summary.get("path"),
+                "source_evaluate_run_root": cast(Mapping[str, Any], export_summary.get("payload", {})).get("source_evaluate_run_root"),
+                "source_evaluate_record_path": cast(Mapping[str, Any], export_summary.get("payload", {})).get("source_evaluate_record_path"),
+            }
+            for score_key, export_summary in clean_evaluate_exports.items()
+        },
+        "system_final": {
+            "mode": "derived_metrics_from_content_evaluate_inputs",
+            "is_formal_evaluate_record": False,
+            "artifact_path": system_final_export.get("path"),
+            "source_score_name": cast(Mapping[str, Any], system_final_export.get("payload", {})).get("source_score_name"),
+            "source_evaluate_run_root": cast(Mapping[str, Any], system_final_export.get("payload", {})).get("source_evaluate_run_root"),
+        },
+        "score_runs": {
+            score_name: {
+                "calibrate_run_root": score_run.get("calibrate_run_root"),
+                "evaluate_run_root": score_run.get("evaluate_run_root"),
+                "thresholds_artifact_path": score_run.get("thresholds_artifact_path"),
+                "evaluate_record_path": score_run.get("evaluate_record_path"),
+            }
+            for score_name, score_run in score_runs.items()
+        },
+    }
 
 
 def _build_labelled_detect_payload(
@@ -652,6 +1101,25 @@ def run_pw02_merge_source_event_shards(
     }
     write_json_atomic(merge_manifest_path, merge_manifest_payload)
 
+    positive_pool_manifest = _write_source_pool_manifest(
+        stage_root=stage_root,
+        family_id=family_id,
+        sample_role=ACTIVE_SAMPLE_ROLE,
+        event_lookup=positive_events,
+        family_manifest_path=layout["family_manifest_path"],
+        source_shard_plan_path=layout["source_shard_plan_path"],
+        source_split_plan_path=layout["source_split_plan_path"],
+    )
+    clean_negative_pool_manifest = _write_source_pool_manifest(
+        stage_root=stage_root,
+        family_id=family_id,
+        sample_role=CLEAN_NEGATIVE_SAMPLE_ROLE,
+        event_lookup=clean_negative_events,
+        family_manifest_path=layout["family_manifest_path"],
+        source_shard_plan_path=layout["source_shard_plan_path"],
+        source_split_plan_path=layout["source_split_plan_path"],
+    )
+
     score_runs = {
         CONTENT_SCORE_NAME: _run_score_pipeline(
             score_name=CONTENT_SCORE_NAME,
@@ -672,7 +1140,51 @@ def run_pw02_merge_source_event_shards(
     content_evaluate_root = Path(str(score_runs[CONTENT_SCORE_NAME]["evaluate_run_root"]))
     system_final_metrics = _build_system_final_metrics_for_run(content_evaluate_root)
 
+    threshold_exports = {
+        _resolve_top_level_score_directory_name(score_name): _build_threshold_export(
+            family_id=family_id,
+            stage_root=stage_root,
+            score_name=score_name,
+            score_run=score_run,
+        )
+        for score_name, score_run in score_runs.items()
+    }
+    clean_evaluate_exports = {
+        _resolve_top_level_score_directory_name(score_name): _build_clean_evaluate_export(
+            family_id=family_id,
+            stage_root=stage_root,
+            score_name=score_name,
+            score_run=score_run,
+        )
+        for score_name, score_run in score_runs.items()
+    }
+    system_final_export = _build_system_final_metrics_export(
+        family_id=family_id,
+        stage_root=stage_root,
+        content_score_run=score_runs[CONTENT_SCORE_NAME],
+        system_final_metrics=system_final_metrics,
+    )
+
     summary_path = layout["runtime_state_root"] / "pw02_summary.json"
+    finalize_manifest_path = stage_root / FINALIZE_MANIFEST_FILE_NAME
+    finalize_manifest_payload = _build_finalize_manifest_payload(
+        family_id=family_id,
+        family_root=family_root,
+        stage_root=stage_root,
+        summary_path=summary_path,
+        family_manifest_path=layout["family_manifest_path"],
+        source_shard_plan_path=layout["source_shard_plan_path"],
+        source_split_plan_path=layout["source_split_plan_path"],
+        source_merge_manifest_path=merge_manifest_path,
+        positive_pool_manifest=positive_pool_manifest,
+        clean_negative_pool_manifest=clean_negative_pool_manifest,
+        threshold_exports=threshold_exports,
+        clean_evaluate_exports=clean_evaluate_exports,
+        system_final_export=system_final_export,
+        score_runs=score_runs,
+        split_counts=cast(Mapping[str, Any], merge_manifest_payload["split_counts"]),
+    )
+    write_json_atomic(finalize_manifest_path, finalize_manifest_payload)
     summary: Dict[str, Any] = {
         "status": "ok",
         "stage_name": "PW02_Source_Merge_And_Global_Thresholds",
@@ -681,11 +1193,24 @@ def run_pw02_merge_source_event_shards(
         "summary_path": normalize_path_value(summary_path),
         "pw02_stage_root": normalize_path_value(stage_root),
         "source_merge_manifest_path": normalize_path_value(merge_manifest_path),
+        "positive_source_pool_manifest_path": str(positive_pool_manifest["path"]),
+        "clean_negative_pool_manifest_path": str(clean_negative_pool_manifest["path"]),
+        "paper_source_finalize_manifest_path": normalize_path_value(finalize_manifest_path),
         "family_manifest_path": normalize_path_value(layout["family_manifest_path"]),
         "source_shard_plan_path": normalize_path_value(layout["source_shard_plan_path"]),
         "source_split_plan_path": normalize_path_value(layout["source_split_plan_path"]),
         "score_runs": score_runs,
+        "threshold_exports": {
+            score_key: export_summary["path"]
+            for score_key, export_summary in threshold_exports.items()
+        },
+        "clean_evaluate_exports": {
+            score_key: export_summary["path"]
+            for score_key, export_summary in clean_evaluate_exports.items()
+        },
         "system_final_metrics": system_final_metrics,
+        "system_final_semantics": "derived_metrics_from_content_evaluate_inputs",
+        "system_final_metrics_artifact_path": str(system_final_export["path"]),
         "split_counts": merge_manifest_payload["split_counts"],
     }
     write_json_atomic(summary_path, summary)

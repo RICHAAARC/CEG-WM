@@ -231,3 +231,106 @@ def test_pw02_merges_dual_role_shards_and_builds_score_runs(tmp_path: Path, monk
     assert system_final_metrics["n_total"] == 4
     assert system_final_metrics["n_positive"] == 2
     assert system_final_metrics["n_negative"] == 2
+
+
+def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path: Path, monkeypatch: Any) -> None:
+    """
+    Verify PW02 writes top-level pool/finalize/threshold/evaluate exports and
+    keeps system_final as an honest derived-metrics artifact.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    summary = _build_pw00_family(tmp_path, family_id="family_pw02_exports")
+    _materialize_completed_pw01_shards(summary)
+    _patch_pw02_python_stage_runner(monkeypatch)
+
+    pw02_summary = pw02_module.run_pw02_merge_source_event_shards(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_pw02_exports",
+    )
+
+    positive_pool_manifest = json.loads(
+        Path(str(pw02_summary["positive_source_pool_manifest_path"])).read_text(encoding="utf-8")
+    )
+    clean_negative_pool_manifest = json.loads(
+        Path(str(pw02_summary["clean_negative_pool_manifest_path"])).read_text(encoding="utf-8")
+    )
+    finalize_manifest = json.loads(
+        Path(str(pw02_summary["paper_source_finalize_manifest_path"])).read_text(encoding="utf-8")
+    )
+    content_threshold_export = json.loads(
+        Path(str(cast(Dict[str, Any], pw02_summary["threshold_exports"])["content"])).read_text(encoding="utf-8")
+    )
+    attestation_threshold_export = json.loads(
+        Path(str(cast(Dict[str, Any], pw02_summary["threshold_exports"])["attestation"])).read_text(encoding="utf-8")
+    )
+    content_clean_evaluate_export = json.loads(
+        Path(str(cast(Dict[str, Any], pw02_summary["clean_evaluate_exports"])["content"])).read_text(encoding="utf-8")
+    )
+    attestation_clean_evaluate_export = json.loads(
+        Path(str(cast(Dict[str, Any], pw02_summary["clean_evaluate_exports"])["attestation"])).read_text(encoding="utf-8")
+    )
+    system_final_metrics_export = json.loads(
+        Path(str(pw02_summary["system_final_metrics_artifact_path"])).read_text(encoding="utf-8")
+    )
+
+    assert positive_pool_manifest["family_id"] == "family_pw02_exports"
+    assert positive_pool_manifest["source_role"] == "positive_source"
+    assert positive_pool_manifest["event_count"] == 4
+    assert len(positive_pool_manifest["events"]) == 4
+    assert len(positive_pool_manifest["source_shard_manifest_paths"]) == 2
+
+    assert clean_negative_pool_manifest["family_id"] == "family_pw02_exports"
+    assert clean_negative_pool_manifest["source_role"] == "clean_negative"
+    assert clean_negative_pool_manifest["event_count"] == 4
+    assert len(clean_negative_pool_manifest["events"]) == 4
+    assert len(clean_negative_pool_manifest["source_shard_manifest_paths"]) == 2
+
+    assert finalize_manifest["source_pools"]["positive_source"]["manifest_path"] == pw02_summary["positive_source_pool_manifest_path"]
+    assert finalize_manifest["source_pools"]["clean_negative"]["manifest_path"] == pw02_summary["clean_negative_pool_manifest_path"]
+    assert finalize_manifest["threshold_exports"]["content"]["path"] == cast(Dict[str, Any], pw02_summary["threshold_exports"])["content"]
+    assert finalize_manifest["clean_evaluate_exports"]["content"]["path"] == cast(Dict[str, Any], pw02_summary["clean_evaluate_exports"])["content"]
+
+    content_run = cast(Dict[str, Any], pw02_summary["score_runs"][pw02_module.CONTENT_SCORE_NAME])
+    attestation_run = cast(Dict[str, Any], pw02_summary["score_runs"][pw02_module.EVENT_ATTESTATION_SCORE_NAME])
+
+    assert content_threshold_export["score_name"] == pw02_module.CONTENT_SCORE_NAME
+    assert content_threshold_export["source_thresholds_artifact_path"] == content_run["thresholds_artifact_path"]
+    assert content_threshold_export["thresholds_artifact"]["score_name"] == pw02_module.CONTENT_SCORE_NAME
+
+    assert attestation_threshold_export["score_name"] == pw02_module.EVENT_ATTESTATION_SCORE_NAME
+    assert attestation_threshold_export["source_thresholds_artifact_path"] == attestation_run["thresholds_artifact_path"]
+    assert attestation_threshold_export["thresholds_artifact"]["score_name"] == pw02_module.EVENT_ATTESTATION_SCORE_NAME
+
+    assert content_clean_evaluate_export["score_name"] == pw02_module.CONTENT_SCORE_NAME
+    assert content_clean_evaluate_export["source_evaluate_run_root"] == content_run["evaluate_run_root"]
+    assert content_clean_evaluate_export["source_evaluate_record_path"] == content_run["evaluate_record_path"]
+    assert content_clean_evaluate_export["evaluate_input_counts"] == {
+        "positive_source": 2,
+        "clean_negative": 2,
+    }
+    assert content_clean_evaluate_export["evaluate_record"]["status"] == "ok"
+
+    assert attestation_clean_evaluate_export["score_name"] == pw02_module.EVENT_ATTESTATION_SCORE_NAME
+    assert attestation_clean_evaluate_export["source_evaluate_run_root"] == attestation_run["evaluate_run_root"]
+    assert attestation_clean_evaluate_export["source_evaluate_record_path"] == attestation_run["evaluate_record_path"]
+    assert attestation_clean_evaluate_export["evaluate_input_counts"] == {
+        "positive_source": 2,
+        "clean_negative": 2,
+    }
+    assert attestation_clean_evaluate_export["evaluate_record"]["status"] == "ok"
+
+    assert system_final_metrics_export["source_kind"] == "derived_metrics_from_content_evaluate_inputs"
+    assert system_final_metrics_export["is_formal_evaluate_record"] is False
+    assert system_final_metrics_export["source_score_name"] == pw02_module.CONTENT_SCORE_NAME
+    assert system_final_metrics_export["source_evaluate_run_root"] == content_run["evaluate_run_root"]
+    assert system_final_metrics_export["metrics"]["scope"] == "system_final"
+
+    assert finalize_manifest["system_final"]["mode"] == "derived_metrics_from_content_evaluate_inputs"
+    assert finalize_manifest["system_final"]["is_formal_evaluate_record"] is False
+    assert finalize_manifest["system_final"]["artifact_path"] == pw02_summary["system_final_metrics_artifact_path"]
