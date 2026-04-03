@@ -38,6 +38,7 @@ from paper_workflow.scripts.pw_common import (
 
 CONTENT_SCORE_NAME = eval_metrics.CONTENT_CHAIN_SCORE_NAME
 EVENT_ATTESTATION_SCORE_NAME = "event_attestation_score"
+PW02_RUN_ROOT_REUSE_REASON = "paper_workflow_pw02_prepared_inputs"
 POOL_MANIFEST_FILE_NAMES = {
     ACTIVE_SAMPLE_ROLE: "positive_source_pool_manifest.json",
     CLEAN_NEGATIVE_SAMPLE_ROLE: "clean_negative_pool_manifest.json",
@@ -833,7 +834,7 @@ def _build_score_runtime_config(
         raise TypeError("base_cfg_obj must be Mapping")
     cfg_obj = copy.deepcopy(dict(base_cfg_obj))
     cfg_obj["allow_nonempty_run_root"] = True
-    cfg_obj["allow_nonempty_run_root_reason"] = "paper_workflow_pw02_prepared_inputs"
+    cfg_obj["allow_nonempty_run_root_reason"] = PW02_RUN_ROOT_REUSE_REASON
 
     calibration_cfg = copy.deepcopy(cfg_obj.get("calibration")) if isinstance(cfg_obj.get("calibration"), dict) else {}
     calibration_cfg["detect_records_glob"] = calibration_records_glob
@@ -850,12 +851,40 @@ def _build_score_runtime_config(
     return cfg_obj
 
 
+def _build_run_root_reuse_override_args(cfg_obj: Mapping[str, Any]) -> List[str]:
+    """
+    Build CLI override args that authorize PW02 run_root reuse.
+
+    Args:
+        cfg_obj: Runtime config mapping.
+
+    Returns:
+        CLI override argument list.
+    """
+    if not isinstance(cfg_obj, Mapping):
+        raise TypeError("cfg_obj must be Mapping")
+
+    allow_nonempty_run_root = cfg_obj.get("allow_nonempty_run_root")
+    if allow_nonempty_run_root is not True:
+        raise ValueError("PW02 run_root reuse override requires allow_nonempty_run_root=True")
+
+    allow_nonempty_run_root_reason = cfg_obj.get("allow_nonempty_run_root_reason")
+    if not isinstance(allow_nonempty_run_root_reason, str) or not allow_nonempty_run_root_reason:
+        raise ValueError("PW02 run_root reuse override requires non-empty allow_nonempty_run_root_reason")
+
+    return [
+        f"run_root_reuse_allowed={json.dumps(True)}",
+        f"run_root_reuse_reason={json.dumps(allow_nonempty_run_root_reason)}",
+    ]
+
+
 def _run_python_stage_command(
     *,
     module_name: str,
     output_dir: Path,
     config_path: Path,
     log_prefix: str,
+    overrides: Sequence[str] | None = None,
 ) -> Dict[str, Any]:
     """
     Run one Python CLI stage with explicit stdout and stderr logs.
@@ -865,6 +894,7 @@ def _run_python_stage_command(
         output_dir: Stage output directory.
         config_path: Runtime config path.
         log_prefix: Log-file prefix.
+        overrides: Optional CLI override args.
 
     Returns:
         Command execution summary.
@@ -877,6 +907,18 @@ def _run_python_stage_command(
         raise TypeError("config_path must be Path")
     if not isinstance(log_prefix, str) or not log_prefix:
         raise TypeError("log_prefix must be non-empty str")
+    overrides_obj: Any = overrides
+    if overrides_obj is not None and (
+        isinstance(overrides_obj, (str, bytes)) or not isinstance(overrides_obj, Sequence)
+    ):
+        raise TypeError("overrides must be Sequence[str] or None")
+
+    normalized_overrides: List[str] = []
+    if overrides_obj is not None:
+        for item in cast(Sequence[Any], overrides_obj):
+            if not isinstance(item, str) or not item:
+                raise TypeError("overrides items must be non-empty str")
+            normalized_overrides.append(item)
 
     logs_root = ensure_directory(output_dir / "logs")
     command = [
@@ -888,6 +930,8 @@ def _run_python_stage_command(
         "--config",
         str(config_path),
     ]
+    for override_arg in normalized_overrides:
+        command.extend(["--override", override_arg])
     result = run_command_with_logs(
         command=command,
         cwd=REPO_ROOT,
@@ -949,6 +993,7 @@ def _run_score_pipeline(
         evaluate_records_glob=str((evaluate_records_root / "*.json").resolve()),
         thresholds_path=thresholds_artifact_path,
     )
+    runtime_override_args = _build_run_root_reuse_override_args(runtime_cfg_obj)
     runtime_cfg_path = score_root / "runtime_config.yaml"
     write_yaml_mapping(runtime_cfg_path, runtime_cfg_obj)
 
@@ -957,6 +1002,7 @@ def _run_score_pipeline(
         output_dir=calibrate_root,
         config_path=runtime_cfg_path,
         log_prefix="pw02_calibrate",
+        overrides=runtime_override_args,
     )
     if int(calibrate_result.get("return_code", 1)) != 0:
         raise RuntimeError(
@@ -971,6 +1017,7 @@ def _run_score_pipeline(
         evaluate_records_glob=str((evaluate_records_root / "*.json").resolve()),
         thresholds_path=thresholds_artifact_path,
     )
+    runtime_override_args = _build_run_root_reuse_override_args(runtime_cfg_obj)
     write_yaml_mapping(runtime_cfg_path, runtime_cfg_obj)
 
     evaluate_result = _run_python_stage_command(
@@ -978,6 +1025,7 @@ def _run_score_pipeline(
         output_dir=evaluate_root,
         config_path=runtime_cfg_path,
         log_prefix="pw02_evaluate",
+        overrides=runtime_override_args,
     )
     if int(evaluate_result.get("return_code", 1)) != 0:
         raise RuntimeError(

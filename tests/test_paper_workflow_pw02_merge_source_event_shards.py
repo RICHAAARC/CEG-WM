@@ -7,12 +7,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, cast
+from typing import Any, Dict, List, Sequence, cast
 
+import pytest
+
+from main.cli import run_calibrate as run_calibrate_cli
+from main.core import config_loader as core_config_loader
 import paper_workflow.scripts.pw02_merge_source_event_shards as pw02_module
 from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
 from paper_workflow.scripts.pw_common import build_source_shard_root, read_jsonl
-from scripts.notebook_runtime_common import ensure_directory, write_json_atomic
+from scripts.notebook_runtime_common import ensure_directory, write_json_atomic, write_yaml_mapping
 
 
 def _build_pw00_family(tmp_path: Path, family_id: str) -> Dict[str, Any]:
@@ -128,7 +132,7 @@ def _materialize_completed_pw01_shards(summary: Dict[str, Any]) -> None:
             )
 
 
-def _patch_pw02_python_stage_runner(monkeypatch: Any) -> None:
+def _patch_pw02_python_stage_runner(monkeypatch: Any) -> List[Dict[str, Any]]:
     """
     Patch PW02 Python stage execution to lightweight artifact-writing stubs.
 
@@ -136,8 +140,10 @@ def _patch_pw02_python_stage_runner(monkeypatch: Any) -> None:
         monkeypatch: Pytest monkeypatch fixture.
 
     Returns:
-        None.
+        Captured stage-call summaries.
     """
+
+    observed_calls: List[Dict[str, Any]] = []
 
     def fake_run_python_stage_command(
         *,
@@ -145,7 +151,20 @@ def _patch_pw02_python_stage_runner(monkeypatch: Any) -> None:
         output_dir: Path,
         config_path: Path,
         log_prefix: str,
+        overrides: Sequence[str] | None = None,
     ) -> Dict[str, Any]:
+        normalized_overrides = list(overrides) if overrides is not None else []
+        config_payload = cast(Dict[str, Any], pw02_module.load_yaml_mapping(config_path))
+        observed_calls.append(
+            {
+                "module_name": module_name,
+                "output_dir": output_dir.as_posix(),
+                "config_path": config_path.as_posix(),
+                "log_prefix": log_prefix,
+                "config": config_payload,
+                "overrides": normalized_overrides,
+            }
+        )
         ensure_directory(output_dir / "logs")
         if module_name == "main.cli.run_calibrate":
             thresholds_path = output_dir / "artifacts" / "thresholds" / "thresholds_artifact.json"
@@ -154,7 +173,7 @@ def _patch_pw02_python_stage_runner(monkeypatch: Any) -> None:
                 thresholds_path,
                 {
                     "status": "ok",
-                    "score_name": cast(Dict[str, Any], pw02_module.load_yaml_mapping(config_path))["calibration"]["score_name"],
+                    "score_name": config_payload["calibration"]["score_name"],
                     "target_fpr": 0.01,
                 },
             )
@@ -170,10 +189,121 @@ def _patch_pw02_python_stage_runner(monkeypatch: Any) -> None:
             "status": "ok",
             "stdout_log_path": (output_dir / "logs" / f"{log_prefix}_stdout.log").as_posix(),
             "stderr_log_path": (output_dir / "logs" / f"{log_prefix}_stderr.log").as_posix(),
-            "command": [module_name, str(config_path), str(output_dir)],
+            "command": [module_name, str(config_path), str(output_dir), *normalized_overrides],
         }
 
     monkeypatch.setattr(pw02_module, "_run_python_stage_command", fake_run_python_stage_command)
+    return observed_calls
+
+
+def _load_config_loader_contract_context() -> tuple[Any, Any, Any, Any]:
+    """
+    Load config_loader contract context for runtime-config validation tests.
+
+    Args:
+        None.
+
+    Returns:
+        Tuple of (whitelist, semantics, contracts, interpretation).
+    """
+    contracts, interpretation = core_config_loader.load_frozen_contracts_interpretation()
+    whitelist = core_config_loader.load_runtime_whitelist()
+    semantics = core_config_loader.load_policy_path_semantics()
+    return whitelist, semantics, contracts, interpretation
+
+
+def _validate_pw02_runtime_config_via_config_loader(
+    *,
+    tmp_path: Path,
+    file_name: str,
+    runtime_cfg_obj: Dict[str, Any],
+    override_args: List[str],
+) -> Dict[str, Any]:
+    """
+    Validate one PW02 runtime config through the real config_loader entrypoint.
+
+    Args:
+        tmp_path: Temporary path fixture.
+        file_name: Output config file name.
+        runtime_cfg_obj: Runtime config payload.
+        override_args: CLI override arguments used by PW02.
+
+    Returns:
+        Validated config mapping returned by config_loader.
+    """
+    whitelist, semantics, contracts, interpretation = _load_config_loader_contract_context()
+    config_path = tmp_path / file_name
+    write_yaml_mapping(config_path, runtime_cfg_obj)
+    validated_cfg, _, _ = core_config_loader.load_and_validate_config(
+        config_path,
+        whitelist,
+        semantics,
+        contracts,
+        interpretation,
+        overrides=override_args,
+    )
+    return cast(Dict[str, Any], validated_cfg)
+
+
+def _assert_pw02_override_applied_contract(validated_cfg: Dict[str, Any]) -> None:
+    """
+    Assert PW02 runtime cfg produces the exact override_applied contract block.
+
+    Args:
+        validated_cfg: Validated config mapping.
+
+    Returns:
+        None.
+    """
+    whitelist = core_config_loader.load_runtime_whitelist()
+    override_applied = cast(Dict[str, Any], validated_cfg.get("override_applied"))
+    requested_overrides = cast(List[Dict[str, Any]], override_applied.get("requested_overrides"))
+    applied_fields = cast(List[Dict[str, Any]], override_applied.get("applied_fields"))
+
+    assert validated_cfg["allow_nonempty_run_root"] is True
+    assert validated_cfg["allow_nonempty_run_root_reason"] == pw02_module.PW02_RUN_ROOT_REUSE_REASON
+    assert override_applied["source"] == "cli"
+    assert override_applied["allowed_fields_version"] == whitelist.whitelist_version
+    assert override_applied["requested_kv"] == {
+        "run_root_reuse_allowed": True,
+        "run_root_reuse_reason": pw02_module.PW02_RUN_ROOT_REUSE_REASON,
+    }
+    assert override_applied["rejected_fields"] == []
+    assert len(requested_overrides) == 2
+    assert len(applied_fields) == 2
+    assert [item["arg_name"] for item in applied_fields] == [
+        "run_root_reuse_allowed",
+        "run_root_reuse_reason",
+    ]
+    assert [item["field_path"] for item in applied_fields] == [
+        "allow_nonempty_run_root",
+        "allow_nonempty_run_root_reason",
+    ]
+    assert [item["new_value"] for item in applied_fields] == [
+        True,
+        pw02_module.PW02_RUN_ROOT_REUSE_REASON,
+    ]
+    for requested in requested_overrides:
+        assert set(requested) == {
+            "arg_name",
+            "field_path",
+            "override_mode",
+            "source",
+            "raw_key",
+            "raw_value",
+            "value",
+        }
+    for applied in applied_fields:
+        assert set(applied) == {
+            "arg_name",
+            "field_path",
+            "override_mode",
+            "source",
+            "old_value",
+            "new_value",
+        }
+        assert applied["source"] == "cli"
+        assert applied["override_mode"] == "set"
 
 
 def test_pw02_merges_dual_role_shards_and_builds_score_runs(tmp_path: Path, monkeypatch: Any) -> None:
@@ -334,3 +464,98 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert finalize_manifest["system_final"]["mode"] == "derived_metrics_from_content_evaluate_inputs"
     assert finalize_manifest["system_final"]["is_formal_evaluate_record"] is False
     assert finalize_manifest["system_final"]["artifact_path"] == pw02_summary["system_final_metrics_artifact_path"]
+
+
+def test_pw02_passes_run_root_reuse_overrides_for_calibrate_and_evaluate_configs(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """
+    Verify PW02 forwards audited run-root reuse overrides for both calibrate and evaluate configs.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    summary = _build_pw00_family(tmp_path, family_id="family_pw02_override_contract")
+    _materialize_completed_pw01_shards(summary)
+    observed_calls = _patch_pw02_python_stage_runner(monkeypatch)
+
+    pw02_module.run_pw02_merge_source_event_shards(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_pw02_override_contract",
+    )
+
+    calibrate_call = next(call for call in observed_calls if call["module_name"] == "main.cli.run_calibrate")
+    evaluate_call = next(call for call in observed_calls if call["module_name"] == "main.cli.run_evaluate")
+
+    for call in [calibrate_call, evaluate_call]:
+        runtime_cfg_obj = cast(Dict[str, Any], call["config"])
+        override_args = cast(List[str], call["overrides"])
+        assert runtime_cfg_obj["allow_nonempty_run_root"] is True
+        assert runtime_cfg_obj["allow_nonempty_run_root_reason"] == pw02_module.PW02_RUN_ROOT_REUSE_REASON
+        assert override_args == pw02_module._build_run_root_reuse_override_args(runtime_cfg_obj)
+
+    validated_calibrate_cfg = _validate_pw02_runtime_config_via_config_loader(
+        tmp_path=tmp_path,
+        file_name="captured_pw02_calibrate_runtime.yaml",
+        runtime_cfg_obj=cast(Dict[str, Any], calibrate_call["config"]),
+        override_args=cast(List[str], calibrate_call["overrides"]),
+    )
+    validated_evaluate_cfg = _validate_pw02_runtime_config_via_config_loader(
+        tmp_path=tmp_path,
+        file_name="captured_pw02_evaluate_runtime.yaml",
+        runtime_cfg_obj=cast(Dict[str, Any], evaluate_call["config"]),
+        override_args=cast(List[str], evaluate_call["overrides"]),
+    )
+
+    _assert_pw02_override_applied_contract(validated_calibrate_cfg)
+    _assert_pw02_override_applied_contract(validated_evaluate_cfg)
+
+
+def test_pw02_calibrate_runtime_config_reaches_run_calibrate_post_validation(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """
+    Verify a PW02 calibrate runtime config reaches run_calibrate past config validation.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    summary = _build_pw00_family(tmp_path, family_id="family_pw02_calibrate_validation")
+    _materialize_completed_pw01_shards(summary)
+    observed_calls = _patch_pw02_python_stage_runner(monkeypatch)
+
+    pw02_module.run_pw02_merge_source_event_shards(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_pw02_calibrate_validation",
+    )
+
+    calibrate_call = next(call for call in observed_calls if call["module_name"] == "main.cli.run_calibrate")
+    runtime_cfg_path = tmp_path / "pw02_calibrate_runtime_config.yaml"
+    write_yaml_mapping(runtime_cfg_path, cast(Dict[str, Any], calibrate_call["config"]))
+
+    def raise_after_config_validation(cfg: Any) -> tuple[int, int]:
+        _ = cfg
+        raise RuntimeError("pw02_after_config_validation_marker")
+
+    monkeypatch.setattr(
+        run_calibrate_cli,
+        "_validate_detect_record_label_balance_for_calibration",
+        raise_after_config_validation,
+    )
+
+    with pytest.raises(RuntimeError, match="pw02_after_config_validation_marker"):
+        run_calibrate_cli.run_calibrate(
+            str(tmp_path / "pw02_calibrate_real_run"),
+            str(runtime_cfg_path),
+            cast(List[str], calibrate_call["overrides"]),
+        )
