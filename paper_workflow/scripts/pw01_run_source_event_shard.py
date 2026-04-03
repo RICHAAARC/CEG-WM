@@ -17,6 +17,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, List, Mapping, Sequence, Tuple, cast
 
+from main.core import status as run_status
+from main.core.errors import RunFailureReason
 from scripts.notebook_runtime_common import (
     REPO_ROOT,
     apply_notebook_model_snapshot_binding,
@@ -77,6 +79,12 @@ _CLEAN_NEGATIVE_OPTIONAL_FORMAL_SCALAR_FIELDS = (
 _CLEAN_NEGATIVE_OPTIONAL_FORMAL_MAPPING_FIELDS = (
     "subspace_planner_impl_identity",
     "subspace_plan",
+)
+_CLEAN_NEGATIVE_REQUIRED_PROBE_PLANNER_FIELDS = (
+    "subspace_plan",
+    "subspace_planner_impl_identity",
+    "plan_input_digest",
+    "plan_input_schema_version",
 )
 
 
@@ -1258,6 +1266,106 @@ def _extract_detect_probe_plan_anchors(detect_payload_obj: Mapping[str, Any]) ->
     }
 
 
+def _validate_clean_negative_probe_planner_payload(detect_payload_obj: Mapping[str, Any]) -> None:
+    """
+    Validate that one detect probe record exposes the required planner payload.
+
+    Args:
+        detect_payload_obj: Detect probe record payload.
+
+    Returns:
+        None.
+
+    Raises:
+        RuntimeError: If required planner payload fields are absent.
+    """
+    if not isinstance(detect_payload_obj, Mapping):
+        raise TypeError("detect_payload_obj must be Mapping")
+
+    missing_fields: List[str] = []
+    for field_name in _CLEAN_NEGATIVE_REQUIRED_PROBE_PLANNER_FIELDS:
+        field_value = detect_payload_obj.get(field_name)
+        if field_name in _CLEAN_NEGATIVE_OPTIONAL_FORMAL_MAPPING_FIELDS:
+            if not isinstance(field_value, dict) or not field_value:
+                missing_fields.append(field_name)
+            continue
+        if not isinstance(field_value, str) or not field_value:
+            missing_fields.append(field_name)
+
+    if missing_fields:
+        raise RuntimeError(
+            "clean_negative_probe_missing_planner_payload: "
+            f"missing_fields={','.join(sorted(missing_fields))}"
+        )
+
+
+def _build_clean_negative_run_meta_from_run_closure(run_closure_payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    Rebuild the minimal run_meta required to refresh one event run closure.
+
+    Args:
+        run_closure_payload: Existing run_closure payload.
+
+    Returns:
+        Mutable run_meta mapping.
+    """
+    if not isinstance(run_closure_payload, Mapping):
+        raise TypeError("run_closure_payload must be Mapping")
+
+    status_node = run_closure_payload.get("status")
+    status_payload = cast(Dict[str, Any], status_node) if isinstance(status_node, dict) else {}
+    status_ok = status_payload.get("ok")
+    if not isinstance(status_ok, bool):
+        raise ValueError("clean_negative run_closure missing boolean status.ok")
+
+    status_reason_value = status_payload.get("reason")
+    if not isinstance(status_reason_value, str) or not status_reason_value:
+        raise ValueError("clean_negative run_closure missing status.reason")
+    try:
+        status_reason = RunFailureReason(status_reason_value)
+    except ValueError as exc:
+        raise ValueError(
+            f"clean_negative run_closure has unsupported status.reason: {status_reason_value}"
+        ) from exc
+
+    run_meta = dict(cast(Dict[str, Any], run_closure_payload))
+    run_meta.pop("status", None)
+    run_meta["status_ok"] = status_ok
+    run_meta["status_reason"] = status_reason
+    run_meta["status_details"] = status_payload.get("details")
+    return run_meta
+
+
+def _refresh_clean_negative_event_run_records_view(prompt_run_root: Path) -> None:
+    """
+    Refresh the event-level records bundle and run_closure after embed write-back.
+
+    Args:
+        prompt_run_root: Event run root.
+
+    Returns:
+        None.
+    """
+    if not isinstance(prompt_run_root, Path):
+        raise TypeError("prompt_run_root must be Path")
+    if not prompt_run_root.exists() or not prompt_run_root.is_dir():
+        raise FileNotFoundError(
+            f"clean_negative event run root missing: {normalize_path_value(prompt_run_root)}"
+        )
+
+    records_dir = ensure_directory(prompt_run_root / "records")
+    artifacts_dir = ensure_directory(prompt_run_root / "artifacts")
+    run_closure_path = artifacts_dir / "run_closure.json"
+    if not run_closure_path.exists() or not run_closure_path.is_file():
+        raise FileNotFoundError(
+            f"clean_negative run_closure missing before records refresh: {normalize_path_value(run_closure_path)}"
+        )
+
+    run_closure_payload = _load_required_json_dict(run_closure_path, "clean_negative run_closure")
+    run_meta = _build_clean_negative_run_meta_from_run_closure(run_closure_payload)
+    run_status.finalize_run(prompt_run_root, records_dir, artifacts_dir, run_meta)
+
+
 def _build_clean_negative_detect_command(
     *,
     config_path: Path,
@@ -1739,6 +1847,7 @@ def _run_clean_negative_event(
     staged_probe_detect_record_path = shard_root / "records" / f"event_{event_index:06d}_detect_probe_record.json"
     validate_path_within_base(shard_root, staged_probe_detect_record_path, "staged detect probe record")
     write_json_atomic(staged_probe_detect_record_path, probe_detect_payload)
+    _validate_clean_negative_probe_planner_payload(probe_detect_payload)
 
     provenance_payload = _build_negative_branch_attestation_provenance(
         runtime_cfg=preview_runtime_cfg,
@@ -1793,6 +1902,11 @@ def _run_clean_negative_event(
         provenance_payload=provenance_payload,
     )
     write_json_atomic(staged_embed_record_path, staged_embed_record_payload)
+
+    event_embed_record_path = prompt_run_root / "records" / "embed_record.json"
+    validate_path_within_base(shard_root, event_embed_record_path, "event embed record")
+    write_json_atomic(event_embed_record_path, staged_embed_record_payload)
+    _refresh_clean_negative_event_run_records_view(prompt_run_root)
 
     normalize_fn = getattr(BASE_RUNNER_MODULE, "_normalize_direct_detect_payload", None)
     if callable(normalize_fn):

@@ -205,6 +205,10 @@ def _patch_pw01_base_runner(
                             "event_attestation_score": 0.61,
                         }
                     },
+                    "final_decision": {
+                        "decision_status": "abstain",
+                        "is_watermarked": None,
+                    },
                 },
             )
         else:
@@ -506,9 +510,16 @@ def test_run_positive_source_event_preserves_model_snapshot_binding(
     )
 
     runtime_cfg = load_yaml_mapping(Path(str(event_manifest["runtime_config_path"])))
+    prompt_run_root = Path(str(event_manifest["runtime_config_path"])).parent / "run"
+    embed_record = json.loads((prompt_run_root / "records" / "embed_record.json").read_text(encoding="utf-8"))
+    detect_record = json.loads((prompt_run_root / "records" / "detect_record.json").read_text(encoding="utf-8"))
     assert runtime_cfg["model_snapshot_path"] == snapshot_dir.resolve().as_posix()
     assert runtime_cfg["model_source_binding"]["binding_status"] == "bound"
     assert runtime_cfg["test_config_origin"] == "event_bound"
+    assert embed_record["record_type"] == "embed"
+    assert detect_record["content_evidence_payload"]["status"] == "ok"
+    assert detect_record["final_decision"]["decision_status"] == "abstain"
+    assert detect_record["attestation"]["final_event_attested_decision"]["event_attestation_score"] == 0.61
 
 
 def test_run_positive_source_event_fails_before_preview_when_model_snapshot_missing(

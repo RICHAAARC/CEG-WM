@@ -85,6 +85,94 @@ def _patch_clean_negative_runner(monkeypatch: pytest.MonkeyPatch) -> Dict[str, A
         "detect_inputs": [],
     }
 
+    default_detect_probe_record: Dict[str, Any] = {
+        "record_type": "detect_probe",
+        "plan_input_digest": "plan-input-probe",
+        "plan_input_schema_version": "v2",
+        "subspace_planner_impl_identity": {
+            "impl_id": "planner_impl",
+        },
+        "subspace_plan": {
+            "rank": 2,
+            "planner_input_digest": "plan-input-probe",
+        },
+        "content_evidence_payload": {
+            "status": "absent",
+            "plan_digest": "plan-probe",
+            "basis_digest": "basis-probe",
+        },
+    }
+
+    def _write_detect_run_closure(run_root: Path) -> None:
+        artifacts_root = ensure_directory(run_root / "artifacts")
+        write_json_atomic(
+            artifacts_root / "run_closure.json",
+            {
+                "schema_version": "run_closure_v1",
+                "run_id": "detect-run",
+                "command": "detect",
+                "created_at_utc": "2026-01-01T00:00:00Z",
+                "started_at": "2026-01-01T00:00:00Z",
+                "ended_at": "2026-01-01T00:00:01Z",
+                "cfg_digest": "cfg-digest",
+                "contract_version": "contracts-v1",
+                "contract_digest": "contract-digest",
+                "contract_file_sha256": "contract-file-sha",
+                "contract_canon_sha256": "contract-canon-sha",
+                "contract_bound_digest": "contract-bound",
+                "whitelist_version": "whitelist-v1",
+                "whitelist_digest": "whitelist-digest",
+                "whitelist_file_sha256": "whitelist-file-sha",
+                "whitelist_canon_sha256": "whitelist-canon-sha",
+                "whitelist_bound_digest": "whitelist-bound",
+                "policy_path_semantics_version": "semantics-v1",
+                "policy_path_semantics_digest": "semantics-digest",
+                "policy_path_semantics_file_sha256": "semantics-file-sha",
+                "policy_path_semantics_canon_sha256": "semantics-canon-sha",
+                "policy_path_semantics_bound_digest": "semantics-bound",
+                "policy_path": "content_np_geo_rescue",
+                "impl_id": "detect_impl",
+                "impl_version": "v1",
+                "impl_identity": {
+                    "impl_id": "detect_impl",
+                    "impl_version": "v1",
+                },
+                "impl_identity_digest": "detect-impl-digest",
+                "bound_fact_sources": {
+                    "contract_version": "contracts-v1",
+                    "contract_digest": "contract-digest",
+                    "contract_file_sha256": "contract-file-sha",
+                    "contract_canon_sha256": "contract-canon-sha",
+                    "contract_bound_digest": "contract-bound",
+                    "whitelist_version": "whitelist-v1",
+                    "whitelist_digest": "whitelist-digest",
+                    "whitelist_file_sha256": "whitelist-file-sha",
+                    "whitelist_canon_sha256": "whitelist-canon-sha",
+                    "whitelist_bound_digest": "whitelist-bound",
+                    "policy_path_semantics_version": "semantics-v1",
+                    "policy_path_semantics_digest": "semantics-digest",
+                    "policy_path_semantics_file_sha256": "semantics-file-sha",
+                    "policy_path_semantics_canon_sha256": "semantics-canon-sha",
+                    "policy_path_semantics_bound_digest": "semantics-bound",
+                    "injection_scope_manifest_version": "injection-scope-v1",
+                    "injection_scope_manifest_digest": "injection-scope-digest",
+                    "injection_scope_manifest_file_sha256": "injection-scope-file-sha",
+                    "injection_scope_manifest_canon_sha256": "injection-scope-canon-sha",
+                    "injection_scope_manifest_bound_digest": "injection-scope-bound",
+                },
+                "bound_fact_sources_status": "bound",
+                "records_bundle": {
+                    "manifest_rel_path": "artifacts/records_manifest.json",
+                    "bundle_canon_sha256": "stale-bundle-digest",
+                },
+                "status": {
+                    "ok": True,
+                    "reason": "ok",
+                    "details": None,
+                },
+            },
+        )
+
     def fake_build_stage_command(stage_name: str, config_path: Path, run_root: Path) -> list[str]:
         return [stage_name, str(config_path), str(run_root)]
 
@@ -131,26 +219,13 @@ def _patch_clean_negative_runner(monkeypatch: pytest.MonkeyPatch) -> Dict[str, A
 
         if stage_name == "detect_probe":
             captures["detect_probe_inputs"].append(_read_detect_input_record(command))
-            write_json_atomic(
-                records_root / "detect_record.json",
-                {
-                    "record_type": "detect_probe",
-                    "plan_input_digest": "plan-input-probe",
-                    "plan_input_schema_version": "v2",
-                    "subspace_planner_impl_identity": {
-                        "impl_id": "planner_impl",
-                    },
-                    "subspace_plan": {
-                        "rank": 2,
-                        "planner_input_digest": "plan-input-probe",
-                    },
-                    "content_evidence_payload": {
-                        "status": "absent",
-                        "plan_digest": "plan-probe",
-                        "basis_digest": "basis-probe",
-                    },
-                },
+            probe_record_override = captures.get("detect_probe_record_override")
+            probe_record_payload = (
+                cast(Dict[str, Any], probe_record_override)
+                if isinstance(probe_record_override, dict)
+                else default_detect_probe_record
             )
+            write_json_atomic(records_root / "detect_record.json", probe_record_payload)
         elif stage_name == "detect":
             detect_input_record = _read_detect_input_record(command)
             captures["detect_inputs"].append(dict(detect_input_record))
@@ -205,6 +280,7 @@ def _patch_clean_negative_runner(monkeypatch: pytest.MonkeyPatch) -> Dict[str, A
                     },
                 },
             )
+            _write_detect_run_closure(run_root)
         else:
             raise ValueError(f"unsupported stage: {stage_name}")
 
@@ -350,7 +426,7 @@ def test_pw01_clean_negative_writes_statement_only_provenance(tmp_path: Path, mo
     prompt_run_root = runtime_config_path.parent / "run"
     detect_input_record_path = prompt_run_root / "artifacts" / "neg_preview_input" / "detect_input_record.json"
     assert detect_input_record_path.exists()
-    assert not (prompt_run_root / "records" / "embed_record.json").exists()
+    assert (prompt_run_root / "records" / "embed_record.json").exists()
 
     detect_input_record = json.loads(detect_input_record_path.read_text(encoding="utf-8"))
     assert detect_input_record["operation"] == "embed_preview_input"
@@ -370,6 +446,9 @@ def test_pw01_clean_negative_writes_statement_only_provenance(tmp_path: Path, mo
     assert detect_command[detect_command.index("--input") + 1] == str(detect_input_record_path)
 
     staged_embed_record = json.loads(Path(str(first_event["embed_record_path"])).read_text(encoding="utf-8"))
+    event_embed_record = json.loads((prompt_run_root / "records" / "embed_record.json").read_text(encoding="utf-8"))
+    records_manifest = json.loads((prompt_run_root / "artifacts" / "records_manifest.json").read_text(encoding="utf-8"))
+    run_closure = json.loads((prompt_run_root / "artifacts" / "run_closure.json").read_text(encoding="utf-8"))
     assert staged_embed_record["negative_branch_source_attestation_provenance"]["statement"]["plan_digest"] == "plan-probe"
     assert staged_embed_record["basis_digest"] == "basis-probe"
     assert staged_embed_record["plan_input_digest"] == "plan-input-probe"
@@ -382,6 +461,61 @@ def test_pw01_clean_negative_writes_statement_only_provenance(tmp_path: Path, mo
     assert "content_evidence" not in staged_embed_record
     assert "embed_trace" not in staged_embed_record
     assert "injection_evidence" not in staged_embed_record
+    assert event_embed_record == staged_embed_record
+    assert {file_entry["path"] for file_entry in records_manifest["files"]} == {
+        "detect_record.json",
+        "embed_record.json",
+    }
+    assert run_closure["records_bundle"]["manifest_rel_path"] == "artifacts/records_manifest.json"
+    assert run_closure["records_bundle"]["bundle_canon_sha256"] == records_manifest["bundle_canon_sha256"]
+
+
+def test_pw01_clean_negative_fails_fast_when_probe_planner_payload_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify clean_negative aborts before final detect when probe planner payload is incomplete.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    _build_pw00_family(tmp_path, family_id="family_clean_negative_fail_fast")
+    bound_config_path = _write_bound_config_snapshot(
+        tmp_path / "drive",
+        marker="family_clean_negative_fail_fast",
+    )
+    captures = _patch_clean_negative_runner(monkeypatch)
+    captures["detect_probe_record_override"] = {
+        "record_type": "detect_probe",
+        "plan_input_digest": "plan-input-probe",
+        "plan_input_schema_version": "v2",
+        "subspace_planner_impl_identity": {
+            "impl_id": "planner_impl",
+        },
+        "content_evidence_payload": {
+            "status": "absent",
+            "plan_digest": "plan-probe",
+            "basis_digest": "basis-probe",
+        },
+    }
+
+    with pytest.raises(RuntimeError, match="clean_negative_probe_missing_planner_payload"):
+        pw01_module.run_pw01_source_event_shard(
+            drive_project_root=tmp_path / "drive",
+            family_id="family_clean_negative_fail_fast",
+            sample_role="clean_negative",
+            shard_index=0,
+            shard_count=2,
+            bound_config_path=bound_config_path,
+        )
+
+    assert captures["detect_probe_inputs"]
+    assert captures["detect_inputs"] == []
 
 
 def test_pw01_clean_negative_final_detect_consumes_probe_plan_anchors(

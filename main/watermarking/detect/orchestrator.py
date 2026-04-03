@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import copy
 import glob
 import inspect
 import math
@@ -23,7 +24,7 @@ from main.core import records_io
 from main.registries.runtime_resolver import BuiltImplSet
 from main.watermarking.content_chain import detector_scoring
 from main.watermarking.content_chain import channel_hf
-from main.watermarking.common.plan_digest_flow import verify_plan_digest
+from main.watermarking.common.plan_digest_flow import PLAN_INPUT_SCHEMA_VERSION, verify_plan_digest
 from main.watermarking.content_chain.high_freq_embedder import (
     HighFreqTruncationCodec,
     HIGH_FREQ_TRUNCATION_CODEC_ID,
@@ -3068,6 +3069,17 @@ def run_detect_orchestrator(
         }
     }
 
+    _bind_actual_detect_planner_payload_to_record(
+        record,
+        input_record=input_record,
+        detect_plan_result=detect_plan_result_obj,
+        detect_plan_result_override=detect_plan_result_override,
+        detect_time_plan_digest=detect_time_plan_digest,
+        detect_time_basis_digest=detect_time_basis_digest,
+        detect_time_planner_impl_identity=detect_time_planner_impl_identity,
+        detect_planner_input_digest=detect_planner_input_digest,
+    )
+
     # (append-only) 构建 final_decision 顶层稳定判决快照，供后续冻结与审查使用 
     # 所有字段从 fusion_result 只读投影，不替换原有 fusion_result 字段 
     try:
@@ -4764,6 +4776,95 @@ def _extract_detect_planner_input_digest(detect_plan_result: Any) -> Optional[st
             if isinstance(digest_value, str) and digest_value:
                 return digest_value
     return None
+
+
+def _bind_actual_detect_planner_payload_to_record(
+    record: Dict[str, Any],
+    *,
+    input_record: Optional[Dict[str, Any]],
+    detect_plan_result: Any,
+    detect_plan_result_override: Any,
+    detect_time_plan_digest: Any,
+    detect_time_basis_digest: Any,
+    detect_time_planner_impl_identity: Any,
+    detect_planner_input_digest: Optional[str],
+) -> None:
+    """
+    功能：将 detect 实际消费的 planner payload 追加写回记录顶层。
+
+    Bind the planner payload actually consumed by detect into top-level record
+    fields in an append-only manner.
+
+    Args:
+        record: Mutable detect record mapping.
+        input_record: Detect input record when available.
+        detect_plan_result: Actual detect-time planner result object or mapping.
+        detect_plan_result_override: Optional override payload supplied by CLI.
+        detect_time_plan_digest: Actual detect-time plan digest.
+        detect_time_basis_digest: Actual detect-time basis digest.
+        detect_time_planner_impl_identity: Actual detect-time planner impl identity.
+        detect_planner_input_digest: Actual detect-time planner input digest.
+
+    Returns:
+        None.
+    """
+    if not isinstance(record, dict):
+        raise TypeError("record must be dict")
+    if input_record is not None and not isinstance(input_record, dict):
+        raise TypeError("input_record must be dict or None")
+
+    def _clone_mapping(mapping_value: Any) -> Optional[Dict[str, Any]]:
+        if not isinstance(mapping_value, dict):
+            return None
+        payload = cast(Dict[str, Any], mapping_value)
+        if not payload:
+            return None
+        return copy.deepcopy(payload)
+
+    actual_subspace_plan = None
+    actual_planner_impl_identity = None
+    actual_plan_input_digest = None
+    actual_plan_input_schema_version = None
+
+    if detect_plan_result_override is not None and isinstance(input_record, dict):
+        actual_subspace_plan = _clone_mapping(input_record.get("subspace_plan"))
+        actual_planner_impl_identity = _clone_mapping(input_record.get("subspace_planner_impl_identity"))
+        input_plan_input_digest = input_record.get("plan_input_digest")
+        if isinstance(input_plan_input_digest, str) and input_plan_input_digest:
+            actual_plan_input_digest = input_plan_input_digest
+        input_plan_input_schema_version = input_record.get("plan_input_schema_version")
+        if isinstance(input_plan_input_schema_version, str) and input_plan_input_schema_version:
+            actual_plan_input_schema_version = input_plan_input_schema_version
+
+    if actual_subspace_plan is None:
+        actual_subspace_plan = _clone_mapping(getattr(detect_plan_result, "plan", None))
+    if actual_subspace_plan is None and isinstance(detect_plan_result, dict):
+        detect_plan_result_payload = cast(Dict[str, Any], detect_plan_result)
+        actual_subspace_plan = _clone_mapping(detect_plan_result_payload.get("plan"))
+
+    if actual_planner_impl_identity is None:
+        actual_planner_impl_identity = _clone_mapping(detect_time_planner_impl_identity)
+    if actual_planner_impl_identity is None and isinstance(actual_subspace_plan, dict):
+        actual_planner_impl_identity = _clone_mapping(actual_subspace_plan.get("planner_impl_identity"))
+
+    if not isinstance(actual_plan_input_digest, str) or not actual_plan_input_digest:
+        if isinstance(detect_planner_input_digest, str) and detect_planner_input_digest:
+            actual_plan_input_digest = detect_planner_input_digest
+    if not isinstance(actual_plan_input_schema_version, str) or not actual_plan_input_schema_version:
+        actual_plan_input_schema_version = PLAN_INPUT_SCHEMA_VERSION
+
+    if isinstance(actual_subspace_plan, dict) and actual_subspace_plan:
+        record["subspace_plan"] = actual_subspace_plan
+    if isinstance(actual_planner_impl_identity, dict) and actual_planner_impl_identity:
+        record["subspace_planner_impl_identity"] = actual_planner_impl_identity
+    if isinstance(actual_plan_input_digest, str) and actual_plan_input_digest:
+        record["plan_input_digest"] = actual_plan_input_digest
+    if isinstance(actual_plan_input_schema_version, str) and actual_plan_input_schema_version:
+        record["plan_input_schema_version"] = actual_plan_input_schema_version
+    if isinstance(detect_time_plan_digest, str) and detect_time_plan_digest:
+        record["plan_digest"] = detect_time_plan_digest
+    if isinstance(detect_time_basis_digest, str) and detect_time_basis_digest:
+        record["basis_digest"] = detect_time_basis_digest
 
 
 def _resolve_mismatch_failure_reason(primary_mismatch_reason: str) -> str:

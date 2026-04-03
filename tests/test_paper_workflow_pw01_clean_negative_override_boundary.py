@@ -356,6 +356,12 @@ def test_clean_negative_detect_override_short_circuits_planner(monkeypatch: pyte
     assert cfg["k_hf"] == "hf-key"
     assert cfg["k_geo"] == "geo-key"
     assert cfg["geo_anchor_seed"] == 17
+    assert record["subspace_plan"] == input_record["subspace_plan"]
+    assert record["subspace_planner_impl_identity"] == input_record["subspace_planner_impl_identity"]
+    assert record["plan_input_digest"] == input_record["plan_input_digest"]
+    assert record["plan_input_schema_version"] == input_record["plan_input_schema_version"]
+    assert record["plan_digest"] == input_record["plan_digest"]
+    assert record["basis_digest"] == input_record["basis_digest"]
     assert record["plan_digest_expected"] == input_record["plan_digest"]
     assert record["plan_digest_validation_status"] == "ok"
 
@@ -396,5 +402,15 @@ def test_clean_negative_detect_replans_when_override_is_missing(monkeypatch: pyt
     assert planner_call["mask_digest"] == "mask-digest-stub"
     assert isinstance(planner_call["inputs"], dict)
     assert cast(Dict[str, Any], planner_call["inputs"])["trace_signature"]["num_inference_steps"] == 28
+    assert record["subspace_plan"]["planner_input_digest"] == "plan-input-probe"
+    assert record["subspace_planner_impl_identity"] == {
+        "impl_id": "planner_impl",
+        "impl_version": "v1",
+        "impl_digest": "planner-digest",
+    }
+    assert record["plan_input_digest"] == "plan-input-probe"
+    assert record["plan_input_schema_version"] == "v2"
+    assert record["plan_digest"] == "plan-probe"
+    assert record["basis_digest"] == "basis-probe"
     assert record["plan_digest_expected"] == input_record["plan_digest"]
     assert record["plan_digest_validation_status"] == "ok"
