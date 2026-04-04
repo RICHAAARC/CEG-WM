@@ -13,6 +13,7 @@ import pytest
 
 from main.cli import run_calibrate as run_calibrate_cli
 from main.core import config_loader as core_config_loader
+from main.evaluation import workflow_inputs as eval_workflow_inputs
 import paper_workflow.scripts.pw02_merge_source_event_shards as pw02_module
 from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
 from paper_workflow.scripts.pw_common import build_source_shard_root, read_jsonl
@@ -90,9 +91,10 @@ def _materialize_completed_pw01_shards(
             ensure_directory(shard_root / "records")
             events: List[Dict[str, Any]] = []
             for event_id in cast(List[str], shard_row["assigned_event_ids"]):
-                event = cast(Dict[str, Any], event_lookup[event_id])
+                event = event_lookup[event_id]
                 event_index = int(event["event_index"])
                 detect_record_path = shard_root / "records" / f"event_{event_index:06d}_detect_record.json"
+                detect_payload: Dict[str, Any]
                 if sample_role == "positive_source":
                     detect_payload = {
                         "sample_role": sample_role,
@@ -118,6 +120,8 @@ def _materialize_completed_pw01_shards(
                 elif sample_role == "clean_negative":
                     detect_payload = {
                         "sample_role": sample_role,
+                        "plan_digest": f"runtime-observed-plan-{event_id}",
+                        "basis_digest": f"runtime-observed-basis-{event_id}",
                         "content_evidence_payload": {
                             "status": "absent",
                             "score": None,
@@ -177,6 +181,35 @@ def _materialize_completed_pw01_shards(
                     "events": events,
                 },
             )
+
+
+def test_strict_clean_negative_runtime_plan_digest_maps_to_formal_null_content_score() -> None:
+    """
+    Verify runtime-observed digests do not disqualify strict clean_negative formal-null mapping.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    record: Dict[str, Any] = {
+        "sample_role": "clean_negative",
+        "plan_digest": "runtime-observed-plan",
+        "basis_digest": "runtime-observed-basis",
+        "content_evidence_payload": {
+            "status": "absent",
+            "score": None,
+            "content_chain_score": None,
+            "content_failure_reason": "detector_no_plan_expected",
+        },
+    }
+
+    assert eval_workflow_inputs._is_strict_clean_negative_formal_null_record(record) is True
+    assert eval_workflow_inputs._resolve_content_score_source(record) == (
+        0.0,
+        "strict_clean_negative_formal_null",
+    )
 
 
 def _patch_pw02_python_stage_runner(monkeypatch: Any) -> List[Dict[str, Any]]:
@@ -390,6 +423,13 @@ def test_pw02_merges_dual_role_shards_and_builds_score_runs(tmp_path: Path, monk
     assert pw02_summary["planner_conditioned_control_negative_cohort_status"] == "completed"
     assert pw02_summary["planner_conditioned_control_negative_role_requirement"] == "optional_diagnostic"
 
+    content_negative_record_summary = next(
+        record
+        for record in content_run["evaluate_inputs"]["records"]
+        if record["sample_role"] == "clean_negative"
+    )
+    assert content_negative_record_summary["score_source"] == "strict_clean_negative_formal_null"
+
     attestation_negative_record_path = Path(
         str(
             next(
@@ -406,6 +446,12 @@ def test_pw02_merges_dual_role_shards_and_builds_score_runs(tmp_path: Path, monk
         attestation_negative_record["attestation"]["final_event_attested_decision"]["event_attestation_score"]
         == 0.0
     )
+
+    content_negative_record_path = Path(str(content_negative_record_summary["record_path"]))
+    content_negative_record = json.loads(content_negative_record_path.read_text(encoding="utf-8"))
+    assert content_negative_record["paper_workflow_score_source"] == "strict_clean_negative_formal_null"
+    assert str(content_negative_record["plan_digest"]).startswith("runtime-observed-plan-")
+    assert str(content_negative_record["basis_digest"]).startswith("runtime-observed-basis-")
 
     formal_final_decision_metrics = cast(Dict[str, Any], pw02_summary["formal_final_decision_metrics"])
     derived_system_union_metrics = cast(Dict[str, Any], pw02_summary["derived_system_union_metrics"])

@@ -25,6 +25,13 @@ from main.evaluation import metrics as eval_metrics
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _CONTENT_SCORE_NAME = eval_metrics.CONTENT_CHAIN_SCORE_NAME
 _EVENT_ATTESTATION_SCORE_NAME = "event_attestation_score"
+_STRICT_CLEAN_NEGATIVE_INPUT_SIDE_PLANNER_FIELDS = (
+    "subspace_plan",
+    "plan_input_digest",
+    "plan_input_schema_version",
+    "subspace_planner_impl_identity",
+    "negative_branch_source_attestation_provenance",
+)
 
 
 def _strip_forbidden_artifact_anchor_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -180,8 +187,14 @@ def _is_strict_clean_negative_formal_null_record(record: Dict[str, Any]) -> bool
     if failure_reason != "detector_no_plan_expected":
         return False
 
-    expected_plan_digest = record.get("plan_digest")
-    if isinstance(expected_plan_digest, str) and expected_plan_digest:
+    for field_name in _STRICT_CLEAN_NEGATIVE_INPUT_SIDE_PLANNER_FIELDS:
+        field_value = record.get(field_name)
+        if field_value is None:
+            continue
+        if isinstance(field_value, str) and not field_value.strip():
+            continue
+        if isinstance(field_value, (dict, list, tuple, set)) and len(field_value) == 0:
+            continue
         return False
 
     return True
