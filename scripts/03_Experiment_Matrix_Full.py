@@ -55,6 +55,11 @@ from scripts.workflow_acceptance_common import detect_stage_03_preflight
 
 DEFAULT_CONFIG_PATH = Path("configs/default.yaml")
 _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD = "auxiliary_analysis_runtime_executed"
+FORMAL_PRIMARY_METRIC_NAME = "formal_final_decision_metrics"
+FORMAL_PRIMARY_DRIVER_MODE = "formal_final_decision_only"
+DERIVED_SYSTEM_UNION_METRIC_NAME = "derived_system_union_metrics"
+SYSTEM_FINAL_ALIAS_METRIC_NAME = "system_final_metrics"
+SYSTEM_FINAL_ALIAS_SEMANTICS = "deprecated_alias_of_derived_system_union_metrics"
 
 
 def _copy_readonly_thresholds(extracted_root: Path, run_root: Path) -> Dict[str, Path]:
@@ -448,17 +453,41 @@ def run_stage_03(
         "grid_summary_path": normalize_path_value(outputs["grid_summary"]),
         "aggregate_report_path": normalize_path_value(outputs["aggregate_report"]),
         "primary_evaluation_scope": aggregate_report_obj.get("primary_evaluation_scope", grid_summary_obj.get("primary_evaluation_scope")),
-        "primary_metric_name": aggregate_report_obj.get("primary_metric_name", grid_summary_obj.get("primary_metric_name")),
-        "primary_driver_mode": aggregate_report_obj.get("primary_driver_mode", grid_summary_obj.get("primary_driver_mode", "system_final_only")),
-        "primary_status_source": aggregate_report_obj.get("primary_status_source", grid_summary_obj.get("primary_status_source", "system_final_metrics")),
+        "primary_metric_name": aggregate_report_obj.get(
+            "primary_metric_name",
+            grid_summary_obj.get("primary_metric_name", FORMAL_PRIMARY_METRIC_NAME),
+        ),
+        "primary_driver_mode": aggregate_report_obj.get(
+            "primary_driver_mode",
+            grid_summary_obj.get("primary_driver_mode", FORMAL_PRIMARY_DRIVER_MODE),
+        ),
+        "primary_status_source": aggregate_report_obj.get(
+            "primary_status_source",
+            grid_summary_obj.get("primary_status_source", FORMAL_PRIMARY_METRIC_NAME),
+        ),
         "primary_summary_basis_scope": aggregate_report_obj.get("primary_summary_basis_scope", grid_summary_obj.get("primary_summary_basis_scope")),
-        "primary_summary_basis_metric_name": aggregate_report_obj.get("primary_summary_basis_metric_name", grid_summary_obj.get("primary_summary_basis_metric_name")),
+        "primary_summary_basis_metric_name": aggregate_report_obj.get(
+            "primary_summary_basis_metric_name",
+            grid_summary_obj.get("primary_summary_basis_metric_name", FORMAL_PRIMARY_METRIC_NAME),
+        ),
         "auxiliary_scopes": aggregate_report_obj.get("auxiliary_scopes", grid_summary_obj.get("auxiliary_scopes", [])),
         _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD: auxiliary_analysis_runtime_executed,
         "gpu_memory_summary": gpu_memory_summary_obj,
         "gpu_memory_profile_breakdown_path": normalize_path_value(outputs["gpu_memory_profile_breakdown"]),
         "scope_manifest": aggregate_report_obj.get("scope_manifest", grid_summary_obj.get("scope_manifest", {})),
+        "formal_final_decision_metrics_presence": aggregate_report_obj.get(
+            "formal_final_decision_metrics_presence",
+            grid_summary_obj.get("formal_final_decision_metrics_presence", {}),
+        ),
+        "derived_system_union_metrics_presence": aggregate_report_obj.get(
+            "derived_system_union_metrics_presence",
+            grid_summary_obj.get("derived_system_union_metrics_presence", {}),
+        ),
         "system_final_metrics_presence": aggregate_report_obj.get("system_final_metrics_presence", grid_summary_obj.get("system_final_metrics_presence", {})),
+        "system_final_metrics_semantics": aggregate_report_obj.get(
+            "system_final_metrics_semantics",
+            grid_summary_obj.get("system_final_metrics_semantics", SYSTEM_FINAL_ALIAS_SEMANTICS),
+        ),
         "created_at": utc_now_iso(),
     })
 
@@ -502,17 +531,41 @@ def run_stage_03(
         "created_at": utc_now_iso(),
         "runner_result": runner_result,
         "primary_evaluation_scope": aggregate_report_obj.get("primary_evaluation_scope", grid_summary_obj.get("primary_evaluation_scope")),
-        "primary_metric_name": aggregate_report_obj.get("primary_metric_name", grid_summary_obj.get("primary_metric_name")),
-        "primary_driver_mode": aggregate_report_obj.get("primary_driver_mode", grid_summary_obj.get("primary_driver_mode", "system_final_only")),
-        "primary_status_source": aggregate_report_obj.get("primary_status_source", grid_summary_obj.get("primary_status_source", "system_final_metrics")),
+        "primary_metric_name": aggregate_report_obj.get(
+            "primary_metric_name",
+            grid_summary_obj.get("primary_metric_name", FORMAL_PRIMARY_METRIC_NAME),
+        ),
+        "primary_driver_mode": aggregate_report_obj.get(
+            "primary_driver_mode",
+            grid_summary_obj.get("primary_driver_mode", FORMAL_PRIMARY_DRIVER_MODE),
+        ),
+        "primary_status_source": aggregate_report_obj.get(
+            "primary_status_source",
+            grid_summary_obj.get("primary_status_source", FORMAL_PRIMARY_METRIC_NAME),
+        ),
         "primary_summary_basis_scope": aggregate_report_obj.get("primary_summary_basis_scope", grid_summary_obj.get("primary_summary_basis_scope")),
-        "primary_summary_basis_metric_name": aggregate_report_obj.get("primary_summary_basis_metric_name", grid_summary_obj.get("primary_summary_basis_metric_name")),
+        "primary_summary_basis_metric_name": aggregate_report_obj.get(
+            "primary_summary_basis_metric_name",
+            grid_summary_obj.get("primary_summary_basis_metric_name", FORMAL_PRIMARY_METRIC_NAME),
+        ),
         "auxiliary_scopes": aggregate_report_obj.get("auxiliary_scopes", grid_summary_obj.get("auxiliary_scopes", [])),
         _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD: auxiliary_analysis_runtime_executed,
         "gpu_memory_summary": gpu_memory_summary_obj,
         "gpu_memory_profile_breakdown_path": normalize_path_value(outputs["gpu_memory_profile_breakdown"]),
         "scope_manifest": aggregate_report_obj.get("scope_manifest", grid_summary_obj.get("scope_manifest", {})),
+        "formal_final_decision_metrics_presence": aggregate_report_obj.get(
+            "formal_final_decision_metrics_presence",
+            grid_summary_obj.get("formal_final_decision_metrics_presence", {}),
+        ),
+        "derived_system_union_metrics_presence": aggregate_report_obj.get(
+            "derived_system_union_metrics_presence",
+            grid_summary_obj.get("derived_system_union_metrics_presence", {}),
+        ),
         "system_final_metrics_presence": aggregate_report_obj.get("system_final_metrics_presence", grid_summary_obj.get("system_final_metrics_presence", {})),
+        "system_final_metrics_semantics": aggregate_report_obj.get(
+            "system_final_metrics_semantics",
+            grid_summary_obj.get("system_final_metrics_semantics", SYSTEM_FINAL_ALIAS_SEMANTICS),
+        ),
         "grid_summary": grid_summary_obj,
     }
     write_json_atomic(stage_manifest_path, stage_manifest)

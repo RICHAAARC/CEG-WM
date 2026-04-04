@@ -60,10 +60,13 @@ BLOCK_FREEZE = "BLOCK_FREEZE"
 SYSTEM_FINAL_SCOPE = "system_final"
 CONTENT_CHAIN_SCOPE = "content_chain"
 LF_CHANNEL_SCOPE = "lf_channel"
+FORMAL_FINAL_DECISION_METRIC_NAME = "formal_final_decision_metrics"
+DERIVED_SYSTEM_UNION_METRIC_NAME = "derived_system_union_metrics"
 SYSTEM_FINAL_METRIC_NAME = "system_final_metrics"
+SYSTEM_FINAL_METRIC_SEMANTICS = "deprecated_alias_of_derived_system_union_metrics"
 _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD = "auxiliary_analysis_runtime_executed"
 REQUIRED_STAGE_03_AUXILIARY_SCOPES = [CONTENT_CHAIN_SCOPE, LF_CHANNEL_SCOPE]
-SYSTEM_FINAL_PRIMARY_DRIVER_MODE = "system_final_only"
+SYSTEM_FINAL_PRIMARY_DRIVER_MODE = "formal_final_decision_only"
 FORMAL_SIGNOFF_PASS_STATUS = "passed"
 FORMAL_SIGNOFF_BLOCK_STATUS = "blocked"
 FORMAL_SUCCESS_STATUS_TOKENS = {"ok", "success", "passed"}
@@ -94,10 +97,14 @@ GRID_SUMMARY_REQUIRED_FIELDS = [
     "primary_evaluation_scope",
     "primary_metric_name",
     "primary_driver_mode",
+    "primary_status_source",
     "primary_summary_basis_scope",
     "primary_summary_basis_metric_name",
     "scope_manifest",
+    "formal_final_decision_metrics_presence",
+    "derived_system_union_metrics_presence",
     "system_final_metrics_presence",
+    "system_final_metrics_semantics",
     _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD,
 ]
 
@@ -106,6 +113,7 @@ AGGREGATE_REPORT_REQUIRED_FIELDS = [
     "primary_evaluation_scope",
     "primary_metric_name",
     "primary_driver_mode",
+    "primary_status_source",
     "primary_summary_basis_scope",
     "primary_summary_basis_metric_name",
     "scope_manifest",
@@ -117,7 +125,10 @@ AGGREGATE_REPORT_REQUIRED_FIELDS = [
     "policy_path",
     "anchors",
     "metrics_matrix",
+    "formal_final_decision_metrics_presence",
+    "derived_system_union_metrics_presence",
     "system_final_metrics_presence",
+    "system_final_metrics_semantics",
     _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD,
 ]
 
@@ -566,7 +577,12 @@ def _require_grid_summary_anchor_fields(
         None.
     """
     missing_fields: List[str] = []
-    dict_fields = {"scope_manifest", "system_final_metrics_presence"}
+    dict_fields = {
+        "scope_manifest",
+        "formal_final_decision_metrics_presence",
+        "derived_system_union_metrics_presence",
+        "system_final_metrics_presence",
+    }
     bool_fields = {_AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD}
     for field_name in GRID_SUMMARY_REQUIRED_FIELDS:
         field_value = payload.get(field_name)
@@ -1041,8 +1057,10 @@ def _validate_stage_03_primary_contract_payload(
     """
     功能：校验 stage 03 各主合同工件不再暴露 legacy scalar formal 顶层结构。
 
-    Validate that stage 03 contract payloads stay purely system_final-driven and
-    do not expose legacy scalar-formal top-level contract fields.
+    Validate that stage 03 contract payloads keep
+    formal_final_decision_metrics as the formal primary contract, retain
+    derived_system_union_metrics as the derived helper contract, and do not
+    expose legacy scalar-formal top-level contract fields.
 
     Args:
         payload_label: Stage 03 payload label.
@@ -1083,14 +1101,14 @@ def _validate_stage_03_primary_contract_payload(
             },
         )
 
-    if payload.get("primary_metric_name") != SYSTEM_FINAL_METRIC_NAME:
+    if payload.get("primary_metric_name") != FORMAL_FINAL_DECISION_METRIC_NAME:
         _append_blocking_reason(
             blocking_reasons,
             source="stage_03",
-            reason_code=f"stage_03.{payload_label}_primary_metric_not_system_final_metrics",
-            rule="stage 03 primary contract payloads must bind primary_metric_name to system_final_metrics",
-            impact="stage 03 primary contract no longer uses structured system_final metrics",
-            fix="regenerate stage 03 payloads with primary_metric_name=system_final_metrics",
+            reason_code=f"stage_03.{payload_label}_primary_metric_not_formal_final_decision_metrics",
+            rule="stage 03 primary contract payloads must bind primary_metric_name to formal_final_decision_metrics",
+            impact="stage 03 primary contract no longer uses formal final-decision metrics as the release anchor",
+            fix="regenerate stage 03 payloads with primary_metric_name=formal_final_decision_metrics",
             evidence={
                 "payload_label": payload_label,
                 "actual_primary_metric_name": payload.get("primary_metric_name"),
@@ -1101,24 +1119,24 @@ def _validate_stage_03_primary_contract_payload(
         _append_blocking_reason(
             blocking_reasons,
             source="stage_03",
-            reason_code=f"stage_03.{payload_label}_primary_driver_mode_not_system_final_only",
-            rule="stage 03 primary contract payloads must bind primary_driver_mode to system_final_only",
-            impact="stage 03 primary contract still allows an internal non-system-final driver path",
-            fix="regenerate stage 03 payloads with primary_driver_mode=system_final_only",
+            reason_code=f"stage_03.{payload_label}_primary_driver_mode_not_formal_final_decision_only",
+            rule="stage 03 primary contract payloads must bind primary_driver_mode to formal_final_decision_only",
+            impact="stage 03 primary contract still allows a non-formal-final-decision driver path",
+            fix="regenerate stage 03 payloads with primary_driver_mode=formal_final_decision_only",
             evidence={
                 "payload_label": payload_label,
                 "actual_primary_driver_mode": payload.get("primary_driver_mode"),
             },
         )
 
-    if payload.get("primary_status_source") != SYSTEM_FINAL_METRIC_NAME:
+    if payload.get("primary_status_source") != FORMAL_FINAL_DECISION_METRIC_NAME:
         _append_blocking_reason(
             blocking_reasons,
             source="stage_03",
-            reason_code=f"stage_03.{payload_label}_primary_status_source_not_system_final_metrics",
-            rule="stage 03 primary contract payloads must bind primary_status_source to system_final_metrics",
-            impact="stage 03 primary status can still be inferred from a non-system-final runtime path",
-            fix="regenerate stage 03 payloads with primary_status_source=system_final_metrics",
+            reason_code=f"stage_03.{payload_label}_primary_status_source_not_formal_final_decision_metrics",
+            rule="stage 03 primary contract payloads must bind primary_status_source to formal_final_decision_metrics",
+            impact="stage 03 primary status can still be inferred from a non-formal-final-decision runtime path",
+            fix="regenerate stage 03 payloads with primary_status_source=formal_final_decision_metrics",
             evidence={
                 "payload_label": payload_label,
                 "actual_primary_status_source": payload.get("primary_status_source"),
@@ -1139,17 +1157,31 @@ def _validate_stage_03_primary_contract_payload(
             },
         )
 
-    if payload.get("primary_summary_basis_metric_name") != SYSTEM_FINAL_METRIC_NAME:
+    if payload.get("primary_summary_basis_metric_name") != FORMAL_FINAL_DECISION_METRIC_NAME:
         _append_blocking_reason(
             blocking_reasons,
             source="stage_03",
-            reason_code=f"stage_03.{payload_label}_primary_summary_basis_metric_not_system_final_metrics",
-            rule="stage 03 primary contract payloads must bind primary_summary_basis_metric_name to system_final_metrics",
-            impact="stage 03 primary summary basis metric drifted away from system_final metrics",
-            fix="regenerate stage 03 payloads with primary_summary_basis_metric_name=system_final_metrics",
+            reason_code=f"stage_03.{payload_label}_primary_summary_basis_metric_not_formal_final_decision_metrics",
+            rule="stage 03 primary contract payloads must bind primary_summary_basis_metric_name to formal_final_decision_metrics",
+            impact="stage 03 primary summary basis metric drifted away from formal final-decision metrics",
+            fix="regenerate stage 03 payloads with primary_summary_basis_metric_name=formal_final_decision_metrics",
             evidence={
                 "payload_label": payload_label,
                 "actual_primary_summary_basis_metric_name": payload.get("primary_summary_basis_metric_name"),
+            },
+        )
+
+    if payload.get("system_final_metrics_semantics") != SYSTEM_FINAL_METRIC_SEMANTICS:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code=f"stage_03.{payload_label}_system_final_alias_semantics_invalid",
+            rule="stage 03 compatibility alias system_final_metrics must be marked as deprecated_alias_of_derived_system_union_metrics",
+            impact="stage 03 compatibility alias can still be misread as the formal primary metric",
+            fix="write system_final_metrics_semantics=deprecated_alias_of_derived_system_union_metrics in stage 03 primary payloads",
+            evidence={
+                "payload_label": payload_label,
+                "actual_system_final_metrics_semantics": payload.get("system_final_metrics_semantics"),
             },
         )
 
@@ -1183,7 +1215,9 @@ def _validate_stage_03_primary_contract_payload(
 
     auxiliary_scopes_raw = payload.get("auxiliary_scopes")
     auxiliary_scopes = cast(List[str], auxiliary_scopes_raw) if isinstance(auxiliary_scopes_raw, list) else []
-    missing_auxiliary_scopes = [scope_name for scope_name in REQUIRED_STAGE_03_AUXILIARY_SCOPES if scope_name not in auxiliary_scopes]
+    missing_auxiliary_scopes = [
+        scope_name for scope_name in REQUIRED_STAGE_03_AUXILIARY_SCOPES if scope_name not in auxiliary_scopes
+    ]
     if missing_auxiliary_scopes:
         _append_blocking_reason(
             blocking_reasons,
@@ -1247,6 +1281,23 @@ def _validate_stage_03_primary_contract_payload(
             },
         )
 
+    if (
+        scope_manifest.get("primary_metric_name") != FORMAL_FINAL_DECISION_METRIC_NAME
+        or scope_manifest.get("primary_summary_basis_metric_name") != FORMAL_FINAL_DECISION_METRIC_NAME
+    ):
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code=f"stage_03.{payload_label}_scope_manifest_primary_metric_binding_invalid",
+            rule="scope_manifest must bind both primary_metric_name and primary_summary_basis_metric_name to formal_final_decision_metrics",
+            impact="stage 03 primary summary is not semantically closed on formal final-decision metrics",
+            fix="set scope_manifest primary metric bindings to formal_final_decision_metrics",
+            evidence={
+                "primary_metric_name": scope_manifest.get("primary_metric_name"),
+                "primary_summary_basis_metric_name": scope_manifest.get("primary_summary_basis_metric_name"),
+            },
+        )
+
     nested_forbidden_fields = [
         field_path
         for field_path in _collect_nested_forbidden_field_paths(payload, sorted(FORBIDDEN_STAGE_03_PRIMARY_CONTRACT_FIELDS))
@@ -1273,10 +1324,12 @@ def _validate_stage_03_primary_scope_semantics(
     blocking_reasons: List[Dict[str, Any]],
 ) -> None:
     """
-    功能：校验 stage 03 是否真正以 system_final 作为主评估对象。
+    功能：校验 stage 03 是否真正以 formal_final_decision_metrics 作为正式主锚点，并保留 derived system union 作为辅助派生指标。
 
     Validate that the stage 03 package binds its primary evaluation semantics
-    to system_final rather than nominally renaming an LF-driven scalar path.
+    to formal_final_decision_metrics while keeping
+    derived_system_union_metrics as the derived helper contract rather than
+    promoting the deprecated system_final alias.
 
     Args:
         grid_summary: Parsed stage 03 grid summary.
@@ -1302,14 +1355,14 @@ def _validate_stage_03_primary_scope_semantics(
         )
 
     primary_metric_name = aggregate_report_obj.get("primary_metric_name")
-    if primary_metric_name != SYSTEM_FINAL_METRIC_NAME:
+    if primary_metric_name != FORMAL_FINAL_DECISION_METRIC_NAME:
         _append_blocking_reason(
             blocking_reasons,
             source="stage_03",
-            reason_code="stage_03.primary_metric_not_system_final_metrics",
-            rule="stage 03 aggregate_report.primary_metric_name must equal system_final_metrics",
-            impact="stage 03 primary summary is not anchored to structured system-final metrics",
-            fix="write primary_metric_name=system_final_metrics and bind summary generation to that structure",
+            reason_code="stage_03.primary_metric_not_formal_final_decision_metrics",
+            rule="stage 03 aggregate_report.primary_metric_name must equal formal_final_decision_metrics",
+            impact="stage 03 primary summary is not anchored to formal final-decision metrics",
+            fix="write primary_metric_name=formal_final_decision_metrics and bind summary generation to that structure",
             evidence={"actual_primary_metric_name": primary_metric_name},
         )
 
@@ -1318,22 +1371,22 @@ def _validate_stage_03_primary_scope_semantics(
         _append_blocking_reason(
             blocking_reasons,
             source="stage_03",
-            reason_code="stage_03.primary_driver_mode_not_system_final_only",
-            rule="stage 03 aggregate_report.primary_driver_mode must equal system_final_only",
-            impact="stage 03 primary summary may still be driven by an internal auxiliary scalar path",
-            fix="write primary_driver_mode=system_final_only and keep scalar evidence auxiliary-only",
+            reason_code="stage_03.primary_driver_mode_not_formal_final_decision_only",
+            rule="stage 03 aggregate_report.primary_driver_mode must equal formal_final_decision_only",
+            impact="stage 03 primary summary may still be driven by a non-formal-final-decision path",
+            fix="write primary_driver_mode=formal_final_decision_only and keep derived metrics auxiliary-only",
             evidence={"actual_primary_driver_mode": primary_driver_mode},
         )
 
     primary_status_source = aggregate_report_obj.get("primary_status_source")
-    if primary_status_source != SYSTEM_FINAL_METRIC_NAME:
+    if primary_status_source != FORMAL_FINAL_DECISION_METRIC_NAME:
         _append_blocking_reason(
             blocking_reasons,
             source="stage_03",
-            reason_code="stage_03.primary_status_source_not_system_final_metrics",
-            rule="stage 03 aggregate_report.primary_status_source must equal system_final_metrics",
-            impact="stage 03 primary row status may still be controlled by an auxiliary scalar branch",
-            fix="write primary_status_source=system_final_metrics and ensure row status closes on system_final_metrics",
+            reason_code="stage_03.primary_status_source_not_formal_final_decision_metrics",
+            rule="stage 03 aggregate_report.primary_status_source must equal formal_final_decision_metrics",
+            impact="stage 03 primary row status may still be controlled by a non-formal-final-decision branch",
+            fix="write primary_status_source=formal_final_decision_metrics and ensure row status closes on formal_final_decision_metrics",
             evidence={"actual_primary_status_source": primary_status_source},
         )
 
@@ -1350,14 +1403,14 @@ def _validate_stage_03_primary_scope_semantics(
         )
 
     primary_summary_basis_metric_name = aggregate_report_obj.get("primary_summary_basis_metric_name")
-    if primary_summary_basis_metric_name != SYSTEM_FINAL_METRIC_NAME:
+    if primary_summary_basis_metric_name != FORMAL_FINAL_DECISION_METRIC_NAME:
         _append_blocking_reason(
             blocking_reasons,
             source="stage_03",
-            reason_code="stage_03.primary_summary_basis_metric_not_system_final_metrics",
-            rule="stage 03 aggregate_report.primary_summary_basis_metric_name must equal system_final_metrics",
-            impact="stage 03 primary summary basis metric drifted away from structured system_final metrics",
-            fix="write primary_summary_basis_metric_name=system_final_metrics into aggregate_report and grid_summary",
+            reason_code="stage_03.primary_summary_basis_metric_not_formal_final_decision_metrics",
+            rule="stage 03 aggregate_report.primary_summary_basis_metric_name must equal formal_final_decision_metrics",
+            impact="stage 03 primary summary basis metric drifted away from formal final-decision metrics",
+            fix="write primary_summary_basis_metric_name=formal_final_decision_metrics into aggregate_report and grid_summary",
             evidence={"actual_primary_summary_basis_metric_name": primary_summary_basis_metric_name},
         )
 
@@ -1389,14 +1442,17 @@ def _validate_stage_03_primary_scope_semantics(
             },
         )
 
-    if scope_manifest.get("primary_metric_name") != SYSTEM_FINAL_METRIC_NAME or scope_manifest.get("primary_summary_basis_metric_name") != SYSTEM_FINAL_METRIC_NAME:
+    if (
+        scope_manifest.get("primary_metric_name") != FORMAL_FINAL_DECISION_METRIC_NAME
+        or scope_manifest.get("primary_summary_basis_metric_name") != FORMAL_FINAL_DECISION_METRIC_NAME
+    ):
         _append_blocking_reason(
             blocking_reasons,
             source="stage_03",
             reason_code="stage_03.scope_manifest_primary_metric_binding_invalid",
-            rule="scope_manifest must bind both primary_metric_name and primary_summary_basis_metric_name to system_final_metrics",
-            impact="stage 03 primary summary is not semantically closed on system_final_metrics",
-            fix="set scope_manifest primary metric bindings to system_final_metrics",
+            rule="scope_manifest must bind both primary_metric_name and primary_summary_basis_metric_name to formal_final_decision_metrics",
+            impact="stage 03 primary summary is not semantically closed on formal final-decision metrics",
+            fix="set scope_manifest primary metric bindings to formal_final_decision_metrics",
             evidence={
                 "primary_metric_name": scope_manifest.get("primary_metric_name"),
                 "primary_summary_basis_metric_name": scope_manifest.get("primary_summary_basis_metric_name"),
@@ -1417,20 +1473,87 @@ def _validate_stage_03_primary_scope_semantics(
             evidence={"auxiliary_scopes": auxiliary_scopes, "missing_auxiliary_scopes": missing_auxiliary_scopes},
         )
 
-    presence_raw = aggregate_report_obj.get("system_final_metrics_presence")
-    presence = cast(Dict[str, Any], presence_raw) if isinstance(presence_raw, dict) else {}
+    system_final_metrics_semantics = aggregate_report_obj.get("system_final_metrics_semantics")
+    if system_final_metrics_semantics != SYSTEM_FINAL_METRIC_SEMANTICS:
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code="stage_03.system_final_alias_semantics_invalid",
+            rule="stage 03 aggregate_report must explicitly mark system_final_metrics as deprecated_alias_of_derived_system_union_metrics",
+            impact="stage 03 compatibility alias can still be misread as the formal primary metric",
+            fix="write system_final_metrics_semantics=deprecated_alias_of_derived_system_union_metrics into aggregate_report and grid_summary",
+            evidence={"actual_system_final_metrics_semantics": system_final_metrics_semantics},
+        )
+
     success_count = aggregate_report_obj.get("success_count") if isinstance(aggregate_report_obj.get("success_count"), int) else None
-    ok_rows_with_system_final_metrics = presence.get("ok_rows_with_system_final_metrics") if isinstance(presence.get("ok_rows_with_system_final_metrics"), int) else None
+
+    formal_presence_raw = aggregate_report_obj.get("formal_final_decision_metrics_presence")
+    formal_presence = cast(Dict[str, Any], formal_presence_raw) if isinstance(formal_presence_raw, dict) else {}
+    ok_rows_with_formal_final_decision_metrics = (
+        formal_presence.get("ok_rows_with_formal_final_decision_metrics")
+        if isinstance(formal_presence.get("ok_rows_with_formal_final_decision_metrics"), int)
+        else None
+    )
+    if (
+        ok_rows_with_formal_final_decision_metrics is None
+        or success_count is None
+        or ok_rows_with_formal_final_decision_metrics < success_count
+    ):
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code="stage_03.formal_final_decision_metrics_missing",
+            rule="every successful stage 03 matrix row must carry formal_final_decision_metrics",
+            impact="stage 03 package cannot prove that the formal primary summary actually came from formal final-decision outputs",
+            fix="ensure every successful row writes a dict-valued formal_final_decision_metrics entry and refresh formal_final_decision_metrics_presence",
+            evidence={
+                "formal_final_decision_metrics_presence": formal_presence,
+                "success_count": success_count,
+            },
+        )
+
+    derived_presence_raw = aggregate_report_obj.get("derived_system_union_metrics_presence")
+    derived_presence = cast(Dict[str, Any], derived_presence_raw) if isinstance(derived_presence_raw, dict) else {}
+    ok_rows_with_derived_system_union_metrics = (
+        derived_presence.get("ok_rows_with_derived_system_union_metrics")
+        if isinstance(derived_presence.get("ok_rows_with_derived_system_union_metrics"), int)
+        else None
+    )
+    if (
+        ok_rows_with_derived_system_union_metrics is None
+        or success_count is None
+        or ok_rows_with_derived_system_union_metrics < success_count
+    ):
+        _append_blocking_reason(
+            blocking_reasons,
+            source="stage_03",
+            reason_code="stage_03.derived_system_union_metrics_missing",
+            rule="every successful stage 03 matrix row must carry derived_system_union_metrics as the derived helper metric",
+            impact="stage 03 package cannot prove that the derived system-union helper metrics are available for signoff review",
+            fix="ensure every successful row writes a dict-valued derived_system_union_metrics entry and refresh derived_system_union_metrics_presence",
+            evidence={
+                "derived_system_union_metrics_presence": derived_presence,
+                "success_count": success_count,
+            },
+        )
+
+    alias_presence_raw = aggregate_report_obj.get("system_final_metrics_presence")
+    alias_presence = cast(Dict[str, Any], alias_presence_raw) if isinstance(alias_presence_raw, dict) else {}
+    ok_rows_with_system_final_metrics = (
+        alias_presence.get("ok_rows_with_system_final_metrics")
+        if isinstance(alias_presence.get("ok_rows_with_system_final_metrics"), int)
+        else None
+    )
     if ok_rows_with_system_final_metrics is None or success_count is None or ok_rows_with_system_final_metrics < success_count:
         _append_blocking_reason(
             blocking_reasons,
             source="stage_03",
             reason_code="stage_03.system_final_metrics_missing",
-            rule="every successful stage 03 matrix row must carry system_final_metrics",
-            impact="stage 03 package cannot prove that the primary summary actually came from system-final outputs",
-            fix="ensure every successful row writes a dict-valued system_final_metrics entry and refresh system_final_metrics_presence",
+            rule="every successful stage 03 matrix row must carry system_final_metrics as the deprecated alias of derived_system_union_metrics",
+            impact="stage 03 package cannot prove that the compatibility alias is available and explicitly subordinate to derived_system_union_metrics",
+            fix="ensure every successful row writes a dict-valued system_final_metrics alias entry and refresh system_final_metrics_presence",
             evidence={
-                "system_final_metrics_presence": presence,
+                "system_final_metrics_presence": alias_presence,
                 "success_count": success_count,
             },
         )
@@ -1460,23 +1583,29 @@ def _validate_stage_03_primary_scope_semantics(
             evidence={"metrics_matrix_length": len(metrics_rows)},
         )
     else:
+        missing_formal_rows: List[Any] = []
+        missing_derived_rows: List[Any] = []
         missing_auxiliary_rows: List[Any] = []
         missing_system_final_rows: List[Any] = []
         for row in ok_rows:
+            if not isinstance(row.get(FORMAL_FINAL_DECISION_METRIC_NAME), dict):
+                missing_formal_rows.append(row.get("grid_item_digest"))
+            if not isinstance(row.get(DERIVED_SYSTEM_UNION_METRIC_NAME), dict):
+                missing_derived_rows.append(row.get("grid_item_digest"))
             if not isinstance(row.get(SYSTEM_FINAL_METRIC_NAME), dict):
                 missing_system_final_rows.append(row.get("grid_item_digest"))
             auxiliary_metrics_raw = row.get("auxiliary_scope_metrics")
             auxiliary_metrics = cast(Dict[str, Any], auxiliary_metrics_raw) if isinstance(auxiliary_metrics_raw, dict) else {}
             if any(scope_name not in auxiliary_metrics for scope_name in REQUIRED_STAGE_03_AUXILIARY_SCOPES):
                 missing_auxiliary_rows.append(row.get("grid_item_digest"))
-            if row.get("evaluation_scope") != SYSTEM_FINAL_SCOPE or row.get("primary_metric_name") != SYSTEM_FINAL_METRIC_NAME:
+            if row.get("evaluation_scope") != SYSTEM_FINAL_SCOPE or row.get("primary_metric_name") != FORMAL_FINAL_DECISION_METRIC_NAME:
                 _append_blocking_reason(
                     blocking_reasons,
                     source="stage_03",
                     reason_code="stage_03.metrics_matrix_primary_binding_invalid",
-                    rule="successful metrics_matrix rows must remain bound to system_final and system_final_metrics",
-                    impact="stage 03 row-level primary evidence still drifts away from the system-level final object",
-                    fix="regenerate metrics_matrix rows so evaluation_scope=system_final and primary_metric_name=system_final_metrics",
+                    rule="successful metrics_matrix rows must remain bound to system_final and formal_final_decision_metrics",
+                    impact="stage 03 row-level primary evidence still drifts away from the formal final-decision object",
+                    fix="regenerate metrics_matrix rows so evaluation_scope=system_final and primary_metric_name=formal_final_decision_metrics",
                     evidence={
                         "grid_item_digest": row.get("grid_item_digest"),
                         "evaluation_scope": row.get("evaluation_scope"),
@@ -1488,26 +1617,51 @@ def _validate_stage_03_primary_scope_semantics(
                     blocking_reasons,
                     source="stage_03",
                     reason_code="stage_03.metrics_matrix_primary_driver_mode_invalid",
-                    rule="successful metrics_matrix rows must keep primary_driver_mode equal to system_final_only",
-                    impact="stage 03 row-level primary evidence still allows an auxiliary scalar driver to leak into the main path",
-                    fix="regenerate metrics_matrix rows so primary_driver_mode=system_final_only on every successful row",
+                    rule="successful metrics_matrix rows must keep primary_driver_mode equal to formal_final_decision_only",
+                    impact="stage 03 row-level primary evidence still allows a non-formal-final-decision driver to leak into the main path",
+                    fix="regenerate metrics_matrix rows so primary_driver_mode=formal_final_decision_only on every successful row",
                     evidence={
                         "grid_item_digest": row.get("grid_item_digest"),
                         "primary_driver_mode": row.get("primary_driver_mode"),
                     },
                 )
-            if row.get("primary_status_source") != SYSTEM_FINAL_METRIC_NAME:
+            if row.get("primary_status_source") != FORMAL_FINAL_DECISION_METRIC_NAME:
                 _append_blocking_reason(
                     blocking_reasons,
                     source="stage_03",
                     reason_code="stage_03.metrics_matrix_primary_status_source_invalid",
-                    rule="successful metrics_matrix rows must declare system_final_metrics as the sole primary status source",
-                    impact="stage 03 row-level success can still be inferred from an auxiliary scalar-first path",
-                    fix="regenerate metrics_matrix rows so primary_status_source=system_final_metrics on every successful row",
+                    rule="successful metrics_matrix rows must declare formal_final_decision_metrics as the sole primary status source",
+                    impact="stage 03 row-level success can still be inferred from a non-formal-final-decision path",
+                    fix="regenerate metrics_matrix rows so primary_status_source=formal_final_decision_metrics on every successful row",
                     evidence={
                         "grid_item_digest": row.get("grid_item_digest"),
                         "primary_status_source": row.get("primary_status_source"),
                     },
+                )
+            if row.get("system_final_metrics_semantics") != SYSTEM_FINAL_METRIC_SEMANTICS:
+                _append_blocking_reason(
+                    blocking_reasons,
+                    source="stage_03",
+                    reason_code="stage_03.metrics_matrix_system_final_alias_semantics_invalid",
+                    rule="successful metrics_matrix rows must mark system_final_metrics as deprecated_alias_of_derived_system_union_metrics",
+                    impact="stage 03 compatibility alias can still be misread as the formal primary metric",
+                    fix="write system_final_metrics_semantics=deprecated_alias_of_derived_system_union_metrics on every successful row",
+                    evidence={
+                        "grid_item_digest": row.get("grid_item_digest"),
+                        "system_final_metrics_semantics": row.get("system_final_metrics_semantics"),
+                    },
+                )
+            derived_metrics = row.get(DERIVED_SYSTEM_UNION_METRIC_NAME)
+            alias_metrics = row.get(SYSTEM_FINAL_METRIC_NAME)
+            if isinstance(derived_metrics, dict) and isinstance(alias_metrics, dict) and alias_metrics != derived_metrics:
+                _append_blocking_reason(
+                    blocking_reasons,
+                    source="stage_03",
+                    reason_code="stage_03.metrics_matrix_system_final_alias_mismatch",
+                    rule="successful metrics_matrix rows must keep system_final_metrics strictly equal to derived_system_union_metrics when the compatibility alias is retained",
+                    impact="stage 03 compatibility alias drifted away from the derived system-union metric object",
+                    fix="rewrite system_final_metrics as an exact alias of derived_system_union_metrics",
+                    evidence={"grid_item_digest": row.get("grid_item_digest")},
                 )
             row_auxiliary_runtime_executed = row.get(_AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD)
             if not isinstance(row_auxiliary_runtime_executed, bool):
@@ -1533,14 +1687,34 @@ def _validate_stage_03_primary_scope_semantics(
                         _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD: row_auxiliary_runtime_executed,
                     },
                 )
+        if missing_formal_rows:
+            _append_blocking_reason(
+                blocking_reasons,
+                source="stage_03",
+                reason_code="stage_03.metrics_matrix_formal_final_decision_rows_missing",
+                rule="successful metrics_matrix rows must expose dict-valued formal_final_decision_metrics",
+                impact="stage 03 formal primary metric object is missing on successful rows",
+                fix="write dict-valued formal_final_decision_metrics for each successful metrics_matrix row",
+                evidence={"missing_rows": missing_formal_rows},
+            )
+        if missing_derived_rows:
+            _append_blocking_reason(
+                blocking_reasons,
+                source="stage_03",
+                reason_code="stage_03.metrics_matrix_derived_system_union_rows_missing",
+                rule="successful metrics_matrix rows must expose dict-valued derived_system_union_metrics",
+                impact="stage 03 derived system-union helper metric object is missing on successful rows",
+                fix="write dict-valued derived_system_union_metrics for each successful metrics_matrix row",
+                evidence={"missing_rows": missing_derived_rows},
+            )
         if missing_system_final_rows:
             _append_blocking_reason(
                 blocking_reasons,
                 source="stage_03",
                 reason_code="stage_03.metrics_matrix_system_final_rows_missing",
-                rule="successful metrics_matrix rows must expose dict-valued system_final_metrics",
-                impact="stage 03 remains in a nominal system_final state without row-level primary evidence",
-                fix="write dict-valued system_final_metrics for each successful metrics_matrix row",
+                rule="successful metrics_matrix rows must expose dict-valued system_final_metrics as the deprecated alias of derived_system_union_metrics",
+                impact="stage 03 compatibility alias is missing on successful rows",
+                fix="write dict-valued system_final_metrics alias for each successful metrics_matrix row",
                 evidence={"missing_rows": missing_system_final_rows},
             )
         if missing_auxiliary_rows:
@@ -1563,7 +1737,10 @@ def _validate_stage_03_primary_scope_semantics(
         "primary_summary_basis_metric_name",
         _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD,
         "scope_manifest",
+        "formal_final_decision_metrics_presence",
+        "derived_system_union_metrics_presence",
         "system_final_metrics_presence",
+        "system_final_metrics_semantics",
     ]:
         if grid_summary_obj.get(field_name) != aggregate_report_obj.get(field_name):
             _append_blocking_reason(
@@ -1572,7 +1749,7 @@ def _validate_stage_03_primary_scope_semantics(
                 reason_code="stage_03.grid_summary_scope_mismatch",
                 rule="grid_summary must mirror aggregate_report primary scope fields for release signoff",
                 impact="stage 03 package exposes conflicting primary-scope semantics across artifacts",
-                fix="synchronize grid_summary with aggregate_report for primary, primary_driver_mode, primary-summary-basis, scope_manifest, and system_final_metrics_presence fields",
+                fix="synchronize grid_summary with aggregate_report for formal primary fields, derived presence fields, scope_manifest, and compatibility alias semantics",
                 evidence={
                     "field_name": field_name,
                     "grid_summary_value": grid_summary_obj.get(field_name),

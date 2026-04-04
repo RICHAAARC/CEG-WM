@@ -30,6 +30,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT_PATH = REPO_ROOT / "scripts" / "04_Release_And_Signoff.py"
 DEFAULT_CONFIG_PATH = REPO_ROOT / "configs" / "default.yaml"
 
+FORMAL_FINAL_DECISION_METRIC_NAME = "formal_final_decision_metrics"
+DERIVED_SYSTEM_UNION_METRIC_NAME = "derived_system_union_metrics"
+SYSTEM_FINAL_METRIC_NAME = "system_final_metrics"
+SYSTEM_FINAL_METRIC_SEMANTICS = "deprecated_alias_of_derived_system_union_metrics"
+FORMAL_PRIMARY_DRIVER_MODE = "formal_final_decision_only"
+
 
 def _load_stage_04_module() -> Any:
     """
@@ -413,10 +419,13 @@ def _build_stage_03_package(
     *,
     mismatch_lineage: bool = False,
     primary_scope: str = "system_final",
-    primary_driver_mode: str = "system_final_only",
-    primary_status_source: str = "system_final_metrics",
+    primary_metric_name: str = FORMAL_FINAL_DECISION_METRIC_NAME,
+    primary_driver_mode: str = FORMAL_PRIMARY_DRIVER_MODE,
+    primary_status_source: str = FORMAL_FINAL_DECISION_METRIC_NAME,
     primary_summary_basis_scope: str = "system_final",
-    primary_summary_basis_metric_name: str = "system_final_metrics",
+    primary_summary_basis_metric_name: str = FORMAL_FINAL_DECISION_METRIC_NAME,
+    include_formal_final_decision_metrics: bool = True,
+    include_derived_system_union_metrics: bool = True,
     include_system_final_metrics: bool = True,
     include_auxiliary_scopes: bool = True,
     auxiliary_analysis_runtime_executed: bool = False,
@@ -450,6 +459,16 @@ def _build_stage_03_package(
         lineage_package_manifest["stage_run_id"] = source_stage_run_id
         lineage_package_manifest["package_sha256"] = source_package_sha256
     auxiliary_scopes = ["content_chain", "lf_channel"] if include_auxiliary_scopes else ["lf_channel"]
+    formal_final_decision_metrics_presence = {
+        "rows_with_formal_final_decision_metrics": 1 if include_formal_final_decision_metrics else 0,
+        "ok_rows_with_formal_final_decision_metrics": 1 if include_formal_final_decision_metrics else 0,
+        "rows_total": 1,
+    }
+    derived_system_union_metrics_presence = {
+        "rows_with_derived_system_union_metrics": 1 if include_derived_system_union_metrics else 0,
+        "ok_rows_with_derived_system_union_metrics": 1 if include_derived_system_union_metrics else 0,
+        "rows_total": 1,
+    }
     system_final_metrics_presence = {
         "rows_with_system_final_metrics": 1 if include_system_final_metrics else 0,
         "ok_rows_with_system_final_metrics": 1 if include_system_final_metrics else 0,
@@ -457,7 +476,7 @@ def _build_stage_03_package(
     }
     scope_manifest: Dict[str, Any] = {
         "primary_scope": primary_scope,
-        "primary_metric_name": "system_final_metrics",
+        "primary_metric_name": primary_metric_name,
         "primary_summary_basis_scope": primary_summary_basis_scope,
         "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
         "auxiliary_scopes": auxiliary_scopes,
@@ -494,7 +513,7 @@ def _build_stage_03_package(
         "thresholds_path": "/drive/runs/03/global_calibrate/artifacts/thresholds/thresholds_artifact.json",
         "threshold_metadata_artifact_path": "/drive/runs/03/global_calibrate/artifacts/thresholds/threshold_metadata_artifact.json",
         "primary_evaluation_scope": primary_scope,
-        "primary_metric_name": "system_final_metrics",
+        "primary_metric_name": primary_metric_name,
         "primary_driver_mode": primary_driver_mode,
         "primary_status_source": primary_status_source,
         "primary_summary_basis_scope": primary_summary_basis_scope,
@@ -502,7 +521,10 @@ def _build_stage_03_package(
         "auxiliary_scopes": auxiliary_scopes,
         "auxiliary_analysis_runtime_executed": auxiliary_analysis_runtime_executed,
         "scope_manifest": scope_manifest,
+        "formal_final_decision_metrics_presence": formal_final_decision_metrics_presence,
+        "derived_system_union_metrics_presence": derived_system_union_metrics_presence,
         "system_final_metrics_presence": system_final_metrics_presence,
+        "system_final_metrics_semantics": SYSTEM_FINAL_METRIC_SEMANTICS,
     }
     if include_legacy_scalar_contract:
         stage_manifest["scalar_formal_scope"] = legacy_scalar_formal_scope
@@ -511,7 +533,7 @@ def _build_stage_03_package(
     anchor_row = {
         "grid_item_digest": "grid01",
         "evaluation_scope": primary_scope,
-        "primary_metric_name": "system_final_metrics",
+        "primary_metric_name": primary_metric_name,
         "primary_summary_basis_scope": primary_summary_basis_scope,
         "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
         "cfg_digest": "cfg03",
@@ -530,9 +552,10 @@ def _build_stage_03_package(
         "grid_item_digest": "grid01",
         "status": "ok",
         "evaluation_scope": primary_scope,
-        "primary_metric_name": "system_final_metrics",
+        "primary_metric_name": primary_metric_name,
         "primary_driver_mode": primary_driver_mode,
         "primary_status_source": primary_status_source,
+        "system_final_metrics_semantics": SYSTEM_FINAL_METRIC_SEMANTICS,
         "auxiliary_analysis_runtime_executed": auxiliary_analysis_runtime_executed,
         "primary_summary_basis_scope": primary_summary_basis_scope,
         "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
@@ -541,8 +564,21 @@ def _build_stage_03_package(
             "lf_channel": {"metric_name": "lf_channel_score", "available": True},
         },
     }
+    if include_formal_final_decision_metrics:
+        metrics_row[FORMAL_FINAL_DECISION_METRIC_NAME] = {
+            "scope": "system_final",
+            "decision_status": "accepted",
+            "formal_pass": True,
+        }
+    if include_derived_system_union_metrics:
+        metrics_row[DERIVED_SYSTEM_UNION_METRIC_NAME] = {
+            "scope": "system_final",
+            "system_tpr": 1.0,
+            "system_fpr": 0.0,
+        }
     if include_system_final_metrics:
-        metrics_row["system_final_metrics"] = {
+        derived_alias = metrics_row.get(DERIVED_SYSTEM_UNION_METRIC_NAME)
+        metrics_row[SYSTEM_FINAL_METRIC_NAME] = dict(derived_alias) if isinstance(derived_alias, dict) else {
             "scope": "system_final",
             "system_tpr": 1.0,
             "system_fpr": 0.0,
@@ -554,9 +590,10 @@ def _build_stage_03_package(
         "evaluation_scope": primary_scope,
         "auxiliary_scopes": auxiliary_scopes,
         "scope_manifest": scope_manifest,
-        "primary_metric_name": "system_final_metrics",
+        "primary_metric_name": primary_metric_name,
         "primary_driver_mode": primary_driver_mode,
         "primary_status_source": primary_status_source,
+        "system_final_metrics_semantics": SYSTEM_FINAL_METRIC_SEMANTICS,
         "auxiliary_analysis_runtime_executed": auxiliary_analysis_runtime_executed,
         "primary_summary_basis_scope": primary_summary_basis_scope,
         "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
@@ -571,7 +608,9 @@ def _build_stage_03_package(
         "impl_digest": "impl03",
         "fusion_rule_version": "fusion_v1",
         "metrics": {
-            "system_final_metrics": metrics_row.get("system_final_metrics"),
+            FORMAL_FINAL_DECISION_METRIC_NAME: metrics_row.get(FORMAL_FINAL_DECISION_METRIC_NAME),
+            DERIVED_SYSTEM_UNION_METRIC_NAME: metrics_row.get(DERIVED_SYSTEM_UNION_METRIC_NAME),
+            SYSTEM_FINAL_METRIC_NAME: metrics_row.get(SYSTEM_FINAL_METRIC_NAME),
             "auxiliary_scope_metrics": metrics_row["auxiliary_scope_metrics"],
         },
     }
@@ -591,7 +630,7 @@ def _build_stage_03_package(
             "fusion_rule_version": "fusion_v1",
             "policy_path": "content_np_geo_rescue",
             "primary_evaluation_scope": primary_scope,
-            "primary_metric_name": "system_final_metrics",
+            "primary_metric_name": primary_metric_name,
             "primary_driver_mode": primary_driver_mode,
             "primary_status_source": primary_status_source,
             "auxiliary_analysis_runtime_executed": auxiliary_analysis_runtime_executed,
@@ -599,14 +638,17 @@ def _build_stage_03_package(
             "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
             "auxiliary_scopes": auxiliary_scopes,
             "scope_manifest": scope_manifest,
+            "formal_final_decision_metrics_presence": formal_final_decision_metrics_presence,
+            "derived_system_union_metrics_presence": derived_system_union_metrics_presence,
             "system_final_metrics_presence": system_final_metrics_presence,
+            "system_final_metrics_semantics": SYSTEM_FINAL_METRIC_SEMANTICS,
             "results": [grid_result_row],
         },
         "artifacts/grid_manifest.json": {"grid_manifest_digest": "grid_manifest_03"},
         "artifacts/aggregate_report.json": {
             "aggregate_report_version": "aggregate_v1",
             "primary_evaluation_scope": primary_scope,
-            "primary_metric_name": "system_final_metrics",
+            "primary_metric_name": primary_metric_name,
             "primary_driver_mode": primary_driver_mode,
             "primary_status_source": primary_status_source,
             "auxiliary_analysis_runtime_executed": auxiliary_analysis_runtime_executed,
@@ -622,14 +664,17 @@ def _build_stage_03_package(
             "policy_path": "content_np_geo_rescue",
             "anchors": [anchor_row],
             "metrics_matrix": [metrics_row],
+            "formal_final_decision_metrics_presence": formal_final_decision_metrics_presence,
+            "derived_system_union_metrics_presence": derived_system_union_metrics_presence,
             "system_final_metrics_presence": system_final_metrics_presence,
+            "system_final_metrics_semantics": SYSTEM_FINAL_METRIC_SEMANTICS,
         },
         "artifacts/workflow_summary.json": {
             "stage_name": "03_Experiment_Matrix_Full",
             "stage_run_id": stage_run_id,
             "status": "ok",
             "primary_evaluation_scope": primary_scope,
-            "primary_metric_name": "system_final_metrics",
+            "primary_metric_name": primary_metric_name,
             "primary_driver_mode": primary_driver_mode,
             "primary_status_source": primary_status_source,
             "auxiliary_analysis_runtime_executed": auxiliary_analysis_runtime_executed,
@@ -637,7 +682,10 @@ def _build_stage_03_package(
             "primary_summary_basis_metric_name": primary_summary_basis_metric_name,
             "auxiliary_scopes": auxiliary_scopes,
             "scope_manifest": scope_manifest,
+            "formal_final_decision_metrics_presence": formal_final_decision_metrics_presence,
+            "derived_system_union_metrics_presence": derived_system_union_metrics_presence,
             "system_final_metrics_presence": system_final_metrics_presence,
+            "system_final_metrics_semantics": SYSTEM_FINAL_METRIC_SEMANTICS,
         },
         "artifacts/run_closure.json": {"status": {"ok": True, "reason": "ok"}},
         "lineage/source_stage_manifest.json": lineage_stage_manifest,
@@ -1043,12 +1091,53 @@ def test_stage_04_blocks_when_stage_03_primary_scope_is_not_system_final(tmp_pat
     assert "stage_03.primary_scope_not_system_final" in reason_codes
 
 
-def test_stage_04_blocks_when_stage_03_primary_driver_mode_is_not_system_final_only(tmp_path: Path) -> None:
+def test_stage_04_blocks_when_stage_03_primary_metric_is_legacy_system_final_alias(tmp_path: Path) -> None:
     """
-    功能：验证 stage 03 若主驱动模式不是 system_final_only，则必须 BLOCK_FREEZE。
+    功能：验证 stage 03 若仍把 system_final_metrics 当作 formal 主指标，则必须 BLOCK_FREEZE。
+
+    Verify that stage 04 blocks freeze when stage 03 still promotes the
+    deprecated system_final_metrics alias as the formal primary metric.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    module = _load_stage_04_module()
+    drive_project_root = tmp_path / "drive_project_root"
+    stage_01_info = _build_stage_01_package(tmp_path / "case_primary_metric_legacy_alias")
+    stage_02_info = _build_stage_02_package(tmp_path / "case_primary_metric_legacy_alias", stage_01_info)
+    stage_03_info = _build_stage_03_package(
+        tmp_path / "case_primary_metric_legacy_alias",
+        stage_01_info,
+        primary_metric_name=SYSTEM_FINAL_METRIC_NAME,
+    )
+
+    summary = module.run_stage_04(
+        drive_project_root=drive_project_root,
+        stage_01_package_path=stage_01_info["package_path"],
+        stage_02_package_path=stage_02_info["package_path"],
+        stage_03_package_path=stage_03_info["package_path"],
+        config_path=DEFAULT_CONFIG_PATH,
+        notebook_name="04_Release_And_Signoff",
+        stage_run_id="stage04_primary_metric_legacy_alias",
+        require_stage_02=True,
+        require_stage_03=True,
+    )
+
+    signoff_report = json.loads(Path(summary["signoff_report_path"]).read_text(encoding="utf-8"))
+    assert signoff_report["decision"] == "BLOCK_FREEZE"
+    reason_codes = {item["reason_code"] for item in signoff_report["blocking_reasons"]}
+    assert "stage_03.primary_metric_not_formal_final_decision_metrics" in reason_codes
+
+
+def test_stage_04_blocks_when_stage_03_primary_driver_mode_is_not_formal_final_decision_only(tmp_path: Path) -> None:
+    """
+    功能：验证 stage 03 若主驱动模式不是 formal_final_decision_only，则必须 BLOCK_FREEZE。
 
     Verify that stage 04 blocks freeze when stage 03 primary_driver_mode
-    drifts away from system_final_only.
+    drifts away from formal_final_decision_only.
 
     Args:
         tmp_path: Pytest temporary directory.
@@ -1081,7 +1170,7 @@ def test_stage_04_blocks_when_stage_03_primary_driver_mode_is_not_system_final_o
     signoff_report = json.loads(Path(summary["signoff_report_path"]).read_text(encoding="utf-8"))
     assert signoff_report["decision"] == "BLOCK_FREEZE"
     reason_codes = {item["reason_code"] for item in signoff_report["blocking_reasons"]}
-    assert "stage_03.primary_driver_mode_not_system_final_only" in reason_codes
+    assert "stage_03.primary_driver_mode_not_formal_final_decision_only" in reason_codes
 
 
 def test_stage_04_blocks_when_stage_03_lacks_system_final_metrics(tmp_path: Path) -> None:
@@ -1207,9 +1296,9 @@ def test_stage_04_blocks_when_stage_03_internal_scalar_primary_driver_residual_e
     assert "stage_03.aggregate_report_internal_scalar_primary_driver_residual" in reason_codes
 
 
-def test_stage_04_blocks_when_stage_03_primary_status_source_is_not_system_final_metrics(tmp_path: Path) -> None:
+def test_stage_04_blocks_when_stage_03_primary_status_source_is_not_formal_final_decision_metrics(tmp_path: Path) -> None:
     """
-    功能：验证即使没有显式 forbidden scalar 字段，只要主状态来源不是 system_final_metrics 也必须 BLOCK_FREEZE。
+    功能：验证即使没有显式 forbidden scalar 字段，只要主状态来源不是 formal_final_decision_metrics 也必须 BLOCK_FREEZE。
 
     Verify that stage 04 blocks freeze when stage 03 still exposes a scalar-first
     primary status source even without legacy scalar field names.
@@ -1245,7 +1334,7 @@ def test_stage_04_blocks_when_stage_03_primary_status_source_is_not_system_final
     signoff_report = json.loads(Path(summary["signoff_report_path"]).read_text(encoding="utf-8"))
     assert signoff_report["decision"] == "BLOCK_FREEZE"
     reason_codes = {item["reason_code"] for item in signoff_report["blocking_reasons"]}
-    assert "stage_03.primary_status_source_not_system_final_metrics" in reason_codes
+    assert "stage_03.primary_status_source_not_formal_final_decision_metrics" in reason_codes
 
 
 def test_stage_04_blocks_when_stage_03_auxiliary_runtime_was_executed(tmp_path: Path) -> None:
