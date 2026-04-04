@@ -14,6 +14,7 @@ import yaml
 from main.evaluation import experiment_matrix
 from main.evaluation import metrics as eval_metrics
 from main.evaluation import workflow_inputs
+from main.watermarking.detect import orchestrator as detect_orchestrator
 
 
 FORMAL_PRIMARY_METRIC_NAME = "formal_final_decision_metrics"
@@ -89,6 +90,95 @@ def test_canonical_score_aliases_are_preferred_over_legacy_detect_helper() -> No
         }
     }
     assert workflow_inputs._resolve_content_score_source(diagnostic_only_record) == (None, None)
+
+
+def test_calibration_accepts_strict_clean_negative_formal_null_scores() -> None:
+    """
+    功能：验证 calibration null 分布会接纳 strict clean_negative 的 formal null 0.0 分数。
+
+    Validate that calibration null-distribution loading accepts the strict
+    clean-negative formal-null score mapping.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    strict_clean_negative_record = {
+        "label": False,
+        "sample_role": "clean_negative",
+        "plan_digest": "runtime-observed-plan",
+        "basis_digest": "runtime-observed-basis",
+        "plan_input_digest": "runtime-observed-plan-input",
+        "plan_input_schema_version": "v2",
+        "subspace_planner_impl_identity": {
+            "impl_id": "subspace_planner",
+            "impl_version": "v2",
+        },
+        "subspace_plan": {
+            "planner_input_digest": "runtime-observed-plan-input",
+            "planner_impl_identity": {
+                "impl_id": "subspace_planner",
+                "impl_version": "v2",
+            },
+            "rank": 128,
+        },
+        "content_evidence_payload": {
+            "status": "absent",
+            "content_chain_score": None,
+            "score": None,
+            "content_score": None,
+            "content_failure_reason": "detector_no_plan_expected",
+        },
+        "attestation": {
+            "authenticity_result": {
+                "status": "absent",
+                "bundle_status": "absent",
+                "statement_status": "absent",
+            },
+        },
+    }
+    positive_record = {
+        "label": True,
+        "sample_role": "positive_source",
+        "content_evidence_payload": {
+            "status": "ok",
+            "content_chain_score": 0.81,
+            "score": 0.81,
+            "content_score": 0.81,
+        },
+    }
+
+    assert detect_orchestrator._extract_score_for_stats(
+        strict_clean_negative_record,
+        eval_metrics.CONTENT_CHAIN_SCORE_NAME,
+    ) == 0.0
+
+    scores, strata = detect_orchestrator.load_scores_for_calibration(
+        [positive_record, strict_clean_negative_record],
+        cfg={"calibration": {}},
+        score_name=eval_metrics.CONTENT_CHAIN_SCORE_NAME,
+    )
+
+    assert scores == [0.0]
+    assert strata["sampling_policy"]["records_with_explicit_label"] is True
+    assert strata["sampling_policy"]["n_rejected_label_positive"] == 1
+    assert strata["sampling_policy"]["n_selected_null"] == 1
+
+    assert eval_metrics._extract_score_value_for_metrics(
+        strict_clean_negative_record,
+        eval_metrics.CONTENT_CHAIN_SCORE_NAME,
+    ) == (0.0, None)
+
+    overall_metrics, _ = eval_metrics.compute_overall_metrics(
+        [positive_record, strict_clean_negative_record],
+        threshold_value=0.5,
+        score_name=eval_metrics.CONTENT_CHAIN_SCORE_NAME,
+    )
+    assert overall_metrics["n_pos"] == 1
+    assert overall_metrics["n_neg"] == 1
+    assert overall_metrics["reject_rate_by_reason"]["status_not_ok"] == 0.0
 
 
 def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fields(tmp_path: Path) -> None:

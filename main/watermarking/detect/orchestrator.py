@@ -50,6 +50,7 @@ from main.evaluation import protocol_loader as eval_protocol_loader
 from main.evaluation import metrics as eval_metrics
 from main.evaluation import report_builder as eval_report_builder
 from main.evaluation import attack_coverage as eval_attack_coverage
+from main.evaluation import workflow_inputs as eval_workflow_inputs
 from main.policy.runtime_whitelist import PolicyPathSemantics, load_policy_path_semantics
 
 
@@ -6113,17 +6114,7 @@ def _extract_score_for_stats(record: Dict[str, Any], score_name: str) -> Optiona
         raise TypeError("score_name must be non-empty str")
 
     if eval_metrics.is_content_chain_score_name(score_name):
-        content_node = record.get("content_evidence_payload")
-        if not isinstance(content_node, dict):
-            return None
-        content_payload = cast(Dict[str, Any], content_node)
-        if content_payload.get("status") != "ok":
-            return None
-        score_value = content_payload.get(eval_metrics.CONTENT_CHAIN_SCORE_NAME)
-        if not isinstance(score_value, (int, float)):
-            score_value = content_payload.get("score")
-        if not isinstance(score_value, (int, float)):
-            score_value = content_payload.get("content_score")
+        score_value, _ = eval_workflow_inputs._resolve_content_score_source(record)
     elif eval_metrics.is_lf_channel_score_name(score_name):
         content_node = record.get("content_evidence_payload")
         if not isinstance(content_node, dict):

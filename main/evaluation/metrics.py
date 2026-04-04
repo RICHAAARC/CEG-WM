@@ -914,13 +914,11 @@ def _extract_score_value_for_metrics(record: Dict[str, Any], score_name: str) ->
         content_payload = record.get("content_evidence_payload")
         if not isinstance(content_payload, dict):
             return None, "missing_content_payload"
-        if content_payload.get("status") != "ok":
+        from main.evaluation import workflow_inputs as eval_workflow_inputs
+
+        score_value, _ = eval_workflow_inputs._resolve_content_score_source(record)
+        if score_value is None and content_payload.get("status") != "ok":
             return None, "status_not_ok"
-        score_value = content_payload.get(CONTENT_CHAIN_SCORE_NAME)
-        if not isinstance(score_value, (int, float)):
-            score_value = content_payload.get("score")
-        if not isinstance(score_value, (int, float)):
-            score_value = content_payload.get("content_score")
     elif is_lf_channel_score_name(score_name):
         content_payload = record.get("content_evidence_payload")
         if not isinstance(content_payload, dict):
