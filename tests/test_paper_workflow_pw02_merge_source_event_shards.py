@@ -122,6 +122,24 @@ def _materialize_completed_pw01_shards(
                         "sample_role": sample_role,
                         "plan_digest": f"runtime-observed-plan-{event_id}",
                         "basis_digest": f"runtime-observed-basis-{event_id}",
+                        "plan_input_digest": f"runtime-observed-plan-input-{event_id}",
+                        "plan_input_schema_version": "v2",
+                        "plan_digest_expected": None,
+                        "plan_digest_status": "absent",
+                        "plan_digest_validation_status": "absent",
+                        "subspace_planner_impl_identity": {
+                            "impl_id": "subspace_planner",
+                            "impl_version": "v2",
+                            "impl_digest": f"planner-digest-{event_id}",
+                        },
+                        "subspace_plan": {
+                            "planner_input_digest": f"runtime-observed-plan-input-{event_id}",
+                            "planner_impl_identity": {
+                                "impl_id": "subspace_planner",
+                                "impl_version": "v2",
+                            },
+                            "rank": 128,
+                        },
                         "content_evidence_payload": {
                             "status": "absent",
                             "score": None,
@@ -132,6 +150,11 @@ def _materialize_completed_pw01_shards(
                             "is_watermarked": False,
                         },
                         "attestation": {
+                            "authenticity_result": {
+                                "status": "absent",
+                                "bundle_status": "absent",
+                                "statement_status": "absent",
+                            },
                             "final_event_attested_decision": {
                                 "status": "absent",
                                 "is_event_attested": False,
@@ -183,9 +206,9 @@ def _materialize_completed_pw01_shards(
             )
 
 
-def test_strict_clean_negative_runtime_plan_digest_maps_to_formal_null_content_score() -> None:
+def test_strict_clean_negative_runtime_observed_planner_fields_map_to_formal_null_content_score() -> None:
     """
-    Verify runtime-observed digests do not disqualify strict clean_negative formal-null mapping.
+    Verify runtime-observed planner fields do not disqualify strict clean_negative formal-null mapping.
 
     Args:
         None.
@@ -197,11 +220,36 @@ def test_strict_clean_negative_runtime_plan_digest_maps_to_formal_null_content_s
         "sample_role": "clean_negative",
         "plan_digest": "runtime-observed-plan",
         "basis_digest": "runtime-observed-basis",
+        "plan_input_digest": "runtime-observed-plan-input",
+        "plan_input_schema_version": "v2",
+        "plan_digest_expected": None,
+        "plan_digest_status": "absent",
+        "plan_digest_validation_status": "absent",
+        "subspace_planner_impl_identity": {
+            "impl_id": "subspace_planner",
+            "impl_version": "v2",
+            "impl_digest": "planner-digest",
+        },
+        "subspace_plan": {
+            "planner_input_digest": "runtime-observed-plan-input",
+            "planner_impl_identity": {
+                "impl_id": "subspace_planner",
+                "impl_version": "v2",
+            },
+            "rank": 128,
+        },
         "content_evidence_payload": {
             "status": "absent",
             "score": None,
             "content_chain_score": None,
             "content_failure_reason": "detector_no_plan_expected",
+        },
+        "attestation": {
+            "authenticity_result": {
+                "status": "absent",
+                "bundle_status": "absent",
+                "statement_status": "absent",
+            },
         },
     }
 
@@ -210,6 +258,55 @@ def test_strict_clean_negative_runtime_plan_digest_maps_to_formal_null_content_s
         0.0,
         "strict_clean_negative_formal_null",
     )
+
+
+def test_control_negative_statement_only_provenance_does_not_map_to_formal_null_content_score() -> None:
+    """
+    Verify control-negative statement-only provenance semantics stay excluded from strict clean formal-null mapping.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    record: Dict[str, Any] = {
+        "sample_role": "clean_negative",
+        "plan_digest": "runtime-observed-plan",
+        "basis_digest": "runtime-observed-basis",
+        "plan_input_digest": "runtime-observed-plan-input",
+        "plan_input_schema_version": "v2",
+        "subspace_planner_impl_identity": {
+            "impl_id": "subspace_planner",
+            "impl_version": "v2",
+        },
+        "subspace_plan": {
+            "planner_input_digest": "runtime-observed-plan-input",
+        },
+        "negative_branch_source_attestation_provenance": {
+            "statement": {
+                "plan_digest": "probe-plan",
+            },
+            "attestation_digest": "attestation-digest",
+        },
+        "content_evidence_payload": {
+            "status": "absent",
+            "score": None,
+            "content_chain_score": None,
+            "content_failure_reason": "detector_no_plan_expected",
+        },
+        "attestation": {
+            "attestation_source": "negative_branch_statement_only_provenance",
+            "authenticity_result": {
+                "status": "statement_only",
+                "bundle_status": "statement_only_provenance_no_bundle",
+                "statement_status": "parsed",
+            },
+        },
+    }
+
+    assert eval_workflow_inputs._is_strict_clean_negative_formal_null_record(record) is False
+    assert eval_workflow_inputs._resolve_content_score_source(record) == (None, None)
 
 
 def _patch_pw02_python_stage_runner(monkeypatch: Any) -> List[Dict[str, Any]]:
@@ -452,6 +549,10 @@ def test_pw02_merges_dual_role_shards_and_builds_score_runs(tmp_path: Path, monk
     assert content_negative_record["paper_workflow_score_source"] == "strict_clean_negative_formal_null"
     assert str(content_negative_record["plan_digest"]).startswith("runtime-observed-plan-")
     assert str(content_negative_record["basis_digest"]).startswith("runtime-observed-basis-")
+    assert str(content_negative_record["plan_input_digest"]).startswith("runtime-observed-plan-input-")
+    assert content_negative_record["plan_input_schema_version"] == "v2"
+    assert content_negative_record["subspace_planner_impl_identity"]["impl_id"] == "subspace_planner"
+    assert content_negative_record["subspace_plan"]["planner_input_digest"] == content_negative_record["plan_input_digest"]
 
     formal_final_decision_metrics = cast(Dict[str, Any], pw02_summary["formal_final_decision_metrics"])
     derived_system_union_metrics = cast(Dict[str, Any], pw02_summary["derived_system_union_metrics"])

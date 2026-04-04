@@ -25,11 +25,9 @@ from main.evaluation import metrics as eval_metrics
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _CONTENT_SCORE_NAME = eval_metrics.CONTENT_CHAIN_SCORE_NAME
 _EVENT_ATTESTATION_SCORE_NAME = "event_attestation_score"
-_STRICT_CLEAN_NEGATIVE_INPUT_SIDE_PLANNER_FIELDS = (
-    "subspace_plan",
-    "plan_input_digest",
-    "plan_input_schema_version",
-    "subspace_planner_impl_identity",
+_NEGATIVE_BRANCH_STATEMENT_ONLY_ATTESTATION_SOURCE = "negative_branch_statement_only_provenance"
+_STATEMENT_ONLY_PROVENANCE_NO_BUNDLE_STATUS = "statement_only_provenance_no_bundle"
+_STRICT_CLEAN_NEGATIVE_PROVENANCE_EXCLUSION_FIELDS = (
     "negative_branch_source_attestation_provenance",
 )
 
@@ -159,6 +157,63 @@ def _coerce_finite_float(value: Any) -> float | None:
     return None
 
 
+def _has_meaningful_payload_value(value: Any) -> bool:
+    """
+    功能：判定候选字段值是否在语义上存在。
+
+    Decide whether a candidate payload value should be treated as semantically
+    present.
+
+    Args:
+        value: Candidate payload value.
+
+    Returns:
+        True when the value is meaningfully present; otherwise False.
+    """
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (dict, list, tuple, set)):
+        return len(value) > 0
+    return True
+
+
+def _has_control_negative_statement_only_semantics(record: Dict[str, Any]) -> bool:
+    """
+    功能：判定记录是否携带 planner-conditioned control-negative 的 statement-only provenance 语义。
+
+    Decide whether the record carries the planner-conditioned control-negative
+    statement-only provenance semantics.
+
+    Args:
+        record: Detect record mapping.
+
+    Returns:
+        True when the record reflects the controlled statement-only provenance
+        path.
+    """
+    if not isinstance(record, dict):
+        raise TypeError("record must be dict")
+
+    for field_name in _STRICT_CLEAN_NEGATIVE_PROVENANCE_EXCLUSION_FIELDS:
+        if _has_meaningful_payload_value(record.get(field_name)):
+            return True
+
+    attestation_node = record.get("attestation")
+    attestation_payload = cast(Dict[str, Any], attestation_node) if isinstance(attestation_node, dict) else {}
+    if attestation_payload.get("attestation_source") == _NEGATIVE_BRANCH_STATEMENT_ONLY_ATTESTATION_SOURCE:
+        return True
+
+    authenticity_result_node = attestation_payload.get("authenticity_result")
+    authenticity_result = (
+        cast(Dict[str, Any], authenticity_result_node)
+        if isinstance(authenticity_result_node, dict)
+        else {}
+    )
+    return authenticity_result.get("bundle_status") == _STATEMENT_ONLY_PROVENANCE_NO_BUNDLE_STATUS
+
+
 def _is_strict_clean_negative_formal_null_record(record: Dict[str, Any]) -> bool:
     """
     功能：判定记录是否属于 strict clean_negative 的 formal null 映射场景。
@@ -187,14 +242,7 @@ def _is_strict_clean_negative_formal_null_record(record: Dict[str, Any]) -> bool
     if failure_reason != "detector_no_plan_expected":
         return False
 
-    for field_name in _STRICT_CLEAN_NEGATIVE_INPUT_SIDE_PLANNER_FIELDS:
-        field_value = record.get(field_name)
-        if field_value is None:
-            continue
-        if isinstance(field_value, str) and not field_value.strip():
-            continue
-        if isinstance(field_value, (dict, list, tuple, set)) and len(field_value) == 0:
-            continue
+    if _has_control_negative_statement_only_semantics(record):
         return False
 
     return True
