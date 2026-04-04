@@ -16,6 +16,12 @@ from main.evaluation import metrics as eval_metrics
 from main.evaluation import workflow_inputs
 
 
+FORMAL_PRIMARY_METRIC_NAME = "formal_final_decision_metrics"
+FORMAL_PRIMARY_DRIVER_MODE = "formal_final_decision_only"
+DERIVED_SYSTEM_UNION_METRIC_NAME = "derived_system_union_metrics"
+SYSTEM_FINAL_ALIAS_SEMANTICS = "deprecated_alias_of_derived_system_union_metrics"
+
+
 def _load_stage_03_module() -> object:
     """
     功能：按文件路径加载 stage 03 脚本模块。
@@ -136,7 +142,8 @@ def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fiel
     assert "scalar_formal_score_name" not in grid[0]
     assert "formal_score_name" not in grid[0]
     assert "auxiliary_analysis_metric_name" not in grid[0]
-    assert grid[0]["primary_driver_mode"] == "system_final_only"
+    assert grid[0]["primary_metric_name"] == FORMAL_PRIMARY_METRIC_NAME
+    assert grid[0]["primary_driver_mode"] == FORMAL_PRIMARY_DRIVER_MODE
     assert grid[0]["enable_auxiliary_analysis_runtime"] is False
     assert experiment_matrix._extract_auxiliary_analysis_metric_name_from_grid_item(grid[0]) == "lf_channel_score"
     assert experiment_matrix._extract_auxiliary_analysis_runtime_enabled_from_grid_item(grid[0]) is False
@@ -185,12 +192,16 @@ def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fiel
     (records_dir / "positive.json").write_text(json.dumps(positive_payload), encoding="utf-8")
     (records_dir / "negative.json").write_text(json.dumps(negative_payload), encoding="utf-8")
 
-    system_final_metrics = experiment_matrix._build_system_final_metrics_for_run(tmp_path)
-    assert system_final_metrics["scope"] == "system_final"
-    assert system_final_metrics["system_tpr"] == 1.0
-    assert system_final_metrics["system_fpr"] == 0.0
-    assert system_final_metrics["final_decision_tpr"] == 1.0
-    assert system_final_metrics["event_attestation_tpr"] == 1.0
+    formal_final_decision_metrics = experiment_matrix._build_formal_final_decision_metrics_for_run(tmp_path)
+    derived_system_union_metrics = experiment_matrix._build_system_final_metrics_for_run(tmp_path)
+    assert formal_final_decision_metrics["scope"] == "formal_final_decision"
+    assert formal_final_decision_metrics["final_decision_tpr"] == 1.0
+    assert formal_final_decision_metrics["final_decision_fpr"] == 0.0
+    assert derived_system_union_metrics["scope"] == "system_final"
+    assert derived_system_union_metrics["system_tpr"] == 1.0
+    assert derived_system_union_metrics["system_fpr"] == 0.0
+    assert derived_system_union_metrics["final_decision_tpr"] == 1.0
+    assert derived_system_union_metrics["event_attestation_tpr"] == 1.0
 
     aggregate_report = experiment_matrix.build_aggregate_report(
         [
@@ -213,7 +224,10 @@ def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fiel
                 "auxiliary_analysis_runtime_executed": False,
                 "policy_path": "content_np_geo_rescue",
                 "metrics": {
-                    "system_final_metrics": system_final_metrics,
+                    FORMAL_PRIMARY_METRIC_NAME: formal_final_decision_metrics,
+                    DERIVED_SYSTEM_UNION_METRIC_NAME: derived_system_union_metrics,
+                    "system_final_metrics": derived_system_union_metrics,
+                    "system_final_metrics_semantics": SYSTEM_FINAL_ALIAS_SEMANTICS,
                     "auxiliary_scope_metrics": {
                         "content_chain": {"metric_name": "content_chain_score", "available": True},
                         "lf_channel": {"metric_name": "lf_channel_score", "available": True},
@@ -224,21 +238,164 @@ def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fiel
         grid_manifest={"grid_manifest_digest": "grid_manifest_01"},
     )
     assert aggregate_report["primary_evaluation_scope"] == "system_final"
-    assert aggregate_report["primary_metric_name"] == "system_final_metrics"
-    assert aggregate_report["primary_driver_mode"] == "system_final_only"
-    assert aggregate_report["primary_status_source"] == "system_final_metrics"
+    assert aggregate_report["primary_metric_name"] == FORMAL_PRIMARY_METRIC_NAME
+    assert aggregate_report["primary_driver_mode"] == FORMAL_PRIMARY_DRIVER_MODE
+    assert aggregate_report["primary_status_source"] == FORMAL_PRIMARY_METRIC_NAME
     assert aggregate_report["primary_summary_basis_scope"] == "system_final"
-    assert aggregate_report["primary_summary_basis_metric_name"] == "system_final_metrics"
+    assert aggregate_report["primary_summary_basis_metric_name"] == FORMAL_PRIMARY_METRIC_NAME
     assert aggregate_report["auxiliary_analysis_runtime_executed"] is False
-    assert aggregate_report["scope_manifest"]["primary_summary_basis_metric_name"] == "system_final_metrics"
+    assert aggregate_report["scope_manifest"]["primary_metric_name"] == FORMAL_PRIMARY_METRIC_NAME
+    assert aggregate_report["scope_manifest"]["primary_summary_basis_metric_name"] == FORMAL_PRIMARY_METRIC_NAME
     assert aggregate_report["scope_manifest"]["auxiliary_scopes"] == ["content_chain", "lf_channel"]
-    assert aggregate_report["metrics_matrix"][0]["primary_status_source"] == "system_final_metrics"
+    assert aggregate_report["metrics_matrix"][0]["primary_metric_name"] == FORMAL_PRIMARY_METRIC_NAME
+    assert aggregate_report["metrics_matrix"][0]["primary_status_source"] == FORMAL_PRIMARY_METRIC_NAME
     assert aggregate_report["metrics_matrix"][0]["auxiliary_analysis_runtime_executed"] is False
+    assert aggregate_report["metrics_matrix"][0][FORMAL_PRIMARY_METRIC_NAME] == formal_final_decision_metrics
+    assert aggregate_report["metrics_matrix"][0][DERIVED_SYSTEM_UNION_METRIC_NAME] == derived_system_union_metrics
+    assert aggregate_report["metrics_matrix"][0]["system_final_metrics"] == derived_system_union_metrics
+    assert aggregate_report["metrics_matrix"][0]["system_final_metrics_semantics"] == SYSTEM_FINAL_ALIAS_SEMANTICS
     assert "scalar_formal_scope" not in aggregate_report
     assert "scalar_formal_score_name" not in aggregate_report
     assert "scalar_formal_scope" not in aggregate_report["scope_manifest"]
     assert "scalar_calibration_scope" not in aggregate_report["scope_manifest"]
+    assert aggregate_report["formal_final_decision_metrics_presence"]["ok_rows_with_formal_final_decision_metrics"] == 1
+    assert aggregate_report["derived_system_union_metrics_presence"]["ok_rows_with_derived_system_union_metrics"] == 1
     assert aggregate_report["system_final_metrics_presence"]["ok_rows_with_system_final_metrics"] == 1
+    assert aggregate_report["system_final_metrics_semantics"] == SYSTEM_FINAL_ALIAS_SEMANTICS
+
+
+def test_run_experiment_grid_grid_summary_keeps_formal_primary_and_derived_alias(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """
+    功能：验证 run_experiment_grid 的 grid_summary 不再把 system_final alias 当作 primary path。
+
+    Validate that run_experiment_grid normalizes the grid summary so that
+    formal_final_decision_metrics remains the primary path while
+    system_final_metrics is only a derived alias.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    grid = [
+        {
+            "grid_index": 0,
+            "grid_item_digest": "grid01",
+            "model_id": "sd3",
+            "seed": 0,
+            "batch_root": (tmp_path / "batch_root").as_posix(),
+            "config_path": "configs/default.yaml",
+        }
+    ]
+    formal_final_decision_metrics = {
+        "scope": "formal_final_decision",
+        "n_total": 2,
+        "n_positive": 1,
+        "n_negative": 1,
+        "final_decision_tpr": 1.0,
+        "final_decision_fpr": 0.0,
+    }
+    derived_system_union_metrics = {
+        "scope": "system_final",
+        "n_total": 2,
+        "n_positive": 1,
+        "n_negative": 1,
+        "system_tpr": 1.0,
+        "system_fpr": 0.0,
+        "final_decision_tpr": 1.0,
+        "event_attestation_tpr": 1.0,
+    }
+
+    monkeypatch.setattr(experiment_matrix, "_run_neg_embed_detect_for_cache", lambda **_: None)
+    monkeypatch.setattr(experiment_matrix, "_run_global_calibrate", lambda **_: None)
+    monkeypatch.setattr(
+        experiment_matrix,
+        "_build_stage_03_gpu_memory_observability",
+        lambda **_: {
+            "gpu_memory_summary": {"status": "absent"},
+            "gpu_memory_profile_breakdown": {"artifact_version": "stub"},
+        },
+    )
+    monkeypatch.setattr(
+        experiment_matrix,
+        "_write_grid_artifacts",
+        lambda *args, **kwargs: {
+            "aggregate_report_path": "aggregate_report.json",
+            "grid_summary_path": "grid_summary.json",
+            "grid_manifest_path": "grid_manifest.json",
+        },
+    )
+    monkeypatch.setattr(experiment_matrix, "_extract_anchors_from_results", lambda *_args, **_kwargs: {})
+
+    def _fake_run_single_experiment(_grid_item: dict) -> dict:
+        return {
+            "grid_item_digest": "grid01",
+            "status": "ok",
+            "evaluation_scope": "system_final",
+            "auxiliary_scopes": ["content_chain", "lf_channel"],
+            "auxiliary_scope_configs": {
+                "content_chain": {"metric_name": "content_chain_score"},
+                "lf_channel": {
+                    "metric_name": "lf_channel_score",
+                    "analysis_metric_name": "lf_channel_score",
+                },
+            },
+            "scope_manifest": experiment_matrix._build_matrix_scope_manifest(
+                primary_scope="system_final",
+                primary_summary_basis_scope="system_final",
+                auxiliary_scopes=["content_chain", "lf_channel"],
+            ),
+            "primary_metric_name": "system_final_metrics",
+            "primary_driver_mode": "system_final_only",
+            "primary_status_source": "system_final_metrics",
+            "primary_summary_basis_scope": "system_final",
+            "primary_summary_basis_metric_name": "system_final_metrics",
+            "auxiliary_analysis_runtime_executed": False,
+            "cfg_digest": "cfg01",
+            "plan_digest": "plan01",
+            "thresholds_digest": "thr01",
+            "threshold_metadata_digest": "meta01",
+            "ablation_digest": "abl01",
+            "attack_protocol_digest": "attack01",
+            "impl_digest": "impl01",
+            "fusion_rule_version": "v1",
+            "attack_protocol_version": "attack-v1",
+            "run_root": (tmp_path / "runs" / "grid01").as_posix(),
+            "policy_path": "content_np_geo_rescue",
+            "metrics": {
+                FORMAL_PRIMARY_METRIC_NAME: formal_final_decision_metrics,
+                DERIVED_SYSTEM_UNION_METRIC_NAME: derived_system_union_metrics,
+                "system_final_metrics": derived_system_union_metrics,
+                "system_final_metrics_semantics": SYSTEM_FINAL_ALIAS_SEMANTICS,
+                "auxiliary_scope_metrics": {},
+            },
+            "auxiliary_analysis": {},
+        }
+
+    monkeypatch.setattr(experiment_matrix, "run_single_experiment", _fake_run_single_experiment)
+
+    grid_summary = experiment_matrix.run_experiment_grid(grid, strict=True)
+
+    assert grid_summary["primary_metric_name"] == FORMAL_PRIMARY_METRIC_NAME
+    assert grid_summary["primary_driver_mode"] == FORMAL_PRIMARY_DRIVER_MODE
+    assert grid_summary["primary_status_source"] == FORMAL_PRIMARY_METRIC_NAME
+    assert grid_summary["primary_summary_basis_metric_name"] == FORMAL_PRIMARY_METRIC_NAME
+    assert grid_summary["formal_final_decision_metrics_presence"]["ok_rows_with_formal_final_decision_metrics"] == 1
+    assert grid_summary["derived_system_union_metrics_presence"]["ok_rows_with_derived_system_union_metrics"] == 1
+    assert grid_summary["system_final_metrics_presence"]["ok_rows_with_system_final_metrics"] == 1
+    assert grid_summary["system_final_metrics_semantics"] == SYSTEM_FINAL_ALIAS_SEMANTICS
+    assert grid_summary["aggregate_report"]["primary_metric_name"] == FORMAL_PRIMARY_METRIC_NAME
+    assert grid_summary["aggregate_report"]["metrics_matrix"][0]["primary_status_source"] == FORMAL_PRIMARY_METRIC_NAME
+    assert (
+        grid_summary["aggregate_report"]["metrics_matrix"][0][DERIVED_SYSTEM_UNION_METRIC_NAME]
+        == derived_system_union_metrics
+    )
+    assert grid_summary["aggregate_report"]["metrics_matrix"][0]["system_final_metrics"] == derived_system_union_metrics
 
 
 def test_schema_and_contracts_register_new_formal_fields() -> None:
@@ -260,9 +417,14 @@ def test_schema_and_contracts_register_new_formal_fields() -> None:
     policy_payload = yaml.safe_load((repo_root / "configs" / "policy_path_semantics.yaml").read_text(encoding="utf-8"))
 
     schema_paths = {item["path"] for item in schema_payload["fields"]}
+    schema_descriptions = {item["path"]: item["description"] for item in schema_payload["fields"]}
     contract_paths = set(contract_payload["records_schema"]["field_paths_registry"])
     content_minimal = policy_payload["field_catalog"]["catalogs"]["content_minimal"]
     artifact_contracts = contract_payload["artifact_schema"]["artifact_contracts"]
+    policy_rules = {
+        item["field_path"]: item["rule"]
+        for item in policy_payload["field_catalog"]["diagnostic_only_field_constraints"]
+    }
 
     required_paths = {
         "content_evidence.content_chain_score",
@@ -289,6 +451,9 @@ def test_schema_and_contracts_register_new_formal_fields() -> None:
     assert "primary_status_source" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "auxiliary_analysis_runtime_executed" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "gpu_memory_summary" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
+    assert "formal_final_decision_metrics_presence" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
+    assert "derived_system_union_metrics_presence" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
+    assert "system_final_metrics_semantics" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "scope_manifest" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "primary_summary_basis_scope" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "primary_summary_basis_metric_name" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
@@ -296,10 +461,25 @@ def test_schema_and_contracts_register_new_formal_fields() -> None:
     assert "primary_status_source" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "auxiliary_analysis_runtime_executed" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "gpu_memory_summary" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
+    assert "formal_final_decision_metrics_presence" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
+    assert "derived_system_union_metrics_presence" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
+    assert "system_final_metrics_semantics" in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "scalar_formal_scope" not in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "scalar_formal_score_name" not in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]
     assert "scalar_formal_scope" not in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
     assert "scalar_formal_score_name" not in artifact_contracts["experiment_matrix_grid_summary"]["allowed_top_level_fields"]
+    assert "planner-conditioned control negative path" in schema_descriptions["negative_branch_source_attestation_provenance"]
+    assert "detect runtime" in schema_descriptions["negative_branch_source_attestation_provenance"]
+    assert "strict clean_negative" in schema_descriptions["negative_branch_source_attestation_provenance"]
+    assert "detect formal attestation extractor" not in schema_descriptions["negative_branch_source_attestation_provenance"]
+    assert "authentic signed bundle verification" in schema_descriptions["negative_branch_source_attestation_provenance.statement"]
+    assert "strict clean_negative" in schema_descriptions["negative_branch_source_attestation_provenance.statement"]
+    assert "planner-conditioned control negative path" in policy_rules["negative_branch_source_attestation_provenance"]
+    assert "detect runtime" in policy_rules["negative_branch_source_attestation_provenance"]
+    assert "runtime bindings" in policy_rules["negative_branch_source_attestation_provenance"]
+    assert "authentic signed bundle verification" in policy_rules["negative_branch_source_attestation_provenance.statement"]
+    assert "strict clean_negative formal input" in policy_rules["negative_branch_source_attestation_provenance.statement"]
+    assert "detect formal attestation extractor" not in policy_rules["negative_branch_source_attestation_provenance.statement"]
 
 
 def test_formal_stage_03_skips_auxiliary_runtime_by_default(tmp_path: Path, monkeypatch) -> None:
@@ -504,26 +684,37 @@ def test_stage_03_script_syncs_auxiliary_runtime_evidence_to_workflow_summary_an
             artifacts_dir / "grid_summary.json",
             {
                 "primary_evaluation_scope": "system_final",
-                "primary_metric_name": "system_final_metrics",
-                "primary_driver_mode": "system_final_only",
-                "primary_status_source": "system_final_metrics",
+                "primary_metric_name": FORMAL_PRIMARY_METRIC_NAME,
+                "primary_driver_mode": FORMAL_PRIMARY_DRIVER_MODE,
+                "primary_status_source": FORMAL_PRIMARY_METRIC_NAME,
                 "primary_summary_basis_scope": "system_final",
-                "primary_summary_basis_metric_name": "system_final_metrics",
+                "primary_summary_basis_metric_name": FORMAL_PRIMARY_METRIC_NAME,
                 "auxiliary_scopes": ["content_chain", "lf_channel"],
                 "auxiliary_analysis_runtime_executed": False,
                 "gpu_memory_summary": gpu_memory_summary,
                 "scope_manifest": {
                     "primary_scope": "system_final",
-                    "primary_metric_name": "system_final_metrics",
+                    "primary_metric_name": FORMAL_PRIMARY_METRIC_NAME,
                     "primary_summary_basis_scope": "system_final",
-                    "primary_summary_basis_metric_name": "system_final_metrics",
+                    "primary_summary_basis_metric_name": FORMAL_PRIMARY_METRIC_NAME,
                     "auxiliary_scopes": ["content_chain", "lf_channel"],
+                },
+                "formal_final_decision_metrics_presence": {
+                    "rows_with_formal_final_decision_metrics": 1,
+                    "ok_rows_with_formal_final_decision_metrics": 1,
+                    "rows_total": 1,
+                },
+                "derived_system_union_metrics_presence": {
+                    "rows_with_derived_system_union_metrics": 1,
+                    "ok_rows_with_derived_system_union_metrics": 1,
+                    "rows_total": 1,
                 },
                 "system_final_metrics_presence": {
                     "rows_with_system_final_metrics": 1,
                     "ok_rows_with_system_final_metrics": 1,
                     "rows_total": 1,
                 },
+                "system_final_metrics_semantics": SYSTEM_FINAL_ALIAS_SEMANTICS,
             },
         )
         stage_03_module.write_json_atomic(artifacts_dir / "grid_manifest.json", {"grid_manifest_digest": "grid01"})
@@ -531,26 +722,37 @@ def test_stage_03_script_syncs_auxiliary_runtime_evidence_to_workflow_summary_an
             artifacts_dir / "aggregate_report.json",
             {
                 "primary_evaluation_scope": "system_final",
-                "primary_metric_name": "system_final_metrics",
-                "primary_driver_mode": "system_final_only",
-                "primary_status_source": "system_final_metrics",
+                "primary_metric_name": FORMAL_PRIMARY_METRIC_NAME,
+                "primary_driver_mode": FORMAL_PRIMARY_DRIVER_MODE,
+                "primary_status_source": FORMAL_PRIMARY_METRIC_NAME,
                 "primary_summary_basis_scope": "system_final",
-                "primary_summary_basis_metric_name": "system_final_metrics",
+                "primary_summary_basis_metric_name": FORMAL_PRIMARY_METRIC_NAME,
                 "auxiliary_scopes": ["content_chain", "lf_channel"],
                 "auxiliary_analysis_runtime_executed": False,
                 "gpu_memory_summary": gpu_memory_summary,
                 "scope_manifest": {
                     "primary_scope": "system_final",
-                    "primary_metric_name": "system_final_metrics",
+                    "primary_metric_name": FORMAL_PRIMARY_METRIC_NAME,
                     "primary_summary_basis_scope": "system_final",
-                    "primary_summary_basis_metric_name": "system_final_metrics",
+                    "primary_summary_basis_metric_name": FORMAL_PRIMARY_METRIC_NAME,
                     "auxiliary_scopes": ["content_chain", "lf_channel"],
+                },
+                "formal_final_decision_metrics_presence": {
+                    "rows_with_formal_final_decision_metrics": 1,
+                    "ok_rows_with_formal_final_decision_metrics": 1,
+                    "rows_total": 1,
+                },
+                "derived_system_union_metrics_presence": {
+                    "rows_with_derived_system_union_metrics": 1,
+                    "ok_rows_with_derived_system_union_metrics": 1,
+                    "rows_total": 1,
                 },
                 "system_final_metrics_presence": {
                     "rows_with_system_final_metrics": 1,
                     "ok_rows_with_system_final_metrics": 1,
                     "rows_total": 1,
                 },
+                "system_final_metrics_semantics": SYSTEM_FINAL_ALIAS_SEMANTICS,
             },
         )
         stage_03_module.write_json_atomic(

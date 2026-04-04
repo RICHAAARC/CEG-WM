@@ -5,7 +5,7 @@
 # - 本文件不是 workflow 运行配置，不承载模型或推理参数。
 # ==============================================================
 
-version: "v18"  # v3→v4 (2026-03-12)：formal path 最终闭包收口；historical_fields: 段已从当前 formal schema 文件移除，旧字段信息不再显式保留在任何 formal 文件中。当前 formal schema 只表达当前正式机制。v4→v5 (2026-03-13)：追加 attestation 事件绑定、真实性/图像证据双层语义与 event-attested 判决字段。v5→v6 (2026-03-13)：追加 geometry recovery observations、observed correspondences 与 recovered consistency 字段。v6→v7 (2026-03-13)：追加 coarse registration 与 recovered-domain sync revalidation 细分字段。v7→v8 (2026-03-14)：追加 LF canonical evidence summary 字段登记。v8→v9 (2026-03-16)：追加 negative branch attestation provenance 的 append-only 诊断字段登记。v9→v10 (2026-03-17)：追加 attestation_source 字段并冻结 statement-only provenance 的受控 no-bundle 语义。v10→v11 (2026-03-19)：追加 exact LF observability 字段与 detect runtime canonical 兼容命名字段。v11→v12 (2026-03-20)：收口 detect runtime mode 当前正式合同描述。v12→v13 (2026-03-20)：移除 detect runtime 历史旧值名在当前 schema 正文中的残留，正式合同仅保留 real / fallback_identity。v13→v14 (2026-03-26)：追加 content_chain_score、lf_channel_score、lf_correlation_score 及 attestation LF 桥接字段登记。v14→v15 (2026-03-26)：追加 experiment_matrix auxiliary_analysis_runtime_executed 显式证据字段登记。v15→v16 (2026-03-26)：从当前 formal schema 中移除 event_attestation_statistics_score 旧 alias 字段登记，只保留 canonical event_attestation_score。v16→v17 (2026-03-29)：追加 statement_only runtime finalization planner 诊断字段登记。v17→v18 (2026-04-03)：追加 hf_raw_energy 与 hf_content_score 字段登记，并区分 HF 原始能量诊断与正式内容分数。
+version: "v19"  # v3→v4 (2026-03-12)：formal path 最终闭包收口；historical_fields: 段已从当前 formal schema 文件移除，旧字段信息不再显式保留在任何 formal 文件中。当前 formal schema 只表达当前正式机制。v4→v5 (2026-03-13)：追加 attestation 事件绑定、真实性/图像证据双层语义与 event-attested 判决字段。v5→v6 (2026-03-13)：追加 geometry recovery observations、observed correspondences 与 recovered consistency 字段。v6→v7 (2026-03-13)：追加 coarse registration 与 recovered-domain sync revalidation 细分字段。v7→v8 (2026-03-14)：追加 LF canonical evidence summary 字段登记。v8→v9 (2026-03-16)：追加 negative branch attestation provenance 的 append-only 诊断字段登记。v9→v10 (2026-03-17)：追加 attestation_source 字段并冻结 statement-only provenance 的受控 no-bundle 语义。v10→v11 (2026-03-19)：追加 exact LF observability 字段与 detect runtime canonical 兼容命名字段。v11→v12 (2026-03-20)：收口 detect runtime mode 当前正式合同描述。v12→v13 (2026-03-20)：移除 detect runtime 历史旧值名在当前 schema 正文中的残留，正式合同仅保留 real / fallback_identity。v13→v14 (2026-03-26)：追加 content_chain_score、lf_channel_score、lf_correlation_score 及 attestation LF 桥接字段登记。v14→v15 (2026-03-26)：追加 experiment_matrix auxiliary_analysis_runtime_executed 显式证据字段登记。v15→v16 (2026-03-26)：从当前 formal schema 中移除 event_attestation_statistics_score 旧 alias 字段登记，只保留 canonical event_attestation_score。v16→v17 (2026-03-29)：追加 statement_only runtime finalization planner 诊断字段登记。v17→v18 (2026-04-03)：追加 hf_raw_energy 与 hf_content_score 字段登记，并区分 HF 原始能量诊断与正式内容分数。v18→v19 (2026-04-04)：收口 planner-conditioned control negative path 的 controlled statement-only provenance contract 描述，明确其 detect runtime 消费边界与 strict clean_negative 排除边界。
 append_only: true
 
 type_definitions:
@@ -1338,35 +1338,35 @@ fields:
     type: "json_dict"
     required: false
     missing_semantics: "absent_ok"
-    description: "dual-branch negative source statement-only provenance（仅 diagnostic/provenance 用途，not a formal attestation payload，也不会被 detect formal attestation extractor 消费）。"
+    description: "planner-conditioned control negative path 的 controlled statement-only provenance contract；detect runtime 可消费其 statement 与摘要字段以派生 control-path runtime bindings 与审计，但其不属于 formal attestation payload，也不得作为 strict clean_negative formal input。"
 
   - path: "negative_branch_source_attestation_provenance.statement"
     layer: "diagnostic"
     type: "json_dict"
     required: false
     missing_semantics: "absent_ok"
-    description: "negative branch source attestation statement 的诊断性拷贝；仅用于 provenance，不构成 formal attestation payload。"
+    description: "planner-conditioned control negative path 的 statement-only provenance statement 拷贝；detect runtime 可消费其用于 control-path bindings 与审计，但不得视作 authentic signed bundle verification，也不得作为 strict clean_negative formal input。"
 
   - path: "negative_branch_source_attestation_provenance.attestation_digest"
     layer: "diagnostic"
     type: "digest_hex64"
     required: false
     missing_semantics: "absent_ok"
-    description: "negative branch source statement 对应的 provenance attestation digest；仅用于诊断追踪。"
+    description: "planner-conditioned control negative path statement-only provenance 对应的 attestation digest；仅用于 control-path runtime bindings 与审计追踪。"
 
   - path: "negative_branch_source_attestation_provenance.event_binding_digest"
     layer: "diagnostic"
     type: "digest_hex64"
     required: false
     missing_semantics: "absent_ok"
-    description: "negative branch source statement 对应的 provenance event binding digest；仅用于诊断追踪。"
+    description: "planner-conditioned control negative path statement-only provenance 对应的 event binding digest；仅用于 control-path runtime bindings 与审计追踪。"
 
   - path: "negative_branch_source_attestation_provenance.trace_commit"
     layer: "diagnostic"
     type: "digest_hex64"
     required: false
     missing_semantics: "absent_ok"
-    description: "negative branch source statement 对应的 provenance trace commit；仅用于诊断追踪。"
+    description: "planner-conditioned control negative path statement-only provenance 对应的 trace commit；仅用于 control-path runtime bindings 与审计追踪。"
 
   - path: "content_evidence.score_parts.lf_status"
     layer: "diagnostic"

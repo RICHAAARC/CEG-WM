@@ -5,7 +5,7 @@
 # - 本文件不是实验运行主配置，不直接承载具体模型或设备参数。
 # ==============================================================
 
-policy_path_semantics_version: "v2.7"  # v2.0→v2.1：同步 runtime_whitelist.yaml v2.1；test_mode_identity 重命名为 embed_identity_mode已移出 formal path。v2.1→v2.2：追加 geometry recovery observations 与 recovered consistency 的正式审计语义。v2.2→v2.3：追加 coarse registration、sync_parameter_agreement、recovered-domain sync revalidation 与 negative branch attestation provenance 的诊断路径语义；该 provenance 仅用于 diagnostic/provenance，不能视作 formal attestation payload。v2.3→v2.4：追加 attestation.attestation_source 的正式语义，并冻结 statement_only_provenance_no_bundle 仅可用于 negative branch statement-only provenance（2026-03-17）。v2.4→v2.5 (2026-03-26)：将 content_minimal 的正式内容分数字段切换为 content_evidence.content_chain_score。v2.5→v2.6 (2026-03-26)：从当前 formal score_audit 命名规则中移除 event_attestation_statistics_score 旧 alias，只保留 canonical event_attestation_score。v2.6→v2.7 (2026-04-03)：明确 negative_branch_source_attestation_provenance 仅对应 planner-conditioned control negative path 的 statement-only provenance，并追加 HF 有界正式内容分数诊断字段。
+policy_path_semantics_version: "v2.8"  # v2.0→v2.1：同步 runtime_whitelist.yaml v2.1；test_mode_identity 重命名为 embed_identity_mode已移出 formal path。v2.1→v2.2：追加 geometry recovery observations 与 recovered consistency 的正式审计语义。v2.2→v2.3：追加 coarse registration、sync_parameter_agreement、recovered-domain sync revalidation 与 negative branch attestation provenance 的诊断路径语义；该 provenance 仅用于 diagnostic/provenance，不能视作 formal attestation payload。v2.3→v2.4：追加 attestation.attestation_source 的正式语义，并冻结 statement_only_provenance_no_bundle 仅可用于 negative branch statement-only provenance（2026-03-17）。v2.4→v2.5 (2026-03-26)：将 content_minimal 的正式内容分数字段切换为 content_evidence.content_chain_score。v2.5→v2.6 (2026-03-26)：从当前 formal score_audit 命名规则中移除 event_attestation_statistics_score 旧 alias，只保留 canonical event_attestation_score。v2.6→v2.7 (2026-04-03)：明确 negative_branch_source_attestation_provenance 仅对应 planner-conditioned control negative path 的 statement-only provenance，并追加 HF 有界正式内容分数诊断字段。v2.7→v2.8 (2026-04-04)：收口 planner-conditioned control negative path 的 controlled statement-only provenance contract 描述，明确 detect runtime 可消费该 provenance 以派生 control-path bindings 与审计，但不得视作 strict clean_negative formal input 或 authentic signed bundle verification。
 
 # ==============================================================
 # 0) 硬约束：必须满足的执行性规则
@@ -182,10 +182,10 @@ field_catalog:
       rule: "formal_input_payload 表示 detect 直接消费 formal attestation payload；negative_branch_statement_only_provenance 表示受控的 planner-conditioned control negative path statement-only provenance，该路径允许 bundle_status=statement_only_provenance_no_bundle，但不得视作 authentic signed bundle verification。"
     - field_path: "negative_branch_source_attestation_provenance"
       semantics: "diagnostic_provenance_only"
-      rule: "仅用于 planner-conditioned control negative path 的 statement-only provenance 审计，不能视作 formal attestation payload、formal negative attestation sample 或 strict clean_negative formal input。"
+      rule: "仅用于 planner-conditioned control negative path 的 controlled statement-only provenance contract；detect runtime 可消费其 statement 与摘要字段以派生 control-path runtime bindings 与审计绑定，但其不构成 formal attestation payload、formal negative attestation sample，也不得作为 strict clean_negative formal input。"
     - field_path: "negative_branch_source_attestation_provenance.statement"
       semantics: "diagnostic_statement_copy_only"
-      rule: "statement 拷贝仅用于 planner-conditioned control path provenance 审计，不得作为 strict clean_negative 或 detect formal attestation extractor 的输入来源。"
+      rule: "statement 拷贝不得作为 strict clean_negative formal input 的来源；仅在 planner-conditioned control negative path 下，可作为 controlled statement-only provenance contract 的输入来源，被 detect runtime 消费用于 control-path bindings 与审计，但不得被视作 authentic signed bundle verification。"
 
 # ------------------------------
 # catalogs 使用约束

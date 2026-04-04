@@ -38,11 +38,15 @@ _FORBIDDEN_ARTIFACT_ANCHOR_FIELDS = {
     "injection_scope_manifest_bound_digest",
 }
 
+_FORMAL_FINAL_DECISION_SCOPE = "formal_final_decision"
 _SYSTEM_FINAL_SCOPE = "system_final"
 _CONTENT_CHAIN_SCOPE = "content_chain"
 _LF_CHANNEL_SCOPE = "lf_channel"
+_FORMAL_FINAL_DECISION_METRIC_NAME = "formal_final_decision_metrics"
+_DERIVED_SYSTEM_UNION_METRIC_NAME = "derived_system_union_metrics"
 _SYSTEM_FINAL_METRIC_NAME = "system_final_metrics"
-_SYSTEM_FINAL_PRIMARY_DRIVER_MODE = "system_final_only"
+_SYSTEM_FINAL_METRIC_SEMANTICS = "deprecated_alias_of_derived_system_union_metrics"
+_SYSTEM_FINAL_PRIMARY_DRIVER_MODE = "formal_final_decision_only"
 _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD = "auxiliary_analysis_runtime_executed"
 _MATRIX_EVALUATION_SCOPES = {
     _SYSTEM_FINAL_SCOPE,
@@ -368,11 +372,12 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
             detect_record.get("fusion_rule_version") if isinstance(detect_record, dict) else None,
             run_closure.get("fusion_rule_version") if isinstance(run_closure, dict) else None,
         )
-        system_final_metrics = _build_system_final_metrics_for_run(run_root)
-        primary_status_source = _resolve_primary_status_source(system_final_metrics)
-        if primary_status_source != _SYSTEM_FINAL_METRIC_NAME:
+        formal_final_decision_metrics = _build_formal_final_decision_metrics_for_run(run_root)
+        derived_system_union_metrics = _build_system_final_metrics_for_run(run_root)
+        primary_status_source = _resolve_primary_status_source(formal_final_decision_metrics)
+        if primary_status_source != _FORMAL_FINAL_DECISION_METRIC_NAME:
             raise RuntimeError(
-                "system_final primary path did not produce a closed labelled result set; "
+                "formal final decision primary path did not produce a closed labelled result set; "
                 f"primary_status_source={primary_status_source}"
             )
         summary.update(
@@ -409,7 +414,10 @@ def run_single_experiment(grid_item_cfg: Dict[str, Any]) -> Dict[str, Any]:
                     "n_rescue_success": metrics_obj.get("n_rescue_success"),
                     "conditional_fpr_estimate": metrics_obj.get("conditional_fpr_estimate"),
                     "conditional_fpr_n": metrics_obj.get("conditional_fpr_n"),
-                    _SYSTEM_FINAL_METRIC_NAME: system_final_metrics,
+                    _FORMAL_FINAL_DECISION_METRIC_NAME: formal_final_decision_metrics,
+                    _DERIVED_SYSTEM_UNION_METRIC_NAME: derived_system_union_metrics,
+                    _SYSTEM_FINAL_METRIC_NAME: derived_system_union_metrics,
+                    "system_final_metrics_semantics": _SYSTEM_FINAL_METRIC_SEMANTICS,
                     "auxiliary_scope_metrics": _build_auxiliary_scope_metrics_for_run(run_root),
                 },
                 "hf_truncation_baseline_comparison": _extract_hf_truncation_baseline_comparison_from_detect_record(run_root),
@@ -969,7 +977,7 @@ def _extract_matrix_primary_scope_from_grid_item(grid_item_cfg: Dict[str, Any]) 
 def _resolve_matrix_primary_metric_name(evaluation_scope: str) -> str:
     """Resolve the primary metric field name for one evaluation scope."""
     if evaluation_scope == _SYSTEM_FINAL_SCOPE:
-        return _SYSTEM_FINAL_METRIC_NAME
+        return _FORMAL_FINAL_DECISION_METRIC_NAME
     if evaluation_scope == _CONTENT_CHAIN_SCOPE:
         return eval_metrics.CONTENT_CHAIN_SCORE_NAME
     if evaluation_scope == _LF_CHANNEL_SCOPE:
@@ -1105,7 +1113,7 @@ def _build_formal_final_decision_metrics_for_run(run_root: Path) -> Dict[str, An
         return float(numerator / denominator)
 
     return {
-        "scope": "formal_final_decision",
+        "scope": _FORMAL_FINAL_DECISION_SCOPE,
         "n_total": n_total,
         "n_positive": n_positive,
         "n_negative": n_negative,
@@ -1118,7 +1126,7 @@ def _build_formal_final_decision_metrics_for_run(run_root: Path) -> Dict[str, An
 
 
 def _build_system_final_metrics_for_run(run_root: Path) -> Dict[str, Any]:
-    """Build system-level metrics from real final decision fields."""
+    """Build derived system-union metrics from real final decision fields."""
     if not isinstance(run_root, Path):
         raise TypeError("run_root must be Path")
 
@@ -1228,24 +1236,24 @@ def _build_system_final_metrics_for_run(run_root: Path) -> Dict[str, Any]:
     }
 
 
-def _resolve_primary_status_source(system_final_metrics: Dict[str, Any]) -> str:
+def _resolve_primary_status_source(formal_final_decision_metrics: Dict[str, Any]) -> str:
     """Resolve the persisted primary status source for one matrix row."""
-    if not isinstance(system_final_metrics, dict):
-        raise TypeError("system_final_metrics must be dict")
+    if not isinstance(formal_final_decision_metrics, dict):
+        raise TypeError("formal_final_decision_metrics must be dict")
 
-    if system_final_metrics.get("scope") != _SYSTEM_FINAL_SCOPE:
+    if formal_final_decision_metrics.get("scope") != _FORMAL_FINAL_DECISION_SCOPE:
         return "<absent>"
 
-    n_total = system_final_metrics.get("n_total")
-    n_positive = system_final_metrics.get("n_positive")
-    n_negative = system_final_metrics.get("n_negative")
+    n_total = formal_final_decision_metrics.get("n_total")
+    n_positive = formal_final_decision_metrics.get("n_positive")
+    n_negative = formal_final_decision_metrics.get("n_negative")
     if not isinstance(n_total, int) or n_total <= 0:
         return "<absent>"
     if not isinstance(n_positive, int) or n_positive <= 0:
         return "<absent>"
     if not isinstance(n_negative, int) or n_negative <= 0:
         return "<absent>"
-    return _SYSTEM_FINAL_METRIC_NAME
+    return _FORMAL_FINAL_DECISION_METRIC_NAME
 
 
 def _build_auxiliary_scope_metrics_for_run(run_root: Path) -> Dict[str, Any]:
@@ -1821,11 +1829,11 @@ def run_experiment_grid(grid: List[Dict[str, Any]], strict: bool = True) -> Dict
         "succeeded": sum(1 for item in results if item.get("status") == "ok"),
         "failed": sum(1 for item in results if item.get("status") != "ok"),
         "primary_evaluation_scope": aggregate_report.get("primary_evaluation_scope", _SYSTEM_FINAL_SCOPE),
-        "primary_metric_name": aggregate_report.get("primary_metric_name", _SYSTEM_FINAL_METRIC_NAME),
+        "primary_metric_name": aggregate_report.get("primary_metric_name", _FORMAL_FINAL_DECISION_METRIC_NAME),
         "primary_driver_mode": aggregate_report.get("primary_driver_mode", _SYSTEM_FINAL_PRIMARY_DRIVER_MODE),
-        "primary_status_source": aggregate_report.get("primary_status_source", _SYSTEM_FINAL_METRIC_NAME),
+        "primary_status_source": aggregate_report.get("primary_status_source", _FORMAL_FINAL_DECISION_METRIC_NAME),
         "primary_summary_basis_scope": aggregate_report.get("primary_summary_basis_scope", _SYSTEM_FINAL_SCOPE),
-        "primary_summary_basis_metric_name": aggregate_report.get("primary_summary_basis_metric_name", _SYSTEM_FINAL_METRIC_NAME),
+        "primary_summary_basis_metric_name": aggregate_report.get("primary_summary_basis_metric_name", _FORMAL_FINAL_DECISION_METRIC_NAME),
         "auxiliary_scopes": aggregate_report.get("auxiliary_scopes", []),
         _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD: aggregate_report.get(
             _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD,
@@ -1833,7 +1841,13 @@ def run_experiment_grid(grid: List[Dict[str, Any]], strict: bool = True) -> Dict
         ),
         "gpu_memory_summary": copy.deepcopy(gpu_memory_observability["gpu_memory_summary"]),
         "scope_manifest": aggregate_report.get("scope_manifest", {}),
+        "formal_final_decision_metrics_presence": aggregate_report.get("formal_final_decision_metrics_presence", {}),
+        "derived_system_union_metrics_presence": aggregate_report.get("derived_system_union_metrics_presence", {}),
         "system_final_metrics_presence": aggregate_report.get("system_final_metrics_presence", {}),
+        "system_final_metrics_semantics": aggregate_report.get(
+            "system_final_metrics_semantics",
+            _SYSTEM_FINAL_METRIC_SEMANTICS,
+        ),
         "aggregate_report": aggregate_report,
         "grid_manifest": grid_manifest,
         "results": results,
@@ -1892,6 +1906,16 @@ def build_aggregate_report(
 
         grid_item_digest = _safe_str(item.get("grid_item_digest"))
         status_value = _safe_str(item.get("status"))
+        metrics_obj = item.get("metrics") if isinstance(item.get("metrics"), dict) else {}
+        row_evaluation_scope = _safe_str(item.get("evaluation_scope"))
+        if row_evaluation_scope == "<absent>":
+            row_evaluation_scope = _SYSTEM_FINAL_SCOPE
+        row_primary_metric_name = _resolve_matrix_primary_metric_name(row_evaluation_scope)
+        row_primary_driver_mode = _SYSTEM_FINAL_PRIMARY_DRIVER_MODE
+        row_primary_status_source = "<absent>"
+        if isinstance(metrics_obj.get(row_primary_metric_name), dict):
+            row_primary_status_source = row_primary_metric_name
+
         canonical_items.append(
             {
                 "grid_item_digest": grid_item_digest,
@@ -1902,9 +1926,9 @@ def build_aggregate_report(
         anchor_row = {
             "grid_item_digest": grid_item_digest,
             "status": status_value,
-            "evaluation_scope": _safe_str(item.get("evaluation_scope")),
-            "primary_metric_name": _safe_str(item.get("primary_metric_name")),
-            "primary_status_source": _safe_str(item.get("primary_status_source")),
+            "evaluation_scope": row_evaluation_scope,
+            "primary_metric_name": row_primary_metric_name,
+            "primary_status_source": row_primary_status_source,
             "cfg_digest": _safe_str(item.get("cfg_digest")),
             "plan_digest": _safe_str(item.get("plan_digest")),
             "thresholds_digest": _safe_str(item.get("thresholds_digest")),
@@ -1919,18 +1943,14 @@ def build_aggregate_report(
         }
         anchor_rows.append(anchor_row)
 
-        metrics_obj = item.get("metrics") if isinstance(item.get("metrics"), dict) else {}
-        primary_status_source_value = _safe_str(item.get("primary_status_source"))
-        if primary_status_source_value == "<absent>" and isinstance(metrics_obj.get(_SYSTEM_FINAL_METRIC_NAME), dict):
-            primary_status_source_value = _SYSTEM_FINAL_METRIC_NAME
         metrics_matrix.append(
             {
                 "grid_item_digest": grid_item_digest,
                 "status": status_value,
-                "evaluation_scope": _safe_str(item.get("evaluation_scope")),
-                "primary_metric_name": _safe_str(item.get("primary_metric_name")),
-                "primary_driver_mode": _safe_str(item.get("primary_driver_mode")) or _SYSTEM_FINAL_PRIMARY_DRIVER_MODE,
-                "primary_status_source": primary_status_source_value,
+                "evaluation_scope": row_evaluation_scope,
+                "primary_metric_name": row_primary_metric_name,
+                "primary_driver_mode": row_primary_driver_mode,
+                "primary_status_source": row_primary_status_source,
                 _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD: bool(
                     item.get(
                         _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD,
@@ -1944,7 +1964,13 @@ def build_aggregate_report(
                 "rescue_rate": metrics_obj.get("rescue_rate"),
                 "reject_rate": metrics_obj.get("reject_rate"),
                 "reject_rate_breakdown": metrics_obj.get("reject_rate_breakdown", {}),
+                _FORMAL_FINAL_DECISION_METRIC_NAME: metrics_obj.get(_FORMAL_FINAL_DECISION_METRIC_NAME),
+                _DERIVED_SYSTEM_UNION_METRIC_NAME: metrics_obj.get(_DERIVED_SYSTEM_UNION_METRIC_NAME),
                 _SYSTEM_FINAL_METRIC_NAME: metrics_obj.get(_SYSTEM_FINAL_METRIC_NAME),
+                "system_final_metrics_semantics": metrics_obj.get(
+                    "system_final_metrics_semantics",
+                    _SYSTEM_FINAL_METRIC_SEMANTICS,
+                ),
                 "auxiliary_scope_metrics": metrics_obj.get("auxiliary_scope_metrics", {}),
                 "auxiliary_analysis": item.get("auxiliary_analysis", {}),
             }
@@ -1963,11 +1989,11 @@ def build_aggregate_report(
     failure_semantics_distribution = _collect_failure_semantics_distribution(experiment_results)
     coverage_manifest = attack_coverage.compute_attack_coverage_manifest()
     primary_evaluation_scope = _SYSTEM_FINAL_SCOPE
-    primary_metric_name = _SYSTEM_FINAL_METRIC_NAME
+    primary_metric_name = _resolve_matrix_primary_metric_name(primary_evaluation_scope)
     primary_summary_basis_scope = _SYSTEM_FINAL_SCOPE
-    primary_summary_basis_metric_name = _SYSTEM_FINAL_METRIC_NAME
+    primary_summary_basis_metric_name = _resolve_matrix_primary_metric_name(primary_summary_basis_scope)
     primary_driver_mode = _SYSTEM_FINAL_PRIMARY_DRIVER_MODE
-    primary_status_source = _SYSTEM_FINAL_METRIC_NAME
+    primary_status_source = _FORMAL_FINAL_DECISION_METRIC_NAME
     auxiliary_scopes = (
         list(experiment_results[0].get("auxiliary_scopes", []))
         if experiment_results and isinstance(experiment_results[0].get("auxiliary_scopes"), list)
@@ -1986,6 +2012,22 @@ def build_aggregate_report(
             primary_summary_basis_scope=primary_summary_basis_scope,
             auxiliary_scopes=auxiliary_scopes,
         )
+    )
+    rows_with_formal_final_decision_metrics = sum(
+        1 for row in metrics_matrix if isinstance(row.get(_FORMAL_FINAL_DECISION_METRIC_NAME), dict)
+    )
+    ok_rows_with_formal_final_decision_metrics = sum(
+        1
+        for row in metrics_matrix
+        if row.get("status") == "ok" and isinstance(row.get(_FORMAL_FINAL_DECISION_METRIC_NAME), dict)
+    )
+    rows_with_derived_system_union_metrics = sum(
+        1 for row in metrics_matrix if isinstance(row.get(_DERIVED_SYSTEM_UNION_METRIC_NAME), dict)
+    )
+    ok_rows_with_derived_system_union_metrics = sum(
+        1
+        for row in metrics_matrix
+        if row.get("status") == "ok" and isinstance(row.get(_DERIVED_SYSTEM_UNION_METRIC_NAME), dict)
     )
     rows_with_system_final_metrics = sum(
         1 for row in metrics_matrix if isinstance(row.get(_SYSTEM_FINAL_METRIC_NAME), dict)
@@ -2027,11 +2069,22 @@ def build_aggregate_report(
         "attack_coverage_manifest": coverage_manifest,
         "anchors": anchor_rows,
         "metrics_matrix": metrics_matrix,
+        "formal_final_decision_metrics_presence": {
+            "rows_with_formal_final_decision_metrics": rows_with_formal_final_decision_metrics,
+            "ok_rows_with_formal_final_decision_metrics": ok_rows_with_formal_final_decision_metrics,
+            "rows_total": len(metrics_matrix),
+        },
+        "derived_system_union_metrics_presence": {
+            "rows_with_derived_system_union_metrics": rows_with_derived_system_union_metrics,
+            "ok_rows_with_derived_system_union_metrics": ok_rows_with_derived_system_union_metrics,
+            "rows_total": len(metrics_matrix),
+        },
         "system_final_metrics_presence": {
             "rows_with_system_final_metrics": rows_with_system_final_metrics,
             "ok_rows_with_system_final_metrics": ok_rows_with_system_final_metrics,
             "rows_total": len(metrics_matrix),
         },
+        "system_final_metrics_semantics": _SYSTEM_FINAL_METRIC_SEMANTICS,
         "grouped_metrics": grouped_rows,
         "failure_semantics_distribution": failure_semantics_distribution,
         "failures": failures,
@@ -3954,11 +4007,11 @@ def _write_grid_artifacts(
             "succeeded": sum(1 for r in results if isinstance(r, dict) and r.get("status") == "ok"),
             "failed": sum(1 for r in results if isinstance(r, dict) and r.get("status") != "ok"),
             "primary_evaluation_scope": aggregate_report.get("primary_evaluation_scope", _SYSTEM_FINAL_SCOPE),
-            "primary_metric_name": aggregate_report.get("primary_metric_name", _SYSTEM_FINAL_METRIC_NAME),
+            "primary_metric_name": aggregate_report.get("primary_metric_name", _FORMAL_FINAL_DECISION_METRIC_NAME),
             "primary_driver_mode": aggregate_report.get("primary_driver_mode", _SYSTEM_FINAL_PRIMARY_DRIVER_MODE),
-            "primary_status_source": aggregate_report.get("primary_status_source", _SYSTEM_FINAL_METRIC_NAME),
+            "primary_status_source": aggregate_report.get("primary_status_source", _FORMAL_FINAL_DECISION_METRIC_NAME),
             "primary_summary_basis_scope": aggregate_report.get("primary_summary_basis_scope", _SYSTEM_FINAL_SCOPE),
-            "primary_summary_basis_metric_name": aggregate_report.get("primary_summary_basis_metric_name", _SYSTEM_FINAL_METRIC_NAME),
+            "primary_summary_basis_metric_name": aggregate_report.get("primary_summary_basis_metric_name", _FORMAL_FINAL_DECISION_METRIC_NAME),
             "auxiliary_scopes": aggregate_report.get("auxiliary_scopes", []),
             _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD: aggregate_report.get(
                 _AUXILIARY_ANALYSIS_RUNTIME_EVIDENCE_FIELD,
@@ -3966,7 +4019,13 @@ def _write_grid_artifacts(
             ),
             "gpu_memory_summary": resolved_gpu_memory_summary,
             "scope_manifest": aggregate_report.get("scope_manifest", {}),
+            "formal_final_decision_metrics_presence": aggregate_report.get("formal_final_decision_metrics_presence", {}),
+            "derived_system_union_metrics_presence": aggregate_report.get("derived_system_union_metrics_presence", {}),
             "system_final_metrics_presence": aggregate_report.get("system_final_metrics_presence", {}),
+            "system_final_metrics_semantics": aggregate_report.get(
+                "system_final_metrics_semantics",
+                _SYSTEM_FINAL_METRIC_SEMANTICS,
+            ),
             "results": results,
             **anchors_obj,  # append-only: 补齐锚点字段全集
         },
