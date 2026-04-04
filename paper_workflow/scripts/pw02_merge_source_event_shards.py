@@ -43,6 +43,10 @@ from paper_workflow.scripts.pw_common import (
 CONTENT_SCORE_NAME = eval_metrics.CONTENT_CHAIN_SCORE_NAME
 EVENT_ATTESTATION_SCORE_NAME = "event_attestation_score"
 PW02_RUN_ROOT_REUSE_REASON = "paper_workflow_pw02_prepared_inputs"
+FORMAL_REQUIRED_SOURCE_POOL = "formal_required"
+OPTIONAL_DIAGNOSTIC_SOURCE_POOL = "optional_diagnostic"
+SOURCE_POOL_STATUS_COMPLETED = "completed"
+SOURCE_POOL_STATUS_NOT_PROVIDED = "not_provided"
 POOL_MANIFEST_FILE_NAMES = {
     ACTIVE_SAMPLE_ROLE: "positive_source_pool_manifest.json",
     CLEAN_NEGATIVE_SAMPLE_ROLE: "clean_negative_pool_manifest.json",
@@ -213,6 +217,89 @@ def _collect_completed_events_for_role(
     return event_lookup
 
 
+def _collect_optional_completed_events_for_role(
+    *,
+    family_root: Path,
+    source_shard_plan: Mapping[str, Any],
+    sample_role: str,
+) -> Dict[str, Any]:
+    """
+    Collect one optional source cohort with 0/N, N/N, and partial-state semantics.
+
+    Args:
+        family_root: Family root path.
+        source_shard_plan: Source shard plan payload.
+        sample_role: Supported optional source sample role.
+
+    Returns:
+        Optional cohort summary with collection status and event lookup.
+
+    Raises:
+        RuntimeError: If the optional cohort is partially provided.
+    """
+    if not isinstance(family_root, Path):
+        raise TypeError("family_root must be Path")
+    normalized_sample_role = validate_source_sample_role(sample_role)
+    role_plan = _resolve_role_plan(source_shard_plan, normalized_sample_role)
+
+    shards_node = role_plan.get("shards")
+    if not isinstance(shards_node, list):
+        raise ValueError(f"source shard plan {normalized_sample_role}.shards must be list")
+
+    expected_shard_indices: List[int] = []
+    discovered_shard_indices: List[int] = []
+    missing_shard_indices: List[int] = []
+    for shard_row_node in cast(List[object], shards_node):
+        if not isinstance(shard_row_node, dict):
+            raise ValueError("source shard plan shards must contain objects")
+        shard_row = cast(Dict[str, Any], shard_row_node)
+        shard_index = shard_row.get("shard_index")
+        if not isinstance(shard_index, int) or shard_index < 0:
+            raise ValueError("source shard row missing shard_index")
+        expected_shard_indices.append(shard_index)
+
+        shard_root = build_source_shard_root(family_root, normalized_sample_role, shard_index)
+        shard_manifest_path = shard_root / "shard_manifest.json"
+        if shard_manifest_path.exists() and shard_manifest_path.is_file():
+            discovered_shard_indices.append(shard_index)
+        else:
+            missing_shard_indices.append(shard_index)
+
+    expected_source_shard_count = len(expected_shard_indices)
+    discovered_source_shard_count = len(discovered_shard_indices)
+    if discovered_source_shard_count == 0:
+        return {
+            "cohort_status": SOURCE_POOL_STATUS_NOT_PROVIDED,
+            "role_requirement": OPTIONAL_DIAGNOSTIC_SOURCE_POOL,
+            "event_lookup": {},
+            "expected_source_shard_count": expected_source_shard_count,
+            "discovered_source_shard_count": 0,
+            "missing_source_shard_indices": missing_shard_indices,
+        }
+
+    if discovered_source_shard_count < expected_source_shard_count:
+        raise RuntimeError(
+            "PW02 optional diagnostic cohort is partially provided: "
+            f"sample_role={normalized_sample_role}, "
+            f"discovered_source_shard_count={discovered_source_shard_count}, "
+            f"expected_source_shard_count={expected_source_shard_count}, "
+            f"missing_source_shard_indices={missing_shard_indices}"
+        )
+
+    return {
+        "cohort_status": SOURCE_POOL_STATUS_COMPLETED,
+        "role_requirement": OPTIONAL_DIAGNOSTIC_SOURCE_POOL,
+        "event_lookup": _collect_completed_events_for_role(
+            family_root=family_root,
+            source_shard_plan=source_shard_plan,
+            sample_role=normalized_sample_role,
+        ),
+        "expected_source_shard_count": expected_source_shard_count,
+        "discovered_source_shard_count": discovered_source_shard_count,
+        "missing_source_shard_indices": [],
+    }
+
+
 def _build_source_pool_manifest_payload(
     *,
     family_id: str,
@@ -222,6 +309,11 @@ def _build_source_pool_manifest_payload(
     source_shard_plan_path: Path,
     source_split_plan_path: Path,
     stage_root: Path,
+    role_requirement: str = FORMAL_REQUIRED_SOURCE_POOL,
+    cohort_status: str = SOURCE_POOL_STATUS_COMPLETED,
+    expected_source_shard_count: int | None = None,
+    discovered_source_shard_count: int | None = None,
+    missing_source_shard_indices: Sequence[int] | None = None,
 ) -> Dict[str, Any]:
     """
     Build one top-level PW02 source-pool manifest payload.
@@ -248,6 +340,20 @@ def _build_source_pool_manifest_payload(
         (dict(event_payload) for event_payload in event_lookup.values()),
         key=lambda item: int(item.get("event_index", -1)),
     )
+    expected_shard_count = (
+        expected_source_shard_count
+        if isinstance(expected_source_shard_count, int) and expected_source_shard_count >= 0
+        else len(ordered_events)
+    )
+    discovered_shard_count = (
+        discovered_source_shard_count
+        if isinstance(discovered_source_shard_count, int) and discovered_source_shard_count >= 0
+        else len(ordered_events)
+    )
+    missing_shard_indices = [
+        int(index)
+        for index in cast(Sequence[int], missing_source_shard_indices or [])
+    ]
 
     shard_rows: Dict[int, Dict[str, Any]] = {}
     manifest_events: List[Dict[str, Any]] = []
@@ -304,10 +410,16 @@ def _build_source_pool_manifest_payload(
         "created_at": utc_now_iso(),
         "family_id": family_id,
         "source_role": normalized_sample_role,
+        "role_requirement": role_requirement,
+        "cohort_status": cohort_status,
+        "diagnostic_only": role_requirement == OPTIONAL_DIAGNOSTIC_SOURCE_POOL,
         "event_count": len(manifest_events),
         "event_ids": [event_payload["event_id"] for event_payload in manifest_events],
         "events": manifest_events,
         "source_shard_count": len(ordered_shards),
+        "expected_source_shard_count": expected_shard_count,
+        "discovered_source_shard_count": discovered_shard_count,
+        "missing_source_shard_indices": missing_shard_indices,
         "source_shards": ordered_shards,
         "source_shard_manifest_paths": [
             str(shard_row["shard_manifest_path"])
@@ -331,6 +443,11 @@ def _write_source_pool_manifest(
     family_manifest_path: Path,
     source_shard_plan_path: Path,
     source_split_plan_path: Path,
+    role_requirement: str = FORMAL_REQUIRED_SOURCE_POOL,
+    cohort_status: str = SOURCE_POOL_STATUS_COMPLETED,
+    expected_source_shard_count: int | None = None,
+    discovered_source_shard_count: int | None = None,
+    missing_source_shard_indices: Sequence[int] | None = None,
 ) -> Dict[str, Any]:
     """
     Write one top-level PW02 source-pool manifest.
@@ -359,6 +476,11 @@ def _write_source_pool_manifest(
         source_shard_plan_path=source_shard_plan_path,
         source_split_plan_path=source_split_plan_path,
         stage_root=stage_root,
+        role_requirement=role_requirement,
+        cohort_status=cohort_status,
+        expected_source_shard_count=expected_source_shard_count,
+        discovered_source_shard_count=discovered_source_shard_count,
+        missing_source_shard_indices=missing_source_shard_indices,
     )
     write_json_atomic(manifest_path, payload)
     return {
@@ -620,6 +742,9 @@ def _build_finalize_manifest_payload(
     Returns:
         Finalize-manifest payload.
     """
+    positive_pool_payload = cast(Mapping[str, Any], positive_pool_manifest.get("payload", {}))
+    clean_negative_pool_payload = cast(Mapping[str, Any], clean_negative_pool_manifest.get("payload", {}))
+    control_negative_pool_payload = cast(Mapping[str, Any], control_negative_pool_manifest.get("payload", {}))
     return {
         "artifact_type": "paper_workflow_pw02_finalize_manifest",
         "schema_version": "pw_stage_02_v1",
@@ -636,15 +761,30 @@ def _build_finalize_manifest_payload(
         "source_pools": {
             ACTIVE_SAMPLE_ROLE: {
                 "manifest_path": str(positive_pool_manifest.get("path")),
-                "event_count": cast(Mapping[str, Any], positive_pool_manifest.get("payload", {})).get("event_count"),
+                "event_count": positive_pool_payload.get("event_count"),
+                "cohort_status": positive_pool_payload.get("cohort_status"),
+                "role_requirement": positive_pool_payload.get("role_requirement"),
+                "expected_source_shard_count": positive_pool_payload.get("expected_source_shard_count"),
+                "discovered_source_shard_count": positive_pool_payload.get("discovered_source_shard_count"),
+                "diagnostic_only": positive_pool_payload.get("diagnostic_only"),
             },
             CLEAN_NEGATIVE_SAMPLE_ROLE: {
                 "manifest_path": str(clean_negative_pool_manifest.get("path")),
-                "event_count": cast(Mapping[str, Any], clean_negative_pool_manifest.get("payload", {})).get("event_count"),
+                "event_count": clean_negative_pool_payload.get("event_count"),
+                "cohort_status": clean_negative_pool_payload.get("cohort_status"),
+                "role_requirement": clean_negative_pool_payload.get("role_requirement"),
+                "expected_source_shard_count": clean_negative_pool_payload.get("expected_source_shard_count"),
+                "discovered_source_shard_count": clean_negative_pool_payload.get("discovered_source_shard_count"),
+                "diagnostic_only": clean_negative_pool_payload.get("diagnostic_only"),
             },
             PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE: {
                 "manifest_path": str(control_negative_pool_manifest.get("path")),
-                "event_count": cast(Mapping[str, Any], control_negative_pool_manifest.get("payload", {})).get("event_count"),
+                "event_count": control_negative_pool_payload.get("event_count"),
+                "cohort_status": control_negative_pool_payload.get("cohort_status"),
+                "role_requirement": control_negative_pool_payload.get("role_requirement"),
+                "expected_source_shard_count": control_negative_pool_payload.get("expected_source_shard_count"),
+                "discovered_source_shard_count": control_negative_pool_payload.get("discovered_source_shard_count"),
+                "diagnostic_only": control_negative_pool_payload.get("diagnostic_only"),
             },
         },
         "threshold_exports": {
@@ -1160,11 +1300,12 @@ def run_pw02_merge_source_event_shards(
         source_shard_plan=source_shard_plan,
         sample_role=CLEAN_NEGATIVE_SAMPLE_ROLE,
     )
-    control_negative_events = _collect_completed_events_for_role(
+    control_negative_collection = _collect_optional_completed_events_for_role(
         family_root=family_root,
         source_shard_plan=source_shard_plan,
         sample_role=PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
     )
+    control_negative_events = cast(Dict[str, Dict[str, Any]], control_negative_collection["event_lookup"])
 
     calibration_records = _build_prepared_records(
         family_id=family_id,
@@ -1249,6 +1390,11 @@ def run_pw02_merge_source_event_shards(
         family_manifest_path=layout["family_manifest_path"],
         source_shard_plan_path=layout["source_shard_plan_path"],
         source_split_plan_path=layout["source_split_plan_path"],
+        role_requirement=str(control_negative_collection["role_requirement"]),
+        cohort_status=str(control_negative_collection["cohort_status"]),
+        expected_source_shard_count=int(control_negative_collection["expected_source_shard_count"]),
+        discovered_source_shard_count=int(control_negative_collection["discovered_source_shard_count"]),
+        missing_source_shard_indices=cast(List[int], control_negative_collection["missing_source_shard_indices"]),
     )
 
     score_runs = {
@@ -1336,6 +1482,10 @@ def run_pw02_merge_source_event_shards(
         "positive_source_pool_manifest_path": str(positive_pool_manifest["path"]),
         "clean_negative_pool_manifest_path": str(clean_negative_pool_manifest["path"]),
         "planner_conditioned_control_negative_pool_manifest_path": str(control_negative_pool_manifest["path"]),
+        "planner_conditioned_control_negative_cohort_status": cast(Mapping[str, Any], control_negative_pool_manifest["payload"]).get("cohort_status"),
+        "planner_conditioned_control_negative_role_requirement": cast(Mapping[str, Any], control_negative_pool_manifest["payload"]).get("role_requirement"),
+        "planner_conditioned_control_negative_expected_source_shard_count": cast(Mapping[str, Any], control_negative_pool_manifest["payload"]).get("expected_source_shard_count"),
+        "planner_conditioned_control_negative_discovered_source_shard_count": cast(Mapping[str, Any], control_negative_pool_manifest["payload"]).get("discovered_source_shard_count"),
         "paper_source_finalize_manifest_path": normalize_path_value(finalize_manifest_path),
         "family_manifest_path": normalize_path_value(layout["family_manifest_path"]),
         "source_shard_plan_path": normalize_path_value(layout["source_shard_plan_path"]),

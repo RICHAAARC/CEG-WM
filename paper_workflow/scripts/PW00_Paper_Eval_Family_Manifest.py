@@ -23,7 +23,12 @@ def main() -> int:
     Returns:
         Process-style exit code.
     """
-    parser = argparse.ArgumentParser(description="Build paper workflow family manifest and source shard plan.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Build the PW00 family manifest, source shard plan, and frozen split plan for formal roles "
+            "plus the optional planner_conditioned_control_negative diagnostic cohort."
+        )
+    )
     parser.add_argument("--drive-project-root", required=True, help="Google Drive project root path.")
     parser.add_argument("--family-id", required=True, help="Paper workflow family identifier.")
     parser.add_argument("--prompt-file", required=True, help="Prompt file path.")

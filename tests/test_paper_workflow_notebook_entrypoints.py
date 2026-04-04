@@ -178,6 +178,7 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
 
     assert '"PW01_Source_Event_Shards.py"' in pw01_constants
     assert 'SAMPLE_ROLE = "positive_source"' in pw01_constants
+    assert '"planner_conditioned_control_negative": "control_negative"' in pw01_constants
     assert 'STAGE_01_WORKER_COUNT = 2' in pw01_constants
     assert '"--drive-project-root"' in pw01_execute
     assert '"--family-id"' in pw01_execute
@@ -239,8 +240,10 @@ def test_pw01_notebook_restores_bootstrap_before_single_formal_precheck() -> Non
     pw01_bootstrap = _find_code_cell_source(NOTEBOOK_PW01_PATH, "MODEL_SNAPSHOT_PATH = snapshot_download(")
     pw01_precheck = _find_code_cell_source(NOTEBOOK_PW01_PATH, "PRECHECK_RESULTS = []")
 
-    assert "sample_role 可取 positive_source 或 clean_negative" in pw01_intro
-    assert "source_shards/positive/shard_xxxx 或 source_shards/negative/shard_xxxx" in pw01_parallel_markdown
+    assert "formal 主流程角色为 positive_source 与 clean_negative" in pw01_intro
+    assert "planner_conditioned_control_negative 仅作为 optional diagnostic cohort 按需执行" in pw01_intro
+    assert "source_shards/positive/shard_xxxx、source_shards/negative/shard_xxxx 或 source_shards/control_negative/shard_xxxx" in pw01_parallel_markdown
+    assert "planner_conditioned_control_negative 仅在需要 diagnostic pool 时按需补跑" in pw01_parallel_markdown
 
     assert 'from huggingface_hub import HfApi, snapshot_download' in pw01_bootstrap
     assert 'os.environ["HUGGINGFACE_HUB_CACHE"] = str(HF_HUB_CACHE)' in pw01_bootstrap
@@ -318,17 +321,58 @@ def test_pw02_notebook_reads_summary_from_runtime_state() -> None:
     assert 'PW02_RESULT = subprocess.run(' in pw02_execute
     assert 'if not PW02_SUMMARY_PATH.exists():' in pw02_execute
     assert 'PW02_SUMMARY = json.loads(PW02_SUMMARY_PATH.read_text(encoding="utf-8"))' in pw02_execute
+    assert 'summary 会显式记录 planner_conditioned_control_negative 的 cohort_status' in _find_markdown_cell_source(
+        NOTEBOOK_PW02_PATH,
+        'summary 会显式记录 planner_conditioned_control_negative 的 cohort_status',
+    )
+
+
+def test_pw00_and_pw02_notebooks_explain_formal_vs_optional_control_boundary() -> None:
+    """
+    Verify PW00 and PW02 notebook markdown explains the formal/optional cohort boundary.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    pw00_intro = _find_markdown_cell_source(NOTEBOOK_PW00_PATH, "用途：")
+    pw02_intro = _find_markdown_cell_source(NOTEBOOK_PW02_PATH, "用途：")
+    pw02_precheck_markdown = _find_markdown_cell_source(NOTEBOOK_PW02_PATH, "本单元只把")
+
+    assert "formal 主流程所需的双 role source event grid" in pw00_intro
+    assert "optional diagnostic cohort planner_conditioned_control_negative" in pw00_intro
+
+    assert "formal 双 role shard（positive_source 与 clean_negative）" in pw02_intro
+    assert "完整 planner_conditioned_control_negative cohort 时额外导出 optional diagnostic pool" in pw02_intro
+
+    assert "positive_source 与 clean_negative 视为 PW02 formal 主流程硬依赖" in pw02_precheck_markdown
+    assert "planner_conditioned_control_negative 缺失可接受" in pw02_precheck_markdown
+    assert "若只完成部分 shard，PW02 CLI 会快速失败" in pw02_precheck_markdown
 
 
 @pytest.mark.parametrize(
-    "script_relative_path",
+    ("script_relative_path", "expected_help_text"),
     [
-        "paper_workflow/scripts/PW00_Paper_Eval_Family_Manifest.py",
-        "paper_workflow/scripts/PW01_Source_Event_Shards.py",
-        "paper_workflow/scripts/PW02_Source_Merge_And_Global_Thresholds.py",
+        (
+            "paper_workflow/scripts/PW00_Paper_Eval_Family_Manifest.py",
+            "optional planner_conditioned_control_negative diagnostic cohort",
+        ),
+        (
+            "paper_workflow/scripts/PW01_Source_Event_Shards.py",
+            "Optional advanced diagnostic value: planner_conditioned_control_negative.",
+        ),
+        (
+            "paper_workflow/scripts/PW02_Source_Merge_And_Global_Thresholds.py",
+            "formal mainline requires positive_source and clean_negative only",
+        ),
     ],
 )
-def test_paper_workflow_script_help_entrypoints(script_relative_path: str) -> None:
+def test_paper_workflow_script_help_entrypoints(
+    script_relative_path: str,
+    expected_help_text: str,
+) -> None:
     """
     Verify paper_workflow scripts expose help entrypoints.
 
@@ -350,8 +394,10 @@ def test_paper_workflow_script_help_entrypoints(script_relative_path: str) -> No
         errors="replace",
     )
     combined_output = f"{result.stdout}\n{result.stderr}"
+    normalized_output = " ".join(combined_output.split())
     assert result.returncode == 0
     assert "usage:" in combined_output.lower()
+    assert expected_help_text in normalized_output
 
 
 def test_pw01_errors_when_family_manifest_missing(tmp_path: Path) -> None:

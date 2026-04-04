@@ -41,12 +41,17 @@ def _build_pw00_family(tmp_path: Path, family_id: str) -> Dict[str, Any]:
     )
 
 
-def _materialize_completed_pw01_shards(summary: Dict[str, Any]) -> None:
+def _materialize_completed_pw01_shards(
+    summary: Dict[str, Any],
+    role_shard_indices: Dict[str, Sequence[int]] | None = None,
+) -> None:
     """
-    Create completed PW01 shard manifests and detect records for all source roles.
+    Create completed PW01 shard manifests and detect records for selected source roles.
 
     Args:
         summary: PW00 summary payload.
+        role_shard_indices: Optional mapping from sample_role to completed shard indices.
+            When omitted, all planned shards are materialized for all source roles.
 
     Returns:
         None.
@@ -57,15 +62,30 @@ def _materialize_completed_pw01_shards(summary: Dict[str, Any]) -> None:
         row["event_id"]: row
         for row in read_jsonl(Path(str(summary["source_event_grid_path"])))
     }
+    sample_role_plans = cast(Dict[str, Dict[str, Any]], shard_plan["sample_role_plans"])
 
-    for sample_role in [
-        "positive_source",
-        "clean_negative",
-        "planner_conditioned_control_negative",
-    ]:
-        role_plan = cast(Dict[str, Any], shard_plan["sample_role_plans"][sample_role])
+    if role_shard_indices is None:
+        normalized_role_shard_indices: Dict[str, List[int]] = {}
+        for sample_role, role_plan in sample_role_plans.items():
+            normalized_role_shard_indices[sample_role] = [
+                int(shard_row["shard_index"])
+                for shard_row in cast(List[Dict[str, Any]], role_plan["shards"])
+            ]
+    else:
+        normalized_role_shard_indices = {
+            str(sample_role): [int(shard_index) for shard_index in shard_indices]
+            for sample_role, shard_indices in role_shard_indices.items()
+        }
+
+    for sample_role, selected_shard_indices in normalized_role_shard_indices.items():
+        if sample_role not in sample_role_plans:
+            raise AssertionError(f"unsupported sample_role fixture request: {sample_role}")
+        role_plan = sample_role_plans[sample_role]
+        shard_index_filter = set(selected_shard_indices)
         for shard_row in cast(List[Dict[str, Any]], role_plan["shards"]):
             shard_index = int(shard_row["shard_index"])
+            if shard_index not in shard_index_filter:
+                continue
             shard_root = ensure_directory(build_source_shard_root(family_root, sample_role, shard_index))
             ensure_directory(shard_root / "records")
             events: List[Dict[str, Any]] = []
@@ -367,6 +387,8 @@ def test_pw02_merges_dual_role_shards_and_builds_score_runs(tmp_path: Path, monk
     assert attestation_run["calibration_inputs"]["record_count"] == 4
     assert attestation_run["evaluate_inputs"]["record_count"] == 4
     assert Path(str(pw02_summary["planner_conditioned_control_negative_pool_manifest_path"])).exists()
+    assert pw02_summary["planner_conditioned_control_negative_cohort_status"] == "completed"
+    assert pw02_summary["planner_conditioned_control_negative_role_requirement"] == "optional_diagnostic"
 
     attestation_negative_record_path = Path(
         str(
@@ -394,6 +416,89 @@ def test_pw02_merges_dual_role_shards_and_builds_score_runs(tmp_path: Path, monk
     assert derived_system_union_metrics["n_positive"] == 2
     assert derived_system_union_metrics["n_negative"] == 2
     assert pw02_summary["system_final_metrics"] == derived_system_union_metrics
+
+
+def test_pw02_succeeds_without_optional_control_cohort(tmp_path: Path, monkeypatch: Any) -> None:
+    """
+    Verify PW02 formal mainline succeeds when the optional control cohort is absent.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    summary = _build_pw00_family(tmp_path, family_id="family_pw02_no_control")
+    _materialize_completed_pw01_shards(
+        summary,
+        role_shard_indices={
+            "positive_source": [0, 1],
+            "clean_negative": [0, 1],
+        },
+    )
+    _patch_pw02_python_stage_runner(monkeypatch)
+
+    pw02_summary = pw02_module.run_pw02_merge_source_event_shards(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_pw02_no_control",
+    )
+
+    control_negative_pool_manifest = json.loads(
+        Path(str(pw02_summary["planner_conditioned_control_negative_pool_manifest_path"])).read_text(encoding="utf-8")
+    )
+    finalize_manifest = json.loads(
+        Path(str(pw02_summary["paper_source_finalize_manifest_path"])).read_text(encoding="utf-8")
+    )
+
+    assert pw02_summary["status"] == "ok"
+    assert pw02_summary["planner_conditioned_control_negative_cohort_status"] == "not_provided"
+    assert pw02_summary["planner_conditioned_control_negative_role_requirement"] == "optional_diagnostic"
+    assert pw02_summary["planner_conditioned_control_negative_expected_source_shard_count"] == 2
+    assert pw02_summary["planner_conditioned_control_negative_discovered_source_shard_count"] == 0
+
+    assert control_negative_pool_manifest["source_role"] == "planner_conditioned_control_negative"
+    assert control_negative_pool_manifest["role_requirement"] == "optional_diagnostic"
+    assert control_negative_pool_manifest["cohort_status"] == "not_provided"
+    assert control_negative_pool_manifest["diagnostic_only"] is True
+    assert control_negative_pool_manifest["event_count"] == 0
+    assert control_negative_pool_manifest["events"] == []
+    assert control_negative_pool_manifest["source_shard_manifest_paths"] == []
+    assert control_negative_pool_manifest["expected_source_shard_count"] == 2
+    assert control_negative_pool_manifest["discovered_source_shard_count"] == 0
+    assert control_negative_pool_manifest["missing_source_shard_indices"] == [0, 1]
+
+    assert finalize_manifest["source_pools"]["planner_conditioned_control_negative"]["event_count"] == 0
+    assert finalize_manifest["source_pools"]["planner_conditioned_control_negative"]["cohort_status"] == "not_provided"
+    assert finalize_manifest["source_pools"]["planner_conditioned_control_negative"]["role_requirement"] == "optional_diagnostic"
+    assert finalize_manifest["source_pools"]["planner_conditioned_control_negative"]["diagnostic_only"] is True
+
+
+def test_pw02_fails_fast_when_optional_control_cohort_is_partial(tmp_path: Path) -> None:
+    """
+    Verify PW02 rejects a partially materialized optional control cohort.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    summary = _build_pw00_family(tmp_path, family_id="family_pw02_partial_control")
+    _materialize_completed_pw01_shards(
+        summary,
+        role_shard_indices={
+            "positive_source": [0, 1],
+            "clean_negative": [0, 1],
+            "planner_conditioned_control_negative": [0],
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="PW02 optional diagnostic cohort is partially provided"):
+        pw02_module.run_pw02_merge_source_event_shards(
+            drive_project_root=tmp_path / "drive",
+            family_id="family_pw02_partial_control",
+        )
 
 
 def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path: Path, monkeypatch: Any) -> None:
@@ -462,8 +567,14 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
 
     assert control_negative_pool_manifest["family_id"] == "family_pw02_exports"
     assert control_negative_pool_manifest["source_role"] == "planner_conditioned_control_negative"
+    assert control_negative_pool_manifest["role_requirement"] == "optional_diagnostic"
+    assert control_negative_pool_manifest["cohort_status"] == "completed"
+    assert control_negative_pool_manifest["diagnostic_only"] is True
     assert control_negative_pool_manifest["event_count"] == 4
     assert len(control_negative_pool_manifest["events"]) == 4
+    assert control_negative_pool_manifest["expected_source_shard_count"] == 2
+    assert control_negative_pool_manifest["discovered_source_shard_count"] == 2
+    assert control_negative_pool_manifest["missing_source_shard_indices"] == []
     assert len(control_negative_pool_manifest["source_shard_manifest_paths"]) == 2
 
     assert finalize_manifest["source_pools"]["positive_source"]["manifest_path"] == pw02_summary["positive_source_pool_manifest_path"]
@@ -472,6 +583,9 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
         finalize_manifest["source_pools"]["planner_conditioned_control_negative"]["manifest_path"]
         == pw02_summary["planner_conditioned_control_negative_pool_manifest_path"]
     )
+    assert finalize_manifest["source_pools"]["planner_conditioned_control_negative"]["cohort_status"] == "completed"
+    assert finalize_manifest["source_pools"]["planner_conditioned_control_negative"]["role_requirement"] == "optional_diagnostic"
+    assert finalize_manifest["source_pools"]["planner_conditioned_control_negative"]["diagnostic_only"] is True
     assert finalize_manifest["threshold_exports"]["content"]["path"] == cast(Dict[str, Any], pw02_summary["threshold_exports"])["content"]
     assert finalize_manifest["clean_evaluate_exports"]["content"]["path"] == cast(Dict[str, Any], pw02_summary["clean_evaluate_exports"])["content"]
 

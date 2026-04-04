@@ -23,13 +23,22 @@ def main() -> int:
     Returns:
         Process-style exit code.
     """
-    parser = argparse.ArgumentParser(description="Run one PW01 source-role shard.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run one PW01 source-role shard. "
+            "Formal mainline roles are positive_source and clean_negative; "
+            "planner_conditioned_control_negative is an optional diagnostic cohort."
+        )
+    )
     parser.add_argument("--drive-project-root", required=True, help="Google Drive project root path.")
     parser.add_argument("--family-id", required=True, help="Paper workflow family identifier.")
     parser.add_argument(
         "--sample-role",
         default="positive_source",
-        help="Source sample role for this shard. Supported values: positive_source, clean_negative.",
+        help=(
+            "Source sample role for this shard. Formal mainline values: positive_source, clean_negative. "
+            "Optional advanced diagnostic value: planner_conditioned_control_negative."
+        ),
     )
     parser.add_argument("--shard-index", required=True, type=int, help="Zero-based shard index.")
     parser.add_argument("--shard-count", required=True, type=int, help="Total shard count.")

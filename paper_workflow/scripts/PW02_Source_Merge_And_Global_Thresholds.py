@@ -23,7 +23,14 @@ def main() -> int:
     Returns:
         Process-style exit code.
     """
-    parser = argparse.ArgumentParser(description="Run PW02 source merge and global thresholds workflow.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run PW02 source merge and global thresholds workflow. "
+            "The formal mainline requires positive_source and clean_negative only; "
+            "planner_conditioned_control_negative is an optional diagnostic cohort that may be absent, "
+            "but if partially provided PW02 will fail fast."
+        )
+    )
     parser.add_argument("--drive-project-root", required=True, help="Google Drive project root path.")
     parser.add_argument("--family-id", required=True, help="Paper workflow family identifier.")
     args = parser.parse_args()
