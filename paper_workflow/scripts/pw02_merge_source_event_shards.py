@@ -13,7 +13,10 @@ from typing import Any, Dict, List, Mapping, Sequence, Tuple, cast
 
 from main.evaluation import metrics as eval_metrics
 from main.evaluation import workflow_inputs as eval_workflow_inputs
-from main.evaluation.experiment_matrix import _build_system_final_metrics_for_run
+from main.evaluation.experiment_matrix import (
+    _build_formal_final_decision_metrics_for_run,
+    _build_system_final_metrics_for_run,
+)
 from scripts.notebook_runtime_common import (
     REPO_ROOT,
     ensure_directory,
@@ -29,6 +32,7 @@ from scripts.notebook_runtime_common import (
 from paper_workflow.scripts.pw_common import (
     ACTIVE_SAMPLE_ROLE,
     CLEAN_NEGATIVE_SAMPLE_ROLE,
+    PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
     build_family_root,
     build_source_shard_root,
     resolve_family_layout_paths,
@@ -42,9 +46,11 @@ PW02_RUN_ROOT_REUSE_REASON = "paper_workflow_pw02_prepared_inputs"
 POOL_MANIFEST_FILE_NAMES = {
     ACTIVE_SAMPLE_ROLE: "positive_source_pool_manifest.json",
     CLEAN_NEGATIVE_SAMPLE_ROLE: "clean_negative_pool_manifest.json",
+    PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE: "planner_conditioned_control_negative_pool_manifest.json",
 }
 FINALIZE_MANIFEST_FILE_NAME = "paper_source_finalize_manifest.json"
-SYSTEM_FINAL_METRICS_FILE_NAME = "system_final_metrics.json"
+FORMAL_FINAL_DECISION_METRICS_FILE_NAME = "formal_final_decision_metrics.json"
+DERIVED_SYSTEM_UNION_METRICS_FILE_NAME = "derived_system_union_metrics.json"
 
 
 def _resolve_top_level_score_directory_name(score_name: str) -> str:
@@ -504,14 +510,14 @@ def _build_system_final_metrics_export(
     Returns:
         System-final export summary with path and payload.
     """
-    export_path = stage_root / SYSTEM_FINAL_METRICS_FILE_NAME
+    export_path = stage_root / DERIVED_SYSTEM_UNION_METRICS_FILE_NAME
     evaluate_inputs = cast(Mapping[str, Any], content_score_run.get("evaluate_inputs", {}))
     payload: Dict[str, Any] = {
-        "artifact_type": "paper_workflow_pw02_system_final_metrics",
+        "artifact_type": "paper_workflow_pw02_derived_system_union_metrics",
         "schema_version": "pw_stage_02_v1",
         "created_at": utc_now_iso(),
         "family_id": family_id,
-        "scope": "system_final",
+        "scope": "derived_system_union",
         "source_kind": "derived_metrics_from_content_evaluate_inputs",
         "is_formal_evaluate_record": False,
         "source_score_name": CONTENT_SCORE_NAME,
@@ -520,6 +526,49 @@ def _build_system_final_metrics_export(
         "source_evaluate_inputs_glob": evaluate_inputs.get("records_glob"),
         "metrics": dict(system_final_metrics),
         "notes": "Derived via main.evaluation.experiment_matrix._build_system_final_metrics_for_run over content evaluate inputs; this is not an independent formal evaluate record.",
+    }
+    write_json_atomic(export_path, payload)
+    return {
+        "path": normalize_path_value(export_path),
+        "payload": payload,
+    }
+
+
+def _build_formal_final_decision_metrics_export(
+    *,
+    family_id: str,
+    stage_root: Path,
+    content_score_run: Mapping[str, Any],
+    formal_final_decision_metrics: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """
+    Build the formal final-decision metrics export from content evaluate inputs.
+
+    Args:
+        family_id: Family identifier.
+        stage_root: PW02 stage root.
+        content_score_run: Content score-run summary.
+        formal_final_decision_metrics: Final-decision-only metrics.
+
+    Returns:
+        Export summary with path and payload.
+    """
+    export_path = stage_root / FORMAL_FINAL_DECISION_METRICS_FILE_NAME
+    evaluate_inputs = cast(Mapping[str, Any], content_score_run.get("evaluate_inputs", {}))
+    payload: Dict[str, Any] = {
+        "artifact_type": "paper_workflow_pw02_formal_final_decision_metrics",
+        "schema_version": "pw_stage_02_v1",
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "scope": "formal_final_decision",
+        "source_kind": "formal_final_decision_metrics_from_content_evaluate_inputs",
+        "is_formal_evaluate_record": False,
+        "source_score_name": CONTENT_SCORE_NAME,
+        "source_evaluate_run_root": str(content_score_run.get("evaluate_run_root")),
+        "source_evaluate_record_path": str(content_score_run.get("evaluate_record_path")),
+        "source_evaluate_inputs_glob": evaluate_inputs.get("records_glob"),
+        "metrics": dict(formal_final_decision_metrics),
+        "notes": "Aggregated from formal final_decision terminal fields over content evaluate inputs; this is separate from the derived system union metrics.",
     }
     write_json_atomic(export_path, payload)
     return {
@@ -540,9 +589,11 @@ def _build_finalize_manifest_payload(
     source_merge_manifest_path: Path,
     positive_pool_manifest: Mapping[str, Any],
     clean_negative_pool_manifest: Mapping[str, Any],
+    control_negative_pool_manifest: Mapping[str, Any],
     threshold_exports: Mapping[str, Dict[str, Any]],
     clean_evaluate_exports: Mapping[str, Dict[str, Any]],
-    system_final_export: Mapping[str, Any],
+    formal_final_decision_export: Mapping[str, Any],
+    derived_system_union_export: Mapping[str, Any],
     score_runs: Mapping[str, Dict[str, Any]],
     split_counts: Mapping[str, Any],
 ) -> Dict[str, Any]:
@@ -591,6 +642,10 @@ def _build_finalize_manifest_payload(
                 "manifest_path": str(clean_negative_pool_manifest.get("path")),
                 "event_count": cast(Mapping[str, Any], clean_negative_pool_manifest.get("payload", {})).get("event_count"),
             },
+            PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE: {
+                "manifest_path": str(control_negative_pool_manifest.get("path")),
+                "event_count": cast(Mapping[str, Any], control_negative_pool_manifest.get("payload", {})).get("event_count"),
+            },
         },
         "threshold_exports": {
             score_key: {
@@ -609,12 +664,26 @@ def _build_finalize_manifest_payload(
             }
             for score_key, export_summary in clean_evaluate_exports.items()
         },
+        "formal_final_decision": {
+            "mode": "formal_final_decision_metrics_from_content_evaluate_inputs",
+            "is_formal_evaluate_record": False,
+            "artifact_path": formal_final_decision_export.get("path"),
+            "source_score_name": cast(Mapping[str, Any], formal_final_decision_export.get("payload", {})).get("source_score_name"),
+            "source_evaluate_run_root": cast(Mapping[str, Any], formal_final_decision_export.get("payload", {})).get("source_evaluate_run_root"),
+        },
+        "derived_system_union": {
+            "mode": "derived_metrics_from_content_evaluate_inputs",
+            "is_formal_evaluate_record": False,
+            "artifact_path": derived_system_union_export.get("path"),
+            "source_score_name": cast(Mapping[str, Any], derived_system_union_export.get("payload", {})).get("source_score_name"),
+            "source_evaluate_run_root": cast(Mapping[str, Any], derived_system_union_export.get("payload", {})).get("source_evaluate_run_root"),
+        },
         "system_final": {
             "mode": "derived_metrics_from_content_evaluate_inputs",
             "is_formal_evaluate_record": False,
-            "artifact_path": system_final_export.get("path"),
-            "source_score_name": cast(Mapping[str, Any], system_final_export.get("payload", {})).get("source_score_name"),
-            "source_evaluate_run_root": cast(Mapping[str, Any], system_final_export.get("payload", {})).get("source_evaluate_run_root"),
+            "artifact_path": derived_system_union_export.get("path"),
+            "source_score_name": cast(Mapping[str, Any], derived_system_union_export.get("payload", {})).get("source_score_name"),
+            "source_evaluate_run_root": cast(Mapping[str, Any], derived_system_union_export.get("payload", {})).get("source_evaluate_run_root"),
         },
         "score_runs": {
             score_name: {
@@ -1091,6 +1160,11 @@ def run_pw02_merge_source_event_shards(
         source_shard_plan=source_shard_plan,
         sample_role=CLEAN_NEGATIVE_SAMPLE_ROLE,
     )
+    control_negative_events = _collect_completed_events_for_role(
+        family_root=family_root,
+        source_shard_plan=source_shard_plan,
+        sample_role=PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
+    )
 
     calibration_records = _build_prepared_records(
         family_id=family_id,
@@ -1167,6 +1241,15 @@ def run_pw02_merge_source_event_shards(
         source_shard_plan_path=layout["source_shard_plan_path"],
         source_split_plan_path=layout["source_split_plan_path"],
     )
+    control_negative_pool_manifest = _write_source_pool_manifest(
+        stage_root=stage_root,
+        family_id=family_id,
+        sample_role=PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
+        event_lookup=control_negative_events,
+        family_manifest_path=layout["family_manifest_path"],
+        source_shard_plan_path=layout["source_shard_plan_path"],
+        source_split_plan_path=layout["source_split_plan_path"],
+    )
 
     score_runs = {
         CONTENT_SCORE_NAME: _run_score_pipeline(
@@ -1186,7 +1269,8 @@ def run_pw02_merge_source_event_shards(
     }
 
     content_evaluate_root = Path(str(score_runs[CONTENT_SCORE_NAME]["evaluate_run_root"]))
-    system_final_metrics = _build_system_final_metrics_for_run(content_evaluate_root)
+    formal_final_decision_metrics = _build_formal_final_decision_metrics_for_run(content_evaluate_root)
+    derived_system_union_metrics = _build_system_final_metrics_for_run(content_evaluate_root)
 
     threshold_exports = {
         _resolve_top_level_score_directory_name(score_name): _build_threshold_export(
@@ -1206,11 +1290,17 @@ def run_pw02_merge_source_event_shards(
         )
         for score_name, score_run in score_runs.items()
     }
-    system_final_export = _build_system_final_metrics_export(
+    formal_final_decision_export = _build_formal_final_decision_metrics_export(
         family_id=family_id,
         stage_root=stage_root,
         content_score_run=score_runs[CONTENT_SCORE_NAME],
-        system_final_metrics=system_final_metrics,
+        formal_final_decision_metrics=formal_final_decision_metrics,
+    )
+    derived_system_union_export = _build_system_final_metrics_export(
+        family_id=family_id,
+        stage_root=stage_root,
+        content_score_run=score_runs[CONTENT_SCORE_NAME],
+        system_final_metrics=derived_system_union_metrics,
     )
 
     summary_path = layout["runtime_state_root"] / "pw02_summary.json"
@@ -1226,9 +1316,11 @@ def run_pw02_merge_source_event_shards(
         source_merge_manifest_path=merge_manifest_path,
         positive_pool_manifest=positive_pool_manifest,
         clean_negative_pool_manifest=clean_negative_pool_manifest,
+        control_negative_pool_manifest=control_negative_pool_manifest,
         threshold_exports=threshold_exports,
         clean_evaluate_exports=clean_evaluate_exports,
-        system_final_export=system_final_export,
+        formal_final_decision_export=formal_final_decision_export,
+        derived_system_union_export=derived_system_union_export,
         score_runs=score_runs,
         split_counts=cast(Mapping[str, Any], merge_manifest_payload["split_counts"]),
     )
@@ -1243,6 +1335,7 @@ def run_pw02_merge_source_event_shards(
         "source_merge_manifest_path": normalize_path_value(merge_manifest_path),
         "positive_source_pool_manifest_path": str(positive_pool_manifest["path"]),
         "clean_negative_pool_manifest_path": str(clean_negative_pool_manifest["path"]),
+        "planner_conditioned_control_negative_pool_manifest_path": str(control_negative_pool_manifest["path"]),
         "paper_source_finalize_manifest_path": normalize_path_value(finalize_manifest_path),
         "family_manifest_path": normalize_path_value(layout["family_manifest_path"]),
         "source_shard_plan_path": normalize_path_value(layout["source_shard_plan_path"]),
@@ -1256,9 +1349,13 @@ def run_pw02_merge_source_event_shards(
             score_key: export_summary["path"]
             for score_key, export_summary in clean_evaluate_exports.items()
         },
-        "system_final_metrics": system_final_metrics,
-        "system_final_semantics": "derived_metrics_from_content_evaluate_inputs",
-        "system_final_metrics_artifact_path": str(system_final_export["path"]),
+        "formal_final_decision_metrics": formal_final_decision_metrics,
+        "formal_final_decision_metrics_artifact_path": str(formal_final_decision_export["path"]),
+        "derived_system_union_metrics": derived_system_union_metrics,
+        "derived_system_union_metrics_artifact_path": str(derived_system_union_export["path"]),
+        "system_final_metrics": derived_system_union_metrics,
+        "system_final_semantics": "derived_system_union_metrics",
+        "system_final_metrics_artifact_path": str(derived_system_union_export["path"]),
         "split_counts": merge_manifest_payload["split_counts"],
     }
     write_json_atomic(summary_path, summary)

@@ -127,13 +127,25 @@ def extract_hf_score_from_evidence(
     elif hf_status != "ok":
         return None, f"hf_status_unknown: {hf_status}"
     
-    # 证据 dict 内存在正式检测分数时，直接读取，禁止以 coeffs_after_norm 能量代理替代。
-    hf_score_direct = hf_evidence.get("hf_score")
-    if isinstance(hf_score_direct, (int, float)) and not isinstance(hf_score_direct, bool):
-        return max(0.0, float(hf_score_direct)), "ok"
+    # 正式内容分数优先读取有界 hf_content_score，禁止回退到原始能量 hf_score。
+    hf_content_score_direct = hf_evidence.get("hf_content_score")
+    if isinstance(hf_content_score_direct, (int, float)) and not isinstance(hf_content_score_direct, bool):
+        return max(0.0, float(hf_content_score_direct)), "ok"
 
-    # 未找到直接检测分数；返回 absent 语义，而非以范数代理。
-    return None, "hf_detect_score_not_in_evidence"
+    hf_summary = hf_evidence.get("hf_evidence_summary")
+    if isinstance(hf_summary, dict):
+        summary_score = hf_summary.get("hf_content_score")
+        if isinstance(summary_score, (int, float)) and not isinstance(summary_score, bool):
+            return max(0.0, float(summary_score)), "ok"
+        if "coeffs_before_norm" in hf_summary and "coeffs_after_norm" in hf_summary:
+            try:
+                return channel_hf.compute_hf_content_score_from_constraint_evidence(hf_summary), "ok"
+            except Exception:
+                # 约束证据损坏时保持显式 absent，而不是回退到原始能量。
+                return None, "hf_content_score_invalid_constraint_evidence"
+
+    # 未找到正式 HF 内容分数；返回 absent 语义，而非以原始能量代理。
+    return None, "hf_content_score_not_in_evidence"
 
 
 def validate_plan_digest_consistency(
@@ -190,7 +202,7 @@ def compute_content_score(
     
     Args:
         lf_score: LF detection score (or None).
-        hf_score: HF detection score (or None).
+        hf_score: Bounded HF content score (or None).
         lf_status: LF status ("ok" / "absent" / "failed" / "mismatch").
         hf_status: HF status ("ok" / "absent" / "failed" / "mismatch").
         rule_version: Rule version identifier.
@@ -207,7 +219,7 @@ def compute_content_score(
         # Rule v1: LF主导，HF增强但不阻断。
         # - LF status != "ok" (failed/mismatch/absent): mismatch → content_score = None
         # - LF status == "ok" && lf_score is None: failed → content_score = None
-        # - HF status == "ok" && hf_score is not None: combine with boosting
+        # - HF status == "ok" && hf_score is not None: combine with bounded boosting
         # - HF status != "ok": ignore, use LF only
         
         if lf_status == "mismatch":
@@ -230,7 +242,7 @@ def compute_content_score(
         
         # 尝试增强 HF。
         if hf_status == "ok" and hf_score is not None and isinstance(hf_score, (int, float)):
-            # HF 增强因子（简单求和）。
+            # HF 使用有界内容分数，不再将原始能量视为 formal content score。
             hf_score_f = float(hf_score)
             # 组合规则：加权和，HF权重较小（增强但不主导）。
             combined = content_score + 0.3 * hf_score_f

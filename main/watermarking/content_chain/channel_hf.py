@@ -571,6 +571,35 @@ def extract_hf_score(
     return score
 
 
+def compute_hf_content_score_from_constraint_evidence(constraint_evidence: Dict[str, Any]) -> float:
+    """
+    功能：从 HF 约束证据计算有界的正式内容分数。
+
+    Compute the bounded HF content score from truncation constraint evidence.
+    The score is the square root of retained-energy ratio, matching the
+    existing HF attestation decision-scale semantics.
+
+    Args:
+        constraint_evidence: Constraint evidence mapping containing
+            coeffs_before_norm and coeffs_after_norm.
+
+    Returns:
+        Bounded HF content score in [0, 1]. Larger indicates stronger HF evidence.
+    """
+    if not isinstance(constraint_evidence, dict):
+        raise TypeError("constraint_evidence must be dict")
+
+    coeffs_before_norm = float(constraint_evidence.get("coeffs_before_norm", 0.0))
+    coeffs_after_norm = float(constraint_evidence.get("coeffs_after_norm", 0.0))
+    total_energy = coeffs_before_norm * coeffs_before_norm
+    retained_energy = coeffs_after_norm * coeffs_after_norm
+    if total_energy < 1e-12:
+        return 0.0
+
+    retained_ratio = max(0.0, min(1.0, retained_energy / total_energy))
+    return float(math.sqrt(retained_ratio))
+
+
 def generate_hf_evidence_digest(
     trace_components: list,
     params_digest: str

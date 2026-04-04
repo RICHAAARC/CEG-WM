@@ -272,6 +272,7 @@ class HighFreqTruncationCodec:
             }
 
         hf_score = channel_hf.extract_hf_score(feature_vector, hf_basis, channel_cfg)
+        hf_content_score = channel_hf.compute_hf_content_score_from_constraint_evidence(constraint_evidence)
         trace_summary: Dict[str, Any] = {
             "impl_id": self.impl_id,
             "impl_version": self.impl_version,
@@ -282,6 +283,8 @@ class HighFreqTruncationCodec:
             "tail_truncation_ratio": tail_ratio,
             "threshold_percentile_applied": threshold_percentile,
             "hf_score": float(hf_score),
+            "hf_raw_energy": float(hf_score),
+            "hf_content_score": float(hf_content_score),
             "higher_is_watermarked": True,
             **constraint_evidence,
             "mode": "detect",
@@ -290,6 +293,8 @@ class HighFreqTruncationCodec:
         return {
             "status": "ok",
             "hf_score": float(hf_score),
+            "hf_raw_energy": float(hf_score),
+            "hf_content_score": float(hf_content_score),
             "hf_trace_digest": hf_trace_digest,
             "tail_truncation_ratio": tail_ratio,
             "threshold_percentile_applied": threshold_percentile,
@@ -299,6 +304,8 @@ class HighFreqTruncationCodec:
                 "basis_rank": int(hf_basis.get("basis_rank", len(constrained_coeffs))),
                 "tail_truncation_ratio": tail_ratio,
                 "threshold_percentile_applied": threshold_percentile,
+                "hf_raw_energy": float(hf_score),
+                "hf_content_score": float(hf_content_score),
                 **constraint_evidence,
                 "higher_is_watermarked": True,
             }

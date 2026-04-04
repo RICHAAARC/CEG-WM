@@ -54,7 +54,11 @@ def test_source_shard_plan_covers_each_event_exactly_once(tmp_path: Path) -> Non
     event_rows = read_jsonl(Path(str(summary["source_event_grid_path"])))
     shard_plan = json.loads(Path(str(summary["source_shard_plan_path"])).read_text(encoding="utf-8"))
 
-    for sample_role in ["positive_source", "clean_negative"]:
+    for sample_role in [
+        "positive_source",
+        "clean_negative",
+        "planner_conditioned_control_negative",
+    ]:
         expected_event_ids = {
             row["event_id"]
             for row in event_rows
@@ -112,5 +116,30 @@ def test_source_shard_plan_resolves_clean_negative_assignments(tmp_path: Path) -
     )
 
     assert shard_assignment["sample_role"] == "clean_negative"
+    assert shard_assignment["shard_index"] == 1
+    assert shard_assignment["assigned_event_ids"]
+
+
+def test_source_shard_plan_resolves_control_negative_assignments(tmp_path: Path) -> None:
+    """
+    Verify the generalized shard resolver returns control-negative assignments.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    summary = _build_pw00_fixture(tmp_path)
+    shard_plan = json.loads(Path(str(summary["source_shard_plan_path"])).read_text(encoding="utf-8"))
+
+    shard_assignment = resolve_source_shard_assignment(
+        shard_plan,
+        sample_role="planner_conditioned_control_negative",
+        shard_index=1,
+        shard_count=4,
+    )
+
+    assert shard_assignment["sample_role"] == "planner_conditioned_control_negative"
     assert shard_assignment["shard_index"] == 1
     assert shard_assignment["assigned_event_ids"]

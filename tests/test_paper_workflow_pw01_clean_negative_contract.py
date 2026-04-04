@@ -383,9 +383,9 @@ def _patch_clean_negative_runner(monkeypatch: pytest.MonkeyPatch) -> Dict[str, A
     return captures
 
 
-def test_pw01_clean_negative_writes_statement_only_provenance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pw01_control_negative_writes_statement_only_provenance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """
-    Verify clean_negative PW01 shards stage a probe detect record and final provenance.
+    Verify planner-conditioned control-negative PW01 shards stage a probe detect record and final provenance.
 
     Args:
         tmp_path: Pytest temporary directory.
@@ -401,19 +401,19 @@ def test_pw01_clean_negative_writes_statement_only_provenance(tmp_path: Path, mo
     summary = pw01_module.run_pw01_source_event_shard(
         drive_project_root=tmp_path / "drive",
         family_id="family_clean_negative",
-        sample_role="clean_negative",
+        sample_role=pw01_module.PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
         shard_index=0,
         shard_count=2,
         bound_config_path=bound_config_path,
     )
 
-    assert summary["sample_role"] == "clean_negative"
+    assert summary["sample_role"] == pw01_module.PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE
     shard_root = Path(str(summary["shard_root"]))
-    assert shard_root.as_posix().endswith("source_shards/negative/shard_0000")
+    assert shard_root.as_posix().endswith("source_shards/control_negative/shard_0000")
 
     shard_manifest = json.loads((shard_root / "shard_manifest.json").read_text(encoding="utf-8"))
     assert shard_manifest["status"] == "completed"
-    assert shard_manifest["sample_role"] == "clean_negative"
+    assert shard_manifest["sample_role"] == pw01_module.PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE
     assert shard_manifest["events"]
 
     first_event = cast(Dict[str, Any], shard_manifest["events"][0])
@@ -470,12 +470,86 @@ def test_pw01_clean_negative_writes_statement_only_provenance(tmp_path: Path, mo
     assert run_closure["records_bundle"]["bundle_canon_sha256"] == records_manifest["bundle_canon_sha256"]
 
 
-def test_pw01_clean_negative_fails_fast_when_probe_planner_payload_missing(
+def test_pw01_clean_negative_remains_strict_formal_null_without_probe(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
-    Verify clean_negative aborts before final detect when probe planner payload is incomplete.
+    Verify strict clean_negative keeps the formal-null path without probe conditioning.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    _build_pw00_family(tmp_path, family_id="family_clean_negative_strict")
+    bound_config_path = _write_bound_config_snapshot(
+        tmp_path / "drive",
+        marker="family_clean_negative_strict",
+    )
+    _patch_clean_negative_runner(monkeypatch)
+
+    summary = pw01_module.run_pw01_source_event_shard(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_clean_negative_strict",
+        sample_role="clean_negative",
+        shard_index=0,
+        shard_count=2,
+        bound_config_path=bound_config_path,
+    )
+
+    assert summary["sample_role"] == "clean_negative"
+    shard_root = Path(str(summary["shard_root"]))
+    assert shard_root.as_posix().endswith("source_shards/negative/shard_0000")
+
+    shard_manifest = json.loads((shard_root / "shard_manifest.json").read_text(encoding="utf-8"))
+    first_event = cast(Dict[str, Any], shard_manifest["events"][0])
+    assert first_event["negative_branch_source_attestation_provenance"] is None
+    assert first_event["detect_probe_record_path"] is None
+    assert "detect_probe" not in first_event["stage_results"]
+    assert first_event["stage_results"]["detect"]["status"] == "ok"
+
+    runtime_config_path = Path(str(first_event["runtime_config_path"]))
+    prompt_run_root = runtime_config_path.parent / "run"
+    detect_input_record_path = prompt_run_root / "artifacts" / "neg_preview_input" / "detect_input_record.json"
+    detect_record_path = Path(str(first_event["detect_record_path"]))
+    staged_embed_record_path = Path(str(first_event["embed_record_path"]))
+
+    detect_input_record = json.loads(detect_input_record_path.read_text(encoding="utf-8"))
+    detect_record = json.loads(detect_record_path.read_text(encoding="utf-8"))
+    staged_embed_record = json.loads(staged_embed_record_path.read_text(encoding="utf-8"))
+
+    assert detect_input_record["operation"] == "embed_preview_input"
+    assert "negative_branch_source_attestation_provenance" not in detect_input_record
+    assert "plan_digest" not in detect_input_record
+    assert "basis_digest" not in detect_input_record
+    assert "plan_input_digest" not in detect_input_record
+    assert "subspace_planner_impl_identity" not in detect_input_record
+    assert "subspace_plan" not in detect_input_record
+
+    assert staged_embed_record["operation"] == "embed"
+    assert "negative_branch_source_attestation_provenance" not in staged_embed_record
+    assert "plan_digest" not in staged_embed_record
+    assert "basis_digest" not in staged_embed_record
+    assert "plan_input_digest" not in staged_embed_record
+    assert "subspace_planner_impl_identity" not in staged_embed_record
+    assert "subspace_plan" not in staged_embed_record
+
+    assert detect_record["plan_digest_expected"] is None
+    assert detect_record["plan_digest_status"] == "absent"
+    assert detect_record["plan_digest_validation_status"] == "absent"
+    assert detect_record["content_evidence_payload"]["status"] == "absent"
+    assert detect_record["content_evidence_payload"]["content_failure_reason"] == "detector_no_plan_expected"
+
+
+def test_pw01_control_negative_fails_fast_when_probe_planner_payload_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify control-negative aborts before final detect when probe planner payload is incomplete.
 
     Args:
         tmp_path: Pytest temporary directory.
@@ -508,7 +582,7 @@ def test_pw01_clean_negative_fails_fast_when_probe_planner_payload_missing(
         pw01_module.run_pw01_source_event_shard(
             drive_project_root=tmp_path / "drive",
             family_id="family_clean_negative_fail_fast",
-            sample_role="clean_negative",
+            sample_role=pw01_module.PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
             shard_index=0,
             shard_count=2,
             bound_config_path=bound_config_path,
@@ -518,12 +592,12 @@ def test_pw01_clean_negative_fails_fast_when_probe_planner_payload_missing(
     assert captures["detect_inputs"] == []
 
 
-def test_pw01_clean_negative_final_detect_consumes_probe_plan_anchors(
+def test_pw01_control_negative_final_detect_consumes_probe_plan_anchors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
-    Verify final detect consumes the probe-derived planner anchors for clean_negative.
+    Verify final detect consumes the probe-derived planner anchors for control-negative.
 
     Args:
         tmp_path: Pytest temporary directory.
@@ -542,7 +616,7 @@ def test_pw01_clean_negative_final_detect_consumes_probe_plan_anchors(
     summary = pw01_module.run_pw01_source_event_shard(
         drive_project_root=tmp_path / "drive",
         family_id="family_clean_negative_regression",
-        sample_role="clean_negative",
+        sample_role=pw01_module.PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
         shard_index=0,
         shard_count=2,
         bound_config_path=bound_config_path,
@@ -575,12 +649,12 @@ def test_pw01_clean_negative_final_detect_consumes_probe_plan_anchors(
     assert detect_input_record["subspace_plan"] == staged_embed_record["subspace_plan"]
 
 
-def test_pw01_clean_negative_probe_and_final_detect_inputs_freeze_context_boundary(
+def test_pw01_control_negative_probe_and_final_detect_inputs_freeze_context_boundary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
-    Freeze the current clean_negative boundary between probe and final detect inputs.
+    Freeze the current control-negative boundary between probe and final detect inputs.
 
     Args:
         tmp_path: Pytest temporary directory.
@@ -606,7 +680,7 @@ def test_pw01_clean_negative_probe_and_final_detect_inputs_freeze_context_bounda
     summary = pw01_module.run_pw01_source_event_shard(
         drive_project_root=tmp_path / "drive",
         family_id="family_clean_negative_context_boundary",
-        sample_role="clean_negative",
+        sample_role=pw01_module.PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
         shard_index=0,
         shard_count=2,
         bound_config_path=bound_config_path,

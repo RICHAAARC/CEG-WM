@@ -41,6 +41,8 @@ class ContentEvidence:
         hf_trace_digest: Optional high-frequency trace digest.
         lf_score: Optional low-frequency score.
         hf_score: Optional high-frequency score.
+        hf_raw_energy: Optional diagnostic high-frequency raw energy.
+        hf_content_score: Optional bounded high-frequency content score.
         score_parts: Optional structured score components.
         trajectory_evidence: Optional trajectory tap evidence mapping.
         content_failure_reason: Optional failure reason enumeration string.
@@ -64,6 +66,8 @@ class ContentEvidence:
     hf_trace_digest: Optional[str] = None
     lf_score: Optional[float] = None
     hf_score: Optional[float] = None
+    hf_raw_energy: Optional[float] = None
+    hf_content_score: Optional[float] = None
     score_parts: Optional[Dict[str, Any]] = None
     trajectory_evidence: Optional[Dict[str, Any]] = None
     lf_statistics_digest: Optional[str] = None
@@ -137,6 +141,8 @@ class ContentEvidence:
         _validate_optional_str(self.hf_trace_digest, "hf_trace_digest")
         _validate_optional_number(self.lf_score, "lf_score")
         _validate_optional_number(self.hf_score, "hf_score")
+        _validate_optional_number(self.hf_raw_energy, "hf_raw_energy")
+        _validate_optional_number(self.hf_content_score, "hf_content_score")
         _validate_optional_mapping(self.score_parts, "score_parts")
         _validate_optional_mapping(self.trajectory_evidence, "trajectory_evidence")
         _validate_optional_str(self.lf_statistics_digest, "lf_statistics_digest")
@@ -170,6 +176,8 @@ class ContentEvidence:
             "hf_trace_digest": self.hf_trace_digest,
             "lf_score": self.lf_score,
             "hf_score": self.hf_score,
+            "hf_raw_energy": self.hf_raw_energy,
+            "hf_content_score": self.hf_content_score,
             "score_parts": self.score_parts,
             "trajectory_evidence": self.trajectory_evidence,
             "lf_statistics_digest": self.lf_statistics_digest,

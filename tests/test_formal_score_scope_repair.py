@@ -268,13 +268,18 @@ def test_schema_and_contracts_register_new_formal_fields() -> None:
         "content_evidence.content_chain_score",
         "content_evidence.lf_channel_score",
         "content_evidence.lf_correlation_score",
+        "content_evidence.hf_raw_energy",
+        "content_evidence.hf_content_score",
         "attestation.image_evidence_result.lf_channel_score",
         "attestation.final_event_attested_decision.lf_attestation_score",
         "experiment_matrix.auxiliary_analysis_runtime_executed",
     }
+    recommended_paths = policy_payload["field_catalog"]["catalogs"]["recommended"]
     assert required_paths.issubset(schema_paths)
     assert required_paths.issubset(contract_paths)
     assert "content_evidence.content_chain_score" in content_minimal
+    assert "content_evidence.hf_raw_energy" in recommended_paths
+    assert "content_evidence.hf_content_score" in recommended_paths
     assert "experiment_matrix_aggregate_report" in artifact_contracts
     assert "experiment_matrix_grid_summary" in artifact_contracts
     assert "primary_evaluation_scope" in artifact_contracts["experiment_matrix_aggregate_report"]["allowed_top_level_fields"]

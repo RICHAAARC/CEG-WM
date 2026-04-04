@@ -38,6 +38,7 @@ from scripts.notebook_runtime_common import (
 from paper_workflow.scripts.pw_common import (
     ACTIVE_SAMPLE_ROLE,
     CLEAN_NEGATIVE_SAMPLE_ROLE,
+    PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
     DEFAULT_CONFIG_RELATIVE_PATH,
     build_source_shard_root,
     build_family_root,
@@ -51,6 +52,7 @@ WORKER_SCRIPT_PATH = Path("paper_workflow/scripts/pw01_run_source_event_shard_wo
 EVENT_RECORD_USAGE_BY_SAMPLE_ROLE = {
     ACTIVE_SAMPLE_ROLE: "paper_workflow_positive_source",
     CLEAN_NEGATIVE_SAMPLE_ROLE: "paper_workflow_clean_negative",
+    PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE: "paper_workflow_planner_conditioned_control_negative",
 }
 DEFAULT_STAGE_01_WORKER_COUNT = 1
 
@@ -1406,6 +1408,7 @@ def _build_clean_negative_detect_command(
 def _build_clean_negative_input_record(
     *,
     preview_image_path: Path,
+    sample_role: str,
     event_id: str,
     prompt_text: str,
     prompt_sha256: str,
@@ -1419,6 +1422,7 @@ def _build_clean_negative_input_record(
 
     Args:
         preview_image_path: Clean preview artifact path.
+        sample_role: Negative-branch sample role.
         event_id: Event identifier.
         prompt_text: Prompt text.
         prompt_sha256: Prompt SHA256.
@@ -1434,6 +1438,7 @@ def _build_clean_negative_input_record(
         raise TypeError("preview_image_path must be Path")
     if not preview_image_path.exists() or not preview_image_path.is_file():
         raise FileNotFoundError(f"clean negative preview image not found: {normalize_path_value(preview_image_path)}")
+    normalized_sample_role = validate_source_sample_role(sample_role)
     if not isinstance(event_id, str) or not event_id:
         raise TypeError("event_id must be non-empty str")
     if not isinstance(prompt_text, str) or not prompt_text:
@@ -1452,7 +1457,10 @@ def _build_clean_negative_input_record(
         "artifact_sha256": artifact_sha256,
         "watermarked_artifact_sha256": artifact_sha256,
         "is_watermarked": False,
-        "negative_branch_note": "paper workflow clean_negative source uses preview artifact without watermark embed",
+        "negative_branch_note": (
+            "paper workflow "
+            f"{normalized_sample_role} source uses preview artifact without watermark embed"
+        ),
         "event_id": event_id,
         "prompt": prompt_text,
         "prompt_text": prompt_text,
@@ -1557,12 +1565,13 @@ def _copy_clean_negative_freeze_anchor_fields(
 def _build_clean_negative_staged_embed_record(
     *,
     preview_image_path: Path,
+    sample_role: str,
     event_id: str,
     prompt_text: str,
     prompt_sha256: str,
     seed: int,
-    probe_plan_anchors: Mapping[str, Any],
-    probe_detect_payload: Mapping[str, Any],
+    probe_plan_anchors: Mapping[str, Any] | None,
+    probe_detect_payload: Mapping[str, Any] | None,
     bound_detect_payload: Mapping[str, Any],
     provenance_payload: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
@@ -1571,12 +1580,13 @@ def _build_clean_negative_staged_embed_record(
 
     Args:
         preview_image_path: Clean preview artifact path.
+        sample_role: Negative-branch sample role.
         event_id: Event identifier.
         prompt_text: Prompt text.
         prompt_sha256: Prompt SHA256.
         seed: Event seed.
-        probe_plan_anchors: Probe-derived plan anchor mapping.
-        probe_detect_payload: Probe detect record payload.
+        probe_plan_anchors: Optional probe-derived plan anchor mapping.
+        probe_detect_payload: Optional probe detect record payload.
         bound_detect_payload: Final detect record payload carrying freeze anchors.
         provenance_payload: Optional statement-only provenance payload.
 
@@ -1587,6 +1597,7 @@ def _build_clean_negative_staged_embed_record(
         raise TypeError("preview_image_path must be Path")
     if not preview_image_path.exists() or not preview_image_path.is_file():
         raise FileNotFoundError(f"clean negative preview image not found: {normalize_path_value(preview_image_path)}")
+    normalized_sample_role = validate_source_sample_role(sample_role)
     if not isinstance(event_id, str) or not event_id:
         raise TypeError("event_id must be non-empty str")
     if not isinstance(prompt_text, str) or not prompt_text:
@@ -1595,10 +1606,10 @@ def _build_clean_negative_staged_embed_record(
         raise TypeError("prompt_sha256 must be non-empty str")
     if not isinstance(seed, int):
         raise TypeError("seed must be int")
-    if not isinstance(probe_plan_anchors, Mapping):
-        raise TypeError("probe_plan_anchors must be Mapping")
-    if not isinstance(probe_detect_payload, Mapping):
-        raise TypeError("probe_detect_payload must be Mapping")
+    if probe_plan_anchors is not None and not isinstance(probe_plan_anchors, Mapping):
+        raise TypeError("probe_plan_anchors must be Mapping or None")
+    if probe_detect_payload is not None and not isinstance(probe_detect_payload, Mapping):
+        raise TypeError("probe_detect_payload must be Mapping or None")
     if not isinstance(bound_detect_payload, Mapping):
         raise TypeError("bound_detect_payload must be Mapping")
 
@@ -1612,7 +1623,10 @@ def _build_clean_negative_staged_embed_record(
         "artifact_sha256": artifact_sha256,
         "watermarked_artifact_sha256": artifact_sha256,
         "is_watermarked": False,
-        "negative_branch_note": "paper workflow clean_negative source uses preview artifact without watermark embed",
+        "negative_branch_note": (
+            "paper workflow "
+            f"{normalized_sample_role} source uses preview artifact without watermark embed"
+        ),
         "event_id": event_id,
         "prompt": prompt_text,
         "prompt_text": prompt_text,
@@ -1622,11 +1636,12 @@ def _build_clean_negative_staged_embed_record(
     if isinstance(provenance_payload, Mapping):
         staged_record["negative_branch_source_attestation_provenance"] = dict(provenance_payload)
 
-    _copy_clean_negative_probe_formal_fields(
-        staged_record,
-        probe_plan_anchors=probe_plan_anchors,
-        probe_detect_payload=probe_detect_payload,
-    )
+    if isinstance(probe_plan_anchors, Mapping) or isinstance(probe_detect_payload, Mapping):
+        _copy_clean_negative_probe_formal_fields(
+            staged_record,
+            probe_plan_anchors=probe_plan_anchors,
+            probe_detect_payload=probe_detect_payload,
+        )
 
     _copy_clean_negative_freeze_anchor_fields(staged_record, bound_detect_payload)
     return staged_record
@@ -1712,7 +1727,7 @@ def _run_clean_negative_event(
     bound_config_path: Path,
 ) -> Dict[str, Any]:
     """
-    Execute one clean_negative event with statement-only provenance.
+    Execute one strict clean_negative event without planner-conditioned override.
 
     Args:
         event: Event payload from source_event_grid.
@@ -1811,61 +1826,19 @@ def _run_clean_negative_event(
 
     detect_input_record_path = prompt_run_root / "artifacts" / "neg_preview_input" / "detect_input_record.json"
     ensure_directory(detect_input_record_path.parent)
-    probe_input_record = _build_clean_negative_input_record(
+    detect_input_record = _build_clean_negative_input_record(
         preview_image_path=preview_image_path,
+        sample_role=CLEAN_NEGATIVE_SAMPLE_ROLE,
         event_id=event_id,
         prompt_text=prompt_text,
         prompt_sha256=prompt_sha256,
         seed=seed,
     )
-    write_json_atomic(detect_input_record_path, probe_input_record)
+    write_json_atomic(detect_input_record_path, detect_input_record)
 
     stage_results: Dict[str, Any] = {
         "preview_precompute": preview_record,
     }
-
-    detect_probe_command = _build_clean_negative_detect_command(
-        config_path=runtime_cfg_path,
-        run_root=prompt_run_root,
-        input_record_path=detect_input_record_path,
-    )
-    detect_probe_result = BASE_RUNNER_MODULE._run_stage("detect_probe", detect_probe_command, prompt_run_root)
-    stage_results["detect_probe"] = detect_probe_result
-    if int(detect_probe_result.get("return_code", 1)) != 0:
-        raise RuntimeError(
-            f"PW01 clean_negative detect probe failed: event_id={event_id}, "
-            f"payload={json.dumps(detect_probe_result, ensure_ascii=False, sort_keys=True)}"
-        )
-
-    probe_detect_record_path = prompt_run_root / "records" / "detect_record.json"
-    if not probe_detect_record_path.exists() or not probe_detect_record_path.is_file():
-        raise FileNotFoundError(f"clean_negative detect probe record missing: {normalize_path_value(probe_detect_record_path)}")
-    probe_detect_payload = _load_required_json_dict(probe_detect_record_path, "clean_negative detect probe record")
-    probe_plan_anchors = _extract_detect_probe_plan_anchors(probe_detect_payload)
-    stage_results["detect_probe_plan_anchors"] = dict(probe_plan_anchors)
-
-    staged_probe_detect_record_path = shard_root / "records" / f"event_{event_index:06d}_detect_probe_record.json"
-    validate_path_within_base(shard_root, staged_probe_detect_record_path, "staged detect probe record")
-    write_json_atomic(staged_probe_detect_record_path, probe_detect_payload)
-    _validate_clean_negative_probe_planner_payload(probe_detect_payload)
-
-    provenance_payload = _build_negative_branch_attestation_provenance(
-        runtime_cfg=preview_runtime_cfg,
-        prompt_text=prompt_text,
-        seed=seed,
-        plan_digest=probe_plan_anchors["plan_digest"],
-    )
-    final_input_record = _build_clean_negative_input_record(
-        preview_image_path=preview_image_path,
-        event_id=event_id,
-        prompt_text=prompt_text,
-        prompt_sha256=prompt_sha256,
-        seed=seed,
-        provenance_payload=provenance_payload,
-        probe_plan_anchors=probe_plan_anchors,
-        probe_detect_payload=probe_detect_payload,
-    )
-    write_json_atomic(detect_input_record_path, final_input_record)
 
     detect_command = _build_clean_negative_detect_command(
         config_path=runtime_cfg_path,
@@ -1892,14 +1865,15 @@ def _run_clean_negative_event(
     detect_payload_obj = _load_required_json_dict(source_detect_record_path, "clean_negative detect record")
     staged_embed_record_payload = _build_clean_negative_staged_embed_record(
         preview_image_path=preview_image_path,
+        sample_role=CLEAN_NEGATIVE_SAMPLE_ROLE,
         event_id=event_id,
         prompt_text=prompt_text,
         prompt_sha256=prompt_sha256,
         seed=seed,
-        probe_plan_anchors=probe_plan_anchors,
-        probe_detect_payload=probe_detect_payload,
+        probe_plan_anchors=None,
+        probe_detect_payload=None,
         bound_detect_payload=detect_payload_obj,
-        provenance_payload=provenance_payload,
+        provenance_payload=None,
     )
     write_json_atomic(staged_embed_record_path, staged_embed_record_payload)
 
@@ -1959,6 +1933,280 @@ def _run_clean_negative_event(
         "attestation_statement": None,
         "attestation_bundle": None,
         "attestation_result": None,
+        "negative_branch_source_attestation_provenance": None,
+        "detect_probe_record_path": None,
+        "sha256": compute_file_sha256(staged_detect_record_path),
+        "stage_results": stage_results,
+    }
+
+    event_manifest_path = event_root / "event_manifest.json"
+    validate_path_within_base(shard_root, event_manifest_path, "event manifest path")
+    write_json_atomic(event_manifest_path, event_manifest_payload)
+    event_manifest_payload["event_manifest_path"] = normalize_path_value(event_manifest_path)
+    return event_manifest_payload
+
+
+def _run_planner_conditioned_control_negative_event(
+    *,
+    event: Mapping[str, Any],
+    shard_root: Path,
+    default_cfg_obj: Mapping[str, Any],
+    bound_config_path: Path,
+) -> Dict[str, Any]:
+    """
+    Execute one planner-conditioned control negative event with statement-only provenance.
+
+    Args:
+        event: Event payload from source_event_grid.
+        shard_root: Shard root path.
+        default_cfg_obj: Parsed default config mapping.
+        bound_config_path: Bound config source path.
+
+    Returns:
+        Event manifest payload.
+    """
+    event_id = event.get("event_id")
+    sample_role = event.get("sample_role")
+    event_index = event.get("event_index")
+    source_prompt_index = event.get("source_prompt_index")
+    if source_prompt_index is None:
+        source_prompt_index = event.get("prompt_index")
+    prompt_text = event.get("prompt_text")
+    prompt_sha256 = event.get("prompt_sha256")
+    seed = event.get("seed")
+    prompt_file = event.get("prompt_file")
+
+    if not isinstance(event_id, str) or not event_id:
+        raise ValueError("event_id must be non-empty str")
+    if sample_role != PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE:
+        raise ValueError(
+            "PW01 control negative executor requires planner_conditioned_control_negative, "
+            f"got: {sample_role}"
+        )
+    if not isinstance(event_index, int) or event_index < 0:
+        raise ValueError("event_index must be non-negative int")
+    if not isinstance(source_prompt_index, int) or source_prompt_index < 0:
+        raise ValueError("prompt_index must be non-negative int")
+    if not isinstance(prompt_text, str) or not prompt_text:
+        raise ValueError("prompt_text must be non-empty str")
+    if not isinstance(prompt_sha256, str) or not prompt_sha256:
+        raise ValueError("prompt_sha256 must be non-empty str")
+    if not isinstance(seed, int):
+        raise ValueError("seed must be int")
+    if not isinstance(prompt_file, str) or not prompt_file:
+        raise ValueError("prompt_file must be non-empty str")
+    if not isinstance(bound_config_path, Path):
+        raise TypeError("bound_config_path must be Path")
+
+    event_root = ensure_directory(shard_root / "events" / f"event_{event_index:06d}")
+    prompt_run_root = ensure_directory(event_root / "run")
+    validate_path_within_base(shard_root, event_root, "event root")
+    validate_path_within_base(shard_root, prompt_run_root, "event run root")
+
+    runtime_cfg = copy.deepcopy(dict(default_cfg_obj))
+    runtime_cfg["inference_prompt"] = prompt_text
+    runtime_cfg["seed"] = seed
+    runtime_cfg["paper_workflow_event"] = {
+        "event_id": event_id,
+        "event_index": event_index,
+        "source_prompt_index": source_prompt_index,
+        "sample_role": PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
+    }
+
+    runtime_cfg_path = event_root / "runtime_config.yaml"
+    validate_path_within_base(shard_root, runtime_cfg_path, "event runtime config")
+    runtime_cfg = apply_notebook_model_snapshot_binding(runtime_cfg, env_mapping=os.environ)
+    _validate_bound_runtime_cfg(
+        runtime_cfg,
+        bound_config_path=bound_config_path,
+        runtime_cfg_path=runtime_cfg_path,
+        event_id=event_id,
+        stage_label="preview_precompute",
+    )
+    write_yaml_mapping(runtime_cfg_path, runtime_cfg)
+
+    preview_precompute = BASE_RUNNER_MODULE._prepare_source_pool_preview_artifact(
+        cfg_obj=runtime_cfg,
+        prompt_run_root=prompt_run_root,
+        prompt_text=prompt_text,
+        prompt_index=source_prompt_index,
+        prompt_file_path=prompt_file,
+    )
+    preview_runtime_cfg_node = preview_precompute.get("runtime_cfg")
+    if not isinstance(preview_runtime_cfg_node, dict):
+        raise ValueError("preview precompute result missing runtime_cfg")
+    preview_runtime_cfg = cast(Dict[str, Any], preview_runtime_cfg_node)
+    _validate_bound_runtime_cfg(
+        preview_runtime_cfg,
+        bound_config_path=bound_config_path,
+        runtime_cfg_path=runtime_cfg_path,
+        event_id=event_id,
+        stage_label="control_negative_detect",
+    )
+    write_yaml_mapping(runtime_cfg_path, preview_runtime_cfg)
+
+    preview_record_node = preview_precompute.get("preview_record")
+    preview_record = cast(Dict[str, Any], preview_record_node) if isinstance(preview_record_node, dict) else {}
+    preview_image_path_value = preview_record.get("persisted_artifact_path")
+    if not isinstance(preview_image_path_value, str) or not preview_image_path_value:
+        raise ValueError("clean_negative preview record missing persisted_artifact_path")
+    preview_image_path = Path(preview_image_path_value).expanduser().resolve()
+    if not preview_image_path.exists() or not preview_image_path.is_file():
+        raise FileNotFoundError(f"clean_negative preview image missing: {normalize_path_value(preview_image_path)}")
+
+    detect_input_record_path = prompt_run_root / "artifacts" / "neg_preview_input" / "detect_input_record.json"
+    ensure_directory(detect_input_record_path.parent)
+    probe_input_record = _build_clean_negative_input_record(
+        preview_image_path=preview_image_path,
+        sample_role=PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
+        event_id=event_id,
+        prompt_text=prompt_text,
+        prompt_sha256=prompt_sha256,
+        seed=seed,
+    )
+    write_json_atomic(detect_input_record_path, probe_input_record)
+
+    stage_results: Dict[str, Any] = {
+        "preview_precompute": preview_record,
+    }
+
+    detect_probe_command = _build_clean_negative_detect_command(
+        config_path=runtime_cfg_path,
+        run_root=prompt_run_root,
+        input_record_path=detect_input_record_path,
+    )
+    detect_probe_result = BASE_RUNNER_MODULE._run_stage("detect_probe", detect_probe_command, prompt_run_root)
+    stage_results["detect_probe"] = detect_probe_result
+    if int(detect_probe_result.get("return_code", 1)) != 0:
+        raise RuntimeError(
+            f"PW01 clean_negative detect probe failed: event_id={event_id}, "
+            f"payload={json.dumps(detect_probe_result, ensure_ascii=False, sort_keys=True)}"
+        )
+
+    probe_detect_record_path = prompt_run_root / "records" / "detect_record.json"
+    if not probe_detect_record_path.exists() or not probe_detect_record_path.is_file():
+        raise FileNotFoundError(f"clean_negative detect probe record missing: {normalize_path_value(probe_detect_record_path)}")
+    probe_detect_payload = _load_required_json_dict(probe_detect_record_path, "clean_negative detect probe record")
+    probe_plan_anchors = _extract_detect_probe_plan_anchors(probe_detect_payload)
+    stage_results["detect_probe_plan_anchors"] = dict(probe_plan_anchors)
+
+    staged_probe_detect_record_path = shard_root / "records" / f"event_{event_index:06d}_detect_probe_record.json"
+    validate_path_within_base(shard_root, staged_probe_detect_record_path, "staged detect probe record")
+    write_json_atomic(staged_probe_detect_record_path, probe_detect_payload)
+    _validate_clean_negative_probe_planner_payload(probe_detect_payload)
+
+    provenance_payload = _build_negative_branch_attestation_provenance(
+        runtime_cfg=preview_runtime_cfg,
+        prompt_text=prompt_text,
+        seed=seed,
+        plan_digest=probe_plan_anchors["plan_digest"],
+    )
+    final_input_record = _build_clean_negative_input_record(
+        preview_image_path=preview_image_path,
+        sample_role=PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
+        event_id=event_id,
+        prompt_text=prompt_text,
+        prompt_sha256=prompt_sha256,
+        seed=seed,
+        provenance_payload=provenance_payload,
+        probe_plan_anchors=probe_plan_anchors,
+        probe_detect_payload=probe_detect_payload,
+    )
+    write_json_atomic(detect_input_record_path, final_input_record)
+
+    detect_command = _build_clean_negative_detect_command(
+        config_path=runtime_cfg_path,
+        run_root=prompt_run_root,
+        input_record_path=detect_input_record_path,
+    )
+    detect_result = BASE_RUNNER_MODULE._run_stage("detect", detect_command, prompt_run_root)
+    stage_results["detect"] = detect_result
+    if int(detect_result.get("return_code", 1)) != 0:
+        raise RuntimeError(
+            f"PW01 clean_negative detect failed: event_id={event_id}, "
+            f"payload={json.dumps(detect_result, ensure_ascii=False, sort_keys=True)}"
+        )
+
+    source_detect_record_path = prompt_run_root / "records" / "detect_record.json"
+    if not source_detect_record_path.exists() or not source_detect_record_path.is_file():
+        raise FileNotFoundError(f"clean_negative detect record missing: {normalize_path_value(source_detect_record_path)}")
+
+    staged_embed_record_path = shard_root / "records" / f"event_{event_index:06d}_embed_record.json"
+    staged_detect_record_path = shard_root / "records" / f"event_{event_index:06d}_detect_record.json"
+    validate_path_within_base(shard_root, staged_embed_record_path, "staged embed record")
+    validate_path_within_base(shard_root, staged_detect_record_path, "staged detect record")
+
+    detect_payload_obj = _load_required_json_dict(source_detect_record_path, "clean_negative detect record")
+    staged_embed_record_payload = _build_clean_negative_staged_embed_record(
+        preview_image_path=preview_image_path,
+        sample_role=PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
+        event_id=event_id,
+        prompt_text=prompt_text,
+        prompt_sha256=prompt_sha256,
+        seed=seed,
+        probe_plan_anchors=probe_plan_anchors,
+        probe_detect_payload=probe_detect_payload,
+        bound_detect_payload=detect_payload_obj,
+        provenance_payload=provenance_payload,
+    )
+    write_json_atomic(staged_embed_record_path, staged_embed_record_payload)
+
+    event_embed_record_path = prompt_run_root / "records" / "embed_record.json"
+    validate_path_within_base(shard_root, event_embed_record_path, "event embed record")
+    write_json_atomic(event_embed_record_path, staged_embed_record_payload)
+    _refresh_clean_negative_event_run_records_view(prompt_run_root)
+
+    normalize_fn = getattr(BASE_RUNNER_MODULE, "_normalize_direct_detect_payload", None)
+    if callable(normalize_fn):
+        normalized_payload = normalize_fn(
+            detect_payload_obj,
+            prompt_text=prompt_text,
+            prompt_index=source_prompt_index,
+            prompt_file_path=prompt_file,
+            record_usage=_resolve_event_record_usage(PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE),
+        )
+        if not isinstance(normalized_payload, dict):
+            raise ValueError("normalized detect payload must be JSON object")
+        detect_payload_obj = cast(Dict[str, Any], normalized_payload)
+    write_json_atomic(staged_detect_record_path, detect_payload_obj)
+
+    source_image_view = BASE_RUNNER_MODULE._resolve_source_pool_source_image_view(
+        cfg_obj=preview_runtime_cfg,
+        run_root=shard_root,
+        prompt_run_root=prompt_run_root,
+        prompt_index=event_index,
+    )
+    preview_generation_record_view = BASE_RUNNER_MODULE._resolve_source_pool_preview_generation_record_view(
+        cfg_obj=preview_runtime_cfg,
+        run_root=shard_root,
+        prompt_run_root=prompt_run_root,
+        prompt_index=event_index,
+    )
+
+    shard_relative_runtime_cfg = runtime_cfg_path.relative_to(shard_root).as_posix()
+    shard_relative_embed_record = staged_embed_record_path.relative_to(shard_root).as_posix()
+    shard_relative_detect_record = staged_detect_record_path.relative_to(shard_root).as_posix()
+
+    event_manifest_payload: Dict[str, Any] = {
+        "artifact_type": "paper_workflow_source_event",
+        "event_id": event_id,
+        "sample_role": PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
+        "source_prompt_index": source_prompt_index,
+        "event_index": event_index,
+        "prompt_text": prompt_text,
+        "prompt_sha256": prompt_sha256,
+        "seed": seed,
+        "runtime_config_path": normalize_path_value(runtime_cfg_path),
+        "runtime_config_package_relative_path": shard_relative_runtime_cfg,
+        "embed_record_path": normalize_path_value(staged_embed_record_path),
+        "embed_record_package_relative_path": shard_relative_embed_record,
+        "detect_record_path": normalize_path_value(staged_detect_record_path),
+        "detect_record_package_relative_path": shard_relative_detect_record,
+        "source_image": source_image_view,
+        "preview_generation_record": preview_generation_record_view,
+        "attestation_statement": None,
+        "attestation_bundle": None,
+        "attestation_result": None,
         "negative_branch_source_attestation_provenance": provenance_payload,
         "detect_probe_record_path": normalize_path_value(staged_probe_detect_record_path),
         "sha256": compute_file_sha256(staged_detect_record_path),
@@ -2001,6 +2249,13 @@ def _run_source_event_by_role(
         )
     if sample_role == CLEAN_NEGATIVE_SAMPLE_ROLE:
         return _run_clean_negative_event(
+            event=event,
+            shard_root=shard_root,
+            default_cfg_obj=default_cfg_obj,
+            bound_config_path=bound_config_path,
+        )
+    if sample_role == PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE:
+        return _run_planner_conditioned_control_negative_event(
             event=event,
             shard_root=shard_root,
             default_cfg_obj=default_cfg_obj,

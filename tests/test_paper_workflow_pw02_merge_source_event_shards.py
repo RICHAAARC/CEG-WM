@@ -43,7 +43,7 @@ def _build_pw00_family(tmp_path: Path, family_id: str) -> Dict[str, Any]:
 
 def _materialize_completed_pw01_shards(summary: Dict[str, Any]) -> None:
     """
-    Create completed PW01 shard manifests and detect records for both roles.
+    Create completed PW01 shard manifests and detect records for all source roles.
 
     Args:
         summary: PW00 summary payload.
@@ -58,7 +58,11 @@ def _materialize_completed_pw01_shards(summary: Dict[str, Any]) -> None:
         for row in read_jsonl(Path(str(summary["source_event_grid_path"])))
     }
 
-    for sample_role in ["positive_source", "clean_negative"]:
+    for sample_role in [
+        "positive_source",
+        "clean_negative",
+        "planner_conditioned_control_negative",
+    ]:
         role_plan = cast(Dict[str, Any], shard_plan["sample_role_plans"][sample_role])
         for shard_row in cast(List[Dict[str, Any]], role_plan["shards"]):
             shard_index = int(shard_row["shard_index"])
@@ -71,6 +75,7 @@ def _materialize_completed_pw01_shards(summary: Dict[str, Any]) -> None:
                 detect_record_path = shard_root / "records" / f"event_{event_index:06d}_detect_record.json"
                 if sample_role == "positive_source":
                     detect_payload = {
+                        "sample_role": sample_role,
                         "content_evidence_payload": {
                             "status": "ok",
                             "score": 0.91,
@@ -90,8 +95,30 @@ def _materialize_completed_pw01_shards(summary: Dict[str, Any]) -> None:
                             }
                         },
                     }
+                elif sample_role == "clean_negative":
+                    detect_payload = {
+                        "sample_role": sample_role,
+                        "content_evidence_payload": {
+                            "status": "absent",
+                            "score": None,
+                            "content_chain_score": None,
+                            "content_failure_reason": "detector_no_plan_expected",
+                        },
+                        "final_decision": {
+                            "is_watermarked": False,
+                        },
+                        "attestation": {
+                            "final_event_attested_decision": {
+                                "status": "absent",
+                                "is_event_attested": False,
+                                "event_attestation_score_name": "event_attestation_score",
+                                "event_attestation_score": 0.0,
+                            }
+                        },
+                    }
                 else:
                     detect_payload = {
+                        "sample_role": sample_role,
                         "content_evidence_payload": {
                             "status": "ok",
                             "score": 0.11,
@@ -339,6 +366,7 @@ def test_pw02_merges_dual_role_shards_and_builds_score_runs(tmp_path: Path, monk
     assert content_run["evaluate_inputs"]["record_count"] == 4
     assert attestation_run["calibration_inputs"]["record_count"] == 4
     assert attestation_run["evaluate_inputs"]["record_count"] == 4
+    assert Path(str(pw02_summary["planner_conditioned_control_negative_pool_manifest_path"])).exists()
 
     attestation_negative_record_path = Path(
         str(
@@ -357,10 +385,15 @@ def test_pw02_merges_dual_role_shards_and_builds_score_runs(tmp_path: Path, monk
         == 0.0
     )
 
-    system_final_metrics = cast(Dict[str, Any], pw02_summary["system_final_metrics"])
-    assert system_final_metrics["n_total"] == 4
-    assert system_final_metrics["n_positive"] == 2
-    assert system_final_metrics["n_negative"] == 2
+    formal_final_decision_metrics = cast(Dict[str, Any], pw02_summary["formal_final_decision_metrics"])
+    derived_system_union_metrics = cast(Dict[str, Any], pw02_summary["derived_system_union_metrics"])
+    assert formal_final_decision_metrics["n_total"] == 4
+    assert formal_final_decision_metrics["n_positive"] == 2
+    assert formal_final_decision_metrics["n_negative"] == 2
+    assert derived_system_union_metrics["n_total"] == 4
+    assert derived_system_union_metrics["n_positive"] == 2
+    assert derived_system_union_metrics["n_negative"] == 2
+    assert pw02_summary["system_final_metrics"] == derived_system_union_metrics
 
 
 def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path: Path, monkeypatch: Any) -> None:
@@ -390,6 +423,9 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     clean_negative_pool_manifest = json.loads(
         Path(str(pw02_summary["clean_negative_pool_manifest_path"])).read_text(encoding="utf-8")
     )
+    control_negative_pool_manifest = json.loads(
+        Path(str(pw02_summary["planner_conditioned_control_negative_pool_manifest_path"])).read_text(encoding="utf-8")
+    )
     finalize_manifest = json.loads(
         Path(str(pw02_summary["paper_source_finalize_manifest_path"])).read_text(encoding="utf-8")
     )
@@ -405,8 +441,11 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     attestation_clean_evaluate_export = json.loads(
         Path(str(cast(Dict[str, Any], pw02_summary["clean_evaluate_exports"])["attestation"])).read_text(encoding="utf-8")
     )
-    system_final_metrics_export = json.loads(
-        Path(str(pw02_summary["system_final_metrics_artifact_path"])).read_text(encoding="utf-8")
+    formal_final_decision_metrics_export = json.loads(
+        Path(str(pw02_summary["formal_final_decision_metrics_artifact_path"])).read_text(encoding="utf-8")
+    )
+    derived_system_union_metrics_export = json.loads(
+        Path(str(pw02_summary["derived_system_union_metrics_artifact_path"])).read_text(encoding="utf-8")
     )
 
     assert positive_pool_manifest["family_id"] == "family_pw02_exports"
@@ -421,8 +460,18 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert len(clean_negative_pool_manifest["events"]) == 4
     assert len(clean_negative_pool_manifest["source_shard_manifest_paths"]) == 2
 
+    assert control_negative_pool_manifest["family_id"] == "family_pw02_exports"
+    assert control_negative_pool_manifest["source_role"] == "planner_conditioned_control_negative"
+    assert control_negative_pool_manifest["event_count"] == 4
+    assert len(control_negative_pool_manifest["events"]) == 4
+    assert len(control_negative_pool_manifest["source_shard_manifest_paths"]) == 2
+
     assert finalize_manifest["source_pools"]["positive_source"]["manifest_path"] == pw02_summary["positive_source_pool_manifest_path"]
     assert finalize_manifest["source_pools"]["clean_negative"]["manifest_path"] == pw02_summary["clean_negative_pool_manifest_path"]
+    assert (
+        finalize_manifest["source_pools"]["planner_conditioned_control_negative"]["manifest_path"]
+        == pw02_summary["planner_conditioned_control_negative_pool_manifest_path"]
+    )
     assert finalize_manifest["threshold_exports"]["content"]["path"] == cast(Dict[str, Any], pw02_summary["threshold_exports"])["content"]
     assert finalize_manifest["clean_evaluate_exports"]["content"]["path"] == cast(Dict[str, Any], pw02_summary["clean_evaluate_exports"])["content"]
 
@@ -455,12 +504,32 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     }
     assert attestation_clean_evaluate_export["evaluate_record"]["status"] == "ok"
 
-    assert system_final_metrics_export["source_kind"] == "derived_metrics_from_content_evaluate_inputs"
-    assert system_final_metrics_export["is_formal_evaluate_record"] is False
-    assert system_final_metrics_export["source_score_name"] == pw02_module.CONTENT_SCORE_NAME
-    assert system_final_metrics_export["source_evaluate_run_root"] == content_run["evaluate_run_root"]
-    assert system_final_metrics_export["metrics"]["scope"] == "system_final"
+    assert formal_final_decision_metrics_export["source_kind"] == "formal_final_decision_metrics_from_content_evaluate_inputs"
+    assert formal_final_decision_metrics_export["is_formal_evaluate_record"] is False
+    assert formal_final_decision_metrics_export["source_score_name"] == pw02_module.CONTENT_SCORE_NAME
+    assert formal_final_decision_metrics_export["source_evaluate_run_root"] == content_run["evaluate_run_root"]
+    assert formal_final_decision_metrics_export["scope"] == "formal_final_decision"
+    assert formal_final_decision_metrics_export["metrics"]["scope"] == "formal_final_decision"
 
+    assert derived_system_union_metrics_export["source_kind"] == "derived_metrics_from_content_evaluate_inputs"
+    assert derived_system_union_metrics_export["is_formal_evaluate_record"] is False
+    assert derived_system_union_metrics_export["source_score_name"] == pw02_module.CONTENT_SCORE_NAME
+    assert derived_system_union_metrics_export["source_evaluate_run_root"] == content_run["evaluate_run_root"]
+    assert derived_system_union_metrics_export["scope"] == "derived_system_union"
+    assert derived_system_union_metrics_export["metrics"]["scope"] == "system_final"
+
+    assert finalize_manifest["formal_final_decision"]["mode"] == "formal_final_decision_metrics_from_content_evaluate_inputs"
+    assert finalize_manifest["formal_final_decision"]["is_formal_evaluate_record"] is False
+    assert (
+        finalize_manifest["formal_final_decision"]["artifact_path"]
+        == pw02_summary["formal_final_decision_metrics_artifact_path"]
+    )
+    assert finalize_manifest["derived_system_union"]["mode"] == "derived_metrics_from_content_evaluate_inputs"
+    assert finalize_manifest["derived_system_union"]["is_formal_evaluate_record"] is False
+    assert (
+        finalize_manifest["derived_system_union"]["artifact_path"]
+        == pw02_summary["derived_system_union_metrics_artifact_path"]
+    )
     assert finalize_manifest["system_final"]["mode"] == "derived_metrics_from_content_evaluate_inputs"
     assert finalize_manifest["system_final"]["is_formal_evaluate_record"] is False
     assert finalize_manifest["system_final"]["artifact_path"] == pw02_summary["system_final_metrics_artifact_path"]

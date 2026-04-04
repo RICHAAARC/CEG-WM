@@ -96,6 +96,25 @@ def _coerce_optional_finite_score(value: Any) -> Optional[float]:
     return None
 
 
+def _resolve_optional_finite_score_from_candidates(*values: Any) -> Optional[float]:
+    """
+    功能：按顺序解析第一个有限浮点分数，保留 0.0。 
+
+    Resolve the first finite score from ordered candidates while preserving 0.0.
+
+    Args:
+        *values: Candidate score values.
+
+    Returns:
+        First finite float score when available; otherwise None.
+    """
+    for value in values:
+        score = _coerce_optional_finite_score(value)
+        if score is not None:
+            return score
+    return None
+
+
 def _synchronize_content_score_aliases(content_evidence_payload: Dict[str, Any]) -> None:
     """
     功能：同步内容链正式分数字段与兼容别名。
@@ -113,6 +132,8 @@ def _synchronize_content_score_aliases(content_evidence_payload: Dict[str, Any])
 
     score_parts_node = content_evidence_payload.get("score_parts")
     score_parts = cast(Dict[str, Any], score_parts_node) if isinstance(score_parts_node, dict) else None
+    hf_summary_node = content_evidence_payload.get("hf_evidence_summary")
+    hf_summary = cast(Dict[str, Any], hf_summary_node) if isinstance(hf_summary_node, dict) else None
 
     content_chain_score = (
         _coerce_optional_finite_score(content_evidence_payload.get(eval_metrics.CONTENT_CHAIN_SCORE_NAME))
@@ -148,6 +169,31 @@ def _synchronize_content_score_aliases(content_evidence_payload: Dict[str, Any])
         if score_parts is not None:
             score_parts[eval_metrics.LF_CORRELATION_SCORE_NAME] = lf_correlation_score
             score_parts["detect_lf_score"] = lf_correlation_score
+
+    hf_raw_energy = _resolve_optional_finite_score_from_candidates(
+        content_evidence_payload.get("hf_raw_energy"),
+        content_evidence_payload.get("hf_score"),
+        hf_summary.get("hf_raw_energy") if isinstance(hf_summary, dict) else None,
+        score_parts.get("hf_raw_energy") if isinstance(score_parts, dict) else None,
+    )
+    if hf_raw_energy is not None:
+        content_evidence_payload["hf_raw_energy"] = hf_raw_energy
+        if score_parts is not None:
+            score_parts["hf_raw_energy"] = hf_raw_energy
+        if hf_summary is not None:
+            hf_summary["hf_raw_energy"] = hf_raw_energy
+
+    hf_content_score = _resolve_optional_finite_score_from_candidates(
+        content_evidence_payload.get("hf_content_score"),
+        hf_summary.get("hf_content_score") if isinstance(hf_summary, dict) else None,
+        score_parts.get("hf_content_score") if isinstance(score_parts, dict) else None,
+    )
+    if hf_content_score is not None:
+        content_evidence_payload["hf_content_score"] = hf_content_score
+        if score_parts is not None:
+            score_parts["hf_content_score"] = hf_content_score
+        if hf_summary is not None:
+            hf_summary["hf_content_score"] = hf_content_score
 
 
 def _call_content_extractor_extract(
@@ -3220,6 +3266,8 @@ def _bind_scores_if_ok(content_evidence_payload: Dict[str, Any]) -> None:
         content_evidence_payload["lf_score"] = None
         content_evidence_payload[eval_metrics.LF_CHANNEL_SCORE_NAME] = None
         content_evidence_payload["hf_score"] = None
+        content_evidence_payload["hf_raw_energy"] = None
+        content_evidence_payload["hf_content_score"] = None
         content_evidence_payload["detect_lf_score"] = None
         content_evidence_payload[eval_metrics.LF_CORRELATION_SCORE_NAME] = None
         content_evidence_payload["detect_hf_score"] = None
@@ -3228,6 +3276,8 @@ def _bind_scores_if_ok(content_evidence_payload: Dict[str, Any]) -> None:
                 "score",
                 "lf_score",
                 "hf_score",
+                "hf_raw_energy",
+                "hf_content_score",
                 "content_score",
                 eval_metrics.CONTENT_CHAIN_SCORE_NAME,
                 eval_metrics.LF_CHANNEL_SCORE_NAME,
@@ -3247,6 +3297,8 @@ def _bind_scores_if_ok(content_evidence_payload: Dict[str, Any]) -> None:
         "lf_score",
         eval_metrics.LF_CHANNEL_SCORE_NAME,
         "hf_score",
+        "hf_raw_energy",
+        "hf_content_score",
         "detect_lf_score",
         eval_metrics.LF_CORRELATION_SCORE_NAME,
     ]:
@@ -3259,6 +3311,8 @@ def _bind_scores_if_ok(content_evidence_payload: Dict[str, Any]) -> None:
             content_evidence_payload["score"] = None
             content_evidence_payload["lf_score"] = None
             content_evidence_payload["hf_score"] = None
+            content_evidence_payload["hf_raw_energy"] = None
+            content_evidence_payload["hf_content_score"] = None
             content_evidence_payload["score_parts"] = None
             return
 

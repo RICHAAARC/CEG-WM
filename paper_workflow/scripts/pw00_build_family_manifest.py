@@ -21,6 +21,7 @@ from paper_workflow.scripts.pw_common import (
     ACTIVE_SAMPLE_ROLE,
     ACTIVE_SOURCE_SAMPLE_ROLES,
     CLEAN_NEGATIVE_SAMPLE_ROLE,
+    PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
     DEFAULT_CONFIG_RELATIVE_PATH,
     DEFAULT_PW_BASE_CONFIG_RELATIVE_PATH,
     RESERVED_SAMPLE_ROLES,
@@ -158,6 +159,11 @@ def run_pw00_build_family_manifest(
         for event in event_grid
         if str(event.get("sample_role")) == CLEAN_NEGATIVE_SAMPLE_ROLE
     )
+    control_negative_event_count = sum(
+        1
+        for event in event_grid
+        if str(event.get("sample_role")) == PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE
+    )
 
     default_cfg_path = (REPO_ROOT / DEFAULT_CONFIG_RELATIVE_PATH).resolve()
     default_cfg_obj = load_default_config_snapshot(REPO_ROOT)
@@ -213,8 +219,11 @@ def run_pw00_build_family_manifest(
         "counts": {
             "positive_source_event_count": positive_source_event_count,
             "clean_negative_event_count": clean_negative_event_count,
+            "planner_conditioned_control_negative_event_count": control_negative_event_count,
             "calibration_event_count": len(source_split_plan["calib_pos_event_ids"]) + len(source_split_plan["calib_neg_event_ids"]),
             "evaluate_event_count": len(source_split_plan["eval_pos_event_ids"]) + len(source_split_plan["eval_neg_event_ids"]),
+            "control_calibration_event_count": len(source_split_plan["calib_control_event_ids"]),
+            "control_evaluate_event_count": len(source_split_plan["eval_control_event_ids"]),
             "total_event_count": len(event_grid),
         },
         "paths": {

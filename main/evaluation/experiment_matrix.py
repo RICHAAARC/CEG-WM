@@ -1030,8 +1030,8 @@ def _extract_system_final_prediction(record_payload: Dict[str, Any]) -> Dict[str
     }
 
 
-def _build_system_final_metrics_for_run(run_root: Path) -> Dict[str, Any]:
-    """Build system-level metrics from real final decision fields."""
+def _resolve_system_metric_record_paths(run_root: Path) -> List[Path]:
+    """Resolve the persisted evaluate-input records used by final metrics helpers."""
     if not isinstance(run_root, Path):
         raise TypeError("run_root must be Path")
 
@@ -1039,16 +1039,90 @@ def _build_system_final_metrics_for_run(run_root: Path) -> Dict[str, Any]:
         run_root / "artifacts" / "evaluate_inputs" / "formal_evaluate_records",
         run_root / "artifacts" / "evaluate_inputs" / "labelled_detect_records",
     ]
-    record_paths: List[Path] = []
     for candidate_dir in candidate_dirs:
         if candidate_dir.exists() and candidate_dir.is_dir():
             record_paths = sorted(path for path in candidate_dir.glob("*.json") if path.is_file())
             if record_paths:
-                break
-    if not record_paths:
-        detect_record_path = run_root / "records" / "detect_record.json"
-        if detect_record_path.exists() and detect_record_path.is_file():
-            record_paths = [detect_record_path]
+                return record_paths
+
+    detect_record_path = run_root / "records" / "detect_record.json"
+    if detect_record_path.exists() and detect_record_path.is_file():
+        return [detect_record_path]
+    return []
+
+
+def _build_formal_final_decision_metrics_for_run(run_root: Path) -> Dict[str, Any]:
+    """Build final-decision-only metrics from the formal evaluate inputs."""
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+
+    record_paths = _resolve_system_metric_record_paths(run_root)
+    n_total = 0
+    n_positive = 0
+    n_negative = 0
+    final_decision_tp = 0
+    final_decision_fp = 0
+    final_decision_available_count = 0
+    content_chain_available_count = 0
+    final_decision_status_counts: Dict[str, int] = {}
+
+    for record_path in record_paths:
+        record_payload = _read_optional_json(record_path)
+        if not isinstance(record_payload, dict) or not record_payload:
+            continue
+        label_value = _resolve_ground_truth_label_for_record(record_payload)
+        if label_value is None:
+            continue
+
+        prediction = _extract_system_final_prediction(record_payload)
+        final_decision_node = record_payload.get("final_decision")
+        final_decision_payload = final_decision_node if isinstance(final_decision_node, dict) else {}
+        content_node = record_payload.get("content_evidence_payload")
+        content_payload = content_node if isinstance(content_node, dict) else {}
+
+        n_total += 1
+        if final_decision_payload:
+            final_decision_available_count += 1
+        if content_payload.get("status") == "ok":
+            content_chain_available_count += 1
+
+        decision_status = final_decision_payload.get("decision_status")
+        if isinstance(decision_status, str) and decision_status:
+            final_decision_status_counts[decision_status] = final_decision_status_counts.get(decision_status, 0) + 1
+
+        if label_value:
+            n_positive += 1
+            if prediction["final_decision_positive"]:
+                final_decision_tp += 1
+        else:
+            n_negative += 1
+            if prediction["final_decision_positive"]:
+                final_decision_fp += 1
+
+    def _safe_rate(numerator: int, denominator: int) -> Optional[float]:
+        if denominator <= 0:
+            return None
+        return float(numerator / denominator)
+
+    return {
+        "scope": "formal_final_decision",
+        "n_total": n_total,
+        "n_positive": n_positive,
+        "n_negative": n_negative,
+        "final_decision_available_rate": _safe_rate(final_decision_available_count, n_total),
+        "content_chain_available_rate": _safe_rate(content_chain_available_count, n_total),
+        "final_decision_tpr": _safe_rate(final_decision_tp, n_positive),
+        "final_decision_fpr": _safe_rate(final_decision_fp, n_negative),
+        "final_decision_status_counts": final_decision_status_counts,
+    }
+
+
+def _build_system_final_metrics_for_run(run_root: Path) -> Dict[str, Any]:
+    """Build system-level metrics from real final decision fields."""
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+
+    record_paths = _resolve_system_metric_record_paths(run_root)
 
     n_total = 0
     n_positive = 0

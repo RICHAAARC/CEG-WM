@@ -25,12 +25,18 @@ DEFAULT_CONFIG_RELATIVE_PATH = "configs/default.yaml"
 DEFAULT_PW_BASE_CONFIG_RELATIVE_PATH = "paper_workflow/configs/pw_base.yaml"
 ACTIVE_SAMPLE_ROLE = "positive_source"
 CLEAN_NEGATIVE_SAMPLE_ROLE = "clean_negative"
+PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE = "planner_conditioned_control_negative"
 ATTACKED_POSITIVE_SAMPLE_ROLE = "attacked_positive"
-ACTIVE_SOURCE_SAMPLE_ROLES = [ACTIVE_SAMPLE_ROLE, CLEAN_NEGATIVE_SAMPLE_ROLE]
+ACTIVE_SOURCE_SAMPLE_ROLES = [
+    ACTIVE_SAMPLE_ROLE,
+    CLEAN_NEGATIVE_SAMPLE_ROLE,
+    PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
+]
 RESERVED_SAMPLE_ROLES = [ATTACKED_POSITIVE_SAMPLE_ROLE]
 SAMPLE_ROLE_DIRECTORY_NAMES = {
     ACTIVE_SAMPLE_ROLE: "positive",
     CLEAN_NEGATIVE_SAMPLE_ROLE: "negative",
+    PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE: "control_negative",
 }
 SOURCE_TRUTH_STAGE = "01_Paper_Full_Cuda_Parallel"
 
@@ -96,6 +102,7 @@ def resolve_family_layout_paths(family_root: Path) -> Dict[str, Path]:
     source_shards_root = family_root / "source_shards"
     positive_shards_root = source_shards_root / "positive"
     negative_shards_root = source_shards_root / "negative"
+    control_negative_shards_root = source_shards_root / "control_negative"
     return {
         "family_root": family_root,
         "manifests_root": manifests_root,
@@ -103,6 +110,7 @@ def resolve_family_layout_paths(family_root: Path) -> Dict[str, Path]:
         "source_shards_root": source_shards_root,
         "positive_shards_root": positive_shards_root,
         "negative_shards_root": negative_shards_root,
+        "control_negative_shards_root": control_negative_shards_root,
         "runs_root": family_root / "runs",
         "logs_root": family_root / "logs",
         "runtime_state_root": family_root / "runtime_state",
@@ -134,6 +142,7 @@ def ensure_family_layout(family_root: Path) -> Dict[str, Path]:
         "snapshots_root",
         "positive_shards_root",
         "negative_shards_root",
+        "control_negative_shards_root",
         "runs_root",
         "logs_root",
         "runtime_state_root",
@@ -525,8 +534,14 @@ def build_source_split_plan(
         "roles": split_roles,
         "calib_pos_event_ids": list(split_roles[ACTIVE_SAMPLE_ROLE]["calibration_event_ids"]),
         "calib_neg_event_ids": list(split_roles[CLEAN_NEGATIVE_SAMPLE_ROLE]["calibration_event_ids"]),
+        "calib_control_event_ids": list(
+            split_roles[PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE]["calibration_event_ids"]
+        ),
         "eval_pos_event_ids": list(split_roles[ACTIVE_SAMPLE_ROLE]["evaluate_event_ids"]),
         "eval_neg_event_ids": list(split_roles[CLEAN_NEGATIVE_SAMPLE_ROLE]["evaluate_event_ids"]),
+        "eval_control_event_ids": list(
+            split_roles[PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE]["evaluate_event_ids"]
+        ),
     }
 
 

@@ -152,6 +152,41 @@ def _coerce_finite_float(value: Any) -> float | None:
     return None
 
 
+def _is_strict_clean_negative_formal_null_record(record: Dict[str, Any]) -> bool:
+    """
+    功能：判定记录是否属于 strict clean_negative 的 formal null 映射场景。
+
+    Decide whether the record matches the strict clean-negative formal-null
+    mapping contract.
+
+    Args:
+        record: Detect record mapping.
+
+    Returns:
+        True when the record should contribute a formal null content score.
+    """
+    if not isinstance(record, dict):
+        raise TypeError("record must be dict")
+
+    if record.get("sample_role") != "clean_negative":
+        return False
+
+    content_node = record.get("content_evidence_payload")
+    content_payload = cast(Dict[str, Any], content_node) if isinstance(content_node, dict) else {}
+    if content_payload.get("status") != "absent":
+        return False
+
+    failure_reason = content_payload.get("content_failure_reason")
+    if failure_reason != "detector_no_plan_expected":
+        return False
+
+    expected_plan_digest = record.get("plan_digest")
+    if isinstance(expected_plan_digest, str) and expected_plan_digest:
+        return False
+
+    return True
+
+
 def _resolve_content_score_source(record: Dict[str, Any]) -> Tuple[float | None, str | None]:
     """
     功能：从 detect record 解析 content_score 或可恢复来源。
@@ -179,15 +214,16 @@ def _resolve_content_score_source(record: Dict[str, Any]) -> Tuple[float | None,
     evidence_summary_node = fusion_result.get("evidence_summary")
     evidence_summary = cast(Dict[str, Any], evidence_summary_node) if isinstance(evidence_summary_node, dict) else {}
 
+    if _is_strict_clean_negative_formal_null_record(record):
+        return 0.0, "strict_clean_negative_formal_null"
+
     candidates = [
         ("content_evidence_payload.content_chain_score", content_payload.get("content_chain_score")),
         ("content_evidence_payload.score", content_payload.get("score")),
         ("content_evidence_payload.content_score", content_payload.get("content_score")),
         ("content_evidence_payload.lf_score", content_payload.get("lf_score")),
-        ("content_evidence_payload.hf_score", content_payload.get("hf_score")),
         ("score_parts.content_chain_score", score_parts.get("content_chain_score")),
         ("score_parts.content_score", score_parts.get("content_score")),
-        ("score_parts.hf_detect_trace.hf_score_raw", hf_detect_trace.get("hf_score_raw")),
         ("fusion_result.evidence_summary.content_score", evidence_summary.get("content_score")),
         ("record.score", record.get("score")),
     ]

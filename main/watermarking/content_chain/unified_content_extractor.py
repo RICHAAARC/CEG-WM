@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional, Tuple, cast
 
 from main.core import digests
 
+from . import channel_hf
 from .semantic_mask_provider import SemanticMaskProvider, SEMANTIC_MASK_PROVIDER_ID, SEMANTIC_MASK_PROVIDER_VERSION
 from .interfaces import ContentEvidence
 
@@ -254,9 +255,15 @@ class _UnifiedContentExtractorBase:
             hf_failure_reason = "hf_disabled_by_config"
             hf_trace_digest = None
             hf_summary = {"hf_status": "absent", "hf_absent_reason": "hf_disabled_by_config"}
+        hf_content_score = _resolve_hf_content_score(
+            normalized_inputs.get("hf_evidence"),
+            hf_summary,
+        )
+        hf_raw_energy = hf_score
 
         _validate_non_negative_score(lf_score, "lf_score")
         _validate_non_negative_score(hf_score, "hf_score")
+        _validate_non_negative_score(hf_content_score, "hf_content_score")
 
         if lf_status in {"absent", "failed", "mismatch"}:
             propagated_reason = lf_failure_reason
@@ -357,11 +364,13 @@ class _UnifiedContentExtractorBase:
 
         content_score, score_parts = self._compose_content_score(
             lf_score=lf_score,
-            hf_score=hf_score,
+            hf_content_score=hf_content_score,
             hf_status=hf_status,
             hf_failure_reason=hf_failure_reason,
         )
         score_parts["lf_status"] = lf_status
+        score_parts["hf_raw_energy"] = hf_raw_energy if hf_raw_energy is not None else "<absent>"
+        score_parts["hf_content_score"] = hf_content_score if hf_content_score is not None else "<absent>"
         if isinstance(lf_summary, dict):
             score_parts["lf_metrics"] = lf_summary
         if isinstance(hf_summary, dict):
@@ -381,6 +390,8 @@ class _UnifiedContentExtractorBase:
             "basis_digest": basis_digest,
             "lf_score": lf_score,
             "hf_score": hf_score,
+            "hf_raw_energy": hf_raw_energy,
+            "hf_content_score": hf_content_score,
             "content_score": content_score,
             "content_score_rule_version": score_parts.get("content_score_rule_version"),
             "cfg_digest": cfg_digest,
@@ -394,6 +405,8 @@ class _UnifiedContentExtractorBase:
             score_parts=score_parts,
             lf_score=lf_score,
             hf_score=hf_score,
+            hf_raw_energy=hf_raw_energy,
+            hf_content_score=hf_content_score,
             cfg_digest=cfg_digest,
             detection_result=detection_result,
             trajectory_evidence=trajectory_evidence,
@@ -406,7 +419,7 @@ class _UnifiedContentExtractorBase:
     def _compose_content_score(
         self,
         lf_score: Optional[float],
-        hf_score: Optional[float],
+        hf_content_score: Optional[float],
         hf_status: Optional[str],
         hf_failure_reason: Optional[str],
     ) -> Tuple[float, Dict[str, Any]]:
@@ -417,7 +430,7 @@ class _UnifiedContentExtractorBase:
 
         Args:
             lf_score: LF score.
-            hf_score: HF score.
+            hf_content_score: Bounded HF content score.
             hf_status: HF status.
             hf_failure_reason: HF absent or failure reason.
 
@@ -434,31 +447,35 @@ class _UnifiedContentExtractorBase:
                 "rule_id": "lf_only_when_hf_absent",
                 "content_score_rule_id": "lf_only_when_hf_absent",
                 "lf_score": lf_score,
-                "hf_score": "<absent>",
+                "hf_content_score": "<absent>",
                 "hf_status": "absent",
                 "hf_absent_reason": hf_reason,
             }
 
-        if hf_score is None:
+        if hf_content_score is None:
             return float(lf_score), {
                 "content_score_rule_version": "content_score_rule_v1",
-                "rule_id": "lf_only_default",
-                "content_score_rule_id": "lf_only_default",
+                "rule_id": "lf_only_when_hf_content_unavailable",
+                "content_score_rule_id": "lf_only_when_hf_content_unavailable",
                 "lf_score": lf_score,
-                "hf_score": "<absent>",
-                "hf_status": "absent",
-                "hf_absent_reason": "hf_disabled_by_config",
+                "hf_content_score": "<absent>",
+                "hf_status": hf_status if isinstance(hf_status, str) and hf_status else "absent",
+                "hf_absent_reason": (
+                    hf_failure_reason
+                    if isinstance(hf_failure_reason, str) and hf_failure_reason
+                    else "hf_content_score_unavailable"
+                ),
             }
 
         weight_lf = 0.7
         weight_hf = 0.3
-        content_score = float(round(lf_score * weight_lf + hf_score * weight_hf, 8))
+        content_score = float(round(lf_score * weight_lf + hf_content_score * weight_hf, 8))
         return content_score, {
             "content_score_rule_version": "content_score_rule_v1",
             "rule_id": "lf_hf_weighted_sum",
             "content_score_rule_id": "lf_hf_weighted_sum",
             "lf_score": lf_score,
-            "hf_score": hf_score,
+            "hf_content_score": hf_content_score,
             "weights": {"lf": weight_lf, "hf": weight_hf},
             "hf_status": "ok",
         }
@@ -473,13 +490,15 @@ class _UnifiedContentExtractorBase:
         score_parts: Optional[Dict[str, Any]],
         lf_score: Optional[float],
         hf_score: Optional[float],
-        cfg_digest: Optional[str],
-        detection_result: Optional[Dict[str, Any]],
-        trajectory_evidence: Optional[Dict[str, Any]],
-        lf_trace_digest: Optional[str],
-        hf_trace_digest: Optional[str],
-        lf_statistics_digest: Optional[str],
-        hf_statistics_digest: Optional[str],
+        hf_raw_energy: Optional[float] = None,
+        hf_content_score: Optional[float] = None,
+        cfg_digest: Optional[str] = None,
+        detection_result: Optional[Dict[str, Any]] = None,
+        trajectory_evidence: Optional[Dict[str, Any]] = None,
+        lf_trace_digest: Optional[str] = None,
+        hf_trace_digest: Optional[str] = None,
+        lf_statistics_digest: Optional[str] = None,
+        hf_statistics_digest: Optional[str] = None,
     ) -> ContentEvidence:
         """
         功能：构造 detect 模式 ContentEvidence 结果。
@@ -513,6 +532,8 @@ class _UnifiedContentExtractorBase:
             hf_trace_digest=hf_trace_digest,
             lf_score=lf_score if status == "ok" else None,
             hf_score=hf_score if status == "ok" else None,
+            hf_raw_energy=hf_raw_energy if status == "ok" else None,
+            hf_content_score=hf_content_score if status == "ok" else None,
             score_parts=score_parts,
             trajectory_evidence=trajectory_evidence,
             lf_statistics_digest=lf_statistics_digest,
@@ -624,6 +645,28 @@ def _extract_channel_evidence(
         trace_digest if isinstance(trace_digest, str) else None,
         None,
     )
+
+
+def _resolve_hf_content_score(
+    evidence: Any,
+    hf_summary: Optional[Dict[str, Any]],
+) -> Optional[float]:
+    if isinstance(hf_summary, dict):
+        summary_score = _safe_float(hf_summary.get("hf_content_score"))
+        if summary_score is not None:
+            return summary_score
+        if "coeffs_before_norm" in hf_summary and "coeffs_after_norm" in hf_summary:
+            return channel_hf.compute_hf_content_score_from_constraint_evidence(hf_summary)
+
+    if isinstance(evidence, dict):
+        evidence_dict = cast(Dict[str, Any], evidence)
+        direct_score = _safe_float(evidence_dict.get("hf_content_score"))
+        if direct_score is not None:
+            return direct_score
+        if "coeffs_before_norm" in evidence_dict and "coeffs_after_norm" in evidence_dict:
+            return channel_hf.compute_hf_content_score_from_constraint_evidence(evidence_dict)
+
+    return None
 
 
 def _extract_statistics_digest(inputs: Dict[str, Any], channel: str) -> Optional[str]:

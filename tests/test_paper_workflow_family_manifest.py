@@ -57,8 +57,8 @@ def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
     )
 
     event_rows = read_jsonl(first_event_grid_path)
-    assert len(event_rows) == 8
-    assert [row["event_index"] for row in event_rows] == list(range(8))
+    assert len(event_rows) == 12
+    assert [row["event_index"] for row in event_rows] == list(range(12))
     assert [row["sample_role"] for row in event_rows] == [
         "positive_source",
         "positive_source",
@@ -68,16 +68,27 @@ def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
         "clean_negative",
         "clean_negative",
         "clean_negative",
+        "planner_conditioned_control_negative",
+        "planner_conditioned_control_negative",
+        "planner_conditioned_control_negative",
+        "planner_conditioned_control_negative",
     ]
     assert len({row["event_id"] for row in event_rows}) == len(event_rows)
 
     family_manifest_path = Path(str(first_summary["paper_eval_family_manifest_path"]))
     family_manifest = json.loads(family_manifest_path.read_text(encoding="utf-8"))
-    assert family_manifest["sample_roles"]["active"] == ["positive_source", "clean_negative"]
+    assert family_manifest["sample_roles"]["active"] == [
+        "positive_source",
+        "clean_negative",
+        "planner_conditioned_control_negative",
+    ]
     assert family_manifest["sample_roles"]["reserved"] == ["attacked_positive"]
     assert family_manifest["source_parameters"]["seed_list"] == [0, 7]
     assert family_manifest["source_parameters"]["calibration_fraction"] == 0.5
     assert family_manifest["counts"]["positive_source_event_count"] == 4
     assert family_manifest["counts"]["clean_negative_event_count"] == 4
+    assert family_manifest["counts"]["planner_conditioned_control_negative_event_count"] == 4
     assert family_manifest["counts"]["calibration_event_count"] == 4
     assert family_manifest["counts"]["evaluate_event_count"] == 4
+    assert family_manifest["counts"]["control_calibration_event_count"] == 2
+    assert family_manifest["counts"]["control_evaluate_event_count"] == 2
