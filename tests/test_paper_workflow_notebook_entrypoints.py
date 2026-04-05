@@ -169,6 +169,10 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     )
     pw00_execute = _find_code_cell_source(NOTEBOOK_PW00_PATH, "COMMAND = [")
     pw01_constants = _find_code_cell_source(NOTEBOOK_PW01_PATH, "SCRIPT_PATH = REPO_ROOT")
+    pw01_repo_bootstrap = _find_code_cell_source(
+        NOTEBOOK_PW01_PATH,
+        'from scripts.notebook_runtime_common import resolve_notebook_model_cache_layout',
+    )
     pw01_execute = _find_code_cell_source(NOTEBOOK_PW01_PATH, "COMMAND = [")
     pw02_constants = _find_code_cell_source(NOTEBOOK_PW02_PATH, "SCRIPT_PATH = REPO_ROOT")
     pw02_bootstrap = _find_code_cell_source(
@@ -189,9 +193,15 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     assert '"--source-shard-count"' in pw00_execute
 
     assert '"PW01_Source_Event_Shards.py"' in pw01_constants
+    assert 'DRIVE_MODELS_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "Models"' in pw01_constants
+    assert 'PERSISTENT_HF_ROOT = DRIVE_MODELS_ROOT / "Huggingface"' in pw01_constants
+    assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in pw01_constants
     assert 'SAMPLE_ROLE = "positive_source"' in pw01_constants
     assert '"planner_conditioned_control_negative": "control_negative"' in pw01_constants
     assert 'STAGE_01_WORKER_COUNT = 2' in pw01_constants
+    assert 'MODEL_CACHE_LAYOUT = resolve_notebook_model_cache_layout(DRIVE_MOUNT_ROOT, REPO_ROOT, create_directories=True)' in pw01_repo_bootstrap
+    assert '"model_cache_mode": "local_session_primary"' in pw01_repo_bootstrap
+    assert '"persistent_hf_root_role": "compatibility_only"' in pw01_repo_bootstrap
     assert '"--drive-project-root"' in pw01_execute
     assert '"--family-id"' in pw01_execute
     assert '"--sample-role"' in pw01_execute
@@ -270,9 +280,11 @@ def test_pw01_notebook_restores_bootstrap_before_single_formal_precheck() -> Non
     assert 'os.environ["HUGGINGFACE_HUB_CACHE"] = str(LOCAL_HF_HUB_CACHE)' in pw01_bootstrap
     assert 'MODEL_CACHE_BOOTSTRAP = bootstrap_notebook_model_cache(' in pw01_bootstrap
     assert 'MODEL_SNAPSHOT_PATH = str(MODEL_CACHE_BOOTSTRAP["local_snapshot_path"])' in pw01_bootstrap
-    assert 'PERSISTENT_SNAPSHOT_PATH = Path(str(MODEL_CACHE_BOOTSTRAP["persistent_snapshot_path"]))' in pw01_bootstrap
-    assert 'MODEL_DOWNLOAD_SUMMARY = build_directory_digest_summary(Path(MODEL_SNAPSHOT_PATH))' in pw01_bootstrap
+    assert 'MODEL_DOWNLOAD_SUMMARY = dict(MODEL_CACHE_BOOTSTRAP["model_audit_summary"])' in pw01_bootstrap
     assert 'WEIGHT_DOWNLOAD_SUMMARY = collect_weight_summary(REPO_ROOT, CFG_OBJ)' in pw01_bootstrap
+    assert '"snapshot_source": MODEL_CACHE_BOOTSTRAP["snapshot_source"]' in pw01_bootstrap
+    assert '"model_source_binding": MODEL_CACHE_BOOTSTRAP["model_source_binding"]' in pw01_bootstrap
+    assert 'build_directory_digest_summary(Path(MODEL_SNAPSHOT_PATH))' not in pw01_bootstrap
     assert 'print_json("model_cache_bootstrap", MODEL_CACHE_BOOTSTRAP)' in pw01_bootstrap
     assert 'ATTESTATION_BOOTSTRAP = ensure_attestation_env_bootstrap(' in pw01_bootstrap
     assert 'print_json("attestation_env_bootstrap", ATTESTATION_BOOTSTRAP)' in pw01_bootstrap
@@ -288,9 +300,11 @@ def test_pw01_notebook_restores_bootstrap_before_single_formal_precheck() -> Non
     )
     assert 'SOURCE_SPLIT_PLAN_PATH = FAMILY_ROOT / "manifests" / "source_split_plan.json"' in pw01_precheck
     assert 'SAMPLE_ROLE in manifest_sample_roles' in pw01_precheck
-    assert 'PERSISTENT_SNAPSHOT_PATH.exists() and PERSISTENT_SNAPSHOT_PATH.is_dir()' in pw01_precheck
+    assert 'persistent Huggingface 路径仅兼容保留' in pw01_precheck
+    assert '模型 snapshot 来源为本地会话缓存' in pw01_precheck
     assert 'Path(str(MODEL_SNAPSHOT_PATH)).exists() and Path(str(MODEL_SNAPSHOT_PATH)).is_dir()' in pw01_precheck
     assert 'str(Path(str(MODEL_SNAPSHOT_PATH)).resolve()).startswith(str(LOCAL_HF_HOME.resolve()))' in pw01_precheck
+    assert 'MODEL_DOWNLOAD_SUMMARY["binding_status"] = PRECHECK_MODEL_SOURCE_BINDING.get("binding_status", "<absent>")' in pw01_precheck
     assert 'Path(str(ATTESTATION_BOOTSTRAP.get("attestation_env_path", ""))).exists()' in pw01_precheck
     assert 'Path(str(ATTESTATION_BOOTSTRAP.get("attestation_env_info_path", ""))).exists()' in pw01_precheck
     assert 'nvidia_smi_result = subprocess.run(' in pw01_precheck

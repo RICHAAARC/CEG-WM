@@ -127,7 +127,9 @@ def test_pw03_notebook_binds_expected_script_and_parameters() -> None:
     assert 'bootstrap_notebook_model_cache' in bootstrap_source
     assert 'os.environ["HUGGINGFACE_HUB_CACHE"] = str(LOCAL_HF_HUB_CACHE)' in bootstrap_source
     assert 'MODEL_SNAPSHOT_PATH = str(MODEL_CACHE_BOOTSTRAP["local_snapshot_path"])' in bootstrap_source
-    assert 'PERSISTENT_SNAPSHOT_PATH = Path(str(MODEL_CACHE_BOOTSTRAP["persistent_snapshot_path"]))' in bootstrap_source
+    assert 'MODEL_DOWNLOAD_SUMMARY = dict(MODEL_CACHE_BOOTSTRAP["model_audit_summary"])' in bootstrap_source
+    assert '"snapshot_source": MODEL_CACHE_BOOTSTRAP["snapshot_source"]' in bootstrap_source
+    assert '"model_source_binding": MODEL_CACHE_BOOTSTRAP["model_source_binding"]' in bootstrap_source
     assert 'print_json("model_cache_bootstrap", MODEL_CACHE_BOOTSTRAP)' in bootstrap_source
 
     assert '"--drive-project-root"' in execute_source
@@ -160,10 +162,12 @@ def test_pw03_notebook_reads_pw02_finalize_inputs_and_shard_outputs() -> None:
     assert 'PW03_BOUND_CONFIG_PATH = PRECHECK_BOUND_CONFIG_PATH' in precheck_source
     assert 'write_yaml_mapping(PW03_BOUND_CONFIG_PATH, PRECHECK_BOUND_CFG)' in precheck_source
     assert 'STAGE_01_PREFLIGHT = detect_stage_01_preflight(PW03_BOUND_CONFIG_PATH)' in precheck_source
-    assert 'PERSISTENT_SNAPSHOT_PATH.exists() and PERSISTENT_SNAPSHOT_PATH.is_dir()' in precheck_source
+    assert 'persistent Huggingface 路径仅兼容保留' in precheck_source
+    assert '模型 snapshot 来源为本地会话缓存' in precheck_source
     assert 'str(Path(str(MODEL_SNAPSHOT_PATH)).resolve()).startswith(str(LOCAL_HF_HOME.resolve()))' in precheck_source
     assert 'CURRENT_SHARD_EVENT_IDS = []' in precheck_source
     assert 'CURRENT_SHARD_PLAN = next(row for row in ATTACK_SHARD_PLAN["shards"] if row["attack_shard_index"] == ATTACK_SHARD_INDEX)' in precheck_source
+    assert 'MODEL_DOWNLOAD_SUMMARY["binding_status"] = PRECHECK_MODEL_SOURCE_BINDING.get("binding_status", "<absent>")' in precheck_source
 
     assert 'SHARD_ROOT = FAMILY_ROOT / "attack_shards" / f"shard_{ATTACK_SHARD_INDEX:04d}"' in execute_source
     assert 'PW03_SHARD_MANIFEST_PATH = SHARD_ROOT / "shard_manifest.json"' in execute_source
@@ -175,10 +179,10 @@ def test_pw03_notebook_reads_pw02_finalize_inputs_and_shard_outputs() -> None:
     assert '"total_event_count": PW03_SUMMARY.get("event_count")' in summary_source
     assert '"completed_event_count": PW03_SUMMARY.get("completed_event_count")' in summary_source
     assert '"failed_event_count": PW03_SUMMARY.get("failed_event_count")' in summary_source
-    assert '"persistent_snapshot_path": str(PERSISTENT_SNAPSHOT_PATH)' in summary_source
     assert '"model_snapshot_path": str(MODEL_SNAPSHOT_PATH)' in summary_source
     assert '"persistent_inspyrenet_path": str(PERSISTENT_WEIGHT_PATH)' in summary_source
     assert '"repo_inspyrenet_path": str(WEIGHT_PATH)' in summary_source
+    assert '"snapshot_source": MODEL_CACHE_BOOTSTRAP.get("snapshot_source", "<absent>")' in summary_source
     assert '"gpu_peak_memory_mib": GPU_PEAK_SUMMARY.get("peak_memory_mib")' in summary_source
     assert '"wrapped_command_count": GPU_PEAK_SUMMARY.get("wrapped_command_count")' in summary_source
 

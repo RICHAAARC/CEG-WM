@@ -1,5 +1,5 @@
 """
-File purpose: Validate notebook model cache bootstrap helpers for persistent Drive reuse and local runtime sync.
+File purpose: Validate notebook model cache bootstrap helpers for session-local Hugging Face reuse and lightweight Drive compatibility.
 Module type: General module
 """
 
@@ -84,7 +84,6 @@ def test_resolve_notebook_model_cache_layout_returns_expected_paths(tmp_path: Pa
     for path_key in [
         "drive_models_root",
         "persistent_inspyrenet_root",
-        "persistent_hf_root",
         "local_hf_home",
         "local_hf_hub_cache",
         "local_transformers_cache",
@@ -92,11 +91,12 @@ def test_resolve_notebook_model_cache_layout_returns_expected_paths(tmp_path: Pa
     ]:
         assert layout[path_key].exists()
         assert layout[path_key].is_dir()
+    assert not layout["persistent_hf_root"].exists()
 
 
-def test_bootstrap_notebook_model_cache_reuses_persistent_snapshot_and_syncs_local(tmp_path: Path) -> None:
+def test_bootstrap_notebook_model_cache_reuses_local_session_snapshot(tmp_path: Path) -> None:
     """
-    Verify helper reuses an existing persistent snapshot and syncs a local runtime copy.
+    Verify helper reuses an existing session-local snapshot without any Drive sync.
 
     Args:
         tmp_path: Temporary pytest directory.
@@ -107,16 +107,16 @@ def test_bootstrap_notebook_model_cache_reuses_persistent_snapshot_and_syncs_loc
     drive_mount_root = tmp_path / "drive"
     repo_root = tmp_path / "repo"
     layout = resolve_notebook_model_cache_layout(drive_mount_root, repo_root, create_directories=True)
-    persistent_snapshot_path = layout["persistent_hf_root"] / "models--acme--demo-model" / "snapshots" / "snapshot-001"
+    local_cache_snapshot_path = layout["local_hf_hub_cache"] / "models--acme--demo-model" / "snapshots" / "snapshot-001"
     persistent_weight_path = layout["persistent_inspyrenet_path"]
     snapshot_calls: List[Dict[str, Any]] = []
 
-    _write_snapshot_tree(persistent_snapshot_path, marker="persistent-reused")
+    _write_snapshot_tree(local_cache_snapshot_path, marker="local-session-reused")
     persistent_weight_path.write_bytes(b"persistent-weight")
 
     def fake_snapshot_download(**kwargs: Any) -> str:
         snapshot_calls.append(dict(kwargs))
-        return persistent_snapshot_path.as_posix()
+        return local_cache_snapshot_path.as_posix()
 
     def fail_file_download(_url: str, _target_path: Path) -> None:
         raise AssertionError("file download should not be used when persistent weight exists")
@@ -132,19 +132,26 @@ def test_bootstrap_notebook_model_cache_reuses_persistent_snapshot_and_syncs_loc
 
     local_snapshot_path = Path(str(summary["local_snapshot_path"]))
     repo_weight_path = Path(str(summary["repo_inspyrenet_path"]))
-    assert summary["cache_reuse_mode"] == "persistent_reused_and_local_synced"
+    assert summary["cache_reuse_mode"] == "local_session_cache"
+    assert summary["snapshot_source"] == "local_session_cache"
     assert summary["weight_cache_mode"] == "persistent_reused"
+    assert summary["persistent_snapshot_mode"] == "disabled"
+    assert summary["persistent_snapshot_path"] == "<disabled>"
     assert snapshot_calls == [
         {
             "repo_id": "acme/demo-model",
             "revision": "rev-1",
-            "cache_dir": str(layout["persistent_hf_root"]),
+            "cache_dir": str(layout["local_hf_hub_cache"]),
             "local_files_only": True,
         }
     ]
     assert local_snapshot_path.exists() and local_snapshot_path.is_dir()
-    assert (local_snapshot_path / "model_index.json").read_text(encoding="utf-8") == '{"marker": "persistent-reused"}'
+    assert local_snapshot_path == local_cache_snapshot_path.resolve()
+    assert (local_snapshot_path / "model_index.json").read_text(encoding="utf-8") == '{"marker": "local-session-reused"}'
     assert repo_weight_path.exists() and repo_weight_path.read_bytes() == b"persistent-weight"
+    assert summary["model_source_binding"]["binding_status"] == "ready_for_env_binding"
+    assert summary["model_source_binding"]["binding_source"] == "notebook_snapshot_download"
+    assert summary["model_audit_summary"]["snapshot_source"] == "local_session_cache"
 
     second_summary = bootstrap_notebook_model_cache(
         _build_cfg_obj(),
@@ -154,7 +161,7 @@ def test_bootstrap_notebook_model_cache_reuses_persistent_snapshot_and_syncs_loc
         snapshot_download_fn=fake_snapshot_download,
         file_download_fn=fail_file_download,
     )
-    assert second_summary["cache_reuse_mode"] == "persistent_reused_and_local_reused"
+    assert second_summary["cache_reuse_mode"] == "local_session_cache"
 
 
 def test_bootstrap_notebook_model_cache_seeds_persistent_weight_from_repo(tmp_path: Path) -> None:
@@ -170,15 +177,15 @@ def test_bootstrap_notebook_model_cache_seeds_persistent_weight_from_repo(tmp_pa
     drive_mount_root = tmp_path / "drive"
     repo_root = tmp_path / "repo"
     layout = resolve_notebook_model_cache_layout(drive_mount_root, repo_root, create_directories=True)
-    persistent_snapshot_path = layout["persistent_hf_root"] / "models--acme--demo-model" / "snapshots" / "snapshot-001"
+    local_cache_snapshot_path = layout["local_hf_hub_cache"] / "models--acme--demo-model" / "snapshots" / "snapshot-001"
     repo_weight_path = repo_root / "models" / "inspyrenet" / "ckpt_base.pth"
 
-    _write_snapshot_tree(persistent_snapshot_path, marker="repo-seed")
+    _write_snapshot_tree(local_cache_snapshot_path, marker="repo-seed")
     repo_weight_path.parent.mkdir(parents=True, exist_ok=True)
     repo_weight_path.write_bytes(b"repo-seeded-weight")
 
     def fake_snapshot_download(**kwargs: Any) -> str:
-        return persistent_snapshot_path.as_posix()
+        return local_cache_snapshot_path.as_posix()
 
     summary = bootstrap_notebook_model_cache(
         _build_cfg_obj(),
@@ -191,13 +198,14 @@ def test_bootstrap_notebook_model_cache_seeds_persistent_weight_from_repo(tmp_pa
 
     persistent_weight_path = Path(str(summary["persistent_inspyrenet_path"]))
     assert summary["weight_cache_mode"] == "persistent_seeded_from_repo"
+    assert summary["cache_reuse_mode"] == "local_session_cache"
     assert persistent_weight_path.exists()
     assert persistent_weight_path.read_bytes() == b"repo-seeded-weight"
 
 
-def test_bootstrap_notebook_model_cache_downloads_missing_persistent_snapshot(tmp_path: Path) -> None:
+def test_bootstrap_notebook_model_cache_downloads_missing_local_session_snapshot(tmp_path: Path) -> None:
     """
-    Verify helper downloads the persistent snapshot once and then binds the local copy.
+    Verify helper downloads a missing session-local snapshot directly into the local cache.
 
     Args:
         tmp_path: Temporary pytest directory.
@@ -208,16 +216,16 @@ def test_bootstrap_notebook_model_cache_downloads_missing_persistent_snapshot(tm
     drive_mount_root = tmp_path / "drive"
     repo_root = tmp_path / "repo"
     layout = resolve_notebook_model_cache_layout(drive_mount_root, repo_root, create_directories=True)
-    persistent_snapshot_path = layout["persistent_hf_root"] / "models--acme--demo-model" / "snapshots" / "snapshot-002"
+    local_cache_snapshot_path = layout["local_hf_hub_cache"] / "models--acme--demo-model" / "snapshots" / "snapshot-002"
     layout["persistent_inspyrenet_path"].write_bytes(b"existing-weight")
     snapshot_calls: List[Dict[str, Any]] = []
 
     def fake_snapshot_download(**kwargs: Any) -> str:
         snapshot_calls.append(dict(kwargs))
         if kwargs.get("local_files_only"):
-            raise FileNotFoundError("persistent snapshot missing")
-        _write_snapshot_tree(persistent_snapshot_path, marker="downloaded")
-        return persistent_snapshot_path.as_posix()
+            raise FileNotFoundError("local session snapshot missing")
+        _write_snapshot_tree(local_cache_snapshot_path, marker="downloaded")
+        return local_cache_snapshot_path.as_posix()
 
     summary = bootstrap_notebook_model_cache(
         _build_cfg_obj(revision="rev-2"),
@@ -229,10 +237,14 @@ def test_bootstrap_notebook_model_cache_downloads_missing_persistent_snapshot(tm
     )
 
     local_snapshot_path = Path(str(summary["local_snapshot_path"]))
-    assert summary["cache_reuse_mode"] == "persistent_downloaded_and_local_synced"
+    assert summary["cache_reuse_mode"] == "downloaded_this_session"
+    assert summary["snapshot_source"] == "downloaded_this_session"
     assert snapshot_calls[0]["local_files_only"] is True
     assert "local_files_only" not in snapshot_calls[1]
+    assert snapshot_calls[0]["cache_dir"] == str(layout["local_hf_hub_cache"])
+    assert snapshot_calls[1]["cache_dir"] == str(layout["local_hf_hub_cache"])
     assert local_snapshot_path.exists()
+    assert local_snapshot_path == local_cache_snapshot_path.resolve()
     assert (local_snapshot_path / "model_index.json").read_text(encoding="utf-8") == '{"marker": "downloaded"}'
 
 
@@ -249,12 +261,12 @@ def test_bootstrap_notebook_model_cache_downloads_missing_persistent_weight(tmp_
     drive_mount_root = tmp_path / "drive"
     repo_root = tmp_path / "repo"
     layout = resolve_notebook_model_cache_layout(drive_mount_root, repo_root, create_directories=True)
-    persistent_snapshot_path = layout["persistent_hf_root"] / "models--acme--demo-model" / "snapshots" / "snapshot-003"
+    local_cache_snapshot_path = layout["local_hf_hub_cache"] / "models--acme--demo-model" / "snapshots" / "snapshot-003"
 
-    _write_snapshot_tree(persistent_snapshot_path, marker="weight-download")
+    _write_snapshot_tree(local_cache_snapshot_path, marker="weight-download")
 
     def fake_snapshot_download(**kwargs: Any) -> str:
-        return persistent_snapshot_path.as_posix()
+        return local_cache_snapshot_path.as_posix()
 
     def fake_file_download(url: str, target_path: Path) -> None:
         assert url == "https://example.invalid/ckpt_base.pth"
@@ -273,5 +285,6 @@ def test_bootstrap_notebook_model_cache_downloads_missing_persistent_weight(tmp_
     persistent_weight_path = Path(str(summary["persistent_inspyrenet_path"]))
     repo_weight_path = Path(str(summary["repo_inspyrenet_path"]))
     assert summary["weight_cache_mode"] == "persistent_downloaded"
+    assert summary["cache_reuse_mode"] == "local_session_cache"
     assert persistent_weight_path.exists() and persistent_weight_path.read_bytes() == b"downloaded-weight"
     assert repo_weight_path.exists() and repo_weight_path.read_bytes() == b"downloaded-weight"

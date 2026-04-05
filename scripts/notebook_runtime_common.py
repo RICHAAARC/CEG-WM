@@ -358,10 +358,11 @@ def resolve_notebook_model_cache_layout(
     create_directories: bool = False,
 ) -> Dict[str, Path]:
     """
-    功能：解析 notebook 使用的 Drive 持久缓存与本地运行时目录布局。
+    功能：解析 notebook 使用的本地会话缓存与兼容性 Drive 目录布局。
 
-    Resolve the notebook cache layout for persistent Google Drive storage and
-    session-local runtime directories.
+    Resolve the notebook cache layout for session-local Hugging Face caches,
+    while preserving compatibility paths for lightweight Google Drive
+    artifacts.
 
     Args:
         drive_mount_root: Notebook Drive mount root.
@@ -401,7 +402,6 @@ def resolve_notebook_model_cache_layout(
         for key in [
             "drive_models_root",
             "persistent_inspyrenet_root",
-            "persistent_hf_root",
             "local_hf_home",
             "local_hf_hub_cache",
             "local_transformers_cache",
@@ -423,11 +423,11 @@ def bootstrap_notebook_model_cache(
     file_download_fn: Optional[Callable[[str, Path], None]] = None,
 ) -> Dict[str, Any]:
     """
-    功能：准备 notebook 所需的 persistent 模型缓存并同步本地运行时快照。
+    功能：准备 notebook 所需的本地会话模型缓存，并同步轻量审计元信息。
 
-    Prepare the notebook model cache by reusing or downloading the canonical
-    persistent artifacts on Google Drive and synchronizing the active snapshot
-    into the session-local runtime directory.
+    Prepare the notebook model cache by resolving the Stable Diffusion
+    snapshot directly from the session-local Hugging Face cache while keeping
+    lightweight Drive compatibility only for the InSPyReNet weight file.
 
     Args:
         cfg_obj: Runtime configuration mapping.
@@ -437,13 +437,14 @@ def bootstrap_notebook_model_cache(
             identifiers to download URLs.
         weight_url_override: Optional explicit semantic model weight URL.
         force_inspyrenet_download: Whether to force a fresh InSPyReNet download
-            into the persistent cache.
+            into the persistent compatibility cache.
         snapshot_download_fn: Optional snapshot download callable used for
             testing.
         file_download_fn: Optional file download callable used for testing.
 
     Returns:
-        Bootstrap summary containing persistent and local cache paths.
+        Bootstrap summary containing the session-local snapshot path,
+        compatibility metadata, and lightweight audit fields.
     """
     if not isinstance(cfg_obj, Mapping):
         raise TypeError("cfg_obj must be Mapping")
@@ -528,43 +529,64 @@ def bootstrap_notebook_model_cache(
         snapshot_download = huggingface_snapshot_download
 
     requested_revision = None if revision == "<absent>" else revision
-    persistent_cache_mode = "persistent_reused"
+    requested_model_source = (
+        str(cfg_obj.get("model_source")).strip()
+        if isinstance(cfg_obj.get("model_source"), str) and str(cfg_obj.get("model_source")).strip()
+        else "<absent>"
+    )
+    local_snapshot_mode = "local_session_cache"
     try:
-        persistent_snapshot_path = Path(
+        local_snapshot_path = Path(
             str(
                 snapshot_download(
                     repo_id=model_id,
                     revision=requested_revision,
-                    cache_dir=str(layout["persistent_hf_root"]),
+                    cache_dir=str(layout["local_hf_hub_cache"]),
                     local_files_only=True,
                 )
             )
         ).resolve()
     except Exception:
-        persistent_cache_mode = "persistent_downloaded"
-        persistent_snapshot_path = Path(
+        local_snapshot_mode = "downloaded_this_session"
+        local_snapshot_path = Path(
             str(
                 snapshot_download(
                     repo_id=model_id,
                     revision=requested_revision,
-                    cache_dir=str(layout["persistent_hf_root"]),
+                    cache_dir=str(layout["local_hf_hub_cache"]),
                 )
             )
         ).resolve()
 
-    if not persistent_snapshot_path.exists() or not persistent_snapshot_path.is_dir():
-        raise RuntimeError(f"persistent model snapshot missing or invalid: {persistent_snapshot_path}")
+    if not local_snapshot_path.exists() or not local_snapshot_path.is_dir():
+        raise RuntimeError(f"local model snapshot missing or invalid: {local_snapshot_path}")
 
-    local_snapshot_path = (
-        layout["local_runtime_snapshot_root"]
-        / _sanitize_identifier(model_id)
-        / _sanitize_identifier(revision if revision != "<absent>" else persistent_snapshot_path.name)
-        / persistent_snapshot_path.name
-    )
-    local_snapshot_mode = "local_reused"
-    if not _directory_contains_files(local_snapshot_path):
-        _replace_directory_copy(persistent_snapshot_path, local_snapshot_path)
-        local_snapshot_mode = "local_synced"
+    model_source_binding: Dict[str, Any] = {
+        "binding_source": NOTEBOOK_MODEL_SNAPSHOT_BINDING_SOURCE,
+        "binding_env_var": NOTEBOOK_MODEL_SNAPSHOT_ENV_VAR,
+        "binding_status": "ready_for_env_binding",
+        "binding_reason": "local_session_snapshot_prepared",
+        "model_snapshot_path": normalize_path_value(local_snapshot_path),
+        "requested_model_id": model_id,
+        "requested_model_source": requested_model_source,
+        "requested_hf_revision": revision,
+    }
+    model_audit_summary: Dict[str, Any] = {
+        "model_id": model_id,
+        "revision": revision,
+        "model_snapshot_path": normalize_path_value(local_snapshot_path),
+        "snapshot_exists": True,
+        "snapshot_source": local_snapshot_mode,
+        "snapshot_path_basename": local_snapshot_path.name,
+        "local_hf_home": normalize_path_value(layout["local_hf_home"]),
+        "local_hf_hub_cache": normalize_path_value(layout["local_hf_hub_cache"]),
+        "local_transformers_cache": normalize_path_value(layout["local_transformers_cache"]),
+        "cache_reuse_mode": local_snapshot_mode,
+        "binding_status": model_source_binding["binding_status"],
+        "binding_source": model_source_binding["binding_source"],
+        "binding_reason": model_source_binding["binding_reason"],
+        "model_source_binding": dict(model_source_binding),
+    }
 
     return {
         "model_id": model_id,
@@ -572,7 +594,7 @@ def bootstrap_notebook_model_cache(
         "semantic_model_source": semantic_model_source or "<absent>",
         "semantic_model_url": semantic_weight_url or "<absent>",
         "persistent_hf_root": normalize_path_value(layout["persistent_hf_root"]),
-        "persistent_snapshot_path": normalize_path_value(persistent_snapshot_path),
+        "persistent_snapshot_path": "<disabled>",
         "local_hf_home": normalize_path_value(layout["local_hf_home"]),
         "local_hf_hub_cache": normalize_path_value(layout["local_hf_hub_cache"]),
         "local_transformers_cache": normalize_path_value(layout["local_transformers_cache"]),
@@ -580,9 +602,12 @@ def bootstrap_notebook_model_cache(
         "persistent_inspyrenet_path": normalize_path_value(persistent_inspyrenet_path),
         "repo_inspyrenet_path": normalize_path_value(repo_inspyrenet_path),
         "weight_cache_mode": weight_cache_mode,
-        "persistent_snapshot_mode": persistent_cache_mode,
+        "persistent_snapshot_mode": "disabled",
         "local_snapshot_mode": local_snapshot_mode,
-        "cache_reuse_mode": f"{persistent_cache_mode}_and_{local_snapshot_mode}",
+        "cache_reuse_mode": local_snapshot_mode,
+        "snapshot_source": local_snapshot_mode,
+        "model_source_binding": model_source_binding,
+        "model_audit_summary": model_audit_summary,
     }
 
 
