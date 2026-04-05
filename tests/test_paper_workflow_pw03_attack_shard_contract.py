@@ -1,0 +1,619 @@
+"""
+File purpose: Validate PW03 attack shard execution, isolation, and artifact contracts.
+Module type: General module
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any, Dict, List, Mapping, Tuple, cast
+
+from PIL import Image
+import pytest
+
+from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
+import paper_workflow.scripts.pw03_run_attack_event_shard as pw03_module
+from scripts.notebook_runtime_common import (
+    apply_notebook_model_snapshot_binding,
+    ensure_directory,
+    load_yaml_mapping,
+    write_json_atomic,
+    write_yaml_mapping,
+    build_repo_import_subprocess_env,
+)
+
+
+def _build_pw00_family(tmp_path: Path, family_id: str) -> Dict[str, Any]:
+    """
+    Build a minimal PW00 family fixture for PW03 tests.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        family_id: Fixture family identifier.
+
+    Returns:
+        PW00 summary payload.
+    """
+    prompt_file = tmp_path / f"{family_id}_prompts.txt"
+    prompt_file.write_text("prompt one\nprompt two\n", encoding="utf-8")
+    return run_pw00_build_family_manifest(
+        drive_project_root=tmp_path / "drive",
+        family_id=family_id,
+        prompt_file=str(prompt_file),
+        seed_list=[3],
+        source_shard_count=2,
+    )
+
+
+def _write_bound_config_snapshot(drive_project_root: Path, *, marker: str) -> Tuple[Path, Path]:
+    """
+    Build a notebook-style bound config snapshot and model snapshot root.
+
+    Args:
+        drive_project_root: Drive project root.
+        marker: Stable fixture marker.
+
+    Returns:
+        Tuple of bound config path and model snapshot directory.
+    """
+    snapshot_dir = drive_project_root / "runtime_state" / f"{marker}_model_snapshot"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+    bound_cfg = apply_notebook_model_snapshot_binding(
+        load_yaml_mapping((pw03_module.REPO_ROOT / "configs" / "default.yaml").resolve()),
+        env_mapping={"CEG_WM_MODEL_SNAPSHOT_PATH": snapshot_dir.as_posix()},
+    )
+    bound_cfg["test_config_origin"] = marker
+    bound_config_path = drive_project_root / "runtime_state" / f"{marker}_bound_config.yaml"
+    write_yaml_mapping(bound_config_path, bound_cfg)
+    return bound_config_path, snapshot_dir
+
+
+def _build_positive_source_finalize_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Build minimal PW01 and PW02 artifacts required by PW03.
+
+    Args:
+        summary: PW00 summary payload.
+
+    Returns:
+        Fixture metadata for PW03 tests.
+    """
+    family_root = Path(str(summary["family_root"]))
+    family_id = str(summary["family_id"])
+    source_event_grid_rows = [
+        row
+        for row in pw03_module.read_jsonl(Path(str(summary["source_event_grid_path"])))
+        if row.get("sample_role") == pw03_module.ACTIVE_SAMPLE_ROLE
+    ]
+    source_shard_plan = json.loads(Path(str(summary["source_shard_plan_path"])).read_text(encoding="utf-8"))
+    positive_shards = cast(
+        List[Dict[str, Any]],
+        cast(Dict[str, Any], source_shard_plan["sample_role_plans"])[pw03_module.ACTIVE_SAMPLE_ROLE]["shards"],
+    )
+    event_to_shard_index: Dict[str, int] = {}
+    for shard_row in positive_shards:
+        shard_index = int(shard_row["shard_index"])
+        for event_id in cast(List[str], shard_row["assigned_event_ids"]):
+            event_to_shard_index[event_id] = shard_index
+
+    stage_root = ensure_directory(family_root / "source_finalize")
+    positive_pool_events: List[Dict[str, Any]] = []
+    shard_event_manifests: Dict[int, List[Dict[str, Any]]] = {}
+    for event_row in source_event_grid_rows:
+        event_id = str(event_row["event_id"])
+        event_index = int(event_row["event_index"])
+        shard_index = event_to_shard_index[event_id]
+        shard_root = ensure_directory(family_root / "source_shards" / "positive" / f"shard_{shard_index:04d}")
+        event_root = ensure_directory(shard_root / "events" / f"event_{event_index:06d}")
+        ensure_directory(shard_root / "records")
+        image_path = shard_root / "artifacts" / "mock_source_images" / f"event_{event_index:06d}.png"
+        ensure_directory(image_path.parent)
+        Image.new("RGB", (8, 8), color=(32 + event_index, 16, 96)).save(image_path)
+
+        embed_record_path = shard_root / "records" / f"event_{event_index:06d}_embed_record.json"
+        detect_record_path = shard_root / "records" / f"event_{event_index:06d}_detect_record.json"
+        runtime_config_path = event_root / "runtime_config.yaml"
+        embed_record = {
+            "operation": "embed",
+            "watermarked_path": image_path.as_posix(),
+            "image_path": image_path.as_posix(),
+            "artifact_sha256": pw03_module.compute_file_sha256(image_path),
+            "watermarked_artifact_sha256": pw03_module.compute_file_sha256(image_path),
+            "is_watermarked": True,
+            "plan_digest": f"plan_{event_index:06d}",
+            "basis_digest": f"basis_{event_index:06d}",
+            "subspace_plan": {"mode": "fixture"},
+            "prompt_text": event_row["prompt_text"],
+            "prompt_sha256": event_row["prompt_sha256"],
+            "seed": event_row["seed"],
+        }
+        detect_record = {
+            "content_evidence_payload": {
+                "status": "ok",
+                "content_chain_score": 0.8,
+            },
+            "attestation": {
+                "final_event_attested_decision": {
+                    "event_attestation_score": 0.7,
+                }
+            },
+            "final_decision": {
+                "decision_status": "accept",
+                "is_watermarked": True,
+            },
+        }
+        write_json_atomic(embed_record_path, embed_record)
+        write_json_atomic(detect_record_path, detect_record)
+        write_yaml_mapping(
+            runtime_config_path,
+            {
+                "paper_workflow_event": {
+                    "event_id": event_id,
+                    "event_index": event_index,
+                    "sample_role": pw03_module.ACTIVE_SAMPLE_ROLE,
+                }
+            },
+        )
+
+        event_manifest_path = event_root / "event_manifest.json"
+        event_manifest = {
+            "artifact_type": "paper_workflow_source_event",
+            "event_id": event_id,
+            "sample_role": pw03_module.ACTIVE_SAMPLE_ROLE,
+            "event_index": event_index,
+            "prompt_text": event_row["prompt_text"],
+            "prompt_sha256": event_row["prompt_sha256"],
+            "seed": event_row["seed"],
+            "runtime_config_path": runtime_config_path.as_posix(),
+            "embed_record_path": embed_record_path.as_posix(),
+            "detect_record_path": detect_record_path.as_posix(),
+            "source_image": {
+                "exists": True,
+                "path": image_path.as_posix(),
+                "package_relative_path": image_path.relative_to(shard_root).as_posix(),
+                "missing_reason": None,
+            },
+            "preview_generation_record": None,
+            "attestation_statement": None,
+            "attestation_bundle": None,
+            "attestation_result": None,
+            "sha256": pw03_module.compute_file_sha256(detect_record_path),
+            "stage_results": {},
+        }
+        write_json_atomic(event_manifest_path, event_manifest)
+        event_manifest["event_manifest_path"] = event_manifest_path.as_posix()
+
+        shard_event_manifests.setdefault(shard_index, []).append(event_manifest)
+        positive_pool_events.append(
+            {
+                "event_id": event_id,
+                "event_index": event_index,
+                "sample_role": pw03_module.ACTIVE_SAMPLE_ROLE,
+                "detect_record_path": detect_record_path.as_posix(),
+                "source_shard_index": shard_index,
+                "source_shard_root": shard_root.as_posix(),
+                "source_shard_manifest_path": (shard_root / "shard_manifest.json").as_posix(),
+            }
+        )
+
+    for shard_index, event_manifests in shard_event_manifests.items():
+        shard_root = family_root / "source_shards" / "positive" / f"shard_{shard_index:04d}"
+        write_json_atomic(
+            shard_root / "shard_manifest.json",
+            {
+                "status": "completed",
+                "sample_role": pw03_module.ACTIVE_SAMPLE_ROLE,
+                "event_count": len(event_manifests),
+                "events": event_manifests,
+            },
+        )
+
+    positive_pool_manifest_path = stage_root / "positive_source_pool_manifest.json"
+    write_json_atomic(
+        positive_pool_manifest_path,
+        {
+            "artifact_type": "paper_workflow_pw02_source_pool_manifest",
+            "schema_version": "pw_stage_02_v1",
+            "family_id": family_id,
+            "source_role": pw03_module.ACTIVE_SAMPLE_ROLE,
+            "event_count": len(positive_pool_events),
+            "events": positive_pool_events,
+        },
+    )
+
+    empty_pool_payload = {
+        "artifact_type": "paper_workflow_pw02_source_pool_manifest",
+        "schema_version": "pw_stage_02_v1",
+        "family_id": family_id,
+        "event_count": 0,
+        "events": [],
+    }
+    clean_negative_pool_manifest_path = stage_root / "clean_negative_pool_manifest.json"
+    control_pool_manifest_path = stage_root / "planner_conditioned_control_negative_pool_manifest.json"
+    write_json_atomic(clean_negative_pool_manifest_path, empty_pool_payload)
+    write_json_atomic(control_pool_manifest_path, empty_pool_payload)
+
+    content_threshold_path = stage_root / "thresholds" / "content" / "thresholds.json"
+    attestation_threshold_path = stage_root / "thresholds" / "attestation" / "thresholds.json"
+    ensure_directory(content_threshold_path.parent)
+    ensure_directory(attestation_threshold_path.parent)
+    write_json_atomic(content_threshold_path, {"threshold": 0.5, "score_name": "content_chain_score"})
+    write_json_atomic(attestation_threshold_path, {"threshold": 0.4, "score_name": "event_attestation_score"})
+
+    finalize_manifest_path = stage_root / "paper_source_finalize_manifest.json"
+    write_json_atomic(
+        finalize_manifest_path,
+        {
+            "artifact_type": "paper_workflow_pw02_finalize_manifest",
+            "schema_version": "pw_stage_02_v1",
+            "family_id": family_id,
+            "source_pools": {
+                pw03_module.ACTIVE_SAMPLE_ROLE: {
+                    "manifest_path": positive_pool_manifest_path.as_posix(),
+                    "event_count": len(positive_pool_events),
+                },
+                "clean_negative": {
+                    "manifest_path": clean_negative_pool_manifest_path.as_posix(),
+                    "event_count": 0,
+                },
+                "planner_conditioned_control_negative": {
+                    "manifest_path": control_pool_manifest_path.as_posix(),
+                    "event_count": 0,
+                },
+            },
+            "threshold_exports": {
+                "content": {"path": content_threshold_path.as_posix()},
+                "attestation": {"path": attestation_threshold_path.as_posix()},
+            },
+        },
+    )
+    write_json_atomic(
+        family_root / "runtime_state" / "pw02_summary.json",
+        {
+            "status": "completed",
+            "family_id": family_id,
+            "paper_source_finalize_manifest_path": finalize_manifest_path.as_posix(),
+        },
+    )
+
+    return {
+        "family_root": family_root,
+        "positive_source_pool_manifest_path": positive_pool_manifest_path,
+        "finalize_manifest_path": finalize_manifest_path,
+        "positive_event_count": len(positive_pool_events),
+    }
+
+
+def _patch_pw03_detect(monkeypatch: pytest.MonkeyPatch) -> Dict[str, Any]:
+    """
+    Patch PW03 detect execution with lightweight artifact writers.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        Mutable capture mapping.
+    """
+    captures: Dict[str, Any] = {
+        "run_roots": [],
+        "detect_input_paths": [],
+        "detect_input_payloads": [],
+    }
+
+    def fake_run_command_with_gpu_monitor(
+        *,
+        command: List[str],
+        label: str,
+        gpu_summary_path: Path,
+        stdout_log_path: Path,
+        stderr_log_path: Path,
+    ) -> Dict[str, Any]:
+        run_root = Path(str(command[command.index("--out") + 1]))
+        detect_input_path = Path(str(command[command.index("--input") + 1]))
+        detect_input_payload = json.loads(detect_input_path.read_text(encoding="utf-8"))
+        captures["run_roots"].append(run_root)
+        captures["detect_input_paths"].append(detect_input_path)
+        captures["detect_input_payloads"].append(detect_input_payload)
+
+        ensure_directory(stdout_log_path.parent)
+        ensure_directory(stderr_log_path.parent)
+        ensure_directory(run_root / "records")
+        stdout_log_path.write_text("ok\n", encoding="utf-8")
+        stderr_log_path.write_text("\n", encoding="utf-8")
+        write_json_atomic(
+            run_root / "records" / "detect_record.json",
+            {
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "content_chain_score": 0.91,
+                    "plan_digest": detect_input_payload.get("plan_digest"),
+                    "basis_digest": detect_input_payload.get("basis_digest"),
+                },
+                "attestation": {
+                    "final_event_attested_decision": {
+                        "event_attestation_score": 0.77,
+                    }
+                },
+                "final_decision": {
+                    "decision_status": "accept",
+                    "is_watermarked": True,
+                },
+            },
+        )
+        gpu_payload = {
+            "status": "ok",
+            "session_board_peak_memory_used_mib": 1536 + len(captures["run_roots"]),
+            "peak_observed_at_utc": "2026-04-05T00:00:00Z",
+            "peak_gpu_name": "Test GPU",
+            "visible_gpu_count": 1,
+            "visible_gpus": [
+                {
+                    "index": 0,
+                    "uuid": "gpu-0",
+                    "name": "Test GPU",
+                    "memory_total_mib": 24576,
+                    "peak_memory_used_mib": 1536 + len(captures["run_roots"]),
+                }
+            ],
+            "wrapped_return_code": 0,
+        }
+        write_json_atomic(gpu_summary_path, gpu_payload)
+        return {
+            "return_code": 0,
+            "stdout_log_path": stdout_log_path.as_posix(),
+            "stderr_log_path": stderr_log_path.as_posix(),
+            "command": [str(item) for item in command],
+            "gpu_session_peak_path": gpu_summary_path.as_posix(),
+            "gpu_session_peak": gpu_payload,
+        }
+
+    monkeypatch.setattr(pw03_module, "_run_command_with_gpu_monitor", fake_run_command_with_gpu_monitor)
+    return captures
+
+
+def _load_attack_event_specs(summary: Dict[str, Any], shard_index: int) -> List[Dict[str, Any]]:
+    """
+    Load the materialized attack event specs for one shard.
+
+    Args:
+        summary: PW00 summary payload.
+        shard_index: Attack shard index.
+
+    Returns:
+        Materialized attack event specs.
+    """
+    family_root = Path(str(summary["family_root"]))
+    attack_event_lookup = pw03_module._load_attack_event_lookup(Path(str(summary["attack_event_grid_path"])))
+    attack_shard_plan = json.loads(Path(str(summary["attack_shard_plan_path"])).read_text(encoding="utf-8"))
+    attack_shard_assignment = pw03_module._resolve_attack_shard_assignment(
+        attack_shard_plan,
+        attack_shard_index=shard_index,
+        attack_shard_count=int(attack_shard_plan["attack_shard_count"]),
+    )
+    finalize_manifest_path = family_root / "source_finalize" / "paper_source_finalize_manifest.json"
+    finalize_manifest = json.loads(finalize_manifest_path.read_text(encoding="utf-8"))
+    positive_pool_manifest_path = Path(str(finalize_manifest["source_pools"][pw03_module.ACTIVE_SAMPLE_ROLE]["manifest_path"]))
+    positive_source_pool_manifest = json.loads(positive_pool_manifest_path.read_text(encoding="utf-8"))
+    parent_event_lookup = pw03_module._load_parent_positive_event_lookup(positive_source_pool_manifest)
+    threshold_binding_reference = pw03_module._build_threshold_binding_reference(
+        finalize_manifest_path=finalize_manifest_path,
+        finalize_manifest=finalize_manifest,
+    )
+    return [
+        pw03_module._resolve_attack_event_spec(
+            attack_event=attack_event_lookup[event_id],
+            parent_event_lookup=parent_event_lookup,
+            threshold_binding_reference=threshold_binding_reference,
+        )
+        for event_id in cast(List[str], attack_shard_assignment["assigned_attack_event_ids"])
+    ]
+
+
+def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify PW03 consumes PW02 finalized positive source pool and writes required artifacts.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    summary = _build_pw00_family(tmp_path, family_id="family_pw03_artifacts")
+    _build_positive_source_finalize_fixture(summary)
+    bound_config_path, _ = _write_bound_config_snapshot(tmp_path / "drive", marker="pw03_artifacts")
+    captures = _patch_pw03_detect(monkeypatch)
+
+    pw03_summary = pw03_module.run_pw03_attack_event_shard(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_pw03_artifacts",
+        attack_shard_index=0,
+        attack_shard_count=2,
+        attack_local_worker_count=1,
+        bound_config_path=bound_config_path,
+    )
+
+    assert pw03_summary["status"] == "completed"
+    assert Path(str(pw03_summary["gpu_session_peak_path"])).exists()
+    assert pw03_summary["completed_event_count"] == pw03_summary["event_count"]
+    assert captures["detect_input_payloads"]
+
+    first_event = cast(Dict[str, Any], pw03_summary["events"][0])
+    assert first_event["sample_role"] == pw03_module.ATTACKED_POSITIVE_SAMPLE_ROLE
+    assert Path(str(first_event["attacked_image_path"])).exists()
+    assert Path(str(first_event["runtime_config_snapshot_path"])).exists()
+    assert Path(str(first_event["threshold_binding_summary_path"])).exists()
+    assert Path(str(first_event["detect_record_path"])).exists()
+    assert first_event["parent_event_id"]
+    assert first_event["attack_family"]
+    assert first_event["attack_params_digest"]
+    assert first_event["threshold_binding_summary"]["threshold_artifact_paths"]["content"]
+    assert first_event["threshold_binding_summary"]["threshold_artifact_paths"]["attestation"]
+    assert first_event["source_finalize_manifest_digest"]
+    assert first_event["parent_source_image_path"] != first_event["attacked_image_path"]
+
+    detect_input_payload = cast(Dict[str, Any], captures["detect_input_payloads"][0])
+    assert detect_input_payload["paper_workflow_parent_event_id"] == first_event["parent_event_id"]
+    assert detect_input_payload["paper_workflow_attack_family"] == first_event["attack_family"]
+    assert detect_input_payload["paper_workflow_attack_params_digest"] == first_event["attack_params_digest"]
+    assert detect_input_payload["watermarked_path"] == first_event["attacked_image_path"]
+    assert detect_input_payload["plan_digest"].startswith("plan_")
+
+
+def test_pw03_attack_shards_remain_isolated_across_sessions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify different PW03 shard sessions produce disjoint event outputs.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    summary = _build_pw00_family(tmp_path, family_id="family_pw03_isolation")
+    _build_positive_source_finalize_fixture(summary)
+    bound_config_path, _ = _write_bound_config_snapshot(tmp_path / "drive", marker="pw03_isolation")
+    _patch_pw03_detect(monkeypatch)
+
+    shard_0_summary = pw03_module.run_pw03_attack_event_shard(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_pw03_isolation",
+        attack_shard_index=0,
+        attack_shard_count=2,
+        attack_local_worker_count=1,
+        bound_config_path=bound_config_path,
+    )
+    shard_1_summary = pw03_module.run_pw03_attack_event_shard(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_pw03_isolation",
+        attack_shard_index=1,
+        attack_shard_count=2,
+        attack_local_worker_count=1,
+        bound_config_path=bound_config_path,
+    )
+
+    assert set(cast(List[str], shard_0_summary["event_ids"]))
+    assert set(cast(List[str], shard_1_summary["event_ids"]))
+    assert set(cast(List[str], shard_0_summary["event_ids"])).isdisjoint(set(cast(List[str], shard_1_summary["event_ids"])))
+    assert Path(str(shard_0_summary["shard_root"])) != Path(str(shard_1_summary["shard_root"]))
+
+    shard_0_attacked_images = {str(event["attacked_image_path"]) for event in cast(List[Dict[str, Any]], shard_0_summary["events"])}
+    shard_1_attacked_images = {str(event["attacked_image_path"]) for event in cast(List[Dict[str, Any]], shard_1_summary["events"])}
+    assert shard_0_attacked_images.isdisjoint(shard_1_attacked_images)
+
+
+def test_pw03_local_worker_assignments_do_not_conflict_outputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify shard-local worker assignments do not write conflicting event outputs.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    summary = _build_pw00_family(tmp_path, family_id="family_pw03_workers")
+    _build_positive_source_finalize_fixture(summary)
+    bound_config_path, _ = _write_bound_config_snapshot(tmp_path / "drive", marker="pw03_workers")
+    _patch_pw03_detect(monkeypatch)
+    _, bound_cfg_obj = pw03_module._load_required_bound_config(bound_config_path)
+
+    family_root = Path(str(summary["family_root"]))
+    shard_root = ensure_directory(pw03_module._resolve_attack_shard_root(family_root, 0))
+    attack_event_specs = _load_attack_event_specs(summary, shard_index=0)
+    worker_plans = pw03_module._prepare_local_worker_plans(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_pw03_workers",
+        attack_shard_index=0,
+        attack_shard_count=2,
+        attack_local_worker_count=2,
+        shard_root=shard_root,
+        bound_config_path=bound_config_path,
+        assigned_attack_events=attack_event_specs,
+    )
+
+    assert len(worker_plans) == 2
+    assigned_by_worker = [set(cast(List[str], worker_plan["assigned_attack_event_ids"])) for worker_plan in worker_plans]
+    assert assigned_by_worker[0].isdisjoint(assigned_by_worker[1])
+
+    worker_results = []
+    for worker_plan in worker_plans:
+        worker_result = pw03_module._run_attack_event_by_worker(
+            family_id="family_pw03_workers",
+            attack_shard_index=0,
+            attack_shard_count=2,
+            attack_local_worker_count=2,
+            local_worker_index=int(worker_plan["local_worker_index"]),
+            worker_root=Path(str(worker_plan["worker_root"])),
+            shard_root=shard_root,
+            bound_cfg_obj=bound_cfg_obj,
+            assigned_attack_events=[
+                cast(Dict[str, Any], event)
+                for event in attack_event_specs
+                if str(event["event_id"]) in cast(List[str], worker_plan["assigned_attack_event_ids"])
+            ],
+        )
+        worker_results.append(worker_result)
+
+    event_manifest_paths = [
+        str(event["event_manifest_path"])
+        for worker_result in worker_results
+        for event in cast(List[Dict[str, Any]], worker_result["events"])
+    ]
+    attacked_image_paths = [
+        str(event["attacked_image_path"])
+        for worker_result in worker_results
+        for event in cast(List[Dict[str, Any]], worker_result["events"])
+    ]
+    assert len(event_manifest_paths) == len(set(event_manifest_paths))
+    assert len(attacked_image_paths) == len(set(attacked_image_paths))
+    assert all(Path(path).exists() for path in event_manifest_paths)
+    assert all(Path(path).exists() for path in attacked_image_paths)
+
+
+def test_pw03_cli_help_exposes_attack_shard_arguments() -> None:
+    """
+    Verify the PW03 CLI exposes the expected shard arguments.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    script_path = pw03_module.REPO_ROOT / "paper_workflow" / "scripts" / "pw03_run_attack_event_shard.py"
+    result = subprocess.run(
+        [sys.executable, str(script_path), "--help"],
+        cwd=pw03_module.REPO_ROOT,
+        env=build_repo_import_subprocess_env(repo_root=pw03_module.REPO_ROOT),
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    combined_output = f"{result.stdout}\n{result.stderr}"
+    normalized_output = " ".join(combined_output.split())
+    assert result.returncode == 0
+    assert "usage:" in combined_output.lower()
+    assert "--attack-shard-index" in normalized_output
+    assert "--attack-shard-count" in normalized_output
+    assert "--attack-local-worker-count" in normalized_output
+    assert "--attack-family-allowlist" in normalized_output
+    assert "finalized positive source pool" in normalized_output
