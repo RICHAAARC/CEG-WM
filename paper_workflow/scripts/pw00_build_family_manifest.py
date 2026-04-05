@@ -26,6 +26,9 @@ from paper_workflow.scripts.pw_common import (
     DEFAULT_PW_BASE_CONFIG_RELATIVE_PATH,
     RESERVED_SAMPLE_ROLES,
     SOURCE_TRUTH_STAGE,
+    build_attack_condition_catalog,
+    build_attack_event_grid,
+    build_attack_shard_plan,
     build_family_root,
     build_method_identity_snapshot,
     build_source_event_grid,
@@ -165,6 +168,27 @@ def run_pw00_build_family_manifest(
         if str(event.get("sample_role")) == PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE
     )
 
+    positive_source_events = [
+        event
+        for event in event_grid
+        if str(event.get("sample_role")) == ACTIVE_SAMPLE_ROLE
+    ]
+    attack_conditions = build_attack_condition_catalog()
+    attack_event_grid = build_attack_event_grid(
+        family_id=family_id,
+        parent_events=positive_source_events,
+        attack_conditions=attack_conditions,
+    )
+    attack_shard_plan = build_attack_shard_plan(
+        family_id=family_id,
+        attack_shard_count=source_shard_count,
+        events=attack_event_grid,
+    )
+    attack_event_grid_path = layout["manifests_root"] / "attack_event_grid.jsonl"
+    attack_shard_plan_path = layout["manifests_root"] / "attack_shard_plan.json"
+    attack_condition_count = len(attack_conditions)
+    attack_event_count = len(attack_event_grid)
+
     default_cfg_path = (REPO_ROOT / DEFAULT_CONFIG_RELATIVE_PATH).resolve()
     default_cfg_obj = load_default_config_snapshot(REPO_ROOT)
     source_alignment_reference_files = _resolve_source_alignment_reference_files(pw_base_cfg)
@@ -185,12 +209,10 @@ def run_pw00_build_family_manifest(
         "family_root_relative": "paper_workflow/families",
         "source_truth_stage": SOURCE_TRUTH_STAGE,
         "stage_boundary": {
-            "implemented": ["PW00", "PW01", "PW02"],
+            "implemented": ["PW00", "PW01", "PW02", "PW03"],
             "excluded": [
-                "PW03",
                 "PW04",
                 "PW05",
-                "attack_event_shards",
             ],
         },
         "sample_roles": {
@@ -220,6 +242,8 @@ def run_pw00_build_family_manifest(
             "positive_source_event_count": positive_source_event_count,
             "clean_negative_event_count": clean_negative_event_count,
             "planner_conditioned_control_negative_event_count": control_negative_event_count,
+            "attack_condition_count": attack_condition_count,
+            "attack_event_count": attack_event_count,
             "calibration_event_count": len(source_split_plan["calib_pos_event_ids"]) + len(source_split_plan["calib_neg_event_ids"]),
             "evaluate_event_count": len(source_split_plan["eval_pos_event_ids"]) + len(source_split_plan["eval_neg_event_ids"]),
             "control_calibration_event_count": len(source_split_plan["calib_control_event_ids"]),
@@ -231,11 +255,19 @@ def run_pw00_build_family_manifest(
             "source_event_grid": normalize_path_value(layout["source_event_grid_path"]),
             "source_shard_plan": normalize_path_value(layout["source_shard_plan_path"]),
             "source_split_plan": normalize_path_value(layout["source_split_plan_path"]),
+            "attack_event_grid": normalize_path_value(attack_event_grid_path),
+            "attack_shard_plan": normalize_path_value(attack_shard_plan_path),
             "prompt_snapshot": normalize_path_value(layout["prompt_snapshot_path"]),
             "method_identity_snapshot": normalize_path_value(layout["method_identity_snapshot_path"]),
             "config_snapshot": normalize_path_value(layout["config_snapshot_path"]),
         },
         "source_split": source_split_plan,
+        "attack_plan": {
+            "materialization_profile": "first_value_per_condition",
+            "attack_shard_count": source_shard_count,
+            "attack_condition_count": attack_condition_count,
+            "attack_event_count": attack_event_count,
+        },
         "default_config_path": normalize_path_value(default_cfg_path),
         "pw_base_config_path": normalize_path_value((REPO_ROOT / DEFAULT_PW_BASE_CONFIG_RELATIVE_PATH).resolve()),
     }
@@ -246,6 +278,8 @@ def run_pw00_build_family_manifest(
     write_jsonl(layout["source_event_grid_path"], event_grid)
     write_json_atomic(layout["source_shard_plan_path"], source_shard_plan)
     write_json_atomic(layout["source_split_plan_path"], source_split_plan)
+    write_jsonl(attack_event_grid_path, attack_event_grid)
+    write_json_atomic(attack_shard_plan_path, attack_shard_plan)
     write_json_atomic(layout["family_manifest_path"], family_manifest)
 
     summary_path = layout["runtime_state_root"] / "pw00_summary.json"
@@ -259,7 +293,11 @@ def run_pw00_build_family_manifest(
         "source_event_grid_path": normalize_path_value(layout["source_event_grid_path"]),
         "source_shard_plan_path": normalize_path_value(layout["source_shard_plan_path"]),
         "source_split_plan_path": normalize_path_value(layout["source_split_plan_path"]),
+        "attack_event_grid_path": normalize_path_value(attack_event_grid_path),
+        "attack_shard_plan_path": normalize_path_value(attack_shard_plan_path),
         "event_count": len(event_grid),
+        "attack_condition_count": attack_condition_count,
+        "attack_event_count": attack_event_count,
         "source_shard_count": source_shard_count,
     }
     write_json_atomic(summary_path, summary)

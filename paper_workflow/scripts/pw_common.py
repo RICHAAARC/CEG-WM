@@ -10,6 +10,10 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence, Tuple, cast
 
+from main.evaluation import attack_plan as eval_attack_plan
+from main.evaluation import attack_runner as eval_attack_runner
+from main.evaluation import protocol_loader as attack_protocol_loader
+
 from scripts.notebook_runtime_common import (
     REPO_ROOT,
     collect_attestation_env_summary,
@@ -620,6 +624,305 @@ def build_source_shard_plan(
             },
         },
         "shards": list(sample_role_plans[ACTIVE_SAMPLE_ROLE]["shards"]),
+    }
+
+
+def _materialize_attack_param_value(*, key_name: str | None, value: Any) -> Any:
+    """
+    Materialize one protocol parameter value into a concrete executable value.
+
+    Args:
+        key_name: Optional parent key name.
+        value: Raw protocol value.
+
+    Returns:
+        Concrete value used by PW03 minimal attack execution.
+    """
+    if isinstance(value, Mapping):
+        materialized_mapping: Dict[str, Any] = {}
+        for nested_key, nested_value in cast(Mapping[str, Any], value).items():
+            materialized_mapping[str(nested_key)] = _materialize_attack_param_value(
+                key_name=str(nested_key),
+                value=nested_value,
+            )
+        return materialized_mapping
+
+    if isinstance(value, list):
+        if key_name == "steps":
+            return [
+                _materialize_attack_param_value(key_name=None, value=item)
+                for item in cast(List[Any], value)
+            ]
+        if not value:
+            return []
+        return _materialize_attack_param_value(key_name=key_name, value=value[0])
+
+    return value
+
+
+def materialize_attack_params(params: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    Materialize one protocol params object into a concrete attack config.
+
+    Args:
+        params: Protocol params mapping.
+
+    Returns:
+        Concrete attack params mapping.
+    """
+    if not isinstance(params, Mapping):
+        raise TypeError("params must be Mapping")
+
+    materialized_params: Dict[str, Any] = {}
+    for key_name, value in cast(Mapping[str, Any], params).items():
+        materialized_params[str(key_name)] = _materialize_attack_param_value(
+            key_name=str(key_name),
+            value=value,
+        )
+    return materialized_params
+
+
+def build_attack_condition_catalog(
+    protocol_spec: Mapping[str, Any] | None = None,
+) -> List[Dict[str, Any]]:
+    """
+    Build the canonical PW03 attack-condition catalog.
+
+    Args:
+        protocol_spec: Optional standardized protocol spec. When absent the
+            repository fact source is loaded.
+
+    Returns:
+        Ordered concrete attack-condition rows.
+    """
+    normalized_protocol_spec = (
+        attack_protocol_loader.load_attack_protocol_spec()
+        if protocol_spec is None
+        else dict(cast(Mapping[str, Any], protocol_spec))
+    )
+    attack_plan = eval_attack_plan.generate_attack_plan(dict(normalized_protocol_spec))
+    if not attack_plan.conditions:
+        raise ValueError("attack protocol must declare at least one condition")
+
+    condition_rows: List[Dict[str, Any]] = []
+    for condition_index, condition_key in enumerate(attack_plan.conditions):
+        condition_spec = eval_attack_runner.resolve_condition_spec_from_protocol(
+            dict(normalized_protocol_spec),
+            condition_key,
+        )
+        attack_family = str(condition_spec["attack_family"])
+        params_version = str(condition_spec["params_version"])
+        attack_params = materialize_attack_params(cast(Mapping[str, Any], condition_spec["params"]))
+        attack_config_name = condition_key
+        condition_rows.append(
+            {
+                "attack_condition_index": condition_index,
+                "attack_condition_key": condition_key,
+                "attack_family": attack_family,
+                "attack_config_name": attack_config_name,
+                "attack_params_version": params_version,
+                "attack_params": attack_params,
+                "attack_params_digest": canonical_mapping_sha256(attack_params),
+                "attack_protocol_version": condition_spec.get("protocol_version", "<absent>"),
+                "attack_protocol_digest": condition_spec.get("protocol_digest", "<absent>"),
+                "attack_materialization_profile": "first_value_per_condition",
+            }
+        )
+    return condition_rows
+
+
+def build_attack_event_id(
+    *,
+    family_id: str,
+    parent_event_id: str,
+    attack_condition_key: str,
+    attack_params_digest: str,
+) -> str:
+    """
+    Build one deterministic PW03 attacked-event identifier.
+
+    Args:
+        family_id: Family identifier.
+        parent_event_id: Parent positive source event identifier.
+        attack_condition_key: Canonical attack condition key.
+        attack_params_digest: Digest of the concrete attack params.
+
+    Returns:
+        Stable attacked-event identifier.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(parent_event_id, str) or not parent_event_id:
+        raise TypeError("parent_event_id must be non-empty str")
+    if not isinstance(attack_condition_key, str) or not attack_condition_key:
+        raise TypeError("attack_condition_key must be non-empty str")
+    if not isinstance(attack_params_digest, str) or not attack_params_digest:
+        raise TypeError("attack_params_digest must be non-empty str")
+
+    digest_payload = {
+        "family_id": family_id,
+        "parent_event_id": parent_event_id,
+        "attack_condition_key": attack_condition_key,
+        "attack_params_digest": attack_params_digest,
+    }
+    return f"atk_{canonical_mapping_sha256(digest_payload)[:24]}"
+
+
+def build_attack_event_grid(
+    *,
+    family_id: str,
+    parent_events: Sequence[Mapping[str, Any]],
+    attack_conditions: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    Build the deterministic attacked-event grid for PW03.
+
+    Args:
+        family_id: Family identifier.
+        parent_events: Positive source parent-event rows.
+        attack_conditions: Concrete attack-condition rows.
+
+    Returns:
+        Ordered attacked-event rows.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not parent_events:
+        raise ValueError("parent_events must be non-empty sequence")
+    if not attack_conditions:
+        raise ValueError("attack_conditions must be non-empty sequence")
+
+    ordered_parent_events = sorted(
+        [dict(cast(Mapping[str, Any], event)) for event in parent_events],
+        key=lambda item: int(item.get("event_index", -1)),
+    )
+    attack_event_rows: List[Dict[str, Any]] = []
+    attack_event_index = 0
+    for parent_event in ordered_parent_events:
+        parent_event_id = parent_event.get("event_id")
+        parent_event_index = parent_event.get("event_index")
+        parent_sample_role = parent_event.get("sample_role")
+        if not isinstance(parent_event_id, str) or not parent_event_id:
+            raise ValueError("parent event missing event_id")
+        if not isinstance(parent_event_index, int) or parent_event_index < 0:
+            raise ValueError("parent event missing event_index")
+        if parent_sample_role != ACTIVE_SAMPLE_ROLE:
+            raise ValueError(
+                f"PW03 parent events must be positive_source, got: {parent_sample_role}"
+            )
+
+        for attack_condition_node in attack_conditions:
+            attack_condition = dict(cast(Mapping[str, Any], attack_condition_node))
+            attack_condition_key = attack_condition.get("attack_condition_key")
+            attack_params_digest = attack_condition.get("attack_params_digest")
+            if not isinstance(attack_condition_key, str) or not attack_condition_key:
+                raise ValueError("attack condition missing attack_condition_key")
+            if not isinstance(attack_params_digest, str) or not attack_params_digest:
+                raise ValueError("attack condition missing attack_params_digest")
+
+            attack_event_id = build_attack_event_id(
+                family_id=family_id,
+                parent_event_id=parent_event_id,
+                attack_condition_key=attack_condition_key,
+                attack_params_digest=attack_params_digest,
+            )
+            attack_event_rows.append(
+                {
+                    "event_id": attack_event_id,
+                    "attack_event_id": attack_event_id,
+                    "event_index": attack_event_index,
+                    "attack_event_index": attack_event_index,
+                    "sample_role": ATTACKED_POSITIVE_SAMPLE_ROLE,
+                    "parent_event_id": parent_event_id,
+                    "parent_event_index": parent_event_index,
+                    "parent_sample_role": ACTIVE_SAMPLE_ROLE,
+                    "attack_family": attack_condition.get("attack_family"),
+                    "attack_config_name": attack_condition.get("attack_config_name"),
+                    "attack_condition_key": attack_condition_key,
+                    "attack_params_version": attack_condition.get("attack_params_version"),
+                    "attack_params": copy.deepcopy(attack_condition.get("attack_params", {})),
+                    "attack_params_digest": attack_params_digest,
+                    "attack_protocol_version": attack_condition.get("attack_protocol_version"),
+                    "attack_protocol_digest": attack_condition.get("attack_protocol_digest"),
+                    "attack_materialization_profile": attack_condition.get("attack_materialization_profile"),
+                }
+            )
+            attack_event_index += 1
+    return attack_event_rows
+
+
+def build_attack_shard_plan(
+    *,
+    family_id: str,
+    attack_shard_count: int,
+    events: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Build deterministic PW03 attack shard assignments.
+
+    Args:
+        family_id: Family identifier.
+        attack_shard_count: Total attack shard count.
+        events: Ordered attacked-event grid rows.
+
+    Returns:
+        Attack shard plan payload.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(attack_shard_count, int) or isinstance(attack_shard_count, bool) or attack_shard_count <= 0:
+        raise TypeError("attack_shard_count must be positive int")
+
+    shard_rows: List[Dict[str, Any]] = [
+        {
+            "attack_shard_index": shard_index,
+            "assigned_attack_event_ids": [],
+            "assigned_attack_event_indices": [],
+            "assigned_parent_event_ids": [],
+            "assigned_attack_families": [],
+            "assigned_attack_config_names": [],
+        }
+        for shard_index in range(attack_shard_count)
+    ]
+
+    ordered_events = sorted(
+        [dict(cast(Mapping[str, Any], event)) for event in events],
+        key=lambda item: int(item.get("attack_event_index", item.get("event_index", -1))),
+    )
+    for attack_event_ordinal, event in enumerate(ordered_events):
+        attack_event_id = event.get("attack_event_id", event.get("event_id"))
+        attack_event_index = event.get("attack_event_index", event.get("event_index"))
+        parent_event_id = event.get("parent_event_id")
+        attack_family = event.get("attack_family")
+        attack_config_name = event.get("attack_config_name")
+        if not isinstance(attack_event_id, str) or not attack_event_id:
+            raise ValueError("attack event missing attack_event_id")
+        if not isinstance(attack_event_index, int) or attack_event_index < 0:
+            raise ValueError("attack event missing attack_event_index")
+        if not isinstance(parent_event_id, str) or not parent_event_id:
+            raise ValueError("attack event missing parent_event_id")
+        if not isinstance(attack_family, str) or not attack_family:
+            raise ValueError("attack event missing attack_family")
+        if not isinstance(attack_config_name, str) or not attack_config_name:
+            raise ValueError("attack event missing attack_config_name")
+
+        shard_index = attack_event_ordinal % attack_shard_count
+        shard_row = shard_rows[shard_index]
+        cast(List[str], shard_row["assigned_attack_event_ids"]).append(attack_event_id)
+        cast(List[int], shard_row["assigned_attack_event_indices"]).append(attack_event_index)
+        cast(List[str], shard_row["assigned_parent_event_ids"]).append(parent_event_id)
+        cast(List[str], shard_row["assigned_attack_families"]).append(attack_family)
+        cast(List[str], shard_row["assigned_attack_config_names"]).append(attack_config_name)
+
+    return {
+        "artifact_type": "paper_workflow_attack_shard_plan",
+        "schema_version": "pw_stage_03_v1",
+        "family_id": family_id,
+        "sample_role": ATTACKED_POSITIVE_SAMPLE_ROLE,
+        "attack_shard_count": attack_shard_count,
+        "attack_event_count": len(ordered_events),
+        "materialization_profile": "first_value_per_condition",
+        "shards": shard_rows,
     }
 
 
