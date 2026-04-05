@@ -25,6 +25,7 @@ import yaml
 from main.core import config_loader, digests
 from main.core import records_io
 from main.evaluation import metrics as eval_metrics
+from main.evaluation import workflow_inputs as eval_workflow_inputs
 from main.evaluation import protocol_loader
 from main.evaluation import attack_coverage
 from main.policy import path_policy
@@ -1059,6 +1060,23 @@ def _resolve_system_metric_record_paths(run_root: Path) -> List[Path]:
     return []
 
 
+def _resolve_formal_final_decision_payload(record_payload: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
+    """Resolve the decision payload used by formal final-decision aggregation."""
+    if not isinstance(record_payload, dict):
+        raise TypeError("record_payload must be dict")
+
+    formal_overlay_node = record_payload.get("formal_final_decision")
+    if isinstance(formal_overlay_node, dict) and formal_overlay_node:
+        return formal_overlay_node, "formal_final_decision_overlay"
+
+    # Legacy compatibility only: older evaluate-input artifacts persisted the
+    final_decision_node = record_payload.get("final_decision")
+    if isinstance(final_decision_node, dict) and final_decision_node:
+        return final_decision_node, "legacy_final_decision"
+
+    return {}, "missing"
+
+
 def _build_formal_final_decision_metrics_for_run(run_root: Path) -> Dict[str, Any]:
     """Build final-decision-only metrics from the formal evaluate inputs."""
     if not isinstance(run_root, Path):
@@ -1082,16 +1100,19 @@ def _build_formal_final_decision_metrics_for_run(run_root: Path) -> Dict[str, An
         if label_value is None:
             continue
 
-        prediction = _extract_system_final_prediction(record_payload)
-        final_decision_node = record_payload.get("final_decision")
-        final_decision_payload = final_decision_node if isinstance(final_decision_node, dict) else {}
+        final_decision_payload, _ = _resolve_formal_final_decision_payload(record_payload)
         content_node = record_payload.get("content_evidence_payload")
         content_payload = content_node if isinstance(content_node, dict) else {}
+        final_decision_positive = (
+            final_decision_payload.get("is_watermarked")
+            if isinstance(final_decision_payload.get("is_watermarked"), bool)
+            else False
+        )
 
         n_total += 1
         if final_decision_payload:
             final_decision_available_count += 1
-        if content_payload.get("status") == "ok":
+        if content_payload.get("status") == "ok" or eval_workflow_inputs._is_strict_clean_negative_formal_null_record(record_payload):
             content_chain_available_count += 1
 
         decision_status = final_decision_payload.get("decision_status")
@@ -1100,11 +1121,11 @@ def _build_formal_final_decision_metrics_for_run(run_root: Path) -> Dict[str, An
 
         if label_value:
             n_positive += 1
-            if prediction["final_decision_positive"]:
+            if final_decision_positive:
                 final_decision_tp += 1
         else:
             n_negative += 1
-            if prediction["final_decision_positive"]:
+            if final_decision_positive:
                 final_decision_fp += 1
 
     def _safe_rate(numerator: int, denominator: int) -> Optional[float]:

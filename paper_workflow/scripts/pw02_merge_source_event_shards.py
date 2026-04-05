@@ -690,7 +690,7 @@ def _build_formal_final_decision_metrics_export(
         "source_evaluate_record_path": str(content_score_run.get("evaluate_record_path")),
         "source_evaluate_inputs_glob": evaluate_inputs.get("records_glob"),
         "metrics": dict(formal_final_decision_metrics),
-        "notes": "Aggregated from formal final_decision terminal fields over content evaluate inputs; this is separate from the derived system union metrics.",
+        "notes": "Aggregated from evaluate-stage formal_final_decision overlays over content evaluate inputs; older artifacts fall back to legacy final_decision only for compatibility. This is separate from the derived system union metrics.",
     }
     write_json_atomic(export_path, payload)
     return {
@@ -957,6 +957,7 @@ def _write_score_split_records(
     score_name: str,
     records_root: Path,
     prepared_records: Sequence[Mapping[str, Any]],
+    thresholds_artifact: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """
     Write score-filtered detect-record copies for one split.
@@ -973,10 +974,13 @@ def _write_score_split_records(
         raise TypeError("records_root must be Path")
     if not isinstance(score_name, str) or not score_name:
         raise TypeError("score_name must be non-empty str")
+    if thresholds_artifact is not None and not isinstance(thresholds_artifact, Mapping):
+        raise TypeError("thresholds_artifact must be Mapping or None")
 
     ensure_directory(records_root)
     written_paths: List[str] = []
     record_summaries: List[Dict[str, Any]] = []
+    thresholds_payload = dict(cast(Dict[str, Any], thresholds_artifact)) if isinstance(thresholds_artifact, Mapping) else None
 
     for ordinal, prepared_record in enumerate(prepared_records):
         payload_node = prepared_record.get("payload")
@@ -990,6 +994,14 @@ def _write_score_split_records(
             )
         payload["paper_workflow_score_name"] = score_name
         payload["paper_workflow_score_source"] = score_source
+        if thresholds_payload is not None and eval_metrics.is_content_chain_score_name(score_name):
+            formal_final_decision = eval_workflow_inputs.build_formal_final_decision_overlay(
+                payload,
+                score_name=score_name,
+                thresholds_artifact=thresholds_payload,
+            )
+            payload["formal_final_decision"] = formal_final_decision
+            payload["formal_final_decision_source"] = str(formal_final_decision["decision_origin"])
 
         event_id = str(prepared_record.get("event_id"))
         sample_role = str(prepared_record.get("sample_role"))
@@ -1219,6 +1231,16 @@ def _run_score_pipeline(
         )
 
     thresholds_artifact_path = calibrate_root / "artifacts" / "thresholds" / "thresholds_artifact.json"
+    thresholds_artifact = _load_required_json_dict(
+        thresholds_artifact_path,
+        f"PW02 thresholds artifact for {score_name}",
+    )
+    evaluate_records_summary = _write_score_split_records(
+        score_name=score_name,
+        records_root=evaluate_records_root,
+        prepared_records=evaluate_records,
+        thresholds_artifact=thresholds_artifact,
+    )
     runtime_cfg_obj = _build_score_runtime_config(
         base_cfg_obj=base_cfg_obj,
         score_name=score_name,

@@ -16,7 +16,7 @@ import json
 import math
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
+from typing import Any, Dict, List, Sequence, Tuple, cast
 
 from main.core import records_io
 from main.evaluation import metrics as eval_metrics
@@ -30,6 +30,7 @@ _STATEMENT_ONLY_PROVENANCE_NO_BUNDLE_STATUS = "statement_only_provenance_no_bund
 _STRICT_CLEAN_NEGATIVE_PROVENANCE_EXCLUSION_FIELDS = (
     "negative_branch_source_attestation_provenance",
 )
+_FORMAL_THRESHOLD_OVERLAY_SOURCE = "formal_threshold_overlay"
 
 
 def _strip_forbidden_artifact_anchor_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -268,8 +269,6 @@ def _resolve_content_score_source(record: Dict[str, Any]) -> Tuple[float | None,
     content_payload = cast(Dict[str, Any], content_node) if isinstance(content_node, dict) else {}
     score_parts_node = content_payload.get("score_parts")
     score_parts = cast(Dict[str, Any], score_parts_node) if isinstance(score_parts_node, dict) else {}
-    hf_detect_trace_node = score_parts.get("hf_detect_trace")
-    hf_detect_trace = cast(Dict[str, Any], hf_detect_trace_node) if isinstance(hf_detect_trace_node, dict) else {}
     fusion_result_node = record.get("fusion_result")
     fusion_result = cast(Dict[str, Any], fusion_result_node) if isinstance(fusion_result_node, dict) else {}
     evidence_summary_node = fusion_result.get("evidence_summary")
@@ -323,6 +322,84 @@ def _resolve_event_attestation_score_source(record: Dict[str, Any]) -> Tuple[flo
     if score_value is None:
         return None, None
     return float(score_value), "attestation.final_event_attested_decision.event_attestation_score"
+
+
+def build_formal_final_decision_overlay(
+    record: Dict[str, Any],
+    score_name: str,
+    thresholds_artifact: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    功能：基于 evaluate-stage score 与 thresholds 工件构造正式 terminal decision overlay。
+
+    Build the evaluate-stage formal terminal decision overlay from the resolved
+    score and the bound thresholds artifact.
+
+    Args:
+        record: Detect record mapping copied into evaluate inputs.
+        score_name: Canonical score name used by the evaluate run.
+        thresholds_artifact: Threshold artifact mapping produced by calibrate.
+
+    Returns:
+        Formal final-decision overlay mapping.
+    """
+    if not isinstance(record, dict):
+        raise TypeError("record must be dict")
+    if not isinstance(score_name, str) or not score_name:
+        raise TypeError("score_name must be non-empty str")
+    if not isinstance(thresholds_artifact, dict):
+        raise TypeError("thresholds_artifact must be dict")
+
+    artifact_score_name = thresholds_artifact.get("score_name")
+    if not isinstance(artifact_score_name, str) or not artifact_score_name:
+        raise ValueError("thresholds_artifact.score_name must be non-empty str")
+    if artifact_score_name != score_name:
+        raise ValueError(
+            f"thresholds_artifact.score_name mismatch: expected={score_name}, actual={artifact_score_name}"
+        )
+
+    threshold_value = _coerce_finite_float(thresholds_artifact.get("threshold_value"))
+    if threshold_value is None:
+        raise ValueError("thresholds_artifact.threshold_value must be finite number")
+
+    if eval_metrics.is_content_chain_score_name(score_name):
+        score_value, score_source = _resolve_content_score_source(record)
+    elif score_name == _EVENT_ATTESTATION_SCORE_NAME:
+        score_value, score_source = _resolve_event_attestation_score_source(record)
+    else:
+        raise ValueError(f"unsupported score_name: {score_name}")
+
+    overlay: Dict[str, Any] = {
+        "decision_origin": _FORMAL_THRESHOLD_OVERLAY_SOURCE,
+        "threshold_source": "np_canonical",
+        "score_name": score_name,
+        "score_source": score_source,
+        "score_value": None,
+        "used_threshold_value": float(threshold_value),
+        "used_threshold_id": thresholds_artifact.get("threshold_id")
+        if isinstance(thresholds_artifact.get("threshold_id"), str)
+        else None,
+        "threshold_key_used": thresholds_artifact.get("threshold_key_used")
+        if isinstance(thresholds_artifact.get("threshold_key_used"), str)
+        else None,
+        "target_fpr": _coerce_finite_float(thresholds_artifact.get("target_fpr")),
+        "decision_operator": thresholds_artifact.get("decision_operator")
+        if isinstance(thresholds_artifact.get("decision_operator"), str)
+        else "score_greater_equal_threshold_value",
+        "selected_order_stat_score": _coerce_finite_float(thresholds_artifact.get("selected_order_stat_score")),
+    }
+
+    numeric_score = _coerce_finite_float(score_value)
+    if numeric_score is None or not isinstance(score_source, str) or not score_source:
+        overlay["decision_status"] = "error"
+        overlay["is_watermarked"] = None
+        overlay["error_reason"] = f"{score_name}_missing_or_nonfinite"
+        return overlay
+
+    overlay["decision_status"] = "decided"
+    overlay["is_watermarked"] = bool(float(numeric_score) >= float(threshold_value))
+    overlay["score_value"] = float(numeric_score)
+    return overlay
 
 
 def _ensure_event_attestation_payload(payload: Dict[str, Any]) -> Dict[str, Any]:

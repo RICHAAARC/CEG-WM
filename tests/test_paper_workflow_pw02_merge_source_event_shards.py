@@ -344,14 +344,26 @@ def _patch_pw02_python_stage_runner(monkeypatch: Any) -> List[Dict[str, Any]]:
         )
         ensure_directory(output_dir / "logs")
         if module_name == "main.cli.run_calibrate":
+            score_name = str(config_payload["calibration"]["score_name"])
+            threshold_value = (
+                float.fromhex("0x0.0000000000001p-1022")
+                if score_name == pw02_module.CONTENT_SCORE_NAME
+                else 0.5
+            )
             thresholds_path = output_dir / "artifacts" / "thresholds" / "thresholds_artifact.json"
             ensure_directory(thresholds_path.parent)
             write_json_atomic(
                 thresholds_path,
                 {
                     "status": "ok",
-                    "score_name": config_payload["calibration"]["score_name"],
+                    "threshold_id": f"{score_name}_np_0p01",
+                    "score_name": score_name,
                     "target_fpr": 0.01,
+                    "threshold_value": threshold_value,
+                    "threshold_key_used": "0p01",
+                    "threshold_value_semantics": "strict_upper_bound",
+                    "decision_operator": "score_greater_equal_threshold_value",
+                    "selected_order_stat_score": 0.0,
                 },
             )
             write_json_atomic(output_dir / "records" / "calibration_record.json", {"status": "ok"})
@@ -546,6 +558,16 @@ def test_pw02_merges_dual_role_shards_and_builds_score_runs(tmp_path: Path, monk
 
     content_negative_record_path = Path(str(content_negative_record_summary["record_path"]))
     content_negative_record = json.loads(content_negative_record_path.read_text(encoding="utf-8"))
+    content_positive_record_path = Path(
+        str(
+            next(
+                record["record_path"]
+                for record in content_run["evaluate_inputs"]["records"]
+                if record["sample_role"] == "positive_source"
+            )
+        )
+    )
+    content_positive_record = json.loads(content_positive_record_path.read_text(encoding="utf-8"))
     assert content_negative_record["paper_workflow_score_source"] == "strict_clean_negative_formal_null"
     assert str(content_negative_record["plan_digest"]).startswith("runtime-observed-plan-")
     assert str(content_negative_record["basis_digest"]).startswith("runtime-observed-basis-")
@@ -553,12 +575,48 @@ def test_pw02_merges_dual_role_shards_and_builds_score_runs(tmp_path: Path, monk
     assert content_negative_record["plan_input_schema_version"] == "v2"
     assert content_negative_record["subspace_planner_impl_identity"]["impl_id"] == "subspace_planner"
     assert content_negative_record["subspace_plan"]["planner_input_digest"] == content_negative_record["plan_input_digest"]
+    assert content_positive_record["final_decision"] == {"is_watermarked": True}
+    assert content_positive_record["formal_final_decision_source"] == "pw02_formal_threshold_overlay"
+    assert content_positive_record["formal_final_decision"] == {
+        "decision_origin": "pw02_formal_threshold_overlay",
+        "decision_operator": "score_greater_equal_threshold_value",
+        "decision_status": "decided",
+        "is_watermarked": True,
+        "score_name": pw02_module.CONTENT_SCORE_NAME,
+        "score_source": "content_evidence_payload.content_chain_score",
+        "score_value": 0.91,
+        "selected_order_stat_score": 0.0,
+        "target_fpr": 0.01,
+        "threshold_key_used": "0p01",
+        "threshold_source": "np_canonical",
+        "used_threshold_id": "content_chain_score_np_0p01",
+        "used_threshold_value": float.fromhex("0x0.0000000000001p-1022"),
+    }
+    assert content_negative_record["final_decision"] == {"is_watermarked": False}
+    assert content_negative_record["formal_final_decision_source"] == "pw02_formal_threshold_overlay"
+    assert content_negative_record["formal_final_decision"] == {
+        "decision_origin": "pw02_formal_threshold_overlay",
+        "decision_operator": "score_greater_equal_threshold_value",
+        "decision_status": "decided",
+        "is_watermarked": False,
+        "score_name": pw02_module.CONTENT_SCORE_NAME,
+        "score_source": "strict_clean_negative_formal_null",
+        "score_value": 0.0,
+        "selected_order_stat_score": 0.0,
+        "target_fpr": 0.01,
+        "threshold_key_used": "0p01",
+        "threshold_source": "np_canonical",
+        "used_threshold_id": "content_chain_score_np_0p01",
+        "used_threshold_value": float.fromhex("0x0.0000000000001p-1022"),
+    }
 
     formal_final_decision_metrics = cast(Dict[str, Any], pw02_summary["formal_final_decision_metrics"])
     derived_system_union_metrics = cast(Dict[str, Any], pw02_summary["derived_system_union_metrics"])
     assert formal_final_decision_metrics["n_total"] == 4
     assert formal_final_decision_metrics["n_positive"] == 2
     assert formal_final_decision_metrics["n_negative"] == 2
+    assert formal_final_decision_metrics["content_chain_available_rate"] == 1.0
+    assert formal_final_decision_metrics["final_decision_status_counts"] == {"decided": 4}
     assert derived_system_union_metrics["n_total"] == 4
     assert derived_system_union_metrics["n_positive"] == 2
     assert derived_system_union_metrics["n_negative"] == 2

@@ -181,6 +181,157 @@ def test_calibration_accepts_strict_clean_negative_formal_null_scores() -> None:
     assert overall_metrics["reject_rate_by_reason"]["status_not_ok"] == 0.0
 
 
+def test_formal_final_decision_overlay_uses_np_threshold_and_strict_clean_null() -> None:
+    """
+    功能：验证 PW02 evaluate-side overlay 会复用 strict clean null 0.0 与 NP 阈值生成正式终态。 
+
+    Validate that the PW02 evaluate-side overlay reuses the strict clean-null
+    0.0 mapping and the bound NP threshold to build a decided terminal field.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    thresholds_artifact = {
+        "threshold_id": "content_chain_score_np_0p01",
+        "score_name": eval_metrics.CONTENT_CHAIN_SCORE_NAME,
+        "target_fpr": 0.01,
+        "threshold_value": float.fromhex("0x0.0000000000001p-1022"),
+        "threshold_key_used": "0p01",
+        "decision_operator": "score_greater_equal_threshold_value",
+        "selected_order_stat_score": 0.0,
+    }
+    strict_clean_negative_record = {
+        "sample_role": "clean_negative",
+        "content_evidence_payload": {
+            "status": "absent",
+            "content_chain_score": None,
+            "score": None,
+            "content_score": None,
+            "content_failure_reason": "detector_no_plan_expected",
+        },
+        "attestation": {
+            "authenticity_result": {
+                "status": "absent",
+                "bundle_status": "absent",
+                "statement_status": "absent",
+            },
+        },
+    }
+    positive_record = {
+        "sample_role": "positive_source",
+        "content_evidence_payload": {
+            "status": "ok",
+            "content_chain_score": 0.81,
+            "score": 0.81,
+            "content_score": 0.81,
+        },
+    }
+
+    negative_overlay = workflow_inputs.build_formal_final_decision_overlay(
+        strict_clean_negative_record,
+        eval_metrics.CONTENT_CHAIN_SCORE_NAME,
+        thresholds_artifact,
+    )
+    positive_overlay = workflow_inputs.build_formal_final_decision_overlay(
+        positive_record,
+        eval_metrics.CONTENT_CHAIN_SCORE_NAME,
+        thresholds_artifact,
+    )
+
+    assert negative_overlay == {
+        "decision_origin": "pw02_formal_threshold_overlay",
+        "decision_operator": "score_greater_equal_threshold_value",
+        "decision_status": "decided",
+        "is_watermarked": False,
+        "score_name": eval_metrics.CONTENT_CHAIN_SCORE_NAME,
+        "score_source": "strict_clean_negative_formal_null",
+        "score_value": 0.0,
+        "selected_order_stat_score": 0.0,
+        "target_fpr": 0.01,
+        "threshold_key_used": "0p01",
+        "threshold_source": "np_canonical",
+        "used_threshold_id": "content_chain_score_np_0p01",
+        "used_threshold_value": float.fromhex("0x0.0000000000001p-1022"),
+    }
+    assert positive_overlay["decision_status"] == "decided"
+    assert positive_overlay["is_watermarked"] is True
+    assert positive_overlay["score_source"] == "content_evidence_payload.content_chain_score"
+    assert positive_overlay["threshold_source"] == "np_canonical"
+
+
+def test_formal_final_decision_metrics_prefer_overlay_and_keep_derived_metrics_on_source_fields(tmp_path: Path) -> None:
+    """
+    功能：验证 formal metrics 优先读取 evaluate-side overlay，而 derived metrics 仍停留在 source terminal fields。 
+
+    Validate that formal metrics prefer the evaluate-side overlay while the
+    derived system metrics continue to consume source terminal fields.
+
+    Args:
+        tmp_path: Temporary pytest directory.
+
+    Returns:
+        None.
+    """
+    records_dir = tmp_path / "artifacts" / "evaluate_inputs" / "formal_evaluate_records"
+    records_dir.mkdir(parents=True)
+    positive_payload = {
+        "label": True,
+        "final_decision": {
+            "decision_status": "abstain",
+            "is_watermarked": None,
+            "threshold_source": "observation_only_pre_calibration",
+        },
+        "formal_final_decision": {
+            "decision_status": "decided",
+            "is_watermarked": True,
+            "threshold_source": "np_canonical",
+            "score_name": eval_metrics.CONTENT_CHAIN_SCORE_NAME,
+            "score_value": 0.81,
+            "decision_origin": "pw02_formal_threshold_overlay",
+        },
+        "attestation": {
+            "final_event_attested_decision": {"is_event_attested": True},
+            "image_evidence_result": {"geo_rescue_applied": False},
+        },
+    }
+    negative_payload = {
+        "label": False,
+        "final_decision": {
+            "decision_status": "error",
+            "is_watermarked": None,
+            "threshold_source": None,
+        },
+        "formal_final_decision": {
+            "decision_status": "decided",
+            "is_watermarked": False,
+            "threshold_source": "np_canonical",
+            "score_name": eval_metrics.CONTENT_CHAIN_SCORE_NAME,
+            "score_value": 0.0,
+            "decision_origin": "pw02_formal_threshold_overlay",
+        },
+        "attestation": {
+            "final_event_attested_decision": {"is_event_attested": False},
+            "image_evidence_result": {"geo_rescue_applied": False},
+        },
+    }
+    (records_dir / "positive.json").write_text(json.dumps(positive_payload), encoding="utf-8")
+    (records_dir / "negative.json").write_text(json.dumps(negative_payload), encoding="utf-8")
+
+    formal_final_decision_metrics = experiment_matrix._build_formal_final_decision_metrics_for_run(tmp_path)
+    derived_system_union_metrics = experiment_matrix._build_system_final_metrics_for_run(tmp_path)
+
+    assert formal_final_decision_metrics["final_decision_tpr"] == 1.0
+    assert formal_final_decision_metrics["final_decision_fpr"] == 0.0
+    assert formal_final_decision_metrics["final_decision_status_counts"] == {"decided": 2}
+    assert derived_system_union_metrics["system_tpr"] == 1.0
+    assert derived_system_union_metrics["system_fpr"] == 0.0
+    assert derived_system_union_metrics["final_decision_tpr"] == 0.0
+    assert derived_system_union_metrics["final_decision_fpr"] == 0.0
+
+
 def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fields(tmp_path: Path) -> None:
     """
     功能：验证 experiment_matrix 主作用域与 system_final 统计来自真实终态字段。
@@ -265,7 +416,7 @@ def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fiel
     records_dir.mkdir(parents=True)
     positive_payload = {
         "label": True,
-        "final_decision": {"is_watermarked": True},
+        "final_decision": {"decision_status": "decided", "is_watermarked": True},
         "attestation": {
             "final_event_attested_decision": {"is_event_attested": True},
             "image_evidence_result": {"geo_rescue_applied": False},
@@ -273,7 +424,7 @@ def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fiel
     }
     negative_payload = {
         "label": False,
-        "final_decision": {"is_watermarked": False},
+        "final_decision": {"decision_status": "decided", "is_watermarked": False},
         "attestation": {
             "final_event_attested_decision": {"is_event_attested": False},
             "image_evidence_result": {"geo_rescue_applied": False},
@@ -287,6 +438,7 @@ def test_experiment_matrix_scope_and_system_final_metrics_use_real_terminal_fiel
     assert formal_final_decision_metrics["scope"] == "formal_final_decision"
     assert formal_final_decision_metrics["final_decision_tpr"] == 1.0
     assert formal_final_decision_metrics["final_decision_fpr"] == 0.0
+    assert formal_final_decision_metrics["final_decision_status_counts"] == {"decided": 2}
     assert derived_system_union_metrics["scope"] == "system_final"
     assert derived_system_union_metrics["system_tpr"] == 1.0
     assert derived_system_union_metrics["system_fpr"] == 0.0
