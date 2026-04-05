@@ -1244,6 +1244,8 @@ def _prepare_local_worker_plans(
         )
         worker_result_path = _build_worker_result_path(worker_root)
         stdout_log_path, stderr_log_path = _build_worker_log_paths(worker_root)
+        ensure_directory(stdout_log_path.parent)
+        ensure_directory(stderr_log_path.parent)
         worker_plans.append(
             {
                 "local_worker_index": local_worker_index,
@@ -1286,6 +1288,8 @@ def _run_local_worker_plans(worker_plans: Sequence[Mapping[str, Any]]) -> Tuple[
         stdout_log_path = Path(str(worker_plan["stdout_log_path"]))
         stderr_log_path = Path(str(worker_plan["stderr_log_path"]))
         ensure_directory(worker_root)
+        ensure_directory(stdout_log_path.parent)
+        ensure_directory(stderr_log_path.parent)
         stdout_handle = stdout_log_path.open("w", encoding="utf-8")
         stderr_handle = stderr_log_path.open("w", encoding="utf-8")
         try:

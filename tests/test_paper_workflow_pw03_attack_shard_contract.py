@@ -6,6 +6,7 @@ Module type: General module
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -375,6 +376,65 @@ def _patch_pw03_detect(monkeypatch: pytest.MonkeyPatch) -> Dict[str, Any]:
     return captures
 
 
+def _patch_pw03_worker_popen(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Patch PW03 worker subprocess launches with an in-process executor.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+
+    class _FakePopen:
+        @classmethod
+        def __class_getitem__(cls, _item: Any) -> type["_FakePopen"]:
+            return cls
+
+        def __init__(
+            self,
+            command: List[str],
+            cwd: str | None = None,
+            env: Mapping[str, str] | None = None,
+            stdout: Any = None,
+            stderr: Any = None,
+            text: bool | None = None,
+        ) -> None:
+            self.command = [str(item) for item in command]
+            self.cwd = cwd
+            self.env = env
+            self.stdout = stdout
+            self.stderr = stderr
+            self.text = text
+            self._return_code: int | None = None
+
+        def _arg_value(self, flag: str) -> str:
+            return self.command[self.command.index(flag) + 1]
+
+        def wait(self) -> int:
+            if self._return_code is None:
+                if self.stdout is not None:
+                    self.stdout.write("worker stdout\n")
+                    self.stdout.flush()
+                if self.stderr is not None:
+                    self.stderr.write("")
+                    self.stderr.flush()
+                pw03_module.run_pw03_attack_event_worker(
+                    drive_project_root=Path(self._arg_value("--drive-project-root")),
+                    family_id=self._arg_value("--family-id"),
+                    attack_shard_index=int(self._arg_value("--attack-shard-index")),
+                    attack_shard_count=int(self._arg_value("--attack-shard-count")),
+                    attack_local_worker_count=int(self._arg_value("--attack-local-worker-count")),
+                    local_worker_index=int(self._arg_value("--local-worker-index")),
+                    worker_plan_path=Path(self._arg_value("--worker-plan-path")),
+                )
+                self._return_code = 0
+            return self._return_code
+
+    monkeypatch.setattr(pw03_module.subprocess, "Popen", _FakePopen)
+
+
 def _load_attack_event_specs(summary: Dict[str, Any], shard_index: int) -> List[Dict[str, Any]]:
     """
     Load the materialized attack event specs for one shard.
@@ -442,7 +502,11 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     )
 
     assert pw03_summary["status"] == "completed"
+    assert pw03_summary["worker_execution_mode"] == "single_process"
     assert Path(str(pw03_summary["gpu_session_peak_path"])).exists()
+    assert len(cast(List[Dict[str, Any]], pw03_summary["worker_outcomes"])) == 1
+    shard_gpu_summary = json.loads(Path(str(pw03_summary["gpu_session_peak_path"])).read_text(encoding="utf-8"))
+    assert shard_gpu_summary["wrapped_command_count"] == 1
     assert pw03_summary["completed_event_count"] == pw03_summary["event_count"]
     assert captures["detect_input_payloads"]
 
@@ -551,6 +615,8 @@ def test_pw03_local_worker_assignments_do_not_conflict_outputs(
     assert len(worker_plans) == 2
     assigned_by_worker = [set(cast(List[str], worker_plan["assigned_attack_event_ids"])) for worker_plan in worker_plans]
     assert assigned_by_worker[0].isdisjoint(assigned_by_worker[1])
+    assert all(Path(str(worker_plan["stdout_log_path"])).parent.exists() for worker_plan in worker_plans)
+    assert all(Path(str(worker_plan["stderr_log_path"])).parent.exists() for worker_plan in worker_plans)
 
     worker_results = []
     for worker_plan in worker_plans:
@@ -585,6 +651,66 @@ def test_pw03_local_worker_assignments_do_not_conflict_outputs(
     assert len(attacked_image_paths) == len(set(attacked_image_paths))
     assert all(Path(path).exists() for path in event_manifest_paths)
     assert all(Path(path).exists() for path in attacked_image_paths)
+
+
+def test_pw03_parallel_worker_launch_recreates_missing_logs_and_keeps_summary_semantics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify PW03 parallel worker launch recreates missing log directories before open.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    summary = _build_pw00_family(tmp_path, family_id="family_pw03_parallel_logs")
+    _build_positive_source_finalize_fixture(summary)
+    bound_config_path, _ = _write_bound_config_snapshot(tmp_path / "drive", marker="pw03_parallel_logs")
+    _patch_pw03_detect(monkeypatch)
+    _patch_pw03_worker_popen(monkeypatch)
+
+    original_prepare_local_worker_plans = pw03_module._prepare_local_worker_plans
+
+    def _prepare_local_worker_plans_without_logs(**kwargs: Any) -> List[Dict[str, Any]]:
+        worker_plans = original_prepare_local_worker_plans(**kwargs)
+        for worker_plan in worker_plans:
+            logs_root = Path(str(worker_plan["stdout_log_path"])).parent
+            if logs_root.exists():
+                shutil.rmtree(logs_root)
+            assert not logs_root.exists()
+        return worker_plans
+
+    monkeypatch.setattr(pw03_module, "_prepare_local_worker_plans", _prepare_local_worker_plans_without_logs)
+
+    pw03_summary = pw03_module.run_pw03_attack_event_shard(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_pw03_parallel_logs",
+        attack_shard_index=0,
+        attack_shard_count=2,
+        attack_local_worker_count=2,
+        bound_config_path=bound_config_path,
+    )
+
+    assert pw03_summary["status"] == "completed"
+    assert pw03_summary["worker_execution_mode"] == "shard_local_subprocess_parallel"
+    worker_outcomes = cast(List[Dict[str, Any]], pw03_summary["worker_outcomes"])
+    assert len(worker_outcomes) == 2
+    assert all(int(worker_outcome["return_code"]) == 0 for worker_outcome in worker_outcomes)
+    assert all(bool(worker_outcome["result_exists"]) for worker_outcome in worker_outcomes)
+    assert all(Path(str(worker_outcome["stdout_log_path"])).exists() for worker_outcome in worker_outcomes)
+    assert all(Path(str(worker_outcome["stderr_log_path"])).exists() for worker_outcome in worker_outcomes)
+    assert all(Path(str(worker_outcome["stdout_log_path"])).parent.exists() for worker_outcome in worker_outcomes)
+    assert all(Path(str(worker_outcome["stderr_log_path"])).parent.exists() for worker_outcome in worker_outcomes)
+    assert all(Path(str(worker_outcome["worker_gpu_session_peak_path"])).exists() for worker_outcome in worker_outcomes)
+
+    shard_gpu_summary = json.loads(Path(str(pw03_summary["gpu_session_peak_path"])).read_text(encoding="utf-8"))
+    assert shard_gpu_summary["wrapped_command_count"] == 2
+    assert len(cast(List[Dict[str, Any]], shard_gpu_summary["worker_local_peaks"])) == 2
+    assert Path(str(pw03_summary["gpu_session_peak_path"])).exists()
 
 
 def test_pw03_cli_help_exposes_attack_shard_arguments() -> None:
