@@ -107,13 +107,28 @@ def test_pw03_notebook_binds_expected_script_and_parameters() -> None:
         None.
     """
     constants_source = _find_code_cell_source(NOTEBOOK_PW03_PATH, "SCRIPT_PATH = REPO_ROOT")
+    bootstrap_source = _find_code_cell_source(
+        NOTEBOOK_PW03_PATH,
+        'MODEL_CACHE_BOOTSTRAP = bootstrap_notebook_model_cache(',
+    )
     execute_source = _find_code_cell_source(NOTEBOOK_PW03_PATH, "COMMAND = [")
 
     assert '"pw03_run_attack_event_shard.py"' in constants_source
+    assert 'DRIVE_MODELS_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "Models"' in constants_source
+    assert 'PERSISTENT_INSPYRENET_ROOT = DRIVE_MODELS_ROOT / "inspyrenet"' in constants_source
+    assert 'PERSISTENT_HF_ROOT = DRIVE_MODELS_ROOT / "Huggingface"' in constants_source
+    assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in constants_source
     assert 'ATTACK_SHARD_INDEX = 0' in constants_source
     assert 'ATTACK_SHARD_COUNT = 2' in constants_source
-    assert 'ATTACK_LOCAL_WORKER_COUNT = 2' in constants_source
+    assert 'ATTACK_LOCAL_WORKER_COUNT =' in constants_source
     assert 'ATTACK_FAMILY_ALLOWLIST = None' in constants_source
+
+    assert 'from huggingface_hub import HfApi' in bootstrap_source
+    assert 'bootstrap_notebook_model_cache' in bootstrap_source
+    assert 'os.environ["HUGGINGFACE_HUB_CACHE"] = str(LOCAL_HF_HUB_CACHE)' in bootstrap_source
+    assert 'MODEL_SNAPSHOT_PATH = str(MODEL_CACHE_BOOTSTRAP["local_snapshot_path"])' in bootstrap_source
+    assert 'PERSISTENT_SNAPSHOT_PATH = Path(str(MODEL_CACHE_BOOTSTRAP["persistent_snapshot_path"]))' in bootstrap_source
+    assert 'print_json("model_cache_bootstrap", MODEL_CACHE_BOOTSTRAP)' in bootstrap_source
 
     assert '"--drive-project-root"' in execute_source
     assert '"--family-id"' in execute_source
@@ -145,6 +160,8 @@ def test_pw03_notebook_reads_pw02_finalize_inputs_and_shard_outputs() -> None:
     assert 'PW03_BOUND_CONFIG_PATH = PRECHECK_BOUND_CONFIG_PATH' in precheck_source
     assert 'write_yaml_mapping(PW03_BOUND_CONFIG_PATH, PRECHECK_BOUND_CFG)' in precheck_source
     assert 'STAGE_01_PREFLIGHT = detect_stage_01_preflight(PW03_BOUND_CONFIG_PATH)' in precheck_source
+    assert 'PERSISTENT_SNAPSHOT_PATH.exists() and PERSISTENT_SNAPSHOT_PATH.is_dir()' in precheck_source
+    assert 'str(Path(str(MODEL_SNAPSHOT_PATH)).resolve()).startswith(str(LOCAL_HF_HOME.resolve()))' in precheck_source
     assert 'CURRENT_SHARD_EVENT_IDS = []' in precheck_source
     assert 'CURRENT_SHARD_PLAN = next(row for row in ATTACK_SHARD_PLAN["shards"] if row["attack_shard_index"] == ATTACK_SHARD_INDEX)' in precheck_source
 
@@ -158,6 +175,10 @@ def test_pw03_notebook_reads_pw02_finalize_inputs_and_shard_outputs() -> None:
     assert '"total_event_count": PW03_SUMMARY.get("event_count")' in summary_source
     assert '"completed_event_count": PW03_SUMMARY.get("completed_event_count")' in summary_source
     assert '"failed_event_count": PW03_SUMMARY.get("failed_event_count")' in summary_source
+    assert '"persistent_snapshot_path": str(PERSISTENT_SNAPSHOT_PATH)' in summary_source
+    assert '"model_snapshot_path": str(MODEL_SNAPSHOT_PATH)' in summary_source
+    assert '"persistent_inspyrenet_path": str(PERSISTENT_WEIGHT_PATH)' in summary_source
+    assert '"repo_inspyrenet_path": str(WEIGHT_PATH)' in summary_source
     assert '"gpu_peak_memory_mib": GPU_PEAK_SUMMARY.get("peak_memory_mib")' in summary_source
     assert '"wrapped_command_count": GPU_PEAK_SUMMARY.get("wrapped_command_count")' in summary_source
 

@@ -163,13 +163,25 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
         None.
     """
     pw00_constants = _find_code_cell_source(NOTEBOOK_PW00_PATH, "SCRIPT_PATH = REPO_ROOT")
+    pw00_bootstrap = _find_code_cell_source(
+        NOTEBOOK_PW00_PATH,
+        'from scripts.notebook_runtime_common import resolve_notebook_model_cache_layout',
+    )
     pw00_execute = _find_code_cell_source(NOTEBOOK_PW00_PATH, "COMMAND = [")
     pw01_constants = _find_code_cell_source(NOTEBOOK_PW01_PATH, "SCRIPT_PATH = REPO_ROOT")
     pw01_execute = _find_code_cell_source(NOTEBOOK_PW01_PATH, "COMMAND = [")
     pw02_constants = _find_code_cell_source(NOTEBOOK_PW02_PATH, "SCRIPT_PATH = REPO_ROOT")
+    pw02_bootstrap = _find_code_cell_source(
+        NOTEBOOK_PW02_PATH,
+        'from scripts.notebook_runtime_common import resolve_notebook_model_cache_layout',
+    )
     pw02_execute = _find_code_cell_source(NOTEBOOK_PW02_PATH, "COMMAND = [")
 
     assert '"PW00_Paper_Eval_Family_Manifest.py"' in pw00_constants
+    assert 'DRIVE_MODELS_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "Models"' in pw00_constants
+    assert 'PERSISTENT_HF_ROOT = DRIVE_MODELS_ROOT / "Huggingface"' in pw00_constants
+    assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in pw00_constants
+    assert 'snapshot_download(' not in pw00_bootstrap
     assert '"--drive-project-root"' in pw00_execute
     assert '"--family-id"' in pw00_execute
     assert '"--prompt-file"' in pw00_execute
@@ -193,6 +205,11 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     assert '"--force-rerun"' in pw01_execute
 
     assert '"PW02_Source_Merge_And_Global_Thresholds.py"' in pw02_constants
+    assert 'DRIVE_MODELS_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "Models"' in pw02_constants
+    assert 'PERSISTENT_HF_ROOT = DRIVE_MODELS_ROOT / "Huggingface"' in pw02_constants
+    assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in pw02_constants
+    assert 'os.environ["HUGGINGFACE_HUB_CACHE"] = str(LOCAL_HF_HUB_CACHE)' in pw02_bootstrap
+    assert 'snapshot_download(' not in pw02_bootstrap
     assert '"--drive-project-root"' in pw02_execute
     assert '"--family-id"' in pw02_execute
 
@@ -237,7 +254,10 @@ def test_pw01_notebook_restores_bootstrap_before_single_formal_precheck() -> Non
     """
     pw01_intro = _find_markdown_cell_source(NOTEBOOK_PW01_PATH, "用途：")
     pw01_parallel_markdown = _find_markdown_cell_source(NOTEBOOK_PW01_PATH, "扩展规则：")
-    pw01_bootstrap = _find_code_cell_source(NOTEBOOK_PW01_PATH, "MODEL_SNAPSHOT_PATH = snapshot_download(")
+    pw01_bootstrap = _find_code_cell_source(
+        NOTEBOOK_PW01_PATH,
+        'MODEL_CACHE_BOOTSTRAP = bootstrap_notebook_model_cache(',
+    )
     pw01_precheck = _find_code_cell_source(NOTEBOOK_PW01_PATH, "PRECHECK_RESULTS = []")
 
     assert "formal 主流程角色为 positive_source 与 clean_negative" in pw01_intro
@@ -245,11 +265,15 @@ def test_pw01_notebook_restores_bootstrap_before_single_formal_precheck() -> Non
     assert "source_shards/positive/shard_xxxx、source_shards/negative/shard_xxxx 或 source_shards/control_negative/shard_xxxx" in pw01_parallel_markdown
     assert "planner_conditioned_control_negative 仅在需要 diagnostic pool 时按需补跑" in pw01_parallel_markdown
 
-    assert 'from huggingface_hub import HfApi, snapshot_download' in pw01_bootstrap
-    assert 'os.environ["HUGGINGFACE_HUB_CACHE"] = str(HF_HUB_CACHE)' in pw01_bootstrap
-    assert 'MODEL_SNAPSHOT_PATH = snapshot_download(' in pw01_bootstrap
+    assert 'from huggingface_hub import HfApi' in pw01_bootstrap
+    assert 'bootstrap_notebook_model_cache' in pw01_bootstrap
+    assert 'os.environ["HUGGINGFACE_HUB_CACHE"] = str(LOCAL_HF_HUB_CACHE)' in pw01_bootstrap
+    assert 'MODEL_CACHE_BOOTSTRAP = bootstrap_notebook_model_cache(' in pw01_bootstrap
+    assert 'MODEL_SNAPSHOT_PATH = str(MODEL_CACHE_BOOTSTRAP["local_snapshot_path"])' in pw01_bootstrap
+    assert 'PERSISTENT_SNAPSHOT_PATH = Path(str(MODEL_CACHE_BOOTSTRAP["persistent_snapshot_path"]))' in pw01_bootstrap
     assert 'MODEL_DOWNLOAD_SUMMARY = build_directory_digest_summary(Path(MODEL_SNAPSHOT_PATH))' in pw01_bootstrap
     assert 'WEIGHT_DOWNLOAD_SUMMARY = collect_weight_summary(REPO_ROOT, CFG_OBJ)' in pw01_bootstrap
+    assert 'print_json("model_cache_bootstrap", MODEL_CACHE_BOOTSTRAP)' in pw01_bootstrap
     assert 'ATTESTATION_BOOTSTRAP = ensure_attestation_env_bootstrap(' in pw01_bootstrap
     assert 'print_json("attestation_env_bootstrap", ATTESTATION_BOOTSTRAP)' in pw01_bootstrap
     assert 'run_checked(["nvidia-smi"])' in pw01_bootstrap
@@ -257,14 +281,16 @@ def test_pw01_notebook_restores_bootstrap_before_single_formal_precheck() -> Non
     assert len(_find_code_cell_sources(NOTEBOOK_PW01_PATH, "PRECHECK_RESULTS = []")) == 1
     assert _find_code_cell_index(
         NOTEBOOK_PW01_PATH,
-        "MODEL_SNAPSHOT_PATH = snapshot_download(",
+        'MODEL_CACHE_BOOTSTRAP = bootstrap_notebook_model_cache(',
     ) < _find_code_cell_index(
         NOTEBOOK_PW01_PATH,
         "PRECHECK_RESULTS = []",
     )
     assert 'SOURCE_SPLIT_PLAN_PATH = FAMILY_ROOT / "manifests" / "source_split_plan.json"' in pw01_precheck
     assert 'SAMPLE_ROLE in manifest_sample_roles' in pw01_precheck
+    assert 'PERSISTENT_SNAPSHOT_PATH.exists() and PERSISTENT_SNAPSHOT_PATH.is_dir()' in pw01_precheck
     assert 'Path(str(MODEL_SNAPSHOT_PATH)).exists() and Path(str(MODEL_SNAPSHOT_PATH)).is_dir()' in pw01_precheck
+    assert 'str(Path(str(MODEL_SNAPSHOT_PATH)).resolve()).startswith(str(LOCAL_HF_HOME.resolve()))' in pw01_precheck
     assert 'Path(str(ATTESTATION_BOOTSTRAP.get("attestation_env_path", ""))).exists()' in pw01_precheck
     assert 'Path(str(ATTESTATION_BOOTSTRAP.get("attestation_env_info_path", ""))).exists()' in pw01_precheck
     assert 'nvidia_smi_result = subprocess.run(' in pw01_precheck

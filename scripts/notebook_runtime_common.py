@@ -23,7 +23,7 @@ import uuid
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, cast
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, cast
 
 import yaml
 
@@ -260,6 +260,330 @@ def build_repo_import_subprocess_env(
 
     env_mapping["PYTHONPATH"] = os.pathsep.join([repo_root_text, *retained_entries])
     return env_mapping
+
+
+def _is_nonempty_file(path_obj: Path) -> bool:
+    """
+    功能：判断文件是否存在且非空。
+
+    Check whether one file exists and has non-zero size.
+
+    Args:
+        path_obj: Candidate file path.
+
+    Returns:
+        True when the file exists, is regular, and has positive size.
+    """
+    if not isinstance(path_obj, Path):
+        raise TypeError("path_obj must be Path")
+    return bool(path_obj.exists() and path_obj.is_file() and path_obj.stat().st_size > 0)
+
+
+def _directory_contains_files(path_obj: Path) -> bool:
+    """
+    功能：判断目录是否包含至少一个文件。
+
+    Check whether one directory contains at least one file entry.
+
+    Args:
+        path_obj: Candidate directory path.
+
+    Returns:
+        True when the directory exists and contains at least one file.
+    """
+    if not isinstance(path_obj, Path):
+        raise TypeError("path_obj must be Path")
+    if not path_obj.exists() or not path_obj.is_dir():
+        return False
+    for child_path in path_obj.rglob("*"):
+        if child_path.is_file():
+            return True
+    return False
+
+
+def _sync_file_copy(source_path: Path, destination_path: Path) -> Path:
+    """
+    功能：把单文件同步到目标路径。
+
+    Synchronize one source file into the destination path.
+
+    Args:
+        source_path: Existing source file path.
+        destination_path: Destination file path.
+
+    Returns:
+        Destination file path.
+    """
+    if not isinstance(source_path, Path):
+        raise TypeError("source_path must be Path")
+    if not isinstance(destination_path, Path):
+        raise TypeError("destination_path must be Path")
+    if source_path.resolve() == destination_path.resolve():
+        return destination_path
+    return copy_file(source_path, destination_path)
+
+
+def _replace_directory_copy(source_root: Path, destination_root: Path) -> Path:
+    """
+    功能：以整目录替换方式同步快照目录。
+
+    Replace one destination directory with a fresh copy of the source tree.
+
+    Args:
+        source_root: Existing source directory.
+        destination_root: Destination directory.
+
+    Returns:
+        Destination directory path.
+    """
+    if not isinstance(source_root, Path):
+        raise TypeError("source_root must be Path")
+    if not isinstance(destination_root, Path):
+        raise TypeError("destination_root must be Path")
+    if not source_root.exists() or not source_root.is_dir():
+        raise FileNotFoundError(f"source_root not found: {source_root}")
+    if destination_root.exists():
+        if not destination_root.is_dir():
+            raise RuntimeError(f"destination_root must be directory when present: {destination_root}")
+        shutil.rmtree(destination_root)
+    ensure_directory(destination_root.parent)
+    shutil.copytree(source_root, destination_root)
+    return destination_root
+
+
+def resolve_notebook_model_cache_layout(
+    drive_mount_root: Path,
+    repo_root: Path = REPO_ROOT,
+    *,
+    create_directories: bool = False,
+) -> Dict[str, Path]:
+    """
+    功能：解析 notebook 使用的 Drive 持久缓存与本地运行时目录布局。
+
+    Resolve the notebook cache layout for persistent Google Drive storage and
+    session-local runtime directories.
+
+    Args:
+        drive_mount_root: Notebook Drive mount root.
+        repo_root: Repository root used for the local runtime cache.
+        create_directories: Whether to create all managed directories.
+
+    Returns:
+        Mapping of cache layout paths.
+    """
+    if not isinstance(drive_mount_root, Path):
+        raise TypeError("drive_mount_root must be Path")
+    if not isinstance(repo_root, Path):
+        raise TypeError("repo_root must be Path")
+    if not isinstance(create_directories, bool):
+        raise TypeError("create_directories must be bool")
+
+    drive_models_root = drive_mount_root / "MyDrive" / "Models"
+    persistent_inspyrenet_root = drive_models_root / "inspyrenet"
+    persistent_hf_root = drive_models_root / "Huggingface"
+    local_hf_home = repo_root / "huggingface_cache"
+    local_hf_hub_cache = local_hf_home / "hub"
+    local_transformers_cache = local_hf_home / "transformers"
+    local_runtime_snapshot_root = local_hf_home / "runtime_snapshots"
+
+    layout: Dict[str, Path] = {
+        "drive_models_root": drive_models_root,
+        "persistent_inspyrenet_root": persistent_inspyrenet_root,
+        "persistent_inspyrenet_path": persistent_inspyrenet_root / "ckpt_base.pth",
+        "persistent_hf_root": persistent_hf_root,
+        "local_hf_home": local_hf_home,
+        "local_hf_hub_cache": local_hf_hub_cache,
+        "local_transformers_cache": local_transformers_cache,
+        "local_runtime_snapshot_root": local_runtime_snapshot_root,
+    }
+
+    if create_directories:
+        for key in [
+            "drive_models_root",
+            "persistent_inspyrenet_root",
+            "persistent_hf_root",
+            "local_hf_home",
+            "local_hf_hub_cache",
+            "local_transformers_cache",
+            "local_runtime_snapshot_root",
+        ]:
+            ensure_directory(layout[key])
+    return layout
+
+
+def bootstrap_notebook_model_cache(
+    cfg_obj: Mapping[str, Any],
+    drive_mount_root: Path,
+    repo_root: Path = REPO_ROOT,
+    *,
+    semantic_model_source_urls: Optional[Mapping[str, str]] = None,
+    weight_url_override: Optional[str] = None,
+    force_inspyrenet_download: bool = False,
+    snapshot_download_fn: Optional[Callable[..., str]] = None,
+    file_download_fn: Optional[Callable[[str, Path], None]] = None,
+) -> Dict[str, Any]:
+    """
+    功能：准备 notebook 所需的 persistent 模型缓存并同步本地运行时快照。
+
+    Prepare the notebook model cache by reusing or downloading the canonical
+    persistent artifacts on Google Drive and synchronizing the active snapshot
+    into the session-local runtime directory.
+
+    Args:
+        cfg_obj: Runtime configuration mapping.
+        drive_mount_root: Notebook Drive mount root.
+        repo_root: Repository root used for local runtime paths.
+        semantic_model_source_urls: Optional mapping from semantic model source
+            identifiers to download URLs.
+        weight_url_override: Optional explicit semantic model weight URL.
+        force_inspyrenet_download: Whether to force a fresh InSPyReNet download
+            into the persistent cache.
+        snapshot_download_fn: Optional snapshot download callable used for
+            testing.
+        file_download_fn: Optional file download callable used for testing.
+
+    Returns:
+        Bootstrap summary containing persistent and local cache paths.
+    """
+    if not isinstance(cfg_obj, Mapping):
+        raise TypeError("cfg_obj must be Mapping")
+    if not isinstance(drive_mount_root, Path):
+        raise TypeError("drive_mount_root must be Path")
+    if not isinstance(repo_root, Path):
+        raise TypeError("repo_root must be Path")
+    if semantic_model_source_urls is not None and not isinstance(semantic_model_source_urls, Mapping):
+        raise TypeError("semantic_model_source_urls must be Mapping[str, str] or None")
+    if weight_url_override is not None and not isinstance(weight_url_override, str):
+        raise TypeError("weight_url_override must be str or None")
+    if not isinstance(force_inspyrenet_download, bool):
+        raise TypeError("force_inspyrenet_download must be bool")
+
+    layout = resolve_notebook_model_cache_layout(drive_mount_root, repo_root, create_directories=True)
+    model_identity = resolve_model_identity(cfg_obj)
+    model_id = str(model_identity["model_id"])
+    revision = str(model_identity["revision"])
+    if model_id == "<absent>":
+        raise ValueError("model_id must be provided in cfg_obj")
+
+    mask_cfg = cast(Dict[str, Any], cfg_obj.get("mask")) if isinstance(cfg_obj.get("mask"), dict) else {}
+    semantic_model_path = mask_cfg.get("semantic_model_path")
+    if not isinstance(semantic_model_path, str) or not semantic_model_path.strip():
+        raise ValueError("mask.semantic_model_path must be non-empty str")
+    repo_inspyrenet_path = resolve_repo_path(semantic_model_path, repo_root)
+    ensure_directory(repo_inspyrenet_path.parent)
+
+    semantic_model_source = (
+        str(mask_cfg.get("semantic_model_source")).strip()
+        if isinstance(mask_cfg.get("semantic_model_source"), str)
+        else ""
+    )
+    semantic_source_urls = semantic_model_source_urls or {}
+    semantic_weight_url = (
+        weight_url_override.strip()
+        if isinstance(weight_url_override, str) and weight_url_override.strip()
+        else str(semantic_source_urls.get(semantic_model_source, "")).strip()
+    )
+
+    persistent_inspyrenet_path = layout["persistent_inspyrenet_path"]
+    weight_cache_mode = "persistent_reused"
+    if force_inspyrenet_download:
+        weight_cache_mode = "persistent_downloaded"
+    elif _is_nonempty_file(persistent_inspyrenet_path):
+        weight_cache_mode = "persistent_reused"
+    elif _is_nonempty_file(repo_inspyrenet_path):
+        _sync_file_copy(repo_inspyrenet_path, persistent_inspyrenet_path)
+        weight_cache_mode = "persistent_seeded_from_repo"
+    else:
+        weight_cache_mode = "persistent_downloaded"
+
+    if weight_cache_mode == "persistent_downloaded":
+        if not semantic_weight_url:
+            raise RuntimeError(
+                f"unsupported semantic_model_source for notebook bootstrap: {semantic_model_source or '<absent>'}"
+            )
+        download_file = file_download_fn
+        if download_file is None:
+            import urllib.request
+
+            def _default_file_download(url: str, target_path: Path) -> None:
+                urllib.request.urlretrieve(url, str(target_path))
+
+            download_file = _default_file_download
+
+        temp_download_path = persistent_inspyrenet_path.with_suffix(persistent_inspyrenet_path.suffix + ".downloading")
+        if temp_download_path.exists():
+            temp_download_path.unlink()
+        download_file(semantic_weight_url, temp_download_path)
+        if not _is_nonempty_file(temp_download_path):
+            temp_download_path.unlink(missing_ok=True)
+            raise RuntimeError(f"downloaded semantic weight is invalid: {temp_download_path}")
+        temp_download_path.replace(persistent_inspyrenet_path)
+
+    _sync_file_copy(persistent_inspyrenet_path, repo_inspyrenet_path)
+
+    snapshot_download = snapshot_download_fn
+    if snapshot_download is None:
+        from huggingface_hub import snapshot_download as huggingface_snapshot_download
+
+        snapshot_download = huggingface_snapshot_download
+
+    requested_revision = None if revision == "<absent>" else revision
+    persistent_cache_mode = "persistent_reused"
+    try:
+        persistent_snapshot_path = Path(
+            str(
+                snapshot_download(
+                    repo_id=model_id,
+                    revision=requested_revision,
+                    cache_dir=str(layout["persistent_hf_root"]),
+                    local_files_only=True,
+                )
+            )
+        ).resolve()
+    except Exception:
+        persistent_cache_mode = "persistent_downloaded"
+        persistent_snapshot_path = Path(
+            str(
+                snapshot_download(
+                    repo_id=model_id,
+                    revision=requested_revision,
+                    cache_dir=str(layout["persistent_hf_root"]),
+                )
+            )
+        ).resolve()
+
+    if not persistent_snapshot_path.exists() or not persistent_snapshot_path.is_dir():
+        raise RuntimeError(f"persistent model snapshot missing or invalid: {persistent_snapshot_path}")
+
+    local_snapshot_path = (
+        layout["local_runtime_snapshot_root"]
+        / _sanitize_identifier(model_id)
+        / _sanitize_identifier(revision if revision != "<absent>" else persistent_snapshot_path.name)
+        / persistent_snapshot_path.name
+    )
+    local_snapshot_mode = "local_reused"
+    if not _directory_contains_files(local_snapshot_path):
+        _replace_directory_copy(persistent_snapshot_path, local_snapshot_path)
+        local_snapshot_mode = "local_synced"
+
+    return {
+        "model_id": model_id,
+        "revision": revision,
+        "semantic_model_source": semantic_model_source or "<absent>",
+        "semantic_model_url": semantic_weight_url or "<absent>",
+        "persistent_hf_root": normalize_path_value(layout["persistent_hf_root"]),
+        "persistent_snapshot_path": normalize_path_value(persistent_snapshot_path),
+        "local_hf_home": normalize_path_value(layout["local_hf_home"]),
+        "local_hf_hub_cache": normalize_path_value(layout["local_hf_hub_cache"]),
+        "local_transformers_cache": normalize_path_value(layout["local_transformers_cache"]),
+        "local_snapshot_path": normalize_path_value(local_snapshot_path),
+        "persistent_inspyrenet_path": normalize_path_value(persistent_inspyrenet_path),
+        "repo_inspyrenet_path": normalize_path_value(repo_inspyrenet_path),
+        "weight_cache_mode": weight_cache_mode,
+        "persistent_snapshot_mode": persistent_cache_mode,
+        "local_snapshot_mode": local_snapshot_mode,
+        "cache_reuse_mode": f"{persistent_cache_mode}_and_{local_snapshot_mode}",
+    }
 
 
 def _normalize_model_snapshot_path(path_value: str) -> str:
