@@ -670,13 +670,18 @@ def _build_attack_detect_input_record(
     parent_embed_record_path = Path(parent_embed_record_path_value).expanduser().resolve()
     parent_embed_record = _load_required_json_dict(parent_embed_record_path, "PW03 parent embed record")
     attacked_image_sha256 = compute_file_sha256(attacked_image_path)
+    attacked_image_path_value = normalize_path_value(attacked_image_path)
 
     detect_input_record = copy.deepcopy(parent_embed_record)
-    detect_input_record["watermarked_path"] = normalize_path_value(attacked_image_path)
-    detect_input_record["image_path"] = normalize_path_value(attacked_image_path)
+    detect_input_record["watermarked_path"] = attacked_image_path_value
+    detect_input_record["image_path"] = attacked_image_path_value
     detect_input_record["artifact_sha256"] = attacked_image_sha256
     detect_input_record["watermarked_artifact_sha256"] = attacked_image_sha256
     detect_input_record["sample_role"] = ATTACKED_POSITIVE_SAMPLE_ROLE
+    inputs_node = detect_input_record.get("inputs")
+    if isinstance(inputs_node, dict):
+        inputs_payload = cast(Dict[str, Any], inputs_node)
+        inputs_payload["input_image_path"] = attacked_image_path_value
     detect_input_record["paper_workflow_attack_stage"] = STAGE_NAME
     detect_input_record["paper_workflow_attack_event_id"] = attack_event_spec.get("event_id")
     detect_input_record["paper_workflow_parent_event_id"] = parent_reference.get("parent_event_id")

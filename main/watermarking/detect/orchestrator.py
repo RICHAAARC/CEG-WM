@@ -3069,6 +3069,7 @@ def run_detect_orchestrator(
     cfg.pop("__runtime_self_attention_maps__", None)
     cfg.pop("__lf_formal_exact_trace_bundle__", None)
     cfg.pop("__lf_formal_exact_context__", None)
+    cfg.pop("__lf_attacked_image_conditioned_latent_cache__", None)
     cfg.pop("__detect_hf_plan_digest_used__", None)
 
     plan_digest_mismatch_reason = plan_digest_reason if plan_digest_reason == "plan_digest_mismatch" else None
@@ -3496,6 +3497,8 @@ def _extract_lf_raw_score_from_trajectory(
     plan_payload: Optional[Dict[str, Any]],
     plan_digest: Optional[str],
     cfg_digest: Optional[str],
+    latent_cache: Any = None,
+    detect_path: str = "low_freq_template_trajectory",
 ) -> tuple[Optional[float], Dict[str, Any]]:
     """
     功能：通过 detect 侧 trajectory 路径提取 LF 原始分数与 trace。
@@ -3513,24 +3516,24 @@ def _extract_lf_raw_score_from_trajectory(
     """
     plan_dict = _resolve_plan_dict(plan_payload)
     lf_basis_for_decode = plan_dict.get("lf_basis") if isinstance(plan_dict.get("lf_basis"), dict) else None
-    detect_traj_cache = cfg.get("__detect_trajectory_latent_cache__")
+    detect_traj_cache = latent_cache if latent_cache is not None else cfg.get("__detect_trajectory_latent_cache__")
     if lf_basis_for_decode is None:
         return None, {
             "lf_status": "absent",
             "lf_absent_reason": "lf_basis_missing",
-            "lf_detect_path": "low_freq_template_trajectory",
+            "lf_detect_path": detect_path,
         }
     if not isinstance(plan_digest, str) or not plan_digest:
         return None, {
             "lf_status": "absent",
             "lf_absent_reason": "lf_plan_digest_missing",
-            "lf_detect_path": "low_freq_template_trajectory",
+            "lf_detect_path": detect_path,
         }
     if detect_traj_cache is None or detect_traj_cache.is_empty():
         return None, {
             "lf_status": "absent",
             "lf_absent_reason": "lf_timestep_unresolved",
-            "lf_detect_path": "low_freq_template_trajectory",
+            "lf_detect_path": detect_path,
         }
 
     tfs = lf_basis_for_decode.get("trajectory_feature_spec")
@@ -3538,7 +3541,7 @@ def _extract_lf_raw_score_from_trajectory(
         return None, {
             "lf_status": "failed",
             "lf_failure_reason": "lf_trajectory_feature_spec_invalid",
-            "lf_detect_path": "low_freq_template_trajectory",
+            "lf_detect_path": detect_path,
         }
 
     edit_timestep = int(tfs.get("edit_timestep", 0))
@@ -3550,7 +3553,7 @@ def _extract_lf_raw_score_from_trajectory(
             "lf_status": "absent",
             "lf_absent_reason": "lf_timestep_unresolved",
             "lf_resolution_status": resolution_status,
-            "lf_detect_path": "low_freq_template_trajectory",
+            "lf_detect_path": detect_path,
         }
 
     try:
@@ -3582,7 +3585,7 @@ def _extract_lf_raw_score_from_trajectory(
             "parity_check_digest": lf_detect_trace.get("parity_check_digest"),
             "lf_failure_reason": lf_detect_trace.get("lf_failure_reason"),
             "bp_converge_status": lf_detect_trace.get("bp_converge_status"),
-            "lf_detect_path": "low_freq_template_trajectory",
+            "lf_detect_path": detect_path,
         }
         failure_reason = lf_trace.get("lf_failure_reason")
         if isinstance(failure_reason, str) and failure_reason:
@@ -3603,8 +3606,98 @@ def _extract_lf_raw_score_from_trajectory(
         return None, {
             "lf_status": "failed",
             "lf_failure_reason": f"lf_trajectory_score_failed:{type(exc).__name__}",
-            "lf_detect_path": "low_freq_template_trajectory",
+            "lf_detect_path": detect_path,
         }
+
+
+def _is_attacked_positive_input_record(input_record: Optional[Dict[str, Any]]) -> bool:
+    """
+    功能：判定当前 detect 输入是否属于 PW03 attacked_positive。 
+
+    Detect whether the current record is a PW03 attacked_positive input.
+
+    Args:
+        input_record: Detect input record mapping.
+
+    Returns:
+        True when the input record is attacked_positive; otherwise False.
+    """
+    if not isinstance(input_record, dict):
+        return False
+    return input_record.get("sample_role") == "attacked_positive"
+
+
+def _update_lf_trace_with_formal_exact_context(
+    lf_trace: Dict[str, Any],
+    lf_formal_exact_context: Dict[str, Any],
+    image_path_source: Optional[str],
+) -> None:
+    """
+    功能：将 formal exact 上下文追加到 LF trace，便于审计 attacked_positive 路径。 
+
+    Append formal exact context fields into LF trace for attacked-positive auditing.
+
+    Args:
+        lf_trace: Mutable LF trace mapping.
+        lf_formal_exact_context: Formal exact context mapping.
+        image_path_source: Resolved detect image path source.
+
+    Returns:
+        None.
+    """
+    formal_exact_object_binding_status = lf_formal_exact_context.get("formal_exact_object_binding_status")
+    if isinstance(formal_exact_object_binding_status, str) and formal_exact_object_binding_status:
+        lf_trace["formal_exact_object_binding_status"] = formal_exact_object_binding_status
+
+    formal_exact_evidence_source = lf_formal_exact_context.get("formal_exact_evidence_source")
+    if isinstance(formal_exact_evidence_source, str) and formal_exact_evidence_source:
+        lf_trace["formal_exact_evidence_source"] = formal_exact_evidence_source
+
+    formal_exact_image_path_source = lf_formal_exact_context.get("formal_exact_image_path_source")
+    if isinstance(formal_exact_image_path_source, str) and formal_exact_image_path_source:
+        lf_trace["formal_exact_image_path_source"] = formal_exact_image_path_source
+
+    image_conditioned_reconstruction_status = lf_formal_exact_context.get("image_conditioned_reconstruction_status")
+    if isinstance(image_conditioned_reconstruction_status, str) and image_conditioned_reconstruction_status:
+        lf_trace["image_conditioned_reconstruction_status"] = image_conditioned_reconstruction_status
+
+    image_conditioned_reconstruction_available = lf_formal_exact_context.get("image_conditioned_reconstruction_available")
+    if isinstance(image_conditioned_reconstruction_available, bool):
+        lf_trace["image_conditioned_reconstruction_available"] = image_conditioned_reconstruction_available
+
+    if isinstance(image_path_source, str) and image_path_source:
+        lf_trace.setdefault("image_path_source", image_path_source)
+
+
+def _build_attacked_positive_lf_unavailable_trace(
+    lf_formal_exact_context: Dict[str, Any],
+    image_path_source: Optional[str],
+) -> Dict[str, Any]:
+    """
+    功能：为 attacked_positive 构造 fail-closed 的 LF unavailable trace。 
+
+    Build a fail-closed LF trace when attacked-positive image-conditioned evidence
+    is unavailable.
+
+    Args:
+        lf_formal_exact_context: Formal exact context mapping.
+        image_path_source: Resolved detect image path source.
+
+    Returns:
+        LF trace mapping with explicit unavailable semantics.
+    """
+    image_conditioned_reconstruction_status = lf_formal_exact_context.get("image_conditioned_reconstruction_status")
+    lf_trace: Dict[str, Any] = {
+        "lf_status": "absent",
+        "lf_absent_reason": "attack_image_conditioned_evidence_unavailable",
+        "lf_detect_path": "low_freq_template_image_conditioned_attack",
+    }
+    if image_conditioned_reconstruction_status == "ok":
+        lf_trace["lf_status"] = "failed"
+        lf_trace.pop("lf_absent_reason", None)
+        lf_trace["lf_failure_reason"] = "attack_image_conditioned_latent_cache_missing"
+    _update_lf_trace_with_formal_exact_context(lf_trace, lf_formal_exact_context, image_path_source)
+    return lf_trace
 
 
 def _extract_lf_attestation_trace_bundle_from_trajectory(
@@ -3772,6 +3865,13 @@ def _extract_content_raw_scores_from_image(
     ecc_value = lf_cfg.get("ecc", 3)
     lf_score = None
     lf_trace: Dict[str, Any] = {"lf_status": "absent", "lf_absent_reason": "lf_unavailable"}
+    lf_formal_exact_context_node = cfg.get("__lf_formal_exact_context__")
+    lf_formal_exact_context = (
+        cast(Dict[str, Any], lf_formal_exact_context_node)
+        if isinstance(lf_formal_exact_context_node, dict)
+        else {}
+    )
+    attacked_positive_input_record = _is_attacked_positive_input_record(input_record)
 
     image_path, image_path_source = _resolve_detect_image_path_with_source(cfg, input_record)
     image_array: Optional[Any] = None
@@ -3782,12 +3882,38 @@ def _extract_content_raw_scores_from_image(
             image_array = None
 
     if isinstance(ecc_value, str) and ecc_value == "sparse_ldpc":
-        lf_score, lf_trace = _extract_lf_raw_score_from_trajectory(
-            cfg=cfg,
-            plan_payload=plan_payload,
-            plan_digest=plan_digest,
-            cfg_digest=cfg_digest,
-        )
+        if attacked_positive_input_record:
+            attack_image_conditioned_cache = cfg.get("__lf_attacked_image_conditioned_latent_cache__")
+            if (
+                attack_image_conditioned_cache is None
+                or not hasattr(attack_image_conditioned_cache, "is_empty")
+                or attack_image_conditioned_cache.is_empty()
+            ):
+                lf_trace = _build_attacked_positive_lf_unavailable_trace(
+                    lf_formal_exact_context,
+                    image_path_source if isinstance(image_path_source, str) else None,
+                )
+            else:
+                lf_score, lf_trace = _extract_lf_raw_score_from_trajectory(
+                    cfg=cfg,
+                    plan_payload=plan_payload,
+                    plan_digest=plan_digest,
+                    cfg_digest=cfg_digest,
+                    latent_cache=attack_image_conditioned_cache,
+                    detect_path="low_freq_template_image_conditioned_attack",
+                )
+                _update_lf_trace_with_formal_exact_context(
+                    lf_trace,
+                    lf_formal_exact_context,
+                    image_path_source if isinstance(image_path_source, str) else None,
+                )
+        else:
+            lf_score, lf_trace = _extract_lf_raw_score_from_trajectory(
+                cfg=cfg,
+                plan_payload=plan_payload,
+                plan_digest=plan_digest,
+                cfg_digest=cfg_digest,
+            )
     else:
         raise RuntimeError(
             "image_dct_fallback path reached in _extract_content_raw_scores_from_image: "

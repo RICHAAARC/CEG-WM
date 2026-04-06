@@ -761,6 +761,11 @@ def _to_numpy_array(payload: Any) -> np.ndarray:
 
 
 def _restore_array_dtype(original_payload: Any, transformed: np.ndarray) -> Any:
+    if isinstance(original_payload, Image.Image):
+        restored_image = _to_pil_image(transformed)
+        if restored_image.mode != original_payload.mode:
+            restored_image = restored_image.convert(original_payload.mode)
+        return _from_pil_image(original_payload, restored_image)
     if isinstance(original_payload, np.ndarray):
         if np.issubdtype(original_payload.dtype, np.integer):
             return np.clip(transformed, 0, 255).astype(original_payload.dtype)

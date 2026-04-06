@@ -128,6 +128,9 @@ def _build_positive_source_finalize_fixture(summary: Dict[str, Any]) -> Dict[str
             "operation": "embed",
             "watermarked_path": image_path.as_posix(),
             "image_path": image_path.as_posix(),
+            "inputs": {
+                "input_image_path": image_path.as_posix(),
+            },
             "artifact_sha256": pw03_module.compute_file_sha256(image_path),
             "watermarked_artifact_sha256": pw03_module.compute_file_sha256(image_path),
             "is_watermarked": True,
@@ -539,6 +542,9 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert detect_input_payload["paper_workflow_attack_family"] == first_event["attack_family"]
     assert detect_input_payload["paper_workflow_attack_params_digest"] == first_event["attack_params_digest"]
     assert detect_input_payload["watermarked_path"] == first_event["attacked_image_path"]
+    assert detect_input_payload["image_path"] == first_event["attacked_image_path"]
+    detect_inputs = cast(Dict[str, Any], detect_input_payload["inputs"])
+    assert detect_inputs["input_image_path"] == first_event["attacked_image_path"]
     assert detect_input_payload["plan_digest"].startswith("plan_")
 
 

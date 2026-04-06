@@ -746,6 +746,8 @@ def _build_lf_formal_exact_context(
 
     image_cache = trajectory_tap.LatentTrajectoryCache()
     image_cache.capture(int(edit_timestep), latent_array)
+    context["image_conditioned_reconstruction_available"] = True
+    context["__transient_detect_lf_content_latent_cache_override__"] = image_cache
 
     previous_cache = cfg.get("__detect_trajectory_latent_cache__")
     try:
@@ -771,7 +773,6 @@ def _build_lf_formal_exact_context(
     context["formal_exact_evidence_source"] = "input_image_conditioned_reconstruction"
     context["formal_exact_object_binding_status"] = "ok"
     context["formal_exact_image_path_source"] = image_path_source
-    context["image_conditioned_reconstruction_available"] = True
     context["image_conditioned_reconstruction_status"] = "ok"
     context["formal_exact_trace_bundle"] = trace_bundle
     context["lf_exact_repair_enabled"] = trace_bundle.get("lf_exact_repair_enabled")
@@ -1614,6 +1615,14 @@ def run_detect(
                     pipeline_obj,
                     str(device),
                 )
+                lf_content_latent_cache_override = lf_formal_exact_context.pop(
+                    "__transient_detect_lf_content_latent_cache_override__",
+                    None,
+                )
+                if input_record.get("sample_role") == "attacked_positive" and lf_content_latent_cache_override is not None:
+                    cfg["__lf_attacked_image_conditioned_latent_cache__"] = lf_content_latent_cache_override
+                else:
+                    cfg.pop("__lf_attacked_image_conditioned_latent_cache__", None)
                 if isinstance(lf_formal_exact_context.get("formal_exact_trace_bundle"), dict):
                     cfg["__lf_formal_exact_trace_bundle__"] = lf_formal_exact_context.get("formal_exact_trace_bundle")
                 cfg["__lf_formal_exact_context__"] = lf_formal_exact_context
@@ -1639,6 +1648,7 @@ def run_detect(
             else:
                 content_override_for_orchestrator = None
                 plan_override_for_orchestrator = None
+                cfg.pop("__lf_attacked_image_conditioned_latent_cache__", None)
                 diagnostics_cfg = _resolve_detect_diagnostics_cfg(cfg)
                 if bool(diagnostics_cfg.get("geo_rescue_scale_control_enabled", False)):
                     cfg["__geo_rescue_scale_control_context__"] = _scan_geo_rescue_scale_control_context(
@@ -1658,6 +1668,7 @@ def run_detect(
             )
             cfg.pop("__lf_formal_exact_trace_bundle__", None)
             cfg.pop("__lf_formal_exact_context__", None)
+            cfg.pop("__lf_attacked_image_conditioned_latent_cache__", None)
             cfg.pop("__lf_protocol_control_context__", None)
             cfg.pop("__geo_rescue_scale_control_context__", None)
             cfg.pop("__attestation_verify_k_master__", None)
