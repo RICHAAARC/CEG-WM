@@ -149,7 +149,7 @@ def test_attacked_positive_lf_uses_image_conditioned_cache(
         "image_conditioned_reconstruction_status": "ok",
     }
 
-    lf_score, hf_score, traces = detect_orchestrator._extract_content_raw_scores_from_image(  # pyright: ignore[reportPrivateUsage]
+    lf_score, lf_trace = detect_orchestrator._extract_attacked_positive_lf_raw_score(  # pyright: ignore[reportPrivateUsage]
         cfg=cfg,
         input_record={
             "sample_role": "attacked_positive",
@@ -164,13 +164,10 @@ def test_attacked_positive_lf_uses_image_conditioned_cache(
         cfg_digest="cfg-digest",
     )
 
-    assert hf_score is None
     assert lf_score == 0.42
     assert len(captures) == 1
     assert captures[0]["latent_cache"] is attacked_cache
     assert captures[0]["detect_path"] == "low_freq_template_image_conditioned_attack"
-
-    lf_trace = cast(Dict[str, Any], traces["lf"])
     assert lf_trace["lf_detect_path"] == "low_freq_template_image_conditioned_attack"
     assert lf_trace["formal_exact_object_binding_status"] == "ok"
     assert lf_trace["image_conditioned_reconstruction_status"] == "ok"
@@ -212,7 +209,7 @@ def test_attacked_positive_lf_fail_closes_without_image_conditioned_cache(
         "image_conditioned_reconstruction_status": "detect_input_image_absent",
     }
 
-    lf_score, hf_score, traces = detect_orchestrator._extract_content_raw_scores_from_image(  # pyright: ignore[reportPrivateUsage]
+    lf_score, lf_trace = detect_orchestrator._extract_attacked_positive_lf_raw_score(  # pyright: ignore[reportPrivateUsage]
         cfg=cfg,
         input_record={
             "sample_role": "attacked_positive",
@@ -223,9 +220,7 @@ def test_attacked_positive_lf_fail_closes_without_image_conditioned_cache(
         cfg_digest="cfg-digest",
     )
 
-    assert hf_score is None
     assert lf_score is None
-    lf_trace = cast(Dict[str, Any], traces["lf"])
     assert lf_trace["lf_status"] == "absent"
     assert lf_trace["lf_absent_reason"] == "attack_image_conditioned_evidence_unavailable"
     assert lf_trace["lf_detect_path"] == "low_freq_template_image_conditioned_attack"

@@ -2750,7 +2750,28 @@ def run_detect_orchestrator(
             embed_time_plan_digest=embed_time_plan_digest,
             trajectory_evidence=trajectory_evidence,
         )
-        if _is_image_domain_sidecar_enabled(cfg, ablation_override=bool(enable_image_sidecar)):
+        attacked_positive_input_record = _is_attacked_positive_input_record(input_record)
+        if attacked_positive_input_record:
+            sidecar_disabled_reason = _resolve_sidecar_disabled_reason(
+                paper_enabled=paper_enabled,
+                enable_image_sidecar=bool(enable_image_sidecar),
+            )
+            lf_raw_score, lf_raw_trace = _extract_attacked_positive_lf_raw_score(
+                cfg=cfg,
+                input_record=input_record,
+                plan_payload=plan_payload,
+                plan_digest=detect_time_plan_digest,
+                cfg_digest=cfg_digest,
+            )
+            hf_raw_score = None
+            raw_score_traces = {
+                "lf": lf_raw_trace,
+                "hf": {
+                    "hf_status": "absent",
+                    "hf_absent_reason": sidecar_disabled_reason,
+                },
+            }
+        elif _is_image_domain_sidecar_enabled(cfg, ablation_override=bool(enable_image_sidecar)):
             lf_raw_score, hf_raw_score, raw_score_traces = _extract_content_raw_scores_from_image(
                 cfg=cfg,
                 input_record=input_record,
@@ -3700,6 +3721,63 @@ def _build_attacked_positive_lf_unavailable_trace(
     return lf_trace
 
 
+def _extract_attacked_positive_lf_raw_score(
+    cfg: Dict[str, Any],
+    input_record: Optional[Dict[str, Any]],
+    plan_payload: Optional[Dict[str, Any]],
+    plan_digest: Optional[str],
+    cfg_digest: Optional[str],
+) -> tuple[Optional[float], Dict[str, Any]]:
+    """
+    功能：为 attacked_positive 输入提取 formal LF image-conditioned 原始分数。
+
+    Extract the formal LF raw score for attacked-positive inputs from the
+    image-conditioned latent cache.
+
+    Args:
+        cfg: Configuration mapping.
+        input_record: Detect input record mapping.
+        plan_payload: Planner payload mapping.
+        plan_digest: Detect-side plan digest.
+        cfg_digest: Detect-side config digest.
+
+    Returns:
+        Tuple of LF score and LF trace mapping.
+    """
+    lf_formal_exact_context_node = cfg.get("__lf_formal_exact_context__")
+    lf_formal_exact_context = (
+        cast(Dict[str, Any], lf_formal_exact_context_node)
+        if isinstance(lf_formal_exact_context_node, dict)
+        else {}
+    )
+    _, image_path_source = _resolve_detect_image_path_with_source(cfg, input_record)
+    attack_image_conditioned_cache = cfg.get("__lf_attacked_image_conditioned_latent_cache__")
+    if (
+        attack_image_conditioned_cache is None
+        or not hasattr(attack_image_conditioned_cache, "is_empty")
+        or attack_image_conditioned_cache.is_empty()
+    ):
+        return None, _build_attacked_positive_lf_unavailable_trace(
+            lf_formal_exact_context,
+            image_path_source if isinstance(image_path_source, str) else None,
+        )
+
+    lf_score, lf_trace = _extract_lf_raw_score_from_trajectory(
+        cfg=cfg,
+        plan_payload=plan_payload,
+        plan_digest=plan_digest,
+        cfg_digest=cfg_digest,
+        latent_cache=attack_image_conditioned_cache,
+        detect_path="low_freq_template_image_conditioned_attack",
+    )
+    _update_lf_trace_with_formal_exact_context(
+        lf_trace,
+        lf_formal_exact_context,
+        image_path_source if isinstance(image_path_source, str) else None,
+    )
+    return lf_score, lf_trace
+
+
 def _extract_lf_attestation_trace_bundle_from_trajectory(
     cfg: Dict[str, Any],
     plan_payload: Optional[Dict[str, Any]],
@@ -3865,13 +3943,6 @@ def _extract_content_raw_scores_from_image(
     ecc_value = lf_cfg.get("ecc", 3)
     lf_score = None
     lf_trace: Dict[str, Any] = {"lf_status": "absent", "lf_absent_reason": "lf_unavailable"}
-    lf_formal_exact_context_node = cfg.get("__lf_formal_exact_context__")
-    lf_formal_exact_context = (
-        cast(Dict[str, Any], lf_formal_exact_context_node)
-        if isinstance(lf_formal_exact_context_node, dict)
-        else {}
-    )
-    attacked_positive_input_record = _is_attacked_positive_input_record(input_record)
 
     image_path, image_path_source = _resolve_detect_image_path_with_source(cfg, input_record)
     image_array: Optional[Any] = None
@@ -3882,38 +3953,12 @@ def _extract_content_raw_scores_from_image(
             image_array = None
 
     if isinstance(ecc_value, str) and ecc_value == "sparse_ldpc":
-        if attacked_positive_input_record:
-            attack_image_conditioned_cache = cfg.get("__lf_attacked_image_conditioned_latent_cache__")
-            if (
-                attack_image_conditioned_cache is None
-                or not hasattr(attack_image_conditioned_cache, "is_empty")
-                or attack_image_conditioned_cache.is_empty()
-            ):
-                lf_trace = _build_attacked_positive_lf_unavailable_trace(
-                    lf_formal_exact_context,
-                    image_path_source if isinstance(image_path_source, str) else None,
-                )
-            else:
-                lf_score, lf_trace = _extract_lf_raw_score_from_trajectory(
-                    cfg=cfg,
-                    plan_payload=plan_payload,
-                    plan_digest=plan_digest,
-                    cfg_digest=cfg_digest,
-                    latent_cache=attack_image_conditioned_cache,
-                    detect_path="low_freq_template_image_conditioned_attack",
-                )
-                _update_lf_trace_with_formal_exact_context(
-                    lf_trace,
-                    lf_formal_exact_context,
-                    image_path_source if isinstance(image_path_source, str) else None,
-                )
-        else:
-            lf_score, lf_trace = _extract_lf_raw_score_from_trajectory(
-                cfg=cfg,
-                plan_payload=plan_payload,
-                plan_digest=plan_digest,
-                cfg_digest=cfg_digest,
-            )
+        lf_score, lf_trace = _extract_lf_raw_score_from_trajectory(
+            cfg=cfg,
+            plan_payload=plan_payload,
+            plan_digest=plan_digest,
+            cfg_digest=cfg_digest,
+        )
     else:
         raise RuntimeError(
             "image_dct_fallback path reached in _extract_content_raw_scores_from_image: "
