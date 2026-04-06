@@ -86,6 +86,8 @@ def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
         "planner_conditioned_control_negative",
     ]
     assert family_manifest["sample_roles"]["reserved"] == ["attacked_positive"]
+    assert family_manifest["stage_boundary"]["implemented"] == ["PW00", "PW01", "PW02", "PW03", "PW04"]
+    assert family_manifest["stage_boundary"]["excluded"] == ["PW05"]
     assert family_manifest["source_parameters"]["seed_list"] == [0, 7]
     assert family_manifest["source_parameters"]["calibration_fraction"] == 0.5
     assert family_manifest["source_parameters"]["source_shard_count"] == 3

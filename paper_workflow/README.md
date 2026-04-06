@@ -1,36 +1,23 @@
-# paper_workflow Stage 01-02
+# paper_workflow Stage 01-04
 
 ## Scope
 
-This directory is an orchestration layer for paper evaluation.
-It reuses the existing method implementation and the stable stage-01 runner path.
-It does not re-implement method internals from main.
+This directory is the orchestration layer for paper evaluation.
+It reuses the existing method implementation under main and only closes the
+paper_workflow stage boundaries around frozen manifests, shard execution,
+merge/materialize, and export publication.
 
-PW02 currently closes the stage-02 source merge layer on top of PW00/PW01.
-It aggregates completed positive_source and clean_negative PW01 shards,
-reuses the PW00-frozen split plan, runs global calibrate/evaluate for
-content_chain_score and event_attestation_score, and writes top-level export
-artifacts under paper_workflow/families/<family_id>/exports/pw02/.
+Implemented in stage 01-04:
 
-Implemented in stage 01-02:
-
-- PW00 family manifest build.
-- PW01 isolated positive_source and clean_negative shard execution.
-- Event identity with prompt_index + seed + sample_role.
-- PW02 source merge from completed PW01 shard manifests.
-- PW02 global thresholds for content and attestation score families.
-- PW02 top-level source pool manifests, finalize manifest, threshold exports, and clean-evaluate exports.
-- PW02 honest system_final derived metrics export (not an independent formal evaluate record).
-- Drive-first output layout under paper_workflow/families/<family_id>/.
+- PW00 family manifest build, source split freeze, attack event grid, and shard plans.
+- PW01 isolated source shard execution for positive_source, clean_negative, and optional diagnostic control-negative roles.
+- PW02 source merge, global thresholds, finalize manifest, and clean-side formal / derived exports.
+- PW03 attacked_positive shard execution, attacked-image materialization, and staged detect records.
+- PW04 attack shard merge, formal overlay materialization from PW02 thresholds, attack metrics exports, and clean / attack overview tables.
 
 Explicitly not implemented in the current paper_workflow stage boundary:
 
-- PW03.
-- PW04.
 - PW05.
-- attacked_positive generation.
-- Attack orchestration.
-- Independent system_final formal evaluate workflow.
 
 ## Layout
 
@@ -40,26 +27,35 @@ paper_workflow/families/<family_id>/
 - snapshots/
 - source_shards/positive/
 - source_shards/negative/
+- source_shards/control_negative/
+- attack_shards/
 - runs/
 - logs/
 - runtime_state/
 - exports/
+- exports/pw02/
+- exports/pw04/
 
-PW02 top-level exports live under:
+PW04 top-level exports live under:
 
-- exports/pw02/positive_source_pool_manifest.json
-- exports/pw02/clean_negative_pool_manifest.json
-- exports/pw02/paper_source_finalize_manifest.json
-- exports/pw02/thresholds/content/thresholds.json
-- exports/pw02/thresholds/attestation/thresholds.json
-- exports/pw02/evaluate/clean/content/evaluate_record.json
-- exports/pw02/evaluate/clean/attestation/evaluate_record.json
-- exports/pw02/system_final_metrics.json
+- exports/pw04/manifests/attack_merge_manifest.json
+- exports/pw04/attack_positive_pool_manifest.json
+- exports/pw04/formal_attack_final_decision_metrics.json
+- exports/pw04/formal_attack_attestation_metrics.json
+- exports/pw04/derived_attack_union_metrics.json
+- exports/pw04/per_attack_family_metrics.json
+- exports/pw04/per_attack_condition_metrics.json
+- exports/pw04/tables/attack_event_table.jsonl
+- exports/pw04/tables/attack_family_summary.csv
+- exports/pw04/tables/attack_condition_summary.csv
+- exports/pw04/clean_attack_overview.json
 
 ## Entrypoints
 
 - paper_workflow/scripts/PW00_Paper_Eval_Family_Manifest.py
 - paper_workflow/scripts/PW01_Source_Event_Shards.py
 - paper_workflow/scripts/PW02_Source_Merge_And_Global_Thresholds.py
+- paper_workflow/scripts/pw03_run_attack_event_shard.py
+- paper_workflow/scripts/pw04_merge_attack_event_shards.py
 
-The notebooks in paper_workflow/notebook are thin wrappers that call these scripts.
+The notebooks in paper_workflow/notebook remain thin wrappers that call these scripts.
