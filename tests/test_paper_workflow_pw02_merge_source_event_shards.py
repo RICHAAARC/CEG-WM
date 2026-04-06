@@ -762,12 +762,16 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert positive_pool_manifest["source_role"] == "positive_source"
     assert positive_pool_manifest["event_count"] == 4
     assert len(positive_pool_manifest["events"]) == 4
+    assert positive_pool_manifest["expected_source_shard_count"] == 2
+    assert positive_pool_manifest["discovered_source_shard_count"] == 2
     assert len(positive_pool_manifest["source_shard_manifest_paths"]) == 2
 
     assert clean_negative_pool_manifest["family_id"] == "family_pw02_exports"
     assert clean_negative_pool_manifest["source_role"] == "clean_negative"
     assert clean_negative_pool_manifest["event_count"] == 4
     assert len(clean_negative_pool_manifest["events"]) == 4
+    assert clean_negative_pool_manifest["expected_source_shard_count"] == 2
+    assert clean_negative_pool_manifest["discovered_source_shard_count"] == 2
     assert len(clean_negative_pool_manifest["source_shard_manifest_paths"]) == 2
 
     assert control_negative_pool_manifest["family_id"] == "family_pw02_exports"

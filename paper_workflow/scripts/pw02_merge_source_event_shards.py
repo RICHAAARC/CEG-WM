@@ -1386,6 +1386,30 @@ def run_pw02_merge_source_event_shards(
     }
     write_json_atomic(merge_manifest_path, merge_manifest_payload)
 
+    positive_role_plan = _resolve_role_plan(source_shard_plan, ACTIVE_SAMPLE_ROLE)
+    positive_shards_node = positive_role_plan.get("shards")
+    if not isinstance(positive_shards_node, list):
+        raise ValueError(f"source shard plan {ACTIVE_SAMPLE_ROLE}.shards must be list")
+    expected_positive_source_shard_count = len(positive_shards_node)
+    discovered_positive_source_shard_count = len(
+        {
+            int(cast(Dict[str, Any], event_payload)["source_shard_index"])
+            for event_payload in positive_events.values()
+        }
+    )
+
+    clean_negative_role_plan = _resolve_role_plan(source_shard_plan, CLEAN_NEGATIVE_SAMPLE_ROLE)
+    clean_negative_shards_node = clean_negative_role_plan.get("shards")
+    if not isinstance(clean_negative_shards_node, list):
+        raise ValueError(f"source shard plan {CLEAN_NEGATIVE_SAMPLE_ROLE}.shards must be list")
+    expected_clean_negative_source_shard_count = len(clean_negative_shards_node)
+    discovered_clean_negative_source_shard_count = len(
+        {
+            int(cast(Dict[str, Any], event_payload)["source_shard_index"])
+            for event_payload in clean_negative_events.values()
+        }
+    )
+
     positive_pool_manifest = _write_source_pool_manifest(
         stage_root=stage_root,
         family_id=family_id,
@@ -1394,6 +1418,8 @@ def run_pw02_merge_source_event_shards(
         family_manifest_path=layout["family_manifest_path"],
         source_shard_plan_path=layout["source_shard_plan_path"],
         source_split_plan_path=layout["source_split_plan_path"],
+        expected_source_shard_count=expected_positive_source_shard_count,
+        discovered_source_shard_count=discovered_positive_source_shard_count,
     )
     clean_negative_pool_manifest = _write_source_pool_manifest(
         stage_root=stage_root,
@@ -1403,6 +1429,8 @@ def run_pw02_merge_source_event_shards(
         family_manifest_path=layout["family_manifest_path"],
         source_shard_plan_path=layout["source_shard_plan_path"],
         source_split_plan_path=layout["source_split_plan_path"],
+        expected_source_shard_count=expected_clean_negative_source_shard_count,
+        discovered_source_shard_count=discovered_clean_negative_source_shard_count,
     )
     control_negative_pool_manifest = _write_source_pool_manifest(
         stage_root=stage_root,
