@@ -513,6 +513,10 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert len(cast(List[Dict[str, Any]], pw03_summary["worker_outcomes"])) == 1
     shard_gpu_summary = json.loads(Path(str(pw03_summary["gpu_session_peak_path"])).read_text(encoding="utf-8"))
     assert shard_gpu_summary["wrapped_command_count"] == 1
+    assert len(cast(List[Dict[str, Any]], shard_gpu_summary["worker_local_peaks"])) == 1
+    assert shard_gpu_summary["peak_memory_mib"] == int(shard_gpu_summary["worker_local_peaks"][0]["peak_memory_mib"])
+    assert shard_gpu_summary["peak_timestamp"] == "2026-04-05T00:00:00Z"
+    assert shard_gpu_summary["visible_gpus"][0]["peak_memory_used_mib"] == shard_gpu_summary["peak_memory_mib"]
     assert pw03_summary["completed_event_count"] == pw03_summary["event_count"]
     assert captures["detect_input_payloads"]
 
@@ -911,7 +915,165 @@ def test_pw03_parallel_worker_launch_recreates_missing_logs_and_keeps_summary_se
     shard_gpu_summary = json.loads(Path(str(pw03_summary["gpu_session_peak_path"])).read_text(encoding="utf-8"))
     assert shard_gpu_summary["wrapped_command_count"] == 2
     assert len(cast(List[Dict[str, Any]], shard_gpu_summary["worker_local_peaks"])) == 2
+    assert shard_gpu_summary["peak_memory_mib"] == max(
+        int(worker_peak["peak_memory_mib"])
+        for worker_peak in cast(List[Dict[str, Any]], shard_gpu_summary["worker_local_peaks"])
+        if worker_peak.get("peak_memory_mib") is not None
+    )
+    assert shard_gpu_summary["peak_timestamp"] == "2026-04-05T00:00:00Z"
+    assert shard_gpu_summary["visible_gpus"][0]["peak_memory_used_mib"] == shard_gpu_summary["peak_memory_mib"]
     assert Path(str(pw03_summary["gpu_session_peak_path"])).exists()
+
+
+def test_pw03_gpu_peak_aggregation_keeps_first_timestamp_on_equal_worker_peaks() -> None:
+    """
+    Verify shard GPU aggregation keeps a stable timestamp when worker peaks tie.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    shard_gpu_summary = pw03_module._aggregate_gpu_session_peaks(
+        family_id="family_gpu_peak_tie",
+        attack_shard_index=0,
+        attack_local_worker_count=2,
+        gpu_peak_payloads=[
+            {
+                "worker_local_index": 0,
+                "peak_memory_mib": 4096,
+                "peak_timestamp": "2026-04-05T00:00:00Z",
+                "device_name": "Test GPU",
+                "visible_gpu_count": 1,
+                "visible_gpus": [
+                    {
+                        "index": 0,
+                        "uuid": "gpu-0",
+                        "name": "Test GPU",
+                        "memory_total_mib": 24576,
+                        "peak_memory_used_mib": 4096,
+                    }
+                ],
+                "wrapped_return_code": 0,
+                "summary_path": "worker_00.json",
+            },
+            {
+                "worker_local_index": 1,
+                "peak_memory_mib": 4096,
+                "peak_timestamp": "2026-04-05T00:00:01Z",
+                "device_name": "Test GPU",
+                "visible_gpu_count": 1,
+                "visible_gpus": [
+                    {
+                        "index": 0,
+                        "uuid": "gpu-0",
+                        "name": "Test GPU",
+                        "memory_total_mib": 24576,
+                        "peak_memory_used_mib": 4096,
+                    }
+                ],
+                "wrapped_return_code": 0,
+                "summary_path": "worker_01.json",
+            },
+        ],
+    )
+
+    assert shard_gpu_summary["peak_memory_mib"] == 4096
+    assert shard_gpu_summary["peak_timestamp"] == "2026-04-05T00:00:00Z"
+    assert shard_gpu_summary["visible_gpus"][0]["peak_memory_used_mib"] == 4096
+
+
+def test_pw03_gpu_peak_aggregation_ignores_null_worker_peak_when_other_worker_valid() -> None:
+    """
+    Verify shard GPU aggregation keeps the valid worker peak when another worker has null values.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    shard_gpu_summary = pw03_module._aggregate_gpu_session_peaks(
+        family_id="family_gpu_peak_partial",
+        attack_shard_index=1,
+        attack_local_worker_count=2,
+        gpu_peak_payloads=[
+            {
+                "worker_local_index": 0,
+                "peak_memory_mib": None,
+                "peak_timestamp": None,
+                "device_name": None,
+                "visible_gpu_count": 0,
+                "visible_gpus": [],
+                "wrapped_return_code": 1,
+                "summary_path": "worker_00.json",
+            },
+            {
+                "worker_local_index": 1,
+                "peak_memory_mib": 8192,
+                "peak_timestamp": "2026-04-05T00:00:02Z",
+                "device_name": "Test GPU",
+                "visible_gpu_count": 1,
+                "visible_gpus": [
+                    {
+                        "index": 0,
+                        "uuid": "gpu-0",
+                        "name": "Test GPU",
+                        "memory_total_mib": 24576,
+                        "peak_memory_used_mib": 8192,
+                    }
+                ],
+                "wrapped_return_code": 0,
+                "summary_path": "worker_01.json",
+            },
+        ],
+    )
+
+    assert shard_gpu_summary["peak_memory_mib"] == 8192
+    assert shard_gpu_summary["peak_timestamp"] == "2026-04-05T00:00:02Z"
+    assert shard_gpu_summary["visible_gpus"][0]["peak_memory_used_mib"] == 8192
+
+
+def test_pw03_gpu_peak_aggregation_falls_back_to_visible_gpu_peak_when_top_level_missing() -> None:
+    """
+    Verify shard GPU aggregation backfills the top-level peak from visible_gpus when needed.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    shard_gpu_summary = pw03_module._aggregate_gpu_session_peaks(
+        family_id="family_gpu_peak_visible_gpus",
+        attack_shard_index=2,
+        attack_local_worker_count=1,
+        gpu_peak_payloads=[
+            {
+                "worker_local_index": 0,
+                "peak_memory_mib": None,
+                "peak_timestamp": "2026-04-05T00:00:03Z",
+                "device_name": "Test GPU",
+                "visible_gpu_count": 1,
+                "visible_gpus": [
+                    {
+                        "index": 0,
+                        "uuid": "gpu-0",
+                        "name": "Test GPU",
+                        "memory_total_mib": 24576,
+                        "peak_memory_used_mib": 38855,
+                    }
+                ],
+                "wrapped_return_code": 0,
+                "summary_path": "worker_00.json",
+            }
+        ],
+    )
+
+    assert shard_gpu_summary["peak_memory_mib"] == 38855
+    assert shard_gpu_summary["peak_timestamp"] == "2026-04-05T00:00:03Z"
+    assert shard_gpu_summary["visible_gpus"][0]["peak_memory_used_mib"] == shard_gpu_summary["peak_memory_mib"]
 
 
 def test_pw03_cli_help_exposes_attack_shard_arguments() -> None:

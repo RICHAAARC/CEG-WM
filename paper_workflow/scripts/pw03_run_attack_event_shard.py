@@ -1354,6 +1354,78 @@ def _run_local_worker_plans(worker_plans: Sequence[Mapping[str, Any]]) -> Tuple[
     return worker_executions, worker_results
 
 
+def _extract_visible_gpu_peak_memory_mib(gpu_peak_payload: Mapping[str, Any]) -> int | None:
+    """
+    Extract the maximum visible-GPU peak memory from one GPU summary payload.
+
+    Args:
+        gpu_peak_payload: Raw or aggregated GPU summary payload.
+
+    Returns:
+        Maximum visible-GPU peak memory in MiB when available.
+    """
+    visible_gpus_node = gpu_peak_payload.get("visible_gpus")
+    if not isinstance(visible_gpus_node, list):
+        return None
+
+    peak_values: List[int] = []
+    for gpu_node in cast(List[object], visible_gpus_node):
+        if not isinstance(gpu_node, Mapping):
+            continue
+        peak_value = gpu_node.get("peak_memory_used_mib")
+        if isinstance(peak_value, (int, float)) and not isinstance(peak_value, bool):
+            peak_values.append(int(peak_value))
+    return max(peak_values) if peak_values else None
+
+
+def _normalize_gpu_peak_payload(gpu_peak_payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize raw and aggregated GPU summaries into one peak-view schema.
+
+    Args:
+        gpu_peak_payload: Raw wrapper payload or worker/shard aggregate payload.
+
+    Returns:
+        Normalized peak-view payload.
+    """
+    peak_memory_value = gpu_peak_payload.get("session_board_peak_memory_used_mib")
+    if not isinstance(peak_memory_value, (int, float)) or isinstance(peak_memory_value, bool):
+        peak_memory_value = gpu_peak_payload.get("peak_memory_mib")
+    peak_memory_mib = int(peak_memory_value) if isinstance(peak_memory_value, (int, float)) and not isinstance(peak_memory_value, bool) else None
+    if peak_memory_mib is None:
+        peak_memory_mib = _extract_visible_gpu_peak_memory_mib(gpu_peak_payload)
+
+    peak_timestamp_value = gpu_peak_payload.get("peak_observed_at_utc")
+    if not isinstance(peak_timestamp_value, str) or not peak_timestamp_value:
+        peak_timestamp_value = gpu_peak_payload.get("peak_timestamp")
+    peak_timestamp = peak_timestamp_value if isinstance(peak_timestamp_value, str) and peak_timestamp_value else None
+
+    device_name_value = gpu_peak_payload.get("peak_gpu_name")
+    if not isinstance(device_name_value, str) or not device_name_value:
+        device_name_value = gpu_peak_payload.get("device_name")
+    device_name = device_name_value if isinstance(device_name_value, str) and device_name_value else None
+
+    visible_gpus_node = gpu_peak_payload.get("visible_gpus")
+    visible_gpus = [
+        dict(cast(Mapping[str, Any], gpu_node))
+        for gpu_node in cast(List[object], visible_gpus_node)
+        if isinstance(gpu_node, Mapping)
+    ] if isinstance(visible_gpus_node, list) else []
+    visible_gpu_count_value = gpu_peak_payload.get("visible_gpu_count")
+    visible_gpu_count = int(visible_gpu_count_value) if isinstance(visible_gpu_count_value, int) and not isinstance(visible_gpu_count_value, bool) else len(visible_gpus)
+
+    return {
+        "peak_memory_mib": peak_memory_mib,
+        "peak_timestamp": peak_timestamp,
+        "device_name": device_name,
+        "visible_gpu_count": visible_gpu_count,
+        "visible_gpus": visible_gpus,
+        "wrapped_return_code": gpu_peak_payload.get("wrapped_return_code"),
+        "worker_local_index": gpu_peak_payload.get("worker_local_index"),
+        "summary_path": gpu_peak_payload.get("summary_path"),
+    }
+
+
 def _aggregate_gpu_session_peaks(
     *,
     family_id: str,
@@ -1390,23 +1462,30 @@ def _aggregate_gpu_session_peaks(
             "worker_local_peaks": [],
         }
 
-    peak_payload = max(
-        payloads,
-        key=lambda item: int(item.get("session_board_peak_memory_used_mib") or -1),
-    )
+    normalized_payloads = [_normalize_gpu_peak_payload(payload) for payload in payloads]
+    peak_payload = normalized_payloads[0]
+    for normalized_payload in normalized_payloads[1:]:
+        candidate_peak_memory_mib = normalized_payload.get("peak_memory_mib")
+        selected_peak_memory_mib = peak_payload.get("peak_memory_mib")
+        # Equal peaks keep the first observed payload to make timestamp tie-break stable.
+        if isinstance(candidate_peak_memory_mib, int) and (
+            not isinstance(selected_peak_memory_mib, int) or candidate_peak_memory_mib > selected_peak_memory_mib
+        ):
+            peak_payload = normalized_payload
+
     wrapped_command_return_codes = [
         payload.get("wrapped_return_code")
-        for payload in payloads
+        for payload in normalized_payloads
     ]
     worker_local_peaks: List[Dict[str, Any]] = []
-    for payload in payloads:
+    for payload in normalized_payloads:
         worker_local_index = payload.get("worker_local_index")
         worker_local_peaks.append(
             {
                 "worker_local_index": worker_local_index,
-                "peak_memory_mib": payload.get("session_board_peak_memory_used_mib"),
-                "peak_timestamp": payload.get("peak_observed_at_utc"),
-                "device_name": payload.get("peak_gpu_name"),
+                "peak_memory_mib": payload.get("peak_memory_mib"),
+                "peak_timestamp": payload.get("peak_timestamp"),
+                "device_name": payload.get("device_name"),
                 "summary_path": payload.get("summary_path"),
             }
         )
@@ -1417,10 +1496,10 @@ def _aggregate_gpu_session_peaks(
         "attack_shard_index": attack_shard_index,
         "attack_local_worker_count": attack_local_worker_count,
         "monitor_source": "nvidia-smi",
-        "device_name": peak_payload.get("peak_gpu_name"),
-        "peak_memory_mib": peak_payload.get("session_board_peak_memory_used_mib"),
-        "peak_timestamp": peak_payload.get("peak_observed_at_utc"),
-        "wrapped_command_count": len(payloads),
+        "device_name": peak_payload.get("device_name"),
+        "peak_memory_mib": peak_payload.get("peak_memory_mib"),
+        "peak_timestamp": peak_payload.get("peak_timestamp"),
+        "wrapped_command_count": len(normalized_payloads),
         "wrapped_command_return_codes": wrapped_command_return_codes,
         "worker_local_peaks": worker_local_peaks,
         "visible_gpu_count": peak_payload.get("visible_gpu_count"),
