@@ -38,6 +38,15 @@ def main() -> int:
         help="Seed list JSON (for example: [0,1,2]) or comma-separated text (for example: 0,1,2).",
     )
     parser.add_argument("--source-shard-count", required=True, type=int, help="Source shard count.")
+    parser.add_argument(
+        "--attack-shard-count",
+        type=int,
+        default=None,
+        help=(
+            "Optional attack shard count frozen for PW03. "
+            "When omitted, the runtime falls back to --source-shard-count for backward compatibility."
+        ),
+    )
     args = parser.parse_args()
 
     summary = run_pw00_build_family_manifest(
@@ -46,6 +55,7 @@ def main() -> int:
         prompt_file=str(args.prompt_file),
         seed_list=args.seed_list,
         source_shard_count=int(args.source_shard_count),
+        attack_shard_count=(None if args.attack_shard_count is None else int(args.attack_shard_count)),
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
     return 0

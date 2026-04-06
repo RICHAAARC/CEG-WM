@@ -576,9 +576,9 @@ def test_pw02_merges_dual_role_shards_and_builds_score_runs(tmp_path: Path, monk
     assert content_negative_record["subspace_planner_impl_identity"]["impl_id"] == "subspace_planner"
     assert content_negative_record["subspace_plan"]["planner_input_digest"] == content_negative_record["plan_input_digest"]
     assert content_positive_record["final_decision"] == {"is_watermarked": True}
-    assert content_positive_record["formal_final_decision_source"] == "pw02_formal_threshold_overlay"
+    assert content_positive_record["formal_final_decision_source"] == "formal_threshold_overlay"
     assert content_positive_record["formal_final_decision"] == {
-        "decision_origin": "pw02_formal_threshold_overlay",
+        "decision_origin": "formal_threshold_overlay",
         "decision_operator": "score_greater_equal_threshold_value",
         "decision_status": "decided",
         "is_watermarked": True,
@@ -593,9 +593,9 @@ def test_pw02_merges_dual_role_shards_and_builds_score_runs(tmp_path: Path, monk
         "used_threshold_value": float.fromhex("0x0.0000000000001p-1022"),
     }
     assert content_negative_record["final_decision"] == {"is_watermarked": False}
-    assert content_negative_record["formal_final_decision_source"] == "pw02_formal_threshold_overlay"
+    assert content_negative_record["formal_final_decision_source"] == "formal_threshold_overlay"
     assert content_negative_record["formal_final_decision"] == {
-        "decision_origin": "pw02_formal_threshold_overlay",
+        "decision_origin": "formal_threshold_overlay",
         "decision_operator": "score_greater_equal_threshold_value",
         "decision_status": "decided",
         "is_watermarked": False,

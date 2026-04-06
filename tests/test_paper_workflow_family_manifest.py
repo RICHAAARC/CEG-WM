@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
 from paper_workflow.scripts.pw_common import read_jsonl
+from scripts.notebook_runtime_common import REPO_ROOT, build_repo_import_subprocess_env
 
 
 def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
@@ -138,3 +141,58 @@ def test_pw00_can_freeze_independent_attack_shard_count(tmp_path: Path) -> None:
     assert source_shard_plan["source_shard_count"] == 3
     assert summary["source_shard_count"] == 3
     assert summary["attack_shard_count"] == 5
+
+
+def test_pw00_cli_wrapper_passes_explicit_attack_shard_count(tmp_path: Path) -> None:
+    """
+    Verify the PW00 CLI wrapper exposes and forwards attack_shard_count.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    drive_project_root = tmp_path / "drive_root"
+    prompt_file = tmp_path / "paper_prompts.txt"
+    prompt_file.write_text("prompt alpha\nprompt beta\n", encoding="utf-8")
+
+    script_path = REPO_ROOT / "paper_workflow" / "scripts" / "PW00_Paper_Eval_Family_Manifest.py"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script_path),
+            "--drive-project-root",
+            str(drive_project_root),
+            "--family-id",
+            "family_stage01_cli_attack_decoupled",
+            "--prompt-file",
+            str(prompt_file),
+            "--seed-list",
+            "[0, 7]",
+            "--source-shard-count",
+            "3",
+            "--attack-shard-count",
+            "5",
+        ],
+        cwd=REPO_ROOT,
+        env=build_repo_import_subprocess_env(repo_root=REPO_ROOT),
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert result.returncode == 0, result.stderr
+
+    summary = json.loads(result.stdout)
+    family_manifest = json.loads(Path(str(summary["paper_eval_family_manifest_path"])).read_text(encoding="utf-8"))
+    attack_shard_plan = json.loads(Path(str(summary["attack_shard_plan_path"])).read_text(encoding="utf-8"))
+
+    assert summary["source_shard_count"] == 3
+    assert summary["attack_shard_count"] == 5
+    assert family_manifest["source_parameters"]["source_shard_count"] == 3
+    assert family_manifest["attack_parameters"]["attack_shard_count"] == 5
+    assert family_manifest["attack_plan"]["attack_shard_count"] == 5
+    assert attack_shard_plan["attack_shard_count"] == 5

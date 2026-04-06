@@ -242,7 +242,7 @@ def test_formal_final_decision_overlay_uses_np_threshold_and_strict_clean_null()
     )
 
     assert negative_overlay == {
-        "decision_origin": "pw02_formal_threshold_overlay",
+        "decision_origin": "formal_threshold_overlay",
         "decision_operator": "score_greater_equal_threshold_value",
         "decision_status": "decided",
         "is_watermarked": False,
@@ -290,7 +290,7 @@ def test_formal_final_decision_metrics_prefer_overlay_and_keep_derived_metrics_o
             "threshold_source": "np_canonical",
             "score_name": eval_metrics.CONTENT_CHAIN_SCORE_NAME,
             "score_value": 0.81,
-            "decision_origin": "pw02_formal_threshold_overlay",
+            "decision_origin": "formal_threshold_overlay",
         },
         "attestation": {
             "final_event_attested_decision": {"is_event_attested": True},
@@ -310,7 +310,7 @@ def test_formal_final_decision_metrics_prefer_overlay_and_keep_derived_metrics_o
             "threshold_source": "np_canonical",
             "score_name": eval_metrics.CONTENT_CHAIN_SCORE_NAME,
             "score_value": 0.0,
-            "decision_origin": "pw02_formal_threshold_overlay",
+            "decision_origin": "formal_threshold_overlay",
         },
         "attestation": {
             "final_event_attested_decision": {"is_event_attested": False},

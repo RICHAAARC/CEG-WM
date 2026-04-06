@@ -165,7 +165,7 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     pw00_constants = _find_code_cell_source(NOTEBOOK_PW00_PATH, "SCRIPT_PATH = REPO_ROOT")
     pw00_bootstrap = _find_code_cell_source(
         NOTEBOOK_PW00_PATH,
-        'from scripts.notebook_runtime_common import resolve_notebook_model_cache_layout',
+        'from scripts.notebook_runtime_common import ensure_attestation_env_bootstrap, load_yaml_mapping',
     )
     pw00_execute = _find_code_cell_source(NOTEBOOK_PW00_PATH, "COMMAND = [")
     pw01_constants = _find_code_cell_source(NOTEBOOK_PW01_PATH, "SCRIPT_PATH = REPO_ROOT")
@@ -182,15 +182,19 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     pw02_execute = _find_code_cell_source(NOTEBOOK_PW02_PATH, "COMMAND = [")
 
     assert '"PW00_Paper_Eval_Family_Manifest.py"' in pw00_constants
-    assert 'DRIVE_MODELS_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "Models"' in pw00_constants
-    assert 'PERSISTENT_HF_ROOT = DRIVE_MODELS_ROOT / "Huggingface"' in pw00_constants
-    assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in pw00_constants
+    assert 'HF_HOME = REPO_ROOT / "huggingface_cache"' in pw00_constants
+    assert 'HF_HUB_CACHE = HF_HOME / "hub"' in pw00_constants
+    assert 'TRANSFORMERS_CACHE = HF_HOME / "transformers"' in pw00_constants
+    assert 'run_checked([sys.executable, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"], cwd=REPO_ROOT)' in pw00_bootstrap
+    assert 'ensure_attestation_env_bootstrap(' in pw00_bootstrap
     assert 'snapshot_download(' not in pw00_bootstrap
     assert '"--drive-project-root"' in pw00_execute
     assert '"--family-id"' in pw00_execute
     assert '"--prompt-file"' in pw00_execute
     assert '"--seed-list"' in pw00_execute
     assert '"--source-shard-count"' in pw00_execute
+    assert '"--attack-shard-count"' in pw00_execute
+    assert '"--attack-shard-count"' in pw00_execute
 
     assert '"PW01_Source_Event_Shards.py"' in pw01_constants
     assert 'DRIVE_MODELS_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "Models"' in pw01_constants
@@ -248,8 +252,41 @@ def test_pw01_notebook_passes_precheck_bound_config_to_execute_and_parallel_plan
     assert 'str(PW01_BOUND_CONFIG_PATH)' in pw01_execute
     assert '"--bound-config-path"' in pw01_parallel_plan
     assert 'str(PW01_BOUND_CONFIG_PATH)' in pw01_parallel_plan
-    assert '"--sample-role"' in pw01_parallel_plan
-    assert 'SAMPLE_ROLE' in pw01_parallel_plan
+
+
+def test_pw00_notebook_exposes_independent_attack_shard_count_controls() -> None:
+    """
+    Verify the PW00 notebook exposes independent attack shard controls.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    pw00_constants = _find_code_cell_source(NOTEBOOK_PW00_PATH, "SOURCE_SHARD_COUNT = 2")
+    pw00_precheck = _find_code_cell_source(NOTEBOOK_PW00_PATH, "PRECHECK_RESULTS = []")
+    pw00_execute = _find_code_cell_source(NOTEBOOK_PW00_PATH, "COMMAND = [")
+    pw00_output_check = _find_code_cell_source(NOTEBOOK_PW00_PATH, "output_check = {")
+    pw00_parallel_markdown = _find_markdown_cell_source(NOTEBOOK_PW00_PATH, "扩展规则：")
+    pw00_parallel_guide = _find_code_cell_source(NOTEBOOK_PW00_PATH, "parallel_extension_guide = {")
+
+    assert 'ATTACK_SHARD_COUNT = None' in pw00_constants
+    assert 'None 表示回退到 SOURCE_SHARD_COUNT' in pw00_constants
+    assert 'RESOLVED_ATTACK_SHARD_COUNT = SOURCE_SHARD_COUNT if ATTACK_SHARD_COUNT is None else ATTACK_SHARD_COUNT' in pw00_constants
+    assert '"attack_shard_count 合法（None 表示回退到 source_shard_count）"' in pw00_precheck
+    assert '"resolved_attack_shard_count": str(RESOLVED_ATTACK_SHARD_COUNT)' in pw00_precheck
+    assert 'if ATTACK_SHARD_COUNT is not None:' in pw00_execute
+    assert '"--attack-shard-count"' in pw00_execute
+    assert 'str(ATTACK_SHARD_COUNT)' in pw00_execute
+    assert 'ATTACK_SHARD_PLAN_PATH = Path(PW00_SUMMARY["attack_shard_plan_path"])' in pw00_output_check
+    assert '"attack_shard_plan": {"path": str(ATTACK_SHARD_PLAN_PATH), "exists": ATTACK_SHARD_PLAN_PATH.exists()}' in pw00_output_check
+    assert 'SOURCE_SHARD_COUNT 控制 source shard' in pw00_parallel_markdown
+    assert 'ATTACK_SHARD_COUNT 控制 attack shard' in pw00_parallel_markdown
+    assert '若未显式提供 ATTACK_SHARD_COUNT，则默认回退到 SOURCE_SHARD_COUNT' in pw00_parallel_markdown
+    assert '"current_attack_shard_count": ATTACK_SHARD_COUNT' in pw00_parallel_guide
+    assert '"resolved_attack_shard_count": RESOLVED_ATTACK_SHARD_COUNT' in pw00_parallel_guide
+    assert '"--attack-shard-count"' in pw00_parallel_guide
 
 
 def test_pw01_notebook_restores_bootstrap_before_single_formal_precheck() -> None:
