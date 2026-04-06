@@ -98,6 +98,7 @@ def run_pw00_build_family_manifest(
     prompt_file: str,
     seed_list: Sequence[int] | str,
     source_shard_count: int,
+    attack_shard_count: int | None = None,
 ) -> Dict[str, Any]:
     """
     Build PW00 family manifest outputs.
@@ -108,6 +109,7 @@ def run_pw00_build_family_manifest(
         prompt_file: Prompt file path.
         seed_list: Seed list or seed-list text.
         source_shard_count: Source shard count.
+        attack_shard_count: Optional attack shard count frozen for PW03.
 
     Returns:
         PW00 summary payload.
@@ -118,8 +120,15 @@ def run_pw00_build_family_manifest(
         raise TypeError("prompt_file must be non-empty str")
     if source_shard_count <= 0:
         raise TypeError("source_shard_count must be positive int")
+    if attack_shard_count is not None and (
+        not isinstance(attack_shard_count, int)
+        or isinstance(attack_shard_count, bool)
+        or attack_shard_count <= 0
+    ):
+        raise TypeError("attack_shard_count must be positive int when provided")
 
     normalized_drive_root = drive_project_root.expanduser().resolve()
+    resolved_attack_shard_count = source_shard_count if attack_shard_count is None else int(attack_shard_count)
     family_root = build_family_root(normalized_drive_root, family_id)
     layout = ensure_family_layout(family_root)
     _ = resolve_family_layout_paths(family_root)
@@ -181,7 +190,7 @@ def run_pw00_build_family_manifest(
     )
     attack_shard_plan = build_attack_shard_plan(
         family_id=family_id,
-        attack_shard_count=source_shard_count,
+        attack_shard_count=resolved_attack_shard_count,
         events=attack_event_grid,
     )
     attack_event_grid_path = layout["manifests_root"] / "attack_event_grid.jsonl"
@@ -238,6 +247,12 @@ def run_pw00_build_family_manifest(
             "source_shard_count": source_shard_count,
             "calibration_fraction": calibration_fraction,
         },
+        "attack_parameters": {
+            "attack_shard_count": resolved_attack_shard_count,
+            "materialization_profile": "first_value_per_condition",
+            "attack_condition_count": attack_condition_count,
+            "attack_event_count": attack_event_count,
+        },
         "counts": {
             "positive_source_event_count": positive_source_event_count,
             "clean_negative_event_count": clean_negative_event_count,
@@ -264,7 +279,7 @@ def run_pw00_build_family_manifest(
         "source_split": source_split_plan,
         "attack_plan": {
             "materialization_profile": "first_value_per_condition",
-            "attack_shard_count": source_shard_count,
+            "attack_shard_count": resolved_attack_shard_count,
             "attack_condition_count": attack_condition_count,
             "attack_event_count": attack_event_count,
         },
@@ -299,6 +314,7 @@ def run_pw00_build_family_manifest(
         "attack_condition_count": attack_condition_count,
         "attack_event_count": attack_event_count,
         "source_shard_count": source_shard_count,
+        "attack_shard_count": resolved_attack_shard_count,
     }
     write_json_atomic(summary_path, summary)
     return summary

@@ -47,7 +47,8 @@ STAGE_NAME = "PW03_Attack_Event_Shards"
 GPU_PEAK_SCRIPT_PATH = REPO_ROOT / "scripts" / "gpu_session_peak.py"
 DEFAULT_SAMPLE_INTERVAL_MS = 200
 DEFAULT_ATTACK_LOCAL_WORKER_COUNT = 1
-ALLOWED_ATTACK_LOCAL_WORKER_COUNTS = {1, 2}
+ALLOWED_ATTACK_LOCAL_WORKER_COUNTS = {1, 2, 3, 4}
+ALLOWED_ATTACK_LOCAL_WORKER_COUNT_ERROR = "attack_local_worker_count must be one of 1, 2, 3, or 4"
 PW02_SUMMARY_FILE_NAME = "pw02_summary.json"
 PW03_RUNTIME_SUMMARY_FILE_NAME = "runtime_summary.json"
 PW03_SHARD_MANIFEST_FILE_NAME = "shard_manifest.json"
@@ -89,9 +90,9 @@ def _validate_attack_local_worker_count(attack_local_worker_count: int) -> None:
         None.
     """
     if not isinstance(attack_local_worker_count, int) or isinstance(attack_local_worker_count, bool):
-        raise ValueError("attack_local_worker_count must be 1 or 2")
+        raise ValueError(ALLOWED_ATTACK_LOCAL_WORKER_COUNT_ERROR)
     if attack_local_worker_count not in ALLOWED_ATTACK_LOCAL_WORKER_COUNTS:
-        raise ValueError("attack_local_worker_count must be 1 or 2")
+        raise ValueError(ALLOWED_ATTACK_LOCAL_WORKER_COUNT_ERROR)
 
 
 def _parse_attack_family_allowlist(attack_family_allowlist: Sequence[str] | str | None) -> List[str] | None:
@@ -2206,7 +2207,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--attack-local-worker-count",
         default=1,
         type=int,
-        help="Shard-local attack worker count. Only 1 or 2 is allowed.",
+        help="Shard-local attack worker count. Allowed values are 1, 2, 3, and 4.",
     )
     parser.add_argument(
         "--attack-family-allowlist",

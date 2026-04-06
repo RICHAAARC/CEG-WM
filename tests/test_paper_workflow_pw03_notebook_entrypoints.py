@@ -122,6 +122,10 @@ def test_pw03_notebook_binds_expected_script_and_parameters() -> None:
     assert 'ATTACK_SHARD_COUNT = 2' in constants_source
     assert 'ATTACK_LOCAL_WORKER_COUNT =' in constants_source
     assert 'ATTACK_FAMILY_ALLOWLIST = None' in constants_source
+    assert 'PW00 family 冻结的 attack_shard_count' in constants_source
+    assert '当前允许 1、2、3 或 4' in constants_source
+    assert '必须与 PW00 和 PW01 一致' not in constants_source
+    assert '当前只允许 1 或 2' not in constants_source
 
     assert 'from huggingface_hub import HfApi' in bootstrap_source
     assert 'bootstrap_notebook_model_cache' in bootstrap_source
@@ -165,6 +169,8 @@ def test_pw03_notebook_reads_pw02_finalize_inputs_and_shard_outputs() -> None:
     assert 'persistent Huggingface 路径仅兼容保留' in precheck_source
     assert '模型 snapshot 来源为本地会话缓存' in precheck_source
     assert 'str(Path(str(MODEL_SNAPSHOT_PATH)).resolve()).startswith(str(LOCAL_HF_HOME.resolve()))' in precheck_source
+    assert 'ATTACK_LOCAL_WORKER_COUNT in {1, 2, 3, 4}' in precheck_source
+    assert 'family 冻结 attack_shard_count 与 ATTACK_SHARD_COUNT 一致' in precheck_source
     assert 'CURRENT_SHARD_EVENT_IDS = []' in precheck_source
     assert 'CURRENT_SHARD_PLAN = next(row for row in ATTACK_SHARD_PLAN["shards"] if row["attack_shard_index"] == ATTACK_SHARD_INDEX)' in precheck_source
     assert 'MODEL_DOWNLOAD_SUMMARY["binding_status"] = PRECHECK_MODEL_SOURCE_BINDING.get("binding_status", "<absent>")' in precheck_source
@@ -204,7 +210,8 @@ def test_pw03_notebook_parallel_plan_explains_isolation_and_worker_layout() -> N
     assert "只消费 PW02 finalized positive source pool" in intro_markdown
     assert "不重新生成 clean 正样本" in intro_markdown
     assert "每个 shard 只写入 attack_shards/shard_xxxx" in parallel_markdown
-    assert "双 worker 的独立日志与结果只写入当前 shard 的 workers/worker_XX" in parallel_markdown
+    assert "控制 1/2/3/4 路 local worker" in parallel_markdown
+    assert "每个 local worker 的独立日志与结果只写入当前 shard 的 workers/worker_XX" in parallel_markdown
 
     assert '"worker_mode": "single_process" if ATTACK_LOCAL_WORKER_COUNT == 1 else "shard_local_subprocess_parallel"' in parallel_source
     assert '"--bound-config-path"' in parallel_source

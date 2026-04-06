@@ -27,13 +27,18 @@ from scripts.notebook_runtime_common import (
 )
 
 
-def _build_pw00_family(tmp_path: Path, family_id: str) -> Dict[str, Any]:
+def _build_pw00_family(
+    tmp_path: Path,
+    family_id: str,
+    attack_shard_count: int | None = None,
+) -> Dict[str, Any]:
     """
     Build a minimal PW00 family fixture for PW03 tests.
 
     Args:
         tmp_path: Pytest temporary directory.
         family_id: Fixture family identifier.
+        attack_shard_count: Optional PW03 attack shard count.
 
     Returns:
         PW00 summary payload.
@@ -46,6 +51,7 @@ def _build_pw00_family(tmp_path: Path, family_id: str) -> Dict[str, Any]:
         prompt_file=str(prompt_file),
         seed_list=[3],
         source_shard_count=2,
+        attack_shard_count=attack_shard_count,
     )
 
 
@@ -651,6 +657,201 @@ def test_pw03_local_worker_assignments_do_not_conflict_outputs(
     assert len(attacked_image_paths) == len(set(attacked_image_paths))
     assert all(Path(path).exists() for path in event_manifest_paths)
     assert all(Path(path).exists() for path in attacked_image_paths)
+
+
+@pytest.mark.parametrize("attack_local_worker_count", [3, 4])
+def test_pw03_local_worker_assignments_support_three_and_four_workers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    attack_local_worker_count: int,
+) -> None:
+    """
+    Verify PW03 worker planning accepts three and four local workers.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+        attack_local_worker_count: Requested local worker count.
+
+    Returns:
+        None.
+    """
+    summary = _build_pw00_family(tmp_path, family_id=f"family_pw03_workers_{attack_local_worker_count}")
+    _build_positive_source_finalize_fixture(summary)
+    bound_config_path, _ = _write_bound_config_snapshot(
+        tmp_path / "drive",
+        marker=f"pw03_workers_{attack_local_worker_count}",
+    )
+    _patch_pw03_detect(monkeypatch)
+
+    pw03_module._validate_attack_local_worker_count(attack_local_worker_count)
+
+    family_root = Path(str(summary["family_root"]))
+    shard_root = ensure_directory(pw03_module._resolve_attack_shard_root(family_root, 0))
+    attack_event_specs = _load_attack_event_specs(summary, shard_index=0)
+    worker_plans = pw03_module._prepare_local_worker_plans(
+        drive_project_root=tmp_path / "drive",
+        family_id=f"family_pw03_workers_{attack_local_worker_count}",
+        attack_shard_index=0,
+        attack_shard_count=2,
+        attack_local_worker_count=attack_local_worker_count,
+        shard_root=shard_root,
+        bound_config_path=bound_config_path,
+        assigned_attack_events=attack_event_specs,
+    )
+
+    expected_event_ids = {str(event["event_id"]) for event in attack_event_specs}
+    assigned_event_ids = {
+        event_id
+        for worker_plan in worker_plans
+        for event_id in cast(List[str], worker_plan["assigned_attack_event_ids"])
+    }
+
+    assert len(worker_plans) == attack_local_worker_count
+    assert len({str(worker_plan["worker_root"]) for worker_plan in worker_plans}) == attack_local_worker_count
+    assert assigned_event_ids == expected_event_ids
+    assert sum(len(cast(List[str], worker_plan["assigned_attack_event_ids"])) for worker_plan in worker_plans) == len(expected_event_ids)
+    assert all(Path(str(worker_plan["worker_plan_path"])).exists() for worker_plan in worker_plans)
+    assert all(Path(str(worker_plan["stdout_log_path"])).parent.exists() for worker_plan in worker_plans)
+    assert all(Path(str(worker_plan["stderr_log_path"])).parent.exists() for worker_plan in worker_plans)
+
+
+@pytest.mark.parametrize("attack_local_worker_count", [3, 4])
+def test_pw03_parallel_worker_launch_supports_three_and_four_workers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    attack_local_worker_count: int,
+) -> None:
+    """
+    Verify PW03 parallel worker execution preserves isolation for three and four workers.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+        attack_local_worker_count: Requested local worker count.
+
+    Returns:
+        None.
+    """
+    summary = _build_pw00_family(tmp_path, family_id=f"family_pw03_parallel_{attack_local_worker_count}")
+    _build_positive_source_finalize_fixture(summary)
+    bound_config_path, _ = _write_bound_config_snapshot(
+        tmp_path / "drive",
+        marker=f"pw03_parallel_{attack_local_worker_count}",
+    )
+    _patch_pw03_detect(monkeypatch)
+    _patch_pw03_worker_popen(monkeypatch)
+
+    original_prepare_local_worker_plans = pw03_module._prepare_local_worker_plans
+
+    def _prepare_local_worker_plans_without_logs(**kwargs: Any) -> List[Dict[str, Any]]:
+        worker_plans = original_prepare_local_worker_plans(**kwargs)
+        for worker_plan in worker_plans:
+            logs_root = Path(str(worker_plan["stdout_log_path"])).parent
+            if logs_root.exists():
+                shutil.rmtree(logs_root)
+            assert not logs_root.exists()
+        return worker_plans
+
+    monkeypatch.setattr(pw03_module, "_prepare_local_worker_plans", _prepare_local_worker_plans_without_logs)
+
+    pw03_summary = pw03_module.run_pw03_attack_event_shard(
+        drive_project_root=tmp_path / "drive",
+        family_id=f"family_pw03_parallel_{attack_local_worker_count}",
+        attack_shard_index=0,
+        attack_shard_count=2,
+        attack_local_worker_count=attack_local_worker_count,
+        bound_config_path=bound_config_path,
+    )
+
+    worker_outcomes = cast(List[Dict[str, Any]], pw03_summary["worker_outcomes"])
+    shard_gpu_summary = json.loads(Path(str(pw03_summary["gpu_session_peak_path"])).read_text(encoding="utf-8"))
+
+    assert pw03_summary["status"] == "completed"
+    assert pw03_summary["worker_execution_mode"] == "shard_local_subprocess_parallel"
+    assert len(worker_outcomes) == attack_local_worker_count
+    assert all(int(worker_outcome["return_code"]) == 0 for worker_outcome in worker_outcomes)
+    assert all(bool(worker_outcome["result_exists"]) for worker_outcome in worker_outcomes)
+    assert all(Path(str(worker_outcome["stdout_log_path"])).exists() for worker_outcome in worker_outcomes)
+    assert all(Path(str(worker_outcome["stderr_log_path"])).exists() for worker_outcome in worker_outcomes)
+    assert all(Path(str(worker_outcome["worker_gpu_session_peak_path"])).exists() for worker_outcome in worker_outcomes)
+    assert len(cast(List[Dict[str, Any]], shard_gpu_summary["worker_local_peaks"])) == attack_local_worker_count
+    assert shard_gpu_summary["wrapped_command_count"] == attack_local_worker_count
+    assert len(cast(List[str], pw03_summary["event_ids"])) == len(set(cast(List[str], pw03_summary["event_ids"])))
+
+
+def test_pw03_accepts_decoupled_attack_shard_count_when_plan_matches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify PW03 accepts a decoupled attack shard count when it matches the frozen plan.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    summary = _build_pw00_family(
+        tmp_path,
+        family_id="family_pw03_attack_decoupled",
+        attack_shard_count=3,
+    )
+    _build_positive_source_finalize_fixture(summary)
+    bound_config_path, _ = _write_bound_config_snapshot(tmp_path / "drive", marker="pw03_attack_decoupled")
+    _patch_pw03_detect(monkeypatch)
+
+    attack_shard_plan = json.loads(Path(str(summary["attack_shard_plan_path"])).read_text(encoding="utf-8"))
+    pw03_summary = pw03_module.run_pw03_attack_event_shard(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_pw03_attack_decoupled",
+        attack_shard_index=0,
+        attack_shard_count=3,
+        attack_local_worker_count=1,
+        attack_family_allowlist=["jpeg"],
+        bound_config_path=bound_config_path,
+    )
+
+    assert attack_shard_plan["attack_shard_count"] == 3
+    assert pw03_summary["status"] == "completed"
+    assert pw03_summary["attack_shard_count"] == 3
+    assert {str(event["attack_family"]) for event in cast(List[Dict[str, Any]], pw03_summary["events"])} == {"jpeg"}
+
+
+def test_pw03_rejects_attack_shard_count_mismatch_with_frozen_plan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify PW03 keeps the frozen attack_shard_count consistency check.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    summary = _build_pw00_family(
+        tmp_path,
+        family_id="family_pw03_attack_mismatch",
+        attack_shard_count=3,
+    )
+    _build_positive_source_finalize_fixture(summary)
+    bound_config_path, _ = _write_bound_config_snapshot(tmp_path / "drive", marker="pw03_attack_mismatch")
+    _patch_pw03_detect(monkeypatch)
+
+    with pytest.raises(ValueError, match="attack_shard_count mismatch with attack shard plan"):
+        pw03_module.run_pw03_attack_event_shard(
+            drive_project_root=tmp_path / "drive",
+            family_id="family_pw03_attack_mismatch",
+            attack_shard_index=0,
+            attack_shard_count=2,
+            attack_local_worker_count=1,
+            bound_config_path=bound_config_path,
+        )
 
 
 def test_pw03_parallel_worker_launch_recreates_missing_logs_and_keeps_summary_semantics(
