@@ -218,8 +218,8 @@ def run_pw00_build_family_manifest(
         "family_root_relative": "paper_workflow/families",
         "source_truth_stage": SOURCE_TRUTH_STAGE,
         "stage_boundary": {
-            "implemented": ["PW00", "PW01", "PW02", "PW03", "PW04"],
-            "excluded": ["PW05"],
+            "implemented": ["PW00", "PW01", "PW02", "PW03", "PW04", "PW05"],
+            "excluded": [],
         },
         "sample_roles": {
             "active": list(ACTIVE_SOURCE_SAMPLE_ROLES),

@@ -1,4 +1,4 @@
-# paper_workflow Stage 01-04
+# paper_workflow Stage 01-05
 
 ## Scope
 
@@ -7,17 +7,14 @@ It reuses the existing method implementation under main and only closes the
 paper_workflow stage boundaries around frozen manifests, shard execution,
 merge/materialize, and export publication.
 
-Implemented in stage 01-04:
+Implemented in stage 01-05:
 
 - PW00 family manifest build, source split freeze, attack event grid, and shard plans.
 - PW01 isolated source shard execution for positive_source, clean_negative, and optional diagnostic control-negative roles.
 - PW02 source merge, global thresholds, finalize manifest, and clean-side formal / derived exports.
 - PW03 attacked_positive shard execution, attacked-image materialization, and staged detect records.
 - PW04 attack shard merge, formal overlay materialization from PW02 thresholds, legacy attack metrics exports, canonical paper-facing exports, and clean / attack overview tables.
-
-Explicitly not implemented in the current paper_workflow stage boundary:
-
-- PW05.
+- PW05 release packaging, signoff emission, and frozen paper-family bundle export.
 
 ## Layout
 
@@ -35,6 +32,7 @@ paper_workflow/families/<family_id>/
 - exports/
 - exports/pw02/
 - exports/pw04/
+- exports/pw05/
 
 PW04 top-level exports live under:
 
@@ -70,6 +68,15 @@ Append-only paper-facing exports also live under:
 - exports/pw04/tail/tail_fit_diagnostics.json
 - exports/pw04/tail/tail_fit_stability_summary.json
 
+PW05 top-level release outputs live under:
+
+- exports/pw05/signoff_report.json
+- exports/pw05/release_manifest.json
+- exports/pw05/workflow_summary.json
+- exports/pw05/run_closure.json
+- exports/pw05/stage_manifest.json
+- exports/pw05/package_manifest.json
+
 The legacy PW04 exports remain authoritative compatibility outputs. The new paper-facing tables and figures only use the canonical scope names content_chain, event_attestation, and system_final.
 
 ## Entrypoints
@@ -79,5 +86,6 @@ The legacy PW04 exports remain authoritative compatibility outputs. The new pape
 - paper_workflow/scripts/PW02_Source_Merge_And_Global_Thresholds.py
 - paper_workflow/scripts/pw03_run_attack_event_shard.py
 - paper_workflow/scripts/pw04_merge_attack_event_shards.py
+- paper_workflow/scripts/pw05_release_signoff.py
 
 The notebooks in paper_workflow/notebook remain thin wrappers that call these scripts.
