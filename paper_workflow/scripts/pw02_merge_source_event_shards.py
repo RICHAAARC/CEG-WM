@@ -43,6 +43,7 @@ from paper_workflow.scripts.pw_quality_metrics import (
     resolve_optional_artifact_path,
     resolve_preview_persisted_artifact_path,
 )
+from paper_workflow.scripts.pw02_metrics_extensions import build_pw02_metrics_extensions
 
 
 CONTENT_SCORE_NAME = eval_metrics.CONTENT_CHAIN_SCORE_NAME
@@ -1812,6 +1813,14 @@ def run_pw02_merge_source_event_shards(
         content_score_run=score_runs[CONTENT_SCORE_NAME],
         system_final_metrics=derived_system_union_metrics,
     )
+    pw02_metrics_extensions = build_pw02_metrics_extensions(
+        family_id=family_id,
+        stage_root=stage_root,
+        clean_score_analysis_exports={
+            score_key: str(export_summary["path"])
+            for score_key, export_summary in clean_score_analysis_exports.items()
+        },
+    )
 
     summary_path = layout["runtime_state_root"] / "pw02_summary.json"
     finalize_manifest_path = stage_root / FINALIZE_MANIFEST_FILE_NAME
@@ -1868,6 +1877,16 @@ def run_pw02_merge_source_event_shards(
             score_key: export_summary["path"]
             for score_key, export_summary in clean_score_analysis_exports.items()
         },
+        "operating_metrics_dir": pw02_metrics_extensions["operating_metrics_dir"],
+        "quality_metrics_dir": pw02_metrics_extensions["quality_metrics_dir"],
+        "payload_metrics_dir": pw02_metrics_extensions["payload_metrics_dir"],
+        "roc_curve_paths": pw02_metrics_extensions["roc_curve_paths"],
+        "auc_summary_path": pw02_metrics_extensions["auc_summary_path"],
+        "eer_summary_path": pw02_metrics_extensions["eer_summary_path"],
+        "tpr_at_target_fpr_summary_path": pw02_metrics_extensions["tpr_at_target_fpr_summary_path"],
+        "quality_metrics_summary_csv_path": pw02_metrics_extensions["quality_metrics_summary_csv_path"],
+        "quality_metrics_summary_json_path": pw02_metrics_extensions["quality_metrics_summary_json_path"],
+        "payload_clean_summary_path": pw02_metrics_extensions["payload_clean_summary_path"],
         "formal_final_decision_metrics": formal_final_decision_metrics,
         "formal_final_decision_metrics_artifact_path": str(formal_final_decision_export["path"]),
         "derived_system_union_metrics": derived_system_union_metrics,

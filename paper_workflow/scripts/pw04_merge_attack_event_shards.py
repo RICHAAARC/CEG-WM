@@ -26,6 +26,7 @@ from paper_workflow.scripts.pw_common import (
     read_jsonl,
     write_jsonl,
 )
+from paper_workflow.scripts.pw04_metrics_extensions import build_pw04_metrics_extensions
 from paper_workflow.scripts.pw_quality_metrics import build_quality_metrics_from_pairs
 from paper_workflow.scripts.pw04_paper_exports import build_pw04_paper_exports
 from scripts.notebook_runtime_common import (
@@ -1767,6 +1768,24 @@ def run_pw04_merge_attack_event_shards(
         attack_quality_metrics_payload=cast(Mapping[str, Any], attack_quality_metrics_export["payload"]),
         enable_tail_estimation=enable_tail_estimation,
     )
+    pw04_metrics_extensions = build_pw04_metrics_extensions(
+        family_id=family_id,
+        family_root=family_root,
+        export_root=cast(Path, pw04_paths["export_root"]),
+        pw02_summary=pw02_summary,
+        attack_event_rows=materialized_attack_event_rows,
+        main_metrics_summary_csv_path=Path(
+            str(cast(Mapping[str, Any], paper_exports_payload["paper_tables_paths"])["main_metrics_summary_csv_path"])
+        ).expanduser().resolve(),
+        attack_family_summary_paper_csv_path=Path(
+            str(cast(Mapping[str, Any], paper_exports_payload["paper_tables_paths"])["attack_family_summary_paper_csv_path"])
+        ).expanduser().resolve(),
+        attack_condition_summary_paper_csv_path=Path(
+            str(cast(Mapping[str, Any], paper_exports_payload["paper_tables_paths"])["attack_condition_summary_paper_csv_path"])
+        ).expanduser().resolve(),
+        paper_metric_registry_path=Path(str(paper_exports_payload["paper_scope_registry_path"])).expanduser().resolve(),
+    )
+    paper_exports_payload.update(pw04_metrics_extensions)
 
     summary_payload = _build_pw04_summary_payload(
         family_id=family_id,

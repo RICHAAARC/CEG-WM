@@ -229,6 +229,11 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
 
     formal_clean_metrics_path = pw02_root / "formal_final_decision_metrics.json"
     derived_clean_metrics_path = pw02_root / "derived_system_union_metrics.json"
+    quality_root = ensure_directory(pw02_root / "quality")
+    quality_metrics_summary_csv_path = quality_root / "quality_metrics_summary.csv"
+    quality_metrics_summary_json_path = quality_root / "quality_metrics_summary.json"
+    payload_root = ensure_directory(pw02_root / "payload")
+    payload_clean_summary_path = payload_root / "payload_clean_summary.json"
     clean_evaluate_root = ensure_directory(pw02_root / "evaluate" / "clean")
     content_clean_evaluate_export_path = clean_evaluate_root / "content" / "evaluate_record.json"
     attestation_clean_evaluate_export_path = clean_evaluate_root / "attestation" / "evaluate_record.json"
@@ -343,6 +348,99 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
             },
         },
     )
+    quality_rows = [
+        {
+            "scope": "content_chain",
+            "status": "ok",
+            "reason": None,
+            "pair_count": 8,
+            "expected_pair_count": 8,
+            "missing_count": 0,
+            "error_count": 0,
+            "mean_psnr": 35.0,
+            "mean_ssim": 0.99,
+            "lpips_status": "not_available",
+            "lpips_reason": "requires additional model dependency or upstream implementation",
+            "clip_status": "not_available",
+            "clip_reason": "requires additional model dependency or upstream implementation",
+            "source_analysis_path": normalize_path_value(content_clean_evaluate_export_path),
+        },
+        {
+            "scope": "event_attestation",
+            "status": "not_applicable",
+            "reason": "quality metrics are only computed for content_chain_score",
+            "pair_count": None,
+            "expected_pair_count": None,
+            "missing_count": None,
+            "error_count": None,
+            "mean_psnr": None,
+            "mean_ssim": None,
+            "lpips_status": "not_available",
+            "lpips_reason": "requires additional model dependency or upstream implementation",
+            "clip_status": "not_available",
+            "clip_reason": "requires additional model dependency or upstream implementation",
+            "source_analysis_path": normalize_path_value(attestation_clean_evaluate_export_path),
+        },
+        {
+            "scope": "system_final",
+            "status": "not_available",
+            "reason": "quality payload is only defined for clean content-chain image pairs in current workflow",
+            "pair_count": None,
+            "expected_pair_count": None,
+            "missing_count": None,
+            "error_count": None,
+            "mean_psnr": None,
+            "mean_ssim": None,
+            "lpips_status": "not_available",
+            "lpips_reason": "requires additional model dependency or upstream implementation",
+            "clip_status": "not_available",
+            "clip_reason": "requires additional model dependency or upstream implementation",
+            "source_analysis_path": None,
+        },
+    ]
+    with quality_metrics_summary_csv_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "scope",
+                "status",
+                "reason",
+                "pair_count",
+                "expected_pair_count",
+                "missing_count",
+                "error_count",
+                "mean_psnr",
+                "mean_ssim",
+                "lpips_status",
+                "lpips_reason",
+                "clip_status",
+                "clip_reason",
+                "source_analysis_path",
+            ],
+        )
+        writer.writeheader()
+        for row in quality_rows:
+            writer.writerow(row)
+    write_json_atomic(
+        quality_metrics_summary_json_path,
+        {
+            "artifact_type": "paper_workflow_pw02_quality_metrics_summary",
+            "schema_version": "pw_stage_02_v1",
+            "family_id": family_id,
+            "rows": quality_rows,
+        },
+    )
+    write_json_atomic(
+        payload_clean_summary_path,
+        {
+            "artifact_type": "paper_workflow_pw02_payload_clean_summary",
+            "schema_version": "pw_stage_02_v1",
+            "family_id": family_id,
+            "status": "not_available",
+            "reason": "missing upstream decoded bits / reference bits / bit error sidecar",
+            "future_upstream_sidecar_required": True,
+        },
+    )
 
     finalize_manifest_path = pw02_root / "paper_source_finalize_manifest.json"
     write_json_atomic(
@@ -369,6 +467,11 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
             "paper_source_finalize_manifest_path": normalize_path_value(finalize_manifest_path),
             "formal_final_decision_metrics_artifact_path": normalize_path_value(formal_clean_metrics_path),
             "derived_system_union_metrics_artifact_path": normalize_path_value(derived_clean_metrics_path),
+            "quality_metrics_dir": normalize_path_value(quality_root),
+            "quality_metrics_summary_csv_path": normalize_path_value(quality_metrics_summary_csv_path),
+            "quality_metrics_summary_json_path": normalize_path_value(quality_metrics_summary_json_path),
+            "payload_metrics_dir": normalize_path_value(payload_root),
+            "payload_clean_summary_path": normalize_path_value(payload_clean_summary_path),
             "clean_evaluate_exports": {
                 "content": normalize_path_value(content_clean_evaluate_export_path),
                 "attestation": normalize_path_value(attestation_clean_evaluate_export_path),
@@ -386,6 +489,9 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
         "attestation_threshold_export_path": attestation_threshold_export_path,
         "formal_clean_metrics_path": formal_clean_metrics_path,
         "derived_clean_metrics_path": derived_clean_metrics_path,
+        "quality_metrics_summary_csv_path": quality_metrics_summary_csv_path,
+        "quality_metrics_summary_json_path": quality_metrics_summary_json_path,
+        "payload_clean_summary_path": payload_clean_summary_path,
         "content_clean_evaluate_export_path": content_clean_evaluate_export_path,
         "attestation_clean_evaluate_export_path": attestation_clean_evaluate_export_path,
     }
@@ -588,6 +694,14 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
     paper_figures_paths = cast(Dict[str, str], pw04_summary["paper_figures_paths"])
     tail_estimation_paths = cast(Dict[str, str], pw04_summary["tail_estimation_paths"])
     attack_quality_metrics_path = Path(str(pw04_summary["attack_quality_metrics_path"]))
+    robustness_curve_by_family_path = Path(str(pw04_summary["robustness_curve_by_family_path"]))
+    robustness_macro_summary_path = Path(str(pw04_summary["robustness_macro_summary_path"]))
+    worst_case_attack_summary_path = Path(str(pw04_summary["worst_case_attack_summary_path"]))
+    geo_chain_usage_by_family_path = Path(str(pw04_summary["geo_chain_usage_by_family_path"]))
+    geo_diagnostics_summary_path = Path(str(pw04_summary["geo_diagnostics_summary_path"]))
+    payload_attack_summary_path = Path(str(pw04_summary["payload_attack_summary_path"]))
+    quality_robustness_tradeoff_path = Path(str(pw04_summary["quality_robustness_tradeoff_path"]))
+    quality_robustness_frontier_path = Path(str(pw04_summary["quality_robustness_frontier_path"]))
 
     required_paths = [
         Path(str(pw04_summary["summary_path"])),
@@ -599,6 +713,14 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
         Path(str(pw04_summary["per_attack_family_metrics_path"])),
         Path(str(pw04_summary["per_attack_condition_metrics_path"])),
         attack_quality_metrics_path,
+        robustness_curve_by_family_path,
+        robustness_macro_summary_path,
+        worst_case_attack_summary_path,
+        geo_chain_usage_by_family_path,
+        geo_diagnostics_summary_path,
+        payload_attack_summary_path,
+        quality_robustness_tradeoff_path,
+        quality_robustness_frontier_path,
         Path(str(pw04_summary["attack_event_table_path"])),
         Path(str(pw04_summary["attack_family_summary_csv_path"])),
         Path(str(pw04_summary["attack_condition_summary_csv_path"])),
@@ -613,6 +735,10 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
     ]
     for path_obj in required_paths:
         assert path_obj.exists(), path_obj
+    assert Path(str(pw04_summary["robustness_dir"])).is_dir()
+    assert Path(str(pw04_summary["geometry_diagnostics_dir"])).is_dir()
+    assert Path(str(pw04_summary["payload_robustness_dir"])).is_dir()
+    assert Path(str(pw04_summary["tradeoff_dir"])).is_dir()
 
     merge_manifest = _load_json_dict(Path(str(pw04_summary["attack_merge_manifest_path"])))
     pool_manifest = _load_json_dict(Path(str(pw04_summary["attack_positive_pool_manifest_path"])))
@@ -635,6 +761,13 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
     tail_fpr_1e5 = _load_json_dict(Path(str(tail_estimation_paths["estimated_tail_fpr_1e5_path"])))
     tail_fit_diagnostics = _load_json_dict(Path(str(tail_estimation_paths["tail_fit_diagnostics_path"])))
     tail_fit_stability = _load_json_dict(Path(str(tail_estimation_paths["tail_fit_stability_summary_path"])))
+    robustness_curve_rows = _load_csv_rows(robustness_curve_by_family_path)
+    robustness_macro_rows = _load_csv_rows(robustness_macro_summary_path)
+    worst_case_rows = _load_csv_rows(worst_case_attack_summary_path)
+    geometry_family_rows = _load_csv_rows(geo_chain_usage_by_family_path)
+    geometry_summary_rows = _load_csv_rows(geo_diagnostics_summary_path)
+    payload_attack_summary = _load_json_dict(payload_attack_summary_path)
+    tradeoff_rows = _load_csv_rows(quality_robustness_tradeoff_path)
     attack_event_rows = read_jsonl(Path(str(pw04_summary["attack_event_table_path"])))
 
     expected_attack_event_count = int(pw03_fixture["expected_attack_event_count"])
@@ -671,6 +804,8 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
     assert paper_metric_registry["legacy_scope_mapping"]["event_attestation"]["clean"]["legacy_scope_name"] == "clean_attestation_evaluate_export"
     assert paper_metric_registry["legacy_scope_mapping"]["system_final"]["attack"]["legacy_scope_name"] == "derived_attack_union"
     assert paper_metric_registry["artifact_paths"]["supplemental_metrics"]["attack_quality_metrics_path"] == normalize_path_value(attack_quality_metrics_path)
+    assert paper_metric_registry["artifact_paths"]["supplemental_metrics"]["robustness_curve_by_family_path"] == normalize_path_value(robustness_curve_by_family_path)
+    assert paper_metric_registry["artifact_paths"]["supplemental_metrics"]["quality_robustness_tradeoff_path"] == normalize_path_value(quality_robustness_tradeoff_path)
 
     assert content_chain_metrics["scope"] == "content_chain"
     assert content_chain_metrics["clean_metrics"]["clean_positive_count"] == 4
@@ -723,6 +858,39 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
     assert tail_fpr_1e5["scope_estimates"]["event_attestation"]["status"] == "disabled"
     assert tail_fit_diagnostics["scope_diagnostics"]["system_final"]["status"] == "not_applicable"
     assert tail_fit_stability["scopes"]["system_final"]["reason"] == "system_final_is_decision_union_without_scalar_score"
+
+    attack_family_count = len({row["attack_family"] for row in cast(List[Dict[str, Any]], pw03_fixture["attack_event_grid"])})
+    assert len(robustness_curve_rows) == attack_family_count * 3
+    assert {row["scope"] for row in robustness_curve_rows} == {"content_chain", "event_attestation", "system_final"}
+    assert all(row["severity_level_status"] == "not_available" for row in robustness_curve_rows)
+    assert len(robustness_macro_rows) == 3
+    assert {row["scope"] for row in robustness_macro_rows} == {"content_chain", "event_attestation", "system_final"}
+    assert all(row["severity_level_status"] == "not_available" for row in robustness_macro_rows)
+    assert len(worst_case_rows) == 3
+    assert {row["scope"] for row in worst_case_rows} == {"content_chain", "event_attestation", "system_final"}
+
+    assert len(geometry_family_rows) == attack_family_count
+    assert all(row["sync_success_status"] == "not_available" for row in geometry_family_rows)
+    assert all(row["inverse_transform_success_status"] == "not_available" for row in geometry_family_rows)
+    assert all(row["attention_anchor_available_status"] == "not_available" for row in geometry_family_rows)
+    assert len(geometry_summary_rows) == 1
+    assert geometry_summary_rows[0]["event_count"] == str(expected_attack_event_count)
+    assert geometry_summary_rows[0]["future_upstream_sidecar_required"] == "True"
+
+    assert payload_attack_summary["status"] == "not_available"
+    assert "decoded bits" in str(payload_attack_summary["reason"])
+    assert payload_attack_summary["future_upstream_sidecar_required"] is True
+
+    assert len(tradeoff_rows) == 3
+    assert {row["scope"] for row in tradeoff_rows} == {"content_chain", "event_attestation", "system_final"}
+    assert all(row["clean_quality_scope"] == "content_chain" for row in tradeoff_rows)
+    assert all(row["clean_quality_status"] == "ok" for row in tradeoff_rows)
+    assert all(row["lpips_status"] == "not_available" for row in tradeoff_rows)
+    assert all(row["clip_status"] == "not_available" for row in tradeoff_rows)
+    assert all(Path(str(row["quality_metrics_summary_csv_path"])).exists() for row in tradeoff_rows)
+    assert all(Path(str(row["quality_metrics_summary_json_path"])).exists() for row in tradeoff_rows)
+    assert all(Path(str(row["robustness_macro_summary_path"])).exists() for row in tradeoff_rows)
+    assert quality_robustness_frontier_path.stat().st_size > 0
 
     attack_event_lookup = cast(Dict[str, Dict[str, Any]], pw03_fixture["attack_event_lookup"])
     for row in attack_event_rows:

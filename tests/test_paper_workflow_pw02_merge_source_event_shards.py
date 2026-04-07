@@ -5,6 +5,7 @@ Module type: General module
 
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Sequence, cast
@@ -817,6 +818,23 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     attestation_clean_score_analysis = json.loads(
         Path(str(cast(Dict[str, Any], pw02_summary["clean_score_analysis_exports"])["attestation"])).read_text(encoding="utf-8")
     )
+    content_roc_curve_export = json.loads(
+        Path(str(cast(Dict[str, Any], pw02_summary["roc_curve_paths"])["content_chain"])).read_text(encoding="utf-8")
+    )
+    attestation_roc_curve_export = json.loads(
+        Path(str(cast(Dict[str, Any], pw02_summary["roc_curve_paths"])["event_attestation"])).read_text(encoding="utf-8")
+    )
+    system_final_roc_curve_export = json.loads(
+        Path(str(cast(Dict[str, Any], pw02_summary["roc_curve_paths"])["system_final"])).read_text(encoding="utf-8")
+    )
+    auc_summary = json.loads(Path(str(pw02_summary["auc_summary_path"])).read_text(encoding="utf-8"))
+    eer_summary = json.loads(Path(str(pw02_summary["eer_summary_path"])).read_text(encoding="utf-8"))
+    with Path(str(pw02_summary["tpr_at_target_fpr_summary_path"])).open("r", encoding="utf-8", newline="") as handle:
+        tpr_rows = list(csv.DictReader(handle))
+    quality_metrics_summary = json.loads(Path(str(pw02_summary["quality_metrics_summary_json_path"])).read_text(encoding="utf-8"))
+    with Path(str(pw02_summary["quality_metrics_summary_csv_path"])).open("r", encoding="utf-8", newline="") as handle:
+        quality_rows = list(csv.DictReader(handle))
+    payload_clean_summary = json.loads(Path(str(pw02_summary["payload_clean_summary_path"])).read_text(encoding="utf-8"))
     formal_final_decision_metrics_export = json.loads(
         Path(str(pw02_summary["formal_final_decision_metrics_artifact_path"])).read_text(encoding="utf-8")
     )
@@ -903,6 +921,69 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert attestation_clean_score_analysis["score_name"] == pw02_module.EVENT_ATTESTATION_SCORE_NAME
     assert attestation_clean_score_analysis["roc_auc"]["auc"] == pytest.approx(1.0)
     assert attestation_clean_score_analysis["clean_positive_quality_metrics"]["status"] == "not_applicable"
+
+    assert set(cast(Dict[str, Any], pw02_summary["roc_curve_paths"]).keys()) == {
+        "content_chain",
+        "event_attestation",
+        "system_final",
+    }
+    assert Path(str(pw02_summary["operating_metrics_dir"])).is_dir()
+    assert Path(str(pw02_summary["quality_metrics_dir"])).is_dir()
+    assert Path(str(pw02_summary["payload_metrics_dir"])).is_dir()
+
+    assert content_roc_curve_export["scope"] == "content_chain"
+    assert content_roc_curve_export["status"] == "ok"
+    assert content_roc_curve_export["auc"] == pytest.approx(1.0)
+    assert content_roc_curve_export["source_analysis_path"] == cast(Dict[str, Any], pw02_summary["clean_score_analysis_exports"])["content"]
+    assert content_roc_curve_export["roc_curve_points"]
+
+    assert attestation_roc_curve_export["scope"] == "event_attestation"
+    assert attestation_roc_curve_export["status"] == "ok"
+    assert attestation_roc_curve_export["auc"] == pytest.approx(1.0)
+    assert attestation_roc_curve_export["source_analysis_path"] == cast(Dict[str, Any], pw02_summary["clean_score_analysis_exports"])["attestation"]
+
+    assert system_final_roc_curve_export["scope"] == "system_final"
+    assert system_final_roc_curve_export["status"] == "not_available"
+    assert "missing scalar score chain" in str(system_final_roc_curve_export["reason"])
+
+    auc_rows_by_scope = {row["scope"]: row for row in cast(List[Dict[str, Any]], auc_summary["rows"])}
+    assert set(auc_rows_by_scope.keys()) == {"content_chain", "event_attestation", "system_final"}
+    assert auc_rows_by_scope["content_chain"]["auc"] == pytest.approx(1.0)
+    assert auc_rows_by_scope["event_attestation"]["auc"] == pytest.approx(1.0)
+    assert auc_rows_by_scope["system_final"]["status"] == "not_available"
+
+    eer_rows_by_scope = {row["scope"]: row for row in cast(List[Dict[str, Any]], eer_summary["rows"])}
+    assert set(eer_rows_by_scope.keys()) == {"content_chain", "event_attestation", "system_final"}
+    assert eer_rows_by_scope["content_chain"]["status"] == "ok"
+    assert eer_rows_by_scope["content_chain"]["eer"] == pytest.approx(0.0)
+    assert eer_rows_by_scope["event_attestation"]["status"] == "ok"
+    assert eer_rows_by_scope["system_final"]["status"] == "not_available"
+
+    assert len(tpr_rows) == 12
+    content_tpr_rows = [row for row in tpr_rows if row["scope"] == "content_chain"]
+    system_tpr_rows = [row for row in tpr_rows if row["scope"] == "system_final"]
+    assert {row["target_fpr"] for row in content_tpr_rows} == {"0.01", "0.001", "0.0001", "1e-05"}
+    assert all(row["status"] == "ok" for row in content_tpr_rows)
+    assert all(float(row["tpr"]) == pytest.approx(1.0) for row in content_tpr_rows)
+    assert all(row["status"] == "not_available" for row in system_tpr_rows)
+
+    quality_rows_by_scope = {row["scope"]: row for row in cast(List[Dict[str, Any]], quality_metrics_summary["rows"])}
+    assert set(quality_rows_by_scope.keys()) == {"content_chain", "event_attestation", "system_final"}
+    assert len(quality_rows) == 3
+    assert quality_rows_by_scope["content_chain"]["status"] == "ok"
+    assert quality_rows_by_scope["content_chain"]["pair_count"] == 2
+    assert quality_rows_by_scope["content_chain"]["mean_psnr"] is not None
+    assert quality_rows_by_scope["content_chain"]["mean_ssim"] is not None
+    assert quality_rows_by_scope["content_chain"]["lpips_status"] == "not_available"
+    assert quality_rows_by_scope["content_chain"]["clip_status"] == "not_available"
+    assert quality_rows_by_scope["event_attestation"]["status"] == "not_applicable"
+    assert quality_rows_by_scope["event_attestation"]["lpips_status"] == "not_available"
+    assert quality_rows_by_scope["system_final"]["status"] == "not_available"
+    assert "quality payload is only defined" in str(quality_rows_by_scope["system_final"]["reason"])
+
+    assert payload_clean_summary["status"] == "not_available"
+    assert "decoded bits" in str(payload_clean_summary["reason"])
+    assert payload_clean_summary["future_upstream_sidecar_required"] is True
 
     assert formal_final_decision_metrics_export["source_kind"] == "formal_final_decision_metrics_from_content_evaluate_inputs"
     assert formal_final_decision_metrics_export["is_formal_evaluate_record"] is False
