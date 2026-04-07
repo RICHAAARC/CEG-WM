@@ -26,6 +26,7 @@ from paper_workflow.scripts.pw_common import (
     read_jsonl,
     write_jsonl,
 )
+from paper_workflow.scripts.pw04_paper_exports import build_pw04_paper_exports
 from scripts.notebook_runtime_common import (
     compute_file_sha256,
     ensure_directory,
@@ -54,6 +55,9 @@ ATTACK_EVENT_TABLE_FILE_NAME = "attack_event_table.jsonl"
 ATTACK_FAMILY_SUMMARY_CSV_FILE_NAME = "attack_family_summary.csv"
 ATTACK_CONDITION_SUMMARY_CSV_FILE_NAME = "attack_condition_summary.csv"
 CLEAN_ATTACK_OVERVIEW_FILE_NAME = "clean_attack_overview.json"
+PW04_METRICS_DIRECTORY_NAME = "metrics"
+PW04_FIGURES_DIRECTORY_NAME = "figures"
+PW04_TAIL_DIRECTORY_NAME = "tail"
 
 
 def _load_required_json_dict(path_obj: Path, label: str) -> Dict[str, Any]:
@@ -133,12 +137,18 @@ def _resolve_pw04_paths(family_root: Path) -> Dict[str, Path]:
     manifests_root = export_root / "manifests"
     records_root = export_root / "records" / FORMAL_RECORDS_DIRECTORY_NAME
     tables_root = export_root / "tables"
+    metrics_root = export_root / PW04_METRICS_DIRECTORY_NAME
+    figures_root = export_root / PW04_FIGURES_DIRECTORY_NAME
+    tail_root = export_root / PW04_TAIL_DIRECTORY_NAME
     summary_path = family_root / "runtime_state" / PW04_SUMMARY_FILE_NAME
     paths = {
         "export_root": export_root,
         "manifests_root": manifests_root,
         "records_root": records_root,
         "tables_root": tables_root,
+        "metrics_root": metrics_root,
+        "figures_root": figures_root,
+        "tail_root": tail_root,
         "summary_path": summary_path,
         "attack_merge_manifest_path": manifests_root / ATTACK_MERGE_MANIFEST_FILE_NAME,
         "attack_pool_manifest_path": export_root / ATTACK_POOL_MANIFEST_FILE_NAME,
@@ -1118,6 +1128,8 @@ def _write_attack_event_table_jsonl(
             Mapping[str, Any],
             formal_record.get("formal_event_attestation_decision", {}),
         )
+        attestation_payload = cast(Mapping[str, Any], formal_record.get("attestation", {}))
+        image_evidence_payload = cast(Mapping[str, Any], attestation_payload.get("image_evidence_result", {}))
         rows.append(
             {
                 "attack_event_id": attack_event_row["attack_event_id"],
@@ -1141,6 +1153,10 @@ def _write_attack_event_table_jsonl(
                 "content_chain_status": attack_event_row.get("content_chain_status"),
                 "fusion_status": attack_event_row.get("fusion_status"),
                 "geometry_chain_status": attack_event_row.get("geometry_chain_status"),
+                "image_evidence_status": image_evidence_payload.get("status"),
+                "geo_rescue_eligible": image_evidence_payload.get("geo_rescue_eligible"),
+                "geo_rescue_applied": image_evidence_payload.get("geo_rescue_applied"),
+                "geo_not_used_reason": image_evidence_payload.get("geo_not_used_reason"),
             }
         )
     ensure_directory(output_path.parent)
@@ -1261,6 +1277,8 @@ def _build_pw04_summary_payload(
     attack_family_count: int,
     parent_event_count: int,
     formal_record_count: int,
+    enable_tail_estimation: bool,
+    paper_exports_payload: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """
     Build the top-level PW04 summary payload.
@@ -1288,11 +1306,13 @@ def _build_pw04_summary_payload(
         attack_family_count: Unique attack family count.
         parent_event_count: Unique parent event count.
         formal_record_count: Materialized formal record count.
+        enable_tail_estimation: Whether optional tail estimation was enabled.
+        paper_exports_payload: Append-only paper-facing export bindings.
 
     Returns:
         PW04 summary payload.
     """
-    return {
+    summary_payload = {
         "status": "completed",
         "stage_name": STAGE_NAME,
         "family_id": family_id,
@@ -1317,7 +1337,11 @@ def _build_pw04_summary_payload(
         "attack_family_count": attack_family_count,
         "parent_event_count": parent_event_count,
         "formal_record_count": formal_record_count,
+        "tail_estimation_enabled": enable_tail_estimation,
     }
+    if isinstance(paper_exports_payload, Mapping):
+        summary_payload.update(dict(cast(Mapping[str, Any], paper_exports_payload)))
+    return summary_payload
 
 
 def run_pw04_merge_attack_event_shards(
@@ -1325,6 +1349,7 @@ def run_pw04_merge_attack_event_shards(
     drive_project_root: Path,
     family_id: str,
     force_rerun: bool = False,
+    enable_tail_estimation: bool = False,
 ) -> Dict[str, Any]:
     """
     Execute the PW04 attack merge and metrics materialization stage.
@@ -1333,6 +1358,7 @@ def run_pw04_merge_attack_event_shards(
         drive_project_root: Drive project root path.
         family_id: Family identifier.
         force_rerun: Whether to clear existing PW04 outputs before rerun.
+        enable_tail_estimation: Whether optional tail estimation exports should be produced.
 
     Returns:
         PW04 summary payload.
@@ -1343,6 +1369,8 @@ def run_pw04_merge_attack_event_shards(
         raise TypeError("family_id must be non-empty str")
     if not isinstance(force_rerun, bool):
         raise TypeError("force_rerun must be bool")
+    if not isinstance(enable_tail_estimation, bool):
+        raise TypeError("enable_tail_estimation must be bool")
 
     normalized_drive_root = drive_project_root.expanduser().resolve()
     family_root = build_family_root(normalized_drive_root, family_id)
@@ -1356,6 +1384,9 @@ def run_pw04_merge_attack_event_shards(
     ensure_directory(cast(Path, pw04_paths["manifests_root"]))
     ensure_directory(cast(Path, pw04_paths["records_root"]))
     ensure_directory(cast(Path, pw04_paths["tables_root"]))
+    ensure_directory(cast(Path, pw04_paths["metrics_root"]))
+    ensure_directory(cast(Path, pw04_paths["figures_root"]))
+    ensure_directory(cast(Path, pw04_paths["tail_root"]))
 
     pw02_summary_path = family_root / "runtime_state" / PW02_SUMMARY_FILE_NAME
     finalize_manifest_path = family_root / "exports" / "pw02" / "paper_source_finalize_manifest.json"
@@ -1539,6 +1570,17 @@ def run_pw04_merge_attack_event_shards(
     write_json_atomic(cast(Path, pw04_paths["per_attack_condition_metrics_path"]), per_attack_condition_metrics_payload)
     write_json_atomic(cast(Path, pw04_paths["clean_attack_overview_path"]), clean_attack_overview_payload)
 
+    paper_exports_payload = build_pw04_paper_exports(
+        family_id=family_id,
+        family_root=family_root,
+        pw02_summary=pw02_summary,
+        pw04_paths=pw04_paths,
+        attack_event_rows=materialized_attack_event_rows,
+        per_attack_family_metrics_payload=per_attack_family_metrics_payload,
+        per_attack_condition_metrics_payload=per_attack_condition_metrics_payload,
+        enable_tail_estimation=enable_tail_estimation,
+    )
+
     summary_payload = _build_pw04_summary_payload(
         family_id=family_id,
         family_root=family_root,
@@ -1562,6 +1604,8 @@ def run_pw04_merge_attack_event_shards(
         attack_family_count=len({str(row["attack_family"]) for row in materialized_attack_event_rows}),
         parent_event_count=len({str(row["parent_event_id"]) for row in materialized_attack_event_rows}),
         formal_record_count=len(materialized_attack_event_rows),
+        enable_tail_estimation=enable_tail_estimation,
+        paper_exports_payload=paper_exports_payload,
     )
     write_json_atomic(cast(Path, pw04_paths["summary_path"]), summary_payload)
     return summary_payload
@@ -1581,6 +1625,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--drive-project-root", required=True, help="Drive project root path.")
     parser.add_argument("--family-id", required=True, help="Family identifier.")
     parser.add_argument("--force-rerun", action="store_true", help="Clear existing PW04 outputs before rerun.")
+    parser.add_argument(
+        "--enable-tail-estimation",
+        action="store_true",
+        help="Emit optional tail-estimation artifacts in addition to empirical clean FPR exports.",
+    )
     return parser
 
 
@@ -1600,6 +1649,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         drive_project_root=Path(args.drive_project_root),
         family_id=str(args.family_id),
         force_rerun=bool(args.force_rerun),
+        enable_tail_estimation=bool(args.enable_tail_estimation),
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
     return 0

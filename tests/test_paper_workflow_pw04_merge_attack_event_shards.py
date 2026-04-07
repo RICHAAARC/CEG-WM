@@ -5,6 +5,7 @@ Module type: General module
 
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Tuple, cast
@@ -56,6 +57,20 @@ def _load_json_dict(path_obj: Path) -> Dict[str, Any]:
     return cast(Dict[str, Any], payload)
 
 
+def _load_csv_rows(path_obj: Path) -> List[Dict[str, Any]]:
+    """
+    Load one CSV file into ordered rows.
+
+    Args:
+        path_obj: CSV file path.
+
+    Returns:
+        Parsed CSV rows.
+    """
+    with path_obj.open("r", encoding="utf-8", newline="") as handle:
+        return [dict(cast(Mapping[str, Any], row)) for row in csv.DictReader(handle)]
+
+
 def _score_pair_for_index(event_index: int) -> Tuple[float, float]:
     """
     Build deterministic content and attestation scores for one attack event.
@@ -74,6 +89,46 @@ def _score_pair_for_index(event_index: int) -> Tuple[float, float]:
     if pattern_index == 2:
         return 0.19, 0.18
     return 0.83, 0.79
+
+
+def _image_evidence_payload_for_index(event_index: int) -> Dict[str, Any]:
+    """
+    Build deterministic image-evidence rescue fields for one attack event.
+
+    Args:
+        event_index: Attack event index.
+
+    Returns:
+        Image evidence payload.
+    """
+    pattern_index = event_index % 4
+    if pattern_index == 1:
+        return {
+            "status": "ok",
+            "geo_rescue_eligible": True,
+            "geo_rescue_applied": True,
+            "geo_not_used_reason": None,
+        }
+    if pattern_index == 2:
+        return {
+            "status": "ok",
+            "geo_rescue_eligible": True,
+            "geo_rescue_applied": False,
+            "geo_not_used_reason": "geometry_score_below_rescue_min",
+        }
+    if pattern_index == 0:
+        return {
+            "status": "ok",
+            "geo_rescue_eligible": False,
+            "geo_rescue_applied": False,
+            "geo_not_used_reason": "content_chain_already_positive",
+        }
+    return {
+        "status": "ok",
+        "geo_rescue_eligible": False,
+        "geo_rescue_applied": False,
+        "geo_not_used_reason": "attestation_already_positive",
+    }
 
 
 def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
@@ -145,6 +200,11 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
 
     formal_clean_metrics_path = pw02_root / "formal_final_decision_metrics.json"
     derived_clean_metrics_path = pw02_root / "derived_system_union_metrics.json"
+    clean_evaluate_root = ensure_directory(pw02_root / "evaluate" / "clean")
+    content_clean_evaluate_export_path = clean_evaluate_root / "content" / "evaluate_record.json"
+    attestation_clean_evaluate_export_path = clean_evaluate_root / "attestation" / "evaluate_record.json"
+    ensure_directory(content_clean_evaluate_export_path.parent)
+    ensure_directory(attestation_clean_evaluate_export_path.parent)
     write_json_atomic(
         formal_clean_metrics_path,
         {
@@ -152,8 +212,18 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
             "schema_version": "pw_stage_02_v1",
             "family_id": family_id,
             "metrics": {
+                "scope": "formal_final_decision",
+                "n_total": 8,
+                "n_positive": 4,
+                "n_negative": 4,
+                "final_decision_available_rate": 1.0,
+                "content_chain_available_rate": 1.0,
                 "final_decision_tpr": 1.0,
                 "final_decision_fpr": 0.0,
+                "final_decision_status_counts": {
+                    "accept": 4,
+                    "reject": 4,
+                },
             },
         },
     )
@@ -164,8 +234,83 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
             "schema_version": "pw_stage_02_v1",
             "family_id": family_id,
             "metrics": {
+                "scope": "system_final",
+                "n_total": 8,
+                "n_positive": 4,
+                "n_negative": 4,
+                "final_decision_available_rate": 1.0,
+                "content_chain_available_rate": 1.0,
+                "image_evidence_ok_rate": 1.0,
+                "event_attestation_available_rate": 1.0,
+                "geo_rescue_eligible_rate": 0.5,
                 "system_tpr": 1.0,
                 "system_fpr": 0.0,
+                "final_decision_tpr": 1.0,
+                "final_decision_fpr": 0.0,
+                "event_attestation_tpr": 0.75,
+                "event_attestation_fpr": 0.25,
+                "geo_rescue_applied_rate": 0.25,
+                "final_decision_status_counts": {
+                    "accept": 4,
+                    "reject": 4,
+                },
+                "geo_not_used_reason_counts": {
+                    "geometry_score_below_rescue_min": 1,
+                },
+            },
+        },
+    )
+    write_json_atomic(
+        content_clean_evaluate_export_path,
+        {
+            "artifact_type": "paper_workflow_pw02_clean_evaluate_export",
+            "schema_version": "pw_stage_02_v1",
+            "family_id": family_id,
+            "score_name": "content_chain_score",
+            "evaluate_record": {
+                "status": "completed",
+                "metrics": {
+                    "n_total": 8,
+                    "n_pos": 4,
+                    "n_neg": 4,
+                    "tpr_at_fpr_primary": 1.0,
+                    "fpr_empirical": 0.0,
+                },
+                "breakdown": {
+                    "confusion": {
+                        "tp": 4,
+                        "fp": 0,
+                        "fn": 0,
+                        "tn": 4,
+                    }
+                },
+            },
+        },
+    )
+    write_json_atomic(
+        attestation_clean_evaluate_export_path,
+        {
+            "artifact_type": "paper_workflow_pw02_clean_evaluate_export",
+            "schema_version": "pw_stage_02_v1",
+            "family_id": family_id,
+            "score_name": "event_attestation_score",
+            "evaluate_record": {
+                "status": "completed",
+                "metrics": {
+                    "n_total": 8,
+                    "n_pos": 4,
+                    "n_neg": 4,
+                    "tpr_at_fpr_primary": 0.75,
+                    "fpr_empirical": 0.25,
+                },
+                "breakdown": {
+                    "confusion": {
+                        "tp": 3,
+                        "fp": 1,
+                        "fn": 1,
+                        "tn": 3,
+                    }
+                },
             },
         },
     )
@@ -195,6 +340,10 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
             "paper_source_finalize_manifest_path": normalize_path_value(finalize_manifest_path),
             "formal_final_decision_metrics_artifact_path": normalize_path_value(formal_clean_metrics_path),
             "derived_system_union_metrics_artifact_path": normalize_path_value(derived_clean_metrics_path),
+            "clean_evaluate_exports": {
+                "content": normalize_path_value(content_clean_evaluate_export_path),
+                "attestation": normalize_path_value(attestation_clean_evaluate_export_path),
+            },
         },
     )
 
@@ -208,6 +357,8 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
         "attestation_threshold_export_path": attestation_threshold_export_path,
         "formal_clean_metrics_path": formal_clean_metrics_path,
         "derived_clean_metrics_path": derived_clean_metrics_path,
+        "content_clean_evaluate_export_path": content_clean_evaluate_export_path,
+        "attestation_clean_evaluate_export_path": attestation_clean_evaluate_export_path,
     }
 
 
@@ -281,7 +432,8 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
                         "is_event_attested": attestation_score >= 0.6,
                         "event_attestation_score_name": "event_attestation_score",
                         "event_attestation_score": attestation_score,
-                    }
+                    },
+                    "image_evidence_result": _image_evidence_payload_for_index(attack_event_index),
                 },
                 "final_decision": {
                     "decision_status": "accept" if content_score >= 0.5 else "reject",
@@ -396,6 +548,11 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
         family_id="family_pw04_success",
     )
 
+    canonical_metrics_paths = cast(Dict[str, str], pw04_summary["canonical_metrics_paths"])
+    paper_tables_paths = cast(Dict[str, str], pw04_summary["paper_tables_paths"])
+    paper_figures_paths = cast(Dict[str, str], pw04_summary["paper_figures_paths"])
+    tail_estimation_paths = cast(Dict[str, str], pw04_summary["tail_estimation_paths"])
+
     required_paths = [
         Path(str(pw04_summary["summary_path"])),
         Path(str(pw04_summary["attack_merge_manifest_path"])),
@@ -409,6 +566,13 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
         Path(str(pw04_summary["attack_family_summary_csv_path"])),
         Path(str(pw04_summary["attack_condition_summary_csv_path"])),
         Path(str(pw04_summary["clean_attack_overview_path"])),
+        Path(str(pw04_summary["paper_scope_registry_path"])),
+        Path(str(pw04_summary["bootstrap_confidence_intervals_path"])),
+        Path(str(pw04_summary["bootstrap_confidence_intervals_csv_path"])),
+        *[Path(path_value) for path_value in canonical_metrics_paths.values()],
+        *[Path(path_value) for path_value in paper_tables_paths.values()],
+        *[Path(path_value) for path_value in paper_figures_paths.values()],
+        *[Path(path_value) for path_value in tail_estimation_paths.values()],
     ]
     for path_obj in required_paths:
         assert path_obj.exists(), path_obj
@@ -418,10 +582,26 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
     formal_final_metrics = _load_json_dict(Path(str(pw04_summary["formal_attack_final_decision_metrics_path"])))
     formal_attestation_metrics = _load_json_dict(Path(str(pw04_summary["formal_attack_attestation_metrics_path"])))
     derived_union_metrics = _load_json_dict(Path(str(pw04_summary["derived_attack_union_metrics_path"])))
+    paper_metric_registry = _load_json_dict(Path(str(pw04_summary["paper_scope_registry_path"])))
+    content_chain_metrics = _load_json_dict(Path(str(canonical_metrics_paths["content_chain"])))
+    event_attestation_metrics = _load_json_dict(Path(str(canonical_metrics_paths["event_attestation"])))
+    system_final_metrics = _load_json_dict(Path(str(canonical_metrics_paths["system_final"])))
+    bootstrap_payload = _load_json_dict(Path(str(pw04_summary["bootstrap_confidence_intervals_path"])))
+    bootstrap_csv_rows = _load_csv_rows(Path(str(pw04_summary["bootstrap_confidence_intervals_csv_path"])))
+    main_metrics_rows = _load_csv_rows(Path(str(paper_tables_paths["main_metrics_summary_csv_path"])))
+    family_paper_rows = _load_csv_rows(Path(str(paper_tables_paths["attack_family_summary_paper_csv_path"])))
+    condition_paper_rows = _load_csv_rows(Path(str(paper_tables_paths["attack_condition_summary_paper_csv_path"])))
+    rescue_rows = _load_csv_rows(Path(str(paper_tables_paths["rescue_metrics_summary_csv_path"])))
+    tail_fpr_1e4 = _load_json_dict(Path(str(tail_estimation_paths["estimated_tail_fpr_1e4_path"])))
+    tail_fpr_1e5 = _load_json_dict(Path(str(tail_estimation_paths["estimated_tail_fpr_1e5_path"])))
+    tail_fit_diagnostics = _load_json_dict(Path(str(tail_estimation_paths["tail_fit_diagnostics_path"])))
+    tail_fit_stability = _load_json_dict(Path(str(tail_estimation_paths["tail_fit_stability_summary_path"])))
     attack_event_rows = read_jsonl(Path(str(pw04_summary["attack_event_table_path"])))
 
     expected_attack_event_count = int(pw03_fixture["expected_attack_event_count"])
     assert pw04_summary["status"] == "completed"
+    assert pw04_summary["paper_exports_completed"] is True
+    assert pw04_summary["tail_estimation_enabled"] is False
     assert pw04_summary["completed_attack_event_count"] == expected_attack_event_count
     assert merge_manifest["expected_attack_event_count"] == expected_attack_event_count
     assert merge_manifest["completed_attack_event_count"] == expected_attack_event_count
@@ -442,11 +622,70 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
         pw03_fixture["expected_derived_union_positive_count"] / expected_attack_event_count
     )
 
+    assert paper_metric_registry["canonical_scopes"] == ["content_chain", "event_attestation", "system_final"]
+    assert paper_metric_registry["legacy_scope_mapping"]["content_chain"]["attack"]["legacy_scope_name"] == "formal_attack_final_decision"
+    assert paper_metric_registry["legacy_scope_mapping"]["event_attestation"]["clean"]["legacy_scope_name"] == "clean_attestation_evaluate_export"
+    assert paper_metric_registry["legacy_scope_mapping"]["system_final"]["attack"]["legacy_scope_name"] == "derived_attack_union"
+
+    assert content_chain_metrics["scope"] == "content_chain"
+    assert content_chain_metrics["clean_metrics"]["clean_positive_count"] == 4
+    assert content_chain_metrics["clean_metrics"]["clean_negative_count"] == 4
+    assert event_attestation_metrics["scope"] == "event_attestation"
+    assert event_attestation_metrics["clean_metrics"]["clean_tpr"] == pytest.approx(0.75)
+    assert event_attestation_metrics["clean_metrics"]["clean_fpr"] == pytest.approx(0.25)
+    assert event_attestation_metrics["clean_metrics"]["accepted_count_clean_positive"] == 3
+    assert event_attestation_metrics["clean_metrics"]["accepted_count_clean_negative"] == 1
+    assert system_final_metrics["scope"] == "system_final"
+    assert system_final_metrics["compatibility"]["attack_legacy_scope_name"] == "derived_attack_union"
+
+    assert [row["scope"] for row in main_metrics_rows] == ["content_chain", "event_attestation", "system_final"]
+    event_attestation_row = next(row for row in main_metrics_rows if row["scope"] == "event_attestation")
+    assert event_attestation_row["clean_tpr"] == "0.75"
+    assert event_attestation_row["clean_fpr"] == "0.25"
+    assert event_attestation_row["accepted_count_clean_positive"] == "3"
+    assert event_attestation_row["accepted_count_clean_negative"] == "1"
+    assert event_attestation_row["bootstrap_ci_clean_tpr_lower"] != ""
+    assert event_attestation_row["metric_source_clean"].endswith("/exports/pw02/evaluate/clean/attestation/evaluate_record.json")
+
+    assert family_paper_rows
+    assert "content_chain_attack_tpr" in family_paper_rows[0]
+    assert "formal_final_decision_attack_tpr" not in family_paper_rows[0]
+    assert condition_paper_rows
+    assert "system_final_attack_tpr" in condition_paper_rows[0]
+    assert "attack_family" in condition_paper_rows[0]
+
+    assert len(rescue_rows) == 1
+    rescue_row = rescue_rows[0]
+    assert rescue_row["clean_false_accept_count"] == "0"
+    assert rescue_row["attack_true_accept_count"] == str(pw03_fixture["expected_derived_union_positive_count"])
+    attack_true_accept_count_by_family = json.loads(rescue_row["attack_true_accept_count_by_family"])
+    assert sum(int(value) for value in attack_true_accept_count_by_family.values()) == pw03_fixture["expected_derived_union_positive_count"]
+    geo_not_used_reason_counts = json.loads(rescue_row["geo_not_used_reason_counts"])
+    assert geo_not_used_reason_counts
+
+    assert set(bootstrap_payload["scopes"].keys()) == {"content_chain", "event_attestation", "system_final"}
+    assert bootstrap_payload["scopes"]["content_chain"]["clean_tpr"]["status"] == "ok"
+    assert bootstrap_payload["scopes"]["event_attestation"]["clean_fpr"]["status"] == "ok"
+    assert bootstrap_payload["scopes"]["system_final"]["attack_tpr"]["lower_bound"] is not None
+    assert len(bootstrap_csv_rows) == 9
+
+    assert tail_fpr_1e4["tail_estimation_enabled"] is False
+    assert tail_fpr_1e4["scope_estimates"]["content_chain"]["status"] == "disabled"
+    assert tail_fpr_1e5["scope_estimates"]["event_attestation"]["status"] == "disabled"
+    assert tail_fit_diagnostics["scope_diagnostics"]["system_final"]["status"] == "not_applicable"
+    assert tail_fit_stability["scopes"]["system_final"]["reason"] == "system_final_is_decision_union_without_scalar_score"
+
     attack_event_lookup = cast(Dict[str, Dict[str, Any]], pw03_fixture["attack_event_lookup"])
     for row in attack_event_rows:
         expected_attack_event = attack_event_lookup[row["attack_event_id"]]
         assert row["attack_family"] == expected_attack_event["attack_family"]
         assert row["parent_event_id"] == expected_attack_event["parent_event_id"]
+        assert "geo_rescue_eligible" in row
+        assert "geo_rescue_applied" in row
+        assert "geo_not_used_reason" in row
+
+    assert any(row["geo_rescue_applied"] is True for row in attack_event_rows)
+    assert any(isinstance(row["geo_not_used_reason"], str) and row["geo_not_used_reason"] for row in attack_event_rows)
 
     first_pool_event = cast(List[Dict[str, Any]], pool_manifest["events"])[0]
     assert first_pool_event["formal_record_path"]

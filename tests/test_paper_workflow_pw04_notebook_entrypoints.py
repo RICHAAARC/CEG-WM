@@ -57,6 +57,8 @@ def _find_cell_sources(notebook_path: Path, marker: str, cell_type: str) -> List
         if not isinstance(source_node, list):
             continue
         source_text = "\n".join(str(line) for line in cast(List[object], source_node))
+        while "\n\n" in source_text:
+            source_text = source_text.replace("\n\n", "\n")
         if marker in source_text:
             matches.append(source_text)
     return matches
@@ -98,6 +100,7 @@ def test_pw04_notebook_binds_expected_script_and_parameters() -> None:
     assert 'LOCAL_HF_HUB_CACHE = LOCAL_HF_HOME / "hub"' in constants_source
     assert 'LOCAL_TRANSFORMERS_CACHE = LOCAL_HF_HOME / "transformers"' in constants_source
     assert 'FORCE_RERUN = False' in constants_source
+    assert 'ENABLE_TAIL_ESTIMATION = False' in constants_source
 
     assert 'os.environ["HUGGINGFACE_HUB_CACHE"] = str(LOCAL_HF_HUB_CACHE)' in bootstrap_source
     assert 'snapshot_download(' not in bootstrap_source
@@ -106,6 +109,7 @@ def test_pw04_notebook_binds_expected_script_and_parameters() -> None:
     assert '"--drive-project-root"' in execute_source
     assert '"--family-id"' in execute_source
     assert '"--force-rerun"' in execute_source
+    assert '"--enable-tail-estimation"' in execute_source
 
 
 def test_pw04_notebook_reads_pw02_inputs_and_pw04_outputs() -> None:
@@ -134,3 +138,15 @@ def test_pw04_notebook_reads_pw02_inputs_and_pw04_outputs() -> None:
     assert 'FORMAL_ATTACK_ATTESTATION_METRICS_PATH = FAMILY_ROOT / "exports" / "pw04" / "formal_attack_attestation_metrics.json"' in summary_source
     assert 'DERIVED_ATTACK_UNION_METRICS_PATH = FAMILY_ROOT / "exports" / "pw04" / "derived_attack_union_metrics.json"' in summary_source
     assert 'CLEAN_ATTACK_OVERVIEW_PATH = FAMILY_ROOT / "exports" / "pw04" / "clean_attack_overview.json"' in summary_source
+    assert 'PAPER_SCOPE_REGISTRY_PATH = Path(str(PW04_SUMMARY["paper_scope_registry_path"]))' in summary_source
+    assert 'CANONICAL_METRICS_PATHS = dict(PW04_SUMMARY.get("canonical_metrics_paths", {}))' in summary_source
+    assert 'PAPER_TABLE_PATHS = dict(PW04_SUMMARY.get("paper_tables_paths", {}))' in summary_source
+    assert 'PAPER_FIGURE_PATHS = dict(PW04_SUMMARY.get("paper_figures_paths", {}))' in summary_source
+    assert 'TAIL_ESTIMATION_PATHS = dict(PW04_SUMMARY.get("tail_estimation_paths", {}))' in summary_source
+    assert 'BOOTSTRAP_CONFIDENCE_INTERVALS_PATH = Path(str(PW04_SUMMARY["bootstrap_confidence_intervals_path"]))' in summary_source
+    assert '"paper_metric_registry": json.loads(PAPER_SCOPE_REGISTRY_PATH.read_text(encoding="utf-8"))' in summary_source
+    assert '"content_chain_metrics": json.loads(Path(str(CANONICAL_METRICS_PATHS["content_chain"])).read_text(encoding="utf-8"))' in summary_source
+    assert '"paper_figures_paths": {' in summary_source
+    assert '"estimated_tail_fpr_1e4": json.loads(Path(str(TAIL_ESTIMATION_PATHS["estimated_tail_fpr_1e4_path"])).read_text(encoding="utf-8"))' in summary_source
+    assert 'matplotlib' not in summary_source
+    assert 'np.random' not in summary_source

@@ -13,7 +13,7 @@ Implemented in stage 01-04:
 - PW01 isolated source shard execution for positive_source, clean_negative, and optional diagnostic control-negative roles.
 - PW02 source merge, global thresholds, finalize manifest, and clean-side formal / derived exports.
 - PW03 attacked_positive shard execution, attacked-image materialization, and staged detect records.
-- PW04 attack shard merge, formal overlay materialization from PW02 thresholds, attack metrics exports, and clean / attack overview tables.
+- PW04 attack shard merge, formal overlay materialization from PW02 thresholds, legacy attack metrics exports, canonical paper-facing exports, and clean / attack overview tables.
 
 Explicitly not implemented in the current paper_workflow stage boundary:
 
@@ -49,6 +49,28 @@ PW04 top-level exports live under:
 - exports/pw04/tables/attack_family_summary.csv
 - exports/pw04/tables/attack_condition_summary.csv
 - exports/pw04/clean_attack_overview.json
+
+Append-only paper-facing exports also live under:
+
+- exports/pw04/metrics/paper_metric_registry.json
+- exports/pw04/metrics/content_chain_metrics.json
+- exports/pw04/metrics/event_attestation_metrics.json
+- exports/pw04/metrics/system_final_metrics.json
+- exports/pw04/metrics/bootstrap_confidence_intervals.json
+- exports/pw04/tables/main_metrics_summary.csv
+- exports/pw04/tables/attack_family_summary_paper.csv
+- exports/pw04/tables/attack_condition_summary_paper.csv
+- exports/pw04/tables/rescue_metrics_summary.csv
+- exports/pw04/tables/bootstrap_confidence_intervals.csv
+- exports/pw04/figures/attack_tpr_by_family.png
+- exports/pw04/figures/clean_vs_attack_scope_overview.png
+- exports/pw04/figures/rescue_breakdown.png
+- exports/pw04/tail/estimated_tail_fpr_1e4.json
+- exports/pw04/tail/estimated_tail_fpr_1e5.json
+- exports/pw04/tail/tail_fit_diagnostics.json
+- exports/pw04/tail/tail_fit_stability_summary.json
+
+The legacy PW04 exports remain authoritative compatibility outputs. The new paper-facing tables and figures only use the canonical scope names content_chain, event_attestation, and system_final.
 
 ## Entrypoints
 
