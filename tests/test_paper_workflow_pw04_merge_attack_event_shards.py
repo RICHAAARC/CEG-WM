@@ -5,17 +5,46 @@ Module type: General module
 
 from __future__ import annotations
 
+import builtins
 import csv
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Tuple, cast
 
 import pytest
+from PIL import Image
 
 import paper_workflow.scripts.pw04_merge_attack_event_shards as pw04_module
 from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
 from paper_workflow.scripts.pw_common import read_jsonl
 from scripts.notebook_runtime_common import compute_file_sha256, ensure_directory, normalize_path_value, write_json_atomic
+
+
+@pytest.fixture(autouse=True)
+def _force_pw04_png_fallback(monkeypatch: Any) -> None:
+    """
+    Force PW04 figure generation tests through the builtin PNG fallback path.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    original_import = builtins.__import__
+
+    def patched_import(
+        name: str,
+        globals_arg: Any = None,
+        locals_arg: Any = None,
+        fromlist: Any = (),
+        level: int = 0,
+    ) -> Any:
+        if name == "matplotlib" or name.startswith("matplotlib."):
+            raise ModuleNotFoundError("forced matplotlib fallback for PW04 tests")
+        return original_import(name, globals_arg, locals_arg, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", patched_import)
 
 
 def _build_pw00_family(tmp_path: Path, family_id: str) -> Dict[str, Any]:
@@ -401,8 +430,12 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
             attack_event_index = int(attack_event["attack_event_index"])
             event_root = ensure_directory(shard_root / "events" / f"event_{attack_event_index:06d}")
             artifacts_root = ensure_directory(event_root / "artifacts")
+            parent_source_image_path = artifacts_root / f"parent_{attack_event_index:06d}.png"
             attacked_image_path = artifacts_root / f"event_{attack_event_index:06d}.png"
-            attacked_image_path.write_bytes(b"pw04_attack_fixture")
+            parent_source_image = Image.new("RGB", (8, 8), color=(60 + attack_event_index, 90, 120))
+            attacked_image = Image.new("RGB", (8, 8), color=(62 + attack_event_index, 90, 120))
+            parent_source_image.save(parent_source_image_path)
+            attacked_image.save(attacked_image_path)
 
             content_score, attestation_score = _score_pair_for_index(attack_event_index)
             if content_score >= 0.5:
@@ -422,6 +455,7 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
                 "paper_workflow_attack_config_name": attack_event["attack_config_name"],
                 "paper_workflow_attack_condition_key": attack_event["attack_condition_key"],
                 "paper_workflow_attack_params_digest": attack_event["attack_params_digest"],
+                "paper_workflow_parent_source_image_path": normalize_path_value(parent_source_image_path),
                 "content_evidence_payload": {
                     "status": "ok",
                     "content_chain_score": content_score,
@@ -461,6 +495,7 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
                 "attack_event_index": attack_event_index,
                 "sample_role": pw04_module.ATTACKED_POSITIVE_SAMPLE_ROLE,
                 "parent_event_id": attack_event["parent_event_id"],
+                "parent_source_image_path": normalize_path_value(parent_source_image_path),
                 "attack_family": attack_event["attack_family"],
                 "attack_config_name": attack_event["attack_config_name"],
                 "attack_condition_key": attack_event["attack_condition_key"],
@@ -552,6 +587,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
     paper_tables_paths = cast(Dict[str, str], pw04_summary["paper_tables_paths"])
     paper_figures_paths = cast(Dict[str, str], pw04_summary["paper_figures_paths"])
     tail_estimation_paths = cast(Dict[str, str], pw04_summary["tail_estimation_paths"])
+    attack_quality_metrics_path = Path(str(pw04_summary["attack_quality_metrics_path"]))
 
     required_paths = [
         Path(str(pw04_summary["summary_path"])),
@@ -562,6 +598,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
         Path(str(pw04_summary["derived_attack_union_metrics_path"])),
         Path(str(pw04_summary["per_attack_family_metrics_path"])),
         Path(str(pw04_summary["per_attack_condition_metrics_path"])),
+        attack_quality_metrics_path,
         Path(str(pw04_summary["attack_event_table_path"])),
         Path(str(pw04_summary["attack_family_summary_csv_path"])),
         Path(str(pw04_summary["attack_condition_summary_csv_path"])),
@@ -582,6 +619,8 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
     formal_final_metrics = _load_json_dict(Path(str(pw04_summary["formal_attack_final_decision_metrics_path"])))
     formal_attestation_metrics = _load_json_dict(Path(str(pw04_summary["formal_attack_attestation_metrics_path"])))
     derived_union_metrics = _load_json_dict(Path(str(pw04_summary["derived_attack_union_metrics_path"])))
+    attack_quality_metrics = _load_json_dict(attack_quality_metrics_path)
+    clean_attack_overview = _load_json_dict(Path(str(pw04_summary["clean_attack_overview_path"])))
     paper_metric_registry = _load_json_dict(Path(str(pw04_summary["paper_scope_registry_path"])))
     content_chain_metrics = _load_json_dict(Path(str(canonical_metrics_paths["content_chain"])))
     event_attestation_metrics = _load_json_dict(Path(str(canonical_metrics_paths["event_attestation"])))
@@ -621,11 +660,17 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
     assert derived_union_metrics["metrics"]["attack_tpr"] == pytest.approx(
         pw03_fixture["expected_derived_union_positive_count"] / expected_attack_event_count
     )
+    assert attack_quality_metrics["overall"]["count"] == expected_attack_event_count
+    assert attack_quality_metrics["overall"]["mean_psnr"] is not None
+    assert attack_quality_metrics["overall"]["mean_ssim"] is not None
+    assert clean_attack_overview["attack_quality_mean_psnr"] == attack_quality_metrics["overall"]["mean_psnr"]
+    assert clean_attack_overview["attack_quality_mean_ssim"] == attack_quality_metrics["overall"]["mean_ssim"]
 
     assert paper_metric_registry["canonical_scopes"] == ["content_chain", "event_attestation", "system_final"]
     assert paper_metric_registry["legacy_scope_mapping"]["content_chain"]["attack"]["legacy_scope_name"] == "formal_attack_final_decision"
     assert paper_metric_registry["legacy_scope_mapping"]["event_attestation"]["clean"]["legacy_scope_name"] == "clean_attestation_evaluate_export"
     assert paper_metric_registry["legacy_scope_mapping"]["system_final"]["attack"]["legacy_scope_name"] == "derived_attack_union"
+    assert paper_metric_registry["artifact_paths"]["supplemental_metrics"]["attack_quality_metrics_path"] == normalize_path_value(attack_quality_metrics_path)
 
     assert content_chain_metrics["scope"] == "content_chain"
     assert content_chain_metrics["clean_metrics"]["clean_positive_count"] == 4
@@ -650,9 +695,13 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
     assert family_paper_rows
     assert "content_chain_attack_tpr" in family_paper_rows[0]
     assert "formal_final_decision_attack_tpr" not in family_paper_rows[0]
+    assert "attack_mean_psnr" in family_paper_rows[0]
+    assert family_paper_rows[0]["attack_mean_psnr"] != ""
     assert condition_paper_rows
     assert "system_final_attack_tpr" in condition_paper_rows[0]
     assert "attack_family" in condition_paper_rows[0]
+    assert "attack_mean_ssim" in condition_paper_rows[0]
+    assert condition_paper_rows[0]["attack_mean_ssim"] != ""
 
     assert len(rescue_rows) == 1
     rescue_row = rescue_rows[0]
@@ -683,6 +732,9 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
         assert "geo_rescue_eligible" in row
         assert "geo_rescue_applied" in row
         assert "geo_not_used_reason" in row
+        assert row["attack_quality_status"] == "ok"
+        assert row["attack_quality_psnr"] is not None
+        assert row["attack_quality_ssim"] is not None
 
     assert any(row["geo_rescue_applied"] is True for row in attack_event_rows)
     assert any(isinstance(row["geo_not_used_reason"], str) and row["geo_not_used_reason"] for row in attack_event_rows)

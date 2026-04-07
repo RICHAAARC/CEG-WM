@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Sequence, cast
 
 import pytest
+from PIL import Image
 
 from main.cli import run_calibrate as run_calibrate_cli
 from main.core import config_loader as core_config_loader
@@ -17,7 +18,7 @@ from main.evaluation import workflow_inputs as eval_workflow_inputs
 import paper_workflow.scripts.pw02_merge_source_event_shards as pw02_module
 from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
 from paper_workflow.scripts.pw_common import build_source_shard_root, read_jsonl
-from scripts.notebook_runtime_common import ensure_directory, write_json_atomic, write_yaml_mapping
+from scripts.notebook_runtime_common import ensure_directory, normalize_path_value, write_json_atomic, write_yaml_mapping
 
 
 def _build_pw00_family(tmp_path: Path, family_id: str) -> Dict[str, Any]:
@@ -93,6 +94,22 @@ def _materialize_completed_pw01_shards(
             for event_id in cast(List[str], shard_row["assigned_event_ids"]):
                 event = event_lookup[event_id]
                 event_index = int(event["event_index"])
+                event_root = ensure_directory(shard_root / "events" / f"event_{event_index:06d}")
+                artifacts_root = ensure_directory(event_root / "artifacts")
+                source_image_path = artifacts_root / f"event_{event_index:06d}_source.png"
+                preview_image_path = artifacts_root / f"event_{event_index:06d}_preview.png"
+                source_image = Image.new("RGB", (8, 8), color=(40 + event_index, 70, 100))
+                preview_image = Image.new("RGB", (8, 8), color=(42 + event_index, 70, 100))
+                source_image.save(source_image_path)
+                preview_image.save(preview_image_path)
+                preview_generation_record_path = artifacts_root / "preview_generation_record.json"
+                write_json_atomic(
+                    preview_generation_record_path,
+                    {
+                        "status": "ok",
+                        "persisted_artifact_path": normalize_path_value(preview_image_path),
+                    },
+                )
                 detect_record_path = shard_root / "records" / f"event_{event_index:06d}_detect_record.json"
                 detect_payload: Dict[str, Any]
                 if sample_role == "positive_source":
@@ -192,6 +209,18 @@ def _materialize_completed_pw01_shards(
                         "sample_role": sample_role,
                         "event_index": event_index,
                         "detect_record_path": detect_record_path.as_posix(),
+                        "source_image": {
+                            "exists": True,
+                            "path": normalize_path_value(source_image_path),
+                            "package_relative_path": f"source_images/{event_index:06d}.png",
+                            "missing_reason": None,
+                        },
+                        "preview_generation_record": {
+                            "exists": True,
+                            "path": normalize_path_value(preview_generation_record_path),
+                            "package_relative_path": f"preview_generation_records/{event_index:06d}.json",
+                            "missing_reason": None,
+                        },
                     }
                 )
 
@@ -368,8 +397,39 @@ def _patch_pw02_python_stage_runner(monkeypatch: Any) -> List[Dict[str, Any]]:
             )
             write_json_atomic(output_dir / "records" / "calibration_record.json", {"status": "ok"})
         elif module_name == "main.cli.run_evaluate":
-            write_json_atomic(output_dir / "records" / "evaluate_record.json", {"status": "ok"})
-            write_json_atomic(output_dir / "artifacts" / "evaluation_report.json", {"status": "ok"})
+            evaluate_cfg = cast(Dict[str, Any], config_payload.get("evaluate", {}))
+            score_name = str(evaluate_cfg.get("score_name", config_payload["calibration"]["score_name"]))
+            metrics_payload = {
+                "score_name": score_name,
+                "n_total": 4,
+                "n_pos": 2,
+                "n_neg": 2,
+                "tpr_at_fpr_primary": 1.0,
+                "fpr_empirical": 0.0,
+            }
+            breakdown_payload = {
+                "confusion": {
+                    "tp": 2,
+                    "fp": 0,
+                    "fn": 0,
+                    "tn": 2,
+                }
+            }
+            evaluation_report = {
+                "status": "ok",
+                "metrics": metrics_payload,
+                "breakdown": breakdown_payload,
+            }
+            write_json_atomic(
+                output_dir / "records" / "evaluate_record.json",
+                {
+                    "status": "ok",
+                    "metrics": metrics_payload,
+                    "evaluation_breakdown": breakdown_payload,
+                    "evaluation_report": evaluation_report,
+                },
+            )
+            write_json_atomic(output_dir / "artifacts" / "evaluation_report.json", evaluation_report)
         else:
             raise ValueError(f"unsupported module_name: {module_name}")
 
@@ -751,6 +811,12 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     attestation_clean_evaluate_export = json.loads(
         Path(str(cast(Dict[str, Any], pw02_summary["clean_evaluate_exports"])["attestation"])).read_text(encoding="utf-8")
     )
+    content_clean_score_analysis = json.loads(
+        Path(str(cast(Dict[str, Any], pw02_summary["clean_score_analysis_exports"])["content"])).read_text(encoding="utf-8")
+    )
+    attestation_clean_score_analysis = json.loads(
+        Path(str(cast(Dict[str, Any], pw02_summary["clean_score_analysis_exports"])["attestation"])).read_text(encoding="utf-8")
+    )
     formal_final_decision_metrics_export = json.loads(
         Path(str(pw02_summary["formal_final_decision_metrics_artifact_path"])).read_text(encoding="utf-8")
     )
@@ -797,6 +863,7 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert finalize_manifest["source_pools"]["planner_conditioned_control_negative"]["diagnostic_only"] is True
     assert finalize_manifest["threshold_exports"]["content"]["path"] == cast(Dict[str, Any], pw02_summary["threshold_exports"])["content"]
     assert finalize_manifest["clean_evaluate_exports"]["content"]["path"] == cast(Dict[str, Any], pw02_summary["clean_evaluate_exports"])["content"]
+    assert finalize_manifest["clean_score_analysis_exports"]["content"]["path"] == cast(Dict[str, Any], pw02_summary["clean_score_analysis_exports"])["content"]
 
     content_run = cast(Dict[str, Any], pw02_summary["score_runs"][pw02_module.CONTENT_SCORE_NAME])
     attestation_run = cast(Dict[str, Any], pw02_summary["score_runs"][pw02_module.EVENT_ATTESTATION_SCORE_NAME])
@@ -826,6 +893,16 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
         "clean_negative": 2,
     }
     assert attestation_clean_evaluate_export["evaluate_record"]["status"] == "ok"
+
+    assert content_clean_score_analysis["score_name"] == pw02_module.CONTENT_SCORE_NAME
+    assert content_clean_score_analysis["roc_auc"]["auc"] == pytest.approx(1.0)
+    assert content_clean_score_analysis["clean_positive_quality_metrics"]["count"] == 2
+    assert content_clean_score_analysis["clean_positive_quality_metrics"]["mean_psnr"] is not None
+    assert content_clean_score_analysis["clean_positive_quality_metrics"]["mean_ssim"] is not None
+
+    assert attestation_clean_score_analysis["score_name"] == pw02_module.EVENT_ATTESTATION_SCORE_NAME
+    assert attestation_clean_score_analysis["roc_auc"]["auc"] == pytest.approx(1.0)
+    assert attestation_clean_score_analysis["clean_positive_quality_metrics"]["status"] == "not_applicable"
 
     assert formal_final_decision_metrics_export["source_kind"] == "formal_final_decision_metrics_from_content_evaluate_inputs"
     assert formal_final_decision_metrics_export["is_formal_evaluate_record"] is False

@@ -85,6 +85,9 @@ ATTACK_FAMILY_PAPER_FIELDNAMES: List[str] = [
     "system_final_attack_tpr",
     "content_score_mean",
     "event_attestation_score_mean",
+    "attack_quality_pair_count",
+    "attack_mean_psnr",
+    "attack_mean_ssim",
 ]
 ATTACK_CONDITION_PAPER_FIELDNAMES: List[str] = [
     "attack_condition_key",
@@ -97,6 +100,9 @@ ATTACK_CONDITION_PAPER_FIELDNAMES: List[str] = [
     "system_final_attack_tpr",
     "content_score_mean",
     "event_attestation_score_mean",
+    "attack_quality_pair_count",
+    "attack_mean_psnr",
+    "attack_mean_ssim",
 ]
 RESCUE_METRICS_SUMMARY_FIELDNAMES: List[str] = [
     "geo_helped_positive_count",
@@ -668,6 +674,9 @@ def _build_paper_group_rows(
             "system_final_attack_tpr": row.get("derived_attack_union_tpr"),
             "content_score_mean": row.get("content_score_mean"),
             "event_attestation_score_mean": row.get("event_attestation_score_mean"),
+            "attack_quality_pair_count": row.get("attack_quality_pair_count"),
+            "attack_mean_psnr": row.get("attack_mean_psnr"),
+            "attack_mean_ssim": row.get("attack_mean_ssim"),
         }
         if group_key_name == "attack_condition_key":
             remapped_row["attack_family"] = row.get("attack_family")
@@ -1630,6 +1639,7 @@ def build_pw04_paper_exports(
     attack_event_rows: Sequence[Mapping[str, Any]],
     per_attack_family_metrics_payload: Mapping[str, Any],
     per_attack_condition_metrics_payload: Mapping[str, Any],
+    attack_quality_metrics_payload: Mapping[str, Any],
     enable_tail_estimation: bool,
 ) -> Dict[str, Any]:
     """
@@ -1658,6 +1668,8 @@ def build_pw04_paper_exports(
         raise TypeError("pw02_summary must be Mapping")
     if not isinstance(pw04_paths, Mapping):
         raise TypeError("pw04_paths must be Mapping")
+    if not isinstance(attack_quality_metrics_payload, Mapping):
+        raise TypeError("attack_quality_metrics_payload must be Mapping")
     if not isinstance(enable_tail_estimation, bool):
         raise TypeError("enable_tail_estimation must be bool")
 
@@ -1787,6 +1799,9 @@ def build_pw04_paper_exports(
         },
         "artifact_paths": {
             "canonical_metrics": {scope_name: normalize_path_value(path_obj) for scope_name, path_obj in canonical_metric_paths.items()},
+            "supplemental_metrics": {
+                "attack_quality_metrics_path": normalize_path_value(cast(Path, pw04_paths["attack_quality_metrics_path"])),
+            },
             "tables": {
                 "main_metrics_summary_csv_path": normalize_path_value(main_metrics_summary_path),
                 "attack_family_summary_paper_csv_path": normalize_path_value(attack_family_summary_paper_path),
@@ -1821,6 +1836,7 @@ def build_pw04_paper_exports(
     return {
         "paper_scope_registry_path": normalize_path_value(paper_metric_registry_path),
         "canonical_metrics_paths": {scope_name: normalize_path_value(path_obj) for scope_name, path_obj in canonical_metric_paths.items()},
+        "attack_quality_metrics_path": normalize_path_value(cast(Path, pw04_paths["attack_quality_metrics_path"])),
         "paper_tables_paths": {
             "main_metrics_summary_csv_path": normalize_path_value(main_metrics_summary_path),
             "attack_family_summary_paper_csv_path": normalize_path_value(attack_family_summary_paper_path),

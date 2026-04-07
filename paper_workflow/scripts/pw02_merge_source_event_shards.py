@@ -38,6 +38,11 @@ from paper_workflow.scripts.pw_common import (
     resolve_family_layout_paths,
     validate_source_sample_role,
 )
+from paper_workflow.scripts.pw_quality_metrics import (
+    build_quality_metrics_from_pairs,
+    resolve_optional_artifact_path,
+    resolve_preview_persisted_artifact_path,
+)
 
 
 CONTENT_SCORE_NAME = eval_metrics.CONTENT_CHAIN_SCORE_NAME
@@ -55,6 +60,7 @@ POOL_MANIFEST_FILE_NAMES = {
 FINALIZE_MANIFEST_FILE_NAME = "paper_source_finalize_manifest.json"
 FORMAL_FINAL_DECISION_METRICS_FILE_NAME = "formal_final_decision_metrics.json"
 DERIVED_SYSTEM_UNION_METRICS_FILE_NAME = "derived_system_union_metrics.json"
+CLEAN_SCORE_ANALYSIS_FILE_NAME = "clean_score_analysis.json"
 
 
 def _resolve_top_level_score_directory_name(score_name: str) -> str:
@@ -613,6 +619,293 @@ def _build_clean_evaluate_export(
     }
 
 
+def _load_records_from_records_summary(records_summary: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Load prepared record payloads from one records-summary mapping.
+
+    Args:
+        records_summary: Records summary produced by _write_score_split_records.
+
+    Returns:
+        Prepared record payloads.
+    """
+    if not isinstance(records_summary, Mapping):
+        raise TypeError("records_summary must be Mapping")
+
+    records_node = records_summary.get("records")
+    if not isinstance(records_node, list):
+        raise ValueError("records_summary.records must be list")
+
+    payloads: List[Dict[str, Any]] = []
+    for record_node in cast(List[object], records_node):
+        if not isinstance(record_node, Mapping):
+            raise ValueError("records_summary.records items must be mappings")
+        record_path_value = record_node.get("record_path")
+        if not isinstance(record_path_value, str) or not record_path_value.strip():
+            raise ValueError("records_summary.records record_path must be non-empty str")
+        payloads.append(_load_required_json_dict(Path(record_path_value).expanduser().resolve(), "PW02 prepared evaluate record"))
+    return payloads
+
+
+def _extract_evaluate_metrics_payload(evaluate_record: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    Extract the stable metrics payload from one evaluate record.
+
+    Args:
+        evaluate_record: Evaluate record payload.
+
+    Returns:
+        Stable metrics mapping.
+    """
+    if not isinstance(evaluate_record, Mapping):
+        raise TypeError("evaluate_record must be Mapping")
+
+    metrics_node = evaluate_record.get("metrics")
+    if isinstance(metrics_node, Mapping):
+        return dict(cast(Mapping[str, Any], metrics_node))
+
+    evaluation_report_node = evaluate_record.get("evaluation_report")
+    if isinstance(evaluation_report_node, Mapping):
+        report_metrics_node = evaluation_report_node.get("metrics")
+        if isinstance(report_metrics_node, Mapping):
+            return dict(cast(Mapping[str, Any], report_metrics_node))
+
+    return {}
+
+
+def _extract_evaluate_breakdown_payload(evaluate_record: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    Extract the stable breakdown payload from one evaluate record.
+
+    Args:
+        evaluate_record: Evaluate record payload.
+
+    Returns:
+        Stable breakdown mapping.
+    """
+    if not isinstance(evaluate_record, Mapping):
+        raise TypeError("evaluate_record must be Mapping")
+
+    for key_name in ["evaluation_breakdown", "breakdown"]:
+        breakdown_node = evaluate_record.get(key_name)
+        if isinstance(breakdown_node, Mapping):
+            return dict(cast(Mapping[str, Any], breakdown_node))
+
+    evaluation_report_node = evaluate_record.get("evaluation_report")
+    if isinstance(evaluation_report_node, Mapping):
+        report_breakdown_node = evaluation_report_node.get("breakdown")
+        if isinstance(report_breakdown_node, Mapping):
+            return dict(cast(Mapping[str, Any], report_breakdown_node))
+
+    return {}
+
+
+def _safe_resolve_source_image_path(event_payload: Mapping[str, Any]) -> str | None:
+    """
+    Resolve the clean source-image path from one PW01 event payload.
+
+    Args:
+        event_payload: PW01 event payload surfaced via shard manifest.
+
+    Returns:
+        Normalized source image path or None.
+    """
+    if not isinstance(event_payload, Mapping):
+        raise TypeError("event_payload must be Mapping")
+
+    source_image_view = event_payload.get("source_image")
+    if not isinstance(source_image_view, Mapping):
+        return None
+    try:
+        source_path = resolve_optional_artifact_path(cast(Mapping[str, Any], source_image_view), "source_image")
+    except Exception:
+        return None
+    if source_path is None:
+        return None
+    return normalize_path_value(source_path)
+
+
+def _safe_resolve_preview_artifact_path(event_payload: Mapping[str, Any]) -> str | None:
+    """
+    Resolve the clean preview artifact path from one PW01 event payload.
+
+    Args:
+        event_payload: PW01 event payload surfaced via shard manifest.
+
+    Returns:
+        Normalized preview artifact path or None.
+    """
+    if not isinstance(event_payload, Mapping):
+        raise TypeError("event_payload must be Mapping")
+
+    preview_record_view = event_payload.get("preview_generation_record")
+    if not isinstance(preview_record_view, Mapping):
+        return None
+    try:
+        preview_artifact_path = resolve_preview_persisted_artifact_path(cast(Mapping[str, Any], preview_record_view))
+    except Exception:
+        return None
+    if preview_artifact_path is None:
+        return None
+    return normalize_path_value(preview_artifact_path)
+
+
+def _build_clean_positive_quality_metrics(
+    *,
+    score_name: str,
+    positive_event_lookup: Mapping[str, Dict[str, Any]],
+    eval_positive_event_ids: Sequence[str],
+) -> Dict[str, Any]:
+    """
+    Build clean-side image-quality metrics for content-chain evaluate positives.
+
+    Args:
+        score_name: Canonical score name.
+        positive_event_lookup: Positive-source event lookup.
+        eval_positive_event_ids: Positive event ids used by the evaluate split.
+
+    Returns:
+        Quality metrics payload or a stable not-applicable payload.
+    """
+    if not isinstance(score_name, str) or not score_name:
+        raise TypeError("score_name must be non-empty str")
+    if not isinstance(positive_event_lookup, Mapping):
+        raise TypeError("positive_event_lookup must be Mapping")
+    if not isinstance(eval_positive_event_ids, Sequence):
+        raise TypeError("eval_positive_event_ids must be Sequence")
+
+    if not eval_metrics.is_content_chain_score_name(score_name):
+        return {
+            "status": "not_applicable",
+            "availability_reason": "quality_defined_for_content_chain_clean_images_only",
+            "expected_count": 0,
+            "count": 0,
+            "missing_count": 0,
+            "error_count": 0,
+            "mean_psnr": None,
+            "mean_ssim": None,
+            "pair_rows": [],
+        }
+
+    pair_specs: List[Dict[str, Any]] = []
+    for event_id in eval_positive_event_ids:
+        if not isinstance(event_id, str) or not event_id:
+            raise TypeError("eval_positive_event_ids items must be non-empty str")
+        event_payload = positive_event_lookup.get(event_id)
+        if not isinstance(event_payload, Mapping):
+            pair_specs.append(
+                {
+                    "event_id": event_id,
+                    "reference_image_path": None,
+                    "candidate_image_path": None,
+                    "sample_role": ACTIVE_SAMPLE_ROLE,
+                }
+            )
+            continue
+        pair_specs.append(
+            {
+                "event_id": event_id,
+                "reference_image_path": _safe_resolve_source_image_path(event_payload),
+                "candidate_image_path": _safe_resolve_preview_artifact_path(event_payload),
+                "sample_role": ACTIVE_SAMPLE_ROLE,
+            }
+        )
+
+    quality_payload = build_quality_metrics_from_pairs(
+        pair_specs=pair_specs,
+        reference_path_key="reference_image_path",
+        candidate_path_key="candidate_image_path",
+        pair_id_key="event_id",
+        extra_metadata_keys=["sample_role"],
+    )
+    quality_payload["reference_semantics"] = "source_image_vs_preview_generation_persisted_artifact"
+    quality_payload["sample_role"] = ACTIVE_SAMPLE_ROLE
+    quality_payload["split_scope"] = "evaluate_positive_only"
+    return quality_payload
+
+
+def _build_clean_score_analysis_export(
+    *,
+    family_id: str,
+    stage_root: Path,
+    score_name: str,
+    score_run: Mapping[str, Any],
+    positive_event_lookup: Mapping[str, Dict[str, Any]],
+    eval_positive_event_ids: Sequence[str],
+) -> Dict[str, Any]:
+    """
+    Build one append-only clean score analysis export.
+
+    Args:
+        family_id: Family identifier.
+        stage_root: PW02 stage root.
+        score_name: Canonical score name.
+        score_run: Score-run summary.
+        positive_event_lookup: Positive-source event lookup.
+        eval_positive_event_ids: Positive event ids used by the evaluate split.
+
+    Returns:
+        Export summary with path and payload.
+    """
+    if not isinstance(stage_root, Path):
+        raise TypeError("stage_root must be Path")
+
+    evaluate_record_path = Path(str(score_run.get("evaluate_record_path", ""))).expanduser().resolve()
+    thresholds_artifact_path = Path(str(score_run.get("thresholds_artifact_path", ""))).expanduser().resolve()
+    evaluate_record = _load_required_json_dict(evaluate_record_path, f"PW02 evaluate record {score_name}")
+    thresholds_artifact = _load_required_json_dict(thresholds_artifact_path, f"PW02 thresholds artifact {score_name}")
+    prepared_records = _load_records_from_records_summary(cast(Mapping[str, Any], score_run.get("evaluate_inputs", {})))
+    roc_fpr, roc_tpr, roc_thresholds = eval_metrics.compute_roc_curve(prepared_records, score_name=score_name)
+    roc_auc_value = None
+    if roc_fpr and roc_tpr:
+        try:
+            roc_auc_value = eval_metrics.compute_auc(roc_fpr, roc_tpr)
+        except ValueError:
+            roc_auc_value = None
+
+    export_path = stage_root / "analysis" / _resolve_top_level_score_directory_name(score_name) / CLEAN_SCORE_ANALYSIS_FILE_NAME
+    ensure_directory(export_path.parent)
+    payload: Dict[str, Any] = {
+        "artifact_type": "paper_workflow_pw02_clean_score_analysis",
+        "schema_version": "pw_stage_02_v1",
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "score_name": score_name,
+        "evaluation_scope": "positive_source_vs_clean_negative",
+        "source_evaluate_run_root": str(score_run.get("evaluate_run_root")),
+        "source_evaluate_record_path": normalize_path_value(evaluate_record_path),
+        "source_thresholds_artifact_path": normalize_path_value(thresholds_artifact_path),
+        "evaluate_input_counts": _count_records_by_role(cast(Mapping[str, Any], score_run.get("evaluate_inputs", {}))),
+        "operating_metrics": _extract_evaluate_metrics_payload(evaluate_record),
+        "breakdown": _extract_evaluate_breakdown_payload(evaluate_record),
+        "threshold_binding": {
+            "threshold_id": thresholds_artifact.get("threshold_id"),
+            "threshold_key_used": thresholds_artifact.get("threshold_key_used"),
+            "threshold_value": thresholds_artifact.get("threshold_value"),
+            "target_fpr": thresholds_artifact.get("target_fpr"),
+            "decision_operator": thresholds_artifact.get("decision_operator"),
+        },
+        "roc_auc": {
+            "auc": roc_auc_value,
+            "roc_curve_points": len(roc_fpr),
+            "fpr": roc_fpr,
+            "tpr": roc_tpr,
+            "thresholds": roc_thresholds,
+        },
+        "clean_positive_quality_metrics": _build_clean_positive_quality_metrics(
+            score_name=score_name,
+            positive_event_lookup=positive_event_lookup,
+            eval_positive_event_ids=eval_positive_event_ids,
+        ),
+    }
+    write_json_atomic(export_path, payload)
+    return {
+        "score_name": score_name,
+        "path": normalize_path_value(export_path),
+        "payload": payload,
+    }
+
+
 def _build_system_final_metrics_export(
     *,
     family_id: str,
@@ -714,6 +1007,7 @@ def _build_finalize_manifest_payload(
     control_negative_pool_manifest: Mapping[str, Any],
     threshold_exports: Mapping[str, Dict[str, Any]],
     clean_evaluate_exports: Mapping[str, Dict[str, Any]],
+    clean_score_analysis_exports: Mapping[str, Dict[str, Any]],
     formal_final_decision_export: Mapping[str, Any],
     derived_system_union_export: Mapping[str, Any],
     score_runs: Mapping[str, Dict[str, Any]],
@@ -803,6 +1097,15 @@ def _build_finalize_manifest_payload(
                 "source_evaluate_record_path": cast(Mapping[str, Any], export_summary.get("payload", {})).get("source_evaluate_record_path"),
             }
             for score_key, export_summary in clean_evaluate_exports.items()
+        },
+        "clean_score_analysis_exports": {
+            score_key: {
+                "score_name": export_summary.get("score_name"),
+                "path": export_summary.get("path"),
+                "source_evaluate_run_root": cast(Mapping[str, Any], export_summary.get("payload", {})).get("source_evaluate_run_root"),
+                "source_evaluate_record_path": cast(Mapping[str, Any], export_summary.get("payload", {})).get("source_evaluate_record_path"),
+            }
+            for score_key, export_summary in clean_score_analysis_exports.items()
         },
         "formal_final_decision": {
             "mode": "formal_final_decision_metrics_from_content_evaluate_inputs",
@@ -1486,6 +1789,17 @@ def run_pw02_merge_source_event_shards(
         )
         for score_name, score_run in score_runs.items()
     }
+    clean_score_analysis_exports = {
+        _resolve_top_level_score_directory_name(score_name): _build_clean_score_analysis_export(
+            family_id=family_id,
+            stage_root=stage_root,
+            score_name=score_name,
+            score_run=score_run,
+            positive_event_lookup=positive_events,
+            eval_positive_event_ids=cast(Sequence[str], source_split_plan.get("eval_pos_event_ids", [])),
+        )
+        for score_name, score_run in score_runs.items()
+    }
     formal_final_decision_export = _build_formal_final_decision_metrics_export(
         family_id=family_id,
         stage_root=stage_root,
@@ -1515,6 +1829,7 @@ def run_pw02_merge_source_event_shards(
         control_negative_pool_manifest=control_negative_pool_manifest,
         threshold_exports=threshold_exports,
         clean_evaluate_exports=clean_evaluate_exports,
+        clean_score_analysis_exports=clean_score_analysis_exports,
         formal_final_decision_export=formal_final_decision_export,
         derived_system_union_export=derived_system_union_export,
         score_runs=score_runs,
@@ -1548,6 +1863,10 @@ def run_pw02_merge_source_event_shards(
         "clean_evaluate_exports": {
             score_key: export_summary["path"]
             for score_key, export_summary in clean_evaluate_exports.items()
+        },
+        "clean_score_analysis_exports": {
+            score_key: export_summary["path"]
+            for score_key, export_summary in clean_score_analysis_exports.items()
         },
         "formal_final_decision_metrics": formal_final_decision_metrics,
         "formal_final_decision_metrics_artifact_path": str(formal_final_decision_export["path"]),

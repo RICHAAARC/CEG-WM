@@ -26,6 +26,7 @@ from paper_workflow.scripts.pw_common import (
     read_jsonl,
     write_jsonl,
 )
+from paper_workflow.scripts.pw_quality_metrics import build_quality_metrics_from_pairs
 from paper_workflow.scripts.pw04_paper_exports import build_pw04_paper_exports
 from scripts.notebook_runtime_common import (
     compute_file_sha256,
@@ -55,6 +56,7 @@ ATTACK_EVENT_TABLE_FILE_NAME = "attack_event_table.jsonl"
 ATTACK_FAMILY_SUMMARY_CSV_FILE_NAME = "attack_family_summary.csv"
 ATTACK_CONDITION_SUMMARY_CSV_FILE_NAME = "attack_condition_summary.csv"
 CLEAN_ATTACK_OVERVIEW_FILE_NAME = "clean_attack_overview.json"
+ATTACK_QUALITY_METRICS_FILE_NAME = "attack_quality_metrics.json"
 PW04_METRICS_DIRECTORY_NAME = "metrics"
 PW04_FIGURES_DIRECTORY_NAME = "figures"
 PW04_TAIL_DIRECTORY_NAME = "tail"
@@ -161,6 +163,7 @@ def _resolve_pw04_paths(family_root: Path) -> Dict[str, Path]:
         "attack_family_summary_csv_path": tables_root / ATTACK_FAMILY_SUMMARY_CSV_FILE_NAME,
         "attack_condition_summary_csv_path": tables_root / ATTACK_CONDITION_SUMMARY_CSV_FILE_NAME,
         "clean_attack_overview_path": export_root / CLEAN_ATTACK_OVERVIEW_FILE_NAME,
+        "attack_quality_metrics_path": metrics_root / ATTACK_QUALITY_METRICS_FILE_NAME,
     }
     for path_obj in paths.values():
         validate_path_within_base(family_root, path_obj, "PW04 output path")
@@ -498,6 +501,13 @@ def _collect_completed_attack_events(
             attacked_image_path = event_manifest.get("attacked_image_path")
             if not isinstance(attacked_image_path, str) or not attacked_image_path.strip():
                 raise ValueError(f"PW03 event manifest missing attacked_image_path: {attack_event_id}")
+            parent_source_image_path = event_manifest.get("parent_source_image_path")
+            if not isinstance(parent_source_image_path, str) or not parent_source_image_path.strip():
+                detect_parent_source_path = detect_payload.get("paper_workflow_parent_source_image_path")
+                if isinstance(detect_parent_source_path, str) and detect_parent_source_path.strip():
+                    parent_source_image_path = detect_parent_source_path
+                else:
+                    parent_source_image_path = None
 
             content_score, content_score_source = eval_workflow_inputs._resolve_content_score_source(detect_payload)
             attestation_score, attestation_score_source = eval_workflow_inputs._resolve_event_attestation_score_source(detect_payload)
@@ -539,6 +549,7 @@ def _collect_completed_attack_events(
                     "attack_params_digest": attack_params_digest,
                     "source_finalize_manifest_digest": source_finalize_manifest_digest,
                     "threshold_artifact_paths": threshold_artifact_paths,
+                    "parent_source_image_path": parent_source_image_path,
                     "attacked_image_path": attacked_image_path,
                     "content_score": content_score,
                     "content_score_source": content_score_source,
@@ -842,6 +853,143 @@ def _build_attack_metrics_core(
     }
 
 
+def _build_grouped_attack_quality_rows(
+    *,
+    pair_rows: Sequence[Mapping[str, Any]],
+    group_key_name: str,
+) -> List[Dict[str, Any]]:
+    """
+    Build grouped attack image-quality rows for one categorical key.
+
+    Args:
+        pair_rows: Per-pair attack quality rows.
+        group_key_name: Grouping field name.
+
+    Returns:
+        Grouped attack quality rows.
+    """
+    if not isinstance(group_key_name, str) or not group_key_name:
+        raise TypeError("group_key_name must be non-empty str")
+
+    grouped_rows: Dict[str, List[Mapping[str, Any]]] = {}
+    for pair_row in pair_rows:
+        if not isinstance(pair_row, Mapping):
+            raise TypeError("pair_rows items must be mappings")
+        if pair_row.get("status") != "ok":
+            continue
+        group_value = pair_row.get(group_key_name)
+        if not isinstance(group_value, str) or not group_value:
+            raise ValueError(f"pair row missing {group_key_name}")
+        grouped_rows.setdefault(group_value, []).append(pair_row)
+
+    output_rows: List[Dict[str, Any]] = []
+    for group_value in sorted(grouped_rows):
+        rows = grouped_rows[group_value]
+        psnr_values = [
+            float(row["psnr"])
+            for row in rows
+            if isinstance(row.get("psnr"), (int, float)) and not isinstance(row.get("psnr"), bool)
+        ]
+        ssim_values = [
+            float(row["ssim"])
+            for row in rows
+            if isinstance(row.get("ssim"), (int, float)) and not isinstance(row.get("ssim"), bool)
+        ]
+        grouped_row: Dict[str, Any] = {
+            group_key_name: group_value,
+            "quality_pair_count": len(psnr_values),
+            "mean_psnr": float(sum(psnr_values) / len(psnr_values)) if psnr_values else None,
+            "mean_ssim": float(sum(ssim_values) / len(ssim_values)) if ssim_values else None,
+        }
+        if group_key_name == "attack_condition_key":
+            grouped_row["attack_family"] = rows[0].get("attack_family")
+            grouped_row["attack_config_name"] = rows[0].get("attack_config_name")
+        output_rows.append(grouped_row)
+    return output_rows
+
+
+def _build_attack_quality_metrics_export(
+    *,
+    family_id: str,
+    output_path: Path,
+    attack_event_rows: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Build one append-only attack image-quality metrics export.
+
+    Args:
+        family_id: Family identifier.
+        output_path: Output artifact path.
+        attack_event_rows: Materialized attack event rows.
+
+    Returns:
+        Export summary with payload and per-event lookup.
+    """
+    if not isinstance(output_path, Path):
+        raise TypeError("output_path must be Path")
+
+    pair_specs: List[Dict[str, Any]] = []
+    for attack_event_row in attack_event_rows:
+        if not isinstance(attack_event_row, Mapping):
+            raise TypeError("attack_event_rows items must be mappings")
+        pair_specs.append(
+            {
+                "attack_event_id": attack_event_row.get("attack_event_id"),
+                "parent_event_id": attack_event_row.get("parent_event_id"),
+                "attack_family": attack_event_row.get("attack_family"),
+                "attack_condition_key": attack_event_row.get("attack_condition_key"),
+                "attack_config_name": attack_event_row.get("attack_config_name"),
+                "reference_image_path": attack_event_row.get("parent_source_image_path"),
+                "candidate_image_path": attack_event_row.get("attacked_image_path"),
+            }
+        )
+
+    quality_summary = build_quality_metrics_from_pairs(
+        pair_specs=pair_specs,
+        reference_path_key="reference_image_path",
+        candidate_path_key="candidate_image_path",
+        pair_id_key="attack_event_id",
+        extra_metadata_keys=["parent_event_id", "attack_family", "attack_condition_key", "attack_config_name"],
+    )
+    pair_rows = cast(List[Mapping[str, Any]], quality_summary.get("pair_rows", []))
+    payload: Dict[str, Any] = {
+        "artifact_type": "paper_workflow_pw04_attack_quality_metrics",
+        "schema_version": SCHEMA_VERSION,
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "reference_semantics": "parent_source_image_vs_attacked_image",
+        "overall": {
+            "status": quality_summary.get("status"),
+            "availability_reason": quality_summary.get("availability_reason"),
+            "expected_count": quality_summary.get("expected_count"),
+            "count": quality_summary.get("count"),
+            "missing_count": quality_summary.get("missing_count"),
+            "error_count": quality_summary.get("error_count"),
+            "mean_psnr": quality_summary.get("mean_psnr"),
+            "mean_ssim": quality_summary.get("mean_ssim"),
+        },
+        "by_attack_family": _build_grouped_attack_quality_rows(
+            pair_rows=pair_rows,
+            group_key_name="attack_family",
+        ),
+        "by_attack_condition": _build_grouped_attack_quality_rows(
+            pair_rows=pair_rows,
+            group_key_name="attack_condition_key",
+        ),
+        "pair_rows": list(pair_rows),
+    }
+    write_json_atomic(output_path, payload)
+    return {
+        "path": normalize_path_value(output_path),
+        "payload": payload,
+        "pair_lookup": {
+            str(pair_row["pair_id"]): dict(pair_row)
+            for pair_row in pair_rows
+            if isinstance(pair_row.get("pair_id"), str) and pair_row.get("pair_id")
+        },
+    }
+
+
 def _build_formal_attack_final_decision_metrics_export(
     *,
     family_id: str,
@@ -1013,6 +1161,16 @@ def _build_grouped_attack_metrics_rows(
             for row in rows
             if isinstance(row.get("event_attestation_score"), (int, float)) and not isinstance(row.get("event_attestation_score"), bool)
         ]
+        quality_psnr_values = [
+            float(row["attack_quality_psnr"])
+            for row in rows
+            if isinstance(row.get("attack_quality_psnr"), (int, float)) and not isinstance(row.get("attack_quality_psnr"), bool)
+        ]
+        quality_ssim_values = [
+            float(row["attack_quality_ssim"])
+            for row in rows
+            if isinstance(row.get("attack_quality_ssim"), (int, float)) and not isinstance(row.get("attack_quality_ssim"), bool)
+        ]
         formal_final_positive_count = 0
         formal_attestation_positive_count = 0
         derived_union_positive_count = 0
@@ -1039,6 +1197,9 @@ def _build_grouped_attack_metrics_rows(
             "derived_attack_union_tpr": float(derived_union_positive_count / len(rows)) if rows else None,
             "content_score_mean": float(sum(content_scores) / len(content_scores)) if content_scores else None,
             "event_attestation_score_mean": float(sum(attestation_scores) / len(attestation_scores)) if attestation_scores else None,
+            "attack_quality_pair_count": len(quality_psnr_values),
+            "attack_mean_psnr": float(sum(quality_psnr_values) / len(quality_psnr_values)) if quality_psnr_values else None,
+            "attack_mean_ssim": float(sum(quality_ssim_values) / len(quality_ssim_values)) if quality_ssim_values else None,
         }
         if group_key_name == "attack_condition_key":
             row_payload["attack_family"] = str(rows[0]["attack_family"])
@@ -1157,6 +1318,9 @@ def _write_attack_event_table_jsonl(
                 "geo_rescue_eligible": image_evidence_payload.get("geo_rescue_eligible"),
                 "geo_rescue_applied": image_evidence_payload.get("geo_rescue_applied"),
                 "geo_not_used_reason": image_evidence_payload.get("geo_not_used_reason"),
+                "attack_quality_status": attack_event_row.get("attack_quality_status"),
+                "attack_quality_psnr": attack_event_row.get("attack_quality_psnr"),
+                "attack_quality_ssim": attack_event_row.get("attack_quality_ssim"),
             }
         )
     ensure_directory(output_path.parent)
@@ -1200,9 +1364,11 @@ def _build_clean_attack_overview_export(
     attack_formal_metrics_path: Path,
     attack_attestation_metrics_path: Path,
     attack_derived_metrics_path: Path,
+    attack_quality_metrics_path: Path,
     attack_formal_metrics_payload: Mapping[str, Any],
     attack_attestation_metrics_payload: Mapping[str, Any],
     attack_derived_metrics_payload: Mapping[str, Any],
+    attack_quality_metrics_payload: Mapping[str, Any],
 ) -> Dict[str, Any]:
     """
     Build the clean-vs-attack overview export payload.
@@ -1234,6 +1400,7 @@ def _build_clean_attack_overview_export(
     attack_formal_metrics = cast(Mapping[str, Any], attack_formal_metrics_payload.get("metrics", {}))
     attack_attestation_metrics = cast(Mapping[str, Any], attack_attestation_metrics_payload.get("metrics", {}))
     attack_derived_metrics = cast(Mapping[str, Any], attack_derived_metrics_payload.get("metrics", {}))
+    attack_quality_overall = cast(Mapping[str, Any], attack_quality_metrics_payload.get("overall", {}))
     return {
         "artifact_type": "paper_workflow_pw04_clean_attack_overview",
         "schema_version": SCHEMA_VERSION,
@@ -1244,12 +1411,15 @@ def _build_clean_attack_overview_export(
         "attack_formal_final_decision_metrics_path": normalize_path_value(attack_formal_metrics_path),
         "attack_formal_attestation_metrics_path": normalize_path_value(attack_attestation_metrics_path),
         "attack_derived_union_metrics_path": normalize_path_value(attack_derived_metrics_path),
+        "attack_quality_metrics_path": normalize_path_value(attack_quality_metrics_path),
         "clean_formal_tpr": clean_formal_metrics.get("final_decision_tpr"),
         "clean_formal_fpr": clean_formal_metrics.get("final_decision_fpr"),
         "clean_derived_union_tpr": clean_derived_metrics.get("system_tpr"),
         "attack_formal_tpr": attack_formal_metrics.get("attack_tpr"),
         "attack_formal_attestation_tpr": attack_attestation_metrics.get("attack_tpr"),
         "attack_derived_union_tpr": attack_derived_metrics.get("attack_tpr"),
+        "attack_quality_mean_psnr": attack_quality_overall.get("mean_psnr"),
+        "attack_quality_mean_ssim": attack_quality_overall.get("mean_ssim"),
     }
 
 
@@ -1265,6 +1435,7 @@ def _build_pw04_summary_payload(
     derived_attack_union_metrics_path: Path,
     per_attack_family_metrics_path: Path,
     per_attack_condition_metrics_path: Path,
+    attack_quality_metrics_path: Path,
     attack_event_table_path: Path,
     attack_family_summary_csv_path: Path,
     attack_condition_summary_csv_path: Path,
@@ -1325,6 +1496,7 @@ def _build_pw04_summary_payload(
         "derived_attack_union_metrics_path": normalize_path_value(derived_attack_union_metrics_path),
         "per_attack_family_metrics_path": normalize_path_value(per_attack_family_metrics_path),
         "per_attack_condition_metrics_path": normalize_path_value(per_attack_condition_metrics_path),
+        "attack_quality_metrics_path": normalize_path_value(attack_quality_metrics_path),
         "attack_event_table_path": normalize_path_value(attack_event_table_path),
         "attack_family_summary_csv_path": normalize_path_value(attack_family_summary_csv_path),
         "attack_condition_summary_csv_path": normalize_path_value(attack_condition_summary_csv_path),
@@ -1499,6 +1671,18 @@ def run_pw04_merge_attack_event_shards(
         family_id=family_id,
         attack_event_rows=materialized_attack_event_rows,
     )
+    attack_quality_metrics_export = _build_attack_quality_metrics_export(
+        family_id=family_id,
+        output_path=cast(Path, pw04_paths["attack_quality_metrics_path"]),
+        attack_event_rows=materialized_attack_event_rows,
+    )
+    quality_lookup = cast(Dict[str, Dict[str, Any]], attack_quality_metrics_export["pair_lookup"])
+    for attack_event_row in materialized_attack_event_rows:
+        attack_event_id = str(attack_event_row["attack_event_id"])
+        quality_row = quality_lookup.get(attack_event_id, {})
+        attack_event_row["attack_quality_status"] = quality_row.get("status", "unavailable")
+        attack_event_row["attack_quality_psnr"] = quality_row.get("psnr")
+        attack_event_row["attack_quality_ssim"] = quality_row.get("ssim")
     formal_attack_final_decision_metrics_payload = _build_formal_attack_final_decision_metrics_export(
         family_id=family_id,
         finalize_manifest_path=finalize_manifest_path,
@@ -1547,9 +1731,11 @@ def run_pw04_merge_attack_event_shards(
         attack_formal_metrics_path=cast(Path, pw04_paths["formal_attack_final_decision_metrics_path"]),
         attack_attestation_metrics_path=cast(Path, pw04_paths["formal_attack_attestation_metrics_path"]),
         attack_derived_metrics_path=cast(Path, pw04_paths["derived_attack_union_metrics_path"]),
+        attack_quality_metrics_path=cast(Path, pw04_paths["attack_quality_metrics_path"]),
         attack_formal_metrics_payload=formal_attack_final_decision_metrics_payload,
         attack_attestation_metrics_payload=formal_attack_attestation_metrics_payload,
         attack_derived_metrics_payload=derived_attack_union_metrics_payload,
+        attack_quality_metrics_payload=cast(Mapping[str, Any], attack_quality_metrics_export["payload"]),
     )
 
     write_json_atomic(cast(Path, pw04_paths["attack_merge_manifest_path"]), attack_merge_manifest_payload)
@@ -1578,6 +1764,7 @@ def run_pw04_merge_attack_event_shards(
         attack_event_rows=materialized_attack_event_rows,
         per_attack_family_metrics_payload=per_attack_family_metrics_payload,
         per_attack_condition_metrics_payload=per_attack_condition_metrics_payload,
+        attack_quality_metrics_payload=cast(Mapping[str, Any], attack_quality_metrics_export["payload"]),
         enable_tail_estimation=enable_tail_estimation,
     )
 
@@ -1592,6 +1779,7 @@ def run_pw04_merge_attack_event_shards(
         derived_attack_union_metrics_path=cast(Path, pw04_paths["derived_attack_union_metrics_path"]),
         per_attack_family_metrics_path=cast(Path, pw04_paths["per_attack_family_metrics_path"]),
         per_attack_condition_metrics_path=cast(Path, pw04_paths["per_attack_condition_metrics_path"]),
+        attack_quality_metrics_path=cast(Path, pw04_paths["attack_quality_metrics_path"]),
         attack_event_table_path=cast(Path, pw04_paths["attack_event_table_path"]),
         attack_family_summary_csv_path=cast(Path, pw04_paths["attack_family_summary_csv_path"]),
         attack_condition_summary_csv_path=cast(Path, pw04_paths["attack_condition_summary_csv_path"]),
