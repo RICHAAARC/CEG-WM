@@ -1820,6 +1820,7 @@ def run_pw02_merge_source_event_shards(
             score_key: str(export_summary["path"])
             for score_key, export_summary in clean_score_analysis_exports.items()
         },
+        score_runs=score_runs,
     )
 
     summary_path = layout["runtime_state_root"] / "pw02_summary.json"
@@ -1881,12 +1882,14 @@ def run_pw02_merge_source_event_shards(
         "quality_metrics_dir": pw02_metrics_extensions["quality_metrics_dir"],
         "payload_metrics_dir": pw02_metrics_extensions["payload_metrics_dir"],
         "roc_curve_paths": pw02_metrics_extensions["roc_curve_paths"],
+        "system_final_auxiliary_operating_semantics_path": pw02_metrics_extensions["system_final_auxiliary_operating_semantics_path"],
         "auc_summary_path": pw02_metrics_extensions["auc_summary_path"],
         "eer_summary_path": pw02_metrics_extensions["eer_summary_path"],
         "tpr_at_target_fpr_summary_path": pw02_metrics_extensions["tpr_at_target_fpr_summary_path"],
         "quality_metrics_summary_csv_path": pw02_metrics_extensions["quality_metrics_summary_csv_path"],
         "quality_metrics_summary_json_path": pw02_metrics_extensions["quality_metrics_summary_json_path"],
         "payload_clean_summary_path": pw02_metrics_extensions["payload_clean_summary_path"],
+        "analysis_only_artifact_paths": pw02_metrics_extensions["analysis_only_artifact_paths"],
         "formal_final_decision_metrics": formal_final_decision_metrics,
         "formal_final_decision_metrics_artifact_path": str(formal_final_decision_export["path"]),
         "derived_system_union_metrics": derived_system_union_metrics,

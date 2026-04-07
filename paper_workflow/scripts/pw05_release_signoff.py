@@ -429,6 +429,49 @@ def _collect_release_source_paths(
     return source_paths
 
 
+def _collect_analysis_only_source_bindings(
+    *,
+    family_root: Path,
+    pw04_summary: Mapping[str, Any],
+) -> Dict[str, Dict[str, Any]]:
+    """
+    功能：收集 PW04 summary 中声明的 analysis-only 源工件绑定。
+
+    Collect analysis-only source artifact bindings declared by the PW04 summary.
+
+    Args:
+        family_root: Family root path.
+        pw04_summary: PW04 summary payload.
+
+    Returns:
+        Label-to-binding mapping containing resolved path and release flags.
+    """
+    if not isinstance(family_root, Path):
+        raise TypeError("family_root must be Path")
+    if not isinstance(pw04_summary, Mapping):
+        raise TypeError("pw04_summary must be Mapping")
+
+    analysis_only_paths = pw04_summary.get("analysis_only_artifact_paths")
+    if not isinstance(analysis_only_paths, Mapping):
+        return {}
+    analysis_only_annotations = pw04_summary.get("analysis_only_artifact_annotations")
+    annotation_mapping = analysis_only_annotations if isinstance(analysis_only_annotations, Mapping) else {}
+
+    bindings: Dict[str, Dict[str, Any]] = {}
+    for label, path_value in analysis_only_paths.items():
+        if not isinstance(label, str) or not label:
+            continue
+        resolved_path = _resolve_path_value_under_family_root(path_value, family_root, f"analysis_only_artifact_paths.{label}")
+        annotation_node = annotation_mapping.get(label) if isinstance(annotation_mapping, Mapping) else None
+        annotation_payload = annotation_node if isinstance(annotation_node, Mapping) else {}
+        bindings[label] = {
+            "path": resolved_path,
+            "canonical": bool(annotation_payload.get("canonical", False)),
+            "analysis_only": bool(annotation_payload.get("analysis_only", True)),
+        }
+    return bindings
+
+
 def _build_release_copy_paths(family_root: Path, source_paths: Mapping[str, Path]) -> Dict[str, str]:
     """
     功能：构造 release package 内的稳定复制路径。
@@ -549,13 +592,31 @@ def run_pw05_release_signoff(
 
     pw04_summary_path = family_root / "runtime_state" / PW04_SUMMARY_FILE_NAME
     pw04_summary = _load_required_json_dict(pw04_summary_path, "PW04 summary")
-    source_paths = _collect_release_source_paths(
+    canonical_source_paths = _collect_release_source_paths(
         family_id=family_id,
         family_root=family_root,
         pw04_summary=pw04_summary,
     )
+    analysis_only_source_bindings = _collect_analysis_only_source_bindings(
+        family_root=family_root,
+        pw04_summary=pw04_summary,
+    )
+    analysis_only_source_paths = {
+        label: cast(Path, binding["path"])
+        for label, binding in analysis_only_source_bindings.items()
+    }
+    source_paths = {**canonical_source_paths, **analysis_only_source_paths}
     source_artifact_index = collect_file_index(family_root, source_paths)
     release_copy_paths = _build_release_copy_paths(family_root, source_paths)
+    analysis_only_release_annotations = {
+        label: {
+            "source_path": normalize_path_value(cast(Path, binding["path"])),
+            "release_copy_path": release_copy_paths[label],
+            "canonical": bool(binding["canonical"]),
+            "analysis_only": bool(binding["analysis_only"]),
+        }
+        for label, binding in analysis_only_source_bindings.items()
+    }
 
     decision = ALLOW_FREEZE
     status_payload = _resolve_signoff_statuses(decision)
@@ -589,6 +650,7 @@ def run_pw05_release_signoff(
         "blocking_reason_count": 0,
         "blocking_reasons": [],
         "checked_source_artifact_count": len(source_artifact_index),
+        "analysis_only_artifact_count": len(analysis_only_release_annotations),
         "checked_source_artifacts": source_artifact_index,
         "pw04_summary_anchor": {
             "status": pw04_summary.get("status"),
@@ -626,9 +688,11 @@ def run_pw05_release_signoff(
             "includes_tables": True,
             "includes_figures": True,
             "includes_tail_estimation": True,
+            "includes_analysis_only_artifacts": bool(analysis_only_release_annotations),
         },
         "source_artifact_index": source_artifact_index,
         "release_copy_paths": release_copy_paths,
+        "analysis_only_artifact_annotations": analysis_only_release_annotations,
         "created_at": utc_now_iso(),
     }
     write_json_atomic(release_manifest_path, release_manifest)
@@ -652,6 +716,7 @@ def run_pw05_release_signoff(
         "stage_manifest_path": normalize_path_value(stage_manifest_path),
         "package_manifest_path": normalize_path_value(package_manifest_path),
         "checked_source_artifact_count": len(source_artifact_index),
+        "analysis_only_artifact_count": len(analysis_only_release_annotations),
         "created_at": utc_now_iso(),
     }
     write_json_atomic(workflow_summary_path, workflow_summary)
@@ -705,6 +770,7 @@ def run_pw05_release_signoff(
         "source_artifact_index": source_artifact_index,
         "generated_artifact_index": generated_artifact_index,
         "release_copy_paths": release_copy_paths,
+        "analysis_only_artifact_annotations": analysis_only_release_annotations,
         "git": collect_git_summary(REPO_ROOT),
         "python": collect_python_summary(),
         "created_at": utc_now_iso(),
@@ -769,6 +835,11 @@ def run_pw05_release_signoff(
         "release_status": status_payload["release_status"],
         "paper_closure_status": status_payload["paper_closure_status"],
         "release_copy_paths": release_copy_paths,
+        "analysis_only_artifact_paths": {
+            label: normalize_path_value(path_obj)
+            for label, path_obj in analysis_only_source_paths.items()
+        },
+        "analysis_only_artifact_annotations": analysis_only_release_annotations,
         "source_artifact_index": source_artifact_index,
         "generated_artifact_index": final_generated_artifact_index,
         "status": "completed",

@@ -17,6 +17,9 @@ from scripts.notebook_runtime_common import ensure_directory, normalize_path_val
 
 
 PAPER_SCOPE_ORDER: Tuple[str, ...] = ("content_chain", "event_attestation", "system_final")
+SYSTEM_FINAL_AUXILIARY_SCOPE = "system_final_auxiliary"
+SYSTEM_FINAL_AUXILIARY_SCORE_NAME = "system_final_auxiliary_score"
+SYSTEM_FINAL_AUXILIARY_DECISION_THRESHOLD = 0.0
 SCOPE_COLUMN_NAMES = {
     "content_chain": "content_chain_attack_tpr",
     "event_attestation": "event_attestation_attack_tpr",
@@ -25,6 +28,9 @@ SCOPE_COLUMN_NAMES = {
 SEVERITY_NOT_AVAILABLE_REASON = "attack condition severity is not frozen in current canonical exports"
 DEEP_GEOMETRY_NOT_AVAILABLE_REASON = "requires future upstream sidecar from PW03 staged detect/event manifest"
 PAYLOAD_UNAVAILABLE_REASON = "missing upstream decoded bits / bit error sidecar"
+SYSTEM_FINAL_AUXILIARY_ATTACK_SUMMARY_FILE_NAME = "system_final_auxiliary_attack_summary.json"
+SYSTEM_FINAL_AUXILIARY_ATTACK_BY_FAMILY_FILE_NAME = "system_final_auxiliary_attack_by_family.csv"
+SYSTEM_FINAL_AUXILIARY_ATTACK_BY_CONDITION_FILE_NAME = "system_final_auxiliary_attack_by_condition.csv"
 
 
 def _load_required_json_dict(path_obj: Path, label: str) -> Dict[str, Any]:
@@ -172,6 +178,313 @@ def _safe_mean(values: Sequence[float]) -> float | None:
     if not finite_values:
         return None
     return float(sum(finite_values) / len(finite_values))
+
+
+def _coerce_finite_float(value: Any) -> float | None:
+    """
+    功能：将候选值解析为有限浮点数。
+
+    Coerce a candidate value into a finite float.
+
+    Args:
+        value: Candidate scalar value.
+
+    Returns:
+        Finite float when available; otherwise None.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        value_float = float(value)
+        return value_float if math.isfinite(value_float) else None
+    if isinstance(value, str) and value.strip():
+        try:
+            value_float = float(value.strip())
+        except ValueError:
+            return None
+        return value_float if math.isfinite(value_float) else None
+    return None
+
+
+def _resolve_pw02_threshold_export_path(
+    pw02_summary: Mapping[str, Any],
+    family_root: Path,
+    threshold_key: str,
+) -> Path:
+    """
+    功能：解析 PW02 threshold export 路径。
+
+    Resolve one PW02 threshold export path.
+
+    Args:
+        pw02_summary: PW02 summary payload.
+        family_root: Paper workflow family root.
+        threshold_key: Threshold key, one of {"content", "attestation"}.
+
+    Returns:
+        Resolved threshold export path.
+    """
+    if not isinstance(pw02_summary, Mapping):
+        raise TypeError("pw02_summary must be Mapping")
+    if not isinstance(family_root, Path):
+        raise TypeError("family_root must be Path")
+    if not isinstance(threshold_key, str) or threshold_key not in {"content", "attestation"}:
+        raise ValueError("threshold_key must be one of {'content', 'attestation'}")
+
+    threshold_exports = pw02_summary.get("threshold_exports")
+    if isinstance(threshold_exports, Mapping):
+        path_value = threshold_exports.get(threshold_key)
+        if isinstance(path_value, str) and path_value.strip():
+            return Path(path_value).expanduser().resolve()
+    return (family_root / "exports" / "pw02" / "thresholds" / threshold_key / "thresholds.json").resolve()
+
+
+def _build_system_final_auxiliary_attack_exports(
+    *,
+    family_id: str,
+    family_root: Path,
+    pw02_summary: Mapping[str, Any],
+    attack_event_rows: Sequence[Mapping[str, Any]],
+    robustness_dir: Path,
+) -> Dict[str, Any]:
+    """
+    功能：构造 system_final auxiliary 的 attack-side analysis 导出。
+
+    Build attack-side auxiliary analysis exports for the synthetic
+    system_final scalar chain.
+
+    Args:
+        family_id: Family identifier.
+        family_root: Family root path.
+        pw02_summary: PW02 summary payload.
+        attack_event_rows: Materialized attack event rows.
+        robustness_dir: PW04 robustness directory.
+
+    Returns:
+        Mapping with summary payload, CSV rows, and written paths.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(family_root, Path):
+        raise TypeError("family_root must be Path")
+    if not isinstance(pw02_summary, Mapping):
+        raise TypeError("pw02_summary must be Mapping")
+    if not isinstance(attack_event_rows, Sequence):
+        raise TypeError("attack_event_rows must be Sequence")
+    if not isinstance(robustness_dir, Path):
+        raise TypeError("robustness_dir must be Path")
+
+    content_threshold_export_path = _resolve_pw02_threshold_export_path(pw02_summary, family_root, "content")
+    attestation_threshold_export_path = _resolve_pw02_threshold_export_path(pw02_summary, family_root, "attestation")
+    content_threshold_export = _load_required_json_dict(content_threshold_export_path, "PW02 content threshold export")
+    attestation_threshold_export = _load_required_json_dict(attestation_threshold_export_path, "PW02 attestation threshold export")
+    content_thresholds_artifact = _extract_mapping(content_threshold_export.get("thresholds_artifact"))
+    attestation_thresholds_artifact = _extract_mapping(attestation_threshold_export.get("thresholds_artifact"))
+    content_threshold_value = _coerce_finite_float(content_thresholds_artifact.get("threshold_value"))
+    attestation_threshold_value = _coerce_finite_float(attestation_thresholds_artifact.get("threshold_value"))
+    if content_threshold_value is None:
+        raise ValueError("PW02 content threshold export missing thresholds_artifact.threshold_value")
+    if attestation_threshold_value is None:
+        raise ValueError("PW02 attestation threshold export missing thresholds_artifact.threshold_value")
+
+    detailed_rows: List[Dict[str, Any]] = []
+    mismatch_count = 0
+    missing_content_score_count = 0
+    missing_event_attestation_score_count = 0
+    for attack_event_row in attack_event_rows:
+        content_score = _coerce_finite_float(attack_event_row.get("content_score"))
+        event_attestation_score = _coerce_finite_float(attack_event_row.get("event_attestation_score"))
+        if content_score is None:
+            missing_content_score_count += 1
+        if event_attestation_score is None:
+            missing_event_attestation_score_count += 1
+        if content_score is None and event_attestation_score is None:
+            raise ValueError(
+                "PW04 auxiliary system_final missing both content_score and event_attestation_score: "
+                f"attack_event_id={attack_event_row.get('attack_event_id')}"
+            )
+
+        content_margin = (
+            float(content_score - content_threshold_value)
+            if content_score is not None
+            else float("-inf")
+        )
+        event_attestation_margin = (
+            float(event_attestation_score - attestation_threshold_value)
+            if event_attestation_score is not None
+            else float("-inf")
+        )
+        auxiliary_score = float(max(content_margin, event_attestation_margin))
+        auxiliary_positive = bool(auxiliary_score >= SYSTEM_FINAL_AUXILIARY_DECISION_THRESHOLD)
+        formal_record = _extract_mapping(attack_event_row.get("formal_record"))
+        derived_attack_union_positive = bool(formal_record.get("derived_attack_union_positive", False))
+        if auxiliary_positive != derived_attack_union_positive:
+            mismatch_count += 1
+
+        detailed_rows.append(
+            {
+                "attack_event_id": attack_event_row.get("attack_event_id"),
+                "parent_event_id": attack_event_row.get("parent_event_id"),
+                "attack_family": attack_event_row.get("attack_family"),
+                "attack_condition_key": attack_event_row.get("attack_condition_key"),
+                "attack_config_name": attack_event_row.get("attack_config_name"),
+                "content_score": content_score,
+                "event_attestation_score": event_attestation_score,
+                "content_margin": content_margin,
+                "event_attestation_margin": event_attestation_margin,
+                SYSTEM_FINAL_AUXILIARY_SCORE_NAME: auxiliary_score,
+                "auxiliary_positive": auxiliary_positive,
+                "derived_attack_union_positive": derived_attack_union_positive,
+            }
+        )
+
+    if mismatch_count > 0:
+        raise ValueError(
+            "PW04 auxiliary system_final score does not preserve derived attack union semantics: "
+            f"mismatch_count={mismatch_count}"
+        )
+
+    def _build_group_summary(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+        event_count = len(rows)
+        parent_event_count = len(
+            {
+                str(row.get("parent_event_id"))
+                for row in rows
+                if isinstance(row.get("parent_event_id"), str) and row.get("parent_event_id")
+            }
+        )
+        auxiliary_scores = [
+            float(cast(float, row.get(SYSTEM_FINAL_AUXILIARY_SCORE_NAME)))
+            for row in rows
+            if isinstance(row.get(SYSTEM_FINAL_AUXILIARY_SCORE_NAME), (int, float))
+        ]
+        auxiliary_positive_count = sum(1 for row in rows if bool(row.get("auxiliary_positive")))
+        derived_positive_count = sum(1 for row in rows if bool(row.get("derived_attack_union_positive")))
+        return {
+            "event_count": event_count,
+            "parent_event_count": parent_event_count,
+            "system_final_auxiliary_attack_tpr": float(auxiliary_positive_count / event_count) if event_count > 0 else None,
+            "system_final_auxiliary_score_mean": _safe_mean(auxiliary_scores),
+            "system_final_auxiliary_score_min": min(auxiliary_scores) if auxiliary_scores else None,
+            "system_final_auxiliary_score_max": max(auxiliary_scores) if auxiliary_scores else None,
+            "auxiliary_positive_count": auxiliary_positive_count,
+            "derived_attack_union_positive_count": derived_positive_count,
+            "consistency_mismatch_count": sum(
+                1 for row in rows if bool(row.get("auxiliary_positive")) != bool(row.get("derived_attack_union_positive"))
+            ),
+            "decision_threshold": SYSTEM_FINAL_AUXILIARY_DECISION_THRESHOLD,
+        }
+
+    family_rows: List[Dict[str, Any]] = []
+    grouped_family_rows: Dict[str, List[Mapping[str, Any]]] = {}
+    for row in detailed_rows:
+        attack_family = row.get("attack_family")
+        if not isinstance(attack_family, str) or not attack_family:
+            raise ValueError("system_final auxiliary attack row missing attack_family")
+        grouped_family_rows.setdefault(attack_family, []).append(row)
+    for attack_family in sorted(grouped_family_rows):
+        family_rows.append(
+            {
+                "attack_family": attack_family,
+                **_build_group_summary(grouped_family_rows[attack_family]),
+            }
+        )
+
+    condition_rows: List[Dict[str, Any]] = []
+    grouped_condition_rows: Dict[str, List[Mapping[str, Any]]] = {}
+    for row in detailed_rows:
+        attack_condition_key = row.get("attack_condition_key")
+        if not isinstance(attack_condition_key, str) or not attack_condition_key:
+            raise ValueError("system_final auxiliary attack row missing attack_condition_key")
+        grouped_condition_rows.setdefault(attack_condition_key, []).append(row)
+    for attack_condition_key in sorted(grouped_condition_rows):
+        first_row = grouped_condition_rows[attack_condition_key][0]
+        condition_rows.append(
+            {
+                "attack_condition_key": attack_condition_key,
+                "attack_family": first_row.get("attack_family"),
+                "attack_config_name": first_row.get("attack_config_name"),
+                **_build_group_summary(grouped_condition_rows[attack_condition_key]),
+            }
+        )
+
+    summary_payload = {
+        "artifact_type": "paper_workflow_pw04_system_final_auxiliary_attack_summary",
+        "schema_version": "pw_stage_04_v1",
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "scope": SYSTEM_FINAL_AUXILIARY_SCOPE,
+        "score_name": SYSTEM_FINAL_AUXILIARY_SCORE_NAME,
+        "canonical": False,
+        "analysis_only": True,
+        "score_definition": "max(content_chain_score - content_threshold, event_attestation_score - event_attestation_threshold)",
+        "decision_operator": ">=",
+        "decision_threshold": SYSTEM_FINAL_AUXILIARY_DECISION_THRESHOLD,
+        "threshold_binding": {
+            "content_threshold_export_path": normalize_path_value(content_threshold_export_path),
+            "event_attestation_threshold_export_path": normalize_path_value(attestation_threshold_export_path),
+            "content_threshold_id": content_thresholds_artifact.get("threshold_id"),
+            "event_attestation_threshold_id": attestation_thresholds_artifact.get("threshold_id"),
+            "content_threshold_value": content_threshold_value,
+            "event_attestation_threshold_value": attestation_threshold_value,
+        },
+        "overall": {
+            **_build_group_summary(detailed_rows),
+            "missing_content_score_count": missing_content_score_count,
+            "missing_event_attestation_score_count": missing_event_attestation_score_count,
+            "consistency_status": "exact_match",
+            "verified_record_count": len(detailed_rows),
+        },
+        "by_family": family_rows,
+        "by_condition": condition_rows,
+    }
+
+    summary_path = robustness_dir / SYSTEM_FINAL_AUXILIARY_ATTACK_SUMMARY_FILE_NAME
+    family_path = robustness_dir / SYSTEM_FINAL_AUXILIARY_ATTACK_BY_FAMILY_FILE_NAME
+    condition_path = robustness_dir / SYSTEM_FINAL_AUXILIARY_ATTACK_BY_CONDITION_FILE_NAME
+    write_json_atomic(summary_path, summary_payload)
+    _write_csv_rows(
+        family_path,
+        [
+            "attack_family",
+            "event_count",
+            "parent_event_count",
+            "system_final_auxiliary_attack_tpr",
+            "system_final_auxiliary_score_mean",
+            "system_final_auxiliary_score_min",
+            "system_final_auxiliary_score_max",
+            "auxiliary_positive_count",
+            "derived_attack_union_positive_count",
+            "consistency_mismatch_count",
+            "decision_threshold",
+        ],
+        family_rows,
+    )
+    _write_csv_rows(
+        condition_path,
+        [
+            "attack_condition_key",
+            "attack_family",
+            "attack_config_name",
+            "event_count",
+            "parent_event_count",
+            "system_final_auxiliary_attack_tpr",
+            "system_final_auxiliary_score_mean",
+            "system_final_auxiliary_score_min",
+            "system_final_auxiliary_score_max",
+            "auxiliary_positive_count",
+            "derived_attack_union_positive_count",
+            "consistency_mismatch_count",
+            "decision_threshold",
+        ],
+        condition_rows,
+    )
+    return {
+        "system_final_auxiliary_attack_summary_path": normalize_path_value(summary_path),
+        "system_final_auxiliary_attack_by_family_path": normalize_path_value(family_path),
+        "system_final_auxiliary_attack_by_condition_path": normalize_path_value(condition_path),
+        "system_final_auxiliary_attack_summary": summary_payload,
+    }
 
 
 def _resolve_pw02_quality_summary_paths(
@@ -574,6 +887,13 @@ def build_pw04_metrics_extensions(
     geometry_dir = ensure_directory(export_root / "geometry_diagnostics")
     payload_dir = ensure_directory(export_root / "payload_robustness")
     tradeoff_dir = ensure_directory(export_root / "tradeoff")
+    auxiliary_attack_exports = _build_system_final_auxiliary_attack_exports(
+        family_id=family_id,
+        family_root=family_root,
+        pw02_summary=pw02_summary,
+        attack_event_rows=attack_event_rows,
+        robustness_dir=robustness_dir,
+    )
 
     main_rows = _read_csv_rows(main_metrics_summary_csv_path)
     family_rows = _read_csv_rows(attack_family_summary_paper_csv_path)
@@ -751,14 +1071,42 @@ def build_pw04_metrics_extensions(
         "payload_attack_summary_path": normalize_path_value(payload_attack_summary_path),
         "quality_robustness_tradeoff_path": normalize_path_value(quality_robustness_tradeoff_path),
         "quality_robustness_frontier_path": normalize_path_value(quality_robustness_frontier_path),
+        "system_final_auxiliary_attack_summary_path": auxiliary_attack_exports["system_final_auxiliary_attack_summary_path"],
+        "system_final_auxiliary_attack_by_family_path": auxiliary_attack_exports["system_final_auxiliary_attack_by_family_path"],
+        "system_final_auxiliary_attack_by_condition_path": auxiliary_attack_exports["system_final_auxiliary_attack_by_condition_path"],
     }
     if paper_metric_registry_path is not None:
         _update_registry_supplemental_paths(paper_metric_registry_path, extension_paths)
+
+    analysis_only_artifact_paths: Dict[str, str] = {}
+    summary_analysis_only_paths = pw02_summary.get("analysis_only_artifact_paths")
+    if isinstance(summary_analysis_only_paths, Mapping):
+        for label, path_value in summary_analysis_only_paths.items():
+            if not isinstance(label, str) or not label:
+                continue
+            if not isinstance(path_value, str) or not path_value.strip():
+                continue
+            resolved_path = Path(path_value).expanduser().resolve()
+            if resolved_path.exists() and resolved_path.is_file():
+                analysis_only_artifact_paths[label] = normalize_path_value(resolved_path)
+    analysis_only_artifact_paths.update(
+        {
+            "pw04_system_final_auxiliary_attack_summary": auxiliary_attack_exports["system_final_auxiliary_attack_summary_path"],
+            "pw04_system_final_auxiliary_attack_by_family": auxiliary_attack_exports["system_final_auxiliary_attack_by_family_path"],
+            "pw04_system_final_auxiliary_attack_by_condition": auxiliary_attack_exports["system_final_auxiliary_attack_by_condition_path"],
+        }
+    )
+    analysis_only_artifact_annotations = {
+        label: {"canonical": False, "analysis_only": True}
+        for label in analysis_only_artifact_paths.keys()
+    }
 
     return {
         "robustness_dir": normalize_path_value(robustness_dir),
         "geometry_diagnostics_dir": normalize_path_value(geometry_dir),
         "payload_robustness_dir": normalize_path_value(payload_dir),
         "tradeoff_dir": normalize_path_value(tradeoff_dir),
+        "analysis_only_artifact_paths": analysis_only_artifact_paths,
+        "analysis_only_artifact_annotations": analysis_only_artifact_annotations,
         **extension_paths,
     }

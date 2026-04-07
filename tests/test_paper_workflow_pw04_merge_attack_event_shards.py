@@ -702,6 +702,9 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
     payload_attack_summary_path = Path(str(pw04_summary["payload_attack_summary_path"]))
     quality_robustness_tradeoff_path = Path(str(pw04_summary["quality_robustness_tradeoff_path"]))
     quality_robustness_frontier_path = Path(str(pw04_summary["quality_robustness_frontier_path"]))
+    system_final_auxiliary_attack_summary_path = Path(str(pw04_summary["system_final_auxiliary_attack_summary_path"]))
+    system_final_auxiliary_attack_by_family_path = Path(str(pw04_summary["system_final_auxiliary_attack_by_family_path"]))
+    system_final_auxiliary_attack_by_condition_path = Path(str(pw04_summary["system_final_auxiliary_attack_by_condition_path"]))
 
     required_paths = [
         Path(str(pw04_summary["summary_path"])),
@@ -721,6 +724,9 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
         payload_attack_summary_path,
         quality_robustness_tradeoff_path,
         quality_robustness_frontier_path,
+        system_final_auxiliary_attack_summary_path,
+        system_final_auxiliary_attack_by_family_path,
+        system_final_auxiliary_attack_by_condition_path,
         Path(str(pw04_summary["attack_event_table_path"])),
         Path(str(pw04_summary["attack_family_summary_csv_path"])),
         Path(str(pw04_summary["attack_condition_summary_csv_path"])),
@@ -768,6 +774,9 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
     geometry_summary_rows = _load_csv_rows(geo_diagnostics_summary_path)
     payload_attack_summary = _load_json_dict(payload_attack_summary_path)
     tradeoff_rows = _load_csv_rows(quality_robustness_tradeoff_path)
+    system_final_auxiliary_attack_summary = _load_json_dict(system_final_auxiliary_attack_summary_path)
+    system_final_auxiliary_family_rows = _load_csv_rows(system_final_auxiliary_attack_by_family_path)
+    system_final_auxiliary_condition_rows = _load_csv_rows(system_final_auxiliary_attack_by_condition_path)
     attack_event_rows = read_jsonl(Path(str(pw04_summary["attack_event_table_path"])))
 
     expected_attack_event_count = int(pw03_fixture["expected_attack_event_count"])
@@ -806,6 +815,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
     assert paper_metric_registry["artifact_paths"]["supplemental_metrics"]["attack_quality_metrics_path"] == normalize_path_value(attack_quality_metrics_path)
     assert paper_metric_registry["artifact_paths"]["supplemental_metrics"]["robustness_curve_by_family_path"] == normalize_path_value(robustness_curve_by_family_path)
     assert paper_metric_registry["artifact_paths"]["supplemental_metrics"]["quality_robustness_tradeoff_path"] == normalize_path_value(quality_robustness_tradeoff_path)
+    assert paper_metric_registry["artifact_paths"]["supplemental_metrics"]["system_final_auxiliary_attack_summary_path"] == normalize_path_value(system_final_auxiliary_attack_summary_path)
 
     assert content_chain_metrics["scope"] == "content_chain"
     assert content_chain_metrics["clean_metrics"]["clean_positive_count"] == 4
@@ -880,6 +890,28 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
     assert payload_attack_summary["status"] == "not_available"
     assert "decoded bits" in str(payload_attack_summary["reason"])
     assert payload_attack_summary["future_upstream_sidecar_required"] is True
+
+    assert system_final_auxiliary_attack_summary["scope"] == "system_final_auxiliary"
+    assert system_final_auxiliary_attack_summary["canonical"] is False
+    assert system_final_auxiliary_attack_summary["analysis_only"] is True
+    assert system_final_auxiliary_attack_summary["overall"]["consistency_status"] == "exact_match"
+    assert system_final_auxiliary_attack_summary["overall"]["consistency_mismatch_count"] == 0
+    assert system_final_auxiliary_attack_summary["overall"]["system_final_auxiliary_attack_tpr"] == pytest.approx(
+        pw03_fixture["expected_derived_union_positive_count"] / expected_attack_event_count
+    )
+    assert system_final_auxiliary_family_rows
+    assert system_final_auxiliary_condition_rows
+    assert cast(Dict[str, Any], pw04_summary["analysis_only_artifact_paths"])["pw04_system_final_auxiliary_attack_summary"] == normalize_path_value(system_final_auxiliary_attack_summary_path)
+    assert cast(Dict[str, Any], pw04_summary["analysis_only_artifact_annotations"])["pw04_system_final_auxiliary_attack_summary"] == {
+        "canonical": False,
+        "analysis_only": True,
+    }
+    pw04_analysis_only_annotations = cast(Dict[str, Any], pw04_summary["analysis_only_artifact_annotations"])
+    if "pw02_system_final_auxiliary_operating_semantics" in pw04_analysis_only_annotations:
+        assert pw04_analysis_only_annotations["pw02_system_final_auxiliary_operating_semantics"] == {
+            "canonical": False,
+            "analysis_only": True,
+        }
 
     assert len(tradeoff_rows) == 3
     assert {row["scope"] for row in tradeoff_rows} == {"content_chain", "event_attestation", "system_final"}

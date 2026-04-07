@@ -81,11 +81,13 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
     ensure_directory(family_root / "runtime_state")
     ensure_directory(family_root / "exports" / "pw02" / "thresholds" / "content")
     ensure_directory(family_root / "exports" / "pw02" / "thresholds" / "attestation")
+    ensure_directory(family_root / "exports" / "pw02" / "operating_metrics")
     ensure_directory(family_root / "exports" / "pw04" / "manifests")
     ensure_directory(family_root / "exports" / "pw04" / "metrics")
     ensure_directory(family_root / "exports" / "pw04" / "tables")
     ensure_directory(family_root / "exports" / "pw04" / "figures")
     ensure_directory(family_root / "exports" / "pw04" / "tail")
+    ensure_directory(family_root / "exports" / "pw04" / "robustness")
 
     family_manifest_path = _write_json(
         family_root / "manifests" / "paper_eval_family_manifest.json",
@@ -124,6 +126,26 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             "artifact_type": "paper_workflow_pw02_threshold_export",
             "family_id": family_id,
             "score_name": "event_attestation_score",
+        },
+    )
+    pw02_system_final_auxiliary_operating_semantics_path = _write_json(
+        family_root / "exports" / "pw02" / "operating_metrics" / "system_final_auxiliary_operating_semantics.json",
+        {
+            "artifact_type": "paper_workflow_pw02_system_final_auxiliary_operating_semantics",
+            "family_id": family_id,
+            "scope": "system_final_auxiliary",
+            "canonical": False,
+            "analysis_only": True,
+        },
+    )
+    pw02_system_final_auxiliary_roc_curve_path = _write_json(
+        family_root / "exports" / "pw02" / "operating_metrics" / "roc_curve_system_final_auxiliary.json",
+        {
+            "artifact_type": "paper_workflow_pw02_operating_curve",
+            "family_id": family_id,
+            "scope": "system_final_auxiliary",
+            "canonical": False,
+            "analysis_only": True,
         },
     )
 
@@ -173,6 +195,24 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             "artifact_type": "paper_workflow_pw04_clean_attack_overview",
             "family_id": family_id,
         },
+    )
+    pw04_system_final_auxiliary_attack_summary_path = _write_json(
+        family_root / "exports" / "pw04" / "robustness" / "system_final_auxiliary_attack_summary.json",
+        {
+            "artifact_type": "paper_workflow_pw04_system_final_auxiliary_attack_summary",
+            "family_id": family_id,
+            "scope": "system_final_auxiliary",
+            "canonical": False,
+            "analysis_only": True,
+        },
+    )
+    pw04_system_final_auxiliary_attack_by_family_path = _write_text(
+        family_root / "exports" / "pw04" / "robustness" / "system_final_auxiliary_attack_by_family.csv",
+        "attack_family,system_final_auxiliary_attack_tpr\nresize,0.6\n",
+    )
+    pw04_system_final_auxiliary_attack_by_condition_path = _write_text(
+        family_root / "exports" / "pw04" / "robustness" / "system_final_auxiliary_attack_by_condition.csv",
+        "attack_condition_key,system_final_auxiliary_attack_tpr\nresize::0.8,0.6\n",
     )
 
     pw04_paper_metric_registry_path = _write_json(
@@ -292,6 +332,20 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
                 key_name: normalize_path_value(path_obj)
                 for key_name, path_obj in tail_paths.items()
             },
+            "analysis_only_artifact_paths": {
+                "pw02_system_final_auxiliary_operating_semantics": normalize_path_value(pw02_system_final_auxiliary_operating_semantics_path),
+                "pw02_system_final_auxiliary_roc_curve": normalize_path_value(pw02_system_final_auxiliary_roc_curve_path),
+                "pw04_system_final_auxiliary_attack_summary": normalize_path_value(pw04_system_final_auxiliary_attack_summary_path),
+                "pw04_system_final_auxiliary_attack_by_family": normalize_path_value(pw04_system_final_auxiliary_attack_by_family_path),
+                "pw04_system_final_auxiliary_attack_by_condition": normalize_path_value(pw04_system_final_auxiliary_attack_by_condition_path),
+            },
+            "analysis_only_artifact_annotations": {
+                "pw02_system_final_auxiliary_operating_semantics": {"canonical": False, "analysis_only": True},
+                "pw02_system_final_auxiliary_roc_curve": {"canonical": False, "analysis_only": True},
+                "pw04_system_final_auxiliary_attack_summary": {"canonical": False, "analysis_only": True},
+                "pw04_system_final_auxiliary_attack_by_family": {"canonical": False, "analysis_only": True},
+                "pw04_system_final_auxiliary_attack_by_condition": {"canonical": False, "analysis_only": True},
+            },
         },
     )
 
@@ -350,11 +404,30 @@ def test_pw05_release_signoff_packages_canonical_pw04_exports(tmp_path: Path) ->
     persisted_summary = _load_json_dict(summary_path)
 
     assert signoff_report["checked_source_artifact_count"] >= 20
+    assert signoff_report["analysis_only_artifact_count"] == 5
     assert "pw04_summary" in release_manifest["release_copy_paths"]
     assert "family_manifest" in release_manifest["source_artifact_index"]
+    assert release_manifest["analysis_only_artifact_annotations"]["pw04_system_final_auxiliary_attack_summary"] == {
+        "source_path": normalize_path_value(
+            Path(str(fixture["drive_root"]))
+            / "paper_workflow"
+            / "families"
+            / str(fixture["family_id"])
+            / "exports"
+            / "pw04"
+            / "robustness"
+            / "system_final_auxiliary_attack_summary.json"
+        ),
+        "release_copy_path": "source/exports/pw04/robustness/system_final_auxiliary_attack_summary.json",
+        "canonical": False,
+        "analysis_only": True,
+    }
     assert "package_zip" in persisted_summary["generated_artifact_index"]
     assert package_manifest["stage_name"] == "PW05_Release_And_Signoff"
     assert stage_manifest["source_stage_name"] == "PW04_Attack_Merge_And_Metrics"
+    assert persisted_summary["analysis_only_artifact_paths"]["pw02_system_final_auxiliary_operating_semantics"].endswith(
+        "/exports/pw02/operating_metrics/system_final_auxiliary_operating_semantics.json"
+    )
 
     with zipfile.ZipFile(package_path, "r") as archive:
         members = set(archive.namelist())
@@ -364,6 +437,8 @@ def test_pw05_release_signoff_packages_canonical_pw04_exports(tmp_path: Path) ->
     assert "source/runtime_state/pw04_summary.json" in members
     assert "source/exports/pw04/metrics/paper_metric_registry.json" in members
     assert "source/exports/pw02/thresholds/content/thresholds.json" in members
+    assert "source/exports/pw02/operating_metrics/system_final_auxiliary_operating_semantics.json" in members
+    assert "source/exports/pw04/robustness/system_final_auxiliary_attack_summary.json" in members
 
 
 def test_pw05_requires_completed_pw04_exports(tmp_path: Path) -> None:

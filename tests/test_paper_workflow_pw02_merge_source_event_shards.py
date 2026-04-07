@@ -827,6 +827,12 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     system_final_roc_curve_export = json.loads(
         Path(str(cast(Dict[str, Any], pw02_summary["roc_curve_paths"])["system_final"])).read_text(encoding="utf-8")
     )
+    system_final_auxiliary_roc_curve_export = json.loads(
+        Path(str(cast(Dict[str, Any], pw02_summary["roc_curve_paths"])["system_final_auxiliary"])).read_text(encoding="utf-8")
+    )
+    system_final_auxiliary_operating_semantics = json.loads(
+        Path(str(pw02_summary["system_final_auxiliary_operating_semantics_path"])).read_text(encoding="utf-8")
+    )
     auc_summary = json.loads(Path(str(pw02_summary["auc_summary_path"])).read_text(encoding="utf-8"))
     eer_summary = json.loads(Path(str(pw02_summary["eer_summary_path"])).read_text(encoding="utf-8"))
     with Path(str(pw02_summary["tpr_at_target_fpr_summary_path"])).open("r", encoding="utf-8", newline="") as handle:
@@ -926,10 +932,12 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
         "content_chain",
         "event_attestation",
         "system_final",
+        "system_final_auxiliary",
     }
     assert Path(str(pw02_summary["operating_metrics_dir"])).is_dir()
     assert Path(str(pw02_summary["quality_metrics_dir"])).is_dir()
     assert Path(str(pw02_summary["payload_metrics_dir"])).is_dir()
+    assert Path(str(pw02_summary["system_final_auxiliary_operating_semantics_path"])).exists()
 
     assert content_roc_curve_export["scope"] == "content_chain"
     assert content_roc_curve_export["status"] == "ok"
@@ -946,26 +954,44 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert system_final_roc_curve_export["status"] == "not_available"
     assert "missing scalar score chain" in str(system_final_roc_curve_export["reason"])
 
+    assert system_final_auxiliary_roc_curve_export["scope"] == "system_final_auxiliary"
+    assert system_final_auxiliary_roc_curve_export["status"] == "ok"
+    assert system_final_auxiliary_roc_curve_export["auc"] == pytest.approx(1.0)
+    assert system_final_auxiliary_roc_curve_export["source_analysis_path"] == pw02_summary["system_final_auxiliary_operating_semantics_path"]
+    assert system_final_auxiliary_operating_semantics["scope"] == "system_final_auxiliary"
+    assert system_final_auxiliary_operating_semantics["canonical"] is False
+    assert system_final_auxiliary_operating_semantics["analysis_only"] is True
+    assert system_final_auxiliary_operating_semantics["decision_equivalence"]["status"] == "exact_match"
+    assert system_final_auxiliary_operating_semantics["decision_equivalence"]["mismatch_count"] == 0
+    assert system_final_auxiliary_operating_semantics["operating_metrics"]["threshold_value"] == pytest.approx(0.0)
+
     auc_rows_by_scope = {row["scope"]: row for row in cast(List[Dict[str, Any]], auc_summary["rows"])}
-    assert set(auc_rows_by_scope.keys()) == {"content_chain", "event_attestation", "system_final"}
+    assert set(auc_rows_by_scope.keys()) == {"content_chain", "event_attestation", "system_final", "system_final_auxiliary"}
     assert auc_rows_by_scope["content_chain"]["auc"] == pytest.approx(1.0)
     assert auc_rows_by_scope["event_attestation"]["auc"] == pytest.approx(1.0)
     assert auc_rows_by_scope["system_final"]["status"] == "not_available"
+    assert auc_rows_by_scope["system_final_auxiliary"]["status"] == "ok"
+    assert auc_rows_by_scope["system_final_auxiliary"]["auc"] == pytest.approx(1.0)
 
     eer_rows_by_scope = {row["scope"]: row for row in cast(List[Dict[str, Any]], eer_summary["rows"])}
-    assert set(eer_rows_by_scope.keys()) == {"content_chain", "event_attestation", "system_final"}
+    assert set(eer_rows_by_scope.keys()) == {"content_chain", "event_attestation", "system_final", "system_final_auxiliary"}
     assert eer_rows_by_scope["content_chain"]["status"] == "ok"
     assert eer_rows_by_scope["content_chain"]["eer"] == pytest.approx(0.0)
     assert eer_rows_by_scope["event_attestation"]["status"] == "ok"
     assert eer_rows_by_scope["system_final"]["status"] == "not_available"
+    assert eer_rows_by_scope["system_final_auxiliary"]["status"] == "ok"
+    assert eer_rows_by_scope["system_final_auxiliary"]["eer"] == pytest.approx(0.0)
 
-    assert len(tpr_rows) == 12
+    assert len(tpr_rows) == 16
     content_tpr_rows = [row for row in tpr_rows if row["scope"] == "content_chain"]
     system_tpr_rows = [row for row in tpr_rows if row["scope"] == "system_final"]
+    auxiliary_tpr_rows = [row for row in tpr_rows if row["scope"] == "system_final_auxiliary"]
     assert {row["target_fpr"] for row in content_tpr_rows} == {"0.01", "0.001", "0.0001", "1e-05"}
     assert all(row["status"] == "ok" for row in content_tpr_rows)
     assert all(float(row["tpr"]) == pytest.approx(1.0) for row in content_tpr_rows)
     assert all(row["status"] == "not_available" for row in system_tpr_rows)
+    assert all(row["status"] == "ok" for row in auxiliary_tpr_rows)
+    assert all(float(row["tpr"]) == pytest.approx(1.0) for row in auxiliary_tpr_rows)
 
     quality_rows_by_scope = {row["scope"]: row for row in cast(List[Dict[str, Any]], quality_metrics_summary["rows"])}
     assert set(quality_rows_by_scope.keys()) == {"content_chain", "event_attestation", "system_final"}
@@ -984,6 +1010,8 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert payload_clean_summary["status"] == "not_available"
     assert "decoded bits" in str(payload_clean_summary["reason"])
     assert payload_clean_summary["future_upstream_sidecar_required"] is True
+    assert cast(Dict[str, Any], pw02_summary["analysis_only_artifact_paths"])["pw02_system_final_auxiliary_operating_semantics"] == pw02_summary["system_final_auxiliary_operating_semantics_path"]
+    assert cast(Dict[str, Any], pw02_summary["analysis_only_artifact_paths"])["pw02_system_final_auxiliary_roc_curve"] == cast(Dict[str, Any], pw02_summary["roc_curve_paths"])["system_final_auxiliary"]
 
     assert formal_final_decision_metrics_export["source_kind"] == "formal_final_decision_metrics_from_content_evaluate_inputs"
     assert formal_final_decision_metrics_export["is_formal_evaluate_record"] is False
