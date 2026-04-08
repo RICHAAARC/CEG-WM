@@ -21,6 +21,10 @@ from scripts.notebook_runtime_common import REPO_ROOT, build_repo_import_subproc
 NOTEBOOK_PW00_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW00_Paper_Eval_Family_Manifest.ipynb"
 NOTEBOOK_PW01_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW01_Source_Event_Shards.ipynb"
 NOTEBOOK_PW02_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW02_Source_Merge_And_Global_Thresholds.ipynb"
+NOTEBOOK_PW03_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW03_Attack_Event_Shards.ipynb"
+NOTEBOOK_PW04_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW04_Attack_Merge_And_Metrics.ipynb"
+NOTEBOOK_PW05_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW05_Release_And_Signoff.ipynb"
+README_PATH = REPO_ROOT / "paper_workflow" / "README.md"
 
 
 def _load_notebook(notebook_path: Path) -> Dict[str, Any]:
@@ -181,7 +185,7 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     )
     pw02_execute = _find_code_cell_source(NOTEBOOK_PW02_PATH, "COMMAND = [")
 
-    assert '"pw00_paper_eval_family_manifest.py"' in pw00_constants
+    assert '"PW00_Paper_Eval_Family_Manifest.py"' in pw00_constants
     assert 'HF_HOME = REPO_ROOT / "huggingface_cache"' in pw00_constants
     assert 'HF_HUB_CACHE = HF_HOME / "hub"' in pw00_constants
     assert 'TRANSFORMERS_CACHE = HF_HOME / "transformers"' in pw00_constants
@@ -196,7 +200,7 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     assert '"--attack-shard-count"' in pw00_execute
     assert '"--attack-shard-count"' in pw00_execute
 
-    assert '"pw01_source_event_shards.py"' in pw01_constants
+    assert '"PW01_Source_Event_Shards.py"' in pw01_constants
     assert 'DRIVE_MODELS_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "Models"' in pw01_constants
     assert 'PERSISTENT_HF_ROOT = DRIVE_MODELS_ROOT / "Huggingface"' in pw01_constants
     assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in pw01_constants
@@ -218,7 +222,7 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     assert 'str(PW01_BOUND_CONFIG_PATH)' in pw01_execute
     assert '"--force-rerun"' in pw01_execute
 
-    assert '"pw02_source_merge_and_global_thresholds.py"' in pw02_constants
+    assert '"PW02_Source_Merge_And_Global_Thresholds.py"' in pw02_constants
     assert 'DRIVE_MODELS_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "Models"' in pw02_constants
     assert 'PERSISTENT_HF_ROOT = DRIVE_MODELS_ROOT / "Huggingface"' in pw02_constants
     assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in pw02_constants
@@ -407,6 +411,87 @@ def test_pw02_notebook_reads_summary_from_runtime_state() -> None:
     )
 
 
+def test_paper_workflow_all_notebook_script_paths_use_existing_wrapper_entrypoints() -> None:
+    """
+    Verify all PW00-PW05 notebooks bind existing uppercase wrapper entrypoints.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    notebook_expectations = [
+        (NOTEBOOK_PW00_PATH, "PW00_Paper_Eval_Family_Manifest.py"),
+        (NOTEBOOK_PW01_PATH, "PW01_Source_Event_Shards.py"),
+        (NOTEBOOK_PW02_PATH, "PW02_Source_Merge_And_Global_Thresholds.py"),
+        (NOTEBOOK_PW03_PATH, "PW03_Attack_Event_Shards.py"),
+        (NOTEBOOK_PW04_PATH, "PW04_Attack_Merge_And_Metrics.py"),
+        (NOTEBOOK_PW05_PATH, "PW05_Release_And_Signoff.py"),
+    ]
+
+    for notebook_path, script_name in notebook_expectations:
+        constants_source = _find_code_cell_source(notebook_path, "SCRIPT_PATH = REPO_ROOT")
+        assert f'"{script_name}"' in constants_source
+        assert (REPO_ROOT / "paper_workflow" / "scripts" / script_name).exists()
+
+
+def test_paper_workflow_wrapper_files_exist() -> None:
+    """
+    Verify all paper_workflow wrapper files exist on disk.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    wrapper_paths = [
+        REPO_ROOT / "paper_workflow" / "scripts" / "PW00_Paper_Eval_Family_Manifest.py",
+        REPO_ROOT / "paper_workflow" / "scripts" / "PW01_Source_Event_Shards.py",
+        REPO_ROOT / "paper_workflow" / "scripts" / "PW02_Source_Merge_And_Global_Thresholds.py",
+        REPO_ROOT / "paper_workflow" / "scripts" / "PW03_Attack_Event_Shards.py",
+        REPO_ROOT / "paper_workflow" / "scripts" / "PW04_Attack_Merge_And_Metrics.py",
+        REPO_ROOT / "paper_workflow" / "scripts" / "PW05_Release_And_Signoff.py",
+    ]
+
+    for wrapper_path in wrapper_paths:
+        assert wrapper_path.exists(), wrapper_path
+
+
+def test_paper_workflow_readme_and_pw00_command_template_use_wrapper_entrypoints() -> None:
+    """
+    Verify README and the PW00 command template use wrapper entrypoints only.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    readme_text = README_PATH.read_text(encoding="utf-8")
+    for old_name in [
+        "pw00_paper_eval_family_manifest.py",
+        "pw01_source_event_shards.py",
+        "pw02_source_merge_and_global_thresholds.py",
+    ]:
+        assert old_name not in readme_text
+
+    for wrapper_relative_path in [
+        "paper_workflow/scripts/PW00_Paper_Eval_Family_Manifest.py",
+        "paper_workflow/scripts/PW01_Source_Event_Shards.py",
+        "paper_workflow/scripts/PW02_Source_Merge_And_Global_Thresholds.py",
+        "paper_workflow/scripts/PW03_Attack_Event_Shards.py",
+        "paper_workflow/scripts/PW04_Attack_Merge_And_Metrics.py",
+        "paper_workflow/scripts/PW05_Release_And_Signoff.py",
+    ]:
+        assert wrapper_relative_path in readme_text
+
+    pw00_parallel_guide = _find_code_cell_source(NOTEBOOK_PW00_PATH, '"pw01_command_template": [')
+    assert 'paper_workflow/scripts/PW01_Source_Event_Shards.py' in pw00_parallel_guide
+    assert 'paper_workflow/scripts/pw01_source_event_shards.py' not in pw00_parallel_guide
+
+
 def test_pw00_and_pw02_notebooks_explain_formal_vs_optional_control_boundary() -> None:
     """
     Verify PW00 and PW02 notebook markdown explains the formal/optional cohort boundary.
@@ -436,16 +521,28 @@ def test_pw00_and_pw02_notebooks_explain_formal_vs_optional_control_boundary() -
     ("script_relative_path", "expected_help_text"),
     [
         (
-            "paper_workflow/scripts/pw00_paper_eval_family_manifest.py",
+            "paper_workflow/scripts/PW00_Paper_Eval_Family_Manifest.py",
             "optional planner_conditioned_control_negative diagnostic cohort",
         ),
         (
-            "paper_workflow/scripts/pw01_source_event_shards.py",
+            "paper_workflow/scripts/PW01_Source_Event_Shards.py",
             "Optional advanced diagnostic value: planner_conditioned_control_negative.",
         ),
         (
-            "paper_workflow/scripts/pw02_source_merge_and_global_thresholds.py",
+            "paper_workflow/scripts/PW02_Source_Merge_And_Global_Thresholds.py",
             "formal mainline requires positive_source and clean_negative only",
+        ),
+        (
+            "paper_workflow/scripts/PW03_Attack_Event_Shards.py",
+            "finalized positive source pool",
+        ),
+        (
+            "paper_workflow/scripts/PW04_Attack_Merge_And_Metrics.py",
+            "optional tail estimation exports",
+        ),
+        (
+            "paper_workflow/scripts/PW05_Release_And_Signoff.py",
+            "release package and signoff outputs",
         ),
     ],
 )

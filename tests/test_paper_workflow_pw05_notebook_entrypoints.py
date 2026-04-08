@@ -5,9 +5,13 @@ Module type: General module
 
 from __future__ import annotations
 
+import importlib
 import json
 from pathlib import Path
+import sys
 from typing import Any, Dict, List, cast
+
+import pytest
 
 from scripts.notebook_runtime_common import REPO_ROOT
 
@@ -94,7 +98,7 @@ def test_pw05_notebook_binds_expected_script_and_parameters() -> None:
     constants_source = _find_code_cell_source(NOTEBOOK_PW05_PATH, "SCRIPT_PATH = REPO_ROOT")
     execute_source = _find_code_cell_source(NOTEBOOK_PW05_PATH, "COMMAND = [")
 
-    assert '"pw05_release_signoff.py"' in constants_source
+    assert '"PW05_Release_And_Signoff.py"' in constants_source
     assert 'NOTEBOOK_NAME = "PW05_Release_And_Signoff"' in constants_source
     assert 'FORCE_RERUN = False' in constants_source
 
@@ -139,3 +143,47 @@ def test_pw05_notebook_reads_pw04_inputs_and_pw05_outputs() -> None:
     assert '"signoff_report": json.loads(SIGNOFF_REPORT_PATH.read_text(encoding="utf-8"))' in summary_source
     assert '"release_manifest": json.loads(RELEASE_MANIFEST_PATH.read_text(encoding="utf-8"))' in summary_source
     assert '"package_exists": PACKAGE_PATH.exists()' in summary_source
+
+
+def test_pw05_wrapper_delegates_to_run_function(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """
+    Verify the PW05 wrapper only parses args and delegates to the run function.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    wrapper_module = importlib.import_module("paper_workflow.scripts.PW05_Release_And_Signoff")
+    captured: Dict[str, Any] = {}
+
+    def fake_run_pw05_release_signoff(**kwargs: Any) -> Dict[str, Any]:
+        captured.update(kwargs)
+        return {"status": "completed"}
+
+    monkeypatch.setattr(wrapper_module, "run_pw05_release_signoff", fake_run_pw05_release_signoff)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "PW05_Release_And_Signoff.py",
+            "--drive-project-root",
+            str(tmp_path / "drive_root"),
+            "--family-id",
+            "family_pw05_demo",
+            "--stage-run-id",
+            "pw05_fixed_run",
+            "--notebook-name",
+            "PW05_Test_Notebook",
+            "--force-rerun",
+        ],
+    )
+
+    assert wrapper_module.main() == 0
+    assert captured["drive_project_root"] == tmp_path / "drive_root"
+    assert captured["family_id"] == "family_pw05_demo"
+    assert captured["stage_run_id"] == "pw05_fixed_run"
+    assert captured["notebook_name"] == "PW05_Test_Notebook"
+    assert captured["force_rerun"] is True

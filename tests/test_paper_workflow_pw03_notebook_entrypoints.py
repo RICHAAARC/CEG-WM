@@ -5,9 +5,13 @@ Module type: General module
 
 from __future__ import annotations
 
+import importlib
 import json
 from pathlib import Path
+import sys
 from typing import Any, Dict, List, cast
+
+import pytest
 
 from scripts.notebook_runtime_common import REPO_ROOT
 
@@ -113,7 +117,7 @@ def test_pw03_notebook_binds_expected_script_and_parameters() -> None:
     )
     execute_source = _find_code_cell_source(NOTEBOOK_PW03_PATH, "COMMAND = [")
 
-    assert '"pw03_run_attack_event_shard.py"' in constants_source
+    assert '"PW03_Attack_Event_Shards.py"' in constants_source
     assert 'DRIVE_MODELS_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "Models"' in constants_source
     assert 'PERSISTENT_INSPYRENET_ROOT = DRIVE_MODELS_ROOT / "inspyrenet"' in constants_source
     assert 'PERSISTENT_HF_ROOT = DRIVE_MODELS_ROOT / "Huggingface"' in constants_source
@@ -220,3 +224,56 @@ def test_pw03_notebook_parallel_plan_explains_isolation_and_worker_layout() -> N
     assert '"--bound-config-path"' in parallel_source
     assert 'str(PW03_BOUND_CONFIG_PATH)' in parallel_source
     assert 'str(shard_root / "workers" / f"worker_{local_worker_index:02d}")' in parallel_source
+
+
+def test_pw03_wrapper_delegates_to_run_function(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """
+    Verify the PW03 wrapper only parses args and delegates to the run function.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    wrapper_module = importlib.import_module("paper_workflow.scripts.PW03_Attack_Event_Shards")
+    captured: Dict[str, Any] = {}
+
+    def fake_run_pw03_attack_event_shard(**kwargs: Any) -> Dict[str, Any]:
+        captured.update(kwargs)
+        return {"status": "completed"}
+
+    monkeypatch.setattr(wrapper_module, "run_pw03_attack_event_shard", fake_run_pw03_attack_event_shard)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "PW03_Attack_Event_Shards.py",
+            "--drive-project-root",
+            str(tmp_path / "drive_root"),
+            "--family-id",
+            "family_pw03_demo",
+            "--attack-shard-index",
+            "1",
+            "--attack-shard-count",
+            "4",
+            "--attack-local-worker-count",
+            "2",
+            "--attack-family-allowlist",
+            '["jpeg"]',
+            "--bound-config-path",
+            str(tmp_path / "bound_config.yaml"),
+            "--force-rerun",
+        ],
+    )
+
+    assert wrapper_module.main() == 0
+    assert captured["drive_project_root"] == tmp_path / "drive_root"
+    assert captured["family_id"] == "family_pw03_demo"
+    assert captured["attack_shard_index"] == 1
+    assert captured["attack_shard_count"] == 4
+    assert captured["attack_local_worker_count"] == 2
+    assert captured["attack_family_allowlist"] == '["jpeg"]'
+    assert captured["bound_config_path"] == tmp_path / "bound_config.yaml"
+    assert captured["force_rerun"] is True

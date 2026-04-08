@@ -5,9 +5,13 @@ Module type: General module
 
 from __future__ import annotations
 
+import importlib
 import json
 from pathlib import Path
+import sys
 from typing import Any, Dict, List, cast
+
+import pytest
 
 from scripts.notebook_runtime_common import REPO_ROOT
 
@@ -95,7 +99,7 @@ def test_pw04_notebook_binds_expected_script_and_parameters() -> None:
     bootstrap_source = _find_code_cell_source(NOTEBOOK_PW04_PATH, "from scripts.notebook_runtime_common import resolve_notebook_model_cache_layout")
     execute_source = _find_code_cell_source(NOTEBOOK_PW04_PATH, "COMMAND = [")
 
-    assert '"pw04_merge_attack_event_shards.py"' in constants_source
+    assert '"PW04_Attack_Merge_And_Metrics.py"' in constants_source
     assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in constants_source
     assert 'LOCAL_HF_HUB_CACHE = LOCAL_HF_HOME / "hub"' in constants_source
     assert 'LOCAL_TRANSFORMERS_CACHE = LOCAL_HF_HOME / "transformers"' in constants_source
@@ -150,3 +154,43 @@ def test_pw04_notebook_reads_pw02_inputs_and_pw04_outputs() -> None:
     assert '"estimated_tail_fpr_1e4": json.loads(Path(str(TAIL_ESTIMATION_PATHS["estimated_tail_fpr_1e4_path"])).read_text(encoding="utf-8"))' in summary_source
     assert 'matplotlib' not in summary_source
     assert 'np.random' not in summary_source
+
+
+def test_pw04_wrapper_delegates_to_run_function(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """
+    Verify the PW04 wrapper only parses args and delegates to the run function.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    wrapper_module = importlib.import_module("paper_workflow.scripts.PW04_Attack_Merge_And_Metrics")
+    captured: Dict[str, Any] = {}
+
+    def fake_run_pw04_merge_attack_event_shards(**kwargs: Any) -> Dict[str, Any]:
+        captured.update(kwargs)
+        return {"status": "completed"}
+
+    monkeypatch.setattr(wrapper_module, "run_pw04_merge_attack_event_shards", fake_run_pw04_merge_attack_event_shards)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "PW04_Attack_Merge_And_Metrics.py",
+            "--drive-project-root",
+            str(tmp_path / "drive_root"),
+            "--family-id",
+            "family_pw04_demo",
+            "--force-rerun",
+            "--enable-tail-estimation",
+        ],
+    )
+
+    assert wrapper_module.main() == 0
+    assert captured["drive_project_root"] == tmp_path / "drive_root"
+    assert captured["family_id"] == "family_pw04_demo"
+    assert captured["force_rerun"] is True
+    assert captured["enable_tail_estimation"] is True

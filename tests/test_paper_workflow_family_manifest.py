@@ -183,7 +183,7 @@ def test_pw00_cli_wrapper_passes_explicit_attack_shard_count(tmp_path: Path) -> 
     prompt_file = tmp_path / "paper_prompts.txt"
     prompt_file.write_text("prompt alpha\nprompt beta\n", encoding="utf-8")
 
-    script_path = REPO_ROOT / "paper_workflow" / "scripts" / "pw00_paper_eval_family_manifest.py"
+    script_path = REPO_ROOT / "paper_workflow" / "scripts" / "PW00_Paper_Eval_Family_Manifest.py"
     result = subprocess.run(
         [
             sys.executable,
