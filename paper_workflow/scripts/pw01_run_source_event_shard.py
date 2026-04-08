@@ -6,7 +6,6 @@ Module type: General module
 from __future__ import annotations
 
 import copy
-import importlib.util
 import json
 import os
 import subprocess
@@ -14,7 +13,6 @@ import shutil
 import sys
 import traceback
 from pathlib import Path
-from types import ModuleType
 from typing import Any, Dict, List, Mapping, Sequence, Tuple, cast
 
 from main.core import status as run_status
@@ -46,9 +44,10 @@ from paper_workflow.scripts.pw_common import (
     resolve_family_layout_paths,
     validate_source_sample_role,
 )
+from paper_workflow.scripts import pw01_stage_runtime_helpers
 
-BASE_RUNNER_SCRIPT_PATH = Path("scripts/01_run_paper_full_cuda.py")
 WORKER_SCRIPT_PATH = Path("paper_workflow/scripts/pw01_run_source_event_shard_worker.py")
+BASE_RUNNER_MODULE = pw01_stage_runtime_helpers
 EVENT_RECORD_USAGE_BY_SAMPLE_ROLE = {
     ACTIVE_SAMPLE_ROLE: "paper_workflow_positive_source",
     CLEAN_NEGATIVE_SAMPLE_ROLE: "paper_workflow_clean_negative",
@@ -88,31 +87,6 @@ _CLEAN_NEGATIVE_REQUIRED_PROBE_PLANNER_FIELDS = (
     "plan_input_digest",
     "plan_input_schema_version",
 )
-
-
-def _load_base_runner_module() -> ModuleType:
-    """
-    Load baseline stage-01 runner module from file path.
-
-    Args:
-        None.
-
-    Returns:
-        Loaded module object.
-
-    Raises:
-        RuntimeError: If runner module cannot be loaded.
-    """
-    runner_path = (REPO_ROOT / BASE_RUNNER_SCRIPT_PATH).resolve()
-    spec = importlib.util.spec_from_file_location("pw01_stage_01_base_runner", runner_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"failed to load stage-01 runner: {runner_path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-BASE_RUNNER_MODULE = _load_base_runner_module()
 
 
 def _load_required_json_dict(path_obj: Path, label: str) -> Dict[str, Any]:
@@ -1392,7 +1366,7 @@ def _build_clean_negative_detect_command(
     if not isinstance(input_record_path, Path):
         raise TypeError("input_record_path must be Path")
 
-    command = list(BASE_RUNNER_MODULE._build_stage_command("detect", config_path, run_root))
+    command = list(pw01_stage_runtime_helpers._build_stage_command("detect", config_path, run_root))
     input_token = str(input_record_path)
     if "--input" in command:
         input_index = command.index("--input")
@@ -1795,7 +1769,7 @@ def _run_clean_negative_event(
     )
     write_yaml_mapping(runtime_cfg_path, runtime_cfg)
 
-    preview_precompute = BASE_RUNNER_MODULE._prepare_source_pool_preview_artifact(
+    preview_precompute = pw01_stage_runtime_helpers._prepare_source_pool_preview_artifact(
         cfg_obj=runtime_cfg,
         prompt_run_root=prompt_run_root,
         prompt_text=prompt_text,
@@ -1845,7 +1819,7 @@ def _run_clean_negative_event(
         run_root=prompt_run_root,
         input_record_path=detect_input_record_path,
     )
-    detect_result = BASE_RUNNER_MODULE._run_stage("detect", detect_command, prompt_run_root)
+    detect_result = pw01_stage_runtime_helpers._run_stage("detect", detect_command, prompt_run_root)
     stage_results["detect"] = detect_result
     if int(detect_result.get("return_code", 1)) != 0:
         raise RuntimeError(
@@ -1882,27 +1856,22 @@ def _run_clean_negative_event(
     write_json_atomic(event_embed_record_path, staged_embed_record_payload)
     _refresh_clean_negative_event_run_records_view(prompt_run_root)
 
-    normalize_fn = getattr(BASE_RUNNER_MODULE, "_normalize_direct_detect_payload", None)
-    if callable(normalize_fn):
-        normalized_payload = normalize_fn(
-            detect_payload_obj,
-            prompt_text=prompt_text,
-            prompt_index=source_prompt_index,
-            prompt_file_path=prompt_file,
-            record_usage=_resolve_event_record_usage(CLEAN_NEGATIVE_SAMPLE_ROLE),
-        )
-        if not isinstance(normalized_payload, dict):
-            raise ValueError("normalized detect payload must be JSON object")
-        detect_payload_obj = cast(Dict[str, Any], normalized_payload)
+    detect_payload_obj = pw01_stage_runtime_helpers._normalize_direct_detect_payload(
+        detect_payload_obj,
+        prompt_text=prompt_text,
+        prompt_index=source_prompt_index,
+        prompt_file_path=prompt_file,
+        record_usage=_resolve_event_record_usage(CLEAN_NEGATIVE_SAMPLE_ROLE),
+    )
     write_json_atomic(staged_detect_record_path, detect_payload_obj)
 
-    source_image_view = BASE_RUNNER_MODULE._resolve_source_pool_source_image_view(
+    source_image_view = pw01_stage_runtime_helpers._resolve_source_pool_source_image_view(
         cfg_obj=preview_runtime_cfg,
         run_root=shard_root,
         prompt_run_root=prompt_run_root,
         prompt_index=event_index,
     )
-    preview_generation_record_view = BASE_RUNNER_MODULE._resolve_source_pool_preview_generation_record_view(
+    preview_generation_record_view = pw01_stage_runtime_helpers._resolve_source_pool_preview_generation_record_view(
         cfg_obj=preview_runtime_cfg,
         run_root=shard_root,
         prompt_run_root=prompt_run_root,
@@ -2025,7 +1994,7 @@ def _run_planner_conditioned_control_negative_event(
     )
     write_yaml_mapping(runtime_cfg_path, runtime_cfg)
 
-    preview_precompute = BASE_RUNNER_MODULE._prepare_source_pool_preview_artifact(
+    preview_precompute = pw01_stage_runtime_helpers._prepare_source_pool_preview_artifact(
         cfg_obj=runtime_cfg,
         prompt_run_root=prompt_run_root,
         prompt_text=prompt_text,
@@ -2075,7 +2044,7 @@ def _run_planner_conditioned_control_negative_event(
         run_root=prompt_run_root,
         input_record_path=detect_input_record_path,
     )
-    detect_probe_result = BASE_RUNNER_MODULE._run_stage("detect_probe", detect_probe_command, prompt_run_root)
+    detect_probe_result = pw01_stage_runtime_helpers._run_stage("detect_probe", detect_probe_command, prompt_run_root)
     stage_results["detect_probe"] = detect_probe_result
     if int(detect_probe_result.get("return_code", 1)) != 0:
         raise RuntimeError(
@@ -2119,7 +2088,7 @@ def _run_planner_conditioned_control_negative_event(
         run_root=prompt_run_root,
         input_record_path=detect_input_record_path,
     )
-    detect_result = BASE_RUNNER_MODULE._run_stage("detect", detect_command, prompt_run_root)
+    detect_result = pw01_stage_runtime_helpers._run_stage("detect", detect_command, prompt_run_root)
     stage_results["detect"] = detect_result
     if int(detect_result.get("return_code", 1)) != 0:
         raise RuntimeError(
@@ -2156,27 +2125,22 @@ def _run_planner_conditioned_control_negative_event(
     write_json_atomic(event_embed_record_path, staged_embed_record_payload)
     _refresh_clean_negative_event_run_records_view(prompt_run_root)
 
-    normalize_fn = getattr(BASE_RUNNER_MODULE, "_normalize_direct_detect_payload", None)
-    if callable(normalize_fn):
-        normalized_payload = normalize_fn(
-            detect_payload_obj,
-            prompt_text=prompt_text,
-            prompt_index=source_prompt_index,
-            prompt_file_path=prompt_file,
-            record_usage=_resolve_event_record_usage(PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE),
-        )
-        if not isinstance(normalized_payload, dict):
-            raise ValueError("normalized detect payload must be JSON object")
-        detect_payload_obj = cast(Dict[str, Any], normalized_payload)
+    detect_payload_obj = pw01_stage_runtime_helpers._normalize_direct_detect_payload(
+        detect_payload_obj,
+        prompt_text=prompt_text,
+        prompt_index=source_prompt_index,
+        prompt_file_path=prompt_file,
+        record_usage=_resolve_event_record_usage(PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE),
+    )
     write_json_atomic(staged_detect_record_path, detect_payload_obj)
 
-    source_image_view = BASE_RUNNER_MODULE._resolve_source_pool_source_image_view(
+    source_image_view = pw01_stage_runtime_helpers._resolve_source_pool_source_image_view(
         cfg_obj=preview_runtime_cfg,
         run_root=shard_root,
         prompt_run_root=prompt_run_root,
         prompt_index=event_index,
     )
-    preview_generation_record_view = BASE_RUNNER_MODULE._resolve_source_pool_preview_generation_record_view(
+    preview_generation_record_view = pw01_stage_runtime_helpers._resolve_source_pool_preview_generation_record_view(
         cfg_obj=preview_runtime_cfg,
         run_root=shard_root,
         prompt_run_root=prompt_run_root,
@@ -2340,7 +2304,7 @@ def _run_positive_source_event(
     )
     write_yaml_mapping(runtime_cfg_path, runtime_cfg)
 
-    preview_precompute = BASE_RUNNER_MODULE._prepare_source_pool_preview_artifact(
+    preview_precompute = pw01_stage_runtime_helpers._prepare_source_pool_preview_artifact(
         cfg_obj=runtime_cfg,
         prompt_run_root=prompt_run_root,
         prompt_text=prompt_text,
@@ -2364,8 +2328,8 @@ def _run_positive_source_event(
         "preview_precompute": preview_precompute.get("preview_record", {}),
     }
     for stage_name in ["embed", "detect"]:
-        command = BASE_RUNNER_MODULE._build_stage_command(stage_name, runtime_cfg_path, prompt_run_root)
-        result = BASE_RUNNER_MODULE._run_stage(stage_name, command, prompt_run_root)
+        command = pw01_stage_runtime_helpers._build_stage_command(stage_name, runtime_cfg_path, prompt_run_root)
+        result = pw01_stage_runtime_helpers._run_stage(stage_name, command, prompt_run_root)
         stage_results[stage_name] = result
         if int(result.get("return_code", 1)) != 0:
             raise RuntimeError(
@@ -2387,33 +2351,28 @@ def _run_positive_source_event(
     copy_file(source_embed_record_path, staged_embed_record_path)
 
     detect_payload_obj = _load_required_json_dict(source_detect_record_path, "event detect record")
-    normalize_fn = getattr(BASE_RUNNER_MODULE, "_normalize_direct_detect_payload", None)
-    if callable(normalize_fn):
-        normalized_payload = normalize_fn(
-            detect_payload_obj,
-            prompt_text=prompt_text,
-            prompt_index=source_prompt_index,
-            prompt_file_path=prompt_file,
-            record_usage=_resolve_event_record_usage(ACTIVE_SAMPLE_ROLE),
-        )
-        if not isinstance(normalized_payload, dict):
-            raise ValueError("normalized detect payload must be JSON object")
-        detect_payload_obj = cast(Dict[str, Any], normalized_payload)
+    detect_payload_obj = pw01_stage_runtime_helpers._normalize_direct_detect_payload(
+        detect_payload_obj,
+        prompt_text=prompt_text,
+        prompt_index=source_prompt_index,
+        prompt_file_path=prompt_file,
+        record_usage=_resolve_event_record_usage(ACTIVE_SAMPLE_ROLE),
+    )
     write_json_atomic(staged_detect_record_path, detect_payload_obj)
 
-    attestation_views = BASE_RUNNER_MODULE._resolve_source_pool_attestation_views(
+    attestation_views = pw01_stage_runtime_helpers._resolve_source_pool_attestation_views(
         cfg_obj=preview_runtime_cfg,
         run_root=shard_root,
         prompt_run_root=prompt_run_root,
         prompt_index=event_index,
     )
-    source_image_view = BASE_RUNNER_MODULE._resolve_source_pool_source_image_view(
+    source_image_view = pw01_stage_runtime_helpers._resolve_source_pool_source_image_view(
         cfg_obj=preview_runtime_cfg,
         run_root=shard_root,
         prompt_run_root=prompt_run_root,
         prompt_index=event_index,
     )
-    preview_generation_record_view = BASE_RUNNER_MODULE._resolve_source_pool_preview_generation_record_view(
+    preview_generation_record_view = pw01_stage_runtime_helpers._resolve_source_pool_preview_generation_record_view(
         cfg_obj=preview_runtime_cfg,
         run_root=shard_root,
         prompt_run_root=prompt_run_root,

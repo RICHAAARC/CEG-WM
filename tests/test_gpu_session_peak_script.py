@@ -104,7 +104,7 @@ def test_gpu_session_peak_wrapper_passthrough_writes_json_and_preserves_return_c
             "--output-json",
             str(output_json_path),
             "--label",
-            "01_Paper_Full_Cuda",
+            "PW01_Source_Event_Shards",
             "--sample-interval-ms",
             "10",
             "--",
@@ -118,7 +118,7 @@ def test_gpu_session_peak_wrapper_passthrough_writes_json_and_preserves_return_c
     assert captured.out == wrapped_stdout
     assert captured.err == wrapped_stderr
     assert payload["status"] == "ok"
-    assert payload["label"] == "01_Paper_Full_Cuda"
+    assert payload["label"] == "PW01_Source_Event_Shards"
     assert payload["monitor_source"] == "nvidia-smi"
     assert payload["nvidia_smi_available"] is True
     assert payload["nvidia_smi_path"] == nvidia_smi_path

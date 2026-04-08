@@ -83,12 +83,14 @@ def _resolve_source_alignment_reference_files(pw_base_cfg: Dict[str, Any]) -> li
         if output:
             return output
     return [
-        "scripts/01_Paper_Full_Cuda_Parallel.py",
-        "scripts/01_run_paper_full_cuda_parallel.py",
-        "scripts/01_run_paper_full_cuda_parallel_worker.py",
-        "scripts/01_run_paper_full_cuda.py",
+        "paper_workflow/configs/pw_base.yaml",
+        "paper_workflow/scripts/pw_common.py",
+        "paper_workflow/scripts/pw00_build_family_manifest.py",
+        "paper_workflow/scripts/pw01_stage_runtime_helpers.py",
+        "paper_workflow/scripts/pw01_run_source_event_shard.py",
+        "paper_workflow/notebook/PW00_Paper_Eval_Family_Manifest.ipynb",
+        "paper_workflow/notebook/PW01_Source_Event_Shards.ipynb",
         "scripts/notebook_runtime_common.py",
-        "notebook/00_main/01_Paper_Full_Cuda_Parallel.ipynb",
         "configs/default.yaml",
     ]
 

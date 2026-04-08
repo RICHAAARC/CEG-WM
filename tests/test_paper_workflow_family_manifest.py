@@ -31,14 +31,14 @@ def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
 
     first_summary = run_pw00_build_family_manifest(
         drive_project_root=drive_project_root,
-        family_id="family_stage01_demo",
+        family_id="family_pw00_demo",
         prompt_file=str(prompt_file),
         seed_list=[0, 7],
         source_shard_count=3,
     )
     second_summary = run_pw00_build_family_manifest(
         drive_project_root=drive_project_root,
-        family_id="family_stage01_demo",
+        family_id="family_pw00_demo",
         prompt_file=str(prompt_file),
         seed_list=[0, 7],
         source_shard_count=3,
@@ -80,6 +80,8 @@ def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
 
     family_manifest_path = Path(str(first_summary["paper_eval_family_manifest_path"]))
     family_manifest = json.loads(family_manifest_path.read_text(encoding="utf-8"))
+    method_identity_snapshot_path = Path(str(family_manifest["paths"]["method_identity_snapshot"]))
+    method_identity_snapshot = json.loads(method_identity_snapshot_path.read_text(encoding="utf-8"))
     assert family_manifest["sample_roles"]["active"] == [
         "positive_source",
         "clean_negative",
@@ -105,6 +107,19 @@ def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
     assert family_manifest["counts"]["evaluate_event_count"] == 4
     assert family_manifest["counts"]["control_calibration_event_count"] == 2
     assert family_manifest["counts"]["control_evaluate_event_count"] == 2
+    assert family_manifest["source_truth_stage"] == "PW01_Source_Event_Shards"
+    assert method_identity_snapshot["source_truth_stage"] == "PW01_Source_Event_Shards"
+    assert method_identity_snapshot["source_alignment_reference_files"] == [
+        "paper_workflow/configs/pw_base.yaml",
+        "paper_workflow/scripts/pw_common.py",
+        "paper_workflow/scripts/pw00_build_family_manifest.py",
+        "paper_workflow/scripts/pw01_stage_runtime_helpers.py",
+        "paper_workflow/scripts/pw01_run_source_event_shard.py",
+        "paper_workflow/notebook/PW00_Paper_Eval_Family_Manifest.ipynb",
+        "paper_workflow/notebook/PW01_Source_Event_Shards.ipynb",
+        "scripts/notebook_runtime_common.py",
+        "configs/default.yaml",
+    ]
     assert first_summary["source_shard_count"] == 3
     assert first_summary["attack_shard_count"] == 3
     assert first_summary["severity_metadata_frozen"] is True
@@ -129,7 +144,7 @@ def test_pw00_can_freeze_independent_attack_shard_count(tmp_path: Path) -> None:
 
     summary = run_pw00_build_family_manifest(
         drive_project_root=drive_project_root,
-        family_id="family_stage01_attack_decoupled",
+        family_id="family_pw00_attack_decoupled",
         prompt_file=str(prompt_file),
         seed_list=[0, 7],
         source_shard_count=3,
@@ -176,7 +191,7 @@ def test_pw00_cli_wrapper_passes_explicit_attack_shard_count(tmp_path: Path) -> 
             "--drive-project-root",
             str(drive_project_root),
             "--family-id",
-            "family_stage01_cli_attack_decoupled",
+            "family_pw00_cli_attack_decoupled",
             "--prompt-file",
             str(prompt_file),
             "--seed-list",
