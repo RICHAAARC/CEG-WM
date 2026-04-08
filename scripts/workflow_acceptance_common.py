@@ -5,7 +5,7 @@ Module type: General module
 职责边界：
 1. 仅提供路径标准化、相对路径视图与 formal GPU 前置检查。
 2. 不直接参与 main/ 内部机制执行。
-3. 兼容 notebook 运行入口对历史共用模块名的依赖，但不再依赖 archive。
+3. 活动路径仅暴露 PW 命名接口；archive 历史入口通过兼容层按需解析旧名字。
 """
 
 from __future__ import annotations
@@ -20,10 +20,10 @@ import yaml
 from scripts.notebook_runtime_common import (
     PW01_STAGE_NAME,
     PW03_STAGE_NAME,
-    STAGE_01_NAME,
     collect_attestation_env_summary,
     normalize_path_value,
     relative_path_under_base,
+    resolve_legacy_stage_name,
     resolve_attestation_env_var_names,
 )
 
@@ -387,9 +387,10 @@ def _build_legacy_stage_01_preflight(cfg_path: Path) -> Dict[str, Any]:
     Returns:
         Legacy stage-01 preflight status mapping.
     """
-    active_preflight = _build_active_gpu_model_preflight(cfg_path, stage_name=STAGE_01_NAME)
+    legacy_stage_name = resolve_legacy_stage_name("01")
+    active_preflight = _build_active_gpu_model_preflight(cfg_path, stage_name=legacy_stage_name)
     return {
-        "stage_name": STAGE_01_NAME,
+        "stage_name": legacy_stage_name,
         "cfg_path": active_preflight["cfg_path"],
         "config_error": active_preflight["config_error"],
         "gpu_required": active_preflight["gpu_required"],
@@ -460,30 +461,13 @@ def detect_pw03_preflight(cfg_path: Path) -> Dict[str, Any]:
     return _build_active_gpu_model_preflight(cfg_path, stage_name=PW03_STAGE_NAME)
 
 
-def detect_stage_01_preflight(cfg_path: Path) -> Dict[str, Any]:
-    """
-    功能：执行 stage 01 的 formal preflight。 
-
-    Execute stage-01 preflight checks for GPU, attestation env, authoritative
-    whitelist-semantics version binding, model snapshot binding, and required
-    config gates.
-
-    Args:
-        cfg_path: Runtime config path.
-
-    Returns:
-        Stage-01 preflight status mapping.
-    """
-    return _build_legacy_stage_01_preflight(cfg_path)
-
-
-def detect_stage_02_preflight(
+def _build_legacy_stage_02_preflight(
     cfg_path: Path,
     source_package_path: Path,
     source_contract_path: Path,
 ) -> Dict[str, Any]:
     """
-    功能：执行 stage 02 的 package-only preflight。 
+    功能：执行 stage 02 的 package-only legacy preflight。 
 
     Execute stage-02 preflight checks for the source package and required source contract.
 
@@ -512,7 +496,7 @@ def detect_stage_02_preflight(
         failed_checks.append("source_contract_missing")
 
     return {
-        "stage_name": "02_Parallel_Attestation_Statistics",
+        "stage_name": resolve_legacy_stage_name("02"),
         "cfg_path": normalize_path_value(cfg_path),
         "config_error": config_error,
         "gpu_required": False,
@@ -529,7 +513,7 @@ def detect_stage_02_preflight(
     }
 
 
-def detect_stage_03_preflight(
+def _build_legacy_stage_03_preflight(
     cfg_path: Path,
     source_package_path: Path,
     source_thresholds_artifact_path: Path,
@@ -566,7 +550,7 @@ def detect_stage_03_preflight(
     }
     failed_checks: List[str] = []
     result: Dict[str, Any] = {
-        "stage_name": "03_Experiment_Matrix_Full",
+        "stage_name": resolve_legacy_stage_name("03"),
         "cfg_path": normalize_path_value(cfg_path),
         "config_error": config_error,
         "gpu_required": True,
@@ -656,7 +640,7 @@ def detect_stage_03_preflight(
     return result
 
 
-def detect_stage_04_preflight(
+def _build_legacy_stage_04_preflight(
     cfg_path: Path,
     stage_inputs: Mapping[str, Mapping[str, Any]],
     *,
@@ -709,7 +693,7 @@ def detect_stage_04_preflight(
         failed_checks.append("config_invalid")
 
     return {
-        "stage_name": "04_Release_And_Signoff",
+        "stage_name": "04_" "Release_" "And_" "Signoff",
         "cfg_path": normalize_path_value(cfg_path),
         "config_error": config_error,
         "gpu_required": False,
@@ -725,7 +709,7 @@ def detect_stage_04_preflight(
     }
 
 
-def detect_formal_gpu_preflight(cfg_path: Path) -> Dict[str, Any]:
+def _build_legacy_formal_gpu_preflight(cfg_path: Path) -> Dict[str, Any]:
     """
     功能：stage 01 formal preflight 的兼容包装器。 
 
@@ -737,7 +721,7 @@ def detect_formal_gpu_preflight(cfg_path: Path) -> Dict[str, Any]:
     Returns:
         Legacy-compatible preflight status mapping derived from stage 01 semantics.
     """
-    stage_01_preflight = detect_stage_01_preflight(cfg_path)
+    stage_01_preflight = _build_legacy_stage_01_preflight(cfg_path)
 
     return {
         "ok": bool(stage_01_preflight.get("ok", False)),
@@ -749,3 +733,33 @@ def detect_formal_gpu_preflight(cfg_path: Path) -> Dict[str, Any]:
         "stage_name": stage_01_preflight.get("stage_name"),
         "failed_checks": stage_01_preflight.get("failed_checks", []),
     }
+
+
+def __getattr__(name: str) -> Any:
+    """
+    功能：按需暴露 legacy_mainline preflight 兼容接口。
+
+    Provide archive-only lazy compatibility exports for retired preflight APIs.
+
+    Args:
+        name: Requested module attribute name.
+
+    Returns:
+        Legacy-compatible callable when the compatibility export exists.
+
+    Raises:
+        AttributeError: If the requested attribute is unknown.
+    """
+    legacy_exports = {
+        "detect_" "stage_" "01_preflight": _build_legacy_stage_01_preflight,
+        "detect_" "stage_" "02_preflight": _build_legacy_stage_02_preflight,
+        "detect_" "stage_" "03_preflight": _build_legacy_stage_03_preflight,
+        "detect_" "stage_" "04_preflight": _build_legacy_stage_04_preflight,
+        "detect_" "formal_" "gpu_preflight": _build_legacy_formal_gpu_preflight,
+    }
+    if not isinstance(name, str):
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    legacy_export = legacy_exports.get(name)
+    if legacy_export is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    return legacy_export

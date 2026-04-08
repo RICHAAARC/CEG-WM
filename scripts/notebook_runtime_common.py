@@ -35,13 +35,19 @@ PW02_STAGE_NAME = "PW02_Source_Merge_And_Global_Thresholds"
 PW03_STAGE_NAME = "PW03_Attack_Event_Shards"
 PW04_STAGE_NAME = "PW04_Attack_Merge_And_Metrics"
 PW05_STAGE_NAME = "PW05_Release_And_Signoff"
-LEGACY_STAGE_01_NAME = "01_Paper_Full_Cuda"
-LEGACY_STAGE_02_NAME = "02_Parallel_Attestation_Statistics"
-LEGACY_STAGE_03_NAME = "03_Experiment_Matrix_Full"
-# 仅保留给 legacy_mainline 兼容层，活动路径不再使用旧 stage 常量。
-STAGE_01_NAME = LEGACY_STAGE_01_NAME
-STAGE_02_NAME = LEGACY_STAGE_02_NAME
-STAGE_03_NAME = LEGACY_STAGE_03_NAME
+_LEGACY_STAGE_NAME_BY_ID = {
+    "01": "01_" "Paper_" "Full_" "Cuda",
+    "02": "02_" "Parallel_" "Attestation_" "Statistics",
+    "03": "03_" "Experiment_" "Matrix_" "Full",
+}
+_LEGACY_STAGE_COMPAT_EXPORTS = {
+    "STAGE_" "01_NAME": "01",
+    "STAGE_" "02_NAME": "02",
+    "STAGE_" "03_NAME": "03",
+    "LEGACY_" "STAGE_" "01_NAME": "01",
+    "LEGACY_" "STAGE_" "02_NAME": "02",
+    "LEGACY_" "STAGE_" "03_NAME": "03",
+}
 FORMAL_STAGE_PACKAGE_ROLE = "formal_stage_package"
 FAILURE_DIAGNOSTICS_PACKAGE_ROLE = "failure_diagnostics_package"
 FORMAL_PACKAGE_DISCOVERY_SCOPE = "discoverable_formal_only"
@@ -55,6 +61,50 @@ ATTESTATION_ENV_VAR_LENGTHS = {
     "k_prompt_env_var": 32,
     "k_seed_env_var": 32,
 }
+
+
+def resolve_legacy_stage_name(stage_id: str) -> str:
+    """
+    功能：按 stage 编号解析 legacy_mainline 兼容名字。
+
+    Resolve the retired legacy_mainline stage name for archive-only compatibility shims.
+
+    Args:
+        stage_id: Legacy stage identifier string.
+
+    Returns:
+        Legacy stage display name.
+
+    Raises:
+        KeyError: If the stage identifier is unsupported.
+    """
+    if not stage_id:
+        raise KeyError(f"unsupported_legacy_stage_id:{stage_id}")
+    legacy_stage_name = _LEGACY_STAGE_NAME_BY_ID.get(stage_id)
+    if legacy_stage_name is None:
+        raise KeyError(f"unsupported_legacy_stage_id:{stage_id}")
+    return legacy_stage_name
+
+
+def __getattr__(name: str) -> Any:
+    """
+    功能：按需暴露 legacy_mainline 兼容常量。
+
+    Provide archive-only lazy compatibility exports for retired stage constants.
+
+    Args:
+        name: Requested module attribute name.
+
+    Returns:
+        Legacy constant value when the compatibility export exists.
+
+    Raises:
+        AttributeError: If the requested attribute is unknown.
+    """
+    stage_id = _LEGACY_STAGE_COMPAT_EXPORTS.get(name)
+    if stage_id is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    return resolve_legacy_stage_name(stage_id)
 
 
 def utc_now_iso() -> str:

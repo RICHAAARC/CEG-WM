@@ -31,6 +31,27 @@ _LEGACY_MARKERS = [
     "01_Paper_Full_Cuda_Parallel_mainline",
     "01_Paper_Full_Cuda_Parallel",
 ]
+_ACTIVE_SHARED_HELPER_PATHS = [
+    REPO_ROOT / "scripts" / "notebook_runtime_common.py",
+    REPO_ROOT / "scripts" / "workflow_acceptance_common.py",
+]
+_ACTIVE_SHARED_HELPER_LEGACY_SEMANTIC_MARKERS = [
+    "STAGE_01_NAME",
+    "STAGE_02_NAME",
+    "STAGE_03_NAME",
+    "LEGACY_STAGE_01_NAME",
+    "LEGACY_STAGE_02_NAME",
+    "LEGACY_STAGE_03_NAME",
+    "detect_stage_01_preflight",
+    "detect_stage_02_preflight",
+    "detect_stage_03_preflight",
+    "detect_stage_04_preflight",
+    "detect_formal_gpu_preflight",
+    "01_Paper_Full_Cuda",
+    "02_Parallel_Attestation_Statistics",
+    "03_Experiment_Matrix_Full",
+    "04_Release_And_Signoff",
+]
 
 
 def _iter_active_text_files() -> List[Path]:
@@ -70,6 +91,31 @@ def test_active_paths_detach_from_legacy_mainline() -> None:
     for file_path in _iter_active_text_files():
         file_text = file_path.read_text(encoding="utf-8")
         for marker in _LEGACY_MARKERS:
+            if marker in file_text:
+                violations.append(
+                    {
+                        "file": file_path.relative_to(REPO_ROOT).as_posix(),
+                        "marker": marker,
+                    }
+                )
+
+    assert not violations, json.dumps(violations, ensure_ascii=False, indent=2)
+
+
+def test_active_shared_helpers_do_not_expose_legacy_mainline_symbols() -> None:
+    """
+    Verify active shared helpers do not keep retired mainline names as direct exports.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    violations: List[dict[str, str]] = []
+    for file_path in _ACTIVE_SHARED_HELPER_PATHS:
+        file_text = file_path.read_text(encoding="utf-8")
+        for marker in _ACTIVE_SHARED_HELPER_LEGACY_SEMANTIC_MARKERS:
             if marker in file_text:
                 violations.append(
                     {
