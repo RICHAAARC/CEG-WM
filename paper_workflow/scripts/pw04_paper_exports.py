@@ -88,6 +88,7 @@ ATTACK_FAMILY_PAPER_FIELDNAMES: List[str] = [
     "attack_quality_pair_count",
     "attack_mean_psnr",
     "attack_mean_ssim",
+    "attack_mean_lpips",
 ]
 ATTACK_CONDITION_PAPER_FIELDNAMES: List[str] = [
     "attack_condition_key",
@@ -103,6 +104,7 @@ ATTACK_CONDITION_PAPER_FIELDNAMES: List[str] = [
     "attack_quality_pair_count",
     "attack_mean_psnr",
     "attack_mean_ssim",
+    "attack_mean_lpips",
 ]
 RESCUE_METRICS_SUMMARY_FIELDNAMES: List[str] = [
     "geo_helped_positive_count",

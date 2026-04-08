@@ -359,10 +359,11 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
             "error_count": 0,
             "mean_psnr": 35.0,
             "mean_ssim": 0.99,
-            "lpips_status": "not_available",
-            "lpips_reason": "requires additional model dependency or upstream implementation",
+            "mean_lpips": 0.12,
+            "lpips_status": "ok",
+            "lpips_reason": None,
             "clip_status": "not_available",
-            "clip_reason": "requires additional model dependency or upstream implementation",
+            "clip_reason": "requires frozen quality model identity and bootstrap contract",
             "source_analysis_path": normalize_path_value(content_clean_evaluate_export_path),
         },
         {
@@ -375,10 +376,11 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
             "error_count": None,
             "mean_psnr": None,
             "mean_ssim": None,
-            "lpips_status": "not_available",
-            "lpips_reason": "requires additional model dependency or upstream implementation",
+            "mean_lpips": 0.12,
+            "lpips_status": "ok",
+            "lpips_reason": None,
             "clip_status": "not_available",
-            "clip_reason": "requires additional model dependency or upstream implementation",
+            "clip_reason": "requires frozen quality model identity and bootstrap contract",
             "source_analysis_path": normalize_path_value(attestation_clean_evaluate_export_path),
         },
         {
@@ -391,10 +393,11 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
             "error_count": None,
             "mean_psnr": None,
             "mean_ssim": None,
-            "lpips_status": "not_available",
-            "lpips_reason": "requires additional model dependency or upstream implementation",
+            "mean_lpips": 0.12,
+            "lpips_status": "ok",
+            "lpips_reason": None,
             "clip_status": "not_available",
-            "clip_reason": "requires additional model dependency or upstream implementation",
+            "clip_reason": "requires frozen quality model identity and bootstrap contract",
             "source_analysis_path": None,
         },
     ]
@@ -411,6 +414,7 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
                 "error_count",
                 "mean_psnr",
                 "mean_ssim",
+                "mean_lpips",
                 "lpips_status",
                 "lpips_reason",
                 "clip_status",
@@ -551,6 +555,36 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
             if content_score >= 0.5 or attestation_score >= 0.6:
                 expected_derived_union_positive_count += 1
 
+            severity_metadata = {
+                "severity_status": attack_event.get("severity_status"),
+                "severity_reason": attack_event.get("severity_reason"),
+                "severity_rule_version": attack_event.get("severity_rule_version"),
+                "severity_axis_kind": attack_event.get("severity_axis_kind"),
+                "severity_directionality": attack_event.get("severity_directionality"),
+                "severity_source_param": attack_event.get("severity_source_param"),
+                "severity_scalarization": attack_event.get("severity_scalarization"),
+                "severity_value": attack_event.get("severity_value"),
+                "severity_sort_value": attack_event.get("severity_sort_value"),
+                "severity_label": attack_event.get("severity_label"),
+                "severity_level_index": attack_event.get("severity_level_index"),
+            }
+            geometry_diagnostics = {
+                "sync_status": "ok" if attack_event_index % 2 == 0 else "degraded",
+                "sync_success": attack_event_index % 2 == 0,
+                "sync_digest": f"sync_digest_{attack_event_index:06d}",
+                "geometry_failure_reason": None if attack_event_index % 2 == 0 else "template_match_below_threshold",
+                "relation_digest_bound": attack_event_index % 2 == 0,
+                "template_match_metrics": {
+                    "peak_value": 0.8 - 0.01 * (attack_event_index % 3),
+                },
+                "sync_quality_metrics": {
+                    "match_score": 0.9 - 0.02 * (attack_event_index % 3),
+                },
+                "inverse_transform_success": attack_event_index % 3 != 2,
+                "attention_anchor_available": attack_event_index % 4 != 3,
+                "anchor_digest": f"anchor_digest_{attack_event_index:06d}" if attack_event_index % 4 != 3 else None,
+            }
+
             detect_record_path = shard_root / "records" / f"event_{attack_event_index:06d}_detect_record.json"
             detect_payload = {
                 "sample_role": pw04_module.ATTACKED_POSITIVE_SAMPLE_ROLE,
@@ -562,6 +596,8 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
                 "paper_workflow_attack_condition_key": attack_event["attack_condition_key"],
                 "paper_workflow_attack_params_digest": attack_event["attack_params_digest"],
                 "paper_workflow_parent_source_image_path": normalize_path_value(parent_source_image_path),
+                "paper_workflow_severity_metadata": severity_metadata,
+                "paper_workflow_geometry_diagnostics": geometry_diagnostics,
                 "content_evidence_payload": {
                     "status": "ok",
                     "content_chain_score": content_score,
@@ -584,6 +620,23 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
                 },
                 "geometry_evidence_payload": {
                     "status": "ok",
+                    "anchor_digest": geometry_diagnostics["anchor_digest"],
+                    "align_metrics": {
+                        "inverse_recovery_success": geometry_diagnostics["inverse_transform_success"],
+                    },
+                    "sync_quality_metrics": geometry_diagnostics["sync_quality_metrics"],
+                    "template_match_metrics": geometry_diagnostics["template_match_metrics"],
+                },
+                "geometry_result": {
+                    "sync_status": geometry_diagnostics["sync_status"],
+                    "sync_digest": geometry_diagnostics["sync_digest"],
+                    "relation_digest_bound": geometry_diagnostics["relation_digest_bound"],
+                    "sync_result": {
+                        "sync_success": geometry_diagnostics["sync_success"],
+                        "failure_reason": geometry_diagnostics["geometry_failure_reason"],
+                        "sync_quality_metrics": geometry_diagnostics["sync_quality_metrics"],
+                        "template_match_metrics": geometry_diagnostics["template_match_metrics"],
+                    },
                 },
                 "lf_detect_variant": "lf_v1",
             }
@@ -606,6 +659,8 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
                 "attack_config_name": attack_event["attack_config_name"],
                 "attack_condition_key": attack_event["attack_condition_key"],
                 "attack_params_digest": attack_event["attack_params_digest"],
+                "severity_metadata": severity_metadata,
+                "geometry_diagnostics": geometry_diagnostics,
                 "source_finalize_manifest_digest": str(pw02_fixture["finalize_manifest_digest"]),
                 "threshold_artifact_paths": threshold_artifact_paths,
                 "attacked_image_path": normalize_path_value(attacked_image_path),
@@ -842,11 +897,13 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
     assert "formal_final_decision_attack_tpr" not in family_paper_rows[0]
     assert "attack_mean_psnr" in family_paper_rows[0]
     assert family_paper_rows[0]["attack_mean_psnr"] != ""
+    assert "attack_mean_lpips" in family_paper_rows[0]
     assert condition_paper_rows
     assert "system_final_attack_tpr" in condition_paper_rows[0]
     assert "attack_family" in condition_paper_rows[0]
     assert "attack_mean_ssim" in condition_paper_rows[0]
     assert condition_paper_rows[0]["attack_mean_ssim"] != ""
+    assert "attack_mean_lpips" in condition_paper_rows[0]
 
     assert len(rescue_rows) == 1
     rescue_row = rescue_rows[0]
@@ -872,20 +929,22 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
     attack_family_count = len({row["attack_family"] for row in cast(List[Dict[str, Any]], pw03_fixture["attack_event_grid"])})
     assert len(robustness_curve_rows) == attack_family_count * 3
     assert {row["scope"] for row in robustness_curve_rows} == {"content_chain", "event_attestation", "system_final"}
-    assert all(row["severity_level_status"] == "not_available" for row in robustness_curve_rows)
+    assert all(row["severity_level_status"] in {"ok", "partial", "not_available"} for row in robustness_curve_rows)
+    assert any(row["severity_level_status"] in {"ok", "partial"} for row in robustness_curve_rows)
     assert len(robustness_macro_rows) == 3
     assert {row["scope"] for row in robustness_macro_rows} == {"content_chain", "event_attestation", "system_final"}
-    assert all(row["severity_level_status"] == "not_available" for row in robustness_macro_rows)
+    assert all(row["severity_level_status"] in {"ok", "partial"} for row in robustness_macro_rows)
     assert len(worst_case_rows) == 3
     assert {row["scope"] for row in worst_case_rows} == {"content_chain", "event_attestation", "system_final"}
+    assert all("severity_label" in row for row in worst_case_rows)
 
     assert len(geometry_family_rows) == attack_family_count
-    assert all(row["sync_success_status"] == "not_available" for row in geometry_family_rows)
-    assert all(row["inverse_transform_success_status"] == "not_available" for row in geometry_family_rows)
-    assert all(row["attention_anchor_available_status"] == "not_available" for row in geometry_family_rows)
+    assert all(row["sync_success_status"] == "ok" for row in geometry_family_rows)
+    assert all(row["inverse_transform_success_status"] == "ok" for row in geometry_family_rows)
+    assert all(row["attention_anchor_available_status"] == "ok" for row in geometry_family_rows)
     assert len(geometry_summary_rows) == 1
     assert geometry_summary_rows[0]["event_count"] == str(expected_attack_event_count)
-    assert geometry_summary_rows[0]["future_upstream_sidecar_required"] == "True"
+    assert geometry_summary_rows[0]["future_upstream_sidecar_required"] == "False"
 
     assert payload_attack_summary["status"] == "not_available"
     assert "decoded bits" in str(payload_attack_summary["reason"])
@@ -917,8 +976,11 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
     assert {row["scope"] for row in tradeoff_rows} == {"content_chain", "event_attestation", "system_final"}
     assert all(row["clean_quality_scope"] == "content_chain" for row in tradeoff_rows)
     assert all(row["clean_quality_status"] == "ok" for row in tradeoff_rows)
-    assert all(row["lpips_status"] == "not_available" for row in tradeoff_rows)
+    assert all(row["lpips_status"] == "ok" for row in tradeoff_rows)
+    assert all(row["clean_mean_lpips"] == "0.12" for row in tradeoff_rows)
     assert all(row["clip_status"] == "not_available" for row in tradeoff_rows)
+    assert all("attack_mean_lpips" in row for row in tradeoff_rows)
+    assert all("attack_lpips_status" in row for row in tradeoff_rows)
     assert all(Path(str(row["quality_metrics_summary_csv_path"])).exists() for row in tradeoff_rows)
     assert all(Path(str(row["quality_metrics_summary_json_path"])).exists() for row in tradeoff_rows)
     assert all(Path(str(row["robustness_macro_summary_path"])).exists() for row in tradeoff_rows)
@@ -932,9 +994,15 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
         assert "geo_rescue_eligible" in row
         assert "geo_rescue_applied" in row
         assert "geo_not_used_reason" in row
+        assert row["severity_status"] in {"ok", "not_available"}
+        assert row["sync_status"] in {"ok", "degraded"}
+        assert row["sync_success"] in {True, False}
+        assert row["inverse_transform_success"] in {True, False}
+        assert row["attention_anchor_available"] in {True, False}
         assert row["attack_quality_status"] == "ok"
         assert row["attack_quality_psnr"] is not None
         assert row["attack_quality_ssim"] is not None
+        assert "attack_quality_lpips" in row
 
     assert any(row["geo_rescue_applied"] is True for row in attack_event_rows)
     assert any(isinstance(row["geo_not_used_reason"], str) and row["geo_not_used_reason"] for row in attack_event_rows)

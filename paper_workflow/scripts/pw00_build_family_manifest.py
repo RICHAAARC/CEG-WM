@@ -20,6 +20,8 @@ from scripts.notebook_runtime_common import (
 from paper_workflow.scripts.pw_common import (
     ACTIVE_SAMPLE_ROLE,
     ACTIVE_SOURCE_SAMPLE_ROLES,
+    ATTACK_SEVERITY_AXIS_KIND,
+    ATTACK_SEVERITY_RULE_VERSION,
     CLEAN_NEGATIVE_SAMPLE_ROLE,
     PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
     DEFAULT_CONFIG_RELATIVE_PATH,
@@ -183,6 +185,15 @@ def run_pw00_build_family_manifest(
         if str(event.get("sample_role")) == ACTIVE_SAMPLE_ROLE
     ]
     attack_conditions = build_attack_condition_catalog()
+    severity_status_counts: Dict[str, int] = {}
+    severity_family_level_counts: Dict[str, int] = {}
+    for attack_condition in attack_conditions:
+        severity_status = str(attack_condition.get("severity_status") or "not_available")
+        severity_status_counts[severity_status] = severity_status_counts.get(severity_status, 0) + 1
+        if severity_status != "ok":
+            continue
+        attack_family_name = str(attack_condition.get("attack_family") or "<absent>")
+        severity_family_level_counts[attack_family_name] = severity_family_level_counts.get(attack_family_name, 0) + 1
     attack_event_grid = build_attack_event_grid(
         family_id=family_id,
         parent_events=positive_source_events,
@@ -249,6 +260,14 @@ def run_pw00_build_family_manifest(
             "materialization_profile": "first_value_per_condition",
             "attack_condition_count": attack_condition_count,
             "attack_event_count": attack_event_count,
+            "severity_metadata_frozen": True,
+            "severity_rule_version": ATTACK_SEVERITY_RULE_VERSION,
+            "severity_axis_kind": ATTACK_SEVERITY_AXIS_KIND,
+            "severity_status_counts": dict(sorted(severity_status_counts.items())),
+            "severity_available_family_count": len(severity_family_level_counts),
+            "severity_multi_point_family_count": sum(
+                1 for count in severity_family_level_counts.values() if count > 1
+            ),
         },
         "counts": {
             "positive_source_event_count": positive_source_event_count,
@@ -279,6 +298,14 @@ def run_pw00_build_family_manifest(
             "attack_shard_count": resolved_attack_shard_count,
             "attack_condition_count": attack_condition_count,
             "attack_event_count": attack_event_count,
+            "severity_metadata_frozen": True,
+            "severity_rule_version": ATTACK_SEVERITY_RULE_VERSION,
+            "severity_axis_kind": ATTACK_SEVERITY_AXIS_KIND,
+            "severity_status_counts": dict(sorted(severity_status_counts.items())),
+            "severity_available_family_count": len(severity_family_level_counts),
+            "severity_multi_point_family_count": sum(
+                1 for count in severity_family_level_counts.values() if count > 1
+            ),
         },
         "default_config_path": normalize_path_value(default_cfg_path),
         "pw_base_config_path": normalize_path_value((REPO_ROOT / DEFAULT_PW_BASE_CONFIG_RELATIVE_PATH).resolve()),
@@ -312,6 +339,14 @@ def run_pw00_build_family_manifest(
         "attack_event_count": attack_event_count,
         "source_shard_count": source_shard_count,
         "attack_shard_count": resolved_attack_shard_count,
+        "severity_metadata_frozen": True,
+        "severity_rule_version": ATTACK_SEVERITY_RULE_VERSION,
+        "severity_axis_kind": ATTACK_SEVERITY_AXIS_KIND,
+        "severity_status_counts": dict(sorted(severity_status_counts.items())),
+        "severity_available_family_count": len(severity_family_level_counts),
+        "severity_multi_point_family_count": sum(
+            1 for count in severity_family_level_counts.values() if count > 1
+        ),
     }
     write_json_atomic(summary_path, summary)
     return summary

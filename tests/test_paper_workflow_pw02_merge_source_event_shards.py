@@ -1000,11 +1000,16 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert quality_rows_by_scope["content_chain"]["pair_count"] == 2
     assert quality_rows_by_scope["content_chain"]["mean_psnr"] is not None
     assert quality_rows_by_scope["content_chain"]["mean_ssim"] is not None
-    assert quality_rows_by_scope["content_chain"]["lpips_status"] == "not_available"
+    assert quality_rows_by_scope["content_chain"]["lpips_status"] in {"ok", "not_available"}
+    if quality_rows_by_scope["content_chain"]["lpips_status"] == "ok":
+        assert quality_rows_by_scope["content_chain"]["mean_lpips"] is not None
+    else:
+        assert quality_rows_by_scope["content_chain"]["lpips_reason"]
     assert quality_rows_by_scope["content_chain"]["clip_status"] == "not_available"
     assert quality_rows_by_scope["event_attestation"]["status"] == "not_applicable"
-    assert quality_rows_by_scope["event_attestation"]["lpips_status"] == "not_available"
+    assert quality_rows_by_scope["event_attestation"]["lpips_status"] == quality_rows_by_scope["content_chain"]["lpips_status"]
     assert quality_rows_by_scope["system_final"]["status"] == "not_available"
+    assert quality_rows_by_scope["system_final"]["lpips_status"] == quality_rows_by_scope["content_chain"]["lpips_status"]
     assert "quality payload is only defined" in str(quality_rows_by_scope["system_final"]["reason"])
 
     assert payload_clean_summary["status"] == "not_available"

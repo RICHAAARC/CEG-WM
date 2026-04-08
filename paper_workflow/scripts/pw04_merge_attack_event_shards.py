@@ -86,6 +86,19 @@ def _load_required_json_dict(path_obj: Path, label: str) -> Dict[str, Any]:
     return cast(Dict[str, Any], payload)
 
 
+def _extract_mapping(node: Any) -> Dict[str, Any]:
+    """
+    Normalize one optional mapping node to dict.
+
+    Args:
+        node: Candidate mapping node.
+
+    Returns:
+        Normalized dict payload.
+    """
+    return dict(cast(Mapping[str, Any], node)) if isinstance(node, Mapping) else {}
+
+
 def _canonical_json_text(payload: Mapping[str, Any]) -> str:
     """
     Build canonical JSON text for stable mapping comparisons.
@@ -472,6 +485,13 @@ def _collect_completed_attack_events(
             if attack_params_digest != expected_attack_event.get("attack_params_digest"):
                 raise ValueError(f"attack_params_digest mismatch for {attack_event_id}")
 
+            severity_metadata = _extract_mapping(event_manifest.get("severity_metadata"))
+            if not severity_metadata:
+                severity_metadata = _extract_mapping(detect_payload.get("paper_workflow_severity_metadata"))
+            geometry_diagnostics = _extract_mapping(event_manifest.get("geometry_diagnostics"))
+            if not geometry_diagnostics:
+                geometry_diagnostics = _extract_mapping(detect_payload.get("paper_workflow_geometry_diagnostics"))
+
             unique_parent_condition_key = (parent_event_id, attack_family, attack_condition_key)
             if unique_parent_condition_key in discovered_parent_condition_keys:
                 raise ValueError(
@@ -557,6 +577,23 @@ def _collect_completed_attack_events(
                     "event_attestation_score": attestation_score,
                     "event_attestation_score_source": attestation_score_source,
                     "lf_detect_variant": lf_detect_variant,
+                    "severity_metadata": severity_metadata,
+                    "severity_status": severity_metadata.get("severity_status"),
+                    "severity_reason": severity_metadata.get("severity_reason"),
+                    "severity_rule_version": severity_metadata.get("severity_rule_version"),
+                    "severity_axis_kind": severity_metadata.get("severity_axis_kind"),
+                    "severity_directionality": severity_metadata.get("severity_directionality"),
+                    "severity_source_param": severity_metadata.get("severity_source_param"),
+                    "severity_scalarization": severity_metadata.get("severity_scalarization"),
+                    "severity_value": severity_metadata.get("severity_value"),
+                    "severity_sort_value": severity_metadata.get("severity_sort_value"),
+                    "severity_label": severity_metadata.get("severity_label"),
+                    "severity_level_index": severity_metadata.get("severity_level_index"),
+                    "geometry_diagnostics": geometry_diagnostics,
+                    "sync_success": geometry_diagnostics.get("sync_success"),
+                    "sync_status": geometry_diagnostics.get("sync_status"),
+                    "inverse_transform_success": geometry_diagnostics.get("inverse_transform_success"),
+                    "attention_anchor_available": geometry_diagnostics.get("attention_anchor_available"),
                     "content_chain_status": content_payload.get("status") if isinstance(content_payload, Mapping) else None,
                     "geometry_chain_status": geometry_payload.get("status") if isinstance(geometry_payload, Mapping) else None,
                     "fusion_status": fusion_status,
@@ -896,11 +933,17 @@ def _build_grouped_attack_quality_rows(
             for row in rows
             if isinstance(row.get("ssim"), (int, float)) and not isinstance(row.get("ssim"), bool)
         ]
+        lpips_values = [
+            float(row["lpips"])
+            for row in rows
+            if isinstance(row.get("lpips"), (int, float)) and not isinstance(row.get("lpips"), bool)
+        ]
         grouped_row: Dict[str, Any] = {
             group_key_name: group_value,
             "quality_pair_count": len(psnr_values),
             "mean_psnr": float(sum(psnr_values) / len(psnr_values)) if psnr_values else None,
             "mean_ssim": float(sum(ssim_values) / len(ssim_values)) if ssim_values else None,
+            "mean_lpips": float(sum(lpips_values) / len(lpips_values)) if lpips_values else None,
         }
         if group_key_name == "attack_condition_key":
             grouped_row["attack_family"] = rows[0].get("attack_family")
@@ -968,6 +1011,11 @@ def _build_attack_quality_metrics_export(
             "error_count": quality_summary.get("error_count"),
             "mean_psnr": quality_summary.get("mean_psnr"),
             "mean_ssim": quality_summary.get("mean_ssim"),
+            "lpips_status": quality_summary.get("lpips_status"),
+            "lpips_reason": quality_summary.get("lpips_reason"),
+            "mean_lpips": quality_summary.get("mean_lpips"),
+            "clip_status": quality_summary.get("clip_status"),
+            "clip_reason": quality_summary.get("clip_reason"),
         },
         "by_attack_family": _build_grouped_attack_quality_rows(
             pair_rows=pair_rows,
@@ -1172,6 +1220,11 @@ def _build_grouped_attack_metrics_rows(
             for row in rows
             if isinstance(row.get("attack_quality_ssim"), (int, float)) and not isinstance(row.get("attack_quality_ssim"), bool)
         ]
+        quality_lpips_values = [
+            float(row["attack_quality_lpips"])
+            for row in rows
+            if isinstance(row.get("attack_quality_lpips"), (int, float)) and not isinstance(row.get("attack_quality_lpips"), bool)
+        ]
         formal_final_positive_count = 0
         formal_attestation_positive_count = 0
         derived_union_positive_count = 0
@@ -1201,10 +1254,22 @@ def _build_grouped_attack_metrics_rows(
             "attack_quality_pair_count": len(quality_psnr_values),
             "attack_mean_psnr": float(sum(quality_psnr_values) / len(quality_psnr_values)) if quality_psnr_values else None,
             "attack_mean_ssim": float(sum(quality_ssim_values) / len(quality_ssim_values)) if quality_ssim_values else None,
+            "attack_mean_lpips": float(sum(quality_lpips_values) / len(quality_lpips_values)) if quality_lpips_values else None,
         }
         if group_key_name == "attack_condition_key":
             row_payload["attack_family"] = str(rows[0]["attack_family"])
             row_payload["attack_config_name"] = str(rows[0]["attack_config_name"])
+            row_payload["severity_status"] = rows[0].get("severity_status")
+            row_payload["severity_reason"] = rows[0].get("severity_reason")
+            row_payload["severity_rule_version"] = rows[0].get("severity_rule_version")
+            row_payload["severity_axis_kind"] = rows[0].get("severity_axis_kind")
+            row_payload["severity_directionality"] = rows[0].get("severity_directionality")
+            row_payload["severity_source_param"] = rows[0].get("severity_source_param")
+            row_payload["severity_scalarization"] = rows[0].get("severity_scalarization")
+            row_payload["severity_value"] = rows[0].get("severity_value")
+            row_payload["severity_sort_value"] = rows[0].get("severity_sort_value")
+            row_payload["severity_label"] = rows[0].get("severity_label")
+            row_payload["severity_level_index"] = rows[0].get("severity_level_index")
         output_rows.append(row_payload)
     return output_rows
 
@@ -1301,6 +1366,17 @@ def _write_attack_event_table_jsonl(
                 "attack_config_name": attack_event_row["attack_config_name"],
                 "attack_condition_key": attack_event_row["attack_condition_key"],
                 "attack_params_digest": attack_event_row["attack_params_digest"],
+                "severity_status": attack_event_row.get("severity_status"),
+                "severity_reason": attack_event_row.get("severity_reason"),
+                "severity_rule_version": attack_event_row.get("severity_rule_version"),
+                "severity_axis_kind": attack_event_row.get("severity_axis_kind"),
+                "severity_directionality": attack_event_row.get("severity_directionality"),
+                "severity_source_param": attack_event_row.get("severity_source_param"),
+                "severity_scalarization": attack_event_row.get("severity_scalarization"),
+                "severity_value": attack_event_row.get("severity_value"),
+                "severity_sort_value": attack_event_row.get("severity_sort_value"),
+                "severity_label": attack_event_row.get("severity_label"),
+                "severity_level_index": attack_event_row.get("severity_level_index"),
                 "sample_role": ATTACKED_POSITIVE_SAMPLE_ROLE,
                 "content_score": attack_event_row["content_score"],
                 "content_score_source": attack_event_row["content_score_source"],
@@ -1315,6 +1391,10 @@ def _write_attack_event_table_jsonl(
                 "content_chain_status": attack_event_row.get("content_chain_status"),
                 "fusion_status": attack_event_row.get("fusion_status"),
                 "geometry_chain_status": attack_event_row.get("geometry_chain_status"),
+                "sync_status": attack_event_row.get("sync_status"),
+                "sync_success": attack_event_row.get("sync_success"),
+                "inverse_transform_success": attack_event_row.get("inverse_transform_success"),
+                "attention_anchor_available": attack_event_row.get("attention_anchor_available"),
                 "image_evidence_status": image_evidence_payload.get("status"),
                 "geo_rescue_eligible": image_evidence_payload.get("geo_rescue_eligible"),
                 "geo_rescue_applied": image_evidence_payload.get("geo_rescue_applied"),
@@ -1322,6 +1402,7 @@ def _write_attack_event_table_jsonl(
                 "attack_quality_status": attack_event_row.get("attack_quality_status"),
                 "attack_quality_psnr": attack_event_row.get("attack_quality_psnr"),
                 "attack_quality_ssim": attack_event_row.get("attack_quality_ssim"),
+                "attack_quality_lpips": attack_event_row.get("attack_quality_lpips"),
             }
         )
     ensure_directory(output_path.parent)
@@ -1421,6 +1502,7 @@ def _build_clean_attack_overview_export(
         "attack_derived_union_tpr": attack_derived_metrics.get("attack_tpr"),
         "attack_quality_mean_psnr": attack_quality_overall.get("mean_psnr"),
         "attack_quality_mean_ssim": attack_quality_overall.get("mean_ssim"),
+        "attack_quality_mean_lpips": attack_quality_overall.get("mean_lpips"),
     }
 
 
@@ -1684,6 +1766,7 @@ def run_pw04_merge_attack_event_shards(
         attack_event_row["attack_quality_status"] = quality_row.get("status", "unavailable")
         attack_event_row["attack_quality_psnr"] = quality_row.get("psnr")
         attack_event_row["attack_quality_ssim"] = quality_row.get("ssim")
+        attack_event_row["attack_quality_lpips"] = quality_row.get("lpips")
     formal_attack_final_decision_metrics_payload = _build_formal_attack_final_decision_metrics_export(
         family_id=family_id,
         finalize_manifest_path=finalize_manifest_path,

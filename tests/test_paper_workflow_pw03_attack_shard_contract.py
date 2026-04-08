@@ -343,6 +343,37 @@ def _patch_pw03_detect(monkeypatch: pytest.MonkeyPatch) -> Dict[str, Any]:
                     "plan_digest": detect_input_payload.get("plan_digest"),
                     "basis_digest": detect_input_payload.get("basis_digest"),
                 },
+                "geometry_result": {
+                    "sync_status": "ok",
+                    "sync_result": {
+                        "sync_success": True,
+                        "failure_reason": None,
+                        "sync_quality_metrics": {
+                            "match_score": 0.92,
+                        },
+                        "template_match_metrics": {
+                            "peak_value": 0.81,
+                        },
+                    },
+                    "sync_digest": "sync_digest_test",
+                    "relation_binding_diagnostics": {
+                        "binding_status": "ok",
+                    },
+                    "relation_digest_bound": True,
+                },
+                "geometry_evidence_payload": {
+                    "status": "ok",
+                    "anchor_digest": "anchor_digest_test",
+                    "align_metrics": {
+                        "inverse_recovery_success": True,
+                    },
+                    "sync_quality_metrics": {
+                        "match_score": 0.92,
+                    },
+                    "template_match_metrics": {
+                        "peak_value": 0.81,
+                    },
+                },
                 "attestation": {
                     "final_event_attested_decision": {
                         "event_attestation_score": 0.77,
@@ -536,6 +567,11 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert first_event["threshold_binding_summary"]["threshold_artifact_paths"]["attestation"]
     assert first_event["source_finalize_manifest_digest"]
     assert first_event["parent_source_image_path"] != first_event["attacked_image_path"]
+    assert cast(Dict[str, Any], first_event["severity_metadata"])["severity_status"] in {"ok", "not_available"}
+    assert cast(Dict[str, Any], first_event["geometry_diagnostics"])["sync_status"] == "ok"
+    assert cast(Dict[str, Any], first_event["geometry_diagnostics"])["sync_success"] is True
+    assert cast(Dict[str, Any], first_event["geometry_diagnostics"])["inverse_transform_success"] is True
+    assert cast(Dict[str, Any], first_event["geometry_diagnostics"])["attention_anchor_available"] is True
 
     detect_input_payload = cast(Dict[str, Any], captures["detect_input_payloads"][0])
     assert detect_input_payload["paper_workflow_parent_event_id"] == first_event["parent_event_id"]
@@ -546,6 +582,12 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     detect_inputs = cast(Dict[str, Any], detect_input_payload["inputs"])
     assert detect_inputs["input_image_path"] == first_event["attacked_image_path"]
     assert detect_input_payload["plan_digest"].startswith("plan_")
+
+    detect_record_payload = json.loads(Path(str(first_event["detect_record_path"])).read_text(encoding="utf-8"))
+    assert cast(Dict[str, Any], detect_record_payload["paper_workflow_severity_metadata"])["severity_status"] in {"ok", "not_available"}
+    assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_diagnostics"])["sync_success"] is True
+    assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_diagnostics"])["inverse_transform_success"] is True
+    assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_diagnostics"])["attention_anchor_available"] is True
 
 
 def test_pw03_attack_shards_remain_isolated_across_sessions(

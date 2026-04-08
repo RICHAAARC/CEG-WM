@@ -81,9 +81,9 @@ The legacy PW04 exports remain authoritative compatibility outputs. The new pape
 
 ## Entrypoints
 
-- paper_workflow/scripts/PW00_Paper_Eval_Family_Manifest.py
-- paper_workflow/scripts/PW01_Source_Event_Shards.py
-- paper_workflow/scripts/PW02_Source_Merge_And_Global_Thresholds.py
+- paper_workflow/scripts/pw00_paper_eval_family_manifest.py
+- paper_workflow/scripts/pw01_source_event_shards.py
+- paper_workflow/scripts/pw02_source_merge_and_global_thresholds.py
 - paper_workflow/scripts/pw03_run_attack_event_shard.py
 - paper_workflow/scripts/pw04_merge_attack_event_shards.py
 - paper_workflow/scripts/pw05_release_signoff.py

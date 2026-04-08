@@ -16,6 +16,11 @@ from main.evaluation.image_quality import compute_psnr, compute_ssim
 from scripts.notebook_runtime_common import normalize_path_value
 
 
+_LPIPS_MODEL: Any = None
+_LPIPS_MODEL_ERROR: str | None = None
+CLIP_UNAVAILABLE_REASON = "requires frozen quality model identity and bootstrap contract"
+
+
 def _load_required_json_dict(path_obj: Path, label: str) -> Dict[str, Any]:
     """
     功能：读取必需的 JSON 对象文件。
@@ -124,6 +129,75 @@ def _load_rgb_image(image_path: Path) -> np.ndarray[Any, Any]:
         return np.asarray(image_obj.convert("RGB"))
 
 
+def _get_lpips_model() -> tuple[Any | None, str | None]:
+    """
+    Load and cache the LPIPS model for image-pair quality evaluation.
+
+    Args:
+        None.
+
+    Returns:
+        Tuple of (model_or_none, error_reason_or_none).
+    """
+    global _LPIPS_MODEL
+    global _LPIPS_MODEL_ERROR
+
+    if _LPIPS_MODEL is not None:
+        return _LPIPS_MODEL, None
+    if _LPIPS_MODEL_ERROR is not None:
+        return None, _LPIPS_MODEL_ERROR
+
+    try:
+        import lpips  # type: ignore
+        import torch
+    except Exception as exc:
+        _LPIPS_MODEL_ERROR = f"{type(exc).__name__}: {exc}"
+        return None, _LPIPS_MODEL_ERROR
+
+    try:
+        model = lpips.LPIPS(net="alex")
+        model.eval()
+        model.to(torch.device("cpu"))
+    except Exception as exc:
+        _LPIPS_MODEL_ERROR = f"{type(exc).__name__}: {exc}"
+        return None, _LPIPS_MODEL_ERROR
+
+    _LPIPS_MODEL = model
+    return _LPIPS_MODEL, None
+
+
+def _compute_lpips_value(
+    reference_image: np.ndarray[Any, Any],
+    candidate_image: np.ndarray[Any, Any],
+) -> float:
+    """
+    Compute LPIPS perceptual distance for one RGB image pair.
+
+    Args:
+        reference_image: Reference RGB image array.
+        candidate_image: Candidate RGB image array.
+
+    Returns:
+        LPIPS distance where smaller indicates higher perceptual similarity.
+
+    Raises:
+        RuntimeError: If the LPIPS model is unavailable.
+    """
+    model, model_error = _get_lpips_model()
+    if model is None:
+        raise RuntimeError(model_error or "LPIPS model unavailable")
+
+    import torch
+
+    reference_tensor = torch.from_numpy(reference_image).permute(2, 0, 1).unsqueeze(0).float()
+    candidate_tensor = torch.from_numpy(candidate_image).permute(2, 0, 1).unsqueeze(0).float()
+    reference_tensor = (reference_tensor / 127.5) - 1.0
+    candidate_tensor = (candidate_tensor / 127.5) - 1.0
+    with torch.no_grad():
+        lpips_value = model(reference_tensor, candidate_tensor)
+    return float(lpips_value.reshape(-1)[0].item())
+
+
 def build_quality_metrics_from_pairs(
     *,
     pair_specs: Sequence[Mapping[str, Any]],
@@ -163,8 +237,10 @@ def build_quality_metrics_from_pairs(
     pair_rows: List[Dict[str, Any]] = []
     psnr_values: List[float] = []
     ssim_values: List[float] = []
+    lpips_values: List[float] = []
     missing_count = 0
     error_count = 0
+    lpips_reason: str | None = None
 
     for pair_spec in pair_specs:
         if not isinstance(pair_spec, Mapping):
@@ -181,6 +257,7 @@ def build_quality_metrics_from_pairs(
             "failure_reason": None,
             "psnr": None,
             "ssim": None,
+            "lpips": None,
         }
         for metadata_key in metadata_keys:
             pair_row[metadata_key] = pair_spec.get(metadata_key)
@@ -230,6 +307,14 @@ def build_quality_metrics_from_pairs(
         pair_row["status"] = "ok"
         pair_row["psnr"] = psnr_value
         pair_row["ssim"] = ssim_value
+        try:
+            lpips_value = _compute_lpips_value(reference_image, candidate_image)
+        except Exception as exc:
+            if lpips_reason is None:
+                lpips_reason = f"{type(exc).__name__}: {exc}"
+        else:
+            pair_row["lpips"] = lpips_value
+            lpips_values.append(lpips_value)
         psnr_values.append(psnr_value)
         ssim_values.append(ssim_value)
         pair_rows.append(pair_row)
@@ -237,8 +322,10 @@ def build_quality_metrics_from_pairs(
     successful_count = len(psnr_values)
     mean_psnr = float(np.mean(psnr_values)) if psnr_values else None
     mean_ssim = float(np.mean(ssim_values)) if ssim_values else None
+    mean_lpips = float(np.mean(lpips_values)) if lpips_values else None
     status = "ok" if successful_count > 0 else "unavailable"
     availability_reason = None if successful_count > 0 else "no_valid_image_pairs"
+    lpips_status = "ok" if lpips_values else "not_available"
 
     return {
         "status": status,
@@ -249,5 +336,10 @@ def build_quality_metrics_from_pairs(
         "error_count": error_count,
         "mean_psnr": mean_psnr,
         "mean_ssim": mean_ssim,
+        "lpips_status": lpips_status,
+        "lpips_reason": None if lpips_status == "ok" else (lpips_reason or "LPIPS model unavailable"),
+        "mean_lpips": mean_lpips,
+        "clip_status": "not_available",
+        "clip_reason": CLIP_UNAVAILABLE_REASON,
         "pair_rows": pair_rows,
     }

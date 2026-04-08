@@ -36,7 +36,7 @@ SYSTEM_FINAL_AUXILIARY_SEMANTICS_FILE_NAME = "system_final_auxiliary_operating_s
 SYSTEM_FINAL_OPERATING_REASON = "missing scalar score chain for threshold sweep; only derived point metrics are available"
 QUALITY_SCOPE_UNAVAILABLE_REASON = "quality payload is only defined for clean content-chain image pairs in current workflow"
 LPIPS_UNAVAILABLE_REASON = "requires additional model dependency or upstream implementation"
-CLIP_UNAVAILABLE_REASON = "requires additional model dependency or upstream implementation"
+CLIP_UNAVAILABLE_REASON = "requires frozen quality model identity and bootstrap contract"
 PAYLOAD_UNAVAILABLE_REASON = "missing upstream decoded bits / reference bits / bit error sidecar"
 
 
@@ -799,6 +799,7 @@ def build_pw02_metrics_extensions(
                         "error_count": None,
                         "mean_psnr": None,
                         "mean_ssim": None,
+                        "mean_lpips": None,
                         "lpips_status": "not_available",
                         "lpips_reason": LPIPS_UNAVAILABLE_REASON,
                         "clip_status": "not_available",
@@ -899,10 +900,11 @@ def build_pw02_metrics_extensions(
                     "error_count": quality_payload.get("error_count"),
                     "mean_psnr": quality_payload.get("mean_psnr"),
                     "mean_ssim": quality_payload.get("mean_ssim"),
-                    "lpips_status": "not_available",
-                    "lpips_reason": LPIPS_UNAVAILABLE_REASON,
-                    "clip_status": "not_available",
-                    "clip_reason": CLIP_UNAVAILABLE_REASON,
+                    "mean_lpips": quality_payload.get("mean_lpips"),
+                    "lpips_status": quality_payload.get("lpips_status", "not_available"),
+                    "lpips_reason": quality_payload.get("lpips_reason", LPIPS_UNAVAILABLE_REASON),
+                    "clip_status": quality_payload.get("clip_status", "not_available"),
+                    "clip_reason": quality_payload.get("clip_reason", CLIP_UNAVAILABLE_REASON),
                     "source_analysis_path": roc_payload["source_analysis_path"],
                 }
             )
@@ -963,6 +965,7 @@ def build_pw02_metrics_extensions(
             "error_count",
             "mean_psnr",
             "mean_ssim",
+            "mean_lpips",
             "lpips_status",
             "lpips_reason",
             "clip_status",

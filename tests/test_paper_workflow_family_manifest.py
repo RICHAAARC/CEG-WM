@@ -92,7 +92,12 @@ def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
     assert family_manifest["source_parameters"]["calibration_fraction"] == 0.5
     assert family_manifest["source_parameters"]["source_shard_count"] == 3
     assert family_manifest["attack_parameters"]["attack_shard_count"] == 3
+    assert family_manifest["attack_parameters"]["severity_metadata_frozen"] is True
+    assert family_manifest["attack_parameters"]["severity_axis_kind"] == "family_local"
+    assert family_manifest["attack_parameters"]["severity_available_family_count"] > 0
     assert family_manifest["attack_plan"]["attack_shard_count"] == 3
+    assert family_manifest["attack_plan"]["severity_metadata_frozen"] is True
+    assert family_manifest["attack_plan"]["severity_status_counts"]["ok"] > 0
     assert family_manifest["counts"]["positive_source_event_count"] == 4
     assert family_manifest["counts"]["clean_negative_event_count"] == 4
     assert family_manifest["counts"]["planner_conditioned_control_negative_event_count"] == 4
@@ -102,6 +107,10 @@ def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
     assert family_manifest["counts"]["control_evaluate_event_count"] == 2
     assert first_summary["source_shard_count"] == 3
     assert first_summary["attack_shard_count"] == 3
+    assert first_summary["severity_metadata_frozen"] is True
+    assert first_summary["severity_axis_kind"] == "family_local"
+    assert first_summary["severity_status_counts"]["ok"] > 0
+    assert first_summary["severity_available_family_count"] > 0
 
 
 def test_pw00_can_freeze_independent_attack_shard_count(tmp_path: Path) -> None:
@@ -159,7 +168,7 @@ def test_pw00_cli_wrapper_passes_explicit_attack_shard_count(tmp_path: Path) -> 
     prompt_file = tmp_path / "paper_prompts.txt"
     prompt_file.write_text("prompt alpha\nprompt beta\n", encoding="utf-8")
 
-    script_path = REPO_ROOT / "paper_workflow" / "scripts" / "PW00_Paper_Eval_Family_Manifest.py"
+    script_path = REPO_ROOT / "paper_workflow" / "scripts" / "pw00_paper_eval_family_manifest.py"
     result = subprocess.run(
         [
             sys.executable,

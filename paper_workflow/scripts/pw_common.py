@@ -8,6 +8,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence, Tuple, cast
 
@@ -44,6 +45,8 @@ SAMPLE_ROLE_DIRECTORY_NAMES = {
     PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE: "control_negative",
 }
 SOURCE_TRUTH_STAGE = "01_Paper_Full_Cuda_Parallel"
+ATTACK_SEVERITY_RULE_VERSION = "pw_attack_severity_v1"
+ATTACK_SEVERITY_AXIS_KIND = "family_local"
 
 
 def _canonical_json_text(payload: Mapping[str, Any]) -> str:
@@ -683,6 +686,244 @@ def materialize_attack_params(params: Mapping[str, Any]) -> Dict[str, Any]:
     return materialized_params
 
 
+def _coerce_attack_numeric(value: Any) -> float | None:
+    """
+    Coerce one candidate attack parameter into a finite float.
+
+    Args:
+        value: Candidate scalar value.
+
+    Returns:
+        Finite float when available, otherwise None.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        value_float = float(value)
+        return value_float if math.isfinite(value_float) else None
+    if isinstance(value, str) and value.strip():
+        try:
+            value_float = float(value.strip())
+        except ValueError:
+            return None
+        return value_float if math.isfinite(value_float) else None
+    return None
+
+
+def _resolve_attack_param_numeric(params: Mapping[str, Any], *key_names: str) -> float | None:
+    """
+    Resolve the first available numeric attack parameter value.
+
+    Args:
+        params: Attack parameter mapping.
+        key_names: Candidate parameter names.
+
+    Returns:
+        Finite float when available, otherwise None.
+    """
+    for key_name in key_names:
+        value_float = _coerce_attack_numeric(params.get(key_name))
+        if value_float is not None:
+            return value_float
+    return None
+
+
+def _format_attack_numeric_label(value: float) -> str:
+    """
+    Format one numeric severity value for stable labels.
+
+    Args:
+        value: Numeric value.
+
+    Returns:
+        Stable compact string.
+    """
+    if float(value).is_integer():
+        return str(int(value))
+    return f"{float(value):.6g}"
+
+
+def _build_attack_severity_metadata(
+    *,
+    attack_family: str,
+    attack_params: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """
+    Build frozen family-local severity metadata for one concrete attack condition.
+
+    Args:
+        attack_family: Canonical attack family name.
+        attack_params: Concrete attack parameter mapping.
+
+    Returns:
+        Append-only severity metadata mapping.
+    """
+    if not isinstance(attack_family, str) or not attack_family:
+        raise TypeError("attack_family must be non-empty str")
+    if not isinstance(attack_params, Mapping):
+        raise TypeError("attack_params must be Mapping")
+
+    metadata: Dict[str, Any] = {
+        "severity_rule_version": ATTACK_SEVERITY_RULE_VERSION,
+        "severity_axis_kind": ATTACK_SEVERITY_AXIS_KIND,
+        "severity_directionality": "larger_indicates_stronger_attack",
+        "severity_status": "not_available",
+        "severity_reason": "attack family has no frozen scalar severity rule",
+        "severity_source_param": None,
+        "severity_scalarization": None,
+        "severity_value": None,
+        "severity_sort_value": None,
+        "severity_label": None,
+        "severity_level_index": None,
+    }
+
+    if attack_family == "rotate":
+        degrees = _resolve_attack_param_numeric(attack_params, "degrees")
+        if degrees is not None:
+            metadata.update(
+                {
+                    "severity_status": "ok",
+                    "severity_reason": None,
+                    "severity_source_param": "degrees",
+                    "severity_scalarization": "abs_degrees",
+                    "severity_value": abs(degrees),
+                    "severity_sort_value": abs(degrees),
+                    "severity_label": f"degrees={_format_attack_numeric_label(degrees)}",
+                }
+            )
+        return metadata
+
+    if attack_family == "resize":
+        scale_factor = _resolve_attack_param_numeric(attack_params, "scale_factor", "scale_factors")
+        if scale_factor is not None:
+            severity_value = abs(1.0 - scale_factor)
+            metadata.update(
+                {
+                    "severity_status": "ok",
+                    "severity_reason": None,
+                    "severity_source_param": "scale_factor",
+                    "severity_scalarization": "abs_one_minus_scale_factor",
+                    "severity_value": severity_value,
+                    "severity_sort_value": severity_value,
+                    "severity_label": f"scale_factor={_format_attack_numeric_label(scale_factor)}",
+                }
+            )
+        return metadata
+
+    if attack_family == "crop":
+        crop_ratio = _resolve_attack_param_numeric(attack_params, "crop_ratio", "crop_ratios")
+        if crop_ratio is not None:
+            severity_value = max(0.0, 1.0 - crop_ratio)
+            metadata.update(
+                {
+                    "severity_status": "ok",
+                    "severity_reason": None,
+                    "severity_source_param": "crop_ratio",
+                    "severity_scalarization": "one_minus_crop_ratio",
+                    "severity_value": severity_value,
+                    "severity_sort_value": severity_value,
+                    "severity_label": f"crop_ratio={_format_attack_numeric_label(crop_ratio)}",
+                }
+            )
+        return metadata
+
+    if attack_family == "translate":
+        x_shift = _resolve_attack_param_numeric(attack_params, "x_shift")
+        y_shift = _resolve_attack_param_numeric(attack_params, "y_shift")
+        if x_shift is not None and y_shift is not None:
+            severity_value = max(abs(x_shift), abs(y_shift))
+            metadata.update(
+                {
+                    "severity_status": "ok",
+                    "severity_reason": None,
+                    "severity_source_param": "x_shift,y_shift",
+                    "severity_scalarization": "max_abs_pixel_shift",
+                    "severity_value": severity_value,
+                    "severity_sort_value": severity_value,
+                    "severity_label": (
+                        f"shift=({_format_attack_numeric_label(x_shift)},{_format_attack_numeric_label(y_shift)})"
+                    ),
+                }
+            )
+        return metadata
+
+    if attack_family == "jpeg":
+        quality = _resolve_attack_param_numeric(attack_params, "quality")
+        if quality is not None:
+            severity_value = max(0.0, 100.0 - quality)
+            metadata.update(
+                {
+                    "severity_status": "ok",
+                    "severity_reason": None,
+                    "severity_source_param": "quality",
+                    "severity_scalarization": "one_hundred_minus_quality",
+                    "severity_value": severity_value,
+                    "severity_sort_value": severity_value,
+                    "severity_label": f"quality={_format_attack_numeric_label(quality)}",
+                }
+            )
+        return metadata
+
+    if attack_family == "gaussian_noise":
+        sigma = _resolve_attack_param_numeric(attack_params, "sigma")
+        if sigma is not None:
+            metadata.update(
+                {
+                    "severity_status": "ok",
+                    "severity_reason": None,
+                    "severity_source_param": "sigma",
+                    "severity_scalarization": "sigma",
+                    "severity_value": sigma,
+                    "severity_sort_value": sigma,
+                    "severity_label": f"sigma={_format_attack_numeric_label(sigma)}",
+                }
+            )
+        return metadata
+
+    if attack_family == "gaussian_blur":
+        sigma = _resolve_attack_param_numeric(attack_params, "sigma")
+        kernel_size = _resolve_attack_param_numeric(attack_params, "kernel_size")
+        if sigma is not None:
+            severity_value = sigma
+            if kernel_size is not None:
+                severity_value = float((sigma * 1000.0) + kernel_size)
+            metadata.update(
+                {
+                    "severity_status": "ok",
+                    "severity_reason": None,
+                    "severity_source_param": "sigma,kernel_size",
+                    "severity_scalarization": "sigma_primary_kernel_size_tiebreak",
+                    "severity_value": severity_value,
+                    "severity_sort_value": severity_value,
+                    "severity_label": (
+                        f"sigma={_format_attack_numeric_label(sigma)},kernel_size={_format_attack_numeric_label(kernel_size)}"
+                        if kernel_size is not None
+                        else f"sigma={_format_attack_numeric_label(sigma)}"
+                    ),
+                }
+            )
+        return metadata
+
+    if attack_family == "composite":
+        steps = attack_params.get("steps")
+        step_families = [
+            str(step.get("family"))
+            for step in cast(List[Any], steps)
+            if isinstance(step, Mapping) and isinstance(step.get("family"), str) and step.get("family")
+        ] if isinstance(steps, list) else []
+        metadata.update(
+            {
+                "severity_reason": "composite attack has no frozen scalar severity rule in current protocol",
+                "severity_source_param": "steps",
+                "severity_scalarization": "not_available",
+                "severity_label": "+".join(step_families) if step_families else "composite",
+            }
+        )
+        return metadata
+
+    return metadata
+
+
 def build_attack_condition_catalog(
     protocol_spec: Mapping[str, Any] | None = None,
 ) -> List[Dict[str, Any]]:
@@ -715,6 +956,10 @@ def build_attack_condition_catalog(
         params_version = str(condition_spec["params_version"])
         attack_params = materialize_attack_params(cast(Mapping[str, Any], condition_spec["params"]))
         attack_config_name = condition_key
+        severity_metadata = _build_attack_severity_metadata(
+            attack_family=attack_family,
+            attack_params=attack_params,
+        )
         condition_rows.append(
             {
                 "attack_condition_index": condition_index,
@@ -727,8 +972,31 @@ def build_attack_condition_catalog(
                 "attack_protocol_version": condition_spec.get("protocol_version", "<absent>"),
                 "attack_protocol_digest": condition_spec.get("protocol_digest", "<absent>"),
                 "attack_materialization_profile": "first_value_per_condition",
+                **severity_metadata,
             }
         )
+
+    grouped_rows: Dict[str, List[Dict[str, Any]]] = {}
+    for condition_row in condition_rows:
+        grouped_rows.setdefault(str(condition_row["attack_family"]), []).append(condition_row)
+    for grouped_condition_rows in grouped_rows.values():
+        sortable_rows = [
+            row
+            for row in grouped_condition_rows
+            if row.get("severity_status") == "ok"
+            and isinstance(row.get("severity_sort_value"), (int, float))
+            and not isinstance(row.get("severity_sort_value"), bool)
+        ]
+        for severity_level_index, row in enumerate(
+            sorted(
+                sortable_rows,
+                key=lambda item: (
+                    float(cast(float, item["severity_sort_value"])),
+                    str(item["attack_condition_key"]),
+                ),
+            )
+        ):
+            row["severity_level_index"] = severity_level_index
     return condition_rows
 
 
@@ -846,6 +1114,17 @@ def build_attack_event_grid(
                     "attack_protocol_version": attack_condition.get("attack_protocol_version"),
                     "attack_protocol_digest": attack_condition.get("attack_protocol_digest"),
                     "attack_materialization_profile": attack_condition.get("attack_materialization_profile"),
+                    "severity_rule_version": attack_condition.get("severity_rule_version"),
+                    "severity_axis_kind": attack_condition.get("severity_axis_kind"),
+                    "severity_directionality": attack_condition.get("severity_directionality"),
+                    "severity_status": attack_condition.get("severity_status"),
+                    "severity_reason": attack_condition.get("severity_reason"),
+                    "severity_source_param": attack_condition.get("severity_source_param"),
+                    "severity_scalarization": attack_condition.get("severity_scalarization"),
+                    "severity_value": attack_condition.get("severity_value"),
+                    "severity_sort_value": attack_condition.get("severity_sort_value"),
+                    "severity_label": attack_condition.get("severity_label"),
+                    "severity_level_index": attack_condition.get("severity_level_index"),
                 }
             )
             attack_event_index += 1

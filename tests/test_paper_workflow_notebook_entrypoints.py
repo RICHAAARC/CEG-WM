@@ -181,7 +181,7 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     )
     pw02_execute = _find_code_cell_source(NOTEBOOK_PW02_PATH, "COMMAND = [")
 
-    assert '"PW00_Paper_Eval_Family_Manifest.py"' in pw00_constants
+    assert '"pw00_paper_eval_family_manifest.py"' in pw00_constants
     assert 'HF_HOME = REPO_ROOT / "huggingface_cache"' in pw00_constants
     assert 'HF_HUB_CACHE = HF_HOME / "hub"' in pw00_constants
     assert 'TRANSFORMERS_CACHE = HF_HOME / "transformers"' in pw00_constants
@@ -196,7 +196,7 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     assert '"--attack-shard-count"' in pw00_execute
     assert '"--attack-shard-count"' in pw00_execute
 
-    assert '"PW01_Source_Event_Shards.py"' in pw01_constants
+    assert '"pw01_source_event_shards.py"' in pw01_constants
     assert 'DRIVE_MODELS_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "Models"' in pw01_constants
     assert 'PERSISTENT_HF_ROOT = DRIVE_MODELS_ROOT / "Huggingface"' in pw01_constants
     assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in pw01_constants
@@ -218,7 +218,7 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     assert 'str(PW01_BOUND_CONFIG_PATH)' in pw01_execute
     assert '"--force-rerun"' in pw01_execute
 
-    assert '"PW02_Source_Merge_And_Global_Thresholds.py"' in pw02_constants
+    assert '"pw02_source_merge_and_global_thresholds.py"' in pw02_constants
     assert 'DRIVE_MODELS_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "Models"' in pw02_constants
     assert 'PERSISTENT_HF_ROOT = DRIVE_MODELS_ROOT / "Huggingface"' in pw02_constants
     assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in pw02_constants
@@ -433,15 +433,15 @@ def test_pw00_and_pw02_notebooks_explain_formal_vs_optional_control_boundary() -
     ("script_relative_path", "expected_help_text"),
     [
         (
-            "paper_workflow/scripts/PW00_Paper_Eval_Family_Manifest.py",
+            "paper_workflow/scripts/pw00_paper_eval_family_manifest.py",
             "optional planner_conditioned_control_negative diagnostic cohort",
         ),
         (
-            "paper_workflow/scripts/PW01_Source_Event_Shards.py",
+            "paper_workflow/scripts/pw01_source_event_shards.py",
             "Optional advanced diagnostic value: planner_conditioned_control_negative.",
         ),
         (
-            "paper_workflow/scripts/PW02_Source_Merge_And_Global_Thresholds.py",
+            "paper_workflow/scripts/pw02_source_merge_and_global_thresholds.py",
             "formal mainline requires positive_source and clean_negative only",
         ),
     ],

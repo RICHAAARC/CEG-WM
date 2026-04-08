@@ -25,8 +25,8 @@ SCOPE_COLUMN_NAMES = {
     "event_attestation": "event_attestation_attack_tpr",
     "system_final": "system_final_attack_tpr",
 }
-SEVERITY_NOT_AVAILABLE_REASON = "attack condition severity is not frozen in current canonical exports"
-DEEP_GEOMETRY_NOT_AVAILABLE_REASON = "requires future upstream sidecar from PW03 staged detect/event manifest"
+SEVERITY_NOT_AVAILABLE_REASON = "attack condition has no frozen family-local scalar severity rule in current protocol"
+DEEP_GEOMETRY_NOT_AVAILABLE_REASON = "PW03 geometry sidecar is missing required diagnostics"
 PAYLOAD_UNAVAILABLE_REASON = "missing upstream decoded bits / bit error sidecar"
 SYSTEM_FINAL_AUXILIARY_ATTACK_SUMMARY_FILE_NAME = "system_final_auxiliary_attack_summary.json"
 SYSTEM_FINAL_AUXILIARY_ATTACK_BY_FAMILY_FILE_NAME = "system_final_auxiliary_attack_by_family.csv"
@@ -204,6 +204,202 @@ def _coerce_finite_float(value: Any) -> float | None:
             return None
         return value_float if math.isfinite(value_float) else None
     return None
+
+
+def _build_condition_severity_lookup(
+    attack_event_rows: Sequence[Mapping[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    """
+    功能：从 attack event 行构造 condition 级 severity 元数据索引。
+
+    Build one per-condition severity metadata lookup from attack event rows.
+
+    Args:
+        attack_event_rows: Materialized attack event rows.
+
+    Returns:
+        Condition-keyed severity metadata mapping.
+    """
+    if not isinstance(attack_event_rows, Sequence):
+        raise TypeError("attack_event_rows must be Sequence")
+
+    field_names = [
+        "severity_status",
+        "severity_reason",
+        "severity_rule_version",
+        "severity_axis_kind",
+        "severity_directionality",
+        "severity_source_param",
+        "severity_scalarization",
+        "severity_value",
+        "severity_sort_value",
+        "severity_label",
+        "severity_level_index",
+    ]
+    lookup: Dict[str, Dict[str, Any]] = {}
+    for attack_event_row in attack_event_rows:
+        attack_condition_key = attack_event_row.get("attack_condition_key")
+        if not isinstance(attack_condition_key, str) or not attack_condition_key:
+            raise ValueError("attack_event_row missing attack_condition_key")
+        severity_metadata = {
+            field_name: attack_event_row.get(field_name)
+            for field_name in field_names
+        }
+        existing_metadata = lookup.get(attack_condition_key)
+        if existing_metadata is None:
+            lookup[attack_condition_key] = severity_metadata
+            continue
+        if existing_metadata != severity_metadata:
+            raise ValueError(
+                "attack condition severity metadata must be identical across PW04 rows: "
+                f"attack_condition_key={attack_condition_key}"
+            )
+    return lookup
+
+
+def _summarize_severity_metadata(
+    severity_rows: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """
+    功能：汇总 family-local severity 元数据状态。
+
+    Summarize family-local severity metadata for one row collection.
+
+    Args:
+        severity_rows: Condition-level severity metadata rows.
+
+    Returns:
+        Severity summary mapping.
+    """
+    if not isinstance(severity_rows, Sequence):
+        raise TypeError("severity_rows must be Sequence")
+
+    total_count = len(severity_rows)
+    ok_rows = [row for row in severity_rows if row.get("severity_status") == "ok"]
+    axis_kinds = sorted(
+        {
+            str(row.get("severity_axis_kind"))
+            for row in ok_rows
+            if isinstance(row.get("severity_axis_kind"), str) and row.get("severity_axis_kind")
+        }
+    )
+    rule_versions = sorted(
+        {
+            str(row.get("severity_rule_version"))
+            for row in ok_rows
+            if isinstance(row.get("severity_rule_version"), str) and row.get("severity_rule_version")
+        }
+    )
+    directionality_values = sorted(
+        {
+            str(row.get("severity_directionality"))
+            for row in ok_rows
+            if isinstance(row.get("severity_directionality"), str) and row.get("severity_directionality")
+        }
+    )
+    label_pairs: List[Tuple[float, str]] = []
+    for row in ok_rows:
+        sort_value = _coerce_finite_float(row.get("severity_sort_value"))
+        label_value = row.get("severity_label")
+        if sort_value is None:
+            continue
+        if not isinstance(label_value, str) or not label_value:
+            label_value = str(sort_value)
+        label_pairs.append((sort_value, label_value))
+    ordered_labels = [label for _, label in sorted(label_pairs, key=lambda item: item[0])]
+    severity_values = [item[0] for item in label_pairs]
+
+    if not ok_rows:
+        reasons = [
+            str(row.get("severity_reason"))
+            for row in severity_rows
+            if isinstance(row.get("severity_reason"), str) and row.get("severity_reason")
+        ]
+        return {
+            "severity_level_status": "not_available",
+            "severity_level_reason": reasons[0] if reasons else SEVERITY_NOT_AVAILABLE_REASON,
+            "severity_axis_kind": None,
+            "severity_rule_version": None,
+            "severity_directionality": None,
+            "severity_available_condition_count": 0,
+            "severity_total_condition_count": total_count,
+            "severity_min_sort_value": None,
+            "severity_max_sort_value": None,
+            "severity_label_sequence": None,
+            "severity_canonical_global_axis": False,
+        }
+
+    summary_reason = None
+    summary_status = "ok"
+    if len(ok_rows) < total_count:
+        summary_status = "partial"
+        summary_reason = f"family-local severity frozen for {len(ok_rows)}/{total_count} attack conditions"
+
+    return {
+        "severity_level_status": summary_status,
+        "severity_level_reason": summary_reason,
+        "severity_axis_kind": axis_kinds[0] if len(axis_kinds) == 1 else json.dumps(axis_kinds, ensure_ascii=False),
+        "severity_rule_version": rule_versions[0] if len(rule_versions) == 1 else json.dumps(rule_versions, ensure_ascii=False),
+        "severity_directionality": (
+            directionality_values[0]
+            if len(directionality_values) == 1
+            else json.dumps(directionality_values, ensure_ascii=False)
+        ),
+        "severity_available_condition_count": len(ok_rows),
+        "severity_total_condition_count": total_count,
+        "severity_min_sort_value": min(severity_values) if severity_values else None,
+        "severity_max_sort_value": max(severity_values) if severity_values else None,
+        "severity_label_sequence": json.dumps(ordered_labels, ensure_ascii=False) if ordered_labels else None,
+        "severity_canonical_global_axis": False,
+    }
+
+
+def _summarize_boolean_diagnostic(
+    rows: Sequence[Mapping[str, Any]],
+    key_name: str,
+    unavailable_reason: str,
+) -> Dict[str, Any]:
+    """
+    功能：汇总布尔型几何诊断字段。
+
+    Summarize one boolean diagnostic signal across rows.
+
+    Args:
+        rows: Attack event rows.
+        key_name: Boolean field name.
+        unavailable_reason: Fallback reason when the signal is absent.
+
+    Returns:
+        Summary mapping with counts, rate, status, and reason.
+    """
+    if not isinstance(rows, Sequence):
+        raise TypeError("rows must be Sequence")
+    if not isinstance(key_name, str) or not key_name:
+        raise TypeError("key_name must be non-empty str")
+    if not isinstance(unavailable_reason, str) or not unavailable_reason:
+        raise TypeError("unavailable_reason must be non-empty str")
+
+    available_values = [row.get(key_name) for row in rows if isinstance(row.get(key_name), bool)]
+    available_count = len(available_values)
+    true_count = sum(1 for value in available_values if value is True)
+    if available_count <= 0:
+        return {
+            f"{key_name}_available_count": 0,
+            f"{key_name}_true_count": 0,
+            f"{key_name}_true_rate": None,
+            f"{key_name}_status": "not_available",
+            f"{key_name}_reason": unavailable_reason,
+        }
+
+    status_value = "ok" if available_count == len(rows) else "partial"
+    reason_value = None if status_value == "ok" else f"available for {available_count}/{len(rows)} attack events"
+    return {
+        f"{key_name}_available_count": available_count,
+        f"{key_name}_true_count": true_count,
+        f"{key_name}_true_rate": float(true_count / available_count),
+        f"{key_name}_status": status_value,
+        f"{key_name}_reason": reason_value,
+    }
 
 
 def _resolve_pw02_threshold_export_path(
@@ -527,6 +723,7 @@ def _build_robustness_rows(
     main_rows: Sequence[Mapping[str, Any]],
     family_rows: Sequence[Mapping[str, Any]],
     condition_rows: Sequence[Mapping[str, Any]],
+    attack_event_rows: Sequence[Mapping[str, Any]],
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     功能：构造 robustness 三类 CSV 行。
@@ -537,6 +734,7 @@ def _build_robustness_rows(
         main_rows: Canonical main summary rows.
         family_rows: Paper-facing family rows.
         condition_rows: Paper-facing condition rows.
+        attack_event_rows: Materialized attack event rows.
 
     Returns:
         Tuple of curve rows, macro rows, and worst-case rows.
@@ -544,6 +742,7 @@ def _build_robustness_rows(
     curve_rows: List[Dict[str, Any]] = []
     macro_rows: List[Dict[str, Any]] = []
     worst_case_rows: List[Dict[str, Any]] = []
+    condition_severity_lookup = _build_condition_severity_lookup(attack_event_rows)
 
     family_rows_by_name: Dict[str, Dict[str, Any]] = {
         str(row.get("attack_family")): dict(cast(Mapping[str, Any], row))
@@ -570,6 +769,13 @@ def _build_robustness_rows(
                 for row in condition_rows
                 if str(row.get("attack_family")) == family_name
             ]
+            severity_rows = [
+                condition_severity_lookup[str(row.get("attack_condition_key"))]
+                for row in matching_condition_rows
+                if isinstance(row.get("attack_condition_key"), str)
+                and row.get("attack_condition_key") in condition_severity_lookup
+            ]
+            severity_summary = _summarize_severity_metadata(severity_rows)
             condition_values = [
                 cast(float, _parse_csv_float(row, column_name))
                 for row in matching_condition_rows
@@ -585,8 +791,7 @@ def _build_robustness_rows(
                     "mean_attack_tpr": mean_attack_tpr,
                     "min_attack_tpr": min_attack_tpr,
                     "macro_avg_attack_tpr": None,
-                    "severity_level_status": "not_available",
-                    "severity_level_reason": SEVERITY_NOT_AVAILABLE_REASON,
+                    **severity_summary,
                 }
             )
             for matching_condition_row in matching_condition_rows:
@@ -597,6 +802,7 @@ def _build_robustness_rows(
         macro_avg_attack_tpr = _safe_mean(family_scope_values)
         overall_attack_tpr = _parse_csv_float(main_rows_by_scope.get(scope_name, {}), "attack_tpr")
         worst_case_attack_tpr = min((value for value, _ in condition_scope_rows), default=None)
+        macro_severity_summary = _summarize_severity_metadata(list(condition_severity_lookup.values()))
         macro_rows.append(
             {
                 "scope": scope_name,
@@ -605,12 +811,17 @@ def _build_robustness_rows(
                 "worst_case_attack_tpr": worst_case_attack_tpr,
                 "family_count": len(family_rows_by_name),
                 "condition_count": len(condition_scope_rows),
-                "severity_level_status": "not_available",
-                "severity_level_reason": SEVERITY_NOT_AVAILABLE_REASON,
+                **macro_severity_summary,
             }
         )
         if condition_scope_rows:
             worst_case_value, worst_case_row = min(condition_scope_rows, key=lambda item: item[0])
+            worst_case_condition_key = worst_case_row.get("attack_condition_key")
+            worst_case_severity = _summarize_severity_metadata(
+                [condition_severity_lookup[str(worst_case_condition_key)]]
+                if isinstance(worst_case_condition_key, str) and worst_case_condition_key in condition_severity_lookup
+                else []
+            )
             worst_case_rows.append(
                 {
                     "scope": scope_name,
@@ -620,8 +831,12 @@ def _build_robustness_rows(
                     "event_count": _parse_csv_int(worst_case_row, "event_count"),
                     "parent_event_count": _parse_csv_int(worst_case_row, "parent_event_count"),
                     "worst_case_attack_tpr": worst_case_value,
-                    "severity_level_status": "not_available",
-                    "severity_level_reason": SEVERITY_NOT_AVAILABLE_REASON,
+                    **worst_case_severity,
+                    "severity_label": (
+                        condition_severity_lookup[str(worst_case_condition_key)].get("severity_label")
+                        if isinstance(worst_case_condition_key, str) and worst_case_condition_key in condition_severity_lookup
+                        else None
+                    ),
                 }
             )
         else:
@@ -634,8 +849,8 @@ def _build_robustness_rows(
                     "event_count": None,
                     "parent_event_count": None,
                     "worst_case_attack_tpr": None,
-                    "severity_level_status": "not_available",
-                    "severity_level_reason": SEVERITY_NOT_AVAILABLE_REASON,
+                    **_summarize_severity_metadata([]),
+                    "severity_label": None,
                 }
             )
 
@@ -673,13 +888,18 @@ def _collect_geometry_rows(
         geo_helped_positive_count = 0
         geo_not_used_count = 0
         geo_not_used_reason_counts: Dict[str, int] = {}
+        sync_status_counts: Dict[str, int] = {}
+        geometry_failure_reason_counts: Dict[str, int] = {}
         for row in rows:
             formal_record = _extract_mapping(row.get("formal_record"))
             attestation_payload = _extract_mapping(formal_record.get("attestation"))
             image_evidence_payload = _extract_mapping(attestation_payload.get("image_evidence_result"))
+            geometry_diagnostics = _extract_mapping(row.get("geometry_diagnostics"))
             geo_rescue_eligible = bool(image_evidence_payload.get("geo_rescue_eligible", False))
             geo_rescue_applied = bool(image_evidence_payload.get("geo_rescue_applied", False))
             geo_not_used_reason = image_evidence_payload.get("geo_not_used_reason")
+            sync_status = geometry_diagnostics.get("sync_status")
+            geometry_failure_reason = geometry_diagnostics.get("geometry_failure_reason")
             if geo_rescue_eligible:
                 geo_rescue_eligible_count += 1
             if geo_rescue_applied:
@@ -689,19 +909,47 @@ def _collect_geometry_rows(
             if isinstance(geo_not_used_reason, str) and geo_not_used_reason:
                 geo_not_used_count += 1
                 geo_not_used_reason_counts[geo_not_used_reason] = geo_not_used_reason_counts.get(geo_not_used_reason, 0) + 1
+            if isinstance(sync_status, str) and sync_status:
+                sync_status_counts[sync_status] = sync_status_counts.get(sync_status, 0) + 1
+            if isinstance(geometry_failure_reason, str) and geometry_failure_reason:
+                geometry_failure_reason_counts[geometry_failure_reason] = (
+                    geometry_failure_reason_counts.get(geometry_failure_reason, 0) + 1
+                )
+
+        sync_success_summary = _summarize_boolean_diagnostic(rows, "sync_success", DEEP_GEOMETRY_NOT_AVAILABLE_REASON)
+        inverse_summary = _summarize_boolean_diagnostic(
+            rows,
+            "inverse_transform_success",
+            DEEP_GEOMETRY_NOT_AVAILABLE_REASON,
+        )
+        anchor_summary = _summarize_boolean_diagnostic(
+            rows,
+            "attention_anchor_available",
+            DEEP_GEOMETRY_NOT_AVAILABLE_REASON,
+        )
         return {
             "geo_rescue_eligible_count": geo_rescue_eligible_count,
             "geo_rescue_applied_count": geo_rescue_applied_count,
             "geo_helped_positive_count": geo_helped_positive_count,
             "geo_not_used_count": geo_not_used_count,
             "geo_not_used_reason_counts": json.dumps(dict(sorted(geo_not_used_reason_counts.items())), ensure_ascii=False, sort_keys=True),
-            "sync_success_status": "not_available",
-            "sync_success_reason": DEEP_GEOMETRY_NOT_AVAILABLE_REASON,
-            "inverse_transform_success_status": "not_available",
-            "inverse_transform_success_reason": DEEP_GEOMETRY_NOT_AVAILABLE_REASON,
-            "attention_anchor_available_status": "not_available",
-            "attention_anchor_available_reason": DEEP_GEOMETRY_NOT_AVAILABLE_REASON,
-            "future_upstream_sidecar_required": True,
+            "sync_status_counts": json.dumps(dict(sorted(sync_status_counts.items())), ensure_ascii=False, sort_keys=True),
+            "geometry_failure_reason_counts": json.dumps(
+                dict(sorted(geometry_failure_reason_counts.items())),
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            **sync_success_summary,
+            **inverse_summary,
+            **anchor_summary,
+            "future_upstream_sidecar_required": any(
+                summary.get(field_name) != "ok"
+                for summary, field_name in [
+                    (sync_success_summary, "sync_success_status"),
+                    (inverse_summary, "inverse_transform_success_status"),
+                    (anchor_summary, "attention_anchor_available_status"),
+                ]
+            ),
         }
 
     family_rows: List[Dict[str, Any]] = []
@@ -902,6 +1150,7 @@ def build_pw04_metrics_extensions(
         main_rows=main_rows,
         family_rows=family_rows,
         condition_rows=condition_rows,
+        attack_event_rows=attack_event_rows,
     )
     geometry_family_rows, geometry_summary_row = _collect_geometry_rows(attack_event_rows)
 
@@ -926,6 +1175,15 @@ def build_pw04_metrics_extensions(
             "macro_avg_attack_tpr",
             "severity_level_status",
             "severity_level_reason",
+            "severity_axis_kind",
+            "severity_rule_version",
+            "severity_directionality",
+            "severity_available_condition_count",
+            "severity_total_condition_count",
+            "severity_min_sort_value",
+            "severity_max_sort_value",
+            "severity_label_sequence",
+            "severity_canonical_global_axis",
         ],
         robustness_curve_rows,
     )
@@ -940,6 +1198,15 @@ def build_pw04_metrics_extensions(
             "condition_count",
             "severity_level_status",
             "severity_level_reason",
+            "severity_axis_kind",
+            "severity_rule_version",
+            "severity_directionality",
+            "severity_available_condition_count",
+            "severity_total_condition_count",
+            "severity_min_sort_value",
+            "severity_max_sort_value",
+            "severity_label_sequence",
+            "severity_canonical_global_axis",
         ],
         robustness_macro_rows,
     )
@@ -955,6 +1222,16 @@ def build_pw04_metrics_extensions(
             "worst_case_attack_tpr",
             "severity_level_status",
             "severity_level_reason",
+            "severity_axis_kind",
+            "severity_rule_version",
+            "severity_directionality",
+            "severity_available_condition_count",
+            "severity_total_condition_count",
+            "severity_min_sort_value",
+            "severity_max_sort_value",
+            "severity_label_sequence",
+            "severity_canonical_global_axis",
+            "severity_label",
         ],
         worst_case_rows,
     )
@@ -968,10 +1245,21 @@ def build_pw04_metrics_extensions(
             "geo_helped_positive_count",
             "geo_not_used_count",
             "geo_not_used_reason_counts",
+            "sync_status_counts",
+            "geometry_failure_reason_counts",
+            "sync_success_available_count",
+            "sync_success_true_count",
+            "sync_success_true_rate",
             "sync_success_status",
             "sync_success_reason",
+            "inverse_transform_success_available_count",
+            "inverse_transform_success_true_count",
+            "inverse_transform_success_true_rate",
             "inverse_transform_success_status",
             "inverse_transform_success_reason",
+            "attention_anchor_available_available_count",
+            "attention_anchor_available_true_count",
+            "attention_anchor_available_true_rate",
             "attention_anchor_available_status",
             "attention_anchor_available_reason",
             "future_upstream_sidecar_required",
@@ -989,10 +1277,21 @@ def build_pw04_metrics_extensions(
             "geo_helped_positive_count",
             "geo_not_used_count",
             "geo_not_used_reason_counts",
+            "sync_status_counts",
+            "geometry_failure_reason_counts",
+            "sync_success_available_count",
+            "sync_success_true_count",
+            "sync_success_true_rate",
             "sync_success_status",
             "sync_success_reason",
+            "inverse_transform_success_available_count",
+            "inverse_transform_success_true_count",
+            "inverse_transform_success_true_rate",
             "inverse_transform_success_status",
             "inverse_transform_success_reason",
+            "attention_anchor_available_available_count",
+            "attention_anchor_available_true_count",
+            "attention_anchor_available_true_rate",
             "attention_anchor_available_status",
             "attention_anchor_available_reason",
             "future_upstream_sidecar_required",
@@ -1019,6 +1318,24 @@ def build_pw04_metrics_extensions(
     quality_summary_payload = _load_required_json_dict(quality_summary_json_path, "PW02 quality metrics summary")
     quality_rows = cast(List[Mapping[str, Any]], quality_summary_payload.get("rows", []))
     clean_quality_row = next((row for row in quality_rows if row.get("scope") == "content_chain"), {})
+    attack_lpips_values = [
+        value
+        for value in (
+            _coerce_finite_float(row.get("attack_quality_lpips"))
+            for row in attack_event_rows
+        )
+        if value is not None
+    ]
+    attack_quality_ok_count = sum(1 for row in attack_event_rows if row.get("attack_quality_status") == "ok")
+    if attack_quality_ok_count <= 0:
+        attack_lpips_status = "not_available"
+        attack_lpips_reason = "PW04 attack quality rows do not contain LPIPS values"
+    elif attack_quality_ok_count == len(attack_event_rows):
+        attack_lpips_status = "ok"
+        attack_lpips_reason = None
+    else:
+        attack_lpips_status = "partial"
+        attack_lpips_reason = f"LPIPS available for {attack_quality_ok_count}/{len(attack_event_rows)} attack events"
 
     tradeoff_rows: List[Dict[str, Any]] = []
     for robustness_row in robustness_macro_rows:
@@ -1029,8 +1346,12 @@ def build_pw04_metrics_extensions(
                 "clean_quality_status": clean_quality_row.get("status", "not_available"),
                 "clean_mean_psnr": clean_quality_row.get("mean_psnr"),
                 "clean_mean_ssim": clean_quality_row.get("mean_ssim"),
+                "clean_mean_lpips": clean_quality_row.get("mean_lpips"),
                 "attack_macro_avg_tpr": robustness_row.get("macro_avg_attack_tpr"),
                 "overall_attack_tpr": robustness_row.get("overall_attack_tpr"),
+                "attack_mean_lpips": _safe_mean(attack_lpips_values),
+                "attack_lpips_status": attack_lpips_status,
+                "attack_lpips_reason": attack_lpips_reason,
                 "quality_metrics_summary_csv_path": normalize_path_value(quality_summary_csv_path),
                 "quality_metrics_summary_json_path": normalize_path_value(quality_summary_json_path),
                 "robustness_macro_summary_path": normalize_path_value(robustness_macro_summary_path),
@@ -1048,8 +1369,12 @@ def build_pw04_metrics_extensions(
             "clean_quality_status",
             "clean_mean_psnr",
             "clean_mean_ssim",
+            "clean_mean_lpips",
             "attack_macro_avg_tpr",
             "overall_attack_tpr",
+            "attack_mean_lpips",
+            "attack_lpips_status",
+            "attack_lpips_reason",
             "quality_metrics_summary_csv_path",
             "quality_metrics_summary_json_path",
             "robustness_macro_summary_path",

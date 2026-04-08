@@ -79,6 +79,148 @@ def _load_required_json_dict(path_obj: Path, label: str) -> Dict[str, Any]:
     return cast(Dict[str, Any], payload)
 
 
+def _extract_mapping(node: Any) -> Dict[str, Any]:
+    """
+    Normalize one optional mapping payload to dict.
+
+    Args:
+        node: Candidate mapping node.
+
+    Returns:
+        Normalized dict payload.
+    """
+    return dict(cast(Mapping[str, Any], node)) if isinstance(node, Mapping) else {}
+
+
+def _extract_attack_severity_metadata(attack_event_spec: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    Extract frozen severity metadata from one attack event spec.
+
+    Args:
+        attack_event_spec: Materialized attack event spec.
+
+    Returns:
+        Severity metadata mapping.
+    """
+    if not isinstance(attack_event_spec, Mapping):
+        raise TypeError("attack_event_spec must be Mapping")
+    return {
+        "severity_rule_version": attack_event_spec.get("severity_rule_version"),
+        "severity_axis_kind": attack_event_spec.get("severity_axis_kind"),
+        "severity_directionality": attack_event_spec.get("severity_directionality"),
+        "severity_status": attack_event_spec.get("severity_status"),
+        "severity_reason": attack_event_spec.get("severity_reason"),
+        "severity_source_param": attack_event_spec.get("severity_source_param"),
+        "severity_scalarization": attack_event_spec.get("severity_scalarization"),
+        "severity_value": attack_event_spec.get("severity_value"),
+        "severity_sort_value": attack_event_spec.get("severity_sort_value"),
+        "severity_label": attack_event_spec.get("severity_label"),
+        "severity_level_index": attack_event_spec.get("severity_level_index"),
+    }
+
+
+def _extract_attack_geometry_diagnostics(detect_payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    Extract stable geometry diagnostics from one attacked detect payload.
+
+    Args:
+        detect_payload: PW03 staged detect payload.
+
+    Returns:
+        Append-only geometry diagnostics mapping.
+    """
+    if not isinstance(detect_payload, Mapping):
+        raise TypeError("detect_payload must be Mapping")
+
+    geometry_result = _extract_mapping(detect_payload.get("geometry_result"))
+    geometry_evidence_payload = _extract_mapping(detect_payload.get("geometry_evidence_payload"))
+    sync_result = _extract_mapping(geometry_result.get("sync_result"))
+    anchor_result = _extract_mapping(geometry_result.get("anchor_result"))
+    align_metrics = _extract_mapping(geometry_evidence_payload.get("align_metrics"))
+    if not align_metrics:
+        align_metrics = _extract_mapping(anchor_result.get("align_metrics"))
+
+    sync_status = geometry_result.get("sync_status")
+    if not isinstance(sync_status, str) or not sync_status:
+        sync_status = sync_result.get("sync_status")
+    if not isinstance(sync_status, str) or not sync_status:
+        sync_status = sync_result.get("status")
+    if not isinstance(sync_status, str) or not sync_status:
+        sync_status = _extract_mapping(geometry_evidence_payload.get("audit")).get("sync_status_detail")
+
+    sync_success_value = sync_result.get("sync_success")
+    sync_success = None
+    if isinstance(sync_success_value, bool):
+        sync_success = sync_success_value
+    elif isinstance(sync_status, str) and sync_status:
+        sync_success = sync_status == "ok"
+
+    sync_quality_metrics = _extract_mapping(geometry_result.get("sync_metrics"))
+    if not sync_quality_metrics:
+        sync_quality_metrics = _extract_mapping(sync_result.get("sync_quality_metrics"))
+    if not sync_quality_metrics:
+        sync_quality_metrics = _extract_mapping(geometry_evidence_payload.get("sync_quality_metrics"))
+
+    template_match_metrics = _extract_mapping(sync_result.get("template_match_metrics"))
+    if not template_match_metrics:
+        template_match_metrics = {
+            key_name: sync_quality_metrics.get(key_name)
+            for key_name in [
+                "template_match_score",
+                "template_match_p95",
+                "template_match_detected",
+                "template_match_threshold",
+                "template_seed",
+                "template_digest",
+                "template_confidence",
+            ]
+            if key_name in sync_quality_metrics
+        }
+
+    relation_binding_diagnostics = _extract_mapping(geometry_result.get("relation_binding_diagnostics"))
+    relation_digest_bound = geometry_result.get("relation_digest_bound")
+    if not isinstance(relation_digest_bound, str) or not relation_digest_bound:
+        relation_digest_bound = sync_result.get("relation_digest_bound")
+
+    geometry_failure_reason = geometry_result.get("geometry_failure_reason")
+    if not isinstance(geometry_failure_reason, str) or not geometry_failure_reason:
+        geometry_failure_reason = sync_result.get("geometry_failure_reason")
+    if not isinstance(geometry_failure_reason, str) or not geometry_failure_reason:
+        geometry_failure_reason = geometry_evidence_payload.get("geometry_failure_reason")
+
+    anchor_digest = geometry_evidence_payload.get("anchor_digest")
+    if not isinstance(anchor_digest, str) or not anchor_digest:
+        anchor_digest = geometry_result.get("anchor_digest")
+    if not isinstance(anchor_digest, str) or not anchor_digest:
+        anchor_digest = anchor_result.get("anchor_digest")
+
+    inverse_transform_success = None
+    inverse_recovery_success = align_metrics.get("inverse_recovery_success")
+    if isinstance(inverse_recovery_success, bool):
+        inverse_transform_success = inverse_recovery_success
+
+    attention_anchor_available = None
+    if isinstance(anchor_digest, str) and anchor_digest:
+        attention_anchor_available = True
+    elif anchor_result or geometry_evidence_payload.get("anchor_metrics") is not None:
+        attention_anchor_available = False
+
+    return {
+        "sync_status": sync_status if isinstance(sync_status, str) and sync_status else None,
+        "sync_success": sync_success,
+        "sync_digest": sync_result.get("sync_digest") if isinstance(sync_result.get("sync_digest"), str) else geometry_result.get("sync_digest"),
+        "geometry_failure_reason": geometry_failure_reason if isinstance(geometry_failure_reason, str) and geometry_failure_reason else None,
+        "relation_digest_bound": relation_digest_bound if isinstance(relation_digest_bound, str) and relation_digest_bound else None,
+        "relation_binding_diagnostics": relation_binding_diagnostics or None,
+        "template_match_metrics": template_match_metrics or None,
+        "sync_quality_metrics": sync_quality_metrics or None,
+        "inverse_transform_success": inverse_transform_success,
+        "attention_anchor_available": attention_anchor_available,
+        "anchor_digest": anchor_digest if isinstance(anchor_digest, str) and anchor_digest else None,
+        "align_metrics": align_metrics or None,
+    }
+
+
 def _validate_attack_local_worker_count(attack_local_worker_count: int) -> None:
     """
     Validate the shard-local worker count.
@@ -891,13 +1033,19 @@ def _run_attack_detect_event(
     if not source_detect_record_path.exists() or not source_detect_record_path.is_file():
         raise FileNotFoundError(f"PW03 detect record missing: {normalize_path_value(source_detect_record_path)}")
     detect_payload = _load_required_json_dict(source_detect_record_path, "PW03 attacked detect record")
+    severity_metadata = _extract_attack_severity_metadata(attack_event_spec)
+    geometry_diagnostics = _extract_attack_geometry_diagnostics(detect_payload)
+    parent_reference = cast(Mapping[str, Any], attack_event_spec.get("parent_event_reference", {}))
     detect_payload["sample_role"] = ATTACKED_POSITIVE_SAMPLE_ROLE
     detect_payload["paper_workflow_attack_stage"] = STAGE_NAME
     detect_payload["paper_workflow_attack_event_id"] = attack_event_spec.get("event_id")
     detect_payload["paper_workflow_parent_event_id"] = attack_event_spec.get("parent_event_id")
+    detect_payload["paper_workflow_parent_source_image_path"] = parent_reference.get("parent_source_image_path")
     detect_payload["paper_workflow_attack_family"] = attack_event_spec.get("attack_family")
     detect_payload["paper_workflow_attack_config_name"] = attack_event_spec.get("attack_config_name")
     detect_payload["paper_workflow_attack_params_digest"] = attack_event_spec.get("attack_params_digest")
+    detect_payload["paper_workflow_severity_metadata"] = severity_metadata
+    detect_payload["paper_workflow_geometry_diagnostics"] = geometry_diagnostics
     write_json_atomic(staged_detect_record_path, detect_payload)
 
     return {
@@ -909,6 +1057,8 @@ def _run_attack_detect_event(
         "event_gpu_session_peak_path": normalize_path_value(event_gpu_summary_path),
         "event_gpu_session_peak_package_relative_path": _relative_to_shard(shard_root, event_gpu_summary_path),
         "detect_stage_result": detect_result,
+        "severity_metadata": severity_metadata,
+        "geometry_diagnostics": geometry_diagnostics,
     }
 
 
@@ -981,6 +1131,8 @@ def _write_attack_event_manifest(
         "attack_params_version": attack_event_spec.get("attack_params_version"),
         "attack_params": copy.deepcopy(attack_event_spec.get("attack_params", {})),
         "attack_params_digest": attack_event_spec.get("attack_params_digest"),
+        "severity_metadata": dict(cast(Mapping[str, Any], detect_summary.get("severity_metadata", {}))),
+        "geometry_diagnostics": dict(cast(Mapping[str, Any], detect_summary.get("geometry_diagnostics", {}))),
         "attack_seed": attack_artifacts.get("attack_seed"),
         "runtime_config_path": runtime_config_summary.get("runtime_config_path"),
         "runtime_config_package_relative_path": runtime_config_summary.get("runtime_config_package_relative_path"),
