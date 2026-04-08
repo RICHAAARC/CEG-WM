@@ -18,6 +18,9 @@ from typing import Any, Dict, List, Mapping, Optional, cast
 import yaml
 
 from scripts.notebook_runtime_common import (
+    PW01_STAGE_NAME,
+    PW03_STAGE_NAME,
+    STAGE_01_NAME,
     collect_attestation_env_summary,
     normalize_path_value,
     relative_path_under_base,
@@ -227,25 +230,51 @@ def _collect_stage_01_model_binding_summary(cfg_obj: Mapping[str, Any]) -> Dict[
     }
 
 
-def detect_stage_01_preflight(cfg_path: Path) -> Dict[str, Any]:
+def _translate_legacy_stage_01_failed_check_names(failed_checks: List[str]) -> List[str]:
     """
-    功能：执行 stage 01 的 formal preflight。 
+    功能：将活动 preflight 失败键映射回 legacy stage 01 失败键。
 
-    Execute stage-01 preflight checks for GPU, attestation env, authoritative
-    whitelist-semantics version binding, model snapshot binding, and required
-    config gates.
+    Translate active preflight failure keys into legacy stage-01 failure keys.
+
+    Args:
+        failed_checks: Active preflight failure key list.
+
+    Returns:
+        Legacy-compatible failure key list.
+    """
+    if not isinstance(failed_checks, list):
+        raise TypeError("failed_checks must be list")
+
+    legacy_name_mapping = {
+        "model_source_binding_missing": "stage_01_model_source_binding_missing",
+        "model_source_binding_not_bound": "stage_01_model_source_binding_not_bound",
+        "model_snapshot_path_missing_or_not_directory": "stage_01_model_snapshot_path_missing_or_not_directory",
+        "model_source_binding_path_mismatch": "stage_01_model_source_binding_path_mismatch",
+    }
+    return [legacy_name_mapping.get(str(item), str(item)) for item in failed_checks]
+
+
+def _build_active_gpu_model_preflight(cfg_path: Path, *, stage_name: str) -> Dict[str, Any]:
+    """
+    功能：构建 paper_workflow 活动路径使用的 GPU 与模型绑定 preflight。
+
+    Build the active paper_workflow preflight payload for GPU and model-binding checks.
 
     Args:
         cfg_path: Runtime config path.
+        stage_name: Active stage display name.
 
     Returns:
-        Stage-01 preflight status mapping.
+        Active preflight status mapping.
     """
+    if not isinstance(stage_name, str) or not stage_name.strip():
+        raise TypeError("stage_name must be non-empty str")
+
     cfg_obj, config_error = _load_config_mapping(cfg_path)
     gpu_summary = _collect_gpu_tool_summary()
     policy_binding_summary = _collect_authoritative_policy_binding_summary()
     result: Dict[str, Any] = {
-        "stage_name": "01_Paper_Full_Cuda",
+        "stage_name": stage_name.strip(),
         "cfg_path": normalize_path_value(cfg_path),
         "config_error": config_error,
         "gpu_required": True,
@@ -255,6 +284,7 @@ def detect_stage_01_preflight(cfg_path: Path) -> Dict[str, Any]:
         "required_attestation_env_vars": [],
         "missing_attestation_env_vars": [],
         "attestation_env_var_bindings_complete": True,
+        "missing_attestation_env_var_bindings": [],
         "model_source_binding_required": True,
         "model_source_binding_present": False,
         "model_source_binding_status": "<absent>",
@@ -265,10 +295,10 @@ def detect_stage_01_preflight(cfg_path: Path) -> Dict[str, Any]:
         "model_snapshot_path_exists": False,
         "model_snapshot_path_is_directory": False,
         "model_source_binding_path_matches_snapshot_path": False,
-        "stage_01_source_pool_enabled": False,
-        "stage_01_source_pool_prompt_file_bound": False,
-        "stage_01_pooled_threshold_build_enabled": False,
-        "stage_01_pooled_threshold_target_pair_count_valid": False,
+        "source_pool_enabled": False,
+        "source_pool_prompt_file_bound": False,
+        "pooled_threshold_build_enabled": False,
+        "pooled_threshold_target_pair_count_valid": False,
         "failed_checks": [],
         "ok": False,
     }
@@ -301,14 +331,14 @@ def detect_stage_01_preflight(cfg_path: Path) -> Dict[str, Any]:
     result["attestation_env_var_bindings_complete"] = len(missing_env_var_bindings) == 0
     result["missing_attestation_env_var_bindings"] = missing_env_var_bindings
     result.update(_collect_stage_01_model_binding_summary(cfg_obj))
-    result["stage_01_source_pool_enabled"] = source_pool_cfg.get("enabled") is True
-    result["stage_01_source_pool_prompt_file_bound"] = (
+    result["source_pool_enabled"] = source_pool_cfg.get("enabled") is True
+    result["source_pool_prompt_file_bound"] = (
         source_pool_cfg.get("use_inference_prompt_file") is True
         and isinstance(cfg_obj.get("inference_prompt_file"), str)
         and bool(str(cfg_obj.get("inference_prompt_file")).strip())
     )
-    result["stage_01_pooled_threshold_build_enabled"] = pooled_cfg.get("enabled") is True
-    result["stage_01_pooled_threshold_target_pair_count_valid"] = (
+    result["pooled_threshold_build_enabled"] = pooled_cfg.get("enabled") is True
+    result["pooled_threshold_target_pair_count_valid"] = (
         isinstance(pooled_cfg.get("target_pair_count"), int)
         and int(pooled_cfg.get("target_pair_count")) > 0
     )
@@ -320,29 +350,131 @@ def detect_stage_01_preflight(cfg_path: Path) -> Dict[str, Any]:
     if bool(result["attestation_env_required"]) and result["missing_attestation_env_vars"]:
         failed_checks.append("missing_attestation_env_vars")
     if not bool(result["model_source_binding_present"]):
-        failed_checks.append("stage_01_model_source_binding_missing")
+        failed_checks.append("model_source_binding_missing")
     elif result["model_source_binding_status"] != "bound":
-        failed_checks.append("stage_01_model_source_binding_not_bound")
+        failed_checks.append("model_source_binding_not_bound")
     if not bool(result["model_snapshot_path_exists"]) or not bool(result["model_snapshot_path_is_directory"]):
-        failed_checks.append("stage_01_model_snapshot_path_missing_or_not_directory")
+        failed_checks.append("model_snapshot_path_missing_or_not_directory")
     if (
         bool(result["model_source_binding_present"])
         and bool(result["model_snapshot_path_exists"])
         and bool(result["model_snapshot_path_is_directory"])
         and not bool(result["model_source_binding_path_matches_snapshot_path"])
     ):
-        failed_checks.append("stage_01_model_source_binding_path_mismatch")
-    if not bool(result["stage_01_source_pool_enabled"]):
-        failed_checks.append("stage_01_source_pool_disabled")
-    if not bool(result["stage_01_source_pool_prompt_file_bound"]):
-        failed_checks.append("stage_01_source_pool_prompt_file_missing")
-    if not bool(result["stage_01_pooled_threshold_build_enabled"]):
-        failed_checks.append("stage_01_pooled_threshold_build_disabled")
-    if not bool(result["stage_01_pooled_threshold_target_pair_count_valid"]):
-        failed_checks.append("stage_01_pooled_threshold_target_pair_count_invalid")
+        failed_checks.append("model_source_binding_path_mismatch")
+    if not bool(result["source_pool_enabled"]):
+        failed_checks.append("source_pool_disabled")
+    if not bool(result["source_pool_prompt_file_bound"]):
+        failed_checks.append("source_pool_prompt_file_missing")
+    if not bool(result["pooled_threshold_build_enabled"]):
+        failed_checks.append("pooled_threshold_build_disabled")
+    if not bool(result["pooled_threshold_target_pair_count_valid"]):
+        failed_checks.append("pooled_threshold_target_pair_count_invalid")
 
     result["ok"] = len(failed_checks) == 0
     return result
+
+
+def _build_legacy_stage_01_preflight(cfg_path: Path) -> Dict[str, Any]:
+    """
+    功能：构建 legacy stage 01 兼容 preflight 负载。
+
+    Build the legacy-compatible stage-01 preflight payload.
+
+    Args:
+        cfg_path: Runtime config path.
+
+    Returns:
+        Legacy stage-01 preflight status mapping.
+    """
+    active_preflight = _build_active_gpu_model_preflight(cfg_path, stage_name=STAGE_01_NAME)
+    return {
+        "stage_name": STAGE_01_NAME,
+        "cfg_path": active_preflight["cfg_path"],
+        "config_error": active_preflight["config_error"],
+        "gpu_required": active_preflight["gpu_required"],
+        "gpu_tool_available": active_preflight["gpu_tool_available"],
+        "nvidia_smi_path": active_preflight["nvidia_smi_path"],
+        "runtime_whitelist_version": active_preflight.get("runtime_whitelist_version", "<absent>"),
+        "policy_path_semantics_version": active_preflight.get("policy_path_semantics_version", "<absent>"),
+        "whitelist_semantics_versions_match": active_preflight.get("whitelist_semantics_versions_match", False),
+        "attestation_env_required": active_preflight["attestation_env_required"],
+        "required_attestation_env_vars": active_preflight["required_attestation_env_vars"],
+        "missing_attestation_env_vars": active_preflight["missing_attestation_env_vars"],
+        "attestation_env_var_bindings_complete": active_preflight["attestation_env_var_bindings_complete"],
+        "missing_attestation_env_var_bindings": active_preflight["missing_attestation_env_var_bindings"],
+        "model_source_binding_required": active_preflight["model_source_binding_required"],
+        "model_source_binding_present": active_preflight["model_source_binding_present"],
+        "model_source_binding_status": active_preflight["model_source_binding_status"],
+        "model_source_binding_reason": active_preflight["model_source_binding_reason"],
+        "model_source_binding_source": active_preflight["model_source_binding_source"],
+        "model_source_binding_snapshot_path": active_preflight["model_source_binding_snapshot_path"],
+        "model_snapshot_path": active_preflight["model_snapshot_path"],
+        "model_snapshot_path_exists": active_preflight["model_snapshot_path_exists"],
+        "model_snapshot_path_is_directory": active_preflight["model_snapshot_path_is_directory"],
+        "model_source_binding_path_matches_snapshot_path": active_preflight[
+            "model_source_binding_path_matches_snapshot_path"
+        ],
+        "stage_01_source_pool_enabled": active_preflight["source_pool_enabled"],
+        "stage_01_source_pool_prompt_file_bound": active_preflight["source_pool_prompt_file_bound"],
+        "stage_01_pooled_threshold_build_enabled": active_preflight["pooled_threshold_build_enabled"],
+        "stage_01_pooled_threshold_target_pair_count_valid": active_preflight[
+            "pooled_threshold_target_pair_count_valid"
+        ],
+        "failed_checks": _translate_legacy_stage_01_failed_check_names(
+            cast(List[str], active_preflight["failed_checks"])
+        ),
+        "ok": active_preflight["ok"],
+    }
+
+
+def detect_pw01_preflight(cfg_path: Path) -> Dict[str, Any]:
+    """
+    功能：执行 PW01 的活动路径 preflight。
+
+    Execute the active PW01 preflight checks for GPU, attestation env, policy binding,
+    model snapshot binding, and source-pool readiness gates.
+
+    Args:
+        cfg_path: Runtime config path.
+
+    Returns:
+        PW01 preflight status mapping.
+    """
+    return _build_active_gpu_model_preflight(cfg_path, stage_name=PW01_STAGE_NAME)
+
+
+def detect_pw03_preflight(cfg_path: Path) -> Dict[str, Any]:
+    """
+    功能：执行 PW03 的活动路径 preflight。
+
+    Execute the active PW03 preflight checks for GPU, attestation env, policy binding,
+    model snapshot binding, and shared source-pool readiness gates.
+
+    Args:
+        cfg_path: Runtime config path.
+
+    Returns:
+        PW03 preflight status mapping.
+    """
+    return _build_active_gpu_model_preflight(cfg_path, stage_name=PW03_STAGE_NAME)
+
+
+def detect_stage_01_preflight(cfg_path: Path) -> Dict[str, Any]:
+    """
+    功能：执行 stage 01 的 formal preflight。 
+
+    Execute stage-01 preflight checks for GPU, attestation env, authoritative
+    whitelist-semantics version binding, model snapshot binding, and required
+    config gates.
+
+    Args:
+        cfg_path: Runtime config path.
+
+    Returns:
+        Stage-01 preflight status mapping.
+    """
+    return _build_legacy_stage_01_preflight(cfg_path)
 
 
 def detect_stage_02_preflight(

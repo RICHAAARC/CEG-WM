@@ -165,7 +165,10 @@ def test_pw03_notebook_reads_pw02_finalize_inputs_and_shard_outputs() -> None:
     assert 'FINALIZE_MANIFEST_PATH = None' in precheck_source
     assert 'PW03_BOUND_CONFIG_PATH = PRECHECK_BOUND_CONFIG_PATH' in precheck_source
     assert 'write_yaml_mapping(PW03_BOUND_CONFIG_PATH, PRECHECK_BOUND_CFG)' in precheck_source
-    assert 'STAGE_01_PREFLIGHT = detect_stage_01_preflight(PW03_BOUND_CONFIG_PATH)' in precheck_source
+    assert 'PW03_PREFLIGHT = detect_pw03_preflight(PW03_BOUND_CONFIG_PATH)' in precheck_source
+    assert 'record_precheck("PW03 preflight"' in precheck_source
+    assert '"pw03_preflight": PW03_PREFLIGHT' in precheck_source
+    assert 'detect_stage_01_preflight' not in precheck_source
     assert 'persistent Huggingface 路径仅兼容保留' in precheck_source
     assert '模型 snapshot 来源为本地会话缓存' in precheck_source
     assert 'str(Path(str(MODEL_SNAPSHOT_PATH)).resolve()).startswith(str(LOCAL_HF_HOME.resolve()))' in precheck_source

@@ -245,7 +245,10 @@ def test_pw01_notebook_passes_precheck_bound_config_to_execute_and_parallel_plan
 
     assert "PW01_BOUND_CONFIG_PATH = PRECHECK_BOUND_CONFIG_PATH" in pw01_precheck
     assert "write_yaml_mapping(PW01_BOUND_CONFIG_PATH, PRECHECK_BOUND_CFG)" in pw01_precheck
-    assert "STAGE_01_PREFLIGHT = detect_stage_01_preflight(PW01_BOUND_CONFIG_PATH)" in pw01_precheck
+    assert "PW01_PREFLIGHT = detect_pw01_preflight(PW01_BOUND_CONFIG_PATH)" in pw01_precheck
+    assert '"PW01 preflight"' in pw01_precheck
+    assert '"pw01_preflight": PW01_PREFLIGHT' in pw01_precheck
+    assert "detect_stage_01_preflight" not in pw01_precheck
     assert '"sample_role 合法"' in pw01_precheck
     assert 'SAMPLE_ROLE in manifest_sample_roles' in pw01_precheck
     assert '"--bound-config-path"' in pw01_execute

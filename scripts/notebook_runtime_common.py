@@ -29,9 +29,19 @@ import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-STAGE_01_NAME = "01_Paper_Full_Cuda"
-STAGE_02_NAME = "02_Parallel_Attestation_Statistics"
-STAGE_03_NAME = "03_Experiment_Matrix_Full"
+PW00_STAGE_NAME = "PW00_Paper_Eval_Family_Manifest"
+PW01_STAGE_NAME = "PW01_Source_Event_Shards"
+PW02_STAGE_NAME = "PW02_Source_Merge_And_Global_Thresholds"
+PW03_STAGE_NAME = "PW03_Attack_Event_Shards"
+PW04_STAGE_NAME = "PW04_Attack_Merge_And_Metrics"
+PW05_STAGE_NAME = "PW05_Release_And_Signoff"
+LEGACY_STAGE_01_NAME = "01_Paper_Full_Cuda"
+LEGACY_STAGE_02_NAME = "02_Parallel_Attestation_Statistics"
+LEGACY_STAGE_03_NAME = "03_Experiment_Matrix_Full"
+# 仅保留给 legacy_mainline 兼容层，活动路径不再使用旧 stage 常量。
+STAGE_01_NAME = LEGACY_STAGE_01_NAME
+STAGE_02_NAME = LEGACY_STAGE_02_NAME
+STAGE_03_NAME = LEGACY_STAGE_03_NAME
 FORMAL_STAGE_PACKAGE_ROLE = "formal_stage_package"
 FAILURE_DIAGNOSTICS_PACKAGE_ROLE = "failure_diagnostics_package"
 FORMAL_PACKAGE_DISCOVERY_SCOPE = "discoverable_formal_only"
