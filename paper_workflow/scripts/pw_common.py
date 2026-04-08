@@ -1,5 +1,5 @@
 """
-File purpose: Shared utilities for paper_workflow stage-01 orchestration.
+File purpose: Shared utilities for paper_workflow PW orchestration.
 Module type: General module
 """
 
@@ -615,7 +615,7 @@ def build_source_shard_plan(
 
     return {
         "artifact_type": "paper_workflow_source_shard_plan",
-        "schema_version": "pw_stage_01_v1",
+        "schema_version": "pw01_v1",
         "family_id": family_id,
         "source_shard_count": source_shard_count,
         "sample_roles_active": list(ACTIVE_SOURCE_SAMPLE_ROLES),

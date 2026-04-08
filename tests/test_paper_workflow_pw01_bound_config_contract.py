@@ -448,7 +448,7 @@ def test_pw01_worker_plan_persists_and_worker_loads_bound_config_path(
         sample_role="positive_source",
         shard_index=0,
         shard_count=2,
-        stage_01_worker_count=1,
+        pw01_worker_count=1,
         shard_root=shard_root,
         default_config_path=default_config_path,
         bound_config_path=bound_config_path,
@@ -463,7 +463,7 @@ def test_pw01_worker_plan_persists_and_worker_loads_bound_config_path(
         drive_project_root=tmp_path / "drive",
         family_id="family_worker_bound_config",
         shard_index=0,
-        stage_01_worker_count=1,
+        pw01_worker_count=1,
         local_worker_index=0,
         worker_plan_path=worker_plan_path,
     )

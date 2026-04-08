@@ -25,9 +25,9 @@ from scripts.notebook_runtime_common import (
 )
 
 
-CANONICAL_SOURCE_POOL_ATTESTATION_RELATIVE_ROOT = "artifacts/stage_01_canonical_source_pool/attestation"
-CANONICAL_SOURCE_POOL_SOURCE_IMAGES_RELATIVE_ROOT = "artifacts/stage_01_canonical_source_pool/source_images"
-CANONICAL_SOURCE_POOL_PREVIEW_RECORDS_RELATIVE_ROOT = "artifacts/stage_01_canonical_source_pool/preview_generation_records"
+CANONICAL_SOURCE_POOL_ATTESTATION_RELATIVE_ROOT = "artifacts/pw01_canonical_source_pool/attestation"
+CANONICAL_SOURCE_POOL_SOURCE_IMAGES_RELATIVE_ROOT = "artifacts/pw01_canonical_source_pool/source_images"
+CANONICAL_SOURCE_POOL_PREVIEW_RECORDS_RELATIVE_ROOT = "artifacts/pw01_canonical_source_pool/preview_generation_records"
 PREVIEW_GENERATION_RECORD_FILE_NAME = "preview_generation_record.json"
 PW01_STAGE_NAME = "PW01_Source_Event_Shards"
 
@@ -161,7 +161,7 @@ def _normalize_direct_detect_payload(
     normalized_payload["is_watermarked"] = True
     normalized_payload["ground_truth_source"] = "paper_workflow_source_event_shard"
     normalized_payload["inference_prompt"] = prompt_text
-    normalized_payload["stage_01_source_pool"] = {
+    normalized_payload["pw01_source_pool"] = {
         "record_origin": "direct_source_record",
         "record_usage": record_usage,
         "prompt_index": prompt_index,
@@ -287,7 +287,7 @@ def _inject_source_pool_input_image_path(
     embed_cfg = dict(cfg_copy.get("embed")) if isinstance(cfg_copy.get("embed"), dict) else {}
     embed_cfg["input_image_path"] = input_image_path
     cfg_copy["embed"] = embed_cfg
-    cfg_copy["stage_01_source_pool_preview"] = {
+    cfg_copy["pw01_source_pool_preview"] = {
         "input_image_path": input_image_path,
         "preview_generation_record_path": preview_record_path,
         "preview_generation_record_rel_path": preview_record_rel_path,

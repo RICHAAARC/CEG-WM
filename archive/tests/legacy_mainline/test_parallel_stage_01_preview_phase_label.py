@@ -14,7 +14,7 @@ from typing import Any, Dict
 import pytest
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 PARALLEL_WORKER_PATH = REPO_ROOT / "scripts" / "01_run_paper_full_cuda_parallel_worker.py"
 BASE_RUNNER_PATH = REPO_ROOT / "scripts" / "01_run_paper_full_cuda.py"
 

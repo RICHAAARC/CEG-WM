@@ -202,7 +202,7 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in pw01_constants
     assert 'SAMPLE_ROLE = "positive_source"' in pw01_constants
     assert '"planner_conditioned_control_negative": "control_negative"' in pw01_constants
-    assert 'STAGE_01_WORKER_COUNT = 2' in pw01_constants
+    assert 'PW01_WORKER_COUNT = 2' in pw01_constants
     assert 'MODEL_CACHE_LAYOUT = resolve_notebook_model_cache_layout(DRIVE_MOUNT_ROOT, REPO_ROOT, create_directories=True)' in pw01_repo_bootstrap
     assert '"model_cache_mode": "local_session_primary"' in pw01_repo_bootstrap
     assert '"persistent_hf_root_role": "compatibility_only"' in pw01_repo_bootstrap
@@ -212,8 +212,8 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     assert 'SAMPLE_ROLE' in pw01_execute
     assert '"--shard-index"' in pw01_execute
     assert '"--shard-count"' in pw01_execute
-    assert '"--stage-01-worker-count"' in pw01_execute
-    assert 'str(STAGE_01_WORKER_COUNT)' in pw01_execute
+    assert '"--pw01-worker-count"' in pw01_execute
+    assert 'str(PW01_WORKER_COUNT)' in pw01_execute
     assert '"--bound-config-path"' in pw01_execute
     assert 'str(PW01_BOUND_CONFIG_PATH)' in pw01_execute
     assert '"--force-rerun"' in pw01_execute

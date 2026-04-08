@@ -53,7 +53,7 @@ EVENT_RECORD_USAGE_BY_SAMPLE_ROLE = {
     CLEAN_NEGATIVE_SAMPLE_ROLE: "paper_workflow_clean_negative",
     PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE: "paper_workflow_planner_conditioned_control_negative",
 }
-DEFAULT_STAGE_01_WORKER_COUNT = 1
+DEFAULT_PW01_WORKER_COUNT = 1
 
 _CLEAN_NEGATIVE_FREEZE_ANCHOR_FIELDS = (
     "contract_version",
@@ -400,12 +400,12 @@ def _load_event_lookup(source_event_grid_path: Path) -> Dict[str, Dict[str, Any]
     return event_lookup
 
 
-def _validate_stage_01_worker_count(stage_01_worker_count: int) -> None:
+def _validate_pw01_worker_count(pw01_worker_count: int) -> None:
     """
-    Validate the shard-local stage-01 worker count.
+    Validate the shard-local PW01 worker count.
 
     Args:
-        stage_01_worker_count: Requested worker count.
+        pw01_worker_count: Requested worker count.
 
     Returns:
         None.
@@ -413,19 +413,19 @@ def _validate_stage_01_worker_count(stage_01_worker_count: int) -> None:
     Raises:
         ValueError: If the worker count is not 1 or 2.
     """
-    if not isinstance(stage_01_worker_count, int) or isinstance(stage_01_worker_count, bool):
-        raise ValueError("stage_01_worker_count must be 1 or 2")
-    if stage_01_worker_count not in {1, 2}:
-        raise ValueError("stage_01_worker_count must be 1 or 2")
+    if not isinstance(pw01_worker_count, int) or isinstance(pw01_worker_count, bool):
+        raise ValueError("pw01_worker_count must be 1 or 2")
+    if pw01_worker_count not in {1, 2}:
+        raise ValueError("pw01_worker_count must be 1 or 2")
 
 
-def _validate_local_worker_index(local_worker_index: int, stage_01_worker_count: int) -> None:
+def _validate_local_worker_index(local_worker_index: int, pw01_worker_count: int) -> None:
     """
     Validate the local worker index against the shard-local worker count.
 
     Args:
         local_worker_index: Local worker index.
-        stage_01_worker_count: Total shard-local worker count.
+        pw01_worker_count: Total shard-local worker count.
 
     Returns:
         None.
@@ -433,11 +433,11 @@ def _validate_local_worker_index(local_worker_index: int, stage_01_worker_count:
     Raises:
         ValueError: If the worker index is outside the allowed range.
     """
-    _validate_stage_01_worker_count(stage_01_worker_count)
+    _validate_pw01_worker_count(pw01_worker_count)
     if not isinstance(local_worker_index, int) or isinstance(local_worker_index, bool):
-        raise ValueError("local_worker_index must satisfy 0 <= local_worker_index < stage_01_worker_count")
-    if local_worker_index < 0 or local_worker_index >= stage_01_worker_count:
-        raise ValueError("local_worker_index must satisfy 0 <= local_worker_index < stage_01_worker_count")
+        raise ValueError("local_worker_index must satisfy 0 <= local_worker_index < pw01_worker_count")
+    if local_worker_index < 0 or local_worker_index >= pw01_worker_count:
+        raise ValueError("local_worker_index must satisfy 0 <= local_worker_index < pw01_worker_count")
 
 
 def _resolve_source_prompt_index(event: Mapping[str, Any]) -> int:
@@ -465,19 +465,19 @@ def _build_local_worker_assignments(
     *,
     assigned_events: Sequence[Mapping[str, Any]],
     sample_role: str,
-    stage_01_worker_count: int,
+    pw01_worker_count: int,
 ) -> List[Dict[str, Any]]:
     """
     Build stable shard-local worker assignments from ordered assigned events.
 
     Args:
         assigned_events: Ordered shard-assigned events.
-        stage_01_worker_count: Requested shard-local worker count.
+        pw01_worker_count: Requested shard-local worker count.
 
     Returns:
         Ordered worker-assignment payloads.
     """
-    _validate_stage_01_worker_count(stage_01_worker_count)
+    _validate_pw01_worker_count(pw01_worker_count)
     normalized_sample_role = validate_source_sample_role(sample_role)
 
     assignments: List[Dict[str, Any]] = [
@@ -488,7 +488,7 @@ def _build_local_worker_assignments(
             "assigned_event_indices": [],
             "assigned_events": [],
         }
-        for local_worker_index in range(stage_01_worker_count)
+        for local_worker_index in range(pw01_worker_count)
     ]
 
     for local_event_ordinal, event in enumerate(assigned_events):
@@ -518,7 +518,7 @@ def _build_local_worker_assignments(
         if not isinstance(prompt_file, str) or not prompt_file:
             raise ValueError("prompt_file must be non-empty str")
 
-        local_worker_index = local_event_ordinal % stage_01_worker_count
+        local_worker_index = local_event_ordinal % pw01_worker_count
         assignment = assignments[local_worker_index]
         assignment["local_event_ordinals"].append(local_event_ordinal)
         assignment["assigned_event_ids"].append(event_id)
@@ -642,7 +642,7 @@ def _write_worker_plan(
     sample_role: str,
     shard_index: int,
     shard_count: int,
-    stage_01_worker_count: int,
+    pw01_worker_count: int,
     default_config_path: Path,
     bound_config_path: Path,
     shard_root: Path,
@@ -656,7 +656,7 @@ def _write_worker_plan(
         family_id: Family identifier.
         shard_index: Shard index.
         shard_count: Total shard count.
-        stage_01_worker_count: Total shard-local worker count.
+        pw01_worker_count: Total shard-local worker count.
         default_config_path: Default config path.
         shard_root: Shard root path.
         assignment: Worker assignment payload.
@@ -681,7 +681,7 @@ def _write_worker_plan(
     local_worker_index = assignment.get("local_worker_index")
     if not isinstance(local_worker_index, int):
         raise ValueError("worker assignment missing local_worker_index")
-    _validate_local_worker_index(local_worker_index, stage_01_worker_count)
+    _validate_local_worker_index(local_worker_index, pw01_worker_count)
 
     plan_path = _build_worker_plan_path(worker_root)
     validate_path_within_base(shard_root, plan_path, "worker plan path")
@@ -689,12 +689,12 @@ def _write_worker_plan(
         plan_path,
         {
             "artifact_type": "paper_workflow_source_shard_worker_plan",
-            "schema_version": "pw_stage_01_v1",
+            "schema_version": "pw01_v1",
             "family_id": family_id,
             "sample_role": normalized_sample_role,
             "shard_index": shard_index,
             "source_shard_count": shard_count,
-            "stage_01_worker_count": stage_01_worker_count,
+            "pw01_worker_count": pw01_worker_count,
             "local_worker_index": local_worker_index,
             "default_config_path": normalize_path_value(default_config_path),
             "bound_config_path": normalize_path_value(bound_config_path),
@@ -714,7 +714,7 @@ def _build_worker_command(
     drive_project_root: Path,
     family_id: str,
     shard_index: int,
-    stage_01_worker_count: int,
+    pw01_worker_count: int,
     local_worker_index: int,
     worker_plan_path: Path,
 ) -> List[str]:
@@ -725,7 +725,7 @@ def _build_worker_command(
         drive_project_root: Drive project root path.
         family_id: Family identifier.
         shard_index: Shard index.
-        stage_01_worker_count: Total shard-local worker count.
+        pw01_worker_count: Total shard-local worker count.
         local_worker_index: Local worker index.
         worker_plan_path: Worker plan path.
 
@@ -740,7 +740,7 @@ def _build_worker_command(
         raise TypeError("family_id must be non-empty str")
     if shard_index < 0:
         raise TypeError("shard_index must be non-negative int")
-    _validate_local_worker_index(local_worker_index, stage_01_worker_count)
+    _validate_local_worker_index(local_worker_index, pw01_worker_count)
 
     return [
         sys.executable,
@@ -751,8 +751,8 @@ def _build_worker_command(
         family_id,
         "--shard-index",
         str(shard_index),
-        "--stage-01-worker-count",
-        str(stage_01_worker_count),
+        "--pw01-worker-count",
+        str(pw01_worker_count),
         "--local-worker-index",
         str(local_worker_index),
         "--worker-plan-path",
@@ -767,7 +767,7 @@ def _prepare_local_worker_plans(
     sample_role: str,
     shard_index: int,
     shard_count: int,
-    stage_01_worker_count: int,
+    pw01_worker_count: int,
     shard_root: Path,
     default_config_path: Path,
     bound_config_path: Path,
@@ -781,7 +781,7 @@ def _prepare_local_worker_plans(
         family_id: Family identifier.
         shard_index: Shard index.
         shard_count: Total shard count.
-        stage_01_worker_count: Total shard-local worker count.
+        pw01_worker_count: Total shard-local worker count.
         shard_root: Shard root path.
         default_config_path: Default config path.
         assigned_events: Ordered shard-assigned events.
@@ -789,13 +789,13 @@ def _prepare_local_worker_plans(
     Returns:
         Ordered worker-plan summaries.
     """
-    _validate_stage_01_worker_count(stage_01_worker_count)
+    _validate_pw01_worker_count(pw01_worker_count)
 
     worker_plans: List[Dict[str, Any]] = []
     for assignment in _build_local_worker_assignments(
         assigned_events=assigned_events,
         sample_role=sample_role,
-        stage_01_worker_count=stage_01_worker_count,
+        pw01_worker_count=pw01_worker_count,
     ):
         local_worker_index = int(assignment["local_worker_index"])
         worker_root = ensure_directory(_build_worker_root(shard_root, local_worker_index))
@@ -805,7 +805,7 @@ def _prepare_local_worker_plans(
             sample_role=sample_role,
             shard_index=shard_index,
             shard_count=shard_count,
-            stage_01_worker_count=stage_01_worker_count,
+            pw01_worker_count=pw01_worker_count,
             default_config_path=default_config_path,
             bound_config_path=bound_config_path,
             shard_root=shard_root,
@@ -829,7 +829,7 @@ def _prepare_local_worker_plans(
                     drive_project_root=drive_project_root,
                     family_id=family_id,
                     shard_index=shard_index,
-                    stage_01_worker_count=stage_01_worker_count,
+                    pw01_worker_count=pw01_worker_count,
                     local_worker_index=local_worker_index,
                     worker_plan_path=worker_plan_path,
                 ),
@@ -1105,7 +1105,7 @@ def _build_worker_result_payload(
     sample_role: str,
     shard_index: int,
     shard_count: int,
-    stage_01_worker_count: int,
+    pw01_worker_count: int,
     local_worker_index: int,
     worker_root: Path,
     worker_plan_path: Path,
@@ -1124,7 +1124,7 @@ def _build_worker_result_payload(
         family_id: Family identifier.
         shard_index: Shard index.
         shard_count: Total shard count.
-        stage_01_worker_count: Total shard-local worker count.
+        pw01_worker_count: Total shard-local worker count.
         local_worker_index: Local worker index.
         worker_root: Worker root path.
         worker_plan_path: Worker plan path.
@@ -1146,7 +1146,7 @@ def _build_worker_result_payload(
         raise TypeError("shard_index must be non-negative int")
     if shard_count <= 0:
         raise TypeError("shard_count must be positive int")
-    _validate_local_worker_index(local_worker_index, stage_01_worker_count)
+    _validate_local_worker_index(local_worker_index, pw01_worker_count)
     if not isinstance(worker_root, Path):
         raise TypeError("worker_root must be Path")
     if not isinstance(worker_plan_path, Path):
@@ -1163,13 +1163,13 @@ def _build_worker_result_payload(
 
     return {
         "artifact_type": "paper_workflow_source_shard_worker_result",
-        "schema_version": "pw_stage_01_v1",
+        "schema_version": "pw01_v1",
         "stage_name": "PW01_Source_Event_Shards",
         "family_id": family_id,
         "sample_role": normalized_sample_role,
         "shard_index": shard_index,
         "source_shard_count": shard_count,
-        "stage_01_worker_count": stage_01_worker_count,
+        "pw01_worker_count": pw01_worker_count,
         "local_worker_index": local_worker_index,
         "worker_root": normalize_path_value(worker_root),
         "worker_plan_path": normalize_path_value(worker_plan_path),
@@ -2419,7 +2419,7 @@ def run_pw01_source_event_shard_worker(
     drive_project_root: Path,
     family_id: str,
     shard_index: int,
-    stage_01_worker_count: int,
+    pw01_worker_count: int,
     local_worker_index: int,
     worker_plan_path: Path,
 ) -> Dict[str, Any]:
@@ -2430,7 +2430,7 @@ def run_pw01_source_event_shard_worker(
         drive_project_root: Drive project root path.
         family_id: Family identifier.
         shard_index: Shard index.
-        stage_01_worker_count: Total shard-local worker count.
+        pw01_worker_count: Total shard-local worker count.
         local_worker_index: Local worker index.
         worker_plan_path: Worker plan JSON path.
 
@@ -2443,7 +2443,7 @@ def run_pw01_source_event_shard_worker(
         raise TypeError("family_id must be non-empty str")
     if shard_index < 0:
         raise TypeError("shard_index must be non-negative int")
-    _validate_local_worker_index(local_worker_index, stage_01_worker_count)
+    _validate_local_worker_index(local_worker_index, pw01_worker_count)
     if not isinstance(worker_plan_path, Path):
         raise TypeError("worker_plan_path must be Path")
 
@@ -2457,11 +2457,11 @@ def run_pw01_source_event_shard_worker(
     plan_shard_index = worker_plan.get("shard_index")
     if not isinstance(plan_shard_index, int) or int(plan_shard_index) != shard_index:
         raise ValueError(f"worker plan shard_index mismatch: expected={shard_index}, actual={plan_shard_index}")
-    plan_stage_01_worker_count = worker_plan.get("stage_01_worker_count")
-    if not isinstance(plan_stage_01_worker_count, int) or int(plan_stage_01_worker_count) != stage_01_worker_count:
+    plan_pw01_worker_count = worker_plan.get("pw01_worker_count")
+    if not isinstance(plan_pw01_worker_count, int) or int(plan_pw01_worker_count) != pw01_worker_count:
         raise ValueError(
-            "worker plan stage_01_worker_count mismatch: "
-            f"expected={stage_01_worker_count}, actual={plan_stage_01_worker_count}"
+            "worker plan pw01_worker_count mismatch: "
+            f"expected={pw01_worker_count}, actual={plan_pw01_worker_count}"
         )
     plan_local_worker_index = worker_plan.get("local_worker_index")
     if not isinstance(plan_local_worker_index, int) or int(plan_local_worker_index) != local_worker_index:
@@ -2545,7 +2545,7 @@ def run_pw01_source_event_shard_worker(
             sample_role=plan_sample_role,
             shard_index=shard_index,
             shard_count=int(worker_plan.get("source_shard_count", 0)),
-            stage_01_worker_count=stage_01_worker_count,
+            pw01_worker_count=pw01_worker_count,
             local_worker_index=local_worker_index,
             worker_root=worker_root,
             worker_plan_path=worker_plan_path,
@@ -2562,7 +2562,7 @@ def run_pw01_source_event_shard_worker(
             sample_role=plan_sample_role,
             shard_index=shard_index,
             shard_count=int(worker_plan.get("source_shard_count", 0)),
-            stage_01_worker_count=stage_01_worker_count,
+            pw01_worker_count=pw01_worker_count,
             local_worker_index=local_worker_index,
             worker_root=worker_root,
             worker_plan_path=worker_plan_path,
@@ -2586,7 +2586,7 @@ def run_pw01_source_event_shard(
     shard_index: int,
     shard_count: int,
     sample_role: str = ACTIVE_SAMPLE_ROLE,
-    stage_01_worker_count: int = DEFAULT_STAGE_01_WORKER_COUNT,
+    pw01_worker_count: int = DEFAULT_PW01_WORKER_COUNT,
     bound_config_path: Path | None = None,
     force_rerun: bool = False,
 ) -> Dict[str, Any]:
@@ -2599,7 +2599,7 @@ def run_pw01_source_event_shard(
         shard_index: Source shard index.
         shard_count: Source shard count.
         sample_role: Source sample role for the shard.
-        stage_01_worker_count: Total shard-local worker count.
+        pw01_worker_count: Total shard-local worker count.
         bound_config_path: Notebook-bound config snapshot path.
         force_rerun: Whether to clear completed shard and rerun.
 
@@ -2613,7 +2613,7 @@ def run_pw01_source_event_shard(
     if shard_count <= 0:
         raise TypeError("shard_count must be positive int")
     normalized_sample_role = validate_source_sample_role(sample_role)
-    _validate_stage_01_worker_count(stage_01_worker_count)
+    _validate_pw01_worker_count(pw01_worker_count)
 
     normalized_drive_root = drive_project_root.expanduser().resolve()
     family_root = build_family_root(normalized_drive_root, family_id)
@@ -2686,13 +2686,13 @@ def run_pw01_source_event_shard(
 
     running_manifest: Dict[str, Any] = {
         "artifact_type": "paper_workflow_source_shard_manifest",
-        "schema_version": "pw_stage_01_v1",
+        "schema_version": "pw01_v1",
         "family_id": family_id,
         "sample_role": normalized_sample_role,
         "shard_index": shard_index,
         "source_shard_count": shard_count,
-        "stage_01_worker_count": stage_01_worker_count,
-        "worker_execution_mode": "single_process" if stage_01_worker_count == 1 else "shard_local_subprocess_parallel",
+        "pw01_worker_count": pw01_worker_count,
+        "worker_execution_mode": "single_process" if pw01_worker_count == 1 else "shard_local_subprocess_parallel",
         "status": "running",
         "created_at": utc_now_iso(),
         "force_rerun": bool(force_rerun),
@@ -2716,7 +2716,7 @@ def run_pw01_source_event_shard(
     worker_executions: List[Dict[str, Any]] = []
     worker_results: List[Dict[str, Any]] = []
     try:
-        if stage_01_worker_count == 1:
+        if pw01_worker_count == 1:
             for event in assigned_events:
                 executed_events.append(
                     _run_source_event_by_role(
@@ -2733,7 +2733,7 @@ def run_pw01_source_event_shard(
                 sample_role=normalized_sample_role,
                 shard_index=shard_index,
                 shard_count=shard_count,
-                stage_01_worker_count=stage_01_worker_count,
+                pw01_worker_count=pw01_worker_count,
                 shard_root=shard_root,
                 default_config_path=default_config_path,
                 bound_config_path=resolved_bound_config_path,
@@ -2747,7 +2747,7 @@ def run_pw01_source_event_shard(
             write_json_atomic(shard_manifest_path, running_manifest)
 
             worker_executions, worker_results = _run_local_worker_plans(worker_plans)
-            if len(worker_results) != stage_01_worker_count or any(
+            if len(worker_results) != pw01_worker_count or any(
                 worker_result.get("status") != "completed" for worker_result in worker_results
             ):
                 raise RuntimeError(
@@ -2777,7 +2777,7 @@ def run_pw01_source_event_shard(
             "sample_role": normalized_sample_role,
             "shard_index": shard_index,
             "source_shard_count": shard_count,
-            "stage_01_worker_count": stage_01_worker_count,
+            "pw01_worker_count": pw01_worker_count,
             "event_count": len(executed_events),
             "shard_root": normalize_path_value(shard_root),
             "shard_manifest_path": normalize_path_value(shard_manifest_path),

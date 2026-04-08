@@ -14,7 +14,7 @@ from typing import Any, Dict
 import pytest
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 PARALLEL_RUNNER_PATH = REPO_ROOT / "scripts" / "01_run_paper_full_cuda_parallel.py"
 PARALLEL_WORKER_PATH = REPO_ROOT / "scripts" / "01_run_paper_full_cuda_parallel_worker.py"
 BASE_RUNNER_PATH = REPO_ROOT / "scripts" / "01_run_paper_full_cuda.py"
@@ -166,8 +166,7 @@ def test_parallel_runner_preserves_shared_stage_02_warning_semantics(
 
     source_contract = json.loads((run_root / shared_runner.SOURCE_CONTRACT_RELATIVE_PATH).read_text(encoding="utf-8"))
     pooled_build_contract = json.loads(
-        (run_root / shared_runner.POOLED_THRESHOLD_BUILD_CONTRACT_RELATIVE_PATH).read_text(encoding="utf-8")
-    )
+        (run_root / shared_runner.POOLED_THRESHOLD_BUILD_CONTRACT_RELATIVE_PATH).read_text(encoding="utf-8"))
     workflow_summary = json.loads((run_root / "artifacts" / "workflow_summary.json").read_text(encoding="utf-8"))
 
     assert exit_code == 0

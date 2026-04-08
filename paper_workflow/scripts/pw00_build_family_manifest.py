@@ -223,7 +223,7 @@ def run_pw00_build_family_manifest(
     config_snapshot = copy.deepcopy(default_cfg_obj)
     family_manifest: Dict[str, Any] = {
         "artifact_type": "paper_eval_family_manifest",
-        "schema_version": "pw_stage_01_v1",
+        "schema_version": "pw01_v1",
         "created_at": utc_now_iso(),
         "family_id": family_id,
         "family_root": normalize_path_value(family_root),

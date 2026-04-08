@@ -79,7 +79,7 @@ def test_pw01_local_worker_assignments_use_local_event_ordinal() -> None:
             _make_event(event_id="evt_008", event_index=8, source_prompt_index=1, seed=3),
         ],
         sample_role="positive_source",
-        stage_01_worker_count=2,
+        pw01_worker_count=2,
     )
 
     assert assignments == [
@@ -152,7 +152,7 @@ def test_pw01_merge_worker_results_restores_assigned_event_order(tmp_path: Path)
         sample_role="positive_source",
         shard_index=0,
         shard_count=2,
-        stage_01_worker_count=2,
+        pw01_worker_count=2,
         local_worker_index=0,
         worker_root=worker_root_00,
         worker_plan_path=worker_root_00 / "worker_plan.json",
@@ -166,7 +166,7 @@ def test_pw01_merge_worker_results_restores_assigned_event_order(tmp_path: Path)
         sample_role="positive_source",
         shard_index=0,
         shard_count=2,
-        stage_01_worker_count=2,
+        pw01_worker_count=2,
         local_worker_index=1,
         worker_root=worker_root_01,
         worker_plan_path=worker_root_01 / "worker_plan.json",
@@ -201,7 +201,7 @@ def test_pw01_merge_rejects_overlapping_completed_events(tmp_path: Path) -> None
         sample_role="positive_source",
         shard_index=0,
         shard_count=2,
-        stage_01_worker_count=2,
+        pw01_worker_count=2,
         local_worker_index=0,
         worker_root=worker_root_00,
         worker_plan_path=worker_root_00 / "worker_plan.json",
@@ -215,7 +215,7 @@ def test_pw01_merge_rejects_overlapping_completed_events(tmp_path: Path) -> None
         sample_role="positive_source",
         shard_index=0,
         shard_count=2,
-        stage_01_worker_count=2,
+        pw01_worker_count=2,
         local_worker_index=1,
         worker_root=worker_root_01,
         worker_plan_path=worker_root_01 / "worker_plan.json",
@@ -248,7 +248,7 @@ def test_pw01_local_worker_assignments_support_clean_negative_role() -> None:
     assignments = pw01_module._build_local_worker_assignments(
         assigned_events=[negative_event],
         sample_role="clean_negative",
-        stage_01_worker_count=1,
+        pw01_worker_count=1,
     )
 
     assert assignments[0]["assigned_events"][0]["sample_role"] == "clean_negative"

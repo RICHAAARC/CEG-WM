@@ -5,7 +5,7 @@ Module type: General module
 职责边界：
 1. 仅提供路径标准化、相对路径视图与 formal GPU 前置检查。
 2. 不直接参与 main/ 内部机制执行。
-3. 活动路径仅暴露 PW 命名接口；archive 历史入口通过兼容层按需解析旧名字。
+3. 活动路径仅暴露 PW 命名接口，不保留 retired legacy preflight 导出。
 """
 
 from __future__ import annotations
@@ -23,7 +23,6 @@ from scripts.notebook_runtime_common import (
     collect_attestation_env_summary,
     normalize_path_value,
     relative_path_under_base,
-    resolve_legacy_stage_name,
     resolve_attestation_env_var_names,
 )
 
@@ -167,11 +166,11 @@ def _collect_authoritative_policy_binding_summary() -> Dict[str, Any]:
     }
 
 
-def _collect_stage_01_model_binding_summary(cfg_obj: Mapping[str, Any]) -> Dict[str, Any]:
+def _collect_pw01_model_binding_summary(cfg_obj: Mapping[str, Any]) -> Dict[str, Any]:
     """
-    功能：收集 stage 01 模型快照绑定门禁摘要。
+    功能：收集 PW01 模型快照绑定门禁摘要。
 
-    Collect the lightweight stage-01 model snapshot binding summary used by the
+    Collect the lightweight PW01 model snapshot binding summary used by the
     formal preflight gate.
 
     Args:
@@ -228,30 +227,6 @@ def _collect_stage_01_model_binding_summary(cfg_obj: Mapping[str, Any]) -> Dict[
             and model_snapshot_path == binding_snapshot_path
         ),
     }
-
-
-def _translate_legacy_stage_01_failed_check_names(failed_checks: List[str]) -> List[str]:
-    """
-    功能：将活动 preflight 失败键映射回 legacy stage 01 失败键。
-
-    Translate active preflight failure keys into legacy stage-01 failure keys.
-
-    Args:
-        failed_checks: Active preflight failure key list.
-
-    Returns:
-        Legacy-compatible failure key list.
-    """
-    if not isinstance(failed_checks, list):
-        raise TypeError("failed_checks must be list")
-
-    legacy_name_mapping = {
-        "model_source_binding_missing": "stage_01_model_source_binding_missing",
-        "model_source_binding_not_bound": "stage_01_model_source_binding_not_bound",
-        "model_snapshot_path_missing_or_not_directory": "stage_01_model_snapshot_path_missing_or_not_directory",
-        "model_source_binding_path_mismatch": "stage_01_model_source_binding_path_mismatch",
-    }
-    return [legacy_name_mapping.get(str(item), str(item)) for item in failed_checks]
 
 
 def _build_active_gpu_model_preflight(cfg_path: Path, *, stage_name: str) -> Dict[str, Any]:
@@ -318,10 +293,10 @@ def _build_active_gpu_model_preflight(cfg_path: Path, *, stage_name: str) -> Dic
         if config_key not in env_var_names
     ]
     attestation_cfg = cfg_obj.get("attestation") if isinstance(cfg_obj.get("attestation"), dict) else {}
-    source_pool_cfg = cfg_obj.get("stage_01_source_pool") if isinstance(cfg_obj.get("stage_01_source_pool"), dict) else {}
+    source_pool_cfg = cfg_obj.get("pw01_source_pool") if isinstance(cfg_obj.get("pw01_source_pool"), dict) else {}
     pooled_cfg = (
-        cfg_obj.get("stage_01_pooled_threshold_build")
-        if isinstance(cfg_obj.get("stage_01_pooled_threshold_build"), dict)
+        cfg_obj.get("pw01_pooled_threshold_build")
+        if isinstance(cfg_obj.get("pw01_pooled_threshold_build"), dict)
         else {}
     )
 
@@ -330,7 +305,7 @@ def _build_active_gpu_model_preflight(cfg_path: Path, *, stage_name: str) -> Dic
     result["missing_attestation_env_vars"] = attestation_summary["missing_env_vars"]
     result["attestation_env_var_bindings_complete"] = len(missing_env_var_bindings) == 0
     result["missing_attestation_env_var_bindings"] = missing_env_var_bindings
-    result.update(_collect_stage_01_model_binding_summary(cfg_obj))
+    result.update(_collect_pw01_model_binding_summary(cfg_obj))
     result["source_pool_enabled"] = source_pool_cfg.get("enabled") is True
     result["source_pool_prompt_file_bound"] = (
         source_pool_cfg.get("use_inference_prompt_file") is True
@@ -375,60 +350,6 @@ def _build_active_gpu_model_preflight(cfg_path: Path, *, stage_name: str) -> Dic
     return result
 
 
-def _build_legacy_stage_01_preflight(cfg_path: Path) -> Dict[str, Any]:
-    """
-    功能：构建 legacy stage 01 兼容 preflight 负载。
-
-    Build the legacy-compatible stage-01 preflight payload.
-
-    Args:
-        cfg_path: Runtime config path.
-
-    Returns:
-        Legacy stage-01 preflight status mapping.
-    """
-    legacy_stage_name = resolve_legacy_stage_name("01")
-    active_preflight = _build_active_gpu_model_preflight(cfg_path, stage_name=legacy_stage_name)
-    return {
-        "stage_name": legacy_stage_name,
-        "cfg_path": active_preflight["cfg_path"],
-        "config_error": active_preflight["config_error"],
-        "gpu_required": active_preflight["gpu_required"],
-        "gpu_tool_available": active_preflight["gpu_tool_available"],
-        "nvidia_smi_path": active_preflight["nvidia_smi_path"],
-        "runtime_whitelist_version": active_preflight.get("runtime_whitelist_version", "<absent>"),
-        "policy_path_semantics_version": active_preflight.get("policy_path_semantics_version", "<absent>"),
-        "whitelist_semantics_versions_match": active_preflight.get("whitelist_semantics_versions_match", False),
-        "attestation_env_required": active_preflight["attestation_env_required"],
-        "required_attestation_env_vars": active_preflight["required_attestation_env_vars"],
-        "missing_attestation_env_vars": active_preflight["missing_attestation_env_vars"],
-        "attestation_env_var_bindings_complete": active_preflight["attestation_env_var_bindings_complete"],
-        "missing_attestation_env_var_bindings": active_preflight["missing_attestation_env_var_bindings"],
-        "model_source_binding_required": active_preflight["model_source_binding_required"],
-        "model_source_binding_present": active_preflight["model_source_binding_present"],
-        "model_source_binding_status": active_preflight["model_source_binding_status"],
-        "model_source_binding_reason": active_preflight["model_source_binding_reason"],
-        "model_source_binding_source": active_preflight["model_source_binding_source"],
-        "model_source_binding_snapshot_path": active_preflight["model_source_binding_snapshot_path"],
-        "model_snapshot_path": active_preflight["model_snapshot_path"],
-        "model_snapshot_path_exists": active_preflight["model_snapshot_path_exists"],
-        "model_snapshot_path_is_directory": active_preflight["model_snapshot_path_is_directory"],
-        "model_source_binding_path_matches_snapshot_path": active_preflight[
-            "model_source_binding_path_matches_snapshot_path"
-        ],
-        "stage_01_source_pool_enabled": active_preflight["source_pool_enabled"],
-        "stage_01_source_pool_prompt_file_bound": active_preflight["source_pool_prompt_file_bound"],
-        "stage_01_pooled_threshold_build_enabled": active_preflight["pooled_threshold_build_enabled"],
-        "stage_01_pooled_threshold_target_pair_count_valid": active_preflight[
-            "pooled_threshold_target_pair_count_valid"
-        ],
-        "failed_checks": _translate_legacy_stage_01_failed_check_names(
-            cast(List[str], active_preflight["failed_checks"])
-        ),
-        "ok": active_preflight["ok"],
-    }
-
-
 def detect_pw01_preflight(cfg_path: Path) -> Dict[str, Any]:
     """
     功能：执行 PW01 的活动路径 preflight。
@@ -459,307 +380,3 @@ def detect_pw03_preflight(cfg_path: Path) -> Dict[str, Any]:
         PW03 preflight status mapping.
     """
     return _build_active_gpu_model_preflight(cfg_path, stage_name=PW03_STAGE_NAME)
-
-
-def _build_legacy_stage_02_preflight(
-    cfg_path: Path,
-    source_package_path: Path,
-    source_contract_path: Path,
-) -> Dict[str, Any]:
-    """
-    功能：执行 stage 02 的 package-only legacy preflight。 
-
-    Execute stage-02 preflight checks for the source package and required source contract.
-
-    Args:
-        cfg_path: Runtime config path.
-        source_package_path: Source stage-01 package path.
-        source_contract_path: Required source contract path resolved from the extracted package.
-
-    Returns:
-        Stage-02 preflight status mapping.
-    """
-    cfg_obj, config_error = _load_config_mapping(cfg_path)
-    gpu_summary = _collect_gpu_tool_summary()
-    source_package_check = _build_missing_path_check(source_package_path, "source_package")
-    source_contract_check = _build_missing_path_check(source_contract_path, "source_contract")
-    attestation_summary = collect_attestation_env_summary(cfg_obj) if isinstance(cfg_obj, dict) else {
-        "required_env_vars": [],
-        "missing_env_vars": [],
-    }
-    failed_checks: List[str] = []
-    if config_error is not None or cfg_obj is None:
-        failed_checks.append("config_invalid")
-    if not bool(source_package_check["exists"]):
-        failed_checks.append("source_package_missing")
-    if not bool(source_contract_check["exists"]):
-        failed_checks.append("source_contract_missing")
-
-    return {
-        "stage_name": resolve_legacy_stage_name("02"),
-        "cfg_path": normalize_path_value(cfg_path),
-        "config_error": config_error,
-        "gpu_required": False,
-        **gpu_summary,
-        "attestation_env_required": False,
-        "required_attestation_env_vars": attestation_summary.get("required_env_vars", []),
-        "missing_attestation_env_vars": attestation_summary.get("missing_env_vars", []),
-        "source_package_path": source_package_check["path"],
-        "source_package_exists": source_package_check["exists"],
-        "source_contract_path": source_contract_check["path"],
-        "source_contract_exists": source_contract_check["exists"],
-        "failed_checks": failed_checks,
-        "ok": len(failed_checks) == 0,
-    }
-
-
-def _build_legacy_stage_03_preflight(
-    cfg_path: Path,
-    source_package_path: Path,
-    source_thresholds_artifact_path: Path,
-    *,
-    require_model_binding: bool = False,
-    require_authoritative_config_path: bool = False,
-) -> Dict[str, Any]:
-    """
-    功能：执行 stage 03 的 experiment-matrix preflight。 
-
-    Execute stage-03 preflight checks for GPU availability, attestation
-    environment readiness, required stage-01 source artifacts, and optional
-    runtime model snapshot binding gates.
-
-    Args:
-        cfg_path: Runtime config path.
-        source_package_path: Source stage-01 package path.
-        source_thresholds_artifact_path: Source thresholds artifact path.
-        require_model_binding: Whether model snapshot binding is mandatory for
-            this stage-03 entrypoint.
-        require_authoritative_config_path: Whether experiment_matrix.config_path
-            must point back to the current runtime config snapshot.
-
-    Returns:
-        Stage-03 preflight status mapping.
-    """
-    cfg_obj, config_error = _load_config_mapping(cfg_path)
-    gpu_summary = _collect_gpu_tool_summary()
-    source_package_check = _build_missing_path_check(source_package_path, "source_package")
-    thresholds_check = _build_missing_path_check(source_thresholds_artifact_path, "source_thresholds_artifact")
-    attestation_summary = collect_attestation_env_summary(cfg_obj) if isinstance(cfg_obj, dict) else {
-        "required_env_vars": [],
-        "missing_env_vars": [],
-    }
-    failed_checks: List[str] = []
-    result: Dict[str, Any] = {
-        "stage_name": resolve_legacy_stage_name("03"),
-        "cfg_path": normalize_path_value(cfg_path),
-        "config_error": config_error,
-        "gpu_required": True,
-        **gpu_summary,
-        "attestation_env_required": False,
-        "required_attestation_env_vars": attestation_summary.get("required_env_vars", []),
-        "missing_attestation_env_vars": attestation_summary.get("missing_env_vars", []),
-        "attestation_env_var_bindings_complete": True,
-        "missing_attestation_env_var_bindings": [],
-        "source_package_path": source_package_check["path"],
-        "source_package_exists": source_package_check["exists"],
-        "source_thresholds_artifact_path": thresholds_check["path"],
-        "source_thresholds_artifact_exists": thresholds_check["exists"],
-        "model_source_binding_required": bool(require_model_binding),
-        "model_source_binding_present": False,
-        "model_source_binding_status": "<absent>",
-        "model_source_binding_reason": "<absent>",
-        "model_source_binding_source": "<absent>",
-        "model_source_binding_snapshot_path": "<absent>",
-        "model_snapshot_path": "<absent>",
-        "model_snapshot_path_exists": False,
-        "model_snapshot_path_is_directory": False,
-        "model_source_binding_path_matches_snapshot_path": False,
-        "experiment_matrix_config_path_required": bool(require_authoritative_config_path),
-        "experiment_matrix_config_path": "<absent>",
-        "experiment_matrix_config_path_matches_runtime_snapshot": False,
-        "failed_checks": failed_checks,
-        "ok": False,
-    }
-    if config_error is not None or cfg_obj is None:
-        failed_checks.append("config_invalid")
-        result["ok"] = False
-        return result
-
-    env_var_names = resolve_attestation_env_var_names(cfg_obj)
-    missing_env_var_bindings = [
-        config_key
-        for config_key in ("k_master_env_var", "k_prompt_env_var", "k_seed_env_var")
-        if config_key not in env_var_names
-    ]
-    attestation_cfg = cfg_obj.get("attestation") if isinstance(cfg_obj.get("attestation"), dict) else {}
-    result["attestation_env_required"] = bool(attestation_cfg.get("enabled", False))
-    result["required_attestation_env_vars"] = attestation_summary.get("required_env_vars", [])
-    result["missing_attestation_env_vars"] = attestation_summary.get("missing_env_vars", [])
-    result["attestation_env_var_bindings_complete"] = len(missing_env_var_bindings) == 0
-    result["missing_attestation_env_var_bindings"] = missing_env_var_bindings
-    result.update(_collect_stage_01_model_binding_summary(cfg_obj))
-    experiment_cfg = cfg_obj.get("experiment_matrix") if isinstance(cfg_obj.get("experiment_matrix"), dict) else {}
-    raw_experiment_config_path = experiment_cfg.get("config_path")
-    if isinstance(raw_experiment_config_path, str) and raw_experiment_config_path.strip():
-        result["experiment_matrix_config_path"] = normalize_path_value(raw_experiment_config_path)
-    result["experiment_matrix_config_path_matches_runtime_snapshot"] = (
-        result["experiment_matrix_config_path"] != "<absent>"
-        and result["experiment_matrix_config_path"] == normalize_path_value(cfg_path)
-    )
-    if not bool(gpu_summary["gpu_tool_available"]):
-        failed_checks.append("gpu_tool_unavailable")
-    if not bool(source_package_check["exists"]):
-        failed_checks.append("source_package_missing")
-    if not bool(thresholds_check["exists"]):
-        failed_checks.append("source_thresholds_artifact_missing")
-    if bool(result["attestation_env_required"]) and not bool(result["attestation_env_var_bindings_complete"]):
-        failed_checks.append("attestation_env_var_bindings_incomplete")
-    if bool(result["attestation_env_required"]) and result["missing_attestation_env_vars"]:
-        failed_checks.append("missing_attestation_env_vars")
-    if bool(require_model_binding):
-        if not bool(result["model_source_binding_present"]) or result["model_source_binding_status"] in {"<absent>", "absent"}:
-            failed_checks.append("stage_03_model_source_binding_missing")
-        elif result["model_source_binding_status"] != "bound":
-            failed_checks.append("stage_03_model_source_binding_not_bound")
-        if not bool(result["model_snapshot_path_exists"]) or not bool(result["model_snapshot_path_is_directory"]):
-            failed_checks.append("stage_03_model_snapshot_path_missing_or_not_directory")
-        if (
-            result["model_source_binding_status"] == "bound"
-            and bool(result["model_snapshot_path_exists"])
-            and bool(result["model_snapshot_path_is_directory"])
-            and not bool(result["model_source_binding_path_matches_snapshot_path"])
-        ):
-            failed_checks.append("stage_03_model_source_binding_path_mismatch")
-    if bool(require_authoritative_config_path):
-        if result["experiment_matrix_config_path"] == "<absent>":
-            failed_checks.append("stage_03_experiment_matrix_config_path_missing")
-        elif not bool(result["experiment_matrix_config_path_matches_runtime_snapshot"]):
-            failed_checks.append("stage_03_experiment_matrix_config_path_mismatch")
-
-    result["ok"] = len(failed_checks) == 0
-    return result
-
-
-def _build_legacy_stage_04_preflight(
-    cfg_path: Path,
-    stage_inputs: Mapping[str, Mapping[str, Any]],
-    *,
-    require_stage_02: bool,
-    require_stage_03: bool,
-) -> Dict[str, Any]:
-    """
-    功能：执行 stage 04 的 signoff-input preflight。 
-
-    Execute stage-04 preflight checks for required stage packages and lineage-ready manifests.
-
-    Args:
-        cfg_path: Runtime config path.
-        stage_inputs: Prepared stage-input mapping.
-        require_stage_02: Whether stage 02 is mandatory.
-        require_stage_03: Whether stage 03 is mandatory.
-
-    Returns:
-        Stage-04 preflight status mapping.
-    """
-    if not isinstance(stage_inputs, Mapping):
-        raise TypeError("stage_inputs must be Mapping")
-
-    _, config_error = _load_config_mapping(cfg_path)
-    gpu_summary = _collect_gpu_tool_summary()
-    failed_checks: List[str] = []
-
-    def _stage_ready(stage_key: str, required: bool) -> Dict[str, Any]:
-        info = stage_inputs.get(stage_key)
-        stage_manifest = info.get("stage_manifest") if isinstance(info, Mapping) else None
-        package_manifest = info.get("package_manifest") if isinstance(info, Mapping) else None
-        status = info.get("status") if isinstance(info, Mapping) else "not_provided"
-        input_path = info.get("input_path") if isinstance(info, Mapping) else "<absent>"
-        has_manifests = isinstance(stage_manifest, Mapping) and isinstance(package_manifest, Mapping)
-        if required and status != "prepared":
-            failed_checks.append(f"{stage_key}_package_not_ready")
-        elif status == "prepared" and not has_manifests:
-            failed_checks.append(f"{stage_key}_manifest_missing")
-        return {
-            "required": required,
-            "status": status,
-            "input_path": input_path,
-            "has_manifests": has_manifests,
-        }
-
-    stage_01_summary = _stage_ready("stage_01", True)
-    stage_02_summary = _stage_ready("stage_02", require_stage_02)
-    stage_03_summary = _stage_ready("stage_03", require_stage_03)
-    if config_error is not None:
-        failed_checks.append("config_invalid")
-
-    return {
-        "stage_name": "04_" "Release_" "And_" "Signoff",
-        "cfg_path": normalize_path_value(cfg_path),
-        "config_error": config_error,
-        "gpu_required": False,
-        **gpu_summary,
-        "attestation_env_required": False,
-        "require_stage_02": require_stage_02,
-        "require_stage_03": require_stage_03,
-        "stage_01": stage_01_summary,
-        "stage_02": stage_02_summary,
-        "stage_03": stage_03_summary,
-        "failed_checks": failed_checks,
-        "ok": len(failed_checks) == 0,
-    }
-
-
-def _build_legacy_formal_gpu_preflight(cfg_path: Path) -> Dict[str, Any]:
-    """
-    功能：stage 01 formal preflight 的兼容包装器。 
-
-    Provide a compatibility wrapper that preserves the legacy formal GPU preflight API.
-
-    Args:
-        cfg_path: Runtime config path.
-
-    Returns:
-        Legacy-compatible preflight status mapping derived from stage 01 semantics.
-    """
-    stage_01_preflight = _build_legacy_stage_01_preflight(cfg_path)
-
-    return {
-        "ok": bool(stage_01_preflight.get("ok", False)),
-        "gpu_tool_available": bool(stage_01_preflight.get("gpu_tool_available", False)),
-        "nvidia_smi_path": stage_01_preflight.get("nvidia_smi_path", "<absent>"),
-        "missing_attestation_env_vars": stage_01_preflight.get("missing_attestation_env_vars", []),
-        "required_attestation_env_vars": stage_01_preflight.get("required_attestation_env_vars", []),
-        "compatibility_wrapper": True,
-        "stage_name": stage_01_preflight.get("stage_name"),
-        "failed_checks": stage_01_preflight.get("failed_checks", []),
-    }
-
-
-def __getattr__(name: str) -> Any:
-    """
-    功能：按需暴露 legacy_mainline preflight 兼容接口。
-
-    Provide archive-only lazy compatibility exports for retired preflight APIs.
-
-    Args:
-        name: Requested module attribute name.
-
-    Returns:
-        Legacy-compatible callable when the compatibility export exists.
-
-    Raises:
-        AttributeError: If the requested attribute is unknown.
-    """
-    legacy_exports = {
-        "detect_" "stage_" "01_preflight": _build_legacy_stage_01_preflight,
-        "detect_" "stage_" "02_preflight": _build_legacy_stage_02_preflight,
-        "detect_" "stage_" "03_preflight": _build_legacy_stage_03_preflight,
-        "detect_" "stage_" "04_preflight": _build_legacy_stage_04_preflight,
-        "detect_" "formal_" "gpu_preflight": _build_legacy_formal_gpu_preflight,
-    }
-    if not isinstance(name, str):
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    legacy_export = legacy_exports.get(name)
-    if legacy_export is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    return legacy_export

@@ -35,17 +35,17 @@ inference_guidance_scale: 7.0
 inference_height: 512
 inference_width: 512
 
-stage_01_source_pool:
+pw01_source_pool:
   enabled: true
   use_inference_prompt_file: true
   target_prompt_count: 16
-  record_usage: "stage_01_direct_source_pool"
+  record_usage: "pw01_direct_source_pool"
 
-stage_01_pooled_threshold_build:
+pw01_pooled_threshold_build:
   enabled: true
   build_mode: "source_plus_derived_pairs"
   target_pair_count: 16
-  build_usage: "stage_01_pooled_thresholds"
+  build_usage: "pw01_pooled_thresholds"
   record_derivation_kind: "prompt_bound_label_balance"
 
 seed: null  # 随机种子（null 表示自动生成，可通过 CLI override 覆盖）

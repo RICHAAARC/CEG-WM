@@ -43,10 +43,10 @@ def main() -> int:
     parser.add_argument("--shard-index", required=True, type=int, help="Zero-based shard index.")
     parser.add_argument("--shard-count", required=True, type=int, help="Total shard count.")
     parser.add_argument(
-        "--stage-01-worker-count",
+        "--pw01-worker-count",
         default=1,
         type=int,
-        help="Shard-local stage-01 worker count. Only 1 or 2 is allowed.",
+        help="Shard-local PW01 worker count. Only 1 or 2 is allowed.",
     )
     parser.add_argument(
         "--bound-config-path",
@@ -62,7 +62,7 @@ def main() -> int:
         sample_role=str(args.sample_role),
         shard_index=int(args.shard_index),
         shard_count=int(args.shard_count),
-        stage_01_worker_count=int(args.stage_01_worker_count),
+        pw01_worker_count=int(args.pw01_worker_count),
         bound_config_path=Path(args.bound_config_path),
         force_rerun=bool(args.force_rerun),
     )

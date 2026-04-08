@@ -28,10 +28,10 @@ def main() -> int:
     parser.add_argument("--family-id", required=True, help="Paper workflow family identifier.")
     parser.add_argument("--shard-index", required=True, type=int, help="Zero-based shard index.")
     parser.add_argument(
-        "--stage-01-worker-count",
+        "--pw01-worker-count",
         required=True,
         type=int,
-        help="Shard-local stage-01 worker count. Only 1 or 2 is allowed.",
+        help="Shard-local PW01 worker count. Only 1 or 2 is allowed.",
     )
     parser.add_argument("--local-worker-index", required=True, type=int, help="Zero-based local worker index.")
     parser.add_argument("--worker-plan-path", required=True, help="Worker plan JSON path.")
@@ -41,7 +41,7 @@ def main() -> int:
         drive_project_root=Path(args.drive_project_root),
         family_id=str(args.family_id),
         shard_index=int(args.shard_index),
-        stage_01_worker_count=int(args.stage_01_worker_count),
+        pw01_worker_count=int(args.pw01_worker_count),
         local_worker_index=int(args.local_worker_index),
         worker_plan_path=Path(args.worker_plan_path),
     )
