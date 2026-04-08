@@ -17,6 +17,7 @@ from main.cli import run_calibrate as run_calibrate_cli
 from main.core import config_loader as core_config_loader
 from main.evaluation import workflow_inputs as eval_workflow_inputs
 import paper_workflow.scripts.pw02_merge_source_event_shards as pw02_module
+import paper_workflow.scripts.pw_quality_metrics as pw_quality_metrics_module
 from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
 from paper_workflow.scripts.pw_common import build_source_shard_root, read_jsonl
 from scripts.notebook_runtime_common import ensure_directory, normalize_path_value, write_json_atomic, write_yaml_mapping
@@ -209,6 +210,7 @@ def _materialize_completed_pw01_shards(
                         "event_id": event_id,
                         "sample_role": sample_role,
                         "event_index": event_index,
+                        "prompt_text": event.get("prompt_text"),
                         "detect_record_path": detect_record_path.as_posix(),
                         "source_image": {
                             "exists": True,
@@ -349,6 +351,17 @@ def _patch_pw02_python_stage_runner(monkeypatch: Any) -> List[Dict[str, Any]]:
     Returns:
         Captured stage-call summaries.
     """
+
+    def fake_clip_text_similarity(candidate_image: Any, prompt_text: str) -> float:
+        if not isinstance(prompt_text, str) or not prompt_text:
+            raise ValueError("prompt_text must be non-empty str")
+        return 0.82 if prompt_text == "prompt one" else 0.74
+
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_compute_clip_text_similarity",
+        fake_clip_text_similarity,
+    )
 
     observed_calls: List[Dict[str, Any]] = []
 
@@ -1005,12 +1018,18 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
         assert quality_rows_by_scope["content_chain"]["mean_lpips"] is not None
     else:
         assert quality_rows_by_scope["content_chain"]["lpips_reason"]
-    assert quality_rows_by_scope["content_chain"]["clip_status"] == "not_available"
+    assert quality_rows_by_scope["content_chain"]["clip_status"] == "ok"
+    assert quality_rows_by_scope["content_chain"]["mean_clip_text_similarity"] is not None
+    assert quality_rows_by_scope["content_chain"]["clip_model_name"] == pw_quality_metrics_module.CLIP_MODEL_NAME
+    assert quality_rows_by_scope["content_chain"]["clip_sample_count"] == 2
     assert quality_rows_by_scope["event_attestation"]["status"] == "not_applicable"
     assert quality_rows_by_scope["event_attestation"]["lpips_status"] == quality_rows_by_scope["content_chain"]["lpips_status"]
     assert quality_rows_by_scope["system_final"]["status"] == "not_available"
     assert quality_rows_by_scope["system_final"]["lpips_status"] == quality_rows_by_scope["content_chain"]["lpips_status"]
     assert "quality payload is only defined" in str(quality_rows_by_scope["system_final"]["reason"])
+    assert "mean_clip_text_similarity" in quality_rows[0]
+    assert "clip_model_name" in quality_rows[0]
+    assert "clip_sample_count" in quality_rows[0]
 
     assert payload_clean_summary["status"] == "not_available"
     assert "decoded bits" in str(payload_clean_summary["reason"])

@@ -205,17 +205,78 @@ def _extract_attack_geometry_diagnostics(detect_payload: Mapping[str, Any]) -> D
     elif anchor_result or geometry_evidence_payload.get("anchor_metrics") is not None:
         attention_anchor_available = False
 
+    if isinstance(geometry_failure_reason, str) and geometry_failure_reason:
+        geometry_failure_status = "ok"
+        geometry_failure_reason_reason = None
+    else:
+        geometry_failure_status = "not_available"
+        geometry_failure_reason_reason = "geometry chain did not report failure reason"
+
+    if isinstance(sync_success, bool):
+        sync_success_status = "ok"
+        sync_success_reason = None
+    else:
+        sync_success_status = "not_available"
+        sync_success_reason = (
+            geometry_failure_reason
+            if isinstance(geometry_failure_reason, str) and geometry_failure_reason
+            else "geometry chain did not report sync_success"
+        )
+
+    if sync_quality_metrics:
+        sync_quality_metrics_status = "ok"
+        sync_quality_metrics_reason = None
+    else:
+        sync_quality_metrics_status = "not_available"
+        sync_quality_metrics_reason = (
+            geometry_failure_reason
+            if isinstance(geometry_failure_reason, str) and geometry_failure_reason
+            else "geometry chain did not expose sync_quality_metrics"
+        )
+
+    if isinstance(inverse_transform_success, bool):
+        inverse_transform_success_status = "ok"
+        inverse_transform_success_reason = None
+    else:
+        inverse_transform_success_status = "not_available"
+        inverse_transform_success_reason = (
+            geometry_failure_reason
+            if isinstance(geometry_failure_reason, str) and geometry_failure_reason
+            else "geometry chain did not report inverse transform status"
+        )
+
+    if isinstance(attention_anchor_available, bool):
+        attention_anchor_available_status = "ok"
+        attention_anchor_available_reason = None
+    else:
+        attention_anchor_available_status = "not_available"
+        attention_anchor_available_reason = (
+            geometry_failure_reason
+            if isinstance(geometry_failure_reason, str) and geometry_failure_reason
+            else "geometry chain did not report attention anchor availability"
+        )
+
     return {
         "sync_status": sync_status if isinstance(sync_status, str) and sync_status else None,
         "sync_success": sync_success,
+        "sync_success_status": sync_success_status,
+        "sync_success_reason": sync_success_reason,
         "sync_digest": sync_result.get("sync_digest") if isinstance(sync_result.get("sync_digest"), str) else geometry_result.get("sync_digest"),
         "geometry_failure_reason": geometry_failure_reason if isinstance(geometry_failure_reason, str) and geometry_failure_reason else None,
+        "geometry_failure_reason_status": geometry_failure_status,
+        "geometry_failure_reason_reason": geometry_failure_reason_reason,
         "relation_digest_bound": relation_digest_bound if isinstance(relation_digest_bound, str) and relation_digest_bound else None,
         "relation_binding_diagnostics": relation_binding_diagnostics or None,
         "template_match_metrics": template_match_metrics or None,
         "sync_quality_metrics": sync_quality_metrics or None,
+        "sync_quality_metrics_status": sync_quality_metrics_status,
+        "sync_quality_metrics_reason": sync_quality_metrics_reason,
         "inverse_transform_success": inverse_transform_success,
+        "inverse_transform_success_status": inverse_transform_success_status,
+        "inverse_transform_success_reason": inverse_transform_success_reason,
         "attention_anchor_available": attention_anchor_available,
+        "attention_anchor_available_status": attention_anchor_available_status,
+        "attention_anchor_available_reason": attention_anchor_available_reason,
         "anchor_digest": anchor_digest if isinstance(anchor_digest, str) and anchor_digest else None,
         "align_metrics": align_metrics or None,
     }

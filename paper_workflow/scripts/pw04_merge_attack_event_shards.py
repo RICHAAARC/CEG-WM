@@ -114,6 +114,25 @@ def _canonical_json_text(payload: Mapping[str, Any]) -> str:
     return json.dumps(dict(payload), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def _extract_prompt_text_from_mapping(payload: Mapping[str, Any] | None) -> str | None:
+    """
+    Extract prompt text from one attack-side metadata mapping when available.
+
+    Args:
+        payload: Candidate metadata mapping.
+
+    Returns:
+        Prompt text or None.
+    """
+    if not isinstance(payload, Mapping):
+        return None
+    for key_name in ["prompt_text", "prompt", "inference_prompt"]:
+        prompt_value = payload.get(key_name)
+        if isinstance(prompt_value, str) and prompt_value.strip():
+            return prompt_value.strip()
+    return None
+
+
 def _normalize_threshold_artifact_paths(threshold_artifact_paths: Mapping[str, Any]) -> Dict[str, str]:
     """
     Normalize threshold artifact path bindings for equality checks.
@@ -529,6 +548,10 @@ def _collect_completed_attack_events(
                     parent_source_image_path = detect_parent_source_path
                 else:
                     parent_source_image_path = None
+            parent_event_reference = _extract_mapping(event_manifest.get("parent_event_reference"))
+            parent_prompt_text = _extract_prompt_text_from_mapping(parent_event_reference)
+            if parent_prompt_text is None:
+                parent_prompt_text = _extract_prompt_text_from_mapping(event_manifest)
 
             content_score, content_score_source = eval_workflow_inputs._resolve_content_score_source(detect_payload)
             attestation_score, attestation_score_source = eval_workflow_inputs._resolve_event_attestation_score_source(detect_payload)
@@ -571,6 +594,7 @@ def _collect_completed_attack_events(
                     "source_finalize_manifest_digest": source_finalize_manifest_digest,
                     "threshold_artifact_paths": threshold_artifact_paths,
                     "parent_source_image_path": parent_source_image_path,
+                    "parent_prompt_text": parent_prompt_text,
                     "attacked_image_path": attacked_image_path,
                     "content_score": content_score,
                     "content_score_source": content_score_source,
@@ -592,8 +616,19 @@ def _collect_completed_attack_events(
                     "geometry_diagnostics": geometry_diagnostics,
                     "sync_success": geometry_diagnostics.get("sync_success"),
                     "sync_status": geometry_diagnostics.get("sync_status"),
+                    "sync_success_status": geometry_diagnostics.get("sync_success_status"),
+                    "sync_success_reason": geometry_diagnostics.get("sync_success_reason"),
                     "inverse_transform_success": geometry_diagnostics.get("inverse_transform_success"),
+                    "inverse_transform_success_status": geometry_diagnostics.get("inverse_transform_success_status"),
+                    "inverse_transform_success_reason": geometry_diagnostics.get("inverse_transform_success_reason"),
                     "attention_anchor_available": geometry_diagnostics.get("attention_anchor_available"),
+                    "attention_anchor_available_status": geometry_diagnostics.get("attention_anchor_available_status"),
+                    "attention_anchor_available_reason": geometry_diagnostics.get("attention_anchor_available_reason"),
+                    "sync_quality_metrics_status": geometry_diagnostics.get("sync_quality_metrics_status"),
+                    "sync_quality_metrics_reason": geometry_diagnostics.get("sync_quality_metrics_reason"),
+                    "geometry_failure_reason": geometry_diagnostics.get("geometry_failure_reason"),
+                    "geometry_failure_reason_status": geometry_diagnostics.get("geometry_failure_reason_status"),
+                    "geometry_failure_reason_reason": geometry_diagnostics.get("geometry_failure_reason_reason"),
                     "content_chain_status": content_payload.get("status") if isinstance(content_payload, Mapping) else None,
                     "geometry_chain_status": geometry_payload.get("status") if isinstance(geometry_payload, Mapping) else None,
                     "fusion_status": fusion_status,
@@ -938,12 +973,19 @@ def _build_grouped_attack_quality_rows(
             for row in rows
             if isinstance(row.get("lpips"), (int, float)) and not isinstance(row.get("lpips"), bool)
         ]
+        clip_values = [
+            float(row["clip_text_similarity"])
+            for row in rows
+            if isinstance(row.get("clip_text_similarity"), (int, float)) and not isinstance(row.get("clip_text_similarity"), bool)
+        ]
         grouped_row: Dict[str, Any] = {
             group_key_name: group_value,
             "quality_pair_count": len(psnr_values),
             "mean_psnr": float(sum(psnr_values) / len(psnr_values)) if psnr_values else None,
             "mean_ssim": float(sum(ssim_values) / len(ssim_values)) if ssim_values else None,
             "mean_lpips": float(sum(lpips_values) / len(lpips_values)) if lpips_values else None,
+            "mean_clip_text_similarity": float(sum(clip_values) / len(clip_values)) if clip_values else None,
+            "clip_sample_count": len(clip_values),
         }
         if group_key_name == "attack_condition_key":
             grouped_row["attack_family"] = rows[0].get("attack_family")
@@ -985,6 +1027,7 @@ def _build_attack_quality_metrics_export(
                 "attack_config_name": attack_event_row.get("attack_config_name"),
                 "reference_image_path": attack_event_row.get("parent_source_image_path"),
                 "candidate_image_path": attack_event_row.get("attacked_image_path"),
+                "prompt_text": attack_event_row.get("parent_prompt_text"),
             }
         )
 
@@ -993,6 +1036,7 @@ def _build_attack_quality_metrics_export(
         reference_path_key="reference_image_path",
         candidate_path_key="candidate_image_path",
         pair_id_key="attack_event_id",
+        text_key="prompt_text",
         extra_metadata_keys=["parent_event_id", "attack_family", "attack_condition_key", "attack_config_name"],
     )
     pair_rows = cast(List[Mapping[str, Any]], quality_summary.get("pair_rows", []))
@@ -1014,6 +1058,9 @@ def _build_attack_quality_metrics_export(
             "lpips_status": quality_summary.get("lpips_status"),
             "lpips_reason": quality_summary.get("lpips_reason"),
             "mean_lpips": quality_summary.get("mean_lpips"),
+            "mean_clip_text_similarity": quality_summary.get("mean_clip_text_similarity"),
+            "clip_model_name": quality_summary.get("clip_model_name"),
+            "clip_sample_count": quality_summary.get("clip_sample_count"),
             "clip_status": quality_summary.get("clip_status"),
             "clip_reason": quality_summary.get("clip_reason"),
         },
@@ -1225,6 +1272,11 @@ def _build_grouped_attack_metrics_rows(
             for row in rows
             if isinstance(row.get("attack_quality_lpips"), (int, float)) and not isinstance(row.get("attack_quality_lpips"), bool)
         ]
+        quality_clip_values = [
+            float(row["attack_quality_clip_text_similarity"])
+            for row in rows
+            if isinstance(row.get("attack_quality_clip_text_similarity"), (int, float)) and not isinstance(row.get("attack_quality_clip_text_similarity"), bool)
+        ]
         formal_final_positive_count = 0
         formal_attestation_positive_count = 0
         derived_union_positive_count = 0
@@ -1255,6 +1307,8 @@ def _build_grouped_attack_metrics_rows(
             "attack_mean_psnr": float(sum(quality_psnr_values) / len(quality_psnr_values)) if quality_psnr_values else None,
             "attack_mean_ssim": float(sum(quality_ssim_values) / len(quality_ssim_values)) if quality_ssim_values else None,
             "attack_mean_lpips": float(sum(quality_lpips_values) / len(quality_lpips_values)) if quality_lpips_values else None,
+            "attack_mean_clip_text_similarity": float(sum(quality_clip_values) / len(quality_clip_values)) if quality_clip_values else None,
+            "attack_clip_sample_count": len(quality_clip_values),
         }
         if group_key_name == "attack_condition_key":
             row_payload["attack_family"] = str(rows[0]["attack_family"])
@@ -1393,8 +1447,19 @@ def _write_attack_event_table_jsonl(
                 "geometry_chain_status": attack_event_row.get("geometry_chain_status"),
                 "sync_status": attack_event_row.get("sync_status"),
                 "sync_success": attack_event_row.get("sync_success"),
+                "sync_success_status": attack_event_row.get("sync_success_status"),
+                "sync_success_reason": attack_event_row.get("sync_success_reason"),
                 "inverse_transform_success": attack_event_row.get("inverse_transform_success"),
+                "inverse_transform_success_status": attack_event_row.get("inverse_transform_success_status"),
+                "inverse_transform_success_reason": attack_event_row.get("inverse_transform_success_reason"),
                 "attention_anchor_available": attack_event_row.get("attention_anchor_available"),
+                "attention_anchor_available_status": attack_event_row.get("attention_anchor_available_status"),
+                "attention_anchor_available_reason": attack_event_row.get("attention_anchor_available_reason"),
+                "sync_quality_metrics_status": attack_event_row.get("sync_quality_metrics_status"),
+                "sync_quality_metrics_reason": attack_event_row.get("sync_quality_metrics_reason"),
+                "geometry_failure_reason": attack_event_row.get("geometry_failure_reason"),
+                "geometry_failure_reason_status": attack_event_row.get("geometry_failure_reason_status"),
+                "geometry_failure_reason_reason": attack_event_row.get("geometry_failure_reason_reason"),
                 "image_evidence_status": image_evidence_payload.get("status"),
                 "geo_rescue_eligible": image_evidence_payload.get("geo_rescue_eligible"),
                 "geo_rescue_applied": image_evidence_payload.get("geo_rescue_applied"),
@@ -1403,6 +1468,8 @@ def _write_attack_event_table_jsonl(
                 "attack_quality_psnr": attack_event_row.get("attack_quality_psnr"),
                 "attack_quality_ssim": attack_event_row.get("attack_quality_ssim"),
                 "attack_quality_lpips": attack_event_row.get("attack_quality_lpips"),
+                "attack_quality_clip_text_similarity": attack_event_row.get("attack_quality_clip_text_similarity"),
+                "attack_quality_clip_model_name": attack_event_row.get("attack_quality_clip_model_name"),
             }
         )
     ensure_directory(output_path.parent)
@@ -1503,6 +1570,11 @@ def _build_clean_attack_overview_export(
         "attack_quality_mean_psnr": attack_quality_overall.get("mean_psnr"),
         "attack_quality_mean_ssim": attack_quality_overall.get("mean_ssim"),
         "attack_quality_mean_lpips": attack_quality_overall.get("mean_lpips"),
+        "attack_quality_mean_clip_text_similarity": attack_quality_overall.get("mean_clip_text_similarity"),
+        "attack_quality_clip_model_name": attack_quality_overall.get("clip_model_name"),
+        "attack_quality_clip_sample_count": attack_quality_overall.get("clip_sample_count"),
+        "attack_quality_clip_status": attack_quality_overall.get("clip_status"),
+        "attack_quality_clip_reason": attack_quality_overall.get("clip_reason"),
     }
 
 
@@ -1760,6 +1832,7 @@ def run_pw04_merge_attack_event_shards(
         attack_event_rows=materialized_attack_event_rows,
     )
     quality_lookup = cast(Dict[str, Dict[str, Any]], attack_quality_metrics_export["pair_lookup"])
+    attack_quality_overall = cast(Mapping[str, Any], cast(Mapping[str, Any], attack_quality_metrics_export["payload"]).get("overall", {}))
     for attack_event_row in materialized_attack_event_rows:
         attack_event_id = str(attack_event_row["attack_event_id"])
         quality_row = quality_lookup.get(attack_event_id, {})
@@ -1767,6 +1840,8 @@ def run_pw04_merge_attack_event_shards(
         attack_event_row["attack_quality_psnr"] = quality_row.get("psnr")
         attack_event_row["attack_quality_ssim"] = quality_row.get("ssim")
         attack_event_row["attack_quality_lpips"] = quality_row.get("lpips")
+        attack_event_row["attack_quality_clip_text_similarity"] = quality_row.get("clip_text_similarity")
+        attack_event_row["attack_quality_clip_model_name"] = attack_quality_overall.get("clip_model_name")
     formal_attack_final_decision_metrics_payload = _build_formal_attack_final_decision_metrics_export(
         family_id=family_id,
         finalize_manifest_path=finalize_manifest_path,

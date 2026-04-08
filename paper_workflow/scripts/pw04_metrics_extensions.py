@@ -380,6 +380,13 @@ def _summarize_boolean_diagnostic(
         raise TypeError("unavailable_reason must be non-empty str")
 
     available_values = [row.get(key_name) for row in rows if isinstance(row.get(key_name), bool)]
+    explicit_reasons = sorted(
+        {
+            str(row.get(f"{key_name}_reason")).strip()
+            for row in rows
+            if isinstance(row.get(f"{key_name}_reason"), str) and str(row.get(f"{key_name}_reason")).strip()
+        }
+    )
     available_count = len(available_values)
     true_count = sum(1 for value in available_values if value is True)
     if available_count <= 0:
@@ -388,11 +395,25 @@ def _summarize_boolean_diagnostic(
             f"{key_name}_true_count": 0,
             f"{key_name}_true_rate": None,
             f"{key_name}_status": "not_available",
-            f"{key_name}_reason": unavailable_reason,
+            f"{key_name}_reason": (
+                explicit_reasons[0]
+                if len(explicit_reasons) == 1
+                else (json.dumps(explicit_reasons, ensure_ascii=False) if explicit_reasons else unavailable_reason)
+            ),
         }
 
     status_value = "ok" if available_count == len(rows) else "partial"
-    reason_value = None if status_value == "ok" else f"available for {available_count}/{len(rows)} attack events"
+    if status_value == "ok":
+        reason_value = None
+    else:
+        reason_value = f"available for {available_count}/{len(rows)} attack events"
+        if explicit_reasons:
+            explicit_reason_text = (
+                explicit_reasons[0]
+                if len(explicit_reasons) == 1
+                else json.dumps(explicit_reasons, ensure_ascii=False)
+            )
+            reason_value = f"{reason_value}; unavailable_reasons={explicit_reason_text}"
     return {
         f"{key_name}_available_count": available_count,
         f"{key_name}_true_count": true_count,
@@ -1326,7 +1347,24 @@ def build_pw04_metrics_extensions(
         )
         if value is not None
     ]
+    attack_clip_values = [
+        value
+        for value in (
+            _coerce_finite_float(row.get("attack_quality_clip_text_similarity"))
+            for row in attack_event_rows
+        )
+        if value is not None
+    ]
     attack_quality_ok_count = sum(1 for row in attack_event_rows if row.get("attack_quality_status") == "ok")
+    attack_clip_sample_count = len(attack_clip_values)
+    attack_clip_model_name = next(
+        (
+            str(row.get("attack_quality_clip_model_name"))
+            for row in attack_event_rows
+            if isinstance(row.get("attack_quality_clip_model_name"), str) and str(row.get("attack_quality_clip_model_name")).strip()
+        ),
+        clean_quality_row.get("clip_model_name"),
+    )
     if attack_quality_ok_count <= 0:
         attack_lpips_status = "not_available"
         attack_lpips_reason = "PW04 attack quality rows do not contain LPIPS values"
@@ -1336,6 +1374,16 @@ def build_pw04_metrics_extensions(
     else:
         attack_lpips_status = "partial"
         attack_lpips_reason = f"LPIPS available for {attack_quality_ok_count}/{len(attack_event_rows)} attack events"
+
+    if attack_clip_sample_count <= 0:
+        attack_clip_status = "not_available"
+        attack_clip_reason = "PW04 attack quality rows do not contain CLIP text similarity values"
+    elif attack_clip_sample_count == len(attack_event_rows):
+        attack_clip_status = "ok"
+        attack_clip_reason = None
+    else:
+        attack_clip_status = "partial"
+        attack_clip_reason = f"CLIP available for {attack_clip_sample_count}/{len(attack_event_rows)} attack events"
 
     tradeoff_rows: List[Dict[str, Any]] = []
     for robustness_row in robustness_macro_rows:
@@ -1352,6 +1400,11 @@ def build_pw04_metrics_extensions(
                 "attack_mean_lpips": _safe_mean(attack_lpips_values),
                 "attack_lpips_status": attack_lpips_status,
                 "attack_lpips_reason": attack_lpips_reason,
+                "attack_mean_clip_text_similarity": _safe_mean(attack_clip_values),
+                "attack_clip_model_name": attack_clip_model_name,
+                "attack_clip_status": attack_clip_status,
+                "attack_clip_reason": attack_clip_reason,
+                "attack_clip_sample_count": attack_clip_sample_count,
                 "quality_metrics_summary_csv_path": normalize_path_value(quality_summary_csv_path),
                 "quality_metrics_summary_json_path": normalize_path_value(quality_summary_json_path),
                 "robustness_macro_summary_path": normalize_path_value(robustness_macro_summary_path),
@@ -1375,6 +1428,11 @@ def build_pw04_metrics_extensions(
             "attack_mean_lpips",
             "attack_lpips_status",
             "attack_lpips_reason",
+            "attack_mean_clip_text_similarity",
+            "attack_clip_model_name",
+            "attack_clip_status",
+            "attack_clip_reason",
+            "attack_clip_sample_count",
             "quality_metrics_summary_csv_path",
             "quality_metrics_summary_json_path",
             "robustness_macro_summary_path",

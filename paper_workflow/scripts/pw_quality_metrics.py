@@ -18,7 +18,14 @@ from scripts.notebook_runtime_common import normalize_path_value
 
 _LPIPS_MODEL: Any = None
 _LPIPS_MODEL_ERROR: str | None = None
+_CLIP_MODEL: Any = None
+_CLIP_PREPROCESS: Any = None
+_CLIP_TOKENIZER: Any = None
+_CLIP_MODEL_ERROR: str | None = None
 CLIP_UNAVAILABLE_REASON = "requires frozen quality model identity and bootstrap contract"
+CLIP_MODEL_NAME = "open_clip:ViT-B-32/laion2b_s34b_b79k"
+_CLIP_MODEL_ARCH = "ViT-B-32"
+_CLIP_MODEL_PRETRAINED = "laion2b_s34b_b79k"
 
 
 def _load_required_json_dict(path_obj: Path, label: str) -> Dict[str, Any]:
@@ -198,24 +205,109 @@ def _compute_lpips_value(
     return float(lpips_value.reshape(-1)[0].item())
 
 
+def _get_clip_model_components() -> tuple[Any | None, Any | None, Any | None, str | None]:
+    """
+    Load and cache the frozen CLIP model components for image-text similarity.
+
+    Args:
+        None.
+
+    Returns:
+        Tuple of (model_or_none, preprocess_or_none, tokenizer_or_none, error_reason_or_none).
+    """
+    global _CLIP_MODEL
+    global _CLIP_PREPROCESS
+    global _CLIP_TOKENIZER
+    global _CLIP_MODEL_ERROR
+
+    if _CLIP_MODEL is not None and _CLIP_PREPROCESS is not None and _CLIP_TOKENIZER is not None:
+        return _CLIP_MODEL, _CLIP_PREPROCESS, _CLIP_TOKENIZER, None
+    if _CLIP_MODEL_ERROR is not None:
+        return None, None, None, _CLIP_MODEL_ERROR
+
+    try:
+        import open_clip  # type: ignore
+        import torch
+    except Exception as exc:
+        _CLIP_MODEL_ERROR = f"{type(exc).__name__}: {exc}"
+        return None, None, None, _CLIP_MODEL_ERROR
+
+    try:
+        model, _, preprocess = open_clip.create_model_and_transforms(
+            _CLIP_MODEL_ARCH,
+            pretrained=_CLIP_MODEL_PRETRAINED,
+            device=torch.device("cpu"),
+        )
+        tokenizer = open_clip.get_tokenizer(_CLIP_MODEL_ARCH)
+        model.eval()
+    except Exception as exc:
+        _CLIP_MODEL_ERROR = f"{type(exc).__name__}: {exc}"
+        return None, None, None, _CLIP_MODEL_ERROR
+
+    _CLIP_MODEL = model
+    _CLIP_PREPROCESS = preprocess
+    _CLIP_TOKENIZER = tokenizer
+    return _CLIP_MODEL, _CLIP_PREPROCESS, _CLIP_TOKENIZER, None
+
+
+def _compute_clip_text_similarity(
+    candidate_image: np.ndarray[Any, Any],
+    prompt_text: str,
+) -> float:
+    """
+    Compute CLIP image-text cosine similarity for one candidate image and prompt.
+
+    Args:
+        candidate_image: Candidate RGB image array.
+        prompt_text: Prompt text paired with the candidate image.
+
+    Returns:
+        CLIP cosine similarity where larger indicates stronger semantic alignment.
+
+    Raises:
+        RuntimeError: If the CLIP model is unavailable.
+        ValueError: If prompt_text is invalid.
+    """
+    if not isinstance(prompt_text, str) or not prompt_text.strip():
+        raise ValueError("prompt_text must be non-empty str")
+
+    model, preprocess, tokenizer, model_error = _get_clip_model_components()
+    if model is None or preprocess is None or tokenizer is None:
+        raise RuntimeError(model_error or "CLIP model unavailable")
+
+    import torch
+
+    image_tensor = preprocess(Image.fromarray(candidate_image)).unsqueeze(0)
+    text_tensor = tokenizer([prompt_text.strip()])
+    with torch.inference_mode():
+        image_features = model.encode_image(image_tensor)
+        text_features = model.encode_text(text_tensor)
+        image_features = image_features / image_features.norm(dim=-1, keepdim=True).clamp(min=1e-12)
+        text_features = text_features / text_features.norm(dim=-1, keepdim=True).clamp(min=1e-12)
+        similarity_value = torch.matmul(image_features, text_features.T)
+    return float(similarity_value.reshape(-1)[0].item())
+
+
 def build_quality_metrics_from_pairs(
     *,
     pair_specs: Sequence[Mapping[str, Any]],
     reference_path_key: str,
     candidate_path_key: str,
     pair_id_key: str,
+    text_key: str | None = None,
     extra_metadata_keys: Sequence[str] | None = None,
 ) -> Dict[str, Any]:
     """
     功能：对一组图像路径对计算质量指标摘要。
 
-    Compute PSNR and SSIM summaries for a sequence of image-path pairs.
+    Compute image-pair quality and optional CLIP text-alignment summaries.
 
     Args:
         pair_specs: Pair specifications.
         reference_path_key: Key containing the reference image path.
         candidate_path_key: Key containing the candidate image path.
         pair_id_key: Key containing the stable pair identifier.
+        text_key: Optional key containing the prompt text for CLIP alignment.
         extra_metadata_keys: Additional metadata keys copied into each pair row.
 
     Returns:
@@ -232,15 +324,21 @@ def build_quality_metrics_from_pairs(
         raise TypeError("candidate_path_key must be non-empty str")
     if not isinstance(pair_id_key, str) or not pair_id_key:
         raise TypeError("pair_id_key must be non-empty str")
+    if text_key is not None and (not isinstance(text_key, str) or not text_key):
+        raise TypeError("text_key must be non-empty str when provided")
     metadata_keys = list(extra_metadata_keys) if extra_metadata_keys is not None else []
 
     pair_rows: List[Dict[str, Any]] = []
     psnr_values: List[float] = []
     ssim_values: List[float] = []
     lpips_values: List[float] = []
+    clip_values: List[float] = []
     missing_count = 0
     error_count = 0
     lpips_reason: str | None = None
+    clip_reason: str | None = None
+    clip_missing_text_count = 0
+    clip_error_count = 0
 
     for pair_spec in pair_specs:
         if not isinstance(pair_spec, Mapping):
@@ -249,6 +347,7 @@ def build_quality_metrics_from_pairs(
         pair_id = pair_spec.get(pair_id_key)
         reference_value = pair_spec.get(reference_path_key)
         candidate_value = pair_spec.get(candidate_path_key)
+        prompt_text = pair_spec.get(text_key) if text_key is not None else None
         pair_row: Dict[str, Any] = {
             "pair_id": pair_id,
             "reference_image_path": reference_value,
@@ -258,6 +357,7 @@ def build_quality_metrics_from_pairs(
             "psnr": None,
             "ssim": None,
             "lpips": None,
+            "clip_text_similarity": None,
         }
         for metadata_key in metadata_keys:
             pair_row[metadata_key] = pair_spec.get(metadata_key)
@@ -315,6 +415,21 @@ def build_quality_metrics_from_pairs(
         else:
             pair_row["lpips"] = lpips_value
             lpips_values.append(lpips_value)
+
+        if text_key is not None:
+            if isinstance(prompt_text, str) and prompt_text.strip():
+                try:
+                    clip_value = _compute_clip_text_similarity(candidate_image, prompt_text)
+                except Exception as exc:
+                    clip_error_count += 1
+                    if clip_reason is None:
+                        clip_reason = f"{type(exc).__name__}: {exc}"
+                else:
+                    pair_row["clip_text_similarity"] = clip_value
+                    clip_values.append(clip_value)
+            else:
+                clip_missing_text_count += 1
+
         psnr_values.append(psnr_value)
         ssim_values.append(ssim_value)
         pair_rows.append(pair_row)
@@ -326,6 +441,34 @@ def build_quality_metrics_from_pairs(
     status = "ok" if successful_count > 0 else "unavailable"
     availability_reason = None if successful_count > 0 else "no_valid_image_pairs"
     lpips_status = "ok" if lpips_values else "not_available"
+    clip_sample_count = len(clip_values)
+    mean_clip_text_similarity = float(np.mean(clip_values)) if clip_values else None
+    if text_key is None:
+        clip_status = "not_available"
+        clip_reason = "prompt text key not configured for CLIP quality metric"
+        clip_model_name: str | None = None
+    else:
+        clip_model_name = CLIP_MODEL_NAME
+        if clip_sample_count > 0 and clip_error_count == 0 and clip_missing_text_count == 0:
+            clip_status = "ok"
+            clip_reason = None
+        elif clip_sample_count > 0:
+            clip_status = "partial"
+            partial_reasons: List[str] = []
+            if clip_missing_text_count > 0:
+                partial_reasons.append(f"prompt text unavailable for {clip_missing_text_count} valid image pairs")
+            if clip_error_count > 0:
+                partial_reasons.append(f"CLIP computation failed for {clip_error_count} valid image pairs")
+            clip_reason = "; ".join(partial_reasons) if partial_reasons else clip_reason
+        elif successful_count <= 0:
+            clip_status = "not_available"
+            clip_reason = "no_valid_image_pairs"
+        elif clip_missing_text_count > 0 and clip_error_count == 0:
+            clip_status = "not_available"
+            clip_reason = f"prompt text unavailable for all {clip_missing_text_count} valid image pairs"
+        else:
+            clip_status = "not_available"
+            clip_reason = clip_reason or "CLIP model unavailable"
 
     return {
         "status": status,
@@ -339,7 +482,10 @@ def build_quality_metrics_from_pairs(
         "lpips_status": lpips_status,
         "lpips_reason": None if lpips_status == "ok" else (lpips_reason or "LPIPS model unavailable"),
         "mean_lpips": mean_lpips,
-        "clip_status": "not_available",
-        "clip_reason": CLIP_UNAVAILABLE_REASON,
+        "mean_clip_text_similarity": mean_clip_text_similarity,
+        "clip_model_name": clip_model_name,
+        "clip_sample_count": clip_sample_count,
+        "clip_status": clip_status,
+        "clip_reason": None if clip_status == "ok" else (clip_reason or CLIP_UNAVAILABLE_REASON),
         "pair_rows": pair_rows,
     }

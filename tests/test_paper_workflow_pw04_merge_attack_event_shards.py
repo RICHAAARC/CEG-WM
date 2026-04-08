@@ -14,7 +14,9 @@ from typing import Any, Dict, List, Mapping, Tuple, cast
 import pytest
 from PIL import Image
 
+import paper_workflow.scripts.pw03_run_attack_event_shard as pw03_module
 import paper_workflow.scripts.pw04_merge_attack_event_shards as pw04_module
+import paper_workflow.scripts.pw_quality_metrics as pw_quality_metrics_module
 from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
 from paper_workflow.scripts.pw_common import read_jsonl
 from scripts.notebook_runtime_common import compute_file_sha256, ensure_directory, normalize_path_value, write_json_atomic
@@ -68,6 +70,22 @@ def _build_pw00_family(tmp_path: Path, family_id: str) -> Dict[str, Any]:
         source_shard_count=2,
         attack_shard_count=2,
     )
+
+
+def _fake_clip_text_similarity(candidate_image: Any, prompt_text: str) -> float:
+    """
+    Build deterministic fake CLIP similarity for paper-workflow tests.
+
+    Args:
+        candidate_image: Unused candidate image payload.
+        prompt_text: Prompt text.
+
+    Returns:
+        Deterministic fake similarity.
+    """
+    if not isinstance(prompt_text, str) or not prompt_text:
+        raise ValueError("prompt_text must be non-empty str")
+    return 0.81 if prompt_text == "prompt one" else 0.69
 
 
 def _load_json_dict(path_obj: Path) -> Dict[str, Any]:
@@ -360,10 +378,13 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
             "mean_psnr": 35.0,
             "mean_ssim": 0.99,
             "mean_lpips": 0.12,
+            "mean_clip_text_similarity": 0.78,
+            "clip_model_name": pw_quality_metrics_module.CLIP_MODEL_NAME,
+            "clip_sample_count": 8,
             "lpips_status": "ok",
             "lpips_reason": None,
-            "clip_status": "not_available",
-            "clip_reason": "requires frozen quality model identity and bootstrap contract",
+            "clip_status": "ok",
+            "clip_reason": None,
             "source_analysis_path": normalize_path_value(content_clean_evaluate_export_path),
         },
         {
@@ -377,6 +398,9 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
             "mean_psnr": None,
             "mean_ssim": None,
             "mean_lpips": 0.12,
+            "mean_clip_text_similarity": None,
+            "clip_model_name": pw_quality_metrics_module.CLIP_MODEL_NAME,
+            "clip_sample_count": None,
             "lpips_status": "ok",
             "lpips_reason": None,
             "clip_status": "not_available",
@@ -394,6 +418,9 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
             "mean_psnr": None,
             "mean_ssim": None,
             "mean_lpips": 0.12,
+            "mean_clip_text_similarity": None,
+            "clip_model_name": pw_quality_metrics_module.CLIP_MODEL_NAME,
+            "clip_sample_count": None,
             "lpips_status": "ok",
             "lpips_reason": None,
             "clip_status": "not_available",
@@ -415,6 +442,9 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
                 "mean_psnr",
                 "mean_ssim",
                 "mean_lpips",
+                "mean_clip_text_similarity",
+                "clip_model_name",
+                "clip_sample_count",
                 "lpips_status",
                 "lpips_reason",
                 "clip_status",
@@ -571,8 +601,12 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
             geometry_diagnostics = {
                 "sync_status": "ok" if attack_event_index % 2 == 0 else "degraded",
                 "sync_success": attack_event_index % 2 == 0,
+                "sync_success_status": "ok",
+                "sync_success_reason": None,
                 "sync_digest": f"sync_digest_{attack_event_index:06d}",
                 "geometry_failure_reason": None if attack_event_index % 2 == 0 else "template_match_below_threshold",
+                "geometry_failure_reason_status": "not_available" if attack_event_index % 2 == 0 else "ok",
+                "geometry_failure_reason_reason": None if attack_event_index % 2 != 0 else "geometry chain did not report failure reason",
                 "relation_digest_bound": attack_event_index % 2 == 0,
                 "template_match_metrics": {
                     "peak_value": 0.8 - 0.01 * (attack_event_index % 3),
@@ -580,10 +614,17 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
                 "sync_quality_metrics": {
                     "match_score": 0.9 - 0.02 * (attack_event_index % 3),
                 },
+                "sync_quality_metrics_status": "ok",
+                "sync_quality_metrics_reason": None,
                 "inverse_transform_success": attack_event_index % 3 != 2,
+                "inverse_transform_success_status": "ok",
+                "inverse_transform_success_reason": None,
                 "attention_anchor_available": attack_event_index % 4 != 3,
+                "attention_anchor_available_status": "ok",
+                "attention_anchor_available_reason": None,
                 "anchor_digest": f"anchor_digest_{attack_event_index:06d}" if attack_event_index % 4 != 3 else None,
             }
+            parent_prompt_text = str(attack_event.get("prompt_text") or ("prompt one" if attack_event_index % 2 == 0 else "prompt two"))
 
             detect_record_path = shard_root / "records" / f"event_{attack_event_index:06d}_detect_record.json"
             detect_payload = {
@@ -654,6 +695,7 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
                 "attack_event_index": attack_event_index,
                 "sample_role": pw04_module.ATTACKED_POSITIVE_SAMPLE_ROLE,
                 "parent_event_id": attack_event["parent_event_id"],
+                "parent_event_reference": {"prompt_text": parent_prompt_text},
                 "parent_source_image_path": normalize_path_value(parent_source_image_path),
                 "attack_family": attack_event["attack_family"],
                 "attack_config_name": attack_event["attack_config_name"],
@@ -725,7 +767,7 @@ def _build_pw04_fixture(tmp_path: Path, family_id: str) -> Dict[str, Any]:
     }
 
 
-def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
+def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch: Any) -> None:
     """
     Verify PW04 merges all completed PW03 shards and exports the required artifacts.
 
@@ -735,6 +777,11 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
     Returns:
         None.
     """
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_compute_clip_text_similarity",
+        _fake_clip_text_similarity,
+    )
     fixture = _build_pw04_fixture(tmp_path, "family_pw04_success")
     summary = cast(Dict[str, Any], fixture["summary"])
     pw03_fixture = cast(Dict[str, Any], fixture["pw03"])
@@ -860,8 +907,15 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
     assert attack_quality_metrics["overall"]["count"] == expected_attack_event_count
     assert attack_quality_metrics["overall"]["mean_psnr"] is not None
     assert attack_quality_metrics["overall"]["mean_ssim"] is not None
+    assert attack_quality_metrics["overall"]["mean_clip_text_similarity"] is not None
+    assert attack_quality_metrics["overall"]["clip_model_name"] == pw_quality_metrics_module.CLIP_MODEL_NAME
+    assert attack_quality_metrics["overall"]["clip_sample_count"] == expected_attack_event_count
+    assert attack_quality_metrics["overall"]["clip_status"] == "ok"
     assert clean_attack_overview["attack_quality_mean_psnr"] == attack_quality_metrics["overall"]["mean_psnr"]
     assert clean_attack_overview["attack_quality_mean_ssim"] == attack_quality_metrics["overall"]["mean_ssim"]
+    assert clean_attack_overview["attack_quality_mean_clip_text_similarity"] == attack_quality_metrics["overall"]["mean_clip_text_similarity"]
+    assert clean_attack_overview["attack_quality_clip_model_name"] == pw_quality_metrics_module.CLIP_MODEL_NAME
+    assert clean_attack_overview["attack_quality_clip_status"] == "ok"
 
     assert paper_metric_registry["canonical_scopes"] == ["content_chain", "event_attestation", "system_final"]
     assert paper_metric_registry["legacy_scope_mapping"]["content_chain"]["attack"]["legacy_scope_name"] == "formal_attack_final_decision"
@@ -898,12 +952,14 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
     assert "attack_mean_psnr" in family_paper_rows[0]
     assert family_paper_rows[0]["attack_mean_psnr"] != ""
     assert "attack_mean_lpips" in family_paper_rows[0]
+    assert "attack_mean_clip_text_similarity" in family_paper_rows[0]
     assert condition_paper_rows
     assert "system_final_attack_tpr" in condition_paper_rows[0]
     assert "attack_family" in condition_paper_rows[0]
     assert "attack_mean_ssim" in condition_paper_rows[0]
     assert condition_paper_rows[0]["attack_mean_ssim"] != ""
     assert "attack_mean_lpips" in condition_paper_rows[0]
+    assert "attack_mean_clip_text_similarity" in condition_paper_rows[0]
 
     assert len(rescue_rows) == 1
     rescue_row = rescue_rows[0]
@@ -978,9 +1034,12 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
     assert all(row["clean_quality_status"] == "ok" for row in tradeoff_rows)
     assert all(row["lpips_status"] == "ok" for row in tradeoff_rows)
     assert all(row["clean_mean_lpips"] == "0.12" for row in tradeoff_rows)
-    assert all(row["clip_status"] == "not_available" for row in tradeoff_rows)
+    assert all(row["clip_status"] == "ok" for row in tradeoff_rows)
     assert all("attack_mean_lpips" in row for row in tradeoff_rows)
     assert all("attack_lpips_status" in row for row in tradeoff_rows)
+    assert all("attack_mean_clip_text_similarity" in row for row in tradeoff_rows)
+    assert all(row["attack_clip_status"] == "ok" for row in tradeoff_rows)
+    assert all(row["attack_clip_model_name"] == pw_quality_metrics_module.CLIP_MODEL_NAME for row in tradeoff_rows)
     assert all(Path(str(row["quality_metrics_summary_csv_path"])).exists() for row in tradeoff_rows)
     assert all(Path(str(row["quality_metrics_summary_json_path"])).exists() for row in tradeoff_rows)
     assert all(Path(str(row["robustness_macro_summary_path"])).exists() for row in tradeoff_rows)
@@ -997,12 +1056,16 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
         assert row["severity_status"] in {"ok", "not_available"}
         assert row["sync_status"] in {"ok", "degraded"}
         assert row["sync_success"] in {True, False}
+        assert row["sync_success_status"] == "ok"
         assert row["inverse_transform_success"] in {True, False}
+        assert row["inverse_transform_success_status"] == "ok"
         assert row["attention_anchor_available"] in {True, False}
+        assert row["attention_anchor_available_status"] == "ok"
         assert row["attack_quality_status"] == "ok"
         assert row["attack_quality_psnr"] is not None
         assert row["attack_quality_ssim"] is not None
         assert "attack_quality_lpips" in row
+        assert row["attack_quality_clip_text_similarity"] is not None
 
     assert any(row["geo_rescue_applied"] is True for row in attack_event_rows)
     assert any(isinstance(row["geo_not_used_reason"], str) and row["geo_not_used_reason"] for row in attack_event_rows)
@@ -1011,6 +1074,37 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path) -> None:
     assert first_pool_event["formal_record_path"]
     assert Path(str(first_pool_event["formal_record_path"])).exists()
     assert summary["family_id"] == pw04_summary["family_id"]
+
+
+def test_pw03_geometry_sidecar_stabilizes_missing_fields() -> None:
+    """
+    Verify PW03 geometry sidecar emits stable status and reason fields when values are absent.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    diagnostics = pw03_module._extract_attack_geometry_diagnostics(
+        {
+            "geometry_result": {
+                "sync_result": {},
+            },
+            "geometry_evidence_payload": {},
+        }
+    )
+
+    assert diagnostics["sync_success"] is None
+    assert diagnostics["sync_success_status"] == "not_available"
+    assert diagnostics["sync_quality_metrics"] is None
+    assert diagnostics["sync_quality_metrics_status"] == "not_available"
+    assert diagnostics["inverse_transform_success"] is None
+    assert diagnostics["inverse_transform_success_status"] == "not_available"
+    assert diagnostics["attention_anchor_available"] is None
+    assert diagnostics["attention_anchor_available_status"] == "not_available"
+    assert diagnostics["geometry_failure_reason"] is None
+    assert diagnostics["geometry_failure_reason_status"] == "not_available"
 
 
 def test_pw04_fails_fast_when_one_planned_shard_manifest_is_missing(tmp_path: Path) -> None:

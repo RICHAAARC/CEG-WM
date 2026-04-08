@@ -89,6 +89,7 @@ ATTACK_FAMILY_PAPER_FIELDNAMES: List[str] = [
     "attack_mean_psnr",
     "attack_mean_ssim",
     "attack_mean_lpips",
+    "attack_mean_clip_text_similarity",
 ]
 ATTACK_CONDITION_PAPER_FIELDNAMES: List[str] = [
     "attack_condition_key",
@@ -105,6 +106,7 @@ ATTACK_CONDITION_PAPER_FIELDNAMES: List[str] = [
     "attack_mean_psnr",
     "attack_mean_ssim",
     "attack_mean_lpips",
+    "attack_mean_clip_text_similarity",
 ]
 RESCUE_METRICS_SUMMARY_FIELDNAMES: List[str] = [
     "geo_helped_positive_count",
@@ -679,6 +681,7 @@ def _build_paper_group_rows(
             "attack_quality_pair_count": row.get("attack_quality_pair_count"),
             "attack_mean_psnr": row.get("attack_mean_psnr"),
             "attack_mean_ssim": row.get("attack_mean_ssim"),
+            "attack_mean_clip_text_similarity": row.get("attack_mean_clip_text_similarity"),
         }
         if group_key_name == "attack_condition_key":
             remapped_row["attack_family"] = row.get("attack_family")

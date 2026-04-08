@@ -751,6 +751,26 @@ def _safe_resolve_preview_artifact_path(event_payload: Mapping[str, Any]) -> str
     return normalize_path_value(preview_artifact_path)
 
 
+def _safe_resolve_prompt_text(event_payload: Mapping[str, Any]) -> str | None:
+    """
+    Resolve the prompt text from one PW01 event payload when available.
+
+    Args:
+        event_payload: PW01 event payload surfaced via shard manifest.
+
+    Returns:
+        Prompt text or None.
+    """
+    if not isinstance(event_payload, Mapping):
+        raise TypeError("event_payload must be Mapping")
+
+    for key_name in ["prompt_text", "prompt"]:
+        prompt_value = event_payload.get(key_name)
+        if isinstance(prompt_value, str) and prompt_value.strip():
+            return prompt_value.strip()
+    return None
+
+
 def _build_clean_positive_quality_metrics(
     *,
     score_name: str,
@@ -808,6 +828,7 @@ def _build_clean_positive_quality_metrics(
                 "event_id": event_id,
                 "reference_image_path": _safe_resolve_source_image_path(event_payload),
                 "candidate_image_path": _safe_resolve_preview_artifact_path(event_payload),
+                "prompt_text": _safe_resolve_prompt_text(event_payload),
                 "sample_role": ACTIVE_SAMPLE_ROLE,
             }
         )
@@ -817,6 +838,7 @@ def _build_clean_positive_quality_metrics(
         reference_path_key="reference_image_path",
         candidate_path_key="candidate_image_path",
         pair_id_key="event_id",
+        text_key="prompt_text",
         extra_metadata_keys=["sample_role"],
     )
     quality_payload["reference_semantics"] = "source_image_vs_preview_generation_persisted_artifact"
