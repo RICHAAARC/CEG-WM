@@ -165,6 +165,14 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             "event_count": 2,
         },
     )
+    pw04_attack_negative_pool_manifest_path = _write_json(
+        family_root / "exports" / "pw04" / "attack_negative_pool_manifest.json",
+        {
+            "artifact_type": "paper_workflow_pw04_attack_negative_pool_manifest",
+            "family_id": family_id,
+            "event_count": 2,
+        },
+    )
     pw04_formal_attack_final_decision_metrics_path = _write_json(
         family_root / "exports" / "pw04" / "formal_attack_final_decision_metrics.json",
         {
@@ -187,6 +195,14 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             "artifact_type": "paper_workflow_pw04_derived_attack_union_metrics",
             "family_id": family_id,
             "metrics": {"attack_tpr": 0.6},
+        },
+    )
+    pw04_formal_attack_negative_metrics_path = _write_json(
+        family_root / "exports" / "pw04" / "formal_attack_negative_metrics.json",
+        {
+            "artifact_type": "paper_workflow_pw04_formal_attack_negative_metrics",
+            "family_id": family_id,
+            "metrics": {"derived_attack_union_attack_fpr": 0.2},
         },
     )
     pw04_clean_attack_overview_path = _write_json(
@@ -306,9 +322,11 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             "completed_attack_event_count": 2,
             "attack_merge_manifest_path": normalize_path_value(pw04_attack_merge_manifest_path),
             "attack_positive_pool_manifest_path": normalize_path_value(pw04_attack_positive_pool_manifest_path),
+            "attack_negative_pool_manifest_path": normalize_path_value(pw04_attack_negative_pool_manifest_path),
             "formal_attack_final_decision_metrics_path": normalize_path_value(pw04_formal_attack_final_decision_metrics_path),
             "formal_attack_attestation_metrics_path": normalize_path_value(pw04_formal_attack_attestation_metrics_path),
             "derived_attack_union_metrics_path": normalize_path_value(pw04_derived_attack_union_metrics_path),
+            "formal_attack_negative_metrics_path": normalize_path_value(pw04_formal_attack_negative_metrics_path),
             "clean_attack_overview_path": normalize_path_value(pw04_clean_attack_overview_path),
             "paper_scope_registry_path": normalize_path_value(pw04_paper_metric_registry_path),
             "canonical_metrics_paths": {
@@ -437,6 +455,8 @@ def test_pw05_release_signoff_packages_canonical_pw04_exports(tmp_path: Path) ->
     assert "source/runtime_state/pw04_summary.json" in members
     assert "source/exports/pw04/metrics/paper_metric_registry.json" in members
     assert "source/exports/pw02/thresholds/content/thresholds.json" in members
+    assert "source/exports/pw04/attack_negative_pool_manifest.json" in members
+    assert "source/exports/pw04/formal_attack_negative_metrics.json" in members
     assert "source/exports/pw02/operating_metrics/system_final_auxiliary_operating_semantics.json" in members
     assert "source/exports/pw04/robustness/system_final_auxiliary_attack_summary.json" in members
 

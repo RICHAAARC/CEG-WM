@@ -94,27 +94,33 @@ def _build_positive_source_finalize_fixture(summary: Dict[str, Any]) -> Dict[str
     source_event_grid_rows = [
         row
         for row in pw03_module.read_jsonl(Path(str(summary["source_event_grid_path"])))
-        if row.get("sample_role") == pw03_module.ACTIVE_SAMPLE_ROLE
+        if row.get("sample_role") in {pw03_module.ACTIVE_SAMPLE_ROLE, pw03_module.CLEAN_NEGATIVE_SAMPLE_ROLE}
     ]
     source_shard_plan = json.loads(Path(str(summary["source_shard_plan_path"])).read_text(encoding="utf-8"))
-    positive_shards = cast(
-        List[Dict[str, Any]],
-        cast(Dict[str, Any], source_shard_plan["sample_role_plans"])[pw03_module.ACTIVE_SAMPLE_ROLE]["shards"],
-    )
     event_to_shard_index: Dict[str, int] = {}
-    for shard_row in positive_shards:
-        shard_index = int(shard_row["shard_index"])
-        for event_id in cast(List[str], shard_row["assigned_event_ids"]):
-            event_to_shard_index[event_id] = shard_index
+    event_to_sample_role: Dict[str, str] = {}
+    for sample_role in [pw03_module.ACTIVE_SAMPLE_ROLE, pw03_module.CLEAN_NEGATIVE_SAMPLE_ROLE]:
+        role_shards = cast(
+            List[Dict[str, Any]],
+            cast(Dict[str, Any], source_shard_plan["sample_role_plans"])[sample_role]["shards"],
+        )
+        for shard_row in role_shards:
+            shard_index = int(shard_row["shard_index"])
+            for event_id in cast(List[str], shard_row["assigned_event_ids"]):
+                event_to_shard_index[event_id] = shard_index
+                event_to_sample_role[event_id] = sample_role
 
     stage_root = ensure_directory(family_root / "source_finalize")
     positive_pool_events: List[Dict[str, Any]] = []
-    shard_event_manifests: Dict[int, List[Dict[str, Any]]] = {}
+    clean_negative_pool_events: List[Dict[str, Any]] = []
+    shard_event_manifests: Dict[Tuple[str, int], List[Dict[str, Any]]] = {}
     for event_row in source_event_grid_rows:
         event_id = str(event_row["event_id"])
         event_index = int(event_row["event_index"])
         shard_index = event_to_shard_index[event_id]
-        shard_root = ensure_directory(family_root / "source_shards" / "positive" / f"shard_{shard_index:04d}")
+        sample_role = event_to_sample_role[event_id]
+        shard_directory_name = "positive" if sample_role == pw03_module.ACTIVE_SAMPLE_ROLE else "negative"
+        shard_root = ensure_directory(family_root / "source_shards" / shard_directory_name / f"shard_{shard_index:04d}")
         event_root = ensure_directory(shard_root / "events" / f"event_{event_index:06d}")
         ensure_directory(shard_root / "records")
         image_path = shard_root / "artifacts" / "mock_source_images" / f"event_{event_index:06d}.png"
@@ -164,7 +170,7 @@ def _build_positive_source_finalize_fixture(summary: Dict[str, Any]) -> Dict[str
                 "paper_workflow_event": {
                     "event_id": event_id,
                     "event_index": event_index,
-                    "sample_role": pw03_module.ACTIVE_SAMPLE_ROLE,
+                    "sample_role": sample_role,
                 }
             },
         )
@@ -173,7 +179,7 @@ def _build_positive_source_finalize_fixture(summary: Dict[str, Any]) -> Dict[str
         event_manifest = {
             "artifact_type": "paper_workflow_source_event",
             "event_id": event_id,
-            "sample_role": pw03_module.ACTIVE_SAMPLE_ROLE,
+            "sample_role": sample_role,
             "event_index": event_index,
             "prompt_text": event_row["prompt_text"],
             "prompt_sha256": event_row["prompt_sha256"],
@@ -197,26 +203,29 @@ def _build_positive_source_finalize_fixture(summary: Dict[str, Any]) -> Dict[str
         write_json_atomic(event_manifest_path, event_manifest)
         event_manifest["event_manifest_path"] = event_manifest_path.as_posix()
 
-        shard_event_manifests.setdefault(shard_index, []).append(event_manifest)
-        positive_pool_events.append(
-            {
-                "event_id": event_id,
-                "event_index": event_index,
-                "sample_role": pw03_module.ACTIVE_SAMPLE_ROLE,
-                "detect_record_path": detect_record_path.as_posix(),
-                "source_shard_index": shard_index,
-                "source_shard_root": shard_root.as_posix(),
-                "source_shard_manifest_path": (shard_root / "shard_manifest.json").as_posix(),
-            }
-        )
+        shard_event_manifests.setdefault((sample_role, shard_index), []).append(event_manifest)
+        pool_event = {
+            "event_id": event_id,
+            "event_index": event_index,
+            "sample_role": sample_role,
+            "detect_record_path": detect_record_path.as_posix(),
+            "source_shard_index": shard_index,
+            "source_shard_root": shard_root.as_posix(),
+            "source_shard_manifest_path": (shard_root / "shard_manifest.json").as_posix(),
+        }
+        if sample_role == pw03_module.ACTIVE_SAMPLE_ROLE:
+            positive_pool_events.append(pool_event)
+        else:
+            clean_negative_pool_events.append(pool_event)
 
-    for shard_index, event_manifests in shard_event_manifests.items():
-        shard_root = family_root / "source_shards" / "positive" / f"shard_{shard_index:04d}"
+    for (sample_role, shard_index), event_manifests in shard_event_manifests.items():
+        shard_directory_name = "positive" if sample_role == pw03_module.ACTIVE_SAMPLE_ROLE else "negative"
+        shard_root = family_root / "source_shards" / shard_directory_name / f"shard_{shard_index:04d}"
         write_json_atomic(
             shard_root / "shard_manifest.json",
             {
                 "status": "completed",
-                "sample_role": pw03_module.ACTIVE_SAMPLE_ROLE,
+                "sample_role": sample_role,
                 "event_count": len(event_manifests),
                 "events": event_manifests,
             },
@@ -244,7 +253,15 @@ def _build_positive_source_finalize_fixture(summary: Dict[str, Any]) -> Dict[str
     }
     clean_negative_pool_manifest_path = stage_root / "clean_negative_pool_manifest.json"
     control_pool_manifest_path = stage_root / "planner_conditioned_control_negative_pool_manifest.json"
-    write_json_atomic(clean_negative_pool_manifest_path, empty_pool_payload)
+    write_json_atomic(
+        clean_negative_pool_manifest_path,
+        {
+            **empty_pool_payload,
+            "source_role": pw03_module.CLEAN_NEGATIVE_SAMPLE_ROLE,
+            "event_count": len(clean_negative_pool_events),
+            "events": clean_negative_pool_events,
+        },
+    )
     write_json_atomic(control_pool_manifest_path, empty_pool_payload)
 
     content_threshold_path = stage_root / "thresholds" / "content" / "thresholds.json"
@@ -268,7 +285,7 @@ def _build_positive_source_finalize_fixture(summary: Dict[str, Any]) -> Dict[str
                 },
                 "clean_negative": {
                     "manifest_path": clean_negative_pool_manifest_path.as_posix(),
-                    "event_count": 0,
+                    "event_count": len(clean_negative_pool_events),
                 },
                 "planner_conditioned_control_negative": {
                     "manifest_path": control_pool_manifest_path.as_posix(),
@@ -293,8 +310,10 @@ def _build_positive_source_finalize_fixture(summary: Dict[str, Any]) -> Dict[str
     return {
         "family_root": family_root,
         "positive_source_pool_manifest_path": positive_pool_manifest_path,
+        "clean_negative_pool_manifest_path": clean_negative_pool_manifest_path,
         "finalize_manifest_path": finalize_manifest_path,
         "positive_event_count": len(positive_pool_events),
+        "clean_negative_event_count": len(clean_negative_pool_events),
     }
 
 
@@ -496,9 +515,21 @@ def _load_attack_event_specs(summary: Dict[str, Any], shard_index: int) -> List[
     )
     finalize_manifest_path = family_root / "source_finalize" / "paper_source_finalize_manifest.json"
     finalize_manifest = json.loads(finalize_manifest_path.read_text(encoding="utf-8"))
-    positive_pool_manifest_path = Path(str(finalize_manifest["source_pools"][pw03_module.ACTIVE_SAMPLE_ROLE]["manifest_path"]))
+    source_pools = cast(Dict[str, Dict[str, Any]], finalize_manifest["source_pools"])
+    positive_pool_manifest_path = Path(str(source_pools[pw03_module.ACTIVE_SAMPLE_ROLE]["manifest_path"]))
     positive_source_pool_manifest = json.loads(positive_pool_manifest_path.read_text(encoding="utf-8"))
-    parent_event_lookup = pw03_module._load_parent_positive_event_lookup(positive_source_pool_manifest)
+    clean_negative_pool_manifest_path = Path(str(source_pools[pw03_module.CLEAN_NEGATIVE_SAMPLE_ROLE]["manifest_path"]))
+    clean_negative_pool_manifest = json.loads(clean_negative_pool_manifest_path.read_text(encoding="utf-8"))
+    parent_event_lookup = pw03_module._load_parent_source_event_lookup(
+        positive_source_pool_manifest,
+        expected_parent_sample_role=pw03_module.ACTIVE_SAMPLE_ROLE,
+    )
+    parent_event_lookup.update(
+        pw03_module._load_parent_source_event_lookup(
+            clean_negative_pool_manifest,
+            expected_parent_sample_role=pw03_module.CLEAN_NEGATIVE_SAMPLE_ROLE,
+        )
+    )
     threshold_binding_reference = pw03_module._build_threshold_binding_reference(
         finalize_manifest_path=finalize_manifest_path,
         finalize_manifest=finalize_manifest,

@@ -179,6 +179,26 @@ def _coerce_finite_float(value: Any) -> float | None:
     return None
 
 
+def _safe_mean(values: Sequence[int | float]) -> float | None:
+    """
+    功能：计算非空数值序列的均值。
+
+    Compute the arithmetic mean of one non-empty numeric sequence.
+
+    Args:
+        values: Numeric sequence.
+
+    Returns:
+        Mean value when available, otherwise None.
+    """
+    if not isinstance(values, Sequence):
+        raise TypeError("values must be Sequence")
+    normalized_values = [float(value) for value in values]
+    if not normalized_values:
+        return None
+    return float(sum(normalized_values) / len(normalized_values))
+
+
 def _load_records_from_records_summary(records_summary: Mapping[str, Any]) -> List[Dict[str, Any]]:
     """
     功能：从 records summary 装载已写出的 prepare record。
@@ -674,6 +694,143 @@ def _build_not_available_roc_payload(*, family_id: str, scope: str, output_path:
     return payload
 
 
+def _build_payload_clean_summary_payload(
+    *,
+    family_id: str,
+    score_runs: Mapping[str, Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """
+    功能：基于 clean positive detect trace 生成 payload clean 汇总。
+
+    Build the append-only clean payload summary from clean positive LF detect traces.
+
+    Args:
+        family_id: Family identifier.
+        score_runs: PW02 score-run summaries keyed by score name.
+
+    Returns:
+        Payload clean summary payload.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(score_runs, Mapping):
+        raise TypeError("score_runs must be Mapping")
+
+    content_score_run: Mapping[str, Any] | None = None
+    for score_name, score_run in score_runs.items():
+        if str(score_name) == CONTENT_SCORE_NAME:
+            content_score_run = score_run
+            break
+
+    if not isinstance(content_score_run, Mapping):
+        return {
+            "artifact_type": "paper_workflow_pw02_payload_clean_summary",
+            "schema_version": "pw_stage_02_v1",
+            "created_at": utc_now_iso(),
+            "family_id": family_id,
+            "status": "not_available",
+            "reason": PAYLOAD_UNAVAILABLE_REASON,
+            "future_upstream_sidecar_required": True,
+            "overall": {
+                "event_count": 0,
+                "available_payload_event_count": 0,
+                "missing_payload_event_count": 0,
+                "mean_codeword_agreement": None,
+                "min_codeword_agreement": None,
+                "max_codeword_agreement": None,
+                "mean_n_bits_compared": None,
+                "attested_event_count": 0,
+                "mean_event_attestation_score": None,
+                "lf_detect_variants": [],
+                "message_sources": [],
+            },
+            "rows": [],
+        }
+
+    prepared_records = _load_records_from_records_summary(cast(Mapping[str, Any], content_score_run.get("evaluate_inputs", {})))
+    row_metrics: List[Dict[str, Any]] = []
+    for prepared_record in prepared_records:
+        if str(prepared_record.get("sample_role") or "") != "positive_source":
+            continue
+        content_payload = _extract_mapping(prepared_record.get("content_evidence_payload"))
+        score_parts = _extract_mapping(content_payload.get("score_parts"))
+        lf_trace = _extract_mapping(score_parts.get("lf_trajectory_detect_trace"))
+        if not lf_trace:
+            lf_trace = _extract_mapping(score_parts.get("lf_detect_trace"))
+        if not lf_trace:
+            lf_trace = _extract_mapping(content_payload.get("lf_evidence_summary"))
+        if not lf_trace:
+            lf_trace = _extract_mapping(score_parts.get("lf_metrics"))
+        attestation_payload = _extract_mapping(prepared_record.get("attestation"))
+        attested_decision = _extract_mapping(attestation_payload.get("final_event_attested_decision"))
+        row_metrics.append(
+            {
+                "event_id": prepared_record.get("paper_workflow_event_id"),
+                "event_index": prepared_record.get("paper_workflow_event_index"),
+                "codeword_agreement": _coerce_finite_float(lf_trace.get("codeword_agreement")),
+                "n_bits_compared": _extract_int(lf_trace, "n_bits_compared"),
+                "event_attestation_score": _coerce_finite_float(attested_decision.get("event_attestation_score")),
+                "is_event_attested": attested_decision.get("is_event_attested") if isinstance(attested_decision.get("is_event_attested"), bool) else None,
+                "lf_detect_variant": lf_trace.get("detect_variant") if isinstance(lf_trace.get("detect_variant"), str) else None,
+                "message_source": lf_trace.get("message_source") if isinstance(lf_trace.get("message_source"), str) else None,
+            }
+        )
+
+    available_rows = [row for row in row_metrics if isinstance(row.get("codeword_agreement"), float)]
+    agreement_values = [float(row["codeword_agreement"]) for row in available_rows]
+    bits_compared_values = [int(cast(int, row["n_bits_compared"])) for row in available_rows if isinstance(row.get("n_bits_compared"), int)]
+    attestation_values = [
+        float(row["event_attestation_score"])
+        for row in row_metrics
+        if isinstance(row.get("event_attestation_score"), float)
+    ]
+    if not available_rows:
+        status_value = "not_available"
+        reason_value = PAYLOAD_UNAVAILABLE_REASON
+    elif len(available_rows) == len(row_metrics):
+        status_value = "ok"
+        reason_value = None
+    else:
+        status_value = "partial"
+        reason_value = f"payload trace available for {len(available_rows)}/{len(row_metrics)} clean positive events"
+
+    return {
+        "artifact_type": "paper_workflow_pw02_payload_clean_summary",
+        "schema_version": "pw_stage_02_v1",
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "status": status_value,
+        "reason": reason_value,
+        "future_upstream_sidecar_required": status_value != "ok",
+        "overall": {
+            "event_count": len(row_metrics),
+            "available_payload_event_count": len(available_rows),
+            "missing_payload_event_count": len(row_metrics) - len(available_rows),
+            "mean_codeword_agreement": _safe_mean(agreement_values),
+            "min_codeword_agreement": min(agreement_values) if agreement_values else None,
+            "max_codeword_agreement": max(agreement_values) if agreement_values else None,
+            "mean_n_bits_compared": _safe_mean(bits_compared_values),
+            "attested_event_count": sum(1 for row in row_metrics if row.get("is_event_attested") is True),
+            "mean_event_attestation_score": _safe_mean(attestation_values),
+            "lf_detect_variants": sorted(
+                {
+                    str(row.get("lf_detect_variant"))
+                    for row in available_rows
+                    if isinstance(row.get("lf_detect_variant"), str) and str(row.get("lf_detect_variant"))
+                }
+            ),
+            "message_sources": sorted(
+                {
+                    str(row.get("message_source"))
+                    for row in available_rows
+                    if isinstance(row.get("message_source"), str) and str(row.get("message_source"))
+                }
+            ),
+        },
+        "rows": row_metrics,
+    }
+
+
 def build_pw02_metrics_extensions(
     *,
     family_id: str,
@@ -995,15 +1152,10 @@ def build_pw02_metrics_extensions(
     )
     write_json_atomic(
         payload_clean_summary_path,
-        {
-            "artifact_type": "paper_workflow_pw02_payload_clean_summary",
-            "schema_version": "pw_stage_02_v1",
-            "created_at": utc_now_iso(),
-            "family_id": family_id,
-            "status": "not_available",
-            "reason": PAYLOAD_UNAVAILABLE_REASON,
-            "future_upstream_sidecar_required": True,
-        },
+        _build_payload_clean_summary_payload(
+            family_id=family_id,
+            score_runs=score_runs,
+        ),
     )
 
     analysis_only_artifact_paths = {

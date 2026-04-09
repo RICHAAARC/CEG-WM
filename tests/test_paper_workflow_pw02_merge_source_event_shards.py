@@ -100,16 +100,26 @@ def _materialize_completed_pw01_shards(
                 artifacts_root = ensure_directory(event_root / "artifacts")
                 source_image_path = artifacts_root / f"event_{event_index:06d}_source.png"
                 preview_image_path = artifacts_root / f"event_{event_index:06d}_preview.png"
+                watermarked_image_path = artifacts_root / f"event_{event_index:06d}_watermarked.png"
                 source_image = Image.new("RGB", (8, 8), color=(40 + event_index, 70, 100))
                 preview_image = Image.new("RGB", (8, 8), color=(42 + event_index, 70, 100))
+                watermarked_image = Image.new("RGB", (8, 8), color=(45 + event_index, 70, 100))
                 source_image.save(source_image_path)
                 preview_image.save(preview_image_path)
+                watermarked_image.save(watermarked_image_path)
                 preview_generation_record_path = artifacts_root / "preview_generation_record.json"
+                embed_record_path = shard_root / "records" / f"event_{event_index:06d}_embed_record.json"
                 write_json_atomic(
                     preview_generation_record_path,
                     {
                         "status": "ok",
                         "persisted_artifact_path": normalize_path_value(preview_image_path),
+                    },
+                )
+                write_json_atomic(
+                    embed_record_path,
+                    {
+                        "watermarked_path": normalize_path_value(watermarked_image_path),
                     },
                 )
                 detect_record_path = shard_root / "records" / f"event_{event_index:06d}_detect_record.json"
@@ -123,6 +133,14 @@ def _materialize_completed_pw01_shards(
                             "content_chain_score": 0.91,
                             "plan_digest": f"plan-{event_id}",
                             "basis_digest": f"basis-{event_id}",
+                            "score_parts": {
+                                "lf_trajectory_detect_trace": {
+                                    "codeword_agreement": 0.72 + 0.06 * float(event_index),
+                                    "n_bits_compared": 96,
+                                    "detect_variant": "correlation_v2",
+                                    "message_source": "plan_digest",
+                                }
+                            },
                         },
                         "final_decision": {
                             "is_watermarked": True,
@@ -211,6 +229,7 @@ def _materialize_completed_pw01_shards(
                         "sample_role": sample_role,
                         "event_index": event_index,
                         "prompt_text": event.get("prompt_text"),
+                        "embed_record_path": embed_record_path.as_posix(),
                         "detect_record_path": detect_record_path.as_posix(),
                         "source_image": {
                             "exists": True,
@@ -936,6 +955,9 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert content_clean_score_analysis["clean_positive_quality_metrics"]["count"] == 2
     assert content_clean_score_analysis["clean_positive_quality_metrics"]["mean_psnr"] is not None
     assert content_clean_score_analysis["clean_positive_quality_metrics"]["mean_ssim"] is not None
+    assert content_clean_score_analysis["clean_positive_quality_metrics"]["reference_semantics"] == (
+        "preview_generation_persisted_artifact_vs_watermarked_output_image"
+    )
 
     assert attestation_clean_score_analysis["score_name"] == pw02_module.EVENT_ATTESTATION_SCORE_NAME
     assert attestation_clean_score_analysis["roc_auc"]["auc"] == pytest.approx(1.0)
@@ -1031,9 +1053,21 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert "clip_model_name" in quality_rows[0]
     assert "clip_sample_count" in quality_rows[0]
 
-    assert payload_clean_summary["status"] == "not_available"
-    assert "decoded bits" in str(payload_clean_summary["reason"])
-    assert payload_clean_summary["future_upstream_sidecar_required"] is True
+    assert payload_clean_summary["status"] == "ok"
+    assert payload_clean_summary["reason"] is None
+    assert payload_clean_summary["future_upstream_sidecar_required"] is False
+    assert payload_clean_summary["overall"]["event_count"] == 2
+    assert payload_clean_summary["overall"]["available_payload_event_count"] == 2
+    assert payload_clean_summary["overall"]["missing_payload_event_count"] == 0
+    assert payload_clean_summary["overall"]["mean_codeword_agreement"] == pytest.approx(0.87)
+    assert payload_clean_summary["overall"]["min_codeword_agreement"] == pytest.approx(0.84)
+    assert payload_clean_summary["overall"]["max_codeword_agreement"] == pytest.approx(0.90)
+    assert payload_clean_summary["overall"]["mean_n_bits_compared"] == pytest.approx(96.0)
+    assert payload_clean_summary["overall"]["attested_event_count"] == 2
+    assert payload_clean_summary["overall"]["mean_event_attestation_score"] == pytest.approx(0.81)
+    assert payload_clean_summary["overall"]["lf_detect_variants"] == ["correlation_v2"]
+    assert payload_clean_summary["overall"]["message_sources"] == ["plan_digest"]
+    assert len(payload_clean_summary["rows"]) == 2
     assert cast(Dict[str, Any], pw02_summary["analysis_only_artifact_paths"])["pw02_system_final_auxiliary_operating_semantics"] == pw02_summary["system_final_auxiliary_operating_semantics_path"]
     assert cast(Dict[str, Any], pw02_summary["analysis_only_artifact_paths"])["pw02_system_final_auxiliary_roc_curve"] == cast(Dict[str, Any], pw02_summary["roc_curve_paths"])["system_final_auxiliary"]
 

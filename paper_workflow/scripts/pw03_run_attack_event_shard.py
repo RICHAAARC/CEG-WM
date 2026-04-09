@@ -24,7 +24,10 @@ from PIL import Image
 from main.evaluation import attack_runner as eval_attack_runner
 from paper_workflow.scripts.pw_common import (
     ACTIVE_SAMPLE_ROLE,
+    ATTACKED_NEGATIVE_SAMPLE_ROLE,
     ATTACKED_POSITIVE_SAMPLE_ROLE,
+    CLEAN_NEGATIVE_SAMPLE_ROLE,
+    MIXED_ATTACK_SAMPLE_ROLE,
     build_family_root,
     read_jsonl,
 )
@@ -54,6 +57,47 @@ PW03_RUNTIME_SUMMARY_FILE_NAME = "runtime_summary.json"
 PW03_SHARD_MANIFEST_FILE_NAME = "shard_manifest.json"
 PW03_WORKER_PLAN_FILE_NAME = "worker_plan.json"
 PW03_WORKER_RESULT_FILE_NAME = "worker_result.json"
+
+
+def _resolve_attack_sample_role(parent_sample_role: str) -> str:
+    """
+    Resolve the attacked sample role from one parent source role.
+
+    Args:
+        parent_sample_role: Parent source sample role.
+
+    Returns:
+        Attacked sample role.
+    """
+    if parent_sample_role == ACTIVE_SAMPLE_ROLE:
+        return ATTACKED_POSITIVE_SAMPLE_ROLE
+    if parent_sample_role == CLEAN_NEGATIVE_SAMPLE_ROLE:
+        return ATTACKED_NEGATIVE_SAMPLE_ROLE
+    raise ValueError(f"unsupported attack parent sample_role: {parent_sample_role}")
+
+
+def _resolve_manifest_attack_sample_role(events: Sequence[Mapping[str, Any]]) -> str:
+    """
+    Resolve one shard- or worker-level attack sample role summary token.
+
+    Args:
+        events: Attack event payloads.
+
+    Returns:
+        Concrete sample role when homogeneous, otherwise mixed token.
+    """
+    sample_roles = sorted(
+        {
+            str(event.get("sample_role"))
+            for event in events
+            if isinstance(event.get("sample_role"), str) and str(event.get("sample_role"))
+        }
+    )
+    if not sample_roles:
+        return MIXED_ATTACK_SAMPLE_ROLE
+    if len(sample_roles) == 1:
+        return sample_roles[0]
+    return MIXED_ATTACK_SAMPLE_ROLE
 
 
 def _load_required_json_dict(path_obj: Path, label: str) -> Dict[str, Any]:
@@ -541,32 +585,37 @@ def _resolve_parent_event_manifest_path(pool_event: Mapping[str, Any]) -> Path:
     return event_manifest_path
 
 
-def _load_parent_positive_event_lookup(
-    positive_source_pool_manifest: Mapping[str, Any],
+def _load_parent_source_event_lookup(
+    source_pool_manifest: Mapping[str, Any],
+    expected_parent_sample_role: str,
 ) -> Dict[str, Dict[str, Any]]:
     """
     Load the finalized parent positive-event lookup.
 
     Args:
-        positive_source_pool_manifest: Positive source pool manifest payload.
+        source_pool_manifest: Source pool manifest payload.
+        expected_parent_sample_role: Expected source sample role.
 
     Returns:
         Lookup keyed by parent event id.
     """
-    events_node = positive_source_pool_manifest.get("events")
+    events_node = source_pool_manifest.get("events")
     if not isinstance(events_node, list):
-        raise ValueError("positive source pool manifest missing events list")
+        raise ValueError("source pool manifest missing events list")
 
     parent_lookup: Dict[str, Dict[str, Any]] = {}
     for event_node in cast(List[object], events_node):
         if not isinstance(event_node, dict):
-            raise ValueError("positive source pool manifest events must contain objects")
+            raise ValueError("source pool manifest events must contain objects")
         pool_event = cast(Dict[str, Any], event_node)
         event_id = pool_event.get("event_id")
         if not isinstance(event_id, str) or not event_id:
-            raise ValueError("positive source pool event missing event_id")
-        if pool_event.get("sample_role") != ACTIVE_SAMPLE_ROLE:
-            raise ValueError("PW03 parent source pool must contain positive_source events only")
+            raise ValueError("source pool event missing event_id")
+        if pool_event.get("sample_role") != expected_parent_sample_role:
+            raise ValueError(
+                "PW03 parent source pool sample_role mismatch: "
+                f"expected={expected_parent_sample_role}, actual={pool_event.get('sample_role')}"
+            )
         parent_event_manifest_path = _resolve_parent_event_manifest_path(pool_event)
         parent_event_manifest = _load_required_json_dict(parent_event_manifest_path, f"PW01 parent event manifest {event_id}")
         if parent_event_manifest.get("event_id") != event_id:
@@ -575,8 +624,28 @@ def _load_parent_positive_event_lookup(
             "pool_event": pool_event,
             "event_manifest": parent_event_manifest,
             "event_manifest_path": normalize_path_value(parent_event_manifest_path),
+            "parent_sample_role": expected_parent_sample_role,
         }
     return parent_lookup
+
+
+def _load_parent_positive_event_lookup(
+    source_pool_manifest: Mapping[str, Any],
+) -> Dict[str, Dict[str, Any]]:
+    """
+    功能：兼容旧的 positive-source helper 名称。
+    Load the finalized parent positive-event lookup using the legacy helper name.
+
+    Args:
+        source_pool_manifest: Source pool manifest payload.
+
+    Returns:
+        Lookup keyed by parent event id.
+    """
+    return _load_parent_source_event_lookup(
+        source_pool_manifest,
+        expected_parent_sample_role=ACTIVE_SAMPLE_ROLE,
+    )
 
 
 def _build_threshold_binding_reference(
@@ -631,7 +700,7 @@ def _build_threshold_binding_reference(
     }
 
 
-def _load_parent_positive_event(
+def _load_parent_source_event(
     *,
     parent_event_id: str,
     parent_event_lookup: Mapping[str, Mapping[str, Any]],
@@ -683,11 +752,14 @@ def _resolve_attack_event_spec(
     if not isinstance(attack_params_digest, str) or not attack_params_digest:
         raise ValueError(f"attack event missing attack_params_digest: {event_id}")
 
-    parent_positive_event = _load_parent_positive_event(
+    parent_source_event = _load_parent_source_event(
         parent_event_id=parent_event_id,
         parent_event_lookup=parent_event_lookup,
     )
-    parent_event_manifest = cast(Dict[str, Any], parent_positive_event["event_manifest"])
+    parent_event_manifest = cast(Dict[str, Any], parent_source_event["event_manifest"])
+    parent_sample_role = parent_event_manifest.get("sample_role")
+    if not isinstance(parent_sample_role, str) or not parent_sample_role:
+        raise ValueError(f"parent event manifest missing sample_role: {parent_event_id}")
     source_image_view = parent_event_manifest.get("source_image")
     if not isinstance(source_image_view, Mapping):
         raise ValueError(f"parent event source_image missing: {parent_event_id}")
@@ -703,18 +775,19 @@ def _resolve_attack_event_spec(
 
     return {
         **attack_event_payload,
-        "sample_role": ATTACKED_POSITIVE_SAMPLE_ROLE,
-        "parent_positive_event": parent_positive_event,
+        "sample_role": _resolve_attack_sample_role(parent_sample_role),
+        "parent_source_event": parent_source_event,
         "parent_event_reference": {
             "parent_event_id": parent_event_id,
             "parent_event_index": parent_event_manifest.get("event_index"),
-            "parent_event_manifest_path": parent_positive_event.get("event_manifest_path"),
+            "parent_event_manifest_path": parent_source_event.get("event_manifest_path"),
             "parent_embed_record_path": parent_embed_record_path,
             "parent_detect_record_path": parent_detect_record_path,
             "parent_source_image_path": parent_source_image_path,
-            "parent_source_shard_root": cast(Mapping[str, Any], parent_positive_event.get("pool_event", {})).get("source_shard_root"),
-            "parent_source_shard_index": cast(Mapping[str, Any], parent_positive_event.get("pool_event", {})).get("source_shard_index"),
-            "parent_source_shard_manifest_path": cast(Mapping[str, Any], parent_positive_event.get("pool_event", {})).get("source_shard_manifest_path"),
+            "parent_sample_role": parent_sample_role,
+            "parent_source_shard_root": cast(Mapping[str, Any], parent_source_event.get("pool_event", {})).get("source_shard_root"),
+            "parent_source_shard_index": cast(Mapping[str, Any], parent_source_event.get("pool_event", {})).get("source_shard_index"),
+            "parent_source_shard_manifest_path": cast(Mapping[str, Any], parent_source_event.get("pool_event", {})).get("source_shard_manifest_path"),
         },
         "threshold_binding_reference": dict(threshold_binding_reference),
     }
@@ -732,8 +805,8 @@ def _build_attack_seed(attack_event_spec: Mapping[str, Any]) -> int:
     """
     parent_reference = cast(Mapping[str, Any], attack_event_spec.get("parent_event_reference", {}))
     parent_event_id = str(parent_reference.get("parent_event_id", ""))
-    parent_positive_event = cast(Mapping[str, Any], attack_event_spec.get("parent_positive_event", {}))
-    parent_event_manifest = cast(Mapping[str, Any], parent_positive_event.get("event_manifest", {}))
+    parent_source_event = cast(Mapping[str, Any], attack_event_spec.get("parent_source_event", {}))
+    parent_event_manifest = cast(Mapping[str, Any], parent_source_event.get("event_manifest", {}))
     seed_value = parent_event_manifest.get("seed")
     parent_seed = int(seed_value) if isinstance(seed_value, int) else 0
     digest_parts = [
@@ -880,7 +953,7 @@ def _build_attack_detect_input_record(
     detect_input_record["image_path"] = attacked_image_path_value
     detect_input_record["artifact_sha256"] = attacked_image_sha256
     detect_input_record["watermarked_artifact_sha256"] = attacked_image_sha256
-    detect_input_record["sample_role"] = ATTACKED_POSITIVE_SAMPLE_ROLE
+    detect_input_record["sample_role"] = attack_event_spec.get("sample_role")
     inputs_node = detect_input_record.get("inputs")
     if isinstance(inputs_node, dict):
         inputs_payload = cast(Dict[str, Any], inputs_node)
@@ -916,14 +989,15 @@ def _write_runtime_config_snapshot(
         Runtime config snapshot summary.
     """
     runtime_cfg = copy.deepcopy(dict(bound_cfg_obj))
-    parent_positive_event = cast(Mapping[str, Any], attack_event_spec.get("parent_positive_event", {}))
-    parent_event_manifest = cast(Mapping[str, Any], parent_positive_event.get("event_manifest", {}))
+    parent_source_event = cast(Mapping[str, Any], attack_event_spec.get("parent_source_event", {}))
+    parent_event_manifest = cast(Mapping[str, Any], parent_source_event.get("event_manifest", {}))
     runtime_cfg["paper_workflow_event"] = {
         "event_id": attack_event_spec.get("event_id"),
         "event_index": attack_event_spec.get("attack_event_index", attack_event_spec.get("event_index")),
-        "sample_role": ATTACKED_POSITIVE_SAMPLE_ROLE,
+        "sample_role": attack_event_spec.get("sample_role"),
         "parent_event_id": attack_event_spec.get("parent_event_id"),
         "parent_event_index": parent_event_manifest.get("event_index"),
+        "parent_sample_role": parent_event_manifest.get("sample_role"),
         "attack_family": attack_event_spec.get("attack_family"),
         "attack_config_name": attack_event_spec.get("attack_config_name"),
         "attack_params_digest": attack_event_spec.get("attack_params_digest"),
@@ -1097,7 +1171,7 @@ def _run_attack_detect_event(
     severity_metadata = _extract_attack_severity_metadata(attack_event_spec)
     geometry_diagnostics = _extract_attack_geometry_diagnostics(detect_payload)
     parent_reference = cast(Mapping[str, Any], attack_event_spec.get("parent_event_reference", {}))
-    detect_payload["sample_role"] = ATTACKED_POSITIVE_SAMPLE_ROLE
+    detect_payload["sample_role"] = attack_event_spec.get("sample_role")
     detect_payload["paper_workflow_attack_stage"] = STAGE_NAME
     detect_payload["paper_workflow_attack_event_id"] = attack_event_spec.get("event_id")
     detect_payload["paper_workflow_parent_event_id"] = attack_event_spec.get("parent_event_id")
@@ -1182,7 +1256,7 @@ def _write_attack_event_manifest(
         "event_id": attack_event_spec.get("event_id"),
         "attack_event_id": attack_event_spec.get("attack_event_id", attack_event_spec.get("event_id")),
         "attack_event_index": attack_event_spec.get("attack_event_index", attack_event_spec.get("event_index")),
-        "sample_role": ATTACKED_POSITIVE_SAMPLE_ROLE,
+        "sample_role": attack_event_spec.get("sample_role"),
         "parent_event_id": attack_event_spec.get("parent_event_id"),
         "parent_event_reference": dict(parent_reference),
         "parent_source_image_path": parent_reference.get("parent_source_image_path"),
@@ -1358,7 +1432,7 @@ def _write_worker_plan(
         "attack_shard_count": attack_shard_count,
         "attack_local_worker_count": attack_local_worker_count,
         "local_worker_index": local_worker_index,
-        "sample_role": ATTACKED_POSITIVE_SAMPLE_ROLE,
+        "sample_role": _resolve_manifest_attack_sample_role(cast(Sequence[Mapping[str, Any]], assignment.get("assigned_attack_events", []))),
         "shard_root": normalize_path_value(shard_root),
         "bound_config_path": normalize_path_value(bound_config_path),
         "assigned_attack_event_ids": list(cast(List[str], assignment.get("assigned_attack_event_ids", []))),
@@ -1832,7 +1906,7 @@ def _build_worker_result_payload(
         "schema_version": "pw_stage_03_v1",
         "stage_name": STAGE_NAME,
         "family_id": family_id,
-        "sample_role": ATTACKED_POSITIVE_SAMPLE_ROLE,
+        "sample_role": _resolve_manifest_attack_sample_role(events),
         "attack_shard_index": attack_shard_index,
         "attack_shard_count": attack_shard_count,
         "attack_local_worker_count": attack_local_worker_count,
@@ -2200,7 +2274,7 @@ def _write_attack_shard_manifest(
         "schema_version": "pw_stage_03_v1",
         "stage_name": STAGE_NAME,
         "family_id": family_id,
-        "sample_role": ATTACKED_POSITIVE_SAMPLE_ROLE,
+        "sample_role": _resolve_manifest_attack_sample_role(events),
         "attack_shard_index": attack_shard_index,
         "attack_shard_count": attack_shard_count,
         "attack_local_worker_count": attack_local_worker_count,
@@ -2301,17 +2375,33 @@ def run_pw03_attack_event_shard(
     source_pools_node = finalize_manifest.get("source_pools")
     if not isinstance(source_pools_node, Mapping):
         raise ValueError("paper source finalize manifest missing source_pools")
-    positive_source_pool_node = source_pools_node.get(ACTIVE_SAMPLE_ROLE)
-    if not isinstance(positive_source_pool_node, Mapping):
-        raise ValueError("paper source finalize manifest missing positive_source pool")
-    positive_pool_manifest_path_value = positive_source_pool_node.get("manifest_path")
-    if not isinstance(positive_pool_manifest_path_value, str) or not positive_pool_manifest_path_value:
-        raise ValueError("paper source finalize manifest missing positive_source manifest_path")
-    positive_source_pool_manifest = _load_required_json_dict(
-        Path(positive_pool_manifest_path_value).expanduser().resolve(),
-        "positive_source pool manifest",
-    )
-    parent_event_lookup = _load_parent_positive_event_lookup(positive_source_pool_manifest)
+    parent_event_lookup: Dict[str, Dict[str, Any]] = {}
+    for parent_sample_role in [ACTIVE_SAMPLE_ROLE, CLEAN_NEGATIVE_SAMPLE_ROLE]:
+        source_pool_node = source_pools_node.get(parent_sample_role)
+        if not isinstance(source_pool_node, Mapping):
+            if parent_sample_role == ACTIVE_SAMPLE_ROLE:
+                raise ValueError("paper source finalize manifest missing positive_source pool")
+            continue
+        source_pool_manifest_path_value = source_pool_node.get("manifest_path")
+        if not isinstance(source_pool_manifest_path_value, str) or not source_pool_manifest_path_value:
+            raise ValueError(
+                f"paper source finalize manifest missing {parent_sample_role} manifest_path"
+            )
+        source_pool_manifest = _load_required_json_dict(
+            Path(source_pool_manifest_path_value).expanduser().resolve(),
+            f"{parent_sample_role} pool manifest",
+        )
+        role_lookup = _load_parent_source_event_lookup(
+            source_pool_manifest,
+            expected_parent_sample_role=parent_sample_role,
+        )
+        duplicate_event_ids = set(parent_event_lookup).intersection(role_lookup)
+        if duplicate_event_ids:
+            raise ValueError(
+                "PW03 parent event lookup collision across source pools: "
+                f"event_ids={sorted(duplicate_event_ids)}"
+            )
+        parent_event_lookup.update(role_lookup)
     threshold_binding_reference = _build_threshold_binding_reference(
         finalize_manifest_path=finalize_manifest_path,
         finalize_manifest=finalize_manifest,

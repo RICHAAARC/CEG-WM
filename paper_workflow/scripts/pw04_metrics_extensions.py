@@ -994,6 +994,333 @@ def _collect_geometry_rows(
     return family_rows, overall_summary
 
 
+def _build_payload_attack_summary_payload(
+    *,
+    family_id: str,
+    attack_event_rows: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """
+    功能：基于 LF detect trace 构造 payload robustness 汇总。
+
+    Build the append-only payload robustness summary from LF detect-side traces.
+
+    Args:
+        family_id: Family identifier.
+        attack_event_rows: Positive attacked-event rows.
+
+    Returns:
+        Payload robustness summary payload.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(attack_event_rows, Sequence):
+        raise TypeError("attack_event_rows must be Sequence")
+
+    row_metrics: List[Dict[str, Any]] = []
+    grouped_rows: Dict[str, List[Dict[str, Any]]] = {}
+    for attack_event_row in attack_event_rows:
+        formal_record = _extract_mapping(attack_event_row.get("formal_record"))
+        content_payload = _extract_mapping(formal_record.get("content_evidence_payload"))
+        score_parts = _extract_mapping(content_payload.get("score_parts"))
+        lf_trace = _extract_mapping(score_parts.get("lf_trajectory_detect_trace"))
+        if not lf_trace:
+            lf_trace = _extract_mapping(content_payload.get("lf_evidence_summary"))
+        if not lf_trace:
+            lf_trace = _extract_mapping(score_parts.get("lf_metrics"))
+        attestation_payload = _extract_mapping(formal_record.get("attestation"))
+        attested_decision = _extract_mapping(attestation_payload.get("final_event_attested_decision"))
+        attack_family = str(attack_event_row.get("attack_family") or "<unknown>")
+        metric_row = {
+            "attack_event_id": attack_event_row.get("attack_event_id"),
+            "attack_family": attack_family,
+            "attack_condition_key": attack_event_row.get("attack_condition_key"),
+            "codeword_agreement": _coerce_finite_float(lf_trace.get("codeword_agreement")),
+            "n_bits_compared": _parse_csv_int(lf_trace, "n_bits_compared"),
+            "event_attestation_score": _coerce_finite_float(attested_decision.get("event_attestation_score")),
+            "is_event_attested": attested_decision.get("is_event_attested") if isinstance(attested_decision.get("is_event_attested"), bool) else None,
+            "lf_detect_variant": lf_trace.get("detect_variant") if isinstance(lf_trace.get("detect_variant"), str) else attack_event_row.get("lf_detect_variant"),
+            "message_source": lf_trace.get("message_source") if isinstance(lf_trace.get("message_source"), str) else None,
+        }
+        row_metrics.append(metric_row)
+        grouped_rows.setdefault(attack_family, []).append(metric_row)
+
+    available_rows = [row for row in row_metrics if isinstance(row.get("codeword_agreement"), float)]
+
+    def _summarize(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+        available = [row for row in rows if isinstance(row.get("codeword_agreement"), float)]
+        agreement_values = [float(row["codeword_agreement"]) for row in available]
+        bits_compared_values = [
+            int(cast(int, row["n_bits_compared"]))
+            for row in available
+            if isinstance(row.get("n_bits_compared"), int)
+        ]
+        attestation_values = [
+            float(row["event_attestation_score"])
+            for row in rows
+            if isinstance(row.get("event_attestation_score"), float)
+        ]
+        detect_variants = sorted(
+            {
+                str(row.get("lf_detect_variant"))
+                for row in available
+                if isinstance(row.get("lf_detect_variant"), str) and str(row.get("lf_detect_variant"))
+            }
+        )
+        message_sources = sorted(
+            {
+                str(row.get("message_source"))
+                for row in available
+                if isinstance(row.get("message_source"), str) and str(row.get("message_source"))
+            }
+        )
+        return {
+            "event_count": len(rows),
+            "available_payload_event_count": len(available),
+            "missing_payload_event_count": len(rows) - len(available),
+            "mean_codeword_agreement": _safe_mean(agreement_values),
+            "min_codeword_agreement": min(agreement_values) if agreement_values else None,
+            "max_codeword_agreement": max(agreement_values) if agreement_values else None,
+            "mean_n_bits_compared": _safe_mean(bits_compared_values),
+            "attested_event_count": sum(1 for row in rows if row.get("is_event_attested") is True),
+            "mean_event_attestation_score": _safe_mean(attestation_values),
+            "lf_detect_variants": detect_variants,
+            "message_sources": message_sources,
+        }
+
+    overall_summary = _summarize(row_metrics)
+    if not available_rows:
+        status_value = "not_available"
+        reason_value = PAYLOAD_UNAVAILABLE_REASON
+    elif len(available_rows) == len(row_metrics):
+        status_value = "ok"
+        reason_value = None
+    else:
+        status_value = "partial"
+        reason_value = f"payload trace available for {len(available_rows)}/{len(row_metrics)} attack events"
+
+    return {
+        "artifact_type": "paper_workflow_pw04_payload_attack_summary",
+        "schema_version": "pw_stage_04_v1",
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "status": status_value,
+        "reason": reason_value,
+        "future_upstream_sidecar_required": status_value != "ok",
+        "overall": overall_summary,
+        "by_attack_family": [
+            {
+                "attack_family": attack_family,
+                **_summarize(rows),
+            }
+            for attack_family, rows in sorted(grouped_rows.items())
+        ],
+    }
+
+
+def _build_wrong_event_attestation_challenge_summary_payload(
+    *,
+    family_id: str,
+    attack_event_rows: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """
+    功能：构造 wrong-event attestation challenge 汇总。
+
+    Build the analysis-only wrong-event attestation challenge summary using
+    cross-event statement-versus-bundle binding checks.
+
+    Args:
+        family_id: Family identifier.
+        attack_event_rows: Positive attacked-event rows.
+
+    Returns:
+        Challenge summary payload.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(attack_event_rows, Sequence):
+        raise TypeError("attack_event_rows must be Sequence")
+
+    from main.watermarking.provenance.attestation_statement import (
+        compute_attestation_digest,
+        statement_from_dict,
+        verify_signed_attestation_bundle,
+    )
+
+    parent_materials: Dict[str, Dict[str, Any]] = {}
+    for attack_event_row in attack_event_rows:
+        parent_event_id = attack_event_row.get("parent_event_id")
+        if not isinstance(parent_event_id, str) or not parent_event_id:
+            continue
+        if parent_event_id in parent_materials:
+            continue
+
+        event_manifest = _extract_mapping(attack_event_row.get("event_manifest"))
+        parent_reference = _extract_mapping(event_manifest.get("parent_event_reference"))
+        parent_embed_record_path_value = parent_reference.get("parent_embed_record_path")
+        runtime_config_snapshot_path_value = event_manifest.get("runtime_config_snapshot_path")
+        if not isinstance(parent_embed_record_path_value, str) or not parent_embed_record_path_value:
+            continue
+        if not isinstance(runtime_config_snapshot_path_value, str) or not runtime_config_snapshot_path_value:
+            continue
+
+        embed_record = _load_required_json_dict(
+            Path(parent_embed_record_path_value).expanduser().resolve(),
+            "PW04 parent embed record",
+        )
+        runtime_cfg = _load_required_json_dict(
+            Path(runtime_config_snapshot_path_value).expanduser().resolve(),
+            "PW04 runtime config snapshot",
+        )
+        attestation_payload = _extract_mapping(embed_record.get("attestation"))
+        statement_payload = attestation_payload.get("statement")
+        signed_bundle = attestation_payload.get("signed_bundle")
+        k_master = runtime_cfg.get("__attestation_verify_k_master__")
+        if not isinstance(statement_payload, Mapping):
+            continue
+        if not isinstance(signed_bundle, Mapping):
+            continue
+        if not isinstance(k_master, str) or not k_master:
+            continue
+
+        parent_materials[parent_event_id] = {
+            "statement": dict(cast(Mapping[str, Any], statement_payload)),
+            "signed_bundle": dict(cast(Mapping[str, Any], signed_bundle)),
+            "k_master": k_master,
+        }
+
+    ordered_parent_ids = sorted(parent_materials.keys())
+    if len(ordered_parent_ids) < 2:
+        return {
+            "artifact_type": "paper_workflow_pw04_wrong_event_attestation_challenge_summary",
+            "schema_version": "pw_stage_04_v1",
+            "created_at": utc_now_iso(),
+            "family_id": family_id,
+            "status": "not_available",
+            "reason": "requires_at_least_two_distinct_positive_parent_events",
+            "future_upstream_sidecar_required": False,
+            "overall": {
+                "event_count": len(attack_event_rows),
+                "attempted_event_count": 0,
+                "bundle_verified_count": 0,
+                "wrong_event_rejected_count": 0,
+                "wrong_event_false_accept_count": 0,
+                "wrong_event_rejection_rate": None,
+            },
+            "by_attack_family": [],
+            "rows": [],
+        }
+
+    wrong_parent_lookup = {
+        parent_event_id: ordered_parent_ids[(index + 1) % len(ordered_parent_ids)]
+        for index, parent_event_id in enumerate(ordered_parent_ids)
+    }
+
+    challenge_rows: List[Dict[str, Any]] = []
+    grouped_rows: Dict[str, List[Dict[str, Any]]] = {}
+    for attack_event_row in attack_event_rows:
+        attack_family = str(attack_event_row.get("attack_family") or "<unknown>")
+        parent_event_id = attack_event_row.get("parent_event_id")
+        if not isinstance(parent_event_id, str) or parent_event_id not in parent_materials:
+            row_payload = {
+                "attack_event_id": attack_event_row.get("attack_event_id"),
+                "attack_family": attack_family,
+                "parent_event_id": parent_event_id,
+                "challenge_parent_event_id": None,
+                "status": "missing_parent_material",
+                "bundle_verification_status": None,
+                "wrong_event_rejected": None,
+            }
+            challenge_rows.append(row_payload)
+            grouped_rows.setdefault(attack_family, []).append(row_payload)
+            continue
+
+        own_material = parent_materials[parent_event_id]
+        challenge_parent_event_id = wrong_parent_lookup[parent_event_id]
+        wrong_material = parent_materials[challenge_parent_event_id]
+        bundle_verification = verify_signed_attestation_bundle(
+            dict(cast(Mapping[str, Any], own_material["signed_bundle"])),
+            cast(str, own_material["k_master"]),
+        )
+        wrong_statement_digest = compute_attestation_digest(
+            statement_from_dict(dict(cast(Mapping[str, Any], wrong_material["statement"])))
+        )
+        bundle_attestation_digest = own_material["signed_bundle"].get("attestation_digest")
+        wrong_event_rejected = bool(
+            bundle_verification.get("status") == "ok"
+            and isinstance(bundle_attestation_digest, str)
+            and wrong_statement_digest != bundle_attestation_digest
+        )
+        row_status = "ok" if wrong_event_rejected else "false_accept"
+        if bundle_verification.get("status") != "ok":
+            row_status = "bundle_invalid"
+
+        row_payload = {
+            "attack_event_id": attack_event_row.get("attack_event_id"),
+            "attack_family": attack_family,
+            "parent_event_id": parent_event_id,
+            "challenge_parent_event_id": challenge_parent_event_id,
+            "status": row_status,
+            "bundle_verification_status": bundle_verification.get("status"),
+            "bundle_verification_mismatch_reasons": list(bundle_verification.get("mismatch_reasons") or []),
+            "wrong_statement_digest": wrong_statement_digest,
+            "bundle_attestation_digest": bundle_attestation_digest,
+            "wrong_event_rejected": wrong_event_rejected if bundle_verification.get("status") == "ok" else None,
+        }
+        challenge_rows.append(row_payload)
+        grouped_rows.setdefault(attack_family, []).append(row_payload)
+
+    def _summarize(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+        attempted = [row for row in rows if row.get("bundle_verification_status") == "ok"]
+        rejected = [row for row in attempted if row.get("wrong_event_rejected") is True]
+        false_accept = [row for row in attempted if row.get("wrong_event_rejected") is False]
+        return {
+            "event_count": len(rows),
+            "attempted_event_count": len(attempted),
+            "bundle_verified_count": len(attempted),
+            "wrong_event_rejected_count": len(rejected),
+            "wrong_event_false_accept_count": len(false_accept),
+            "wrong_event_rejection_rate": float(len(rejected) / len(attempted)) if attempted else None,
+        }
+
+    overall_summary = _summarize(challenge_rows)
+    if overall_summary["attempted_event_count"] <= 0:
+        status_value = "not_available"
+        reason_value = "no_valid_parent_attestation_bundle_available_for_challenge"
+    elif overall_summary["wrong_event_false_accept_count"] > 0:
+        status_value = "mismatch"
+        reason_value = (
+            f"wrong-event bundle binding failed for "
+            f"{overall_summary['wrong_event_false_accept_count']}/{overall_summary['attempted_event_count']} attempts"
+        )
+    elif overall_summary["attempted_event_count"] < len(challenge_rows):
+        status_value = "partial"
+        reason_value = (
+            f"wrong-event challenge executed for {overall_summary['attempted_event_count']}/{len(challenge_rows)} attack events"
+        )
+    else:
+        status_value = "ok"
+        reason_value = None
+
+    return {
+        "artifact_type": "paper_workflow_pw04_wrong_event_attestation_challenge_summary",
+        "schema_version": "pw_stage_04_v1",
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "status": status_value,
+        "reason": reason_value,
+        "future_upstream_sidecar_required": False,
+        "overall": overall_summary,
+        "by_attack_family": [
+            {
+                "attack_family": attack_family,
+                **_summarize(rows),
+            }
+            for attack_family, rows in sorted(grouped_rows.items())
+        ],
+        "rows": challenge_rows,
+    }
+
+
 def _draw_tradeoff_frontier_png(output_path: Path, tradeoff_rows: Sequence[Mapping[str, Any]]) -> None:
     """
     功能：根据真实 tradeoff 表绘制 frontier PNG。
@@ -1181,6 +1508,7 @@ def build_pw04_metrics_extensions(
     geo_chain_usage_by_family_path = geometry_dir / "geo_chain_usage_by_family.csv"
     geo_diagnostics_summary_path = geometry_dir / "geo_diagnostics_summary.csv"
     payload_attack_summary_path = payload_dir / "payload_attack_summary.json"
+    wrong_event_attestation_challenge_summary_path = payload_dir / "wrong_event_attestation_challenge_summary.json"
     quality_robustness_tradeoff_path = tradeoff_dir / "quality_robustness_tradeoff.csv"
     quality_robustness_frontier_path = tradeoff_dir / "quality_robustness_frontier.png"
 
@@ -1321,15 +1649,17 @@ def build_pw04_metrics_extensions(
     )
     write_json_atomic(
         payload_attack_summary_path,
-        {
-            "artifact_type": "paper_workflow_pw04_payload_attack_summary",
-            "schema_version": "pw_stage_04_v1",
-            "created_at": utc_now_iso(),
-            "family_id": family_id,
-            "status": "not_available",
-            "reason": PAYLOAD_UNAVAILABLE_REASON,
-            "future_upstream_sidecar_required": True,
-        },
+        _build_payload_attack_summary_payload(
+            family_id=family_id,
+            attack_event_rows=attack_event_rows,
+        ),
+    )
+    write_json_atomic(
+        wrong_event_attestation_challenge_summary_path,
+        _build_wrong_event_attestation_challenge_summary_payload(
+            family_id=family_id,
+            attack_event_rows=attack_event_rows,
+        ),
     )
 
     quality_summary_csv_path, quality_summary_json_path = _resolve_pw02_quality_summary_paths(
@@ -1452,6 +1782,7 @@ def build_pw04_metrics_extensions(
         "geo_chain_usage_by_family_path": normalize_path_value(geo_chain_usage_by_family_path),
         "geo_diagnostics_summary_path": normalize_path_value(geo_diagnostics_summary_path),
         "payload_attack_summary_path": normalize_path_value(payload_attack_summary_path),
+        "wrong_event_attestation_challenge_summary_path": normalize_path_value(wrong_event_attestation_challenge_summary_path),
         "quality_robustness_tradeoff_path": normalize_path_value(quality_robustness_tradeoff_path),
         "quality_robustness_frontier_path": normalize_path_value(quality_robustness_frontier_path),
         "system_final_auxiliary_attack_summary_path": auxiliary_attack_exports["system_final_auxiliary_attack_summary_path"],
@@ -1477,6 +1808,7 @@ def build_pw04_metrics_extensions(
             "pw04_system_final_auxiliary_attack_summary": auxiliary_attack_exports["system_final_auxiliary_attack_summary_path"],
             "pw04_system_final_auxiliary_attack_by_family": auxiliary_attack_exports["system_final_auxiliary_attack_by_family_path"],
             "pw04_system_final_auxiliary_attack_by_condition": auxiliary_attack_exports["system_final_auxiliary_attack_by_condition_path"],
+            "pw04_wrong_event_attestation_challenge_summary": normalize_path_value(wrong_event_attestation_challenge_summary_path),
         }
     )
     analysis_only_artifact_annotations = {

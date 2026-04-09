@@ -21,7 +21,9 @@ if str(REPO_ROOT) not in sys.path:
 from main.evaluation import metrics as eval_metrics
 from main.evaluation import workflow_inputs as eval_workflow_inputs
 from paper_workflow.scripts.pw_common import (
+    ATTACKED_NEGATIVE_SAMPLE_ROLE,
     ATTACKED_POSITIVE_SAMPLE_ROLE,
+    MIXED_ATTACK_SAMPLE_ROLE,
     build_family_root,
     read_jsonl,
     write_jsonl,
@@ -48,9 +50,11 @@ PW04_SUMMARY_FILE_NAME = "pw04_summary.json"
 FORMAL_RECORDS_DIRECTORY_NAME = "attack_formal_records"
 ATTACK_MERGE_MANIFEST_FILE_NAME = "attack_merge_manifest.json"
 ATTACK_POOL_MANIFEST_FILE_NAME = "attack_positive_pool_manifest.json"
+ATTACK_NEGATIVE_POOL_MANIFEST_FILE_NAME = "attack_negative_pool_manifest.json"
 FORMAL_ATTACK_FINAL_DECISION_METRICS_FILE_NAME = "formal_attack_final_decision_metrics.json"
 FORMAL_ATTACK_ATTESTATION_METRICS_FILE_NAME = "formal_attack_attestation_metrics.json"
 DERIVED_ATTACK_UNION_METRICS_FILE_NAME = "derived_attack_union_metrics.json"
+FORMAL_ATTACK_NEGATIVE_METRICS_FILE_NAME = "formal_attack_negative_metrics.json"
 PER_ATTACK_FAMILY_METRICS_FILE_NAME = "per_attack_family_metrics.json"
 PER_ATTACK_CONDITION_METRICS_FILE_NAME = "per_attack_condition_metrics.json"
 ATTACK_EVENT_TABLE_FILE_NAME = "attack_event_table.jsonl"
@@ -187,9 +191,11 @@ def _resolve_pw04_paths(family_root: Path) -> Dict[str, Path]:
         "summary_path": summary_path,
         "attack_merge_manifest_path": manifests_root / ATTACK_MERGE_MANIFEST_FILE_NAME,
         "attack_pool_manifest_path": export_root / ATTACK_POOL_MANIFEST_FILE_NAME,
+        "attack_negative_pool_manifest_path": export_root / ATTACK_NEGATIVE_POOL_MANIFEST_FILE_NAME,
         "formal_attack_final_decision_metrics_path": export_root / FORMAL_ATTACK_FINAL_DECISION_METRICS_FILE_NAME,
         "formal_attack_attestation_metrics_path": export_root / FORMAL_ATTACK_ATTESTATION_METRICS_FILE_NAME,
         "derived_attack_union_metrics_path": export_root / DERIVED_ATTACK_UNION_METRICS_FILE_NAME,
+        "formal_attack_negative_metrics_path": export_root / FORMAL_ATTACK_NEGATIVE_METRICS_FILE_NAME,
         "per_attack_family_metrics_path": export_root / PER_ATTACK_FAMILY_METRICS_FILE_NAME,
         "per_attack_condition_metrics_path": export_root / PER_ATTACK_CONDITION_METRICS_FILE_NAME,
         "attack_event_table_path": tables_root / ATTACK_EVENT_TABLE_FILE_NAME,
@@ -328,10 +334,15 @@ def _collect_completed_pw03_shard_manifests(
                 "PW04 requires every planned PW03 shard_manifest to be completed: "
                 f"attack_shard_index={attack_shard_index}, status={shard_manifest.get('status')}"
             )
-        if shard_manifest.get("sample_role") != ATTACKED_POSITIVE_SAMPLE_ROLE:
+        shard_sample_role = shard_manifest.get("sample_role")
+        if shard_sample_role not in {
+            ATTACKED_POSITIVE_SAMPLE_ROLE,
+            ATTACKED_NEGATIVE_SAMPLE_ROLE,
+            MIXED_ATTACK_SAMPLE_ROLE,
+        }:
             raise ValueError(
                 "PW03 shard manifest sample_role mismatch: "
-                f"attack_shard_index={attack_shard_index}, sample_role={shard_manifest.get('sample_role')}"
+                f"attack_shard_index={attack_shard_index}, sample_role={shard_sample_role}"
             )
 
         manifest_events_node = shard_manifest.get("events")
@@ -433,10 +444,11 @@ def _collect_completed_attack_events(
                     "PW04 requires every planned PW03 event_manifest to be completed: "
                     f"attack_event_id={expected_attack_event_id}, status={event_manifest.get('status')}"
                 )
-            if event_manifest.get("sample_role") != ATTACKED_POSITIVE_SAMPLE_ROLE:
+            event_sample_role = event_manifest.get("sample_role")
+            if event_sample_role not in {ATTACKED_POSITIVE_SAMPLE_ROLE, ATTACKED_NEGATIVE_SAMPLE_ROLE}:
                 raise ValueError(
-                    "PW03 event sample_role must be attacked_positive before PW04: "
-                    f"attack_event_id={expected_attack_event_id}, sample_role={event_manifest.get('sample_role')}"
+                    "PW03 event sample_role must be attacked_positive or attacked_negative before PW04: "
+                    f"attack_event_id={expected_attack_event_id}, sample_role={event_sample_role}"
                 )
 
             manifest_event_id = event_manifest.get("event_id")
@@ -462,9 +474,12 @@ def _collect_completed_attack_events(
             detect_payload = _load_required_json_dict(detect_record_path, f"PW03 staged detect record {manifest_event_id}")
 
             sample_role_value = detect_payload.get("sample_role")
-            if sample_role_value is not None and sample_role_value != ATTACKED_POSITIVE_SAMPLE_ROLE:
+            if sample_role_value is not None and sample_role_value not in {
+                ATTACKED_POSITIVE_SAMPLE_ROLE,
+                ATTACKED_NEGATIVE_SAMPLE_ROLE,
+            }:
                 raise ValueError(
-                    "PW03 staged detect record sample_role must be attacked_positive: "
+                    "PW03 staged detect record sample_role must be attacked_positive or attacked_negative: "
                     f"attack_event_id={attack_event_id}, sample_role={sample_role_value}"
                 )
 
@@ -586,6 +601,7 @@ def _collect_completed_attack_events(
                     "attack_event_id": attack_event_id,
                     "event_id": manifest_event_id,
                     "attack_event_index": expected_attack_event_index,
+                    "sample_role": event_sample_role,
                     "parent_event_id": parent_event_id,
                     "attack_family": attack_family,
                     "attack_config_name": attack_config_name,
@@ -834,17 +850,19 @@ def _build_attack_merge_manifest_payload(
 def _build_attack_pool_manifest_payload(
     *,
     family_id: str,
+    source_role: str,
     attack_event_rows: Sequence[Mapping[str, Any]],
 ) -> Dict[str, Any]:
     """
-    Build the attacked-positive pool manifest payload.
+    Build one attacked pool manifest payload.
 
     Args:
         family_id: Family identifier.
+        source_role: Attack sample role represented by the pool.
         attack_event_rows: Collected and materialized attack event rows.
 
     Returns:
-        Attacked-positive pool manifest payload.
+        Attacked pool manifest payload.
     """
     ordered_rows = sorted(attack_event_rows, key=lambda row: int(row["attack_event_index"]))
     events: List[Dict[str, Any]] = []
@@ -874,12 +892,17 @@ def _build_attack_pool_manifest_payload(
                 "derived_attack_union_positive": bool(formal_record.get("derived_attack_union_positive", False)),
             }
         )
+    artifact_type = (
+        "paper_workflow_pw04_attack_positive_pool_manifest"
+        if source_role == ATTACKED_POSITIVE_SAMPLE_ROLE
+        else "paper_workflow_pw04_attack_negative_pool_manifest"
+    )
     return {
-        "artifact_type": "paper_workflow_pw04_attack_positive_pool_manifest",
+        "artifact_type": artifact_type,
         "schema_version": SCHEMA_VERSION,
         "created_at": utc_now_iso(),
         "family_id": family_id,
-        "source_role": ATTACKED_POSITIVE_SAMPLE_ROLE,
+        "source_role": source_role,
         "event_count": len(events),
         "attack_family_count": len({str(row["attack_family"]) for row in ordered_rows}),
         "parent_event_count": len({str(row["parent_event_id"]) for row in ordered_rows}),
@@ -923,6 +946,67 @@ def _build_attack_metrics_core(
         "accepted_count": accepted_count,
         "attack_tpr": attack_tpr,
         "decision_status_counts": decision_status_counts,
+    }
+
+
+def _build_attack_negative_metrics_export(
+    *,
+    family_id: str,
+    content_threshold_export_path: Path,
+    attestation_threshold_export_path: Path,
+    attack_negative_pool_manifest_path: Path,
+    attack_event_rows: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Build the attacked-negative false-accept summary export.
+
+    Args:
+        family_id: Family identifier.
+        content_threshold_export_path: PW02 content threshold export path.
+        attestation_threshold_export_path: PW02 attestation threshold export path.
+        attack_negative_pool_manifest_path: PW04 attacked-negative pool manifest path.
+        attack_event_rows: Attacked-negative materialized rows.
+
+    Returns:
+        Attacked-negative summary payload.
+    """
+    attack_negative_count = len(attack_event_rows)
+    formal_final_false_accept_count = 0
+    formal_attestation_false_accept_count = 0
+    derived_attack_union_false_accept_count = 0
+    for attack_event_row in attack_event_rows:
+        formal_record = cast(Mapping[str, Any], attack_event_row["formal_record"])
+        formal_final_decision = cast(Mapping[str, Any], formal_record.get("formal_final_decision", {}))
+        formal_event_attestation_decision = cast(
+            Mapping[str, Any],
+            formal_record.get("formal_event_attestation_decision", {}),
+        )
+        if formal_final_decision.get("is_watermarked") is True:
+            formal_final_false_accept_count += 1
+        if formal_event_attestation_decision.get("is_watermarked") is True:
+            formal_attestation_false_accept_count += 1
+        if bool(formal_record.get("derived_attack_union_positive", False)):
+            derived_attack_union_false_accept_count += 1
+
+    return {
+        "artifact_type": "paper_workflow_pw04_formal_attack_negative_metrics",
+        "schema_version": SCHEMA_VERSION,
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "source_role": ATTACKED_NEGATIVE_SAMPLE_ROLE,
+        "content_threshold_export_path": normalize_path_value(content_threshold_export_path),
+        "attestation_threshold_export_path": normalize_path_value(attestation_threshold_export_path),
+        "attack_negative_pool_manifest_path": normalize_path_value(attack_negative_pool_manifest_path),
+        "metrics": {
+            "attack_negative_count": attack_negative_count,
+            "formal_final_false_accept_count": formal_final_false_accept_count,
+            "formal_final_attack_fpr": None if attack_negative_count <= 0 else float(formal_final_false_accept_count / attack_negative_count),
+            "formal_attestation_false_accept_count": formal_attestation_false_accept_count,
+            "formal_attestation_attack_fpr": None if attack_negative_count <= 0 else float(formal_attestation_false_accept_count / attack_negative_count),
+            "derived_attack_union_false_accept_count": derived_attack_union_false_accept_count,
+            "derived_attack_union_attack_fpr": None if attack_negative_count <= 0 else float(derived_attack_union_false_accept_count / attack_negative_count),
+        },
+        "notes": "This append-only export summarizes false accepts on attacked clean_negative parents and does not alter canonical positive-attack TPR tables.",
     }
 
 
@@ -1431,7 +1515,7 @@ def _write_attack_event_table_jsonl(
                 "severity_sort_value": attack_event_row.get("severity_sort_value"),
                 "severity_label": attack_event_row.get("severity_label"),
                 "severity_level_index": attack_event_row.get("severity_level_index"),
-                "sample_role": ATTACKED_POSITIVE_SAMPLE_ROLE,
+                "sample_role": attack_event_row.get("sample_role"),
                 "content_score": attack_event_row["content_score"],
                 "content_score_source": attack_event_row["content_score_source"],
                 "event_attestation_score": attack_event_row["event_attestation_score"],
@@ -1514,10 +1598,12 @@ def _build_clean_attack_overview_export(
     attack_attestation_metrics_path: Path,
     attack_derived_metrics_path: Path,
     attack_quality_metrics_path: Path,
+    attack_negative_metrics_path: Path,
     attack_formal_metrics_payload: Mapping[str, Any],
     attack_attestation_metrics_payload: Mapping[str, Any],
     attack_derived_metrics_payload: Mapping[str, Any],
     attack_quality_metrics_payload: Mapping[str, Any],
+    attack_negative_metrics_payload: Mapping[str, Any],
 ) -> Dict[str, Any]:
     """
     Build the clean-vs-attack overview export payload.
@@ -1550,6 +1636,7 @@ def _build_clean_attack_overview_export(
     attack_attestation_metrics = cast(Mapping[str, Any], attack_attestation_metrics_payload.get("metrics", {}))
     attack_derived_metrics = cast(Mapping[str, Any], attack_derived_metrics_payload.get("metrics", {}))
     attack_quality_overall = cast(Mapping[str, Any], attack_quality_metrics_payload.get("overall", {}))
+    attack_negative_metrics = cast(Mapping[str, Any], attack_negative_metrics_payload.get("metrics", {}))
     return {
         "artifact_type": "paper_workflow_pw04_clean_attack_overview",
         "schema_version": SCHEMA_VERSION,
@@ -1561,12 +1648,16 @@ def _build_clean_attack_overview_export(
         "attack_formal_attestation_metrics_path": normalize_path_value(attack_attestation_metrics_path),
         "attack_derived_union_metrics_path": normalize_path_value(attack_derived_metrics_path),
         "attack_quality_metrics_path": normalize_path_value(attack_quality_metrics_path),
+        "attack_negative_metrics_path": normalize_path_value(attack_negative_metrics_path),
         "clean_formal_tpr": clean_formal_metrics.get("final_decision_tpr"),
         "clean_formal_fpr": clean_formal_metrics.get("final_decision_fpr"),
         "clean_derived_union_tpr": clean_derived_metrics.get("system_tpr"),
         "attack_formal_tpr": attack_formal_metrics.get("attack_tpr"),
         "attack_formal_attestation_tpr": attack_attestation_metrics.get("attack_tpr"),
         "attack_derived_union_tpr": attack_derived_metrics.get("attack_tpr"),
+        "attack_negative_formal_fpr": attack_negative_metrics.get("formal_final_attack_fpr"),
+        "attack_negative_formal_attestation_fpr": attack_negative_metrics.get("formal_attestation_attack_fpr"),
+        "attack_negative_derived_union_fpr": attack_negative_metrics.get("derived_attack_union_attack_fpr"),
         "attack_quality_mean_psnr": attack_quality_overall.get("mean_psnr"),
         "attack_quality_mean_ssim": attack_quality_overall.get("mean_ssim"),
         "attack_quality_mean_lpips": attack_quality_overall.get("mean_lpips"),
@@ -1585,9 +1676,11 @@ def _build_pw04_summary_payload(
     summary_path: Path,
     attack_merge_manifest_path: Path,
     attack_pool_manifest_path: Path,
+    attack_negative_pool_manifest_path: Path,
     formal_attack_final_decision_metrics_path: Path,
     formal_attack_attestation_metrics_path: Path,
     derived_attack_union_metrics_path: Path,
+    formal_attack_negative_metrics_path: Path,
     per_attack_family_metrics_path: Path,
     per_attack_condition_metrics_path: Path,
     attack_quality_metrics_path: Path,
@@ -1600,6 +1693,8 @@ def _build_pw04_summary_payload(
     expected_attack_event_count: int,
     discovered_attack_event_count: int,
     completed_attack_event_count: int,
+    attacked_positive_event_count: int,
+    attacked_negative_event_count: int,
     attack_family_count: int,
     parent_event_count: int,
     formal_record_count: int,
@@ -1646,9 +1741,11 @@ def _build_pw04_summary_payload(
         "summary_path": normalize_path_value(summary_path),
         "attack_merge_manifest_path": normalize_path_value(attack_merge_manifest_path),
         "attack_positive_pool_manifest_path": normalize_path_value(attack_pool_manifest_path),
+        "attack_negative_pool_manifest_path": normalize_path_value(attack_negative_pool_manifest_path),
         "formal_attack_final_decision_metrics_path": normalize_path_value(formal_attack_final_decision_metrics_path),
         "formal_attack_attestation_metrics_path": normalize_path_value(formal_attack_attestation_metrics_path),
         "derived_attack_union_metrics_path": normalize_path_value(derived_attack_union_metrics_path),
+        "formal_attack_negative_metrics_path": normalize_path_value(formal_attack_negative_metrics_path),
         "per_attack_family_metrics_path": normalize_path_value(per_attack_family_metrics_path),
         "per_attack_condition_metrics_path": normalize_path_value(per_attack_condition_metrics_path),
         "attack_quality_metrics_path": normalize_path_value(attack_quality_metrics_path),
@@ -1661,6 +1758,8 @@ def _build_pw04_summary_payload(
         "expected_attack_event_count": expected_attack_event_count,
         "discovered_attack_event_count": discovered_attack_event_count,
         "completed_attack_event_count": completed_attack_event_count,
+        "attacked_positive_event_count": attacked_positive_event_count,
+        "attacked_negative_event_count": attacked_negative_event_count,
         "attack_family_count": attack_family_count,
         "parent_event_count": parent_event_count,
         "formal_record_count": formal_record_count,
@@ -1804,6 +1903,12 @@ def run_pw04_merge_attack_event_shards(
         content_thresholds_artifact=content_thresholds_artifact,
         attestation_thresholds_artifact=attestation_thresholds_artifact,
     )
+    positive_attack_event_rows = [
+        row for row in materialized_attack_event_rows if row.get("sample_role") == ATTACKED_POSITIVE_SAMPLE_ROLE
+    ]
+    negative_attack_event_rows = [
+        row for row in materialized_attack_event_rows if row.get("sample_role") == ATTACKED_NEGATIVE_SAMPLE_ROLE
+    ]
 
     attack_merge_manifest_payload = _build_attack_merge_manifest_payload(
         family_id=family_id,
@@ -1824,16 +1929,22 @@ def run_pw04_merge_attack_event_shards(
     )
     attack_pool_manifest_payload = _build_attack_pool_manifest_payload(
         family_id=family_id,
-        attack_event_rows=materialized_attack_event_rows,
+        source_role=ATTACKED_POSITIVE_SAMPLE_ROLE,
+        attack_event_rows=positive_attack_event_rows,
+    )
+    attack_negative_pool_manifest_payload = _build_attack_pool_manifest_payload(
+        family_id=family_id,
+        source_role=ATTACKED_NEGATIVE_SAMPLE_ROLE,
+        attack_event_rows=negative_attack_event_rows,
     )
     attack_quality_metrics_export = _build_attack_quality_metrics_export(
         family_id=family_id,
         output_path=cast(Path, pw04_paths["attack_quality_metrics_path"]),
-        attack_event_rows=materialized_attack_event_rows,
+        attack_event_rows=positive_attack_event_rows,
     )
     quality_lookup = cast(Dict[str, Dict[str, Any]], attack_quality_metrics_export["pair_lookup"])
     attack_quality_overall = cast(Mapping[str, Any], cast(Mapping[str, Any], attack_quality_metrics_export["payload"]).get("overall", {}))
-    for attack_event_row in materialized_attack_event_rows:
+    for attack_event_row in positive_attack_event_rows:
         attack_event_id = str(attack_event_row["attack_event_id"])
         quality_row = quality_lookup.get(attack_event_id, {})
         attack_event_row["attack_quality_status"] = quality_row.get("status", "unavailable")
@@ -1842,34 +1953,48 @@ def run_pw04_merge_attack_event_shards(
         attack_event_row["attack_quality_lpips"] = quality_row.get("lpips")
         attack_event_row["attack_quality_clip_text_similarity"] = quality_row.get("clip_text_similarity")
         attack_event_row["attack_quality_clip_model_name"] = attack_quality_overall.get("clip_model_name")
+    for attack_event_row in negative_attack_event_rows:
+        attack_event_row["attack_quality_status"] = "not_applicable"
+        attack_event_row["attack_quality_psnr"] = None
+        attack_event_row["attack_quality_ssim"] = None
+        attack_event_row["attack_quality_lpips"] = None
+        attack_event_row["attack_quality_clip_text_similarity"] = None
+        attack_event_row["attack_quality_clip_model_name"] = None
     formal_attack_final_decision_metrics_payload = _build_formal_attack_final_decision_metrics_export(
         family_id=family_id,
         finalize_manifest_path=finalize_manifest_path,
         content_threshold_export_path=content_threshold_export_path,
         attack_pool_manifest_path=cast(Path, pw04_paths["attack_pool_manifest_path"]),
-        attack_event_rows=materialized_attack_event_rows,
+        attack_event_rows=positive_attack_event_rows,
     )
     formal_attack_attestation_metrics_payload = _build_formal_attack_attestation_metrics_export(
         family_id=family_id,
         finalize_manifest_path=finalize_manifest_path,
         attestation_threshold_export_path=attestation_threshold_export_path,
         attack_pool_manifest_path=cast(Path, pw04_paths["attack_pool_manifest_path"]),
-        attack_event_rows=materialized_attack_event_rows,
+        attack_event_rows=positive_attack_event_rows,
     )
     derived_attack_union_metrics_payload = _build_derived_attack_union_metrics_export(
         family_id=family_id,
         content_threshold_export_path=content_threshold_export_path,
         attestation_threshold_export_path=attestation_threshold_export_path,
         attack_pool_manifest_path=cast(Path, pw04_paths["attack_pool_manifest_path"]),
-        attack_event_rows=materialized_attack_event_rows,
+        attack_event_rows=positive_attack_event_rows,
+    )
+    formal_attack_negative_metrics_payload = _build_attack_negative_metrics_export(
+        family_id=family_id,
+        content_threshold_export_path=content_threshold_export_path,
+        attestation_threshold_export_path=attestation_threshold_export_path,
+        attack_negative_pool_manifest_path=cast(Path, pw04_paths["attack_negative_pool_manifest_path"]),
+        attack_event_rows=negative_attack_event_rows,
     )
     per_attack_family_metrics_payload = _build_per_attack_family_metrics_export(
         family_id=family_id,
-        attack_event_rows=materialized_attack_event_rows,
+        attack_event_rows=positive_attack_event_rows,
     )
     per_attack_condition_metrics_payload = _build_per_attack_condition_metrics_export(
         family_id=family_id,
-        attack_event_rows=materialized_attack_event_rows,
+        attack_event_rows=positive_attack_event_rows,
     )
     attack_event_table_rows = _write_attack_event_table_jsonl(
         output_path=cast(Path, pw04_paths["attack_event_table_path"]),
@@ -1891,14 +2016,17 @@ def run_pw04_merge_attack_event_shards(
         attack_attestation_metrics_path=cast(Path, pw04_paths["formal_attack_attestation_metrics_path"]),
         attack_derived_metrics_path=cast(Path, pw04_paths["derived_attack_union_metrics_path"]),
         attack_quality_metrics_path=cast(Path, pw04_paths["attack_quality_metrics_path"]),
+        attack_negative_metrics_path=cast(Path, pw04_paths["formal_attack_negative_metrics_path"]),
         attack_formal_metrics_payload=formal_attack_final_decision_metrics_payload,
         attack_attestation_metrics_payload=formal_attack_attestation_metrics_payload,
         attack_derived_metrics_payload=derived_attack_union_metrics_payload,
         attack_quality_metrics_payload=cast(Mapping[str, Any], attack_quality_metrics_export["payload"]),
+        attack_negative_metrics_payload=formal_attack_negative_metrics_payload,
     )
 
     write_json_atomic(cast(Path, pw04_paths["attack_merge_manifest_path"]), attack_merge_manifest_payload)
     write_json_atomic(cast(Path, pw04_paths["attack_pool_manifest_path"]), attack_pool_manifest_payload)
+    write_json_atomic(cast(Path, pw04_paths["attack_negative_pool_manifest_path"]), attack_negative_pool_manifest_payload)
     write_json_atomic(
         cast(Path, pw04_paths["formal_attack_final_decision_metrics_path"]),
         formal_attack_final_decision_metrics_payload,
@@ -1911,6 +2039,10 @@ def run_pw04_merge_attack_event_shards(
         cast(Path, pw04_paths["derived_attack_union_metrics_path"]),
         derived_attack_union_metrics_payload,
     )
+    write_json_atomic(
+        cast(Path, pw04_paths["formal_attack_negative_metrics_path"]),
+        formal_attack_negative_metrics_payload,
+    )
     write_json_atomic(cast(Path, pw04_paths["per_attack_family_metrics_path"]), per_attack_family_metrics_payload)
     write_json_atomic(cast(Path, pw04_paths["per_attack_condition_metrics_path"]), per_attack_condition_metrics_payload)
     write_json_atomic(cast(Path, pw04_paths["clean_attack_overview_path"]), clean_attack_overview_payload)
@@ -1920,7 +2052,7 @@ def run_pw04_merge_attack_event_shards(
         family_root=family_root,
         pw02_summary=pw02_summary,
         pw04_paths=pw04_paths,
-        attack_event_rows=materialized_attack_event_rows,
+        attack_event_rows=positive_attack_event_rows,
         per_attack_family_metrics_payload=per_attack_family_metrics_payload,
         per_attack_condition_metrics_payload=per_attack_condition_metrics_payload,
         attack_quality_metrics_payload=cast(Mapping[str, Any], attack_quality_metrics_export["payload"]),
@@ -1931,7 +2063,7 @@ def run_pw04_merge_attack_event_shards(
         family_root=family_root,
         export_root=cast(Path, pw04_paths["export_root"]),
         pw02_summary=pw02_summary,
-        attack_event_rows=materialized_attack_event_rows,
+        attack_event_rows=positive_attack_event_rows,
         main_metrics_summary_csv_path=Path(
             str(cast(Mapping[str, Any], paper_exports_payload["paper_tables_paths"])["main_metrics_summary_csv_path"])
         ).expanduser().resolve(),
@@ -1951,9 +2083,11 @@ def run_pw04_merge_attack_event_shards(
         summary_path=cast(Path, pw04_paths["summary_path"]),
         attack_merge_manifest_path=cast(Path, pw04_paths["attack_merge_manifest_path"]),
         attack_pool_manifest_path=cast(Path, pw04_paths["attack_pool_manifest_path"]),
+        attack_negative_pool_manifest_path=cast(Path, pw04_paths["attack_negative_pool_manifest_path"]),
         formal_attack_final_decision_metrics_path=cast(Path, pw04_paths["formal_attack_final_decision_metrics_path"]),
         formal_attack_attestation_metrics_path=cast(Path, pw04_paths["formal_attack_attestation_metrics_path"]),
         derived_attack_union_metrics_path=cast(Path, pw04_paths["derived_attack_union_metrics_path"]),
+        formal_attack_negative_metrics_path=cast(Path, pw04_paths["formal_attack_negative_metrics_path"]),
         per_attack_family_metrics_path=cast(Path, pw04_paths["per_attack_family_metrics_path"]),
         per_attack_condition_metrics_path=cast(Path, pw04_paths["per_attack_condition_metrics_path"]),
         attack_quality_metrics_path=cast(Path, pw04_paths["attack_quality_metrics_path"]),
@@ -1966,6 +2100,8 @@ def run_pw04_merge_attack_event_shards(
         expected_attack_event_count=expected_attack_event_count,
         discovered_attack_event_count=len(attack_event_table_rows),
         completed_attack_event_count=len(materialized_attack_event_rows),
+        attacked_positive_event_count=len(positive_attack_event_rows),
+        attacked_negative_event_count=len(negative_attack_event_rows),
         attack_family_count=len({str(row["attack_family"]) for row in materialized_attack_event_rows}),
         parent_event_count=len({str(row["parent_event_id"]) for row in materialized_attack_event_rows}),
         formal_record_count=len(materialized_attack_event_rows),

@@ -751,6 +751,41 @@ def _safe_resolve_preview_artifact_path(event_payload: Mapping[str, Any]) -> str
     return normalize_path_value(preview_artifact_path)
 
 
+def _safe_resolve_watermarked_image_path(event_payload: Mapping[str, Any]) -> str | None:
+    """
+    Resolve the finalized watermarked image path from one PW01 event payload.
+
+    Args:
+        event_payload: PW01 event payload surfaced via shard manifest.
+
+    Returns:
+        Normalized watermarked image path or None.
+    """
+    if not isinstance(event_payload, Mapping):
+        raise TypeError("event_payload must be Mapping")
+
+    embed_record_path_value = event_payload.get("embed_record_path")
+    if not isinstance(embed_record_path_value, str) or not embed_record_path_value.strip():
+        return None
+
+    try:
+        embed_record = _load_required_json_dict(
+            Path(embed_record_path_value).expanduser().resolve(),
+            "PW01 embed record",
+        )
+    except Exception:
+        return None
+
+    watermarked_path_value = embed_record.get("watermarked_path") or embed_record.get("image_path")
+    if not isinstance(watermarked_path_value, str) or not watermarked_path_value.strip():
+        return None
+
+    watermarked_path = Path(watermarked_path_value).expanduser().resolve()
+    if not watermarked_path.exists() or not watermarked_path.is_file():
+        return None
+    return normalize_path_value(watermarked_path)
+
+
 def _safe_resolve_prompt_text(event_payload: Mapping[str, Any]) -> str | None:
     """
     Resolve the prompt text from one PW01 event payload when available.
@@ -826,8 +861,8 @@ def _build_clean_positive_quality_metrics(
         pair_specs.append(
             {
                 "event_id": event_id,
-                "reference_image_path": _safe_resolve_source_image_path(event_payload),
-                "candidate_image_path": _safe_resolve_preview_artifact_path(event_payload),
+                "reference_image_path": _safe_resolve_preview_artifact_path(event_payload),
+                "candidate_image_path": _safe_resolve_watermarked_image_path(event_payload),
                 "prompt_text": _safe_resolve_prompt_text(event_payload),
                 "sample_role": ACTIVE_SAMPLE_ROLE,
             }
@@ -841,7 +876,7 @@ def _build_clean_positive_quality_metrics(
         text_key="prompt_text",
         extra_metadata_keys=["sample_role"],
     )
-    quality_payload["reference_semantics"] = "source_image_vs_preview_generation_persisted_artifact"
+    quality_payload["reference_semantics"] = "preview_generation_persisted_artifact_vs_watermarked_output_image"
     quality_payload["sample_role"] = ACTIVE_SAMPLE_ROLE
     quality_payload["split_scope"] = "evaluate_positive_only"
     return quality_payload

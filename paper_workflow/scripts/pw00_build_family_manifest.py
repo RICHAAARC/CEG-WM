@@ -20,6 +20,8 @@ from scripts.notebook_runtime_common import (
 from paper_workflow.scripts.pw_common import (
     ACTIVE_SAMPLE_ROLE,
     ACTIVE_SOURCE_SAMPLE_ROLES,
+    ATTACKED_NEGATIVE_SAMPLE_ROLE,
+    ATTACKED_POSITIVE_SAMPLE_ROLE,
     ATTACK_SEVERITY_AXIS_KIND,
     ATTACK_SEVERITY_RULE_VERSION,
     CLEAN_NEGATIVE_SAMPLE_ROLE,
@@ -186,6 +188,11 @@ def run_pw00_build_family_manifest(
         for event in event_grid
         if str(event.get("sample_role")) == ACTIVE_SAMPLE_ROLE
     ]
+    clean_negative_events = [
+        event
+        for event in event_grid
+        if str(event.get("sample_role")) == CLEAN_NEGATIVE_SAMPLE_ROLE
+    ]
     attack_conditions = build_attack_condition_catalog()
     severity_status_counts: Dict[str, int] = {}
     severity_family_level_counts: Dict[str, int] = {}
@@ -198,8 +205,18 @@ def run_pw00_build_family_manifest(
         severity_family_level_counts[attack_family_name] = severity_family_level_counts.get(attack_family_name, 0) + 1
     attack_event_grid = build_attack_event_grid(
         family_id=family_id,
-        parent_events=positive_source_events,
+        parent_events=[*positive_source_events, *clean_negative_events],
         attack_conditions=attack_conditions,
+    )
+    attacked_positive_event_count = sum(
+        1
+        for event in attack_event_grid
+        if str(event.get("sample_role")) == ATTACKED_POSITIVE_SAMPLE_ROLE
+    )
+    attacked_negative_event_count = sum(
+        1
+        for event in attack_event_grid
+        if str(event.get("sample_role")) == ATTACKED_NEGATIVE_SAMPLE_ROLE
     )
     attack_shard_plan = build_attack_shard_plan(
         family_id=family_id,
@@ -262,6 +279,8 @@ def run_pw00_build_family_manifest(
             "materialization_profile": "first_value_per_condition",
             "attack_condition_count": attack_condition_count,
             "attack_event_count": attack_event_count,
+            "attacked_positive_event_count": attacked_positive_event_count,
+            "attacked_negative_event_count": attacked_negative_event_count,
             "severity_metadata_frozen": True,
             "severity_rule_version": ATTACK_SEVERITY_RULE_VERSION,
             "severity_axis_kind": ATTACK_SEVERITY_AXIS_KIND,
@@ -277,6 +296,8 @@ def run_pw00_build_family_manifest(
             "planner_conditioned_control_negative_event_count": control_negative_event_count,
             "attack_condition_count": attack_condition_count,
             "attack_event_count": attack_event_count,
+            "attacked_positive_event_count": attacked_positive_event_count,
+            "attacked_negative_event_count": attacked_negative_event_count,
             "calibration_event_count": len(source_split_plan["calib_pos_event_ids"]) + len(source_split_plan["calib_neg_event_ids"]),
             "evaluate_event_count": len(source_split_plan["eval_pos_event_ids"]) + len(source_split_plan["eval_neg_event_ids"]),
             "control_calibration_event_count": len(source_split_plan["calib_control_event_ids"]),
@@ -300,6 +321,8 @@ def run_pw00_build_family_manifest(
             "attack_shard_count": resolved_attack_shard_count,
             "attack_condition_count": attack_condition_count,
             "attack_event_count": attack_event_count,
+            "attacked_positive_event_count": attacked_positive_event_count,
+            "attacked_negative_event_count": attacked_negative_event_count,
             "severity_metadata_frozen": True,
             "severity_rule_version": ATTACK_SEVERITY_RULE_VERSION,
             "severity_axis_kind": ATTACK_SEVERITY_AXIS_KIND,

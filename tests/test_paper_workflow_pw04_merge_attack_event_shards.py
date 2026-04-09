@@ -17,6 +17,12 @@ from PIL import Image
 import paper_workflow.scripts.pw03_run_attack_event_shard as pw03_module
 import paper_workflow.scripts.pw04_merge_attack_event_shards as pw04_module
 import paper_workflow.scripts.pw_quality_metrics as pw_quality_metrics_module
+from main.watermarking.provenance.attestation_statement import (
+    ATTESTATION_SCHEMA,
+    AttestationStatement,
+    build_signed_attestation_bundle,
+    compute_attestation_digest,
+)
 from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
 from paper_workflow.scripts.pw_common import read_jsonl
 from scripts.notebook_runtime_common import compute_file_sha256, ensure_directory, normalize_path_value, write_json_atomic
@@ -554,9 +560,18 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
         "attestation": normalize_path_value(Path(str(pw02_fixture["attestation_threshold_export_path"]))),
     }
 
+    expected_positive_attack_event_count = 0
+    expected_negative_attack_event_count = 0
     expected_formal_final_positive_count = 0
     expected_formal_attestation_positive_count = 0
     expected_derived_union_positive_count = 0
+    expected_formal_final_negative_false_accept_count = 0
+    expected_formal_attestation_negative_false_accept_count = 0
+    expected_derived_union_negative_false_accept_count = 0
+    expected_payload_codeword_agreement_values: List[float] = []
+    expected_payload_attestation_score_values: List[float] = []
+    attestation_master_key = "5" * 64
+    parent_attestation_materials: Dict[str, Dict[str, Any]] = {}
     detect_record_paths: List[Path] = []
     event_manifest_paths: List[Path] = []
 
@@ -578,12 +593,26 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
             attacked_image.save(attacked_image_path)
 
             content_score, attestation_score = _score_pair_for_index(attack_event_index)
-            if content_score >= 0.5:
-                expected_formal_final_positive_count += 1
-            if attestation_score >= 0.6:
-                expected_formal_attestation_positive_count += 1
-            if content_score >= 0.5 or attestation_score >= 0.6:
-                expected_derived_union_positive_count += 1
+            attack_sample_role = str(attack_event["sample_role"])
+            codeword_agreement = 0.6 + 0.05 * float(attack_event_index % 4)
+            if attack_sample_role == pw04_module.ATTACKED_POSITIVE_SAMPLE_ROLE:
+                expected_positive_attack_event_count += 1
+                expected_payload_codeword_agreement_values.append(codeword_agreement)
+                expected_payload_attestation_score_values.append(attestation_score)
+                if content_score >= 0.5:
+                    expected_formal_final_positive_count += 1
+                if attestation_score >= 0.6:
+                    expected_formal_attestation_positive_count += 1
+                if content_score >= 0.5 or attestation_score >= 0.6:
+                    expected_derived_union_positive_count += 1
+            else:
+                expected_negative_attack_event_count += 1
+                if content_score >= 0.5:
+                    expected_formal_final_negative_false_accept_count += 1
+                if attestation_score >= 0.6:
+                    expected_formal_attestation_negative_false_accept_count += 1
+                if content_score >= 0.5 or attestation_score >= 0.6:
+                    expected_derived_union_negative_false_accept_count += 1
 
             severity_metadata = {
                 "severity_status": attack_event.get("severity_status"),
@@ -625,10 +654,58 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
                 "anchor_digest": f"anchor_digest_{attack_event_index:06d}" if attack_event_index % 4 != 3 else None,
             }
             parent_prompt_text = str(attack_event.get("prompt_text") or ("prompt one" if attack_event_index % 2 == 0 else "prompt two"))
+            parent_event_id = str(attack_event["parent_event_id"])
+            parent_material = parent_attestation_materials.get(parent_event_id)
+            if parent_material is None:
+                statement = AttestationStatement(
+                    schema=ATTESTATION_SCHEMA,
+                    model_id="sd3-test",
+                    prompt_commit=f"prompt_commit_{parent_event_id}",
+                    seed_commit=f"seed_commit_{parent_event_id}",
+                    plan_digest=f"plan_digest_{parent_event_id}",
+                    event_nonce=f"nonce_{parent_event_id}",
+                    time_bucket="2026-03-01",
+                )
+                attestation_digest = compute_attestation_digest(statement)
+                signed_bundle = build_signed_attestation_bundle(
+                    statement,
+                    attestation_digest,
+                    attestation_master_key,
+                    lf_payload_hex="ab" * 16,
+                    trace_commit="cd" * 32,
+                    geo_anchor_seed=attack_event_index,
+                )
+                parent_embed_record_path = family_root / "source_attestation" / f"{parent_event_id}_embed_record.json"
+                write_json_atomic(
+                    parent_embed_record_path,
+                    {
+                        "attestation": {
+                            "status": "ok",
+                            "statement": statement.as_dict(),
+                            "attestation_digest": attestation_digest,
+                            "signed_bundle": signed_bundle,
+                        }
+                    },
+                )
+                parent_material = {
+                    "parent_embed_record_path": normalize_path_value(parent_embed_record_path),
+                }
+                parent_attestation_materials[parent_event_id] = parent_material
+
+            runtime_config_snapshot_path = event_root / "runtime_config_snapshot.json"
+            write_json_atomic(
+                runtime_config_snapshot_path,
+                {
+                    "__attestation_verify_k_master__": attestation_master_key,
+                    "attestation": {
+                        "use_trajectory_mix": True,
+                    },
+                },
+            )
 
             detect_record_path = shard_root / "records" / f"event_{attack_event_index:06d}_detect_record.json"
             detect_payload = {
-                "sample_role": pw04_module.ATTACKED_POSITIVE_SAMPLE_ROLE,
+                "sample_role": attack_sample_role,
                 "parent_event_id": None,
                 "paper_workflow_parent_event_id": attack_event["parent_event_id"],
                 "paper_workflow_attack_event_id": attack_event_id,
@@ -642,6 +719,14 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
                 "content_evidence_payload": {
                     "status": "ok",
                     "content_chain_score": content_score,
+                    "score_parts": {
+                        "lf_trajectory_detect_trace": {
+                            "codeword_agreement": codeword_agreement,
+                            "n_bits_compared": 96,
+                            "detect_variant": "correlation_v2",
+                            "message_source": "attestation_event_digest",
+                        }
+                    },
                 },
                 "attestation": {
                     "final_event_attested_decision": {
@@ -693,9 +778,12 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
                 "event_id": attack_event_id,
                 "attack_event_id": attack_event_id,
                 "attack_event_index": attack_event_index,
-                "sample_role": pw04_module.ATTACKED_POSITIVE_SAMPLE_ROLE,
+                "sample_role": attack_sample_role,
                 "parent_event_id": attack_event["parent_event_id"],
-                "parent_event_reference": {"prompt_text": parent_prompt_text},
+                "parent_event_reference": {
+                    "prompt_text": parent_prompt_text,
+                    "parent_embed_record_path": parent_material["parent_embed_record_path"],
+                },
                 "parent_source_image_path": normalize_path_value(parent_source_image_path),
                 "attack_family": attack_event["attack_family"],
                 "attack_config_name": attack_event["attack_config_name"],
@@ -703,6 +791,7 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
                 "attack_params_digest": attack_event["attack_params_digest"],
                 "severity_metadata": severity_metadata,
                 "geometry_diagnostics": geometry_diagnostics,
+                "runtime_config_snapshot_path": normalize_path_value(runtime_config_snapshot_path),
                 "source_finalize_manifest_digest": str(pw02_fixture["finalize_manifest_digest"]),
                 "threshold_artifact_paths": threshold_artifact_paths,
                 "attacked_image_path": normalize_path_value(attacked_image_path),
@@ -719,7 +808,7 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
                 "artifact_type": "paper_workflow_attack_shard_manifest",
                 "schema_version": "pw_stage_03_v1",
                 "family_id": summary["family_id"],
-                "sample_role": pw04_module.ATTACKED_POSITIVE_SAMPLE_ROLE,
+                "sample_role": pw04_module.MIXED_ATTACK_SAMPLE_ROLE,
                 "attack_shard_index": attack_shard_index,
                 "status": "completed",
                 "event_count": len(events_payload),
@@ -732,6 +821,13 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
         )
 
     expected_attack_event_count = int(attack_shard_plan["attack_event_count"])
+    unique_positive_parent_count = len(
+        {
+            str(row["parent_event_id"])
+            for row in cast(List[Dict[str, Any]], attack_event_grid)
+            if str(row["sample_role"]) == pw04_module.ATTACKED_POSITIVE_SAMPLE_ROLE
+        }
+    )
     return {
         "family_root": family_root,
         "attack_event_grid": attack_event_grid,
@@ -740,9 +836,20 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
         "event_manifest_paths": event_manifest_paths,
         "detect_record_paths": detect_record_paths,
         "expected_attack_event_count": expected_attack_event_count,
+        "expected_positive_attack_event_count": expected_positive_attack_event_count,
+        "expected_negative_attack_event_count": expected_negative_attack_event_count,
         "expected_formal_final_positive_count": expected_formal_final_positive_count,
         "expected_formal_attestation_positive_count": expected_formal_attestation_positive_count,
         "expected_derived_union_positive_count": expected_derived_union_positive_count,
+        "expected_formal_final_negative_false_accept_count": expected_formal_final_negative_false_accept_count,
+        "expected_formal_attestation_negative_false_accept_count": expected_formal_attestation_negative_false_accept_count,
+        "expected_derived_union_negative_false_accept_count": expected_derived_union_negative_false_accept_count,
+        "expected_payload_mean_codeword_agreement": sum(expected_payload_codeword_agreement_values) / len(expected_payload_codeword_agreement_values),
+        "expected_payload_min_codeword_agreement": min(expected_payload_codeword_agreement_values),
+        "expected_payload_max_codeword_agreement": max(expected_payload_codeword_agreement_values),
+        "expected_payload_mean_attestation_score": sum(expected_payload_attestation_score_values) / len(expected_payload_attestation_score_values),
+        "expected_wrong_event_challenge_attempt_count": expected_positive_attack_event_count,
+        "expected_wrong_event_rejected_count": expected_positive_attack_event_count if unique_positive_parent_count >= 2 else 0,
     }
 
 
@@ -802,19 +909,24 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     geo_chain_usage_by_family_path = Path(str(pw04_summary["geo_chain_usage_by_family_path"]))
     geo_diagnostics_summary_path = Path(str(pw04_summary["geo_diagnostics_summary_path"]))
     payload_attack_summary_path = Path(str(pw04_summary["payload_attack_summary_path"]))
+    wrong_event_attestation_challenge_summary_path = Path(str(pw04_summary["wrong_event_attestation_challenge_summary_path"]))
     quality_robustness_tradeoff_path = Path(str(pw04_summary["quality_robustness_tradeoff_path"]))
     quality_robustness_frontier_path = Path(str(pw04_summary["quality_robustness_frontier_path"]))
     system_final_auxiliary_attack_summary_path = Path(str(pw04_summary["system_final_auxiliary_attack_summary_path"]))
     system_final_auxiliary_attack_by_family_path = Path(str(pw04_summary["system_final_auxiliary_attack_by_family_path"]))
     system_final_auxiliary_attack_by_condition_path = Path(str(pw04_summary["system_final_auxiliary_attack_by_condition_path"]))
+    attack_negative_pool_manifest_path = Path(str(pw04_summary["attack_negative_pool_manifest_path"]))
+    formal_attack_negative_metrics_path = Path(str(pw04_summary["formal_attack_negative_metrics_path"]))
 
     required_paths = [
         Path(str(pw04_summary["summary_path"])),
         Path(str(pw04_summary["attack_merge_manifest_path"])),
         Path(str(pw04_summary["attack_positive_pool_manifest_path"])),
+        attack_negative_pool_manifest_path,
         Path(str(pw04_summary["formal_attack_final_decision_metrics_path"])),
         Path(str(pw04_summary["formal_attack_attestation_metrics_path"])),
         Path(str(pw04_summary["derived_attack_union_metrics_path"])),
+        formal_attack_negative_metrics_path,
         Path(str(pw04_summary["per_attack_family_metrics_path"])),
         Path(str(pw04_summary["per_attack_condition_metrics_path"])),
         attack_quality_metrics_path,
@@ -824,6 +936,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
         geo_chain_usage_by_family_path,
         geo_diagnostics_summary_path,
         payload_attack_summary_path,
+        wrong_event_attestation_challenge_summary_path,
         quality_robustness_tradeoff_path,
         quality_robustness_frontier_path,
         system_final_auxiliary_attack_summary_path,
@@ -850,9 +963,11 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
 
     merge_manifest = _load_json_dict(Path(str(pw04_summary["attack_merge_manifest_path"])))
     pool_manifest = _load_json_dict(Path(str(pw04_summary["attack_positive_pool_manifest_path"])))
+    attack_negative_pool_manifest = _load_json_dict(attack_negative_pool_manifest_path)
     formal_final_metrics = _load_json_dict(Path(str(pw04_summary["formal_attack_final_decision_metrics_path"])))
     formal_attestation_metrics = _load_json_dict(Path(str(pw04_summary["formal_attack_attestation_metrics_path"])))
     derived_union_metrics = _load_json_dict(Path(str(pw04_summary["derived_attack_union_metrics_path"])))
+    formal_attack_negative_metrics = _load_json_dict(formal_attack_negative_metrics_path)
     attack_quality_metrics = _load_json_dict(attack_quality_metrics_path)
     clean_attack_overview = _load_json_dict(Path(str(pw04_summary["clean_attack_overview_path"])))
     paper_metric_registry = _load_json_dict(Path(str(pw04_summary["paper_scope_registry_path"])))
@@ -875,6 +990,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     geometry_family_rows = _load_csv_rows(geo_chain_usage_by_family_path)
     geometry_summary_rows = _load_csv_rows(geo_diagnostics_summary_path)
     payload_attack_summary = _load_json_dict(payload_attack_summary_path)
+    wrong_event_attestation_challenge_summary = _load_json_dict(wrong_event_attestation_challenge_summary_path)
     tradeoff_rows = _load_csv_rows(quality_robustness_tradeoff_path)
     system_final_auxiliary_attack_summary = _load_json_dict(system_final_auxiliary_attack_summary_path)
     system_final_auxiliary_family_rows = _load_csv_rows(system_final_auxiliary_attack_by_family_path)
@@ -882,6 +998,8 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     attack_event_rows = read_jsonl(Path(str(pw04_summary["attack_event_table_path"])))
 
     expected_attack_event_count = int(pw03_fixture["expected_attack_event_count"])
+    expected_positive_attack_event_count = int(pw03_fixture["expected_positive_attack_event_count"])
+    expected_negative_attack_event_count = int(pw03_fixture["expected_negative_attack_event_count"])
     assert pw04_summary["status"] == "completed"
     assert pw04_summary["paper_exports_completed"] is True
     assert pw04_summary["tail_estimation_enabled"] is False
@@ -890,32 +1008,42 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert merge_manifest["completed_attack_event_count"] == expected_attack_event_count
     assert merge_manifest["attack_family_count"] == len({row["attack_family"] for row in cast(List[Dict[str, Any]], pw03_fixture["attack_event_grid"])})
     assert merge_manifest["parent_event_count"] == len({row["parent_event_id"] for row in cast(List[Dict[str, Any]], pw03_fixture["attack_event_grid"])})
-    assert pool_manifest["event_count"] == expected_attack_event_count
+    assert pw04_summary["attacked_positive_event_count"] == expected_positive_attack_event_count
+    assert pw04_summary["attacked_negative_event_count"] == expected_negative_attack_event_count
+    assert pool_manifest["event_count"] == expected_positive_attack_event_count
+    assert attack_negative_pool_manifest["event_count"] == expected_negative_attack_event_count
 
     assert formal_final_metrics["metrics"]["accepted_count"] == pw03_fixture["expected_formal_final_positive_count"]
     assert formal_final_metrics["metrics"]["attack_tpr"] == pytest.approx(
-        pw03_fixture["expected_formal_final_positive_count"] / expected_attack_event_count
+        pw03_fixture["expected_formal_final_positive_count"] / expected_positive_attack_event_count
     )
     assert formal_attestation_metrics["metrics"]["accepted_count"] == pw03_fixture["expected_formal_attestation_positive_count"]
     assert formal_attestation_metrics["metrics"]["attack_tpr"] == pytest.approx(
-        pw03_fixture["expected_formal_attestation_positive_count"] / expected_attack_event_count
+        pw03_fixture["expected_formal_attestation_positive_count"] / expected_positive_attack_event_count
     )
     assert derived_union_metrics["metrics"]["accepted_count"] == pw03_fixture["expected_derived_union_positive_count"]
     assert derived_union_metrics["metrics"]["attack_tpr"] == pytest.approx(
-        pw03_fixture["expected_derived_union_positive_count"] / expected_attack_event_count
+        pw03_fixture["expected_derived_union_positive_count"] / expected_positive_attack_event_count
     )
-    assert attack_quality_metrics["overall"]["count"] == expected_attack_event_count
+    assert formal_attack_negative_metrics["metrics"]["attack_negative_count"] == expected_negative_attack_event_count
+    assert formal_attack_negative_metrics["metrics"]["formal_final_false_accept_count"] == pw03_fixture["expected_formal_final_negative_false_accept_count"]
+    assert formal_attack_negative_metrics["metrics"]["formal_attestation_false_accept_count"] == pw03_fixture["expected_formal_attestation_negative_false_accept_count"]
+    assert formal_attack_negative_metrics["metrics"]["derived_attack_union_false_accept_count"] == pw03_fixture["expected_derived_union_negative_false_accept_count"]
+    assert attack_quality_metrics["overall"]["count"] == expected_positive_attack_event_count
     assert attack_quality_metrics["overall"]["mean_psnr"] is not None
     assert attack_quality_metrics["overall"]["mean_ssim"] is not None
     assert attack_quality_metrics["overall"]["mean_clip_text_similarity"] is not None
     assert attack_quality_metrics["overall"]["clip_model_name"] == pw_quality_metrics_module.CLIP_MODEL_NAME
-    assert attack_quality_metrics["overall"]["clip_sample_count"] == expected_attack_event_count
+    assert attack_quality_metrics["overall"]["clip_sample_count"] == expected_positive_attack_event_count
     assert attack_quality_metrics["overall"]["clip_status"] == "ok"
     assert clean_attack_overview["attack_quality_mean_psnr"] == attack_quality_metrics["overall"]["mean_psnr"]
     assert clean_attack_overview["attack_quality_mean_ssim"] == attack_quality_metrics["overall"]["mean_ssim"]
     assert clean_attack_overview["attack_quality_mean_clip_text_similarity"] == attack_quality_metrics["overall"]["mean_clip_text_similarity"]
     assert clean_attack_overview["attack_quality_clip_model_name"] == pw_quality_metrics_module.CLIP_MODEL_NAME
     assert clean_attack_overview["attack_quality_clip_status"] == "ok"
+    assert clean_attack_overview["attack_negative_formal_fpr"] == formal_attack_negative_metrics["metrics"]["formal_final_attack_fpr"]
+    assert clean_attack_overview["attack_negative_formal_attestation_fpr"] == formal_attack_negative_metrics["metrics"]["formal_attestation_attack_fpr"]
+    assert clean_attack_overview["attack_negative_derived_union_fpr"] == formal_attack_negative_metrics["metrics"]["derived_attack_union_attack_fpr"]
 
     assert paper_metric_registry["canonical_scopes"] == ["content_chain", "event_attestation", "system_final"]
     assert paper_metric_registry["legacy_scope_mapping"]["content_chain"]["attack"]["legacy_scope_name"] == "formal_attack_final_decision"
@@ -999,12 +1127,50 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert all(row["inverse_transform_success_status"] == "ok" for row in geometry_family_rows)
     assert all(row["attention_anchor_available_status"] == "ok" for row in geometry_family_rows)
     assert len(geometry_summary_rows) == 1
-    assert geometry_summary_rows[0]["event_count"] == str(expected_attack_event_count)
+    assert geometry_summary_rows[0]["event_count"] == str(expected_positive_attack_event_count)
     assert geometry_summary_rows[0]["future_upstream_sidecar_required"] == "False"
 
-    assert payload_attack_summary["status"] == "not_available"
-    assert "decoded bits" in str(payload_attack_summary["reason"])
-    assert payload_attack_summary["future_upstream_sidecar_required"] is True
+    assert payload_attack_summary["status"] == "ok"
+    assert payload_attack_summary["reason"] is None
+    assert payload_attack_summary["future_upstream_sidecar_required"] is False
+    assert payload_attack_summary["overall"]["event_count"] == expected_positive_attack_event_count
+    assert payload_attack_summary["overall"]["available_payload_event_count"] == expected_positive_attack_event_count
+    assert payload_attack_summary["overall"]["missing_payload_event_count"] == 0
+    assert payload_attack_summary["overall"]["mean_codeword_agreement"] == pytest.approx(
+        pw03_fixture["expected_payload_mean_codeword_agreement"]
+    )
+    assert payload_attack_summary["overall"]["min_codeword_agreement"] == pytest.approx(
+        pw03_fixture["expected_payload_min_codeword_agreement"]
+    )
+    assert payload_attack_summary["overall"]["max_codeword_agreement"] == pytest.approx(
+        pw03_fixture["expected_payload_max_codeword_agreement"]
+    )
+    assert payload_attack_summary["overall"]["mean_n_bits_compared"] == pytest.approx(96.0)
+    assert payload_attack_summary["overall"]["attested_event_count"] == pw03_fixture["expected_formal_attestation_positive_count"]
+    assert payload_attack_summary["overall"]["mean_event_attestation_score"] == pytest.approx(
+        pw03_fixture["expected_payload_mean_attestation_score"]
+    )
+    assert payload_attack_summary["overall"]["lf_detect_variants"] == ["correlation_v2"]
+    assert payload_attack_summary["overall"]["message_sources"] == ["attestation_event_digest"]
+    assert len(payload_attack_summary["by_attack_family"]) == attack_family_count
+    assert wrong_event_attestation_challenge_summary["status"] == "ok"
+    assert wrong_event_attestation_challenge_summary["reason"] is None
+    assert wrong_event_attestation_challenge_summary["future_upstream_sidecar_required"] is False
+    assert wrong_event_attestation_challenge_summary["overall"]["event_count"] == expected_positive_attack_event_count
+    assert wrong_event_attestation_challenge_summary["overall"]["attempted_event_count"] == pw03_fixture["expected_wrong_event_challenge_attempt_count"]
+    assert wrong_event_attestation_challenge_summary["overall"]["bundle_verified_count"] == pw03_fixture["expected_wrong_event_challenge_attempt_count"]
+    assert wrong_event_attestation_challenge_summary["overall"]["wrong_event_rejected_count"] == pw03_fixture["expected_wrong_event_rejected_count"]
+    assert wrong_event_attestation_challenge_summary["overall"]["wrong_event_false_accept_count"] == 0
+    assert wrong_event_attestation_challenge_summary["overall"]["wrong_event_rejection_rate"] == pytest.approx(1.0)
+    assert len(wrong_event_attestation_challenge_summary["by_attack_family"]) == attack_family_count
+    assert all(row["status"] == "ok" for row in wrong_event_attestation_challenge_summary["rows"])
+    assert cast(Dict[str, Any], pw04_summary["analysis_only_artifact_paths"])["pw04_wrong_event_attestation_challenge_summary"] == normalize_path_value(
+        wrong_event_attestation_challenge_summary_path
+    )
+    assert cast(Dict[str, Any], pw04_summary["analysis_only_artifact_annotations"])["pw04_wrong_event_attestation_challenge_summary"] == {
+        "canonical": False,
+        "analysis_only": True,
+    }
 
     assert system_final_auxiliary_attack_summary["scope"] == "system_final_auxiliary"
     assert system_final_auxiliary_attack_summary["canonical"] is False
@@ -1012,7 +1178,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert system_final_auxiliary_attack_summary["overall"]["consistency_status"] == "exact_match"
     assert system_final_auxiliary_attack_summary["overall"]["consistency_mismatch_count"] == 0
     assert system_final_auxiliary_attack_summary["overall"]["system_final_auxiliary_attack_tpr"] == pytest.approx(
-        pw03_fixture["expected_derived_union_positive_count"] / expected_attack_event_count
+        pw03_fixture["expected_derived_union_positive_count"] / expected_positive_attack_event_count
     )
     assert system_final_auxiliary_family_rows
     assert system_final_auxiliary_condition_rows
@@ -1050,6 +1216,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
         expected_attack_event = attack_event_lookup[row["attack_event_id"]]
         assert row["attack_family"] == expected_attack_event["attack_family"]
         assert row["parent_event_id"] == expected_attack_event["parent_event_id"]
+        assert row["sample_role"] == expected_attack_event["sample_role"]
         assert "geo_rescue_eligible" in row
         assert "geo_rescue_applied" in row
         assert "geo_not_used_reason" in row
@@ -1061,11 +1228,19 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
         assert row["inverse_transform_success_status"] == "ok"
         assert row["attention_anchor_available"] in {True, False}
         assert row["attention_anchor_available_status"] == "ok"
-        assert row["attack_quality_status"] == "ok"
-        assert row["attack_quality_psnr"] is not None
-        assert row["attack_quality_ssim"] is not None
-        assert "attack_quality_lpips" in row
-        assert row["attack_quality_clip_text_similarity"] is not None
+        if row["sample_role"] == pw03_module.ATTACKED_POSITIVE_SAMPLE_ROLE:
+            assert row["attack_quality_status"] == "ok"
+            assert row["attack_quality_psnr"] is not None
+            assert row["attack_quality_ssim"] is not None
+            assert "attack_quality_lpips" in row
+            assert row["attack_quality_clip_text_similarity"] is not None
+        else:
+            assert row["sample_role"] == pw03_module.ATTACKED_NEGATIVE_SAMPLE_ROLE
+            assert row["attack_quality_status"] == "not_applicable"
+            assert row["attack_quality_psnr"] is None
+            assert row["attack_quality_ssim"] is None
+            assert row["attack_quality_lpips"] is None
+            assert row["attack_quality_clip_text_similarity"] is None
 
     assert any(row["geo_rescue_applied"] is True for row in attack_event_rows)
     assert any(isinstance(row["geo_not_used_reason"], str) and row["geo_not_used_reason"] for row in attack_event_rows)

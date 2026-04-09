@@ -33,12 +33,15 @@ ACTIVE_SAMPLE_ROLE = "positive_source"
 CLEAN_NEGATIVE_SAMPLE_ROLE = "clean_negative"
 PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE = "planner_conditioned_control_negative"
 ATTACKED_POSITIVE_SAMPLE_ROLE = "attacked_positive"
+ATTACKED_NEGATIVE_SAMPLE_ROLE = "attacked_negative"
+ATTACK_SAMPLE_ROLES = [ATTACKED_POSITIVE_SAMPLE_ROLE, ATTACKED_NEGATIVE_SAMPLE_ROLE]
+MIXED_ATTACK_SAMPLE_ROLE = "mixed_attack_roles"
 ACTIVE_SOURCE_SAMPLE_ROLES = [
     ACTIVE_SAMPLE_ROLE,
     CLEAN_NEGATIVE_SAMPLE_ROLE,
     PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
 ]
-RESERVED_SAMPLE_ROLES = [ATTACKED_POSITIVE_SAMPLE_ROLE]
+RESERVED_SAMPLE_ROLES = ATTACK_SAMPLE_ROLES
 SAMPLE_ROLE_DIRECTORY_NAMES = {
     ACTIVE_SAMPLE_ROLE: "positive",
     CLEAN_NEGATIVE_SAMPLE_ROLE: "negative",
@@ -1048,7 +1051,7 @@ def build_attack_event_grid(
 
     Args:
         family_id: Family identifier.
-        parent_events: Positive source parent-event rows.
+        parent_events: Attack-eligible parent-event rows.
         attack_conditions: Concrete attack-condition rows.
 
     Returns:
@@ -1075,10 +1078,16 @@ def build_attack_event_grid(
             raise ValueError("parent event missing event_id")
         if not isinstance(parent_event_index, int) or parent_event_index < 0:
             raise ValueError("parent event missing event_index")
-        if parent_sample_role != ACTIVE_SAMPLE_ROLE:
+        if parent_sample_role not in {ACTIVE_SAMPLE_ROLE, CLEAN_NEGATIVE_SAMPLE_ROLE}:
             raise ValueError(
-                f"PW03 parent events must be positive_source, got: {parent_sample_role}"
+                "PW03 parent events must be positive_source or clean_negative, "
+                f"got: {parent_sample_role}"
             )
+        attack_sample_role = (
+            ATTACKED_POSITIVE_SAMPLE_ROLE
+            if parent_sample_role == ACTIVE_SAMPLE_ROLE
+            else ATTACKED_NEGATIVE_SAMPLE_ROLE
+        )
 
         for attack_condition_node in attack_conditions:
             attack_condition = dict(cast(Mapping[str, Any], attack_condition_node))
@@ -1101,10 +1110,10 @@ def build_attack_event_grid(
                     "attack_event_id": attack_event_id,
                     "event_index": attack_event_index,
                     "attack_event_index": attack_event_index,
-                    "sample_role": ATTACKED_POSITIVE_SAMPLE_ROLE,
+                    "sample_role": attack_sample_role,
                     "parent_event_id": parent_event_id,
                     "parent_event_index": parent_event_index,
-                    "parent_sample_role": ACTIVE_SAMPLE_ROLE,
+                    "parent_sample_role": parent_sample_role,
                     "attack_family": attack_condition.get("attack_family"),
                     "attack_config_name": attack_condition.get("attack_config_name"),
                     "attack_condition_key": attack_condition_key,
@@ -1194,11 +1203,19 @@ def build_attack_shard_plan(
         cast(List[str], shard_row["assigned_attack_families"]).append(attack_family)
         cast(List[str], shard_row["assigned_attack_config_names"]).append(attack_config_name)
 
+    attack_sample_roles = sorted(
+        {
+            str(event.get("sample_role"))
+            for event in ordered_events
+            if isinstance(event.get("sample_role"), str) and str(event.get("sample_role"))
+        }
+    )
     return {
         "artifact_type": "paper_workflow_attack_shard_plan",
         "schema_version": "pw_stage_03_v1",
         "family_id": family_id,
-        "sample_role": ATTACKED_POSITIVE_SAMPLE_ROLE,
+        "sample_role": attack_sample_roles[0] if len(attack_sample_roles) == 1 else MIXED_ATTACK_SAMPLE_ROLE,
+        "attack_sample_roles": attack_sample_roles,
         "attack_shard_count": attack_shard_count,
         "attack_event_count": len(ordered_events),
         "materialization_profile": "first_value_per_condition",
