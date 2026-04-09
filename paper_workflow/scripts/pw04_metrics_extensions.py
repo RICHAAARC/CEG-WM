@@ -1217,6 +1217,364 @@ def _collect_geometry_conditional_rows(
     return conditional_rows
 
 
+def _build_geometry_conditional_rescue_summary(
+    rows: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """
+    功能：在 content-only 失败子集上汇总 geometry conditional rescue 指标。
+
+    Summarize geometry conditional rescue metrics on the content-failed subset.
+
+    Args:
+        rows: Materialized attack event rows for one grouping.
+
+    Returns:
+        Conditional rescue metric summary.
+    """
+    if not isinstance(rows, Sequence):
+        raise TypeError("rows must be Sequence")
+
+    event_count = len(rows)
+    formal_final_positive_count = 0
+    formal_attestation_positive_count = 0
+    content_failed_subset_event_count = 0
+    geo_only_positive_count = 0
+    geo_rescue_eligible_on_content_failed_count = 0
+    geo_rescue_applied_on_content_failed_count = 0
+
+    for row in rows:
+        formal_record = _extract_mapping(row.get("formal_record"))
+        formal_final_decision = _extract_mapping(formal_record.get("formal_final_decision"))
+        formal_event_attestation_decision = _extract_mapping(
+            formal_record.get("formal_event_attestation_decision")
+        )
+        attestation_payload = _extract_mapping(formal_record.get("attestation"))
+        image_evidence_payload = _extract_mapping(attestation_payload.get("image_evidence_result"))
+
+        formal_final_positive = formal_final_decision.get("is_watermarked") is True
+        formal_attestation_positive = formal_event_attestation_decision.get("is_watermarked") is True
+        geo_rescue_eligible = image_evidence_payload.get("geo_rescue_eligible") is True
+        geo_rescue_applied = image_evidence_payload.get("geo_rescue_applied") is True
+
+        if formal_final_positive:
+            formal_final_positive_count += 1
+        if formal_attestation_positive:
+            formal_attestation_positive_count += 1
+        if not formal_final_positive:
+            content_failed_subset_event_count += 1
+            if geo_rescue_eligible:
+                geo_rescue_eligible_on_content_failed_count += 1
+            if geo_rescue_applied:
+                geo_rescue_applied_on_content_failed_count += 1
+            if formal_attestation_positive:
+                geo_only_positive_count += 1
+
+    content_only_positive_rate = (
+        float(formal_final_positive_count / event_count) if event_count > 0 else None
+    )
+    attestation_positive_rate = (
+        float(formal_attestation_positive_count / event_count) if event_count > 0 else None
+    )
+    conditional_rescue_rate = (
+        float(geo_only_positive_count / content_failed_subset_event_count)
+        if content_failed_subset_event_count > 0
+        else None
+    )
+    rescue_precision = (
+        float(geo_only_positive_count / geo_rescue_applied_on_content_failed_count)
+        if geo_rescue_applied_on_content_failed_count > 0
+        else None
+    )
+    rescue_lift_over_content_only = (
+        float(attestation_positive_rate - content_only_positive_rate)
+        if attestation_positive_rate is not None and content_only_positive_rate is not None
+        else None
+    )
+    if event_count <= 0:
+        status_value = "not_available"
+        reason_value = "no_attack_events_available_for_conditional_rescue_metrics"
+    elif content_failed_subset_event_count <= 0:
+        status_value = "not_available"
+        reason_value = "no_content_failed_subset_available"
+    else:
+        status_value = "ok"
+        reason_value = None
+
+    return {
+        "event_count": event_count,
+        "formal_final_positive_count": formal_final_positive_count,
+        "formal_attestation_positive_count": formal_attestation_positive_count,
+        "content_only_positive_rate": content_only_positive_rate,
+        "attestation_positive_rate": attestation_positive_rate,
+        "content_failed_subset_event_count": content_failed_subset_event_count,
+        "geo_rescue_eligible_on_content_failed_count": geo_rescue_eligible_on_content_failed_count,
+        "geo_rescue_applied_on_content_failed_count": geo_rescue_applied_on_content_failed_count,
+        "geo_only_positive_on_content_failed_subset": geo_only_positive_count,
+        "geo_only_positive_on_content_failed_subset_rate": conditional_rescue_rate,
+        "conditional_rescue_rate": conditional_rescue_rate,
+        "rescue_precision": rescue_precision,
+        "rescue_lift_over_content_only": rescue_lift_over_content_only,
+        "status": status_value,
+        "reason": reason_value,
+    }
+
+
+def _build_geometry_conditional_rescue_metrics_payload(
+    *,
+    family_id: str,
+    attack_event_rows: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """
+    功能：构造 geometry conditional rescue 的显式导出。 
+
+    Build the explicit geometry conditional rescue metrics export.
+
+    Args:
+        family_id: Family identifier.
+        attack_event_rows: Materialized attack event rows.
+
+    Returns:
+        Geometry conditional rescue metrics payload.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(attack_event_rows, Sequence):
+        raise TypeError("attack_event_rows must be Sequence")
+
+    grouped_by_family: Dict[str, List[Dict[str, Any]]] = {}
+    grouped_by_condition: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    for attack_event_row in attack_event_rows:
+        attack_family = str(attack_event_row.get("attack_family") or "<unknown>")
+        attack_condition_key = str(attack_event_row.get("attack_condition_key") or "<unknown>")
+        grouped_by_family.setdefault(attack_family, []).append(dict(cast(Mapping[str, Any], attack_event_row)))
+        grouped_by_condition.setdefault((attack_family, attack_condition_key), []).append(
+            dict(cast(Mapping[str, Any], attack_event_row))
+        )
+
+    overall_summary = _build_geometry_conditional_rescue_summary(attack_event_rows)
+    return {
+        "artifact_type": "paper_workflow_pw04_geometry_conditional_rescue_metrics_export",
+        "schema_version": "pw_stage_04_v1",
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "metric_name": "geometry_conditional_rescue_metrics",
+        "canonical": False,
+        "analysis_only": True,
+        "status": overall_summary["status"],
+        "reason": overall_summary["reason"],
+        "definition": {
+            "conditional_rescue_rate": "geo_only_positive_on_content_failed_subset divided by content_failed_subset_event_count",
+            "rescue_precision": "geo_only_positive_on_content_failed_subset divided by geo_rescue_applied_on_content_failed_count",
+            "rescue_lift_over_content_only": "attestation_positive_rate minus content_only_positive_rate within the same grouping",
+            "geo_only_positive_on_content_failed_subset": "count of rows with formal_final_decision negative and formal_event_attestation_decision positive",
+        },
+        "overall": overall_summary,
+        "by_attack_family": [
+            {
+                "attack_family": attack_family,
+                **_build_geometry_conditional_rescue_summary(rows),
+            }
+            for attack_family, rows in sorted(grouped_by_family.items())
+        ],
+        "by_attack_condition": [
+            {
+                "attack_family": attack_family,
+                "attack_condition_key": attack_condition_key,
+                "attack_config_name": next(
+                    (
+                        row.get("attack_config_name")
+                        for row in rows
+                        if isinstance(row.get("attack_config_name"), str) and row.get("attack_config_name")
+                    ),
+                    None,
+                ),
+                **_build_geometry_conditional_rescue_summary(rows),
+            }
+            for (attack_family, attack_condition_key), rows in sorted(grouped_by_condition.items())
+        ],
+    }
+
+
+def _summarize_wrong_event_outcomes(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    evaluation_mode: str,
+) -> Dict[str, Any]:
+    """
+    功能：按 clean 或 attack 视角汇总 wrong-event FAR。 
+
+    Summarize wrong-event rejection and false-accept outcomes for one view.
+
+    Args:
+        rows: Wrong-event challenge rows.
+        evaluation_mode: Either clean or attack.
+
+    Returns:
+        FAR summary mapping.
+    """
+    if not isinstance(rows, Sequence):
+        raise TypeError("rows must be Sequence")
+    if evaluation_mode not in {"clean", "attack"}:
+        raise ValueError(f"unsupported evaluation_mode: {evaluation_mode}")
+
+    attempted_event_count = 0
+    wrong_event_rejected_count = 0
+    wrong_event_false_accept_count = 0
+    for row in rows:
+        if evaluation_mode == "clean":
+            verify_status = row.get("clean_parent_verify_status")
+            rejected_flag = row.get("clean_parent_wrong_event_rejected")
+            if not isinstance(rejected_flag, bool):
+                rejected_flag = row.get("wrong_event_rejected")
+        else:
+            verify_status = row.get("attack_verify_status")
+            rejected_flag = row.get("attack_wrong_event_rejected")
+
+        verify_token = str(verify_status) if isinstance(verify_status, str) and verify_status else None
+        if isinstance(rejected_flag, bool) or verify_token in {"rejected", "false_accept"}:
+            attempted_event_count += 1
+            if rejected_flag is True or verify_token == "rejected":
+                wrong_event_rejected_count += 1
+            elif rejected_flag is False or verify_token == "false_accept":
+                wrong_event_false_accept_count += 1
+
+    wrong_event_far = (
+        float(wrong_event_false_accept_count / attempted_event_count)
+        if attempted_event_count > 0
+        else None
+    )
+    return {
+        "attempted_event_count": attempted_event_count,
+        "wrong_event_rejected_count": wrong_event_rejected_count,
+        "wrong_event_false_accept_count": wrong_event_false_accept_count,
+        "wrong_event_far": wrong_event_far,
+    }
+
+
+def _build_wrong_event_far_metric_payload(
+    *,
+    family_id: str,
+    metric_name: str,
+    summary_path: Path,
+    metric_summary: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """
+    功能：构造显式 wrong-event FAR 导出。 
+
+    Build one explicit wrong-event FAR export payload.
+
+    Args:
+        family_id: Family identifier.
+        metric_name: Export metric name.
+        summary_path: Source summary path.
+        metric_summary: FAR summary mapping.
+
+    Returns:
+        Explicit FAR export payload.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(metric_name, str) or not metric_name:
+        raise TypeError("metric_name must be non-empty str")
+    if not isinstance(summary_path, Path):
+        raise TypeError("summary_path must be Path")
+    if not isinstance(metric_summary, Mapping):
+        raise TypeError("metric_summary must be Mapping")
+
+    attempted_event_count = int(metric_summary.get("attempted_event_count", 0) or 0)
+    status_value = "ok" if attempted_event_count > 0 else "not_available"
+    reason_value = None if attempted_event_count > 0 else f"no_{metric_name}_attempt_available"
+    metric_value = _coerce_finite_float(metric_summary.get("wrong_event_far"))
+    payload = {
+        "artifact_type": "paper_workflow_pw04_wrong_event_far_export",
+        "schema_version": "pw_stage_04_v1",
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "metric_name": metric_name,
+        "status": status_value,
+        "reason": reason_value,
+        "canonical": False,
+        "analysis_only": True,
+        "source_artifacts": {
+            "wrong_event_attestation_challenge_summary_path": normalize_path_value(summary_path),
+        },
+        "attempted_event_count": attempted_event_count,
+        "wrong_event_rejected_count": int(metric_summary.get("wrong_event_rejected_count", 0) or 0),
+        "wrong_event_false_accept_count": int(metric_summary.get("wrong_event_false_accept_count", 0) or 0),
+        "metric_value": metric_value,
+    }
+    payload[metric_name] = metric_value
+    return payload
+
+
+def _build_wrong_event_far_by_challenge_type_payload(
+    *,
+    family_id: str,
+    summary_path: Path,
+    challenge_rows: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """
+    功能：按 challenge_type 构造 wrong-event FAR 导出。 
+
+    Build the explicit wrong-event FAR-by-challenge-type export.
+
+    Args:
+        family_id: Family identifier.
+        summary_path: Source summary path.
+        challenge_rows: Wrong-event challenge rows.
+
+    Returns:
+        Challenge-type FAR export payload.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(summary_path, Path):
+        raise TypeError("summary_path must be Path")
+    if not isinstance(challenge_rows, Sequence):
+        raise TypeError("challenge_rows must be Sequence")
+
+    grouped_rows: Dict[str, List[Dict[str, Any]]] = {}
+    for challenge_row in challenge_rows:
+        challenge_type = str(challenge_row.get("challenge_type") or "wrong_statement")
+        grouped_rows.setdefault(challenge_type, []).append(dict(cast(Mapping[str, Any], challenge_row)))
+
+    output_rows: List[Dict[str, Any]] = []
+    for challenge_type, rows in sorted(grouped_rows.items()):
+        clean_summary = _summarize_wrong_event_outcomes(rows, evaluation_mode="clean")
+        attack_summary = _summarize_wrong_event_outcomes(rows, evaluation_mode="attack")
+        output_rows.append(
+            {
+                "challenge_type": challenge_type,
+                "event_count": len(rows),
+                "clean_attempted_event_count": clean_summary["attempted_event_count"],
+                "clean_wrong_event_rejected_count": clean_summary["wrong_event_rejected_count"],
+                "clean_wrong_event_false_accept_count": clean_summary["wrong_event_false_accept_count"],
+                "wrong_event_far_clean": clean_summary["wrong_event_far"],
+                "attack_attempted_event_count": attack_summary["attempted_event_count"],
+                "attack_wrong_event_rejected_count": attack_summary["wrong_event_rejected_count"],
+                "attack_wrong_event_false_accept_count": attack_summary["wrong_event_false_accept_count"],
+                "wrong_event_far_attack": attack_summary["wrong_event_far"],
+            }
+        )
+
+    return {
+        "artifact_type": "paper_workflow_pw04_wrong_event_far_by_challenge_type_export",
+        "schema_version": "pw_stage_04_v1",
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "metric_name": "wrong_event_far_by_challenge_type",
+        "status": "ok" if output_rows else "not_available",
+        "reason": None if output_rows else "no_wrong_event_rows_available",
+        "canonical": False,
+        "analysis_only": True,
+        "source_artifacts": {
+            "wrong_event_attestation_challenge_summary_path": normalize_path_value(summary_path),
+        },
+        "wrong_event_far_by_challenge_type": output_rows,
+        "rows": output_rows,
+    }
+
+
 def _build_payload_attack_summary_payload(
     *,
     family_id: str,
@@ -1414,17 +1772,31 @@ def _build_wrong_event_attestation_challenge_summary_payload(
             row_payload = {
                 "attack_event_id": attack_event_id,
                 "attack_family": attack_family,
+                "attack_condition_key": attack_event_row.get("attack_condition_key"),
                 "parent_event_id": parent_event_id,
+                "source_event_id": parent_event_id,
+                "challenged_event_id": None,
                 "challenge_parent_event_id": None,
+                "challenge_type": "wrong_statement",
                 "status": "missing_upstream_challenge_record",
                 "reason": "PW03 wrong-event attestation challenge record missing",
                 "plan_status": None,
                 "plan_reason": None,
+                "binding_status": None,
+                "verify_status": None,
                 "bundle_verification_status": None,
                 "bundle_verification_mismatch_reasons": [],
                 "wrong_statement_digest": None,
                 "bundle_attestation_digest": None,
                 "wrong_event_rejected": None,
+                "clean_parent_binding_status": None,
+                "clean_parent_verify_status": None,
+                "clean_parent_wrong_event_rejected": None,
+                "attack_binding_status": None,
+                "attack_bundle_verification_status": None,
+                "attack_attestation_digest": None,
+                "attack_verify_status": None,
+                "attack_wrong_event_rejected": None,
             }
             challenge_rows.append(row_payload)
             grouped_rows.setdefault(attack_family, []).append(row_payload)
@@ -1433,12 +1805,18 @@ def _build_wrong_event_attestation_challenge_summary_payload(
         row_payload = {
             "attack_event_id": challenge_record.get("attack_event_id", attack_event_id),
             "attack_family": attack_family,
+            "attack_condition_key": attack_event_row.get("attack_condition_key"),
             "parent_event_id": challenge_record.get("parent_event_id", parent_event_id),
+            "source_event_id": challenge_record.get("source_event_id", parent_event_id),
+            "challenged_event_id": challenge_record.get("challenged_event_id"),
             "challenge_parent_event_id": challenge_record.get("challenge_parent_event_id"),
+            "challenge_type": challenge_record.get("challenge_type", "wrong_statement"),
             "status": challenge_record.get("status", "missing_upstream_challenge_record"),
             "reason": challenge_record.get("reason"),
             "plan_status": challenge_record.get("plan_status"),
             "plan_reason": challenge_record.get("plan_reason"),
+            "binding_status": challenge_record.get("binding_status"),
+            "verify_status": challenge_record.get("verify_status"),
             "bundle_verification_status": challenge_record.get("bundle_verification_status"),
             "bundle_verification_mismatch_reasons": list(
                 challenge_record.get("bundle_verification_mismatch_reasons") or []
@@ -1446,24 +1824,70 @@ def _build_wrong_event_attestation_challenge_summary_payload(
             "wrong_statement_digest": challenge_record.get("wrong_statement_digest"),
             "bundle_attestation_digest": challenge_record.get("bundle_attestation_digest"),
             "wrong_event_rejected": challenge_record.get("wrong_event_rejected"),
+            "clean_parent_binding_status": challenge_record.get("clean_parent_binding_status"),
+            "clean_parent_verify_status": challenge_record.get("clean_parent_verify_status"),
+            "clean_parent_wrong_event_rejected": challenge_record.get("clean_parent_wrong_event_rejected"),
+            "attack_binding_status": challenge_record.get("attack_binding_status"),
+            "attack_bundle_verification_status": challenge_record.get("attack_bundle_verification_status"),
+            "attack_attestation_digest": challenge_record.get("attack_attestation_digest"),
+            "attack_verify_status": challenge_record.get("attack_verify_status"),
+            "attack_wrong_event_rejected": challenge_record.get("attack_wrong_event_rejected"),
         }
         challenge_rows.append(row_payload)
         grouped_rows.setdefault(attack_family, []).append(row_payload)
 
     def _summarize(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
-        attempted = [row for row in rows if row.get("bundle_verification_status") == "ok"]
-        rejected = [row for row in attempted if row.get("wrong_event_rejected") is True]
-        false_accept = [row for row in attempted if row.get("wrong_event_rejected") is False]
+        clean_summary = _summarize_wrong_event_outcomes(rows, evaluation_mode="clean")
+        attack_summary = _summarize_wrong_event_outcomes(rows, evaluation_mode="attack")
         return {
             "event_count": len(rows),
-            "attempted_event_count": len(attempted),
-            "bundle_verified_count": len(attempted),
-            "wrong_event_rejected_count": len(rejected),
-            "wrong_event_false_accept_count": len(false_accept),
-            "wrong_event_rejection_rate": float(len(rejected) / len(attempted)) if attempted else None,
+            "attempted_event_count": clean_summary["attempted_event_count"],
+            "bundle_verified_count": clean_summary["attempted_event_count"],
+            "wrong_event_rejected_count": clean_summary["wrong_event_rejected_count"],
+            "wrong_event_false_accept_count": clean_summary["wrong_event_false_accept_count"],
+            "wrong_event_rejection_rate": (
+                float(
+                    clean_summary["wrong_event_rejected_count"]
+                    / clean_summary["attempted_event_count"]
+                )
+                if clean_summary["attempted_event_count"] > 0
+                else None
+            ),
+            "wrong_event_far_clean": clean_summary["wrong_event_far"],
+            "attack_attempted_event_count": attack_summary["attempted_event_count"],
+            "attack_wrong_event_rejected_count": attack_summary["wrong_event_rejected_count"],
+            "attack_wrong_event_false_accept_count": attack_summary["wrong_event_false_accept_count"],
+            "wrong_event_far_attack": attack_summary["wrong_event_far"],
         }
 
     overall_summary = _summarize(challenge_rows)
+    challenge_type_grouped_rows: Dict[str, List[Dict[str, Any]]] = {}
+    for challenge_row in challenge_rows:
+        challenge_type = str(challenge_row.get("challenge_type") or "wrong_statement")
+        challenge_type_grouped_rows.setdefault(challenge_type, []).append(
+            dict(cast(Mapping[str, Any], challenge_row))
+        )
+    wrong_event_far_by_challenge_type = [
+        {
+            "challenge_type": challenge_type,
+            "event_count": len(rows),
+            "clean_attempted_event_count": clean_summary["attempted_event_count"],
+            "clean_wrong_event_rejected_count": clean_summary["wrong_event_rejected_count"],
+            "clean_wrong_event_false_accept_count": clean_summary["wrong_event_false_accept_count"],
+            "wrong_event_far_clean": clean_summary["wrong_event_far"],
+            "attack_attempted_event_count": attack_summary["attempted_event_count"],
+            "attack_wrong_event_rejected_count": attack_summary["wrong_event_rejected_count"],
+            "attack_wrong_event_false_accept_count": attack_summary["wrong_event_false_accept_count"],
+            "wrong_event_far_attack": attack_summary["wrong_event_far"],
+        }
+        for challenge_type, rows in sorted(challenge_type_grouped_rows.items())
+        for clean_summary, attack_summary in [
+            (
+                _summarize_wrong_event_outcomes(rows, evaluation_mode="clean"),
+                _summarize_wrong_event_outcomes(rows, evaluation_mode="attack"),
+            )
+        ]
+    ]
     if overall_summary["event_count"] <= 0:
         status_value = "not_available"
         reason_value = "no_positive_attack_events_available_for_wrong_event_challenge"
@@ -1512,7 +1936,156 @@ def _build_wrong_event_attestation_challenge_summary_payload(
             }
             for attack_family, rows in sorted(grouped_rows.items())
         ],
+        "wrong_event_far_by_challenge_type": wrong_event_far_by_challenge_type,
         "rows": challenge_rows,
+    }
+
+
+def _build_clean_imperceptibility_payload(
+    *,
+    family_id: str,
+    clean_quality_row: Mapping[str, Any],
+    quality_summary_csv_path: Path,
+    quality_summary_json_path: Path,
+) -> Dict[str, Any]:
+    """
+    功能：显式导出 clean imperceptibility 语义。 
+
+    Build the explicit clean imperceptibility export from the legacy clean
+    quality summary row.
+
+    Args:
+        family_id: Family identifier.
+        clean_quality_row: PW02 content-chain quality summary row.
+        quality_summary_csv_path: Source summary CSV path.
+        quality_summary_json_path: Source summary JSON path.
+
+    Returns:
+        Clean imperceptibility export payload.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(clean_quality_row, Mapping):
+        raise TypeError("clean_quality_row must be Mapping")
+    if not isinstance(quality_summary_csv_path, Path):
+        raise TypeError("quality_summary_csv_path must be Path")
+    if not isinstance(quality_summary_json_path, Path):
+        raise TypeError("quality_summary_json_path must be Path")
+
+    pair_count = _parse_csv_int(clean_quality_row, "pair_count")
+    status_value = clean_quality_row.get("status")
+    reason_value = clean_quality_row.get("reason")
+    if not isinstance(status_value, str) or not status_value:
+        status_value = "not_available"
+    if not isinstance(reason_value, str) or not reason_value:
+        reason_value = None
+
+    return {
+        "artifact_type": "paper_workflow_pw04_clean_imperceptibility_export",
+        "schema_version": "pw_stage_04_v1",
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "metric_name": "clean_imperceptibility",
+        "status": status_value,
+        "reason": reason_value,
+        "canonical": False,
+        "analysis_only": True,
+        "fallback_source": "pw02_quality_metrics_summary.rows[scope=content_chain]",
+        "legacy_scope_name": clean_quality_row.get("scope"),
+        "pair_semantics": {
+            "scene": "clean",
+            "reference_artifact": "plain_preview_image",
+            "candidate_artifact": "watermarked_output_image",
+            "semantic_definition": "imperceptibility",
+            "directionality": "larger psnr/ssim and smaller lpips indicate stronger clean imperceptibility",
+        },
+        "source_artifacts": {
+            "quality_summary_csv_path": normalize_path_value(quality_summary_csv_path),
+            "quality_summary_json_path": normalize_path_value(quality_summary_json_path),
+        },
+        "metrics": {
+            "pair_count": pair_count,
+            "mean_psnr": _coerce_finite_float(clean_quality_row.get("mean_psnr")),
+            "mean_ssim": _coerce_finite_float(clean_quality_row.get("mean_ssim")),
+            "mean_lpips": _coerce_finite_float(clean_quality_row.get("mean_lpips")),
+            "mean_clip_text_similarity": _coerce_finite_float(clean_quality_row.get("mean_clip_text_similarity")),
+            "clip_model_name": clean_quality_row.get("clip_model_name"),
+            "lpips_status": clean_quality_row.get("lpips_status"),
+            "lpips_reason": clean_quality_row.get("lpips_reason"),
+            "clip_status": clean_quality_row.get("clip_status"),
+            "clip_reason": clean_quality_row.get("clip_reason"),
+        },
+    }
+
+
+def _build_attack_distortion_payload(
+    *,
+    family_id: str,
+    attack_quality_metrics_payload: Mapping[str, Any],
+    attack_quality_metrics_path: Path,
+) -> Dict[str, Any]:
+    """
+    功能：显式导出 attack distortion 语义。 
+
+    Build the explicit attack distortion export from the legacy PW04 attack
+    quality summary payload.
+
+    Args:
+        family_id: Family identifier.
+        attack_quality_metrics_payload: PW04 attack quality payload.
+        attack_quality_metrics_path: PW04 attack quality JSON path.
+
+    Returns:
+        Attack distortion export payload.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(attack_quality_metrics_payload, Mapping):
+        raise TypeError("attack_quality_metrics_payload must be Mapping")
+    if not isinstance(attack_quality_metrics_path, Path):
+        raise TypeError("attack_quality_metrics_path must be Path")
+
+    overall_payload = _extract_mapping(attack_quality_metrics_payload.get("overall"))
+    status_value = overall_payload.get("status")
+    reason_value = overall_payload.get("reason")
+    if not isinstance(status_value, str) or not status_value:
+        status_value = "not_available"
+    if not isinstance(reason_value, str) or not reason_value:
+        reason_value = None
+
+    return {
+        "artifact_type": "paper_workflow_pw04_attack_distortion_export",
+        "schema_version": "pw_stage_04_v1",
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "metric_name": "attack_distortion",
+        "status": status_value,
+        "reason": reason_value,
+        "canonical": False,
+        "analysis_only": True,
+        "fallback_source": "pw04_attack_quality_metrics.overall",
+        "pair_semantics": {
+            "scene": "attack",
+            "reference_artifact": "watermarked_parent_image",
+            "candidate_artifact": "attacked_image",
+            "semantic_definition": "distortion",
+            "directionality": "larger psnr/ssim and smaller lpips indicate smaller attack distortion",
+        },
+        "source_artifacts": {
+            "attack_quality_metrics_path": normalize_path_value(attack_quality_metrics_path),
+        },
+        "metrics": {
+            "pair_count": _parse_csv_int(overall_payload, "pair_count"),
+            "mean_psnr": _coerce_finite_float(overall_payload.get("mean_psnr")),
+            "mean_ssim": _coerce_finite_float(overall_payload.get("mean_ssim")),
+            "mean_lpips": _coerce_finite_float(overall_payload.get("mean_lpips")),
+            "mean_clip_text_similarity": _coerce_finite_float(overall_payload.get("mean_clip_text_similarity")),
+            "clip_model_name": overall_payload.get("clip_model_name"),
+            "lpips_status": overall_payload.get("lpips_status"),
+            "lpips_reason": overall_payload.get("lpips_reason"),
+            "clip_status": overall_payload.get("clip_status"),
+            "clip_reason": overall_payload.get("clip_reason"),
+        },
     }
 
 
@@ -1704,10 +2277,16 @@ def build_pw04_metrics_extensions(
     geo_chain_usage_by_family_path = geometry_dir / "geo_chain_usage_by_family.csv"
     geo_diagnostics_summary_path = geometry_dir / "geo_diagnostics_summary.csv"
     geo_diagnostics_conditional_metrics_path = geometry_dir / "geo_diagnostics_conditional_metrics.csv"
+    conditional_rescue_metrics_path = geometry_dir / "conditional_rescue_metrics.json"
     payload_attack_summary_path = payload_dir / "payload_attack_summary.json"
     wrong_event_attestation_challenge_summary_path = payload_dir / "wrong_event_attestation_challenge_summary.json"
+    wrong_event_far_clean_path = payload_dir / "wrong_event_far_clean.json"
+    wrong_event_far_attack_path = payload_dir / "wrong_event_far_attack.json"
+    wrong_event_far_by_challenge_type_path = payload_dir / "wrong_event_far_by_challenge_type.json"
     quality_robustness_tradeoff_path = tradeoff_dir / "quality_robustness_tradeoff.csv"
     quality_robustness_frontier_path = tradeoff_dir / "quality_robustness_frontier.png"
+    clean_imperceptibility_path = tradeoff_dir / "clean_imperceptibility.json"
+    attack_distortion_path = tradeoff_dir / "attack_distortion.json"
 
     _write_csv_rows(
         robustness_curve_by_family_path,
@@ -1864,17 +2443,80 @@ def build_pw04_metrics_extensions(
         geometry_conditional_rows,
     )
     write_json_atomic(
+        conditional_rescue_metrics_path,
+        _build_geometry_conditional_rescue_metrics_payload(
+            family_id=family_id,
+            attack_event_rows=attack_event_rows,
+        ),
+    )
+    write_json_atomic(
         payload_attack_summary_path,
         _build_payload_attack_summary_payload(
             family_id=family_id,
             attack_event_rows=attack_event_rows,
         ),
     )
+    wrong_event_attestation_challenge_summary_payload = _build_wrong_event_attestation_challenge_summary_payload(
+        family_id=family_id,
+        attack_event_rows=attack_event_rows,
+    )
     write_json_atomic(
         wrong_event_attestation_challenge_summary_path,
-        _build_wrong_event_attestation_challenge_summary_payload(
+        wrong_event_attestation_challenge_summary_payload,
+    )
+    write_json_atomic(
+        wrong_event_far_clean_path,
+        _build_wrong_event_far_metric_payload(
             family_id=family_id,
-            attack_event_rows=attack_event_rows,
+            metric_name="wrong_event_far_clean",
+            summary_path=wrong_event_attestation_challenge_summary_path,
+            metric_summary={
+                "attempted_event_count": _extract_mapping(
+                    wrong_event_attestation_challenge_summary_payload.get("overall")
+                ).get("attempted_event_count"),
+                "wrong_event_rejected_count": _extract_mapping(
+                    wrong_event_attestation_challenge_summary_payload.get("overall")
+                ).get("wrong_event_rejected_count"),
+                "wrong_event_false_accept_count": _extract_mapping(
+                    wrong_event_attestation_challenge_summary_payload.get("overall")
+                ).get("wrong_event_false_accept_count"),
+                "wrong_event_far": _extract_mapping(
+                    wrong_event_attestation_challenge_summary_payload.get("overall")
+                ).get("wrong_event_far_clean"),
+            },
+        ),
+    )
+    write_json_atomic(
+        wrong_event_far_attack_path,
+        _build_wrong_event_far_metric_payload(
+            family_id=family_id,
+            metric_name="wrong_event_far_attack",
+            summary_path=wrong_event_attestation_challenge_summary_path,
+            metric_summary={
+                "attempted_event_count": _extract_mapping(
+                    wrong_event_attestation_challenge_summary_payload.get("overall")
+                ).get("attack_attempted_event_count"),
+                "wrong_event_rejected_count": _extract_mapping(
+                    wrong_event_attestation_challenge_summary_payload.get("overall")
+                ).get("attack_wrong_event_rejected_count"),
+                "wrong_event_false_accept_count": _extract_mapping(
+                    wrong_event_attestation_challenge_summary_payload.get("overall")
+                ).get("attack_wrong_event_false_accept_count"),
+                "wrong_event_far": _extract_mapping(
+                    wrong_event_attestation_challenge_summary_payload.get("overall")
+                ).get("wrong_event_far_attack"),
+            },
+        ),
+    )
+    write_json_atomic(
+        wrong_event_far_by_challenge_type_path,
+        _build_wrong_event_far_by_challenge_type_payload(
+            family_id=family_id,
+            summary_path=wrong_event_attestation_challenge_summary_path,
+            challenge_rows=cast(
+                Sequence[Mapping[str, Any]],
+                wrong_event_attestation_challenge_summary_payload.get("rows", []),
+            ),
         ),
     )
 
@@ -1882,9 +2524,31 @@ def build_pw04_metrics_extensions(
         family_root=family_root,
         pw02_summary=pw02_summary,
     )
+    attack_quality_metrics_json_path = (export_root / "metrics" / "attack_quality_metrics.json").resolve()
+    attack_quality_metrics_payload = _load_required_json_dict(
+        attack_quality_metrics_json_path,
+        "PW04 attack quality metrics",
+    )
     quality_summary_payload = _load_required_json_dict(quality_summary_json_path, "PW02 quality metrics summary")
     quality_rows = cast(List[Mapping[str, Any]], quality_summary_payload.get("rows", []))
     clean_quality_row = next((row for row in quality_rows if row.get("scope") == "content_chain"), {})
+    write_json_atomic(
+        clean_imperceptibility_path,
+        _build_clean_imperceptibility_payload(
+            family_id=family_id,
+            clean_quality_row=clean_quality_row,
+            quality_summary_csv_path=quality_summary_csv_path,
+            quality_summary_json_path=quality_summary_json_path,
+        ),
+    )
+    write_json_atomic(
+        attack_distortion_path,
+        _build_attack_distortion_payload(
+            family_id=family_id,
+            attack_quality_metrics_payload=attack_quality_metrics_payload,
+            attack_quality_metrics_path=attack_quality_metrics_json_path,
+        ),
+    )
     attack_lpips_values = [
         value
         for value in (
@@ -2000,8 +2664,14 @@ def build_pw04_metrics_extensions(
         "geo_diagnostics_conditional_metrics_path": normalize_path_value(
             geo_diagnostics_conditional_metrics_path
         ),
+        "conditional_rescue_metrics_path": normalize_path_value(conditional_rescue_metrics_path),
         "payload_attack_summary_path": normalize_path_value(payload_attack_summary_path),
         "wrong_event_attestation_challenge_summary_path": normalize_path_value(wrong_event_attestation_challenge_summary_path),
+        "wrong_event_far_clean_path": normalize_path_value(wrong_event_far_clean_path),
+        "wrong_event_far_attack_path": normalize_path_value(wrong_event_far_attack_path),
+        "wrong_event_far_by_challenge_type_path": normalize_path_value(wrong_event_far_by_challenge_type_path),
+        "clean_imperceptibility_path": normalize_path_value(clean_imperceptibility_path),
+        "attack_distortion_path": normalize_path_value(attack_distortion_path),
         "quality_robustness_tradeoff_path": normalize_path_value(quality_robustness_tradeoff_path),
         "quality_robustness_frontier_path": normalize_path_value(quality_robustness_frontier_path),
         "system_final_auxiliary_attack_summary_path": auxiliary_attack_exports["system_final_auxiliary_attack_summary_path"],
@@ -2027,7 +2697,13 @@ def build_pw04_metrics_extensions(
             "pw04_system_final_auxiliary_attack_summary": auxiliary_attack_exports["system_final_auxiliary_attack_summary_path"],
             "pw04_system_final_auxiliary_attack_by_family": auxiliary_attack_exports["system_final_auxiliary_attack_by_family_path"],
             "pw04_system_final_auxiliary_attack_by_condition": auxiliary_attack_exports["system_final_auxiliary_attack_by_condition_path"],
+            "pw04_conditional_rescue_metrics": normalize_path_value(conditional_rescue_metrics_path),
             "pw04_wrong_event_attestation_challenge_summary": normalize_path_value(wrong_event_attestation_challenge_summary_path),
+            "pw04_wrong_event_far_clean": normalize_path_value(wrong_event_far_clean_path),
+            "pw04_wrong_event_far_attack": normalize_path_value(wrong_event_far_attack_path),
+            "pw04_wrong_event_far_by_challenge_type": normalize_path_value(wrong_event_far_by_challenge_type_path),
+            "pw04_clean_imperceptibility": normalize_path_value(clean_imperceptibility_path),
+            "pw04_attack_distortion": normalize_path_value(attack_distortion_path),
         }
     )
     analysis_only_artifact_annotations = {

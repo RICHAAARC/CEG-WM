@@ -122,10 +122,36 @@ def _build_wrong_event_attestation_challenge_plan(
         key=lambda item: int(item.get("event_index", -1)),
     )
     plan_rows: list[Dict[str, Any]] = []
+
+    def _derive_challenge_type(
+        source_event: Mapping[str, Any],
+        challenge_event: Mapping[str, Any] | None,
+    ) -> str:
+        if not isinstance(challenge_event, Mapping):
+            return "wrong_statement"
+
+        source_prompt_text = str(source_event.get("prompt_text") or "")
+        challenge_prompt_text = str(challenge_event.get("prompt_text") or "")
+        source_seed = source_event.get("seed")
+        challenge_seed = challenge_event.get("seed")
+        same_prompt = bool(source_prompt_text) and source_prompt_text == challenge_prompt_text
+        same_seed = source_seed == challenge_seed
+
+        if same_prompt and not same_seed:
+            return "same_prompt_wrong_seed"
+        if same_seed and not same_prompt:
+            return "same_seed_wrong_prompt"
+        if same_prompt and same_seed:
+            return "same_prompt_same_seed_wrong_event"
+        return "different_prompt_and_seed"
+
     if len(ordered_positive_events) < 2:
         for positive_event in ordered_positive_events:
             plan_rows.append(
                 {
+                    "challenge_type": _derive_challenge_type(positive_event, None),
+                    "source_event_id": positive_event.get("event_id"),
+                    "challenged_event_id": None,
                     "parent_event_id": positive_event.get("event_id"),
                     "parent_event_index": positive_event.get("event_index"),
                     "challenge_parent_event_id": None,
@@ -150,6 +176,9 @@ def _build_wrong_event_attestation_challenge_plan(
         challenge_parent_event = ordered_positive_events[(event_index + 1) % len(ordered_positive_events)]
         plan_rows.append(
             {
+                "challenge_type": _derive_challenge_type(positive_event, challenge_parent_event),
+                "source_event_id": positive_event.get("event_id"),
+                "challenged_event_id": challenge_parent_event.get("event_id"),
                 "parent_event_id": positive_event.get("event_id"),
                 "parent_event_index": positive_event.get("event_index"),
                 "challenge_parent_event_id": challenge_parent_event.get("event_id"),

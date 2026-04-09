@@ -817,6 +817,11 @@ def _attach_wrong_event_attestation_challenge_assignment(
 
     assignment_payload = dict(cast(Mapping[str, Any], assignment))
     challenge_parent_event_id = assignment_payload.get("challenge_parent_event_id")
+    assignment_payload["challenge_type"] = str(assignment_payload.get("challenge_type") or "wrong_statement")
+    assignment_payload["source_event_id"] = assignment_payload.get("source_event_id") or parent_event_id
+    assignment_payload["challenged_event_id"] = (
+        assignment_payload.get("challenged_event_id") or challenge_parent_event_id
+    )
     challenge_parent_source_event: Dict[str, Any] | None = None
     if isinstance(challenge_parent_event_id, str) and challenge_parent_event_id:
         challenge_parent_source_event = _load_parent_source_event(
@@ -906,6 +911,12 @@ def _write_wrong_event_attestation_challenge_record(
         "stage_name": STAGE_NAME,
         "family_id": family_id,
         "attack_event_id": attack_event_spec.get("attack_event_id", attack_event_spec.get("event_id")),
+        "challenge_type": challenge_assignment.get("challenge_type", "wrong_statement"),
+        "source_event_id": challenge_assignment.get("source_event_id", attack_event_spec.get("parent_event_id")),
+        "challenged_event_id": challenge_assignment.get(
+            "challenged_event_id",
+            challenge_assignment.get("challenge_parent_event_id"),
+        ),
         "parent_event_id": attack_event_spec.get("parent_event_id"),
         "challenge_parent_event_id": challenge_assignment.get("challenge_parent_event_id"),
         "challenge_parent_event_index": challenge_assignment.get("challenge_parent_event_index"),
@@ -913,11 +924,22 @@ def _write_wrong_event_attestation_challenge_record(
         "plan_reason": challenge_assignment.get("reason"),
         "plan_policy": challenge_assignment.get("assignment_policy"),
         "challenge_plan_path": challenge_assignment.get("challenge_plan_path"),
+        "challenge_execution_mode": "detect_only_attestation_binding",
+        "binding_status": None,
+        "verify_status": None,
         "bundle_verification_status": None,
         "bundle_verification_mismatch_reasons": [],
         "wrong_statement_digest": None,
         "bundle_attestation_digest": None,
         "wrong_event_rejected": None,
+        "clean_parent_binding_status": None,
+        "clean_parent_verify_status": None,
+        "clean_parent_wrong_event_rejected": None,
+        "attack_binding_status": None,
+        "attack_bundle_verification_status": None,
+        "attack_attestation_digest": None,
+        "attack_verify_status": None,
+        "attack_wrong_event_rejected": None,
     }
 
     if not challenge_assignment:
@@ -925,12 +947,24 @@ def _write_wrong_event_attestation_challenge_record(
             **base_payload,
             "status": "not_available",
             "reason": "missing_pw00_wrong_event_attestation_challenge_assignment",
+            "binding_status": "not_available",
+            "verify_status": "not_available",
+            "clean_parent_binding_status": "not_available",
+            "clean_parent_verify_status": "not_available",
+            "attack_binding_status": "not_available",
+            "attack_verify_status": "not_available",
         }
     elif challenge_assignment.get("status") != "ready":
         challenge_record_payload = {
             **base_payload,
             "status": "not_available",
             "reason": challenge_assignment.get("reason"),
+            "binding_status": "not_available",
+            "verify_status": "not_available",
+            "clean_parent_binding_status": "not_available",
+            "clean_parent_verify_status": "not_available",
+            "attack_binding_status": "not_available",
+            "attack_verify_status": "not_available",
         }
     else:
         try:
@@ -959,6 +993,26 @@ def _write_wrong_event_attestation_challenge_record(
                 runtime_config_snapshot_path,
                 "PW03 runtime config snapshot",
             )
+            attacked_detect_record_path_candidates = [
+                event_root / "run" / "records" / "detect_record.json",
+                event_root / "records" / "detect_record.json",
+            ]
+            attacked_detect_record: Dict[str, Any] | None = None
+            for attacked_detect_record_path in attacked_detect_record_path_candidates:
+                if attacked_detect_record_path.exists() and attacked_detect_record_path.is_file():
+                    attacked_detect_record = _load_required_json_dict(
+                        attacked_detect_record_path,
+                        "PW03 attacked detect record",
+                    )
+                    break
+            if attacked_detect_record is None:
+                raise FileNotFoundError(
+                    "PW03 attacked detect record not found: "
+                    + ", ".join(
+                        normalize_path_value(path_obj)
+                        for path_obj in attacked_detect_record_path_candidates
+                    )
+                )
             k_master = runtime_cfg.get("__attestation_verify_k_master__")
             if not isinstance(k_master, str) or not k_master:
                 raise ValueError("PW03 runtime config snapshot missing __attestation_verify_k_master__")
@@ -967,12 +1021,17 @@ def _write_wrong_event_attestation_challenge_record(
                 dict(cast(Mapping[str, Any], own_material["signed_bundle"])),
                 k_master,
             )
+            attacked_attestation_payload = _extract_mapping(attacked_detect_record.get("attestation"))
+            attacked_bundle_verification = _extract_mapping(
+                attacked_attestation_payload.get("bundle_verification")
+            )
             wrong_statement_digest = compute_attestation_digest(
                 statement_from_dict(dict(cast(Mapping[str, Any], wrong_material["statement"])))
             )
             bundle_attestation_digest = cast(Mapping[str, Any], own_material["signed_bundle"]).get(
                 "attestation_digest"
             )
+            attacked_attestation_digest = attacked_attestation_payload.get("attestation_digest")
             challenge_record_payload = {
                 **base_payload,
                 "bundle_verification_status": bundle_verification.get("status"),
@@ -982,6 +1041,28 @@ def _write_wrong_event_attestation_challenge_record(
                 "wrong_statement_digest": wrong_statement_digest,
                 "bundle_attestation_digest": bundle_attestation_digest,
                 "wrong_event_rejected": None,
+                "binding_status": (
+                    "ok" if bundle_verification.get("status") == "ok" else "bundle_invalid"
+                ),
+                "verify_status": None,
+                "clean_parent_binding_status": (
+                    "ok" if bundle_verification.get("status") == "ok" else "bundle_invalid"
+                ),
+                "clean_parent_verify_status": None,
+                "clean_parent_wrong_event_rejected": None,
+                "attack_binding_status": (
+                    "ok"
+                    if attacked_bundle_verification.get("status") == "ok"
+                    else (
+                        str(attacked_bundle_verification.get("status"))
+                        if attacked_bundle_verification.get("status")
+                        else "not_available"
+                    )
+                ),
+                "attack_bundle_verification_status": attacked_bundle_verification.get("status"),
+                "attack_attestation_digest": attacked_attestation_digest,
+                "attack_verify_status": None,
+                "attack_wrong_event_rejected": None,
             }
             if bundle_verification.get("status") == "ok":
                 wrong_event_rejected = bool(
@@ -989,6 +1070,13 @@ def _write_wrong_event_attestation_challenge_record(
                     and wrong_statement_digest != bundle_attestation_digest
                 )
                 challenge_record_payload["wrong_event_rejected"] = wrong_event_rejected
+                challenge_record_payload["verify_status"] = (
+                    "rejected" if wrong_event_rejected else "false_accept"
+                )
+                challenge_record_payload["clean_parent_verify_status"] = (
+                    "rejected" if wrong_event_rejected else "false_accept"
+                )
+                challenge_record_payload["clean_parent_wrong_event_rejected"] = wrong_event_rejected
                 challenge_record_payload["status"] = "ok" if wrong_event_rejected else "false_accept"
                 challenge_record_payload["reason"] = (
                     None
@@ -997,16 +1085,36 @@ def _write_wrong_event_attestation_challenge_record(
                 )
             else:
                 challenge_record_payload["status"] = "bundle_invalid"
+                challenge_record_payload["verify_status"] = "not_available"
+                challenge_record_payload["clean_parent_verify_status"] = "not_available"
                 mismatch_reasons = cast(List[Any], challenge_record_payload["bundle_verification_mismatch_reasons"])
                 challenge_record_payload["reason"] = (
                     str(mismatch_reasons[0]) if mismatch_reasons else "signed_bundle_verification_failed"
                 )
+
+            if attacked_bundle_verification.get("status") == "ok":
+                attack_wrong_event_rejected = bool(
+                    isinstance(attacked_attestation_digest, str)
+                    and wrong_statement_digest != attacked_attestation_digest
+                )
+                challenge_record_payload["attack_verify_status"] = (
+                    "rejected" if attack_wrong_event_rejected else "false_accept"
+                )
+                challenge_record_payload["attack_wrong_event_rejected"] = attack_wrong_event_rejected
+            else:
+                challenge_record_payload["attack_verify_status"] = "not_available"
         except Exception as exc:
             challenge_record_payload = {
                 **base_payload,
                 "status": "not_available",
                 "reason": f"wrong_event_challenge_materialization_failed:{type(exc).__name__}",
                 "error_message": str(exc),
+                "binding_status": "not_available",
+                "verify_status": "not_available",
+                "clean_parent_binding_status": "not_available",
+                "clean_parent_verify_status": "not_available",
+                "attack_binding_status": "not_available",
+                "attack_verify_status": "not_available",
             }
 
     write_json_atomic(challenge_record_path, challenge_record_payload)
