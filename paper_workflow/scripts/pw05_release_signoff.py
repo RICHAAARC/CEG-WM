@@ -18,7 +18,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 
-from paper_workflow.scripts.pw_common import build_family_root
+from paper_workflow.scripts.pw_common import ACTIVE_SAMPLE_ROLE, build_family_root
 from scripts.notebook_runtime_common import (
     collect_file_index,
     collect_git_summary,
@@ -430,6 +430,13 @@ def _collect_release_source_paths(
         )
         source_paths[f"pw04_tail_{key_name}"] = resolved_path
 
+    source_paths.update(
+        _collect_payload_sidecar_source_paths(
+            family_root=family_root,
+            source_paths=source_paths,
+        )
+    )
+
     return source_paths
 
 
@@ -474,6 +481,133 @@ def _collect_analysis_only_source_bindings(
             "analysis_only": bool(annotation_payload.get("analysis_only", True)),
         }
     return bindings
+
+
+def _build_payload_sidecar_source_label(prefix: str, event_index: Any, fallback_ordinal: int) -> str:
+    """
+    功能：为 payload sidecar 源工件生成稳定标签。
+
+    Build one stable source-artifact label for payload sidecars.
+
+    Args:
+        prefix: Stable label prefix.
+        event_index: Event index when available.
+        fallback_ordinal: Fallback ordinal.
+
+    Returns:
+        Stable label token.
+    """
+    if not isinstance(prefix, str) or not prefix:
+        raise TypeError("prefix must be non-empty str")
+    if not isinstance(fallback_ordinal, int) or isinstance(fallback_ordinal, bool) or fallback_ordinal < 0:
+        raise TypeError("fallback_ordinal must be non-negative int")
+    if isinstance(event_index, int) and not isinstance(event_index, bool) and event_index >= 0:
+        return f"{prefix}_e{event_index:06d}"
+    return f"{prefix}_{fallback_ordinal:06d}"
+
+
+def _collect_payload_sidecar_source_paths(
+    *,
+    family_root: Path,
+    source_paths: Mapping[str, Path],
+) -> Dict[str, Path]:
+    """
+    功能：从 PW02 与 PW04 pool manifest 收集 payload sidecar 源工件。
+
+    Collect payload-sidecar source artifacts from PW02 and PW04 pool manifests.
+
+    Args:
+        family_root: Family root path.
+        source_paths: Validated canonical source paths.
+
+    Returns:
+        Additional label-to-path mappings for payload sidecars.
+    """
+    if not isinstance(family_root, Path):
+        raise TypeError("family_root must be Path")
+    if not isinstance(source_paths, Mapping):
+        raise TypeError("source_paths must be Mapping")
+
+    collected_paths: Dict[str, Path] = {}
+
+    finalize_manifest_path = source_paths.get("pw02_finalize_manifest")
+    if isinstance(finalize_manifest_path, Path):
+        finalize_manifest = _load_required_json_dict(finalize_manifest_path, "PW02 finalize manifest")
+        source_pools = finalize_manifest.get("source_pools")
+        if isinstance(source_pools, Mapping):
+            positive_pool_node = source_pools.get(ACTIVE_SAMPLE_ROLE)
+            if isinstance(positive_pool_node, Mapping):
+                positive_pool_manifest_path_value = positive_pool_node.get("manifest_path")
+                if isinstance(positive_pool_manifest_path_value, str) and positive_pool_manifest_path_value.strip():
+                    positive_pool_manifest_path = _resolve_path_value_under_family_root(
+                        positive_pool_manifest_path_value,
+                        family_root,
+                        "PW02 positive_source_pool_manifest_path",
+                    )
+                    positive_pool_manifest = _load_required_json_dict(
+                        positive_pool_manifest_path,
+                        "PW02 positive source pool manifest",
+                    )
+                    positive_events = positive_pool_manifest.get("events")
+                    if isinstance(positive_events, list):
+                        for ordinal, event_node in enumerate(positive_events):
+                            if not isinstance(event_node, Mapping):
+                                continue
+                            event_index = event_node.get("event_index")
+                            reference_path_value = event_node.get("payload_reference_sidecar_path")
+                            if isinstance(reference_path_value, str) and reference_path_value.strip():
+                                collected_paths[
+                                    _build_payload_sidecar_source_label(
+                                        "pw02_positive_source_payload_reference_sidecar",
+                                        event_index,
+                                        ordinal,
+                                    )
+                                ] = _resolve_path_value_under_family_root(
+                                    reference_path_value,
+                                    family_root,
+                                    "PW02 payload reference sidecar",
+                                )
+                            decode_path_value = event_node.get("payload_decode_sidecar_path")
+                            if isinstance(decode_path_value, str) and decode_path_value.strip():
+                                collected_paths[
+                                    _build_payload_sidecar_source_label(
+                                        "pw02_positive_source_payload_decode_sidecar",
+                                        event_index,
+                                        ordinal,
+                                    )
+                                ] = _resolve_path_value_under_family_root(
+                                    decode_path_value,
+                                    family_root,
+                                    "PW02 payload decode sidecar",
+                                )
+
+    attack_positive_pool_manifest_path = source_paths.get("pw04_attack_positive_pool_manifest")
+    if isinstance(attack_positive_pool_manifest_path, Path):
+        attack_positive_pool_manifest = _load_required_json_dict(
+            attack_positive_pool_manifest_path,
+            "PW04 attack positive pool manifest",
+        )
+        attack_positive_events = attack_positive_pool_manifest.get("events")
+        if isinstance(attack_positive_events, list):
+            for ordinal, event_node in enumerate(attack_positive_events):
+                if not isinstance(event_node, Mapping):
+                    continue
+                attack_event_index = event_node.get("attack_event_index")
+                decode_path_value = event_node.get("payload_decode_sidecar_path")
+                if isinstance(decode_path_value, str) and decode_path_value.strip():
+                    collected_paths[
+                        _build_payload_sidecar_source_label(
+                            "pw04_attacked_positive_payload_decode_sidecar",
+                            attack_event_index,
+                            ordinal,
+                        )
+                    ] = _resolve_path_value_under_family_root(
+                        decode_path_value,
+                        family_root,
+                        "PW04 payload decode sidecar",
+                    )
+
+    return collected_paths
 
 
 def _build_release_copy_paths(family_root: Path, source_paths: Mapping[str, Path]) -> Dict[str, str]:

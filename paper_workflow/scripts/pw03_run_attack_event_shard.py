@@ -28,8 +28,10 @@ from paper_workflow.scripts.pw_common import (
     ATTACKED_POSITIVE_SAMPLE_ROLE,
     CLEAN_NEGATIVE_SAMPLE_ROLE,
     MIXED_ATTACK_SAMPLE_ROLE,
+    build_payload_decode_sidecar_payload,
     build_family_root,
     read_jsonl,
+    resolve_family_id_from_path,
 )
 from scripts.notebook_runtime_common import (
     build_repo_import_subprocess_env,
@@ -1180,6 +1182,8 @@ def _resolve_attack_event_spec(
     if not isinstance(parent_detect_record_path, str) or not parent_detect_record_path:
         raise ValueError(f"parent detect_record_path missing: {parent_event_id}")
 
+    pool_event = cast(Mapping[str, Any], parent_source_event.get("pool_event", {}))
+
     return {
         **attack_event_payload,
         "sample_role": _resolve_attack_sample_role(parent_sample_role),
@@ -1192,9 +1196,11 @@ def _resolve_attack_event_spec(
             "parent_detect_record_path": parent_detect_record_path,
             "parent_source_image_path": parent_source_image_path,
             "parent_sample_role": parent_sample_role,
-            "parent_source_shard_root": cast(Mapping[str, Any], parent_source_event.get("pool_event", {})).get("source_shard_root"),
-            "parent_source_shard_index": cast(Mapping[str, Any], parent_source_event.get("pool_event", {})).get("source_shard_index"),
-            "parent_source_shard_manifest_path": cast(Mapping[str, Any], parent_source_event.get("pool_event", {})).get("source_shard_manifest_path"),
+            "parent_source_shard_root": pool_event.get("source_shard_root"),
+            "parent_source_shard_index": pool_event.get("source_shard_index"),
+            "parent_source_shard_manifest_path": pool_event.get("source_shard_manifest_path"),
+            "payload_reference_sidecar_path": pool_event.get("payload_reference_sidecar_path"),
+            "payload_decode_sidecar_path": pool_event.get("payload_decode_sidecar_path"),
         },
         "threshold_binding_reference": dict(threshold_binding_reference),
     }
@@ -1531,10 +1537,11 @@ def _run_attack_detect_event(
     """
     run_root = ensure_directory(event_root / "run")
     logs_root = ensure_directory(event_root / "logs")
+    artifacts_root = ensure_directory(event_root / "artifacts")
     detect_input_record_path = event_root / "detect_input_record.json"
     detect_stdout_log_path = logs_root / "detect_stdout.log"
     detect_stderr_log_path = logs_root / "detect_stderr.log"
-    event_gpu_summary_path = event_root / "artifacts" / "gpu_session_peak.json"
+    event_gpu_summary_path = artifacts_root / "gpu_session_peak.json"
     staged_detect_record_path = shard_root / "records" / f"event_{int(attack_event_spec.get('attack_event_index', attack_event_spec.get('event_index', 0))):06d}_detect_record.json"
 
     validate_path_within_base(shard_root, detect_input_record_path, "PW03 detect_input_record path")
@@ -1588,6 +1595,39 @@ def _run_attack_detect_event(
     detect_payload["paper_workflow_attack_params_digest"] = attack_event_spec.get("attack_params_digest")
     detect_payload["paper_workflow_severity_metadata"] = severity_metadata
     detect_payload["paper_workflow_geometry_diagnostics"] = geometry_diagnostics
+
+    family_id_value = attack_event_spec.get("family_id")
+    family_id = str(family_id_value) if isinstance(family_id_value, str) and family_id_value else resolve_family_id_from_path(shard_root)
+    sample_role = str(attack_event_spec.get("sample_role") or "")
+    payload_reference_sidecar_path_value = parent_reference.get("payload_reference_sidecar_path")
+    payload_reference_sidecar_path: Path | None = None
+    if isinstance(payload_reference_sidecar_path_value, str) and payload_reference_sidecar_path_value.strip():
+        payload_reference_sidecar_path = Path(payload_reference_sidecar_path_value).expanduser().resolve()
+
+    payload_decode_sidecar_path: Path | None = None
+    if sample_role == ATTACKED_POSITIVE_SAMPLE_ROLE and payload_reference_sidecar_path is not None:
+        payload_decode_sidecar_path = artifacts_root / "payload_decode_sidecar.json"
+        validate_path_within_base(shard_root, payload_decode_sidecar_path, "PW03 payload decode sidecar path")
+        reference_sidecar = _load_required_json_dict(
+            payload_reference_sidecar_path,
+            f"PW03 payload reference sidecar {attack_event_spec.get('event_id')}",
+        )
+        try:
+            payload_decode_sidecar_payload = build_payload_decode_sidecar_payload(
+                family_id=family_id,
+                stage_name=STAGE_NAME,
+                event_id=str(attack_event_spec.get("event_id")),
+                event_index=int(attack_event_spec.get("attack_event_index", attack_event_spec.get("event_index", 0))),
+                sample_role=sample_role,
+                reference_event_id=str(parent_reference.get("parent_event_id") or ""),
+                detect_payload=detect_payload,
+                reference_sidecar=reference_sidecar,
+            )
+            write_json_atomic(payload_decode_sidecar_path, payload_decode_sidecar_payload)
+        except (TypeError, ValueError):
+            # 兼容旧的最小化 fixture；当上游 payload 证据不足时不让 PW03 整体失败。
+            payload_decode_sidecar_path = None
+
     write_json_atomic(staged_detect_record_path, detect_payload)
 
     return {
@@ -1598,6 +1638,22 @@ def _run_attack_detect_event(
         "detect_record_package_relative_path": _relative_to_shard(shard_root, staged_detect_record_path),
         "event_gpu_session_peak_path": normalize_path_value(event_gpu_summary_path),
         "event_gpu_session_peak_package_relative_path": _relative_to_shard(shard_root, event_gpu_summary_path),
+        "payload_reference_sidecar_path": (
+            normalize_path_value(payload_reference_sidecar_path)
+            if payload_reference_sidecar_path is not None
+            else None
+        ),
+        "payload_reference_sidecar_package_relative_path": None,
+        "payload_decode_sidecar_path": (
+            normalize_path_value(payload_decode_sidecar_path)
+            if payload_decode_sidecar_path is not None
+            else None
+        ),
+        "payload_decode_sidecar_package_relative_path": (
+            _relative_to_shard(shard_root, payload_decode_sidecar_path)
+            if payload_decode_sidecar_path is not None
+            else None
+        ),
         "detect_stage_result": detect_result,
         "severity_metadata": severity_metadata,
         "geometry_diagnostics": geometry_diagnostics,
@@ -1695,6 +1751,10 @@ def _write_attack_event_manifest(
         "detect_input_record_package_relative_path": detect_summary.get("detect_input_record_package_relative_path"),
         "detect_record_path": detect_summary.get("detect_record_path"),
         "detect_record_package_relative_path": detect_summary.get("detect_record_package_relative_path"),
+        "payload_reference_sidecar_path": detect_summary.get("payload_reference_sidecar_path"),
+        "payload_reference_sidecar_package_relative_path": detect_summary.get("payload_reference_sidecar_package_relative_path"),
+        "payload_decode_sidecar_path": detect_summary.get("payload_decode_sidecar_path"),
+        "payload_decode_sidecar_package_relative_path": detect_summary.get("payload_decode_sidecar_package_relative_path"),
         "wrong_event_attestation_challenge_record_path": wrong_event_attestation_challenge_summary.get(
             "wrong_event_attestation_challenge_record_path"
         ),

@@ -17,6 +17,7 @@ from main.cli import run_calibrate as run_calibrate_cli
 from main.core import config_loader as core_config_loader
 from main.evaluation import workflow_inputs as eval_workflow_inputs
 import paper_workflow.scripts.pw02_merge_source_event_shards as pw02_module
+import paper_workflow.scripts.pw02_metrics_extensions as pw02_metrics_extensions_module
 import paper_workflow.scripts.pw_quality_metrics as pw_quality_metrics_module
 from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
 from paper_workflow.scripts.pw_common import build_source_shard_root, read_jsonl
@@ -1139,6 +1140,86 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert finalize_manifest["system_final"]["mode"] == "derived_metrics_from_content_evaluate_inputs"
     assert finalize_manifest["system_final"]["is_formal_evaluate_record"] is False
     assert finalize_manifest["system_final"]["artifact_path"] == pw02_summary["system_final_metrics_artifact_path"]
+
+
+def test_pw02_payload_clean_summary_prefers_decode_sidecar_metrics(tmp_path: Path) -> None:
+    """
+    Verify PW02 payload clean summary prefers decode sidecar metrics over legacy LF trace values.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    payload_decode_sidecar_path = tmp_path / "payload_decode_sidecar.json"
+    prepared_record_path = tmp_path / "prepared_record.json"
+
+    write_json_atomic(
+        payload_decode_sidecar_path,
+        {
+            "artifact_type": "paper_workflow_payload_decode_sidecar",
+            "schema_version": "pw_payload_sidecar_v1",
+            "event_id": "event_000001",
+            "sample_role": "positive_source",
+            "reference_event_id": "event_000001",
+            "message_source": "sidecar_source",
+            "lf_detect_variant": "sidecar_variant",
+            "n_bits_compared": 96,
+            "bit_error_count": 72,
+            "codeword_agreement": 0.25,
+            "message_decode_success": False,
+        },
+    )
+    write_json_atomic(
+        prepared_record_path,
+        {
+            "sample_role": "positive_source",
+            "paper_workflow_event_id": "event_000001",
+            "paper_workflow_event_index": 1,
+            "paper_workflow_payload_decode_sidecar_path": normalize_path_value(payload_decode_sidecar_path),
+            "content_evidence_payload": {
+                "score_parts": {
+                    "lf_trajectory_detect_trace": {
+                        "codeword_agreement": 0.91,
+                        "n_bits_compared": 64,
+                        "detect_variant": "trace_variant",
+                        "message_source": "trace_source",
+                    }
+                }
+            },
+            "attestation": {
+                "final_event_attested_decision": {
+                    "event_attestation_score": 0.5,
+                    "is_event_attested": True,
+                }
+            },
+        },
+    )
+
+    payload_clean_summary = pw02_metrics_extensions_module._build_payload_clean_summary_payload(
+        family_id="family_payload_sidecar_pw02",
+        score_runs={
+            pw02_module.CONTENT_SCORE_NAME: {
+                "evaluate_inputs": {
+                    "records": [
+                        {
+                            "record_path": normalize_path_value(prepared_record_path),
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    assert payload_clean_summary["status"] == "ok"
+    assert payload_clean_summary["overall"]["mean_codeword_agreement"] == pytest.approx(0.25)
+    assert payload_clean_summary["overall"]["mean_n_bits_compared"] == pytest.approx(96.0)
+    assert payload_clean_summary["overall"]["payload_primary_metric_sources"] == ["codeword_agreement_and_n_bits_compared"]
+    assert payload_clean_summary["overall"]["lf_detect_variants"] == ["sidecar_variant"]
+    assert payload_clean_summary["overall"]["message_sources"] == ["sidecar_source"]
+    assert payload_clean_summary["rows"][0]["codeword_agreement"] == pytest.approx(0.25)
+    assert payload_clean_summary["rows"][0]["payload_decode_sidecar_path"] == normalize_path_value(payload_decode_sidecar_path)
 
 
 def test_pw02_passes_run_root_reuse_overrides_for_calibrate_and_evaluate_configs(

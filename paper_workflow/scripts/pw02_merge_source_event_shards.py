@@ -390,6 +390,8 @@ def _build_source_pool_manifest_payload(
                 "event_index": event_index,
                 "sample_role": normalized_sample_role,
                 "detect_record_path": detect_record_path,
+                "payload_reference_sidecar_path": event_payload.get("payload_reference_sidecar_path"),
+                "payload_decode_sidecar_path": event_payload.get("payload_decode_sidecar_path"),
                 "source_shard_index": source_shard_index,
                 "source_shard_root": source_shard_root,
                 "source_shard_manifest_path": source_shard_manifest_path,
@@ -1330,6 +1332,12 @@ def _build_prepared_records(
             event_id=event_id,
             event_index=event_index,
         )
+        payload_reference_sidecar_path = event_payload.get("payload_reference_sidecar_path")
+        if isinstance(payload_reference_sidecar_path, str) and payload_reference_sidecar_path:
+            labelled_payload["paper_workflow_payload_reference_sidecar_path"] = payload_reference_sidecar_path
+        payload_decode_sidecar_path = event_payload.get("payload_decode_sidecar_path")
+        if isinstance(payload_decode_sidecar_path, str) and payload_decode_sidecar_path:
+            labelled_payload["paper_workflow_payload_decode_sidecar_path"] = payload_decode_sidecar_path
         prepared_records.append(
             {
                 "event_id": event_id,

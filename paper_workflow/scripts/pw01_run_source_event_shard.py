@@ -38,9 +38,12 @@ from paper_workflow.scripts.pw_common import (
     CLEAN_NEGATIVE_SAMPLE_ROLE,
     PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
     DEFAULT_CONFIG_RELATIVE_PATH,
+    build_payload_decode_sidecar_payload,
+    build_payload_reference_sidecar_payload,
     build_source_shard_root,
     build_family_root,
     read_jsonl,
+    resolve_family_id_from_path,
     resolve_family_layout_paths,
     validate_source_sample_role,
 )
@@ -2423,6 +2426,27 @@ def _run_positive_source_event(
     validate_path_within_base(shard_root, staged_detect_record_path, "staged detect record")
     copy_file(source_embed_record_path, staged_embed_record_path)
 
+    family_id = resolve_family_id_from_path(shard_root)
+    artifacts_root = ensure_directory(event_root / "artifacts")
+    payload_reference_sidecar_path = artifacts_root / "payload_reference_sidecar.json"
+    validate_path_within_base(shard_root, payload_reference_sidecar_path, "payload reference sidecar path")
+    payload_reference_sidecar_payload: Dict[str, Any] | None = None
+    try:
+        payload_reference_sidecar_payload = build_payload_reference_sidecar_payload(
+            family_id=family_id,
+            stage_name="PW01_Source_Event_Shards",
+            event_id=event_id,
+            event_index=event_index,
+            sample_role=ACTIVE_SAMPLE_ROLE,
+            prompt_sha256=prompt_sha256,
+            seed=seed,
+            embed_record=_load_required_json_dict(staged_embed_record_path, "event embed record"),
+        )
+        write_json_atomic(payload_reference_sidecar_path, payload_reference_sidecar_payload)
+    except (TypeError, ValueError):
+        # 旧夹具可能未提供完整 payload 参考字段，此时保持 PW01 主流程兼容。
+        payload_reference_sidecar_payload = None
+
     detect_payload_obj = _load_required_json_dict(source_detect_record_path, "event detect record")
     detect_payload_obj = pw01_stage_runtime_helpers._normalize_direct_detect_payload(
         detect_payload_obj,
@@ -2432,6 +2456,26 @@ def _run_positive_source_event(
         record_usage=_resolve_event_record_usage(ACTIVE_SAMPLE_ROLE),
     )
     write_json_atomic(staged_detect_record_path, detect_payload_obj)
+
+    payload_decode_sidecar_path = artifacts_root / "payload_decode_sidecar.json"
+    validate_path_within_base(shard_root, payload_decode_sidecar_path, "payload decode sidecar path")
+    payload_decode_sidecar_payload: Dict[str, Any] | None = None
+    if payload_reference_sidecar_payload is not None:
+        try:
+            payload_decode_sidecar_payload = build_payload_decode_sidecar_payload(
+                family_id=family_id,
+                stage_name="PW01_Source_Event_Shards",
+                event_id=event_id,
+                event_index=event_index,
+                sample_role=ACTIVE_SAMPLE_ROLE,
+                reference_event_id=event_id,
+                detect_payload=detect_payload_obj,
+                reference_sidecar=payload_reference_sidecar_payload,
+            )
+            write_json_atomic(payload_decode_sidecar_path, payload_decode_sidecar_payload)
+        except (TypeError, ValueError):
+            # 旧夹具 detect 记录可能缺少 LF 闭环细节，此时保留旧路径回退能力。
+            payload_decode_sidecar_payload = None
 
     attestation_views = pw01_stage_runtime_helpers._resolve_source_pool_attestation_views(
         cfg_obj=preview_runtime_cfg,
@@ -2471,6 +2515,26 @@ def _run_positive_source_event(
         "embed_record_package_relative_path": shard_relative_embed_record,
         "detect_record_path": normalize_path_value(staged_detect_record_path),
         "detect_record_package_relative_path": shard_relative_detect_record,
+        "payload_reference_sidecar_path": (
+            normalize_path_value(payload_reference_sidecar_path)
+            if payload_reference_sidecar_payload is not None
+            else None
+        ),
+        "payload_reference_sidecar_package_relative_path": (
+            payload_reference_sidecar_path.relative_to(shard_root).as_posix()
+            if payload_reference_sidecar_payload is not None
+            else None
+        ),
+        "payload_decode_sidecar_path": (
+            normalize_path_value(payload_decode_sidecar_path)
+            if payload_decode_sidecar_payload is not None
+            else None
+        ),
+        "payload_decode_sidecar_package_relative_path": (
+            payload_decode_sidecar_path.relative_to(shard_root).as_posix()
+            if payload_decode_sidecar_payload is not None
+            else None
+        ),
         "source_image": source_image_view,
         "plain_preview_image": plain_preview_image_view,
         "preview_generation_record": preview_generation_record_view,

@@ -157,6 +157,8 @@ def _build_positive_source_finalize_fixture(summary: Dict[str, Any]) -> Dict[str
             "prompt_sha256": event_row["prompt_sha256"],
             "seed": event_row["seed"],
         }
+        payload_reference_sidecar_path = None
+        payload_decode_sidecar_path = None
         if sample_role == pw03_module.ACTIVE_SAMPLE_ROLE:
             statement = AttestationStatement(
                 schema=ATTESTATION_SCHEMA,
@@ -181,6 +183,47 @@ def _build_positive_source_finalize_fixture(summary: Dict[str, Any]) -> Dict[str
                     geo_anchor_seed=event_index,
                 ),
             }
+            payload_reference_sidecar_path = event_root / "artifacts" / "payload_reference_sidecar.json"
+            payload_decode_sidecar_path = event_root / "artifacts" / "payload_decode_sidecar.json"
+            expected_code_bits = [1 if bit_index % 2 == 0 else -1 for bit_index in range(96)]
+            write_json_atomic(
+                payload_reference_sidecar_path,
+                {
+                    "artifact_type": "paper_workflow_payload_reference_sidecar",
+                    "schema_version": "pw_payload_sidecar_v1",
+                    "family_id": family_id,
+                    "event_id": event_id,
+                    "event_index": event_index,
+                    "sample_role": sample_role,
+                    "reference_event_id": event_id,
+                    "message_source": "attestation_event_digest",
+                    "code_bits": expected_code_bits,
+                    "reference_payload_digest": f"reference_payload_digest_{event_id}",
+                    "payload_binding_digest": f"payload_binding_digest_{event_id}",
+                },
+            )
+            write_json_atomic(
+                payload_decode_sidecar_path,
+                {
+                    "artifact_type": "paper_workflow_payload_decode_sidecar",
+                    "schema_version": "pw_payload_sidecar_v1",
+                    "family_id": family_id,
+                    "event_id": event_id,
+                    "event_index": event_index,
+                    "sample_role": sample_role,
+                    "reference_event_id": event_id,
+                    "reference_payload_digest": f"reference_payload_digest_{event_id}",
+                    "payload_binding_digest": f"payload_binding_digest_{event_id}",
+                    "message_source": "attestation_event_digest",
+                    "lf_detect_variant": "correlation_v2",
+                    "decoded_bits": expected_code_bits,
+                    "n_bits_compared": 96,
+                    "bit_error_count": 0,
+                    "codeword_agreement": 1.0,
+                    "message_decode_success": True,
+                    "decode_failure_reason": None,
+                },
+            )
         detect_record = {
             "content_evidence_payload": {
                 "status": "ok",
@@ -231,6 +274,8 @@ def _build_positive_source_finalize_fixture(summary: Dict[str, Any]) -> Dict[str
             "attestation_statement": cast(Dict[str, Any], embed_record.get("attestation", {})).get("statement"),
             "attestation_bundle": cast(Dict[str, Any], embed_record.get("attestation", {})).get("signed_bundle"),
             "attestation_result": {"status": "ok"} if sample_role == pw03_module.ACTIVE_SAMPLE_ROLE else None,
+            "payload_reference_sidecar_path": payload_reference_sidecar_path.as_posix() if payload_reference_sidecar_path is not None else None,
+            "payload_decode_sidecar_path": payload_decode_sidecar_path.as_posix() if payload_decode_sidecar_path is not None else None,
             "sha256": pw03_module.compute_file_sha256(detect_record_path),
             "stage_results": {},
         }
@@ -243,6 +288,8 @@ def _build_positive_source_finalize_fixture(summary: Dict[str, Any]) -> Dict[str
             "event_index": event_index,
             "sample_role": sample_role,
             "detect_record_path": detect_record_path.as_posix(),
+            "payload_reference_sidecar_path": payload_reference_sidecar_path.as_posix() if payload_reference_sidecar_path is not None else None,
+            "payload_decode_sidecar_path": payload_decode_sidecar_path.as_posix() if payload_decode_sidecar_path is not None else None,
             "source_shard_index": shard_index,
             "source_shard_root": shard_root.as_posix(),
             "source_shard_manifest_path": (shard_root / "shard_manifest.json").as_posix(),
@@ -382,6 +429,9 @@ def _patch_pw03_detect(monkeypatch: pytest.MonkeyPatch) -> Dict[str, Any]:
         captures["detect_input_paths"].append(detect_input_path)
         captures["detect_input_payloads"].append(detect_input_payload)
 
+        expected_bit_signs = [1 if bit_index % 2 == 0 else -1 for bit_index in range(96)]
+        mismatch_indices = [1, 5, 9]
+
         ensure_directory(stdout_log_path.parent)
         ensure_directory(stderr_log_path.parent)
         ensure_directory(run_root / "records")
@@ -395,6 +445,20 @@ def _patch_pw03_detect(monkeypatch: pytest.MonkeyPatch) -> Dict[str, Any]:
                     "content_chain_score": 0.91,
                     "plan_digest": detect_input_payload.get("plan_digest"),
                     "basis_digest": detect_input_payload.get("basis_digest"),
+                    "score_parts": {
+                        "lf_trajectory_detect_trace": {
+                            "codeword_agreement": 1.0 - (len(mismatch_indices) / 96.0),
+                            "n_bits_compared": 96,
+                            "detect_variant": "correlation_v2",
+                            "message_source": "attestation_event_digest",
+                        }
+                    },
+                },
+                "_lf_attestation_trace_artifact": {
+                    "expected_bit_signs": expected_bit_signs,
+                    "mismatch_indices": mismatch_indices,
+                    "n_bits_compared": 96,
+                    "agreement_count": 96 - len(mismatch_indices),
                 },
                 "geometry_result": {
                     "sync_status": "ok",
@@ -641,6 +705,8 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert Path(str(first_event["threshold_binding_summary_path"])).exists()
     assert Path(str(first_event["detect_record_path"])).exists()
     assert Path(str(first_event["wrong_event_attestation_challenge_record_path"])).exists()
+    assert Path(str(first_event["payload_reference_sidecar_path"])).exists()
+    assert Path(str(first_event["payload_decode_sidecar_path"])).exists()
     assert first_event["parent_event_id"]
     assert first_event["attack_family"]
     assert first_event["attack_params_digest"]
@@ -677,6 +743,10 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_diagnostics"])["sync_success"] is True
     assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_diagnostics"])["inverse_transform_success"] is True
     assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_diagnostics"])["attention_anchor_available"] is True
+    payload_decode_sidecar = json.loads(Path(str(first_event["payload_decode_sidecar_path"])).read_text(encoding="utf-8"))
+    assert payload_decode_sidecar["reference_event_id"] == first_event["parent_event_id"]
+    assert payload_decode_sidecar["sample_role"] == pw03_module.ATTACKED_POSITIVE_SAMPLE_ROLE
+    assert payload_decode_sidecar["lf_detect_variant"] == "correlation_v2"
 
 
 def test_pw03_attack_shards_remain_isolated_across_sessions(

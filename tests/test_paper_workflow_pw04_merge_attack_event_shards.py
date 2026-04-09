@@ -16,6 +16,7 @@ from PIL import Image
 
 import paper_workflow.scripts.pw03_run_attack_event_shard as pw03_module
 import paper_workflow.scripts.pw04_merge_attack_event_shards as pw04_module
+import paper_workflow.scripts.pw04_metrics_extensions as pw04_metrics_extensions_module
 import paper_workflow.scripts.pw_quality_metrics as pw_quality_metrics_module
 from main.watermarking.provenance.attestation_statement import (
     ATTESTATION_SCHEMA,
@@ -1470,6 +1471,74 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert first_pool_event["formal_record_path"]
     assert Path(str(first_pool_event["formal_record_path"])).exists()
     assert summary["family_id"] == pw04_summary["family_id"]
+
+
+def test_pw04_payload_attack_summary_prefers_decode_sidecar_metrics(tmp_path: Path) -> None:
+    """
+    Verify PW04 payload attack summary prefers decode sidecar metrics over legacy LF trace values.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    payload_decode_sidecar_path = tmp_path / "attack_payload_decode_sidecar.json"
+    write_json_atomic(
+        payload_decode_sidecar_path,
+        {
+            "artifact_type": "paper_workflow_payload_decode_sidecar",
+            "schema_version": "pw_payload_sidecar_v1",
+            "event_id": "attack_event_000001",
+            "sample_role": "attacked_positive",
+            "reference_event_id": "source_event_000001",
+            "message_source": "sidecar_message_source",
+            "lf_detect_variant": "sidecar_attack_variant",
+            "n_bits_compared": 96,
+            "bit_error_count": 48,
+            "codeword_agreement": 0.5,
+            "message_decode_success": False,
+        },
+    )
+
+    payload_attack_summary = pw04_metrics_extensions_module._build_payload_attack_summary_payload(
+        family_id="family_payload_sidecar_pw04",
+        attack_event_rows=[
+            {
+                "attack_event_id": "attack_event_000001",
+                "attack_family": "resize",
+                "attack_condition_key": "resize::0.8",
+                "payload_decode_sidecar_path": normalize_path_value(payload_decode_sidecar_path),
+                "formal_record": {
+                    "content_evidence_payload": {
+                        "score_parts": {
+                            "lf_trajectory_detect_trace": {
+                                "codeword_agreement": 0.88,
+                                "n_bits_compared": 64,
+                                "detect_variant": "trace_variant",
+                                "message_source": "trace_source",
+                            }
+                        }
+                    },
+                    "attestation": {
+                        "final_event_attested_decision": {
+                            "event_attestation_score": 0.7,
+                            "is_event_attested": True,
+                        }
+                    },
+                },
+            }
+        ],
+    )
+
+    assert payload_attack_summary["status"] == "ok"
+    assert payload_attack_summary["overall"]["mean_codeword_agreement"] == pytest.approx(0.5)
+    assert payload_attack_summary["overall"]["mean_n_bits_compared"] == pytest.approx(96.0)
+    assert payload_attack_summary["overall"]["payload_primary_metric_sources"] == ["codeword_agreement_and_n_bits_compared"]
+    assert payload_attack_summary["overall"]["lf_detect_variants"] == ["sidecar_attack_variant"]
+    assert payload_attack_summary["overall"]["message_sources"] == ["sidecar_message_source"]
+    assert payload_attack_summary["by_attack_family"][0]["attack_family"] == "resize"
+    assert payload_attack_summary["by_attack_family"][0]["mean_codeword_agreement"] == pytest.approx(0.5)
 
 
 def test_pw03_geometry_sidecar_stabilizes_missing_fields() -> None:

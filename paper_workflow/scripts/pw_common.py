@@ -9,12 +9,14 @@ import copy
 import hashlib
 import json
 import math
+import random
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence, Tuple, cast
 
 from main.evaluation import attack_plan as eval_attack_plan
 from main.evaluation import attack_runner as eval_attack_runner
 from main.evaluation import protocol_loader as attack_protocol_loader
+from main.watermarking.content_chain.ldpc_codec import build_ldpc_spec, encode_message_bits
 
 from scripts.notebook_runtime_common import (
     REPO_ROOT,
@@ -50,6 +52,7 @@ SAMPLE_ROLE_DIRECTORY_NAMES = {
 SOURCE_TRUTH_STAGE = "PW01_Source_Event_Shards"
 ATTACK_SEVERITY_RULE_VERSION = "pw_attack_severity_v1"
 ATTACK_SEVERITY_AXIS_KIND = "family_local"
+PAYLOAD_SIDECAR_SCHEMA_VERSION = "pw_payload_sidecar_v1"
 
 
 def _canonical_json_text(payload: Mapping[str, Any]) -> str:
@@ -79,6 +82,493 @@ def canonical_mapping_sha256(payload: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical_text.encode("utf-8")).hexdigest()
 
 
+def _extract_mapping(node: Any) -> Dict[str, Any]:
+    """
+    Normalize an optional mapping node to dict.
+
+    Args:
+        node: Candidate mapping node.
+
+    Returns:
+        Normalized dict payload.
+    """
+    return dict(cast(Mapping[str, Any], node)) if isinstance(node, Mapping) else {}
+
+
+def _extract_sign_list(node: Any) -> List[int]:
+    """
+    Normalize one sign list to integer values in {-1, +1}.
+
+    Args:
+        node: Candidate sign list.
+
+    Returns:
+        Normalized sign list.
+    """
+    if not isinstance(node, list):
+        return []
+    normalized: List[int] = []
+    for raw_value in cast(List[object], node):
+        if isinstance(raw_value, bool):
+            continue
+        if isinstance(raw_value, (int, float)):
+            normalized.append(1 if float(raw_value) > 0.0 else -1)
+    return normalized
+
+
+def _extract_int_list(node: Any) -> List[int]:
+    """
+    Normalize one integer list.
+
+    Args:
+        node: Candidate integer list.
+
+    Returns:
+        Normalized integer list.
+    """
+    if not isinstance(node, list):
+        return []
+    normalized: List[int] = []
+    for raw_value in cast(List[object], node):
+        if isinstance(raw_value, int) and not isinstance(raw_value, bool):
+            normalized.append(int(raw_value))
+    return normalized
+
+
+def _extract_int(value: Any) -> int | None:
+    """
+    Coerce one integer-like scalar.
+
+    Args:
+        value: Candidate scalar value.
+
+    Returns:
+        Parsed integer or None.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float) and float(value).is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = float(value.strip())
+        except ValueError:
+            return None
+        return int(parsed) if float(parsed).is_integer() else None
+    return None
+
+
+def _coerce_finite_float(value: Any) -> float | None:
+    """
+    Coerce one scalar to finite float.
+
+    Args:
+        value: Candidate scalar value.
+
+    Returns:
+        Finite float or None.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        value_float = float(value)
+        return value_float if math.isfinite(value_float) else None
+    if isinstance(value, str) and value.strip():
+        try:
+            value_float = float(value.strip())
+        except ValueError:
+            return None
+        return value_float if math.isfinite(value_float) else None
+    return None
+
+
+def _payload_bytes_to_bipolar_bits(payload_bytes: bytes, message_length: int) -> List[int]:
+    """
+    Convert payload bytes to bipolar bits.
+
+    Args:
+        payload_bytes: Payload bytes.
+        message_length: Required message length.
+
+    Returns:
+        Message bits encoded as {-1, +1}.
+    """
+    if not isinstance(payload_bytes, bytes) or not payload_bytes:
+        raise ValueError("payload_bytes must be non-empty bytes")
+    if not isinstance(message_length, int) or message_length <= 0:
+        raise ValueError("message_length must be positive int")
+
+    bits: List[int] = []
+    for byte_value in payload_bytes:
+        for shift in range(7, -1, -1):
+            bits.append(1 if ((byte_value >> shift) & 1) == 1 else -1)
+            if len(bits) >= message_length:
+                return bits
+    raise ValueError("payload_bytes does not contain enough bits for message_length")
+
+
+def build_payload_reference_sidecar_payload(
+    *,
+    family_id: str,
+    stage_name: str,
+    event_id: str,
+    event_index: int,
+    sample_role: str,
+    prompt_sha256: str | None,
+    seed: int | None,
+    embed_record: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """
+    Build one event-level payload reference sidecar.
+
+    Args:
+        family_id: Family identifier.
+        stage_name: Stage name.
+        event_id: Event identifier.
+        event_index: Event index.
+        sample_role: Event sample role.
+        prompt_sha256: Optional prompt digest.
+        seed: Optional event seed.
+        embed_record: Staged embed record payload.
+
+    Returns:
+        Payload reference sidecar payload.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(stage_name, str) or not stage_name:
+        raise TypeError("stage_name must be non-empty str")
+    if not isinstance(event_id, str) or not event_id:
+        raise TypeError("event_id must be non-empty str")
+    if not isinstance(event_index, int) or isinstance(event_index, bool) or event_index < 0:
+        raise TypeError("event_index must be non-negative int")
+    if not isinstance(sample_role, str) or not sample_role:
+        raise TypeError("sample_role must be non-empty str")
+    if not isinstance(embed_record, Mapping):
+        raise TypeError("embed_record must be Mapping")
+
+    content_payload = _extract_mapping(embed_record.get("content_evidence") or embed_record.get("content_result"))
+    score_parts = _extract_mapping(content_payload.get("score_parts"))
+    lf_metrics = _extract_mapping(score_parts.get("lf_metrics"))
+    if not lf_metrics:
+        embed_trace = _extract_mapping(embed_record.get("embed_trace"))
+        lf_metrics = _extract_mapping(embed_trace.get("lf_trace_summary"))
+    if not lf_metrics:
+        raise ValueError("embed_record missing lf_metrics required for payload reference sidecar")
+
+    attestation_payload = _extract_mapping(embed_record.get("attestation"))
+    message_length = _extract_int(lf_metrics.get("message_length"))
+    if message_length is None or message_length <= 0:
+        raise ValueError("embed_record lf_metrics missing valid message_length")
+    ecc_sparsity = _extract_int(lf_metrics.get("ecc_sparsity")) or 3
+    plan_digest = str(lf_metrics.get("plan_digest") or content_payload.get("plan_digest") or "")
+    basis_digest = str(lf_metrics.get("basis_digest") or content_payload.get("basis_digest") or embed_record.get("basis_digest") or "")
+    attestation_event_digest = str(
+        attestation_payload.get("event_binding_digest")
+        or lf_metrics.get("attestation_event_digest")
+        or ""
+    )
+    event_binding_mode = attestation_payload.get("event_binding_mode")
+    message_source = str(lf_metrics.get("message_source") or "plan_digest")
+    parity_check_digest = lf_metrics.get("parity_check_digest")
+
+    lf_payload_hex = attestation_payload.get("lf_payload_hex")
+    if isinstance(lf_payload_hex, str) and lf_payload_hex:
+        message_bits = _payload_bytes_to_bipolar_bits(bytes.fromhex(lf_payload_hex), message_length)
+    else:
+        seed_material = {
+            "plan_digest": plan_digest,
+            "tag": "lf_message",
+            "basis_digest": basis_digest,
+            "attestation_event_digest": attestation_event_digest,
+        }
+        seed_value = int(canonical_mapping_sha256(seed_material)[:16], 16)
+        rng = random.Random(seed_value)
+        message_bits = [1 if rng.random() < 0.5 else -1 for _ in range(message_length)]
+
+    ldpc_seed_key = canonical_mapping_sha256(
+        {
+            "plan_digest": plan_digest,
+            "basis_digest": basis_digest,
+            "attestation_event_digest": attestation_event_digest,
+            "message_length": message_length,
+            "ecc_sparsity": ecc_sparsity,
+            "message_source": message_source,
+            "channel": "lf",
+        }
+    )
+    ldpc_spec = build_ldpc_spec(
+        message_length=message_length,
+        ecc_sparsity=ecc_sparsity,
+        seed_key=ldpc_seed_key,
+    )
+    code_bits = encode_message_bits(message_bits, ldpc_spec)
+
+    reference_payload_digest = canonical_mapping_sha256(
+        {
+            "message_bits": message_bits,
+            "code_bits": code_bits,
+            "message_source": message_source,
+            "plan_digest": plan_digest,
+            "basis_digest": basis_digest,
+            "attestation_event_digest": attestation_event_digest,
+            "parity_check_digest": parity_check_digest,
+        }
+    )
+    payload_binding_digest = canonical_mapping_sha256(
+        {
+            "reference_event_id": event_id,
+            "sample_role": sample_role,
+            "prompt_sha256": prompt_sha256,
+            "seed": seed,
+            "reference_payload_digest": reference_payload_digest,
+        }
+    )
+
+    return {
+        "artifact_type": "paper_workflow_payload_reference_sidecar",
+        "schema_version": PAYLOAD_SIDECAR_SCHEMA_VERSION,
+        "stage_name": stage_name,
+        "family_id": family_id,
+        "event_id": event_id,
+        "event_index": event_index,
+        "sample_role": sample_role,
+        "reference_event_id": event_id,
+        "prompt_sha256": prompt_sha256,
+        "seed": seed,
+        "message_source": message_source,
+        "event_binding_mode": event_binding_mode if isinstance(event_binding_mode, str) and event_binding_mode else None,
+        "plan_digest": plan_digest or None,
+        "basis_digest": basis_digest or None,
+        "attestation_event_digest": attestation_event_digest or None,
+        "parity_check_digest": parity_check_digest if isinstance(parity_check_digest, str) and parity_check_digest else None,
+        "message_length": message_length,
+        "code_length": len(code_bits),
+        "message_bits": message_bits,
+        "code_bits": code_bits,
+        "reference_payload_digest": reference_payload_digest,
+        "payload_binding_digest": payload_binding_digest,
+    }
+
+
+def build_payload_decode_sidecar_payload(
+    *,
+    family_id: str,
+    stage_name: str,
+    event_id: str,
+    event_index: int,
+    sample_role: str,
+    reference_event_id: str,
+    detect_payload: Mapping[str, Any],
+    reference_sidecar: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """
+    Build one event-level payload decode sidecar.
+
+    Args:
+        family_id: Family identifier.
+        stage_name: Stage name.
+        event_id: Event identifier.
+        event_index: Event index.
+        sample_role: Event sample role.
+        reference_event_id: Reference positive-source event identifier.
+        detect_payload: Staged detect record payload.
+        reference_sidecar: Reference sidecar payload.
+
+    Returns:
+        Payload decode sidecar payload.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(stage_name, str) or not stage_name:
+        raise TypeError("stage_name must be non-empty str")
+    if not isinstance(event_id, str) or not event_id:
+        raise TypeError("event_id must be non-empty str")
+    if not isinstance(event_index, int) or isinstance(event_index, bool) or event_index < 0:
+        raise TypeError("event_index must be non-negative int")
+    if not isinstance(sample_role, str) or not sample_role:
+        raise TypeError("sample_role must be non-empty str")
+    if not isinstance(reference_event_id, str) or not reference_event_id:
+        raise TypeError("reference_event_id must be non-empty str")
+    if not isinstance(detect_payload, Mapping):
+        raise TypeError("detect_payload must be Mapping")
+    if not isinstance(reference_sidecar, Mapping):
+        raise TypeError("reference_sidecar must be Mapping")
+
+    content_payload = _extract_mapping(detect_payload.get("content_evidence_payload"))
+    score_parts = _extract_mapping(content_payload.get("score_parts"))
+    lf_trace = _extract_mapping(score_parts.get("lf_trajectory_detect_trace"))
+    if not lf_trace:
+        lf_trace = _extract_mapping(score_parts.get("lf_detect_trace"))
+    if not lf_trace:
+        lf_trace = _extract_mapping(content_payload.get("lf_evidence_summary"))
+    if not lf_trace:
+        lf_trace = _extract_mapping(score_parts.get("lf_metrics"))
+
+    trace_artifact = _extract_mapping(detect_payload.get("_lf_attestation_trace_artifact"))
+    alignment_artifact = _extract_mapping(detect_payload.get("_lf_alignment_table_artifact"))
+    mismatch_indices = _extract_int_list(trace_artifact.get("mismatch_indices"))
+    if not mismatch_indices:
+        mismatch_indices = _extract_int_list(alignment_artifact.get("mismatch_indices"))
+
+    decoded_bits = _extract_sign_list(detect_payload.get("decoded_bits"))
+    if not decoded_bits:
+        decoded_bits = _extract_sign_list(trace_artifact.get("decoded_bits"))
+    if not decoded_bits:
+        decoded_bits = _extract_sign_list(trace_artifact.get("posterior_signs"))
+    if not decoded_bits:
+        decoded_bits = _extract_sign_list(trace_artifact.get("projected_lf_signs"))
+    if not decoded_bits:
+        expected_bits = _extract_sign_list(trace_artifact.get("expected_bit_signs"))
+        if not expected_bits:
+            expected_bits = _extract_sign_list(alignment_artifact.get("expected_bit_signs"))
+        if not expected_bits:
+            expected_bits = _extract_sign_list(reference_sidecar.get("code_bits"))
+        if expected_bits:
+            decoded_bits = list(expected_bits)
+            for mismatch_index in mismatch_indices:
+                if 0 <= mismatch_index < len(decoded_bits):
+                    decoded_bits[mismatch_index] = -1 * int(decoded_bits[mismatch_index])
+
+    n_bits_compared = _extract_int(trace_artifact.get("n_bits_compared"))
+    if n_bits_compared is None:
+        n_bits_compared = _extract_int(alignment_artifact.get("n_bits_compared"))
+    if n_bits_compared is None:
+        n_bits_compared = _extract_int(lf_trace.get("n_bits_compared"))
+
+    agreement_count = _extract_int(trace_artifact.get("agreement_count"))
+    if agreement_count is None:
+        agreement_indices = _extract_int_list(trace_artifact.get("agreement_indices"))
+        if agreement_indices:
+            agreement_count = len(agreement_indices)
+    if agreement_count is None and isinstance(n_bits_compared, int) and mismatch_indices:
+        agreement_count = max(0, n_bits_compared - len(mismatch_indices))
+
+    codeword_agreement = _coerce_finite_float(lf_trace.get("codeword_agreement"))
+    if codeword_agreement is None and isinstance(agreement_count, int) and isinstance(n_bits_compared, int) and n_bits_compared > 0:
+        codeword_agreement = float(agreement_count / n_bits_compared)
+
+    bit_error_count = None
+    if isinstance(n_bits_compared, int) and mismatch_indices:
+        bit_error_count = len(mismatch_indices)
+    elif isinstance(n_bits_compared, int) and isinstance(agreement_count, int) and n_bits_compared >= agreement_count:
+        bit_error_count = int(n_bits_compared - agreement_count)
+    elif isinstance(n_bits_compared, int) and n_bits_compared > 0 and codeword_agreement is not None:
+        bit_error_count = int(round((1.0 - codeword_agreement) * float(n_bits_compared)))
+
+    if isinstance(n_bits_compared, int) and n_bits_compared > 0 and decoded_bits:
+        decoded_bits = decoded_bits[:n_bits_compared]
+
+    decode_failure_reason = None
+    if not isinstance(n_bits_compared, int) or n_bits_compared <= 0:
+        decode_failure_reason = str(
+            lf_trace.get("lf_failure_reason")
+            or lf_trace.get("content_failure_reason")
+            or lf_trace.get("lf_absent_reason")
+            or "missing_upstream_decoded_bits"
+        )
+
+    message_decode_success = None
+    if isinstance(bit_error_count, int):
+        message_decode_success = bit_error_count == 0
+
+    reference_payload_digest = reference_sidecar.get("reference_payload_digest")
+    payload_binding_digest = reference_sidecar.get("payload_binding_digest")
+    if not isinstance(reference_payload_digest, str) or not reference_payload_digest:
+        raise ValueError("reference_sidecar missing reference_payload_digest")
+    if not isinstance(payload_binding_digest, str) or not payload_binding_digest:
+        raise ValueError("reference_sidecar missing payload_binding_digest")
+
+    return {
+        "artifact_type": "paper_workflow_payload_decode_sidecar",
+        "schema_version": PAYLOAD_SIDECAR_SCHEMA_VERSION,
+        "stage_name": stage_name,
+        "family_id": family_id,
+        "event_id": event_id,
+        "event_index": event_index,
+        "sample_role": sample_role,
+        "reference_event_id": reference_event_id,
+        "reference_payload_digest": reference_payload_digest,
+        "payload_binding_digest": payload_binding_digest,
+        "message_source": (
+            str(lf_trace.get("message_source"))
+            if isinstance(lf_trace.get("message_source"), str) and str(lf_trace.get("message_source"))
+            else reference_sidecar.get("message_source")
+        ),
+        "lf_detect_variant": (
+            str(lf_trace.get("detect_variant"))
+            if isinstance(lf_trace.get("detect_variant"), str) and str(lf_trace.get("detect_variant"))
+            else detect_payload.get("lf_detect_variant")
+        ),
+        "decoded_bits": decoded_bits or None,
+        "n_bits_compared": n_bits_compared,
+        "agreement_count": agreement_count,
+        "bit_error_count": bit_error_count,
+        "codeword_agreement": codeword_agreement,
+        "message_decode_success": message_decode_success,
+        "decode_failure_reason": decode_failure_reason,
+        "bp_converged": trace_artifact.get("bp_converged"),
+        "bp_iteration_count": _extract_int(trace_artifact.get("bp_iteration_count")),
+    }
+
+
+def extract_payload_metrics_from_decode_sidecar(decode_sidecar: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    Extract summary-friendly metrics from one payload decode sidecar.
+
+    Args:
+        decode_sidecar: Payload decode sidecar payload.
+
+    Returns:
+        Summary-friendly metric mapping.
+    """
+    if not isinstance(decode_sidecar, Mapping):
+        raise TypeError("decode_sidecar must be Mapping")
+
+    n_bits_compared = _extract_int(decode_sidecar.get("n_bits_compared"))
+    codeword_agreement = _coerce_finite_float(decode_sidecar.get("codeword_agreement"))
+    bit_error_count = _extract_int(decode_sidecar.get("bit_error_count"))
+    if codeword_agreement is None and isinstance(bit_error_count, int) and isinstance(n_bits_compared, int) and n_bits_compared > 0:
+        codeword_agreement = float(1.0 - (float(bit_error_count) / float(n_bits_compared)))
+    return {
+        "codeword_agreement": codeword_agreement,
+        "n_bits_compared": n_bits_compared,
+        "bit_error_count": bit_error_count,
+        "message_decode_success": (
+            decode_sidecar.get("message_decode_success")
+            if isinstance(decode_sidecar.get("message_decode_success"), bool)
+            else None
+        ),
+        "decode_failure_reason": (
+            str(decode_sidecar.get("decode_failure_reason"))
+            if isinstance(decode_sidecar.get("decode_failure_reason"), str) and str(decode_sidecar.get("decode_failure_reason"))
+            else None
+        ),
+        "message_source": (
+            str(decode_sidecar.get("message_source"))
+            if isinstance(decode_sidecar.get("message_source"), str) and str(decode_sidecar.get("message_source"))
+            else None
+        ),
+        "lf_detect_variant": (
+            str(decode_sidecar.get("lf_detect_variant"))
+            if isinstance(decode_sidecar.get("lf_detect_variant"), str) and str(decode_sidecar.get("lf_detect_variant"))
+            else None
+        ),
+        "reference_payload_digest": (
+            str(decode_sidecar.get("reference_payload_digest"))
+            if isinstance(decode_sidecar.get("reference_payload_digest"), str) and str(decode_sidecar.get("reference_payload_digest"))
+            else None
+        ),
+        "payload_binding_digest": (
+            str(decode_sidecar.get("payload_binding_digest"))
+            if isinstance(decode_sidecar.get("payload_binding_digest"), str) and str(decode_sidecar.get("payload_binding_digest"))
+            else None
+        ),
+    }
+
+
 def build_family_root(drive_project_root: Path, family_id: str) -> Path:
     """
     Build the paper workflow family root path.
@@ -96,6 +586,28 @@ def build_family_root(drive_project_root: Path, family_id: str) -> Path:
     family_root = drive_project_root / "paper_workflow" / "families" / family_id.strip()
     validate_path_within_base(drive_project_root, family_root, "paper workflow family root")
     return family_root
+
+
+def resolve_family_id_from_path(path_obj: Path) -> str:
+    """
+    Resolve one family_id by scanning ancestor layout segments.
+
+    Args:
+        path_obj: Candidate path inside one family root.
+
+    Returns:
+        Resolved family identifier.
+    """
+    if not isinstance(path_obj, Path):
+        raise TypeError("path_obj must be Path")
+
+    parts = list(path_obj.resolve().parts)
+    for index, part in enumerate(parts[:-1]):
+        if str(part).lower() == "families" and index + 1 < len(parts):
+            family_id = str(parts[index + 1]).strip()
+            if family_id:
+                return family_id
+    raise ValueError(f"unable to resolve family_id from path: {normalize_path_value(path_obj)}")
 
 
 def resolve_family_layout_paths(family_root: Path) -> Dict[str, Path]:

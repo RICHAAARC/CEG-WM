@@ -88,6 +88,59 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
     ensure_directory(family_root / "exports" / "pw04" / "figures")
     ensure_directory(family_root / "exports" / "pw04" / "tail")
     ensure_directory(family_root / "exports" / "pw04" / "robustness")
+    ensure_directory(family_root / "source_finalize")
+
+    positive_source_sidecar_root = ensure_directory(
+        family_root / "source_shards" / "positive" / "shard_0000" / "events" / "event_000001" / "artifacts"
+    )
+    attacked_positive_sidecar_root = ensure_directory(
+        family_root / "attack_shards" / "shard_0000" / "events" / "event_000001" / "artifacts"
+    )
+    pw02_payload_reference_sidecar_path = _write_json(
+        positive_source_sidecar_root / "payload_reference_sidecar.json",
+        {
+            "artifact_type": "paper_workflow_payload_reference_sidecar",
+            "schema_version": "pw_payload_sidecar_v1",
+            "family_id": family_id,
+            "event_id": "source_event_000001",
+        },
+    )
+    pw02_payload_decode_sidecar_path = _write_json(
+        positive_source_sidecar_root / "payload_decode_sidecar.json",
+        {
+            "artifact_type": "paper_workflow_payload_decode_sidecar",
+            "schema_version": "pw_payload_sidecar_v1",
+            "family_id": family_id,
+            "event_id": "source_event_000001",
+        },
+    )
+    pw04_payload_decode_sidecar_path = _write_json(
+        attacked_positive_sidecar_root / "payload_decode_sidecar.json",
+        {
+            "artifact_type": "paper_workflow_payload_decode_sidecar",
+            "schema_version": "pw_payload_sidecar_v1",
+            "family_id": family_id,
+            "event_id": "attack_event_000001",
+        },
+    )
+    positive_source_pool_manifest_path = _write_json(
+        family_root / "source_finalize" / "positive_source_pool_manifest.json",
+        {
+            "artifact_type": "paper_workflow_pw02_source_pool_manifest",
+            "schema_version": "pw_stage_02_v1",
+            "family_id": family_id,
+            "source_role": "positive_source",
+            "event_count": 1,
+            "events": [
+                {
+                    "event_id": "source_event_000001",
+                    "event_index": 1,
+                    "payload_reference_sidecar_path": normalize_path_value(pw02_payload_reference_sidecar_path),
+                    "payload_decode_sidecar_path": normalize_path_value(pw02_payload_decode_sidecar_path),
+                }
+            ],
+        },
+    )
 
     family_manifest_path = _write_json(
         family_root / "manifests" / "paper_eval_family_manifest.json",
@@ -110,6 +163,12 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             "artifact_type": "paper_workflow_pw02_finalize_manifest",
             "family_id": family_id,
             "status": "completed",
+            "source_pools": {
+                "positive_source": {
+                    "manifest_path": normalize_path_value(positive_source_pool_manifest_path),
+                    "event_count": 1,
+                }
+            },
         },
     )
     pw02_content_threshold_export_path = _write_json(
@@ -163,6 +222,13 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             "artifact_type": "paper_workflow_pw04_attack_positive_pool_manifest",
             "family_id": family_id,
             "event_count": 2,
+            "events": [
+                {
+                    "attack_event_id": "attack_event_000001",
+                    "attack_event_index": 1,
+                    "payload_decode_sidecar_path": normalize_path_value(pw04_payload_decode_sidecar_path),
+                }
+            ],
         },
     )
     pw04_attack_negative_pool_manifest_path = _write_json(
@@ -425,6 +491,9 @@ def test_pw05_release_signoff_packages_canonical_pw04_exports(tmp_path: Path) ->
     assert signoff_report["analysis_only_artifact_count"] == 5
     assert "pw04_summary" in release_manifest["release_copy_paths"]
     assert "family_manifest" in release_manifest["source_artifact_index"]
+    assert "pw02_positive_source_payload_reference_sidecar_e000001" in release_manifest["source_artifact_index"]
+    assert "pw02_positive_source_payload_decode_sidecar_e000001" in release_manifest["source_artifact_index"]
+    assert "pw04_attacked_positive_payload_decode_sidecar_e000001" in release_manifest["source_artifact_index"]
     assert release_manifest["analysis_only_artifact_annotations"]["pw04_system_final_auxiliary_attack_summary"] == {
         "source_path": normalize_path_value(
             Path(str(fixture["drive_root"]))
@@ -457,6 +526,9 @@ def test_pw05_release_signoff_packages_canonical_pw04_exports(tmp_path: Path) ->
     assert "source/exports/pw02/thresholds/content/thresholds.json" in members
     assert "source/exports/pw04/attack_negative_pool_manifest.json" in members
     assert "source/exports/pw04/formal_attack_negative_metrics.json" in members
+    assert "source/source_shards/positive/shard_0000/events/event_000001/artifacts/payload_reference_sidecar.json" in members
+    assert "source/source_shards/positive/shard_0000/events/event_000001/artifacts/payload_decode_sidecar.json" in members
+    assert "source/attack_shards/shard_0000/events/event_000001/artifacts/payload_decode_sidecar.json" in members
     assert "source/exports/pw02/operating_metrics/system_final_auxiliary_operating_semantics.json" in members
     assert "source/exports/pw04/robustness/system_final_auxiliary_attack_summary.json" in members
 

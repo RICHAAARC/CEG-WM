@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence, Tuple, cast
 
 from main.evaluation import workflow_inputs as eval_workflow_inputs
+from paper_workflow.scripts.pw_common import extract_payload_metrics_from_decode_sidecar
 from scripts.notebook_runtime_common import ensure_directory, normalize_path_value, utc_now_iso, write_json_atomic
 
 
@@ -177,6 +178,37 @@ def _coerce_finite_float(value: Any) -> float | None:
             return None
         return value_float if math.isfinite(value_float) else None
     return None
+
+
+def _load_optional_payload_decode_sidecar_metrics(
+    record_payload: Mapping[str, Any],
+    label: str,
+) -> Dict[str, Any]:
+    """
+    功能：读取可选 payload decode sidecar 并提取 summary 指标。
+
+    Load one optional payload decode sidecar and extract summary-ready metrics.
+
+    Args:
+        record_payload: Prepared detect-record payload.
+        label: Human-readable label.
+
+    Returns:
+        Extracted decode-sidecar metrics, or an empty mapping when absent.
+    """
+    if not isinstance(record_payload, Mapping):
+        raise TypeError("record_payload must be Mapping")
+    if not isinstance(label, str) or not label:
+        raise TypeError("label must be non-empty str")
+
+    sidecar_path_value = record_payload.get("paper_workflow_payload_decode_sidecar_path")
+    if not isinstance(sidecar_path_value, str) or not sidecar_path_value.strip():
+        return {}
+    sidecar_payload = _load_required_json_dict(
+        Path(sidecar_path_value).expanduser().resolve(),
+        label,
+    )
+    return extract_payload_metrics_from_decode_sidecar(sidecar_payload)
 
 
 def _extract_int_list(value: Any) -> List[int]:
@@ -821,6 +853,7 @@ def _build_payload_clean_summary_payload(
     for prepared_record in prepared_records:
         if str(prepared_record.get("sample_role") or "") != "positive_source":
             continue
+        event_id = prepared_record.get("paper_workflow_event_id") or prepared_record.get("event_id")
         content_payload = _extract_mapping(prepared_record.get("content_evidence_payload"))
         score_parts = _extract_mapping(content_payload.get("score_parts"))
         lf_trace = _extract_mapping(score_parts.get("lf_trajectory_detect_trace"))
@@ -830,19 +863,59 @@ def _build_payload_clean_summary_payload(
             lf_trace = _extract_mapping(content_payload.get("lf_evidence_summary"))
         if not lf_trace:
             lf_trace = _extract_mapping(score_parts.get("lf_metrics"))
+        decode_sidecar_metrics = _load_optional_payload_decode_sidecar_metrics(
+            prepared_record,
+            f"PW02 payload decode sidecar {event_id}",
+        )
+        codeword_agreement = (
+            float(cast(float, decode_sidecar_metrics["codeword_agreement"]))
+            if isinstance(decode_sidecar_metrics.get("codeword_agreement"), float)
+            else _coerce_finite_float(lf_trace.get("codeword_agreement"))
+        )
+        n_bits_compared = (
+            int(cast(int, decode_sidecar_metrics["n_bits_compared"]))
+            if isinstance(decode_sidecar_metrics.get("n_bits_compared"), int)
+            else _extract_int(lf_trace, "n_bits_compared")
+        )
+        payload_primary_metrics = _derive_payload_primary_metrics(
+            {
+                "codeword_agreement": codeword_agreement,
+                "n_bits_compared": n_bits_compared,
+            }
+        )
+        if isinstance(decode_sidecar_metrics.get("message_decode_success"), bool):
+            payload_primary_metrics["message_success"] = bool(decode_sidecar_metrics["message_decode_success"])
         attestation_payload = _extract_mapping(prepared_record.get("attestation"))
         attested_decision = _extract_mapping(attestation_payload.get("final_event_attested_decision"))
         row_metrics.append(
             {
                 "event_id": prepared_record.get("paper_workflow_event_id"),
                 "event_index": prepared_record.get("paper_workflow_event_index"),
-                "codeword_agreement": _coerce_finite_float(lf_trace.get("codeword_agreement")),
-                "n_bits_compared": _extract_int(lf_trace, "n_bits_compared"),
-                **_derive_payload_primary_metrics(lf_trace),
+                "codeword_agreement": codeword_agreement,
+                "n_bits_compared": n_bits_compared,
+                **payload_primary_metrics,
                 "event_attestation_score": _coerce_finite_float(attested_decision.get("event_attestation_score")),
                 "is_event_attested": attested_decision.get("is_event_attested") if isinstance(attested_decision.get("is_event_attested"), bool) else None,
-                "lf_detect_variant": lf_trace.get("detect_variant") if isinstance(lf_trace.get("detect_variant"), str) else None,
-                "message_source": lf_trace.get("message_source") if isinstance(lf_trace.get("message_source"), str) else None,
+                "lf_detect_variant": (
+                    str(decode_sidecar_metrics.get("lf_detect_variant"))
+                    if isinstance(decode_sidecar_metrics.get("lf_detect_variant"), str) and str(decode_sidecar_metrics.get("lf_detect_variant"))
+                    else (lf_trace.get("detect_variant") if isinstance(lf_trace.get("detect_variant"), str) else None)
+                ),
+                "message_source": (
+                    str(decode_sidecar_metrics.get("message_source"))
+                    if isinstance(decode_sidecar_metrics.get("message_source"), str) and str(decode_sidecar_metrics.get("message_source"))
+                    else (lf_trace.get("message_source") if isinstance(lf_trace.get("message_source"), str) else None)
+                ),
+                "payload_reference_sidecar_path": (
+                    prepared_record.get("paper_workflow_payload_reference_sidecar_path")
+                    if isinstance(prepared_record.get("paper_workflow_payload_reference_sidecar_path"), str)
+                    else None
+                ),
+                "payload_decode_sidecar_path": (
+                    prepared_record.get("paper_workflow_payload_decode_sidecar_path")
+                    if isinstance(prepared_record.get("paper_workflow_payload_decode_sidecar_path"), str)
+                    else None
+                ),
             }
         )
 

@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Mapping, Sequence, Tuple, cast
 
 from PIL import Image, ImageDraw
 
+from paper_workflow.scripts.pw_common import extract_payload_metrics_from_decode_sidecar
 from scripts.notebook_runtime_common import ensure_directory, normalize_path_value, utc_now_iso, write_json_atomic
 
 
@@ -234,6 +235,37 @@ def _coerce_finite_float(value: Any) -> float | None:
             return None
         return value_float if math.isfinite(value_float) else None
     return None
+
+
+def _load_optional_payload_decode_sidecar_metrics(
+    attack_event_row: Mapping[str, Any],
+    label: str,
+) -> Dict[str, Any]:
+    """
+    功能：读取可选 attack payload decode sidecar 并提取 summary 指标。
+
+    Load one optional attack payload decode sidecar and extract summary-ready metrics.
+
+    Args:
+        attack_event_row: Attack event row payload.
+        label: Human-readable label.
+
+    Returns:
+        Extracted decode-sidecar metrics, or an empty mapping when absent.
+    """
+    if not isinstance(attack_event_row, Mapping):
+        raise TypeError("attack_event_row must be Mapping")
+    if not isinstance(label, str) or not label:
+        raise TypeError("label must be non-empty str")
+
+    sidecar_path_value = attack_event_row.get("payload_decode_sidecar_path")
+    if not isinstance(sidecar_path_value, str) or not sidecar_path_value.strip():
+        return {}
+    sidecar_payload = _load_required_json_dict(
+        Path(sidecar_path_value).expanduser().resolve(),
+        label,
+    )
+    return extract_payload_metrics_from_decode_sidecar(sidecar_payload)
 
 
 def _extract_int_list(value: Any) -> List[int]:
@@ -1608,6 +1640,28 @@ def _build_payload_attack_summary_payload(
             lf_trace = _extract_mapping(content_payload.get("lf_evidence_summary"))
         if not lf_trace:
             lf_trace = _extract_mapping(score_parts.get("lf_metrics"))
+        decode_sidecar_metrics = _load_optional_payload_decode_sidecar_metrics(
+            attack_event_row,
+            f"PW04 payload decode sidecar {attack_event_row.get('attack_event_id')}",
+        )
+        codeword_agreement = (
+            float(cast(float, decode_sidecar_metrics["codeword_agreement"]))
+            if isinstance(decode_sidecar_metrics.get("codeword_agreement"), float)
+            else _coerce_finite_float(lf_trace.get("codeword_agreement"))
+        )
+        n_bits_compared = (
+            int(cast(int, decode_sidecar_metrics["n_bits_compared"]))
+            if isinstance(decode_sidecar_metrics.get("n_bits_compared"), int)
+            else _parse_csv_int(lf_trace, "n_bits_compared")
+        )
+        payload_primary_metrics = _derive_payload_primary_metrics(
+            {
+                "codeword_agreement": codeword_agreement,
+                "n_bits_compared": n_bits_compared,
+            }
+        )
+        if isinstance(decode_sidecar_metrics.get("message_decode_success"), bool):
+            payload_primary_metrics["message_success"] = bool(decode_sidecar_metrics["message_decode_success"])
         attestation_payload = _extract_mapping(formal_record.get("attestation"))
         attested_decision = _extract_mapping(attestation_payload.get("final_event_attested_decision"))
         attack_family = str(attack_event_row.get("attack_family") or "<unknown>")
@@ -1615,13 +1669,31 @@ def _build_payload_attack_summary_payload(
             "attack_event_id": attack_event_row.get("attack_event_id"),
             "attack_family": attack_family,
             "attack_condition_key": attack_event_row.get("attack_condition_key"),
-            "codeword_agreement": _coerce_finite_float(lf_trace.get("codeword_agreement")),
-            "n_bits_compared": _parse_csv_int(lf_trace, "n_bits_compared"),
-            **_derive_payload_primary_metrics(lf_trace),
+            "codeword_agreement": codeword_agreement,
+            "n_bits_compared": n_bits_compared,
+            **payload_primary_metrics,
             "event_attestation_score": _coerce_finite_float(attested_decision.get("event_attestation_score")),
             "is_event_attested": attested_decision.get("is_event_attested") if isinstance(attested_decision.get("is_event_attested"), bool) else None,
-            "lf_detect_variant": lf_trace.get("detect_variant") if isinstance(lf_trace.get("detect_variant"), str) else attack_event_row.get("lf_detect_variant"),
-            "message_source": lf_trace.get("message_source") if isinstance(lf_trace.get("message_source"), str) else None,
+            "lf_detect_variant": (
+                str(decode_sidecar_metrics.get("lf_detect_variant"))
+                if isinstance(decode_sidecar_metrics.get("lf_detect_variant"), str) and str(decode_sidecar_metrics.get("lf_detect_variant"))
+                else (lf_trace.get("detect_variant") if isinstance(lf_trace.get("detect_variant"), str) else attack_event_row.get("lf_detect_variant"))
+            ),
+            "message_source": (
+                str(decode_sidecar_metrics.get("message_source"))
+                if isinstance(decode_sidecar_metrics.get("message_source"), str) and str(decode_sidecar_metrics.get("message_source"))
+                else (lf_trace.get("message_source") if isinstance(lf_trace.get("message_source"), str) else None)
+            ),
+            "payload_reference_sidecar_path": (
+                attack_event_row.get("payload_reference_sidecar_path")
+                if isinstance(attack_event_row.get("payload_reference_sidecar_path"), str)
+                else None
+            ),
+            "payload_decode_sidecar_path": (
+                attack_event_row.get("payload_decode_sidecar_path")
+                if isinstance(attack_event_row.get("payload_decode_sidecar_path"), str)
+                else None
+            ),
         }
         row_metrics.append(metric_row)
         grouped_rows.setdefault(attack_family, []).append(metric_row)
