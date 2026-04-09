@@ -1201,6 +1201,74 @@ def _resolve_event_record_usage(sample_role: str) -> str:
     return EVENT_RECORD_USAGE_BY_SAMPLE_ROLE[normalized_sample_role]
 
 
+def _resolve_watermarked_output_image_view(
+    *,
+    shard_root: Path,
+    embed_record_path: Path,
+) -> Dict[str, Any]:
+    """
+    Resolve the explicit watermarked-output image view for one PW01 event.
+
+    Args:
+        shard_root: Source shard root.
+        embed_record_path: Staged embed record path.
+
+    Returns:
+        Optional artifact view for the finalized watermarked output image.
+    """
+    if not isinstance(shard_root, Path):
+        raise TypeError("shard_root must be Path")
+    if not isinstance(embed_record_path, Path):
+        raise TypeError("embed_record_path must be Path")
+    if not embed_record_path.exists() or not embed_record_path.is_file():
+        return {
+            "exists": False,
+            "path": None,
+            "package_relative_path": None,
+            "missing_reason": "embed_record_not_emitted",
+        }
+
+    try:
+        embed_record = _load_required_json_dict(embed_record_path, "PW01 embed record")
+    except Exception:
+        return {
+            "exists": False,
+            "path": None,
+            "package_relative_path": None,
+            "missing_reason": "embed_record_invalid",
+        }
+
+    watermarked_path_value = embed_record.get("watermarked_path") or embed_record.get("image_path")
+    if not isinstance(watermarked_path_value, str) or not watermarked_path_value.strip():
+        return {
+            "exists": False,
+            "path": None,
+            "package_relative_path": None,
+            "missing_reason": "watermarked_output_image_missing",
+        }
+
+    watermarked_path = Path(watermarked_path_value).expanduser().resolve()
+    if not watermarked_path.exists() or not watermarked_path.is_file():
+        return {
+            "exists": False,
+            "path": normalize_path_value(watermarked_path),
+            "package_relative_path": None,
+            "missing_reason": "watermarked_output_image_missing",
+        }
+
+    try:
+        package_relative_path = watermarked_path.relative_to(shard_root).as_posix()
+    except ValueError:
+        package_relative_path = None
+
+    return {
+        "exists": True,
+        "path": normalize_path_value(watermarked_path),
+        "package_relative_path": package_relative_path,
+        "missing_reason": None,
+    }
+
+
 def _extract_detect_probe_plan_anchors(detect_payload_obj: Mapping[str, Any]) -> Dict[str, str]:
     """
     Extract plan and basis digests from one detect probe record.
@@ -1877,6 +1945,11 @@ def _run_clean_negative_event(
         prompt_run_root=prompt_run_root,
         prompt_index=event_index,
     )
+    plain_preview_image_view = dict(source_image_view)
+    watermarked_output_image_view = _resolve_watermarked_output_image_view(
+        shard_root=shard_root,
+        embed_record_path=staged_embed_record_path,
+    )
 
     shard_relative_runtime_cfg = runtime_cfg_path.relative_to(shard_root).as_posix()
     shard_relative_embed_record = staged_embed_record_path.relative_to(shard_root).as_posix()
@@ -2399,7 +2472,9 @@ def _run_positive_source_event(
         "detect_record_path": normalize_path_value(staged_detect_record_path),
         "detect_record_package_relative_path": shard_relative_detect_record,
         "source_image": source_image_view,
+        "plain_preview_image": plain_preview_image_view,
         "preview_generation_record": preview_generation_record_view,
+        "watermarked_output_image": watermarked_output_image_view,
         "attestation_statement": attestation_views.get("attestation_statement"),
         "attestation_bundle": attestation_views.get("attestation_bundle"),
         "attestation_result": attestation_views.get("attestation_result"),

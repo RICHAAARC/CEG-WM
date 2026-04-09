@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import copy
 from pathlib import Path
-from typing import Any, Dict, Sequence, cast
+from typing import Any, Dict, Mapping, Sequence, cast
 
 from scripts.notebook_runtime_common import (
     REPO_ROOT,
@@ -95,6 +95,81 @@ def _resolve_source_alignment_reference_files(pw_base_cfg: Dict[str, Any]) -> li
         "scripts/notebook_runtime_common.py",
         "configs/default.yaml",
     ]
+
+
+def _build_wrong_event_attestation_challenge_plan(
+    *,
+    family_id: str,
+    positive_source_events: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Build the frozen wrong-event attestation challenge plan for PW03.
+
+    Args:
+        family_id: Family identifier.
+        positive_source_events: Ordered positive-source parent events.
+
+    Returns:
+        Challenge plan payload keyed by positive parent event.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(positive_source_events, Sequence):
+        raise TypeError("positive_source_events must be Sequence")
+
+    ordered_positive_events = sorted(
+        [dict(cast(Mapping[str, Any], event)) for event in positive_source_events],
+        key=lambda item: int(item.get("event_index", -1)),
+    )
+    plan_rows: list[Dict[str, Any]] = []
+    if len(ordered_positive_events) < 2:
+        for positive_event in ordered_positive_events:
+            plan_rows.append(
+                {
+                    "parent_event_id": positive_event.get("event_id"),
+                    "parent_event_index": positive_event.get("event_index"),
+                    "challenge_parent_event_id": None,
+                    "challenge_parent_event_index": None,
+                    "status": "not_available",
+                    "reason": "requires_at_least_two_distinct_positive_parent_events",
+                    "assignment_policy": "cyclic_next_positive_parent_event_by_event_index",
+                }
+            )
+        return {
+            "artifact_type": "paper_workflow_wrong_event_attestation_challenge_plan",
+            "schema_version": "pw_stage_00_v1",
+            "created_at": utc_now_iso(),
+            "family_id": family_id,
+            "plan_policy": "cyclic_next_positive_parent_event_by_event_index",
+            "positive_parent_event_count": len(ordered_positive_events),
+            "available_assignment_count": 0,
+            "rows": plan_rows,
+        }
+
+    for event_index, positive_event in enumerate(ordered_positive_events):
+        challenge_parent_event = ordered_positive_events[(event_index + 1) % len(ordered_positive_events)]
+        plan_rows.append(
+            {
+                "parent_event_id": positive_event.get("event_id"),
+                "parent_event_index": positive_event.get("event_index"),
+                "challenge_parent_event_id": challenge_parent_event.get("event_id"),
+                "challenge_parent_event_index": challenge_parent_event.get("event_index"),
+                "status": "ready",
+                "reason": None,
+                "assignment_policy": "cyclic_next_positive_parent_event_by_event_index",
+            }
+        )
+
+    return {
+        "artifact_type": "paper_workflow_wrong_event_attestation_challenge_plan",
+        "schema_version": "pw_stage_00_v1",
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "plan_policy": "cyclic_next_positive_parent_event_by_event_index",
+        "positive_parent_event_count": len(ordered_positive_events),
+        "available_assignment_count": len(plan_rows),
+        "rows": plan_rows,
+    }
 
 
 def run_pw00_build_family_manifest(
@@ -193,6 +268,10 @@ def run_pw00_build_family_manifest(
         for event in event_grid
         if str(event.get("sample_role")) == CLEAN_NEGATIVE_SAMPLE_ROLE
     ]
+    wrong_event_attestation_challenge_plan = _build_wrong_event_attestation_challenge_plan(
+        family_id=family_id,
+        positive_source_events=positive_source_events,
+    )
     attack_conditions = build_attack_condition_catalog()
     severity_status_counts: Dict[str, int] = {}
     severity_family_level_counts: Dict[str, int] = {}
@@ -225,6 +304,9 @@ def run_pw00_build_family_manifest(
     )
     attack_event_grid_path = layout["manifests_root"] / "attack_event_grid.jsonl"
     attack_shard_plan_path = layout["manifests_root"] / "attack_shard_plan.json"
+    wrong_event_attestation_challenge_plan_path = (
+        layout["manifests_root"] / "wrong_event_attestation_challenge_plan.json"
+    )
     attack_condition_count = len(attack_conditions)
     attack_event_count = len(attack_event_grid)
 
@@ -281,6 +363,13 @@ def run_pw00_build_family_manifest(
             "attack_event_count": attack_event_count,
             "attacked_positive_event_count": attacked_positive_event_count,
             "attacked_negative_event_count": attacked_negative_event_count,
+            "wrong_event_attestation_challenge_plan_frozen": True,
+            "wrong_event_challenge_parent_event_count": int(
+                wrong_event_attestation_challenge_plan["positive_parent_event_count"]
+            ),
+            "wrong_event_challenge_available_assignment_count": int(
+                wrong_event_attestation_challenge_plan["available_assignment_count"]
+            ),
             "severity_metadata_frozen": True,
             "severity_rule_version": ATTACK_SEVERITY_RULE_VERSION,
             "severity_axis_kind": ATTACK_SEVERITY_AXIS_KIND,
@@ -294,6 +383,9 @@ def run_pw00_build_family_manifest(
             "positive_source_event_count": positive_source_event_count,
             "clean_negative_event_count": clean_negative_event_count,
             "planner_conditioned_control_negative_event_count": control_negative_event_count,
+            "wrong_event_challenge_parent_event_count": int(
+                wrong_event_attestation_challenge_plan["positive_parent_event_count"]
+            ),
             "attack_condition_count": attack_condition_count,
             "attack_event_count": attack_event_count,
             "attacked_positive_event_count": attacked_positive_event_count,
@@ -311,6 +403,9 @@ def run_pw00_build_family_manifest(
             "source_split_plan": normalize_path_value(layout["source_split_plan_path"]),
             "attack_event_grid": normalize_path_value(attack_event_grid_path),
             "attack_shard_plan": normalize_path_value(attack_shard_plan_path),
+            "wrong_event_attestation_challenge_plan": normalize_path_value(
+                wrong_event_attestation_challenge_plan_path
+            ),
             "prompt_snapshot": normalize_path_value(layout["prompt_snapshot_path"]),
             "method_identity_snapshot": normalize_path_value(layout["method_identity_snapshot_path"]),
             "config_snapshot": normalize_path_value(layout["config_snapshot_path"]),
@@ -323,6 +418,16 @@ def run_pw00_build_family_manifest(
             "attack_event_count": attack_event_count,
             "attacked_positive_event_count": attacked_positive_event_count,
             "attacked_negative_event_count": attacked_negative_event_count,
+            "wrong_event_attestation_challenge_plan_frozen": True,
+            "wrong_event_attestation_challenge_plan_policy": str(
+                wrong_event_attestation_challenge_plan["plan_policy"]
+            ),
+            "wrong_event_challenge_parent_event_count": int(
+                wrong_event_attestation_challenge_plan["positive_parent_event_count"]
+            ),
+            "wrong_event_challenge_available_assignment_count": int(
+                wrong_event_attestation_challenge_plan["available_assignment_count"]
+            ),
             "severity_metadata_frozen": True,
             "severity_rule_version": ATTACK_SEVERITY_RULE_VERSION,
             "severity_axis_kind": ATTACK_SEVERITY_AXIS_KIND,
@@ -344,6 +449,10 @@ def run_pw00_build_family_manifest(
     write_json_atomic(layout["source_split_plan_path"], source_split_plan)
     write_jsonl(attack_event_grid_path, attack_event_grid)
     write_json_atomic(attack_shard_plan_path, attack_shard_plan)
+    write_json_atomic(
+        wrong_event_attestation_challenge_plan_path,
+        wrong_event_attestation_challenge_plan,
+    )
     write_json_atomic(layout["family_manifest_path"], family_manifest)
 
     summary_path = layout["runtime_state_root"] / "pw00_summary.json"
@@ -359,11 +468,20 @@ def run_pw00_build_family_manifest(
         "source_split_plan_path": normalize_path_value(layout["source_split_plan_path"]),
         "attack_event_grid_path": normalize_path_value(attack_event_grid_path),
         "attack_shard_plan_path": normalize_path_value(attack_shard_plan_path),
+        "wrong_event_attestation_challenge_plan_path": normalize_path_value(
+            wrong_event_attestation_challenge_plan_path
+        ),
         "event_count": len(event_grid),
         "attack_condition_count": attack_condition_count,
         "attack_event_count": attack_event_count,
         "source_shard_count": source_shard_count,
         "attack_shard_count": resolved_attack_shard_count,
+        "wrong_event_challenge_parent_event_count": int(
+            wrong_event_attestation_challenge_plan["positive_parent_event_count"]
+        ),
+        "wrong_event_challenge_available_assignment_count": int(
+            wrong_event_attestation_challenge_plan["available_assignment_count"]
+        ),
         "severity_metadata_frozen": True,
         "severity_rule_version": ATTACK_SEVERITY_RULE_VERSION,
         "severity_axis_kind": ATTACK_SEVERITY_AXIS_KIND,

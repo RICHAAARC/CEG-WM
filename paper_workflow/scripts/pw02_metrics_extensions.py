@@ -179,6 +179,75 @@ def _coerce_finite_float(value: Any) -> float | None:
     return None
 
 
+def _extract_int_list(value: Any) -> List[int]:
+    """
+    功能：把整型序列规范化为 int 列表。
+
+    Normalize one integer sequence to a list of ints.
+
+    Args:
+        value: Candidate sequence.
+
+    Returns:
+        Normalized integer list.
+    """
+    if not isinstance(value, list):
+        return []
+    normalized: List[int] = []
+    for item in cast(List[object], value):
+        if isinstance(item, int) and not isinstance(item, bool):
+            normalized.append(int(item))
+    return normalized
+
+
+def _derive_payload_primary_metrics(lf_trace: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    功能：从 LF trace 派生 payload 主指标。
+
+    Derive primary payload metrics from one LF detect trace.
+
+    Args:
+        lf_trace: LF detect trace mapping.
+
+    Returns:
+        Derived payload metric mapping.
+    """
+    if not isinstance(lf_trace, Mapping):
+        raise TypeError("lf_trace must be Mapping")
+
+    agreement_count = _extract_int(lf_trace, "agreement_count")
+    n_bits_compared = _extract_int(lf_trace, "n_bits_compared")
+    mismatch_indices = _extract_int_list(lf_trace.get("mismatch_indices"))
+    mismatch_count = len(mismatch_indices) if mismatch_indices else None
+    bit_accuracy = _coerce_finite_float(lf_trace.get("codeword_agreement"))
+    if bit_accuracy is None and agreement_count is not None and isinstance(n_bits_compared, int) and n_bits_compared > 0:
+        bit_accuracy = float(agreement_count / n_bits_compared)
+    if mismatch_count is None and agreement_count is not None and isinstance(n_bits_compared, int) and n_bits_compared >= agreement_count:
+        mismatch_count = int(n_bits_compared - agreement_count)
+    bit_error_rate = None if bit_accuracy is None else float(max(0.0, min(1.0, 1.0 - bit_accuracy)))
+    message_success = None
+    if isinstance(n_bits_compared, int) and n_bits_compared > 0 and bit_accuracy is not None:
+        message_success = bool(bit_accuracy >= 1.0 - 1e-12)
+
+    if agreement_count is not None and isinstance(n_bits_compared, int) and n_bits_compared > 0:
+        primary_metric_source = "agreement_count_and_n_bits_compared"
+    elif bit_accuracy is not None and isinstance(n_bits_compared, int) and n_bits_compared > 0:
+        primary_metric_source = "codeword_agreement_and_n_bits_compared"
+    elif bit_accuracy is not None:
+        primary_metric_source = "codeword_agreement_only"
+    else:
+        primary_metric_source = None
+
+    return {
+        "agreement_count": agreement_count,
+        "mismatch_count": mismatch_count,
+        "bit_accuracy": bit_accuracy,
+        "bit_error_rate": bit_error_rate,
+        "message_success": message_success,
+        "primary_metric_source": primary_metric_source,
+    }
+
+
 def _safe_mean(values: Sequence[int | float]) -> float | None:
     """
     功能：计算非空数值序列的均值。
@@ -769,6 +838,7 @@ def _build_payload_clean_summary_payload(
                 "event_index": prepared_record.get("paper_workflow_event_index"),
                 "codeword_agreement": _coerce_finite_float(lf_trace.get("codeword_agreement")),
                 "n_bits_compared": _extract_int(lf_trace, "n_bits_compared"),
+                **_derive_payload_primary_metrics(lf_trace),
                 "event_attestation_score": _coerce_finite_float(attested_decision.get("event_attestation_score")),
                 "is_event_attested": attested_decision.get("is_event_attested") if isinstance(attested_decision.get("is_event_attested"), bool) else None,
                 "lf_detect_variant": lf_trace.get("detect_variant") if isinstance(lf_trace.get("detect_variant"), str) else None,
@@ -779,11 +849,24 @@ def _build_payload_clean_summary_payload(
     available_rows = [row for row in row_metrics if isinstance(row.get("codeword_agreement"), float)]
     agreement_values = [float(row["codeword_agreement"]) for row in available_rows]
     bits_compared_values = [int(cast(int, row["n_bits_compared"])) for row in available_rows if isinstance(row.get("n_bits_compared"), int)]
+    bit_accuracy_values = [float(row["bit_accuracy"]) for row in row_metrics if isinstance(row.get("bit_accuracy"), float)]
+    bit_error_rate_values = [float(row["bit_error_rate"]) for row in row_metrics if isinstance(row.get("bit_error_rate"), float)]
+    weighted_bit_accuracy_numerator = sum(
+        float(cast(float, row["bit_accuracy"])) * int(cast(int, row["n_bits_compared"]))
+        for row in row_metrics
+        if isinstance(row.get("bit_accuracy"), float) and isinstance(row.get("n_bits_compared"), int)
+    )
+    weighted_bit_accuracy_denominator = sum(
+        int(cast(int, row["n_bits_compared"]))
+        for row in row_metrics
+        if isinstance(row.get("bit_accuracy"), float) and isinstance(row.get("n_bits_compared"), int)
+    )
     attestation_values = [
         float(row["event_attestation_score"])
         for row in row_metrics
         if isinstance(row.get("event_attestation_score"), float)
     ]
+    message_success_values = [row["message_success"] for row in row_metrics if isinstance(row.get("message_success"), bool)]
     if not available_rows:
         status_value = "not_available"
         reason_value = PAYLOAD_UNAVAILABLE_REASON
@@ -810,6 +893,31 @@ def _build_payload_clean_summary_payload(
             "min_codeword_agreement": min(agreement_values) if agreement_values else None,
             "max_codeword_agreement": max(agreement_values) if agreement_values else None,
             "mean_n_bits_compared": _safe_mean(bits_compared_values),
+            "mean_bit_accuracy": _safe_mean(bit_accuracy_values),
+            "weighted_bit_accuracy": (
+                float(weighted_bit_accuracy_numerator / weighted_bit_accuracy_denominator)
+                if weighted_bit_accuracy_denominator > 0
+                else None
+            ),
+            "mean_bit_error_rate": _safe_mean(bit_error_rate_values),
+            "weighted_bit_error_rate": (
+                float(1.0 - (weighted_bit_accuracy_numerator / weighted_bit_accuracy_denominator))
+                if weighted_bit_accuracy_denominator > 0
+                else None
+            ),
+            "message_success_count": sum(1 for value in message_success_values if value is True),
+            "message_success_rate": (
+                float(sum(1 for value in message_success_values if value is True) / len(message_success_values))
+                if message_success_values
+                else None
+            ),
+            "payload_primary_metric_sources": sorted(
+                {
+                    str(row.get("primary_metric_source"))
+                    for row in row_metrics
+                    if isinstance(row.get("primary_metric_source"), str) and str(row.get("primary_metric_source"))
+                }
+            ),
             "attested_event_count": sum(1 for row in row_metrics if row.get("is_event_attested") is True),
             "mean_event_attestation_score": _safe_mean(attestation_values),
             "lf_detect_variants": sorted(

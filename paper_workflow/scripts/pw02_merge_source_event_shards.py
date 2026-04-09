@@ -739,6 +739,18 @@ def _safe_resolve_preview_artifact_path(event_payload: Mapping[str, Any]) -> str
     if not isinstance(event_payload, Mapping):
         raise TypeError("event_payload must be Mapping")
 
+    plain_preview_view = event_payload.get("plain_preview_image")
+    if isinstance(plain_preview_view, Mapping):
+        try:
+            plain_preview_path = resolve_optional_artifact_path(
+                cast(Mapping[str, Any], plain_preview_view),
+                "plain_preview_image",
+            )
+        except Exception:
+            plain_preview_path = None
+        if plain_preview_path is not None:
+            return normalize_path_value(plain_preview_path)
+
     preview_record_view = event_payload.get("preview_generation_record")
     if not isinstance(preview_record_view, Mapping):
         return None
@@ -763,6 +775,18 @@ def _safe_resolve_watermarked_image_path(event_payload: Mapping[str, Any]) -> st
     """
     if not isinstance(event_payload, Mapping):
         raise TypeError("event_payload must be Mapping")
+
+    watermarked_output_view = event_payload.get("watermarked_output_image")
+    if isinstance(watermarked_output_view, Mapping):
+        try:
+            watermarked_output_path = resolve_optional_artifact_path(
+                cast(Mapping[str, Any], watermarked_output_view),
+                "watermarked_output_image",
+            )
+        except Exception:
+            watermarked_output_path = None
+        if watermarked_output_path is not None:
+            return normalize_path_value(watermarked_output_path)
 
     embed_record_path_value = event_payload.get("embed_record_path")
     if not isinstance(embed_record_path_value, str) or not embed_record_path_value.strip():
@@ -858,11 +882,15 @@ def _build_clean_positive_quality_metrics(
                 }
             )
             continue
+        plain_preview_image_path = _safe_resolve_preview_artifact_path(event_payload)
+        watermarked_output_image_path = _safe_resolve_watermarked_image_path(event_payload)
         pair_specs.append(
             {
                 "event_id": event_id,
-                "reference_image_path": _safe_resolve_preview_artifact_path(event_payload),
-                "candidate_image_path": _safe_resolve_watermarked_image_path(event_payload),
+                "reference_image_path": plain_preview_image_path,
+                "candidate_image_path": watermarked_output_image_path,
+                "plain_preview_image_path": plain_preview_image_path,
+                "watermarked_output_image_path": watermarked_output_image_path,
                 "prompt_text": _safe_resolve_prompt_text(event_payload),
                 "sample_role": ACTIVE_SAMPLE_ROLE,
             }
@@ -874,8 +902,10 @@ def _build_clean_positive_quality_metrics(
         candidate_path_key="candidate_image_path",
         pair_id_key="event_id",
         text_key="prompt_text",
-        extra_metadata_keys=["sample_role"],
+        extra_metadata_keys=["sample_role", "plain_preview_image_path", "watermarked_output_image_path"],
     )
+    quality_payload["reference_artifact_name"] = "plain_preview_image"
+    quality_payload["candidate_artifact_name"] = "watermarked_output_image"
     quality_payload["reference_semantics"] = "preview_generation_persisted_artifact_vs_watermarked_output_image"
     quality_payload["sample_role"] = ACTIVE_SAMPLE_ROLE
     quality_payload["split_scope"] = "evaluate_positive_only"

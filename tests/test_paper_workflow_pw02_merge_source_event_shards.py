@@ -237,10 +237,22 @@ def _materialize_completed_pw01_shards(
                             "package_relative_path": f"source_images/{event_index:06d}.png",
                             "missing_reason": None,
                         },
+                        "plain_preview_image": {
+                            "exists": True,
+                            "path": normalize_path_value(preview_image_path),
+                            "package_relative_path": f"plain_preview_images/{event_index:06d}.png",
+                            "missing_reason": None,
+                        },
                         "preview_generation_record": {
                             "exists": True,
                             "path": normalize_path_value(preview_generation_record_path),
                             "package_relative_path": f"preview_generation_records/{event_index:06d}.json",
+                            "missing_reason": None,
+                        },
+                        "watermarked_output_image": {
+                            "exists": True,
+                            "path": normalize_path_value(watermarked_image_path),
+                            "package_relative_path": f"watermarked_output_images/{event_index:06d}.png",
                             "missing_reason": None,
                         },
                     }
@@ -955,9 +967,29 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert content_clean_score_analysis["clean_positive_quality_metrics"]["count"] == 2
     assert content_clean_score_analysis["clean_positive_quality_metrics"]["mean_psnr"] is not None
     assert content_clean_score_analysis["clean_positive_quality_metrics"]["mean_ssim"] is not None
+    assert content_clean_score_analysis["clean_positive_quality_metrics"]["reference_artifact_name"] == "plain_preview_image"
+    assert content_clean_score_analysis["clean_positive_quality_metrics"]["candidate_artifact_name"] == "watermarked_output_image"
     assert content_clean_score_analysis["clean_positive_quality_metrics"]["reference_semantics"] == (
         "preview_generation_persisted_artifact_vs_watermarked_output_image"
     )
+    quality_pair_rows = cast(
+        List[Dict[str, Any]],
+        content_clean_score_analysis["clean_positive_quality_metrics"]["pair_rows"],
+    )
+    assert len(quality_pair_rows) == 2
+    assert all(isinstance(row.get("plain_preview_image_path"), str) and row["plain_preview_image_path"] for row in quality_pair_rows)
+    assert all(
+        isinstance(row.get("watermarked_output_image_path"), str) and row["watermarked_output_image_path"]
+        for row in quality_pair_rows
+    )
+    assert {row["plain_preview_image_path"] for row in quality_pair_rows} == {
+        normalize_path_value(Path(str(row["plain_preview_image_path"])).expanduser().resolve())
+        for row in quality_pair_rows
+    }
+    assert {row["watermarked_output_image_path"] for row in quality_pair_rows} == {
+        normalize_path_value(Path(str(row["watermarked_output_image_path"])).expanduser().resolve())
+        for row in quality_pair_rows
+    }
 
     assert attestation_clean_score_analysis["score_name"] == pw02_module.EVENT_ATTESTATION_SCORE_NAME
     assert attestation_clean_score_analysis["roc_auc"]["auc"] == pytest.approx(1.0)
@@ -1063,6 +1095,13 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert payload_clean_summary["overall"]["min_codeword_agreement"] == pytest.approx(0.84)
     assert payload_clean_summary["overall"]["max_codeword_agreement"] == pytest.approx(0.90)
     assert payload_clean_summary["overall"]["mean_n_bits_compared"] == pytest.approx(96.0)
+    assert payload_clean_summary["overall"]["mean_bit_accuracy"] == pytest.approx(0.87)
+    assert payload_clean_summary["overall"]["weighted_bit_accuracy"] == pytest.approx(0.87)
+    assert payload_clean_summary["overall"]["mean_bit_error_rate"] == pytest.approx(0.13)
+    assert payload_clean_summary["overall"]["weighted_bit_error_rate"] == pytest.approx(0.13)
+    assert payload_clean_summary["overall"]["message_success_count"] == 0
+    assert payload_clean_summary["overall"]["message_success_rate"] == pytest.approx(0.0)
+    assert payload_clean_summary["overall"]["payload_primary_metric_sources"] == ["codeword_agreement_and_n_bits_compared"]
     assert payload_clean_summary["overall"]["attested_event_count"] == 2
     assert payload_clean_summary["overall"]["mean_event_attestation_score"] == pytest.approx(0.81)
     assert payload_clean_summary["overall"]["lf_detect_variants"] == ["correlation_v2"]

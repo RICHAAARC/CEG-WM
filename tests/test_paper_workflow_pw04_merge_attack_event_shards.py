@@ -94,6 +94,112 @@ def _fake_clip_text_similarity(candidate_image: Any, prompt_text: str) -> float:
     return 0.81 if prompt_text == "prompt one" else 0.69
 
 
+def test_build_quality_metrics_from_pairs_supports_env_gpu_batch_runtime(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """
+    Verify quality helpers honor env-driven GPU and batch runtime options.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    pair_specs: List[Dict[str, Any]] = []
+    for pair_index in range(3):
+        reference_path = tmp_path / f"reference_{pair_index}.png"
+        candidate_path = tmp_path / f"candidate_{pair_index}.png"
+        Image.new("RGB", (8, 8), color=(32 + pair_index, 64, 96)).save(reference_path)
+        Image.new("RGB", (8, 8), color=(36 + pair_index, 64, 96)).save(candidate_path)
+        pair_specs.append(
+            {
+                "pair_id": f"pair_{pair_index}",
+                "reference_image_path": normalize_path_value(reference_path),
+                "candidate_image_path": normalize_path_value(candidate_path),
+                "prompt_text": "prompt one" if pair_index < 2 else "prompt two",
+            }
+        )
+
+    lpips_batch_calls: List[Dict[str, Any]] = []
+    clip_batch_calls: List[Dict[str, Any]] = []
+
+    def fake_lpips_values_batch(
+        reference_images: Any,
+        candidate_images: Any,
+        torch_device: str = "cpu",
+    ) -> List[float]:
+        lpips_batch_calls.append(
+            {
+                "batch_size": len(reference_images),
+                "torch_device": torch_device,
+            }
+        )
+        return [0.1 + 0.01 * batch_index for batch_index in range(len(reference_images))]
+
+    def fake_clip_text_similarity_batch(
+        candidate_images: Any,
+        prompt_texts: Any,
+        torch_device: str = "cpu",
+    ) -> List[float]:
+        clip_batch_calls.append(
+            {
+                "batch_size": len(candidate_images),
+                "torch_device": torch_device,
+                "prompt_texts": list(prompt_texts),
+            }
+        )
+        return [0.8 - 0.01 * batch_index for batch_index in range(len(candidate_images))]
+
+    def fail_single_lpips(*args: Any, **kwargs: Any) -> float:
+        raise AssertionError("single-item LPIPS path should not run when batch mode is enabled")
+
+    def fail_single_clip(*args: Any, **kwargs: Any) -> float:
+        raise AssertionError("single-item CLIP path should not run when batch mode is enabled")
+
+    monkeypatch.setenv(pw_quality_metrics_module.QUALITY_TORCH_DEVICE_ENV, "cuda:0")
+    monkeypatch.setenv(pw_quality_metrics_module.QUALITY_LPIPS_BATCH_SIZE_ENV, "2")
+    monkeypatch.setenv(pw_quality_metrics_module.QUALITY_CLIP_BATCH_SIZE_ENV, "2")
+    monkeypatch.setattr(pw_quality_metrics_module, "_compute_lpips_values_batch", fake_lpips_values_batch)
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_compute_clip_text_similarity_batch",
+        fake_clip_text_similarity_batch,
+    )
+    monkeypatch.setattr(pw_quality_metrics_module, "_compute_lpips_value", fail_single_lpips)
+    monkeypatch.setattr(pw_quality_metrics_module, "_compute_clip_text_similarity", fail_single_clip)
+
+    quality_summary = pw_quality_metrics_module.build_quality_metrics_from_pairs(
+        pair_specs=pair_specs,
+        reference_path_key="reference_image_path",
+        candidate_path_key="candidate_image_path",
+        pair_id_key="pair_id",
+        text_key="prompt_text",
+    )
+
+    assert lpips_batch_calls == [
+        {"batch_size": 2, "torch_device": "cuda:0"},
+        {"batch_size": 1, "torch_device": "cuda:0"},
+    ]
+    assert [call["batch_size"] for call in clip_batch_calls] == [2, 1]
+    assert all(call["torch_device"] == "cuda:0" for call in clip_batch_calls)
+    assert quality_summary["quality_runtime"] == {
+        "torch_device": "cuda:0",
+        "lpips_batch_size": 2,
+        "clip_batch_size": 2,
+    }
+    assert quality_summary["lpips_status"] == "ok"
+    assert quality_summary["clip_status"] == "ok"
+    assert quality_summary["clip_model_name"] == pw_quality_metrics_module.CLIP_MODEL_NAME
+    assert all(row["lpips"] is not None for row in cast(List[Dict[str, Any]], quality_summary["pair_rows"]))
+    assert all(
+        row["clip_text_similarity"] is not None
+        for row in cast(List[Dict[str, Any]], quality_summary["pair_rows"])
+    )
+
+
 def _load_json_dict(path_obj: Path) -> Dict[str, Any]:
     """
     Load one JSON object file.
@@ -555,6 +661,13 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
         str(row.get("attack_event_id", row.get("event_id"))): row
         for row in attack_event_grid
     }
+    wrong_event_challenge_plan = _load_json_dict(
+        Path(str(summary["wrong_event_attestation_challenge_plan_path"]))
+    )
+    wrong_event_challenge_lookup = {
+        str(row["parent_event_id"]): row
+        for row in cast(List[Dict[str, Any]], wrong_event_challenge_plan["rows"])
+    }
     threshold_artifact_paths = {
         "content": normalize_path_value(Path(str(pw02_fixture["content_threshold_export_path"]))),
         "attestation": normalize_path_value(Path(str(pw02_fixture["attestation_threshold_export_path"]))),
@@ -574,6 +687,49 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
     parent_attestation_materials: Dict[str, Dict[str, Any]] = {}
     detect_record_paths: List[Path] = []
     event_manifest_paths: List[Path] = []
+
+    parent_event_index_lookup: Dict[str, int] = {}
+    for attack_event in cast(List[Dict[str, Any]], attack_event_grid):
+        parent_event_id = str(attack_event["parent_event_id"])
+        parent_event_index_lookup.setdefault(parent_event_id, int(attack_event["parent_event_index"]))
+    for parent_event_id, parent_event_index in sorted(parent_event_index_lookup.items(), key=lambda item: item[1]):
+        statement = AttestationStatement(
+            schema=ATTESTATION_SCHEMA,
+            model_id="sd3-test",
+            prompt_commit=f"prompt_commit_{parent_event_id}",
+            seed_commit=f"seed_commit_{parent_event_id}",
+            plan_digest=f"plan_digest_{parent_event_id}",
+            event_nonce=f"nonce_{parent_event_id}",
+            time_bucket="2026-03-01",
+        )
+        attestation_digest = compute_attestation_digest(statement)
+        signed_bundle = build_signed_attestation_bundle(
+            statement,
+            attestation_digest,
+            attestation_master_key,
+            lf_payload_hex="ab" * 16,
+            trace_commit="cd" * 32,
+            geo_anchor_seed=parent_event_index,
+        )
+        parent_embed_record_path = family_root / "source_attestation" / f"{parent_event_id}_embed_record.json"
+        ensure_directory(parent_embed_record_path.parent)
+        write_json_atomic(
+            parent_embed_record_path,
+            {
+                "attestation": {
+                    "status": "ok",
+                    "statement": statement.as_dict(),
+                    "attestation_digest": attestation_digest,
+                    "signed_bundle": signed_bundle,
+                }
+            },
+        )
+        parent_attestation_materials[parent_event_id] = {
+            "parent_embed_record_path": normalize_path_value(parent_embed_record_path),
+            "statement": statement.as_dict(),
+            "attestation_digest": attestation_digest,
+            "signed_bundle": signed_bundle,
+        }
 
     for shard_row in cast(List[Dict[str, Any]], attack_shard_plan["shards"]):
         attack_shard_index = int(shard_row["attack_shard_index"])
@@ -655,42 +811,7 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
             }
             parent_prompt_text = str(attack_event.get("prompt_text") or ("prompt one" if attack_event_index % 2 == 0 else "prompt two"))
             parent_event_id = str(attack_event["parent_event_id"])
-            parent_material = parent_attestation_materials.get(parent_event_id)
-            if parent_material is None:
-                statement = AttestationStatement(
-                    schema=ATTESTATION_SCHEMA,
-                    model_id="sd3-test",
-                    prompt_commit=f"prompt_commit_{parent_event_id}",
-                    seed_commit=f"seed_commit_{parent_event_id}",
-                    plan_digest=f"plan_digest_{parent_event_id}",
-                    event_nonce=f"nonce_{parent_event_id}",
-                    time_bucket="2026-03-01",
-                )
-                attestation_digest = compute_attestation_digest(statement)
-                signed_bundle = build_signed_attestation_bundle(
-                    statement,
-                    attestation_digest,
-                    attestation_master_key,
-                    lf_payload_hex="ab" * 16,
-                    trace_commit="cd" * 32,
-                    geo_anchor_seed=attack_event_index,
-                )
-                parent_embed_record_path = family_root / "source_attestation" / f"{parent_event_id}_embed_record.json"
-                write_json_atomic(
-                    parent_embed_record_path,
-                    {
-                        "attestation": {
-                            "status": "ok",
-                            "statement": statement.as_dict(),
-                            "attestation_digest": attestation_digest,
-                            "signed_bundle": signed_bundle,
-                        }
-                    },
-                )
-                parent_material = {
-                    "parent_embed_record_path": normalize_path_value(parent_embed_record_path),
-                }
-                parent_attestation_materials[parent_event_id] = parent_material
+            parent_material = parent_attestation_materials[parent_event_id]
 
             runtime_config_snapshot_path = event_root / "runtime_config_snapshot.json"
             write_json_atomic(
@@ -769,6 +890,59 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
             write_json_atomic(detect_record_path, detect_payload)
             detect_record_paths.append(detect_record_path)
 
+            wrong_event_challenge_record_path: Path | None = None
+            wrong_event_challenge_record_payload: Dict[str, Any] | None = None
+            if attack_sample_role == pw04_module.ATTACKED_POSITIVE_SAMPLE_ROLE:
+                challenge_assignment = cast(Dict[str, Any], wrong_event_challenge_lookup[parent_event_id])
+                challenge_parent_event_id = challenge_assignment.get("challenge_parent_event_id")
+                wrong_event_challenge_record_path = artifacts_root / "wrong_event_attestation_challenge_record.json"
+                if isinstance(challenge_parent_event_id, str) and challenge_parent_event_id:
+                    challenge_parent_material = parent_attestation_materials[challenge_parent_event_id]
+                    wrong_event_challenge_record_payload = {
+                        "artifact_type": "paper_workflow_wrong_event_attestation_challenge_record",
+                        "schema_version": "pw_stage_03_v1",
+                        "stage_name": "PW03_Attack_Event_Shards",
+                        "family_id": summary["family_id"],
+                        "attack_event_id": attack_event_id,
+                        "parent_event_id": parent_event_id,
+                        "challenge_parent_event_id": challenge_parent_event_id,
+                        "challenge_parent_event_index": challenge_assignment.get("challenge_parent_event_index"),
+                        "plan_status": challenge_assignment.get("status"),
+                        "plan_reason": challenge_assignment.get("reason"),
+                        "plan_policy": challenge_assignment.get("assignment_policy"),
+                        "challenge_plan_path": summary["wrong_event_attestation_challenge_plan_path"],
+                        "status": "ok",
+                        "reason": None,
+                        "bundle_verification_status": "ok",
+                        "bundle_verification_mismatch_reasons": [],
+                        "wrong_statement_digest": challenge_parent_material["attestation_digest"],
+                        "bundle_attestation_digest": cast(Dict[str, Any], parent_material["signed_bundle"])["attestation_digest"],
+                        "wrong_event_rejected": True,
+                    }
+                else:
+                    wrong_event_challenge_record_payload = {
+                        "artifact_type": "paper_workflow_wrong_event_attestation_challenge_record",
+                        "schema_version": "pw_stage_03_v1",
+                        "stage_name": "PW03_Attack_Event_Shards",
+                        "family_id": summary["family_id"],
+                        "attack_event_id": attack_event_id,
+                        "parent_event_id": parent_event_id,
+                        "challenge_parent_event_id": None,
+                        "challenge_parent_event_index": None,
+                        "plan_status": challenge_assignment.get("status"),
+                        "plan_reason": challenge_assignment.get("reason"),
+                        "plan_policy": challenge_assignment.get("assignment_policy"),
+                        "challenge_plan_path": summary["wrong_event_attestation_challenge_plan_path"],
+                        "status": "not_available",
+                        "reason": challenge_assignment.get("reason"),
+                        "bundle_verification_status": None,
+                        "bundle_verification_mismatch_reasons": [],
+                        "wrong_statement_digest": None,
+                        "bundle_attestation_digest": None,
+                        "wrong_event_rejected": None,
+                    }
+                write_json_atomic(wrong_event_challenge_record_path, wrong_event_challenge_record_payload)
+
             event_manifest_path = event_root / "event_manifest.json"
             event_manifest_payload = {
                 "artifact_type": "paper_workflow_attack_event",
@@ -796,6 +970,17 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
                 "threshold_artifact_paths": threshold_artifact_paths,
                 "attacked_image_path": normalize_path_value(attacked_image_path),
                 "detect_record_path": normalize_path_value(detect_record_path),
+                "wrong_event_attestation_challenge_record_path": normalize_path_value(
+                    wrong_event_challenge_record_path
+                )
+                if isinstance(wrong_event_challenge_record_path, Path)
+                else None,
+                "wrong_event_attestation_challenge_record_package_relative_path": wrong_event_challenge_record_path.relative_to(
+                    shard_root
+                ).as_posix()
+                if isinstance(wrong_event_challenge_record_path, Path)
+                else None,
+                "wrong_event_attestation_challenge_record": wrong_event_challenge_record_payload,
             }
             write_json_atomic(event_manifest_path, event_manifest_payload)
             event_manifest_paths.append(event_manifest_path)
@@ -908,6 +1093,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     worst_case_attack_summary_path = Path(str(pw04_summary["worst_case_attack_summary_path"]))
     geo_chain_usage_by_family_path = Path(str(pw04_summary["geo_chain_usage_by_family_path"]))
     geo_diagnostics_summary_path = Path(str(pw04_summary["geo_diagnostics_summary_path"]))
+    geo_diagnostics_conditional_metrics_path = Path(str(pw04_summary["geo_diagnostics_conditional_metrics_path"]))
     payload_attack_summary_path = Path(str(pw04_summary["payload_attack_summary_path"]))
     wrong_event_attestation_challenge_summary_path = Path(str(pw04_summary["wrong_event_attestation_challenge_summary_path"]))
     quality_robustness_tradeoff_path = Path(str(pw04_summary["quality_robustness_tradeoff_path"]))
@@ -935,6 +1121,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
         worst_case_attack_summary_path,
         geo_chain_usage_by_family_path,
         geo_diagnostics_summary_path,
+        geo_diagnostics_conditional_metrics_path,
         payload_attack_summary_path,
         wrong_event_attestation_challenge_summary_path,
         quality_robustness_tradeoff_path,
@@ -989,6 +1176,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     worst_case_rows = _load_csv_rows(worst_case_attack_summary_path)
     geometry_family_rows = _load_csv_rows(geo_chain_usage_by_family_path)
     geometry_summary_rows = _load_csv_rows(geo_diagnostics_summary_path)
+    geometry_conditional_rows = _load_csv_rows(geo_diagnostics_conditional_metrics_path)
     payload_attack_summary = _load_json_dict(payload_attack_summary_path)
     wrong_event_attestation_challenge_summary = _load_json_dict(wrong_event_attestation_challenge_summary_path)
     tradeoff_rows = _load_csv_rows(quality_robustness_tradeoff_path)
@@ -1129,6 +1317,24 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert len(geometry_summary_rows) == 1
     assert geometry_summary_rows[0]["event_count"] == str(expected_positive_attack_event_count)
     assert geometry_summary_rows[0]["future_upstream_sidecar_required"] == "False"
+    assert len(geometry_conditional_rows) == 15
+    assert {row["geometry_condition_name"] for row in geometry_conditional_rows} == {
+        "sync_success",
+        "inverse_transform_success",
+        "attention_anchor_available",
+        "geo_rescue_eligible",
+        "geo_rescue_applied",
+    }
+    assert {row["geometry_condition_value"] for row in geometry_conditional_rows} == {"true", "false", "missing"}
+    for condition_name in {
+        "sync_success",
+        "inverse_transform_success",
+        "attention_anchor_available",
+        "geo_rescue_eligible",
+        "geo_rescue_applied",
+    }:
+        condition_rows = [row for row in geometry_conditional_rows if row["geometry_condition_name"] == condition_name]
+        assert sum(int(row["event_count"]) for row in condition_rows) == expected_positive_attack_event_count
 
     assert payload_attack_summary["status"] == "ok"
     assert payload_attack_summary["reason"] is None
@@ -1146,6 +1352,21 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
         pw03_fixture["expected_payload_max_codeword_agreement"]
     )
     assert payload_attack_summary["overall"]["mean_n_bits_compared"] == pytest.approx(96.0)
+    assert payload_attack_summary["overall"]["mean_bit_accuracy"] == pytest.approx(
+        pw03_fixture["expected_payload_mean_codeword_agreement"]
+    )
+    assert payload_attack_summary["overall"]["weighted_bit_accuracy"] == pytest.approx(
+        pw03_fixture["expected_payload_mean_codeword_agreement"]
+    )
+    assert payload_attack_summary["overall"]["mean_bit_error_rate"] == pytest.approx(
+        1.0 - pw03_fixture["expected_payload_mean_codeword_agreement"]
+    )
+    assert payload_attack_summary["overall"]["weighted_bit_error_rate"] == pytest.approx(
+        1.0 - pw03_fixture["expected_payload_mean_codeword_agreement"]
+    )
+    assert payload_attack_summary["overall"]["message_success_count"] == 0
+    assert payload_attack_summary["overall"]["message_success_rate"] == pytest.approx(0.0)
+    assert payload_attack_summary["overall"]["payload_primary_metric_sources"] == ["codeword_agreement_and_n_bits_compared"]
     assert payload_attack_summary["overall"]["attested_event_count"] == pw03_fixture["expected_formal_attestation_positive_count"]
     assert payload_attack_summary["overall"]["mean_event_attestation_score"] == pytest.approx(
         pw03_fixture["expected_payload_mean_attestation_score"]

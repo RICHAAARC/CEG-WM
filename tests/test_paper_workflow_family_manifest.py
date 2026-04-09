@@ -47,9 +47,11 @@ def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
     first_event_grid_path = Path(str(first_summary["source_event_grid_path"]))
     first_shard_plan_path = Path(str(first_summary["source_shard_plan_path"]))
     first_split_plan_path = Path(str(first_summary["source_split_plan_path"]))
+    first_wrong_event_challenge_plan_path = Path(str(first_summary["wrong_event_attestation_challenge_plan_path"]))
     second_event_grid_path = Path(str(second_summary["source_event_grid_path"]))
     second_shard_plan_path = Path(str(second_summary["source_shard_plan_path"]))
     second_split_plan_path = Path(str(second_summary["source_split_plan_path"]))
+    second_wrong_event_challenge_plan_path = Path(str(second_summary["wrong_event_attestation_challenge_plan_path"]))
 
     assert first_event_grid_path.read_text(encoding="utf-8") == second_event_grid_path.read_text(encoding="utf-8")
     assert json.loads(first_shard_plan_path.read_text(encoding="utf-8")) == json.loads(
@@ -58,6 +60,8 @@ def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
     assert json.loads(first_split_plan_path.read_text(encoding="utf-8")) == json.loads(
         second_split_plan_path.read_text(encoding="utf-8")
     )
+    assert first_wrong_event_challenge_plan_path.exists()
+    assert second_wrong_event_challenge_plan_path.exists()
 
     event_rows = read_jsonl(first_event_grid_path)
     assert len(event_rows) == 12
@@ -80,6 +84,7 @@ def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
 
     family_manifest_path = Path(str(first_summary["paper_eval_family_manifest_path"]))
     family_manifest = json.loads(family_manifest_path.read_text(encoding="utf-8"))
+    wrong_event_challenge_plan = json.loads(first_wrong_event_challenge_plan_path.read_text(encoding="utf-8"))
     method_identity_snapshot_path = Path(str(family_manifest["paths"]["method_identity_snapshot"]))
     method_identity_snapshot = json.loads(method_identity_snapshot_path.read_text(encoding="utf-8"))
     assert family_manifest["sample_roles"]["active"] == [
@@ -87,27 +92,47 @@ def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
         "clean_negative",
         "planner_conditioned_control_negative",
     ]
-    assert family_manifest["sample_roles"]["reserved"] == ["attacked_positive"]
+    assert family_manifest["sample_roles"]["reserved"] == ["attacked_positive", "attacked_negative"]
     assert family_manifest["stage_boundary"]["implemented"] == ["PW00", "PW01", "PW02", "PW03", "PW04", "PW05"]
     assert family_manifest["stage_boundary"]["excluded"] == []
     assert family_manifest["source_parameters"]["seed_list"] == [0, 7]
     assert family_manifest["source_parameters"]["calibration_fraction"] == 0.5
     assert family_manifest["source_parameters"]["source_shard_count"] == 3
     assert family_manifest["attack_parameters"]["attack_shard_count"] == 3
+    assert family_manifest["attack_parameters"]["wrong_event_attestation_challenge_plan_frozen"] is True
+    assert family_manifest["attack_parameters"]["wrong_event_challenge_parent_event_count"] == 4
+    assert family_manifest["attack_parameters"]["wrong_event_challenge_available_assignment_count"] == 4
     assert family_manifest["attack_parameters"]["severity_metadata_frozen"] is True
     assert family_manifest["attack_parameters"]["severity_axis_kind"] == "family_local"
     assert family_manifest["attack_parameters"]["severity_available_family_count"] > 0
     assert family_manifest["attack_plan"]["attack_shard_count"] == 3
+    assert family_manifest["attack_plan"]["wrong_event_attestation_challenge_plan_frozen"] is True
+    assert family_manifest["attack_plan"]["wrong_event_attestation_challenge_plan_policy"] == "cyclic_next_positive_parent_event_by_event_index"
+    assert family_manifest["attack_plan"]["wrong_event_challenge_parent_event_count"] == 4
+    assert family_manifest["attack_plan"]["wrong_event_challenge_available_assignment_count"] == 4
     assert family_manifest["attack_plan"]["severity_metadata_frozen"] is True
     assert family_manifest["attack_plan"]["severity_status_counts"]["ok"] > 0
     assert family_manifest["counts"]["positive_source_event_count"] == 4
     assert family_manifest["counts"]["clean_negative_event_count"] == 4
     assert family_manifest["counts"]["planner_conditioned_control_negative_event_count"] == 4
+    assert family_manifest["counts"]["wrong_event_challenge_parent_event_count"] == 4
     assert family_manifest["counts"]["calibration_event_count"] == 4
     assert family_manifest["counts"]["evaluate_event_count"] == 4
     assert family_manifest["counts"]["control_calibration_event_count"] == 2
     assert family_manifest["counts"]["control_evaluate_event_count"] == 2
+    assert family_manifest["paths"]["wrong_event_attestation_challenge_plan"] == first_summary[
+        "wrong_event_attestation_challenge_plan_path"
+    ]
     assert family_manifest["source_truth_stage"] == "PW01_Source_Event_Shards"
+    assert wrong_event_challenge_plan["plan_policy"] == "cyclic_next_positive_parent_event_by_event_index"
+    assert wrong_event_challenge_plan["positive_parent_event_count"] == 4
+    assert wrong_event_challenge_plan["available_assignment_count"] == 4
+    assert len(wrong_event_challenge_plan["rows"]) == 4
+    assert all(row["status"] == "ready" for row in wrong_event_challenge_plan["rows"])
+    assert all(
+        row["parent_event_id"] != row["challenge_parent_event_id"]
+        for row in wrong_event_challenge_plan["rows"]
+    )
     assert method_identity_snapshot["source_truth_stage"] == "PW01_Source_Event_Shards"
     assert method_identity_snapshot["source_alignment_reference_files"] == [
         "paper_workflow/configs/pw_base.yaml",
@@ -122,6 +147,9 @@ def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
     ]
     assert first_summary["source_shard_count"] == 3
     assert first_summary["attack_shard_count"] == 3
+    assert first_summary["wrong_event_challenge_parent_event_count"] == 4
+    assert first_summary["wrong_event_challenge_available_assignment_count"] == 4
+    assert Path(str(first_summary["wrong_event_attestation_challenge_plan_path"])) == first_wrong_event_challenge_plan_path
     assert first_summary["severity_metadata_frozen"] is True
     assert first_summary["severity_axis_kind"] == "family_local"
     assert first_summary["severity_status_counts"]["ok"] > 0
@@ -161,7 +189,9 @@ def test_pw00_can_freeze_independent_attack_shard_count(tmp_path: Path) -> None:
 
     assert family_manifest["source_parameters"]["source_shard_count"] == 3
     assert family_manifest["attack_parameters"]["attack_shard_count"] == 5
+    assert family_manifest["attack_parameters"]["wrong_event_attestation_challenge_plan_frozen"] is True
     assert family_manifest["attack_plan"]["attack_shard_count"] == 5
+    assert family_manifest["attack_plan"]["wrong_event_attestation_challenge_plan_policy"] == "cyclic_next_positive_parent_event_by_event_index"
     assert attack_shard_plan["attack_shard_count"] == 5
     assert len(attack_shard_plan["shards"]) == 5
     assert source_shard_plan["source_shard_count"] == 3

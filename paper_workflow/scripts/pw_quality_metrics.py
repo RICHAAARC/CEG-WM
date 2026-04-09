@@ -6,6 +6,7 @@ Module type: Semi-general module
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence, cast
 
@@ -16,16 +17,21 @@ from main.evaluation.image_quality import compute_psnr, compute_ssim
 from scripts.notebook_runtime_common import normalize_path_value
 
 
-_LPIPS_MODEL: Any = None
-_LPIPS_MODEL_ERROR: str | None = None
-_CLIP_MODEL: Any = None
-_CLIP_PREPROCESS: Any = None
-_CLIP_TOKENIZER: Any = None
-_CLIP_MODEL_ERROR: str | None = None
+_LPIPS_MODELS: Dict[str, Any] = {}
+_LPIPS_MODEL_ERRORS: Dict[str, str] = {}
+_CLIP_MODELS: Dict[str, Any] = {}
+_CLIP_PREPROCESSES: Dict[str, Any] = {}
+_CLIP_TOKENIZERS: Dict[str, Any] = {}
+_CLIP_MODEL_ERRORS: Dict[str, str] = {}
 CLIP_UNAVAILABLE_REASON = "requires frozen quality model identity and bootstrap contract"
 CLIP_MODEL_NAME = "open_clip:ViT-B-32/laion2b_s34b_b79k"
 _CLIP_MODEL_ARCH = "ViT-B-32"
 _CLIP_MODEL_PRETRAINED = "laion2b_s34b_b79k"
+QUALITY_TORCH_DEVICE_ENV = "PW_QUALITY_TORCH_DEVICE"
+QUALITY_LPIPS_BATCH_SIZE_ENV = "PW_QUALITY_LPIPS_BATCH_SIZE"
+QUALITY_CLIP_BATCH_SIZE_ENV = "PW_QUALITY_CLIP_BATCH_SIZE"
+DEFAULT_QUALITY_TORCH_DEVICE = "cpu"
+DEFAULT_QUALITY_BATCH_SIZE = 1
 
 
 def _load_required_json_dict(path_obj: Path, label: str) -> Dict[str, Any]:
@@ -136,7 +142,81 @@ def _load_rgb_image(image_path: Path) -> np.ndarray[Any, Any]:
         return np.asarray(image_obj.convert("RGB"))
 
 
-def _get_lpips_model() -> tuple[Any | None, str | None]:
+def _normalize_batch_size(batch_size_value: Any, label: str) -> int:
+    """
+    功能：规范化 quality metric batch size 输入。
+
+    Normalize one quality-metric batch size value.
+
+    Args:
+        batch_size_value: Candidate batch size.
+        label: Human-readable label.
+
+    Returns:
+        Positive batch size.
+
+    Raises:
+        TypeError: If the batch size is invalid.
+    """
+    try:
+        normalized_batch_size = int(batch_size_value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{label} must be positive int") from exc
+    if normalized_batch_size <= 0:
+        raise TypeError(f"{label} must be positive int")
+    return normalized_batch_size
+
+
+def _resolve_quality_runtime_options(
+    *,
+    torch_device: str | None,
+    lpips_batch_size: int | None,
+    clip_batch_size: int | None,
+) -> Dict[str, Any]:
+    """
+    功能：解析 quality metric 的 device 与 batch 运行参数。
+
+    Resolve device and batch runtime options for quality metrics.
+
+    Args:
+        torch_device: Optional explicit torch device string.
+        lpips_batch_size: Optional explicit LPIPS batch size.
+        clip_batch_size: Optional explicit CLIP batch size.
+
+    Returns:
+        Runtime option mapping.
+
+    Raises:
+        TypeError: If any runtime option is invalid.
+    """
+    resolved_torch_device = (
+        torch_device
+        if isinstance(torch_device, str) and torch_device.strip()
+        else os.environ.get(QUALITY_TORCH_DEVICE_ENV, DEFAULT_QUALITY_TORCH_DEVICE)
+    )
+    if not isinstance(resolved_torch_device, str) or not resolved_torch_device.strip():
+        raise TypeError("torch_device must be non-empty str when provided")
+
+    lpips_batch_size_raw = (
+        lpips_batch_size
+        if lpips_batch_size is not None
+        else os.environ.get(QUALITY_LPIPS_BATCH_SIZE_ENV, DEFAULT_QUALITY_BATCH_SIZE)
+    )
+    clip_batch_size_raw = (
+        clip_batch_size
+        if clip_batch_size is not None
+        else os.environ.get(QUALITY_CLIP_BATCH_SIZE_ENV, DEFAULT_QUALITY_BATCH_SIZE)
+    )
+    return {
+        "torch_device": resolved_torch_device.strip(),
+        "lpips_batch_size": _normalize_batch_size(lpips_batch_size_raw, "lpips_batch_size"),
+        "clip_batch_size": _normalize_batch_size(clip_batch_size_raw, "clip_batch_size"),
+    }
+
+
+def _get_lpips_model(
+    torch_device: str = DEFAULT_QUALITY_TORCH_DEVICE,
+) -> tuple[Any | None, str | None]:
     """
     Load and cache the LPIPS model for image-pair quality evaluation.
 
@@ -146,36 +226,40 @@ def _get_lpips_model() -> tuple[Any | None, str | None]:
     Returns:
         Tuple of (model_or_none, error_reason_or_none).
     """
-    global _LPIPS_MODEL
-    global _LPIPS_MODEL_ERROR
+    resolved_torch_device = str(torch_device).strip()
+    if not resolved_torch_device:
+        raise TypeError("torch_device must be non-empty str")
 
-    if _LPIPS_MODEL is not None:
-        return _LPIPS_MODEL, None
-    if _LPIPS_MODEL_ERROR is not None:
-        return None, _LPIPS_MODEL_ERROR
+    if resolved_torch_device in _LPIPS_MODELS:
+        return _LPIPS_MODELS[resolved_torch_device], None
+    if resolved_torch_device in _LPIPS_MODEL_ERRORS:
+        return None, _LPIPS_MODEL_ERRORS[resolved_torch_device]
 
     try:
         import lpips  # type: ignore
         import torch
     except Exception as exc:
-        _LPIPS_MODEL_ERROR = f"{type(exc).__name__}: {exc}"
-        return None, _LPIPS_MODEL_ERROR
+        error_message = f"{type(exc).__name__}: {exc}"
+        _LPIPS_MODEL_ERRORS[resolved_torch_device] = error_message
+        return None, error_message
 
     try:
         model = lpips.LPIPS(net="alex")
         model.eval()
-        model.to(torch.device("cpu"))
+        model.to(torch.device(resolved_torch_device))
     except Exception as exc:
-        _LPIPS_MODEL_ERROR = f"{type(exc).__name__}: {exc}"
-        return None, _LPIPS_MODEL_ERROR
+        error_message = f"{type(exc).__name__}: {exc}"
+        _LPIPS_MODEL_ERRORS[resolved_torch_device] = error_message
+        return None, error_message
 
-    _LPIPS_MODEL = model
-    return _LPIPS_MODEL, None
+    _LPIPS_MODELS[resolved_torch_device] = model
+    return model, None
 
 
 def _compute_lpips_value(
     reference_image: np.ndarray[Any, Any],
     candidate_image: np.ndarray[Any, Any],
+    torch_device: str = DEFAULT_QUALITY_TORCH_DEVICE,
 ) -> float:
     """
     Compute LPIPS perceptual distance for one RGB image pair.
@@ -190,14 +274,15 @@ def _compute_lpips_value(
     Raises:
         RuntimeError: If the LPIPS model is unavailable.
     """
-    model, model_error = _get_lpips_model()
+    model, model_error = _get_lpips_model(torch_device=torch_device)
     if model is None:
         raise RuntimeError(model_error or "LPIPS model unavailable")
 
     import torch
 
-    reference_tensor = torch.from_numpy(reference_image).permute(2, 0, 1).unsqueeze(0).float()
-    candidate_tensor = torch.from_numpy(candidate_image).permute(2, 0, 1).unsqueeze(0).float()
+    device = torch.device(torch_device)
+    reference_tensor = torch.from_numpy(reference_image).permute(2, 0, 1).unsqueeze(0).float().to(device)
+    candidate_tensor = torch.from_numpy(candidate_image).permute(2, 0, 1).unsqueeze(0).float().to(device)
     reference_tensor = (reference_tensor / 127.5) - 1.0
     candidate_tensor = (candidate_tensor / 127.5) - 1.0
     with torch.no_grad():
@@ -205,7 +290,56 @@ def _compute_lpips_value(
     return float(lpips_value.reshape(-1)[0].item())
 
 
-def _get_clip_model_components() -> tuple[Any | None, Any | None, Any | None, str | None]:
+def _compute_lpips_values_batch(
+    reference_images: Sequence[np.ndarray[Any, Any]],
+    candidate_images: Sequence[np.ndarray[Any, Any]],
+    torch_device: str = DEFAULT_QUALITY_TORCH_DEVICE,
+) -> List[float]:
+    """
+    Compute LPIPS perceptual distance for one aligned image batch.
+
+    Args:
+        reference_images: Reference RGB image arrays.
+        candidate_images: Candidate RGB image arrays.
+        torch_device: Torch device used for model and tensors.
+
+    Returns:
+        LPIPS distances aligned with the input order.
+
+    Raises:
+        RuntimeError: If the LPIPS model is unavailable.
+        ValueError: If the batch inputs are inconsistent.
+    """
+    if len(reference_images) != len(candidate_images):
+        raise ValueError("reference_images and candidate_images must have the same length")
+    if not reference_images:
+        return []
+
+    model, model_error = _get_lpips_model(torch_device=torch_device)
+    if model is None:
+        raise RuntimeError(model_error or "LPIPS model unavailable")
+
+    import torch
+
+    device = torch.device(torch_device)
+    reference_tensor = torch.stack(
+        [torch.from_numpy(image).permute(2, 0, 1).float() for image in reference_images],
+        dim=0,
+    ).to(device)
+    candidate_tensor = torch.stack(
+        [torch.from_numpy(image).permute(2, 0, 1).float() for image in candidate_images],
+        dim=0,
+    ).to(device)
+    reference_tensor = (reference_tensor / 127.5) - 1.0
+    candidate_tensor = (candidate_tensor / 127.5) - 1.0
+    with torch.no_grad():
+        lpips_values = model(reference_tensor, candidate_tensor)
+    return [float(value.item()) for value in lpips_values.reshape(-1)]
+
+
+def _get_clip_model_components(
+    torch_device: str = DEFAULT_QUALITY_TORCH_DEVICE,
+) -> tuple[Any | None, Any | None, Any | None, str | None]:
     """
     Load and cache the frozen CLIP model components for image-text similarity.
 
@@ -215,44 +349,55 @@ def _get_clip_model_components() -> tuple[Any | None, Any | None, Any | None, st
     Returns:
         Tuple of (model_or_none, preprocess_or_none, tokenizer_or_none, error_reason_or_none).
     """
-    global _CLIP_MODEL
-    global _CLIP_PREPROCESS
-    global _CLIP_TOKENIZER
-    global _CLIP_MODEL_ERROR
+    resolved_torch_device = str(torch_device).strip()
+    if not resolved_torch_device:
+        raise TypeError("torch_device must be non-empty str")
 
-    if _CLIP_MODEL is not None and _CLIP_PREPROCESS is not None and _CLIP_TOKENIZER is not None:
-        return _CLIP_MODEL, _CLIP_PREPROCESS, _CLIP_TOKENIZER, None
-    if _CLIP_MODEL_ERROR is not None:
-        return None, None, None, _CLIP_MODEL_ERROR
+    if (
+        resolved_torch_device in _CLIP_MODELS
+        and resolved_torch_device in _CLIP_PREPROCESSES
+        and resolved_torch_device in _CLIP_TOKENIZERS
+    ):
+        return (
+            _CLIP_MODELS[resolved_torch_device],
+            _CLIP_PREPROCESSES[resolved_torch_device],
+            _CLIP_TOKENIZERS[resolved_torch_device],
+            None,
+        )
+    if resolved_torch_device in _CLIP_MODEL_ERRORS:
+        return None, None, None, _CLIP_MODEL_ERRORS[resolved_torch_device]
 
     try:
         import open_clip  # type: ignore
         import torch
     except Exception as exc:
-        _CLIP_MODEL_ERROR = f"{type(exc).__name__}: {exc}"
-        return None, None, None, _CLIP_MODEL_ERROR
+        error_message = f"{type(exc).__name__}: {exc}"
+        _CLIP_MODEL_ERRORS[resolved_torch_device] = error_message
+        return None, None, None, error_message
 
     try:
         model, _, preprocess = open_clip.create_model_and_transforms(
             _CLIP_MODEL_ARCH,
             pretrained=_CLIP_MODEL_PRETRAINED,
-            device=torch.device("cpu"),
+            device=torch.device(resolved_torch_device),
         )
         tokenizer = open_clip.get_tokenizer(_CLIP_MODEL_ARCH)
         model.eval()
     except Exception as exc:
-        _CLIP_MODEL_ERROR = f"{type(exc).__name__}: {exc}"
-        return None, None, None, _CLIP_MODEL_ERROR
+        error_message = f"{type(exc).__name__}: {exc}"
+        _CLIP_MODEL_ERRORS[resolved_torch_device] = error_message
+        return None, None, None, error_message
 
-    _CLIP_MODEL = model
-    _CLIP_PREPROCESS = preprocess
-    _CLIP_TOKENIZER = tokenizer
-    return _CLIP_MODEL, _CLIP_PREPROCESS, _CLIP_TOKENIZER, None
+    _CLIP_MODELS[resolved_torch_device] = model
+    _CLIP_PREPROCESSES[resolved_torch_device] = preprocess
+    _CLIP_TOKENIZERS[resolved_torch_device] = tokenizer
+    return model, preprocess, tokenizer, None
 
 
 def _compute_clip_text_similarity(
     candidate_image: np.ndarray[Any, Any],
     prompt_text: str,
+    torch_device: str = DEFAULT_QUALITY_TORCH_DEVICE,
 ) -> float:
     """
     Compute CLIP image-text cosine similarity for one candidate image and prompt.
@@ -271,14 +416,17 @@ def _compute_clip_text_similarity(
     if not isinstance(prompt_text, str) or not prompt_text.strip():
         raise ValueError("prompt_text must be non-empty str")
 
-    model, preprocess, tokenizer, model_error = _get_clip_model_components()
+    model, preprocess, tokenizer, model_error = _get_clip_model_components(torch_device=torch_device)
     if model is None or preprocess is None or tokenizer is None:
         raise RuntimeError(model_error or "CLIP model unavailable")
 
     import torch
 
-    image_tensor = preprocess(Image.fromarray(candidate_image)).unsqueeze(0)
+    device = torch.device(torch_device)
+    image_tensor = preprocess(Image.fromarray(candidate_image)).unsqueeze(0).to(device)
     text_tensor = tokenizer([prompt_text.strip()])
+    if hasattr(text_tensor, "to"):
+        text_tensor = text_tensor.to(device)
     with torch.inference_mode():
         image_features = model.encode_image(image_tensor)
         text_features = model.encode_text(text_tensor)
@@ -286,6 +434,122 @@ def _compute_clip_text_similarity(
         text_features = text_features / text_features.norm(dim=-1, keepdim=True).clamp(min=1e-12)
         similarity_value = torch.matmul(image_features, text_features.T)
     return float(similarity_value.reshape(-1)[0].item())
+
+
+def _compute_clip_text_similarity_batch(
+    candidate_images: Sequence[np.ndarray[Any, Any]],
+    prompt_texts: Sequence[str],
+    torch_device: str = DEFAULT_QUALITY_TORCH_DEVICE,
+) -> List[float]:
+    """
+    Compute CLIP image-text cosine similarity for one aligned batch.
+
+    Args:
+        candidate_images: Candidate RGB image arrays.
+        prompt_texts: Prompt texts aligned with candidate_images.
+        torch_device: Torch device used for model and tensors.
+
+    Returns:
+        Cosine similarities aligned with the input order.
+
+    Raises:
+        RuntimeError: If the CLIP model is unavailable.
+        ValueError: If the prompts are invalid or the batch lengths mismatch.
+    """
+    if len(candidate_images) != len(prompt_texts):
+        raise ValueError("candidate_images and prompt_texts must have the same length")
+    if not candidate_images:
+        return []
+
+    cleaned_prompts: List[str] = []
+    for prompt_text in prompt_texts:
+        if not isinstance(prompt_text, str) or not prompt_text.strip():
+            raise ValueError("prompt_texts items must be non-empty str")
+        cleaned_prompts.append(prompt_text.strip())
+
+    model, preprocess, tokenizer, model_error = _get_clip_model_components(torch_device=torch_device)
+    if model is None or preprocess is None or tokenizer is None:
+        raise RuntimeError(model_error or "CLIP model unavailable")
+
+    import torch
+
+    device = torch.device(torch_device)
+    image_tensor = torch.stack(
+        [preprocess(Image.fromarray(candidate_image)) for candidate_image in candidate_images],
+        dim=0,
+    ).to(device)
+    text_tensor = tokenizer(cleaned_prompts)
+    if hasattr(text_tensor, "to"):
+        text_tensor = text_tensor.to(device)
+    with torch.inference_mode():
+        image_features = model.encode_image(image_tensor)
+        text_features = model.encode_text(text_tensor)
+        image_features = image_features / image_features.norm(dim=-1, keepdim=True).clamp(min=1e-12)
+        text_features = text_features / text_features.norm(dim=-1, keepdim=True).clamp(min=1e-12)
+        similarity_values = (image_features * text_features).sum(dim=-1)
+    return [float(value.item()) for value in similarity_values.reshape(-1)]
+
+
+def _call_lpips_value_compat(
+    reference_image: np.ndarray[Any, Any],
+    candidate_image: np.ndarray[Any, Any],
+    *,
+    torch_device: str,
+) -> float:
+    """
+    功能：兼容旧 monkeypatch 签名调用单样本 LPIPS 计算。
+
+    Call the single-item LPIPS helper while remaining compatible with legacy monkeypatches.
+
+    Args:
+        reference_image: Reference RGB image array.
+        candidate_image: Candidate RGB image array.
+        torch_device: Torch device string.
+
+    Returns:
+        LPIPS distance for one image pair.
+    """
+    try:
+        return _compute_lpips_value(
+            reference_image,
+            candidate_image,
+            torch_device=torch_device,
+        )
+    except TypeError as exc:
+        if "torch_device" not in str(exc):
+            raise
+    return _compute_lpips_value(reference_image, candidate_image)
+
+
+def _call_clip_text_similarity_compat(
+    candidate_image: np.ndarray[Any, Any],
+    prompt_text: str,
+    *,
+    torch_device: str,
+) -> float:
+    """
+    功能：兼容旧 monkeypatch 签名调用单样本 CLIP 计算。
+
+    Call the single-item CLIP helper while remaining compatible with legacy monkeypatches.
+
+    Args:
+        candidate_image: Candidate RGB image array.
+        prompt_text: Prompt text.
+        torch_device: Torch device string.
+
+    Returns:
+        CLIP similarity for one image-text pair.
+    """
+    try:
+        return _compute_clip_text_similarity(
+            candidate_image,
+            prompt_text,
+            torch_device=torch_device,
+        )
+    except TypeError as exc:
+        if "torch_device" not in str(exc):
+            raise
+    return _compute_clip_text_similarity(candidate_image, prompt_text)
 
 
 def build_quality_metrics_from_pairs(
@@ -296,6 +560,9 @@ def build_quality_metrics_from_pairs(
     pair_id_key: str,
     text_key: str | None = None,
     extra_metadata_keys: Sequence[str] | None = None,
+    torch_device: str | None = None,
+    lpips_batch_size: int | None = None,
+    clip_batch_size: int | None = None,
 ) -> Dict[str, Any]:
     """
     功能：对一组图像路径对计算质量指标摘要。
@@ -309,6 +576,9 @@ def build_quality_metrics_from_pairs(
         pair_id_key: Key containing the stable pair identifier.
         text_key: Optional key containing the prompt text for CLIP alignment.
         extra_metadata_keys: Additional metadata keys copied into each pair row.
+        torch_device: Optional torch device string used by LPIPS and CLIP.
+        lpips_batch_size: Optional LPIPS batch size.
+        clip_batch_size: Optional CLIP batch size.
 
     Returns:
         Quality summary payload with aggregate metrics and per-pair rows.
@@ -327,12 +597,22 @@ def build_quality_metrics_from_pairs(
     if text_key is not None and (not isinstance(text_key, str) or not text_key):
         raise TypeError("text_key must be non-empty str when provided")
     metadata_keys = list(extra_metadata_keys) if extra_metadata_keys is not None else []
+    runtime_options = _resolve_quality_runtime_options(
+        torch_device=torch_device,
+        lpips_batch_size=lpips_batch_size,
+        clip_batch_size=clip_batch_size,
+    )
+    resolved_torch_device = str(runtime_options["torch_device"])
+    resolved_lpips_batch_size = int(runtime_options["lpips_batch_size"])
+    resolved_clip_batch_size = int(runtime_options["clip_batch_size"])
 
     pair_rows: List[Dict[str, Any]] = []
     psnr_values: List[float] = []
     ssim_values: List[float] = []
     lpips_values: List[float] = []
     clip_values: List[float] = []
+    lpips_pending: List[tuple[int, np.ndarray[Any, Any], np.ndarray[Any, Any]]] = []
+    clip_pending: List[tuple[int, np.ndarray[Any, Any], str]] = []
     missing_count = 0
     error_count = 0
     lpips_reason: str | None = None
@@ -407,32 +687,109 @@ def build_quality_metrics_from_pairs(
         pair_row["status"] = "ok"
         pair_row["psnr"] = psnr_value
         pair_row["ssim"] = ssim_value
-        try:
-            lpips_value = _compute_lpips_value(reference_image, candidate_image)
-        except Exception as exc:
-            if lpips_reason is None:
-                lpips_reason = f"{type(exc).__name__}: {exc}"
+        pair_row_index = len(pair_rows)
+        if resolved_lpips_batch_size > 1:
+            lpips_pending.append((pair_row_index, reference_image, candidate_image))
         else:
-            pair_row["lpips"] = lpips_value
-            lpips_values.append(lpips_value)
+            try:
+                lpips_value = _call_lpips_value_compat(
+                    reference_image,
+                    candidate_image,
+                    torch_device=resolved_torch_device,
+                )
+            except Exception as exc:
+                if lpips_reason is None:
+                    lpips_reason = f"{type(exc).__name__}: {exc}"
+            else:
+                pair_row["lpips"] = lpips_value
+                lpips_values.append(lpips_value)
 
         if text_key is not None:
             if isinstance(prompt_text, str) and prompt_text.strip():
-                try:
-                    clip_value = _compute_clip_text_similarity(candidate_image, prompt_text)
-                except Exception as exc:
-                    clip_error_count += 1
-                    if clip_reason is None:
-                        clip_reason = f"{type(exc).__name__}: {exc}"
+                if resolved_clip_batch_size > 1:
+                    clip_pending.append((pair_row_index, candidate_image, prompt_text.strip()))
                 else:
-                    pair_row["clip_text_similarity"] = clip_value
-                    clip_values.append(clip_value)
+                    try:
+                        clip_value = _call_clip_text_similarity_compat(
+                            candidate_image,
+                            prompt_text,
+                            torch_device=resolved_torch_device,
+                        )
+                    except Exception as exc:
+                        clip_error_count += 1
+                        if clip_reason is None:
+                            clip_reason = f"{type(exc).__name__}: {exc}"
+                    else:
+                        pair_row["clip_text_similarity"] = clip_value
+                        clip_values.append(clip_value)
             else:
                 clip_missing_text_count += 1
 
         psnr_values.append(psnr_value)
         ssim_values.append(ssim_value)
         pair_rows.append(pair_row)
+
+    if resolved_lpips_batch_size > 1 and lpips_pending:
+        for batch_start in range(0, len(lpips_pending), resolved_lpips_batch_size):
+            batch = lpips_pending[batch_start : batch_start + resolved_lpips_batch_size]
+            try:
+                batch_values = _compute_lpips_values_batch(
+                    [reference_image for _, reference_image, _ in batch],
+                    [candidate_image for _, _, candidate_image in batch],
+                    torch_device=resolved_torch_device,
+                )
+            except Exception as exc:
+                if lpips_reason is None:
+                    lpips_reason = f"{type(exc).__name__}: {exc}"
+                for pair_row_index, reference_image, candidate_image in batch:
+                    try:
+                        lpips_value = _call_lpips_value_compat(
+                            reference_image,
+                            candidate_image,
+                            torch_device=resolved_torch_device,
+                        )
+                    except Exception as single_exc:
+                        if lpips_reason is None:
+                            lpips_reason = f"{type(single_exc).__name__}: {single_exc}"
+                    else:
+                        pair_rows[pair_row_index]["lpips"] = lpips_value
+                        lpips_values.append(lpips_value)
+            else:
+                for (pair_row_index, _, _), lpips_value in zip(batch, batch_values, strict=False):
+                    pair_rows[pair_row_index]["lpips"] = lpips_value
+                    lpips_values.append(lpips_value)
+
+    if resolved_clip_batch_size > 1 and clip_pending:
+        for batch_start in range(0, len(clip_pending), resolved_clip_batch_size):
+            batch = clip_pending[batch_start : batch_start + resolved_clip_batch_size]
+            try:
+                batch_values = _compute_clip_text_similarity_batch(
+                    [candidate_image for _, candidate_image, _ in batch],
+                    [prompt_text for _, _, prompt_text in batch],
+                    torch_device=resolved_torch_device,
+                )
+            except Exception as exc:
+                clip_error_count += len(batch)
+                if clip_reason is None:
+                    clip_reason = f"{type(exc).__name__}: {exc}"
+                for pair_row_index, candidate_image, prompt_text in batch:
+                    try:
+                        clip_value = _call_clip_text_similarity_compat(
+                            candidate_image,
+                            prompt_text,
+                            torch_device=resolved_torch_device,
+                        )
+                    except Exception as single_exc:
+                        if clip_reason is None:
+                            clip_reason = f"{type(single_exc).__name__}: {single_exc}"
+                    else:
+                        clip_error_count -= 1
+                        pair_rows[pair_row_index]["clip_text_similarity"] = clip_value
+                        clip_values.append(clip_value)
+            else:
+                for (pair_row_index, _, _), clip_value in zip(batch, batch_values, strict=False):
+                    pair_rows[pair_row_index]["clip_text_similarity"] = clip_value
+                    clip_values.append(clip_value)
 
     successful_count = len(psnr_values)
     mean_psnr = float(np.mean(psnr_values)) if psnr_values else None
@@ -487,5 +844,10 @@ def build_quality_metrics_from_pairs(
         "clip_sample_count": clip_sample_count,
         "clip_status": clip_status,
         "clip_reason": None if clip_status == "ok" else (clip_reason or CLIP_UNAVAILABLE_REASON),
+        "quality_runtime": {
+            "torch_device": resolved_torch_device,
+            "lpips_batch_size": resolved_lpips_batch_size,
+            "clip_batch_size": resolved_clip_batch_size,
+        },
         "pair_rows": pair_rows,
     }

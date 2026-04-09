@@ -73,6 +73,36 @@ def _extract_mapping(node: Any) -> Dict[str, Any]:
     return dict(cast(Mapping[str, Any], node)) if isinstance(node, Mapping) else {}
 
 
+def _load_optional_wrong_event_attestation_challenge_record(
+    event_manifest: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """
+    功能：从 PW03 event manifest 读取可选 wrong-event challenge record。
+
+    Load the optional PW03 wrong-event challenge record referenced by one event manifest.
+
+    Args:
+        event_manifest: PW03 event manifest payload.
+
+    Returns:
+        Challenge record payload when available, otherwise an empty mapping.
+    """
+    inline_record = event_manifest.get("wrong_event_attestation_challenge_record")
+    if isinstance(inline_record, Mapping):
+        return dict(cast(Mapping[str, Any], inline_record))
+
+    record_path_value = event_manifest.get("wrong_event_attestation_challenge_record_path")
+    if not isinstance(record_path_value, str) or not record_path_value:
+        return {}
+    record_path = Path(record_path_value).expanduser().resolve()
+    if not record_path.exists() or not record_path.is_file():
+        return {}
+    try:
+        return _load_required_json_dict(record_path, "PW04 wrong-event attestation challenge record")
+    except (FileNotFoundError, ValueError, json.JSONDecodeError):
+        return {}
+
+
 def _parse_csv_float(row: Mapping[str, Any], key_name: str) -> float | None:
     """
     功能：从 CSV 行解析有限浮点值。
@@ -204,6 +234,75 @@ def _coerce_finite_float(value: Any) -> float | None:
             return None
         return value_float if math.isfinite(value_float) else None
     return None
+
+
+def _extract_int_list(value: Any) -> List[int]:
+    """
+    功能：把整型序列规范化为 int 列表。
+
+    Normalize one integer sequence to a list of ints.
+
+    Args:
+        value: Candidate sequence.
+
+    Returns:
+        Normalized integer list.
+    """
+    if not isinstance(value, list):
+        return []
+    normalized: List[int] = []
+    for item in cast(List[object], value):
+        if isinstance(item, int) and not isinstance(item, bool):
+            normalized.append(int(item))
+    return normalized
+
+
+def _derive_payload_primary_metrics(lf_trace: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    功能：从 LF trace 派生 payload 主指标。
+
+    Derive primary payload metrics from one LF detect trace.
+
+    Args:
+        lf_trace: LF detect trace mapping.
+
+    Returns:
+        Derived payload metric mapping.
+    """
+    if not isinstance(lf_trace, Mapping):
+        raise TypeError("lf_trace must be Mapping")
+
+    agreement_count = _parse_csv_int(lf_trace, "agreement_count")
+    n_bits_compared = _parse_csv_int(lf_trace, "n_bits_compared")
+    mismatch_indices = _extract_int_list(lf_trace.get("mismatch_indices"))
+    mismatch_count = len(mismatch_indices) if mismatch_indices else None
+    bit_accuracy = _coerce_finite_float(lf_trace.get("codeword_agreement"))
+    if bit_accuracy is None and agreement_count is not None and isinstance(n_bits_compared, int) and n_bits_compared > 0:
+        bit_accuracy = float(agreement_count / n_bits_compared)
+    if mismatch_count is None and agreement_count is not None and isinstance(n_bits_compared, int) and n_bits_compared >= agreement_count:
+        mismatch_count = int(n_bits_compared - agreement_count)
+    bit_error_rate = None if bit_accuracy is None else float(max(0.0, min(1.0, 1.0 - bit_accuracy)))
+    message_success = None
+    if isinstance(n_bits_compared, int) and n_bits_compared > 0 and bit_accuracy is not None:
+        message_success = bool(bit_accuracy >= 1.0 - 1e-12)
+
+    if agreement_count is not None and isinstance(n_bits_compared, int) and n_bits_compared > 0:
+        primary_metric_source = "agreement_count_and_n_bits_compared"
+    elif bit_accuracy is not None and isinstance(n_bits_compared, int) and n_bits_compared > 0:
+        primary_metric_source = "codeword_agreement_and_n_bits_compared"
+    elif bit_accuracy is not None:
+        primary_metric_source = "codeword_agreement_only"
+    else:
+        primary_metric_source = None
+
+    return {
+        "agreement_count": agreement_count,
+        "mismatch_count": mismatch_count,
+        "bit_accuracy": bit_accuracy,
+        "bit_error_rate": bit_error_rate,
+        "message_success": message_success,
+        "primary_metric_source": primary_metric_source,
+    }
 
 
 def _build_condition_severity_lookup(
@@ -994,6 +1093,130 @@ def _collect_geometry_rows(
     return family_rows, overall_summary
 
 
+def _resolve_geometry_condition_value(value: Any) -> str:
+    """
+    功能：将 geometry 条件值归一化为 true / false / missing。
+
+    Normalize one geometry-condition value to true / false / missing.
+
+    Args:
+        value: Candidate condition value.
+
+    Returns:
+        Normalized condition bucket.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return "missing"
+
+
+def _collect_geometry_conditional_rows(
+    attack_event_rows: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    功能：按几何诊断条件分桶，构造 attack TPR 条件指标行。
+
+    Build attack TPR conditional rows stratified by frozen geometry diagnostics.
+
+    Args:
+        attack_event_rows: Materialized attack event rows.
+
+    Returns:
+        Conditional geometry metric rows.
+    """
+    if not isinstance(attack_event_rows, Sequence):
+        raise TypeError("attack_event_rows must be Sequence")
+
+    grouped_rows: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    ordered_condition_names = [
+        "sync_success",
+        "inverse_transform_success",
+        "attention_anchor_available",
+        "geo_rescue_eligible",
+        "geo_rescue_applied",
+    ]
+    for attack_event_row in attack_event_rows:
+        formal_record = _extract_mapping(attack_event_row.get("formal_record"))
+        formal_final_decision = _extract_mapping(formal_record.get("formal_final_decision"))
+        formal_event_attestation_decision = _extract_mapping(
+            formal_record.get("formal_event_attestation_decision")
+        )
+        attestation_payload = _extract_mapping(formal_record.get("attestation"))
+        image_evidence_payload = _extract_mapping(attestation_payload.get("image_evidence_result"))
+        geometry_diagnostics = _extract_mapping(attack_event_row.get("geometry_diagnostics"))
+        bucket_payload = {
+            "parent_event_id": attack_event_row.get("parent_event_id"),
+            "attack_family": attack_event_row.get("attack_family"),
+            "formal_final_positive": formal_final_decision.get("is_watermarked") is True,
+            "formal_attestation_positive": formal_event_attestation_decision.get("is_watermarked") is True,
+            "derived_attack_union_positive": bool(formal_record.get("derived_attack_union_positive", False)),
+            "geo_helped_positive": bool(image_evidence_payload.get("geo_rescue_applied", False))
+            and bool(formal_record.get("derived_attack_union_positive", False)),
+        }
+        condition_specs = [
+            ("sync_success", geometry_diagnostics.get("sync_success")),
+            ("inverse_transform_success", geometry_diagnostics.get("inverse_transform_success")),
+            ("attention_anchor_available", geometry_diagnostics.get("attention_anchor_available")),
+            ("geo_rescue_eligible", image_evidence_payload.get("geo_rescue_eligible")),
+            ("geo_rescue_applied", image_evidence_payload.get("geo_rescue_applied")),
+        ]
+        for condition_name, condition_raw_value in condition_specs:
+            condition_value = _resolve_geometry_condition_value(condition_raw_value)
+            grouped_rows.setdefault((condition_name, condition_value), []).append(dict(bucket_payload))
+
+    conditional_rows: List[Dict[str, Any]] = []
+    for condition_name in ordered_condition_names:
+        for condition_value in ["true", "false", "missing"]:
+            rows = grouped_rows.get((condition_name, condition_value), [])
+            event_count = len(rows)
+            formal_final_positive_count = sum(1 for row in rows if bool(row.get("formal_final_positive")))
+            formal_attestation_positive_count = sum(
+                1 for row in rows if bool(row.get("formal_attestation_positive"))
+            )
+            derived_attack_union_positive_count = sum(
+                1 for row in rows if bool(row.get("derived_attack_union_positive"))
+            )
+            geo_helped_positive_count = sum(1 for row in rows if bool(row.get("geo_helped_positive")))
+            conditional_rows.append(
+                {
+                    "geometry_condition_name": condition_name,
+                    "geometry_condition_value": condition_value,
+                    "event_count": event_count,
+                    "parent_event_count": len(
+                        {
+                            str(row.get("parent_event_id"))
+                            for row in rows
+                            if isinstance(row.get("parent_event_id"), str) and str(row.get("parent_event_id"))
+                        }
+                    ),
+                    "attack_family_count": len(
+                        {
+                            str(row.get("attack_family"))
+                            for row in rows
+                            if isinstance(row.get("attack_family"), str) and str(row.get("attack_family"))
+                        }
+                    ),
+                    "formal_final_positive_count": formal_final_positive_count,
+                    "formal_final_decision_attack_tpr": (
+                        float(formal_final_positive_count / event_count) if event_count > 0 else None
+                    ),
+                    "formal_attestation_positive_count": formal_attestation_positive_count,
+                    "formal_attestation_attack_tpr": (
+                        float(formal_attestation_positive_count / event_count) if event_count > 0 else None
+                    ),
+                    "derived_attack_union_positive_count": derived_attack_union_positive_count,
+                    "derived_attack_union_attack_tpr": (
+                        float(derived_attack_union_positive_count / event_count) if event_count > 0 else None
+                    ),
+                    "geo_helped_positive_count": geo_helped_positive_count,
+                    "geo_helped_positive_rate": (
+                        float(geo_helped_positive_count / event_count) if event_count > 0 else None
+                    ),
+                }
+            )
+    return conditional_rows
+
+
 def _build_payload_attack_summary_payload(
     *,
     family_id: str,
@@ -1036,6 +1259,7 @@ def _build_payload_attack_summary_payload(
             "attack_condition_key": attack_event_row.get("attack_condition_key"),
             "codeword_agreement": _coerce_finite_float(lf_trace.get("codeword_agreement")),
             "n_bits_compared": _parse_csv_int(lf_trace, "n_bits_compared"),
+            **_derive_payload_primary_metrics(lf_trace),
             "event_attestation_score": _coerce_finite_float(attested_decision.get("event_attestation_score")),
             "is_event_attested": attested_decision.get("is_event_attested") if isinstance(attested_decision.get("is_event_attested"), bool) else None,
             "lf_detect_variant": lf_trace.get("detect_variant") if isinstance(lf_trace.get("detect_variant"), str) else attack_event_row.get("lf_detect_variant"),
@@ -1054,11 +1278,24 @@ def _build_payload_attack_summary_payload(
             for row in available
             if isinstance(row.get("n_bits_compared"), int)
         ]
+        bit_accuracy_values = [float(row["bit_accuracy"]) for row in rows if isinstance(row.get("bit_accuracy"), float)]
+        bit_error_rate_values = [float(row["bit_error_rate"]) for row in rows if isinstance(row.get("bit_error_rate"), float)]
+        weighted_bit_accuracy_numerator = sum(
+            float(cast(float, row["bit_accuracy"])) * int(cast(int, row["n_bits_compared"]))
+            for row in rows
+            if isinstance(row.get("bit_accuracy"), float) and isinstance(row.get("n_bits_compared"), int)
+        )
+        weighted_bit_accuracy_denominator = sum(
+            int(cast(int, row["n_bits_compared"]))
+            for row in rows
+            if isinstance(row.get("bit_accuracy"), float) and isinstance(row.get("n_bits_compared"), int)
+        )
         attestation_values = [
             float(row["event_attestation_score"])
             for row in rows
             if isinstance(row.get("event_attestation_score"), float)
         ]
+        message_success_values = [row["message_success"] for row in rows if isinstance(row.get("message_success"), bool)]
         detect_variants = sorted(
             {
                 str(row.get("lf_detect_variant"))
@@ -1081,6 +1318,31 @@ def _build_payload_attack_summary_payload(
             "min_codeword_agreement": min(agreement_values) if agreement_values else None,
             "max_codeword_agreement": max(agreement_values) if agreement_values else None,
             "mean_n_bits_compared": _safe_mean(bits_compared_values),
+            "mean_bit_accuracy": _safe_mean(bit_accuracy_values),
+            "weighted_bit_accuracy": (
+                float(weighted_bit_accuracy_numerator / weighted_bit_accuracy_denominator)
+                if weighted_bit_accuracy_denominator > 0
+                else None
+            ),
+            "mean_bit_error_rate": _safe_mean(bit_error_rate_values),
+            "weighted_bit_error_rate": (
+                float(1.0 - (weighted_bit_accuracy_numerator / weighted_bit_accuracy_denominator))
+                if weighted_bit_accuracy_denominator > 0
+                else None
+            ),
+            "message_success_count": sum(1 for value in message_success_values if value is True),
+            "message_success_rate": (
+                float(sum(1 for value in message_success_values if value is True) / len(message_success_values))
+                if message_success_values
+                else None
+            ),
+            "payload_primary_metric_sources": sorted(
+                {
+                    str(row.get("primary_metric_source"))
+                    for row in rows
+                    if isinstance(row.get("primary_metric_source"), str) and str(row.get("primary_metric_source"))
+                }
+            ),
             "attested_event_count": sum(1 for row in rows if row.get("is_event_attested") is True),
             "mean_event_attestation_score": _safe_mean(attestation_values),
             "lf_detect_variants": detect_variants,
@@ -1125,8 +1387,8 @@ def _build_wrong_event_attestation_challenge_summary_payload(
     """
     功能：构造 wrong-event attestation challenge 汇总。
 
-    Build the analysis-only wrong-event attestation challenge summary using
-    cross-event statement-versus-bundle binding checks.
+    Build the wrong-event attestation challenge summary using PW03
+    per-event challenge records.
 
     Args:
         family_id: Family identifier.
@@ -1140,131 +1402,50 @@ def _build_wrong_event_attestation_challenge_summary_payload(
     if not isinstance(attack_event_rows, Sequence):
         raise TypeError("attack_event_rows must be Sequence")
 
-    from main.watermarking.provenance.attestation_statement import (
-        compute_attestation_digest,
-        statement_from_dict,
-        verify_signed_attestation_bundle,
-    )
-
-    parent_materials: Dict[str, Dict[str, Any]] = {}
-    for attack_event_row in attack_event_rows:
-        parent_event_id = attack_event_row.get("parent_event_id")
-        if not isinstance(parent_event_id, str) or not parent_event_id:
-            continue
-        if parent_event_id in parent_materials:
-            continue
-
-        event_manifest = _extract_mapping(attack_event_row.get("event_manifest"))
-        parent_reference = _extract_mapping(event_manifest.get("parent_event_reference"))
-        parent_embed_record_path_value = parent_reference.get("parent_embed_record_path")
-        runtime_config_snapshot_path_value = event_manifest.get("runtime_config_snapshot_path")
-        if not isinstance(parent_embed_record_path_value, str) or not parent_embed_record_path_value:
-            continue
-        if not isinstance(runtime_config_snapshot_path_value, str) or not runtime_config_snapshot_path_value:
-            continue
-
-        embed_record = _load_required_json_dict(
-            Path(parent_embed_record_path_value).expanduser().resolve(),
-            "PW04 parent embed record",
-        )
-        runtime_cfg = _load_required_json_dict(
-            Path(runtime_config_snapshot_path_value).expanduser().resolve(),
-            "PW04 runtime config snapshot",
-        )
-        attestation_payload = _extract_mapping(embed_record.get("attestation"))
-        statement_payload = attestation_payload.get("statement")
-        signed_bundle = attestation_payload.get("signed_bundle")
-        k_master = runtime_cfg.get("__attestation_verify_k_master__")
-        if not isinstance(statement_payload, Mapping):
-            continue
-        if not isinstance(signed_bundle, Mapping):
-            continue
-        if not isinstance(k_master, str) or not k_master:
-            continue
-
-        parent_materials[parent_event_id] = {
-            "statement": dict(cast(Mapping[str, Any], statement_payload)),
-            "signed_bundle": dict(cast(Mapping[str, Any], signed_bundle)),
-            "k_master": k_master,
-        }
-
-    ordered_parent_ids = sorted(parent_materials.keys())
-    if len(ordered_parent_ids) < 2:
-        return {
-            "artifact_type": "paper_workflow_pw04_wrong_event_attestation_challenge_summary",
-            "schema_version": "pw_stage_04_v1",
-            "created_at": utc_now_iso(),
-            "family_id": family_id,
-            "status": "not_available",
-            "reason": "requires_at_least_two_distinct_positive_parent_events",
-            "future_upstream_sidecar_required": False,
-            "overall": {
-                "event_count": len(attack_event_rows),
-                "attempted_event_count": 0,
-                "bundle_verified_count": 0,
-                "wrong_event_rejected_count": 0,
-                "wrong_event_false_accept_count": 0,
-                "wrong_event_rejection_rate": None,
-            },
-            "by_attack_family": [],
-            "rows": [],
-        }
-
-    wrong_parent_lookup = {
-        parent_event_id: ordered_parent_ids[(index + 1) % len(ordered_parent_ids)]
-        for index, parent_event_id in enumerate(ordered_parent_ids)
-    }
-
     challenge_rows: List[Dict[str, Any]] = []
     grouped_rows: Dict[str, List[Dict[str, Any]]] = {}
     for attack_event_row in attack_event_rows:
         attack_family = str(attack_event_row.get("attack_family") or "<unknown>")
+        attack_event_id = attack_event_row.get("attack_event_id")
         parent_event_id = attack_event_row.get("parent_event_id")
-        if not isinstance(parent_event_id, str) or parent_event_id not in parent_materials:
+        event_manifest = _extract_mapping(attack_event_row.get("event_manifest"))
+        challenge_record = _load_optional_wrong_event_attestation_challenge_record(event_manifest)
+        if not challenge_record:
             row_payload = {
-                "attack_event_id": attack_event_row.get("attack_event_id"),
+                "attack_event_id": attack_event_id,
                 "attack_family": attack_family,
                 "parent_event_id": parent_event_id,
                 "challenge_parent_event_id": None,
-                "status": "missing_parent_material",
+                "status": "missing_upstream_challenge_record",
+                "reason": "PW03 wrong-event attestation challenge record missing",
+                "plan_status": None,
+                "plan_reason": None,
                 "bundle_verification_status": None,
+                "bundle_verification_mismatch_reasons": [],
+                "wrong_statement_digest": None,
+                "bundle_attestation_digest": None,
                 "wrong_event_rejected": None,
             }
             challenge_rows.append(row_payload)
             grouped_rows.setdefault(attack_family, []).append(row_payload)
             continue
 
-        own_material = parent_materials[parent_event_id]
-        challenge_parent_event_id = wrong_parent_lookup[parent_event_id]
-        wrong_material = parent_materials[challenge_parent_event_id]
-        bundle_verification = verify_signed_attestation_bundle(
-            dict(cast(Mapping[str, Any], own_material["signed_bundle"])),
-            cast(str, own_material["k_master"]),
-        )
-        wrong_statement_digest = compute_attestation_digest(
-            statement_from_dict(dict(cast(Mapping[str, Any], wrong_material["statement"])))
-        )
-        bundle_attestation_digest = own_material["signed_bundle"].get("attestation_digest")
-        wrong_event_rejected = bool(
-            bundle_verification.get("status") == "ok"
-            and isinstance(bundle_attestation_digest, str)
-            and wrong_statement_digest != bundle_attestation_digest
-        )
-        row_status = "ok" if wrong_event_rejected else "false_accept"
-        if bundle_verification.get("status") != "ok":
-            row_status = "bundle_invalid"
-
         row_payload = {
-            "attack_event_id": attack_event_row.get("attack_event_id"),
+            "attack_event_id": challenge_record.get("attack_event_id", attack_event_id),
             "attack_family": attack_family,
-            "parent_event_id": parent_event_id,
-            "challenge_parent_event_id": challenge_parent_event_id,
-            "status": row_status,
-            "bundle_verification_status": bundle_verification.get("status"),
-            "bundle_verification_mismatch_reasons": list(bundle_verification.get("mismatch_reasons") or []),
-            "wrong_statement_digest": wrong_statement_digest,
-            "bundle_attestation_digest": bundle_attestation_digest,
-            "wrong_event_rejected": wrong_event_rejected if bundle_verification.get("status") == "ok" else None,
+            "parent_event_id": challenge_record.get("parent_event_id", parent_event_id),
+            "challenge_parent_event_id": challenge_record.get("challenge_parent_event_id"),
+            "status": challenge_record.get("status", "missing_upstream_challenge_record"),
+            "reason": challenge_record.get("reason"),
+            "plan_status": challenge_record.get("plan_status"),
+            "plan_reason": challenge_record.get("plan_reason"),
+            "bundle_verification_status": challenge_record.get("bundle_verification_status"),
+            "bundle_verification_mismatch_reasons": list(
+                challenge_record.get("bundle_verification_mismatch_reasons") or []
+            ),
+            "wrong_statement_digest": challenge_record.get("wrong_statement_digest"),
+            "bundle_attestation_digest": challenge_record.get("bundle_attestation_digest"),
+            "wrong_event_rejected": challenge_record.get("wrong_event_rejected"),
         }
         challenge_rows.append(row_payload)
         grouped_rows.setdefault(attack_family, []).append(row_payload)
@@ -1283,9 +1464,23 @@ def _build_wrong_event_attestation_challenge_summary_payload(
         }
 
     overall_summary = _summarize(challenge_rows)
-    if overall_summary["attempted_event_count"] <= 0:
+    if overall_summary["event_count"] <= 0:
         status_value = "not_available"
-        reason_value = "no_valid_parent_attestation_bundle_available_for_challenge"
+        reason_value = "no_positive_attack_events_available_for_wrong_event_challenge"
+    elif overall_summary["attempted_event_count"] <= 0:
+        status_value = "not_available"
+        distinct_reasons = sorted(
+            {
+                str(row.get("reason"))
+                for row in challenge_rows
+                if isinstance(row.get("reason"), str) and str(row.get("reason"))
+            }
+        )
+        reason_value = (
+            distinct_reasons[0]
+            if len(distinct_reasons) == 1
+            else "no_valid_upstream_wrong_event_challenge_attempt_available"
+        )
     elif overall_summary["wrong_event_false_accept_count"] > 0:
         status_value = "mismatch"
         reason_value = (
@@ -1501,12 +1696,14 @@ def build_pw04_metrics_extensions(
         attack_event_rows=attack_event_rows,
     )
     geometry_family_rows, geometry_summary_row = _collect_geometry_rows(attack_event_rows)
+    geometry_conditional_rows = _collect_geometry_conditional_rows(attack_event_rows)
 
     robustness_curve_by_family_path = robustness_dir / "robustness_curve_by_family.csv"
     robustness_macro_summary_path = robustness_dir / "robustness_macro_summary.csv"
     worst_case_attack_summary_path = robustness_dir / "worst_case_attack_summary.csv"
     geo_chain_usage_by_family_path = geometry_dir / "geo_chain_usage_by_family.csv"
     geo_diagnostics_summary_path = geometry_dir / "geo_diagnostics_summary.csv"
+    geo_diagnostics_conditional_metrics_path = geometry_dir / "geo_diagnostics_conditional_metrics.csv"
     payload_attack_summary_path = payload_dir / "payload_attack_summary.json"
     wrong_event_attestation_challenge_summary_path = payload_dir / "wrong_event_attestation_challenge_summary.json"
     quality_robustness_tradeoff_path = tradeoff_dir / "quality_robustness_tradeoff.csv"
@@ -1647,6 +1844,25 @@ def build_pw04_metrics_extensions(
         ],
         [{"family_id": family_id, **geometry_summary_row}],
     )
+    _write_csv_rows(
+        geo_diagnostics_conditional_metrics_path,
+        [
+            "geometry_condition_name",
+            "geometry_condition_value",
+            "event_count",
+            "parent_event_count",
+            "attack_family_count",
+            "formal_final_positive_count",
+            "formal_final_decision_attack_tpr",
+            "formal_attestation_positive_count",
+            "formal_attestation_attack_tpr",
+            "derived_attack_union_positive_count",
+            "derived_attack_union_attack_tpr",
+            "geo_helped_positive_count",
+            "geo_helped_positive_rate",
+        ],
+        geometry_conditional_rows,
+    )
     write_json_atomic(
         payload_attack_summary_path,
         _build_payload_attack_summary_payload(
@@ -1781,6 +1997,9 @@ def build_pw04_metrics_extensions(
         "worst_case_attack_summary_path": normalize_path_value(worst_case_attack_summary_path),
         "geo_chain_usage_by_family_path": normalize_path_value(geo_chain_usage_by_family_path),
         "geo_diagnostics_summary_path": normalize_path_value(geo_diagnostics_summary_path),
+        "geo_diagnostics_conditional_metrics_path": normalize_path_value(
+            geo_diagnostics_conditional_metrics_path
+        ),
         "payload_attack_summary_path": normalize_path_value(payload_attack_summary_path),
         "wrong_event_attestation_challenge_summary_path": normalize_path_value(wrong_event_attestation_challenge_summary_path),
         "quality_robustness_tradeoff_path": normalize_path_value(quality_robustness_tradeoff_path),

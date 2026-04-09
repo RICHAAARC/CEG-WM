@@ -15,6 +15,12 @@ from typing import Any, Dict, List, Mapping, Tuple, cast
 from PIL import Image
 import pytest
 
+from main.watermarking.provenance.attestation_statement import (
+    ATTESTATION_SCHEMA,
+    AttestationStatement,
+    build_signed_attestation_bundle,
+    compute_attestation_digest,
+)
 from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
 import paper_workflow.scripts.pw03_run_attack_event_shard as pw03_module
 from scripts.notebook_runtime_common import (
@@ -25,6 +31,9 @@ from scripts.notebook_runtime_common import (
     write_yaml_mapping,
     build_repo_import_subprocess_env,
 )
+
+
+TEST_ATTESTATION_MASTER_KEY = "5" * 64
 
 
 def _build_pw00_family(
@@ -74,6 +83,7 @@ def _write_bound_config_snapshot(drive_project_root: Path, *, marker: str) -> Tu
         env_mapping={"CEG_WM_MODEL_SNAPSHOT_PATH": snapshot_dir.as_posix()},
     )
     bound_cfg["test_config_origin"] = marker
+    bound_cfg["__attestation_verify_k_master__"] = TEST_ATTESTATION_MASTER_KEY
     bound_config_path = drive_project_root / "runtime_state" / f"{marker}_bound_config.yaml"
     write_yaml_mapping(bound_config_path, bound_cfg)
     return bound_config_path, snapshot_dir
@@ -147,6 +157,30 @@ def _build_positive_source_finalize_fixture(summary: Dict[str, Any]) -> Dict[str
             "prompt_sha256": event_row["prompt_sha256"],
             "seed": event_row["seed"],
         }
+        if sample_role == pw03_module.ACTIVE_SAMPLE_ROLE:
+            statement = AttestationStatement(
+                schema=ATTESTATION_SCHEMA,
+                model_id="sd3-test",
+                prompt_commit=f"prompt_commit_{event_id}",
+                seed_commit=f"seed_commit_{event_id}",
+                plan_digest=f"plan_digest_{event_id}",
+                event_nonce=f"nonce_{event_id}",
+                time_bucket="2026-03-01",
+            )
+            attestation_digest = compute_attestation_digest(statement)
+            embed_record["attestation"] = {
+                "status": "ok",
+                "statement": statement.as_dict(),
+                "attestation_digest": attestation_digest,
+                "signed_bundle": build_signed_attestation_bundle(
+                    statement,
+                    attestation_digest,
+                    TEST_ATTESTATION_MASTER_KEY,
+                    lf_payload_hex="ab" * 16,
+                    trace_commit="cd" * 32,
+                    geo_anchor_seed=event_index,
+                ),
+            }
         detect_record = {
             "content_evidence_payload": {
                 "status": "ok",
@@ -194,9 +228,9 @@ def _build_positive_source_finalize_fixture(summary: Dict[str, Any]) -> Dict[str
                 "missing_reason": None,
             },
             "preview_generation_record": None,
-            "attestation_statement": None,
-            "attestation_bundle": None,
-            "attestation_result": None,
+            "attestation_statement": cast(Dict[str, Any], embed_record.get("attestation", {})).get("statement"),
+            "attestation_bundle": cast(Dict[str, Any], embed_record.get("attestation", {})).get("signed_bundle"),
+            "attestation_result": {"status": "ok"} if sample_role == pw03_module.ACTIVE_SAMPLE_ROLE else None,
             "sha256": pw03_module.compute_file_sha256(detect_record_path),
             "stage_results": {},
         }
@@ -506,6 +540,9 @@ def _load_attack_event_specs(summary: Dict[str, Any], shard_index: int) -> List[
         Materialized attack event specs.
     """
     family_root = Path(str(summary["family_root"]))
+    family_manifest = json.loads(
+        Path(str(summary["paper_eval_family_manifest_path"])).read_text(encoding="utf-8")
+    )
     attack_event_lookup = pw03_module._load_attack_event_lookup(Path(str(summary["attack_event_grid_path"])))
     attack_shard_plan = json.loads(Path(str(summary["attack_shard_plan_path"])).read_text(encoding="utf-8"))
     attack_shard_assignment = pw03_module._resolve_attack_shard_assignment(
@@ -534,11 +571,23 @@ def _load_attack_event_specs(summary: Dict[str, Any], shard_index: int) -> List[
         finalize_manifest_path=finalize_manifest_path,
         finalize_manifest=finalize_manifest,
     )
+    wrong_event_challenge_plan_path = pw03_module._resolve_wrong_event_attestation_challenge_plan_path(
+        family_manifest=family_manifest,
+        family_root=family_root,
+    )
+    wrong_event_challenge_lookup = pw03_module._load_wrong_event_attestation_challenge_lookup(
+        wrong_event_challenge_plan_path
+    )
     return [
-        pw03_module._resolve_attack_event_spec(
-            attack_event=attack_event_lookup[event_id],
+        pw03_module._attach_wrong_event_attestation_challenge_assignment(
+            attack_event_spec=pw03_module._resolve_attack_event_spec(
+                attack_event=attack_event_lookup[event_id],
+                parent_event_lookup=parent_event_lookup,
+                threshold_binding_reference=threshold_binding_reference,
+            ),
+            wrong_event_challenge_lookup=wrong_event_challenge_lookup,
             parent_event_lookup=parent_event_lookup,
-            threshold_binding_reference=threshold_binding_reference,
+            challenge_plan_path=wrong_event_challenge_plan_path,
         )
         for event_id in cast(List[str], attack_shard_assignment["assigned_attack_event_ids"])
     ]
@@ -591,6 +640,7 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert Path(str(first_event["runtime_config_snapshot_path"])).exists()
     assert Path(str(first_event["threshold_binding_summary_path"])).exists()
     assert Path(str(first_event["detect_record_path"])).exists()
+    assert Path(str(first_event["wrong_event_attestation_challenge_record_path"])).exists()
     assert first_event["parent_event_id"]
     assert first_event["attack_family"]
     assert first_event["attack_params_digest"]
@@ -603,6 +653,14 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert cast(Dict[str, Any], first_event["geometry_diagnostics"])["sync_success"] is True
     assert cast(Dict[str, Any], first_event["geometry_diagnostics"])["inverse_transform_success"] is True
     assert cast(Dict[str, Any], first_event["geometry_diagnostics"])["attention_anchor_available"] is True
+    wrong_event_challenge_record = json.loads(
+        Path(str(first_event["wrong_event_attestation_challenge_record_path"])).read_text(encoding="utf-8")
+    )
+    assert wrong_event_challenge_record["status"] == "ok"
+    assert wrong_event_challenge_record["wrong_event_rejected"] is True
+    assert wrong_event_challenge_record["bundle_verification_status"] == "ok"
+    assert wrong_event_challenge_record["plan_status"] == "ready"
+    assert first_event["wrong_event_attestation_challenge_record"]["status"] == "ok"
 
     detect_input_payload = cast(Dict[str, Any], captures["detect_input_payloads"][0])
     assert detect_input_payload["paper_workflow_parent_event_id"] == first_event["parent_event_id"]

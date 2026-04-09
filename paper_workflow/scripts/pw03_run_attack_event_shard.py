@@ -57,6 +57,7 @@ PW03_RUNTIME_SUMMARY_FILE_NAME = "runtime_summary.json"
 PW03_SHARD_MANIFEST_FILE_NAME = "shard_manifest.json"
 PW03_WORKER_PLAN_FILE_NAME = "worker_plan.json"
 PW03_WORKER_RESULT_FILE_NAME = "worker_result.json"
+WRONG_EVENT_ATTESTATION_CHALLENGE_PLAN_FILE_NAME = "wrong_event_attestation_challenge_plan.json"
 
 
 def _resolve_attack_sample_role(parent_sample_role: str) -> str:
@@ -700,6 +701,64 @@ def _build_threshold_binding_reference(
     }
 
 
+def _resolve_wrong_event_attestation_challenge_plan_path(
+    *,
+    family_manifest: Mapping[str, Any],
+    family_root: Path,
+) -> Path:
+    """
+    Resolve the frozen PW00 wrong-event challenge plan path.
+
+    Args:
+        family_manifest: PW00 family manifest payload.
+        family_root: Family root path.
+
+    Returns:
+        Resolved challenge-plan path.
+    """
+    if not isinstance(family_root, Path):
+        raise TypeError("family_root must be Path")
+
+    paths_node = family_manifest.get("paths")
+    if isinstance(paths_node, Mapping):
+        plan_path_value = paths_node.get("wrong_event_attestation_challenge_plan")
+        if isinstance(plan_path_value, str) and plan_path_value:
+            return Path(plan_path_value).expanduser().resolve()
+    return (family_root / "manifests" / WRONG_EVENT_ATTESTATION_CHALLENGE_PLAN_FILE_NAME).resolve()
+
+
+def _load_wrong_event_attestation_challenge_lookup(plan_path: Path) -> Dict[str, Dict[str, Any]]:
+    """
+    Load the frozen wrong-event challenge lookup keyed by parent_event_id.
+
+    Args:
+        plan_path: PW00 wrong-event challenge plan path.
+
+    Returns:
+        Lookup keyed by positive parent event id.
+    """
+    plan_payload = _load_required_json_dict(plan_path, "PW00 wrong-event attestation challenge plan")
+    rows_node = plan_payload.get("rows")
+    if not isinstance(rows_node, list):
+        raise ValueError("PW00 wrong-event attestation challenge plan missing rows")
+
+    challenge_lookup: Dict[str, Dict[str, Any]] = {}
+    for row_node in cast(List[object], rows_node):
+        if not isinstance(row_node, Mapping):
+            raise ValueError("PW00 wrong-event attestation challenge plan rows must be mappings")
+        row_payload = dict(cast(Mapping[str, Any], row_node))
+        parent_event_id = row_payload.get("parent_event_id")
+        if not isinstance(parent_event_id, str) or not parent_event_id:
+            raise ValueError("PW00 wrong-event challenge row missing parent_event_id")
+        if parent_event_id in challenge_lookup:
+            raise ValueError(
+                "PW00 wrong-event challenge plan contains duplicate parent_event_id: "
+                f"{parent_event_id}"
+            )
+        challenge_lookup[parent_event_id] = row_payload
+    return challenge_lookup
+
+
 def _load_parent_source_event(
     *,
     parent_event_id: str,
@@ -719,6 +778,246 @@ def _load_parent_source_event(
     if not isinstance(parent_event, Mapping):
         raise ValueError(f"PW03 parent_event_id not found in finalized positive source pool: {parent_event_id}")
     return dict(cast(Mapping[str, Any], parent_event))
+
+
+def _attach_wrong_event_attestation_challenge_assignment(
+    *,
+    attack_event_spec: Mapping[str, Any],
+    wrong_event_challenge_lookup: Mapping[str, Mapping[str, Any]],
+    parent_event_lookup: Mapping[str, Mapping[str, Any]],
+    challenge_plan_path: Path,
+) -> Dict[str, Any]:
+    """
+    Attach the frozen wrong-event challenge assignment to one attack event.
+
+    Args:
+        attack_event_spec: Materialized attack event spec.
+        wrong_event_challenge_lookup: Frozen lookup keyed by parent event id.
+        parent_event_lookup: Finalized parent source lookup.
+        challenge_plan_path: PW00 challenge plan path.
+
+    Returns:
+        Attack event spec extended with wrong-event challenge assignment.
+    """
+    attack_event_payload = dict(cast(Mapping[str, Any], attack_event_spec))
+    if attack_event_payload.get("sample_role") != ATTACKED_POSITIVE_SAMPLE_ROLE:
+        attack_event_payload["wrong_event_attestation_challenge"] = None
+        return attack_event_payload
+
+    parent_event_id = attack_event_payload.get("parent_event_id")
+    if not isinstance(parent_event_id, str) or not parent_event_id:
+        raise ValueError("PW03 positive attack event missing parent_event_id for challenge assignment")
+
+    assignment = wrong_event_challenge_lookup.get(parent_event_id)
+    if not isinstance(assignment, Mapping):
+        raise ValueError(
+            "PW03 positive attack event missing frozen wrong-event challenge assignment: "
+            f"{parent_event_id}"
+        )
+
+    assignment_payload = dict(cast(Mapping[str, Any], assignment))
+    challenge_parent_event_id = assignment_payload.get("challenge_parent_event_id")
+    challenge_parent_source_event: Dict[str, Any] | None = None
+    if isinstance(challenge_parent_event_id, str) and challenge_parent_event_id:
+        challenge_parent_source_event = _load_parent_source_event(
+            parent_event_id=challenge_parent_event_id,
+            parent_event_lookup=parent_event_lookup,
+        )
+    assignment_payload["challenge_plan_path"] = normalize_path_value(challenge_plan_path)
+    assignment_payload["challenge_parent_source_event"] = challenge_parent_source_event
+    attack_event_payload["wrong_event_attestation_challenge"] = assignment_payload
+    return attack_event_payload
+
+
+def _load_parent_attestation_material(
+    *,
+    parent_source_event: Mapping[str, Any],
+    label: str,
+) -> Dict[str, Any]:
+    """
+    Load parent attestation material from a finalized PW01 source event.
+
+    Args:
+        parent_source_event: Finalized parent source event payload.
+        label: Human-readable label.
+
+    Returns:
+        Parent attestation material.
+    """
+    parent_event_manifest = cast(Mapping[str, Any], parent_source_event.get("event_manifest", {}))
+    parent_embed_record_path_value = parent_event_manifest.get("embed_record_path")
+    if not isinstance(parent_embed_record_path_value, str) or not parent_embed_record_path_value:
+        raise ValueError(f"{label} missing embed_record_path")
+    parent_embed_record = _load_required_json_dict(
+        Path(parent_embed_record_path_value).expanduser().resolve(),
+        label,
+    )
+    attestation_payload = parent_embed_record.get("attestation")
+    if not isinstance(attestation_payload, Mapping):
+        raise ValueError(f"{label} missing attestation payload")
+    statement_payload = attestation_payload.get("statement")
+    signed_bundle_payload = attestation_payload.get("signed_bundle")
+    if not isinstance(statement_payload, Mapping):
+        raise ValueError(f"{label} missing attestation statement")
+    if not isinstance(signed_bundle_payload, Mapping):
+        raise ValueError(f"{label} missing signed attestation bundle")
+    return {
+        "statement": dict(cast(Mapping[str, Any], statement_payload)),
+        "signed_bundle": dict(cast(Mapping[str, Any], signed_bundle_payload)),
+    }
+
+
+def _write_wrong_event_attestation_challenge_record(
+    *,
+    family_id: str,
+    attack_event_spec: Mapping[str, Any],
+    shard_root: Path,
+    event_root: Path,
+    runtime_config_snapshot_path: Path,
+) -> Dict[str, Any]:
+    """
+    Write the PW03 wrong-event attestation challenge record for one attacked-positive event.
+
+    Args:
+        family_id: Family identifier.
+        attack_event_spec: Materialized attack event spec.
+        shard_root: Attack shard root.
+        event_root: Event root.
+        runtime_config_snapshot_path: Event runtime-config snapshot path.
+
+    Returns:
+        Challenge record summary for event-manifest append-only fields.
+    """
+    if attack_event_spec.get("sample_role") != ATTACKED_POSITIVE_SAMPLE_ROLE:
+        return {}
+
+    challenge_record_path = event_root / "artifacts" / "wrong_event_attestation_challenge_record.json"
+    validate_path_within_base(shard_root, challenge_record_path, "PW03 wrong-event challenge record path")
+
+    challenge_assignment_node = attack_event_spec.get("wrong_event_attestation_challenge")
+    challenge_assignment = (
+        cast(Mapping[str, Any], challenge_assignment_node)
+        if isinstance(challenge_assignment_node, Mapping)
+        else {}
+    )
+    base_payload: Dict[str, Any] = {
+        "artifact_type": "paper_workflow_wrong_event_attestation_challenge_record",
+        "schema_version": "pw_stage_03_v1",
+        "stage_name": STAGE_NAME,
+        "family_id": family_id,
+        "attack_event_id": attack_event_spec.get("attack_event_id", attack_event_spec.get("event_id")),
+        "parent_event_id": attack_event_spec.get("parent_event_id"),
+        "challenge_parent_event_id": challenge_assignment.get("challenge_parent_event_id"),
+        "challenge_parent_event_index": challenge_assignment.get("challenge_parent_event_index"),
+        "plan_status": challenge_assignment.get("status"),
+        "plan_reason": challenge_assignment.get("reason"),
+        "plan_policy": challenge_assignment.get("assignment_policy"),
+        "challenge_plan_path": challenge_assignment.get("challenge_plan_path"),
+        "bundle_verification_status": None,
+        "bundle_verification_mismatch_reasons": [],
+        "wrong_statement_digest": None,
+        "bundle_attestation_digest": None,
+        "wrong_event_rejected": None,
+    }
+
+    if not challenge_assignment:
+        challenge_record_payload = {
+            **base_payload,
+            "status": "not_available",
+            "reason": "missing_pw00_wrong_event_attestation_challenge_assignment",
+        }
+    elif challenge_assignment.get("status") != "ready":
+        challenge_record_payload = {
+            **base_payload,
+            "status": "not_available",
+            "reason": challenge_assignment.get("reason"),
+        }
+    else:
+        try:
+            from main.watermarking.provenance.attestation_statement import (
+                compute_attestation_digest,
+                statement_from_dict,
+                verify_signed_attestation_bundle,
+            )
+
+            own_parent_source_event = cast(Mapping[str, Any], attack_event_spec.get("parent_source_event", {}))
+            own_material = _load_parent_attestation_material(
+                parent_source_event=own_parent_source_event,
+                label="PW03 own parent embed record",
+            )
+            challenge_parent_source_event = cast(
+                Mapping[str, Any],
+                challenge_assignment.get("challenge_parent_source_event", {}),
+            )
+            if not challenge_parent_source_event:
+                raise ValueError("PW03 challenge assignment missing challenge_parent_source_event")
+            wrong_material = _load_parent_attestation_material(
+                parent_source_event=challenge_parent_source_event,
+                label="PW03 challenge parent embed record",
+            )
+            runtime_cfg = _load_required_json_dict(
+                runtime_config_snapshot_path,
+                "PW03 runtime config snapshot",
+            )
+            k_master = runtime_cfg.get("__attestation_verify_k_master__")
+            if not isinstance(k_master, str) or not k_master:
+                raise ValueError("PW03 runtime config snapshot missing __attestation_verify_k_master__")
+
+            bundle_verification = verify_signed_attestation_bundle(
+                dict(cast(Mapping[str, Any], own_material["signed_bundle"])),
+                k_master,
+            )
+            wrong_statement_digest = compute_attestation_digest(
+                statement_from_dict(dict(cast(Mapping[str, Any], wrong_material["statement"])))
+            )
+            bundle_attestation_digest = cast(Mapping[str, Any], own_material["signed_bundle"]).get(
+                "attestation_digest"
+            )
+            challenge_record_payload = {
+                **base_payload,
+                "bundle_verification_status": bundle_verification.get("status"),
+                "bundle_verification_mismatch_reasons": list(
+                    bundle_verification.get("mismatch_reasons") or []
+                ),
+                "wrong_statement_digest": wrong_statement_digest,
+                "bundle_attestation_digest": bundle_attestation_digest,
+                "wrong_event_rejected": None,
+            }
+            if bundle_verification.get("status") == "ok":
+                wrong_event_rejected = bool(
+                    isinstance(bundle_attestation_digest, str)
+                    and wrong_statement_digest != bundle_attestation_digest
+                )
+                challenge_record_payload["wrong_event_rejected"] = wrong_event_rejected
+                challenge_record_payload["status"] = "ok" if wrong_event_rejected else "false_accept"
+                challenge_record_payload["reason"] = (
+                    None
+                    if wrong_event_rejected
+                    else "wrong_statement_digest_matches_bundle_attestation_digest"
+                )
+            else:
+                challenge_record_payload["status"] = "bundle_invalid"
+                mismatch_reasons = cast(List[Any], challenge_record_payload["bundle_verification_mismatch_reasons"])
+                challenge_record_payload["reason"] = (
+                    str(mismatch_reasons[0]) if mismatch_reasons else "signed_bundle_verification_failed"
+                )
+        except Exception as exc:
+            challenge_record_payload = {
+                **base_payload,
+                "status": "not_available",
+                "reason": f"wrong_event_challenge_materialization_failed:{type(exc).__name__}",
+                "error_message": str(exc),
+            }
+
+    write_json_atomic(challenge_record_path, challenge_record_payload)
+    return {
+        "wrong_event_attestation_challenge_record_path": normalize_path_value(challenge_record_path),
+        "wrong_event_attestation_challenge_record_package_relative_path": _relative_to_shard(
+            shard_root,
+            challenge_record_path,
+        ),
+        "wrong_event_attestation_challenge_record": challenge_record_payload,
+    }
 
 
 def _resolve_attack_event_spec(
@@ -1206,6 +1505,7 @@ def _write_attack_event_manifest(
     threshold_binding_summary: Mapping[str, Any],
     attack_artifacts: Mapping[str, Any],
     detect_summary: Mapping[str, Any],
+    wrong_event_attestation_challenge_summary: Mapping[str, Any],
     worker_local_index: int,
     status: str,
     start_time: str,
@@ -1226,6 +1526,7 @@ def _write_attack_event_manifest(
         threshold_binding_summary: Threshold binding summary.
         attack_artifacts: Attack materialization summary.
         detect_summary: Detect execution summary.
+        wrong_event_attestation_challenge_summary: Wrong-event challenge summary.
         worker_local_index: Local worker index.
         status: Event status.
         start_time: Event start time.
@@ -1286,6 +1587,26 @@ def _write_attack_event_manifest(
         "detect_input_record_package_relative_path": detect_summary.get("detect_input_record_package_relative_path"),
         "detect_record_path": detect_summary.get("detect_record_path"),
         "detect_record_package_relative_path": detect_summary.get("detect_record_package_relative_path"),
+        "wrong_event_attestation_challenge_record_path": wrong_event_attestation_challenge_summary.get(
+            "wrong_event_attestation_challenge_record_path"
+        ),
+        "wrong_event_attestation_challenge_record_package_relative_path": wrong_event_attestation_challenge_summary.get(
+            "wrong_event_attestation_challenge_record_package_relative_path"
+        ),
+        "wrong_event_attestation_challenge_record": dict(
+            cast(
+                Mapping[str, Any],
+                wrong_event_attestation_challenge_summary.get(
+                    "wrong_event_attestation_challenge_record",
+                    {},
+                ),
+            )
+        )
+        if isinstance(
+            wrong_event_attestation_challenge_summary.get("wrong_event_attestation_challenge_record"),
+            Mapping,
+        )
+        else None,
         "gpu_session_peak_path": detect_summary.get("event_gpu_session_peak_path"),
         "gpu_session_peak_package_relative_path": detect_summary.get("event_gpu_session_peak_package_relative_path"),
         "worker_local_index": worker_local_index,
@@ -1991,6 +2312,15 @@ def _run_attack_event_by_worker(
                 runtime_config_path=Path(str(runtime_config_summary["runtime_config_path"])),
                 attacked_image_path=Path(str(attack_artifacts["attacked_image_path"])),
             )
+            wrong_event_attestation_challenge_summary = _write_wrong_event_attestation_challenge_record(
+                family_id=family_id,
+                attack_event_spec=attack_event_spec,
+                shard_root=shard_root,
+                event_root=event_root,
+                runtime_config_snapshot_path=Path(
+                    str(runtime_config_summary["runtime_config_snapshot_path"])
+                ),
+            )
             event_manifest = _write_attack_event_manifest(
                 attack_event_spec=attack_event_spec,
                 shard_root=shard_root,
@@ -1999,6 +2329,7 @@ def _run_attack_event_by_worker(
                 threshold_binding_summary=threshold_binding_summary,
                 attack_artifacts=attack_artifacts,
                 detect_summary=detect_summary,
+                wrong_event_attestation_challenge_summary=wrong_event_attestation_challenge_summary,
                 worker_local_index=local_worker_index,
                 status="completed",
                 start_time=event_start_time,
@@ -2358,7 +2689,7 @@ def run_pw03_attack_event_shard(
     resolved_bound_config_path, bound_cfg_obj = _load_required_bound_config(bound_config_path)
     attack_family_allowlist_values = _parse_attack_family_allowlist(attack_family_allowlist)
 
-    _load_required_json_dict(family_manifest_path, "paper eval family manifest")
+    family_manifest = _load_required_json_dict(family_manifest_path, "paper eval family manifest")
     attack_shard_plan = _load_required_json_dict(attack_shard_plan_path, "PW03 attack shard plan")
     attack_shard_assignment = _resolve_attack_shard_assignment(
         attack_shard_plan,
@@ -2366,6 +2697,13 @@ def run_pw03_attack_event_shard(
         attack_shard_count=attack_shard_count,
     )
     attack_event_lookup = _load_attack_event_lookup(attack_event_grid_path)
+    wrong_event_challenge_plan_path = _resolve_wrong_event_attestation_challenge_plan_path(
+        family_manifest=family_manifest,
+        family_root=family_root,
+    )
+    wrong_event_challenge_lookup = _load_wrong_event_attestation_challenge_lookup(
+        wrong_event_challenge_plan_path
+    )
     pw02_summary = _load_required_json_dict(pw02_summary_path, "PW02 summary")
     finalize_manifest_path_value = pw02_summary.get("paper_source_finalize_manifest_path")
     if not isinstance(finalize_manifest_path_value, str) or not finalize_manifest_path_value:
@@ -2417,11 +2755,17 @@ def run_pw03_attack_event_shard(
             attack_family = attack_event.get("attack_family")
             if attack_family not in attack_family_allowlist_values:
                 continue
-        assigned_attack_events.append(
-            _resolve_attack_event_spec(
+        assigned_attack_event_spec = _resolve_attack_event_spec(
                 attack_event=attack_event,
                 parent_event_lookup=parent_event_lookup,
                 threshold_binding_reference=threshold_binding_reference,
+            )
+        assigned_attack_events.append(
+            _attach_wrong_event_attestation_challenge_assignment(
+                attack_event_spec=assigned_attack_event_spec,
+                wrong_event_challenge_lookup=wrong_event_challenge_lookup,
+                parent_event_lookup=parent_event_lookup,
+                challenge_plan_path=wrong_event_challenge_plan_path,
             )
         )
 
