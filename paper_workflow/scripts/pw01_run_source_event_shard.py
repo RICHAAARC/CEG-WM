@@ -1948,11 +1948,6 @@ def _run_clean_negative_event(
         prompt_run_root=prompt_run_root,
         prompt_index=event_index,
     )
-    plain_preview_image_view = dict(source_image_view)
-    watermarked_output_image_view = _resolve_watermarked_output_image_view(
-        shard_root=shard_root,
-        embed_record_path=staged_embed_record_path,
-    )
 
     shard_relative_runtime_cfg = runtime_cfg_path.relative_to(shard_root).as_posix()
     shard_relative_embed_record = staged_embed_record_path.relative_to(shard_root).as_posix()
@@ -2494,6 +2489,11 @@ def _run_positive_source_event(
         run_root=shard_root,
         prompt_run_root=prompt_run_root,
         prompt_index=event_index,
+    )
+    plain_preview_image_view = dict(source_image_view)
+    watermarked_output_image_view = _resolve_watermarked_output_image_view(
+        shard_root=shard_root,
+        embed_record_path=staged_embed_record_path,
     )
 
     shard_relative_runtime_cfg = runtime_cfg_path.relative_to(shard_root).as_posix()
