@@ -1151,6 +1151,18 @@ def _build_attack_quality_metrics_export(
             "clip_sample_count": quality_summary.get("clip_sample_count"),
             "clip_status": quality_summary.get("clip_status"),
             "clip_reason": quality_summary.get("clip_reason"),
+            "quality_runtime": quality_summary.get("quality_runtime"),
+            "prompt_text_expected": quality_summary.get("prompt_text_expected"),
+            "prompt_text_available_count": quality_summary.get("prompt_text_available_count"),
+            "prompt_text_missing_count": quality_summary.get("prompt_text_missing_count"),
+            "prompt_text_coverage_status": quality_summary.get("prompt_text_coverage_status"),
+            "prompt_text_coverage_reason": quality_summary.get("prompt_text_coverage_reason"),
+            "quality_readiness_status": quality_summary.get("quality_readiness_status"),
+            "quality_readiness_reason": quality_summary.get("quality_readiness_reason"),
+            "quality_readiness_blocking": quality_summary.get("quality_readiness_blocking"),
+            "quality_readiness_required_for_formal_release": quality_summary.get(
+                "quality_readiness_required_for_formal_release"
+            ),
         },
         "by_attack_family": _build_grouped_attack_quality_rows(
             pair_rows=pair_rows,

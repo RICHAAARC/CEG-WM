@@ -1384,6 +1384,12 @@ def _build_geometry_conditional_rescue_metrics_payload(
         )
 
     overall_summary = _build_geometry_conditional_rescue_summary(attack_event_rows)
+    if overall_summary["status"] == "ok":
+        readiness_status = "ready"
+        readiness_reason = None
+    else:
+        readiness_status = "not_ready"
+        readiness_reason = overall_summary["reason"]
     return {
         "artifact_type": "paper_workflow_pw04_geometry_conditional_rescue_metrics_export",
         "schema_version": "pw_stage_04_v1",
@@ -1401,6 +1407,13 @@ def _build_geometry_conditional_rescue_metrics_payload(
             "geo_only_positive_on_content_failed_subset": "count of rows with formal_final_decision negative and formal_event_attestation_decision positive",
         },
         "overall": overall_summary,
+        "readiness": {
+            "status": readiness_status,
+            "reason": readiness_reason,
+            "required_for_formal_release": False,
+            "blocking": False,
+            "claim_scope": "geometry_conditional_rescue_optional",
+        },
         "by_attack_family": [
             {
                 "attack_family": attack_family,
@@ -1790,6 +1803,16 @@ def _build_payload_attack_summary_payload(
         status_value = "partial"
         reason_value = f"payload trace available for {len(available_rows)}/{len(row_metrics)} attack events"
 
+    if status_value == "ok":
+        readiness_status = "ready"
+        readiness_reason = None
+    elif status_value == "partial":
+        readiness_status = "partial"
+        readiness_reason = reason_value
+    else:
+        readiness_status = "not_ready"
+        readiness_reason = reason_value or PAYLOAD_UNAVAILABLE_REASON
+
     return {
         "artifact_type": "paper_workflow_pw04_payload_attack_summary",
         "schema_version": "pw_stage_04_v1",
@@ -1798,6 +1821,17 @@ def _build_payload_attack_summary_payload(
         "status": status_value,
         "reason": reason_value,
         "future_upstream_sidecar_required": status_value != "ok",
+        "readiness": {
+            "status": readiness_status,
+            "reason": readiness_reason,
+            "required_for_formal_release": True,
+            "blocking": readiness_status != "ready",
+            "gap_classification": (
+                "partial_upstream_result" if readiness_status == "partial" else (
+                    "upstream_result_unavailable" if readiness_status == "not_ready" else None
+                )
+            ),
+        },
         "overall": overall_summary,
         "by_attack_family": [
             {
@@ -1992,6 +2026,16 @@ def _build_wrong_event_attestation_challenge_summary_payload(
         status_value = "ok"
         reason_value = None
 
+    if status_value == "ok":
+        readiness_status = "ready"
+        readiness_reason = None
+    elif status_value == "partial":
+        readiness_status = "partial"
+        readiness_reason = reason_value
+    else:
+        readiness_status = "not_ready"
+        readiness_reason = reason_value
+
     return {
         "artifact_type": "paper_workflow_pw04_wrong_event_attestation_challenge_summary",
         "schema_version": "pw_stage_04_v1",
@@ -2000,6 +2044,17 @@ def _build_wrong_event_attestation_challenge_summary_payload(
         "status": status_value,
         "reason": reason_value,
         "future_upstream_sidecar_required": False,
+        "readiness": {
+            "status": readiness_status,
+            "reason": readiness_reason,
+            "required_for_formal_release": True,
+            "blocking": readiness_status != "ready",
+            "gap_classification": (
+                "partial_upstream_result" if readiness_status == "partial" else (
+                    "upstream_result_unavailable" if readiness_status == "not_ready" else None
+                )
+            ),
+        },
         "overall": overall_summary,
         "by_attack_family": [
             {

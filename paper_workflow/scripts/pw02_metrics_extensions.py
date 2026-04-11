@@ -950,6 +950,16 @@ def _build_payload_clean_summary_payload(
         status_value = "partial"
         reason_value = f"payload trace available for {len(available_rows)}/{len(row_metrics)} clean positive events"
 
+    if status_value == "ok":
+        readiness_status = "ready"
+        readiness_reason = None
+    elif status_value == "partial":
+        readiness_status = "partial"
+        readiness_reason = reason_value
+    else:
+        readiness_status = "not_ready"
+        readiness_reason = reason_value or PAYLOAD_UNAVAILABLE_REASON
+
     return {
         "artifact_type": "paper_workflow_pw02_payload_clean_summary",
         "schema_version": "pw_stage_02_v1",
@@ -958,6 +968,17 @@ def _build_payload_clean_summary_payload(
         "status": status_value,
         "reason": reason_value,
         "future_upstream_sidecar_required": status_value != "ok",
+        "readiness": {
+            "status": readiness_status,
+            "reason": readiness_reason,
+            "required_for_formal_release": True,
+            "blocking": readiness_status != "ready",
+            "gap_classification": (
+                "partial_upstream_result" if readiness_status == "partial" else (
+                    "upstream_result_unavailable" if readiness_status == "not_ready" else None
+                )
+            ),
+        },
         "overall": {
             "event_count": len(row_metrics),
             "available_payload_event_count": len(available_rows),
@@ -1145,6 +1166,21 @@ def build_pw02_metrics_extensions(
                         "lpips_reason": LPIPS_UNAVAILABLE_REASON,
                         "clip_status": "not_available",
                         "clip_reason": CLIP_UNAVAILABLE_REASON,
+                        "quality_torch_device": None,
+                        "quality_lpips_batch_size": None,
+                        "quality_clip_batch_size": None,
+                        "prompt_text_expected": None,
+                        "prompt_text_available_count": None,
+                        "prompt_text_missing_count": None,
+                        "prompt_text_coverage_status": "not_applicable",
+                        "prompt_text_coverage_reason": "quality_defined_for_content_chain_clean_images_only",
+                        "quality_readiness_status": "not_applicable" if scope_name != "content_chain" else "not_ready",
+                        "quality_readiness_reason": (
+                            "quality_defined_for_content_chain_clean_images_only"
+                            if scope_name != "content_chain"
+                            else QUALITY_SCOPE_UNAVAILABLE_REASON
+                        ),
+                        "quality_readiness_blocking": scope_name == "content_chain",
                         "source_analysis_path": None,
                     }
                 )
@@ -1230,6 +1266,22 @@ def build_pw02_metrics_extensions(
             )
 
         if scope_name in PAPER_SCOPE_ORDER:
+            quality_runtime_payload = _extract_mapping(quality_payload.get("quality_runtime"))
+            if scope_name == "content_chain":
+                quality_readiness_status = quality_payload.get("quality_readiness_status", "not_ready")
+                quality_readiness_reason = quality_payload.get("quality_readiness_reason")
+                quality_readiness_blocking = bool(quality_payload.get("quality_readiness_blocking", True))
+                prompt_text_coverage_status = quality_payload.get(
+                    "prompt_text_coverage_status",
+                    "not_available",
+                )
+                prompt_text_coverage_reason = quality_payload.get("prompt_text_coverage_reason")
+            else:
+                quality_readiness_status = "not_applicable"
+                quality_readiness_reason = "quality_defined_for_content_chain_clean_images_only"
+                quality_readiness_blocking = False
+                prompt_text_coverage_status = "not_applicable"
+                prompt_text_coverage_reason = "quality_defined_for_content_chain_clean_images_only"
             quality_rows.append(
                 {
                     "scope": scope_name,
@@ -1249,6 +1301,17 @@ def build_pw02_metrics_extensions(
                     "lpips_reason": quality_payload.get("lpips_reason", LPIPS_UNAVAILABLE_REASON),
                     "clip_status": quality_payload.get("clip_status", "not_available"),
                     "clip_reason": quality_payload.get("clip_reason", CLIP_UNAVAILABLE_REASON),
+                    "quality_torch_device": quality_runtime_payload.get("torch_device"),
+                    "quality_lpips_batch_size": quality_runtime_payload.get("lpips_batch_size"),
+                    "quality_clip_batch_size": quality_runtime_payload.get("clip_batch_size"),
+                    "prompt_text_expected": quality_payload.get("prompt_text_expected"),
+                    "prompt_text_available_count": quality_payload.get("prompt_text_available_count"),
+                    "prompt_text_missing_count": quality_payload.get("prompt_text_missing_count"),
+                    "prompt_text_coverage_status": prompt_text_coverage_status,
+                    "prompt_text_coverage_reason": prompt_text_coverage_reason,
+                    "quality_readiness_status": quality_readiness_status,
+                    "quality_readiness_reason": quality_readiness_reason,
+                    "quality_readiness_blocking": quality_readiness_blocking,
                     "source_analysis_path": roc_payload["source_analysis_path"],
                 }
             )
@@ -1317,6 +1380,17 @@ def build_pw02_metrics_extensions(
             "lpips_reason",
             "clip_status",
             "clip_reason",
+            "quality_torch_device",
+            "quality_lpips_batch_size",
+            "quality_clip_batch_size",
+            "prompt_text_expected",
+            "prompt_text_available_count",
+            "prompt_text_missing_count",
+            "prompt_text_coverage_status",
+            "prompt_text_coverage_reason",
+            "quality_readiness_status",
+            "quality_readiness_reason",
+            "quality_readiness_blocking",
             "source_analysis_path",
         ],
         quality_rows,
@@ -1345,6 +1419,9 @@ def build_pw02_metrics_extensions(
         "pw02_operating_auc_summary": normalize_path_value(auc_summary_path),
         "pw02_operating_eer_summary": normalize_path_value(eer_summary_path),
         "pw02_operating_tpr_at_target_fpr_summary": normalize_path_value(tpr_summary_path),
+        "pw02_quality_metrics_summary_csv": normalize_path_value(quality_summary_csv_path),
+        "pw02_quality_metrics_summary_json": normalize_path_value(quality_summary_json_path),
+        "pw02_payload_clean_summary": normalize_path_value(payload_clean_summary_path),
     }
 
     return {

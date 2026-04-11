@@ -827,6 +827,56 @@ def build_quality_metrics_from_pairs(
             clip_status = "not_available"
             clip_reason = clip_reason or "CLIP model unavailable"
 
+    prompt_text_expected = text_key is not None
+    prompt_text_available_count = (
+        max(successful_count - clip_missing_text_count, 0)
+        if prompt_text_expected
+        else None
+    )
+    if not prompt_text_expected:
+        prompt_text_coverage_status = "not_configured"
+        prompt_text_coverage_reason = "prompt text key not configured for CLIP quality metric"
+    elif successful_count <= 0:
+        prompt_text_coverage_status = "not_available"
+        prompt_text_coverage_reason = "no_valid_image_pairs"
+    elif clip_missing_text_count <= 0:
+        prompt_text_coverage_status = "ok"
+        prompt_text_coverage_reason = None
+    elif clip_missing_text_count < successful_count:
+        prompt_text_coverage_status = "partial"
+        prompt_text_coverage_reason = (
+            f"prompt text unavailable for {clip_missing_text_count}/{successful_count} valid image pairs"
+        )
+    else:
+        prompt_text_coverage_status = "not_available"
+        prompt_text_coverage_reason = (
+            f"prompt text unavailable for all {clip_missing_text_count} valid image pairs"
+        )
+
+    quality_readiness_reasons: List[str] = []
+    if successful_count <= 0:
+        quality_readiness_status = "not_ready"
+        quality_readiness_reason = "no_valid_image_pairs"
+    else:
+        if successful_count != len(pair_specs):
+            quality_readiness_reasons.append(
+                f"valid image pairs available for {successful_count}/{len(pair_specs)} expected bindings"
+            )
+        if lpips_status != "ok":
+            quality_readiness_reasons.append(lpips_reason or "LPIPS model unavailable")
+        if prompt_text_expected and prompt_text_coverage_status not in {"ok", "not_configured"}:
+            quality_readiness_reasons.append(
+                prompt_text_coverage_reason or "prompt text coverage incomplete"
+            )
+        if prompt_text_expected and clip_status != "ok":
+            quality_readiness_reasons.append(clip_reason or CLIP_UNAVAILABLE_REASON)
+        if quality_readiness_reasons:
+            quality_readiness_status = "partial"
+            quality_readiness_reason = "; ".join(dict.fromkeys(quality_readiness_reasons))
+        else:
+            quality_readiness_status = "ready"
+            quality_readiness_reason = None
+
     return {
         "status": status,
         "availability_reason": availability_reason,
@@ -849,5 +899,14 @@ def build_quality_metrics_from_pairs(
             "lpips_batch_size": resolved_lpips_batch_size,
             "clip_batch_size": resolved_clip_batch_size,
         },
+        "prompt_text_expected": prompt_text_expected,
+        "prompt_text_available_count": prompt_text_available_count,
+        "prompt_text_missing_count": clip_missing_text_count if prompt_text_expected else None,
+        "prompt_text_coverage_status": prompt_text_coverage_status,
+        "prompt_text_coverage_reason": prompt_text_coverage_reason,
+        "quality_readiness_status": quality_readiness_status,
+        "quality_readiness_reason": quality_readiness_reason,
+        "quality_readiness_blocking": quality_readiness_status != "ready",
+        "quality_readiness_required_for_formal_release": True,
         "pair_rows": pair_rows,
     }

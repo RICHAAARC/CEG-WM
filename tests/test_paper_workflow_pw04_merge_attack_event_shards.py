@@ -193,6 +193,9 @@ def test_build_quality_metrics_from_pairs_supports_env_gpu_batch_runtime(
     }
     assert quality_summary["lpips_status"] == "ok"
     assert quality_summary["clip_status"] == "ok"
+    assert quality_summary["prompt_text_coverage_status"] == "ok"
+    assert quality_summary["quality_readiness_status"] == "ready"
+    assert quality_summary["quality_readiness_blocking"] is False
     assert quality_summary["clip_model_name"] == pw_quality_metrics_module.CLIP_MODEL_NAME
     assert all(row["lpips"] is not None for row in cast(List[Dict[str, Any]], quality_summary["pair_rows"]))
     assert all(
@@ -1095,6 +1098,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     geo_chain_usage_by_family_path = Path(str(pw04_summary["geo_chain_usage_by_family_path"]))
     geo_diagnostics_summary_path = Path(str(pw04_summary["geo_diagnostics_summary_path"]))
     geo_diagnostics_conditional_metrics_path = Path(str(pw04_summary["geo_diagnostics_conditional_metrics_path"]))
+    conditional_rescue_metrics_path = Path(str(pw04_summary["conditional_rescue_metrics_path"]))
     payload_attack_summary_path = Path(str(pw04_summary["payload_attack_summary_path"]))
     wrong_event_attestation_challenge_summary_path = Path(str(pw04_summary["wrong_event_attestation_challenge_summary_path"]))
     quality_robustness_tradeoff_path = Path(str(pw04_summary["quality_robustness_tradeoff_path"]))
@@ -1123,6 +1127,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
         geo_chain_usage_by_family_path,
         geo_diagnostics_summary_path,
         geo_diagnostics_conditional_metrics_path,
+        conditional_rescue_metrics_path,
         payload_attack_summary_path,
         wrong_event_attestation_challenge_summary_path,
         quality_robustness_tradeoff_path,
@@ -1178,6 +1183,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     geometry_family_rows = _load_csv_rows(geo_chain_usage_by_family_path)
     geometry_summary_rows = _load_csv_rows(geo_diagnostics_summary_path)
     geometry_conditional_rows = _load_csv_rows(geo_diagnostics_conditional_metrics_path)
+    conditional_rescue_metrics = _load_json_dict(conditional_rescue_metrics_path)
     payload_attack_summary = _load_json_dict(payload_attack_summary_path)
     wrong_event_attestation_challenge_summary = _load_json_dict(wrong_event_attestation_challenge_summary_path)
     tradeoff_rows = _load_csv_rows(quality_robustness_tradeoff_path)
@@ -1225,6 +1231,14 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert attack_quality_metrics["overall"]["clip_model_name"] == pw_quality_metrics_module.CLIP_MODEL_NAME
     assert attack_quality_metrics["overall"]["clip_sample_count"] == expected_positive_attack_event_count
     assert attack_quality_metrics["overall"]["clip_status"] == "ok"
+    assert attack_quality_metrics["overall"]["prompt_text_coverage_status"] == "ok"
+    if attack_quality_metrics["overall"]["lpips_status"] == "ok":
+        assert attack_quality_metrics["overall"]["quality_readiness_status"] == "ready"
+        assert attack_quality_metrics["overall"]["quality_readiness_blocking"] is False
+    else:
+        assert attack_quality_metrics["overall"]["quality_readiness_status"] == "partial"
+        assert attack_quality_metrics["overall"]["quality_readiness_blocking"] is True
+        assert attack_quality_metrics["overall"]["quality_readiness_reason"]
     assert clean_attack_overview["attack_quality_mean_psnr"] == attack_quality_metrics["overall"]["mean_psnr"]
     assert clean_attack_overview["attack_quality_mean_ssim"] == attack_quality_metrics["overall"]["mean_ssim"]
     assert clean_attack_overview["attack_quality_mean_clip_text_similarity"] == attack_quality_metrics["overall"]["mean_clip_text_similarity"]
@@ -1294,9 +1308,11 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert len(bootstrap_csv_rows) == 9
 
     assert tail_fpr_1e4["tail_estimation_enabled"] is False
+    assert tail_fpr_1e4["readiness"]["status"] == "disabled"
     assert tail_fpr_1e4["scope_estimates"]["content_chain"]["status"] == "disabled"
     assert tail_fpr_1e5["scope_estimates"]["event_attestation"]["status"] == "disabled"
     assert tail_fit_diagnostics["scope_diagnostics"]["system_final"]["status"] == "not_applicable"
+    assert tail_fit_diagnostics["readiness"]["status"] == "disabled"
     assert tail_fit_stability["scopes"]["system_final"]["reason"] == "system_final_is_decision_union_without_scalar_score"
 
     attack_family_count = len({row["attack_family"] for row in cast(List[Dict[str, Any]], pw03_fixture["attack_event_grid"])})
@@ -1336,10 +1352,14 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     }:
         condition_rows = [row for row in geometry_conditional_rows if row["geometry_condition_name"] == condition_name]
         assert sum(int(row["event_count"]) for row in condition_rows) == expected_positive_attack_event_count
+    assert conditional_rescue_metrics["readiness"]["status"] == "ready"
+    assert conditional_rescue_metrics["readiness"]["blocking"] is False
 
     assert payload_attack_summary["status"] == "ok"
     assert payload_attack_summary["reason"] is None
     assert payload_attack_summary["future_upstream_sidecar_required"] is False
+    assert payload_attack_summary["readiness"]["status"] == "ready"
+    assert payload_attack_summary["readiness"]["blocking"] is False
     assert payload_attack_summary["overall"]["event_count"] == expected_positive_attack_event_count
     assert payload_attack_summary["overall"]["available_payload_event_count"] == expected_positive_attack_event_count
     assert payload_attack_summary["overall"]["missing_payload_event_count"] == 0
@@ -1378,6 +1398,8 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert wrong_event_attestation_challenge_summary["status"] == "ok"
     assert wrong_event_attestation_challenge_summary["reason"] is None
     assert wrong_event_attestation_challenge_summary["future_upstream_sidecar_required"] is False
+    assert wrong_event_attestation_challenge_summary["readiness"]["status"] == "ready"
+    assert wrong_event_attestation_challenge_summary["readiness"]["blocking"] is False
     assert wrong_event_attestation_challenge_summary["overall"]["event_count"] == expected_positive_attack_event_count
     assert wrong_event_attestation_challenge_summary["overall"]["attempted_event_count"] == pw03_fixture["expected_wrong_event_challenge_attempt_count"]
     assert wrong_event_attestation_challenge_summary["overall"]["bundle_verified_count"] == pw03_fixture["expected_wrong_event_challenge_attempt_count"]

@@ -1102,6 +1102,17 @@ def _build_tail_estimation_payloads(
             cast(Dict[str, Any], stability_payload["scopes"])[scope] = scope_payload
             for target_key, _ in TAIL_TARGETS:
                 cast(Dict[str, Any], target_payloads[target_key]["scope_estimates"])[scope] = scope_payload
+        readiness_payload = {
+            "status": "disabled",
+            "reason": disabled_reason,
+            "required_for_formal_release": False,
+            "blocking": False,
+            "claim_scope": "tail_estimation_optional",
+        }
+        diagnostics_payload["readiness"] = dict(readiness_payload)
+        stability_payload["readiness"] = dict(readiness_payload)
+        for target_key, _ in TAIL_TARGETS:
+            target_payloads[target_key]["readiness"] = dict(readiness_payload)
         return {
             "estimated_tail_fpr_1e4": target_payloads["1e4"],
             "estimated_tail_fpr_1e5": target_payloads["1e5"],
@@ -1177,6 +1188,40 @@ def _build_tail_estimation_payloads(
                 and float(threshold_1e5) >= float(threshold_1e4)
             ) if fitted_scopes[scope].get("status") == "ok" else None,
         }
+
+    fitted_scalar_scope_count = sum(
+        1
+        for scope in ("content_chain", "event_attestation")
+        if fitted_scopes[scope].get("status") == "ok"
+    )
+    if fitted_scalar_scope_count >= 2:
+        readiness_payload = {
+            "status": "ready",
+            "reason": None,
+            "required_for_formal_release": False,
+            "blocking": False,
+            "claim_scope": "tail_estimation_optional",
+        }
+    elif fitted_scalar_scope_count == 1:
+        readiness_payload = {
+            "status": "partial",
+            "reason": "tail fit estimable for 1/2 scalar-score scopes",
+            "required_for_formal_release": False,
+            "blocking": False,
+            "claim_scope": "tail_estimation_optional",
+        }
+    else:
+        readiness_payload = {
+            "status": "not_ready",
+            "reason": "no_scalar_score_scope_has_estimable_tail_fit",
+            "required_for_formal_release": False,
+            "blocking": False,
+            "claim_scope": "tail_estimation_optional",
+        }
+    diagnostics_payload["readiness"] = dict(readiness_payload)
+    stability_payload["readiness"] = dict(readiness_payload)
+    for target_key, _ in TAIL_TARGETS:
+        target_payloads[target_key]["readiness"] = dict(readiness_payload)
 
     return {
         "estimated_tail_fpr_1e4": target_payloads["1e4"],

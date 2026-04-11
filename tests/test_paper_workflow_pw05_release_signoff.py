@@ -82,6 +82,8 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
     ensure_directory(family_root / "exports" / "pw02" / "thresholds" / "content")
     ensure_directory(family_root / "exports" / "pw02" / "thresholds" / "attestation")
     ensure_directory(family_root / "exports" / "pw02" / "operating_metrics")
+    ensure_directory(family_root / "exports" / "pw02" / "quality")
+    ensure_directory(family_root / "exports" / "pw02" / "payload")
     ensure_directory(family_root / "exports" / "pw04" / "manifests")
     ensure_directory(family_root / "exports" / "pw04" / "metrics")
     ensure_directory(family_root / "exports" / "pw04" / "tables")
@@ -207,6 +209,72 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             "analysis_only": True,
         },
     )
+    pw02_quality_metrics_summary_csv_path = _write_text(
+        family_root / "exports" / "pw02" / "quality" / "quality_metrics_summary.csv",
+        "scope,status,reason,pair_count,expected_pair_count,missing_count,error_count,mean_psnr,mean_ssim,mean_lpips,mean_clip_text_similarity,clip_model_name,clip_sample_count,lpips_status,lpips_reason,clip_status,clip_reason,quality_torch_device,quality_lpips_batch_size,quality_clip_batch_size,prompt_text_expected,prompt_text_available_count,prompt_text_missing_count,prompt_text_coverage_status,prompt_text_coverage_reason,quality_readiness_status,quality_readiness_reason,quality_readiness_blocking,source_analysis_path\ncontent_chain,ok,,1,1,0,0,30.0,0.95,0.10,0.80,ViT-B-32,1,ok,,ok,,cuda:0,2,2,True,1,0,ok,,ready,,False,/source\n",
+    )
+    pw02_quality_metrics_summary_json_path = _write_json(
+        family_root / "exports" / "pw02" / "quality" / "quality_metrics_summary.json",
+        {
+            "artifact_type": "paper_workflow_pw02_quality_metrics_summary",
+            "family_id": family_id,
+            "rows": [
+                {
+                    "scope": "content_chain",
+                    "status": "ok",
+                    "reason": None,
+                    "pair_count": 1,
+                    "expected_pair_count": 1,
+                    "missing_count": 0,
+                    "error_count": 0,
+                    "mean_psnr": 30.0,
+                    "mean_ssim": 0.95,
+                    "mean_lpips": 0.10,
+                    "mean_clip_text_similarity": 0.80,
+                    "clip_model_name": "ViT-B-32",
+                    "clip_sample_count": 1,
+                    "lpips_status": "ok",
+                    "lpips_reason": None,
+                    "clip_status": "ok",
+                    "clip_reason": None,
+                    "quality_torch_device": "cuda:0",
+                    "quality_lpips_batch_size": 2,
+                    "quality_clip_batch_size": 2,
+                    "prompt_text_expected": True,
+                    "prompt_text_available_count": 1,
+                    "prompt_text_missing_count": 0,
+                    "prompt_text_coverage_status": "ok",
+                    "prompt_text_coverage_reason": None,
+                    "quality_readiness_status": "ready",
+                    "quality_readiness_reason": None,
+                    "quality_readiness_blocking": False,
+                    "source_analysis_path": "/source",
+                }
+            ],
+        },
+    )
+    pw02_payload_clean_summary_path = _write_json(
+        family_root / "exports" / "pw02" / "payload" / "payload_clean_summary.json",
+        {
+            "artifact_type": "paper_workflow_pw02_payload_clean_summary",
+            "family_id": family_id,
+            "status": "ok",
+            "reason": None,
+            "future_upstream_sidecar_required": False,
+            "readiness": {
+                "status": "ready",
+                "reason": None,
+                "required_for_formal_release": True,
+                "blocking": False,
+            },
+            "overall": {
+                "event_count": 1,
+                "available_payload_event_count": 1,
+                "missing_payload_event_count": 0,
+            },
+            "rows": [],
+        },
+    )
 
     pw04_attack_merge_manifest_path = _write_json(
         family_root / "exports" / "pw04" / "manifests" / "attack_merge_manifest.json",
@@ -271,6 +339,45 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             "metrics": {"derived_attack_union_attack_fpr": 0.2},
         },
     )
+    pw04_attack_quality_metrics_path = _write_json(
+        family_root / "exports" / "pw04" / "metrics" / "attack_quality_metrics.json",
+        {
+            "artifact_type": "paper_workflow_pw04_attack_quality_metrics",
+            "family_id": family_id,
+            "overall": {
+                "status": "ok",
+                "availability_reason": None,
+                "expected_count": 1,
+                "count": 1,
+                "missing_count": 0,
+                "error_count": 0,
+                "mean_psnr": 24.0,
+                "mean_ssim": 0.91,
+                "mean_lpips": 0.18,
+                "mean_clip_text_similarity": 0.77,
+                "clip_model_name": "ViT-B-32",
+                "clip_sample_count": 1,
+                "lpips_status": "ok",
+                "lpips_reason": None,
+                "clip_status": "ok",
+                "clip_reason": None,
+                "quality_runtime": {
+                    "torch_device": "cuda:0",
+                    "lpips_batch_size": 2,
+                    "clip_batch_size": 2,
+                },
+                "prompt_text_expected": True,
+                "prompt_text_available_count": 1,
+                "prompt_text_missing_count": 0,
+                "prompt_text_coverage_status": "ok",
+                "prompt_text_coverage_reason": None,
+                "quality_readiness_status": "ready",
+                "quality_readiness_reason": None,
+                "quality_readiness_blocking": False,
+                "quality_readiness_required_for_formal_release": True,
+            },
+        },
+    )
     pw04_clean_attack_overview_path = _write_json(
         family_root / "exports" / "pw04" / "clean_attack_overview.json",
         {
@@ -295,6 +402,67 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
     pw04_system_final_auxiliary_attack_by_condition_path = _write_text(
         family_root / "exports" / "pw04" / "robustness" / "system_final_auxiliary_attack_by_condition.csv",
         "attack_condition_key,system_final_auxiliary_attack_tpr\nresize::0.8,0.6\n",
+    )
+    pw04_conditional_rescue_metrics_path = _write_json(
+        family_root / "exports" / "pw04" / "geometry_diagnostics" / "conditional_rescue_metrics.json",
+        {
+            "artifact_type": "paper_workflow_pw04_geometry_conditional_rescue_metrics_export",
+            "family_id": family_id,
+            "status": "ok",
+            "reason": None,
+            "readiness": {
+                "status": "ready",
+                "reason": None,
+                "required_for_formal_release": False,
+                "blocking": False,
+            },
+            "overall": {
+                "event_count": 1,
+                "content_failed_subset_event_count": 1,
+            },
+        },
+    )
+    pw04_payload_attack_summary_path = _write_json(
+        family_root / "exports" / "pw04" / "payload_robustness" / "payload_attack_summary.json",
+        {
+            "artifact_type": "paper_workflow_pw04_payload_attack_summary",
+            "family_id": family_id,
+            "status": "ok",
+            "reason": None,
+            "future_upstream_sidecar_required": False,
+            "readiness": {
+                "status": "ready",
+                "reason": None,
+                "required_for_formal_release": True,
+                "blocking": False,
+            },
+            "overall": {
+                "event_count": 1,
+                "available_payload_event_count": 1,
+            },
+        },
+    )
+    pw04_wrong_event_attestation_challenge_summary_path = _write_json(
+        family_root / "exports" / "pw04" / "robustness" / "wrong_event_attestation_challenge_summary.json",
+        {
+            "artifact_type": "paper_workflow_pw04_wrong_event_attestation_challenge_summary",
+            "family_id": family_id,
+            "status": "ok",
+            "reason": None,
+            "future_upstream_sidecar_required": False,
+            "readiness": {
+                "status": "ready",
+                "reason": None,
+                "required_for_formal_release": True,
+                "blocking": False,
+            },
+            "overall": {
+                "event_count": 1,
+                "attempted_event_count": 1,
+                "wrong_event_rejected_count": 1,
+            },
+            "rows": [],
+        },
     )
 
     pw04_paper_metric_registry_path = _write_json(
@@ -360,19 +528,35 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
     tail_paths = {
         "estimated_tail_fpr_1e4_path": _write_json(
             family_root / "exports" / "pw04" / "tail" / "estimated_tail_fpr_1e4.json",
-            {"family_id": family_id, "target": "1e-4"},
+            {
+                "family_id": family_id,
+                "target": "1e-4",
+                "readiness": {"status": "disabled", "reason": "tail_estimation_flag_not_enabled"},
+            },
         ),
         "estimated_tail_fpr_1e5_path": _write_json(
             family_root / "exports" / "pw04" / "tail" / "estimated_tail_fpr_1e5.json",
-            {"family_id": family_id, "target": "1e-5"},
+            {
+                "family_id": family_id,
+                "target": "1e-5",
+                "readiness": {"status": "disabled", "reason": "tail_estimation_flag_not_enabled"},
+            },
         ),
         "tail_fit_diagnostics_path": _write_json(
             family_root / "exports" / "pw04" / "tail" / "tail_fit_diagnostics.json",
-            {"family_id": family_id, "status": "ok"},
+            {
+                "family_id": family_id,
+                "status": "ok",
+                "readiness": {"status": "disabled", "reason": "tail_estimation_flag_not_enabled"},
+            },
         ),
         "tail_fit_stability_summary_path": _write_json(
             family_root / "exports" / "pw04" / "tail" / "tail_fit_stability_summary.json",
-            {"family_id": family_id, "status": "stable"},
+            {
+                "family_id": family_id,
+                "status": "stable",
+                "readiness": {"status": "disabled", "reason": "tail_estimation_flag_not_enabled"},
+            },
         ),
     }
 
@@ -394,6 +578,7 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             "derived_attack_union_metrics_path": normalize_path_value(pw04_derived_attack_union_metrics_path),
             "formal_attack_negative_metrics_path": normalize_path_value(pw04_formal_attack_negative_metrics_path),
             "clean_attack_overview_path": normalize_path_value(pw04_clean_attack_overview_path),
+            "attack_quality_metrics_path": normalize_path_value(pw04_attack_quality_metrics_path),
             "paper_scope_registry_path": normalize_path_value(pw04_paper_metric_registry_path),
             "canonical_metrics_paths": {
                 "content_chain": normalize_path_value(pw04_content_chain_metrics_path),
@@ -419,16 +604,28 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             "analysis_only_artifact_paths": {
                 "pw02_system_final_auxiliary_operating_semantics": normalize_path_value(pw02_system_final_auxiliary_operating_semantics_path),
                 "pw02_system_final_auxiliary_roc_curve": normalize_path_value(pw02_system_final_auxiliary_roc_curve_path),
+                "pw02_quality_metrics_summary_csv": normalize_path_value(pw02_quality_metrics_summary_csv_path),
+                "pw02_quality_metrics_summary_json": normalize_path_value(pw02_quality_metrics_summary_json_path),
+                "pw02_payload_clean_summary": normalize_path_value(pw02_payload_clean_summary_path),
                 "pw04_system_final_auxiliary_attack_summary": normalize_path_value(pw04_system_final_auxiliary_attack_summary_path),
                 "pw04_system_final_auxiliary_attack_by_family": normalize_path_value(pw04_system_final_auxiliary_attack_by_family_path),
                 "pw04_system_final_auxiliary_attack_by_condition": normalize_path_value(pw04_system_final_auxiliary_attack_by_condition_path),
+                "pw04_conditional_rescue_metrics": normalize_path_value(pw04_conditional_rescue_metrics_path),
+                "pw04_payload_attack_summary": normalize_path_value(pw04_payload_attack_summary_path),
+                "pw04_wrong_event_attestation_challenge_summary": normalize_path_value(pw04_wrong_event_attestation_challenge_summary_path),
             },
             "analysis_only_artifact_annotations": {
                 "pw02_system_final_auxiliary_operating_semantics": {"canonical": False, "analysis_only": True},
                 "pw02_system_final_auxiliary_roc_curve": {"canonical": False, "analysis_only": True},
+                "pw02_quality_metrics_summary_csv": {"canonical": False, "analysis_only": True},
+                "pw02_quality_metrics_summary_json": {"canonical": False, "analysis_only": True},
+                "pw02_payload_clean_summary": {"canonical": False, "analysis_only": True},
                 "pw04_system_final_auxiliary_attack_summary": {"canonical": False, "analysis_only": True},
                 "pw04_system_final_auxiliary_attack_by_family": {"canonical": False, "analysis_only": True},
                 "pw04_system_final_auxiliary_attack_by_condition": {"canonical": False, "analysis_only": True},
+                "pw04_conditional_rescue_metrics": {"canonical": False, "analysis_only": True},
+                "pw04_payload_attack_summary": {"canonical": False, "analysis_only": True},
+                "pw04_wrong_event_attestation_challenge_summary": {"canonical": False, "analysis_only": True},
             },
         },
     )
@@ -470,6 +667,7 @@ def test_pw05_release_signoff_packages_canonical_pw04_exports(tmp_path: Path) ->
     stage_manifest_path = Path(str(summary["stage_manifest_path"]))
     package_manifest_path = Path(str(summary["package_manifest_path"]))
     package_path = Path(str(summary["package_path"]))
+    formal_run_readiness_report_path = Path(str(summary["formal_run_readiness_report_path"]))
 
     assert summary["stage_name"] == "PW05_Release_And_Signoff"
     assert summary["status"] == "completed"
@@ -478,22 +676,47 @@ def test_pw05_release_signoff_packages_canonical_pw04_exports(tmp_path: Path) ->
     assert summary["release_status"] == "passed"
     assert summary["paper_closure_status"] == "passed"
 
-    for path_obj in [summary_path, signoff_report_path, release_manifest_path, stage_manifest_path, package_manifest_path, package_path]:
+    for path_obj in [
+        summary_path,
+        signoff_report_path,
+        release_manifest_path,
+        stage_manifest_path,
+        package_manifest_path,
+        package_path,
+        formal_run_readiness_report_path,
+    ]:
         assert path_obj.exists(), path_obj
 
+    formal_run_readiness_report = _load_json_dict(formal_run_readiness_report_path)
     signoff_report = _load_json_dict(signoff_report_path)
     release_manifest = _load_json_dict(release_manifest_path)
     stage_manifest = _load_json_dict(stage_manifest_path)
     package_manifest = _load_json_dict(package_manifest_path)
     persisted_summary = _load_json_dict(summary_path)
 
+    assert formal_run_readiness_report["overall_status"] == "ready"
+    assert formal_run_readiness_report["decision"] == "ALLOW_FREEZE"
+    assert formal_run_readiness_report["blocking_components"] == []
+    assert formal_run_readiness_report["blocking_reasons"] == []
+    assert "tail_estimation" in formal_run_readiness_report["advisory_components"]
+    assert formal_run_readiness_report["components"]["quality_attack"]["status"] == "ready"
+    assert formal_run_readiness_report["components"]["quality_clean"]["status"] == "ready"
+    assert formal_run_readiness_report["components"]["payload_clean"]["status"] == "ready"
+    assert formal_run_readiness_report["components"]["payload_attack"]["status"] == "ready"
+    assert formal_run_readiness_report["components"]["wrong_event_attack"]["status"] == "ready"
+    assert formal_run_readiness_report["components"]["geometry_conditional_rescue"]["blocking"] is False
+    assert formal_run_readiness_report["recommended_run_plan"]["plan_name"] == "formal_paper_run_minimal_scale_up"
+    assert formal_run_readiness_report["recommended_run_plan"]["gates_before_scale_up"] == []
     assert signoff_report["checked_source_artifact_count"] >= 20
-    assert signoff_report["analysis_only_artifact_count"] == 5
+    assert signoff_report["analysis_only_artifact_count"] == 11
+    assert signoff_report["formal_run_readiness_report_path"] == normalize_path_value(formal_run_readiness_report_path)
     assert "pw04_summary" in release_manifest["release_copy_paths"]
     assert "family_manifest" in release_manifest["source_artifact_index"]
+    assert "pw04_attack_quality_metrics" in release_manifest["source_artifact_index"]
     assert "pw02_positive_source_payload_reference_sidecar_e000001" in release_manifest["source_artifact_index"]
     assert "pw02_positive_source_payload_decode_sidecar_e000001" in release_manifest["source_artifact_index"]
     assert "pw04_attacked_positive_payload_decode_sidecar_e000001" in release_manifest["source_artifact_index"]
+    assert release_manifest["formal_run_readiness_report_path"] == normalize_path_value(formal_run_readiness_report_path)
     assert release_manifest["analysis_only_artifact_annotations"]["pw04_system_final_auxiliary_attack_summary"] == {
         "source_path": normalize_path_value(
             Path(str(fixture["drive_root"]))
@@ -509,20 +732,30 @@ def test_pw05_release_signoff_packages_canonical_pw04_exports(tmp_path: Path) ->
         "canonical": False,
         "analysis_only": True,
     }
+    assert release_manifest["analysis_only_artifact_annotations"]["pw02_quality_metrics_summary_json"]["release_copy_path"] == (
+        "source/exports/pw02/quality/quality_metrics_summary.json"
+    )
+    assert release_manifest["analysis_only_artifact_annotations"]["pw04_payload_attack_summary"]["release_copy_path"] == (
+        "source/exports/pw04/payload_robustness/payload_attack_summary.json"
+    )
     assert "package_zip" in persisted_summary["generated_artifact_index"]
     assert package_manifest["stage_name"] == "PW05_Release_And_Signoff"
     assert stage_manifest["source_stage_name"] == "PW04_Attack_Merge_And_Metrics"
+    assert stage_manifest["formal_run_readiness_report_path"] == normalize_path_value(formal_run_readiness_report_path)
     assert persisted_summary["analysis_only_artifact_paths"]["pw02_system_final_auxiliary_operating_semantics"].endswith(
         "/exports/pw02/operating_metrics/system_final_auxiliary_operating_semantics.json"
     )
+    assert persisted_summary["formal_run_readiness_report_path"] == normalize_path_value(formal_run_readiness_report_path)
 
     with zipfile.ZipFile(package_path, "r") as archive:
         members = set(archive.namelist())
     assert "artifacts/stage_manifest.json" in members
+    assert "artifacts/readiness/formal_run_readiness_report.json" in members
     assert "artifacts/release/release_manifest.json" in members
     assert "artifacts/signoff/signoff_report.json" in members
     assert "source/runtime_state/pw04_summary.json" in members
     assert "source/exports/pw04/metrics/paper_metric_registry.json" in members
+    assert "source/exports/pw04/metrics/attack_quality_metrics.json" in members
     assert "source/exports/pw02/thresholds/content/thresholds.json" in members
     assert "source/exports/pw04/attack_negative_pool_manifest.json" in members
     assert "source/exports/pw04/formal_attack_negative_metrics.json" in members
@@ -530,7 +763,60 @@ def test_pw05_release_signoff_packages_canonical_pw04_exports(tmp_path: Path) ->
     assert "source/source_shards/positive/shard_0000/events/event_000001/artifacts/payload_decode_sidecar.json" in members
     assert "source/attack_shards/shard_0000/events/event_000001/artifacts/payload_decode_sidecar.json" in members
     assert "source/exports/pw02/operating_metrics/system_final_auxiliary_operating_semantics.json" in members
+    assert "source/exports/pw02/quality/quality_metrics_summary.json" in members
+    assert "source/exports/pw02/payload/payload_clean_summary.json" in members
+    assert "source/exports/pw04/geometry_diagnostics/conditional_rescue_metrics.json" in members
+    assert "source/exports/pw04/payload_robustness/payload_attack_summary.json" in members
     assert "source/exports/pw04/robustness/system_final_auxiliary_attack_summary.json" in members
+    assert "source/exports/pw04/robustness/wrong_event_attestation_challenge_summary.json" in members
+
+
+def test_pw05_blocks_freeze_when_formal_run_readiness_has_blocking_component(tmp_path: Path) -> None:
+    """
+    Verify PW05 blocks freeze when one required readiness component is not ready.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    fixture = _build_pw05_family_fixture(tmp_path)
+    family_root = Path(str(fixture["family_root"]))
+    attack_quality_metrics_path = family_root / "exports" / "pw04" / "metrics" / "attack_quality_metrics.json"
+    attack_quality_metrics = _load_json_dict(attack_quality_metrics_path)
+    attack_quality_overall = cast(Dict[str, Any], attack_quality_metrics["overall"])
+    attack_quality_overall["clip_status"] = "missing"
+    attack_quality_overall["clip_reason"] = "clip_model_not_available"
+    write_json_atomic(attack_quality_metrics_path, attack_quality_metrics)
+
+    summary = pw05_module.run_pw05_release_signoff(
+        drive_project_root=Path(str(fixture["drive_root"])),
+        family_id=str(fixture["family_id"]),
+        stage_run_id="pw05_release_demo",
+    )
+
+    formal_run_readiness_report = _load_json_dict(Path(str(summary["formal_run_readiness_report_path"])))
+    signoff_report = _load_json_dict(Path(str(summary["signoff_report_path"])))
+    run_closure = _load_json_dict(Path(str(summary["run_closure_path"])))
+
+    assert summary["decision"] == "BLOCK_FREEZE"
+    assert summary["signoff_status"] == "blocked"
+    assert summary["release_status"] == "blocked"
+    assert summary["paper_closure_status"] == "blocked"
+    assert formal_run_readiness_report["overall_status"] == "blocked"
+    assert "quality_attack" in formal_run_readiness_report["blocking_components"]
+    assert any("clip_model_not_available" in reason for reason in formal_run_readiness_report["blocking_reasons"])
+    assert signoff_report["decision"] == "BLOCK_FREEZE"
+    assert signoff_report["blocking_reason_count"] >= 1
+    assert run_closure["status"] == {
+        "ok": False,
+        "reason": "formal_run_readiness_blocked",
+        "details": {
+            "checked_source_artifact_count": signoff_report["checked_source_artifact_count"],
+            "blocking_reason_count": signoff_report["blocking_reason_count"],
+        },
+    }
 
 
 def test_pw05_requires_completed_pw04_exports(tmp_path: Path) -> None:

@@ -1077,6 +1077,14 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert quality_rows_by_scope["content_chain"]["mean_clip_text_similarity"] is not None
     assert quality_rows_by_scope["content_chain"]["clip_model_name"] == pw_quality_metrics_module.CLIP_MODEL_NAME
     assert quality_rows_by_scope["content_chain"]["clip_sample_count"] == 2
+    assert quality_rows_by_scope["content_chain"]["prompt_text_coverage_status"] == "ok"
+    if quality_rows_by_scope["content_chain"]["lpips_status"] == "ok":
+        assert quality_rows_by_scope["content_chain"]["quality_readiness_status"] == "ready"
+        assert quality_rows_by_scope["content_chain"]["quality_readiness_blocking"] is False
+    else:
+        assert quality_rows_by_scope["content_chain"]["quality_readiness_status"] == "partial"
+        assert quality_rows_by_scope["content_chain"]["quality_readiness_blocking"] is True
+        assert quality_rows_by_scope["content_chain"]["quality_readiness_reason"]
     assert quality_rows_by_scope["event_attestation"]["status"] == "not_applicable"
     assert quality_rows_by_scope["event_attestation"]["lpips_status"] == quality_rows_by_scope["content_chain"]["lpips_status"]
     assert quality_rows_by_scope["system_final"]["status"] == "not_available"
@@ -1089,6 +1097,8 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert payload_clean_summary["status"] == "ok"
     assert payload_clean_summary["reason"] is None
     assert payload_clean_summary["future_upstream_sidecar_required"] is False
+    assert payload_clean_summary["readiness"]["status"] == "ready"
+    assert payload_clean_summary["readiness"]["blocking"] is False
     assert payload_clean_summary["overall"]["event_count"] == 2
     assert payload_clean_summary["overall"]["available_payload_event_count"] == 2
     assert payload_clean_summary["overall"]["missing_payload_event_count"] == 0
@@ -1110,6 +1120,9 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert len(payload_clean_summary["rows"]) == 2
     assert cast(Dict[str, Any], pw02_summary["analysis_only_artifact_paths"])["pw02_system_final_auxiliary_operating_semantics"] == pw02_summary["system_final_auxiliary_operating_semantics_path"]
     assert cast(Dict[str, Any], pw02_summary["analysis_only_artifact_paths"])["pw02_system_final_auxiliary_roc_curve"] == cast(Dict[str, Any], pw02_summary["roc_curve_paths"])["system_final_auxiliary"]
+    assert cast(Dict[str, Any], pw02_summary["analysis_only_artifact_paths"])["pw02_quality_metrics_summary_json"] == pw02_summary["quality_metrics_summary_json_path"]
+    assert cast(Dict[str, Any], pw02_summary["analysis_only_artifact_paths"])["pw02_quality_metrics_summary_csv"] == pw02_summary["quality_metrics_summary_csv_path"]
+    assert cast(Dict[str, Any], pw02_summary["analysis_only_artifact_paths"])["pw02_payload_clean_summary"] == pw02_summary["payload_clean_summary_path"]
 
     assert formal_final_decision_metrics_export["source_kind"] == "formal_final_decision_metrics_from_content_evaluate_inputs"
     assert formal_final_decision_metrics_export["is_formal_evaluate_record"] is False
@@ -1213,6 +1226,7 @@ def test_pw02_payload_clean_summary_prefers_decode_sidecar_metrics(tmp_path: Pat
     )
 
     assert payload_clean_summary["status"] == "ok"
+    assert payload_clean_summary["readiness"]["status"] == "ready"
     assert payload_clean_summary["overall"]["mean_codeword_agreement"] == pytest.approx(0.25)
     assert payload_clean_summary["overall"]["mean_n_bits_compared"] == pytest.approx(96.0)
     assert payload_clean_summary["overall"]["payload_primary_metric_sources"] == ["codeword_agreement_and_n_bits_compared"]

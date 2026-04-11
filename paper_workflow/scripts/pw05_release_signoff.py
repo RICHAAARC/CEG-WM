@@ -10,7 +10,7 @@ import json
 import shutil
 import sys
 from pathlib import Path
-from typing import Any, Dict, Mapping, Sequence, cast
+from typing import Any, Dict, List, Mapping, Sequence, cast
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -127,6 +127,7 @@ def _resolve_pw05_paths(family_root: Path) -> Dict[str, Path]:
         "export_root": export_root,
         "package_staging_root": package_staging_root,
         "summary_path": runtime_state_root / PW05_SUMMARY_FILE_NAME,
+        "formal_run_readiness_report_path": export_root / "formal_run_readiness_report.json",
         "signoff_report_path": export_root / "signoff_report.json",
         "release_manifest_path": export_root / "release_manifest.json",
         "workflow_summary_path": export_root / "workflow_summary.json",
@@ -237,6 +238,7 @@ def _build_canonical_source_paths(family_root: Path) -> Dict[str, Path]:
         "pw04_formal_attack_negative_metrics": pw04_root / "formal_attack_negative_metrics.json",
         "pw04_clean_attack_overview": pw04_root / "clean_attack_overview.json",
         "pw04_paper_metric_registry": pw04_metrics_root / "paper_metric_registry.json",
+        "pw04_attack_quality_metrics": pw04_metrics_root / "attack_quality_metrics.json",
         "pw04_content_chain_metrics": pw04_metrics_root / "content_chain_metrics.json",
         "pw04_event_attestation_metrics": pw04_metrics_root / "event_attestation_metrics.json",
         "pw04_system_final_metrics": pw04_metrics_root / "system_final_metrics.json",
@@ -356,6 +358,7 @@ def _collect_release_source_paths(
         "formal_attack_negative_metrics_path": "pw04_formal_attack_negative_metrics",
         "clean_attack_overview_path": "pw04_clean_attack_overview",
         "paper_scope_registry_path": "pw04_paper_metric_registry",
+        "attack_quality_metrics_path": "pw04_attack_quality_metrics",
         "bootstrap_confidence_intervals_path": "pw04_bootstrap_confidence_intervals",
         "bootstrap_confidence_intervals_csv_path": "pw04_bootstrap_confidence_intervals_csv",
     }
@@ -481,6 +484,519 @@ def _collect_analysis_only_source_bindings(
             "analysis_only": bool(annotation_payload.get("analysis_only", True)),
         }
     return bindings
+
+
+def _extract_mapping(node: Any) -> Dict[str, Any]:
+    """
+    功能：安全提取映射节点。 
+
+    Safely coerce one optional mapping-like node into a plain dict.
+
+    Args:
+        node: Candidate mapping node.
+
+    Returns:
+        Plain dict when the input is mapping-like; otherwise empty dict.
+    """
+    return dict(cast(Mapping[str, Any], node)) if isinstance(node, Mapping) else {}
+
+
+def _coerce_non_negative_int(value: Any) -> int | None:
+    """
+    功能：把输入解析为非负整数。 
+
+    Parse one optional non-negative integer value.
+
+    Args:
+        value: Candidate numeric value.
+
+    Returns:
+        Parsed non-negative integer, or None when unavailable.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float) and value >= 0.0:
+        return int(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed_value = int(float(value))
+        except ValueError:
+            return None
+        return parsed_value if parsed_value >= 0 else None
+    return None
+
+
+def _resolve_analysis_only_binding_path(
+    analysis_only_bindings: Mapping[str, Mapping[str, Any]],
+    label: str,
+) -> Path | None:
+    """
+    功能：解析 analysis-only 绑定中的文件路径。 
+
+    Resolve one analysis-only artifact path from the collected binding mapping.
+
+    Args:
+        analysis_only_bindings: Analysis-only binding mapping.
+        label: Stable artifact label.
+
+    Returns:
+        Resolved path when present; otherwise None.
+    """
+    if not isinstance(analysis_only_bindings, Mapping):
+        raise TypeError("analysis_only_bindings must be Mapping")
+    if not isinstance(label, str) or not label:
+        raise TypeError("label must be non-empty str")
+    binding = analysis_only_bindings.get(label)
+    if not isinstance(binding, Mapping):
+        return None
+    path_obj = binding.get("path")
+    return path_obj if isinstance(path_obj, Path) else None
+
+
+def _load_optional_json_dict(path_obj: Path | None, label: str) -> Dict[str, Any] | None:
+    """
+    功能：按存在性读取可选 JSON 对象文件。 
+
+    Load one optional JSON object file when the path exists.
+
+    Args:
+        path_obj: Optional JSON file path.
+        label: Human-readable label.
+
+    Returns:
+        Parsed JSON mapping, or None when the path is absent.
+    """
+    if path_obj is None:
+        return None
+    return _load_required_json_dict(path_obj, label)
+
+
+def _build_quality_component_readiness(
+    *,
+    component_name: str,
+    source_path: Path | None,
+    quality_payload: Mapping[str, Any] | None,
+    status_key: str,
+    reason_key: str,
+    count_key: str,
+    expected_count_key: str,
+    lpips_status_key: str,
+    lpips_reason_key: str,
+    clip_status_key: str,
+    clip_reason_key: str,
+    prompt_text_coverage_status_key: str,
+    prompt_text_coverage_reason_key: str,
+) -> Dict[str, Any]:
+    """
+    功能：为 clean 或 attack 质量链构造统一 readiness 结论。 
+
+    Build one normalized readiness verdict for clean or attack quality metrics.
+
+    Args:
+        component_name: Stable component name.
+        source_path: Source artifact path.
+        quality_payload: Quality payload mapping.
+        status_key: Status field name.
+        reason_key: Reason field name.
+        count_key: Available pair-count field name.
+        expected_count_key: Expected pair-count field name.
+        lpips_status_key: LPIPS status field name.
+        lpips_reason_key: LPIPS reason field name.
+        clip_status_key: CLIP status field name.
+        clip_reason_key: CLIP reason field name.
+        prompt_text_coverage_status_key: Prompt-coverage status field name.
+        prompt_text_coverage_reason_key: Prompt-coverage reason field name.
+
+    Returns:
+        Normalized readiness mapping.
+    """
+    payload = _extract_mapping(quality_payload)
+    raw_status = payload.get(status_key)
+    status_value = str(raw_status) if isinstance(raw_status, str) and raw_status else "not_available"
+    reason_value = payload.get(reason_key)
+    count_value = _coerce_non_negative_int(payload.get(count_key))
+    expected_count_value = _coerce_non_negative_int(payload.get(expected_count_key))
+    lpips_status = payload.get(lpips_status_key)
+    lpips_reason = payload.get(lpips_reason_key)
+    clip_status = payload.get(clip_status_key)
+    clip_reason = payload.get(clip_reason_key)
+    prompt_text_coverage_status = payload.get(prompt_text_coverage_status_key)
+    prompt_text_coverage_reason = payload.get(prompt_text_coverage_reason_key)
+
+    blocking_reasons: list[str] = []
+    if status_value != "ok":
+        blocking_reasons.append(
+            str(reason_value) if isinstance(reason_value, str) and str(reason_value).strip() else f"quality status={status_value}"
+        )
+    if expected_count_value is not None and count_value is not None and expected_count_value > count_value:
+        blocking_reasons.append(
+            f"valid image pairs available for {count_value}/{expected_count_value} expected bindings"
+        )
+    if lpips_status != "ok":
+        blocking_reasons.append(
+            str(lpips_reason) if isinstance(lpips_reason, str) and str(lpips_reason).strip() else "LPIPS unavailable"
+        )
+    if clip_status != "ok":
+        blocking_reasons.append(
+            str(clip_reason) if isinstance(clip_reason, str) and str(clip_reason).strip() else "CLIP unavailable"
+        )
+    if isinstance(prompt_text_coverage_status, str) and prompt_text_coverage_status not in {"ok", "not_configured"}:
+        blocking_reasons.append(
+            str(prompt_text_coverage_reason)
+            if isinstance(prompt_text_coverage_reason, str) and str(prompt_text_coverage_reason).strip()
+            else "prompt text coverage incomplete"
+        )
+
+    if not blocking_reasons:
+        readiness_status = "ready"
+        readiness_reason = None
+    elif count_value is not None and count_value > 0:
+        readiness_status = "partial"
+        readiness_reason = "; ".join(dict.fromkeys(blocking_reasons))
+    else:
+        readiness_status = "not_ready"
+        readiness_reason = "; ".join(dict.fromkeys(blocking_reasons))
+
+    return {
+        "component_name": component_name,
+        "status": readiness_status,
+        "reason": readiness_reason,
+        "required_for_formal_release": True,
+        "blocking": readiness_status != "ready",
+        "source_path": normalize_path_value(source_path) if isinstance(source_path, Path) else None,
+        "available_pair_count": count_value,
+        "expected_pair_count": expected_count_value,
+        "lpips_status": lpips_status,
+        "clip_status": clip_status,
+        "prompt_text_coverage_status": prompt_text_coverage_status,
+    }
+
+
+def _build_auxiliary_summary_component_readiness(
+    *,
+    component_name: str,
+    source_path: Path | None,
+    summary_payload: Mapping[str, Any] | None,
+    required_for_formal_release: bool,
+) -> Dict[str, Any]:
+    """
+    功能：把 payload 或 wrong-event 汇总规范化为统一 readiness 结论。 
+
+    Normalize one auxiliary summary payload into a readiness verdict.
+
+    Args:
+        component_name: Stable component name.
+        source_path: Source artifact path.
+        summary_payload: Summary payload mapping.
+        required_for_formal_release: Whether this component blocks formal release.
+
+    Returns:
+        Normalized readiness mapping.
+    """
+    payload = _extract_mapping(summary_payload)
+    readiness_payload = _extract_mapping(payload.get("readiness"))
+    status_value = readiness_payload.get("status")
+    if not isinstance(status_value, str) or not status_value:
+        payload_status = payload.get("status")
+        if payload_status == "ok":
+            status_value = "ready"
+        elif payload_status == "partial":
+            status_value = "partial"
+        elif payload_status == "not_applicable":
+            status_value = "not_applicable"
+        else:
+            status_value = "not_ready"
+    readiness_reason = readiness_payload.get("reason")
+    if not isinstance(readiness_reason, str) or not readiness_reason.strip():
+        raw_reason = payload.get("reason")
+        readiness_reason = raw_reason if isinstance(raw_reason, str) and raw_reason.strip() else None
+    overall_payload = _extract_mapping(payload.get("overall"))
+    return {
+        "component_name": component_name,
+        "status": status_value,
+        "reason": readiness_reason,
+        "required_for_formal_release": required_for_formal_release,
+        "blocking": required_for_formal_release and status_value != "ready",
+        "source_path": normalize_path_value(source_path) if isinstance(source_path, Path) else None,
+        "event_count": _coerce_non_negative_int(overall_payload.get("event_count")),
+        "attempted_event_count": _coerce_non_negative_int(overall_payload.get("attempted_event_count")),
+    }
+
+
+def _build_tail_component_readiness(
+    *,
+    source_path: Path | None,
+    diagnostics_payload: Mapping[str, Any] | None,
+) -> Dict[str, Any]:
+    """
+    功能：规范化 tail estimation 的 readiness 结论。 
+
+    Normalize the tail-estimation readiness payload.
+
+    Args:
+        source_path: Tail diagnostics artifact path.
+        diagnostics_payload: Tail diagnostics payload mapping.
+
+    Returns:
+        Normalized readiness mapping.
+    """
+    payload = _extract_mapping(diagnostics_payload)
+    readiness_payload = _extract_mapping(payload.get("readiness"))
+    readiness_status = readiness_payload.get("status")
+    if not isinstance(readiness_status, str) or not readiness_status:
+        readiness_status = "not_ready"
+    readiness_reason = readiness_payload.get("reason")
+    if not isinstance(readiness_reason, str) or not readiness_reason.strip():
+        readiness_reason = None
+    return {
+        "component_name": "tail_estimation",
+        "status": readiness_status,
+        "reason": readiness_reason,
+        "required_for_formal_release": False,
+        "blocking": False,
+        "source_path": normalize_path_value(source_path) if isinstance(source_path, Path) else None,
+    }
+
+
+def _build_formal_run_scaling_plan(
+    *,
+    family_manifest: Mapping[str, Any],
+    pw04_summary: Mapping[str, Any],
+    attack_quality_payload: Mapping[str, Any] | None,
+    blocking_components: Sequence[str],
+) -> Dict[str, Any]:
+    """
+    功能：为正式论文 run 生成最小扩量建议模板。 
+
+    Build the minimal scale-up template used before a formal paper run.
+
+    Args:
+        family_manifest: Family manifest payload.
+        pw04_summary: PW04 summary payload.
+        attack_quality_payload: Attack quality payload mapping.
+        blocking_components: Blocking component names.
+
+    Returns:
+        Machine-readable scale-up plan template.
+    """
+    source_parameters = _extract_mapping(family_manifest.get("source_parameters"))
+    attack_parameters = _extract_mapping(family_manifest.get("attack_parameters"))
+    attack_quality_overall = _extract_mapping(_extract_mapping(attack_quality_payload).get("overall"))
+    quality_runtime = _extract_mapping(attack_quality_overall.get("quality_runtime"))
+
+    source_shard_count = _coerce_non_negative_int(source_parameters.get("source_shard_count")) or 0
+    attack_shard_count = _coerce_non_negative_int(attack_parameters.get("attack_shard_count")) or source_shard_count
+
+    return {
+        "status": "template",
+        "plan_name": "formal_paper_run_minimal_scale_up",
+        "family_id": family_manifest.get("family_id", pw04_summary.get("family_id")),
+        "current_observed_attack_event_count": _coerce_non_negative_int(
+            pw04_summary.get("completed_attack_event_count")
+        ),
+        "current_source_shard_count": source_shard_count,
+        "current_attack_shard_count": attack_shard_count,
+        "recommended_stage_parameters": {
+            "pw00": {
+                "source_shard_count": max(source_shard_count, 4),
+                "attack_shard_count": max(attack_shard_count, 4),
+                "freeze_family_manifest_before_parallel_run": True,
+            },
+            "pw01": {
+                "pw01_worker_count": 2,
+                "rerun_only_missing_or_failed_shards": True,
+            },
+            "pw03": {
+                "attack_local_worker_count": 2,
+                "rerun_only_missing_or_failed_shards": True,
+            },
+            "pw04": {
+                "enable_tail_estimation": True,
+                "quality_runtime_env": {
+                    "PW_QUALITY_TORCH_DEVICE": str(quality_runtime.get("torch_device") or "cuda:0"),
+                    "PW_QUALITY_LPIPS_BATCH_SIZE": str(quality_runtime.get("lpips_batch_size") or 2),
+                    "PW_QUALITY_CLIP_BATCH_SIZE": str(quality_runtime.get("clip_batch_size") or 2),
+                },
+            },
+        },
+        "gates_before_scale_up": [str(component_name) for component_name in blocking_components],
+    }
+
+
+def _build_formal_run_readiness_report(
+    *,
+    family_root: Path,
+    family_id: str,
+    source_paths: Mapping[str, Path],
+    analysis_only_bindings: Mapping[str, Mapping[str, Any]],
+    pw04_summary: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """
+    功能：汇总辅助指标链并生成正式 run readiness 报告。 
+
+    Build the unified formal-run readiness report for auxiliary metric closure.
+
+    Args:
+        family_root: Family root path.
+        family_id: Family identifier.
+        source_paths: Canonical release source paths.
+        analysis_only_bindings: Analysis-only source artifact bindings.
+        pw04_summary: PW04 summary payload.
+
+    Returns:
+        Formal-run readiness report payload.
+    """
+    family_manifest = _load_required_json_dict(cast(Path, source_paths["family_manifest"]), "family manifest")
+    attack_quality_payload = _load_required_json_dict(
+        cast(Path, source_paths["pw04_attack_quality_metrics"]),
+        "PW04 attack quality metrics",
+    )
+    clean_quality_summary = _load_optional_json_dict(
+        _resolve_analysis_only_binding_path(analysis_only_bindings, "pw02_quality_metrics_summary_json"),
+        "PW02 quality metrics summary",
+    )
+    payload_clean_summary = _load_optional_json_dict(
+        _resolve_analysis_only_binding_path(analysis_only_bindings, "pw02_payload_clean_summary"),
+        "PW02 payload clean summary",
+    )
+    payload_attack_summary = _load_optional_json_dict(
+        _resolve_analysis_only_binding_path(analysis_only_bindings, "pw04_payload_attack_summary"),
+        "PW04 payload attack summary",
+    )
+    wrong_event_summary = _load_optional_json_dict(
+        _resolve_analysis_only_binding_path(analysis_only_bindings, "pw04_wrong_event_attestation_challenge_summary"),
+        "PW04 wrong-event attestation challenge summary",
+    )
+    geometry_summary = _load_optional_json_dict(
+        _resolve_analysis_only_binding_path(analysis_only_bindings, "pw04_conditional_rescue_metrics"),
+        "PW04 conditional rescue metrics",
+    )
+    tail_paths = _extract_mapping(pw04_summary.get("tail_estimation_paths"))
+    tail_diagnostics_path = None
+    tail_diagnostics_path_value = tail_paths.get("tail_fit_diagnostics_path")
+    if isinstance(tail_diagnostics_path_value, str) and tail_diagnostics_path_value.strip():
+        tail_diagnostics_path = _resolve_path_value_under_family_root(
+            tail_diagnostics_path_value,
+            family_root,
+            "tail_estimation_paths.tail_fit_diagnostics_path",
+        )
+    tail_diagnostics = _load_optional_json_dict(tail_diagnostics_path, "PW04 tail fit diagnostics")
+
+    clean_quality_rows = cast(List[Mapping[str, Any]], _extract_mapping(clean_quality_summary).get("rows", []))
+    clean_content_chain_row = next(
+        (row for row in clean_quality_rows if row.get("scope") == "content_chain"),
+        {},
+    )
+    attack_quality_overall = _extract_mapping(attack_quality_payload.get("overall"))
+
+    components = {
+        "quality_clean": _build_quality_component_readiness(
+            component_name="quality_clean",
+            source_path=_resolve_analysis_only_binding_path(analysis_only_bindings, "pw02_quality_metrics_summary_json"),
+            quality_payload=clean_content_chain_row,
+            status_key="status",
+            reason_key="reason",
+            count_key="pair_count",
+            expected_count_key="expected_pair_count",
+            lpips_status_key="lpips_status",
+            lpips_reason_key="lpips_reason",
+            clip_status_key="clip_status",
+            clip_reason_key="clip_reason",
+            prompt_text_coverage_status_key="prompt_text_coverage_status",
+            prompt_text_coverage_reason_key="prompt_text_coverage_reason",
+        ),
+        "quality_attack": _build_quality_component_readiness(
+            component_name="quality_attack",
+            source_path=cast(Path, source_paths["pw04_attack_quality_metrics"]),
+            quality_payload=attack_quality_overall,
+            status_key="status",
+            reason_key="availability_reason",
+            count_key="count",
+            expected_count_key="expected_count",
+            lpips_status_key="lpips_status",
+            lpips_reason_key="lpips_reason",
+            clip_status_key="clip_status",
+            clip_reason_key="clip_reason",
+            prompt_text_coverage_status_key="prompt_text_coverage_status",
+            prompt_text_coverage_reason_key="prompt_text_coverage_reason",
+        ),
+        "payload_clean": _build_auxiliary_summary_component_readiness(
+            component_name="payload_clean",
+            source_path=_resolve_analysis_only_binding_path(analysis_only_bindings, "pw02_payload_clean_summary"),
+            summary_payload=payload_clean_summary,
+            required_for_formal_release=True,
+        ),
+        "payload_attack": _build_auxiliary_summary_component_readiness(
+            component_name="payload_attack",
+            source_path=_resolve_analysis_only_binding_path(analysis_only_bindings, "pw04_payload_attack_summary"),
+            summary_payload=payload_attack_summary,
+            required_for_formal_release=True,
+        ),
+        "wrong_event_attack": _build_auxiliary_summary_component_readiness(
+            component_name="wrong_event_attack",
+            source_path=_resolve_analysis_only_binding_path(
+                analysis_only_bindings,
+                "pw04_wrong_event_attestation_challenge_summary",
+            ),
+            summary_payload=wrong_event_summary,
+            required_for_formal_release=True,
+        ),
+        "geometry_conditional_rescue": _build_auxiliary_summary_component_readiness(
+            component_name="geometry_conditional_rescue",
+            source_path=_resolve_analysis_only_binding_path(analysis_only_bindings, "pw04_conditional_rescue_metrics"),
+            summary_payload=geometry_summary,
+            required_for_formal_release=False,
+        ),
+        "tail_estimation": _build_tail_component_readiness(
+            source_path=tail_diagnostics_path,
+            diagnostics_payload=tail_diagnostics,
+        ),
+    }
+
+    blocking_components = [
+        component_name
+        for component_name, component_payload in components.items()
+        if component_payload.get("blocking") is True
+    ]
+    blocking_reasons = [
+        f"{component_name}: {component_payload.get('reason') or component_payload.get('status')}"
+        for component_name, component_payload in components.items()
+        if component_payload.get("blocking") is True
+    ]
+    advisory_components = [
+        component_name
+        for component_name, component_payload in components.items()
+        if component_payload.get("blocking") is not True and component_payload.get("status") not in {"ready", "not_applicable"}
+    ]
+
+    if blocking_components:
+        overall_status = "blocked"
+        decision = BLOCK_FREEZE
+    else:
+        overall_status = "ready"
+        decision = ALLOW_FREEZE
+
+    return {
+        "artifact_type": "paper_workflow_pw05_formal_run_readiness_report",
+        "schema_version": SCHEMA_VERSION,
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "family_root": normalize_path_value(family_root),
+        "overall_status": overall_status,
+        "decision": decision,
+        "blocking_components": blocking_components,
+        "blocking_reasons": blocking_reasons,
+        "advisory_components": advisory_components,
+        "components": components,
+        "recommended_run_plan": _build_formal_run_scaling_plan(
+            family_manifest=family_manifest,
+            pw04_summary=pw04_summary,
+            attack_quality_payload=attack_quality_payload,
+            blocking_components=blocking_components,
+        ),
+    }
 
 
 def _build_payload_sidecar_source_label(prefix: str, event_index: Any, fallback_ordinal: int) -> str:
@@ -665,6 +1181,7 @@ def _package_stage_outputs(
     ensure_directory(package_root)
 
     generated_copy_map = {
+        "formal_run_readiness_report": "artifacts/readiness/formal_run_readiness_report.json",
         "signoff_report": "artifacts/signoff/signoff_report.json",
         "release_manifest": "artifacts/release/release_manifest.json",
         "workflow_summary": "artifacts/workflow_summary.json",
@@ -756,10 +1273,9 @@ def run_pw05_release_signoff(
         for label, binding in analysis_only_source_bindings.items()
     }
 
-    decision = ALLOW_FREEZE
-    status_payload = _resolve_signoff_statuses(decision)
     resolved_stage_run_id = stage_run_id or make_stage_run_id(STAGE_NAME)
 
+    formal_run_readiness_report_path = cast(Path, pw05_paths["formal_run_readiness_report_path"])
     signoff_report_path = cast(Path, pw05_paths["signoff_report_path"])
     release_manifest_path = cast(Path, pw05_paths["release_manifest_path"])
     workflow_summary_path = cast(Path, pw05_paths["workflow_summary_path"])
@@ -769,6 +1285,19 @@ def run_pw05_release_signoff(
     export_root = cast(Path, pw05_paths["export_root"])
     summary_path = cast(Path, pw05_paths["summary_path"])
     package_staging_root = cast(Path, pw05_paths["package_staging_root"])
+
+    formal_run_readiness_report = _build_formal_run_readiness_report(
+        family_root=family_root,
+        family_id=family_id,
+        source_paths=source_paths,
+        analysis_only_bindings=analysis_only_source_bindings,
+        pw04_summary=pw04_summary,
+    )
+    write_json_atomic(formal_run_readiness_report_path, formal_run_readiness_report)
+
+    blocking_reasons = cast(List[str], formal_run_readiness_report.get("blocking_reasons", []))
+    decision = BLOCK_FREEZE if blocking_reasons else ALLOW_FREEZE
+    status_payload = _resolve_signoff_statuses(decision)
 
     signoff_report = {
         "signoff_report_version": "v1",
@@ -785,11 +1314,12 @@ def run_pw05_release_signoff(
         "signoff_status": status_payload["signoff_status"],
         "release_status": status_payload["release_status"],
         "paper_closure_status": status_payload["paper_closure_status"],
-        "blocking_reason_count": 0,
-        "blocking_reasons": [],
+        "blocking_reason_count": len(blocking_reasons),
+        "blocking_reasons": blocking_reasons,
         "checked_source_artifact_count": len(source_artifact_index),
         "analysis_only_artifact_count": len(analysis_only_release_annotations),
         "checked_source_artifacts": source_artifact_index,
+        "formal_run_readiness_report_path": normalize_path_value(formal_run_readiness_report_path),
         "pw04_summary_anchor": {
             "status": pw04_summary.get("status"),
             "paper_exports_completed": pw04_summary.get("paper_exports_completed"),
@@ -831,6 +1361,7 @@ def run_pw05_release_signoff(
         "source_artifact_index": source_artifact_index,
         "release_copy_paths": release_copy_paths,
         "analysis_only_artifact_annotations": analysis_only_release_annotations,
+        "formal_run_readiness_report_path": normalize_path_value(formal_run_readiness_report_path),
         "created_at": utc_now_iso(),
     }
     write_json_atomic(release_manifest_path, release_manifest)
@@ -849,6 +1380,7 @@ def run_pw05_release_signoff(
         "source_stage_name": pw04_summary.get("stage_name", "PW04_Attack_Merge_And_Metrics"),
         "source_stage_run_id": pw04_summary.get("stage_run_id", "<absent>"),
         "source_stage_summary_path": normalize_path_value(pw04_summary_path),
+        "formal_run_readiness_report_path": normalize_path_value(formal_run_readiness_report_path),
         "signoff_report_path": normalize_path_value(signoff_report_path),
         "release_manifest_path": normalize_path_value(release_manifest_path),
         "stage_manifest_path": normalize_path_value(stage_manifest_path),
@@ -870,11 +1402,11 @@ def run_pw05_release_signoff(
         "release_status": status_payload["release_status"],
         "paper_closure_status": status_payload["paper_closure_status"],
         "status": {
-            "ok": True,
-            "reason": "allow_freeze",
+            "ok": decision == ALLOW_FREEZE,
+            "reason": "allow_freeze" if decision == ALLOW_FREEZE else "formal_run_readiness_blocked",
             "details": {
                 "checked_source_artifact_count": len(source_artifact_index),
-                "blocking_reason_count": 0,
+                "blocking_reason_count": len(blocking_reasons),
             },
         },
         "created_at": utc_now_iso(),
@@ -882,6 +1414,7 @@ def run_pw05_release_signoff(
     write_json_atomic(run_closure_path, run_closure)
 
     generated_artifact_paths = {
+        "formal_run_readiness_report": formal_run_readiness_report_path,
         "signoff_report": signoff_report_path,
         "release_manifest": release_manifest_path,
         "workflow_summary": workflow_summary_path,
@@ -901,6 +1434,7 @@ def run_pw05_release_signoff(
         "source_stage_summary_path": normalize_path_value(pw04_summary_path),
         "export_root": normalize_path_value(export_root),
         "summary_path": normalize_path_value(summary_path),
+        "formal_run_readiness_report_path": normalize_path_value(formal_run_readiness_report_path),
         "signoff_report_path": normalize_path_value(signoff_report_path),
         "release_manifest_path": normalize_path_value(release_manifest_path),
         "workflow_summary_path": normalize_path_value(workflow_summary_path),
@@ -957,6 +1491,7 @@ def run_pw05_release_signoff(
         "pw04_summary_path": normalize_path_value(pw04_summary_path),
         "summary_path": normalize_path_value(summary_path),
         "export_root": normalize_path_value(export_root),
+        "formal_run_readiness_report_path": normalize_path_value(formal_run_readiness_report_path),
         "signoff_report_path": normalize_path_value(signoff_report_path),
         "release_manifest_path": normalize_path_value(release_manifest_path),
         "workflow_summary_path": normalize_path_value(workflow_summary_path),
