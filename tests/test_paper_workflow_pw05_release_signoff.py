@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, Mapping, cast
+from typing import Any, Dict, List, Mapping, cast
 
 import pytest
 
@@ -817,6 +817,59 @@ def test_pw05_blocks_freeze_when_formal_run_readiness_has_blocking_component(tmp
             "blocking_reason_count": signoff_report["blocking_reason_count"],
         },
     }
+
+
+def test_pw05_reports_quality_runtime_preflight_when_quality_dependency_is_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify PW05 surfaces current quality dependency import failures in the readiness report.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    fixture = _build_pw05_family_fixture(tmp_path)
+    family_root = Path(str(fixture["family_root"]))
+    attack_quality_metrics_path = family_root / "exports" / "pw04" / "metrics" / "attack_quality_metrics.json"
+    attack_quality_metrics = _load_json_dict(attack_quality_metrics_path)
+    attack_quality_overall = cast(Dict[str, Any], attack_quality_metrics["overall"])
+    attack_quality_overall["clip_status"] = "missing"
+    attack_quality_overall["clip_reason"] = "clip_model_not_available"
+    write_json_atomic(attack_quality_metrics_path, attack_quality_metrics)
+
+    original_import_module = pw05_module.importlib.import_module
+
+    def fake_import_module(module_name: str) -> Any:
+        if module_name == "open_clip":
+            raise ModuleNotFoundError("No module named 'open_clip'")
+        return original_import_module(module_name)
+
+    monkeypatch.setattr(pw05_module.importlib, "import_module", fake_import_module)
+
+    summary = pw05_module.run_pw05_release_signoff(
+        drive_project_root=Path(str(fixture["drive_root"])),
+        family_id=str(fixture["family_id"]),
+        stage_run_id="pw05_release_demo",
+    )
+
+    formal_run_readiness_report = _load_json_dict(Path(str(summary["formal_run_readiness_report_path"])))
+    quality_attack = cast(Dict[str, Any], formal_run_readiness_report["components"]["quality_attack"])
+
+    assert formal_run_readiness_report["quality_runtime_preflight"]["clip_dependency_ready"] is False
+    assert "open_clip_import_failed:ModuleNotFoundError" in str(
+        formal_run_readiness_report["quality_runtime_preflight"]["clip_dependency_reason"]
+    )
+    assert quality_attack["clip_dependency_ready"] is False
+    assert "open_clip_import_failed:ModuleNotFoundError" in str(quality_attack["clip_dependency_reason"])
+    assert any(
+        "open_clip_import_failed:ModuleNotFoundError" in reason
+        for reason in cast(List[str], formal_run_readiness_report["blocking_reasons"])
+    )
 
 
 def test_pw05_requires_completed_pw04_exports(tmp_path: Path) -> None:

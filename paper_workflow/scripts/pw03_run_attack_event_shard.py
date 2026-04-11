@@ -970,6 +970,7 @@ def _write_wrong_event_attestation_challenge_record(
         }
     else:
         try:
+            from main.cli.run_common import resolve_attestation_env_inputs
             from main.watermarking.provenance.attestation_statement import (
                 compute_attestation_digest,
                 statement_from_dict,
@@ -1017,7 +1018,16 @@ def _write_wrong_event_attestation_challenge_record(
                 )
             k_master = runtime_cfg.get("__attestation_verify_k_master__")
             if not isinstance(k_master, str) or not k_master:
-                raise ValueError("PW03 runtime config snapshot missing __attestation_verify_k_master__")
+                attestation_env_inputs = resolve_attestation_env_inputs(
+                    dict(runtime_cfg),
+                    require_prompt_seed=False,
+                )
+                k_master = attestation_env_inputs.get("k_master")
+            if not isinstance(k_master, str) or not k_master:
+                raise ValueError(
+                    "PW03 runtime config snapshot missing __attestation_verify_k_master__ "
+                    "and attestation env resolution did not provide k_master"
+                )
 
             bundle_verification = verify_signed_attestation_bundle(
                 dict(cast(Mapping[str, Any], own_material["signed_bundle"])),
@@ -1183,6 +1193,12 @@ def _resolve_attack_event_spec(
         raise ValueError(f"parent detect_record_path missing: {parent_event_id}")
 
     pool_event = cast(Mapping[str, Any], parent_source_event.get("pool_event", {}))
+    parent_prompt_text = parent_event_manifest.get("prompt_text")
+    if not isinstance(parent_prompt_text, str) or not parent_prompt_text.strip():
+        parent_prompt_text = pool_event.get("prompt_text")
+    parent_prompt_sha256 = parent_event_manifest.get("prompt_sha256")
+    if not isinstance(parent_prompt_sha256, str) or not parent_prompt_sha256.strip():
+        parent_prompt_sha256 = pool_event.get("prompt_sha256")
 
     return {
         **attack_event_payload,
@@ -1199,6 +1215,16 @@ def _resolve_attack_event_spec(
             "parent_source_shard_root": pool_event.get("source_shard_root"),
             "parent_source_shard_index": pool_event.get("source_shard_index"),
             "parent_source_shard_manifest_path": pool_event.get("source_shard_manifest_path"),
+            "prompt_text": (
+                str(parent_prompt_text).strip()
+                if isinstance(parent_prompt_text, str) and str(parent_prompt_text).strip()
+                else None
+            ),
+            "prompt_sha256": (
+                str(parent_prompt_sha256).strip()
+                if isinstance(parent_prompt_sha256, str) and str(parent_prompt_sha256).strip()
+                else None
+            ),
             "payload_reference_sidecar_path": pool_event.get("payload_reference_sidecar_path"),
             "payload_decode_sidecar_path": pool_event.get("payload_decode_sidecar_path"),
         },

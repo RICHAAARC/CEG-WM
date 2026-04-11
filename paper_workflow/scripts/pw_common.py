@@ -407,8 +407,13 @@ def build_payload_decode_sidecar_payload(
     if not lf_trace:
         lf_trace = _extract_mapping(score_parts.get("lf_metrics"))
 
+    attestation_payload = _extract_mapping(detect_payload.get("attestation"))
     trace_artifact = _extract_mapping(detect_payload.get("_lf_attestation_trace_artifact"))
+    if not trace_artifact:
+        trace_artifact = _extract_mapping(attestation_payload.get("_lf_attestation_trace_artifact"))
     alignment_artifact = _extract_mapping(detect_payload.get("_lf_alignment_table_artifact"))
+    if not alignment_artifact:
+        alignment_artifact = _extract_mapping(attestation_payload.get("_lf_alignment_table_artifact"))
     mismatch_indices = _extract_int_list(trace_artifact.get("mismatch_indices"))
     if not mismatch_indices:
         mismatch_indices = _extract_int_list(alignment_artifact.get("mismatch_indices"))

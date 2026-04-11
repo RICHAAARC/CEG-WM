@@ -21,6 +21,7 @@ from main.watermarking.provenance.attestation_statement import (
     build_signed_attestation_bundle,
     compute_attestation_digest,
 )
+from paper_workflow.scripts.pw_common import build_payload_decode_sidecar_payload
 from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
 import paper_workflow.scripts.pw03_run_attack_event_shard as pw03_module
 from scripts.notebook_runtime_common import (
@@ -84,6 +85,30 @@ def _write_bound_config_snapshot(drive_project_root: Path, *, marker: str) -> Tu
     )
     bound_cfg["test_config_origin"] = marker
     bound_cfg["__attestation_verify_k_master__"] = TEST_ATTESTATION_MASTER_KEY
+    bound_config_path = drive_project_root / "runtime_state" / f"{marker}_bound_config.yaml"
+    write_yaml_mapping(bound_config_path, bound_cfg)
+    return bound_config_path, snapshot_dir
+
+
+def _write_bound_config_snapshot_without_verify_key(drive_project_root: Path, *, marker: str) -> Tuple[Path, Path]:
+    """
+    Build a notebook-style bound config snapshot without the verify key override.
+
+    Args:
+        drive_project_root: Drive project root.
+        marker: Stable fixture marker.
+
+    Returns:
+        Tuple of bound config path and model snapshot directory.
+    """
+    snapshot_dir = drive_project_root / "runtime_state" / f"{marker}_model_snapshot"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+    bound_cfg = apply_notebook_model_snapshot_binding(
+        load_yaml_mapping((pw03_module.REPO_ROOT / "configs" / "default.yaml").resolve()),
+        env_mapping={"CEG_WM_MODEL_SNAPSHOT_PATH": snapshot_dir.as_posix()},
+    )
+    bound_cfg["test_config_origin"] = marker
     bound_config_path = drive_project_root / "runtime_state" / f"{marker}_bound_config.yaml"
     write_yaml_mapping(bound_config_path, bound_cfg)
     return bound_config_path, snapshot_dir
@@ -454,12 +479,6 @@ def _patch_pw03_detect(monkeypatch: pytest.MonkeyPatch) -> Dict[str, Any]:
                         }
                     },
                 },
-                "_lf_attestation_trace_artifact": {
-                    "expected_bit_signs": expected_bit_signs,
-                    "mismatch_indices": mismatch_indices,
-                    "n_bits_compared": 96,
-                    "agreement_count": 96 - len(mismatch_indices),
-                },
                 "geometry_result": {
                     "sync_status": "ok",
                     "sync_result": {
@@ -492,6 +511,16 @@ def _patch_pw03_detect(monkeypatch: pytest.MonkeyPatch) -> Dict[str, Any]:
                     },
                 },
                 "attestation": {
+                    "bundle_verification": {
+                        "status": "ok",
+                        "mismatch_reasons": [],
+                    },
+                    "_lf_attestation_trace_artifact": {
+                        "expected_bit_signs": expected_bit_signs,
+                        "mismatch_indices": mismatch_indices,
+                        "n_bits_compared": 96,
+                        "agreement_count": 96 - len(mismatch_indices),
+                    },
                     "final_event_attested_decision": {
                         "event_attestation_score": 0.77,
                     }
@@ -708,6 +737,9 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert Path(str(first_event["payload_reference_sidecar_path"])).exists()
     assert Path(str(first_event["payload_decode_sidecar_path"])).exists()
     assert first_event["parent_event_id"]
+    parent_reference = cast(Dict[str, Any], first_event["parent_event_reference"])
+    assert parent_reference["prompt_text"] in {"prompt one", "prompt two"}
+    assert isinstance(parent_reference["prompt_sha256"], str) and parent_reference["prompt_sha256"]
     assert first_event["attack_family"]
     assert first_event["attack_params_digest"]
     assert first_event["threshold_binding_summary"]["threshold_artifact_paths"]["content"]
@@ -747,6 +779,102 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert payload_decode_sidecar["reference_event_id"] == first_event["parent_event_id"]
     assert payload_decode_sidecar["sample_role"] == pw03_module.ATTACKED_POSITIVE_SAMPLE_ROLE
     assert payload_decode_sidecar["lf_detect_variant"] == "correlation_v2"
+
+
+def test_payload_decode_sidecar_supports_nested_attestation_trace_artifacts() -> None:
+    """
+    Verify payload decode sidecars accept LF trace artifacts nested under attestation.
+
+    Returns:
+        None.
+    """
+    expected_bit_signs = [1 if bit_index % 2 == 0 else -1 for bit_index in range(96)]
+    mismatch_indices = [2, 7]
+
+    payload = build_payload_decode_sidecar_payload(
+        family_id="family_nested_trace",
+        stage_name="PW01_Source_Event_Shards",
+        event_id="source_event_000001",
+        event_index=1,
+        sample_role=pw03_module.ACTIVE_SAMPLE_ROLE,
+        reference_event_id="source_event_000001",
+        detect_payload={
+            "content_evidence_payload": {
+                "status": "ok",
+                "score_parts": {
+                    "lf_trajectory_detect_trace": {
+                        "codeword_agreement": 1.0 - (len(mismatch_indices) / 96.0),
+                        "n_bits_compared": 96,
+                        "detect_variant": "correlation_v2",
+                        "message_source": "attestation_event_digest",
+                    }
+                },
+            },
+            "attestation": {
+                "_lf_attestation_trace_artifact": {
+                    "expected_bit_signs": expected_bit_signs,
+                    "mismatch_indices": mismatch_indices,
+                    "n_bits_compared": 96,
+                    "agreement_count": 96 - len(mismatch_indices),
+                }
+            },
+        },
+        reference_sidecar={
+            "reference_payload_digest": "reference_payload_digest_source_event_000001",
+            "payload_binding_digest": "payload_binding_digest_source_event_000001",
+            "message_source": "attestation_event_digest",
+            "code_bits": expected_bit_signs,
+        },
+    )
+
+    assert payload["reference_event_id"] == "source_event_000001"
+    assert payload["bit_error_count"] == len(mismatch_indices)
+    assert payload["agreement_count"] == 96 - len(mismatch_indices)
+    assert payload["n_bits_compared"] == 96
+    assert payload["lf_detect_variant"] == "correlation_v2"
+    assert isinstance(payload["decoded_bits"], list)
+    assert len(cast(List[int], payload["decoded_bits"])) == 96
+
+
+def test_pw03_wrong_event_challenge_uses_env_verify_key_when_snapshot_omits_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify PW03 can materialize wrong-event challenge records using env-based verify key fallback.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    summary = _build_pw00_family(tmp_path, family_id="family_pw03_env_verify_key")
+    _build_positive_source_finalize_fixture(summary)
+    bound_config_path, _ = _write_bound_config_snapshot_without_verify_key(
+        tmp_path / "drive",
+        marker="pw03_env_verify_key",
+    )
+    _patch_pw03_detect(monkeypatch)
+    monkeypatch.setenv("CEG_WM_K_MASTER", TEST_ATTESTATION_MASTER_KEY)
+
+    pw03_summary = pw03_module.run_pw03_attack_event_shard(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_pw03_env_verify_key",
+        attack_shard_index=0,
+        attack_shard_count=2,
+        attack_local_worker_count=1,
+        bound_config_path=bound_config_path,
+    )
+
+    first_event = cast(Dict[str, Any], pw03_summary["events"][0])
+    wrong_event_challenge_record = json.loads(
+        Path(str(first_event["wrong_event_attestation_challenge_record_path"])).read_text(encoding="utf-8")
+    )
+    assert wrong_event_challenge_record["status"] == "ok"
+    assert wrong_event_challenge_record["bundle_verification_status"] == "ok"
+    assert wrong_event_challenge_record["wrong_event_rejected"] is True
 
 
 def test_pw03_attack_shards_remain_isolated_across_sessions(

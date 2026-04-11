@@ -6,6 +6,7 @@ Module type: General module
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import shutil
 import sys
@@ -573,6 +574,31 @@ def _load_optional_json_dict(path_obj: Path | None, label: str) -> Dict[str, Any
     return _load_required_json_dict(path_obj, label)
 
 
+def _build_quality_runtime_preflight() -> Dict[str, Any]:
+    """
+    功能：检查当前 Python 环境中的质量依赖可导入性。
+
+    Build the quality-runtime dependency preflight payload for the current
+    Python environment.
+
+    Returns:
+        Dependency preflight mapping for LPIPS and CLIP runtime imports.
+    """
+    preflight_payload: Dict[str, Any] = {}
+    for module_name, ready_key, reason_key in [
+        ("lpips", "lpips_dependency_ready", "lpips_dependency_reason"),
+        ("open_clip", "clip_dependency_ready", "clip_dependency_reason"),
+    ]:
+        try:
+            importlib.import_module(module_name)
+            preflight_payload[ready_key] = True
+            preflight_payload[reason_key] = None
+        except Exception as exc:
+            preflight_payload[ready_key] = False
+            preflight_payload[reason_key] = f"{module_name}_import_failed:{type(exc).__name__}: {exc}"
+    return preflight_payload
+
+
 def _build_quality_component_readiness(
     *,
     component_name: str,
@@ -588,6 +614,7 @@ def _build_quality_component_readiness(
     clip_reason_key: str,
     prompt_text_coverage_status_key: str,
     prompt_text_coverage_reason_key: str,
+    dependency_preflight: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """
     功能：为 clean 或 attack 质量链构造统一 readiness 结论。 
@@ -624,6 +651,11 @@ def _build_quality_component_readiness(
     clip_reason = payload.get(clip_reason_key)
     prompt_text_coverage_status = payload.get(prompt_text_coverage_status_key)
     prompt_text_coverage_reason = payload.get(prompt_text_coverage_reason_key)
+    dependency_payload = _extract_mapping(dependency_preflight)
+    lpips_dependency_ready = dependency_payload.get("lpips_dependency_ready")
+    lpips_dependency_reason = dependency_payload.get("lpips_dependency_reason")
+    clip_dependency_ready = dependency_payload.get("clip_dependency_ready")
+    clip_dependency_reason = dependency_payload.get("clip_dependency_reason")
 
     blocking_reasons: list[str] = []
     if status_value != "ok":
@@ -636,11 +668,19 @@ def _build_quality_component_readiness(
         )
     if lpips_status != "ok":
         blocking_reasons.append(
-            str(lpips_reason) if isinstance(lpips_reason, str) and str(lpips_reason).strip() else "LPIPS unavailable"
+            str(lpips_dependency_reason)
+            if lpips_dependency_ready is False and isinstance(lpips_dependency_reason, str) and str(lpips_dependency_reason).strip()
+            else (
+                str(lpips_reason) if isinstance(lpips_reason, str) and str(lpips_reason).strip() else "LPIPS unavailable"
+            )
         )
     if clip_status != "ok":
         blocking_reasons.append(
-            str(clip_reason) if isinstance(clip_reason, str) and str(clip_reason).strip() else "CLIP unavailable"
+            str(clip_dependency_reason)
+            if clip_dependency_ready is False and isinstance(clip_dependency_reason, str) and str(clip_dependency_reason).strip()
+            else (
+                str(clip_reason) if isinstance(clip_reason, str) and str(clip_reason).strip() else "CLIP unavailable"
+            )
         )
     if isinstance(prompt_text_coverage_status, str) and prompt_text_coverage_status not in {"ok", "not_configured"}:
         blocking_reasons.append(
@@ -671,6 +711,10 @@ def _build_quality_component_readiness(
         "lpips_status": lpips_status,
         "clip_status": clip_status,
         "prompt_text_coverage_status": prompt_text_coverage_status,
+        "lpips_dependency_ready": lpips_dependency_ready,
+        "lpips_dependency_reason": lpips_dependency_reason,
+        "clip_dependency_ready": clip_dependency_ready,
+        "clip_dependency_reason": clip_dependency_reason,
     }
 
 
@@ -890,6 +934,7 @@ def _build_formal_run_readiness_report(
         {},
     )
     attack_quality_overall = _extract_mapping(attack_quality_payload.get("overall"))
+    quality_runtime_preflight = _build_quality_runtime_preflight()
 
     components = {
         "quality_clean": _build_quality_component_readiness(
@@ -906,6 +951,7 @@ def _build_formal_run_readiness_report(
             clip_reason_key="clip_reason",
             prompt_text_coverage_status_key="prompt_text_coverage_status",
             prompt_text_coverage_reason_key="prompt_text_coverage_reason",
+            dependency_preflight=quality_runtime_preflight,
         ),
         "quality_attack": _build_quality_component_readiness(
             component_name="quality_attack",
@@ -921,6 +967,7 @@ def _build_formal_run_readiness_report(
             clip_reason_key="clip_reason",
             prompt_text_coverage_status_key="prompt_text_coverage_status",
             prompt_text_coverage_reason_key="prompt_text_coverage_reason",
+            dependency_preflight=quality_runtime_preflight,
         ),
         "payload_clean": _build_auxiliary_summary_component_readiness(
             component_name="payload_clean",
@@ -989,6 +1036,7 @@ def _build_formal_run_readiness_report(
         "blocking_components": blocking_components,
         "blocking_reasons": blocking_reasons,
         "advisory_components": advisory_components,
+        "quality_runtime_preflight": quality_runtime_preflight,
         "components": components,
         "recommended_run_plan": _build_formal_run_scaling_plan(
             family_manifest=family_manifest,
