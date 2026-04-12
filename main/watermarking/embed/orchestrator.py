@@ -27,6 +27,9 @@ from main.watermarking.common.plan_digest_flow import (
 from main.watermarking.content_chain.subspace.subspace_planner_impl import (
     build_runtime_jvp_operator_from_cache,
 )
+from main.watermarking.content_chain.channel_lf import (
+    derive_lf_template_bundle,
+)
 from main.watermarking.content_chain.high_freq_embedder import (
     compute_hf_trace_digest,
 )
@@ -689,6 +692,17 @@ def run_embed_orchestrator(
                 record_fields["subspace_rank"] = plan_node_payload.get("rank")
                 record_fields["subspace_energy_ratio"] = plan_node_payload.get("energy_ratio")
                 record_fields["subspace_planner_impl_identity"] = plan_node_payload.get("planner_impl_identity")
+
+        if use_latent_per_step:
+            bound_basis_digest = record_fields.get("basis_digest")
+            _bind_latent_step_lf_trace_summary(
+                cfg,
+                content_evidence_payload,
+                embed_trace,
+                injection_evidence,
+                plan_digest=plan_digest,
+                basis_digest=bound_basis_digest if isinstance(bound_basis_digest, str) and bound_basis_digest else None,
+            )
         
         return record_fields
     finally:
@@ -873,6 +887,139 @@ def _normalize_content_evidence_optional_mappings(content_evidence_payload: Dict
         current_value = content_evidence_payload.get(key)
         if current_value is None:
             content_evidence_payload[key] = {}
+
+
+def _bind_latent_step_lf_trace_summary(
+    cfg: Dict[str, Any],
+    content_evidence_payload: Dict[str, Any],
+    embed_trace: Dict[str, Any],
+    injection_evidence: Dict[str, Any] | None,
+    *,
+    plan_digest: str | None,
+    basis_digest: str | None,
+) -> None:
+    """
+    功能：为 latent per-step 主路径补齐 LF 摘要字段。
+
+    Bind builder-compatible LF summary fields for the latent per-step embed
+    path using runtime injection evidence and the formal LF template inputs.
+
+    Args:
+        cfg: Runtime configuration mapping.
+        content_evidence_payload: Mutable content evidence mapping.
+        embed_trace: Mutable embed trace mapping.
+        injection_evidence: Injection evidence mapping.
+        plan_digest: Canonical content plan digest.
+        basis_digest: Canonical basis digest.
+
+    Returns:
+        None.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+    if not isinstance(content_evidence_payload, dict):
+        raise TypeError("content_evidence_payload must be dict")
+    if not isinstance(embed_trace, dict):
+        raise TypeError("embed_trace must be dict")
+    if injection_evidence is not None and not isinstance(injection_evidence, dict):
+        raise TypeError("injection_evidence must be dict or None")
+    if not isinstance(plan_digest, str) or not plan_digest:
+        return
+    if not isinstance(injection_evidence, dict):
+        return
+    if injection_evidence.get("status") != "ok":
+        return
+
+    injection_metrics = _as_dict_payload(injection_evidence.get("injection_metrics"))
+    if not isinstance(injection_metrics, dict):
+        return
+
+    lf_closed_loop_summary = _as_dict_payload(injection_metrics.get("lf_closed_loop_summary"))
+    if not isinstance(lf_closed_loop_summary, dict):
+        return
+
+    template_cfg = dict(cfg)
+    watermark_node = template_cfg.get("watermark")
+    watermark_payload = cast(Dict[str, Any], watermark_node) if isinstance(watermark_node, dict) else {}
+    watermark_cfg = dict(watermark_payload)
+    watermark_cfg["plan_digest"] = plan_digest
+    template_cfg["lf_plan_digest"] = plan_digest
+    template_cfg["plan_digest"] = plan_digest
+    if isinstance(basis_digest, str) and basis_digest:
+        watermark_cfg["basis_digest"] = basis_digest
+        template_cfg["basis_digest"] = basis_digest
+        template_cfg["lf_basis_digest"] = basis_digest
+    template_cfg["watermark"] = watermark_cfg
+
+    coeffs_count = lf_closed_loop_summary.get("coeffs_count")
+    if not isinstance(coeffs_count, int) or coeffs_count <= 0:
+        coeffs_count = None
+
+    lf_cfg_node = watermark_cfg.get("lf")
+    lf_cfg = cast(Dict[str, Any], lf_cfg_node) if isinstance(lf_cfg_node, dict) else {}
+    template_length = coeffs_count
+    if template_length is None:
+        message_length_candidate = lf_cfg.get("message_length")
+        if isinstance(message_length_candidate, int) and message_length_candidate > 0:
+            template_length = message_length_candidate
+        else:
+            template_length = 1
+
+    try:
+        template_bundle = derive_lf_template_bundle(template_cfg, int(template_length))
+    except Exception:
+        # LF 模板输入不足时保持缺失，让下游按既有 fail-fast 语义处理。
+        return
+
+    ldpc_spec = _as_dict_payload(template_bundle.get("ldpc_spec"))
+    if not isinstance(ldpc_spec, dict):
+        return
+
+    message_length = ldpc_spec.get("message_length")
+    ecc_sparsity = lf_cfg.get("ecc_sparsity")
+    if not isinstance(ecc_sparsity, int) or ecc_sparsity <= 0:
+        ecc_sparsity = ldpc_spec.get("row_weight")
+    if not isinstance(message_length, int) or message_length <= 0:
+        return
+    if not isinstance(ecc_sparsity, int) or ecc_sparsity <= 0:
+        return
+
+    resolved_basis_digest = template_bundle.get("basis_digest")
+    if not isinstance(resolved_basis_digest, str) or not resolved_basis_digest:
+        resolved_basis_digest = injection_metrics.get("lf_basis_digest")
+    if not isinstance(resolved_basis_digest, str) or not resolved_basis_digest:
+        resolved_basis_digest = basis_digest
+
+    resolved_attestation_event_digest = template_bundle.get("attestation_event_digest")
+    if not isinstance(resolved_attestation_event_digest, str) or not resolved_attestation_event_digest:
+        resolved_attestation_event_digest = injection_metrics.get("lf_attestation_event_digest")
+
+    lf_trace_summary: Dict[str, Any] = {
+        "lf_status": "ok",
+        "lf_mode": "latent_step_injection_v1",
+        "message_length": message_length,
+        "ecc_sparsity": ecc_sparsity,
+        "message_source": template_bundle.get("message_source"),
+        "plan_digest": template_bundle.get("plan_digest") or plan_digest,
+        "basis_digest": resolved_basis_digest,
+        "attestation_event_digest": resolved_attestation_event_digest,
+        "parity_check_digest": template_bundle.get("parity_check_digest"),
+        "event_binding_mode": template_bundle.get("event_binding_mode") or injection_metrics.get("event_binding_mode"),
+        "codeword_source": injection_metrics.get("lf_codeword_source") or lf_closed_loop_summary.get("codeword_source") or template_bundle.get("codeword_source"),
+        "lf_closed_loop_summary": lf_closed_loop_summary,
+        "lf_closed_loop_digest": injection_metrics.get("lf_closed_loop_digest"),
+        "lf_closed_loop_step_index": injection_metrics.get("lf_closed_loop_step_index"),
+        "lf_closed_loop_candidate_count": injection_metrics.get("lf_closed_loop_candidate_count"),
+    }
+
+    score_parts = content_evidence_payload.get("score_parts")
+    if not isinstance(score_parts, dict):
+        score_parts = {}
+        content_evidence_payload["score_parts"] = score_parts
+    score_parts_payload = cast(Dict[str, Any], score_parts)
+    score_parts_payload["lf_status"] = lf_trace_summary["lf_status"]
+    score_parts_payload["lf_metrics"] = lf_trace_summary
+    embed_trace["lf_trace_summary"] = lf_trace_summary
 
 
 def _build_planner_inputs_for_runtime(
