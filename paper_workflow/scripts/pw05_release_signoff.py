@@ -584,7 +584,10 @@ def _build_quality_runtime_preflight() -> Dict[str, Any]:
     Returns:
         Dependency preflight mapping for LPIPS and CLIP runtime imports.
     """
-    preflight_payload: Dict[str, Any] = {}
+    preflight_payload: Dict[str, Any] = {
+        "diagnostic_only": True,
+        "scope": "diagnostic_only_for_pw05_env",
+    }
     for module_name, ready_key, reason_key in [
         ("lpips", "lpips_dependency_ready", "lpips_dependency_reason"),
         ("open_clip", "clip_dependency_ready", "clip_dependency_reason"),
@@ -766,6 +769,8 @@ def _build_quality_component_readiness(
         "lpips_status": lpips_status,
         "clip_status": clip_status,
         "prompt_text_coverage_status": prompt_text_coverage_status,
+        "runtime_preflight_diagnostic_only": bool(dependency_payload.get("diagnostic_only", True)),
+        "runtime_preflight_scope": dependency_payload.get("scope"),
         "lpips_dependency_ready": lpips_dependency_ready,
         "lpips_dependency_reason": lpips_dependency_reason,
         "clip_dependency_ready": clip_dependency_ready,
