@@ -599,6 +599,61 @@ def _build_quality_runtime_preflight() -> Dict[str, Any]:
     return preflight_payload
 
 
+def _append_quality_failure_reasons(
+    blocking_reasons: List[str],
+    *,
+    artifact_reason: Any,
+    dependency_ready: Any,
+    dependency_reason: Any,
+    fallback_reason: str,
+) -> None:
+    """
+    功能：按 artifact 优先、dependency 次之的顺序追加 quality 失败原因。
+
+    Append one quality failure reason with artifact-level specificity preserved
+    ahead of runtime dependency preflight diagnostics.
+
+    Args:
+        blocking_reasons: Mutable blocking-reason list.
+        artifact_reason: Quality artifact reason.
+        dependency_ready: Dependency readiness flag.
+        dependency_reason: Dependency preflight reason.
+        fallback_reason: Fallback reason when neither concrete source exists.
+
+    Returns:
+        None.
+    """
+    if not isinstance(blocking_reasons, list):
+        raise TypeError("blocking_reasons must be list")
+    if not isinstance(fallback_reason, str) or not fallback_reason.strip():
+        raise TypeError("fallback_reason must be non-empty str")
+
+    artifact_reason_text = (
+        str(artifact_reason).strip()
+        if isinstance(artifact_reason, str) and str(artifact_reason).strip()
+        else None
+    )
+    dependency_reason_text = (
+        str(dependency_reason).strip()
+        if dependency_ready is False
+        and isinstance(dependency_reason, str)
+        and str(dependency_reason).strip()
+        else None
+    )
+
+    if artifact_reason_text is not None:
+        blocking_reasons.append(artifact_reason_text)
+        if dependency_reason_text is not None:
+            blocking_reasons.append(dependency_reason_text)
+        return
+
+    if dependency_reason_text is not None:
+        blocking_reasons.append(dependency_reason_text)
+        return
+
+    blocking_reasons.append(fallback_reason)
+
+
 def _build_quality_component_readiness(
     *,
     component_name: str,
@@ -667,20 +722,20 @@ def _build_quality_component_readiness(
             f"valid image pairs available for {count_value}/{expected_count_value} expected bindings"
         )
     if lpips_status != "ok":
-        blocking_reasons.append(
-            str(lpips_dependency_reason)
-            if lpips_dependency_ready is False and isinstance(lpips_dependency_reason, str) and str(lpips_dependency_reason).strip()
-            else (
-                str(lpips_reason) if isinstance(lpips_reason, str) and str(lpips_reason).strip() else "LPIPS unavailable"
-            )
+        _append_quality_failure_reasons(
+            blocking_reasons,
+            artifact_reason=lpips_reason,
+            dependency_ready=lpips_dependency_ready,
+            dependency_reason=lpips_dependency_reason,
+            fallback_reason="LPIPS unavailable",
         )
     if clip_status != "ok":
-        blocking_reasons.append(
-            str(clip_dependency_reason)
-            if clip_dependency_ready is False and isinstance(clip_dependency_reason, str) and str(clip_dependency_reason).strip()
-            else (
-                str(clip_reason) if isinstance(clip_reason, str) and str(clip_reason).strip() else "CLIP unavailable"
-            )
+        _append_quality_failure_reasons(
+            blocking_reasons,
+            artifact_reason=clip_reason,
+            dependency_ready=clip_dependency_ready,
+            dependency_reason=clip_dependency_reason,
+            fallback_reason="CLIP unavailable",
         )
     if isinstance(prompt_text_coverage_status, str) and prompt_text_coverage_status not in {"ok", "not_configured"}:
         blocking_reasons.append(
