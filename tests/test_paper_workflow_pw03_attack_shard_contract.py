@@ -736,6 +736,7 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert Path(str(first_event["wrong_event_attestation_challenge_record_path"])).exists()
     assert Path(str(first_event["payload_reference_sidecar_path"])).exists()
     assert Path(str(first_event["payload_decode_sidecar_path"])).exists()
+    assert Path(str(first_event["payload_decode_sidecar_status_path"])).exists()
     assert first_event["parent_event_id"]
     parent_reference = cast(Dict[str, Any], first_event["parent_event_reference"])
     assert parent_reference["prompt_text"] in {"prompt one", "prompt two"}
@@ -775,10 +776,152 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_diagnostics"])["sync_success"] is True
     assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_diagnostics"])["inverse_transform_success"] is True
     assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_diagnostics"])["attention_anchor_available"] is True
+    payload_decode_status = json.loads(Path(str(first_event["payload_decode_sidecar_status_path"])).read_text(encoding="utf-8"))
+    assert payload_decode_status["status"] == "ok"
+    assert payload_decode_status["required"] is True
     payload_decode_sidecar = json.loads(Path(str(first_event["payload_decode_sidecar_path"])).read_text(encoding="utf-8"))
     assert payload_decode_sidecar["reference_event_id"] == first_event["parent_event_id"]
     assert payload_decode_sidecar["sample_role"] == pw03_module.ATTACKED_POSITIVE_SAMPLE_ROLE
     assert payload_decode_sidecar["lf_detect_variant"] == "correlation_v2"
+
+
+def test_run_attack_detect_event_marks_payload_decode_sidecar_not_applicable_for_attacked_negative(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify attacked-negative events emit an explicit not_applicable payload decode status artifact.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    _patch_pw03_detect(monkeypatch)
+
+    shard_root = ensure_directory(tmp_path / "attack_shard")
+    event_root = ensure_directory(shard_root / "events" / "event_000000")
+    source_image_path = tmp_path / "parent_source.png"
+    attacked_image_path = tmp_path / "attacked_negative.png"
+    Image.new("RGB", (8, 8), color=(32, 64, 96)).save(source_image_path)
+    Image.new("RGB", (8, 8), color=(96, 64, 32)).save(attacked_image_path)
+
+    parent_embed_record_path = tmp_path / "parent_embed_record.json"
+    write_json_atomic(
+        parent_embed_record_path,
+        {
+            "operation": "embed",
+            "watermarked_path": source_image_path.as_posix(),
+            "image_path": source_image_path.as_posix(),
+            "inputs": {"input_image_path": source_image_path.as_posix()},
+            "plan_digest": "plan_detect_negative_test",
+            "basis_digest": "basis_detect_negative_test",
+            "subspace_plan": {"mode": "fixture"},
+        },
+    )
+    runtime_config_path = event_root / "runtime_config.yaml"
+    write_yaml_mapping(runtime_config_path, {"paper_workflow_event": {"event_id": "attack_negative_0000"}})
+
+    detect_summary = pw03_module._run_attack_detect_event(
+        attack_event_spec={
+            "event_id": "attack_negative_0000",
+            "attack_event_index": 0,
+            "sample_role": pw03_module.ATTACKED_NEGATIVE_SAMPLE_ROLE,
+            "parent_event_id": "source_event_000000",
+            "family_id": "family_attack_negative_status",
+            "attack_family": "jpeg",
+            "attack_config_name": "jpeg_q75",
+            "attack_params_digest": "attack_params_digest_negative",
+            "attack_condition_key": "jpeg:q75",
+            "parent_event_reference": {
+                "parent_event_id": "source_event_000000",
+                "parent_source_image_path": source_image_path.as_posix(),
+                "parent_embed_record_path": parent_embed_record_path.as_posix(),
+            },
+        },
+        shard_root=shard_root,
+        event_root=event_root,
+        runtime_config_path=runtime_config_path,
+        attacked_image_path=attacked_image_path,
+    )
+
+    assert detect_summary["payload_decode_sidecar_path"] is None
+    assert detect_summary["payload_decode_sidecar_status"] == "not_applicable"
+    status_payload = json.loads(Path(str(detect_summary["payload_decode_sidecar_status_path"])).read_text(encoding="utf-8"))
+    assert status_payload["status"] == "not_applicable"
+    assert status_payload["required"] is False
+    assert status_payload["not_applicable_reason"] == "sample_role_not_attacked_positive"
+
+
+def test_run_attack_detect_event_fails_when_required_parent_payload_reference_sidecar_is_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify attacked-positive events fail fast when the parent payload reference sidecar is missing.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    _patch_pw03_detect(monkeypatch)
+
+    shard_root = ensure_directory(tmp_path / "attack_shard")
+    event_root = ensure_directory(shard_root / "events" / "event_000001")
+    source_image_path = tmp_path / "parent_source_positive.png"
+    attacked_image_path = tmp_path / "attacked_positive.png"
+    Image.new("RGB", (8, 8), color=(16, 48, 80)).save(source_image_path)
+    Image.new("RGB", (8, 8), color=(80, 48, 16)).save(attacked_image_path)
+
+    parent_embed_record_path = tmp_path / "parent_positive_embed_record.json"
+    write_json_atomic(
+        parent_embed_record_path,
+        {
+            "operation": "embed",
+            "watermarked_path": source_image_path.as_posix(),
+            "image_path": source_image_path.as_posix(),
+            "inputs": {"input_image_path": source_image_path.as_posix()},
+            "plan_digest": "plan_detect_positive_test",
+            "basis_digest": "basis_detect_positive_test",
+            "subspace_plan": {"mode": "fixture"},
+        },
+    )
+    runtime_config_path = event_root / "runtime_config.yaml"
+    write_yaml_mapping(runtime_config_path, {"paper_workflow_event": {"event_id": "attack_positive_0001"}})
+
+    with pytest.raises(RuntimeError, match="PW03 required payload decode sidecar dependency missing"):
+        pw03_module._run_attack_detect_event(
+            attack_event_spec={
+                "event_id": "attack_positive_0001",
+                "attack_event_index": 1,
+                "sample_role": pw03_module.ATTACKED_POSITIVE_SAMPLE_ROLE,
+                "parent_event_id": "source_event_000001",
+                "family_id": "family_attack_positive_status",
+                "attack_family": "jpeg",
+                "attack_config_name": "jpeg_q75",
+                "attack_params_digest": "attack_params_digest_positive",
+                "attack_condition_key": "jpeg:q75",
+                "parent_event_reference": {
+                    "parent_event_id": "source_event_000001",
+                    "parent_source_image_path": source_image_path.as_posix(),
+                    "parent_embed_record_path": parent_embed_record_path.as_posix(),
+                },
+            },
+            shard_root=shard_root,
+            event_root=event_root,
+            runtime_config_path=runtime_config_path,
+            attacked_image_path=attacked_image_path,
+        )
+
+    status_payload = json.loads((event_root / "artifacts" / "payload_decode_sidecar_status.json").read_text(encoding="utf-8"))
+    assert status_payload["status"] == "failed"
+    assert status_payload["required"] is True
+    assert status_payload["failure_reason"] == "parent_payload_reference_sidecar_missing"
 
 
 def test_payload_decode_sidecar_supports_nested_attestation_trace_artifacts() -> None:

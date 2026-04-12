@@ -53,6 +53,7 @@ SOURCE_TRUTH_STAGE = "PW01_Source_Event_Shards"
 ATTACK_SEVERITY_RULE_VERSION = "pw_attack_severity_v1"
 ATTACK_SEVERITY_AXIS_KIND = "family_local"
 PAYLOAD_SIDECAR_SCHEMA_VERSION = "pw_payload_sidecar_v1"
+PAYLOAD_SIDECAR_STATUS_SCHEMA_VERSION = "pw_payload_sidecar_status_v1"
 
 
 def _canonical_json_text(payload: Mapping[str, Any]) -> str:
@@ -516,6 +517,101 @@ def build_payload_decode_sidecar_payload(
         "decode_failure_reason": decode_failure_reason,
         "bp_converged": trace_artifact.get("bp_converged"),
         "bp_iteration_count": _extract_int(trace_artifact.get("bp_iteration_count")),
+    }
+
+
+def build_payload_sidecar_status_payload(
+    *,
+    family_id: str,
+    stage_name: str,
+    event_id: str,
+    event_index: int,
+    sample_role: str,
+    sidecar_name: str,
+    required: bool,
+    status: str,
+    builder_name: str | None = None,
+    reference_event_id: str | None = None,
+    failure_reason: str | None = None,
+    exception_type: str | None = None,
+    exception_message: str | None = None,
+    not_applicable_reason: str | None = None,
+) -> Dict[str, Any]:
+    """
+    功能：构造 payload sidecar 生成状态工件。
+
+    Build one payload sidecar generation-status artifact.
+
+    Args:
+        family_id: Family identifier.
+        stage_name: Stage name.
+        event_id: Event identifier.
+        event_index: Event index.
+        sample_role: Event sample role.
+        sidecar_name: Stable payload sidecar name.
+        required: Whether the sidecar is required on the current path.
+        status: Sidecar generation status.
+        builder_name: Optional authoritative builder name.
+        reference_event_id: Optional reference event identifier.
+        failure_reason: Optional failure reason token.
+        exception_type: Optional exception type name.
+        exception_message: Optional exception message.
+        not_applicable_reason: Optional not-applicable reason token.
+
+    Returns:
+        Payload sidecar status artifact mapping.
+
+    Raises:
+        TypeError: If required fields are invalid.
+        ValueError: If the status contract is inconsistent.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(stage_name, str) or not stage_name:
+        raise TypeError("stage_name must be non-empty str")
+    if not isinstance(event_id, str) or not event_id:
+        raise TypeError("event_id must be non-empty str")
+    if not isinstance(event_index, int) or isinstance(event_index, bool) or event_index < 0:
+        raise TypeError("event_index must be non-negative int")
+    if not isinstance(sample_role, str) or not sample_role:
+        raise TypeError("sample_role must be non-empty str")
+    if not isinstance(sidecar_name, str) or not sidecar_name:
+        raise TypeError("sidecar_name must be non-empty str")
+    if not isinstance(required, bool):
+        raise TypeError("required must be bool")
+    if status not in {"ok", "failed", "not_applicable"}:
+        raise ValueError("status must be one of {'ok', 'failed', 'not_applicable'}")
+    if status == "failed" and (not isinstance(failure_reason, str) or not failure_reason):
+        raise ValueError("failure_reason is required when status='failed'")
+    if status == "not_applicable" and (not isinstance(not_applicable_reason, str) or not not_applicable_reason):
+        raise ValueError("not_applicable_reason is required when status='not_applicable'")
+    if required and status == "not_applicable":
+        raise ValueError("required sidecar cannot use status='not_applicable'")
+
+    return {
+        "artifact_type": "paper_workflow_payload_sidecar_status",
+        "schema_version": PAYLOAD_SIDECAR_STATUS_SCHEMA_VERSION,
+        "family_id": family_id,
+        "stage_name": stage_name,
+        "event_id": event_id,
+        "event_index": event_index,
+        "sample_role": sample_role,
+        "sidecar_name": sidecar_name,
+        "required": required,
+        "status": status,
+        "payload_sidecar_present": status == "ok",
+        "builder_name": builder_name if isinstance(builder_name, str) and builder_name else None,
+        "reference_event_id": (
+            reference_event_id if isinstance(reference_event_id, str) and reference_event_id else None
+        ),
+        "failure_reason": failure_reason if isinstance(failure_reason, str) and failure_reason else None,
+        "exception_type": exception_type if isinstance(exception_type, str) and exception_type else None,
+        "exception_message": (
+            exception_message if isinstance(exception_message, str) and exception_message else None
+        ),
+        "not_applicable_reason": (
+            not_applicable_reason if isinstance(not_applicable_reason, str) and not_applicable_reason else None
+        ),
     }
 
 

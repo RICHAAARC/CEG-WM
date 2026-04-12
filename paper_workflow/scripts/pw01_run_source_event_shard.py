@@ -40,6 +40,7 @@ from paper_workflow.scripts.pw_common import (
     DEFAULT_CONFIG_RELATIVE_PATH,
     build_payload_decode_sidecar_payload,
     build_payload_reference_sidecar_payload,
+    build_payload_sidecar_status_payload,
     build_source_shard_root,
     build_family_root,
     read_jsonl,
@@ -2425,7 +2426,48 @@ def _run_positive_source_event(
     artifacts_root = ensure_directory(event_root / "artifacts")
     payload_reference_sidecar_path = artifacts_root / "payload_reference_sidecar.json"
     validate_path_within_base(shard_root, payload_reference_sidecar_path, "payload reference sidecar path")
+    payload_reference_sidecar_status_path = artifacts_root / "payload_reference_sidecar_status.json"
+    validate_path_within_base(shard_root, payload_reference_sidecar_status_path, "payload reference sidecar status path")
+    payload_decode_sidecar_path = artifacts_root / "payload_decode_sidecar.json"
+    validate_path_within_base(shard_root, payload_decode_sidecar_path, "payload decode sidecar path")
+    payload_decode_sidecar_status_path = artifacts_root / "payload_decode_sidecar_status.json"
+    validate_path_within_base(shard_root, payload_decode_sidecar_status_path, "payload decode sidecar status path")
     payload_reference_sidecar_payload: Dict[str, Any] | None = None
+    payload_reference_sidecar_status_payload: Dict[str, Any] | None = None
+    payload_decode_sidecar_payload: Dict[str, Any] | None = None
+    payload_decode_sidecar_status_payload: Dict[str, Any] | None = None
+
+    def _write_payload_sidecar_status(
+        *,
+        sidecar_name: str,
+        status_path: Path,
+        status: str,
+        required: bool,
+        builder_name: str | None = None,
+        reference_event_id: str | None = None,
+        failure_reason: str | None = None,
+        exception: Exception | None = None,
+        not_applicable_reason: str | None = None,
+    ) -> Dict[str, Any]:
+        status_payload = build_payload_sidecar_status_payload(
+            family_id=family_id,
+            stage_name="PW01_Source_Event_Shards",
+            event_id=event_id,
+            event_index=event_index,
+            sample_role=ACTIVE_SAMPLE_ROLE,
+            sidecar_name=sidecar_name,
+            required=required,
+            status=status,
+            builder_name=builder_name,
+            reference_event_id=reference_event_id,
+            failure_reason=failure_reason,
+            exception_type=type(exception).__name__ if exception is not None else None,
+            exception_message=str(exception) if exception is not None else None,
+            not_applicable_reason=not_applicable_reason,
+        )
+        write_json_atomic(status_path, status_payload)
+        return status_payload
+
     try:
         payload_reference_sidecar_payload = build_payload_reference_sidecar_payload(
             family_id=family_id,
@@ -2438,9 +2480,39 @@ def _run_positive_source_event(
             embed_record=_load_required_json_dict(staged_embed_record_path, "event embed record"),
         )
         write_json_atomic(payload_reference_sidecar_path, payload_reference_sidecar_payload)
-    except (TypeError, ValueError):
-        # 旧夹具可能未提供完整 payload 参考字段，此时保持 PW01 主流程兼容。
-        payload_reference_sidecar_payload = None
+        payload_reference_sidecar_status_payload = _write_payload_sidecar_status(
+            sidecar_name="payload_reference_sidecar",
+            status_path=payload_reference_sidecar_status_path,
+            status="ok",
+            required=True,
+            builder_name="build_payload_reference_sidecar_payload",
+            reference_event_id=event_id,
+        )
+    except (TypeError, ValueError) as exc:
+        # payload reference sidecar 属于 formal positive-source 必需工件，失败时必须显式落盘并终止。
+        payload_reference_sidecar_status_payload = _write_payload_sidecar_status(
+            sidecar_name="payload_reference_sidecar",
+            status_path=payload_reference_sidecar_status_path,
+            status="failed",
+            required=True,
+            builder_name="build_payload_reference_sidecar_payload",
+            reference_event_id=event_id,
+            failure_reason="payload_reference_sidecar_generation_failed",
+            exception=exc,
+        )
+        payload_decode_sidecar_status_payload = _write_payload_sidecar_status(
+            sidecar_name="payload_decode_sidecar",
+            status_path=payload_decode_sidecar_status_path,
+            status="failed",
+            required=True,
+            reference_event_id=event_id,
+            failure_reason="payload_reference_sidecar_generation_failed",
+            exception=exc,
+        )
+        raise RuntimeError(
+            "PW01 required payload reference sidecar generation failed: "
+            f"event_id={event_id}, exception_type={type(exc).__name__}, detail={exc}"
+        ) from exc
 
     detect_payload_obj = _load_required_json_dict(source_detect_record_path, "event detect record")
     detect_payload_obj = pw01_stage_runtime_helpers._normalize_direct_detect_payload(
@@ -2452,25 +2524,42 @@ def _run_positive_source_event(
     )
     write_json_atomic(staged_detect_record_path, detect_payload_obj)
 
-    payload_decode_sidecar_path = artifacts_root / "payload_decode_sidecar.json"
-    validate_path_within_base(shard_root, payload_decode_sidecar_path, "payload decode sidecar path")
-    payload_decode_sidecar_payload: Dict[str, Any] | None = None
-    if payload_reference_sidecar_payload is not None:
-        try:
-            payload_decode_sidecar_payload = build_payload_decode_sidecar_payload(
-                family_id=family_id,
-                stage_name="PW01_Source_Event_Shards",
-                event_id=event_id,
-                event_index=event_index,
-                sample_role=ACTIVE_SAMPLE_ROLE,
-                reference_event_id=event_id,
-                detect_payload=detect_payload_obj,
-                reference_sidecar=payload_reference_sidecar_payload,
-            )
-            write_json_atomic(payload_decode_sidecar_path, payload_decode_sidecar_payload)
-        except (TypeError, ValueError):
-            # 旧夹具 detect 记录可能缺少 LF 闭环细节，此时保留旧路径回退能力。
-            payload_decode_sidecar_payload = None
+    try:
+        payload_decode_sidecar_payload = build_payload_decode_sidecar_payload(
+            family_id=family_id,
+            stage_name="PW01_Source_Event_Shards",
+            event_id=event_id,
+            event_index=event_index,
+            sample_role=ACTIVE_SAMPLE_ROLE,
+            reference_event_id=event_id,
+            detect_payload=detect_payload_obj,
+            reference_sidecar=cast(Dict[str, Any], payload_reference_sidecar_payload),
+        )
+        write_json_atomic(payload_decode_sidecar_path, payload_decode_sidecar_payload)
+        payload_decode_sidecar_status_payload = _write_payload_sidecar_status(
+            sidecar_name="payload_decode_sidecar",
+            status_path=payload_decode_sidecar_status_path,
+            status="ok",
+            required=True,
+            builder_name="build_payload_decode_sidecar_payload",
+            reference_event_id=event_id,
+        )
+    except (TypeError, ValueError) as exc:
+        # payload decode sidecar 同属 formal positive-source 必需工件，失败时禁止静默回退为 None。
+        payload_decode_sidecar_status_payload = _write_payload_sidecar_status(
+            sidecar_name="payload_decode_sidecar",
+            status_path=payload_decode_sidecar_status_path,
+            status="failed",
+            required=True,
+            builder_name="build_payload_decode_sidecar_payload",
+            reference_event_id=event_id,
+            failure_reason="payload_decode_sidecar_generation_failed",
+            exception=exc,
+        )
+        raise RuntimeError(
+            "PW01 required payload decode sidecar generation failed: "
+            f"event_id={event_id}, exception_type={type(exc).__name__}, detail={exc}"
+        ) from exc
 
     attestation_views = pw01_stage_runtime_helpers._resolve_source_pool_attestation_views(
         cfg_obj=preview_runtime_cfg,
@@ -2525,6 +2614,21 @@ def _run_positive_source_event(
             if payload_reference_sidecar_payload is not None
             else None
         ),
+        "payload_reference_sidecar_status_path": (
+            normalize_path_value(payload_reference_sidecar_status_path)
+            if payload_reference_sidecar_status_payload is not None
+            else None
+        ),
+        "payload_reference_sidecar_status_package_relative_path": (
+            payload_reference_sidecar_status_path.relative_to(shard_root).as_posix()
+            if payload_reference_sidecar_status_payload is not None
+            else None
+        ),
+        "payload_reference_sidecar_status": (
+            payload_reference_sidecar_status_payload.get("status")
+            if payload_reference_sidecar_status_payload is not None
+            else None
+        ),
         "payload_decode_sidecar_path": (
             normalize_path_value(payload_decode_sidecar_path)
             if payload_decode_sidecar_payload is not None
@@ -2533,6 +2637,21 @@ def _run_positive_source_event(
         "payload_decode_sidecar_package_relative_path": (
             payload_decode_sidecar_path.relative_to(shard_root).as_posix()
             if payload_decode_sidecar_payload is not None
+            else None
+        ),
+        "payload_decode_sidecar_status_path": (
+            normalize_path_value(payload_decode_sidecar_status_path)
+            if payload_decode_sidecar_status_payload is not None
+            else None
+        ),
+        "payload_decode_sidecar_status_package_relative_path": (
+            payload_decode_sidecar_status_path.relative_to(shard_root).as_posix()
+            if payload_decode_sidecar_status_payload is not None
+            else None
+        ),
+        "payload_decode_sidecar_status": (
+            payload_decode_sidecar_status_payload.get("status")
+            if payload_decode_sidecar_status_payload is not None
             else None
         ),
         "source_image": source_image_view,

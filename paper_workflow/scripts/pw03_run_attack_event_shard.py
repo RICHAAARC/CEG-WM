@@ -29,6 +29,7 @@ from paper_workflow.scripts.pw_common import (
     CLEAN_NEGATIVE_SAMPLE_ROLE,
     MIXED_ATTACK_SAMPLE_ROLE,
     build_payload_decode_sidecar_payload,
+    build_payload_sidecar_status_payload,
     build_family_root,
     read_jsonl,
     resolve_family_id_from_path,
@@ -1631,13 +1632,69 @@ def _run_attack_detect_event(
         payload_reference_sidecar_path = Path(payload_reference_sidecar_path_value).expanduser().resolve()
 
     payload_decode_sidecar_path: Path | None = None
-    if sample_role == ATTACKED_POSITIVE_SAMPLE_ROLE and payload_reference_sidecar_path is not None:
+    payload_decode_sidecar_status_path = artifacts_root / "payload_decode_sidecar_status.json"
+    validate_path_within_base(shard_root, payload_decode_sidecar_status_path, "PW03 payload decode sidecar status path")
+    payload_decode_sidecar_status_payload: Dict[str, Any] | None = None
+
+    def _write_payload_sidecar_status(
+        *,
+        status: str,
+        required: bool,
+        builder_name: str | None = None,
+        failure_reason: str | None = None,
+        exception: Exception | None = None,
+        not_applicable_reason: str | None = None,
+    ) -> Dict[str, Any]:
+        status_payload = build_payload_sidecar_status_payload(
+            family_id=family_id,
+            stage_name=STAGE_NAME,
+            event_id=str(attack_event_spec.get("event_id") or ""),
+            event_index=int(attack_event_spec.get("attack_event_index", attack_event_spec.get("event_index", 0))),
+            sample_role=sample_role,
+            sidecar_name="payload_decode_sidecar",
+            required=required,
+            status=status,
+            builder_name=builder_name,
+            reference_event_id=str(parent_reference.get("parent_event_id") or "") or None,
+            failure_reason=failure_reason,
+            exception_type=type(exception).__name__ if exception is not None else None,
+            exception_message=str(exception) if exception is not None else None,
+            not_applicable_reason=not_applicable_reason,
+        )
+        write_json_atomic(payload_decode_sidecar_status_path, status_payload)
+        return status_payload
+
+    if sample_role == ATTACKED_POSITIVE_SAMPLE_ROLE:
+        if payload_reference_sidecar_path is None:
+            payload_decode_sidecar_status_payload = _write_payload_sidecar_status(
+                status="failed",
+                required=True,
+                failure_reason="parent_payload_reference_sidecar_missing",
+            )
+            raise RuntimeError(
+                "PW03 required payload decode sidecar dependency missing: "
+                f"event_id={attack_event_spec.get('event_id')}, parent_event_id={parent_reference.get('parent_event_id')}"
+            )
+
         payload_decode_sidecar_path = artifacts_root / "payload_decode_sidecar.json"
         validate_path_within_base(shard_root, payload_decode_sidecar_path, "PW03 payload decode sidecar path")
-        reference_sidecar = _load_required_json_dict(
-            payload_reference_sidecar_path,
-            f"PW03 payload reference sidecar {attack_event_spec.get('event_id')}",
-        )
+        try:
+            reference_sidecar = _load_required_json_dict(
+                payload_reference_sidecar_path,
+                f"PW03 payload reference sidecar {attack_event_spec.get('event_id')}",
+            )
+        except (FileNotFoundError, TypeError, ValueError) as exc:
+            # attacked_positive 必须绑定父 positive-source reference sidecar，缺失或损坏时必须显式失败。
+            payload_decode_sidecar_status_payload = _write_payload_sidecar_status(
+                status="failed",
+                required=True,
+                failure_reason="parent_payload_reference_sidecar_invalid",
+                exception=exc,
+            )
+            raise RuntimeError(
+                "PW03 required payload reference sidecar invalid: "
+                f"event_id={attack_event_spec.get('event_id')}, exception_type={type(exc).__name__}, detail={exc}"
+            ) from exc
         try:
             payload_decode_sidecar_payload = build_payload_decode_sidecar_payload(
                 family_id=family_id,
@@ -1650,9 +1707,30 @@ def _run_attack_detect_event(
                 reference_sidecar=reference_sidecar,
             )
             write_json_atomic(payload_decode_sidecar_path, payload_decode_sidecar_payload)
-        except (TypeError, ValueError):
-            # 兼容旧的最小化 fixture；当上游 payload 证据不足时不让 PW03 整体失败。
-            payload_decode_sidecar_path = None
+            payload_decode_sidecar_status_payload = _write_payload_sidecar_status(
+                status="ok",
+                required=True,
+                builder_name="build_payload_decode_sidecar_payload",
+            )
+        except (TypeError, ValueError) as exc:
+            # attacked_positive decode sidecar 属于 formal 主路径必需工件，失败时禁止静默吞掉 builder 异常。
+            payload_decode_sidecar_status_payload = _write_payload_sidecar_status(
+                status="failed",
+                required=True,
+                builder_name="build_payload_decode_sidecar_payload",
+                failure_reason="payload_decode_sidecar_generation_failed",
+                exception=exc,
+            )
+            raise RuntimeError(
+                "PW03 required payload decode sidecar generation failed: "
+                f"event_id={attack_event_spec.get('event_id')}, exception_type={type(exc).__name__}, detail={exc}"
+            ) from exc
+    else:
+        payload_decode_sidecar_status_payload = _write_payload_sidecar_status(
+            status="not_applicable",
+            required=False,
+            not_applicable_reason="sample_role_not_attacked_positive",
+        )
 
     write_json_atomic(staged_detect_record_path, detect_payload)
 
@@ -1678,6 +1756,21 @@ def _run_attack_detect_event(
         "payload_decode_sidecar_package_relative_path": (
             _relative_to_shard(shard_root, payload_decode_sidecar_path)
             if payload_decode_sidecar_path is not None
+            else None
+        ),
+        "payload_decode_sidecar_status_path": (
+            normalize_path_value(payload_decode_sidecar_status_path)
+            if payload_decode_sidecar_status_payload is not None
+            else None
+        ),
+        "payload_decode_sidecar_status_package_relative_path": (
+            _relative_to_shard(shard_root, payload_decode_sidecar_status_path)
+            if payload_decode_sidecar_status_payload is not None
+            else None
+        ),
+        "payload_decode_sidecar_status": (
+            payload_decode_sidecar_status_payload.get("status")
+            if payload_decode_sidecar_status_payload is not None
             else None
         ),
         "detect_stage_result": detect_result,
@@ -1781,6 +1874,9 @@ def _write_attack_event_manifest(
         "payload_reference_sidecar_package_relative_path": detect_summary.get("payload_reference_sidecar_package_relative_path"),
         "payload_decode_sidecar_path": detect_summary.get("payload_decode_sidecar_path"),
         "payload_decode_sidecar_package_relative_path": detect_summary.get("payload_decode_sidecar_package_relative_path"),
+        "payload_decode_sidecar_status_path": detect_summary.get("payload_decode_sidecar_status_path"),
+        "payload_decode_sidecar_status_package_relative_path": detect_summary.get("payload_decode_sidecar_status_package_relative_path"),
+        "payload_decode_sidecar_status": detect_summary.get("payload_decode_sidecar_status"),
         "wrong_event_attestation_challenge_record_path": wrong_event_attestation_challenge_summary.get(
             "wrong_event_attestation_challenge_record_path"
         ),

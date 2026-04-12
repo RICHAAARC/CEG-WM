@@ -188,7 +188,32 @@ def _patch_pw01_base_runner(
         (logs_root / f"{stage_name}_stderr.log").write_text("\n", encoding="utf-8")
 
         if stage_name == "embed":
-            write_json_atomic(records_root / "embed_record.json", {"record_type": "embed"})
+            write_json_atomic(
+                records_root / "embed_record.json",
+                {
+                    "record_type": "embed",
+                    "content_evidence": {
+                        "status": "ok",
+                        "plan_digest": "plan_digest_pw01_test",
+                        "basis_digest": "basis_digest_pw01_test",
+                        "score_parts": {
+                            "lf_metrics": {
+                                "message_length": 8,
+                                "ecc_sparsity": 3,
+                                "plan_digest": "plan_digest_pw01_test",
+                                "basis_digest": "basis_digest_pw01_test",
+                                "message_source": "attestation_event_digest",
+                                "parity_check_digest": "parity_check_digest_pw01_test",
+                            }
+                        },
+                    },
+                    "attestation": {
+                        "event_binding_digest": "event_binding_digest_pw01_test",
+                        "event_binding_mode": "trajectory_bound",
+                        "lf_payload_hex": "ab",
+                    },
+                },
+            )
         elif stage_name == "detect":
             write_json_atomic(
                 records_root / "detect_record.json",
@@ -198,8 +223,21 @@ def _patch_pw01_base_runner(
                         "status": "ok",
                         "score": 0.75,
                         "content_chain_score": 0.75,
+                        "score_parts": {
+                            "lf_trajectory_detect_trace": {
+                                "codeword_agreement": 1.0,
+                                "n_bits_compared": 8,
+                                "detect_variant": "correlation_v2",
+                                "message_source": "attestation_event_digest",
+                            }
+                        },
                     },
                     "attestation": {
+                        "_lf_attestation_trace_artifact": {
+                            "mismatch_indices": [],
+                            "n_bits_compared": 8,
+                            "agreement_count": 8,
+                        },
                         "final_event_attested_decision": {
                             "event_attestation_score_name": "event_attestation_score",
                             "event_attestation_score": 0.61,
@@ -520,6 +558,80 @@ def test_run_positive_source_event_preserves_model_snapshot_binding(
     assert detect_record["content_evidence_payload"]["status"] == "ok"
     assert detect_record["final_decision"]["decision_status"] == "abstain"
     assert detect_record["attestation"]["final_event_attested_decision"]["event_attestation_score"] == 0.61
+    assert Path(str(event_manifest["payload_reference_sidecar_path"])).exists()
+    assert Path(str(event_manifest["payload_decode_sidecar_path"])).exists()
+    assert Path(str(event_manifest["payload_reference_sidecar_status_path"])).exists()
+    assert Path(str(event_manifest["payload_decode_sidecar_status_path"])).exists()
+    payload_reference_status = json.loads(
+        Path(str(event_manifest["payload_reference_sidecar_status_path"])).read_text(encoding="utf-8")
+    )
+    payload_decode_status = json.loads(
+        Path(str(event_manifest["payload_decode_sidecar_status_path"])).read_text(encoding="utf-8")
+    )
+    assert payload_reference_status["status"] == "ok"
+    assert payload_decode_status["status"] == "ok"
+
+
+def test_run_positive_source_event_fails_when_required_payload_reference_sidecar_generation_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Fail fast when the required PW01 payload reference sidecar cannot be built.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    bound_config_path, snapshot_dir = _write_bound_config_snapshot(tmp_path / "drive", marker="event_sidecar_failure")
+    bound_cfg_obj = load_yaml_mapping(bound_config_path)
+    _patch_pw01_base_runner(monkeypatch, expected_snapshot_path=snapshot_dir)
+
+    def fake_build_payload_reference_sidecar_payload(**kwargs: Any) -> Dict[str, Any]:
+        raise ValueError("embed_record missing lf_metrics required for payload reference sidecar")
+
+    monkeypatch.setattr(
+        pw01_module,
+        "build_payload_reference_sidecar_payload",
+        fake_build_payload_reference_sidecar_payload,
+    )
+
+    shard_root = ensure_directory(
+        tmp_path / "drive" / "paper_workflow" / "families" / "family_event_sidecar_failure" / "source_shards" / "positive" / "shard_0000"
+    )
+    with pytest.raises(RuntimeError, match="PW01 required payload reference sidecar generation failed"):
+        pw01_module._run_positive_source_event(
+            event={
+                "event_id": "evt_sidecar_failure_0000",
+                "event_index": 0,
+                "sample_role": "positive_source",
+                "source_prompt_index": 0,
+                "prompt_text": "prompt one",
+                "prompt_sha256": "sha256-prompt-one",
+                "seed": 3,
+                "prompt_file": "prompts/paper_small.txt",
+            },
+            shard_root=shard_root,
+            default_cfg_obj=bound_cfg_obj,
+            bound_config_path=bound_config_path,
+        )
+
+    event_root = shard_root / "events" / "event_000000"
+    payload_reference_status = json.loads(
+        (event_root / "artifacts" / "payload_reference_sidecar_status.json").read_text(encoding="utf-8")
+    )
+    payload_decode_status = json.loads(
+        (event_root / "artifacts" / "payload_decode_sidecar_status.json").read_text(encoding="utf-8")
+    )
+    assert payload_reference_status["status"] == "failed"
+    assert payload_reference_status["required"] is True
+    assert payload_reference_status["failure_reason"] == "payload_reference_sidecar_generation_failed"
+    assert payload_decode_status["status"] == "failed"
+    assert payload_decode_status["required"] is True
+    assert payload_decode_status["failure_reason"] == "payload_reference_sidecar_generation_failed"
 
 
 def test_run_positive_source_event_fails_before_preview_when_model_snapshot_missing(
