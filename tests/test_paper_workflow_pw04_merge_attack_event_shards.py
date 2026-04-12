@@ -1023,9 +1023,42 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     summary = cast(Dict[str, Any], fixture["summary"])
     pw03_fixture = cast(Dict[str, Any], fixture["pw03"])
 
+    prepare_summary = pw04_module.run_pw04_merge_attack_event_shards(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_pw04_success",
+        pw04_mode=pw04_module.PW04_MODE_PREPARE,
+    )
+
+    prepare_manifest_path = Path(str(prepare_summary["prepare_manifest_path"]))
+    prepared_quality_pair_plan_path = Path(str(prepare_summary["quality_pair_plan_path"]))
+    prepared_quality_shard_paths = [
+        Path(str(path_value)) for path_value in cast(List[str], prepare_summary["expected_quality_shard_paths"])
+    ]
+    prepare_manifest = _load_json_dict(prepare_manifest_path)
+    assert prepare_summary["pw04_mode"] == pw04_module.PW04_MODE_PREPARE
+    assert prepare_summary["status"] == "completed"
+    assert prepare_manifest_path.exists()
+    assert prepared_quality_pair_plan_path.exists()
+    assert prepare_manifest["quality_shard_count"] == len(prepared_quality_shard_paths)
+    assert not (Path(str(summary["family_root"])) / "runtime_state" / "pw04_summary.json").exists()
+    assert not (Path(str(summary["family_root"])) / "exports" / "pw04" / "metrics" / "clean_quality_metrics.json").exists()
+    assert not (Path(str(summary["family_root"])) / "exports" / "pw04" / "metrics" / "attack_quality_metrics.json").exists()
+
+    for shard_index in range(len(prepared_quality_shard_paths)):
+        shard_summary = pw04_module.run_pw04_merge_attack_event_shards(
+            drive_project_root=tmp_path / "drive",
+            family_id="family_pw04_success",
+            pw04_mode=pw04_module.PW04_MODE_QUALITY_SHARD,
+            quality_shard_index=shard_index,
+        )
+        assert shard_summary["pw04_mode"] == pw04_module.PW04_MODE_QUALITY_SHARD
+        assert shard_summary["quality_shard_index"] == shard_index
+        assert Path(str(shard_summary["quality_shard_path"])).exists()
+
     pw04_summary = pw04_module.run_pw04_merge_attack_event_shards(
         drive_project_root=tmp_path / "drive",
         family_id="family_pw04_success",
+        pw04_mode=pw04_module.PW04_MODE_FINALIZE,
     )
 
     canonical_metrics_paths = cast(Dict[str, str], pw04_summary["canonical_metrics_paths"])
@@ -1148,9 +1181,14 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     expected_positive_attack_event_count = int(pw03_fixture["expected_positive_attack_event_count"])
     expected_negative_attack_event_count = int(pw03_fixture["expected_negative_attack_event_count"])
     assert pw04_summary["status"] == "completed"
+    assert pw04_summary["pw04_mode"] == pw04_module.PW04_MODE_FINALIZE
+    assert pw04_summary["prepare_manifest_path"] == normalize_path_value(prepare_manifest_path)
     assert pw04_summary["paper_exports_completed"] is True
     assert pw04_summary["tail_estimation_enabled"] is False
     assert pw04_summary["quality_shard_count"] == len(quality_shard_paths)
+    assert [normalize_path_value(path_obj) for path_obj in prepared_quality_shard_paths] == [
+        normalize_path_value(path_obj) for path_obj in quality_shard_paths
+    ]
     assert pw04_summary["completed_attack_event_count"] == expected_attack_event_count
     assert merge_manifest["expected_attack_event_count"] == expected_attack_event_count
     assert merge_manifest["completed_attack_event_count"] == expected_attack_event_count
@@ -1554,6 +1592,57 @@ def test_pw04_quality_shard_worker_only_writes_shard_payload(tmp_path: Path, mon
     assert not (family_root / "exports" / "pw04" / "figures").exists()
 
 
+def test_pw04_quality_shard_mode_requires_prepare_manifest(tmp_path: Path) -> None:
+    """
+    Verify PW04 worker mode refuses to run before prepare manifest exists.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    with pytest.raises(FileNotFoundError, match="PW04 prepare manifest"):
+        pw04_module.run_pw04_merge_attack_event_shards(
+            drive_project_root=tmp_path / "drive",
+            family_id="family_pw04_missing_prepare",
+            pw04_mode=pw04_module.PW04_MODE_QUALITY_SHARD,
+            quality_shard_index=0,
+        )
+
+
+def test_pw04_finalize_requires_all_planned_quality_shards(tmp_path: Path, monkeypatch: Any) -> None:
+    """
+    Verify PW04 finalize fails until all planned quality shards are present.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_compute_clip_text_similarity",
+        _fake_clip_text_similarity,
+    )
+    _build_pw04_fixture(tmp_path, "family_pw04_missing_quality_shards")
+    prepare_summary = pw04_module.run_pw04_merge_attack_event_shards(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_pw04_missing_quality_shards",
+        pw04_mode=pw04_module.PW04_MODE_PREPARE,
+    )
+
+    assert prepare_summary["quality_shard_count"] >= 1
+    with pytest.raises(RuntimeError, match="requires all prepared quality shard outputs"):
+        pw04_module.run_pw04_merge_attack_event_shards(
+            drive_project_root=tmp_path / "drive",
+            family_id="family_pw04_missing_quality_shards",
+            pw04_mode=pw04_module.PW04_MODE_FINALIZE,
+        )
+
+
 def test_pw04_payload_attack_summary_prefers_decode_sidecar_metrics(tmp_path: Path) -> None:
     """
     Verify PW04 payload attack summary prefers decode sidecar metrics over legacy LF trace values.
@@ -1674,6 +1763,7 @@ def test_pw04_fails_fast_when_one_planned_shard_manifest_is_missing(tmp_path: Pa
         pw04_module.run_pw04_merge_attack_event_shards(
             drive_project_root=tmp_path / "drive",
             family_id="family_pw04_missing_shard",
+            pw04_mode=pw04_module.PW04_MODE_PREPARE,
         )
 
 
@@ -1697,6 +1787,7 @@ def test_pw04_fails_fast_when_planned_shard_is_not_completed(tmp_path: Path) -> 
         pw04_module.run_pw04_merge_attack_event_shards(
             drive_project_root=tmp_path / "drive",
             family_id="family_pw04_non_completed_shard",
+            pw04_mode=pw04_module.PW04_MODE_PREPARE,
         )
 
 
@@ -1724,6 +1815,7 @@ def test_pw04_fails_fast_on_duplicate_attack_event_id(tmp_path: Path) -> None:
         pw04_module.run_pw04_merge_attack_event_shards(
             drive_project_root=tmp_path / "drive",
             family_id="family_pw04_duplicate_attack_event_id",
+            pw04_mode=pw04_module.PW04_MODE_PREPARE,
         )
 
 
@@ -1748,6 +1840,7 @@ def test_pw04_fails_fast_on_threshold_binding_inconsistency(tmp_path: Path) -> N
         pw04_module.run_pw04_merge_attack_event_shards(
             drive_project_root=tmp_path / "drive",
             family_id="family_pw04_threshold_binding",
+            pw04_mode=pw04_module.PW04_MODE_PREPARE,
         )
 
 
@@ -1772,6 +1865,7 @@ def test_pw04_uses_event_manifest_parent_event_id_when_detect_parent_is_absent(t
     pw04_summary = pw04_module.run_pw04_merge_attack_event_shards(
         drive_project_root=tmp_path / "drive",
         family_id="family_pw04_parent_authority",
+        pw04_mode=pw04_module.PW04_MODE_PREPARE,
     )
     pool_manifest = _load_json_dict(Path(str(pw04_summary["attack_positive_pool_manifest_path"])))
     first_event = cast(List[Dict[str, Any]], pool_manifest["events"])[0]

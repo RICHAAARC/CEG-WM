@@ -103,6 +103,8 @@ def test_pw04_notebook_binds_expected_script_and_parameters() -> None:
     assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in constants_source
     assert 'LOCAL_HF_HUB_CACHE = LOCAL_HF_HOME / "hub"' in constants_source
     assert 'LOCAL_TRANSFORMERS_CACHE = LOCAL_HF_HOME / "transformers"' in constants_source
+    assert 'PW04_MODE = "prepare"' in constants_source
+    assert 'QUALITY_SHARD_INDEX = 0' in constants_source
     assert 'FORCE_RERUN = False' in constants_source
     assert 'ENABLE_TAIL_ESTIMATION = False' in constants_source
 
@@ -112,6 +114,10 @@ def test_pw04_notebook_binds_expected_script_and_parameters() -> None:
 
     assert '"--drive-project-root"' in execute_source
     assert '"--family-id"' in execute_source
+    assert '"--pw04-mode"' in execute_source
+    assert 'if PW04_MODE == "quality_shard":' in execute_source
+    assert '"--quality-shard-index"' in execute_source
+    assert 'str(QUALITY_SHARD_INDEX)' in execute_source
     assert '"--force-rerun"' in execute_source
     assert '"--enable-tail-estimation"' in execute_source
 
@@ -134,10 +140,20 @@ def test_pw04_notebook_reads_pw02_inputs_and_pw04_outputs() -> None:
     assert 'ATTACK_SHARD_PLAN_PATH = FAMILY_ROOT / "manifests" / "attack_shard_plan.json"' in precheck_source
     assert 'CONTENT_THRESHOLD_EXPORT_PATH = FAMILY_ROOT / "exports" / "pw02" / "thresholds" / "content" / "thresholds.json"' in precheck_source
     assert 'ATTESTATION_THRESHOLD_EXPORT_PATH = FAMILY_ROOT / "exports" / "pw02" / "thresholds" / "attestation" / "thresholds.json"' in precheck_source
+    assert 'PREPARE_MANIFEST_PATH = FAMILY_ROOT / "exports" / "pw04" / "manifests" / "pw04_prepare_manifest.json"' in precheck_source
+    assert 'QUALITY_PAIR_PLAN_PATH = QUALITY_ROOT / "quality_pair_plan.json"' in precheck_source
+    assert 'SELECTED_QUALITY_SHARD_PATH = QUALITY_ROOT / "shards" / f"quality_shard_{QUALITY_SHARD_INDEX:04d}.json"' in precheck_source
     assert '所有计划内 PW03 shard manifest 存在且 completed' in precheck_source
     assert 'expected_attack_event_count == discovered_attack_event_count' in precheck_source
+    assert 'PW04_MODE == "prepare"' in precheck_source
+    assert 'PW04_MODE == "quality_shard"' in precheck_source
+    assert '全部计划内 quality shard 已完成' in precheck_source
 
     assert 'PW04_SUMMARY_PATH = FAMILY_ROOT / "runtime_state" / "pw04_summary.json"' in precheck_source
+    assert 'if PW04_MODE == "prepare":' in summary_source
+    assert '"prepare_manifest": json.loads(PREPARE_MANIFEST_PATH.read_text(encoding="utf-8"))' in summary_source
+    assert 'elif PW04_MODE == "quality_shard":' in summary_source
+    assert '"quality_shard": json.loads(SELECTED_QUALITY_SHARD_PATH.read_text(encoding="utf-8"))' in summary_source
     assert 'FORMAL_ATTACK_FINAL_DECISION_METRICS_PATH = FAMILY_ROOT / "exports" / "pw04" / "formal_attack_final_decision_metrics.json"' in summary_source
     assert 'FORMAL_ATTACK_ATTESTATION_METRICS_PATH = FAMILY_ROOT / "exports" / "pw04" / "formal_attack_attestation_metrics.json"' in summary_source
     assert 'DERIVED_ATTACK_UNION_METRICS_PATH = FAMILY_ROOT / "exports" / "pw04" / "derived_attack_union_metrics.json"' in summary_source
@@ -184,6 +200,10 @@ def test_pw04_wrapper_delegates_to_run_function(monkeypatch: pytest.MonkeyPatch,
             str(tmp_path / "drive_root"),
             "--family-id",
             "family_pw04_demo",
+            "--pw04-mode",
+            "quality_shard",
+            "--quality-shard-index",
+            "3",
             "--force-rerun",
             "--enable-tail-estimation",
         ],
@@ -192,5 +212,7 @@ def test_pw04_wrapper_delegates_to_run_function(monkeypatch: pytest.MonkeyPatch,
     assert wrapper_module.main() == 0
     assert captured["drive_project_root"] == tmp_path / "drive_root"
     assert captured["family_id"] == "family_pw04_demo"
+    assert captured["pw04_mode"] == "quality_shard"
+    assert captured["quality_shard_index"] == 3
     assert captured["force_rerun"] is True
     assert captured["enable_tail_estimation"] is True

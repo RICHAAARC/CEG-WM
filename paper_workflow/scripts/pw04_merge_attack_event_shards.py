@@ -84,6 +84,16 @@ CLEAN_QUALITY_METRICS_FILE_NAME = "clean_quality_metrics.json"
 PW04_METRICS_DIRECTORY_NAME = "metrics"
 PW04_FIGURES_DIRECTORY_NAME = "figures"
 PW04_TAIL_DIRECTORY_NAME = "tail"
+PW04_MODE_PREPARE = "prepare"
+PW04_MODE_QUALITY_SHARD = "quality_shard"
+PW04_MODE_FINALIZE = "finalize"
+PW04_MODE_CHOICES = (
+    PW04_MODE_PREPARE,
+    PW04_MODE_QUALITY_SHARD,
+    PW04_MODE_FINALIZE,
+)
+PREPARE_MANIFEST_FILE_NAME = "pw04_prepare_manifest.json"
+PREPARED_ATTACK_EVENT_ROWS_FILE_NAME = "prepared_attack_event_rows.json"
 
 
 def _load_required_json_dict(path_obj: Path, label: str) -> Dict[str, Any]:
@@ -210,6 +220,8 @@ def _resolve_pw04_paths(family_root: Path) -> Dict[str, Path]:
         "tail_root": tail_root,
         "quality_root": quality_root,
         "summary_path": summary_path,
+        "prepare_manifest_path": manifests_root / PREPARE_MANIFEST_FILE_NAME,
+        "prepared_attack_event_rows_path": manifests_root / PREPARED_ATTACK_EVENT_ROWS_FILE_NAME,
         "attack_merge_manifest_path": manifests_root / ATTACK_MERGE_MANIFEST_FILE_NAME,
         "attack_pool_manifest_path": export_root / ATTACK_POOL_MANIFEST_FILE_NAME,
         "attack_negative_pool_manifest_path": export_root / ATTACK_NEGATIVE_POOL_MANIFEST_FILE_NAME,
@@ -263,6 +275,376 @@ def _prepare_pw04_outputs(
 
     ensure_directory(family_root / "runtime_state")
     ensure_directory(export_root)
+
+
+def _resolve_pw04_mode(pw04_mode: str) -> str:
+    """
+    Resolve one validated PW04 execution mode.
+
+    Args:
+        pw04_mode: Candidate mode token.
+
+    Returns:
+        Normalized PW04 mode token.
+    """
+    if not isinstance(pw04_mode, str) or not pw04_mode.strip():
+        raise TypeError("pw04_mode must be non-empty str")
+    resolved_mode = pw04_mode.strip().lower()
+    if resolved_mode not in PW04_MODE_CHOICES:
+        raise ValueError(
+            f"unsupported pw04_mode: {pw04_mode}; expected one of {', '.join(PW04_MODE_CHOICES)}"
+        )
+    return resolved_mode
+
+
+def _resolve_manifest_bound_path(
+    *,
+    manifest_payload: Mapping[str, Any],
+    family_root: Path,
+    field_name: str,
+    label: str,
+) -> Path:
+    """
+    Resolve one family-root-constrained path from a manifest payload.
+
+    Args:
+        manifest_payload: Source manifest mapping.
+        family_root: Family root path.
+        field_name: Manifest field name.
+        label: Human-readable label.
+
+    Returns:
+        Resolved file path.
+    """
+    if not isinstance(manifest_payload, Mapping):
+        raise TypeError("manifest_payload must be Mapping")
+    if not isinstance(family_root, Path):
+        raise TypeError("family_root must be Path")
+    if not isinstance(field_name, str) or not field_name:
+        raise TypeError("field_name must be non-empty str")
+    if not isinstance(label, str) or not label:
+        raise TypeError("label must be non-empty str")
+
+    path_value = manifest_payload.get(field_name)
+    if not isinstance(path_value, str) or not path_value.strip():
+        raise ValueError(f"{field_name} missing from manifest")
+    resolved_path = Path(path_value).expanduser().resolve()
+    validate_path_within_base(family_root, resolved_path, label)
+    return resolved_path
+
+
+def _build_expected_quality_shard_paths(
+    *,
+    family_root: Path,
+    quality_root: Path,
+    quality_pair_plan: Mapping[str, Any],
+) -> List[Path]:
+    """
+    Build the ordered expected quality shard paths from the quality plan.
+
+    Args:
+        family_root: Family root path.
+        quality_root: PW04 quality root.
+        quality_pair_plan: Prepared quality pair plan payload.
+
+    Returns:
+        Ordered expected shard paths.
+    """
+    if not isinstance(family_root, Path):
+        raise TypeError("family_root must be Path")
+    if not isinstance(quality_root, Path):
+        raise TypeError("quality_root must be Path")
+    if not isinstance(quality_pair_plan, Mapping):
+        raise TypeError("quality_pair_plan must be Mapping")
+
+    shard_nodes = quality_pair_plan.get("shards")
+    if not isinstance(shard_nodes, list):
+        raise ValueError("PW04 quality pair plan missing shards")
+
+    seen_indices: set[int] = set()
+    expected_paths: List[Path] = []
+    for shard_node in cast(List[Any], shard_nodes):
+        if not isinstance(shard_node, Mapping):
+            raise ValueError("PW04 quality pair plan shards must contain objects")
+        quality_shard_index = shard_node.get(QUALITY_SHARD_FILE_NAME_FIELD)
+        if not isinstance(quality_shard_index, int) or isinstance(quality_shard_index, bool) or quality_shard_index < 0:
+            raise ValueError("PW04 quality pair plan shard missing quality_shard_index")
+        if quality_shard_index in seen_indices:
+            raise ValueError(f"duplicate quality_shard_index in PW04 quality pair plan: {quality_shard_index}")
+        seen_indices.add(quality_shard_index)
+        shard_path = quality_root / QUALITY_SHARDS_DIRECTORY_NAME / QUALITY_SHARD_FILE_NAME_TEMPLATE.format(
+            quality_shard_index=quality_shard_index
+        )
+        validate_path_within_base(family_root, shard_path, QUALITY_PATH_LABEL)
+        expected_paths.append(shard_path)
+    return expected_paths
+
+
+def _build_prepared_attack_event_rows_payload(
+    *,
+    family_id: str,
+    attack_event_rows: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Build the persisted prepared attack-event rows payload.
+
+    Args:
+        family_id: Family identifier.
+        attack_event_rows: Prepared materialized attack-event rows.
+
+    Returns:
+        Prepared attack-event rows payload.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(attack_event_rows, Sequence):
+        raise TypeError("attack_event_rows must be Sequence")
+
+    return {
+        "artifact_type": "paper_workflow_pw04_prepared_attack_event_rows",
+        "schema_version": SCHEMA_VERSION,
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "row_count": len(attack_event_rows),
+        "rows": [dict(cast(Mapping[str, Any], row)) for row in attack_event_rows],
+    }
+
+
+def _build_prepare_manifest_payload(
+    *,
+    family_id: str,
+    family_root: Path,
+    pw04_paths: Mapping[str, Path],
+    quality_pair_plan_path: Path,
+    prepared_attack_event_rows_path: Path,
+    expected_quality_shard_paths: Sequence[Path],
+    expected_attack_shard_count: int,
+    discovered_attack_shard_count: int,
+    expected_attack_event_count: int,
+    discovered_attack_event_count: int,
+    completed_attack_event_count: int,
+    attacked_positive_event_count: int,
+    attacked_negative_event_count: int,
+    enable_tail_estimation: bool,
+) -> Dict[str, Any]:
+    """
+    Build the manifest that freezes the PW04 prepare-stage outputs.
+
+    Args:
+        family_id: Family identifier.
+        family_root: Family root path.
+        pw04_paths: Canonical PW04 path mapping.
+        quality_pair_plan_path: Prepared quality pair plan path.
+        prepared_attack_event_rows_path: Persisted prepared attack rows path.
+        expected_quality_shard_paths: Ordered expected quality shard paths.
+        expected_attack_shard_count: Expected attack shard count.
+        discovered_attack_shard_count: Discovered attack shard count.
+        expected_attack_event_count: Expected attack event count.
+        discovered_attack_event_count: Discovered attack event count.
+        completed_attack_event_count: Completed attack event count.
+        attacked_positive_event_count: Attacked-positive event count.
+        attacked_negative_event_count: Attacked-negative event count.
+        enable_tail_estimation: Frozen tail-estimation request.
+
+    Returns:
+        Prepare manifest payload.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(family_root, Path):
+        raise TypeError("family_root must be Path")
+    if not isinstance(pw04_paths, Mapping):
+        raise TypeError("pw04_paths must be Mapping")
+    if not isinstance(quality_pair_plan_path, Path):
+        raise TypeError("quality_pair_plan_path must be Path")
+    if not isinstance(prepared_attack_event_rows_path, Path):
+        raise TypeError("prepared_attack_event_rows_path must be Path")
+    if not isinstance(expected_quality_shard_paths, Sequence):
+        raise TypeError("expected_quality_shard_paths must be Sequence")
+    if not isinstance(enable_tail_estimation, bool):
+        raise TypeError("enable_tail_estimation must be bool")
+
+    return {
+        "artifact_type": "paper_workflow_pw04_prepare_manifest",
+        "schema_version": SCHEMA_VERSION,
+        "created_at": utc_now_iso(),
+        "stage_name": STAGE_NAME,
+        "pw04_mode": PW04_MODE_PREPARE,
+        "family_id": family_id,
+        "family_root": normalize_path_value(family_root),
+        "status": "completed",
+        "enable_tail_estimation": enable_tail_estimation,
+        "attack_merge_manifest_path": normalize_path_value(cast(Path, pw04_paths["attack_merge_manifest_path"])),
+        "attack_positive_pool_manifest_path": normalize_path_value(cast(Path, pw04_paths["attack_pool_manifest_path"])),
+        "attack_negative_pool_manifest_path": normalize_path_value(cast(Path, pw04_paths["attack_negative_pool_manifest_path"])),
+        "formal_attack_final_decision_metrics_path": normalize_path_value(cast(Path, pw04_paths["formal_attack_final_decision_metrics_path"])),
+        "formal_attack_attestation_metrics_path": normalize_path_value(cast(Path, pw04_paths["formal_attack_attestation_metrics_path"])),
+        "derived_attack_union_metrics_path": normalize_path_value(cast(Path, pw04_paths["derived_attack_union_metrics_path"])),
+        "formal_attack_negative_metrics_path": normalize_path_value(cast(Path, pw04_paths["formal_attack_negative_metrics_path"])),
+        "per_attack_family_metrics_path": normalize_path_value(cast(Path, pw04_paths["per_attack_family_metrics_path"])),
+        "per_attack_condition_metrics_path": normalize_path_value(cast(Path, pw04_paths["per_attack_condition_metrics_path"])),
+        "summary_path": normalize_path_value(cast(Path, pw04_paths["summary_path"])),
+        "prepare_manifest_path": normalize_path_value(cast(Path, pw04_paths["prepare_manifest_path"])),
+        "quality_root": normalize_path_value(cast(Path, pw04_paths["quality_root"])),
+        "quality_pair_plan_path": normalize_path_value(quality_pair_plan_path),
+        "prepared_attack_event_rows_path": normalize_path_value(prepared_attack_event_rows_path),
+        "clean_quality_metrics_path": normalize_path_value(cast(Path, pw04_paths["clean_quality_metrics_path"])),
+        "attack_quality_metrics_path": normalize_path_value(cast(Path, pw04_paths["attack_quality_metrics_path"])),
+        "quality_finalize_manifest_path": normalize_path_value(cast(Path, pw04_paths["quality_root"]) / QUALITY_FINALIZE_MANIFEST_FILE_NAME),
+        "expected_quality_shard_paths": [normalize_path_value(path_obj) for path_obj in expected_quality_shard_paths],
+        "quality_shard_count": len(expected_quality_shard_paths),
+        "expected_attack_shard_count": expected_attack_shard_count,
+        "discovered_attack_shard_count": discovered_attack_shard_count,
+        "expected_attack_event_count": expected_attack_event_count,
+        "discovered_attack_event_count": discovered_attack_event_count,
+        "completed_attack_event_count": completed_attack_event_count,
+        "attacked_positive_event_count": attacked_positive_event_count,
+        "attacked_negative_event_count": attacked_negative_event_count,
+    }
+
+
+def _load_pw04_prepare_context(
+    *,
+    family_id: str,
+    family_root: Path,
+    pw04_paths: Mapping[str, Path],
+) -> Dict[str, Any]:
+    """
+    Load and validate the frozen PW04 prepare-stage context.
+
+    Args:
+        family_id: Family identifier.
+        family_root: Family root path.
+        pw04_paths: Canonical PW04 path mapping.
+
+    Returns:
+        Loaded prepare context.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(family_root, Path):
+        raise TypeError("family_root must be Path")
+    if not isinstance(pw04_paths, Mapping):
+        raise TypeError("pw04_paths must be Mapping")
+
+    prepare_manifest_path = cast(Path, pw04_paths["prepare_manifest_path"])
+    prepare_manifest = _load_required_json_dict(prepare_manifest_path, "PW04 prepare manifest")
+    if prepare_manifest.get("family_id") != family_id:
+        raise ValueError(
+            "PW04 prepare manifest family_id mismatch: "
+            f"expected={family_id}, actual={prepare_manifest.get('family_id')}"
+        )
+    if prepare_manifest.get("status") != "completed":
+        raise ValueError(
+            "PW04 prepare manifest must be completed before worker/finalize: "
+            f"status={prepare_manifest.get('status')}"
+        )
+
+    expected_bindings = {
+        "attack_merge_manifest_path": "attack_merge_manifest_path",
+        "attack_positive_pool_manifest_path": "attack_pool_manifest_path",
+        "attack_negative_pool_manifest_path": "attack_negative_pool_manifest_path",
+        "formal_attack_final_decision_metrics_path": "formal_attack_final_decision_metrics_path",
+        "formal_attack_attestation_metrics_path": "formal_attack_attestation_metrics_path",
+        "derived_attack_union_metrics_path": "derived_attack_union_metrics_path",
+        "formal_attack_negative_metrics_path": "formal_attack_negative_metrics_path",
+        "per_attack_family_metrics_path": "per_attack_family_metrics_path",
+        "per_attack_condition_metrics_path": "per_attack_condition_metrics_path",
+        "clean_quality_metrics_path": "clean_quality_metrics_path",
+        "attack_quality_metrics_path": "attack_quality_metrics_path",
+        "summary_path": "summary_path",
+        "prepare_manifest_path": "prepare_manifest_path",
+        "prepared_attack_event_rows_path": "prepared_attack_event_rows_path",
+    }
+    resolved_paths: Dict[str, Path] = {}
+    for manifest_field_name, pw04_path_key in expected_bindings.items():
+        resolved_path = _resolve_manifest_bound_path(
+            manifest_payload=prepare_manifest,
+            family_root=family_root,
+            field_name=manifest_field_name,
+            label=manifest_field_name,
+        )
+        expected_path = cast(Path, pw04_paths[pw04_path_key]).resolve()
+        if normalize_path_value(resolved_path) != normalize_path_value(expected_path):
+            raise ValueError(
+                f"PW04 prepare manifest {manifest_field_name} mismatch: "
+                f"expected={normalize_path_value(expected_path)}, actual={normalize_path_value(resolved_path)}"
+            )
+        resolved_paths[manifest_field_name] = resolved_path
+
+    quality_pair_plan_path = _resolve_manifest_bound_path(
+        manifest_payload=prepare_manifest,
+        family_root=family_root,
+        field_name=QUALITY_PAIR_PLAN_PATH_FIELD,
+        label="PW04 quality pair plan",
+    )
+    prepared_attack_event_rows_path = resolved_paths["prepared_attack_event_rows_path"]
+    quality_pair_plan = _load_required_json_dict(quality_pair_plan_path, "PW04 quality pair plan")
+    if quality_pair_plan.get("family_id") != family_id:
+        raise ValueError(
+            "PW04 quality pair plan family_id mismatch: "
+            f"expected={family_id}, actual={quality_pair_plan.get('family_id')}"
+        )
+    expected_quality_shard_paths = _build_expected_quality_shard_paths(
+        family_root=family_root,
+        quality_root=cast(Path, pw04_paths["quality_root"]),
+        quality_pair_plan=quality_pair_plan,
+    )
+
+    expected_quality_shard_paths_node = prepare_manifest.get("expected_quality_shard_paths")
+    if not isinstance(expected_quality_shard_paths_node, list):
+        raise ValueError("PW04 prepare manifest missing expected_quality_shard_paths")
+    manifest_quality_shard_paths = [
+        _resolve_manifest_bound_path(
+            manifest_payload={"path": path_value},
+            family_root=family_root,
+            field_name="path",
+            label="PW04 expected quality shard path",
+        )
+        for path_value in cast(List[Any], expected_quality_shard_paths_node)
+    ]
+    if [normalize_path_value(path_obj) for path_obj in manifest_quality_shard_paths] != [
+        normalize_path_value(path_obj) for path_obj in expected_quality_shard_paths
+    ]:
+        raise ValueError("PW04 prepare manifest expected_quality_shard_paths mismatch with quality pair plan")
+
+    prepared_attack_event_rows_payload = _load_required_json_dict(
+        prepared_attack_event_rows_path,
+        "PW04 prepared attack event rows",
+    )
+    if prepared_attack_event_rows_payload.get("family_id") != family_id:
+        raise ValueError(
+            "PW04 prepared attack event rows family_id mismatch: "
+            f"expected={family_id}, actual={prepared_attack_event_rows_payload.get('family_id')}"
+        )
+    prepared_rows_node = prepared_attack_event_rows_payload.get("rows")
+    if not isinstance(prepared_rows_node, list):
+        raise ValueError("PW04 prepared attack event rows missing rows")
+    materialized_attack_event_rows = [
+        dict(cast(Mapping[str, Any], row))
+        for row in cast(List[Any], prepared_rows_node)
+        if isinstance(row, Mapping)
+    ]
+    if len(materialized_attack_event_rows) != len(prepared_rows_node):
+        raise ValueError("PW04 prepared attack event rows must contain objects only")
+    expected_row_count = prepared_attack_event_rows_payload.get("row_count")
+    if isinstance(expected_row_count, int) and expected_row_count != len(materialized_attack_event_rows):
+        raise ValueError(
+            "PW04 prepared attack event rows row_count mismatch: "
+            f"expected={expected_row_count}, actual={len(materialized_attack_event_rows)}"
+        )
+
+    return {
+        "prepare_manifest_path": prepare_manifest_path,
+        "prepare_manifest": prepare_manifest,
+        "resolved_paths": resolved_paths,
+        "quality_pair_plan_path": quality_pair_plan_path,
+        "quality_pair_plan": quality_pair_plan,
+        "prepared_attack_event_rows_path": prepared_attack_event_rows_path,
+        "materialized_attack_event_rows": materialized_attack_event_rows,
+        "expected_quality_shard_paths": expected_quality_shard_paths,
+        "enable_tail_estimation": bool(prepare_manifest.get("enable_tail_estimation", False)),
+    }
 
 
 def _resolve_authoritative_parent_event_id(
@@ -1814,6 +2196,8 @@ def run_pw04_merge_attack_event_shards(
     family_id: str,
     force_rerun: bool = False,
     enable_tail_estimation: bool = False,
+    pw04_mode: str = PW04_MODE_PREPARE,
+    quality_shard_index: int | None = None,
 ) -> Dict[str, Any]:
     """
     Execute the PW04 attack merge and metrics materialization stage.
@@ -1823,9 +2207,11 @@ def run_pw04_merge_attack_event_shards(
         family_id: Family identifier.
         force_rerun: Whether to clear existing PW04 outputs before rerun.
         enable_tail_estimation: Whether optional tail estimation exports should be produced.
+        pw04_mode: Explicit PW04 execution mode.
+        quality_shard_index: Optional quality shard index for worker mode.
 
     Returns:
-        PW04 summary payload.
+        Mode-specific PW04 execution summary.
     """
     if not isinstance(drive_project_root, Path):
         raise TypeError("drive_project_root must be Path")
@@ -1835,113 +2221,369 @@ def run_pw04_merge_attack_event_shards(
         raise TypeError("force_rerun must be bool")
     if not isinstance(enable_tail_estimation, bool):
         raise TypeError("enable_tail_estimation must be bool")
+    if quality_shard_index is not None and (
+        not isinstance(quality_shard_index, int)
+        or isinstance(quality_shard_index, bool)
+        or quality_shard_index < 0
+    ):
+        raise TypeError("quality_shard_index must be non-negative int when provided")
 
+    resolved_mode = _resolve_pw04_mode(pw04_mode)
     normalized_drive_root = drive_project_root.expanduser().resolve()
     family_root = build_family_root(normalized_drive_root, family_id)
     pw04_paths = _resolve_pw04_paths(family_root)
-    _prepare_pw04_outputs(
-        family_root=family_root,
-        export_root=cast(Path, pw04_paths["export_root"]),
-        summary_path=cast(Path, pw04_paths["summary_path"]),
-        force_rerun=force_rerun,
-    )
-    ensure_directory(cast(Path, pw04_paths["manifests_root"]))
-    ensure_directory(cast(Path, pw04_paths["records_root"]))
-    ensure_directory(cast(Path, pw04_paths["tables_root"]))
-    ensure_directory(cast(Path, pw04_paths["metrics_root"]))
-    ensure_directory(cast(Path, pw04_paths["figures_root"]))
-    ensure_directory(cast(Path, pw04_paths["tail_root"]))
-    ensure_directory(cast(Path, pw04_paths["quality_root"]))
+    if resolved_mode != PW04_MODE_QUALITY_SHARD and quality_shard_index is not None:
+        raise ValueError("quality_shard_index is only valid when pw04_mode=quality_shard")
 
-    pw02_summary_path = family_root / "runtime_state" / PW02_SUMMARY_FILE_NAME
-    finalize_manifest_path = family_root / "exports" / "pw02" / "paper_source_finalize_manifest.json"
-    content_threshold_export_path = family_root / "exports" / "pw02" / "thresholds" / "content" / "thresholds.json"
-    attestation_threshold_export_path = family_root / "exports" / "pw02" / "thresholds" / "attestation" / "thresholds.json"
-    attack_shard_plan_path = family_root / "manifests" / "attack_shard_plan.json"
-    attack_event_grid_path = family_root / "manifests" / "attack_event_grid.jsonl"
-    clean_formal_metrics_path = family_root / "exports" / "pw02" / "formal_final_decision_metrics.json"
-    clean_derived_metrics_path = family_root / "exports" / "pw02" / "derived_system_union_metrics.json"
+    if resolved_mode == PW04_MODE_PREPARE:
+        _prepare_pw04_outputs(
+            family_root=family_root,
+            export_root=cast(Path, pw04_paths["export_root"]),
+            summary_path=cast(Path, pw04_paths["summary_path"]),
+            force_rerun=force_rerun,
+        )
+        ensure_directory(cast(Path, pw04_paths["manifests_root"]))
+        ensure_directory(cast(Path, pw04_paths["records_root"]))
+        ensure_directory(cast(Path, pw04_paths["tables_root"]))
+        ensure_directory(cast(Path, pw04_paths["metrics_root"]))
+        ensure_directory(cast(Path, pw04_paths["figures_root"]))
+        ensure_directory(cast(Path, pw04_paths["tail_root"]))
+        ensure_directory(cast(Path, pw04_paths["quality_root"]))
 
-    pw02_summary = _load_required_json_dict(pw02_summary_path, "PW02 summary")
-    finalize_manifest = _load_required_json_dict(finalize_manifest_path, "paper source finalize manifest")
-    content_threshold_export = _load_required_json_dict(content_threshold_export_path, "PW02 content threshold export")
-    attestation_threshold_export = _load_required_json_dict(attestation_threshold_export_path, "PW02 attestation threshold export")
-    attack_shard_plan = _load_required_json_dict(attack_shard_plan_path, "PW00 attack shard plan")
+        pw02_summary_path = family_root / "runtime_state" / PW02_SUMMARY_FILE_NAME
+        finalize_manifest_path = family_root / "exports" / "pw02" / "paper_source_finalize_manifest.json"
+        content_threshold_export_path = family_root / "exports" / "pw02" / "thresholds" / "content" / "thresholds.json"
+        attestation_threshold_export_path = family_root / "exports" / "pw02" / "thresholds" / "attestation" / "thresholds.json"
+        attack_shard_plan_path = family_root / "manifests" / "attack_shard_plan.json"
+        attack_event_grid_path = family_root / "manifests" / "attack_event_grid.jsonl"
 
-    finalize_manifest_path_from_summary = pw02_summary.get("paper_source_finalize_manifest_path")
-    if not isinstance(finalize_manifest_path_from_summary, str) or not finalize_manifest_path_from_summary.strip():
-        raise ValueError("PW02 summary missing paper_source_finalize_manifest_path")
-    if normalize_path_value(Path(finalize_manifest_path_from_summary).expanduser().resolve()) != normalize_path_value(finalize_manifest_path):
-        raise ValueError("PW02 summary finalize manifest path mismatch with canonical PW02 output")
+        pw02_summary = _load_required_json_dict(pw02_summary_path, "PW02 summary")
+        _load_required_json_dict(finalize_manifest_path, "paper source finalize manifest")
+        content_threshold_export = _load_required_json_dict(content_threshold_export_path, "PW02 content threshold export")
+        attestation_threshold_export = _load_required_json_dict(attestation_threshold_export_path, "PW02 attestation threshold export")
+        attack_shard_plan = _load_required_json_dict(attack_shard_plan_path, "PW00 attack shard plan")
 
-    content_thresholds_artifact = content_threshold_export.get("thresholds_artifact")
-    attestation_thresholds_artifact = attestation_threshold_export.get("thresholds_artifact")
-    if not isinstance(content_thresholds_artifact, Mapping):
-        raise ValueError("PW02 content threshold export missing thresholds_artifact")
-    if not isinstance(attestation_thresholds_artifact, Mapping):
-        raise ValueError("PW02 attestation threshold export missing thresholds_artifact")
+        finalize_manifest_path_from_summary = pw02_summary.get("paper_source_finalize_manifest_path")
+        if not isinstance(finalize_manifest_path_from_summary, str) or not finalize_manifest_path_from_summary.strip():
+            raise ValueError("PW02 summary missing paper_source_finalize_manifest_path")
+        if normalize_path_value(Path(finalize_manifest_path_from_summary).expanduser().resolve()) != normalize_path_value(finalize_manifest_path):
+            raise ValueError("PW02 summary finalize manifest path mismatch with canonical PW02 output")
 
-    attack_event_rows_from_grid = read_jsonl(attack_event_grid_path)
-    attack_event_lookup: Dict[str, Dict[str, Any]] = {}
-    for attack_event_row in attack_event_rows_from_grid:
-        attack_event_id = attack_event_row.get("attack_event_id", attack_event_row.get("event_id"))
-        if not isinstance(attack_event_id, str) or not attack_event_id:
-            raise ValueError("attack_event_grid contains invalid attack_event_id")
-        if attack_event_id in attack_event_lookup:
-            raise ValueError(f"duplicate attack_event_id in attack_event_grid: {attack_event_id}")
-        attack_event_lookup[attack_event_id] = attack_event_row
+        content_thresholds_artifact = content_threshold_export.get("thresholds_artifact")
+        attestation_thresholds_artifact = attestation_threshold_export.get("thresholds_artifact")
+        if not isinstance(content_thresholds_artifact, Mapping):
+            raise ValueError("PW02 content threshold export missing thresholds_artifact")
+        if not isinstance(attestation_thresholds_artifact, Mapping):
+            raise ValueError("PW02 attestation threshold export missing thresholds_artifact")
 
-    attack_plan_shards = attack_shard_plan.get("shards")
-    if not isinstance(attack_plan_shards, list):
-        raise ValueError("attack_shard_plan.shards must be list")
-    planned_attack_event_ids: List[str] = []
-    for shard_node in cast(List[object], attack_plan_shards):
-        if not isinstance(shard_node, Mapping):
-            raise ValueError("attack_shard_plan.shards must contain objects")
-        assigned_attack_event_ids = shard_node.get("assigned_attack_event_ids")
-        if not isinstance(assigned_attack_event_ids, list):
-            raise ValueError("attack_shard_plan shard missing assigned_attack_event_ids")
-        planned_attack_event_ids.extend(str(event_id) for event_id in cast(List[object], assigned_attack_event_ids))
+        attack_event_rows_from_grid = read_jsonl(attack_event_grid_path)
+        attack_event_lookup: Dict[str, Dict[str, Any]] = {}
+        for attack_event_row in attack_event_rows_from_grid:
+            attack_event_id = attack_event_row.get("attack_event_id", attack_event_row.get("event_id"))
+            if not isinstance(attack_event_id, str) or not attack_event_id:
+                raise ValueError("attack_event_grid contains invalid attack_event_id")
+            if attack_event_id in attack_event_lookup:
+                raise ValueError(f"duplicate attack_event_id in attack_event_grid: {attack_event_id}")
+            attack_event_lookup[attack_event_id] = attack_event_row
 
-    expected_attack_event_count = attack_shard_plan.get("attack_event_count")
-    expected_attack_shard_count = attack_shard_plan.get("attack_shard_count")
-    if not isinstance(expected_attack_event_count, int) or expected_attack_event_count < 0:
-        raise ValueError("attack_shard_plan missing attack_event_count")
-    if not isinstance(expected_attack_shard_count, int) or expected_attack_shard_count <= 0:
-        raise ValueError("attack_shard_plan missing attack_shard_count")
-    if expected_attack_event_count != len(planned_attack_event_ids):
-        raise ValueError("attack_shard_plan attack_event_count mismatch with shard assignments")
-    if expected_attack_event_count != len(attack_event_lookup):
-        raise ValueError("attack_shard_plan attack_event_count mismatch with attack_event_grid")
-    if set(planned_attack_event_ids) != set(attack_event_lookup.keys()):
-        raise ValueError("attack_shard_plan expected universe does not match attack_event_grid")
+        attack_plan_shards = attack_shard_plan.get("shards")
+        if not isinstance(attack_plan_shards, list):
+            raise ValueError("attack_shard_plan.shards must be list")
+        planned_attack_event_ids: List[str] = []
+        for shard_node in cast(List[object], attack_plan_shards):
+            if not isinstance(shard_node, Mapping):
+                raise ValueError("attack_shard_plan.shards must contain objects")
+            assigned_attack_event_ids = shard_node.get("assigned_attack_event_ids")
+            if not isinstance(assigned_attack_event_ids, list):
+                raise ValueError("attack_shard_plan shard missing assigned_attack_event_ids")
+            planned_attack_event_ids.extend(str(event_id) for event_id in cast(List[object], assigned_attack_event_ids))
 
-    source_finalize_manifest_digest = compute_file_sha256(finalize_manifest_path)
-    expected_threshold_artifact_paths = {
-        "content": normalize_path_value(content_threshold_export_path),
-        "attestation": normalize_path_value(attestation_threshold_export_path),
-    }
+        expected_attack_event_count = attack_shard_plan.get("attack_event_count")
+        expected_attack_shard_count = attack_shard_plan.get("attack_shard_count")
+        if not isinstance(expected_attack_event_count, int) or expected_attack_event_count < 0:
+            raise ValueError("attack_shard_plan missing attack_event_count")
+        if not isinstance(expected_attack_shard_count, int) or expected_attack_shard_count <= 0:
+            raise ValueError("attack_shard_plan missing attack_shard_count")
+        if expected_attack_event_count != len(planned_attack_event_ids):
+            raise ValueError("attack_shard_plan attack_event_count mismatch with shard assignments")
+        if expected_attack_event_count != len(attack_event_lookup):
+            raise ValueError("attack_shard_plan attack_event_count mismatch with attack_event_grid")
+        if set(planned_attack_event_ids) != set(attack_event_lookup.keys()):
+            raise ValueError("attack_shard_plan expected universe does not match attack_event_grid")
 
-    shard_rows = _collect_completed_pw03_shard_manifests(
-        family_root=family_root,
-        attack_shard_plan=attack_shard_plan,
-    )
-    attack_event_rows = _collect_completed_attack_events(
+        source_finalize_manifest_digest = compute_file_sha256(finalize_manifest_path)
+        expected_threshold_artifact_paths = {
+            "content": normalize_path_value(content_threshold_export_path),
+            "attestation": normalize_path_value(attestation_threshold_export_path),
+        }
+
+        shard_rows = _collect_completed_pw03_shard_manifests(
+            family_root=family_root,
+            attack_shard_plan=attack_shard_plan,
+        )
+        attack_event_rows = _collect_completed_attack_events(
+            family_id=family_id,
+            family_root=family_root,
+            shard_rows=shard_rows,
+            attack_event_lookup=attack_event_lookup,
+            expected_source_finalize_manifest_digest=source_finalize_manifest_digest,
+            expected_threshold_artifact_paths=expected_threshold_artifact_paths,
+        )
+        materialized_attack_event_rows = _write_attack_formal_records(
+            family_root=family_root,
+            records_root=cast(Path, pw04_paths["records_root"]),
+            family_id=family_id,
+            attack_event_rows=attack_event_rows,
+            content_thresholds_artifact=content_thresholds_artifact,
+            attestation_thresholds_artifact=attestation_thresholds_artifact,
+        )
+        positive_attack_event_rows = [
+            row for row in materialized_attack_event_rows if row.get("sample_role") == ATTACKED_POSITIVE_SAMPLE_ROLE
+        ]
+        negative_attack_event_rows = [
+            row for row in materialized_attack_event_rows if row.get("sample_role") == ATTACKED_NEGATIVE_SAMPLE_ROLE
+        ]
+
+        quality_pair_plan_export = run_pw04_prepare_quality_pairs(
+            family_id=family_id,
+            family_root=family_root,
+            pw02_summary=pw02_summary,
+            attack_event_rows=positive_attack_event_rows,
+            quality_root=cast(Path, pw04_paths["quality_root"]),
+            planned_shard_count=expected_attack_shard_count,
+        )
+        quality_pair_plan_path = Path(str(quality_pair_plan_export["path"])).expanduser().resolve()
+        quality_pair_plan_payload = cast(Mapping[str, Any], quality_pair_plan_export["payload"])
+        expected_quality_shard_paths = _build_expected_quality_shard_paths(
+            family_root=family_root,
+            quality_root=cast(Path, pw04_paths["quality_root"]),
+            quality_pair_plan=quality_pair_plan_payload,
+        )
+
+        attack_merge_manifest_payload = _build_attack_merge_manifest_payload(
+            family_id=family_id,
+            family_root=family_root,
+            pw02_summary_path=pw02_summary_path,
+            finalize_manifest_path=finalize_manifest_path,
+            content_threshold_export_path=content_threshold_export_path,
+            attestation_threshold_export_path=attestation_threshold_export_path,
+            attack_shard_plan_path=attack_shard_plan_path,
+            attack_event_grid_path=attack_event_grid_path,
+            expected_attack_shard_count=expected_attack_shard_count,
+            discovered_attack_shard_count=len(shard_rows),
+            expected_attack_event_count=expected_attack_event_count,
+            discovered_attack_event_count=len(materialized_attack_event_rows),
+            completed_attack_event_count=len(materialized_attack_event_rows),
+            attack_event_rows=materialized_attack_event_rows,
+            source_finalize_manifest_digest=source_finalize_manifest_digest,
+        )
+        attack_pool_manifest_payload = _build_attack_pool_manifest_payload(
+            family_id=family_id,
+            source_role=ATTACKED_POSITIVE_SAMPLE_ROLE,
+            attack_event_rows=positive_attack_event_rows,
+        )
+        attack_negative_pool_manifest_payload = _build_attack_pool_manifest_payload(
+            family_id=family_id,
+            source_role=ATTACKED_NEGATIVE_SAMPLE_ROLE,
+            attack_event_rows=negative_attack_event_rows,
+        )
+        formal_attack_final_decision_metrics_payload = _build_formal_attack_final_decision_metrics_export(
+            family_id=family_id,
+            finalize_manifest_path=finalize_manifest_path,
+            content_threshold_export_path=content_threshold_export_path,
+            attack_pool_manifest_path=cast(Path, pw04_paths["attack_pool_manifest_path"]),
+            attack_event_rows=positive_attack_event_rows,
+        )
+        formal_attack_attestation_metrics_payload = _build_formal_attack_attestation_metrics_export(
+            family_id=family_id,
+            finalize_manifest_path=finalize_manifest_path,
+            attestation_threshold_export_path=attestation_threshold_export_path,
+            attack_pool_manifest_path=cast(Path, pw04_paths["attack_pool_manifest_path"]),
+            attack_event_rows=positive_attack_event_rows,
+        )
+        derived_attack_union_metrics_payload = _build_derived_attack_union_metrics_export(
+            family_id=family_id,
+            content_threshold_export_path=content_threshold_export_path,
+            attestation_threshold_export_path=attestation_threshold_export_path,
+            attack_pool_manifest_path=cast(Path, pw04_paths["attack_pool_manifest_path"]),
+            attack_event_rows=positive_attack_event_rows,
+        )
+        formal_attack_negative_metrics_payload = _build_attack_negative_metrics_export(
+            family_id=family_id,
+            content_threshold_export_path=content_threshold_export_path,
+            attestation_threshold_export_path=attestation_threshold_export_path,
+            attack_negative_pool_manifest_path=cast(Path, pw04_paths["attack_negative_pool_manifest_path"]),
+            attack_event_rows=negative_attack_event_rows,
+        )
+        per_attack_family_metrics_payload = _build_per_attack_family_metrics_export(
+            family_id=family_id,
+            attack_event_rows=positive_attack_event_rows,
+        )
+        per_attack_condition_metrics_payload = _build_per_attack_condition_metrics_export(
+            family_id=family_id,
+            attack_event_rows=positive_attack_event_rows,
+        )
+        prepared_attack_event_rows_payload = _build_prepared_attack_event_rows_payload(
+            family_id=family_id,
+            attack_event_rows=materialized_attack_event_rows,
+        )
+
+        write_json_atomic(cast(Path, pw04_paths["attack_merge_manifest_path"]), attack_merge_manifest_payload)
+        write_json_atomic(cast(Path, pw04_paths["attack_pool_manifest_path"]), attack_pool_manifest_payload)
+        write_json_atomic(cast(Path, pw04_paths["attack_negative_pool_manifest_path"]), attack_negative_pool_manifest_payload)
+        write_json_atomic(
+            cast(Path, pw04_paths["formal_attack_final_decision_metrics_path"]),
+            formal_attack_final_decision_metrics_payload,
+        )
+        write_json_atomic(
+            cast(Path, pw04_paths["formal_attack_attestation_metrics_path"]),
+            formal_attack_attestation_metrics_payload,
+        )
+        write_json_atomic(
+            cast(Path, pw04_paths["derived_attack_union_metrics_path"]),
+            derived_attack_union_metrics_payload,
+        )
+        write_json_atomic(
+            cast(Path, pw04_paths["formal_attack_negative_metrics_path"]),
+            formal_attack_negative_metrics_payload,
+        )
+        write_json_atomic(cast(Path, pw04_paths["per_attack_family_metrics_path"]), per_attack_family_metrics_payload)
+        write_json_atomic(cast(Path, pw04_paths["per_attack_condition_metrics_path"]), per_attack_condition_metrics_payload)
+        write_json_atomic(
+            cast(Path, pw04_paths["prepared_attack_event_rows_path"]),
+            prepared_attack_event_rows_payload,
+        )
+
+        prepare_manifest_payload = _build_prepare_manifest_payload(
+            family_id=family_id,
+            family_root=family_root,
+            pw04_paths=pw04_paths,
+            quality_pair_plan_path=quality_pair_plan_path,
+            prepared_attack_event_rows_path=cast(Path, pw04_paths["prepared_attack_event_rows_path"]),
+            expected_quality_shard_paths=expected_quality_shard_paths,
+            expected_attack_shard_count=expected_attack_shard_count,
+            discovered_attack_shard_count=len(shard_rows),
+            expected_attack_event_count=expected_attack_event_count,
+            discovered_attack_event_count=len(materialized_attack_event_rows),
+            completed_attack_event_count=len(materialized_attack_event_rows),
+            attacked_positive_event_count=len(positive_attack_event_rows),
+            attacked_negative_event_count=len(negative_attack_event_rows),
+            enable_tail_estimation=enable_tail_estimation,
+        )
+        write_json_atomic(cast(Path, pw04_paths["prepare_manifest_path"]), prepare_manifest_payload)
+
+        return {
+            "artifact_type": "paper_workflow_pw04_prepare_result",
+            "schema_version": SCHEMA_VERSION,
+            "created_at": utc_now_iso(),
+            "stage_name": STAGE_NAME,
+            "pw04_mode": resolved_mode,
+            "family_id": family_id,
+            "family_root": normalize_path_value(family_root),
+            "status": "completed",
+            "prepare_manifest_path": normalize_path_value(cast(Path, pw04_paths["prepare_manifest_path"])),
+            "prepared_attack_event_rows_path": normalize_path_value(cast(Path, pw04_paths["prepared_attack_event_rows_path"])),
+            "attack_merge_manifest_path": normalize_path_value(cast(Path, pw04_paths["attack_merge_manifest_path"])),
+            "attack_positive_pool_manifest_path": normalize_path_value(cast(Path, pw04_paths["attack_pool_manifest_path"])),
+            "attack_negative_pool_manifest_path": normalize_path_value(cast(Path, pw04_paths["attack_negative_pool_manifest_path"])),
+            "formal_attack_final_decision_metrics_path": normalize_path_value(cast(Path, pw04_paths["formal_attack_final_decision_metrics_path"])),
+            "formal_attack_attestation_metrics_path": normalize_path_value(cast(Path, pw04_paths["formal_attack_attestation_metrics_path"])),
+            "derived_attack_union_metrics_path": normalize_path_value(cast(Path, pw04_paths["derived_attack_union_metrics_path"])),
+            "formal_attack_negative_metrics_path": normalize_path_value(cast(Path, pw04_paths["formal_attack_negative_metrics_path"])),
+            "per_attack_family_metrics_path": normalize_path_value(cast(Path, pw04_paths["per_attack_family_metrics_path"])),
+            "per_attack_condition_metrics_path": normalize_path_value(cast(Path, pw04_paths["per_attack_condition_metrics_path"])),
+            "quality_pair_plan_path": normalize_path_value(quality_pair_plan_path),
+            "quality_shard_count": len(expected_quality_shard_paths),
+            "expected_quality_shard_paths": [normalize_path_value(path_obj) for path_obj in expected_quality_shard_paths],
+            "completed_attack_event_count": len(materialized_attack_event_rows),
+            "attacked_positive_event_count": len(positive_attack_event_rows),
+            "attacked_negative_event_count": len(negative_attack_event_rows),
+            "enable_tail_estimation": enable_tail_estimation,
+        }
+
+    prepare_context = _load_pw04_prepare_context(
         family_id=family_id,
         family_root=family_root,
-        shard_rows=shard_rows,
-        attack_event_lookup=attack_event_lookup,
-        expected_source_finalize_manifest_digest=source_finalize_manifest_digest,
-        expected_threshold_artifact_paths=expected_threshold_artifact_paths,
+        pw04_paths=pw04_paths,
     )
-    materialized_attack_event_rows = _write_attack_formal_records(
-        family_root=family_root,
-        records_root=cast(Path, pw04_paths["records_root"]),
-        family_id=family_id,
-        attack_event_rows=attack_event_rows,
-        content_thresholds_artifact=content_thresholds_artifact,
-        attestation_thresholds_artifact=attestation_thresholds_artifact,
-    )
+
+    if resolved_mode == PW04_MODE_QUALITY_SHARD:
+        if quality_shard_index is None:
+            raise ValueError("quality_shard_index is required when pw04_mode=quality_shard")
+        summary_path = cast(Path, pw04_paths["summary_path"])
+        if summary_path.exists():
+            raise RuntimeError(
+                "PW04 final summary already exists; rerun quality shards requires restarting from prepare mode"
+            )
+
+        expected_quality_shard_path = (
+            cast(Path, pw04_paths["quality_root"])
+            / QUALITY_SHARDS_DIRECTORY_NAME
+            / QUALITY_SHARD_FILE_NAME_TEMPLATE.format(quality_shard_index=quality_shard_index)
+        )
+        expected_quality_shard_path_set = {
+            normalize_path_value(path_obj) for path_obj in cast(List[Path], prepare_context["expected_quality_shard_paths"])
+        }
+        if normalize_path_value(expected_quality_shard_path) not in expected_quality_shard_path_set:
+            raise ValueError(
+                "PW04 quality_shard mode received unexpected shard index: "
+                f"quality_shard_index={quality_shard_index}"
+            )
+        if expected_quality_shard_path.exists():
+            if not force_rerun:
+                raise RuntimeError(
+                    "PW04 quality shard output already exists; rerun requires force_rerun: "
+                    f"quality_shard_path={normalize_path_value(expected_quality_shard_path)}"
+                )
+            expected_quality_shard_path.unlink()
+
+        shard_export = run_pw04_quality_shard(
+            family_id=family_id,
+            quality_pair_plan_path=cast(Path, prepare_context["quality_pair_plan_path"]),
+            quality_shard_index=quality_shard_index,
+        )
+        if normalize_path_value(Path(str(shard_export["path"])).expanduser().resolve()) != normalize_path_value(expected_quality_shard_path):
+            raise ValueError("PW04 quality shard output path mismatch with frozen prepare manifest")
+        return {
+            "artifact_type": "paper_workflow_pw04_quality_shard_result",
+            "schema_version": SCHEMA_VERSION,
+            "created_at": utc_now_iso(),
+            "stage_name": STAGE_NAME,
+            "pw04_mode": resolved_mode,
+            "family_id": family_id,
+            "family_root": normalize_path_value(family_root),
+            "status": "completed",
+            "prepare_manifest_path": normalize_path_value(cast(Path, prepare_context["prepare_manifest_path"])),
+            "quality_pair_plan_path": normalize_path_value(cast(Path, prepare_context["quality_pair_plan_path"])),
+            "quality_shard_index": quality_shard_index,
+            "quality_shard_path": normalize_path_value(expected_quality_shard_path),
+            "quality_shard_count": len(cast(List[Path], prepare_context["expected_quality_shard_paths"])),
+        }
+
+    summary_path = cast(Path, pw04_paths["summary_path"])
+    if summary_path.exists() and not force_rerun:
+        raise RuntimeError(
+            "PW04 outputs already finalized; rerun finalize requires force_rerun: "
+            f"summary_path={normalize_path_value(summary_path)}"
+        )
+    if enable_tail_estimation and not bool(prepare_context["enable_tail_estimation"]):
+        raise ValueError(
+            "PW04 finalize cannot enable tail estimation beyond the frozen prepare manifest"
+        )
+
+    expected_quality_shard_paths = cast(List[Path], prepare_context["expected_quality_shard_paths"])
+    missing_quality_shard_paths = [path_obj for path_obj in expected_quality_shard_paths if not path_obj.exists()]
+    if missing_quality_shard_paths:
+        raise RuntimeError(
+            "PW04 finalize requires all prepared quality shard outputs before reducer execution: "
+            f"missing={[normalize_path_value(path_obj) for path_obj in missing_quality_shard_paths]}"
+        )
+
+    resolved_paths = cast(Dict[str, Path], prepare_context["resolved_paths"])
+    materialized_attack_event_rows = [
+        dict(cast(Mapping[str, Any], row))
+        for row in cast(List[Mapping[str, Any]], prepare_context["materialized_attack_event_rows"])
+    ]
     positive_attack_event_rows = [
         row for row in materialized_attack_event_rows if row.get("sample_role") == ATTACKED_POSITIVE_SAMPLE_ROLE
     ]
@@ -1949,60 +2591,12 @@ def run_pw04_merge_attack_event_shards(
         row for row in materialized_attack_event_rows if row.get("sample_role") == ATTACKED_NEGATIVE_SAMPLE_ROLE
     ]
 
-    quality_pair_plan_export = run_pw04_prepare_quality_pairs(
-        family_id=family_id,
-        family_root=family_root,
-        pw02_summary=pw02_summary,
-        attack_event_rows=positive_attack_event_rows,
-        quality_root=cast(Path, pw04_paths["quality_root"]),
-        planned_shard_count=expected_attack_shard_count,
-    )
-    quality_pair_plan_payload = cast(Mapping[str, Any], quality_pair_plan_export["payload"])
-    quality_shard_exports = [
-        run_pw04_quality_shard(
-            family_id=family_id,
-            quality_pair_plan_path=Path(str(quality_pair_plan_export["path"])).expanduser().resolve(),
-            quality_shard_index=int(cast(Mapping[str, Any], shard_row)["quality_shard_index"]),
-        )
-        for shard_row in cast(List[Mapping[str, Any]], quality_pair_plan_payload.get("shards", []))
-    ]
     quality_finalize_export = run_pw04_finalize_quality_metrics(
         family_id=family_id,
-        quality_pair_plan_path=Path(str(quality_pair_plan_export["path"])).expanduser().resolve(),
+        quality_pair_plan_path=cast(Path, prepare_context["quality_pair_plan_path"]),
         clean_quality_metrics_path=cast(Path, pw04_paths["clean_quality_metrics_path"]),
         attack_quality_metrics_path=cast(Path, pw04_paths["attack_quality_metrics_path"]),
-        quality_shard_paths=[
-            Path(str(shard_export["path"])).expanduser().resolve()
-            for shard_export in quality_shard_exports
-        ],
-    )
-
-    attack_merge_manifest_payload = _build_attack_merge_manifest_payload(
-        family_id=family_id,
-        family_root=family_root,
-        pw02_summary_path=pw02_summary_path,
-        finalize_manifest_path=finalize_manifest_path,
-        content_threshold_export_path=content_threshold_export_path,
-        attestation_threshold_export_path=attestation_threshold_export_path,
-        attack_shard_plan_path=attack_shard_plan_path,
-        attack_event_grid_path=attack_event_grid_path,
-        expected_attack_shard_count=expected_attack_shard_count,
-        discovered_attack_shard_count=len(shard_rows),
-        expected_attack_event_count=expected_attack_event_count,
-        discovered_attack_event_count=len(materialized_attack_event_rows),
-        completed_attack_event_count=len(materialized_attack_event_rows),
-        attack_event_rows=materialized_attack_event_rows,
-        source_finalize_manifest_digest=source_finalize_manifest_digest,
-    )
-    attack_pool_manifest_payload = _build_attack_pool_manifest_payload(
-        family_id=family_id,
-        source_role=ATTACKED_POSITIVE_SAMPLE_ROLE,
-        attack_event_rows=positive_attack_event_rows,
-    )
-    attack_negative_pool_manifest_payload = _build_attack_pool_manifest_payload(
-        family_id=family_id,
-        source_role=ATTACKED_NEGATIVE_SAMPLE_ROLE,
-        attack_event_rows=negative_attack_event_rows,
+        quality_shard_paths=expected_quality_shard_paths,
     )
     clean_quality_metrics_payload = cast(Mapping[str, Any], quality_finalize_export["clean_quality_payload"])
     attack_quality_metrics_payload = cast(Mapping[str, Any], quality_finalize_export["attack_quality_payload"])
@@ -2024,33 +2618,22 @@ def run_pw04_merge_attack_event_shards(
         attack_event_row["attack_quality_lpips"] = None
         attack_event_row["attack_quality_clip_text_similarity"] = None
         attack_event_row["attack_quality_clip_model_name"] = None
-    formal_attack_final_decision_metrics_payload = _build_formal_attack_final_decision_metrics_export(
-        family_id=family_id,
-        finalize_manifest_path=finalize_manifest_path,
-        content_threshold_export_path=content_threshold_export_path,
-        attack_pool_manifest_path=cast(Path, pw04_paths["attack_pool_manifest_path"]),
-        attack_event_rows=positive_attack_event_rows,
+
+    formal_attack_final_decision_metrics_payload = _load_required_json_dict(
+        resolved_paths["formal_attack_final_decision_metrics_path"],
+        "PW04 formal attack final decision metrics",
     )
-    formal_attack_attestation_metrics_payload = _build_formal_attack_attestation_metrics_export(
-        family_id=family_id,
-        finalize_manifest_path=finalize_manifest_path,
-        attestation_threshold_export_path=attestation_threshold_export_path,
-        attack_pool_manifest_path=cast(Path, pw04_paths["attack_pool_manifest_path"]),
-        attack_event_rows=positive_attack_event_rows,
+    formal_attack_attestation_metrics_payload = _load_required_json_dict(
+        resolved_paths["formal_attack_attestation_metrics_path"],
+        "PW04 formal attack attestation metrics",
     )
-    derived_attack_union_metrics_payload = _build_derived_attack_union_metrics_export(
-        family_id=family_id,
-        content_threshold_export_path=content_threshold_export_path,
-        attestation_threshold_export_path=attestation_threshold_export_path,
-        attack_pool_manifest_path=cast(Path, pw04_paths["attack_pool_manifest_path"]),
-        attack_event_rows=positive_attack_event_rows,
+    derived_attack_union_metrics_payload = _load_required_json_dict(
+        resolved_paths["derived_attack_union_metrics_path"],
+        "PW04 derived attack union metrics",
     )
-    formal_attack_negative_metrics_payload = _build_attack_negative_metrics_export(
-        family_id=family_id,
-        content_threshold_export_path=content_threshold_export_path,
-        attestation_threshold_export_path=attestation_threshold_export_path,
-        attack_negative_pool_manifest_path=cast(Path, pw04_paths["attack_negative_pool_manifest_path"]),
-        attack_event_rows=negative_attack_event_rows,
+    formal_attack_negative_metrics_payload = _load_required_json_dict(
+        resolved_paths["formal_attack_negative_metrics_path"],
+        "PW04 formal attack negative metrics",
     )
     per_attack_family_metrics_payload = _build_per_attack_family_metrics_export(
         family_id=family_id,
@@ -2060,6 +2643,20 @@ def run_pw04_merge_attack_event_shards(
         family_id=family_id,
         attack_event_rows=positive_attack_event_rows,
     )
+    write_json_atomic(
+        resolved_paths["per_attack_family_metrics_path"],
+        per_attack_family_metrics_payload,
+    )
+    write_json_atomic(
+        resolved_paths["per_attack_condition_metrics_path"],
+        per_attack_condition_metrics_payload,
+    )
+
+    pw02_summary_path = family_root / "runtime_state" / PW02_SUMMARY_FILE_NAME
+    pw02_summary = _load_required_json_dict(pw02_summary_path, "PW02 summary")
+    clean_formal_metrics_path = family_root / "exports" / "pw02" / "formal_final_decision_metrics.json"
+    clean_derived_metrics_path = family_root / "exports" / "pw02" / "derived_system_union_metrics.json"
+
     attack_event_table_rows = _write_attack_event_table_jsonl(
         output_path=cast(Path, pw04_paths["attack_event_table_path"]),
         attack_event_rows=materialized_attack_event_rows,
@@ -2076,41 +2673,20 @@ def run_pw04_merge_attack_event_shards(
         family_id=family_id,
         clean_formal_metrics_path=clean_formal_metrics_path,
         clean_derived_metrics_path=clean_derived_metrics_path,
-        attack_formal_metrics_path=cast(Path, pw04_paths["formal_attack_final_decision_metrics_path"]),
-        attack_attestation_metrics_path=cast(Path, pw04_paths["formal_attack_attestation_metrics_path"]),
-        attack_derived_metrics_path=cast(Path, pw04_paths["derived_attack_union_metrics_path"]),
+        attack_formal_metrics_path=resolved_paths["formal_attack_final_decision_metrics_path"],
+        attack_attestation_metrics_path=resolved_paths["formal_attack_attestation_metrics_path"],
+        attack_derived_metrics_path=resolved_paths["derived_attack_union_metrics_path"],
         attack_quality_metrics_path=cast(Path, pw04_paths["attack_quality_metrics_path"]),
-        attack_negative_metrics_path=cast(Path, pw04_paths["formal_attack_negative_metrics_path"]),
+        attack_negative_metrics_path=resolved_paths["formal_attack_negative_metrics_path"],
         attack_formal_metrics_payload=formal_attack_final_decision_metrics_payload,
         attack_attestation_metrics_payload=formal_attack_attestation_metrics_payload,
         attack_derived_metrics_payload=derived_attack_union_metrics_payload,
         attack_quality_metrics_payload=attack_quality_metrics_payload,
         attack_negative_metrics_payload=formal_attack_negative_metrics_payload,
     )
-
-    write_json_atomic(cast(Path, pw04_paths["attack_merge_manifest_path"]), attack_merge_manifest_payload)
-    write_json_atomic(cast(Path, pw04_paths["attack_pool_manifest_path"]), attack_pool_manifest_payload)
-    write_json_atomic(cast(Path, pw04_paths["attack_negative_pool_manifest_path"]), attack_negative_pool_manifest_payload)
-    write_json_atomic(
-        cast(Path, pw04_paths["formal_attack_final_decision_metrics_path"]),
-        formal_attack_final_decision_metrics_payload,
-    )
-    write_json_atomic(
-        cast(Path, pw04_paths["formal_attack_attestation_metrics_path"]),
-        formal_attack_attestation_metrics_payload,
-    )
-    write_json_atomic(
-        cast(Path, pw04_paths["derived_attack_union_metrics_path"]),
-        derived_attack_union_metrics_payload,
-    )
-    write_json_atomic(
-        cast(Path, pw04_paths["formal_attack_negative_metrics_path"]),
-        formal_attack_negative_metrics_payload,
-    )
-    write_json_atomic(cast(Path, pw04_paths["per_attack_family_metrics_path"]), per_attack_family_metrics_payload)
-    write_json_atomic(cast(Path, pw04_paths["per_attack_condition_metrics_path"]), per_attack_condition_metrics_payload)
     write_json_atomic(cast(Path, pw04_paths["clean_attack_overview_path"]), clean_attack_overview_payload)
 
+    enable_tail_estimation_for_finalize = bool(prepare_context["enable_tail_estimation"])
     paper_exports_payload = build_pw04_paper_exports(
         family_id=family_id,
         family_root=family_root,
@@ -2120,7 +2696,7 @@ def run_pw04_merge_attack_event_shards(
         per_attack_family_metrics_payload=per_attack_family_metrics_payload,
         per_attack_condition_metrics_payload=per_attack_condition_metrics_payload,
         attack_quality_metrics_payload=attack_quality_metrics_payload,
-        enable_tail_estimation=enable_tail_estimation,
+        enable_tail_estimation=enable_tail_estimation_for_finalize,
     )
     pw04_metrics_extensions = build_pw04_metrics_extensions(
         family_id=family_id,
@@ -2148,8 +2724,10 @@ def run_pw04_merge_attack_event_shards(
     )
     analysis_only_artifact_paths.update(
         {
-            "pw04_quality_pair_plan": str(quality_pair_plan_export["path"]),
+            "pw04_quality_pair_plan": normalize_path_value(cast(Path, prepare_context["quality_pair_plan_path"])),
             "pw04_quality_finalize_manifest": str(quality_finalize_export["quality_finalize_manifest_path"]),
+            "pw04_prepare_manifest": normalize_path_value(cast(Path, prepare_context["prepare_manifest_path"])),
+            "pw04_prepared_attack_event_rows": normalize_path_value(cast(Path, prepare_context["prepared_attack_event_rows_path"])),
         }
     )
     analysis_only_artifact_annotations = dict(
@@ -2159,6 +2737,8 @@ def run_pw04_merge_attack_event_shards(
         {
             "pw04_quality_pair_plan": {"canonical": False, "analysis_only": True},
             "pw04_quality_finalize_manifest": {"canonical": False, "analysis_only": True},
+            "pw04_prepare_manifest": {"canonical": False, "analysis_only": True},
+            "pw04_prepared_attack_event_rows": {"canonical": False, "analysis_only": True},
         }
     )
     pw04_metrics_extensions["analysis_only_artifact_paths"] = analysis_only_artifact_paths
@@ -2166,11 +2746,14 @@ def run_pw04_merge_attack_event_shards(
     paper_exports_payload.update(pw04_metrics_extensions)
     paper_exports_payload.update(
         {
+            "pw04_mode": resolved_mode,
+            "prepare_manifest_path": normalize_path_value(cast(Path, prepare_context["prepare_manifest_path"])),
+            "prepared_attack_event_rows_path": normalize_path_value(cast(Path, prepare_context["prepared_attack_event_rows_path"])),
             "clean_quality_metrics_path": str(quality_finalize_export["clean_quality_metrics_path"]),
-            "quality_pair_plan_path": str(quality_pair_plan_export["path"]),
-            "quality_shard_paths": [str(shard_export["path"]) for shard_export in quality_shard_exports],
+            "quality_pair_plan_path": normalize_path_value(cast(Path, prepare_context["quality_pair_plan_path"])),
+            "quality_shard_paths": [normalize_path_value(path_obj) for path_obj in expected_quality_shard_paths],
             "quality_finalize_manifest_path": str(quality_finalize_export["quality_finalize_manifest_path"]),
-            "quality_shard_count": len(quality_shard_exports),
+            "quality_shard_count": len(expected_quality_shard_paths),
         }
     )
 
@@ -2178,23 +2761,23 @@ def run_pw04_merge_attack_event_shards(
         family_id=family_id,
         family_root=family_root,
         summary_path=cast(Path, pw04_paths["summary_path"]),
-        attack_merge_manifest_path=cast(Path, pw04_paths["attack_merge_manifest_path"]),
-        attack_pool_manifest_path=cast(Path, pw04_paths["attack_pool_manifest_path"]),
-        attack_negative_pool_manifest_path=cast(Path, pw04_paths["attack_negative_pool_manifest_path"]),
-        formal_attack_final_decision_metrics_path=cast(Path, pw04_paths["formal_attack_final_decision_metrics_path"]),
-        formal_attack_attestation_metrics_path=cast(Path, pw04_paths["formal_attack_attestation_metrics_path"]),
-        derived_attack_union_metrics_path=cast(Path, pw04_paths["derived_attack_union_metrics_path"]),
-        formal_attack_negative_metrics_path=cast(Path, pw04_paths["formal_attack_negative_metrics_path"]),
-        per_attack_family_metrics_path=cast(Path, pw04_paths["per_attack_family_metrics_path"]),
-        per_attack_condition_metrics_path=cast(Path, pw04_paths["per_attack_condition_metrics_path"]),
+        attack_merge_manifest_path=resolved_paths["attack_merge_manifest_path"],
+        attack_pool_manifest_path=resolved_paths["attack_positive_pool_manifest_path"],
+        attack_negative_pool_manifest_path=resolved_paths["attack_negative_pool_manifest_path"],
+        formal_attack_final_decision_metrics_path=resolved_paths["formal_attack_final_decision_metrics_path"],
+        formal_attack_attestation_metrics_path=resolved_paths["formal_attack_attestation_metrics_path"],
+        derived_attack_union_metrics_path=resolved_paths["derived_attack_union_metrics_path"],
+        formal_attack_negative_metrics_path=resolved_paths["formal_attack_negative_metrics_path"],
+        per_attack_family_metrics_path=resolved_paths["per_attack_family_metrics_path"],
+        per_attack_condition_metrics_path=resolved_paths["per_attack_condition_metrics_path"],
         attack_quality_metrics_path=cast(Path, pw04_paths["attack_quality_metrics_path"]),
         attack_event_table_path=cast(Path, pw04_paths["attack_event_table_path"]),
         attack_family_summary_csv_path=cast(Path, pw04_paths["attack_family_summary_csv_path"]),
         attack_condition_summary_csv_path=cast(Path, pw04_paths["attack_condition_summary_csv_path"]),
         clean_attack_overview_path=cast(Path, pw04_paths["clean_attack_overview_path"]),
-        expected_attack_shard_count=expected_attack_shard_count,
-        discovered_attack_shard_count=len(shard_rows),
-        expected_attack_event_count=expected_attack_event_count,
+        expected_attack_shard_count=int(cast(Mapping[str, Any], prepare_context["prepare_manifest"])["expected_attack_shard_count"]),
+        discovered_attack_shard_count=int(cast(Mapping[str, Any], prepare_context["prepare_manifest"])["discovered_attack_shard_count"]),
+        expected_attack_event_count=int(cast(Mapping[str, Any], prepare_context["prepare_manifest"])["expected_attack_event_count"]),
         discovered_attack_event_count=len(attack_event_table_rows),
         completed_attack_event_count=len(materialized_attack_event_rows),
         attacked_positive_event_count=len(positive_attack_event_rows),
@@ -2202,10 +2785,11 @@ def run_pw04_merge_attack_event_shards(
         attack_family_count=len({str(row["attack_family"]) for row in materialized_attack_event_rows}),
         parent_event_count=len({str(row["parent_event_id"]) for row in materialized_attack_event_rows}),
         formal_record_count=len(materialized_attack_event_rows),
-        enable_tail_estimation=enable_tail_estimation,
+        enable_tail_estimation=enable_tail_estimation_for_finalize,
         paper_exports_payload=paper_exports_payload,
     )
-    write_json_atomic(cast(Path, pw04_paths["summary_path"]), summary_payload)
+    summary_payload["pw04_mode"] = resolved_mode
+    write_json_atomic(summary_path, summary_payload)
     return summary_payload
 
 
@@ -2219,9 +2803,26 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     Returns:
         Configured argument parser.
     """
-    parser = argparse.ArgumentParser(description="Merge PW03 attack shards and materialize PW04 metrics exports.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Execute one explicit PW04 mode over the frozen prepare/quality_shard/finalize flow, "
+            "with optional tail estimation exports at finalize time."
+        )
+    )
     parser.add_argument("--drive-project-root", required=True, help="Drive project root path.")
     parser.add_argument("--family-id", required=True, help="Family identifier.")
+    parser.add_argument(
+        "--pw04-mode",
+        required=True,
+        choices=list(PW04_MODE_CHOICES),
+        help="Explicit PW04 mode: prepare, quality_shard, or finalize.",
+    )
+    parser.add_argument(
+        "--quality-shard-index",
+        type=int,
+        default=None,
+        help="Zero-based quality shard index required for quality_shard mode.",
+    )
     parser.add_argument("--force-rerun", action="store_true", help="Clear existing PW04 outputs before rerun.")
     parser.add_argument(
         "--enable-tail-estimation",
@@ -2248,6 +2849,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         family_id=str(args.family_id),
         force_rerun=bool(args.force_rerun),
         enable_tail_estimation=bool(args.enable_tail_estimation),
+        pw04_mode=str(args.pw04_mode),
+        quality_shard_index=args.quality_shard_index,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
