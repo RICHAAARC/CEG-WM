@@ -39,7 +39,6 @@ from paper_workflow.scripts.pw_common import (
     validate_source_sample_role,
 )
 from paper_workflow.scripts.pw_quality_metrics import (
-    build_quality_metrics_from_pairs,
     resolve_optional_artifact_path,
     resolve_preview_persisted_artifact_path,
 )
@@ -62,6 +61,7 @@ FINALIZE_MANIFEST_FILE_NAME = "paper_source_finalize_manifest.json"
 FORMAL_FINAL_DECISION_METRICS_FILE_NAME = "formal_final_decision_metrics.json"
 DERIVED_SYSTEM_UNION_METRICS_FILE_NAME = "derived_system_union_metrics.json"
 CLEAN_SCORE_ANALYSIS_FILE_NAME = "clean_score_analysis.json"
+CLEAN_QUALITY_PAIR_MANIFEST_FILE_NAME = "clean_quality_pair_manifest.json"
 
 
 def _resolve_top_level_score_directory_name(score_name: str) -> str:
@@ -832,86 +832,130 @@ def _safe_resolve_prompt_text(event_payload: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _build_clean_positive_quality_metrics(
+def _build_clean_quality_pair_manifest(
     *,
-    score_name: str,
+    family_id: str,
+    stage_root: Path,
     positive_event_lookup: Mapping[str, Dict[str, Any]],
     eval_positive_event_ids: Sequence[str],
 ) -> Dict[str, Any]:
     """
-    Build clean-side image-quality metrics for content-chain evaluate positives.
+    Build one reusable clean-pair manifest for downstream PW04 quality metrics.
 
     Args:
-        score_name: Canonical score name.
+        family_id: Family identifier.
+        stage_root: PW02 stage root.
         positive_event_lookup: Positive-source event lookup.
         eval_positive_event_ids: Positive event ids used by the evaluate split.
 
     Returns:
-        Quality metrics payload or a stable not-applicable payload.
+        Clean-pair manifest export summary.
     """
-    if not isinstance(score_name, str) or not score_name:
-        raise TypeError("score_name must be non-empty str")
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(stage_root, Path):
+        raise TypeError("stage_root must be Path")
     if not isinstance(positive_event_lookup, Mapping):
         raise TypeError("positive_event_lookup must be Mapping")
     if not isinstance(eval_positive_event_ids, Sequence):
         raise TypeError("eval_positive_event_ids must be Sequence")
 
-    if not eval_metrics.is_content_chain_score_name(score_name):
-        return {
-            "status": "not_applicable",
-            "availability_reason": "quality_defined_for_content_chain_clean_images_only",
-            "expected_count": 0,
-            "count": 0,
-            "missing_count": 0,
-            "error_count": 0,
-            "mean_psnr": None,
-            "mean_ssim": None,
-            "pair_rows": [],
-        }
-
-    pair_specs: List[Dict[str, Any]] = []
+    pair_rows: List[Dict[str, Any]] = []
+    missing_pair_count = 0
+    prompt_text_available_count = 0
     for event_id in eval_positive_event_ids:
         if not isinstance(event_id, str) or not event_id:
             raise TypeError("eval_positive_event_ids items must be non-empty str")
         event_payload = positive_event_lookup.get(event_id)
         if not isinstance(event_payload, Mapping):
-            pair_specs.append(
+            missing_pair_count += 1
+            pair_rows.append(
                 {
                     "event_id": event_id,
                     "reference_image_path": None,
                     "candidate_image_path": None,
+                    "plain_preview_image_path": None,
+                    "watermarked_output_image_path": None,
+                    "prompt_text": None,
                     "sample_role": ACTIVE_SAMPLE_ROLE,
                 }
             )
             continue
         plain_preview_image_path = _safe_resolve_preview_artifact_path(event_payload)
         watermarked_output_image_path = _safe_resolve_watermarked_image_path(event_payload)
-        pair_specs.append(
+        prompt_text = _safe_resolve_prompt_text(event_payload)
+        if isinstance(prompt_text, str) and prompt_text:
+            prompt_text_available_count += 1
+        if (
+            not isinstance(plain_preview_image_path, str)
+            or not plain_preview_image_path
+            or not isinstance(watermarked_output_image_path, str)
+            or not watermarked_output_image_path
+        ):
+            missing_pair_count += 1
+        pair_rows.append(
             {
                 "event_id": event_id,
                 "reference_image_path": plain_preview_image_path,
                 "candidate_image_path": watermarked_output_image_path,
                 "plain_preview_image_path": plain_preview_image_path,
                 "watermarked_output_image_path": watermarked_output_image_path,
-                "prompt_text": _safe_resolve_prompt_text(event_payload),
+                "prompt_text": prompt_text,
                 "sample_role": ACTIVE_SAMPLE_ROLE,
             }
         )
 
-    quality_payload = build_quality_metrics_from_pairs(
-        pair_specs=pair_specs,
-        reference_path_key="reference_image_path",
-        candidate_path_key="candidate_image_path",
-        pair_id_key="event_id",
-        text_key="prompt_text",
-        extra_metadata_keys=["sample_role", "plain_preview_image_path", "watermarked_output_image_path"],
-    )
-    quality_payload["reference_artifact_name"] = "plain_preview_image"
-    quality_payload["candidate_artifact_name"] = "watermarked_output_image"
-    quality_payload["reference_semantics"] = "preview_generation_persisted_artifact_vs_watermarked_output_image"
-    quality_payload["sample_role"] = ACTIVE_SAMPLE_ROLE
-    quality_payload["split_scope"] = "evaluate_positive_only"
-    return quality_payload
+    expected_pair_count = len(eval_positive_event_ids)
+    complete_pair_count = expected_pair_count - missing_pair_count
+    if expected_pair_count <= 0:
+        status_value = "not_available"
+        reason_value = "no_evaluate_positive_events_available_for_clean_pair_manifest"
+    elif missing_pair_count <= 0:
+        status_value = "ok"
+        reason_value = None
+    else:
+        status_value = "partial"
+        reason_value = (
+            f"clean pair manifest complete for {complete_pair_count}/{expected_pair_count} evaluate-positive events"
+        )
+
+    output_path = stage_root / "quality" / CLEAN_QUALITY_PAIR_MANIFEST_FILE_NAME
+    ensure_directory(output_path.parent)
+    payload = {
+        "artifact_type": "paper_workflow_pw02_clean_quality_pair_manifest",
+        "schema_version": "pw_stage_02_v1",
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "score_name": CONTENT_SCORE_NAME,
+        "scope": "content_chain",
+        "canonical": False,
+        "analysis_only": True,
+        "status": status_value,
+        "reason": reason_value,
+        "pair_id_key": "event_id",
+        "reference_path_key": "reference_image_path",
+        "candidate_path_key": "candidate_image_path",
+        "text_key": "prompt_text",
+        "extra_metadata_keys": ["sample_role", "plain_preview_image_path", "watermarked_output_image_path"],
+        "reference_artifact_name": "plain_preview_image",
+        "candidate_artifact_name": "watermarked_output_image",
+        "reference_semantics": "preview_generation_persisted_artifact_vs_watermarked_output_image",
+        "sample_role": ACTIVE_SAMPLE_ROLE,
+        "split_scope": "evaluate_positive_only",
+        "pair_count": expected_pair_count,
+        "expected_pair_count": expected_pair_count,
+        "complete_pair_count": complete_pair_count,
+        "missing_pair_count": missing_pair_count,
+        "prompt_text_expected": True,
+        "prompt_text_available_count": prompt_text_available_count,
+        "prompt_text_missing_count": expected_pair_count - prompt_text_available_count,
+        "pair_rows": pair_rows,
+    }
+    write_json_atomic(output_path, payload)
+    return {
+        "path": normalize_path_value(output_path),
+        "payload": payload,
+    }
 
 
 def _build_clean_score_analysis_export(
@@ -922,6 +966,7 @@ def _build_clean_score_analysis_export(
     score_run: Mapping[str, Any],
     positive_event_lookup: Mapping[str, Dict[str, Any]],
     eval_positive_event_ids: Sequence[str],
+    clean_quality_pair_manifest_export: Mapping[str, Any] | None,
 ) -> Dict[str, Any]:
     """
     Build one append-only clean score analysis export.
@@ -933,6 +978,7 @@ def _build_clean_score_analysis_export(
         score_run: Score-run summary.
         positive_event_lookup: Positive-source event lookup.
         eval_positive_event_ids: Positive event ids used by the evaluate split.
+        clean_quality_pair_manifest_export: Clean-pair manifest export summary.
 
     Returns:
         Export summary with path and payload.
@@ -982,12 +1028,14 @@ def _build_clean_score_analysis_export(
             "tpr": roc_tpr,
             "thresholds": roc_thresholds,
         },
-        "clean_positive_quality_metrics": _build_clean_positive_quality_metrics(
-            score_name=score_name,
-            positive_event_lookup=positive_event_lookup,
-            eval_positive_event_ids=eval_positive_event_ids,
-        ),
     }
+    if eval_metrics.is_content_chain_score_name(score_name):
+        pair_manifest_path = None
+        if isinstance(clean_quality_pair_manifest_export, Mapping):
+            pair_manifest_path_value = clean_quality_pair_manifest_export.get("path")
+            if isinstance(pair_manifest_path_value, str) and pair_manifest_path_value.strip():
+                pair_manifest_path = pair_manifest_path_value
+        payload["clean_positive_quality_pair_manifest_path"] = pair_manifest_path
     write_json_atomic(export_path, payload)
     return {
         "score_name": score_name,
@@ -1098,6 +1146,7 @@ def _build_finalize_manifest_payload(
     threshold_exports: Mapping[str, Dict[str, Any]],
     clean_evaluate_exports: Mapping[str, Dict[str, Any]],
     clean_score_analysis_exports: Mapping[str, Dict[str, Any]],
+    clean_quality_pair_manifest_export: Mapping[str, Any],
     formal_final_decision_export: Mapping[str, Any],
     derived_system_union_export: Mapping[str, Any],
     score_runs: Mapping[str, Dict[str, Any]],
@@ -1119,6 +1168,7 @@ def _build_finalize_manifest_payload(
         clean_negative_pool_manifest: Negative pool manifest summary.
         threshold_exports: Threshold export summaries keyed by score directory name.
         clean_evaluate_exports: Evaluate export summaries keyed by score directory name.
+        clean_quality_pair_manifest_export: Clean-pair manifest export summary.
         system_final_export: System-final export summary.
         score_runs: Score-run summaries keyed by score name.
         split_counts: Split count summary.
@@ -1129,6 +1179,10 @@ def _build_finalize_manifest_payload(
     positive_pool_payload = cast(Mapping[str, Any], positive_pool_manifest.get("payload", {}))
     clean_negative_pool_payload = cast(Mapping[str, Any], clean_negative_pool_manifest.get("payload", {}))
     control_negative_pool_payload = cast(Mapping[str, Any], control_negative_pool_manifest.get("payload", {}))
+    clean_quality_pair_manifest_payload = cast(
+        Mapping[str, Any],
+        clean_quality_pair_manifest_export.get("payload", {}),
+    )
     return {
         "artifact_type": "paper_workflow_pw02_finalize_manifest",
         "schema_version": "pw_stage_02_v1",
@@ -1196,6 +1250,14 @@ def _build_finalize_manifest_payload(
                 "source_evaluate_record_path": cast(Mapping[str, Any], export_summary.get("payload", {})).get("source_evaluate_record_path"),
             }
             for score_key, export_summary in clean_score_analysis_exports.items()
+        },
+        "clean_quality_pair_artifact": {
+            "path": clean_quality_pair_manifest_export.get("path"),
+            "status": clean_quality_pair_manifest_payload.get("status"),
+            "reason": clean_quality_pair_manifest_payload.get("reason"),
+            "pair_count": clean_quality_pair_manifest_payload.get("pair_count"),
+            "complete_pair_count": clean_quality_pair_manifest_payload.get("complete_pair_count"),
+            "missing_pair_count": clean_quality_pair_manifest_payload.get("missing_pair_count"),
         },
         "formal_final_decision": {
             "mode": "formal_final_decision_metrics_from_content_evaluate_inputs",
@@ -1845,6 +1907,12 @@ def run_pw02_merge_source_event_shards(
         discovered_source_shard_count=int(control_negative_collection["discovered_source_shard_count"]),
         missing_source_shard_indices=cast(List[int], control_negative_collection["missing_source_shard_indices"]),
     )
+    clean_quality_pair_manifest_export = _build_clean_quality_pair_manifest(
+        family_id=family_id,
+        stage_root=stage_root,
+        positive_event_lookup=positive_events,
+        eval_positive_event_ids=cast(Sequence[str], source_split_plan.get("eval_pos_event_ids", [])),
+    )
 
     score_runs = {
         CONTENT_SCORE_NAME: _run_score_pipeline(
@@ -1893,6 +1961,7 @@ def run_pw02_merge_source_event_shards(
             score_run=score_run,
             positive_event_lookup=positive_events,
             eval_positive_event_ids=cast(Sequence[str], source_split_plan.get("eval_pos_event_ids", [])),
+            clean_quality_pair_manifest_export=clean_quality_pair_manifest_export,
         )
         for score_name, score_run in score_runs.items()
     }
@@ -1915,6 +1984,7 @@ def run_pw02_merge_source_event_shards(
             score_key: str(export_summary["path"])
             for score_key, export_summary in clean_score_analysis_exports.items()
         },
+        clean_quality_pair_manifest_path=Path(str(clean_quality_pair_manifest_export["path"])).expanduser().resolve(),
         score_runs=score_runs,
     )
 
@@ -1935,6 +2005,7 @@ def run_pw02_merge_source_event_shards(
         threshold_exports=threshold_exports,
         clean_evaluate_exports=clean_evaluate_exports,
         clean_score_analysis_exports=clean_score_analysis_exports,
+        clean_quality_pair_manifest_export=clean_quality_pair_manifest_export,
         formal_final_decision_export=formal_final_decision_export,
         derived_system_union_export=derived_system_union_export,
         score_runs=score_runs,
@@ -1974,15 +2045,14 @@ def run_pw02_merge_source_event_shards(
             for score_key, export_summary in clean_score_analysis_exports.items()
         },
         "operating_metrics_dir": pw02_metrics_extensions["operating_metrics_dir"],
-        "quality_metrics_dir": pw02_metrics_extensions["quality_metrics_dir"],
+        "clean_pair_artifacts_dir": pw02_metrics_extensions["clean_pair_artifacts_dir"],
+        "clean_quality_pair_manifest_path": pw02_metrics_extensions["clean_quality_pair_manifest_path"],
         "payload_metrics_dir": pw02_metrics_extensions["payload_metrics_dir"],
         "roc_curve_paths": pw02_metrics_extensions["roc_curve_paths"],
         "system_final_auxiliary_operating_semantics_path": pw02_metrics_extensions["system_final_auxiliary_operating_semantics_path"],
         "auc_summary_path": pw02_metrics_extensions["auc_summary_path"],
         "eer_summary_path": pw02_metrics_extensions["eer_summary_path"],
         "tpr_at_target_fpr_summary_path": pw02_metrics_extensions["tpr_at_target_fpr_summary_path"],
-        "quality_metrics_summary_csv_path": pw02_metrics_extensions["quality_metrics_summary_csv_path"],
-        "quality_metrics_summary_json_path": pw02_metrics_extensions["quality_metrics_summary_json_path"],
         "payload_clean_summary_path": pw02_metrics_extensions["payload_clean_summary_path"],
         "analysis_only_artifact_paths": pw02_metrics_extensions["analysis_only_artifact_paths"],
         "formal_final_decision_metrics": formal_final_decision_metrics,

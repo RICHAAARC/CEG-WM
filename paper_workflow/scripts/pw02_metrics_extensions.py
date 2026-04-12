@@ -1,5 +1,5 @@
 """
-File purpose: Build append-only PW02 operating, quality, and payload metric exports.
+File purpose: Build append-only PW02 operating, clean-pair, and payload metric exports.
 Module type: Semi-general module
 """
 
@@ -35,9 +35,6 @@ SYSTEM_FINAL_AUXILIARY_SCORE_NAME = "system_final_auxiliary_score"
 SYSTEM_FINAL_AUXILIARY_DECISION_THRESHOLD = 0.0
 SYSTEM_FINAL_AUXILIARY_SEMANTICS_FILE_NAME = "system_final_auxiliary_operating_semantics.json"
 SYSTEM_FINAL_OPERATING_REASON = "missing scalar score chain for threshold sweep; only derived point metrics are available"
-QUALITY_SCOPE_UNAVAILABLE_REASON = "quality payload is only defined for clean content-chain image pairs in current workflow"
-LPIPS_UNAVAILABLE_REASON = "requires additional model dependency or upstream implementation"
-CLIP_UNAVAILABLE_REASON = "requires frozen quality model identity and bootstrap contract"
 PAYLOAD_UNAVAILABLE_REASON = "missing upstream decoded bits / reference bits / bit error sidecar"
 
 
@@ -1038,17 +1035,19 @@ def build_pw02_metrics_extensions(
     family_id: str,
     stage_root: Path,
     clean_score_analysis_exports: Mapping[str, str],
+    clean_quality_pair_manifest_path: Path,
     score_runs: Mapping[str, Mapping[str, Any]],
 ) -> Dict[str, Any]:
     """
-    功能：为 PW02 构建独立 operating、quality 与 payload 导出目录。
+    功能：为 PW02 构建独立 operating、clean-pair 与 payload 导出目录。
 
-    Build append-only PW02 operating, quality, and payload export artifacts.
+    Build append-only PW02 operating, clean-pair, and payload export artifacts.
 
     Args:
         family_id: Family identifier.
         stage_root: PW02 export root.
         clean_score_analysis_exports: Mapping from analysis key to analysis JSON path.
+        clean_quality_pair_manifest_path: Clean-pair manifest JSON path.
         score_runs: In-memory PW02 score-run summaries keyed by score name.
 
     Returns:
@@ -1060,12 +1059,18 @@ def build_pw02_metrics_extensions(
         raise TypeError("stage_root must be Path")
     if not isinstance(clean_score_analysis_exports, Mapping):
         raise TypeError("clean_score_analysis_exports must be Mapping")
+    if not isinstance(clean_quality_pair_manifest_path, Path):
+        raise TypeError("clean_quality_pair_manifest_path must be Path")
     if not isinstance(score_runs, Mapping):
         raise TypeError("score_runs must be Mapping")
 
     operating_metrics_dir = ensure_directory(stage_root / "operating_metrics")
-    quality_dir = ensure_directory(stage_root / "quality")
+    clean_pair_dir = ensure_directory(stage_root / "quality")
     payload_dir = ensure_directory(stage_root / "payload")
+    if not clean_quality_pair_manifest_path.exists() or not clean_quality_pair_manifest_path.is_file():
+        raise FileNotFoundError(
+            f"PW02 clean_quality_pair_manifest_path not found: {normalize_path_value(clean_quality_pair_manifest_path)}"
+        )
 
     analysis_payloads: Dict[str, Dict[str, Any]] = {}
     analysis_source_paths: Dict[str, str] = {}
@@ -1093,7 +1098,6 @@ def build_pw02_metrics_extensions(
     auc_rows: List[Dict[str, Any]] = []
     eer_rows: List[Dict[str, Any]] = []
     tpr_rows: List[Dict[str, Any]] = []
-    quality_rows: List[Dict[str, Any]] = []
 
     for scope_name in OPERATING_SCOPE_ORDER:
         roc_output_path = operating_metrics_dir / ROC_FILE_NAMES[scope_name]
@@ -1146,50 +1150,11 @@ def build_pw02_metrics_extensions(
                         "source_analysis_path": None,
                     }
                 )
-            if scope_name in PAPER_SCOPE_ORDER:
-                quality_rows.append(
-                    {
-                        "scope": scope_name,
-                        "status": "not_available",
-                        "reason": QUALITY_SCOPE_UNAVAILABLE_REASON,
-                        "pair_count": None,
-                        "expected_pair_count": None,
-                        "missing_count": None,
-                        "error_count": None,
-                        "mean_psnr": None,
-                        "mean_ssim": None,
-                        "mean_lpips": None,
-                        "mean_clip_text_similarity": None,
-                        "clip_model_name": None,
-                        "clip_sample_count": None,
-                        "lpips_status": "not_available",
-                        "lpips_reason": LPIPS_UNAVAILABLE_REASON,
-                        "clip_status": "not_available",
-                        "clip_reason": CLIP_UNAVAILABLE_REASON,
-                        "quality_torch_device": None,
-                        "quality_lpips_batch_size": None,
-                        "quality_clip_batch_size": None,
-                        "prompt_text_expected": None,
-                        "prompt_text_available_count": None,
-                        "prompt_text_missing_count": None,
-                        "prompt_text_coverage_status": "not_applicable",
-                        "prompt_text_coverage_reason": "quality_defined_for_content_chain_clean_images_only",
-                        "quality_readiness_status": "not_applicable" if scope_name != "content_chain" else "not_ready",
-                        "quality_readiness_reason": (
-                            "quality_defined_for_content_chain_clean_images_only"
-                            if scope_name != "content_chain"
-                            else QUALITY_SCOPE_UNAVAILABLE_REASON
-                        ),
-                        "quality_readiness_blocking": scope_name == "content_chain",
-                        "source_analysis_path": None,
-                    }
-                )
             roc_curve_paths[scope_name] = normalize_path_value(roc_output_path)
             continue
 
         metrics_payload = _extract_mapping(analysis_payload.get("operating_metrics"))
         roc_auc_payload = _extract_mapping(analysis_payload.get("roc_auc"))
-        quality_payload = _extract_mapping(analysis_payload.get("clean_positive_quality_metrics"))
         fpr_values = _normalize_float_list(roc_auc_payload.get("fpr"))
         tpr_values = _normalize_float_list(roc_auc_payload.get("tpr"))
         threshold_values = _normalize_float_list(roc_auc_payload.get("thresholds"))
@@ -1265,62 +1230,9 @@ def build_pw02_metrics_extensions(
                 }
             )
 
-        if scope_name in PAPER_SCOPE_ORDER:
-            quality_runtime_payload = _extract_mapping(quality_payload.get("quality_runtime"))
-            if scope_name == "content_chain":
-                quality_readiness_status = quality_payload.get("quality_readiness_status", "not_ready")
-                quality_readiness_reason = quality_payload.get("quality_readiness_reason")
-                quality_readiness_blocking = bool(quality_payload.get("quality_readiness_blocking", True))
-                prompt_text_coverage_status = quality_payload.get(
-                    "prompt_text_coverage_status",
-                    "not_available",
-                )
-                prompt_text_coverage_reason = quality_payload.get("prompt_text_coverage_reason")
-            else:
-                quality_readiness_status = "not_applicable"
-                quality_readiness_reason = "quality_defined_for_content_chain_clean_images_only"
-                quality_readiness_blocking = False
-                prompt_text_coverage_status = "not_applicable"
-                prompt_text_coverage_reason = "quality_defined_for_content_chain_clean_images_only"
-            quality_rows.append(
-                {
-                    "scope": scope_name,
-                    "status": quality_payload.get("status", "not_available"),
-                    "reason": quality_payload.get("availability_reason"),
-                    "pair_count": quality_payload.get("count"),
-                    "expected_pair_count": quality_payload.get("expected_count"),
-                    "missing_count": quality_payload.get("missing_count"),
-                    "error_count": quality_payload.get("error_count"),
-                    "mean_psnr": quality_payload.get("mean_psnr"),
-                    "mean_ssim": quality_payload.get("mean_ssim"),
-                    "mean_lpips": quality_payload.get("mean_lpips"),
-                    "mean_clip_text_similarity": quality_payload.get("mean_clip_text_similarity"),
-                    "clip_model_name": quality_payload.get("clip_model_name"),
-                    "clip_sample_count": quality_payload.get("clip_sample_count"),
-                    "lpips_status": quality_payload.get("lpips_status", "not_available"),
-                    "lpips_reason": quality_payload.get("lpips_reason", LPIPS_UNAVAILABLE_REASON),
-                    "clip_status": quality_payload.get("clip_status", "not_available"),
-                    "clip_reason": quality_payload.get("clip_reason", CLIP_UNAVAILABLE_REASON),
-                    "quality_torch_device": quality_runtime_payload.get("torch_device"),
-                    "quality_lpips_batch_size": quality_runtime_payload.get("lpips_batch_size"),
-                    "quality_clip_batch_size": quality_runtime_payload.get("clip_batch_size"),
-                    "prompt_text_expected": quality_payload.get("prompt_text_expected"),
-                    "prompt_text_available_count": quality_payload.get("prompt_text_available_count"),
-                    "prompt_text_missing_count": quality_payload.get("prompt_text_missing_count"),
-                    "prompt_text_coverage_status": prompt_text_coverage_status,
-                    "prompt_text_coverage_reason": prompt_text_coverage_reason,
-                    "quality_readiness_status": quality_readiness_status,
-                    "quality_readiness_reason": quality_readiness_reason,
-                    "quality_readiness_blocking": quality_readiness_blocking,
-                    "source_analysis_path": roc_payload["source_analysis_path"],
-                }
-            )
-
     auc_summary_path = operating_metrics_dir / "auc_summary.json"
     eer_summary_path = operating_metrics_dir / "eer_summary.json"
     tpr_summary_path = operating_metrics_dir / "tpr_at_target_fpr_summary.csv"
-    quality_summary_csv_path = quality_dir / "quality_metrics_summary.csv"
-    quality_summary_json_path = quality_dir / "quality_metrics_summary.json"
     payload_clean_summary_path = payload_dir / "payload_clean_summary.json"
 
     write_json_atomic(
@@ -1360,51 +1272,6 @@ def build_pw02_metrics_extensions(
         ],
         tpr_rows,
     )
-    _write_csv_rows(
-        quality_summary_csv_path,
-        [
-            "scope",
-            "status",
-            "reason",
-            "pair_count",
-            "expected_pair_count",
-            "missing_count",
-            "error_count",
-            "mean_psnr",
-            "mean_ssim",
-            "mean_lpips",
-            "mean_clip_text_similarity",
-            "clip_model_name",
-            "clip_sample_count",
-            "lpips_status",
-            "lpips_reason",
-            "clip_status",
-            "clip_reason",
-            "quality_torch_device",
-            "quality_lpips_batch_size",
-            "quality_clip_batch_size",
-            "prompt_text_expected",
-            "prompt_text_available_count",
-            "prompt_text_missing_count",
-            "prompt_text_coverage_status",
-            "prompt_text_coverage_reason",
-            "quality_readiness_status",
-            "quality_readiness_reason",
-            "quality_readiness_blocking",
-            "source_analysis_path",
-        ],
-        quality_rows,
-    )
-    write_json_atomic(
-        quality_summary_json_path,
-        {
-            "artifact_type": "paper_workflow_pw02_quality_metrics_summary",
-            "schema_version": "pw_stage_02_v1",
-            "created_at": utc_now_iso(),
-            "family_id": family_id,
-            "rows": quality_rows,
-        },
-    )
     write_json_atomic(
         payload_clean_summary_path,
         _build_payload_clean_summary_payload(
@@ -1419,22 +1286,20 @@ def build_pw02_metrics_extensions(
         "pw02_operating_auc_summary": normalize_path_value(auc_summary_path),
         "pw02_operating_eer_summary": normalize_path_value(eer_summary_path),
         "pw02_operating_tpr_at_target_fpr_summary": normalize_path_value(tpr_summary_path),
-        "pw02_quality_metrics_summary_csv": normalize_path_value(quality_summary_csv_path),
-        "pw02_quality_metrics_summary_json": normalize_path_value(quality_summary_json_path),
+        "pw02_clean_quality_pair_manifest": normalize_path_value(clean_quality_pair_manifest_path),
         "pw02_payload_clean_summary": normalize_path_value(payload_clean_summary_path),
     }
 
     return {
         "operating_metrics_dir": normalize_path_value(operating_metrics_dir),
-        "quality_metrics_dir": normalize_path_value(quality_dir),
+        "clean_pair_artifacts_dir": normalize_path_value(clean_pair_dir),
+        "clean_quality_pair_manifest_path": normalize_path_value(clean_quality_pair_manifest_path),
         "payload_metrics_dir": normalize_path_value(payload_dir),
         "roc_curve_paths": roc_curve_paths,
         "system_final_auxiliary_operating_semantics_path": normalize_path_value(system_final_auxiliary_semantics_path),
         "auc_summary_path": normalize_path_value(auc_summary_path),
         "eer_summary_path": normalize_path_value(eer_summary_path),
         "tpr_at_target_fpr_summary_path": normalize_path_value(tpr_summary_path),
-        "quality_metrics_summary_csv_path": normalize_path_value(quality_summary_csv_path),
-        "quality_metrics_summary_json_path": normalize_path_value(quality_summary_json_path),
         "payload_clean_summary_path": normalize_path_value(payload_clean_summary_path),
         "analysis_only_artifact_paths": analysis_only_artifact_paths,
     }

@@ -28,9 +28,12 @@ from paper_workflow.scripts.pw_common import (
     read_jsonl,
     write_jsonl,
 )
+from paper_workflow.scripts.pw04_finalize_quality_metrics import run_pw04_finalize_quality_metrics
 from paper_workflow.scripts.pw04_metrics_extensions import build_pw04_metrics_extensions
+from paper_workflow.scripts.pw04_prepare_quality_pairs import run_pw04_prepare_quality_pairs
 from paper_workflow.scripts.pw_quality_metrics import build_quality_metrics_from_pairs
 from paper_workflow.scripts.pw04_paper_exports import build_pw04_paper_exports
+from paper_workflow.scripts.pw04_run_quality_shard import run_pw04_quality_shard
 from scripts.notebook_runtime_common import (
     compute_file_sha256,
     ensure_directory,
@@ -61,7 +64,23 @@ ATTACK_EVENT_TABLE_FILE_NAME = "attack_event_table.jsonl"
 ATTACK_FAMILY_SUMMARY_CSV_FILE_NAME = "attack_family_summary.csv"
 ATTACK_CONDITION_SUMMARY_CSV_FILE_NAME = "attack_condition_summary.csv"
 CLEAN_ATTACK_OVERVIEW_FILE_NAME = "clean_attack_overview.json"
+QUALITY_ROOT_DIRECTORY_NAME = "quality"
+QUALITY_FINALIZE_MANIFEST_FILE_NAME = "quality_finalize_manifest.json"
+QUALITY_PAIR_PLAN_FILE_NAME = "quality_pair_plan.json"
+QUALITY_SHARDS_DIRECTORY_NAME = "shards"
+QUALITY_SHARD_FILE_NAME_TEMPLATE = "quality_shard_{quality_shard_index:04d}.json"
+QUALITY_SHARD_FILE_NAME_FIELD = "quality_shard_index"
+QUALITY_SHARD_PATHS_FIELD = "quality_shard_paths"
+QUALITY_SHARD_COUNT_FIELD = "quality_shard_count"
+QUALITY_PAIR_PLAN_PATH_FIELD = "quality_pair_plan_path"
+QUALITY_FINALIZE_MANIFEST_PATH_FIELD = "quality_finalize_manifest_path"
+QUALITY_ROOT_PATH_FIELD = "quality_root"
+QUALITY_ROOT_SUMMARY_FIELD = "quality_root"
+QUALITY_ROOT_EXPORT_FIELD = "quality_root"
+QUALITY_ROOT_LABEL = "PW04 quality root"
+QUALITY_PATH_LABEL = "PW04 quality output path"
 ATTACK_QUALITY_METRICS_FILE_NAME = "attack_quality_metrics.json"
+CLEAN_QUALITY_METRICS_FILE_NAME = "clean_quality_metrics.json"
 PW04_METRICS_DIRECTORY_NAME = "metrics"
 PW04_FIGURES_DIRECTORY_NAME = "figures"
 PW04_TAIL_DIRECTORY_NAME = "tail"
@@ -179,6 +198,7 @@ def _resolve_pw04_paths(family_root: Path) -> Dict[str, Path]:
     metrics_root = export_root / PW04_METRICS_DIRECTORY_NAME
     figures_root = export_root / PW04_FIGURES_DIRECTORY_NAME
     tail_root = export_root / PW04_TAIL_DIRECTORY_NAME
+    quality_root = export_root / QUALITY_ROOT_DIRECTORY_NAME
     summary_path = family_root / "runtime_state" / PW04_SUMMARY_FILE_NAME
     paths = {
         "export_root": export_root,
@@ -188,6 +208,7 @@ def _resolve_pw04_paths(family_root: Path) -> Dict[str, Path]:
         "metrics_root": metrics_root,
         "figures_root": figures_root,
         "tail_root": tail_root,
+        "quality_root": quality_root,
         "summary_path": summary_path,
         "attack_merge_manifest_path": manifests_root / ATTACK_MERGE_MANIFEST_FILE_NAME,
         "attack_pool_manifest_path": export_root / ATTACK_POOL_MANIFEST_FILE_NAME,
@@ -202,6 +223,7 @@ def _resolve_pw04_paths(family_root: Path) -> Dict[str, Path]:
         "attack_family_summary_csv_path": tables_root / ATTACK_FAMILY_SUMMARY_CSV_FILE_NAME,
         "attack_condition_summary_csv_path": tables_root / ATTACK_CONDITION_SUMMARY_CSV_FILE_NAME,
         "clean_attack_overview_path": export_root / CLEAN_ATTACK_OVERVIEW_FILE_NAME,
+        "clean_quality_metrics_path": metrics_root / CLEAN_QUALITY_METRICS_FILE_NAME,
         "attack_quality_metrics_path": metrics_root / ATTACK_QUALITY_METRICS_FILE_NAME,
     }
     for path_obj in paths.values():
@@ -1829,6 +1851,7 @@ def run_pw04_merge_attack_event_shards(
     ensure_directory(cast(Path, pw04_paths["metrics_root"]))
     ensure_directory(cast(Path, pw04_paths["figures_root"]))
     ensure_directory(cast(Path, pw04_paths["tail_root"]))
+    ensure_directory(cast(Path, pw04_paths["quality_root"]))
 
     pw02_summary_path = family_root / "runtime_state" / PW02_SUMMARY_FILE_NAME
     finalize_manifest_path = family_root / "exports" / "pw02" / "paper_source_finalize_manifest.json"
@@ -1926,6 +1949,34 @@ def run_pw04_merge_attack_event_shards(
         row for row in materialized_attack_event_rows if row.get("sample_role") == ATTACKED_NEGATIVE_SAMPLE_ROLE
     ]
 
+    quality_pair_plan_export = run_pw04_prepare_quality_pairs(
+        family_id=family_id,
+        family_root=family_root,
+        pw02_summary=pw02_summary,
+        attack_event_rows=positive_attack_event_rows,
+        quality_root=cast(Path, pw04_paths["quality_root"]),
+        planned_shard_count=expected_attack_shard_count,
+    )
+    quality_pair_plan_payload = cast(Mapping[str, Any], quality_pair_plan_export["payload"])
+    quality_shard_exports = [
+        run_pw04_quality_shard(
+            family_id=family_id,
+            quality_pair_plan_path=Path(str(quality_pair_plan_export["path"])).expanduser().resolve(),
+            quality_shard_index=int(cast(Mapping[str, Any], shard_row)["quality_shard_index"]),
+        )
+        for shard_row in cast(List[Mapping[str, Any]], quality_pair_plan_payload.get("shards", []))
+    ]
+    quality_finalize_export = run_pw04_finalize_quality_metrics(
+        family_id=family_id,
+        quality_pair_plan_path=Path(str(quality_pair_plan_export["path"])).expanduser().resolve(),
+        clean_quality_metrics_path=cast(Path, pw04_paths["clean_quality_metrics_path"]),
+        attack_quality_metrics_path=cast(Path, pw04_paths["attack_quality_metrics_path"]),
+        quality_shard_paths=[
+            Path(str(shard_export["path"])).expanduser().resolve()
+            for shard_export in quality_shard_exports
+        ],
+    )
+
     attack_merge_manifest_payload = _build_attack_merge_manifest_payload(
         family_id=family_id,
         family_root=family_root,
@@ -1953,13 +2004,10 @@ def run_pw04_merge_attack_event_shards(
         source_role=ATTACKED_NEGATIVE_SAMPLE_ROLE,
         attack_event_rows=negative_attack_event_rows,
     )
-    attack_quality_metrics_export = _build_attack_quality_metrics_export(
-        family_id=family_id,
-        output_path=cast(Path, pw04_paths["attack_quality_metrics_path"]),
-        attack_event_rows=positive_attack_event_rows,
-    )
-    quality_lookup = cast(Dict[str, Dict[str, Any]], attack_quality_metrics_export["pair_lookup"])
-    attack_quality_overall = cast(Mapping[str, Any], cast(Mapping[str, Any], attack_quality_metrics_export["payload"]).get("overall", {}))
+    clean_quality_metrics_payload = cast(Mapping[str, Any], quality_finalize_export["clean_quality_payload"])
+    attack_quality_metrics_payload = cast(Mapping[str, Any], quality_finalize_export["attack_quality_payload"])
+    quality_lookup = cast(Dict[str, Dict[str, Any]], quality_finalize_export["attack_pair_lookup"])
+    attack_quality_overall = cast(Mapping[str, Any], attack_quality_metrics_payload.get("overall", {}))
     for attack_event_row in positive_attack_event_rows:
         attack_event_id = str(attack_event_row["attack_event_id"])
         quality_row = quality_lookup.get(attack_event_id, {})
@@ -2036,7 +2084,7 @@ def run_pw04_merge_attack_event_shards(
         attack_formal_metrics_payload=formal_attack_final_decision_metrics_payload,
         attack_attestation_metrics_payload=formal_attack_attestation_metrics_payload,
         attack_derived_metrics_payload=derived_attack_union_metrics_payload,
-        attack_quality_metrics_payload=cast(Mapping[str, Any], attack_quality_metrics_export["payload"]),
+        attack_quality_metrics_payload=attack_quality_metrics_payload,
         attack_negative_metrics_payload=formal_attack_negative_metrics_payload,
     )
 
@@ -2071,7 +2119,7 @@ def run_pw04_merge_attack_event_shards(
         attack_event_rows=positive_attack_event_rows,
         per_attack_family_metrics_payload=per_attack_family_metrics_payload,
         per_attack_condition_metrics_payload=per_attack_condition_metrics_payload,
-        attack_quality_metrics_payload=cast(Mapping[str, Any], attack_quality_metrics_export["payload"]),
+        attack_quality_metrics_payload=attack_quality_metrics_payload,
         enable_tail_estimation=enable_tail_estimation,
     )
     pw04_metrics_extensions = build_pw04_metrics_extensions(
@@ -2080,6 +2128,10 @@ def run_pw04_merge_attack_event_shards(
         export_root=cast(Path, pw04_paths["export_root"]),
         pw02_summary=pw02_summary,
         attack_event_rows=positive_attack_event_rows,
+        clean_quality_metrics_payload=clean_quality_metrics_payload,
+        clean_quality_metrics_path=cast(Path, pw04_paths["clean_quality_metrics_path"]),
+        attack_quality_metrics_payload=attack_quality_metrics_payload,
+        attack_quality_metrics_path=cast(Path, pw04_paths["attack_quality_metrics_path"]),
         main_metrics_summary_csv_path=Path(
             str(cast(Mapping[str, Any], paper_exports_payload["paper_tables_paths"])["main_metrics_summary_csv_path"])
         ).expanduser().resolve(),
@@ -2091,7 +2143,36 @@ def run_pw04_merge_attack_event_shards(
         ).expanduser().resolve(),
         paper_metric_registry_path=Path(str(paper_exports_payload["paper_scope_registry_path"])).expanduser().resolve(),
     )
+    analysis_only_artifact_paths = dict(
+        cast(Mapping[str, str], pw04_metrics_extensions["analysis_only_artifact_paths"])
+    )
+    analysis_only_artifact_paths.update(
+        {
+            "pw04_quality_pair_plan": str(quality_pair_plan_export["path"]),
+            "pw04_quality_finalize_manifest": str(quality_finalize_export["quality_finalize_manifest_path"]),
+        }
+    )
+    analysis_only_artifact_annotations = dict(
+        cast(Mapping[str, Mapping[str, Any]], pw04_metrics_extensions["analysis_only_artifact_annotations"])
+    )
+    analysis_only_artifact_annotations.update(
+        {
+            "pw04_quality_pair_plan": {"canonical": False, "analysis_only": True},
+            "pw04_quality_finalize_manifest": {"canonical": False, "analysis_only": True},
+        }
+    )
+    pw04_metrics_extensions["analysis_only_artifact_paths"] = analysis_only_artifact_paths
+    pw04_metrics_extensions["analysis_only_artifact_annotations"] = analysis_only_artifact_annotations
     paper_exports_payload.update(pw04_metrics_extensions)
+    paper_exports_payload.update(
+        {
+            "clean_quality_metrics_path": str(quality_finalize_export["clean_quality_metrics_path"]),
+            "quality_pair_plan_path": str(quality_pair_plan_export["path"]),
+            "quality_shard_paths": [str(shard_export["path"]) for shard_export in quality_shard_exports],
+            "quality_finalize_manifest_path": str(quality_finalize_export["quality_finalize_manifest_path"]),
+            "quality_shard_count": len(quality_shard_exports),
+        }
+    )
 
     summary_payload = _build_pw04_summary_payload(
         family_id=family_id,

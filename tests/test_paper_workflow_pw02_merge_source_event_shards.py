@@ -826,6 +826,13 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     """
     summary = _build_pw00_family(tmp_path, family_id="family_pw02_exports")
     _materialize_completed_pw01_shards(summary)
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "build_quality_metrics_from_pairs",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("PW02 must not compute formal clean quality metrics after pair-manifest refactor")
+        ),
+    )
     _patch_pw02_python_stage_runner(monkeypatch)
 
     pw02_summary = pw02_module.run_pw02_merge_source_event_shards(
@@ -863,6 +870,9 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     attestation_clean_score_analysis = json.loads(
         Path(str(cast(Dict[str, Any], pw02_summary["clean_score_analysis_exports"])["attestation"])).read_text(encoding="utf-8")
     )
+    clean_quality_pair_manifest = json.loads(
+        Path(str(pw02_summary["clean_quality_pair_manifest_path"])).read_text(encoding="utf-8")
+    )
     content_roc_curve_export = json.loads(
         Path(str(cast(Dict[str, Any], pw02_summary["roc_curve_paths"])["content_chain"])).read_text(encoding="utf-8")
     )
@@ -882,9 +892,6 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     eer_summary = json.loads(Path(str(pw02_summary["eer_summary_path"])).read_text(encoding="utf-8"))
     with Path(str(pw02_summary["tpr_at_target_fpr_summary_path"])).open("r", encoding="utf-8", newline="") as handle:
         tpr_rows = list(csv.DictReader(handle))
-    quality_metrics_summary = json.loads(Path(str(pw02_summary["quality_metrics_summary_json_path"])).read_text(encoding="utf-8"))
-    with Path(str(pw02_summary["quality_metrics_summary_csv_path"])).open("r", encoding="utf-8", newline="") as handle:
-        quality_rows = list(csv.DictReader(handle))
     payload_clean_summary = json.loads(Path(str(pw02_summary["payload_clean_summary_path"])).read_text(encoding="utf-8"))
     formal_final_decision_metrics_export = json.loads(
         Path(str(pw02_summary["formal_final_decision_metrics_artifact_path"])).read_text(encoding="utf-8")
@@ -933,6 +940,7 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert finalize_manifest["threshold_exports"]["content"]["path"] == cast(Dict[str, Any], pw02_summary["threshold_exports"])["content"]
     assert finalize_manifest["clean_evaluate_exports"]["content"]["path"] == cast(Dict[str, Any], pw02_summary["clean_evaluate_exports"])["content"]
     assert finalize_manifest["clean_score_analysis_exports"]["content"]["path"] == cast(Dict[str, Any], pw02_summary["clean_score_analysis_exports"])["content"]
+    assert finalize_manifest["clean_quality_pair_artifact"]["path"] == pw02_summary["clean_quality_pair_manifest_path"]
 
     content_run = cast(Dict[str, Any], pw02_summary["score_runs"][pw02_module.CONTENT_SCORE_NAME])
     attestation_run = cast(Dict[str, Any], pw02_summary["score_runs"][pw02_module.EVENT_ATTESTATION_SCORE_NAME])
@@ -965,18 +973,19 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
 
     assert content_clean_score_analysis["score_name"] == pw02_module.CONTENT_SCORE_NAME
     assert content_clean_score_analysis["roc_auc"]["auc"] == pytest.approx(1.0)
-    assert content_clean_score_analysis["clean_positive_quality_metrics"]["count"] == 2
-    assert content_clean_score_analysis["clean_positive_quality_metrics"]["mean_psnr"] is not None
-    assert content_clean_score_analysis["clean_positive_quality_metrics"]["mean_ssim"] is not None
-    assert content_clean_score_analysis["clean_positive_quality_metrics"]["reference_artifact_name"] == "plain_preview_image"
-    assert content_clean_score_analysis["clean_positive_quality_metrics"]["candidate_artifact_name"] == "watermarked_output_image"
-    assert content_clean_score_analysis["clean_positive_quality_metrics"]["reference_semantics"] == (
+    assert content_clean_score_analysis["clean_positive_quality_pair_manifest_path"] == pw02_summary["clean_quality_pair_manifest_path"]
+    assert clean_quality_pair_manifest["artifact_type"] == "paper_workflow_pw02_clean_quality_pair_manifest"
+    assert clean_quality_pair_manifest["scope"] == "content_chain"
+    assert clean_quality_pair_manifest["status"] == "ok"
+    assert clean_quality_pair_manifest["pair_count"] == 2
+    assert clean_quality_pair_manifest["complete_pair_count"] == 2
+    assert clean_quality_pair_manifest["missing_pair_count"] == 0
+    assert clean_quality_pair_manifest["reference_artifact_name"] == "plain_preview_image"
+    assert clean_quality_pair_manifest["candidate_artifact_name"] == "watermarked_output_image"
+    assert clean_quality_pair_manifest["reference_semantics"] == (
         "preview_generation_persisted_artifact_vs_watermarked_output_image"
     )
-    quality_pair_rows = cast(
-        List[Dict[str, Any]],
-        content_clean_score_analysis["clean_positive_quality_metrics"]["pair_rows"],
-    )
+    quality_pair_rows = cast(List[Dict[str, Any]], clean_quality_pair_manifest["pair_rows"])
     assert len(quality_pair_rows) == 2
     assert all(isinstance(row.get("plain_preview_image_path"), str) and row["plain_preview_image_path"] for row in quality_pair_rows)
     assert all(
@@ -994,7 +1003,7 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
 
     assert attestation_clean_score_analysis["score_name"] == pw02_module.EVENT_ATTESTATION_SCORE_NAME
     assert attestation_clean_score_analysis["roc_auc"]["auc"] == pytest.approx(1.0)
-    assert attestation_clean_score_analysis["clean_positive_quality_metrics"]["status"] == "not_applicable"
+    assert "clean_positive_quality_pair_manifest_path" not in attestation_clean_score_analysis
 
     assert set(cast(Dict[str, Any], pw02_summary["roc_curve_paths"]).keys()) == {
         "content_chain",
@@ -1003,7 +1012,7 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
         "system_final_auxiliary",
     }
     assert Path(str(pw02_summary["operating_metrics_dir"])).is_dir()
-    assert Path(str(pw02_summary["quality_metrics_dir"])).is_dir()
+    assert Path(str(pw02_summary["clean_pair_artifacts_dir"])).is_dir()
     assert Path(str(pw02_summary["payload_metrics_dir"])).is_dir()
     assert Path(str(pw02_summary["system_final_auxiliary_operating_semantics_path"])).exists()
 
@@ -1061,39 +1070,6 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert all(row["status"] == "ok" for row in auxiliary_tpr_rows)
     assert all(float(row["tpr"]) == pytest.approx(1.0) for row in auxiliary_tpr_rows)
 
-    quality_rows_by_scope = {row["scope"]: row for row in cast(List[Dict[str, Any]], quality_metrics_summary["rows"])}
-    assert set(quality_rows_by_scope.keys()) == {"content_chain", "event_attestation", "system_final"}
-    assert len(quality_rows) == 3
-    assert quality_rows_by_scope["content_chain"]["status"] == "ok"
-    assert quality_rows_by_scope["content_chain"]["pair_count"] == 2
-    assert quality_rows_by_scope["content_chain"]["mean_psnr"] is not None
-    assert quality_rows_by_scope["content_chain"]["mean_ssim"] is not None
-    assert quality_rows_by_scope["content_chain"]["lpips_status"] in {"ok", "not_available"}
-    if quality_rows_by_scope["content_chain"]["lpips_status"] == "ok":
-        assert quality_rows_by_scope["content_chain"]["mean_lpips"] is not None
-    else:
-        assert quality_rows_by_scope["content_chain"]["lpips_reason"]
-    assert quality_rows_by_scope["content_chain"]["clip_status"] == "ok"
-    assert quality_rows_by_scope["content_chain"]["mean_clip_text_similarity"] is not None
-    assert quality_rows_by_scope["content_chain"]["clip_model_name"] == pw_quality_metrics_module.CLIP_MODEL_NAME
-    assert quality_rows_by_scope["content_chain"]["clip_sample_count"] == 2
-    assert quality_rows_by_scope["content_chain"]["prompt_text_coverage_status"] == "ok"
-    if quality_rows_by_scope["content_chain"]["lpips_status"] == "ok":
-        assert quality_rows_by_scope["content_chain"]["quality_readiness_status"] == "ready"
-        assert quality_rows_by_scope["content_chain"]["quality_readiness_blocking"] is False
-    else:
-        assert quality_rows_by_scope["content_chain"]["quality_readiness_status"] == "partial"
-        assert quality_rows_by_scope["content_chain"]["quality_readiness_blocking"] is True
-        assert quality_rows_by_scope["content_chain"]["quality_readiness_reason"]
-    assert quality_rows_by_scope["event_attestation"]["status"] == "not_applicable"
-    assert quality_rows_by_scope["event_attestation"]["lpips_status"] == quality_rows_by_scope["content_chain"]["lpips_status"]
-    assert quality_rows_by_scope["system_final"]["status"] == "not_available"
-    assert quality_rows_by_scope["system_final"]["lpips_status"] == quality_rows_by_scope["content_chain"]["lpips_status"]
-    assert "quality payload is only defined" in str(quality_rows_by_scope["system_final"]["reason"])
-    assert "mean_clip_text_similarity" in quality_rows[0]
-    assert "clip_model_name" in quality_rows[0]
-    assert "clip_sample_count" in quality_rows[0]
-
     assert payload_clean_summary["status"] == "ok"
     assert payload_clean_summary["reason"] is None
     assert payload_clean_summary["future_upstream_sidecar_required"] is False
@@ -1120,8 +1096,7 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert len(payload_clean_summary["rows"]) == 2
     assert cast(Dict[str, Any], pw02_summary["analysis_only_artifact_paths"])["pw02_system_final_auxiliary_operating_semantics"] == pw02_summary["system_final_auxiliary_operating_semantics_path"]
     assert cast(Dict[str, Any], pw02_summary["analysis_only_artifact_paths"])["pw02_system_final_auxiliary_roc_curve"] == cast(Dict[str, Any], pw02_summary["roc_curve_paths"])["system_final_auxiliary"]
-    assert cast(Dict[str, Any], pw02_summary["analysis_only_artifact_paths"])["pw02_quality_metrics_summary_json"] == pw02_summary["quality_metrics_summary_json_path"]
-    assert cast(Dict[str, Any], pw02_summary["analysis_only_artifact_paths"])["pw02_quality_metrics_summary_csv"] == pw02_summary["quality_metrics_summary_csv_path"]
+    assert cast(Dict[str, Any], pw02_summary["analysis_only_artifact_paths"])["pw02_clean_quality_pair_manifest"] == pw02_summary["clean_quality_pair_manifest_path"]
     assert cast(Dict[str, Any], pw02_summary["analysis_only_artifact_paths"])["pw02_payload_clean_summary"] == pw02_summary["payload_clean_summary_path"]
 
     assert formal_final_decision_metrics_export["source_kind"] == "formal_final_decision_metrics_from_content_evaluate_inputs"

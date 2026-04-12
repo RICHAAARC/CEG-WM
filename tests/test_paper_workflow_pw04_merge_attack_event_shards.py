@@ -17,6 +17,7 @@ from PIL import Image
 import paper_workflow.scripts.pw03_run_attack_event_shard as pw03_module
 import paper_workflow.scripts.pw04_merge_attack_event_shards as pw04_module
 import paper_workflow.scripts.pw04_metrics_extensions as pw04_metrics_extensions_module
+import paper_workflow.scripts.pw04_run_quality_shard as pw04_quality_shard_module
 import paper_workflow.scripts.pw_quality_metrics as pw_quality_metrics_module
 from main.watermarking.provenance.attestation_statement import (
     ATTESTATION_SCHEMA,
@@ -25,7 +26,7 @@ from main.watermarking.provenance.attestation_statement import (
     compute_attestation_digest,
 )
 from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
-from paper_workflow.scripts.pw_common import read_jsonl
+from paper_workflow.scripts.pw_common import ACTIVE_SAMPLE_ROLE, read_jsonl
 from scripts.notebook_runtime_common import compute_file_sha256, ensure_directory, normalize_path_value, write_json_atomic
 
 
@@ -364,8 +365,7 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
     formal_clean_metrics_path = pw02_root / "formal_final_decision_metrics.json"
     derived_clean_metrics_path = pw02_root / "derived_system_union_metrics.json"
     quality_root = ensure_directory(pw02_root / "quality")
-    quality_metrics_summary_csv_path = quality_root / "quality_metrics_summary.csv"
-    quality_metrics_summary_json_path = quality_root / "quality_metrics_summary.json"
+    clean_quality_pair_manifest_path = quality_root / "clean_quality_pair_manifest.json"
     payload_root = ensure_directory(pw02_root / "payload")
     payload_clean_summary_path = payload_root / "payload_clean_summary.json"
     clean_evaluate_root = ensure_directory(pw02_root / "evaluate" / "clean")
@@ -482,102 +482,39 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
             },
         },
     )
-    quality_rows = [
-        {
-            "scope": "content_chain",
-            "status": "ok",
-            "reason": None,
-            "pair_count": 8,
-            "expected_pair_count": 8,
-            "missing_count": 0,
-            "error_count": 0,
-            "mean_psnr": 35.0,
-            "mean_ssim": 0.99,
-            "mean_lpips": 0.12,
-            "mean_clip_text_similarity": 0.78,
-            "clip_model_name": pw_quality_metrics_module.CLIP_MODEL_NAME,
-            "clip_sample_count": 8,
-            "lpips_status": "ok",
-            "lpips_reason": None,
-            "clip_status": "ok",
-            "clip_reason": None,
-            "source_analysis_path": normalize_path_value(content_clean_evaluate_export_path),
-        },
-        {
-            "scope": "event_attestation",
-            "status": "not_applicable",
-            "reason": "quality metrics are only computed for content_chain_score",
-            "pair_count": None,
-            "expected_pair_count": None,
-            "missing_count": None,
-            "error_count": None,
-            "mean_psnr": None,
-            "mean_ssim": None,
-            "mean_lpips": 0.12,
-            "mean_clip_text_similarity": None,
-            "clip_model_name": pw_quality_metrics_module.CLIP_MODEL_NAME,
-            "clip_sample_count": None,
-            "lpips_status": "ok",
-            "lpips_reason": None,
-            "clip_status": "not_available",
-            "clip_reason": "requires frozen quality model identity and bootstrap contract",
-            "source_analysis_path": normalize_path_value(attestation_clean_evaluate_export_path),
-        },
-        {
-            "scope": "system_final",
-            "status": "not_available",
-            "reason": "quality payload is only defined for clean content-chain image pairs in current workflow",
-            "pair_count": None,
-            "expected_pair_count": None,
-            "missing_count": None,
-            "error_count": None,
-            "mean_psnr": None,
-            "mean_ssim": None,
-            "mean_lpips": 0.12,
-            "mean_clip_text_similarity": None,
-            "clip_model_name": pw_quality_metrics_module.CLIP_MODEL_NAME,
-            "clip_sample_count": None,
-            "lpips_status": "ok",
-            "lpips_reason": None,
-            "clip_status": "not_available",
-            "clip_reason": "requires frozen quality model identity and bootstrap contract",
-            "source_analysis_path": None,
-        },
-    ]
-    with quality_metrics_summary_csv_path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(
-            handle,
-            fieldnames=[
-                "scope",
-                "status",
-                "reason",
-                "pair_count",
-                "expected_pair_count",
-                "missing_count",
-                "error_count",
-                "mean_psnr",
-                "mean_ssim",
-                "mean_lpips",
-                "mean_clip_text_similarity",
-                "clip_model_name",
-                "clip_sample_count",
-                "lpips_status",
-                "lpips_reason",
-                "clip_status",
-                "clip_reason",
-                "source_analysis_path",
-            ],
+    clean_pair_rows: List[Dict[str, Any]] = []
+    for pair_index, prompt_text in enumerate(["prompt one", "prompt two"], start=1):
+        reference_path = quality_root / f"plain_preview_{pair_index:06d}.png"
+        candidate_path = quality_root / f"watermarked_output_{pair_index:06d}.png"
+        Image.new("RGB", (8, 8), color=(80 + pair_index, 110, 140)).save(reference_path)
+        Image.new("RGB", (8, 8), color=(82 + pair_index, 110, 140)).save(candidate_path)
+        clean_pair_rows.append(
+            {
+                "event_id": f"source_event_{pair_index:06d}",
+                "reference_image_path": normalize_path_value(reference_path),
+                "candidate_image_path": normalize_path_value(candidate_path),
+                "prompt_text": prompt_text,
+                "sample_role": ACTIVE_SAMPLE_ROLE,
+                "plain_preview_image_path": normalize_path_value(reference_path),
+                "watermarked_output_image_path": normalize_path_value(candidate_path),
+            }
         )
-        writer.writeheader()
-        for row in quality_rows:
-            writer.writerow(row)
     write_json_atomic(
-        quality_metrics_summary_json_path,
+        clean_quality_pair_manifest_path,
         {
-            "artifact_type": "paper_workflow_pw02_quality_metrics_summary",
+            "artifact_type": "paper_workflow_pw02_clean_quality_pair_manifest",
             "schema_version": "pw_stage_02_v1",
             "family_id": family_id,
-            "rows": quality_rows,
+            "score_name": "content_chain_score",
+            "scope": "content_chain",
+            "pair_id_key": "event_id",
+            "reference_path_key": "reference_image_path",
+            "candidate_path_key": "candidate_image_path",
+            "text_key": "prompt_text",
+            "reference_artifact_name": "plain_preview_image",
+            "candidate_artifact_name": "watermarked_output_image",
+            "reference_semantics": "preview_generation_persisted_artifact_vs_watermarked_output_image",
+            "pair_rows": clean_pair_rows,
         },
     )
     write_json_atomic(
@@ -617,11 +554,16 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
             "paper_source_finalize_manifest_path": normalize_path_value(finalize_manifest_path),
             "formal_final_decision_metrics_artifact_path": normalize_path_value(formal_clean_metrics_path),
             "derived_system_union_metrics_artifact_path": normalize_path_value(derived_clean_metrics_path),
-            "quality_metrics_dir": normalize_path_value(quality_root),
-            "quality_metrics_summary_csv_path": normalize_path_value(quality_metrics_summary_csv_path),
-            "quality_metrics_summary_json_path": normalize_path_value(quality_metrics_summary_json_path),
+            "clean_pair_artifacts_dir": normalize_path_value(quality_root),
+            "clean_quality_pair_manifest_path": normalize_path_value(clean_quality_pair_manifest_path),
             "payload_metrics_dir": normalize_path_value(payload_root),
             "payload_clean_summary_path": normalize_path_value(payload_clean_summary_path),
+            "analysis_only_artifact_paths": {
+                "pw02_clean_quality_pair_manifest": normalize_path_value(clean_quality_pair_manifest_path),
+            },
+            "analysis_only_artifact_annotations": {
+                "pw02_clean_quality_pair_manifest": {"canonical": False, "analysis_only": True},
+            },
             "clean_evaluate_exports": {
                 "content": normalize_path_value(content_clean_evaluate_export_path),
                 "attestation": normalize_path_value(attestation_clean_evaluate_export_path),
@@ -639,8 +581,7 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
         "attestation_threshold_export_path": attestation_threshold_export_path,
         "formal_clean_metrics_path": formal_clean_metrics_path,
         "derived_clean_metrics_path": derived_clean_metrics_path,
-        "quality_metrics_summary_csv_path": quality_metrics_summary_csv_path,
-        "quality_metrics_summary_json_path": quality_metrics_summary_json_path,
+        "clean_quality_pair_manifest_path": clean_quality_pair_manifest_path,
         "payload_clean_summary_path": payload_clean_summary_path,
         "content_clean_evaluate_export_path": content_clean_evaluate_export_path,
         "attestation_clean_evaluate_export_path": attestation_clean_evaluate_export_path,
@@ -1091,7 +1032,11 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     paper_tables_paths = cast(Dict[str, str], pw04_summary["paper_tables_paths"])
     paper_figures_paths = cast(Dict[str, str], pw04_summary["paper_figures_paths"])
     tail_estimation_paths = cast(Dict[str, str], pw04_summary["tail_estimation_paths"])
+    clean_quality_metrics_path = Path(str(pw04_summary["clean_quality_metrics_path"]))
     attack_quality_metrics_path = Path(str(pw04_summary["attack_quality_metrics_path"]))
+    quality_pair_plan_path = Path(str(pw04_summary["quality_pair_plan_path"]))
+    quality_finalize_manifest_path = Path(str(pw04_summary["quality_finalize_manifest_path"]))
+    quality_shard_paths = [Path(str(path_value)) for path_value in cast(List[str], pw04_summary["quality_shard_paths"])]
     robustness_curve_by_family_path = Path(str(pw04_summary["robustness_curve_by_family_path"]))
     robustness_macro_summary_path = Path(str(pw04_summary["robustness_macro_summary_path"]))
     worst_case_attack_summary_path = Path(str(pw04_summary["worst_case_attack_summary_path"]))
@@ -1120,7 +1065,11 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
         formal_attack_negative_metrics_path,
         Path(str(pw04_summary["per_attack_family_metrics_path"])),
         Path(str(pw04_summary["per_attack_condition_metrics_path"])),
+        clean_quality_metrics_path,
         attack_quality_metrics_path,
+        quality_pair_plan_path,
+        quality_finalize_manifest_path,
+        *quality_shard_paths,
         robustness_curve_by_family_path,
         robustness_macro_summary_path,
         worst_case_attack_summary_path,
@@ -1161,7 +1110,10 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     formal_attestation_metrics = _load_json_dict(Path(str(pw04_summary["formal_attack_attestation_metrics_path"])))
     derived_union_metrics = _load_json_dict(Path(str(pw04_summary["derived_attack_union_metrics_path"])))
     formal_attack_negative_metrics = _load_json_dict(formal_attack_negative_metrics_path)
+    clean_quality_metrics = _load_json_dict(clean_quality_metrics_path)
     attack_quality_metrics = _load_json_dict(attack_quality_metrics_path)
+    quality_pair_plan = _load_json_dict(quality_pair_plan_path)
+    quality_finalize_manifest = _load_json_dict(quality_finalize_manifest_path)
     clean_attack_overview = _load_json_dict(Path(str(pw04_summary["clean_attack_overview_path"])))
     paper_metric_registry = _load_json_dict(Path(str(pw04_summary["paper_scope_registry_path"])))
     content_chain_metrics = _load_json_dict(Path(str(canonical_metrics_paths["content_chain"])))
@@ -1198,6 +1150,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert pw04_summary["status"] == "completed"
     assert pw04_summary["paper_exports_completed"] is True
     assert pw04_summary["tail_estimation_enabled"] is False
+    assert pw04_summary["quality_shard_count"] == len(quality_shard_paths)
     assert pw04_summary["completed_attack_event_count"] == expected_attack_event_count
     assert merge_manifest["expected_attack_event_count"] == expected_attack_event_count
     assert merge_manifest["completed_attack_event_count"] == expected_attack_event_count
@@ -1224,6 +1177,9 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert formal_attack_negative_metrics["metrics"]["formal_final_false_accept_count"] == pw03_fixture["expected_formal_final_negative_false_accept_count"]
     assert formal_attack_negative_metrics["metrics"]["formal_attestation_false_accept_count"] == pw03_fixture["expected_formal_attestation_negative_false_accept_count"]
     assert formal_attack_negative_metrics["metrics"]["derived_attack_union_false_accept_count"] == pw03_fixture["expected_derived_union_negative_false_accept_count"]
+    assert clean_quality_metrics["overall"]["count"] == 2
+    assert clean_quality_metrics["overall"]["clip_status"] == "ok"
+    assert clean_quality_metrics["overall"]["prompt_text_coverage_status"] == "ok"
     assert attack_quality_metrics["overall"]["count"] == expected_positive_attack_event_count
     assert attack_quality_metrics["overall"]["mean_psnr"] is not None
     assert attack_quality_metrics["overall"]["mean_ssim"] is not None
@@ -1239,6 +1195,14 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
         assert attack_quality_metrics["overall"]["quality_readiness_status"] == "partial"
         assert attack_quality_metrics["overall"]["quality_readiness_blocking"] is True
         assert attack_quality_metrics["overall"]["quality_readiness_reason"]
+    assert quality_pair_plan["clean_quality_pair_manifest_path"] == normalize_path_value(
+        Path(str(cast(Dict[str, Any], fixture["pw02"])["clean_quality_pair_manifest_path"]))
+    )
+    assert quality_pair_plan["clean_expected_pair_count"] == clean_quality_metrics["overall"]["expected_count"]
+    assert quality_pair_plan["attack_expected_pair_count"] == attack_quality_metrics["overall"]["expected_count"]
+    assert quality_finalize_manifest["clean_quality_metrics_path"] == normalize_path_value(clean_quality_metrics_path)
+    assert quality_finalize_manifest["attack_quality_metrics_path"] == normalize_path_value(attack_quality_metrics_path)
+    assert quality_finalize_manifest["quality_pair_plan_path"] == normalize_path_value(quality_pair_plan_path)
     assert clean_attack_overview["attack_quality_mean_psnr"] == attack_quality_metrics["overall"]["mean_psnr"]
     assert clean_attack_overview["attack_quality_mean_ssim"] == attack_quality_metrics["overall"]["mean_ssim"]
     assert clean_attack_overview["attack_quality_mean_clip_text_similarity"] == attack_quality_metrics["overall"]["mean_clip_text_similarity"]
@@ -1252,6 +1216,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert paper_metric_registry["legacy_scope_mapping"]["content_chain"]["attack"]["legacy_scope_name"] == "formal_attack_final_decision"
     assert paper_metric_registry["legacy_scope_mapping"]["event_attestation"]["clean"]["legacy_scope_name"] == "clean_attestation_evaluate_export"
     assert paper_metric_registry["legacy_scope_mapping"]["system_final"]["attack"]["legacy_scope_name"] == "derived_attack_union"
+    assert paper_metric_registry["artifact_paths"]["supplemental_metrics"]["clean_quality_metrics_path"] == normalize_path_value(clean_quality_metrics_path)
     assert paper_metric_registry["artifact_paths"]["supplemental_metrics"]["attack_quality_metrics_path"] == normalize_path_value(attack_quality_metrics_path)
     assert paper_metric_registry["artifact_paths"]["supplemental_metrics"]["robustness_curve_by_family_path"] == normalize_path_value(robustness_curve_by_family_path)
     assert paper_metric_registry["artifact_paths"]["supplemental_metrics"]["quality_robustness_tradeoff_path"] == normalize_path_value(quality_robustness_tradeoff_path)
@@ -1411,6 +1376,12 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert cast(Dict[str, Any], pw04_summary["analysis_only_artifact_paths"])["pw04_wrong_event_attestation_challenge_summary"] == normalize_path_value(
         wrong_event_attestation_challenge_summary_path
     )
+    assert cast(Dict[str, Any], pw04_summary["analysis_only_artifact_paths"])["pw04_quality_pair_plan"] == normalize_path_value(
+        quality_pair_plan_path
+    )
+    assert cast(Dict[str, Any], pw04_summary["analysis_only_artifact_paths"])["pw04_quality_finalize_manifest"] == normalize_path_value(
+        quality_finalize_manifest_path
+    )
     assert cast(Dict[str, Any], pw04_summary["analysis_only_artifact_annotations"])["pw04_wrong_event_attestation_challenge_summary"] == {
         "canonical": False,
         "analysis_only": True,
@@ -1441,17 +1412,16 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert len(tradeoff_rows) == 3
     assert {row["scope"] for row in tradeoff_rows} == {"content_chain", "event_attestation", "system_final"}
     assert all(row["clean_quality_scope"] == "content_chain" for row in tradeoff_rows)
-    assert all(row["clean_quality_status"] == "ok" for row in tradeoff_rows)
-    assert all(row["lpips_status"] == "ok" for row in tradeoff_rows)
-    assert all(row["clean_mean_lpips"] == "0.12" for row in tradeoff_rows)
-    assert all(row["clip_status"] == "ok" for row in tradeoff_rows)
+    assert all(row["clean_quality_status"] == str(clean_quality_metrics["overall"]["status"]) for row in tradeoff_rows)
+    assert all(row["lpips_status"] == str(clean_quality_metrics["overall"]["lpips_status"]) for row in tradeoff_rows)
+    assert all(row["clip_status"] == str(clean_quality_metrics["overall"]["clip_status"]) for row in tradeoff_rows)
     assert all("attack_mean_lpips" in row for row in tradeoff_rows)
     assert all("attack_lpips_status" in row for row in tradeoff_rows)
     assert all("attack_mean_clip_text_similarity" in row for row in tradeoff_rows)
-    assert all(row["attack_clip_status"] == "ok" for row in tradeoff_rows)
+    assert all(row["attack_clip_status"] == str(attack_quality_metrics["overall"]["clip_status"]) for row in tradeoff_rows)
     assert all(row["attack_clip_model_name"] == pw_quality_metrics_module.CLIP_MODEL_NAME for row in tradeoff_rows)
-    assert all(Path(str(row["quality_metrics_summary_csv_path"])).exists() for row in tradeoff_rows)
-    assert all(Path(str(row["quality_metrics_summary_json_path"])).exists() for row in tradeoff_rows)
+    assert all(Path(str(row["clean_quality_metrics_path"])).exists() for row in tradeoff_rows)
+    assert all(Path(str(row["attack_quality_metrics_path"])).exists() for row in tradeoff_rows)
     assert all(Path(str(row["robustness_macro_summary_path"])).exists() for row in tradeoff_rows)
     assert quality_robustness_frontier_path.stat().st_size > 0
 
@@ -1493,6 +1463,95 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert first_pool_event["formal_record_path"]
     assert Path(str(first_pool_event["formal_record_path"])).exists()
     assert summary["family_id"] == pw04_summary["family_id"]
+
+
+def test_pw04_quality_shard_worker_only_writes_shard_payload(tmp_path: Path, monkeypatch: Any) -> None:
+    """
+    Verify the PW04 quality shard worker writes only shard-local payloads.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_compute_clip_text_similarity",
+        _fake_clip_text_similarity,
+    )
+    family_root = tmp_path / "paper_workflow" / "families" / "family_pw04_quality_shard"
+    quality_root = family_root / "exports" / "pw04" / "quality"
+    ensure_directory(quality_root)
+
+    clean_reference_path = quality_root / "clean_reference.png"
+    clean_candidate_path = quality_root / "clean_candidate.png"
+    attack_reference_path = quality_root / "attack_reference.png"
+    attack_candidate_path = quality_root / "attack_candidate.png"
+    Image.new("RGB", (8, 8), color=(120, 80, 60)).save(clean_reference_path)
+    Image.new("RGB", (8, 8), color=(121, 80, 60)).save(clean_candidate_path)
+    Image.new("RGB", (8, 8), color=(90, 100, 110)).save(attack_reference_path)
+    Image.new("RGB", (8, 8), color=(93, 100, 110)).save(attack_candidate_path)
+
+    quality_pair_plan_path = quality_root / "quality_pair_plan.json"
+    write_json_atomic(
+        quality_pair_plan_path,
+        {
+            "artifact_type": "paper_workflow_pw04_quality_pair_plan",
+            "schema_version": "pw_stage_04_v1",
+            "family_id": "family_pw04_quality_shard",
+            "clean_pairs": [
+                {
+                    "event_id": "source_event_000001",
+                    "reference_image_path": normalize_path_value(clean_reference_path),
+                    "candidate_image_path": normalize_path_value(clean_candidate_path),
+                    "prompt_text": "prompt one",
+                }
+            ],
+            "attack_pairs": [
+                {
+                    "attack_event_id": "attack_event_000001",
+                    "parent_event_id": "source_event_000001",
+                    "attack_family": "resize",
+                    "attack_condition_key": "resize::0.8",
+                    "attack_config_name": "resize_cfg",
+                    "reference_image_path": normalize_path_value(attack_reference_path),
+                    "candidate_image_path": normalize_path_value(attack_candidate_path),
+                    "prompt_text": "prompt two",
+                }
+            ],
+            "shards": [
+                {
+                    "quality_shard_index": 0,
+                    "clean_pair_ids": ["source_event_000001"],
+                    "attack_pair_ids": ["attack_event_000001"],
+                    "clean_pair_count": 1,
+                    "attack_pair_count": 1,
+                    "total_pair_count": 2,
+                }
+            ],
+        },
+    )
+
+    shard_export = pw04_quality_shard_module.run_pw04_quality_shard(
+        family_id="family_pw04_quality_shard",
+        quality_pair_plan_path=quality_pair_plan_path,
+        quality_shard_index=0,
+    )
+
+    shard_path = Path(str(shard_export["path"]))
+    shard_payload = _load_json_dict(shard_path)
+    assert shard_path.exists()
+    assert shard_payload["artifact_type"] == "paper_workflow_pw04_quality_shard"
+    assert shard_payload["clean_pair_count"] == 1
+    assert shard_payload["attack_pair_count"] == 1
+    assert shard_payload["clean_quality_summary"]["count"] == 1
+    assert shard_payload["attack_quality_summary"]["count"] == 1
+    assert not (family_root / "exports" / "pw04" / "metrics" / "clean_quality_metrics.json").exists()
+    assert not (family_root / "exports" / "pw04" / "metrics" / "attack_quality_metrics.json").exists()
+    assert not (family_root / "exports" / "pw04" / "tables").exists()
+    assert not (family_root / "exports" / "pw04" / "figures").exists()
 
 
 def test_pw04_payload_attack_summary_prefers_decode_sidecar_metrics(tmp_path: Path) -> None:

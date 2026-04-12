@@ -833,44 +833,6 @@ def _build_system_final_auxiliary_attack_exports(
         "system_final_auxiliary_attack_by_condition_path": normalize_path_value(condition_path),
         "system_final_auxiliary_attack_summary": summary_payload,
     }
-
-
-def _resolve_pw02_quality_summary_paths(
-    family_root: Path,
-    pw02_summary: Mapping[str, Any],
-) -> Tuple[Path, Path]:
-    """
-    功能：解析 PW02 clean quality summary 路径。
-
-    Resolve the PW02 clean quality summary CSV and JSON paths.
-
-    Args:
-        family_root: Family root path.
-        pw02_summary: PW02 summary payload.
-
-    Returns:
-        Tuple of (csv_path, json_path).
-    """
-    if not isinstance(family_root, Path):
-        raise TypeError("family_root must be Path")
-    if not isinstance(pw02_summary, Mapping):
-        raise TypeError("pw02_summary must be Mapping")
-
-    csv_path_value = pw02_summary.get("quality_metrics_summary_csv_path")
-    json_path_value = pw02_summary.get("quality_metrics_summary_json_path")
-    csv_path = (
-        Path(str(csv_path_value)).expanduser().resolve()
-        if isinstance(csv_path_value, str) and csv_path_value.strip()
-        else (family_root / "exports" / "pw02" / "quality" / "quality_metrics_summary.csv").resolve()
-    )
-    json_path = (
-        Path(str(json_path_value)).expanduser().resolve()
-        if isinstance(json_path_value, str) and json_path_value.strip()
-        else (family_root / "exports" / "pw02" / "quality" / "quality_metrics_summary.json").resolve()
-    )
-    return csv_path, json_path
-
-
 def _build_robustness_rows(
     main_rows: Sequence[Mapping[str, Any]],
     family_rows: Sequence[Mapping[str, Any]],
@@ -2071,37 +2033,34 @@ def _build_wrong_event_attestation_challenge_summary_payload(
 def _build_clean_imperceptibility_payload(
     *,
     family_id: str,
-    clean_quality_row: Mapping[str, Any],
-    quality_summary_csv_path: Path,
-    quality_summary_json_path: Path,
+    clean_quality_metrics_payload: Mapping[str, Any],
+    clean_quality_metrics_path: Path,
 ) -> Dict[str, Any]:
     """
     功能：显式导出 clean imperceptibility 语义。 
 
     Build the explicit clean imperceptibility export from the legacy clean
-    quality summary row.
+    quality metrics payload.
 
     Args:
         family_id: Family identifier.
-        clean_quality_row: PW02 content-chain quality summary row.
-        quality_summary_csv_path: Source summary CSV path.
-        quality_summary_json_path: Source summary JSON path.
+        clean_quality_metrics_payload: PW04 clean quality payload.
+        clean_quality_metrics_path: PW04 clean quality JSON path.
 
     Returns:
         Clean imperceptibility export payload.
     """
     if not isinstance(family_id, str) or not family_id:
         raise TypeError("family_id must be non-empty str")
-    if not isinstance(clean_quality_row, Mapping):
-        raise TypeError("clean_quality_row must be Mapping")
-    if not isinstance(quality_summary_csv_path, Path):
-        raise TypeError("quality_summary_csv_path must be Path")
-    if not isinstance(quality_summary_json_path, Path):
-        raise TypeError("quality_summary_json_path must be Path")
+    if not isinstance(clean_quality_metrics_payload, Mapping):
+        raise TypeError("clean_quality_metrics_payload must be Mapping")
+    if not isinstance(clean_quality_metrics_path, Path):
+        raise TypeError("clean_quality_metrics_path must be Path")
 
-    pair_count = _parse_csv_int(clean_quality_row, "pair_count")
-    status_value = clean_quality_row.get("status")
-    reason_value = clean_quality_row.get("reason")
+    overall_payload = _extract_mapping(clean_quality_metrics_payload.get("overall"))
+    pair_count = _parse_csv_int(overall_payload, "count")
+    status_value = overall_payload.get("status")
+    reason_value = overall_payload.get("availability_reason")
     if not isinstance(status_value, str) or not status_value:
         status_value = "not_available"
     if not isinstance(reason_value, str) or not reason_value:
@@ -2117,8 +2076,8 @@ def _build_clean_imperceptibility_payload(
         "reason": reason_value,
         "canonical": False,
         "analysis_only": True,
-        "fallback_source": "pw02_quality_metrics_summary.rows[scope=content_chain]",
-        "legacy_scope_name": clean_quality_row.get("scope"),
+        "fallback_source": "pw04_clean_quality_metrics.overall",
+        "legacy_scope_name": "content_chain",
         "pair_semantics": {
             "scene": "clean",
             "reference_artifact": "plain_preview_image",
@@ -2127,20 +2086,19 @@ def _build_clean_imperceptibility_payload(
             "directionality": "larger psnr/ssim and smaller lpips indicate stronger clean imperceptibility",
         },
         "source_artifacts": {
-            "quality_summary_csv_path": normalize_path_value(quality_summary_csv_path),
-            "quality_summary_json_path": normalize_path_value(quality_summary_json_path),
+            "clean_quality_metrics_path": normalize_path_value(clean_quality_metrics_path),
         },
         "metrics": {
             "pair_count": pair_count,
-            "mean_psnr": _coerce_finite_float(clean_quality_row.get("mean_psnr")),
-            "mean_ssim": _coerce_finite_float(clean_quality_row.get("mean_ssim")),
-            "mean_lpips": _coerce_finite_float(clean_quality_row.get("mean_lpips")),
-            "mean_clip_text_similarity": _coerce_finite_float(clean_quality_row.get("mean_clip_text_similarity")),
-            "clip_model_name": clean_quality_row.get("clip_model_name"),
-            "lpips_status": clean_quality_row.get("lpips_status"),
-            "lpips_reason": clean_quality_row.get("lpips_reason"),
-            "clip_status": clean_quality_row.get("clip_status"),
-            "clip_reason": clean_quality_row.get("clip_reason"),
+            "mean_psnr": _coerce_finite_float(overall_payload.get("mean_psnr")),
+            "mean_ssim": _coerce_finite_float(overall_payload.get("mean_ssim")),
+            "mean_lpips": _coerce_finite_float(overall_payload.get("mean_lpips")),
+            "mean_clip_text_similarity": _coerce_finite_float(overall_payload.get("mean_clip_text_similarity")),
+            "clip_model_name": overall_payload.get("clip_model_name"),
+            "lpips_status": overall_payload.get("lpips_status"),
+            "lpips_reason": overall_payload.get("lpips_reason"),
+            "clip_status": overall_payload.get("clip_status"),
+            "clip_reason": overall_payload.get("clip_reason"),
         },
     }
 
@@ -2331,6 +2289,10 @@ def build_pw04_metrics_extensions(
     export_root: Path,
     pw02_summary: Mapping[str, Any],
     attack_event_rows: Sequence[Mapping[str, Any]],
+    clean_quality_metrics_payload: Mapping[str, Any],
+    clean_quality_metrics_path: Path,
+    attack_quality_metrics_payload: Mapping[str, Any],
+    attack_quality_metrics_path: Path,
     main_metrics_summary_csv_path: Path,
     attack_family_summary_paper_csv_path: Path,
     attack_condition_summary_paper_csv_path: Path,
@@ -2347,6 +2309,10 @@ def build_pw04_metrics_extensions(
         export_root: PW04 export root.
         pw02_summary: PW02 summary payload.
         attack_event_rows: Materialized attack event rows.
+        clean_quality_metrics_payload: PW04 clean quality payload.
+        clean_quality_metrics_path: PW04 clean quality path.
+        attack_quality_metrics_payload: PW04 attack quality payload.
+        attack_quality_metrics_path: PW04 attack quality path.
         main_metrics_summary_csv_path: Canonical main summary CSV path.
         attack_family_summary_paper_csv_path: Paper-facing family summary CSV path.
         attack_condition_summary_paper_csv_path: Paper-facing condition summary CSV path.
@@ -2365,6 +2331,14 @@ def build_pw04_metrics_extensions(
         raise TypeError("pw02_summary must be Mapping")
     if not isinstance(attack_event_rows, Sequence):
         raise TypeError("attack_event_rows must be Sequence")
+    if not isinstance(clean_quality_metrics_payload, Mapping):
+        raise TypeError("clean_quality_metrics_payload must be Mapping")
+    if not isinstance(clean_quality_metrics_path, Path):
+        raise TypeError("clean_quality_metrics_path must be Path")
+    if not isinstance(attack_quality_metrics_payload, Mapping):
+        raise TypeError("attack_quality_metrics_payload must be Mapping")
+    if not isinstance(attack_quality_metrics_path, Path):
+        raise TypeError("attack_quality_metrics_path must be Path")
     if not isinstance(main_metrics_summary_csv_path, Path):
         raise TypeError("main_metrics_summary_csv_path must be Path")
     if not isinstance(attack_family_summary_paper_csv_path, Path):
@@ -2647,25 +2621,14 @@ def build_pw04_metrics_extensions(
         ),
     )
 
-    quality_summary_csv_path, quality_summary_json_path = _resolve_pw02_quality_summary_paths(
-        family_root=family_root,
-        pw02_summary=pw02_summary,
-    )
-    attack_quality_metrics_json_path = (export_root / "metrics" / "attack_quality_metrics.json").resolve()
-    attack_quality_metrics_payload = _load_required_json_dict(
-        attack_quality_metrics_json_path,
-        "PW04 attack quality metrics",
-    )
-    quality_summary_payload = _load_required_json_dict(quality_summary_json_path, "PW02 quality metrics summary")
-    quality_rows = cast(List[Mapping[str, Any]], quality_summary_payload.get("rows", []))
-    clean_quality_row = next((row for row in quality_rows if row.get("scope") == "content_chain"), {})
+    clean_quality_overall = _extract_mapping(clean_quality_metrics_payload.get("overall"))
+    attack_quality_overall = _extract_mapping(attack_quality_metrics_payload.get("overall"))
     write_json_atomic(
         clean_imperceptibility_path,
         _build_clean_imperceptibility_payload(
             family_id=family_id,
-            clean_quality_row=clean_quality_row,
-            quality_summary_csv_path=quality_summary_csv_path,
-            quality_summary_json_path=quality_summary_json_path,
+            clean_quality_metrics_payload=clean_quality_metrics_payload,
+            clean_quality_metrics_path=clean_quality_metrics_path,
         ),
     )
     write_json_atomic(
@@ -2673,82 +2636,37 @@ def build_pw04_metrics_extensions(
         _build_attack_distortion_payload(
             family_id=family_id,
             attack_quality_metrics_payload=attack_quality_metrics_payload,
-            attack_quality_metrics_path=attack_quality_metrics_json_path,
+            attack_quality_metrics_path=attack_quality_metrics_path,
         ),
     )
-    attack_lpips_values = [
-        value
-        for value in (
-            _coerce_finite_float(row.get("attack_quality_lpips"))
-            for row in attack_event_rows
-        )
-        if value is not None
-    ]
-    attack_clip_values = [
-        value
-        for value in (
-            _coerce_finite_float(row.get("attack_quality_clip_text_similarity"))
-            for row in attack_event_rows
-        )
-        if value is not None
-    ]
-    attack_quality_ok_count = sum(1 for row in attack_event_rows if row.get("attack_quality_status") == "ok")
-    attack_clip_sample_count = len(attack_clip_values)
-    attack_clip_model_name = next(
-        (
-            str(row.get("attack_quality_clip_model_name"))
-            for row in attack_event_rows
-            if isinstance(row.get("attack_quality_clip_model_name"), str) and str(row.get("attack_quality_clip_model_name")).strip()
-        ),
-        clean_quality_row.get("clip_model_name"),
-    )
-    if attack_quality_ok_count <= 0:
-        attack_lpips_status = "not_available"
-        attack_lpips_reason = "PW04 attack quality rows do not contain LPIPS values"
-    elif attack_quality_ok_count == len(attack_event_rows):
-        attack_lpips_status = "ok"
-        attack_lpips_reason = None
-    else:
-        attack_lpips_status = "partial"
-        attack_lpips_reason = f"LPIPS available for {attack_quality_ok_count}/{len(attack_event_rows)} attack events"
-
-    if attack_clip_sample_count <= 0:
-        attack_clip_status = "not_available"
-        attack_clip_reason = "PW04 attack quality rows do not contain CLIP text similarity values"
-    elif attack_clip_sample_count == len(attack_event_rows):
-        attack_clip_status = "ok"
-        attack_clip_reason = None
-    else:
-        attack_clip_status = "partial"
-        attack_clip_reason = f"CLIP available for {attack_clip_sample_count}/{len(attack_event_rows)} attack events"
 
     tradeoff_rows: List[Dict[str, Any]] = []
     for robustness_row in robustness_macro_rows:
         tradeoff_rows.append(
             {
                 "scope": robustness_row.get("scope"),
-                "clean_quality_scope": clean_quality_row.get("scope"),
-                "clean_quality_status": clean_quality_row.get("status", "not_available"),
-                "clean_mean_psnr": clean_quality_row.get("mean_psnr"),
-                "clean_mean_ssim": clean_quality_row.get("mean_ssim"),
-                "clean_mean_lpips": clean_quality_row.get("mean_lpips"),
+                "clean_quality_scope": "content_chain",
+                "clean_quality_status": clean_quality_overall.get("status", "not_available"),
+                "clean_mean_psnr": clean_quality_overall.get("mean_psnr"),
+                "clean_mean_ssim": clean_quality_overall.get("mean_ssim"),
+                "clean_mean_lpips": clean_quality_overall.get("mean_lpips"),
                 "attack_macro_avg_tpr": robustness_row.get("macro_avg_attack_tpr"),
                 "overall_attack_tpr": robustness_row.get("overall_attack_tpr"),
-                "attack_mean_lpips": _safe_mean(attack_lpips_values),
-                "attack_lpips_status": attack_lpips_status,
-                "attack_lpips_reason": attack_lpips_reason,
-                "attack_mean_clip_text_similarity": _safe_mean(attack_clip_values),
-                "attack_clip_model_name": attack_clip_model_name,
-                "attack_clip_status": attack_clip_status,
-                "attack_clip_reason": attack_clip_reason,
-                "attack_clip_sample_count": attack_clip_sample_count,
-                "quality_metrics_summary_csv_path": normalize_path_value(quality_summary_csv_path),
-                "quality_metrics_summary_json_path": normalize_path_value(quality_summary_json_path),
+                "attack_mean_lpips": attack_quality_overall.get("mean_lpips"),
+                "attack_lpips_status": attack_quality_overall.get("lpips_status", "not_available"),
+                "attack_lpips_reason": attack_quality_overall.get("lpips_reason"),
+                "attack_mean_clip_text_similarity": attack_quality_overall.get("mean_clip_text_similarity"),
+                "attack_clip_model_name": attack_quality_overall.get("clip_model_name"),
+                "attack_clip_status": attack_quality_overall.get("clip_status", "not_available"),
+                "attack_clip_reason": attack_quality_overall.get("clip_reason"),
+                "attack_clip_sample_count": attack_quality_overall.get("clip_sample_count"),
+                "clean_quality_metrics_path": normalize_path_value(clean_quality_metrics_path),
+                "attack_quality_metrics_path": normalize_path_value(attack_quality_metrics_path),
                 "robustness_macro_summary_path": normalize_path_value(robustness_macro_summary_path),
-                "lpips_status": clean_quality_row.get("lpips_status", "not_available"),
-                "lpips_reason": clean_quality_row.get("lpips_reason"),
-                "clip_status": clean_quality_row.get("clip_status", "not_available"),
-                "clip_reason": clean_quality_row.get("clip_reason"),
+                "lpips_status": clean_quality_overall.get("lpips_status", "not_available"),
+                "lpips_reason": clean_quality_overall.get("lpips_reason"),
+                "clip_status": clean_quality_overall.get("clip_status", "not_available"),
+                "clip_reason": clean_quality_overall.get("clip_reason"),
             }
         )
     _write_csv_rows(
@@ -2770,8 +2688,8 @@ def build_pw04_metrics_extensions(
             "attack_clip_status",
             "attack_clip_reason",
             "attack_clip_sample_count",
-            "quality_metrics_summary_csv_path",
-            "quality_metrics_summary_json_path",
+            "clean_quality_metrics_path",
+            "attack_quality_metrics_path",
             "robustness_macro_summary_path",
             "lpips_status",
             "lpips_reason",
@@ -2797,6 +2715,7 @@ def build_pw04_metrics_extensions(
         "wrong_event_far_clean_path": normalize_path_value(wrong_event_far_clean_path),
         "wrong_event_far_attack_path": normalize_path_value(wrong_event_far_attack_path),
         "wrong_event_far_by_challenge_type_path": normalize_path_value(wrong_event_far_by_challenge_type_path),
+        "clean_quality_metrics_path": normalize_path_value(clean_quality_metrics_path),
         "clean_imperceptibility_path": normalize_path_value(clean_imperceptibility_path),
         "attack_distortion_path": normalize_path_value(attack_distortion_path),
         "quality_robustness_tradeoff_path": normalize_path_value(quality_robustness_tradeoff_path),

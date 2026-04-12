@@ -5,6 +5,7 @@ Module type: General module
 
 from __future__ import annotations
 
+import builtins
 import json
 import zipfile
 from pathlib import Path
@@ -209,46 +210,23 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             "analysis_only": True,
         },
     )
-    pw02_quality_metrics_summary_csv_path = _write_text(
-        family_root / "exports" / "pw02" / "quality" / "quality_metrics_summary.csv",
-        "scope,status,reason,pair_count,expected_pair_count,missing_count,error_count,mean_psnr,mean_ssim,mean_lpips,mean_clip_text_similarity,clip_model_name,clip_sample_count,lpips_status,lpips_reason,clip_status,clip_reason,quality_torch_device,quality_lpips_batch_size,quality_clip_batch_size,prompt_text_expected,prompt_text_available_count,prompt_text_missing_count,prompt_text_coverage_status,prompt_text_coverage_reason,quality_readiness_status,quality_readiness_reason,quality_readiness_blocking,source_analysis_path\ncontent_chain,ok,,1,1,0,0,30.0,0.95,0.10,0.80,ViT-B-32,1,ok,,ok,,cuda:0,2,2,True,1,0,ok,,ready,,False,/source\n",
-    )
-    pw02_quality_metrics_summary_json_path = _write_json(
-        family_root / "exports" / "pw02" / "quality" / "quality_metrics_summary.json",
+    pw02_clean_quality_pair_manifest_path = _write_json(
+        family_root / "exports" / "pw02" / "quality" / "clean_quality_pair_manifest.json",
         {
-            "artifact_type": "paper_workflow_pw02_quality_metrics_summary",
+            "artifact_type": "paper_workflow_pw02_clean_quality_pair_manifest",
             "family_id": family_id,
-            "rows": [
+            "scope": "content_chain",
+            "pair_id_key": "event_id",
+            "reference_path_key": "reference_image_path",
+            "candidate_path_key": "candidate_image_path",
+            "text_key": "prompt_text",
+            "pair_rows": [
                 {
-                    "scope": "content_chain",
-                    "status": "ok",
-                    "reason": None,
-                    "pair_count": 1,
-                    "expected_pair_count": 1,
-                    "missing_count": 0,
-                    "error_count": 0,
-                    "mean_psnr": 30.0,
-                    "mean_ssim": 0.95,
-                    "mean_lpips": 0.10,
-                    "mean_clip_text_similarity": 0.80,
-                    "clip_model_name": "ViT-B-32",
-                    "clip_sample_count": 1,
-                    "lpips_status": "ok",
-                    "lpips_reason": None,
-                    "clip_status": "ok",
-                    "clip_reason": None,
-                    "quality_torch_device": "cuda:0",
-                    "quality_lpips_batch_size": 2,
-                    "quality_clip_batch_size": 2,
-                    "prompt_text_expected": True,
-                    "prompt_text_available_count": 1,
-                    "prompt_text_missing_count": 0,
-                    "prompt_text_coverage_status": "ok",
-                    "prompt_text_coverage_reason": None,
-                    "quality_readiness_status": "ready",
-                    "quality_readiness_reason": None,
-                    "quality_readiness_blocking": False,
-                    "source_analysis_path": "/source",
+                    "event_id": "source_event_000001",
+                    "reference_image_path": normalize_path_value(family_root / "exports" / "pw02" / "quality" / "plain_preview_000001.png"),
+                    "candidate_image_path": normalize_path_value(family_root / "exports" / "pw02" / "quality" / "watermarked_output_000001.png"),
+                    "prompt_text": "prompt one",
+                    "sample_role": "positive_source",
                 }
             ],
         },
@@ -337,6 +315,45 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             "artifact_type": "paper_workflow_pw04_formal_attack_negative_metrics",
             "family_id": family_id,
             "metrics": {"derived_attack_union_attack_fpr": 0.2},
+        },
+    )
+    pw04_clean_quality_metrics_path = _write_json(
+        family_root / "exports" / "pw04" / "metrics" / "clean_quality_metrics.json",
+        {
+            "artifact_type": "paper_workflow_pw04_clean_quality_metrics",
+            "family_id": family_id,
+            "overall": {
+                "status": "ok",
+                "availability_reason": None,
+                "expected_count": 1,
+                "count": 1,
+                "missing_count": 0,
+                "error_count": 0,
+                "mean_psnr": 30.0,
+                "mean_ssim": 0.95,
+                "mean_lpips": 0.10,
+                "mean_clip_text_similarity": 0.80,
+                "clip_model_name": "ViT-B-32",
+                "clip_sample_count": 1,
+                "lpips_status": "ok",
+                "lpips_reason": None,
+                "clip_status": "ok",
+                "clip_reason": None,
+                "quality_runtime": {
+                    "torch_device": "cuda:0",
+                    "lpips_batch_size": 2,
+                    "clip_batch_size": 2,
+                },
+                "prompt_text_expected": True,
+                "prompt_text_available_count": 1,
+                "prompt_text_missing_count": 0,
+                "prompt_text_coverage_status": "ok",
+                "prompt_text_coverage_reason": None,
+                "quality_readiness_status": "ready",
+                "quality_readiness_reason": None,
+                "quality_readiness_blocking": False,
+                "quality_readiness_required_for_formal_release": True,
+            },
         },
     )
     pw04_attack_quality_metrics_path = _write_json(
@@ -578,6 +595,7 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             "derived_attack_union_metrics_path": normalize_path_value(pw04_derived_attack_union_metrics_path),
             "formal_attack_negative_metrics_path": normalize_path_value(pw04_formal_attack_negative_metrics_path),
             "clean_attack_overview_path": normalize_path_value(pw04_clean_attack_overview_path),
+            "clean_quality_metrics_path": normalize_path_value(pw04_clean_quality_metrics_path),
             "attack_quality_metrics_path": normalize_path_value(pw04_attack_quality_metrics_path),
             "paper_scope_registry_path": normalize_path_value(pw04_paper_metric_registry_path),
             "canonical_metrics_paths": {
@@ -604,8 +622,7 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             "analysis_only_artifact_paths": {
                 "pw02_system_final_auxiliary_operating_semantics": normalize_path_value(pw02_system_final_auxiliary_operating_semantics_path),
                 "pw02_system_final_auxiliary_roc_curve": normalize_path_value(pw02_system_final_auxiliary_roc_curve_path),
-                "pw02_quality_metrics_summary_csv": normalize_path_value(pw02_quality_metrics_summary_csv_path),
-                "pw02_quality_metrics_summary_json": normalize_path_value(pw02_quality_metrics_summary_json_path),
+                "pw02_clean_quality_pair_manifest": normalize_path_value(pw02_clean_quality_pair_manifest_path),
                 "pw02_payload_clean_summary": normalize_path_value(pw02_payload_clean_summary_path),
                 "pw04_system_final_auxiliary_attack_summary": normalize_path_value(pw04_system_final_auxiliary_attack_summary_path),
                 "pw04_system_final_auxiliary_attack_by_family": normalize_path_value(pw04_system_final_auxiliary_attack_by_family_path),
@@ -617,8 +634,7 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             "analysis_only_artifact_annotations": {
                 "pw02_system_final_auxiliary_operating_semantics": {"canonical": False, "analysis_only": True},
                 "pw02_system_final_auxiliary_roc_curve": {"canonical": False, "analysis_only": True},
-                "pw02_quality_metrics_summary_csv": {"canonical": False, "analysis_only": True},
-                "pw02_quality_metrics_summary_json": {"canonical": False, "analysis_only": True},
+                "pw02_clean_quality_pair_manifest": {"canonical": False, "analysis_only": True},
                 "pw02_payload_clean_summary": {"canonical": False, "analysis_only": True},
                 "pw04_system_final_auxiliary_attack_summary": {"canonical": False, "analysis_only": True},
                 "pw04_system_final_auxiliary_attack_by_family": {"canonical": False, "analysis_only": True},
@@ -699,19 +715,40 @@ def test_pw05_release_signoff_packages_canonical_pw04_exports(tmp_path: Path) ->
     assert formal_run_readiness_report["blocking_components"] == []
     assert formal_run_readiness_report["blocking_reasons"] == []
     assert "tail_estimation" in formal_run_readiness_report["advisory_components"]
+    assert "quality_runtime_preflight" not in formal_run_readiness_report
     assert formal_run_readiness_report["components"]["quality_attack"]["status"] == "ready"
     assert formal_run_readiness_report["components"]["quality_clean"]["status"] == "ready"
     assert formal_run_readiness_report["components"]["payload_clean"]["status"] == "ready"
     assert formal_run_readiness_report["components"]["payload_attack"]["status"] == "ready"
     assert formal_run_readiness_report["components"]["wrong_event_attack"]["status"] == "ready"
     assert formal_run_readiness_report["components"]["geometry_conditional_rescue"]["blocking"] is False
+    for component_name in ["quality_clean", "quality_attack"]:
+        component_payload = cast(Dict[str, Any], formal_run_readiness_report["components"][component_name])
+        assert "lpips_dependency_ready" not in component_payload
+        assert "lpips_dependency_reason" not in component_payload
+        assert "clip_dependency_ready" not in component_payload
+        assert "clip_dependency_reason" not in component_payload
     assert formal_run_readiness_report["recommended_run_plan"]["plan_name"] == "formal_paper_run_minimal_scale_up"
     assert formal_run_readiness_report["recommended_run_plan"]["gates_before_scale_up"] == []
+    serialized_readiness_report = json.dumps(formal_run_readiness_report, ensure_ascii=False, sort_keys=True)
+    serialized_signoff_report = json.dumps(signoff_report, ensure_ascii=False, sort_keys=True)
+    for forbidden_token in [
+        "lpips_import_failed",
+        "open_clip_import_failed",
+        "lpips_dependency_ready",
+        "lpips_dependency_reason",
+        "clip_dependency_ready",
+        "clip_dependency_reason",
+        "quality_runtime_preflight",
+    ]:
+        assert forbidden_token not in serialized_readiness_report
+        assert forbidden_token not in serialized_signoff_report
     assert signoff_report["checked_source_artifact_count"] >= 20
-    assert signoff_report["analysis_only_artifact_count"] == 11
+    assert signoff_report["analysis_only_artifact_count"] == 10
     assert signoff_report["formal_run_readiness_report_path"] == normalize_path_value(formal_run_readiness_report_path)
     assert "pw04_summary" in release_manifest["release_copy_paths"]
     assert "family_manifest" in release_manifest["source_artifact_index"]
+    assert "pw04_clean_quality_metrics" in release_manifest["source_artifact_index"]
     assert "pw04_attack_quality_metrics" in release_manifest["source_artifact_index"]
     assert "pw02_positive_source_payload_reference_sidecar_e000001" in release_manifest["source_artifact_index"]
     assert "pw02_positive_source_payload_decode_sidecar_e000001" in release_manifest["source_artifact_index"]
@@ -732,8 +769,8 @@ def test_pw05_release_signoff_packages_canonical_pw04_exports(tmp_path: Path) ->
         "canonical": False,
         "analysis_only": True,
     }
-    assert release_manifest["analysis_only_artifact_annotations"]["pw02_quality_metrics_summary_json"]["release_copy_path"] == (
-        "source/exports/pw02/quality/quality_metrics_summary.json"
+    assert release_manifest["analysis_only_artifact_annotations"]["pw02_clean_quality_pair_manifest"]["release_copy_path"] == (
+        "source/exports/pw02/quality/clean_quality_pair_manifest.json"
     )
     assert release_manifest["analysis_only_artifact_annotations"]["pw04_payload_attack_summary"]["release_copy_path"] == (
         "source/exports/pw04/payload_robustness/payload_attack_summary.json"
@@ -755,6 +792,7 @@ def test_pw05_release_signoff_packages_canonical_pw04_exports(tmp_path: Path) ->
     assert "artifacts/signoff/signoff_report.json" in members
     assert "source/runtime_state/pw04_summary.json" in members
     assert "source/exports/pw04/metrics/paper_metric_registry.json" in members
+    assert "source/exports/pw04/metrics/clean_quality_metrics.json" in members
     assert "source/exports/pw04/metrics/attack_quality_metrics.json" in members
     assert "source/exports/pw02/thresholds/content/thresholds.json" in members
     assert "source/exports/pw04/attack_negative_pool_manifest.json" in members
@@ -763,7 +801,7 @@ def test_pw05_release_signoff_packages_canonical_pw04_exports(tmp_path: Path) ->
     assert "source/source_shards/positive/shard_0000/events/event_000001/artifacts/payload_decode_sidecar.json" in members
     assert "source/attack_shards/shard_0000/events/event_000001/artifacts/payload_decode_sidecar.json" in members
     assert "source/exports/pw02/operating_metrics/system_final_auxiliary_operating_semantics.json" in members
-    assert "source/exports/pw02/quality/quality_metrics_summary.json" in members
+    assert "source/exports/pw02/quality/clean_quality_pair_manifest.json" in members
     assert "source/exports/pw02/payload/payload_clean_summary.json" in members
     assert "source/exports/pw04/geometry_diagnostics/conditional_rescue_metrics.json" in members
     assert "source/exports/pw04/payload_robustness/payload_attack_summary.json" in members
@@ -819,12 +857,12 @@ def test_pw05_blocks_freeze_when_formal_run_readiness_has_blocking_component(tmp
     }
 
 
-def test_pw05_reports_quality_runtime_preflight_when_quality_dependency_is_missing(
+def test_pw05_ignores_current_quality_import_state_and_omits_dependency_fields(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
-    Verify PW05 surfaces current quality dependency import failures in the readiness report.
+    Verify PW05 signoff ignores current quality dependency import state and omits dependency fields.
 
     Args:
         tmp_path: Pytest temporary directory.
@@ -834,22 +872,20 @@ def test_pw05_reports_quality_runtime_preflight_when_quality_dependency_is_missi
         None.
     """
     fixture = _build_pw05_family_fixture(tmp_path)
-    family_root = Path(str(fixture["family_root"]))
-    attack_quality_metrics_path = family_root / "exports" / "pw04" / "metrics" / "attack_quality_metrics.json"
-    attack_quality_metrics = _load_json_dict(attack_quality_metrics_path)
-    attack_quality_overall = cast(Dict[str, Any], attack_quality_metrics["overall"])
-    attack_quality_overall["clip_status"] = "missing"
-    attack_quality_overall["clip_reason"] = "clip_model_not_available"
-    write_json_atomic(attack_quality_metrics_path, attack_quality_metrics)
+    original_import = builtins.__import__
 
-    original_import_module = pw05_module.importlib.import_module
+    def fake_import(
+        name: str,
+        globals_arg: Any = None,
+        locals_arg: Any = None,
+        fromlist: Any = (),
+        level: int = 0,
+    ) -> Any:
+        if name in {"lpips", "open_clip"}:
+            raise ModuleNotFoundError(f"No module named '{name}'")
+        return original_import(name, globals_arg, locals_arg, fromlist, level)
 
-    def fake_import_module(module_name: str) -> Any:
-        if module_name == "open_clip":
-            raise ModuleNotFoundError("No module named 'open_clip'")
-        return original_import_module(module_name)
-
-    monkeypatch.setattr(pw05_module.importlib, "import_module", fake_import_module)
+    monkeypatch.setattr(builtins, "__import__", fake_import)
 
     summary = pw05_module.run_pw05_release_signoff(
         drive_project_root=Path(str(fixture["drive_root"])),
@@ -858,18 +894,31 @@ def test_pw05_reports_quality_runtime_preflight_when_quality_dependency_is_missi
     )
 
     formal_run_readiness_report = _load_json_dict(Path(str(summary["formal_run_readiness_report_path"])))
+    signoff_report = _load_json_dict(Path(str(summary["signoff_report_path"])))
+    quality_clean = cast(Dict[str, Any], formal_run_readiness_report["components"]["quality_clean"])
     quality_attack = cast(Dict[str, Any], formal_run_readiness_report["components"]["quality_attack"])
+    serialized_readiness_report = json.dumps(formal_run_readiness_report, ensure_ascii=False, sort_keys=True)
+    serialized_signoff_report = json.dumps(signoff_report, ensure_ascii=False, sort_keys=True)
 
-    assert formal_run_readiness_report["quality_runtime_preflight"]["clip_dependency_ready"] is False
-    assert "open_clip_import_failed:ModuleNotFoundError" in str(
-        formal_run_readiness_report["quality_runtime_preflight"]["clip_dependency_reason"]
-    )
-    assert quality_attack["clip_dependency_ready"] is False
-    assert "open_clip_import_failed:ModuleNotFoundError" in str(quality_attack["clip_dependency_reason"])
-    assert any(
-        "open_clip_import_failed:ModuleNotFoundError" in reason
-        for reason in cast(List[str], formal_run_readiness_report["blocking_reasons"])
-    )
+    assert summary["decision"] == "ALLOW_FREEZE"
+    assert formal_run_readiness_report["overall_status"] == "ready"
+    assert "quality_runtime_preflight" not in formal_run_readiness_report
+    for component_payload in [quality_clean, quality_attack]:
+        assert "lpips_dependency_ready" not in component_payload
+        assert "lpips_dependency_reason" not in component_payload
+        assert "clip_dependency_ready" not in component_payload
+        assert "clip_dependency_reason" not in component_payload
+    for forbidden_token in [
+        "lpips_import_failed",
+        "open_clip_import_failed",
+        "lpips_dependency_ready",
+        "lpips_dependency_reason",
+        "clip_dependency_ready",
+        "clip_dependency_reason",
+        "quality_runtime_preflight",
+    ]:
+        assert forbidden_token not in serialized_readiness_report
+        assert forbidden_token not in serialized_signoff_report
 
 
 def test_pw05_requires_completed_pw04_exports(tmp_path: Path) -> None:
