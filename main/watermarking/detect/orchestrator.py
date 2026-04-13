@@ -3604,6 +3604,15 @@ def _extract_lf_raw_score_from_trajectory(
             "bp_converged": lf_detect_trace.get("bp_converged"),
             "bp_iteration_count": lf_detect_trace.get("bp_iteration_count"),
             "parity_check_digest": lf_detect_trace.get("parity_check_digest"),
+            "detect_variant": lf_detect_trace.get("detect_variant"),
+            "message_source": lf_detect_trace.get("message_source"),
+            "codeword_agreement": lf_detect_trace.get("codeword_agreement"),
+            "n_bits_compared": lf_detect_trace.get("n_bits_compared"),
+            "agreement_count": lf_detect_trace.get("agreement_count"),
+            "bit_error_count": lf_detect_trace.get("bit_error_count"),
+            "decoded_bits": lf_detect_trace.get("decoded_bits"),
+            "agreement_indices": lf_detect_trace.get("agreement_indices"),
+            "mismatch_indices": lf_detect_trace.get("mismatch_indices"),
             "lf_failure_reason": lf_detect_trace.get("lf_failure_reason"),
             "bp_converge_status": lf_detect_trace.get("bp_converge_status"),
             "lf_detect_path": detect_path,
@@ -4223,6 +4232,17 @@ def _build_lf_detect_evidence(
     """
     trace_payload = cast(Dict[str, Any], lf_trace) if isinstance(lf_trace, dict) else {}
     lf_status = trace_payload.get("lf_status") if isinstance(trace_payload.get("lf_status"), str) else "absent"
+    detect_variant = trace_payload.get("detect_variant")
+    if not isinstance(detect_variant, str) or not detect_variant:
+        detect_variant = trace_payload.get("lf_detect_path")
+    message_source = trace_payload.get("message_source")
+    n_bits_compared = trace_payload.get("n_bits_compared")
+    agreement_count = trace_payload.get("agreement_count")
+    codeword_agreement = trace_payload.get("codeword_agreement")
+    bit_error_count = trace_payload.get("bit_error_count")
+    decoded_bits = trace_payload.get("decoded_bits")
+    agreement_indices = trace_payload.get("agreement_indices")
+    mismatch_indices = trace_payload.get("mismatch_indices")
     if lf_status == "ok" and isinstance(lf_score, (int, float)):
         return {
             "status": "ok",
@@ -4233,7 +4253,16 @@ def _build_lf_detect_evidence(
             "parity_check_digest": trace_payload.get("parity_check_digest"),
             "lf_evidence_summary": {
                 "lf_status": "ok",
-                "lf_detect_variant": trace_payload.get("lf_detect_path"),
+                "lf_detect_variant": detect_variant,
+                "detect_variant": detect_variant,
+                "message_source": message_source,
+                "n_bits_compared": n_bits_compared,
+                "agreement_count": agreement_count,
+                "codeword_agreement": codeword_agreement,
+                "bit_error_count": bit_error_count,
+                "decoded_bits": decoded_bits,
+                "agreement_indices": agreement_indices,
+                "mismatch_indices": mismatch_indices,
                 "bp_converged": trace_payload.get("bp_converged"),
                 "bp_iteration_count": trace_payload.get("bp_iteration_count"),
                 "parity_check_digest": trace_payload.get("parity_check_digest"),
@@ -4247,6 +4276,12 @@ def _build_lf_detect_evidence(
             "lf_trace_digest": trace_payload.get("lf_trace_digest"),
             "lf_evidence_summary": {
                 "lf_status": "mismatch",
+                "lf_detect_variant": detect_variant,
+                "detect_variant": detect_variant,
+                "message_source": message_source,
+                "n_bits_compared": n_bits_compared,
+                "agreement_count": agreement_count,
+                "codeword_agreement": codeword_agreement,
                 "lf_failure_reason": trace_payload.get("lf_failure_reason") or "lf_plan_mismatch",
             },
         }
@@ -4258,6 +4293,12 @@ def _build_lf_detect_evidence(
             "lf_trace_digest": trace_payload.get("lf_trace_digest"),
             "lf_evidence_summary": {
                 "lf_status": "failed",
+                "lf_detect_variant": detect_variant,
+                "detect_variant": detect_variant,
+                "message_source": message_source,
+                "n_bits_compared": n_bits_compared,
+                "agreement_count": agreement_count,
+                "codeword_agreement": codeword_agreement,
                 "lf_failure_reason": trace_payload.get("lf_failure_reason") or "lf_detection_failed",
             },
         }
@@ -4268,6 +4309,12 @@ def _build_lf_detect_evidence(
         "lf_trace_digest": trace_payload.get("lf_trace_digest"),
         "lf_evidence_summary": {
             "lf_status": "absent",
+            "lf_detect_variant": detect_variant,
+            "detect_variant": detect_variant,
+            "message_source": message_source,
+            "n_bits_compared": n_bits_compared,
+            "agreement_count": agreement_count,
+            "codeword_agreement": codeword_agreement,
             "lf_absent_reason": trace_payload.get("lf_absent_reason"),
         },
     }

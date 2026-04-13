@@ -1027,13 +1027,18 @@ class LowFreqTemplateCodec:
         )
         bp_iterations = int(template_bundle["bp_iterations"])
         decode_result = decode_soft_llr(llr_values, ldpc_spec, bp_iterations)
-        decoded_bits = decode_result["decoded_bits"]
+        decoded_bits = [int(value) for value in decode_result["decoded_bits"]]
         expected_codeword = np.asarray(template_bundle["codeword_bipolar"], dtype=np.int32)
         agreement_count = 0
         compare_count = min(len(decoded_bits), int(expected_codeword.shape[0]))
+        agreement_indices: list[int] = []
+        mismatch_indices: list[int] = []
         for index in range(compare_count):
             if int(decoded_bits[index]) == int(expected_codeword[index]):
                 agreement_count += 1
+                agreement_indices.append(index)
+            else:
+                mismatch_indices.append(index)
         codeword_agreement = float(agreement_count / compare_count) if compare_count > 0 else 0.0
         correlation_score = 1.0 / (1.0 + math.exp(-correlation_scale * raw_corr))
         lf_score = float(round(0.5 * correlation_score + 0.5 * codeword_agreement, 8))
@@ -1045,6 +1050,12 @@ class LowFreqTemplateCodec:
             "raw_correlation": raw_corr,
             "correlation_score": float(correlation_score),
             "codeword_agreement": round(codeword_agreement, 8),
+            "decoded_bits": decoded_bits[:compare_count],
+            "n_bits_compared": compare_count,
+            "agreement_count": agreement_count,
+            "agreement_indices": agreement_indices,
+            "mismatch_indices": mismatch_indices,
+            "bit_error_count": len(mismatch_indices),
             "c_mean": c_mean,
             "c_std": c_std,
             "basis_rank": basis_rank,

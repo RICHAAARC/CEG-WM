@@ -330,6 +330,14 @@ def test_run_detect_orchestrator_attacked_positive_uses_image_conditioned_main_d
         return 0.73, {
             "lf_status": "ok",
             "lf_detect_path": str(kwargs.get("detect_path", "low_freq_template_trajectory")),
+            "detect_variant": "correlation_v2",
+            "message_source": "attestation_event_digest",
+            "n_bits_compared": 96,
+            "agreement_count": 84,
+            "codeword_agreement": 0.875,
+            "bit_error_count": 12,
+            "decoded_bits": [1 if index % 2 == 0 else -1 for index in range(96)],
+            "mismatch_indices": [1, 5, 9],
         }
 
     def fail_image_sidecar(*args: Any, **kwargs: Any) -> tuple[float | None, float | None, Dict[str, Any]]:
@@ -378,6 +386,16 @@ def test_run_detect_orchestrator_attacked_positive_uses_image_conditioned_main_d
     assert lf_trace["image_conditioned_reconstruction_status"] == "ok"
     record_lf_trace = _extract_record_lf_trace(record)
     assert record_lf_trace["lf_detect_path"] == "low_freq_template_image_conditioned_attack"
+    assert record_lf_trace["n_bits_compared"] == 96
+    assert record_lf_trace["agreement_count"] == 84
+    assert record_lf_trace["codeword_agreement"] == pytest.approx(0.875)
+    content_payload = cast(Dict[str, Any], record["content_evidence_payload"])
+    lf_summary = cast(Dict[str, Any], content_payload["lf_evidence_summary"])
+    assert lf_summary["detect_variant"] == "correlation_v2"
+    assert lf_summary["message_source"] == "attestation_event_digest"
+    assert lf_summary["n_bits_compared"] == 96
+    assert lf_summary["agreement_count"] == 84
+    assert lf_summary["codeword_agreement"] == pytest.approx(0.875)
 
 
 def test_run_detect_orchestrator_attacked_positive_fail_closes_without_cache(
