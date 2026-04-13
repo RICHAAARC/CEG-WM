@@ -2744,6 +2744,7 @@ def build_pw04_metrics_extensions(
             "pw04_system_final_auxiliary_attack_by_family": auxiliary_attack_exports["system_final_auxiliary_attack_by_family_path"],
             "pw04_system_final_auxiliary_attack_by_condition": auxiliary_attack_exports["system_final_auxiliary_attack_by_condition_path"],
             "pw04_conditional_rescue_metrics": normalize_path_value(conditional_rescue_metrics_path),
+            "pw04_payload_attack_summary": normalize_path_value(payload_attack_summary_path),
             "pw04_wrong_event_attestation_challenge_summary": normalize_path_value(wrong_event_attestation_challenge_summary_path),
             "pw04_wrong_event_far_clean": normalize_path_value(wrong_event_far_clean_path),
             "pw04_wrong_event_far_attack": normalize_path_value(wrong_event_far_attack_path),

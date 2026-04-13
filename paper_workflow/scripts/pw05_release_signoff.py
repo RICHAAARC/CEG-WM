@@ -488,6 +488,63 @@ def _collect_analysis_only_source_bindings(
     return bindings
 
 
+def _backfill_analysis_only_binding_from_summary_field(
+    *,
+    family_root: Path,
+    pw04_summary: Mapping[str, Any],
+    analysis_only_bindings: Dict[str, Dict[str, Any]],
+    label: str,
+    summary_field_name: str,
+) -> None:
+    """
+    功能：当 analysis-only label 缺失时按顶层 summary 字段补齐绑定。
+
+    Backfill one analysis-only binding from a top-level PW04 summary path
+    field when the expected label is absent.
+
+    Args:
+        family_root: Family root path.
+        pw04_summary: PW04 summary payload.
+        analysis_only_bindings: Mutable analysis-only binding mapping.
+        label: Analysis-only binding label to backfill.
+        summary_field_name: Top-level PW04 summary field providing the path.
+
+    Returns:
+        None.
+    """
+    if not isinstance(family_root, Path):
+        raise TypeError("family_root must be Path")
+    if not isinstance(pw04_summary, Mapping):
+        raise TypeError("pw04_summary must be Mapping")
+    if not isinstance(analysis_only_bindings, dict):
+        raise TypeError("analysis_only_bindings must be dict")
+    if not isinstance(label, str) or not label:
+        raise TypeError("label must be non-empty str")
+    if not isinstance(summary_field_name, str) or not summary_field_name:
+        raise TypeError("summary_field_name must be non-empty str")
+
+    if label in analysis_only_bindings:
+        return
+
+    summary_path_value = pw04_summary.get(summary_field_name)
+    if not isinstance(summary_path_value, str) or not summary_path_value.strip():
+        return
+
+    resolved_path = _resolve_path_value_under_family_root(
+        summary_path_value,
+        family_root,
+        summary_field_name,
+    )
+    if not resolved_path.exists() or not resolved_path.is_file():
+        return
+
+    analysis_only_bindings[label] = {
+        "path": resolved_path,
+        "canonical": False,
+        "analysis_only": True,
+    }
+
+
 def _extract_mapping(node: Any) -> Dict[str, Any]:
     """
     功能：安全提取映射节点。 
@@ -1253,6 +1310,13 @@ def run_pw05_release_signoff(
     analysis_only_source_bindings = _collect_analysis_only_source_bindings(
         family_root=family_root,
         pw04_summary=pw04_summary,
+    )
+    _backfill_analysis_only_binding_from_summary_field(
+        family_root=family_root,
+        pw04_summary=pw04_summary,
+        analysis_only_bindings=analysis_only_source_bindings,
+        label="pw04_payload_attack_summary",
+        summary_field_name="payload_attack_summary_path",
     )
     analysis_only_source_paths = {
         label: cast(Path, binding["path"])

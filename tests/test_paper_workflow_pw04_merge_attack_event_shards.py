@@ -1411,6 +1411,9 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert wrong_event_attestation_challenge_summary["overall"]["wrong_event_rejection_rate"] == pytest.approx(1.0)
     assert len(wrong_event_attestation_challenge_summary["by_attack_family"]) == attack_family_count
     assert all(row["status"] == "ok" for row in wrong_event_attestation_challenge_summary["rows"])
+    assert cast(Dict[str, Any], pw04_summary["analysis_only_artifact_paths"])["pw04_payload_attack_summary"] == normalize_path_value(
+        payload_attack_summary_path
+    )
     assert cast(Dict[str, Any], pw04_summary["analysis_only_artifact_paths"])["pw04_wrong_event_attestation_challenge_summary"] == normalize_path_value(
         wrong_event_attestation_challenge_summary_path
     )
@@ -1421,6 +1424,10 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
         quality_finalize_manifest_path
     )
     assert cast(Dict[str, Any], pw04_summary["analysis_only_artifact_annotations"])["pw04_wrong_event_attestation_challenge_summary"] == {
+        "canonical": False,
+        "analysis_only": True,
+    }
+    assert cast(Dict[str, Any], pw04_summary["analysis_only_artifact_annotations"])["pw04_payload_attack_summary"] == {
         "canonical": False,
         "analysis_only": True,
     }

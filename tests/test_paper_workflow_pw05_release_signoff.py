@@ -615,6 +615,7 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             },
             "bootstrap_confidence_intervals_path": normalize_path_value(pw04_bootstrap_confidence_intervals_path),
             "bootstrap_confidence_intervals_csv_path": normalize_path_value(pw04_bootstrap_confidence_intervals_csv_path),
+            "payload_attack_summary_path": normalize_path_value(pw04_payload_attack_summary_path),
             "tail_estimation_paths": {
                 key_name: normalize_path_value(path_obj)
                 for key_name, path_obj in tail_paths.items()
@@ -807,6 +808,50 @@ def test_pw05_release_signoff_packages_canonical_pw04_exports(tmp_path: Path) ->
     assert "source/exports/pw04/payload_robustness/payload_attack_summary.json" in members
     assert "source/exports/pw04/robustness/system_final_auxiliary_attack_summary.json" in members
     assert "source/exports/pw04/robustness/wrong_event_attestation_challenge_summary.json" in members
+
+
+def test_pw05_backfills_payload_attack_binding_from_top_level_pw04_summary(tmp_path: Path) -> None:
+    """
+    Verify PW05 recovers the payload attack binding from the top-level PW04 summary field.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    fixture = _build_pw05_family_fixture(tmp_path)
+    pw04_summary_path = Path(str(fixture["pw04_summary_path"]))
+    pw04_summary = _load_json_dict(pw04_summary_path)
+    payload_attack_summary_path = str(pw04_summary["payload_attack_summary_path"])
+    analysis_only_artifact_paths = cast(Dict[str, Any], pw04_summary["analysis_only_artifact_paths"])
+    analysis_only_artifact_annotations = cast(Dict[str, Any], pw04_summary["analysis_only_artifact_annotations"])
+    analysis_only_artifact_paths.pop("pw04_payload_attack_summary")
+    analysis_only_artifact_annotations.pop("pw04_payload_attack_summary")
+    write_json_atomic(pw04_summary_path, pw04_summary)
+
+    summary = pw05_module.run_pw05_release_signoff(
+        drive_project_root=Path(str(fixture["drive_root"])),
+        family_id=str(fixture["family_id"]),
+        stage_run_id="pw05_release_demo",
+    )
+
+    formal_run_readiness_report = _load_json_dict(Path(str(summary["formal_run_readiness_report_path"])))
+    signoff_report = _load_json_dict(Path(str(summary["signoff_report_path"])))
+    release_manifest = _load_json_dict(Path(str(summary["release_manifest_path"])))
+    persisted_summary = _load_json_dict(Path(str(summary["summary_path"])))
+
+    assert summary["decision"] == "ALLOW_FREEZE"
+    assert signoff_report["analysis_only_artifact_count"] == 10
+    assert formal_run_readiness_report["components"]["payload_attack"]["status"] == "ready"
+    assert formal_run_readiness_report["components"]["payload_attack"]["source_path"] == payload_attack_summary_path
+    assert release_manifest["analysis_only_artifact_annotations"]["pw04_payload_attack_summary"] == {
+        "source_path": payload_attack_summary_path,
+        "release_copy_path": "source/exports/pw04/payload_robustness/payload_attack_summary.json",
+        "canonical": False,
+        "analysis_only": True,
+    }
+    assert persisted_summary["analysis_only_artifact_paths"]["pw04_payload_attack_summary"] == payload_attack_summary_path
 
 
 def test_pw05_blocks_freeze_when_formal_run_readiness_has_blocking_component(tmp_path: Path) -> None:
