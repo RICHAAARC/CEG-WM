@@ -772,7 +772,7 @@ def _build_auxiliary_summary_component_readiness(
         raw_reason = payload.get("reason")
         readiness_reason = raw_reason if isinstance(raw_reason, str) and raw_reason.strip() else None
     overall_payload = _extract_mapping(payload.get("overall"))
-    return {
+    component_payload = {
         "component_name": component_name,
         "status": status_value,
         "reason": readiness_reason,
@@ -782,6 +782,15 @@ def _build_auxiliary_summary_component_readiness(
         "event_count": _coerce_non_negative_int(overall_payload.get("event_count")),
         "attempted_event_count": _coerce_non_negative_int(overall_payload.get("attempted_event_count")),
     }
+    if component_name in {"payload_clean", "payload_attack"}:
+        component_payload.update(
+            {
+                "payload_role": "auxiliary_probe",
+                "payload_claim_scope": "non_primary_decision",
+                "payload_primary_release_dependency": False,
+            }
+        )
+    return component_payload
 
 
 def _build_tail_component_readiness(

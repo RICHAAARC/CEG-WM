@@ -929,6 +929,12 @@ def _build_payload_clean_summary_payload(
                 "payload_probe_alignment_signal_available": decode_sidecar_metrics.get("payload_probe_alignment_signal_available"),
                 "payload_probe_consistency_score": decode_sidecar_metrics.get("payload_probe_consistency_score"),
                 "payload_probe_bp_converged": decode_sidecar_metrics.get("payload_probe_bp_converged"),
+                "probe_margin_threshold": decode_sidecar_metrics.get("probe_margin_threshold"),
+                "probe_reference_n_bits": decode_sidecar_metrics.get("probe_reference_n_bits"),
+                "probe_effective_n_bits": decode_sidecar_metrics.get("probe_effective_n_bits"),
+                "probe_agreement_count": decode_sidecar_metrics.get("probe_agreement_count"),
+                "probe_bit_accuracy": decode_sidecar_metrics.get("probe_bit_accuracy"),
+                "probe_support_rate": decode_sidecar_metrics.get("probe_support_rate"),
             }
         )
 

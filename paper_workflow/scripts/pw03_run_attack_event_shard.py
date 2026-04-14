@@ -27,9 +27,12 @@ from paper_workflow.scripts.pw_common import (
     ATTACKED_NEGATIVE_SAMPLE_ROLE,
     ATTACKED_POSITIVE_SAMPLE_ROLE,
     CLEAN_NEGATIVE_SAMPLE_ROLE,
+    GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_ABS_MAX,
+    GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_METRIC,
     GEOMETRY_OPTIONAL_CLAIM_DIRECTIONALITY,
     GEOMETRY_OPTIONAL_CLAIM_MODE,
     GEOMETRY_OPTIONAL_CLAIM_PLAN_FILE_NAME,
+    GEOMETRY_OPTIONAL_CLAIM_PROTOCOL_VERSION,
     GEOMETRY_OPTIONAL_CLAIM_SCOPE,
     MIXED_ATTACK_SAMPLE_ROLE,
     build_payload_decode_sidecar_payload,
@@ -903,6 +906,197 @@ def _load_geometry_optional_claim_lookup(
     return lookup
 
 
+def _extract_threshold_value_from_export(export_payload: Mapping[str, Any]) -> float | None:
+    """
+    Extract one threshold value from a PW02 threshold export payload.
+
+    Args:
+        export_payload: Threshold export payload.
+
+    Returns:
+        Threshold value when available.
+    """
+    if not isinstance(export_payload, Mapping):
+        raise TypeError("export_payload must be Mapping")
+
+    thresholds_artifact = _extract_mapping(export_payload.get("thresholds_artifact"))
+    for candidate in [
+        thresholds_artifact.get("threshold_value"),
+        export_payload.get("threshold_value"),
+        export_payload.get("threshold"),
+    ]:
+        if isinstance(candidate, (int, float)) and not isinstance(candidate, bool):
+            return float(candidate)
+    return None
+
+
+def _resolve_geometry_optional_claim_boundary_assignment(
+    *,
+    attack_event_spec: Mapping[str, Any],
+    assignment_payload: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """
+    Resolve geometry optional-claim eligibility from finalized PW02 parent margins.
+
+    Args:
+        attack_event_spec: Materialized attack event spec.
+        assignment_payload: Frozen PW00 protocol row.
+
+    Returns:
+        Resolved assignment payload.
+    """
+    if not isinstance(attack_event_spec, Mapping):
+        raise TypeError("attack_event_spec must be Mapping")
+    if not isinstance(assignment_payload, Mapping):
+        raise TypeError("assignment_payload must be Mapping")
+
+    resolved_payload = dict(cast(Mapping[str, Any], assignment_payload))
+    parent_source_event = _extract_mapping(attack_event_spec.get("parent_source_event"))
+    parent_event_manifest = _extract_mapping(parent_source_event.get("event_manifest"))
+    threshold_binding_reference = _extract_mapping(attack_event_spec.get("threshold_binding_reference"))
+    threshold_artifact_paths = _extract_mapping(threshold_binding_reference.get("threshold_artifact_paths"))
+
+    parent_detect_record_path_value = parent_event_manifest.get("detect_record_path")
+    content_threshold_export_path_value = threshold_artifact_paths.get("content")
+    attestation_threshold_export_path_value = threshold_artifact_paths.get("attestation")
+    if not isinstance(parent_detect_record_path_value, str) or not parent_detect_record_path_value:
+        resolved_payload.update(
+            {
+                "status": "not_available",
+                "reason": "missing_parent_detect_record_path_for_geometry_optional_claim_boundary",
+                "eligible_for_optional_claim": False,
+                "boundary_resolution_status": "failed",
+                "boundary_resolution_reason": "missing_parent_detect_record_path",
+            }
+        )
+        return resolved_payload
+    if not isinstance(content_threshold_export_path_value, str) or not content_threshold_export_path_value:
+        resolved_payload.update(
+            {
+                "status": "not_available",
+                "reason": "missing_content_threshold_export_for_geometry_optional_claim_boundary",
+                "eligible_for_optional_claim": False,
+                "boundary_resolution_status": "failed",
+                "boundary_resolution_reason": "missing_content_threshold_export_path",
+            }
+        )
+        return resolved_payload
+
+    parent_detect_record_path = Path(parent_detect_record_path_value).expanduser().resolve()
+    content_threshold_export_path = Path(content_threshold_export_path_value).expanduser().resolve()
+    attestation_threshold_export_path = (
+        Path(attestation_threshold_export_path_value).expanduser().resolve()
+        if isinstance(attestation_threshold_export_path_value, str) and attestation_threshold_export_path_value
+        else None
+    )
+    try:
+        parent_detect_payload = _load_required_json_dict(
+            parent_detect_record_path,
+            f"PW03 parent detect record {attack_event_spec.get('parent_event_id')}",
+        )
+        content_threshold_export = _load_required_json_dict(
+            content_threshold_export_path,
+            "PW03 content threshold export",
+        )
+        attestation_threshold_export = (
+            _load_required_json_dict(attestation_threshold_export_path, "PW03 attestation threshold export")
+            if isinstance(attestation_threshold_export_path, Path)
+            else {}
+        )
+    except (FileNotFoundError, TypeError, ValueError) as exc:
+        resolved_payload.update(
+            {
+                "status": "not_available",
+                "reason": f"geometry_optional_claim_boundary_resolution_failed:{type(exc).__name__}",
+                "eligible_for_optional_claim": False,
+                "boundary_resolution_status": "failed",
+                "boundary_resolution_reason": str(exc),
+            }
+        )
+        return resolved_payload
+
+    content_payload = _extract_mapping(parent_detect_payload.get("content_evidence_payload"))
+    attestation_payload = _extract_mapping(parent_detect_payload.get("attestation"))
+    attested_decision = _extract_mapping(attestation_payload.get("final_event_attested_decision"))
+    content_score = None
+    for candidate in [content_payload.get("content_chain_score"), content_payload.get("score")]:
+        if isinstance(candidate, (int, float)) and not isinstance(candidate, bool):
+            content_score = float(candidate)
+            break
+    content_threshold_value = _extract_threshold_value_from_export(content_threshold_export)
+    event_attestation_score = None
+    if isinstance(attested_decision.get("event_attestation_score"), (int, float)) and not isinstance(
+        attested_decision.get("event_attestation_score"),
+        bool,
+    ):
+        event_attestation_score = float(cast(float, attested_decision["event_attestation_score"]))
+    event_attestation_threshold_value = (
+        _extract_threshold_value_from_export(attestation_threshold_export)
+        if attestation_threshold_export
+        else None
+    )
+    if content_score is None or content_threshold_value is None:
+        resolved_payload.update(
+            {
+                "status": "not_available",
+                "reason": "missing_parent_content_margin_for_geometry_optional_claim_boundary",
+                "eligible_for_optional_claim": False,
+                "boundary_resolution_status": "failed",
+                "boundary_resolution_reason": "missing_parent_content_margin",
+                "parent_source_detect_record_path": normalize_path_value(parent_detect_record_path),
+                "content_threshold_export_path": normalize_path_value(content_threshold_export_path),
+            }
+        )
+        return resolved_payload
+
+    parent_content_margin = float(content_score - content_threshold_value)
+    boundary_metric_value = abs(parent_content_margin)
+    parent_event_attestation_margin = (
+        float(event_attestation_score - event_attestation_threshold_value)
+        if event_attestation_score is not None and event_attestation_threshold_value is not None
+        else None
+    )
+    is_boundary_member = boundary_metric_value <= GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_ABS_MAX + 1e-12
+    resolved_payload.update(
+        {
+            "protocol_version": GEOMETRY_OPTIONAL_CLAIM_PROTOCOL_VERSION,
+            "boundary_metric": GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_METRIC,
+            "boundary_abs_margin_max": GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_ABS_MAX,
+            "boundary_metric_value": boundary_metric_value,
+            "boundary_resolution_status": "ok",
+            "boundary_resolution_reason": None,
+            "parent_content_margin": parent_content_margin,
+            "parent_event_attestation_margin": parent_event_attestation_margin,
+            "parent_source_detect_record_path": normalize_path_value(parent_detect_record_path),
+            "content_threshold_export_path": normalize_path_value(content_threshold_export_path),
+            "content_threshold_value": content_threshold_value,
+            "event_attestation_threshold_export_path": (
+                normalize_path_value(attestation_threshold_export_path)
+                if isinstance(attestation_threshold_export_path, Path)
+                else None
+            ),
+            "event_attestation_threshold_value": event_attestation_threshold_value,
+        }
+    )
+    if is_boundary_member:
+        resolved_payload.update(
+            {
+                "status": "ready",
+                "reason": None,
+                "eligible_for_optional_claim": True,
+            }
+        )
+    else:
+        resolved_payload.update(
+            {
+                "status": "not_applicable",
+                "reason": "parent_source_outside_content_margin_boundary_subset",
+                "eligible_for_optional_claim": False,
+            }
+        )
+    return resolved_payload
+
+
 def _attach_geometry_optional_claim_assignment(
     *,
     attack_event_spec: Mapping[str, Any],
@@ -941,7 +1135,12 @@ def _attach_geometry_optional_claim_assignment(
     )
 
     sample_role = str(attack_event_payload.get("sample_role") or "")
-    if not assignment_payload:
+    if sample_role == ATTACKED_POSITIVE_SAMPLE_ROLE and assignment_payload:
+        assignment_payload = _resolve_geometry_optional_claim_boundary_assignment(
+            attack_event_spec=attack_event_payload,
+            assignment_payload=assignment_payload,
+        )
+    elif not assignment_payload:
         if sample_role == ATTACKED_POSITIVE_SAMPLE_ROLE:
             assignment_payload = {
                 "attack_event_id": attack_event_id,
@@ -997,12 +1196,15 @@ def _build_geometry_optional_claim_evidence(
     if sample_role != ATTACKED_POSITIVE_SAMPLE_ROLE:
         status_value = "not_applicable"
         reason_value = "sample_role_not_attacked_positive"
-    elif assignment_payload.get("status") != "ready":
-        status_value = "not_available"
-        reason_value = assignment_payload.get("reason") or "missing_pw00_geometry_optional_claim_assignment"
-    else:
+    elif assignment_payload.get("status") == "ready":
         status_value = "ok"
         reason_value = None
+    elif assignment_payload.get("status") == "not_applicable":
+        status_value = "not_applicable"
+        reason_value = assignment_payload.get("reason") or "geometry_optional_claim_not_applicable"
+    else:
+        status_value = "not_available"
+        reason_value = assignment_payload.get("reason") or "missing_pw00_geometry_optional_claim_assignment"
 
     supporting_signal_count = sum(
         1
@@ -1028,6 +1230,19 @@ def _build_geometry_optional_claim_evidence(
         "content_positive_veto_allowed": False,
         "rescue_directionality": GEOMETRY_OPTIONAL_CLAIM_DIRECTIONALITY,
         "eligible_for_optional_claim": assignment_payload.get("eligible_for_optional_claim") is True,
+        "protocol_version": assignment_payload.get("protocol_version", GEOMETRY_OPTIONAL_CLAIM_PROTOCOL_VERSION),
+        "boundary_metric": assignment_payload.get("boundary_metric", GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_METRIC),
+        "boundary_abs_margin_max": assignment_payload.get("boundary_abs_margin_max", GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_ABS_MAX),
+        "boundary_metric_value": assignment_payload.get("boundary_metric_value"),
+        "boundary_resolution_status": assignment_payload.get("boundary_resolution_status"),
+        "boundary_resolution_reason": assignment_payload.get("boundary_resolution_reason"),
+        "parent_content_margin": assignment_payload.get("parent_content_margin"),
+        "parent_event_attestation_margin": assignment_payload.get("parent_event_attestation_margin"),
+        "parent_source_detect_record_path": assignment_payload.get("parent_source_detect_record_path"),
+        "content_threshold_export_path": assignment_payload.get("content_threshold_export_path"),
+        "content_threshold_value": assignment_payload.get("content_threshold_value"),
+        "event_attestation_threshold_export_path": assignment_payload.get("event_attestation_threshold_export_path"),
+        "event_attestation_threshold_value": assignment_payload.get("event_attestation_threshold_value"),
         "severity_status": attack_event_spec.get("severity_status"),
         "severity_label": attack_event_spec.get("severity_label"),
         "severity_level_index": attack_event_spec.get("severity_level_index"),

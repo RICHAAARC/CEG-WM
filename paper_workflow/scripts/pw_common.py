@@ -59,6 +59,9 @@ GEOMETRY_OPTIONAL_CLAIM_PLAN_FILE_NAME = "geometry_optional_claim_plan.json"
 GEOMETRY_OPTIONAL_CLAIM_MODE = "optional_geometry_rescue_evidence_only"
 GEOMETRY_OPTIONAL_CLAIM_SCOPE = "attacked_positive_content_failed_subset"
 GEOMETRY_OPTIONAL_CLAIM_DIRECTIONALITY = "one_way_positive_only"
+GEOMETRY_OPTIONAL_CLAIM_PROTOCOL_VERSION = "geometry_optional_claim_content_margin_boundary_v1"
+GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_METRIC = "abs_content_margin"
+GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_ABS_MAX = 0.05
 
 
 def _canonical_json_text(payload: Mapping[str, Any]) -> str:
@@ -382,6 +385,88 @@ def build_payload_reference_sidecar_payload(
     }
 
 
+def _derive_payload_probe_exact_fields(
+    *,
+    n_bits_compared: int | None,
+    agreement_count: int | None,
+    codeword_agreement: float | None,
+    reference_bit_count: int | None,
+    margin_threshold: float | None,
+    support_rate: float | None = None,
+) -> Dict[str, Any]:
+    """
+    Derive exact payload-probe fields using append-only compatibility rules.
+
+    Args:
+        n_bits_compared: Effective compared bit count.
+        agreement_count: Agreement count when available.
+        codeword_agreement: Bit-accuracy style agreement score.
+        reference_bit_count: Total reference code length when available.
+        margin_threshold: Margin threshold used by LF alignment repair logic.
+        support_rate: Optional precomputed support rate.
+
+    Returns:
+        Exact payload-probe field mapping.
+    """
+    probe_effective_n_bits = (
+        int(n_bits_compared)
+        if isinstance(n_bits_compared, int) and not isinstance(n_bits_compared, bool) and n_bits_compared > 0
+        else None
+    )
+    probe_agreement_count = (
+        int(agreement_count)
+        if isinstance(agreement_count, int)
+        and not isinstance(agreement_count, bool)
+        and agreement_count >= 0
+        and (
+            probe_effective_n_bits is None
+            or agreement_count <= probe_effective_n_bits
+        )
+        else None
+    )
+    if (
+        probe_agreement_count is None
+        and probe_effective_n_bits is not None
+        and codeword_agreement is not None
+    ):
+        derived_agreement_count = int(round(float(codeword_agreement) * float(probe_effective_n_bits)))
+        probe_agreement_count = max(0, min(probe_effective_n_bits, derived_agreement_count))
+
+    probe_bit_accuracy = _coerce_finite_float(codeword_agreement)
+    if (
+        probe_bit_accuracy is None
+        and probe_effective_n_bits is not None
+        and probe_agreement_count is not None
+        and probe_effective_n_bits > 0
+    ):
+        probe_bit_accuracy = float(probe_agreement_count / probe_effective_n_bits)
+
+    normalized_reference_bit_count = (
+        int(reference_bit_count)
+        if isinstance(reference_bit_count, int)
+        and not isinstance(reference_bit_count, bool)
+        and reference_bit_count > 0
+        else None
+    )
+    normalized_support_rate = _coerce_finite_float(support_rate)
+    if normalized_support_rate is None and probe_effective_n_bits is not None:
+        if normalized_reference_bit_count is not None and normalized_reference_bit_count > 0:
+            normalized_support_rate = float(probe_effective_n_bits / normalized_reference_bit_count)
+        else:
+            normalized_support_rate = 1.0
+    if normalized_support_rate is not None:
+        normalized_support_rate = float(max(0.0, min(1.0, normalized_support_rate)))
+
+    return {
+        "probe_margin_threshold": _coerce_finite_float(margin_threshold),
+        "probe_reference_n_bits": normalized_reference_bit_count,
+        "probe_effective_n_bits": probe_effective_n_bits,
+        "probe_agreement_count": probe_agreement_count,
+        "probe_bit_accuracy": probe_bit_accuracy,
+        "probe_support_rate": normalized_support_rate,
+    }
+
+
 def build_payload_decode_sidecar_payload(
     *,
     family_id: str,
@@ -534,6 +619,29 @@ def build_payload_decode_sidecar_payload(
     payload_probe_reconstruction_applied = (
         decoded_bits_source == "alignment_repair_from_expected_bits_and_mismatch_indices"
     )
+    reference_code_bits = _extract_sign_list(reference_sidecar.get("code_bits"))
+    reference_bit_count = len(reference_code_bits) if reference_code_bits else None
+    if reference_bit_count is None and decoded_bits:
+        reference_bit_count = len(decoded_bits)
+    probe_margin_threshold = _coerce_finite_float(alignment_artifact.get("confidence_threshold"))
+    if probe_margin_threshold is None:
+        probe_margin_threshold = _coerce_finite_float(alignment_artifact.get("alignment_margin_threshold"))
+    if probe_margin_threshold is None:
+        probe_margin_threshold = _coerce_finite_float(trace_artifact.get("confidence_threshold"))
+    if probe_margin_threshold is None:
+        probe_margin_threshold = _coerce_finite_float(trace_artifact.get("alignment_margin_threshold"))
+    exact_probe_fields = _derive_payload_probe_exact_fields(
+        n_bits_compared=n_bits_compared,
+        agreement_count=agreement_count,
+        codeword_agreement=codeword_agreement,
+        reference_bit_count=reference_bit_count,
+        margin_threshold=probe_margin_threshold,
+    )
+    payload_probe_consistency_score = (
+        float(cast(float, exact_probe_fields["probe_bit_accuracy"]))
+        if isinstance(exact_probe_fields.get("probe_bit_accuracy"), float)
+        else codeword_agreement
+    )
 
     reference_payload_digest = reference_sidecar.get("reference_payload_digest")
     payload_binding_digest = reference_sidecar.get("payload_binding_digest")
@@ -568,6 +676,7 @@ def build_payload_decode_sidecar_payload(
         "agreement_count": agreement_count,
         "bit_error_count": bit_error_count,
         "codeword_agreement": codeword_agreement,
+        **exact_probe_fields,
         "message_decode_success": message_decode_success,
         "decode_failure_reason": decode_failure_reason,
         "bp_converged": trace_artifact.get("bp_converged"),
@@ -697,17 +806,47 @@ def extract_payload_metrics_from_decode_sidecar(decode_sidecar: Mapping[str, Any
     bit_error_count = _extract_int(decode_sidecar.get("bit_error_count"))
     if codeword_agreement is None and isinstance(bit_error_count, int) and isinstance(n_bits_compared, int) and n_bits_compared > 0:
         codeword_agreement = float(1.0 - (float(bit_error_count) / float(n_bits_compared)))
+    probe_effective_n_bits = _extract_int(decode_sidecar.get("probe_effective_n_bits"))
+    if probe_effective_n_bits is None:
+        probe_effective_n_bits = n_bits_compared
+    probe_agreement_count = _extract_int(decode_sidecar.get("probe_agreement_count"))
+    if probe_agreement_count is None:
+        probe_agreement_count = _extract_int(decode_sidecar.get("agreement_count"))
+    probe_reference_n_bits = _extract_int(decode_sidecar.get("probe_reference_n_bits"))
+    decoded_bits = _extract_sign_list(decode_sidecar.get("decoded_bits"))
+    if probe_reference_n_bits is None and decoded_bits:
+        probe_reference_n_bits = len(decoded_bits)
+    probe_margin_threshold = _coerce_finite_float(decode_sidecar.get("probe_margin_threshold"))
+    if probe_margin_threshold is None:
+        probe_margin_threshold = _coerce_finite_float(decode_sidecar.get("alignment_margin_threshold"))
+    if probe_margin_threshold is None:
+        probe_margin_threshold = _coerce_finite_float(decode_sidecar.get("confidence_threshold"))
+    exact_probe_fields = _derive_payload_probe_exact_fields(
+        n_bits_compared=probe_effective_n_bits,
+        agreement_count=probe_agreement_count,
+        codeword_agreement=(
+            _coerce_finite_float(decode_sidecar.get("probe_bit_accuracy"))
+            or codeword_agreement
+        ),
+        reference_bit_count=probe_reference_n_bits,
+        margin_threshold=probe_margin_threshold,
+        support_rate=_coerce_finite_float(decode_sidecar.get("probe_support_rate")),
+    )
     payload_probe_consistency_score = _coerce_finite_float(
         decode_sidecar.get("payload_probe_consistency_score")
     )
     if payload_probe_consistency_score is None:
-        payload_probe_consistency_score = codeword_agreement
+        payload_probe_consistency_score = (
+            float(cast(float, exact_probe_fields["probe_bit_accuracy"]))
+            if isinstance(exact_probe_fields.get("probe_bit_accuracy"), float)
+            else codeword_agreement
+        )
     payload_probe_available = decode_sidecar.get("payload_probe_available")
     if not isinstance(payload_probe_available, bool):
         payload_probe_available = bool(
-            isinstance(n_bits_compared, int)
-            and n_bits_compared > 0
-            and payload_probe_consistency_score is not None
+            isinstance(exact_probe_fields.get("probe_effective_n_bits"), int)
+            and int(cast(int, exact_probe_fields["probe_effective_n_bits"])) > 0
+            and isinstance(exact_probe_fields.get("probe_bit_accuracy"), float)
         )
     payload_probe_reason = decode_sidecar.get("payload_probe_reason")
     if not isinstance(payload_probe_reason, str) or not payload_probe_reason:
@@ -787,6 +926,7 @@ def extract_payload_metrics_from_decode_sidecar(decode_sidecar: Mapping[str, Any
                 else None
             )
         ),
+        **exact_probe_fields,
     }
 
 
@@ -820,15 +960,40 @@ def summarize_payload_probe_rows(
             if isinstance(normalized_row.get("payload_probe_consistency_score"), float)
             else _coerce_finite_float(normalized_row.get("codeword_agreement"))
         )
+        probe_effective_n_bits = _extract_int(normalized_row.get("probe_effective_n_bits"))
+        if probe_effective_n_bits is None:
+            probe_effective_n_bits = _extract_int(normalized_row.get("n_bits_compared"))
+        probe_agreement_count = _extract_int(normalized_row.get("probe_agreement_count"))
+        if probe_agreement_count is None:
+            probe_agreement_count = _extract_int(normalized_row.get("agreement_count"))
+        probe_reference_n_bits = _extract_int(normalized_row.get("probe_reference_n_bits"))
+        if probe_reference_n_bits is None and isinstance(normalized_row.get("decoded_bits"), list):
+            decoded_bits = _extract_sign_list(normalized_row.get("decoded_bits"))
+            if decoded_bits:
+                probe_reference_n_bits = len(decoded_bits)
+        probe_margin_threshold = _coerce_finite_float(normalized_row.get("probe_margin_threshold"))
+        derived_probe_fields = _derive_payload_probe_exact_fields(
+            n_bits_compared=probe_effective_n_bits,
+            agreement_count=probe_agreement_count,
+            codeword_agreement=(
+                _coerce_finite_float(normalized_row.get("probe_bit_accuracy"))
+                or probe_consistency_score
+                or _coerce_finite_float(normalized_row.get("bit_accuracy"))
+            ),
+            reference_bit_count=probe_reference_n_bits,
+            margin_threshold=probe_margin_threshold,
+            support_rate=_coerce_finite_float(normalized_row.get("probe_support_rate")),
+        )
         probe_available = normalized_row.get("payload_probe_available")
         if not isinstance(probe_available, bool):
             probe_available = bool(
                 probe_consistency_score is not None
-                and isinstance(normalized_row.get("n_bits_compared"), int)
-                and int(cast(int, normalized_row["n_bits_compared"])) > 0
+                and isinstance(derived_probe_fields.get("probe_effective_n_bits"), int)
+                and int(cast(int, derived_probe_fields["probe_effective_n_bits"])) > 0
             )
         normalized_row["payload_probe_consistency_score"] = probe_consistency_score
         normalized_row["payload_probe_available"] = probe_available
+        normalized_row.update(derived_probe_fields)
         if not isinstance(normalized_row.get("payload_probe_source"), str) and probe_available:
             normalized_row["payload_probe_source"] = "derived_from_row_metrics"
         normalized_rows.append(normalized_row)
@@ -859,6 +1024,36 @@ def summarize_payload_probe_rows(
         for row in available_rows
         if isinstance(row.get("payload_probe_reconstruction_applied"), bool)
     ]
+    probe_effective_n_bits_total = sum(
+        int(cast(int, row["probe_effective_n_bits"]))
+        for row in available_rows
+        if isinstance(row.get("probe_effective_n_bits"), int)
+    )
+    probe_agreement_count_total = sum(
+        int(cast(int, row["probe_agreement_count"]))
+        for row in available_rows
+        if isinstance(row.get("probe_agreement_count"), int)
+    )
+    probe_reference_n_bits_total = sum(
+        int(cast(int, row["probe_reference_n_bits"]))
+        for row in available_rows
+        if isinstance(row.get("probe_reference_n_bits"), int)
+    )
+    probe_bit_accuracy_values = [
+        float(row["probe_bit_accuracy"])
+        for row in available_rows
+        if isinstance(row.get("probe_bit_accuracy"), float)
+    ]
+    probe_support_rate_values = [
+        float(row["probe_support_rate"])
+        for row in available_rows
+        if isinstance(row.get("probe_support_rate"), float)
+    ]
+    probe_margin_threshold_values = [
+        float(row["probe_margin_threshold"])
+        for row in available_rows
+        if isinstance(row.get("probe_margin_threshold"), float)
+    ]
 
     if not available_rows:
         status_value = "not_available"
@@ -877,6 +1072,23 @@ def summarize_payload_probe_rows(
         "event_count": len(normalized_rows),
         "available_probe_event_count": len(available_rows),
         "missing_probe_event_count": len(normalized_rows) - len(available_rows),
+        "probe_margin_threshold": (
+            probe_margin_threshold_values[0]
+            if len({round(value, 12) for value in probe_margin_threshold_values}) == 1 and probe_margin_threshold_values
+            else _safe_mean(probe_margin_threshold_values)
+        ),
+        "probe_effective_n_bits": probe_effective_n_bits_total,
+        "probe_agreement_count": probe_agreement_count_total,
+        "probe_bit_accuracy": (
+            float(probe_agreement_count_total / probe_effective_n_bits_total)
+            if probe_effective_n_bits_total > 0
+            else _safe_mean(probe_bit_accuracy_values)
+        ),
+        "probe_support_rate": (
+            float(probe_effective_n_bits_total / probe_reference_n_bits_total)
+            if probe_reference_n_bits_total > 0
+            else _safe_mean(probe_support_rate_values)
+        ),
         "mean_consistency_score": _safe_mean(consistency_scores),
         "min_consistency_score": min(consistency_scores) if consistency_scores else None,
         "max_consistency_score": max(consistency_scores) if consistency_scores else None,

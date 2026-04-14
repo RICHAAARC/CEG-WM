@@ -754,8 +754,12 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert cast(Dict[str, Any], first_event["geometry_diagnostics"])["sync_success"] is True
     assert cast(Dict[str, Any], first_event["geometry_diagnostics"])["inverse_transform_success"] is True
     assert cast(Dict[str, Any], first_event["geometry_diagnostics"])["attention_anchor_available"] is True
-    assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["status"] == "ok"
-    assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["eligible_for_optional_claim"] is True
+    assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["status"] == "not_applicable"
+    assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["reason"] == "parent_source_outside_content_margin_boundary_subset"
+    assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["eligible_for_optional_claim"] is False
+    assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["boundary_resolution_status"] == "ok"
+    assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["parent_content_margin"] == pytest.approx(0.3)
+    assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["boundary_metric_value"] == pytest.approx(0.3)
     assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["supporting_evidence_available"] is True
     wrong_event_challenge_record = json.loads(
         Path(str(first_event["wrong_event_attestation_challenge_record_path"])).read_text(encoding="utf-8")
@@ -781,7 +785,8 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_diagnostics"])["sync_success"] is True
     assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_diagnostics"])["inverse_transform_success"] is True
     assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_diagnostics"])["attention_anchor_available"] is True
-    assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_optional_claim_evidence"])["status"] == "ok"
+    assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_optional_claim_evidence"])["status"] == "not_applicable"
+    assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_optional_claim_evidence"])["boundary_resolution_status"] == "ok"
     assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_optional_claim_evidence"])["supporting_evidence_available"] is True
     payload_decode_status = json.loads(Path(str(first_event["payload_decode_sidecar_status_path"])).read_text(encoding="utf-8"))
     assert payload_decode_status["status"] == "ok"
@@ -793,6 +798,12 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert payload_decode_sidecar["payload_probe_status"] == "ready"
     assert payload_decode_sidecar["payload_probe_available"] is True
     assert payload_decode_sidecar["payload_probe_source"]
+    assert payload_decode_sidecar["probe_margin_threshold"] is None
+    assert payload_decode_sidecar["probe_reference_n_bits"] == 96
+    assert payload_decode_sidecar["probe_effective_n_bits"] == 96
+    assert payload_decode_sidecar["probe_agreement_count"] == 93
+    assert payload_decode_sidecar["probe_bit_accuracy"] == pytest.approx(93.0 / 96.0)
+    assert payload_decode_sidecar["probe_support_rate"] == pytest.approx(1.0)
 
 
 def test_run_attack_detect_event_marks_payload_decode_sidecar_not_applicable_for_attacked_negative(
@@ -992,6 +1003,12 @@ def test_payload_decode_sidecar_supports_nested_attestation_trace_artifacts() ->
     assert payload["payload_probe_available"] is True
     assert payload["payload_probe_reconstruction_applied"] is True
     assert payload["payload_probe_alignment_signal_available"] is True
+    assert payload["probe_margin_threshold"] is None
+    assert payload["probe_reference_n_bits"] == 96
+    assert payload["probe_effective_n_bits"] == 96
+    assert payload["probe_agreement_count"] == 94
+    assert payload["probe_bit_accuracy"] == pytest.approx((96 - len(mismatch_indices)) / 96.0)
+    assert payload["probe_support_rate"] == pytest.approx(1.0)
 
 
 def test_pw03_wrong_event_challenge_uses_env_verify_key_when_snapshot_omits_it(

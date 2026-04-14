@@ -1442,29 +1442,52 @@ def _load_geometry_optional_claim_evidence(
         if geometry_diagnostics.get(field_name) is True
     )
 
-    if evidence_payload.get("status") == "ok":
-        return evidence_payload
-
-    fallback_status = "ok" if sample_role == "attacked_positive" else "not_applicable"
-    fallback_reason = None if fallback_status == "ok" else "sample_role_not_attacked_positive"
+    if evidence_payload:
+        normalized_payload = dict(cast(Mapping[str, Any], evidence_payload))
+    elif sample_role == "attacked_positive":
+        normalized_payload = {
+            "status": "not_available",
+            "reason": "missing_geometry_optional_claim_evidence",
+        }
+    else:
+        normalized_payload = {
+            "status": "not_applicable",
+            "reason": "sample_role_not_attacked_positive",
+        }
+    supporting_evidence_available = normalized_payload.get("supporting_evidence_available")
+    if not isinstance(supporting_evidence_available, bool):
+        supporting_evidence_available = supporting_signal_count > 0
     return {
-        **evidence_payload,
-        "status": fallback_status,
-        "reason": fallback_reason,
-        "plan_status": evidence_payload.get("plan_status", "not_available"),
-        "plan_reason": evidence_payload.get("plan_reason"),
-        "claim_mode": evidence_payload.get("claim_mode", "optional_geometry_rescue_evidence_only"),
-        "claim_scope": evidence_payload.get("claim_scope", "attacked_positive_content_failed_subset"),
+        **normalized_payload,
+        "status": normalized_payload.get("status", "not_available"),
+        "reason": normalized_payload.get("reason"),
+        "plan_status": normalized_payload.get("plan_status", "not_available"),
+        "plan_reason": normalized_payload.get("plan_reason"),
+        "claim_mode": normalized_payload.get("claim_mode", "optional_geometry_rescue_evidence_only"),
+        "claim_scope": normalized_payload.get("claim_scope", "attacked_positive_content_failed_subset"),
         "content_positive_veto_allowed": False,
-        "rescue_directionality": evidence_payload.get("rescue_directionality", "one_way_positive_only"),
-        "eligible_for_optional_claim": sample_role == "attacked_positive",
+        "rescue_directionality": normalized_payload.get("rescue_directionality", "one_way_positive_only"),
+        "eligible_for_optional_claim": normalized_payload.get("eligible_for_optional_claim") is True,
+        "protocol_version": normalized_payload.get("protocol_version"),
+        "boundary_metric": normalized_payload.get("boundary_metric"),
+        "boundary_abs_margin_max": normalized_payload.get("boundary_abs_margin_max"),
+        "boundary_metric_value": normalized_payload.get("boundary_metric_value"),
+        "boundary_resolution_status": normalized_payload.get("boundary_resolution_status"),
+        "boundary_resolution_reason": normalized_payload.get("boundary_resolution_reason"),
+        "parent_content_margin": normalized_payload.get("parent_content_margin"),
+        "parent_event_attestation_margin": normalized_payload.get("parent_event_attestation_margin"),
+        "parent_source_detect_record_path": normalized_payload.get("parent_source_detect_record_path"),
+        "content_threshold_export_path": normalized_payload.get("content_threshold_export_path"),
+        "content_threshold_value": normalized_payload.get("content_threshold_value"),
+        "event_attestation_threshold_export_path": normalized_payload.get("event_attestation_threshold_export_path"),
+        "event_attestation_threshold_value": normalized_payload.get("event_attestation_threshold_value"),
         "sync_status": geometry_diagnostics.get("sync_status"),
         "sync_success": geometry_diagnostics.get("sync_success"),
         "inverse_transform_success": geometry_diagnostics.get("inverse_transform_success"),
         "attention_anchor_available": geometry_diagnostics.get("attention_anchor_available"),
         "geometry_failure_reason": geometry_diagnostics.get("geometry_failure_reason"),
         "supporting_signal_count": supporting_signal_count,
-        "supporting_evidence_available": supporting_signal_count > 0,
+        "supporting_evidence_available": supporting_evidence_available,
     }
 
 
@@ -1487,17 +1510,32 @@ def _build_geometry_optional_claim_summary(
 
     conditional_summary = _build_geometry_conditional_rescue_summary(rows)
     evidence_rows = [_load_geometry_optional_claim_evidence(row) for row in rows]
-    available_evidence = [row for row in evidence_rows if row.get("status") == "ok"]
+    available_evidence = [
+        row
+        for row in evidence_rows
+        if row.get("boundary_resolution_status") == "ok" or row.get("status") in {"ok", "not_applicable"}
+    ]
+    eligible_rows = [row for row in evidence_rows if row.get("eligible_for_optional_claim") is True]
     eligible_event_count = sum(1 for row in evidence_rows if row.get("eligible_for_optional_claim") is True)
-    supporting_evidence_event_count = sum(
-        1 for row in available_evidence if row.get("supporting_evidence_available") is True
+    boundary_excluded_event_count = sum(
+        1
+        for row in evidence_rows
+        if row.get("status") == "not_applicable" and row.get("eligible_for_optional_claim") is not True
     )
-    sync_success_support_count = sum(1 for row in available_evidence if row.get("sync_success") is True)
+    boundary_resolution_failed_event_count = sum(
+        1
+        for row in evidence_rows
+        if row.get("boundary_resolution_status") == "failed" or row.get("status") == "not_available"
+    )
+    supporting_evidence_event_count = sum(
+        1 for row in eligible_rows if row.get("supporting_evidence_available") is True
+    )
+    sync_success_support_count = sum(1 for row in eligible_rows if row.get("sync_success") is True)
     inverse_transform_support_count = sum(
-        1 for row in available_evidence if row.get("inverse_transform_success") is True
+        1 for row in eligible_rows if row.get("inverse_transform_success") is True
     )
     attention_anchor_support_count = sum(
-        1 for row in available_evidence if row.get("attention_anchor_available") is True
+        1 for row in eligible_rows if row.get("attention_anchor_available") is True
     )
     plan_ready_event_count = sum(1 for row in evidence_rows if row.get("plan_status") == "ready")
     claim_modes = sorted(
@@ -1507,17 +1545,30 @@ def _build_geometry_optional_claim_summary(
             if isinstance(row.get("claim_mode"), str) and str(row.get("claim_mode"))
         }
     )
+    protocol_versions = sorted(
+        {
+            str(row.get("protocol_version"))
+            for row in evidence_rows
+            if isinstance(row.get("protocol_version"), str) and str(row.get("protocol_version"))
+        }
+    )
 
-    if not available_evidence:
+    if not rows:
         status_value = "not_available"
-        reason_value = "no_geometry_optional_claim_evidence_available"
-    elif len(available_evidence) == len(rows):
+        reason_value = "no_geometry_optional_claim_attack_rows"
+    elif not available_evidence:
+        status_value = "not_available"
+        reason_value = "no_geometry_optional_claim_boundary_resolution_available"
+    elif eligible_event_count <= 0 and boundary_resolution_failed_event_count <= 0:
+        status_value = "not_applicable"
+        reason_value = "no_attack_events_within_content_margin_boundary_subset"
+    elif boundary_resolution_failed_event_count <= 0:
         status_value = "ok"
         reason_value = None
     else:
         status_value = "partial"
         reason_value = (
-            f"geometry optional claim evidence available for {len(available_evidence)}/{len(rows)} attack events"
+            f"geometry optional claim boundary resolution available for {len(available_evidence)}/{len(rows)} attack events"
         )
 
     return {
@@ -1525,19 +1576,23 @@ def _build_geometry_optional_claim_summary(
         "reason": reason_value,
         "event_count": len(rows),
         "eligible_event_count": eligible_event_count,
+        "boundary_resolved_event_count": len(available_evidence),
+        "boundary_excluded_event_count": boundary_excluded_event_count,
+        "boundary_resolution_failed_event_count": boundary_resolution_failed_event_count,
         "plan_ready_event_count": plan_ready_event_count,
         "evidence_event_count": len(available_evidence),
         "missing_evidence_event_count": len(rows) - len(available_evidence),
         "supporting_evidence_event_count": supporting_evidence_event_count,
         "supporting_evidence_rate": (
-            float(supporting_evidence_event_count / len(available_evidence))
-            if available_evidence
+            float(supporting_evidence_event_count / len(eligible_rows))
+            if eligible_rows
             else None
         ),
         "sync_success_support_count": sync_success_support_count,
         "inverse_transform_support_count": inverse_transform_support_count,
         "attention_anchor_support_count": attention_anchor_support_count,
         "claim_modes": claim_modes,
+        "protocol_versions": protocol_versions,
         "content_failed_subset_event_count": conditional_summary["content_failed_subset_event_count"],
         "geo_rescue_applied_on_content_failed_count": conditional_summary[
             "geo_rescue_applied_on_content_failed_count"
@@ -1583,6 +1638,27 @@ def _build_geometry_optional_claim_summary_payload(
             if isinstance(row.get("claim_scope"), str) and str(row.get("claim_scope"))
         }
     )
+    protocol_versions = sorted(
+        {
+            str(row.get("protocol_version"))
+            for row in evidence_rows
+            if isinstance(row.get("protocol_version"), str) and str(row.get("protocol_version"))
+        }
+    )
+    boundary_metrics = sorted(
+        {
+            str(row.get("boundary_metric"))
+            for row in evidence_rows
+            if isinstance(row.get("boundary_metric"), str) and str(row.get("boundary_metric"))
+        }
+    )
+    boundary_abs_margin_values = sorted(
+        {
+            float(cast(float, row["boundary_abs_margin_max"]))
+            for row in evidence_rows
+            if isinstance(row.get("boundary_abs_margin_max"), (int, float)) and not isinstance(row.get("boundary_abs_margin_max"), bool)
+        }
+    )
     for attack_event_row in attack_event_rows:
         attack_family = str(attack_event_row.get("attack_family") or "<unknown>")
         attack_condition_key = str(attack_event_row.get("attack_condition_key") or "<unknown>")
@@ -1592,7 +1668,7 @@ def _build_geometry_optional_claim_summary_payload(
         )
 
     overall_summary = _build_geometry_optional_claim_summary(attack_event_rows)
-    readiness_status = "ready" if overall_summary["status"] in {"ok", "partial"} else "not_ready"
+    readiness_status = "ready" if overall_summary["status"] in {"ok", "partial", "not_applicable"} else "not_ready"
     readiness_reason = None if readiness_status == "ready" else overall_summary["reason"]
 
     return {
@@ -1610,6 +1686,14 @@ def _build_geometry_optional_claim_summary_payload(
             "claim_modes": overall_summary["claim_modes"],
             "content_positive_veto_allowed": False,
             "rescue_directionality": "one_way_positive_only",
+            "protocol_version": protocol_versions[0] if len(protocol_versions) == 1 else protocol_versions,
+            "boundary_metric": boundary_metrics[0] if len(boundary_metrics) == 1 else boundary_metrics,
+            "boundary_abs_margin_max": (
+                boundary_abs_margin_values[0]
+                if len(boundary_abs_margin_values) == 1
+                else boundary_abs_margin_values
+            ),
+            "eligibility_is_boundary_subset_only": True,
         },
         "readiness": {
             "status": readiness_status,
@@ -1658,6 +1742,226 @@ def _build_geometry_optional_claim_summary_payload(
             }
             for (attack_family, attack_condition_key), rows in sorted(grouped_by_condition.items())
         ],
+    }
+
+
+def _normalize_geometry_optional_claim_csv_row(row: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    功能：把 geometry optional claim 汇总行规范化为 CSV 友好格式。 
+
+    Normalize one geometry optional-claim summary row for CSV export.
+
+    Args:
+        row: Summary row mapping.
+
+    Returns:
+        CSV-friendly row mapping.
+    """
+    if not isinstance(row, Mapping):
+        raise TypeError("row must be Mapping")
+
+    normalized_row = dict(cast(Mapping[str, Any], row))
+    for field_name in ["claim_modes", "protocol_versions"]:
+        field_value = normalized_row.get(field_name)
+        if isinstance(field_value, list):
+            normalized_row[field_name] = json.dumps(field_value, ensure_ascii=False)
+    return normalized_row
+
+
+def _build_geometry_optional_claim_export_rows(
+    attack_event_rows: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    功能：构造 geometry optional claim 的逐事件导出行。 
+
+    Build per-event geometry optional-claim export rows.
+
+    Args:
+        attack_event_rows: Materialized attack event rows.
+
+    Returns:
+        Event-level export rows.
+    """
+    if not isinstance(attack_event_rows, Sequence):
+        raise TypeError("attack_event_rows must be Sequence")
+
+    export_rows: List[Dict[str, Any]] = []
+    for attack_event_row in attack_event_rows:
+        evidence_payload = _load_geometry_optional_claim_evidence(attack_event_row)
+        export_rows.append(
+            {
+                "attack_event_id": attack_event_row.get("attack_event_id"),
+                "parent_event_id": attack_event_row.get("parent_event_id"),
+                "attack_family": attack_event_row.get("attack_family"),
+                "attack_condition_key": attack_event_row.get("attack_condition_key"),
+                "attack_config_name": attack_event_row.get("attack_config_name"),
+                "severity_label": attack_event_row.get("severity_label"),
+                "severity_level_index": attack_event_row.get("severity_level_index"),
+                "status": evidence_payload.get("status"),
+                "reason": evidence_payload.get("reason"),
+                "plan_status": evidence_payload.get("plan_status"),
+                "plan_reason": evidence_payload.get("plan_reason"),
+                "claim_mode": evidence_payload.get("claim_mode"),
+                "claim_scope": evidence_payload.get("claim_scope"),
+                "eligible_for_optional_claim": evidence_payload.get("eligible_for_optional_claim"),
+                "supporting_evidence_available": evidence_payload.get("supporting_evidence_available"),
+                "supporting_signal_count": evidence_payload.get("supporting_signal_count"),
+                "sync_success": evidence_payload.get("sync_success"),
+                "inverse_transform_success": evidence_payload.get("inverse_transform_success"),
+                "attention_anchor_available": evidence_payload.get("attention_anchor_available"),
+                "protocol_version": evidence_payload.get("protocol_version"),
+                "boundary_metric": evidence_payload.get("boundary_metric"),
+                "boundary_abs_margin_max": evidence_payload.get("boundary_abs_margin_max"),
+                "boundary_metric_value": evidence_payload.get("boundary_metric_value"),
+                "boundary_resolution_status": evidence_payload.get("boundary_resolution_status"),
+                "boundary_resolution_reason": evidence_payload.get("boundary_resolution_reason"),
+                "parent_content_margin": evidence_payload.get("parent_content_margin"),
+                "parent_event_attestation_margin": evidence_payload.get("parent_event_attestation_margin"),
+                "parent_source_detect_record_path": evidence_payload.get("parent_source_detect_record_path"),
+                "content_threshold_export_path": evidence_payload.get("content_threshold_export_path"),
+                "event_attestation_threshold_export_path": evidence_payload.get("event_attestation_threshold_export_path"),
+            }
+        )
+    return export_rows
+
+
+def _build_geometry_optional_claim_by_severity_rows(
+    attack_event_rows: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    功能：按 severity 聚合 geometry optional claim 汇总。 
+
+    Build severity-aggregated geometry optional-claim summary rows.
+
+    Args:
+        attack_event_rows: Materialized attack event rows.
+
+    Returns:
+        Severity-level summary rows.
+    """
+    if not isinstance(attack_event_rows, Sequence):
+        raise TypeError("attack_event_rows must be Sequence")
+
+    grouped_rows: Dict[Tuple[int | None, str | None], List[Dict[str, Any]]] = {}
+    for attack_event_row in attack_event_rows:
+        severity_level_index = (
+            int(cast(int, attack_event_row["severity_level_index"]))
+            if isinstance(attack_event_row.get("severity_level_index"), int)
+            else None
+        )
+        severity_label = (
+            str(attack_event_row.get("severity_label"))
+            if isinstance(attack_event_row.get("severity_label"), str) and str(attack_event_row.get("severity_label"))
+            else None
+        )
+        grouped_rows.setdefault((severity_level_index, severity_label), []).append(
+            dict(cast(Mapping[str, Any], attack_event_row))
+        )
+
+    severity_rows: List[Dict[str, Any]] = []
+    for (severity_level_index, severity_label), rows in sorted(
+        grouped_rows.items(),
+        key=lambda item: (
+            item[0][0] is None,
+            item[0][0] if item[0][0] is not None else 10**9,
+            item[0][1] or "",
+        ),
+    ):
+        summary_row = _build_geometry_optional_claim_summary(rows)
+        severity_rows.append(
+            _normalize_geometry_optional_claim_csv_row(
+                {
+                    "severity_level_index": severity_level_index,
+                    "severity_label": severity_label,
+                    "attack_family_count": len(
+                        {
+                            str(row.get("attack_family"))
+                            for row in rows
+                            if isinstance(row.get("attack_family"), str) and str(row.get("attack_family"))
+                        }
+                    ),
+                    "attack_condition_count": len(
+                        {
+                            str(row.get("attack_condition_key"))
+                            for row in rows
+                            if isinstance(row.get("attack_condition_key"), str) and str(row.get("attack_condition_key"))
+                        }
+                    ),
+                    **summary_row,
+                }
+            )
+        )
+    return severity_rows
+
+
+def _build_geometry_optional_claim_example_manifest(
+    *,
+    family_id: str,
+    attack_event_rows: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """
+    功能：构造 geometry optional claim 示例清单。 
+
+    Build the geometry optional-claim example manifest.
+
+    Args:
+        family_id: Family identifier.
+        attack_event_rows: Materialized attack event rows.
+
+    Returns:
+        Example manifest payload.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(attack_event_rows, Sequence):
+        raise TypeError("attack_event_rows must be Sequence")
+
+    export_rows = _build_geometry_optional_claim_export_rows(attack_event_rows)
+    eligible_rows = [row for row in export_rows if row.get("eligible_for_optional_claim") is True]
+    ordered_rows = sorted(
+        eligible_rows,
+        key=lambda row: (
+            0 if row.get("supporting_evidence_available") is True else 1,
+            _coerce_finite_float(row.get("boundary_metric_value")) if _coerce_finite_float(row.get("boundary_metric_value")) is not None else float("inf"),
+            str(row.get("attack_family") or ""),
+            str(row.get("attack_event_id") or ""),
+        ),
+    )
+    selected_rows: List[Dict[str, Any]] = []
+    selected_families: set[str] = set()
+    for row in ordered_rows:
+        attack_family = str(row.get("attack_family") or "<unknown>")
+        if attack_family in selected_families:
+            continue
+        selected_rows.append(dict(row))
+        selected_families.add(attack_family)
+
+    if selected_rows:
+        status_value = "ok"
+        reason_value = None
+    else:
+        status_value = "not_available"
+        reason_value = "no_geometry_optional_claim_examples_within_boundary_subset"
+
+    return {
+        "artifact_type": "paper_workflow_pw04_geometry_optional_claim_example_manifest",
+        "schema_version": "pw_stage_04_v1",
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "status": status_value,
+        "reason": reason_value,
+        "selection_protocol": {
+            "eligible_required": True,
+            "max_examples_per_attack_family": 1,
+            "sort_order": [
+                "supporting_evidence_available_desc",
+                "boundary_metric_value_asc",
+                "attack_event_id_asc",
+            ],
+        },
+        "eligible_event_count": len(eligible_rows),
+        "example_count": len(selected_rows),
+        "rows": selected_rows,
     }
 
 
@@ -1937,6 +2241,12 @@ def _build_payload_attack_summary_payload(
             "payload_probe_alignment_signal_available": decode_sidecar_metrics.get("payload_probe_alignment_signal_available"),
             "payload_probe_consistency_score": decode_sidecar_metrics.get("payload_probe_consistency_score"),
             "payload_probe_bp_converged": decode_sidecar_metrics.get("payload_probe_bp_converged"),
+            "probe_margin_threshold": decode_sidecar_metrics.get("probe_margin_threshold"),
+            "probe_reference_n_bits": decode_sidecar_metrics.get("probe_reference_n_bits"),
+            "probe_effective_n_bits": decode_sidecar_metrics.get("probe_effective_n_bits"),
+            "probe_agreement_count": decode_sidecar_metrics.get("probe_agreement_count"),
+            "probe_bit_accuracy": decode_sidecar_metrics.get("probe_bit_accuracy"),
+            "probe_support_rate": decode_sidecar_metrics.get("probe_support_rate"),
         }
         row_metrics.append(metric_row)
         grouped_rows.setdefault(attack_family, []).append(metric_row)
@@ -2666,6 +2976,9 @@ def build_pw04_metrics_extensions(
     geo_diagnostics_conditional_metrics_path = geometry_dir / "geo_diagnostics_conditional_metrics.csv"
     conditional_rescue_metrics_path = geometry_dir / "conditional_rescue_metrics.json"
     geometry_optional_claim_summary_path = geometry_dir / "geometry_optional_claim_summary.json"
+    geometry_optional_claim_by_family_path = geometry_dir / "geometry_optional_claim_by_family.csv"
+    geometry_optional_claim_by_severity_path = geometry_dir / "geometry_optional_claim_by_severity.csv"
+    geometry_optional_claim_example_manifest_path = geometry_dir / "geometry_optional_claim_example_manifest.json"
     payload_attack_summary_path = payload_dir / "payload_attack_summary.json"
     wrong_event_attestation_challenge_summary_path = payload_dir / "wrong_event_attestation_challenge_summary.json"
     wrong_event_far_clean_path = payload_dir / "wrong_event_far_clean.json"
@@ -2837,9 +3150,79 @@ def build_pw04_metrics_extensions(
             attack_event_rows=attack_event_rows,
         ),
     )
+    geometry_optional_claim_summary_payload = _build_geometry_optional_claim_summary_payload(
+        family_id=family_id,
+        attack_event_rows=attack_event_rows,
+    )
     write_json_atomic(
         geometry_optional_claim_summary_path,
-        _build_geometry_optional_claim_summary_payload(
+        geometry_optional_claim_summary_payload,
+    )
+    _write_csv_rows(
+        geometry_optional_claim_by_family_path,
+        [
+            "attack_family",
+            "status",
+            "reason",
+            "event_count",
+            "eligible_event_count",
+            "boundary_resolved_event_count",
+            "boundary_excluded_event_count",
+            "boundary_resolution_failed_event_count",
+            "plan_ready_event_count",
+            "evidence_event_count",
+            "missing_evidence_event_count",
+            "supporting_evidence_event_count",
+            "supporting_evidence_rate",
+            "sync_success_support_count",
+            "inverse_transform_support_count",
+            "attention_anchor_support_count",
+            "claim_modes",
+            "protocol_versions",
+            "content_failed_subset_event_count",
+            "geo_rescue_applied_on_content_failed_count",
+            "geo_only_positive_on_content_failed_subset",
+            "geo_only_positive_on_content_failed_subset_rate",
+        ],
+        [
+            _normalize_geometry_optional_claim_csv_row(row)
+            for row in cast(Sequence[Mapping[str, Any]], geometry_optional_claim_summary_payload.get("by_attack_family", []))
+        ],
+    )
+    _write_csv_rows(
+        geometry_optional_claim_by_severity_path,
+        [
+            "severity_level_index",
+            "severity_label",
+            "attack_family_count",
+            "attack_condition_count",
+            "status",
+            "reason",
+            "event_count",
+            "eligible_event_count",
+            "boundary_resolved_event_count",
+            "boundary_excluded_event_count",
+            "boundary_resolution_failed_event_count",
+            "plan_ready_event_count",
+            "evidence_event_count",
+            "missing_evidence_event_count",
+            "supporting_evidence_event_count",
+            "supporting_evidence_rate",
+            "sync_success_support_count",
+            "inverse_transform_support_count",
+            "attention_anchor_support_count",
+            "claim_modes",
+            "protocol_versions",
+            "content_failed_subset_event_count",
+            "geo_rescue_applied_on_content_failed_count",
+            "geo_only_positive_on_content_failed_subset",
+            "geo_only_positive_on_content_failed_subset_rate",
+        ],
+        _build_geometry_optional_claim_by_severity_rows(attack_event_rows),
+    )
+    write_json_atomic(
+        geometry_optional_claim_example_manifest_path,
+        _build_geometry_optional_claim_example_manifest(
             family_id=family_id,
             attack_event_rows=attack_event_rows,
         ),
@@ -3005,6 +3388,9 @@ def build_pw04_metrics_extensions(
         ),
         "conditional_rescue_metrics_path": normalize_path_value(conditional_rescue_metrics_path),
         "geometry_optional_claim_summary_path": normalize_path_value(geometry_optional_claim_summary_path),
+        "geometry_optional_claim_by_family_path": normalize_path_value(geometry_optional_claim_by_family_path),
+        "geometry_optional_claim_by_severity_path": normalize_path_value(geometry_optional_claim_by_severity_path),
+        "geometry_optional_claim_example_manifest_path": normalize_path_value(geometry_optional_claim_example_manifest_path),
         "payload_attack_summary_path": normalize_path_value(payload_attack_summary_path),
         "wrong_event_attestation_challenge_summary_path": normalize_path_value(wrong_event_attestation_challenge_summary_path),
         "wrong_event_far_clean_path": normalize_path_value(wrong_event_far_clean_path),
@@ -3040,6 +3426,9 @@ def build_pw04_metrics_extensions(
             "pw04_system_final_auxiliary_attack_by_condition": auxiliary_attack_exports["system_final_auxiliary_attack_by_condition_path"],
             "pw04_conditional_rescue_metrics": normalize_path_value(conditional_rescue_metrics_path),
             "pw04_geometry_optional_claim_summary": normalize_path_value(geometry_optional_claim_summary_path),
+            "pw04_geometry_optional_claim_by_family": normalize_path_value(geometry_optional_claim_by_family_path),
+            "pw04_geometry_optional_claim_by_severity": normalize_path_value(geometry_optional_claim_by_severity_path),
+            "pw04_geometry_optional_claim_example_manifest": normalize_path_value(geometry_optional_claim_example_manifest_path),
             "pw04_payload_attack_summary": normalize_path_value(payload_attack_summary_path),
             "pw04_wrong_event_attestation_challenge_summary": normalize_path_value(wrong_event_attestation_challenge_summary_path),
             "pw04_wrong_event_far_clean": normalize_path_value(wrong_event_far_clean_path),

@@ -30,8 +30,11 @@ from paper_workflow.scripts.pw_common import (
     DEFAULT_PW_BASE_CONFIG_RELATIVE_PATH,
     GEOMETRY_OPTIONAL_CLAIM_DIRECTIONALITY,
     GEOMETRY_OPTIONAL_CLAIM_MODE,
+    GEOMETRY_OPTIONAL_CLAIM_PROTOCOL_VERSION,
     GEOMETRY_OPTIONAL_CLAIM_PLAN_FILE_NAME,
     GEOMETRY_OPTIONAL_CLAIM_SCOPE,
+    GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_METRIC,
+    GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_ABS_MAX,
     RESERVED_SAMPLE_ROLES,
     SOURCE_TRUTH_STAGE,
     build_attack_condition_catalog,
@@ -226,15 +229,20 @@ def _build_geometry_optional_claim_plan(
         raise TypeError("attack_event_grid must be Sequence")
 
     plan_rows: list[Dict[str, Any]] = []
-    available_assignment_count = 0
+    protocol_candidate_event_count = 0
     for attack_event in attack_event_grid:
         attack_event_payload = dict(cast(Mapping[str, Any], attack_event))
         sample_role = str(attack_event_payload.get("sample_role") or "")
-        eligible_for_optional_claim = sample_role == ATTACKED_POSITIVE_SAMPLE_ROLE
-        row_status = "ready" if eligible_for_optional_claim else "not_applicable"
-        row_reason = None if eligible_for_optional_claim else "sample_role_not_attacked_positive"
-        if eligible_for_optional_claim:
-            available_assignment_count += 1
+        is_protocol_candidate = sample_role == ATTACKED_POSITIVE_SAMPLE_ROLE
+        eligible_for_optional_claim = None if is_protocol_candidate else False
+        row_status = "pending_resolution" if is_protocol_candidate else "not_applicable"
+        row_reason = (
+            "await_pw03_boundary_subset_resolution"
+            if is_protocol_candidate
+            else "sample_role_not_attacked_positive"
+        )
+        if is_protocol_candidate:
+            protocol_candidate_event_count += 1
         plan_rows.append(
             {
                 "attack_event_id": attack_event_payload.get("event_id"),
@@ -248,10 +256,16 @@ def _build_geometry_optional_claim_plan(
                 "severity_reason": attack_event_payload.get("severity_reason"),
                 "severity_label": attack_event_payload.get("severity_label"),
                 "severity_level_index": attack_event_payload.get("severity_level_index"),
-                "claim_mode": GEOMETRY_OPTIONAL_CLAIM_MODE if eligible_for_optional_claim else None,
+                "claim_mode": GEOMETRY_OPTIONAL_CLAIM_MODE if is_protocol_candidate else None,
                 "claim_scope": GEOMETRY_OPTIONAL_CLAIM_SCOPE,
                 "content_positive_veto_allowed": False,
                 "rescue_directionality": GEOMETRY_OPTIONAL_CLAIM_DIRECTIONALITY,
+                "protocol_version": GEOMETRY_OPTIONAL_CLAIM_PROTOCOL_VERSION,
+                "boundary_metric": GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_METRIC,
+                "boundary_abs_margin_max": GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_ABS_MAX,
+                "eligibility_resolution_stage": "PW03_Attack_Event_Shards",
+                "eligibility_source_stage": "PW02_Source_Merge_And_Global_Thresholds",
+                "missing_margin_policy": "explicit_not_available",
                 "eligible_for_optional_claim": eligible_for_optional_claim,
                 "status": row_status,
                 "reason": row_reason,
@@ -267,8 +281,15 @@ def _build_geometry_optional_claim_plan(
         "claim_scope": GEOMETRY_OPTIONAL_CLAIM_SCOPE,
         "content_positive_veto_allowed": False,
         "rescue_directionality": GEOMETRY_OPTIONAL_CLAIM_DIRECTIONALITY,
+        "protocol_version": GEOMETRY_OPTIONAL_CLAIM_PROTOCOL_VERSION,
+        "boundary_metric": GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_METRIC,
+        "boundary_abs_margin_max": GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_ABS_MAX,
+        "eligibility_resolution_stage": "PW03_Attack_Event_Shards",
+        "eligibility_source_stage": "PW02_Source_Merge_And_Global_Thresholds",
+        "missing_margin_policy": "explicit_not_available",
         "attack_event_count": len(plan_rows),
-        "available_assignment_count": available_assignment_count,
+        "candidate_event_count": protocol_candidate_event_count,
+        "available_assignment_count": protocol_candidate_event_count,
         "rows": plan_rows,
     }
 
