@@ -28,6 +28,10 @@ from paper_workflow.scripts.pw_common import (
     PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
     DEFAULT_CONFIG_RELATIVE_PATH,
     DEFAULT_PW_BASE_CONFIG_RELATIVE_PATH,
+    GEOMETRY_OPTIONAL_CLAIM_DIRECTIONALITY,
+    GEOMETRY_OPTIONAL_CLAIM_MODE,
+    GEOMETRY_OPTIONAL_CLAIM_PLAN_FILE_NAME,
+    GEOMETRY_OPTIONAL_CLAIM_SCOPE,
     RESERVED_SAMPLE_ROLES,
     SOURCE_TRUTH_STAGE,
     build_attack_condition_catalog,
@@ -201,6 +205,74 @@ def _build_wrong_event_attestation_challenge_plan(
     }
 
 
+def _build_geometry_optional_claim_plan(
+    *,
+    family_id: str,
+    attack_event_grid: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Build the frozen geometry optional-claim evidence plan for PW03/PW04.
+
+    Args:
+        family_id: Family identifier.
+        attack_event_grid: Ordered attack-event grid rows.
+
+    Returns:
+        Geometry optional-claim plan payload.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(attack_event_grid, Sequence):
+        raise TypeError("attack_event_grid must be Sequence")
+
+    plan_rows: list[Dict[str, Any]] = []
+    available_assignment_count = 0
+    for attack_event in attack_event_grid:
+        attack_event_payload = dict(cast(Mapping[str, Any], attack_event))
+        sample_role = str(attack_event_payload.get("sample_role") or "")
+        eligible_for_optional_claim = sample_role == ATTACKED_POSITIVE_SAMPLE_ROLE
+        row_status = "ready" if eligible_for_optional_claim else "not_applicable"
+        row_reason = None if eligible_for_optional_claim else "sample_role_not_attacked_positive"
+        if eligible_for_optional_claim:
+            available_assignment_count += 1
+        plan_rows.append(
+            {
+                "attack_event_id": attack_event_payload.get("event_id"),
+                "attack_event_index": attack_event_payload.get("attack_event_index"),
+                "parent_event_id": attack_event_payload.get("parent_event_id"),
+                "sample_role": sample_role,
+                "attack_family": attack_event_payload.get("attack_family"),
+                "attack_condition_key": attack_event_payload.get("attack_condition_key"),
+                "attack_config_name": attack_event_payload.get("attack_config_name"),
+                "severity_status": attack_event_payload.get("severity_status"),
+                "severity_reason": attack_event_payload.get("severity_reason"),
+                "severity_label": attack_event_payload.get("severity_label"),
+                "severity_level_index": attack_event_payload.get("severity_level_index"),
+                "claim_mode": GEOMETRY_OPTIONAL_CLAIM_MODE if eligible_for_optional_claim else None,
+                "claim_scope": GEOMETRY_OPTIONAL_CLAIM_SCOPE,
+                "content_positive_veto_allowed": False,
+                "rescue_directionality": GEOMETRY_OPTIONAL_CLAIM_DIRECTIONALITY,
+                "eligible_for_optional_claim": eligible_for_optional_claim,
+                "status": row_status,
+                "reason": row_reason,
+            }
+        )
+
+    return {
+        "artifact_type": "paper_workflow_geometry_optional_claim_plan",
+        "schema_version": "pw_stage_00_v1",
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "claim_mode": GEOMETRY_OPTIONAL_CLAIM_MODE,
+        "claim_scope": GEOMETRY_OPTIONAL_CLAIM_SCOPE,
+        "content_positive_veto_allowed": False,
+        "rescue_directionality": GEOMETRY_OPTIONAL_CLAIM_DIRECTIONALITY,
+        "attack_event_count": len(plan_rows),
+        "available_assignment_count": available_assignment_count,
+        "rows": plan_rows,
+    }
+
+
 def run_pw00_build_family_manifest(
     *,
     drive_project_root: Path,
@@ -336,8 +408,13 @@ def run_pw00_build_family_manifest(
     wrong_event_attestation_challenge_plan_path = (
         layout["manifests_root"] / "wrong_event_attestation_challenge_plan.json"
     )
+    geometry_optional_claim_plan_path = layout["manifests_root"] / GEOMETRY_OPTIONAL_CLAIM_PLAN_FILE_NAME
     attack_condition_count = len(attack_conditions)
     attack_event_count = len(attack_event_grid)
+    geometry_optional_claim_plan = _build_geometry_optional_claim_plan(
+        family_id=family_id,
+        attack_event_grid=attack_event_grid,
+    )
 
     default_cfg_path = (REPO_ROOT / DEFAULT_CONFIG_RELATIVE_PATH).resolve()
     default_cfg_obj = load_default_config_snapshot(REPO_ROOT)
@@ -399,6 +476,12 @@ def run_pw00_build_family_manifest(
             "wrong_event_challenge_available_assignment_count": int(
                 wrong_event_attestation_challenge_plan["available_assignment_count"]
             ),
+            "geometry_optional_claim_plan_frozen": True,
+            "geometry_optional_claim_mode": GEOMETRY_OPTIONAL_CLAIM_MODE,
+            "geometry_optional_claim_scope": GEOMETRY_OPTIONAL_CLAIM_SCOPE,
+            "geometry_optional_claim_available_assignment_count": int(
+                geometry_optional_claim_plan["available_assignment_count"]
+            ),
             "severity_metadata_frozen": True,
             "severity_rule_version": ATTACK_SEVERITY_RULE_VERSION,
             "severity_axis_kind": ATTACK_SEVERITY_AXIS_KIND,
@@ -435,6 +518,7 @@ def run_pw00_build_family_manifest(
             "wrong_event_attestation_challenge_plan": normalize_path_value(
                 wrong_event_attestation_challenge_plan_path
             ),
+            "geometry_optional_claim_plan": normalize_path_value(geometry_optional_claim_plan_path),
             "prompt_snapshot": normalize_path_value(layout["prompt_snapshot_path"]),
             "method_identity_snapshot": normalize_path_value(layout["method_identity_snapshot_path"]),
             "config_snapshot": normalize_path_value(layout["config_snapshot_path"]),
@@ -456,6 +540,12 @@ def run_pw00_build_family_manifest(
             ),
             "wrong_event_challenge_available_assignment_count": int(
                 wrong_event_attestation_challenge_plan["available_assignment_count"]
+            ),
+            "geometry_optional_claim_plan_frozen": True,
+            "geometry_optional_claim_mode": GEOMETRY_OPTIONAL_CLAIM_MODE,
+            "geometry_optional_claim_scope": GEOMETRY_OPTIONAL_CLAIM_SCOPE,
+            "geometry_optional_claim_available_assignment_count": int(
+                geometry_optional_claim_plan["available_assignment_count"]
             ),
             "severity_metadata_frozen": True,
             "severity_rule_version": ATTACK_SEVERITY_RULE_VERSION,
@@ -482,6 +572,10 @@ def run_pw00_build_family_manifest(
         wrong_event_attestation_challenge_plan_path,
         wrong_event_attestation_challenge_plan,
     )
+    write_json_atomic(
+        geometry_optional_claim_plan_path,
+        geometry_optional_claim_plan,
+    )
     write_json_atomic(layout["family_manifest_path"], family_manifest)
 
     summary_path = layout["runtime_state_root"] / "pw00_summary.json"
@@ -500,6 +594,7 @@ def run_pw00_build_family_manifest(
         "wrong_event_attestation_challenge_plan_path": normalize_path_value(
             wrong_event_attestation_challenge_plan_path
         ),
+        "geometry_optional_claim_plan_path": normalize_path_value(geometry_optional_claim_plan_path),
         "event_count": len(event_grid),
         "attack_condition_count": attack_condition_count,
         "attack_event_count": attack_event_count,
@@ -510,6 +605,9 @@ def run_pw00_build_family_manifest(
         ),
         "wrong_event_challenge_available_assignment_count": int(
             wrong_event_attestation_challenge_plan["available_assignment_count"]
+        ),
+        "geometry_optional_claim_available_assignment_count": int(
+            geometry_optional_claim_plan["available_assignment_count"]
         ),
         "severity_metadata_frozen": True,
         "severity_rule_version": ATTACK_SEVERITY_RULE_VERSION,

@@ -932,6 +932,10 @@ def _build_formal_run_readiness_report(
         _resolve_analysis_only_binding_path(analysis_only_bindings, "pw04_conditional_rescue_metrics"),
         "PW04 conditional rescue metrics",
     )
+    geometry_optional_claim_summary = _load_optional_json_dict(
+        _resolve_analysis_only_binding_path(analysis_only_bindings, "pw04_geometry_optional_claim_summary"),
+        "PW04 geometry optional claim summary",
+    )
     tail_paths = _extract_mapping(pw04_summary.get("tail_estimation_paths"))
     tail_diagnostics_path = None
     tail_diagnostics_path_value = tail_paths.get("tail_fit_diagnostics_path")
@@ -1002,6 +1006,15 @@ def _build_formal_run_readiness_report(
             component_name="geometry_conditional_rescue",
             source_path=_resolve_analysis_only_binding_path(analysis_only_bindings, "pw04_conditional_rescue_metrics"),
             summary_payload=geometry_summary,
+            required_for_formal_release=False,
+        ),
+        "geometry_optional_claim": _build_auxiliary_summary_component_readiness(
+            component_name="geometry_optional_claim",
+            source_path=_resolve_analysis_only_binding_path(
+                analysis_only_bindings,
+                "pw04_geometry_optional_claim_summary",
+            ),
+            summary_payload=geometry_optional_claim_summary,
             required_for_formal_release=False,
         ),
         "tail_estimation": _build_tail_component_readiness(

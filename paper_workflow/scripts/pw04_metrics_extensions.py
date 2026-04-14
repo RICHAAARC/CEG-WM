@@ -13,7 +13,10 @@ from typing import Any, Dict, List, Mapping, Sequence, Tuple, cast
 
 from PIL import Image, ImageDraw
 
-from paper_workflow.scripts.pw_common import extract_payload_metrics_from_decode_sidecar
+from paper_workflow.scripts.pw_common import (
+    extract_payload_metrics_from_decode_sidecar,
+    summarize_payload_probe_rows,
+)
 from scripts.notebook_runtime_common import ensure_directory, normalize_path_value, utc_now_iso, write_json_atomic
 
 
@@ -1402,6 +1405,262 @@ def _build_geometry_conditional_rescue_metrics_payload(
     }
 
 
+def _load_geometry_optional_claim_evidence(
+    attack_event_row: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """
+    功能：读取一条 attack row 绑定的 geometry optional claim evidence。 
+
+    Load geometry optional-claim evidence from one attack event row.
+
+    Args:
+        attack_event_row: Materialized attack event row.
+
+    Returns:
+        Optional-claim evidence mapping.
+    """
+    if not isinstance(attack_event_row, Mapping):
+        raise TypeError("attack_event_row must be Mapping")
+
+    event_manifest = _extract_mapping(attack_event_row.get("event_manifest"))
+    evidence_payload = _extract_mapping(event_manifest.get("geometry_optional_claim_evidence"))
+    if not evidence_payload:
+        detect_payload = _extract_mapping(attack_event_row.get("detect_payload"))
+        evidence_payload = _extract_mapping(
+            detect_payload.get("paper_workflow_geometry_optional_claim_evidence")
+        )
+
+    sample_role = str(
+        attack_event_row.get("sample_role")
+        or event_manifest.get("sample_role")
+        or ""
+    )
+    geometry_diagnostics = _extract_mapping(attack_event_row.get("geometry_diagnostics"))
+    supporting_signal_count = sum(
+        1
+        for field_name in ["sync_success", "inverse_transform_success", "attention_anchor_available"]
+        if geometry_diagnostics.get(field_name) is True
+    )
+
+    if evidence_payload.get("status") == "ok":
+        return evidence_payload
+
+    fallback_status = "ok" if sample_role == "attacked_positive" else "not_applicable"
+    fallback_reason = None if fallback_status == "ok" else "sample_role_not_attacked_positive"
+    return {
+        **evidence_payload,
+        "status": fallback_status,
+        "reason": fallback_reason,
+        "plan_status": evidence_payload.get("plan_status", "not_available"),
+        "plan_reason": evidence_payload.get("plan_reason"),
+        "claim_mode": evidence_payload.get("claim_mode", "optional_geometry_rescue_evidence_only"),
+        "claim_scope": evidence_payload.get("claim_scope", "attacked_positive_content_failed_subset"),
+        "content_positive_veto_allowed": False,
+        "rescue_directionality": evidence_payload.get("rescue_directionality", "one_way_positive_only"),
+        "eligible_for_optional_claim": sample_role == "attacked_positive",
+        "sync_status": geometry_diagnostics.get("sync_status"),
+        "sync_success": geometry_diagnostics.get("sync_success"),
+        "inverse_transform_success": geometry_diagnostics.get("inverse_transform_success"),
+        "attention_anchor_available": geometry_diagnostics.get("attention_anchor_available"),
+        "geometry_failure_reason": geometry_diagnostics.get("geometry_failure_reason"),
+        "supporting_signal_count": supporting_signal_count,
+        "supporting_evidence_available": supporting_signal_count > 0,
+    }
+
+
+def _build_geometry_optional_claim_summary(
+    rows: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """
+    功能：汇总 geometry optional claim 的辅助证据。 
+
+    Summarize geometry optional-claim evidence for one grouping.
+
+    Args:
+        rows: Materialized attack event rows.
+
+    Returns:
+        Optional-claim evidence summary.
+    """
+    if not isinstance(rows, Sequence):
+        raise TypeError("rows must be Sequence")
+
+    conditional_summary = _build_geometry_conditional_rescue_summary(rows)
+    evidence_rows = [_load_geometry_optional_claim_evidence(row) for row in rows]
+    available_evidence = [row for row in evidence_rows if row.get("status") == "ok"]
+    eligible_event_count = sum(1 for row in evidence_rows if row.get("eligible_for_optional_claim") is True)
+    supporting_evidence_event_count = sum(
+        1 for row in available_evidence if row.get("supporting_evidence_available") is True
+    )
+    sync_success_support_count = sum(1 for row in available_evidence if row.get("sync_success") is True)
+    inverse_transform_support_count = sum(
+        1 for row in available_evidence if row.get("inverse_transform_success") is True
+    )
+    attention_anchor_support_count = sum(
+        1 for row in available_evidence if row.get("attention_anchor_available") is True
+    )
+    plan_ready_event_count = sum(1 for row in evidence_rows if row.get("plan_status") == "ready")
+    claim_modes = sorted(
+        {
+            str(row.get("claim_mode"))
+            for row in evidence_rows
+            if isinstance(row.get("claim_mode"), str) and str(row.get("claim_mode"))
+        }
+    )
+
+    if not available_evidence:
+        status_value = "not_available"
+        reason_value = "no_geometry_optional_claim_evidence_available"
+    elif len(available_evidence) == len(rows):
+        status_value = "ok"
+        reason_value = None
+    else:
+        status_value = "partial"
+        reason_value = (
+            f"geometry optional claim evidence available for {len(available_evidence)}/{len(rows)} attack events"
+        )
+
+    return {
+        "status": status_value,
+        "reason": reason_value,
+        "event_count": len(rows),
+        "eligible_event_count": eligible_event_count,
+        "plan_ready_event_count": plan_ready_event_count,
+        "evidence_event_count": len(available_evidence),
+        "missing_evidence_event_count": len(rows) - len(available_evidence),
+        "supporting_evidence_event_count": supporting_evidence_event_count,
+        "supporting_evidence_rate": (
+            float(supporting_evidence_event_count / len(available_evidence))
+            if available_evidence
+            else None
+        ),
+        "sync_success_support_count": sync_success_support_count,
+        "inverse_transform_support_count": inverse_transform_support_count,
+        "attention_anchor_support_count": attention_anchor_support_count,
+        "claim_modes": claim_modes,
+        "content_failed_subset_event_count": conditional_summary["content_failed_subset_event_count"],
+        "geo_rescue_applied_on_content_failed_count": conditional_summary[
+            "geo_rescue_applied_on_content_failed_count"
+        ],
+        "geo_only_positive_on_content_failed_subset": conditional_summary[
+            "geo_only_positive_on_content_failed_subset"
+        ],
+        "geo_only_positive_on_content_failed_subset_rate": conditional_summary[
+            "geo_only_positive_on_content_failed_subset_rate"
+        ],
+    }
+
+
+def _build_geometry_optional_claim_summary_payload(
+    *,
+    family_id: str,
+    attack_event_rows: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """
+    功能：构造 geometry optional claim 的 analysis-only 导出。 
+
+    Build the analysis-only geometry optional-claim evidence export.
+
+    Args:
+        family_id: Family identifier.
+        attack_event_rows: Materialized attack event rows.
+
+    Returns:
+        Optional-claim evidence payload.
+    """
+    if not isinstance(family_id, str) or not family_id:
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(attack_event_rows, Sequence):
+        raise TypeError("attack_event_rows must be Sequence")
+
+    grouped_by_family: Dict[str, List[Dict[str, Any]]] = {}
+    grouped_by_condition: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    evidence_rows = [_load_geometry_optional_claim_evidence(row) for row in attack_event_rows]
+    claim_scopes = sorted(
+        {
+            str(row.get("claim_scope"))
+            for row in evidence_rows
+            if isinstance(row.get("claim_scope"), str) and str(row.get("claim_scope"))
+        }
+    )
+    for attack_event_row in attack_event_rows:
+        attack_family = str(attack_event_row.get("attack_family") or "<unknown>")
+        attack_condition_key = str(attack_event_row.get("attack_condition_key") or "<unknown>")
+        grouped_by_family.setdefault(attack_family, []).append(dict(cast(Mapping[str, Any], attack_event_row)))
+        grouped_by_condition.setdefault((attack_family, attack_condition_key), []).append(
+            dict(cast(Mapping[str, Any], attack_event_row))
+        )
+
+    overall_summary = _build_geometry_optional_claim_summary(attack_event_rows)
+    readiness_status = "ready" if overall_summary["status"] in {"ok", "partial"} else "not_ready"
+    readiness_reason = None if readiness_status == "ready" else overall_summary["reason"]
+
+    return {
+        "artifact_type": "paper_workflow_pw04_geometry_optional_claim_summary",
+        "schema_version": "pw_stage_04_v1",
+        "created_at": utc_now_iso(),
+        "family_id": family_id,
+        "metric_name": "geometry_optional_claim_summary",
+        "canonical": False,
+        "analysis_only": True,
+        "status": overall_summary["status"],
+        "reason": overall_summary["reason"],
+        "claim_contract": {
+            "claim_scope": claim_scopes[0] if len(claim_scopes) == 1 else claim_scopes,
+            "claim_modes": overall_summary["claim_modes"],
+            "content_positive_veto_allowed": False,
+            "rescue_directionality": "one_way_positive_only",
+        },
+        "readiness": {
+            "status": readiness_status,
+            "reason": readiness_reason,
+            "required_for_formal_release": False,
+            "blocking": False,
+            "claim_scope": "geometry_optional_claim_optional",
+        },
+        "overall": overall_summary,
+        "by_attack_family": [
+            {
+                "attack_family": attack_family,
+                **_build_geometry_optional_claim_summary(rows),
+            }
+            for attack_family, rows in sorted(grouped_by_family.items())
+        ],
+        "by_attack_condition": [
+            {
+                "attack_family": attack_family,
+                "attack_condition_key": attack_condition_key,
+                "attack_config_name": next(
+                    (
+                        row.get("attack_config_name")
+                        for row in rows
+                        if isinstance(row.get("attack_config_name"), str) and row.get("attack_config_name")
+                    ),
+                    None,
+                ),
+                "severity_label": next(
+                    (
+                        row.get("severity_label")
+                        for row in rows
+                        if isinstance(row.get("severity_label"), str) and row.get("severity_label")
+                    ),
+                    None,
+                ),
+                "severity_level_index": next(
+                    (
+                        row.get("severity_level_index")
+                        for row in rows
+                        if isinstance(row.get("severity_level_index"), int)
+                    ),
+                    None,
+                ),
+                **_build_geometry_optional_claim_summary(rows),
+            }
+            for (attack_family, attack_condition_key), rows in sorted(grouped_by_condition.items())
+        ],
+    }
+
+
 def _summarize_wrong_event_outcomes(
     rows: Sequence[Mapping[str, Any]],
     *,
@@ -1669,6 +1928,15 @@ def _build_payload_attack_summary_payload(
                 if isinstance(attack_event_row.get("payload_decode_sidecar_path"), str)
                 else None
             ),
+            "payload_probe_mode": decode_sidecar_metrics.get("payload_probe_mode"),
+            "payload_probe_available": decode_sidecar_metrics.get("payload_probe_available"),
+            "payload_probe_status": decode_sidecar_metrics.get("payload_probe_status"),
+            "payload_probe_reason": decode_sidecar_metrics.get("payload_probe_reason"),
+            "payload_probe_source": decode_sidecar_metrics.get("payload_probe_source"),
+            "payload_probe_reconstruction_applied": decode_sidecar_metrics.get("payload_probe_reconstruction_applied"),
+            "payload_probe_alignment_signal_available": decode_sidecar_metrics.get("payload_probe_alignment_signal_available"),
+            "payload_probe_consistency_score": decode_sidecar_metrics.get("payload_probe_consistency_score"),
+            "payload_probe_bp_converged": decode_sidecar_metrics.get("payload_probe_bp_converged"),
         }
         row_metrics.append(metric_row)
         grouped_rows.setdefault(attack_family, []).append(metric_row)
@@ -1794,11 +2062,29 @@ def _build_payload_attack_summary_payload(
                 )
             ),
         },
+        "probe_overall": summarize_payload_probe_rows(
+            rows=row_metrics,
+            unavailable_reason=PAYLOAD_UNAVAILABLE_REASON,
+        ),
         "overall": overall_summary,
         "by_attack_family": [
             {
                 "attack_family": attack_family,
+                "probe_overall": summarize_payload_probe_rows(
+                    rows=rows,
+                    unavailable_reason=PAYLOAD_UNAVAILABLE_REASON,
+                ),
                 **_summarize(rows),
+            }
+            for attack_family, rows in sorted(grouped_rows.items())
+        ],
+        "probe_by_attack_family": [
+            {
+                "attack_family": attack_family,
+                **summarize_payload_probe_rows(
+                    rows=rows,
+                    unavailable_reason=PAYLOAD_UNAVAILABLE_REASON,
+                ),
             }
             for attack_family, rows in sorted(grouped_rows.items())
         ],
@@ -2379,6 +2665,7 @@ def build_pw04_metrics_extensions(
     geo_diagnostics_summary_path = geometry_dir / "geo_diagnostics_summary.csv"
     geo_diagnostics_conditional_metrics_path = geometry_dir / "geo_diagnostics_conditional_metrics.csv"
     conditional_rescue_metrics_path = geometry_dir / "conditional_rescue_metrics.json"
+    geometry_optional_claim_summary_path = geometry_dir / "geometry_optional_claim_summary.json"
     payload_attack_summary_path = payload_dir / "payload_attack_summary.json"
     wrong_event_attestation_challenge_summary_path = payload_dir / "wrong_event_attestation_challenge_summary.json"
     wrong_event_far_clean_path = payload_dir / "wrong_event_far_clean.json"
@@ -2551,6 +2838,13 @@ def build_pw04_metrics_extensions(
         ),
     )
     write_json_atomic(
+        geometry_optional_claim_summary_path,
+        _build_geometry_optional_claim_summary_payload(
+            family_id=family_id,
+            attack_event_rows=attack_event_rows,
+        ),
+    )
+    write_json_atomic(
         payload_attack_summary_path,
         _build_payload_attack_summary_payload(
             family_id=family_id,
@@ -2710,6 +3004,7 @@ def build_pw04_metrics_extensions(
             geo_diagnostics_conditional_metrics_path
         ),
         "conditional_rescue_metrics_path": normalize_path_value(conditional_rescue_metrics_path),
+        "geometry_optional_claim_summary_path": normalize_path_value(geometry_optional_claim_summary_path),
         "payload_attack_summary_path": normalize_path_value(payload_attack_summary_path),
         "wrong_event_attestation_challenge_summary_path": normalize_path_value(wrong_event_attestation_challenge_summary_path),
         "wrong_event_far_clean_path": normalize_path_value(wrong_event_far_clean_path),
@@ -2744,6 +3039,7 @@ def build_pw04_metrics_extensions(
             "pw04_system_final_auxiliary_attack_by_family": auxiliary_attack_exports["system_final_auxiliary_attack_by_family_path"],
             "pw04_system_final_auxiliary_attack_by_condition": auxiliary_attack_exports["system_final_auxiliary_attack_by_condition_path"],
             "pw04_conditional_rescue_metrics": normalize_path_value(conditional_rescue_metrics_path),
+            "pw04_geometry_optional_claim_summary": normalize_path_value(geometry_optional_claim_summary_path),
             "pw04_payload_attack_summary": normalize_path_value(payload_attack_summary_path),
             "pw04_wrong_event_attestation_challenge_summary": normalize_path_value(wrong_event_attestation_challenge_summary_path),
             "pw04_wrong_event_far_clean": normalize_path_value(wrong_event_far_clean_path),

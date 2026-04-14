@@ -726,6 +726,7 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert shard_gpu_summary["visible_gpus"][0]["peak_memory_used_mib"] == shard_gpu_summary["peak_memory_mib"]
     assert pw03_summary["completed_event_count"] == pw03_summary["event_count"]
     assert captures["detect_input_payloads"]
+    assert Path(str(summary["geometry_optional_claim_plan_path"])).exists()
 
     first_event = cast(Dict[str, Any], pw03_summary["events"][0])
     assert first_event["sample_role"] == pw03_module.ATTACKED_POSITIVE_SAMPLE_ROLE
@@ -737,6 +738,7 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert Path(str(first_event["payload_reference_sidecar_path"])).exists()
     assert Path(str(first_event["payload_decode_sidecar_path"])).exists()
     assert Path(str(first_event["payload_decode_sidecar_status_path"])).exists()
+    assert Path(str(first_event["geometry_optional_claim_plan_path"])).exists()
     assert first_event["parent_event_id"]
     parent_reference = cast(Dict[str, Any], first_event["parent_event_reference"])
     assert parent_reference["prompt_text"] in {"prompt one", "prompt two"}
@@ -752,6 +754,9 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert cast(Dict[str, Any], first_event["geometry_diagnostics"])["sync_success"] is True
     assert cast(Dict[str, Any], first_event["geometry_diagnostics"])["inverse_transform_success"] is True
     assert cast(Dict[str, Any], first_event["geometry_diagnostics"])["attention_anchor_available"] is True
+    assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["status"] == "ok"
+    assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["eligible_for_optional_claim"] is True
+    assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["supporting_evidence_available"] is True
     wrong_event_challenge_record = json.loads(
         Path(str(first_event["wrong_event_attestation_challenge_record_path"])).read_text(encoding="utf-8")
     )
@@ -776,6 +781,8 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_diagnostics"])["sync_success"] is True
     assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_diagnostics"])["inverse_transform_success"] is True
     assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_diagnostics"])["attention_anchor_available"] is True
+    assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_optional_claim_evidence"])["status"] == "ok"
+    assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_optional_claim_evidence"])["supporting_evidence_available"] is True
     payload_decode_status = json.loads(Path(str(first_event["payload_decode_sidecar_status_path"])).read_text(encoding="utf-8"))
     assert payload_decode_status["status"] == "ok"
     assert payload_decode_status["required"] is True
@@ -783,6 +790,9 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert payload_decode_sidecar["reference_event_id"] == first_event["parent_event_id"]
     assert payload_decode_sidecar["sample_role"] == pw03_module.ATTACKED_POSITIVE_SAMPLE_ROLE
     assert payload_decode_sidecar["lf_detect_variant"] == "correlation_v2"
+    assert payload_decode_sidecar["payload_probe_status"] == "ready"
+    assert payload_decode_sidecar["payload_probe_available"] is True
+    assert payload_decode_sidecar["payload_probe_source"]
 
 
 def test_run_attack_detect_event_marks_payload_decode_sidecar_not_applicable_for_attacked_negative(
@@ -849,6 +859,7 @@ def test_run_attack_detect_event_marks_payload_decode_sidecar_not_applicable_for
 
     assert detect_summary["payload_decode_sidecar_path"] is None
     assert detect_summary["payload_decode_sidecar_status"] == "not_applicable"
+    assert cast(Dict[str, Any], detect_summary["geometry_optional_claim_evidence"])["status"] == "not_applicable"
     status_payload = json.loads(Path(str(detect_summary["payload_decode_sidecar_status_path"])).read_text(encoding="utf-8"))
     assert status_payload["status"] == "not_applicable"
     assert status_payload["required"] is False
@@ -977,6 +988,10 @@ def test_payload_decode_sidecar_supports_nested_attestation_trace_artifacts() ->
     assert payload["lf_detect_variant"] == "correlation_v2"
     assert isinstance(payload["decoded_bits"], list)
     assert len(cast(List[int], payload["decoded_bits"])) == 96
+    assert payload["payload_probe_status"] == "ready"
+    assert payload["payload_probe_available"] is True
+    assert payload["payload_probe_reconstruction_applied"] is True
+    assert payload["payload_probe_alignment_signal_available"] is True
 
 
 def test_pw03_wrong_event_challenge_uses_env_verify_key_when_snapshot_omits_it(

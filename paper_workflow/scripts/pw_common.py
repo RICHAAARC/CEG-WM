@@ -54,6 +54,11 @@ ATTACK_SEVERITY_RULE_VERSION = "pw_attack_severity_v1"
 ATTACK_SEVERITY_AXIS_KIND = "family_local"
 PAYLOAD_SIDECAR_SCHEMA_VERSION = "pw_payload_sidecar_v1"
 PAYLOAD_SIDECAR_STATUS_SCHEMA_VERSION = "pw_payload_sidecar_status_v1"
+PAYLOAD_CONSISTENCY_PROBE_MODE = "payload_consistency_probe_v1"
+GEOMETRY_OPTIONAL_CLAIM_PLAN_FILE_NAME = "geometry_optional_claim_plan.json"
+GEOMETRY_OPTIONAL_CLAIM_MODE = "optional_geometry_rescue_evidence_only"
+GEOMETRY_OPTIONAL_CLAIM_SCOPE = "attacked_positive_content_failed_subset"
+GEOMETRY_OPTIONAL_CLAIM_DIRECTIONALITY = "one_way_positive_only"
 
 
 def _canonical_json_text(payload: Mapping[str, Any]) -> str:
@@ -183,6 +188,29 @@ def _coerce_finite_float(value: Any) -> float | None:
             return None
         return value_float if math.isfinite(value_float) else None
     return None
+
+
+def _safe_mean(values: Sequence[int | float]) -> float | None:
+    """
+    Compute the finite mean for one numeric sequence.
+
+    Args:
+        values: Numeric values.
+
+    Returns:
+        Finite mean when available; otherwise None.
+    """
+    if not isinstance(values, Sequence):
+        raise TypeError("values must be Sequence")
+
+    normalized_values = [
+        float(value)
+        for value in values
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+    ]
+    if not normalized_values:
+        return None
+    return float(sum(normalized_values) / len(normalized_values))
 
 
 def _payload_bytes_to_bipolar_bits(payload_bytes: bytes, message_length: int) -> List[int]:
@@ -420,12 +448,19 @@ def build_payload_decode_sidecar_payload(
         mismatch_indices = _extract_int_list(alignment_artifact.get("mismatch_indices"))
 
     decoded_bits = _extract_sign_list(detect_payload.get("decoded_bits"))
+    decoded_bits_source = "detect_payload.decoded_bits"
     if not decoded_bits:
         decoded_bits = _extract_sign_list(trace_artifact.get("decoded_bits"))
+        if decoded_bits:
+            decoded_bits_source = "lf_attestation_trace_artifact.decoded_bits"
     if not decoded_bits:
         decoded_bits = _extract_sign_list(trace_artifact.get("posterior_signs"))
+        if decoded_bits:
+            decoded_bits_source = "lf_attestation_trace_artifact.posterior_signs"
     if not decoded_bits:
         decoded_bits = _extract_sign_list(trace_artifact.get("projected_lf_signs"))
+        if decoded_bits:
+            decoded_bits_source = "lf_attestation_trace_artifact.projected_lf_signs"
     if not decoded_bits:
         expected_bits = _extract_sign_list(trace_artifact.get("expected_bit_signs"))
         if not expected_bits:
@@ -434,9 +469,12 @@ def build_payload_decode_sidecar_payload(
             expected_bits = _extract_sign_list(reference_sidecar.get("code_bits"))
         if expected_bits:
             decoded_bits = list(expected_bits)
+            decoded_bits_source = "alignment_repair_from_expected_bits_and_mismatch_indices"
             for mismatch_index in mismatch_indices:
                 if 0 <= mismatch_index < len(decoded_bits):
                     decoded_bits[mismatch_index] = -1 * int(decoded_bits[mismatch_index])
+    if not decoded_bits:
+        decoded_bits_source = "missing_upstream_decoded_bits"
 
     n_bits_compared = _extract_int(trace_artifact.get("n_bits_compared"))
     if n_bits_compared is None:
@@ -480,6 +518,23 @@ def build_payload_decode_sidecar_payload(
     if isinstance(bit_error_count, int):
         message_decode_success = bit_error_count == 0
 
+    payload_probe_consistency_score = codeword_agreement
+    payload_probe_available = bool(
+        isinstance(n_bits_compared, int)
+        and n_bits_compared > 0
+        and payload_probe_consistency_score is not None
+    )
+    payload_probe_reason = None if payload_probe_available else decode_failure_reason
+    payload_probe_bp_converged = (
+        trace_artifact.get("bp_converged") if isinstance(trace_artifact.get("bp_converged"), bool) else None
+    )
+    payload_probe_alignment_signal_available = bool(
+        trace_artifact or alignment_artifact or mismatch_indices
+    )
+    payload_probe_reconstruction_applied = (
+        decoded_bits_source == "alignment_repair_from_expected_bits_and_mismatch_indices"
+    )
+
     reference_payload_digest = reference_sidecar.get("reference_payload_digest")
     payload_binding_digest = reference_sidecar.get("payload_binding_digest")
     if not isinstance(reference_payload_digest, str) or not reference_payload_digest:
@@ -517,6 +572,15 @@ def build_payload_decode_sidecar_payload(
         "decode_failure_reason": decode_failure_reason,
         "bp_converged": trace_artifact.get("bp_converged"),
         "bp_iteration_count": _extract_int(trace_artifact.get("bp_iteration_count")),
+        "payload_probe_mode": PAYLOAD_CONSISTENCY_PROBE_MODE,
+        "payload_probe_available": payload_probe_available,
+        "payload_probe_status": "ready" if payload_probe_available else "not_available",
+        "payload_probe_reason": payload_probe_reason,
+        "payload_probe_source": decoded_bits_source,
+        "payload_probe_reconstruction_applied": payload_probe_reconstruction_applied,
+        "payload_probe_alignment_signal_available": payload_probe_alignment_signal_available,
+        "payload_probe_consistency_score": payload_probe_consistency_score,
+        "payload_probe_bp_converged": payload_probe_bp_converged,
     }
 
 
@@ -633,6 +697,25 @@ def extract_payload_metrics_from_decode_sidecar(decode_sidecar: Mapping[str, Any
     bit_error_count = _extract_int(decode_sidecar.get("bit_error_count"))
     if codeword_agreement is None and isinstance(bit_error_count, int) and isinstance(n_bits_compared, int) and n_bits_compared > 0:
         codeword_agreement = float(1.0 - (float(bit_error_count) / float(n_bits_compared)))
+    payload_probe_consistency_score = _coerce_finite_float(
+        decode_sidecar.get("payload_probe_consistency_score")
+    )
+    if payload_probe_consistency_score is None:
+        payload_probe_consistency_score = codeword_agreement
+    payload_probe_available = decode_sidecar.get("payload_probe_available")
+    if not isinstance(payload_probe_available, bool):
+        payload_probe_available = bool(
+            isinstance(n_bits_compared, int)
+            and n_bits_compared > 0
+            and payload_probe_consistency_score is not None
+        )
+    payload_probe_reason = decode_sidecar.get("payload_probe_reason")
+    if not isinstance(payload_probe_reason, str) or not payload_probe_reason:
+        payload_probe_reason = None
+    if not payload_probe_available and payload_probe_reason is None:
+        decode_failure_reason_value = decode_sidecar.get("decode_failure_reason")
+        if isinstance(decode_failure_reason_value, str) and decode_failure_reason_value:
+            payload_probe_reason = decode_failure_reason_value
     return {
         "codeword_agreement": codeword_agreement,
         "n_bits_compared": n_bits_compared,
@@ -666,6 +749,167 @@ def extract_payload_metrics_from_decode_sidecar(decode_sidecar: Mapping[str, Any
             str(decode_sidecar.get("payload_binding_digest"))
             if isinstance(decode_sidecar.get("payload_binding_digest"), str) and str(decode_sidecar.get("payload_binding_digest"))
             else None
+        ),
+        "payload_probe_mode": (
+            str(decode_sidecar.get("payload_probe_mode"))
+            if isinstance(decode_sidecar.get("payload_probe_mode"), str) and str(decode_sidecar.get("payload_probe_mode"))
+            else PAYLOAD_CONSISTENCY_PROBE_MODE
+        ),
+        "payload_probe_available": payload_probe_available,
+        "payload_probe_status": (
+            str(decode_sidecar.get("payload_probe_status"))
+            if isinstance(decode_sidecar.get("payload_probe_status"), str) and str(decode_sidecar.get("payload_probe_status"))
+            else ("ready" if payload_probe_available else "not_available")
+        ),
+        "payload_probe_reason": payload_probe_reason,
+        "payload_probe_source": (
+            str(decode_sidecar.get("payload_probe_source"))
+            if isinstance(decode_sidecar.get("payload_probe_source"), str) and str(decode_sidecar.get("payload_probe_source"))
+            else "legacy_payload_metrics"
+        ),
+        "payload_probe_reconstruction_applied": (
+            decode_sidecar.get("payload_probe_reconstruction_applied")
+            if isinstance(decode_sidecar.get("payload_probe_reconstruction_applied"), bool)
+            else False
+        ),
+        "payload_probe_alignment_signal_available": (
+            decode_sidecar.get("payload_probe_alignment_signal_available")
+            if isinstance(decode_sidecar.get("payload_probe_alignment_signal_available"), bool)
+            else None
+        ),
+        "payload_probe_consistency_score": payload_probe_consistency_score,
+        "payload_probe_bp_converged": (
+            decode_sidecar.get("payload_probe_bp_converged")
+            if isinstance(decode_sidecar.get("payload_probe_bp_converged"), bool)
+            else (
+                decode_sidecar.get("bp_converged")
+                if isinstance(decode_sidecar.get("bp_converged"), bool)
+                else None
+            )
+        ),
+    }
+
+
+def summarize_payload_probe_rows(
+    *,
+    rows: Sequence[Mapping[str, Any]],
+    unavailable_reason: str,
+) -> Dict[str, Any]:
+    """
+    功能：汇总 payload consistency probe 的辅助统计。 
+
+    Summarize append-only payload consistency probe metrics.
+
+    Args:
+        rows: Row payloads carrying payload_probe_* fields.
+        unavailable_reason: Stable reason when no probe is available.
+
+    Returns:
+        Probe summary payload.
+    """
+    if not isinstance(rows, Sequence):
+        raise TypeError("rows must be Sequence")
+    if not isinstance(unavailable_reason, str) or not unavailable_reason:
+        raise TypeError("unavailable_reason must be non-empty str")
+
+    normalized_rows: List[Dict[str, Any]] = []
+    for row in rows:
+        normalized_row = dict(cast(Mapping[str, Any], row))
+        probe_consistency_score = (
+            float(normalized_row["payload_probe_consistency_score"])
+            if isinstance(normalized_row.get("payload_probe_consistency_score"), float)
+            else _coerce_finite_float(normalized_row.get("codeword_agreement"))
+        )
+        probe_available = normalized_row.get("payload_probe_available")
+        if not isinstance(probe_available, bool):
+            probe_available = bool(
+                probe_consistency_score is not None
+                and isinstance(normalized_row.get("n_bits_compared"), int)
+                and int(cast(int, normalized_row["n_bits_compared"])) > 0
+            )
+        normalized_row["payload_probe_consistency_score"] = probe_consistency_score
+        normalized_row["payload_probe_available"] = probe_available
+        if not isinstance(normalized_row.get("payload_probe_source"), str) and probe_available:
+            normalized_row["payload_probe_source"] = "derived_from_row_metrics"
+        normalized_rows.append(normalized_row)
+
+    available_rows = [row for row in normalized_rows if row.get("payload_probe_available") is True]
+    consistency_scores = [
+        float(row["payload_probe_consistency_score"])
+        for row in available_rows
+        if isinstance(row.get("payload_probe_consistency_score"), float)
+    ]
+    message_success_values = [
+        row["message_success"]
+        for row in normalized_rows
+        if isinstance(row.get("message_success"), bool)
+    ]
+    bp_converged_values = [
+        row["payload_probe_bp_converged"]
+        for row in available_rows
+        if isinstance(row.get("payload_probe_bp_converged"), bool)
+    ]
+    alignment_signal_values = [
+        row["payload_probe_alignment_signal_available"]
+        for row in available_rows
+        if isinstance(row.get("payload_probe_alignment_signal_available"), bool)
+    ]
+    reconstruction_values = [
+        row["payload_probe_reconstruction_applied"]
+        for row in available_rows
+        if isinstance(row.get("payload_probe_reconstruction_applied"), bool)
+    ]
+
+    if not available_rows:
+        status_value = "not_available"
+        reason_value = unavailable_reason
+    elif len(available_rows) == len(normalized_rows):
+        status_value = "ready"
+        reason_value = None
+    else:
+        status_value = "partial"
+        reason_value = f"payload probe available for {len(available_rows)}/{len(normalized_rows)} events"
+
+    return {
+        "probe_mode": PAYLOAD_CONSISTENCY_PROBE_MODE,
+        "status": status_value,
+        "reason": reason_value,
+        "event_count": len(normalized_rows),
+        "available_probe_event_count": len(available_rows),
+        "missing_probe_event_count": len(normalized_rows) - len(available_rows),
+        "mean_consistency_score": _safe_mean(consistency_scores),
+        "min_consistency_score": min(consistency_scores) if consistency_scores else None,
+        "max_consistency_score": max(consistency_scores) if consistency_scores else None,
+        "message_success_count": sum(1 for value in message_success_values if value is True),
+        "message_success_rate": (
+            float(sum(1 for value in message_success_values if value is True) / len(message_success_values))
+            if message_success_values
+            else None
+        ),
+        "bp_converged_count": sum(1 for value in bp_converged_values if value is True),
+        "bp_converged_rate": (
+            float(sum(1 for value in bp_converged_values if value is True) / len(bp_converged_values))
+            if bp_converged_values
+            else None
+        ),
+        "alignment_signal_available_count": sum(1 for value in alignment_signal_values if value is True),
+        "alignment_signal_available_rate": (
+            float(sum(1 for value in alignment_signal_values if value is True) / len(alignment_signal_values))
+            if alignment_signal_values
+            else None
+        ),
+        "reconstruction_applied_count": sum(1 for value in reconstruction_values if value is True),
+        "reconstruction_applied_rate": (
+            float(sum(1 for value in reconstruction_values if value is True) / len(reconstruction_values))
+            if reconstruction_values
+            else None
+        ),
+        "probe_sources": sorted(
+            {
+                str(row.get("payload_probe_source"))
+                for row in available_rows
+                if isinstance(row.get("payload_probe_source"), str) and str(row.get("payload_probe_source"))
+            }
         ),
     }
 

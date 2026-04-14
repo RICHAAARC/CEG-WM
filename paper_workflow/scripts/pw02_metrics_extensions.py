@@ -11,7 +11,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence, Tuple, cast
 
 from main.evaluation import workflow_inputs as eval_workflow_inputs
-from paper_workflow.scripts.pw_common import extract_payload_metrics_from_decode_sidecar
+from paper_workflow.scripts.pw_common import (
+    extract_payload_metrics_from_decode_sidecar,
+    summarize_payload_probe_rows,
+)
 from scripts.notebook_runtime_common import ensure_directory, normalize_path_value, utc_now_iso, write_json_atomic
 
 
@@ -842,6 +845,10 @@ def _build_payload_clean_summary_payload(
                 "lf_detect_variants": [],
                 "message_sources": [],
             },
+            "probe_overall": summarize_payload_probe_rows(
+                rows=[],
+                unavailable_reason=PAYLOAD_UNAVAILABLE_REASON,
+            ),
             "rows": [],
         }
 
@@ -913,6 +920,15 @@ def _build_payload_clean_summary_payload(
                     if isinstance(prepared_record.get("paper_workflow_payload_decode_sidecar_path"), str)
                     else None
                 ),
+                "payload_probe_mode": decode_sidecar_metrics.get("payload_probe_mode"),
+                "payload_probe_available": decode_sidecar_metrics.get("payload_probe_available"),
+                "payload_probe_status": decode_sidecar_metrics.get("payload_probe_status"),
+                "payload_probe_reason": decode_sidecar_metrics.get("payload_probe_reason"),
+                "payload_probe_source": decode_sidecar_metrics.get("payload_probe_source"),
+                "payload_probe_reconstruction_applied": decode_sidecar_metrics.get("payload_probe_reconstruction_applied"),
+                "payload_probe_alignment_signal_available": decode_sidecar_metrics.get("payload_probe_alignment_signal_available"),
+                "payload_probe_consistency_score": decode_sidecar_metrics.get("payload_probe_consistency_score"),
+                "payload_probe_bp_converged": decode_sidecar_metrics.get("payload_probe_bp_converged"),
             }
         )
 
@@ -1026,6 +1042,10 @@ def _build_payload_clean_summary_payload(
                 }
             ),
         },
+        "probe_overall": summarize_payload_probe_rows(
+            rows=row_metrics,
+            unavailable_reason=PAYLOAD_UNAVAILABLE_REASON,
+        ),
         "rows": row_metrics,
     }
 

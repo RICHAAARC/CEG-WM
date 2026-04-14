@@ -439,6 +439,26 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             },
         },
     )
+    pw04_geometry_optional_claim_summary_path = _write_json(
+        family_root / "exports" / "pw04" / "geometry_diagnostics" / "geometry_optional_claim_summary.json",
+        {
+            "artifact_type": "paper_workflow_pw04_geometry_optional_claim_summary",
+            "family_id": family_id,
+            "status": "ok",
+            "reason": None,
+            "readiness": {
+                "status": "ready",
+                "reason": None,
+                "required_for_formal_release": False,
+                "blocking": False,
+            },
+            "overall": {
+                "event_count": 1,
+                "eligible_event_count": 1,
+                "evidence_event_count": 1,
+            },
+        },
+    )
     pw04_payload_attack_summary_path = _write_json(
         family_root / "exports" / "pw04" / "payload_robustness" / "payload_attack_summary.json",
         {
@@ -456,6 +476,12 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             "overall": {
                 "event_count": 1,
                 "available_payload_event_count": 1,
+            },
+            "probe_overall": {
+                "status": "ready",
+                "reason": None,
+                "event_count": 1,
+                "available_probe_event_count": 1,
             },
         },
     )
@@ -615,6 +641,7 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             },
             "bootstrap_confidence_intervals_path": normalize_path_value(pw04_bootstrap_confidence_intervals_path),
             "bootstrap_confidence_intervals_csv_path": normalize_path_value(pw04_bootstrap_confidence_intervals_csv_path),
+            "geometry_optional_claim_summary_path": normalize_path_value(pw04_geometry_optional_claim_summary_path),
             "payload_attack_summary_path": normalize_path_value(pw04_payload_attack_summary_path),
             "tail_estimation_paths": {
                 key_name: normalize_path_value(path_obj)
@@ -629,6 +656,7 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
                 "pw04_system_final_auxiliary_attack_by_family": normalize_path_value(pw04_system_final_auxiliary_attack_by_family_path),
                 "pw04_system_final_auxiliary_attack_by_condition": normalize_path_value(pw04_system_final_auxiliary_attack_by_condition_path),
                 "pw04_conditional_rescue_metrics": normalize_path_value(pw04_conditional_rescue_metrics_path),
+                "pw04_geometry_optional_claim_summary": normalize_path_value(pw04_geometry_optional_claim_summary_path),
                 "pw04_payload_attack_summary": normalize_path_value(pw04_payload_attack_summary_path),
                 "pw04_wrong_event_attestation_challenge_summary": normalize_path_value(pw04_wrong_event_attestation_challenge_summary_path),
             },
@@ -641,6 +669,7 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
                 "pw04_system_final_auxiliary_attack_by_family": {"canonical": False, "analysis_only": True},
                 "pw04_system_final_auxiliary_attack_by_condition": {"canonical": False, "analysis_only": True},
                 "pw04_conditional_rescue_metrics": {"canonical": False, "analysis_only": True},
+                "pw04_geometry_optional_claim_summary": {"canonical": False, "analysis_only": True},
                 "pw04_payload_attack_summary": {"canonical": False, "analysis_only": True},
                 "pw04_wrong_event_attestation_challenge_summary": {"canonical": False, "analysis_only": True},
             },
@@ -723,6 +752,7 @@ def test_pw05_release_signoff_packages_canonical_pw04_exports(tmp_path: Path) ->
     assert formal_run_readiness_report["components"]["payload_attack"]["status"] == "ready"
     assert formal_run_readiness_report["components"]["wrong_event_attack"]["status"] == "ready"
     assert formal_run_readiness_report["components"]["geometry_conditional_rescue"]["blocking"] is False
+    assert formal_run_readiness_report["components"]["geometry_optional_claim"]["blocking"] is False
     for component_name in ["quality_clean", "quality_attack"]:
         component_payload = cast(Dict[str, Any], formal_run_readiness_report["components"][component_name])
         assert "lpips_dependency_ready" not in component_payload
@@ -745,7 +775,7 @@ def test_pw05_release_signoff_packages_canonical_pw04_exports(tmp_path: Path) ->
         assert forbidden_token not in serialized_readiness_report
         assert forbidden_token not in serialized_signoff_report
     assert signoff_report["checked_source_artifact_count"] >= 20
-    assert signoff_report["analysis_only_artifact_count"] == 10
+    assert signoff_report["analysis_only_artifact_count"] == 11
     assert signoff_report["formal_run_readiness_report_path"] == normalize_path_value(formal_run_readiness_report_path)
     assert "pw04_summary" in release_manifest["release_copy_paths"]
     assert "family_manifest" in release_manifest["source_artifact_index"]
@@ -776,6 +806,9 @@ def test_pw05_release_signoff_packages_canonical_pw04_exports(tmp_path: Path) ->
     assert release_manifest["analysis_only_artifact_annotations"]["pw04_payload_attack_summary"]["release_copy_path"] == (
         "source/exports/pw04/payload_robustness/payload_attack_summary.json"
     )
+    assert release_manifest["analysis_only_artifact_annotations"]["pw04_geometry_optional_claim_summary"]["release_copy_path"] == (
+        "source/exports/pw04/geometry_diagnostics/geometry_optional_claim_summary.json"
+    )
     assert "package_zip" in persisted_summary["generated_artifact_index"]
     assert package_manifest["stage_name"] == "PW05_Release_And_Signoff"
     assert stage_manifest["source_stage_name"] == "PW04_Attack_Merge_And_Metrics"
@@ -805,6 +838,7 @@ def test_pw05_release_signoff_packages_canonical_pw04_exports(tmp_path: Path) ->
     assert "source/exports/pw02/quality/clean_quality_pair_manifest.json" in members
     assert "source/exports/pw02/payload/payload_clean_summary.json" in members
     assert "source/exports/pw04/geometry_diagnostics/conditional_rescue_metrics.json" in members
+    assert "source/exports/pw04/geometry_diagnostics/geometry_optional_claim_summary.json" in members
     assert "source/exports/pw04/payload_robustness/payload_attack_summary.json" in members
     assert "source/exports/pw04/robustness/system_final_auxiliary_attack_summary.json" in members
     assert "source/exports/pw04/robustness/wrong_event_attestation_challenge_summary.json" in members
@@ -842,7 +876,7 @@ def test_pw05_backfills_payload_attack_binding_from_top_level_pw04_summary(tmp_p
     persisted_summary = _load_json_dict(Path(str(summary["summary_path"])))
 
     assert summary["decision"] == "ALLOW_FREEZE"
-    assert signoff_report["analysis_only_artifact_count"] == 10
+    assert signoff_report["analysis_only_artifact_count"] == 11
     assert formal_run_readiness_report["components"]["payload_attack"]["status"] == "ready"
     assert formal_run_readiness_report["components"]["payload_attack"]["source_path"] == payload_attack_summary_path
     assert release_manifest["analysis_only_artifact_annotations"]["pw04_payload_attack_summary"] == {

@@ -1077,6 +1077,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     geo_diagnostics_summary_path = Path(str(pw04_summary["geo_diagnostics_summary_path"]))
     geo_diagnostics_conditional_metrics_path = Path(str(pw04_summary["geo_diagnostics_conditional_metrics_path"]))
     conditional_rescue_metrics_path = Path(str(pw04_summary["conditional_rescue_metrics_path"]))
+    geometry_optional_claim_summary_path = Path(str(pw04_summary["geometry_optional_claim_summary_path"]))
     payload_attack_summary_path = Path(str(pw04_summary["payload_attack_summary_path"]))
     wrong_event_attestation_challenge_summary_path = Path(str(pw04_summary["wrong_event_attestation_challenge_summary_path"]))
     quality_robustness_tradeoff_path = Path(str(pw04_summary["quality_robustness_tradeoff_path"]))
@@ -1110,6 +1111,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
         geo_diagnostics_summary_path,
         geo_diagnostics_conditional_metrics_path,
         conditional_rescue_metrics_path,
+        geometry_optional_claim_summary_path,
         payload_attack_summary_path,
         wrong_event_attestation_challenge_summary_path,
         quality_robustness_tradeoff_path,
@@ -1169,6 +1171,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     geometry_summary_rows = _load_csv_rows(geo_diagnostics_summary_path)
     geometry_conditional_rows = _load_csv_rows(geo_diagnostics_conditional_metrics_path)
     conditional_rescue_metrics = _load_json_dict(conditional_rescue_metrics_path)
+    geometry_optional_claim_summary = _load_json_dict(geometry_optional_claim_summary_path)
     payload_attack_summary = _load_json_dict(payload_attack_summary_path)
     wrong_event_attestation_challenge_summary = _load_json_dict(wrong_event_attestation_challenge_summary_path)
     tradeoff_rows = _load_csv_rows(quality_robustness_tradeoff_path)
@@ -1357,12 +1360,23 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
         assert sum(int(row["event_count"]) for row in condition_rows) == expected_positive_attack_event_count
     assert conditional_rescue_metrics["readiness"]["status"] == "ready"
     assert conditional_rescue_metrics["readiness"]["blocking"] is False
+    assert geometry_optional_claim_summary["readiness"]["status"] == "ready"
+    assert geometry_optional_claim_summary["readiness"]["blocking"] is False
+    assert geometry_optional_claim_summary["overall"]["event_count"] == expected_positive_attack_event_count
+    assert geometry_optional_claim_summary["overall"]["eligible_event_count"] == expected_positive_attack_event_count
+    assert geometry_optional_claim_summary["overall"]["evidence_event_count"] == expected_positive_attack_event_count
+    assert geometry_optional_claim_summary["overall"]["supporting_evidence_event_count"] > 0
 
     assert payload_attack_summary["status"] == "ok"
     assert payload_attack_summary["reason"] is None
     assert payload_attack_summary["future_upstream_sidecar_required"] is False
     assert payload_attack_summary["readiness"]["status"] == "ready"
     assert payload_attack_summary["readiness"]["blocking"] is False
+    assert payload_attack_summary["probe_overall"]["status"] == "ready"
+    assert payload_attack_summary["probe_overall"]["available_probe_event_count"] == expected_positive_attack_event_count
+    assert payload_attack_summary["probe_overall"]["mean_consistency_score"] == pytest.approx(
+        pw03_fixture["expected_payload_mean_codeword_agreement"]
+    )
     assert payload_attack_summary["overall"]["event_count"] == expected_positive_attack_event_count
     assert payload_attack_summary["overall"]["available_payload_event_count"] == expected_positive_attack_event_count
     assert payload_attack_summary["overall"]["missing_payload_event_count"] == 0
@@ -1398,6 +1412,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert payload_attack_summary["overall"]["lf_detect_variants"] == ["correlation_v2"]
     assert payload_attack_summary["overall"]["message_sources"] == ["attestation_event_digest"]
     assert len(payload_attack_summary["by_attack_family"]) == attack_family_count
+    assert len(payload_attack_summary["probe_by_attack_family"]) == attack_family_count
     assert wrong_event_attestation_challenge_summary["status"] == "ok"
     assert wrong_event_attestation_challenge_summary["reason"] is None
     assert wrong_event_attestation_challenge_summary["future_upstream_sidecar_required"] is False
@@ -1414,6 +1429,9 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert cast(Dict[str, Any], pw04_summary["analysis_only_artifact_paths"])["pw04_payload_attack_summary"] == normalize_path_value(
         payload_attack_summary_path
     )
+    assert cast(Dict[str, Any], pw04_summary["analysis_only_artifact_paths"])["pw04_geometry_optional_claim_summary"] == normalize_path_value(
+        geometry_optional_claim_summary_path
+    )
     assert cast(Dict[str, Any], pw04_summary["analysis_only_artifact_paths"])["pw04_wrong_event_attestation_challenge_summary"] == normalize_path_value(
         wrong_event_attestation_challenge_summary_path
     )
@@ -1428,6 +1446,10 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
         "analysis_only": True,
     }
     assert cast(Dict[str, Any], pw04_summary["analysis_only_artifact_annotations"])["pw04_payload_attack_summary"] == {
+        "canonical": False,
+        "analysis_only": True,
+    }
+    assert cast(Dict[str, Any], pw04_summary["analysis_only_artifact_annotations"])["pw04_geometry_optional_claim_summary"] == {
         "canonical": False,
         "analysis_only": True,
     }
@@ -1709,6 +1731,9 @@ def test_pw04_payload_attack_summary_prefers_decode_sidecar_metrics(tmp_path: Pa
     )
 
     assert payload_attack_summary["status"] == "ok"
+    assert payload_attack_summary["probe_overall"]["status"] == "ready"
+    assert payload_attack_summary["probe_overall"]["available_probe_event_count"] == 1
+    assert payload_attack_summary["probe_overall"]["mean_consistency_score"] == pytest.approx(0.5)
     assert payload_attack_summary["overall"]["mean_codeword_agreement"] == pytest.approx(0.5)
     assert payload_attack_summary["overall"]["mean_n_bits_compared"] == pytest.approx(96.0)
     assert payload_attack_summary["overall"]["payload_primary_metric_sources"] == ["codeword_agreement_and_n_bits_compared"]
@@ -1716,6 +1741,8 @@ def test_pw04_payload_attack_summary_prefers_decode_sidecar_metrics(tmp_path: Pa
     assert payload_attack_summary["overall"]["message_sources"] == ["sidecar_message_source"]
     assert payload_attack_summary["by_attack_family"][0]["attack_family"] == "resize"
     assert payload_attack_summary["by_attack_family"][0]["mean_codeword_agreement"] == pytest.approx(0.5)
+    assert payload_attack_summary["probe_by_attack_family"][0]["attack_family"] == "resize"
+    assert payload_attack_summary["probe_by_attack_family"][0]["mean_consistency_score"] == pytest.approx(0.5)
 
 
 def test_pw03_geometry_sidecar_stabilizes_missing_fields() -> None:

@@ -27,6 +27,10 @@ from paper_workflow.scripts.pw_common import (
     ATTACKED_NEGATIVE_SAMPLE_ROLE,
     ATTACKED_POSITIVE_SAMPLE_ROLE,
     CLEAN_NEGATIVE_SAMPLE_ROLE,
+    GEOMETRY_OPTIONAL_CLAIM_DIRECTIONALITY,
+    GEOMETRY_OPTIONAL_CLAIM_MODE,
+    GEOMETRY_OPTIONAL_CLAIM_PLAN_FILE_NAME,
+    GEOMETRY_OPTIONAL_CLAIM_SCOPE,
     MIXED_ATTACK_SAMPLE_ROLE,
     build_payload_decode_sidecar_payload,
     build_payload_sidecar_status_payload,
@@ -837,6 +841,206 @@ def _attach_wrong_event_attestation_challenge_assignment(
     return attack_event_payload
 
 
+def _resolve_geometry_optional_claim_plan_path(
+    *,
+    family_manifest: Mapping[str, Any],
+    family_root: Path,
+) -> Path | None:
+    """
+    Resolve the optional geometry-claim plan path declared by PW00.
+
+    Args:
+        family_manifest: PW00 family manifest payload.
+        family_root: Family root path.
+
+    Returns:
+        Geometry optional-claim plan path when available.
+    """
+    if not isinstance(family_manifest, Mapping):
+        raise TypeError("family_manifest must be Mapping")
+    if not isinstance(family_root, Path):
+        raise TypeError("family_root must be Path")
+
+    paths_payload = family_manifest.get("paths")
+    if isinstance(paths_payload, Mapping):
+        path_value = paths_payload.get("geometry_optional_claim_plan")
+        if isinstance(path_value, str) and path_value.strip():
+            return Path(path_value).expanduser().resolve()
+
+    fallback_path = family_root / "manifests" / GEOMETRY_OPTIONAL_CLAIM_PLAN_FILE_NAME
+    if fallback_path.exists() and fallback_path.is_file():
+        return fallback_path.resolve()
+    return None
+
+
+def _load_geometry_optional_claim_lookup(
+    plan_path: Path | None,
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Load the optional geometry-claim assignment lookup keyed by attack_event_id.
+
+    Args:
+        plan_path: Optional plan path.
+
+    Returns:
+        Assignment lookup mapping.
+    """
+    if plan_path is None:
+        return {}
+
+    plan_payload = _load_required_json_dict(plan_path, "PW00 geometry optional claim plan")
+    rows_node = plan_payload.get("rows")
+    if not isinstance(rows_node, list):
+        raise ValueError("PW00 geometry optional claim plan missing rows")
+
+    lookup: Dict[str, Dict[str, Any]] = {}
+    for row_node in rows_node:
+        if not isinstance(row_node, Mapping):
+            continue
+        attack_event_id = row_node.get("attack_event_id")
+        if isinstance(attack_event_id, str) and attack_event_id:
+            lookup[attack_event_id] = dict(cast(Mapping[str, Any], row_node))
+    return lookup
+
+
+def _attach_geometry_optional_claim_assignment(
+    *,
+    attack_event_spec: Mapping[str, Any],
+    geometry_optional_claim_lookup: Mapping[str, Mapping[str, Any]],
+    plan_path: Path | None,
+) -> Dict[str, Any]:
+    """
+    Attach the geometry optional-claim assignment for one attack event.
+
+    Args:
+        attack_event_spec: Materialized attack event spec.
+        geometry_optional_claim_lookup: PW00 optional-claim lookup.
+        plan_path: Optional plan path.
+
+    Returns:
+        Attack event payload with geometry optional-claim assignment.
+    """
+    if not isinstance(attack_event_spec, Mapping):
+        raise TypeError("attack_event_spec must be Mapping")
+    if not isinstance(geometry_optional_claim_lookup, Mapping):
+        raise TypeError("geometry_optional_claim_lookup must be Mapping")
+    if plan_path is not None and not isinstance(plan_path, Path):
+        raise TypeError("plan_path must be Path or None")
+
+    attack_event_payload = dict(cast(Mapping[str, Any], attack_event_spec))
+    attack_event_id = attack_event_payload.get("attack_event_id", attack_event_payload.get("event_id"))
+    assignment_node = (
+        geometry_optional_claim_lookup.get(str(attack_event_id))
+        if isinstance(attack_event_id, str) and attack_event_id
+        else None
+    )
+    assignment_payload = (
+        dict(cast(Mapping[str, Any], assignment_node))
+        if isinstance(assignment_node, Mapping)
+        else {}
+    )
+
+    sample_role = str(attack_event_payload.get("sample_role") or "")
+    if not assignment_payload:
+        if sample_role == ATTACKED_POSITIVE_SAMPLE_ROLE:
+            assignment_payload = {
+                "attack_event_id": attack_event_id,
+                "status": "not_available",
+                "reason": "missing_pw00_geometry_optional_claim_assignment",
+                "eligible_for_optional_claim": False,
+            }
+        else:
+            assignment_payload = {
+                "attack_event_id": attack_event_id,
+                "status": "not_applicable",
+                "reason": "sample_role_not_attacked_positive",
+                "eligible_for_optional_claim": False,
+            }
+
+    assignment_payload["claim_mode"] = (
+        assignment_payload.get("claim_mode")
+        if isinstance(assignment_payload.get("claim_mode"), str) and assignment_payload.get("claim_mode")
+        else GEOMETRY_OPTIONAL_CLAIM_MODE
+    )
+    assignment_payload["claim_scope"] = GEOMETRY_OPTIONAL_CLAIM_SCOPE
+    assignment_payload["content_positive_veto_allowed"] = False
+    assignment_payload["rescue_directionality"] = GEOMETRY_OPTIONAL_CLAIM_DIRECTIONALITY
+    assignment_payload["plan_path"] = normalize_path_value(plan_path) if isinstance(plan_path, Path) else None
+
+    attack_event_payload["geometry_optional_claim_assignment"] = assignment_payload
+    attack_event_payload["geometry_optional_claim_plan_path"] = assignment_payload.get("plan_path")
+    return attack_event_payload
+
+
+def _build_geometry_optional_claim_evidence(
+    *,
+    attack_event_spec: Mapping[str, Any],
+    geometry_diagnostics: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """
+    Build one append-only geometry optional-claim evidence payload.
+
+    Args:
+        attack_event_spec: Materialized attack event spec.
+        geometry_diagnostics: Stable PW03 geometry diagnostics.
+
+    Returns:
+        Geometry optional-claim evidence payload.
+    """
+    if not isinstance(attack_event_spec, Mapping):
+        raise TypeError("attack_event_spec must be Mapping")
+    if not isinstance(geometry_diagnostics, Mapping):
+        raise TypeError("geometry_diagnostics must be Mapping")
+
+    assignment_payload = _extract_mapping(attack_event_spec.get("geometry_optional_claim_assignment"))
+    sample_role = str(attack_event_spec.get("sample_role") or "")
+    if sample_role != ATTACKED_POSITIVE_SAMPLE_ROLE:
+        status_value = "not_applicable"
+        reason_value = "sample_role_not_attacked_positive"
+    elif assignment_payload.get("status") != "ready":
+        status_value = "not_available"
+        reason_value = assignment_payload.get("reason") or "missing_pw00_geometry_optional_claim_assignment"
+    else:
+        status_value = "ok"
+        reason_value = None
+
+    supporting_signal_count = sum(
+        1
+        for field_name in ["sync_success", "inverse_transform_success", "attention_anchor_available"]
+        if geometry_diagnostics.get(field_name) is True
+    )
+
+    return {
+        "artifact_type": "paper_workflow_geometry_optional_claim_evidence",
+        "schema_version": "pw_stage_03_v1",
+        "stage_name": STAGE_NAME,
+        "attack_event_id": attack_event_spec.get("attack_event_id", attack_event_spec.get("event_id")),
+        "parent_event_id": attack_event_spec.get("parent_event_id"),
+        "attack_family": attack_event_spec.get("attack_family"),
+        "attack_condition_key": attack_event_spec.get("attack_condition_key"),
+        "status": status_value,
+        "reason": reason_value,
+        "plan_status": assignment_payload.get("status"),
+        "plan_reason": assignment_payload.get("reason"),
+        "plan_path": assignment_payload.get("plan_path"),
+        "claim_mode": assignment_payload.get("claim_mode", GEOMETRY_OPTIONAL_CLAIM_MODE),
+        "claim_scope": assignment_payload.get("claim_scope", GEOMETRY_OPTIONAL_CLAIM_SCOPE),
+        "content_positive_veto_allowed": False,
+        "rescue_directionality": GEOMETRY_OPTIONAL_CLAIM_DIRECTIONALITY,
+        "eligible_for_optional_claim": assignment_payload.get("eligible_for_optional_claim") is True,
+        "severity_status": attack_event_spec.get("severity_status"),
+        "severity_label": attack_event_spec.get("severity_label"),
+        "severity_level_index": attack_event_spec.get("severity_level_index"),
+        "sync_status": geometry_diagnostics.get("sync_status"),
+        "sync_success": geometry_diagnostics.get("sync_success"),
+        "inverse_transform_success": geometry_diagnostics.get("inverse_transform_success"),
+        "attention_anchor_available": geometry_diagnostics.get("attention_anchor_available"),
+        "geometry_failure_reason": geometry_diagnostics.get("geometry_failure_reason"),
+        "supporting_signal_count": supporting_signal_count,
+        "supporting_evidence_available": supporting_signal_count > 0,
+    }
+
+
 def _load_parent_attestation_material(
     *,
     parent_source_event: Mapping[str, Any],
@@ -1611,6 +1815,10 @@ def _run_attack_detect_event(
     detect_payload = _load_required_json_dict(source_detect_record_path, "PW03 attacked detect record")
     severity_metadata = _extract_attack_severity_metadata(attack_event_spec)
     geometry_diagnostics = _extract_attack_geometry_diagnostics(detect_payload)
+    geometry_optional_claim_evidence = _build_geometry_optional_claim_evidence(
+        attack_event_spec=attack_event_spec,
+        geometry_diagnostics=geometry_diagnostics,
+    )
     parent_reference = cast(Mapping[str, Any], attack_event_spec.get("parent_event_reference", {}))
     detect_payload["sample_role"] = attack_event_spec.get("sample_role")
     detect_payload["paper_workflow_attack_stage"] = STAGE_NAME
@@ -1622,6 +1830,7 @@ def _run_attack_detect_event(
     detect_payload["paper_workflow_attack_params_digest"] = attack_event_spec.get("attack_params_digest")
     detect_payload["paper_workflow_severity_metadata"] = severity_metadata
     detect_payload["paper_workflow_geometry_diagnostics"] = geometry_diagnostics
+    detect_payload["paper_workflow_geometry_optional_claim_evidence"] = geometry_optional_claim_evidence
 
     family_id_value = attack_event_spec.get("family_id")
     family_id = str(family_id_value) if isinstance(family_id_value, str) and family_id_value else resolve_family_id_from_path(shard_root)
@@ -1776,6 +1985,7 @@ def _run_attack_detect_event(
         "detect_stage_result": detect_result,
         "severity_metadata": severity_metadata,
         "geometry_diagnostics": geometry_diagnostics,
+        "geometry_optional_claim_evidence": geometry_optional_claim_evidence,
     }
 
 
@@ -1852,6 +2062,10 @@ def _write_attack_event_manifest(
         "attack_params_digest": attack_event_spec.get("attack_params_digest"),
         "severity_metadata": dict(cast(Mapping[str, Any], detect_summary.get("severity_metadata", {}))),
         "geometry_diagnostics": dict(cast(Mapping[str, Any], detect_summary.get("geometry_diagnostics", {}))),
+        "geometry_optional_claim_plan_path": attack_event_spec.get("geometry_optional_claim_plan_path"),
+        "geometry_optional_claim_evidence": dict(
+            cast(Mapping[str, Any], detect_summary.get("geometry_optional_claim_evidence", {}))
+        ),
         "attack_seed": attack_artifacts.get("attack_seed"),
         "runtime_config_path": runtime_config_summary.get("runtime_config_path"),
         "runtime_config_package_relative_path": runtime_config_summary.get("runtime_config_package_relative_path"),
@@ -2994,6 +3208,13 @@ def run_pw03_attack_event_shard(
     wrong_event_challenge_lookup = _load_wrong_event_attestation_challenge_lookup(
         wrong_event_challenge_plan_path
     )
+    geometry_optional_claim_plan_path = _resolve_geometry_optional_claim_plan_path(
+        family_manifest=family_manifest,
+        family_root=family_root,
+    )
+    geometry_optional_claim_lookup = _load_geometry_optional_claim_lookup(
+        geometry_optional_claim_plan_path
+    )
     pw02_summary = _load_required_json_dict(pw02_summary_path, "PW02 summary")
     finalize_manifest_path_value = pw02_summary.get("paper_source_finalize_manifest_path")
     if not isinstance(finalize_manifest_path_value, str) or not finalize_manifest_path_value:
@@ -3051,11 +3272,15 @@ def run_pw03_attack_event_shard(
                 threshold_binding_reference=threshold_binding_reference,
             )
         assigned_attack_events.append(
-            _attach_wrong_event_attestation_challenge_assignment(
-                attack_event_spec=assigned_attack_event_spec,
-                wrong_event_challenge_lookup=wrong_event_challenge_lookup,
-                parent_event_lookup=parent_event_lookup,
-                challenge_plan_path=wrong_event_challenge_plan_path,
+            _attach_geometry_optional_claim_assignment(
+                attack_event_spec=_attach_wrong_event_attestation_challenge_assignment(
+                    attack_event_spec=assigned_attack_event_spec,
+                    wrong_event_challenge_lookup=wrong_event_challenge_lookup,
+                    parent_event_lookup=parent_event_lookup,
+                    challenge_plan_path=wrong_event_challenge_plan_path,
+                ),
+                geometry_optional_claim_lookup=geometry_optional_claim_lookup,
+                plan_path=geometry_optional_claim_plan_path,
             )
         )
 
