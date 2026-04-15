@@ -40,6 +40,7 @@
 1. `quality_clean` 读取 `PW04 clean_quality_metrics.json`
 2. `quality_attack` 读取 `PW04 attack_quality_metrics.json`
 3. 不再根据当前 notebook 会话能否导入 `lpips` 或 `open_clip` 决定是否通过 signoff
+4. 会校验 `PW04 summary.paper_tables_paths` 中 `event_subset_summary_*` 与 `system_event_count_sweep_*` 的 canonical 路径绑定是否存在
 
 ## 目录布局
 
@@ -102,10 +103,11 @@ exports/pw05/
 7. `formal_attack_negative_metrics.json`
 8. `per_attack_family_metrics.json`
 9. `per_attack_condition_metrics.json`
-10. `tables/attack_event_table.jsonl`
-11. `tables/attack_family_summary.csv`
-12. `tables/attack_condition_summary.csv`
-13. `clean_attack_overview.json`
+10. `tables/general_attacked_event_table.jsonl`
+11. `tables/boundary_attacked_event_table.jsonl`
+12. `tables/attack_family_summary.csv`
+13. `tables/attack_condition_summary.csv`
+14. `clean_attack_overview.json`
 
 当前 unified quality 流水线还会额外写出：
 
@@ -127,17 +129,27 @@ append-only 的 paper-facing exports 包括：
 8. `tables/attack_condition_summary_paper.csv`
 9. `tables/rescue_metrics_summary.csv`
 10. `tables/bootstrap_confidence_intervals.csv`
-11. `figures/attack_tpr_by_family.png`
-12. `figures/clean_vs_attack_scope_overview.png`
-13. `figures/rescue_breakdown.png`
-14. `tradeoff/clean_imperceptibility.json`
-15. `tradeoff/attack_distortion.json`
-16. `tradeoff/quality_robustness_tradeoff.csv`
-17. `tradeoff/quality_robustness_frontier.png`
-18. `tail/estimated_tail_fpr_1e4.json`
-19. `tail/estimated_tail_fpr_1e5.json`
-20. `tail/tail_fit_diagnostics.json`
-21. `tail/tail_fit_stability_summary.json`
+11. `tables/event_subset_summary.json`
+12. `tables/event_subset_summary.csv`
+13. `tables/system_event_count_sweep.json`
+14. `tables/system_event_count_sweep.csv`
+15. `tables/geometry_optional_claim_by_family_severity.csv`
+16. `figures/attack_tpr_by_family.png`
+17. `figures/clean_vs_attack_scope_overview.png`
+18. `figures/rescue_breakdown.png`
+19. `tradeoff/clean_imperceptibility.json`
+20. `tradeoff/attack_distortion.json`
+21. `tradeoff/quality_robustness_tradeoff.csv`
+22. `tradeoff/quality_robustness_frontier.png`
+23. `tail/estimated_tail_fpr_1e4.json`
+24. `tail/estimated_tail_fpr_1e5.json`
+25. `tail/tail_fit_diagnostics.json`
+26. `tail/tail_fit_stability_summary.json`
+
+其中新增的两组统计表语义为：
+
+1. `tables/event_subset_summary.json` 与 `tables/event_subset_summary.csv`：按 `clean_eval_events`、`general_attacked_events`、`boundary_attacked_events` 三个子集汇总，包含 `content_margin_mean` 与 `abs_content_margin_mean`，后者定义为 `mean(abs(content_margin))`，不改变原始 `content_margin_mean` 的方向性语义。
+2. `tables/system_event_count_sweep.json` 与 `tables/system_event_count_sweep.csv`：按 `clean_positive`、`clean_negative`、`attack_positive`、`attack_negative` 四个 cohort 输出事件数 sweep 结果，标准化字段至少包括 `cohort`、`event_count`、`population_event_count`、`repeats`、`seed`、`mean_accept_rate`、`std_accept_rate`、`p05_accept_rate`、`p50_accept_rate`、`p95_accept_rate`；兼容字段会继续保留。
 
 `PW04 summary` 中当前关键字段包括：
 
@@ -148,8 +160,24 @@ append-only 的 paper-facing exports 包括：
 5. `quality_finalize_manifest_path`
 6. `quality_shard_count`
 7. `paper_scope_registry_path`
-8. `analysis_only_artifact_paths`
-9. `analysis_only_artifact_annotations`
+8. `paper_tables_paths`
+9. `analysis_only_artifact_paths`
+10. `analysis_only_artifact_annotations`
+
+其中 `paper_tables_paths` 当前会显式暴露：
+
+1. `clean_event_table_path`
+2. `main_metrics_summary_csv_path`
+3. `attack_family_summary_paper_csv_path`
+4. `attack_condition_summary_paper_csv_path`
+5. `rescue_metrics_summary_csv_path`
+6. `general_attacked_event_table_path`
+7. `boundary_attacked_event_table_path`
+8. `event_subset_summary_json_path`
+9. `event_subset_summary_csv_path`
+10. `system_event_count_sweep_json_path`
+11. `system_event_count_sweep_csv_path`
+12. `geometry_optional_claim_by_family_severity_csv_path`
 
 当前 paper-facing 主作用域只使用 canonical scope names：
 
