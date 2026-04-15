@@ -2729,6 +2729,7 @@ def run_pw04_merge_attack_event_shards(
         pw02_summary=pw02_summary,
         pw04_paths=pw04_paths,
         attack_event_rows=positive_attack_event_rows,
+        attack_negative_event_rows=negative_attack_event_rows,
         per_attack_family_metrics_payload=per_attack_family_metrics_payload,
         per_attack_condition_metrics_payload=per_attack_condition_metrics_payload,
         attack_quality_metrics_payload=attack_quality_metrics_payload,

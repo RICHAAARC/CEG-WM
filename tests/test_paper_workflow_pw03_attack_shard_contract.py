@@ -757,6 +757,11 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["status"] == "not_applicable"
     assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["reason"] == "parent_source_outside_content_margin_boundary_subset"
     assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["eligible_for_optional_claim"] is False
+    assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["parent_boundary_hit"] is False
+    assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["attacked_content_failed"] is False
+    assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["geo_rescue_candidate_family"] is True
+    assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["geo_rescue_eligible"] is False
+    assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["geo_rescue_applied"] is False
     assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["boundary_resolution_status"] == "ok"
     assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["parent_content_margin"] == pytest.approx(0.3)
     assert cast(Dict[str, Any], first_event["geometry_optional_claim_evidence"])["boundary_metric_value"] == pytest.approx(0.3)
@@ -787,6 +792,8 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_diagnostics"])["attention_anchor_available"] is True
     assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_optional_claim_evidence"])["status"] == "not_applicable"
     assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_optional_claim_evidence"])["boundary_resolution_status"] == "ok"
+    assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_optional_claim_evidence"])["parent_boundary_hit"] is False
+    assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_optional_claim_evidence"])["attacked_content_failed"] is False
     assert cast(Dict[str, Any], detect_record_payload["paper_workflow_geometry_optional_claim_evidence"])["supporting_evidence_available"] is True
     payload_decode_status = json.loads(Path(str(first_event["payload_decode_sidecar_status_path"])).read_text(encoding="utf-8"))
     assert payload_decode_status["status"] == "ok"
@@ -842,8 +849,8 @@ def test_geometry_optional_claim_boundary_band_uses_min_and_max(tmp_path: Path) 
         "protocol_version": "geometry_optional_claim_content_margin_boundary_v1",
         "boundary_rule_version": "geometry_optional_claim_boundary_band_v2",
         "boundary_metric": "abs_content_margin",
-        "boundary_abs_margin_min": 0.005,
-        "boundary_abs_margin_max": 0.05,
+        "boundary_abs_margin_min": 0.02,
+        "boundary_abs_margin_max": 0.2,
     }
 
     write_json_atomic(
@@ -865,7 +872,7 @@ def test_geometry_optional_claim_boundary_band_uses_min_and_max(tmp_path: Path) 
         assignment_payload=assignment_payload,
     )
     assert below_min_resolution["boundary_metric_value"] == pytest.approx(0.002)
-    assert below_min_resolution["boundary_abs_margin_min"] == pytest.approx(0.005)
+    assert below_min_resolution["boundary_abs_margin_min"] == pytest.approx(0.02)
     assert below_min_resolution["status"] == "not_applicable"
     assert below_min_resolution["reason"] == "parent_source_outside_content_margin_boundary_subset"
     assert below_min_resolution["eligible_for_optional_claim"] is False

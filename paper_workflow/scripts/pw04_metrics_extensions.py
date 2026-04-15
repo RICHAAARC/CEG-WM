@@ -1435,6 +1435,9 @@ def _load_geometry_optional_claim_evidence(
         or event_manifest.get("sample_role")
         or ""
     )
+    formal_record = _extract_mapping(attack_event_row.get("formal_record"))
+    attestation_payload = _extract_mapping(formal_record.get("attestation"))
+    image_evidence_payload = _extract_mapping(attestation_payload.get("image_evidence_result"))
     geometry_diagnostics = _extract_mapping(attack_event_row.get("geometry_diagnostics"))
     supporting_signal_count = sum(
         1
@@ -1457,6 +1460,33 @@ def _load_geometry_optional_claim_evidence(
     supporting_evidence_available = normalized_payload.get("supporting_evidence_available")
     if not isinstance(supporting_evidence_available, bool):
         supporting_evidence_available = supporting_signal_count > 0
+    content_score = _coerce_finite_float(attack_event_row.get("content_score"))
+    content_threshold_value = _coerce_finite_float(normalized_payload.get("content_threshold_value"))
+    parent_boundary_hit = normalized_payload.get("parent_boundary_hit")
+    if not isinstance(parent_boundary_hit, bool):
+        parent_boundary_hit = normalized_payload.get("eligible_for_optional_claim") is True
+    attacked_content_failed = normalized_payload.get("attacked_content_failed")
+    if not isinstance(attacked_content_failed, bool):
+        if content_score is not None and content_threshold_value is not None:
+            attacked_content_failed = content_score < content_threshold_value
+        else:
+            attacked_content_failed = None
+    geo_rescue_candidate_family = normalized_payload.get("geo_rescue_candidate_family")
+    if not isinstance(geo_rescue_candidate_family, bool):
+        geo_rescue_candidate_family = (
+            normalized_payload.get("geometry_rescue_candidate") is True
+            or attack_event_row.get("geometry_rescue_candidate") is True
+        )
+    geo_rescue_eligible = normalized_payload.get("geo_rescue_eligible")
+    if not isinstance(geo_rescue_eligible, bool):
+        geo_rescue_eligible = bool(
+            parent_boundary_hit and attacked_content_failed is True and geo_rescue_candidate_family
+        )
+    geo_rescue_applied = normalized_payload.get("geo_rescue_applied")
+    if not isinstance(geo_rescue_applied, bool):
+        geo_rescue_applied = bool(
+            geo_rescue_eligible and image_evidence_payload.get("geo_rescue_applied") is True
+        )
     return {
         **normalized_payload,
         "status": normalized_payload.get("status", "not_available"),
@@ -1468,6 +1498,11 @@ def _load_geometry_optional_claim_evidence(
         "content_positive_veto_allowed": False,
         "rescue_directionality": normalized_payload.get("rescue_directionality", "one_way_positive_only"),
         "eligible_for_optional_claim": normalized_payload.get("eligible_for_optional_claim") is True,
+        "parent_boundary_hit": parent_boundary_hit,
+        "attacked_content_failed": attacked_content_failed,
+        "geo_rescue_candidate_family": geo_rescue_candidate_family,
+        "geo_rescue_eligible": geo_rescue_eligible,
+        "geo_rescue_applied": geo_rescue_applied,
         "protocol_version": normalized_payload.get("protocol_version"),
         "boundary_metric": normalized_payload.get("boundary_metric"),
         "boundary_abs_margin_max": normalized_payload.get("boundary_abs_margin_max"),
@@ -1515,12 +1550,15 @@ def _build_geometry_optional_claim_summary(
         for row in evidence_rows
         if row.get("boundary_resolution_status") == "ok" or row.get("status") in {"ok", "not_applicable"}
     ]
-    eligible_rows = [row for row in evidence_rows if row.get("eligible_for_optional_claim") is True]
-    eligible_event_count = sum(1 for row in evidence_rows if row.get("eligible_for_optional_claim") is True)
+    boundary_hit_event_count = sum(1 for row in evidence_rows if row.get("parent_boundary_hit") is True)
+    content_failed_event_count = sum(1 for row in evidence_rows if row.get("attacked_content_failed") is True)
+    eligible_rows = [row for row in evidence_rows if row.get("geo_rescue_eligible") is True]
+    eligible_event_count = len(eligible_rows)
+    rescue_applied_event_count = sum(1 for row in evidence_rows if row.get("geo_rescue_applied") is True)
     boundary_excluded_event_count = sum(
         1
         for row in evidence_rows
-        if row.get("status") == "not_applicable" and row.get("eligible_for_optional_claim") is not True
+        if row.get("boundary_resolution_status") == "ok" and row.get("parent_boundary_hit") is not True
     )
     boundary_resolution_failed_event_count = sum(
         1
@@ -1559,7 +1597,7 @@ def _build_geometry_optional_claim_summary(
     elif not available_evidence:
         status_value = "not_available"
         reason_value = "no_geometry_optional_claim_boundary_resolution_available"
-    elif eligible_event_count <= 0 and boundary_resolution_failed_event_count <= 0:
+    elif boundary_hit_event_count <= 0 and boundary_resolution_failed_event_count <= 0:
         status_value = "not_applicable"
         reason_value = "no_attack_events_within_content_margin_boundary_subset"
     elif boundary_resolution_failed_event_count <= 0:
@@ -1575,7 +1613,10 @@ def _build_geometry_optional_claim_summary(
         "status": status_value,
         "reason": reason_value,
         "event_count": len(rows),
+        "boundary_hit_event_count": boundary_hit_event_count,
+        "content_failed_event_count": content_failed_event_count,
         "eligible_event_count": eligible_event_count,
+        "rescue_applied_event_count": rescue_applied_event_count,
         "boundary_resolved_event_count": len(available_evidence),
         "boundary_excluded_event_count": boundary_excluded_event_count,
         "boundary_resolution_failed_event_count": boundary_resolution_failed_event_count,
@@ -3165,7 +3206,10 @@ def build_pw04_metrics_extensions(
             "status",
             "reason",
             "event_count",
+            "boundary_hit_event_count",
+            "content_failed_event_count",
             "eligible_event_count",
+            "rescue_applied_event_count",
             "boundary_resolved_event_count",
             "boundary_excluded_event_count",
             "boundary_resolution_failed_event_count",
@@ -3199,7 +3243,10 @@ def build_pw04_metrics_extensions(
             "status",
             "reason",
             "event_count",
+            "boundary_hit_event_count",
+            "content_failed_event_count",
             "eligible_event_count",
+            "rescue_applied_event_count",
             "boundary_resolved_event_count",
             "boundary_excluded_event_count",
             "boundary_resolution_failed_event_count",

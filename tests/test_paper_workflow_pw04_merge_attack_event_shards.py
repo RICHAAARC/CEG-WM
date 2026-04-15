@@ -550,6 +550,7 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
                     pw02_root / "records" / f"positive_source_event_{event_index:06d}_detect_record.json"
                 ),
                 "content_score": 0.91,
+                "content_margin": 0.41,
                 "content_score_source": "content_evidence_payload.content_chain_score",
                 "event_attestation_score": 0.81 if event_index < 3 else 0.12,
                 "event_attestation_score_source": "attestation.final_event_attested_decision.event_attestation_score",
@@ -575,6 +576,7 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
                     pw02_root / "records" / f"clean_negative_event_{event_index:06d}_detect_record.json"
                 ),
                 "content_score": 0.11,
+                "content_margin": -0.39,
                 "content_score_source": "content_evidence_payload.content_chain_score",
                 "event_attestation_score": 0.81 if event_index == 0 else 0.0,
                 "event_attestation_score_source": "attestation.final_event_attested_decision.event_attestation_score",
@@ -1398,8 +1400,10 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert len(bootstrap_csv_rows) == 9
     assert clean_event_rows
     assert {row["subset_name"] for row in clean_event_rows} == {"clean_eval_events"}
+    assert all("content_margin" in row for row in clean_event_rows)
     assert len(general_attacked_event_rows) == expected_positive_attack_event_count
     assert {row["subset_name"] for row in general_attacked_event_rows} == {"general_attacked_events"}
+    assert all("content_margin" in row for row in general_attacked_event_rows)
     assert len(boundary_attacked_event_rows) <= len(general_attacked_event_rows)
     assert {row["subset_name"] for row in event_subset_summary["rows"]} == {
         "clean_eval_events",
@@ -1411,12 +1415,22 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
         "general_attacked_events",
         "boundary_attacked_events",
     }
+    assert all("content_margin_mean" in row for row in event_subset_summary["rows"])
+    assert all("content_margin_mean" in row for row in event_subset_summary_rows)
     assert system_event_count_sweep["system_event_count_sweep"]["repeat_count"] == 64
-    expected_sweep_subset_names = {"clean_eval_events", "general_attacked_events"}
-    if boundary_attacked_event_rows:
-        expected_sweep_subset_names.add("boundary_attacked_events")
-    assert {row["subset_name"] for row in system_event_count_sweep_rows} == expected_sweep_subset_names
+    assert {row["cohort_name"] for row in system_event_count_sweep_rows} == {
+        "clean_positive",
+        "clean_negative",
+        "attack_positive",
+        "attack_negative",
+    }
     assert geometry_optional_claim_by_family_severity_rows
+    assert {
+        "boundary_hit_count",
+        "content_failed_count",
+        "eligible_count",
+        "rescue_applied_count",
+    }.issubset(set(geometry_optional_claim_by_family_severity_rows[0].keys()))
 
     assert tail_fpr_1e4["tail_estimation_enabled"] is False
     assert tail_fpr_1e4["readiness"]["status"] == "disabled"
@@ -1470,7 +1484,9 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert geometry_optional_claim_summary["readiness"]["status"] == "not_ready"
     assert geometry_optional_claim_summary["readiness"]["blocking"] is False
     assert geometry_optional_claim_summary["overall"]["event_count"] == expected_positive_attack_event_count
+    assert geometry_optional_claim_summary["overall"]["boundary_hit_event_count"] == 0
     assert geometry_optional_claim_summary["overall"]["eligible_event_count"] == 0
+    assert geometry_optional_claim_summary["overall"]["rescue_applied_event_count"] == 0
     assert geometry_optional_claim_summary["overall"]["boundary_resolved_event_count"] == 0
     assert geometry_optional_claim_summary["overall"]["boundary_resolution_failed_event_count"] == expected_positive_attack_event_count
     assert geometry_optional_claim_summary["overall"]["evidence_event_count"] == 0
@@ -1478,6 +1494,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert geometry_optional_claim_summary["claim_contract"]["eligibility_is_boundary_subset_only"] is True
     assert len(geometry_optional_claim_by_family_rows) == attack_family_count
     assert all(row["status"] == "not_available" for row in geometry_optional_claim_by_family_rows)
+    assert all("boundary_hit_event_count" in row for row in geometry_optional_claim_by_family_rows)
     assert all(row["eligible_event_count"] == "0" for row in geometry_optional_claim_by_family_rows)
     assert geometry_optional_claim_by_severity_rows
     assert all(row["status"] == "not_available" for row in geometry_optional_claim_by_severity_rows)

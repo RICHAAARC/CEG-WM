@@ -945,6 +945,8 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert finalize_manifest["clean_quality_pair_artifact"]["path"] == pw02_summary["clean_quality_pair_manifest_path"]
     assert clean_event_rows
     assert {row["subset_name"] for row in clean_event_rows} == {"clean_eval_events"}
+    assert all("content_margin" in row for row in clean_event_rows)
+    assert any(row["content_margin"] is not None for row in clean_event_rows if row["ground_truth_label"] is True)
 
     content_run = cast(Dict[str, Any], pw02_summary["score_runs"][pw02_module.CONTENT_SCORE_NAME])
     attestation_run = cast(Dict[str, Any], pw02_summary["score_runs"][pw02_module.EVENT_ATTESTATION_SCORE_NAME])

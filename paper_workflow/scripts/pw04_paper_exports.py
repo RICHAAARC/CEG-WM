@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Mapping, Sequence, Tuple, cast
 import numpy as np
 
 from paper_workflow.scripts.pw_common import (
+    ATTACKED_NEGATIVE_SAMPLE_ROLE,
     CLEAN_NEGATIVE_SAMPLE_ROLE,
     load_pw_matrix_config,
     read_jsonl,
@@ -161,29 +162,34 @@ EVENT_SUBSET_SUMMARY_FIELDNAMES: List[str] = [
     "formal_event_attestation_fpr",
     "system_final_tpr",
     "system_final_fpr",
+    "content_score_mean",
+    "content_score_coverage_count",
+    "content_score_coverage_rate",
+    "content_margin_mean",
+    "content_margin_coverage_count",
+    "content_margin_coverage_rate",
+    "event_attestation_score_mean",
+    "event_attestation_score_coverage_count",
+    "event_attestation_score_coverage_rate",
+    "parent_boundary_hit_count",
+    "attacked_content_failed_count",
     "geo_rescue_eligible_count",
     "geo_rescue_applied_count",
     "boundary_member_count",
 ]
 SYSTEM_EVENT_COUNT_SWEEP_FIELDNAMES: List[str] = [
-    "subset_name",
+    "cohort_name",
+    "ground_truth_label",
     "population_event_count",
     "sample_size",
     "repeat_count",
-    "mean_positive_event_count",
-    "mean_negative_event_count",
-    "mean_system_tpr",
-    "min_system_tpr",
-    "max_system_tpr",
-    "std_system_tpr",
-    "mean_system_fpr",
-    "min_system_fpr",
-    "max_system_fpr",
-    "std_system_fpr",
-    "mean_formal_final_tpr",
-    "mean_formal_final_fpr",
-    "mean_formal_event_attestation_tpr",
-    "mean_formal_event_attestation_fpr",
+    "mean_positive_decision_count",
+    "mean_system_accept_rate",
+    "min_system_accept_rate",
+    "max_system_accept_rate",
+    "std_system_accept_rate",
+    "mean_formal_final_accept_rate",
+    "mean_formal_event_attestation_accept_rate",
 ]
 GEOMETRY_OPTIONAL_CLAIM_BY_FAMILY_SEVERITY_FIELDNAMES: List[str] = [
     "attack_family",
@@ -194,6 +200,10 @@ GEOMETRY_OPTIONAL_CLAIM_BY_FAMILY_SEVERITY_FIELDNAMES: List[str] = [
     "matrix_version",
     "event_count",
     "system_final_attack_tpr",
+    "boundary_hit_count",
+    "content_failed_count",
+    "eligible_count",
+    "rescue_applied_count",
     "geo_rescue_eligible_count",
     "geo_rescue_applied_count",
     "boundary_member_count",
@@ -443,21 +453,45 @@ def _build_attack_event_subset_export_rows(
         if not isinstance(attack_event_row, Mapping):
             raise TypeError("attack_event_row must be Mapping")
         geometry_optional_claim_evidence = _extract_mapping(attack_event_row.get("geometry_optional_claim_evidence"))
-        if boundary_only and geometry_optional_claim_evidence.get("eligible_for_optional_claim") is not True:
+        parent_boundary_hit = (
+            geometry_optional_claim_evidence.get("parent_boundary_hit") is True
+            or geometry_optional_claim_evidence.get("eligible_for_optional_claim") is True
+        )
+        if boundary_only and not parent_boundary_hit:
             continue
         formal_record = _extract_mapping(attack_event_row.get("formal_record"))
         formal_final_decision = _extract_mapping(formal_record.get("formal_final_decision"))
         formal_event_attestation = _extract_mapping(formal_record.get("formal_event_attestation_decision"))
         attestation_payload = _extract_mapping(formal_record.get("attestation"))
         image_evidence_payload = _extract_mapping(attestation_payload.get("image_evidence_result"))
+        sample_role = str(attack_event_row.get("sample_role") or "")
+        content_score = _extract_float(cast(Mapping[str, Any], attack_event_row), "content_score")
+        content_threshold_value = _extract_float(geometry_optional_claim_evidence, "content_threshold_value")
+        content_margin = (
+            float(content_score - content_threshold_value)
+            if content_score is not None and content_threshold_value is not None
+            else None
+        )
+        geo_rescue_candidate_family = (
+            geometry_optional_claim_evidence.get("geo_rescue_candidate_family") is True
+            or attack_event_row.get("geometry_rescue_candidate") is True
+        )
+        geo_rescue_eligible = (
+            geometry_optional_claim_evidence.get("geo_rescue_eligible") is True
+            or image_evidence_payload.get("geo_rescue_eligible") is True
+        )
+        geo_rescue_applied = (
+            geometry_optional_claim_evidence.get("geo_rescue_applied") is True
+            or image_evidence_payload.get("geo_rescue_applied") is True
+        )
         subset_rows.append(
             {
                 "subset_name": subset_name,
                 "attack_event_id": attack_event_row.get("attack_event_id"),
                 "attack_event_index": attack_event_row.get("attack_event_index"),
                 "parent_event_id": attack_event_row.get("parent_event_id"),
-                "sample_role": attack_event_row.get("sample_role"),
-                "ground_truth_label": True,
+                "sample_role": sample_role,
+                "ground_truth_label": sample_role != ATTACKED_NEGATIVE_SAMPLE_ROLE,
                 "attack_family": attack_event_row.get("attack_family"),
                 "attack_config_name": attack_event_row.get("attack_config_name"),
                 "attack_condition_base_key": attack_event_row.get("attack_condition_base_key"),
@@ -466,17 +500,21 @@ def _build_attack_event_subset_export_rows(
                 "matrix_version": attack_event_row.get("matrix_version"),
                 "matrix_attack_set_names": copy.deepcopy(attack_event_row.get("matrix_attack_set_names", [])),
                 "geometry_rescue_candidate": attack_event_row.get("geometry_rescue_candidate") is True,
+                "geo_rescue_candidate_family": geo_rescue_candidate_family,
                 "severity_status": attack_event_row.get("severity_status"),
                 "severity_label": attack_event_row.get("severity_label"),
                 "severity_level_index": attack_event_row.get("severity_level_index"),
-                "content_score": attack_event_row.get("content_score"),
+                "content_score": content_score,
+                "content_margin": content_margin,
                 "event_attestation_score": attack_event_row.get("event_attestation_score"),
                 "formal_final_decision_is_positive": formal_final_decision.get("is_watermarked") is True,
                 "formal_event_attestation_is_positive": formal_event_attestation.get("is_watermarked") is True,
                 "system_final_is_positive": bool(formal_record.get("derived_attack_union_positive", False)),
-                "geo_rescue_eligible": image_evidence_payload.get("geo_rescue_eligible"),
-                "geo_rescue_applied": image_evidence_payload.get("geo_rescue_applied"),
+                "geo_rescue_eligible": geo_rescue_eligible,
+                "geo_rescue_applied": geo_rescue_applied,
                 "eligible_for_optional_claim": geometry_optional_claim_evidence.get("eligible_for_optional_claim"),
+                "parent_boundary_hit": parent_boundary_hit,
+                "attacked_content_failed": geometry_optional_claim_evidence.get("attacked_content_failed"),
                 "boundary_rule_version": geometry_optional_claim_evidence.get("boundary_rule_version"),
                 "boundary_metric": geometry_optional_claim_evidence.get("boundary_metric"),
                 "boundary_abs_margin_min": geometry_optional_claim_evidence.get("boundary_abs_margin_min"),
@@ -513,9 +551,14 @@ def _build_event_subset_summary_row(subset_name: str, rows: Sequence[Mapping[str
         1 for row in rows if row.get("formal_event_attestation_is_positive") is True
     )
     system_final_positive_count = sum(1 for row in rows if row.get("system_final_is_positive") is True)
+    content_score_summary = _summarize_subset_numeric_field(rows, "content_score")
+    content_margin_summary = _summarize_subset_numeric_field(rows, "content_margin")
+    event_attestation_score_summary = _summarize_subset_numeric_field(rows, "event_attestation_score")
+    parent_boundary_hit_count = sum(1 for row in rows if row.get("parent_boundary_hit") is True)
+    attacked_content_failed_count = sum(1 for row in rows if row.get("attacked_content_failed") is True)
     geo_rescue_eligible_count = sum(1 for row in rows if row.get("geo_rescue_eligible") is True)
     geo_rescue_applied_count = sum(1 for row in rows if row.get("geo_rescue_applied") is True)
-    boundary_member_count = sum(1 for row in rows if row.get("eligible_for_optional_claim") is True)
+    boundary_member_count = parent_boundary_hit_count
     return {
         "subset_name": subset_name,
         "event_count": len(rows),
@@ -548,6 +591,17 @@ def _build_event_subset_summary_row(subset_name: str, rows: Sequence[Mapping[str
             sum(1 for row in negative_rows if row.get("system_final_is_positive") is True),
             len(negative_rows),
         ),
+        "content_score_mean": content_score_summary["mean"],
+        "content_score_coverage_count": content_score_summary["coverage_count"],
+        "content_score_coverage_rate": content_score_summary["coverage_rate"],
+        "content_margin_mean": content_margin_summary["mean"],
+        "content_margin_coverage_count": content_margin_summary["coverage_count"],
+        "content_margin_coverage_rate": content_margin_summary["coverage_rate"],
+        "event_attestation_score_mean": event_attestation_score_summary["mean"],
+        "event_attestation_score_coverage_count": event_attestation_score_summary["coverage_count"],
+        "event_attestation_score_coverage_rate": event_attestation_score_summary["coverage_rate"],
+        "parent_boundary_hit_count": parent_boundary_hit_count,
+        "attacked_content_failed_count": attacked_content_failed_count,
         "geo_rescue_eligible_count": geo_rescue_eligible_count,
         "geo_rescue_applied_count": geo_rescue_applied_count,
         "boundary_member_count": boundary_member_count,
@@ -578,6 +632,41 @@ def _summarize_numeric_values(values: Sequence[float | None]) -> Dict[str, float
     }
 
 
+def _summarize_subset_numeric_field(
+    rows: Sequence[Mapping[str, Any]],
+    field_name: str,
+) -> Dict[str, float | int | None]:
+    """
+    功能：对一个 subset 数值字段计算均值和覆盖率。 
+
+    Summarize one numeric subset field with mean and coverage statistics.
+
+    Args:
+        rows: Event rows belonging to one subset.
+        field_name: Numeric field name.
+
+    Returns:
+        Mean and coverage summary mapping.
+    """
+    if not isinstance(rows, Sequence):
+        raise TypeError("rows must be Sequence")
+    if not isinstance(field_name, str) or not field_name:
+        raise TypeError("field_name must be non-empty str")
+
+    values: List[float] = []
+    for row in rows:
+        value = row.get(field_name)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            values.append(float(value))
+    numeric_summary = _summarize_numeric_values(values)
+    coverage_count = len(values)
+    return {
+        "mean": numeric_summary["mean"],
+        "coverage_count": coverage_count,
+        "coverage_rate": _safe_rate(coverage_count, len(rows)),
+    }
+
+
 def _compute_event_subset_metrics(rows: Sequence[Mapping[str, Any]]) -> Dict[str, float | int | None]:
     """
     功能：为一个 event 子集样本计算 formal/system 指标。 
@@ -593,34 +682,20 @@ def _compute_event_subset_metrics(rows: Sequence[Mapping[str, Any]]) -> Dict[str
     if not isinstance(rows, Sequence):
         raise TypeError("rows must be Sequence")
 
-    positive_rows = [row for row in rows if row.get("ground_truth_label") is True]
-    negative_rows = [row for row in rows if row.get("ground_truth_label") is False]
+    positive_decision_count = sum(1 for row in rows if row.get("system_final_is_positive") is True)
+    formal_final_positive_count = sum(
+        1 for row in rows if row.get("formal_final_decision_is_positive") is True
+    )
+    formal_event_attestation_positive_count = sum(
+        1 for row in rows if row.get("formal_event_attestation_is_positive") is True
+    )
     return {
-        "positive_event_count": len(positive_rows),
-        "negative_event_count": len(negative_rows),
-        "system_tpr": _safe_rate(
-            sum(1 for row in positive_rows if row.get("system_final_is_positive") is True),
-            len(positive_rows),
-        ),
-        "system_fpr": _safe_rate(
-            sum(1 for row in negative_rows if row.get("system_final_is_positive") is True),
-            len(negative_rows),
-        ),
-        "formal_final_tpr": _safe_rate(
-            sum(1 for row in positive_rows if row.get("formal_final_decision_is_positive") is True),
-            len(positive_rows),
-        ),
-        "formal_final_fpr": _safe_rate(
-            sum(1 for row in negative_rows if row.get("formal_final_decision_is_positive") is True),
-            len(negative_rows),
-        ),
-        "formal_event_attestation_tpr": _safe_rate(
-            sum(1 for row in positive_rows if row.get("formal_event_attestation_is_positive") is True),
-            len(positive_rows),
-        ),
-        "formal_event_attestation_fpr": _safe_rate(
-            sum(1 for row in negative_rows if row.get("formal_event_attestation_is_positive") is True),
-            len(negative_rows),
+        "positive_decision_count": positive_decision_count,
+        "system_accept_rate": _safe_rate(positive_decision_count, len(rows)),
+        "formal_final_accept_rate": _safe_rate(formal_final_positive_count, len(rows)),
+        "formal_event_attestation_accept_rate": _safe_rate(
+            formal_event_attestation_positive_count,
+            len(rows),
         ),
     }
 
@@ -661,7 +736,12 @@ def _build_system_event_count_sweep_rows(
         population_rows = [dict(cast(Mapping[str, Any], row)) for row in subset_rows]
         population_event_count = len(population_rows)
         if population_event_count <= 0:
-            continue
+            raise ValueError(f"system_event_count_sweep requires non-empty cohort rows: {subset_name}")
+        if not all(isinstance(row.get("ground_truth_label"), bool) for row in population_rows):
+            raise ValueError(f"system_event_count_sweep cohort missing ground_truth_label: {subset_name}")
+        ground_truth_label = bool(population_rows[0]["ground_truth_label"])
+        if any(bool(row["ground_truth_label"]) != ground_truth_label for row in population_rows):
+            raise ValueError(f"system_event_count_sweep cohort must contain one label only: {subset_name}")
         sample_sizes = sorted({count for count in event_counts if isinstance(count, int) and count > 0 and count <= population_event_count} | {population_event_count})
         for sample_size in sample_sizes:
             effective_repeat_count = 1 if sample_size == population_event_count else repeat_count
@@ -674,60 +754,40 @@ def _build_system_event_count_sweep_rows(
                     sampled_rows = [population_rows[int(index)] for index in sampled_indices]
                 sample_metrics.append(_compute_event_subset_metrics(sampled_rows))
 
-            positive_event_count_summary = _summarize_numeric_values(
+            positive_decision_count_summary = _summarize_numeric_values(
                 [
-                    float(cast(int, metric_row["positive_event_count"]))
-                    if isinstance(metric_row.get("positive_event_count"), int)
+                    float(cast(int, metric_row["positive_decision_count"]))
+                    if isinstance(metric_row.get("positive_decision_count"), int)
                     else None
                     for metric_row in sample_metrics
                 ]
             )
-            negative_event_count_summary = _summarize_numeric_values(
+            system_accept_rate_summary = _summarize_numeric_values(
+                [cast(float | None, metric_row.get("system_accept_rate")) for metric_row in sample_metrics]
+            )
+            formal_final_accept_rate_summary = _summarize_numeric_values(
+                [cast(float | None, metric_row.get("formal_final_accept_rate")) for metric_row in sample_metrics]
+            )
+            formal_event_attestation_accept_rate_summary = _summarize_numeric_values(
                 [
-                    float(cast(int, metric_row["negative_event_count"]))
-                    if isinstance(metric_row.get("negative_event_count"), int)
-                    else None
+                    cast(float | None, metric_row.get("formal_event_attestation_accept_rate"))
                     for metric_row in sample_metrics
                 ]
-            )
-            system_tpr_summary = _summarize_numeric_values(
-                [cast(float | None, metric_row.get("system_tpr")) for metric_row in sample_metrics]
-            )
-            system_fpr_summary = _summarize_numeric_values(
-                [cast(float | None, metric_row.get("system_fpr")) for metric_row in sample_metrics]
-            )
-            formal_final_tpr_summary = _summarize_numeric_values(
-                [cast(float | None, metric_row.get("formal_final_tpr")) for metric_row in sample_metrics]
-            )
-            formal_final_fpr_summary = _summarize_numeric_values(
-                [cast(float | None, metric_row.get("formal_final_fpr")) for metric_row in sample_metrics]
-            )
-            formal_event_attestation_tpr_summary = _summarize_numeric_values(
-                [cast(float | None, metric_row.get("formal_event_attestation_tpr")) for metric_row in sample_metrics]
-            )
-            formal_event_attestation_fpr_summary = _summarize_numeric_values(
-                [cast(float | None, metric_row.get("formal_event_attestation_fpr")) for metric_row in sample_metrics]
             )
             sweep_rows.append(
                 {
-                    "subset_name": subset_name,
+                    "cohort_name": subset_name,
+                    "ground_truth_label": ground_truth_label,
                     "population_event_count": population_event_count,
                     "sample_size": sample_size,
                     "repeat_count": effective_repeat_count,
-                    "mean_positive_event_count": positive_event_count_summary["mean"],
-                    "mean_negative_event_count": negative_event_count_summary["mean"],
-                    "mean_system_tpr": system_tpr_summary["mean"],
-                    "min_system_tpr": system_tpr_summary["min"],
-                    "max_system_tpr": system_tpr_summary["max"],
-                    "std_system_tpr": system_tpr_summary["std"],
-                    "mean_system_fpr": system_fpr_summary["mean"],
-                    "min_system_fpr": system_fpr_summary["min"],
-                    "max_system_fpr": system_fpr_summary["max"],
-                    "std_system_fpr": system_fpr_summary["std"],
-                    "mean_formal_final_tpr": formal_final_tpr_summary["mean"],
-                    "mean_formal_final_fpr": formal_final_fpr_summary["mean"],
-                    "mean_formal_event_attestation_tpr": formal_event_attestation_tpr_summary["mean"],
-                    "mean_formal_event_attestation_fpr": formal_event_attestation_fpr_summary["mean"],
+                    "mean_positive_decision_count": positive_decision_count_summary["mean"],
+                    "mean_system_accept_rate": system_accept_rate_summary["mean"],
+                    "min_system_accept_rate": system_accept_rate_summary["min"],
+                    "max_system_accept_rate": system_accept_rate_summary["max"],
+                    "std_system_accept_rate": system_accept_rate_summary["std"],
+                    "mean_formal_final_accept_rate": formal_final_accept_rate_summary["mean"],
+                    "mean_formal_event_attestation_accept_rate": formal_event_attestation_accept_rate_summary["mean"],
                 }
             )
     return sweep_rows
@@ -778,9 +838,10 @@ def _build_geometry_optional_claim_by_family_severity_rows(
         ),
     ):
         system_final_positive_count = 0
-        geo_rescue_eligible_count = 0
-        geo_rescue_applied_count = 0
-        boundary_member_count = 0
+        boundary_hit_count = 0
+        content_failed_count = 0
+        eligible_count = 0
+        rescue_applied_count = 0
         boundary_resolution_failed_event_count = 0
         supporting_evidence_event_count = 0
         content_scores: List[float] = []
@@ -791,13 +852,24 @@ def _build_geometry_optional_claim_by_family_severity_rows(
                 system_final_positive_count += 1
             attestation_payload = _extract_mapping(formal_record.get("attestation"))
             image_evidence_payload = _extract_mapping(attestation_payload.get("image_evidence_result"))
-            if image_evidence_payload.get("geo_rescue_eligible") is True:
-                geo_rescue_eligible_count += 1
-            if image_evidence_payload.get("geo_rescue_applied") is True:
-                geo_rescue_applied_count += 1
             geometry_optional_claim_evidence = _extract_mapping(row.get("geometry_optional_claim_evidence"))
-            if geometry_optional_claim_evidence.get("eligible_for_optional_claim") is True:
-                boundary_member_count += 1
+            if (
+                geometry_optional_claim_evidence.get("parent_boundary_hit") is True
+                or geometry_optional_claim_evidence.get("eligible_for_optional_claim") is True
+            ):
+                boundary_hit_count += 1
+            if geometry_optional_claim_evidence.get("attacked_content_failed") is True:
+                content_failed_count += 1
+            if (
+                geometry_optional_claim_evidence.get("geo_rescue_eligible") is True
+                or image_evidence_payload.get("geo_rescue_eligible") is True
+            ):
+                eligible_count += 1
+            if (
+                geometry_optional_claim_evidence.get("geo_rescue_applied") is True
+                or image_evidence_payload.get("geo_rescue_applied") is True
+            ):
+                rescue_applied_count += 1
             if geometry_optional_claim_evidence.get("boundary_resolution_status") == "failed":
                 boundary_resolution_failed_event_count += 1
             if geometry_optional_claim_evidence.get("supporting_evidence_available") is True:
@@ -818,9 +890,13 @@ def _build_geometry_optional_claim_by_family_severity_rows(
                 "matrix_version": rows[0].get("matrix_version"),
                 "event_count": len(rows),
                 "system_final_attack_tpr": _safe_rate(system_final_positive_count, len(rows)),
-                "geo_rescue_eligible_count": geo_rescue_eligible_count,
-                "geo_rescue_applied_count": geo_rescue_applied_count,
-                "boundary_member_count": boundary_member_count,
+                "boundary_hit_count": boundary_hit_count,
+                "content_failed_count": content_failed_count,
+                "eligible_count": eligible_count,
+                "rescue_applied_count": rescue_applied_count,
+                "geo_rescue_eligible_count": eligible_count,
+                "geo_rescue_applied_count": rescue_applied_count,
+                "boundary_member_count": boundary_hit_count,
                 "boundary_resolution_failed_event_count": boundary_resolution_failed_event_count,
                 "supporting_evidence_event_count": supporting_evidence_event_count,
                 "content_score_mean": float(np.mean(content_scores)) if content_scores else None,
@@ -2235,6 +2311,7 @@ def build_pw04_paper_exports(
     pw02_summary: Mapping[str, Any],
     pw04_paths: Mapping[str, Path],
     attack_event_rows: Sequence[Mapping[str, Any]],
+    attack_negative_event_rows: Sequence[Mapping[str, Any]],
     per_attack_family_metrics_payload: Mapping[str, Any],
     per_attack_condition_metrics_payload: Mapping[str, Any],
     attack_quality_metrics_payload: Mapping[str, Any],
@@ -2250,9 +2327,11 @@ def build_pw04_paper_exports(
         family_root: Family root path.
         pw02_summary: PW02 summary payload.
         pw04_paths: Resolved PW04 path mapping.
-        attack_event_rows: Materialized PW04 attack event rows.
+        attack_event_rows: Materialized attacked-positive PW04 attack event rows.
+        attack_negative_event_rows: Materialized attacked-negative PW04 attack event rows.
         per_attack_family_metrics_payload: Legacy per-family metrics payload.
         per_attack_condition_metrics_payload: Legacy per-condition metrics payload.
+        attack_quality_metrics_payload: Legacy attack-quality metrics payload.
         enable_tail_estimation: Whether optional tail estimation is enabled.
 
     Returns:
@@ -2266,6 +2345,10 @@ def build_pw04_paper_exports(
         raise TypeError("pw02_summary must be Mapping")
     if not isinstance(pw04_paths, Mapping):
         raise TypeError("pw04_paths must be Mapping")
+    if not isinstance(attack_event_rows, Sequence):
+        raise TypeError("attack_event_rows must be Sequence")
+    if not isinstance(attack_negative_event_rows, Sequence):
+        raise TypeError("attack_negative_event_rows must be Sequence")
     if not isinstance(attack_quality_metrics_payload, Mapping):
         raise TypeError("attack_quality_metrics_payload must be Mapping")
     if not isinstance(enable_tail_estimation, bool):
@@ -2383,6 +2466,16 @@ def build_pw04_paper_exports(
         subset_name="boundary_attacked_events",
         boundary_only=True,
     )
+    attack_positive_cohort_rows = _build_attack_event_subset_export_rows(
+        attack_event_rows=attack_event_rows,
+        subset_name="attack_positive",
+        boundary_only=False,
+    )
+    attack_negative_cohort_rows = _build_attack_event_subset_export_rows(
+        attack_event_rows=attack_negative_event_rows,
+        subset_name="attack_negative",
+        boundary_only=False,
+    )
     write_jsonl(general_attacked_event_table_path, general_attacked_event_rows)
     write_jsonl(boundary_attacked_event_table_path, boundary_attacked_event_rows)
 
@@ -2404,12 +2497,17 @@ def build_pw04_paper_exports(
     _write_csv_rows(event_subset_summary_csv_path, EVENT_SUBSET_SUMMARY_FIELDNAMES, event_subset_summary_rows)
 
     matrix_settings = resolve_pw_matrix_settings(load_pw_matrix_config())
+    sweep_rows_by_name = {
+        "clean_positive": [row for row in clean_event_rows if row.get("ground_truth_label") is True],
+        "clean_negative": [row for row in clean_event_rows if row.get("ground_truth_label") is False],
+        "attack_positive": attack_positive_cohort_rows,
+        "attack_negative": attack_negative_cohort_rows,
+    }
+    for cohort_name, cohort_rows in sweep_rows_by_name.items():
+        if not cohort_rows:
+            raise ValueError(f"system_event_count_sweep missing required non-empty cohort: {cohort_name}")
     system_event_count_sweep_rows = _build_system_event_count_sweep_rows(
-        subset_rows_by_name={
-            "clean_eval_events": clean_event_rows,
-            "general_attacked_events": general_attacked_event_rows,
-            "boundary_attacked_events": boundary_attacked_event_rows,
-        },
+        subset_rows_by_name=sweep_rows_by_name,
         event_counts=cast(Sequence[int], cast(Mapping[str, Any], matrix_settings["system_event_count_sweep"])["event_counts"]),
         repeat_count=int(cast(Mapping[str, Any], matrix_settings["system_event_count_sweep"])["repeat_count"]),
         random_seed=int(cast(Mapping[str, Any], matrix_settings["system_event_count_sweep"])["random_seed"]),

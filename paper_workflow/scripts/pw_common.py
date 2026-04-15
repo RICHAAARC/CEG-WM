@@ -62,7 +62,8 @@ GEOMETRY_OPTIONAL_CLAIM_SCOPE = "attacked_positive_content_failed_subset"
 GEOMETRY_OPTIONAL_CLAIM_DIRECTIONALITY = "one_way_positive_only"
 GEOMETRY_OPTIONAL_CLAIM_PROTOCOL_VERSION = "geometry_optional_claim_content_margin_boundary_v1"
 GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_METRIC = "abs_content_margin"
-GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_ABS_MAX = 0.05
+GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_ABS_MIN = 0.02
+GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_ABS_MAX = 0.2
 
 
 def _canonical_json_text(payload: Mapping[str, Any]) -> str:
@@ -215,6 +216,106 @@ def _extract_str_list(node: Any) -> List[str]:
     return normalized
 
 
+def _normalize_matrix_concrete_conditions(node: Any) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Normalize matrix-defined concrete attack conditions.
+
+    Args:
+        node: Candidate concrete-conditions node.
+
+    Returns:
+        Concrete condition rows keyed by attack_condition_base_key.
+    """
+    if node is None:
+        return {}
+    if not isinstance(node, Mapping):
+        raise ValueError("pw_matrix.concrete_conditions must be mapping when provided")
+
+    normalized_conditions: Dict[str, List[Dict[str, Any]]] = {}
+    for raw_condition_key, raw_rows in cast(Mapping[str, Any], node).items():
+        condition_key = str(raw_condition_key or "").strip()
+        if not condition_key:
+            raise ValueError("pw_matrix.concrete_conditions keys must be non-empty str")
+        if not isinstance(raw_rows, list) or not raw_rows:
+            raise ValueError(
+                f"pw_matrix.concrete_conditions.{condition_key} must be non-empty list[mapping]"
+            )
+
+        seen_suffixes: set[str] = set()
+        seen_level_indices: set[int] = set()
+        normalized_rows: List[Dict[str, Any]] = []
+        for row_index, raw_row in enumerate(cast(List[Any], raw_rows)):
+            if not isinstance(raw_row, Mapping):
+                raise ValueError(
+                    f"pw_matrix.concrete_conditions.{condition_key}[{row_index}] must be mapping"
+                )
+            condition_suffix = str(raw_row.get("condition_suffix") or "").strip()
+            severity_label = str(raw_row.get("severity_label") or "").strip()
+            severity_level_index = _extract_int(raw_row.get("severity_level_index"))
+            params_node = raw_row.get("params")
+
+            if not condition_suffix:
+                raise ValueError(
+                    f"pw_matrix.concrete_conditions.{condition_key}[{row_index}].condition_suffix must be non-empty str"
+                )
+            if "::" in condition_suffix:
+                raise ValueError(
+                    f"pw_matrix.concrete_conditions.{condition_key}[{row_index}].condition_suffix must not contain '::'"
+                )
+            if not severity_label:
+                raise ValueError(
+                    f"pw_matrix.concrete_conditions.{condition_key}[{row_index}].severity_label must be non-empty str"
+                )
+            if severity_level_index is None or severity_level_index < 0:
+                raise ValueError(
+                    f"pw_matrix.concrete_conditions.{condition_key}[{row_index}].severity_level_index must be non-negative int"
+                )
+            if not isinstance(params_node, Mapping) or not params_node:
+                raise ValueError(
+                    f"pw_matrix.concrete_conditions.{condition_key}[{row_index}].params must be non-empty mapping"
+                )
+            if condition_suffix in seen_suffixes:
+                raise ValueError(
+                    f"duplicate pw_matrix concrete condition suffix under {condition_key}: {condition_suffix}"
+                )
+            if severity_level_index in seen_level_indices:
+                raise ValueError(
+                    f"duplicate pw_matrix concrete severity_level_index under {condition_key}: {severity_level_index}"
+                )
+
+            seen_suffixes.add(condition_suffix)
+            seen_level_indices.add(severity_level_index)
+            normalized_rows.append(
+                {
+                    "condition_suffix": condition_suffix,
+                    "severity_label": severity_label,
+                    "severity_level_index": severity_level_index,
+                    "params": copy.deepcopy(dict(cast(Mapping[str, Any], params_node))),
+                }
+            )
+
+        ordered_rows = sorted(
+            normalized_rows,
+            key=lambda row: (
+                int(cast(int, row["severity_level_index"])),
+                str(row["condition_suffix"]),
+            ),
+        )
+        expected_level_indices = list(range(len(ordered_rows)))
+        actual_level_indices = [
+            int(cast(int, row["severity_level_index"]))
+            for row in ordered_rows
+        ]
+        if actual_level_indices != expected_level_indices:
+            raise ValueError(
+                "pw_matrix concrete severity_level_index values must form a contiguous 0-based sequence: "
+                f"condition_key={condition_key}, actual={actual_level_indices}"
+            )
+        normalized_conditions[condition_key] = ordered_rows
+
+    return normalized_conditions
+
+
 def load_pw_matrix_config(repo_root: Path = REPO_ROOT) -> Dict[str, Any]:
     """
     Load the paper_workflow matrix config mapping.
@@ -275,6 +376,12 @@ def resolve_pw_matrix_settings(matrix_cfg: Mapping[str, Any]) -> Dict[str, Any]:
             raise ValueError(f"pw_matrix.attack_sets.{set_name}.families must be non-empty list[str]")
         attack_sets[set_name] = list(dict.fromkeys(families))
 
+    concrete_conditions = _normalize_matrix_concrete_conditions(matrix_cfg.get("concrete_conditions"))
+    if materialization_profile == "matrix_defined_concrete_conditions" and not concrete_conditions:
+        raise ValueError(
+            "pw_matrix.concrete_conditions must be non-empty when materialization_profile=matrix_defined_concrete_conditions"
+        )
+
     geometry_optional_claim_node = matrix_cfg.get("geometry_optional_claim")
     if not isinstance(geometry_optional_claim_node, Mapping):
         raise ValueError("pw_matrix.geometry_optional_claim must be mapping")
@@ -320,6 +427,7 @@ def resolve_pw_matrix_settings(matrix_cfg: Mapping[str, Any]) -> Dict[str, Any]:
         "matrix_version": matrix_version,
         "materialization_profile": materialization_profile,
         "attack_sets": attack_sets,
+        "concrete_conditions": concrete_conditions,
         "geometry_optional_claim": {
             "candidate_attack_set": candidate_attack_set,
             "candidate_attack_families": list(attack_sets[candidate_attack_set]),
@@ -2256,6 +2364,10 @@ def build_attack_condition_catalog(
     )
     materialization_profile = str(matrix_settings["materialization_profile"])
     attack_sets = cast(Mapping[str, Sequence[str]], matrix_settings["attack_sets"])
+    concrete_conditions = cast(
+        Mapping[str, Sequence[Mapping[str, Any]]],
+        matrix_settings.get("concrete_conditions", {}),
+    )
     geometry_optional_claim_settings = cast(Mapping[str, Any], matrix_settings["geometry_optional_claim"])
     geometry_candidate_families = {
         str(attack_family)
@@ -2264,6 +2376,16 @@ def build_attack_condition_catalog(
     attack_plan = eval_attack_plan.generate_attack_plan(dict(normalized_protocol_spec))
     if not attack_plan.conditions:
         raise ValueError("attack protocol must declare at least one condition")
+    if materialization_profile == "matrix_defined_concrete_conditions":
+        declared_condition_keys = set(concrete_conditions.keys())
+        protocol_condition_keys = set(attack_plan.conditions)
+        missing_condition_keys = sorted(protocol_condition_keys - declared_condition_keys)
+        extra_condition_keys = sorted(declared_condition_keys - protocol_condition_keys)
+        if missing_condition_keys or extra_condition_keys:
+            raise ValueError(
+                "pw_matrix concrete_conditions must match attack protocol conditions exactly: "
+                f"missing={missing_condition_keys}, extra={extra_condition_keys}"
+            )
 
     condition_rows: List[Dict[str, Any]] = []
     for condition_key in attack_plan.conditions:
@@ -2274,6 +2396,63 @@ def build_attack_condition_catalog(
         attack_family = str(condition_spec["attack_family"])
         params_version = str(condition_spec["params_version"])
         attack_param_variants = materialize_attack_param_variants(cast(Mapping[str, Any], condition_spec["params"]))
+        if materialization_profile == "matrix_defined_concrete_conditions":
+            concrete_rows = concrete_conditions.get(condition_key)
+            if not concrete_rows:
+                raise ValueError(
+                    f"pw_matrix.concrete_conditions missing rows for attack condition: {condition_key}"
+                )
+            allowed_variant_digests = {
+                canonical_mapping_sha256(variant): variant
+                for variant in attack_param_variants
+            }
+            seen_condition_keys: set[str] = set()
+            for variant_index, concrete_row in enumerate(concrete_rows):
+                attack_params = copy.deepcopy(dict(cast(Mapping[str, Any], concrete_row["params"])))
+                attack_params_digest = canonical_mapping_sha256(attack_params)
+                if attack_params_digest not in allowed_variant_digests:
+                    raise ValueError(
+                        "pw_matrix concrete condition params are not permitted by configs/attack_protocol.yaml: "
+                        f"condition_key={condition_key}, condition_suffix={concrete_row.get('condition_suffix')}"
+                    )
+                severity_metadata = _build_attack_severity_metadata(
+                    attack_family=attack_family,
+                    attack_params=attack_params,
+                )
+                severity_metadata["severity_label"] = concrete_row.get("severity_label")
+                severity_metadata["severity_level_index"] = concrete_row.get("severity_level_index")
+                condition_suffix = str(concrete_row["condition_suffix"])
+                attack_condition_key = f"{condition_key}::{condition_suffix}"
+                if attack_condition_key in seen_condition_keys:
+                    raise ValueError(
+                        f"duplicate matrix-defined attack_condition_key generated: {attack_condition_key}"
+                    )
+                seen_condition_keys.add(attack_condition_key)
+                condition_rows.append(
+                    {
+                        "attack_condition_base_key": condition_key,
+                        "attack_family": attack_family,
+                        "attack_config_name": condition_key,
+                        "attack_params_version": params_version,
+                        "attack_params": attack_params,
+                        "attack_params_digest": attack_params_digest,
+                        "attack_protocol_version": condition_spec.get("protocol_version", "<absent>"),
+                        "attack_protocol_digest": condition_spec.get("protocol_digest", "<absent>"),
+                        "attack_materialization_profile": materialization_profile,
+                        "matrix_profile": matrix_settings["matrix_profile"],
+                        "matrix_version": matrix_settings["matrix_version"],
+                        "matrix_attack_set_names": _resolve_attack_set_names(
+                            attack_family=attack_family,
+                            attack_sets=attack_sets,
+                        ),
+                        "geometry_rescue_candidate": attack_family in geometry_candidate_families,
+                        "attack_condition_suffix": condition_suffix,
+                        "attack_condition_variant_index": variant_index,
+                        "attack_condition_key": attack_condition_key,
+                        **severity_metadata,
+                    }
+                )
+            continue
         if materialization_profile == "first_value_per_condition":
             attack_param_variants = attack_param_variants[:1]
         elif materialization_profile != "protocol_list_cartesian_per_condition":
@@ -2348,6 +2527,8 @@ def build_attack_condition_catalog(
     grouped_rows: Dict[str, List[Dict[str, Any]]] = {}
     for condition_row in condition_rows:
         grouped_rows.setdefault(str(condition_row["attack_family"]), []).append(condition_row)
+    if materialization_profile == "matrix_defined_concrete_conditions":
+        return condition_rows
     for grouped_condition_rows in grouped_rows.values():
         sortable_rows = [
             row

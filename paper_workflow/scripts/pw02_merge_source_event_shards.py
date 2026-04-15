@@ -548,6 +548,27 @@ def _build_threshold_export(
     }
 
 
+def _extract_threshold_value_from_export_summary(threshold_export_summary: Mapping[str, Any]) -> float:
+    """
+    Extract one finite threshold value from the PW02 export summary.
+
+    Args:
+        threshold_export_summary: Threshold export summary mapping.
+
+    Returns:
+        Threshold value.
+    """
+    if not isinstance(threshold_export_summary, Mapping):
+        raise TypeError("threshold_export_summary must be Mapping")
+
+    payload = cast(Mapping[str, Any], threshold_export_summary.get("payload", {}))
+    thresholds_artifact = cast(Mapping[str, Any], payload.get("thresholds_artifact", {}))
+    threshold_value = thresholds_artifact.get("threshold_value")
+    if isinstance(threshold_value, bool) or not isinstance(threshold_value, (int, float)):
+        raise ValueError("PW02 threshold export missing finite thresholds_artifact.threshold_value")
+    return float(threshold_value)
+
+
 def _count_records_by_role(records_summary: Mapping[str, Any]) -> Dict[str, int]:
     """
     Count prepared records by sample role.
@@ -994,6 +1015,7 @@ def _build_clean_event_table_rows(
     clean_negative_event_lookup: Mapping[str, Dict[str, Any]],
     eval_positive_event_ids: Sequence[str],
     eval_negative_event_ids: Sequence[str],
+    content_threshold_value: float,
 ) -> List[Dict[str, Any]]:
     """
     Build the canonical clean evaluate event table rows.
@@ -1003,6 +1025,7 @@ def _build_clean_event_table_rows(
         clean_negative_event_lookup: Clean-negative event lookup.
         eval_positive_event_ids: Evaluate positive event ids.
         eval_negative_event_ids: Evaluate negative event ids.
+        content_threshold_value: Frozen PW02 content threshold value.
 
     Returns:
         Ordered clean event table rows.
@@ -1015,6 +1038,8 @@ def _build_clean_event_table_rows(
         raise TypeError("eval_positive_event_ids must be Sequence")
     if not isinstance(eval_negative_event_ids, Sequence):
         raise TypeError("eval_negative_event_ids must be Sequence")
+    if not isinstance(content_threshold_value, (int, float)) or isinstance(content_threshold_value, bool):
+        raise TypeError("content_threshold_value must be finite float")
 
     row_specs: List[Tuple[int, bool, str, Dict[str, Any]]] = []
     for event_id in eval_positive_event_ids:
@@ -1065,6 +1090,11 @@ def _build_clean_event_table_rows(
                 "prompt_text": event_payload.get("prompt_text"),
                 "detect_record_path": normalize_path_value(detect_record_path),
                 "content_score": content_score,
+                "content_margin": (
+                    float(cast(float, content_score) - float(content_threshold_value))
+                    if isinstance(content_score, (int, float)) and not isinstance(content_score, bool)
+                    else None
+                ),
                 "content_score_source": content_score_source,
                 "event_attestation_score": event_attestation_score,
                 "event_attestation_score_source": event_attestation_score_source,
@@ -2096,6 +2126,9 @@ def run_pw02_merge_source_event_shards(
         clean_negative_event_lookup=clean_negative_events,
         eval_positive_event_ids=cast(Sequence[str], source_split_plan.get("eval_pos_event_ids", [])),
         eval_negative_event_ids=cast(Sequence[str], source_split_plan.get("eval_neg_event_ids", [])),
+        content_threshold_value=_extract_threshold_value_from_export_summary(
+            threshold_exports[_resolve_top_level_score_directory_name(CONTENT_SCORE_NAME)]
+        ),
     )
     clean_event_table_path = stage_root / "tables" / CLEAN_EVENT_TABLE_FILE_NAME
     ensure_directory(clean_event_table_path.parent)

@@ -101,7 +101,7 @@ def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
     assert family_manifest["source_parameters"]["calibration_fraction"] == 0.5
     assert family_manifest["source_parameters"]["source_shard_count"] == 3
     assert family_manifest["attack_parameters"]["attack_shard_count"] == 3
-    assert family_manifest["attack_parameters"]["materialization_profile"] == "protocol_list_cartesian_per_condition"
+    assert family_manifest["attack_parameters"]["materialization_profile"] == "matrix_defined_concrete_conditions"
     assert family_manifest["attack_parameters"]["matrix_profile"] == "family_x_severity_v1"
     assert family_manifest["attack_parameters"]["system_event_count_sweep"]["repeat_count"] == 64
     assert family_manifest["attack_parameters"]["wrong_event_attestation_challenge_plan_frozen"] is True
@@ -153,7 +153,7 @@ def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
     ]
     assert first_summary["source_shard_count"] == 3
     assert first_summary["attack_shard_count"] == 3
-    assert first_summary["materialization_profile"] == "protocol_list_cartesian_per_condition"
+    assert first_summary["materialization_profile"] == "matrix_defined_concrete_conditions"
     assert first_summary["matrix_profile"] == "family_x_severity_v1"
     assert first_summary["wrong_event_challenge_parent_event_count"] == 4
     assert first_summary["wrong_event_challenge_available_assignment_count"] == 4
@@ -162,6 +162,18 @@ def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
     assert first_summary["severity_axis_kind"] == "family_local"
     assert first_summary["severity_status_counts"]["ok"] > 0
     assert first_summary["severity_available_family_count"] > 0
+
+    attack_condition_catalog = build_attack_condition_catalog()
+    rotate_condition_keys = [
+        row["attack_condition_key"]
+        for row in attack_condition_catalog
+        if row["attack_condition_base_key"] == "rotate::v1"
+    ]
+    assert rotate_condition_keys == [
+        "rotate::v1::sev00",
+        "rotate::v1::sev01",
+        "rotate::v1::sev02",
+    ]
 
 
 def test_pw00_can_freeze_independent_attack_shard_count(tmp_path: Path) -> None:

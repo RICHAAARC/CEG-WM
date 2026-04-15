@@ -27,6 +27,7 @@ from paper_workflow.scripts.pw_common import (
     ATTACKED_NEGATIVE_SAMPLE_ROLE,
     ATTACKED_POSITIVE_SAMPLE_ROLE,
     CLEAN_NEGATIVE_SAMPLE_ROLE,
+    GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_ABS_MIN,
     GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_ABS_MAX,
     GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_METRIC,
     GEOMETRY_OPTIONAL_CLAIM_DIRECTIONALITY,
@@ -1055,7 +1056,7 @@ def _resolve_geometry_optional_claim_boundary_assignment(
         float(cast(float, assignment_payload["boundary_abs_margin_min"]))
         if isinstance(assignment_payload.get("boundary_abs_margin_min"), (int, float))
         and not isinstance(assignment_payload.get("boundary_abs_margin_min"), bool)
-        else 0.0
+        else GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_ABS_MIN
     )
     boundary_abs_margin_max = (
         float(cast(float, assignment_payload["boundary_abs_margin_max"]))
@@ -1195,6 +1196,7 @@ def _attach_geometry_optional_claim_assignment(
 def _build_geometry_optional_claim_evidence(
     *,
     attack_event_spec: Mapping[str, Any],
+    detect_payload: Mapping[str, Any],
     geometry_diagnostics: Mapping[str, Any],
 ) -> Dict[str, Any]:
     """
@@ -1202,6 +1204,7 @@ def _build_geometry_optional_claim_evidence(
 
     Args:
         attack_event_spec: Materialized attack event spec.
+        detect_payload: Attacked detect payload.
         geometry_diagnostics: Stable PW03 geometry diagnostics.
 
     Returns:
@@ -1209,6 +1212,8 @@ def _build_geometry_optional_claim_evidence(
     """
     if not isinstance(attack_event_spec, Mapping):
         raise TypeError("attack_event_spec must be Mapping")
+    if not isinstance(detect_payload, Mapping):
+        raise TypeError("detect_payload must be Mapping")
     if not isinstance(geometry_diagnostics, Mapping):
         raise TypeError("geometry_diagnostics must be Mapping")
 
@@ -1231,6 +1236,36 @@ def _build_geometry_optional_claim_evidence(
         1
         for field_name in ["sync_success", "inverse_transform_success", "attention_anchor_available"]
         if geometry_diagnostics.get(field_name) is True
+    )
+    attacked_content_payload = _extract_mapping(detect_payload.get("content_evidence_payload"))
+    attacked_content_score = None
+    for candidate in [
+        attacked_content_payload.get("content_chain_score"),
+        attacked_content_payload.get("score"),
+    ]:
+        if isinstance(candidate, (int, float)) and not isinstance(candidate, bool):
+            attacked_content_score = float(candidate)
+            break
+    content_threshold_value = assignment_payload.get("content_threshold_value")
+    attacked_content_failed = None
+    if isinstance(attacked_content_score, float) and isinstance(content_threshold_value, (int, float)) and not isinstance(
+        content_threshold_value,
+        bool,
+    ):
+        attacked_content_failed = float(attacked_content_score) < float(content_threshold_value)
+    parent_boundary_hit = assignment_payload.get("eligible_for_optional_claim") is True
+    geo_rescue_candidate_family = attack_event_spec.get("geometry_rescue_candidate") is True
+    geo_rescue_eligible = bool(
+        parent_boundary_hit
+        and attacked_content_failed is True
+        and geo_rescue_candidate_family
+        and sample_role == ATTACKED_POSITIVE_SAMPLE_ROLE
+    )
+    image_evidence_payload = _extract_mapping(
+        _extract_mapping(detect_payload.get("attestation")).get("image_evidence_result")
+    )
+    geo_rescue_applied = bool(
+        geo_rescue_eligible and image_evidence_payload.get("geo_rescue_applied") is True
     )
 
     return {
@@ -1256,6 +1291,11 @@ def _build_geometry_optional_claim_evidence(
         "content_positive_veto_allowed": False,
         "rescue_directionality": GEOMETRY_OPTIONAL_CLAIM_DIRECTIONALITY,
         "eligible_for_optional_claim": assignment_payload.get("eligible_for_optional_claim") is True,
+        "parent_boundary_hit": parent_boundary_hit,
+        "attacked_content_failed": attacked_content_failed,
+        "geo_rescue_candidate_family": geo_rescue_candidate_family,
+        "geo_rescue_eligible": geo_rescue_eligible,
+        "geo_rescue_applied": geo_rescue_applied,
         "protocol_version": assignment_payload.get("protocol_version", GEOMETRY_OPTIONAL_CLAIM_PROTOCOL_VERSION),
         "boundary_rule_version": assignment_payload.get("boundary_rule_version"),
         "boundary_metric": assignment_payload.get("boundary_metric", GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_METRIC),
@@ -2060,6 +2100,7 @@ def _run_attack_detect_event(
     geometry_diagnostics = _extract_attack_geometry_diagnostics(detect_payload)
     geometry_optional_claim_evidence = _build_geometry_optional_claim_evidence(
         attack_event_spec=attack_event_spec,
+        detect_payload=detect_payload,
         geometry_diagnostics=geometry_diagnostics,
     )
     parent_reference = cast(Mapping[str, Any], attack_event_spec.get("parent_event_reference", {}))
