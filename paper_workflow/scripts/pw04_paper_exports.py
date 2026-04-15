@@ -156,6 +156,9 @@ EVENT_SUBSET_SUMMARY_FIELDNAMES: List[str] = [
     "formal_final_positive_count",
     "formal_event_attestation_positive_count",
     "system_final_positive_count",
+    "positive_rate_content_chain",
+    "positive_rate_event_attestation",
+    "positive_rate_system_final",
     "formal_final_tpr",
     "formal_final_fpr",
     "formal_event_attestation_tpr",
@@ -166,6 +169,7 @@ EVENT_SUBSET_SUMMARY_FIELDNAMES: List[str] = [
     "content_score_coverage_count",
     "content_score_coverage_rate",
     "content_margin_mean",
+    "abs_content_margin_mean",
     "content_margin_coverage_count",
     "content_margin_coverage_rate",
     "event_attestation_score_mean",
@@ -178,9 +182,18 @@ EVENT_SUBSET_SUMMARY_FIELDNAMES: List[str] = [
     "boundary_member_count",
 ]
 SYSTEM_EVENT_COUNT_SWEEP_FIELDNAMES: List[str] = [
+    "cohort",
+    "event_count",
+    "population_event_count",
+    "repeats",
+    "seed",
+    "mean_accept_rate",
+    "std_accept_rate",
+    "p05_accept_rate",
+    "p50_accept_rate",
+    "p95_accept_rate",
     "cohort_name",
     "ground_truth_label",
-    "population_event_count",
     "sample_size",
     "repeat_count",
     "mean_positive_decision_count",
@@ -553,6 +566,11 @@ def _build_event_subset_summary_row(subset_name: str, rows: Sequence[Mapping[str
     system_final_positive_count = sum(1 for row in rows if row.get("system_final_is_positive") is True)
     content_score_summary = _summarize_subset_numeric_field(rows, "content_score")
     content_margin_summary = _summarize_subset_numeric_field(rows, "content_margin")
+    abs_content_margin_summary = _summarize_subset_numeric_field(
+        rows,
+        "content_margin",
+        absolute_value=True,
+    )
     event_attestation_score_summary = _summarize_subset_numeric_field(rows, "event_attestation_score")
     parent_boundary_hit_count = sum(1 for row in rows if row.get("parent_boundary_hit") is True)
     attacked_content_failed_count = sum(1 for row in rows if row.get("attacked_content_failed") is True)
@@ -567,6 +585,12 @@ def _build_event_subset_summary_row(subset_name: str, rows: Sequence[Mapping[str
         "formal_final_positive_count": formal_final_positive_count,
         "formal_event_attestation_positive_count": formal_event_attestation_positive_count,
         "system_final_positive_count": system_final_positive_count,
+        "positive_rate_content_chain": _safe_rate(formal_final_positive_count, len(rows)),
+        "positive_rate_event_attestation": _safe_rate(
+            formal_event_attestation_positive_count,
+            len(rows),
+        ),
+        "positive_rate_system_final": _safe_rate(system_final_positive_count, len(rows)),
         "formal_final_tpr": _safe_rate(
             sum(1 for row in positive_rows if row.get("formal_final_decision_is_positive") is True),
             len(positive_rows),
@@ -595,6 +619,7 @@ def _build_event_subset_summary_row(subset_name: str, rows: Sequence[Mapping[str
         "content_score_coverage_count": content_score_summary["coverage_count"],
         "content_score_coverage_rate": content_score_summary["coverage_rate"],
         "content_margin_mean": content_margin_summary["mean"],
+        "abs_content_margin_mean": abs_content_margin_summary["mean"],
         "content_margin_coverage_count": content_margin_summary["coverage_count"],
         "content_margin_coverage_rate": content_margin_summary["coverage_rate"],
         "event_attestation_score_mean": event_attestation_score_summary["mean"],
@@ -635,6 +660,7 @@ def _summarize_numeric_values(values: Sequence[float | None]) -> Dict[str, float
 def _summarize_subset_numeric_field(
     rows: Sequence[Mapping[str, Any]],
     field_name: str,
+    absolute_value: bool = False,
 ) -> Dict[str, float | int | None]:
     """
     功能：对一个 subset 数值字段计算均值和覆盖率。 
@@ -644,6 +670,7 @@ def _summarize_subset_numeric_field(
     Args:
         rows: Event rows belonging to one subset.
         field_name: Numeric field name.
+        absolute_value: Whether to apply abs() before aggregation.
 
     Returns:
         Mean and coverage summary mapping.
@@ -652,18 +679,53 @@ def _summarize_subset_numeric_field(
         raise TypeError("rows must be Sequence")
     if not isinstance(field_name, str) or not field_name:
         raise TypeError("field_name must be non-empty str")
+    if not isinstance(absolute_value, bool):
+        raise TypeError("absolute_value must be bool")
 
     values: List[float] = []
     for row in rows:
         value = row.get(field_name)
         if isinstance(value, (int, float)) and not isinstance(value, bool):
-            values.append(float(value))
+            value_float = float(value)
+            values.append(abs(value_float) if absolute_value else value_float)
     numeric_summary = _summarize_numeric_values(values)
     coverage_count = len(values)
     return {
         "mean": numeric_summary["mean"],
         "coverage_count": coverage_count,
         "coverage_rate": _safe_rate(coverage_count, len(rows)),
+    }
+
+
+def _summarize_accept_rate_percentiles(values: Sequence[float | None]) -> Dict[str, float | None]:
+    """
+    功能：对 accept rate 序列计算确定性的分位数。 
+
+    Compute deterministic percentile summaries for one accept-rate sequence.
+
+    Args:
+        values: Accept-rate values.
+
+    Returns:
+        Mapping with p05, p50, and p95 percentiles.
+    """
+    if not isinstance(values, Sequence):
+        raise TypeError("values must be Sequence")
+
+    valid_values = [float(value) for value in values if isinstance(value, (int, float)) and not isinstance(value, bool)]
+    if not valid_values:
+        return {
+            "p05_accept_rate": None,
+            "p50_accept_rate": None,
+            "p95_accept_rate": None,
+        }
+
+    valid_array = np.asarray(valid_values, dtype=float)
+    quantiles = np.quantile(valid_array, [0.05, 0.5, 0.95])
+    return {
+        "p05_accept_rate": float(quantiles[0]),
+        "p50_accept_rate": float(quantiles[1]),
+        "p95_accept_rate": float(quantiles[2]),
     }
 
 
@@ -730,9 +792,8 @@ def _build_system_event_count_sweep_rows(
     if not isinstance(random_seed, int):
         raise TypeError("random_seed must be int")
 
-    rng = np.random.default_rng(random_seed)
     sweep_rows: List[Dict[str, Any]] = []
-    for subset_name, subset_rows in subset_rows_by_name.items():
+    for cohort_index, (subset_name, subset_rows) in enumerate(subset_rows_by_name.items()):
         population_rows = [dict(cast(Mapping[str, Any], row)) for row in subset_rows]
         population_event_count = len(population_rows)
         if population_event_count <= 0:
@@ -744,6 +805,8 @@ def _build_system_event_count_sweep_rows(
             raise ValueError(f"system_event_count_sweep cohort must contain one label only: {subset_name}")
         sample_sizes = sorted({count for count in event_counts if isinstance(count, int) and count > 0 and count <= population_event_count} | {population_event_count})
         for sample_size in sample_sizes:
+            row_seed = int(random_seed + ((cohort_index + 1) * 1000) + sample_size)
+            rng = np.random.default_rng(row_seed)
             effective_repeat_count = 1 if sample_size == population_event_count else repeat_count
             sample_metrics: List[Dict[str, float | int | None]] = []
             for _ in range(effective_repeat_count):
@@ -774,11 +837,21 @@ def _build_system_event_count_sweep_rows(
                     for metric_row in sample_metrics
                 ]
             )
+            accept_rate_percentiles = _summarize_accept_rate_percentiles(
+                [cast(float | None, metric_row.get("system_accept_rate")) for metric_row in sample_metrics]
+            )
             sweep_rows.append(
                 {
+                    "cohort": subset_name,
+                    "event_count": sample_size,
+                    "population_event_count": population_event_count,
+                    "repeats": effective_repeat_count,
+                    "seed": row_seed,
+                    "mean_accept_rate": system_accept_rate_summary["mean"],
+                    "std_accept_rate": system_accept_rate_summary["std"],
+                    **accept_rate_percentiles,
                     "cohort_name": subset_name,
                     "ground_truth_label": ground_truth_label,
-                    "population_event_count": population_event_count,
                     "sample_size": sample_size,
                     "repeat_count": effective_repeat_count,
                     "mean_positive_decision_count": positive_decision_count_summary["mean"],

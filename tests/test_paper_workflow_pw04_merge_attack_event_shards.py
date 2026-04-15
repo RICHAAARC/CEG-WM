@@ -1415,10 +1415,35 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
         "general_attacked_events",
         "boundary_attacked_events",
     }
-    assert all("content_margin_mean" in row for row in event_subset_summary["rows"])
-    assert all("content_margin_mean" in row for row in event_subset_summary_rows)
+    required_event_subset_fields = {
+        "subset_name",
+        "event_count",
+        "content_score_mean",
+        "event_attestation_score_mean",
+        "content_margin_mean",
+        "abs_content_margin_mean",
+        "positive_rate_content_chain",
+        "positive_rate_event_attestation",
+        "positive_rate_system_final",
+    }
+    assert all(required_event_subset_fields.issubset(set(row.keys())) for row in event_subset_summary["rows"])
+    assert all(required_event_subset_fields.issubset(set(row.keys())) for row in event_subset_summary_rows)
     assert system_event_count_sweep["system_event_count_sweep"]["repeat_count"] == 64
-    assert {row["cohort_name"] for row in system_event_count_sweep_rows} == {
+    required_sweep_fields = {
+        "cohort",
+        "event_count",
+        "population_event_count",
+        "repeats",
+        "seed",
+        "mean_accept_rate",
+        "std_accept_rate",
+        "p05_accept_rate",
+        "p50_accept_rate",
+        "p95_accept_rate",
+    }
+    assert all(required_sweep_fields.issubset(set(row.keys())) for row in system_event_count_sweep["rows"])
+    assert all(required_sweep_fields.issubset(set(row.keys())) for row in system_event_count_sweep_rows)
+    assert {row["cohort"] for row in system_event_count_sweep_rows} == {
         "clean_positive",
         "clean_negative",
         "attack_positive",
