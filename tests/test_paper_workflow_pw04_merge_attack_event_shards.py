@@ -26,7 +26,12 @@ from main.watermarking.provenance.attestation_statement import (
     compute_attestation_digest,
 )
 from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
-from paper_workflow.scripts.pw_common import ACTIVE_SAMPLE_ROLE, read_jsonl
+from paper_workflow.scripts.pw_common import (
+    ACTIVE_SAMPLE_ROLE,
+    CLEAN_NEGATIVE_SAMPLE_ROLE,
+    read_jsonl,
+    write_jsonl,
+)
 from scripts.notebook_runtime_common import compute_file_sha256, ensure_directory, normalize_path_value, write_json_atomic
 
 
@@ -529,6 +534,60 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
         },
     )
 
+    clean_event_table_path = pw02_root / "tables" / "clean_event_table.jsonl"
+    clean_event_rows: List[Dict[str, Any]] = []
+    for event_index in range(4):
+        clean_event_rows.append(
+            {
+                "clean_event_table_index": len(clean_event_rows),
+                "subset_name": "clean_eval_events",
+                "event_id": f"positive_source_event_{event_index:06d}",
+                "event_index": event_index,
+                "sample_role": ACTIVE_SAMPLE_ROLE,
+                "ground_truth_label": True,
+                "prompt_text": "prompt one" if event_index % 2 == 0 else "prompt two",
+                "detect_record_path": normalize_path_value(
+                    pw02_root / "records" / f"positive_source_event_{event_index:06d}_detect_record.json"
+                ),
+                "content_score": 0.91,
+                "content_score_source": "content_evidence_payload.content_chain_score",
+                "event_attestation_score": 0.81 if event_index < 3 else 0.12,
+                "event_attestation_score_source": "attestation.final_event_attested_decision.event_attestation_score",
+                "formal_final_decision_is_positive": True,
+                "formal_event_attestation_is_positive": event_index < 3,
+                "system_final_is_positive": True,
+                "geo_rescue_eligible": False,
+                "geo_rescue_applied": False,
+                "eligible_for_optional_claim": False,
+            }
+        )
+    for event_index in range(4):
+        clean_event_rows.append(
+            {
+                "clean_event_table_index": len(clean_event_rows),
+                "subset_name": "clean_eval_events",
+                "event_id": f"clean_negative_event_{event_index:06d}",
+                "event_index": event_index + 4,
+                "sample_role": CLEAN_NEGATIVE_SAMPLE_ROLE,
+                "ground_truth_label": False,
+                "prompt_text": "prompt one" if event_index % 2 == 0 else "prompt two",
+                "detect_record_path": normalize_path_value(
+                    pw02_root / "records" / f"clean_negative_event_{event_index:06d}_detect_record.json"
+                ),
+                "content_score": 0.11,
+                "content_score_source": "content_evidence_payload.content_chain_score",
+                "event_attestation_score": 0.81 if event_index == 0 else 0.0,
+                "event_attestation_score_source": "attestation.final_event_attested_decision.event_attestation_score",
+                "formal_final_decision_is_positive": False,
+                "formal_event_attestation_is_positive": event_index == 0,
+                "system_final_is_positive": False,
+                "geo_rescue_eligible": False,
+                "geo_rescue_applied": False,
+                "eligible_for_optional_claim": False,
+            }
+        )
+    write_jsonl(clean_event_table_path, clean_event_rows)
+
     finalize_manifest_path = pw02_root / "paper_source_finalize_manifest.json"
     write_json_atomic(
         finalize_manifest_path,
@@ -539,6 +598,11 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
             "threshold_exports": {
                 "content": {"path": normalize_path_value(content_threshold_export_path)},
                 "attestation": {"path": normalize_path_value(attestation_threshold_export_path)},
+            },
+            "clean_event_table": {
+                "path": normalize_path_value(clean_event_table_path),
+                "event_count": len(clean_event_rows),
+                "subset_name": "clean_eval_events",
             },
             "source_pools": {},
         },
@@ -556,6 +620,7 @@ def _build_pw02_fixture(summary: Dict[str, Any]) -> Dict[str, Any]:
             "derived_system_union_metrics_artifact_path": normalize_path_value(derived_clean_metrics_path),
             "clean_pair_artifacts_dir": normalize_path_value(quality_root),
             "clean_quality_pair_manifest_path": normalize_path_value(clean_quality_pair_manifest_path),
+            "clean_event_table_path": normalize_path_value(clean_event_table_path),
             "payload_metrics_dir": normalize_path_value(payload_root),
             "payload_clean_summary_path": normalize_path_value(payload_clean_summary_path),
             "analysis_only_artifact_paths": {
@@ -1089,6 +1154,16 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     system_final_auxiliary_attack_by_family_path = Path(str(pw04_summary["system_final_auxiliary_attack_by_family_path"]))
     system_final_auxiliary_attack_by_condition_path = Path(str(pw04_summary["system_final_auxiliary_attack_by_condition_path"]))
     attack_negative_pool_manifest_path = Path(str(pw04_summary["attack_negative_pool_manifest_path"]))
+    clean_event_rows = read_jsonl(Path(str(paper_tables_paths["clean_event_table_path"])))
+    general_attacked_event_rows = read_jsonl(Path(str(paper_tables_paths["general_attacked_event_table_path"])))
+    boundary_attacked_event_rows = read_jsonl(Path(str(paper_tables_paths["boundary_attacked_event_table_path"])))
+    event_subset_summary = _load_json_dict(Path(str(paper_tables_paths["event_subset_summary_json_path"])))
+    event_subset_summary_rows = _load_csv_rows(Path(str(paper_tables_paths["event_subset_summary_csv_path"])))
+    system_event_count_sweep = _load_json_dict(Path(str(paper_tables_paths["system_event_count_sweep_json_path"])))
+    system_event_count_sweep_rows = _load_csv_rows(Path(str(paper_tables_paths["system_event_count_sweep_csv_path"])))
+    geometry_optional_claim_by_family_severity_rows = _load_csv_rows(
+        Path(str(paper_tables_paths["geometry_optional_claim_by_family_severity_csv_path"]))
+    )
     formal_attack_negative_metrics_path = Path(str(pw04_summary["formal_attack_negative_metrics_path"]))
 
     required_paths = [
@@ -1321,6 +1396,27 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert bootstrap_payload["scopes"]["event_attestation"]["clean_fpr"]["status"] == "ok"
     assert bootstrap_payload["scopes"]["system_final"]["attack_tpr"]["lower_bound"] is not None
     assert len(bootstrap_csv_rows) == 9
+    assert clean_event_rows
+    assert {row["subset_name"] for row in clean_event_rows} == {"clean_eval_events"}
+    assert len(general_attacked_event_rows) == expected_positive_attack_event_count
+    assert {row["subset_name"] for row in general_attacked_event_rows} == {"general_attacked_events"}
+    assert len(boundary_attacked_event_rows) <= len(general_attacked_event_rows)
+    assert {row["subset_name"] for row in event_subset_summary["rows"]} == {
+        "clean_eval_events",
+        "general_attacked_events",
+        "boundary_attacked_events",
+    }
+    assert {row["subset_name"] for row in event_subset_summary_rows} == {
+        "clean_eval_events",
+        "general_attacked_events",
+        "boundary_attacked_events",
+    }
+    assert system_event_count_sweep["system_event_count_sweep"]["repeat_count"] == 64
+    expected_sweep_subset_names = {"clean_eval_events", "general_attacked_events"}
+    if boundary_attacked_event_rows:
+        expected_sweep_subset_names.add("boundary_attacked_events")
+    assert {row["subset_name"] for row in system_event_count_sweep_rows} == expected_sweep_subset_names
+    assert geometry_optional_claim_by_family_severity_rows
 
     assert tail_fpr_1e4["tail_estimation_enabled"] is False
     assert tail_fpr_1e4["readiness"]["status"] == "disabled"

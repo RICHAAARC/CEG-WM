@@ -903,12 +903,15 @@ def _collect_completed_attack_events(
 
             attack_family = event_manifest.get("attack_family")
             attack_config_name = event_manifest.get("attack_config_name")
+            attack_condition_base_key = event_manifest.get("attack_condition_base_key")
             attack_condition_key = event_manifest.get("attack_condition_key")
             attack_params_digest = event_manifest.get("attack_params_digest")
             if not isinstance(attack_family, str) or not attack_family:
                 raise ValueError(f"PW03 event manifest missing attack_family: {attack_event_id}")
             if not isinstance(attack_config_name, str) or not attack_config_name:
                 raise ValueError(f"PW03 event manifest missing attack_config_name: {attack_event_id}")
+            if not isinstance(attack_condition_base_key, str) or not attack_condition_base_key:
+                attack_condition_base_key = expected_attack_event.get("attack_condition_base_key")
             if not isinstance(attack_condition_key, str) or not attack_condition_key:
                 raise ValueError(f"PW03 event manifest missing attack_condition_key: {attack_event_id}")
             if not isinstance(attack_params_digest, str) or not attack_params_digest:
@@ -929,6 +932,17 @@ def _collect_completed_attack_events(
             geometry_diagnostics = _extract_mapping(event_manifest.get("geometry_diagnostics"))
             if not geometry_diagnostics:
                 geometry_diagnostics = _extract_mapping(detect_payload.get("paper_workflow_geometry_diagnostics"))
+            geometry_optional_claim_evidence = _extract_mapping(event_manifest.get("geometry_optional_claim_evidence"))
+            matrix_profile = event_manifest.get("matrix_profile", expected_attack_event.get("matrix_profile"))
+            matrix_version = event_manifest.get("matrix_version", expected_attack_event.get("matrix_version"))
+            matrix_attack_set_names = event_manifest.get(
+                "matrix_attack_set_names",
+                expected_attack_event.get("matrix_attack_set_names", []),
+            )
+            geometry_rescue_candidate = event_manifest.get(
+                "geometry_rescue_candidate",
+                expected_attack_event.get("geometry_rescue_candidate"),
+            )
 
             unique_parent_condition_key = (parent_event_id, attack_family, attack_condition_key)
             if unique_parent_condition_key in discovered_parent_condition_keys:
@@ -1009,8 +1023,13 @@ def _collect_completed_attack_events(
                     "parent_event_id": parent_event_id,
                     "attack_family": attack_family,
                     "attack_config_name": attack_config_name,
+                    "attack_condition_base_key": attack_condition_base_key,
                     "attack_condition_key": attack_condition_key,
                     "attack_params_digest": attack_params_digest,
+                    "matrix_profile": matrix_profile,
+                    "matrix_version": matrix_version,
+                    "matrix_attack_set_names": copy.deepcopy(matrix_attack_set_names),
+                    "geometry_rescue_candidate": geometry_rescue_candidate is True,
                     "source_finalize_manifest_digest": source_finalize_manifest_digest,
                     "threshold_artifact_paths": threshold_artifact_paths,
                     "parent_source_image_path": parent_source_image_path,
@@ -1035,6 +1054,7 @@ def _collect_completed_attack_events(
                     "severity_sort_value": severity_metadata.get("severity_sort_value"),
                     "severity_label": severity_metadata.get("severity_label"),
                     "severity_level_index": severity_metadata.get("severity_level_index"),
+                    "geometry_optional_claim_evidence": geometry_optional_claim_evidence,
                     "geometry_diagnostics": geometry_diagnostics,
                     "sync_success": geometry_diagnostics.get("sync_success"),
                     "sync_status": geometry_diagnostics.get("sync_status"),
@@ -1915,6 +1935,7 @@ def _write_attack_event_table_jsonl(
         )
         attestation_payload = cast(Mapping[str, Any], formal_record.get("attestation", {}))
         image_evidence_payload = cast(Mapping[str, Any], attestation_payload.get("image_evidence_result", {}))
+        geometry_optional_claim_evidence = _extract_mapping(attack_event_row.get("geometry_optional_claim_evidence"))
         rows.append(
             {
                 "attack_event_id": attack_event_row["attack_event_id"],
@@ -1922,8 +1943,13 @@ def _write_attack_event_table_jsonl(
                 "parent_event_id": attack_event_row["parent_event_id"],
                 "attack_family": attack_event_row["attack_family"],
                 "attack_config_name": attack_event_row["attack_config_name"],
+                "attack_condition_base_key": attack_event_row.get("attack_condition_base_key"),
                 "attack_condition_key": attack_event_row["attack_condition_key"],
                 "attack_params_digest": attack_event_row["attack_params_digest"],
+                "matrix_profile": attack_event_row.get("matrix_profile"),
+                "matrix_version": attack_event_row.get("matrix_version"),
+                "matrix_attack_set_names": copy.deepcopy(attack_event_row.get("matrix_attack_set_names", [])),
+                "geometry_rescue_candidate": attack_event_row.get("geometry_rescue_candidate"),
                 "severity_status": attack_event_row.get("severity_status"),
                 "severity_reason": attack_event_row.get("severity_reason"),
                 "severity_rule_version": attack_event_row.get("severity_rule_version"),
@@ -1968,6 +1994,16 @@ def _write_attack_event_table_jsonl(
                 "geo_rescue_eligible": image_evidence_payload.get("geo_rescue_eligible"),
                 "geo_rescue_applied": image_evidence_payload.get("geo_rescue_applied"),
                 "geo_not_used_reason": image_evidence_payload.get("geo_not_used_reason"),
+                "geometry_optional_claim_status": geometry_optional_claim_evidence.get("status"),
+                "geometry_optional_claim_reason": geometry_optional_claim_evidence.get("reason"),
+                "eligible_for_optional_claim": geometry_optional_claim_evidence.get("eligible_for_optional_claim"),
+                "boundary_rule_version": geometry_optional_claim_evidence.get("boundary_rule_version"),
+                "boundary_metric": geometry_optional_claim_evidence.get("boundary_metric"),
+                "boundary_abs_margin_min": geometry_optional_claim_evidence.get("boundary_abs_margin_min"),
+                "boundary_abs_margin_max": geometry_optional_claim_evidence.get("boundary_abs_margin_max"),
+                "boundary_metric_value": geometry_optional_claim_evidence.get("boundary_metric_value"),
+                "boundary_resolution_status": geometry_optional_claim_evidence.get("boundary_resolution_status"),
+                "boundary_resolution_reason": geometry_optional_claim_evidence.get("boundary_resolution_reason"),
                 "attack_quality_status": attack_event_row.get("attack_quality_status"),
                 "attack_quality_psnr": attack_event_row.get("attack_quality_psnr"),
                 "attack_quality_ssim": attack_event_row.get("attack_quality_ssim"),

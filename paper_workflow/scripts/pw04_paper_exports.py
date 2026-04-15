@@ -5,6 +5,7 @@ Module type: General module
 
 from __future__ import annotations
 
+import copy
 import csv
 import json
 import math
@@ -15,7 +16,13 @@ from typing import Any, Dict, List, Mapping, Sequence, Tuple, cast
 
 import numpy as np
 
-from paper_workflow.scripts.pw_common import CLEAN_NEGATIVE_SAMPLE_ROLE
+from paper_workflow.scripts.pw_common import (
+    CLEAN_NEGATIVE_SAMPLE_ROLE,
+    load_pw_matrix_config,
+    read_jsonl,
+    resolve_pw_matrix_settings,
+    write_jsonl,
+)
 from scripts.notebook_runtime_common import ensure_directory, normalize_path_value, utc_now_iso, write_json_atomic
 
 
@@ -54,6 +61,13 @@ CLEAN_VS_ATTACK_SCOPE_OVERVIEW_FIGURE_FILE_NAME = "clean_vs_attack_scope_overvie
 RESCUE_BREAKDOWN_FIGURE_FILE_NAME = "rescue_breakdown.png"
 TAIL_FIT_DIAGNOSTICS_FILE_NAME = "tail_fit_diagnostics.json"
 TAIL_FIT_STABILITY_SUMMARY_FILE_NAME = "tail_fit_stability_summary.json"
+GENERAL_ATTACKED_EVENT_TABLE_FILE_NAME = "general_attacked_event_table.jsonl"
+BOUNDARY_ATTACKED_EVENT_TABLE_FILE_NAME = "boundary_attacked_event_table.jsonl"
+EVENT_SUBSET_SUMMARY_JSON_FILE_NAME = "event_subset_summary.json"
+EVENT_SUBSET_SUMMARY_CSV_FILE_NAME = "event_subset_summary.csv"
+SYSTEM_EVENT_COUNT_SWEEP_JSON_FILE_NAME = "system_event_count_sweep.json"
+SYSTEM_EVENT_COUNT_SWEEP_CSV_FILE_NAME = "system_event_count_sweep.csv"
+GEOMETRY_OPTIONAL_CLAIM_BY_FAMILY_SEVERITY_CSV_FILE_NAME = "geometry_optional_claim_by_family_severity.csv"
 
 MAIN_METRICS_SUMMARY_FIELDNAMES: List[str] = [
     "scope",
@@ -132,6 +146,61 @@ BOOTSTRAP_CSV_FIELDNAMES: List[str] = [
     "random_seed",
     "status",
     "reason",
+]
+EVENT_SUBSET_SUMMARY_FIELDNAMES: List[str] = [
+    "subset_name",
+    "event_count",
+    "positive_event_count",
+    "negative_event_count",
+    "formal_final_positive_count",
+    "formal_event_attestation_positive_count",
+    "system_final_positive_count",
+    "formal_final_tpr",
+    "formal_final_fpr",
+    "formal_event_attestation_tpr",
+    "formal_event_attestation_fpr",
+    "system_final_tpr",
+    "system_final_fpr",
+    "geo_rescue_eligible_count",
+    "geo_rescue_applied_count",
+    "boundary_member_count",
+]
+SYSTEM_EVENT_COUNT_SWEEP_FIELDNAMES: List[str] = [
+    "subset_name",
+    "population_event_count",
+    "sample_size",
+    "repeat_count",
+    "mean_positive_event_count",
+    "mean_negative_event_count",
+    "mean_system_tpr",
+    "min_system_tpr",
+    "max_system_tpr",
+    "std_system_tpr",
+    "mean_system_fpr",
+    "min_system_fpr",
+    "max_system_fpr",
+    "std_system_fpr",
+    "mean_formal_final_tpr",
+    "mean_formal_final_fpr",
+    "mean_formal_event_attestation_tpr",
+    "mean_formal_event_attestation_fpr",
+]
+GEOMETRY_OPTIONAL_CLAIM_BY_FAMILY_SEVERITY_FIELDNAMES: List[str] = [
+    "attack_family",
+    "severity_level_index",
+    "severity_label",
+    "severity_status",
+    "matrix_profile",
+    "matrix_version",
+    "event_count",
+    "system_final_attack_tpr",
+    "geo_rescue_eligible_count",
+    "geo_rescue_applied_count",
+    "boundary_member_count",
+    "boundary_resolution_failed_event_count",
+    "supporting_evidence_event_count",
+    "content_score_mean",
+    "event_attestation_score_mean",
 ]
 
 
@@ -280,6 +349,485 @@ def _read_csv_rows(input_path: Path) -> List[Dict[str, Any]]:
         raise TypeError("input_path must be Path")
     with input_path.open("r", encoding="utf-8", newline="") as handle:
         return [dict(cast(Mapping[str, Any], row)) for row in csv.DictReader(handle)]
+
+
+def _safe_rate(numerator: int, denominator: int) -> float | None:
+    """
+    功能：在分母有效时计算 rate。 
+
+    Compute one rate when the denominator is valid.
+
+    Args:
+        numerator: Numerator value.
+        denominator: Denominator value.
+
+    Returns:
+        Floating-point rate or None.
+    """
+    if denominator <= 0:
+        return None
+    return float(numerator / denominator)
+
+
+def _resolve_clean_event_table_path(pw02_summary: Mapping[str, Any], family_root: Path) -> Path:
+    """
+    功能：解析 PW02 clean event table 路径。 
+
+    Resolve the canonical PW02 clean event table path.
+
+    Args:
+        pw02_summary: PW02 summary payload.
+        family_root: Family root path.
+
+    Returns:
+        Resolved clean event table path.
+    """
+    if not isinstance(pw02_summary, Mapping):
+        raise TypeError("pw02_summary must be Mapping")
+    if not isinstance(family_root, Path):
+        raise TypeError("family_root must be Path")
+
+    path_value = pw02_summary.get("clean_event_table_path")
+    if isinstance(path_value, str) and path_value.strip():
+        return Path(path_value).expanduser().resolve()
+    return (family_root / "exports" / "pw02" / "tables" / "clean_event_table.jsonl").resolve()
+
+
+def _load_clean_event_rows(clean_event_table_path: Path) -> List[Dict[str, Any]]:
+    """
+    功能：加载 canonical clean event rows。 
+
+    Load canonical clean event rows.
+
+    Args:
+        clean_event_table_path: Clean event table path.
+
+    Returns:
+        Ordered clean event rows.
+    """
+    if not isinstance(clean_event_table_path, Path):
+        raise TypeError("clean_event_table_path must be Path")
+    if not clean_event_table_path.exists() or not clean_event_table_path.is_file():
+        raise FileNotFoundError(f"PW02 clean event table not found: {normalize_path_value(clean_event_table_path)}")
+    return [dict(row) for row in read_jsonl(clean_event_table_path)]
+
+
+def _build_attack_event_subset_export_rows(
+    *,
+    attack_event_rows: Sequence[Mapping[str, Any]],
+    subset_name: str,
+    boundary_only: bool,
+) -> List[Dict[str, Any]]:
+    """
+    功能：从 PW04 attack rows 构造 subset 级 canonical event rows。 
+
+    Build canonical subset event rows from PW04 attack rows.
+
+    Args:
+        attack_event_rows: Materialized PW04 attack event rows.
+        subset_name: Stable subset name.
+        boundary_only: Whether to keep only the boundary subset.
+
+    Returns:
+        Ordered subset event rows.
+    """
+    if not isinstance(attack_event_rows, Sequence):
+        raise TypeError("attack_event_rows must be Sequence")
+    if not isinstance(subset_name, str) or not subset_name:
+        raise TypeError("subset_name must be non-empty str")
+    if not isinstance(boundary_only, bool):
+        raise TypeError("boundary_only must be bool")
+
+    subset_rows: List[Dict[str, Any]] = []
+    for attack_event_row in attack_event_rows:
+        if not isinstance(attack_event_row, Mapping):
+            raise TypeError("attack_event_row must be Mapping")
+        geometry_optional_claim_evidence = _extract_mapping(attack_event_row.get("geometry_optional_claim_evidence"))
+        if boundary_only and geometry_optional_claim_evidence.get("eligible_for_optional_claim") is not True:
+            continue
+        formal_record = _extract_mapping(attack_event_row.get("formal_record"))
+        formal_final_decision = _extract_mapping(formal_record.get("formal_final_decision"))
+        formal_event_attestation = _extract_mapping(formal_record.get("formal_event_attestation_decision"))
+        attestation_payload = _extract_mapping(formal_record.get("attestation"))
+        image_evidence_payload = _extract_mapping(attestation_payload.get("image_evidence_result"))
+        subset_rows.append(
+            {
+                "subset_name": subset_name,
+                "attack_event_id": attack_event_row.get("attack_event_id"),
+                "attack_event_index": attack_event_row.get("attack_event_index"),
+                "parent_event_id": attack_event_row.get("parent_event_id"),
+                "sample_role": attack_event_row.get("sample_role"),
+                "ground_truth_label": True,
+                "attack_family": attack_event_row.get("attack_family"),
+                "attack_config_name": attack_event_row.get("attack_config_name"),
+                "attack_condition_base_key": attack_event_row.get("attack_condition_base_key"),
+                "attack_condition_key": attack_event_row.get("attack_condition_key"),
+                "matrix_profile": attack_event_row.get("matrix_profile"),
+                "matrix_version": attack_event_row.get("matrix_version"),
+                "matrix_attack_set_names": copy.deepcopy(attack_event_row.get("matrix_attack_set_names", [])),
+                "geometry_rescue_candidate": attack_event_row.get("geometry_rescue_candidate") is True,
+                "severity_status": attack_event_row.get("severity_status"),
+                "severity_label": attack_event_row.get("severity_label"),
+                "severity_level_index": attack_event_row.get("severity_level_index"),
+                "content_score": attack_event_row.get("content_score"),
+                "event_attestation_score": attack_event_row.get("event_attestation_score"),
+                "formal_final_decision_is_positive": formal_final_decision.get("is_watermarked") is True,
+                "formal_event_attestation_is_positive": formal_event_attestation.get("is_watermarked") is True,
+                "system_final_is_positive": bool(formal_record.get("derived_attack_union_positive", False)),
+                "geo_rescue_eligible": image_evidence_payload.get("geo_rescue_eligible"),
+                "geo_rescue_applied": image_evidence_payload.get("geo_rescue_applied"),
+                "eligible_for_optional_claim": geometry_optional_claim_evidence.get("eligible_for_optional_claim"),
+                "boundary_rule_version": geometry_optional_claim_evidence.get("boundary_rule_version"),
+                "boundary_metric": geometry_optional_claim_evidence.get("boundary_metric"),
+                "boundary_abs_margin_min": geometry_optional_claim_evidence.get("boundary_abs_margin_min"),
+                "boundary_abs_margin_max": geometry_optional_claim_evidence.get("boundary_abs_margin_max"),
+                "boundary_metric_value": geometry_optional_claim_evidence.get("boundary_metric_value"),
+                "boundary_resolution_status": geometry_optional_claim_evidence.get("boundary_resolution_status"),
+            }
+        )
+    return subset_rows
+
+
+def _build_event_subset_summary_row(subset_name: str, rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+    """
+    功能：构造 event subset 汇总行。 
+
+    Build one event subset summary row.
+
+    Args:
+        subset_name: Stable subset name.
+        rows: Event rows belonging to the subset.
+
+    Returns:
+        Summary row.
+    """
+    if not isinstance(subset_name, str) or not subset_name:
+        raise TypeError("subset_name must be non-empty str")
+    if not isinstance(rows, Sequence):
+        raise TypeError("rows must be Sequence")
+
+    positive_rows = [row for row in rows if row.get("ground_truth_label") is True]
+    negative_rows = [row for row in rows if row.get("ground_truth_label") is False]
+    formal_final_positive_count = sum(1 for row in rows if row.get("formal_final_decision_is_positive") is True)
+    formal_event_attestation_positive_count = sum(
+        1 for row in rows if row.get("formal_event_attestation_is_positive") is True
+    )
+    system_final_positive_count = sum(1 for row in rows if row.get("system_final_is_positive") is True)
+    geo_rescue_eligible_count = sum(1 for row in rows if row.get("geo_rescue_eligible") is True)
+    geo_rescue_applied_count = sum(1 for row in rows if row.get("geo_rescue_applied") is True)
+    boundary_member_count = sum(1 for row in rows if row.get("eligible_for_optional_claim") is True)
+    return {
+        "subset_name": subset_name,
+        "event_count": len(rows),
+        "positive_event_count": len(positive_rows),
+        "negative_event_count": len(negative_rows),
+        "formal_final_positive_count": formal_final_positive_count,
+        "formal_event_attestation_positive_count": formal_event_attestation_positive_count,
+        "system_final_positive_count": system_final_positive_count,
+        "formal_final_tpr": _safe_rate(
+            sum(1 for row in positive_rows if row.get("formal_final_decision_is_positive") is True),
+            len(positive_rows),
+        ),
+        "formal_final_fpr": _safe_rate(
+            sum(1 for row in negative_rows if row.get("formal_final_decision_is_positive") is True),
+            len(negative_rows),
+        ),
+        "formal_event_attestation_tpr": _safe_rate(
+            sum(1 for row in positive_rows if row.get("formal_event_attestation_is_positive") is True),
+            len(positive_rows),
+        ),
+        "formal_event_attestation_fpr": _safe_rate(
+            sum(1 for row in negative_rows if row.get("formal_event_attestation_is_positive") is True),
+            len(negative_rows),
+        ),
+        "system_final_tpr": _safe_rate(
+            sum(1 for row in positive_rows if row.get("system_final_is_positive") is True),
+            len(positive_rows),
+        ),
+        "system_final_fpr": _safe_rate(
+            sum(1 for row in negative_rows if row.get("system_final_is_positive") is True),
+            len(negative_rows),
+        ),
+        "geo_rescue_eligible_count": geo_rescue_eligible_count,
+        "geo_rescue_applied_count": geo_rescue_applied_count,
+        "boundary_member_count": boundary_member_count,
+    }
+
+
+def _summarize_numeric_values(values: Sequence[float | None]) -> Dict[str, float | None]:
+    """
+    功能：对数值序列做 mean/min/max/std 汇总。 
+
+    Summarize a numeric sequence with mean/min/max/std.
+
+    Args:
+        values: Numeric values.
+
+    Returns:
+        Summary mapping.
+    """
+    valid_values = [float(value) for value in values if isinstance(value, (int, float))]
+    if not valid_values:
+        return {"mean": None, "min": None, "max": None, "std": None}
+    valid_array = np.asarray(valid_values, dtype=float)
+    return {
+        "mean": float(valid_array.mean()),
+        "min": float(valid_array.min()),
+        "max": float(valid_array.max()),
+        "std": float(valid_array.std(ddof=0)),
+    }
+
+
+def _compute_event_subset_metrics(rows: Sequence[Mapping[str, Any]]) -> Dict[str, float | int | None]:
+    """
+    功能：为一个 event 子集样本计算 formal/system 指标。 
+
+    Compute formal/system metrics for one event subset sample.
+
+    Args:
+        rows: Sampled event rows.
+
+    Returns:
+        Metric mapping.
+    """
+    if not isinstance(rows, Sequence):
+        raise TypeError("rows must be Sequence")
+
+    positive_rows = [row for row in rows if row.get("ground_truth_label") is True]
+    negative_rows = [row for row in rows if row.get("ground_truth_label") is False]
+    return {
+        "positive_event_count": len(positive_rows),
+        "negative_event_count": len(negative_rows),
+        "system_tpr": _safe_rate(
+            sum(1 for row in positive_rows if row.get("system_final_is_positive") is True),
+            len(positive_rows),
+        ),
+        "system_fpr": _safe_rate(
+            sum(1 for row in negative_rows if row.get("system_final_is_positive") is True),
+            len(negative_rows),
+        ),
+        "formal_final_tpr": _safe_rate(
+            sum(1 for row in positive_rows if row.get("formal_final_decision_is_positive") is True),
+            len(positive_rows),
+        ),
+        "formal_final_fpr": _safe_rate(
+            sum(1 for row in negative_rows if row.get("formal_final_decision_is_positive") is True),
+            len(negative_rows),
+        ),
+        "formal_event_attestation_tpr": _safe_rate(
+            sum(1 for row in positive_rows if row.get("formal_event_attestation_is_positive") is True),
+            len(positive_rows),
+        ),
+        "formal_event_attestation_fpr": _safe_rate(
+            sum(1 for row in negative_rows if row.get("formal_event_attestation_is_positive") is True),
+            len(negative_rows),
+        ),
+    }
+
+
+def _build_system_event_count_sweep_rows(
+    *,
+    subset_rows_by_name: Mapping[str, Sequence[Mapping[str, Any]]],
+    event_counts: Sequence[int],
+    repeat_count: int,
+    random_seed: int,
+) -> List[Dict[str, Any]]:
+    """
+    功能：对多个 canonical event 子集构造 system event-count sweep。 
+
+    Build the system event-count sweep rows for canonical event subsets.
+
+    Args:
+        subset_rows_by_name: Subset rows keyed by stable subset name.
+        event_counts: Requested sample sizes.
+        repeat_count: Sweep repeat count.
+        random_seed: Deterministic random seed.
+
+    Returns:
+        Sweep summary rows.
+    """
+    if not isinstance(subset_rows_by_name, Mapping):
+        raise TypeError("subset_rows_by_name must be Mapping")
+    if not isinstance(event_counts, Sequence):
+        raise TypeError("event_counts must be Sequence")
+    if not isinstance(repeat_count, int) or repeat_count <= 0:
+        raise TypeError("repeat_count must be positive int")
+    if not isinstance(random_seed, int):
+        raise TypeError("random_seed must be int")
+
+    rng = np.random.default_rng(random_seed)
+    sweep_rows: List[Dict[str, Any]] = []
+    for subset_name, subset_rows in subset_rows_by_name.items():
+        population_rows = [dict(cast(Mapping[str, Any], row)) for row in subset_rows]
+        population_event_count = len(population_rows)
+        if population_event_count <= 0:
+            continue
+        sample_sizes = sorted({count for count in event_counts if isinstance(count, int) and count > 0 and count <= population_event_count} | {population_event_count})
+        for sample_size in sample_sizes:
+            effective_repeat_count = 1 if sample_size == population_event_count else repeat_count
+            sample_metrics: List[Dict[str, float | int | None]] = []
+            for _ in range(effective_repeat_count):
+                if sample_size == population_event_count:
+                    sampled_rows = population_rows
+                else:
+                    sampled_indices = rng.choice(population_event_count, size=sample_size, replace=False)
+                    sampled_rows = [population_rows[int(index)] for index in sampled_indices]
+                sample_metrics.append(_compute_event_subset_metrics(sampled_rows))
+
+            positive_event_count_summary = _summarize_numeric_values(
+                [
+                    float(cast(int, metric_row["positive_event_count"]))
+                    if isinstance(metric_row.get("positive_event_count"), int)
+                    else None
+                    for metric_row in sample_metrics
+                ]
+            )
+            negative_event_count_summary = _summarize_numeric_values(
+                [
+                    float(cast(int, metric_row["negative_event_count"]))
+                    if isinstance(metric_row.get("negative_event_count"), int)
+                    else None
+                    for metric_row in sample_metrics
+                ]
+            )
+            system_tpr_summary = _summarize_numeric_values(
+                [cast(float | None, metric_row.get("system_tpr")) for metric_row in sample_metrics]
+            )
+            system_fpr_summary = _summarize_numeric_values(
+                [cast(float | None, metric_row.get("system_fpr")) for metric_row in sample_metrics]
+            )
+            formal_final_tpr_summary = _summarize_numeric_values(
+                [cast(float | None, metric_row.get("formal_final_tpr")) for metric_row in sample_metrics]
+            )
+            formal_final_fpr_summary = _summarize_numeric_values(
+                [cast(float | None, metric_row.get("formal_final_fpr")) for metric_row in sample_metrics]
+            )
+            formal_event_attestation_tpr_summary = _summarize_numeric_values(
+                [cast(float | None, metric_row.get("formal_event_attestation_tpr")) for metric_row in sample_metrics]
+            )
+            formal_event_attestation_fpr_summary = _summarize_numeric_values(
+                [cast(float | None, metric_row.get("formal_event_attestation_fpr")) for metric_row in sample_metrics]
+            )
+            sweep_rows.append(
+                {
+                    "subset_name": subset_name,
+                    "population_event_count": population_event_count,
+                    "sample_size": sample_size,
+                    "repeat_count": effective_repeat_count,
+                    "mean_positive_event_count": positive_event_count_summary["mean"],
+                    "mean_negative_event_count": negative_event_count_summary["mean"],
+                    "mean_system_tpr": system_tpr_summary["mean"],
+                    "min_system_tpr": system_tpr_summary["min"],
+                    "max_system_tpr": system_tpr_summary["max"],
+                    "std_system_tpr": system_tpr_summary["std"],
+                    "mean_system_fpr": system_fpr_summary["mean"],
+                    "min_system_fpr": system_fpr_summary["min"],
+                    "max_system_fpr": system_fpr_summary["max"],
+                    "std_system_fpr": system_fpr_summary["std"],
+                    "mean_formal_final_tpr": formal_final_tpr_summary["mean"],
+                    "mean_formal_final_fpr": formal_final_fpr_summary["mean"],
+                    "mean_formal_event_attestation_tpr": formal_event_attestation_tpr_summary["mean"],
+                    "mean_formal_event_attestation_fpr": formal_event_attestation_fpr_summary["mean"],
+                }
+            )
+    return sweep_rows
+
+
+def _build_geometry_optional_claim_by_family_severity_rows(
+    attack_event_rows: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    功能：按 family × severity 聚合 geometry optional claim 行。 
+
+    Build family-by-severity geometry optional-claim summary rows.
+
+    Args:
+        attack_event_rows: Materialized PW04 attack event rows.
+
+    Returns:
+        Aggregated CSV rows.
+    """
+    if not isinstance(attack_event_rows, Sequence):
+        raise TypeError("attack_event_rows must be Sequence")
+
+    grouped_rows: Dict[Tuple[str, int | None, str | None], List[Dict[str, Any]]] = {}
+    for attack_event_row in attack_event_rows:
+        attack_family = str(attack_event_row.get("attack_family") or "<unknown>")
+        severity_level_index = (
+            int(cast(int, attack_event_row["severity_level_index"]))
+            if isinstance(attack_event_row.get("severity_level_index"), int)
+            else None
+        )
+        severity_label = (
+            str(attack_event_row.get("severity_label"))
+            if isinstance(attack_event_row.get("severity_label"), str) and str(attack_event_row.get("severity_label"))
+            else None
+        )
+        grouped_rows.setdefault((attack_family, severity_level_index, severity_label), []).append(
+            dict(cast(Mapping[str, Any], attack_event_row))
+        )
+
+    output_rows: List[Dict[str, Any]] = []
+    for (attack_family, severity_level_index, severity_label), rows in sorted(
+        grouped_rows.items(),
+        key=lambda item: (
+            item[0][0],
+            item[0][1] is None,
+            item[0][1] if item[0][1] is not None else 10**9,
+            item[0][2] or "",
+        ),
+    ):
+        system_final_positive_count = 0
+        geo_rescue_eligible_count = 0
+        geo_rescue_applied_count = 0
+        boundary_member_count = 0
+        boundary_resolution_failed_event_count = 0
+        supporting_evidence_event_count = 0
+        content_scores: List[float] = []
+        event_attestation_scores: List[float] = []
+        for row in rows:
+            formal_record = _extract_mapping(row.get("formal_record"))
+            if bool(formal_record.get("derived_attack_union_positive", False)):
+                system_final_positive_count += 1
+            attestation_payload = _extract_mapping(formal_record.get("attestation"))
+            image_evidence_payload = _extract_mapping(attestation_payload.get("image_evidence_result"))
+            if image_evidence_payload.get("geo_rescue_eligible") is True:
+                geo_rescue_eligible_count += 1
+            if image_evidence_payload.get("geo_rescue_applied") is True:
+                geo_rescue_applied_count += 1
+            geometry_optional_claim_evidence = _extract_mapping(row.get("geometry_optional_claim_evidence"))
+            if geometry_optional_claim_evidence.get("eligible_for_optional_claim") is True:
+                boundary_member_count += 1
+            if geometry_optional_claim_evidence.get("boundary_resolution_status") == "failed":
+                boundary_resolution_failed_event_count += 1
+            if geometry_optional_claim_evidence.get("supporting_evidence_available") is True:
+                supporting_evidence_event_count += 1
+            content_score = _extract_float(row, "content_score")
+            event_attestation_score = _extract_float(row, "event_attestation_score")
+            if content_score is not None:
+                content_scores.append(content_score)
+            if event_attestation_score is not None:
+                event_attestation_scores.append(event_attestation_score)
+        output_rows.append(
+            {
+                "attack_family": attack_family,
+                "severity_level_index": severity_level_index,
+                "severity_label": severity_label,
+                "severity_status": rows[0].get("severity_status"),
+                "matrix_profile": rows[0].get("matrix_profile"),
+                "matrix_version": rows[0].get("matrix_version"),
+                "event_count": len(rows),
+                "system_final_attack_tpr": _safe_rate(system_final_positive_count, len(rows)),
+                "geo_rescue_eligible_count": geo_rescue_eligible_count,
+                "geo_rescue_applied_count": geo_rescue_applied_count,
+                "boundary_member_count": boundary_member_count,
+                "boundary_resolution_failed_event_count": boundary_resolution_failed_event_count,
+                "supporting_evidence_event_count": supporting_evidence_event_count,
+                "content_score_mean": float(np.mean(content_scores)) if content_scores else None,
+                "event_attestation_score_mean": float(np.mean(event_attestation_scores)) if event_attestation_scores else None,
+            }
+        )
+    return output_rows
 
 
 def _resolve_clean_attestation_export_path(pw02_summary: Mapping[str, Any], family_root: Path) -> Path:
@@ -1744,6 +2292,15 @@ def build_pw04_paper_exports(
     attack_family_summary_paper_path = tables_root / ATTACK_FAMILY_SUMMARY_PAPER_CSV_FILE_NAME
     attack_condition_summary_paper_path = tables_root / ATTACK_CONDITION_SUMMARY_PAPER_CSV_FILE_NAME
     rescue_metrics_summary_path = tables_root / RESCUE_METRICS_SUMMARY_CSV_FILE_NAME
+    general_attacked_event_table_path = tables_root / GENERAL_ATTACKED_EVENT_TABLE_FILE_NAME
+    boundary_attacked_event_table_path = tables_root / BOUNDARY_ATTACKED_EVENT_TABLE_FILE_NAME
+    event_subset_summary_json_path = tables_root / EVENT_SUBSET_SUMMARY_JSON_FILE_NAME
+    event_subset_summary_csv_path = tables_root / EVENT_SUBSET_SUMMARY_CSV_FILE_NAME
+    system_event_count_sweep_json_path = tables_root / SYSTEM_EVENT_COUNT_SWEEP_JSON_FILE_NAME
+    system_event_count_sweep_csv_path = tables_root / SYSTEM_EVENT_COUNT_SWEEP_CSV_FILE_NAME
+    geometry_optional_claim_by_family_severity_path = (
+        tables_root / GEOMETRY_OPTIONAL_CLAIM_BY_FAMILY_SEVERITY_CSV_FILE_NAME
+    )
     tail_paths = {
         "estimated_tail_fpr_1e4_path": tail_root / "estimated_tail_fpr_1e4.json",
         "estimated_tail_fpr_1e5_path": tail_root / "estimated_tail_fpr_1e5.json",
@@ -1814,6 +2371,79 @@ def build_pw04_paper_exports(
     )
     _write_csv_rows(rescue_metrics_summary_path, RESCUE_METRICS_SUMMARY_FIELDNAMES, [rescue_summary_row])
 
+    clean_event_table_path = _resolve_clean_event_table_path(pw02_summary, family_root)
+    clean_event_rows = _load_clean_event_rows(clean_event_table_path)
+    general_attacked_event_rows = _build_attack_event_subset_export_rows(
+        attack_event_rows=attack_event_rows,
+        subset_name="general_attacked_events",
+        boundary_only=False,
+    )
+    boundary_attacked_event_rows = _build_attack_event_subset_export_rows(
+        attack_event_rows=attack_event_rows,
+        subset_name="boundary_attacked_events",
+        boundary_only=True,
+    )
+    write_jsonl(general_attacked_event_table_path, general_attacked_event_rows)
+    write_jsonl(boundary_attacked_event_table_path, boundary_attacked_event_rows)
+
+    event_subset_summary_rows = [
+        _build_event_subset_summary_row("clean_eval_events", clean_event_rows),
+        _build_event_subset_summary_row("general_attacked_events", general_attacked_event_rows),
+        _build_event_subset_summary_row("boundary_attacked_events", boundary_attacked_event_rows),
+    ]
+    write_json_atomic(
+        event_subset_summary_json_path,
+        {
+            "artifact_type": "paper_workflow_pw04_event_subset_summary",
+            "schema_version": SCHEMA_VERSION,
+            "created_at": utc_now_iso(),
+            "family_id": family_id,
+            "rows": event_subset_summary_rows,
+        },
+    )
+    _write_csv_rows(event_subset_summary_csv_path, EVENT_SUBSET_SUMMARY_FIELDNAMES, event_subset_summary_rows)
+
+    matrix_settings = resolve_pw_matrix_settings(load_pw_matrix_config())
+    system_event_count_sweep_rows = _build_system_event_count_sweep_rows(
+        subset_rows_by_name={
+            "clean_eval_events": clean_event_rows,
+            "general_attacked_events": general_attacked_event_rows,
+            "boundary_attacked_events": boundary_attacked_event_rows,
+        },
+        event_counts=cast(Sequence[int], cast(Mapping[str, Any], matrix_settings["system_event_count_sweep"])["event_counts"]),
+        repeat_count=int(cast(Mapping[str, Any], matrix_settings["system_event_count_sweep"])["repeat_count"]),
+        random_seed=int(cast(Mapping[str, Any], matrix_settings["system_event_count_sweep"])["random_seed"]),
+    )
+    write_json_atomic(
+        system_event_count_sweep_json_path,
+        {
+            "artifact_type": "paper_workflow_pw04_system_event_count_sweep",
+            "schema_version": SCHEMA_VERSION,
+            "created_at": utc_now_iso(),
+            "family_id": family_id,
+            "matrix_profile": matrix_settings["matrix_profile"],
+            "matrix_version": matrix_settings["matrix_version"],
+            "system_event_count_sweep": copy.deepcopy(
+                cast(Mapping[str, Any], matrix_settings["system_event_count_sweep"])
+            ),
+            "rows": system_event_count_sweep_rows,
+        },
+    )
+    _write_csv_rows(
+        system_event_count_sweep_csv_path,
+        SYSTEM_EVENT_COUNT_SWEEP_FIELDNAMES,
+        system_event_count_sweep_rows,
+    )
+
+    geometry_optional_claim_by_family_severity_rows = _build_geometry_optional_claim_by_family_severity_rows(
+        attack_event_rows
+    )
+    _write_csv_rows(
+        geometry_optional_claim_by_family_severity_path,
+        GEOMETRY_OPTIONAL_CLAIM_BY_FAMILY_SEVERITY_FIELDNAMES,
+        geometry_optional_claim_by_family_severity_rows,
+    )
+
     tail_payloads = _build_tail_estimation_payloads(
         family_root=family_root,
         pw02_summary=pw02_summary,
@@ -1853,10 +2483,20 @@ def build_pw04_paper_exports(
                 "attack_quality_metrics_path": normalize_path_value(cast(Path, pw04_paths["attack_quality_metrics_path"])),
             },
             "tables": {
+                "clean_event_table_path": normalize_path_value(clean_event_table_path),
                 "main_metrics_summary_csv_path": normalize_path_value(main_metrics_summary_path),
                 "attack_family_summary_paper_csv_path": normalize_path_value(attack_family_summary_paper_path),
                 "attack_condition_summary_paper_csv_path": normalize_path_value(attack_condition_summary_paper_path),
                 "rescue_metrics_summary_csv_path": normalize_path_value(rescue_metrics_summary_path),
+                "general_attacked_event_table_path": normalize_path_value(general_attacked_event_table_path),
+                "boundary_attacked_event_table_path": normalize_path_value(boundary_attacked_event_table_path),
+                "event_subset_summary_json_path": normalize_path_value(event_subset_summary_json_path),
+                "event_subset_summary_csv_path": normalize_path_value(event_subset_summary_csv_path),
+                "system_event_count_sweep_json_path": normalize_path_value(system_event_count_sweep_json_path),
+                "system_event_count_sweep_csv_path": normalize_path_value(system_event_count_sweep_csv_path),
+                "geometry_optional_claim_by_family_severity_csv_path": normalize_path_value(
+                    geometry_optional_claim_by_family_severity_path
+                ),
                 "bootstrap_confidence_intervals_csv_path": normalize_path_value(bootstrap_csv_path),
             },
             "figures": {key_name: normalize_path_value(path_obj) for key_name, path_obj in figure_paths.items()},
@@ -1888,10 +2528,20 @@ def build_pw04_paper_exports(
         "canonical_metrics_paths": {scope_name: normalize_path_value(path_obj) for scope_name, path_obj in canonical_metric_paths.items()},
         "attack_quality_metrics_path": normalize_path_value(cast(Path, pw04_paths["attack_quality_metrics_path"])),
         "paper_tables_paths": {
+            "clean_event_table_path": normalize_path_value(clean_event_table_path),
             "main_metrics_summary_csv_path": normalize_path_value(main_metrics_summary_path),
             "attack_family_summary_paper_csv_path": normalize_path_value(attack_family_summary_paper_path),
             "attack_condition_summary_paper_csv_path": normalize_path_value(attack_condition_summary_paper_path),
             "rescue_metrics_summary_csv_path": normalize_path_value(rescue_metrics_summary_path),
+            "general_attacked_event_table_path": normalize_path_value(general_attacked_event_table_path),
+            "boundary_attacked_event_table_path": normalize_path_value(boundary_attacked_event_table_path),
+            "event_subset_summary_json_path": normalize_path_value(event_subset_summary_json_path),
+            "event_subset_summary_csv_path": normalize_path_value(event_subset_summary_csv_path),
+            "system_event_count_sweep_json_path": normalize_path_value(system_event_count_sweep_json_path),
+            "system_event_count_sweep_csv_path": normalize_path_value(system_event_count_sweep_csv_path),
+            "geometry_optional_claim_by_family_severity_csv_path": normalize_path_value(
+                geometry_optional_claim_by_family_severity_path
+            ),
         },
         "paper_figures_paths": {key_name: normalize_path_value(path_obj) for key_name, path_obj in figure_paths.items()},
         "bootstrap_confidence_intervals_path": normalize_path_value(bootstrap_json_path),

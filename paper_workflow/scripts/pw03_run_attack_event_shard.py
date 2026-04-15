@@ -1051,17 +1051,34 @@ def _resolve_geometry_optional_claim_boundary_assignment(
 
     parent_content_margin = float(content_score - content_threshold_value)
     boundary_metric_value = abs(parent_content_margin)
+    boundary_abs_margin_min = (
+        float(cast(float, assignment_payload["boundary_abs_margin_min"]))
+        if isinstance(assignment_payload.get("boundary_abs_margin_min"), (int, float))
+        and not isinstance(assignment_payload.get("boundary_abs_margin_min"), bool)
+        else 0.0
+    )
+    boundary_abs_margin_max = (
+        float(cast(float, assignment_payload["boundary_abs_margin_max"]))
+        if isinstance(assignment_payload.get("boundary_abs_margin_max"), (int, float))
+        and not isinstance(assignment_payload.get("boundary_abs_margin_max"), bool)
+        else GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_ABS_MAX
+    )
     parent_event_attestation_margin = (
         float(event_attestation_score - event_attestation_threshold_value)
         if event_attestation_score is not None and event_attestation_threshold_value is not None
         else None
     )
-    is_boundary_member = boundary_metric_value <= GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_ABS_MAX + 1e-12
+    is_boundary_member = (
+        boundary_metric_value >= (boundary_abs_margin_min - 1e-12)
+        and boundary_metric_value <= (boundary_abs_margin_max + 1e-12)
+    )
     resolved_payload.update(
         {
-            "protocol_version": GEOMETRY_OPTIONAL_CLAIM_PROTOCOL_VERSION,
-            "boundary_metric": GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_METRIC,
-            "boundary_abs_margin_max": GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_ABS_MAX,
+            "protocol_version": assignment_payload.get("protocol_version", GEOMETRY_OPTIONAL_CLAIM_PROTOCOL_VERSION),
+            "boundary_rule_version": assignment_payload.get("boundary_rule_version"),
+            "boundary_metric": assignment_payload.get("boundary_metric", GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_METRIC),
+            "boundary_abs_margin_min": boundary_abs_margin_min,
+            "boundary_abs_margin_max": boundary_abs_margin_max,
             "boundary_metric_value": boundary_metric_value,
             "boundary_resolution_status": "ok",
             "boundary_resolution_reason": None,
@@ -1135,7 +1152,11 @@ def _attach_geometry_optional_claim_assignment(
     )
 
     sample_role = str(attack_event_payload.get("sample_role") or "")
-    if sample_role == ATTACKED_POSITIVE_SAMPLE_ROLE and assignment_payload:
+    if (
+        sample_role == ATTACKED_POSITIVE_SAMPLE_ROLE
+        and assignment_payload
+        and assignment_payload.get("status") == "pending_resolution"
+    ):
         assignment_payload = _resolve_geometry_optional_claim_boundary_assignment(
             attack_event_spec=attack_event_payload,
             assignment_payload=assignment_payload,
@@ -1219,7 +1240,12 @@ def _build_geometry_optional_claim_evidence(
         "attack_event_id": attack_event_spec.get("attack_event_id", attack_event_spec.get("event_id")),
         "parent_event_id": attack_event_spec.get("parent_event_id"),
         "attack_family": attack_event_spec.get("attack_family"),
+        "attack_condition_base_key": attack_event_spec.get("attack_condition_base_key"),
         "attack_condition_key": attack_event_spec.get("attack_condition_key"),
+        "matrix_profile": attack_event_spec.get("matrix_profile"),
+        "matrix_version": attack_event_spec.get("matrix_version"),
+        "matrix_attack_set_names": copy.deepcopy(attack_event_spec.get("matrix_attack_set_names", [])),
+        "geometry_rescue_candidate": attack_event_spec.get("geometry_rescue_candidate") is True,
         "status": status_value,
         "reason": reason_value,
         "plan_status": assignment_payload.get("status"),
@@ -1231,7 +1257,9 @@ def _build_geometry_optional_claim_evidence(
         "rescue_directionality": GEOMETRY_OPTIONAL_CLAIM_DIRECTIONALITY,
         "eligible_for_optional_claim": assignment_payload.get("eligible_for_optional_claim") is True,
         "protocol_version": assignment_payload.get("protocol_version", GEOMETRY_OPTIONAL_CLAIM_PROTOCOL_VERSION),
+        "boundary_rule_version": assignment_payload.get("boundary_rule_version"),
         "boundary_metric": assignment_payload.get("boundary_metric", GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_METRIC),
+        "boundary_abs_margin_min": assignment_payload.get("boundary_abs_margin_min"),
         "boundary_abs_margin_max": assignment_payload.get("boundary_abs_margin_max", GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_ABS_MAX),
         "boundary_metric_value": assignment_payload.get("boundary_metric_value"),
         "boundary_resolution_status": assignment_payload.get("boundary_resolution_status"),
@@ -2271,10 +2299,17 @@ def _write_attack_event_manifest(
         "parent_source_image_path": parent_reference.get("parent_source_image_path"),
         "attack_family": attack_event_spec.get("attack_family"),
         "attack_config_name": attack_event_spec.get("attack_config_name"),
+        "attack_condition_base_key": attack_event_spec.get("attack_condition_base_key"),
         "attack_condition_key": attack_event_spec.get("attack_condition_key"),
+        "attack_condition_variant_index": attack_event_spec.get("attack_condition_variant_index"),
+        "attack_condition_suffix": attack_event_spec.get("attack_condition_suffix"),
         "attack_params_version": attack_event_spec.get("attack_params_version"),
         "attack_params": copy.deepcopy(attack_event_spec.get("attack_params", {})),
         "attack_params_digest": attack_event_spec.get("attack_params_digest"),
+        "matrix_profile": attack_event_spec.get("matrix_profile"),
+        "matrix_version": attack_event_spec.get("matrix_version"),
+        "matrix_attack_set_names": copy.deepcopy(attack_event_spec.get("matrix_attack_set_names", [])),
+        "geometry_rescue_candidate": attack_event_spec.get("geometry_rescue_candidate") is True,
         "severity_metadata": dict(cast(Mapping[str, Any], detect_summary.get("severity_metadata", {}))),
         "geometry_diagnostics": dict(cast(Mapping[str, Any], detect_summary.get("geometry_diagnostics", {}))),
         "geometry_optional_claim_plan_path": attack_event_spec.get("geometry_optional_claim_plan_path"),

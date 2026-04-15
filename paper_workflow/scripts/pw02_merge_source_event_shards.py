@@ -35,6 +35,7 @@ from paper_workflow.scripts.pw_common import (
     PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
     build_family_root,
     build_source_shard_root,
+    write_jsonl,
     resolve_family_layout_paths,
     validate_source_sample_role,
 )
@@ -62,6 +63,7 @@ FORMAL_FINAL_DECISION_METRICS_FILE_NAME = "formal_final_decision_metrics.json"
 DERIVED_SYSTEM_UNION_METRICS_FILE_NAME = "derived_system_union_metrics.json"
 CLEAN_SCORE_ANALYSIS_FILE_NAME = "clean_score_analysis.json"
 CLEAN_QUALITY_PAIR_MANIFEST_FILE_NAME = "clean_quality_pair_manifest.json"
+CLEAN_EVENT_TABLE_FILE_NAME = "clean_event_table.jsonl"
 
 
 def _resolve_top_level_score_directory_name(score_name: str) -> str:
@@ -958,6 +960,120 @@ def _build_clean_quality_pair_manifest(
     }
 
 
+def _extract_clean_event_outcomes(detect_payload: Mapping[str, Any]) -> Dict[str, bool]:
+    """
+    Extract clean-side formal and system outcomes from one detect payload.
+
+    Args:
+        detect_payload: Source detect payload.
+
+    Returns:
+        Outcome booleans for formal and system scopes.
+    """
+    if not isinstance(detect_payload, Mapping):
+        raise TypeError("detect_payload must be Mapping")
+
+    final_decision_payload = cast(Mapping[str, Any], detect_payload.get("final_decision", {}))
+    attestation_payload = cast(Mapping[str, Any], detect_payload.get("attestation", {}))
+    final_attestation_payload = cast(
+        Mapping[str, Any],
+        attestation_payload.get("final_event_attested_decision", {}),
+    )
+    formal_final_positive = final_decision_payload.get("is_watermarked") is True
+    formal_attestation_positive = final_attestation_payload.get("is_event_attested") is True
+    return {
+        "formal_final_decision_is_positive": formal_final_positive,
+        "formal_event_attestation_is_positive": formal_attestation_positive,
+        "system_final_is_positive": bool(formal_final_positive or formal_attestation_positive),
+    }
+
+
+def _build_clean_event_table_rows(
+    *,
+    positive_event_lookup: Mapping[str, Dict[str, Any]],
+    clean_negative_event_lookup: Mapping[str, Dict[str, Any]],
+    eval_positive_event_ids: Sequence[str],
+    eval_negative_event_ids: Sequence[str],
+) -> List[Dict[str, Any]]:
+    """
+    Build the canonical clean evaluate event table rows.
+
+    Args:
+        positive_event_lookup: Positive-source event lookup.
+        clean_negative_event_lookup: Clean-negative event lookup.
+        eval_positive_event_ids: Evaluate positive event ids.
+        eval_negative_event_ids: Evaluate negative event ids.
+
+    Returns:
+        Ordered clean event table rows.
+    """
+    if not isinstance(positive_event_lookup, Mapping):
+        raise TypeError("positive_event_lookup must be Mapping")
+    if not isinstance(clean_negative_event_lookup, Mapping):
+        raise TypeError("clean_negative_event_lookup must be Mapping")
+    if not isinstance(eval_positive_event_ids, Sequence):
+        raise TypeError("eval_positive_event_ids must be Sequence")
+    if not isinstance(eval_negative_event_ids, Sequence):
+        raise TypeError("eval_negative_event_ids must be Sequence")
+
+    row_specs: List[Tuple[int, bool, str, Dict[str, Any]]] = []
+    for event_id in eval_positive_event_ids:
+        if not isinstance(event_id, str) or not event_id:
+            raise TypeError("eval_positive_event_ids items must be non-empty str")
+        event_payload = positive_event_lookup.get(event_id)
+        if not isinstance(event_payload, Mapping):
+            raise ValueError(f"missing evaluate positive event payload: {event_id}")
+        event_index = event_payload.get("event_index")
+        if not isinstance(event_index, int) or event_index < 0:
+            raise ValueError(f"evaluate positive event missing event_index: {event_id}")
+        row_specs.append((event_index, True, ACTIVE_SAMPLE_ROLE, dict(cast(Mapping[str, Any], event_payload))))
+    for event_id in eval_negative_event_ids:
+        if not isinstance(event_id, str) or not event_id:
+            raise TypeError("eval_negative_event_ids items must be non-empty str")
+        event_payload = clean_negative_event_lookup.get(event_id)
+        if not isinstance(event_payload, Mapping):
+            raise ValueError(f"missing evaluate negative event payload: {event_id}")
+        event_index = event_payload.get("event_index")
+        if not isinstance(event_index, int) or event_index < 0:
+            raise ValueError(f"evaluate negative event missing event_index: {event_id}")
+        row_specs.append((event_index, False, CLEAN_NEGATIVE_SAMPLE_ROLE, dict(cast(Mapping[str, Any], event_payload))))
+
+    clean_event_rows: List[Dict[str, Any]] = []
+    for clean_event_table_index, (_event_index, ground_truth_label, sample_role, event_payload) in enumerate(
+        sorted(row_specs, key=lambda item: (item[0], item[2], str(item[3].get("event_id"))))
+    ):
+        event_id = event_payload.get("event_id")
+        detect_record_path_value = event_payload.get("detect_record_path")
+        if not isinstance(event_id, str) or not event_id:
+            raise ValueError("clean event row missing event_id")
+        if not isinstance(detect_record_path_value, str) or not detect_record_path_value:
+            raise ValueError(f"clean event row missing detect_record_path: {event_id}")
+        detect_record_path = Path(detect_record_path_value).expanduser().resolve()
+        detect_payload = _load_required_json_dict(detect_record_path, f"PW02 clean detect record {event_id}")
+        content_score, content_score_source = eval_workflow_inputs._resolve_content_score_source(detect_payload)
+        event_attestation_score, event_attestation_score_source = (
+            eval_workflow_inputs._resolve_event_attestation_score_source(detect_payload)
+        )
+        clean_event_rows.append(
+            {
+                "clean_event_table_index": clean_event_table_index,
+                "subset_name": "clean_eval_events",
+                "event_id": event_id,
+                "event_index": event_payload.get("event_index"),
+                "sample_role": sample_role,
+                "ground_truth_label": ground_truth_label,
+                "prompt_text": event_payload.get("prompt_text"),
+                "detect_record_path": normalize_path_value(detect_record_path),
+                "content_score": content_score,
+                "content_score_source": content_score_source,
+                "event_attestation_score": event_attestation_score,
+                "event_attestation_score_source": event_attestation_score_source,
+                **_extract_clean_event_outcomes(detect_payload),
+            }
+        )
+    return clean_event_rows
+
+
 def _build_clean_score_analysis_export(
     *,
     family_id: str,
@@ -1146,6 +1262,8 @@ def _build_finalize_manifest_payload(
     threshold_exports: Mapping[str, Dict[str, Any]],
     clean_evaluate_exports: Mapping[str, Dict[str, Any]],
     clean_score_analysis_exports: Mapping[str, Dict[str, Any]],
+    clean_event_table_path: Path,
+    clean_event_table_event_count: int,
     clean_quality_pair_manifest_export: Mapping[str, Any],
     formal_final_decision_export: Mapping[str, Any],
     derived_system_union_export: Mapping[str, Any],
@@ -1168,6 +1286,9 @@ def _build_finalize_manifest_payload(
         clean_negative_pool_manifest: Negative pool manifest summary.
         threshold_exports: Threshold export summaries keyed by score directory name.
         clean_evaluate_exports: Evaluate export summaries keyed by score directory name.
+        clean_score_analysis_exports: Score-analysis export summaries keyed by score directory name.
+        clean_event_table_path: Canonical clean event table path.
+        clean_event_table_event_count: Clean event table row count.
         clean_quality_pair_manifest_export: Clean-pair manifest export summary.
         system_final_export: System-final export summary.
         score_runs: Score-run summaries keyed by score name.
@@ -1250,6 +1371,11 @@ def _build_finalize_manifest_payload(
                 "source_evaluate_record_path": cast(Mapping[str, Any], export_summary.get("payload", {})).get("source_evaluate_record_path"),
             }
             for score_key, export_summary in clean_score_analysis_exports.items()
+        },
+        "clean_event_table": {
+            "path": normalize_path_value(clean_event_table_path),
+            "event_count": clean_event_table_event_count,
+            "subset_name": "clean_eval_events",
         },
         "clean_quality_pair_artifact": {
             "path": clean_quality_pair_manifest_export.get("path"),
@@ -1965,6 +2091,15 @@ def run_pw02_merge_source_event_shards(
         )
         for score_name, score_run in score_runs.items()
     }
+    clean_event_table_rows = _build_clean_event_table_rows(
+        positive_event_lookup=positive_events,
+        clean_negative_event_lookup=clean_negative_events,
+        eval_positive_event_ids=cast(Sequence[str], source_split_plan.get("eval_pos_event_ids", [])),
+        eval_negative_event_ids=cast(Sequence[str], source_split_plan.get("eval_neg_event_ids", [])),
+    )
+    clean_event_table_path = stage_root / "tables" / CLEAN_EVENT_TABLE_FILE_NAME
+    ensure_directory(clean_event_table_path.parent)
+    write_jsonl(clean_event_table_path, clean_event_table_rows)
     formal_final_decision_export = _build_formal_final_decision_metrics_export(
         family_id=family_id,
         stage_root=stage_root,
@@ -2005,6 +2140,8 @@ def run_pw02_merge_source_event_shards(
         threshold_exports=threshold_exports,
         clean_evaluate_exports=clean_evaluate_exports,
         clean_score_analysis_exports=clean_score_analysis_exports,
+        clean_event_table_path=clean_event_table_path,
+        clean_event_table_event_count=len(clean_event_table_rows),
         clean_quality_pair_manifest_export=clean_quality_pair_manifest_export,
         formal_final_decision_export=formal_final_decision_export,
         derived_system_union_export=derived_system_union_export,
@@ -2044,6 +2181,7 @@ def run_pw02_merge_source_event_shards(
             score_key: export_summary["path"]
             for score_key, export_summary in clean_score_analysis_exports.items()
         },
+        "clean_event_table_path": normalize_path_value(clean_event_table_path),
         "operating_metrics_dir": pw02_metrics_extensions["operating_metrics_dir"],
         "clean_pair_artifacts_dir": pw02_metrics_extensions["clean_pair_artifacts_dir"],
         "clean_quality_pair_manifest_path": pw02_metrics_extensions["clean_quality_pair_manifest_path"],

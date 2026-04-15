@@ -228,6 +228,7 @@ def _build_canonical_source_paths(family_root: Path) -> Dict[str, Path]:
         "pw02_finalize_manifest": family_root / "exports" / "pw02" / "paper_source_finalize_manifest.json",
         "pw02_content_threshold_export": family_root / "exports" / "pw02" / "thresholds" / "content" / "thresholds.json",
         "pw02_attestation_threshold_export": family_root / "exports" / "pw02" / "thresholds" / "attestation" / "thresholds.json",
+        "pw02_clean_event_table": family_root / "exports" / "pw02" / "tables" / "clean_event_table.jsonl",
         "pw04_summary": family_root / "runtime_state" / PW04_SUMMARY_FILE_NAME,
         "pw04_attack_merge_manifest": pw04_root / "manifests" / "attack_merge_manifest.json",
         "pw04_attack_positive_pool_manifest": pw04_root / "attack_positive_pool_manifest.json",
@@ -248,6 +249,13 @@ def _build_canonical_source_paths(family_root: Path) -> Dict[str, Path]:
         "pw04_attack_family_summary_paper_csv": pw04_tables_root / "attack_family_summary_paper.csv",
         "pw04_attack_condition_summary_paper_csv": pw04_tables_root / "attack_condition_summary_paper.csv",
         "pw04_rescue_metrics_summary_csv": pw04_tables_root / "rescue_metrics_summary.csv",
+        "pw04_general_attacked_event_table": pw04_tables_root / "general_attacked_event_table.jsonl",
+        "pw04_boundary_attacked_event_table": pw04_tables_root / "boundary_attacked_event_table.jsonl",
+        "pw04_event_subset_summary_json": pw04_tables_root / "event_subset_summary.json",
+        "pw04_event_subset_summary_csv": pw04_tables_root / "event_subset_summary.csv",
+        "pw04_system_event_count_sweep_json": pw04_tables_root / "system_event_count_sweep.json",
+        "pw04_system_event_count_sweep_csv": pw04_tables_root / "system_event_count_sweep.csv",
+        "pw04_geometry_optional_claim_by_family_severity_csv": pw04_tables_root / "geometry_optional_claim_by_family_severity.csv",
         "pw04_bootstrap_confidence_intervals_csv": pw04_tables_root / "bootstrap_confidence_intervals.csv",
     }
 
@@ -396,10 +404,18 @@ def _collect_release_source_paths(
     if not isinstance(paper_tables_paths, Mapping):
         raise ValueError("PW04 summary missing paper_tables_paths")
     for table_key, label in {
+        "clean_event_table_path": "pw02_clean_event_table",
         "main_metrics_summary_csv_path": "pw04_main_metrics_summary_csv",
         "attack_family_summary_paper_csv_path": "pw04_attack_family_summary_paper_csv",
         "attack_condition_summary_paper_csv_path": "pw04_attack_condition_summary_paper_csv",
         "rescue_metrics_summary_csv_path": "pw04_rescue_metrics_summary_csv",
+        "general_attacked_event_table_path": "pw04_general_attacked_event_table",
+        "boundary_attacked_event_table_path": "pw04_boundary_attacked_event_table",
+        "event_subset_summary_json_path": "pw04_event_subset_summary_json",
+        "event_subset_summary_csv_path": "pw04_event_subset_summary_csv",
+        "system_event_count_sweep_json_path": "pw04_system_event_count_sweep_json",
+        "system_event_count_sweep_csv_path": "pw04_system_event_count_sweep_csv",
+        "geometry_optional_claim_by_family_severity_csv_path": "pw04_geometry_optional_claim_by_family_severity_csv",
     }.items():
         resolved_path = _resolve_path_value_under_family_root(
             paper_tables_paths.get(table_key),

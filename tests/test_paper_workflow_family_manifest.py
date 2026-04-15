@@ -10,8 +10,10 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+
 from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
-from paper_workflow.scripts.pw_common import read_jsonl
+from paper_workflow.scripts.pw_common import build_attack_condition_catalog, read_jsonl
 from scripts.notebook_runtime_common import REPO_ROOT, build_repo_import_subprocess_env
 
 
@@ -99,6 +101,9 @@ def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
     assert family_manifest["source_parameters"]["calibration_fraction"] == 0.5
     assert family_manifest["source_parameters"]["source_shard_count"] == 3
     assert family_manifest["attack_parameters"]["attack_shard_count"] == 3
+    assert family_manifest["attack_parameters"]["materialization_profile"] == "protocol_list_cartesian_per_condition"
+    assert family_manifest["attack_parameters"]["matrix_profile"] == "family_x_severity_v1"
+    assert family_manifest["attack_parameters"]["system_event_count_sweep"]["repeat_count"] == 64
     assert family_manifest["attack_parameters"]["wrong_event_attestation_challenge_plan_frozen"] is True
     assert family_manifest["attack_parameters"]["wrong_event_challenge_parent_event_count"] == 4
     assert family_manifest["attack_parameters"]["wrong_event_challenge_available_assignment_count"] == 4
@@ -136,6 +141,7 @@ def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
     assert method_identity_snapshot["source_truth_stage"] == "PW01_Source_Event_Shards"
     assert method_identity_snapshot["source_alignment_reference_files"] == [
         "paper_workflow/configs/pw_base.yaml",
+        "paper_workflow/configs/pw_matrix.yaml",
         "paper_workflow/scripts/pw_common.py",
         "paper_workflow/scripts/pw00_build_family_manifest.py",
         "paper_workflow/scripts/pw01_stage_runtime_helpers.py",
@@ -147,6 +153,8 @@ def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
     ]
     assert first_summary["source_shard_count"] == 3
     assert first_summary["attack_shard_count"] == 3
+    assert first_summary["materialization_profile"] == "protocol_list_cartesian_per_condition"
+    assert first_summary["matrix_profile"] == "family_x_severity_v1"
     assert first_summary["wrong_event_challenge_parent_event_count"] == 4
     assert first_summary["wrong_event_challenge_available_assignment_count"] == 4
     assert Path(str(first_summary["wrong_event_attestation_challenge_plan_path"])) == first_wrong_event_challenge_plan_path
@@ -252,3 +260,40 @@ def test_pw00_cli_wrapper_passes_explicit_attack_shard_count(tmp_path: Path) -> 
     assert family_manifest["attack_parameters"]["attack_shard_count"] == 5
     assert family_manifest["attack_plan"]["attack_shard_count"] == 5
     assert attack_shard_plan["attack_shard_count"] == 5
+
+
+def test_attack_matrix_validation_rejects_unknown_geometry_candidate_set() -> None:
+    """
+    Verify invalid matrix config fails fast before PW00 attack catalog materialization.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    with pytest.raises(ValueError, match="candidate_attack_set"):
+        build_attack_condition_catalog(
+            matrix_cfg={
+                "matrix_profile": "family_x_severity_v1",
+                "matrix_version": "pw_attack_matrix_v1",
+                "materialization_profile": "protocol_list_cartesian_per_condition",
+                "attack_sets": {
+                    "general_attacks": {
+                        "families": ["rotate"],
+                    }
+                },
+                "geometry_optional_claim": {
+                    "candidate_attack_set": "missing_geometry_set",
+                    "boundary_rule_version": "geometry_optional_claim_boundary_band_v2",
+                    "boundary_metric": "abs_content_margin",
+                    "boundary_abs_margin_min": 0.005,
+                    "boundary_abs_margin_max": 0.05,
+                },
+                "system_event_count_sweep": {
+                    "event_counts": [1, 2],
+                    "repeat_count": 2,
+                    "random_seed": 1,
+                },
+            }
+        )

@@ -356,6 +356,10 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             },
         },
     )
+    pw02_clean_event_table_path = _write_text(
+        family_root / "exports" / "pw02" / "tables" / "clean_event_table.jsonl",
+        '{"subset_name":"clean_eval_events","event_id":"clean_evt_000001"}\n',
+    )
     pw04_attack_quality_metrics_path = _write_json(
         family_root / "exports" / "pw04" / "metrics" / "attack_quality_metrics.json",
         {
@@ -580,6 +584,45 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
         family_root / "exports" / "pw04" / "tables" / "rescue_metrics_summary.csv",
         "scope,rescue_rate\nsystem_final,0.1\n",
     )
+    pw04_general_attacked_event_table_path = _write_text(
+        family_root / "exports" / "pw04" / "tables" / "general_attacked_event_table.jsonl",
+        '{"subset_name":"general_attacked_events","attack_event_id":"attack_evt_000001"}\n',
+    )
+    pw04_boundary_attacked_event_table_path = _write_text(
+        family_root / "exports" / "pw04" / "tables" / "boundary_attacked_event_table.jsonl",
+        '{"subset_name":"boundary_attacked_events","attack_event_id":"attack_evt_000001"}\n',
+    )
+    pw04_event_subset_summary_json_path = _write_json(
+        family_root / "exports" / "pw04" / "tables" / "event_subset_summary.json",
+        {
+            "family_id": family_id,
+            "rows": [
+                {"subset_name": "clean_eval_events"},
+                {"subset_name": "general_attacked_events"},
+                {"subset_name": "boundary_attacked_events"},
+            ],
+        },
+    )
+    pw04_event_subset_summary_csv_path = _write_text(
+        family_root / "exports" / "pw04" / "tables" / "event_subset_summary.csv",
+        "subset_name,event_count\nclean_eval_events,1\ngeneral_attacked_events,1\nboundary_attacked_events,1\n",
+    )
+    pw04_system_event_count_sweep_json_path = _write_json(
+        family_root / "exports" / "pw04" / "tables" / "system_event_count_sweep.json",
+        {
+            "family_id": family_id,
+            "system_event_count_sweep": {"repeat_count": 64},
+            "rows": [{"subset_name": "clean_eval_events", "sample_size": 1}],
+        },
+    )
+    pw04_system_event_count_sweep_csv_path = _write_text(
+        family_root / "exports" / "pw04" / "tables" / "system_event_count_sweep.csv",
+        "subset_name,sample_size\nclean_eval_events,1\n",
+    )
+    pw04_geometry_optional_claim_by_family_severity_csv_path = _write_text(
+        family_root / "exports" / "pw04" / "tables" / "geometry_optional_claim_by_family_severity.csv",
+        "attack_family,severity_label,event_count\nresize,scale_factor=0.75,1\n",
+    )
     pw04_bootstrap_confidence_intervals_csv_path = _write_text(
         family_root / "exports" / "pw04" / "tables" / "bootstrap_confidence_intervals.csv",
         "scope,lower,upper\nsystem_final,0.4,0.8\n",
@@ -661,10 +704,20 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
                 "system_final": normalize_path_value(pw04_system_final_metrics_path),
             },
             "paper_tables_paths": {
+                "clean_event_table_path": normalize_path_value(pw02_clean_event_table_path),
                 "main_metrics_summary_csv_path": normalize_path_value(pw04_main_metrics_summary_csv_path),
                 "attack_family_summary_paper_csv_path": normalize_path_value(pw04_attack_family_summary_paper_csv_path),
                 "attack_condition_summary_paper_csv_path": normalize_path_value(pw04_attack_condition_summary_paper_csv_path),
                 "rescue_metrics_summary_csv_path": normalize_path_value(pw04_rescue_metrics_summary_csv_path),
+                "general_attacked_event_table_path": normalize_path_value(pw04_general_attacked_event_table_path),
+                "boundary_attacked_event_table_path": normalize_path_value(pw04_boundary_attacked_event_table_path),
+                "event_subset_summary_json_path": normalize_path_value(pw04_event_subset_summary_json_path),
+                "event_subset_summary_csv_path": normalize_path_value(pw04_event_subset_summary_csv_path),
+                "system_event_count_sweep_json_path": normalize_path_value(pw04_system_event_count_sweep_json_path),
+                "system_event_count_sweep_csv_path": normalize_path_value(pw04_system_event_count_sweep_csv_path),
+                "geometry_optional_claim_by_family_severity_csv_path": normalize_path_value(
+                    pw04_geometry_optional_claim_by_family_severity_csv_path
+                ),
             },
             "paper_figures_paths": {
                 key_name: normalize_path_value(path_obj)
@@ -892,11 +945,19 @@ def test_pw05_release_signoff_packages_canonical_pw04_exports(tmp_path: Path) ->
     assert "source/exports/pw02/operating_metrics/system_final_auxiliary_operating_semantics.json" in members
     assert "source/exports/pw02/quality/clean_quality_pair_manifest.json" in members
     assert "source/exports/pw02/payload/payload_clean_summary.json" in members
+    assert "source/exports/pw02/tables/clean_event_table.jsonl" in members
     assert "source/exports/pw04/geometry_diagnostics/conditional_rescue_metrics.json" in members
     assert "source/exports/pw04/geometry_diagnostics/geometry_optional_claim_summary.json" in members
     assert "source/exports/pw04/geometry_diagnostics/geometry_optional_claim_by_family.csv" in members
     assert "source/exports/pw04/geometry_diagnostics/geometry_optional_claim_by_severity.csv" in members
     assert "source/exports/pw04/geometry_diagnostics/geometry_optional_claim_example_manifest.json" in members
+    assert "source/exports/pw04/tables/general_attacked_event_table.jsonl" in members
+    assert "source/exports/pw04/tables/boundary_attacked_event_table.jsonl" in members
+    assert "source/exports/pw04/tables/event_subset_summary.json" in members
+    assert "source/exports/pw04/tables/event_subset_summary.csv" in members
+    assert "source/exports/pw04/tables/system_event_count_sweep.json" in members
+    assert "source/exports/pw04/tables/system_event_count_sweep.csv" in members
+    assert "source/exports/pw04/tables/geometry_optional_claim_by_family_severity.csv" in members
     assert "source/exports/pw04/payload_robustness/payload_attack_summary.json" in members
     assert "source/exports/pw04/robustness/system_final_auxiliary_attack_summary.json" in members
     assert "source/exports/pw04/robustness/wrong_event_attestation_challenge_summary.json" in members

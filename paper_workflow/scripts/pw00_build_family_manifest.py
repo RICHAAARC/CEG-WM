@@ -28,6 +28,7 @@ from paper_workflow.scripts.pw_common import (
     PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
     DEFAULT_CONFIG_RELATIVE_PATH,
     DEFAULT_PW_BASE_CONFIG_RELATIVE_PATH,
+    DEFAULT_PW_MATRIX_CONFIG_RELATIVE_PATH,
     GEOMETRY_OPTIONAL_CLAIM_DIRECTIONALITY,
     GEOMETRY_OPTIONAL_CLAIM_MODE,
     GEOMETRY_OPTIONAL_CLAIM_PROTOCOL_VERSION,
@@ -47,8 +48,10 @@ from paper_workflow.scripts.pw_common import (
     build_source_split_plan,
     ensure_family_layout,
     load_default_config_snapshot,
+    load_pw_matrix_config,
     load_prompt_lines,
     parse_seed_list,
+    resolve_pw_matrix_settings,
     resolve_family_layout_paths,
     write_jsonl,
 )
@@ -93,6 +96,7 @@ def _resolve_source_alignment_reference_files(pw_base_cfg: Dict[str, Any]) -> li
             return output
     return [
         "paper_workflow/configs/pw_base.yaml",
+        "paper_workflow/configs/pw_matrix.yaml",
         "paper_workflow/scripts/pw_common.py",
         "paper_workflow/scripts/pw00_build_family_manifest.py",
         "paper_workflow/scripts/pw01_stage_runtime_helpers.py",
@@ -102,6 +106,22 @@ def _resolve_source_alignment_reference_files(pw_base_cfg: Dict[str, Any]) -> li
         "scripts/notebook_runtime_common.py",
         "configs/default.yaml",
     ]
+
+
+def _resolve_matrix_config_path(pw_base_cfg: Dict[str, Any]) -> Path:
+    """
+    Resolve the authoritative matrix config path.
+
+    Args:
+        pw_base_cfg: Parsed pw_base config mapping.
+
+    Returns:
+        Resolved matrix config path.
+    """
+    matrix_config_path_value = pw_base_cfg.get("matrix_config_path")
+    if not isinstance(matrix_config_path_value, str) or not matrix_config_path_value.strip():
+        matrix_config_path_value = DEFAULT_PW_MATRIX_CONFIG_RELATIVE_PATH
+    return (REPO_ROOT / matrix_config_path_value).resolve()
 
 
 def _build_wrong_event_attestation_challenge_plan(
@@ -212,6 +232,9 @@ def _build_geometry_optional_claim_plan(
     *,
     family_id: str,
     attack_event_grid: Sequence[Mapping[str, Any]],
+    geometry_optional_claim_policy: Mapping[str, Any],
+    matrix_profile: str,
+    matrix_version: str,
 ) -> Dict[str, Any]:
     """
     Build the frozen geometry optional-claim evidence plan for PW03/PW04.
@@ -219,6 +242,9 @@ def _build_geometry_optional_claim_plan(
     Args:
         family_id: Family identifier.
         attack_event_grid: Ordered attack-event grid rows.
+        geometry_optional_claim_policy: Frozen geometry candidate/boundary policy.
+        matrix_profile: Frozen matrix profile name.
+        matrix_version: Frozen matrix version.
 
     Returns:
         Geometry optional-claim plan payload.
@@ -227,20 +253,50 @@ def _build_geometry_optional_claim_plan(
         raise TypeError("family_id must be non-empty str")
     if not isinstance(attack_event_grid, Sequence):
         raise TypeError("attack_event_grid must be Sequence")
+    if not isinstance(geometry_optional_claim_policy, Mapping):
+        raise TypeError("geometry_optional_claim_policy must be Mapping")
+    if not isinstance(matrix_profile, str) or not matrix_profile:
+        raise TypeError("matrix_profile must be non-empty str")
+    if not isinstance(matrix_version, str) or not matrix_version:
+        raise TypeError("matrix_version must be non-empty str")
+
+    candidate_attack_set = str(geometry_optional_claim_policy.get("candidate_attack_set") or "").strip()
+    candidate_attack_families = [
+        str(attack_family)
+        for attack_family in cast(Sequence[str], geometry_optional_claim_policy.get("candidate_attack_families", []))
+        if isinstance(attack_family, str) and attack_family
+    ]
+    boundary_rule_version = str(geometry_optional_claim_policy.get("boundary_rule_version") or "").strip()
+    boundary_metric = str(geometry_optional_claim_policy.get("boundary_metric") or GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_METRIC)
+    boundary_abs_margin_min = float(geometry_optional_claim_policy.get("boundary_abs_margin_min", 0.0))
+    boundary_abs_margin_max = float(
+        geometry_optional_claim_policy.get("boundary_abs_margin_max", GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_ABS_MAX)
+    )
 
     plan_rows: list[Dict[str, Any]] = []
     protocol_candidate_event_count = 0
     for attack_event in attack_event_grid:
         attack_event_payload = dict(cast(Mapping[str, Any], attack_event))
         sample_role = str(attack_event_payload.get("sample_role") or "")
-        is_protocol_candidate = sample_role == ATTACKED_POSITIVE_SAMPLE_ROLE
-        eligible_for_optional_claim = None if is_protocol_candidate else False
-        row_status = "pending_resolution" if is_protocol_candidate else "not_applicable"
-        row_reason = (
-            "await_pw03_boundary_subset_resolution"
-            if is_protocol_candidate
-            else "sample_role_not_attacked_positive"
+        attack_set_names = [
+            str(set_name)
+            for set_name in cast(Sequence[str], attack_event_payload.get("matrix_attack_set_names", []))
+            if isinstance(set_name, str) and set_name
+        ]
+        is_protocol_candidate = (
+            sample_role == ATTACKED_POSITIVE_SAMPLE_ROLE
+            and attack_event_payload.get("geometry_rescue_candidate") is True
         )
+        eligible_for_optional_claim = None if is_protocol_candidate else False
+        if is_protocol_candidate:
+            row_status = "pending_resolution"
+            row_reason = "await_pw03_boundary_subset_resolution"
+        elif sample_role != ATTACKED_POSITIVE_SAMPLE_ROLE:
+            row_status = "not_applicable"
+            row_reason = "sample_role_not_attacked_positive"
+        else:
+            row_status = "not_applicable"
+            row_reason = "attack_family_not_in_geometry_rescue_candidate_set"
         if is_protocol_candidate:
             protocol_candidate_event_count += 1
         plan_rows.append(
@@ -250,8 +306,14 @@ def _build_geometry_optional_claim_plan(
                 "parent_event_id": attack_event_payload.get("parent_event_id"),
                 "sample_role": sample_role,
                 "attack_family": attack_event_payload.get("attack_family"),
+                "attack_condition_base_key": attack_event_payload.get("attack_condition_base_key"),
                 "attack_condition_key": attack_event_payload.get("attack_condition_key"),
                 "attack_config_name": attack_event_payload.get("attack_config_name"),
+                "matrix_profile": matrix_profile,
+                "matrix_version": matrix_version,
+                "matrix_attack_set_names": attack_set_names,
+                "geometry_rescue_candidate": attack_event_payload.get("geometry_rescue_candidate") is True,
+                "geometry_rescue_candidate_attack_set": candidate_attack_set,
                 "severity_status": attack_event_payload.get("severity_status"),
                 "severity_reason": attack_event_payload.get("severity_reason"),
                 "severity_label": attack_event_payload.get("severity_label"),
@@ -261,8 +323,10 @@ def _build_geometry_optional_claim_plan(
                 "content_positive_veto_allowed": False,
                 "rescue_directionality": GEOMETRY_OPTIONAL_CLAIM_DIRECTIONALITY,
                 "protocol_version": GEOMETRY_OPTIONAL_CLAIM_PROTOCOL_VERSION,
-                "boundary_metric": GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_METRIC,
-                "boundary_abs_margin_max": GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_ABS_MAX,
+                "boundary_rule_version": boundary_rule_version,
+                "boundary_metric": boundary_metric,
+                "boundary_abs_margin_min": boundary_abs_margin_min,
+                "boundary_abs_margin_max": boundary_abs_margin_max,
                 "eligibility_resolution_stage": "PW03_Attack_Event_Shards",
                 "eligibility_source_stage": "PW02_Source_Merge_And_Global_Thresholds",
                 "missing_margin_policy": "explicit_not_available",
@@ -277,13 +341,19 @@ def _build_geometry_optional_claim_plan(
         "schema_version": "pw_stage_00_v1",
         "created_at": utc_now_iso(),
         "family_id": family_id,
+        "matrix_profile": matrix_profile,
+        "matrix_version": matrix_version,
         "claim_mode": GEOMETRY_OPTIONAL_CLAIM_MODE,
         "claim_scope": GEOMETRY_OPTIONAL_CLAIM_SCOPE,
         "content_positive_veto_allowed": False,
         "rescue_directionality": GEOMETRY_OPTIONAL_CLAIM_DIRECTIONALITY,
         "protocol_version": GEOMETRY_OPTIONAL_CLAIM_PROTOCOL_VERSION,
-        "boundary_metric": GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_METRIC,
-        "boundary_abs_margin_max": GEOMETRY_OPTIONAL_CLAIM_BOUNDARY_ABS_MAX,
+        "geometry_rescue_candidate_attack_set": candidate_attack_set,
+        "geometry_rescue_candidate_attack_families": candidate_attack_families,
+        "boundary_rule_version": boundary_rule_version,
+        "boundary_metric": boundary_metric,
+        "boundary_abs_margin_min": boundary_abs_margin_min,
+        "boundary_abs_margin_max": boundary_abs_margin_max,
         "eligibility_resolution_stage": "PW03_Attack_Event_Shards",
         "eligibility_source_stage": "PW02_Source_Merge_And_Global_Thresholds",
         "missing_margin_policy": "explicit_not_available",
@@ -337,6 +407,9 @@ def run_pw00_build_family_manifest(
     _ = resolve_family_layout_paths(family_root)
 
     pw_base_cfg = _load_pw_base_cfg()
+    matrix_config_path = _resolve_matrix_config_path(pw_base_cfg)
+    matrix_cfg = load_pw_matrix_config(REPO_ROOT)
+    matrix_settings = resolve_pw_matrix_settings(matrix_cfg)
     normalized_seeds = parse_seed_list(seed_list)
     prompt_path, prompt_lines = load_prompt_lines(prompt_file)
     prompt_file_normalized = normalize_path_value(prompt_path)
@@ -394,7 +467,15 @@ def run_pw00_build_family_manifest(
         family_id=family_id,
         positive_source_events=positive_source_events,
     )
-    attack_conditions = build_attack_condition_catalog()
+    attack_conditions = build_attack_condition_catalog(matrix_cfg=matrix_cfg)
+    attack_set_names = sorted(
+        {
+            str(set_name)
+            for attack_condition in attack_conditions
+            for set_name in cast(Sequence[str], attack_condition.get("matrix_attack_set_names", []))
+            if isinstance(set_name, str) and set_name
+        }
+    )
     severity_status_counts: Dict[str, int] = {}
     severity_family_level_counts: Dict[str, int] = {}
     for attack_condition in attack_conditions:
@@ -435,7 +516,18 @@ def run_pw00_build_family_manifest(
     geometry_optional_claim_plan = _build_geometry_optional_claim_plan(
         family_id=family_id,
         attack_event_grid=attack_event_grid,
+        geometry_optional_claim_policy=cast(Mapping[str, Any], matrix_settings["geometry_optional_claim"]),
+        matrix_profile=str(matrix_settings["matrix_profile"]),
+        matrix_version=str(matrix_settings["matrix_version"]),
     )
+    geometry_rescue_candidate_event_count = sum(
+        1
+        for event in attack_event_grid
+        if str(event.get("sample_role")) == ATTACKED_POSITIVE_SAMPLE_ROLE
+        and event.get("geometry_rescue_candidate") is True
+    )
+    geometry_optional_claim_policy = cast(Mapping[str, Any], matrix_settings["geometry_optional_claim"])
+    system_event_count_sweep = copy.deepcopy(cast(Mapping[str, Any], matrix_settings["system_event_count_sweep"]))
 
     default_cfg_path = (REPO_ROOT / DEFAULT_CONFIG_RELATIVE_PATH).resolve()
     default_cfg_obj = load_default_config_snapshot(REPO_ROOT)
@@ -485,11 +577,15 @@ def run_pw00_build_family_manifest(
         },
         "attack_parameters": {
             "attack_shard_count": resolved_attack_shard_count,
-            "materialization_profile": "first_value_per_condition",
+            "materialization_profile": matrix_settings["materialization_profile"],
+            "matrix_profile": matrix_settings["matrix_profile"],
+            "matrix_version": matrix_settings["matrix_version"],
+            "attack_set_names": attack_set_names,
             "attack_condition_count": attack_condition_count,
             "attack_event_count": attack_event_count,
             "attacked_positive_event_count": attacked_positive_event_count,
             "attacked_negative_event_count": attacked_negative_event_count,
+            "system_event_count_sweep": system_event_count_sweep,
             "wrong_event_attestation_challenge_plan_frozen": True,
             "wrong_event_challenge_parent_event_count": int(
                 wrong_event_attestation_challenge_plan["positive_parent_event_count"]
@@ -500,6 +596,14 @@ def run_pw00_build_family_manifest(
             "geometry_optional_claim_plan_frozen": True,
             "geometry_optional_claim_mode": GEOMETRY_OPTIONAL_CLAIM_MODE,
             "geometry_optional_claim_scope": GEOMETRY_OPTIONAL_CLAIM_SCOPE,
+            "geometry_optional_claim_candidate_attack_set": geometry_optional_claim_policy["candidate_attack_set"],
+            "geometry_optional_claim_candidate_attack_family_count": len(
+                cast(Sequence[str], geometry_optional_claim_policy["candidate_attack_families"])
+            ),
+            "geometry_optional_claim_candidate_event_count": geometry_rescue_candidate_event_count,
+            "geometry_optional_claim_boundary_rule_version": geometry_optional_claim_policy["boundary_rule_version"],
+            "geometry_optional_claim_boundary_abs_margin_min": geometry_optional_claim_policy["boundary_abs_margin_min"],
+            "geometry_optional_claim_boundary_abs_margin_max": geometry_optional_claim_policy["boundary_abs_margin_max"],
             "geometry_optional_claim_available_assignment_count": int(
                 geometry_optional_claim_plan["available_assignment_count"]
             ),
@@ -523,6 +627,7 @@ def run_pw00_build_family_manifest(
             "attack_event_count": attack_event_count,
             "attacked_positive_event_count": attacked_positive_event_count,
             "attacked_negative_event_count": attacked_negative_event_count,
+            "geometry_optional_claim_candidate_event_count": geometry_rescue_candidate_event_count,
             "calibration_event_count": len(source_split_plan["calib_pos_event_ids"]) + len(source_split_plan["calib_neg_event_ids"]),
             "evaluate_event_count": len(source_split_plan["eval_pos_event_ids"]) + len(source_split_plan["eval_neg_event_ids"]),
             "control_calibration_event_count": len(source_split_plan["calib_control_event_ids"]),
@@ -543,15 +648,20 @@ def run_pw00_build_family_manifest(
             "prompt_snapshot": normalize_path_value(layout["prompt_snapshot_path"]),
             "method_identity_snapshot": normalize_path_value(layout["method_identity_snapshot_path"]),
             "config_snapshot": normalize_path_value(layout["config_snapshot_path"]),
+            "pw_matrix_config": normalize_path_value(matrix_config_path),
         },
         "source_split": source_split_plan,
         "attack_plan": {
-            "materialization_profile": "first_value_per_condition",
+            "materialization_profile": matrix_settings["materialization_profile"],
+            "matrix_profile": matrix_settings["matrix_profile"],
+            "matrix_version": matrix_settings["matrix_version"],
+            "attack_set_names": attack_set_names,
             "attack_shard_count": resolved_attack_shard_count,
             "attack_condition_count": attack_condition_count,
             "attack_event_count": attack_event_count,
             "attacked_positive_event_count": attacked_positive_event_count,
             "attacked_negative_event_count": attacked_negative_event_count,
+            "system_event_count_sweep": system_event_count_sweep,
             "wrong_event_attestation_challenge_plan_frozen": True,
             "wrong_event_attestation_challenge_plan_policy": str(
                 wrong_event_attestation_challenge_plan["plan_policy"]
@@ -565,6 +675,14 @@ def run_pw00_build_family_manifest(
             "geometry_optional_claim_plan_frozen": True,
             "geometry_optional_claim_mode": GEOMETRY_OPTIONAL_CLAIM_MODE,
             "geometry_optional_claim_scope": GEOMETRY_OPTIONAL_CLAIM_SCOPE,
+            "geometry_optional_claim_candidate_attack_set": geometry_optional_claim_policy["candidate_attack_set"],
+            "geometry_optional_claim_candidate_attack_family_count": len(
+                cast(Sequence[str], geometry_optional_claim_policy["candidate_attack_families"])
+            ),
+            "geometry_optional_claim_candidate_event_count": geometry_rescue_candidate_event_count,
+            "geometry_optional_claim_boundary_rule_version": geometry_optional_claim_policy["boundary_rule_version"],
+            "geometry_optional_claim_boundary_abs_margin_min": geometry_optional_claim_policy["boundary_abs_margin_min"],
+            "geometry_optional_claim_boundary_abs_margin_max": geometry_optional_claim_policy["boundary_abs_margin_max"],
             "geometry_optional_claim_available_assignment_count": int(
                 geometry_optional_claim_plan["available_assignment_count"]
             ),
@@ -579,6 +697,7 @@ def run_pw00_build_family_manifest(
         },
         "default_config_path": normalize_path_value(default_cfg_path),
         "pw_base_config_path": normalize_path_value((REPO_ROOT / DEFAULT_PW_BASE_CONFIG_RELATIVE_PATH).resolve()),
+        "pw_matrix_config_path": normalize_path_value(matrix_config_path),
     }
 
     layout["prompt_snapshot_path"].write_text("\n".join(prompt_lines) + "\n", encoding="utf-8")
@@ -621,15 +740,24 @@ def run_pw00_build_family_manifest(
         "attack_event_count": attack_event_count,
         "source_shard_count": source_shard_count,
         "attack_shard_count": resolved_attack_shard_count,
+        "materialization_profile": matrix_settings["materialization_profile"],
+        "matrix_profile": matrix_settings["matrix_profile"],
+        "matrix_version": matrix_settings["matrix_version"],
+        "attack_set_names": attack_set_names,
+        "system_event_count_sweep": system_event_count_sweep,
         "wrong_event_challenge_parent_event_count": int(
             wrong_event_attestation_challenge_plan["positive_parent_event_count"]
         ),
         "wrong_event_challenge_available_assignment_count": int(
             wrong_event_attestation_challenge_plan["available_assignment_count"]
         ),
+        "geometry_optional_claim_candidate_event_count": geometry_rescue_candidate_event_count,
         "geometry_optional_claim_available_assignment_count": int(
             geometry_optional_claim_plan["available_assignment_count"]
         ),
+        "geometry_optional_claim_boundary_rule_version": geometry_optional_claim_policy["boundary_rule_version"],
+        "geometry_optional_claim_boundary_abs_margin_min": geometry_optional_claim_policy["boundary_abs_margin_min"],
+        "geometry_optional_claim_boundary_abs_margin_max": geometry_optional_claim_policy["boundary_abs_margin_max"],
         "severity_metadata_frozen": True,
         "severity_rule_version": ATTACK_SEVERITY_RULE_VERSION,
         "severity_axis_kind": ATTACK_SEVERITY_AXIS_KIND,
@@ -638,6 +766,7 @@ def run_pw00_build_family_manifest(
         "severity_multi_point_family_count": sum(
             1 for count in severity_family_level_counts.values() if count > 1
         ),
+        "pw_matrix_config_path": normalize_path_value(matrix_config_path),
     }
     write_json_atomic(summary_path, summary)
     return summary

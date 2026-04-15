@@ -31,6 +31,7 @@ from scripts.notebook_runtime_common import (
 PAPER_WORKFLOW_ROOT_RELATIVE = "paper_workflow/families"
 DEFAULT_CONFIG_RELATIVE_PATH = "configs/default.yaml"
 DEFAULT_PW_BASE_CONFIG_RELATIVE_PATH = "paper_workflow/configs/pw_base.yaml"
+DEFAULT_PW_MATRIX_CONFIG_RELATIVE_PATH = "paper_workflow/configs/pw_matrix.yaml"
 ACTIVE_SAMPLE_ROLE = "positive_source"
 CLEAN_NEGATIVE_SAMPLE_ROLE = "clean_negative"
 PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE = "planner_conditioned_control_negative"
@@ -191,6 +192,148 @@ def _coerce_finite_float(value: Any) -> float | None:
             return None
         return value_float if math.isfinite(value_float) else None
     return None
+
+
+def _extract_str_list(node: Any) -> List[str]:
+    """
+    Normalize one string list.
+
+    Args:
+        node: Candidate string list.
+
+    Returns:
+        Normalized string list.
+    """
+    if not isinstance(node, list):
+        return []
+
+    normalized: List[str] = []
+    for raw_value in cast(List[object], node):
+        if not isinstance(raw_value, str) or not raw_value.strip():
+            return []
+        normalized.append(raw_value.strip())
+    return normalized
+
+
+def load_pw_matrix_config(repo_root: Path = REPO_ROOT) -> Dict[str, Any]:
+    """
+    Load the paper_workflow matrix config mapping.
+
+    Args:
+        repo_root: Repository root path.
+
+    Returns:
+        Parsed matrix config mapping.
+    """
+    if not isinstance(repo_root, Path):
+        raise TypeError("repo_root must be Path")
+
+    pw_base_path = (repo_root / DEFAULT_PW_BASE_CONFIG_RELATIVE_PATH).resolve()
+    pw_base_cfg = load_yaml_mapping(pw_base_path)
+    matrix_config_relative_path = pw_base_cfg.get("matrix_config_path")
+    if not isinstance(matrix_config_relative_path, str) or not matrix_config_relative_path.strip():
+        matrix_config_relative_path = DEFAULT_PW_MATRIX_CONFIG_RELATIVE_PATH
+    matrix_config_path = (repo_root / matrix_config_relative_path).resolve()
+    return load_yaml_mapping(matrix_config_path)
+
+
+def resolve_pw_matrix_settings(matrix_cfg: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    Resolve the normalized paper_workflow attack matrix settings.
+
+    Args:
+        matrix_cfg: Raw matrix config mapping.
+
+    Returns:
+        Normalized matrix settings.
+    """
+    if not isinstance(matrix_cfg, Mapping):
+        raise TypeError("matrix_cfg must be Mapping")
+
+    matrix_profile = str(matrix_cfg.get("matrix_profile") or "").strip()
+    matrix_version = str(matrix_cfg.get("matrix_version") or "").strip()
+    materialization_profile = str(matrix_cfg.get("materialization_profile") or "").strip()
+    if not matrix_profile:
+        raise ValueError("pw_matrix.matrix_profile must be non-empty str")
+    if not matrix_version:
+        raise ValueError("pw_matrix.matrix_version must be non-empty str")
+    if not materialization_profile:
+        raise ValueError("pw_matrix.materialization_profile must be non-empty str")
+
+    attack_sets_node = matrix_cfg.get("attack_sets")
+    if not isinstance(attack_sets_node, Mapping) or not attack_sets_node:
+        raise ValueError("pw_matrix.attack_sets must be non-empty mapping")
+    attack_sets: Dict[str, List[str]] = {}
+    for raw_set_name, raw_set_payload in cast(Mapping[str, Any], attack_sets_node).items():
+        set_name = str(raw_set_name or "").strip()
+        if not set_name:
+            raise ValueError("pw_matrix.attack_sets keys must be non-empty str")
+        if not isinstance(raw_set_payload, Mapping):
+            raise ValueError(f"pw_matrix.attack_sets.{set_name} must be mapping")
+        families = _extract_str_list(cast(Mapping[str, Any], raw_set_payload).get("families"))
+        if not families:
+            raise ValueError(f"pw_matrix.attack_sets.{set_name}.families must be non-empty list[str]")
+        attack_sets[set_name] = list(dict.fromkeys(families))
+
+    geometry_optional_claim_node = matrix_cfg.get("geometry_optional_claim")
+    if not isinstance(geometry_optional_claim_node, Mapping):
+        raise ValueError("pw_matrix.geometry_optional_claim must be mapping")
+    candidate_attack_set = str(geometry_optional_claim_node.get("candidate_attack_set") or "").strip()
+    if candidate_attack_set not in attack_sets:
+        raise ValueError("pw_matrix.geometry_optional_claim.candidate_attack_set must reference one attack_sets key")
+    boundary_rule_version = str(geometry_optional_claim_node.get("boundary_rule_version") or "").strip()
+    boundary_metric = str(geometry_optional_claim_node.get("boundary_metric") or "").strip()
+    boundary_abs_margin_min = _coerce_finite_float(geometry_optional_claim_node.get("boundary_abs_margin_min"))
+    boundary_abs_margin_max = _coerce_finite_float(geometry_optional_claim_node.get("boundary_abs_margin_max"))
+    if not boundary_rule_version:
+        raise ValueError("pw_matrix.geometry_optional_claim.boundary_rule_version must be non-empty str")
+    if not boundary_metric:
+        raise ValueError("pw_matrix.geometry_optional_claim.boundary_metric must be non-empty str")
+    if boundary_abs_margin_min is None or boundary_abs_margin_min < 0.0:
+        raise ValueError("pw_matrix.geometry_optional_claim.boundary_abs_margin_min must be finite and >= 0")
+    if boundary_abs_margin_max is None or boundary_abs_margin_max <= 0.0:
+        raise ValueError("pw_matrix.geometry_optional_claim.boundary_abs_margin_max must be finite and > 0")
+    if boundary_abs_margin_max < boundary_abs_margin_min:
+        raise ValueError("pw_matrix geometry boundary max must be >= min")
+
+    system_event_count_sweep_node = matrix_cfg.get("system_event_count_sweep")
+    if not isinstance(system_event_count_sweep_node, Mapping):
+        raise ValueError("pw_matrix.system_event_count_sweep must be mapping")
+    event_counts = sorted(
+        {
+            int(event_count)
+            for event_count in cast(List[int], _extract_int_list(system_event_count_sweep_node.get("event_counts")))
+            if int(event_count) > 0
+        }
+    )
+    repeat_count = _extract_int(system_event_count_sweep_node.get("repeat_count"))
+    random_seed = _extract_int(system_event_count_sweep_node.get("random_seed"))
+    if not event_counts:
+        raise ValueError("pw_matrix.system_event_count_sweep.event_counts must contain positive ints")
+    if repeat_count is None or repeat_count <= 0:
+        raise ValueError("pw_matrix.system_event_count_sweep.repeat_count must be positive int")
+    if random_seed is None:
+        raise ValueError("pw_matrix.system_event_count_sweep.random_seed must be int")
+
+    return {
+        "matrix_profile": matrix_profile,
+        "matrix_version": matrix_version,
+        "materialization_profile": materialization_profile,
+        "attack_sets": attack_sets,
+        "geometry_optional_claim": {
+            "candidate_attack_set": candidate_attack_set,
+            "candidate_attack_families": list(attack_sets[candidate_attack_set]),
+            "boundary_rule_version": boundary_rule_version,
+            "boundary_metric": boundary_metric,
+            "boundary_abs_margin_min": boundary_abs_margin_min,
+            "boundary_abs_margin_max": boundary_abs_margin_max,
+        },
+        "system_event_count_sweep": {
+            "event_counts": event_counts,
+            "repeat_count": repeat_count,
+            "random_seed": random_seed,
+        },
+    }
 
 
 def _safe_mean(values: Sequence[int | float]) -> float | None:
@@ -1703,37 +1846,80 @@ def build_source_shard_plan(
     }
 
 
-def _materialize_attack_param_value(*, key_name: str | None, value: Any) -> Any:
+def _materialize_attack_param_variants_value(*, key_name: str | None, value: Any) -> List[Any]:
     """
-    Materialize one protocol parameter value into a concrete executable value.
+    Materialize one protocol parameter value into concrete executable variants.
 
     Args:
         key_name: Optional parent key name.
         value: Raw protocol value.
 
     Returns:
-        Concrete value used by PW03 minimal attack execution.
+        Concrete value variants used by PW03 attack execution.
     """
     if isinstance(value, Mapping):
-        materialized_mapping: Dict[str, Any] = {}
+        materialized_variants: List[Dict[str, Any]] = [{}]
         for nested_key, nested_value in cast(Mapping[str, Any], value).items():
-            materialized_mapping[str(nested_key)] = _materialize_attack_param_value(
+            nested_variants = _materialize_attack_param_variants_value(
                 key_name=str(nested_key),
                 value=nested_value,
             )
-        return materialized_mapping
+            if not nested_variants:
+                return []
+            next_variants: List[Dict[str, Any]] = []
+            for materialized_variant in materialized_variants:
+                for nested_variant in nested_variants:
+                    next_variant = copy.deepcopy(materialized_variant)
+                    next_variant[str(nested_key)] = copy.deepcopy(nested_variant)
+                    next_variants.append(next_variant)
+            materialized_variants = next_variants
+        return materialized_variants
 
     if isinstance(value, list):
         if key_name == "steps":
-            return [
-                _materialize_attack_param_value(key_name=None, value=item)
+            return [[
+                _materialize_attack_param_variants_value(key_name=None, value=item)[0]
                 for item in cast(List[Any], value)
-            ]
+            ]]
         if not value:
             return []
-        return _materialize_attack_param_value(key_name=key_name, value=value[0])
+        materialized_variants: List[Any] = []
+        for item in cast(List[Any], value):
+            materialized_variants.extend(
+                copy.deepcopy(
+                    _materialize_attack_param_variants_value(
+                        key_name=key_name,
+                        value=item,
+                    )
+                )
+            )
+        return materialized_variants
 
-    return value
+    return [copy.deepcopy(value)]
+
+
+def materialize_attack_param_variants(params: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Materialize one protocol params object into concrete attack-config variants.
+
+    Args:
+        params: Protocol params mapping.
+
+    Returns:
+        Concrete attack params mappings.
+    """
+    if not isinstance(params, Mapping):
+        raise TypeError("params must be Mapping")
+
+    variants = _materialize_attack_param_variants_value(key_name=None, value=params)
+    materialized_params: List[Dict[str, Any]] = []
+    for variant in variants:
+        if not isinstance(variant, Mapping):
+            raise TypeError("materialized attack param variant must be Mapping")
+        materialized_params.append(dict(cast(Mapping[str, Any], variant)))
+    if not materialized_params:
+        raise ValueError("materialized attack params must contain at least one variant")
+    return materialized_params
 
 
 def materialize_attack_params(params: Mapping[str, Any]) -> Dict[str, Any]:
@@ -1746,16 +1932,64 @@ def materialize_attack_params(params: Mapping[str, Any]) -> Dict[str, Any]:
     Returns:
         Concrete attack params mapping.
     """
-    if not isinstance(params, Mapping):
-        raise TypeError("params must be Mapping")
+    return materialize_attack_param_variants(params)[0]
 
-    materialized_params: Dict[str, Any] = {}
-    for key_name, value in cast(Mapping[str, Any], params).items():
-        materialized_params[str(key_name)] = _materialize_attack_param_value(
-            key_name=str(key_name),
-            value=value,
-        )
-    return materialized_params
+
+def _resolve_attack_set_names(
+    *,
+    attack_family: str,
+    attack_sets: Mapping[str, Sequence[str]],
+) -> List[str]:
+    """
+    Resolve the stable attack-set names containing one attack family.
+
+    Args:
+        attack_family: Canonical attack family name.
+        attack_sets: Mapping of attack-set names to allowed families.
+
+    Returns:
+        Sorted attack-set names.
+    """
+    if not isinstance(attack_family, str) or not attack_family:
+        raise TypeError("attack_family must be non-empty str")
+    if not isinstance(attack_sets, Mapping):
+        raise TypeError("attack_sets must be Mapping")
+
+    return sorted(
+        set_name
+        for set_name, families in attack_sets.items()
+        if isinstance(set_name, str)
+        and set_name
+        and isinstance(families, Sequence)
+        and attack_family in {str(family) for family in families}
+    )
+
+
+def _build_attack_condition_variant_suffix(
+    *,
+    severity_label: Any,
+    attack_params_digest: str,
+    variant_index: int,
+) -> str:
+    """
+    Build one stable attack-condition suffix for a concrete variant.
+
+    Args:
+        severity_label: Optional severity label.
+        attack_params_digest: Digest of the concrete params.
+        variant_index: Zero-based variant index under the base condition.
+
+    Returns:
+        Stable attack-condition suffix.
+    """
+    if not isinstance(attack_params_digest, str) or not attack_params_digest:
+        raise TypeError("attack_params_digest must be non-empty str")
+    if not isinstance(variant_index, int) or isinstance(variant_index, bool) or variant_index < 0:
+        raise TypeError("variant_index must be non-negative int")
+
+    if isinstance(severity_label, str) and severity_label.strip():
+        return severity_label.strip().replace(" ", "")
+    return f"variant_{variant_index:02d}_{attack_params_digest[:8]}"
 
 
 def _coerce_attack_numeric(value: Any) -> float | None:
@@ -1998,6 +2232,7 @@ def _build_attack_severity_metadata(
 
 def build_attack_condition_catalog(
     protocol_spec: Mapping[str, Any] | None = None,
+    matrix_cfg: Mapping[str, Any] | None = None,
 ) -> List[Dict[str, Any]]:
     """
     Build the canonical PW03 attack-condition catalog.
@@ -2005,6 +2240,8 @@ def build_attack_condition_catalog(
     Args:
         protocol_spec: Optional standardized protocol spec. When absent the
             repository fact source is loaded.
+        matrix_cfg: Optional matrix config. When absent the repository config
+            is loaded.
 
     Returns:
         Ordered concrete attack-condition rows.
@@ -2014,39 +2251,99 @@ def build_attack_condition_catalog(
         if protocol_spec is None
         else dict(cast(Mapping[str, Any], protocol_spec))
     )
+    matrix_settings = resolve_pw_matrix_settings(
+        load_pw_matrix_config() if matrix_cfg is None else matrix_cfg
+    )
+    materialization_profile = str(matrix_settings["materialization_profile"])
+    attack_sets = cast(Mapping[str, Sequence[str]], matrix_settings["attack_sets"])
+    geometry_optional_claim_settings = cast(Mapping[str, Any], matrix_settings["geometry_optional_claim"])
+    geometry_candidate_families = {
+        str(attack_family)
+        for attack_family in cast(Sequence[str], geometry_optional_claim_settings["candidate_attack_families"])
+    }
     attack_plan = eval_attack_plan.generate_attack_plan(dict(normalized_protocol_spec))
     if not attack_plan.conditions:
         raise ValueError("attack protocol must declare at least one condition")
 
     condition_rows: List[Dict[str, Any]] = []
-    for condition_index, condition_key in enumerate(attack_plan.conditions):
+    for condition_key in attack_plan.conditions:
         condition_spec = eval_attack_runner.resolve_condition_spec_from_protocol(
             dict(normalized_protocol_spec),
             condition_key,
         )
         attack_family = str(condition_spec["attack_family"])
         params_version = str(condition_spec["params_version"])
-        attack_params = materialize_attack_params(cast(Mapping[str, Any], condition_spec["params"]))
-        attack_config_name = condition_key
-        severity_metadata = _build_attack_severity_metadata(
-            attack_family=attack_family,
-            attack_params=attack_params,
+        attack_param_variants = materialize_attack_param_variants(cast(Mapping[str, Any], condition_spec["params"]))
+        if materialization_profile == "first_value_per_condition":
+            attack_param_variants = attack_param_variants[:1]
+        elif materialization_profile != "protocol_list_cartesian_per_condition":
+            raise ValueError(f"unsupported pw_matrix materialization_profile: {materialization_profile}")
+
+        per_condition_rows: List[Dict[str, Any]] = []
+        for attack_params in attack_param_variants:
+            severity_metadata = _build_attack_severity_metadata(
+                attack_family=attack_family,
+                attack_params=attack_params,
+            )
+            attack_params_digest = canonical_mapping_sha256(attack_params)
+            per_condition_rows.append(
+                {
+                    "attack_condition_base_key": condition_key,
+                    "attack_family": attack_family,
+                    "attack_config_name": condition_key,
+                    "attack_params_version": params_version,
+                    "attack_params": attack_params,
+                    "attack_params_digest": attack_params_digest,
+                    "attack_protocol_version": condition_spec.get("protocol_version", "<absent>"),
+                    "attack_protocol_digest": condition_spec.get("protocol_digest", "<absent>"),
+                    "attack_materialization_profile": materialization_profile,
+                    "matrix_profile": matrix_settings["matrix_profile"],
+                    "matrix_version": matrix_settings["matrix_version"],
+                    "matrix_attack_set_names": _resolve_attack_set_names(
+                        attack_family=attack_family,
+                        attack_sets=attack_sets,
+                    ),
+                    "geometry_rescue_candidate": attack_family in geometry_candidate_families,
+                    **severity_metadata,
+                }
+            )
+
+        per_condition_rows = sorted(
+            per_condition_rows,
+            key=lambda row: (
+                row.get("severity_status") != "ok",
+                (
+                    float(cast(float, row["severity_sort_value"]))
+                    if isinstance(row.get("severity_sort_value"), (int, float))
+                    and not isinstance(row.get("severity_sort_value"), bool)
+                    else float("inf")
+                ),
+                str(row.get("severity_label") or ""),
+                str(row["attack_params_digest"]),
+            ),
         )
-        condition_rows.append(
-            {
-                "attack_condition_index": condition_index,
-                "attack_condition_key": condition_key,
-                "attack_family": attack_family,
-                "attack_config_name": attack_config_name,
-                "attack_params_version": params_version,
-                "attack_params": attack_params,
-                "attack_params_digest": canonical_mapping_sha256(attack_params),
-                "attack_protocol_version": condition_spec.get("protocol_version", "<absent>"),
-                "attack_protocol_digest": condition_spec.get("protocol_digest", "<absent>"),
-                "attack_materialization_profile": "first_value_per_condition",
-                **severity_metadata,
-            }
-        )
+        seen_condition_keys: set[str] = set()
+        for variant_index, row in enumerate(per_condition_rows):
+            condition_key_value = condition_key
+            if len(per_condition_rows) > 1:
+                condition_suffix = _build_attack_condition_variant_suffix(
+                    severity_label=row.get("severity_label"),
+                    attack_params_digest=str(row["attack_params_digest"]),
+                    variant_index=variant_index,
+                )
+                condition_key_value = f"{condition_key}::{condition_suffix}"
+                if condition_key_value in seen_condition_keys:
+                    condition_key_value = f"{condition_key_value}__{str(row['attack_params_digest'])[:8]}"
+                row["attack_condition_suffix"] = condition_suffix
+            else:
+                row["attack_condition_suffix"] = None
+            row["attack_condition_variant_index"] = variant_index
+            row["attack_condition_key"] = condition_key_value
+            seen_condition_keys.add(condition_key_value)
+            condition_rows.append(row)
+
+    for condition_index, row in enumerate(condition_rows):
+        row["attack_condition_index"] = condition_index
 
     grouped_rows: Dict[str, List[Dict[str, Any]]] = {}
     for condition_row in condition_rows:
@@ -2185,13 +2482,20 @@ def build_attack_event_grid(
                     "parent_sample_role": parent_sample_role,
                     "attack_family": attack_condition.get("attack_family"),
                     "attack_config_name": attack_condition.get("attack_config_name"),
+                    "attack_condition_base_key": attack_condition.get("attack_condition_base_key"),
                     "attack_condition_key": attack_condition_key,
+                    "attack_condition_variant_index": attack_condition.get("attack_condition_variant_index"),
+                    "attack_condition_suffix": attack_condition.get("attack_condition_suffix"),
                     "attack_params_version": attack_condition.get("attack_params_version"),
                     "attack_params": copy.deepcopy(attack_condition.get("attack_params", {})),
                     "attack_params_digest": attack_params_digest,
                     "attack_protocol_version": attack_condition.get("attack_protocol_version"),
                     "attack_protocol_digest": attack_condition.get("attack_protocol_digest"),
                     "attack_materialization_profile": attack_condition.get("attack_materialization_profile"),
+                    "matrix_profile": attack_condition.get("matrix_profile"),
+                    "matrix_version": attack_condition.get("matrix_version"),
+                    "matrix_attack_set_names": copy.deepcopy(attack_condition.get("matrix_attack_set_names", [])),
+                    "geometry_rescue_candidate": attack_condition.get("geometry_rescue_candidate"),
                     "severity_rule_version": attack_condition.get("severity_rule_version"),
                     "severity_axis_kind": attack_condition.get("severity_axis_kind"),
                     "severity_directionality": attack_condition.get("severity_directionality"),
@@ -2279,6 +2583,28 @@ def build_attack_shard_plan(
             if isinstance(event.get("sample_role"), str) and str(event.get("sample_role"))
         }
     )
+    materialization_profiles = sorted(
+        {
+            str(event.get("attack_materialization_profile"))
+            for event in ordered_events
+            if isinstance(event.get("attack_materialization_profile"), str)
+            and str(event.get("attack_materialization_profile"))
+        }
+    )
+    matrix_profiles = sorted(
+        {
+            str(event.get("matrix_profile"))
+            for event in ordered_events
+            if isinstance(event.get("matrix_profile"), str) and str(event.get("matrix_profile"))
+        }
+    )
+    matrix_versions = sorted(
+        {
+            str(event.get("matrix_version"))
+            for event in ordered_events
+            if isinstance(event.get("matrix_version"), str) and str(event.get("matrix_version"))
+        }
+    )
     return {
         "artifact_type": "paper_workflow_attack_shard_plan",
         "schema_version": "pw_stage_03_v1",
@@ -2287,7 +2613,9 @@ def build_attack_shard_plan(
         "attack_sample_roles": attack_sample_roles,
         "attack_shard_count": attack_shard_count,
         "attack_event_count": len(ordered_events),
-        "materialization_profile": "first_value_per_condition",
+        "materialization_profile": materialization_profiles[0] if len(materialization_profiles) == 1 else materialization_profiles,
+        "matrix_profile": matrix_profiles[0] if len(matrix_profiles) == 1 else matrix_profiles,
+        "matrix_version": matrix_versions[0] if len(matrix_versions) == 1 else matrix_versions,
         "shards": shard_rows,
     }
 

@@ -899,6 +899,7 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     derived_system_union_metrics_export = json.loads(
         Path(str(pw02_summary["derived_system_union_metrics_artifact_path"])).read_text(encoding="utf-8")
     )
+    clean_event_rows = read_jsonl(Path(str(pw02_summary["clean_event_table_path"])))
 
     assert positive_pool_manifest["family_id"] == "family_pw02_exports"
     assert positive_pool_manifest["source_role"] == "positive_source"
@@ -940,7 +941,10 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert finalize_manifest["threshold_exports"]["content"]["path"] == cast(Dict[str, Any], pw02_summary["threshold_exports"])["content"]
     assert finalize_manifest["clean_evaluate_exports"]["content"]["path"] == cast(Dict[str, Any], pw02_summary["clean_evaluate_exports"])["content"]
     assert finalize_manifest["clean_score_analysis_exports"]["content"]["path"] == cast(Dict[str, Any], pw02_summary["clean_score_analysis_exports"])["content"]
+    assert finalize_manifest["clean_event_table"]["path"] == pw02_summary["clean_event_table_path"]
     assert finalize_manifest["clean_quality_pair_artifact"]["path"] == pw02_summary["clean_quality_pair_manifest_path"]
+    assert clean_event_rows
+    assert {row["subset_name"] for row in clean_event_rows} == {"clean_eval_events"}
 
     content_run = cast(Dict[str, Any], pw02_summary["score_runs"][pw02_module.CONTENT_SCORE_NAME])
     attestation_run = cast(Dict[str, Any], pw02_summary["score_runs"][pw02_module.EVENT_ATTESTATION_SCORE_NAME])

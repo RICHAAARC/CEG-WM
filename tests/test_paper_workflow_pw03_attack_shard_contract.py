@@ -805,6 +805,94 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert payload_decode_sidecar["probe_bit_accuracy"] == pytest.approx(93.0 / 96.0)
     assert payload_decode_sidecar["probe_support_rate"] == pytest.approx(1.0)
 
+def test_geometry_optional_claim_boundary_band_uses_min_and_max(tmp_path: Path) -> None:
+    """
+    Verify PW03 boundary resolution honors both min and max margin thresholds.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    parent_detect_record_path = tmp_path / "parent_detect_record.json"
+    content_threshold_path = tmp_path / "thresholds" / "content" / "thresholds.json"
+    attestation_threshold_path = tmp_path / "thresholds" / "attestation" / "thresholds.json"
+    ensure_directory(content_threshold_path.parent)
+    ensure_directory(attestation_threshold_path.parent)
+    write_json_atomic(content_threshold_path, {"threshold": 0.5, "score_name": "content_chain_score"})
+    write_json_atomic(attestation_threshold_path, {"threshold": 0.4, "score_name": "event_attestation_score"})
+
+    attack_event_spec = {
+        "parent_event_id": "parent_event_demo",
+        "parent_source_event": {
+            "event_manifest": {
+                "detect_record_path": str(parent_detect_record_path.resolve()),
+            }
+        },
+        "threshold_binding_reference": {
+            "threshold_artifact_paths": {
+                "content": str(content_threshold_path.resolve()),
+                "attestation": str(attestation_threshold_path.resolve()),
+            }
+        },
+    }
+    assignment_payload = {
+        "status": "pending_resolution",
+        "protocol_version": "geometry_optional_claim_content_margin_boundary_v1",
+        "boundary_rule_version": "geometry_optional_claim_boundary_band_v2",
+        "boundary_metric": "abs_content_margin",
+        "boundary_abs_margin_min": 0.005,
+        "boundary_abs_margin_max": 0.05,
+    }
+
+    write_json_atomic(
+        parent_detect_record_path,
+        {
+            "content_evidence_payload": {
+                "status": "ok",
+                "content_chain_score": 0.502,
+            },
+            "attestation": {
+                "final_event_attested_decision": {
+                    "event_attestation_score": 0.41,
+                }
+            },
+        },
+    )
+    below_min_resolution = pw03_module._resolve_geometry_optional_claim_boundary_assignment(
+        attack_event_spec=attack_event_spec,
+        assignment_payload=assignment_payload,
+    )
+    assert below_min_resolution["boundary_metric_value"] == pytest.approx(0.002)
+    assert below_min_resolution["boundary_abs_margin_min"] == pytest.approx(0.005)
+    assert below_min_resolution["status"] == "not_applicable"
+    assert below_min_resolution["reason"] == "parent_source_outside_content_margin_boundary_subset"
+    assert below_min_resolution["eligible_for_optional_claim"] is False
+
+    write_json_atomic(
+        parent_detect_record_path,
+        {
+            "content_evidence_payload": {
+                "status": "ok",
+                "content_chain_score": 0.52,
+            },
+            "attestation": {
+                "final_event_attested_decision": {
+                    "event_attestation_score": 0.41,
+                }
+            },
+        },
+    )
+    in_band_resolution = pw03_module._resolve_geometry_optional_claim_boundary_assignment(
+        attack_event_spec=attack_event_spec,
+        assignment_payload=assignment_payload,
+    )
+    assert in_band_resolution["boundary_metric_value"] == pytest.approx(0.02)
+    assert in_band_resolution["status"] == "ready"
+    assert in_band_resolution["reason"] is None
+    assert in_band_resolution["eligible_for_optional_claim"] is True
+
 
 def test_run_attack_detect_event_marks_payload_decode_sidecar_not_applicable_for_attacked_negative(
     tmp_path: Path,
