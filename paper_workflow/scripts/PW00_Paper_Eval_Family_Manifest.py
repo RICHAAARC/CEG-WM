@@ -47,6 +47,14 @@ def main() -> int:
             "When omitted, the runtime falls back to --source-shard-count for backward compatibility."
         ),
     )
+    parser.add_argument(
+        "--pw-base-config-path",
+        default=None,
+        help=(
+            "Optional absolute or repo-relative pw_base config path. "
+            "When omitted, paper_workflow/configs/pw_base.yaml is used."
+        ),
+    )
     args = parser.parse_args()
 
     summary = run_pw00_build_family_manifest(
@@ -56,6 +64,7 @@ def main() -> int:
         seed_list=args.seed_list,
         source_shard_count=int(args.source_shard_count),
         attack_shard_count=(None if args.attack_shard_count is None else int(args.attack_shard_count)),
+        pw_base_config_path=(None if args.pw_base_config_path is None else str(args.pw_base_config_path)),
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
     return 0

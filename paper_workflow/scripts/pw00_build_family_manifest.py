@@ -11,6 +11,7 @@ from typing import Any, Dict, Mapping, Sequence, cast
 
 from scripts.notebook_runtime_common import (
     REPO_ROOT,
+    load_yaml_mapping,
     normalize_path_value,
     utc_now_iso,
     write_json_atomic,
@@ -122,6 +123,30 @@ def _resolve_matrix_config_path(pw_base_cfg: Dict[str, Any]) -> Path:
     if not isinstance(matrix_config_path_value, str) or not matrix_config_path_value.strip():
         matrix_config_path_value = DEFAULT_PW_MATRIX_CONFIG_RELATIVE_PATH
     return (REPO_ROOT / matrix_config_path_value).resolve()
+
+
+def _resolve_pw_base_config_path(pw_base_config_path: Path | str | None) -> Path:
+    """
+    Resolve the authoritative pw_base config path.
+
+    Args:
+        pw_base_config_path: Optional absolute or repo-relative pw_base path.
+
+    Returns:
+        Resolved absolute pw_base path.
+    """
+    if pw_base_config_path is None:
+        candidate_path = Path(DEFAULT_PW_BASE_CONFIG_RELATIVE_PATH)
+    elif isinstance(pw_base_config_path, Path):
+        candidate_path = pw_base_config_path.expanduser()
+    elif isinstance(pw_base_config_path, str) and pw_base_config_path.strip():
+        candidate_path = Path(pw_base_config_path.strip()).expanduser()
+    else:
+        raise TypeError("pw_base_config_path must be Path, non-empty str, or None")
+
+    if not candidate_path.is_absolute():
+        candidate_path = REPO_ROOT / candidate_path
+    return candidate_path.resolve()
 
 
 def _build_wrong_event_attestation_challenge_plan(
@@ -372,6 +397,7 @@ def run_pw00_build_family_manifest(
     seed_list: Sequence[int] | str,
     source_shard_count: int,
     attack_shard_count: int | None = None,
+    pw_base_config_path: Path | str | None = None,
 ) -> Dict[str, Any]:
     """
     Build PW00 family manifest outputs.
@@ -383,6 +409,7 @@ def run_pw00_build_family_manifest(
         seed_list: Seed list or seed-list text.
         source_shard_count: Source shard count.
         attack_shard_count: Optional attack shard count frozen for PW03.
+        pw_base_config_path: Optional absolute or repo-relative pw_base path.
 
     Returns:
         PW00 summary payload.
@@ -406,9 +433,10 @@ def run_pw00_build_family_manifest(
     layout = ensure_family_layout(family_root)
     _ = resolve_family_layout_paths(family_root)
 
-    pw_base_cfg = _load_pw_base_cfg()
+    resolved_pw_base_config_path = _resolve_pw_base_config_path(pw_base_config_path)
+    pw_base_cfg = load_yaml_mapping(resolved_pw_base_config_path)
     matrix_config_path = _resolve_matrix_config_path(pw_base_cfg)
-    matrix_cfg = load_pw_matrix_config(REPO_ROOT)
+    matrix_cfg = load_pw_matrix_config(REPO_ROOT, base_config_path=resolved_pw_base_config_path)
     matrix_settings = resolve_pw_matrix_settings(matrix_cfg)
     normalized_seeds = parse_seed_list(seed_list)
     prompt_path, prompt_lines = load_prompt_lines(prompt_file)
@@ -696,7 +724,7 @@ def run_pw00_build_family_manifest(
             ),
         },
         "default_config_path": normalize_path_value(default_cfg_path),
-        "pw_base_config_path": normalize_path_value((REPO_ROOT / DEFAULT_PW_BASE_CONFIG_RELATIVE_PATH).resolve()),
+        "pw_base_config_path": normalize_path_value(resolved_pw_base_config_path),
         "pw_matrix_config_path": normalize_path_value(matrix_config_path),
     }
 
@@ -766,6 +794,7 @@ def run_pw00_build_family_manifest(
         "severity_multi_point_family_count": sum(
             1 for count in severity_family_level_counts.values() if count > 1
         ),
+        "pw_base_config_path": normalize_path_value(resolved_pw_base_config_path),
         "pw_matrix_config_path": normalize_path_value(matrix_config_path),
     }
     write_json_atomic(summary_path, summary)

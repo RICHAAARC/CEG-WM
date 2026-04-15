@@ -35,6 +35,9 @@ from paper_workflow.scripts.pw_common import (
 from scripts.notebook_runtime_common import compute_file_sha256, ensure_directory, normalize_path_value, write_json_atomic
 
 
+PILOT_PW_BASE_CONFIG_PATH = (pw04_module.REPO_ROOT / "paper_workflow" / "configs" / "pw_base_pilot.yaml").resolve()
+
+
 @pytest.fixture(autouse=True)
 def _force_pw04_png_fallback(monkeypatch: Any) -> None:
     """
@@ -62,13 +65,18 @@ def _force_pw04_png_fallback(monkeypatch: Any) -> None:
     monkeypatch.setattr(builtins, "__import__", patched_import)
 
 
-def _build_pw00_family(tmp_path: Path, family_id: str) -> Dict[str, Any]:
+def _build_pw00_family(
+    tmp_path: Path,
+    family_id: str,
+    pw_base_config_path: Path | str | None = None,
+) -> Dict[str, Any]:
     """
     Build a minimal PW00 family fixture for PW04 tests.
 
     Args:
         tmp_path: Pytest temporary directory.
         family_id: Fixture family identifier.
+        pw_base_config_path: Optional absolute or repo-relative pw_base path.
 
     Returns:
         PW00 summary payload.
@@ -82,6 +90,7 @@ def _build_pw00_family(tmp_path: Path, family_id: str) -> Dict[str, Any]:
         seed_list=[7],
         source_shard_count=2,
         attack_shard_count=2,
+        pw_base_config_path=pw_base_config_path,
     )
 
 
@@ -1050,18 +1059,23 @@ def _build_pw03_fixture(summary: Dict[str, Any], pw02_fixture: Mapping[str, Any]
     }
 
 
-def _build_pw04_fixture(tmp_path: Path, family_id: str) -> Dict[str, Any]:
+def _build_pw04_fixture(
+    tmp_path: Path,
+    family_id: str,
+    pw_base_config_path: Path | str | None = None,
+) -> Dict[str, Any]:
     """
     Build the full PW00 + PW02 + PW03 fixture consumed by PW04.
 
     Args:
         tmp_path: Pytest temporary directory.
         family_id: Fixture family identifier.
+        pw_base_config_path: Optional absolute or repo-relative pw_base path.
 
     Returns:
         Full PW04 fixture metadata.
     """
-    summary = _build_pw00_family(tmp_path, family_id)
+    summary = _build_pw00_family(tmp_path, family_id, pw_base_config_path=pw_base_config_path)
     pw02_fixture = _build_pw02_fixture(summary)
     pw03_fixture = _build_pw03_fixture(summary, pw02_fixture)
     return {
@@ -1812,6 +1826,71 @@ def test_pw04_quality_shard_worker_only_writes_shard_payload(tmp_path: Path, mon
     assert not (family_root / "exports" / "pw04" / "metrics" / "attack_quality_metrics.json").exists()
     assert not (family_root / "exports" / "pw04" / "tables").exists()
     assert not (family_root / "exports" / "pw04" / "figures").exists()
+
+
+def test_pw04_system_event_count_sweep_uses_family_bound_pilot_matrix(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """
+    Verify PW04 sweep exports use the family-bound pilot matrix instead of the
+    repository default matrix.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_compute_clip_text_similarity",
+        _fake_clip_text_similarity,
+    )
+    fixture = _build_pw04_fixture(
+        tmp_path,
+        "family_pw04_pilot_matrix",
+        pw_base_config_path=PILOT_PW_BASE_CONFIG_PATH,
+    )
+
+    pw04_module.run_pw04_merge_attack_event_shards(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_pw04_pilot_matrix",
+        pw04_mode=pw04_module.PW04_MODE_PREPARE,
+    )
+    for shard_index in range(2):
+        pw04_module.run_pw04_merge_attack_event_shards(
+            drive_project_root=tmp_path / "drive",
+            family_id="family_pw04_pilot_matrix",
+            pw04_mode=pw04_module.PW04_MODE_QUALITY_SHARD,
+            quality_shard_index=shard_index,
+        )
+
+    pw04_summary = pw04_module.run_pw04_merge_attack_event_shards(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_pw04_pilot_matrix",
+        pw04_mode=pw04_module.PW04_MODE_FINALIZE,
+    )
+
+    summary = cast(Dict[str, Any], fixture["summary"])
+    paper_tables_paths = cast(Dict[str, str], pw04_summary["paper_tables_paths"])
+    system_event_count_sweep = _load_json_dict(Path(str(paper_tables_paths["system_event_count_sweep_json_path"])))
+    system_event_count_sweep_rows = _load_csv_rows(Path(str(paper_tables_paths["system_event_count_sweep_csv_path"])))
+
+    assert summary["pw_matrix_config_path"].endswith("paper_workflow/configs/pw_matrix_pilot.yaml")
+    assert system_event_count_sweep["matrix_profile"] == "family_x_severity_pilot_v1"
+    assert system_event_count_sweep["matrix_version"] == "pw_attack_matrix_pilot_v1"
+    assert system_event_count_sweep["system_event_count_sweep"]["event_counts"] == [1, 2, 4, 8, 16, 32, 64]
+    assert system_event_count_sweep["system_event_count_sweep"]["repeat_count"] == 48
+    assert system_event_count_sweep["system_event_count_sweep"]["random_seed"] == 20260415
+    assert 128 not in cast(List[int], system_event_count_sweep["system_event_count_sweep"]["event_counts"])
+    assert {row["repeats"] for row in system_event_count_sweep_rows} <= {"1", "48"}
+    assert all(
+        row["repeats"] == "48"
+        for row in system_event_count_sweep_rows
+        if row["event_count"] != row["population_event_count"]
+    )
 
 
 def test_pw04_quality_shard_mode_requires_prepare_manifest(tmp_path: Path) -> None:

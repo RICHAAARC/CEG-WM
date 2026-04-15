@@ -1,0 +1,34 @@
+schema_version: "pw01_v1"
+source_truth_stage: "PW01_Source_Event_Shards"
+default_config_path: "configs/default.yaml"
+matrix_config_path: "paper_workflow/configs/pw_matrix_pilot.yaml"
+family_root_relative: "paper_workflow/families"
+sample_roles:
+  active:
+    - "positive_source"
+    - "clean_negative"
+  reserved:
+    - "attacked_positive"
+calibration_fraction: 0.5
+event_identity:
+  unit_definition: "sample_event = (prompt_index, prompt_text, seed, sample_role)"
+  id_fields:
+    - "family_id"
+    - "sample_role"
+    - "prompt_index"
+    - "prompt_sha256"
+    - "seed"
+  id_digest: "sha256"
+source_shards:
+  default_count: 2
+source_alignment_reference_files:
+  - "paper_workflow/configs/pw_base.yaml"
+  - "paper_workflow/configs/pw_matrix.yaml"
+  - "paper_workflow/scripts/pw_common.py"
+  - "paper_workflow/scripts/pw00_build_family_manifest.py"
+  - "paper_workflow/scripts/pw01_stage_runtime_helpers.py"
+  - "paper_workflow/scripts/pw01_run_source_event_shard.py"
+  - "paper_workflow/notebook/PW00_Paper_Eval_Family_Manifest.ipynb"
+  - "paper_workflow/notebook/PW01_Source_Event_Shards.ipynb"
+  - "scripts/notebook_runtime_common.py"
+  - "configs/default.yaml"

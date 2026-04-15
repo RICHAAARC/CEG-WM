@@ -1,0 +1,160 @@
+schema_version: "pw_matrix_v1"
+matrix_profile: "family_x_severity_pilot_v1"
+matrix_version: "pw_attack_matrix_pilot_v1"
+materialization_profile: "matrix_defined_concrete_conditions"
+attack_sets:
+  general_attacks:
+    families:
+      - "rotate"
+      - "resize"
+      - "crop"
+      - "translate"
+      - "jpeg"
+      - "gaussian_noise"
+      - "gaussian_blur"
+      - "composite"
+  geometry_rescue_candidates:
+    families:
+      - "rotate"
+      - "resize"
+      - "crop"
+      - "composite"
+concrete_conditions:
+  "composite::rotate_resize_v1":
+    - condition_suffix: "sev00"
+      severity_label: "rotate+resize"
+      severity_level_index: 0
+      params:
+        steps:
+          - family: "rotate"
+            params:
+              degrees: 10
+          - family: "resize"
+            params:
+              scale_factor: 0.9
+        seed_policy: "shared"
+  "crop::v1":
+    - condition_suffix: "sev00"
+      severity_label: "crop_ratio=0.9"
+      severity_level_index: 0
+      params:
+        crop_ratios: 0.9
+    - condition_suffix: "sev01"
+      severity_label: "crop_ratio=0.8"
+      severity_level_index: 1
+      params:
+        crop_ratios: 0.8
+    - condition_suffix: "sev02"
+      severity_label: "crop_ratio=0.7"
+      severity_level_index: 2
+      params:
+        crop_ratios: 0.7
+  "gaussian_blur::v1":
+    - condition_suffix: "sev00"
+      severity_label: "sigma=0.8,kernel_size=3"
+      severity_level_index: 0
+      params:
+        kernel_size: 3
+        sigma: 0.8
+        seed_policy: "inherit"
+    - condition_suffix: "sev01"
+      severity_label: "sigma=1.2,kernel_size=5"
+      severity_level_index: 1
+      params:
+        kernel_size: 5
+        sigma: 1.2
+        seed_policy: "inherit"
+  "gaussian_noise::v1":
+    - condition_suffix: "sev00"
+      severity_label: "sigma=0.01"
+      severity_level_index: 0
+      params:
+        sigma: 0.01
+        seed_policy: "inherit"
+    - condition_suffix: "sev01"
+      severity_label: "sigma=0.02"
+      severity_level_index: 1
+      params:
+        sigma: 0.02
+        seed_policy: "inherit"
+  "jpeg::v1":
+    - condition_suffix: "sev00"
+      severity_label: "quality=95"
+      severity_level_index: 0
+      params:
+        quality: 95
+        seed_policy: "inherit"
+    - condition_suffix: "sev01"
+      severity_label: "quality=85"
+      severity_level_index: 1
+      params:
+        quality: 85
+        seed_policy: "inherit"
+    - condition_suffix: "sev02"
+      severity_label: "quality=75"
+      severity_level_index: 2
+      params:
+        quality: 75
+        seed_policy: "inherit"
+  "resize::v1":
+    - condition_suffix: "sev00"
+      severity_label: "scale_factor=0.9"
+      severity_level_index: 0
+      params:
+        scale_factors: 0.9
+    - condition_suffix: "sev01"
+      severity_label: "scale_factor=0.75"
+      severity_level_index: 1
+      params:
+        scale_factors: 0.75
+    - condition_suffix: "sev02"
+      severity_label: "scale_factor=1.1"
+      severity_level_index: 2
+      params:
+        scale_factors: 1.1
+  "rotate::v1":
+    - condition_suffix: "sev00"
+      severity_label: "degrees=5"
+      severity_level_index: 0
+      params:
+        degrees: 5
+    - condition_suffix: "sev01"
+      severity_label: "degrees=10"
+      severity_level_index: 1
+      params:
+        degrees: 10
+    - condition_suffix: "sev02"
+      severity_label: "degrees=15"
+      severity_level_index: 2
+      params:
+        degrees: 15
+  "translate::v1":
+    - condition_suffix: "sev00"
+      severity_label: "shift=(12,12)"
+      severity_level_index: 0
+      params:
+        x_shift: 12
+        y_shift: 12
+    - condition_suffix: "sev01"
+      severity_label: "shift=(24,24)"
+      severity_level_index: 1
+      params:
+        x_shift: 24
+        y_shift: 24
+geometry_optional_claim:
+  candidate_attack_set: "geometry_rescue_candidates"
+  boundary_rule_version: "geometry_optional_claim_boundary_band_v2"
+  boundary_metric: "abs_content_margin"
+  boundary_abs_margin_min: 0.01
+  boundary_abs_margin_max: 0.25
+system_event_count_sweep:
+  event_counts:
+    - 1
+    - 2
+    - 4
+    - 8
+    - 16
+    - 32
+    - 64
+  repeat_count: 48
+  random_seed: 20260415

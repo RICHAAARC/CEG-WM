@@ -2377,6 +2377,75 @@ def _build_rescue_breakdown_figure(input_csv_path: Path, output_path: Path) -> N
     plt.close()
 
 
+def _extract_bound_pw_matrix_config_path(payload: Mapping[str, Any]) -> str | None:
+    """
+    功能：从 PW00 工件中提取绑定的矩阵配置路径。
+
+    Extract the bound matrix config path from one PW00 artifact payload.
+
+    Args:
+        payload: PW00 family manifest or PW00 summary payload.
+
+    Returns:
+        Bound matrix config path when available, otherwise None.
+    """
+    if not isinstance(payload, Mapping):
+        raise TypeError("payload must be Mapping")
+
+    direct_path = payload.get("pw_matrix_config_path")
+    if isinstance(direct_path, str) and direct_path.strip():
+        return direct_path.strip()
+
+    paths_payload = _extract_mapping(payload.get("paths"))
+    nested_path = paths_payload.get("pw_matrix_config")
+    if isinstance(nested_path, str) and nested_path.strip():
+        return nested_path.strip()
+    return None
+
+
+def _load_family_bound_pw_matrix_settings(family_root: Path) -> Dict[str, Any]:
+    """
+    功能：读取 family 冻结绑定的 PW matrix 配置。
+
+    Load matrix settings from the family-bound PW00 artifacts rather than the
+    repository default config.
+
+    Args:
+        family_root: Family root path.
+
+    Returns:
+        Resolved matrix settings for the current family.
+
+    Raises:
+        ValueError: Raised when neither PW00 family manifest nor PW00 summary
+            provides a bound matrix config path.
+    """
+    if not isinstance(family_root, Path):
+        raise TypeError("family_root must be Path")
+
+    family_manifest_path = family_root / "manifests" / "paper_eval_family_manifest.json"
+    if family_manifest_path.exists():
+        family_manifest = _load_required_json_dict(family_manifest_path, "PW00 family manifest")
+        family_bound_matrix_config_path = _extract_bound_pw_matrix_config_path(family_manifest)
+        if family_bound_matrix_config_path:
+            return resolve_pw_matrix_settings(
+                load_pw_matrix_config(matrix_config_path=family_bound_matrix_config_path)
+            )
+
+    pw00_summary_path = family_root / "runtime_state" / "pw00_summary.json"
+    if pw00_summary_path.exists():
+        pw00_summary = _load_required_json_dict(pw00_summary_path, "PW00 summary")
+        family_bound_matrix_config_path = _extract_bound_pw_matrix_config_path(pw00_summary)
+        if family_bound_matrix_config_path:
+            return resolve_pw_matrix_settings(
+                load_pw_matrix_config(matrix_config_path=family_bound_matrix_config_path)
+            )
+
+    raise ValueError(
+        "PW04 requires a family-bound pw_matrix_config_path in PW00 family manifest or PW00 summary"
+    )
+
+
 def build_pw04_paper_exports(
     *,
     family_id: str,
@@ -2569,7 +2638,7 @@ def build_pw04_paper_exports(
     )
     _write_csv_rows(event_subset_summary_csv_path, EVENT_SUBSET_SUMMARY_FIELDNAMES, event_subset_summary_rows)
 
-    matrix_settings = resolve_pw_matrix_settings(load_pw_matrix_config())
+    matrix_settings = _load_family_bound_pw_matrix_settings(family_root)
     sweep_rows_by_name = {
         "clean_positive": [row for row in clean_event_rows if row.get("ground_truth_label") is True],
         "clean_negative": [row for row in clean_event_rows if row.get("ground_truth_label") is False],

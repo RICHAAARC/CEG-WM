@@ -316,12 +316,60 @@ def _normalize_matrix_concrete_conditions(node: Any) -> Dict[str, List[Dict[str,
     return normalized_conditions
 
 
-def load_pw_matrix_config(repo_root: Path = REPO_ROOT) -> Dict[str, Any]:
+def _resolve_repo_config_path(
+    repo_root: Path,
+    path_value: Path | str | None,
+    default_relative_path: str,
+    label: str,
+) -> Path:
+    """
+    Resolve one repository-bound config path.
+
+    Args:
+        repo_root: Repository root path.
+        path_value: Optional absolute or repo-relative path override.
+        default_relative_path: Default repo-relative path.
+        label: Human-readable argument label.
+
+    Returns:
+        Resolved absolute config path.
+    """
+    if not isinstance(repo_root, Path):
+        raise TypeError("repo_root must be Path")
+    if not isinstance(default_relative_path, str) or not default_relative_path:
+        raise TypeError("default_relative_path must be non-empty str")
+    if not isinstance(label, str) or not label:
+        raise TypeError("label must be non-empty str")
+
+    if path_value is None:
+        candidate_path = Path(default_relative_path).expanduser()
+    elif isinstance(path_value, Path):
+        candidate_path = path_value.expanduser()
+    elif isinstance(path_value, str) and path_value.strip():
+        candidate_path = Path(path_value.strip()).expanduser()
+    else:
+        raise TypeError(f"{label} must be Path, non-empty str, or None")
+
+    if not candidate_path.is_absolute():
+        candidate_path = repo_root / candidate_path
+    return candidate_path.resolve()
+
+
+def load_pw_matrix_config(
+    repo_root: Path = REPO_ROOT,
+    base_config_path: Path | str | None = None,
+    matrix_config_path: Path | str | None = None,
+) -> Dict[str, Any]:
     """
     Load the paper_workflow matrix config mapping.
 
     Args:
         repo_root: Repository root path.
+        base_config_path: Optional pw_base config path. When provided and
+            matrix_config_path is absent, matrix_config_path is resolved from
+            this base config.
+        matrix_config_path: Optional direct matrix config path. When provided,
+            it takes precedence over base_config_path.
 
     Returns:
         Parsed matrix config mapping.
@@ -329,13 +377,32 @@ def load_pw_matrix_config(repo_root: Path = REPO_ROOT) -> Dict[str, Any]:
     if not isinstance(repo_root, Path):
         raise TypeError("repo_root must be Path")
 
-    pw_base_path = (repo_root / DEFAULT_PW_BASE_CONFIG_RELATIVE_PATH).resolve()
-    pw_base_cfg = load_yaml_mapping(pw_base_path)
+    if matrix_config_path is not None:
+        resolved_matrix_config_path = _resolve_repo_config_path(
+            repo_root,
+            matrix_config_path,
+            DEFAULT_PW_MATRIX_CONFIG_RELATIVE_PATH,
+            "matrix_config_path",
+        )
+        return load_yaml_mapping(resolved_matrix_config_path)
+
+    resolved_pw_base_path = _resolve_repo_config_path(
+        repo_root,
+        base_config_path,
+        DEFAULT_PW_BASE_CONFIG_RELATIVE_PATH,
+        "base_config_path",
+    )
+    pw_base_cfg = load_yaml_mapping(resolved_pw_base_path)
     matrix_config_relative_path = pw_base_cfg.get("matrix_config_path")
-    if not isinstance(matrix_config_relative_path, str) or not matrix_config_relative_path.strip():
-        matrix_config_relative_path = DEFAULT_PW_MATRIX_CONFIG_RELATIVE_PATH
-    matrix_config_path = (repo_root / matrix_config_relative_path).resolve()
-    return load_yaml_mapping(matrix_config_path)
+    resolved_matrix_config_path = _resolve_repo_config_path(
+        repo_root,
+        matrix_config_relative_path
+        if isinstance(matrix_config_relative_path, str) and matrix_config_relative_path.strip()
+        else None,
+        DEFAULT_PW_MATRIX_CONFIG_RELATIVE_PATH,
+        "matrix_config_path",
+    )
+    return load_yaml_mapping(resolved_matrix_config_path)
 
 
 def resolve_pw_matrix_settings(matrix_cfg: Mapping[str, Any]) -> Dict[str, Any]:

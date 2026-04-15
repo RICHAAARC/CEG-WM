@@ -13,8 +13,19 @@ import sys
 import pytest
 
 from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
-from paper_workflow.scripts.pw_common import build_attack_condition_catalog, read_jsonl
-from scripts.notebook_runtime_common import REPO_ROOT, build_repo_import_subprocess_env
+from paper_workflow.scripts.pw_common import (
+    build_attack_condition_catalog,
+    load_pw_matrix_config,
+    read_jsonl,
+    resolve_pw_matrix_settings,
+)
+from scripts.notebook_runtime_common import REPO_ROOT, build_repo_import_subprocess_env, normalize_path_value
+
+
+DEFAULT_PW_BASE_CONFIG_PATH = (REPO_ROOT / "paper_workflow" / "configs" / "pw_base.yaml").resolve()
+DEFAULT_PW_MATRIX_CONFIG_PATH = (REPO_ROOT / "paper_workflow" / "configs" / "pw_matrix.yaml").resolve()
+PILOT_PW_BASE_CONFIG_PATH = (REPO_ROOT / "paper_workflow" / "configs" / "pw_base_pilot.yaml").resolve()
+PILOT_PW_MATRIX_CONFIG_PATH = (REPO_ROOT / "paper_workflow" / "configs" / "pw_matrix_pilot.yaml").resolve()
 
 
 def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
@@ -117,6 +128,8 @@ def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
     assert family_manifest["attack_plan"]["wrong_event_challenge_available_assignment_count"] == 4
     assert family_manifest["attack_plan"]["severity_metadata_frozen"] is True
     assert family_manifest["attack_plan"]["severity_status_counts"]["ok"] > 0
+    assert family_manifest["pw_base_config_path"] == normalize_path_value(DEFAULT_PW_BASE_CONFIG_PATH)
+    assert family_manifest["pw_matrix_config_path"] == normalize_path_value(DEFAULT_PW_MATRIX_CONFIG_PATH)
     assert family_manifest["counts"]["positive_source_event_count"] == 4
     assert family_manifest["counts"]["clean_negative_event_count"] == 4
     assert family_manifest["counts"]["planner_conditioned_control_negative_event_count"] == 4
@@ -155,6 +168,8 @@ def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
     assert first_summary["attack_shard_count"] == 3
     assert first_summary["materialization_profile"] == "matrix_defined_concrete_conditions"
     assert first_summary["matrix_profile"] == "family_x_severity_v1"
+    assert first_summary["pw_base_config_path"] == normalize_path_value(DEFAULT_PW_BASE_CONFIG_PATH)
+    assert first_summary["pw_matrix_config_path"] == normalize_path_value(DEFAULT_PW_MATRIX_CONFIG_PATH)
     assert first_summary["wrong_event_challenge_parent_event_count"] == 4
     assert first_summary["wrong_event_challenge_available_assignment_count"] == 4
     assert Path(str(first_summary["wrong_event_attestation_challenge_plan_path"])) == first_wrong_event_challenge_plan_path
@@ -272,6 +287,120 @@ def test_pw00_cli_wrapper_passes_explicit_attack_shard_count(tmp_path: Path) -> 
     assert family_manifest["attack_parameters"]["attack_shard_count"] == 5
     assert family_manifest["attack_plan"]["attack_shard_count"] == 5
     assert attack_shard_plan["attack_shard_count"] == 5
+
+
+def test_pw00_cli_defaults_to_formal_pw_base_config_when_base_arg_is_omitted(tmp_path: Path) -> None:
+    """
+    Verify the PW00 CLI defaults to the formal pw_base config when the
+    optional base-config argument is omitted.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    drive_project_root = tmp_path / "drive_root"
+    prompt_file = tmp_path / "paper_prompts.txt"
+    prompt_file.write_text("prompt alpha\nprompt beta\n", encoding="utf-8")
+
+    script_path = REPO_ROOT / "paper_workflow" / "scripts" / "PW00_Paper_Eval_Family_Manifest.py"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script_path),
+            "--drive-project-root",
+            str(drive_project_root),
+            "--family-id",
+            "family_pw00_cli_default_base",
+            "--prompt-file",
+            str(prompt_file),
+            "--seed-list",
+            "[0, 7]",
+            "--source-shard-count",
+            "3",
+        ],
+        cwd=REPO_ROOT,
+        env=build_repo_import_subprocess_env(repo_root=REPO_ROOT),
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert result.returncode == 0, result.stderr
+
+    summary = json.loads(result.stdout)
+    family_manifest = json.loads(Path(str(summary["paper_eval_family_manifest_path"])).read_text(encoding="utf-8"))
+
+    assert summary["pw_base_config_path"] == normalize_path_value(DEFAULT_PW_BASE_CONFIG_PATH)
+    assert summary["pw_matrix_config_path"] == normalize_path_value(DEFAULT_PW_MATRIX_CONFIG_PATH)
+    assert family_manifest["pw_base_config_path"] == normalize_path_value(DEFAULT_PW_BASE_CONFIG_PATH)
+    assert family_manifest["pw_matrix_config_path"] == normalize_path_value(DEFAULT_PW_MATRIX_CONFIG_PATH)
+
+
+def test_pw00_records_pilot_base_and_matrix_paths_and_freezes_pilot_geometry_policy(tmp_path: Path) -> None:
+    """
+    Verify PW00 can bind the pilot pw_base config and freeze the pilot matrix
+    paths and geometry policy into summary artifacts.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    drive_project_root = tmp_path / "drive_root"
+    prompt_file = tmp_path / "paper_prompts.txt"
+    prompt_file.write_text("prompt alpha\nprompt beta\n", encoding="utf-8")
+
+    summary = run_pw00_build_family_manifest(
+        drive_project_root=drive_project_root,
+        family_id="family_pw00_pilot_bound",
+        prompt_file=str(prompt_file),
+        seed_list=[0, 7],
+        source_shard_count=3,
+        pw_base_config_path=PILOT_PW_BASE_CONFIG_PATH,
+    )
+
+    family_manifest = json.loads(Path(str(summary["paper_eval_family_manifest_path"])).read_text(encoding="utf-8"))
+    geometry_optional_claim_plan = json.loads(
+        Path(str(summary["geometry_optional_claim_plan_path"])).read_text(encoding="utf-8")
+    )
+    attack_event_rows = read_jsonl(Path(str(summary["attack_event_grid_path"])))
+    pilot_matrix_settings = resolve_pw_matrix_settings(
+        load_pw_matrix_config(matrix_config_path=PILOT_PW_MATRIX_CONFIG_PATH)
+    )
+
+    assert summary["pw_base_config_path"] == normalize_path_value(PILOT_PW_BASE_CONFIG_PATH)
+    assert summary["pw_matrix_config_path"] == normalize_path_value(PILOT_PW_MATRIX_CONFIG_PATH)
+    assert family_manifest["pw_base_config_path"] == normalize_path_value(PILOT_PW_BASE_CONFIG_PATH)
+    assert family_manifest["pw_matrix_config_path"] == normalize_path_value(PILOT_PW_MATRIX_CONFIG_PATH)
+    assert summary["matrix_profile"] == "family_x_severity_pilot_v1"
+    assert family_manifest["attack_parameters"]["matrix_profile"] == "family_x_severity_pilot_v1"
+    assert summary["system_event_count_sweep"]["repeat_count"] == 48
+    assert family_manifest["attack_parameters"]["system_event_count_sweep"]["repeat_count"] == 48
+    assert summary["geometry_optional_claim_boundary_abs_margin_min"] == pytest.approx(0.01)
+    assert summary["geometry_optional_claim_boundary_abs_margin_max"] == pytest.approx(0.25)
+    assert family_manifest["attack_parameters"]["geometry_optional_claim_boundary_abs_margin_min"] == pytest.approx(0.01)
+    assert family_manifest["attack_parameters"]["geometry_optional_claim_boundary_abs_margin_max"] == pytest.approx(0.25)
+    assert pilot_matrix_settings["geometry_optional_claim"]["boundary_abs_margin_min"] == pytest.approx(0.01)
+    assert pilot_matrix_settings["geometry_optional_claim"]["boundary_abs_margin_max"] == pytest.approx(0.25)
+    assert set(pilot_matrix_settings["geometry_optional_claim"]["candidate_attack_families"]) == {
+        "rotate",
+        "resize",
+        "crop",
+        "composite",
+    }
+    assert "translate" not in geometry_optional_claim_plan["geometry_rescue_candidate_attack_families"]
+    assert geometry_optional_claim_plan["boundary_abs_margin_min"] == pytest.approx(0.01)
+    assert geometry_optional_claim_plan["boundary_abs_margin_max"] == pytest.approx(0.25)
+    assert all(
+        row["geometry_rescue_candidate"] is False
+        for row in attack_event_rows
+        if row["attack_family"] == "translate"
+    )
 
 
 def test_attack_matrix_validation_rejects_unknown_geometry_candidate_set() -> None:
